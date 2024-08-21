@@ -6,7 +6,7 @@ on:
   #   workflows: ["Rocky build"]
   #   types: [completed]
   push:
-    branches: [xvm-disabled]
+    branches: [xvm]
 env:
   vmArch: aarch64
 jobs:

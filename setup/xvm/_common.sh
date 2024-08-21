@@ -4,7 +4,7 @@ if [[ -z $vmArch ]]; then
     exit 1
 fi
 if [[ $(uname -p) == "arm" && $CI != "true" ]]; then
-    qemuMachineFlags="-machine type=virt,highmem=on,accel=hvf:kvm -cpu host"
+    qemuMachineFlags="-machine type=virt,highmem=on -cpu host"
 elif [[ $(uname -p) == "arm" ]]; then
     qemuMachineFlags="-machine type=virt -cpu max"
 elif [[ $(uname -p) == "x86_64" ]]; then
@@ -20,4 +20,30 @@ else
 fi
 export ioFlag
 
+nCpus=3
+ramMB=8192
+
+qemuSystemCommand="qemu-system-${vmArch} \
+    -name xvm \
+    -netdev user,id=user.0,hostfwd=tcp:127.0.0.1:2201-:22 \
+    -device virtio-keyboard-pci -device virtio-mouse-pci \
+    -smp $nCpus \
+    -accel kvm -accel hvf -accel tcg,thread=multi \
+    $qemuMachineFlags \
+    -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./output/firmware_code.fd \
+    -drive if=pflash,format=raw,id=ovmf_vars,file=./output/firmware_vars.fd \
+    -drive file=output/xvm.qcow2,format=qcow2 \
+    -device virtio-gpu-pci \
+    -device virtio-net-pci,netdev=user.0 \
+    -boot c \
+    -m ${ramMB}M \
+    $ioFlag "
+export qemuSystemCommand
+
 export rockyVersion=${rockyVersion:-9.4}
+
+function updateGuestMagAOXCheckout() {
+    echo "Syncing ~/MagAOX/ in guest..."
+    rsync --progress -a --exclude xvm/output --exclude xvm/input -e 'ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./output/xvm_key' ../../ xdev@localhost:MagAOX/
+    echo "Finished updating ~/MagAOX/ in guest"
+}

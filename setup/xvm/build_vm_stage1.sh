@@ -26,22 +26,9 @@ else
 fi
 
 echo "Starting VM installation process..."
-qemu-system-${vmArch} \
-    -name xvm \
+$qemuSystemCommand \
     -cdrom ./input/iso/Rocky-${rockyVersion}-${vmArch}-minimal.iso \
-    -netdev user,id=user.0 \
-    -device virtio-keyboard-pci -device virtio-mouse-pci \
-    -smp 3 \
-    $qemuMachineFlags \
-    -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./output/firmware_code.fd \
-    -drive if=pflash,format=raw,id=ovmf_vars,file=./output/firmware_vars.fd \
-    -drive file=output/xvm.qcow2,format=qcow2 \
     -drive file=input/oemdrv.qcow2,format=qcow2 \
-    -device virtio-gpu-pci \
-    -device virtio-net-pci,netdev=user.0 \
-    -boot c \
-    -m 8192M \
-    $ioFlag \
 || exit 1
 mv -v ./output/xvm.qcow2 ./output/xvm_stage1.qcow2
 echo "Created VM and installed Rocky Linux"
