@@ -23,12 +23,18 @@ export ioFlag
 nCpus=3
 ramMB=8192
 
+if [[ $CI == true ]]; then
+    qemuAccelFlags="-accel tcg,thread=multi"
+else
+    qemuAccelFlags="-accel kvm -accel hvf -accel tcg,thread=multi"
+fi
+
 qemuSystemCommand="qemu-system-${vmArch} \
     -name xvm \
     -netdev user,id=user.0,hostfwd=tcp:127.0.0.1:2201-:22 \
     -device virtio-keyboard-pci -device virtio-mouse-pci \
     -smp $nCpus \
-    -accel kvm -accel hvf -accel tcg,thread=multi \
+    $qemuAccelFlags \
     $qemuMachineFlags \
     -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./output/firmware_code.fd \
     -drive if=pflash,format=raw,id=ovmf_vars,file=./output/firmware_vars.fd \
