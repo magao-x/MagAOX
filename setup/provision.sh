@@ -34,8 +34,6 @@ fi
 
 # Defines $ID and $VERSION_ID so we can detect which distribution we're on
 source /etc/os-release
-# Get just the XX beginning of a XX.YY version string
-MAJOR_VERSION=${VERSION_ID%.*}
 
 roleScript=/etc/profile.d/magaox_role.sh
 VM_KIND=$(systemd-detect-virt)
@@ -52,6 +50,14 @@ fi
 source $roleScript
 echo "Got MAGAOX_ROLE=$MAGAOX_ROLE"
 export MAGAOX_ROLE
+
+# The VM and CI provisioning doesn't run setup_users_and_groups.sh
+# separately as in the instrument instructions; we have to run it
+if [[ $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
+    bash -l "$DIR/setup_users_and_groups.sh"
+fi
+## Set up file structure and permissions
+sudo -H bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $MAGAOX_ROLE
 
 sudo -H bash -l "$DIR/install_third_party_deps.sh" || exit_with_error "Failed to install third-party dependencies"
 
@@ -83,12 +89,6 @@ if [[ $MAGAOX_ROLE != ci ]]; then
     sudo -H bash -l "$DIR/steps/increase_fs_watcher_limits.sh"
 fi
 
-# The VM and CI provisioning doesn't run setup_users_and_groups.sh
-# separately as in the instrument instructions; we have to run it
-if [[ $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
-    bash -l "$DIR/setup_users_and_groups.sh"
-fi
-
 if [[ $MAGAOX_ROLE == AOC ]]; then
     bash -l "$DIR/configure_certificate_renewal.sh"
 fi
@@ -102,8 +102,7 @@ if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     fi
 fi
 
-## Set up file structure and permissions
-sudo -H bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $MAGAOX_ROLE
+
 
 if [[ $MAGAOX_ROLE == AOC ]]; then
     # Configure a tablespace to store postgres data on the /data array

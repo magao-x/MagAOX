@@ -11,7 +11,7 @@ $qemuSystemCommand &
 sleep 60
 ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./output/xvm_key xdev@localhost mkdir -p MagAOX
 updateGuestMagAOXCheckout  # since the previous stage VM may be from cache
-ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./output/xvm_key xdev@localhost 'bash -s' < ./guest_install_other_dependencies.sh || exit 1
+ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./output/xvm_key xdev@localhost 'bash -s' < ./guest_provision_up_to_build.sh || exit 1
 # wait for the backgrounded qemu process to exit:
 wait
 mv -v ./output/xvm.qcow2 ./output/xvm_stage3.qcow2

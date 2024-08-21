@@ -5,15 +5,17 @@ source $DIR/_common.sh
 
 # Defines $ID and $VERSION_ID so we can detect which distribution we're on
 source /etc/os-release
+# Get just the XX beginning of a XX.YY version string
+MAJOR_VERSION=${VERSION_ID%.*}
 
 # Install third-party dependencies (including OS-packaged ones) except for vendor SDKs
 
 # Install OS packages first
 osPackagesScript="$DIR/steps/install_${ID}_${MAJOR_VERSION}_packages.sh"
-$_REAL_SUDO -H bash -l $osPackagesScript || exit_with_error "Failed to install packages from $osPackagesScript"
+sudo -H bash -l $osPackagesScript || exit_with_error "Failed to install packages from $osPackagesScript"
 
 distroSpecificScript="$DIR/steps/configure_${ID}_${MAJOR_VERSION}.sh"
-$_REAL_SUDO -H bash -l $distroSpecificScript || exit_with_error "Failed to configure ${ID} from $distroSpecificScript"
+sudo -H bash -l $distroSpecificScript || exit_with_error "Failed to configure ${ID} from $distroSpecificScript"
 
 # Install dependencies for the GUIs
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == workstation ]]; then
