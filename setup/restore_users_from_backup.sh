@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/_common.sh
-set -euo pipefail
+set -uo pipefail
 [ "$#" -eq 1 ] || exit_with_error "Usage: ${BASH_SOURCE[0]} /path/to/folder/of/homes/"
 if [[ ! -d $1 ]]; then
     exit_with_error "Specify the path to a folder of backed-up home directories"

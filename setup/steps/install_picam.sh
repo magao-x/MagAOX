@@ -6,10 +6,10 @@ if [[ "$EUID" != 0 ]]; then
 fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -euo pipefail
+set -uo pipefail
 
 PICAM_RUNFILE=Picam_SDK-v5.7.2.run
-cd /opt/MagAOX/vendor/teledyne
+cd /opt/MagAOX/vendor/teledyne || exit 1
 
 chmod +x ./$PICAM_RUNFILE
 if [[ ! -e /opt/PrincetonInstruments/picam ]]; then
@@ -22,8 +22,8 @@ fi
 if [[ ! -e /opt/PrincetonInstruments/picam ]]; then
     exit_with_error "Installer failed to create /opt/PrincetonInstruments/picam, aborting"
 fi
-chmod a+rX -R /opt/pleora
-chmod a+rX -R /opt/PrincetonInstruments
-chmod g+xr,o+xr /usr/local/lib/libftd2xx.so.1.4.6
-echo "if [[ \"\$EUID\" != 0 ]]; then source /opt/pleora/ebus_sdk/x86_64/bin/set_puregev_env; fi" > /etc/profile.d/picam_pleora_env.sh
+chmod a+rX -R /opt/pleora || exit 1
+chmod a+rX -R /opt/PrincetonInstruments || exit 1
+chmod g+xr,o+xr /usr/local/lib/libftd2xx.so.1.4.6 || exit 1
+echo "if [[ \"\$EUID\" != 0 ]]; then source /opt/pleora/ebus_sdk/x86_64/bin/set_puregev_env; fi" > /etc/profile.d/picam_pleora_env.sh || exit 1
 log_success "Princeton Instruments Picam SDK installed"

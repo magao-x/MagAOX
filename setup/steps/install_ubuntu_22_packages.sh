@@ -1,8 +1,8 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -euo pipefail
-apt-get update
+set -uo pipefail
+apt-get update || exit 1
 
 apt-get install -y \
     sudo \
@@ -52,8 +52,4 @@ apt-get install -y \
     liblapack-dev \
     liblapacke-dev \
     podman \
-;
-
-if [[ $VM_KIND != "none" ]]; then
-    apt install -y xauth
-fi
+|| exit 1

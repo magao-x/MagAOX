@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -ex
+set -x
 mkdir -p ./input/firmware || exit 1
 cd ./input/firmware
 

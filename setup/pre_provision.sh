@@ -49,7 +49,7 @@ fi
 
 echo "export MAGAOX_ROLE=$MAGAOX_ROLE" | sudo tee /etc/profile.d/magaox_role.sh
 export MAGAOX_ROLE
-set -euo pipefail
+set -uo pipefail
 
 source /etc/os-release
 # without hardened_usercopy=off, the ALPAO DM driver (really the Interface Corp card driver) will
@@ -74,13 +74,13 @@ else
 fi
 
 if ! sudo grep -r "$DESIRED_CMDLINE" /boot/loader/entries; then
-    sudo cp /etc/default/grub /etc/default/grub.bak
-    sudo grubby --update-kernel=ALL --args="$DESIRED_CMDLINE"
+    sudo cp /etc/default/grub /etc/default/grub.bak || exit 1
+    sudo grubby --update-kernel=ALL --args="$DESIRED_CMDLINE" || exit 1
 
     if [[ -d /boot/grub2 ]]; then
-        sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+        sudo grub2-mkconfig -o /boot/grub2/grub.cfg || exit 1
     elif [[ -d /boot/grub ]]; then
-        sudo update-grub
+        sudo update-grub || exit 1
     else
         exit_with_error "Where's grub gotten to?"
     fi
@@ -90,16 +90,16 @@ fi
 if [[ -d /etc/initramfs-tools ]]; then
     log_info "Disabling hibernate/resume support in initramfs"
     if ! grep 'RESUME=none' /etc/initramfs-tools/conf.d/resume; then
-        echo "RESUME=none" | sudo tee /etc/initramfs-tools/conf.d/resume
-        sudo update-initramfs -u -k all
+        echo "RESUME=none" | sudo tee /etc/initramfs-tools/conf.d/resume || exit 1
+        sudo update-initramfs -u -k all || exit 1
     fi
 fi
 
 if [[ ! -e /etc/modprobe.d/blacklist-nouveau.conf ]]; then
-    echo "blacklist nouveau" | sudo tee /etc/modprobe.d/blacklist-nouveau.conf > /dev/null
-    echo "options nouveau modeset=0" | sudo tee -a /etc/modprobe.d/blacklist-nouveau.conf > /dev/null
+    echo "blacklist nouveau" | sudo tee /etc/modprobe.d/blacklist-nouveau.conf > /dev/null || exit 1
+    echo "options nouveau modeset=0" | sudo tee -a /etc/modprobe.d/blacklist-nouveau.conf > /dev/null || exit 1
     if [[ $ID == ubuntu ]]; then
-        sudo update-initramfs -u
+        sudo update-initramfs -u || exit 1
     fi
     log_success "Blacklisted nouveau nvidia driver"
 else
@@ -107,11 +107,11 @@ else
 fi
 
 if ! grep "Storage=persistent" /etc/systemd/journald.conf; then
-    echo "Storage=persistent" | sudo tee -a /etc/systemd/journald.conf
+    echo "Storage=persistent" | sudo tee -a /etc/systemd/journald.conf || exit 1
     log_success "Enabled persistent systemd journald log across reboots"
 fi
 
-$DIR/setup_users_and_groups.sh
+$DIR/setup_users_and_groups.sh || exit_with_error "Failed to set up users and groups"
 log_success "Created users and configured groups"
 log_info "You will need to use grub2-install with the right devices to get RAID1 reliability for boot"
 log_success "Reboot before proceeding"

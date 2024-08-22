@@ -6,7 +6,7 @@ if [[ "$EUID" != 0 ]]; then
 fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -euo pipefail
+set -uo pipefail
 set -x
 
 #
@@ -33,51 +33,54 @@ sudo tee $JUPYTER_SCRIPT >/dev/null <<HERE
 source /etc/profile
 /opt/conda/bin/jupyter notebook --config=$NOTEBOOK_CONFIG_PATH $NOTEBOOK_OPTIONS
 HERE
-chmod +x $JUPYTER_SCRIPT
+if [[ $? ]]; then
+	exit_with_error "Couldn't write $JUPYTER_SCRIPT"
+fi
+chmod +x $JUPYTER_SCRIPT || exit 1
 UNIT_PATH=/etc/systemd/system/
 
 # clean up old files if they exist
 if [[ -e $UNIT_PATH/jupyterlab.service ]]; then
     sudo -H systemctl stop jupyterlab || true
-	sudo -H rm $UNIT_PATH/jupyterlab.service
+	sudo -H rm $UNIT_PATH/jupyterlab.service || exit 1
 fi
 
 if [[ $MAGAOX_ROLE != ci ]]; then
-	sudo -H cp $DIR/../systemd_units/jupyternotebook.service $UNIT_PATH/jupyternotebook.service
+	sudo -H cp $DIR/../systemd_units/jupyternotebook.service $UNIT_PATH/jupyternotebook.service || exit 1
 	log_success "Installed jupyternotebook.service to $UNIT_PATH"
 
 	# Due to SystemD nonsense, WorkingDirectory must be a directory and not a symbolic link
 	# and due to MagAO-X nonsense those directories are different if the role has a /data array
 	# ...but at least there is 'override.conf'
 	OVERRIDE_PATH=$UNIT_PATH/jupyternotebook.service.d/
-	sudo mkdir -p $OVERRIDE_PATH
+	sudo mkdir -p $OVERRIDE_PATH || exit 1
 	log_info "Made $OVERRIDE_PATH for override"
 	overrideFileDest=$OVERRIDE_PATH/override.conf
 	overrideFile=/tmp/jupyternotebook_$(date +"%s")
-	echo "[Service]" > $overrideFile
+	echo "[Service]" > $overrideFile || exit 1
 	workingDir=/home/xsup/data
 	if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == TIC ]]; then
 		workingDir=/data/users/xsup
 	fi
-	echo "WorkingDirectory=$workingDir" >> $overrideFile
+	echo "WorkingDirectory=$workingDir" >> $overrideFile || exit 1
 	if [[ -e $overrideFileDest ]]; then
 		if ! diff $overrideFile $overrideFileDest; then
 			exit_with_error "Existing $overrideFile does not match $overrideFileDest"
 		fi
 	else
-		sudo mv $overrideFile $overrideFileDest
+		sudo mv $overrideFile $overrideFileDest || exit 1
 	fi
 
 	if [[ $ID == rocky ]]; then
 		log_info "Fixing SELinux contexts for SystemD override files"
-		sudo /sbin/restorecon -v $OVERRIDE_PATH
-		sudo /sbin/restorecon -v $overrideFileDest
+		sudo /sbin/restorecon -v $OVERRIDE_PATH || exit 1
+		sudo /sbin/restorecon -v $overrideFileDest || exit 1
 		log_success "Applied correct SELinux contexts to $overrideFileDest and $OVERRIDE_PATH"
 	fi
-	sudo -H systemctl daemon-reload
+	sudo -H systemctl daemon-reload || exit 1
 
-	sudo -H systemctl enable jupyternotebook
+	sudo -H systemctl enable jupyternotebook || exit 1
 	log_success "Enabled jupyternotebook service"
-	sudo -H systemctl start jupyternotebook
+	sudo -H systemctl start jupyternotebook || exit 1
 	log_success "Started jupyternotebook service"
 fi

@@ -1,7 +1,7 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -euo pipefail
+set -uo pipefail
 source /etc/os-release
 if [[ -e /etc/chrony/chrony.conf ]]; then
     CHRONYCONF_PATH=/etc/chrony/chrony.conf
@@ -26,6 +26,9 @@ driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 HERE
+    if [[ $? ]]; then
+        exit_with_error "Couldn't create $CHRONYCONF_PATH"
+    fi
 elif [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
     log_info "Configuring chronyd for $MAGAOX_ROLE as a time minion to exao1"
     sudo tee $CHRONYCONF_PATH <<'HERE'
@@ -36,6 +39,9 @@ driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 HERE
+    if [[ $? ]]; then
+        exit_with_error "Couldn't create $CHRONYCONF_PATH"
+    fi
 elif [[ $MAGAOX_ROLE == TIC ]]; then
     log_info "Configuring chronyd as a time master for $MAGAOX_ROLE"
     sudo tee $CHRONYCONF_PATH <<'HERE'
@@ -48,6 +54,9 @@ driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 HERE
+    if [[ $? ]]; then
+        exit_with_error "Couldn't create $CHRONYCONF_PATH"
+    fi
 elif [[ $MAGAOX_ROLE == TOC ]]; then
     log_info "Configuring chronyd for $MAGAOX_ROLE as a time minion to tic"
     sudo tee $CHRONYCONF_PATH <<'HERE'
@@ -58,6 +67,9 @@ driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 HERE
+    if [[ $? ]]; then
+        exit_with_error "Couldn't create $CHRONYCONF_PATH"
+    fi
 else
     log_info "Skipping chronyd setup because this isn't an instrument computer"
     exit 0
@@ -65,7 +77,7 @@ fi
 if [[ $ID == "ubuntu" ]]; then
 	sudo systemctl enable chrony || exit 1
 else
-	sudo systemctl enable chronyd
+	sudo systemctl enable chronyd || exit 1
 fi
 log_info "chronyd enabled"
 if [[ $ID == "ubuntu" ]]; then
@@ -76,8 +88,8 @@ else
 	systemctl status chronyd | cat || exit 1
 fi
 log_info "chronyd started"
-chronyc sources
+chronyc sources || exit 1
 # see https://chrony.tuxfamily.org/faq.html#_i_keep_getting_the_error_code_501_not_authorised_code
 # for why -a is needed
-sudo chronyc -a makestep
+sudo chronyc -a makestep || exit 1
 log_info "forced time sync"

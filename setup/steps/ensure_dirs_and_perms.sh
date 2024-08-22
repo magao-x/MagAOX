@@ -1,7 +1,10 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -euo pipefail
+set -uo pipefail
+
+# Exit if any of these fail:
+set -e
 
 mkdir -pv /opt/MagAOX
 mkdir -pv /opt/MagAOX/bin

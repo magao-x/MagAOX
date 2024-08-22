@@ -1,4 +1,9 @@
 #/usr/bin/env bash
+function shutdownVM() {
+    echo 'Shutting down VM from within guest...'
+    sudo shutdown -P now
+}
+trap cleanup EXIT
+set -x
 export CI=1
-bash -lx ~/MagAOX/setup/provision.sh
-sudo shutdown -P now
+bash -lx ~/MagAOX/setup/provision.sh || exit 1

@@ -1,7 +1,7 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -euo pipefail
+set -uo pipefail
 cd /opt/MagAOX/vendor
 PACKAGE_VERSION=1.60.0
 arch=$(uname -p)
@@ -15,11 +15,11 @@ else
 fi
 PACKAGE_ARCHIVE=$PACKAGE_DIR.zip
 if [[ ! -d $PACKAGE_DIR ]]; then
-    _cached_fetch https://downloads.rclone.org/v${PACKAGE_VERSION}/$PACKAGE_ARCHIVE $PACKAGE_ARCHIVE
-    unzip $PACKAGE_ARCHIVE
+    _cached_fetch https://downloads.rclone.org/v${PACKAGE_VERSION}/$PACKAGE_ARCHIVE $PACKAGE_ARCHIVE || exit 1
+    unzip $PACKAGE_ARCHIVE || exit 1
 fi
-cd $PACKAGE_DIR
-sudo install ./rclone /usr/local/bin
-sudo mkdir -p /usr/local/share/man/man1/
-sudo install ./rclone.1 /usr/local/share/man/man1/
-sudo ln -sf /usr/local/bin/rclone /sbin/mount.rclone
+cd $PACKAGE_DIR || exit 1
+sudo install ./rclone /usr/local/bin || exit 1
+sudo mkdir -p /usr/local/share/man/man1/ || exit 1
+sudo install ./rclone.1 /usr/local/share/man/man1/ || exit 1
+sudo ln -sf /usr/local/bin/rclone /sbin/mount.rclone || exit 1

@@ -35,12 +35,13 @@ function link_if_necessary() {
     if [[ -L $thelinkname ]]; then
       if [[ "$(readlink -- "$thelinkname")" != $thedir ]]; then
         echo "$thelinkname is an existing link, but doesn't point to $thedir. Aborting."
-        exit 1
+        return 1
       fi
     elif [[ -e $thelinkname ]]; then
       echo "$thelinkname exists, but is not a symlink and we want the destination to be $thedir."
+      return 1
     else
-        sudo ln -sv "$thedir" "$thelinkname"
+      sudo ln -sv "$thedir" "$thelinkname"
     fi
   fi
 }
@@ -49,9 +50,9 @@ function setgid_all() {
     # n.b. can't be recursive because g+s on files means something else
     # so we find all directories and individually chmod them:
     if [[ "$EUID" != 0 ]]; then
-      find $1 -type d -exec sudo chmod g+rxs {} \;
+      find $1 -type d -exec sudo chmod g+rxs {} \; || return 1
     else
-      find $1 -type d -exec chmod g+rxs {} \;
+      find $1 -type d -exec chmod g+rxs {} \; || return 1
     fi
 }
 
@@ -61,29 +62,29 @@ function make_on_data_array() {
   # If not on a real instrument computer, just make a normal folder under /opt/MagAOX/
   if [[ -z $1 ]]; then
     log_error "Missing target name argument for make_on_data_array"
-    exit 1
+    return 1
   else
     TARGET_NAME=$1
   fi
   if [[ -z $2 ]]; then
     log_error "Missing parent dir argument for make_on_data_array"
-    exit 1
+    return 1
   else
     PARENT_DIR=$2
   fi
 
   if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
     REAL_DIR=/data/$TARGET_NAME
-    sudo mkdir -pv $REAL_DIR
-    link_if_necessary $REAL_DIR $PARENT_DIR/$TARGET_NAME
+    sudo mkdir -pv $REAL_DIR || return 1
+    link_if_necessary $REAL_DIR $PARENT_DIR/$TARGET_NAME || return 1
   else
     REAL_DIR=$PARENT_DIR/$TARGET_NAME
-    sudo mkdir -pv $REAL_DIR
+    sudo mkdir -pv $REAL_DIR || return 1
   fi
 
-  sudo chown -RP $instrument_user:$instrument_group $REAL_DIR
-  sudo chmod -R u=rwX,g=rwX,o=rX $REAL_DIR
-  setgid_all $REAL_DIR
+  sudo chown -RP $instrument_user:$instrument_group $REAL_DIR || return 1
+  sudo chmod -R u=rwX,g=rwX,o=rX $REAL_DIR || return 1
+  setgid_all $REAL_DIR || return 1
 }
 
 function _cached_fetch() {
@@ -95,30 +96,30 @@ function _cached_fetch() {
   else
     EXTRA_CURL_OPTS=''
   fi
-  mkdir -p /opt/MagAOX/.cache
+  mkdir -p /opt/MagAOX/.cache || return 1
   if [[ ! -e $dest/$filename ]]; then
     if [[ ! -e /opt/MagAOX/.cache/$filename ]]; then
-      curl $EXTRA_CURL_OPTS --fail -L $url > /tmp/magaoxcache-$filename
-      mv /tmp/magaoxcache-$filename /opt/MagAOX/.cache/$filename
+      curl $EXTRA_CURL_OPTS --fail -L $url > /tmp/magaoxcache-$filename || return 1
+      mv /tmp/magaoxcache-$filename /opt/MagAOX/.cache/$filename || return 1
       log_info "Downloaded to /opt/MagAOX/.cache/$filename"
     fi
-    cp /opt/MagAOX/.cache/$filename $dest/$filename
+    cp /opt/MagAOX/.cache/$filename $dest/$filename || return 1
     log_info "Copied to $dest/$filename"
   fi
 }
 
 function normalize_git_checkout() {
   destdir=$1
-  pushd $destdir
-  git config core.sharedRepository group
-  git submodule update --init --recursive || true
-  sudo chown -R :$instrument_dev_group $destdir
-  sudo chmod -R g=rwX $destdir
+  pushd $destdir || return 1
+  git config core.sharedRepository group || return 1
+  git submodule update --init --recursive
+  sudo chown -R :$instrument_dev_group $destdir || return 1
+  sudo chmod -R g=rwX $destdir || return 1
   # n.b. can't be recursive because g+s on files means something else
   # so we find all directories and individually chmod them:
-  sudo find $destdir -type d -exec chmod g+s {} \;
+  sudo find $destdir -type d -exec chmod g+s {} \; || return 1
   log_success "Normalized permissions on $destdir"
-  popd
+  popd || return 1
 }
 
 function clone_or_update_and_cd() {
@@ -138,30 +139,30 @@ function clone_or_update_and_cd() {
     if [[ ! -d $parentdir/$reponame/.git ]]; then
       echo "Cloning new copy of $orgname/$reponame"
       CLONE_DEST=/tmp/${reponame}_$(date +"%s")
-      git clone https://github.com/$orgname/$reponame.git $CLONE_DEST
-      sudo rsync -a $CLONE_DEST/ $destdir/
-      cd $destdir/
+      git clone https://github.com/$orgname/$reponame.git $CLONE_DEST || return 1
+      sudo rsync -a $CLONE_DEST/ $destdir/ || return 1
+      cd $destdir/ || return 1
       log_success "Cloned new $destdir"
       rm -rf $CLONE_DEST
       log_success "Removed temporary clone at $CLONE_DEST"
     else
       cd $destdir
       if [[ "$(git rev-parse --abbrev-ref --symbolic-full-name HEAD)" != HEAD ]]; then
-        git pull --ff-only
+        git pull --ff-only || return 1
       else
-        git fetch
+        git fetch || return 1
         log_info "Not pulling because a specific commit is checked out"
       fi
       log_success "Updated $destdir"
     fi
-    normalize_git_checkout $destdir
+    normalize_git_checkout $destdir || return 1
 }
 
 DEFAULT_PASSWORD="extremeAO!"
 
 function creategroup() {
   if [[ ! $(getent group $1) ]]; then
-    sudo groupadd $1
+    sudo groupadd $1 || return 1
     echo "Added group $1"
   else
     echo "Group $1 exists"
@@ -173,29 +174,29 @@ function createuser() {
   if getent passwd $username > /dev/null 2>&1; then
     log_info "User account $username exists"
   else
-    sudo useradd -U $username || exit 1
+    sudo useradd -U $username || return 1
     echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | sudo -H passwd $username || exit 1
     log_success "Created user account $username with default password $DEFAULT_PASSWORD"
   fi
-  sudo usermod -a -G magaox $username || exit 1
+  sudo usermod -a -G magaox $username || return 1
   log_info "Added user $username to group magaox"
-  sudo mkdir -p /home/$username/.ssh || exit 1
-  sudo touch /home/$username/.ssh/authorized_keys || exit 1
-  sudo chmod -R u=rwx,g=,o= /home/$username/.ssh || exit 1
-  sudo chmod u=rw,g=,o= /home/$username/.ssh/authorized_keys || exit 1
-  sudo chown -R $username:$instrument_group /home/$username || exit 1
-  sudo -H chsh $username -s $(which bash) || exit 1
+  sudo mkdir -p /home/$username/.ssh || return 1
+  sudo touch /home/$username/.ssh/authorized_keys || return 1
+  sudo chmod -R u=rwx,g=,o= /home/$username/.ssh || return 1
+  sudo chmod u=rw,g=,o= /home/$username/.ssh/authorized_keys || return 1
+  sudo chown -R $username:$instrument_group /home/$username || return 1
+  sudo -H chsh $username -s $(which bash) || return 1
   log_info "Append an ecdsa or ed25519 key to /home/$username/.ssh/authorized_keys to enable SSH login"
 
   data_path="/data/users/$username/"
-  sudo -H mkdir -p "$data_path" || exit 1
-  sudo -H chown "$username:$instrument_group" "$data_path" || exit 1
-  sudo -H chmod g+rxs "$data_path" || exit 1
+  sudo -H mkdir -p "$data_path" || return 1
+  sudo -H chown "$username:$instrument_group" "$data_path" || return 1
+  sudo -H chmod g+rxs "$data_path" || return 1
   log_success "Created $data_path"
 
   link_name="/home/$username/data"
   if sudo test ! -L "$link_name"; then
-    sudo -H ln -sv "$data_path" "$link_name" || exit 1
+    sudo -H ln -sv "$data_path" "$link_name" || return 1
     log_success "Linked $link_name -> $data_path"
   fi
 }
