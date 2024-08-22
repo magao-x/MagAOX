@@ -29,7 +29,7 @@ jobs:
         id: cache-vm-stage1
         with:
           path: setup/xvm/stage1_outputs.tar
-          key: xvm-stage1-${{ runner.os }}-${{ hashFiles('setup/xvm/*','setup/xvm/kickstart/*') }}
+          key: xvm-stage1-${{ runner.os }}-${{ hashFiles('setup/xvm/_common.sh','setup/xvm/build_vm_stage1.sh','setup/xvm/create_oemdrv.sh','setup/xvm/download_firmware.sh','setup/xvm/download_rocky_iso.sh','setup/xvm/kickstart/ks.cfg.template') }}
       - name: Download Rocky ISO
         if: steps.cache-iso.outputs.cache-hit != 'true'
         run: |

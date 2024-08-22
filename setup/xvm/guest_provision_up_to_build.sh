@@ -3,7 +3,7 @@ function shutdownVM() {
     echo 'Shutting down VM from within guest...'
     sudo shutdown -P now
 }
-trap cleanup EXIT
+trap shutdownVM EXIT
 set -x
 export CI=1
 export _skip3rdPartyDeps=1

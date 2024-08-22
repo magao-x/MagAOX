@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-echo "Starting up the VM for MagAO-X dependencies installation..."
+echo "Starting up the VM for MagAO-X 3rd party dependencies installation..."
 source ./_common.sh
 if [[ -e ./output/xvm_stage1.qcow2 ]]; then
     cp ./output/xvm_stage1.qcow2 ./output/xvm.qcow2

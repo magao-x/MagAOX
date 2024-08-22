@@ -3,7 +3,7 @@ function shutdownVM() {
     echo 'Shutting down VM from within guest...'
     sudo shutdown -P now
 }
-trap cleanup EXIT
+trap shutdownVM EXIT
 set -x
 sudo rsync -rv ~/MagAOX/ /opt/MagAOX/source/MagAOX/ || exit 1
 sudo bash -x /opt/MagAOX/source/MagAOX/setup/steps/ensure_dirs_and_perms.sh || exit 1
