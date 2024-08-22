@@ -3,6 +3,10 @@ set -o pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/_common.sh
 
+# Install OS-packaged and a handful of self-built dependencies
+# (but not Python environments, proprietary vendor SDKs, or first-party
+# dependencies)
+
 # Defines $ID and $VERSION_ID so we can detect which distribution we're on
 source /etc/os-release
 # Get just the XX beginning of a XX.YY version string

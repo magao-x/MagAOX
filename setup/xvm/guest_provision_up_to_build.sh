@@ -6,4 +6,5 @@ function shutdownVM() {
 trap cleanup EXIT
 set -x
 export CI=1
+export _skip3rdPartyDeps=1
 bash -lx ~/MagAOX/setup/provision.sh || exit 1

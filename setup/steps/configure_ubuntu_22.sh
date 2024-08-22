@@ -15,7 +15,7 @@ if [ -d /etc/profile.d ]; then
   unset i
 fi
 HERE
-  if [[ $? ]]; then
+  if [[ ! $? ]]; then
     exit_with_error "Couldn't add profile.d snippet to /etc/bash.bashrc"
 fi
 
@@ -27,7 +27,7 @@ HandleSuspendKey=ignore
 HandleHibernateKey=ignore
 HandleRebootKey=ignore
 HERE
-  if [[ $? ]]; then
+  if [[ ! $? ]]; then
     exit_with_error "Unable to disable power keys on keyboard"
   fi
 fi

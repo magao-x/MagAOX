@@ -33,7 +33,7 @@ sudo tee $JUPYTER_SCRIPT >/dev/null <<HERE
 source /etc/profile
 /opt/conda/bin/jupyter notebook --config=$NOTEBOOK_CONFIG_PATH $NOTEBOOK_OPTIONS
 HERE
-if [[ $? ]]; then
+if [[ ! $? ]]; then
 	exit_with_error "Couldn't write $JUPYTER_SCRIPT"
 fi
 chmod +x $JUPYTER_SCRIPT || exit 1

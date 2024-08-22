@@ -26,7 +26,7 @@ driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 HERE
-    if [[ $? ]]; then
+    if [[ ! $? ]]; then
         exit_with_error "Couldn't create $CHRONYCONF_PATH"
     fi
 elif [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
@@ -39,7 +39,7 @@ driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 HERE
-    if [[ $? ]]; then
+    if [[ ! $? ]]; then
         exit_with_error "Couldn't create $CHRONYCONF_PATH"
     fi
 elif [[ $MAGAOX_ROLE == TIC ]]; then
@@ -54,7 +54,7 @@ driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 HERE
-    if [[ $? ]]; then
+    if [[ ! $? ]]; then
         exit_with_error "Couldn't create $CHRONYCONF_PATH"
     fi
 elif [[ $MAGAOX_ROLE == TOC ]]; then
@@ -67,7 +67,7 @@ driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 HERE
-    if [[ $? ]]; then
+    if [[ ! $? ]]; then
         exit_with_error "Couldn't create $CHRONYCONF_PATH"
     fi
 else

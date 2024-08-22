@@ -59,7 +59,13 @@ fi
 ## Set up file structure and permissions
 sudo -H bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $MAGAOX_ROLE
 
-sudo -H bash -l "$DIR/install_third_party_deps.sh" || exit_with_error "Failed to install third-party dependencies"
+# Install OS-packaged and a few self-built dependencies.
+if [[ ! $_skip3rdPartyDeps ]]; then
+    # For staged VM builds we don't want to redo the 3rd party deps
+    # (even if they're mostly already done). Setting $_skip3rdPartyDeps
+    # lets us skip this line:
+    sudo -H bash -l "$DIR/install_third_party_deps.sh" || exit_with_error "Failed to install third-party dependencies"
+fi
 
 # Apply configuration tweaks
 log_info "Applying configuration tweaks for OS and services"

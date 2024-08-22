@@ -12,7 +12,7 @@ if [[ ! -e $UNIT_PATH/renew_certificates.service.d/override.conf ]]; then
 [Service]
 Environment="VULTR_API_KEY=xxxxxxx"
 HERE
-    if [[ $? ]]; then
+    if [[ ! $? ]]; then
         exit_with_error "Couldn't create $UNIT_PATH/renew_certificates.service.d/override.conf"
     fi
     log_warn "Populate the Vultr API key in $UNIT_PATH/renew_certificates.service.d/override.conf to complete automatic certificate renewal config"

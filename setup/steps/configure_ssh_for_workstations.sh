@@ -16,7 +16,7 @@ rtc ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBFmg
 icc ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBNpRRN65o8TcP2DnkXHdzIqAJ9CAoiz2guLSXjobx7L4meAtphb30nSx5pQqOeysU+otN9PEJH6TWr8KUXBDw6I=
 exao1.magao-x.org ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBMsOYTn6tlmcatxt1pDfowTtBTsmJ77OMSPl3rNl8+OBKhmpVpX+iBUMKsBDwwVIlqEAa9BfJPbSrpWEWZABv3s=
 HERE
-  if [[ $? ]]; then
+  if [[ ! $? ]]; then
     exit_with_error "Couldn't prepopulate $HOME/.ssh/known_hosts"
   fi
 else
@@ -41,7 +41,7 @@ Host toc corona
 Host *
   User YOURMAGAOXUSERNAME
 HERE
-  if [[ $? ]]; then
+  if [[ ! $? ]]; then
     exit_with_error "Couldn't prepopulate $HOME/.ssh/config"
   fi
 else
