@@ -9,6 +9,8 @@
 
 #include <instGraph/instGraphXML.hpp>
 
+#include "../../INDI/libcommon/IndiProperty.hpp"
+
 class xigNode
 {
   protected:
@@ -21,6 +23,8 @@ class xigNode
     ingr::instNode *m_node{ nullptr };
 
   public:
+    xigNode() = delete;
+
     xigNode( const std::string &name, ingr::instGraphXML *parentGraph );
 
     std::string name();
@@ -28,8 +32,6 @@ class xigNode
     const std::set<std::string> &keys();
 
     void key( const std::string &nkey );
-
-    bool nodeValid();
 
     ingr::instNode *node();
 
@@ -40,79 +42,34 @@ class xigNode
     virtual void togglePutsOff();
 };
 
-inline
-xigNode::xigNode( const std::string &name, ingr::instGraphXML *parentGraph ) : m_parentGraph( parentGraph )
+inline xigNode::xigNode( const std::string &name, ingr::instGraphXML *parentGraph ) : m_parentGraph( parentGraph )
 {
+    //This will throw if name is not in the parent's nodes
     m_node = m_parentGraph->node( name );
 }
 
-inline
-std::string xigNode::name()
+inline std::string xigNode::name()
 {
-    if( m_node == nullptr )
-    {
-        std::string msg = "xigNode::name(): m_node is nullptr";
-        msg += " at ";
-        msg += __FILE__;
-        msg += " " + std::to_string( __LINE__ );
-        throw std::runtime_error(msg);
-    }
-
     return m_node->name();
 }
 
-inline
-const std::set<std::string> &xigNode::keys()
+inline const std::set<std::string> &xigNode::keys()
 {
     return m_keys;
 }
 
-inline
-void xigNode::key( const std::string &nkey )
+inline void xigNode::key( const std::string &nkey )
 {
     m_keys.insert( nkey );
 }
 
-inline
-bool xigNode::nodeValid()
+inline ingr::instNode *xigNode::node()
 {
-    if( m_node == nullptr )
-    {
-        return false;
-    }
-
-    return true;
+    return m_node; // b/c of constructor, this can't be null
 }
 
-inline
-ingr::instNode *xigNode::node()
+inline void xigNode::togglePutsOn()
 {
-    if( m_node == nullptr )
-    {
-        std::string msg = "xigNode::node(): m_node is nullptr";
-        msg += " at ";
-        msg += __FILE__;
-        msg += " " + std::to_string( __LINE__ );
-
-        throw std::runtime_error(msg);
-    }
-
-    return m_node;
-}
-
-inline
-void xigNode::togglePutsOn()
-{
-    if( m_node == nullptr )
-    {
-        std::string msg = "xigNode::togglePutsOn(): m_node is nullptr";
-        msg += " at ";
-        msg += __FILE__;
-        msg += " " + std::to_string( __LINE__ );
-
-        throw std::runtime_error(msg);
-    }
-
     for( auto &&iput : m_node->inputs() )
     {
         iput.second->state( ingr::putState::on );
@@ -124,19 +81,8 @@ void xigNode::togglePutsOn()
     }
 }
 
-inline
-void xigNode::togglePutsOff()
+inline void xigNode::togglePutsOff()
 {
-    if( m_node == nullptr )
-    {
-        std::string msg = "xigNode::togglePutsOff(): m_node is nullptr";
-        msg += " at ";
-        msg += __FILE__;
-        msg += " " + std::to_string( __LINE__ );
-
-        throw std::runtime_error(msg);
-    }
-
     for( auto &&iput : m_node->inputs() )
     {
         iput.second->state( ingr::putState::off );

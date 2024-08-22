@@ -1,6 +1,6 @@
 #############################################################
 #              makefile for a single test                   #
-#                                                           #  
+#                                                           #
 # Command:                                                  #
 # $ make -f Makefile.one t=<full-path-to-test>              #
 #                                                           #
@@ -11,10 +11,10 @@
 #   -- can not include precompiled header as tests need to  #
 #      define things differently in many cases              #
 #                                                           #
-#############################################################       
+#############################################################
 
 
-       
+
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 include $(SELF_DIR)/../Make/common.mk
 
@@ -47,18 +47,18 @@ $(TESTNAME): $(OBJNAME) testMain.o
 .PHONY: pcommand
 pcommand:
 	@echo $(TESTNAME)
-	
+
 .PHONY: magaox_git_version.h
 magaox_git_version.h:
 	@gengithead.sh $(abspath $(SELF_DIR)/../) $(SELF_DIR)/../magaox_git_version.h MAGAOX
-	
+
 .PHONY: clean
 clean:
 	@echo cleaning $(TESTNAME)
 	@rm -f $(OBJNAME)
 	@rm -f $(TESTNAME)
 	@rm -f *.binlog
-			
+
 
 .PHONY: realclean
 realclean: clean
