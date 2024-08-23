@@ -91,8 +91,6 @@ libs_to_build = libtelnet
 
 apps_to_build = $(apps_basic)
 
-
-
 ifeq ($(MAGAOX_ROLE),AOC)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_aoc)
@@ -109,8 +107,6 @@ else ifeq ($(MAGAOX_ROLE),TIC)
   apps_to_build += $(apps_tic)
 else ifeq ($(MAGAOX_ROLE),SS)
   apps_to_build += $(apps_sim)
-  CXXFLAGS += -DXWC_SIM_MODE
-
 endif
 
 all_guis = \
@@ -347,4 +343,4 @@ setup:
 
 .PHONY: print_role
 print_role:
-	echo $(MAGAOX_ROLE)
+	@echo "MAGAOX_ROLE=$(MAGAOX_ROLE)"

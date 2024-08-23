@@ -1516,6 +1516,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
         // We don't log this, because it won't be logged anyway.
         std::cerr << "\nCRITICAL: log thread not running.  Exiting.\n\n";
 
+        m_shutdown = 1; //just in case, though this should not have an effect yet.
+
         if( unlockPID() < 0 )
         {
             log<software_error>( { __FILE__, __LINE__, "error from unlockPID()" } );
@@ -1534,6 +1536,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
             state( stateCodes::FAILURE );
 
             log<software_critical>( { __FILE__, __LINE__, "error from setSigTermHandler()" } );
+
+            m_shutdown = 1; //just in case, though this should not have an effect yet.
 
             if( unlockPID() < 0 )
             {
@@ -1557,6 +1561,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
 
             log<software_critical>( { __FILE__, __LINE__, "error from appStartup()" } );
 
+            m_shutdown = 1; //just in case, though this should not have an effect yet.
+
             if( unlockPID() < 0 )
             {
                 log<software_error>( { __FILE__, __LINE__, "error from unlockPID()" } );
@@ -1574,6 +1580,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
             state( stateCodes::FAILURE );
 
             log<software_critical>( { __FILE__, __LINE__, "INDI failed to start." } );
+
+            m_shutdown = 1; //have to set so that child event loops know to exit
 
             // Have to call appShutdown since appStartup was called
             if( appShutdown() < 0 )

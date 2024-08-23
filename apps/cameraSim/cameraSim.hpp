@@ -49,6 +49,11 @@ class cameraSim : public MagAOXApp<>,
     friend class dev::telemeter<cameraSim>;
 
   public:
+
+    typedef dev::stdCamera<cameraSim> stdCameraT;
+    typedef dev::frameGrabber<cameraSim> frameGrabberT;
+    typedef dev::telemeter<cameraSim> telemeterT;
+
     /** \name app::dev Configurations
      *@{
      */
@@ -111,6 +116,9 @@ class cameraSim : public MagAOXApp<>,
 
     /// Setup the configuration system (called by MagAOXApp::setup())
     virtual void setupConfig();
+
+    /// load the configuration system results (called by MagAOXApp::setup())
+    virtual int loadConfigImpl(mx::app::appConfigurator & cfg);
 
     /// load the configuration system results (called by MagAOXApp::setup())
     virtual void loadConfig();
@@ -211,7 +219,7 @@ class cameraSim : public MagAOXApp<>,
 
 inline cameraSim::cameraSim() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
-    m_powerMgtEnabled = false;
+    m_powerMgtEnabled = true;
 
     m_defaultReadoutSpeed = "1";
     m_defaultVShiftSpeed = "1";
@@ -245,9 +253,9 @@ inline void cameraSim::setupConfig()
 {
     dev::stdCamera<cameraSim>::setupConfig( config );
 
-    dev::frameGrabber<cameraSim>::setupConfig( config );
+    FRAMEGRABBER_SETUP_CONFIG(config);
 
-    dev::telemeter<cameraSim>::setupConfig( config );
+    TELEMETER_SETUP_CONFIG(config);
 
     config.add( "camsim.fullW",
                 "",
@@ -280,16 +288,16 @@ inline void cameraSim::setupConfig()
                 "the camera default FPS, set at startup.  Default is 10" );
 }
 
-inline void cameraSim::loadConfig()
+inline int cameraSim::loadConfigImpl(mx::app::appConfigurator & cfg)
 {
-    dev::stdCamera<cameraSim>::loadConfig( config );
+    dev::stdCamera<cameraSim>::loadConfig( cfg );
 
-    dev::frameGrabber<cameraSim>::loadConfig( config );
+    FRAMEGRABBER_LOAD_CONFIG(cfg);
 
-    dev::telemeter<cameraSim>::loadConfig( config );
+    TELEMETER_LOAD_CONFIG(cfg);
 
-    config(m_full_w, "camsim.fullW");
-    config(m_full_h, "camsim.fullH");
+    cfg(m_full_w, "camsim.fullW");
+    cfg(m_full_h, "camsim.fullH");
 
     m_full_x = 0.5*(m_full_w - 1.0);
     m_full_y = 0.5*(m_full_h - 1.0);
@@ -306,13 +314,19 @@ inline void cameraSim::loadConfig()
         m_default_y = m_full_y;
     }
 
-
-
     m_fps = 10;
-    config(m_fps, "camsim.defaultFPS");
+    cfg(m_fps, "camsim.defaultFPS");
     m_fpsSet = m_fps;
 
+    return 0;
+}
 
+inline void cameraSim::loadConfig()
+{
+    if(loadConfigImpl(config) < 0)
+    {
+        m_shutdown = 1;
+    }
 }
 
 inline int cameraSim::appStartup()
@@ -340,15 +354,9 @@ inline int cameraSim::appStartup()
         return log<software_critical, -1>( { __FILE__, __LINE__ } );
     }
 
-    if( dev::frameGrabber<cameraSim>::appStartup() < 0 )
-    {
-        return log<software_critical, -1>( { __FILE__, __LINE__ } );
-    }
+    FRAMEGRABBER_APP_STARTUP;
 
-    if( dev::telemeter<cameraSim>::appStartup() < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
-    }
+    TELEMETER_APP_STARTUP;
 
     m_currentROI.x = m_default_x;
     m_currentROI.y = m_default_y;
@@ -357,8 +365,6 @@ inline int cameraSim::appStartup()
     m_currentROI.bin_x = 1;
     m_currentROI.bin_y = 1;
     m_nextROI = m_currentROI;
-
-
 
     m_expTime = 1.0 / m_fps;
     m_expTimeSet = m_expTime;
@@ -373,6 +379,8 @@ inline int cameraSim::appStartup()
 
 inline int cameraSim::appLogic()
 {
+    state( stateCodes::OPERATING );
+
     // and run stdCamera's appLogic
     if( dev::stdCamera<cameraSim>::appLogic() < 0 )
     {
@@ -380,12 +388,9 @@ inline int cameraSim::appLogic()
     }
 
     // and run frameGrabber's appLogic to see if the f.g. thread has exited.
-    if( dev::frameGrabber<cameraSim>::appLogic() < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
-    }
+    FRAMEGRABBER_APP_LOGIC;
 
-    std::cerr << m_offset << "\n";
+    TELEMETER_APP_LOGIC;
 
     if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
     {
@@ -403,18 +408,8 @@ inline int cameraSim::appLogic()
             return 0;
         }
 
-        if( frameGrabber<cameraSim>::updateINDI() < 0 )
-        {
-            log<software_error>( { __FILE__, __LINE__ } );
-            state( stateCodes::ERROR );
-            return 0;
-        }
+        FRAMEGRABBER_UPDATE_INDI;
 
-        if( telemeter<cameraSim>::appLogic() < 0 )
-        {
-            log<software_error>( { __FILE__, __LINE__ } );
-            return 0;
-        }
     }
 
     ///\todo Fall through check?
@@ -424,11 +419,13 @@ inline int cameraSim::appLogic()
 
 inline int cameraSim::appShutdown()
 {
+
+
     dev::stdCamera<cameraSim>::appShutdown();
 
-    dev::frameGrabber<cameraSim>::appShutdown();
+    FRAMEGRABBER_APP_SHUTDOWN;
 
-    dev::telemeter<cameraSim>::appShutdown();
+    TELEMETER_APP_SHUTDOWN;
 
     return 0;
 }
