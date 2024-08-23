@@ -3,10 +3,11 @@
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 include $(SELF_DIR)/../../Make/common.mk
 
+CFLAGS = -O0
 all: indiserver getINDI setINDI evalINDI
 
 indiserver: indiapi.h fq.h fq.c indiserver.c
-	$(CC) $(CFLAGS) -g -o indiserver -I../liblilxml  indiserver.c fq.c ../liblilxml/liblilxml.a -lpthread
+	$(CC) $(CFLAGS) -o indiserver -I../liblilxml  indiserver.c fq.c ../liblilxml/liblilxml.a -lpthread
 
 
 getINDI: connect_to.h connect_to.c indiapi.h getINDI.c

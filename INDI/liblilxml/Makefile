@@ -10,6 +10,7 @@
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 include $(SELF_DIR)/../../Make/common.mk
 
+CFLAGS=
 all: liblilxml.a
 	$(CC) -shared -Wl,-soname,liblilxml.so -o liblilxml.so lilxml*.o -rdynamic
 
