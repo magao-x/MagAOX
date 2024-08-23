@@ -8,7 +8,7 @@ apps_basic = \
 	xindiserver \
 	magAOXMaths \
 	timeSeriesSimulator \
-	mzmqClient 
+	mzmqClient
 
 #Apps commmon to all MagAO-X control machines
 apps_common = \
@@ -64,7 +64,7 @@ apps_icc = \
 	xt1121Ctrl \
 	xt1121DCDU \
 	koolanceCtrl \
-	corAlign 
+	corAlign
 
 apps_aoc = \
 	trippLitePDU \
@@ -83,9 +83,15 @@ apps_tic = \
 	bmcCtrl \
 	trippLitePDU
 
+apps_sim = \
+    cameraSim \
+	trippLitePDU
+
 libs_to_build = libtelnet
 
 apps_to_build = $(apps_basic)
+
+
 
 ifeq ($(MAGAOX_ROLE),AOC)
   apps_to_build += $(apps_common)
@@ -101,6 +107,10 @@ else ifeq ($(MAGAOX_ROLE),RTC)
 else ifeq ($(MAGAOX_ROLE),TIC)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_tic)
+else ifeq ($(MAGAOX_ROLE),SS)
+  apps_to_build += $(apps_sim)
+  CXXFLAGS += -DXWC_SIM_MODE
+
 endif
 
 all_guis = \
@@ -248,7 +258,7 @@ guis_install: rtimv_plugins_install
 		(cd gui/apps/$$gui && ${MAKE} install) || exit 1; \
 	done
 
-guis_clean: rtimv_plugins_clean 
+guis_clean: rtimv_plugins_clean
 	for gui in ${all_guis}; do \
 		(cd gui/apps/$$gui && ${MAKE} clean) || exit 1; \
 	done
@@ -308,7 +318,7 @@ test: tests_clean
 
 tests_clean:
 	cd tests && ${MAKE} clean || exit 1;
-	
+
 
 .PHONY: python_install
 python_install:
@@ -334,3 +344,7 @@ setup:
 	@echo "*** Build settings available in local/config.mk ***"
 	@grep "?=" Make/config.mk || true
 	@echo "***"
+
+.PHONY: print_role
+print_role:
+	echo $(MAGAOX_ROLE)
