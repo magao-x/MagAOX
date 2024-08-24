@@ -101,6 +101,7 @@ jobs:
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
             tar -xvf stage1_outputs.tar
+            rm stage1_outputs.tar
             mv -v output/xvm_stage1.qcow2 output/xvm.qcow2
       - name: Install MagAO-X software
         if: steps.cache-vm-stage2.outputs.cache-hit != 'true'
@@ -145,6 +146,7 @@ jobs:
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
             tar -xvf stage2_outputs.tar
+            rm stage2_outputs.tar
             mv -v output/xvm_stage2.qcow2 output/xvm.qcow2
       - name: Install MagAO-X software
         run: |
@@ -175,6 +177,8 @@ jobs:
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
             tar -xvf stage3_outputs.tar
+            rm stage3_outputs.tar
+            mv -v output/xvm_stage3.qcow2 output/xvm.qcow2
       - name: Create UTM bundle
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
