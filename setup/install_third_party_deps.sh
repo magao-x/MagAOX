@@ -42,7 +42,6 @@ bash -l "$DIR/steps/install_openblas.sh" || exit 1
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
     bash -l "$DIR/steps/install_cuda_rocky_9.sh" || exit_with_error "CUDA install failed"
 fi
-sudo -H bash -l "$DIR/steps/install_fftw.sh" || exit 1
 sudo -H bash -l "$DIR/steps/install_cfitsio.sh" || exit 1
 sudo -H bash -l "$DIR/steps/install_eigen.sh" || exit 1
 sudo -H bash -l "$DIR/steps/install_zeromq.sh" || exit 1

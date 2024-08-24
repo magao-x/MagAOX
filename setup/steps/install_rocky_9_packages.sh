@@ -71,7 +71,21 @@ yum install -y \
     rsync \
     lapack-devel \
     python \
+    fftw \
+    fftw-devel \
+    fftw-libs \
+    fftw-libs-double \
+    fftw-libs-single \
+    fftw-libs-long \
+    fftw-static \
 || exit 1
+
+if [[ $(uname -p) == "x86_64" ]]; then
+    yum install -y fftw-libs-quad || exit 1
+else
+    log_info "libfftw3-quad not available on $(uname -p) host"
+fi
+
 
 # For some reason, pkg-config doesn't automatically look here?
 mkdir -p /etc/profile.d/ || exit 1

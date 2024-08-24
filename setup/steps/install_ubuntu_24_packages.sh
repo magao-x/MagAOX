@@ -52,4 +52,16 @@ apt-get install -y \
     liblapack-dev \
     liblapacke-dev \
     podman \
+    libfftw3-bin \
+    libfftw3-dev \
+    libfftw3-doc \
+    libfftw3-single \
+    libfftw3-long \
+    libfftw3-double \
 || exit 1
+
+if [[ $(uname -p) == "x86_64" ]]; then
+    apt-get install -y libfftw3-quad || exit 1
+else
+    log_info "libfftw3-quad not available on $(uname -p) host"
+fi
