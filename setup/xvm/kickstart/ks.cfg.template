@@ -1,9 +1,10 @@
 # Inspired by https://github.com/canonical/packer-maas/blob/main/rocky9/http/rocky.ks.pkrtpl.hcl
-repo --name=base --mirrorlist=https://mirrors.rockylinux.org/mirrorlist?repo=rocky-BaseOS-9.3&arch=aarch64
-repo --name=appstream --mirrorlist=https://mirrors.rockylinux.org/mirrorlist?repo=rocky-AppStream-9.3&arch=aarch64
-repo --name=crb --mirrorlist=https://mirrors.rockylinux.org/mirrorlist?repo=rocky-CRB-9.3&arch=aarch64
-repo --name=epel --metalink=https://mirrors.fedoraproject.org/metalink?repo=epel-9&arch=aarch64
-repo --name=epel-cisco-openh264 --metalink=https://mirrors.fedoraproject.org/metalink?repo=epel-cisco-openh264-9&arch=aarch64
+repo --name=minimal --baseurl=file:///run/install/sources/mount-0000-cdrom/minimal
+repo --name=base --mirrorlist=https://mirrors.rockylinux.org/mirrorlist?repo=rocky-BaseOS-${rockyVersion}&arch=${vmArch}
+repo --name=appstream --mirrorlist=https://mirrors.rockylinux.org/mirrorlist?repo=rocky-AppStream-${rockyVersion}&arch=${vmArch}
+repo --name=crb --mirrorlist=https://mirrors.rockylinux.org/mirrorlist?repo=rocky-CRB-${rockyVersion}&arch=${vmArch}
+repo --name=epel --metalink=https://mirrors.fedoraproject.org/metalink?repo=epel-9&arch=${vmArch}
+repo --name=epel-cisco-openh264 --metalink=https://mirrors.fedoraproject.org/metalink?repo=epel-cisco-openh264-9&arch=${vmArch}
 
 cdrom
 graphical
@@ -16,14 +17,13 @@ firewall --enabled --service=ssh
 
 # System language, keyboard and timezone
 lang en_US.UTF-8
-keyboard us
+keyboard --xlayouts='us'
 timezone UTC --utc
 
 # Use CDROM installation media
 cdrom
 
 # Generated using Blivet version 3.6.0
-# ignoredisk --only-use=vda
 autopart
 # Partition clearing information
 clearpart --none --initlabel
@@ -95,7 +95,7 @@ dnf config-manager --set-enabled crb
 %end
 
 %packages
-@^Minimal Install
+@^minimal-environment
 @kde-desktop
 firefox
 vim
@@ -103,6 +103,7 @@ nano
 git
 qemu-guest-agent
 spice-vdagent
+rsync
 %end
 
 # Do not start the Inital Setup app

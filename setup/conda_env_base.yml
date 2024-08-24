@@ -1,6 +1,5 @@
 channels:
   - conda-forge
-  - defaults
 dependencies:
   - astropy
   # Note: omission of jupyter and use of matplotlib-base prevents dependency on qt
@@ -17,6 +16,7 @@ dependencies:
   - pip
   - nb_conda_kernels
   - pytest
+  - pybind11
   - psutil
   - cupy
   - line_profiler

@@ -62,10 +62,8 @@ if os.environ.get('MAGAOX_ROLE') == 'vm':
 else:
     INSTRUMENT_USER = 'xsup'
 
-# CentOS + devtoolset-7 aliases sudo, but breaks command line arguments for it,
-# so if we need those, we must use _REAL_SUDO. Of course, sudo may live in
-# different places depending on distro. We fall back to
-# whatever `which sudo` says.
+# sudo may live in different places depending on distro. We fall back
+# to whatever `which sudo` says.
 SUDO_PATHS = [
     '/usr/bin/sudo',
     '/bin/sudo',

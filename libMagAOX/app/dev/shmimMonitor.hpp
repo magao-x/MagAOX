@@ -37,36 +37,58 @@ struct shmimT
 /** MagAO-X generic shared memory monitor
   *
   *
-  * The derived class `derivedT` must expose the following interface
-   \code
-
-    //The allocate function is called after connecting to the shared memory buffer
-    //It should check that the buffer has the expected size, and perform any internal allocations
-    //to prepare for processing.
-    int derivedT::allocate( const specificT & ///< [in] tag to differentiate shmimMonitor parents.  Normally this is dev::shmimT for a single parent.
-                          );
-
-    int derivedT::processImage( void * curr_src,   ///< [in] pointer to the start of the current frame
-                                const specificT &  ///< [in] tag to differentiate shmimMonitor parents.  Normally this is dev::shmimT for a single parent.
-                              )
-   \endcode
-  * Each of the above functions should return 0 on success, and -1 on an error.
+  * The derived class `derivedT` has the following requirements (see below for discussion of specificT):
+  * 
+  * - Must be derived from MagAOXApp<true>
+  * 
+  * - Must contain the following friend declaration:
+  *   \code
+  *       friend class dev::shmimMonitor<derivedT, specificT>; //specificT may not need to be included
+  *   \endcode
+  * 
+  * - Must provide the following interfaces:
+  *   \code
   *
-  * This class should be declared a friend in the derived class, like so:
-   \code
-    friend class dev::shmimMonitor<derivedT, specificT>;
-   \endcode
+  *       //The allocate function is called after connecting to the shared memory buffer
+  *       //It should check that the buffer has the expected size, and perform any internal allocations
+  *       //to prepare for processing.
+  *       int derivedT::allocate( const specificT & ///< [in] tag to differentiate shmimMonitor parents.  Normally this is dev::shmimT for a single parent.
+  *                             );
   *
-  * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic` and `appShutdown`
-  * functions must be placed in the derived class's functions of the same name.
+  *       int derivedT::processImage( void * curr_src,   ///< [in] pointer to the start of the current frame
+  *                                   const specificT &  ///< [in] tag to differentiate shmimMonitor parents.  Normally this is dev::shmimT for a single parent.
+  *                                 )
+  *   \endcode
+  *   Each of the above functions should return 0 on success, and -1 on an error.
   *
+  * - Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic` and `appShutdown`
+  *   functions must be placed in the derived class's functions of the same name. For convenience the 
+  *   following macros are defined to provide error checking:
+  *   \code  
+  *       SHMIMMONITOR_SETUP_CONFIG( cfig )
+  *       SHMIMMONITOR_LOAD_CONFIG( cfig )
+  *       SHMIMMONITOR_APP_STARTUP
+  *       SHMIMMONITOR_APP_LOGIC
+  *       SHMIMMONITOR_UPDATE_INDI
+  *       SHMIMMONITOR_APP_SHUTDOWN
+  *   \endcode
+  *   See below for the macros to use if `specificT` is used to specialize.
   *
   * The template specifier `specificT` allows inheritance of multiple shmimMonitor classes.  This type must have at least
   * the static member function:
-  \code
-  static std::string indiPrefix()
-  \endcode
-  * which returns the string to prefix to INDI properties.  The default `shmimT` uses "sm".
+  * \code
+  *     static std::string indiPrefix()
+  * \endcode
+  * which returns the string which is prefixed to INDI properties.  The default `shmimT` uses "sm".
+  * 
+  * Additionally, if `specificT` is used, the following convenience macros can be used:
+  *   \code  
+  *       SHMIMMONITORT_SETUP_CONFIG( SHMIMMONITORT, cfig )
+  *       SHMIMMONITORT_LOAD_CONFIG( SHMIMMONITORT, cfig )
+  *       SHMIMMONITORT_APP_STARTUP( SHMIMMONITORT )
+  *       SHMIMMONITORT_APP_LOGIC( SHMIMMONITORT )
+  *       SHMIMMONITORT_APP_SHUTDOWN( SHMIMMONITORT )
+  *   \endcode
   *
   *
   * \ingroup appdev

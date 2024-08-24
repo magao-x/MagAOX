@@ -14,29 +14,22 @@ if [[ $ID == ubuntu ]]; then
         qtbase5-dev-tools \
         libqt5svg5-dev \
         wmctrl \
+        xauth \
 	;
     if [[ $VERSION_ID = "24.04" ]]; then
         sudo -i apt install -y libqwtmathml-qt5-dev ;
     else
         sudo -i apt install -y libqwt-qt5-dev/jammy ;
     fi
-elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
-    sudo yum install -y \
-        xorg-x11-apps \
-        kate \
-        wmctrl \
-        mesa-libGL-devel \
-    ;
 elif [[ $ID == rocky && $VERSION_ID == "9."* ]]; then
     sudo dnf install -y \
         qt5-devel \
         qwt-qt5-devel \
         wmctrl \
+        xorg-x11-xauth \
     ;
 fi
 
-if [[ $MAGAOX_ROLE == vm ]]; then
-    # For some reason, Qt won't hear any keyboard events unless this is set.
-    # (Hinted at by: "Qt: Failed to create XKB context!")
-    echo "export QT_XKB_CONFIG_ROOT=/usr/lib/kbd/keymaps/xkb" | sudo tee /etc/profile.d/qt_xkb_config_env_var.sh
-fi
+# For some reason, Qt won't hear any keyboard events unless this is set.
+# (Hinted at by: "Qt: Failed to create XKB context!")
+echo "export QT_XKB_CONFIG_ROOT=/usr/lib/kbd/keymaps/xkb" | sudo tee /etc/profile.d/qt_xkb_config_env_var.sh

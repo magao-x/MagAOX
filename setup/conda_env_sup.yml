@@ -1,7 +1,6 @@
 name: sup
 channels:
   - conda-forge
-  - defaults
 dependencies:
   - numpy
   - matplotlib

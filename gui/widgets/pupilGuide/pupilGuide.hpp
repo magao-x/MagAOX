@@ -139,7 +139,7 @@ protected:
    double m_pupCh1 {0};
    double m_pupCh2 {0};
    
-   float m_pupStepSize {0.1};
+   float m_pupStepSize {0.5};
 
    int m_pupCam {CAMSCIS};
 
@@ -148,7 +148,7 @@ protected:
    double m_ttmPeriCh1 {0};
    double m_ttmPeriCh2 {0};
 
-   float m_ttmPeriStepSize {0.1};
+   float m_ttmPeriStepSize {25};
 
 
    // -- Camera Lens
@@ -312,6 +312,9 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
    snprintf(ss, 5, "%0.2f", m_camlensStepSize*10);
    ui.button_camlens_scale->setText(ss);
    
+   snprintf(ss, 5, "%0.2f", m_ttmPeriStepSize/100.);
+   ui.button_ttmPeri_scale->setText(ss);
+
    setXwFont(ui.labelModAndCenter);
    setXwFont(ui.modState);
    setXwFont(ui.labelFreq);
@@ -2034,7 +2037,6 @@ void pupilGuide::on_button_focus_p_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-
    if(m_tipmovewhat == MOVE_WOOF)
    {
       
@@ -2049,7 +2051,7 @@ void pupilGuide::on_button_focus_p_pressed()
       ip.setDevice("tcsi");
       ip.setName("pyrNudge");
       ip.add(pcf::IndiElement("z"));
-      ip["z"] = m_stepSize*5.;
+      ip["z"] = m_stepSize*100.;
    }
    else return;
 
@@ -2075,7 +2077,7 @@ void pupilGuide::on_button_focus_m_pressed()
       ip.setDevice("tcsi");
       ip.setName("pyrNudge");
       ip.add(pcf::IndiElement("z"));
-      ip["z"] = -m_stepSize*5.;
+      ip["z"] = -m_stepSize*100.;
    }
    else return;
 

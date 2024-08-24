@@ -13,9 +13,11 @@
    ****/
 
 #include "../../../tests/catch2/catch.hpp"
-
+#include "../../tests/testMacrosINDI.hpp"
 
 #include "../sysMonitor.hpp"
+
+using namespace MagAOX::app;
 
 SCENARIO( "System monitor is constructed and CPU temperature results are passed in", "[sysMonitor]" ) 
 {
@@ -29,49 +31,49 @@ SCENARIO( "System monitor is constructed and CPU temperature results are passed 
       
       WHEN("Correct line is given")
       {
-         rv = sm.parseCPUTemperatures("Core 0:         +42.0°C  (high = +100.0°C, crit = +100.0°C)", temps);
+         rv = sm.parseCPUTemperatures(temps, "Core 0:         +42.0°C  (high = +100.0°C, crit = +100.0°C)");
          REQUIRE(rv == 0);
          REQUIRE(temps == 42);
       }
       
       WHEN("Correct line is given")
       {
-         rv = sm.parseCPUTemperatures("Core 1:         +45.0°C    (high = +100.0°C, crit = +100.0°C)", temps);
+         rv = sm.parseCPUTemperatures(temps, "Core 1:         +45.0°C    (high = +100.0°C, crit = +100.0°C)");
          REQUIRE(rv == 0);
          REQUIRE(temps == 45);
       }
       
       WHEN("Correct line is given")
       {
-         rv = sm.parseCPUTemperatures("Core 2:         +91.0°C  (high = +100.0°C, crit = +100.0°C)", temps);
+         rv = sm.parseCPUTemperatures(temps, "Core 2:         +91.0°C  (high = +100.0°C, crit = +100.0°C)");
          REQUIRE(rv == 0);
          REQUIRE(temps == 91);
       }
       
       WHEN("Blank line is given")
       {
-         rv = sm.parseCPUTemperatures("", temps);
+         rv = sm.parseCPUTemperatures(temps, "");
          REQUIRE(rv == -1);
          REQUIRE(temps == -999);
       }
 
       WHEN("Incorrect line is given")
       {
-         rv = sm.parseCPUTemperatures("coretemp-isa-0000", temps);
+         rv = sm.parseCPUTemperatures(temps, "coretemp-isa-0000");
          REQUIRE(rv == -1);
          REQUIRE(temps == -999);
       }
       
       WHEN("Corrupted line is given")
       {
-         rv = sm.parseCPUTemperatures("Core 3:+91.0° XXXXXXX", temps);
+         rv = sm.parseCPUTemperatures(temps, "Core 3:+91.0° XXXXXXX");
          REQUIRE(rv == -1);
          REQUIRE(temps == -999);
       }
 
       WHEN("Corrupted line is given")
       {
-         rv = sm.parseCPUTemperatures("Core2:      +91.0°C(high =+100.0°C, crit= +100.0°C)", temps);
+         rv = sm.parseCPUTemperatures(temps, "Core2:      +91.0°C(high =+100.0°C, crit= +100.0°C)");
          REQUIRE(rv == -1);
          REQUIRE(temps == -999);
       }
@@ -90,42 +92,42 @@ SCENARIO( "System monitor is constructed and CPU load results are passed in", "[
       
       WHEN("Correct line is given")
       {
-         rv = sm.parseCPULoads("02:35:43 PM    0    6.57    0.02    1.32    0.24    0.00    0.00    0.00    0.00    0.00   91.85", loads);
+         rv = sm.parseCPULoads(loads, "02:35:43 PM    0    6.57    0.02    1.32    0.24    0.00    0.00    0.00    0.00    0.00   91.85");
          REQUIRE(rv == 0);
          REQUIRE((loads - 0.0815) < 0.0005);
       }
       
       WHEN("Correct line is given")
       {
-         rv = sm.parseCPULoads("10:32:28 AM    1    6.54    0.21    2.75   24.64    0.00    0.06    0.00    0.00    0.00   65.81", loads);
+         rv = sm.parseCPULoads(loads, "10:32:28 AM    1    6.54    0.21    2.75   24.64    0.00    0.06    0.00    0.00    0.00   65.81");
          REQUIRE(rv == 0);
          REQUIRE((loads - 0.3419) < 0.0005);
       }
       
       WHEN("Correct line is given")
       {
-         rv = sm.parseCPULoads("10:32:28 AM    3    4.24    0.03    1.97    5.52    0.00    0.00    0.00    0.00    0.00   88.24", loads);
+         rv = sm.parseCPULoads(loads, "10:32:28 AM    3    4.24    0.03    1.97    5.52    0.00    0.00    0.00    0.00    0.00   88.24");
          REQUIRE(rv == 0);
          REQUIRE((loads - 0.1176) < 0.0005);
       }
       
       WHEN("Blank line is given")
       {
-         rv = sm.parseCPULoads("", loads);
+         rv = sm.parseCPULoads(loads, "");
          REQUIRE(rv == -1);
          REQUIRE(loads == -1);
       }
 
       WHEN("Incorrect line is given")
       {
-         rv = sm.parseCPULoads("02:35:43 PM  CPU    %%usr   %%nice    %%sys %%iowait    %%irq   %%soft  %%steal  %%guest  %%gnice   %%idle", loads);
+         rv = sm.parseCPULoads(loads, "02:35:43 PM  CPU    %%usr   %%nice    %%sys %%iowait    %%irq   %%soft  %%steal  %%guest  %%gnice   %%idle");
          REQUIRE(rv == -1);
          REQUIRE(loads == -1);
       }
 
       WHEN("Corrupted line is given")
       {
-         rv = sm.parseCPULoads("10:32:28AM    2    5.24    0.14    2.70_1.41    0.00    0.00    0.00    0.00    0.00   80.50  ncawd vexing", loads);
+         rv = sm.parseCPULoads(loads, "10:32:28AM    2    5.24    0.14    2.70_1.41    0.00    0.00    0.00    0.00    0.00   80.50  ncawd vexing");
          REQUIRE(rv == -1);
          REQUIRE(loads == -1);
       }
@@ -302,3 +304,25 @@ SCENARIO( "System monitor is constructed and ram usage result is passed in", "[s
       }
    }
 }
+
+namespace SYSMONTEST
+{
+
+class sysMonitor_test : public sysMonitor 
+{
+
+public:
+    sysMonitor_test(const std::string device)
+    {
+        m_configName = device;
+
+        XWCTEST_SETUP_INDI_NEW_PROP(setlat);
+    }
+};
+
+SCENARIO( "INDI Callbacks", "[sysMonitor]" )
+{
+    XWCTEST_INDI_NEW_CALLBACK( sysMonitor, setlat);
+}
+
+}//namespace SYSMONTEST

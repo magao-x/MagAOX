@@ -46,7 +46,7 @@ namespace dev
   * 
   * - Must be derived from  `dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::darkShmimT>` (replace DERIVEDNAME with derivedT class name)
   * 
-  * - Must contain the following friend declalibMagAOX/app/indiMacros.hpprations (replace DERIVEDNAME with derivedT class name):
+  * - Must contain the following friend declarations (replace DERIVEDNAME with derivedT class name):
   *   \code
   *      friend class dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::wfsShmimT>;
   *      friend class dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::darkShmimT>;

@@ -149,7 +149,7 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
 {
    if( !indiDriver ) return;
    
-   size_t n; //loop index outside so we can use it for error reporting.
+   size_t n = 0; //loop index outside so we can use it for error reporting.
 
    try
    {
@@ -185,13 +185,19 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
    catch(std::exception & e)
    {
       std::cerr << "Exception caught at " << __FILE__ << " " << __LINE__ << " ";
-      std::cerr << "from " << p.getName() << "." << els[n] << ": ";
+      if(n < els.size())
+      {
+         std::cerr << "from " << p.getName() << "." << els[n] << ": ";
+      }
       std::cerr << e.what() << "\n";
    }
    catch(...)
    {
       std::cerr << "Exception caught at " << __FILE__ << " " << __LINE__ << " ";
-      std::cerr << "from " << p.getName() << "." << els[n] << "\n";
+      if(n < els.size())
+      {
+         std::cerr << "from " << p.getName() << "." << els[n] << "\n";
+      }
    }   
 }
 

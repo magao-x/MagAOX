@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
+source ./_common.sh
 mkdir -p ./input/iso
 cd ./input/iso
-if [[ ! -e Rocky-9.3-aarch64-minimal.iso ]]; then
-    curl -L https://download.rockylinux.org/pub/rocky/9/isos/aarch64/Rocky-9.3-aarch64-minimal.iso > Rocky-9.3-aarch64-minimal.iso.part
-    mv Rocky-9.3-aarch64-minimal.iso.part Rocky-9.3-aarch64-minimal.iso
+if [[ ! -e Rocky-${rockyVersion}-${vmArch}-minimal.iso ]]; then
+    curl --no-progress-meter -L https://download.rockylinux.org/pub/rocky/9/isos/${vmArch}/Rocky-${rockyVersion}-${vmArch}-minimal.iso > Rocky-${rockyVersion}-${vmArch}-minimal.iso.part
+    mv Rocky-${rockyVersion}-${vmArch}-minimal.iso.part Rocky-${rockyVersion}-${vmArch}-minimal.iso
 else
-    echo "Rocky Linux 9.3 aarch64 minimal ISO already downloaded."
+    echo "Rocky Linux ${vmArch} minimal ISO already downloaded."
 fi
