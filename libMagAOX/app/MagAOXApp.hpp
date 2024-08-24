@@ -1467,7 +1467,7 @@ void MagAOXApp<_useINDI>::checkConfig() // virtual
 
     if(m_shutdown == true)
     {
-        m_doHelp = true; //Causes mx::application to print help and exit.
+        doHelp = true; //Causes mx::application to print help and exit.
     }
 }
 
