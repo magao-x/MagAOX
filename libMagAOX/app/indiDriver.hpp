@@ -153,26 +153,56 @@ indiDriver<parentT>::indiDriver ( parentT * parent,
    }
    setOutputFd(fd);
    
-   // Open the ctrl fifo and write a single byte to it to trigger a restart
-   // of the xindidriver process.
-   // This allows indiserver to refresh everything.
-   errno = 0;
-   fd = open( parent->driverCtrlName().c_str(), O_RDWR);
-   if(fd < 0)
+   // If the INDI server ctrl FIFO name is an empty string, then return
+   if (parent->indiserver_ctrl_fifo() == "") { return; }
+
+   /////////////////////////////////////////////////////////////////////
+   // If the INDI server ctrl FIFO name is not an empty string, then
+   // open that INDI server ctrl FIFO, and write to it the prefix string
+   //
+   //   start /opt/MagAOX/fifos/driver_name
+   //
+   // This will notify the INDI server that this INDI driver is live and
+   // where to find its .in and .out FIFOs (above)
+   /////////////////////////////////////////////////////////////////////
+
+   // - Append the the INDI driver .in file name to "start "
+   std::string start_string{"start "};
+   start_string += parent->driverInName();
+
+   // - Ensure the last three characters in the string are ".in"
+   int nchars = start_string.size() - 3;
+
+   if (nchars < 1 || start_string.substr(nchars<0 ? 0 : nchars) != ".in")
    {
-      parentT::template log<logger::software_error>({__FILE__, __LINE__, errno, "Error opening control INDI FIFO."});
+      parentT::template log<logger::software_error>({__FILE__, __LINE__, 0, "Error:  INDI driver input FIFO name does not end in [.in]"});
       m_good = false;
       return;
    }
-   char c = 0;
-   int wrno = write(fd, &c, 1);
+
+   // - Truncate that ".in" extension from the string, append a newline,
+   //   and increment the char count
+   start_string = start_string.substr(0,nchars++) + std::string("\n");
+
+   // - Open the INDI server ctrl FIFO
+   errno = 0;
+   fd = open( parent->indiserver_ctrl_fifo().c_str(), O_RDWR);
+   if(fd < 0)
+   {
+      parentT::template log<logger::software_error>({__FILE__, __LINE__, errno, "Error opening INDI server control FIFO."});
+      m_good = false;
+      return;
+   }
+
+   // - Write the "start ...\n" string to the INDI server ctrl FIFO
+   int wrno = write(fd, start_string.c_str(), nchars);
    if(wrno < 0)
    {
-      parentT::template log<logger::software_error>({__FILE__, __LINE__, errno, "Error writing to control INDI FIFO."});
+      parentT::template log<logger::software_error>({__FILE__, __LINE__, errno, "Error writing to INDI server control FIFO."});
       m_good = false;
    }
-   
-   
+
+   // - Close the INDI server ctrl FIFO
    close(fd);
 }
 
