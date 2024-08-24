@@ -5,7 +5,7 @@
   */
 
 #ifndef stateRuleEngine_indiCompRules_hpp
-#define stateRuleEngine_indiCompRules_hpp 
+#define stateRuleEngine_indiCompRules_hpp
 
 #include <variant>
 #include <mx/mxException.hpp>
@@ -132,7 +132,7 @@ rulePriority string2priority(const std::string & pstr)
 
 /// Virtual base-class for all rules
 /** Provides error handling and comparison functions.
-  * Derived classes must implemented valid() and value(). 
+  * Derived classes must implement valid() and value().
   */
 struct indiCompRule
 {
@@ -142,7 +142,7 @@ public:
     typedef std::variant<bool, std::string> boolorerr_t;
 
     /// Check if returned value indicates an error
-    bool isError(boolorerr_t rv /**< [in] the return value to check*/) 
+    bool isError(boolorerr_t rv /**< [in] the return value to check*/)
     {
         return (rv.index() > 0);
     }
@@ -185,7 +185,7 @@ public:
         m_message = m;
     }
 
-    /// Get the message 
+    /// Get the message
     /**
       * \returns the current message
       */
@@ -198,7 +198,7 @@ public:
     void comparison( const ruleComparison & c /**< [in] the new comparison*/)
     {
         m_comparison = c;
-    } 
+    }
 
     /// Get the rule comparison
     /**
@@ -212,7 +212,7 @@ public:
 
     /// Report whether the rule is valid as configured
     /** If not valid, the return value is a std::string with the reason.
-      * If valid, the return value is a bool set to true. 
+      * If valid, the return value is a bool set to true.
       */
     virtual boolorerr_t valid() = 0;
 
@@ -220,7 +220,7 @@ public:
     /**
       * \returns the result of the comparison defined by the rule
       */
-    virtual bool value() = 0; 
+    virtual bool value() = 0;
 
     /// Compare two strings
     /** String comparison can only be Eq or Neq.
@@ -323,7 +323,7 @@ public:
     }
 
     /// Compare two booleans
-    /** 
+    /**
       * \returns true if the comparison is true
       * \returns false if the comparison is false
       * \returns std::string with error message if the comparison is not valid
@@ -363,15 +363,15 @@ public:
 };
 
 /// A rule base class for testing an element in one property
-struct onePropRule : public indiCompRule 
+struct onePropRule : public indiCompRule
 {
 
 protected:
 
     int m_type; ///< The property type, from pcf::IndiProperty::Type
 
-    pcf::IndiProperty * m_property {nullptr}; ///< Pointer to the property 
-    
+    pcf::IndiProperty * m_property {nullptr}; ///< Pointer to the property
+
     std::string m_element; ///< The element name within the property
 
 public:
@@ -427,12 +427,12 @@ public:
         return m_element;
     }
 
-    /// Check if this rule is valid 
+    /// Check if this rule is valid
     /** The rule is valid if the property pointer is not null, and the element
       * is contained within the property.
       *
       * If not valid, the return value is a std::string with the reason.
-      * If valid, the return value is a bool set to true. 
+      * If valid, the return value is a bool set to true.
       */
     virtual boolorerr_t valid()
     {
@@ -455,7 +455,7 @@ public:
 };
 
 /// A rule base class for testing elements in two properties
-struct twoPropRule : public indiCompRule 
+struct twoPropRule : public indiCompRule
 {
 
 protected:
@@ -463,11 +463,11 @@ protected:
     int m_type; ///< The property type, from pcf::IndiProperty::Type
 
     pcf::IndiProperty * m_property1 {nullptr}; ///< Pointer to the first property
-    
+
     std::string m_element1; ///< The element name within the first property
 
     pcf::IndiProperty * m_property2 {nullptr}; ///< Pointer to the second property
-    
+
     std::string m_element2; ///< The element name within the second property
 
 public:
@@ -567,23 +567,23 @@ public:
         return m_element2;
     }
 
-    /// Check if this rule is valid 
+    /// Check if this rule is valid
     /** The rule is valid if both property pointers are not null, and the elements
       * are contained within their respective properties.
       *
       * If not valid, the return value is a std::string with the reason.
-      * If valid, the return value is a bool set to true. 
+      * If valid, the return value is a bool set to true.
       */
     virtual boolorerr_t valid()
     {
         boolorerr_t rv;
-        
+
         if(m_property1 == nullptr)
         {
             rv = "property1 is null";
             return rv;
         }
-        
+
         if(!m_property1->find(m_element1))
         {
             rv = "element1 is not found";
@@ -595,7 +595,7 @@ public:
             rv = "property2 is null";
             return rv;
         }
-        
+
         if(!m_property2->find(m_element2))
         {
             rv = "element2 is not found";
@@ -609,7 +609,7 @@ public:
 };
 
 /// Compare the value of a number element to a target
-/** 
+/**
   */
 struct numValRule : public onePropRule
 {
@@ -686,9 +686,9 @@ public:
         {
             mxThrowException(mx::err::invalidconfig, "numValRule::value", std::get<std::string>(rv));
         }
-        
+
         double val = (*m_property)[m_element].get<double>();
-        
+
         rv = compNum(val, m_target, m_tol);
         if(isError(rv))
         {
@@ -700,7 +700,7 @@ public:
 };
 
 /// Compare the value of a text element to a target value
-/** Can only be Eq or Neq. 
+/** Can only be Eq or Neq.
   */
 struct txtValRule : public onePropRule
 {
@@ -752,7 +752,7 @@ public:
         }
 
         rv = compTxt((*m_property)[m_element].get(), m_target);
-        if(isError(rv))                
+        if(isError(rv))
         {
             mxThrowException(mx::err::invalidconfig, "txtValRule::value()", std::get<std::string>(rv));
         }
@@ -764,7 +764,7 @@ public:
 /// Compare the value of a switch to a target value
 /** Can only be Eq or Neq to On or Off.
   */
-struct swValRule : public onePropRule 
+struct swValRule : public onePropRule
 {
 
 public:
@@ -846,7 +846,7 @@ public:
 
 /// Compare two elements based on their numeric values
 struct elCompNumRule : public twoPropRule
-{    
+{
 
 public:
 
@@ -916,7 +916,7 @@ public:
 
 /// Compare two elements based on their text values
 struct elCompTxtRule : public twoPropRule
-{ 
+{
 public:
 
     /// Name of this rule, used by config system
@@ -994,7 +994,7 @@ public:
 };
 
 /// A rule to compare two rules
-/** 
+/**
   *
   */
 struct ruleCompRule: public indiCompRule
@@ -1041,11 +1041,11 @@ public:
         return m_rule2;
     }
 
-    /// Check if this rule is valid 
+    /// Check if this rule is valid
     /** The rule is valid if the rule pointers are not nullptr, and if each rule is itself valid.
       *
       * If not valid, the return value is a std::string with the reason.
-      * If valid, the return value is a bool set to true. 
+      * If valid, the return value is a bool set to true.
       */
     virtual boolorerr_t valid()
     {
@@ -1061,13 +1061,13 @@ public:
         else
         {
             rv = m_rule1->valid();
-            if(isError(rv)) 
+            if(isError(rv))
             {
                 return rv;
             }
 
             rv = m_rule2->valid();
-            if(isError(rv)) 
+            if(isError(rv))
             {
                 return rv;
             }
