@@ -1418,35 +1418,44 @@ void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
 template <bool _useINDI>
 void MagAOXApp<_useINDI>::checkConfig() // virtual
 {
-    // This checks for unused config options and arguments, and logs them.
-    // This will catch both bad options, and options we aren't actually using (debugging).
+    // This checks for unused but valid config options and arguments, and logs them.
+    // This will catch options we aren't actually using but are configured(debugging).
     for( auto it = config.m_targets.begin(); it != config.m_targets.end(); ++it )
     {
         if( it->second.used == false )
         {
             std::string msg = it->second.name;
             if( config.m_sources && it->second.sources.size() > 0 )
+            {
                 msg += " [" + it->second.sources[0] + "]";
+            }
             log<text_log>( "Unused config target: " + msg, logPrio::LOG_WARNING );
         }
     }
 
+    // This checks for invalid/unknown config options and arguments, and logs them.
+    // This diagnosis problems in the config file
     if( config.m_unusedConfigs.size() > 0 )
     {
         for( auto it = config.m_unusedConfigs.begin(); it != config.m_unusedConfigs.end(); ++it )
         {
             if( it->second.used == true )
+            {
                 continue;
+            }
 
             std::string msg = it->second.name;
             if( config.m_sources && it->second.sources.size() > 0 )
+            {
                 msg += " [" + it->second.sources[0] + "]";
-
+            }
             log<text_log>( "Unrecognized config setting: " + msg, logPrio::LOG_CRITICAL );
+
             m_shutdown = true;
         }
     }
 
+    //MagAO-X does not use non-option CLI arguments. Presence probably points to a typo (missing - or --).
     if( config.nonOptions.size() > 0 )
     {
         for( size_t n = 0; n < config.nonOptions.size(); ++n )
@@ -1454,6 +1463,11 @@ void MagAOXApp<_useINDI>::checkConfig() // virtual
             log<text_log>( "Unrecognized command line argument: " + config.nonOptions[n], logPrio::LOG_CRITICAL );
         }
         m_shutdown = true;
+    }
+
+    if(m_shutdown == true)
+    {
+        m_doHelp = true; //Causes mx::application to print help and exit.
     }
 }
 
