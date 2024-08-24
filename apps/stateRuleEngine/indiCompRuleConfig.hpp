@@ -5,7 +5,7 @@
   */
 
 #ifndef stateRuleEngine_indiCompRuleConfig_hpp
-#define stateRuleEngine_indiCompRuleConfig_hpp 
+#define stateRuleEngine_indiCompRuleConfig_hpp
 
 #include <map>
 
@@ -107,16 +107,16 @@ void loadRuleConfig( indiRuleMaps & maps,              ///< [out] contains the r
     {
         mxThrowException(mx::err::invalidconfig, "loadRuleConfig", "no rules found in config");
     }
-   
+
     std::map<std::string, ruleRuleKeys> rrkMap; // Holds the ruleVal rule keys aside for later post-processing
 
     for(size_t i=0; i< sections.size(); ++i)
     {
         bool ruleTypeSet = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "ruleType" ));
-      
+
         //If there is no ruleType then this isn't a rule
         if( !ruleTypeSet ) continue;
-      
+
         //If the rule already exists this is an error
         if(maps.rules.count(sections[i]) != 0)
         {
@@ -125,7 +125,7 @@ void loadRuleConfig( indiRuleMaps & maps,              ///< [out] contains the r
 
         std::string ruleType;
         config.configUnused(ruleType, mx::app::iniFile::makeKey(sections[i], "ruleType" ));
-      
+
         std::string priostr="none";
         config.configUnused(priostr, mx::app::iniFile::makeKey(sections[i], "priority" ));
         rulePriority priority = string2priority(priostr);
@@ -144,11 +144,11 @@ void loadRuleConfig( indiRuleMaps & maps,              ///< [out] contains the r
 
             nvr->priority(priority);
             nvr->message(message);
-            nvr->comparison(comparison); 
+            nvr->comparison(comparison);
 
             pcf::IndiProperty * prop = nullptr;
             std::string element;
-    
+
             extractRuleProp( &prop, element, maps, sections[i], "property", "element", pcf::IndiProperty::Number, config );
             nvr->property(prop);
             nvr->element(element);
@@ -168,11 +168,11 @@ void loadRuleConfig( indiRuleMaps & maps,              ///< [out] contains the r
 
             tvr->priority(priority);
             tvr->message(message);
-            tvr->comparison(comparison); 
+            tvr->comparison(comparison);
 
             pcf::IndiProperty * prop = nullptr;
             std::string element;
-    
+
             extractRuleProp( &prop, element, maps, sections[i], "property", "element", pcf::IndiProperty::Text, config );
             tvr->property(prop);
             tvr->element(element);
@@ -190,11 +190,11 @@ void loadRuleConfig( indiRuleMaps & maps,              ///< [out] contains the r
 
             svr->priority(priority);
             svr->message(message);
-            svr->comparison(comparison); 
+            svr->comparison(comparison);
 
             pcf::IndiProperty * prop  = nullptr;
             std::string element;
-    
+
             extractRuleProp( &prop, element, maps, sections[i], "property", "element", pcf::IndiProperty::Switch, config );
             svr->property(prop);
             svr->element(element);
@@ -210,18 +210,18 @@ void loadRuleConfig( indiRuleMaps & maps,              ///< [out] contains the r
 
             nvr->priority(priority);
             nvr->message(message);
-            nvr->comparison(comparison); 
+            nvr->comparison(comparison);
 
             pcf::IndiProperty * prop1;
             std::string element1;
-    
+
             extractRuleProp( &prop1, element1, maps, sections[i], "property1", "element1", pcf::IndiProperty::Number, config );
             nvr->property1(prop1);
             nvr->element1(element1);
 
             pcf::IndiProperty * prop2;
             std::string element2;
-    
+
             extractRuleProp( &prop2, element2, maps, sections[i], "property2", "element2", pcf::IndiProperty::Number, config );
             nvr->property2(prop2);
             nvr->element2(element2);
@@ -233,18 +233,18 @@ void loadRuleConfig( indiRuleMaps & maps,              ///< [out] contains the r
 
             tvr->priority(priority);
             tvr->message(message);
-            tvr->comparison(comparison); 
+            tvr->comparison(comparison);
 
             pcf::IndiProperty * prop1;
             std::string element1;
-    
+
             extractRuleProp( &prop1, element1, maps, sections[i], "property1", "element1", pcf::IndiProperty::Text, config );
             tvr->property1(prop1);
             tvr->element1(element1);
 
             pcf::IndiProperty * prop2;
             std::string element2;
-    
+
             extractRuleProp( &prop2, element2, maps, sections[i], "property2", "element2", pcf::IndiProperty::Text, config );
             tvr->property2(prop2);
             tvr->element2(element2);
@@ -256,18 +256,18 @@ void loadRuleConfig( indiRuleMaps & maps,              ///< [out] contains the r
 
             svr->priority(priority);
             svr->message(message);
-            svr->comparison(comparison); 
+            svr->comparison(comparison);
 
             pcf::IndiProperty * prop1;
             std::string element1;
-    
+
             extractRuleProp( &prop1, element1, maps, sections[i], "property1", "element1", pcf::IndiProperty::Switch, config );
             svr->property1(prop1);
             svr->element1(element1);
 
             pcf::IndiProperty * prop2;
             std::string element2;
-    
+
             extractRuleProp( &prop2, element2, maps, sections[i], "property2", "element2", pcf::IndiProperty::Switch, config );
             svr->property2(prop2);
             svr->element2(element2);
@@ -286,20 +286,28 @@ void loadRuleConfig( indiRuleMaps & maps,              ///< [out] contains the r
             maps.rules.insert(std::pair<std::string, indiCompRule*>({sections[i], rcr}));
 
             rcr->priority(priority);
-            rcr->comparison(comparison); 
+            rcr->comparison(comparison);
 
             ruleRuleKeys rrk;
-        
+
             config.configUnused(rrk.rule1, mx::app::iniFile::makeKey(sections[i], "rule1" ));
             if(rrk.rule1 == "")
             {
                 mxThrowException(mx::err::invalidconfig, "loadRuleConfig", "rule1 for ruleVal rule " + sections[i] + " not found");
+            }
+            if(rrk.rule1 == sections[i])
+            {
+                mxThrowException(mx::err::invalidconfig, "loadRuleConfig", "rule1 for ruleVal rule " + sections[i] + " can't equal rule name");
             }
 
             config.configUnused(rrk.rule2, mx::app::iniFile::makeKey(sections[i], "rule2" ));
             if(rrk.rule2 == "")
             {
                 mxThrowException(mx::err::invalidconfig, "loadRuleConfig", "rule2 for ruleVal rule " + sections[i] + " not found");
+            }
+            if(rrk.rule2 == sections[i])
+            {
+                mxThrowException(mx::err::invalidconfig, "loadRuleConfig", "rule2 for ruleVal rule " + sections[i] + " can't equal rule name");
             }
 
             rrkMap.insert(std::pair<std::string, ruleRuleKeys>(sections[i], rrk));
