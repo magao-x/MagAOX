@@ -18,7 +18,7 @@ set -euo pipefail
 
 log_info "Setting up CUDA for $MAGAOX_ROLE"
 
-if [[ $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
+if [[ $MAGAOX_ROLE == ci ]]; then
   TMP_CUDA_DIR=$HOME/tmp
   mkdir -p $TMP_CUDA_DIR
   CUDA_FLAGS="--silent --toolkit --tmpdir=$TMP_CUDA_DIR"
