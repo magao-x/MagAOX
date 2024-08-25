@@ -128,7 +128,7 @@ if [[ $MAGAOX_ROLE == vm ]]; then
     fi
     # Install a config in ~/.ssh/config for the vm user
     # to make it easier to make tunnels work
-    bash -l "$DIR/steps/configure_vm_ssh.sh" || exit_with_error "Failed to set up VM SSH"
+    bash -l "$DIR/steps/configure_ssh_for_workstations.sh" || exit_with_error "Failed to pre-populate SSH config"
 fi
 
 # Install dependencies for the GUIs
