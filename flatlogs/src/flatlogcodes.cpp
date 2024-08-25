@@ -13,6 +13,7 @@
 #include <sstream>
 #include <map>
 #include <set>
+#include <cstring>
 
 #include <sys/stat.h>
 
@@ -48,7 +49,23 @@ int readCodeFile( std::map<eventCodeT, typeSchemaPair> & codeMap, ///< [out] The
    
    std::fstream fin;
 
+   errno = 0;
    fin.open(fileName);
+
+   if(!fin.good())
+   {
+      std::cerr << "error opening " << fileName << " (" << __FILE__ << " " << __LINE__ << ")";
+      if(errno)
+      {
+         std::cerr << ": " << strerror(errno) << "\n";
+      }
+      else
+      {
+         std::cerr << "\n";
+      }
+
+      return -1;
+   }
 
    int lineNo = 0;
    while(1)
@@ -64,12 +81,12 @@ int readCodeFile( std::map<eventCodeT, typeSchemaPair> & codeMap, ///< [out] The
       }
       catch(std::exception & e)
       {
-         std::cerr << fileName << " line " << lineNo << ": Exception: " << e.what() << "\n";
+         std::cerr << fileName << " line " << lineNo << ": Exception: " << e.what() << "\n(" << __FILE__ << " " << __LINE__ << ")\n";
          return -1;
       }
       catch(...)
       {
-         std::cerr << fileName << " line " << lineNo << ": unknown exception.\n";
+         std::cerr << fileName << " line " << lineNo << ": unknown exception. (" << __FILE__ << " " << __LINE__ << ")\n";
          return -1;
       }
 
@@ -91,19 +108,19 @@ int readCodeFile( std::map<eventCodeT, typeSchemaPair> & codeMap, ///< [out] The
       
       if(logCodeStr.size() == 0)
       {
-         std::cerr << fileName << " line " << lineNo << ": no log code found.\n";
+         std::cerr << fileName << " line " << lineNo << ": no log code found. (" << __FILE__ << " " << __LINE__ << ")\n";
          return -1;
       }
       
       if(!isdigit(logCodeStr[0]))
       {
-         std::cerr << fileName << " line " << lineNo << ": log code must be numeric.\n";
+         std::cerr << fileName << " line " << lineNo << ": log code must be numeric. (" << __FILE__ << " " << __LINE__ << ")\n";
          return -1;
       }
 
       if(schema.size() == 0)
       {
-         std::cerr << fileName << " line " << lineNo << ": no schema found.\n";
+         std::cerr << fileName << " line " << lineNo << ": no schema found. (" << __FILE__ << " " << __LINE__ << ")\n";
          return -1;
       }
       
@@ -118,18 +135,18 @@ int readCodeFile( std::map<eventCodeT, typeSchemaPair> & codeMap, ///< [out] The
       }
       catch(std::exception & e)
       {
-         std::cerr << fileName << " line " << lineNo << ": Exception on map insertion: " << e.what() << "\n";
+         std::cerr << fileName << " line " << lineNo << ": Exception on map insertion: " << e.what() << "\n(" << __FILE__ << " " << __LINE__ << ")\n";
          return -1;
       }
       catch(...)
       {
-         std::cerr << fileName << " line " << lineNo << ": unknown exception on map insertion.\n";
+         std::cerr << fileName << " line " << lineNo << ": unknown exception on map insertion. (" << __FILE__ << " " << __LINE__ << ")\n";
          return -1;
       }
       
       if(res.second == false)
       {
-         std::cerr << fileName << " line " << lineNo << ": Duplicate log code.\n";
+         std::cerr << fileName << " line " << lineNo << ": Duplicate log code. (" << __FILE__ << " " << __LINE__ << ")\n";
          std::cerr << "Original:    " << res.first->first << " {" << res.first->second.type << ", " << res.first->second.schema << "}\n";
          std::cerr << "New attempt: " << logType << " " << logCode << "\n\n";
          return -1;
@@ -142,12 +159,12 @@ int readCodeFile( std::map<eventCodeT, typeSchemaPair> & codeMap, ///< [out] The
       }
       catch(std::exception & e)
       {
-         std::cerr << fileName << " line " << lineNo << ": Exception on set insertion: " << e.what() << "\n";
+         std::cerr << fileName << " line " << lineNo << ": Exception on set insertion: " << e.what() <<  "\n(" << __FILE__ << " " << __LINE__ << ")\n";
          return -1;
       }
       catch(...)
       {
-         std::cerr << fileName << " line " << lineNo << ": unknown exception on set insertion.\n";
+         std::cerr << fileName << " line " << lineNo << ": unknown exception on set insertion. (" << __FILE__ << " " << __LINE__ << ")\n";
          return -1;
       }
             
@@ -497,10 +514,22 @@ int main()
    
    if( readCodeFile(logCodes, schemas, inputFile) < 0 )
    {
-      std::cerr << "Error reading code file.\n";
+      std::cerr << "flatlogcodes: error reading code file " << inputFile << ". Aborting. (" << __FILE__ << " " << __LINE__ << ")\n";
       return -1;
    }
    
+   if( logCodes.size() == 0)
+   {
+      std::cerr << "flatlogcodes: no log codes read from file " << inputFile << ". Aborting. (" << __FILE__ << " " << __LINE__ << ")\n";
+      return -1;
+   }
+
+   if( schemas.size() == 0)
+   {
+      std::cerr << "flatlogcodes: no schemas read from file " << inputFile << ". Aborting. (" << __FILE__ << " " << __LINE__ << ")\n";
+      return -1;
+   }
+
    emitStdFormatHeader(stdFormatHeader, logCodes );
    emitVerifyHeader(verifyHeader, logCodes );
    emitLogCodes( logCodesHeader, logCodes );
