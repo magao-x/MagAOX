@@ -73,10 +73,6 @@ yum install -y \
     python \
 ;
 
-if [[ $MAGAOX_ROLE == vm ]]; then
-    yum install -y xorg-x11-xauth
-fi
-
 # For some reason, pkg-config doesn't automatically look here?
 mkdir -p /etc/profile.d/
 echo "export PKG_CONFIG_PATH=\${PKG_CONFIG_PATH-}:/usr/local/lib/pkgconfig" > /etc/profile.d/99-pkg-config.sh
