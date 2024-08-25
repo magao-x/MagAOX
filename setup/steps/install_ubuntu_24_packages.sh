@@ -4,7 +4,7 @@ source $DIR/../_common.sh
 set -euo pipefail
 apt-get update
 
-apt-get install -y \
+NEEDRESTART_SUSPEND=yes apt-get install -y \
     sudo \
     ssh \
     build-essential \
@@ -54,6 +54,6 @@ apt-get install -y \
     podman \
 ;
 
-if [[ $MAGAOX_ROLE == vm ]]; then
-    apt install -y xauth
+if [[ $VM_KIND != "none" ]]; then
+    NEEDRESTART_SUSPEND=yes apt install -y xauth
 fi
