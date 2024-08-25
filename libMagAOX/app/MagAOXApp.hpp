@@ -1250,10 +1250,10 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
                 "name",
                 argType::Required,
                 "",
-                "name",
-                false,
+                "",
+                true,
                 "string",
-                "The name of the application, specifies config." );
+                "The name of the application and its device name in INDI (if used), specifies the config file in the XWC config directory." );
 
     config.parseCommandLine( argc, argv, "name" );
     config( m_configName, "name" );
@@ -1261,7 +1261,11 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
     if( m_configName == "" )
     {
         m_configName = mx::ioutils::pathStem( invokedName );
-        log<text_log>( "Application name (-n --name) not set.  Using argv[0]." );
+        if(!doHelp)
+        {
+            log<text_log>( "Configuration Error: Application name (-n --name) not set." );
+            doHelp = true;
+        }
     }
 
     // We use mx::application's configPathLocal for this component's config file
@@ -1289,6 +1293,17 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
 template <bool _useINDI>
 void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
 {
+    // Validate config
+    config.add( "config.validate",
+                "",
+                "config.validate",
+                argType::True,
+                "",
+                "",
+                false,
+                "bool",
+                "Validate the configuration.  App will exit after loading the configuration, but before entering the event loop. Errors from configuratin processing will be shown. Always safe to run." );
+
     // App stuff
     config.add( "loopPause",
                 "p",
@@ -1301,7 +1316,7 @@ void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
                 "The main loop pause time in ns" );
 
     config.add(
-        "ignore_git", "", "ignore-git", argType::True, "", "", false, "bool", "set to true to ignore git status" );
+        "ignore_git", "", "ignore-git", argType::True, "", "", false, "bool", "set to true to ignore git status to prevent the fsm_alert" );
 
     // Logger Stuff
     m_log.setupConfig( config );
@@ -1367,12 +1382,19 @@ void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
 template <bool _useINDI>
 void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
 {
+    //--------- Ignore Git State --------//
     bool ig{ false };
     config( ig, "ignore_git" );
 
     if( !ig && m_gitAlert )
     {
         m_stateAlert = true;
+    }
+
+    //--------- Config Validation Mode --------//
+    if(config.isSet("config.validate"))
+    {
+        m_configOnly = true; //m_configOnly is from mx::application
     }
 
     //---------- Setup the logger ----------//
@@ -1465,7 +1487,18 @@ void MagAOXApp<_useINDI>::checkConfig() // virtual
         m_shutdown = true;
     }
 
-    if(m_shutdown == true)
+    if(m_configOnly) //validation mode
+    {
+        if(m_shutdown == true)
+        {
+            std::cerr << "\nThere were configuration errors.\n\n";
+        }
+        else
+        {
+            std::cerr << "\nConfiguration is valid.\n\n";
+        }
+    }
+    else if(m_shutdown == true)
     {
         doHelp = true; //Causes mx::application to print help and exit.
     }
