@@ -268,7 +268,7 @@ class MagAOXApp : public application
      */
     void logMessage( bufferPtrT &b );
 
-  private:
+  protected:
     /// Callback for config system logging.
     /** Called by appConfigurator each time a value is set using the config() operator.
      * You never need to call this directly.
