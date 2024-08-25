@@ -158,8 +158,3 @@ To-do items are listed in the above sections.  Also see the Todo page in the dox
   - [] make it possible to start and stop drivers and associated INDI protocol communications on-the-fly
     - eliminate xindidriver intermediate pass-through processes
   - See sub-directory 2022_ANT/ for more detail
-
-## 7 Develop in a VM with [Vagrant](https://vagrantup.com)
-
-To develop in the most "flight-like" configuration, a Vagrantfile is provided to set up a development VM. A quick-start guide is available [in the handbook](https://magao-x.org/docs/handbook/appendices/development_vm.html).
-=======
