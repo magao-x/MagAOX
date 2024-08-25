@@ -4,7 +4,7 @@ source $DIR/../_common.sh
 set -euo pipefail
 apt-get update
 
-apt-get install -y \
+NEEDRESTART_SUSPEND=yes apt-get install -y \
     sudo \
     ssh \
     build-essential \
@@ -55,5 +55,5 @@ apt-get install -y \
 ;
 
 if [[ $VM_KIND != "none" ]]; then
-    apt install -y xauth
+    NEEDRESTART_SUSPEND=yes apt install -y xauth
 fi
