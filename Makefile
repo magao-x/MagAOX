@@ -147,6 +147,7 @@ else
 endif
 
 utils_to_build = \
+	resurrector_indi \
 	logdump \
 	logsurgeon \
 	logstream \
@@ -158,6 +159,7 @@ scripts_to_install = magaox \
 	query_seeing \
 	sync_cacao \
 	xctrl \
+	resuctrl \
 	netconsole_logger \
 	dmdispbridge \
 	shmimTCPreceive \
