@@ -4,7 +4,7 @@ source $DIR/../_common.sh
 set -euo pipefail
 apt-get update
 
-NEEDRESTART_SUSPEND=yes apt install -y \
+NEEDRESTART_SUSPEND=yes apt-get install -y \
     sudo \
     ssh \
     build-essential \
@@ -49,16 +49,11 @@ NEEDRESTART_SUSPEND=yes apt install -y \
     nfs-kernel-server \
     tree \
     linux-headers-generic \
-    libopenblas-openmp-dev \
     liblapack-dev \
     liblapacke-dev \
     podman \
 ;
 
-if [[ $MAGAOX_ROLE == vm ]]; then
+if [[ $VM_KIND != "none" ]]; then
     NEEDRESTART_SUSPEND=yes apt install -y xauth
-fi
-if [[ $(uname -p) == "aarch64" ]]; then
-    # since we won't install MKL:
-    NEEDRESTART_SUSPEND=yes apt install -y libopenblas-openmp-dev liblapack-dev liblapacke-dev
 fi
