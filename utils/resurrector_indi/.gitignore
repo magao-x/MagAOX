@@ -1,0 +1,11 @@
+resurrector_indi
+test/gausswait
+test_crc
+
+### [fifos] is a directory for Hexbeater named fifos:  sometimes it is a
+### directory here for tests, but sometimes it is a symlink to
+###
+###   /opt/MagAOX/drivers/fifo
+###
+### where FIFOs used by resurrector_indi & INDI driver devices are found
+fifos
