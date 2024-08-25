@@ -2,8 +2,9 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
+source /etc/os-release
 
-if [[ $ID == centos || $ID == rocky ]]; then
+if [[ $ID == rocky ]]; then
     nfsServiceUnit=nfs-server.service
 else
     nfsServiceUnit=nfs-kernel-server.service

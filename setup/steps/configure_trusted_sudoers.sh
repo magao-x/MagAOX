@@ -11,12 +11,12 @@ targetFile=/etc/sudoers.d/trusted
 
 echo '# file automatically created by configure_trusted_sudoers.sh, do not edit' > $scratchFile || exit_with_error "Could not create $scratchFile"
 
-if [[ $ID == rocky || $ID == centos ]]; then
+if [[ $ID == rocky ]]; then
     echo "User_Alias TRUSTED = %wheel" > $scratchFile
 elif [[ $ID == ubuntu ]]; then
     echo "User_Alias TRUSTED = %sudo" > $scratchFile
 else
-    exit_with_error "Got ID=$ID, only know rocky, centos, and ubuntu"
+    exit_with_error "Got ID=$ID, only know rocky and ubuntu"
 fi
 
 cat <<'HERE' | tee -a $scratchFile

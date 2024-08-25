@@ -2,6 +2,7 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
+source /etc/os-release
 if [[ -e /etc/chrony/chrony.conf ]]; then
     CHRONYCONF_PATH=/etc/chrony/chrony.conf
 elif [[ -e /etc/chrony.conf ]]; then
@@ -19,7 +20,7 @@ if [[ $MAGAOX_ROLE == AOC ]]; then
 server lbtntp.as.arizona.edu iburst
 server ntp1.lco.cl iburst
 server ntp2.lco.cl iburst
-pool 0.centos.pool.ntp.org iburst
+pool 0.rocky.pool.ntp.org iburst
 allow 192.168.0.0/24
 driftfile /var/lib/chrony/drift
 makestep 1.0 3
@@ -41,7 +42,7 @@ elif [[ $MAGAOX_ROLE == TIC ]]; then
 # chrony.conf installed by MagAO-X
 # for time master
 server lbtntp.as.arizona.edu iburst
-pool 0.centos.pool.ntp.org iburst
+pool 0.rocky.pool.ntp.org iburst
 allow 192.168.1.0/24
 driftfile /var/lib/chrony/drift
 makestep 1.0 3
