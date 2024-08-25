@@ -73,7 +73,7 @@ apps_aoc = \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
-	siglentSDG \
+	stateRuleEngine \
 	audibleAlerts
 
 
