@@ -8,7 +8,7 @@
 #include <QSlider>
 #include <QTimer>
 
-#include <qwt/qwt_text_label.h>
+#include <qwt_text_label.h>
 
 namespace xqt 
 {

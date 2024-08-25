@@ -12,9 +12,9 @@
 
 #include <QLabel>
 
-#include "qwt/qwt_global.h"
-#include "qwt/qwt_dial.h"
-#include "qwt/qwt_dial_needle.h"
+#include "qwt_global.h"
+#include "qwt_dial.h"
+#include "qwt_dial_needle.h"
 
 
 class QWT_EXPORT XqwtMultiDial: public QwtDial

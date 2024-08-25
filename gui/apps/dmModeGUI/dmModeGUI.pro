@@ -38,8 +38,7 @@ SOURCES += dmModeGUI_main.cpp
 FORMS += ../../widgets/dmMode/dmMode.ui
      
 LIBS += ../../../INDI/libcommon/libcommon.a \
-        ../../../INDI/liblilxml/liblilxml.a \
-        -lqwt-qt5
+        ../../../INDI/liblilxml/liblilxml.a 
 
 RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
 

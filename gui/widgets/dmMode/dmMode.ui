@@ -1422,7 +1422,7 @@
   <customwidget>
    <class>QwtSlider</class>
    <extends>QWidget</extends>
-   <header>qwt/qwt_slider.h</header>
+   <header>qwt_slider.h</header>
   </customwidget>
  </customwidgets>
  <resources/>

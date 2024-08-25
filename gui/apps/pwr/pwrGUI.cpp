@@ -2,17 +2,17 @@
 #include "pwrGUI.hpp"
 
 
-#include "qwt/qwt_global.h"
-#include "qwt/qwt_abstract_slider.h"
-#include "qwt/qwt_abstract_scale_draw.h"
-#include "qwt/qwt_dial.h"
-#include "qwt/qwt_dial_needle.h"
-#include "qwt/qwt_math.h"
-#include "qwt/qwt_scale_engine.h"
-#include "qwt/qwt_scale_map.h"
-#include "qwt/qwt_round_scale_draw.h"
-#include "qwt/qwt_painter.h"
-#include "qwt/qwt_text_label.h"
+#include "qwt_global.h"
+#include "qwt_abstract_slider.h"
+#include "qwt_abstract_scale_draw.h"
+#include "qwt_dial.h"
+#include "qwt_dial_needle.h"
+#include "qwt_math.h"
+#include "qwt_scale_engine.h"
+#include "qwt_scale_map.h"
+#include "qwt_round_scale_draw.h"
+#include "qwt_painter.h"
+#include "qwt_text_label.h"
 
 #include <qframe.h>
 #include <qpalette.h>

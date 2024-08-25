@@ -8,9 +8,6 @@ DESTDIR = bin/
 DEPENDPATH += ./ ../../lib 
 INCLUDEPATH += ../../widgets/multiDial
 INCLUDEPATH += ../../lib
-exists( $$(CONDA_PREFIX)/include ) {
-    INCLUDEPATH += $$(CONDA_PREFIX)/include
-}
 
 MOC_DIR = moc/
 OBJECTS_DIR = obj/
@@ -47,8 +44,7 @@ SOURCES += pwrGUI.cpp \
 FORMS += ../../widgets/pwr/pwr.ui
      
 LIBS += ../../../INDI/libcommon/libcommon.a \
-        ../../../INDI/liblilxml/liblilxml.a \
-        -lqwt-qt5
+        ../../../INDI/liblilxml/liblilxml.a
 
 LIBS += -lmxlib  
 
