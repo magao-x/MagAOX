@@ -1,10 +1,24 @@
 #!/usr/bin/env bash
-rockyVersion=${rockyVersion:-9.4}
-if [[ $(uname -p) == arm ]]; then
-    rockyArch=${rockyArch:-aarch64}
-    qemuArch=aarch64
-else
-    rockyArch=${rockyArch:-x86_64}
-    qemuArch=x86_64
+if [[ -z $vmArch ]]; then
+    echo "Set vmArch environment variable to aarch64 or x86_64"
+    exit 1
 fi
-export rockyVersion rockyArch qemuArch
+
+if [[ $(uname -p) == "arm" && $CI != "true" ]]; then
+    cpuType="host"
+    accelFlag=",highmem=on,accel=hvf:kvm"
+else
+    cpuType="max"
+    accelFlag=""
+fi
+export cpuType accelFlag
+
+qemuDisplay=${qemuDisplay:-}
+if [[ ! -z $qemuDisplay ]]; then
+    ioFlag="-display $qemuDisplay"
+else
+    ioFlag='-serial stdio -display none'
+fi
+export ioFlag
+
+export rockyVersion=${rockyVersion:-9.4}

@@ -1,10 +1,10 @@
 # Inspired by https://github.com/canonical/packer-maas/blob/main/rocky9/http/rocky.ks.pkrtpl.hcl
 repo --name=minimal --baseurl=file:///run/install/sources/mount-0000-cdrom/minimal
-repo --name=base --mirrorlist=https://mirrors.rockylinux.org/mirrorlist?repo=rocky-BaseOS-${rockyVersion}&arch=${rockyArch}
-repo --name=appstream --mirrorlist=https://mirrors.rockylinux.org/mirrorlist?repo=rocky-AppStream-${rockyVersion}&arch=${rockyArch}
-repo --name=crb --mirrorlist=https://mirrors.rockylinux.org/mirrorlist?repo=rocky-CRB-${rockyVersion}&arch=${rockyArch}
-repo --name=epel --metalink=https://mirrors.fedoraproject.org/metalink?repo=epel-9&arch=${rockyArch}
-repo --name=epel-cisco-openh264 --metalink=https://mirrors.fedoraproject.org/metalink?repo=epel-cisco-openh264-9&arch=${rockyArch}
+repo --name=base --mirrorlist=https://mirrors.rockylinux.org/mirrorlist?repo=rocky-BaseOS-${rockyVersion}&arch=${vmArch}
+repo --name=appstream --mirrorlist=https://mirrors.rockylinux.org/mirrorlist?repo=rocky-AppStream-${rockyVersion}&arch=${vmArch}
+repo --name=crb --mirrorlist=https://mirrors.rockylinux.org/mirrorlist?repo=rocky-CRB-${rockyVersion}&arch=${vmArch}
+repo --name=epel --metalink=https://mirrors.fedoraproject.org/metalink?repo=epel-9&arch=${vmArch}
+repo --name=epel-cisco-openh264 --metalink=https://mirrors.fedoraproject.org/metalink?repo=epel-cisco-openh264-9&arch=${vmArch}
 
 cdrom
 graphical
@@ -103,6 +103,7 @@ nano
 git
 qemu-guest-agent
 spice-vdagent
+rsync
 %end
 
 # Do not start the Inital Setup app

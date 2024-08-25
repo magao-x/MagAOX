@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-echo "Starting up the VM for MagAO-X dependencies installation..."
+echo "Starting up the VM for MagAO-X software installation..."
 source ./_common.sh
-if [[ -e ./output/xvm_stage1.qcow2 ]]; then
-    cp ./output/xvm_stage1.qcow2 ./output/xvm.qcow2
+if [[ -e ./output/xvm_stage2.qcow2 ]]; then
+    cp ./output/xvm_stage2.qcow2 ./output/xvm.qcow2
 elif [[ ! -e ./output/xvm.qcow2 ]]; then
     echo "No xvm.qcow2 found for stage 2"
     exit 1
@@ -24,10 +24,10 @@ qemu-system-${vmArch} \
     $ioFlag \
 &
 sleep 60
-ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./output/xvm_key xdev@localhost mkdir -p MagAOX
 rsync -rv --exclude xvm -e 'ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./output/xvm_key' ../../ xdev@localhost:MagAOX/
-ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./output/xvm_key xdev@localhost 'bash -s' < ./bootstrap_magao-x.sh || exit 1
+ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./output/xvm_key xdev@localhost 'bash -s' < ./install_magao-x_in_vm.sh || exit 1
 # wait for the backgrounded qemu process to exit:
 wait
-mv -v ./output/xvm.qcow2 ./output/xvm_stage2.qcow2
-echo "Finished installing MagAO-X dependencies."
+rm -f ./output/xvm_stage*
+mv -v ./output/xvm.qcow2 ./output/xvm_stage3.qcow2
+echo "Finished installing MagAO-X software."
