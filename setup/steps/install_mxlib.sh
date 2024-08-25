@@ -10,7 +10,7 @@ MXLIBROOT=/opt/MagAOX/source/mxlib
 # mxLib
 #
 
-MXLIB_COMMIT_ISH=dev
+MXLIB_COMMIT_ISH=magaox
 orgname=jaredmales
 reponame=mxlib
 parentdir=/opt/MagAOX/source
@@ -48,9 +48,7 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGA
   echo "INCLUDES += -I/usr/local/cuda/targets/x86_64-linux/include/" >> $mxlibCommonOverrides
 fi
 
-if [[ $ID == centos ]]; then
-  echo "CXXVERSION = -std=c++14" >> $mxlibCommonOverrides
-fi
+source /etc/os-release
 
 if [[ $ID == rocky && $(uname -p) == "aarch64" ]]; then
   echo "CXXFLAGS += -I/usr/include/lapacke" >> $mxlibCommonOverrides
