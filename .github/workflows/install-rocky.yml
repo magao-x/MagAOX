@@ -5,8 +5,8 @@ on:
       - xvm
       # - '*'
       # - '!libcommon-refactor'
-  schedule:
-    - cron: '43 5 * * *'
+  # schedule:
+  #   - cron: '43 5 * * *'
 jobs:
   install-rocky:
     runs-on: ubuntu-latest
