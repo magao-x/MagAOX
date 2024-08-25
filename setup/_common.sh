@@ -1,21 +1,12 @@
 #!/bin/bash
 SETUPDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
+VM_KIND=$(systemd-detect-virt)
+VM_KIND=$(systemd-detect-virt || echo none)
 
 instrument_user=xsup
 instrument_group=magaox
 instrument_dev_group=magaox-dev
-if [[ $MAGAOX_ROLE == vm ]]; then
-  # Heuristic detection of which automatically created user account to use
-  # based on home directory existing.
-  if [[ -d /home/vagrant ]]; then
-    instrument_user=vagrant
-  elif [[ -d /home/ubuntu ]]; then
-    instrument_user=ubuntu
-    instrument_group=ubuntu
-    instrument_dev_group=ubuntu
-  fi
-elif [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == container ]]; then
+if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == container ]]; then
   instrument_user=root
   instrument_group=root
   instrument_dev_group=root
@@ -146,14 +137,14 @@ function clone_or_update_and_cd() {
     # and re-enable.
 
     if [[ ! -d $parentdir/$reponame/.git ]]; then
+      echo "Cloning new copy of $orgname/$reponame"
       CLONE_DEST=/tmp/${reponame}_$(date +"%s")
-      thetopdir="$HOME/githubalt/$reponame"
-      theref="$(git --git-dir="$thetopdir/.git"  rev-parse --symbolic-full-name --abbrev-ref --verify HEAD 2>/dev/null || true)"
+      thealtdir="$HOME/githubalt/$reponame"
+      theref="$(git --git-dir="$thealtdir/.git"  rev-parse --symbolic-full-name --abbrev-ref --verify HEAD 2>/dev/null || true)"
       if [[ "$theref" ]]; then
-        echo "Cloning new copy of $reponame from $thetopdir, reference[$theref]"
-        git clone "file://$thetopdir" $CLONE_DEST
+        echo "SCRATCH THAT:  Cloning new copy of $reponame from local direcotry $thealtdir, reference[$theref]"
+        git clone "file://$thealtdir" $CLONE_DEST
       else
-        echo "Cloning new copy of $orgname/$reponame"
         git clone https://github.com/$orgname/$reponame.git $CLONE_DEST
       fi
       sudo rsync -a $CLONE_DEST/ $destdir/
@@ -194,8 +185,8 @@ function createuser() {
     echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | sudo -H passwd $username || exit 1
     log_success "Created user account $username with default password $DEFAULT_PASSWORD"
   fi
-  sudo usermod -a -G $instrument_group $username || exit 1
-  log_info "Added user $username to group $instrument_group"
+  sudo usermod -a -G magaox $username || exit 1
+  log_info "Added user $username to group magaox"
   sudo mkdir -p /home/$username/.ssh || exit 1
   sudo touch /home/$username/.ssh/authorized_keys || exit 1
   sudo chmod -R u=rwx,g=,o= /home/$username/.ssh || exit 1
@@ -241,6 +232,3 @@ if [[ $(which sudo) == *devtoolset* ]]; then
 else
   REAL_SUDO=$(which sudo)
 fi
-
-# Define $ID and $VERSION_ID so we can detect which distribution we're on
-source /etc/os-release

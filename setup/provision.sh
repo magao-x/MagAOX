@@ -39,22 +39,22 @@ MAJOR_VERSION=${VERSION_ID%.*}
 
 roleScript=/etc/profile.d/magaox_role.sh
 VM_KIND=$(systemd-detect-virt)
-if [[ ! $VM_KIND == "none" ]]; then
+VM_KIND=$(systemd-detect-virt || echo none)
+if [[ $VM_KIND != "none" ]]; then
     echo "Detected virtualization: $VM_KIND"
-    if [[ ! -z $CI ]]; then
-        echo "export MAGAOX_ROLE=ci" | $_REAL_SUDO tee $roleScript
-    elif [[ ! -e $roleScript ]]; then
-        echo "export MAGAOX_ROLE=vm" | $_REAL_SUDO tee $roleScript
-    fi
+fi
+if [[ ! -e $roleScript && ! -z $MAGAOX_ROLE ]]; then
+    echo "export MAGAOX_ROLE=$MAGAOX_ROLE" | $_REAL_SUDO tee $roleScript
 fi
 if [[ ! -e $roleScript ]]; then
     echo "Export \$MAGAOX_ROLE in $roleScript first"
     exit 1
 fi
 source $roleScript
+echo "Got MAGAOX_ROLE=$MAGAOX_ROLE"
+export MAGAOX_ROLE
 
 # Get logging functions
-# Also defines $ID and $VERSION_ID, from /etc/os-release, so we can detect which distribution we're on
 source $DIR/_common.sh
 
 # Install OS packages first
@@ -91,7 +91,7 @@ fi
 
 # The VM and CI provisioning doesn't run setup_users_and_groups.sh
 # separately as in the instrument instructions; we have to run it
-if [[ $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
+if [[ $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
     bash -l "$DIR/setup_users_and_groups.sh"
 fi
 
@@ -121,7 +121,7 @@ fi
 # All MagAO-X computers may use the password to connect to the main db
 bash -l "$DIR/steps/configure_postgresql_pass.sh"
 
-if [[ $MAGAOX_ROLE == vm ]]; then
+if [[ $MAGAOX_ROLE == workstation ]]; then
     if [[ $VM_KIND != "wsl" ]]; then
         # Enable forwarding MagAO-X GUIs to the host for VMs
         sudo -H bash -l "$DIR/steps/enable_vm_x11_forwarding.sh"
@@ -132,22 +132,22 @@ if [[ $MAGAOX_ROLE == vm ]]; then
 fi
 
 # Install dependencies for the GUIs
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == workstation ]]; then
     sudo -H bash -l "$DIR/steps/install_gui_dependencies.sh"
 fi
 
 # Install Linux headers (instrument computers use the RT kernel / headers)
-if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC ]]; then
+if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC ]]; then
     if [[ $ID == ubuntu ]]; then
         sudo NEEDRESTART_SUSPEND=yes apt install -y linux-headers-generic
-    elif [[ $ID == centos ]]; then
+    elif [[ $ID == rocky ]]; then
         sudo yum install -y kernel-devel-$(uname -r) || sudo yum install -y kernel-devel
     fi
 fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
 sudo -H bash -l "$DIR/steps/install_rclone.sh" || exit 1
-[ -r "$DIR/steps/install_openblas.inhibit" ] \
+( [ -r "$DIR/steps/install_openblas.inhibit" ] && ( echo "openBLAS install is inhibited" || true ) \
 || ( bash -l "$DIR/steps/install_openblas.sh" && touch "$DIR/steps/install_openblas.inhibit" ) \
 || exit 1
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
@@ -163,10 +163,10 @@ sudo -H bash -l "$DIR/steps/install_zlib-drbitboy.sh" || exit 1
 if [[ $MAGAOX_ROLE == AOC ]]; then
     sudo -H bash -l "$DIR/steps/install_lego.sh"
 fi
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci || ( $MAGAOX_ROLE == vm && $VM_KIND == vagrant ) ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
     sudo -H bash -l "$DIR/steps/install_basler_pylon.sh"
 fi
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == ci || ( $MAGAOX_ROLE == vm && $VM_KIND == vagrant ) ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == ci ]]; then
     sudo -H bash -l "$DIR/steps/install_edt.sh"
 fi
 
@@ -190,65 +190,25 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
             echo "(but they're in $BUNDLE_TMPDIR/bundle/$vendorname if you want them)"
         fi
     done
-    # Note that 'vm' is in the list for ease of testing the install_* scripts
-    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == vm ]]; then
-        if [[ $ID == centos ]]; then
-            sudo -H bash -l "$DIR/steps/install_alpao.sh"
-        fi
-        sudo -H bash -l "$DIR/steps/install_andor.sh"
+
+    if [[ $MAGAOX_ROLE == RTC ]]; then
+        sudo -H bash -l "$DIR/steps/install_alpao.sh"
     fi
-    if [[ $ID == centos && ( $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == vm ) ]]; then
+    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TIC ]]; then
         sudo -H bash -l "$DIR/steps/install_bmc.sh"
     fi
-    if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ]]; then
+    if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
         sudo -H bash -l "$DIR/steps/install_libhsfw.sh"
     fi
-    if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == vm ]]; then
+    if [[ $MAGAOX_ROLE == ICC ]]; then
         sudo -H bash -l "$DIR/steps/install_picam.sh"
         sudo -H bash -l "$DIR/steps/install_kinetix.sh"
     fi
     sudo rm -rf $BUNDLE_TMPDIR
 fi
 
-## Build first-party dependencies
-cd /opt/MagAOX/source
-bash -l "$DIR/steps/install_xrif.sh" || exit_error "Failed to build and install xrif"
-bash -l "$DIR/steps/install_mxlib.sh" || exit_error "Failed to build and install mxlib"
-source /etc/profile.d/mxmakefile.sh
-
-## Build MagAO-X and install sources to /opt/MagAOX/source/MagAOX
-if [[ $MAGAOX_ROLE == ci ]]; then
-    ln -sfv ~/project/ /opt/MagAOX/source/MagAOX
-else
-    log_info "Running as $USER"
-    if [[ $DIR != /opt/MagAOX/source/MagAOX/setup ]]; then
-        if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
-            echo "Cloning new copy of MagAOX codebase"
-            orgname=magao-x
-            reponame=MagAOX
-            parentdir=/opt/MagAOX/source
-            clone_or_update_and_cd $orgname $reponame $parentdir
-            if git --git-dir="$parentdir/$reponame/.git" remote -v 2>/dev/null | grep -q "^origin  *https://.*/$orgname/$reponame" ; then
-                # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
-                # things and not having them go where we expect
-                stat /opt/MagAOX/source/MagAOX/.git
-                git remote remove origin
-                git remote add origin https://github.com/magao-x/MagAOX.git
-                git fetch origin
-                git branch -u origin/dev dev
-            fi
-            log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
-            log_info "(In fact, maybe delete $(dirname $DIR)?)"
-        else
-            cd /opt/MagAOX/source/MagAOX
-            git fetch
-        fi
-    else
-        log_info "Running from clone located at $(dirname $DIR), nothing to do for cloning step"
-    fi
-fi
 # These steps should work as whatever user is installing, provided
-# they are a member of $instrument_dev_group and they have sudo access to install to
+# they are a member of magaox-dev and they have sudo access to install to
 # /usr/local. Building as root would leave intermediate build products
 # owned by root, which we probably don't want.
 #
@@ -276,24 +236,19 @@ sudo -H bash -l "$DIR/steps/install_python.sh" || exit_with_error "Couldn't inst
 sudo -H bash -l "$DIR/steps/configure_python.sh" || exit_with_error "Couldn't configure Python environments"
 source /opt/conda/bin/activate
 
-if [[ $ID == centos && ( $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ) ]]; then
-    sudo -H mamba install -y qwt qt=5.9.7 || exit 1
-    log_info "Installed qwt from conda for widgeting purposes on old CentOS"
-fi
-
 # Install first-party deps
 bash -l "$DIR/steps/install_milk_and_cacao.sh" || exit_with_error "milk/cacao install failed" # depends on /opt/conda/bin/python existing for plugin build
-#bash -l "$DIR/steps/install_xrif.sh" || exit_with_error "Failed to build and install xrif"
+bash -l "$DIR/steps/install_xrif.sh" || exit_with_error "Failed to build and install xrif"
 bash -l "$DIR/steps/install_milkzmq.sh" || exit_with_error "milkzmq install failed"
 bash -l "$DIR/steps/install_purepyindi.sh" || exit_with_error "purepyindi install failed"
 bash -l "$DIR/steps/install_purepyindi2.sh" || exit_with_error "purepyindi2 install failed"
 bash -l "$DIR/steps/install_xconf.sh" || exit_with_error "xconf install failed"
 bash -l "$DIR/steps/install_lookyloo.sh" || exit_with_error "lookyloo install failed"
 bash -l "$DIR/steps/install_magpyx.sh" || exit_with_error "magpyx install failed"
-#bash -l "$DIR/steps/install_mxlib.sh" || exit_with_error "Failed to build and install mxlib"
-#source /etc/profile.d/mxmakefile.sh
+bash -l "$DIR/steps/install_mxlib.sh" || exit_with_error "Failed to build and install mxlib"
+source /etc/profile.d/mxmakefile.sh
 
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == workstation ]]; then
     # sup web interface
     bash -l "$DIR/steps/install_sup.sh"
 fi
@@ -329,13 +284,13 @@ else
 fi
 
 
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
     # realtime image viewer
     bash -l "$DIR/steps/install_rtimv.sh" || exit_with_error "Could not install rtimv"
     echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | sudo -H tee /etc/profile.d/rtimv_config_path.sh
 fi
 
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC ||  $MAGAOX_ROLE == workstation ]]; then
     # regular old ds9 image viewer
     sudo -H bash -l "$DIR/steps/install_ds9.sh"
 fi
@@ -343,10 +298,10 @@ fi
 # aliases to improve ergonomics of MagAO-X ops
 sudo -H bash -l "$DIR/steps/install_aliases.sh"
 
-# CI invokes install_MagAOX.sh as the next step (see .circleci/config.yml)
-# By separating the real build into another step, we can cache the slow provisioning steps
-# and reuse them on subsequent runs.
-if [[ $MAGAOX_ROLE != ci ]]; then
+# CI invokes install_MagAOX.sh as the next step. By separating the
+# real build into another step, we can cache the slow provisioning
+# steps and reuse them on subsequent runs.
+if [[ -z $CI ]]; then
     cd /opt/MagAOX/source/MagAOX
     bash -l "$DIR/steps/install_MagAOX.sh" || exit 1
 fi
@@ -354,11 +309,9 @@ fi
 if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container && $MAGAOX_ROLE != vm ]]; then
     sudo -H bash -l "$DIR/steps/configure_startup_services.sh"
 
-    if which podman ; then
-        log_info "Generating subuid and subgid files, may need to run podman system migrate"
-        sudo -H python "$DIR/generate_subuid_subgid.py" || exit_with_error "Generating subuid/subgid files for podman failed"
-        sudo -H podman system migrate || exit_with_error "Could not run podman system migrate"
-    fi
+    log_info "Generating subuid and subgid files, may need to run podman system migrate"
+    sudo -H python "$DIR/generate_subuid_subgid.py" || exit_with_error "Generating subuid/subgid files for podman failed"
+    sudo -H podman system migrate || exit_with_error "Could not run podman system migrate"
 
     # To try and debug hardware issues, ICC and RTC replicate their
     # kernel console log over UDP to AOC over the instrument LAN.
