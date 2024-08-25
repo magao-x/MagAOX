@@ -61,10 +61,6 @@ source $DIR/_common.sh
 osPackagesScript="$DIR/steps/install_${ID}_${MAJOR_VERSION}_packages.sh"
 $_REAL_SUDO -H bash -l $osPackagesScript || exit_with_error "Failed to install packages from $osPackagesScript"
 
-if [[ $ID == centos ]]; then
-    $_REAL_SUDO -H bash -l "$DIR/steps/install_cmake.sh" || exit 1
-fi
-
 distroSpecificScript="$DIR/steps/configure_${ID}_${MAJOR_VERSION}.sh"
 $_REAL_SUDO -H bash -l $distroSpecificScript || exit_with_error "Failed to configure ${ID} from $distroSpecificScript"
 
