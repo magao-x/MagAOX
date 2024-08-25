@@ -51,6 +51,7 @@ echo "export MAGAOX_ROLE=$MAGAOX_ROLE" | sudo tee /etc/profile.d/magaox_role.sh
 export MAGAOX_ROLE
 set -euo pipefail
 
+source /etc/os-release
 # without hardened_usercopy=off, the ALPAO DM driver (really the Interface Corp card driver) will
 # trigger protections against suspicious copying between kernel and userspace
 # and *bring down the whole system* (by rebooting when you try to run
