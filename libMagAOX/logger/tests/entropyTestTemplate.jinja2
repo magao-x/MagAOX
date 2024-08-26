@@ -1,6 +1,6 @@
 #include <assert.h>
-#include "../catch.hpp"
-#include "generated/logCodes.hpp"
+#include "../../../../tests/catch2/catch.hpp"
+#include "../generated/logCodes.hpp"
 {% for type in types %}
 #include "generated_tests/{{type.name}}_generated_tests.cpp"
 {% endfor %}

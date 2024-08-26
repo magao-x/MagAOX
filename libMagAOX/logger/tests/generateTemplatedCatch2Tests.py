@@ -348,6 +348,11 @@ def getTestValFromType(fieldType : str, schemaFieldType = None) -> str:
 def makeTestVal(fieldDict : dict) -> str:
     if "vector" in fieldDict["type"]:
         vals = [ getTestValFromType(fieldDict["vectorType"]) for i in range(10)]
+
+        # special case telem_pokecenter because vector follows specific format
+        if fieldDict["name"] == "pokes" and "vector<float" in fieldDict["type"]:
+            catchAssertVals = [vals[i] for i in range(0, len(vals), 2)]
+            fieldDict["specialAssertVal"] = f"{{ {",".join(catchAssertVals)} }}"
         return f"{{ {",".join(vals)} }}"
 
     if "schemaType" in fieldDict:

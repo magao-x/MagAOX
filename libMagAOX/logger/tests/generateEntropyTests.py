@@ -164,21 +164,22 @@ def main():
             initObjStr = f"{type["className"]}_0 {objName} = {type["className"]}_0("
 
             for field in type["messageTypes"][0]:
-
-                testValName = f"{type["classVarName"]}{field["name"].capitalize()}_{str(totalFieldCount).rjust(5, '0')}"
+                
+                # make test variable
+                testValName = f"{type["classVarName"]}{field["name"].capitalize()}_{str(totalFieldCount).rjust(8, '0')}"
 
                 initObjStr += f"(char *) {testValName}, " if "char *" in field["type"] else f"{testValName}, " 
                 if field == type["messageTypes"][0][-1]:
-                    initObjStr = initObjStr[:-2] + ");"# remove comma if last member of class
+                    initObjStr = initObjStr[:-2] + ");"  # remove comma if last member of class
 
                 constVarStr = f"const {field["type"]} {testValName} = {makeTestVal(field)};"
                 testVariables.append(constVarStr)
 
+                # make catch 2 assertion
                 if "char *" in field["type"]:
                     catchAssertStr = f"REQUIRE(strcmp({objName}.m_{field["name"]}, {testValName}) == 0);"
                 else: 
                     catchAssertStr = f"REQUIRE({objName}.m_{field["name"]} == {testValName});"
-                    
                 catchAsserts.append(catchAssertStr)
 
                 totalFieldCount += 1

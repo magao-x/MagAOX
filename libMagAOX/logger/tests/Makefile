@@ -42,7 +42,7 @@ do_catch2_test: catch2_tests
 ### Build and run Catch2 Entropy tests
 entropy_test: ../generated/binarySchemata.inc catch2_tests.cpp 
 	$(AT)python3 generateEntropyTests.py -e $(e) -n $(n) -s $(s) -f $(f)
-	$(AT)g++ -std=c++14 -I. -I./../types -I../../../flatlogs/include/ -I./generated_tests gen_entropy_tests/generated_test_e$(e)_n$(n).cpp catch2_tests.cpp -o generated_entropy_test_e$(e)_n$(n)
+	$(AT)g++ -std=c++14 -I. -I.. -I./../types -I../../../flatlogs/include/ -I./generated_tests gen_entropy_tests/generated_test_e$(e)_n$(n).cpp catch2_tests.cpp -o generated_entropy_test_e$(e)_n$(n)
 
 do_entropy_test: entropy_test
 	$(AT)./generated_entropy_test_e$(e)_n$(n) "Scenario: test_e$(e)_n$(n)"

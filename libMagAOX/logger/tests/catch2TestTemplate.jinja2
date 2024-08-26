@@ -17,6 +17,9 @@
 {% set outerLoopI = loop.index0 %}
 {% for field in msgType %}
 const {{field.type}} {{nameCamelCase}}{{UPPER_FIRST_CHAR(field.name)}}_{{outerLoopI}} = {{field.testVal}}; // dummy {{field.name}}
+{% if "specialAssertVal" in field %}
+const {{field.type}} {{nameCamelCase}}Special{{UPPER_FIRST_CHAR(field.name)}}_{{outerLoopI}} = {{field.specialAssertVal}}; // dummy special case {{field.name}}
+{% endif %}
 {% endfor %}
 
 
@@ -161,6 +164,8 @@ SCENARIO( "Create {{name}} {{outerLoopI}}", "[a log item]")
             {% for field in msgType %}
             {% if 'char *' in field.type %}
             REQUIRE(strcmp({{classVarName}}.m_{{field.name}}, {{nameCamelCase}}{{UPPER_FIRST_CHAR(field.name)}}_{{outerLoopI}}) == 0);
+            {% elif "specialAssertVal" in field %}
+            REQUIRE({{classVarName}}.m_{{field.name}} == {{nameCamelCase}}Special{{UPPER_FIRST_CHAR(field.name)}}_{{outerLoopI}});
             {% else %}
             REQUIRE({{classVarName}}.m_{{field.name}} == {{nameCamelCase}}{{UPPER_FIRST_CHAR(field.name)}}_{{outerLoopI}});
             {% endif %}
