@@ -1090,11 +1090,6 @@ class MagAOXApp : public application
     bool powerOnWaitElapsed();
 
   public:
-    /** \name Power Management
-     *
-     * @{
-     */
-
     /// Returns the current power state.
     /** If power management is not enabled, this always returns 1=On.
      *
@@ -1115,7 +1110,7 @@ class MagAOXApp : public application
 
     INDI_SETCALLBACK_DECL( MagAOXApp, m_indiP_powerChannel );
 
-    ///@} --Power Management
+    ///@} Power Management
 
   public:
     /** \name Member Accessors
