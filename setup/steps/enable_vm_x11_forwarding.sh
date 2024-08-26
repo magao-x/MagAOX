@@ -12,15 +12,3 @@ if ! sudo grep -q 'X11Forwarding no' /etc/ssh/sshd_config; then
     echo 'X11Forwarding no' | sudo tee -a /etc/ssh/sshd_config
 fi
 sudo systemctl restart sshd
-########################################################################
-### xauth is installed elsewhere; left commented out here in case it is
-### needed for diagnostics later
-########################################################################
-## Necessary for forwarding GUIs from the VM to the host
-## Shell variables $ID and $VERSION_ID were sourced from /etc/os-release
-##   in _common.sh above, so we can detect which distribution we're on
-#if [[ $ID == ubuntu ]]; then
-#    sudo NEEDRESTART_SUSPEND=yes apt install -y xauth
-#elif [[ $ID == rocky ]]; then
-#    sudo yum install -y xorg-x11-xauth
-#fi

@@ -3,7 +3,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-mkdir -pv /usr/local/share/man/man{1,2,3,4,5,6,7,8,9}
 mkdir -pv /opt/MagAOX
 mkdir -pv /opt/MagAOX/bin
 mkdir -pv /opt/MagAOX/drivers/fifos
@@ -33,9 +32,12 @@ chmod u+rwX,g+rX,o+rX /opt/MagAOX/bin
 chown -R root:root /opt/MagAOX/drivers
 chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/drivers
 chown -R root:$instrument_group /opt/MagAOX/drivers/fifos
+# For resurrector and non-threading INDI server
 mkfifo /opt/MagAOX/drivers/fifos/indiserver.ctrl
 chown $instrument_user:$instrument_group /opt/MagAOX/drivers/fifos/indiserver.ctrl
 chmod 664 /opt/MagAOX/drivers/fifos/indiserver.ctrl
+
+mkdir -pv /usr/local/share/man/man{1,2,3,4,5,6,7,8,9}
 
 make_on_data_array logs /opt/MagAOX
 make_on_data_array rawimages /opt/MagAOX

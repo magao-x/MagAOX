@@ -16,5 +16,5 @@ fi
 cd ./OpenBLAS-${VERSION}
 make clean
 make USE_OPENMP=1
-sudo make install USE_OPENMP=1 PREFIX=/usr/local
+sudo make install PREFIX=/usr/local
 log_info "Finished OpenBLAS source install"

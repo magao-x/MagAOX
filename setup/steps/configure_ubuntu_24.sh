@@ -29,28 +29,28 @@ fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC ]]; then
     log_info "Purging cloud-init"
-    sudo -H apt-get purge -y cloud-init || exit 1
-    sudo -H apt autoremove -y || true
+    sudo apt-get purge -y cloud-init || exit 1
+    sudo apt autoremove -y || true
 
     log_info "Disable waiting for LAN config during boot"
-    sudo -H -H systemctl mask systemd-networkd-wait-online.service || true
+    sudo -H systemctl mask systemd-networkd-wait-online.service || true
     
     log_info "Ensure UFW firewall is enabled"
-    yes | sudo -H ufw enable || true
-    sudo -H ufw allow ssh || true
-    sudo -H ufw deny http || true
-    sudo -H ufw deny https || true
-    sudo -H ufw allow in from 192.168.0.0/24 || true
+    yes | sudo ufw enable || true
+    sudo ufw allow ssh || true
+    sudo ufw deny http || true
+    sudo ufw deny https || true
+    sudo ufw allow in from 192.168.0.0/24 || true
 
     log_info "Use old (RHEL 7) mountpoint for cpusets"
-    sudo -H mkdir -p /sys/fs/cgroup/cpuset
-    cat <<'HERE' | sudo -H -H tee /etc/cset.conf || true
+    sudo mkdir -p /sys/fs/cgroup/cpuset
+    cat <<'HERE' | sudo -H tee /etc/cset.conf || true
 mountpoint = /sys/fs/cgroup/cpuset
 HERE
 fi
 
 log_info "Hush login banners"
-sudo -H touch /etc/skel/.hushlogin
+sudo touch /etc/skel/.hushlogin
 
 if [[ -d /usr/share/unattended-upgrades ]]; then
   log_info "Disable automatic upgrades"

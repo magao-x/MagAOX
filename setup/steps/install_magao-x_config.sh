@@ -5,5 +5,5 @@ set -eo pipefail
 
 orgname=magao-x
 reponame=config
-parentdir=/opt/MagAOX
+parentdir=/opt/MagAOX/
 clone_or_update_and_cd $orgname $reponame $parentdir

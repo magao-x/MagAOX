@@ -39,7 +39,6 @@ MAJOR_VERSION=${VERSION_ID%.*}
 
 roleScript=/etc/profile.d/magaox_role.sh
 VM_KIND=$(systemd-detect-virt)
-VM_KIND=$(systemd-detect-virt || echo none)
 if [[ $VM_KIND != "none" ]]; then
     echo "Detected virtualization: $VM_KIND"
 fi
@@ -139,7 +138,7 @@ fi
 # Install Linux headers (instrument computers use the RT kernel / headers)
 if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC ]]; then
     if [[ $ID == ubuntu ]]; then
-        sudo NEEDRESTART_SUSPEND=yes apt install -y linux-headers-generic
+        sudo -i apt install -y linux-headers-generic
     elif [[ $ID == rocky ]]; then
         sudo yum install -y kernel-devel-$(uname -r) || sudo yum install -y kernel-devel
     fi
@@ -147,9 +146,7 @@ fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
 sudo -H bash -l "$DIR/steps/install_rclone.sh" || exit 1
-( [ -r "$DIR/steps/install_openblas.inhibit" ] && ( echo "openBLAS install is inhibited" || true ) \
-|| ( bash -l "$DIR/steps/install_openblas.sh" && touch "$DIR/steps/install_openblas.inhibit" ) \
-|| exit 1
+bash -l "$DIR/steps/install_openblas.sh" || exit 1
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
     bash -l "$DIR/steps/install_cuda_rocky_9.sh" || exit_with_error "CUDA install failed"
 fi

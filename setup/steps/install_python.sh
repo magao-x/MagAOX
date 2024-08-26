@@ -23,13 +23,13 @@ if [[ ! -d /opt/conda ]]; then
     # set group and permissions such that only magaox-dev has write access
     chmod -R g=rwX /opt/conda
     find /opt/conda -type d -exec sudo chmod g+rwxs {} \;
-    # Set BASH environment variables for conda
+    # Set environment variables for conda
     cat << 'EOF' | tee /etc/profile.d/conda.sh
 if [ -f "/opt/conda/etc/profile.d/conda.sh" ]; then
     . "/opt/conda/etc/profile.d/conda.sh"
     CONDA_CHANGEPS1=false conda activate base
 else
-    \export PATH="/opt/conda/bin:\$PATH"
+    \export PATH="/opt/conda/bin:$PATH"
 fi
 EOF
     cat << 'EOF' | tee /opt/conda/.condarc
