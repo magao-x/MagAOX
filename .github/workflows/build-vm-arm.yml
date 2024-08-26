@@ -172,7 +172,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
             name: arm_stage3_vm
-            path: setup/xvm/output/
+            path: setup/xvm/
       - name: Extract previous job outputs
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
