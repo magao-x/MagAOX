@@ -139,11 +139,14 @@ int stateRuleEngine::loadConfigImpl( mx::app::appConfigurator & _config )
 {
     _config(m_ruleDir, "rules.dir");
 
+    std::map<std::string, ruleRuleKeys> rrkMap;
+
     if(m_ruleDir == "")
     {
         try
         {
-            loadRuleConfig(m_ruleMaps, _config);
+            loadRuleConfig(m_ruleMaps, rrkMap, _config);
+            finalizeRuleValRules(m_ruleMaps, rrkMap);
         }
         catch(mx::err::mxException & e)
         {
@@ -171,13 +174,23 @@ int stateRuleEngine::loadConfigImpl( mx::app::appConfigurator & _config )
             try
             {
                 //and finally add to our rule map
-                loadRuleConfig(m_ruleMaps, fcfg);
+                loadRuleConfig(m_ruleMaps, rrkMap, fcfg);
             }
             catch(mx::err::mxException & e)
             {
                 return log<software_critical,-1>({__FILE__,__LINE__, std::string("Rule config exception caught from ") + cnf + ":\n" + e.what()});
             }
         }
+
+        try
+        {
+            finalizeRuleValRules(m_ruleMaps, rrkMap);
+        }
+        catch(const std::exception& e)
+        {
+            return log<software_critical,-1>({__FILE__,__LINE__, std::string("Error finalizing rules:\n") + e.what()});
+        }
+        
     }
 
     return 0;
@@ -282,6 +295,15 @@ int stateRuleEngine::appLogic()
 {
     for(auto it = m_ruleMaps.rules.begin(); it != m_ruleMaps.rules.end(); ++it)
     {
+        #if 0
+        try
+        {
+            bool val = it->second->value();
+            std::cerr << it->first << " " << val << "\n";
+        }
+        catch(...){}
+        #endif
+        
         if(it->second->priority() != rulePriority::none)
         {
             try

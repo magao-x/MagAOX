@@ -96,6 +96,7 @@ void extractRuleProp( pcf::IndiProperty ** prop,            ///< [out] pointer t
   * ///\todo add a constructor that has priority, message, and comparison, to reduce duplication
   */
 void loadRuleConfig( indiRuleMaps & maps,              ///< [out] contains the rule and property maps in which to place the items found in config
+                     std::map<std::string, ruleRuleKeys> & rrkMap, ///< [out] Holds the ruleVal rule keys aside for later post-processing
                      mx::app::appConfigurator & config ///< [in] the application configuration structure
                    )
 {
@@ -108,8 +109,7 @@ void loadRuleConfig( indiRuleMaps & maps,              ///< [out] contains the r
         mxThrowException(mx::err::invalidconfig, "loadRuleConfig", "no rules found in config");
     }
 
-    std::map<std::string, ruleRuleKeys> rrkMap; // Holds the ruleVal rule keys aside for later post-processing
-
+    
     for(size_t i=0; i< sections.size(); ++i)
     {
         bool ruleTypeSet = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "ruleType" ));
@@ -317,7 +317,16 @@ void loadRuleConfig( indiRuleMaps & maps,              ///< [out] contains the r
             mxThrowException(mx::err::notimpl, "loadRuleConfig", "unknown rule type " + ruleType + " in " + sections[i]);
         }
     }
+}
 
+/// Finalize ruleVal rules
+/** ///\todo check for insertion failure
+  * ///\todo add a constructor that has priority, message, and comparison, to reduce duplication
+  */
+void finalizeRuleValRules( indiRuleMaps & maps,    /**< [in/out] contains the rule and property maps with rules ot finalize */
+                           std::map<std::string, ruleRuleKeys> & rrkMap ///< [out] Holds the ruleVal rule keys aside for later post-processing
+                         )
+{
     //Now set the rule pointers for any ruleVal rules
     auto it=rrkMap.begin();
     while(it != rrkMap.end())
