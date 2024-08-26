@@ -42,9 +42,9 @@ struct telem_pokeloop : public flatbuffer_log
 
             if(measuring == 0)
             {
-                Telem_pokecenter_fbBuilder telem_pokecenter_builder(builder);
-                telem_pokecenter_builder.add_measuring(measuring);
-                auto fb = telem_pokecenter_builder.Finish();
+                Telem_pokeloop_fbBuilder telem_pokeloop_builder(builder);
+                telem_pokeloop_builder.add_measuring(measuring);
+                auto fb = telem_pokeloop_builder.Finish();
                 builder.Finish(fb);
                 return;
             }
