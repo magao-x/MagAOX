@@ -7,11 +7,16 @@ on:
   #   types: [completed]
   push:
     branches: [xvm]
-env:
-  vmArch: aarch64
+# env:
+#   vmArch: aarch64
 jobs:
-  build-arm-stage1:
-    runs-on: macos-14
+  build-vm-stage1:
+    strategy:
+      matrix:
+        os: [macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      vmArch: $${{ matrix.os == 'macos-latest' && 'aarch64' || 'x86_64' }}
     permissions:
       contents: read
       packages: write
@@ -65,9 +70,14 @@ jobs:
           retention-days: 1
           name: arm_stage1_vm
           path: setup/xvm/stage1_outputs.tar
-  build-arm-stage2:
-    runs-on: macos-14
-    needs: build-arm-stage1
+  build-vm-stage2:
+    strategy:
+      matrix:
+        os: [macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      vmArch: $${{ matrix.os == 'macos-latest' && 'aarch64' || 'x86_64' }}
+    needs: build-vm-stage1
     permissions:
       contents: read
       packages: write
@@ -118,9 +128,14 @@ jobs:
         with:
           name: arm_stage2_vm
           path: setup/xvm/stage2_outputs.tar
-  build-arm-stage3:
-    runs-on: macos-14
-    needs: build-arm-stage2
+  build-vm-stage3:
+    strategy:
+      matrix:
+        os: [macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      vmArch: $${{ matrix.os == 'macos-latest' && 'aarch64' || 'x86_64' }}
+    needs: build-vm-stage2
     permissions:
       contents: read
       packages: write
@@ -161,15 +176,30 @@ jobs:
         with:
           name: arm_stage3_vm
           path: setup/xvm/stage3_outputs.tar
-  build-arm-stage4:
-    runs-on: macos-14
-    needs: build-arm-stage3
+  build-vm-stage4:
+    strategy:
+      matrix:
+        os: [macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      vmArch: $${{ matrix.os == 'macos-latest' && 'aarch64' || 'x86_64' }}
+    needs: build-vm-stage3
     permissions:
       contents: read
       packages: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      - name: Install QEMU for Ubuntu
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-arm rpm2cpio
+      - name: Install QEMU for macOS
+        if: runner.os == 'macOS'
+        run: |
+          sysctl machdep.cpu
+          brew install qemu
       - name: Get built VM artifact
         uses: actions/download-artifact@v4
         with:
