@@ -182,7 +182,7 @@ jobs:
         os: [macos-latest]
     runs-on: ${{ matrix.os }}
     env:
-      vmArch: $${{ matrix.os == 'macos-latest' && 'aarch64' || 'x86_64' }}
+      vmArch: ${{ matrix.os == 'macos-latest' && 'aarch64' || 'x86_64' }}
     needs: build-vm-stage3
     permissions:
       contents: read
