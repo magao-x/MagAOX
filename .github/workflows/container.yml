@@ -1,9 +1,6 @@
 name: Container build
 on:
-  workflow_run:
-    workflows: ["Rocky build"]
-    types: [completed]
-    branches: [dev]
+  - push
 
 env:
   REGISTRY: ghcr.io
