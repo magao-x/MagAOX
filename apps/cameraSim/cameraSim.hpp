@@ -12,6 +12,9 @@
 // #include <ImageStruct.h>
 #include <ImageStreamIO/ImageStreamIO.h>
 
+#include <mx/math/func/gaussian.hpp>
+#include <mx/math/randomT.hpp>
+
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
@@ -106,6 +109,19 @@ class cameraSim : public MagAOXApp<>,
 
     double m_lastTime{ 0 };
     double m_offset = { 0 };
+
+    float m_bias {500}; ///< the simulated bias level. default 500.
+    float m_ron {5}; ///< the simulated readout noise, in counts/read. default 5.
+
+    float m_xcen {0}; ///< the simulated star x center coordinate, relative to image center. default 0.
+    float m_ycen {0}; ///< the simulated star y center coordinate, relative to image center. default 0.
+    float m_peak {2000}; ///< the simulated star peak, in counts/second. default 2000.
+    float m_fwhm {2}; ///< the simulated star FWHM in pixels. default 2.
+
+    float m_jitter {0.1}; ///< the simulated jitter, in pixels/read. default 2.
+
+
+    mx::math::normDistT<float> m_norm;
 
   public:
     /// Default c'tor
@@ -286,6 +302,76 @@ inline void cameraSim::setupConfig()
                 false,
                 "float",
                 "the camera default FPS, set at startup.  Default is 10" );
+
+    config.add( "camsim.bias",
+                "",
+                "camsim.bias",
+                argType::Required,
+                "camsim",
+                "bias",
+                false,
+                "float",
+                "the simulated bias level. default 500." );
+
+    config.add( "camsim.ron",
+                "",
+                "camsim.ron",
+                argType::Required,
+                "camsim",
+                "ron",
+                false,
+                "float",
+                "the simulated readout noise, in counts/read. default 5." );
+
+    config.add( "camsim.xcen",
+                "",
+                "camsim.xcen",
+                argType::Required,
+                "camsim",
+                "xcen",
+                false,
+                "float",
+                "the simulated star x center coordinate, relative to image center. default 0." );
+
+    config.add( "camsim.ycen",
+                "",
+                "camsim.ycen",
+                argType::Required,
+                "camsim",
+                "ycen",
+                false,
+                "float",
+                "the simulated star y center coordinate, relative to image center. default 0." );
+
+    config.add( "camsim.peak",
+                "",
+                "camsim.peak",
+                argType::Required,
+                "camsim",
+                "peak",
+                false,
+                "float",
+                "the simulated star peak, in counts/second. default 2000." );
+
+    config.add( "camsim.fwhm",
+                "",
+                "camsim.fwhm",
+                argType::Required,
+                "camsim",
+                "fwhm",
+                false,
+                "float",
+                "the simulated star FWHM in pixels. default 2." );
+
+    config.add( "camsim.jitter",
+                "",
+                "camsim.jitter",
+                argType::Required,
+                "camsim",
+                "jitter",
+                false,
+                "float",
+                "the simulated jitter, in pixels/read. default 2." );
 }
 
 inline int cameraSim::loadConfigImpl(mx::app::appConfigurator & cfg)
@@ -318,6 +404,15 @@ inline int cameraSim::loadConfigImpl(mx::app::appConfigurator & cfg)
     cfg(m_fps, "camsim.defaultFPS");
     m_fpsSet = m_fps;
 
+    config(m_bias, "camsim.bias");
+    config(m_ron, "camsim.ron");
+
+    config(m_xcen, "camsim.xcen");
+    config(m_ycen, "camsim.ycen");
+    config(m_peak, "camsim.peak");
+    config(m_fwhm, "camsim.fwhm");
+
+    config(m_jitter, "camsim.jitter");
     return 0;
 }
 
@@ -491,7 +586,31 @@ int cameraSim::acquireAndCheckValid()
 
     m_lastTime = dt;
 
-    m_fgimage.setRandom();
+    float xcen = m_xcen + m_norm*m_jitter;
+    float ycen = m_ycen + m_norm*m_jitter;
+
+    for(uint32_t cc = 0; cc < m_height; ++cc)
+    {
+        float y = (cc - 0.5*(1.0*m_height-1.0));
+
+        for(uint32_t rr = 0; rr < m_width; ++rr)
+        {
+            float x = (rr - 0.5*(1.0*m_width-1.0));
+
+            m_fgimage(rr,cc) = m_bias + m_norm*m_ron;
+
+            if( (m_shutterState == 1) && (fabs(y) < 4*m_fwhm) && (fabs(x) < 4*m_fwhm))
+            {
+                float flux = mx::math::func::gaussian2D<float>(x, y, 0.0, m_peak*m_expTime, xcen, ycen, mx::math::func::fwhm2sigma(m_fwhm));
+                flux += m_norm*sqrt(flux);
+
+                m_fgimage(rr,cc) += flux;
+            }
+        }
+    }
+
+
+
 
     return 0;
 }
