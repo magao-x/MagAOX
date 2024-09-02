@@ -1,22 +1,27 @@
-#############################################################
-#              makefile for a single test                   #
-#                                                           #
-# Command:                                                  #
-# $ make -f Makefile.one t=<full-path-to-test>              #
-#                                                           #
-# notes:                                                    #
-#   -- normally do not need to edit this file for new tests #
-#   -- add conditionals if setuid required, using           #
-#      thSetuid_tests as a guide                            #
-#   -- can not include precompiled header as tests need to  #
-#      define things differently in many cases              #
-#                                                           #
-#############################################################
+###############################################################################
+#              makefile for a single test                                     #
+#                                                                             #
+# Command:                                                                    #
+# $ make -f Makefile.one t=<full-path-to-test>                                #
+#                                                                             #
+# options:                                                                    #
+#   TESTLIBS: Can include `TESTLIBS=-l<lib> where lib is a library needed by  #
+#             this test, which will be += to LDLIBS.                          #
+#                                                                             #
+# notes:                                                                      #
+#   -- normally do not need to edit this file for new tests                   #
+#   -- add conditionals if setuid required, using thSetuid_tests as a guide   #
+#   -- can not include precompiled header as tests need to define things      #
+#      differently in many cases                                              #
+#                                                                             #
+###############################################################################
 
 
 
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 include $(SELF_DIR)/../Make/common.mk
+
+LDLIBS+=$(TESTLIBS)
 
 # Single-file app name can be supplied as `TARGET=`,
 # or `t=` for short

@@ -7,15 +7,31 @@
 #ifndef stdMotionNode_hpp
 #define stdMotionNode_hpp
 
-#include "xigNode.hpp"
+#include "fsmNode.hpp"
 
+///
+/**
+ *
+ * The key assumption of this node is that it should be in a valid, not-`none`, preset position
+ * for its ioputs to be `on`.  It also supports triggering an alternate `on` state, which is used for
+ * stages which have a continuous tracking mode (k-mirror and ADC).
+ *
+ * The preset is specified by an INDI property with signature `<device>.<presetPrefix>Name` where device
+ * and presetPrefix are part of the configuration.  This INDI property is a switch vector.
+ *
+ * The device and prefix can only be set once.
+ */
 class stdMotionNode : public fsmNode
 {
 
   protected:
+    /// The prefix for preset naes.  Usually either "preset" or "filter", to which "Name" is appended.
     std::string m_presetPrefix;
+
+    /// The INDI key (device.property) for the presets.  This is, say, `fwpupil.filterName`.  It is set automatically.
     std::string m_presetKey;
 
+    /// The current value of the preset property.  Corresponds to the element name of the selected preset.
     std::string m_curVal;
 
     std::vector<std::string> m_presetPutName{ "out" };
@@ -26,27 +42,59 @@ class stdMotionNode : public fsmNode
      */
     ingr::ioDir m_presetDir{ ingr::ioDir::output };
 
+    /// The INDI key (device.property) for the switch denoting that this stage is tracking and should be tracking.
+    std::string m_trackerKey;
+
+    /// The element of the INDI property denoted by m_trackerKey to follow.
+    std::string m_trackerElement;
+
+    /// Flag indicating whether or not the stage is currently tracking.
+    bool m_tracking{ false };
+
   public:
-    stdMotionNode( const std::string &name, ingr::instGraphXML *parentGraph ) : fsmNode( name, parentGraph )
-    {
-    }
+    /// Only c'tor.  Must be constructed with node name and a parent graph.
+    stdMotionNode( const std::string &name, ingr::instGraphXML *parentGraph );
 
-    virtual void device( const std::string &dev );
+    /// Set the device name.  This can only be done once.
+    /**
+     * \throws
+     */
+    virtual void device( const std::string &dev /**< [in] */);
 
-    virtual void presetPrefix( const std::string &pp );
+    using fsmNode::device;
 
-    void presetPutName( const std::vector<std::string> &ppp );
+    virtual void presetPrefix( const std::string &pp /**< [in] */);
 
-    void presetDir( const ingr::ioDir &dir );
+    const std::string & presetPrefix();
 
-    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv );
+    void presetPutName( const std::vector<std::string> &ppp /**< [in] */);
+
+    const std::vector<std::string> & presetPutName();
+
+    void presetDir( const ingr::ioDir &dir /**< [in] */);
+
+    const ingr::ioDir & presetDir();
+
+    void trackerKey( const std::string &tk /**< [in] */);
+
+    const std::string & trackerKey();
+
+    void trackerElement( const std::string &te /**< [in] */);
+
+    const std::string & trackerElement();
+
+    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] */);
 
     virtual void togglePutsOn();
 
     virtual void togglePutsOff();
 
-    void loadConfig( mx::app::appConfigurator &config );
+    void loadConfig( mx::app::appConfigurator &config /**< [in] */);
 };
+
+inline stdMotionNode::stdMotionNode( const std::string &name, ingr::instGraphXML *parentGraph ) : fsmNode( name, parentGraph )
+{
+}
 
 inline void stdMotionNode::device( const std::string &dev )
 {
@@ -66,7 +114,7 @@ inline void stdMotionNode::presetPrefix( const std::string &pp )
     // Set it one time only
     if( m_presetPrefix != "" && pp != m_presetPrefix )
     {
-        std::string msg = "attempt to change preset prefix from " + m_presetPrefix + " to " + pp;
+        std::string msg = "stdMotionNode::presetPrefix: attempt to change preset prefix from " + m_presetPrefix + " to " + pp;
         msg += " at ";
         msg += __FILE__;
         msg += " " + std::to_string( __LINE__ );
@@ -83,14 +131,54 @@ inline void stdMotionNode::presetPrefix( const std::string &pp )
     }
 }
 
+inline const std::string & stdMotionNode::presetPrefix()
+{
+    return m_presetPrefix;
+}
+
 inline void stdMotionNode::presetPutName( const std::vector<std::string> &ppp )
 {
     m_presetPutName = ppp;
 }
 
+inline const std::vector<std::string> & stdMotionNode::presetPutName()
+{
+    return m_presetPutName;
+}
+
 inline void stdMotionNode::presetDir( const ingr::ioDir &dir )
 {
     m_presetDir = dir;
+}
+
+inline const ingr::ioDir & stdMotionNode::presetDir()
+{
+    return m_presetDir;
+}
+
+inline void stdMotionNode::trackerKey( const std::string &tk )
+{
+    m_trackerKey = tk;
+
+    if( m_trackerKey != "" )
+    {
+        key( m_trackerKey );
+    }
+}
+
+inline const std::string & stdMotionNode::trackerKey()
+{
+    return m_trackerKey;
+}
+
+inline void stdMotionNode::trackerElement( const std::string &te )
+{
+    m_trackerElement = te;
+}
+
+inline const std::string & stdMotionNode::trackerElement()
+{
+    return m_trackerElement;
 }
 
 inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
@@ -101,6 +189,29 @@ inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 
     if( ipRecv.createUniqueKey() == m_presetKey )
     {
+        if( ipRecv.find( m_trackerElement ) )
+        {
+            if( ipRecv[m_trackerElement].getSwitchState() == pcf::IndiElement::On )
+            {
+                if( !m_tracking )
+                {
+                    ++m_changes;
+                }
+
+                m_tracking = true;
+            }
+            else
+            {
+                if( m_tracking )
+                {
+                    ++m_changes;
+                }
+                m_tracking = false;
+            }
+        }
+    }
+    else if( ipRecv.createUniqueKey() == m_presetKey )
+    {
         std::cerr << "got " << ipRecv.createUniqueKey() << "\n";
 
         if( m_node != nullptr )
@@ -109,7 +220,7 @@ inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
             {
                 if( it.second.getSwitchState() == pcf::IndiElement::On )
                 {
-                    if( m_curVal != it.second.getName() )
+                    if( m_curVal != it.second.getName() && !m_tracking ) // we only update if not tracking
                     {
                         ++m_changes;
                     }
@@ -124,17 +235,19 @@ inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
     {
         m_changes = 0;
 
-        if( m_state != MagAOX::app::stateCodes::READY )
+        if( m_state != MagAOX::app::stateCodes::READY ||
+            ( m_tracking &&
+              !( m_state == MagAOX::app::stateCodes::READY || m_state == MagAOX::app::stateCodes::OPERATING ) ) )
         {
             std::cerr << name() << ": toggling off because not READY: " << m_state << "\n";
             togglePutsOff();
         }
-        else if( m_curVal == "none" )
+        else if( m_curVal == "none" && !m_tracking )
         {
             std::cerr << name() << ": toggling off because 'none'\n";
             togglePutsOff();
         }
-        else
+        else // Here it's either  (READY && !none) || (m_tracking && (READY||OPERATING))
         {
             std::cerr << name() << ": toggling on because READY and " << m_curVal << "\n";
             togglePutsOn();
@@ -144,7 +257,11 @@ inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 
 inline void stdMotionNode::togglePutsOn()
 {
-    if( m_state == MagAOX::app::stateCodes::READY )
+    if( m_tracking )
+    {
+        m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "tracking" );
+    }
+    else if( m_state == MagAOX::app::stateCodes::READY )
     {
         if( m_presetPutName.size() == 1 ) // There's only one put, it's just on or off with a value
         {
@@ -152,7 +269,9 @@ inline void stdMotionNode::togglePutsOn()
             {
                 if( m_parentGraph )
                 {
-                    m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, m_curVal );
+                    {
+                        m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, m_curVal );
+                    }
                 }
             }
             xigNode::togglePutsOn();
@@ -218,13 +337,25 @@ inline void stdMotionNode::togglePutsOff()
 
 inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
 {
-    if( !nodeValid() )
+    if( !m_parentGraph )
     {
-        std::string msg = "stdMotionNode::loadConfig: node is not valid";
+        std::string msg = "stdMotionNode::loadConfig: parent graph is null";
         msg += " at ";
         msg += __FILE__;
         msg += " " + std::to_string( __LINE__ );
-        throw std::runtime_error(msg);
+        throw std::runtime_error( msg );
+    }
+
+    std::string type;
+    config.configUnused(type, mx::app::iniFile::makeKey( name(), "type" ));
+
+    if(type != "stdMotionNode")
+    {
+        std::string msg = "stdMotionNode::loadConfig: node type is not stdMotionNode ";
+        msg += " at ";
+        msg += __FILE__;
+        msg += " " + std::to_string( __LINE__ );
+        throw std::runtime_error( msg );
     }
 
     std::string dev = name();
@@ -236,28 +367,6 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
     std::string preDir = "output";
     config.configUnused( preDir, mx::app::iniFile::makeKey( name(), "presetDir" ) );
 
-    std::vector<std::string> prePutName( { "out" } );
-    config.configUnused( prePutName, mx::app::iniFile::makeKey( name(), "presetPutName" ) );
-    if( prePutName.size() == 0 )
-    {
-        std::string msg = "stdMotionNode::loadConfig: presetPutName can't be empty";
-        msg += " at ";
-        msg += __FILE__;
-        msg += " " + std::to_string( __LINE__ );
-        throw std::runtime_error(msg);
-    }
-
-    /*std::cerr << "  device: " << dev << "\n";
-    std::cerr << "  presetPrefix: " << prePrefix << "\n";
-    std::cerr << "  presetDir: " << preDir << "\n";
-    std::cerr << "  presetPutName: " << prePutName[0] << "\n";
-    for( size_t n = 1; n < prePutName.size(); ++n )
-    {
-        std::cerr << "                 " << prePutName[1] << "\n";
-    }*/
-
-    device( dev );
-    presetPrefix( prePrefix );
     if( preDir == "input" )
     {
         presetDir( ingr::ioDir::input );
@@ -272,11 +381,41 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
         msg += " at ";
         msg += __FILE__;
         msg += " " + std::to_string( __LINE__ );
-        throw std::runtime_error(msg);
+        throw std::runtime_error( msg );
     }
 
-    presetPutName( prePutName );
 
+    std::vector<std::string> prePutName( { "out" } );
+    config.configUnused( prePutName, mx::app::iniFile::makeKey( name(), "presetPutName" ) );
+    if( prePutName.size() == 0 )
+    {
+        std::string msg = "stdMotionNode::loadConfig: presetPutName can't be empty";
+        msg += " at ";
+        msg += __FILE__;
+        msg += " " + std::to_string( __LINE__ );
+        throw std::runtime_error( msg );
+    }
+
+    std::string trackKey;
+    config.configUnused( trackKey, mx::app::iniFile::makeKey( name(), "trackerKey" ) );
+
+    std::string trackEl;
+    config.configUnused( trackEl, mx::app::iniFile::makeKey( name(), "trackerElement" ) );
+
+    if( ( trackKey == "" && trackEl != "" ) || ( trackKey != "" && trackEl == "" ) )
+    {
+        std::string msg = "stdMotionNode::loadConfig: trackerKey and trackerElement must both be provided)";
+        msg += " at ";
+        msg += __FILE__;
+        msg += " " + std::to_string( __LINE__ );
+        throw std::runtime_error( msg );
+    }
+
+    device( dev );
+    presetPrefix( prePrefix );
+    presetPutName( prePutName );
+    trackerKey( trackKey );
+    trackerElement( trackEl );
 }
 
 #endif // stdMotionNode_hpp

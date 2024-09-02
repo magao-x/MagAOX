@@ -24,6 +24,8 @@ class fsmNode : public xigNode
 
     virtual void device( const std::string &dev );
 
+    const std::string & device();
+
     virtual void handleSetProperty( const pcf::IndiProperty &ipRecv );
 
     virtual void updateGUI();
@@ -37,7 +39,7 @@ inline void fsmNode::device( const std::string &dev )
 {
     if( m_device != "" && dev != m_device )
     {
-        std::string msg = "attempt to change device name from " + m_device + " to " + dev;
+        std::string msg = "fsmNode::device attempt to change device name from " + m_device + " to " + dev;
         msg += " at ";
         msg += __FILE__;
         msg += " " + std::to_string( __LINE__ );
@@ -48,6 +50,11 @@ inline void fsmNode::device( const std::string &dev )
     m_fsmKey = m_device + ".fsm";
 
     key( m_fsmKey );
+}
+
+inline const std::string & fsmNode::device()
+{
+    return m_device;
 }
 
 inline void fsmNode::handleSetProperty( const pcf::IndiProperty &ipRecv )

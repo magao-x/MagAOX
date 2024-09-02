@@ -1011,6 +1011,12 @@ protected:
 
 public:
 
+    /// Default c'tor
+    /** Changes default comparison to And for ruleCompRule
+      */
+    ruleCompRule() : m_comparison { ruleComparison::And }
+    {}
+
     /// Set the pointer to the first rule
     void rule1( indiCompRule * r /**< [in] the new pointer to rule1*/)
     {

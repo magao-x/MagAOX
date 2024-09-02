@@ -11,22 +11,35 @@
 
 #include "../../INDI/libcommon/IndiProperty.hpp"
 
+/// Implementation of basic instGraph node interface for MagAO-X
+/** This class is pure virtual, derived classes must implement handleSetProperty.
+  *
+  */
 class xigNode
 {
   protected:
-    std::set<std::string> m_keys;
+    std::set<std::string> m_keys; ///< The INDI keys (device.property) which this node subscribes to
 
-    ingr::instGraphXML *m_parentGraph{ nullptr };
+    ingr::instGraphXML *m_parentGraph{ nullptr }; ///< The parent instGraph that this node is a part of
+
+    ingr::instNode *m_node{ nullptr }; ///< The underlying instGraph node
 
     int m_changes{ 0 }; ///< Counter that can be incremented when changes are detected.  Set to 0 when graph is updated.
-
-    ingr::instNode *m_node{ nullptr };
 
   public:
     xigNode() = delete;
 
-    xigNode( const std::string &name, ingr::instGraphXML *parentGraph );
+    /// Constructor.
+    /**
+      * Default c'tor is deleted.  Must supply both node name and a parentGraph with a node with the same name in it.
+      */
+    xigNode( const std::string &name, /**< [in] the name of the node */
+             ingr::instGraphXML *parentGraph /**< [in] the parent instGraph */ );
 
+    /// Get the name of this node
+    /**
+      * \returns the nodes' name (the value of m_name).
+      */
     std::string name();
 
     const std::set<std::string> &keys();
@@ -40,10 +53,27 @@ class xigNode
     virtual void togglePutsOn();
 
     virtual void togglePutsOff();
+
+    #ifdef XWC_XIGNODE_TEST
+    //allow setting m_parentGraph to null for testing
+    void setParentGraphNull()
+    {
+        m_parentGraph = nullptr;
+    }
+    #endif
 };
 
 inline xigNode::xigNode( const std::string &name, ingr::instGraphXML *parentGraph ) : m_parentGraph( parentGraph )
 {
+    if(m_parentGraph == nullptr)
+    {
+        std::string msg = "xigNode::loadConfig: parent graph is null";
+        msg += " at ";
+        msg += __FILE__;
+        msg += " " + std::to_string( __LINE__ );
+        throw std::runtime_error(msg);
+    }
+
     //This will throw if name is not in the parent's nodes
     m_node = m_parentGraph->node( name );
 }

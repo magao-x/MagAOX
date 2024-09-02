@@ -103,6 +103,28 @@ SCENARIO( "Creating an xigNode", "[instGraph::xigNode]" )
             REQUIRE(txn == nullptr);
         }
     }
+
+    GIVEN("an invalid XML file")
+    {
+        WHEN("parent graph is null on construction")
+        {
+            ingr::instGraphXML * parentGraph = nullptr;
+
+            test_xigNode * txn = nullptr;
+            bool pass = false;
+            try
+            {
+                txn = new test_xigNode("telescope", parentGraph);
+                pass = true;
+            }
+            catch(...)
+            {
+            }
+
+            REQUIRE(pass == false);
+            REQUIRE(txn == nullptr);
+        }
+    }
 }
 
 

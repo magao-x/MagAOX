@@ -82,14 +82,26 @@ void pwrOnOffNode::toggleOff()
 inline
 void pwrOnOffNode::loadConfig( mx::app::appConfigurator &config )
 {
-    if( !nodeValid() )
+    if( !m_parentGraph )
     {
-        std::string msg = "pwrOnOffNode::loadConfig: node is not valid";
+        std::string msg = "pwrOnOffNode::loadConfig: parent graph is null";
         msg += " at ";
         msg += __FILE__;
         msg += " " + std::to_string( __LINE__ );
 
         throw std::runtime_error(msg);
+    }
+
+    std::string type;
+    config.configUnused(type, mx::app::iniFile::makeKey( name(), "type" ));
+
+    if(type != "pwrOnOffNode")
+    {
+        std::string msg = "pwrOnOffNode::loadConfig: node type is not stdMotionNode ";
+        msg += " at ";
+        msg += __FILE__;
+        msg += " " + std::to_string( __LINE__ );
+        throw std::runtime_error( msg );
     }
 
     std::string pk;
