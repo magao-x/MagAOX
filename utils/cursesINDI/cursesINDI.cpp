@@ -68,7 +68,7 @@ retry:
          ci->quitProcess();
          ci->deactivate();
          delete ci;
-         std::cout << "\rcursesINDI: Connection to INDI server failed.  Will retry in 5...";
+         std::cout << "\rcursesINDI: Connection to INDI server quit.  Will retry in 5...";
          std::cout.flush();
          sleep(1);
          for(int i=4; i > 0; --i)

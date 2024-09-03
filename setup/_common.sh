@@ -138,7 +138,14 @@ function clone_or_update_and_cd() {
     if [[ ! -d $parentdir/$reponame/.git ]]; then
       echo "Cloning new copy of $orgname/$reponame"
       CLONE_DEST=/tmp/${reponame}_$(date +"%s")
-      git clone https://github.com/$orgname/$reponame.git $CLONE_DEST
+      thealtdir="$HOME/githubalt/$reponame"
+      theref="$(git --git-dir="$thealtdir/.git"  rev-parse --symbolic-full-name --abbrev-ref --verify HEAD 2>/dev/null || true)"
+      if [[ "$theref" ]]; then
+        echo "SCRATCH THAT:  Cloning new copy of $reponame from local direcotry $thealtdir, reference[$theref]"
+        git clone "file://$thealtdir" $CLONE_DEST
+      else
+        git clone https://github.com/$orgname/$reponame.git $CLONE_DEST
+      fi
       sudo rsync -a $CLONE_DEST/ $destdir/
       cd $destdir/
       log_success "Cloned new $destdir"

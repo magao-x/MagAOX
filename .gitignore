@@ -34,6 +34,9 @@ doc/www/
 #ignore test executables
 **/tests/*_test
 
+#Carcich temporary files
+x.x
+
 ##########################################
 #Executables and app specifics to ignore:
 
@@ -119,6 +122,8 @@ apps/photonCounter
 #r
 apps/rhusbMon/rhusbMon
 apps/refRMS/refRMS
+apps/resurrector/resurrector_indi
+apps/resurrector/test/test_resurrector
 
 #s
 apps/shmimIntegrator/shmimIntegrator
@@ -200,6 +205,8 @@ vm/calib/
 vm/config/
 vm/
 *.swp
+
+setup/qhyccd_container/sdk_linux64_22.02.17.tgz
 
 # Python caches, etc
 *.egg-info

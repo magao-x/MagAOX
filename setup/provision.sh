@@ -156,6 +156,7 @@ sudo -H bash -l "$DIR/steps/install_eigen.sh" || exit 1
 sudo -H bash -l "$DIR/steps/install_zeromq.sh" || exit 1
 sudo -H bash -l "$DIR/steps/install_cppzmq.sh" || exit 1
 sudo -H bash -l "$DIR/steps/install_flatbuffers.sh" || exit 1
+sudo -H bash -l "$DIR/steps/install_zlib-drbitboy.sh" || exit 1
 if [[ $MAGAOX_ROLE == AOC ]]; then
     sudo -H bash -l "$DIR/steps/install_lego.sh"
 fi

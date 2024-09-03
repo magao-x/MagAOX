@@ -1,6 +1,7 @@
 
 #include <iostream>
 #include <string>
+#include <chrono>
 #include <cstring>
 
 #include <fcntl.h>
@@ -69,8 +70,6 @@ int flushFIFO(const std::string & fileName)
 
    // Set the timeout on the select call.
    timeval tv;
-   tv.tv_sec = 1;
-   tv.tv_usec = 0;
 
    #ifdef DEBUG
    debug << __FILE__ << " " << __LINE__ << std::endl;
@@ -80,6 +79,9 @@ int flushFIFO(const std::string & fileName)
    
    while(rd > 0)
    {
+      tv.tv_sec = 1;
+      tv.tv_usec = 0;
+
       int nRetval = ::select( fd + 1, &fdsRead, NULL, NULL, &tv );
 
       #ifdef DEBUG      
@@ -198,9 +200,32 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
       fdWrite = df->stdfd;
    }
 
+   auto chrono_base = std::chrono::system_clock::now();
+   int counter = 0;
+   std::chrono::duration<double> elapsed_seconds;
+
    //Now loop until told to stop.
    while(!timeToDie)
    {
+
+      elapsed_seconds = std::chrono::system_clock::now() - chrono_base;
+      if (elapsed_seconds.count() < 0.1)
+      { 
+         ++counter;
+      } 
+      else
+      { 
+         if (counter > 1000)
+         {
+	    struct timeval sleeptv;
+	    sleeptv.tv_sec = 0;
+	    sleeptv.tv_usec = 100000;
+	    select (0, NULL, NULL, NULL, &sleeptv);
+         }
+         counter = 0;
+         chrono_base = std::chrono::system_clock::now();
+      } 
+
       rdbuff[0] = 0;
 
       // Create and clear out the FD set, set to watch the reader.

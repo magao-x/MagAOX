@@ -83,6 +83,13 @@ protected:
   int n_gizmos = 2;
   double gizmoTimeToTarget = 1;
 
+  // For testing resurrector and resurrectee.timeout
+  // - A positive value here, in seconds, effects a delay at the end of
+  //   MagAOXApp<_useINDI>::startResurectee().  The delay emulates the
+  //   delay of a slow-starting process e.g. that must wait for a device
+  //   to start, initialize, and/or connect to the process
+  unsigned int m_startup_delay{0};
+
 public:
   /// Default c'tor.
   timeSeriesSimulator();
@@ -147,12 +154,24 @@ timeSeriesSimulator::timeSeriesSimulator() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGA
 
 void timeSeriesSimulator::setupConfig()
 {
+   config.add("startup_delay", "", "startup_delay", mx::app::argType::Required, "", "startup_delay", false, "int"
+, "Delay to sleep at end of process startup, seconds; default=0,"
+  " which prevents any such delay.  This parameter is used for testing"
+  " resurrector behavior with slow-starting processes.  The default"
+  " startup timeout for resurrector is 10s.  Assigning a value of 10s or"
+  " greater will cause this process to fail to send its first hexbeat to"
+  " resurrector, which in turn will normally cause resurrector (i) to"
+  " assume this process has crashes or hung, and (ii) send a SIGUSR2"
+  " (kill) to stop this process and restart another.  To prevent that"
+  " action by resurrector, assign a value greater than [startup_delay]"
+  " to a second element of resurrectee.timeout in the configuration file.");
 }
 
 int timeSeriesSimulator::loadConfigImpl(mx::app::appConfigurator &_config)
 {
-    static_cast<void>(_config);
-    return 0;
+   _config(m_startup_delay, "startup_delay");
+
+  return 0;
 }
 
 void timeSeriesSimulator::loadConfig()
@@ -215,6 +234,15 @@ int timeSeriesSimulator::appStartup()
   startTimeSec = mx::sys::get_curr_time();
   updateVals();
   state(stateCodes::READY);
+
+  // Startup delsy; refer to help text above for startup_delay config
+  unsigned int seconds = m_startup_delay;
+  while (seconds > 0)
+  {
+    std::cerr << "Sleeping for " << seconds << 's' << std::endl;
+    seconds = sleep(seconds);
+  }
+
   return 0;
 }
 
