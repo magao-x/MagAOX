@@ -1948,8 +1948,8 @@ void MagAOXApp<_useINDI>::handlerSigTerm( int signum,
 {
     m_shutdown = 1;
 
-#if 0
     std::string signame;
+#if 0
     switch( signum )
     {
     case SIGTERM:
