@@ -52,7 +52,6 @@ class cameraSim : public MagAOXApp<>,
     friend class dev::telemeter<cameraSim>;
 
   public:
-
     typedef dev::stdCamera<cameraSim> stdCameraT;
     typedef dev::frameGrabber<cameraSim> frameGrabberT;
     typedef dev::telemeter<cameraSim> telemeterT;
@@ -110,16 +109,17 @@ class cameraSim : public MagAOXApp<>,
     double m_lastTime{ 0 };
     double m_offset = { 0 };
 
-    float m_bias {500}; ///< the simulated bias level. default 500.
-    float m_ron {5}; ///< the simulated readout noise, in counts/read. default 5.
+    float m_bias{ 500 }; ///< the simulated bias level. default 500.
+    float m_ron{ 5 };    ///< the simulated readout noise, in counts/read. default 5.
 
-    float m_xcen {0}; ///< the simulated star x center coordinate, relative to image center. default 0.
-    float m_ycen {0}; ///< the simulated star y center coordinate, relative to image center. default 0.
-    float m_peak {2000}; ///< the simulated star peak, in counts/second. default 2000.
-    float m_fwhm {2}; ///< the simulated star FWHM in pixels. default 2.
+    std::vector<float> m_xcen{ 0 }; /**< the simulated star x center coordinate, relative to image center.
+                                         one per star. default 0*/
+    std::vector<float> m_ycen{ 0 }; /**< the simulated star y center coordinate, relative to image center.
+                                         one per star. default 0.*/
+    std::vector<float> m_peak{ 2000 }; ///< the simulated star peak, in counts/second. one per star. default 2000.
+    float m_fwhm{ 2 };                 ///< the simulated star FWHM in pixels. the same for all stars. default 2.
 
-    float m_jitter {0.1}; ///< the simulated jitter, in pixels/read. default 2.
-
+    float m_jitter{ 0.1 }; ///< the simulated jitter, in pixels/read. the same for all stars. default 0.1.
 
     mx::math::normDistT<float> m_norm;
 
@@ -134,7 +134,7 @@ class cameraSim : public MagAOXApp<>,
     virtual void setupConfig();
 
     /// load the configuration system results (called by MagAOXApp::setup())
-    virtual int loadConfigImpl(mx::app::appConfigurator & cfg);
+    virtual int loadConfigImpl( mx::app::appConfigurator &cfg );
 
     /// load the configuration system results (called by MagAOXApp::setup())
     virtual void loadConfig();
@@ -269,9 +269,9 @@ inline void cameraSim::setupConfig()
 {
     dev::stdCamera<cameraSim>::setupConfig( config );
 
-    FRAMEGRABBER_SETUP_CONFIG(config);
+    FRAMEGRABBER_SETUP_CONFIG( config );
 
-    TELEMETER_SETUP_CONFIG(config);
+    TELEMETER_SETUP_CONFIG( config );
 
     config.add( "camsim.fullW",
                 "",
@@ -330,8 +330,8 @@ inline void cameraSim::setupConfig()
                 "camsim",
                 "xcen",
                 false,
-                "float",
-                "the simulated star x center coordinate, relative to image center. default 0." );
+                "vector<float>",
+                "the simulated star x center coordinate, relative to image center. one per star. default 0." );
 
     config.add( "camsim.ycen",
                 "",
@@ -340,8 +340,8 @@ inline void cameraSim::setupConfig()
                 "camsim",
                 "ycen",
                 false,
-                "float",
-                "the simulated star y center coordinate, relative to image center. default 0." );
+                "vector<float>",
+                "the simulated star y center coordinate, relative to image center. one per star. default 0." );
 
     config.add( "camsim.peak",
                 "",
@@ -350,8 +350,8 @@ inline void cameraSim::setupConfig()
                 "camsim",
                 "peak",
                 false,
-                "float",
-                "the simulated star peak, in counts/second. default 2000." );
+                "vector<float>",
+                "the simulated star peak, in counts/second. one per star. default 2000." );
 
     config.add( "camsim.fwhm",
                 "",
@@ -361,7 +361,7 @@ inline void cameraSim::setupConfig()
                 "fwhm",
                 false,
                 "float",
-                "the simulated star FWHM in pixels. default 2." );
+                "the simulated star FWHM in pixels. the same for all stars. default 2." );
 
     config.add( "camsim.jitter",
                 "",
@@ -371,54 +371,60 @@ inline void cameraSim::setupConfig()
                 "jitter",
                 false,
                 "float",
-                "the simulated jitter, in pixels/read. default 2." );
+                "the simulated jitter, in pixels/read. the same for all stars. default 0.1." );
 }
 
-inline int cameraSim::loadConfigImpl(mx::app::appConfigurator & cfg)
+inline int cameraSim::loadConfigImpl( mx::app::appConfigurator &cfg )
 {
     dev::stdCamera<cameraSim>::loadConfig( cfg );
 
-    FRAMEGRABBER_LOAD_CONFIG(cfg);
+    FRAMEGRABBER_LOAD_CONFIG( cfg );
 
-    TELEMETER_LOAD_CONFIG(cfg);
+    TELEMETER_LOAD_CONFIG( cfg );
 
-    cfg(m_full_w, "camsim.fullW");
-    cfg(m_full_h, "camsim.fullH");
+    cfg( m_full_w, "camsim.fullW" );
+    cfg( m_full_h, "camsim.fullH" );
 
-    m_full_x = 0.5*(m_full_w - 1.0);
-    m_full_y = 0.5*(m_full_h - 1.0);
+    m_full_x = 0.5 * ( m_full_w - 1.0 );
+    m_full_y = 0.5 * ( m_full_h - 1.0 );
 
-    if(m_default_w > m_full_w || m_default_x > m_full_w)
+    if( m_default_w > m_full_w || m_default_x > m_full_w )
     {
         m_default_w = m_full_w;
         m_default_x = m_full_x;
     }
 
-    if(m_default_h > m_full_h || m_default_y > m_full_h)
+    if( m_default_h > m_full_h || m_default_y > m_full_h )
     {
         m_default_h = m_full_h;
         m_default_y = m_full_y;
     }
 
     m_fps = 10;
-    cfg(m_fps, "camsim.defaultFPS");
+    cfg( m_fps, "camsim.defaultFPS" );
     m_fpsSet = m_fps;
 
-    config(m_bias, "camsim.bias");
-    config(m_ron, "camsim.ron");
+    config( m_bias, "camsim.bias" );
+    config( m_ron, "camsim.ron" );
 
-    config(m_xcen, "camsim.xcen");
-    config(m_ycen, "camsim.ycen");
-    config(m_peak, "camsim.peak");
-    config(m_fwhm, "camsim.fwhm");
+    config( m_xcen, "camsim.xcen" );
+    config( m_ycen, "camsim.ycen" );
+    config( m_peak, "camsim.peak" );
 
-    config(m_jitter, "camsim.jitter");
+    if( m_xcen.size() != m_ycen.size() || m_xcen.size() != m_peak.size() )
+    {
+        log<software_error>( { __FILE__, __LINE__, "cameraSim: xcen, ycen, and peak must be the same size." } );
+    }
+
+    config( m_fwhm, "camsim.fwhm" );
+
+    config( m_jitter, "camsim.jitter" );
     return 0;
 }
 
 inline void cameraSim::loadConfig()
 {
-    if(loadConfigImpl(config) < 0)
+    if( loadConfigImpl( config ) < 0 )
     {
         m_shutdown = 1;
     }
@@ -504,7 +510,6 @@ inline int cameraSim::appLogic()
         }
 
         FRAMEGRABBER_UPDATE_INDI;
-
     }
 
     ///\todo Fall through check?
@@ -514,7 +519,6 @@ inline int cameraSim::appLogic()
 
 inline int cameraSim::appShutdown()
 {
-
 
     dev::stdCamera<cameraSim>::appShutdown();
 
@@ -586,31 +590,37 @@ int cameraSim::acquireAndCheckValid()
 
     m_lastTime = dt;
 
-    float xcen = m_xcen + m_norm*m_jitter;
-    float ycen = m_ycen + m_norm*m_jitter;
-
-    for(uint32_t cc = 0; cc < m_height; ++cc)
+    for( uint32_t cc = 0; cc < m_height; ++cc )
     {
-        float y = (cc - 0.5*(1.0*m_height-1.0));
+        float y = ( cc - 0.5 * ( 1.0 * m_height - 1.0 ) ) +
+                  ( m_currentROI.y - 0.5 * ( 1.0 * m_full_h - 1.0 ) ); // Y position relative to the full array
 
-        for(uint32_t rr = 0; rr < m_width; ++rr)
+        for( uint32_t rr = 0; rr < m_width; ++rr )
         {
-            float x = (rr - 0.5*(1.0*m_width-1.0));
+            float x = ( rr - 0.5 * ( 1.0 * m_width - 1.0 ) ) +
+                      ( m_currentROI.x - 0.5 * ( 1.0 * m_full_w - 1.0 ) ); // X position realtive to the full array
 
-            m_fgimage(rr,cc) = m_bias + m_norm*m_ron;
+            m_fgimage( rr, cc ) = m_bias + m_norm * m_ron;
 
-            if( (m_shutterState == 1) && (fabs(y) < 4*m_fwhm) && (fabs(x) < 4*m_fwhm))
+            if( m_shutterState == 1 )
             {
-                float flux = mx::math::func::gaussian2D<float>(x, y, 0.0, m_peak*m_expTime, xcen, ycen, mx::math::func::fwhm2sigma(m_fwhm));
-                flux += m_norm*sqrt(flux);
+                for( size_t s = 0; s < m_xcen.size(); ++s )
+                {
+                    if( ( fabs( y - m_ycen[s] ) < 4 * m_fwhm ) && ( fabs( x - m_xcen[s] ) < 4 * m_fwhm ) )
+                    {
+                        float xcen = m_xcen[s] + m_norm * m_jitter;
+                        float ycen = m_ycen[s] + m_norm * m_jitter;
 
-                m_fgimage(rr,cc) += flux;
+                        float flux = mx::math::func::gaussian2D<float>(
+                            x, y, 0.0, m_peak[s] * m_expTime, xcen, ycen, mx::math::func::fwhm2sigma( m_fwhm ) );
+                        flux += m_norm * sqrt( flux );
+
+                        m_fgimage( rr, cc ) += flux;
+                    }
+                }
             }
         }
     }
-
-
-
 
     return 0;
 }
@@ -620,8 +630,12 @@ int cameraSim::loadImageIntoStream( void *dest )
 
     if( frameGrabber<cameraSim>::loadImageIntoStreamCopy(
             dest, m_fgimage.data(), m_width, m_height, sizeof( uint16_t ) ) == nullptr )
+    {
         return -1;
+    }
+
     m_imageStream->md->atime = m_imageStream->md->writetime;
+
     return 0;
 }
 
