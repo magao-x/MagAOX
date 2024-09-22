@@ -23,7 +23,6 @@ Test:
 #ifndef bmcCtrl_hpp
 #define bmcCtrl_hpp
 
-
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
@@ -66,7 +65,9 @@ class bmcCtrl : public MagAOXApp<true>, public dev::dm<bmcCtrl,float>, public de
    
    typedef float realT;  ///< This defines the datatype used to signal the DM using the ImageStreamIO library.
    
-   
+   typedef dev::dm<bmcCtrl,float> dmT;
+   typedef dev::shmimMonitor<bmcCtrl> shmimMonitorT;
+
    
 protected:
 
@@ -202,6 +203,8 @@ public:
    int get_actuator_mapping();
    
    ///@}
+
+
 };
 
 bmcCtrl::bmcCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -261,14 +264,16 @@ int bmcCtrl::appStartup()
    }
    
    dev::dm<bmcCtrl,float>::appStartup();
+
    shmimMonitor<bmcCtrl>::appStartup();
-   
+
    return 0;
 }
 
 int bmcCtrl::appLogic()
 {
    dev::dm<bmcCtrl,float>::appLogic();
+
    shmimMonitor<bmcCtrl>::appLogic();
    
    if(state()==stateCodes::POWEROFF) return 0;
@@ -276,6 +281,7 @@ int bmcCtrl::appLogic()
    if(state()==stateCodes::POWERON)
    {
       sleep(5);
+      std::cerr << "initing DM" << std::endl;
       return initDM();
    }
    
@@ -283,6 +289,7 @@ int bmcCtrl::appLogic()
    {
       log<text_log>("Saturated actuators in last second: " + std::to_string(m_nsat), logPrio::LOG_WARNING);
    }
+
    m_nsat = 0;
    
    return 0;
@@ -293,6 +300,7 @@ int bmcCtrl::appShutdown()
    if(m_dmopen) releaseDM();
       
    dev::dm<bmcCtrl,float>::appShutdown();
+
    shmimMonitor<bmcCtrl>::appShutdown();
    
    return 0;
@@ -437,52 +445,49 @@ int bmcCtrl::commandDM(void * curr_src)
    /*This loop performs the following steps:
      1) converts from float to double
      2) convert to volume-normalized displacement
-     3) convert to squared fractional voltage (0 to +1)
-     4) calculate the mean
+     3) convert to squared fractional voltage clamped from 0 to 1.
    */
 
+   #ifdef XWC_DMTIMINGS
+   dmT::m_tact0 = mx::sys::get_curr_time();
+   #endif
 
-   // want to rework the logic here so that we don't have to check
-   // if every actuator is addressable.
-   // Loop over addressable only?
-   //double mean = 0;
    for (uint32_t idx = 0; idx < m_nbAct; ++idx)
    {
-     int address = m_actuator_mapping[idx];
-     if(address == -1)
-     {
-        m_dminputs[idx] = 0.; // addressable but ignored actuators set to 0
-     } 
-     else 
-     {
-        m_dminputs[idx] = ((double)  ((realT *) curr_src)[address]) * m_volume_factor/m_act_gain;
-        //mean += m_dminputs[idx];
-     }
-   }
-   //mean /= m_nbAct;
+      int address = m_actuator_mapping[idx];
+      if(address == -1)
+      {
+         m_dminputs[idx] = 0.; // addressable but ignored actuators set to 0
+      } 
+      else 
+      {
+         m_dminputs[idx] = ((double)  (static_cast<realT *>(curr_src)[address])) * m_volume_factor/m_act_gain;
 
-   /*This loop performas the following steps:
-      1) remove mean from each actuator input (and add midpoint bias)
-      2) clip to fractional values between 0 and 1.
-      3) take the square root to approximate the voltage-displacement curve
-   */
-   for (uint32_t idx = 0 ; idx < m_nbAct ; ++idx)
-   {
-      //m_dminputs[idx] -= mean - 0.5;
-      if (m_dminputs[idx] > 1)
-      {
-         ++m_nsat;
-         m_dminputs[idx] = 1;
-      } else if (m_dminputs[idx] < 0)
-      {
-         ++m_nsat;
-         m_dminputs[idx] = 0;
+         if (m_dminputs[idx] > 1)
+         {
+            m_dminputs[idx] = 1;
+         } 
+         else if (m_dminputs[idx] < 0)
+         {
+            m_dminputs[idx] = 0;
+         }
+         else
+         {
+            m_dminputs[idx] = sqrt(m_dminputs[idx]);
+         }
       }
-      m_dminputs[idx] = sqrt(m_dminputs[idx]);
    }
 
-   /* Finally, send the command to the DM */
+   #ifdef XWC_DMTIMINGS
+   dmT::m_tact1 = mx::sys::get_curr_time();
+   #endif
+
+   /* Send the command to the DM */
    BMCRC ret = BMCSetArray(&m_dm, m_dminputs, NULL);
+   
+   #ifdef XWC_DMTIMINGS
+   dmT::m_tact2 = mx::sys::get_curr_time();
+   #endif
 
    /* Return immediately upon error, logging the error
    message first and then return the failure code. */
@@ -494,14 +499,22 @@ int bmcCtrl::commandDM(void * curr_src)
       return -1;
    }
 
+   #ifdef XWC_DMTIMINGS
+   dmT::m_tact3 = mx::sys::get_curr_time();
+   #endif
+
    /* Now update the instantaneous sat map */
    for (uint32_t idx = 0; idx < m_nbAct; ++idx)
    {
       int address = m_actuator_mapping[idx];
-      if(address == -1) continue;
-     
-      if(m_dminputs[idx] >= 1 || m_dminputs[idx] <= 0)
+
+      if(address == -1) 
       {
+         continue;
+      }
+      else if(m_dminputs[idx] >= 1 || m_dminputs[idx] <= 0)
+      {
+         ++m_nsat;
          m_instSatMap.data()[address] = 1;
       }
       else
@@ -510,6 +523,10 @@ int bmcCtrl::commandDM(void * curr_src)
       }
    }
    
+   #ifdef XWC_DMTIMINGS
+   dmT::m_tact4 = mx::sys::get_curr_time();
+   #endif
+
    return ret;
 }
 
