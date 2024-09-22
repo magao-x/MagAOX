@@ -537,6 +537,32 @@ public:
 
     ///@}
 
+public:
+
+    #ifdef XWC_DMTIMINGS
+    typedef uint16_t cbIndexT;
+
+    double m_t0 {0}, m_tf {0}, m_tsat0 {0}, m_tsatf {0};
+    double m_tact0 {0}, m_tact1 {0}, m_tact2 {0}, m_tact3 {0}, m_tact4 {0};
+
+    mx::sigproc::circularBufferIndex<double, cbIndexT> m_piTimes;
+
+    mx::sigproc::circularBufferIndex<double, cbIndexT> m_satSem;
+
+    mx::sigproc::circularBufferIndex<double, cbIndexT> m_actProc;
+
+    mx::sigproc::circularBufferIndex<double, cbIndexT> m_actCom;
+
+    mx::sigproc::circularBufferIndex<double, cbIndexT> m_satUp;
+
+    std::vector<double> m_piTimesD;
+    std::vector<double> m_satSemD;
+    std::vector<double> m_actProcD;
+    std::vector<double> m_actComD;
+    std::vector<double> m_satUpD;
+
+    #endif
+
 private:
     derivedT &derived()
     {
@@ -780,7 +806,9 @@ int dm<derivedT, realT>::appStartup()
     }
 
     if (sem_init(&m_satSemaphore, 0, 0) < 0)
+    {
         return derivedT::template log<software_critical, -1>({__FILE__, __LINE__, errno, 0, "Initializing sat semaphore"});
+    }
 
     if (derived().threadStart(m_satThread, m_satThreadInit, m_satThreadID, m_satThreadProp, m_satThreadPrio, "", "saturation", this, satThreadStart) < 0)
     {
@@ -803,6 +831,7 @@ int dm<derivedT, realT>::appLogic()
     }
 
     checkFlats();
+
     checkTests();
 
     if (m_intervalSatTrip)
@@ -810,6 +839,39 @@ int dm<derivedT, realT>::appLogic()
         intervalSatTrip();
         m_intervalSatTrip = false;
     }
+
+    #ifdef XWC_DMTIMINGS
+    static uint64_t lastMono = 0;
+
+    if(m_piTimes.size() >= m_piTimes.maxEntries() && m_piTimes.maxEntries() > 0 && m_piTimes.mono() != lastMono)
+    {
+       cbIndexT refEntry = m_piTimes.earliest();
+         
+       m_piTimesD.resize(m_piTimes.maxEntries());
+       m_satSemD.resize(m_satSem.maxEntries());
+       m_actProcD.resize(m_actProc.maxEntries());
+       m_actComD.resize(m_actCom.maxEntries());
+       m_satUpD.resize(m_satUp.maxEntries());
+
+       for(size_t n=0; n <= m_piTimesD.size(); ++n)
+       {
+           m_piTimesD[n] = m_piTimes.at(refEntry,n);
+           m_satSemD[n] = m_satSem.at(refEntry,n);
+           m_actProcD[n] = m_actProc.at(refEntry,n);
+           m_actComD[n] = m_actCom.at(refEntry,n);
+           m_satUpD[n] = m_satUp.at(refEntry,n);
+       }
+
+       std::cerr << "Act. Process:   " << mx::math::vectorMean(m_actProcD) << " +/- " << sqrt(mx::math::vectorVariance(m_actProcD)) << "\n";
+       std::cerr << "Act. Command:   " << mx::math::vectorMean(m_actComD) << " +/- " << sqrt(mx::math::vectorVariance(m_actComD)) << "\n";
+       std::cerr << "Sat. Update:    " << mx::math::vectorMean(m_satUpD) << " +/- " << sqrt(mx::math::vectorVariance(m_satUpD)) << "\n";
+       std::cerr << "Tot. CommandDM: " << mx::math::vectorMean(m_piTimesD) << " +/- " << sqrt(mx::math::vectorVariance(m_piTimesD)) << "\n";
+       std::cerr << "Sat. Semaphore: " << mx::math::vectorMean(m_satSemD) << " +/- " << sqrt(mx::math::vectorVariance(m_satSemD)) << "\n";
+       std::cerr << "\n";
+
+       lastMono = m_piTimes.mono();
+    }
+    #endif //XWC_DMTIMINGS
 
     return 0;
 }
@@ -836,6 +898,7 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::onPowerOff()
 {
     releaseDM();
+
     return 0;
 }
 
@@ -928,6 +991,14 @@ int dm<derivedT, realT>::allocate(const dev::shmimT &sp)
         return -1;
     }
 
+    #ifdef XWC_DMTIMINGS
+    m_piTimes.maxEntries(2000);
+    m_satSem.maxEntries(2000);
+    m_actProc.maxEntries(2000);
+    m_actCom.maxEntries(2000);
+    m_satUp.maxEntries(2000);
+    #endif
+
     return 0;
 }
 
@@ -937,13 +1008,26 @@ int dm<derivedT, realT>::processImage(void *curr_src,
 {
     static_cast<void>(sp); // be unused
 
+    #ifdef XWC_DMTIMINGS
+    m_t0 = mx::sys::get_curr_time();
+    #endif
+    
     int rv = derived().commandDM(curr_src);
+
+    #ifdef XWC_DMTIMINGS
+    m_tf = mx::sys::get_curr_time();
+    #endif
 
     if (rv < 0)
     {
         derivedT::template log<software_critical>({__FILE__, __LINE__, errno, rv, "Error from commandDM"});
         return rv;
     }
+
+    #ifdef XWC_DMTIMINGS
+    m_tsat0 = mx::sys::get_curr_time();
+    #endif
+
     // Tell the sat thread to get going
     if (sem_post(&m_satSemaphore) < 0)
     {
@@ -951,6 +1035,21 @@ int dm<derivedT, realT>::processImage(void *curr_src,
         return -1;
     }
 
+    #ifdef XWC_DMTIMINGS
+    m_tsatf = mx::sys::get_curr_time();
+    #endif
+
+    #ifdef XWC_DMTIMINGS
+    //Update the latency circ. buffs
+    if(m_piTimes.maxEntries() > 0)
+    {
+        m_piTimes.nextEntry(m_tf-m_t0);
+        m_satSem.nextEntry(m_tsatf - m_tsat0);
+        m_actProc.nextEntry(m_tact1 - m_tact0);
+        m_actCom.nextEntry(m_tact2 - m_tact1);
+        m_satUp.nextEntry(m_tact4 - m_tact3);
+    }
+    #endif
     return rv;
 }
 
@@ -972,6 +1071,7 @@ int dm<derivedT, realT>::releaseDM()
 
     return 0;
 }
+
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::checkFlats()
 {
@@ -1637,7 +1737,9 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::zeroAll(bool nosem)
 {
     if (derived().m_shmimName == "")
+    {
         return 0;
+    }
 
     IMAGE imageStream;
 
@@ -1712,8 +1814,10 @@ int dm<derivedT, realT>::zeroAll(bool nosem)
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::clearSat()
 {
-    if (m_shmimSat == "")
+    if(m_shmimSat == "" || m_dmWidth == 0 || m_dmHeight == 0)
+    {
         return 0;
+    }
 
     IMAGE imageStream;
 
@@ -1746,7 +1850,7 @@ int dm<derivedT, realT>::clearSat()
         }
 
         imageStream.md->write = 1;
-        memset(imageStream.array.raw, 0, m_dmWidth * m_dmHeight * sizeof(realT));
+        memset(imageStream.array.raw, 0, m_dmWidth * m_dmHeight * sizeof(uint8_t));
 
         clock_gettime(CLOCK_REALTIME, &imageStream.md->writetime);
 
@@ -1792,8 +1896,11 @@ void dm<derivedT, realT>::satThreadExec()
     {
         sleep(1);
     }
+
     if (derived().shutdown())
+    {
         return;
+    }
 
     imsize[0] = m_dmWidth;
     imsize[1] = m_dmHeight;
@@ -1840,7 +1947,9 @@ void dm<derivedT, realT>::satThreadExec()
 
             // If less than avg int --> go back and wait again
             if (mx::sys::get_curr_time(ts) - t_accumst < m_satAvgInt / 1000.0)
+            {
                 continue;
+            }
 
             // If greater than avg int --> calc stats, write to streams.
             m_overSatAct = 0;
@@ -1850,7 +1959,9 @@ void dm<derivedT, realT>::satThreadExec()
                 {
                     m_satPercMap(rr, cc) = m_accumSatMap(rr, cc) / naccum;
                     if (m_satPercMap(rr, cc) >= m_percThreshold)
+                    {
                         ++m_overSatAct;
+                    }
                     satmap(rr, cc) = (m_accumSatMap(rr, cc) > 0); // it's  1/0 map
                 }
             }
@@ -1858,13 +1969,19 @@ void dm<derivedT, realT>::satThreadExec()
             // Check of the number of actuators saturated above the percent threshold is greater than the number threshold
             // if it is, increment the counter
             if (m_overSatAct / (m_satPercMap.rows() * m_satPercMap.cols() * 0.75) > m_intervalSatThreshold)
+            {
                 ++m_intervalSatExceeds;
+            }
             else
+            {
                 m_intervalSatExceeds = 0;
+            }
 
             // If enough consecutive intervals exceed the count threshold, we trigger
             if (m_intervalSatExceeds >= m_intervalSatCountThreshold)
+            {
                 m_intervalSatTrip = true;
+            }
 
             m_satImageStream.md->write = 1;
             m_satPercImageStream.md->write = 1;
@@ -1911,7 +2028,9 @@ void dm<derivedT, realT>::satThreadExec()
         {
             // Check for why we timed out
             if (errno == EINTR)
+            {
                 break; // This indicates signal interrupted us, time to restart or shutdown, loop will exit normally if flags set.
+            }
 
             // ETIMEDOUT just means we should wait more.
             // Otherwise, report an error.
