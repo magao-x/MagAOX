@@ -853,7 +853,7 @@ int dm<derivedT, realT>::appLogic()
        m_actComD.resize(m_actCom.maxEntries());
        m_satUpD.resize(m_satUp.maxEntries());
 
-       for(size_t n=0; n <= m_piTimesD.size(); ++n)
+       for(size_t n=0; n < m_piTimesD.size(); ++n)
        {
            m_piTimesD[n] = m_piTimes.at(refEntry,n);
            m_satSemD[n] = m_satSem.at(refEntry,n);
