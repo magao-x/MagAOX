@@ -50,7 +50,7 @@ struct user_log : public flatbuffer_log
                       )
     {
         auto verifier = flatbuffers::Verifier( static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)), static_cast<size_t>(len));
-        return VerifyString_log_fbBuffer(verifier);
+        return VerifyUser_log_fbBuffer(verifier);
     }
 
     ///Get the message formatte for human consumption.
