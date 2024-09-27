@@ -9,10 +9,21 @@ import psycopg
 from psycopg import sql
 from tqdm import tqdm
 
-from .records import Telem, FileOrigin, FileReplica, FileIngestTime
+from .records import Telem, FileOrigin, FileReplica, FileIngestTime, UserLog
 from ..utils import creation_time_from_filename, parse_iso_datetime_as_utc
 
 log = logging.getLogger(__name__)
+
+def batch_user_log(cur: psycopg.Cursor, records: list[UserLog]):
+    """This will be where the logs will insert into user_logs table"""
+    #for log in records:
+    cur.execute('BEGIN')
+    cur.executemany(f'''
+INSERT INTO user_log (ts, device, ec, msg)
+VALUES (%s, %s, %s::JSONB, %s)
+ON CONFLICT (ts, ec) DO NOTHING;
+''', [(rec.ts, rec.device, Jsonb(rec.msg, dumps=orjson.dumps), rec.ec)for rec in records])
+    cur.execute('COMMIT')
 
 def batch_telem(cur: psycopg.Cursor, records: list[Telem]):
     cur.execute("BEGIN")
@@ -20,7 +31,7 @@ def batch_telem(cur: psycopg.Cursor, records: list[Telem]):
 INSERT INTO telem (ts, device, msg, ec)
 VALUES (%s, %s, %s::JSONB, %s)
 ON CONFLICT (device, ts) DO NOTHING;
-''', [(rec.ts, rec.device, Jsonb(rec.msg, dumps=orjson.dumps), rec.ec) for rec in records])
+''', [(rec.ts, rec.device, Jsonb(rec.msg, rec.ec, dumps=orjson.dumps)) for rec in records])
     cur.execute("COMMIT")
 
 def batch_file_origins(cur: psycopg.Cursor, records: list[FileOrigin]):
@@ -70,6 +81,7 @@ def identify_new_files(cur: psycopg.Cursor, this_host: str, paths: list[str]):
         cur.execute("ROLLBACK")  # ensure temp table is deleted
     return new_files
 
+#add non-ingested-userlogs?
 
 def identify_non_ingested_telem(cur: psycopg.Cursor, host: str) -> list[str]:
     '''Use ``file_origins`` table to find ``.bintel`` file paths on the host
