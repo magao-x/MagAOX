@@ -14,6 +14,7 @@ __all__ = [
     'FileReplica',
     'FileIngestTime',
     'Telem',
+    'UserLog'
 ]
 
 FALLBACK_JSON = FunkyJSONDecoder()
@@ -98,24 +99,22 @@ class Telem:
 ##### user log here
 @dataclass
 class UserLog:
+    device : str
     ts : datetime.datetime
-    user : str
-    msg : str
+    ec : str
+    msg : dict
 
     @classmethod
-    def from_json(cls, json_str):
+    def from_json(cls,device, json_str):
         payload = _parse_msg_json(json_str)
         return cls(
-            ts = parse_iso_datetime_as_utc(payload['ts'])
-            user = payload['USER']
-            message=payload['message'],
+            device = device,
+            ts = parse_iso_datetime_as_utc(payload['ts']),
+            ec = payload['ec'],
+            msg = payload['msg']
         )
     
     def get_msg_json_bytes(self) -> bytes:
-        return orjson.dumps({
-            'ts' : self.ts.isoformat(),
-            'user' : self.user,
-            'message' : self.message,
-        })
+        return orjson.dumps(self.msg)
     def get_msg_json(self) -> str:
         return self.get_msg_json_bytes().decode('utf8')
