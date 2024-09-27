@@ -22,7 +22,7 @@ def batch_user_log(cur: psycopg.Cursor, records: list[UserLog]):
 INSERT INTO user_log (ts, device, ec, msg)
 VALUES (%s, %s, %s::JSONB, %s)
 ON CONFLICT (ts, ec) DO NOTHING;
-''', [(rec.ts, rec.device, Jsonb(rec.msg, dumps=orjson.dumps), rec.ec)for rec in records])
+''', [(rec.ts, rec.device, Jsonb(rec.msg, dumps=orjson.dumps), rec.ec)for rec in records if rec.ec == 'user_log'])
     cur.execute('COMMIT')
 
 def batch_telem(cur: psycopg.Cursor, records: list[Telem]):
