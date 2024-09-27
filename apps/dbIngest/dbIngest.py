@@ -64,6 +64,8 @@ CREATE_CONNECTION_TIMEOUT_SEC = 2
 EXIT_TIMEOUT_SEC = 2
 
 def _run_logdump_thread(logger_name, logdump_dir, logdump_args, name, message_queue):
+    # filter what content from user_logs gets put into db
+    ec_filter = ['user_log']
     log = logging.getLogger(logger_name)
     glob_pat = logdump_dir + f'/{name}_*'
     has_no_logs = len(glob.glob(glob_pat)) == 0
@@ -92,19 +94,29 @@ class dbIngestConfig(BaseDeviceConfig):
 class dbIngest(XDevice):
     config : dbIngestConfig
     telem_threads : list[tuple[str, threading.Thread]]
-    fs_observer : BaseObserverSubclassCallable
     telem_queue : queue.Queue
+    fs_observer : BaseObserverSubclassCallable
     fs_queue : queue.Queue
     last_update_ts_sec : float
     startup_ts_sec : float
     records_since_startup : float
+    #add user_log support here
+    user_log_threads : list[tuple[str, threading.Thread]]
+    user_log_queue : queue.Queue
 
-    def launch_follower(self, dev):
-        args = self.log.name + '.' + dev, '/opt/MagAOX/telem', (self.config.logdump_exe, '--ext=.bintel'), dev, self.telem_queue
-        telem_thread = threading.Thread(target=_run_logdump_thread, args=args, daemon=True)
+    def launch_followers(self, dev):
+        telem_args = self.log.name + '.' + dev, '/opt/MagAOX/telem', (self.config.logdump_exe, '--ext=.bintel'), dev, self.telem_queue
+        telem_thread = threading.Thread(target=_run_logdump_thread, args=telem_args, daemon=True)
         telem_thread.start()
         self.log.debug(f"Watching {dev} for incoming telem")
         self.telem_threads.append((dev, telem_thread))
+
+        #userLog support here
+        ULog_args = self.log.name + '.' + dev, '/opt/MagAOX/logs', (self.config.logdump_exe, '--ext=.binlog'), dev, self.user_log_queue
+        user_log_thread = threading.Thread(target=_run_logdump_thread, args= ULog_args, daemon=True)
+        user_log_thread.start()
+        self.log.debug(f"Watching {dev} for incoming user logs")
+        self.user_log_threads.append((dev, user_log_thread))
 
     def refresh_properties(self):
         self.properties['last_update']['timestamp'] = self.last_update_ts_sec
@@ -161,10 +173,14 @@ class dbIngest(XDevice):
                     raise RuntimeError(f"Got malformed proclist line: {repr(line)}")
                 device_names.add(parts[0])
 
+        #setup user log here too
+        self.user_log_queue = queue.Queue()
+        self.user_log_threads = []
+
         self.telem_queue = queue.Queue()
         self.telem_threads = []
         for dev in device_names:
-            self.launch_follower(dev)
+            self.launch_followers(dev)
         
         self.startup_ts_sec = time.time()
         
@@ -206,10 +222,20 @@ class dbIngest(XDevice):
         except queue.Empty:
             pass
 
+        #update for userlog here too
+        user_logs = []
+        try:
+            while rec := self.user_log_queue.get(timeout=0.1):
+                user_logs.append(rec)
+                self.records_since_startup += 1
+        except queue.Empty:
+            pass
+
         with self.conn.transaction():
             cur = self.conn.cursor()
             ingest.batch_telem(cur, telems)
             ingest.batch_file_origins(cur, fs_events)
+            ingest.batch_user_log(cur, user_logs)
 
         this_ts_sec = time.time()
         self.last_update_ts_sec = this_ts_sec
