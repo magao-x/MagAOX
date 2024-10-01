@@ -34,6 +34,9 @@ class stdMotionNode : public fsmNode
     /// The current value of the preset property.  Corresponds to the element name of the selected preset.
     std::string m_curVal;
 
+    /// The current value of the put label.
+    std::string m_curLabel;
+
     std::vector<std::string> m_presetPutName{ "out" };
 
     /// This sets whether the multi-put selector is on the input or the output (default)
@@ -42,13 +45,22 @@ class stdMotionNode : public fsmNode
      */
     ingr::ioDir m_presetDir{ ingr::ioDir::output };
 
-    /// The INDI key (device.property) for the switch denoting that this stage is tracking and should be tracking.
+    /// The INDI key (device.property) for the switch denoting that this stage should be or should not be tracking
+    std::string m_trackingReqKey;
+
+    /// The element of the INDI property denoted by m_trackingReqKey to follow.
+    std::string m_trackingReqElement;
+
+    /// The INDI key (device.property) for the switch denoting that this stage is tracking
     std::string m_trackerKey;
 
     /// The element of the INDI property denoted by m_trackerKey to follow.
     std::string m_trackerElement;
 
-    /// Flag indicating whether or not the stage is currently tracking.
+    /// Flag indicating if the stage should be (true) or should not be (false, default) tracking.
+    bool m_trackingReq{ false };
+
+    /// Flag indicating whether or not the stage is currently tracking (default false).
     bool m_tracking{ false };
 
   public:
@@ -67,6 +79,12 @@ class stdMotionNode : public fsmNode
 
     const std::string & presetPrefix();
 
+    /// Get the current label text
+    /**
+     * \returns the current value of m_curLabel.
+     */
+    const std::string & curLabel();
+
     void presetPutName( const std::vector<std::string> &ppp /**< [in] */);
 
     const std::vector<std::string> & presetPutName();
@@ -74,6 +92,14 @@ class stdMotionNode : public fsmNode
     void presetDir( const ingr::ioDir &dir /**< [in] */);
 
     const ingr::ioDir & presetDir();
+
+    void trackingReqKey( const std::string &tk /**< [in] */);
+
+    const std::string & trackingReqKey();
+
+    void trackingReqElement( const std::string &te /**< [in] */);
+
+    const std::string & trackingReqElement();
 
     void trackerKey( const std::string &tk /**< [in] */);
 
@@ -83,13 +109,14 @@ class stdMotionNode : public fsmNode
 
     const std::string & trackerElement();
 
-    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] */);
+    /// INDI SetProperty callback
+    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
     virtual void togglePutsOn();
 
     virtual void togglePutsOff();
 
-    void loadConfig( mx::app::appConfigurator &config /**< [in] */);
+    void loadConfig( mx::app::appConfigurator &config /**< [in] the application configurator loaded with this node's options*/);
 };
 
 inline stdMotionNode::stdMotionNode( const std::string &name, ingr::instGraphXML *parentGraph ) : fsmNode( name, parentGraph )
@@ -136,6 +163,11 @@ inline const std::string & stdMotionNode::presetPrefix()
     return m_presetPrefix;
 }
 
+inline const std::string & stdMotionNode::curLabel()
+{
+    return m_curLabel;
+}
+
 inline void stdMotionNode::presetPutName( const std::vector<std::string> &ppp )
 {
     m_presetPutName = ppp;
@@ -154,6 +186,31 @@ inline void stdMotionNode::presetDir( const ingr::ioDir &dir )
 inline const ingr::ioDir & stdMotionNode::presetDir()
 {
     return m_presetDir;
+}
+
+inline void stdMotionNode::trackingReqKey( const std::string &tk )
+{
+    m_trackingReqKey = tk;
+
+    if( m_trackingReqKey != "" )
+    {
+        key( m_trackingReqKey );
+    }
+}
+
+inline const std::string & stdMotionNode::trackingReqKey()
+{
+    return m_trackingReqKey;
+}
+
+inline void stdMotionNode::trackingReqElement( const std::string &te )
+{
+    m_trackingReqElement = te;
+}
+
+inline const std::string & stdMotionNode::trackingReqElement()
+{
+    return m_trackingReqElement;
 }
 
 inline void stdMotionNode::trackerKey( const std::string &tk )
@@ -183,11 +240,32 @@ inline const std::string & stdMotionNode::trackerElement()
 
 inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
-    std::cerr << name() << ": handleSetProperty=" << ipRecv.createUniqueKey() << "\n";
-
     fsmNode::handleSetProperty( ipRecv );
 
-    if( ipRecv.createUniqueKey() == m_presetKey )
+    if( ipRecv.createUniqueKey() == m_trackingReqKey )
+    {
+        if( ipRecv.find( m_trackingReqElement ) )
+        {
+            if( ipRecv[m_trackingReqElement].getSwitchState() == pcf::IndiElement::On )
+            {
+                if( !m_trackingReq )
+                {
+                    ++m_changes;
+                }
+
+                m_trackingReq = true;
+            }
+            else
+            {
+                if( m_trackingReq )
+                {
+                    ++m_changes;
+                }
+                m_trackingReq = false;
+            }
+        }
+    }
+    else if( ipRecv.createUniqueKey() == m_trackerKey )
     {
         if( ipRecv.find( m_trackerElement ) )
         {
@@ -212,10 +290,9 @@ inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
     }
     else if( ipRecv.createUniqueKey() == m_presetKey )
     {
-        std::cerr << "got " << ipRecv.createUniqueKey() << "\n";
-
         if( m_node != nullptr )
         {
+            bool nothingIsOn = true;
             for( auto &&it : ipRecv.getElements() )
             {
                 if( it.second.getSwitchState() == pcf::IndiElement::On )
@@ -226,7 +303,17 @@ inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
                     }
 
                     m_curVal = it.second.getName();
+                    nothingIsOn = false;
                 }
+            }
+
+            if(nothingIsOn)
+            {
+                if( m_curVal != "" && !m_tracking ) // we only update if not tracking
+                {
+                    ++m_changes;
+                }
+                m_curVal = "";
             }
         }
     }
@@ -235,45 +322,60 @@ inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
     {
         m_changes = 0;
 
-        if( m_state != MagAOX::app::stateCodes::READY ||
-            ( m_tracking &&
-              !( m_state == MagAOX::app::stateCodes::READY || m_state == MagAOX::app::stateCodes::OPERATING ) ) )
+        if(m_trackingReq)
         {
-            std::cerr << name() << ": toggling off because not READY: " << m_state << "\n";
-            togglePutsOff();
+            if(m_tracking && (m_state == MagAOX::app::stateCodes::READY || m_state == MagAOX::app::stateCodes::OPERATING ) )
+            {
+                togglePutsOn();
+            }
+            else
+            {   //Either we aren't tracking or we aren't READY || OPERATING
+                togglePutsOff();
+            }
         }
-        else if( m_curVal == "none" && !m_tracking )
+        else
         {
-            std::cerr << name() << ": toggling off because 'none'\n";
-            togglePutsOff();
-        }
-        else // Here it's either  (READY && !none) || (m_tracking && (READY||OPERATING))
-        {
-            std::cerr << name() << ": toggling on because READY and " << m_curVal << "\n";
-            togglePutsOn();
+            if( m_state != MagAOX::app::stateCodes::READY || m_tracking || m_curVal == "none" || m_curVal == "")
+            {
+                togglePutsOff();
+            }
+            else
+            {
+                togglePutsOn();
+            }
         }
     }
 }
 
 inline void stdMotionNode::togglePutsOn()
 {
-    if( m_tracking )
+    if(m_node == nullptr || !m_parentGraph || !m_node->auxDataValid())
     {
-        m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "tracking" );
+        return;
+    }
+
+    if( m_trackingReq )
+    {
+        if( m_tracking )
+        {
+            m_curLabel = "tracking";
+            m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "tracking" );
+            xigNode::togglePutsOn();
+        }
+        else
+        {
+            m_curLabel = "not tracking";
+            m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "not tracking" );
+            m_parentGraph->stateChange();
+        }
     }
     else if( m_state == MagAOX::app::stateCodes::READY )
     {
+        m_curLabel = m_curVal;
+
         if( m_presetPutName.size() == 1 ) // There's only one put, it's just on or off with a value
         {
-            if( m_node->auxDataValid() )
-            {
-                if( m_parentGraph )
-                {
-                    {
-                        m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, m_curVal );
-                    }
-                }
-            }
+            m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, m_curVal );
             xigNode::togglePutsOn();
         }
         else // There is more than one put, and which one is on is selected by the value of the switch
@@ -307,30 +409,36 @@ inline void stdMotionNode::togglePutsOn()
                     pptr->state( ingr::putState::off );
                 }
             }
-            std::cerr << "changing state\n";
             m_parentGraph->stateChange();
         }
     }
 
-    return; // we don't automatically toggle puts on upon power on.
+    return;
 }
 
 inline void stdMotionNode::togglePutsOff()
 {
-    std::cerr << name() << ": toggle off\n";
-    if( m_node != nullptr )
+    if(m_node == nullptr || !m_parentGraph || !m_node->auxDataValid())
     {
-        if( m_node->auxDataValid() )
-        {
-            if( m_presetPutName.size() == 1 )
-            {
-                m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "off" );
-            }
-            else
-            {
-            }
-        }
+        return;
     }
+
+    if( m_tracking ) //regardless of whether required, if tracking this is our state
+    {
+        m_curLabel = "tracking";
+        m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "tracking" );
+    }
+    else if( m_trackingReq ) //we can only be "not tracking" if tracking is required
+    {
+        m_curLabel = "not tracking";
+        m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "not tracking" );
+    }
+    else if( m_presetPutName.size() == 1 ) //otherwise, if we have a single node it's off
+    {
+        m_curLabel = "off";
+        m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "off" );
+    }
+    //We don't change labels if m_presetPutName.size() > 1
 
     xigNode::togglePutsOff();
 }
@@ -349,9 +457,9 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
     std::string type;
     config.configUnused(type, mx::app::iniFile::makeKey( name(), "type" ));
 
-    if(type != "stdMotionNode")
+    if(type != "stdMotion")
     {
-        std::string msg = "stdMotionNode::loadConfig: node type is not stdMotionNode ";
+        std::string msg = "stdMotionNode::loadConfig: node type is not stdMotion";
         msg += " at ";
         msg += __FILE__;
         msg += " " + std::to_string( __LINE__ );
@@ -396,12 +504,29 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
         throw std::runtime_error( msg );
     }
 
+    std::string trackReqKey;
+    config.configUnused( trackReqKey, mx::app::iniFile::makeKey( name(), "trackingReqKey" ) );
+
+    std::string trackReqEl;
+    config.configUnused( trackReqEl, mx::app::iniFile::makeKey( name(), "trackingReqElement" ) );
+
+    //Check if both are set
+    if( ( trackReqKey == "" && trackReqEl != "" ) || ( trackReqKey != "" && trackReqEl == "" ) )
+    {
+        std::string msg = "stdMotionNode::loadConfig: trackingReqKey and trackingReqElement must both be provided)";
+        msg += " at ";
+        msg += __FILE__;
+        msg += " " + std::to_string( __LINE__ );
+        throw std::runtime_error( msg );
+    }
+
     std::string trackKey;
     config.configUnused( trackKey, mx::app::iniFile::makeKey( name(), "trackerKey" ) );
 
     std::string trackEl;
     config.configUnused( trackEl, mx::app::iniFile::makeKey( name(), "trackerElement" ) );
 
+    //Check if both are set
     if( ( trackKey == "" && trackEl != "" ) || ( trackKey != "" && trackEl == "" ) )
     {
         std::string msg = "stdMotionNode::loadConfig: trackerKey and trackerElement must both be provided)";
@@ -411,9 +536,21 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
         throw std::runtime_error( msg );
     }
 
+    //This will catch the case where one or the other pair was set, but not both
+    if( ( trackKey == "" && trackReqKey != "" ) || ( trackKey != "" && trackReqKey == "" ) )
+    {
+        std::string msg = "stdMotionNode::loadConfig: trackingReqKey and trackerKey must both be provided)";
+        msg += " at ";
+        msg += __FILE__;
+        msg += " " + std::to_string( __LINE__ );
+        throw std::runtime_error( msg );
+    }
+
     device( dev );
     presetPrefix( prePrefix );
     presetPutName( prePutName );
+    trackingReqKey( trackReqKey );
+    trackingReqElement( trackReqEl );
     trackerKey( trackKey );
     trackerElement( trackEl );
 }

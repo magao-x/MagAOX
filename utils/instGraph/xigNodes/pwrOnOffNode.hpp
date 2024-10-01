@@ -23,7 +23,8 @@ class pwrOnOffNode : public xigNode
 
     void pwrKey( const std::string &pk );
 
-    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv );
+    /// INDI SetProperty callback
+    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
     virtual void toggleOn();
 
@@ -95,9 +96,9 @@ void pwrOnOffNode::loadConfig( mx::app::appConfigurator &config )
     std::string type;
     config.configUnused(type, mx::app::iniFile::makeKey( name(), "type" ));
 
-    if(type != "pwrOnOffNode")
+    if(type != "pwrOnOff")
     {
-        std::string msg = "pwrOnOffNode::loadConfig: node type is not stdMotionNode ";
+        std::string msg = "pwrOnOffNode::loadConfig: node type is not pwrOnOff";
         msg += " at ";
         msg += __FILE__;
         msg += " " + std::to_string( __LINE__ );

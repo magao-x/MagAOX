@@ -173,6 +173,8 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
 
         std::cerr << "found node " << sections[i] << ": " << type << "\n";
 
+        xigNode * xn = nullptr;
+
         if( type == "pwrOnOff" )
         {
             pwrOnOffNode *nn;
@@ -203,7 +205,9 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
                 throw std::runtime_error(msg);
             }
 
-            try
+            xn = nn;
+
+            /*try
             {
                 m_nodes.insert( { nn->node()->name(), nn } );
             }
@@ -214,7 +218,7 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
                 msg += __FILE__;
                 msg += " " + std::to_string(__LINE__);
                 throw std::runtime_error(msg);
-            }
+            }*/
 
         }
         else if(type == "stdMotion")
@@ -246,9 +250,27 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
                 throw std::runtime_error(msg);
             }
 
-            try
+            xn = nn;
+            /*try
             {
                 m_nodes.insert( { nn->node()->name(), nn } );
+            }
+            catch(const std::exception& e)
+            {
+                std::string msg = e.what();
+                msg += "\ncaught at ";
+                msg += __FILE__;
+                msg += " " + std::to_string(__LINE__);
+                throw std::runtime_error(msg);
+            }*/
+
+        }
+
+        if(xn != nullptr)
+        {
+            try
+            {
+                m_nodes.insert( { xn->node()->name(), xn } );
             }
             catch(const std::exception& e)
             {

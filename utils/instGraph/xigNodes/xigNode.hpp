@@ -27,7 +27,7 @@ class xigNode
     int m_changes{ 0 }; ///< Counter that can be incremented when changes are detected.  Set to 0 when graph is updated.
 
   public:
-    xigNode() = delete;
+    xigNode() = delete; // default c'tor is deleted
 
     /// Constructor.
     /**
@@ -42,16 +42,31 @@ class xigNode
       */
     std::string name();
 
+    /// Get the set holding the INDI keys for this node
+    /**
+     * \returns a const reference to m_keys
+     */
     const std::set<std::string> &keys();
 
+    /// Add a key to the set
     void key( const std::string &nkey );
 
+    /// Get the pointer to the underlying node.
+    /**
+     * \returns the node pointer, which can not be nullptr after construction
+     */
     ingr::instNode *node();
 
-    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv ) = 0;
+    /// INDI SetProperty callback
+    /**
+     * This is a pure virtual function in xigNode.
+     */
+    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ ) = 0;
 
+    /// Change the state of all inputs and all outputs to on.
     virtual void togglePutsOn();
 
+    /// Change the state of all inputs and all outputs to off.
     virtual void togglePutsOff();
 
     #ifdef XWC_XIGNODE_TEST
