@@ -10,7 +10,7 @@ irqs=$(awk '{print $1}' /proc/interrupts | grep '[0-9]:' | sed 's/.$//')
 
 for irq in $irqs; do
     if [ "$irq" != "0" ]; then
-        echo "0-31,64-49" > /proc/irq/$irq/smp_affinity_list || true
+        echo "0-31,64-95" > /proc/irq/$irq/smp_affinity_list || true
     fi
 done
 
@@ -29,7 +29,7 @@ for nvidia in $nvidias; do
 done
 
 dmws=$(grep cp2x72c /proc/interrupts | awk '{print $1}' | sed 's/.$//')
-cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/dmwoofer/cpuset.cpus)
+cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/woofer/cpuset.cpus)
 for dmw in $dmws; do
     echo "alpao: " $dmw " to " $cpu 
     echo $cpu > /proc/irq/$dmw/smp_affinity_list
