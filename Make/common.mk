@@ -19,7 +19,6 @@ EDT ?= false
 PYLON ?= false
 PICAM ?= false
 ifeq ($(MAGAOX_ROLE),ICC)
-  EDT = true
   PYLON = true
   PICAM = true
 else

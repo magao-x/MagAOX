@@ -6,68 +6,28 @@
 ## See https://linux.die.net/man/7/cpuset
 ##
 ## Run this as sudo at startup of the system
-## Then run icc_procset after starting all loop processes
+## Then run rtc_procset after starting all loop processes
 ##
 ####################################################
 
 source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
 cpusetMount=$CGROUPS1_CPUSET_MOUNTPOINT
 
-# On ICC (v2) we have 2x18 = 36 real cores, which maps to 72 cpus
-# To see the list: cat /proc/cpuinfo | egrep 'processor|physical id|core id'
-# Each row in this table corresponds to a real core, and two logical processors.
-#
-# processor   physical-id    core-id    processor    physical-id    core-id  
-#     0           0            0           36            0            0
-#     1           0            1           37            0            1
-#     2           0            2           38            0            2
-#     3           0            3           39            0            3 
-#     4           0            4           40            0            4 
-#     5           0            8           41            0            8 
-#     6           0            9           42            0            9 
-#     7           0            10          43            0            10 
-#     8           0            11          44            0            11 
-#     9           0            16          45            0            16 
-#    10           0            17          46            0            17 
-#    11           0            18          47            0            18 
-#    12           0            19          48            0            19  
-#    13           0            20          49            0            20 
-#    14           0            24          50            0            24 
-#    15           0            25          51            0            25  
-#    16           0            26          52            0            26 
-#    17           0            27          53            0            27 
-#    18           1            0           54            1            0  
-#    19           1            1           55            1            1  
-#    20           1            2           56            1            2  
-#    21           1            3           57            1            3  
-#    22           1            4           58            1            4  
-#    23           1            8           59            1            8  
-#    24           1            9           60            1            9  
-#    25           1            10          61            1            10 
-#    26           1            11          62            1            11 
-#    27           1            16          63            1            16 
-#    28           1            17          64            1            17 
-#    29           1            18          65            1            18 
-#    30           1            19          66            1            19 
-#    31           1            20          67            1            20     
-#    32           1            24          68            1            24      
-#    33           1            25          69            1            25            
-#    34           1            26          70            1            26 
-#    35           1            27          71            1            27      
+# RTC w/ AMD Threadripper 64 core / 128 threads
 
 set -xeuo pipefail
 
-#First enable everybody
-for cpu in {0..71}
+# we will use processors 0-31 and 64-95 as the hyperthread system cpus (32 cores, 64 threads),
+# so we disable processors 96-127. This leaves us 32-63 (32) as single thread r/t processors.
+
+#enable everything first just to start from a known state
+for cpu in {1..127}
 do
-   /bin/echo 1 > /sys/devices/system/cpu/cpu$cpu/online 
+   /bin/echo 1 > /sys/devices/system/cpu/cpu$cpu/online
 done
 
-# we will use processors 0-13 and 36-49 as the hyperthread system cpus (28),
-# so we disable processors 50-71. This leaves us 14-35 (22) as single thread processors.
-
-# Disable processors 50-71
-for cpu in {50..71}
+# Disable processors 96-127, the hardware threads
+for cpu in {96..127}
 do
    /bin/echo 0 > /sys/devices/system/cpu/cpu$cpu/online 
 done
@@ -79,8 +39,8 @@ cd $cpusetMount
 #
 ############################
 mkdir -p $cpusetMount/system
-/bin/echo 0-13,36-49 > $cpusetMount/system/cpuset.cpus
-/bin/echo 0-1 > $cpusetMount/system/cpuset.mems
+/bin/echo 0-31,64-95 > $cpusetMount/system/cpuset.cpus
+/bin/echo 0 > $cpusetMount/system/cpuset.mems
 
 # Now move all current tasks to system cpuset
 # Note that this moves pid=1 (init) so all new process created should live here.
@@ -96,148 +56,201 @@ echo 0 > cpuset.sched_load_balance
 echo 1 > system/cpuset.sched_load_balance
 
 ###############
-# Now setup cpusets for the ICC R/T processes
-# We have cores 14-35 (22 cores) to use.
+# Now setup cpusets for the RTC R/T processes
 ###############
 
-## NCPC DM
 
 #dm02comb
 mkdir -p $cpusetMount/dm02comb
-/bin/echo 14 > $cpusetMount/dm02comb/cpuset.cpus
+/bin/echo 32 > $cpusetMount/dm02comb/cpuset.cpus
 /bin/echo 1 > $cpusetMount/dm02comb/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/dm02comb/cpuset.mems
+/bin/echo 0 > $cpusetMount/dm02comb/cpuset.mems
 
 #ncpc
 mkdir -p $cpusetMount/ncpc
-/bin/echo 15 > $cpusetMount/ncpc/cpuset.cpus
+/bin/echo 33 > $cpusetMount/ncpc/cpuset.cpus
 /bin/echo 1 > $cpusetMount/ncpc/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/ncpc/cpuset.mems
+/bin/echo 0 > $cpusetMount/ncpc/cpuset.mems
 
-## camlowfs
+#camflowfs
+mkdir -p $cpusetMount/camflowfs
+/bin/echo 34 > $cpusetMount/camflowfs/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camflowfs/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/camflowfs/cpuset.mems
 
-#camlowfs
-mkdir -p $cpusetMount/camlowfs
-/bin/echo 16 > $cpusetMount/camlowfs/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camlowfs/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/camlowfs/cpuset.mems
+#camflowfs_sw
+mkdir -p $cpusetMount/camflowfs_sw
+/bin/echo 35 > $cpusetMount/camflowfs_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camflowfs_sw/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/camflowfs_sw/cpuset.mems
 
-#camlowfs_sw
-mkdir -p $cpusetMount/camlowfs_sw
-/bin/echo 17 > $cpusetMount/camlowfs_sw/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camlowfs_sw/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/camlowfs_sw/cpuset.mems
+#camllowfs
+mkdir -p $cpusetMount/camllowfs
+/bin/echo 36 > $cpusetMount/camllowfs/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camllowfs/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/camllowfs/cpuset.mems
 
-## camsci1
+#camllowfs_sw
+mkdir -p $cpusetMount/camllowfs_sw
+/bin/echo 37 > $cpusetMount/camllowfs_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camllowfs_sw/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/camllowfs_sw/cpuset.mems
+
 #camsci1
 mkdir -p $cpusetMount/camsci1
-/bin/echo 18 > $cpusetMount/camsci1/cpuset.cpus
+/bin/echo 38 > $cpusetMount/camsci1/cpuset.cpus
 /bin/echo 1 > $cpusetMount/camsci1/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/camsci1/cpuset.mems
+/bin/echo 0 > $cpusetMount/camsci1/cpuset.mems
 
 #camsci1_sw
 mkdir -p $cpusetMount/camsci1_sw
-/bin/echo 19 > $cpusetMount/camsci1_sw/cpuset.cpus
+/bin/echo 39 > $cpusetMount/camsci1_sw/cpuset.cpus
 /bin/echo 1 > $cpusetMount/camsci1_sw/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/camsci1_sw/cpuset.mems
+/bin/echo 0 > $cpusetMount/camsci1_sw/cpuset.mems
 
-## camsci2
 #camsci2
 mkdir -p $cpusetMount/camsci2
-/bin/echo 20 > $cpusetMount/camsci2/cpuset.cpus
+/bin/echo 40 > $cpusetMount/camsci2/cpuset.cpus
 /bin/echo 1 > $cpusetMount/camsci2/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/camsci2/cpuset.mems
+/bin/echo 0 > $cpusetMount/camsci2/cpuset.mems
 
-#camsci2_sw
+#camsci2_sw offload process 
 mkdir -p $cpusetMount/camsci2_sw
-/bin/echo 21 > $cpusetMount/camsci2_sw/cpuset.cpus
+/bin/echo 41 > $cpusetMount/camsci2_sw/cpuset.cpus
 /bin/echo 1 > $cpusetMount/camsci2_sw/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/camsci2_sw/cpuset.mems
+/bin/echo 0 > $cpusetMount/camsci2_sw/cpuset.mems
 
-#spare22
-mkdir -p $cpusetMount/spare22
-/bin/echo 22 > $cpusetMount/spare22/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare22/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare22/cpuset.mems
+#camlowfs_fit
+mkdir -p $cpusetMount/camlowfs_fit
+/bin/echo 42 > $cpusetMount/camlowfs_fit/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camlowfs_fit/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/camlowfs_fit/cpuset.mems
 
-#spare23
-mkdir -p $cpusetMount/spare23
-/bin/echo 23 > $cpusetMount/spare23/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare23/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare23/cpuset.mems
+#spare43
+mkdir -p $cpusetMount/spare43
+/bin/echo 43 > $cpusetMount/spare43/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare43/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/spare43/cpuset.mems
 
-## CACAO
+#spare44
+mkdir -p $cpusetMount/spare44
+/bin/echo 44 > $cpusetMount/spare44/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare44/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/spare44/cpuset.mems
 
 #acqu_mvm
 mkdir -p $cpusetMount/acqu_mvm
-/bin/echo 24 > $cpusetMount/acqu_mvm/cpuset.cpus
+/bin/echo 45 > $cpusetMount/acqu_mvm/cpuset.cpus
 /bin/echo 1 > $cpusetMount/acqu_mvm/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/acqu_mvm/cpuset.mems
+/bin/echo 0 > $cpusetMount/acqu_mvm/cpuset.mems
 
 #mfilt
 mkdir -p $cpusetMount/mfilt
-/bin/echo 25 > $cpusetMount/mfilt/cpuset.cpus
+/bin/echo 46 > $cpusetMount/mfilt/cpuset.cpus
 /bin/echo 1 > $cpusetMount/mfilt/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/mfilt/cpuset.mems
+/bin/echo 0 > $cpusetMount/mfilt/cpuset.mems
+
+#spare47
+mkdir -p $cpusetMount/spare47
+/bin/echo 47 > $cpusetMount/spare47/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare47/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/spare47/cpuset.mems
 
 #mlat
 mkdir -p $cpusetMount/mlat
-/bin/echo 26 > $cpusetMount/mlat/cpuset.cpus
+/bin/echo 48 > $cpusetMount/mlat/cpuset.cpus
 /bin/echo 1 > $cpusetMount/mlat/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/mlat/cpuset.mems
+/bin/echo 0 > $cpusetMount/mlat/cpuset.mems
 
 #RTmon
 mkdir -p $cpusetMount/RTmon
-/bin/echo 27 > $cpusetMount/RTmon/cpuset.cpus
+/bin/echo 49 > $cpusetMount/RTmon/cpuset.cpus
 /bin/echo 1 > $cpusetMount/RTmon/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/RTmon/cpuset.mems
+/bin/echo 0 > $cpusetMount/RTmon/cpuset.mems
+
+#dm02disp03_sw
+mkdir -p $cpusetMount/dm02disp03_sw
+/bin/echo 50 > $cpusetMount/dm02disp03_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/dm02disp03_sw/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/dm02disp03_sw/cpuset.mems
+
+#dm02disp04_sw
+mkdir -p $cpusetMount/dm02disp04_sw
+/bin/echo 51 > $cpusetMount/dm02disp04_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/dm02disp04_sw/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/dm02disp04_sw/cpuset.mems
+
+#dm02disp08_sw
+mkdir -p $cpusetMount/dm02disp08_sw
+/bin/echo 52 > $cpusetMount/dm02disp08_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/dm02disp08_sw/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/dm02disp08_sw/cpuset.mems
+
+#spare53
+mkdir -p $cpusetMount/spare53
+/bin/echo 53 > $cpusetMount/spare53/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare53/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/spare53/cpuset.mems
+
+#spare54
+mkdir -p $cpusetMount/spare54
+/bin/echo 54 > $cpusetMount/spare54/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare54/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/spare54/cpuset.mems
+
+#spare55
+mkdir -p $cpusetMount/spare55
+/bin/echo 55 > $cpusetMount/spare55/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare55/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/spare55/cpuset.mems
+
+#spare56
+mkdir -p $cpusetMount/spare56
+/bin/echo 56 > $cpusetMount/spare56/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare56/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/spare56/cpuset.mems
+
+#spare57
+mkdir -p $cpusetMount/spare57
+/bin/echo 57 > $cpusetMount/spare57/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare57/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/spare57/cpuset.mems
 
 #shmimTCP
 mkdir -p $cpusetMount/shmimTCP
-/bin/echo 28 > $cpusetMount/shmimTCP/cpuset.cpus
+/bin/echo 58 > $cpusetMount/shmimTCP/cpuset.cpus
 /bin/echo 1 > $cpusetMount/shmimTCP/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/shmimTCP/cpuset.mems
+/bin/echo 0 > $cpusetMount/shmimTCP/cpuset.mems
 
-#spare29
-mkdir -p $cpusetMount/spare29
-/bin/echo 29 > $cpusetMount/spare29/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare29/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare29/cpuset.mems
+#dm02disp09_sw
+mkdir -p $cpusetMount/dm02disp09_sw
+/bin/echo 59 > $cpusetMount/dm02disp09_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/dm02disp09_sw/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/dm02disp09_sw/cpuset.mems
 
-#spare30
-mkdir -p $cpusetMount/spare30
-/bin/echo 30 > $cpusetMount/spare30/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare30/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare30/cpuset.mems
+#dm02disp_sw
+mkdir -p $cpusetMount/dm02disp_sw
+/bin/echo 60 > $cpusetMount/dm02disp_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/dm02disp_sw/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/dm02disp_sw/cpuset.mems
 
-#spare31
-mkdir -p $cpusetMount/spare31
-/bin/echo 31 > $cpusetMount/spare31/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare31/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare31/cpuset.mems
+#spare61
+mkdir -p $cpusetMount/spare61
+/bin/echo 61 > $cpusetMount/spare61/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare61/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/spare61/cpuset.mems
 
-#spare32
-mkdir -p $cpusetMount/spare32
-/bin/echo 32 > $cpusetMount/spare32/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare32/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare32/cpuset.mems
+#spare62
+mkdir -p $cpusetMount/spare62
+/bin/echo 62 > $cpusetMount/spare62/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare62/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/spare62/cpuset.mems
 
-#spare33
-mkdir -p $cpusetMount/spare33
-/bin/echo 33 > $cpusetMount/spare33/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare33/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare33/cpuset.mems
+#spare63
+mkdir -p $cpusetMount/spare63
+/bin/echo 63 > $cpusetMount/spare63/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare63/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/spare63/cpuset.mems
 
-#spare34
-mkdir -p $cpusetMount/spare34
-/bin/echo 34 > $cpusetMount/spare34/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare34/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare34/cpuset.mems
-
-#spare35
-mkdir -p $cpusetMount/spare35
-/bin/echo 35 > $cpusetMount/spare35/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare35/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare35/cpuset.mems
 
 echo "cpusets configured successfully"

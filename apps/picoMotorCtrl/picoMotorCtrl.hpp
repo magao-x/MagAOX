@@ -34,6 +34,50 @@ namespace MagAOX
 namespace app
 {
 
+int splitResponse( int & address,
+                   std::string & response,
+                   const std::string & fullResponse
+                 )
+{
+   size_t carrot = fullResponse.find('>');
+
+   if(carrot == std::string::npos)
+   {
+      address = 1;
+      response = fullResponse;
+      return 0;
+   }
+
+   if(carrot == 0)
+   {
+      address = 0;
+      response = "";
+      return -1;
+   }
+
+   if(carrot == fullResponse.size()-1)
+   {
+      address = 0;
+      response = "";
+      return -2;
+   }
+
+   try
+   {
+      address = std::stoi( fullResponse.substr(0,carrot));
+      response = fullResponse.substr(carrot+1);
+   }
+   catch(...)
+   {
+      address = 0;
+      response = "";
+      return -3;
+   }
+
+   return 0;
+
+}
+
 /** MagAO-X application to control a multi-channel Newport Picomotor Controller.
   *
   * \todo need to recognize signals in tty polls and not return errors, etc.
@@ -55,14 +99,16 @@ class picoMotorCtrl : public MagAOXApp<>, public dev::ioDevice, public dev::tele
    struct motorChannel
    {
       picoMotorCtrl * m_parent {nullptr}; ///< A pointer to this for thread starting.
-      
+
       std::string m_name; ///< The name of this channel, from the config section
-      
+
+      int m_address {1}; ///< The controller address.
+
+      int m_channel {-1}; ///< The number of this channel, where the motor is plugged in
+
       std::vector<std::string> m_presetNames;
       std::vector<posT> m_presetPositions;
-      
-      int m_channel {-1}; ///< The number of this channel, where the motor is plugged in
-      
+            
       posT m_currCounts {0}; ///< The current counts, the cumulative position
       
       bool m_doMove {false}; ///< Flag indicating that a move is requested.
@@ -86,8 +132,9 @@ class picoMotorCtrl : public MagAOXApp<>, public dev::ioDevice, public dev::tele
       
       motorChannel( picoMotorCtrl * p,     ///< [in] The parent point to set
                     const std::string & n, ///< [in] The name of this channel
+                    int add,               ///< [in] The controller address
                     int ch                 ///< [in] The number of this channel
-                  ) : m_parent(p), m_name(n), m_channel(ch)
+                  ) : m_parent(p), m_name(n), m_address(add), m_channel(ch)
       {
          m_thread = new std::thread;
       }
@@ -107,6 +154,8 @@ class picoMotorCtrl : public MagAOXApp<>, public dev::ioDevice, public dev::tele
    
    ///@}
    
+   std::vector<int> m_addresses; ///< The unique controller addresses.
+
    channelMapT m_channels; ///< Map of motor names to channel.
    
    tty::telnetConn m_telnetConn; ///< The telnet connection manager
@@ -301,13 +350,24 @@ int picoMotorCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
       
       if(channel < 1 || channel > m_nChannels)
       {
-         log<text_log>("Bad channel specificiation: " + sections[i] + " " + std::to_string(channel), logPrio::LOG_CRITICAL);
+         log<text_log>("Bad channel specificiation: " + sections[i] + " channel: " + std::to_string(channel), logPrio::LOG_CRITICAL);
 
          return PICOMOTORCTRL_E_BADCHANNEL;
       }
 
+      int address = 1;
+      _config.configUnused(address, mx::app::iniFile::makeKey(sections[i], "address" ) );
+
+      if(address < 1)
+      {
+         log<text_log>("Bad channel specificiation: " + sections[i] + " address: " + std::to_string(address), logPrio::LOG_CRITICAL);
+
+         return PICOMOTORCTRL_E_BADCHANNEL;
+      }
+
+
       //Ok, valid channel.  Insert into map and check for duplicates.
-      std::pair<channelMapT::iterator, bool> insert = m_channels.insert(std::pair<std::string, motorChannel>(sections[i], motorChannel(this,sections[i],channel)));
+      std::pair<channelMapT::iterator, bool> insert = m_channels.insert(std::pair<std::string, motorChannel>(sections[i], motorChannel(this,sections[i], address, channel)));
       
       if(insert.second == false)
       {
@@ -320,7 +380,23 @@ int picoMotorCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
          _config.configUnused(insert.first->second.m_presetPositions, mx::app::iniFile::makeKey(sections[i], "positions" ));
       }
       
+      ///\todo extend to include address
       log<pico_channel>({sections[i], (uint8_t) channel});
+
+      bool found = false;
+      for(size_t n = 0; n < m_addresses.size(); ++n)
+      {
+         if(address == m_addresses[n])
+         {
+            found = true;
+            break;
+         }
+      }
+
+      if(!found)
+      {
+         m_addresses.push_back(address);
+      }
    }
    
    return 0;
@@ -583,7 +659,7 @@ int picoMotorCtrl::appLogic()
       {
          std::unique_lock<std::mutex> lock(m_telnetMutex);
       
-         std::string query = std::to_string(it->second.m_channel) + "MD?";
+         std::string query = std::to_string(it->second.m_address) + ">" + std::to_string(it->second.m_channel) + "MD?";
          
          int rv = m_telnetConn.write(query + "\r\n", m_writeTimeout);
          if(rv != TTY_E_NOERROR)
@@ -603,8 +679,28 @@ int picoMotorCtrl::appLogic()
             return 0;
          }
 
+         int add;
+         std::string resp;
+
+         rv = splitResponse(add, resp, m_telnetConn.m_strRead);
+         if(rv != 0)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, "splitResponse returned " + std::to_string(rv)});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
+         if(add != it->second.m_address)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, "address did not match in response"});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
          //The check for moving here. With power off detection
-         if(std::stoi(m_telnetConn.m_strRead) == 0) 
+         if(std::stoi(resp) == 0) 
          {
             anymoving = true;
             it->second.m_moving = true;
@@ -786,8 +882,8 @@ void picoMotorCtrl::channelThreadExec( motorChannel * mc)
          mc->m_moving = true;
          log<text_log>("moving " + mc->m_name + " by " + std::to_string(dr) + " counts");
 
-         std::string comm = std::to_string(mc->m_channel) + "PR" + std::to_string(dr);
-                  
+         std::string comm = std::to_string(mc->m_address) + ">" + std::to_string(mc->m_channel) + "PR" + std::to_string(dr);
+         
          int rv = m_telnetConn.write(comm + "\r\n", m_writeTimeout);
          if(rv != TTY_E_NOERROR)
          {
