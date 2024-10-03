@@ -4,8 +4,8 @@
 
 TEMPLATE = app
 TARGET = cameraGUI
-DESTDIR = bin/ 
-DEPENDPATH += ./ ../../lib 
+DESTDIR = bin/
+DEPENDPATH += ./ ../../lib
 
 CONFIG+=debug
 
@@ -49,9 +49,9 @@ HEADERS += ../../widgets/camera/camera.hpp \
            ../../widgets/stage/stage.hpp \
            ../../widgets/camera/shutterStatus.hpp \
            ../../lib/multiIndiManager.hpp
-           
-SOURCES += cameraGUI_main.cpp 
-           
+
+SOURCES += cameraGUI_main.cpp
+
 FORMS += ../../widgets/camera/camera.ui \
          ../../widgets/xWidgets/fsmDisplay.ui \
          ../../widgets/xWidgets/statusEntry.ui \
@@ -61,11 +61,11 @@ FORMS += ../../widgets/camera/camera.ui \
          ../../widgets/stage/stage.ui \
          ../../widgets/camera/shutterStatus.ui \
          ../../widgets/xWidgets/selectionSw.ui
-     
+
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a \
         -lmxlib
 
-RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
+RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc
 
 QT += widgets
