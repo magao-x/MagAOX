@@ -6,19 +6,19 @@
 
 #include "../xWidgets/xWidget.hpp"
 
-namespace xqt 
+namespace xqt
 {
-   
+
 class stage : public xWidget
 {
    Q_OBJECT
-   
+
    enum editchanges{NOTEDITING, STARTED, STOPPED};
 
 protected:
-   
+
    std::string m_appState;
-   
+
    std::string m_stageName;
    std::string m_winTitle;
 
@@ -40,27 +40,27 @@ protected:
    QTimer * m_setPointEditTimer {nullptr};
 
 public:
-   explicit stage( std::string & stageName,
-                   QWidget * Parent = 0, 
+   explicit stage( const std::string & stageName,
+                   QWidget * Parent = 0,
                    Qt::WindowFlags f = Qt::WindowFlags()
                  );
-   
+
    ~stage();
-   
+
    void subscribe();
-             
+
    virtual void onConnect();
    virtual void onDisconnect();
-   
+
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
+
    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
+
    void clear_focus();
 
 public slots:
    void updateGUI();
-   
+
    void on_setPoint_activated( int index );
 
    void on_setPointGo_pressed();
@@ -81,7 +81,7 @@ public slots:
 
    void on_home_pressed();
    void on_stop_pressed();
-      
+
    void setPointEditTimerOut();
 
 signals:
@@ -93,18 +93,18 @@ protected:
    virtual void paintEvent(QPaintEvent * e);
 
 private:
-     
+
    Ui::stage ui;
 };
-   
-stage::stage( std::string & stageName,
-              QWidget * Parent, 
+
+stage::stage( const std::string & stageName,
+              QWidget * Parent,
               Qt::WindowFlags f) : xWidget(Parent, f), m_stageName{stageName}
 {
     ui.setupUi(this);
 
     m_winTitle = m_stageName;
-   
+
     ui.fsmState->device(m_stageName);
     QFont qf = ui.stageName->font();
     qf.setPixelSize(XW_FONT_SIZE+3);
@@ -124,7 +124,7 @@ stage::stage( std::string & stageName,
 
     onDisconnect();
 }
-   
+
 stage::~stage()
 {
 }
@@ -132,7 +132,7 @@ stage::~stage()
 void stage::subscribe()
 {
    if(!m_parent) return;
-   
+
    m_parent->addSubscriberProperty(this, m_stageName, "fsm");
    m_parent->addSubscriberProperty(this, m_stageName, "maxpos");
    m_parent->addSubscriberProperty(this, m_stageName, "position");
@@ -143,7 +143,7 @@ void stage::subscribe()
 
    return;
 }
-  
+
 void stage::onConnect()
 {
    setWindowTitle(QString(m_winTitle.c_str()));
@@ -178,14 +178,14 @@ void stage::onDisconnect()
 }
 
 void stage::handleDefProperty( const pcf::IndiProperty & ipRecv)
-{  
+{
    return handleSetProperty(ipRecv);
 }
 
 void stage::handleSetProperty( const pcf::IndiProperty & ipRecv)
-{  
+{
    if(ipRecv.getDevice() != m_stageName) return;
-   
+
    if(ipRecv.getName() == "fsm")
    {
       if(ipRecv.find("state"))
@@ -242,12 +242,12 @@ void stage::handleSetProperty( const pcf::IndiProperty & ipRecv)
             {
                std::cerr << "More than one switch selected in " << ipRecv.getDevice() << "." << ipRecv.getName() << "\n";
             }
-         
+
             newName = it->second.getName();
             m_setPoint = newName;
             ui.setPoint->setCurrentText(m_setPoint.c_str());
             //if(newName != m_value) m_valChanged = true;
-            //m_value = newName; 
+            //m_value = newName;
          }
       }
 
@@ -259,8 +259,8 @@ void stage::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
 void stage::updateGUI()
 {
-   if( m_appState != "READY" && m_appState != "OPERATING" 
-             && m_appState != "CONFIGURING"  && m_appState != "NOTHOMED" 
+   if( m_appState != "READY" && m_appState != "OPERATING"
+             && m_appState != "CONFIGURING"  && m_appState != "NOTHOMED"
                      && m_appState != "HOMING")
    {
       ui.stageName->setEnabled(false);
@@ -271,18 +271,18 @@ void stage::updateGUI()
       ui.position->setText("---");
       ui.position->setEnabled(false);
       ui.stepSize->setEnabled(false);
-   
+
       ui.posMinus->setEnabled(false);
       ui.posPlus->setEnabled(false);
       ui.posStepMulTen->setEnabled(false);
       ui.posStepDivTen->setEnabled(false);
-   
+
       ui.home->setEnabled(false);
       ui.stop->setEnabled(false);
 
       return;
    }
-   
+
    if( m_appState == "READY" || m_appState == "OPERATING" || m_appState == "HOMING" || m_appState == "CONFIGURING")
    {
       ui.stageName->setEnabled(true);
@@ -292,7 +292,7 @@ void stage::updateGUI()
       ui.posStepMulTen->setEnabled(true);
       ui.posStepDivTen->setEnabled(true);
       ui.stop->setEnabled(true);
-   
+
       if( m_appState == "READY" )
       {
          ui.setPointGo->setEnabled(true);
@@ -302,7 +302,7 @@ void stage::updateGUI()
          ui.posPlus->setEnabled(true);
          ui.home->setEnabled(true);
       }
-      else  
+      else
       {
          ui.setPointGo->setEnabled(false);
          ui.positionSlider->setEnabled(false);
@@ -379,14 +379,14 @@ void stage::on_setPointGo_pressed()
       {
          ipSend.setName("presetName");
       }
-      ipSend.setPerm(pcf::IndiProperty::ReadWrite); 
+      ipSend.setPerm(pcf::IndiProperty::ReadWrite);
       ipSend.setState(pcf::IndiProperty::Idle);
       ipSend.setRule(pcf::IndiProperty::OneOfMany);
-   
+
       for(int idx = 0; idx < ui.setPoint->count(); ++idx)
       {
          std::string elName = ui.setPoint->itemText(idx).toStdString();
-   
+
          if(elName == selection)
          {
             ipSend.add(pcf::IndiElement(elName, pcf::IndiElement::On));
@@ -396,7 +396,7 @@ void stage::on_setPointGo_pressed()
             ipSend.add(pcf::IndiElement(elName, pcf::IndiElement::Off));
          }
       }
-   
+
       sendNewProperty(ipSend);
    }
    catch(...)
@@ -413,7 +413,7 @@ void stage::on_positionSlider_sliderMoved( double s )
 {
    double epos = s/100.0 * m_maxPos;
 
-   ui.position->setEditText(QString::number(epos));  
+   ui.position->setEditText(QString::number(epos));
 }
 
 void stage::on_positionSlider_sliderReleased()
@@ -430,7 +430,7 @@ void stage::on_positionSlider_sliderReleased()
    if(newPos == lastPos) return;
 
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
+
    ip.setDevice(m_stageName);
    if(m_filterWheel)
    {
@@ -458,7 +458,7 @@ void stage::on_position_returnPressed()
    if(newPos == lastPos) return;
 
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
+
    ip.setDevice(m_stageName);
    if(m_filterWheel)
    {
@@ -488,7 +488,7 @@ void stage::on_posMinus_pressed()
    double newPos = m_position - m_step;
 
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
+
    ip.setDevice(m_stageName);
    if(m_filterWheel)
    {
@@ -500,7 +500,7 @@ void stage::on_posMinus_pressed()
    }
    ip.add(pcf::IndiElement("target"));
    ip["target"] = newPos;
-   
+
    sendNewProperty(ip);
 }
 
@@ -509,7 +509,7 @@ void stage::on_posPlus_pressed()
    double newPos = m_position + m_step;
 
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
+
    ip.setDevice(m_stageName);
    if(m_filterWheel)
    {
@@ -521,7 +521,7 @@ void stage::on_posPlus_pressed()
    }
    ip.add(pcf::IndiElement("target"));
    ip["target"] = newPos;
-   
+
    sendNewProperty(ip);
 }
 
@@ -540,25 +540,25 @@ void stage::on_posStepDivTen_pressed()
 void stage::on_home_pressed()
 {
    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-   
+
    ipFreq.setDevice(m_stageName);
    ipFreq.setName("home");
    ipFreq.add(pcf::IndiElement("request"));
    ipFreq["request"].setSwitchState(pcf::IndiElement::On);
-    
-   sendNewProperty(ipFreq);   
+
+   sendNewProperty(ipFreq);
 }
 
 void stage::on_stop_pressed()
 {
    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-   
+
    ipFreq.setDevice(m_stageName);
    ipFreq.setName("stop");
    ipFreq.add(pcf::IndiElement("request"));
    ipFreq["request"].setSwitchState(pcf::IndiElement::On);
-    
-   sendNewProperty(ipFreq);   
+
+   sendNewProperty(ipFreq);
 }
 
 void stage::setPointEditTimerOut()
@@ -576,18 +576,18 @@ void stage::paintEvent(QPaintEvent * e)
       ui.setPoint->setProperty("isEditing", true);
       style()->unpolish(ui.setPoint);
    }
-   else 
+   else
    {
       ui.setPoint->setProperty("isEditing", false);
       ui.setPoint->setProperty("isStatus", true);
       style()->unpolish(ui.setPoint);
    }
-   
+
    QWidget::paintEvent(e);
 }
 
 } //namespace xqt
-   
+
 #include "moc_stage.cpp"
 
 #endif

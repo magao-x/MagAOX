@@ -6,15 +6,15 @@
 #include "xWidget.hpp"
 #include "../../lib/multiIndiSubscriber.hpp"
 
-namespace xqt 
+namespace xqt
 {
-   
+
 class statusDisplay : public xWidget
 {
     Q_OBJECT
-   
+
 protected:
-   
+
     xWidget * m_ctrlWidget {nullptr};
 
     std::string m_device;
@@ -34,42 +34,54 @@ protected:
     bool m_showVal {true};
 
 public:
+
+   statusDisplay( QWidget * Parent = 0,
+                  Qt::WindowFlags f = Qt::WindowFlags()
+                );
+
    statusDisplay( const std::string & device,
                   const std::string & property,
                   const std::string & element,
                   const std::string & label,
                   const std::string & units,
-                  QWidget * Parent = 0, 
+                  QWidget * Parent = 0,
                   Qt::WindowFlags f = Qt::WindowFlags()
                 );
-   
+
    ~statusDisplay();
+
+   void setup( const std::string & device,
+                  const std::string & property,
+                  const std::string & element,
+                  const std::string & label,
+                  const std::string & units
+                );
 
    void ctrlWidget (xWidget * cw);
 
    xWidget * ctrlWidget();
-   
+
    virtual QString formatValue();
 
    virtual void subscribe();
-             
+
    virtual void onConnect();
 
    virtual void onDisconnect();
-   
+
    virtual void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
+
    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
+
 public:
-    /// 
+    ///
     virtual void changeEvent(QEvent * e)
     {
         if(e->type() == QEvent::EnabledChange && !isEnabledTo(nullptr))
         {
             if(m_ctrlWidget) m_ctrlWidget->hide();
         }
-      
+
         xWidget::changeEvent(e);
     }
 
@@ -79,7 +91,7 @@ public slots:
 
     void on_button_pressed()
     {
-        if(m_ctrlWidget) 
+        if(m_ctrlWidget)
         {
             m_ctrlWidget->show();
             m_ctrlWidget->onConnect();
@@ -91,18 +103,45 @@ signals:
     void doUpdateGUI();
 
 protected:
-     
+
    Ui::statusDisplay ui;
 };
-   
+
+statusDisplay::statusDisplay( QWidget * Parent,
+                              Qt::WindowFlags f) : xWidget(Parent, f)
+{
+}
+
 statusDisplay::statusDisplay( const std::string & device,
                               const std::string & property,
-                              const std::string & element, 
+                              const std::string & element,
                               const std::string & label,
                               const std::string & units,
-                              QWidget * Parent, 
-                              Qt::WindowFlags f) : xWidget(Parent, f), m_device{device}, m_property{property}, m_element{element}, m_label{label}, m_units{units}
+                              QWidget * Parent,
+                              Qt::WindowFlags f) : xWidget(Parent, f)
 {
+    setup(device, property, element, label, units);
+}
+
+
+statusDisplay::~statusDisplay()
+{
+}
+
+void statusDisplay::setup( const std::string & device,
+                              const std::string & property,
+                              const std::string & element,
+                              const std::string & label,
+                              const std::string & units
+                          )
+
+{
+    m_device = device;
+    m_property = property;
+    m_element = element;
+    m_label = label;
+    m_units = units;
+
     ui.setupUi(this);
     std::string lab = m_label;
     if(m_units != "") lab += " [" + m_units + "]";
@@ -120,17 +159,13 @@ statusDisplay::statusDisplay( const std::string & device,
 
     onDisconnect();
 }
-   
-statusDisplay::~statusDisplay()
-{
-}
 
 void statusDisplay::ctrlWidget (xWidget * cw)
 {
    if(m_ctrlWidget) m_ctrlWidget->deleteLater();
    m_ctrlWidget = cw;
 }
-   
+
 xWidget * statusDisplay::ctrlWidget()
 {
    return m_ctrlWidget;
@@ -144,12 +179,12 @@ QString statusDisplay::formatValue()
 void statusDisplay::subscribe()
 {
     if(!m_parent) return;
-   
+
     m_parent->addSubscriberProperty(this, m_device, "fsm");
 
     if(m_property != "") m_parent->addSubscriberProperty(this, m_device, m_property);
 
-    if(m_ctrlWidget) 
+    if(m_ctrlWidget)
     {
         m_ctrlWidget->subscribe();
         m_parent->addSubscriber(m_ctrlWidget);
@@ -157,7 +192,7 @@ void statusDisplay::subscribe()
 
     return;
 }
-  
+
 void statusDisplay::onConnect()
 {
    m_valChanged = true;
@@ -176,15 +211,15 @@ void statusDisplay::handleDefProperty( const pcf::IndiProperty & ipRecv)
 }
 
 void statusDisplay::handleSetProperty( const pcf::IndiProperty & ipRecv)
-{  
+{
     if(ipRecv.getDevice() != m_device) return;
-   
+
     if(ipRecv.getName() == "fsm")
     {
         if(ipRecv.find("state"))
         {
             std::string fsmState = ipRecv["state"].get();
-            
+
             if(fsmState == "READY" || fsmState == "OPERATING")
             {
                 if(fsmState != m_fsmState)
@@ -240,8 +275,8 @@ void statusDisplay::updateGUI()
             if(m_valChanged)
             {
                 QString value = formatValue();
-      
-                ui.status->setTextChanged(value);  
+
+                ui.status->setTextChanged(value);
                 m_valChanged = false;
             }
         }
@@ -259,7 +294,7 @@ void statusDisplay::updateGUI()
 
 
 } //namespace xqt
-   
+
 #include "moc_statusDisplay.cpp"
 
 #endif

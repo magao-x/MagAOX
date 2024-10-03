@@ -4,8 +4,8 @@
 
 TEMPLATE = app
 TARGET = coronAlignGUI
-DESTDIR = bin/ 
-DEPENDPATH += ./ ../../lib 
+DESTDIR = bin/
+DEPENDPATH += ./ ../../lib
 
 MOC_DIR = moc/
 OBJECTS_DIR = obj/
@@ -28,21 +28,33 @@ exists( $$(CONDA_PREFIX)/lib ) {
 MAKEFILE = makefile.coronAlignGUI
 
 # Input
-INCLUDEPATH += ../../lib ../../widgets/coronAlign
+INCLUDEPATH += ../../lib ../../widgets/coronAlign ../../widgets/xWidgets
 
 HEADERS += ../../widgets/coronAlign/coronAlign.hpp \
            ../../widgets/xWidgets/xWidget.hpp \
-           ../../lib/multiIndiManager.hpp 
-           
-SOURCES += coronAlignGUI_main.cpp 
-           
-FORMS += ../../widgets/coronAlign/coronAlign.ui
-     
+           ../../lib/multiIndiManager.hpp \
+           ../../widgets/xWidgets/selectionSwStatus.hpp \
+           ../../widgets/xWidgets/statusDisplay.hpp \
+           ../../widgets/xWidgets/statusLabel.hpp \
+           ../../widgets/xWidgets/selectionSw.hpp \
+           ../../widgets/xWidgets/stageStatus.hpp \
+           ../../widgets/stage/stage.hpp \
+           ../../widgets/xWidgets/fsmDisplay.hpp \
+           ../../widgets/xWidgets/statusLineEdit.hpp \
+
+SOURCES += coronAlignGUI_main.cpp
+
+FORMS += ../../widgets/coronAlign/coronAlign.ui \
+         ../../widgets/xWidgets/statusDisplay.ui \
+         ../../widgets/xWidgets/selectionSw.ui \
+         ../../widgets/stage/stage.ui \
+         ../../widgets/xWidgets/fsmDisplay.ui \
+
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a
 
-RESOURCES += ../../resources/magaox.qrc 
+RESOURCES += ../../resources/magaox.qrc
 
-RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
+RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc
 
 QT += widgets

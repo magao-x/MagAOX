@@ -6,6 +6,7 @@
 #include "ui_statusDisplay.h"
 
 #include "../xWidgets/statusDisplay.hpp"
+#include "../stage/stage.hpp"
 
 namespace xqt
 {
@@ -20,12 +21,19 @@ protected:
     float m_position;
 
 public:
-   stageStatus( std::string & stageName,
+
+    stageStatus( QWidget * Parent = 0,
+                Qt::WindowFlags f = Qt::WindowFlags()
+              );
+
+   stageStatus( const std::string & stgN,
                 QWidget * Parent = 0,
                 Qt::WindowFlags f = Qt::WindowFlags()
               );
 
    ~stageStatus();
+
+   void setup(const std::string & stgN);
 
    virtual QString formatValue();
 
@@ -37,17 +45,33 @@ public:
 
 };
 
-stageStatus::stageStatus( std::string & stageName,
-                      QWidget * Parent,
-                      Qt::WindowFlags f) : statusDisplay(stageName, "", "", stageName, "", Parent, f)
+stageStatus::stageStatus(  QWidget * Parent,
+                      Qt::WindowFlags f) : statusDisplay(Parent, f)
 {
-   m_ctrlWidget = (xWidget *) (new stage(stageName, this, Qt::Dialog));
+}
+
+stageStatus::stageStatus( const std::string & stageName,
+                      QWidget * Parent,
+                      Qt::WindowFlags f) : statusDisplay(Parent, f)
+{
+   setup(stageName);
 }
 
 stageStatus::~stageStatus()
 {
 }
 
+void stageStatus::setup(const std::string & stageName)
+{
+    statusDisplay::setup(stageName, "", "", stageName, "");
+    if(m_ctrlWidget)
+    {
+        delete m_ctrlWidget;
+    }
+
+    m_ctrlWidget = (xWidget *) (new stage(stageName, this, Qt::Dialog));
+
+}
 QString stageStatus::formatValue()
 {
     if(m_presetName == "" || m_presetName == "none")
