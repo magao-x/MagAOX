@@ -1850,7 +1850,7 @@ int dm<derivedT, realT>::clearSat()
         }
 
         imageStream.md->write = 1;
-        memset(imageStream.array.raw, 0, m_dmWidth * m_dmHeight * sizeof(uint8_t));
+        memset(imageStream.array.raw, 0, m_dmWidth * m_dmHeight * ImageStreamIO_typesize(imageStream.md->datatype));
 
         clock_gettime(CLOCK_REALTIME, &imageStream.md->writetime);
 
