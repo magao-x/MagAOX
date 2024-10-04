@@ -79,8 +79,10 @@ def _run_logdump_thread(logger_name, logdump_dir, logdump_args, name, message_qu
             log.debug(f"Running logdump command {repr(' '.join(args))} for {name} in follow mode")
             p = subprocess.Popen(args, stdout=subprocess.PIPE, stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
             for line in p.stdout:
+                log.debug(f"Log line read: {line}")
                 message = Telem.from_json(name, line)
-                message_queue.put(message)
+                if message.ec in ec_filter:
+                    message_queue.put(message) #only 'user_log' into queue
             if p.returncode != 0:
                 raise RuntimeError(f"{name} logdump exited with {p.returncode} ({repr(' '.join(args))})")
         except Exception as e:
@@ -100,6 +102,7 @@ class dbIngest(XDevice):
     last_update_ts_sec : float
     startup_ts_sec : float
     records_since_startup : float
+    
     #add user_log support here
     user_log_threads : list[tuple[str, threading.Thread]]
     user_log_queue : queue.Queue
@@ -112,7 +115,7 @@ class dbIngest(XDevice):
         self.telem_threads.append((dev, telem_thread))
 
         #userLog support here
-        ULog_args = self.log.name + '.' + dev, '/opt/MagAOX/logs', (self.config.logdump_exe, '--ext=.binlog'), dev, self.user_log_queue
+        ULog_args = self.log.name + '.' + dev, '/opt/MagAOX/log', (self.config.logdump_exe, '--ext=.binlog'), dev, self.user_log_queue
         user_log_thread = threading.Thread(target=_run_logdump_thread, args= ULog_args, daemon=True)
         user_log_thread.start()
         self.log.debug(f"Watching {dev} for incoming user logs")
