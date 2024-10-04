@@ -1335,7 +1335,7 @@ void coronAlign::on_button_piaa_u_pressed()
     ip.setDevice("stagepiaa");
     ip.setName("position");
     ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaaPos + m_piaaScale*m_piaaStepSize;
+    ip["target"] = m_piaaPos - m_piaaScale*m_piaaStepSize;
 
     sendNewProperty(ip);
 
@@ -1348,7 +1348,7 @@ void coronAlign::on_button_piaa_d_pressed()
     ip.setDevice("stagepiaa");
     ip.setName("position");
     ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaaPos - m_piaaScale*m_piaaStepSize;
+    ip["target"] = m_piaaPos + m_piaaScale*m_piaaStepSize;
 
     sendNewProperty(ip);
 
@@ -1533,7 +1533,7 @@ void coronAlign::on_button_ipiaa_u_pressed()
     ip.setDevice("stageipiaa");
     ip.setName("position");
     ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_ipiaaPos + m_ipiaaScale*m_ipiaaStepSize;
+    ip["target"] = m_ipiaaPos - m_ipiaaScale*m_ipiaaStepSize;
     sendNewProperty(ip);
 }
 
@@ -1544,7 +1544,7 @@ void coronAlign::on_button_ipiaa_d_pressed()
     ip.setDevice("stageipiaa");
     ip.setName("position");
     ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_ipiaaPos - m_ipiaaScale*m_ipiaaStepSize;
+    ip["target"] = m_ipiaaPos + m_ipiaaScale*m_ipiaaStepSize;
 
     sendNewProperty(ip);
 
