@@ -29,6 +29,7 @@ def batch_user_log(cur: psycopg.Cursor, records: list[UserLog]):
         cur.execute('ROLLBACK')
     else:
         cur.execute('COMMIT')
+        log.debug(f"Inserted {len(records)} user_logs into database")
 
 
 def batch_telem(cur: psycopg.Cursor, records: list[Telem]):
