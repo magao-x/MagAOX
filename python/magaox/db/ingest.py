@@ -14,16 +14,22 @@ from ..utils import creation_time_from_filename, parse_iso_datetime_as_utc
 
 log = logging.getLogger(__name__)
 
+
 def batch_user_log(cur: psycopg.Cursor, records: list[UserLog]):
     """This will be where the logs will insert into user_logs table"""
-    #for log in records:
     cur.execute('BEGIN')
-    cur.executemany(f'''
-INSERT INTO user_log (ts, device, ec, msg)
-VALUES (%s, %s, %s::JSONB, %s)
-ON CONFLICT (ts, ec) DO NOTHING;
-''', [(rec.ts, rec.device, Jsonb(rec.msg, dumps=orjson.dumps), rec.ec)for rec in records if rec.ec == 'user_log'])
-    cur.execute('COMMIT')
+    try:
+        cur.executemany('''
+        INSERT INTO user_log (ts, device, ec, msg)
+        VALUES (%s, %s, %s, %s::JSONB)
+        ON CONFLICT (ts, device) DO NOTHING;
+        ''', [(rec.ts, rec.device, rec.ec, orjson.dumps(rec.msg).decode('utf8')) for rec in records])
+    except Exception as e:
+        log.error(f"Error inserting user logs into the database: {e}")
+        cur.execute('ROLLBACK')
+    else:
+        cur.execute('COMMIT')
+
 
 def batch_telem(cur: psycopg.Cursor, records: list[Telem]):
     cur.execute("BEGIN")
@@ -31,7 +37,7 @@ def batch_telem(cur: psycopg.Cursor, records: list[Telem]):
 INSERT INTO telem (ts, device, msg, ec)
 VALUES (%s, %s, %s::JSONB, %s)
 ON CONFLICT (device, ts) DO NOTHING;
-''', [(rec.ts, rec.device, Jsonb(rec.msg, rec.ec, dumps=orjson.dumps)) for rec in records])
+''', [(rec.ts, rec.device, Jsonb(rec.msg, dumps=orjson.dumps), rec.ec) for rec in records])
     cur.execute("COMMIT")
 
 def batch_file_origins(cur: psycopg.Cursor, records: list[FileOrigin]):
