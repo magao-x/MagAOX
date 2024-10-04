@@ -204,3 +204,10 @@ vm/
 # Python caches, etc
 *.egg-info
 __pycache__
+libMagAOX/doc/diag/Makefile
+libMagAOX/doc/diag/xwcapp_fsm.drawio
+libMagAOX/doc/diag/xwcapp.drawio
+libMagAOX/doc/diag/xwcapps_connections.drawio
+libMagAOX/doc/diag/png/xwcapp_fsm.png
+libMagAOX/doc/diag/png/xwcapp.png
+libMagAOX/doc/diag/png/xwcapps_connections.png
