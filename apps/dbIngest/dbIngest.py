@@ -6,11 +6,12 @@ import logging
 import xconf
 from magaox.indi.device import XDevice
 from magaox.db.config import BaseDeviceConfig
-from magaox.db import Telem, FileOrigin
+from magaox.db import Telem, FileOrigin, UserLog
 from magaox.db import ingest
 from magaox.utils import parse_iso_datetime_as_utc, creation_time_from_filename
 
 import json
+import orjson
 import xconf
 import subprocess
 import queue
@@ -79,10 +80,18 @@ def _run_logdump_thread(logger_name, logdump_dir, logdump_args, name, message_qu
             log.debug(f"Running logdump command {repr(' '.join(args))} for {name} in follow mode")
             p = subprocess.Popen(args, stdout=subprocess.PIPE, stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
             for line in p.stdout:
-                log.debug(f"Log line read: {line}")
-                message = Telem.from_json(name, line)
-                if message.ec in ec_filter:
-                    message_queue.put(message) #only 'user_log' into queue
+                try:
+                    log.debug(f"Log line read: {line}")
+                    message = Telem.from_json(name, line)
+                except orjson.JSONDecodeError: #if telem parse failed, its not telem
+                    try:
+                        messge = UserLog.from_json(name, line)
+                        if message.ec in ec_filter:
+                            #only user_log
+                            message_queue.put(message)
+                            log.debug(f"added user_log to queue: {message}")
+                    except Exception as e:
+                        log.exception(f"Exception while parsing user_log {name}: {e}")
             if p.returncode != 0:
                 raise RuntimeError(f"{name} logdump exited with {p.returncode} ({repr(' '.join(args))})")
         except Exception as e:
@@ -115,7 +124,7 @@ class dbIngest(XDevice):
         self.telem_threads.append((dev, telem_thread))
 
         #userLog support here
-        ULog_args = self.log.name + '.' + dev, '/opt/MagAOX/log', (self.config.logdump_exe, '--ext=.binlog'), dev, self.user_log_queue
+        ULog_args = self.log.name + '.' + dev, '/opt/MagAOX/logs', (self.config.logdump_exe, '--ext=.binlog'), dev, self.user_log_queue
         user_log_thread = threading.Thread(target=_run_logdump_thread, args= ULog_args, daemon=True)
         user_log_thread.start()
         self.log.debug(f"Watching {dev} for incoming user logs")
