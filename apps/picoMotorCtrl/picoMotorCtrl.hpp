@@ -102,9 +102,11 @@ class picoMotorCtrl : public MagAOXApp<>, public dev::ioDevice, public dev::tele
 
       std::string m_name; ///< The name of this channel, from the config section
 
-      int m_address {1}; ///< The controller address.
+      int m_address {1}; ///< The controller address, default is 1
 
       int m_channel {-1}; ///< The number of this channel, where the motor is plugged in
+
+      int m_type {3}; ///< The motor type of this channel, default is 3
 
       std::vector<std::string> m_presetNames;
       std::vector<posT> m_presetPositions;
@@ -133,8 +135,9 @@ class picoMotorCtrl : public MagAOXApp<>, public dev::ioDevice, public dev::tele
       motorChannel( picoMotorCtrl * p,     ///< [in] The parent point to set
                     const std::string & n, ///< [in] The name of this channel
                     int add,               ///< [in] The controller address
-                    int ch                 ///< [in] The number of this channel
-                  ) : m_parent(p), m_name(n), m_address(add), m_channel(ch)
+                    int ch,                ///< [in] The number of this channel
+                    int type               ///< [in] The motor type of this channel
+                  ) : m_parent(p), m_name(n), m_address(add), m_channel(ch), m_type(type)
       {
          m_thread = new std::thread;
       }
@@ -310,7 +313,8 @@ void picoMotorCtrl::setupConfig()
    
    dev::ioDevice::setupConfig(config);
    
-   telemeterT::setupConfig(config);
+   TELEMETER_SETUP_CONFIG( config );
+
 }
 
 #define PICOMOTORCTRL_E_NOMOTORS   (-5)
@@ -365,9 +369,18 @@ int picoMotorCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
          return PICOMOTORCTRL_E_BADCHANNEL;
       }
 
+      int type = 3;
+      _config.configUnused(type, mx::app::iniFile::makeKey(sections[i], "type" ) );
+
+      if(address < 1)
+      {
+         log<text_log>("Bad motor type specificiation: " + sections[i] + " type: " + std::to_string(type), logPrio::LOG_CRITICAL);
+
+         return PICOMOTORCTRL_E_BADCHANNEL;
+      }
 
       //Ok, valid channel.  Insert into map and check for duplicates.
-      std::pair<channelMapT::iterator, bool> insert = m_channels.insert(std::pair<std::string, motorChannel>(sections[i], motorChannel(this,sections[i], address, channel)));
+      std::pair<channelMapT::iterator, bool> insert = m_channels.insert(std::pair<std::string, motorChannel>(sections[i], motorChannel(this,sections[i], address, channel, type)));
       
       if(insert.second == false)
       {
@@ -399,6 +412,8 @@ int picoMotorCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
       }
    }
    
+   TELEMETER_LOAD_CONFIG( config );
+   
    return 0;
 }
   
@@ -416,11 +431,8 @@ void picoMotorCtrl::loadConfig()
       m_shutdown = true;
    }
    
-   if(telemeterT::loadConfig(config) < 0)
-   {
-      log<text_log>("Error during telemeter config", logPrio::LOG_CRITICAL);
-      m_shutdown = true;
-   }
+   
+
 }
 
 int picoMotorCtrl::appStartup()
@@ -483,10 +495,7 @@ int picoMotorCtrl::appStartup()
       return -1;
    }
    
-   if(telemeterT::appStartup() < 0)
-   {
-      return log<software_error,-1>({__FILE__,__LINE__});
-   }
+   TELEMETER_APP_STARTUP;
    
    return 0;
 }
@@ -527,6 +536,8 @@ int picoMotorCtrl::appLogic()
    {
          
       std::unique_lock<std::mutex> lock(m_telnetMutex);
+
+      //First check the address 1 controller
       int rv = m_telnetConn.write("*IDN?\r\n", m_writeTimeout);
       if(rv != TTY_E_NOERROR)
       {
@@ -547,18 +558,27 @@ int picoMotorCtrl::appLogic()
 
       if(m_telnetConn.m_strRead.find("New_Focus") != std::string::npos)
       {
-         log<text_log>("Connected to " + m_telnetConn.m_strRead);
+         log<text_log>("Connected to " + m_telnetConn.m_strRead + " at address 1");
       }
       else
       {
          if(powerState() != 1 || powerStateTarget() != 1) return 0;
-         
-         log<software_error>({__FILE__, __LINE__, "wrong response to IDN query"});
+         log<software_error>({__FILE__, __LINE__, "wrong response to IDN query at address 1"});
          state(stateCodes::ERROR);
          return 0;
       }
-      
-      //Do a motor scan
+
+      //Now do a controller scan
+      rv = m_telnetConn.write("SC1\r\n", m_writeTimeout); //Will adjust addresses.
+      if(rv != TTY_E_NOERROR)
+      {
+         if(powerState() != 1 || powerStateTarget() != 1) return 0;
+         log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+         state(stateCodes::ERROR);
+         return 0;
+      }
+
+      //And now do a motor scan
       rv = m_telnetConn.write("MC\r\n", m_writeTimeout);
       if(rv != TTY_E_NOERROR)
       {
@@ -568,12 +588,81 @@ int picoMotorCtrl::appLogic()
          return 0;
       }
 
-      sleep(1); //wtf is this here?
+      sleep(2); //Give time for controller scan to finish
+
+      for(size_t n = 0; n < m_addresses.size(); ++n)
+      {
+         if(m_addresses[n] == 1) continue; //already done.
+
+         std::string addprefix = std::to_string(m_addresses[n]) + ">";
+
+         int rv = m_telnetConn.write(addprefix + "*IDN?\r\n", m_writeTimeout);
+         if(rv != TTY_E_NOERROR)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
+         rv = m_telnetConn.read("\r\n", m_readTimeout, true);
+         if(rv != TTY_E_NOERROR)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
+         int add;
+         std::string resp;
+
+         rv = splitResponse(add, resp, m_telnetConn.m_strRead);
+         if(rv != 0)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, "splitResponse returned " + std::to_string(rv)});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
+         if(add != m_addresses[n])
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, "address did not match in response"});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
+         if(resp.find("New_Focus") != std::string::npos)
+         {
+            log<text_log>("Connected to " + resp + " at address " + std::to_string(m_addresses[n]));
+         }
+         else
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, "wrong response to IDN query at address " + std::to_string(m_addresses[n])});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
+         //Now do a motor scan
+         rv = m_telnetConn.write(addprefix + "MC\r\n", m_writeTimeout);
+         if(rv != TTY_E_NOERROR)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+      }
       
+      sleep(2); //This is to give time for motor scans to finish
+
       //Now check for each motor attached
       for(auto it=m_channels.begin(); it!=m_channels.end();++it)
       {
-         std::string query = std::to_string(it->second.m_channel) + "QM?";
+         std::string query = std::to_string(it->second.m_address) + ">" + std::to_string(it->second.m_channel) + "QM?";
 
          rv = m_telnetConn.write(query + "\r\n", m_writeTimeout); 
          if(rv != TTY_E_NOERROR)
@@ -593,26 +682,49 @@ int picoMotorCtrl::appLogic()
             return 0;
          }
 
-         int moType = std::stoi(m_telnetConn.m_strRead);
+         int add;
+         std::string resp;
+
+         rv = splitResponse(add, resp, m_telnetConn.m_strRead);
+         if(rv != 0)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, "splitResponse returned " + std::to_string(rv)});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
+         if(add != it->second.m_address)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, "address did not match in response"});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
+         int moType = std::stoi(resp);
          if(moType == 0)
          {
             if(powerState() != 1 || powerStateTarget() != 1) return 0;
-            log<text_log>("No motor connected on channel " + std::to_string(it->second.m_channel) + " [" + it->second.m_name + "]", logPrio::LOG_CRITICAL);
+            log<text_log>("No motor connected on channel " + std::to_string(it->second.m_address) + "." + std::to_string(it->second.m_channel) + " [" + it->second.m_name + "]", logPrio::LOG_CRITICAL);
             state(stateCodes::FAILURE);
             return -1;
          }
-         else if (moType != 3)
+         else if (moType != it->second.m_type)
          {
             if(powerState() != 1 || powerStateTarget() != 1) return 0;
-            log<text_log>("Wrong motor type connected on channel " + std::to_string(it->second.m_channel) + " [" + it->second.m_name + "]", logPrio::LOG_CRITICAL);
+            std::string msg = "Wrong motor type connected on channel " + std::to_string(it->second.m_address) + ".";
+            msg += std::to_string(it->second.m_channel) + " [" + it->second.m_name + "] ";
+            msg += "expected " + std::to_string(it->second.m_type) + " ";
+            msg += "got " + std::to_string(moType);
+
+            log<text_log>(msg, logPrio::LOG_CRITICAL);
             state(stateCodes::FAILURE);
             return -1;
          }
       }
       
-         
       state(stateCodes::READY);
-      
       
       return 0;
    }
@@ -751,11 +863,7 @@ int picoMotorCtrl::appLogic()
          }
       }
       
-      if(telemeterT::appLogic() < 0)
-      {
-         log<software_error>({__FILE__, __LINE__});
-         return 0;
-      }
+      TELEMETER_APP_LOGIC;
       
       return 0;
    }
@@ -792,7 +900,7 @@ int picoMotorCtrl::appShutdown()
       }
    }
    
-   telemeterT::appShutdown();
+   TELEMETER_APP_SHUTDOWN;
 
    return 0;
 }
