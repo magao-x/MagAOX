@@ -64,9 +64,8 @@ RETRY_WAIT_SEC = 2
 CREATE_CONNECTION_TIMEOUT_SEC = 2
 EXIT_TIMEOUT_SEC = 2
 
-def _run_logdump_thread(logger_name, logdump_dir, logdump_args, name, message_queue):
+def _run_logdump_thread(logger_name, logdump_dir, logdump_args, name, message_queue, record_class):
     # filter what content from user_logs gets put into db
-    ec_filter = ['user_log']
     log = logging.getLogger(logger_name)
     glob_pat = logdump_dir + f'/{name}_*'
     has_no_logs = len(glob.glob(glob_pat)) == 0
@@ -80,18 +79,9 @@ def _run_logdump_thread(logger_name, logdump_dir, logdump_args, name, message_qu
             log.debug(f"Running logdump command {repr(' '.join(args))} for {name} in follow mode")
             p = subprocess.Popen(args, stdout=subprocess.PIPE, stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
             for line in p.stdout:
-                try:
-                    log.debug(f"Log line read: {line}")
-                    message = Telem.from_json(name, line)
-                except orjson.JSONDecodeError: #if telem parse failed, its not telem
-                    try:
-                        messge = UserLog.from_json(name, line)
-                        if message.ec in ec_filter:
-                            #only user_log
-                            message_queue.put(message)
-                            log.debug(f"added user_log to queue: {message}")
-                    except Exception as e:
-                        log.exception(f"Exception while parsing user_log {name}: {e}")
+                log.debug(f"Log line read: {line}")
+                message = record_class.from_json(name, line)
+                message_queue.put(message)
             if p.returncode != 0:
                 raise RuntimeError(f"{name} logdump exited with {p.returncode} ({repr(' '.join(args))})")
         except Exception as e:
@@ -117,18 +107,19 @@ class dbIngest(XDevice):
     user_log_queue : queue.Queue
 
     def launch_followers(self, dev):
-        telem_args = self.log.name + '.' + dev, '/opt/MagAOX/telem', (self.config.logdump_exe, '--ext=.bintel'), dev, self.telem_queue
+        telem_args = self.log.name + '.' + dev, '/opt/MagAOX/telem', (self.config.logdump_exe, '--ext=.bintel'), dev, self.telem_queue, Telem
         telem_thread = threading.Thread(target=_run_logdump_thread, args=telem_args, daemon=True)
         telem_thread.start()
         self.log.debug(f"Watching {dev} for incoming telem")
         self.telem_threads.append((dev, telem_thread))
 
         #userLog support here
-        ULog_args = self.log.name + '.' + dev, '/opt/MagAOX/logs', (self.config.logdump_exe, '--ext=.binlog'), dev, self.user_log_queue
-        user_log_thread = threading.Thread(target=_run_logdump_thread, args= ULog_args, daemon=True)
-        user_log_thread.start()
-        self.log.debug(f"Watching {dev} for incoming user logs")
-        self.user_log_threads.append((dev, user_log_thread))
+        if dev == "observers":
+            ULog_args = self.log.name + '.' + dev, '/opt/MagAOX/logs', (self.config.logdump_exe, '--ext=.binlog'), dev, self.user_log_queue, UserLog
+            user_log_thread = threading.Thread(target=_run_logdump_thread, args= ULog_args, daemon=True)
+            user_log_thread.start()
+            self.log.debug(f"Watching {dev} for incoming user logs")
+            self.user_log_threads.append((dev, user_log_thread))
 
     def refresh_properties(self):
         self.properties['last_update']['timestamp'] = self.last_update_ts_sec
