@@ -418,8 +418,6 @@ void stage::on_positionSlider_sliderMoved( double s )
 
 void stage::on_positionSlider_sliderReleased()
 {
-   static double lastPos {-1e30};
-
    ui.position->stopEditing();
 
    double s = ui.positionSlider->value();
@@ -427,8 +425,6 @@ void stage::on_positionSlider_sliderReleased()
 
    ui.positionSlider->setValue(m_position/m_maxPos * 100.);
 
-   if(newPos == lastPos) return;
-
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
 
    ip.setDevice(m_stageName);
@@ -442,8 +438,6 @@ void stage::on_positionSlider_sliderReleased()
    }
    ip.add(pcf::IndiElement("target"));
    ip["target"] = newPos;
-
-   lastPos = newPos;
 
    sendNewProperty(ip);
 
@@ -451,11 +445,7 @@ void stage::on_positionSlider_sliderReleased()
 
 void stage::on_position_returnPressed()
 {
-   static double lastPos {-1e30};
-
    double newPos = ui.position->editText().toDouble();
-
-   if(newPos == lastPos) return;
 
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
 
@@ -470,7 +460,7 @@ void stage::on_position_returnPressed()
    }
    ip.add(pcf::IndiElement("target"));
    ip["target"] = newPos;
-   lastPos = newPos;
+
    sendNewProperty(ip);
 
    ui.position->clearFocus();
