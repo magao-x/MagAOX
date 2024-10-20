@@ -5,129 +5,113 @@
 
 #include "ui_statusDisplay.h"
 
-#include "../xWidgets/statusDisplay.hpp"
+#include "../xWidgets/statusCombo.hpp"
 #include "../stage/stage.hpp"
 
 namespace xqt
 {
 
-class stageStatus : public statusDisplay
+class stageStatus : public statusCombo
 {
-   Q_OBJECT
+    Q_OBJECT
 
-protected:
+  protected:
 
-    std::string m_presetName;
     float m_position;
 
-public:
+  public:
+    stageStatus( QWidget *Parent = 0, Qt::WindowFlags f = Qt::WindowFlags() );
 
-    stageStatus( QWidget * Parent = 0,
-                Qt::WindowFlags f = Qt::WindowFlags()
-              );
+    stageStatus( const std::string &stgN, QWidget *Parent = 0, Qt::WindowFlags f = Qt::WindowFlags() );
 
-   stageStatus( const std::string & stgN,
-                QWidget * Parent = 0,
-                Qt::WindowFlags f = Qt::WindowFlags()
-              );
+    ~stageStatus();
 
-   ~stageStatus();
+    void setup( const std::string &stgN );
 
-   void setup(const std::string & stgN);
+    virtual QString formatValue();
 
-   virtual QString formatValue();
+    virtual void subscribe();
 
-   virtual void subscribe();
+    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
 
-   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-
-   //void updateGUI();
-
+    // void updateGUI();
 };
 
-stageStatus::stageStatus(  QWidget * Parent,
-                      Qt::WindowFlags f) : statusDisplay(Parent, f)
+stageStatus::stageStatus( QWidget *Parent, Qt::WindowFlags f ) : statusCombo( Parent, f )
 {
 }
 
-stageStatus::stageStatus( const std::string & stageName,
-                      QWidget * Parent,
-                      Qt::WindowFlags f) : statusDisplay(Parent, f)
+stageStatus::stageStatus( const std::string &stageName, QWidget *Parent, Qt::WindowFlags f )
+    : statusCombo( Parent, f )
 {
-   setup(stageName);
+    setup( stageName );
 }
 
 stageStatus::~stageStatus()
 {
 }
 
-void stageStatus::setup(const std::string & stageName)
+void stageStatus::setup( const std::string &stageName )
 {
-    statusDisplay::setup(stageName, "", "", stageName, "");
-    if(m_ctrlWidget)
+    if(stageName.find("fw") == 0)
+    {
+        statusCombo::setup( stageName, "filterName", "", stageName, "" );
+    }
+    else
+    {
+        statusCombo::setup( stageName, "presetName", "", stageName, "" );
+    }
+
+    if( m_ctrlWidget )
     {
         delete m_ctrlWidget;
     }
 
-    m_ctrlWidget = (xWidget *) (new stage(stageName, this, Qt::Dialog));
-
+    m_ctrlWidget = (xWidget *)( new stage( stageName, this, Qt::Dialog ) );
 }
+
 QString stageStatus::formatValue()
 {
-    if(m_presetName == "" || m_presetName == "none")
+    if( m_value == "" || m_value == "none" )
     {
         char pstr[64];
-        snprintf(pstr, sizeof(pstr), "%0.4f", m_position);
-        return QString(pstr);
+        snprintf( pstr, sizeof( pstr ), "%0.4f", m_position );
+        return QString( pstr );
     }
     else
     {
-        return QString(m_presetName.c_str());
+        return statusCombo::formatValue();
     }
 }
 
 void stageStatus::subscribe()
 {
-    if(!m_parent) return;
+    if( !m_parent )
+    {
+        return;
+    }
 
-    m_parent->addSubscriberProperty(this, m_device, "presetName");
-    m_parent->addSubscriberProperty(this, m_device, "filterName");
-    m_parent->addSubscriberProperty(this, m_device, "position");
-    m_parent->addSubscriberProperty(this, m_device, "filter");
+    //m_parent->addSubscriberProperty( this, m_device, "presetName" );
+    //m_parent->addSubscriberProperty( this, m_device, "filterName" );
+    m_parent->addSubscriberProperty( this, m_device, "position" );
+    m_parent->addSubscriberProperty( this, m_device, "filter" );
 
-    statusDisplay::subscribe();
+    statusCombo::subscribe();
 
     return;
 }
 
-void stageStatus::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void stageStatus::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
-    if(ipRecv.getDevice() != m_device) return;
+    if( ipRecv.getDevice() != m_device )
+        return;
 
-    if(ipRecv.getName() == "presetName" || ipRecv.getName() == "filterName")
+    if( ipRecv.getName() == "position" || ipRecv.getName() == "filter" )
     {
-        auto map = ipRecv.getElements();
-
-        for(auto it = map.begin(); it != map.end(); ++it)
-        {
-            if(it->second.getSwitchState() == pcf::IndiElement::On)
-            {
-                if(m_presetName != it->first)
-                {
-                    m_presetName = it->first;
-                    m_valChanged = true;
-                }
-
-                break;
-            }
-        }
-    }
-    else if(ipRecv.getName() == "position" || ipRecv.getName() == "filter")
-    {
-        if(ipRecv.find("current"))
+        if( ipRecv.find( "current" ) )
         {
             float pos = ipRecv["current"].get<float>();
-            if(pos != m_position && (m_presetName == "none" || m_presetName == ""))
+            if( pos != m_position && ( m_value == "none" || m_value == "" ) )
             {
                 m_valChanged = true;
                 m_position = pos;
@@ -135,10 +119,10 @@ void stageStatus::handleSetProperty( const pcf::IndiProperty & ipRecv)
         }
     }
 
-    statusDisplay::handleSetProperty(ipRecv);
+    statusCombo::handleSetProperty( ipRecv ); //always emit updateGUI
 }
 
-} //namespace xqt
+} // namespace xqt
 
 #include "moc_stageStatus.cpp"
 

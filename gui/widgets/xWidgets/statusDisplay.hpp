@@ -129,10 +129,10 @@ statusDisplay::~statusDisplay()
 }
 
 void statusDisplay::setup( const std::string & device,
-                              const std::string & property,
-                              const std::string & element,
-                              const std::string & label,
-                              const std::string & units
+                           const std::string & property,
+                           const std::string & element,
+                           const std::string & label,
+                           const std::string & units
                           )
 
 {

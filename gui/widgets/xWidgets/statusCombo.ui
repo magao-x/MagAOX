@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>statusDisplay</class>
- <widget class="QWidget" name="statusDisplay">
+ <class>statusCombo</class>
+ <widget class="QWidget" name="statusCombo">
   <property name="geometry">
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>430</width>
-    <height>68</height>
+    <width>399</width>
+    <height>58</height>
    </rect>
   </property>
   <property name="sizePolicy">
-   <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+   <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
     <horstretch>0</horstretch>
     <verstretch>0</verstretch>
    </sizepolicy>
@@ -21,10 +21,7 @@
   </property>
   <layout class="QHBoxLayout" name="horizontalLayout">
    <item>
-    <layout class="QHBoxLayout" name="hl_roi" stretch="1,1,6,1">
-     <property name="spacing">
-      <number>9</number>
-     </property>
+    <layout class="QHBoxLayout" name="hl_roi" stretch="1,2,5,1,1">
      <item>
       <spacer name="horizontalSpacer_2">
        <property name="orientation">
@@ -52,45 +49,40 @@
       </widget>
      </item>
      <item>
-      <widget class="xqt::statusLabel" name="status">
+      <widget class="QComboBox" name="status"/>
+     </item>
+     <item>
+      <widget class="QToolButton" name="buttonGo">
        <property name="sizePolicy">
-        <sizepolicy hsizetype="MinimumExpanding" vsizetype="Expanding">
+        <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
          <horstretch>0</horstretch>
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
-       <property name="minimumSize">
+       <property name="maximumSize">
+        <size>
+         <width>16777215</width>
+         <height>16777214</height>
+        </size>
+       </property>
+       <property name="focusPolicy">
+        <enum>Qt::StrongFocus</enum>
+       </property>
+       <property name="text">
+        <string>go</string>
+       </property>
+       <property name="iconSize">
         <size>
          <width>0</width>
          <height>0</height>
         </size>
        </property>
-       <property name="font">
-        <font>
-         <pointsize>10</pointsize>
-        </font>
-       </property>
-       <property name="frameShape">
-        <enum>QFrame::NoFrame</enum>
-       </property>
-       <property name="frameShadow">
-        <enum>QFrame::Plain</enum>
-       </property>
-       <property name="text">
-        <string>status</string>
-       </property>
-       <property name="alignment">
-        <set>Qt::AlignCenter</set>
-       </property>
-       <property name="margin">
-        <number>0</number>
-       </property>
       </widget>
      </item>
      <item>
-      <widget class="QToolButton" name="button">
+      <widget class="QToolButton" name="buttonCtrl">
        <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+        <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
          <horstretch>0</horstretch>
          <verstretch>0</verstretch>
         </sizepolicy>
@@ -119,13 +111,6 @@
    </item>
   </layout>
  </widget>
- <customwidgets>
-  <customwidget>
-   <class>xqt::statusLabel</class>
-   <extends>QLabel</extends>
-   <header>../xWidgets/statusLabel.hpp</header>
-  </customwidget>
- </customwidgets>
  <resources/>
  <connections/>
 </ui>
