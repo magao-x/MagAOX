@@ -163,6 +163,8 @@ public slots:
    void on_button_lyot_r_pressed();
    void on_button_lyot_scale_pressed();
 
+   void on_button_piaa_l_pressed();
+   void on_button_piaa_r_pressed();
    void on_button_piaa_u_pressed();
    void on_button_piaa_d_pressed();
    void on_button_piaa_scale_pressed();
@@ -177,6 +179,8 @@ public slots:
    void on_button_piaa1_d_pressed();
    void on_button_piaa1_scale_pressed();
 
+   void on_button_ipiaa_l_pressed();
+   void on_button_ipiaa_r_pressed();
    void on_button_ipiaa_u_pressed();
    void on_button_ipiaa_d_pressed();
    void on_button_ipiaa_scale_pressed();
@@ -244,6 +248,8 @@ coronAlign::coronAlign( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
    ui.checkCamllowfs->setEnabled(false);
 
    ui.fwpupil->setup("fwpupil");
+   //ui.fwpupil->setup("fwpupil", "filterName", "", "fwpupil", "");
+
    ui.fwfpm->setup("fwfpm");
    ui.fwlyot->setup("fwlyot");
    ui.stagepiaa->setup("stagepiaa");
@@ -320,6 +326,8 @@ void coronAlign::onConnect()
    ui.button_lyot_scale->setEnabled(true);
 
    ui.labelPIAA->setEnabled(true);
+   ui.button_piaa_l->setEnabled(true);
+   ui.button_piaa_r->setEnabled(true);
    ui.button_piaa_u->setEnabled(true);
    ui.button_piaa_d->setEnabled(true);
    ui.button_piaa_scale->setEnabled(true);
@@ -337,6 +345,8 @@ void coronAlign::onConnect()
    ui.button_piaa1_scale->setEnabled(true);
 
    ui.labeliPIAA->setEnabled(true);
+   ui.button_ipiaa_l->setEnabled(true);
+   ui.button_ipiaa_r->setEnabled(true);
    ui.button_ipiaa_u->setEnabled(true);
    ui.button_ipiaa_d->setEnabled(true);
    ui.button_ipiaa_scale->setEnabled(true);
@@ -404,6 +414,8 @@ void coronAlign::onDisconnect()
    ui.button_lyot_scale->setEnabled(false);
 
    ui.labelPIAA->setEnabled(false);
+   ui.button_piaa_l->setEnabled(false);
+   ui.button_piaa_r->setEnabled(false);
    ui.button_piaa_u->setEnabled(false);
    ui.button_piaa_d->setEnabled(false);
    ui.button_piaa_scale->setEnabled(false);
@@ -421,6 +433,8 @@ void coronAlign::onDisconnect()
    ui.button_piaa1_scale->setEnabled(false);
 
    ui.labeliPIAA->setEnabled(false);
+   ui.button_ipiaa_l->setEnabled(false);
+   ui.button_ipiaa_r->setEnabled(false);
    ui.button_ipiaa_u->setEnabled(false);
    ui.button_ipiaa_d->setEnabled(false);
    ui.button_ipiaa_scale->setEnabled(false);
@@ -851,6 +865,9 @@ void coronAlign::enablePicoButtons()
       ui.button_lyot_d->setEnabled(true);
    }
 
+   ui.button_piaa_l->setEnabled(true);
+   ui.button_piaa_r->setEnabled(true);
+
    ui.button_piaa0_l->setEnabled(true);
    ui.button_piaa0_r->setEnabled(true);
    ui.button_piaa0_scale->setEnabled(true);
@@ -860,6 +877,9 @@ void coronAlign::enablePicoButtons()
    ui.button_piaa1_u->setEnabled(true);
    ui.button_piaa1_d->setEnabled(true);
    ui.button_piaa1_scale->setEnabled(true);
+
+   ui.button_ipiaa_l->setEnabled(true);
+   ui.button_ipiaa_r->setEnabled(true);
 
    ui.button_ipiaa0_l->setEnabled(true);
    ui.button_ipiaa0_r->setEnabled(true);
@@ -893,6 +913,9 @@ void coronAlign::disablePicoButtons()
       ui.button_lyot_d->setEnabled(false);
    }
 
+   ui.button_piaa_l->setEnabled(false);
+   ui.button_piaa_r->setEnabled(false);
+
    ui.button_piaa0_l->setEnabled(false);
    ui.button_piaa0_r->setEnabled(false);
    ui.button_piaa0_scale->setEnabled(false);
@@ -902,6 +925,9 @@ void coronAlign::disablePicoButtons()
    ui.button_piaa1_u->setEnabled(false);
    ui.button_piaa1_d->setEnabled(false);
    ui.button_piaa1_scale->setEnabled(false);
+
+   ui.button_ipiaa_l->setEnabled(false);
+   ui.button_ipiaa_r->setEnabled(false);
 
    ui.button_ipiaa0_l->setEnabled(false);
    ui.button_ipiaa0_r->setEnabled(false);
@@ -1328,6 +1354,54 @@ void coronAlign::on_button_lyot_scale_pressed()
 
 }
 
+void coronAlign::on_button_piaa_l_pressed()
+{
+
+    disablePicoButtons();
+
+    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+
+    ip.setDevice("picomotors");
+    ip.setName("piaa0x_pos");
+    ip.add(pcf::IndiElement("target"));
+    ip["target"] = m_piaa0xPos - m_piaaScale*m_piaa0StepSize;
+
+    sendNewProperty(ip);
+
+    pcf::IndiProperty ip1(pcf::IndiProperty::Number);
+
+    ip1.setDevice("picomotors");
+    ip1.setName("piaa1x_pos");
+    ip1.add(pcf::IndiElement("target"));
+    ip1["target"] = m_piaa1xPos - m_piaaScale*m_piaa1StepSize;
+
+    sendNewProperty(ip1);
+
+}
+
+void coronAlign::on_button_piaa_r_pressed()
+{
+    disablePicoButtons();
+
+    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+
+    ip.setDevice("picomotors");
+    ip.setName("piaa0x_pos");
+    ip.add(pcf::IndiElement("target"));
+    ip["target"] = m_piaa0xPos + m_piaaScale*m_piaa0StepSize;
+
+    sendNewProperty(ip);
+
+    pcf::IndiProperty ip1(pcf::IndiProperty::Number);
+
+    ip1.setDevice("picomotors");
+    ip1.setName("piaa1x_pos");
+    ip1.add(pcf::IndiElement("target"));
+    ip1["target"] = m_piaa1xPos + m_piaaScale*m_piaa1StepSize;
+
+    sendNewProperty(ip1);
+}
+
 void coronAlign::on_button_piaa_u_pressed()
 {
     pcf::IndiProperty ip(pcf::IndiProperty::Number);
@@ -1390,7 +1464,7 @@ void coronAlign::on_button_piaa0_l_pressed()
     ip.setDevice("picomotors");
     ip.setName("piaa0x_pos");
     ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaa0xPos + m_piaa0Scale*m_piaa0StepSize;
+    ip["target"] = m_piaa0xPos - m_piaa0Scale*m_piaa0StepSize;
 
     disablePicoButtons();
 
@@ -1405,7 +1479,7 @@ void coronAlign::on_button_piaa0_r_pressed()
     ip.setDevice("picomotors");
     ip.setName("piaa0x_pos");
     ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaa0xPos - m_piaa0Scale*m_piaa0StepSize;
+    ip["target"] = m_piaa0xPos + m_piaa0Scale*m_piaa0StepSize;
 
     disablePicoButtons();
 
@@ -1448,7 +1522,7 @@ void coronAlign::on_button_piaa1_l_pressed()
     ip.setDevice("picomotors");
     ip.setName("piaa1x_pos");
     ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaa1xPos + m_piaa1Scale*m_piaa1StepSize;
+    ip["target"] = m_piaa1xPos - m_piaa1Scale*m_piaa1StepSize;
 
     disablePicoButtons();
 
@@ -1462,7 +1536,7 @@ void coronAlign::on_button_piaa1_r_pressed()
     ip.setDevice("picomotors");
     ip.setName("piaa1x_pos");
     ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaa1xPos - m_piaa1Scale*m_piaa1StepSize;
+    ip["target"] = m_piaa1xPos + m_piaa1Scale*m_piaa1StepSize;
 
     disablePicoButtons();
 
@@ -1476,7 +1550,7 @@ void coronAlign::on_button_piaa1_u_pressed()
     ip.setDevice("picomotors");
     ip.setName("piaa1y_pos");
     ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaa1yPos + m_piaa1Scale*m_piaa1StepSize;
+    ip["target"] = m_piaa1yPos - m_piaa1Scale*m_piaa1StepSize;
 
     disablePicoButtons();
 
@@ -1490,7 +1564,7 @@ void coronAlign::on_button_piaa1_d_pressed()
     ip.setDevice("picomotors");
     ip.setName("piaa1y_pos");
     ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaa1yPos - m_piaa1Scale*m_piaa1StepSize;
+    ip["target"] = m_piaa1yPos + m_piaa1Scale*m_piaa1StepSize;
 
     disablePicoButtons();
 
@@ -1524,6 +1598,52 @@ void coronAlign::on_button_piaa1_scale_pressed()
    snprintf(ss, 5, "%d", m_piaa1Scale);
    ui.button_piaa1_scale->setText(ss);
 
+}
+
+void coronAlign::on_button_ipiaa_l_pressed()
+{
+    disablePicoButtons();
+
+    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+
+    ip.setDevice("picomotors");
+    ip.setName("ipiaa0x_pos");
+    ip.add(pcf::IndiElement("target"));
+    ip["target"] = m_ipiaa0xPos + m_ipiaaScale*m_ipiaa0StepSize;
+
+    sendNewProperty(ip);
+
+    pcf::IndiProperty ip1(pcf::IndiProperty::Number);
+
+    ip1.setDevice("picomotors");
+    ip1.setName("ipiaa1x_pos");
+    ip1.add(pcf::IndiElement("target"));
+    ip1["target"] = m_ipiaa1xPos + m_ipiaaScale*m_ipiaa1StepSize;
+
+    sendNewProperty(ip1);
+}
+
+void coronAlign::on_button_ipiaa_r_pressed()
+{
+    disablePicoButtons();
+
+    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+
+    ip.setDevice("picomotors");
+    ip.setName("ipiaa0x_pos");
+    ip.add(pcf::IndiElement("target"));
+    ip["target"] = m_ipiaa0xPos - m_ipiaaScale*m_ipiaa0StepSize;
+
+    sendNewProperty(ip);
+
+    pcf::IndiProperty ip1(pcf::IndiProperty::Number);
+
+    ip1.setDevice("picomotors");
+    ip1.setName("ipiaa1x_pos");
+    ip1.add(pcf::IndiElement("target"));
+    ip1["target"] = m_ipiaa1xPos - m_ipiaaScale*m_ipiaa1StepSize;
+
+    sendNewProperty(ip1);
 }
 
 void coronAlign::on_button_ipiaa_u_pressed()

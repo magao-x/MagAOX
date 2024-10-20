@@ -41,6 +41,7 @@ HEADERS += ../../widgets/coronAlign/coronAlign.hpp \
            ../../widgets/stage/stage.hpp \
            ../../widgets/xWidgets/fsmDisplay.hpp \
            ../../widgets/xWidgets/statusLineEdit.hpp \
+           ../../widgets/xWidgets/statusCombo.hpp
 
 SOURCES += coronAlignGUI_main.cpp
 
@@ -49,6 +50,7 @@ FORMS += ../../widgets/coronAlign/coronAlign.ui \
          ../../widgets/xWidgets/selectionSw.ui \
          ../../widgets/stage/stage.ui \
          ../../widgets/xWidgets/fsmDisplay.ui \
+         ../../widgets/xWidgets/statusCombo.ui
 
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a

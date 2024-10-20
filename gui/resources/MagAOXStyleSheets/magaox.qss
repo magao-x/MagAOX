@@ -1,6 +1,6 @@
 /*
  *  MagaOX Stylesheet, modified from:
- * 
+ *
  *  BreezeDark stylesheet.
  *
  *  :author: Colin Duquesnoy
@@ -873,6 +873,7 @@ QComboBox[isStatus="true"]
 {
    color: #3DA5FF;
 }
+
 QComboBox:disabled[isStatus="true"]
 {
    color: #007ae6;

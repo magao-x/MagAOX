@@ -60,7 +60,7 @@ selectionSwStatus::selectionSwStatus(  const std::string & device,
                                        const std::string & units,
                                        QWidget * Parent,
                                        Qt::WindowFlags f
-                                     ) : statusDisplay(device, property, element, label, units, Parent, f)
+                                     ) : statusDisplay(Parent, f)
 {
     setup(device, property, element, label, units);
 }

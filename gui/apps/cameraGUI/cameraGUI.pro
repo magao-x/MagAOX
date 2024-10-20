@@ -44,7 +44,8 @@ HEADERS += ../../widgets/camera/camera.hpp \
            ../../widgets/xWidgets/selectionSw.hpp \
            ../../widgets/xWidgets/toggleSlider.hpp \
            ../../widgets/camera/roiStatus.hpp \
-           ../../widgets/camera/stageStatus.hpp \
+           ../../widgets/xWidgets/statusCombo.hpp \
+           ../../widgets/xWidgets/stageStatus.hpp \
            ../../widgets/roi/roi.hpp \
            ../../widgets/stage/stage.hpp \
            ../../widgets/camera/shutterStatus.hpp \
@@ -56,6 +57,7 @@ FORMS += ../../widgets/camera/camera.ui \
          ../../widgets/xWidgets/fsmDisplay.ui \
          ../../widgets/xWidgets/statusEntry.ui \
          ../../widgets/xWidgets/statusDisplay.ui \
+         ../../widgets/xWidgets/statusCombo.ui \
          ../../widgets/xWidgets/toggleSlider.ui \
          ../../widgets/roi/roi.ui \
          ../../widgets/stage/stage.ui \
