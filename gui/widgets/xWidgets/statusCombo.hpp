@@ -169,7 +169,14 @@ void statusCombo::ctrlWidget( xWidget *cw )
         m_ctrlWidget->deleteLater();
     }
 
-    m_ctrlWidget = cw;
+    if(cw == nullptr)
+    {
+        ui.buttonCtrl->setVisible(false);
+    }
+    else
+    {
+        m_ctrlWidget = cw;
+    }
 }
 
 xWidget *statusCombo::ctrlWidget()

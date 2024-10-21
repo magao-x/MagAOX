@@ -8,7 +8,6 @@
 #include "xWidgets/xWidget.hpp"
 #include "xWidgets/fsmDisplay.hpp"
 #include "xWidgets/statusEntry.hpp"
-#include "xWidgets/selectionSwStatus.hpp"
 #include "xWidgets/statusDisplay.hpp"
 #include "xWidgets/stageStatus.hpp"
 #include "xWidgets/toggleSlider.hpp"
@@ -54,11 +53,11 @@ protected:
 
     roiStatus * ui_roiStatus {nullptr};
 
-    selectionSwStatus * ui_modes {nullptr};
+    statusCombo * ui_modes {nullptr};
 
-    selectionSwStatus * ui_readoutSpd {nullptr};
+    statusCombo * ui_readoutSpd {nullptr};
 
-    selectionSwStatus * ui_vshiftSpd {nullptr};
+    statusCombo * ui_vshiftSpd {nullptr};
 
     toggleSlider * ui_cropMode {nullptr};
 
@@ -767,7 +766,7 @@ void camera::setup_modes()
 {
    if(ui_modes) return;
 
-   ui_modes = new selectionSwStatus(m_camName, "mode", "", "Mode", "", this);
+   ui_modes = new statusCombo(m_camName, "mode", "", "Mode", "", this);
 
    ui_modes->setObjectName(QString::fromUtf8("modes"));
 
@@ -783,7 +782,9 @@ void camera::setup_readoutSpd()
 {
    if(ui_readoutSpd) return;
 
-   ui_readoutSpd = new selectionSwStatus(m_camName,"readout_speed", "", "Readout Spd", "", this);
+   ui_readoutSpd = new statusCombo(m_camName,"readout_speed", "", "Readout Spd", "", this);
+   ui_readoutSpd->ctrlWidget(nullptr);
+
    ui_readoutSpd->setObjectName(QString::fromUtf8("readoutSpd"));
 
    ui.grid->addWidget(ui_readoutSpd, 4, 1, 1, 1);
@@ -797,7 +798,9 @@ void camera::setup_vshiftSpd()
 {
    if(ui_vshiftSpd) return;
 
-   ui_vshiftSpd = new selectionSwStatus(m_camName,"vshift_speed", "", "Vert. Shift Spd", "", this);
+   ui_vshiftSpd = new statusCombo(m_camName,"vshift_speed", "", "Vert. Shift Spd", "", this);
+   ui_vshiftSpd->ctrlWidget(nullptr);
+
    ui_vshiftSpd->setObjectName(QString::fromUtf8("vshiftSpd"));
 
    ui.grid->addWidget(ui_vshiftSpd, 5, 1, 1, 1);

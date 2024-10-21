@@ -7,11 +7,15 @@
     <x>0</x>
     <y>0</y>
     <width>471</width>
-    <height>258</height>
+    <height>270</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Form</string>
+  </property>
+  <property name="windowIcon">
+   <iconset>
+    <normaloff>:/icons/waves.png</normaloff>:/icons/waves.png</iconset>
   </property>
   <layout class="QGridLayout" name="gridLayout">
    <item row="0" column="0">

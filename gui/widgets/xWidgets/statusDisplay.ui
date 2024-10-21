@@ -90,27 +90,40 @@
      <item>
       <widget class="QToolButton" name="button">
        <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>1</horstretch>
+         <verstretch>1</verstretch>
         </sizepolicy>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>40</width>
+         <height>40</height>
+        </size>
        </property>
        <property name="maximumSize">
         <size>
-         <width>16777215</width>
-         <height>16777214</height>
+         <width>40</width>
+         <height>40</height>
         </size>
        </property>
        <property name="focusPolicy">
-        <enum>Qt::NoFocus</enum>
+        <enum>Qt::StrongFocus</enum>
+       </property>
+       <property name="toolTip">
+        <string>open control</string>
        </property>
        <property name="text">
-        <string>---</string>
+        <string/>
+       </property>
+       <property name="icon">
+        <iconset>
+         <normaloff>:/icons/application-cog-outline.png</normaloff>:/icons/application-cog-outline.png</iconset>
        </property>
        <property name="iconSize">
         <size>
-         <width>0</width>
-         <height>0</height>
+         <width>32</width>
+         <height>32</height>
         </size>
        </property>
       </widget>

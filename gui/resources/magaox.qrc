@@ -9,7 +9,23 @@
         <file>icons/arrow_down_128.png</file>
         <file>icons/arrow_down_right_128.png</file>
         <file>icons/square_128.png</file>
+        <file>icons/home-circle.png</file>
+        <file>icons/stop-circle-outline.png</file>
         <file>icons/scamper_cutout_sq_64.jpeg</file>
         <file>icons/recycle.png</file>
+        <file>icons/arrow-right-drop-circle-outline.png</file>
+        <file>icons/application-cog-outline.png</file>
+        <file>icons/camera.png</file>
+        <file>icons/arrow-all.png</file>
+        <file>icons/waves.png</file>
+        <file>icons/controller-classic.png</file>
+        <file>icons/tune.png</file>
+        <file>icons/power-plug.png</file>
+        <file>icons/cog.png</file>
+        <file>icons/dump-truck.png</file>
+        <file>icons/crop.png</file>
+        <file>icons/flare.png</file>
     </qresource>
 </RCC>
+
+
