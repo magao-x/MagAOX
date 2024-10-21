@@ -36,7 +36,6 @@ HEADERS += ../../widgets/camera/camera.hpp \
            ../../widgets/xWidgets/app.hpp \
            ../../widgets/xWidgets/xWidget.hpp \
            ../../widgets/xWidgets/fsmDisplay.hpp \
-           ../../widgets/xWidgets/selectionSwStatus.hpp \
            ../../widgets/xWidgets/statusEntry.hpp \
            ../../widgets/xWidgets/statusDisplay.hpp \
            ../../widgets/xWidgets/statusLineEdit.hpp \
@@ -68,6 +67,7 @@ LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a \
         -lmxlib
 
+RESOURCES += ../../resources/magaox.qrc
 RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc
 
 QT += widgets

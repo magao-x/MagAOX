@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>399</width>
-    <height>58</height>
+    <height>64</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -54,27 +54,40 @@
      <item>
       <widget class="QToolButton" name="buttonGo">
        <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>1</horstretch>
+         <verstretch>1</verstretch>
         </sizepolicy>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>40</width>
+         <height>40</height>
+        </size>
        </property>
        <property name="maximumSize">
         <size>
-         <width>16777215</width>
-         <height>16777214</height>
+         <width>40</width>
+         <height>40</height>
         </size>
        </property>
        <property name="focusPolicy">
         <enum>Qt::StrongFocus</enum>
        </property>
+       <property name="toolTip">
+        <string>apply selection</string>
+       </property>
        <property name="text">
-        <string>go</string>
+        <string/>
+       </property>
+       <property name="icon">
+        <iconset>
+         <normaloff>:/icons/arrow-right-drop-circle-outline.png</normaloff>:/icons/arrow-right-drop-circle-outline.png</iconset>
        </property>
        <property name="iconSize">
         <size>
-         <width>0</width>
-         <height>0</height>
+         <width>32</width>
+         <height>32</height>
         </size>
        </property>
       </widget>
@@ -82,27 +95,40 @@
      <item>
       <widget class="QToolButton" name="buttonCtrl">
        <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>1</horstretch>
+         <verstretch>1</verstretch>
         </sizepolicy>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>40</width>
+         <height>40</height>
+        </size>
        </property>
        <property name="maximumSize">
         <size>
-         <width>16777215</width>
-         <height>16777214</height>
+         <width>40</width>
+         <height>40</height>
         </size>
        </property>
        <property name="focusPolicy">
-        <enum>Qt::NoFocus</enum>
+        <enum>Qt::StrongFocus</enum>
+       </property>
+       <property name="toolTip">
+        <string>open control</string>
        </property>
        <property name="text">
-        <string>---</string>
+        <string/>
+       </property>
+       <property name="icon">
+        <iconset>
+         <normaloff>:/icons/application-cog-outline.png</normaloff>:/icons/application-cog-outline.png</iconset>
        </property>
        <property name="iconSize">
         <size>
-         <width>0</width>
-         <height>0</height>
+         <width>32</width>
+         <height>32</height>
         </size>
        </property>
       </widget>

@@ -7,11 +7,15 @@
     <x>0</x>
     <y>0</y>
     <width>925</width>
-    <height>325</height>
+    <height>344</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Form</string>
+  </property>
+  <property name="windowIcon">
+   <iconset>
+    <normaloff>:/icons/controller-classic.png</normaloff>:/icons/controller-classic.png</iconset>
   </property>
   <layout class="QGridLayout" name="gridLayout">
    <item row="0" column="0">
@@ -351,6 +355,11 @@
  </widget>
  <customwidgets>
   <customwidget>
+   <class>xqt::statusEntry</class>
+   <extends>QLineEdit</extends>
+   <header>../xWidgets/statusEntry.hpp</header>
+  </customwidget>
+  <customwidget>
    <class>xqt::gainCtrl</class>
    <extends>QPushButton</extends>
    <header>../xWidgets/gainCtrl.hpp</header>
@@ -359,11 +368,6 @@
    <class>xqt::toggleSlider</class>
    <extends>QSlider</extends>
    <header>../xWidgets/toggleSlider.hpp</header>
-  </customwidget>
-  <customwidget>
-   <class>xqt::statusEntry</class>
-   <extends>QLineEdit</extends>
-   <header>statusEntry.hpp</header>
   </customwidget>
  </customwidgets>
  <resources/>

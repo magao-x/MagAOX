@@ -13,6 +13,10 @@
   <property name="windowTitle">
    <string>Form</string>
   </property>
+  <property name="windowIcon">
+   <iconset>
+    <normaloff>:/icons/dump-truck.png</normaloff>:/icons/dump-truck.png</iconset>
+  </property>
   <layout class="QGridLayout" name="gridLayout">
    <item row="0" column="0">
     <layout class="QHBoxLayout" name="horizontalLayout_6" stretch="6,1,4">
@@ -558,6 +562,11 @@
  </widget>
  <customwidgets>
   <customwidget>
+   <class>xqt::statusEntry</class>
+   <extends>QLineEdit</extends>
+   <header>../xWidgets/statusEntry.hpp</header>
+  </customwidget>
+  <customwidget>
    <class>xqt::gainCtrl</class>
    <extends>QPushButton</extends>
    <header>../xWidgets/gainCtrl.hpp</header>
@@ -566,11 +575,6 @@
    <class>xqt::toggleSlider</class>
    <extends>QSlider</extends>
    <header>../xWidgets/toggleSlider.hpp</header>
-  </customwidget>
-  <customwidget>
-   <class>xqt::statusEntry</class>
-   <extends>QLineEdit</extends>
-   <header>statusEntry.hpp</header>
   </customwidget>
  </customwidgets>
  <resources/>
