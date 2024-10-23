@@ -75,6 +75,7 @@ gui/rtimv/plugins/cameraStatus/makefile.cameraStatus
 gui/rtimv/plugins/indiDictionary/makefile.indiDictionary
 gui/rtimv/plugins/pwfsAlignment/makefile.pwfsAlignment
 gui/rtimv/plugins/dmStatus/makefile.dmStatus
+gui/rtimv/plugins/acquisition/makefile.acquisition
 
 #h
 apps/hoPredCtrl/hoPredCtrl
@@ -110,6 +111,7 @@ apps/pi335Ctrl/pi335Ctrl
 apps/picamCtrl/picamCtrl
 apps/picoMotorCtrl/picoMotorCtrl
 apps/psfFit/psfFit
+apps/psfFit/psfAcq
 apps/pupilAlign/pupilAlign
 apps/pupilFit/pupilFit
 apps/pvcamCtrl/pvcamCtrl

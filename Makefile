@@ -137,7 +137,8 @@ all_rtimv_plugins = \
 	indiDictionary \
 	pwfsAlignment \
 	dmStatus \
-	warnings
+	warnings \
+	acquisition
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =
