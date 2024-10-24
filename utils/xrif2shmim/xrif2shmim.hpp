@@ -300,15 +300,15 @@ inline int xrif2shmim::execute()
         errno = 0;
         FILE *fp_xrif = fopen( m_files[n].c_str(), "rb" );
 
-        if(!fp_xrif)
+        if( !fp_xrif )
         {
-            mx::errno_report("xrif2shmim", errno, __FILE__, __LINE__, "null ptr from fopen for " + m_files[n]);
+            mx::errno_report( "xrif2shmim", errno, __FILE__, __LINE__, "null ptr from fopen for " + m_files[n] );
             return -1;
         }
 
-        if(ferror(fp_xrif) || errno != 0)
+        if( ferror( fp_xrif ) || errno != 0 )
         {
-            mx::errno_report("xrif2shmim", errno, __FILE__, __LINE__, "error from fopen for " + m_files[n]);
+            mx::errno_report( "xrif2shmim", errno, __FILE__, __LINE__, "error from fopen for " + m_files[n] );
             return -1;
         }
 
@@ -354,13 +354,11 @@ inline int xrif2shmim::execute()
             return -1;
         }
 
-
-        if(m_dataType !=  XRIF_TYPECODE_INT16)
+        if( m_dataType != XRIF_TYPECODE_INT16 )
         {
-           std::cerr << " (" << invokedName << "): Only 16-bit signed integers (short) supported" << "\n";
-           return -1;
+            std::cerr << " (" << invokedName << "): Only 16-bit signed integers (short) supported" << "\n";
+            return -1;
         }
-
 
         nframes += m_xrif->frames;
 
@@ -386,7 +384,7 @@ inline int xrif2shmim::execute()
     std::cerr << " (" << invokedName << "): Reading " << m_numFrames << " frames in " << ( ed - st ) * stp << " file";
     if( ( ed - st ) * stp > 1 )
     {
-        std::cerr << "s"; //make it plural
+        std::cerr << "s"; // make it plural
     }
     std::cerr << "\n";
 
@@ -416,15 +414,15 @@ inline int xrif2shmim::execute()
         errno = 0;
         FILE *fp_xrif = fopen( m_files[n].c_str(), "rb" );
 
-        if(!fp_xrif)
+        if( !fp_xrif )
         {
-            mx::errno_report("xrif2shmim", errno, __FILE__, __LINE__, "null ptr from fopen for " + m_files[n]);
+            mx::errno_report( "xrif2shmim", errno, __FILE__, __LINE__, "null ptr from fopen for " + m_files[n] );
             return -1;
         }
 
-        if(ferror(fp_xrif) || errno != 0)
+        if( ferror( fp_xrif ) || errno != 0 )
         {
-            mx::errno_report("xrif2shmim", errno, __FILE__, __LINE__, "error from fopen for " + m_files[n]);
+            mx::errno_report( "xrif2shmim", errno, __FILE__, __LINE__, "error from fopen for " + m_files[n] );
             return -1;
         }
 
@@ -466,7 +464,8 @@ inline int xrif2shmim::execute()
             break; // check after the decompress.
         }
 
-        mx::improc::eigenCube<uint16_t> tmpc( (uint16_t *)m_xrif->raw_buffer, m_xrif->width, m_xrif->height, m_xrif->frames );
+        mx::improc::eigenCube<uint16_t> tmpc(
+            (uint16_t *)m_xrif->raw_buffer, m_xrif->width, m_xrif->height, m_xrif->frames );
 
         // Determine the order in which frames in tmpc are read
         long pst = 0;
@@ -486,7 +485,6 @@ inline int xrif2shmim::execute()
                 break;
             }
         }
-
     }
 
     if( g_timeToDie != false )
