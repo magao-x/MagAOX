@@ -111,7 +111,7 @@ apps/pi335Ctrl/pi335Ctrl
 apps/picamCtrl/picamCtrl
 apps/picoMotorCtrl/picoMotorCtrl
 apps/psfFit/psfFit
-apps/psfFit/psfAcq
+apps/psfAcq/psfAcq
 apps/pupilAlign/pupilAlign
 apps/pupilFit/pupilFit
 apps/pvcamCtrl/pvcamCtrl

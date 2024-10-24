@@ -18,18 +18,32 @@ class acquisition : public rtimvOverlayInterface
     Q_INTERFACES(rtimvOverlayInterface)
 
 protected:
+
+    /** \name Configurable Parameters
+      * @{
+      */
+    std::string m_deviceName; ///< INDI device name of the acquisition program
+
+    std::string m_cameraName; ///< INDI device name of the associated camera
+
+    int m_circRad {10};  ///< Radius of the circle to draw around the star
+
+    std::string m_color {"cyan"}; ///< Color name or RGB spec for the overlay
+
+    int m_fontSize {18}; ///< The font size for the overlay
+
+    ///@}
+
     rtimvOverlayAccess m_roa;
 
     bool m_enabled{false};
 
     bool m_enableable{false};
 
-    std::string m_deviceName;
-
-    std::string m_cameraName;
 
     QGraphicsScene *m_qgs{nullptr};
 
+    size_t m_nStars {0};
     std::vector<StretchCircle *> m_starCircles;
     std::vector<QTextEdit *> m_starLabels;
 
