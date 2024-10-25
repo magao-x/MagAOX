@@ -30,8 +30,10 @@ struct pupilFitter
    unsigned m_cols {0}; ///< [in] the size of a quad, in cols
 
    int m_numPupils {4}; ///< the number of pupils.  Default is 4, 3 is also supported.
-   float m_pupMedIndex {0.6266}; ///< the index of the illuminated pupil median in a sorted array.
+   float m_bgMedIndex {0.1867};
+   float m_pupMedIndex {0.6867}; ///< the index of the illuminated pupil median in a sorted array.
 
+   float m_bg[4] = {0,0,0,0};
    float m_med[4] = {0,0,0,0};
    float m_avgx[4] = {0,0,0,0};
    float m_avgy[4] = {0,0,0,0};
@@ -255,9 +257,11 @@ int pupilFitter<realT>::fit( mx::improc::eigenImage<realT> & im,
 
       std::sort(m_pixs.begin(), m_pixs.end());
 
+      m_bg[i] =  m_pixs[m_bgMedIndex*m_pixs.size()];
+
       m_med[i] = m_pixs[m_pupMedIndex*m_pixs.size()]; //This should be the median of the pupils if the right size and contained in the quad
 
-      m_quadMag/=m_med[i];
+      m_quadMag = (m_quadMag - m_bg[i]) / (m_med[i] - m_bg[i]);
 
       // 2) Threshold the normalized quad
       threshold(m_quadMag);
