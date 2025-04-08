@@ -435,9 +435,14 @@ class VisX(XDevice):
             if not success:
                 self.log.debug("No camera found yet, retrying on next loop")
                 return
-            self.log.info(f"Have camera: {self.camera}")
             self.properties['fsm']['state'] = 'CONNECTED'
             self.update_property(self.properties['fsm'])
+            self.log.info(f"Have camera: {self.camera}")
+            # TODO clean up
+            param_limits = self.sdk.get_all_limits(self.camera)
+            self.log.debug(f"{param_limits=}")
+            chip_info = self.sdk.get_chip_info(self.camera)
+            self.log.debug(f"{chip_info=}")
 
         now = time.time()
         if self.should_cancel:
