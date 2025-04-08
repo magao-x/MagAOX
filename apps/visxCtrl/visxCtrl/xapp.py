@@ -17,26 +17,55 @@ from .qhyccd import QHYCCDSDK, QHYCCDCamera
 
 log = logging.getLogger(__name__)
 
-EXTERNAL_RECORDED_PROPERTIES = {
-    'tcsi.catalog.object': 'OBJECT',
-    'tcsi.catdata.ra': None,
-    'tcsi.catdata.dec': None,
-    'tcsi.catdata.epoch': None,
-    'observers.current_observer.full_name': 'OBSERVER',
+PROPERTIES_RECORDED_INITIAL_FINAL = {
     'tcsi.teldata.pa': 'PARANG',
-    'flipacq.presetName.in': None,
+    'tcsi.teldata.zd': 'ZD',
 }
 
-RECORDED_WHEELS = ('fwfpm', 'fwlyot')
+PROPERTIES_RECORDED_STATIC = {
+    'flipacq.presetName.in': 'FLIPACQ',
+    'camwfs.fps.current': 'CAMWFS FPS',
+    'fxngenmodwfs.C1freq.current': 'FXNGENMODWFS C1 FREQ',
+    'fxngenmodwfs.C2freq.current': 'FXNGENMODWFS C2 FREQ',
+    'holoop.loop_state.toggle': 'HOLOOP LOOP STATE',
+    'loloop.loop_state.toggle': 'LOLOOP LOOP STATE',
+    # telescope data
+    'tcsi.catalog.object': 'CAT-OBJ',
+    'tcsi.catdata.ra': 'CATRA',
+    'tcsi.catdata.dec': 'CATDEC',
+    'tcsi.catdata.epoch': 'CATEP',
+    # user data
+    'observers.current_observer.full_name': 'OBSERVER',
+    'observers.target.current': 'OBJECT',
+    'observers.obs_name.current': 'OBSERVATION NAME',
+    # sparkles
+    'tweeterSpeck.modulating.toggle': 'TWEETERSPECK MODULATING',
+    'tweeterSpeck.trigger.toggle': 'TWEETERSPECK TRIGGERED',
+    'tweeterSpeck.frequency.current': 'TWEETERSPECK FREQUENCY',
+    'tweeterSpeck.separation.current': 'TWEETERSPECK SEPARATIONS',
+    'tweeterSpeck.angle.current': 'TWEETERSPECK ANGLES',
+    'tweeterSpeck.amp.current': 'TWEETERSPECK AMPLITUDES',
+    'tweeterSpeck.cross.toggle': 'TWEETERSPECK CROSSES',
+}
+
+EXTERNAL_RECORDED_PROPERTIES = PROPERTIES_RECORDED_INITIAL_FINAL | PROPERTIES_RECORDED_STATIC
+
+RECORDED_SWITCHES = {
+    'fwfpm.filterName': 'FWFPM PRESET NAME',
+    'fwlyot.filterName': 'FWLYOT PRESET NAME',
+    'camwfs.mode': 'CAMWFS MODE'
+}
 
 CAMERA_CONNECT_RETRY_SEC = 5
 
-def find_active_filter(client, fwname):
-    fwelems = client[f"{fwname}.filterName"]
-    if fwelems is None:
+CAMVISX_WIDTH_HEIGHT = 9600, 6422
+
+def find_active_switch(client, switch_name):
+    elems = client[switch_name]
+    if elems is None:
         return
-    for elem in fwelems:
-        if fwelems[elem] == constants.SwitchState.ON:
+    for elem in elems:
+        if elems[elem] == constants.SwitchState.ON:
             return elem
 
 @xconf.config
@@ -70,7 +99,7 @@ class VisX(XDevice):
         return temp_on_target
 
     def emit_telem_stdcam(self):
-        w, h = 9600, 6422
+        w, h = CAMVISX_WIDTH_HEIGHT
         self.telem("telem_stdcam", {
             "roi": {
                 "xcen": (w - 1) / 2,
@@ -233,8 +262,9 @@ class VisX(XDevice):
             device = prop.split('.')[0]
             devices.add(device)
             self.log.debug(f"subscribe to device: {device}")
-        for fw in RECORDED_WHEELS:
-            devices.add(fw)
+        for sw in RECORDED_SWITCHES:
+            dev, swname = sw.split('.')
+            devices.add(dev)
         try:
             self.client.get_properties_and_wait(devices)
         except TimeoutError as e:
@@ -253,6 +283,9 @@ class VisX(XDevice):
         self.log.debug("Set FSM prop")
         self.update_property(self.properties['fsm'])
         self.log.debug("Sent FSM prop")
+
+        # self.shmim = ISIO.Image()
+
         self.log.info("Set up complete")
 
     def update_from_camera(self):
@@ -281,7 +314,7 @@ class VisX(XDevice):
             current['remaining_sec'] = remaining_sec
             current['remaining_pct'] = remaining_pct
             self.update_property(current)
-        
+
         self.update_from_camera()
 
         self.properties['temp_ccd']['current'] = self.temp_current_deg_c
@@ -303,32 +336,48 @@ class VisX(XDevice):
             return
         self.camera.target_temperature = self.temp_target_deg_c
 
-    def _gather_metadata(self):
-        meta = {
-            'CCDTEMP': self.camera.temperature,
-            'CCDSETP': self.camera.target_temperature,
-            'GAIN': self.camera.gain,
-            'EXPTIME': self.camera.exposure_time,
-        }
-        for indi_prop in EXTERNAL_RECORDED_PROPERTIES:
+    def _gather_properties(self, recorded_properties):
+        meta = {}
+        for indi_prop in recorded_properties:
             if EXTERNAL_RECORDED_PROPERTIES[indi_prop] is None:
                 new_kw = indi_prop.upper().replace('.', ' ')
             else:
                 new_kw = EXTERNAL_RECORDED_PROPERTIES[indi_prop]
-            #value = self.client.get(indi_prop)
             value = self.client[indi_prop]
-            if hasattr(value, 'value'):
+            if value is constants.SwitchState.ON:
+                value = 1
+            elif value is constants.SwitchState.OFF:
+                value = 0
+            elif hasattr(value, 'value'):
                 value = value.value
             meta[new_kw] = value
-        for fwname in RECORDED_WHEELS:
-            meta[f"{fwname.upper()} PRESET NAME"] = find_active_filter(self.client, fwname)
         return meta
+
+    def _gather_static_metadata(self, recorded_properties, recorded_switches):
+        meta = {
+            'CCDSETP': self.camera.target_temperature,
+            'GAIN': self.camera.gain,
+            'EXPTIME': self.camera.exposure_time,
+        }
+        meta = meta | self._gather_properties(PROPERTIES_RECORDED_STATIC)
+        for name, keyword in RECORDED_SWITCHES.items():
+            meta[keyword] = find_active_switch(self.client, name)
+        return meta
+
+    def _gather_variable_metadata(self, prefix):
+        meta = {
+            'CCDTEMP': self.camera.temperature,
+        }
+        meta = meta | self._gather_properties(PROPERTIES_RECORDED_INITIAL_FINAL)
+        meta = {prefix + ' ' + k: v for k, v in meta.items()}
+        return meta
+
 
     def begin_exposure(self):
         self.currently_exposing = True
         self.should_begin_exposure = False
         self.exposure_start_ts = time.time()
-        self.exposure_start_telem = self._gather_metadata()
+        self.exposure_start_telem = self._gather_variable_metadata('INITIAL')
         self.camera.start_exposure()
         self.log.debug("Asking camera to begin exposure")
 
@@ -339,17 +388,17 @@ class VisX(XDevice):
             fits.PrimaryHDU(img)
         ])
         # Populate headers
-        meta = self._gather_metadata()
-        self.log.debug(f"{meta=}")
+        meta = self._gather_metadata(PROPERTIES_RECORDED)
+        meta.update(self._gather_variable_metadata('FINAL'))
         meta['DATE-OBS'] = datetime.datetime.fromtimestamp(self.exposure_start_ts).isoformat()
         exposure_time = self.camera.exposure_time if actual_exptime_sec is None else actual_exptime_sec
         meta['DATE-END'] = datetime.datetime.fromtimestamp(self.exposure_start_ts + exposure_time).isoformat()
         meta['DATE'] = datetime.datetime.utcnow().isoformat()
-        for key in self.exposure_start_telem:
-            meta[f"BEGIN {key}"] = self.exposure_start_telem[key]
+        meta.update(self.exposure_start_telem)
         meta['INSTRUME'] = 'MagAO-X'
         meta['CAMERA'] = 'VIS-X'
         meta['TELESCOP'] = "Magellan Clay, Las Campanas Obs."
+        self.log.debug(f"{meta=}")
         with warnings.catch_warnings(): 
             warnings.simplefilter('ignore')
             hdul[0].header.update(meta)
