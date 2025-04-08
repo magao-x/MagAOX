@@ -273,7 +273,7 @@ class VisX(XDevice):
     def setup(self):
         os.makedirs(self.data_directory, exist_ok=True)
         while self.client.status is not constants.ConnectionStatus.CONNECTED:
-            self.log.info(f"Connecting to INDI as a client to get {list(EXTERNAL_RECORDED_PROPERTIES.keys())} and {RECORDED_WHEELS}...")
+            self.log.info(f"Connecting to INDI as a client to get {list(EXTERNAL_RECORDED_PROPERTIES.keys())} and {RECORDED_SWITCHES}...")
             time.sleep(1)
         self.log.info(f"INDI client connection: {self.client.status}")
         self.subscribe_to_other_devices()
@@ -430,12 +430,12 @@ class VisX(XDevice):
             self.log.debug(f"Repeating subscription because some external devices we use for headers are not showing up")
 
         if self.sdk is None:
-            self.log.debug("Initializing camera SDK...")
+            self.log.info("Initializing camera SDK...")
             success = self._init_camera()
             if not success:
                 self.log.debug("No camera found yet, retrying on next loop")
                 return
-            self.log.debug(f"Have camera: {self.camera}")
+            self.log.info(f"Have camera: {self.camera}")
             self.properties['fsm']['state'] = 'CONNECTED'
             self.update_property(self.properties['fsm'])
 
