@@ -188,6 +188,7 @@ class VisX(XDevice):
         # Load SDK
         self.sdk = QHYCCDSDK(dll_path=self.config.full_sdk_path)
         if self.sdk.number_of_cameras < 1:
+            self.log.info('No cameras found, not initializing QHYCCD SDK')
             del self.sdk
             return False
         # Find camera
@@ -267,10 +268,11 @@ class VisX(XDevice):
         for prop in EXTERNAL_RECORDED_PROPERTIES:
             device = prop.split('.')[0]
             devices.add(device)
-            self.log.debug(f"subscribe to device: {device}")
         for sw in RECORDED_SWITCHES:
             dev, swname = sw.split('.')
             devices.add(dev)
+        devices.add(self.config.power_device)
+        self.log.debug(f"subscribe to devices: {devices}")
         try:
             self.client.get_properties_and_wait(devices)
         except TimeoutError as e:
@@ -433,7 +435,7 @@ class VisX(XDevice):
     def check_power_state(self):
         if self.client.status is not constants.ConnectionStatus.CONNECTED:
             return None
-        elif self.client[self.power_device][self.power_channel]:
+        elif self.client[self.config.power_device][self.config.power_channel]['state'] == 'On':
             return True
         else:
             return False
@@ -451,10 +453,10 @@ class VisX(XDevice):
         else:
             fsm_state = 'POWEROFF'
         self.properties['fsm']['state'] = fsm_state
-        self.log.debug(f"{power_state=}, FSM={self.properties['fsm']['state']}")
         self.update_property(self.properties['fsm'])
         if fsm_state in ('NODEVICE', 'POWEROFF'):
-            self.log.debug(f"No INDI client connection or no power to {self.power_device}.{self.power_channel}, retrying on next loop")
+            self.log.debug(f"No INDI client connection or no power to {self.config.power_device}.{self.config.power_channel}, retrying on next loop")
+            return
 
         if power_state and self.sdk is None:
             self.log.info("Initializing camera SDK...")
