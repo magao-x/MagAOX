@@ -73,7 +73,7 @@ def parse_iso_datetime(input_str):
 
 
 def utcnow():
-    return datetime.datetime.utcnow().replace(tzinfo=timezone.utc)
+    return datetime.datetime.now(timezone.utc)
 
 
 def format_timestamp_for_filename(ts):

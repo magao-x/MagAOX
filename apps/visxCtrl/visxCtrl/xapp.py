@@ -15,6 +15,8 @@ import sys
 
 from .qhyccd import QHYCCDSDK, QHYCCDCamera
 
+from magaox import utils
+
 log = logging.getLogger(__name__)
 
 PROPERTIES_RECORDED_INITIAL_FINAL = {
@@ -397,7 +399,7 @@ class VisX(XDevice):
         meta['DATE-OBS'] = datetime.datetime.fromtimestamp(self.exposure_start_ts).isoformat()
         exposure_time = self.camera.exposure_time if actual_exptime_sec is None else actual_exptime_sec
         meta['DATE-END'] = datetime.datetime.fromtimestamp(self.exposure_start_ts + exposure_time).isoformat()
-        meta['DATE'] = datetime.datetime.utcnow().isoformat()
+        meta['DATE'] = utils.utcnow()
         meta.update(self.exposure_start_telem)
         meta['INSTRUME'] = 'MagAO-X'
         meta['CAMERA'] = 'VIS-X'
@@ -410,7 +412,7 @@ class VisX(XDevice):
         if actual_exptime_sec is not None:
             hdul[0].header['CANCELD'] = True
         # Write to /data path
-        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H%M%S")
+        timestamp = utils.utcnow().strftime("%Y-%m-%dT%H%M%S")
         self.last_image_filename = f"camvisx_{timestamp}.fits"
         outpath = f"{self.data_directory}/{self.last_image_filename}"
         self.log.info(f"Saving to {outpath}")
