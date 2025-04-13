@@ -180,13 +180,13 @@ scripts_to_install = \
 	shot_in_the_dark \
 	howfs_apply \
 	lowfs_switch \
-	write_magaox_pidfile \
 	mount_cgroups1_cpuset \
 	killIndiZombies \
 	xlog \
 	hoblockleaks \
 	inventory_files \
-	list_xfiles_by_semester
+	list_xfiles_by_semester \
+	magaox_pidfile
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 

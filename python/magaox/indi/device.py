@@ -252,11 +252,20 @@ class XDevice(Device):
                         log.error(f"Found process ID {pid}: {proc.cmdline()} [{proc.status()}]")
                         sys.exit(1)
         log.debug(f"Writing PID file with PID {thisproc.pid}")
-        subprocess.check_call(["sudo", "/opt/MagAOX/bin/write_magaox_pidfile", str(thisproc.pid), self.name])
+        subprocess.check_call(["sudo", "/opt/MagAOX/bin/magaox_pidfile", "lock", str(thisproc.pid), self.name])
+
+    def unlock_pid_file(self):
+        thisproc = psutil.Process()
+        subprocess.check_call(["sudo", "/opt/MagAOX/bin/magaox_pidfile", "unlock", str(thisproc.pid), self.name])
 
     def main(self):
         self.lock_pid_file()
-        super().main()
+        try:
+            super().main()
+        finally:
+            self.log.info("Shutting down...")
+            self.unlock_pid_file()
+            self.log.info("Removed PID file")
 
     @classmethod
     def console_app(cls):

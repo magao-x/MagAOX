@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# This script is used by Python MagAO-X apps to write and remove
+# PID files in the restricted system directories.
+#
+# To function, there should be a rule like this in the sudoers
+# file:
+#
+# %magaox ALL = (root) NOPASSWD: /opt/MagAOX/bin/magaox_pidfile
+if [[ -z "$1" || -z "$2" || -z "$3" ]]; then
+    echo "usage: [lock|unlock] pid appname"
+    exit 1
+fi
+action="$1"
+pidNumber="$2"
+appName="$3"
+if [[ ! -d "/proc/$pidNumber" ]]; then
+    echo "Process $pidNumber does not exist"
+    exit 1
+fi
+PID_PREFIX=/opt/MagAOX/sys
+appPidDir=$(realpath "$PID_PREFIX/$appName")
+case $appPidDir/ in
+  $PID_PREFIX/) echo "Directory traversal thwarted. Refusing to write $appPidDir." && exit 1;;
+  $PID_PREFIX/*) mkdir -p $appPidDir;;
+  *) echo "Directory traversal thwarted. Refusing to write $appPidDir." && exit 1;;
+esac
+if [[ "$1" == lock ]]; then
+  echo "$pidNumber" > $appPidDir/pid
+elif [[ "$2" == unlock ]]; then
+  if [[ -f "$appPidDir/pid" ]]; then
+    existingPid=$(cat "$appPidDir/pid")
+    if [[ "$existingPid" != "$pidNumber" ]]; then
+      echo "Got $existingPid as the pid in $appPidDir/pid, but was asked to remove pid for $pidNumber. Aborting."
+      exit 1
+    fi
+  fi
+  rm -f $appPidDir/pid
+else
+  echo "Unknown action: $action. Use 'lock' or 'unlock'."
+fi
