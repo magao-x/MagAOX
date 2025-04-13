@@ -26,7 +26,7 @@ case $appPidDir/ in
 esac
 if [[ "$1" == lock ]]; then
   echo "$pidNumber" > $appPidDir/pid
-elif [[ "$2" == unlock ]]; then
+elif [[ "$1" == unlock ]]; then
   if [[ -f "$appPidDir/pid" ]]; then
     existingPid=$(cat "$appPidDir/pid")
     if [[ "$existingPid" != "$pidNumber" ]]; then
