@@ -73,6 +73,10 @@ class VisXConfig(BaseConfig):
     full_sdk_path : str = xconf.field(default='/usr/local/lib/libqhyccd.so')
     temp_on_target_pct_diff : float = xconf.field(default=0.05, help="Absolute percent difference between temperature setpoint and currently reported value")
     startup_temp : float = xconf.field(default=-15, help='Startup temperature of the camera.')
+    power_device : str = xconf.field(help="INDI device with the device's power channel/outlet")
+    power_channel : str = xconf.field(help="INDI element name for the device's power channel/outlet")
+
+
 class VisX(XDevice):
     config : VisXConfig
     # us
@@ -424,12 +428,33 @@ class VisX(XDevice):
         actual_exptime_sec = time.time() - self.exposure_start_ts
         self.finalize_exposure(actual_exptime_sec=actual_exptime_sec)
 
+    def check_power_state(self):
+        if self.client.status is not constants.ConnectionStatus.CONNECTED:
+            return None
+        elif self.client[self.power_device][self.power_channel]:
+            return True
+        else:
+            return False
+
     def loop(self):
         if self.client.interested_properties_missing:
             self.subscribe_to_other_devices()
             self.log.debug(f"Repeating subscription because some external devices we use for headers are not showing up")
 
-        if self.sdk is None:
+        power_state = self.check_power_state()
+        if power_state is None:
+            fsm_state = 'NODEVICE'
+        elif power_state:
+            fsm_state = 'POWERON'
+        else:
+            fsm_state = 'POWEROFF'
+        self.properties['fsm']['state'] = fsm_state
+        self.log.debug(f"{power_state=}, FSM={self.properties['fsm']['state']}")
+        self.update_property(self.properties['fsm'])
+        if fsm_state in ('NODEVICE', 'POWEROFF'):
+            self.log.debug(f"No INDI client connection or no power to {self.power_device}.{self.power_channel}, retrying on next loop")
+
+        if power_state and self.sdk is None:
             self.log.info("Initializing camera SDK...")
             success = self._init_camera()
             if not success:
