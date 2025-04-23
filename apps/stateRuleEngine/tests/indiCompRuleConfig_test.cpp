@@ -4,7 +4,7 @@
 
 #include "../indiCompRuleConfig.hpp"
 
-SCENARIO( "configuring basic rules", "[stateRuleEngine::ruleConfig]" ) 
+SCENARIO( "configuring basic rules", "[stateRuleEngine::ruleConfig]" )
 {
     GIVEN("single rules in a config file")
     {
@@ -188,10 +188,33 @@ SCENARIO( "configuring basic rules", "[stateRuleEngine::ruleConfig]" )
             REQUIRE(static_cast<twoPropRule*>(maps.rules["rule1"])->element2() == "elem2");
 
         }
+
+        WHEN("a ruleCompRule using defaults")
+        {
+            //This requires configuring the other rules too
+            mx::app::writeConfigFile( "/tmp/ruleConfig_test.conf",
+                {"ruleA",    "ruleA", "ruleA", "rule3",    "rule3",      "rule3",   "rule3",  "rule4",    "rule4",      "rule4",   "rule4"  },
+                {"ruleType", "rule1", "rule2", "ruleType", "property",   "element", "target", "ruleType", "property",   "element", "target"   },
+                {"ruleComp", "rule3", "rule4", "txtVal",   "dev3.propQ", "elem",    "xxx",    "txtVal",   "dev4.propR", "mele",    "yyy"  }
+                );
+            mx::app::appConfigurator config;
+            config.readConfig("/tmp/ruleConfig_test.conf");
+
+            indiRuleMaps maps;
+
+            loadRuleConfig(maps, config);
+
+            REQUIRE(maps.rules["ruleA"]->priority() == rulePriority::none);
+            REQUIRE(maps.rules["ruleA"]->comparison() == ruleComparison::Eq);
+
+            REQUIRE(static_cast<ruleCompRule*>(maps.rules["ruleA"])->rule1() == maps.rules["rule3"]);
+            REQUIRE(static_cast<ruleCompRule*>(maps.rules["ruleA"])->rule2() == maps.rules["rule4"]);
+
+        }
     }
 }
 
-SCENARIO( "configuring the demo", "[stateRuleEngine::ruleConfig]" ) 
+SCENARIO( "configuring the demo", "[stateRuleEngine::ruleConfig]" )
 {
     GIVEN("the demo")
     {
@@ -254,7 +277,7 @@ SCENARIO( "configuring the demo", "[stateRuleEngine::ruleConfig]" )
     }
 }
 
-SCENARIO( "rule configurations with errors", "[stateRuleEngine::ruleConfig]" ) 
+SCENARIO( "rule configurations with errors", "[stateRuleEngine::ruleConfig]" )
 {
     GIVEN("single rules in a config file")
     {
@@ -310,6 +333,115 @@ SCENARIO( "rule configurations with errors", "[stateRuleEngine::ruleConfig]" )
             }
 
             REQUIRE(caught==true);
+        }
+    }
+    GIVEN("ruleComp rules with errors")
+    {
+        WHEN("a ruleCompRule with rule1 not found")
+        {
+            //This requires configuring the other rules too
+            mx::app::writeConfigFile( "/tmp/ruleConfig_test.conf",
+                {"ruleA",    "ruleA", "ruleA", "rule3",    "rule3",      "rule3",   "rule3",  "rule4",    "rule4",      "rule4",   "rule4"  },
+                {"ruleType", "rule1", "rule2", "ruleType", "property",   "element", "target", "ruleType", "property",   "element", "target"   },
+                {"ruleComp", "rule6", "rule4", "txtVal",   "dev3.propQ", "elem",    "xxx",    "txtVal",   "dev4.propR", "mele",    "yyy"  }
+                );
+            mx::app::appConfigurator config;
+            config.readConfig("/tmp/ruleConfig_test.conf");
+
+            indiRuleMaps maps;
+
+            bool caught = false;
+            try
+            {
+                loadRuleConfig(maps, config);
+            }
+            catch(...)
+            {
+                caught = true;
+            }
+
+            REQUIRE(caught == true);
+
+        }
+
+        WHEN("a ruleCompRule with rule1 self-referencing")
+        {
+            //This requires configuring the other rules too
+            mx::app::writeConfigFile( "/tmp/ruleConfig_test.conf",
+                {"ruleA",    "ruleA", "ruleA", "rule3",    "rule3",      "rule3",   "rule3",  "rule4",    "rule4",      "rule4",   "rule4"  },
+                {"ruleType", "rule1", "rule2", "ruleType", "property",   "element", "target", "ruleType", "property",   "element", "target"   },
+                {"ruleComp", "ruleA", "rule4", "txtVal",   "dev3.propQ", "elem",    "xxx",    "txtVal",   "dev4.propR", "mele",    "yyy"  }
+                );
+            mx::app::appConfigurator config;
+            config.readConfig("/tmp/ruleConfig_test.conf");
+
+            indiRuleMaps maps;
+
+            bool caught = false;
+            try
+            {
+                loadRuleConfig(maps, config);
+            }
+            catch(...)
+            {
+                caught = true;
+            }
+
+            REQUIRE(caught == true);
+
+        }
+        WHEN("a ruleCompRule with rule2 not found")
+        {
+            //This requires configuring the other rules too
+            mx::app::writeConfigFile( "/tmp/ruleConfig_test.conf",
+                {"ruleA",    "ruleA", "ruleA", "rule3",    "rule3",      "rule3",   "rule3",  "rule4",    "rule4",      "rule4",   "rule4"  },
+                {"ruleType", "rule1", "rule2", "ruleType", "property",   "element", "target", "ruleType", "property",   "element", "target"   },
+                {"ruleComp", "rule3", "rule5", "txtVal",   "dev3.propQ", "elem",    "xxx",    "txtVal",   "dev4.propR", "mele",    "yyy"  }
+                );
+            mx::app::appConfigurator config;
+            config.readConfig("/tmp/ruleConfig_test.conf");
+
+            indiRuleMaps maps;
+
+            bool caught = false;
+            try
+            {
+                loadRuleConfig(maps, config);
+            }
+            catch(...)
+            {
+                caught = true;
+            }
+
+            REQUIRE(caught == true);
+
+        }
+
+        WHEN("a ruleCompRule with rule2 self-referencing")
+        {
+            //This requires configuring the other rules too
+            mx::app::writeConfigFile( "/tmp/ruleConfig_test.conf",
+                {"ruleA",    "ruleA", "ruleA", "rule3",    "rule3",      "rule3",   "rule3",  "rule4",    "rule4",      "rule4",   "rule4"  },
+                {"ruleType", "rule1", "rule2", "ruleType", "property",   "element", "target", "ruleType", "property",   "element", "target"   },
+                {"ruleComp", "rule3", "ruleA", "txtVal",   "dev3.propQ", "elem",    "xxx",    "txtVal",   "dev4.propR", "mele",    "yyy"  }
+                );
+            mx::app::appConfigurator config;
+            config.readConfig("/tmp/ruleConfig_test.conf");
+
+            indiRuleMaps maps;
+
+            bool caught = false;
+            try
+            {
+                loadRuleConfig(maps, config);
+            }
+            catch(...)
+            {
+                caught = true;
+            }
+
+            REQUIRE(caught == true);
+
         }
     }
 }

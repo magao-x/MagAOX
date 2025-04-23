@@ -4,12 +4,16 @@ dmdisp.sh woofer
 dmdisp.sh tweeter 
 dmdisp.sh ncpc 
 
+sleep 2
+
 rtimv -c rtimv_camacq.conf &
 rtimv -c rtimv_camwfs.conf &
 rtimv -c rtimv_camwfs_avg.conf &
 rtimv -c rtimv_camtip.conf &
-rtimv -c rtimv_camlowfs.conf &
-rtimv -c rtimv_camlowfs_avg.conf &
+rtimv -c rtimv_camflowfs.conf &
+rtimv -c rtimv_camflowfs_avg.conf &
+rtimv -c rtimv_camllowfs.conf &
+rtimv -c rtimv_camllowfs_avg.conf &
 rtimv -c rtimv_camsci1.conf &
 rtimv -c rtimv_camsci1_avg.conf &
 rtimv -c rtimv_camsci2.conf &

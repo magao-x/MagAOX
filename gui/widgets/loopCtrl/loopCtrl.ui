@@ -6,12 +6,16 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>925</width>
-    <height>325</height>
+    <width>703</width>
+    <height>425</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Form</string>
+  </property>
+  <property name="windowIcon">
+   <iconset>
+    <normaloff>:/icons/controller-classic.png</normaloff>:/icons/controller-classic.png</iconset>
   </property>
   <layout class="QGridLayout" name="gridLayout">
    <item row="0" column="0">
@@ -47,7 +51,7 @@
      <item>
       <layout class="QHBoxLayout" name="horizontalLayout_2" stretch="5,1,0,1,0,0,0,0">
        <item>
-        <layout class="QVBoxLayout" name="vl_loopStatus" stretch="2,3,1,1,2,0">
+        <layout class="QVBoxLayout" name="vl_loopStatus" stretch="2,0,3,1,1,2,0">
          <item>
           <widget class="QLabel" name="label_loop">
            <property name="font">
@@ -65,6 +69,19 @@
             <set>Qt::AlignCenter</set>
            </property>
           </widget>
+         </item>
+         <item>
+          <spacer name="verticalSpacer_6">
+           <property name="orientation">
+            <enum>Qt::Vertical</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>20</width>
+             <height>40</height>
+            </size>
+           </property>
+          </spacer>
          </item>
          <item>
           <widget class="QLabel" name="label_loop_state">
@@ -104,12 +121,6 @@
              <property name="orientation">
               <enum>Qt::Horizontal</enum>
              </property>
-             <property name="sizeHint" stdset="0">
-              <size>
-               <width>40</width>
-               <height>20</height>
-              </size>
-             </property>
             </spacer>
            </item>
            <item>
@@ -123,12 +134,6 @@
             <spacer name="horizontalSpacer_4">
              <property name="orientation">
               <enum>Qt::Horizontal</enum>
-             </property>
-             <property name="sizeHint" stdset="0">
-              <size>
-               <width>40</width>
-               <height>20</height>
-              </size>
              </property>
             </spacer>
            </item>
@@ -240,19 +245,11 @@
         </spacer>
        </item>
        <item>
-        <layout class="QVBoxLayout" name="verticalLayout_2">
+        <layout class="QVBoxLayout" name="verticalLayout_autoGain">
          <item>
-          <widget class="QLabel" name="label_block_gains">
-           <property name="font">
-            <font>
-             <pointsize>14</pointsize>
-            </font>
-           </property>
-           <property name="frameShape">
-            <enum>QFrame::StyledPanel</enum>
-           </property>
+          <widget class="QLabel" name="label_autogain">
            <property name="text">
-            <string>Block Gains</string>
+            <string>AutoGain</string>
            </property>
            <property name="alignment">
             <set>Qt::AlignCenter</set>
@@ -260,7 +257,7 @@
           </widget>
          </item>
          <item>
-          <spacer name="verticalSpacer_5">
+          <spacer name="verticalSpacer_7">
            <property name="orientation">
             <enum>Qt::Vertical</enum>
            </property>
@@ -273,17 +270,50 @@
           </spacer>
          </item>
          <item>
-          <widget class="QLabel" name="label_powerLaw">
-           <property name="font">
-            <font>
-             <pointsize>14</pointsize>
-            </font>
-           </property>
-           <property name="frameShape">
-            <enum>QFrame::StyledPanel</enum>
-           </property>
+          <layout class="QHBoxLayout" name="horizontalLayout_autoGainSlider">
+           <item>
+            <spacer name="horizontalSpacer_8">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <widget class="xqt::toggleSlider" name="slider_autogain"/>
+           </item>
+           <item>
+            <spacer name="horizontalSpacer_9">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <widget class="QPushButton" name="button_autoGainDump">
            <property name="text">
-            <string>Power Law</string>
+            <string>dump</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="verticalSpacer_9">
+           <property name="orientation">
+            <enum>Qt::Vertical</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>20</width>
+             <height>40</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QLabel" name="label_trackog">
+           <property name="text">
+            <string>Optical Gain</string>
            </property>
            <property name="alignment">
             <set>Qt::AlignCenter</set>
@@ -291,28 +321,40 @@
           </widget>
          </item>
          <item>
-          <widget class="xqt::statusEntry" name="powerLawIndex">
-           <property name="enabled">
-            <bool>false</bool>
-           </property>
-          </widget>
+          <layout class="QHBoxLayout" name="horizontalLayout_3">
+           <item>
+            <spacer name="horizontalSpacer_10">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>0</width>
+               <height>0</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <widget class="xqt::toggleSlider" name="slider_trackog"/>
+           </item>
+           <item>
+            <spacer name="horizontalSpacer_11">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>0</width>
+               <height>0</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
          </item>
          <item>
-          <widget class="xqt::statusEntry" name="powerLawFloor">
-           <property name="enabled">
-            <bool>false</bool>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QPushButton" name="button_setplaw">
-           <property name="enabled">
-            <bool>false</bool>
-           </property>
-           <property name="text">
-            <string>set power law</string>
-           </property>
-          </widget>
+          <widget class="xqt::statusEntry" name="opticalGain"/>
          </item>
          <item>
           <spacer name="verticalSpacer_4">
@@ -351,6 +393,11 @@
  </widget>
  <customwidgets>
   <customwidget>
+   <class>xqt::statusEntry</class>
+   <extends>QLineEdit</extends>
+   <header>../xWidgets/statusEntry.hpp</header>
+  </customwidget>
+  <customwidget>
    <class>xqt::gainCtrl</class>
    <extends>QPushButton</extends>
    <header>../xWidgets/gainCtrl.hpp</header>
@@ -359,11 +406,6 @@
    <class>xqt::toggleSlider</class>
    <extends>QSlider</extends>
    <header>../xWidgets/toggleSlider.hpp</header>
-  </customwidget>
-  <customwidget>
-   <class>xqt::statusEntry</class>
-   <extends>QLineEdit</extends>
-   <header>statusEntry.hpp</header>
   </customwidget>
  </customwidgets>
  <resources/>

@@ -7,14 +7,14 @@
 #
 # Driver names are actually patterns, i.e. enx matches enx2cfda1c6db1a.
 
-#edt: any EDT gramegrabber
 #nvidia: any NVIDIA GPU
 #enx503eaa0ceeff: ICC camsci1
 #enx503eaa0cf4cd: ICC camsci2
-#enx6cb31152a245: ICC icc-to-rtc
-#cp2x73c: ?
+#enx98b78501ae64: ICC icc-to-rtc
+#pvcamPCIE_0: camflowfs
+#pvcamPCIE_1: camllowfs
 
-for driverPattern in edt nvidia enx503eaa0ceeff enx503eaa0cf4cd enx6cb31152a245 cp2x72c; do
+for driverPattern in nvidia enx503eaa0ceeff enx503eaa0cf4cd enx98b78501ae64 pvcamPCIE_0 pvcamPCIE_1; do
     if [[ $(grep -e "^\s*$2" /proc/interrupts) == *"$driverPattern"* ]]; then
         echo "ban=true"
         exit 0

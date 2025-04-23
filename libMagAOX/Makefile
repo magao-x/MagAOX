@@ -45,6 +45,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              logger/types/loop_open.hpp \
              logger/types/loop_paused.hpp \
              logger/types/observer.hpp \
+             logger/types/ao_operator.hpp \
              logger/types/outlet_state.hpp \
              logger/types/outlet_channel_state.hpp \
              logger/types/pico_channel.hpp \

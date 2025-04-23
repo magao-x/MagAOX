@@ -4,8 +4,8 @@
 
 TEMPLATE = app
 TARGET = offloadCtrlGUI
-DESTDIR = bin/ 
-DEPENDPATH += ./ ../../lib 
+DESTDIR = bin/
+DEPENDPATH += ./ ../../lib
 
 MOC_DIR = moc/
 OBJECTS_DIR = obj/
@@ -37,18 +37,19 @@ HEADERS += ../../widgets/offloadCtrl/offloadCtrl.hpp \
            ../../widgets/xWidgets/statusEntry.hpp \
            ../../widgets/xWidgets/toggleSlider.hpp \
            ../../lib/multiIndiManager.hpp
-           
-SOURCES += offloadCtrlGUI_main.cpp 
-        
-           
+
+SOURCES += offloadCtrlGUI_main.cpp
+
+
 FORMS += ../../widgets/offloadCtrl/offloadCtrl.ui \
          ../../widgets/xWidgets/gainCtrl.ui \
          ../../widgets/xWidgets/statusEntry.ui \
          ../../widgets/xWidgets/toggleSlider.ui
-     
+
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a
 
-RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
+RESOURCES += ../../resources/magaox.qrc
+RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc
 
 QT += widgets

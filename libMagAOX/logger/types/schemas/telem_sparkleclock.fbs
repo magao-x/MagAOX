@@ -1,0 +1,28 @@
+namespace MagAOX.logger;
+
+table Telem_sparkleclock_fb
+{
+   /// whether or not the speckle is being modulated
+   modulating:bool;
+
+   /// whether or not the speckle is being triggered
+   trigger:bool;
+
+   /// frequency of modulation if not triggered
+   frequency:float;
+   
+   /// time for one complete cycle of the sparkle clock (e.g. exposure time of some camera)
+   interval: float;
+
+   /// the separations of the speckle(s)
+   separations:[float];
+
+   /// the angles of the speckle(s)
+   angleOffset: float;
+
+   /// the amplitudes of the speckle(s)
+   amplitude: float;
+}
+
+root_type Telem_sparkleclock_fb;
+

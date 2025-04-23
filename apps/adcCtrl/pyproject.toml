@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "adcCtrl"
+description = "close-loop control for ADCs"
+version = "2023.12.21"
+
+authors = [
+  {name = "Katie Twitchell", email = "twitchell@arizona.edu"},
+]
+
+[project.scripts]
+adcCtrl = "adcCtrl:adcCtrl.console_app"

@@ -1,7 +1,8 @@
-import json
-import glob
 import datetime
 from datetime import timezone
+import gzip
+import glob
+import json
 import os.path
 import sys
 from functools import partial
@@ -10,16 +11,21 @@ import subprocess
 import psutil
 from purepyindi2 import Device, transports, messages
 from purepyindi2.properties import IndiProperty
+import pathlib
 import typing
 import xconf
+import atexit
 
-from ..utils import PUREPYINDI_DEVICE_FILENAME_TIME_FORMAT
+
+from ..utils import PUREPYINDI_DEVICE_FILENAME_TIME_FORMAT, XFILENAME_TIME_FORMAT_OUT
+from ..constants import DEFAULT_PREFIX
 
 # n.b. replaced with logger scoped to device name during device init
 log = logging.getLogger()
 
 @xconf.config
 class BaseConfig:
+    common_path_prefix : pathlib.Path = xconf.field(default=DEFAULT_PREFIX, help="Prefix for all instrument data and config directories")
     sleep_interval_sec : float = xconf.field(default=1.0, help="Main loop logic will be run every `sleep_interval_sec` seconds")
 
     @classmethod
@@ -54,63 +60,88 @@ class BaseConfig:
             raise xconf.ConfigMismatch(e, raw_config)
         return instance
 
+
+def log_level_to_label(levelno):
+    if levelno >= logging.CRITICAL:
+        return "CRIT "
+    elif levelno >= logging.ERROR:
+        return "ERR  "
+    elif levelno >= logging.WARNING:
+        return "WARN"
+    elif levelno >= logging.INFO:
+        return "INFO"
+    else:
+        return "DBG "
+
 class MagAOXLogFormatter(logging.Formatter):
+    def __init__(self, fmt='%(asctime)s %(levelname)s %(message)s (%(name)s:%(funcName)s:%(lineno)d)'):
+        super().__init__(fmt=fmt)
     def formatTime(self, record, datefmt):
-        return datetime.datetime.fromtimestamp(record.created, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f000')
+        return datetime.datetime.fromtimestamp(record.created, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + '000'
 
-def compress_files_glob(pattern, latest_filename=None):
-    '''GZip compress files matching a glob pattern,
-    omitting a "latest" file optionally'''
-    for fn in glob.glob(pattern):
-        if latest_filename is not None and fn.endswith(latest_filename):
-            # don't gzip our empty log right after opening (and we
-            # need to open it first in case we need to log problems
-            # with compression)
-            continue
-        path_to_text_log = os.path.realpath(fn)
-        return_code = subprocess.call(["gzip", path_to_text_log])
-        if return_code != 0:
-            log.error(f"Unable to compress {path_to_text_log} with gzip")
-        else:
-            log.debug(f"Compressed existing file: {fn}")
+class NDJSONLogFormatter(MagAOXLogFormatter):
+    def __init__(self):
+        super().__init__("%(message)s")
+    def format(self, record: logging.LogRecord):
+        timestamp = self.formatTime(record, self.datefmt)
+        # {"ts": "2024-11-12T22:15:11.554323648", "prio": "INFO", "ec": "text_log", "msg": {"message": "PID (6585) locked."}}
+        label = log_level_to_label(record.levelno)
+        return json.dumps({
+            "ts": timestamp,
+            "prio": label or "",
+            "ec": "text_log",
+            "msg": {"message": self.formatMessage(record)},
+        })
 
-def init_logging(logger : logging.Logger, destination, console_log_level, file_log_level, all_verbose):
+def init_logging(logger : logging.Logger, destination, temporary_log_path, console_log_level, file_log_level, all_verbose):
     root = logging.getLogger()
     root.setLevel(logging.WARN)
     if all_verbose:
         file_log_level = console_log_level = logging.DEBUG
         logger = root
-    log_format = '%(asctime)s %(levelname)s %(message)s (%(name)s:%(funcName)s:%(lineno)d)'
-    file_handler = logging.FileHandler(destination)
 
-    logger.addHandler(file_handler)
-    file_handler.setLevel(file_log_level)
+    if os.path.exists(temporary_log_path):
+        os.remove(temporary_log_path)
+
+    temp_file_handler = logging.FileHandler(temporary_log_path)
+    logger.addHandler(temp_file_handler)
+    temp_file_handler.setLevel(console_log_level)
+
+    gzipped_file_log_handler = GzipStreamHandler(destination)
+    gzipped_file_log_handler.setLevel(console_log_level)
+    logger.addHandler(gzipped_file_log_handler)
 
     console = logging.StreamHandler()
     console.setLevel(console_log_level)
     logger.addHandler(console)
     logger.setLevel(min(file_log_level, console_log_level))
 
-    formatter = MagAOXLogFormatter(log_format)
-    console.setFormatter(formatter)
-    file_handler.setFormatter(formatter)
-    logger.info(f"Logging to {destination}")
+    text_formatter = MagAOXLogFormatter()
+    ndjson_formatter = NDJSONLogFormatter()
+    console.setFormatter(text_formatter)
+    temp_file_handler.setFormatter(text_formatter)
+    gzipped_file_log_handler.setFormatter(ndjson_formatter)
+    logger.info(f"Logging to {destination}, current human-readable log at: {temporary_log_path}")
 
 LINE_BUFFERED = 1
+
+class GzipStreamHandler(logging.StreamHandler):
+    _gzipfile : gzip.GzipFile
+    def __init__(self, destination):
+        self._gzipfile = gzip.open(destination, mode='wt', encoding='utf-8')
+        atexit.register(self._gzipfile.close)
+        super().__init__(self._gzipfile)
+
+    def __del__(self):
+        self._gzipfile.close()
 
 class IndiDeviceHandler(logging.Handler):
     def __init__(self, device: Device, *args, **kwargs):
         self.device = device
         super().__init__(*args, **kwargs)
     def emit(self, record: logging.LogRecord):
-        if logging.WARNING > record.levelno >= logging.INFO:
-            level_text = 'INFO '
-        elif logging.ERROR > record.levelno >= logging.WARNING:
-            level_text = 'WARN '
-        elif logging.CRITICAL > record.levelno >= logging.ERROR:
-            level_text = 'ERR  '
-        elif record.levelno >= logging.CRITICAL:
-            level_text = 'CRIT '
+        if record.levelno >= self.level:
+            level_text = log_level_to_label(record.levelno)
         else:
             return
         msg = level_text + record.getMessage()
@@ -152,26 +183,27 @@ class XDevice(Device):
         log = self.log = logging.getLogger(self.name)
         log_dir = self.prefix_dir + "/" + self.logs_dir + "/" + self.name
         os.makedirs(log_dir, exist_ok=True)
-        timestamp = self._startup_time.strftime(PUREPYINDI_DEVICE_FILENAME_TIME_FORMAT)
-        self.log_file_name = f"{self.name}_{timestamp}.log"
+        timestamp = self._startup_time.strftime(XFILENAME_TIME_FORMAT_OUT)
+        self.log_file_name = f"{self.name}_{timestamp}.ndjson.gz"
         log_file_path = log_dir + "/" + self.log_file_name
+        temporary_log_path = f"/tmp/{self.name}.log"
         init_logging(
             log,
             log_file_path,
+            temporary_log_path,
             console_log_level=logging.DEBUG if verbose else logging.INFO,
             file_log_level=logging.DEBUG if verbose else logging.INFO,
             all_verbose=all_verbose)
-        compress_files_glob(log_dir + f"/{self.name}_*.log", latest_filename=self.log_file_name)
         log.addHandler(IndiDeviceHandler(self, level=logging.INFO))
 
     def _init_telem(self):
         telem_dir = self.prefix_dir + "/" + self.telem_dir + "/" + self.name
-        timestamp = self._startup_time.strftime(PUREPYINDI_DEVICE_FILENAME_TIME_FORMAT)
-        telem_file_name = f"{self.name}_{timestamp}.ndjson"
+        timestamp = self._startup_time.strftime(XFILENAME_TIME_FORMAT_OUT)
+        telem_file_name = f"{self.name}_{timestamp}.ndjson.gz"
         os.makedirs(telem_dir, exist_ok=True)
         telem_file_path = telem_dir + "/" + telem_file_name
-        self._telem_file = open(telem_file_path, 'wt', buffering=LINE_BUFFERED, encoding='utf8')
-        compress_files_glob(telem_dir + f"/{self.name}_*.ndjson", latest_filename=telem_file_name)
+        self._telem_file = gzip.open(telem_file_path, mode='wt', encoding='utf8')
+        atexit.register(self._telem_file.close)
         self.log.info(f"Telemetrying to {telem_file_path}")
 
     def telem(self, event : str, message : typing.Union[str, dict[str, typing.Any]]):

@@ -19,6 +19,7 @@ loop_paused              1002     empty_log
 loop_open                1003     empty_log
 
 observer                 1050     observer
+ao_operator                 1051     observer
 
 pico_channel             11025    pico_channel
 
@@ -82,3 +83,4 @@ telem_blockgains         20920    telem_blockgains
 
 telem_pi335              20930    telem_pi335
 
+telem_sparkleclock       20940    telem_sparkleclock

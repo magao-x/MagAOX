@@ -1,5 +1,13 @@
 <personality name="lab">
   <default-voice name="larynx:southern_english_female-glow_tts" />
+  <soundboard>
+    <button name="ThemeSong">
+      <file name="clown.wav" />
+    </button>
+    <button name="Diggy">
+      <file name="diggy_short.wav" />
+    </button>
+  </soundboard>
   <react-to indi-id="observers.obs_on.toggle">
     <transition value="On">
       <speak>Saving data for {observers.current_observer.pfoa}.</speak>

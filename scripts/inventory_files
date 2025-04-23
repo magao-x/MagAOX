@@ -1,0 +1,21 @@
+#!/usr/bin/env python
+import glob
+import itertools
+import os
+
+COMMON_FOLDERS = ['logs', 'telem', 'rawimages', 'cacao']
+
+def main(argv):
+    for prefix in argv:
+        prefix = os.path.realpath(prefix)
+        file_iters = []
+        for subfolder in COMMON_FOLDERS:
+            file_iters.append(glob.iglob(f"{prefix}/{subfolder}/**", recursive=True))
+        for fn in itertools.chain(*file_iters):
+            if fn[-1] == '/':
+                continue
+            print(fn.replace(prefix + '/', ''))
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main(sys.argv[1:]))

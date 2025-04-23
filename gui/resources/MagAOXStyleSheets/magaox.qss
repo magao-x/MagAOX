@@ -1,6 +1,6 @@
 /*
  *  MagaOX Stylesheet, modified from:
- * 
+ *
  *  BreezeDark stylesheet.
  *
  *  :author: Colin Duquesnoy
@@ -873,6 +873,7 @@ QComboBox[isStatus="true"]
 {
    color: #3DA5FF;
 }
+
 QComboBox:disabled[isStatus="true"]
 {
    color: #007ae6;
@@ -896,34 +897,17 @@ QLCDNumber:disabled[isStatus="true"]
 /* BORDERS */
 QTabWidget::pane
 {
+    border: 0.1ex solid #76797c;
     padding: 0.5ex;
     margin: 0.1ex;
 }
 
-QTabWidget::pane:top
+QTabWidget::pane[isAdmin="true"]
 {
-    border: 0.1ex solid #76797c;
-    top: -0.1ex;
+    border: 0.1ex solid #ffff00;
+    padding: 0.5ex;
+    margin: 0.1ex;
 }
-
-QTabWidget::pane:bottom
-{
-    border: 0.1ex solid #76797c;
-    bottom: -0.1ex;
-}
-
-QTabWidget::pane:left
-{
-    border: 0.1ex solid #76797c;
-    right: -0.1ex;
-}
-
-QTabWidget::pane:right
-{
-    border: 0.1ex solid #76797c;
-    left: -0.1ex;
-}
-
 
 QTabBar
 {
@@ -1089,7 +1073,7 @@ QTabBar::tab:left
     border: 0.1ex transparent black;
     border-top: 0.1ex solid #76797c;
     border-right: 0.1ex solid #76797c;
-    background-color: #23262a;
+    background-color: #54575B;
     padding: 0.5ex;
     border-top-right-radius: 0.2ex;
     border-bottom-right-radius: 0.2ex;
@@ -1104,7 +1088,7 @@ QTabBar::tab:left:only-one
     border-top: 0.1ex solid #76797c;
     border-bottom: 0.1ex solid #76797c;
     border-right: 0.1ex solid #76797c;
-    background-color: #23262a;
+    background-color: #54575B;
     padding: 0.5ex;
     border-top-right-radius: 0.2ex;
     border-bottom-right-radius: 0.2ex;
@@ -1114,9 +1098,9 @@ QTabBar::tab:left:only-one
 QTabBar::tab:left:!selected
 {
     color: #eff0f1;
-    background-color: #54575B;
+    background-color: #23262a;
     border: 0.1ex transparent black;
-    border-top: 0.1ex solid #76797c;
+    border-top: 0.1ex solid #23262a;
     border-top-right-radius: 0.2ex;
     border-bottom-right-radius: 0.2ex;
 }
@@ -1381,6 +1365,13 @@ QSlider::sub-page:horizontal,
 QSlider::add-page:vertical
 {
     background: #007ae6;
+    border-radius: 0.3ex;
+}
+
+QSlider::sub-page:horizontal[isAdmin="true"],
+QSlider::add-page:vertical[isAdmin="true"]
+{
+    background: #ffff00;
     border-radius: 0.3ex;
 }
 

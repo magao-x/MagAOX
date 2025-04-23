@@ -491,11 +491,17 @@ std::string cacaoInterface::getFPSValStr( const std::string & fps,
 
     int rfd = -1;
     int nr =0;
-    while(rfd < 0 && nr < 20)
+    while(rfd < 0 && nr < 500)
     {
         rfd = open(outfile.c_str(), O_RDONLY);
         ++nr;
         mx::sys::milliSleep(10);
+    }
+
+    if(rfd < 0)
+    {
+        log<software_error>({__FILE__, __LINE__, "could not get an open fd on " + m_fpsFifo});
+        return "";
     }
 
     int r = read(rfd, inbuff, sizeof(inbuff));
@@ -518,7 +524,7 @@ std::string cacaoInterface::getFPSValStr( const std::string & fps,
 
     if(ned == std::string::npos || ned == 0)
     {
-        log<software_error>({__FILE__, __LINE__, "got empty result from " + m_fpsFifo});
+        //log<software_error>({__FILE__, __LINE__, "got empty result from " + m_fpsFifo});
         return "";
     }
 
@@ -561,11 +567,17 @@ std::string cacaoInterface::getFPSValNum( const std::string & fps,
 
     int rfd = -1;
     int nr =0;
-    while(rfd < 0 && nr < 20)
+    while(rfd < 0 && nr < 500)
     {
         rfd = open(outfile.c_str(), O_RDONLY);
         ++nr;
         mx::sys::milliSleep(10);
+    }
+
+    if(rfd < 0)
+    {
+        log<software_error>({__FILE__, __LINE__, "could not get an open fd on " + m_fpsFifo});
+        return "";
     }
 
     int r = read(rfd, inbuff, sizeof(inbuff));
@@ -828,7 +840,7 @@ void cacaoInterface::fmThreadExec( )
 
       recordLoopGain();
 
-      mx::sys::milliSleep(250);
+      mx::sys::milliSleep(500);
 
    }
    

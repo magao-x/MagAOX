@@ -23,6 +23,10 @@ import getpass
 import threading
 import time
 import shlex
+from enum import Enum
+
+this_env = os.environ.copy()
+this_env.pop('TMUX', None)
 
 stdout_b = os.fdopen(sys.stdout.fileno(), 'wb')
 try:
@@ -30,6 +34,8 @@ try:
     GREEN_SEQ = subprocess.check_output('tput setaf 2', shell=True)
     YELLOW_SEQ = subprocess.check_output('tput setaf 3', shell=True)
     BLUE_SEQ = subprocess.check_output('tput setaf 4', shell=True)
+    MAGENTA_SEQ = subprocess.check_output('tput setaf 5', shell=True)
+    CYAN_SEQ = subprocess.check_output('tput setaf 6', shell=True)
     RESET_SEQ = subprocess.check_output('tput sgr0', shell=True)
 except subprocess.CalledProcessError:
     RED_SEQ = GREEN_SEQ = YELLOW_SEQ = BLUE_SEQ = RESET_SEQ = b''
@@ -47,9 +53,9 @@ def _make_output_funcs(color):
 
 
 success, success_bytes = _make_output_funcs(GREEN_SEQ)
-failure, failure_bytes = _make_output_funcs(RED_SEQ)
-warning, warning_bytes = _make_output_funcs(YELLOW_SEQ)
-info, info_bytes = _make_output_funcs(BLUE_SEQ)
+failure, failure_bytes = _make_output_funcs(BLUE_SEQ)
+warning, warning_bytes = _make_output_funcs(MAGENTA_SEQ)
+info, info_bytes = _make_output_funcs(CYAN_SEQ)
 
 DEBUG = os.environ.get('XCTRL_DEBUG') is not None
 def debug(msg):
@@ -94,7 +100,7 @@ def _run_as_xsup(command, capture_output=True, check=True):
         args = []
     args.extend(shlex.split(command))
     debug(f'Running as {WHO_AM_I}: {" ".join(args)}')
-    res = subprocess.run(args, capture_output=capture_output, check=check)
+    res = subprocess.run(args, capture_output=capture_output, check=check, env=this_env)
     return res.returncode, res.stdout, res.stderr
 
 
@@ -130,26 +136,49 @@ def _check_status(process_name):
 
     return session_exists, pid_file_exists, pid, pid_exists
 
-def _brief_status(process_name):
-    session_exists, pid_file_exists, pid, pid_exists = _check_status(process_name)
-    message = f"{process_name}: "
-    if session_exists and pid_exists:
-        success(message + f"running (pid: {pid})")
-    elif session_exists and pid_file_exists and not pid_exists:
-        failure(message + "dead (session exists, stale pid file)")
-    elif session_exists and not pid_file_exists:
-        failure(message + "session exists, but process is not running")
-    elif not session_exists and not pid_file_exists:
-        warning(message + "not started")
-    else:
-        warning(f"{session_exists=} {pid_file_exists=} {pid=} {pid_exists=}")
+RUNNING = 1
+NOT_STARTED = 0
+SESSION_EXISTS = -1
+DEAD = -2
+UNKNOWN = -3
+
+class Process:
+    def __init__(self, process_name):
+        self.process_name = process_name
+        self.session_exists, self.pid_file_exists, self.pid, self.pid_exists = _check_status(process_name)
+    def _format(self):
+        message = f"{self.process_name}: "
+        if self.session_exists and self.pid_exists:
+            return RUNNING, message + f"running (pid: {self.pid})"
+        elif self.session_exists and self.pid_file_exists and not self.pid_exists:
+            return DEAD, message + "dead 💀 (session exists, stale pid file)"
+        elif self.session_exists and not self.pid_file_exists:
+            return SESSION_EXISTS, message + "session exists, but process is not running"
+        elif not self.session_exists and not self.pid_file_exists:
+            return NOT_STARTED, message + "not started"
+        else:
+            return UNKNOWN, f"{self.session_exists=} {self.pid_file_exists=} {self.pid=} {self.pid_exists=}"
+    @property
+    def state(self):
+        return self._format()[0]
+    def format(self):
+        return self._format()[1]
 
 def status(processes, targets, role):
     if not len(targets):
         targets = processes.keys()
     debug(f"Querying status for: {list(targets)}")
-    for process_name in targets:
-        _brief_status(process_name)
+    procs = []
+    for process_name in sorted(targets):
+        procs.append(Process(process_name))
+
+    for state, write_func in [(RUNNING, success), (NOT_STARTED, info), (SESSION_EXISTS, warning), (DEAD, failure), (UNKNOWN, failure)]:
+        matching_procs = [p for p in procs if p.state == state]
+        if matching_procs:
+            for proc in matching_procs:
+                write_func(proc.format())
+            print()
+
     return 0
 
 def _peek_logs(process_name, n_lines):

@@ -19,7 +19,6 @@ EDT ?= false
 PYLON ?= false
 PICAM ?= false
 ifeq ($(MAGAOX_ROLE),ICC)
-  EDT = true
   PYLON = true
   PICAM = true
 else
@@ -32,15 +31,18 @@ CFLAGS += -D_XOPEN_SOURCE=700
 CXXFLAGS += -D_XOPEN_SOURCE=700
 
 #Need this on COS-7, doesn't hurt elsewhere.
-CXXFLAGS += -DMX_OLD_GSL
+#CXXFLAGS += -DMX_OLD_GSL
 
+ifeq ($(MAGAOX_ROLE),SS)
+  CXXFLAGS += -DXWC_SIM_MODE
+endif
 
 
 LIB_PATH ?= $(PREFIX)/lib
 INCLUDE_PATH ?= $(PREFIX)/include
 LIB_SOFA ?= $(LIB_PATH)/libsofa_c.a
 
-INCLUDES += -I$(INCLUDE_PATH) -I$(abspath $(SELF_DIR)/../flatlogs/include) 
+INCLUDES += -I$(INCLUDE_PATH) -I$(abspath $(SELF_DIR)/../flatlogs/include)
 INCLUDES += $(shell pkg-config --cflags eigen3)
 
 
@@ -68,8 +70,8 @@ EXTRA_LDLIBS ?=  -lmxlib \
   -lboost_filesystem \
   $(abspath \
   $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
-  $(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a) 
-  
+  $(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a)
+
 HOST_ARCH   := $(shell uname -m)
 ifeq ($(HOST_ARCH),x86_64)
   # only enable on x86 because ARM doesn't have quad precision by default
@@ -138,10 +140,10 @@ ifeq ($(NEED_CUDA),yes)
 
    #Finally we define the cuda libs for linking
    CUDA_LIBS ?= $(CUDA_LIBPATH) -L/usr/local/cuda/lib64/ -lcudart -lcublas -lcufft -lcurand
-  
+
 else
    CUDA_LIBS ?=
-  
+
 endif
 
 EXTRA_LDLIBS+= $(CUDA_LIBS)

@@ -253,17 +253,17 @@ int adcTracker::appStartup()
    createStandardIndiToggleSw( m_indiP_tracking, "tracking");
    registerIndiPropertyNew( m_indiP_tracking, INDI_NEWCALLBACK(m_indiP_tracking));
    
-   createStandardIndiNumber<float>( m_indiP_deltaAngle, "deltaAngle", 0.0, 180.0, 0, "%0.2f");
+   createStandardIndiNumber<float>( m_indiP_deltaAngle, "deltaAngle", -180.0, 180.0, 0, "%0.2f");
    m_indiP_deltaAngle["target"].set(m_deltaAngle);
    m_indiP_deltaAngle["current"].set(m_deltaAngle);
    registerIndiPropertyNew( m_indiP_deltaAngle, INDI_NEWCALLBACK(m_indiP_deltaAngle));
    
-   createStandardIndiNumber<float>( m_indiP_deltaADC1, "deltaADC1", 0.0, 180.0, 0, "%0.2f");
+   createStandardIndiNumber<float>( m_indiP_deltaADC1, "deltaADC1", -180.0, 180.0, 0, "%0.2f");
    m_indiP_deltaADC1["target"].set(m_adc1delta);
    m_indiP_deltaADC1["current"].set(m_adc1delta);
    registerIndiPropertyNew( m_indiP_deltaADC1, INDI_NEWCALLBACK(m_indiP_deltaADC1));
    
-   createStandardIndiNumber<float>( m_indiP_deltaADC2, "deltaADC2", 0.0, 180.0, 0, "%0.2f");
+   createStandardIndiNumber<float>( m_indiP_deltaADC2, "deltaADC2", -180.0, 180.0, 0, "%0.2f");
    m_indiP_deltaADC2["target"].set(m_adc2delta);
    m_indiP_deltaADC2["current"].set(m_adc2delta);
    registerIndiPropertyNew( m_indiP_deltaADC2, INDI_NEWCALLBACK(m_indiP_deltaADC2));

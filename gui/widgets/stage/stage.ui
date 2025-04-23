@@ -7,11 +7,15 @@
     <x>0</x>
     <y>0</y>
     <width>433</width>
-    <height>294</height>
+    <height>361</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Form</string>
+  </property>
+  <property name="windowIcon">
+   <iconset>
+    <normaloff>:/icons/cog.png</normaloff>:/icons/cog.png</iconset>
   </property>
   <layout class="QGridLayout" name="gridLayout">
    <item row="0" column="0">
@@ -66,8 +70,42 @@
        </item>
        <item>
         <widget class="QPushButton" name="setPointGo">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+           <horstretch>1</horstretch>
+           <verstretch>1</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>40</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>40</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="toolTip">
+          <string>go to new preset</string>
+         </property>
          <property name="text">
-          <string>go</string>
+          <string/>
+         </property>
+         <property name="icon">
+          <iconset>
+           <normaloff>:/icons/arrow-right-drop-circle-outline.png</normaloff>:/icons/arrow-right-drop-circle-outline.png</iconset>
+         </property>
+         <property name="iconSize">
+          <size>
+           <width>32</width>
+           <height>32</height>
+          </size>
+         </property>
+         <property name="shortcut">
+          <string/>
          </property>
         </widget>
        </item>
@@ -145,8 +183,39 @@
        </item>
        <item>
         <widget class="QPushButton" name="posMinus">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>40</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>40</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="toolTip">
+          <string>jog negative</string>
+         </property>
          <property name="text">
-          <string>-</string>
+          <string/>
+         </property>
+         <property name="icon">
+          <iconset>
+           <normaloff>:/icons/arrow_left_128.png</normaloff>:/icons/arrow_left_128.png</iconset>
+         </property>
+         <property name="iconSize">
+          <size>
+           <width>32</width>
+           <height>32</height>
+          </size>
          </property>
         </widget>
        </item>
@@ -155,8 +224,39 @@
        </item>
        <item>
         <widget class="QPushButton" name="posPlus">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+           <horstretch>1</horstretch>
+           <verstretch>1</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>40</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>40</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="toolTip">
+          <string>jog positive</string>
+         </property>
          <property name="text">
-          <string>+</string>
+          <string/>
+         </property>
+         <property name="icon">
+          <iconset>
+           <normaloff>:/icons/arrow_right_128.png</normaloff>:/icons/arrow_right_128.png</iconset>
+         </property>
+         <property name="iconSize">
+          <size>
+           <width>32</width>
+           <height>32</height>
+          </size>
          </property>
         </widget>
        </item>
@@ -192,6 +292,9 @@
        </item>
        <item>
         <widget class="QPushButton" name="posStepMulTen">
+         <property name="toolTip">
+          <string>increase stepsize by x10</string>
+         </property>
          <property name="text">
           <string>x10</string>
          </property>
@@ -199,6 +302,9 @@
        </item>
        <item>
         <widget class="QPushButton" name="posStepDivTen">
+         <property name="toolTip">
+          <string>decrease stepsize by /10</string>
+         </property>
          <property name="text">
           <string>/10</string>
          </property>
@@ -236,15 +342,77 @@
        </item>
        <item>
         <widget class="QPushButton" name="home">
-         <property name="text">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+           <horstretch>1</horstretch>
+           <verstretch>1</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>40</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>40</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="toolTip">
           <string>home</string>
+         </property>
+         <property name="text">
+          <string/>
+         </property>
+         <property name="icon">
+          <iconset>
+           <normaloff>:/icons/home-circle.png</normaloff>:/icons/home-circle.png</iconset>
+         </property>
+         <property name="iconSize">
+          <size>
+           <width>32</width>
+           <height>32</height>
+          </size>
          </property>
         </widget>
        </item>
        <item>
         <widget class="QPushButton" name="stop">
-         <property name="text">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+           <horstretch>1</horstretch>
+           <verstretch>1</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>40</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>40</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="toolTip">
           <string>stop</string>
+         </property>
+         <property name="text">
+          <string/>
+         </property>
+         <property name="icon">
+          <iconset>
+           <normaloff>:/icons/stop-circle-outline.png</normaloff>:/icons/stop-circle-outline.png</iconset>
+         </property>
+         <property name="iconSize">
+          <size>
+           <width>32</width>
+           <height>32</height>
+          </size>
          </property>
         </widget>
        </item>

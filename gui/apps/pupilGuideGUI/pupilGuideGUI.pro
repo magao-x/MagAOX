@@ -4,8 +4,8 @@
 
 TEMPLATE = app
 TARGET = pupilGuideGUI
-DESTDIR = bin/ 
-DEPENDPATH += ./ ../../lib 
+DESTDIR = bin/
+DEPENDPATH += ./ ../../lib
 
 MOC_DIR = moc/
 OBJECTS_DIR = obj/
@@ -36,19 +36,21 @@ HEADERS += ../../widgets/pupilGuide/pupilGuide.hpp \
            ../../widgets/xWidgets/statusEntry.hpp \
            ../../widgets/xWidgets/statusLabel.hpp \
            ../../widgets/xWidgets/fsmDisplay.hpp \
-           ../../lib/multiIndiManager.hpp 
-           
-SOURCES += pupilGuideGUI_main.cpp 
-           
+           ../../widgets/xWidgets/toggleSlider.hpp \
+           ../../lib/multiIndiManager.hpp
+
+SOURCES += pupilGuideGUI_main.cpp
+
 FORMS += ../../widgets/pupilGuide/pupilGuide.ui \
          ../../widgets/xWidgets/statusEntry.ui \
-         ../../widgets/xWidgets/fsmDisplay.ui
-     
+         ../../widgets/xWidgets/fsmDisplay.ui \
+         ../../widgets/xWidgets/toggleSlider.ui
+
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a
 
-RESOURCES += ../../resources/magaox.qrc 
+RESOURCES += ../../resources/magaox.qrc
 
-RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
+RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc
 
 QT += widgets

@@ -10,6 +10,7 @@ import os.path
 import pprint
 import re
 import xconf
+from xconf.contrib import DirectoryConfig
 from purepyindi2 import device, properties, constants, messages
 from purepyindi2.messages import DefNumber, DefSwitch, DefText
 from magaox.indi.device import XDevice, BaseConfig
@@ -27,7 +28,7 @@ def drop_xml_tags(raw_xml):
 @xconf.config
 class AudibleAlertsConfig(BaseConfig):
     random_utterance_interval_sec : Union[float, int] = xconf.field(default=15 * 60, help="Seconds since last (real or random) utterance before a random utterance should play")
-    cache : xconf.DirectoryConfig = xconf.field(default=xconf.DirectoryConfig(path="/tmp/audibleAlerts_cache"))
+    cache : DirectoryConfig = xconf.field(default=DirectoryConfig(path="/tmp/audibleAlerts_cache"))
 
 def contains_substitutions(text):
     return '{' in text or '}' in text
@@ -47,6 +48,10 @@ class AudibleAlerts(XDevice):
     per_transition_cooldown_ts : dict[Transition, float]
     last_utterance_ts : float = 0
     last_utterance_chosen : Optional[str] = None
+    observers_device : str = 'observers'
+    last_walkup : Optional[dict[str,str]] = None
+    last_walkup_ts : float = 0
+    walkup_double_trigger_timeout_sec : float = 30
 
     def enqueue_speech_request(self, sr):
         if any(sr == x for x in self._speech_requests):
@@ -81,11 +86,26 @@ class AudibleAlerts(XDevice):
         existing_property['toggle'] = new_message['toggle']
         self.mute = new_message['toggle'] is constants.SwitchState.ON
         if self.mute:
-            log.debug("Muted")
+            self.log.info("Muted")
         else:
-            log.debug("Unmuted")
+            self.log.info("Unmuted")
         self.update_property(existing_property)
         self.telem("mute_toggle", {"mute": self.mute})
+
+    def walkup_handler(self, new_message):
+        which_updated = new_message.name
+        for element_name in new_message:
+            value = new_message[element_name]
+            if value == constants.SwitchState.ON:
+                if element_name == self.last_walkup[which_updated]:
+                    self.log.debug(f"Already did {self.last_walkup[which_updated]}")
+                    return
+                if element_name in self.personality.walkups:
+                    utterance = choice(self.personality.walkups[element_name])
+                    self.log.info(f"Queueing walk-up {utterance} for {element_name}")
+                    self.last_walkup_ts = time.time()
+                    self.last_walkup[which_updated] = element_name
+                    self.enqueue_speech_request(utterance)
 
     def reaction_handler(self, new_message, element_name, transition, utterance_choices):
         if not isinstance(new_message, messages.IndiSetMessage):
@@ -93,9 +113,12 @@ class AudibleAlerts(XDevice):
         if element_name not in new_message:
             return
         value = new_message[element_name]
-        self.log.debug(f"Judging reaction for {element_name} change to {repr(value)} using {transition}")
+        if new_message.device == 'labrules':
+            self.log.debug(f"Judging reaction for {element_name} change to {repr(value)} using {transition}")
+            self.log.debug(f"before check {self.latch_transitions=}")
         last_value = self.latch_transitions.get(transition)
-        self.log.debug(f"{new_message}\n{transition.compare(value)=}, last value was {last_value}, {value != last_value=} {(not transition.compare(last_value))=}")
+        if new_message.device == 'labrules':
+            self.log.debug(f"{new_message}\n{transition.compare(value)=}, last value was {last_value}, {value != last_value=} {(not transition.compare(last_value))=}")
         if transition.compare(value) and (
             # if there's no operation, we fire on any change,
             # but make sure it's actually a change
@@ -104,10 +127,13 @@ class AudibleAlerts(XDevice):
             (not transition.compare(last_value))
         ):
             self.latch_transitions[transition] = value
+            if new_message.device == 'labrules':
+                self.log.debug(f"after update {self.latch_transitions=}")
+                self.log.debug(f"latched {transition=} with {value=}")
             last_transition_ts = self.per_transition_cooldown_ts.get(transition, 0)
             sec_since_trigger = time.time() - last_transition_ts
             debounce_expired = sec_since_trigger > transition.debounce_sec
-            self.log.debug(f"Debounced {sec_since_trigger=}")
+            self.log.debug(f"Checking for debounce: {sec_since_trigger=} {debounce_expired=}")
             if debounce_expired:
                 utterance = choice(utterance_choices)
                 self.log.debug(f"Submitting speech request: {utterance}")
@@ -115,10 +141,15 @@ class AudibleAlerts(XDevice):
             else:
                 self.log.debug(f"Would have spoken, but it's only been {sec_since_trigger=}")
         elif transition.compare(last_value) and not transition.compare(value):
-            # un-latch, so next time we change to a value that compares True we trigger again:
+            if new_message.device == 'labrules':
+                self.log.debug(f"un-latch {transition}, so next time we change to a value that compares True we trigger again. ({last_value=} {value=})")
+                self.log.debug(f"before {self.latch_transitions=}")
             del self.latch_transitions[transition]
+            if new_message.device == 'labrules':
+                self.log.debug(f"after {self.latch_transitions=}")
         else:
-            self.log.debug(f"Got {new_message.device}.{new_message.name} but {transition=} did not match")
+            if new_message.device == 'labrules':
+                self.log.debug(f"Got {new_message.device}.{new_message.name} but {transition=} did not match")
 
     def preprocess(self, speech):
         if isinstance(speech, Recording):
@@ -169,7 +200,7 @@ class AudibleAlerts(XDevice):
 
     def load_personality(self, personality_name):
         personality_file = os.path.join(HERE, "personalities", f"{personality_name}.xml")
-        for cb, device_name, property_name in self._cb_handles:
+        for cb, device_name, property_name, _ in self._cb_handles:
             try:
                 self.client.unregister_callback(cb, device_name=device_name, property_name=property_name)
             except ValueError:
@@ -202,7 +233,7 @@ class AudibleAlerts(XDevice):
                     device_name=device_name,
                     property_name=property_name
                 )
-                self._cb_handles.add((cb, device_name, property_name))
+                self._cb_handles.add((cb, device_name, property_name, t))
                 self.log.debug(f"Registered reaction handler on {device_name=} {property_name=} {element_name=} using transition {t}")
                 for idx, utterance in enumerate(reaction.transitions[t]):
                     self.log.debug(f"{reaction.indi_id}: {t}: {utterance}")
@@ -212,6 +243,10 @@ class AudibleAlerts(XDevice):
                             self.log.debug(f"Caching synthesis to {result}")
                         else:
                             self.log.debug(f"Cannot pre-cache because there are substitutions to be made")
+        if self.walkup_handler not in self.client.callbacks[self.observers_device]['operators']:
+            self.client.register_callback(self.walkup_handler, self.observers_device, 'operators')
+        if self.walkup_handler not in self.client.callbacks[self.observers_device]['observers']:
+            self.client.register_callback(self.walkup_handler, self.observers_device, 'observers')
         self.active_personality = personality_name
         self.telem("load_personality", {'name': personality_name})
         self.send_all_properties()
@@ -222,6 +257,7 @@ class AudibleAlerts(XDevice):
         self.per_transition_cooldown_ts = {}
         self._cb_handles = set()
         self._speech_requests = []
+        self.last_walkup = {'observers': '', 'operators': ''}
 
         while self.client.status is not constants.ConnectionStatus.CONNECTED:
             self.log.info("Waiting for connection...")

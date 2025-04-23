@@ -107,6 +107,9 @@ protected:
    ///Current temperature of the stage.  
    pcf::IndiProperty m_indiP_temp;
    
+   ///Current temperature of the stage.  
+   pcf::IndiProperty m_indiP_warn;
+
    ///Target raw position of the stage.  
    pcf::IndiProperty m_indiP_tgt_pos;
       
@@ -395,6 +398,14 @@ int zaberLowLevel::appStartup()
       m_indiP_temp.add (pcf::IndiElement(m_stages[n].name()));
    }
    
+   REG_INDI_NEWPROP_NOCB(m_indiP_warn, "warning", pcf::IndiProperty::Switch);
+   m_indiP_warn.setRule(pcf::IndiProperty::AnyOfMany);
+   for(size_t n=0; n< m_stages.size(); ++n)
+   {
+      m_indiP_warn.add (pcf::IndiElement(m_stages[n].name()));
+      m_indiP_warn[m_stages[n].name()].setSwitchState(pcf::IndiElement::Off);
+   }
+
    REG_INDI_NEWPROP(m_indiP_tgt_pos, "tgt_pos", pcf::IndiProperty::Number);
    for(size_t n=0; n< m_stages.size(); ++n)
    {
@@ -608,6 +619,15 @@ int zaberLowLevel::appLogic()
          }
          else updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NODEVICE"));
          
+         if(m_stages[i].warn())
+         {
+            updateIfChanged(m_indiP_warn, m_stages[i].name(), pcf::IndiElement::On);
+         }
+         else
+         {
+            updateIfChanged(m_indiP_warn, m_stages[i].name(), pcf::IndiElement::Off);
+         }
+
          m_stages[i].updateTemp(m_port);
          updateIfChanged(m_indiP_temp, m_stages[i].name(), m_stages[i].temp());
          
@@ -690,7 +710,6 @@ int zaberLowLevel::onPowerOff()
       log<text_log>("Error disconnecting from zaber system.", logPrio::LOG_ERROR);
    }
    
-   
    m_port = 0;
    
    std::lock_guard<std::mutex> lock(m_indiMutex);
@@ -705,7 +724,7 @@ int zaberLowLevel::onPowerOff()
       
       updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("POWEROFF"));
       
-         
+      updateIfChanged(m_indiP_warn, m_stages[i].name(), pcf::IndiElement::Off);
    }
    return 0;
 }

@@ -113,6 +113,14 @@ elCompTxt   | compare the value of two text elements to each other      | Eq, Ne
 elCompSw    | compare the value of two switch elements to each other    | Eq, Neq                            ||
 ruleComp    | compare the value of two rules to each other                   | Eq/Xnor, Neq/Xor, And, Nand, Or, Nor ||
 
+### Keyword priority
+|`priority`  | Description                                                   | Notes                       |
+|:---------:|----------------------------------------------------------------|-----------------------------|
+| none      | not published
+| info      | |
+| caution   | |
+| warning   | |
+| alert     | |
 
 ### Keyword tol
 For numerical comparisons, equality is tested with a tolerance, specified by the keyword `tol` in the config file.  This accounts for floating point nonsense and the binary-text-binary conversions inherent in the INDI protocol.  The default for `tol` is `1e-6`.  If you set it to 0 you will get strict equality checking.

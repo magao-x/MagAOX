@@ -1,0 +1,36 @@
+allall: all 
+
+OTHER_HEADERS=
+NEED_CUDA = yes
+TARGET=nnReconstructor
+
+CXXFLAGS += -g -DXWC_DISABLE_USER_CHECK
+# OTHER_OBJS=/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib/libnvinfer.so /opt/MagAOX/vendor/TensorRT-10.0.0.6/lib/libnvonnxparser.so
+
+# debug static
+# Compiling: NNReconstructor.cpp
+# g++ -Wall -Wno-deprecated-declarations -std=c++14 -I"../common" -I"../utils" -I".." -I"/usr/local/cuda/include" -I"../include" -I"../../include" -I"../../parsers/onnxOpenSource" -D_REENTRANT -DTRT_STATIC=1 -g -c -o ../../bin/dchobj/NNReconstructor/NNReconstructor/NNReconstructor.o NNReconstructor.cpp
+# Linking: ../../bin/nn_reconstructor_debug_static
+# g++ -o ../../bin/nn_reconstructor_debug_static -mcmodel=large -L"/usr/local/cuda/lib64" -Wl,-rpath-link="/usr/local/cuda/lib64" -L"../lib" -L"../../lib" -L"/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib/" -Wl,-rpath-link="/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib/" -L"/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib//stubs" -Wl,-rpath-link="/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib//stubs" -L"/usr/lib/x86_64-linux-gnu/lib" -Wl,-rpath-link="/usr/lib/x86_64-linux-gnu/lib" -L"" -Wl,-rpath-link="" -L../../bin  -Wl,--start-group -Wl,--whole-archive -lnvinfer_static -Wl,--no-whole-archive -Wl,--whole-archive -lnvinfer_plugin_static -Wl,--no-whole-archive -Wl,--whole-archive -lnvonnxparser_static -Wl,--no-whole-archive -lculibos -lnvrtc_static -lnvrtc-builtins_static -lnvptxcompiler_static -lrt -ldl -lpthread -lz -lcudart_static -lnvrtc_static -lnvrtc-builtins_static -lnvptxcompiler_static -lonnx_proto ../../bin/dchobj/NNReconstructor/NNReconstructor/NNReconstructor.o -Wl,--end-group
+
+
+# release static
+# Compiling: NNReconstructor.cpp
+# g++ -Wall -Wno-deprecated-declarations -std=c++14 -I"../common" -I"../utils" -I".." -I"/usr/local/cuda/include" -I"../include" -I"../../include" -I"../../parsers/onnxOpenSource" -D_REENTRANT -DTRT_STATIC=1 -c -o ../../bin/chobj/NNReconstructor/NNReconstructor/NNReconstructor.o NNReconstructor.cpp
+# Linking: ../../bin/nn_reconstructor_static
+# g++ -o ../../bin/nn_reconstructor_static -mcmodel=large -L"/usr/local/cuda/lib64" -Wl,-rpath-link="/usr/local/cuda/lib64" -L"../lib" -L"../../lib" -L"/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib/" -Wl,-rpath-link="/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib/" -L"/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib//stubs" -Wl,-rpath-link="/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib//stubs" -L"/usr/lib/x86_64-linux-gnu/lib" -Wl,-rpath-link="/usr/lib/x86_64-linux-gnu/lib" -L"" -Wl,-rpath-link="" -L../../bin  -Wl,--start-group -Wl,--whole-archive -lnvinfer_static -Wl,--no-whole-archive -Wl,--whole-archive -lnvinfer_plugin_static -Wl,--no-whole-archive -Wl,--whole-archive -lnvonnxparser_static -Wl,--no-whole-archive -lculibos -lnvrtc_static -lnvrtc-builtins_static -lnvptxcompiler_static -lrt -ldl -lpthread -lz -lcudart_static -lnvrtc_static -lnvrtc-builtins_static -lnvptxcompiler_static -lonnx_proto ../../bin/chobj/NNReconstructor/NNReconstructor/NNReconstructor.o -Wl,--end-group
+
+# release dyn
+# Compiling: NNReconstructor.cpp
+# g++ -Wall -Wno-deprecated-declarations -std=c++14 -I"../common" -I"../utils" -I".." -I"/usr/local/cuda/include" -I"../include" -I"../../include" -I"../../parsers/onnxOpenSource" -D_REENTRANT -DTRT_STATIC=0 -c -o ../../bin/chobj/NNReconstructor/NNReconstructor/NNReconstructor.o NNReconstructor.cpp
+# Linking: ../../bin/nn_reconstructor
+# g++ -o ../../bin/nn_reconstructor -L"/usr/local/cuda/lib64" -Wl,-rpath-link="/usr/local/cuda/lib64" -L"../lib" -L"../../lib" -L"/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib/" -Wl,-rpath-link="/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib/"  -L"/usr/lib/x86_64-linux-gnu/lib" -Wl,-rpath-link="/usr/lib/x86_64-linux-gnu/lib" -L"" -Wl,-rpath-link="" -L../../bin  -Wl,--start-group -lnvinfer -lnvinfer_plugin -lnvonnxparser -lcudart -lrt -ldl -lpthread  ../../bin/chobj/NNReconstructor/NNReconstructor/NNReconstructor.o -Wl,--end-group
+
+# CXXFLAGS += -DTRT_STATIC=1
+# EXTRA_LDFLAGS += -mcmodel=large -L"/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib/" -Wl,-rpath-link="/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib/" -L"/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib//stubs" -Wl,-rpath-link="/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib//stubs" -L"/usr/lib/x86_64-linux-gnu/lib" -Wl,-rpath-link="/usr/lib/x86_64-linux-gnu/lib" -Wl,--start-group -Wl,--whole-archive -lnvinfer_static -Wl,--no-whole-archive -Wl,--whole-archive -lnvinfer_plugin_static -Wl,--no-whole-archive -Wl,--whole-archive -lnvonnxparser_static -Wl,--no-whole-archive -lculibos -lnvrtc_static -lnvrtc-builtins_static -lnvptxcompiler_static -lrt -ldl -lpthread -lz -lcudart_static -lnvrtc_static -lnvrtc-builtins_static -lnvptxcompiler_static -lonnx_proto -Wl,--end-group
+
+
+EXTRA_LDFLAGS += -mcmodel=large -L"/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib/" -Wl,-rpath-link="/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib/" -Wl,--start-group -lnvinfer -lnvinfer_plugin -lnvonnxparser -lcudart -lrt -ldl -lpthread -Wl,--end-group
+
+
+include ../../Make/magAOXApp.mk

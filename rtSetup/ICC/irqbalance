@@ -1,9 +1,9 @@
-#######################################
-# MagAO-X irqbalance configuration
+############################################
+# MagAO-X irqbalance configuration for ICC
 #
-# Edit the IRQBALANCE_BANNED_CPUS bitmask to match the r/t cpusets created in rtc_cpuset
+# Edit the IRQBALANCE_BANNED_CPUS bitmask to match the r/t cpusets created in make_cpusets
 #
-# Edit the IRQBALANCE_ARGS list of args to add a --banirq=x for each irq x you want to prevent being balanced
+# Edit the irqbalance_policyscript to include IRQs to ban
 # 
 # To Install:
 #
@@ -31,8 +31,8 @@
 #
 # IRQBALANCE_BANNED_CPUS
 #
-# For ICC currently bans 8-31 and 40-63 (which are the h/t pairs)                        
-IRQBALANCE_BANNED_CPULIST=8-31,40-63
+# For RTC this is 128 bits.  Currently bans 32-63 and 96-127 (which are the h/t pairs)                      
+IRQBALANCE_BANNED_CPULIST=32-63,96-127
 
 #
 # IRQBALANCE_ARGS

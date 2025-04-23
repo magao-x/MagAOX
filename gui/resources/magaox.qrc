@@ -1,15 +1,45 @@
 <!DOCTYPE RCC><RCC version="1.0">
     <qresource>
         <file>icons/arrow_right_128.png</file>
+        <file>icons/arrow_right_dark_128.png</file>
         <file>icons/arrow_up_right_128.png</file>
+        <file>icons/arrow_up_right_dark_128.png</file>
         <file>icons/arrow_up_128.png</file>
+        <file>icons/arrow_up_dark_128.png</file>
         <file>icons/arrow_up_left_128.png</file>
+        <file>icons/arrow_up_left_dark_128.png</file>
         <file>icons/arrow_left_128.png</file>
+        <file>icons/arrow_left_dark_128.png</file>
         <file>icons/arrow_down_left_128.png</file>
+        <file>icons/arrow_down_left_dark_128.png</file>
         <file>icons/arrow_down_128.png</file>
+        <file>icons/arrow_down_dark_128.png</file>
         <file>icons/arrow_down_right_128.png</file>
+        <file>icons/arrow_down_right_dark_128.png</file>
         <file>icons/square_128.png</file>
+        <file>icons/home-circle.png</file>
+        <file>icons/stop-circle-outline.png</file>
         <file>icons/scamper_cutout_sq_64.jpeg</file>
         <file>icons/recycle.png</file>
+        <file>icons/arrow-right-drop-circle-outline.png</file>
+        <file>icons/application-cog-outline.png</file>
+        <file>icons/camera.png</file>
+        <file>icons/arrow-all.png</file>
+        <file>icons/waves.png</file>
+        <file>icons/controller-classic.png</file>
+        <file>icons/tune.png</file>
+        <file>icons/power-plug.png</file>
+        <file>icons/cog.png</file>
+        <file>icons/dump-truck.png</file>
+        <file>icons/crop.png</file>
+        <file>icons/flare.png</file>
+        <file>icons/keyboard_double_arrow_down.png</file>
+        <file>icons/keyboard_double_arrow_up.png</file>
+        <file>icons/keyboard_double_arrow_left.png</file>
+        <file>icons/keyboard_double_arrow_right.png</file>
+        <file>icons/account_64.png</file>
+        <file>icons/ninja_64.png</file>
     </qresource>
 </RCC>
+
+

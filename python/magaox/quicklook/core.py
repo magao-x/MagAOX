@@ -32,17 +32,31 @@ from datetime import timezone
 from concurrent import futures
 import logging
 import glob
-import tempfile
-from astropy.io import fits
 import shutil
+import tempfile
 
+import xconf
+
+from astropy.io import fits
+from ..db import fetch, query_observations, query_files
 from ..utils import parse_iso_datetime, format_timestamp_for_filename, utcnow
 from ..constants import (
     PRETTY_MODIFIED_TIME_FORMAT, LINE_FORMAT_REGEX, LINE_BUFFERED, MODIFIED_TIME_FORMAT, OBSERVERS_DEVICE, HISTORY_FILENAME, FAILED_HISTORY_FILENAME, XRIF2FITS_TIMEOUT_SEC, SLEEP_FOR_TELEMS, ALL_CAMERAS, DEFAULT_SEPARATE, DEFAULT_CUBE, CHECK_INTERVAL_SEC, LOOKYLOO_DATA_ROOTS, QUICKLOOK_PATH,
-    FOLDER_TIMESTAMP_FORMAT,
+    FOLDER_TIMESTAMP_FORMAT, DEFAULT_PREFIX
 )
 
 log = logging.getLogger(__name__)
+
+@xconf.config
+class PathRewriteConfig:
+    hostname : str = xconf.field(help="Hostname under which the file was inventoried")
+    from_path : str = xconf.field(help="Substring to replace from the inventoried path")
+    to_path : str = xconf.field(help="Replacement substring for the actual 'physical' path where we read it (e.g. to use an NFS mount to read from another host)")
+
+    def rewrite(self, hostname, path):
+        if hostname == self.hostname:
+            return path.replace(self.from_path, self.to_path)
+        return path
 
 @dataclasses.dataclass(frozen=True, eq=True)
 class TimestampedFile:
@@ -58,6 +72,15 @@ class ObserverTelem:
     email : str
     obs : str
     on : bool
+
+    @classmethod
+    def from_row(cls, row):
+        return cls(
+            ts=row['ts'],
+            email=row['email'],
+            obs=row['obsName'],
+            on=row['observing'],
+        )
 
     def __str__(self):
         return f"<ObserverTelem: {repr(self.obs)} {self.email} at {self.ts.strftime(PRETTY_MODIFIED_TIME_FORMAT)} [{'on' if self.on else 'off'}]>"
@@ -136,6 +159,15 @@ class ObservationSpan:
     def __str__(self, ):
         endpart = f" to {self.end.strftime(PRETTY_MODIFIED_TIME_FORMAT)}" if self.end is not None else ""
         return f"<ObservationSpan: {self.email} '{self.title}' from {self.begin.strftime(PRETTY_MODIFIED_TIME_FORMAT)}{endpart}>"
+
+    @classmethod
+    def from_row(cls, row):
+        return cls(
+            email=row['email'],
+            title=row['obsname'],
+            begin=row['start_ts'],
+            end=row['end_ts'],
+        )
 
 def xfilename_to_utc_timestamp(filename):
     _, filename = os.path.split(filename)
@@ -294,14 +326,20 @@ def transform_telems_to_spans(events : typing.List[ObserverTelem], start_dt : da
     return spans, start_dt
 
 def get_new_observation_spans(
-        data_roots: typing.List[pathlib.Path],
-        existing_observation_spans : typing.Set[ObservationSpan],
         start_dt : datetime.datetime,
         end_dt : typing.Optional[datetime.datetime]=None,
-        ignore_data_integrity : bool=False,
+        email : typing.Optional[str]=None,
+        title : typing.Optional[str]=None,
+        existing_observation_spans : typing.Set[ObservationSpan]=None,
+        exact_title: bool = False,
 ) -> tuple[set[ObservationSpan, datetime.datetime]]:
-    events = get_observation_telems(data_roots, start_dt, end_dt, ignore_data_integrity)
-    spans, start_dt = transform_telems_to_spans(events, start_dt, end_dt)
+    if existing_observation_spans is None:
+        existing_observation_spans = set()
+    # events = get_observation_telems(data_roots, start_dt, end_dt, ignore_data_integrity)
+    # result = fetch('observers', ec="telem_observer", start=start_dt, end=end_dt)
+    result = query_observations(start_dt=start_dt, end_dt=end_dt, title=title, email=email, exact_title=exact_title)
+    spans = set(ObservationSpan.from_row(r) for r in result)
+
     if len(spans):
         new_observation_spans = set(spans) - existing_observation_spans
         return new_observation_spans, start_dt
@@ -582,8 +620,8 @@ def convert_xrif(
     log.debug(f"Extracted {len(paths)} XRIF archives to FITS")
     return successful_paths, failed_paths
 
-def decide_to_process(args, span):
-    if args.title is not None:
+def decide_to_process(title, email):
+    if title is not None:
         title_match = span.title.strip().lower() == args.title.strip().lower()
         if args.partial_match_ok:
             title_match = title_match or args.title.strip().lower() in span.title.lower()
@@ -612,6 +650,7 @@ def process_span(
 ):
     log.info(f"Observation interval to process: {span}")
     for device in cameras:
+        # TODO currently all cams are separate because cube mode is not useful
         cube_mode = ALL_CAMERAS.get(device, DEFAULT_SEPARATE) is DEFAULT_CUBE
         if force_cube_or_separate is DEFAULT_CUBE:
             cube_mode = True
@@ -638,9 +677,11 @@ def process_span(
 
     log.info(f"Completed span {span}")
 
-def _copy_task(src : str, dest : str, dry_run : bool) -> str:
+def _copy_task(src : pathlib.Path, dest : pathlib.Path, dry_run : bool) -> str:
     if not dry_run:
+        dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(src, dest)
+        log.debug(f"copied {src} -> {dest}")
     else:
         log.debug(f"dry run: cp {src} {dest}")
     return dest
@@ -730,104 +771,122 @@ def check_telem_in_span(span : ObservationSpan, log_file : TimestampedFile):
 def create_bundle_from_span(
     span : ObservationSpan,
     output_dir : pathlib.Path,
-    data_roots: typing.List[pathlib.Path],
+    path_rewrites: list[PathRewriteConfig],
     threadpool : futures.ThreadPoolExecutor,
     dry_run : bool,
-    cameras : typing.Optional[typing.List[str]] = None,
+    common_path_prefix: str=DEFAULT_PREFIX,
 ):
     log.info(f"Observation interval to bundle: {span}")
-    bundle_root = output_dir / f'bundle_{format_timestamp_for_filename(span.begin)}_to_{format_timestamp_for_filename(span.end)}'
-    log.debug(f"Staging to {bundle_root.as_posix()}")
-    for subfolder in ['logs', 'telem', 'rawimages']:
-        subfolder_path = bundle_root / subfolder
-        if not dry_run:
-            os.makedirs(subfolder_path, exist_ok=True)
-            log.debug(f"mkdir {subfolder_path}")
-        else:
-            log.debug(f"dry run: mkdir {subfolder_path}")
+    files = query_files(span.begin, span.end)
+    copy_tasks = []
+    for file_row in files:
+        real_path = file_row['origin_path']
+        path_sans_prefix = pathlib.Path(file_row['origin_path']).relative_to(common_path_prefix)
+        origin_host = file_row['origin_host']
+        for rw in path_rewrites:
+            real_path = rw.rewrite(origin_host, real_path)
+        if not os.path.exists(real_path):
+            raise RuntimeError(f"Cannot bundle {real_path=} for {origin_host}:{file_row['origin_path']} because file does not exist")
 
-    bundle_contents = []
-    for data_root in data_roots:
-        # collect logs
-        logs_root = data_root / 'logs'
-        for devname in find_device_names_in_folder(logs_root, 'binlog'):
-            log_files = get_matching_paths(
-                logs_root,
-                device=devname,
-                extension='binlog',
-                newer_than_dt=span.begin,
-                older_than_dt=span.end,
-                grab_one_before_start=True,
-            )
-            if not len(log_files):
-                continue
-            elif not check_log_in_span(span, log_files[0]):
-                # drop first file if it was grabbed by optimistic matching for pre-interval-start frames
-                log_files = log_files[1:]
-            bundle_contents.extend(stage_for_bundling(
-                data_root,
-                log_files,
-                bundle_root,
-                dry_run,
-                threadpool,
-            ))
-        # collect telems
-        telem_root = data_root / 'telem'
-        for devname in find_device_names_in_folder(telem_root, 'bintel'):
-            telem_files = get_matching_paths(
-                telem_root,
-                device=devname,
-                extension='bintel',
-                newer_than_dt=span.begin,
-                older_than_dt=span.end,
-                grab_one_before_start=True,
-            )
-            if not len(telem_files):
-                continue
-            elif not check_telem_in_span(span, telem_files[0]):
-                # drop first file if it was grabbed by optimistic matching for pre-interval-start frames
-                telem_files = telem_files[1:]
-            bundle_contents.extend(stage_for_bundling(
-                data_root,
-                telem_files,
-                bundle_root,
-                dry_run,
-                threadpool,
-            ))
-        # for every camera:
-        if cameras is not None:
-            images_dirs = list(filter(lambda x: x.is_dir(), [data_root / 'rawimages' / camname for camname in cameras]))
-        else:
-            images_dirs = list(filter(lambda x: x.is_dir(), (data_root / 'rawimages').glob('*')))
-        log.debug(f"{data_root=} {images_dirs=}")
-        for imgdir in images_dirs:
-            log.debug(f"{imgdir=}")
-            # collect image archives
-            cam_files = get_matching_paths(
-                imgdir,
-                device=imgdir.name,
-                extension='xrif',
-                newer_than_dt=span.begin,
-                older_than_dt=span.end,
-                grab_one_before_start=True,
-            )
-            if not len(cam_files):
-                continue
-            elif not check_xrif_in_span(span, data_roots, cam_files[0]):
-                # drop first file if it was grabbed by optimistic matching for pre-interval-start frames
-                cam_files = cam_files[1:]
-            # only make dir if there's a nonzero number of camera archives
-            images_dest = bundle_root / 'rawimages' / imgdir.name
-            if not dry_run:
-                os.makedirs(images_dest, exist_ok=True)
-                log.debug(f"mkdir {images_dest}")
-            else:
-                log.debug(f"dry run: mkdir {images_dest}")
-            bundle_contents.extend(stage_for_bundling(
-                data_root,
-                cam_files,
-                bundle_root,
-                dry_run,
-                threadpool,
-            ))
-    return bundle_root
+        dest = output_dir / path_sans_prefix
+        log.debug(f"copying to {dest=}")
+        copy_tasks.append(threadpool.submit(_copy_task, real_path, dest, dry_run))
+    dest_paths = [dst.result() for dst in futures.as_completed(copy_tasks)]
+    log.debug("dest_paths = %s", dest_paths)
+    return dest_paths
+
+    # bundle_root = output_dir / f'bundle_{format_timestamp_for_filename(span.begin)}_to_{format_timestamp_for_filename(span.end)}'
+    # log.debug(f"Staging to {bundle_root.as_posix()}")
+    # for subfolder in ['logs', 'telem', 'rawimages']:
+    #     subfolder_path = bundle_root / subfolder
+    #     if not dry_run:
+    #         os.makedirs(subfolder_path, exist_ok=True)
+    #         log.debug(f"mkdir {subfolder_path}")
+    #     else:
+    #         log.debug(f"dry run: mkdir {subfolder_path}")
+
+    # bundle_contents = []
+    # for data_root in data_roots:
+    #     # collect logs
+    #     logs_root = data_root / 'logs'
+    #     for devname in find_device_names_in_folder(logs_root, 'binlog'):
+    #         log_files = get_matching_paths(
+    #             logs_root,
+    #             device=devname,
+    #             extension='binlog',
+    #             newer_than_dt=span.begin,
+    #             older_than_dt=span.end,
+    #             grab_one_before_start=True,
+    #         )
+    #         if not len(log_files):
+    #             continue
+    #         elif not check_log_in_span(span, log_files[0]):
+    #             # drop first file if it was grabbed by optimistic matching for pre-interval-start frames
+    #             log_files = log_files[1:]
+    #         bundle_contents.extend(stage_for_bundling(
+    #             data_root,
+    #             log_files,
+    #             bundle_root,
+    #             dry_run,
+    #             threadpool,
+    #         ))
+    #     # collect telems
+    #     telem_root = data_root / 'telem'
+    #     for devname in find_device_names_in_folder(telem_root, 'bintel'):
+    #         telem_files = get_matching_paths(
+    #             telem_root,
+    #             device=devname,
+    #             extension='bintel',
+    #             newer_than_dt=span.begin,
+    #             older_than_dt=span.end,
+    #             grab_one_before_start=True,
+    #         )
+    #         if not len(telem_files):
+    #             continue
+    #         elif not check_telem_in_span(span, telem_files[0]):
+    #             # drop first file if it was grabbed by optimistic matching for pre-interval-start frames
+    #             telem_files = telem_files[1:]
+    #         bundle_contents.extend(stage_for_bundling(
+    #             data_root,
+    #             telem_files,
+    #             bundle_root,
+    #             dry_run,
+    #             threadpool,
+    #         ))
+    #     # for every camera:
+    #     if cameras is not None:
+    #         images_dirs = list(filter(lambda x: x.is_dir(), [data_root / 'rawimages' / camname for camname in cameras]))
+    #     else:
+    #         images_dirs = list(filter(lambda x: x.is_dir(), (data_root / 'rawimages').glob('*')))
+    #     log.debug(f"{data_root=} {images_dirs=}")
+    #     for imgdir in images_dirs:
+    #         log.debug(f"{imgdir=}")
+    #         # collect image archives
+    #         cam_files = get_matching_paths(
+    #             imgdir,
+    #             device=imgdir.name,
+    #             extension='xrif',
+    #             newer_than_dt=span.begin,
+    #             older_than_dt=span.end,
+    #             grab_one_before_start=True,
+    #         )
+    #         if not len(cam_files):
+    #             continue
+    #         elif not check_xrif_in_span(span, data_roots, cam_files[0]):
+    #             # drop first file if it was grabbed by optimistic matching for pre-interval-start frames
+    #             cam_files = cam_files[1:]
+    #         # only make dir if there's a nonzero number of camera archives
+    #         images_dest = bundle_root / 'rawimages' / imgdir.name
+    #         if not dry_run:
+    #             os.makedirs(images_dest, exist_ok=True)
+    #             log.debug(f"mkdir {images_dest}")
+    #         else:
+    #             log.debug(f"dry run: mkdir {images_dest}")
+    #         bundle_contents.extend(stage_for_bundling(
+    #             data_root,
+    #             cam_files,
+    #             bundle_root,
+    #             dry_run,
+    #             threadpool,
+    #         ))
+    # return bundle_root

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -ex
+
+# Function to refresh sudo timer
+refresh_sudo_timer() {
+    while true; do
+        sudo -v
+        sleep 60
+    done
+}
+
+# Clear cached credentials for sudo, if they exist
+sudo -K
+
+# Start refreshing sudo timer in the background
+if [[ "$(sudo -H -n true 2>&1)" ]]; then
+    sudo -v
+    refresh_sudo_timer &
+fi
+
+while true; do
+    instrument_backup_sync || exit 1
+    echo "Waiting 2 min before the next go round..."
+    sleep 120
+done

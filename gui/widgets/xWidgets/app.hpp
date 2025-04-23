@@ -7,6 +7,7 @@
 
 #include <mx/app/application.hpp>
 #include <mx/sys/environment.hpp>
+#include <mx/ioutils/fileUtils.hpp>
 
 #include "../../../libMagAOX/common/environment.hpp"
 #include "../../../libMagAOX/common/paths.hpp"
@@ -15,7 +16,7 @@
 #include "xWidget.hpp"
 #include "multiIndiManager.hpp"
 
-namespace xqt 
+namespace xqt
 {
 
 template<class widgetT>
@@ -23,20 +24,23 @@ class app : public xWidget, public mx::app::application
 {
 public:
 
+    bool m_useInvokedName {false};
+
     std::string m_styleSheet {":/magaox.qss"};
 
     std::string m_deviceName;
     std::string m_ipAddress {"127.0.0.1"};
     int m_port {7624};
 
-    app()
+    app( bool useInvokedName = false) : m_useInvokedName(useInvokedName)
     {
+
         std::string basePath = mx::sys::getEnv(MAGAOX_env_path);
         if(basePath == "")
         {
             basePath = MAGAOX_path;
         }
-        
+
         std::string configDir = mx::sys::getEnv(MAGAOX_env_config);
         if(configDir == "")
         {
@@ -62,8 +66,14 @@ public:
                         char ** argv ///< [in] standard command line result containing the arguments.
                       )
     {
-        ///\todo We should config search path regardless of number of arguments.
-        if(argc == 2)
+        m_configPathGlobal = m_configPathCLBase + "/guis.conf";
+
+        if(argc == 1 && m_useInvokedName)
+        {
+            m_deviceName = mx::ioutils::pathStem(argv[0]);
+            m_configPathUser = m_configPathCLBase + "/gui_" + m_deviceName + ".conf";
+        }
+        else if(argc == 2)
         {
             m_deviceName = argv[1];
             if(m_deviceName.find(".conf") != std::string::npos || m_deviceName.find('/') != std::string::npos)
@@ -71,10 +81,9 @@ public:
                 throw std::invalid_argument("Can only pass device name, not config file, as non-option argument.  Use -c <config_file> instead.");
             }
 
-            m_configPathGlobal = m_configPathCLBase + "/guis.conf";
             m_configPathUser = m_configPathCLBase + "/gui_" + m_deviceName + ".conf";
         }
-            
+
         application::setup(argc, argv);
 
     }
@@ -82,7 +91,7 @@ public:
     virtual void setupConfig()
     {
         config.add("gui.stylesheet", "", "gui.styleSheet", mx::app::argType::Required, "gui", "styleSheet", false, "string", "Path to a Qt style sheet to replace the default.");
-        
+
         config.add("indi.device", "d", "indi.device", mx::app::argType::Required, "indi", "device", false, "string", "INDI device name.");
         config.add("indi.ip", "a", "indi.ip", mx::app::argType::Required, "indi", "ip", false, "string", "INDI IP address or host name.  Default is 127.0.0.1.");
         config.add("indi.port", "p", "indi.port", mx::app::argType::Required, "indi", "port", false, "int", "INDI IP port.  Default is 7624.");
@@ -122,11 +131,11 @@ public:
         mgr.addSubscriber(&device);
 
         mgr.activate();
-      
+
         device.show();
-   
+
         int rv = qApp->exec();
-   
+
         return rv;
     }
 };

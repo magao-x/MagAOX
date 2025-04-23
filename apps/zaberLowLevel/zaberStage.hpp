@@ -190,6 +190,12 @@ public:
      */
    long maxPos();
    
+   /// Get the status of the warning flag
+   /**
+     * \returns the current value of m_warn 
+     */
+   bool warn();
+
    /// Get the temperature, in C
    /**
      * \returns the current value of m_temp
@@ -393,6 +399,12 @@ long zaberStage<parentT>::maxPos()
 }
 
 template<class parentT>
+bool zaberStage<parentT>::warn()
+{
+   return m_warn;
+}
+
+template<class parentT>
 float zaberStage<parentT>::temp()
 {
    return m_temp;
@@ -565,7 +577,7 @@ int zaberStage<parentT>::getResponse( std::string & response,
       }
 
       if(rep.warning_flags[0] == '-') unsetWarnings();
-      else m_warn = true;;
+      else m_warn = true;
 
       response = rep.response_data;
 
@@ -988,43 +1000,77 @@ int zaberStage<parentT>::processWarning( std::string & warn )
 {
    if(warn == "FD")
    {
-      MagAOXAppT::log<text_log>(m_name + " Driver Disabled (FD): The driver has disabled itself due to overheating." , logPrio::LOG_EMERGENCY);
+      if(!m_warnFDreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Driver Disabled (FD): The driver has disabled itself due to overheating." , logPrio::LOG_EMERGENCY);
+         m_warnFDreported = true;
+      }
+
       m_warnFD = true;
       return 0;
    }
    else if(warn == "FQ")
    {
-      MagAOXAppT::log<text_log>(m_name + " Encoder Error (FQ): The encoder-measured position may be unreliable. [home recommended]" , logPrio::LOG_WARNING);
+      if(!m_warnFQreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " warning FQ: you should probably check." , logPrio::LOG_EMERGENCY);
+         m_warnFQreported = true;
+      }
+
       m_warnFQ = true;
       return 0;
    }
    else if(warn == "FS")
    {
-      MagAOXAppT::log<text_log>(m_name + " Stalled and Stopped (FS): Stalling was detected and the axis has stopped itself. " , logPrio::LOG_WARNING);
+      if(!m_warnFSreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Stalled and Stopped (FS): Stalling was detected and the axis has stopped itself. " , logPrio::LOG_WARNING);
+         m_warnFSreported = true;
+      }
       m_warnFS = true;
       return 0;
    }
    else if(warn == "FT")
    {
-      MagAOXAppT::log<text_log>(m_name + " Excessive Twist (FT): The lockstep group has exceeded allowable twist and has stopped. " , logPrio::LOG_WARNING);
+      if(!m_warnFTreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Excessive Twist (FT): The lockstep group has exceeded allowable twist and has stopped. " , logPrio::LOG_WARNING);
+         m_warnFTreported = true;
+      }
+      
       m_warnFT = true;
       return 0;
    }
    else if(warn == "FB")
    {
-      MagAOXAppT::log<text_log>(m_name + " Stream Bounds Error (FB): A previous streamed motion could not be executed because it failed a precondition" , logPrio::LOG_WARNING);
+      if(!m_warnFBreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Stream Bounds Error (FB): A previous streamed motion could not be executed because it failed a precondition" , logPrio::LOG_WARNING);
+         m_warnFBreported = true;
+      }
+      
       m_warnFB = true;
       return 0;
    }
    else if(warn == "FP")
    {
-      MagAOXAppT::log<text_log>(m_name + " Interpolated Path Deviation (FP): Streamed or sinusoidal motion was terminated because an axis slipped and thus the device deviated from the requested path. " , logPrio::LOG_WARNING);
+      if(!m_warnFPreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Interpolated Path Deviation (FP): Streamed or sinusoidal motion was terminated because an axis slipped and thus the device deviated from the requested path. " , logPrio::LOG_WARNING);
+         m_warnFPreported = true;
+      }
+      
       m_warnFP = true;
       return 0;
    }
    else if(warn == "FE")
    {
-      MagAOXAppT::log<text_log>(m_name + " Limit Error (FE): The target limit sensor cannot be reached or is faulty. " , logPrio::LOG_WARNING);
+      if(!m_warnFEreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Limit Error (FE): The target limit sensor cannot be reached or is faulty. " , logPrio::LOG_WARNING);
+         m_warnFEreported = true;
+      }
+      
       m_warnFE = true;
       return 0;
    }
@@ -1035,36 +1081,62 @@ int zaberStage<parentT>::processWarning( std::string & warn )
          MagAOXAppT::log<text_log>(m_name + " Device not homed (WH): The device has a position reference, but has not been homed." , logPrio::LOG_WARNING);
          m_warnWHreported = true;
       }
+
       m_warnWH = true;
       return 0;
    }
    else if(warn == "WL")
    {
-      MagAOXAppT::log<text_log>(m_name + " Unexpected Limit Trigger warning (WL): A movement operation did not complete due to a triggered limit sensor." , logPrio::LOG_WARNING);
+      if(!m_warnWLreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Unexpected Limit Trigger warning (WL): A movement operation did not complete due to a triggered limit sensor." , logPrio::LOG_WARNING);
+         m_warnWLreported = true;
+      }
+      
       m_warnWL = true;
       return 0;
    }
    else if(warn == "WP")
    {
-      MagAOXAppT::log<text_log>(m_name + " Invalid calibration type (WP): The saved calibration data type is unsupported" , logPrio::LOG_WARNING);
+      if(!m_warnWPreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Invalid calibration type (WP): The saved calibration data type is unsupported" , logPrio::LOG_WARNING);
+         m_warnWPreported = true;
+      }
+      
       m_warnWP = true;
       return 0;
    }
    else if(warn == "WV")
    {
-      MagAOXAppT::log<text_log>(m_name + " Voltage Out of Range (WV): The supply voltage is outside the recommended operating range of the device" , logPrio::LOG_WARNING);
+      if(!m_warnWVreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Voltage Out of Range (WV): The supply voltage is outside the recommended operating range of the device" , logPrio::LOG_WARNING);
+         m_warnWVreported = true;
+      }
+      
       m_warnWV = true;
       return 0;
    }
    else if(warn == "WT")
    {
-      MagAOXAppT::log<text_log>(m_name + " Controller Temperature High (WT): The internal temperature of the controller has exceeded the recommended limit for the device." , logPrio::LOG_WARNING);
+      if(!m_warnWTreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Controller Temperature High (WT): The internal temperature of the controller has exceeded the recommended limit for the device." , logPrio::LOG_WARNING);
+         m_warnWTreported = true;
+      }
+      
       m_warnWT = true;
       return 0;
    }
    else if(warn == "WM")
    {
-      MagAOXAppT::log<text_log>(m_name + " Displaced when Stationary (WM): While not in motion, the axis has been forced out of its position." , logPrio::LOG_WARNING);
+      if(m_warnWMreported == false)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Displaced when Stationary (WM): While not in motion, the axis has been forced out of its position." , logPrio::LOG_WARNING);
+         m_warnWMreported = true;
+      }
+      
       m_warnWM = true;
       return 0;
    }
@@ -1072,15 +1144,21 @@ int zaberStage<parentT>::processWarning( std::string & warn )
    {
       if(m_warnWRreported == false)
       {
-         //MagAOXAppT::log<text_log>(m_name + " No Reference Position (WR): Axis has not had a reference position established. [homing required]" , logPrio::LOG_WARNING);
+         MagAOXAppT::log<text_log>(m_name + " No Reference Position (WR): Axis has not had a reference position established. [homing required]" , logPrio::LOG_WARNING);
          m_warnWRreported = true;
       }
+
       m_warnWR = true;
       return 0;
    }
    else if(warn == "NC")
    {
-      MagAOXAppT::log<text_log>(m_name + " Manual Control (NC): Axis is busy due to manual control via the knob." , logPrio::LOG_WARNING);
+      if(!m_warnNCreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Manual Control (NC): Axis is busy due to manual control via the knob." , logPrio::LOG_WARNING);
+         m_warnNCreported = true;
+      }
+      
       m_warnNC = true;
       return 0;
    }
@@ -1090,32 +1168,55 @@ int zaberStage<parentT>::processWarning( std::string & warn )
       {
          if(m_homing == true || warnWR()) return 0; //ignore this during homing
       }
-      MagAOXAppT::log<text_log>(m_name + " Command Interrupted (NI): A movement operation (command or manual control) was requested while the axis was executing another movement command." , logPrio::LOG_WARNING);
+
+      if(!m_warnNIreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Command Interrupted (NI): A movement operation (command or manual control) was requested while the axis was executing another movement command." , logPrio::LOG_WARNING);
+         m_warnNIreported = true;
+      }
+      
       m_warnNI = true;
       return 0;
    }
    else if(warn == "ND")
    {
-      MagAOXAppT::log<text_log>(m_name + " Stream Discontinuity (ND): The device has slowed down while following a streamed motion path because it has run out of queued motions." , logPrio::LOG_WARNING);
+      if(!m_warnNDreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Stream Discontinuity (ND): The device has slowed down while following a streamed motion path because it has run out of queued motions." , logPrio::LOG_WARNING);
+         m_warnNDreported = true;
+      }
+      
       m_warnND = true;
       return 0;
    }
    else if(warn == "NU")
    {
-      MagAOXAppT::log<text_log>(m_name + " Setting Update Pending (NU): A setting is pending to be updated or a reset is pending." , logPrio::LOG_WARNING);
+      if(!m_warnNUreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Setting Update Pending (NU): A setting is pending to be updated or a reset is pending." , logPrio::LOG_WARNING);
+         m_warnNUreported = true;
+      }
+      
       m_warnNU = true;
       return 0;
    }
    else if(warn == "NJ")
    {
-      MagAOXAppT::log<text_log>(m_name + " Joystick Calibrating (NJ): Joystick calibration is in progress." , logPrio::LOG_WARNING);
+      if(!m_warnNJreported)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Joystick Calibrating (NJ): Joystick calibration is in progress." , logPrio::LOG_WARNING);
+         m_warnNJreported = true;
+      }
+      
       m_warnNJ = true;
       return 0;
    }
    else
    {
-      m_warnUNK = true;
       MagAOXAppT::log<software_warning>({__FILE__, __LINE__, m_name + " unknown stage warning: " + warn});
+      
+      m_warnUNK = true;
+
       return 0;
    }
    
@@ -1157,18 +1258,155 @@ int zaberStage<parentT>::parseWarnings( std::string & response )
       }
    }
    
-   
+   if(m_warnFDreported)
+   {
+      if(!m_warnFD) 
+      {
+         m_warnFDreported = false;
+      }
+   }
+
+   if(m_warnFQreported)
+   {
+      if(!m_warnFQ) 
+      {
+         m_warnFQreported = false;
+      }
+   }
+
+   if(m_warnFSreported)
+   {
+      if(!m_warnFS) 
+      {
+         m_warnFSreported = false;
+      }
+   }
+
+   if(m_warnFTreported)
+   {
+      if(!m_warnFT) 
+      {
+         m_warnFTreported = false;
+      }
+   }
+
+   if(m_warnFBreported)
+   {
+      if(!m_warnFB) 
+      {
+         m_warnFBreported = false;
+      }
+   }
+
+   if(m_warnFPreported)
+   {
+      if(!m_warnFP) 
+      {
+         m_warnFPreported = false;
+      }
+   }
+
+   if(m_warnFEreported)
+   {
+      if(!m_warnFE) 
+      {
+         m_warnFEreported = false;
+      }
+   }
+
    if(m_warnWHreported)
    {
-      if(!m_warnWH) m_warnWHreported = false;
+      if(!m_warnWH) 
+      {
+         m_warnWHreported = false;
+      }
+   }
+
+   if(m_warnWLreported)
+   {
+      if(!m_warnWL) 
+      {
+         m_warnWLreported = false;
+      }
+   }
+
+   if(m_warnWPreported)
+   {
+      if(!m_warnWP) 
+      {
+         m_warnWPreported = false;
+      }
+   }
+
+   if(m_warnWVreported)
+   {
+      if(!m_warnWV) 
+      {
+         m_warnWVreported = false;
+      }
+   }
+
+   if(m_warnWTreported)
+   {
+      if(!m_warnWT) 
+      {
+         m_warnWTreported = false;
+      }
    }
    
+   if(m_warnWMreported)
+   {
+      if(!m_warnWM) 
+      {
+         m_warnWMreported = false;
+      }
+   }
+
    if(m_warnWRreported)
    {
       if(!m_warnWR) 
       {
-         //MagAOXAppT::log<text_log>(m_name + " homed.  WR clear." , logPrio::LOG_NOTICE);
          m_warnWRreported = false;
+      }
+   }
+
+   if(m_warnNCreported)
+   {
+      if(!m_warnNC) 
+      {
+         m_warnNCreported = false;
+      }
+   }
+
+   if(m_warnNIreported)
+   {
+      if(!m_warnNI) 
+      {
+         m_warnNIreported = false;
+      }
+   }
+
+   if(m_warnNDreported)
+   {
+      if(!m_warnND) 
+      {
+         m_warnNDreported = false;
+      }
+   }
+
+   if(m_warnNUreported)
+   {
+      if(!m_warnNU) 
+      {
+         m_warnNUreported = false;
+      }
+   }
+
+   if(m_warnNJreported)
+   {
+      if(!m_warnNJ) 
+      {
+         m_warnNJreported = false;
       }
    }
    

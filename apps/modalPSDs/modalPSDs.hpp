@@ -1,12 +1,11 @@
 /** \file modalPSDs.hpp
-  * \brief The MagAO-X modalPSDs app header file
-  *
-  * \ingroup modalPSDs_files
-  */
+ * \brief The MagAO-X modalPSDs app header file
+ *
+ * \ingroup modalPSDs_files
+ */
 
 #ifndef modalPSDs_hpp
 #define modalPSDs_hpp
-
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -14,21 +13,21 @@
 #include <mx/sigproc/circularBuffer.hpp>
 #include <mx/sigproc/signalWindows.hpp>
 
-#include <mx/math/fft/fftwEnvironment.hpp>
-#include <mx/math/fft/fft.hpp>
+#include <mx/math/ft/fftwEnvironment.hpp>
+#include <mx/math/ft/fftT.hpp>
 
 /** \defgroup modalPSDs
-  * \brief An application to calculate rolling PSDs of modal amplitudes
-  *
-  * <a href="../handbook/operating/software/apps/modalPSDs.html">Application Documentation</a>
-  *
-  * \ingroup apps
-  *
-  */
+ * \brief An application to calculate rolling PSDs of modal amplitudes
+ *
+ * <a href="../handbook/operating/software/apps/modalPSDs.html">Application Documentation</a>
+ *
+ * \ingroup apps
+ *
+ */
 
 /** \defgroup modalPSDs_files
-    * \ingroup modalPSDs
-    */
+ * \ingroup modalPSDs
+ */
 
 namespace MagAOX
 {
@@ -37,723 +36,960 @@ namespace app
 
 /// Class for application to calculate rolling PSDs of modal amplitudes.
 /**
-  * \ingroup modalPSDs
-  */
+ * \ingroup modalPSDs
+ */
 class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
 {
-   //Give the test harness access.
-   friend class modalPSDs_test;
+    // Give the test harness access.
+    friend class modalPSDs_test;
 
-   friend class dev::shmimMonitor<modalPSDs>;
+    friend class dev::shmimMonitor<modalPSDs>;
 
-public:
+  public:
+    typedef float realT;
 
-   typedef float realT;
-   typedef std::complex<realT> complexT;
+    typedef std::complex<realT> complexT;
 
-   /// The base shmimMonitor type
-   typedef dev::shmimMonitor<modalPSDs> shmimMonitorT;
+    typedef int32_t cbIndexT; ///< The index for the circular buffer
 
-   /// The amplitude circular buffer type
-   typedef mx::sigproc::circularBufferIndex<float*, unsigned> ampCircBuffT;
+    /// The base shmimMonitor type
+    typedef dev::shmimMonitor<modalPSDs> shmimMonitorT;
 
-protected:
+    /// The amplitude circular buffer type
+    typedef mx::sigproc::circularBufferIndex<realT *, cbIndexT> ampCircBuffT;
 
-   /** \name Configurable Parameters
+  protected:
+    /** \name Configurable Parameters
      *@{
      */
 
-   std::string m_fpsSource; ///< Device name for getting fps to set circular buffer length.  This device should have *.fps.current.
+    int m_loopNumber{ 1 };
 
-   realT m_psdTime{ 1 }; ///< The length of time over which to calculate PSDs.  The default is 1 sec.
-   realT m_psdAvgTime{ 10 }; ///< The time over which to average PSDs.  The default is 10 sec.
+    std::string m_shmimBase; /**< The base name for the PSD shmims.  If empty, the default,
+                                  then aolN where N is the loop number is used*/
 
-   //realT m_overSize {10}; ///< Multiplicative factor by which to oversize the circular buffer, to give good mean estimates and account for time-to-calculate.
+    std::string m_shmimTag{ "cl" }; /**< The tag to apply to the front of psds in the shmim name.  Default is cl.  */
 
-   realT m_psdOverlapFraction{ 0.5 }; ///< The fraction of the sample time to overlap by.
+    std::string m_fpsDevice;               ///< Device name for getting fps to set circular buffer length.
+    std::string m_fpsProperty{ "fps" };    ///< Property name for getting fps to set circular buffer length.
+    std::string m_fpsElement{ "current" }; ///< Element name for getting fps to set circular buffer length.
 
-   int m_nPSDHistory{ 100 }; //
+    realT m_fpsTol{ 0 }; ///< The tolerance for detecting a change in FPS.
 
+    realT m_psdTime{ 1 };     ///< The length of time over which to calculate PSDs.  The default is 1 sec.
+    realT m_psdAvgTime{ 10 }; ///< The time over which to average PSDs.  The default is 10 sec.
 
-   ///@}
+    // realT m_overSize {10}; ///< Multiplicative factor by which to oversize the circular buffer, to give good mean
+    // estimates and account for time-to-calculate.
 
-   int m_nModes{ 0 }; ///< the number of modes to calculate PSDs for.
+    realT m_psdOverlapFraction{ 0.5 }; ///< The fraction of the sample time to overlap by.
 
-   ampCircBuffT m_ampCircBuff;
+    int m_nPSDHistory{ 100 }; //
 
-   //std::vector<ampCircBuffT> m_ampCircBuffs;
+    ///@}
 
-   realT m_fps{ 0 };
-   realT m_df{ 1 };
+    size_t m_nModes{ 0 }; ///< the number of modes to calculate PSDs for.
 
-   //unsigned m_tsCircBuffLength {4000}; ///< Length of the time-series circular buffers.  This is updated by m_fpsSource and m_psdTime. 
+    ampCircBuffT m_ampCircBuff;
 
-   unsigned m_tsSize{ 2000 }; ///< The length of the time series sample over which the PSD is calculated
-   unsigned m_tsOverlapSize{ 1000 }; ///< The number of samples in the overlap
+    // std::vector<ampCircBuffT> m_ampCircBuffs;
 
-   std::vector<realT> m_win; ///< The window function.  By default this is Hann.
+    realT m_fps{ 0 };
 
-   realT* m_tsWork{ nullptr };
-   size_t m_tsWorkSize{ 0 };
+    realT m_df{ 1 };
 
-   std::complex<realT>* m_fftWork{ nullptr };
-   size_t m_fftWorkSize{ 0 };
+    cbIndexT m_tsSize{ 2000 }; ///< The length of the time series sample over which the PSD is calculated
 
-   std::vector<realT> m_psd;
+    cbIndexT m_tsOverlapSize{ 1000 }; ///< The number of samples in the overlap
 
-   mx::math::fft::fftT< realT, std::complex<realT>, 1, 0> m_fft;
-   mx::math::fft::fftwEnvironment<realT> m_fftEnv;
+    cbIndexT m_meanSize{ 20000 }; ///< The length of the time series over which to calculate the mean
 
-   /** \name PSD Calculation Thread
+    std::vector<realT> m_win; ///< The window function.  By default this is Hann.
+
+    realT *m_tsWork{ nullptr };
+    size_t m_tsWorkSize{ 0 };
+
+    std::complex<realT> *m_fftWork{ nullptr };
+    size_t               m_fftWorkSize{ 0 };
+
+    std::vector<realT> m_psd;
+
+    mx::math::ft::fftT<realT, std::complex<realT>, 1, 0> m_fft;
+    mx::math::ft::fftwEnvironment<realT>                 m_fftEnv;
+
+    /** \name PSD Calculation Thread
      * Handling of offloads from the average woofer shape
      * @{
      */
-   int m_psdThreadPrio{ 0 }; ///< Priority of the PSD Calculation thread.
-   std::string m_psdThreadCpuset; ///< The cpuset to use for the PSD Calculation thread.
+    int m_psdThreadPrio{ 0 }; ///< Priority of the PSD Calculation thread.
 
-   std::thread m_psdThread; ///< The PSD Calculation thread.
+    std::string m_psdThreadCpuset; ///< The cpuset to use for the PSD Calculation thread.
 
-   bool m_psdThreadInit{ true }; ///< Initialization flag for the PSD Calculation thread.
+    std::thread m_psdThread; ///< The PSD Calculation thread.
 
-   bool m_psdRestarting{ true }; ///< Synchronization flag.  This will only become false after a successful call to allocate.
-   bool m_psdWaiting{ false }; ///< Synchronization flag.  This is set to true when the PSD thread is safely waiting for allocation to complete.
+    bool m_psdThreadInit{ true }; ///< Initialization flag for the PSD Calculation thread.
 
-   pid_t m_psdThreadID{ 0 }; ///< PSD Calculation thread PID.
+    bool m_psdRestarting{ true }; /**< Synchronization flag.  This will only become false
+                                       after a successful call to allocate.*/
 
-   pcf::IndiProperty m_psdThreadProp; ///< The property to hold the PSD Calculation thread details.
+    bool m_psdWaiting{ false }; ///< Synchronization flag.  This is set to true when the PSD thread is safely waiting
+                                ///< for allocation to complete.
 
-   /// PS Calculation thread starter function
-   static void psdThreadStart(modalPSDs* p /**< [in] pointer to this */);
+    pid_t m_psdThreadID{ 0 }; ///< PSD Calculation thread PID.
 
-   /// PSD Calculation thread function
-   /** Runs until m_shutdown is true.
+    pcf::IndiProperty m_psdThreadProp; ///< The property to hold the PSD Calculation thread details.
+
+    /// PS Calculation thread starter function
+    static void psdThreadStart( modalPSDs *p /**< [in] pointer to this */ );
+
+    /// PSD Calculation thread function
+    /** Runs until m_shutdown is true.
      */
-   void psdThreadExec();
+    void psdThreadExec();
 
-   IMAGE* m_freqStream{ nullptr }; ///< The ImageStreamIO shared memory buffer to hold the frequency scale
+    IMAGE *m_freqStream{ nullptr }; ///< The ImageStreamIO shared memory buffer to hold the frequency scale
 
-   mx::improc::eigenImage<realT> m_psdBuffer;
+    mx::improc::eigenImage<realT> m_psdBuffer;
 
-   IMAGE* m_rawpsdStream{ nullptr }; ///< The ImageStreamIO shared memory buffer to hold the raw psds
+    IMAGE *m_rawpsdStream{ nullptr }; ///< The ImageStreamIO shared memory buffer to hold the raw psds
 
-   IMAGE* m_avgpsdStream{ nullptr }; ///< The ImageStreamIO shared memory buffer to hold the average psds
+    IMAGE *m_avgpsdStream{ nullptr }; ///< The ImageStreamIO shared memory buffer to hold the average psds
 
-public:
-   /// Default c'tor.
-   modalPSDs();
+  public:
+    /// Default c'tor.
+    modalPSDs();
 
-   /// D'tor, declared and defined for noexcept.
-   ~modalPSDs() noexcept
-   {}
+    /// D'tor, declared and defined for noexcept.
+    ~modalPSDs() noexcept
+    {
+    }
 
-   virtual void setupConfig();
+    virtual void setupConfig();
 
-   /// Implementation of loadConfig logic, separated for testing.
-   /** This is called by loadConfig().
+    /// Implementation of loadConfig logic, separated for testing.
+    /** This is called by loadConfig().
      */
-   int loadConfigImpl(mx::app::appConfigurator& _config /**< [in] an application configuration from which to load values*/);
+    int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] an application configuration
+                                                                    from which to load values*/ );
 
-   virtual void loadConfig();
+    virtual void loadConfig();
 
-   /// Startup function
-   /**
+    /// Startup function
+    /**
      *
      */
-   virtual int appStartup();
+    virtual int appStartup();
 
-   /// Implementation of the FSM for modalPSDs.
-   /**
+    /// Implementation of the FSM for modalPSDs.
+    /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
-   virtual int appLogic();
+    virtual int appLogic();
 
-   /// Shutdown the app.
-   /**
+    /// Shutdown the app.
+    /**
      *
      */
-   virtual int appShutdown();
+    virtual int appShutdown();
 
-   //shmimMonitor Interface
-protected:
+    // shmimMonitor Interface
+  protected:
+    int allocate( const dev::shmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
 
-   int allocate(const dev::shmimT& dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
+    int allocatePSDStreams();
 
-   int allocatePSDStreams();
+    int processImage( void              *curr_src, ///< [in] pointer to start of current frame.
+                      const dev::shmimT &dummy     ///< [in] tag to differentiate shmimMonitor parents.
+    );
 
-   int processImage( void* curr_src,          ///< [in] pointer to start of current frame.
-                     const dev::shmimT& dummy ///< [in] tag to differentiate shmimMonitor parents.
-                   );
+    // INDI Interface
+  protected:
+    pcf::IndiProperty m_indiP_psdTime;
+    pcf::IndiProperty m_indiP_psdAvgTime;
+    pcf::IndiProperty m_indiP_overSize;
+    pcf::IndiProperty m_indiP_fpsSource;
+    pcf::IndiProperty m_indiP_fps;
 
-
-   //INDI Interface
-protected:
-
-   pcf::IndiProperty m_indiP_psdTime;
-   pcf::IndiProperty m_indiP_psdAvgTime;
-   pcf::IndiProperty m_indiP_overSize;
-   pcf::IndiProperty m_indiP_fpsSource;
-   pcf::IndiProperty m_indiP_fps;
-
-public:
-
-   INDI_NEWCALLBACK_DECL(modalPSDs, m_indiP_psdTime);
-   INDI_NEWCALLBACK_DECL(modalPSDs, m_indiP_psdAvgTime);
-   INDI_NEWCALLBACK_DECL(modalPSDs, m_indiP_overSize);
-   INDI_SETCALLBACK_DECL(modalPSDs, m_indiP_fpsSource);
-
+  public:
+    INDI_NEWCALLBACK_DECL( modalPSDs, m_indiP_psdTime );
+    INDI_NEWCALLBACK_DECL( modalPSDs, m_indiP_psdAvgTime );
+    INDI_NEWCALLBACK_DECL( modalPSDs, m_indiP_overSize );
+    INDI_SETCALLBACK_DECL( modalPSDs, m_indiP_fpsSource );
 };
 
-modalPSDs::modalPSDs() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+modalPSDs::modalPSDs() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
-   return;
+    return;
 }
 
 void modalPSDs::setupConfig()
 {
-   SHMIMMONITOR_SETUP_CONFIG(config);
+    SHMIMMONITOR_SETUP_CONFIG( config );
 
-   config.add("circBuff.fpsSource", "", "circBuff.fpsSource", argType::Required, "circBuff", "fpsSource", false, "string", "Device name for getting fps to set circular buffer length.  This device should have *.fps.current.");
-   config.add("circBuff.defaultFPS", "", "circBuff.defaultFPS", argType::Required, "circBuff", "defaultFPS", false, "realT", "Default FPS at startup, will enable changing average length with psdTime before INDI available.");
-   config.add("circBuff.psdTime", "", "circBuff.psdTime", argType::Required, "circBuff", "psdTime", false, "realT", "The length of time over which to calculate PSDs.  The default is 1 sec.");
+    config.add( "loop.number",
+                "",
+                "loop.number",
+                argType::Required,
+                "loop",
+                "number",
+                false,
+                "string",
+                "Loop number, as in aolN" );
+
+    config.add( "psds.shmimBase",
+                "",
+                "psds.shmimBase",
+                argType::Required,
+                "psds",
+                "shmimBase",
+                false,
+                "string",
+                "The base name for the PSD shmims.  If empty, the default, "
+                "then aolN where N is the loop number is used" );
+
+    config.add( "psds.shmimTag",
+                "",
+                "psds.shmimTag",
+                argType::Required,
+                "psds",
+                "shmimTag",
+                false,
+                "string",
+                "The tag to apply to the front of psds in the shmim name.  Default is cl. " );
+
+    config.add( "circBuff.fpsDevice",
+                "",
+                "circBuff.fpsDevice",
+                argType::Required,
+                "circBuff",
+                "fpsDevice",
+                false,
+                "string",
+                "Device name for getting fps to set circular buffer length." );
+
+    config.add( "circBuff.fpsProperty",
+                "",
+                "circBuff.fpsProperty",
+                argType::Required,
+                "circBuff",
+                "fpsProperty",
+                false,
+                "string",
+                "Property name for getting fps to set circular buffer length. Default is 'fps'." );
+
+    config.add( "circBuff.fpsElement",
+                "",
+                "circBuff.fpsElement",
+                argType::Required,
+                "circBuff",
+                "fpsElement",
+                false,
+                "string",
+                "Property name for getting fps to set circular buffer length. Default is 'current'." );
+
+    config.add( "circBuff.fpsTol",
+                "",
+                "circBuff.fpsTol",
+                argType::Required,
+                "circBuff",
+                "fpsTol",
+                false,
+                "float",
+                "Tolerance for detecting a change in FPS.  Default is 0." );
+
+    config.add( "circBuff.defaultFPS",
+                "",
+                "circBuff.defaultFPS",
+                argType::Required,
+                "circBuff",
+                "defaultFPS",
+                false,
+                "realT",
+                "Default FPS at startup, will enable changing average length with psdTime before INDI available." );
+
+    config.add( "circBuff.psdTime",
+                "",
+                "circBuff.psdTime",
+                argType::Required,
+                "circBuff",
+                "psdTime",
+                false,
+                "realT",
+                "The length of time over which to calculate PSDs.  The default is 1 sec." );
 }
 
-int modalPSDs::loadConfigImpl(mx::app::appConfigurator& _config)
+int modalPSDs::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-   SHMIMMONITOR_LOAD_CONFIG(_config);
+    SHMIMMONITOR_LOAD_CONFIG( _config );
 
-   _config(m_fpsSource, "circBuff.fpsSource");
-   _config(m_fps, "circBuff.defaultFPS");
-   _config(m_psdTime, "circBuff.psdTime");
+    _config( m_loopNumber, "loop.number" );
 
-   return 0;
+    m_shmimBase = "aol" + std::to_string( m_loopNumber );
+    _config( m_shmimBase, "psds.shmimBase" );
+
+    _config( m_shmimTag, "psds.shmimTag" );
+
+    _config( m_fpsDevice, "circBuff.fpsDevice" );
+    _config( m_fpsProperty, "circBuff.fpsProperty" );
+    _config( m_fpsElement, "circBuff.fpsElement" );
+    _config( m_fpsTol, "circBuff.fpsTol" );
+
+    _config( m_psdTime, "circBuff.psdTime" );
+
+    return 0;
 }
 
 void modalPSDs::loadConfig()
 {
-   loadConfigImpl(config);
+    loadConfigImpl( config );
 }
 
 int modalPSDs::appStartup()
 {
-   CREATE_REG_INDI_NEW_NUMBERF(m_indiP_psdTime, "psdTime", 0, 60, 0.1, "%0.1f", "PSD time", "PSD Setup");
-   m_indiP_psdTime["current"].set(m_psdTime);
-   m_indiP_psdTime["target"].set(m_psdTime);
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_psdTime, "psdTime", 0, 60, 0.1, "%0.1f", "PSD time", "PSD Setup" );
+    m_indiP_psdTime["current"].set( m_psdTime );
+    m_indiP_psdTime["target"].set( m_psdTime );
 
-   CREATE_REG_INDI_NEW_NUMBERU(m_indiP_psdAvgTime, "psdAvgTime", 0, 60, 0.1, "%0.1f", "PSD Avg. Time", "PSD Setup");
-   m_indiP_psdAvgTime["current"].set(m_psdAvgTime);
-   m_indiP_psdAvgTime["target"].set(m_psdAvgTime);
+    CREATE_REG_INDI_NEW_NUMBERU( m_indiP_psdAvgTime, "psdAvgTime", 0, 60, 0.1, "%0.1f", "PSD Avg. Time", "PSD Setup" );
+    m_indiP_psdAvgTime["current"].set( m_psdAvgTime );
+    m_indiP_psdAvgTime["target"].set( m_psdAvgTime );
 
-   if (m_fpsSource != "")
-   {
-      REG_INDI_SETPROP(m_indiP_fpsSource, m_fpsSource, std::string("fps"));
-   }
+    if( m_fpsDevice == "" )
+    {
+        return log<software_critical, -1>(
+            { __FILE__, __LINE__, "FPS source is not configurated (circBuff.fpsDevice)" } );
+    }
 
-   CREATE_REG_INDI_RO_NUMBER(m_indiP_fps, "fps", "current", "Circular Buffer");
-   m_indiP_fps.add(pcf::IndiElement("current"));
-   m_indiP_fps["current"] = m_fps;
+    REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsDevice, m_fpsProperty );
 
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_fps, "fps", "current", "Circular Buffer" );
+    m_indiP_fps.add( pcf::IndiElement( "current" ) );
+    m_indiP_fps["current"] = m_fps;
 
-   SHMIMMONITOR_APP_STARTUP;
+    SHMIMMONITOR_APP_STARTUP;
 
-   XWCAPP_THREAD_START(m_psdThread, m_psdThreadInit, m_psdThreadID, m_psdThreadProp, m_psdThreadPrio, m_psdThreadCpuset, "psdcalc", psdThreadStart);
+    XWCAPP_THREAD_START( m_psdThread,
+                         m_psdThreadInit,
+                         m_psdThreadID,
+                         m_psdThreadProp,
+                         m_psdThreadPrio,
+                         m_psdThreadCpuset,
+                         "psdcalc",
+                         psdThreadStart );
 
-   state(stateCodes::OPERATING);
+    state( stateCodes::OPERATING );
 
-   return 0;
+    return 0;
 }
 
 int modalPSDs::appLogic()
 {
-   SHMIMMONITOR_APP_LOGIC;
+    SHMIMMONITOR_APP_LOGIC;
 
-   XWCAPP_THREAD_CHECK(m_psdThread, "psdcalc");
+    XWCAPP_THREAD_CHECK( m_psdThread, "psdcalc" );
 
-   std::unique_lock<std::mutex> lock(m_indiMutex);
+    std::unique_lock<std::mutex> lock( m_indiMutex );
 
-   SHMIMMONITOR_UPDATE_INDI;
+    SHMIMMONITOR_UPDATE_INDI;
 
-   return 0;
+    return 0;
 }
 
 int modalPSDs::appShutdown()
 {
-   SHMIMMONITOR_APP_SHUTDOWN;
 
-   XWCAPP_THREAD_STOP( m_psdThread );
+    XWCAPP_THREAD_STOP( m_psdThread );
 
-   if (m_rawpsdStream)
-   {
-      ImageStreamIO_destroyIm(m_rawpsdStream);
-      free(m_rawpsdStream);
-   }
+    SHMIMMONITOR_APP_SHUTDOWN;
 
-   if (m_avgpsdStream)
-   {
-      ImageStreamIO_destroyIm(m_avgpsdStream);
-      free(m_avgpsdStream);
-   }
+    if( m_rawpsdStream )
+    {
+        ImageStreamIO_destroyIm( m_rawpsdStream );
+        free( m_rawpsdStream );
+    }
 
-   if (m_freqStream)
-   {
-      ImageStreamIO_destroyIm(m_freqStream);
-      free(m_freqStream);
-   }
+    if( m_avgpsdStream )
+    {
+        ImageStreamIO_destroyIm( m_avgpsdStream );
+        free( m_avgpsdStream );
+    }
 
-   if (m_tsWork) fftw_free(m_tsWork);
-   if (m_fftWork) fftw_free(m_fftWork);
+    if( m_freqStream )
+    {
+        ImageStreamIO_destroyIm( m_freqStream );
+        free( m_freqStream );
+    }
 
-   return 0;
+    if( m_tsWork )
+    {
+        fftw_free( m_tsWork );
+    }
+
+    if( m_fftWork )
+    {
+        fftw_free( m_fftWork );
+    }
+
+    return 0;
 }
 
-int modalPSDs::allocate(const dev::shmimT& dummy)
+int modalPSDs::allocate( const dev::shmimT &dummy )
 {
-   static_cast<void>(dummy);
+    static_cast<void>( dummy );
 
-   m_psdRestarting = true;
+    m_psdRestarting = true;
 
-   //Prevent reallocation while the psd thread might be calculating
-   while (m_psdWaiting == false && !shutdown()) mx::sys::microSleep(100);
+    // Wait for FPS to become not 0
+    // We wait indefinitely, the other process just might not be alive
+    bool logged = false;
+    while( m_fps <= 0 && !shutdown() )
+    {
+        if( !logged ) // log every thirty seconds
+        {
+            log<text_log>( "waiting for FPS...", logPrio::LOG_NOTICE );
+            logged = true;
+        }
+        mx::sys::sleep( 1 );
+    }
 
-   if (shutdown()) return 0; //If shutdown() is true then shmimMonitor will cleanup
+    if( m_psdWaiting == false )
+    {
+        std::cerr << "PSD not waiting  . . .\n";
+    }
+    // Prevent reallocation while the psd thread might be calculating
+    while( m_psdWaiting == false && !shutdown() )
+    {
+        mx::sys::microSleep( 100 );
+    }
 
-   if (m_fps > 0)
-   {
-      //m_tsCircBuffLength = m_fps * m_psdTime * m_overSize;
-      m_tsSize = m_fps * m_psdTime;
-      m_tsOverlapSize = m_tsSize * m_psdOverlapFraction;
-   }
+    std::cerr << "PSD waiting \n";
 
-   if (m_tsOverlapSize == 0 || !std::isnormal(m_tsOverlapSize))
-   {
-      log<software_error>({ __FILE__,__LINE__, "bad m_tsOverlapSize value: " + std::to_string(m_tsOverlapSize) });
-      return -1;
-   }
+    if( shutdown() )
+    {
+        return 0; // If shutdown() is true then shmimMonitor will cleanup
+    }
 
-   //Check for unsupported type (must be realT)
-   if (shmimMonitorT::m_dataType != IMAGESTRUCT_FLOAT)
-   {
-      //must be a vector of size 1 on one axis
-      log<software_error>({ __FILE__,__LINE__, "unsupported data type: must be realT" });
-      return -1;
-   }
+    // Check for unsupported type (must be realT)
+    if( shmimMonitorT::m_dataType != IMAGESTRUCT_FLOAT )
+    {
+        // must be a vector of size 1 on one axis
+        log<software_error>( { __FILE__, __LINE__, "unsupported data type: must be realT" } );
+        return -1;
+    }
 
-   //Check for unexpected format
-   if (shmimMonitorT::m_width != 1 && shmimMonitorT::m_height != 1)
-   {
-      //must be a vector of size 1 on one axis
-      log<software_error>({ __FILE__,__LINE__, "unexpected shmim format" });
-      return -1;
-   }
+    // Check for unexpected format
+    if( shmimMonitorT::m_width != 1 && shmimMonitorT::m_height != 1 )
+    {
+        // must be a vector of size 1 on one axis
+        log<software_error>( { __FILE__, __LINE__, "unexpected shmim format" } );
+        return -1;
+    }
 
-   std::cerr << "connected to " << shmimMonitorT::m_shmimName << " " << shmimMonitorT::m_width << " " << shmimMonitorT::m_height << " " << shmimMonitorT::m_depth << "\n";
+    std::cerr << "connected to " << shmimMonitorT::m_shmimName << " " << shmimMonitorT::m_width << " "
+              << shmimMonitorT::m_height << " " << shmimMonitorT::m_depth << "\n";
 
+    m_nModes = shmimMonitorT::m_width * shmimMonitorT::m_height;
 
-   m_nModes = shmimMonitorT::m_width * shmimMonitorT::m_height;
+    m_tsSize = m_fps * m_psdTime;
 
-   //Size the circ buff
-   m_ampCircBuff.maxEntries(shmimMonitorT::m_depth);
+    // Adjust length if odd to ensure we get the Nyquist frequency
+    if( m_tsSize % 2 == 1 )
+    {
+        m_tsSize += 1;
+    }
 
-   //Create the window
-   m_win.resize(m_tsSize);
-   mx::sigproc::window::hann(m_win);
+    m_tsOverlapSize = m_tsSize * m_psdOverlapFraction;
 
-   //Set up the FFT and working memory
-   m_fft.plan(m_tsSize, MXFFT_FORWARD, false);
+    if( m_tsOverlapSize == 0 || !std::isnormal( m_tsOverlapSize ) )
+    {
+        log<software_error>(
+            { __FILE__, __LINE__, "bad m_tsOverlapSize value: " + std::to_string( m_tsOverlapSize ) } );
+        return -1;
+    }
 
-   if (m_tsWork) fftw_free(m_tsWork);
-   m_tsWork = mx::math::fft::fftw_malloc<realT>(m_tsSize);
+    m_meanSize = m_fps * m_psdAvgTime;
 
-   if (m_fftWork) fftw_free(m_fftWork);
-   m_fftWork = mx::math::fft::fftw_malloc<std::complex<realT>>((m_tsSize / 2 + 1));
+    if( static_cast<uint32_t>( m_meanSize ) > shmimMonitorT::m_depth )
+    {
+        log<software_error>( { __FILE__, __LINE__, "input circ buff is not long enough for psd avg. time" } );
+        m_meanSize = shmimMonitorT::m_depth;
+    }
 
-   m_psd.resize(m_tsSize / 2 + 1);
+    // Size the circ buff
+    // we really want 2*m_meanSize but might not be able to
+    if( 2 * static_cast<uint32_t>( m_meanSize ) > shmimMonitorT::m_depth )
+    {
+        m_ampCircBuff.maxEntries( shmimMonitorT::m_depth );
+    }
+    else
+    {
+        m_ampCircBuff.maxEntries( 2 * m_meanSize );
+    }
 
-   if (m_fps > 0)
-   {
-      m_df = 1.0 / (m_tsSize / m_fps);
-   }
-   else
-   {
-      m_df = 1.0 / (m_tsSize);
-   }
+    // Create the window
+    m_win.resize( m_tsSize );
+    mx::sigproc::window::hann( m_win );
 
-   //Create the shared memory images
-   uint32_t imsize[3];
+    // Set up the FFT and working memory
+    m_fft.plan( m_tsSize, mx::math::ft::dir::forward, false );
 
-   //First the frequency
-   imsize[0] = 1;
-   imsize[1] = m_psd.size();
-   imsize[2] = 1;
+    if( m_tsWork )
+    {
+        fftw_free( m_tsWork );
+    }
+    m_tsWork = mx::math::ft::fftw_malloc<realT>( m_tsSize );
 
-   if (m_freqStream)
-   {
-      ImageStreamIO_destroyIm(m_freqStream);
-      free(m_freqStream);
-   }
-   m_freqStream = static_cast<IMAGE*>(malloc(sizeof(IMAGE)));
+    if( m_fftWork )
+    {
+        fftw_free( m_fftWork );
+    }
 
-   ImageStreamIO_createIm_gpu(m_freqStream, (m_configName + "_freq").c_str(), 3, imsize, IMAGESTRUCT_FLOAT, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL, 0);
-   m_freqStream->md->write = 1;
-   for (size_t n = 0; n < m_psd.size(); ++n)
-   {
-      m_freqStream->array.F[n] = n * m_df;
-   }
+    m_fftWork = mx::math::ft::fftw_malloc<std::complex<realT>>( ( m_tsSize / 2 + 1 ) );
 
-   //Set the time of last write
-   clock_gettime(CLOCK_REALTIME, &m_freqStream->md->writetime);
-   m_freqStream->md->atime = m_freqStream->md->writetime;
+    m_psd.resize( m_tsSize / 2 + 1 );
 
-   //Update cnt1
-   m_freqStream->md->cnt1 = 0;
+    m_df = 1.0 / ( m_tsSize / m_fps );
 
-   //Update cnt0
-   m_freqStream->md->cnt0 = 0;
+    // Create the shared memory images
+    uint32_t imsize[3];
 
-   m_freqStream->md->write = 0;
-   ImageStreamIO_sempost(m_freqStream, -1);
+    // First the frequency
+    imsize[0] = 1;
+    imsize[1] = m_psd.size();
+    imsize[2] = 1;
 
-   allocatePSDStreams();
+    if( m_freqStream )
+    {
+        ImageStreamIO_destroyIm( m_freqStream );
+        free( m_freqStream );
+    }
+    m_freqStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
 
-   m_psdRestarting = false;
+    ImageStreamIO_createIm_gpu( m_freqStream,
+                                ( m_shmimBase + "_freq" ).c_str(),
+                                3,
+                                imsize,
+                                IMAGESTRUCT_FLOAT,
+                                -1,
+                                1,
+                                IMAGE_NB_SEMAPHORE,
+                                0,
+                                CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
+                                0 );
+    m_freqStream->md->write = 1;
+    for( size_t n = 0; n < m_psd.size(); ++n )
+    {
+        m_freqStream->array.F[n] = n * m_df;
+    }
 
-   return 0;
+    // Set the time of last write
+    clock_gettime( CLOCK_REALTIME, &m_freqStream->md->writetime );
+    m_freqStream->md->atime = m_freqStream->md->writetime;
+
+    // Update cnt1
+    m_freqStream->md->cnt1 = 0;
+
+    // Update cnt0
+    m_freqStream->md->cnt0 = 0;
+
+    m_freqStream->md->write = 0;
+    ImageStreamIO_sempost( m_freqStream, -1 );
+
+    allocatePSDStreams();
+
+    std::cerr << "done restarting\n";
+
+    m_psdRestarting = false;
+
+    return 0;
 }
 
 int modalPSDs::allocatePSDStreams()
 {
-   if (m_rawpsdStream)
-   {
-      ImageStreamIO_destroyIm(m_rawpsdStream);
-      free(m_rawpsdStream);
-   }
+    if( m_rawpsdStream )
+    {
+        ImageStreamIO_destroyIm( m_rawpsdStream );
+        free( m_rawpsdStream );
+    }
 
-   uint32_t imsize[3];
-   imsize[0] = m_psd.size();
-   imsize[1] = m_nModes;
-   imsize[2] = m_nPSDHistory;
+    uint32_t imsize[3];
+    imsize[0] = m_psd.size();
+    imsize[1] = m_nModes;
+    imsize[2] = m_nPSDHistory;
 
-   m_rawpsdStream = static_cast<IMAGE*>(malloc(sizeof(IMAGE)));
+    m_rawpsdStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
 
-   ImageStreamIO_createIm_gpu(m_rawpsdStream, (m_configName + "_rawpsds").c_str(), 3, imsize, IMAGESTRUCT_FLOAT, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL, 0);
+    ImageStreamIO_createIm_gpu( m_rawpsdStream,
+                                ( m_shmimBase + "_raw_" + m_shmimTag + "psds" ).c_str(),
+                                3,
+                                imsize,
+                                IMAGESTRUCT_FLOAT,
+                                -1,
+                                1,
+                                IMAGE_NB_SEMAPHORE,
+                                0,
+                                CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
+                                0 );
 
-   if (m_avgpsdStream)
-   {
-      ImageStreamIO_destroyIm(m_avgpsdStream);
-      free(m_avgpsdStream);
-   }
+    if( m_avgpsdStream )
+    {
+        ImageStreamIO_destroyIm( m_avgpsdStream );
+        free( m_avgpsdStream );
+    }
 
-   imsize[0] = m_psd.size();
-   imsize[1] = m_nModes;
-   imsize[2] = 1;
+    imsize[0] = m_psd.size();
+    imsize[1] = m_nModes;
+    imsize[2] = 1;
 
-   m_avgpsdStream = static_cast<IMAGE*>(malloc(sizeof(IMAGE)));
-   ImageStreamIO_createIm_gpu(m_avgpsdStream, (m_configName + "_psds").c_str(), 3, imsize, IMAGESTRUCT_FLOAT, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL, 0);
+    m_avgpsdStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
+    ImageStreamIO_createIm_gpu( m_avgpsdStream,
+                                ( m_shmimBase + "_" + m_shmimTag + "psds" ).c_str(),
+                                3,
+                                imsize,
+                                IMAGESTRUCT_FLOAT,
+                                -1,
+                                1,
+                                IMAGE_NB_SEMAPHORE,
+                                0,
+                                CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
+                                0 );
 
-   m_psdBuffer.resize(m_psd.size(), m_nModes);
+    m_psdBuffer.resize( m_psd.size(), m_nModes );
 
-   return 0;
+    return 0;
 }
 
-int modalPSDs::processImage( void* curr_src,
-                             const dev::shmimT& dummy
-                           )
+int modalPSDs::processImage( void *curr_src, const dev::shmimT &dummy )
 {
-   static_cast<void>(dummy);
+    static_cast<void>( dummy );
 
-   float* f_src = static_cast<float*>(curr_src);
+    float *f_src = static_cast<float *>( curr_src );
 
-   m_ampCircBuff.nextEntry(f_src);
+    m_ampCircBuff.nextEntry( f_src );
 
-   return 0;
+    return 0;
 }
 
-void modalPSDs::psdThreadStart(modalPSDs* p)
+void modalPSDs::psdThreadStart( modalPSDs *p )
 {
-   p->psdThreadExec();
+    p->psdThreadExec();
 }
-
 
 void modalPSDs::psdThreadExec()
 {
-   m_psdThreadID = syscall(SYS_gettid);
+    m_psdThreadID = syscall( SYS_gettid );
 
-   while (m_psdThreadInit == true && shutdown() == 0)
-   {
-      sleep(1);
-   }
+    while( m_psdThreadInit == true && shutdown() == 0 )
+    {
+        sleep( 1 );
+    }
 
-   while (shutdown() == 0)
-   {
-      if (m_psdRestarting == true || m_ampCircBuff.maxEntries() == 0) m_psdWaiting = true;
+    while( shutdown() == 0 )
+    {
+        if( m_psdRestarting == true || m_ampCircBuff.maxEntries() == 0 )
+        {
+            m_psdWaiting = true;
+        }
 
-      while ((m_psdRestarting == true || m_ampCircBuff.maxEntries() == 0) && !shutdown()) mx::sys::microSleep(100);
+        while( ( m_psdRestarting == true || m_ampCircBuff.maxEntries() == 0 ) && !shutdown() )
+        {
+            mx::sys::microSleep( 100 );
+        }
 
-      if (shutdown()) break;
+        if( shutdown() )
+        {
+            break;
+        }
 
-      m_psdWaiting = false;
+        m_psdWaiting = false;
 
-      if (m_ampCircBuff.maxEntries() == 0)
-      {
-         log<software_error>({ __FILE__, __LINE__, "amp circ buff has zero size" });
-         return;
-      }
+        if( m_ampCircBuff.maxEntries() == 0 )
+        {
+            log<software_error>( { __FILE__, __LINE__, "amp circ buff has zero size" } );
+            return;
+        }
 
-      std::cerr << "waiting to grow\n";
-      while (m_ampCircBuff.size() < m_ampCircBuff.maxEntries() && m_psdRestarting == false && !shutdown())
-      {
-         //shrinking sleep
-         double stime = (1.0 * m_ampCircBuff.maxEntries() - 1.0 * m_ampCircBuff.size()) / m_fps * 0.5 * 1e9;
-         mx::sys::nanoSleep(stime);
-      }
+        std::cerr << "waiting to grow\n";
+        while( m_ampCircBuff.size() < m_ampCircBuff.maxEntries() && m_psdRestarting == false && !shutdown() )
+        {
+            // shrinking sleep
+            double stime = ( 1.0 * m_ampCircBuff.maxEntries() - 1.0 * m_ampCircBuff.size() ) / m_fps * 0.5 * 1e9;
+            mx::sys::nanoSleep( stime );
+        }
 
-      std::cerr << "all grown.  starting to calculate\n";
+        std::cerr << "all grown.  starting to calculate\n";
 
-      ampCircBuffT::indexT ne0;
-      ampCircBuffT::indexT ne1 = m_ampCircBuff.latest();
-      if (ne1 > m_tsOverlapSize) ne1 -= m_tsSize;
-      else ne1 = m_ampCircBuff.size() + ne1 - m_tsSize;
+        ampCircBuffT::indexT ne0;
+        ampCircBuffT::indexT mne0;
+        ampCircBuffT::indexT ne1 = m_ampCircBuff.latest();
+        if( ne1 >= m_tsSize )
+        {
+            ne1 -= m_tsSize;
+        }
+        else
+        {
+            ne1 = m_ampCircBuff.size() + ne1 - m_tsSize;
+        }
+        // std::cerr << __LINE__ << " " << ne1 << " " << m_tsSize << " " << m_ampCircBuff.size() << '\n';
 
-      while (m_psdRestarting == false && !shutdown())
-      {
-         //Used to check if we are getting too behind
-         uint64_t mono0 = m_ampCircBuff.mono();
+        while( m_psdRestarting == false && !shutdown() )
+        {
+            // Used to check if we are getting too behind
+            uint64_t mono0 = m_ampCircBuff.mono();
 
-         //Calc PSDs here
-         ne0 = ne1;
+            // Calc PSDs here
+            ne0 = ne1;
 
-         std::cerr << "calculating: " << ne0 << " " << m_ampCircBuff.size() << " " << m_tsSize << "\n";
-         double t0 = mx::sys::get_curr_time();
-
-         for (size_t m = 0; m < shmimMonitorT::m_width * shmimMonitorT::m_height; ++m) //Loop over each mode
-         {
-            //get mean going over entire TS
-            realT mn = 0;
-            for (size_t n = 0; n < m_ampCircBuff.size(); ++n)
+            if( ne0 >= m_meanSize )
             {
-               mn += m_ampCircBuff[n][m];
+                mne0 = ne0 - m_meanSize;
             }
-            mn /= m_ampCircBuff.size();
-
-            double var = 0;
-            for (size_t n = 0; n < m_tsSize; ++n)
+            else
             {
-               m_tsWork[n] = (m_ampCircBuff.at(ne0, n)[m] - mn); //load mean subtracted chunk
-               var += pow(m_tsWork[n], 2);
-
-               m_tsWork[n] *= m_win[n];
-            }
-            var /= m_tsSize;
-
-            m_fft(m_fftWork, m_tsWork);
-
-            double nm = 0;
-            for (size_t n = 0; n < m_psd.size(); ++n)
-            {
-               m_psd[n] = norm(m_fftWork[n]);
-               nm += m_psd[n] * m_df;
+                mne0 = m_ampCircBuff.size() + ne0 - m_meanSize;
             }
 
-            for (size_t n = 0; n < m_psd.size(); ++n)
+            // std::cerr << "calculating: " << ne0 << " " << " " << m_tsSize << ' ' << m_ampCircBuff.size() << '\n';
+            //   double t0 = mx::sys::get_curr_time();
+
+            for( size_t m = 0; m < m_nModes; ++m ) // Loop over each mode
             {
-               m_psd[n] *= (var / nm);
+                // get mean going over avg time
+                realT mn = 0;
+                for( cbIndexT n = 0; n < m_meanSize; ++n )
+                {
+                    mn += ( m_ampCircBuff.at( mne0, n ) )[m];
+                }
+                mn /= m_meanSize;
+
+                double var = 0;
+
+                for( cbIndexT n = 0; n < m_tsSize; ++n )
+                {
+                    m_tsWork[n] = ( m_ampCircBuff.at( ne0, n )[m] - mn ); // load mean subtracted chunk
+
+                    var += pow( m_tsWork[n], 2 );
+
+                    m_tsWork[n] *= m_win[n];
+                }
+                var /= m_tsSize;
+
+                m_fft( m_fftWork, m_tsWork );
+
+                double nm = 0;
+                for( size_t n = 0; n < m_psd.size(); ++n )
+                {
+                    m_psd[n] = norm( m_fftWork[n] );
+                    nm += m_psd[n] * m_df;
+                }
+
+                // Put it in the buffer for uploading to shmim
+                for( size_t n = 0; n < m_psd.size(); ++n )
+                {
+                    //                    m_psd[n] *= ( var / nm );
+                    m_psdBuffer( n, m ) = m_psd[n] * ( var / nm );
+                }
             }
 
-            //Put it in the buffer for uploading to shmim
-            for (size_t n = 0; n < m_psd.size(); ++n) m_psdBuffer(n, m) = m_psd[n];
+            //------------------------- the raw psds ---------------------------
+            m_rawpsdStream->md->write = 1;
 
-         }
+            // Set the time of last write
+            clock_gettime( CLOCK_REALTIME, &m_rawpsdStream->md->writetime );
+            m_rawpsdStream->md->atime = m_rawpsdStream->md->writetime;
 
-         //------------------------- the raw psds ---------------------------
-         m_rawpsdStream->md->write = 1;
+            uint64_t cnt1 = m_rawpsdStream->md->cnt1 + 1;
+            if( cnt1 >= m_rawpsdStream->md->size[2] )
+            {
+                cnt1 = 0;
+            }
 
-         //Set the time of last write
-         clock_gettime(CLOCK_REALTIME, &m_rawpsdStream->md->writetime);
-         m_rawpsdStream->md->atime = m_rawpsdStream->md->writetime;
+            // Move to next pointer
+            float *F = m_rawpsdStream->array.F + m_psdBuffer.rows() * m_psdBuffer.cols() * cnt1;
 
-         uint64_t cnt1 = m_rawpsdStream->md->cnt1 + 1;
-         if (cnt1 >= m_rawpsdStream->md->size[2]) cnt1 = 0;
+            memcpy( F, m_psdBuffer.data(), m_psdBuffer.rows() * m_psdBuffer.cols() * sizeof( float ) );
 
-         //Move to next pointer
-         float* F = m_rawpsdStream->array.F + m_psdBuffer.rows() * m_psdBuffer.cols() * cnt1;
+            // Update cnt1
+            m_rawpsdStream->md->cnt1 = cnt1;
 
-         memcpy(F, m_psdBuffer.data(), m_psdBuffer.rows() * m_psdBuffer.cols() * sizeof(float));
+            // Update cnt0
+            ++m_rawpsdStream->md->cnt0;
 
-         //Update cnt1
-         m_rawpsdStream->md->cnt1 = cnt1;
+            m_rawpsdStream->md->write = 0;
+            ImageStreamIO_sempost( m_rawpsdStream, -1 );
 
-         //Update cnt0
-         ++m_rawpsdStream->md->cnt0;
+            //-------------------------- now average the psds ----------------------------
 
-         m_rawpsdStream->md->write = 0;
-         ImageStreamIO_sempost(m_rawpsdStream, -1);
+            int nPSDAverage = ( m_psdAvgTime / m_psdTime ) / m_psdOverlapFraction;
 
-         //-------------------------- now average the psds ----------------------------
+            if( nPSDAverage <= 0 )
+            {
+                nPSDAverage = 1;
+            }
+            else if( static_cast<uint64_t>( nPSDAverage ) > m_rawpsdStream->md->size[2] )
+            {
+                nPSDAverage = m_rawpsdStream->md->size[2];
+            }
 
-         int nPSDAverage = (m_psdAvgTime / m_psdTime) / m_psdOverlapFraction;
+            memcpy( m_psdBuffer.data(), F, m_psdBuffer.rows() * m_psdBuffer.cols() * sizeof( float ) );
 
-         if (nPSDAverage <= 0) nPSDAverage = 1;
-         else if ((uint64_t)nPSDAverage > m_rawpsdStream->md->size[2]) nPSDAverage = m_rawpsdStream->md->size[2];
+            for( int n = 1; n < nPSDAverage; ++n )
+            {
+                if( cnt1 == 0 )
+                {
+                    cnt1 = m_rawpsdStream->md->size[2] - 1;
+                }
+                else
+                {
+                    --cnt1;
+                }
 
-         //Move to next pointer
-         F = m_rawpsdStream->array.F + m_psdBuffer.rows() * m_psdBuffer.cols() * cnt1;
+                F = m_rawpsdStream->array.F + m_psdBuffer.rows() * m_psdBuffer.cols() * cnt1;
 
-         memcpy(m_psdBuffer.data(), F, m_psdBuffer.rows() * m_psdBuffer.cols() * sizeof(float));
+                m_psdBuffer += Eigen::Map<Eigen::Array<float, -1, -1>>( F, m_psdBuffer.rows(), m_psdBuffer.cols() );
+            }
 
-         for (int n = 1; n < nPSDAverage; ++n)
-         {
-            if (cnt1 == 0) cnt1 = m_rawpsdStream->md->size[2] - 1;
-            else --cnt1;
+            m_psdBuffer /= nPSDAverage;
 
-            F = m_rawpsdStream->array.F + m_psdBuffer.rows() * m_psdBuffer.cols() * cnt1;
+            m_avgpsdStream->md->write = 1;
 
-            m_psdBuffer += Eigen::Map<Eigen::Array<float, -1, -1>>(F, m_psdBuffer.rows(), m_psdBuffer.cols());
-         }
+            // Set the time of last write
+            clock_gettime( CLOCK_REALTIME, &m_avgpsdStream->md->writetime );
+            m_avgpsdStream->md->atime = m_avgpsdStream->md->writetime;
 
-         m_psdBuffer /= nPSDAverage;
+            // Move to next pointer
+            F = m_avgpsdStream->array.F;
 
-         m_avgpsdStream->md->write = 1;
+            memcpy( F, m_psdBuffer.data(), m_psdBuffer.rows() * m_psdBuffer.cols() * sizeof( float ) );
 
-         //Set the time of last write
-         clock_gettime(CLOCK_REALTIME, &m_avgpsdStream->md->writetime);
-         m_avgpsdStream->md->atime = m_avgpsdStream->md->writetime;
+            // Update cnt1
+            m_avgpsdStream->md->cnt1 = 0;
 
-         //Move to next pointer
-         F = m_avgpsdStream->array.F;
+            // Update cnt0
+            ++m_avgpsdStream->md->cnt0;
 
-         memcpy(F, m_psdBuffer.data(), m_psdBuffer.rows() * m_psdBuffer.cols() * sizeof(float));
+            m_avgpsdStream->md->write = 0;
+            ImageStreamIO_sempost( m_avgpsdStream, -1 );
 
-         //Update cnt1
-         m_avgpsdStream->md->cnt1 = 0;
+            // double t1 = mx::sys::get_curr_time();
+            // std::cerr << "done " << t1 - t0 << "\n";
 
-         //Update cnt0
-         ++m_avgpsdStream->md->cnt0;
+            // Have to be cycling within the overlap
+            if( m_ampCircBuff.mono() - mono0 >= static_cast<uint32_t>( m_tsOverlapSize ) )
+            {
+                log<text_log>( "PSD calculations getting behind, skipping ahead.", logPrio::LOG_WARNING );
+            }
+            else
+            {
+                while( m_ampCircBuff.mono() - mono0 < static_cast<uint32_t>( m_tsOverlapSize ) && !m_psdRestarting )
+                {
+                    mx::sys::microSleep( 0.2 * 1000000.0 / m_fps );
+                }
+            }
 
-         m_avgpsdStream->md->write = 0;
-         ImageStreamIO_sempost(m_avgpsdStream, -1);
+            if( m_psdRestarting )
+            {
+                continue;
+            }
 
-         double t1 = mx::sys::get_curr_time();
-         std::cerr << "done " << t1 - t0 << "\n";
-
-         //Have to be cycling within the overlap
-         if (m_ampCircBuff.mono() - mono0 >= m_tsOverlapSize)
-         {
-            log<text_log>("PSD calculations getting behind, skipping ahead.", logPrio::LOG_WARNING);
-            ne0 = m_ampCircBuff.latest();
-            if (ne0 > m_tsOverlapSize) ne0 -= m_tsOverlapSize;
-            else ne0 = m_ampCircBuff.size() + ne0 - m_tsOverlapSize;
-         }
-
-         //Now wait until we get to next one
-         ne1 = ne0 + m_tsOverlapSize;
-         if (ne1 >= m_ampCircBuff.size())
-         {
-            ne1 -= m_ampCircBuff.size();
-         }
-
-         ampCircBuffT::indexT ce = m_ampCircBuff.latest();
-         //wrapped difference
-         long dn;
-         if (ce >= ne1) dn = ce - ne1;
-         else dn = ce + (m_ampCircBuff.size() - ne1);
-
-         while (dn < m_tsOverlapSize && !shutdown() && m_psdRestarting == false)
-         {
-            double stime = (1.0 * dn) / m_fps * 0.5 * 1e9;
-            mx::sys::nanoSleep(stime);
-
-            ce = m_ampCircBuff.latest();
-
-            if (ce >= ne1) dn = ce - ne1;
-            else dn = ce + (m_ampCircBuff.size() - ne1);
-         }
-      }
-   }
+            ne1 = m_ampCircBuff.latest();
+            if( ne1 > m_tsSize )
+            {
+                ne1 -= m_tsSize;
+            }
+            else
+            {
+                ne1 = m_ampCircBuff.size() + ne1 - m_tsSize;
+            }
+        }
+    }
 }
 
-INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_psdTime)(const pcf::IndiProperty& ipRecv)
+INDI_NEWCALLBACK_DEFN( modalPSDs, m_indiP_psdTime )( const pcf::IndiProperty &ipRecv )
 {
-   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_psdTime, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_psdTime, ipRecv );
 
-   realT target;
+    realT target;
 
-   if (indiTargetUpdate(m_indiP_psdTime, target, ipRecv, true) < 0)
-   {
-      log<software_error>({ __FILE__,__LINE__ });
-      return -1;
-   }
+    if( indiTargetUpdate( m_indiP_psdTime, target, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
 
-   if (m_psdTime != target)
-   {
-      std::lock_guard<std::mutex> guard(m_indiMutex);
+    if( m_psdTime != target )
+    {
+        std::lock_guard<std::mutex> guard( m_indiMutex );
 
-      m_psdTime = target;
+        m_psdTime = target;
 
-      updateIfChanged(m_indiP_psdTime, "current", m_psdTime, INDI_IDLE);
-      updateIfChanged(m_indiP_psdTime, "target", m_psdTime, INDI_IDLE);
+        updateIfChanged( m_indiP_psdTime, "current", m_psdTime, INDI_IDLE );
+        updateIfChanged( m_indiP_psdTime, "target", m_psdTime, INDI_IDLE );
 
-      shmimMonitorT::m_restart = true;
+        shmimMonitorT::m_restart = true;
 
-      log<text_log>("set psdTime to " + std::to_string(m_psdTime), logPrio::LOG_NOTICE);
-   }
+        log<text_log>( "set psdTime to " + std::to_string( m_psdTime ), logPrio::LOG_NOTICE );
+    }
 
-   return 0;
-} //INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_psdTime)
+    return 0;
+} // INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_psdTime)
 
-INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_psdAvgTime)(const pcf::IndiProperty& ipRecv)
+INDI_NEWCALLBACK_DEFN( modalPSDs, m_indiP_psdAvgTime )( const pcf::IndiProperty &ipRecv )
 {
-   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_psdAvgTime, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_psdAvgTime, ipRecv );
 
-   realT target;
+    realT target;
 
-   if (indiTargetUpdate(m_indiP_psdAvgTime, target, ipRecv, true) < 0)
-   {
-      log<software_error>({ __FILE__,__LINE__ });
-      return -1;
-   }
+    if( indiTargetUpdate( m_indiP_psdAvgTime, target, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
 
-   if (m_psdAvgTime != target)
-   {
-      std::lock_guard<std::mutex> guard(m_indiMutex);
+    if( m_psdAvgTime != target )
+    {
+        std::lock_guard<std::mutex> guard( m_indiMutex );
 
-      m_psdAvgTime = target;
+        m_psdAvgTime = target;
 
-      updateIfChanged(m_indiP_psdTime, "current", m_psdAvgTime, INDI_IDLE);
-      updateIfChanged(m_indiP_psdTime, "target", m_psdAvgTime, INDI_IDLE);
+        updateIfChanged( m_indiP_psdAvgTime, "current", m_psdAvgTime, INDI_IDLE );
+        updateIfChanged( m_indiP_psdAvgTime, "target", m_psdAvgTime, INDI_IDLE );
 
-      log<text_log>("set psdAvgTime to " + std::to_string(m_psdAvgTime), logPrio::LOG_NOTICE);
-   }
+        log<text_log>( "set psdAvgTime to " + std::to_string( m_psdAvgTime ), logPrio::LOG_NOTICE );
+    }
 
-   return 0;
-} //INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_psdAvgTime)
+    return 0;
+} // INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_psdAvgTime)
 
-INDI_SETCALLBACK_DEFN(modalPSDs, m_indiP_fpsSource)(const pcf::IndiProperty& ipRecv)
+INDI_SETCALLBACK_DEFN( modalPSDs, m_indiP_fpsSource )( const pcf::IndiProperty &ipRecv )
 {
-   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_fpsSource, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_fpsSource, ipRecv );
 
-   if (ipRecv.find("current") != true) //this isn't valid
-   {
-      log<software_error>({ __FILE__, __LINE__, "No current property in fps source." });
-      return 0;
-   }
+    if( ipRecv.find( m_fpsElement ) != true ) // this isn't valid
+    {
+        log<software_error>( { __FILE__, __LINE__, "No current property in fps source." } );
+        return 0;
+    }
 
-   std::lock_guard<std::mutex> guard(m_indiMutex);
+    std::lock_guard<std::mutex> guard( m_indiMutex );
 
-   realT fps = ipRecv["current"].get<realT>();
+    realT fps = ipRecv[m_fpsElement].get<realT>();
 
-   if (fps != m_fps)
-   {
-      m_fps = fps;
-      log<text_log>("set fps to " + std::to_string(m_fps), logPrio::LOG_NOTICE);
-      updateIfChanged(m_indiP_fps, "current", m_fps, INDI_IDLE);
-      shmimMonitorT::m_restart = true;
-   }
+    if( fabs( fps - m_fps ) > m_fpsTol + .0001)
+    {
+        m_fps = fps;
+        log<text_log>( "set fps to " + std::to_string( m_fps ), logPrio::LOG_NOTICE );
+        updateIfChanged( m_indiP_fps, "current", m_fps, INDI_IDLE );
 
-   return 0;
+        shmimMonitorT::m_restart = true;
+    }
 
-} //INDI_SETCALLBACK_DEFN(modalPSDs, m_indiP_fpsSource)
+    return 0;
 
-} //namespace app
-} //namespace MagAOX
+} // INDI_SETCALLBACK_DEFN(modalPSDs, m_indiP_fpsSource)
 
-#endif //modalPSDs_hpp
+} // namespace app
+} // namespace MagAOX
+
+#endif // modalPSDs_hpp

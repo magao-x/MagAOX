@@ -678,6 +678,8 @@ int dmPokeWFS<derivedT>::allocate( const wfsShmimT & dummy)
         return derivedT::template log<software_error,-1>({__FILE__, __LINE__, std::string("exception opening DM: ") + e.what()});
     }
     
+    m_dmStream.passive(true);
+    
     m_dmImage.resize(m_dmStream.rows(), m_dmStream.cols());
 
     if(derived().darkShmimMonitor().width() == derived().shmimMonitor().width() && 

@@ -1,14 +1,16 @@
 from .bundle import Bundle
-# from .spans import Spans
+from .pack import Pack
+from .spans import Spans
 # from .watch import Watch
 __all__ = [
     'Bundle',
-    # 'Spans',
+    'Spans',
     # 'Watch',
     'XQUICKLOOK_COMMANDS',
 ]
 XQUICKLOOK_COMMANDS = [
     Bundle,
-    # Spans,
+    Pack,
+    Spans,
     # Watch,
 ]

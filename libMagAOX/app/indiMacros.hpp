@@ -4,7 +4,7 @@
   *
   * History:
   * - 2018-05-27 created by JRM
-  * 
+  *
   * \ingroup app_files
   */
 
@@ -36,7 +36,7 @@
                                           {\
                                              return static_cast<class *>(app)->setCallBack ## _ ## prop(ipRecv);\
                                           }
-                                          
+
 /// Declare the callback for a new property request, and declare and define the static wrapper.
 /** After including this, you still need to actually define the callback.
   *
@@ -58,7 +58,7 @@
   */
 #define INDI_SETCALLBACK_DECL(class, prop) int setCallBack_ ## prop(const pcf::IndiProperty &ipRecv); \
                                            SET_INDI_SETCALLBACK(class, prop)
-                                           
+
 /// Define the callback for a new property request.
 /** Creates a class::method definition, which must be appended with a const reference of type pcf::IndiProperty.
   * Example usage for a class named xapp and an INDI property x:
@@ -117,16 +117,16 @@
    */
 #define INDI_SETCALLBACK_DEFN(class, prop) int class::setCallBack_ ## prop
 
-#ifndef XWCTEST_INDI_CALLBACK_VALIDATION   
+#ifndef XWCTEST_INDI_CALLBACK_VALIDATION
 #define INDI_VALIDATE_LOG_ERROR(prop1, prop2)  log<software_error>({__FILE__,__LINE__, "INDI properties do not match in callback: "             \
-                                                                  + prop1.createUniqueKey() + " != " + prop2.createUniqueKey()}); 
+                                                                  + prop1.createUniqueKey() + " != " + prop2.createUniqueKey()});
 
 #define INDI_VALIDATE_LOG_ERROR_DERIVED(prop1, prop2) derivedT::template log<software_error>({__FILE__,__LINE__, "INDI properties do not match in callback: "             \
-                                                                  + prop1.createUniqueKey() + " != " + prop2.createUniqueKey()}); 
+                                                                  + prop1.createUniqueKey() + " != " + prop2.createUniqueKey()});
 #else
 #define INDI_VALIDATE_LOG_ERROR(prop1, prop2)
 #define INDI_VALIDATE_LOG_ERROR_DERIVED(prop1,prop2)
-#endif                                                                                                           
+#endif
 
 /// Implementation of new callback INDI property validator for main class
 /** \param prop1 [in] the first property to compare
@@ -151,15 +151,15 @@
 /** Uses makeUniqueKey() to check.
   *
   * Causes a return -1 on a mismatch.
-  * 
+  *
   * Does nothing on a match.
-  * 
+  *
   * If the test macro XWCTEST_INDI_CALLBACK_VALIDATION is defined this will cause return 0 on a match.
-  * 
+  *
   * \param prop1 [in] the first property to compare
   * \param prop2 [in] the second property to compare
   */
-#define INDI_VALIDATE_CALLBACK_PROPS(prop1, prop2)  INDI_VALIDATE_CALLBACK_PROPS_IMPL( prop1, prop2 )  
+#define INDI_VALIDATE_CALLBACK_PROPS(prop1, prop2)  INDI_VALIDATE_CALLBACK_PROPS_IMPL( prop1, prop2 )
 
 #endif
 
@@ -186,15 +186,15 @@
 /** Uses makeUniqueKey() to check.
   *
   * Causes a return -1 on a mismatch.
-  * 
+  *
   * Does nothing on a match.
-  * 
+  *
   * If the test macro XWCTEST_INDI_CALLBACK_VALIDATION is defined this will cause return 0 on a match.
-  * 
+  *
   * \param prop1 [in] the first property to compare
   * \param prop2 [in] the second property to compare
   */
-#define INDI_VALIDATE_CALLBACK_PROPS_DERIVED(prop1, prop2)  INDI_VALIDATE_CALLBACK_PROPS_DERIVED_IMPL( prop1, prop2)  
+#define INDI_VALIDATE_CALLBACK_PROPS_DERIVED(prop1, prop2)  INDI_VALIDATE_CALLBACK_PROPS_DERIVED_IMPL( prop1, prop2)
 
 #endif
 
@@ -217,13 +217,13 @@
 #define INDI_SETCALLBACK(prop) st_setCallBack_ ## prop
 
 /// Register a NEW INDI property with the class, using the standard callback name.
-/** Is a wrapper for MagAOXApp::registerIndiPropertyNew.
+/** Is a wrapper for MagAOXApp::registerIndiPropertyNew with setup
+  *
+  * \todo swap this with the _NOSETUP version, making this _SETUP
   *
   * \param prop the property member name, with no quotes
   * \param propName the property name, in quotes
   * \param type the property type, pcf::IndiProperty::Type
-  * \param perm the property permissions, pcf::IndiProperty::PropertyPermType
-  * \param state the property state, pcf::IndiProperty::PropertyStateType
   *
   * \ingroup indi
   */
@@ -231,8 +231,23 @@
 if( registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle, INDI_NEWCALLBACK(prop)) < 0)  \
 {                                                                                                                                       \
     return log<software_error,-1>({__FILE__,__LINE__, "failed to register new property"});                                              \
-}                                                                     
+}
 
+/// Register a NEW INDI property with the class, using the standard callback name.
+/** Is a wrapper for MagAOXApp::registerIndiPropertyNew with no setup
+  *
+  * \todo swap this with the setup version, making this have no _NOSETUP
+  *
+  * \param prop the property member name, with no quotes
+  * \param propName the property name, in quotes
+  *
+  * \ingroup indi
+  */
+ #define REG_INDI_NEWPROP_NOSETUP(prop)                                                                                          \
+ if( registerIndiPropertyNew( prop, INDI_NEWCALLBACK(prop)) < 0)  \
+ {                                                                                                                                       \
+     return log<software_error,-1>({__FILE__,__LINE__, "failed to register new property"});                                              \
+ }
 
 /// Register a NEW INDI property with the class, with no callback.
 /** Is a wrapper for MagAOXApp::registerIndiPropertyNew with  NULL callback.
@@ -249,7 +264,7 @@ if( registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadWrite,
 if( registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle, 0) < 0)  \
 {                                                                                                                 \
     return log<software_error,-1>({__FILE__,__LINE__, "failed to register read only property"});                  \
-}                                    
+}
 
 /// Register a NEW INDI property with the class, with no callback, using the derived class
 /** Is a wrapper for MagAOXApp::registerIndiPropertyNew with  NULL callback.
@@ -266,7 +281,7 @@ if( registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadOnly, 
 if( derived().registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle, 0) < 0)  \
 {                                                                                                                           \
     return derivedT::template log<software_error,-1>({__FILE__,__LINE__, "failed to register read only property"});         \
-}                                     
+}
 
 /// Register a SET INDI property with the class, using the standard callback name.
 /** Is a wrapper for MagAOXApp::registerIndiPropertySet.
@@ -283,13 +298,36 @@ if( derived().registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::
 if( registerIndiPropertySet( prop,devName,  propName, INDI_SETCALLBACK(prop)) < 0)         \
 {                                                                                          \
     return log<software_error,-1>({__FILE__,__LINE__, "failed to register set property"}); \
-}                                                                                           
+}
 
 #define REG_INDI_SETPROP_DERIVED(prop, devName, propName)                                                     \
 if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SETCALLBACK(prop)) < 0)         \
 {                                                                                                             \
     return derivedT::template log<software_error,-1>({__FILE__,__LINE__, "failed to register set property"}); \
-}                                                                                           
+}
+
+/// Create and register a NEW INDI property as a standard text, using the standard callback name.
+/** This wraps createStandardIndiText and registerIndiPropertyNew, with error checking.
+  * \p prop will have elements "current" and "target".
+  *
+  * \param prop   [out] the property to create and setup
+  * \param name   [in] the name of the property.
+  * \param label  [in] [optional] the GUI label suggestion for this property
+  * \param group  [in] [optional] the group for this property
+  *
+  * \ingroup indi
+  */
+ #define CREATE_REG_INDI_NEW_TEXT( prop, name, label, group)                                 \
+ if( createStandardIndiText( prop, name, label, group) < 0)                                  \
+ {                                                                                           \
+     log<software_error>({__FILE__,__LINE__, "error from createStandardIndiText"});          \
+     return -1;                                                                              \
+ }                                                                                           \
+ if( registerIndiPropertyNew( prop, INDI_NEWCALLBACK(prop)) < 0)                             \
+ {                                                                                           \
+     log<software_error>({__FILE__,__LINE__, "error from registerIndiPropertyNew"});         \
+     return -1;                                                                              \
+ }
 
 /// Create and register a NEW INDI property as a standard number as float, using the standard callback name.
 /** This wraps createStandardIndiNumber and registerIndiPropertyNew, with error checking.
@@ -303,7 +341,7 @@ if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SE
   * \param format [in] the _ value for the elements, applied to both target and current.  Set to "" to use the MagAO-X standard for type.
   * \param label  [in] [optional] the GUI label suggestion for this property
   * \param group  [in] [optional] the group for this property
-  * 
+  *
   * \ingroup indi
   */
 #define CREATE_REG_INDI_NEW_NUMBERF( prop, name, min, max, step, format, label, group)          \
@@ -318,6 +356,33 @@ if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SE
         return -1;                                                                              \
     }
 
+/// Create and register a NEW INDI property as a standard number as double, using the standard callback name.
+/** This wraps createStandardIndiNumber and registerIndiPropertyNew, with error checking.
+  * \p prop will have elements "current" and "target".
+  *
+  * \param prop   [out] the property to create and setup
+  * \param name   [in] the name of the property
+  * \param min    [in] the minimum value for the elements, applied to both target and current
+  * \param max    [in] the minimum value for the elements, applied to both target and current
+  * \param step   [in] the step size for the elements, applied to both target and current
+  * \param format [in] the _ value for the elements, applied to both target and current.  Set to "" to use the MagAO-X standard for type.
+  * \param label  [in] [optional] the GUI label suggestion for this property
+  * \param group  [in] [optional] the group for this property
+  *
+  * \ingroup indi
+  */
+#define CREATE_REG_INDI_NEW_NUMBERD( prop, name, min, max, step, format, label, group)           \
+    if( createStandardIndiNumber<double>( prop, name, min, max, step, format, label, group) < 0) \
+    {                                                                                            \
+        log<software_error>({__FILE__,__LINE__, "error from createStandardIndiNumber"});         \
+        return -1;                                                                               \
+    }                                                                                            \
+    if( registerIndiPropertyNew( prop, INDI_NEWCALLBACK(prop)) < 0)                              \
+    {                                                                                            \
+        log<software_error>({__FILE__,__LINE__, "error from registerIndiPropertyNew"});          \
+        return -1;                                                                               \
+    }
+
 /// Create and register a NEW INDI property as a standard number as int, using the standard callback name.
 /** This wraps createStandardIndiNumber and registerIndiPropertyNew, with error checking
   * \p prop will have elements "current" and "target".
@@ -330,7 +395,7 @@ if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SE
   * \param format [in] the _ value for the elements, applied to both target and current.  Set to "" to use the MagAO-X standard for type.
   * \param label  [in] [optional] the GUI label suggestion for this property
   * \param group  [in] [optional] the group for this property
-  * 
+  *
   * \ingroup indi
   */
 #define CREATE_REG_INDI_NEW_NUMBERI( prop, name, min, max, step, format, label, group)          \
@@ -357,7 +422,7 @@ if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SE
   * \param format [in] the _ value for the elements, applied to both target and current.  Set to "" to use the MagAO-X standard for type.
   * \param label  [in] [optional] the GUI label suggestion for this property
   * \param group  [in] [optional] the group for this property
-  * 
+  *
   * \ingroup indi
   */
 #define CREATE_REG_INDI_NEW_NUMBERU( prop, name, min, max, step, format, label, group)               \
@@ -379,7 +444,7 @@ if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SE
   * \param name   [in] the name of the property
   * \param label  [in] [optional] the GUI label suggestion for this property
   * \param group  [in] [optional] the group for this property
-  * 
+  *
   * \ingroup indi
   */
 #define CREATE_REG_INDI_RO_NUMBER( prop, name, label, group )                                \
@@ -399,10 +464,10 @@ if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SE
   *
   * \param prop the property member name, with no quotes
   * \param name he property name, in quotes
-  * 
+  *
   * \ingroup indi
   */
-#define CREATE_REG_INDI_NEW_TOGGLESWITCH( prop, name)                                 \
+#define CREATE_REG_INDI_NEW_TOGGLESWITCH( prop, name)                                      \
     if( createStandardIndiToggleSw( prop, name) < 0)                                       \
     {                                                                                      \
         log<software_error>({__FILE__,__LINE__, "error from createStandardIndiToggleSw"}); \
@@ -419,7 +484,7 @@ if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SE
   *
   * \param prop the property member name, with no quotes
   * \param name he property name, in quotes
-  * 
+  *
   * \ingroup indi
   */
 #define CREATE_REG_INDI_NEW_TOGGLESWITCH_NOCB( prop, name)                                 \
@@ -439,7 +504,7 @@ if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SE
   *
   * \param prop the property member name, with no quotes
   * \param name he property name, in quotes
-  * 
+  *
   * \ingroup indi
   */
 #define CREATE_REG_INDI_NEW_REQUESTSWITCH( prop, name)                                      \
@@ -466,7 +531,7 @@ if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SE
   * \param format   [in] the _ value for the elements, applied to both target and current.  Set to "" to use the MagAO-X standard for type.
   * \param label    [in] the GUI label suggestion for this property
   * \param group    [in] the group for this property
-  * 
+  *
   * \ingroup indi
   */
 #define CREATE_REG_INDI_NEW_NUMBERF_DERIVED( prop, name, min, max, step, format, label, group)              \
@@ -494,7 +559,7 @@ if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SE
   * \param format   [in] the _ value for the elements, applied to both target and current.  Set to "" to use the MagAO-X standard for type.
   * \param label    [in] the GUI label suggestion for this property
   * \param group    [in] the group for this property
-  * 
+  *
   * \ingroup indi
   */
 #define CREATE_REG_INDI_NEW_NUMBERI_DERIVED( prop, name, min, max, step, format, label, group)              \
@@ -514,7 +579,7 @@ if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SE
   *
   * \param prop the property member name, with no quotes
   * \param name he property name, in quotes
-  * 
+  *
   * \ingroup indi
   */
 #define CREATE_REG_INDI_NEW_TOGGLESWITCH_DERIVED( prop, name )                                                \
@@ -534,7 +599,7 @@ if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SE
   *
   * \param prop the property member name, with no quotes
   * \param name he property name, in quotes
-  * 
+  *
   * \ingroup indi
   */
 #define CREATE_REG_INDI_NEW_REQUESTSWITCH_DERIVED( prop, name)                                                 \

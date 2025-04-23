@@ -139,3 +139,7 @@ set max pos = 384000
 
 set point for out should be 85 degrees
 
+Setup of stagellowfs
+serial: 122400
+max: 1066667
+

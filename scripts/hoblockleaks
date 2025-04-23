@@ -1,0 +1,13 @@
+#!/bin/bash
+
+minb=$1
+maxb=20
+mc=$2
+
+mbstr=$(printf "%02d" $minb)
+echo "setting block leaks to" $mc "above block" $mbstr
+
+for ((i=minb;i<=maxb;i++)); do
+    mbstr=$(printf "%02d" $i)
+    setINDI -n "hogainctrl.block$mbstr""_multcoeff.target=$mc"
+done

@@ -268,7 +268,7 @@ class MagAOXApp : public application
      */
     void logMessage( bufferPtrT &b );
 
-  private:
+  protected:
     /// Callback for config system logging.
     /** Called by appConfigurator each time a value is set using the config() operator.
      * You never need to call this directly.
@@ -932,6 +932,14 @@ class MagAOXApp : public application
                               pcf::IndiProperty::Ok ///< [in] [optional] The state of the property
     );
 
+    template <typename T>
+    void updatesIfChanged( pcf::IndiProperty &p, ///< [in/out] The property containing the element to possibly update
+                          const std::vector<const char *> &els, ///< [in] String vector of element names
+                          const std::vector<T> &newVals,       ///< [in] the new values
+                          pcf::IndiProperty::PropertyStateType newState =
+                              pcf::IndiProperty::Ok ///< [in] [optional] The state of the property
+    );
+
     /// Get the target element value from an new property
     /**
      * \returns 0 on success
@@ -1250,10 +1258,10 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
                 "name",
                 argType::Required,
                 "",
-                "name",
-                false,
+                "",
+                true,
                 "string",
-                "The name of the application, specifies config." );
+                "The name of the application and its device name in INDI (if used), specifies the config file in the XWC config directory." );
 
     config.parseCommandLine( argc, argv, "name" );
     config( m_configName, "name" );
@@ -1261,7 +1269,11 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
     if( m_configName == "" )
     {
         m_configName = mx::ioutils::pathStem( invokedName );
-        log<text_log>( "Application name (-n --name) not set.  Using argv[0]." );
+        if(!doHelp)
+        {
+            log<text_log>( "Configuration Error: Application name (-n --name) not set." );
+            doHelp = true;
+        }
     }
 
     // We use mx::application's configPathLocal for this component's config file
@@ -1289,6 +1301,17 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
 template <bool _useINDI>
 void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
 {
+    // Validate config
+    config.add( "config.validate",
+                "",
+                "config.validate",
+                argType::True,
+                "",
+                "",
+                false,
+                "bool",
+                "Validate the configuration.  App will exit after loading the configuration, but before entering the event loop. Errors from configuratin processing will be shown. Always safe to run." );
+
     // App stuff
     config.add( "loopPause",
                 "p",
@@ -1301,7 +1324,7 @@ void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
                 "The main loop pause time in ns" );
 
     config.add(
-        "ignore_git", "", "ignore-git", argType::True, "", "", false, "bool", "set to true to ignore git status" );
+        "ignore_git", "", "ignore-git", argType::True, "", "", false, "bool", "set to true to ignore git status to prevent the fsm_alert" );
 
     // Logger Stuff
     m_log.setupConfig( config );
@@ -1367,12 +1390,19 @@ void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
 template <bool _useINDI>
 void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
 {
+    //--------- Ignore Git State --------//
     bool ig{ false };
     config( ig, "ignore_git" );
 
     if( !ig && m_gitAlert )
     {
         m_stateAlert = true;
+    }
+
+    //--------- Config Validation Mode --------//
+    if(config.isSet("config.validate"))
+    {
+        m_configOnly = true; //m_configOnly is from mx::application
     }
 
     //---------- Setup the logger ----------//
@@ -1418,35 +1448,44 @@ void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
 template <bool _useINDI>
 void MagAOXApp<_useINDI>::checkConfig() // virtual
 {
-    // This checks for unused config options and arguments, and logs them.
-    // This will catch both bad options, and options we aren't actually using (debugging).
+    // This checks for unused but valid config options and arguments, and logs them.
+    // This will catch options we aren't actually using but are configured(debugging).
     for( auto it = config.m_targets.begin(); it != config.m_targets.end(); ++it )
     {
         if( it->second.used == false )
         {
             std::string msg = it->second.name;
             if( config.m_sources && it->second.sources.size() > 0 )
+            {
                 msg += " [" + it->second.sources[0] + "]";
+            }
             log<text_log>( "Unused config target: " + msg, logPrio::LOG_WARNING );
         }
     }
 
+    // This checks for invalid/unknown config options and arguments, and logs them.
+    // This diagnosis problems in the config file
     if( config.m_unusedConfigs.size() > 0 )
     {
         for( auto it = config.m_unusedConfigs.begin(); it != config.m_unusedConfigs.end(); ++it )
         {
             if( it->second.used == true )
+            {
                 continue;
+            }
 
             std::string msg = it->second.name;
             if( config.m_sources && it->second.sources.size() > 0 )
+            {
                 msg += " [" + it->second.sources[0] + "]";
-
+            }
             log<text_log>( "Unrecognized config setting: " + msg, logPrio::LOG_CRITICAL );
+
             m_shutdown = true;
         }
     }
 
+    //MagAO-X does not use non-option CLI arguments. Presence probably points to a typo (missing - or --).
     if( config.nonOptions.size() > 0 )
     {
         for( size_t n = 0; n < config.nonOptions.size(); ++n )
@@ -1454,6 +1493,22 @@ void MagAOXApp<_useINDI>::checkConfig() // virtual
             log<text_log>( "Unrecognized command line argument: " + config.nonOptions[n], logPrio::LOG_CRITICAL );
         }
         m_shutdown = true;
+    }
+
+    if(m_configOnly) //validation mode
+    {
+        if(m_shutdown == true)
+        {
+            std::cerr << "\nThere were configuration errors.\n\n";
+        }
+        else
+        {
+            std::cerr << "\nConfiguration is valid.\n\n";
+        }
+    }
+    else if(m_shutdown == true)
+    {
+        doHelp = true; //Causes mx::application to print help and exit.
     }
 }
 
@@ -1516,6 +1571,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
         // We don't log this, because it won't be logged anyway.
         std::cerr << "\nCRITICAL: log thread not running.  Exiting.\n\n";
 
+        m_shutdown = 1; //just in case, though this should not have an effect yet.
+
         if( unlockPID() < 0 )
         {
             log<software_error>( { __FILE__, __LINE__, "error from unlockPID()" } );
@@ -1534,6 +1591,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
             state( stateCodes::FAILURE );
 
             log<software_critical>( { __FILE__, __LINE__, "error from setSigTermHandler()" } );
+
+            m_shutdown = 1; //just in case, though this should not have an effect yet.
 
             if( unlockPID() < 0 )
             {
@@ -1557,6 +1616,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
 
             log<software_critical>( { __FILE__, __LINE__, "error from appStartup()" } );
 
+            m_shutdown = 1; //just in case, though this should not have an effect yet.
+
             if( unlockPID() < 0 )
             {
                 log<software_error>( { __FILE__, __LINE__, "error from unlockPID()" } );
@@ -1574,6 +1635,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
             state( stateCodes::FAILURE );
 
             log<software_critical>( { __FILE__, __LINE__, "INDI failed to start." } );
+
+            m_shutdown = 1; //have to set so that child event loops know to exit
 
             // Have to call appShutdown since appStartup was called
             if( appShutdown() < 0 )
@@ -2218,11 +2281,11 @@ int MagAOXApp<_useINDI>::threadStart( std::thread &thrd,
                 return log<software_error, -1>( { __FILE__, __LINE__, errno, "error from open for " + cpuFile } );
             }
 
-            char pids[16];
+            char pids[128];
             snprintf( pids, sizeof( pids ), "%d", tpid );
 
             int w = write( wfd, pids, strnlen( pids, sizeof( pids ) ) );
-            if( w != (int)strlen( pids ) )
+            if( w != (int)strnlen( pids, sizeof(pids) ) )
             {
                 return log<software_error, -1>( { __FILE__, __LINE__, errno, "error on write" } );
             }
@@ -3140,6 +3203,26 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty &p,
 
 template <bool _useINDI>
 template <typename T>
+void MagAOXApp<_useINDI>::updatesIfChanged( pcf::IndiProperty &p,
+                                           const std::vector<const char *> &els,
+                                           const std::vector<T> &newVals,
+                                           pcf::IndiProperty::PropertyStateType newState )
+{
+    if( !_useINDI )
+    {
+        return;
+    }
+
+    if( !m_indiDriver )
+    {
+        return;
+    }
+
+    indi::updatesIfChanged( p, els, newVals, m_indiDriver, newState );
+}
+
+template <bool _useINDI>
+template <typename T>
 int MagAOXApp<_useINDI>::indiTargetUpdate( pcf::IndiProperty &localProperty,
                                            T &localTarget,
                                            const pcf::IndiProperty &remoteProperty,
@@ -3342,7 +3425,9 @@ template <bool _useINDI>
 bool MagAOXApp<_useINDI>::powerOnWaitElapsed()
 {
     if( !m_powerMgtEnabled || m_powerOnWait == 0 || m_powerOnCounter < 0 )
+    {
         return true;
+    }
 
     if( m_powerOnCounter * m_loopPause > ( (double)m_powerOnWait ) * 1e9 )
     {

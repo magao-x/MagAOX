@@ -9,6 +9,8 @@ import socket
 
 from magaox.indi.device import BaseConfig as IndiDeviceBaseConfig
 
+from ..constants import DEFAULT_DATA_DIRS
+
 log = logging.getLogger(__name__)
 
 __all__ = [
@@ -18,12 +20,6 @@ __all__ = [
     'BaseDeviceConfig',
 ]
 
-DEFAULT_DATA_DIRS = [
-    '/opt/MagAOX/logs',
-    '/opt/MagAOX/rawimages',
-    '/opt/MagAOX/telem',
-    '/opt/MagAOX/cacao',
-]
 
 SETUP_USERS_SQL_PATH = pathlib.Path(__file__).parent / 'sql' / 'setup_users.sql'
 

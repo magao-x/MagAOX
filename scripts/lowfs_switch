@@ -9,6 +9,7 @@
 
 echo 'Switching LOWFS to' $1
 
+#Stop relevant CACAO processes
 echo "runstop mvalC2dm-2" >> /milk/shm/ncpc_fpsCTRL.fifo
 echo "confstop mvalC2dm-2" >> /milk/shm/ncpc_fpsCTRL.fifo
 echo "runstop mfilt-2" >> /milk/shm/ncpc_fpsCTRL.fifo
@@ -18,25 +19,19 @@ echo "confstop wfs2cmodeval-2" >> /milk/shm/ncpc_fpsCTRL.fifo
 echo "runstop acquWFS-2" >> /milk/shm/ncpc_fpsCTRL.fifo
 echo "confstop acquWFS-2" >> /milk/shm/ncpc_fpsCTRL.fifo
 
+#move symlinks
 cmd='ln -sf /milk/shm/'$1'.im.shm /milk/shm/aol2_wfsim.im.shm'
 $cmd
 
 cmd='ln -sf /milk/shm/'$1'_dark.im.shm /milk/shm/aol2_wfsdark.im.shm'
 $cmd
 
+#restart only acquWFS.  
+
 sleep 1
 echo "confstart acquWFS-2" >> /milk/shm/ncpc_fpsCTRL.fifo
 sleep 1
 echo "runstart acquWFS-2" >> /milk/shm/ncpc_fpsCTRL.fifo
-sleep 1
-echo "confstart wfs2cmodeval-2" >> /milk/shm/ncpc_fpsCTRL.fifo
-sleep 1
-echo "runstart wfs2cmodeval-2" >> /milk/shm/ncpc_fpsCTRL.fifo
-sleep 1
-echo "confstart mfilt-2" >> /milk/shm/ncpc_fpsCTRL.fifo
-sleep 1
-echo "runstart mfilt-2" >> /milk/shm/ncpc_fpsCTRL.fifo
-sleep 1
-echo "confstart mvalC2dm-2" >> /milk/shm/ncpc_fpsCTRL.fifo
-sleep 1
-echo "runstart mvalC2dm-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+
+echo 'LOWFS switched to' $1 '.  You probably want to run cacao-calib-apply next.'
+

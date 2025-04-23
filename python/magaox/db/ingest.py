@@ -1,6 +1,8 @@
 import datetime
+from datetime import timezone
 import logging
 import os
+import pathlib
 
 from psycopg.types.json import Jsonb
 import orjson
@@ -9,10 +11,28 @@ import psycopg
 from psycopg import sql
 from tqdm import tqdm
 
-from .records import Telem, FileOrigin, FileReplica, FileIngestTime
+from .records import Telem, FileOrigin, FileReplica, FileIngestTime, UserLog
 from ..utils import creation_time_from_filename, parse_iso_datetime_as_utc
 
 log = logging.getLogger(__name__)
+
+
+def batch_user_log(cur: psycopg.Cursor, records: list[UserLog]):
+    """This will be where the logs will insert into user_logs table"""
+    cur.execute('BEGIN')
+    try:
+        cur.executemany('''
+        INSERT INTO user_log (ts, device, ec, msg)
+        VALUES (%s, %s, %s, %s::JSONB)
+        ON CONFLICT (ts, device) DO NOTHING;
+        ''', [(rec.ts, rec.device, rec.ec, orjson.dumps(rec.msg).decode('utf8')) for rec in records])
+    except Exception as e:
+        log.error(f"Error inserting user logs into the database: {e}")
+        cur.execute('ROLLBACK')
+    else:
+        cur.execute('COMMIT')
+        log.debug(f"Inserted {len(records)} user_logs into database")
+
 
 def batch_telem(cur: psycopg.Cursor, records: list[Telem]):
     cur.execute("BEGIN")
@@ -33,7 +53,7 @@ DO UPDATE SET modification_time = EXCLUDED.modification_time, size_bytes = EXCLU
 ''', [(rec.origin_host, rec.origin_path, rec.creation_time, rec.modification_time, rec.size_bytes) for rec in records])
     cur.execute("COMMIT")
 
-def identify_new_files(cur: psycopg.Cursor, this_host: str, paths: list[str]):
+def identify_new_files(cur: psycopg.Cursor, this_host: str, paths: list[pathlib.Path]):
     '''Returns the paths from ``paths`` that are not already part of the ``file_origins`` table'''
     if len(paths) == 0:
         return []
@@ -45,7 +65,7 @@ def identify_new_files(cur: psycopg.Cursor, this_host: str, paths: list[str]):
     INSERT INTO on_disk_files (path)
     VALUES (%s)
     '''
-        cur.executemany(query, [(x,) for x in paths])
+        cur.executemany(query, [(x.as_posix(),) for x in paths])
         # execute_values(cur, query, )
         log.debug(f"Loaded {len(paths)} paths into temporary table for new file identification")
 
@@ -70,6 +90,7 @@ def identify_new_files(cur: psycopg.Cursor, this_host: str, paths: list[str]):
         cur.execute("ROLLBACK")  # ensure temp table is deleted
     return new_files
 
+#add non-ingested-userlogs?
 
 def identify_non_ingested_telem(cur: psycopg.Cursor, host: str) -> list[str]:
     '''Use ``file_origins`` table to find ``.bintel`` file paths on the host
@@ -101,13 +122,14 @@ WHERE
         fns.append(row['origin_path'])
     return fns
 
-def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
+def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[pathlib.Path]):
     """Update the file inventory with any untracked local files (if any)"""
     cur.execute("BEGIN")
     for prefix in data_dirs:
         for dirpath, dirnames, filenames in os.walk(prefix):
+            dirpath = pathlib.Path(dirpath)
             log.info(f"Checking for new files in {dirpath}")
-            new_files = identify_new_files(cur, host, [os.path.join(dirpath, fn) for fn in filenames])
+            new_files = identify_new_files(cur, host, [dirpath / fn for fn in filenames])
             if len(new_files) == 0:
                 continue
             else:
@@ -125,7 +147,7 @@ def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
                     origin_host=host,
                     origin_path=fn,
                     creation_time=creation_time_from_filename(fn, stat_result=stat_result),
-                    modification_time=datetime.datetime.fromtimestamp(stat_result.st_mtime),
+                    modification_time=datetime.datetime.fromtimestamp(stat_result.st_mtime, tz=timezone.utc),
                     size_bytes=stat_result.st_size,
                 ))
             batch_file_origins(cur, origin_records)

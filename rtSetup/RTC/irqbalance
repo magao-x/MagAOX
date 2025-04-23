@@ -1,13 +1,13 @@
-#######################################
-# MagAO-X irqbalance configuration
+############################################
+# MagAO-X irqbalance configuration for RTC
 #
-# Edit the IRQBALANCE_BANNED_CPUS bitmask to match the r/t cpusets created in rtc_cpuset
+# Edit the IRQBALANCE_BANNED_CPUS bitmask to match the r/t cpusets created in make_cpusets
 #
-# Edit the IRQBALANCE_ARGS list of args to add a --banirq=x for each irq x you want to prevent being balanced
+# Edit the irqbalance_policyscript to include IRQs to ban
 # 
-# To install:
+# To Install:
 #
-# This should be installed by the configure_irqbalance.sh setup script.  You will need to delete the installed version.
+# If first time after new installation: $ cp /etc/sysconfig/irqbalance /etc/sysconfig/irqbalance.bup
 #
 # $ systemctl stop irqbalance
 #
@@ -15,7 +15,6 @@
 # $ systemctl start irqbalance
 # $ systemctl status irqbalance
 # 
-
 
 # irqbalance is a daemon process that distributes interrupts across
 # CPUS on SMP systems. The default is to rebalance once every 10

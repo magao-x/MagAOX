@@ -530,6 +530,7 @@ int picamCtrl::appLogic()
       //Might have gotten here because of a power off.
       if(powerState() != 1 || powerStateTarget() != 1) return 0;
 
+      std::cerr << __LINE__ << '\n';
       std::unique_lock<std::mutex> lock(m_indiMutex);
       if(connect() < 0)
       {
@@ -913,7 +914,7 @@ int picamCtrl::setPicamParameterOnline( PicamParameter parameter,
 inline
 int picamCtrl::connect()
 {
-
+   std::cerr << __LINE__ << '\n';
    PicamError error;
    PicamCameraID * id_array;
    piint id_count;
@@ -925,10 +926,16 @@ int picamCtrl::connect()
       m_acqBuff.memory_size = 0;
    }
 
+   std::cerr << __LINE__ << '\n';
+
    Picam_UninitializeLibrary();
+
+   std::cerr << __LINE__ << '\n';
 
    //Have to initialize the library every time.  Otherwise we won't catch a newly booted camera.
    Picam_InitializeLibrary();
+
+   std::cerr << __LINE__ << '\n';
 
    if(m_cameraHandle)
    {
@@ -936,10 +943,16 @@ int picamCtrl::connect()
       m_cameraHandle = 0;
    }
 
+   std::cerr << __LINE__ << '\n';
+
    Picam_GetAvailableCameraIDs(const_cast<const PicamCameraID **>(&id_array), &id_count);
+
+   std::cerr << __LINE__ << '\n';
 
    if(powerState() != 1 || powerStateTarget() != 1) return 0;
 
+   std::cerr << __LINE__ << '\n';
+   
    if(id_count == 0)
    {
       Picam_DestroyCameraIDs(id_array);
@@ -949,9 +962,13 @@ int picamCtrl::connect()
       state(stateCodes::NODEVICE);
       if(!stateLogged())
       {
-         log<text_log>("no P.I. Cameras available.");
+         log<text_log>("no P.I. Cameras available.", logPrio::LOG_NOTICE);
       }
       return 0;
+   }
+   else 
+   {
+      std::cerr << "found " << id_count << " PI cameras.\n";
    }
 
    for(int i=0; i< id_count; ++i)

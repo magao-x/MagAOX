@@ -20,19 +20,23 @@ if ! mount | grep -q "on $dest"; then
     exit 1
 fi
 for remote in icc rtc; do
-    if ! mount | grep -q "$remote:/data on /srv/$remote/data"; then
-        echo "NFS mount appears not to be active for $remote"
-        exit 1
-    fi
+    for folder in data calib; do
+        if ! mount | grep -q "on /srv/$remote/$folder"; then
+            echo "NFS mount appears not to be active for on /srv/$remote/$folder"
+            exit 1
+        fi
+    done
 done
 
-rsyncWithOptions="rsync --exclude='**/*_2022*' --exclude='**/*_2023*' -a --info=progress2"
+rsyncWithOptions="rsync --exclude=obs --exclude='*_2022*' --exclude='*_2023*' --exclude='*_2024*' -a --info=progress2"
 
 mkdir -p $dest/aoc/
 $rsyncWithOptions /data/ $dest/aoc/
 
 mkdir -p $dest/icc/
 $rsyncWithOptions /srv/icc/data/ $dest/icc/
+$rsyncWithOptions /srv/icc/calib/ $dest/icc/calib/
 
 mkdir -p $dest/rtc/
 $rsyncWithOptions /srv/rtc/data/ $dest/rtc/
+$rsyncWithOptions /srv/rtc/calib/ $dest/rtc/calib/

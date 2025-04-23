@@ -742,7 +742,11 @@ int ocam2KCtrl::getTemps()
          
          recordTemps();
          recordCamera();
-         return log<software_error, -1>({__FILE__, __LINE__, "Temp. parse error"});
+
+         std::cerr << "Temp. parse error. Response:\n" << response << std::endl;
+
+         //We don't trust the temps, but don't reconfig just for this.
+         return log<software_error, 0>({__FILE__, __LINE__, "Temp. parse error"});
       }
       
       m_temps = temps;
@@ -909,7 +913,10 @@ int ocam2KCtrl::getFPS()
             if(parseFPS( fps, response ) < 0) 
             {
                 if(powerState() != 1 || powerStateTarget() != 1) return -1;
-                return log<software_error, -1>({__FILE__, __LINE__, "fps parse error"});
+
+                std::cerr << "fps parse error. Response:\n" << response << "\n";
+
+                return log<software_error, 0>({__FILE__, __LINE__, "fps parse error"});
             }
             m_fps = fps;
 
@@ -1113,9 +1120,19 @@ int ocam2KCtrl::getEMGain()
       {
          if(powerState() != 1 || powerStateTarget() != 1) return -1;
          
-         std::cerr << "EM Gain parse error, response: " << response << "\n";
+         if(response.find("HV") != std::string::npos)
+         {
+            m_emGain = 1;
+            updateIfChanged(m_indiP_emProt, "status", std::string("TRIPPED"), INDI_ALERT);
+            return log<software_warning, -1>({__FILE__, __LINE__, "EM Gain tripped!"});
+
+         }
+
+         std::cerr << "EM Gain parse error, response:\n" << response << "\n";
+
          return log<software_error, -1>({__FILE__, __LINE__, "EM Gain parse error"});
       }
+
       m_emGain = emGain;
 
       return 0;
@@ -1136,7 +1153,11 @@ int ocam2KCtrl::setEMGain( )
    if(m_protectionReset == false)
    {
       log<text_log>("Attempt to set EM gain before protection reset", logPrio::LOG_NOTICE);
-      return 0;
+
+      if(m_emGainSet > 1) //we allow setting to 1 for safety
+      {
+         return 0;
+      }
    }
    
    unsigned emg  = m_emGainSet; //a float
@@ -1328,7 +1349,7 @@ int ocam2KCtrl::acquireAndCheckValid()
   
    //Get the image number to see if this is valid.
    //This is how it is in the ocam2_sdk:
-   unsigned currImageNumber = ((int *)m_image_p)[OCAM2_IMAGE_NB_OFFSET/4]; /* int offset */
+   unsigned currImageNumber = (reinterpret_cast<int *>(m_image_p))[OCAM2_IMAGE_NB_OFFSET/4]; /* int offset */
    m_currImageNumber = currImageNumber;
    
    //For the first loop after a restart

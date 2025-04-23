@@ -1,0 +1,32 @@
+#!/usr/bin/env python
+import glob
+import itertools
+import os
+import magaox.utils
+
+COMMON_FOLDERS = ['logs', 'telem', 'rawimages', 'cacao']
+
+def main(argv):
+    prefix, *semesters = argv
+    for semester in semesters:
+        start_dt, end_dt = magaox.utils.semester_to_datetime_range(semester)
+        prefix = os.path.realpath(prefix)
+        file_iters = []
+        for subfolder in COMMON_FOLDERS:
+            file_iters.append(glob.iglob(f"{prefix}/{subfolder}/**", recursive=True))
+        for fn in itertools.chain(*file_iters):
+            if fn[-1] == '/':
+                continue
+            try:
+                dt = magaox.utils.xfilename_to_utc_timestamp(fn)
+            except ValueError:
+                continue
+            if start_dt < dt < end_dt:
+                print(fn)
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) < 2:
+        print(f'usage: {sys.argv[0]} PREFIX SEMESTER [SEMESTER] ...')
+        sys.exit(1)
+    sys.exit(main(sys.argv[1:]))

@@ -51,6 +51,14 @@ echo "export MAGAOX_ROLE=$MAGAOX_ROLE" | sudo tee /etc/profile.d/magaox_role.sh
 export MAGAOX_ROLE
 set -euo pipefail
 
+# Put it all together
+if [[ $MAGAOX_ROLE == "workstation" ]]; then
+    $DIR/setup_users_and_groups.sh
+    log_success "Created users and configured groups"
+    log_success "logout and login before proceeding..."
+    exit 0
+fi
+
 source /etc/os-release
 # without hardened_usercopy=off, the ALPAO DM driver (really the Interface Corp card driver) will
 # trigger protections against suspicious copying between kernel and userspace
@@ -66,12 +74,8 @@ SPECTRE_CMDLINE_FIX="noibrs noibpb nopti nospectre_v2 nospectre_v1 l1tf=off nosp
 # disable 3rd party nvidia drivers
 NVIDIA_DRIVER_FIX="rd.driver.blacklist=nouveau nouveau.modeset=0"
 
-# Put it all together
-if [[ $MAGAOX_ROLE == "workstation" ]]; then
-    DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX"
-else
-    DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX $IOMMU_FIX"
-fi
+
+DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX $IOMMU_FIX"
 
 if ! sudo grep -r "$DESIRED_CMDLINE" /boot/loader/entries; then
     sudo cp /etc/default/grub /etc/default/grub.bak

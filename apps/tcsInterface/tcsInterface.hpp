@@ -1448,21 +1448,39 @@ int tcsInterface::getCatData()
 
    if(cdat.size() != 6)
    {
-      //This can occur if no target selected by operator
-      log<text_log>("Catalog data (catdata): TCS response wrong size, returned " + std::to_string(cdat.size()) +  " values", logPrio::LOG_WARNING);
-      m_catRA = 0;
+      bool pointing = false;
+
+      if(cdat.size() == 7)
+      {
+         if(cdat[6] == "Pointing")
+         {
+            pointing = true;
+         }
+      }
+
+      if(!pointing)
+      {
+         //This can occur if no target selected by operator
+         log<text_log>("Catalog data (catdata): TCS response wrong size, returned " + std::to_string(cdat.size()) +  " values", logPrio::LOG_WARNING);
+
+         for(size_t n = 0; n < cdat.size(); ++n)
+         {
+            std::cerr << n << " " << cdat[n] << "\n";
+         }
+         m_catRA = 0;
    
-      m_catDec = 0;
+         m_catDec = 0;
 
-      m_catEp = 0;
+         m_catEp = 0;
 
-      m_catRo = 0;
+         m_catRo = 0;
 
-      m_catRm = "";
+         m_catRm = "";
 
-      m_catObj = "none";
+         m_catObj = "none";
       
-      return 1;
+         return 1;
+      }
    }
 
    if(parse_xms(h,m,s,cdat[0]) != 0)
@@ -2819,12 +2837,10 @@ INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_loopState)(const pcf::IndiProperty &
 
    if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
-      std::cerr << "on\n";
       m_loopState = 2;
    }
    else
    {
-      std::cerr << "off\n";
       m_loopState = 0;
    }
 

@@ -22,7 +22,16 @@ import pathlib
 import os
 import re
 
-LOOKYLOO_DATA_ROOTS = ['/opt/MagAOX', '/srv/icc/data', '/srv/rtc/data']
+DEFAULT_PREFIX = pathlib.Path('/opt/MagAOX')
+
+DEFAULT_DATA_DIRS = [
+    'logs',
+    'rawimages',
+    'telem',
+    'calib',
+]
+
+LOOKYLOO_DATA_ROOTS = [pathlib.Path('/opt/MagAOX'), pathlib.Path('/srv/icc/data'), pathlib.Path('/srv/rtc/data')]
 QUICKLOOK_PATH = pathlib.Path('/data/obs')
 LOG_PATH = pathlib.Path('/opt/MagAOX/logs/lookyloo')
 HISTORY_FILENAME = ".lookyloo_succeeded"
@@ -33,6 +42,8 @@ ALL_CAMERAS = {
     'camsci1': DEFAULT_SEPARATE,
     'camsci2': DEFAULT_SEPARATE,
     'camlowfs': DEFAULT_SEPARATE,
+    'camflowfs': DEFAULT_SEPARATE,
+    'camllowfs': DEFAULT_SEPARATE,
     'camwfs': DEFAULT_SEPARATE,
     'camtip': DEFAULT_SEPARATE,
     'camacq': DEFAULT_SEPARATE,

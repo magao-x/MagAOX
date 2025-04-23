@@ -6,20 +6,24 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1395</width>
-    <height>872</height>
+    <width>2084</width>
+    <height>926</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Form</string>
   </property>
+  <property name="windowIcon">
+   <iconset resource="../../resources/magaox.qrc">
+    <normaloff>:/icons/arrow-all.png</normaloff>:/icons/arrow-all.png</iconset>
+  </property>
   <layout class="QGridLayout" name="gridLayout_4">
    <item row="0" column="0">
-    <layout class="QHBoxLayout" name="horizontalLayout_11" stretch="6,1,6,1,6">
+    <layout class="QHBoxLayout" name="hl_main" stretch="6,1,6,1,6,1,6">
      <item>
-      <layout class="QVBoxLayout" name="verticalLayout_3" stretch="2,2,0,0,2,2,2,0,0,0,0,0">
+      <layout class="QVBoxLayout" name="vl_pwfsAcq" stretch="1,1,2,1,1,1,1,1,3,2,2">
        <item>
-        <widget class="QLabel" name="labelModAndCenter">
+        <widget class="QLabel" name="label_modulation">
          <property name="maximumSize">
           <size>
            <width>16777215</width>
@@ -32,7 +36,7 @@
           </font>
          </property>
          <property name="text">
-          <string>TTM Modulator</string>
+          <string>Modulaion</string>
          </property>
          <property name="alignment">
           <set>Qt::AlignCenter</set>
@@ -40,14 +44,14 @@
         </widget>
        </item>
        <item>
-        <widget class="QLabel" name="modState">
+        <widget class="xqt::fsmDisplay" name="modwfs_fsm">
          <property name="palette">
           <palette>
            <active>
             <colorrole role="WindowText">
              <brush brushstyle="SolidPattern">
               <color alpha="255">
-               <red>170</red>
+               <red>0</red>
                <green>255</green>
                <blue>255</blue>
               </color>
@@ -58,7 +62,7 @@
             <colorrole role="WindowText">
              <brush brushstyle="SolidPattern">
               <color alpha="255">
-               <red>170</red>
+               <red>0</red>
                <green>255</green>
                <blue>255</blue>
               </color>
@@ -78,44 +82,14 @@
            </disabled>
           </palette>
          </property>
-         <property name="text">
-          <string>MODSTATE</string>
-         </property>
-         <property name="alignment">
-          <set>Qt::AlignCenter</set>
-         </property>
         </widget>
        </item>
        <item>
-        <layout class="QGridLayout" name="gridLayout_2" columnstretch="2,3,1">
-         <item row="0" column="1">
-          <widget class="xqt::statusEntry" name="modFreq_current">
-           <property name="focusPolicy">
-            <enum>Qt::NoFocus</enum>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <widget class="xqt::statusEntry" name="modRad_current">
-           <property name="focusPolicy">
-            <enum>Qt::NoFocus</enum>
-           </property>
-          </widget>
-         </item>
+        <layout class="QGridLayout" name="gl_modparams" columnstretch="2,0,0">
          <item row="0" column="0">
-          <widget class="QLabel" name="labelFreq">
+          <widget class="QLabel" name="label_modFreq">
            <property name="text">
             <string>Frequency [Hz]</string>
-           </property>
-           <property name="alignment">
-            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="0">
-          <widget class="QLabel" name="labelRad">
-           <property name="text">
-            <string>Radius [l/D]</string>
            </property>
            <property name="alignment">
             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -135,10 +109,34 @@
            </property>
           </spacer>
          </item>
+         <item row="0" column="1">
+          <widget class="xqt::statusEntry" name="modFreq_current">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="xqt::statusEntry" name="modRad_current">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_modRad">
+           <property name="text">
+            <string>Radius [l/D]</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+           </property>
+          </widget>
+         </item>
         </layout>
        </item>
        <item>
-        <layout class="QHBoxLayout" name="horizontalLayout_14">
+        <layout class="QHBoxLayout" name="hl_modbuttons">
          <item>
           <widget class="QPushButton" name="buttonMod_rest">
            <property name="focusPolicy">
@@ -172,7 +170,7 @@
         </layout>
        </item>
        <item>
-        <layout class="QHBoxLayout" name="horizontalLayout_7" stretch="3,3">
+        <layout class="QHBoxLayout" name="hl_modCh" stretch="3,3">
          <item>
           <widget class="xqt::statusEntry" name="modCh1">
            <property name="focusPolicy">
@@ -203,11 +201,11 @@
         </spacer>
        </item>
        <item>
-        <widget class="QLabel" name="labelMedianFluxes">
+        <widget class="QLabel" name="label_tipAlignment">
          <property name="maximumSize">
           <size>
            <width>16777215</width>
-           <height>64</height>
+           <height>35</height>
           </size>
          </property>
          <property name="font">
@@ -216,7 +214,7 @@
           </font>
          </property>
          <property name="text">
-          <string>Median Fluxes</string>
+          <string>Tip Alignment</string>
          </property>
          <property name="alignment">
           <set>Qt::AlignCenter</set>
@@ -224,107 +222,7 @@
         </widget>
        </item>
        <item>
-        <layout class="QGridLayout" name="gridLayout">
-         <item row="1" column="1">
-          <widget class="QLineEdit" name="med2">
-           <property name="focusPolicy">
-            <enum>Qt::NoFocus</enum>
-           </property>
-           <property name="alignment">
-            <set>Qt::AlignCenter</set>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="0">
-          <widget class="QLineEdit" name="med3">
-           <property name="focusPolicy">
-            <enum>Qt::NoFocus</enum>
-           </property>
-           <property name="alignment">
-            <set>Qt::AlignCenter</set>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="0">
-          <widget class="QLineEdit" name="med1">
-           <property name="focusPolicy">
-            <enum>Qt::NoFocus</enum>
-           </property>
-           <property name="alignment">
-            <set>Qt::AlignCenter</set>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="QLineEdit" name="med4">
-           <property name="focusPolicy">
-            <enum>Qt::NoFocus</enum>
-           </property>
-           <property name="alignment">
-            <set>Qt::AlignCenter</set>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </item>
-       <item>
-        <layout class="QHBoxLayout" name="horizontalLayout">
-         <item>
-          <spacer name="horizontalSpacer">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>40</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-         <item>
-          <widget class="QCheckBox" name="setDelta">
-           <property name="focusPolicy">
-            <enum>Qt::NoFocus</enum>
-           </property>
-           <property name="text">
-            <string>delta from mean</string>
-           </property>
-           <property name="checked">
-            <bool>true</bool>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <spacer name="horizontalSpacer_2">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>40</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-        </layout>
-       </item>
-       <item>
-        <spacer name="verticalSpacer">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>20</width>
-           <height>40</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-       <item>
-        <layout class="QHBoxLayout" name="horizontalLayout_6" stretch="1,2,1">
+        <layout class="QHBoxLayout" name="hl_ttmtel" stretch="1,2,1">
          <item>
           <spacer name="horizontalSpacer_17">
            <property name="orientation">
@@ -376,7 +274,7 @@
         </layout>
        </item>
        <item>
-        <layout class="QHBoxLayout" name="horizontalLayout_10" stretch="2,3,2,1,2">
+        <layout class="QHBoxLayout" name="hl_tipbuttons" stretch="2,3,2,1,2">
          <item>
           <spacer name="horizontalSpacer_4">
            <property name="orientation">
@@ -419,8 +317,9 @@
               <enum>Qt::NoFocus</enum>
              </property>
              <property name="icon">
-              <iconset>
-               <normaloff>:/icons/arrow_up_right_128.png</normaloff>:/icons/arrow_up_right_128.png</iconset>
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_up_right_128.png</normaloff>
+               <disabledoff>:/icons/arrow_up_right_dark_128.png</disabledoff>:/icons/arrow_up_right_128.png</iconset>
              </property>
             </widget>
            </item>
@@ -484,8 +383,9 @@
               <string/>
              </property>
              <property name="icon">
-              <iconset>
-               <normaloff>:/icons/arrow_up_left_128.png</normaloff>:/icons/arrow_up_left_128.png</iconset>
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_up_left_128.png</normaloff>
+               <disabledoff>:/icons/arrow_up_left_dark_128.png</disabledoff>:/icons/arrow_up_left_128.png</iconset>
              </property>
             </widget>
            </item>
@@ -516,8 +416,9 @@
               <string/>
              </property>
              <property name="icon">
-              <iconset>
-               <normaloff>:/icons/arrow_up_128.png</normaloff>:/icons/arrow_up_128.png</iconset>
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_up_128.png</normaloff>
+               <disabledoff>:/icons/arrow_up_dark_128.png</disabledoff>:/icons/arrow_up_128.png</iconset>
              </property>
             </widget>
            </item>
@@ -548,8 +449,9 @@
               <string/>
              </property>
              <property name="icon">
-              <iconset>
-               <normaloff>:/icons/arrow_right_128.png</normaloff>:/icons/arrow_right_128.png</iconset>
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_right_128.png</normaloff>
+               <disabledoff>:/icons/arrow_right_dark_128.png</disabledoff>:/icons/arrow_right_128.png</iconset>
              </property>
             </widget>
            </item>
@@ -580,8 +482,9 @@
               <string/>
              </property>
              <property name="icon">
-              <iconset>
-               <normaloff>:/icons/arrow_down_left_128.png</normaloff>:/icons/arrow_down_left_128.png</iconset>
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_down_left_128.png</normaloff>
+               <disabledoff>:/icons/arrow_down_left_dark_128.png</disabledoff>:/icons/arrow_down_left_128.png</iconset>
              </property>
             </widget>
            </item>
@@ -612,8 +515,9 @@
               <string/>
              </property>
              <property name="icon">
-              <iconset>
-               <normaloff>:/icons/arrow_left_128.png</normaloff>:/icons/arrow_left_128.png</iconset>
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_left_128.png</normaloff>
+               <disabledoff>:/icons/arrow_left_dark_128.png</disabledoff>:/icons/arrow_left_128.png</iconset>
              </property>
             </widget>
            </item>
@@ -644,8 +548,9 @@
               <string/>
              </property>
              <property name="icon">
-              <iconset>
-               <normaloff>:/icons/arrow_down_128.png</normaloff>:/icons/arrow_down_128.png</iconset>
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_down_128.png</normaloff>
+               <disabledoff>:/icons/arrow_down_dark_128.png</disabledoff>:/icons/arrow_down_128.png</iconset>
              </property>
             </widget>
            </item>
@@ -676,8 +581,9 @@
               <string/>
              </property>
              <property name="icon">
-              <iconset>
-               <normaloff>:/icons/arrow_down_right_128.png</normaloff>:/icons/arrow_down_right_128.png</iconset>
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_down_right_128.png</normaloff>
+               <disabledoff>:/icons/arrow_down_right_dark_128.png</disabledoff>:/icons/arrow_down_right_128.png</iconset>
              </property>
             </widget>
            </item>
@@ -804,6 +710,274 @@
          </item>
         </layout>
        </item>
+       <item>
+        <spacer name="verticalSpacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item>
+        <layout class="QVBoxLayout" name="verticalLayout_2">
+         <item>
+          <widget class="QLabel" name="picoscix_label">
+           <property name="text">
+            <string>pico sci-x</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_6">
+           <item>
+            <spacer name="horizontalSpacer_40">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <widget class="xqt::statusEntry" name="picoscix_pos"/>
+           </item>
+           <item>
+            <spacer name="horizontalSpacer_41">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout">
+           <item>
+            <spacer name="horizontalSpacer_42">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <layout class="QGridLayout" name="gridLayout">
+             <item row="0" column="1">
+              <widget class="QPushButton" name="picoscix_scale">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
+                 <horstretch>1</horstretch>
+                 <verstretch>1</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="minimumSize">
+                <size>
+                 <width>40</width>
+                 <height>40</height>
+                </size>
+               </property>
+               <property name="maximumSize">
+                <size>
+                 <width>40</width>
+                 <height>40</height>
+                </size>
+               </property>
+               <property name="font">
+                <font>
+                 <pointsize>11</pointsize>
+                </font>
+               </property>
+               <property name="focusPolicy">
+                <enum>Qt::NoFocus</enum>
+               </property>
+               <property name="text">
+                <string>0.01</string>
+               </property>
+              </widget>
+             </item>
+             <item row="0" column="2">
+              <widget class="QPushButton" name="picoscix_r">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
+                 <horstretch>1</horstretch>
+                 <verstretch>1</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="minimumSize">
+                <size>
+                 <width>40</width>
+                 <height>40</height>
+                </size>
+               </property>
+               <property name="maximumSize">
+                <size>
+                 <width>40</width>
+                 <height>40</height>
+                </size>
+               </property>
+               <property name="focusPolicy">
+                <enum>Qt::NoFocus</enum>
+               </property>
+               <property name="text">
+                <string/>
+               </property>
+               <property name="icon">
+                <iconset resource="../../resources/magaox.qrc">
+                 <normaloff>:/icons/arrow_right_128.png</normaloff>
+                 <disabledoff>:/icons/arrow_right_dark_128.png</disabledoff>:/icons/arrow_right_128.png</iconset>
+               </property>
+              </widget>
+             </item>
+             <item row="0" column="0">
+              <widget class="QPushButton" name="picoscix_l">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
+                 <horstretch>1</horstretch>
+                 <verstretch>1</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="minimumSize">
+                <size>
+                 <width>40</width>
+                 <height>40</height>
+                </size>
+               </property>
+               <property name="maximumSize">
+                <size>
+                 <width>40</width>
+                 <height>40</height>
+                </size>
+               </property>
+               <property name="focusPolicy">
+                <enum>Qt::NoFocus</enum>
+               </property>
+               <property name="text">
+                <string/>
+               </property>
+               <property name="icon">
+                <iconset resource="../../resources/magaox.qrc">
+                 <normaloff>:/icons/arrow_left_128.png</normaloff>
+                 <disabledoff>:/icons/arrow_left_dark_128.png</disabledoff>:/icons/arrow_left_128.png</iconset>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <spacer name="horizontalSpacer_43">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_7" stretch="2,2,5,1,3">
+           <item>
+            <spacer name="horizontalSpacer_44">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <widget class="QLabel" name="picoscix_combo_label">
+             <property name="text">
+              <string>goto:</string>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QComboBox" name="picoscix_combo"/>
+           </item>
+           <item>
+            <widget class="QPushButton" name="picoscix_go">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
+               <horstretch>1</horstretch>
+               <verstretch>1</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>40</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>40</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+             <property name="icon">
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow-right-drop-circle-outline.png</normaloff>:/icons/arrow-right-drop-circle-outline.png</iconset>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="horizontalSpacer_45">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </item>
+        </layout>
+       </item>
       </layout>
      </item>
      <item>
@@ -820,125 +994,7 @@
       </spacer>
      </item>
      <item>
-      <layout class="QVBoxLayout" name="gridPupilMeds" stretch="1,0,0,0,0,1,0,0">
-       <item>
-        <layout class="QVBoxLayout" name="verticalLayout" stretch="0">
-         <item>
-          <layout class="QGridLayout" name="gridLayout_5">
-           <item row="0" column="1">
-            <widget class="QLabel" name="labelNCPC">
-             <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
-               <horstretch>0</horstretch>
-               <verstretch>0</verstretch>
-              </sizepolicy>
-             </property>
-             <property name="minimumSize">
-              <size>
-               <width>0</width>
-               <height>25</height>
-              </size>
-             </property>
-             <property name="maximumSize">
-              <size>
-               <width>16777215</width>
-               <height>35</height>
-              </size>
-             </property>
-             <property name="font">
-              <font>
-               <pointsize>12</pointsize>
-              </font>
-             </property>
-             <property name="text">
-              <string>NCPC</string>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="0" column="0">
-            <widget class="QLabel" name="labelTweeter">
-             <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
-               <horstretch>0</horstretch>
-               <verstretch>0</verstretch>
-              </sizepolicy>
-             </property>
-             <property name="minimumSize">
-              <size>
-               <width>0</width>
-               <height>25</height>
-              </size>
-             </property>
-             <property name="maximumSize">
-              <size>
-               <width>16777215</width>
-               <height>35</height>
-              </size>
-             </property>
-             <property name="font">
-              <font>
-               <pointsize>12</pointsize>
-              </font>
-             </property>
-             <property name="text">
-              <string>Tweeter</string>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="1" column="1">
-            <widget class="QPushButton" name="buttonNCPCTest_set">
-             <property name="sizePolicy">
-              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-               <horstretch>1</horstretch>
-               <verstretch>1</verstretch>
-              </sizepolicy>
-             </property>
-             <property name="minimumSize">
-              <size>
-               <width>150</width>
-               <height>25</height>
-              </size>
-             </property>
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="text">
-              <string>set test</string>
-             </property>
-            </widget>
-           </item>
-           <item row="1" column="0">
-            <widget class="QPushButton" name="buttonTweeterTest_set">
-             <property name="sizePolicy">
-              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-               <horstretch>1</horstretch>
-               <verstretch>1</verstretch>
-              </sizepolicy>
-             </property>
-             <property name="minimumSize">
-              <size>
-               <width>150</width>
-               <height>25</height>
-              </size>
-             </property>
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="text">
-              <string>set test</string>
-             </property>
-            </widget>
-           </item>
-          </layout>
-         </item>
-        </layout>
-       </item>
+      <layout class="QVBoxLayout" name="vl_pupilAlign" stretch="0,0,0,0,1,0,0">
        <item>
         <spacer name="verticalSpacer_2">
          <property name="orientation">
@@ -1018,7 +1074,96 @@
         </spacer>
        </item>
        <item>
-        <layout class="QVBoxLayout" name="layout_pupilalign" stretch="1,0,0,0">
+        <layout class="QVBoxLayout" name="layout_pupilalign" stretch="0,1,0,0,0">
+         <item>
+          <layout class="QVBoxLayout" name="verticalLayout">
+           <item>
+            <layout class="QHBoxLayout" name="hl_tweeterTest" stretch="1,2,2,1">
+             <item>
+              <spacer name="horizontalSpacer_25">
+               <property name="orientation">
+                <enum>Qt::Horizontal</enum>
+               </property>
+               <property name="sizeHint" stdset="0">
+                <size>
+                 <width>40</width>
+                 <height>20</height>
+                </size>
+               </property>
+              </spacer>
+             </item>
+             <item>
+              <widget class="QLabel" name="label_tweeter">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="minimumSize">
+                <size>
+                 <width>0</width>
+                 <height>25</height>
+                </size>
+               </property>
+               <property name="maximumSize">
+                <size>
+                 <width>16777215</width>
+                 <height>35</height>
+                </size>
+               </property>
+               <property name="font">
+                <font>
+                 <pointsize>12</pointsize>
+                </font>
+               </property>
+               <property name="text">
+                <string>Tweeter</string>
+               </property>
+               <property name="alignment">
+                <set>Qt::AlignCenter</set>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="buttonTweeterTest_set">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                 <horstretch>1</horstretch>
+                 <verstretch>1</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="minimumSize">
+                <size>
+                 <width>150</width>
+                 <height>25</height>
+                </size>
+               </property>
+               <property name="focusPolicy">
+                <enum>Qt::NoFocus</enum>
+               </property>
+               <property name="text">
+                <string>set test</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <spacer name="horizontalSpacer_26">
+               <property name="orientation">
+                <enum>Qt::Horizontal</enum>
+               </property>
+               <property name="sizeHint" stdset="0">
+                <size>
+                 <width>40</width>
+                 <height>20</height>
+                </size>
+               </property>
+              </spacer>
+             </item>
+            </layout>
+           </item>
+          </layout>
+         </item>
          <item>
           <widget class="QLabel" name="labelPupilSteering">
            <property name="maximumSize">
@@ -1205,8 +1350,9 @@
               <string/>
              </property>
              <property name="icon">
-              <iconset>
-               <normaloff>:/icons/arrow_down_right_128.png</normaloff>:/icons/arrow_down_right_128.png</iconset>
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_down_right_128.png</normaloff>
+               <disabledoff>:/icons/arrow_down_right_dark_128.png</disabledoff>:/icons/arrow_down_right_128.png</iconset>
              </property>
             </widget>
            </item>
@@ -1237,8 +1383,9 @@
               <string/>
              </property>
              <property name="icon">
-              <iconset>
-               <normaloff>:/icons/arrow_down_left_128.png</normaloff>:/icons/arrow_down_left_128.png</iconset>
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_down_left_128.png</normaloff>
+               <disabledoff>:/icons/arrow_down_left_dark_128.png</disabledoff>:/icons/arrow_down_left_128.png</iconset>
              </property>
             </widget>
            </item>
@@ -1269,8 +1416,9 @@
               <string/>
              </property>
              <property name="icon">
-              <iconset>
-               <normaloff>:/icons/arrow_up_right_128.png</normaloff>:/icons/arrow_up_right_128.png</iconset>
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_up_right_128.png</normaloff>
+               <disabledoff>:/icons/arrow_up_right_dark_128.png</disabledoff>:/icons/arrow_up_right_128.png</iconset>
              </property>
             </widget>
            </item>
@@ -1301,8 +1449,9 @@
               <string/>
              </property>
              <property name="icon">
-              <iconset>
-               <normaloff>:/icons/arrow_up_left_128.png</normaloff>:/icons/arrow_up_left_128.png</iconset>
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_up_left_128.png</normaloff>
+               <disabledoff>:/icons/arrow_up_left_dark_128.png</disabledoff>:/icons/arrow_up_left_128.png</iconset>
              </property>
             </widget>
            </item>
@@ -1337,9 +1486,98 @@
         </spacer>
        </item>
        <item>
-        <layout class="QVBoxLayout" name="gridPupilMeds_3" stretch="1,0,1">
+        <layout class="QVBoxLayout" name="gridNCPC" stretch="1,0,1">
          <item>
-          <layout class="QVBoxLayout" name="layout_pupilalign_3" stretch="1,0,0,0">
+          <layout class="QVBoxLayout" name="layout_pupilalign_3" stretch="0,0,0,0,0">
+           <item>
+            <layout class="QVBoxLayout" name="verticalLayout_5">
+             <item>
+              <layout class="QHBoxLayout" name="hl_ncpcTest" stretch="1,2,2,1">
+               <item>
+                <spacer name="horizontalSpacer_22">
+                 <property name="orientation">
+                  <enum>Qt::Horizontal</enum>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>40</width>
+                   <height>20</height>
+                  </size>
+                 </property>
+                </spacer>
+               </item>
+               <item>
+                <widget class="QLabel" name="label_ncpc">
+                 <property name="sizePolicy">
+                  <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+                   <horstretch>0</horstretch>
+                   <verstretch>0</verstretch>
+                  </sizepolicy>
+                 </property>
+                 <property name="minimumSize">
+                  <size>
+                   <width>0</width>
+                   <height>25</height>
+                  </size>
+                 </property>
+                 <property name="maximumSize">
+                  <size>
+                   <width>16777215</width>
+                   <height>35</height>
+                  </size>
+                 </property>
+                 <property name="font">
+                  <font>
+                   <pointsize>12</pointsize>
+                  </font>
+                 </property>
+                 <property name="text">
+                  <string>NCPC</string>
+                 </property>
+                 <property name="alignment">
+                  <set>Qt::AlignCenter</set>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="buttonNCPCTest_set">
+                 <property name="sizePolicy">
+                  <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                   <horstretch>1</horstretch>
+                   <verstretch>1</verstretch>
+                  </sizepolicy>
+                 </property>
+                 <property name="minimumSize">
+                  <size>
+                   <width>150</width>
+                   <height>25</height>
+                  </size>
+                 </property>
+                 <property name="focusPolicy">
+                  <enum>Qt::NoFocus</enum>
+                 </property>
+                 <property name="text">
+                  <string>set test</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <spacer name="horizontalSpacer_24">
+                 <property name="orientation">
+                  <enum>Qt::Horizontal</enum>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>40</width>
+                   <height>20</height>
+                  </size>
+                 </property>
+                </spacer>
+               </item>
+              </layout>
+             </item>
+            </layout>
+           </item>
            <item>
             <widget class="QLabel" name="labelTTMPeri">
              <property name="maximumSize">
@@ -1496,8 +1734,9 @@
                 <string/>
                </property>
                <property name="icon">
-                <iconset>
-                 <normaloff>:/icons/arrow_right_128.png</normaloff>:/icons/arrow_right_128.png</iconset>
+                <iconset resource="../../resources/magaox.qrc">
+                 <normaloff>:/icons/arrow_right_128.png</normaloff>
+                 <disabledoff>:/icons/arrow_right_dark_128.png</disabledoff>:/icons/arrow_right_128.png</iconset>
                </property>
               </widget>
              </item>
@@ -1528,8 +1767,9 @@
                 <string/>
                </property>
                <property name="icon">
-                <iconset>
-                 <normaloff>:/icons/arrow_up_128.png</normaloff>:/icons/arrow_up_128.png</iconset>
+                <iconset resource="../../resources/magaox.qrc">
+                 <normaloff>:/icons/arrow_up_128.png</normaloff>
+                 <disabledoff>:/icons/arrow_up_dark_128.png</disabledoff>:/icons/arrow_up_128.png</iconset>
                </property>
               </widget>
              </item>
@@ -1560,8 +1800,9 @@
                 <string/>
                </property>
                <property name="icon">
-                <iconset>
-                 <normaloff>:/icons/arrow_left_128.png</normaloff>:/icons/arrow_left_128.png</iconset>
+                <iconset resource="../../resources/magaox.qrc">
+                 <normaloff>:/icons/arrow_left_128.png</normaloff>
+                 <disabledoff>:/icons/arrow_left_dark_128.png</disabledoff>:/icons/arrow_left_128.png</iconset>
                </property>
               </widget>
              </item>
@@ -1625,8 +1866,9 @@
                 <string/>
                </property>
                <property name="icon">
-                <iconset>
-                 <normaloff>:/icons/arrow_down_128.png</normaloff>:/icons/arrow_down_128.png</iconset>
+                <iconset resource="../../resources/magaox.qrc">
+                 <normaloff>:/icons/arrow_down_128.png</normaloff>
+                 <disabledoff>:/icons/arrow_down_dark_128.png</disabledoff>:/icons/arrow_down_128.png</iconset>
                </property>
               </widget>
              </item>
@@ -1665,124 +1907,502 @@
       </spacer>
      </item>
      <item>
-      <layout class="QVBoxLayout" name="verticalLayout_2">
+      <layout class="QVBoxLayout" name="vl_camlens">
        <item>
-        <layout class="QVBoxLayout" name="camlens_layout">
+        <spacer name="verticalSpacer_6">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item>
+        <widget class="QLabel" name="labelPupilFitting">
+         <property name="maximumSize">
+          <size>
+           <width>16777215</width>
+           <height>64</height>
+          </size>
+         </property>
+         <property name="font">
+          <font>
+           <pointsize>12</pointsize>
+          </font>
+         </property>
+         <property name="text">
+          <string>Pupil Fitting</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QGridLayout" name="gl_pupilFit" rowstretch="1">
+         <item row="0" column="1">
+          <widget class="xqt::statusEntry" name="fitAvgTime">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="0">
+          <widget class="xqt::statusEntry" name="fitThreshold">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <spacer name="verticalSpacer_8">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item>
+        <layout class="QVBoxLayout" name="vl_medians" stretch="1,4">
          <item>
-          <layout class="QVBoxLayout" name="verticalLayout_4">
-           <item>
-            <widget class="QLabel" name="labelPupilAlignment">
-             <property name="maximumSize">
-              <size>
-               <width>16777215</width>
-               <height>35</height>
-              </size>
-             </property>
-             <property name="font">
-              <font>
-               <pointsize>12</pointsize>
-              </font>
-             </property>
-             <property name="text">
-              <string>Pupil Alignment Loop</string>
+          <widget class="QLabel" name="labelMedianFluxes">
+           <property name="maximumSize">
+            <size>
+             <width>16777215</width>
+             <height>64</height>
+            </size>
+           </property>
+           <property name="font">
+            <font>
+             <pointsize>12</pointsize>
+            </font>
+           </property>
+           <property name="text">
+            <string>Median Fluxes</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <layout class="QGridLayout" name="gl_medians">
+           <item row="1" column="1">
+            <widget class="QLineEdit" name="med2">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
              </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
             </widget>
            </item>
-           <item>
-            <layout class="QHBoxLayout" name="horizontalLayout_2">
-             <item>
-              <spacer name="horizontalSpacer_13">
-               <property name="orientation">
-                <enum>Qt::Horizontal</enum>
-               </property>
-               <property name="sizeHint" stdset="0">
-                <size>
-                 <width>40</width>
-                 <height>20</height>
-                </size>
-               </property>
-              </spacer>
-             </item>
-             <item>
-              <widget class="xqt::statusEntry" name="pupilAlign_gain">
-               <property name="focusPolicy">
-                <enum>Qt::NoFocus</enum>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <spacer name="horizontalSpacer_14">
-               <property name="orientation">
-                <enum>Qt::Horizontal</enum>
-               </property>
-               <property name="sizeHint" stdset="0">
-                <size>
-                 <width>40</width>
-                 <height>20</height>
-                </size>
-               </property>
-              </spacer>
-             </item>
-            </layout>
-           </item>
-           <item>
-            <layout class="QHBoxLayout" name="horizontalLayout_5">
-             <item>
-              <spacer name="horizontalSpacer_15">
-               <property name="orientation">
-                <enum>Qt::Horizontal</enum>
-               </property>
-               <property name="sizeHint" stdset="0">
-                <size>
-                 <width>40</width>
-                 <height>20</height>
-                </size>
-               </property>
-              </spacer>
-             </item>
-             <item>
-              <widget class="QSlider" name="pupilAlign_loopSlider">
-               <property name="focusPolicy">
-                <enum>Qt::NoFocus</enum>
-               </property>
-               <property name="orientation">
-                <enum>Qt::Horizontal</enum>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <spacer name="horizontalSpacer_16">
-               <property name="orientation">
-                <enum>Qt::Horizontal</enum>
-               </property>
-               <property name="sizeHint" stdset="0">
-                <size>
-                 <width>40</width>
-                 <height>20</height>
-                </size>
-               </property>
-              </spacer>
-             </item>
-            </layout>
-           </item>
-           <item>
-            <spacer name="verticalSpacer_4">
-             <property name="orientation">
-              <enum>Qt::Vertical</enum>
+           <item row="0" column="0">
+            <widget class="QLineEdit" name="med3">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
              </property>
-             <property name="sizeHint" stdset="0">
-              <size>
-               <width>20</width>
-               <height>40</height>
-              </size>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
              </property>
-            </spacer>
+            </widget>
+           </item>
+           <item row="1" column="0">
+            <widget class="QLineEdit" name="med1">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="1">
+            <widget class="QLineEdit" name="med4">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
+             </property>
+            </widget>
            </item>
           </layout>
          </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="hl_medDelta">
+         <item>
+          <spacer name="horizontalSpacer">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="setDelta">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="text">
+            <string>delta from mean</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="horizontalSpacer_2">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <spacer name="verticalSpacer_12">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item>
+        <widget class="QLabel" name="label_pupilPositions">
+         <property name="maximumSize">
+          <size>
+           <width>16777215</width>
+           <height>64</height>
+          </size>
+         </property>
+         <property name="font">
+          <font>
+           <pointsize>12</pointsize>
+          </font>
+         </property>
+         <property name="text">
+          <string>Pupil Positions</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QGridLayout" name="gridCoords" rowstretch="1,0,0,0,0,0,0,0,0">
+         <item row="8" column="3">
+          <widget class="QLineEdit" name="coordAvg_D">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="7" column="3">
+          <widget class="QLineEdit" name="coordLL_D">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="3">
+          <widget class="QLineEdit" name="coordUR_D">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="8" column="2">
+          <widget class="QLineEdit" name="coordAvg_y">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="1">
+          <widget class="QLineEdit" name="coordUL_x">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="6" column="1">
+          <widget class="QLineEdit" name="coordLR_x">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="8" column="1">
+          <widget class="QLineEdit" name="coordAvg_x">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="6" column="0">
+          <widget class="QLabel" name="labelLR">
+           <property name="text">
+            <string>LR</string>
+           </property>
+          </widget>
+         </item>
+         <item row="7" column="0">
+          <widget class="QLabel" name="labelLL">
+           <property name="text">
+            <string>LL</string>
+           </property>
+          </widget>
+         </item>
+         <item row="6" column="3">
+          <widget class="QLineEdit" name="coordLR_D">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="2">
+          <widget class="QLabel" name="labely">
+           <property name="text">
+            <string>y</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="0">
+          <widget class="QLabel" name="labelUR">
+           <property name="text">
+            <string>UR</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="1">
+          <widget class="QLineEdit" name="coordUR_x">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="0">
+          <widget class="QLabel" name="labelUL">
+           <property name="text">
+            <string>UL</string>
+           </property>
+          </widget>
+         </item>
+         <item row="7" column="1">
+          <widget class="QLineEdit" name="coordLL_x">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="7" column="2">
+          <widget class="QLineEdit" name="coordLL_y">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="3">
+          <widget class="QLabel" name="labelD">
+           <property name="text">
+            <string>D</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="6" column="2">
+          <widget class="QLineEdit" name="coordLR_y">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="8" column="0">
+          <widget class="QLabel" name="labelAvg">
+           <property name="text">
+            <string>Avg:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="2">
+          <widget class="QLineEdit" name="coordUL_y">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QPushButton" name="buttonExpFit">
+           <property name="minimumSize">
+            <size>
+             <width>30</width>
+             <height>30</height>
+            </size>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="text">
+            <string/>
+           </property>
+           <property name="icon">
+            <iconset resource="../../resources/magaox.qrc">
+             <normaloff>:/icons/keyboard_double_arrow_down.png</normaloff>:/icons/keyboard_double_arrow_down.png</iconset>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="QLabel" name="labelx">
+           <property name="text">
+            <string>x</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="3">
+          <widget class="QLineEdit" name="coordUL_D">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="2">
+          <widget class="QLineEdit" name="coordUR_y">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_3">
+         <item>
+          <spacer name="horizontalSpacer_10">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="setDelta_pup">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="text">
+            <string>delta from set pt</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="horizontalSpacer_9">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QVBoxLayout" name="camlens_layout">
          <item>
           <spacer name="verticalSpacer_7">
            <property name="orientation">
@@ -1797,7 +2417,7 @@
           </spacer>
          </item>
          <item>
-          <widget class="QLabel" name="camlens_label">
+          <widget class="QLabel" name="label_camlens">
            <property name="font">
             <font>
              <pointsize>12</pointsize>
@@ -1812,51 +2432,130 @@
           </widget>
          </item>
          <item>
-          <widget class="QLabel" name="camlens_fsm">
-           <property name="palette">
-            <palette>
-             <active>
-              <colorrole role="WindowText">
-               <brush brushstyle="SolidPattern">
-                <color alpha="255">
-                 <red>170</red>
-                 <green>255</green>
-                 <blue>255</blue>
-                </color>
-               </brush>
-              </colorrole>
-             </active>
-             <inactive>
-              <colorrole role="WindowText">
-               <brush brushstyle="SolidPattern">
-                <color alpha="255">
-                 <red>170</red>
-                 <green>255</green>
-                 <blue>255</blue>
-                </color>
-               </brush>
-              </colorrole>
-             </inactive>
-             <disabled>
-              <colorrole role="WindowText">
-               <brush brushstyle="SolidPattern">
-                <color alpha="255">
-                 <red>96</red>
-                 <green>95</green>
-                 <blue>94</blue>
-                </color>
-               </brush>
-              </colorrole>
-             </disabled>
-            </palette>
-           </property>
-           <property name="text">
-            <string>CAMLENS FSM</string>
-           </property>
-           <property name="alignment">
-            <set>Qt::AlignCenter</set>
-           </property>
-          </widget>
+          <layout class="QGridLayout" name="gl_camlens_fsm" columnstretch="1,10,1">
+           <item row="0" column="0">
+            <widget class="QLabel" name="label_camlensX_fsm">
+             <property name="text">
+              <string>X:</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <widget class="xqt::fsmDisplay" name="camlensY_fsm">
+             <property name="palette">
+              <palette>
+               <active>
+                <colorrole role="WindowText">
+                 <brush brushstyle="SolidPattern">
+                  <color alpha="255">
+                   <red>0</red>
+                   <green>255</green>
+                   <blue>255</blue>
+                  </color>
+                 </brush>
+                </colorrole>
+               </active>
+               <inactive>
+                <colorrole role="WindowText">
+                 <brush brushstyle="SolidPattern">
+                  <color alpha="255">
+                   <red>0</red>
+                   <green>255</green>
+                   <blue>255</blue>
+                  </color>
+                 </brush>
+                </colorrole>
+               </inactive>
+               <disabled>
+                <colorrole role="WindowText">
+                 <brush brushstyle="SolidPattern">
+                  <color alpha="255">
+                   <red>96</red>
+                   <green>95</green>
+                   <blue>94</blue>
+                  </color>
+                 </brush>
+                </colorrole>
+               </disabled>
+              </palette>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="0">
+            <widget class="QLabel" name="label_camlensY_fsm">
+             <property name="text">
+              <string>Y:</string>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="1">
+            <widget class="xqt::fsmDisplay" name="camlensX_fsm">
+             <property name="palette">
+              <palette>
+               <active>
+                <colorrole role="WindowText">
+                 <brush brushstyle="SolidPattern">
+                  <color alpha="255">
+                   <red>0</red>
+                   <green>255</green>
+                   <blue>255</blue>
+                  </color>
+                 </brush>
+                </colorrole>
+               </active>
+               <inactive>
+                <colorrole role="WindowText">
+                 <brush brushstyle="SolidPattern">
+                  <color alpha="255">
+                   <red>0</red>
+                   <green>255</green>
+                   <blue>255</blue>
+                  </color>
+                 </brush>
+                </colorrole>
+               </inactive>
+               <disabled>
+                <colorrole role="WindowText">
+                 <brush brushstyle="SolidPattern">
+                  <color alpha="255">
+                   <red>96</red>
+                   <green>95</green>
+                   <blue>94</blue>
+                  </color>
+                 </brush>
+                </colorrole>
+               </disabled>
+              </palette>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="2">
+            <spacer name="horizontalSpacer_36">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item row="1" column="2">
+            <spacer name="horizontalSpacer_37">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
          </item>
          <item>
           <layout class="QHBoxLayout" name="horizontalLayout_9" stretch="0,0">
@@ -1864,14 +2563,14 @@
             <enum>QLayout::SetFixedSize</enum>
            </property>
            <item>
-            <widget class="xqt::statusEntry" name="camlens_x_pos">
+            <widget class="xqt::statusEntry" name="camlensX_pos">
              <property name="focusPolicy">
               <enum>Qt::NoFocus</enum>
              </property>
             </widget>
            </item>
            <item>
-            <widget class="xqt::statusEntry" name="camlens_y_pos">
+            <widget class="xqt::statusEntry" name="camlensY_pos">
              <property name="focusPolicy">
               <enum>Qt::NoFocus</enum>
              </property>
@@ -1882,26 +2581,232 @@
         </layout>
        </item>
        <item>
-        <layout class="QVBoxLayout" name="pupilfitLayout">
+        <layout class="QHBoxLayout" name="camlensButtonsLayout_h">
          <item>
-          <spacer name="verticalSpacer_6">
+          <spacer name="horizontalSpacer_7">
            <property name="orientation">
-            <enum>Qt::Vertical</enum>
+            <enum>Qt::Horizontal</enum>
            </property>
            <property name="sizeHint" stdset="0">
             <size>
-             <width>20</width>
-             <height>40</height>
+             <width>40</width>
+             <height>20</height>
             </size>
            </property>
           </spacer>
          </item>
          <item>
-          <widget class="QLabel" name="labelPupilFitting">
+          <layout class="QGridLayout" name="camLensButtonsLayout" rowstretch="1,0,0" columnstretch="1,0,0">
+           <property name="sizeConstraint">
+            <enum>QLayout::SetDefaultConstraint</enum>
+           </property>
+           <item row="1" column="0">
+            <widget class="QPushButton" name="button_camlens_l">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
+               <horstretch>1</horstretch>
+               <verstretch>1</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>40</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>40</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+             <property name="icon">
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_left_128.png</normaloff>
+               <disabledoff>:/icons/arrow_left_dark_128.png</disabledoff>:/icons/arrow_left_128.png</iconset>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <widget class="QPushButton" name="button_camlens_scale">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
+               <horstretch>1</horstretch>
+               <verstretch>1</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>40</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>40</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="font">
+              <font>
+               <pointsize>11</pointsize>
+              </font>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="text">
+              <string>0.01</string>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="1">
+            <widget class="QPushButton" name="button_camlens_u">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
+               <horstretch>1</horstretch>
+               <verstretch>1</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>40</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>40</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+             <property name="icon">
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_up_128.png</normaloff>
+               <disabledoff>:/icons/arrow_up_dark_128.png</disabledoff>:/icons/arrow_up_128.png</iconset>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="1">
+            <widget class="QPushButton" name="button_camlens_d">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
+               <horstretch>1</horstretch>
+               <verstretch>1</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>40</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>40</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+             <property name="icon">
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_down_128.png</normaloff>
+               <disabledoff>:/icons/arrow_down_dark_128.png</disabledoff>:/icons/arrow_down_128.png</iconset>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="2">
+            <widget class="QPushButton" name="button_camlens_r">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
+               <horstretch>1</horstretch>
+               <verstretch>1</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>40</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>40</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+             <property name="icon">
+              <iconset resource="../../resources/magaox.qrc">
+               <normaloff>:/icons/arrow_right_128.png</normaloff>
+               <disabledoff>:/icons/arrow_right_dark_128.png</disabledoff>:/icons/arrow_right_128.png</iconset>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <spacer name="horizontalSpacer_8">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </item>
+     <item>
+      <spacer name="horizontalSpacer_33">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <layout class="QVBoxLayout" name="vl_alignLoops" stretch="1,5,1,1,7,1,1,1">
+       <item>
+        <layout class="QVBoxLayout" name="vl_pupTrack">
+         <item>
+          <widget class="QLabel" name="label_pupTrackLoop">
            <property name="maximumSize">
             <size>
              <width>16777215</width>
-             <height>64</height>
+             <height>35</height>
             </size>
            </property>
            <property name="font">
@@ -1910,7 +2815,7 @@
             </font>
            </property>
            <property name="text">
-            <string>Pupil Fitting</string>
+            <string>Pupil Tracking Loop</string>
            </property>
            <property name="alignment">
             <set>Qt::AlignCenter</set>
@@ -1918,16 +2823,16 @@
           </widget>
          </item>
          <item>
-          <layout class="QGridLayout" name="gridLayout_3" rowstretch="1">
-           <item row="0" column="1">
-            <widget class="xqt::statusEntry" name="fitAvgTime">
+          <layout class="QHBoxLayout" name="hl_pupTrack_deltas">
+           <item>
+            <widget class="xqt::statusEntry" name="pupTrackLoop_deltaX">
              <property name="focusPolicy">
               <enum>Qt::NoFocus</enum>
              </property>
             </widget>
            </item>
-           <item row="0" column="0">
-            <widget class="xqt::statusEntry" name="fitThreshold">
+           <item>
+            <widget class="xqt::statusEntry" name="pupTrackLoop_deltaY">
              <property name="focusPolicy">
               <enum>Qt::NoFocus</enum>
              </property>
@@ -1936,257 +2841,211 @@
           </layout>
          </item>
          <item>
-          <spacer name="verticalSpacer_8">
+          <layout class="QHBoxLayout" name="horizontalLayout_13">
+           <item>
+            <spacer name="horizontalSpacer_29">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <widget class="xqt::toggleSlider" name="pupTrackLoop_slider">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="horizontalSpacer_30">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_5">
+           <item>
+            <spacer name="horizontalSpacer_27">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <widget class="xqt::statusEntry" name="pupTrackLoop_gain">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="horizontalSpacer_28">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <spacer name="verticalSpacer_9">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item>
+        <widget class="QLabel" name="label_alignment">
+         <property name="font">
+          <font>
+           <pointsize>12</pointsize>
+          </font>
+         </property>
+         <property name="text">
+          <string>Auto Alignment</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="hl_alignmentStartStop" stretch="0,0,0,0">
+         <item>
+          <spacer name="horizontalSpacer_38">
            <property name="orientation">
-            <enum>Qt::Vertical</enum>
+            <enum>Qt::Horizontal</enum>
            </property>
            <property name="sizeHint" stdset="0">
             <size>
-             <width>20</width>
-             <height>40</height>
+             <width>40</width>
+             <height>20</height>
             </size>
            </property>
           </spacer>
          </item>
          <item>
-          <layout class="QGridLayout" name="gridCoords" rowstretch="1,0,0,0,0,0">
-           <item row="3" column="3">
-            <widget class="QLineEdit" name="coordLR_D">
+          <widget class="QPushButton" name="button_startAlignment">
+           <property name="text">
+            <string>start</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="button_stopAlignment">
+           <property name="text">
+            <string>stop</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="horizontalSpacer_39">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <spacer name="verticalSpacer_14">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item>
+        <layout class="QVBoxLayout" name="vl_actAlignLoop" stretch="1,1,1,5">
+         <item>
+          <widget class="QLabel" name="label_actAlignLoop">
+           <property name="maximumSize">
+            <size>
+             <width>16777215</width>
+             <height>35</height>
+            </size>
+           </property>
+           <property name="font">
+            <font>
+             <pointsize>12</pointsize>
+            </font>
+           </property>
+           <property name="text">
+            <string>Actuator Alignment Loop</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="hl_actAlign_deltas">
+           <item>
+            <widget class="xqt::statusEntry" name="actAlignLoop_deltaX">
              <property name="focusPolicy">
               <enum>Qt::NoFocus</enum>
              </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
             </widget>
            </item>
-           <item row="1" column="2">
-            <widget class="QLineEdit" name="coordUR_y">
+           <item>
+            <widget class="xqt::statusEntry" name="actAlignLoop_deltaY">
              <property name="focusPolicy">
               <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="4" column="2">
-            <widget class="QLineEdit" name="coordLL_y">
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="4" column="3">
-            <widget class="QLineEdit" name="coordLL_D">
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="3">
-            <widget class="QLineEdit" name="coordUL_D">
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="2">
-            <widget class="QLineEdit" name="coordUL_y">
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="1">
-            <widget class="QLineEdit" name="coordUL_x">
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="5" column="1">
-            <widget class="QLineEdit" name="coordAvg_x">
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="3" column="2">
-            <widget class="QLineEdit" name="coordLR_y">
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="4" column="1">
-            <widget class="QLineEdit" name="coordLL_x">
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="1" column="3">
-            <widget class="QLineEdit" name="coordUR_D">
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="3" column="0">
-            <widget class="QLabel" name="labelLR">
-             <property name="text">
-              <string>LR</string>
-             </property>
-            </widget>
-           </item>
-           <item row="4" column="0">
-            <widget class="QLabel" name="labelLL">
-             <property name="text">
-              <string>LL</string>
-             </property>
-            </widget>
-           </item>
-           <item row="1" column="0">
-            <widget class="QLabel" name="labelUR">
-             <property name="text">
-              <string>UR</string>
-             </property>
-            </widget>
-           </item>
-           <item row="0" column="1">
-            <widget class="QLabel" name="labelx">
-             <property name="text">
-              <string>x</string>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="1" column="1">
-            <widget class="QLineEdit" name="coordUR_x">
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="5" column="3">
-            <widget class="QLineEdit" name="coordAvg_D">
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="3" column="1">
-            <widget class="QLineEdit" name="coordLR_x">
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="5" column="2">
-            <widget class="QLineEdit" name="coordAvg_y">
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="0">
-            <widget class="QLabel" name="labelUL">
-             <property name="text">
-              <string>UL</string>
-             </property>
-            </widget>
-           </item>
-           <item row="0" column="3">
-            <widget class="QLabel" name="labelD">
-             <property name="text">
-              <string>D</string>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="0" column="2">
-            <widget class="QLabel" name="labely">
-             <property name="text">
-              <string>y</string>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-           <item row="5" column="0">
-            <widget class="QLabel" name="labelAvg">
-             <property name="text">
-              <string>Avg:</string>
-             </property>
-            </widget>
-           </item>
-           <item row="0" column="0">
-            <widget class="QPushButton" name="buttonExpFit">
-             <property name="minimumSize">
-              <size>
-               <width>30</width>
-               <height>30</height>
-              </size>
-             </property>
-             <property name="focusPolicy">
-              <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="text">
-              <string>|</string>
              </property>
             </widget>
            </item>
           </layout>
          </item>
          <item>
-          <layout class="QHBoxLayout" name="horizontalLayout_3">
+          <layout class="QHBoxLayout" name="horizontalLayout_15">
            <item>
-            <spacer name="horizontalSpacer_10">
+            <spacer name="horizontalSpacer_15">
              <property name="orientation">
               <enum>Qt::Horizontal</enum>
              </property>
@@ -2199,20 +3058,14 @@
             </spacer>
            </item>
            <item>
-            <widget class="QCheckBox" name="setDelta_pup">
+            <widget class="xqt::toggleSlider" name="actAlignLoop_slider">
              <property name="focusPolicy">
               <enum>Qt::NoFocus</enum>
-             </property>
-             <property name="text">
-              <string>delta from set pt</string>
-             </property>
-             <property name="checked">
-              <bool>true</bool>
              </property>
             </widget>
            </item>
            <item>
-            <spacer name="horizontalSpacer_9">
+            <spacer name="horizontalSpacer_16">
              <property name="orientation">
               <enum>Qt::Horizontal</enum>
              </property>
@@ -2227,9 +3080,9 @@
           </layout>
          </item>
          <item>
-          <layout class="QHBoxLayout" name="camlensButtonsLayout_h">
+          <layout class="QHBoxLayout" name="horizontalLayout_2">
            <item>
-            <spacer name="horizontalSpacer_7">
+            <spacer name="horizontalSpacer_13">
              <property name="orientation">
               <enum>Qt::Horizontal</enum>
              </property>
@@ -2242,175 +3095,14 @@
             </spacer>
            </item>
            <item>
-            <layout class="QGridLayout" name="camLensButtonsLayout" rowstretch="1,0,0" columnstretch="1,0,0">
-             <property name="sizeConstraint">
-              <enum>QLayout::SetDefaultConstraint</enum>
+            <widget class="xqt::statusEntry" name="actAlignLoop_gain">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
              </property>
-             <item row="1" column="0">
-              <widget class="QPushButton" name="button_camlens_l">
-               <property name="sizePolicy">
-                <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
-                 <horstretch>1</horstretch>
-                 <verstretch>1</verstretch>
-                </sizepolicy>
-               </property>
-               <property name="minimumSize">
-                <size>
-                 <width>40</width>
-                 <height>40</height>
-                </size>
-               </property>
-               <property name="maximumSize">
-                <size>
-                 <width>40</width>
-                 <height>40</height>
-                </size>
-               </property>
-               <property name="focusPolicy">
-                <enum>Qt::NoFocus</enum>
-               </property>
-               <property name="text">
-                <string/>
-               </property>
-               <property name="icon">
-                <iconset>
-                 <normaloff>:/icons/arrow_left_128.png</normaloff>:/icons/arrow_left_128.png</iconset>
-               </property>
-              </widget>
-             </item>
-             <item row="1" column="1">
-              <widget class="QPushButton" name="button_camlens_scale">
-               <property name="sizePolicy">
-                <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
-                 <horstretch>1</horstretch>
-                 <verstretch>1</verstretch>
-                </sizepolicy>
-               </property>
-               <property name="minimumSize">
-                <size>
-                 <width>40</width>
-                 <height>40</height>
-                </size>
-               </property>
-               <property name="maximumSize">
-                <size>
-                 <width>40</width>
-                 <height>40</height>
-                </size>
-               </property>
-               <property name="font">
-                <font>
-                 <pointsize>11</pointsize>
-                </font>
-               </property>
-               <property name="focusPolicy">
-                <enum>Qt::NoFocus</enum>
-               </property>
-               <property name="text">
-                <string>0.01</string>
-               </property>
-              </widget>
-             </item>
-             <item row="0" column="1">
-              <widget class="QPushButton" name="button_camlens_u">
-               <property name="sizePolicy">
-                <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
-                 <horstretch>1</horstretch>
-                 <verstretch>1</verstretch>
-                </sizepolicy>
-               </property>
-               <property name="minimumSize">
-                <size>
-                 <width>40</width>
-                 <height>40</height>
-                </size>
-               </property>
-               <property name="maximumSize">
-                <size>
-                 <width>40</width>
-                 <height>40</height>
-                </size>
-               </property>
-               <property name="focusPolicy">
-                <enum>Qt::NoFocus</enum>
-               </property>
-               <property name="text">
-                <string/>
-               </property>
-               <property name="icon">
-                <iconset>
-                 <normaloff>:/icons/arrow_up_128.png</normaloff>:/icons/arrow_up_128.png</iconset>
-               </property>
-              </widget>
-             </item>
-             <item row="2" column="1">
-              <widget class="QPushButton" name="button_camlens_d">
-               <property name="sizePolicy">
-                <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
-                 <horstretch>1</horstretch>
-                 <verstretch>1</verstretch>
-                </sizepolicy>
-               </property>
-               <property name="minimumSize">
-                <size>
-                 <width>40</width>
-                 <height>40</height>
-                </size>
-               </property>
-               <property name="maximumSize">
-                <size>
-                 <width>40</width>
-                 <height>40</height>
-                </size>
-               </property>
-               <property name="focusPolicy">
-                <enum>Qt::NoFocus</enum>
-               </property>
-               <property name="text">
-                <string/>
-               </property>
-               <property name="icon">
-                <iconset>
-                 <normaloff>:/icons/arrow_down_128.png</normaloff>:/icons/arrow_down_128.png</iconset>
-               </property>
-              </widget>
-             </item>
-             <item row="1" column="2">
-              <widget class="QPushButton" name="button_camlens_r">
-               <property name="sizePolicy">
-                <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
-                 <horstretch>1</horstretch>
-                 <verstretch>1</verstretch>
-                </sizepolicy>
-               </property>
-               <property name="minimumSize">
-                <size>
-                 <width>40</width>
-                 <height>40</height>
-                </size>
-               </property>
-               <property name="maximumSize">
-                <size>
-                 <width>40</width>
-                 <height>40</height>
-                </size>
-               </property>
-               <property name="focusPolicy">
-                <enum>Qt::NoFocus</enum>
-               </property>
-               <property name="text">
-                <string/>
-               </property>
-               <property name="icon">
-                <iconset>
-                 <normaloff>:/icons/arrow_right_128.png</normaloff>:/icons/arrow_right_128.png</iconset>
-               </property>
-              </widget>
-             </item>
-            </layout>
+            </widget>
            </item>
            <item>
-            <spacer name="horizontalSpacer_8">
+            <spacer name="horizontalSpacer_14">
              <property name="orientation">
               <enum>Qt::Horizontal</enum>
              </property>
@@ -2423,6 +3115,105 @@
             </spacer>
            </item>
           </layout>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <spacer name="verticalSpacer_4">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item>
+        <layout class="QVBoxLayout" name="vl_actAlignSensor">
+         <item>
+          <widget class="QLabel" name="label_actAlignSensor">
+           <property name="maximumSize">
+            <size>
+             <width>16777215</width>
+             <height>35</height>
+            </size>
+           </property>
+           <property name="font">
+            <font>
+             <pointsize>12</pointsize>
+            </font>
+           </property>
+           <property name="text">
+            <string>Actuator Alignment Sensor</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_16">
+           <item>
+            <spacer name="horizontalSpacer_31">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <widget class="xqt::toggleSlider" name="actAlignSensor_slider">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="horizontalSpacer_32">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_17"/>
+         </item>
+         <item>
+          <widget class="xqt::statusEntry" name="actAlignSensor_nAverage">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="xqt::statusEntry" name="actAlignSensor_nImages">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="xqt::statusEntry" name="actAlignSensor_pokeAmp">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+          </widget>
          </item>
         </layout>
        </item>
@@ -2443,7 +3234,14 @@
    <extends>QLabel</extends>
    <header>../xWidgets/fsmDisplay.hpp</header>
   </customwidget>
+  <customwidget>
+   <class>xqt::toggleSlider</class>
+   <extends>QSlider</extends>
+   <header>../xWidgets/toggleSlider.hpp</header>
+  </customwidget>
  </customwidgets>
- <resources/>
+ <resources>
+  <include location="../../resources/magaox.qrc"/>
+ </resources>
  <connections/>
 </ui>

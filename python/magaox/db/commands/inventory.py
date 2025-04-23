@@ -10,7 +10,7 @@ import socket
 from tqdm import tqdm
 
 from magaox.db import FileOrigin, ingest
-from magaox.db.config import DEFAULT_DATA_DIRS
+from magaox.constants import DEFAULT_PREFIX, DEFAULT_DATA_DIRS
 
 import xconf
 from ._base import BaseDbCommand
@@ -22,7 +22,7 @@ class Inventory(BaseDbCommand):
     '''Find files that aren't yet inventoried and create records for
     them in the file_origins table
     '''
-    data_dirs : list[str] = xconf.field(default_factory=lambda: DEFAULT_DATA_DIRS)
+    data_dirs : list[pathlib.Path] = xconf.field(default_factory=lambda: [DEFAULT_PREFIX / x for x in DEFAULT_DATA_DIRS])
 
     def main(self):
         conn = self.database.connect()

@@ -46,6 +46,8 @@ class Operation(Enum):
 
 @dataclass(eq=True, frozen=True)
 class Transition:
+    # id duplicated here from Reaction because Transition is used as a dict key and we need uniqueness:
+    indi_id : str  
     value : Optional[purepyindi2.AnyIndiValue]
     value_2 : Optional[purepyindi2.AnyIndiValue]
     debounce_sec : float = DEFAULT_DEBOUNCE_SEC
@@ -88,6 +90,7 @@ class Personality:
     default_voice : str
     random_utterances : list[SpeechRequest]
     soundboard : dict[str, SpeechRequest]
+    walkups : dict[str, list[SpeechRequest]]
 
     @classmethod
     def from_path(cls, file_path):
@@ -97,6 +100,7 @@ class Personality:
         random_utterances = []
         soundboard = {}
         default_voice = None
+        walkups = {}
 
         for el in root:
             transitions = {}
@@ -111,6 +115,15 @@ class Personality:
                 for btn in el:
                     assert len(btn) == 1
                     soundboard[btn.attrib['name']] = xml_to_speechrequest(btn[0], file_path)
+                continue
+            elif el.tag == 'walk-ups':
+                for wup in el:
+                    assert wup.tag == 'walk-up'
+                    email = wup.attrib['email'].replace('.', '-dot-').replace('@', '-at-')
+                    walkups[email] = []
+                    for utterance in wup:
+                        assert utterance.tag in ('speak', 'file')
+                        walkups[email].append(xml_to_speechrequest(utterance, file_path))
                 continue
             assert el.tag == 'react-to'
             indi_id = el.attrib['indi-id']
@@ -132,7 +145,7 @@ class Personality:
                     debounce_sec = float(transition.attrib['debounce_sec'])
                 else:
                     debounce_sec = DEFAULT_DEBOUNCE_SEC
-                trans = Transition(op=operation, value=value, value_2=value_2, debounce_sec=debounce_sec)
+                trans = Transition(indi_id=indi_id, op=operation, value=value, value_2=value_2, debounce_sec=debounce_sec)
                 if trans in transitions:
                     raise RuntimeError(f"Multiply defined for {indi_id} {operation=} {value=}")
                 transitions[trans] = []
@@ -145,8 +158,9 @@ class Personality:
             default_voice=default_voice,
             random_utterances=random_utterances,
             soundboard=soundboard,
+            walkups=walkups,
         )
 
 if __name__ == "__main__":
     import pprint
-    pprint.pprint(Personality.from_path('./default.xml'), width=255)
+    pprint.pprint(Personality.from_path('personalities/default.xml'), width=255)

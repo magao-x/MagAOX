@@ -12,6 +12,7 @@ __all__ = [
     'utcnow',
     'format_timestamp_for_filename',
     'get_current_semester',
+    'semester_to_datetime_range',
     'get_search_start_end_timestamps',
     'FunkyJSONDecoder',
 ]
@@ -20,8 +21,13 @@ __all__ = [
 # `datetime`, so this pattern works only after chopping off the last
 # three characters
 XFILENAME_TIME_FORMAT = "%Y%m%d%H%M%S%f"
+# For output we can just fill in zeros for the nanoseconds
+XFILENAME_TIME_FORMAT_OUT = "%Y%m%d%H%M%S%f000"
 # Python devices use a different time stamp format
 PUREPYINDI_DEVICE_FILENAME_TIME_FORMAT = "%Y-%m-%dT%H%M%S"
+
+def make_filename_safe(name):
+    return name.replace('/', '__')
 
 def parse_iso_datetime_as_utc(input_str):
     input_str = input_str[:26]  # chop off nanoseconds and anything else
@@ -47,7 +53,7 @@ def creation_time_from_filename(filepath, stat_result=None):
     except ValueError:
         if stat_result is None:
             stat_result = os.stat(filepath)
-        ts = datetime.datetime.fromtimestamp(stat_result.st_ctime)
+        ts = datetime.datetime.fromtimestamp(stat_result.st_ctime, tz=timezone.utc)
     return ts
 
 
@@ -79,11 +85,13 @@ def get_current_semester():
     this_semester = str(this_year) + ("B" if now.month > 6 else "A")
     return this_semester
 
-def get_search_start_end_timestamps(
+def semester_to_datetime_range(
     semester : str,
-    utc_start : typing.Optional[datetime.datetime] = None,
-    utc_end : typing.Optional[datetime.datetime] = None,
 ):
+    '''Return datetimes spanning the given semester. The 'A' semester
+    begins at midnight January 1 and ends midnight June 15. The 'B'
+    semester is the rest of the year.
+    '''
     letter = semester[-1].upper()
     try:
         if len(semester) != 5 or semester[-1].upper() not in ['A', 'B']:
@@ -102,16 +110,6 @@ def get_search_start_end_timestamps(
         day = 15 if letter == 'A' else 1,
     ).replace(tzinfo=timezone.utc)
     end_dt = semester_end_dt
-
-
-    if utc_start is not None:
-        start_dt = utc_start
-
-    if utc_end is not None:
-        end_dt = utc_end
-
-    if end_dt < start_dt:
-        raise ValueError("End time is before start time")
     return start_dt, end_dt
 
 

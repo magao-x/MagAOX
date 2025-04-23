@@ -23,16 +23,16 @@ namespace xqt
   * - If focus then returns, the last edited value is loaded
   * - After the stale timeout (default 60 sec), the edited value is cleared so that subsequent edits start with the current value
   * - onReturnPressed should normally be used to signal a new value to set, rather than editingFinished.
-  * 
+  *
   * To trigger the statusChanged style, the member function setTextChanged() must be called instead of setText().  This will also prevent interrupting
   * current editing when the widget has focus.
-  * 
+  *
   * Ref: https://doc.qt.io/qt-5/qlabel.html
-  */ 
+  */
 class statusLabel : public QLabel
 {
    Q_OBJECT
-   
+
 public:
 
    enum valchanges{NOTCHANGED, CHANGED, CHANGED_TIMEOUT};
@@ -47,7 +47,7 @@ protected:
 
    /// The timer for restoring status style from the statusChanged style
    /** This is started for m_changeTimeout msecs after a setTextChanged() is called.
-     * 
+     *
      * Ref: https://doc.qt.io/qt-5/qtimer.html
      */
    QTimer * m_changeTimer {nullptr};
@@ -62,7 +62,7 @@ public:
    /// Set the highlight changes flag
    /** If set to false, the widget will not change to statusChanged.
      * The default is true.
-     * 
+     *
      * This sets m_highlightChanges
      */
    void highlightChanges(bool hc);
@@ -74,13 +74,13 @@ public:
    bool highlightChanges();
 
    /// Set the change timeout
-   /** The change timeout (m_changeTimeout) is the duration for which the 
+   /** The change timeout (m_changeTimeout) is the duration for which the
      * statusChanged CSS style is applied after a value update.
-     */ 
+     */
    void changeTimeout( std::chrono::milliseconds & cto /**< [in] the new change timeout in msec */);
 
    /// Get the change timeout
-   /** The change timeout (m_changeTimeout) is the duration for which the 
+   /** The change timeout (m_changeTimeout) is the duration for which the
      * statusChanged CSS style is applied after a value update.
      */
    std::chrono::milliseconds changeTimeout();
@@ -95,6 +95,8 @@ protected:
      * \override
      */
    virtual void paintEvent(QPaintEvent * e);
+
+   virtual void changeEvent(QEvent * e);
 
 protected slots:
 
@@ -154,13 +156,13 @@ void statusLabel::paintEvent(QPaintEvent * e)
       setProperty("isStatus", true);
       if(m_highlightChanges)
       {
-         setFrameShape(QFrame::Box); 
+         setFrameShape(QFrame::Box);
          setProperty("isStatusChanged", true);
       }
       style()->unpolish(this);
-      
+
       emit changeTimerStart(m_changeTimeout.count());
-      
+
       m_valChanged = 0;
    }
    else if(m_valChanged == CHANGED_TIMEOUT)
@@ -169,17 +171,34 @@ void statusLabel::paintEvent(QPaintEvent * e)
       setFrameShape(QFrame::NoFrame);
       setProperty("isStatusChanged",false);
       style()->unpolish(this);
-      
+
       m_valChanged = 0;
    }
 
    QLabel::paintEvent(e);
 }
 
+void statusLabel::changeEvent(QEvent * e)
+{
+    if(e->type() == QEvent::EnabledChange)
+    {
+        if(!isEnabled())
+        {
+            m_changeTimer->stop();
+            setFrameShape(QFrame::NoFrame);
+            setProperty("isStatusChanged",false);
+            style()->unpolish(this);
+            m_valChanged = 0;
+        }
+    }
+
+    QLabel::changeEvent(e);
+}
+
 void statusLabel::changeTimerOut()
 {
    m_valChanged = CHANGED_TIMEOUT;
-   if(isEnabled()) update();   
+   if(isEnabled()) update();
 }
 
 } //namespace xqt

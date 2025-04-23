@@ -73,6 +73,9 @@ protected:
    mx::improc::eigenImage<float> m_intMat;
 
    mx::improc::eigenImage<float> m_measurements;
+   float m_delta0 {0};
+   float m_delta1 {0};
+
    mx::improc::eigenImage<float> m_commands;
 
    float m_ggain {0};
@@ -129,6 +132,8 @@ public:
    int sendCommands(std::vector<float> & commands);
    
    //INDI 
+
+   pcf::IndiProperty m_indiP_deltas;
 
    pcf::IndiProperty m_indiP_ggain;
    pcf::IndiProperty m_indiP_ctrlEnabled;
@@ -228,6 +233,12 @@ int alignLoop::appStartup()
          return log<software_error, -1>({__FILE__, __LINE__, "ctrl.Targets and loop.gains are not the same size"});
       }
    }
+
+   CREATE_REG_INDI_RO_NUMBER( m_indiP_deltas, "deltas", "Deltas", "Deltas");
+   m_indiP_deltas.add(pcf::IndiElement("delta0"));
+   m_indiP_deltas["delta0"] = 0;
+   m_indiP_deltas.add(pcf::IndiElement("delta1"));
+   m_indiP_deltas["delta1"] = 0;
 
    m_gains.resize(m_defaultGains.size());
    for(size_t n=0; n < m_defaultGains.size(); ++n) m_gains[n] = m_defaultGains[n];
@@ -367,6 +378,8 @@ int alignLoop::processImage( void* curr_src,
    }
 
 
+   m_delta0 = m_measurements(0,0);
+   m_delta1 = m_measurements(1,0);
 
    std::cout << "measurements: ";
    for(int cc = 0; cc < m_measurements.rows(); ++cc)
@@ -378,6 +391,8 @@ int alignLoop::processImage( void* curr_src,
    if(m_currents[0] < -1e14) return 0;
 
    m_commands.matrix() = m_intMat.matrix() * m_measurements.matrix();
+
+   
 
    std::cout << "delta commands:    ";
    for(int cc = 0; cc < m_measurements.rows(); ++cc)
@@ -398,14 +413,18 @@ int alignLoop::processImage( void* curr_src,
    std::cout << "\n";
   
    //And send commands.
+   int rv;
    if(m_ctrlEnabled)
    {
-      return sendCommands(commands);
+      rv = sendCommands(commands);
    }
    else 
    {
-      return 0;
+      rv = 0;
    }
+
+   updateIfChanged(m_indiP_deltas, std::vector<std::string>({"delta0", "delta1"}), std::vector<float>({m_delta0, m_delta1}));
+   return rv;
 }
 
 inline

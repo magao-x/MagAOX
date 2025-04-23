@@ -30,7 +30,7 @@ apps_rtcicc = \
     hsfwCtrl \
     rhusbMon \
 	cacaoInterface \
-    kcubeCtrl \
+    modalGainOpt \
     modalPSDs \
 	userGainCtrl \
     refRMS \
@@ -51,8 +51,10 @@ apps_rtc = \
 	t2wOffloader \
 	dmSpeckle \
 	w2tcsOffloader \
-	pwfsSlopeCalc
-
+	pwfsSlopeCalc \
+    kcubeCtrl \
+	dmPokeXCorr \
+	psfAcq
 
 apps_icc = \
 	dmPokeCenter \
@@ -64,7 +66,8 @@ apps_icc = \
 	xt1121Ctrl \
 	xt1121DCDU \
 	koolanceCtrl \
-	corAlign
+	corAlign \
+	adcCtrl
 
 apps_aoc = \
 	trippLitePDU \
@@ -73,7 +76,7 @@ apps_aoc = \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
-	siglentSDG \
+	stateRuleEngine \
 	audibleAlerts
 
 
@@ -91,8 +94,6 @@ libs_to_build = libtelnet
 
 apps_to_build = $(apps_basic)
 
-
-
 ifeq ($(MAGAOX_ROLE),AOC)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_aoc)
@@ -109,8 +110,6 @@ else ifeq ($(MAGAOX_ROLE),TIC)
   apps_to_build += $(apps_tic)
 else ifeq ($(MAGAOX_ROLE),SS)
   apps_to_build += $(apps_sim)
-  CXXFLAGS += -DXWC_SIM_MODE
-
 endif
 
 all_guis = \
@@ -142,7 +141,8 @@ all_rtimv_plugins = \
 	indiDictionary \
 	pwfsAlignment \
 	dmStatus \
-	warnings
+	warnings \
+	acquisition
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =
@@ -164,7 +164,7 @@ utils_to_build = \
 	xrif2shmim \
 	xrif2fits
 
-scripts_to_install = magaox \
+scripts_to_install = \
 	query_seeing \
 	sync_cacao \
 	xctrl \
@@ -180,12 +180,14 @@ scripts_to_install = magaox \
 	shot_in_the_dark \
 	howfs_apply \
 	lowfs_switch \
-	lowfs_apply \
-	lowfs_switch_apply \
 	write_magaox_pidfile \
 	mount_cgroups1_cpuset \
 	killIndiZombies \
-	xlog
+	xlog \
+	hoblockleaks \
+	inventory_files \
+	list_xfiles_by_semester \
+	loop_instrument_backup_sync
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
@@ -322,7 +324,7 @@ tests_clean:
 
 .PHONY: python_install
 python_install:
-	sudo -H $(PYTHON) -m pip install -e ./python/
+	sudo -H $(PYTHON) -m pip install ./python/
 
 .PHONY: doc
 doc:
@@ -347,4 +349,4 @@ setup:
 
 .PHONY: print_role
 print_role:
-	echo $(MAGAOX_ROLE)
+	@echo "MAGAOX_ROLE=$(MAGAOX_ROLE)"

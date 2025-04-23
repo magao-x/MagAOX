@@ -1,0 +1,1 @@
+cset proc --set spare42 --exec -- ./shmimLat -n acc000

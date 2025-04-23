@@ -5,12 +5,14 @@ import sys
 import logging
 import xconf
 from magaox.indi.device import XDevice
+from magaox.constants import DEFAULT_PREFIX
 from magaox.db.config import BaseDeviceConfig
-from magaox.db import Telem, FileOrigin
+from magaox.db import Telem, FileOrigin, UserLog
 from magaox.db import ingest
 from magaox.utils import parse_iso_datetime_as_utc, creation_time_from_filename
 
 import json
+import orjson
 import xconf
 import subprocess
 import queue
@@ -63,7 +65,8 @@ RETRY_WAIT_SEC = 2
 CREATE_CONNECTION_TIMEOUT_SEC = 2
 EXIT_TIMEOUT_SEC = 2
 
-def _run_logdump_thread(logger_name, logdump_dir, logdump_args, name, message_queue):
+def _run_logdump_thread(logger_name, logdump_dir, logdump_args, name, message_queue, record_class):
+    # filter what content from user_logs gets put into db
     log = logging.getLogger(logger_name)
     glob_pat = logdump_dir + f'/{name}_*'
     has_no_logs = len(glob.glob(glob_pat)) == 0
@@ -77,7 +80,8 @@ def _run_logdump_thread(logger_name, logdump_dir, logdump_args, name, message_qu
             log.debug(f"Running logdump command {repr(' '.join(args))} for {name} in follow mode")
             p = subprocess.Popen(args, stdout=subprocess.PIPE, stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
             for line in p.stdout:
-                message = Telem.from_json(name, line)
+                log.debug(f"Log line read: {line}")
+                message = record_class.from_json(name, line)
                 message_queue.put(message)
             if p.returncode != 0:
                 raise RuntimeError(f"{name} logdump exited with {p.returncode} ({repr(' '.join(args))})")
@@ -92,19 +96,31 @@ class dbIngestConfig(BaseDeviceConfig):
 class dbIngest(XDevice):
     config : dbIngestConfig
     telem_threads : list[tuple[str, threading.Thread]]
-    fs_observer : BaseObserverSubclassCallable
     telem_queue : queue.Queue
+    fs_observer : BaseObserverSubclassCallable
     fs_queue : queue.Queue
     last_update_ts_sec : float
     startup_ts_sec : float
     records_since_startup : float
+    
+    #add user_log support here
+    user_log_threads : list[tuple[str, threading.Thread]]
+    user_log_queue : queue.Queue
 
-    def launch_follower(self, dev):
-        args = self.log.name + '.' + dev, '/opt/MagAOX/telem', (self.config.logdump_exe, '--ext=.bintel'), dev, self.telem_queue
-        telem_thread = threading.Thread(target=_run_logdump_thread, args=args, daemon=True)
+    def launch_followers(self, dev):
+        telem_args = self.log.name + '.' + dev, '/opt/MagAOX/telem', (self.config.logdump_exe, '--ext=.bintel'), dev, self.telem_queue, Telem
+        telem_thread = threading.Thread(target=_run_logdump_thread, args=telem_args, daemon=True)
         telem_thread.start()
         self.log.debug(f"Watching {dev} for incoming telem")
         self.telem_threads.append((dev, telem_thread))
+
+        #userLog support here
+        if dev == "observers":
+            ULog_args = self.log.name + '.' + dev, '/opt/MagAOX/logs', (self.config.logdump_exe, '--ext=.binlog'), dev, self.user_log_queue, UserLog
+            user_log_thread = threading.Thread(target=_run_logdump_thread, args= ULog_args, daemon=True)
+            user_log_thread.start()
+            self.log.debug(f"Watching {dev} for incoming user logs")
+            self.user_log_threads.append((dev, user_log_thread))
 
     def refresh_properties(self):
         self.properties['last_update']['timestamp'] = self.last_update_ts_sec
@@ -161,10 +177,14 @@ class dbIngest(XDevice):
                     raise RuntimeError(f"Got malformed proclist line: {repr(line)}")
                 device_names.add(parts[0])
 
+        #setup user log here too
+        self.user_log_queue = queue.Queue()
+        self.user_log_threads = []
+
         self.telem_queue = queue.Queue()
         self.telem_threads = []
         for dev in device_names:
-            self.launch_follower(dev)
+            self.launch_followers(dev)
         
         self.startup_ts_sec = time.time()
         
@@ -174,15 +194,20 @@ class dbIngest(XDevice):
         self.fs_queue = queue.Queue()
         event_handler = NewXFilesHandler(self.config.hostname, self.fs_queue, self.log.name + '.fs_observer')
         self.fs_observer = Observer()
-        for dirpath in self.config.data_dirs:
+        for dirname in self.config.data_dirs:
+            dirpath = self.config.common_path_prefix / dirname
+            if not dirpath.exists():
+                self.log.debug(f"No {dirpath} to watch")
+                continue
             self.fs_observer.schedule(event_handler, dirpath, recursive=True)
             self.log.info(f"Watching {dirpath} for changes")
         self.fs_observer.start()
 
     def rescan_files(self):
+        search_paths = [self.config.common_path_prefix / name for name in self.config.data_dirs]
         with self.conn.cursor() as cur:
-            ingest.update_file_inventory(cur, self.config.hostname, self.config.data_dirs)
-        self.log.info(f"Completed startup rescan of file inventory for {self.config.hostname}")
+            ingest.update_file_inventory(cur, self.config.hostname, search_paths)
+        self.log.info(f"Completed startup rescan of file inventory for {self.config.hostname} from {search_paths}")
 
     def ingest_line(self, line):
         # avoid infinite loop of modifying log file and getting notified of the modification
@@ -206,10 +231,20 @@ class dbIngest(XDevice):
         except queue.Empty:
             pass
 
+        #update for userlog here too
+        user_logs = []
+        try:
+            while rec := self.user_log_queue.get(timeout=0.1):
+                user_logs.append(rec)
+                self.records_since_startup += 1
+        except queue.Empty:
+            pass
+
         with self.conn.transaction():
             cur = self.conn.cursor()
             ingest.batch_telem(cur, telems)
             ingest.batch_file_origins(cur, fs_events)
+            ingest.batch_user_log(cur, user_logs)
 
         this_ts_sec = time.time()
         self.last_update_ts_sec = this_ts_sec

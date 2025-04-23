@@ -61,7 +61,7 @@ class dmPokeXCorr : public MagAOXApp<true>,
     friend class dmPokeXCorr_test;
 
     friend class dev::dmPokeWFS<dmPokeXCorr>;
-    
+
     typedef dev::dmPokeWFS<dmPokeXCorr> dmPokeWFST;
 
     friend class dev::shmimMonitor<dmPokeXCorr, dev::dmPokeWFS<dmPokeXCorr>::wfsShmimT>;
@@ -80,7 +80,7 @@ class dmPokeXCorr : public MagAOXApp<true>,
 
     typedef dev::telemeter<dmPokeXCorr> telemeterT;
 
-protected:
+  protected:
     /** \name Configurable Parameters
      *@{
      */
@@ -93,8 +93,7 @@ protected:
 
     mx::improc::milkImage<float> m_refIm;
 
-
-public:
+  public:
     /// Default c'tor.
     dmPokeXCorr();
 
@@ -112,7 +111,8 @@ public:
     /// Implementation of loadConfig logic, separated for testing.
     /** This is called by loadConfig().
      */
-    int loadConfigImpl(mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/);
+    int loadConfigImpl(
+        mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
 
     virtual void loadConfig();
 
@@ -137,25 +137,23 @@ public:
 
     ///@}
 
-    shmimMonitorT & shmimMonitor()
+    shmimMonitorT &shmimMonitor()
     {
-        return *dynamic_cast<shmimMonitorT *>(this);
+        return *dynamic_cast<shmimMonitorT *>( this );
     }
 
-    darkShmimMonitorT & darkShmimMonitor()
+    darkShmimMonitorT &darkShmimMonitor()
     {
-        return *static_cast<darkShmimMonitorT *>(this);
+        return *static_cast<darkShmimMonitorT *>( this );
     }
 
     /** \name zrespShmimMonitorT inteface
-      * @{
-      */
+     * @{
+     */
 
-    int allocate(const zrespShmimT & dummy );
+    int allocate( const zrespShmimT &dummy );
 
-    int processImage( void * curr_src,    
-                      const zrespShmimT &  dummy
-                    );
+    int processImage( void *curr_src, const zrespShmimT &dummy );
 
     using dmPokeWFST::allocate;
 
@@ -164,8 +162,8 @@ public:
     ///@}
 
     /** \name dmPokeWFS Interface
-      * @{
-      */
+     * @{
+     */
 
     /// Run the sensor steps
     /** Coordinates the actions of poking and collecting images.
@@ -175,7 +173,7 @@ public:
      * \returns 0 on success
      * \returns \< 0 on an error
      */
-    int runSensor(bool firstRun /**< [in] flag indicating this is the first call.  triggers taking a dark if true.*/);
+    int runSensor( bool firstRun /**< [in] flag indicating this is the first call.  triggers taking a dark if true.*/ );
 
     /// Analyze the poke image
     /** This analyzes the resulting poke image and reports the results.
@@ -185,12 +183,12 @@ public:
      */
     int analyzeSensor();
 
-    ///@} 
+    ///@}
 
     /** \name INDI Interface
      * @{
      */
-protected:
+  protected:
     ///@}
 
     /** \name Telemeter Interface
@@ -199,39 +197,40 @@ protected:
      */
     int checkRecordTimes();
 
-    
-
     ///@}
 };
 
-dmPokeXCorr::dmPokeXCorr() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+dmPokeXCorr::dmPokeXCorr() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
+    darkShmimMonitorT::m_getExistingFirst  = true;
+    zrespShmimMonitorT::m_getExistingFirst = true;
+
     return;
 }
 
 void dmPokeXCorr::setupConfig()
 {
-    DMPOKEWFS_SETUP_CONFIG(config);
+    DMPOKEWFS_SETUP_CONFIG( config );
 
-    SHMIMMONITORT_SETUP_CONFIG( zrespShmimMonitorT, config ); 
+    SHMIMMONITORT_SETUP_CONFIG( zrespShmimMonitorT, config );
 
-    TELEMETER_SETUP_CONFIG(config);
+    TELEMETER_SETUP_CONFIG( config );
 }
 
-int dmPokeXCorr::loadConfigImpl(mx::app::appConfigurator &_config)
+int dmPokeXCorr::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-    DMPOKEWFS_LOAD_CONFIG(_config);
+    DMPOKEWFS_LOAD_CONFIG( _config );
 
-    SHMIMMONITORT_LOAD_CONFIG( zrespShmimMonitorT, _config);
+    SHMIMMONITORT_LOAD_CONFIG( zrespShmimMonitorT, _config );
 
-    TELEMETER_LOAD_CONFIG(_config);
+    TELEMETER_LOAD_CONFIG( _config );
 
     return 0;
 }
 
 void dmPokeXCorr::loadConfig()
 {
-    if (loadConfigImpl(config) < 0)
+    if( loadConfigImpl( config ) < 0 )
     {
         m_shutdown = true;
     }
@@ -241,23 +240,22 @@ int dmPokeXCorr::appStartup()
 {
     DMPOKEWFS_APP_STARTUP;
 
-    SHMIMMONITORT_APP_STARTUP(zrespShmimMonitorT);
+    SHMIMMONITORT_APP_STARTUP( zrespShmimMonitorT );
 
     TELEMETER_APP_STARTUP;
 
-    //Gotta connect to the DM stream to find out its size
+    // Gotta connect to the DM stream to find out its size
     mx::improc::milkImage<float> mdm;
     try
     {
-        mdm.open(m_dmChan);    
+        mdm.open( m_dmChan );
     }
-    catch(const std::exception& e) //this can check for invalid_argument and distinguish not existing
+    catch( const std::exception &e ) // this can check for invalid_argument and distinguish not existing
     {
-        return log<software_error,-1>({__FILE__, __LINE__, std::string("exception opening DM: ") + e.what()});
+        return log<software_error, -1>( { __FILE__, __LINE__, std::string( "exception opening DM: " ) + e.what() } );
     }
 
-    
-    state(stateCodes::READY);
+    state( stateCodes::READY );
 
     return 0;
 }
@@ -287,69 +285,81 @@ int dmPokeXCorr::appShutdown()
     return 0;
 }
 
-int dmPokeXCorr::allocate(const zrespShmimT & dummy )
+int dmPokeXCorr::allocate( const zrespShmimT &dummy )
 {
-    static_cast<void>(dummy);
+    static_cast<void>( dummy );
 
-    if(m_refIm.rows() != zrespShmimMonitorT::m_width || m_refIm.cols() != zrespShmimMonitorT::m_height)
+    if( m_refIm.rows() != zrespShmimMonitorT::m_width || m_refIm.cols() != zrespShmimMonitorT::m_height )
     {
-        m_refIm.create( m_configName + "_refIm", zrespShmimMonitorT::m_width, zrespShmimMonitorT::m_height);
+        m_refIm.create( m_configName + "_refIm", zrespShmimMonitorT::m_width, zrespShmimMonitorT::m_height );
     }
 
     return 0;
 }
 
-int dmPokeXCorr::processImage( void * curr_src,    
-                               const zrespShmimT &  dummy
-                             )
+int dmPokeXCorr::processImage( void *curr_src, const zrespShmimT &dummy )
 {
-    static_cast<void>(dummy);
+    static_cast<void>( dummy );
 
-    //Gotta connect to the DM stream to find out its size
-    //can't assume that we have connected anywhere else.
+    // Gotta connect to the DM stream to find out its size
+    // can't assume that we have connected anywhere else.
     mx::improc::milkImage<float> mdm;
     try
     {
-        mdm.open(m_dmChan);    
+        mdm.open( m_dmChan );
     }
-    catch(const std::exception& e) 
+    catch( const std::exception &e )
     {
-        return log<software_error,-1>({__FILE__, __LINE__, std::string("exception opening DM: ") + e.what()});
+        return log<software_error, -1>( { __FILE__, __LINE__, std::string( "exception opening DM: " ) + e.what() } );
     }
 
-    mx::improc::eigenCube<float> zRespM ((float *) curr_src, zrespShmimMonitorT::m_width, zrespShmimMonitorT::m_height, zrespShmimMonitorT::m_depth);
+    mx::improc::eigenCube<float> zRespM(
+        (float *)curr_src, zrespShmimMonitorT::m_width, zrespShmimMonitorT::m_height, zrespShmimMonitorT::m_depth );
 
     mx::improc::eigenImage<float> refIm;
-    refIm.resize(zRespM.rows(), zRespM.cols());
+    refIm.resize( zRespM.rows(), zRespM.cols() );
     refIm.setZero();
 
-    for(size_t n = 0; n < m_poke_x.size(); ++n)
+    for( size_t n = 0; n < m_poke_x.size(); ++n )
     {
-        int actno = m_poke_y[n]*mdm.rows() + m_poke_x[n];
+        int actno = m_poke_y[n] * mdm.rows() + m_poke_x[n];
 
-        refIm += zRespM.image(actno);
+        refIm += zRespM.image( actno );
     }
 
     m_refIm = refIm;
-    
-    m_xcorr.refIm(m_refIm());
 
+    std::cerr << "Got reference: " << refIm.rows() << " x " << refIm.cols() << '\n';
+    try
+    {
+        m_xcorr.peakMethod( xcorrPeakMethod::mftOversamp );
+        m_xcorr.normalize( true );
+        m_xcorr.maxLag( 10 );
+        m_xcorr.tol( 0.001 );
+
+        m_xcorr.refIm( refIm, 1 );
+
+    }
+    catch( const std::exception &e )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, std::string( "exception caught: \n" ) + e.what() } );
+    }
     return 0;
 }
 
-int dmPokeXCorr::runSensor(bool firstRun)
+int dmPokeXCorr::runSensor( bool firstRun )
 {
-    static_cast<void>(firstRun);
+    static_cast<void>( firstRun );
 
     int rv = dmPokeWFST::basicRunSensor();
 
-    if (rv > 0)
+    if( rv > 0 )
     {
         return 0;
     }
-    else if (rv < 0)
+    else if( rv < 0 )
     {
-        log<software_error>({__FILE__, __LINE__});
+        log<software_error>( { __FILE__, __LINE__ } );
         return rv;
     }
 
@@ -358,20 +368,30 @@ int dmPokeXCorr::runSensor(bool firstRun)
 
 int dmPokeXCorr::analyzeSensor()
 {
-    if(m_xcorr.refIm().rows() != m_pokeImage().rows() || m_xcorr.refIm().rows() != m_pokeImage().cols() )
+    if( m_xcorr.refIm().rows() != m_pokeImage().rows() || m_xcorr.refIm().cols() != m_pokeImage().cols() )
     {
-        return 0;
+        std::cerr << "refIm:  " << m_xcorr.refIm().rows() << " x " << m_xcorr.refIm().cols() << '\n';
+        std::cerr << "pokeIm: " << m_pokeImage().rows() << " x " << m_pokeImage().cols() << '\n';
+        return log<software_error, -1>( { __FILE__, __LINE__, "reference is not valid" } );
     }
 
     float xs, ys;
 
-    m_xcorr(xs, ys, m_pokeImage());
-
-    std::cerr << "dmPokeXCorr::analyzeSensor: " << xs << " " << ys << "\n";
-    
-    if(updateMeasurement(xs, ys) < 0)
+    try
     {
-        return log<software_error,-1>({__FILE__, __LINE__, "error from dmPokeWFS::updateMeasurement"});
+        m_xcorr( xs, ys, m_pokeImage() );
+    }
+    catch( const std::exception &e )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, std::string( "exception caught: \n" ) + e.what() } );
+    }
+
+    std::cerr.precision( 5 );
+    std::cerr << "dmPokeXCorr::analyzeSensor: " << xs << " " << ys << "\n";
+
+    if( updateMeasurement( xs, ys ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "error from dmPokeWFS::updateMeasurement" } );
     }
 
     return 0;
@@ -379,10 +399,8 @@ int dmPokeXCorr::analyzeSensor()
 
 int dmPokeXCorr::checkRecordTimes()
 {
-    return telemeterT::checkRecordTimes(telem_pokeloop());
+    return telemeterT::checkRecordTimes( telem_pokeloop() );
 }
-
-
 
 } // namespace app
 } // namespace MagAOX

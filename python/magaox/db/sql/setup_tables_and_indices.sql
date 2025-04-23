@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS telem (
 );
 
 CREATE INDEX IF NOT EXISTS telem_device_ts ON telem (device, ts);
+CREATE INDEX IF NOT EXISTS telem_device_ec_ts ON telem (device, ec, ts);
 CREATE INDEX IF NOT EXISTS observation_spans_fixup ON telem (ts, (msg->>'obsName')) WHERE device = 'observers' AND (msg->>'obsName' != '');
 
 -- CREATE TABLE IF NOT EXISTS logs (
@@ -29,6 +30,8 @@ CREATE TABLE IF NOT EXISTS file_origins (
     size_bytes BIGINT,
     PRIMARY KEY (origin_host, origin_path)
 );
+
+CREATE INDEX IF NOT EXISTS file_origins_modification_time ON file_origins (modification_time);
 
 CREATE TABLE IF NOT EXISTS file_ingest_times (
     ts TIMESTAMPTZ,

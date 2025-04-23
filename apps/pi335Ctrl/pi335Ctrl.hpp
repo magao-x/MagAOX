@@ -296,7 +296,7 @@ void pi335Ctrl::setupConfig()
     DM_SETUP_CONFIG(config);
 
     TELEMETER_SETUP_CONFIG(config);
-      
+
     config.add("stage.naxes", "", "stage.naxes", argType::Required, "stage", "naxes", false, "int", "Number of axes.  Default is 2.  Max is 3.");
 
     config.add("stage.homePos1", "", "stage.homePos1", argType::Required, "stage", "homePos1", false, "float", "Home position of axis 1.  Default is 17.5.");
@@ -543,8 +543,7 @@ int pi335Ctrl::appLogic()
         float sva1;
         float pos2;
         float sva2;
-        float pos3;
-        float sva3;
+
 
         // Get a lock if we can
         std::unique_lock<std::mutex> lock(m_indiMutex);
@@ -615,6 +614,9 @@ int pi335Ctrl::appLogic()
 
         if (m_naxes == 3)
         {
+            float pos3;
+            float sva3;
+
             lock.lock();
             if (getPos(pos3, 3) < 0)
             {
@@ -667,7 +669,7 @@ int pi335Ctrl::appLogic()
 
     SHMIMMONITOR_UPDATE_INDI;
     DM_UPDATE_INDI;
-    
+
     return 0;
 }
 
@@ -967,8 +969,6 @@ int pi335Ctrl::homeState(int axis)
 
 int pi335Ctrl::home_1()
 {
-    int rv;
-
     if (m_servoState != 0)
     {
         log<text_log>("home_1 requested but servos are not off", logPrio::LOG_ERROR);
@@ -984,7 +984,7 @@ int pi335Ctrl::home_1()
     if (m_actuallyATZ)
     {
         // zero range found in axis 1 (NOTE this moves mirror full range) TAKES 1min
-        rv = tty::ttyWrite("ATZ 1 NaN\n", m_fileDescrip, m_writeTimeout);
+        int rv = tty::ttyWrite("ATZ 1 NaN\n", m_fileDescrip, m_writeTimeout);
 
         if (rv < 0)
         {
@@ -1248,12 +1248,12 @@ int pi335Ctrl::commandDM(void *curr_src)
 {
     if (state() != stateCodes::OPERATING)
         return 0;
-    float pos1 = ((float *)curr_src)[0];
-    float pos2 = ((float *)curr_src)[1];
+    float pos1 = (reinterpret_cast<float *>(curr_src))[0];
+    float pos2 = (reinterpret_cast<float *>(curr_src))[1];
 
     float pos3 = 0;
     if (m_naxes == 3)
-        pos3 = ((float *)curr_src)[2];
+        pos3 = (reinterpret_cast<float *>(curr_src))[2];
 
     std::unique_lock<std::mutex> lock(m_indiMutex);
 

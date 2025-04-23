@@ -7,7 +7,8 @@ table Telem_observer_fb
    email:string;
    obsName:string;
    observing:bool;
-
+   tgt_name:string;
+   operator_email:string;
 }
 
 root_type Telem_observer_fb;

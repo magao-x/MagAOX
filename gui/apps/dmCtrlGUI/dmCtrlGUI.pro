@@ -4,8 +4,8 @@
 
 TEMPLATE = app
 TARGET = dmCtrlGUI
-DESTDIR = bin/ 
-DEPENDPATH += ./ ../../lib 
+DESTDIR = bin/
+DEPENDPATH += ./ ../../lib
 
 MOC_DIR = moc/
 OBJECTS_DIR = obj/
@@ -35,17 +35,18 @@ HEADERS += ../../widgets/dmCtrl/dmCtrl.hpp \
            ../../widgets/xWidgets/statusLabel.hpp \
            ../../widgets/xWidgets/fsmDisplay.hpp \
            ../../lib/multiIndiManager.hpp
-           
-SOURCES += dmCtrlGUI_main.cpp 
+
+SOURCES += dmCtrlGUI_main.cpp
 #\
 #           ../../widgets/dmCtrl/dmCtrl.cpp \
-           
+
 FORMS += ../../widgets/dmCtrl/dmCtrl.ui \
          ../../widgets/xWidgets/fsmDisplay.ui
-     
+
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a
 
-RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
+RESOURCES += ../../resources/magaox.qrc
+RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc
 
 QT += widgets

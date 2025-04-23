@@ -24,16 +24,16 @@ namespace xqt
   * - If focus then returns, the last edited value is loaded
   * - After the stale timeout (default 60 sec), the edited value is cleared so that subsequent edits start with the current value
   * - onReturnPressed should normally be used to signal a new value to set, rather than editingFinished.
-  * 
+  *
   * To trigger the statusChanged style, the member function setTextChanged() must be called instead of setText().  This will also prevent interrupting
   * current editing when the widget has focus.
-  * 
+  *
   * Ref: https://doc.qt.io/qt-5/qlineedit.html
-  */ 
+  */
 class statusLineEdit : public QLineEdit
 {
    Q_OBJECT
-   
+
 public:
 
    enum valchanges{NOTCHANGED, CHANGED, CHANGED_TIMEOUT};
@@ -48,12 +48,12 @@ protected:
    bool m_highlightChanges {true};
 
    int m_valChanged {NOTCHANGED}; ///< Whether or not the value has changed, can take the values in enum statusLineEdit::valchanges.
-   
+
    int m_editing {NOTEDITING}; ///< Whether or not editing is in progress, can take the values in enum statusLineEdit::editchanges.
 
    /// The timer for restoring status style from the statusChanged style
    /** This is started for m_changeTimeout msecs after a setTextChanged() is called.
-     * 
+     *
      * Ref: https://doc.qt.io/qt-5/qtimer.html
      */
    QTimer * m_changeTimer {nullptr};
@@ -62,7 +62,7 @@ protected:
 
    /// The timer for returning to status display mode when editing has paused
    /** This is started for m_editTimeout msecs after a focusInEvent and any keyPressEvent other than ESC.
-     * 
+     *
      * Ref: https://doc.qt.io/qt-5/qtimer.html
      */
    QTimer * m_editTimer {nullptr};
@@ -71,7 +71,7 @@ protected:
 
    /// The timer for clearing the edit text after a long pause in editing
    /** This is started for m_staleTimeout msecs after a timeout from m_editTimer.
-     * 
+     *
      * Ref: https://doc.qt.io/qt-5/qtimer.html
      */
    QTimer * m_staleTimer {nullptr};
@@ -87,7 +87,7 @@ public:
    /** Is independent of the edited text
      *
      * \returns m_currText;
-     */ 
+     */
    QString currText();
 
    /// Get the edited text
@@ -97,10 +97,10 @@ public:
      */
    QString editText();
 
-   /// Set the read only flag 
+   /// Set the read only flag
    /** If set to true, the widget will not accept focus and will not enter edit mode.
      * The default is false.
-     * 
+     *
      * This sets m_readOnly
      */
    void readOnly(bool ro /**< [in] the new value of the read only flag*/);
@@ -108,13 +108,13 @@ public:
    /// Get the value of the read only flag
    /**
      * \returns the current value of m_readOnly
-     */ 
+     */
    bool readOnly();
 
    /// Set the highlight changes flag
    /** If set to false, the widget will not change to statusChanged.
      * The default is true.
-     * 
+     *
      * This sets m_highlightChanges
      */
    void highlightChanges(bool hc);
@@ -126,13 +126,13 @@ public:
    bool highlightChanges();
 
    /// Set the change timeout
-   /** The change timeout (m_changeTimeout) is the duration for which the 
+   /** The change timeout (m_changeTimeout) is the duration for which the
      * statusChanged CSS style is applied after a value update.
-     */ 
+     */
    void changeTimeout( std::chrono::milliseconds & cto /**< [in] the new change timeout in msec */);
 
    /// Get the change timeout
-   /** The change timeout (m_changeTimeout) is the duration for which the 
+   /** The change timeout (m_changeTimeout) is the duration for which the
      * statusChanged CSS style is applied after a value update.
      */
    std::chrono::milliseconds changeTimeout();
@@ -140,7 +140,7 @@ public:
    /// Set the edit timeout
    /** The edit timeout (m_editTimeout) is the time after the last keystroke when
      * normal status mode is restored.
-     */ 
+     */
    void editTimeout( std::chrono::milliseconds & eto /**< [in] the new edit timeout in msec */);
 
    /// Get the edit timeout
@@ -151,14 +151,14 @@ public:
 
    /// Set the stale timeout
    /** The stale timeout (m_staleTimeout) is the time after and editing timeout
-     * when the edit text is cleared, causing the current value to be the initial 
-     * editing text. 
-     */ 
+     * when the edit text is cleared, causing the current value to be the initial
+     * editing text.
+     */
    void staleTimeout( std::chrono::milliseconds & sto /**< [in] the new stale timeout in msec */);
 
    /// Get the stale timeout
    /** The stale timeout (m_staleTimeout) is the time after and editing timeout
-     * when the edit text is cleared, causing the current value to be the initial 
+     * when the edit text is cleared, causing the current value to be the initial
      * editing text.
      */
    std::chrono::milliseconds staleTimeout();
@@ -171,19 +171,19 @@ public:
 
    /// Stop editing
    /** Calls the editTimerOut slot.
-     * 
+     *
      */
    void stopEditing();
 
    /// Adopt the statusChanged CSS style for the duration of m_changeTimeout
    void setTextChanged(const QString & text /**< [in] The new text */);
 
-   
+
 
 protected:
 
    /// The focusInEvent triggers editing mode
-   /** 
+   /**
      * \override
      */
    virtual void focusInEvent(QFocusEvent * e);
@@ -191,7 +191,7 @@ protected:
    /// The focusOutEvent ends editig mode
    /**
      * \override
-     */ 
+     */
    virtual void focusOutEvent(QFocusEvent * e);
 
    /// Each keyPressEvent restarts the edit timer
@@ -205,6 +205,8 @@ protected:
      * \override
      */
    virtual void paintEvent(QPaintEvent * e);
+
+   virtual void changeEvent(QEvent * e);
 
 protected slots:
 
@@ -333,7 +335,7 @@ void statusLineEdit::setEditText( const QString & etext)
    m_editTimer->stop();
    m_staleTimer->stop();
 
-   if(m_editing != STARTED) 
+   if(m_editing != STARTED)
    {
       m_currText = text();
    }
@@ -341,7 +343,7 @@ void statusLineEdit::setEditText( const QString & etext)
    m_editText = etext;
    QLineEdit::setText(m_editText);
    m_editing = STARTED;
-   
+
    emit editTimerStart(m_editTimeout.count());
    update();
 }
@@ -356,10 +358,10 @@ void statusLineEdit::focusInEvent(QFocusEvent * e)
    m_editTimer->stop();
    m_staleTimer->stop();
    m_currText = text();
-   
-   if(m_editText.size() > 0) setText(m_editText);
+
+   if(m_editText.size() > 0) QLineEdit::setText(m_editText);
    m_editing = STARTED;
-   
+
    emit editTimerStart(m_editTimeout.count());
    update();
    QLineEdit::focusInEvent(e);
@@ -375,10 +377,13 @@ void statusLineEdit::focusOutEvent(QFocusEvent * e)
    }
 
    m_editText = text();
-   setText(m_currText);
+
+   QLineEdit::setText(m_currText);
+
    m_editing = STOPPED;
-   
+
    update();
+
    QLineEdit::focusOutEvent(e);
 }
 
@@ -388,18 +393,18 @@ void statusLineEdit::keyPressEvent(QKeyEvent * e)
    {
       e->accept();
       m_editText = m_currText;
-      setText(m_currText);
+      QLineEdit::setText(m_currText);
       m_editing = STOPPED;
       clearFocus();
       update();
       return;
    }
-   
+
    m_editText = text(); //keep updated for return press
 
    emit editTimerStart(m_editTimeout.count());
 
-   QLineEdit::keyPressEvent(e);  
+   QLineEdit::keyPressEvent(e);
 }
 
 void statusLineEdit::paintEvent(QPaintEvent * e)
@@ -439,14 +444,36 @@ void statusLineEdit::paintEvent(QPaintEvent * e)
       style()->unpolish(this);
       m_valChanged = 0;
    }
-   
+
    QLineEdit::paintEvent(e);
+}
+
+void statusLineEdit::changeEvent(QEvent * e)
+{
+    if(e->type() == QEvent::EnabledChange)
+    {
+        if(!isEnabled())
+        {
+            m_changeTimer->stop();
+            setProperty("isStatusChanged",false);
+            QLineEdit::setText("---");
+            style()->unpolish(this);
+            m_valChanged = 0;
+        }
+        else
+        {
+            QLineEdit::setText(m_currText);
+            style()->unpolish(this);
+        }
+    }
+
+    QLineEdit::changeEvent(e);
 }
 
 void statusLineEdit::changeTimerOut()
 {
    m_valChanged = CHANGED_TIMEOUT;
-   update();   
+   update();
 }
 
 void statusLineEdit::editTimerOut()
@@ -456,9 +483,9 @@ void statusLineEdit::editTimerOut()
    QLineEdit::setText(m_currText);
 
    emit staleTimerStart(m_staleTimeout.count());
-   
+
    m_editing = STOPPED;
-   
+
    clearFocus(); //This will call onFocusOutEvent
 
    update();

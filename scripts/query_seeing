@@ -5,12 +5,14 @@ import datetime
 from datetime import datetime, timezone
 import json
 import math
+import ssl
 
 endpoints = ['Dimm', 'Mag1', 'Mag2']
-endpoint_template = "http://weather.lco.cl/clima/weather/Magellan/PHP/grab{name}.php"
+endpoint_template = "https://weather.lco.cl/clima/weather/Magellan/PHP/grab{name}.php"
 
 def retrieve_one(name):
-    fh = urlopen(endpoint_template.format(name=name))
+    context = ssl._create_unverified_context()
+    fh = urlopen(endpoint_template.format(name=name), context=context)
     points = json.load(fh)
     new_points = []
     for pt in points:

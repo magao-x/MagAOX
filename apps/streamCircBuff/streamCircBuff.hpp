@@ -114,6 +114,8 @@ public:
    
 protected:
 
+   float (*pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as float
+
    //shmimMonitor Interface
    int allocate( const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
    
@@ -267,6 +269,8 @@ int streamCircBuff::allocate( const dev::shmimT & dummy)
 
    //we don't actually do anything here -- just a pass through to f.g.
 
+   pixget = getPixPointer<float>(shmimMonitorT::m_dataType);
+
    m_reconfig = true;
 
    return 0;
@@ -305,7 +309,7 @@ int streamCircBuff::configureAcquisition()
    
    frameGrabberT::m_width = shmimMonitorT::m_width;
    frameGrabberT::m_height = shmimMonitorT::m_height;
-   frameGrabberT::m_dataType = shmimMonitorT::m_dataType;
+   frameGrabberT::m_dataType = IMAGESTRUCT_FLOAT;
    
    return 0;
 }
@@ -350,7 +354,14 @@ int streamCircBuff::loadImageIntoStream(void * dest)
       return -1;
    }
 
-   memcpy(dest, m_currSrc, shmimMonitorT::m_width*shmimMonitorT::m_height*frameGrabberT::m_typeSize  );
+   float * fdest = reinterpret_cast<float *>(dest);
+
+   for(size_t n = 0; n < shmimMonitorT::m_width*shmimMonitorT::m_height; ++n)
+   {
+      fdest[n] = pixget(m_currSrc,n);
+   }
+      
+   //memcpy(dest, m_currSrc, shmimMonitorT::m_width*shmimMonitorT::m_height*frameGrabberT::m_typeSize  );
    return 0;
 }
 

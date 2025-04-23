@@ -1,15 +1,16 @@
 #!/bin/bash
 
+magaox_rtimvs.sh
 
 pwrGUI &
 dmCtrlGUI dmwoofer &
 dmCtrlGUI dmtweeter &
 dmCtrlGUI dmncpc &
-magaox_rtimvs.sh
 
 cameraGUI camwfs &
 cameraGUI camtip &
-cameraGUI camlowfs &
+cameraGUI camflowfs &
+cameraGUI camllowfs &
 cameraGUI camacq &
 cameraGUI camsci1 &
 cameraGUI camsci2 &
@@ -25,7 +26,8 @@ dmModeGUI wooferModes &
 dmModeGUI ncpcModes &
 
 coronAlignGUI &
-sleep 6
+
+sleep 10
 
 dmnorm.sh woofer
 dmnorm.sh tweeter

@@ -1,12 +1,12 @@
 /** \file telem_observer.hpp
-  * \brief The MagAO-X logger telem_observer log type.
-  * \author Jared R. Males (jaredmales@gmail.com)
-  *
-  * \ingroup logger_types_files
-  * 
-  * History:
-  * - 2018-09-06 created by JRM
-  */
+ * \brief The MagAO-X logger telem_observer log type.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup logger_types_files
+ *
+ * History:
+ * - 2018-09-06 created by JRM
+ */
 #ifndef logger_types_telem_observer_hpp
 #define logger_types_telem_observer_hpp
 
@@ -20,159 +20,258 @@ namespace MagAOX
 namespace logger
 {
 
-
 /// Log entry recording the build-time git state.
 /** \ingroup logger_types
-  */
+ */
 struct telem_observer : public flatbuffer_log
 {
-   ///The event code
-   static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_OBSERVER;
+    /// The event code
+    static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_OBSERVER;
 
-   ///The default level
-   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
+    /// The default level
+    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
-   static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
+    static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
 
-   
-   ///The type of the input message
-   struct messageT : public fbMessage
-   {
-      ///Construct from components
-      messageT( const std::string & email,   /// <[in] observer email
-                const std::string & obsName, /// <[in] observer email
-                const bool & observing       /// <[in] status of observing
-              )
-      {
-         auto _email = builder.CreateString(email);
-         auto _obsName = builder.CreateString(obsName);
-         
-         auto fp = CreateTelem_observer_fb(builder, _email, _obsName, observing);
-         builder.Finish(fp);
-      }
+    /// The type of the input message
+    struct messageT : public fbMessage
+    {
+        /// Construct from components
+        messageT( const std::string &email,     ///< [in] observer email
+                  const std::string &obsName,   ///< [in] observer email
+                  const bool        &observing, ///< [in] status of observing
+                  const std::string &tgtName,   ///< [in] the target name
+                  const std::string &opEmail    ///< [in] operator email
+        )
+        {
+            auto _email   = builder.CreateString( email );
+            auto _obsName = builder.CreateString( obsName );
+            auto _tgtName = builder.CreateString( tgtName );
+            auto _opEmail = builder.CreateString( opEmail );
 
-   };
+            auto fp = CreateTelem_observer_fb( builder, _email, _obsName, observing, _tgtName, _opEmail );
+            builder.Finish( fp );
+        }
+    };
 
-   static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
-                       flatlogs::msgLenT len            ///< [in] length of msgBuffer.
-                     )
-   {
-      auto verifier = flatbuffers::Verifier( static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)), static_cast<size_t>(len));
+    static bool verify( flatlogs::bufferPtrT &logBuff, ///< [in] Buffer containing the flatbuffer serialized message.
+                        flatlogs::msgLenT     len      ///< [in] length of msgBuffer.
+    )
+    {
+        auto verifier = flatbuffers::Verifier( static_cast<uint8_t *>( flatlogs::logHeader::messageBuffer( logBuff ) ),
+                                               static_cast<size_t>( len ) );
 
-      bool ok = VerifyTelem_observer_fbBuffer(verifier); 
-      if(!ok) return ok;
+        bool ok = VerifyTelem_observer_fbBuffer( verifier );
+        if( !ok )
+            return ok;
 
-      auto fbs = GetTelem_observer_fb(static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)));
+        auto fbs = GetTelem_observer_fb( static_cast<uint8_t *>( flatlogs::logHeader::messageBuffer( logBuff ) ) );
 
-      if(fbs->email())
-      {
-         std::string email = fbs->email()->c_str();
-         for(size_t n = 0; n < email.size(); ++n)
-         {
-            if(!isprint(email[n]))
+        if( fbs->email() )
+        {
+            std::string email = fbs->email()->c_str();
+            for( size_t n = 0; n < email.size(); ++n )
             {
-               return false;
+                if( !isprint( email[n] ) )
+                {
+                    return false;
+                }
             }
-         }
-      }
+        }
 
-      if(fbs->obsName())
-      {
-         std::string obsn = fbs->obsName()->c_str();
-         for(size_t n = 0; n < obsn.size(); ++n)
-         {
-            if(!isprint(obsn[n]))
+        if( fbs->obsName() )
+        {
+            std::string obsn = fbs->obsName()->c_str();
+            for( size_t n = 0; n < obsn.size(); ++n )
             {
-               return false;
+                if( !isprint( obsn[n] ) )
+                {
+                    return false;
+                }
             }
-         }
-      }
+        }
 
-      return ok;
-   }
+        if( fbs->tgt_name() )
+        {
+            std::string tgtn = fbs->tgt_name()->c_str();
+            for( size_t n = 0; n < tgtn.size(); ++n )
+            {
+                if( !isprint( tgtn[n] ) )
+                {
+                    return false;
+                }
+            }
+        }
 
-   ///Get the message formattd for human consumption.
-   static std::string msgString( void * msgBuffer,      ///< [in] Buffer containing the flatbuffer serialized message.
-                                 flatlogs::msgLenT len  ///< [in] [unused] length of msgBuffer.
-                               )
-   {
-      static_cast<void>(len);
+        if( fbs->operator_email() )
+        {
+            std::string tgtn = fbs->operator_email()->c_str();
+            for( size_t n = 0; n < tgtn.size(); ++n )
+            {
+                if( !isprint( tgtn[n] ) )
+                {
+                    return false;
+                }
+            }
+        }
 
-      auto fbs = GetTelem_observer_fb(msgBuffer);
+        return ok;
+    }
 
-      std::string msg = "[observer] ";
-      
-      if(fbs->email())
-      {
-         msg += "email: ";
-         msg += fbs->email()->c_str();
-         msg += " ";
-      }
-      
-      if(fbs->obsName())
-      {
-         msg += "obs: ";
-         msg += fbs->obsName()->c_str();
-         msg += " ";
-      }
-      
-      msg += std::to_string(fbs->observing());
-      
-      return msg;
-   
-   }
-   
-   static std::string email( void * msgBuffer )
-   {
-      auto fbs = GetTelem_observer_fb(msgBuffer);
-      if(fbs->email() != nullptr)
-      {
-         return std::string(fbs->email()->c_str());
-      }
-      else return "";
-   }
+    /// Get the message formatted for human consumption.
+    static std::string msgString( void *msgBuffer,      ///< [in] Buffer containing the flatbuffer serialized message.
+                                  flatlogs::msgLenT len ///< [in] [unused] length of msgBuffer.
+    )
+    {
+        static_cast<void>( len );
 
-   static std::string obsName( void * msgBuffer )
-   {
-      auto fbs = GetTelem_observer_fb(msgBuffer);
-      if(fbs->email() != nullptr)
-      {
-         return std::string(fbs->obsName()->c_str());
-      }
-      else return "";
-   }
+        auto fbs = GetTelem_observer_fb( msgBuffer );
 
-   static bool observing( void * msgBuffer )
-   {
-      auto fbs = GetTelem_observer_fb(msgBuffer);
-      return fbs->observing();
-   }
+        std::string msg = "[observer] ";
 
-   /// Get the logMetaDetail for a member by name
-   /**
+        if( fbs->email() )
+        {
+            msg += "email: ";
+            msg += fbs->email()->c_str();
+            msg += " ";
+        }
+
+        if( fbs->obsName() )
+        {
+            msg += "obs: ";
+            msg += fbs->obsName()->c_str();
+            msg += " ";
+        }
+
+        msg += std::to_string( fbs->observing() );
+
+        if( fbs->tgt_name() )
+        {
+            msg += " tgt: ";
+            msg += fbs->tgt_name()->c_str();
+            msg += " ";
+        }
+        else
+        {
+            msg += " tgt: notimpl";
+        }
+
+        if( fbs->operator_email() )
+        {
+            msg += "operator: ";
+            msg += fbs->operator_email()->c_str();
+            msg += " ";
+        }
+
+        return msg;
+    }
+
+    static std::string email( void *msgBuffer )
+    {
+        auto fbs = GetTelem_observer_fb( msgBuffer );
+        if( fbs->email() != nullptr )
+        {
+            return std::string( fbs->email()->c_str() );
+        }
+        else
+            return "";
+    }
+
+    static std::string obsName( void *msgBuffer )
+    {
+        auto fbs = GetTelem_observer_fb( msgBuffer );
+        if( fbs->email() != nullptr )
+        {
+            return std::string( fbs->obsName()->c_str() );
+        }
+        else
+            return "";
+    }
+
+    static bool observing( void *msgBuffer )
+    {
+        auto fbs = GetTelem_observer_fb( msgBuffer );
+        return fbs->observing();
+    }
+
+    static std::string tgtName( void *msgBuffer )
+    {
+        auto fbs = GetTelem_observer_fb( msgBuffer );
+        if( fbs->tgt_name() != nullptr )
+        {
+            return std::string( fbs->tgt_name()->c_str() );
+        }
+        else
+            return "notimpl";
+    }
+
+    static std::string operator_email( void *msgBuffer )
+    {
+        auto fbs = GetTelem_observer_fb( msgBuffer );
+        if( fbs->operator_email() != nullptr )
+        {
+            return std::string( fbs->operator_email()->c_str() );
+        }
+        else
+            return "";
+    }
+
+    /// Get the logMetaDetail for a member by name
+    /**
      * \returns the a logMetaDetail filled in with the appropriate details
      * \returns an empty logmegaDetail if member not recognized
-     */ 
-   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
-   {
-      if(     member == "email")     return logMetaDetail({"OBSERVER", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&email), false});
-      else if(member == "obsName")   return logMetaDetail({"OBS-NAME", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&obsName), false});
-      else if(member == "observing") return logMetaDetail({"OBSERVING", logMeta::valTypes::Bool, logMeta::metaTypes::State, reinterpret_cast<void*>(&observing)}); 
-      else
-      {
-         std::cerr << "No string member " << member << " in telem_observer\n";
-         return logMetaDetail();
-      }
-   }
+     */
+    static logMetaDetail getAccessor( const std::string &member /**< [in] the name of the member */ )
+    {
+        if( member == "email" )
+        {
+            return logMetaDetail( { "OBSERVER",
+                                    logMeta::valTypes::String,
+                                    logMeta::metaTypes::State,
+                                    reinterpret_cast<void *>( &email ),
+                                    false } );
+        }
+        else if( member == "obsName" )
+        {
+            return logMetaDetail( { "OBSERVATION NAME",
+                                    logMeta::valTypes::String,
+                                    logMeta::metaTypes::State,
+                                    reinterpret_cast<void *>( &obsName ),
+                                    false } );
+        }
+        else if( member == "observing" )
+        {
+            return logMetaDetail( { "OBSERVING",
+                                    logMeta::valTypes::Bool,
+                                    logMeta::metaTypes::State,
+                                    reinterpret_cast<void *>( &observing ) } );
+        }
+        else if( member == "tgtName" )
+        {
+            return logMetaDetail( { "TARGET NAME",
+                                    logMeta::valTypes::String,
+                                    logMeta::metaTypes::State,
+                                    reinterpret_cast<void *>( &tgtName ),
+                                    false } );
+        }
+        if( member == "operator_email" )
+        {
+            return logMetaDetail( { "OPERATOR",
+                                    logMeta::valTypes::String,
+                                    logMeta::metaTypes::State,
+                                    reinterpret_cast<void *>( &operator_email ),
+                                    false } );
+        }
+        else
+        {
+            std::cerr << "No string member " << member << " in telem_observer\n";
+            return logMetaDetail();
+        }
+    }
 
-   
-   
-}; //telem_observer
+}; // telem_observer
 
+} // namespace logger
+} // namespace MagAOX
 
-
-} //namespace logger
-} //namespace MagAOX
-
-#endif //logger_types_telem_observer_hpp
-
+#endif // logger_types_telem_observer_hpp

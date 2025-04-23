@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "camtipSR"
+description = "Instantaneous Strehl Ratio estimate from camtip"
+version = "2025.04.09"
+
+authors = [
+  {name = "Eden McEwen", email = "edenmcewen@arizona.edu"},
+]
+
+[project.scripts]
+camtipSR = "camtipSR:core.camtipSR.console_app"

@@ -1836,11 +1836,11 @@ int siglentSDG::changeFreq( int channel,
    if(m_waveform == "PULSE"){
       // we want to auto change the pulse duration, want either 0.000250 or 0.5%
       double wdthLim = 0.5 / newFreq ;         // this is the limit if we don't have long enough frequencies
-      double wdth250 = 1 / newFreq - 0.000250;  // this is the ideal length of low dip
-      double newWdth = wdth250;
+      double wdth250 = 0.000250;  // this is the ideal length of low dip WHACK THINGS.. it's doubling, want to be 0.00025
+      double newWdth = wdthLim;
 
       if(wdthLim > wdth250){
-         newWdth = wdthLim;
+         newWdth = wdth250;
          log<text_log>("Ch. " + std::to_string(channel) + " WDTH auto-changing to duty cycle limit: " + std::to_string(newWdth), logPrio::LOG_NOTICE);
       }else{
          log<text_log>("Ch. " + std::to_string(channel) + " WDTH auto-changing to 250us ideal case: " + std::to_string(newWdth), logPrio::LOG_NOTICE);

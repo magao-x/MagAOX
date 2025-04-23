@@ -4,10 +4,10 @@
 
 TEMPLATE = app
 TARGET = pwrGUI
-DESTDIR = bin/ 
-DEPENDPATH += ./ ../../lib 
-INCLUDEPATH += ../../widgets/multiDial
-INCLUDEPATH += ../../lib
+DESTDIR = bin/
+DEPENDPATH += ./ ../../lib
+
+INCLUDEPATH += ../../lib ../../widgets ../../widgets/xWidgets
 
 MOC_DIR = moc/
 OBJECTS_DIR = obj/
@@ -29,26 +29,23 @@ exists( $$(CONDA_PREFIX)/lib ) {
 MAKEFILE = makefile.pwrGUI
 
 # Input
-HEADERS += pwrGUI.hpp \
-           ../../widgets/multiDial/xqwt_multi_dial.h \
+HEADERS += ../../widgets/xWidgets/app.hpp \
+           ../../widgets/xWidgets/xWidget.hpp \
+           ../../widgets/pwr/pwr.hpp \
            ../../widgets/pwr/pwrDevice.hpp \
            ../../widgets/pwr/pwrChannel.hpp \
-           ../../lib/multiIndiManager.hpp 
-           
-SOURCES += pwrGUI.cpp \
-           pwr_main.cpp \
-           ../../widgets/multiDial/xqwt_multi_dial.cpp \
-           ../../widgets/pwr/pwrDevice.cpp \
-           ../../widgets/pwr/pwrChannel.cpp
-           
+           ../../lib/multiIndiManager.hpp
+
+SOURCES += pwrGUI_main.cpp
+
 FORMS += ../../widgets/pwr/pwr.ui
-     
+
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a
 
-LIBS += -lmxlib  
+LIBS += -lmxlib
 
-RESOURCES += ../../resources/magaox.qrc         
-RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
+RESOURCES += ../../resources/magaox.qrc
+RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc
 
 QT += widgets

@@ -84,7 +84,7 @@ public:
    ///Floating point type in which to do all calculations.
    typedef float realT;
    
-   typedef uint16_t cbIndexT;
+   typedef int32_t cbIndexT;
 
 protected:
 

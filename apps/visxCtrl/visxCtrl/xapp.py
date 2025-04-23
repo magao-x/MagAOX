@@ -357,7 +357,7 @@ class VisX(XDevice):
         if actual_exptime_sec is not None:
             hdul[0].header['CANCELD'] = True
         # Write to /data path
-        timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H%M%S")
+        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H%M%S")
         self.last_image_filename = f"camvisx_{timestamp}.fits"
         outpath = f"{self.data_directory}/{self.last_image_filename}"
         self.log.info(f"Saving to {outpath}")

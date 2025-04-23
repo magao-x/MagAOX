@@ -3,7 +3,7 @@ import typing
 import datetime
 from datetime import timezone
 
-from .constants import FOLDER_TIMESTAMP_FORMAT
+from ..constants import FOLDER_TIMESTAMP_FORMAT
 
 def parse_iso_datetime(input_str):
     dt = datetime.datetime.fromisoformat(input_str)

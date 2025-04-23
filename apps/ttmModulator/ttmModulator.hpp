@@ -8,6 +8,13 @@
 #include "../../magaox_git_version.h"
 
 
+#define MODSTATE_UNKNOWN (-1)
+#define MODSTATE_OFF (0)
+#define MODSTATE_REST (1)
+#define MODSTATE_MIDSET (2)
+#define MODSTATE_SET (3)
+#define MODSTATE_MODULATING (4)
+
 namespace MagAOX
 {
 namespace app
@@ -42,8 +49,8 @@ protected:
    
    ///@}
 
-   int m_modState {-1}; ///< -1 = unknown, 0 = off, 1 = rest, 2 = midset, 3 = set, 4 = modulating
-   int m_modStateRequested {-1};  ///< The requested TTM state
+   int m_modState {MODSTATE_UNKNOWN}; ///< -1 = unknown, 0 = off, 1 = rest, 2 = midset, 3 = set, 4 = modulating
+   int m_modStateRequested {MODSTATE_UNKNOWN};  ///< The requested TTM state
    double m_modRad {0}; ///< The current modulation radius, in lam/D.
    double m_modRadRequested {-1}; ///< The requested modulation radius, in lam/D.
    double m_modFreq {0}; ///< The current modulation frequency, in Hz.
@@ -244,10 +251,6 @@ inline
 void ttmModulator::loadConfig()
 {
    config(m_maxFreq, "limits.maxfreq");
-   //config(m_maxAmp, "limits.maxamp");
-   //config(m_voltsPerLD_1, "cal.voltsperld1");
-   //config(m_voltsPerLD_2, "cal.voltsperld2");
-   //config(m_phase_2, "cal.phase");
 
    config(m_setVoltage_1, "cal.setv1");
    config(m_setVoltage_2, "cal.setv2");
@@ -328,17 +331,22 @@ int ttmModulator::appLogic()
       return -1;
    }
 
-   if(m_modState == 1 || m_modState == 3)
+   if(m_modState == MODSTATE_REST)
+   {
+      state(stateCodes::NOTHOMED);
+      if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
+   }
+   else if(m_modState == MODSTATE_SET)
    {
       state(stateCodes::READY);
       if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
    }
-   if(m_modState == 2)
+   else if(m_modState == MODSTATE_MIDSET)
    {
       state(stateCodes::ERROR);
       if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
    }
-   if(m_modState == 4)
+   else if(m_modState == MODSTATE_MODULATING)
    {
       state(stateCodes::OPERATING);
       if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
@@ -353,6 +361,7 @@ int ttmModulator::appLogic()
       updateIfChanged(m_indiP_modFrequency, "current", m_modFreq);
       updateIfChanged(m_indiP_modFrequency, "target", m_modFreqRequested);
    }
+
    //This is set by an INDI newProperty
    if(m_modStateRequested > 0)
    {
@@ -364,16 +373,14 @@ int ttmModulator::appLogic()
       double newRad = m_modRadRequested;
       double newFreq = m_modFreqRequested;
 
-      m_modStateRequested = 0;
-      //m_modFreqRequested = 0;
-      //m_modRadRequested = 0;
-
+      m_modStateRequested = MODSTATE_OFF;
+ 
       lock.unlock();
 
       state(stateCodes::CONFIGURING);
-      if(newState == 1) restTTM();
-      if(newState == 3) setTTM();
-      if(newState == 4) 
+      if(newState == MODSTATE_REST) restTTM();
+      if(newState == MODSTATE_SET) setTTM();
+      if(newState == MODSTATE_MODULATING) 
       {
          if(newRad <= 0.1 || newFreq <= 1)
          {
@@ -387,17 +394,22 @@ int ttmModulator::appLogic()
       calcState();
 
       //Do this now for responsiveness.
-      if(m_modState == 1 || m_modState == 3)
+      if(m_modState == MODSTATE_REST)
+      {
+         state(stateCodes::NOTHOMED);
+         if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
+      }
+      else if(m_modState == MODSTATE_SET)
       {
          state(stateCodes::READY);
          if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
       }
-      if(m_modState == 2)
+      else if(m_modState == MODSTATE_MIDSET)
       {
          state(stateCodes::ERROR);
          if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
       }
-      if(m_modState == 4)
+      else if(m_modState == MODSTATE_MODULATING)
       {
          state(stateCodes::OPERATING);
          if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
@@ -425,7 +437,7 @@ int ttmModulator::calcState()
    if( m_C1outp < 1 || m_C2outp < 1 ) //At least one channel off
    {
       //Need to also check fxn gen pwr state here
-      m_modState = 1;
+      m_modState = MODSTATE_REST;
    }
    else if( (m_C1freq == 0 || m_C1volts <= 0.002) && (m_C2freq == 0 || m_C2volts <= 0.002) )
    {
@@ -435,18 +447,18 @@ int ttmModulator::calcState()
       // -- phase is 0
       if(/*m_C1ofst == m_setVoltage_1 && m_C2ofst == m_setVoltage_2 &&*/ m_C1phse == 0 && m_C2phse == 0 )
       {
-         m_modState = 3;
+         m_modState = MODSTATE_SET;
       }
       else
       {
-         m_modState = 2; //must be setting
+         m_modState = MODSTATE_MIDSET; //must be setting
       }
    }
    else
    {
       if(m_C1freq != m_C2freq)
       {
-         m_modState = 2;
+         m_modState = MODSTATE_MIDSET;
       }
       else
       {
@@ -476,7 +488,7 @@ int ttmModulator::calcState()
    
          m_modRad = m_C1volts/terpC1Amp * m_calRadius;
          
-         m_modState = 4;
+         m_modState = MODSTATE_MODULATING;
       }
    }
 
@@ -593,12 +605,12 @@ int ttmModulator::restTTM()
 inline
 int ttmModulator::setTTM()
 {
-   if(m_modState == 3) //already Set.
+   if(m_modState == MODSTATE_SET) //already Set.
    {
       return 0;
    }
 
-   if(m_modState == 4) //Modulating
+   if(m_modState == MODSTATE_MODULATING) //Modulating
    {
       log<text_log>("Stopping modulation.", logPrio::LOG_INFO);
 
@@ -639,7 +651,7 @@ int ttmModulator::setTTM()
 
    //Steps:
    //1) Make sure we're fully rested:
-   if( m_modState != 1)
+   if( m_modState != MODSTATE_REST)
    {
       if( restTTM() < 0 ) return log<software_error, -1>({__FILE__, __LINE__});
 
@@ -753,7 +765,7 @@ int ttmModulator::modTTM( double newRad,
 
    //For now: if we enter modulating, we stop modulating.
    /// \todo Implement changing modulation without setting first.
-   if( m_modState == 4)
+   if( m_modState == MODSTATE_MODULATING)
    {
       if(newRad == m_modRad && newFreq == m_modFreq) return 0;
 
@@ -764,13 +776,13 @@ int ttmModulator::modTTM( double newRad,
    }
 
    //If not set, we first check if we are fully rested.
-   if( m_modState < 3 )
+   if( m_modState < MODSTATE_SET )
    {
       if( setTTM() < 0 ) return log<software_error, -1>({__FILE__, __LINE__});
 
       if( calcState() < 0 ) return log<software_error, -1>({__FILE__,__LINE__});
 
-      if( m_modState < 3) return log<software_error, -1>({__FILE__,__LINE__, "TTM not set/setable."});
+      if( m_modState < MODSTATE_SET) return log<software_error, -1>({__FILE__,__LINE__, "TTM not set/setable."});
    }
 
    //Check frequency for safety.
@@ -834,7 +846,7 @@ int ttmModulator::modTTM( double newRad,
    
    //At this point we have safe calibrated voltage for the frequency.
 
-   if( m_modState == 3)
+   if( m_modState == MODSTATE_SET)
    {
       // 0) set phase
       if( sendNewProperty(m_indiP_C2phse, "value", terpC2Phse) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});

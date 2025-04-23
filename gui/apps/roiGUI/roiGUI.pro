@@ -4,8 +4,8 @@
 
 TEMPLATE = app
 TARGET = roiGUI
-DESTDIR = bin/ 
-DEPENDPATH += ./ ../../lib 
+DESTDIR = bin/
+DEPENDPATH += ./ ../../lib
 
 MOC_DIR = moc/
 OBJECTS_DIR = obj/
@@ -37,16 +37,17 @@ HEADERS += ../../widgets/xWidgets/xWidget.hpp \
            ../../lib/multiIndiSubscriber.hpp
            ../../lib/multiIndiPublisher.hpp
            ../../lib/multiIndiManager.hpp
-           
-SOURCES += roiGUI_main.cpp 
+
+SOURCES += roiGUI_main.cpp
 #\
 #           ../../widgets/roi/roi.cpp \
-           
+
 FORMS += ../../widgets/roi/roi.ui
-     
+
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a
 
-RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
+RESOURCES += ../../resources/magaox.qrc
+RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc
 
 QT += widgets
