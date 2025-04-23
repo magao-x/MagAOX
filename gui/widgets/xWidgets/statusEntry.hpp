@@ -10,9 +10,9 @@
 
 #include "../../lib/multiIndiSubscriber.hpp"
 
-namespace xqt 
+namespace xqt
 {
-   
+
 class statusEntry : public QWidget, public multiIndiSubscriber
 {
    Q_OBJECT
@@ -21,7 +21,7 @@ public:
    enum types{ STRING, INT, FLOAT };
 
 protected:
-   
+
    std::string m_device;
    std::string m_property;
    std::string m_label;
@@ -41,11 +41,11 @@ protected:
 
    std::string m_current;
    std::string m_target;
-   
+
    QTimer * m_updateTimer {nullptr};
-   
+
 public:
-   statusEntry( QWidget * Parent = 0, 
+   statusEntry( QWidget * Parent = 0,
                 Qt::WindowFlags f = Qt::WindowFlags()
               );
 
@@ -54,12 +54,12 @@ public:
                 int type,
                 const std::string & label,
                 const std::string & units,
-                QWidget * Parent = 0, 
+                QWidget * Parent = 0,
                 Qt::WindowFlags f = Qt::WindowFlags()
               );
-   
+
    ~statusEntry() noexcept;
-   
+
    void construct();
 
    void setup( const std::string & device,
@@ -83,10 +83,10 @@ public:
 
    QString formattedValue();
 
-   /// Set the read only flag 
+   /// Set the read only flag
    /** If set to true, the widget will not accept focus and will not enter edit mode.
      * The default is false.
-     * 
+     *
      * This sets m_readOnly
      */
    void readOnly(bool ro /**< [in] the new value of the read only flag*/);
@@ -94,13 +94,13 @@ public:
    /// Get the value of the read only flag
    /**
      * \returns the current value of m_readOnly
-     */ 
+     */
    bool readOnly();
 
    /// Set the highlight changes flag
    /** If set to false, the widget will not changed to statusChanged.
      * The default is true.
-     * 
+     *
      * This sets m_highlightChanges
      */
    void highlightChanges(bool hc);
@@ -112,15 +112,15 @@ public:
    bool highlightChanges();
 
    virtual void subscribe();
-             
+
    virtual void onConnect();
-   
+
    virtual void onDisconnect();
-   
+
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
+
    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
+
    /// Set the stretch of the horizontal layout
    void setStretch( int s0, ///< Stretch of the spacer.  If 0, the spacer is removed.
                     int s1, ///< Stretch of the label
@@ -147,11 +147,11 @@ signals:
    void doUpdateGUI();
 
 private:
-     
+
    Ui::statusEntry ui;
 };
-   
-statusEntry::statusEntry( QWidget * Parent, 
+
+statusEntry::statusEntry( QWidget * Parent,
                           Qt::WindowFlags f) : QWidget(Parent, f)
 {
    construct();
@@ -162,7 +162,7 @@ statusEntry::statusEntry( const std::string & device,
                           int type,
                           const std::string & label,
                           const std::string & units,
-                          QWidget * Parent, 
+                          QWidget * Parent,
                           Qt::WindowFlags f) : QWidget(Parent, f)
 {
    construct();
@@ -204,7 +204,7 @@ void statusEntry::setup( const std::string & device,
 {
    m_device = device;
    m_property = property;
-   
+
    m_type = type;
    defaultFormat();
 
@@ -248,7 +248,7 @@ QString floatAutoFormat(const std::string & value)
    {
       return QString("");
    }
-    
+
    std::string format = "%f";
 
    double av = fabs(v);
@@ -272,7 +272,7 @@ QString floatAutoFormat(const std::string & value)
    {
       format = "%0.4f";
    }
-   else 
+   else
    {
       format = "%0.3g";
    }
@@ -299,21 +299,21 @@ QString statusEntry::formattedValue()
          {
             return QString("");
          }
-         
+
       case FLOAT:
          if(m_format == "auto") return floatAutoFormat(m_current);
 
-         try 
+         try
          {
             snprintf(str, sizeof(str), m_format.c_str(), std::stof(m_current));
             return QString(str);
          }
          catch(...)
-         {  
+         {
             return QString("");
          }
 
-         
+
       default:
          return QString(m_current.c_str());
    }
@@ -344,12 +344,12 @@ bool statusEntry::highlightChanges()
 void statusEntry::subscribe()
 {
     if(!m_parent) return ;
-   
+
     if(m_property != "") m_parent->addSubscriberProperty(this, m_device, m_property);
 
     return;
 }
-  
+
 void statusEntry::onConnect()
 {
     m_valChanged = true;
@@ -366,15 +366,15 @@ void statusEntry::handleDefProperty( const pcf::IndiProperty & ipRecv)
 }
 
 void statusEntry::handleSetProperty( const pcf::IndiProperty & ipRecv)
-{  
+{
    if(ipRecv.getDevice() != m_device) return;
-   
+
    if(ipRecv.getName() == m_property)
    {
       if(ipRecv.find(m_currEl))
       {
-         std::string current = ipRecv[m_currEl].value();
-         if(current != m_current)  
+         std::string current = ipRecv[m_currEl].get();
+         if(current != m_current)
          {
             m_valChanged = true;
          }
@@ -383,15 +383,15 @@ void statusEntry::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
       if(ipRecv.find(m_targEl))
       {
-         m_target = ipRecv[m_targEl].value();
+         m_target = ipRecv[m_targEl].get();
       }
    }
 
    emit doUpdateGUI();
 }
 
-void statusEntry::setStretch( int s0, 
-                              int s1, 
+void statusEntry::setStretch( int s0,
+                              int s1,
                               int s2
                             )
 {
@@ -410,7 +410,7 @@ void statusEntry::setStretch( int s0,
    }
 }
 
-void statusEntry::format( const std::string & f) 
+void statusEntry::format( const std::string & f)
 {
    m_format = f;
 }
@@ -426,12 +426,12 @@ void statusEntry::on_value_returnPressed()
    ui.value->clearFocus();
 
    pcf::IndiProperty ip(pcf::IndiProperty::Text);
-   
+
    ip.setDevice(m_device);
    ip.setName(m_property);
    ip.add(pcf::IndiElement(m_targEl));
    ip[m_targEl] = str;
-   
+
    sendNewProperty(ip);
 
 }
@@ -459,8 +459,10 @@ void statusEntry::stopEditing()
    ui.value->stopEditing();
 }
 
+
+
 } //namespace xqt
-   
+
 #include "moc_statusEntry.cpp"
 
 #endif
