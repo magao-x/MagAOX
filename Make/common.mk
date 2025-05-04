@@ -192,7 +192,7 @@ LDLIBS += -Wl,-rpath,$(LDLIBRPATH)
 ## Compilation and linking
 #######################################
 CSTD ?= -std=c99
-CXXSTD ?= -std=c++17
+CXXSTD ?= -std=c++20
 
 CFLAGS += $(CSTD) -fPIC $(INCLUDES) $(OPTIMIZE)
 CXXFLAGS += $(CXXSTD) -Wall -Wextra -fPIC $(INCLUDES) $(OPTIMIZE)

@@ -5,14 +5,12 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "IndiDriver.hpp"
-#include "System.hpp"
 
 using std::runtime_error;
 using std::string;
 using std::stringstream;
 using std::endl;
 using std::vector;
-using pcf::System;
 using pcf::TimeStamp;
 using pcf::IndiConnection;
 using pcf::IndiDriver;
@@ -249,7 +247,7 @@ bool IndiDriver::handleDriverNewProperty( const IndiProperty &ipRecv )
   // Assume we didn't handle the NEW and it will be handled by
   // the derived class.
   bool oHandledProperty = false;
-  
+
   return oHandledProperty;
 }
 
@@ -433,9 +431,9 @@ void IndiDriver::sendMessage( const IndiProperty &ipSend )
 void IndiDriver::sendSetProperty( const IndiProperty &ipSend ) const
 {
    IndiProperty _ipSend = ipSend;
-   
+
    _ipSend.timeStamp(TimeStamp::now());
-   
+
   if ( isResponseModeEnabled() == true )
   {
     IndiXmlParser ixp( IndiMessage( IndiMessage::SetProperty, _ipSend ),

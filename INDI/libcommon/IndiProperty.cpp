@@ -32,14 +32,14 @@ IndiProperty::IndiProperty(const Type & type,
                            const std::string & name,
                            const State & state,
                            const Perm & perm,
-                           const SwitchRule & rule) : m_type(type), m_device(device), m_name(name), 
+                           const SwitchRule & rule) : m_type(type), m_device(device), m_name(name),
                                                        m_state(state), m_perm(perm), m_rule(rule)
 {
 }
 
 IndiProperty::IndiProperty(const IndiProperty &ipRhs) : m_type(ipRhs.m_type), m_device(ipRhs.m_device), m_name(ipRhs.m_name),
                                                         m_state(ipRhs.m_state), m_message(ipRhs.m_message), m_perm(ipRhs.m_perm),
-                                                        m_rule(ipRhs.m_rule), m_group(ipRhs.m_group), m_label(ipRhs.m_label),                                      
+                                                        m_rule(ipRhs.m_rule), m_group(ipRhs.m_group), m_label(ipRhs.m_label),
                                                         m_timeout(ipRhs.m_timeout),
                                                         /*m_requested(ipRhs.m_requested),*/ m_timeStamp(ipRhs.m_timeStamp),
                                                         m_version(ipRhs.m_version), m_elements(ipRhs.m_elements), m_beValue(ipRhs.m_beValue)
@@ -57,7 +57,7 @@ const IndiProperty::Type &IndiProperty::type() const
 }
 
 void IndiProperty::device(const std::string & dev)
-{*9793.
+{
     std::unique_lock wLock(m_rwData);
     m_device = dev;
 }
@@ -520,7 +520,7 @@ std::string IndiProperty::scrubName(const std::string &szName)
 
     // These are one-for-one replacements, so we can do them in-place.
     std::replace_if(szScrubbed.begin(), szScrubbed.end(),
-                    std::not1(std::ptr_fun(::isalnum)), '_');
+                    std::not_fn(std::function(::isalnum)), '_');
 
     return szScrubbed;
 }
@@ -851,7 +851,7 @@ IndiProperty::State IndiProperty::string2State(const std::string &str)
     {
         return State::Alert;
     }
-    else 
+    else
     {
         return State::Unknown;
     }
@@ -891,7 +891,7 @@ IndiProperty::SwitchRule IndiProperty::string2SwitchRule(const std::string &str)
     {
         return SwitchRule::AnyOfMany;
     }
-    else 
+    else
     {
         return SwitchRule::Unknown;
     }
@@ -932,7 +932,7 @@ IndiProperty::Perm IndiProperty::string2Permission(const std::string &str)
     {
         return Perm::ReadWrite;
     }
-    else 
+    else
     {
         return Perm::Unknown;
     }
@@ -999,7 +999,7 @@ IndiProperty::Type IndiProperty::string2Type( const std::string & str )
     {
         return Type::Text;
     }
-    else 
+    else
     {
         return Type::Unknown;
     }
