@@ -170,6 +170,7 @@ apps/zylaCtrl/zylaCtrl
 #Executables and util specifics to ignore:
 
 
+utils/instGraph/instGraph
 utils/logdump/logdump
 utils/logsurgeon/logsurgeon
 utils/cursesINDI/cursesINDI

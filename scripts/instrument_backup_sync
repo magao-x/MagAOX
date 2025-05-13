@@ -28,15 +28,17 @@ for remote in icc rtc; do
     done
 done
 
-rsyncWithOptions="rsync --exclude=obs --exclude='*_2022*' --exclude='*_2023*' --exclude='*_2024*' -a --info=progress2"
+rsyncWithOptions="rsync --exclude=obs --exclude='*_2022*' --exclude='.Trash*' --exclude='*_2023*' --exclude='*_2024*' -a --info=progress2"
 
-mkdir -p $dest/aoc/
-$rsyncWithOptions /data/ $dest/aoc/
+mkdir -p $dest/rtc/
+$rsyncWithOptions /srv/rtc/data/ $dest/rtc/
+$rsyncWithOptions /srv/rtc/calib/ $dest/rtc/calib/
 
 mkdir -p $dest/icc/
 $rsyncWithOptions /srv/icc/data/ $dest/icc/
 $rsyncWithOptions /srv/icc/calib/ $dest/icc/calib/
 
-mkdir -p $dest/rtc/
-$rsyncWithOptions /srv/rtc/data/ $dest/rtc/
-$rsyncWithOptions /srv/rtc/calib/ $dest/rtc/calib/
+mkdir -p $dest/aoc/
+$rsyncWithOptions /data/ $dest/aoc/
+
+

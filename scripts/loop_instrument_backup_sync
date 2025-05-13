@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -ex
+set -x
 
 # Function to refresh sudo timer
 refresh_sudo_timer() {
@@ -19,7 +19,7 @@ if [[ "$(sudo -H -n true 2>&1)" ]]; then
 fi
 
 while true; do
-    instrument_backup_sync || exit 1
+    instrument_backup_sync || echo "instrument_backup_sync exited with an error, continuing..."
     echo "Waiting 2 min before the next go round..."
     sleep 120
 done

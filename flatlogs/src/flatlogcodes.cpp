@@ -14,6 +14,7 @@
 #include <map>
 #include <set>
 #include <cstring>
+#include <algorithm>
 
 #include <sys/stat.h>
 
@@ -90,6 +91,15 @@ int readCodeFile( std::map<eventCodeT, typeSchemaPair> & codeMap, ///< [out] The
          return -1;
       }
 
+      // Trim leading whitespace:
+      line.erase(line.begin(), std::find_if(line.begin(), line.end(), [](unsigned char ch) {
+         return !std::isspace(ch);
+      }));
+
+      // Trim trailing whitespace:
+      line.erase(std::find_if(line.rbegin(), line.rend(), [](unsigned char ch) {
+         return !std::isspace(ch);
+      }).base(), line.end());
       
       size_t com = line.find('#', 0);
 
