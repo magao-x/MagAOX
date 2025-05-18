@@ -110,7 +110,7 @@ void IndiDriver::setup()
   m_oIsResponseModeEnabled = false;
 
   // Create and initialize the uptime message.
-  m_ipUpTime = IndiProperty( IndiProperty::Type::Number, getName(), "Version" );
+  m_ipUpTime = IndiProperty( IndiType::Number, getName(), "Version" );
   m_ipUpTime.perm( IndiProperty::Perm::ReadOnly );
   m_ipUpTime.state( IndiProperty::State::Ok );
   m_ipUpTime.timeStamp( TimeStamp::now() );

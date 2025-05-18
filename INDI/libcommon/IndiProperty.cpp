@@ -17,17 +17,17 @@ IndiProperty::IndiProperty()
 {
 }
 
-IndiProperty::IndiProperty(const Type & type) : m_type(type)
+IndiProperty::IndiProperty(const IndiType & type) : m_type(type)
 {
 }
 
-IndiProperty::IndiProperty(const Type & type,
+IndiProperty::IndiProperty(const IndiType & type,
                            const std::string & device,
                            const std::string & name) : m_type(type), m_device(device), m_name(name)
 {
 }
 
-IndiProperty::IndiProperty(const Type & type,
+IndiProperty::IndiProperty(const IndiType & type,
                            const std::string & device,
                            const std::string & name,
                            const State & state,
@@ -50,7 +50,7 @@ IndiProperty::~IndiProperty()
 {
 }
 
-const IndiProperty::Type &IndiProperty::type() const
+const IndiType &IndiProperty::type() const
 {
     std::shared_lock rLock(m_rwData);
     return m_type;
@@ -661,7 +661,7 @@ std::string IndiProperty::scrubName(const std::string &szName)
     ssOutput << "{ "
              << "\"device\" : \"" << m_device << "\" , "
              << "\"name\" : \"" << m_name << "\" , "
-             << "\"type\" : \"" << convertTypeToString(m_type) << "\" , "
+             << "\"type\" : \"" << convertIndiTypeToString(m_type) << "\" , "
              << "\"group\" : \"" << m_group << "\" , "
              << "\"label\" : \"" << m_label << "\" , "
              << "\"timeout\" : \"" << m_timeout << "\" , "
@@ -956,52 +956,52 @@ std::string IndiProperty::permission2String(const Perm & perm)
     }
 }
 
-std::string IndiProperty::type2String(const Type &type)
+std::string IndiProperty::type2String(const IndiType &type)
 {
     switch (type)
     {
-        case Type::Unknown:
+        case IndiType::Unknown:
             return std::string("");
-        case Type::BLOB:
+        case IndiType::BLOB:
             return std::string("BLOB");
-        case Type::Light:
+        case IndiType::Light:
             return std::string ("Light");
-        case Type::Number:
+        case IndiType::Number:
             return std::string ("Number");
-        case Type::Switch:
+        case IndiType::Switch:
             return std::string("Switch");
-        case Type::Text:
+        case IndiType::Text:
             return std::string("Text");
         default:
             return std::string("");
     }
 }
 
-IndiProperty::Type IndiProperty::string2Type( const std::string & str )
+IndiType IndiProperty::string2IndiType( const std::string & str )
 {
     if(str == "BLOB")
     {
-        return Type::BLOB;
+        return IndiType::BLOB;
     }
     else if(str == "Light")
     {
-        return Type::Light;
+        return IndiType::Light;
     }
     else if(str == "Number")
     {
-        return Type::Number;
+        return IndiType::Number;
     }
     else if(str == "Switch")
     {
-        return Type::Switch;
+        return IndiType::Switch;
     }
     else if(str == "Text")
     {
-        return Type::Text;
+        return IndiType::Text;
     }
     else
     {
-        return Type::Unknown;
+        return IndiType::Unknown;
     }
 }
 

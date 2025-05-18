@@ -17,7 +17,7 @@
 
 #include <mutex>
 #include <shared_mutex>
-/* 2024-05-24 refactor in progress 
+/* 2024-05-24 refactor in progress
  * ToDo:
  * - make sure member data in best order
  * - organize get/set functions
@@ -31,21 +31,6 @@ class IndiProperty
 {
 
 public:
-
-    /// The possible types of INDI properties 
-    /** The order and enumeration of this list is important.
-      * Do not add or change enumerations here without adjusting
-      * the indexing of the 'allowed attributes' list.
-      */ 
-    enum class Type
-    {
-        Unknown = 0, ///< Type is not known, generally indicates an error
-        BLOB,        ///< The binary large object (BLOB) type
-        Light,       ///< The INDI Light type
-        Number,      ///< The INDI Number type
-        Switch,      ///< The INDI Switch type
-        Text,        ///< The INDI Text type
-    };
 
     /// The possible states of an INDI Property
     enum class State
@@ -93,15 +78,15 @@ public:
         Undefined = -9999
     };
 
-    
 
-    
 
-    
 
-    
 
-    
+
+
+
+
+
 public:
     class Excep : public std::exception
     {
@@ -133,7 +118,7 @@ public:
 protected:
 
     /// The type of this object. Set on construction, it cannot be changed except by assignment.
-    Type m_type{Type::Unknown};
+    IndiType m_type{IndiType::Unknown};
 
     /// The INDI device name
     std::string m_device;
@@ -159,7 +144,7 @@ protected:
     /// The UI label
     std::string m_label;
 
-    /// The time it takes to change this property 
+    /// The time it takes to change this property
     double m_timeout{0.0f};
 
     /// The moment when these data were valid
@@ -173,7 +158,7 @@ protected:
 
     /// This can also be the value.
     BLOBEnable m_beValue{BLOBEnable::Unknown};
-    
+
     // A read write lock to protect the internal data.
     mutable std::shared_mutex m_rwData;
 
@@ -187,16 +172,16 @@ public:
     IndiProperty();
 
     /// Constructor with a type. This will be used often.
-    explicit IndiProperty(const Type & type /**< [in] the INDI property \ref Type*/);
+    explicit IndiProperty(const IndiType & type /**< [in] the INDI property \ref Type*/);
 
     /// Constructor with a type, device and name. This will be used often.
-    IndiProperty( const Type & type,          ///< [in] the INDI property \ref Type
+    IndiProperty( const IndiType & type,          ///< [in] the INDI property \ref Type
                   const std::string & device, ///< [in] the name of the INDI device which owns this property
                   const std::string & name    ///< [in] the name of this INDI property
                 );
 
     /// Constructor with a type, device, name, state, and perm.
-    IndiProperty( const Type & type,                            ///< [in] the INDI property \ref Type
+    IndiProperty( const IndiType & type,                            ///< [in] the INDI property \ref Type
                   const std::string & device,                   ///< [in] the name of the INDI device which owns this property
                   const std::string & name,                     ///< [in] the name of this INDI property
                   const State & state,                          ///< [in] the INDI property \ref State
@@ -211,19 +196,19 @@ public:
     virtual ~IndiProperty();
 
     ///@}
-    
-    /** \name Member Data Access 
+
+    /** \name Member Data Access
       * @{
       */
 
     /// Get the property type
-    /** 
+    /**
       * \note m_type has only a get function, no set, since it can't be changed
-      * 
+      *
       * \returns the current value of m_type
       */
-    const Type &type() const;
-    
+    const IndiType &type() const;
+
     /// Set the device name
     void device(const std::string & dev /**< [in] the new device name */);
 
@@ -243,7 +228,7 @@ public:
     /// Set the property name
     void name(const std::string & na /**< [in] the new property name */);
 
-    /// Get the property name 
+    /// Get the property name
     /** \returns the current value of m_name
       */
     const std::string & name() const;
@@ -256,7 +241,7 @@ public:
       */
     bool hasValidName() const;
 
-    /// Create the unique key for this property based on the device name and the property name. 
+    /// Create the unique key for this property based on the device name and the property name.
     /** A '.' is used as the character to join them together.
       * This key must be unique for all indi devices.
       *
@@ -267,8 +252,8 @@ public:
     /// Set the
     void state(const State & st /**< [in]  */);
 
-    /// Get the 
-    /** \returns the current value of 
+    /// Get the
+    /** \returns the current value of
       */
     const State & state() const;
 
@@ -283,7 +268,7 @@ public:
     /// Set the
     void message(const std::string & msg /**< [in]  */);
 
-    /// Get the  
+    /// Get the
     /** \returns the current value of
       */
     const std::string & message() const;
@@ -299,7 +284,7 @@ public:
     /// Set the
     void perm(const Perm & prm);
 
-    /// Get the  
+    /// Get the
     /** \returns the current value of
       */
     const Perm & perm() const;
@@ -315,7 +300,7 @@ public:
     /// Set the
     void rule(const SwitchRule & rl /**< [in]  */);
 
-    /// Get the  
+    /// Get the
     /** \returns the current value of
       */
     const SwitchRule & rule() const;
@@ -331,11 +316,11 @@ public:
     /// Set the
     void group(const std::string & grp /**< [in]  */);
 
-    /// Get the  
+    /// Get the
     /** \returns the current value of
       */
     const std::string & group() const;
-    
+
     /// Check if the  is valid
     /** The  is valid if m_ is non-zero size.
       *
@@ -347,11 +332,11 @@ public:
     /// Set the
     void label(const std::string & lbl /**< [in]  */);
 
-    /// Get the  
+    /// Get the
     /** \returns the current value of
       */
     const std::string &label() const;
-    
+
     /// Check if the  is valid
     /** The  is valid if m_ is non-zero size.
       *
@@ -363,11 +348,11 @@ public:
     /// Set the
     void timeout(const double & tmo /**< [in]  */);
 
-    /// Get the  
+    /// Get the
     /** \returns the current value of
       */
     const double & timeout() const;
-    
+
     /// Check if the  is valid
     /** The  is valid if m_ is non-zero size.
       *
@@ -379,11 +364,11 @@ public:
     /// Set the
     void timeStamp(const pcf::TimeStamp &ts /**< [in]  */);
 
-    /// Get the  
+    /// Get the
     /** \returns the current value of
       */
     const pcf::TimeStamp & timeStamp() const;
-    
+
     /// Check if the  is valid
     /** The  is valid if m_ is non-zero size.
       *
@@ -395,7 +380,7 @@ public:
     /// Set the
     void version(const std::string &vers /**< [in]  */);
 
-    /// Get the  
+    /// Get the
     /** \returns the current value of
       */
     const std::string & version() const;
@@ -445,12 +430,12 @@ public:
 
     /// Set the
     void beValue(const BLOBEnable & blobe);
-    
+
     const BLOBEnable & beValue() const;
 
     /// Returns true if this contains a valid BLOB-enable value.
     bool hasValidBeValue() const;
-    
+
     ///@}
 
 
@@ -458,97 +443,97 @@ public:
 
     // Operators.
 public:
-    
+
     /// Assigns the internal data of this object from an existing one.
     const IndiProperty &operator=(const IndiProperty &ipRhs);
 
     /// This is an alternate way of calling 'setBLOBEnable'.
     const BLOBEnable &operator=(const BLOBEnable &tValue);
-    
+
     /// Returns true if we have an exact match (value as well).
     bool operator==(const IndiProperty &ipRhs) const;
-    
+
     // Return a reference to an element so it can be modified.
     const IndiElement &operator[](const std::string &szName) const;
-    
+
     IndiElement &operator[](const std::string &szName);
- 
+
     // Return a reference to an element so it can be modified.
     const IndiElement &operator[](const unsigned int &uiIndex) const;
-    
+
     IndiElement &operator[](const unsigned int &uiIndex);
 
     /** \name General Methods.
       * @{
-      */ 
+      */
 
 public:
     /// Reset this object.
     void clear();
-    
+
     /// Get the string name of a property \ref Type
-    /** 
-      * \returns 
+    /**
+      * \returns
       */
-    static std::string type2String( const Type & type /**< [in] the \ref Type to convert*/ );
+    static std::string type2String( const IndiType & type /**< [in] the \ref Type to convert*/ );
 
     /// Get the property \ref Type given its string name
-    /** 
-      * \returns 
+    /**
+      * \returns
       */
-    static Type string2Type( const std::string & str /**< [in] the string to convert */ );
-    
+    static IndiType string2IndiType( const std::string & str /**< [in] the string to convert */ );
+
     /// Get the string name of the given \ref BLOBEnable
-    /** 
-      * \returns 
+    /**
+      * \returns
       */
     static std::string BLOBEnable2String( const BLOBEnable & type /**<[in] the \ref BLOBEnable to convert */ );
 
     /// Get the \ref BLOBEnable given its string name.
-    /** 
-      * \returns 
+    /**
+      * \returns
       */
     static BLOBEnable string2BLOBEnable( const std::string & str /**< [in] the string to convert */ );
 
     /// Get the string name of the given \ref Perm.
-    /** 
-      * \returns 
+    /**
+      * \returns
       */
     static std::string permission2String( const Perm & perm /**< [in] the \ref Perm to convert*/ );
-    
+
     /// Get the \ref Perm given the string name.
-    /** 
-      * \returns 
+    /**
+      * \returns
       */
     static Perm string2Permission( const std::string & str  /**< [in] the string to convert */ );
 
     /// Get the string name of the state.
-    /** 
-      * \returns 
+    /**
+      * \returns
       */
     static std::string state2String( const State &state /**< [in] the \ref State to convert*/ );
-    
+
     /// Get the state string name of the \ref State.
-    /** 
-      * \returns 
+    /**
+      * \returns
       */
     static State string2State( const std::string & str  /**< [in] the string to convert */ );
 
     /// Get the string name of a \ref SwitchRule.
-    /** 
-      * \returns 
+    /**
+      * \returns
       */
     static std::string switchRule2String( const SwitchRule & rule /**< [in] the \ref SwitchRule to convert*/ );
 
     /// Get the \ref SwitchRule given the string name.
-    /** 
-      * \returns 
+    /**
+      * \returns
       */
     static SwitchRule string2SwitchRule( const std::string & str /**< [in] the string to convert */ );
 
     /// Get the message concerning the error.
-    /** 
-      * \returns 
+    /**
+      * \returns
       */
     static std::string errorMsg( const Error & err /**< [in] the \ref Error to convert*/ );
 
@@ -561,11 +546,11 @@ public:
 
     ///@}
 
-    
-    
+
+
     // Element functions.
 public:
-    
+
 
 }; // class IndiProperty
 
