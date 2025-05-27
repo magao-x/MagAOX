@@ -238,7 +238,7 @@ Element &Element::operator=( const Element &ieRhs )
     if( &ieRhs != this )
     {
         std::unique_lock wLock( m_rwData );
-
+        m_type = ieRhs.m_type;
         m_format      = ieRhs.m_format;
         m_label       = ieRhs.m_label;
         m_max         = ieRhs.m_max;

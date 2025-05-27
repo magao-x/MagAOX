@@ -325,6 +325,12 @@ class Element
      */
     bool hasValidSize() const;
 
+    /// Get the value as a string independent of type
+    /**
+     * \returns the current \ref m_value
+     */
+    std::string valueStr() const;
+
     /// Set the element's value
     template <typename TT>
     void value( const TT &val );
@@ -365,6 +371,7 @@ class Element
 
     /// Compare to another Element
     /** \returns true if we have an exact match (value as well).
+     *
      */
     bool operator==( const Element &ieRhs /**< [in] */) const;
 
@@ -401,22 +408,51 @@ class Element
      */
 
     /// Assigns the internal data of this object from an existing one.
+    /**
+     * \returns a reference to `this`
+     *
+     */
     Element &operator=( const Element &ieRhs /**< [in] */);
 
     /// Set the element's numeric value
+    /**
+     * \returns a reference to `this`
+     *
+     * \test Assignment of values to xindi::Element \ref tests_xindi_Element_value_assignment "[test doc]"
+     */
     template<typename TT>
     Element & operator=( const TT & val /**< [in] the new value*/ );
 
     /// Set the element's string value
+    /**
+     * \returns a reference to `this`
+     *
+     * \test Assignment of values to xindi::Element \ref tests_xindi_Element_value_assignment "[test doc]"
+     */
     Element &operator=( const std::string &val /**< [in] the new value*/ );
 
     /// Set the element's string value
+    /**
+     * \returns a reference to `this`
+     *
+     * \test Assignment of values to xindi::Element \ref tests_xindi_Element_value_assignment "[test doc]"
+     */
     Element & operator=( const char * val /**< [in] the new value*/ );
 
     /// Set the element's switch state
+    /**
+     * \returns a reference to `this`
+     *
+     * \test Assignment of values to xindi::Element \ref tests_xindi_Element_value_assignment "[test doc]"
+     */
     Element &operator=( const Switch &state /**< [in] the new switch state*/ );
 
     /// Set the element's light state
+    /**
+     * \returns a reference to `this`
+     *
+     * \test Assignment of values to xindi::Element \ref tests_xindi_Element_value_assignment "[test doc]"
+     */
     Element &operator=( const Light &state /**< [in] the new light state*/ );
 
     ///@}
@@ -519,7 +555,7 @@ void Element::getValue( TT &val ) const // kept this here instead of cpp for cla
 }
 
 template <typename TT>
-void Element::value( const TT &val )
+void Element::value( const TT &val ) //make me const
 {
     std::unique_lock wLock( m_rwData );
     m_value = value2string<TT>( val );

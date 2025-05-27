@@ -676,6 +676,128 @@ SCENARIO( "Construction of xindi::Element", "[xindi::Element]" )
 //todo: setting parameters
 //todo: setting value (get rid of separate setSwitchState, etc.)
 
+/** Scenario: Assignment of and xindi::Element to another xindi::Element
+ *
+ * Verify the assignment operator for an element
+ *
+ * \anchor tests_xindi_Element_Element_assignment
+ */
+SCENARIO( "Assignment of xindi::Element to another xindi::Element", "[xindi::Element]" )
+{
+    GIVEN( "An Element" )
+    {
+        WHEN( "assigning a Number Element to a 2nd Element" )
+        {
+            xindi::Element el("newval", static_cast<int>(2));
+            el.format("%d");
+            el.label("newlab");
+            el.min(2);
+            el.max(5);
+            el.step(1);
+
+            xindi::Element el2;
+            el2 = el;
+            REQUIRE( el2.type() == xindi::Type::Number);
+            REQUIRE( el2.hasValidType() == true);
+            REQUIRE( el2.name() == "newval" );
+            REQUIRE( el2.hasValidName() == true);
+            REQUIRE( el2.format() == "%d");
+            REQUIRE( el2.hasValidFormat() == true);
+            REQUIRE( el2.label() == "newlab");
+            REQUIRE( el2.hasValidLabel() == true);
+            REQUIRE( el2.min() == "2");
+            REQUIRE( el2.hasValidMin() == true);
+            REQUIRE( el2.max() == "5");
+            REQUIRE( el2.hasValidMax() == true);
+            REQUIRE( el2.step() == "1");
+            REQUIRE( el2.hasValidStep() == true);
+            REQUIRE( el2.size() == "");
+            REQUIRE( el2.hasValidSize() == false);
+            REQUIRE( el2.value<int>() == static_cast<int>(2));
+            REQUIRE( el2.hasValidValue() == true);
+        }
+        WHEN( "assigning a Text Element to a 2nd Element" )
+        {
+            xindi::Element el("newval", "newstr");
+            el.format("%s");
+            el.label("newlab");
+
+            xindi::Element el2;
+            el2 = el;
+            REQUIRE( el2.type() == xindi::Type::Text);
+            REQUIRE( el2.hasValidType() == true);
+            REQUIRE( el2.name() == "newval" );
+            REQUIRE( el2.hasValidName() == true);
+            REQUIRE( el2.format() == "%s");
+            REQUIRE( el2.hasValidFormat() == true);
+            REQUIRE( el2.label() == "newlab");
+            REQUIRE( el2.hasValidLabel() == true);
+            REQUIRE( el2.min() == "");
+            REQUIRE( el2.hasValidMin() == false);
+            REQUIRE( el2.max() == "");
+            REQUIRE( el2.hasValidMax() == false);
+            REQUIRE( el2.step() == "");
+            REQUIRE( el2.hasValidStep() == false);
+            REQUIRE( el2.size() == "");
+            REQUIRE( el2.hasValidSize() == false);
+            REQUIRE( el2.value<std::string>() == "newstr");
+            REQUIRE( el2.hasValidValue() == true);
+        }
+        WHEN( "assigning a Switch Element to a 2nd Element" )
+        {
+            xindi::Element el("newval", xindi::Switch::On);
+            el.label("newlab");
+
+            xindi::Element el2;
+            el2 = el;
+            REQUIRE( el2.type() == xindi::Type::Switch);
+            REQUIRE( el2.hasValidType() == true);
+            REQUIRE( el2.name() == "newval" );
+            REQUIRE( el2.hasValidName() == true);
+            REQUIRE( el2.format() == "");
+            REQUIRE( el2.hasValidFormat() == false);
+            REQUIRE( el2.label() == "newlab");
+            REQUIRE( el2.hasValidLabel() == true);
+            REQUIRE( el2.min() == "");
+            REQUIRE( el2.hasValidMin() == false);
+            REQUIRE( el2.max() == "");
+            REQUIRE( el2.hasValidMax() == false);
+            REQUIRE( el2.step() == "");
+            REQUIRE( el2.hasValidStep() == false);
+            REQUIRE( el2.size() == "");
+            REQUIRE( el2.hasValidSize() == false);
+            REQUIRE( el2.value<xindi::Switch>() == xindi::Switch::On);
+            REQUIRE( el2.hasValidValue() == true);
+        }
+        WHEN( "assigning a Light Element to a 2nd Element" )
+        {
+            xindi::Element el("newval", xindi::Light::Ok);
+            el.label("newlab");
+
+            xindi::Element el2;
+            el2 = el;
+            REQUIRE( el2.type() == xindi::Type::Light);
+            REQUIRE( el2.hasValidType() == true);
+            REQUIRE( el2.name() == "newval" );
+            REQUIRE( el2.hasValidName() == true);
+            REQUIRE( el2.format() == "");
+            REQUIRE( el2.hasValidFormat() == false);
+            REQUIRE( el2.label() == "newlab");
+            REQUIRE( el2.hasValidLabel() == true);
+            REQUIRE( el2.min() == "");
+            REQUIRE( el2.hasValidMin() == false);
+            REQUIRE( el2.max() == "");
+            REQUIRE( el2.hasValidMax() == false);
+            REQUIRE( el2.step() == "");
+            REQUIRE( el2.hasValidStep() == false);
+            REQUIRE( el2.size() == "");
+            REQUIRE( el2.hasValidSize() == false);
+            REQUIRE( el2.value<xindi::Light>() == xindi::Light::Ok);
+            REQUIRE( el2.hasValidValue() == true);
+        }
+    }
+}
+
 /** Scenario: Assignment of values to xindi::Element
  *
  * Verify the assignment operators for values
