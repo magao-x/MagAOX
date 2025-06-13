@@ -673,10 +673,232 @@ SCENARIO( "Construction of xindi::Element", "[xindi::Element]" )
 
 }
 
+/** Scenario: Comparison of an xindi::Element to another xindi::Element
+ *
+ * Verify the comparison operator for two elements
+ *
+ * \anchor tests_xindi_Element_Element_comparison
+ */
+SCENARIO( "Comparison of xindi::Element to another xindi::Element", "[xindi::Element]" )
+{
+    GIVEN( "A default constructed Element" )
+    {
+        WHEN( "Comparing to another default constructed Element" )
+        {
+            xindi::Element el1;
+            xindi::Element el2;
+
+            REQUIRE(el1 == el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (Number)" )
+        {
+            xindi::Element el1;
+            xindi::Element el2(xindi::Type::Number);
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (Text)" )
+        {
+            xindi::Element el1;
+            xindi::Element el2(xindi::Type::Text);
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (Switch)" )
+        {
+            xindi::Element el1;
+            xindi::Element el2(xindi::Type::Switch);
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (Light)" )
+        {
+            xindi::Element el1;
+            xindi::Element el2(xindi::Type::Light);
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (BLOB)" )
+        {
+            xindi::Element el1;
+            xindi::Element el2(xindi::Type::BLOB);
+
+            REQUIRE(el1 != el2);
+        }
+    }
+    GIVEN( "Element constructed as Number" )
+    {
+        WHEN( "Comparing to a non-default Element: same type (Number)" )
+        {
+            xindi::Element el1(xindi::Type::Number);
+            xindi::Element el2(xindi::Type::Number);
+
+            REQUIRE(el1 == el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (Text)" )
+        {
+            xindi::Element el1(xindi::Type::Number);
+            xindi::Element el2(xindi::Type::Text);
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (Switch)" )
+        {
+            xindi::Element el1(xindi::Type::Number);
+            xindi::Element el2(xindi::Type::Switch);
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (Light)" )
+        {
+            xindi::Element el1(xindi::Type::Number);
+            xindi::Element el2(xindi::Type::Light);
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (BLOB)" )
+        {
+            xindi::Element el1(xindi::Type::Number);
+            xindi::Element el2(xindi::Type::BLOB);
+
+            REQUIRE(el1 != el2);
+        }
+    }
+    GIVEN( "Element constructed as Text" )
+    {
+        WHEN( "Comparing to a non-default Element: same type (Text)" )
+        {
+            xindi::Element el1(xindi::Type::Text);
+            xindi::Element el2(xindi::Type::Text);
+
+            REQUIRE(el1 == el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (Switch)" )
+        {
+            xindi::Element el1(xindi::Type::Text);
+            xindi::Element el2(xindi::Type::Switch);
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (Light)" )
+        {
+            xindi::Element el1(xindi::Type::Text);
+            xindi::Element el2(xindi::Type::Light);
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (BLOB)" )
+        {
+            xindi::Element el1(xindi::Type::Text);
+            xindi::Element el2(xindi::Type::BLOB);
+
+            REQUIRE(el1 != el2);
+        }
+    }
+    GIVEN( "Element constructed as Switch" )
+    {
+        WHEN( "Comparing to a non-default Element: same type (Switch)" )
+        {
+            xindi::Element el1(xindi::Type::Switch);
+            xindi::Element el2(xindi::Type::Switch);
+
+            REQUIRE(el1 == el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (Light)" )
+        {
+            xindi::Element el1(xindi::Type::Switch);
+            xindi::Element el2(xindi::Type::Light);
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (BLOB)" )
+        {
+            xindi::Element el1(xindi::Type::Switch);
+            xindi::Element el2(xindi::Type::BLOB);
+
+            REQUIRE(el1 != el2);
+        }
+    }
+    GIVEN( "Element constructed as Light" )
+    {
+        WHEN( "Comparing to a non-default Element: same type (Light)" )
+        {
+            xindi::Element el1(xindi::Type::Light);
+            xindi::Element el2(xindi::Type::Light);
+
+            REQUIRE(el1 == el2);
+        }
+        WHEN( "Comparing to a non-default Element: different type (BLOB)" )
+        {
+            xindi::Element el1(xindi::Type::Light);
+            xindi::Element el2(xindi::Type::BLOB);
+
+            REQUIRE(el1 != el2);
+        }
+    }
+    /*GIVEN( "Element constructed as BLOB" ) -- BLOB stuff not well implemented
+    {
+        WHEN( "Comparing to a non-default Element: same type (BLOB)" )
+        {
+            xindi::Element el1(xindi::Type::BLOB);
+            xindi::Element el2(xindi::Type::BLOB);
+
+            REQUIRE(el1 == el2);
+        }
+    }*/
+
+    GIVEN( "Element with different meta" )
+    {
+        WHEN( "type is same but name is different" )
+        {
+            xindi::Element el1(xindi::Type::Number, "el1");
+            xindi::Element el2(xindi::Type::Number, "el2");
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "type is different but name is same" ) //this is invalid INDI!
+        {
+            xindi::Element el1(xindi::Type::Number, "el");
+            xindi::Element el2(xindi::Type::Text, "el");
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "same type and name, different, value, for Number" ) //this is invalid INDI!
+        {
+            xindi::Element el1("el", 2.5);
+            xindi::Element el2("el", 2.6);
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "same type and name, different, value, for Text" ) //this is invalid INDI!
+        {
+            xindi::Element el1(xindi::Type::Text, "el", "hoop");
+            xindi::Element el2(xindi::Type::Text, "el", "haap");
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "same type and name, different, value, for Switch" ) //this is invalid INDI!
+        {
+            xindi::Element el1("el", xindi::Switch::On);
+            xindi::Element el2("el", xindi::Switch::Off);
+
+            REQUIRE(el1 != el2);
+        }
+        WHEN( "same type and name, different, value, for Light" ) //this is invalid INDI!
+        {
+            xindi::Element el1("el", xindi::Light::Alert);
+            xindi::Element el2("el", xindi::Light::Busy);
+
+            REQUIRE(el1 != el2);
+        }
+    }
+}
+
+
 //todo: setting parameters
 //todo: setting value (get rid of separate setSwitchState, etc.)
 
-/** Scenario: Assignment of and xindi::Element to another xindi::Element
+/** Scenario: Assignment of an xindi::Element to another xindi::Element
  *
  * Verify the assignment operator for an element
  *

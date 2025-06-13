@@ -66,7 +66,7 @@ class Element
     /// If this is a number, this is its maximum value.
     std::string m_max;
 
-    /// If this is a number, this is increment for it.
+    /// If this is a number, this is the increment for it.
     std::string m_step;
 
     /// If this is a BLOB, this is the number of bytes for it.
@@ -331,10 +331,6 @@ class Element
      */
     std::string valueStr() const;
 
-    /// Set the element's value
-    template <typename TT>
-    void value( const TT &val );
-
     /// Get the value as a string
     void getValue( std::string &str /**< [out] the value as a string */ ) const;
 
@@ -347,6 +343,10 @@ class Element
     /// Get the value as an arbitrary type TT
     template <class TT>
     void getValue( TT &val /**< [out] the value as a TT */ ) const;
+
+    /// Set the element's value
+    template <typename TT>
+    void value( const TT &val );
 
     /// Return the value as type string.
     std::string value() const;
@@ -362,7 +362,6 @@ class Element
      */
     bool hasValidValue() const;
 
-
     ///@}
 
     /** \name Comparison
@@ -373,7 +372,7 @@ class Element
     /** \returns true if we have an exact match (value as well).
      *
      */
-    bool operator==( const Element &ieRhs /**< [in] */) const;
+    bool operator==( const Element &ieRhs /**< [in] the element to compare to*/) const;
 
     /// Compare the string representation of the value
     /** \returns true if the value is an exact match as a string
@@ -476,12 +475,6 @@ void Element::min( const TT &min )
     m_min = value2string<TT>( min );
 }
 
-inline const std::string &Element::min() const // kept this here instead of cpp for clarity
-{
-    std::shared_lock rLock( m_rwData );
-    return m_min;
-}
-
 template <typename TT>
 const TT &Element::min() const
 {
@@ -494,12 +487,6 @@ void Element::max( const TT &max )
 {
     std::unique_lock wLock( m_rwData );
     m_max = value2string<TT>( max );
-}
-
-inline const std::string &Element::max() const // kept this here instead of cpp for clarity
-{
-    std::shared_lock rLock( m_rwData );
-    return m_max;
 }
 
 template <typename TT>
@@ -516,12 +503,6 @@ void Element::step( const TT &stp )
     m_step = value2string<TT>( stp );
 }
 
-inline const std::string &Element::step() const // kept this here instead of cpp for clarity
-{
-    std::shared_lock rLock( m_rwData );
-    return m_step;
-}
-
 template <class TT>
 const TT &Element::step() const
 {
@@ -529,42 +510,18 @@ const TT &Element::step() const
     return string2value<TT>( m_step );
 }
 
-void Element::getValue( std::string &str ) const // kept this here instead of cpp for clarity
-{
-    std::shared_lock rLock( m_rwData );
-    str = m_value;
-}
-
-void Element::getValue( Light &lst ) const // kept this here instead of cpp for clarity
-{
-    std::shared_lock rLock( m_rwData );
-    lst = m_lightState;
-}
-
-void Element::getValue( Switch &sst ) const // kept this here instead of cpp for clarity
-{
-    std::shared_lock rLock( m_rwData );
-    sst = m_switchState;
-}
-
 template <class TT>
-void Element::getValue( TT &val ) const // kept this here instead of cpp for clarity
+void Element::getValue( TT &val ) const
 {
     std::shared_lock rLock( m_rwData );
     val = string2value<TT>( m_value );
 }
 
 template <typename TT>
-void Element::value( const TT &val ) //make me const
+void Element::value( const TT &val )
 {
     std::unique_lock wLock( m_rwData );
     m_value = value2string<TT>( val );
-}
-
-inline std::string Element::value() const // kept this here instead of cpp for clarity
-{
-    std::shared_lock rLock( m_rwData );
-    return m_value;
 }
 
 template <class TT>

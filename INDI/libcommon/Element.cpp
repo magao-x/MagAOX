@@ -49,15 +49,17 @@ Element::Element( const Type &type, const std::string &name, const std::string &
     }
 }
 
-Element::Element( const std::string &name, const char * value ) : m_type(Type::Text), m_name( name ), m_value(value)
+Element::Element( const std::string &name, const char *value ) : m_type( Type::Text ), m_name( name ), m_value( value )
 {
 }
 
-Element::Element( const std::string &name, const Switch &value ) : m_type(Type::Switch), m_name( name ), m_switchState(value)
+Element::Element( const std::string &name, const Switch &value )
+    : m_type( Type::Switch ), m_name( name ), m_switchState( value )
 {
 }
 
-Element::Element( const std::string &name, const Light &value ) : m_type(Type::Light), m_name( name ), m_lightState(value)
+Element::Element( const std::string &name, const Light &value )
+    : m_type( Type::Light ), m_name( name ), m_lightState( value )
 {
 }
 
@@ -144,16 +146,34 @@ bool Element::hasValidLabel() const
     return ( m_label.size() > 0 );
 }
 
+const std::string &Element::min() const
+{
+    std::shared_lock rLock( m_rwData );
+    return m_min;
+}
+
 bool Element::hasValidMin() const
 {
     std::shared_lock rLock( m_rwData );
     return ( m_min.size() > 0 );
 }
 
+const std::string &Element::max() const
+{
+    std::shared_lock rLock( m_rwData );
+    return m_max;
+}
+
 bool Element::hasValidMax() const
 {
     std::shared_lock rLock( m_rwData );
     return ( m_max.size() > 0 );
+}
+
+const std::string &Element::step() const
+{
+    std::shared_lock rLock( m_rwData );
+    return m_step;
 }
 
 bool Element::hasValidStep() const
@@ -171,10 +191,7 @@ void Element::size( const std::string &size )
 void Element::size( const size_t &size )
 {
     std::unique_lock wLock( m_rwData );
-
-    std::stringstream value;
-    value << size;
-    m_size = value.str();
+    m_size = value2string( size );
 }
 
 const std::string &Element::size() const
@@ -187,6 +204,36 @@ bool Element::hasValidSize() const
 {
     std::shared_lock rLock( m_rwData );
     return ( m_size.size() > 0 );
+}
+
+std::string Element::valueStr() const
+{
+    std::shared_lock rLock( m_rwData );
+    return m_value;
+}
+
+void Element::getValue( std::string &str ) const
+{
+    std::shared_lock rLock( m_rwData );
+    str = m_value;
+}
+
+void Element::getValue( Light &lst ) const
+{
+    std::shared_lock rLock( m_rwData );
+    lst = m_lightState;
+}
+
+void Element::getValue( Switch &sst ) const
+{
+    std::shared_lock rLock( m_rwData );
+    sst = m_switchState;
+}
+
+std::string Element::value() const
+{
+    std::shared_lock rLock( m_rwData );
+    return m_value;
 }
 
 bool Element::hasValidValue() const
@@ -221,12 +268,66 @@ bool Element::hasValidValue() const
     }
 }
 
+bool Element::operator==( const Element &ieRhs ) const
+{
+    if( &ieRhs == this )
+    {
+        return true;
+    }
+
+    std::shared_lock rLock( m_rwData );
+
+    if(m_name != ieRhs.m_name) //Do these first b/c they are the most likely differences in valid INDI
+    {
+        return false;
+    }
+    else if( m_type != ieRhs.m_type)
+    {
+        return false;
+    }
+
+    if( m_type == Type::Switch )
+    {
+        if( m_switchState != ieRhs.m_switchState )
+        {
+            return false;
+        }
+    }
+
+    if( m_type == Type::Light )
+    {
+        if( m_lightState != ieRhs.m_lightState )
+        {
+            return false;
+        }
+    }
+
+    if( m_type == Type::BLOB )
+    {
+        return false;
+    }
+
+    if(m_type == Type::Number || m_type == Type::Text)
+    {
+        if( m_value != ieRhs.m_value )
+        {
+            return false;
+        }
+    }
+
+    if( m_format != ieRhs.m_format || m_label != ieRhs.m_label ||
+        m_min != ieRhs.m_min || m_max != ieRhs.m_max || m_step != ieRhs.m_step || m_size != ieRhs.m_size )
+    {
+        return false;
+    }
+
+    return true;
+}
 
 bool Element::operator==( const Light &ls ) const
 {
     return ( m_lightState == ls );
 }
-
 
 bool Element::operator==( const Switch &ss ) const
 {
@@ -238,7 +339,7 @@ Element &Element::operator=( const Element &ieRhs )
     if( &ieRhs != this )
     {
         std::unique_lock wLock( m_rwData );
-        m_type = ieRhs.m_type;
+        m_type        = ieRhs.m_type;
         m_format      = ieRhs.m_format;
         m_label       = ieRhs.m_label;
         m_max         = ieRhs.m_max;
@@ -261,7 +362,7 @@ Element &Element::operator=( const std::string &val )
     return *this;
 }
 
-Element &Element::operator=( const char * val )
+Element &Element::operator=( const char *val )
 {
     std::unique_lock wLock( m_rwData );
     m_value = val;
@@ -282,20 +383,6 @@ Element &Element::operator=( const Light &state )
     return *this;
 }
 
-bool Element::operator==( const Element &ieRhs ) const
-{
-    if( &ieRhs == this )
-    {
-        return true;
-    }
-
-    std::shared_lock rLock( m_rwData );
-
-    return ( m_format == ieRhs.m_format && m_label == ieRhs.m_label && m_max == ieRhs.m_max && m_min == ieRhs.m_min &&
-             m_name == ieRhs.m_name && m_size == ieRhs.m_size && m_step == ieRhs.m_step && m_value == ieRhs.m_value &&
-             m_lightState == ieRhs.m_lightState && m_switchState == ieRhs.m_switchState );
-}
-
 void Element::clear()
 {
     std::unique_lock wLock( m_rwData );
@@ -310,6 +397,5 @@ void Element::clear()
     m_lightState  = Light::Unknown;
     m_switchState = Switch::Unknown;
 }
-
 
 } // namespace xindi
