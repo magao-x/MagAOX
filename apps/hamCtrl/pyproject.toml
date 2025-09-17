@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hamCtrl"
+description = "Python INDI device for controlling the Hamamatsu 15550-22UP Camera"
+version = "0.0.1.dev"
+dependencies = [
+    "xconf",
+    # "purepyindi2" 
+    # Makefile is temporally adjusted / default should be used for locations. 
+    # Currently pointing to a purepyindi2 version per a conda environment 'cv2' that will work on Velma.
+    ## This is a temp workaround so the base purepyindi2 version doesn't need to be updated just yet so it doesn't break another app.
+]
+
+authors = [
+    {name = "Stephanie F. Rinaldi", email = "srinaldi@arizona.edu"}
+]
+
+[project.scripts]
+hamCtrl = "hamCtrl.xapp:HamCam.console_app"

@@ -85,7 +85,8 @@ apps_tic = \
 	baslerCtrl \
 	bmcCtrl \
 	trippLitePDU \
-	rhusbMon
+	rhusbMon \
+	hamCtrl
 
 #     cameraSim
 apps_sim = \
