@@ -6,9 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "hamCtrl"
 description = "Python INDI device for controlling the Hamamatsu 15550-22UP Camera"
 version = "0.0.1.dev"
-dependencies = [
-    "xconf",
-]
 
 authors = [
     {name = "Stephanie F. Rinaldi", email = "srinaldi@arizona.edu"}
