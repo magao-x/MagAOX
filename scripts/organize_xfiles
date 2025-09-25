@@ -119,17 +119,25 @@ def verify_file(src, dest, dry_run):
 
 def remove_file(src, dry_run):
     if not dry_run:
-        # src.unlink()  # Remove before flight
-        log.info(f"Didn't remove {src}")
+        src.unlink()
+        log.info(f"Removed {src}")
     else:
         log.debug(f"Would have removed {src}")
+
+DRY_RUN_DIRS_CREATED = set()
 
 def make_parent_dirs(parent, dry_run):
     if not dry_run:
         parent.mkdir(parents=True, exist_ok=True)
         log.info(f"Made dir {parent}")
     else:
-        log.debug(f"Would have made dir {parent}")
+        global DRY_RUN_DIRS_CREATED
+        parent_path_str = str(parent)
+        if parent_path_str in DRY_RUN_DIRS_CREATED:
+            log.debug(f"Would have reused dir {parent_path_str}")
+        else:
+            log.debug(f"Would have made dir {parent_path_str}")
+            DRY_RUN_DIRS_CREATED.add(parent_path_str)
 
 def organize_store(store_root: pathlib.Path, dry_run):
     try:
@@ -140,6 +148,8 @@ def organize_store(store_root: pathlib.Path, dry_run):
         pass
     
     for child in store_root.glob('*'):
+        if 'lookyloo' in child.name:
+            continue
         if child.is_dir():
             log.debug(f'Descending to {child}')
             organize_store(child, dry_run)
@@ -154,8 +164,6 @@ def organize_store(store_root: pathlib.Path, dry_run):
                 raise RuntimeError(f"Differing file metadata for {child} and {new_target}")
             else:
                 remove_file(child, dry_run)
-        if not dry_run:
-            raise RuntimeError("Bail after one")
 
 def main(root_dirs, dry_run):
     log.debug(f"Organizing all of these: {root_dirs}")
