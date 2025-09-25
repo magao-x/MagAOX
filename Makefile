@@ -144,7 +144,8 @@ all_buildable_apps = \
 	xt1121Ctrl \
 	xt1121DCDU \
 	zaberCtrl \
-	zaberLowLevel
+	zaberLowLevel \
+	hamCtrl
 
 libs_to_build = libtelnet
 

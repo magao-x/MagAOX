@@ -42,7 +42,7 @@ CAMERA_CONNECT_RETRY_SEC = 5
 
 
 @xconf.config
-class HamCamConfig(BaseConfig):
+class CamHamConfig(BaseConfig):
     """Python INDI Device for controlling the Hamamatsu 15550-22UP camera.
 
     Pulled from the 'Example Python INDI device for MagAO-X
@@ -63,16 +63,16 @@ class HamCamConfig(BaseConfig):
     #camera_stream(dpath='/dev/video2', exptime=args.exptime, gain=args.gain,
                   #window=(args.x0, args.y0, args.width, args.height))"""
 
-class HamCam(XDevice):
-    config : HamCamConfig
+class CamHam(XDevice):
+    config : CamHamConfig
     
     # Testing 
-    data_dir : str = "/opt/MagAOX/rawimages/hamcam"
+    data_dir : str = "/opt/MagAOX/rawimages/camham"
     cancel : bool = False
     exp_start : float = 0
     shmim : ISIO.Image
     frame : np.ndarray
-    shmim_name : str = "hamcam"
+    shmim_name : str = "camham"
     last_image : Optional[str] = None
     start_telem : Optional[dict] = None
     exptime : Optional[float] = None
@@ -96,14 +96,14 @@ class HamCam(XDevice):
     th = threading.Thread()
 
 
-    def emit_telem_hamcam(self):
-        self.log.info(f"In emit_telem_hamcam")
-        print("In emit_telem_hamcam")
+    def emit_telem_camham(self):
+        self.log.info(f"In emit_telem_camham")
+        print("In emit_telem_camham")
         w = self.width #self.width
         h = self.height #self.height
         x = self.hpos
         y = self.vpos
-        self.telem("telem_hamcam", {
+        self.telem("telem_camham", {
             "roi": {
                 "xcen": x,  # Need to check this
                 "ycen": y, # Need to check this
