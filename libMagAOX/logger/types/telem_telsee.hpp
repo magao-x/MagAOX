@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-09-06 created by JRM
   */
@@ -36,17 +36,17 @@ struct telem_telsee : public flatbuffer_log
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( const int & dimm_time,         ///< [in] 
-                const double & dimm_el,        ///< [in] 
+      messageT( const int & dimm_time,         ///< [in]
+                const double & dimm_el,        ///< [in]
                 const double & dimm_fwhm_corr, ///< [in]
                 const double & dimm_fwhm_bad,  ///< [in]
-                const int & mag1_time,         ///< [in] 
-                const double & mag1_el,        ///< [in] 
-                const double & mag1_fwhm,      ///< [in] 
+                const int & mag1_time,         ///< [in]
+                const double & mag1_el,        ///< [in]
+                const double & mag1_fwhm,      ///< [in]
                 const double & mag1_fwhm_corr, ///< [in]
-                const int & mag2_time,         ///< [in] 
-                const double & mag2_el,        ///< [in] 
-                const double & mag2_fwhm,      ///< [in] 
+                const int & mag2_time,         ///< [in]
+                const double & mag2_el,        ///< [in]
+                const double & mag2_fwhm,      ///< [in]
                 const double & mag2_fwhm_corr  ///< [in]
               )
       {
@@ -55,7 +55,7 @@ struct telem_telsee : public flatbuffer_log
       }
 
    };
-                 
+
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
@@ -74,50 +74,141 @@ struct telem_telsee : public flatbuffer_log
       auto fbs = GetTelem_telsee_fb(msgBuffer);
 
       std::string msg = "[telsee] ";
-      
+
       msg += "dimm[ ";
-      
+
       msg += "t: ";
       msg += std::to_string(fbs->dimm_time()) + " ";
-      
+
       msg += "el: ";
       msg += std::to_string(fbs->dimm_el()) + " ";
 
       msg += "fw-cor: ";
       msg += std::to_string(fbs->dimm_fwhm_corr()) + "] ";
-      
+
       msg += "mag1[ ";
-      
+
       msg += "t: ";
       msg += std::to_string(fbs->mag1_time()) + " ";
-      
+
       msg += "el: ";
       msg += std::to_string(fbs->mag1_el()) + " ";
-      
+
       msg += "fw: ";
       msg += std::to_string(fbs->mag1_fwhm()) + " ";
-      
+
       msg += "fw-cor: ";
       msg += std::to_string(fbs->mag1_fwhm_corr()) + "] ";
-      
-      
+
+
       msg += "mag2[ ";
-      
+
       msg += "t: ";
       msg += std::to_string(fbs->mag2_time()) + " ";
-      
+
       msg += "el: ";
       msg += std::to_string(fbs->mag2_el()) + " ";
-      
+
       msg += "fw: ";
       msg += std::to_string(fbs->mag2_fwhm()) + " ";
-      
+
       msg += "fw-cor: ";
       msg += std::to_string(fbs->mag2_fwhm_corr()) + "] ";
       return msg;
-   
+
    }
-   
+
+    static int dimm_time( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_telsee_fb(msgBuffer);
+        return fbs->dimm_time();
+    }
+
+    static double dimm_el( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_telsee_fb(msgBuffer);
+        return fbs->dimm_el();
+    }
+
+    static double dimm_fwhm_corr( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_telsee_fb(msgBuffer);
+        return fbs->dimm_fwhm_corr();
+    }
+
+    static int mag1_time( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_telsee_fb(msgBuffer);
+        return fbs->mag1_time();
+    }
+
+    static double mag1_el( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_telsee_fb(msgBuffer);
+        return fbs->mag1_el();
+    }
+
+    static double mag1_fwhm( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_telsee_fb(msgBuffer);
+        return fbs->mag1_fwhm();
+    }
+
+    static double mag1_fwhm_corr( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_telsee_fb(msgBuffer);
+        return fbs->mag1_fwhm_corr();
+    }
+
+    static int mag2_time( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_telsee_fb(msgBuffer);
+        return fbs->mag2_time();
+    }
+
+    static double mag2_el( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_telsee_fb(msgBuffer);
+        return fbs->mag2_el();
+    }
+
+    static double mag2_fwhm( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_telsee_fb(msgBuffer);
+        return fbs->mag2_fwhm();
+    }
+
+    static double mag2_fwhm_corr( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_telsee_fb(msgBuffer);
+        return fbs->mag2_fwhm_corr();
+    }
+
+   /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(     member == "dimm_time") return logMetaDetail({"DIMM TIME", "DIMM meas. time [sec since midnight]", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&dimm_time), false});
+      else if( member == "dimm_el") return logMetaDetail({"DIMM EL", "DIMM elevation", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&dimm_el), false});
+      else if( member == "dimm_fwhm_corr") return logMetaDetail({"DIMM FWHM CORR", "DIMM FWHM corrected to zenith", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&dimm_fwhm_corr), false});
+      else if( member == "mag1_time") return logMetaDetail({"MAG1 TIME", "Baade meas. time [sec since midnight]", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&mag1_time), false});
+      else if( member == "mag1_el") return logMetaDetail({"MAG1 EL", "Baade elevation", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&mag1_el), false});
+      else if( member == "mag1_fwhm") return logMetaDetail({"MAG1 FWHM", "Baade FWHM raw", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&mag1_fwhm), false});
+      else if( member == "mag1_fwhm_corr") return logMetaDetail({"MAG1 FWHM CORR", "Baade FWHM corrected to zenith", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&mag1_fwhm_corr), false});
+      else if( member == "mag2_time") return logMetaDetail({"MAG2 TIME", "Clay meas. time [sec since midnight]", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&mag2_time), false});
+      else if( member == "mag2_el") return logMetaDetail({"MAG2 EL", "Clay elevation", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&mag2_el), false});
+      else if( member == "mag2_fwhm") return logMetaDetail({"MAG2 FWHM", "Clay FWHM raw", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&mag2_fwhm), false});
+      else if( member == "mag2_fwhm_corr") return logMetaDetail({"MAG2 FWHM CORR", "Clay FWHM corrected to zenith", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&mag2_fwhm_corr), false});
+      else
+      {
+         std::cerr << "No member " << member << " in telem_saving\n";
+         return logMetaDetail();
+      }
+    }
+
 }; //telem_telsee
 
 

@@ -173,14 +173,16 @@ inline
 int w2tcsOffloader::appStartup(){
 
    mx::fits::fitsFile<float> ff;
-   if(ff.read(m_wZModes, m_wZModesPath) < 0) 
+   mx::error_t errc = ff.read(m_wZModes, m_wZModesPath);
+   if(errc != mx::error_t::noerror) 
    {
       return log<text_log,-1>("Could not open mode cube file", logPrio::LOG_ERROR);
    }
    
    m_zCoeffs.resize(m_wZModes.planes(), 0);
 
-   if(ff.read(m_wMask, m_wMaskPath) < 0) 
+   errc = ff.read(m_wMask, m_wMaskPath);
+   if( errc != mx::error_t::noerror) 
    {
      return log<text_log,-1>("Could not open mode mask file", logPrio::LOG_ERROR);
    }

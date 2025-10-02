@@ -1041,8 +1041,16 @@ inline int shmimIntegrator::processImage( void *curr_src, const dark2ShmimT &dum
 
 inline int shmimIntegrator::findMatchingDark()
 {
-    std::vector<std::string> fnames = mx::ioutils::getFileNames( m_fileSaveDir, m_configName, "", ".fits" );
+    std::vector<std::string> fnames;
+    
+    mx::error_t errc = mx::ioutils::getFileNames(fnames, m_fileSaveDir, m_configName, "", ".fits" );
 
+    if(errc != mx::error_t::noerror)
+    {
+        return log<text_log,-1>(std::format("Could not get list of darks: {} "
+         "({})", mx::errorMessage(errc), mx::errorName(errc)), logPrio::LOG_ERROR);
+    }
+    
     // getFileNames sorts, so these will be in oldest to newest order by lexical timestamp sort
     // So we search in reverse to always pick newest
     long N = fnames.size();

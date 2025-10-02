@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-09-06 created by JRM
   */
@@ -38,7 +38,7 @@ struct telem_chrony_stats : public flatbuffer_log
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( const double systemTime,     ///< [in] the error in system time 
+      messageT( const double systemTime,     ///< [in] the error in system time
                 const double lastOffset,     ///< [in] the last clock offset
                 const double rmsOffset,      ///< [in] the rms avg offset
                 const double freq,           ///< [in] freq drift of clock
@@ -49,7 +49,7 @@ struct telem_chrony_stats : public flatbuffer_log
                 const double updateInt       ///< [in] the update interval
               )
       {
-         
+
          auto fp = CreateTelem_chrony_stats_fb(builder, systemTime, lastOffset, rmsOffset, freq, residFreq, skew, rootDelay, rootDispersion, updateInt);
          builder.Finish(fp);
       }
@@ -63,7 +63,7 @@ struct telem_chrony_stats : public flatbuffer_log
       auto verifier = flatbuffers::Verifier( static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)), static_cast<size_t>(len));
       return VerifyTelem_chrony_stats_fbBuffer(verifier);
    }
- 
+
    ///Get the message formatte for human consumption.
    static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
                                  flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
@@ -71,48 +71,48 @@ struct telem_chrony_stats : public flatbuffer_log
    {
       static_cast<void>(len);
       char num[128];
-      
+
       auto fbs = GetTelem_chrony_stats_fb(msgBuffer);
 
       std::string msg = "[chrony_stats] ";
-   
+
       msg += "sys_time: ";
       snprintf(num, sizeof(num), "%g",fbs->systemTime());
       msg += num;
-      
+
       msg += " last_off: ";
       snprintf(num, sizeof(num), "%g",fbs->lastOffset());
       msg += num;
-      
+
       msg += " rms_off: ";
       snprintf(num, sizeof(num), "%g",fbs->rmsOffset());
       msg += num;
-      
+
       msg += " freq: ";
       snprintf(num, sizeof(num), "%g",fbs->freq());
       msg += num;
-      
+
       msg += " rfreq: ";
       snprintf(num, sizeof(num), "%g",fbs->residFreq());
       msg += num;
-      
+
       msg += " skew: ";
       snprintf(num, sizeof(num), "%g",fbs->skew());
       msg += num;
-      
+
       msg += " root_del: ";
       snprintf(num, sizeof(num), "%g",fbs->rootDelay());
       msg += num;
-      
+
       msg += " root_disp: ";
       snprintf(num, sizeof(num), "%g",fbs->rootDispersion());
       msg += num;
-      
+
       msg += " upd_int: ";
       msg += std::to_string(fbs->updateInt());
-      
+
       return msg;
-   
+
    }
 
    static double systemTime(void * msgBuffer )
@@ -120,80 +120,79 @@ struct telem_chrony_stats : public flatbuffer_log
       auto fbs = GetTelem_chrony_stats_fb(msgBuffer);
       return fbs->systemTime();
    }
-   
+
    static double lastOffset(void * msgBuffer )
    {
       auto fbs = GetTelem_chrony_stats_fb(msgBuffer);
       return fbs->lastOffset();
    }
-   
+
    static double rmsOffset(void * msgBuffer )
    {
       auto fbs = GetTelem_chrony_stats_fb(msgBuffer);
       return fbs->rmsOffset();
    }
-   
+
    static double freq(void * msgBuffer )
    {
       auto fbs = GetTelem_chrony_stats_fb(msgBuffer);
       return fbs->freq();
    }
-   
+
    static double residFreq(void * msgBuffer )
    {
       auto fbs = GetTelem_chrony_stats_fb(msgBuffer);
       return fbs->residFreq();
    }
-   
+
    static double skew(void * msgBuffer )
    {
       auto fbs = GetTelem_chrony_stats_fb(msgBuffer);
       return fbs->skew();
    }
-   
+
    static double rootDelay(void * msgBuffer )
    {
       auto fbs = GetTelem_chrony_stats_fb(msgBuffer);
       return fbs->rootDelay();
    }
-   
+
    static double rootDispersion(void * msgBuffer )
    {
       auto fbs = GetTelem_chrony_stats_fb(msgBuffer);
       return fbs->rootDispersion();
    }
-   
+
    static double updateInt(void * msgBuffer )
    {
       auto fbs = GetTelem_chrony_stats_fb(msgBuffer);
       return fbs->updateInt();
    }
-   
-   /// Get pointer to the accessor for a member by name 
+
+   /// Get the logMetaDetail for a member by name
    /**
-     * \returns the function pointer cast to void*
-     * \returns -1 for an unknown member
-     */ 
-   static void * getAccessor( const std::string & member /**< [in] the name of the member */ )
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(member == "systemTime") return reinterpret_cast<void*>(&systemTime);
-      if(member == "lastOffset") return reinterpret_cast<void*>(&lastOffset);
-      if(member == "rmsOffset") return reinterpret_cast<void*>(&rmsOffset);
-      if(member == "freq") return reinterpret_cast<void*>(&freq);
-      if(member == "residFreq") return reinterpret_cast<void*>(&residFreq);
-      if(member == "skew") return reinterpret_cast<void*>(&skew);
-      if(member == "rootDelay") return reinterpret_cast<void*>(&rootDelay);
-      if(member == "rootDispersion") return reinterpret_cast<void*>(&rootDispersion);
-      if(member == "updateInt") return reinterpret_cast<void*>(&updateInt);
+      if(     member == "systemTime") return logMetaDetail({"CHRONY SYSTEM TIME", "", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&systemTime), true});
+      else if( member == "lastOffset") return logMetaDetail({ "CHRONY LAST OFFSET", "", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&lastOffset), true});
+      else if( member == "rmsOffset") return logMetaDetail({ "CHRONY RMS OFFSET", "", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&rmsOffset), true});
+      else if( member == "freq") return logMetaDetail({"CHRONY FREQ", "", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&freq), true});
+      else if( member == "residFreq") return logMetaDetail({"CHRONY RESID FREQ", "", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&residFreq), true});
+      else if( member == "skew") return logMetaDetail({"CHRONY SKEW", "", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&skew), true});
+      else if( member == "rootDelay") return logMetaDetail({"CHRONY ROOT DELAY", "", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&rootDelay), true});
+      else if( member == "rootDispersion") return logMetaDetail({"CHRONY ROOT DISPERSION", "", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&rootDispersion), true});
+      else if( member == "updateInt") return logMetaDetail({"CHRONY UPDATE INT", "", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&updateInt), true});
       else
       {
-         std::cerr << "No string member " << member << " in telem_chrony_stats\n";
-         return 0;
+         std::cerr << "No member " << member << " in telem_chrony_stats\n";
+         return logMetaDetail();
       }
-   }
+    }
 
-   
-   
+
 }; //telem_chrony_stats
 
 } //namespace logger

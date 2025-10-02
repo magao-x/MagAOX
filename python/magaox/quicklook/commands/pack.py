@@ -69,7 +69,7 @@ class Pack(BaseQuicklookCommand):
         if not self.destination.is_dir():
             self.destination.mkdir(parents=True, exist_ok=True)
         log.debug(f"Starting the packer with {self.destination / self.name}")
-
+        start_time_sec = time.time()
 
         dbconn = self.database.connect()
 
@@ -122,10 +122,16 @@ class Pack(BaseQuicklookCommand):
                 n_files = len(paths_packed)
                 total_files += n_files
                 if final_bytes > 0:
-                    log.debug(
-                        f"Packed {orig_bytes/1024/1024:1.1f} MiB from {n_files} files into {final_bytes/1024/1024:1.1f} MiB in {pack_target_group} ({orig_bytes / final_bytes:1.2f})"
+                    log.info(
+                        f"Packed {orig_bytes/1024/1024:1.1f} MiB from {n_files} files into "
+                        f"{final_bytes/1024/1024:1.1f} MiB in {pack_target_group} ({orig_bytes / final_bytes:1.2f})"
                     )
         if final_total_bytes > 0:
-            log.debug(
-                f"Packed {orig_total_bytes/1024/1024:1.1f} MiB from {total_files} files into {final_total_bytes/1024/1024:1.1f} MiB ({orig_total_bytes / final_total_bytes:1.2f})"
+            duration_sec = time.time() - start_time_sec
+            log.info(
+                f"Packed {orig_total_bytes/1024/1024:1.1f} MiB from {total_files} files into "
+                f"{final_total_bytes/1024/1024:1.1f} MiB ({orig_total_bytes / final_total_bytes:1.2f})"
             )
+            log.info(f"Spent {duration_sec / 60:1.2f} min total packing")
+        else:
+            log.info("No data were found to pack")

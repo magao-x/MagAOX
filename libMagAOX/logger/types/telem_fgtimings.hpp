@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2022-10-03 created by JRM
   */
@@ -43,13 +43,13 @@ struct telem_fgtimings : public flatbuffer_log
                 const double & mawtime,       ///< [in] acquisition time deltas
                 const double & mawtime_jitter ///< [in] jitter in acquisition time deltas
               )
-      {  
+      {
          auto fp = CreateTelem_fgtimings_fb(builder, atime, atime_jitter, wtime, wtime_jitter, mawtime, mawtime_jitter);
          builder.Finish(fp);
       }
 
    };
-                 
+
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
@@ -70,7 +70,7 @@ struct telem_fgtimings : public flatbuffer_log
       auto fbs = GetTelem_fgtimings_fb(msgBuffer);
 
       std::string msg = "[fgtimes]";
-      
+
       msg += " acq: ";
 
       snprintf(buf, sizeof(buf), "%0.10e", fbs->atime());
@@ -94,9 +94,9 @@ struct telem_fgtimings : public flatbuffer_log
       msg += " +/- ";
       snprintf(buf, sizeof(buf), "%0.5e", fbs->wmatime_jitter());
       msg += buf;
-      
+
       return msg;
-   
+
    }
 
    static double atime( void * msgBuffer )
@@ -110,7 +110,7 @@ struct telem_fgtimings : public flatbuffer_log
       auto fbs = GetTelem_fgtimings_fb(msgBuffer);
       return fbs->atime_jitter();
    }
-   
+
    static double wtime( void * msgBuffer )
    {
       auto fbs = GetTelem_fgtimings_fb(msgBuffer);
@@ -135,11 +135,11 @@ struct telem_fgtimings : public flatbuffer_log
       return fbs->wmatime_jitter();
    }
 
-   /// Get pointer to the accessor for a member by name 
+   /// Get the logMetaDetail for a member by name
    /**
-     * \returns the function pointer cast to void*
-     * \returns -1 for an unknown member
-     */ 
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
       if(member == "atime") return logMetaDetail({"ACQ TIME", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&atime)});
@@ -151,11 +151,11 @@ struct telem_fgtimings : public flatbuffer_log
 
       else
       {
-         std::cerr << "No string member " << member << " in telem_fgtimings\n";
+         std::cerr << "No member " << member << " in telem_fgtimings\n";
          return logMetaDetail();
       }
    }
-   
+
 }; //telem_fgtimings
 
 

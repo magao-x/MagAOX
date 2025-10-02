@@ -72,6 +72,8 @@ template <class derivedT, typename realT>
 class dm
 {
 
+    typedef mx::verbose::vvv verboseT;
+
 protected:
     /** \name Configurable Parameters
      * @{
@@ -918,7 +920,10 @@ int dm<derivedT, realT>::whilePowerOff()
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::findDMChannels()
 {
-    std::vector<std::string> dmlist = mx::ioutils::getFileNames("/milk/shm/", derived().m_shmimName, ".im", ".shm");
+    std::vector<std::string> dmlist;
+    mx::error_t errc = mx::ioutils::getFileNames(dmlist, "/milk/shm/", derived().m_shmimName, ".im", ".shm");
+
+    mx_error_check_rv(errc, -1);
 
     if (dmlist.size() == 0)
     {
@@ -1079,7 +1084,10 @@ int dm<derivedT, realT>::releaseDM()
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::checkFlats()
 {
-    std::vector<std::string> tfs = mx::ioutils::getFileNames(m_flatPath, "", "", ".fits");
+    std::vector<std::string> tfs;
+    mx::error_t errc = mx::ioutils::getFileNames(tfs, m_flatPath, "", "", ".fits");
+
+    mx_error_check_rv(errc, -1);
 
     // First remove default, b/c we always add it and don't want to include it in timestamp selected ones
     for (size_t n = 0; n < tfs.size(); ++n)
@@ -1232,9 +1240,12 @@ int dm<derivedT, realT>::loadFlat(const std::string &intarget)
     m_flatLoaded = false;
     // load into memory.
     mx::fits::fitsFile<realT> ff;
-    if (ff.read(m_flatCommand, targetPath) < 0)
+    mx::error_t errc = ff.read(m_flatCommand, targetPath);
+    if (errc != mx::error_t::noerror)
     {
-        derivedT::template log<text_log>("flat file " + targetPath + " not found", logPrio::LOG_ERROR);
+        derivedT::template log<text_log>(std::format("error reading flat file {}: "
+                                                     "{} ({})", targetPath, mx::errorMessage(errc), 
+                                                     mx::errorName(errc)), logPrio::LOG_ERROR);
         return -1;
     }
 
@@ -1432,7 +1443,10 @@ int dm<derivedT, realT>::zeroFlat()
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::checkTests()
 {
-    std::vector<std::string> tfs = mx::ioutils::getFileNames(m_testPath, "", "", ".fits");
+    std::vector<std::string> tfs;
+    mx::error_t errc = mx::ioutils::getFileNames(tfs, m_testPath, "", "", ".fits");
+
+    mx_error_check_rv(errc, -1);
 
     for (auto it = m_testCommands.begin(); it != m_testCommands.end(); ++it)
     {
@@ -1545,9 +1559,12 @@ int dm<derivedT, realT>::loadTest(const std::string &intarget)
     m_testLoaded = false;
     // load into memory.
     mx::fits::fitsFile<realT> ff;
-    if (ff.read(m_testCommand, targetPath) < 0)
+    mx::error_t errc = ff.read(m_testCommand, targetPath);
+    if ( errc != mx::error_t::noerror)
     {
-        derivedT::template log<text_log>("test file " + targetPath + " not found", logPrio::LOG_ERROR);
+        derivedT::template log<text_log>(std::format("error reading test file {}: "
+                                                     "{} ({})", targetPath, mx::errorMessage(errc), 
+                                                     mx::errorName(errc)), logPrio::LOG_ERROR);
         return -1;
     }
 

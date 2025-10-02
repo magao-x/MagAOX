@@ -155,7 +155,11 @@ int stateRuleEngine::loadConfigImpl( mx::app::appConfigurator & _config )
     }
     else
     {
-        std::vector<std::string> conffiles = mx::ioutils::getFileNames(m_configDir + "/" + m_ruleDir, "", "", ".conf");
+        std::vector<std::string> conffiles;
+        if(mx::ioutils::getFileNames(conffiles, m_configDir + "/" + m_ruleDir, "", "", ".conf") != mx::error_t::noerror)
+        {
+            return log<software_critical,-1>({__FILE__,__LINE__, "Error reading rules"});
+        }
 
         for(auto & cnf : conffiles)
         {
@@ -190,7 +194,7 @@ int stateRuleEngine::loadConfigImpl( mx::app::appConfigurator & _config )
         {
             return log<software_critical,-1>({__FILE__,__LINE__, std::string("Error finalizing rules:\n") + e.what()});
         }
-        
+
     }
 
     return 0;
@@ -303,7 +307,7 @@ int stateRuleEngine::appLogic()
         }
         catch(...){}
         #endif
-        
+
         if(it->second->priority() != rulePriority::none)
         {
             try

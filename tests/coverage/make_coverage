@@ -1,0 +1,18 @@
+#!/bin/bash
+set -eo pipefail
+
+#######################################################
+# build and run tests with gcov
+#
+# run in the top level MagAO-X source directory
+#######################################################
+
+make coverage
+
+cd tests
+
+make coverage
+
+cd ..
+
+tests/coverage/update_coverage

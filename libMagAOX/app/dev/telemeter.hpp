@@ -67,8 +67,10 @@ namespace dev
 template <class derivedT>
 struct telemeter
 {
+    typedef XWC_DEFAULT_VERBOSITY verboseT;
+
     /// The log manager type.
-    typedef logger::logManager<derivedT, logFileRaw> logManagerT;
+    typedef logger::logManager<derivedT, logFileRaw<verboseT>> logManagerT;
 
     logManagerT m_tel;
 

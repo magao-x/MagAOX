@@ -21,6 +21,7 @@ jobs:
         run: |
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
           pkg-config --modversion openblas
+          make coverage_clean
           make coverage
           cd tests
           make coverage
@@ -30,7 +31,7 @@ jobs:
           cd ..
           lcov --directory . --capture --output-file coverage.info
           lcov --remove coverage.info "*/tests/*" "/usr/*" "/sys/*" "/tty/*" --output-file coverage_filtered.info
-          genhtml coverage_filtered.info --output-directory coverage_report --title "MagAOX"
+          genhtml coverage_filtered.info --output-directory coverage_report --title "MagAOX" --hierarchical --merge-aliases --suppress-aliases --filter function --demangle-cpp --css-file tests/coverage/gcov.css
       - name: Upload Coverage Report as Artifact
         uses: actions/upload-artifact@v4
         with:

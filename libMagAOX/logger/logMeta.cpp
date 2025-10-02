@@ -3,20 +3,23 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_files
-  * 
+  *
   */
 
 
 #include "logMeta.hpp"
 
-#include "generated/logTypes.hpp"
+//#include "generated/logTypes.hpp"
+
+#include "generated/logMemberAccessor.hpp"
 
 
 namespace MagAOX
 {
 namespace logger
 {
-   
+
+/*
 logMetaDetail logMemberAccessor( flatlogs::eventCodeT ec,
                           const std::string & memberName
                         )
@@ -34,7 +37,7 @@ logMetaDetail logMemberAccessor( flatlogs::eventCodeT ec,
       case telem_stage::eventCode:
          return telem_stage::getAccessor(memberName);
       case telem_zaber::eventCode:
-         return telem_zaber::getAccessor(memberName);   
+         return telem_zaber::getAccessor(memberName);
       case telem_dmspeck::eventCode:
          return telem_dmspeck::getAccessor(memberName);
       case telem_observer::eventCode:
@@ -44,23 +47,28 @@ logMetaDetail logMemberAccessor( flatlogs::eventCodeT ec,
       case telem_loopgain::eventCode:
          return telem_loopgain::getAccessor(memberName);
       default:
-         std::cerr << "Missing logMemberAccessor case entry for " << ec << ":" << memberName << "\n";
+         std::cerr << "Missing logMemberAccessor case entry for " << ec << ": " << memberName << "\n";
          return logMetaDetail();
    }
-}
+}*/
 
 
 logMeta::logMeta( const logMetaSpec & lms )
 {
-   setLog(lms);   
+   setLog(lms);
 }
-       
-std::string logMeta::keyword()
+
+const std::string & logMeta::device()
+{
+   return m_spec.device;
+}
+
+const std::string & logMeta::keyword()
 {
    return m_spec.keyword;
 }
 
-std::string logMeta::comment()
+const std::string & logMeta::comment()
 {
    return m_spec.comment;
 }
@@ -69,7 +77,7 @@ int logMeta::setLog( const logMetaSpec & lms )
 {
    m_spec = lms;
    m_detail = logMemberAccessor(m_spec.eventCode, m_spec.member);
-   
+
    if(m_spec.keyword == "") m_spec.keyword = m_detail.keyword;
    if(m_spec.format == "") m_spec.format = m_detail.format;
    if(m_spec.format == "")
@@ -133,20 +141,20 @@ int logMeta::setLog( const logMetaSpec & lms )
 }
 
 
-std::string logMeta::value( logMap & lm,
+std::string logMeta::value( logMap<verboseT> & lm,
                             const flatlogs::timespecX & stime,
                             const flatlogs::timespecX & atime
                           )
 {
    if(m_detail.accessor == nullptr) return "";
-         
+
    if(m_detail.valType == valTypes::String)
    {
-      std::string vs = valueString( lm, stime, atime); 
+      std::string vs = valueString( lm, stime, atime);
       if(vs == m_invalidValue)
       {
          std::cerr << __FILE__ << " " << __LINE__ << " valueString returned invalid value\n";
-      } 
+      }
       return vs;
    }
    else
@@ -155,12 +163,12 @@ std::string logMeta::value( logMap & lm,
       if(vn == m_invalidValue)
       {
          std::cerr << __FILE__ << " " << __LINE__ << " valueNumber returned invalid value\n";
-      } 
+      }
       return vn;
    }
 }
 
-std::string logMeta::valueNumber( logMap & lm,
+std::string logMeta::valueNumber( logMap<verboseT> & lm,
                                   const flatlogs::timespecX & stime,
                                   const flatlogs::timespecX & atime
                                 )
@@ -181,7 +189,7 @@ std::string logMeta::valueNumber( logMap & lm,
          case valTypes::Char:
          {
             char val;
-            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,reinterpret_cast<char(*)(void*)>(m_detail.accessor), &m_hint) != 0) 
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,reinterpret_cast<char(*)(void*)>(m_detail.accessor), &m_hint) != 0)
             {
                std::cerr << "getLogStateVal returned error: " << __FILE__ << " " << __LINE__ << "\n";
                return m_invalidValue;
@@ -284,7 +292,7 @@ std::string logMeta::valueNumber( logMap & lm,
 
             snprintf(str, sizeof(str), m_spec.format.c_str(), (int) val.back());
             res += str;
-            
+
             return res;
          }
          case valTypes::Vector_Float:
@@ -305,7 +313,7 @@ std::string logMeta::valueNumber( logMap & lm,
 
             snprintf(str, sizeof(str), m_spec.format.c_str(), val.back());
             res += str;
-            
+
             return res;
          }
          default:
@@ -413,10 +421,10 @@ std::string logMeta::valueNumber( logMap & lm,
    }
 
    return m_invalidValue;
-   
+
 }
 
-std::string logMeta::valueString( logMap & lm,
+std::string logMeta::valueString( logMap<verboseT> & lm,
                                   const flatlogs::timespecX & stime,
                                   const flatlogs::timespecX & atime
                                 )
@@ -428,9 +436,9 @@ std::string logMeta::valueString( logMap & lm,
       {
          std::cerr << "getLogStateVal returned error " << __FILE__ << " " << __LINE__ << "\n";
 
-         #ifdef HARD_EXIT 
+         #ifdef HARD_EXIT
          std::cerr << __FILE__ << " " << __LINE__ << "\n";
-         
+
          exit(-1);
          #endif
          val = m_invalidValue;
@@ -443,17 +451,17 @@ std::string logMeta::valueString( logMap & lm,
    return val;
 }
 
-mx::fits::fitsHeaderCard logMeta::card( logMap &lm,
+mx::fits::fitsHeaderCard<logMeta::verboseT> logMeta::card( logMap<verboseT> &lm,
                                           const flatlogs::timespecX & stime,
-                                          const flatlogs::timespecX & atime 
+                                          const flatlogs::timespecX & atime
                                         )
 {
    #ifdef DEBUG
    std::cerr << __FILE__ << " " << __LINE__ << "\n";
    #endif
-   
+
    std::string vstr = value(lm, stime, atime);
-   
+
    #ifdef DEBUG
    std::cerr << __FILE__ << " " << __LINE__ << "\n";
    #endif
@@ -477,16 +485,16 @@ mx::fits::fitsHeaderCard logMeta::card( logMap &lm,
    {
       std::cerr << "got invalid value: " << __FILE__ << " " << __LINE__ << "\n";
       // always a string sentinel value, so return here to skip the valType conditional
-      return mx::fits::fitsHeaderCard(keyw, vstr, m_spec.comment);
+      return mx::fits::fitsHeaderCard<verboseT>(keyw, vstr, m_spec.comment);
    }
 
    if(m_detail.valType == valTypes::String)
    {
-      return mx::fits::fitsHeaderCard(keyw, vstr, m_spec.comment);
+      return mx::fits::fitsHeaderCard<verboseT>(keyw, vstr, m_spec.comment);
    }
-   else 
+   else
    {
-      return mx::fits::fitsHeaderCard(keyw, vstr.c_str(), m_detail.valType, m_spec.comment);
+      return mx::fits::fitsHeaderCard<verboseT>(keyw, vstr.c_str(), m_detail.valType, m_spec.comment);
    }
 }
 

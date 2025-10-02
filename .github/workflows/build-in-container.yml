@@ -3,39 +3,10 @@ on:
   push
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: magao-x/magaox
   BASE_IMAGE_NAME: magao-x/magao-x-setup
 jobs:
-  build-and-push-rocky:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Log in to the Container registry
-        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Extract metadata (tags, labels) for Docker (full)
-        id: meta_full
-        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-      - name: Build and push Docker image (full)
-        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
-        with:
-          context: .
-          file: Dockerfile
-          push: ${{ github.ref == 'refs/heads/dev' }}
-          tags: ${{ steps.meta_full.outputs.tags }}
-          labels: ${{ steps.meta_full.outputs.labels }}
-          build-args: |
-            BASE_IMAGE=${{ env.REGISTRY }}/${{ env.BASE_IMAGE_NAME }}
-  build-and-push-rocky-guis:
+  build-and-push-rocky-x86_64:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -64,7 +35,8 @@ jobs:
           labels: ${{ steps.meta_full.outputs.labels }}
           build-args: |
             BASE_IMAGE=${{ env.REGISTRY }}/${{ env.BASE_IMAGE_NAME }}:cli
-      - name: Build and push Docker image (no GUIs)
+            MAGAOX_ROLE=container
+      - name: Build and push Docker image (GUIs)
         uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
         with:
           context: .
@@ -74,3 +46,4 @@ jobs:
           labels: ${{ steps.meta_full.outputs.labels }}
           build-args: |
             BASE_IMAGE=${{ env.REGISTRY }}/${{ env.BASE_IMAGE_NAME }}:gui
+            MAGAOX_ROLE=workstation

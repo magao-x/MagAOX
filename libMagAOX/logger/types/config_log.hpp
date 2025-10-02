@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-09-06 created by JRM
   */
@@ -44,15 +44,15 @@ struct config_log : public flatbuffer_log
          auto _name = builder.CreateString(name);
          auto _value = builder.CreateString(value);
          auto _source = builder.CreateString(source);
-         
-         
+
+
          auto fp = CreateConfig_log_fb(builder, _name, code, _value, _source);
          builder.Finish(fp);
 
       }
 
    };
-   
+
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
@@ -71,32 +71,44 @@ struct config_log : public flatbuffer_log
       auto fbs = GetConfig_log_fb(msgBuffer);
 
       std::string msg = "Config: ";
-      
+
       if(fbs->name())
       {
          msg += fbs->name()->c_str();
       }
-      
+
       msg += "=";
-      
+
       if(fbs->value())
       {
          msg += fbs->value()->c_str();
       }
-      
+
       msg += " [";
-      
+
       if(fbs->source())
       {
          msg += fbs->source()->c_str();
       }
-      
+
       msg += "]";
-      
+
       return msg;
-   
+
    }
-   
+
+   /// Get an empty logMetaDetail because meta data doesn't make sense for this log
+   /**
+     * \returns an empty logMetaDetail
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+
+      std::cerr << "meta data doesn't make sense for config_log.\n";
+      return logMetaDetail();
+   }
+
 }; //config_log
 
 

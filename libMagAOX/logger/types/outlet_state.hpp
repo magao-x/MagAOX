@@ -63,7 +63,7 @@ struct outlet_state : public flatbuffer_log
 
       std::stringstream s;
       s << "Outlet: " << (int) rgs->outlet() << " ";
-      
+
       if(rgs->state()==2)
       {
          s << "ON";
@@ -77,8 +77,20 @@ struct outlet_state : public flatbuffer_log
          s << "OFF";
       }
       else s << "UNK";
-      
+
       return s.str();
+   }
+
+   /// Get an empty logMetaDetail because meta data doesn't make sense for this log
+   /**
+     * \returns an empty logMetaDetail
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+
+      std::cerr << "meta data doesn't make sense for outlet_state.\n";
+      return logMetaDetail();
    }
 };
 

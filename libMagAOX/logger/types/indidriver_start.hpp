@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-08-18 created by JRM
   */
@@ -30,7 +30,7 @@ struct indidriver_start : public empty_log<indidriver_start>
 
    ///The message string
    static const char * msg() { return "INDI driver communications started"; }
-   
+
 };
 
 } //namespace logger

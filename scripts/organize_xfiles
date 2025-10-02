@@ -124,20 +124,24 @@ def remove_file(src, dry_run):
     else:
         log.debug(f"Would have removed {src}")
 
-DRY_RUN_DIRS_CREATED = set()
+PARENT_DIRS = set()
 
 def make_parent_dirs(parent, dry_run):
-    if not dry_run:
-        parent.mkdir(parents=True, exist_ok=True)
-        log.info(f"Made dir {parent}")
-    else:
-        global DRY_RUN_DIRS_CREATED
-        parent_path_str = str(parent)
-        if parent_path_str in DRY_RUN_DIRS_CREATED:
+    global PARENT_DIRS
+    parent_path_str = str(parent)
+    if parent_path_str in PARENT_DIRS or parent.is_dir():
+        PARENT_DIRS.add(parent_path_str)  # ensure added if found existing from disk
+        if dry_run:
             log.debug(f"Would have reused dir {parent_path_str}")
         else:
+            log.debug(f"{parent} exists")
+    else:
+        if dry_run:
             log.debug(f"Would have made dir {parent_path_str}")
-            DRY_RUN_DIRS_CREATED.add(parent_path_str)
+        else:
+            parent.mkdir(parents=True, exist_ok=True)
+        PARENT_DIRS.add(parent_path_str)
+        log.debug(f"Made dir {parent}")
 
 def organize_store(store_root: pathlib.Path, dry_run):
     try:
@@ -148,17 +152,18 @@ def organize_store(store_root: pathlib.Path, dry_run):
         pass
     
     for child in store_root.glob('*'):
-        if 'lookyloo' in child.name:
+        if 'lookyloo' in child.name or 'selfRM' in child.name:
             continue
         if child.is_dir():
             log.debug(f'Descending to {child}')
             organize_store(child, dry_run)
         else:
-            new_target = file_time_rel_path(store_root, parse_xname(child.name))
-            if new_target.parent.is_dir():
-                log.debug(f"{new_target.parent} exists")
-            else:
-                make_parent_dirs(new_target.parent, dry_run)
+            try:
+                new_target = file_time_rel_path(store_root, parse_xname(child.name))
+            except Exception:
+                log.exception(f"{child} failed to parse")
+                raise
+            make_parent_dirs(new_target.parent, dry_run)
             copy_file_if_needed(child, new_target, dry_run)
             if not verify_file(child, new_target, dry_run):
                 raise RuntimeError(f"Differing file metadata for {child} and {new_target}")

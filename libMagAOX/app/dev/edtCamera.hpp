@@ -303,8 +303,13 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string & response,
       if (*buf) lastbyte = (u_char)buf[strnlen(buf, sizeof(buf))-1];
 
       if (pdv_get_waitchar(m_pdv, &waitc) && (lastbyte == waitc))
+      {
           break;
-      else ret = pdv_serial_wait(m_pdv, m_readTimeout/2, 1);
+      }
+      else 
+      {
+         ret = pdv_serial_wait(m_pdv, m_readTimeout/2, 1);
+      }
    }
    while(ret > 0);
 

@@ -1,12 +1,12 @@
 /** \file string_log.hpp
-  * \brief The MagAO-X logger string_log log type.
-  * \author Jared R. Males (jaredmales@gmail.com)
-  *
-  * \ingroup logger_types_files
-  * 
-  * History:
-  * - 2018-08-18 created by JRM
-  */
+ * \brief The MagAO-X logger string_log log type.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup logger_types_files
+ *
+ * History:
+ * - 2018-08-18 created by JRM
+ */
 #ifndef logger_types_string_log_hpp
 #define logger_types_string_log_hpp
 
@@ -18,63 +18,97 @@ namespace MagAOX
 
 namespace logger
 {
-   
-   
-   
+
 /// Base class for logs consisting of a string message.
 /** Does not have eventCode or defaultLevel, so this can not be used as a log type in logger.
-  *
-  * \ingroup logger_types_basic
-  */
+ *
+ * \ingroup logger_types_basic
+ */
 struct string_log : public flatbuffer_log
 {
-   ///The type of the message
-   struct messageT : public fbMessage
-   {
-      messageT( const char * msg )
-      {
-         auto _msg = builder.CreateString(msg);
-         
-         auto gs = CreateString_log_fb(builder, _msg);
-         builder.Finish(gs);
-      }
-      
-      messageT( const std::string & msg )
-      {
-         auto _msg = builder.CreateString(msg);
-         
-         auto gs = CreateString_log_fb(builder, _msg);
-         builder.Finish(gs);
-      }
-   };
+    /// The type of the message
+    struct messageT : public fbMessage
+    {
+        messageT( const char *msg )
+        {
+            auto _msg = builder.CreateString( msg );
 
-   static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
-                       flatlogs::msgLenT len            ///< [in] length of msgBuffer.
-                     )
-   {
-      auto verifier = flatbuffers::Verifier( static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)), static_cast<size_t>(len));
-      return VerifyString_log_fbBuffer(verifier);
-   }
+            auto gs = CreateString_log_fb( builder, _msg );
+            builder.Finish( gs );
+        }
 
-   ///Get the message formatted for human consumption.
-   static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
-                                 flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
-                               )
-   {
-      static_cast<void>(len);
-      
-      auto rgs = GetString_log_fb(msgBuffer);
-      
-      if(rgs->message() == nullptr) return "";
-      else return rgs->message()->c_str();
-   }
+        messageT( const std::string &msg )
+        {
+            auto _msg = builder.CreateString( msg );
 
+            auto gs = CreateString_log_fb( builder, _msg );
+            builder.Finish( gs );
+        }
+    };
+
+    static bool verify( flatlogs::bufferPtrT &logBuff, ///< [in] Buffer containing the flatbuffer serialized message.
+                        flatlogs::msgLenT     len      ///< [in] length of msgBuffer.
+    )
+    {
+        auto verifier = flatbuffers::Verifier( static_cast<uint8_t *>( flatlogs::logHeader::messageBuffer( logBuff ) ),
+                                               static_cast<size_t>( len ) );
+        return VerifyString_log_fbBuffer( verifier );
+    }
+
+    /// Get the message formatted for human consumption.
+    static std::string msgString( void *msgBuffer,      /**< [in] Buffer containing the flatbuffer serialized message.*/
+                                  flatlogs::msgLenT len /**< [in] [unused] length of msgBuffer.*/
+    )
+    {
+        static_cast<void>( len );
+
+        auto rgs = GetString_log_fb( msgBuffer );
+
+        if( rgs->message() == nullptr )
+            return "";
+        else
+            return rgs->message()->c_str();
+    }
+
+    /// Access the message field
+    static std::string message( void *msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto rgs = GetString_log_fb( msgBuffer );
+        if( rgs->message() == nullptr )
+        {
+            return "";
+        }
+        else
+        {
+            return rgs->message()->c_str();
+        }
+    }
+
+    /// Get the logMetaDetail for a member by name
+    /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
+    static logMetaDetail getAccessor( const std::string &member /**< [in] the name of the member */ )
+    {
+        if( member == "message" )
+        {
+            return logMetaDetail( { "MESSAGE",
+                                    "log message",
+                                    logMeta::valTypes::String,
+                                    logMeta::metaTypes::State,
+                                    reinterpret_cast<void *>( &message ),
+                                    false } );
+        }
+        else
+        {
+            std::cerr << "No member " << member << " in string_log\n";
+            return logMetaDetail();
+        }
+    }
 };
 
+} // namespace logger
+} // namespace MagAOX
 
-
-
-} //namespace logger
-} //namespace MagAOX
-
-#endif //logger_types_string_log_hpp
+#endif // logger_types_string_log_hpp

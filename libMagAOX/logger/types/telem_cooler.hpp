@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-09-06 created by JRM
   */
@@ -35,7 +35,7 @@ struct telem_cooler : public flatbuffer_log
    static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
 
    enum member{ em_liquidTemp, em_flowRate, em_pumpLevel, em_pumpSpeed, em_fanLevel, em_fanSpeed };
-   
+
    ///The type of the input message
    struct messageT : public fbMessage
    {
@@ -53,8 +53,8 @@ struct telem_cooler : public flatbuffer_log
       }
 
    };
-                 
- 
+
+
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
@@ -73,31 +73,31 @@ struct telem_cooler : public flatbuffer_log
       auto fbs = GetTelem_cooler_fb(msgBuffer);
 
       std::string msg = "[cooler] ";
-      
+
       msg += "temp: ";
       msg += std::to_string(fbs->liquidTemp()) + " C ";
-      
+
       msg += "flow: ";
       msg += std::to_string(fbs->flowRate()) + " L/min ";
-      
+
       msg += "pump lvl: ";
       msg += std::to_string(fbs->pumpLevel()) + " ";
-      
+
       msg += "spd: ";
       msg += std::to_string(fbs->pumpSpeed()) + " RPM ";
-      
+
       msg += "fan lvl: ";
       msg += std::to_string(fbs->fanLevel()) + " ";
-      
+
       msg += "speed: ";
       msg += std::to_string(fbs->fanSpeed()) + " RPM ";
-      
+
       return msg;
-   
+
    }
 
    static double getDouble( flatlogs::bufferPtrT & buffer,
-                            member m 
+                            member m
                           )
    {
       switch(m)
@@ -118,8 +118,19 @@ struct telem_cooler : public flatbuffer_log
             return nan("");
       }
    }
-   
-   
+
+   /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+      std::cerr << "Meta data accessor not implemented in telem_usage\n";
+      return logMetaDetail();
+  }
+
 }; //telem_cooler
 
 

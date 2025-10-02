@@ -63,6 +63,8 @@ void sigTermHandler( int signum, siginfo_t *siginf, void *ucont )
  */
 class xrif2shmim : public mx::app::application
 {
+    typedef mx::verbose::d verboseT;
+
   protected:
     /** \name Configurable Parameters
      * @{
@@ -212,10 +214,10 @@ inline int xrif2shmim::execute()
 {
     // Install signal handling
     struct sigaction act;
-    sigset_t set;
+    sigset_t         set;
 
     act.sa_sigaction = sigTermHandler;
-    act.sa_flags = SA_SIGINFO;
+    act.sa_flags     = SA_SIGINFO;
     sigemptyset( &set );
     act.sa_mask = set;
 
@@ -248,14 +250,22 @@ inline int xrif2shmim::execute()
             m_dir = "./";
         }
 
-        m_files = mx::ioutils::getFileNames( m_dir, "", "", ".xrif" );
+        mx::error_t errc = mx::ioutils::getFileNames<verboseT>( m_files, m_dir, "", "", ".xrif" );
+
+        if( !!errc )
+        {
+            mx::error_report<verboseT>( errc, "getting list of xrif files" );
+            return -1;
+        }
     }
     else
     {
         if( m_dir != "" )
         {
             if( m_dir[m_dir.size() - 1] != '/' )
+            {
                 m_dir += '/';
+            }
         }
 
         for( size_t n = 0; n < m_files.size(); ++n )
@@ -266,7 +276,7 @@ inline int xrif2shmim::execute()
 
     if( m_files.size() == 0 )
     {
-        std::cerr << " (" << invokedName << "): No files found.\n";
+        mx::error_report<verboseT>( mx::error_t::filenotfound, "no xrif files found" );
         return -1;
     }
 
@@ -275,18 +285,18 @@ inline int xrif2shmim::execute()
 
     if( rv < 0 )
     {
-        std::cerr << " (" << invokedName << "): Error allocating xrif.\n";
+        mx::error_report<verboseT>( mx::error_t::allocerr, "allocating xrif" );
         return -1;
     }
 
-    long st = 0;
-    long ed = m_files.size();
-    int stp = 1;
+    long st  = 0;
+    long ed  = m_files.size();
+    int  stp = 1;
 
     if( m_numFrames != 0 && !m_earliest )
     {
-        st = m_files.size() - 1;
-        ed = -1;
+        st  = m_files.size() - 1;
+        ed  = -1;
         stp = -1;
     }
 
@@ -297,18 +307,18 @@ inline int xrif2shmim::execute()
     // First get number of frames.
     for( long n = st; n != ed; n += stp )
     {
-        errno = 0;
+        errno         = 0;
         FILE *fp_xrif = fopen( m_files[n].c_str(), "rb" );
 
         if( !fp_xrif )
         {
-            mx::errno_report( "xrif2shmim", errno, __FILE__, __LINE__, "null ptr from fopen for " + m_files[n] );
+            mx::error_report<verboseT>( mx::errno2error_t( errno ), "opening " + m_files[n] );
             return -1;
         }
 
         if( ferror( fp_xrif ) || errno != 0 )
         {
-            mx::errno_report( "xrif2shmim", errno, __FILE__, __LINE__, "error from fopen for " + m_files[n] );
+            mx::error_report<verboseT>( mx::errno2error_t( errno ), "error from fopen for " + m_files[n] );
             return -1;
         }
 
@@ -317,7 +327,7 @@ inline int xrif2shmim::execute()
         fclose( fp_xrif );
         if( nr != XRIF_HEADER_SIZE )
         {
-            std::cerr << " (" << invokedName << "): Error reading header of " << m_files[n] << "\n";
+            mx::error_report<verboseT>(mx::error_t::filererr, "reading header of " + m_files[n]);
             return -1;
         }
 
@@ -326,37 +336,38 @@ inline int xrif2shmim::execute()
 
         if( n == st )
         {
-            m_width = m_xrif->width;
-            m_height = m_xrif->height;
+            m_width    = m_xrif->width;
+            m_height   = m_xrif->height;
             m_dataType = m_xrif->type_code;
         }
         else
         {
             if( m_xrif->width != m_width )
             {
-                std::cerr << " (" << invokedName << "): width mis-match in " << m_files[n] << "\n";
+                mx::error_report<verboseT>(mx::error_t::sizeerr, "width mis-match in "+ m_files[n]);
                 return -1;
             }
             if( m_xrif->height != m_height )
             {
-                std::cerr << " (" << invokedName << "): height mis-match in " << m_files[n] << "\n";
+                mx::error_report<verboseT>(mx::error_t::sizeerr, "height mis-match in "+ m_files[n]);
                 return -1;
             }
             if( m_xrif->type_code != m_dataType )
             {
-                std::cerr << " (" << invokedName << "): data type mismatch in " << m_files[n] << "\n";
+                mx::error_report<verboseT>(mx::error_t::invalidconfig, "width mis-match in "+ m_files[n]);
+                return -1;
             }
         }
 
         if( m_xrif->depth != 1 )
         {
-            std::cerr << " (" << invokedName << "): Cubes detected in " << m_files[n] << "\n";
+            mx::error_report<verboseT>(mx::error_t::invalidarg, "Cubes detected in " + m_files[n]);
             return -1;
         }
 
-        if( m_dataType != XRIF_TYPECODE_INT16 )
+        if( m_dataType != XRIF_TYPECODE_UINT16 )
         {
-            std::cerr << " (" << invokedName << "): Only 16-bit signed integers (short) supported" << "\n";
+            mx::error_report<verboseT>(mx::error_t::invalidarg, "Only 16-bit unsigned integers (short) supported");
             return -1;
         }
 
@@ -372,7 +383,7 @@ inline int xrif2shmim::execute()
     if( g_timeToDie != false )
     {
         std::cerr << " (" << invokedName << "): exiting.\n";
-        return -1;
+        return 0;
     }
 
     // Now record the actual number of frames
@@ -395,11 +406,11 @@ inline int xrif2shmim::execute()
 
     // Determine the order in which frames are copied
     int findex = 0;
-    int fed = m_frames.planes();
+    int fed    = m_frames.planes();
     if( stp == -1 )
     {
         findex = m_frames.planes() - 1;
-        fed = -1;
+        fed    = -1;
     }
 
     // Now de-compress and load the frames
@@ -411,18 +422,18 @@ inline int xrif2shmim::execute()
             break; // check before going on
         }
 
-        errno = 0;
+        errno         = 0;
         FILE *fp_xrif = fopen( m_files[n].c_str(), "rb" );
 
         if( !fp_xrif )
         {
-            mx::errno_report( "xrif2shmim", errno, __FILE__, __LINE__, "null ptr from fopen for " + m_files[n] );
+            mx::error_report<verboseT>(mx::errno2error_t(errno), "null ptr from fopen for " + m_files[n] );
             return -1;
         }
 
         if( ferror( fp_xrif ) || errno != 0 )
         {
-            mx::errno_report( "xrif2shmim", errno, __FILE__, __LINE__, "error from fopen for " + m_files[n] );
+            mx::error_report<verboseT>(mx::errno2error_t(errno),  "error from fopen for " + m_files[n] );
             return -1;
         }
 
@@ -430,7 +441,7 @@ inline int xrif2shmim::execute()
 
         if( nr != XRIF_HEADER_SIZE )
         {
-            std::cerr << " (" << invokedName << "): Error reading header of " << m_files[n] << "\n";
+            mx::error_report<verboseT>(mx::error_t::filererr, "reading header of " + m_files[n]);
             fclose( fp_xrif );
             return -1;
         }
@@ -453,7 +464,7 @@ inline int xrif2shmim::execute()
 
         if( nr != m_xrif->compressed_size )
         {
-            std::cerr << " (" << invokedName << "): Error reading data from " << m_files[n] << "\n";
+            mx::error_report<verboseT>(mx::error_t::filererr, "reading data from " + m_files[n]);
             return -1;
         }
 
@@ -490,7 +501,7 @@ inline int xrif2shmim::execute()
     if( g_timeToDie != false )
     {
         std::cerr << " (" << invokedName << "): exiting.\n";
-        return -1;
+        return 0;
     }
 
     // De-allocate xrif
@@ -522,15 +533,15 @@ inline int xrif2shmim::execute()
     m_imageStream.md->cnt1 = m_circBuffLength;
 
     // Begin streaming
-    uint64_t next_cnt1 = 0;
-    char *next_dest = (char *)m_imageStream.array.raw;
+    uint64_t  next_cnt1     = 0;
+    char     *next_dest     = (char *)m_imageStream.array.raw;
     timespec *next_wtimearr = &m_imageStream.writetimearray[0];
     timespec *next_atimearr = &m_imageStream.atimearray[0];
-    uint64_t *next_cntarr = &m_imageStream.cntarray[0];
+    uint64_t *next_cntarr   = &m_imageStream.cntarray[0];
 
-    findex = 0;
+    findex          = 0;
     double lastSend = mx::sys::get_curr_time();
-    double delta = 0;
+    double delta    = 0;
 
     while( g_timeToDie == false )
     {
@@ -550,7 +561,7 @@ inline int xrif2shmim::execute()
 
         *next_wtimearr = m_imageStream.md->writetime;
         *next_atimearr = m_imageStream.md->atime;
-        *next_cntarr = m_imageStream.md->cnt0;
+        *next_cntarr   = m_imageStream.md->cnt0;
 
         // And post
         m_imageStream.md->write = 0;
@@ -561,10 +572,10 @@ inline int xrif2shmim::execute()
         if( next_cnt1 >= m_circBuffLength )
             next_cnt1 = 0;
 
-        next_dest = (char *)m_imageStream.array.raw + next_cnt1 * m_width * m_height * m_typeSize;
+        next_dest     = (char *)m_imageStream.array.raw + next_cnt1 * m_width * m_height * m_typeSize;
         next_wtimearr = &m_imageStream.writetimearray[next_cnt1];
         next_atimearr = &m_imageStream.atimearray[next_cnt1];
-        next_cntarr = &m_imageStream.cntarray[next_cnt1];
+        next_cntarr   = &m_imageStream.cntarray[next_cnt1];
 
         ++findex;
         if( findex >= m_frames.planes() )

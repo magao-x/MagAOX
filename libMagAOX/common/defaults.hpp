@@ -11,7 +11,7 @@
 
 
 /** \defgroup default_app Default App Setup
-  * \ingroup common 
+  * \ingroup common
   * @{
   */
 
@@ -47,6 +47,10 @@
      * Units: nanoseconds.
      */
    #define MAGAOX_default_loopPause (1000000000)
+#endif
+
+#ifndef XWC_DEFAULT_VERBOSITY
+#define XWC_DEFAULT_VERBOSITY mx::verbose::vv
 #endif
 
 ///@}

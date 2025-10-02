@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-09-06 created by JRM
   */
@@ -35,8 +35,8 @@ struct telem_fxngen : public flatbuffer_log
     static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
     static timespec lastRecord; ///< The timestamp of the last time this log was recorded.  Used by the telemetry system.
-   
-    
+
+
 
 
    ///The type of the input message
@@ -54,20 +54,20 @@ struct telem_fxngen : public flatbuffer_log
                 const double & C2vpp,   ///< [in] Channel 2 P2P voltage [V]
                 const double & C2ofst,  ///< [in] Channel 2 offset [V]
                 const double & C2phse,  ///< [in] Channel 2 phase [deg]
-                const uint8_t & C2wvtp, ///< [in] Channel 2 wavetype  (SINE or DC) 
+                const uint8_t & C2wvtp, ///< [in] Channel 2 wavetype  (SINE or DC)
                 const uint8_t & C1sync, ///< [in] Channel 1 sync status
                 const uint8_t & C2sync, ///< [in] Channel 2 sync status
                 const double & C1wdth,  ///< [in] Channel 1 width [s]
                 const double & C2wdth   ///< [in] Channel 2 width [s]
               )
       {
-         auto fp = CreateTelem_fxngen_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, C1wvtp, 
+         auto fp = CreateTelem_fxngen_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, C1wvtp,
                                                C2outp, C2freq, C2vpp, C2ofst, C2phse, C2wvtp, C1sync, C2sync, C1wdth, C2wdth);
          builder.Finish(fp);
       }
 
    };
-   
+
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
@@ -86,16 +86,16 @@ struct telem_fxngen : public flatbuffer_log
       auto fbs = GetTelem_fxngen_fb(msgBuffer);
 
       std::string msg = "Ch 1: ";
-      
+
       if(fbs->C1wvtp() == TELEM_FXNGEN_WVTP_DC) msg += "DC ";
       else if(fbs->C1wvtp() == TELEM_FXNGEN_WVTP_SINE) msg += "SINE ";
       else if(fbs->C1wvtp() == TELEM_FXNGEN_WVTP_PULSE) msg += "PULSE ";
       else msg += "UNK ";
-      
+
       if(fbs->C1outp() == 0) msg += "OFF ";
       else if(fbs->C1outp() == 1) msg += "ON ";
       else msg += "UNK ";
-      
+
       msg += std::to_string(fbs->C1freq()) + " Hz ";
       msg += std::to_string(fbs->C1vpp()) + " Vp2p ";
       msg += std::to_string(fbs->C1ofst()) + " V ";
@@ -111,11 +111,11 @@ struct telem_fxngen : public flatbuffer_log
       else if(fbs->C2wvtp() == TELEM_FXNGEN_WVTP_SINE) msg += "SINE ";
       else if(fbs->C2wvtp() == TELEM_FXNGEN_WVTP_PULSE) msg += "PULSE ";
       else msg += "UNK ";
-      
+
       if(fbs->C2outp() == 0) msg += "OFF ";
       else if(fbs->C2outp() == 1) msg += "ON ";
       else msg += "UNK ";
-      
+
       msg += std::to_string(fbs->C2freq()) + " Hz ";
       msg += std::to_string(fbs->C2vpp()) + " Vp2p ";
       msg += std::to_string(fbs->C2ofst()) + " V ";
@@ -126,7 +126,7 @@ struct telem_fxngen : public flatbuffer_log
       else msg += "OFF ";
 
       return msg;
-   
+
    }
 
    static double C1freq( void * msgBuffer )
@@ -142,13 +142,17 @@ struct telem_fxngen : public flatbuffer_log
    }
 
    /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
       if(     member == "C1freq") return logMetaDetail({"C1 FREQ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&C1freq)});
       else if(member == "C2freq") return logMetaDetail({"C2 FREQ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&C2freq)});
       else
       {
-         std::cerr << "No string member " << member << " in telem_fxngen\n";
+         std::cerr << "No member " << member << " in telem_fxngen\n";
          return logMetaDetail();
       }
    }

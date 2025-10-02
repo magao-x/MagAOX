@@ -1,7 +1,7 @@
 /** \file ttyUSB.cpp
  * \author Jared R. Males
  * \brief Find the details for USB serial devices
- * 
+ *
  * \ingroup tty_files
  *
  */
@@ -33,10 +33,12 @@ int ttyUSBDevName( std::string & devName,       // [out] the /dev/ttyUSBX device
                    const std::string & serial   // [in] the serial number.  Can be "".
                  )
 {
+    typedef mx::verbose::vvv verboseT;
+
    std::vector<std::string> devNames;
 
    devName = "";
-   devNames = mx::ioutils::getFileNames("/sys/class/tty/", "ttyUSB", "", "");
+   mx_error_check_rv(mx::ioutils::getFileNames(devNames, "/sys/class/tty/", "ttyUSB", "", ""),-1);
 
    if(devNames.size() == 0) return TTY_E_NODEVNAMES;
 
@@ -53,7 +55,7 @@ int ttyUSBDevName( std::string & devName,       // [out] the /dev/ttyUSBX device
 
       dev0 = udev_device_new_from_syspath(udev, devNames[i].c_str());
 
-      if(!dev0) 
+      if(!dev0)
       {
          std::cerr << "udev_device_new_from_syspath failed: " << strerror(errno) << "\n";
          perror("");
@@ -64,8 +66,8 @@ int ttyUSBDevName( std::string & devName,       // [out] the /dev/ttyUSBX device
 
       dev = udev_device_get_parent_with_subsystem_devtype( dev0, "usb", "usb_device");
 
-      if (!dev) 
-      {   
+      if (!dev)
+      {
          std::cerr << "udev_device_get_parent_with_subsystem_devtype failed: " << strerror(errno) << "\n";
          perror("");
          udev_device_unref(dev0);
@@ -73,14 +75,14 @@ int ttyUSBDevName( std::string & devName,       // [out] the /dev/ttyUSBX device
       }
 
       const char * idVendor = udev_device_get_sysattr_value( dev, "idVendor" );
-      
-      if(idVendor == nullptr) 
+
+      if(idVendor == nullptr)
       {
          udev_device_unref(dev0);
          continue;
       }
 
-      if( strcmp( idVendor, vendor.c_str()) != 0) 
+      if( strcmp( idVendor, vendor.c_str()) != 0)
       {
          udev_device_unref(dev0);
          continue;
@@ -88,13 +90,13 @@ int ttyUSBDevName( std::string & devName,       // [out] the /dev/ttyUSBX device
 
       const char * idProduct = udev_device_get_sysattr_value( dev, "idProduct" );
 
-      if(idProduct == nullptr) 
+      if(idProduct == nullptr)
       {
          udev_device_unref(dev0);
          continue;
       }
 
-      if( strcmp( idProduct, product.c_str()) != 0) 
+      if( strcmp( idProduct, product.c_str()) != 0)
       {
          udev_device_unref(dev0);
          continue;
@@ -104,18 +106,18 @@ int ttyUSBDevName( std::string & devName,       // [out] the /dev/ttyUSBX device
 
       if(dserial == nullptr)
       {
-         if( serial != "") 
+         if( serial != "")
          {
             udev_device_unref(dev0);
             continue;
          }
       }
-      else if( strcmp( dserial, serial.c_str()) != 0 ) 
+      else if( strcmp( dserial, serial.c_str()) != 0 )
       {
          udev_device_unref(dev0);
          continue;
       }
-    
+
       //If we make it through all comparisons we found it!
       boost::filesystem::path p(devNames[i]);
       devName = "/dev/" + p.filename().string();
@@ -142,8 +144,9 @@ int ttyUSBDevNames( std::vector<std::string> & devNames, // [out] the /dev/ttyUS
    std::vector<std::string> pdevNames;
 
    devNames.clear();
-   
-   pdevNames = mx::ioutils::getFileNames("/sys/class/tty/", "ttyUSB", "", "");
+
+   typedef mx::verbose::vvv verboseT;
+   mx_error_check_rv(mx::ioutils::getFileNames(pdevNames, "/sys/class/tty/", "ttyUSB", "", ""), -1);
 
    if(pdevNames.size() == 0) return TTY_E_NODEVNAMES;
 
@@ -159,15 +162,15 @@ int ttyUSBDevNames( std::vector<std::string> & devNames, // [out] the /dev/ttyUS
 
       dev0 = udev_device_new_from_syspath(udev, pdevNames[i].c_str());
 
-      if(!dev0) 
+      if(!dev0)
       {
          continue;
       }
-      
+
       struct udev_device * dev;
       dev = udev_device_get_parent_with_subsystem_devtype( dev0, "usb", "usb_device");
 
-      if (!dev) 
+      if (!dev)
       {
          udev_device_unref(dev0);
          continue;
@@ -175,13 +178,13 @@ int ttyUSBDevNames( std::vector<std::string> & devNames, // [out] the /dev/ttyUS
 
       const char * idVendor = udev_device_get_sysattr_value( dev, "idVendor" );
 
-      if(idVendor == nullptr) 
+      if(idVendor == nullptr)
       {
          udev_device_unref(dev0);
          continue;
       }
 
-      if( strcmp( idVendor, vendor.c_str()) != 0) 
+      if( strcmp( idVendor, vendor.c_str()) != 0)
       {
          udev_device_unref(dev0);
          continue;
@@ -189,13 +192,13 @@ int ttyUSBDevNames( std::vector<std::string> & devNames, // [out] the /dev/ttyUS
 
       const char * idProduct = udev_device_get_sysattr_value( dev, "idProduct" );
 
-      if(idProduct == nullptr) 
+      if(idProduct == nullptr)
       {
          udev_device_unref(dev0);
          continue;
       }
 
-      if( strcmp( idProduct, product.c_str()) != 0) 
+      if( strcmp( idProduct, product.c_str()) != 0)
       {
          udev_device_unref(dev0);
          continue;
@@ -210,9 +213,9 @@ int ttyUSBDevNames( std::vector<std::string> & devNames, // [out] the /dev/ttyUS
 
    udev_unref(udev);
 
-   if( devNames.size() > 0) return TTY_E_NOERROR;   
+   if( devNames.size() > 0) return TTY_E_NOERROR;
    else return TTY_E_DEVNOTFOUND;
-   
+
 }
 } //namespace tty
 } //namespace MagAOX

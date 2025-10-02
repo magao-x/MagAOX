@@ -152,10 +152,10 @@ struct telem_pi335 : public flatbuffer_log
         return fbs->sva3();
     }
 
-    /// Get pointer to the accessor for a member by name
+    /// Get the logMetaDetail for a member by name
     /**
-     * \returns the function pointer cast to void*
-     * \returns -1 for an unknown member
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
      */
     static logMetaDetail getAccessor(const std::string &member /**< [in] the name of the member */)
     {
@@ -179,7 +179,7 @@ struct telem_pi335 : public flatbuffer_log
             return logMetaDetail({"SVA3", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void *>(&sva3)});
         else
         {
-            std::cerr << "No string member " << member << " in telem_pi335\n";
+            std::cerr << "No member " << member << " in telem_pi335\n";
             return logMetaDetail();
         }
     }

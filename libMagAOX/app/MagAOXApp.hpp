@@ -161,8 +161,10 @@ class MagAOXApp : public application
     //clang-format on
 
   public:
+    typedef XWC_DEFAULT_VERBOSITY verboseT;
+
     /// The log manager type.
-    typedef logger::logManager<MagAOXApp<_useINDI>, logFileRaw> logManagerT;
+    typedef logger::logManager<MagAOXApp<_useINDI>, logFileRaw<verboseT>> logManagerT;
 
   protected:
     std::string m_basePath; ///< The base path of the MagAO-X system.
@@ -1665,7 +1667,9 @@ int MagAOXApp<_useINDI>::execute() // virtual
 //----------------------------------------//
 //        Check user
 //----------------------------------------//
-#ifndef XWC_DISABLE_USER_CHECK
+    // clang-format off
+    #ifndef XWC_DISABLE_USER_CHECK
+
     struct stat logstat;
 
     if( stat( m_log.logPath().c_str(), &logstat ) < 0 )
@@ -1675,13 +1679,24 @@ int MagAOXApp<_useINDI>::execute() // virtual
         return -1;
     }
 
+    // clang-format off
+    #ifdef XWCTEST_MAGAOXAPP_EXEC_WRONG_USER
+    logstat.st_uid = geteuid()+1; // LCOV_EXCL_LINE
+    #endif // clang-format on
+
     if( logstat.st_uid != geteuid() )
     {
         state( stateCodes::FAILURE );
         std::cerr << "\nCRITICAL: You are running this app as the wrong user.\n\n";
         return -1;
     }
-#endif
+
+    #endif // clang-format on
+
+    // clang-format off
+    #ifdef XWCTEST_MAGAOXAPP_EXEC_NORM
+    int testTimesThrough = 0; // LCOV_EXCL_LINE
+    #endif // clang-format on
 
     //----------------------------------------//
     //        Get the PID Lock
@@ -1701,6 +1716,11 @@ int MagAOXApp<_useINDI>::execute() // virtual
     /*        start logging          */
     /* ***************************** */
     m_log.logThreadStart(); // no return type
+
+    // clang-format off
+    #ifdef XWCTEST_MAGAOXAPP_EXEC_LOG_START
+    m_log.logShutdown(true); // LCOV_EXCL_LINE
+    #endif // clang-format on
 
     // Give up to 2 secs to make sure log thread has time to get started and try to open a file.
     int w = 0;
@@ -1819,6 +1839,11 @@ int MagAOXApp<_useINDI>::execute() // virtual
                 log<text_log>( "stalled waiting for power state", logPrio::LOG_ERROR );
                 state( stateCodes::ERROR );
             }
+
+            // clang-format off
+            #ifdef XWCTEST_MAGAOXAPP_EXEC_NORM
+            m_powerState = 0; // LCOV_EXCL_LINE
+            #endif // clang-format on
         }
 
         if( m_powerState > 0 )
@@ -1848,6 +1873,14 @@ int MagAOXApp<_useINDI>::execute() // virtual
      */
     while( m_shutdown == 0 )
     {
+        // clang-format off
+        #ifdef XWCTEST_MAGAOXAPP_EXEC_NORM
+             if(testTimesThrough > 1) // LCOV_EXCL_LINE
+             {                        // LCOV_EXCL_LINE
+                m_shutdown = 1;       // LCOV_EXCL_LINE
+             }                        // LCOV_EXCL_LINE
+        #endif // clang-format on
+
         // First check power state.
         if( m_powerMgtEnabled )
         {
@@ -1893,6 +1926,11 @@ int MagAOXApp<_useINDI>::execute() // virtual
                 m_shutdown = 1;
                 continue;
             }
+
+            // clang-format off
+            #ifdef XWCTEST_MAGAOXAPP_EXEC_NORM
+                m_powerState = 1; // LCOV_EXCL_LINE
+            #endif // clang-format on
         }
 
         /** \todo Need a heartbeat update here.
@@ -1916,6 +1954,11 @@ int MagAOXApp<_useINDI>::execute() // virtual
         {
             std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>( m_loopPause ) );
         }
+
+        // clang-format off
+        #ifdef XWCTEST_MAGAOXAPP_EXEC_NORM
+             ++testTimesThrough; // LCOV_EXCL_LINE
+        #endif // clang-format on
     }
 
     if( appShutdown() < 0 )
@@ -2026,6 +2069,28 @@ void MagAOXApp<_useINDI>::configLog( const std::string &name,
 template <bool _useINDI>
 int MagAOXApp<_useINDI>::setSigTermHandler()
 {
+    // clang-format off
+    #ifdef XWCTEST_MAGAOXAPP_SIGTERMH_ERR
+        return -1;
+    #endif
+
+    #ifdef XWCTEST_MAGAOXAPP_SIGTERMH_SIGTERM
+        #undef SIGTERM
+        #define SIGTERM SIGKILL
+    #endif
+
+    #ifdef XWCTEST_MAGAOXAPP_SIGTERMH_SIGQUIT
+        #undef SIGQUIT
+        #define SIGQUIT SIGKILL
+    #endif
+
+    #ifdef XWCTEST_MAGAOXAPP_SIGTERMH_SIGINT
+        #undef SIGINT
+        #define SIGINT SIGKILL
+    #endif
+
+    // clang-format on
+
     struct sigaction act;
     sigset_t set;
 
@@ -2118,14 +2183,13 @@ int MagAOXApp<_useINDI>::setEuidCalled()
     errno = 0;
     if( sys::th_seteuid( m_euidCalled ) < 0 )
     {
-        std::string logss = "Setting effective user id to euidCalled (";
-        logss += mx::ioutils::convertToString<int>( m_euidCalled );
-        logss += ") failed.  Errno says: ";
-        logss += strerror( errno );
-
-        log<software_error>( { __FILE__, __LINE__, errno, 0, logss } );
-
+        log<software_error>( { __FILE__, __LINE__, errno, 0, std::format("Setting effective user id to "
+                                                                                     "euidCalled ({}) failed.  "
+                                                                                     "Errno says: {}",
+            m_euidCalled,
+            strerror( errno )) } );
         return -1;
+
     }
 
     return 0;
@@ -2137,12 +2201,11 @@ int MagAOXApp<_useINDI>::setEuidReal()
     errno = 0;
     if( sys::th_seteuid( m_euidReal ) < 0 )
     {
-        std::string logss = "Setting effective user id to euidReal (";
-        logss += mx::ioutils::convertToString<int>( m_euidReal );
-        logss += ") failed.  Errno says: ";
-        logss += strerror( errno );
-
-        log<software_error>( { __FILE__, __LINE__, errno, 0, logss } );
+        log<software_error>( { __FILE__, __LINE__, errno, 0, std::format("Setting effective user id to "
+            "euidReal ({}) failed.  "
+            "Errno says: {}",
+            m_euidReal,
+            strerror( errno )) } );
 
         return -1;
     }
@@ -2281,6 +2344,11 @@ int MagAOXApp<_useINDI>::lockPID()
 template <bool _useINDI>
 int MagAOXApp<_useINDI>::unlockPID()
 {
+    // clang-format off
+    #ifdef XWCTEST_MAGAOXAPP_PID_UNLOCK_ERR
+        return -1; // LCOV_EXCL_LINE
+    #endif //clang-format on
+
     { // scope for elPriv
 
         // Get the maximum privileges available

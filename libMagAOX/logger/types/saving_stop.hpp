@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2019-05-04 created by JRM
   */
@@ -30,6 +30,17 @@ struct saving_stop : public saving_state_change
 
    static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
 
+   /// Get an empty logMetaDetail because meta data doesn't make sense for this log
+   /**
+     * \returns an empty logMetaDetail
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+
+      std::cerr << "meta data doesn't make sense for saving_stop.\n";
+      return logMetaDetail();
+   }
 };
 
 

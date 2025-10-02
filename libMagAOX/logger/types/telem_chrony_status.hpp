@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-09-06 created by JRM
   */
@@ -48,13 +48,13 @@ struct telem_chrony_status : public flatbuffer_log
          auto _ip = builder.CreateString(ip);
          auto _sync = builder.CreateString(sync);
          auto _leap = builder.CreateString(leap);
-         
+
          auto fp = CreateTelem_chrony_status_fb(builder, _mac, _ip, _sync, _leap);
          builder.Finish(fp);
       }
 
    };
-                 
+
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
@@ -80,42 +80,42 @@ struct telem_chrony_status : public flatbuffer_log
          msg += fbs->sourceMAC()->c_str();
          msg +="/";
       }
-      
+
       if(fbs->sourceIP())
       {
          msg += fbs->sourceIP()->c_str();
       }
-      
+
       if(fbs->synch())
       {
          msg += " synch: ";
          msg += fbs->synch()->c_str();
       }
-      
+
       if(fbs->leap())
       {
          msg += " leap: ";
          msg += fbs->leap()->c_str();
       }
-      
+
       return msg;
-   
+
    }
-   
+
    static std::string sourceMAC(void * msgBuffer )
    {
       auto fbs = GetTelem_chrony_status_fb(msgBuffer);
       if(fbs->sourceMAC()) return std::string(fbs->sourceMAC()->c_str());
       else return "";
    }
-   
+
    static std::string sourceIP(void * msgBuffer )
    {
       auto fbs = GetTelem_chrony_status_fb(msgBuffer);
       if(fbs->sourceIP()) return std::string(fbs->sourceIP()->c_str());
       else return "";
    }
-   
+
    static std::string synch(void * msgBuffer )
    {
       auto fbs = GetTelem_chrony_status_fb(msgBuffer);
@@ -129,25 +129,25 @@ struct telem_chrony_status : public flatbuffer_log
       if(fbs->leap()) return std::string(fbs->leap()->c_str());
       else return "";
    }
-   
-   /// Get pointer to the accessor for a member by name 
+
+   /// Get the logMetaDetail for a member by name
    /**
-     * \returns the function pointer cast to void*
-     * \returns -1 for an unknown member
-     */ 
-   static void * getAccessor( const std::string & member /**< [in] the name of the member */ )
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(member == "sourceMAC") return reinterpret_cast<void*>(&sourceMAC);
-      else if(member == "sourceIP") return reinterpret_cast<void*>(&sourceIP);
-      else if(member == "synch") return reinterpret_cast<void*>(&synch);
-      else if(member == "leap") return reinterpret_cast<void*>(&leap);
+      if(     member == "sourceMAC") return logMetaDetail({"CHRONY SOURCE MAC", "", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&sourceMAC), false});
+      else if( member == "sourceIP") return logMetaDetail({"CHRONY SOURCE IP", "", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&sourceIP), false});
+      else if( member == "synch") return logMetaDetail({"CHRONY SYNC STATUS", "", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&synch), false});
+      else if( member == "leap") return logMetaDetail({"CHRONY LEAP STATUS", "", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&leap), false});
       else
       {
-         std::cerr << "No string member " << member << " in telem_chrony_status\n";
-         return 0;
+         std::cerr << "No member " << member << " in telem_chrony_status\n";
+         return logMetaDetail();
       }
-   }
-   
+    }
+
 }; //telem_chrony_status
 
 

@@ -29,7 +29,7 @@ struct telem_dmmodes : public flatbuffer_log
   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
   static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
-  
+
    ///The type of the input message
    struct messageT : public fbMessage
    {
@@ -37,9 +37,9 @@ struct telem_dmmodes : public flatbuffer_log
       explicit messageT( std::vector<float> & amps )
       {
          auto _ampsVec = builder.CreateVector(amps);
-         
+
          auto fp = CreateTelem_dmmodes_fb(builder, _ampsVec );
-         
+
          builder.Finish(fp);
       }
 
@@ -60,14 +60,14 @@ struct telem_dmmodes : public flatbuffer_log
    {
 
       static_cast<void>(len); // unused by most log types
-   
-      auto rgs = GetTelem_dmmodes_fb(msgBuffer);  
-      
+
+      auto rgs = GetTelem_dmmodes_fb(msgBuffer);
+
       std::string msg;
 
       msg+= "[dmmodes amps] ";
 
-      if (rgs->amps() != nullptr) 
+      if (rgs->amps() != nullptr)
       {
          for(flatbuffers::Vector<float>::const_iterator it = rgs->amps()->begin(); it != rgs->amps()->end(); ++it)
          {
@@ -85,7 +85,7 @@ struct telem_dmmodes : public flatbuffer_log
       std::vector<float> amps;
       auto fbs = GetTelem_dmmodes_fb(msgBuffer);
 
-      if (fbs->amps() != nullptr) 
+      if (fbs->amps() != nullptr)
       {
          for(flatbuffers::Vector<float>::const_iterator it = fbs->amps()->begin(); it != fbs->amps()->end(); ++it)
          {
@@ -99,14 +99,14 @@ struct telem_dmmodes : public flatbuffer_log
    /// Get the logMetaDetail for a member by name
    /**
      * \returns the a logMetaDetail filled in with the appropriate details
-     * \returns an empty logmegaDetail if member not recognized
-     */ 
+     * \returns an empty logMetaDetail if member not recognized
+     */
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
       if(member == "amps") return logMetaDetail({"AMPS", logMeta::valTypes::Vector_Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&amps), false});
       else
       {
-         std::cerr << "No string member " << member << " in telem_dmmodes\n";
+         std::cerr << "No member " << member << " in telem_dmmodes\n";
          return logMetaDetail();
       }
    }

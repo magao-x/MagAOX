@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2022-02-06 created by JRM
   */
@@ -55,7 +55,7 @@ struct telem_sparkleclock : public flatbuffer_log
       }
 
    };
-                 
+
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
@@ -74,16 +74,16 @@ struct telem_sparkleclock : public flatbuffer_log
       auto fbs = GetTelem_sparkleclock_fb(msgBuffer);
 
       std::string msg = "[sparkleclock] ";
-      
+
       if(!fbs->modulating())
       {
          msg += "not modulating";
          return msg;
       }
-      
+
       msg += "modulating";
       if(fbs->trigger())
-      { 
+      {
          msg += " by trigger ";
       }
       else
@@ -92,20 +92,20 @@ struct telem_sparkleclock : public flatbuffer_log
          msg += std::to_string(fbs->frequency());
          msg += " Hz ";
       }
-      
+
       msg += "seps: ";
       for(flatbuffers::Vector<float>::const_iterator it = fbs->separations()->begin(); it != fbs->separations()->end(); ++it)
       {
          msg+= std::to_string(*it);
          msg+= " ";
-      }      
+      }
       msg += "angle offset: ";
       msg += std::to_string(fbs->angleOffset());
       msg += "amp: ";
       msg += std::to_string(fbs->amplitude());
 
       return msg;
-   
+
    }
 
    static bool modulating( void * msgBuffer )
@@ -119,7 +119,7 @@ struct telem_sparkleclock : public flatbuffer_log
       auto fbs = GetTelem_sparkleclock_fb(msgBuffer);
       return fbs->trigger();
    }
-   
+
    static float frequency( void * msgBuffer )
    {
       auto fbs = GetTelem_sparkleclock_fb(msgBuffer);
@@ -135,7 +135,7 @@ struct telem_sparkleclock : public flatbuffer_log
       for(flatbuffers::Vector<float>::const_iterator it = fbs->separations()->begin(); it != fbs->separations()->end(); ++it)
       {
          v.push_back(*it);
-      }      
+      }
 
       return v;
    }
@@ -151,11 +151,11 @@ struct telem_sparkleclock : public flatbuffer_log
       return fbs->amplitude();
    }
 
-   /// Get pointer to the accessor for a member by name 
+   /// Get the logMetaDetail for a member by name
    /**
-     * \returns the function pointer cast to void*
-     * \returns -1 for an unknown member
-     */ 
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
       if(member == "modulating") return logMetaDetail({"MODULATING", logMeta::valTypes::Bool, logMeta::metaTypes::State, reinterpret_cast<void*>(&modulating)});
@@ -166,11 +166,11 @@ struct telem_sparkleclock : public flatbuffer_log
       else if(member == "amplitude") return logMetaDetail({"AMPLITUDES", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&amplitude)});
       else
       {
-         std::cerr << "No string member " << member << " in telem_sparkleclock\n";
+         std::cerr << "No member " << member << " in telem_sparkleclock\n";
          return logMetaDetail();
       }
    }
-   
+
 }; //telem_sparkleclock
 
 

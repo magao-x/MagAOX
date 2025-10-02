@@ -26,6 +26,10 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
     {
     }
 
+    bool appStartupFail {false};
+    bool appLogicFail {false};
+    bool appShutdownFail {false};
+
     void addUnusedConfig()
     {
         config.add( "name2", "", "name2", argType::Required, "", "", true, "string", "" );
@@ -39,14 +43,29 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
 
     virtual int appStartup()
     {
+        if(appStartupFail)
+        {
+            return -1;
+        }
+
         return 0;
     }
     virtual int appLogic()
     {
+        if(appLogicFail)
+        {
+            return -1;
+        }
+
         return 0;
     }
     virtual int appShutdown()
     {
+        if(appShutdownFail)
+        {
+            return -1;
+        }
+
         return 0;
     }
 
@@ -206,10 +225,16 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
         return APP_XWCTEST_BASE::setEuidReal();
     }
 
-    int setEuidReal( int euidr )
+    int setEuidReal( int euidr, bool set = true )
     {
         m_euidReal = euidr;
-        return APP_XWCTEST_BASE::setEuidReal();
+
+        if(set)
+        {
+            return APP_XWCTEST_BASE::setEuidReal();
+        }
+
+        return 0;
     }
 
     int setEuidCalled()

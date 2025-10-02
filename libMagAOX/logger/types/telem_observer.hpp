@@ -219,7 +219,7 @@ struct telem_observer : public flatbuffer_log
     /// Get the logMetaDetail for a member by name
     /**
      * \returns the a logMetaDetail filled in with the appropriate details
-     * \returns an empty logmegaDetail if member not recognized
+     * \returns an empty logMetaDetail if member not recognized
      */
     static logMetaDetail getAccessor( const std::string &member /**< [in] the name of the member */ )
     {
@@ -264,7 +264,7 @@ struct telem_observer : public flatbuffer_log
         }
         else
         {
-            std::cerr << "No string member " << member << " in telem_observer\n";
+            std::cerr << "No member " << member << " in telem_observer\n";
             return logMetaDetail();
         }
     }

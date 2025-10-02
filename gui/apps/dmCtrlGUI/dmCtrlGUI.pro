@@ -2,30 +2,8 @@
 # project file for dmCtrlGUI
 ######################################################################
 
-TEMPLATE = app
 TARGET = dmCtrlGUI
-DESTDIR = bin/
-DEPENDPATH += ./ ../../lib
-
-MOC_DIR = moc/
-OBJECTS_DIR = obj/
-RCC_DIR = res/
-UI_DIR = ../../widgets/dmCtrl
-
-CONFIG(release, debug|release) {
-    CONFIG += optimize_full
-}
-
-CONFIG += c++14
-CONFIG += qwt
-exists( $$(CONDA_PREFIX)/include ) {
-    INCLUDEPATH += $$(CONDA_PREFIX)/include
-}
-exists( $$(CONDA_PREFIX)/lib ) {
-    INCLUDEPATH += $$(CONDA_PREFIX)/lib
-}
-
-MAKEFILE = makefile.dmCtrlGUI
+include(../magaoxQtApp.pri)
 
 # Input
 INCLUDEPATH += ../../lib ../../widgets/dmCtrl

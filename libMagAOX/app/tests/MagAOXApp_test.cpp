@@ -26,12 +26,26 @@
 #undef XWCTEST_NAMESPACE
 #undef XWCTEST_MAGAOXAPP_PID_WRITE_FAIL
 
+#undef app_MagAOXApp_hpp
+#undef app_tests_MagAOXApp_test_hpp
+#define XWCTEST_NAMESPACE XWCTEST_MAGAOXAPP_EXEC_NORM_ns
+#define XWCTEST_MAGAOXAPP_EXEC_NORM
+#include "../MagAOXApp.hpp"
+#include "MagAOXApp_test.hpp"
+#undef XWCTEST_NAMESPACE
+#undef XWCTEST_MAGAOXAPP_EXEC_NORM
+
+
 namespace libXWCTest
 {
 namespace appTest
 {
 
-/** \defgroup MagAOXApp_unit_test stdFileName Unit Tests
+/** \defgroup app_unit_test libXWC::app Unit Tests
+ * \ingroup unit_test
+*/
+
+/** \defgroup MagAOXApp_unit_test MagAOXApp Unit Tests
  * \ingroup app_unit_test
  */
 
@@ -48,7 +62,6 @@ namespace MagAOXAppTest
  */
 TEST_CASE( "MagAOXApp 2nd instance", "[app::MagAOXApp]" )
 {
-
     SECTION( "test 2nd app" )
     {
         bool caught = false;
@@ -66,6 +79,11 @@ TEST_CASE( "MagAOXApp 2nd instance", "[app::MagAOXApp]" )
 
         REQUIRE( caught == true );
     }
+
+    #ifdef XWCTEST_DOXYGEN_REF_PROTECTED
+    MagAOX::app::MagAOXApp<true> app("", true);
+    #endif
+
 }
 
 /// MagAOXApp INDI NewProperty
@@ -112,9 +130,22 @@ SCENARIO( "MagAOXApp INDI NewProperty", "[app::MagAOXApp]" )
             REQUIRE( app.called_back == 0 );
         }
     }
+
+    #ifdef XWCTEST_DOXYGEN_REF_PROTECTED
+    MagAOX::app::MagAOXApp<true> app("", true);
+    app.configName();
+    pcf::IndiProperty prop;
+    app.registerIndiPropertyNew( prop,
+                                 "nprop",
+                                         pcf::IndiProperty::Number,
+                                         pcf::IndiProperty::ReadWrite,
+                                         pcf::IndiProperty::Idle,
+                                         callback );
+    app.handleNewProperty(prop);
+    #endif
 }
 
-/// MagAOXApp_unit_test
+/// Setting defaults
 /**
  * \ingroup MagAOXApp_unit_test
  */
@@ -706,7 +737,7 @@ TEST_CASE( "PID Locking", "[app::MagAOXApp]" )
         REQUIRE( !std::filesystem::exists( "/tmp/MagAOXApp_test/sys/testapp/pid" ) );
     }
 
-    SECTION( "PID Lock, app directory creation erryr" )
+    SECTION( "PID Lock, app directory creation error" )
     {
         std::vector<const char *> argv;
         std::vector<std::string>  argvstr( { "./execname", "-n", "testapp" } );
@@ -1195,6 +1226,8 @@ TEST_CASE( "Setting Euid", "[app::MagAOXApp]" )
     REQUIRE( app.setEuidReal( 0 ) == -1 );
     REQUIRE( app.setEuidCalled( 0 ) == -1 );
 }
+
+
 
 /// Tests of utilities in cpp
 /**

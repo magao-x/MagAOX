@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-08-18 created by JRM
   * - 2025-05-02 revised with added email field by JRM
@@ -34,7 +34,7 @@ struct user_log : public flatbuffer_log
     struct messageT : public fbMessage
     {
         messageT( const std::string & email,
-                  const std::string & message 
+                  const std::string & message
                 )
         {
             auto _eml = builder.CreateString(email);
@@ -78,7 +78,7 @@ struct user_log : public flatbuffer_log
         {
             msg += fbs->message()->c_str();
         }
-      
+
         return msg;
     }
 
@@ -105,17 +105,17 @@ struct user_log : public flatbuffer_log
     }
 
     /// Get the logMetaDetail for a member by name
-    /**
+   /**
      * \returns the a logMetaDetail filled in with the appropriate details
-     * \returns an empty logmegaDetail if member not recognized
-     */ 
+     * \returns an empty logMetaDetail if member not recognized
+     */
     static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
     {
         if(     member == "email")   return logMetaDetail({"USER", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&email), false});
         else if(member == "message") return logMetaDetail({"MESSAGE", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&message), false});
         else
         {
-            std::cerr << "No string member " << member << " in user_log\n";
+            std::cerr << "No member " << member << " in user_log\n";
             return logMetaDetail();
         }
    }

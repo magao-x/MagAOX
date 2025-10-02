@@ -1,11 +1,11 @@
 
 #include "app.hpp"
-#include "camera.hpp"
+#include "camera/camera.hpp"
 
 
 int main(int argc, char *argv[])
 {
-   
+
     QApplication qapp(argc, argv);
 
     xqt::app<xqt::camera> app;
@@ -20,4 +20,4 @@ int main(int argc, char *argv[])
         std::cerr << "try " << argv[0] << " -h for more information." << std::endl;
     }
 }
-   
+

@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-09-06 created by JRM
   */
@@ -37,7 +37,7 @@ struct telem_telcat : public flatbuffer_log
    {
       ///Construct from components
       messageT( const std::string & catObj, ///< [in] Catalog object name
-                const std::string & catRm,  ///< [in] Catalog rotator mode 
+                const std::string & catRm,  ///< [in] Catalog rotator mode
                 const double & catRa,       ///< [in] Catalog right ascension [degrees]
                 const double & catDec,      ///< [in] Catalog declination [degrees]
                 const double & catEp,       ///< [in] Catalog epoch
@@ -51,7 +51,7 @@ struct telem_telcat : public flatbuffer_log
       }
 
    };
-                 
+
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
@@ -70,39 +70,39 @@ struct telem_telcat : public flatbuffer_log
       auto fbs = GetTelem_telcat_fb(msgBuffer);
 
       std::string msg = "[telcat] ";
-     
+
       if(fbs->catObj() != nullptr)
       {
          msg += "obj: ";
          msg += fbs->catObj()->c_str() ;
          msg += " ";
       }
-      
+
       msg += "ra: ";
       msg += std::to_string(fbs->catRa()) + " ";
-      
+
       msg += "dec: ";
       msg += std::to_string(fbs->catDec()) + " ";
-      
+
       msg += "ep: ";
       msg += std::to_string(fbs->catEp()) + " ";
-      
+
       if(fbs->catRm() != nullptr)
       {
          msg += "rm: ";
          msg += fbs->catRm()->c_str() ;
          msg += " ";
       }
-      
+
       msg += "ro: ";
       msg += std::to_string(fbs->catRo()) + " ";
-      
-      
-      
+
+
+
       return msg;
-   
+
    }
-   
+
    static std::string catObj(void * msgBuffer)
    {
       auto fbs = GetTelem_telcat_fb(msgBuffer);
@@ -115,7 +115,7 @@ struct telem_telcat : public flatbuffer_log
          return std::string("");
       }
    }
-   
+
    static std::string catRm(void * msgBuffer)
    {
       auto fbs = GetTelem_telcat_fb(msgBuffer);
@@ -128,36 +128,36 @@ struct telem_telcat : public flatbuffer_log
          return std::string("");
       }
    }
-   
+
    static double catRA(void * msgBuffer)
    {
       auto fbs = GetTelem_telcat_fb(msgBuffer);
       return fbs->catRa();
    }
-   
+
    static double catDec(void * msgBuffer)
    {
       auto fbs = GetTelem_telcat_fb(msgBuffer);
       return fbs->catDec();
    }
-   
+
    static double catEp(void * msgBuffer)
    {
       auto fbs = GetTelem_telcat_fb(msgBuffer);
       return fbs->catEp();
    }
-   
+
    static double catRo(void * msgBuffer)
    {
       auto fbs = GetTelem_telcat_fb(msgBuffer);
       return fbs->catRo();
    }
-   
+
    /// Get the logMetaDetail for a member by name
    /**
-     * \returns the function pointer cast to void*
-     * \returns -1 for an unknown member
-     */ 
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
       if(     member == "catObj") return logMetaDetail({"OBJECT", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&catObj), false});
@@ -168,11 +168,11 @@ struct telem_telcat : public flatbuffer_log
       else if(member == "catRo")  return logMetaDetail({"CATRO", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&catRo), false});
       else
       {
-         std::cerr << "No string member " << member << " in telem_telcat\n";
+         std::cerr << "No member " << member << " in telem_telcat\n";
          return logMetaDetail();
       }
    }
-   
+
 }; //telem_telcat
 
 

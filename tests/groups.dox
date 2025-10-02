@@ -1,10 +1,10 @@
 
-/// \defgroup testing Testing the MagAO-X software
+/// \defgroup testing Testing XWCTk
 
-/** \defgroup test_build_run Building and Running Tests 
-  * \ingroup testing 
-  
-To build a single test, from inside the `tests` subfolder, run 
+/** \defgroup test_build_run Building and Running Tests
+  * \ingroup testing
+
+To build a single test, from inside the `tests` subfolder, run
 \verbatim
 $ make -B -f Makefile.one t=../apps/zaberCtrl/tests/zaberCtrl_test.cpp
 $ ../apps/zaberCtrl/tests/zaberCtrl_test
@@ -27,9 +27,13 @@ $ bash ./testMagAOX.bash
 */
 
 /** \defgroup test_indi Tests of INDI Communications
-  * \ingroup testing 
+  * \ingroup testing
   */
-  
+
+/** \defgroup unit_test Unit Testing
+  * \brief Unit tests in XWCTk.
+  * \ingroup testing
+  */
 
 
 

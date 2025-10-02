@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_files
-  * 
+  *
   * History:
   * - 2017-06-27 created by JRM
   */
@@ -74,15 +74,15 @@ struct logManager : public _logFileT
 {
    typedef _parentT parentT;
    typedef _logFileT logFileT;
-   
+
 protected:
    parentT * m_parent {nullptr};
-   
+
    ///\todo Make these protected members, with appropriate access methods
    //-->
 public:
    std::string m_configSection {"logger"}; ///<The configuration files section name.  Default is `logger`.
-   
+
 protected:
    std::list<bufferPtrT> m_logQueue; ///< Log entries are stored here, and writen to the file by the log thread.
 
@@ -109,17 +109,30 @@ public:
    /// Destructor.
    ~logManager();
 
-   /// Set the logger parent 
+   /// Set the logger parent
    /** The parent is used for interactive presentation of log messages
      */
    void parent( parentT * p /**< [in] pointer to the parent object*/);
-   
+
    /// Get the logger parent
    /**
      * Returns a point to the parent object.
-     */ 
+     */
    parentT * parent();
-   
+
+   /// Set a new value of logShutdown
+   /** Updates m_logShutdown with new value.
+     *
+     * \returns 0 on success
+     * \returns -1 on error (if wp == 0).
+     */
+   int logShutdown( bool ls );
+
+   /// Get the current value of logShutdown
+   /** \returns the value m_logShutdown.
+     */
+   bool logShutdown();
+
    /// Set a new value of writePause
    /** Updates m_writePause with new value.
      *
@@ -163,11 +176,11 @@ public:
      */
    int logThreadPrio();
 
-   /// Get status of the log thread running flag 
-   /** \returns the current value of m_logThreadRunning 
+   /// Get status of the log thread running flag
+   /** \returns the current value of m_logThreadRunning
      */
    bool logThreadRunning();
-   
+
    ///Setup an application configurator for the logger section
    int setupConfig( mx::app::appConfigurator & config /**< [in] an application configuration to setup */);
 
@@ -194,8 +207,8 @@ public:
      * \returns 0 on success, -1 on error.
      */
    template<typename logT>
-   static int createLog( bufferPtrT & logBuffer, ///< [out] a shared_ptr\<logBuffer\>, which will be allocated and populated with the log entry 
-                         const typename logT::messageT & msg, ///< [in] the message to log (could be of type emptyMessage) 
+   static int createLog( bufferPtrT & logBuffer, ///< [out] a shared_ptr\<logBuffer\>, which will be allocated and populated with the log entry
+                         const typename logT::messageT & msg, ///< [in] the message to log (could be of type emptyMessage)
                          const logPrioT & level  ///< [in] the level (verbosity) of this log
                        );
 
@@ -207,12 +220,12 @@ public:
      * \returns 0 on success, -1 on error.
      */
    template<typename logT>
-   static int createLog( bufferPtrT & logBuffer, ///< [out] a shared_ptr\<logBuffer\>, which will be allocated and populated with the log entry 
+   static int createLog( bufferPtrT & logBuffer, ///< [out] a shared_ptr\<logBuffer\>, which will be allocated and populated with the log entry
                          const timespecX & ts, ///< [in] the timestamp of this log entry.
-                         const typename logT::messageT & msg, ///< [in] the message to log (could be of type emptyMessage) 
+                         const typename logT::messageT & msg, ///< [in] the message to log (could be of type emptyMessage)
                          const logPrioT & level ///< [in] the level (verbosity) of this log
                        );
-   
+
    /// Make a log entry, including a message.
    /**
      * \tparam logT is a log entry type
@@ -231,7 +244,7 @@ public:
              const typename logT::messageT & msg, ///< [in] the message to log
              logPrioT level = logPrio::LOG_DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
            );
-   
+
    /// Make a log entry with no message.
    /**
      * \tparam logT is a log entry type
@@ -280,6 +293,19 @@ parentT * logManager<parentT, logFileT>::parent()
 }
 
 template<class parentT, class logFileT>
+int logManager<parentT, logFileT>::logShutdown( bool ls )
+{
+    m_logShutdown = ls;
+    return 0;
+}
+
+template<class parentT, class logFileT>
+bool logManager<parentT, logFileT>::logShutdown()
+{
+    return m_logShutdown;
+}
+
+template<class parentT, class logFileT>
 int logManager<parentT, logFileT>::writePause( const unsigned long & wp )
 {
    if(wp == 0) return -1;
@@ -298,7 +324,7 @@ unsigned long logManager<parentT, logFileT>::writePause()
 template<class parentT, class logFileT>
 int logManager<parentT, logFileT>::logLevel( logPrioT newLev )
 {
-   
+
 
    m_logLevel = newLev;
 
@@ -411,25 +437,25 @@ int logManager<parentT, logFileT>::logThreadStart()
       log<software_error>({__FILE__,__LINE__, 0, 0, "Unkown exception on log thread start"});
       return -1;
    }
-   
+
    if(!m_logThread.joinable())
    {
       log<software_error>({__FILE__, __LINE__, 0, 0,  "Log thread did not start"});
       return -1;
    }
-   
+
    //Always set the m_logThread to lowest priority
    sched_param sp;
    sp.sched_priority = m_logThreadPrio;
 
    int rv = pthread_setschedparam( m_logThread.native_handle(), SCHED_OTHER, &sp);
-   
+
    if(rv != 0)
    {
       log<software_error>({__FILE__, __LINE__, 0, rv, std::string("Error setting thread params: ") + strerror(rv)});
       return -1;
    }
-   
+
    return 0;
 
 }
@@ -439,9 +465,10 @@ void logManager<parentT, logFileT>::logThreadExec()
 {
 
    m_logThreadRunning = true;
-   
+
    std::unique_lock<std::mutex> lock(m_qMutex, std::defer_lock);
 
+   //Run until shutdown.  If shutdown is true we keep running while the queue is not empty.
    while(!m_logShutdown || !m_logQueue.empty())
    {
       std::list<bufferPtrT>::iterator beg, it, er, end;
@@ -460,12 +487,13 @@ void logManager<parentT, logFileT>::logThreadExec()
          while( it != end )
          {
             //m_logFile.
-            if( this->writeLog( *it ) < 0) 
+            mx::error_t errc = this->writeLog( *it );
+            if( errc != mx::error_t::noerror)
             {
                m_logThreadRunning = false;
                return;
             }
-        
+
             if(m_parent)
             {
                m_parent->logMessage( *it );
@@ -473,9 +501,9 @@ void logManager<parentT, logFileT>::logThreadExec()
             else if( logHeader::logLevel( *it ) <= logPrio::LOG_NOTICE )
             {
                logStdFormat(std::cerr, *it);
-               std::cerr << "\n";
+               std::cerr << '\n';
             }
-            
+
             er = it;
             ++it;
 
@@ -532,7 +560,7 @@ void logManager<parentT, logFileT>::log( const typename logT::messageT & msg,
    if(level == logPrio::LOG_DEFAULT) level = logT::defaultLevel;
 
    if(level > m_logLevel) return; // We do nothing with this.
-   
+
    //Step 1 create log
    bufferPtrT logBuffer;
    createLog<logT>(logBuffer, msg, level);
@@ -540,7 +568,7 @@ void logManager<parentT, logFileT>::log( const typename logT::messageT & msg,
    //Step 2 add log to queue
    std::lock_guard<std::mutex> guard(m_qMutex);  //Lock the mutex before pushing back.
    m_logQueue.push_back(logBuffer);
-   
+
 
 }
 
@@ -576,7 +604,7 @@ void logManager<parentT, logFileT>::log( logPrioT level )
 template<class parentT, class logFileT>
 template<typename logT>
 void logManager<parentT, logFileT>::log( timespecX & ts,
-                                logPrioT level 
+                                logPrioT level
                               )
 {
    log<logT>( ts, emptyMessage(), level );

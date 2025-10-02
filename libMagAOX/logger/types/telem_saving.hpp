@@ -46,7 +46,6 @@ struct telem_saving : public flatbuffer_log
       {
          auto fp = Createtelem_saving_fb(builder, rawSize,compressedSize, encodeRate, differenceRate, reorderRate, compressRate);
          builder.Finish(fp);
-
       }
 
    };
@@ -70,10 +69,72 @@ struct telem_saving : public flatbuffer_log
 
 
       std::stringstream s;
-      s << "Saved " << ((float)fbs->rawSize())/1048576.0 << " MB @ " << ((float) fbs->compressedSize() )/((float) fbs->rawSize()) << "%.";
+      s << "Saved " << ((float)fbs->raw_size())/1048576.0 << " MB @ " << ((float) fbs->compressed_size() )/((float) fbs->raw_size()) << "%.";
       return s.str();
 
    }
+
+   static unsigned int raw_size( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto fbs = Gettelem_saving_fb(msgBuffer);
+
+      return fbs->raw_size();
+   }
+
+   static unsigned int compressed_size( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto fbs = Gettelem_saving_fb(msgBuffer);
+
+      return fbs->compressed_size();
+   }
+
+   static float encode_rate( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto fbs = Gettelem_saving_fb(msgBuffer);
+
+      return fbs->encode_rate();
+   }
+
+   static float difference_rate( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto fbs = Gettelem_saving_fb(msgBuffer);
+
+      return fbs->difference_rate();
+   }
+
+   static float reorder_rate( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto fbs = Gettelem_saving_fb(msgBuffer);
+
+      return fbs->reorder_rate();
+   }
+
+   static float compress_rate( void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto fbs = Gettelem_saving_fb(msgBuffer);
+
+      return fbs->compress_rate();
+   }
+
+   /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(     member == "raw_size") return logMetaDetail({"RAW SIZE", "archive raw sized", logMeta::valTypes::UInt, logMeta::metaTypes::State, reinterpret_cast<void*>(&raw_size), false});
+      else if( member == "compressed_size") return logMetaDetail({"COMPRESSED SIZE", "archive compressed sized", logMeta::valTypes::UInt, logMeta::metaTypes::State, reinterpret_cast<void*>(&compressed_size), false});
+      else if( member == "encode_sate") return logMetaDetail({"ENCODE RATE", "encoding rate [MB/s]", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&encode_rate), false});
+      else if( member == "difference_rate") return logMetaDetail({"DIFFERENCING RATE", "differencing rate [MB/s]", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&difference_rate), false});
+      else if( member == "reorder_rate") return logMetaDetail({"REORDERING RATE", "reordering rate [MB/s]", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&reorder_rate), false});
+      else if( member == "compress_rate") return logMetaDetail({"COMPRESSION RATE", "compression rate [MB/s]", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&compress_rate), false});
+      else
+      {
+         std::cerr << "No member " << member << " in telem_saving\n";
+         return logMetaDetail();
+      }
+    }
 
 }; //telem_saving
 

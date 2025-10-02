@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-08-18 created by JRM
   */
@@ -28,7 +28,17 @@ struct saving_start : public saving_state_change
    ///The default level
    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_NOTICE;
 
-   
+   /// Get an empty logMetaDetail because meta data doesn't make sense for this log
+   /**
+     * \returns an empty logMetaDetail
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+
+      std::cerr << "meta data doesn't make sense for saving_start.\n";
+      return logMetaDetail();
+   }
 
 };
 

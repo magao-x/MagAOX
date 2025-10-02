@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-09-06 created by JRM
   */
@@ -48,13 +48,13 @@ struct ao_operator : public flatbuffer_log
          auto _pfoa = builder.CreateString(pfoa);
          auto _email = builder.CreateString(email);
          auto _institution = builder.CreateString(institution);
-         
+
          auto fp = CreateObserver_fb(builder, _fullName, _pfoa, _email, _institution);
          builder.Finish(fp);
       }
 
    };
-                 
+
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
@@ -73,37 +73,48 @@ struct ao_operator : public flatbuffer_log
       auto fbs = GetObserver_fb(msgBuffer);
 
       std::string msg = "AO Operator Loaded: ";
-      
+
       if(fbs->fullName())
       {
          msg += fbs->fullName()->c_str();
          if(!fbs->pfoa()) msg += ", ";
          else msg += " ";
       }
-      
+
       if(fbs->pfoa())
       {
          msg += "(";
          msg += fbs->pfoa()->c_str();
          msg += "), ";
       }
-      
+
       if(fbs->email())
       {
          msg += fbs->email()->c_str();
          if(fbs->institution()) msg += ", ";
          else msg += " ";
       }
-         
+
       if(fbs->institution())
       {
          msg += fbs->institution()->c_str();
       }
-      
+
       return msg;
-   
+
    }
-   
+
+   /// Get an empty logMetaDetail because meta data doesn't make sense for this log
+   /**
+     * \returns an empty logMetaDetail
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+
+      std::cerr << "meta data doesn't make sense for ao_operator.\n";
+      return logMetaDetail();
+   }
 }; //ao_operator
 
 

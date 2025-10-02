@@ -10,11 +10,29 @@ namespace MagAOX
 {
 namespace app
 {
-struct streamWriter_test
+
+//Standard test harness for INDI callbacks
+struct streamWriter_test : public streamWriter
 {
     streamWriter *m_sw;
 
-    streamWriter_test( streamWriter *sw )
+    streamWriter_test(const std::string & device)
+    {
+        m_configName = device;
+        m_outName = device;
+
+        XWCTEST_SETUP_INDI_NEW_PROP(writing);
+    }
+
+
+};
+
+//Test harness for data writing
+struct streamWriter_data_test
+{
+    streamWriter_test *m_sw;
+
+    streamWriter_data_test( streamWriter_test *sw )
     {
         m_sw = sw;
     }
@@ -46,20 +64,6 @@ struct streamWriter_test
 
         m_sw->initialize_xrif();
         return m_sw->allocate_xrif();
-    }
-
-    // Allocates and populates the filename buffer
-    int setup_fname()
-    {
-        m_sw->m_fnameBase = "/tmp/swtest_";
-
-        m_sw->m_fnameSz =
-            m_sw->m_fnameBase.size() + sizeof( "YYYYMMDDHHMMSSNNNNNNNNN.xrif" ); // the sizeof includes the \0
-        m_sw->m_fname = (char *)malloc( m_sw->m_fnameSz );
-
-        snprintf( m_sw->m_fname, m_sw->m_fnameSz, "%sYYYYMMDDHHMMSSNNNNNNNNN.xrif", m_sw->m_fnameBase.c_str() );
-
-        return 0;
     }
 
     // Fill the circular buffers.
@@ -98,6 +102,8 @@ struct streamWriter_test
                       int stop   // should be a m_writeChunkLength boundary
     )
     {
+        m_sw->m_rawimageDir = "/tmp";
+
         m_sw->m_currSaveStart       = start;
         m_sw->m_currSaveStop        = stop;
         m_sw->m_currSaveStopFrameNo = stop;
@@ -110,19 +116,19 @@ struct streamWriter_test
     int comp_frames_uint16( size_t start, size_t stop )
     {
 
-        std::cout << "Reading: " << m_sw->m_fname << "\n";
+        std::cout << "Reading: " << m_sw->m_outFilePath << "\n";
 
         xrif_t       xrif;
         xrif_error_t xrv = xrif_new( &xrif );
 
         char header[XRIF_HEADER_SIZE];
 
-        FILE  *fp_xrif = fopen( m_sw->m_fname, "rb" );
+        FILE  *fp_xrif = fopen( m_sw->m_outFilePath.c_str(), "rb" );
         size_t nr      = fread( header, 1, XRIF_HEADER_SIZE, fp_xrif );
 
         if( nr != XRIF_HEADER_SIZE )
         {
-            std::cerr << "Error reading header of " << m_sw->m_fname << "\n";
+            std::cerr << "Error reading header of " << m_sw->m_outFilePath << "\n";
             fclose( fp_xrif );
             return -1;
         }
@@ -195,12 +201,17 @@ struct streamWriter_test
 
 using namespace MagAOX::app;
 
+SCENARIO( "streamWriter INDI Callbacks", "[streamWriter]" )
+{
+    XWCTEST_INDI_NEW_CALLBACK( streamWriter, writing);
+}
+
 SCENARIO( "streamWriter Configuration", "[streamWriter]" )
 {
     GIVEN( "A default constructed streamWriter" )
     {
-        streamWriter      sw;
-        streamWriter_test sw_test( &sw );
+        streamWriter_test      sw("testdev");
+        streamWriter_data_test sw_test( &sw );
 
         WHEN( "default configurations" )
         {
@@ -213,8 +224,8 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
 {
     GIVEN( "A default constructed streamWriter and a 120x120 uint16 stream" )
     {
-        streamWriter      sw;
-        streamWriter_test sw_test( &sw );
+        streamWriter_test      sw("testdev");
+        streamWriter_data_test sw_test( &sw );
 
         WHEN( "writing full 1st chunk" )
         {
@@ -222,7 +233,6 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
             int writeChunkLength = 5;
             REQUIRE( sw_test.setup_circbufs( 120, 120, XRIF_TYPECODE_UINT16, circBuffLength, writeChunkLength ) == 0 );
             REQUIRE( sw_test.setup_xrif() == 0 );
-            REQUIRE( sw_test.setup_fname() == 0 );
 
             REQUIRE( sw_test.fill_circbuf_uint16() == 0 );
 
@@ -237,7 +247,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
             int writeChunkLength = 5;
             REQUIRE( sw_test.setup_circbufs( 120, 120, XRIF_TYPECODE_UINT16, circBuffLength, writeChunkLength ) == 0 );
             REQUIRE( sw_test.setup_xrif() == 0 );
-            REQUIRE( sw_test.setup_fname() == 0 );
+            //REQUIRE( sw_test.setup_fname() == 0 );
 
             REQUIRE( sw_test.fill_circbuf_uint16() == 0 );
 
@@ -252,7 +262,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
             int writeChunkLength = 5;
             REQUIRE( sw_test.setup_circbufs( 120, 120, XRIF_TYPECODE_UINT16, circBuffLength, writeChunkLength ) == 0 );
             REQUIRE( sw_test.setup_xrif() == 0 );
-            REQUIRE( sw_test.setup_fname() == 0 );
+            //REQUIRE( sw_test.setup_fname() == 0 );
 
             REQUIRE( sw_test.fill_circbuf_uint16() == 0 );
 
@@ -267,7 +277,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
             int writeChunkLength = 5;
             REQUIRE( sw_test.setup_circbufs( 120, 120, XRIF_TYPECODE_UINT16, circBuffLength, writeChunkLength ) == 0 );
             REQUIRE( sw_test.setup_xrif() == 0 );
-            REQUIRE( sw_test.setup_fname() == 0 );
+            //REQUIRE( sw_test.setup_fname() == 0 );
 
             REQUIRE( sw_test.fill_circbuf_uint16() == 0 );
 

@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2022-02-06 created by JRM
   */
@@ -44,7 +44,7 @@ struct telem_dmspeck : public flatbuffer_log
                 const std::vector<float> & amplitudes,  ///< [in] the amplitudes of the speckle(s)
                 const std::vector<bool> & crosses       ///< [in] whether or not the cross speckle(s) are produced
               )
-      {  
+      {
          auto _separationsVec = builder.CreateVector(separations);
          auto _anglesVec = builder.CreateVector(angles);
          auto _amplitudesVec = builder.CreateVector(amplitudes);
@@ -55,7 +55,7 @@ struct telem_dmspeck : public flatbuffer_log
       }
 
    };
-                 
+
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
@@ -74,16 +74,16 @@ struct telem_dmspeck : public flatbuffer_log
       auto fbs = GetTelem_dmspeck_fb(msgBuffer);
 
       std::string msg = "[speckles] ";
-      
+
       if(!fbs->modulating())
       {
          msg += "not modulating";
          return msg;
       }
-      
+
       msg += "modulating";
       if(fbs->trigger())
-      { 
+      {
          msg += " by trigger ";
       }
       else
@@ -92,13 +92,13 @@ struct telem_dmspeck : public flatbuffer_log
          msg += std::to_string(fbs->frequency());
          msg += " Hz ";
       }
-      
+
       msg += "seps: ";
       for(flatbuffers::Vector<float>::const_iterator it = fbs->separations()->begin(); it != fbs->separations()->end(); ++it)
       {
          msg+= std::to_string(*it);
          msg+= " ";
-      }      
+      }
       msg += "angs: ";
       for(flatbuffers::Vector<float>::const_iterator it = fbs->angles()->begin(); it != fbs->angles()->end(); ++it)
       {
@@ -117,9 +117,9 @@ struct telem_dmspeck : public flatbuffer_log
          else msg += "-";
       }
 
-      
+
       return msg;
-   
+
    }
 
    static bool modulating( void * msgBuffer )
@@ -133,7 +133,7 @@ struct telem_dmspeck : public flatbuffer_log
       auto fbs = GetTelem_dmspeck_fb(msgBuffer);
       return fbs->trigger();
    }
-   
+
    static float frequency( void * msgBuffer )
    {
       auto fbs = GetTelem_dmspeck_fb(msgBuffer);
@@ -149,11 +149,11 @@ struct telem_dmspeck : public flatbuffer_log
       for(flatbuffers::Vector<float>::const_iterator it = fbs->separations()->begin(); it != fbs->separations()->end(); ++it)
       {
          v.push_back(*it);
-      }      
+      }
 
       return v;
    }
-   
+
    static std::vector<float> angles( void * msgBuffer )
    {
       std::vector<float> v;
@@ -163,11 +163,11 @@ struct telem_dmspeck : public flatbuffer_log
       for(flatbuffers::Vector<float>::const_iterator it = fbs->angles()->begin(); it != fbs->angles()->end(); ++it)
       {
          v.push_back(*it);
-      }      
+      }
 
       return v;
    }
-   
+
    static std::vector<float> amplitudes( void * msgBuffer )
    {
       std::vector<float> v;
@@ -177,7 +177,7 @@ struct telem_dmspeck : public flatbuffer_log
       for(flatbuffers::Vector<float>::const_iterator it = fbs->amplitudes()->begin(); it != fbs->amplitudes()->end(); ++it)
       {
          v.push_back(*it);
-      }      
+      }
 
       return v;
    }
@@ -191,16 +191,16 @@ struct telem_dmspeck : public flatbuffer_log
       for(flatbuffers::Vector<unsigned char>::const_iterator it = fbs->crosses()->begin(); it != fbs->crosses()->end(); ++it)
       {
          v.push_back(*it);
-      }      
+      }
 
       return v;
    }
 
-   /// Get pointer to the accessor for a member by name 
+   /// Get the logMetaDetail for a member by name
    /**
-     * \returns the function pointer cast to void*
-     * \returns -1 for an unknown member
-     */ 
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
       if(member == "modulating") return logMetaDetail({"MODULATING", logMeta::valTypes::Bool, logMeta::metaTypes::State, reinterpret_cast<void*>(&modulating)});
@@ -212,11 +212,11 @@ struct telem_dmspeck : public flatbuffer_log
       else if(member == "crosses") return logMetaDetail({"CROSSES", logMeta::valTypes::Vector_Bool, logMeta::metaTypes::State, reinterpret_cast<void*>(&crosses)});
       else
       {
-         std::cerr << "No string member " << member << " in telem_dmspeck\n";
+         std::cerr << "No member " << member << " in telem_dmspeck\n";
          return logMetaDetail();
       }
    }
-   
+
 }; //telem_dmspeck
 
 

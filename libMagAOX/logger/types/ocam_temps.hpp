@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-09-06 created by JRM
   */
@@ -51,7 +51,7 @@ struct ocam_temps : public flatbuffer_log
       }
 
    };
-   
+
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
@@ -74,29 +74,98 @@ struct ocam_temps : public flatbuffer_log
 
       msg += "cpu: ";
       msg += std::to_string(fbs->cpu()) + " C ";
-      
+
       msg += "pwr: ";
       msg += std::to_string(fbs->power()) + " C ";
-      
+
       msg += "bias: ";
       msg += std::to_string(fbs->bias()) + " C ";
-      
+
       msg += "water: ";
       msg += std::to_string(fbs->water()) + " C ";
-      
+
       msg += "left: ";
       msg += std::to_string(fbs->left()) + " C ";
-      
+
       msg += "right: ";
       msg += std::to_string(fbs->right()) + " C ";
-      
+
       msg += "cool-pwr: ";
       msg += std::to_string(fbs->cooling()) + " mW ";
-      
+
       return msg;
-   
+
    }
-   
+
+   static float ccd( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto fbs = GetOcam_temps_fb(msgBuffer);
+      return fbs->ccd();
+   }
+
+   static float cpu( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto fbs = GetOcam_temps_fb(msgBuffer);
+      return fbs->cpu();
+   }
+
+   static float power( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto fbs = GetOcam_temps_fb(msgBuffer);
+      return fbs->power();
+   }
+
+   static float bias( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto fbs = GetOcam_temps_fb(msgBuffer);
+      return fbs->bias();
+   }
+
+   static float water( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto fbs = GetOcam_temps_fb(msgBuffer);
+      return fbs->water();
+   }
+
+   static float left( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto fbs = GetOcam_temps_fb(msgBuffer);
+      return fbs->left();
+   }
+
+   static float right( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto fbs = GetOcam_temps_fb(msgBuffer);
+      return fbs->right();
+   }
+
+   static float cooling( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto fbs = GetOcam_temps_fb(msgBuffer);
+      return fbs->cooling();
+   }
+
+   /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(     member == "ccd") return logMetaDetail({"CCD TEMP", "CCD temperature [C]", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&ccd), false});
+      else if( member == "cpu") return logMetaDetail({"CPU TEMP", "CPU temperature [C]", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&cpu), false});
+      else if( member == "power") return logMetaDetail({"PWR TEMP", "power temperature [C]", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&power), false});
+      else if( member == "bias") return logMetaDetail({"BIAS TEMP", "bias temperature [C]", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&bias), false});
+      else if( member == "water") return logMetaDetail({"WATER TEMP", "water temperature [C]", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(water), false});
+      else if( member == "left") return logMetaDetail({"LEFT TEMP", "left temperature [C]", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&left), false});
+      else if( member == "right") return logMetaDetail({"RIGHT TEMP", "right temperature [C]", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&right), false});
+      else if( member == "cooling") return logMetaDetail({"COOLING PWR", "cooling power [mW]", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&cooling), false});
+      else
+      {
+         std::cerr << "No member " << member << " in ocam_temps\n";
+         return logMetaDetail();
+      }
+   }
 }; //ocam_temps
 
 

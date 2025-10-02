@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   */
 #ifndef logger_types_telem_position_hpp
 #define logger_types_telem_position_hpp
@@ -35,14 +35,14 @@ struct telem_position : public flatbuffer_log
    {
       ///Construct from components
       messageT( const float & pos     /**<[in] stage position in mm */ )
-      {         
+      {
          auto fp = CreateTelem_position_fb(builder, pos);
          builder.Finish(fp);
       }
 
    };
-                 
- 
+
+
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
@@ -61,12 +61,12 @@ struct telem_position : public flatbuffer_log
       auto fbs = GetTelem_position_fb(msgBuffer);
 
       std::string msg = "[position] ";
-      
+
       msg += "pos: ";
       msg += std::to_string(fbs->pos()) + " ";
-            
+
       return msg;
-   
+
    }
 
    static float pos( void * msgBuffer )
@@ -79,14 +79,14 @@ struct telem_position : public flatbuffer_log
    /// Get the logMetaDetail for a member by name
    /**
      * \returns the a logMetaDetail filled in with the appropriate details
-     * \returns an empty logmegaDetail if member not recognized
-     */ 
+     * \returns an empty logMetaDetail if member not recognized
+     */
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
       if(     member == "pos") return logMetaDetail({"POS", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&pos)});
       else
       {
-         std::cerr << "No string member " << member << " in telem_position\n";
+         std::cerr << "No member " << member << " in telem_position\n";
          return logMetaDetail();
       }
    }

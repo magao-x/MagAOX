@@ -29,7 +29,7 @@ struct telem_drivetemps : public flatbuffer_log
   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
   static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
-  
+
    ///The type of the input message
    struct messageT : public fbMessage
    {
@@ -37,12 +37,12 @@ struct telem_drivetemps : public flatbuffer_log
       messageT( std::vector<std::string> & names,
                 std::vector<float> & temps )
       {
-         
+
          auto _namesVec = builder.CreateVectorOfStrings(names);
          auto _tempsVec = builder.CreateVector(temps);
-         
+
          auto fp = CreateTelem_drivetemps_fb(builder, _namesVec, _tempsVec );
-         
+
          builder.Finish(fp);
 
       }
@@ -64,15 +64,15 @@ struct telem_drivetemps : public flatbuffer_log
    {
 
       static_cast<void>(len); // unused by most log types
-   
-      auto rgs = GetTelem_drivetemps_fb(msgBuffer);  
-      
+
+      auto rgs = GetTelem_drivetemps_fb(msgBuffer);
+
       std::string msg;
 
-      if(rgs->diskName() != nullptr && rgs->diskTemp() != nullptr) 
+      if(rgs->diskName() != nullptr && rgs->diskTemp() != nullptr)
       {
          msg+= "[hdd temps] ";
-         
+
          int i=0;
          for(flatbuffers::Vector<float>::const_iterator it = rgs->diskTemp()->begin(); it != rgs->diskTemp()->end(); ++it, ++i)
          {
@@ -86,6 +86,18 @@ struct telem_drivetemps : public flatbuffer_log
       return msg;
 
    }
+
+   /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+      std::cerr << "Meta data accessor not implemented in telem_drivetemps\n";
+      return logMetaDetail();
+  }
 
 }; //telem_drivetemps
 

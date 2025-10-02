@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup flatlogcodes
-  * 
+  *
   * History:
   * - 2018-08-18 created by JRM
   */
@@ -15,6 +15,7 @@
 #include <set>
 #include <cstring>
 #include <algorithm>
+#include <limits>
 
 #include <sys/stat.h>
 
@@ -38,8 +39,8 @@ struct typeSchemaPair {
   *
   * \returns 0 on success
   * \returns -1 on error
-  * 
-  */ 
+  *
+  */
 int readCodeFile( std::map<eventCodeT, typeSchemaPair> & codeMap, ///< [out] The map of codes to log types
                   std::set<std::string> & schemaSet, ///< [out] The set of schemas to process
                   const std::string & fileName ///< [in] the file to parse
@@ -47,7 +48,7 @@ int readCodeFile( std::map<eventCodeT, typeSchemaPair> & codeMap, ///< [out] The
 {
    typedef std::map<eventCodeT, typeSchemaPair> codeMapT;
    typedef std::set<std::string> schemaSetT;
-   
+
    std::fstream fin;
 
    errno = 0;
@@ -100,13 +101,13 @@ int readCodeFile( std::map<eventCodeT, typeSchemaPair> & codeMap, ///< [out] The
       line.erase(std::find_if(line.rbegin(), line.rend(), [](unsigned char ch) {
          return !std::isspace(ch);
       }).base(), line.end());
-      
+
       size_t com = line.find('#', 0);
 
       if(com != std::string::npos) line.erase(com);
 
       if(line.size() == 0) continue;
-      
+
       std::stringstream sstr(line, std::ios_base::in);
 
       std::string logType, logCodeStr, schema;
@@ -115,13 +116,13 @@ int readCodeFile( std::map<eventCodeT, typeSchemaPair> & codeMap, ///< [out] The
       sstr >> logType;
       sstr >> logCodeStr;
       sstr >> schema;
-      
+
       if(logCodeStr.size() == 0)
       {
          std::cerr << fileName << " line " << lineNo << ": no log code found. (" << __FILE__ << " " << __LINE__ << ")\n";
          return -1;
       }
-      
+
       if(!isdigit(logCodeStr[0]))
       {
          std::cerr << fileName << " line " << lineNo << ": log code must be numeric. (" << __FILE__ << " " << __LINE__ << ")\n";
@@ -133,10 +134,10 @@ int readCodeFile( std::map<eventCodeT, typeSchemaPair> & codeMap, ///< [out] The
          std::cerr << fileName << " line " << lineNo << ": no schema found. (" << __FILE__ << " " << __LINE__ << ")\n";
          return -1;
       }
-      
+
       std::stringstream sstr2(logCodeStr, std::ios_base::in);
       sstr2 >> logCode;
-      
+
       std::pair<codeMapT::iterator, bool> res;
       typeSchemaPair logTypeSchemaPair = {logType, schema};
       try
@@ -153,7 +154,7 @@ int readCodeFile( std::map<eventCodeT, typeSchemaPair> & codeMap, ///< [out] The
          std::cerr << fileName << " line " << lineNo << ": unknown exception on map insertion. (" << __FILE__ << " " << __LINE__ << ")\n";
          return -1;
       }
-      
+
       if(res.second == false)
       {
          std::cerr << fileName << " line " << lineNo << ": Duplicate log code. (" << __FILE__ << " " << __LINE__ << ")\n";
@@ -161,7 +162,7 @@ int readCodeFile( std::map<eventCodeT, typeSchemaPair> & codeMap, ///< [out] The
          std::cerr << "New attempt: " << logType << " " << logCode << "\n\n";
          return -1;
       }
-      
+
       std::pair<schemaSetT::iterator, bool> res2;
       try
       {
@@ -177,11 +178,24 @@ int readCodeFile( std::map<eventCodeT, typeSchemaPair> & codeMap, ///< [out] The
          std::cerr << fileName << " line " << lineNo << ": unknown exception on set insertion. (" << __FILE__ << " " << __LINE__ << ")\n";
          return -1;
       }
-            
+
    }
-   
+
    return 0;
 }
+
+std::string stoup( const std::string & in)
+{
+    std::string up;
+    up.resize(in.size());
+    for(size_t i=0;i<in.size();++i)
+    {
+        up[i] = toupper(in[i]);
+    }
+
+    return up;
+}
+
 
 /// Write the logCodes.hpp header
 int emitLogCodes( const std::string & fileName,
@@ -189,10 +203,10 @@ int emitLogCodes( const std::string & fileName,
                 )
 {
    typedef std::map<uint16_t, typeSchemaPair> mapT;
-   
+
    std::ofstream fout;
    fout.open(fileName);
-   
+
    fout << "#ifndef logger_logCodes_hpp\n";
    fout << "#define logger_logCodes_hpp\n";
    fout << "#include <flatlogs/flatlogs.hpp>\n";
@@ -205,15 +219,106 @@ int emitLogCodes( const std::string & fileName,
       mapT::iterator it = logCodes.begin();
       for(; it!=logCodes.end(); ++it)
       {
-         std::string name = it->second.type;
-         for(size_t i=0;i<name.size();++i) name[i] = toupper(name[i]);
-         fout << "   constexpr static flatlogs::eventCodeT " << name << " = " << it->first <<";\n";
+         fout << "   constexpr static flatlogs::eventCodeT " << stoup(it->second.type) << " = " << it->first <<";\n";
       }
+      fout << "   constexpr static flatlogs::eventCodeT UNKNOWN = " << std::numeric_limits<flatlogs::eventCodeT>::max()  <<";\n";
+   fout << "}\n";
+   fout << '\n';
+   fout << "inline\n";
+   fout << "flatlogs::eventCodeT eventCode( const std::string & cn /**< [in] the code name to convert */)\n";
+   fout << "{\n";
+   it = logCodes.begin();
+   fout << "    if(cn == \"" << it->second.type << "\" )\n";
+   fout << "    {\n";
+   fout << "        return eventCodes::" << stoup(it->second.type) << ";\n";
+   fout << "    }\n";
+   ++it;
+   while(it != logCodes.end())
+   {
+   fout << "    else if(cn == \"" << it->second.type << "\" )\n";
+   fout << "    {\n";
+   fout << "        return eventCodes::" << stoup(it->second.type) << ";\n";
+   fout << "    }\n";
+   ++it;
+   }
+   fout << "    else\n";
+   fout << "    {\n";
+   fout << "        return eventCodes::UNKNOWN;\n";
+   fout << "    }\n";
+   fout << "} // flatlogs::eventCodeT eventCode(const std::string &)\n";
+
+   fout << '\n';
+   fout << "inline\n";
+   fout << "std::string eventCodeName( flatlogs::eventCodeT ec/**< [in] the code to convert to its name */)\n";
+   fout << "{\n";
+   it = logCodes.begin();
+   fout << "    if(ec == eventCodes::" << stoup(it->second.type) << " )\n";
+   fout << "    {\n";
+   fout << "        return \"" << it->second.type << "\";\n";
+   fout << "    }\n";
+   ++it;
+   while(it != logCodes.end())
+   {
+   fout << "    else if(ec == eventCodes::" << stoup(it->second.type) << " )\n";
+   fout << "    {\n";
+   fout << "        return \"" << it->second.type << "\";\n";
+   fout << "    }\n";
+   ++it;
+   }
+   fout << "    else\n";
+   fout << "    {\n";
+   fout << "        return \"unknown event code\";\n";
+   fout << "    }\n";
+   fout << "} // std::string eventCodeName(flatlogs::eventCodeT)\n";
+   fout << '\n';
+
+   fout << "}\n";
+   fout << "}\n";
+   fout << "#endif\n";
+
+   fout.close();
+   return 0;
+}
+
+/// Write the logCodes.hpp header
+int emitLogMemberAccessor( const std::string & fileName,
+                  std::map<uint16_t, typeSchemaPair> & logCodes
+                )
+{
+   typedef std::map<uint16_t, typeSchemaPair> mapT;
+
+   std::ofstream fout;
+   fout.open(fileName);
+
+   fout << "#ifndef logger_logMemberAccessor_hpp\n";
+   fout << "#define logger_logMemberAccessor_hpp\n";
+   fout << "#include <flatlogs/flatlogs.hpp>\n";
+   fout << "#include \"logTypes.hpp\"\n";
+   fout << "namespace MagAOX\n";
+   fout << "{\n";
+   fout << "namespace logger\n";
+   fout << "{\n\n";
+   fout << "inline\n";
+   fout << "logMetaDetail logMemberAccessor( flatlogs::eventCodeT ec,\n";
+   fout << "                                 const std::string & memberName\n";
+   fout << "                               )\n";
+   fout << "{\n";
+   fout << "    switch(ec)\n";
+   fout << "    {\n";
+   for(auto it = logCodes.begin(); it!=logCodes.end(); ++it)
+   {
+   fout << "        case eventCodes::" << stoup(it->second.type) << ":\n";
+   fout << "            return " << it->second.type << "::getAccessor( memberName );\n";
+   }
+   fout << "        default:\n";
+   fout << "            std::cerr << \"Missing logMemberAccessor case entry for \" << ec << \": \" << memberName << '\\n';\n";
+   fout << "            return logMetaDetail();\n";
+   fout << "    }\n";
    fout << "}\n";
    fout << "}\n";
    fout << "}\n";
    fout << "#endif\n";
-   
+
    fout.close();
    return 0;
 }
@@ -224,13 +329,13 @@ int emitStdFormatHeader( const std::string & fileName,
                        )
 {
    typedef std::map<uint16_t, typeSchemaPair> mapT;
-   
+
    mapT::iterator it = logCodes.begin();
-   
+
    std::ofstream fout;
    fout.open(fileName);
 
-   
+
    fout << "#ifndef logger_logStdFormat_hpp\n";
    fout << "#define logger_logStdFormat_hpp\n";
 
@@ -250,7 +355,7 @@ int emitStdFormatHeader( const std::string & fileName,
    fout << "{\n";
    fout << "   flatlogs::eventCodeT ec;\n";
    fout << "   ec = flatlogs::logHeader::eventCode(buffer);\n";
-   
+
    fout << "   switch(ec)\n";
    fout << "   {\n";
    for(; it!=logCodes.end(); ++it)
@@ -264,9 +369,9 @@ int emitStdFormatHeader( const std::string & fileName,
    fout << "   }\n";
    fout << "}\n";
 
-   
+
    it = logCodes.begin();
-    
+
    fout << "template<class iosT>\n";
    fout << "iosT & logShortStdFormat( iosT & ios,\n";
    fout << "                          const std::string & appName,\n";
@@ -274,7 +379,7 @@ int emitStdFormatHeader( const std::string & fileName,
    fout << "{\n";
    fout << "   flatlogs::eventCodeT ec;\n";
    fout << "   ec = flatlogs::logHeader::eventCode(buffer);\n";
-   
+
    fout << "   switch(ec)\n";
    fout << "   {\n";
    for(; it!=logCodes.end(); ++it)
@@ -287,18 +392,18 @@ int emitStdFormatHeader( const std::string & fileName,
       fout << "         return ios;\n";
    fout << "   }\n";
    fout << "}\n";
-   
-   
-   
+
+
+
    it = logCodes.begin();
-    
+
    fout << "template<class iosT>\n";
    fout << "iosT & logMinStdFormat( iosT & ios,\n";
    fout << "                        flatlogs::bufferPtrT & buffer )\n";
    fout << "{\n";
    fout << "   flatlogs::eventCodeT ec;\n";
    fout << "   ec = flatlogs::logHeader::eventCode(buffer);\n";
-   
+
    fout << "   switch(ec)\n";
    fout << "   {\n";
    for(; it!=logCodes.end(); ++it)
@@ -323,7 +428,7 @@ int emitStdFormatHeader( const std::string & fileName,
 
    fout << "   flatlogs::eventCodeT ec;\n";
    fout << "   ec = flatlogs::logHeader::eventCode(buffer);\n";
-   
+
    fout << "   switch(ec)\n";
    fout << "   {\n";
    for(; it!=logCodes.end(); ++it)
@@ -348,7 +453,7 @@ int emitStdFormatHeader( const std::string & fileName,
    fout << "#endif\n"; //logger_logStdFormat_hpp
 
    fout.close();
-   
+
    return 0;
 }
 
@@ -461,9 +566,9 @@ int emitLogTypes( const std::string & fileName,
                 )
 {
    typedef std::map<uint16_t, typeSchemaPair> mapT;
-   
+
    mapT::iterator it = logCodes.begin();
-   
+
    std::ofstream fout;
    fout.open(fileName);
 
@@ -476,7 +581,7 @@ int emitLogTypes( const std::string & fileName,
    }
    fout << "#endif\n";
    fout.close();
-   
+
    return 0;
 }
 
@@ -503,31 +608,32 @@ int main()
 {
    typedef std::map<uint16_t, typeSchemaPair> mapT;
    typedef std::set<std::string> setT;
-   
+
    std::string generatedDir = "generated";
    std::string schemaDir = "types/schemas";
-   
+
    std::string schemaGeneratedDir = "types/generated";
-   
+
    mkdir(generatedDir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
    mkdir(schemaGeneratedDir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-   
+
    std::string inputFile = "logCodes.dat";
    std::string stdFormatHeader = generatedDir + "/logStdFormat.hpp";
    std::string verifyHeader = generatedDir + "/logVerify.hpp";
    std::string logCodesHeader = generatedDir + "/logCodes.hpp";
+   std::string logMemberAccessorHeader = generatedDir + "/logMemberAccessor.hpp";
    std::string logTypesHeader = generatedDir + "/logTypes.hpp";
    std::string logCodeValidHeader = generatedDir + "/logCodeValid.hpp";
    std::string binarySchemataDeclarations = generatedDir + "/binarySchemataDeclarations.inc";
    mapT logCodes;
    setT schemas;
-   
+
    if( readCodeFile(logCodes, schemas, inputFile) < 0 )
    {
       std::cerr << "flatlogcodes: error reading code file " << inputFile << ". Aborting. (" << __FILE__ << " " << __LINE__ << ")\n";
       return -1;
    }
-   
+
    if( logCodes.size() == 0)
    {
       std::cerr << "flatlogcodes: no log codes read from file " << inputFile << ". Aborting. (" << __FILE__ << " " << __LINE__ << ")\n";
@@ -543,12 +649,13 @@ int main()
    emitStdFormatHeader(stdFormatHeader, logCodes );
    emitVerifyHeader(verifyHeader, logCodes );
    emitLogCodes( logCodesHeader, logCodes );
+   emitLogMemberAccessor(logMemberAccessorHeader, logCodes);
    emitLogTypes( logTypesHeader, logCodes );
    emitCodeValidHeader( logCodeValidHeader, logCodes);
    emitBinarySchemataDeclarations( binarySchemataDeclarations, schemas );
 
    std::string flatc = "flatc -o " + schemaGeneratedDir + " --cpp --reflect-types --reflect-names";
-   
+
    setT::iterator it = schemas.begin();
    while(it != schemas.end())
    {
@@ -560,13 +667,13 @@ int main()
       flatc += " " + schemaDir + "/";
       flatc += *it;
       flatc += ".fbs";
-      
+
       ++it;
    }
 
    std::cerr << "flatc command: " << flatc << "\n";
    int rv = system(flatc.c_str());
-   
+
    if(rv < 0) std::cerr << "Error running flatc to generate headers.\n";
 
    flatc = "flatc -o " + schemaGeneratedDir + " --binary --schema";
@@ -590,7 +697,7 @@ int main()
    rv = system(flatc.c_str());
 
    if(rv < 0) std::cerr << "Error running flatc to generate binary schemata.\n";
-   
+
    return 0;
 }
 

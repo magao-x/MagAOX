@@ -5,16 +5,16 @@ CONFIG(release, debug|release) {
     CONFIG += optimize_full
 }
 
-CONFIG += c++14
+QMAKE_CXXFLAGS += -std=c++20
 
-CONFIG += -O3
+CONFIG += -O2
 
 MAKEFILE = makefile.dmStatus
 
 QT           += widgets
 
 HEADERS       = dmStatus.hpp
-SOURCES       = dmStatus.cpp 
+SOURCES       = dmStatus.cpp
 LIBS          += -lrtimv
 TARGET        = $$qtLibraryTarget(rtimv_dmStatusPlugin)
 DESTDIR       = ./

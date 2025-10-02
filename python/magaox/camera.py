@@ -171,8 +171,13 @@ class XCam:
 		if subtract_dark and not self._dark_exists:
 			raise RuntimeError("No dark found, but subtract_dark=False was not supplied")
 		elif self._dark_exists and subtract_dark:
-			if np.all(self.dark_shmim.md.size == self.shmim.md.size):
-				arr = data - self.dark_shmim.copy().astype(float)
+			dark_shape = self.dark_shmim.md.size
+			if np.all(dark_shape == data.shape):
+				dark = self.dark_shmim.copy().astype(float)
+				arr = data - dark
+			else:
+				warnings.warn(f"Got {data.shape=} but {dark_shape=}, skipping dark subtraction")
+				return data
 		else:
 			arr = data
 		if self._use_hcipy:

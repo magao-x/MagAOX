@@ -1,0 +1,32 @@
+#!/bin/bash
+set -eo pipefail
+
+#######################################################
+# update the coverage report
+#
+# run in the top level MagAO-X source directory
+#######################################################
+
+cd tests
+
+lcov --directory . --zerocounters
+
+chmod +x testMagAOX.bash
+
+bash -l testMagAOX.bash
+
+cd ..
+
+lcov --directory . --capture --output-file coverage.info
+
+lcov --remove coverage.info "*/tests/*" "/usr/*" "/sys/*" "/tty/*" --output-file coverage_filtered.info
+
+genhtml coverage_filtered.info --output-directory coverage_report \
+                               --title "MagAOX" \
+                               --hierarchical \
+                               --merge-aliases \
+                               --suppress-aliases \
+                               --filter function \
+                               --demangle-cpp \
+                               --css-file tests/coverage/gcov.css
+

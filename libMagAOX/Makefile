@@ -28,14 +28,18 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              common/config.hpp \
              common/defaults.hpp \
              common/environment.hpp \
+			 file/fileTimes.hpp \
+			 file/stdFileName.hpp \
+			 file/stdSubDir.hpp \
              ImageStreamIO/ImageStruct.hpp \
              ImageStreamIO/pixaccess.hpp \
              logger/logFileRaw.hpp \
              logger/logManager.hpp \
-             logger/logFileName.hpp \
              logger/logMap.hpp \
              logger/logMeta.hpp \
              logger/logBinarySchemata.hpp \
+			 logger/types/ao_operator.hpp \
+			 logger/types/config_log.hpp \
              logger/types/empty_log.hpp \
              logger/types/flatbuffer_log.hpp \
              logger/types/git_state.hpp \
@@ -45,39 +49,38 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              logger/types/loop_open.hpp \
              logger/types/loop_paused.hpp \
              logger/types/observer.hpp \
-             logger/types/ao_operator.hpp \
-             logger/types/outlet_state.hpp \
+			 logger/types/ocam_temps.hpp \
              logger/types/outlet_channel_state.hpp \
+             logger/types/outlet_state.hpp \
              logger/types/pico_channel.hpp \
-             logger/types/software_log.hpp \
+			 logger/types/saving_start.hpp \
+			 logger/types/saving_state_change.hpp \
+			 logger/types/saving_stop.hpp \
+			 logger/types/software_log.hpp \
              logger/types/state_change.hpp \
              logger/types/string_log.hpp \
-             logger/types/user_log.hpp \
-             logger/types/config_log.hpp \
-             logger/types/saving_state_change.hpp \
-             logger/types/saving_start.hpp \
-             logger/types/saving_stop.hpp \
-             logger/types/telem_saving.hpp \
-             logger/types/telem_saving_state.hpp \
-             logger/types/telem_dmmodes.hpp \
-             logger/types/telem_dmspeck.hpp \
-             logger/types/telem_blockgains.hpp \
+			 logger/types/telem_blockgains.hpp \
+			 logger/types/telem_chrony_stats.hpp \
              logger/types/telem_chrony_status.hpp \
-             logger/types/telem_chrony_stats.hpp \
              logger/types/telem_cooler.hpp \
              logger/types/telem_coreloads.hpp \
              logger/types/telem_coretemps.hpp \
+			 logger/types/telem_dmmodes.hpp \
+             logger/types/telem_dmspeck.hpp \
              logger/types/telem_drivetemps.hpp \
              logger/types/telem_fgtimings.hpp \
              logger/types/telem_fxngen.hpp \
-             logger/types/telem_observer.hpp \
              logger/types/telem_loopgain.hpp \
+             logger/types/telem_observer.hpp \
 			 logger/types/telem_pi335.hpp \
              logger/types/telem_pico.hpp \
-             logger/types/telem_position.hpp \
              logger/types/telem_pokecenter.hpp \
 			 logger/types/telem_pokeloop.hpp \
+             logger/types/telem_position.hpp \
              logger/types/telem_rhusb.hpp \
+             logger/types/telem_saving_state.hpp \
+			 logger/types/telem_saving.hpp \
+			 logger/types/telem_sparkleclock.hpp \
              logger/types/telem_stage.hpp \
              logger/types/telem_stdcam.hpp \
              logger/types/telem_telcat.hpp \
@@ -90,6 +93,8 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              logger/types/telem_usage.hpp \
              logger/types/telem_zaber.hpp \
              logger/types/text_log.hpp \
+			 logger/types/ttmmod_params.hpp \
+			 logger/types/user_log.hpp \
              sys/thSetuid.hpp \
              sys/runCommand.hpp \
              tty/ttyErrors.hpp \
@@ -106,8 +111,9 @@ OBJS = app/MagAOXApp.o \
        app/dev/ioDevice.o \
        app/dev/outletController.o \
        app/dev/stdCamera.o \
+	   file/stdFileName.o \
+	   file/stdSubDir.o \
        logger/types/telem.o \
-       logger/logFileName.o \
        logger/logFileRaw.o \
        logger/logMap.o \
        logger/logMeta.o \
@@ -122,10 +128,10 @@ OBJS = app/MagAOXApp.o \
        tty/ttyUSB.o \
        tty/usbDevice.o
 
-              
-all: libMagAOX.hpp.gch libMagAOX.a  
 
-app/MagAOXApp.o: app/MagAOXApp.hpp app/indiDriver.hpp app/indiMacros.hpp app/indiUtils.hpp app/stateCodes.o 
+all: libMagAOX.hpp.gch libMagAOX.a
+
+app/MagAOXApp.o: app/MagAOXApp.hpp app/indiDriver.hpp app/indiMacros.hpp app/indiUtils.hpp app/stateCodes.o
 app/stateCodes.o: app/stateCodes.hpp
 
 libMagAOX.hpp.gch: libMagAOX.hpp $(INCLUDEDEPS) logger/generated/logTypes.hpp $(OBJS)
@@ -139,7 +145,7 @@ libMagAOX.a: libMagAOX.hpp.gch $(OBJS)
 	ar rvs libMagAOX.a $(OBJS)
 
 logger/logMeta.o: logger/logMap.hpp logger/logMap.cpp logger/logMeta.hpp logger/logMeta.cpp logger/generated/logTypes.hpp
-logger/logMap.o: logger/logMap.hpp logger/logMap.cpp logger/logFileName.hpp 
+logger/logMap.o: logger/logMap.hpp logger/logMap.cpp
 
 clean:
 	rm -f libMagAOX.hpp.gch

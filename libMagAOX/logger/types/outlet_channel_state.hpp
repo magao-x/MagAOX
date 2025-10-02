@@ -38,7 +38,7 @@ struct outlet_channel_state : public flatbuffer_log
               )
       {
          auto _channel = builder.CreateString(channel);
-         
+
          auto gs = CreateOutlet_channel_state_fb(builder, _channel, state);
          builder.Finish(gs);
 
@@ -65,10 +65,10 @@ struct outlet_channel_state : public flatbuffer_log
 
       std::stringstream s;
       s << "Channel: ";
-      
+
       if(rgs->channel() != nullptr) s << rgs->channel()->c_str() << " ";
       else s << "????" << " ";
-      
+
       if(rgs->state()==2)
       {
          s << "ON";
@@ -86,6 +86,17 @@ struct outlet_channel_state : public flatbuffer_log
       return s.str();
    }
 
+   /// Get an empty logMetaDetail because meta data doesn't make sense for this log
+   /**
+     * \returns an empty logMetaDetail
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+
+      std::cerr << "meta data doesn't make sense for outlet_channel_state.\n";
+      return logMetaDetail();
+   }
 };
 
 } //namespace logger

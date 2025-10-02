@@ -19,7 +19,7 @@ namespace logger
 {
 
 
-/// Log entry recording hdd temperatures
+/// Log entry recording disk usage
 /** \ingroup logger_types
   */
 struct telem_usage : public flatbuffer_log
@@ -29,7 +29,7 @@ struct telem_usage : public flatbuffer_log
   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
   static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
-  
+
    ///The type of the input message
    struct messageT : public fbMessage
    {
@@ -40,9 +40,9 @@ struct telem_usage : public flatbuffer_log
                 float data
               )
       {
-         
+
          auto fp = CreateTelem_usage_fb(builder, ram, boot, root, data );
-         
+
          builder.Finish(fp);
 
       }
@@ -64,9 +64,9 @@ struct telem_usage : public flatbuffer_log
    {
 
       static_cast<void>(len); // unused by most log types
-   
-      auto rgs = GetTelem_usage_fb(msgBuffer);  
-      
+
+      auto rgs = GetTelem_usage_fb(msgBuffer);
+
       std::string msg = "[usage] ram: ";
 
       msg += std::to_string(rgs->ramUsage());
@@ -76,10 +76,22 @@ struct telem_usage : public flatbuffer_log
       msg += std::to_string(rgs->rootUsage());
       msg += " data: ";
       msg += std::to_string(rgs->dataUsage());
-      
+
       return msg;
 
    }
+
+   /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+      std::cerr << "Meta data accessor not implemented in telem_usage\n";
+      return logMetaDetail();
+  }
 
 }; //telem_usage
 

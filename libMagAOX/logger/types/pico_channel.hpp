@@ -19,7 +19,7 @@ namespace logger
 {
 
 
-///Application State Change
+/// Picomotor Channel Setup
 /** \ingroup logger_types
   */
 struct pico_channel : public flatbuffer_log
@@ -38,7 +38,7 @@ struct pico_channel : public flatbuffer_log
               )
       {
          auto _name = builder.CreateString(name);
-         
+
          auto gs = CreatePico_channel_fb(builder, _name, channel);
          builder.Finish(gs);
 
@@ -63,18 +63,30 @@ struct pico_channel : public flatbuffer_log
 
       auto rgs = GetPico_channel_fb(msgBuffer);
 
-      
+
       std::string s = "Pico Motor: ";
-      
+
       if(rgs->name())
       {
          s += rgs->name()->c_str();
       }
-      
+
       s += " ch: ";
       s += std::to_string(rgs->channel());
-         
+
       return s;
+   }
+
+   /// Get an empty logMetaDetail because meta data doesn't make sense for this log
+   /**
+     * \returns an empty logMetaDetail
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+
+      std::cerr << "meta data doesn't make sense for pico_channel.\n";
+      return logMetaDetail();
    }
 };
 

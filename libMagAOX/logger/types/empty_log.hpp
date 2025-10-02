@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-08-18 created by JRM
   */
@@ -26,15 +26,15 @@ struct emptyMessage
 };
 
 
-///Base class for logs consisting of an empty message.
-/** Such logs are used to log events. Does not have eventCode or defaultLevel, 
+/// Base class for logs consisting of an empty message.
+/** Such logs are used to log events. Does not have eventCode or defaultLevel,
   * so this can not be used as a log type directly.
   *
   *
   * \ingroup logger_types_basic
   */
 template<class derivedT>
-struct empty_log 
+struct empty_log
 {
    ///The type of the message
    typedef emptyMessage messageT;
@@ -43,7 +43,7 @@ struct empty_log
    static flatlogs::msgLenT length( const messageT & msg)
    {
       static_cast<void>(msg);
-      
+
       return 0;
    }
 
@@ -57,7 +57,7 @@ struct empty_log
    {
       static_cast<void>(msgBuffer);
       static_cast<void>(msg);
-      
+
       return 0;
    }
 
@@ -74,10 +74,10 @@ struct empty_log
       static_cast<void>(msgBuffer);
       static_cast<void>(len);
 
-      
+
       return 0;
    }
-   
+
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
@@ -90,7 +90,7 @@ struct empty_log
    {
       static_cast<void>(msgBuffer);
       static_cast<void>(len);
-      
+
       return derivedT::msg();
    }
 
@@ -105,6 +105,18 @@ struct empty_log
       static_cast<void>(binarySchema);
       static_cast<void>(binarySchemaLength);
       return "{}";
+   }
+
+   /// Get an empty logMetaDetail because meta data doesn't make sense for this log
+   /**
+     * \returns an empty logMetaDetail
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+
+      std::cerr << "meta data doesn't make sense for " << eventCodeName(derivedT::eventCode) << "\n";
+      return logMetaDetail();
    }
 };
 

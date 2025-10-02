@@ -193,9 +193,11 @@ int dmMode::appStartup()
 {
    mx::fits::fitsFile<realT> ff;
    
-   if(ff.read(m_modes, m_modeCube) < 0) 
+   mx::error_t errc = ff.read(m_modes, m_modeCube);
+   if(errc != mx::error_t::noerror) 
    {
-      return log<text_log,-1>("Could not open mode cube file", logPrio::LOG_ERROR);
+      return log<text_log,-1>(std::format("Could not open mode cube file: {} "
+         "({})", mx::errorMessage(errc), mx::errorName(errc)), logPrio::LOG_ERROR);
    }
 
    if(m_maxModes > 0 && m_maxModes < m_modes.planes())

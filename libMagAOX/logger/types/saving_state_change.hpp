@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2019-05-04 created by JRM
   */
@@ -26,7 +26,7 @@ namespace logger
   */
 struct saving_state_change : public flatbuffer_log
 {
-  
+
 
    ///The type of the message
    struct messageT : public fbMessage
@@ -54,21 +54,33 @@ struct saving_state_change : public flatbuffer_log
      */
    static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
                                  flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
-                               )   
+                               )
    {
       static_cast<void>(len);
-      
+
       auto rgs = GetSaving_state_change_fb(msgBuffer);
-      
+
       std::stringstream s;
-      s << "Saving "; 
-      
+      s << "Saving ";
+
       if(rgs->state() == 0) s << "stopped at frame number ";
       else s << "started at frame number ";
-      
+
       s << rgs->frameNo();
-      
+
       return s.str();
+   }
+
+   /// Get an empty logMetaDetail because meta data doesn't make sense for this log
+   /**
+     * \returns an empty logMetaDetail
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+
+      std::cerr << "meta data doesn't make sense for saving_state_change.\n";
+      return logMetaDetail();
    }
 };
 

@@ -1,0 +1,497 @@
+@import url("https://fonts.googleapis.com/css?family=Source Code Pro|Quicksand");
+
+:root {
+  --textColor: aliceblue;
+  --mainBg: #131313;
+  --linkColor: aquamarine;
+
+  --lighter: #ffffff05;
+}
+
+a,
+a:visited {
+  color: var(--linkColor);
+  text-decoration: none;
+}
+
+body center table tbody tr:nth-child(even):not(:nth-child(2)) {
+  background-color: var(--lighter);
+}
+
+body {
+  font-family: "Quicksand", "Gill Sans", "Gill Sans MT", Calibri, "Trebuchet MS",
+    sans-serif;
+  letter-spacing: 0.03em;
+  background-color: var(--mainBg);
+  color: var(--textColor);
+}
+
+center table {
+  background-color: var(--lighter);
+  border-radius: 1em;
+  padding: 1em;
+  padding-top: 0;
+}
+
+td,
+th {
+  padding: 0.5em;
+}
+
+td.coverBar > table {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+/*code-related style is below this line*/
+
+td.lineCov,
+span.lineCov {
+  background-color: rgb(0, 30, 30);
+}
+td.lineNoCov,
+span.lineNoCov {
+  background-color: rgb(50, 0, 0);
+}
+
+.source > a {
+  color: var(--textColor);
+  font-family: "Source Code Pro", "Courier New", Courier, monospace;
+}
+
+.source {
+  font-size: 1.1em;
+}
+
+/* Source code view/table entry background: format for lines classified as "Uncovered New Code (+ => 0):
+Newly added code is not tested" */
+td.tlaUNC
+{
+  text-align: right;
+  background-color: #6d2914;
+}
+td.tlaBgUNC {
+  background-color: #6d2914;
+}
+
+/* Source code view/table entry background: format for lines classified as "Uncovered New Code (+ => 0):
+Newly added code is not tested" */
+span.tlaUNC
+{
+  text-align: left;
+  background-color: #6d2914;
+}
+span.tlaBgUNC {
+  background-color: #6d2914;
+}
+a.tlaBgUNC {
+  background-color: #6d2914;
+  color: #000000;
+}
+
+td.headerCovTableHeadUNC {
+  text-align: center;
+  padding-right: 6px;
+  padding-left: 6px;
+  padding-bottom: 0px;
+  font-family: sans-serif;
+  white-space: nowrap;
+  background-color: #6d2914;
+}
+
+/* Source code view/table entry background: format for lines classified as "Lost Baseline Coverage (1 => 0):
+Unchanged code is no longer tested" */
+td.tlaLBC
+{
+  text-align: right;
+  background-color: #6d2914;
+}
+td.tlaBgLBC {
+  background-color: #6d2914;
+}
+
+/* Source code view/table entry background: format for lines classified as "Lost Baseline Coverage (1 => 0):
+Unchanged code is no longer tested" */
+span.tlaLBC
+{
+  text-align: left;
+  background-color: #6d2914;
+}
+span.tlaBgLBC {
+  background-color: #6d2914;
+}
+a.tlaBgLBC {
+  background-color: #6d2914;
+  color: #000000;
+}
+
+td.headerCovTableHeadLBC {
+  text-align: center;
+  padding-right: 6px;
+  padding-left: 6px;
+  padding-bottom: 0px;
+  font-family: sans-serif;
+  white-space: nowrap;
+  background-color: #6d2914;
+}
+
+/* Source code view/table entry background: format for lines classified as "Uncovered Included Code (# => 0):
+Previously unused code is untested" */
+td.tlaUIC
+{
+  text-align: right;
+  background-color: #6d2914;
+}
+td.tlaBgUIC {
+  background-color: #6d2914;
+}
+
+/* Source code view/table entry background: format for lines classified as "Uncovered Included Code (# => 0):
+Previously unused code is untested" */
+span.tlaUIC
+{
+  text-align: left;
+  background-color: #6d2914;
+}
+span.tlaBgUIC {
+  background-color: #6d2914;
+}
+a.tlaBgUIC {
+  background-color: #6d2914;
+  color: #000000;
+}
+
+td.headerCovTableHeadUIC {
+  text-align: center;
+  padding-right: 6px;
+  padding-left: 6px;
+  padding-bottom: 0px;
+  font-family: sans-serif;
+  white-space: nowrap;
+  background-color: #6d2914;
+}
+
+/* Source code view/table entry background: format for lines classified as "Uncovered Baseline Code (0 => 0):
+Unchanged code was untested before, is untested now" */
+td.tlaUBC
+{
+  text-align: right;
+  background-color: #6d2914;
+}
+td.tlaBgUBC {
+  background-color: #6d2914;
+}
+
+/* Source code view/table entry background: format for lines classified as "Uncovered Baseline Code (0 => 0):
+Unchanged code was untested before, is untested now" */
+span.tlaUBC
+{
+  text-align: left;
+  background-color: #6d2914;
+}
+span.tlaBgUBC {
+  background-color: #6d2914;
+}
+a.tlaBgUBC {
+  background-color: #6d2914;
+  color: #000000;
+}
+
+td.headerCovTableHeadUBC {
+  text-align: center;
+  padding-right: 6px;
+  padding-left: 6px;
+  padding-bottom: 0px;
+  font-family: sans-serif;
+  white-space: nowrap;
+  background-color: #6d2914;
+}
+
+/* Source code view/table entry background: format for lines classified as "Gained Baseline Coverage (0 => 1):
+Unchanged code is tested now" */
+td.tlaGBC
+{
+  text-align: right;
+  background-color: #414963;
+}
+td.tlaBgGBC {
+  background-color: #414963;
+}
+
+/* Source code view/table entry background: format for lines classified as "Gained Baseline Coverage (0 => 1):
+Unchanged code is tested now" */
+span.tlaGBC
+{
+  text-align: left;
+  background-color: #414963;
+}
+span.tlaBgGBC {
+  background-color: #414963;
+}
+a.tlaBgGBC {
+  background-color: #414963;
+  color: #000000;
+}
+
+td.headerCovTableHeadGBC {
+  text-align: center;
+  padding-right: 6px;
+  padding-left: 6px;
+  padding-bottom: 0px;
+  font-family: sans-serif;
+  white-space: nowrap;
+  background-color: #414963;
+}
+
+/* Source code view/table entry background: format for lines classified as "Gained Included Coverage (# => 1):
+Previously unused code is tested now" */
+td.tlaGIC
+{
+  text-align: right;
+  background-color: #414963;
+}
+td.tlaBgGIC {
+  background-color: #414963;
+}
+
+/* Source code view/table entry background: format for lines classified as "Gained Included Coverage (# => 1):
+Previously unused code is tested now" */
+span.tlaGIC
+{
+  text-align: left;
+  background-color: #414963;
+}
+span.tlaBgGIC {
+  background-color: #414963;
+}
+a.tlaBgGIC {
+  background-color: #414963;
+  color: #000000;
+}
+
+td.headerCovTableHeadGIC {
+  text-align: center;
+  padding-right: 6px;
+  padding-left: 6px;
+  padding-bottom: 0px;
+  font-family: sans-serif;
+  white-space: nowrap;
+  background-color: #414963;
+}
+
+/* Source code view/table entry background: format for lines classified as "Gained New Coverage (+ => 1):
+Newly added code is tested" */
+td.tlaGNC
+{
+  text-align: right;
+  background-color: #414963;
+}
+td.tlaBgGNC {
+  background-color: #414963;
+}
+
+/* Source code view/table entry background: format for lines classified as "Gained New Coverage (+ => 1):
+Newly added code is tested" */
+span.tlaGNC
+{
+  text-align: left;
+  background-color: #414963;
+}
+span.tlaBgGNC {
+  background-color: #414963;
+}
+a.tlaBgGNC {
+  background-color: #414963;
+  color: #000000;
+}
+
+td.headerCovTableHeadGNC {
+  text-align: center;
+  padding-right: 6px;
+  padding-left: 6px;
+  padding-bottom: 0px;
+  font-family: sans-serif;
+  white-space: nowrap;
+  background-color: #414963;
+}
+
+/* Source code view/table entry background: format for lines classified as "Covered Baseline Code (1 => 1):
+Unchanged code was tested before and is still tested" */
+td.tlaCBC
+{
+  text-align: right;
+  background-color: #414963;
+}
+td.tlaBgCBC {
+  background-color: #414963;
+}
+
+/* Source code view/table entry background: format for lines classified as "Covered Baseline Code (1 => 1):
+Unchanged code was tested before and is still tested" */
+span.tlaCBC
+{
+  text-align: left;
+  background-color: #414963;
+}
+span.tlaBgCBC {
+  background-color: #414963;
+}
+a.tlaBgCBC {
+  background-color: #414963;
+  color: #000000;
+}
+
+td.headerCovTableHeadCBC {
+  text-align: center;
+  padding-right: 6px;
+  padding-left: 6px;
+  padding-bottom: 0px;
+  font-family: sans-serif;
+  white-space: nowrap;
+  background-color: #414963;
+}
+
+/* Source code view/table entry background: format for lines classified as "Excluded Uncovered Baseline (0 => #):
+Previously untested code is unused now" */
+td.tlaEUB
+{
+  text-align: right;
+  background-color: #FFFFFF;
+}
+td.tlaBgEUB {
+  background-color: #FFFFFF;
+}
+
+/* Source code view/table entry background: format for lines classified as "Excluded Uncovered Baseline (0 => #):
+Previously untested code is unused now" */
+span.tlaEUB
+{
+  text-align: left;
+  background-color: #FFFFFF;
+}
+span.tlaBgEUB {
+  background-color: #FFFFFF;
+}
+a.tlaBgEUB {
+  background-color: #FFFFFF;
+  color: #000000;
+}
+
+td.headerCovTableHeadEUB {
+  text-align: center;
+  padding-right: 6px;
+  padding-left: 6px;
+  padding-bottom: 0px;
+  font-family: sans-serif;
+  white-space: nowrap;
+  background-color: #FFFFFF;
+}
+
+/* Source code view/table entry background: format for lines classified as "Excluded Covered Baseline (1 => #):
+Previously tested code is unused now" */
+td.tlaECB
+{
+  text-align: right;
+  background-color: #FFFFFF;
+}
+td.tlaBgECB {
+  background-color: #FFFFFF;
+}
+
+/* Source code view/table entry background: format for lines classified as "Excluded Covered Baseline (1 => #):
+Previously tested code is unused now" */
+span.tlaECB
+{
+  text-align: left;
+  background-color: #FFFFFF;
+}
+span.tlaBgECB {
+  background-color: #FFFFFF;
+}
+a.tlaBgECB {
+  background-color: #FFFFFF;
+  color: #000000;
+}
+
+td.headerCovTableHeadECB {
+  text-align: center;
+  padding-right: 6px;
+  padding-left: 6px;
+  padding-bottom: 0px;
+  font-family: sans-serif;
+  white-space: nowrap;
+  background-color: #FFFFFF;
+}
+
+/* Source code view/table entry background: format for lines classified as "Deleted Uncovered Baseline (0 => -):
+Previously untested code has been deleted" */
+td.tlaDUB
+{
+  text-align: right;
+  background-color: #FFFFFF;
+}
+td.tlaBgDUB {
+  background-color: #FFFFFF;
+}
+
+/* Source code view/table entry background: format for lines classified as "Deleted Uncovered Baseline (0 => -):
+Previously untested code has been deleted" */
+span.tlaDUB
+{
+  text-align: left;
+  background-color: #FFFFFF;
+}
+span.tlaBgDUB {
+  background-color: #FFFFFF;
+}
+a.tlaBgDUB {
+  background-color: #FFFFFF;
+  color: #000000;
+}
+
+td.headerCovTableHeadDUB {
+  text-align: center;
+  padding-right: 6px;
+  padding-left: 6px;
+  padding-bottom: 0px;
+  font-family: sans-serif;
+  white-space: nowrap;
+  background-color: #FFFFFF;
+}
+
+/* Source code view/table entry background: format for lines classified as "Deleted Covered Baseline (1 => -):
+Previously tested code has been deleted" */
+td.tlaDCB
+{
+  text-align: right;
+  background-color: #FFFFFF;
+}
+td.tlaBgDCB {
+  background-color: #FFFFFF;
+}
+
+/* Source code view/table entry background: format for lines classified as "Deleted Covered Baseline (1 => -):
+Previously tested code has been deleted" */
+span.tlaDCB
+{
+  text-align: left;
+  background-color: #FFFFFF;
+}
+span.tlaBgDCB {
+  background-color: #FFFFFF;
+}
+a.tlaBgDCB {
+  background-color: #FFFFFF;
+  color: #000000;
+}
+
+td.headerCovTableHeadDCB {
+  text-align: center;
+  padding-right: 6px;
+  padding-left: 6px;
+  padding-bottom: 0px;
+  font-family: sans-serif;
+  white-space: nowrap;
+  background-color: #FFFFFF;
+}

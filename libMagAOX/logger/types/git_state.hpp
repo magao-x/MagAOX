@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-08-18 created by JRM
   */
@@ -42,16 +42,16 @@ struct git_state : public flatbuffer_log
       {
          auto _repoName = builder.CreateString(repoName);
          auto _sha1 = builder.CreateString(sha1);
-                           
+
          uint8_t _modified = modified;
-         
+
          auto gs = CreateGit_state_fb(builder, _repoName, _sha1, _modified);
          builder.Finish(gs);
 
       }
 
    };
-   
+
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
@@ -66,39 +66,65 @@ struct git_state : public flatbuffer_log
                                )
    {
       static_cast<void>(len);
-      
+
       auto rgs = GetGit_state_fb(msgBuffer);
-      
+
       std::string str;
       if( rgs->repo()) str = rgs->repo()->c_str();
-      
+
       str += " GIT: ";
-      
+
       if( rgs->sha1()) str += rgs->sha1()->c_str();
-      
+
       if(rgs->modified() > 0) str+= " MODIFIED";
 
       return str;
    }
-   
+
    /// Access the repo name field
    static std::string repoName( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
    {
       auto rgs = GetGit_state_fb(msgBuffer);
-   
+
       if(rgs->repo()) return std::string(rgs->repo()->c_str());
       else return "";
    }
-   
+
+   /// Access the sha1 field
+   static std::string sha1( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+   {
+      auto rgs = GetGit_state_fb(msgBuffer);
+
+      if(rgs->sha1()) return std::string(rgs->sha1()->c_str());
+      else return "";
+   }
+
    /// Access the modified field
    static bool modified( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
    {
       auto rgs = GetGit_state_fb(msgBuffer);
-   
+
       if(rgs->modified() > 0) return true;
       else return false;
    }
-   
+
+   /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(     member == "repoName") return logMetaDetail({"GIT REPO NAME", "git repository name", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&repoName), false});
+      else if(member == "sha1") return logMetaDetail({"GIT REPO SHA1", "git repo sha1 hash", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&sha1), false});
+      else if(member == "modified") return logMetaDetail({"GIT REPO MODIFIED", "git repo modified state", logMeta::valTypes::Bool, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&modified), false});
+      else
+      {
+         std::cerr << "No member " << member << " in git_state\n";
+         return logMetaDetail();
+      }
+   }
+
 }; //git_state
 
 

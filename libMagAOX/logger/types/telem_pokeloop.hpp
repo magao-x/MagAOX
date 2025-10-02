@@ -77,7 +77,7 @@ struct telem_pokeloop : public flatbuffer_log
         {
             msg = "[pokeloop] not measuring";
         }
-        else 
+        else
         {
             msg = "[pokeloop] X: ";
 
@@ -90,6 +90,47 @@ struct telem_pokeloop : public flatbuffer_log
         }
 
         return msg;
+    }
+
+    static bool measuring( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_pokeloop_fb(msgBuffer);
+        return fbs->measuring();
+    }
+
+    static float deltaX( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_pokeloop_fb(msgBuffer);
+        return fbs->deltaX();
+    }
+    static float deltaY( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_pokeloop_fb(msgBuffer);
+        return fbs->deltaY();
+    }
+
+    static unsigned long long counter( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
+    {
+        auto fbs = GetTelem_pokeloop_fb(msgBuffer);
+        return fbs->counter();
+    }
+
+    /// Get the logMetaDetail for a member by name
+    /**
+      * \returns the a logMetaDetail filled in with the appropriate details
+      * \returns an empty logMetaDetail if member not recognized
+      */
+    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+    {
+       if( member == "measuring") return logMetaDetail({"MEASURING", "measuring state", logMeta::valTypes::Bool, logMeta::metaTypes::State, reinterpret_cast<void*>(&measuring), false});
+       else if( member == "deltaX") return logMetaDetail({"DELTA X", "loop delta x", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&deltaX), false});
+       else if( member == "deltaY") return logMetaDetail({"DELTA Y", "loop delta y", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&deltaY), false});
+       else if( member == "counter") return logMetaDetail({"LOOP COUNTER", "loop counter", logMeta::valTypes::ULongLong, logMeta::metaTypes::State, reinterpret_cast<void*>(&counter), false});
+       else
+       {
+          std::cerr << "No member " << member << " in telem_pokeloop\n";
+          return logMetaDetail();
+       }
     }
 
 }; // telem_pokeloop

@@ -1,3 +1,9 @@
+/** \defgroup flatlogs_unit_test flatlogs Unit Tests
+  * \ingroup logger_unit_test
+  */
+
+\ingroup flatlogs_unit_test
+
 # Catch2 Test Generator for MagAOX Flatlogs
 
 ## Background

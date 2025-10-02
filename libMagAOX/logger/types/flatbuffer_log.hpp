@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-08-18 created by JRM
   */
@@ -32,19 +32,19 @@ struct fbMessage
 
 
 ///Base class for logs consisting of a flatbuffer message.
-/** Such logs are used to log arbitrary data structures using the flatbuffer protocol. Does not have eventCode or defaultLevel, 
+/** Such logs are used to log arbitrary data structures using the flatbuffer protocol. Does not have eventCode or defaultLevel,
   * so this can not be used as a log type directly.
   *
   *
   * \ingroup logger_types_basic
   */
-struct flatbuffer_log 
+struct flatbuffer_log
 {
 
    ///Get the length of the message.
    static flatlogs::msgLenT length( const fbMessage & msg /**< [in] the fbMessage type holding a FlatBufferBuilder */)
    {
-      return msg.builder.GetSize();      
+      return msg.builder.GetSize();
    }
 
    ///Format the buffer given the input message.
@@ -57,7 +57,7 @@ struct flatbuffer_log
       uint8_t * cbuff = reinterpret_cast<uint8_t *>(msgBuffer);
 
       memcpy(cbuff, msg.builder.GetBufferPointer(), msg.builder.GetSize());
-      
+
       return 0;
    }
 

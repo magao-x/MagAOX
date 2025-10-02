@@ -145,12 +145,19 @@ def unpack_one_xrif(
     # zero for timestamp seconds is used as a sentinel for empty frames, which we should skip
     actual_frames_mask = times[:, 1] != 0
     n_actual_frames = np.count_nonzero(actual_frames_mask)
+    n_frames_loaded = actual_frames_mask.shape[0]
+    if n_frames_loaded != n_actual_frames:
+        log.warning(f"Got {n_actual_frames=} from {local_path} but {n_frames_loaded=} and {frames_per_xrif_chunk=}")
+        raise RuntimeError(f"this one {local_path}")
     if n_actual_frames != frames_per_xrif_chunk:
         log.debug(
             f"Got {n_actual_frames=} from {local_path} but expected {frames_per_xrif_chunk=}, filling in the frames we have"
         )
-    frames_tmp[start_idx : start_idx + n_actual_frames] = frames[actual_frames_mask]
-    times_tmp[start_idx : start_idx + n_actual_frames] = times[actual_frames_mask]
+    actual_frames = frames[actual_frames_mask]
+    actual_times = times[actual_frames_mask]
+    assert not np.any(actual_times[:, 1] == 0), f"{actual_times=}"
+    frames_tmp[start_idx : start_idx + n_actual_frames] = actual_frames
+    times_tmp[start_idx : start_idx + n_actual_frames] = actual_times
     return idx, n_actual_frames
 
 
@@ -217,7 +224,7 @@ def repack_xrif_channel(
     cur.execute(other_files_count_q)
     xrifs_row_count = cur.fetchone()["count"]
     if xrifs_row_count == 0:
-        log.info(f"No {camera_channel.name} frames to process")
+        log.debug(f"No {camera_channel.name} XRIF archives found to process")
         return [], 0, 0
 
     camera_root = channel_grouping_root.require_group(camera_channel.name)
@@ -292,28 +299,29 @@ def repack_xrif_channel(
             )
             futs.append(pool.submit(unpack_one_xrif, *unpack_args))
         log.info(
-            f"Loading {idx + 1} archives, total compressed size {orig_total_bytes/1024/1024:1.1f} MiB"
+            f"Loading {idx + 1} {camera_channel.name} archives, total compressed size {orig_total_bytes/1024/1024:1.1f} MiB"
         )
-        start_idx = 0
-        # iterate in-order because `other_files_q` has an `ORDER BY` and we want to
-        # preserve time ordering
+
         failed = 0
         succeeded = 0
         total_frames = 0
-        good_frames_mask = np.ones(n_frames, dtype=bool)
-        for fut in tqdm(futures.as_completed(futs), total=len(futs)):
+        good_frames_mask = np.zeros(n_frames, dtype=bool)
+        # for fut in tqdm(futures.as_completed(futs), total=len(futs)):
+        for fut in futures.as_completed(futs):
             idx, n_actual_frames = fut.result()
-            good_frames_mask[
-                frames_per_xrif_chunk * idx : frames_per_xrif_chunk * idx
-                + n_actual_frames
-            ] = True
-            total_frames += n_actual_frames
+            # assert not np.any(times_tmp[frames_per_xrif_chunk * idx : frames_per_xrif_chunk * idx + n_actual_frames, 1] == 0), "Zero times"
             if n_actual_frames < 1:
                 failed += 1
             else:
+                total_frames += n_actual_frames
+                good_frames_mask[
+                    frames_per_xrif_chunk * idx :
+                    frames_per_xrif_chunk * idx + n_actual_frames
+                ] = True
                 succeeded += 1
 
-        log.info(
+        # assert np.count_nonzero(good_frames_mask) == total_frames, "mask mismatched"
+        log.debug(
             f"Loaded {total_frames=} of an expected {n_frames} (loads {succeeded=} {failed=})"
         )
         if failed > 0:
@@ -338,22 +346,34 @@ def repack_xrif_channel(
         )
         log.debug(f"Created {cam_frames} with {filters=} {compressor=}")
         start = time.perf_counter()
+        # The "cursor" represented by `start_idx` should point to the destination where a chunk of frames/times will be copied into.
+        # e.g. Before copying a single-frame span, it will be 0 and afterwards it will be 1, the location where the next span starts.
         start_idx = 0
-        for i in range(max(1, math.ceil(total_frames / chunk_size))):
+        n_loaded_frames = good_frames_mask.shape[0]
+        n_chunks_from_loaded = max(1, math.ceil(n_loaded_frames / chunk_size))
+        log.debug(f"Re-chunking to {total_frames=} of {chunk_size=}, using {n_loaded_frames=} in {n_chunks_from_loaded} chunks")
+        for i in range(n_chunks_from_loaded):
             chunk_start = i * chunk_size
-            chunk_end = min(total_frames, (i + 1) * chunk_size)
+            chunk_end = min(n_loaded_frames, (i + 1) * chunk_size)
             good_chunk_mask = good_frames_mask[chunk_start:chunk_end]
             real_frames = np.count_nonzero(good_chunk_mask)
-            cam_frames[start_idx : start_idx + real_frames] = frames_tmp[
+            frames_contiguous = frames_tmp[
                 chunk_start:chunk_end
             ][good_chunk_mask]
-            cam_times[start_idx : start_idx + real_frames] = times_tmp[
+            # assert frames_contiguous.shape[0] == real_frames
+            cam_frames[start_idx : start_idx + real_frames] = frames_contiguous
+            times_contiguous = times_tmp[
                 chunk_start:chunk_end
             ][good_chunk_mask]
+            assert times_contiguous.shape[0] == real_frames
+            assert not np.any(times_contiguous[:, 1] == 0), f"{good_chunk_mask=} {times_contiguous=}"
+            cam_times[start_idx : start_idx + real_frames] = times_contiguous
             start_idx += real_frames
+        
+        # After all frames are copied, start_idx should be equal to the length.
         assert start_idx == total_frames, f"{start_idx=} {total_frames=}"
         dt = time.perf_counter() - start
-        log.info(f"Compressed and wrote frames and times in {dt:1.1f} sec")
+        log.info(f"Compressed and wrote {total_frames} frames and times in {dt:1.1f} sec")
         log.debug(f"{cam_frames.nbytes=} {cam_frames.nbytes_stored=}")
         final_total_bytes += cam_frames.nbytes_stored
         log.debug(f"{cam_times.nbytes=} {cam_times.nbytes_stored=}")

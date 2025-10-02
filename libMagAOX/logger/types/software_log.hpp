@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-08-18 created by JRM
   */
@@ -22,21 +22,21 @@ namespace logger
 /** Such logs are used to log software status, warnings, and errors. Does not have defaultLevel, so this can not be used as a log type in logger.
   *
   * \includedoc sw_logs.dox.inc
-  * 
-  * 
+  *
+  *
   * \ingroup logger_types__basic
   */
 struct software_log : public flatbuffer_log
 {
    ///The event code
    static const flatlogs::eventCodeT eventCode = eventCodes::SOFTWARE_LOG;
-   
+
    ///The type of the message
    struct messageT : public fbMessage
    {
       /// C'tor with full specification.
       messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
-                const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_ 
+                const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
                 const int32_t  errnoCode, ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
                 const int32_t  otherCode, ///< [in] Some other error code, such as a return value or library code.
                 const char * explanation  ///< [in] explanatory text about the software event
@@ -44,11 +44,11 @@ struct software_log : public flatbuffer_log
       {
          auto _file = builder.CreateString(file);
          auto _expl = builder.CreateString(explanation);
-                                    
+
          auto gs = CreateSoftware_log_fb(builder, _file, line, errnoCode, otherCode, _expl);
          builder.Finish(gs);
       }
-      
+
       /// C'tor with full specification, overloaded for a std::string in explanation.
       /** \overload
         */
@@ -61,11 +61,11 @@ struct software_log : public flatbuffer_log
       {
          auto _file = builder.CreateString(file);
          auto _expl = builder.CreateString(explanation);
-                                    
+
          auto gs = CreateSoftware_log_fb(builder, _file, line, errnoCode, otherCode, _expl);
          builder.Finish(gs);
       }
-      
+
       /// C'tor for errno only -- code explanation can be looked up later.
       messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
                 const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
@@ -73,11 +73,11 @@ struct software_log : public flatbuffer_log
               )
       {
          auto _file = builder.CreateString(file);
-                                    
+
          auto gs = CreateSoftware_log_fb(builder, _file, line, errnoCode, 0, 0);
          builder.Finish(gs);
       }
-      
+
       /// C'tor for errno with additional explanation.
       messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
                 const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
@@ -86,12 +86,12 @@ struct software_log : public flatbuffer_log
               )
       {
          auto _file = builder.CreateString(file);
-         auto _expl = builder.CreateString(explanation);                           
-         
+         auto _expl = builder.CreateString(explanation);
+
          auto gs = CreateSoftware_log_fb(builder, _file, line, errnoCode, 0, _expl);
          builder.Finish(gs);
       }
-      
+
       /// C'tor for errno with additional explanation, std::string overload.
       messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
                 const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
@@ -100,12 +100,12 @@ struct software_log : public flatbuffer_log
               )
       {
          auto _file = builder.CreateString(file);
-         auto _expl = builder.CreateString(explanation);                           
-         
+         auto _expl = builder.CreateString(explanation);
+
          auto gs = CreateSoftware_log_fb(builder, _file, line, errnoCode, 0, _expl);
          builder.Finish(gs);
       }
-      
+
       /// C'tor with no codes, just the explanation.
       messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
                 const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
@@ -114,9 +114,9 @@ struct software_log : public flatbuffer_log
       {
          auto _file = builder.CreateString(file);
          auto _expl = builder.CreateString(explanation);
-         
+
          auto gs = CreateSoftware_log_fb(builder, _file, line, 0,0,_expl);
-         builder.Finish(gs);        
+         builder.Finish(gs);
       }
 
       /// C'tor for a trace log, only the file and line.
@@ -125,12 +125,12 @@ struct software_log : public flatbuffer_log
               )
       {
          auto _file = builder.CreateString(file);
-         
+
          auto gs = CreateSoftware_log_fb(builder, _file, line, 0,0,0);
-         builder.Finish(gs);        
+         builder.Finish(gs);
       }
-      
-      
+
+
    };
 
    static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
@@ -146,11 +146,11 @@ struct software_log : public flatbuffer_log
                                  flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
                                )
    {
-      
+
       static_cast<void>(len);
-      
+
       auto rgs = GetSoftware_log_fb(msgBuffer);
-      
+
       std::string ret = "SW FILE: ";
       if(rgs->file() != nullptr)
       {
@@ -160,26 +160,19 @@ struct software_log : public flatbuffer_log
       {
          ret += "????";
       }
-      
-      ret += " LINE: ";
-      ret += mx::ioutils::convertToString(rgs->line());
+
+      ret += std::format(" LINE: {}",rgs->line());
+
       if(rgs->errnoCode())
       {
-         ret += "  ERRNO: ";
-         ret += mx::ioutils::convertToString(rgs->errnoCode());
-         ret += " [";
-         ret += strerror(rgs->errnoCode());
-         ret += "]";
+         ret += std::format("  ERRNO: {} [{}]",rgs->errnoCode(),rgs->errnoCode());
       }
       if(rgs->otherCode())
       {
-         ret += "  CODE: ";
-         ret += mx::ioutils::convertToString(rgs->otherCode());
+         ret += std::format("  CODE: {}",rgs->otherCode());
          if(rgs->explanation())
          {
-            ret += " [";
-            ret += rgs->explanation()->c_str();
-            ret += "]";
+            ret += std::format(" [{}]",rgs->explanation()->c_str());
          }
       }
       else if(rgs->explanation())
@@ -188,6 +181,18 @@ struct software_log : public flatbuffer_log
          ret += rgs->explanation()->c_str();
       }
       return ret;
+   }
+
+   /// Get an empty logMetaDetail because meta data doesn't make sense for this log
+   /**
+     * \returns an empty logMetaDetail
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+
+      std::cerr << "meta data doesn't make sense for software_log.\n";
+      return logMetaDetail();
    }
 
 };
@@ -227,7 +232,7 @@ struct software_critical : public software_log
 };
 
 ///Software ERR log entry
-/** Used to record and error that the process will attempt to recover from. 
+/** Used to record and error that the process will attempt to recover from.
   * \includedoc sw_logs.dox.inc
   * \ingroup logger_types
   */

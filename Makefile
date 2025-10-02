@@ -93,7 +93,6 @@ apps_sim = \
 	trippLitePDU
 
 all_buildable_apps = \
-	acesxeCtrl \
 	adcTracker \
 	alignLoop \
 	cacaoInterface \
@@ -150,20 +149,25 @@ all_buildable_apps = \
 libs_to_build = libtelnet
 
 ifeq ($(MAGAOX_ROLE),AOC)
+  apps_to_build += $(apps_basic)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_aoc)
 else ifeq ($(MAGAOX_ROLE),ICC)
+  apps_to_build += $(apps_basic)  
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_icc)
 else ifeq ($(MAGAOX_ROLE),RTC)
+  apps_to_build += $(apps_basic)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_rtc)
 else ifeq ($(MAGAOX_ROLE),TIC)
+  apps_to_build += $(apps_basic)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_tic)
 else ifeq ($(MAGAOX_ROLE),SS)
+  apps_to_build += $(apps_basic)
   apps_to_build += $(apps_sim)
 endif
 
@@ -186,7 +190,7 @@ all_guis = \
 
 # If building for coverage, don't build guis for now
 ifeq ($(NO_GUIS),1)
-	all_guis := 
+	all_guis :=
 endif
 
 
@@ -225,10 +229,9 @@ endif
 utils_to_build = \
 	logdump \
 	logsurgeon \
-	logstream \
 	cursesINDI \
-	xrif2shmim \
-	xrif2fits
+	xrif2fits \
+	xrif2shmim
 
 scripts_to_install = \
 	query_seeing \

@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-08-18 created by JRM
   */
@@ -58,15 +58,41 @@ struct state_change : public flatbuffer_log
      */
    static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
                                  flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
-                               )   
+                               )
    {
       static_cast<void>(len);
-      
+
       auto rgs = GetState_change_fb(msgBuffer);
-      
+
       std::stringstream s;
       s << "State changed from " << app::stateCodes::codeText(rgs->from()) << " to " << app::stateCodes::codeText(rgs->to());
       return s.str();
+   }
+
+   /// Access the from field
+   static std::string from(void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/)
+   {
+      auto rgs = GetState_change_fb(msgBuffer);
+      return app::stateCodes::codeText(rgs->from());
+   }
+
+   /// Access the to field
+   static std::string to(void * msgBuffer  /**< [in] Buffer containing the flatbuffer serialized message.*/)
+   {
+      auto rgs = GetState_change_fb(msgBuffer);
+      return app::stateCodes::codeText(rgs->to());
+   }
+
+   /// Get an empty logMetaDetail because meta data doesn't make sense for this log
+   /**
+     * \returns an empty logMetaDetail
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+
+      std::cerr << "meta data doesn't make sense for state_change.\n";
+      return logMetaDetail();
    }
 
 };

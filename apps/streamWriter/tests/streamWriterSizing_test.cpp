@@ -123,9 +123,9 @@ SCENARIO( "streamWriter Buffer Sizing", "[streamWriter]" )
                                               height,
                                               typeSize );
 
-            REQUIRE( circBuffLength == 1 );
-            REQUIRE_THAT( circBuffSize, Catch::Matchers::WithinAbs( 512.0625019, 0.00001 ) );
-            REQUIRE( writeChunkLength == 1 );
+            REQUIRE( circBuffLength == 0 );
+            REQUIRE( circBuffSize == 0 );
+            REQUIRE( writeChunkLength == 0 );
         }
 
         WHEN( "Exceeding largest frame size possible by a lot" )

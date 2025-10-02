@@ -639,7 +639,8 @@ int dmSpeckle::generateSpeckles()
     if( m_opMode == ARBCUBE )
     {
         mx::fits::fitsFile<float> ff;
-        if( ff.read( m_shapes, m_fileName ) < 0 )
+        mx::error_t errc = ff.read( m_shapes, m_fileName ) ;
+        if( errc != mx::error_t::noerror )
         {
             return log<software_critical, -1>( { __FILE__, __LINE__, "no file with that name" } );
         }

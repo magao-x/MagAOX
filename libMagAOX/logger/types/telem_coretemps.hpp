@@ -29,18 +29,18 @@ struct telem_coretemps : public flatbuffer_log
   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
   static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
-  
+
    ///The type of the input message
    struct messageT : public fbMessage
    {
       ///Construct from components
       messageT( std::vector<float> & temps )
       {
-         
+
          auto _coreTempsVec = builder.CreateVector(temps);
-         
+
          auto fp = CreateTelem_coretemps_fb(builder, _coreTempsVec );
-         
+
          builder.Finish(fp);
 
       }
@@ -62,12 +62,12 @@ struct telem_coretemps : public flatbuffer_log
    {
 
       static_cast<void>(len); // unused by most log types
-   
-      auto rgs = GetTelem_coretemps_fb(msgBuffer);  
-      
+
+      auto rgs = GetTelem_coretemps_fb(msgBuffer);
+
       std::string msg;
 
-      if (rgs->temps() != nullptr) 
+      if (rgs->temps() != nullptr)
       {
          msg+= "[cpu temps] ";
          for(flatbuffers::Vector<float>::const_iterator it = rgs->temps()->begin(); it != rgs->temps()->end(); ++it)
@@ -80,6 +80,18 @@ struct telem_coretemps : public flatbuffer_log
       return msg;
 
    }
+
+   /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logMetaDetail if member not recognized
+     */
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      static_cast<void>(member);
+      std::cerr << "Meta data accessor not implemented in telem_coretemps\n";
+      return logMetaDetail();
+  }
 
 }; //telem_coretemps
 
