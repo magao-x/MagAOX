@@ -950,8 +950,8 @@ def loop(self): #new loop function for gaussian fitter
             
             for i in range(self._no_measurements):
                 img = self.camera.grab_stack(self._n_avg)
-                # transpose = img.shaped.T  ## I'm pretty sure that this doesn't work? check research notes
-                # img = transpose.ravel()
+                transpose = Field(img.shaped.T.ravel(),img.grid)
+                img = transpose #hopefully this actually fixes the transpose issue
 
                 img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
                 img = self.ADC.filter_image(img)
@@ -982,8 +982,8 @@ def loop(self): #new loop function for gaussian fitter
             measurements = []
             for i in range(self._no_measurements):
                 img = self.camera.grab_stack(self._n_avg)
-                transpose = img.shaped.T 
-                img = transpose.ravel()
+                transpose = Field(img.shaped.T.ravel(),img.grid)
+                img = transpose
 
                 if self._lab == False:
                     img = self.ADC.filter_image(img)
@@ -1024,8 +1024,8 @@ def loop(self): #new loop function for gaussian fitter
                     self.send_command()
 
                     img = self.camera.grab_stack(self._n_avg)
-                    transpose = img.shaped.T 
-                    img = transpose.ravel()
+                    transpose = Field(img.shaped.T.ravel(),img.grid)
+                    img = transpose
 
                     if self._lab == False:
                         img = self.ADC.filter_image(img)
@@ -1065,8 +1065,8 @@ def loop(self): #new loop function for gaussian fitter
                     self.send_command()
 
                     img = self.camera.grab_stack(self._n_avg)
-                    transpose = img.shaped.T 
-                    img = transpose.ravel()
+                    transpose = Field(img.shaped.T.ravel(),img.grid)
+                    img = transpose
 
                     if self._lab == False:
                         img = self.ADC.filter_image(img)
