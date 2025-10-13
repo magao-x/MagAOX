@@ -24,6 +24,7 @@ from purepyindi2.messages import DefNumber, DefSwitch, DefLight, DefText
 from magaox.indi.device import XDevice, BaseConfig
 # Might remove / testing
 from magpyx.utils import create_shmim, ImageStream
+# from magaox.shmim import Image as Img
 
 log = logging.getLogger(__name__)
 
@@ -479,22 +480,18 @@ class CamHam(XDevice):
         #    self.log.info(f"Issues with cap_start working.")
         #    return False
     
-    # Testing / not working
     def camera_stream(self):
-        """
-        Testing this adjustment
-        """
-        # DCAM_IDPROP_IMAGE_WIDTH useful here? / need to check
-        #shmim_shape = ( int(self.width), int(self.height) )
-        shmim_shape = ( int(self.hsize), int(self.vsize) )
-        try:
-             self.camstream = ImageStream(self.shmim_name, expected_shape=shmim_shape)
-        except RuntimeError or ValueError:
-             self.log.info(f"Failed to open shmim {self.shmim_name}. Trying to create...")
-             create_shmim(self.shmim_name, shmim_shape)
-             self.camstream == ImageStream(self.shmim_name)
+        shmim_shape = ( int(self.hsize), int(self.vsize), )
+        img = ISIO.Image()
 
-        
+        try:
+            self.camstream = ImageStream(self.shmim_name, expected_shape=shmim_shape)
+
+        except RuntimeError or ValueError:
+            self.log.info(f"Failed to open shmim {self.shmim_name}. Trying to create...")
+            create_shmim(self.shmim_name, shmim_shape, dtype=ISIO.ImageStreamIODataType.UINT16)
+            self.camstream == ImageStream(self.shmim_name)
+
         if self.cam.buf_alloc(10):
             #self.stream_thread()
             self.th = threading.Thread(target=self.stream_thread)
@@ -508,7 +505,6 @@ class CamHam(XDevice):
             self.cam.buf_release()
             self.log.info("Released buffer in camera_stream")
     
-    # Testing / not working
     def stream_thread(self):
         """
         Testing
@@ -538,10 +534,9 @@ class CamHam(XDevice):
                     #if isinstance(data, bool) and not data:
                     #    print(self.cam.lasterr())
                     if data.dtype == np.uint16:
-                        #rawframe = np.frombuffer(data, dtype=np.uint16).reshape(int(self.height), int(self.width))
                         rawframe = np.frombuffer(data, dtype=np.uint16).reshape(int(self.vsize), int(self.hsize))
                         self.camstream.write(rawframe)
-                        #self.log.info("in camstream.writer")
+                        
                     else:
                         dcamerr = self.cam.lasterr()
                         if dcamerr.is_timeout():
