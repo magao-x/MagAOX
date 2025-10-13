@@ -11,3 +11,9 @@ install:
 	sudo -H /opt/conda/bin/python -m pip install .
 	sudo -H ln -sfv $(PYTHON_SCRIPTS_PREFIX)/$(APP) /opt/MagAOX/bin/$(APP)
 	@echo "*** Install succeeded, app located in /opt/MagAOX/bin/$(APP) ***"
+
+.PHONY: clean
+	
+clean:
+	@echo "Nothing to clean for $(TARGET)"
+

@@ -15,5 +15,6 @@ install:
 
 .PHONY: all install
 
+.PHONY: clean
 clean:
 	@echo "Nothing to clean for $(TARGET)"

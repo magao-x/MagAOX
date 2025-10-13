@@ -6,11 +6,13 @@ sudo mkdir -p /opt/MagAOX/vendor/cuda_rpm
 sudo chown :magaox-dev /opt/MagAOX/vendor/cuda_rpm
 sudo chmod g+ws /opt/MagAOX/vendor/cuda_rpm
 cd /opt/MagAOX/vendor/cuda_rpm
-rpmFile=cuda-repo-rhel9-12-4-local-12.4.1_550.54.15-1.x86_64.rpm
-_cached_fetch https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/$rpmFile $rpmFile
-if ! rpm -q cuda-repo-rhel9-12-4-local-12.4.1_550.54.15-1.x86_64; then
-    sudo rpm -i $rpmFile
+rpmFile=cuda-repo-rhel9-13-0-local-13.0.1_580.82.07-1.x86_64
+rpmVers=13.0.1
+package=cuda-toolkit-13-0
+_cached_fetch https://developer.download.nvidia.com/compute/cuda/$rpmVers/local_installers/$rpmFile.rpm $rpmFile.rpm
+if ! rpm -q $rpmFile; then
+    sudo rpm -i $rpmFile.rpm
 fi
 sudo dnf clean all
-sudo dnf -y install cuda-toolkit-12-4
+sudo dnf -y install $package
 sudo dnf -y module install nvidia-driver:open-dkms

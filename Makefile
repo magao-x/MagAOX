@@ -54,7 +54,9 @@ apps_rtc = \
 	pwfsSlopeCalc \
     kcubeCtrl \
 	dmPokeXCorr \
-	psfAcq
+	psfAcq \
+	strehlEstimator \
+	modalFilter
 
 # 	picamCtrl
 # 	pvcamCtrl
@@ -67,7 +69,9 @@ apps_icc = \
 	xt1121DCDU \
 	koolanceCtrl \
 	corAlign \
-	adcCtrl
+	adcCtrl \
+	picamCtrl \
+	pvcamCtrl
 
 # 	audibleAlerts
 apps_aoc = \

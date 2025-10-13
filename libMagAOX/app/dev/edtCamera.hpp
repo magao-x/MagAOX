@@ -265,7 +265,7 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string & response,
                                              const std::string & command
                                            )
 {
-   char    buf[MAGAOX_PDV_SERBUFSIZE+1];
+   char buf[MAGAOX_PDV_SERBUFSIZE+1];
 
    // Flush the channel first.
    // This does not indicate errors, so no checks possible.
@@ -289,7 +289,8 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string & response,
       return -1;
    }
 
-   u_char  lastbyte, waitc;
+   u_char  lastbyte = 0;
+   u_char waitc = 0;
 
    response.clear();
 
@@ -299,8 +300,7 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string & response,
 
       if(ret > 0) response += buf;
 
-      //Check for last char, wait for more otherwise.
-      if (*buf) lastbyte = (u_char)buf[strnlen(buf, sizeof(buf))-1];
+      lastbyte = (u_char)buf[strnlen(buf, sizeof(buf))-1];
 
       if (pdv_get_waitchar(m_pdv, &waitc) && (lastbyte == waitc))
       {

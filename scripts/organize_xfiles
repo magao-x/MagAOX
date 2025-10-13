@@ -6,6 +6,9 @@ import shutil
 import datetime
 import logging
 from datetime import timezone
+from pwd import getpwnam
+from grp import getgrnam
+
 run_ts = datetime.datetime.now().replace(tzinfo=timezone.utc).strftime("%Y-%m-%dT%H%M%S")
 outfile = f'organize_xfiles_{run_ts}.log'
 log = logging.getLogger('organize_xfiles')
@@ -19,6 +22,9 @@ log.addHandler(log_to_file)
 log.setLevel(logging.DEBUG)
 log.debug(f"Logging to {outfile}")
 
+_, EFFECTIVE_UID, _ = os.getresuid()
+XSUP_UID = getpwnam('xsup').pw_uid
+MAGAOX_GID = getgrnam('magaox').gr_gid
 
 root = pathlib.Path(os.environ.get('MAGAOX_ROOT', '/opt/MagAOX'))
 
@@ -76,7 +82,7 @@ def parse_xname(name):
 #  *      devName/YYYY/MM/DD
 #  * \endverbatim
 
-def file_time_rel_path(root: pathlib.Path, xfile) -> pathlib.Path: 
+def file_time_rel_path(root: pathlib.Path, xfile) -> pathlib.Path:
     fmt_from_hpp = "%04i_%02i_%02i"
     dest = fmt_from_hpp % (xfile.year, xfile.month, xfile.day) + '/' + xfile.filename
     if root.name == xfile.devname:
@@ -124,24 +130,37 @@ def remove_file(src, dry_run):
     else:
         log.debug(f"Would have removed {src}")
 
-PARENT_DIRS = set()
 
-def make_parent_dirs(parent, dry_run):
+def mkdir_and_chown(dir_path: pathlib.Path, dry_run: bool):
+    if not dir_path.parent.is_dir():
+        mkdir_and_chown(dir_path.parent, dry_run=dry_run)
+    if dry_run:
+        log.debug(f"Would have made {dir_path} dir")
+    else:
+        # we already think dir_path.is_dir() is false
+        # to get to this point, but it's not an error
+        # if something else has created it
+        dir_path.mkdir(parents=False, exist_ok=True)
+    if EFFECTIVE_UID == 0:
+        if dry_run:
+            log.debug(f"Would have chowned {dir_path} to {XSUP_UID=} {MAGAOX_GID=}")
+        else:
+            os.chown(dir_path, XSUP_UID, MAGAOX_GID)
+
+PARENT_DIRS: set['str'] = set()
+
+def make_parent_dirs(parent: pathlib.Path, dry_run: bool):
     global PARENT_DIRS
     parent_path_str = str(parent)
     if parent_path_str in PARENT_DIRS or parent.is_dir():
-        PARENT_DIRS.add(parent_path_str)  # ensure added if found existing from disk
         if dry_run:
             log.debug(f"Would have reused dir {parent_path_str}")
         else:
             log.debug(f"{parent} exists")
     else:
-        if dry_run:
-            log.debug(f"Would have made dir {parent_path_str}")
-        else:
-            parent.mkdir(parents=True, exist_ok=True)
-        PARENT_DIRS.add(parent_path_str)
+        mkdir_and_chown(parent, dry_run=dry_run)
         log.debug(f"Made dir {parent}")
+    PARENT_DIRS.add(parent_path_str)
 
 def organize_store(store_root: pathlib.Path, dry_run):
     try:
@@ -150,7 +169,7 @@ def organize_store(store_root: pathlib.Path, dry_run):
         return
     except ValueError:
         pass
-    
+
     for child in store_root.glob('*'):
         if 'lookyloo' in child.name or 'selfRM' in child.name:
             continue

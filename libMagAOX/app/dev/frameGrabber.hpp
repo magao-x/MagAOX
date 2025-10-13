@@ -127,8 +127,6 @@ class frameGrabber
 
     ///@}
 
-    int m_currentFlip{ fgFlipNone };
-
     uint32_t m_width{ 0 };  ///< The width of the image, once deinterlaced etc.
     uint32_t m_height{ 0 }; ///< The height of the image, once deinterlaced etc.
 
@@ -417,7 +415,9 @@ int frameGrabber<derivedT>::loadConfig( mx::app::appConfigurator &config )
     if( derivedT::c_frameGrabber_flippable )
     {
         std::string flip = "flipNone";
+        
         config( flip, "framegrabber.defaultFlip" );
+
         if( flip == "flipNone" )
         {
             m_defaultFlip = fgFlipNone;
@@ -436,11 +436,14 @@ int frameGrabber<derivedT>::loadConfig( mx::app::appConfigurator &config )
         }
         else
         {
-            derivedT::template log<text_log>(
-                { std::string( "invalid framegrabber flip specification (" ) + flip + "), setting flipNone" },
-                logPrio::LOG_ERROR );
+            derivedT::template log<text_log>( { std::string( "invalid framegrabber flip"
+                                                             "specification (" ) +
+                                                flip + "), setting flipNone" },
+                                              logPrio::LOG_ERROR );
+
             m_defaultFlip = fgFlipNone;
         }
+
     }
 
     return 0;
@@ -793,9 +796,6 @@ void frameGrabber<derivedT>::fgThreadExec()
 
         m_typeSize = ImageStreamIO_typesize( m_dataType );
 
-        // Here we resolve currentFlip somehow.
-        m_currentFlip = m_defaultFlip;
-
         if( configCircBuffs() < 0 )
         {
             derivedT::template log<software_error>( { __FILE__, __LINE__, "error configuring latency circ. buffs" } );
@@ -967,7 +967,7 @@ void *frameGrabber<derivedT>::loadImageIntoStreamCopy( void *dest, void *src, si
     }
     else
     {
-        switch( m_currentFlip )
+        switch( m_defaultFlip )
         {
         case fgFlipNone:
             return mx::improc::imcpy( dest, src, width, height, szof );

@@ -26,8 +26,10 @@ echo Running MagAO-X Tests
 
 tests=$(cat tests.list)
 
+: > test_stderr.txt
 for test in $tests; do \
-   echo running $test; \
-   $test 2>test_stderr.txt ; \
+   echo running $test | tee -a test_stderr.txt; \
+   $test 2>>test_stderr.txt ; \
+   echo '' >> test_stderr.txt; \
 done
 

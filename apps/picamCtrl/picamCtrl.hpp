@@ -384,12 +384,6 @@ picamCtrl::picamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_defaultVShiftSpeed = "1_2us";
    m_vShiftSpeedNames = {"0_7us", "1_2us", "2_0us", "5_0us"};
    m_vShiftSpeedNameLabels = {"0.7 us", "1.2 us", "2.0 us", "5.0 us"};
-   
-   
-   m_default_x = 511.5; 
-   m_default_y = 511.5; 
-   m_default_w = 1024;  
-   m_default_h = 1024;  
       
    m_full_x = 511.5; 
    m_full_y = 511.5; 
@@ -1091,19 +1085,19 @@ int picamCtrl::getTemps()
       return -1;
    }
 
-   if(status == 1) 
+   if(status == PicamSensorTemperatureStatus_Unlocked) 
    {
       m_tempControlStatus = true;
       m_tempControlOnTarget = false;
       m_tempControlStatusStr = "UNLOCKED";
    }
-   else if(status == 2) 
+   else if(status == PicamSensorTemperatureStatus_Locked) 
    {
       m_tempControlStatus = true;
       m_tempControlOnTarget = true;
       m_tempControlStatusStr = "LOCKED";
    }
-   else if(status == 3) 
+   else if(status == PicamSensorTemperatureStatus_Faulted) 
    {
       m_tempControlStatus = false;
       m_tempControlOnTarget = false;
@@ -1134,12 +1128,12 @@ int picamCtrl::powerOnDefaults()
 {
    m_ccdTempSetpt = -55; //This is the power on setpoint
 
-   m_currentROI.x = 511.5;
+   /*m_currentROI.x = 511.5;
    m_currentROI.y = 511.5;
    m_currentROI.w = 1024;
    m_currentROI.h = 1024;
    m_currentROI.bin_x = 1;
-   m_currentROI.bin_y = 1;
+   m_currentROI.bin_y = 1;*/
 
    m_readoutSpeedName = "emccd_05MHz";
    m_vShiftSpeedName = "1_2us";
@@ -1470,7 +1464,7 @@ int picamCtrl::configureAcquisition()
    nextrois.roi_count = 1;
    
    int roi_err = false;
-   if(m_currentFlip == fgFlipLR || m_currentFlip == fgFlipUDLR)
+   if(m_defaultFlip == fgFlipLR || m_defaultFlip == fgFlipUDLR)
    {
       nextroi.x = ((1023-m_nextROI.x) - 0.5*( (float) m_nextROI.w - 1.0));
    }
@@ -1492,7 +1486,7 @@ int picamCtrl::configureAcquisition()
    }
    
 
-   if(m_currentFlip == fgFlipUD || m_currentFlip == fgFlipUDLR)
+   if(m_defaultFlip == fgFlipUD || m_defaultFlip == fgFlipUDLR)
    {
       nextroi.y = ((1023 - m_nextROI.y) - 0.5*( (float) m_nextROI.h - 1.0));
    }
@@ -1634,7 +1628,7 @@ int picamCtrl::configureAcquisition()
    std::cerr << 0.5*( (float) (rois->roi_array[0].width - 1.0)) << "\n";
    
 
-   if(m_currentFlip == fgFlipLR || m_currentFlip == fgFlipUDLR)
+   if(m_defaultFlip == fgFlipLR || m_defaultFlip == fgFlipUDLR)
    {
       m_currentROI.x = (1023.0-rois->roi_array[0].x) - 0.5*( (float) (rois->roi_array[0].width - 1.0)) ;
       //nextroi.x = ((1023-m_nextROI.x) - 0.5*( (float) m_nextROI.w - 1.0));
@@ -1645,7 +1639,7 @@ int picamCtrl::configureAcquisition()
    }
 
    
-   if(m_currentFlip == fgFlipUD || m_currentFlip == fgFlipUDLR)
+   if(m_defaultFlip == fgFlipUD || m_defaultFlip == fgFlipUDLR)
    {
       m_currentROI.y = (1023.0-rois->roi_array[0].y) - 0.5*( (float) (rois->roi_array[0].height - 1.0)) ;
       //nextroi.y = ((1023 - m_nextROI.y) - 0.5*( (float) m_nextROI.h - 1.0));

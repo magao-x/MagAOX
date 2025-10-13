@@ -135,7 +135,7 @@ class pvcamCtrl : public MagAOXApp<true>,
         false; ///< app::dev confg to tell stdCamera to expose the state string property
 
     static constexpr bool c_frameGrabber_flippable =
-        false; ///< app:dev config to tell framegrabber this camera can be flipped
+        false; ///< app:dev config to tell framegrabber this camera can not be flipped
 
     ///@}
 
@@ -319,8 +319,8 @@ pvcamCtrl::pvcamCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 
     m_default_x     = 1599.5;
     m_default_y     = 1599.5;
-    m_default_w     = 3200;
-    m_default_h     = 3200;
+    m_default_w     = 512; //we make this smaller by default
+    m_default_h     = 512;
     m_default_bin_x = 1;
     m_default_bin_y = 1;
 
@@ -329,19 +329,6 @@ pvcamCtrl::pvcamCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
     m_full_w = 3200;
     m_full_h = 3200;
 
-    m_currentROI.x     = m_default_x;
-    m_currentROI.y     = m_default_y;
-    m_currentROI.w     = m_default_w;
-    m_currentROI.h     = m_default_h;
-    m_currentROI.bin_x = m_default_bin_x;
-    m_currentROI.bin_y = m_default_bin_y;
-
-    m_nextROI.x     = m_currentROI.x;
-    m_nextROI.y     = m_currentROI.y;
-    m_nextROI.w     = m_currentROI.w;
-    m_nextROI.h     = m_currentROI.h;
-    m_nextROI.bin_x = m_currentROI.bin_x;
-    m_nextROI.bin_y = m_currentROI.bin_y;
 
     m_defaultReadoutSpeed    = "dynamic_range";
     m_readoutSpeedNames      = { "sensitivity", "speed", "dynamic_range", "sub_electron" };
@@ -407,20 +394,6 @@ int pvcamCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
     }
 
     STDCAMERA_LOAD_CONFIG( _config );
-
-    m_currentROI.x     = m_default_x;
-    m_currentROI.y     = m_default_y;
-    m_currentROI.w     = m_default_w;
-    m_currentROI.h     = m_default_h;
-    m_currentROI.bin_x = m_default_bin_x;
-    m_currentROI.bin_y = m_default_bin_y;
-
-    m_nextROI.x     = m_currentROI.x;
-    m_nextROI.y     = m_currentROI.y;
-    m_nextROI.w     = m_currentROI.w;
-    m_nextROI.h     = m_currentROI.h;
-    m_nextROI.bin_x = m_currentROI.bin_x;
-    m_nextROI.bin_y = m_currentROI.bin_y;
 
     FRAMEGRABBER_LOAD_CONFIG( _config );
 
@@ -578,20 +551,6 @@ int pvcamCtrl::powerOnDefaults()
 {
     m_expTime    = 0.01;
     m_expTimeSet = 0.01;
-
-    m_currentROI.x     = m_default_x;
-    m_currentROI.y     = m_default_y;
-    m_currentROI.w     = m_default_w;
-    m_currentROI.h     = m_default_h;
-    m_currentROI.bin_x = m_default_bin_x;
-    m_currentROI.bin_y = m_default_bin_y;
-
-    m_nextROI.x     = m_default_x;
-    m_nextROI.y     = m_default_y;
-    m_nextROI.w     = m_default_w;
-    m_nextROI.h     = m_default_h;
-    m_nextROI.bin_x = m_default_bin_x;
-    m_nextROI.bin_y = m_default_bin_y;
 
     m_readoutSpeedName    = m_defaultReadoutSpeed;
     m_readoutSpeedNameSet = m_defaultReadoutSpeed;
