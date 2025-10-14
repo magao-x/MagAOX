@@ -961,11 +961,11 @@ def loop(self): #new loop function for gaussian fitter
                 else:
                     angles = self.ADC.all_speckle_angles(img)
                     pairs = self.ADC.speckle_pairs(angles)
-                    command = self.ADC.calculate_command(pairs)
+                    command = np.squeeze(self.ADC.calculate_command(pairs))
 
                     self.log.debug(f'measured speckle angles: {angles}')
 
-                self.log.debug(f'measured error: {-command}')
+                self.log.debug(f'single error measurement: {-command}')
                 measurements.append(command)
             
             error = np.nanmean(measurements)
@@ -985,31 +985,28 @@ def loop(self): #new loop function for gaussian fitter
                 transpose = Field(img.shaped.T.ravel(),img.grid)
                 img = transpose
 
-                if self._lab == False:
-                    img = self.ADC.filter_image(img)
 
                 img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
-                
+                img = self.ADC.filter_image(img)
                 
                 if self._knife_edge:
                   pass #don't have this functionality yet
+                else:
+                    angles = self.ADC.all_speckle_angles(img)
+                    pairs = self.ADC.speckle_pairs(angles)
+                    command = np.squeeze(self.ADC.calculate_command(pairs))
 
-                measurements.append(self._command)
-                self.log.debug(f'single measurement command: {self._command}')
+                    self.log.debug(f'measured speckle angles: {angles}')
+
+                self.log.debug(f'single error measurement: {-command}')
+                measurements.append(command)
+
 
             error = np.mean(measurements)
-            self.log.debug(f'average command: {error} (just calculated, not sent)')
-            #### deleting the send command part so you can use it without interfering with anyone else's stuff
-            # if np.abs(self._command) < 5: #setting a threshold so the prisms don't do anything crazy     
-            #     self.add_command(self._command,0)
-            #     self.send_command()
-            #     self.log.debug(f'ADC command sent: {self._command}')
-            # else: 
-            #     self.log.info(f'ADC command {self._command} exceeds acceptable threshold and was not sent')            
 
+            self.log.debug(f'mean error across {self._no_measurements} measurements: {-error} (command calculated but not sent)')          
             self.log.info('transitioning to idle')
             self.transition_to_idle()
-            self._command = 0
             self.log.info('successfully transitioned to idle')
 
         elif self._state == States.CALIB:
