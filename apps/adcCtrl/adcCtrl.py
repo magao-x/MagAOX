@@ -111,11 +111,6 @@ class AdcFitter2:
             else: 
                 sliced = shaped[i,:]
 
-        # for i in range(shaped.shape[0]): 
-        #     if speckle_number % 2 != 0: #columns vs rows depending on which speckle it is
-        #         sliced = shaped[:,i]
-        #     else: sliced = shaped[i,:]
-
             zscore = (np.max(sliced) - np.mean(sliced))/np.std(sliced)
 
             if zscore > self.snr_threshold:
@@ -360,7 +355,7 @@ class adcCtrl(XDevice):
         self._n_avg = 1
         self._gain = 0.3
         self._command = 0
-        self._control_mtx = np.array([-0.11276422,  0.19904244]) #need to come up with a new value for this default
+        self._control_mtx = np.array([-0.11276422,  0.19904244]) 
         self._extent = 400
         self.delta_1 = 0
         self.delta_2 = 0
@@ -639,7 +634,7 @@ def loop(self): #new loop function for gaussian fitter
 
             error = np.nanmean(measurements)
 
-            self.log.debug(f'mean error across {self._no_measurements} measurements: {error} (command calculated but not sent)')          
+            self.log.info(f'mean error across {self._no_measurements} measurements: {error} (command calculated but not sent)')          
             self.log.info('transitioning to idle')
             self.transition_to_idle()
             self.log.info('successfully transitioned to idle')
