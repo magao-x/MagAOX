@@ -69,13 +69,7 @@ EXIT_TIMEOUT_SEC = 2
 def _run_logdump_thread(logger_name, logdump_dir, logdump_args, name, message_queue, record_class):
     # filter what content from user_logs gets put into db
     log = logging.getLogger(logger_name)
-    glob_pat = logdump_dir + f'/{name}_*'
-    has_no_logs = len(glob.glob(glob_pat)) == 0
-    if has_no_logs:
-        log.debug(f"No matching files found for {glob_pat}")
     while True:
-        while has_no_logs := len(glob.glob(glob_pat)) == 0:
-            time.sleep(RETRY_WAIT_SEC)
         try:
             args = logdump_args + ('--dir='+logdump_dir, '-J', '-f', name)
             log.debug(f"Running logdump command {repr(' '.join(args))} for {name} in follow mode")
@@ -84,10 +78,20 @@ def _run_logdump_thread(logger_name, logdump_dir, logdump_args, name, message_qu
                 log.debug(f"Log line read: {line}")
                 message = record_class.from_json(name, line)
                 message_queue.put(message)
+            p.wait()  # stdout is over when the process exits
             if p.returncode != 0:
                 raise RuntimeError(f"{name} logdump exited with {p.returncode} ({repr(' '.join(args))})")
         except Exception as e:
-            log.exception(f"Exception in log/telem follower for {name}")
+            glob_pattern = logdump_dir + f"/{name}/*/{name}_*"
+            if len(glob.glob(glob_pattern + ".ndjson.gz")):
+                log.info(f"Looks like {name} is a Python app; support is TODO")
+                return
+            if len(glob.glob(glob_pattern)):
+                log.exception(f"Exception in log/telem follower for {name}")
+            else:
+                log.info(f"No files found for {name}, waiting for them to appear")
+            while not len(glob.glob(glob_pattern)):
+                time.sleep(RETRY_WAIT_SEC)
 
 @xconf.config
 class dbIngestConfig(BaseDbDeviceConfig):
