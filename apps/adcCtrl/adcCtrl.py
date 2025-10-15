@@ -13,7 +13,7 @@ from magaox.constants import StateCodes
 from purepyindi2 import device, properties, constants
 from purepyindi2.messages import DefNumber, DefSwitch, DefLight, DefText
 
-import hcipy as hp
+from hcipy import *
 from scipy.optimize import minimize
 from scipy.optimize import curve_fit
 
@@ -388,8 +388,7 @@ class adcCtrl(XDevice):
 
         self.ADC = AdcFitter2(wavelength=self._center_wavelength)
         self.log.debug(f'initial normalized wavelength value: {self.ADC.normalized_wavelength}')
-        #self.update_wavelength()
-        self.ADC.set_control_mtx(self._control_mtx)
+        self.ADC.control_matrix = self._control_mtx
 
         self.properties['fsm']['state'] = StateCodes.READY.name
         self.update_property(self.properties['fsm'])
@@ -527,6 +526,7 @@ class adcCtrl(XDevice):
             existing_property['m01'] = float(new_message['m01'])
             self._control_mtx[1] = new_message['m01']
         
+        self.ADC.control_matrix = self._control_mtx
         self.log.debug(f'control matrix changed to {self._control_mtx}')
         self.update_property(existing_property)
         
@@ -688,7 +688,7 @@ def loop(self): #new loop function for gaussian fitter
                 new_control_mtx = np.linalg.pinv(response)
 
             self._control_mtx = new_control_mtx.T
-            self.ADC.set_control_mtx(self._control_mtx)
+            self.ADC.control_matrix = self._control_mtx
             self.log.info(f'calibration updated control matrix to: {self._control_mtx}')
 
             self.properties['ctrl_mtx']['m00'] = self._control_mtx[0,0]
