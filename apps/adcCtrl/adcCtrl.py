@@ -219,7 +219,6 @@ class AdcFitter2:
         return -predicted_disp
 
 
-
 @xconf.config
 class CameraConfig:
     """
@@ -359,9 +358,9 @@ class adcCtrl(XDevice):
 
         #self._loop_counter = 0
         self._n_avg = 1
-        self._gain = 0.5
+        self._gain = 0.3
         self._command = 0
-        self._control_mtx = np.array([0.21178766, 0.19275196]) #need to come up with a new value for this default
+        self._control_mtx = np.array([-0.11276422,  0.19904244]) #need to come up with a new value for this default
         self._extent = 400
         self.delta_1 = 0
         self.delta_2 = 0
@@ -369,7 +368,7 @@ class adcCtrl(XDevice):
         self._mask_diam = 45
         self._lab = False
         self._knife_edge = False
-        self._knife_edge_zero1 = 26.78175714
+        self._knife_edge_zero1 = 26.78175714 #need to re-calibrate these values
         self._knife_edge_zero2 = 26.544759645
         self._no_measurements = 1
 
