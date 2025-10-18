@@ -40,7 +40,8 @@
 ../apps/modalPSDs/tests/modalPSDs_test
 ../apps/mzmqClient/tests/mzmqClient_test
 ../apps/mzmqServer/tests/mzmqServer_test
-../apps/observerCtrl/tests/observerCtrl_test
+../apps/observerCtrl/tests/observerCtrl_INDI_val_test
+../apps/observerCtrl/tests/observerCtrl_targetLogic_test
 ../apps/ocam2KCtrl/tests/ocamUtils_test
 ../apps/pi335Ctrl/tests/pi335Ctrl_test
 ../apps/picoMotorCtrl/tests/picoMotorCtrl_test

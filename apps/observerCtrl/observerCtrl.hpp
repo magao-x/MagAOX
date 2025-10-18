@@ -46,8 +46,11 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
     typedef dev::telemeter<observerCtrl> telemeterT;
 
     typedef std::chrono::time_point<std::chrono::steady_clock> timePointT;
-    typedef std::string                                        timeStampT;
-    typedef std::chrono::duration<double>                      durationT;
+
+    typedef std::string timeStampT;
+
+    typedef std::chrono::duration<double> durationT;
+
     std::string timeStampAsISO8601( const std::chrono::time_point<std::chrono::system_clock> &tp );
 
   protected:
@@ -68,16 +71,13 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
     std::string m_teldataProp{ "teldata" };
     std::string m_parangEl{ "pa" };
 
-    std::string m_loopDev{ "holoop" };
-    std::string m_loopStateProp{ "loop_state" };
-
     ///@}
 
     /// The observer specification
     struct observer
     {
         std::string m_fullName;       ///< Obsever's full name
-        std::string m_pfoa;           ///< Observer's preferred forma of address
+        std::string m_pfoa;           ///< Observer's preferred form of of address
         std::string m_pronunciation;  ///< Guide for the TTS to pronounced the pfoa (defaults to pfoa)
         std::string m_email;          ///< Observer's email.  Must be unique.
         std::string m_sanitizedEmail; ///< Observer's email sanitized for use in INDI properties
@@ -104,15 +104,13 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
     std::string m_catRA;
     std::string m_catDec;
 
-    bool m_loop{ false }; ///< Flag tracking loop state.  true is loop closed.
-
     bool m_labMode{ false }; ///< Flag tracking whether the TCS interface is in lab mode.
 
     bool m_newTargetBlock{ true }; /**< Flag to indicate that this is a new target block.  This starts out as true
-                                        but becomes false on the first observation.  Then becomes true when the
-                                        loop closes for the first time after a target change. */
-    bool m_newTarget{ false }; /**< Flag to track when the target changes.  Occurs either automatically on a TCS update
-                                    or on a user override.*/
+                                        but becomes false on the first observation.*/
+
+    bool m_newPointing{ false }; /**< Flag to indicate that a new pointing has been set by the TCS.  Triggered by
+                                      changes in catalog object, RA, or Dec. */
 
     /// The start time of the current observation
     timePointT m_obsStartTime;
@@ -216,7 +214,7 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
 
     pcf::IndiProperty m_indiP_labMode; ///< Tracks whether TCS is in lab mode.
 
-    pcf::IndiProperty m_indiP_loop; ///< Tracks the loop state
+    pcf::IndiProperty m_indiP_newPointing; ///< Reports the status of the new pointing flag
 
   public:
     INDI_NEWCALLBACK_DECL( observerCtrl, m_indiP_observers );
@@ -244,8 +242,6 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
     INDI_SETCALLBACK_DECL( observerCtrl, m_indiP_teldata );
 
     INDI_SETCALLBACK_DECL( observerCtrl, m_indiP_labMode );
-
-    INDI_SETCALLBACK_DECL( observerCtrl, m_indiP_loop );
 
     ///@}
 
@@ -486,7 +482,26 @@ int observerCtrl::appStartup()
     REG_INDI_SETPROP( m_indiP_teldata, m_tcsDev, m_teldataProp );
     REG_INDI_SETPROP( m_indiP_labMode, m_tcsDev, m_labModeProp );
 
-    REG_INDI_SETPROP( m_indiP_loop, m_loopDev, m_loopStateProp );
+    //The new pointing flag
+    if( registerIndiPropertyNew( m_indiP_newPointing,
+                                 "new_pointing",
+                                 pcf::IndiProperty::Switch,
+                                 pcf::IndiProperty::ReadOnly,
+                                 pcf::IndiProperty::Idle,
+                                 pcf::IndiProperty::AtMostOne,
+                                 nullptr ) < 0 )
+    {
+        return log<software_critical, -1>( { __FILE__, __LINE__ } );
+    }
+    m_indiP_newPointing.add(pcf::IndiElement("set"));
+    if(m_newPointing)
+    {
+        m_indiP_newPointing["set"].setSwitchState(pcf::IndiElement::On);
+    }
+    else
+    {
+        m_indiP_newPointing["set"].setSwitchState(pcf::IndiElement::Off);
+    }
 
     TELEMETER_APP_STARTUP;
 
@@ -950,22 +965,22 @@ INDI_NEWCALLBACK_DEFN( observerCtrl, m_indiP_target )( const pcf::IndiProperty &
     {
         if( m_observing )
         {
-            m_tgtStartTime   = m_obsStartTime;
-            m_tgtStartParang = m_obsStartParang;
-        }
-        else
-        {
-            m_newTargetBlock = true;
+            return log<text_log,-2>( "Can not change target while observing", logPrio::LOG_ERROR );
         }
 
-        m_target    = target;
-        m_newTarget = true;
+        m_newTargetBlock = true;
+
+        m_target = target;
 
         log<text_log>( "Target updated by observer to " + m_target, logPrio::LOG_NOTICE );
 
         std::unique_lock<std::mutex> lock( m_indiMutex );
         updatesIfChanged<std::string>( m_indiP_target, { "current", "target" }, { m_target, m_target } );
     }
+
+    // Set this regardless so this can be a reset
+    m_newPointing = false;
+    updateSwitchIfChanged(m_indiP_newPointing, "set", pcf::IndiElement::Off);
 
     return 0;
 }
@@ -976,7 +991,7 @@ INDI_NEWCALLBACK_DEFN( observerCtrl, m_indiP_tcsTarget )( const pcf::IndiPropert
 
     if( !ipRecv.find( "request" ) )
     {
-        return 0;
+        return -1;
     }
 
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
@@ -985,20 +1000,20 @@ INDI_NEWCALLBACK_DEFN( observerCtrl, m_indiP_tcsTarget )( const pcf::IndiPropert
         {
             if( m_observing )
             {
-                m_tgtStartTime   = m_obsStartTime;
-                m_tgtStartParang = m_obsStartParang;
-            }
-            else
-            {
-                m_newTargetBlock = true;
+                return log<text_log,-2>( "Can not change target while observing", logPrio::LOG_ERROR );
             }
 
-            m_target    = m_catObj;
-            m_newTarget = true;
+            m_newTargetBlock = true;
+
+            m_target = m_catObj;
 
             log<text_log>( "Target updated by observer to TCS target: " + m_target, logPrio::LOG_NOTICE );
             updatesIfChanged<std::string>( m_indiP_target, { "current", "target" }, { m_target, m_target } );
         }
+
+        // We always update this to allow this to be a reset
+        m_newPointing = false;
+        updateSwitchIfChanged(m_indiP_newPointing, "set", pcf::IndiElement::Off);
     }
 
     return 0;
@@ -1017,15 +1032,13 @@ INDI_SETCALLBACK_DEFN( observerCtrl, m_indiP_catalog )( const pcf::IndiProperty 
 
     if( object != m_catObj )
     {
-        m_catObj    = object;
-        //m_target    = object;
-        //m_newTarget = true;
+        m_catObj = object;
+
+        m_newPointing = true;
+        updateSwitchIfChanged(m_indiP_newPointing, "set", pcf::IndiElement::On);
 
         // Always log change in name (different from RA and DEC)
         log<text_log>( "TCS target updated to " + m_catObj, logPrio::LOG_NOTICE );
-
-        //std::unique_lock<std::mutex> lock( m_indiMutex );
-        //updatesIfChanged<std::string>( m_indiP_target, { "current", "target" }, { m_target, m_target } );
     }
 
     return 0;
@@ -1042,17 +1055,8 @@ INDI_SETCALLBACK_DEFN( observerCtrl, m_indiP_catdata )( const pcf::IndiProperty 
 
         if( ra != m_catRA )
         {
-            m_catRA  = ra;
-            //m_target = m_catObj;
-
-            if( !m_newTarget ) // Only log if not already new
-            {
-                change      = true;
-                m_newTarget = true;
-            }
-
-            /*std::unique_lock<std::mutex> lock( m_indiMutex );
-            updatesIfChanged<std::string>( m_indiP_target, { "current", "target" }, { m_target, m_target } );*/
+            m_catRA = ra;
+            change  = true;
         }
     }
 
@@ -1063,21 +1067,14 @@ INDI_SETCALLBACK_DEFN( observerCtrl, m_indiP_catdata )( const pcf::IndiProperty 
         if( dec != m_catDec )
         {
             m_catDec = dec;
-            //m_target = m_catObj;
-
-            if( !m_newTarget ) // Only log if not already new
-            {
-                change      = true;
-                m_newTarget = true;
-            }
-
-            /*std::unique_lock<std::mutex> lock( m_indiMutex );
-            updatesIfChanged<std::string>( m_indiP_target, { "current", "target" }, { m_target, m_target } );*/
+            change   = true;
         }
     }
 
     if( change ) // Only log if not already new
     {
+        m_newPointing = true;
+        updateSwitchIfChanged(m_indiP_newPointing, "set", pcf::IndiElement::On);
         log<text_log>( "Pointing change.  Probable target change.", logPrio::LOG_NOTICE );
     }
 
@@ -1108,38 +1105,11 @@ INDI_SETCALLBACK_DEFN( observerCtrl, m_indiP_labMode )( const pcf::IndiProperty 
         }
         else
         {
-            m_labMode        = false;
+            m_labMode = false;
         }
     }
 
     std::cerr << "got labmode: " << m_labMode << '\n';
-    return 0;
-}
-
-INDI_SETCALLBACK_DEFN( observerCtrl, m_indiP_loop )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loop, ipRecv );
-
-    if( ipRecv.find( "toggle" ) )
-    {
-        if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
-        {
-            //Now that we're manually synch-ing the target name, we don't need loop closed logic
-            //i.e. the target block starts when the observation starts after setting the name.
-            /*if( m_newTarget == true && !m_loop )
-            {
-                m_newTargetBlock = true;
-                m_newTarget      = false;
-            }*/
-
-            m_loop = true;
-        }
-        else
-        {
-            m_loop = false;
-        }
-    }
-
     return 0;
 }
 

@@ -426,7 +426,9 @@ class MagAOXApp : public application
         void elevate()
         {
             if( m_elevated )
+            {
                 return;
+            }
 
             m_app->setEuidCalled();
             m_elevated = true;
@@ -435,7 +437,9 @@ class MagAOXApp : public application
         void restore()
         {
             if( !m_elevated )
+            {
                 return;
+            }
 
             m_app->setEuidReal();
             m_elevated = false;
@@ -1820,6 +1824,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
         }
     }
 
+    int retval = 0; //from here on out we don't return directly, so we have to track the return code.
+
     // We have to wait for power status to become available
     if( m_powerMgtEnabled && m_shutdown == 0 )
     {
@@ -1858,6 +1864,7 @@ int MagAOXApp<_useINDI>::execute() // virtual
             {
                 log<software_error>( { __FILE__, __LINE__, "error from onPowerOff()" } );
                 m_shutdown = 1;
+                retval = -2;
             }
         }
     }
@@ -1901,6 +1908,7 @@ int MagAOXApp<_useINDI>::execute() // virtual
                     {
                         log<software_error>( { __FILE__, __LINE__, "error from onPowerOff()" } );
                         m_shutdown = 1;
+                        retval = -3;
                         continue;
                     }
                 }
@@ -1915,6 +1923,7 @@ int MagAOXApp<_useINDI>::execute() // virtual
             {
                 log<software_error>( { __FILE__, __LINE__, "error from appLogic()" } );
                 m_shutdown = 1;
+                retval = -4;
                 continue;
             }
         }
@@ -1924,6 +1933,7 @@ int MagAOXApp<_useINDI>::execute() // virtual
             {
                 log<software_error>( { __FILE__, __LINE__, "error from whilePowerOff()" } );
                 m_shutdown = 1;
+                retval = -5;
                 continue;
             }
 
@@ -1963,6 +1973,7 @@ int MagAOXApp<_useINDI>::execute() // virtual
 
     if( appShutdown() < 0 )
     {
+        retval = -5;
         log<software_error>( { __FILE__, __LINE__, "error from appShutdown()" } );
     }
 
@@ -1990,11 +2001,12 @@ int MagAOXApp<_useINDI>::execute() // virtual
 
     if( unlockPID() < 0 )
     {
+        retval = -6;
         log<software_error>( { __FILE__, __LINE__, "error from unlockPID()" } );
     }
 
     sleep( 1 );
-    return 0;
+    return retval;
 }
 
 template <bool _useINDI>
@@ -2071,7 +2083,7 @@ int MagAOXApp<_useINDI>::setSigTermHandler()
 {
     // clang-format off
     #ifdef XWCTEST_MAGAOXAPP_SIGTERMH_ERR
-        return -1;
+        return -1; // LCOV_EXCL_LINE
     #endif
 
     #ifdef XWCTEST_MAGAOXAPP_SIGTERMH_SIGTERM
@@ -3818,7 +3830,7 @@ extern template class MagAOXApp<false>;
 } // namespace MagAOX
 
 /// Error handling wrapper for the threadStart function of the XWCApp
-/** This should be placed in appLogic for each thread managed by an MagAOXApp.
+/** This should be placed in appStartup for each thread managed by an MagAOXApp.
  * On error, this will cause the app to shutdown.
  * \see MagAOXApp::threadStart
  *

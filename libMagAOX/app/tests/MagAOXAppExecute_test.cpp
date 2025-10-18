@@ -94,23 +94,19 @@
 #undef app_tests_MagAOXApp_test_hpp
 #define XWCTEST_NAMESPACE XWCTEST_MAGAOXAPP_EXEC_NORM_APPLOGIC_ns
 #define XWCTEST_MAGAOXAPP_EXEC_NORM
-#define XWCTEST_MAGAOXAPP_PID_UNLOCK_ERR
 #include "../MagAOXApp.hpp"
 #include "MagAOXApp_test.hpp"
 #undef XWCTEST_NAMESPACE
 #undef XWCTEST_MAGAOXAPP_EXEC_NORM
-#undef XWCTEST_MAGAOXAPP_PID_UNLOCK_ERR
 
 #undef app_MagAOXApp_hpp
 #undef app_tests_MagAOXApp_test_hpp
 #define XWCTEST_NAMESPACE XWCTEST_MAGAOXAPP_EXEC_NORM_APPSHUTDOWN_ns
 #define XWCTEST_MAGAOXAPP_EXEC_NORM
-#define XWCTEST_MAGAOXAPP_PID_UNLOCK_ERR
 #include "../MagAOXApp.hpp"
 #include "MagAOXApp_test.hpp"
 #undef XWCTEST_NAMESPACE
 #undef XWCTEST_MAGAOXAPP_EXEC_NORM
-#undef XWCTEST_MAGAOXAPP_PID_UNLOCK_ERR
 
 
 namespace libXWCTest
@@ -461,7 +457,7 @@ TEST_CASE( "running execute", "[app::MagAOXApp]" )
         app.setup( argv.size() - 1, const_cast<char **>( argv.data() ) );
         app.appLogicFail = true;
         int rv = app.execute();
-        REQUIRE( rv == -1 );
+        REQUIRE( rv == -4 );
     }
 
     SECTION( "appShutdown failure" )
@@ -502,8 +498,8 @@ TEST_CASE( "running execute", "[app::MagAOXApp]" )
 
         app.setup( argv.size() - 1, const_cast<char **>( argv.data() ) );
         app.appShutdownFail = true;
-        int rv = app.execute();//this still returns 0
-        REQUIRE( rv == 0 );
+        int rv = app.execute();
+        REQUIRE( rv == -5 );
     }
 }
 

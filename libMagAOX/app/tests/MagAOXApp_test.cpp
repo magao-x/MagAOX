@@ -1166,7 +1166,7 @@ TEST_CASE( "Signal Handlers", "[app::MagAOXApp]" )
         REQUIRE( app.setSigTermHandler() == 0 );
 
         REQUIRE( app.shutdown() == 0 );
-        app._handlerSigTerm( SIGTERM, nullptr, nullptr );
+        app.p_handlerSigTerm( SIGTERM, nullptr, nullptr );
         REQUIRE( app.shutdown() == 1 );
     }
 
@@ -1179,7 +1179,7 @@ TEST_CASE( "Signal Handlers", "[app::MagAOXApp]" )
         REQUIRE( app.setSigTermHandler() == 0 );
 
         REQUIRE( app.shutdown() == 0 );
-        app._handlerSigTerm( SIGINT, nullptr, nullptr );
+        app.p_handlerSigTerm( SIGINT, nullptr, nullptr );
         REQUIRE( app.shutdown() == 1 );
     }
 
@@ -1192,7 +1192,7 @@ TEST_CASE( "Signal Handlers", "[app::MagAOXApp]" )
         REQUIRE( app.setSigTermHandler() == 0 );
 
         REQUIRE( app.shutdown() == 0 );
-        app._handlerSigTerm( SIGQUIT, nullptr, nullptr );
+        app.p_handlerSigTerm( SIGQUIT, nullptr, nullptr );
         REQUIRE( app.shutdown() == 1 );
     }
 
@@ -1205,7 +1205,8 @@ TEST_CASE( "Signal Handlers", "[app::MagAOXApp]" )
         REQUIRE( app.setSigTermHandler() == 0 );
 
         REQUIRE( app.shutdown() == 0 );
-        app._handlerSigTerm( SIGHUP, nullptr, nullptr );
+        app.p_handlerSigTerm( SIGHUP, nullptr, nullptr );
+        //app.handlerSigTerm(SIGHUP, nullptr, nullptr );
         REQUIRE( app.shutdown() == 1 );
     }
 }
@@ -1225,9 +1226,20 @@ TEST_CASE( "Setting Euid", "[app::MagAOXApp]" )
 
     REQUIRE( app.setEuidReal( 0 ) == -1 );
     REQUIRE( app.setEuidCalled( 0 ) == -1 );
+
+    REQUIRE(app.p_elevatePriveleges() == 0);
 }
 
+/// Starting a thread
+/**
+ * \ingroup MagAOXApp_unit_test
+ */
+TEST_CASE( "Starting a thread", "[app::MagAOXApp]" )
+{
+    MagAOXApp_test app;
 
+    REQUIRE( app.threadStartTest() == 0 );
+}
 
 /// Tests of utilities in cpp
 /**

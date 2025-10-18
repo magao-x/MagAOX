@@ -22,13 +22,17 @@ namespace XWCTEST_NAMESPACE
 
 struct MagAOXApp_test : public APP_XWCTEST_BASE
 {
+
     MagAOXApp_test( bool gitmod = false ) : MagAOXApp( "sha1", gitmod )
     {
     }
 
-    bool appStartupFail {false};
-    bool appLogicFail {false};
-    bool appShutdownFail {false};
+    ~MagAOXApp_test() noexcept (true)
+    {}
+
+    bool appStartupFail{ false };
+    bool appLogicFail{ false };
+    bool appShutdownFail{ false };
 
     void addUnusedConfig()
     {
@@ -43,25 +47,27 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
 
     virtual int appStartup()
     {
-        if(appStartupFail)
+        if( appStartupFail )
         {
             return -1;
         }
 
         return 0;
     }
+
     virtual int appLogic()
     {
-        if(appLogicFail)
+        if( appLogicFail )
         {
             return -1;
         }
 
         return 0;
     }
+
     virtual int appShutdown()
     {
-        if(appShutdownFail)
+        if( appShutdownFail )
         {
             return -1;
         }
@@ -215,9 +221,9 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
         return APP_XWCTEST_BASE::setSigTermHandler();
     }
 
-    void _handlerSigTerm( int signum, siginfo_t *siginf, void *ucont )
+    void p_handlerSigTerm( int signum, siginfo_t *siginf, void *ucont )
     {
-        APP_XWCTEST_BASE::_handlerSigTerm( signum, siginf, ucont );
+        _handlerSigTerm( signum, siginf, ucont );
     }
 
     int setEuidReal()
@@ -229,10 +235,19 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
     {
         m_euidReal = euidr;
 
-        if(set)
+        if( set )
         {
             return APP_XWCTEST_BASE::setEuidReal();
         }
+
+        return 0;
+    }
+
+    int p_elevatePriveleges()
+    {
+        elevatedPrivileges elPriv( this );
+        elPriv.elevate();
+        elPriv.restore();
 
         return 0;
     }
@@ -256,6 +271,110 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
     int unlockPID()
     {
         return APP_XWCTEST_BASE::unlockPID();
+    }
+
+    // Thread
+    int m_threadPrio{ 0 }; ///< Priority of the framegrabber thread, should normally be > 00.
+
+    std::string m_cpuset; ///< The cpuset to assign the framegrabber thread to.  Not used if empty, the default.
+
+    bool m_threadInit{ true }; ///< Synchronizer for thread startup, to allow priority setting to finish.
+
+    pid_t m_threadID{ 0 }; ///< The ID of the thread.
+
+    pcf::IndiProperty m_threadProp; ///< The property to hold the thread details.
+
+    std::thread m_thread; ///< A separate thread
+
+    bool m_threadRunning {false};
+    bool m_threadStopped {false};
+    int m_threadError {0};
+
+    int threadStartTest()
+    {
+        if( threadStart( m_thread,
+                         m_threadInit,
+                         m_threadID,
+                         m_threadProp,
+                         m_threadPrio,
+                         m_cpuset,
+                         "thread",
+                         this,
+                         threadStarter ) < 0 )
+        {
+
+            return -1;
+        }
+
+
+        while(m_threadError == 0 && m_threadRunning == false)
+        {
+            sleep(1);
+        }
+
+        if(m_threadError != 0)
+        {
+            return m_threadError;
+        }
+
+        if(m_threadRunning != true)
+        {
+            return -3;
+        }
+
+        m_threadRunning = false;
+
+        while(m_threadError == 0 && m_threadStopped == false)
+        {
+            sleep(1);
+        }
+
+        if(m_threadError != 0)
+        {
+            return m_threadError;
+        }
+
+        XWCAPP_THREAD_STOP(m_thread);
+
+        return 0;
+    }
+    /// Thread starter, called by MagAOXApp::threadStart on thread construction.  Calls threadExec.
+    static void threadStarter( MagAOXApp_test *o /**< [in] a pointer to aninstance (normally this) */ )
+    {
+        o->threadExec();
+    }
+
+    /// Execute framegrabbing.
+    void threadExec()
+    {
+        // Get the thread PID immediately so the caller can return.
+        m_threadID = syscall( SYS_gettid );
+
+        // Wait for the thread starter to finish initializing this thread.
+        int n = 0;
+        while( m_threadInit == true && n < 5)
+        {
+            sleep( 1 );
+            ++n;
+        }
+
+        if(n >= 5)
+        {
+            m_threadError = -2;
+            return;
+        }
+
+        std::cerr << "threading\n";
+
+        m_threadRunning = true;
+
+        while(m_threadRunning)
+        {
+            sleep( 1 );
+        }
+
+        m_threadRunning = false;
+        m_threadStopped = true;
     }
 };
 

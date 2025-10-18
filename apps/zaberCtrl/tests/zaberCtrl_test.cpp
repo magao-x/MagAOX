@@ -17,7 +17,7 @@ using namespace MagAOX::app;
 namespace ZCTRLTEST
 {
 
-class zaberCtrl_test : public zaberCtrl 
+class zaberCtrl_test : public zaberCtrl
 {
 
 public:
@@ -43,7 +43,7 @@ public:
 };
 
 
-SCENARIO( "INDI Callbacks", "[zaberCtrl]" )
+SCENARIO( "zaberCtrl INDI Callbacks", "[zaberCtrl]" )
 {
     XWCTEST_INDI_NEW_CALLBACK( zaberCtrl, pos);
     XWCTEST_INDI_NEW_CALLBACK( zaberCtrl, rawPos);
@@ -61,4 +61,4 @@ SCENARIO( "INDI Callbacks", "[zaberCtrl]" )
 }
 
 
-} //namespace zaberCtrl_test 
+} //namespace zaberCtrl_test

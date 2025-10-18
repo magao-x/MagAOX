@@ -35,6 +35,10 @@ $ bash ./testMagAOX.bash
   * \ingroup testing
   */
 
+/** \defgroup app_tests Application Testing
+  * \brief Unit tests of the apps
+  * \ingroup testing
+  */
 
 
 
