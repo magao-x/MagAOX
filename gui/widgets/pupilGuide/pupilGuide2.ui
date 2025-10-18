@@ -27,7 +27,7 @@
        <item row="0" column="1">
         <layout class="QHBoxLayout" name="telalign_hl" stretch="3,1,3,1,7">
          <item>
-          <layout class="QVBoxLayout" name="staracq_top_vl" stretch="0,5,5,5">
+          <layout class="QVBoxLayout" name="staracq_top_vl" stretch="1,3,3,4,3,4">
            <item>
             <widget class="QLabel" name="acquisition_label">
              <property name="text">
@@ -39,7 +39,52 @@
             </widget>
            </item>
            <item>
-            <spacer name="verticalSpacer_7">
+            <layout class="QVBoxLayout" name="target_vl" stretch="1,2">
+             <item>
+              <widget class="QLabel" name="target_label">
+               <property name="maximumSize">
+                <size>
+                 <width>16777215</width>
+                 <height>35</height>
+                </size>
+               </property>
+               <property name="text">
+                <string>Target</string>
+               </property>
+               <property name="alignment">
+                <set>Qt::AlignCenter</set>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <layout class="QGridLayout" name="target_gl" rowstretch="1,1" columnstretch="10,1">
+               <item row="1" column="0">
+                <widget class="xqt::statusEntry" name="target_name"/>
+               </item>
+               <item row="0" column="0">
+                <widget class="xqt::statusDisplay" name="target_catobj">
+                 <property name="sizePolicy">
+                  <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                   <horstretch>0</horstretch>
+                   <verstretch>0</verstretch>
+                  </sizepolicy>
+                 </property>
+                </widget>
+               </item>
+               <item row="1" column="1">
+                <widget class="QPushButton" name="target_sync">
+                 <property name="icon">
+                  <iconset resource="../../resources/magaox.qrc">
+                   <normaloff>:/icons/recycle.png</normaloff>:/icons/recycle.png</iconset>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <spacer name="verticalSpacer_8">
              <property name="orientation">
               <enum>Qt::Vertical</enum>
              </property>
@@ -52,11 +97,104 @@
             </spacer>
            </item>
            <item>
-            <layout class="QVBoxLayout" name="staracq_vl" stretch="2,1,1,1">
+            <layout class="QVBoxLayout" name="telacq_vl" stretch="1,1,1,1">
              <item>
-              <widget class="QLabel" name="label">
+              <widget class="QLabel" name="telacq_label">
+               <property name="maximumSize">
+                <size>
+                 <width>16777215</width>
+                 <height>35</height>
+                </size>
+               </property>
                <property name="text">
-                <string>Star Acquisition</string>
+                <string>Telescope</string>
+               </property>
+               <property name="alignment">
+                <set>Qt::AlignCenter</set>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="telacq_acqfromguider_button">
+               <property name="text">
+                <string>Acquire Fm Guider</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="telacq_acqfocus_button">
+               <property name="text">
+                <string>Acquire Focus</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="telacq_override_hl" stretch="1,2,2,1">
+               <item>
+                <spacer name="horizontalSpacer_11">
+                 <property name="orientation">
+                  <enum>Qt::Horizontal</enum>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>40</width>
+                   <height>20</height>
+                  </size>
+                 </property>
+                </spacer>
+               </item>
+               <item>
+                <widget class="QLabel" name="telacq_override_label">
+                 <property name="text">
+                  <string>override</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="xqt::toggleSlider" name="telacq_override_slider"/>
+               </item>
+               <item>
+                <spacer name="horizontalSpacer_12">
+                 <property name="orientation">
+                  <enum>Qt::Horizontal</enum>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>40</width>
+                   <height>20</height>
+                  </size>
+                 </property>
+                </spacer>
+               </item>
+              </layout>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <spacer name="verticalSpacer_7">
+             <property name="orientation">
+              <enum>Qt::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>420</width>
+               <height>37</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <layout class="QVBoxLayout" name="camacq_vl" stretch="1,1,1,1">
+             <item>
+              <widget class="QLabel" name="camacq_label">
+               <property name="maximumSize">
+                <size>
+                 <width>16777215</width>
+                 <height>35</height>
+                </size>
+               </property>
+               <property name="text">
+                <string>camacq</string>
                </property>
                <property name="alignment">
                 <set>Qt::AlignCenter</set>
@@ -258,19 +396,6 @@
               </layout>
              </item>
             </layout>
-           </item>
-           <item>
-            <spacer name="verticalSpacer_8">
-             <property name="orientation">
-              <enum>Qt::Vertical</enum>
-             </property>
-             <property name="sizeHint" stdset="0">
-              <size>
-               <width>20</width>
-               <height>40</height>
-              </size>
-             </property>
-            </spacer>
            </item>
           </layout>
          </item>
@@ -2378,9 +2503,9 @@
           </spacer>
          </item>
          <item>
-          <layout class="QVBoxLayout" name="vl_camlens_2" stretch="2,1,3,1,1,6,1,4,3">
+          <layout class="QVBoxLayout" name="pwfs_cl" stretch="2,1,3,1,1,6,1,4,3">
            <item>
-            <widget class="QLabel" name="pwfspupils_label">
+            <widget class="QLabel" name="pwfs_pupils_label">
              <property name="text">
               <string>PWFS Pupils</string>
              </property>
@@ -2390,7 +2515,7 @@
             </widget>
            </item>
            <item>
-            <widget class="QLabel" name="labelPupilFitting_2">
+            <widget class="QLabel" name="pwfs_fitting_label">
              <property name="maximumSize">
               <size>
                <width>16777215</width>
@@ -2411,9 +2536,9 @@
             </widget>
            </item>
            <item>
-            <layout class="QVBoxLayout" name="vl_medians_2" stretch="1,4">
+            <layout class="QVBoxLayout" name="pwfs_medians_vl" stretch="1,4">
              <item>
-              <widget class="QLabel" name="labelMedianFluxes_2">
+              <widget class="QLabel" name="pwfs_medians_label">
                <property name="maximumSize">
                 <size>
                  <width>16777215</width>
@@ -2434,9 +2559,9 @@
               </widget>
              </item>
              <item>
-              <layout class="QGridLayout" name="gl_medians_2">
+              <layout class="QGridLayout" name="pwfs_medians_gl">
                <item row="1" column="1">
-                <widget class="QLineEdit" name="med2_2">
+                <widget class="QLineEdit" name="pwfs_median_2">
                  <property name="focusPolicy">
                   <enum>Qt::NoFocus</enum>
                  </property>
@@ -2446,7 +2571,7 @@
                 </widget>
                </item>
                <item row="0" column="0">
-                <widget class="QLineEdit" name="med3_2">
+                <widget class="QLineEdit" name="pwfs_median_3">
                  <property name="focusPolicy">
                   <enum>Qt::NoFocus</enum>
                  </property>
@@ -2456,7 +2581,7 @@
                 </widget>
                </item>
                <item row="1" column="0">
-                <widget class="QLineEdit" name="med1_2">
+                <widget class="QLineEdit" name="pwfs_median_1">
                  <property name="focusPolicy">
                   <enum>Qt::NoFocus</enum>
                  </property>
@@ -2466,7 +2591,7 @@
                 </widget>
                </item>
                <item row="0" column="1">
-                <widget class="QLineEdit" name="med4_2">
+                <widget class="QLineEdit" name="pwfs_median_4">
                  <property name="focusPolicy">
                   <enum>Qt::NoFocus</enum>
                  </property>
@@ -2480,7 +2605,7 @@
             </layout>
            </item>
            <item>
-            <layout class="QHBoxLayout" name="hl_medDelta_2">
+            <layout class="QHBoxLayout" name="pwfs_medians_delta_hl">
              <item>
               <spacer name="horizontalSpacer_89">
                <property name="orientation">
@@ -2495,7 +2620,7 @@
               </spacer>
              </item>
              <item>
-              <widget class="QCheckBox" name="setDelta_2">
+              <widget class="QCheckBox" name="pwfs_medians_delta_checkbox">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2523,7 +2648,7 @@
             </layout>
            </item>
            <item>
-            <widget class="QLabel" name="label_pupilPositions_2">
+            <widget class="QLabel" name="pwfs_coords_label">
              <property name="maximumSize">
               <size>
                <width>16777215</width>
@@ -2544,9 +2669,9 @@
             </widget>
            </item>
            <item>
-            <layout class="QGridLayout" name="gridCoords_2" rowstretch="1,0,0,0,0,0,0,0,0">
+            <layout class="QGridLayout" name="pwfs_coords_gl" rowstretch="1,0,0,0,0,0,0,0,0">
              <item row="8" column="3">
-              <widget class="QLineEdit" name="coordAvg_D_2">
+              <widget class="QLineEdit" name="pwfs_avg_D">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2556,7 +2681,7 @@
               </widget>
              </item>
              <item row="7" column="3">
-              <widget class="QLineEdit" name="coordLL_D_2">
+              <widget class="QLineEdit" name="pwfs_LL_D">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2566,7 +2691,7 @@
               </widget>
              </item>
              <item row="3" column="3">
-              <widget class="QLineEdit" name="coordUR_D_2">
+              <widget class="QLineEdit" name="pwfs_UR_D">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2576,7 +2701,7 @@
               </widget>
              </item>
              <item row="8" column="2">
-              <widget class="QLineEdit" name="coordAvg_y_2">
+              <widget class="QLineEdit" name="pwfs_avg_y">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2586,7 +2711,7 @@
               </widget>
              </item>
              <item row="5" column="1">
-              <widget class="QLineEdit" name="coordUL_x_2">
+              <widget class="QLineEdit" name="pwfs_UL_x">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2596,7 +2721,7 @@
               </widget>
              </item>
              <item row="6" column="1">
-              <widget class="QLineEdit" name="coordLR_x_2">
+              <widget class="QLineEdit" name="pwfs_LR_x">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2606,7 +2731,7 @@
               </widget>
              </item>
              <item row="8" column="1">
-              <widget class="QLineEdit" name="coordAvg_x_2">
+              <widget class="QLineEdit" name="pwfs_avg_x">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2616,21 +2741,21 @@
               </widget>
              </item>
              <item row="6" column="0">
-              <widget class="QLabel" name="labelLR_2">
+              <widget class="QLabel" name="pwfs_LR_label">
                <property name="text">
                 <string>LR</string>
                </property>
               </widget>
              </item>
              <item row="7" column="0">
-              <widget class="QLabel" name="labelLL_2">
+              <widget class="QLabel" name="pwfs_LL_label">
                <property name="text">
                 <string>LL</string>
                </property>
               </widget>
              </item>
              <item row="6" column="3">
-              <widget class="QLineEdit" name="coordLR_D_2">
+              <widget class="QLineEdit" name="pwfs_LR_D">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2640,7 +2765,7 @@
               </widget>
              </item>
              <item row="2" column="2">
-              <widget class="QLabel" name="labely_2">
+              <widget class="QLabel" name="pwfs_y_label">
                <property name="text">
                 <string>y</string>
                </property>
@@ -2650,14 +2775,14 @@
               </widget>
              </item>
              <item row="3" column="0">
-              <widget class="QLabel" name="labelUR_2">
+              <widget class="QLabel" name="pwfs_UR_label">
                <property name="text">
                 <string>UR</string>
                </property>
               </widget>
              </item>
              <item row="3" column="1">
-              <widget class="QLineEdit" name="coordUR_x_2">
+              <widget class="QLineEdit" name="pwfs_UR_x">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2667,14 +2792,14 @@
               </widget>
              </item>
              <item row="5" column="0">
-              <widget class="QLabel" name="labelUL_2">
+              <widget class="QLabel" name="pwfs_UL_label">
                <property name="text">
                 <string>UL</string>
                </property>
               </widget>
              </item>
              <item row="7" column="1">
-              <widget class="QLineEdit" name="coordLL_x_2">
+              <widget class="QLineEdit" name="pwfs_LL_x">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2684,7 +2809,7 @@
               </widget>
              </item>
              <item row="7" column="2">
-              <widget class="QLineEdit" name="coordLL_y_2">
+              <widget class="QLineEdit" name="pwfs_LL_y">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2694,7 +2819,7 @@
               </widget>
              </item>
              <item row="2" column="3">
-              <widget class="QLabel" name="labelD_2">
+              <widget class="QLabel" name="pwfs_D_label">
                <property name="text">
                 <string>D</string>
                </property>
@@ -2704,7 +2829,7 @@
               </widget>
              </item>
              <item row="6" column="2">
-              <widget class="QLineEdit" name="coordLR_y_2">
+              <widget class="QLineEdit" name="pwfs_LR_y">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2714,14 +2839,14 @@
               </widget>
              </item>
              <item row="8" column="0">
-              <widget class="QLabel" name="labelAvg_2">
+              <widget class="QLabel" name="pwfs_avg_label">
                <property name="text">
                 <string>Avg:</string>
                </property>
               </widget>
              </item>
              <item row="5" column="2">
-              <widget class="QLineEdit" name="coordUL_y_2">
+              <widget class="QLineEdit" name="pwfs_UL_y">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2731,7 +2856,7 @@
               </widget>
              </item>
              <item row="2" column="0">
-              <widget class="QPushButton" name="buttonExpFit_2">
+              <widget class="QPushButton" name="pwfs_coords_expand">
                <property name="minimumSize">
                 <size>
                  <width>30</width>
@@ -2751,7 +2876,7 @@
               </widget>
              </item>
              <item row="2" column="1">
-              <widget class="QLabel" name="labelx_2">
+              <widget class="QLabel" name="pwfs_x_label">
                <property name="text">
                 <string>x</string>
                </property>
@@ -2761,7 +2886,7 @@
               </widget>
              </item>
              <item row="5" column="3">
-              <widget class="QLineEdit" name="coordUL_D_2">
+              <widget class="QLineEdit" name="pwfs_UL_D">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2771,7 +2896,7 @@
               </widget>
              </item>
              <item row="3" column="2">
-              <widget class="QLineEdit" name="coordUR_y_2">
+              <widget class="QLineEdit" name="pwfs_UR_y">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2783,7 +2908,7 @@
             </layout>
            </item>
            <item>
-            <layout class="QHBoxLayout" name="pwfspupils_pos_delta_hl">
+            <layout class="QHBoxLayout" name="pwfs_coords_delta_hl">
              <item>
               <spacer name="horizontalSpacer_91">
                <property name="orientation">
@@ -2798,7 +2923,7 @@
               </spacer>
              </item>
              <item>
-              <widget class="QCheckBox" name="setDelta_pup_2">
+              <widget class="QCheckBox" name="pwfs_coords_delta_checkbox">
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
@@ -2828,7 +2953,7 @@
            <item>
             <layout class="QVBoxLayout" name="camlens_layout_2">
              <item>
-              <widget class="QLabel" name="label_camlens_2">
+              <widget class="QLabel" name="camlens_label">
                <property name="font">
                 <font>
                  <pointsize>12</pointsize>
@@ -2843,16 +2968,16 @@
               </widget>
              </item>
              <item>
-              <layout class="QGridLayout" name="gl_camlens_fsm_2" columnstretch="1,10,1">
+              <layout class="QGridLayout" name="camlens_fsm_gl" columnstretch="1,10,1">
                <item row="0" column="0">
-                <widget class="QLabel" name="label_camlensX_fsm_2">
+                <widget class="QLabel" name="camlens_fsm_x_label">
                  <property name="text">
                   <string>X:</string>
                  </property>
                 </widget>
                </item>
                <item row="1" column="1">
-                <widget class="xqt::fsmDisplay" name="camlensY_fsm_2">
+                <widget class="xqt::fsmDisplay" name="camlens_fsm_y">
                  <property name="palette">
                   <palette>
                    <active>
@@ -2893,14 +3018,14 @@
                 </widget>
                </item>
                <item row="1" column="0">
-                <widget class="QLabel" name="label_camlensY_fsm_2">
+                <widget class="QLabel" name="camlens_fsm_y_label">
                  <property name="text">
                   <string>Y:</string>
                  </property>
                 </widget>
                </item>
                <item row="0" column="1">
-                <widget class="xqt::fsmDisplay" name="camlensX_fsm_2">
+                <widget class="xqt::fsmDisplay" name="camlens_fsm_x">
                  <property name="palette">
                   <palette>
                    <active>
@@ -2969,19 +3094,19 @@
               </layout>
              </item>
              <item>
-              <layout class="QHBoxLayout" name="horizontalLayout_38" stretch="0,0">
+              <layout class="QHBoxLayout" name="camlens_pos_hl" stretch="0,0">
                <property name="sizeConstraint">
                 <enum>QLayout::SetFixedSize</enum>
                </property>
                <item>
-                <widget class="xqt::statusEntry" name="camlensX_pos_2">
+                <widget class="xqt::statusEntry" name="camlens_x">
                  <property name="focusPolicy">
                   <enum>Qt::NoFocus</enum>
                  </property>
                 </widget>
                </item>
                <item>
-                <widget class="xqt::statusEntry" name="camlensY_pos_2">
+                <widget class="xqt::statusEntry" name="camlens_y">
                  <property name="focusPolicy">
                   <enum>Qt::NoFocus</enum>
                  </property>
@@ -2992,7 +3117,7 @@
             </layout>
            </item>
            <item>
-            <layout class="QHBoxLayout" name="camlensButtonsLayout_h_2">
+            <layout class="QHBoxLayout" name="camlens_buttons_hl">
              <item>
               <spacer name="horizontalSpacer_95">
                <property name="orientation">
@@ -3007,12 +3132,12 @@
               </spacer>
              </item>
              <item>
-              <layout class="QGridLayout" name="camLensButtonsLayout_2" rowstretch="1,0,0" columnstretch="1,0,0">
+              <layout class="QGridLayout" name="camlens_buttons_gl" rowstretch="1,0,0" columnstretch="1,0,0">
                <property name="sizeConstraint">
                 <enum>QLayout::SetDefaultConstraint</enum>
                </property>
                <item row="1" column="0">
-                <widget class="QPushButton" name="button_camlens_l_2">
+                <widget class="QPushButton" name="camlens_l">
                  <property name="sizePolicy">
                   <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                    <horstretch>1</horstretch>
@@ -3045,7 +3170,7 @@
                 </widget>
                </item>
                <item row="1" column="1">
-                <widget class="QPushButton" name="button_camlens_scale_2">
+                <widget class="QPushButton" name="camlens_scale">
                  <property name="sizePolicy">
                   <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                    <horstretch>1</horstretch>
@@ -3078,7 +3203,7 @@
                 </widget>
                </item>
                <item row="0" column="1">
-                <widget class="QPushButton" name="button_camlens_u_2">
+                <widget class="QPushButton" name="camlens_u">
                  <property name="sizePolicy">
                   <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                    <horstretch>1</horstretch>
@@ -3111,7 +3236,7 @@
                 </widget>
                </item>
                <item row="2" column="1">
-                <widget class="QPushButton" name="button_camlens_d_2">
+                <widget class="QPushButton" name="camlens_d">
                  <property name="sizePolicy">
                   <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                    <horstretch>1</horstretch>
@@ -3144,7 +3269,7 @@
                 </widget>
                </item>
                <item row="1" column="2">
-                <widget class="QPushButton" name="button_camlens_r_2">
+                <widget class="QPushButton" name="camlens_r">
                  <property name="sizePolicy">
                   <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                    <horstretch>1</horstretch>
@@ -3503,6 +3628,11 @@
    <class>xqt::toggleSlider</class>
    <extends>QSlider</extends>
    <header>../xWidgets/toggleSlider.hpp</header>
+  </customwidget>
+  <customwidget>
+   <class>xqt::statusDisplay</class>
+   <extends>QLabel</extends>
+   <header>../xWidgets/statusDisplay.hpp</header>
   </customwidget>
  </customwidgets>
  <resources>
