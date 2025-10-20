@@ -610,11 +610,11 @@ class adcCtrl(XDevice):
                 else: self.log.info(f'ADC command {error} exceeds acceptable threshold and was not sent')
 
             elif self._state == States.ONESHOT:
-                self.log.debug('oneshot state')
                 measurements = []
                 for i in range(self._no_measurements):
-                    self.log.debug('oneshot for loop')
                     img = self.camera.grab_stack(self._n_avg)
+                    img_type = type(img)
+                    self.log.debug(f'image stack has type {img_type}')
                     transpose = Field(img.shaped.T.ravel(),img.grid)
                     img = transpose
                     self.log.debug('images taken and transposed')
@@ -624,7 +624,7 @@ class adcCtrl(XDevice):
                     img = self.ADC.filter_image(img)
                     
                     if self._knife_edge:
-                    pass #don't have this functionality yet
+                        pass #don't have this functionality yet
                     else:
                         angles = self.ADC.all_speckle_angles(img)
                         pairs = self.ADC.speckle_pairs(angles)
