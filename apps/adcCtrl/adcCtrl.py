@@ -574,123 +574,126 @@ class adcCtrl(XDevice):
                 
             time.sleep(0.05)
 
-def loop(self): #new loop function for gaussian fitter
-        if self._state == States.CLOSED_LOOP:
-            measurements = []
-            error = 0
-            
-            for i in range(self._no_measurements):
-                img = self.camera.grab_stack(self._n_avg)
-                transpose = Field(img.shaped.T.ravel(),img.grid)
-                img = transpose #hopefully this actually fixes the transpose issue
-
-                img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
-                img = self.ADC.filter_image(img)
+    def loop(self): #new loop function for gaussian fitter
+            if self._state == States.CLOSED_LOOP:
+                measurements = []
+                error = 0
                 
-                if self._knife_edge:
-                    pass #haven't gotten here yet
-                else:
-                    angles = self.ADC.all_speckle_angles(img)
-                    pairs = self.ADC.speckle_pairs(angles)
-                    command = np.squeeze(self.ADC.calculate_command(pairs))
-
-                    self.log.debug(f'measured speckle angles: {angles}')
-
-                self.log.debug(f'single error measurement: {-command}')
-                measurements.append(command)
-            
-            error = np.nanmean(measurements)
-            self.log.debug(f'mean error across {self._no_measurements} measurements: {-error}')
-
-            if np.abs(error) < 3: #setting a threshold so the prisms don't do anything crazy     
-                self.add_command(error * self._gain,0)
-                self.send_command()
-                self.log.debug(f'delta command: {error * self._gain}')
-                self.log.debug(f'total command: {self.delta_1}')
-            else: self.log.info(f'ADC command {error} exceeds acceptable threshold and was not sent')
-
-        elif self._state == States.ONESHOT:
-            measurements = []
-            for i in range(self._no_measurements):
-                img = self.camera.grab_stack(self._n_avg)
-                transpose = Field(img.shaped.T.ravel(),img.grid)
-                img = transpose
-
-
-                img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
-                img = self.ADC.filter_image(img)
-                
-                if self._knife_edge:
-                  pass #don't have this functionality yet
-                else:
-                    angles = self.ADC.all_speckle_angles(img)
-                    pairs = self.ADC.speckle_pairs(angles)
-                    command = np.squeeze(self.ADC.calculate_command(pairs))
-
-                    self.log.debug(f'measured speckle angles: {angles}')
-
-                self.log.debug(f'single error measurement: {-command}')
-                measurements.append(command)
-
-            error = np.nanmean(measurements)
-
-            self.log.info(f'mean error across {self._no_measurements} measurements: {error} (command calculated but not sent)')          
-            self.log.info('transitioning to idle')
-            self.transition_to_idle()
-            self.log.info('successfully transitioned to idle')
-
-        elif self._state == States.CALIB:
-            sweep_angles = np.linspace(-3,3,26)
-            diff_pointing_pairs = np.zeros((len(sweep_angles),2)) 
-
-            if self._knife_edge == False:
-                self.log.debug(f'calibrating in regular mode')
-                for i, orientation in enumerate(sweep_angles):
-                    self.log.debug(f'Step {i:d}')
-                    self.set_command(orientation, 0)
-                    self.send_command()
-
+                for i in range(self._no_measurements):
                     img = self.camera.grab_stack(self._n_avg)
                     transpose = Field(img.shaped.T.ravel(),img.grid)
-                    img = transpose
+                    img = transpose #hopefully this actually fixes the transpose issue
 
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
                     img = self.ADC.filter_image(img)
                     
-                    angles = self.ADC.all_speckle_angles()
-                    pointing_pair = self.ADC.speckle_pairs(angles)
-                    diff_pointing_pairs[i,] = pointing_pair
-            else:
-                self.log.debug(f'calibrating in knife-edge mode')
-                pass #none of the knife edge stuff works yet
+                    if self._knife_edge:
+                        pass #haven't gotten here yet
+                    else:
+                        angles = self.ADC.all_speckle_angles(img)
+                        pairs = self.ADC.speckle_pairs(angles)
+                        command = np.squeeze(self.ADC.calculate_command(pairs))
 
-            self.set_command(0,0)
-            self.send_command()
+                        self.log.debug(f'measured speckle angles: {angles}')
 
-            a1 = np.zeros(2)
-            b1 = np.zeros(2)
+                    self.log.debug(f'single error measurement: {-command}')
+                    measurements.append(command)
+                
+                error = np.nanmean(measurements)
+                self.log.debug(f'mean error across {self._no_measurements} measurements: {-error}')
 
-            for j in range(2):
-                b1[j] , a1[j] = np.polyfit(sweep_angles,diff_pointing_pairs[:,j],deg=1)
+                if np.abs(error) < 3: #setting a threshold so the prisms don't do anything crazy     
+                    self.add_command(error * self._gain,0)
+                    self.send_command()
+                    self.log.debug(f'delta command: {error * self._gain}')
+                    self.log.debug(f'total command: {self.delta_1}')
+                else: self.log.info(f'ADC command {error} exceeds acceptable threshold and was not sent')
 
-            response = np.matrix([b1])
-            self.log.debug(f'response matrix: {response}')
-            
-            if np.isnan(np.sum(response)):
-                self.log.info(f'calibration failed, measured response is NaN')
+            elif self._state == States.ONESHOT:
+                self.log.debug('oneshot state')
+                measurements = []
+                for i in range(self._no_measurements):
+                    self.log.debug('oneshot for loop')
+                    img = self.camera.grab_stack(self._n_avg)
+                    transpose = Field(img.shaped.T.ravel(),img.grid)
+                    img = transpose
+                    self.log.debug('images taken and transposed')
+
+
+                    img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
+                    img = self.ADC.filter_image(img)
+                    
+                    if self._knife_edge:
+                    pass #don't have this functionality yet
+                    else:
+                        angles = self.ADC.all_speckle_angles(img)
+                        pairs = self.ADC.speckle_pairs(angles)
+                        command = np.squeeze(self.ADC.calculate_command(pairs))
+
+                        self.log.debug(f'measured speckle angles: {angles}')
+
+                    self.log.debug(f'single error measurement: {-command}')
+                    measurements.append(command)
+
+                error = np.nanmean(measurements)
+
+                self.log.info(f'mean error across {self._no_measurements} measurements: {error} (command calculated but not sent)')          
+                self.log.info('transitioning to idle')
                 self.transition_to_idle()
-            else:
-                new_control_mtx = np.linalg.pinv(response)
+                self.log.info('successfully transitioned to idle')
 
-            self._control_mtx = new_control_mtx.T
-            self.ADC.control_matrix = self._control_mtx
-            self.log.info(f'calibration updated control matrix to: {self._control_mtx}')
+            elif self._state == States.CALIB:
+                sweep_angles = np.linspace(-3,3,26)
+                diff_pointing_pairs = np.zeros((len(sweep_angles),2)) 
 
-            self.properties['ctrl_mtx']['m00'] = self._control_mtx[0,0]
-            self.properties['ctrl_mtx']['m01'] = self._control_mtx[0,1]
-            self.update_property(self.properties['ctrl_mtx'])
-            
-            self.transition_to_idle()
+                if self._knife_edge == False:
+                    self.log.debug(f'calibrating in regular mode')
+                    for i, orientation in enumerate(sweep_angles):
+                        self.log.debug(f'Step {i:d}')
+                        self.set_command(orientation, 0)
+                        self.send_command()
+
+                        img = self.camera.grab_stack(self._n_avg)
+                        transpose = Field(img.shaped.T.ravel(),img.grid)
+                        img = transpose
+
+                        img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
+                        img = self.ADC.filter_image(img)
+                        
+                        angles = self.ADC.all_speckle_angles()
+                        pointing_pair = self.ADC.speckle_pairs(angles)
+                        diff_pointing_pairs[i,] = pointing_pair
+                else:
+                    self.log.debug(f'calibrating in knife-edge mode')
+                    pass #none of the knife edge stuff works yet
+
+                self.set_command(0,0)
+                self.send_command()
+
+                a1 = np.zeros(2)
+                b1 = np.zeros(2)
+
+                for j in range(2):
+                    b1[j] , a1[j] = np.polyfit(sweep_angles,diff_pointing_pairs[:,j],deg=1)
+
+                response = np.matrix([b1])
+                self.log.debug(f'response matrix: {response}')
+                
+                if np.isnan(np.sum(response)):
+                    self.log.info(f'calibration failed, measured response is NaN')
+                    self.transition_to_idle()
+                else:
+                    new_control_mtx = np.linalg.pinv(response)
+
+                self._control_mtx = new_control_mtx.T
+                self.ADC.control_matrix = self._control_mtx
+                self.log.info(f'calibration updated control matrix to: {self._control_mtx}')
+
+                self.properties['ctrl_mtx']['m00'] = self._control_mtx[0,0]
+                self.properties['ctrl_mtx']['m01'] = self._control_mtx[0,1]
+                self.update_property(self.properties['ctrl_mtx'])
+                
+                self.transition_to_idle()
 
 
 
