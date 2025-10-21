@@ -27,10 +27,10 @@ namespace xqt
 
 void wooferTipTilt( double &tip, double &tilt, double x, double y )
 {
-    double rot = ( 180. + 29.0 ) * 3.14159 / 180.;
+    double rot   = ( 180. + 29.0 ) * 3.14159 / 180.;
     double scale = -1.0;
 
-    tip = scale * ( x * cos( rot ) - y * sin( rot ) );
+    tip  = scale * ( x * cos( rot ) - y * sin( rot ) );
     tilt = scale * ( x * sin( rot ) + y * cos( rot ) );
 }
 
@@ -38,69 +38,216 @@ class pupilGuide : public xWidget
 {
     Q_OBJECT
 
-    enum camera
-    {
-        FLOWFS,
-        LLOWFS,
-        CAMSCIS
-    };
+  public:
+    pupilGuide( QWidget *Parent = 0, Qt::WindowFlags f = Qt::WindowFlags() );
+
+    ~pupilGuide();
+
+    // INDI Interface
+    void subscribe();
+
+    virtual void onConnect();
+    virtual void onDisconnect();
+
+    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
 
   protected:
-    //std::string m_appState;
+    // === Acquisition and Alignment === //
+    // *** Acquistion *** //
+    // --- Target --- //
+    std::string m_tcsiFsmState;
+    std::string m_tcsiCatObj;
+    bool        m_tcsiLabMode{ true };
 
-    //QMutex m_mutex;
+    std::string m_observersFsmState;
+    std::string m_observersTarget;
 
-    // --- modttm
-    std::string m_modFsmState;
+  protected slots:
+    /// Synchronize the observer's target with the tcsi's catObj.
+    void on_target_sync_pressed();
+
+    // --- Telescope --- //
+
+    // Send the acquire from guider request
+    void on_telacq_acqfromguider_pressed();
+
+    // Send the acquisition focus offset
+    void on_telacq_acqfocus_pressed();
+
+    // --- camacq --- //
+    void on_camacq_acqstar_activated( int index );
+
+    void on_camacq_acq_go_pressed();
+
+    void on_camacq_seestar_activated( int index );
+
+    void on_camacq_see_go_pressed();
+
+    void on_camacq_acq_restart_pressed();
+
+    void on_camacq_see_measure_pressed();
+
+  protected:
+    // *** PWFS Alignment *** //
+    // --- modwfs --- //
+
+    std::string m_modwfsFsmState;
+
     int m_modState{ 0 };
 
-    double m_modCh1{ 0 };
-    double m_modCh2{ 0 };
-
-    double m_camwfsFreq{ 0 };
+    double m_modFreq{ 0 };
+    double m_modFreqTarget{ 0 };
 
     double m_modRad{ 0 };
     double m_modRad_tgt{ 0 };
 
-    float m_stepSize{ 0.1 };
+    double m_camwfsFreq{ 0 };
 
-    int m_tipmovewhat{ MOVE_TTM };
+  protected slots:
 
+    void on_modwfs_rest_pressed();
+    void on_modwfs_set_pressed();
+    void on_modwfs_modulate_pressed();
 
-
-    // --- TCS
-
-    std::string m_tcsiState;
-
-    bool m_labMode {true};
-
-    // --- woofer
-
-    std::string m_dmWooferState;
-    std::string m_wooferModesState;
+  protected:
+    // --- pwfsacq --- //
+    std::string m_dmWooferFsmState;
+    std::string m_wooferModesFsmState;
 
     double m_tilt{ 0 };  ///< current value of tilt mode from wooferModes
     double m_tip{ 0 };   ///< current value of tip mode from wooferModes
     double m_focus{ 0 }; ///< current value of focus mode from wooferModes
 
-    float m_focusStepSize{ 0.1 };
+    int m_tipmovewhat{ MOVE_TTM };
 
+    float m_pwfsacqScale{ 0.5 }; // 0.5 means that it will be 0.1 on initialization
 
+    float m_pwfsacqFocScale{ 0.1 };
+
+  protected slots:
+
+    void on_pwfsacq_what_pressed();
+
+    void on_pwfsacq_u_pressed();
+    void on_pwfsacq_ul_pressed();
+    void on_pwfsacq_l_pressed();
+    void on_pwfsacq_dl_pressed();
+    void on_pwfsacq_d_pressed();
+    void on_pwfsacq_dr_pressed();
+    void on_pwfsacq_r_pressed();
+    void on_pwfsacq_ur_pressed();
+    void on_pwfsacq_scale_pressed();
+
+    void on_pwfsfoc_p_pressed();
+    void on_pwfsfoc_m_pressed();
+    void on_pwfsfoc_scale_pressed();
+
+    // **** Pupil Alignment **** //
+
+    // --- Act Align Loop ---- //
+
+    // --- Act Align Sensor --- //
+    // --- Pupil Tracking Loop --- //
+    // --- Auto Pupil Alignment --- //
+
+    // void on_autoalign_start_pressed();
+    // void on_autoalign_stop_pressed();
+
+    // ******** alignment *********//
+
+    // ===== Manual Alignment ===== //
+    // **** F-test **** //
+    // --- Tweeter --- //
+
+  protected slots:
+    void on_tweeter_set_pressed();
+
+  protected:
+    // --- TTM Pupil Buttons --- //
+
+  protected slots:
+    void on_ttmpupil_ul_pressed();
+    void on_ttmpupil_dl_pressed();
+    void on_ttmpupil_dr_pressed();
+    void on_ttmpupil_ur_pressed();
+    void on_ttmpupil_scale_pressed();
+
+  protected:
+    // --- TTM Pupil --- //
+
+  protected slots:
+    void on_ttmpupil_rest_pressed();
+    void on_ttmpupil_set_pressed();
+
+  protected:
+    // **** J-test **** //
+    // --- NCPC --- //
+
+  protected slots:
+    void on_ncpc_set_pressed();
+
+  protected:
+    // --- TTM Peri. Buttons --- //
+
+  protected slots:
+    void on_ttmperi_l_pressed();
+    void on_ttmperi_r_pressed();
+    void on_ttmperi_u_pressed();
+    void on_ttmperi_d_pressed();
+    void on_ttmperi_scale_pressed();
+
+  protected:
+    // --- TTM Peri. --- //
+
+    std::string m_ttmPeriFsmState;
+    double      m_ttmperi_ch1{ 0 };
+    double      m_ttmperi_ch2{ 0 };
+
+    float m_ttmPeriStepSize{ 50 }; // This will be 25 after init
+
+  protected slots:
+    void on_ttmperi_rest_pressed();
+    void on_ttmperi_set_pressed();
+
+  protected:
+    // **** PWFS Pupils **** //
+    // --- Pupil Fitting --- //
+    // --- Pupil Positions --- //
+    // --- Camera Lens --- //
+    std::string m_camlensxFsmState;
+    std::string m_camlensyFsmState;
+    float       m_camlensx_pos{ 0 };
+    float       m_camlensy_pos{ 0 };
+
+    float m_camlensStepSize{ 0.025 }; // this will set it to 0.01 after init
+    // --- Camera Lens Buttons --- //
+  protected slots:
+    void on_camlens_u_pressed();
+    void on_camlens_l_pressed();
+    void on_camlens_d_pressed();
+    void on_camlens_r_pressed();
+    void on_camlens_scale_pressed();
+
+  protected:
+    // **** Pico Sci-x **** //
+
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+  protected:
     // --- picoscix
-    std::string m_picoState {"UNKNOWN"};
-    int m_picoscixPos {-1000000000};
+    std::string m_picoState{ "UNKNOWN" };
+    int         m_picoscixPos{ -1000000000 };
 
-    int m_picoscix_stepSize {50};
+    int         m_picoscix_stepSize{ 50 };
     std::string m_picoscix_gotoSelection;
-
-
 
     // --- camwfs-fit
     std::string m_camwfsfitState;
-    double m_med1{ 0 };
-    double m_med2{ 0 };
-    double m_med3{ 0 };
-    double m_med4{ 0 };
+    double      m_pwfs_median_1{ 0 };
+    double      m_pwfs_median_2{ 0 };
+    double      m_pwfs_median_3{ 0 };
+    double      m_pwfs_median_4{ 0 };
 
     double m_x1{ 0 };
     double m_y1{ 0 };
@@ -139,67 +286,39 @@ class pupilGuide : public xWidget
 
     // -- camwfs-avg
     std::string m_camwfsavgState;
-    unsigned m_nAverage_current{ 0 };
-    unsigned m_nAverage_target{ 0 };
+    unsigned    m_nAverage_current{ 0 };
+    unsigned    m_nAverage_target{ 0 };
 
     // -- dmtweeter
     std::string m_dmtweeterState;
-    bool m_dmtweeterTestSet{ false };
+    bool        m_dmtweeterTestSet{ false };
 
     // -- dmncpc
     std::string m_dmncpcState;
-    bool m_dmncpcTestSet{ false };
+    bool        m_dmncpcTestSet{ false };
 
     // -- ttmpupil
     std::string m_pupFsmState;
-    double m_pupCh1{ 0 };
-    double m_pupCh2{ 0 };
+    double      m_ttmpupil_ch1{ 0 };
+    double      m_ttmpupil_ch2{ 0 };
 
     float m_pupStepSize{ 0.5 };
 
-    int m_pupCam{ CAMSCIS };
-
-    // -- ttmperi
-    std::string m_ttmPeriFsmState;
-    double m_ttmPeriCh1{ 0 };
-    double m_ttmPeriCh2{ 0 };
-
-    float m_ttmPeriStepSize{ 25 };
-
     // -- Camera Lens
-    std::string m_camlensxFsmState;
-    std::string m_camlensyFsmState;
-    float m_camlensx_pos{ 0 };
-    float m_camlensy_pos{ 0 };
-
-    float m_camlensStepSize{ 0.01 };
 
     // ****** Alignment ******** //
 
     // --- camwfs-align
     std::string m_camwfs_align_fsmState;
-    bool m_camwfsAlignLoopState{ false };
+    bool        m_camwfsAlignLoopState{ false };
 
     // --- twAlign-camwfs-ctrl
     std::string m_twAlign_camwfs_ctrl_fsmState;
-    bool m_twAlignLoopState {false};
+    bool        m_twAlignLoopState{ false };
 
     // --- twAlign-camwfs-wfs
     std::string m_twAlign_camwfs_wfs_fsmState;
-    bool m_twAlignSensorState {false};
-
-  public:
-    pupilGuide( QWidget *Parent = 0, Qt::WindowFlags f = Qt::WindowFlags() );
-
-    ~pupilGuide();
-
-    void subscribe();
-
-    virtual void onConnect();
-    virtual void onDisconnect();
-
-    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
-    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    bool        m_twAlignSensorState{ false };
 
     void modGUISetEnable( bool enableModGUI, bool enableModArrows );
 
@@ -209,8 +328,8 @@ class pupilGuide : public xWidget
     /** IF whichcl is CAMLENS_BOTH, the action is applied to all components.
      * If it's CAMLENS_X or CAMLENS_Y, it is only applied to that access.  The common components are then enabled.
      */
-    void camlensSetEnabled( bool enabled,            ///< true for enabled, false for disabled
-                            int whichcl = CAMLENS_BOTH ///< Which axis, or both.  CAMLENS_X, CAMLENS_Y, CAMLENS_BOTH
+    void camlensSetEnabled( bool enabled,               ///< true for enabled, false for disabled
+                            int  whichcl = CAMLENS_BOTH ///< Which axis, or both.  CAMLENS_X, CAMLENS_Y, CAMLENS_BOTH
     );
 
     void camwfs_align_setEnabled( bool enabled, bool all );
@@ -226,75 +345,19 @@ class pupilGuide : public xWidget
 
     //----------- modttm
 
-    void on_buttonMod_mod_pressed();
-    void on_buttonMod_set_pressed();
-    void on_buttonMod_rest_pressed();
-
-    void on_button_ttmtel_pressed();
-
-    void on_button_tip_u_pressed();
-    void on_button_tip_ul_pressed();
-    void on_button_tip_l_pressed();
-    void on_button_tip_dl_pressed();
-    void on_button_tip_d_pressed();
-    void on_button_tip_dr_pressed();
-    void on_button_tip_r_pressed();
-    void on_button_tip_ur_pressed();
-    void on_button_tip_scale_pressed();
-
-    //------------- focus
-    void on_button_focus_p_pressed();
-    void on_button_focus_m_pressed();
-    void on_button_focus_scale_pressed();
-
     //------------- picoscix
-    void move_picoscix(int delta);
+    void move_picoscix( int delta );
     void on_picoscix_l_pressed();
     void on_picoscix_scale_pressed();
     void on_picoscix_r_pressed();
     void on_picoscix_go_pressed();
 
-    //----------- dmtweeter
-    void on_buttonTweeterTest_set_pressed();
-
-    //----------- dmncpc
-    void on_buttonNCPCTest_set_pressed();
-
     //----------- ttmpupil
-    void on_buttonPup_rest_pressed();
-    void on_buttonPup_set_pressed();
-
-    void on_button_camera_pressed();
-
-    void on_button_pup_ul_pressed();
-    void on_button_pup_dl_pressed();
-    void on_button_pup_dr_pressed();
-    void on_button_pup_ur_pressed();
-    void on_button_pup_scale_pressed();
 
     //---------- TTM Peri
-    void on_button_ttmPeri_rest_pressed();
-    void on_button_ttmPeri_set_pressed();
-
-    void on_button_ttmPeri_l_pressed();
-    void on_button_ttmPeri_r_pressed();
-    void on_button_ttmPeri_u_pressed();
-    void on_button_ttmPeri_d_pressed();
-    void on_button_ttmPeri_scale_pressed();
 
     void toggleExpFit( bool visible );
-    void on_buttonExpFit_pressed();
-
-    void on_button_camlens_u_pressed();
-    void on_button_camlens_l_pressed();
-    void on_button_camlens_d_pressed();
-    void on_button_camlens_r_pressed();
-    void on_button_camlens_scale_pressed();
-
-    // ******** alignment *********//
-
-    void on_button_startAlignment_pressed();
-    void on_button_stopAlignment_pressed();
+    void on_pwfs_coords_expand_pressed();
 
   private:
     Ui::pupilGuide ui;
@@ -302,55 +365,302 @@ class pupilGuide : public xWidget
 
 pupilGuide::pupilGuide( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, f )
 {
-    char ss[64]; //for scale buttons
+    char ss[64]; // for scale buttons
 
     ui.setupUi( this );
 
-    ui.button_focus_scale->setProperty( "isScaleButton", true );
-    ui.button_pup_scale->setProperty( "isScaleButton", true );
-    ui.button_ttmPeri_scale->setProperty( "isScaleButton", true );
+    // ===== Acquisition and Alignment ===== //
+    // **** Acquistion **** //
+    // --- Target --- //
+    setXwFont( ui.target_label );
 
-    //-----------modwfs controls ------------
+    ui.target_catobj->setup( "tcsi", "catalog", statusEntry::STRING, "Catalog", "" );
+    ui.target_catobj->currEl( "object" );
+    ui.target_catobj->targEl( "" );
+    ui.target_catobj->readOnly( true );
+    ui.target_catobj->setStretch( 0, 1, 2 );
 
-    setXwFont( ui.label_modulation );
+    ui.target_name->setup( "observers", "target", statusEntry::STRING, "Observer", "" );
+    ui.target_name->setStretch( 0, 1, 2 );
+
+    // --- Telescope --- //
+
+    setXwFont( ui.telacq_label );
+    setXwFont( ui.telacq_acqfromguider );
+    setXwFont( ui.telacq_acqfocus );
+    setXwFont( ui.telacq_override_label );
+
+    // --- camacq --- //
+
+    setXwFont( ui.camacq_label );
+    setXwFont( ui.camacq_acq_label );
+    setXwFont( ui.camacq_see_label );
+    setXwFont( ui.camacq_acq_restart );
+    setXwFont( ui.camacq_see_measure );
+
+    // **** PWFS Alignment **** //
+    // --- modwfs --- //
+
+    setXwFont( ui.modwfs_label );
 
     ui.modwfs_fsm->device( "modwfs" );
     ui.modwfs_fsm->NOTHOMED( "RIP" );
-    ui.modwfs_fsm->READY("SET");
-    ui.modwfs_fsm->OPERATING("MODULATING");
+    ui.modwfs_fsm->READY( "SET" );
+    ui.modwfs_fsm->OPERATING( "MODULATING" );
 
-    setXwFont( ui.label_modFreq );
-    setXwFont( ui.label_modRad );
+    setXwFont( ui.modwfs_freq_label );
+    setXwFont( ui.modwfs_rad_label );
 
-    setXwFont( ui.buttonMod_rest );
-    setXwFont( ui.buttonMod_set );
-    setXwFont( ui.buttonMod_mod );
+    ui.modwfs_freq->setup( "modwfs", "modFrequency", statusEntry::FLOAT, "", "" );
+    ui.modwfs_freq->setStretch( 0, 0, 6 ); // removes spacer and maximizes text field
+    ui.modwfs_freq->format( "%0.1f" );
 
-    ui.modFreq_current->setup( "modwfs", "modFrequency", statusEntry::FLOAT, "", "" );
-    ui.modFreq_current->setStretch( 0, 0, 6 ); // removes spacer and maximizes text field
-    ui.modFreq_current->format( "%0.1f" );
-    //ui.modFreq_current->onDisconnect();
+    ui.modwfs_rad->setup( "modwfs", "modRadius", statusEntry::FLOAT, "", "" );
+    ui.modwfs_rad->setStretch( 0, 0, 6 ); // removes spacer and maximizes text field
+    ui.modwfs_rad->format( "%0.1f" );
 
-    ui.modRad_current->setup( "modwfs", "modRadius", statusEntry::FLOAT, "", "" );
-    ui.modRad_current->setStretch( 0, 0, 6 ); // removes spacer and maximizes text field
-    ui.modRad_current->format( "%0.1f" );
-    //ui.modRad_current->onDisconnect();
+    setXwFont( ui.modwfs_rest );
+    setXwFont( ui.modwfs_set );
+    setXwFont( ui.modwfs_modulate );
 
-    ui.modCh1->setup( "fxngenmodwfs", "C1ofst", statusEntry::FLOAT, "Ch1", "V" );
-    ui.modCh1->currEl( "value" );
-    ui.modCh1->targEl( "value" );
-    ui.modCh1->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
-    ui.modCh1->format( "%0.2f" );
-    //ui.modCh1->onDisconnect();
+    ui.modwfs_ch1->setup( "fxngenmodwfs", "C1ofst", statusEntry::FLOAT, "Ch1", "V" );
+    ui.modwfs_ch1->currEl( "value" );
+    ui.modwfs_ch1->targEl( "value" );
+    ui.modwfs_ch1->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
+    ui.modwfs_ch1->format( "%0.2f" );
 
-    ui.modCh2->setup( "fxngenmodwfs", "C2ofst", statusEntry::FLOAT, "Ch2", "V" );
-    ui.modCh2->currEl( "value" );
-    ui.modCh2->targEl( "value" );
-    ui.modCh2->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
-    ui.modCh2->format( "%0.2f" );
-    //ui.modCh2->onDisconnect();
+    ui.modwfs_ch2->setup( "fxngenmodwfs", "C2ofst", statusEntry::FLOAT, "Ch2", "V" );
+    ui.modwfs_ch2->currEl( "value" );
+    ui.modwfs_ch2->targEl( "value" );
+    ui.modwfs_ch2->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
+    ui.modwfs_ch2->format( "%0.2f" );
 
-    //-----------tip alignment controls ------------
+    // --- pwfsacq --- //
+
+    setXwFont( ui.tip_alignment_label );
+
+    setXwFont( ui.pwfsacq_what );
+
+    ui.pwfsacq_scale->setProperty( "isScaleButton", true );
+    on_pwfsacq_scale_pressed();
+
+    ui.pwfsfoc_scale->setProperty( "isScaleButton", true );
+    on_pwfsfoc_scale_pressed();
+
+    // **** Pupil Alignment **** //
+    // --- Act Align Loop ---- //
+
+    setXwFont( ui.actalign_loop_label );
+
+    ui.actalign_loop_deltaX->setup( "twAlign-camwfs-ctrl", "deltas", statusEntry::FLOAT, "", "" );
+    ui.actalign_loop_deltaX->currEl( "delta0" );
+    ui.actalign_loop_deltaX->highlightChanges( false );
+    ui.actalign_loop_deltaX->readOnly( true );
+    ui.actalign_loop_deltaX->setStretch( 0, 0, 6 ); // removes spacer and maximizes text field
+    ui.actalign_loop_deltaX->format( "%0.03f" );
+
+    ui.actalign_loop_deltaY->setup( "twAlign-camwfs-ctrl", "deltas", statusEntry::FLOAT, "", "" );
+    ui.actalign_loop_deltaY->currEl( "delta1" );
+    ui.actalign_loop_deltaY->highlightChanges( false );
+    ui.actalign_loop_deltaY->readOnly( true );
+    ui.actalign_loop_deltaY->setStretch( 0, 0, 6 ); // removes spacer and maximizes text field
+    ui.actalign_loop_deltaY->format( "%0.03f" );
+
+    ui.actalign_loop_slider->setup( "twAlign-camwfs-ctrl", "loop_state", "toggle", "" );
+    ui.actalign_loop_slider->setStretch( 0, 0, 10, true, true );
+
+    ui.actalign_loop_gain->setup( "twAlign-camwfs-ctrl", "loop_gain", statusEntry::FLOAT, "loop gain", "" );
+    ui.actalign_loop_gain->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
+    ui.actalign_loop_gain->format( "%0.2f" );
+
+    // --- Act Align Sensor --- //
+
+    setXwFont( ui.actalign_sensor_label );
+
+    ui.actalign_sensor_slider->setup( "twAlign-camwfs-wfs", "continuous", "toggle", "" );
+    ui.actalign_sensor_slider->setStretch( 0, 0, 10, true, true );
+
+    ui.actalign_sensor_nAverage->setup( "twAlign-camwfs-wfs", "nPokeAverage", statusEntry::INT, "no. average", "" );
+    ui.actalign_sensor_nAverage->setStretch( 1, 3, 6 );
+    ui.actalign_sensor_nAverage->format( "%d" );
+
+    ui.actalign_sensor_nImages->setup( "twAlign-camwfs-wfs", "nPokeImages", statusEntry::INT, "no. images", "" );
+    ui.actalign_sensor_nImages->setStretch( 1, 3, 6 );
+    ui.actalign_sensor_nImages->format( "%d" );
+
+    ui.actalign_sensor_pokeAmp->setup( "twAlign-camwfs-wfs", "poke_amp", statusEntry::FLOAT, "poke amp.", "um" );
+    ui.actalign_sensor_pokeAmp->setStretch( 1, 3, 6 );
+    ui.actalign_sensor_pokeAmp->format( "%0.2f" );
+
+    // --- Pupil Tracking Loop --- //
+
+    setXwFont( ui.puptrack_loop_label );
+
+    ui.puptrack_loop_deltaX->setup( "camwfs-align", "deltas", statusEntry::FLOAT, "", "" );
+    ui.puptrack_loop_deltaX->currEl( "delta0" );
+    ui.puptrack_loop_deltaX->highlightChanges( false );
+    ui.puptrack_loop_deltaX->readOnly( true );
+    ui.puptrack_loop_deltaX->setStretch( 0, 0, 6 ); // removes spacer and maximizes text field
+    ui.puptrack_loop_deltaX->format( "%0.03f" );
+
+    ui.puptrack_loop_deltaY->setup( "camwfs-align", "deltas", statusEntry::FLOAT, "", "" );
+    ui.puptrack_loop_deltaY->currEl( "delta1" );
+    ui.puptrack_loop_deltaY->highlightChanges( false );
+    ui.puptrack_loop_deltaY->readOnly( true );
+    ui.puptrack_loop_deltaY->setStretch( 0, 0, 6 ); // removes spacer and maximizes text field
+    ui.puptrack_loop_deltaY->format( "%0.03f" );
+
+    ui.puptrack_loop_slider->setup( "camwfs-align", "loop_state", "toggle", "" );
+    ui.puptrack_loop_slider->setStretch( 0, 0, 10, true, true );
+
+    ui.puptrack_loop_gain->setup( "camwfs-align", "loop_gain", statusEntry::FLOAT, "loop gain", "" );
+    ui.puptrack_loop_gain->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
+    ui.puptrack_loop_gain->format( "%0.2f" );
+
+    // --- Auto Pupil Alignment --- //
+
+    setXwFont( ui.autoalign_label );
+    // Have to deal wit this -- it's not actually a toggle slider but it should be
+    // ui.autoalign_slider->setup( "camwfs-align", "loop_state", "toggle", "" );
+    // ui.autoalign_slider->setStretch( 0, 0, 10, true, true );
+
+    // ===== Manual Alignment ===== //
+    // **** F-test **** //
+    // --- Tweeter --- //
+
+    setXwFont( ui.tweeter_label );
+    setXwFont( ui.tweeter_set );
+
+    // --- TTM Pupil Buttons --- //
+
+    ui.ttmpupil_scale->setProperty( "isScaleButton", true );
+    on_ttmpupil_scale_pressed();
+
+    // --- TTM Pupil --- //
+
+    setXwFont( ui.ttmpupil_label );
+    setXwFont( ui.ttmpupil_rest );
+    setXwFont( ui.ttmpupil_set );
+    ui.ttmpupil_fsm->device( "ttmpupil" );
+    ui.ttmpupil_fsm->NOTHOMED( "RIP" );
+    ui.ttmpupil_fsm->HOMING( "SETTING" );
+    ui.ttmpupil_fsm->READY( "SET" );
+
+    ui.ttmpupil_ch1->setup( "ttmpupil", "pos_1", statusEntry::FLOAT, "Ch 1", "V" );
+    ui.ttmpupil_ch1->setStretch( 1, 2, 4 );
+    ui.ttmpupil_ch1->highlightChanges( false );
+
+    ui.ttmpupil_ch2->setup( "ttmpupil", "pos_2", statusEntry::FLOAT, "Ch 2", "V" );
+    ui.ttmpupil_ch2->setStretch( 1, 2, 4 );
+    ui.ttmpupil_ch2->highlightChanges( false );
+
+    // **** J-test **** //
+    // --- NCPC --- //
+
+    setXwFont( ui.ncpc_label );
+    setXwFont( ui.ncpc_set );
+
+    // --- TTM Peri. Buttons --- //
+
+    ui.ttmperi_scale->setProperty( "isScaleButton", true );
+    on_ttmperi_scale_pressed();
+
+    // --- TTM Peri. --- //
+
+    setXwFont( ui.ttmperi_label );
+    setXwFont( ui.ttmperi_rest );
+    setXwFont( ui.ttmperi_set );
+    ui.ttmperi_fsm->device( "ttmperi" );
+    ui.ttmperi_fsm->READY( "RIP" );
+    ui.ttmperi_fsm->OPERATING( "SET" );
+
+    ui.ttmperi_ch1->setup( "ttmperi", "axis1_voltage", statusEntry::FLOAT, "Ch 1", "V" );
+    ui.ttmperi_ch1->setStretch( 1, 2, 4 );
+    ui.ttmperi_ch1->highlightChanges( false );
+
+    ui.ttmperi_ch2->setup( "ttmperi", "axis2_voltage", statusEntry::FLOAT, "Ch 2", "V" );
+    ui.ttmperi_ch2->highlightChanges( false );
+    ui.ttmperi_ch2->setStretch( 1, 2, 4 );
+
+    // **** PWFS Pupils **** //
+    // --- Pupil Fitting --- //
+
+    setXwFont( ui.pwfsfit_label );
+
+    ui.pwfsfit_threshold->setup( "camwfs-fit", "threshold", statusEntry::FLOAT, "Thresh", "" );
+    ui.pwfsfit_threshold->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
+    ui.pwfsfit_threshold->format( "%0.3f" );
+
+    ui.pwfsfit_avgtime->setup( "camwfs-avg", "avgTime", statusEntry::FLOAT, "Avg. T.", "s" );
+    ui.pwfsfit_avgtime->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
+    ui.pwfsfit_avgtime->format( "%0.3f" );
+
+    setXwFont( ui.pwfs_medians_label );
+    setXwFont( ui.pwfs_median_1 );
+    setXwFont( ui.pwfs_median_2 );
+    setXwFont( ui.pwfs_median_3 );
+    setXwFont( ui.pwfs_median_4 );
+    setXwFont( ui.pwfs_medians_delta );
+
+    // --- Pupil Positions --- //
+
+    setXwFont( ui.pwfs_coords_label );
+    setXwFont( ui.pwfs_x_label );
+    setXwFont( ui.pwfs_y_label );
+    setXwFont( ui.pwfs_D_label );
+    setXwFont( ui.pwfs_UR_label );
+    setXwFont( ui.pwfs_UL_label );
+    setXwFont( ui.pwfs_LR_label );
+    setXwFont( ui.pwfs_LL_label );
+    setXwFont( ui.pwfs_avg_label );
+    setXwFont( ui.pwfs_UR_x );
+    setXwFont( ui.pwfs_UR_y );
+    setXwFont( ui.pwfs_UR_D );
+    setXwFont( ui.pwfs_UL_x );
+    setXwFont( ui.pwfs_UL_y );
+    setXwFont( ui.pwfs_UL_D );
+    setXwFont( ui.pwfs_LR_x );
+    setXwFont( ui.pwfs_LR_y );
+    setXwFont( ui.pwfs_LR_D );
+    setXwFont( ui.pwfs_LL_x );
+    setXwFont( ui.pwfs_LL_y );
+    setXwFont( ui.pwfs_LL_D );
+    setXwFont( ui.pwfs_avg_x );
+    setXwFont( ui.pwfs_avg_y );
+    setXwFont( ui.pwfs_avg_D );
+
+    setXwFont( ui.pwfs_coords_delta );
+
+    // --- Camera Lens --- //
+
+    setXwFont( ui.camlens_label );
+    setXwFont( ui.camlens_fsm_x_label );
+    setXwFont( ui.camlens_fsm_y_label );
+    ui.camlens_fsm_x->device( "stagecamlensx" );
+    ui.camlens_fsm_y->device( "stagecamlensy" );
+
+    ui.camlens_x->setup( "stagecamlensx", "position", statusEntry::FLOAT, "X", "mm" );
+    ui.camlens_x->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
+    ui.camlens_x->format( "%0.4f" );
+
+    ui.camlens_y->setup( "stagecamlensy", "position", statusEntry::FLOAT, "Y", "mm" );
+    ui.camlens_y->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
+    ui.camlens_y->format( "%0.4f" );
+
+    // --- Camera Lens Buttons --- //
+    ui.camlens_scale->setProperty( "isScaleButton", true );
+    on_camlens_scale_pressed();
+
+    // **** Pico Sci-x **** //
+
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
     setXwFont( ui.picoscix_label );
 
@@ -359,215 +669,25 @@ pupilGuide::pupilGuide( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, 
     ui.picoscix_pos->format( "%d" );
 
     ui.picoscix_scale->setProperty( "isScaleButton", true );
-    snprintf( ss, 5, "%0.2f", m_picoscix_stepSize/1000. );
-    ui.button_tip_scale->setText( ss );
+    snprintf( ss, 5, "%0.2f", m_picoscix_stepSize / 1000. );
+    ui.picoscix_scale->setText( ss );
 
-    ui.picoscix_combo->addItem("    ");
-    ui.picoscix_combo->addItem("65-35");
-    ui.picoscix_combo->addItem("Ha-IR");
-    ui.picoscix_combo->setCurrentText("    ");
+    ui.picoscix_combo->addItem( "    " );
+    ui.picoscix_combo->addItem( "65-35" );
+    ui.picoscix_combo->addItem( "Ha-IR" );
+    ui.picoscix_combo->setCurrentText( "    " );
 
     setXwFont( ui.picoscix_combo_label );
 
-
-    //-----------orphans ------------
-    ui.button_tip_scale->setProperty( "isScaleButton", true );
-    snprintf( ss, 5, "%0.2f", m_stepSize );
-    ui.button_tip_scale->setText( ss );
-
-    snprintf( ss, 5, "%0.2f", m_focusStepSize );
-    ui.button_focus_scale->setText( ss );
-
-    //-----------picoscix controls ------------
-    setXwFont( ui.label_tipAlignment );
-
-
-    // orphans:
-
-
-    snprintf( ss, 5, "%0.2f", m_pupStepSize );
-    ui.button_pup_scale->setText( ss );
-
-    snprintf( ss, 5, "%0.2f", m_camlensStepSize * 10 );
-    ui.button_camlens_scale->setText( ss );
-
-    snprintf( ss, 5, "%0.2f", m_ttmPeriStepSize / 100. );
-    ui.button_ttmPeri_scale->setText( ss );
-
-
-    setXwFont( ui.labelMedianFluxes );
-    setXwFont( ui.med1 );
-    setXwFont( ui.med2 );
-    setXwFont( ui.med3 );
-    setXwFont( ui.med4 );
-    setXwFont( ui.setDelta );
-
-
-    // tweeter controls
-    setXwFont( ui.label_tweeter );
-    setXwFont( ui.buttonTweeterTest_set );
-
-    // ncpc controls
-    setXwFont( ui.label_ncpc );
-    setXwFont( ui.buttonNCPCTest_set );
-
-    //-----------ttmpupil controls ------------
-    setXwFont( ui.labelPupilSteering );
-    setXwFont( ui.buttonPup_rest );
-    setXwFont( ui.buttonPup_set );
-    ui.pupState->device( "ttmpupil" );
-    ui.pupState->NOTHOMED( "RIP" );
-    ui.pupState->HOMING( "SETTING" );
-    ui.pupState->READY("SET");
-
-    ui.pupCh1->setup( "ttmpupil", "pos_1", statusEntry::FLOAT, "Ch 1", "V" );
-    ui.pupCh1->setStretch( 1, 2, 4 );
-    ui.pupCh1->highlightChanges( false );
-
-    ui.pupCh2->setup( "ttmpupil", "pos_2", statusEntry::FLOAT, "Ch 2", "V" );
-    ui.pupCh2->setStretch( 1, 2, 4 );
-    ui.pupCh2->highlightChanges( false );
-
-    //-----------ttmperi controls ------------
-    setXwFont( ui.labelTTMPeri );
-    setXwFont( ui.buttonPup_rest );
-    setXwFont( ui.buttonPup_set );
-    ui.ttmPeriState->device( "ttmperi" );
-    ui.ttmPeriState->READY("RIP");
-    ui.ttmPeriState->OPERATING( "SET" );
-
-    ui.ttmPeriCh1->setup( "ttmperi", "axis1_voltage", statusEntry::FLOAT, "Ch 1", "V" );
-    ui.ttmPeriCh1->setStretch( 1, 2, 4 );
-    ui.ttmPeriCh1->highlightChanges( false );
-
-    ui.ttmPeriCh2->setup( "ttmperi", "axis2_voltage", statusEntry::FLOAT, "Ch 2", "V" );
-    ui.ttmPeriCh2->highlightChanges( false );
-    ui.ttmPeriCh2->setStretch( 1, 2, 4 );
-
     /* pupil tracking loop */
-    setXwFont( ui.label_pupTrackLoop );
-
-    ui.pupTrackLoop_deltaX->setup( "camwfs-align", "deltas", statusEntry::FLOAT, "", "" );
-    ui.pupTrackLoop_deltaX->currEl( "delta0" );
-    ui.pupTrackLoop_deltaX->highlightChanges( false );
-    ui.pupTrackLoop_deltaX->readOnly( true );
-    ui.pupTrackLoop_deltaX->setStretch( 0, 0, 6 ); // removes spacer and maximizes text field
-    ui.pupTrackLoop_deltaX->format( "%0.03f" );
-
-    ui.pupTrackLoop_deltaY->setup( "camwfs-align", "deltas", statusEntry::FLOAT, "", "" );
-    ui.pupTrackLoop_deltaY->currEl( "delta1" );
-    ui.pupTrackLoop_deltaY->highlightChanges( false );
-    ui.pupTrackLoop_deltaY->readOnly( true );
-    ui.pupTrackLoop_deltaY->setStretch( 0, 0, 6 ); // removes spacer and maximizes text field
-    ui.pupTrackLoop_deltaY->format( "%0.03f" );
-
-    ui.pupTrackLoop_slider->setup( "camwfs-align", "loop_state", "toggle", "" );
-    ui.pupTrackLoop_slider->setStretch( 0, 0, 10, true, true );
-
-    ui.pupTrackLoop_gain->setup( "camwfs-align", "loop_gain", statusEntry::FLOAT, "loop gain", "" );
-    ui.pupTrackLoop_gain->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
-    ui.pupTrackLoop_gain->format( "%0.2f" );
 
     /* actuator alignment loop */
-    setXwFont( ui.label_actAlignLoop );
-
-    ui.actAlignLoop_deltaX->setup( "twAlign-camwfs-ctrl", "deltas", statusEntry::FLOAT, "", "" );
-    ui.actAlignLoop_deltaX->currEl( "delta0" );
-    ui.actAlignLoop_deltaX->highlightChanges( false );
-    ui.actAlignLoop_deltaX->readOnly( true );
-    ui.actAlignLoop_deltaX->setStretch( 0, 0, 6 ); // removes spacer and maximizes text field
-    ui.actAlignLoop_deltaX->format( "%0.03f" );
-
-    ui.actAlignLoop_deltaY->setup( "twAlign-camwfs-ctrl", "deltas", statusEntry::FLOAT, "", "" );
-    ui.actAlignLoop_deltaY->currEl( "delta1" );
-    ui.actAlignLoop_deltaY->highlightChanges( false );
-    ui.actAlignLoop_deltaY->readOnly( true );
-    ui.actAlignLoop_deltaY->setStretch( 0, 0, 6 ); // removes spacer and maximizes text field
-    ui.actAlignLoop_deltaY->format( "%0.03f" );
-
-    ui.actAlignLoop_slider->setup( "twAlign-camwfs-ctrl", "loop_state", "toggle", "" );
-    ui.actAlignLoop_slider->setStretch( 0, 0, 10, true, true );
-
-    ui.actAlignLoop_gain->setup( "twAlign-camwfs-ctrl", "loop_gain", statusEntry::FLOAT, "loop gain", "" );
-    ui.actAlignLoop_gain->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
-    ui.actAlignLoop_gain->format( "%0.2f" );
 
     /* actuator alignment sensor */
-    setXwFont( ui.label_actAlignSensor );
-
-    ui.actAlignSensor_slider->setup( "twAlign-camwfs-wfs", "continuous", "toggle", "" );
-    ui.actAlignSensor_slider->setStretch( 0, 0, 10, true, true );
-
-    ui.actAlignSensor_nAverage->setup( "twAlign-camwfs-wfs", "nPokeAverage", statusEntry::INT, "no. average", "" );
-    ui.actAlignSensor_nAverage->setStretch( 1, 3, 6 );
-    ui.actAlignSensor_nAverage->format( "%d" );
-
-    ui.actAlignSensor_nImages->setup( "twAlign-camwfs-wfs", "nPokeImages", statusEntry::INT, "no. images", "" );
-    ui.actAlignSensor_nImages->setStretch( 1, 3, 6 );
-    ui.actAlignSensor_nImages->format( "%d" );
-
-    ui.actAlignSensor_pokeAmp->setup( "twAlign-camwfs-wfs", "poke_amp", statusEntry::FLOAT, "poke amp.", "um" );
-    ui.actAlignSensor_pokeAmp->setStretch( 1, 3, 6 );
-    ui.actAlignSensor_pokeAmp->format( "%0.2f" );
 
     /* alignment start/stop */
-    setXwFont( ui.label_alignment );
-    setXwFont( ui.button_startAlignment );
-    setXwFont( ui.button_stopAlignment );
-
-    setXwFont( ui.labelPupilFitting ); //,1.2);
-
-    setXwFont( ui.label_pupilPositions );
-    setXwFont( ui.labelx );
-    setXwFont( ui.labely );
-    setXwFont( ui.labelD );
-    setXwFont( ui.labelUR );
-    setXwFont( ui.labelUL );
-    setXwFont( ui.labelLR );
-    setXwFont( ui.labelLL );
-    setXwFont( ui.labelAvg );
-    setXwFont( ui.coordUR_x );
-    setXwFont( ui.coordUR_y );
-    setXwFont( ui.coordUR_D );
-    setXwFont( ui.coordUL_x );
-    setXwFont( ui.coordUL_y );
-    setXwFont( ui.coordUL_D );
-    setXwFont( ui.coordLR_x );
-    setXwFont( ui.coordLR_y );
-    setXwFont( ui.coordLR_D );
-    setXwFont( ui.coordLL_x );
-    setXwFont( ui.coordLL_y );
-    setXwFont( ui.coordLL_D );
-    setXwFont( ui.coordAvg_x );
-    setXwFont( ui.coordAvg_y );
-    setXwFont( ui.coordAvg_D );
-
-    setXwFont( ui.setDelta_pup );
-
-    ui.fitThreshold->setup( "camwfs-fit", "threshold", statusEntry::FLOAT, "Thresh", "" );
-    ui.fitThreshold->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
-    ui.fitThreshold->format( "%0.3f" );
-
-    ui.fitAvgTime->setup( "camwfs-avg", "avgTime", statusEntry::FLOAT, "Avg. T.", "s" );
-    ui.fitAvgTime->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
-    ui.fitAvgTime->format( "%0.3f" );
 
     /* Camera Lens */
-    setXwFont( ui.label_camlens );
-    setXwFont( ui.label_camlensX_fsm );
-    setXwFont( ui.label_camlensY_fsm );
-    ui.camlensX_fsm->device( "stagecamlensx" );
-    ui.camlensY_fsm->device( "stagecamlensy" );
-
-    ui.camlensX_pos->setup( "stagecamlensx", "position", statusEntry::FLOAT, "X", "mm" );
-    ui.camlensX_pos->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
-    ui.camlensX_pos->format( "%0.4f" );
-
-    ui.camlensY_pos->setup( "stagecamlensy", "position", statusEntry::FLOAT, "Y", "mm" );
-    ui.camlensY_pos->setStretch( 0, 1, 6 ); // removes spacer and maximizes text field
-    ui.camlensY_pos->format( "%0.4f" );
-
-    ui.button_camlens_scale->setProperty( "isScaleButton", true );
 
     // Set the pupil fit boxes to invisible at startup
     toggleExpFit( false );
@@ -590,14 +710,17 @@ void pupilGuide::subscribe()
         return;
     }
 
-    m_parent->addSubscriber(ui.modwfs_fsm);
+    m_parent->addSubscriber( ui.target_catobj );
+    m_parent->addSubscriber( ui.target_name );
+
+    m_parent->addSubscriber( ui.modwfs_fsm );
     m_parent->addSubscriberProperty( this, "modwfs", "fsm" );
     m_parent->addSubscriberProperty( this, "modwfs", "modState" );
 
-    m_parent->addSubscriber( ui.modFreq_current );
-    m_parent->addSubscriber( ui.modRad_current );
-    m_parent->addSubscriber( ui.modCh1 );
-    m_parent->addSubscriber( ui.modCh2 );
+    m_parent->addSubscriber( ui.modwfs_freq );
+    m_parent->addSubscriber( ui.modwfs_rad );
+    m_parent->addSubscriber( ui.modwfs_ch1 );
+    m_parent->addSubscriber( ui.modwfs_ch2 );
 
     m_parent->addSubscriberProperty( this, "camwfs", "fps" );
 
@@ -622,16 +745,16 @@ void pupilGuide::subscribe()
     m_parent->addSubscriberProperty( this, "camwfs-avg", "fsm" );
     m_parent->addSubscriberProperty( this, "camwfs-avg", "nAverage" );
 
-    m_parent->addSubscriber( ui.pupState );
-    m_parent->addSubscriber( ui.pupCh1 );
-    m_parent->addSubscriber( ui.pupCh2 );
+    m_parent->addSubscriber( ui.ttmpupil_fsm );
+    m_parent->addSubscriber( ui.ttmpupil_ch1 );
+    m_parent->addSubscriber( ui.ttmpupil_ch2 );
     m_parent->addSubscriberProperty( this, "ttmpupil", "fsm" );
     m_parent->addSubscriberProperty( this, "ttmpupil", "pos_1" );
     m_parent->addSubscriberProperty( this, "ttmpupil", "pos_2" );
 
-    m_parent->addSubscriber( ui.ttmPeriState );
-    m_parent->addSubscriber( ui.ttmPeriCh1 );
-    m_parent->addSubscriber( ui.ttmPeriCh2 );
+    m_parent->addSubscriber( ui.ttmperi_fsm );
+    m_parent->addSubscriber( ui.ttmperi_ch1 );
+    m_parent->addSubscriber( ui.ttmperi_ch2 );
     m_parent->addSubscriberProperty( this, "ttmperi", "fsm" );
     m_parent->addSubscriberProperty( this, "ttmperi", "axis1_voltage" );
     m_parent->addSubscriberProperty( this, "ttmperi", "axis2_voltage" );
@@ -647,217 +770,216 @@ void pupilGuide::subscribe()
     m_parent->addSubscriberProperty( this, "camwfs-align", "fsm" );
     m_parent->addSubscriberProperty( this, "camwfs-align", "loop_state" );
 
-    m_parent->addSubscriber( ui.pupTrackLoop_deltaX );
-    m_parent->addSubscriber( ui.pupTrackLoop_deltaY );
+    m_parent->addSubscriber( ui.puptrack_loop_deltaX );
+    m_parent->addSubscriber( ui.puptrack_loop_deltaY );
 
-    m_parent->addSubscriber( ui.pupTrackLoop_slider );
-    m_parent->addSubscriber( ui.pupTrackLoop_gain );
+    m_parent->addSubscriber( ui.puptrack_loop_slider );
+    m_parent->addSubscriber( ui.puptrack_loop_gain );
 
     m_parent->addSubscriberProperty( this, "twAlign-camwfs-ctrl", "fsm" );
     m_parent->addSubscriberProperty( this, "twAlign-camwfs-ctrl", "loop_state" );
 
-    m_parent->addSubscriber( ui.actAlignLoop_deltaX );
-    m_parent->addSubscriber( ui.actAlignLoop_deltaY );
+    m_parent->addSubscriber( ui.actalign_loop_deltaX );
+    m_parent->addSubscriber( ui.actalign_loop_deltaY );
 
-    m_parent->addSubscriber( ui.actAlignLoop_slider );
+    m_parent->addSubscriber( ui.actalign_loop_slider );
 
-    m_parent->addSubscriber( ui.actAlignLoop_gain );
+    m_parent->addSubscriber( ui.actalign_loop_gain );
 
     m_parent->addSubscriberProperty( this, "twAlign-camwfs-wfs", "fsm" );
     m_parent->addSubscriberProperty( this, "twAlign-camwfs-wfs", "loop_state" );
 
-    m_parent->addSubscriber( ui.actAlignSensor_slider );
+    m_parent->addSubscriber( ui.actalign_sensor_slider );
 
-    m_parent->addSubscriber( ui.actAlignSensor_nAverage );
-    m_parent->addSubscriber( ui.actAlignSensor_nImages );
-    m_parent->addSubscriber( ui.actAlignSensor_pokeAmp );
+    m_parent->addSubscriber( ui.actalign_sensor_nAverage );
+    m_parent->addSubscriber( ui.actalign_sensor_nImages );
+    m_parent->addSubscriber( ui.actalign_sensor_pokeAmp );
 
-    m_parent->addSubscriber( ui.fitThreshold );
-    m_parent->addSubscriber( ui.fitAvgTime );
+    m_parent->addSubscriber( ui.pwfsfit_threshold );
+    m_parent->addSubscriber( ui.pwfsfit_avgtime );
 
     /* Camera Lens */
-    m_parent->addSubscriber( ui.camlensX_fsm );
-    m_parent->addSubscriber( ui.camlensY_fsm );
+    m_parent->addSubscriber( ui.camlens_fsm_x );
+    m_parent->addSubscriber( ui.camlens_fsm_y );
     m_parent->addSubscriberProperty( this, "stagecamlensx", "fsm" );
     m_parent->addSubscriberProperty( this, "stagecamlensy", "fsm" );
     m_parent->addSubscriberProperty( this, "stagecamlensx", "position" ); // we need these too
     m_parent->addSubscriberProperty( this, "stagecamlensy", "position" );
-    m_parent->addSubscriber( ui.camlensX_pos );
-    m_parent->addSubscriber( ui.camlensY_pos );
+    m_parent->addSubscriber( ui.camlens_x );
+    m_parent->addSubscriber( ui.camlens_y );
 
     return;
 }
 
 void pupilGuide::onConnect()
 {
-    ui.label_modulation->setEnabled( true );
-    ui.labelPupilFitting->setEnabled( true );
+
+    ui.target_catobj->onConnect();
+    ui.target_name->onConnect();
+
+    ui.modwfs_label->setEnabled( true );
+    ui.pwfsfit_label->setEnabled( true );
 
     ui.modwfs_fsm->onConnect();
-    ui.modFreq_current->onConnect();
-    ui.modRad_current->onConnect();
-    ui.modCh1->onConnect();
-    ui.modCh2->onConnect();
+    ui.modwfs_freq->onConnect();
+    ui.modwfs_rad->onConnect();
+    ui.modwfs_ch1->onConnect();
+    ui.modwfs_ch2->onConnect();
 
-    ui.label_tipAlignment->setEnabled(true);
-    ui.button_ttmtel->setEnabled(true);
+    ui.tip_alignment_label->setEnabled( true );
+    ui.pwfsacq_what->setEnabled( true );
 
-    ui.picoscix_label->setEnabled(true);
+    ui.picoscix_label->setEnabled( true );
     ui.picoscix_pos->onConnect();
-    ui.picoscix_l->setEnabled(true);
-    ui.picoscix_scale->setEnabled(true);
-    ui.picoscix_r->setEnabled(true);
-    ui.picoscix_combo_label->setEnabled(true);
-    ui.picoscix_combo->setEnabled(true);
-    ui.picoscix_go->setEnabled(true);
+    ui.picoscix_l->setEnabled( true );
+    ui.picoscix_scale->setEnabled( true );
+    ui.picoscix_r->setEnabled( true );
+    ui.picoscix_combo_label->setEnabled( true );
+    ui.picoscix_combo->setEnabled( true );
+    ui.picoscix_go->setEnabled( true );
 
-    ui.button_camera->setEnabled(true);
+    ui.tweeter_label->setEnabled( true );
 
-    ui.label_tweeter->setEnabled(true);
+    ui.ttmpupil_label->setEnabled( true );
+    ui.ttmpupil_fsm->onConnect();
+    ui.ttmpupil_ch1->onConnect();
+    ui.ttmpupil_ch2->onConnect();
 
-    ui.labelPupilSteering->setEnabled( true );
-    ui.pupState->onConnect();
-    ui.pupCh1->onConnect();
-    ui.pupCh2->onConnect();
+    ui.ncpc_label->setEnabled( false );
 
-    ui.label_ncpc->setEnabled(false);
+    ui.ttmperi_label->setEnabled( true );
+    ui.ttmperi_fsm->onConnect();
+    ui.ttmperi_ch1->onConnect();
+    ui.ttmperi_ch2->onConnect();
 
-    ui.labelTTMPeri->setEnabled( true );
-    ui.ttmPeriState->onConnect();
-    ui.ttmPeriCh1->onConnect();
-    ui.ttmPeriCh2->onConnect();
-
-    ui.label_pupilPositions->setEnabled(true);
+    ui.pwfs_coords_label->setEnabled( true );
 
     /* Camera Lens */
-    ui.label_camlens->setEnabled( true );
-    ui.label_camlensX_fsm->setEnabled( true );
-    ui.label_camlensY_fsm->setEnabled( true );
+    ui.camlens_label->setEnabled( true );
+    ui.camlens_fsm_x_label->setEnabled( true );
+    ui.camlens_fsm_y_label->setEnabled( true );
 
-    ui.camlensX_fsm->onConnect();
-    ui.camlensY_fsm->onConnect();
-    ui.camlensX_pos->onConnect();
-    ui.camlensY_pos->onConnect();
+    ui.camlens_fsm_x->onConnect();
+    ui.camlens_fsm_y->onConnect();
+    ui.camlens_x->onConnect();
+    ui.camlens_y->onConnect();
 
-    ui.fitThreshold->onConnect();
-    ui.fitAvgTime->onConnect();
+    ui.pwfsfit_threshold->onConnect();
+    ui.pwfsfit_avgtime->onConnect();
 
+    ui.puptrack_loop_deltaX->onConnect();
+    ui.puptrack_loop_deltaY->onConnect();
 
-    ui.pupTrackLoop_deltaX->onConnect();
-    ui.pupTrackLoop_deltaY->onConnect();
+    ui.puptrack_loop_slider->onConnect();
+    ui.puptrack_loop_gain->onConnect();
 
-    ui.pupTrackLoop_slider->onConnect();
-    ui.pupTrackLoop_gain->onConnect();
+    ui.actalign_loop_deltaX->onConnect();
+    ui.actalign_loop_deltaY->onConnect();
 
-    ui.actAlignLoop_deltaX->onConnect();
-    ui.actAlignLoop_deltaY->onConnect();
+    ui.actalign_loop_slider->onConnect();
+    ui.actalign_loop_gain->onConnect();
 
-    ui.actAlignLoop_slider->onConnect();
-    ui.actAlignLoop_gain->onConnect();
+    ui.actalign_sensor_slider->onConnect();
+    ui.actalign_sensor_nAverage->onConnect();
+    ui.actalign_sensor_nImages->onConnect();
+    ui.actalign_sensor_pokeAmp->onConnect();
 
-    ui.actAlignSensor_slider->onConnect();
-    ui.actAlignSensor_nAverage->onConnect();
-    ui.actAlignSensor_nImages->onConnect();
-    ui.actAlignSensor_pokeAmp->onConnect();
-
-
-    camwfs_align_setEnabled(true, true);
-    twAlign_camwfs_ctrl_setEnabled(true, true);
-    twAlign_camwfs_wfs_setEnabled(true, true);
-    alignment_buttons_setEnabled(true, true);
+    camwfs_align_setEnabled( true, true );
+    twAlign_camwfs_ctrl_setEnabled( true, true );
+    twAlign_camwfs_wfs_setEnabled( true, true );
+    alignment_buttons_setEnabled( true, true );
 
     setWindowTitle( "Alignment" );
 }
 
 void pupilGuide::onDisconnect()
 {
-    m_modFsmState = "";
+    ui.target_catobj->onDisconnect();
+    ui.target_name->onDisconnect();
 
-    ui.label_modulation->setEnabled( false );
+    m_modwfsFsmState = "";
+
+    ui.modwfs_label->setEnabled( false );
     ui.modwfs_fsm->onDisconnect();
-    ui.modFreq_current->onDisconnect();
-    ui.modRad_current->onDisconnect();
-    ui.modCh1->onDisconnect();
-    ui.modCh2->onDisconnect();
+    ui.modwfs_freq->onDisconnect();
+    ui.modwfs_rad->onDisconnect();
+    ui.modwfs_ch1->onDisconnect();
+    ui.modwfs_ch2->onDisconnect();
 
-    ui.label_tipAlignment->setEnabled(false);
-    ui.button_ttmtel->setEnabled(false);
+    ui.tip_alignment_label->setEnabled( false );
+    ui.pwfsacq_what->setEnabled( false );
 
-    ui.picoscix_label->setEnabled(false);
+    ui.picoscix_label->setEnabled( false );
     ui.picoscix_pos->onDisconnect();
-    ui.picoscix_l->setEnabled(false);
-    ui.picoscix_scale->setEnabled(false);
-    ui.picoscix_r->setEnabled(false);
-    ui.picoscix_combo_label->setEnabled(false);
-    ui.picoscix_combo->setEnabled(false);
-    ui.picoscix_go->setEnabled(false);
+    ui.picoscix_l->setEnabled( false );
+    ui.picoscix_scale->setEnabled( false );
+    ui.picoscix_r->setEnabled( false );
+    ui.picoscix_combo_label->setEnabled( false );
+    ui.picoscix_combo->setEnabled( false );
+    ui.picoscix_go->setEnabled( false );
 
-    ui.button_camera->setEnabled(false);
-
-    ui.label_tweeter->setEnabled(false);
+    ui.tweeter_label->setEnabled( false );
 
     m_pupFsmState = "";
-    ui.labelPupilSteering->setEnabled( false );
-    ui.pupState->onDisconnect();
-    ui.pupCh1->onDisconnect();
-    ui.pupCh2->onDisconnect();
+    ui.ttmpupil_label->setEnabled( false );
+    ui.ttmpupil_fsm->onDisconnect();
+    ui.ttmpupil_ch1->onDisconnect();
+    ui.ttmpupil_ch2->onDisconnect();
 
-    ui.label_ncpc->setEnabled(false);
+    ui.ncpc_label->setEnabled( false );
 
-    ui.labelTTMPeri->setEnabled( false );
-    ui.ttmPeriState->onDisconnect();
-    ui.ttmPeriCh1->onDisconnect();
-    ui.ttmPeriCh2->onDisconnect();
+    ui.ttmperi_label->setEnabled( false );
+    ui.ttmperi_fsm->onDisconnect();
+    ui.ttmperi_ch1->onDisconnect();
+    ui.ttmperi_ch2->onDisconnect();
 
     m_camlensxFsmState = "";
     m_camlensyFsmState = "";
-    m_camwfsavgState = "";
-    m_camwfsfitState = "";
+    m_camwfsavgState   = "";
+    m_camwfsfitState   = "";
 
+    ui.pwfsfit_label->setEnabled( false );
 
-    ui.labelPupilFitting->setEnabled( false );
-
-
-    ui.label_pupilPositions->setEnabled(false);
+    ui.pwfs_coords_label->setEnabled( false );
 
     /* Camera Lens */
-    ui.label_camlens->setEnabled( false );
-    ui.label_camlensX_fsm->setEnabled( false );
-    ui.label_camlensY_fsm->setEnabled( false );
+    ui.camlens_label->setEnabled( false );
+    ui.camlens_fsm_x_label->setEnabled( false );
+    ui.camlens_fsm_y_label->setEnabled( false );
 
-    ui.camlensX_fsm->onDisconnect();
-    ui.camlensY_fsm->onDisconnect();
-    ui.camlensX_pos->onDisconnect();
-    ui.camlensY_pos->onDisconnect();
-    camlensSetEnabled(false);
+    ui.camlens_fsm_x->onDisconnect();
+    ui.camlens_fsm_y->onDisconnect();
+    ui.camlens_x->onDisconnect();
+    ui.camlens_y->onDisconnect();
+    camlensSetEnabled( false );
 
-    ui.fitThreshold->onDisconnect();
-    ui.fitAvgTime->onDisconnect();
+    ui.pwfsfit_threshold->onDisconnect();
+    ui.pwfsfit_avgtime->onDisconnect();
 
-    ui.pupTrackLoop_deltaX->onDisconnect();
-    ui.pupTrackLoop_deltaY->onDisconnect();
+    ui.puptrack_loop_deltaX->onDisconnect();
+    ui.puptrack_loop_deltaY->onDisconnect();
 
-    ui.pupTrackLoop_slider->onDisconnect();
-    ui.pupTrackLoop_gain->onDisconnect();
+    ui.puptrack_loop_slider->onDisconnect();
+    ui.puptrack_loop_gain->onDisconnect();
 
-    ui.actAlignLoop_deltaX->onDisconnect();
-    ui.actAlignLoop_deltaY->onDisconnect();
+    ui.actalign_loop_deltaX->onDisconnect();
+    ui.actalign_loop_deltaY->onDisconnect();
 
-    ui.actAlignLoop_slider->onDisconnect();
-    ui.actAlignLoop_gain->onDisconnect();
+    ui.actalign_loop_slider->onDisconnect();
+    ui.actalign_loop_gain->onDisconnect();
 
-    ui.actAlignSensor_slider->onDisconnect();
-    ui.actAlignSensor_nAverage->onDisconnect();
-    ui.actAlignSensor_nImages->onDisconnect();
-    ui.actAlignSensor_pokeAmp->onDisconnect();
+    ui.actalign_sensor_slider->onDisconnect();
+    ui.actalign_sensor_nAverage->onDisconnect();
+    ui.actalign_sensor_nImages->onDisconnect();
+    ui.actalign_sensor_pokeAmp->onDisconnect();
 
-    camwfs_align_setEnabled(false, true);
+    camwfs_align_setEnabled( false, true );
     m_camwfs_align_fsmState = "";
-    twAlign_camwfs_ctrl_setEnabled(false, true);
+    twAlign_camwfs_ctrl_setEnabled( false, true );
     m_twAlign_camwfs_ctrl_fsmState = "";
-    twAlign_camwfs_wfs_setEnabled(false, true);
+    twAlign_camwfs_wfs_setEnabled( false, true );
     m_twAlign_camwfs_wfs_fsmState = "";
-    alignment_buttons_setEnabled(false, true);
+    alignment_buttons_setEnabled( false, true );
 
     setWindowTitle( "Alignment (disconnected)" );
 }
@@ -884,7 +1006,7 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
         {
             if( ipRecv.find( "state" ) )
             {
-                m_modFsmState = ipRecv["state"].get<std::string>();
+                m_modwfsFsmState = ipRecv["state"].get<std::string>();
             }
         }
     }
@@ -904,20 +1026,20 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
         {
             if( ipRecv.find( "state" ) )
             {
-                m_tcsiState = ipRecv["state"].get<std::string>();
+                m_tcsiFsmState = ipRecv["state"].get<std::string>();
             }
         }
         else if( ipRecv.getName() == "labMode" )
         {
             if( ipRecv.find( "toggle" ) )
             {
-                if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+                if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
                 {
-                    m_labMode = true;
+                    m_tcsiLabMode = true;
                 }
                 else
                 {
-                    m_labMode = false;
+                    m_tcsiLabMode = false;
                 }
             }
         }
@@ -928,7 +1050,7 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
         {
             if( ipRecv.find( "state" ) )
             {
-                m_dmWooferState = ipRecv["state"].get<std::string>();
+                m_dmWooferFsmState = ipRecv["state"].get<std::string>();
             }
         }
     }
@@ -938,7 +1060,7 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
         {
             if( ipRecv.find( "state" ) )
             {
-                m_wooferModesState = ipRecv["state"].get<std::string>();
+                m_wooferModesFsmState = ipRecv["state"].get<std::string>();
             }
         }
         else if( ipRecv.getName() == "current_amps" )
@@ -998,7 +1120,7 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
         {
             if( ipRecv.find( "med" ) )
             {
-                m_med1 = ipRecv["med"].get<double>();
+                m_pwfs_median_1 = ipRecv["med"].get<double>();
             }
 
             if( ipRecv.find( "x" ) )
@@ -1035,7 +1157,7 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
         {
             if( ipRecv.find( "med" ) )
             {
-                m_med2 = ipRecv["med"].get<double>();
+                m_pwfs_median_2 = ipRecv["med"].get<double>();
             }
 
             if( ipRecv.find( "x" ) )
@@ -1072,7 +1194,7 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
         {
             if( ipRecv.find( "med" ) )
             {
-                m_med3 = ipRecv["med"].get<double>();
+                m_pwfs_median_3 = ipRecv["med"].get<double>();
             }
 
             if( ipRecv.find( "x" ) )
@@ -1109,7 +1231,7 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
         {
             if( ipRecv.find( "med" ) )
             {
-                m_med4 = ipRecv["med"].get<double>();
+                m_pwfs_median_4 = ipRecv["med"].get<double>();
             }
 
             if( ipRecv.find( "x" ) )
@@ -1170,14 +1292,14 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
         {
             if( ipRecv.find( "current" ) )
             {
-                m_pupCh1 = ipRecv["current"].get<double>();
+                m_ttmpupil_ch1 = ipRecv["current"].get<double>();
             }
         }
         else if( ipRecv.getName() == "pos_2" )
         {
             if( ipRecv.find( "current" ) )
             {
-                m_pupCh2 = ipRecv["current"].get<double>();
+                m_ttmpupil_ch2 = ipRecv["current"].get<double>();
             }
         }
     }
@@ -1194,14 +1316,14 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
         {
             if( ipRecv.find( "current" ) )
             {
-                m_ttmPeriCh1 = ipRecv["current"].get<double>();
+                m_ttmperi_ch1 = ipRecv["current"].get<double>();
             }
         }
         else if( ipRecv.getName() == "axis2_voltage" )
         {
             if( ipRecv.find( "current" ) )
             {
-                m_ttmPeriCh2 = ipRecv["current"].get<double>();
+                m_ttmperi_ch2 = ipRecv["current"].get<double>();
             }
         }
     }
@@ -1352,134 +1474,652 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
         }
     }
     return;
+} // handleSetProperty
+
+void pupilGuide::on_target_sync_pressed()
+{
+    std::cerr << "on_target_sync_pressed()\n";
 }
+
+void pupilGuide::on_telacq_acqfromguider_pressed()
+{
+    std::cerr << "on_telacq_acqfromguider_pressed()\n";
+}
+
+void pupilGuide::on_telacq_acqfocus_pressed()
+{
+    std::cerr << "on_telacq_acqfocus_pressed()\n";
+}
+
+void pupilGuide::on_camacq_acqstar_activated( int index )
+{
+    static_cast<void>( index );
+
+    std::cerr << "on_camacq_acqstar_activated( int index )\n";
+}
+void pupilGuide::on_camacq_acq_go_pressed()
+{
+    std::cerr << "on_camacq_acq_go_pressed()\n";
+}
+void pupilGuide::on_camacq_seestar_activated( int index )
+{
+    static_cast<void>( index );
+
+    std::cerr << "on_camacq_seestar_activated( int index )\n";
+}
+void pupilGuide::on_camacq_see_go_pressed()
+{
+    std::cerr << "on_camacq_see_go_pressed()\n";
+}
+
+void pupilGuide::on_camacq_acq_restart_pressed()
+{
+    std::cerr << "on_camacq_acq_restart_pressed()\n";
+}
+
+void pupilGuide::on_camacq_see_measure_pressed()
+{
+    std::cerr << "on_camacq_see_measure_pressed()\n";
+}
+
+void pupilGuide::on_modwfs_rest_pressed()
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "modwfs" );
+    ip.setName( "modState" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = 1;
+
+    sendNewProperty( ip );
+}
+
+void pupilGuide::on_modwfs_set_pressed()
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "modwfs" );
+    ip.setName( "modState" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = 3;
+    sendNewProperty( ip );
+}
+
+void pupilGuide::on_modwfs_modulate_pressed()
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "modwfs" );
+    ip.setName( "modState" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = 4;
+
+    sendNewProperty( ip );
+}
+
+void pupilGuide::on_pwfsacq_what_pressed()
+{
+    if( m_tipmovewhat == MOVE_TTM )
+    {
+        m_tipmovewhat = MOVE_WOOF;
+        ui.pwfsacq_what->setText( "move woofer" );
+    }
+    else if( m_tipmovewhat == MOVE_WOOF && !m_tcsiLabMode )
+    {
+        m_tipmovewhat = MOVE_TEL;
+        ui.pwfsacq_what->setText( "move telescope" );
+    }
+    else
+    {
+        m_tipmovewhat = MOVE_TTM;
+        ui.pwfsacq_what->setText( "move ttm" );
+    }
+}
+
+void pupilGuide::on_pwfsacq_u_pressed()
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    if( m_tipmovewhat == MOVE_TTM )
+    {
+        ip.setDevice( "modwfs" );
+        ip.setName( "offset" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = m_pwfsacqScale;
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = 0;
+    }
+    else if( m_tipmovewhat == MOVE_WOOF )
+    {
+        double tip, tilt;
+        wooferTipTilt( tip, tilt, 0, m_pwfsacqScale );
+
+        ip.setDevice( "wooferModes" );
+        ip.setName( "target_amps" );
+        ip.add( pcf::IndiElement( "0000" ) );
+        ip.add( pcf::IndiElement( "0001" ) );
+        ip["0000"] = m_tip + tip;
+        ip["0001"] = m_tilt + tilt;
+    }
+    else if( m_tipmovewhat == MOVE_TEL )
+    {
+        ip.setDevice( "tcsi" );
+        ip.setName( "pyrNudge" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = m_pwfsacqScale * 5.;
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = 0;
+    }
+    else
+        return;
+
+    sendNewProperty( ip );
+}
+
+void pupilGuide::on_pwfsacq_ul_pressed()
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    if( m_tipmovewhat == MOVE_TTM )
+    {
+        ip.setDevice( "modwfs" );
+        ip.setName( "offset" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = m_pwfsacqScale / sqrt( 2. );
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = -m_pwfsacqScale / sqrt( 2. );
+    }
+    else if( m_tipmovewhat == MOVE_WOOF )
+    {
+        double tip, tilt;
+        wooferTipTilt( tip, tilt, m_pwfsacqScale / sqrt( 2. ), m_pwfsacqScale / sqrt( 2. ) );
+
+        ip.setDevice( "wooferModes" );
+        ip.setName( "target_amps" );
+        ip.add( pcf::IndiElement( "0000" ) );
+        ip.add( pcf::IndiElement( "0001" ) );
+        ip["0000"] = m_tip + tip;
+        ip["0001"] = m_tilt + tilt;
+    }
+    else if( m_tipmovewhat == MOVE_TEL )
+    {
+        ip.setDevice( "tcsi" );
+        ip.setName( "pyrNudge" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = m_pwfsacqScale * 5. / sqrt( 2. );
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = m_pwfsacqScale * 5. / sqrt( 2. );
+    }
+
+    sendNewProperty( ip );
+}
+
+void pupilGuide::on_pwfsacq_l_pressed()
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    if( m_tipmovewhat == MOVE_TTM )
+    {
+        ip.setDevice( "modwfs" );
+        ip.setName( "offset" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = 0;
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = -m_pwfsacqScale;
+    }
+    else if( m_tipmovewhat == MOVE_WOOF )
+    {
+        double tip, tilt;
+        wooferTipTilt( tip, tilt, m_pwfsacqScale, 0 );
+
+        ip.setDevice( "wooferModes" );
+        ip.setName( "target_amps" );
+        ip.add( pcf::IndiElement( "0000" ) );
+        ip.add( pcf::IndiElement( "0001" ) );
+        ip["0000"] = m_tip + tip;
+        ip["0001"] = m_tilt + tilt;
+    }
+    else if( m_tipmovewhat == MOVE_TEL )
+    {
+        ip.setDevice( "tcsi" );
+        ip.setName( "pyrNudge" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = 0;
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = -m_pwfsacqScale * 5.;
+    }
+
+    sendNewProperty( ip );
+}
+
+void pupilGuide::on_pwfsacq_dl_pressed()
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    if( m_tipmovewhat == MOVE_TTM )
+    {
+        ip.setDevice( "modwfs" );
+        ip.setName( "offset" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = -m_pwfsacqScale / sqrt( 2. );
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = -m_pwfsacqScale / sqrt( 2. );
+    }
+    else if( m_tipmovewhat == MOVE_WOOF )
+    {
+        double tip, tilt;
+        wooferTipTilt( tip, tilt, m_pwfsacqScale / sqrt( 2. ), -m_pwfsacqScale / sqrt( 2. ) );
+
+        ip.setDevice( "wooferModes" );
+        ip.setName( "target_amps" );
+        ip.add( pcf::IndiElement( "0000" ) );
+        ip.add( pcf::IndiElement( "0001" ) );
+        ip["0000"] = m_tip + tip;
+        ip["0001"] = m_tilt + tilt;
+    }
+    else if( m_tipmovewhat == MOVE_TEL )
+    {
+        ip.setDevice( "tcsi" );
+        ip.setName( "pyrNudge" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = -m_pwfsacqScale * 5. / sqrt( 2. );
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = -m_pwfsacqScale * 5. / sqrt( 2. );
+    }
+
+    sendNewProperty( ip );
+}
+
+void pupilGuide::on_pwfsacq_d_pressed()
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    if( m_tipmovewhat == MOVE_TTM )
+    {
+        ip.setDevice( "modwfs" );
+        ip.setName( "offset" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = -m_pwfsacqScale;
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = 0;
+    }
+    else if( m_tipmovewhat == MOVE_WOOF )
+    {
+        double tip, tilt;
+        wooferTipTilt( tip, tilt, 0, -m_pwfsacqScale );
+
+        ip.setDevice( "wooferModes" );
+        ip.setName( "target_amps" );
+        ip.add( pcf::IndiElement( "0000" ) );
+        ip.add( pcf::IndiElement( "0001" ) );
+        ip["0000"] = m_tip + tip;
+        ip["0001"] = m_tilt + tilt;
+    }
+    else if( m_tipmovewhat == MOVE_TEL )
+    {
+        ip.setDevice( "tcsi" );
+        ip.setName( "pyrNudge" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = -m_pwfsacqScale * 5.;
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = 0;
+    }
+
+    sendNewProperty( ip );
+}
+
+void pupilGuide::on_pwfsacq_dr_pressed()
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    if( m_tipmovewhat == MOVE_TTM )
+    {
+        ip.setDevice( "modwfs" );
+        ip.setName( "offset" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = -m_pwfsacqScale / sqrt( 2. );
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = m_pwfsacqScale / sqrt( 2. );
+    }
+    else if( m_tipmovewhat == MOVE_WOOF )
+    {
+        double tip, tilt;
+        wooferTipTilt( tip, tilt, -m_pwfsacqScale / sqrt( 2. ), -m_pwfsacqScale / sqrt( 2. ) );
+
+        ip.setDevice( "wooferModes" );
+        ip.setName( "target_amps" );
+        ip.add( pcf::IndiElement( "0000" ) );
+        ip.add( pcf::IndiElement( "0001" ) );
+        ip["0000"] = m_tip + tip;
+        ip["0001"] = m_tilt + tilt;
+    }
+    else if( m_tipmovewhat == MOVE_TEL )
+    {
+        ip.setDevice( "tcsi" );
+        ip.setName( "pyrNudge" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = -m_pwfsacqScale * 5. / sqrt( 2. );
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = m_pwfsacqScale * 5. / sqrt( 2. );
+    }
+    else
+        return;
+
+    sendNewProperty( ip );
+}
+
+void pupilGuide::on_pwfsacq_r_pressed()
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    if( m_tipmovewhat == MOVE_TTM )
+    {
+        ip.setDevice( "modwfs" );
+        ip.setName( "offset" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = 0;
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = m_pwfsacqScale;
+    }
+    else if( m_tipmovewhat == MOVE_WOOF )
+    {
+        double tip, tilt;
+        wooferTipTilt( tip, tilt, -m_pwfsacqScale, 0 );
+
+        ip.setDevice( "wooferModes" );
+        ip.setName( "target_amps" );
+        ip.add( pcf::IndiElement( "0000" ) );
+        ip.add( pcf::IndiElement( "0001" ) );
+        ip["0000"] = m_tip + tip;
+        ip["0001"] = m_tilt + tilt;
+    }
+    else if( m_tipmovewhat == MOVE_TEL )
+    {
+        ip.setDevice( "tcsi" );
+        ip.setName( "pyrNudge" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = 0;
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = m_pwfsacqScale * 5.;
+    }
+    else
+        return;
+
+    sendNewProperty( ip );
+}
+
+void pupilGuide::on_pwfsacq_ur_pressed()
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    if( m_tipmovewhat == MOVE_TTM )
+    {
+        ip.setDevice( "modwfs" );
+        ip.setName( "offset" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = m_pwfsacqScale / sqrt( 2. );
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = m_pwfsacqScale / sqrt( 2. );
+    }
+    else if( m_tipmovewhat == MOVE_WOOF )
+    {
+        double tip, tilt;
+        wooferTipTilt( tip, tilt, -m_pwfsacqScale / sqrt( 2. ), m_pwfsacqScale / sqrt( 2. ) );
+
+        ip.setDevice( "wooferModes" );
+        ip.setName( "target_amps" );
+        ip.add( pcf::IndiElement( "0000" ) );
+        ip.add( pcf::IndiElement( "0001" ) );
+        ip["0000"] = m_tip + tip;
+        ip["0001"] = m_tilt + tilt;
+    }
+    else if( m_tipmovewhat == MOVE_TEL )
+    {
+        ip.setDevice( "tcsi" );
+        ip.setName( "pyrNudge" );
+        ip.add( pcf::IndiElement( "y" ) );
+        ip["y"] = m_pwfsacqScale * 5. / sqrt( 2. );
+        ip.add( pcf::IndiElement( "x" ) );
+        ip["x"] = m_pwfsacqScale * 5. / sqrt( 2. );
+    }
+    else
+        return;
+
+    sendNewProperty( ip );
+}
+
+void pupilGuide::on_pwfsacq_scale_pressed()
+{
+    if( ( (int)( 100 * m_pwfsacqScale ) ) == 100 )
+    {
+        m_pwfsacqScale = 0.5;
+    }
+    else if( ( (int)( 100 * m_pwfsacqScale ) ) == 50 )
+    {
+        m_pwfsacqScale = 0.1;
+    }
+    else if( ( (int)( 100 * m_pwfsacqScale ) ) == 10 )
+    {
+        m_pwfsacqScale = 0.05;
+    }
+    else if( ( (int)( 100 * m_pwfsacqScale ) ) == 5 )
+    {
+        m_pwfsacqScale = 0.01;
+    }
+    else if( ( (int)( 100 * m_pwfsacqScale ) ) == 1 )
+    {
+        m_pwfsacqScale = 1.0;
+    }
+
+    char ss[5];
+    snprintf( ss, 5, "%0.2f", m_pwfsacqScale );
+    ui.pwfsacq_scale->setText( ss );
+}
+
+void pupilGuide::on_pwfsfoc_p_pressed()
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    if( m_tipmovewhat == MOVE_WOOF )
+    {
+
+        ip.setDevice( "wooferModes" );
+        ip.setName( "target_amps" );
+        ip.add( pcf::IndiElement( "0002" ) );
+        ip["0002"] = m_focus + m_pwfsacqFocScale * 0.2;
+    }
+    else if( m_tipmovewhat == MOVE_TEL )
+    {
+        ip.setDevice( "tcsi" );
+        ip.setName( "pyrNudge" );
+        ip.add( pcf::IndiElement( "z" ) );
+        ip["z"] = m_pwfsacqScale * 100.;
+    }
+    else
+        return;
+
+    sendNewProperty( ip );
+}
+
+void pupilGuide::on_pwfsfoc_m_pressed()
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    if( m_tipmovewhat == MOVE_WOOF )
+    {
+
+        ip.setDevice( "wooferModes" );
+        ip.setName( "target_amps" );
+        ip.add( pcf::IndiElement( "0002" ) );
+        ip["0002"] = m_focus - m_pwfsacqFocScale * 0.2;
+    }
+    else if( m_tipmovewhat == MOVE_TEL )
+    {
+        ip.setDevice( "tcsi" );
+        ip.setName( "pyrNudge" );
+        ip.add( pcf::IndiElement( "z" ) );
+        ip["z"] = -m_pwfsacqScale * 100.;
+    }
+    else
+        return;
+
+    sendNewProperty( ip );
+}
+
+void pupilGuide::on_pwfsfoc_scale_pressed()
+{
+    if( ( (int)( 100 * m_pwfsacqFocScale ) ) == 100 )
+    {
+        m_pwfsacqFocScale = 0.5;
+    }
+    else if( ( (int)( 100 * m_pwfsacqFocScale ) ) == 50 )
+    {
+        m_pwfsacqFocScale = 0.1;
+    }
+    else if( ( (int)( 100 * m_pwfsacqFocScale ) ) == 10 )
+    {
+        m_pwfsacqFocScale = 0.05;
+    }
+    else if( ( (int)( 100 * m_pwfsacqFocScale ) ) == 5 )
+    {
+        m_pwfsacqFocScale = 0.01;
+    }
+    else if( ( (int)( 100 * m_pwfsacqFocScale ) ) == 1 )
+    {
+        m_pwfsacqFocScale = 1.0;
+    }
+
+    char ss[5];
+    snprintf( ss, 5, "%0.2f", m_pwfsacqFocScale );
+    ui.pwfsfoc_scale->setText( ss );
+}
+
+// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^//
 
 void pupilGuide::modGUISetEnable( bool enableModGUI, bool enableModArrows )
 {
     if( enableModGUI )
     {
-        ui.label_modulation->setEnabled( true );
+        ui.modwfs_label->setEnabled( true );
         ui.modwfs_fsm->setEnabled( true );
         ui.modwfs_fsm->setEnabled( true );
-        if(m_modState == 3 || m_modState == 4)
+        if( m_modState == 3 || m_modState == 4 )
         {
-            ui.label_modFreq->setEnabled( true );
-            ui.modFreq_current->setEnabled( true );
-            ui.label_modRad->setEnabled( true );
-            ui.modRad_current->setEnabled( true );
+            ui.modwfs_freq_label->setEnabled( true );
+            ui.modwfs_freq->setEnabled( true );
+            ui.modwfs_rad_label->setEnabled( true );
+            ui.modwfs_rad->setEnabled( true );
 
-            ui.modCh1->setEnabled( true );
-            ui.modCh2->setEnabled( true );
+            ui.modwfs_ch1->setEnabled( true );
+            ui.modwfs_ch2->setEnabled( true );
         }
         else
         {
-            ui.label_modFreq->setEnabled( false );
-            ui.modFreq_current->setEnabled( false );
-            ui.label_modRad->setEnabled( false );
-            ui.modRad_current->setEnabled( false );
+            ui.modwfs_freq_label->setEnabled( false );
+            ui.modwfs_freq->setEnabled( false );
+            ui.modwfs_rad_label->setEnabled( false );
+            ui.modwfs_rad->setEnabled( false );
 
-            ui.modCh1->setEnabled( false );
-            ui.modCh2->setEnabled( false );
+            ui.modwfs_ch1->setEnabled( false );
+            ui.modwfs_ch2->setEnabled( false );
         }
-
-
 
         if( enableModArrows )
         {
-            ui.button_tip_ul->setEnabled( true );
-            ui.button_tip_u->setEnabled( true );
-            ui.button_tip_ur->setEnabled( true );
-            ui.button_tip_l->setEnabled( true );
-            ui.button_tip_scale->setEnabled( true );
-            ui.button_tip_r->setEnabled( true );
-            ui.button_tip_dl->setEnabled( true );
-            ui.button_tip_d->setEnabled( true );
-            ui.button_tip_dr->setEnabled( true );
+            ui.pwfsacq_ul->setEnabled( true );
+            ui.pwfsacq_u->setEnabled( true );
+            ui.pwfsacq_ur->setEnabled( true );
+            ui.pwfsacq_l->setEnabled( true );
+            ui.pwfsacq_scale->setEnabled( true );
+            ui.pwfsacq_r->setEnabled( true );
+            ui.pwfsacq_dl->setEnabled( true );
+            ui.pwfsacq_d->setEnabled( true );
+            ui.pwfsacq_dr->setEnabled( true );
 
             if( m_tipmovewhat == MOVE_TEL || m_tipmovewhat == MOVE_WOOF )
             {
-                ui.button_focus_p->setEnabled( true );
-                ui.button_focus_scale->setEnabled( true );
-                ui.button_focus_m->setEnabled( true );
+                ui.pwfsfoc_p->setEnabled( true );
+                ui.pwfsfoc_scale->setEnabled( true );
+                ui.pwfsfoc_m->setEnabled( true );
             }
             else
             {
-                ui.button_focus_p->setEnabled( false );
-                ui.button_focus_scale->setEnabled( false );
-                ui.button_focus_m->setEnabled( false );
+                ui.pwfsfoc_p->setEnabled( false );
+                ui.pwfsfoc_scale->setEnabled( false );
+                ui.pwfsfoc_m->setEnabled( false );
             }
         }
         else
         {
-            ui.button_tip_ul->setEnabled( false );
-            ui.button_tip_u->setEnabled( false );
-            ui.button_tip_ur->setEnabled( false );
-            ui.button_tip_l->setEnabled( false );
-            ui.button_tip_scale->setEnabled( false );
-            ui.button_tip_r->setEnabled( false );
-            ui.button_tip_dl->setEnabled( false );
-            ui.button_tip_d->setEnabled( false );
-            ui.button_tip_dr->setEnabled( false );
+            ui.pwfsacq_ul->setEnabled( false );
+            ui.pwfsacq_u->setEnabled( false );
+            ui.pwfsacq_ur->setEnabled( false );
+            ui.pwfsacq_l->setEnabled( false );
+            ui.pwfsacq_scale->setEnabled( false );
+            ui.pwfsacq_r->setEnabled( false );
+            ui.pwfsacq_dl->setEnabled( false );
+            ui.pwfsacq_d->setEnabled( false );
+            ui.pwfsacq_dr->setEnabled( false );
 
-            ui.button_focus_p->setEnabled( false );
-            ui.button_focus_scale->setEnabled( false );
-            ui.button_focus_m->setEnabled( false );
+            ui.pwfsfoc_p->setEnabled( false );
+            ui.pwfsfoc_scale->setEnabled( false );
+            ui.pwfsfoc_m->setEnabled( false );
         }
     }
     else
     {
-        if(m_modFsmState != "POWEROFF" && m_modFsmState != "CONFIGURING")
+        if( m_modwfsFsmState != "POWEROFF" && m_modwfsFsmState != "CONFIGURING" )
         {
-            ui.label_modulation->setEnabled( false );
+            ui.modwfs_label->setEnabled( false );
         }
         else
         {
-            ui.label_modulation->setEnabled( true );
+            ui.modwfs_label->setEnabled( true );
         }
         ui.modwfs_fsm->setEnabled( false );
-        ui.label_modFreq->setEnabled( false );
-        ui.modFreq_current->setEnabled( false );
-        ui.label_modRad->setEnabled( false );
-        ui.modRad_current->setEnabled( false );
-        ui.buttonMod_rest->setEnabled( false );
-        ui.buttonMod_set->setEnabled( false );
-        ui.buttonMod_mod->setEnabled( false );
-        ui.modCh1->setEnabled( false );
-        ui.modCh2->setEnabled( false );
+        ui.modwfs_freq_label->setEnabled( false );
+        ui.modwfs_freq->setEnabled( false );
+        ui.modwfs_rad_label->setEnabled( false );
+        ui.modwfs_rad->setEnabled( false );
+        ui.modwfs_rest->setEnabled( false );
+        ui.modwfs_set->setEnabled( false );
+        ui.modwfs_modulate->setEnabled( false );
+        ui.modwfs_ch1->setEnabled( false );
+        ui.modwfs_ch2->setEnabled( false );
 
-        if(!enableModArrows)
+        if( !enableModArrows )
         {
-            ui.button_tip_ul->setEnabled( false );
-            ui.button_tip_u->setEnabled( false );
-            ui.button_tip_ur->setEnabled( false );
-            ui.button_tip_l->setEnabled( false );
-            ui.button_tip_scale->setEnabled( false );
-            ui.button_tip_r->setEnabled( false );
-            ui.button_tip_dl->setEnabled( false );
-            ui.button_tip_d->setEnabled( false );
-            ui.button_tip_dr->setEnabled( false );
+            ui.pwfsacq_ul->setEnabled( false );
+            ui.pwfsacq_u->setEnabled( false );
+            ui.pwfsacq_ur->setEnabled( false );
+            ui.pwfsacq_l->setEnabled( false );
+            ui.pwfsacq_scale->setEnabled( false );
+            ui.pwfsacq_r->setEnabled( false );
+            ui.pwfsacq_dl->setEnabled( false );
+            ui.pwfsacq_d->setEnabled( false );
+            ui.pwfsacq_dr->setEnabled( false );
 
-            ui.button_focus_p->setEnabled( false );
-            ui.button_focus_scale->setEnabled( false );
-            ui.button_focus_m->setEnabled( false );
+            ui.pwfsfoc_p->setEnabled( false );
+            ui.pwfsfoc_scale->setEnabled( false );
+            ui.pwfsfoc_m->setEnabled( false );
         }
         else
         {
-            ui.button_tip_ul->setEnabled( true );
-            ui.button_tip_u->setEnabled( true );
-            ui.button_tip_ur->setEnabled( true );
-            ui.button_tip_l->setEnabled( true );
-            ui.button_tip_scale->setEnabled( true );
-            ui.button_tip_r->setEnabled( true );
-            ui.button_tip_dl->setEnabled( true );
-            ui.button_tip_d->setEnabled( true );
-            ui.button_tip_dr->setEnabled( true );
+            ui.pwfsacq_ul->setEnabled( true );
+            ui.pwfsacq_u->setEnabled( true );
+            ui.pwfsacq_ur->setEnabled( true );
+            ui.pwfsacq_l->setEnabled( true );
+            ui.pwfsacq_scale->setEnabled( true );
+            ui.pwfsacq_r->setEnabled( true );
+            ui.pwfsacq_dl->setEnabled( true );
+            ui.pwfsacq_d->setEnabled( true );
+            ui.pwfsacq_dr->setEnabled( true );
 
             if( m_tipmovewhat != MOVE_TTM )
             {
-                ui.button_focus_p->setEnabled( true );
-                ui.button_focus_scale->setEnabled( true );
-                ui.button_focus_m->setEnabled( true );
+                ui.pwfsfoc_p->setEnabled( true );
+                ui.pwfsfoc_scale->setEnabled( true );
+                ui.pwfsfoc_m->setEnabled( true );
             }
         }
     }
@@ -1487,123 +2127,121 @@ void pupilGuide::modGUISetEnable( bool enableModGUI, bool enableModArrows )
 
 void pupilGuide::camwfsfitSetEnabled( bool enabled )
 {
-    ui.labelMedianFluxes->setEnabled( enabled );
-    ui.med1->setEnabled( enabled );
-    ui.med2->setEnabled( enabled );
-    ui.med3->setEnabled( enabled );
-    ui.med4->setEnabled( enabled );
-    ui.setDelta->setEnabled( enabled );
-    ui.fitThreshold->setEnabled( enabled );
+    ui.pwfs_medians_label->setEnabled( enabled );
+    ui.pwfs_median_1->setEnabled( enabled );
+    ui.pwfs_median_2->setEnabled( enabled );
+    ui.pwfs_median_3->setEnabled( enabled );
+    ui.pwfs_median_4->setEnabled( enabled );
+    ui.pwfs_medians_delta->setEnabled( enabled );
+    ui.pwfsfit_threshold->setEnabled( enabled );
 
     if( enabled == false )
     {
-        ui.med1->setText( "" );
-        ui.med2->setText( "" );
-        ui.med3->setText( "" );
-        ui.med4->setText( "" );
+        ui.pwfs_median_1->setText( "" );
+        ui.pwfs_median_2->setText( "" );
+        ui.pwfs_median_3->setText( "" );
+        ui.pwfs_median_4->setText( "" );
     }
 
-    ui.coordLL_D->setEnabled( enabled );
-    ui.coordLR_D->setEnabled( enabled );
-    ui.coordUL_D->setEnabled( enabled );
-    ui.coordUR_D->setEnabled( enabled );
-    ui.coordLL_x->setEnabled( enabled );
-    ui.coordLR_x->setEnabled( enabled );
-    ui.coordUL_x->setEnabled( enabled );
-    ui.coordUR_x->setEnabled( enabled );
-    ui.coordLL_y->setEnabled( enabled );
-    ui.coordLR_y->setEnabled( enabled );
-    ui.coordUL_y->setEnabled( enabled );
-    ui.coordUR_y->setEnabled( enabled );
-    ui.coordAvg_D->setEnabled( enabled );
-    ui.coordAvg_x->setEnabled( enabled );
-    ui.coordAvg_y->setEnabled( enabled );
-    ui.setDelta_pup->setEnabled( enabled );
-    ui.labelx->setEnabled( enabled );
-    ui.labely->setEnabled( enabled );
-    ui.labelD->setEnabled( enabled );
-    ui.labelUR->setEnabled( enabled );
-    ui.labelUL->setEnabled( enabled );
-    ui.labelLR->setEnabled( enabled );
-    ui.labelLL->setEnabled( enabled );
-    ui.labelAvg->setEnabled( enabled );
+    ui.pwfs_LL_D->setEnabled( enabled );
+    ui.pwfs_LR_D->setEnabled( enabled );
+    ui.pwfs_UL_D->setEnabled( enabled );
+    ui.pwfs_UR_D->setEnabled( enabled );
+    ui.pwfs_LL_x->setEnabled( enabled );
+    ui.pwfs_LR_x->setEnabled( enabled );
+    ui.pwfs_UL_x->setEnabled( enabled );
+    ui.pwfs_UR_x->setEnabled( enabled );
+    ui.pwfs_LL_y->setEnabled( enabled );
+    ui.pwfs_LR_y->setEnabled( enabled );
+    ui.pwfs_UL_y->setEnabled( enabled );
+    ui.pwfs_UR_y->setEnabled( enabled );
+    ui.pwfs_avg_D->setEnabled( enabled );
+    ui.pwfs_avg_x->setEnabled( enabled );
+    ui.pwfs_avg_y->setEnabled( enabled );
+    ui.pwfs_coords_delta->setEnabled( enabled );
+    ui.pwfs_x_label->setEnabled( enabled );
+    ui.pwfs_y_label->setEnabled( enabled );
+    ui.pwfs_D_label->setEnabled( enabled );
+    ui.pwfs_UR_label->setEnabled( enabled );
+    ui.pwfs_UL_label->setEnabled( enabled );
+    ui.pwfs_LR_label->setEnabled( enabled );
+    ui.pwfs_LL_label->setEnabled( enabled );
+    ui.pwfs_avg_label->setEnabled( enabled );
 }
 
-void pupilGuide::camlensSetEnabled( bool enabled,
-                                    int whichcl
-)
+void pupilGuide::camlensSetEnabled( bool enabled, int whichcl )
 {
     if( whichcl == CAMLENS_BOTH )
     {
-        ui.button_camlens_scale->setEnabled( enabled );
+        ui.camlens_scale->setEnabled( enabled );
     }
     else
     {
-        ui.button_camlens_scale->setEnabled( true );
+        ui.camlens_scale->setEnabled( true );
     }
 
     if( whichcl == CAMLENS_X || whichcl == CAMLENS_BOTH )
     {
-        ui.camlensX_fsm->setEnabled( enabled );
-        ui.camlensX_pos->setEnabled( enabled );
-        ui.button_camlens_l->setEnabled( enabled );
-        ui.button_camlens_r->setEnabled( enabled );
+        ui.camlens_fsm_x->setEnabled( enabled );
+        ui.camlens_x->setEnabled( enabled );
+        ui.camlens_l->setEnabled( enabled );
+        ui.camlens_r->setEnabled( enabled );
     }
 
     if( whichcl == CAMLENS_Y || whichcl == CAMLENS_BOTH )
     {
-        ui.camlensY_fsm->setEnabled( enabled );
-        ui.camlensY_pos->setEnabled( enabled );
-        ui.button_camlens_u->setEnabled( enabled );
-        ui.button_camlens_d->setEnabled( enabled );
+        ui.camlens_fsm_y->setEnabled( enabled );
+        ui.camlens_y->setEnabled( enabled );
+        ui.camlens_u->setEnabled( enabled );
+        ui.camlens_d->setEnabled( enabled );
     }
 }
 
 void pupilGuide::camwfs_align_setEnabled( bool enabled, bool all )
 {
-    if(all)
+    if( all )
     {
-        ui.label_pupTrackLoop->setEnabled(enabled);
+        ui.puptrack_loop_label->setEnabled( enabled );
     }
-    ui.pupTrackLoop_deltaX->setEnabled(enabled);
-    ui.pupTrackLoop_deltaY->setEnabled(enabled);
-    ui.pupTrackLoop_slider->setEnabled(enabled);
-    ui.pupTrackLoop_gain->setEnabled(enabled);
+    ui.puptrack_loop_deltaX->setEnabled( enabled );
+    ui.puptrack_loop_deltaY->setEnabled( enabled );
+    ui.puptrack_loop_slider->setEnabled( enabled );
+    ui.puptrack_loop_gain->setEnabled( enabled );
 }
 
 void pupilGuide::twAlign_camwfs_ctrl_setEnabled( bool enabled, bool all )
 {
-    if(all)
+    if( all )
     {
-        ui.label_actAlignLoop->setEnabled(enabled);
+        ui.actalign_loop_label->setEnabled( enabled );
     }
-    ui.actAlignLoop_deltaX->setEnabled(enabled);
-    ui.actAlignLoop_deltaY->setEnabled(enabled);
-    ui.actAlignLoop_slider->setEnabled(enabled);
-    ui.actAlignLoop_gain->setEnabled(enabled);
+    ui.actalign_loop_deltaX->setEnabled( enabled );
+    ui.actalign_loop_deltaY->setEnabled( enabled );
+    ui.actalign_loop_slider->setEnabled( enabled );
+    ui.actalign_loop_gain->setEnabled( enabled );
 }
 
 void pupilGuide::twAlign_camwfs_wfs_setEnabled( bool enabled, bool all )
 {
-    if(all)
+    if( all )
     {
-        ui.label_actAlignSensor->setEnabled(enabled);
+        ui.actalign_sensor_label->setEnabled( enabled );
     }
-    ui.actAlignSensor_slider->setEnabled(enabled);
-    ui.actAlignSensor_nAverage->setEnabled(enabled);
-    ui.actAlignSensor_nImages->setEnabled(enabled);
-    ui.actAlignSensor_pokeAmp->setEnabled(enabled);
+    ui.actalign_sensor_slider->setEnabled( enabled );
+    ui.actalign_sensor_nAverage->setEnabled( enabled );
+    ui.actalign_sensor_nImages->setEnabled( enabled );
+    ui.actalign_sensor_pokeAmp->setEnabled( enabled );
 }
 
 void pupilGuide::alignment_buttons_setEnabled( bool enabled, bool all )
 {
-    if(all)
+    if( all )
     {
-        ui.label_alignment->setEnabled(enabled);
+        ui.autoalign_label->setEnabled( enabled );
     }
-    ui.button_startAlignment->setEnabled(enabled);
-    ui.button_stopAlignment->setEnabled(enabled);
-
+    ui.autoalign_slider->setEnabled( enabled );
+    //    ui.button_startAlignment->setEnabled( enabled );
+    //    ui.button_stopAlignment->setEnabled( enabled );
 }
 
 void pupilGuide::updateGUI()
@@ -1611,88 +2249,86 @@ void pupilGuide::updateGUI()
 
     //--------- Modulation
 
-    bool enableModGUI = true;
+    bool enableModGUI    = true;
     bool enableModArrows = true;
 
     char str[16];
-    if( m_modFsmState == "NOTHOMED" )
+    if( m_modwfsFsmState == "NOTHOMED" )
     {
         if( m_tipmovewhat == MOVE_TTM )
         {
-           enableModArrows = false;
+            enableModArrows = false;
         }
     }
-    else if( (m_modFsmState != "READY") && (m_modFsmState != "OPERATING") )
+    else if( ( m_modwfsFsmState != "READY" ) && ( m_modwfsFsmState != "OPERATING" ) )
     {
         enableModGUI = false;
         if( m_tipmovewhat == MOVE_TTM )
         {
-           enableModArrows = false;
+            enableModArrows = false;
         }
     }
 
-    //If moving woofer and either woofer or wooferModes aren't ready we disable the arrows
-    if( m_tipmovewhat == MOVE_WOOF && (m_dmWooferState != "OPERATING" || m_wooferModesState != "READY"))
+    // If moving woofer and either woofer or wooferModes aren't ready we disable the arrows
+    if( m_tipmovewhat == MOVE_WOOF && ( m_dmWooferFsmState != "OPERATING" || m_wooferModesFsmState != "READY" ) )
     {
         enableModArrows = false;
     }
 
-    //If moving telescope and tcsi isn't connected we disable the arrows
-    if( m_tipmovewhat == MOVE_TEL && (m_tcsiState != "CONNECTED"))
+    // If moving telescope and tcsi isn't connected we disable the arrows
+    if( m_tipmovewhat == MOVE_TEL && ( m_tcsiFsmState != "CONNECTED" ) )
     {
         enableModArrows = false;
     }
 
     modGUISetEnable( enableModGUI, enableModArrows );
 
-
-
     if( m_modState == 3 && enableModGUI )
     {
-        ui.buttonMod_rest->setEnabled( true );
-        ui.buttonMod_set->setEnabled( false );
-        ui.buttonMod_mod->setEnabled( true );
+        ui.modwfs_rest->setEnabled( true );
+        ui.modwfs_set->setEnabled( false );
+        ui.modwfs_modulate->setEnabled( true );
     }
     else if( m_modState == 4 && enableModGUI )
     {
-        ui.buttonMod_rest->setEnabled( true );
-        ui.buttonMod_set->setEnabled( true );
-        ui.buttonMod_mod->setEnabled( true );
+        ui.modwfs_rest->setEnabled( true );
+        ui.modwfs_set->setEnabled( true );
+        ui.modwfs_modulate->setEnabled( true );
     }
     else
     {
         if( enableModGUI )
         {
-            ui.buttonMod_rest->setEnabled( true );
-            ui.buttonMod_set->setEnabled( true );
-            ui.buttonMod_mod->setEnabled( false );
+            ui.modwfs_rest->setEnabled( true );
+            ui.modwfs_set->setEnabled( true );
+            ui.modwfs_modulate->setEnabled( false );
         }
     }
 
     ui.modwfs_fsm->updateGUI();
-    ui.modFreq_current->updateGUI();
-    ui.modRad_current->updateGUI();
-    ui.modCh1->updateGUI();
-    ui.modCh2->updateGUI();
+    ui.modwfs_freq->updateGUI();
+    ui.modwfs_rad->updateGUI();
+    ui.modwfs_ch1->updateGUI();
+    ui.modwfs_ch2->updateGUI();
 
     // ------picoscis
-    if(m_picoState != "READY")
+    if( m_picoState != "READY" )
     {
-        ui.picoscix_pos->setEnabled(false);
-        ui.picoscix_l->setEnabled(false);
-        ui.picoscix_scale->setEnabled(false);
-        ui.picoscix_r->setEnabled(false);
-        ui.picoscix_combo->setEnabled(false);
-        ui.picoscix_go->setEnabled(false);
+        ui.picoscix_pos->setEnabled( false );
+        ui.picoscix_l->setEnabled( false );
+        ui.picoscix_scale->setEnabled( false );
+        ui.picoscix_r->setEnabled( false );
+        ui.picoscix_combo->setEnabled( false );
+        ui.picoscix_go->setEnabled( false );
     }
     else
     {
-        ui.picoscix_pos->setEnabled(true);
-        ui.picoscix_l->setEnabled(true);
-        ui.picoscix_scale->setEnabled(true);
-        ui.picoscix_r->setEnabled(true);
-        ui.picoscix_combo->setEnabled(true);
-        ui.picoscix_go->setEnabled(true);
+        ui.picoscix_pos->setEnabled( true );
+        ui.picoscix_l->setEnabled( true );
+        ui.picoscix_scale->setEnabled( true );
+        ui.picoscix_r->setEnabled( true );
+        ui.picoscix_combo->setEnabled( true );
+        ui.picoscix_go->setEnabled( true );
     }
 
     // ------Pupil Fitting
@@ -1707,33 +2343,33 @@ void pupilGuide::updateGUI()
 
         double m1, m2, m3, m4;
 
-        if( ui.setDelta->checkState() == Qt::Checked )
+        if( ui.pwfs_medians_delta->checkState() == Qt::Checked )
         {
-            double ave = 0.25 * ( m_med1 + m_med2 + m_med3 + m_med4 );
-            m1 = m_med1 - ave;
-            m2 = m_med2 - ave;
-            m3 = m_med3 - ave;
-            m4 = m_med4 - ave;
+            double ave = 0.25 * ( m_pwfs_median_1 + m_pwfs_median_2 + m_pwfs_median_3 + m_pwfs_median_4 );
+            m1         = m_pwfs_median_1 - ave;
+            m2         = m_pwfs_median_2 - ave;
+            m3         = m_pwfs_median_3 - ave;
+            m4         = m_pwfs_median_4 - ave;
         }
         else
         {
-            m1 = m_med1;
-            m2 = m_med2;
-            m3 = m_med3;
-            m4 = m_med4;
+            m1 = m_pwfs_median_1;
+            m2 = m_pwfs_median_2;
+            m3 = m_pwfs_median_3;
+            m4 = m_pwfs_median_4;
         }
 
         snprintf( str, 16, "%0.1f", m1 );
-        ui.med1->setText( str );
+        ui.pwfs_median_1->setText( str );
 
         snprintf( str, 16, "%0.1f", m2 );
-        ui.med2->setText( str );
+        ui.pwfs_median_2->setText( str );
 
         snprintf( str, 16, "%0.1f", m3 );
-        ui.med3->setText( str );
+        ui.pwfs_median_3->setText( str );
 
         snprintf( str, 16, "%0.1f", m4 );
-        ui.med4->setText( str );
+        ui.pwfs_median_4->setText( str );
 
         double x1 = m_x1;
         double y1 = m_y1;
@@ -1748,7 +2384,7 @@ void pupilGuide::updateGUI()
         double y4 = m_y4;
         double D4 = m_D4;
 
-        if( ui.setDelta_pup->checkState() == Qt::Checked )
+        if( ui.pwfs_coords_delta->checkState() == Qt::Checked )
         {
             x1 -= m_setx1;
             y1 -= m_sety1;
@@ -1768,130 +2404,130 @@ void pupilGuide::updateGUI()
         }
 
         snprintf( str, 16, "%0.2f", D1 );
-        ui.coordLL_D->setText( str );
+        ui.pwfs_LL_D->setText( str );
 
         snprintf( str, 16, "%0.2f", D2 );
-        ui.coordLR_D->setText( str );
+        ui.pwfs_LR_D->setText( str );
 
         snprintf( str, 16, "%0.2f", D3 );
-        ui.coordUL_D->setText( str );
+        ui.pwfs_UL_D->setText( str );
 
         snprintf( str, 16, "%0.2f", D4 );
-        ui.coordUR_D->setText( str );
+        ui.pwfs_UR_D->setText( str );
 
         snprintf( str, 16, "%0.2f", x1 );
-        ui.coordLL_x->setText( str );
+        ui.pwfs_LL_x->setText( str );
 
         snprintf( str, 16, "%0.2f", x2 );
-        ui.coordLR_x->setText( str );
+        ui.pwfs_LR_x->setText( str );
 
         snprintf( str, 16, "%0.2f", x3 );
-        ui.coordUL_x->setText( str );
+        ui.pwfs_UL_x->setText( str );
 
         snprintf( str, 16, "%0.2f", x4 );
-        ui.coordUR_x->setText( str );
+        ui.pwfs_UR_x->setText( str );
 
         snprintf( str, 16, "%0.2f", y1 );
-        ui.coordLL_y->setText( str );
+        ui.pwfs_LL_y->setText( str );
 
         snprintf( str, 16, "%0.2f", y2 );
-        ui.coordLR_y->setText( str );
+        ui.pwfs_LR_y->setText( str );
 
         snprintf( str, 16, "%0.2f", y3 );
-        ui.coordUL_y->setText( str );
+        ui.pwfs_UL_y->setText( str );
 
         snprintf( str, 16, "%0.2f", y4 );
-        ui.coordUR_y->setText( str );
+        ui.pwfs_UR_y->setText( str );
 
         snprintf( str, 16, "%0.2f", 0.25 * ( D1 + D2 + D3 + D4 ) );
-        ui.coordAvg_D->setText( str );
+        ui.pwfs_avg_D->setText( str );
 
         snprintf( str, 16, "%0.2f", 0.25 * ( x1 + x2 + x3 + x4 ) );
-        ui.coordAvg_x->setText( str );
+        ui.pwfs_avg_x->setText( str );
 
         snprintf( str, 16, "%0.2f", 0.25 * ( y1 + y2 + y3 + y4 ) );
-        ui.coordAvg_y->setText( str );
+        ui.pwfs_avg_y->setText( str );
     }
 
     // ------ camwfs averaging
     if( m_camwfsavgState == "READY" || m_camwfsavgState == "OPERATING" )
     {
-        ui.fitAvgTime->setEnabled( true );
+        ui.pwfsfit_avgtime->setEnabled( true );
     }
     else
     {
-        ui.fitAvgTime->setEnabled( false );
+        ui.pwfsfit_avgtime->setEnabled( false );
     }
 
     // ------ dmtweeter
 
     if( m_dmtweeterState == "READY" || m_dmtweeterState == "OPERATING" )
     {
-        ui.buttonTweeterTest_set->setEnabled( true );
+        ui.tweeter_set->setEnabled( true );
         if( m_dmtweeterTestSet )
         {
-            ui.buttonTweeterTest_set->setText( "zero test" );
+            ui.tweeter_set->setText( "zero test" );
         }
         else
         {
-            ui.buttonTweeterTest_set->setText( "set test" );
+            ui.tweeter_set->setText( "set test" );
         }
     }
     else
     {
-        ui.buttonTweeterTest_set->setEnabled( false );
-        ui.buttonTweeterTest_set->setText( "set test" );
+        ui.tweeter_set->setEnabled( false );
+        ui.tweeter_set->setText( "set test" );
     }
 
     // ------ dmncpc
 
     if( m_dmncpcState == "READY" || m_dmncpcState == "OPERATING" )
     {
-        ui.buttonNCPCTest_set->setEnabled( true );
+        ui.ncpc_set->setEnabled( true );
 
         if( m_dmncpcTestSet )
         {
-            ui.buttonNCPCTest_set->setText( "zero test" );
+            ui.ncpc_set->setText( "zero test" );
         }
         else
         {
-            ui.buttonNCPCTest_set->setText( "set test" );
+            ui.ncpc_set->setText( "set test" );
         }
     }
     else
     {
-        ui.buttonNCPCTest_set->setEnabled( false );
-        ui.buttonNCPCTest_set->setText( "set test" );
+        ui.ncpc_set->setEnabled( false );
+        ui.ncpc_set->setText( "set test" );
     }
 
     // ------ Pupil Steering
-    bool enablePupFSM = true;
+    bool enablePupFSM       = true;
     bool enablePupFSMArrows = true;
 
     if( m_pupFsmState == "READY" )
     {
-        ui.pupState->setEnabled( true );
-        ui.pupCh1->setEnabled( true );
-        ui.pupCh2->setEnabled( true );
-        ui.buttonPup_set->setEnabled( false );
-        ui.buttonPup_rest->setEnabled( true );
+        ui.ttmpupil_fsm->setEnabled( true );
+        ui.ttmpupil_ch1->setEnabled( true );
+        ui.ttmpupil_ch2->setEnabled( true );
+        ui.ttmpupil_set->setEnabled( false );
+        ui.ttmpupil_rest->setEnabled( true );
     }
     else if( m_pupFsmState == "NOTHOMED" )
     {
-        ui.pupState->setEnabled( true );
-        ui.pupCh1->setEnabled( false );
-        ui.pupCh2->setEnabled( false );
-        ui.buttonPup_set->setEnabled( true );
-        ui.buttonPup_rest->setEnabled( false );
+        ui.ttmpupil_fsm->setEnabled( true );
+        ui.ttmpupil_ch1->setEnabled( false );
+        ui.ttmpupil_ch2->setEnabled( false );
+        ui.ttmpupil_set->setEnabled( true );
+        ui.ttmpupil_rest->setEnabled( false );
         enablePupFSMArrows = false;
     }
     else if( m_pupFsmState == "HOMING" )
     {
-        ui.pupState->setEnabled( true );
-        ui.pupCh1->setEnabled( false );
-        ui.pupCh2->setEnabled( false );
-        ui.buttonPup_set->setEnabled( false );
-        ui.buttonPup_rest->setEnabled( true );
+        ui.ttmpupil_fsm->setEnabled( true );
+        ui.ttmpupil_ch1->setEnabled( false );
+        ui.ttmpupil_ch2->setEnabled( false );
+        ui.ttmpupil_set->setEnabled( false );
+        ui.ttmpupil_rest->setEnabled( true );
         enablePupFSMArrows = false;
     }
     else
@@ -1899,11 +2535,11 @@ void pupilGuide::updateGUI()
         enablePupFSM = false;
         if( m_pupFsmState == "" )
         {
-            ui.pupState->setEnabled( false );
+            ui.ttmpupil_fsm->setEnabled( false );
         }
         else
         {
-            ui.pupState->setEnabled( true );
+            ui.ttmpupil_fsm->setEnabled( true );
         }
     }
 
@@ -1911,57 +2547,57 @@ void pupilGuide::updateGUI()
     {
         if( enablePupFSMArrows )
         {
-            ui.button_pup_ul->setEnabled( true );
-            ui.button_pup_ur->setEnabled( true );
-            ui.button_pup_scale->setEnabled( true );
-            ui.button_pup_dl->setEnabled( true );
-            ui.button_pup_dr->setEnabled( true );
+            ui.ttmpupil_ul->setEnabled( true );
+            ui.ttmpupil_ur->setEnabled( true );
+            ui.ttmpupil_scale->setEnabled( true );
+            ui.ttmpupil_dl->setEnabled( true );
+            ui.ttmpupil_dr->setEnabled( true );
         }
         else
         {
-            ui.button_pup_ul->setEnabled( false );
-            ui.button_pup_ur->setEnabled( false );
-            ui.button_pup_scale->setEnabled( false );
-            ui.button_pup_dl->setEnabled( false );
-            ui.button_pup_dr->setEnabled( false );
+            ui.ttmpupil_ul->setEnabled( false );
+            ui.ttmpupil_ur->setEnabled( false );
+            ui.ttmpupil_scale->setEnabled( false );
+            ui.ttmpupil_dl->setEnabled( false );
+            ui.ttmpupil_dr->setEnabled( false );
         }
     }
     else
     {
 
-        ui.buttonPup_set->setEnabled( false );
-        ui.buttonPup_rest->setEnabled( false );
-        ui.pupCh1->setEnabled( false );
-        ui.pupCh2->setEnabled( false );
+        ui.ttmpupil_set->setEnabled( false );
+        ui.ttmpupil_rest->setEnabled( false );
+        ui.ttmpupil_ch1->setEnabled( false );
+        ui.ttmpupil_ch2->setEnabled( false );
 
-        ui.button_pup_ul->setEnabled( false );
-        ui.button_pup_ur->setEnabled( false );
-        ui.button_pup_scale->setEnabled( false );
-        ui.button_pup_dl->setEnabled( false );
-        ui.button_pup_dr->setEnabled( false );
+        ui.ttmpupil_ul->setEnabled( false );
+        ui.ttmpupil_ur->setEnabled( false );
+        ui.ttmpupil_scale->setEnabled( false );
+        ui.ttmpupil_dl->setEnabled( false );
+        ui.ttmpupil_dr->setEnabled( false );
     }
 
     // ------ TTM Peri
-    bool enableTTMPeriFSM = true;
+    bool enableTTMPeriFSM       = true;
     bool enableTTMPeriFSMArrows = true;
 
     if( m_ttmPeriFsmState == "READY" )
     {
-        ui.ttmPeriState->setEnabled( true );
-        ui.ttmPeriCh1->setEnabled( false );
-        ui.ttmPeriCh2->setEnabled( false );
-        ui.button_ttmPeri_set->setEnabled( true );
-        ui.button_ttmPeri_rest->setEnabled( false );
+        ui.ttmperi_fsm->setEnabled( true );
+        ui.ttmperi_ch1->setEnabled( false );
+        ui.ttmperi_ch2->setEnabled( false );
+        ui.ttmperi_set->setEnabled( true );
+        ui.ttmperi_rest->setEnabled( false );
 
         enableTTMPeriFSMArrows = false;
     }
     else if( m_ttmPeriFsmState == "OPERATING" )
     {
-        ui.ttmPeriState->setEnabled( true );
-        ui.ttmPeriCh1->setEnabled( true );
-        ui.ttmPeriCh2->setEnabled( true );
-        ui.button_ttmPeri_set->setEnabled( false );
-        ui.button_ttmPeri_rest->setEnabled( true );
+        ui.ttmperi_fsm->setEnabled( true );
+        ui.ttmperi_ch1->setEnabled( true );
+        ui.ttmperi_ch2->setEnabled( true );
+        ui.ttmperi_set->setEnabled( false );
+        ui.ttmperi_rest->setEnabled( true );
         enableTTMPeriFSMArrows = true;
     }
     else
@@ -1970,45 +2606,45 @@ void pupilGuide::updateGUI()
 
         if( m_ttmPeriFsmState == "" )
         {
-            ui.ttmPeriState->setEnabled( false );
+            ui.ttmperi_fsm->setEnabled( false );
         }
         else
         {
-            ui.ttmPeriState->setEnabled( true );
+            ui.ttmperi_fsm->setEnabled( true );
         }
 
-        ui.ttmPeriCh1->setEnabled( false );
-        ui.ttmPeriCh2->setEnabled( false );
-        ui.button_ttmPeri_set->setEnabled( false );
-        ui.button_ttmPeri_rest->setEnabled( false );
+        ui.ttmperi_ch1->setEnabled( false );
+        ui.ttmperi_ch2->setEnabled( false );
+        ui.ttmperi_set->setEnabled( false );
+        ui.ttmperi_rest->setEnabled( false );
     }
 
     if( enableTTMPeriFSM )
     {
         if( enableTTMPeriFSMArrows )
         {
-            ui.button_ttmPeri_l->setEnabled( true );
-            ui.button_ttmPeri_r->setEnabled( true );
-            ui.button_ttmPeri_scale->setEnabled( true );
-            ui.button_ttmPeri_u->setEnabled( true );
-            ui.button_ttmPeri_d->setEnabled( true );
+            ui.ttmperi_l->setEnabled( true );
+            ui.ttmperi_r->setEnabled( true );
+            ui.ttmperi_scale->setEnabled( true );
+            ui.ttmperi_u->setEnabled( true );
+            ui.ttmperi_d->setEnabled( true );
         }
         else
         {
-            ui.button_ttmPeri_l->setEnabled( false );
-            ui.button_ttmPeri_r->setEnabled( false );
-            ui.button_ttmPeri_scale->setEnabled( false );
-            ui.button_ttmPeri_u->setEnabled( false );
-            ui.button_ttmPeri_d->setEnabled( false );
+            ui.ttmperi_l->setEnabled( false );
+            ui.ttmperi_r->setEnabled( false );
+            ui.ttmperi_scale->setEnabled( false );
+            ui.ttmperi_u->setEnabled( false );
+            ui.ttmperi_d->setEnabled( false );
         }
     }
     else
     {
-        ui.button_ttmPeri_l->setEnabled( false );
-        ui.button_ttmPeri_r->setEnabled( false );
-        ui.button_ttmPeri_scale->setEnabled( false );
-        ui.button_ttmPeri_u->setEnabled( false );
-        ui.button_ttmPeri_d->setEnabled( false );
+        ui.ttmperi_l->setEnabled( false );
+        ui.ttmperi_r->setEnabled( false );
+        ui.ttmperi_scale->setEnabled( false );
+        ui.ttmperi_u->setEnabled( false );
+        ui.ttmperi_d->setEnabled( false );
     }
 
     // --- camera lens
@@ -2023,568 +2659,92 @@ void pupilGuide::updateGUI()
     {
         camlensSetEnabled( true, CAMLENS_X );
         camlensSetEnabled( false, CAMLENS_Y );
-        ui.camlensY_pos->onDisconnect();
+        ui.camlens_y->onDisconnect();
     }
     else if( !( m_camlensxFsmState == "READY" || m_camlensxFsmState == "OPERATING" ) &&
              ( m_camlensyFsmState == "READY" || m_camlensyFsmState == "OPERATING" ) )
     {
         camlensSetEnabled( false, CAMLENS_X );
-        ui.camlensX_pos->onDisconnect();
+        ui.camlens_x->onDisconnect();
 
         camlensSetEnabled( true, CAMLENS_Y );
     }
     else
     {
         camlensSetEnabled( false );
-        ui.camlensX_pos->onDisconnect();
-        ui.camlensY_pos->onDisconnect();
+        ui.camlens_x->onDisconnect();
+        ui.camlens_y->onDisconnect();
     }
 
-    if(m_camlensxFsmState == "SHUTDOWN")
+    if( m_camlensxFsmState == "SHUTDOWN" )
     {
-        ui.camlensX_pos->onDisconnect();
+        ui.camlens_x->onDisconnect();
     }
 
-    if(m_camlensyFsmState == "SHUTDOWN")
+    if( m_camlensyFsmState == "SHUTDOWN" )
     {
-        ui.camlensY_pos->onDisconnect();
+        ui.camlens_y->onDisconnect();
     }
 
-    ui.camlensX_fsm->updateGUI();
-    ui.camlensY_fsm->updateGUI();
-    ui.camlensX_pos->updateGUI();
-    ui.camlensY_pos->updateGUI();
+    ui.camlens_fsm_x->updateGUI();
+    ui.camlens_fsm_y->updateGUI();
+    ui.camlens_x->updateGUI();
+    ui.camlens_y->updateGUI();
 
+    ui.pwfsfit_threshold->updateGUI();
+    ui.pwfsfit_avgtime->updateGUI();
 
-
-
-
-    ui.fitThreshold->updateGUI();
-    ui.fitAvgTime->updateGUI();
-
-    if(m_camwfs_align_fsmState != "READY" && m_camwfs_align_fsmState != "OPERATING")
+    if( m_camwfs_align_fsmState != "READY" && m_camwfs_align_fsmState != "OPERATING" )
     {
-        camwfs_align_setEnabled(false, false);
+        camwfs_align_setEnabled( false, false );
     }
     else
     {
-        camwfs_align_setEnabled(true, true);
+        camwfs_align_setEnabled( true, true );
     }
 
-    ui.pupTrackLoop_deltaX->updateGUI();
-    ui.pupTrackLoop_deltaY->updateGUI();
-    ui.pupTrackLoop_slider->updateGUI();
-    ui.pupTrackLoop_gain->updateGUI();
+    ui.puptrack_loop_deltaX->updateGUI();
+    ui.puptrack_loop_deltaY->updateGUI();
+    ui.puptrack_loop_slider->updateGUI();
+    ui.puptrack_loop_gain->updateGUI();
 
-    if(m_twAlign_camwfs_ctrl_fsmState != "READY" && m_twAlign_camwfs_ctrl_fsmState != "OPERATING")
+    if( m_twAlign_camwfs_ctrl_fsmState != "READY" && m_twAlign_camwfs_ctrl_fsmState != "OPERATING" )
     {
-        twAlign_camwfs_ctrl_setEnabled(false, false);
+        twAlign_camwfs_ctrl_setEnabled( false, false );
     }
     else
     {
-        twAlign_camwfs_ctrl_setEnabled(true, true);
+        twAlign_camwfs_ctrl_setEnabled( true, true );
     }
 
-    ui.actAlignLoop_deltaX->updateGUI();
-    ui.actAlignLoop_deltaY->updateGUI();
-    ui.actAlignLoop_slider->updateGUI();
-    ui.actAlignLoop_gain->updateGUI();
+    ui.actalign_loop_deltaX->updateGUI();
+    ui.actalign_loop_deltaY->updateGUI();
+    ui.actalign_loop_slider->updateGUI();
+    ui.actalign_loop_gain->updateGUI();
 
-    if(m_twAlign_camwfs_wfs_fsmState != "READY" && m_twAlign_camwfs_wfs_fsmState != "OPERATING")
+    if( m_twAlign_camwfs_wfs_fsmState != "READY" && m_twAlign_camwfs_wfs_fsmState != "OPERATING" )
     {
-        twAlign_camwfs_wfs_setEnabled(false, false);
+        twAlign_camwfs_wfs_setEnabled( false, false );
     }
     else
     {
-        twAlign_camwfs_wfs_setEnabled(true, true);
+        twAlign_camwfs_wfs_setEnabled( true, true );
     }
 
-    ui.actAlignSensor_slider->updateGUI();
-    ui.actAlignSensor_nAverage->updateGUI();
-    ui.actAlignSensor_nImages->updateGUI();
-    ui.actAlignSensor_pokeAmp->updateGUI();
+    ui.actalign_sensor_slider->updateGUI();
+    ui.actalign_sensor_nAverage->updateGUI();
+    ui.actalign_sensor_nImages->updateGUI();
+    ui.actalign_sensor_pokeAmp->updateGUI();
 
 } // updateGUI()
 
 // ------------- modttm
 
-void pupilGuide::on_buttonMod_mod_pressed()
-{
-    pcf::IndiProperty ip( pcf::IndiProperty::Number );
-
-    ip.setDevice( "modwfs" );
-    ip.setName( "modState" );
-    ip.add( pcf::IndiElement( "target" ) );
-    ip["target"] = 4;
-
-    sendNewProperty( ip );
-}
-
-void pupilGuide::on_buttonMod_set_pressed()
-{
-    pcf::IndiProperty ip( pcf::IndiProperty::Number );
-
-    ip.setDevice( "modwfs" );
-    ip.setName( "modState" );
-    ip.add( pcf::IndiElement( "target" ) );
-    ip["target"] = 3;
-    sendNewProperty( ip );
-}
-
-void pupilGuide::on_buttonMod_rest_pressed()
-{
-    pcf::IndiProperty ip( pcf::IndiProperty::Number );
-
-    ip.setDevice( "modwfs" );
-    ip.setName( "modState" );
-    ip.add( pcf::IndiElement( "target" ) );
-    ip["target"] = 1;
-
-    sendNewProperty( ip );
-}
-
-void pupilGuide::on_button_ttmtel_pressed()
-{
-    if( m_tipmovewhat == MOVE_TTM )
-    {
-        m_tipmovewhat = MOVE_WOOF;
-        ui.button_ttmtel->setText( "move woofer" );
-    }
-    else if( m_tipmovewhat == MOVE_WOOF && !m_labMode )
-    {
-        m_tipmovewhat = MOVE_TEL;
-        ui.button_ttmtel->setText( "move telescope" );
-    }
-    else
-    {
-        m_tipmovewhat = MOVE_TTM;
-        ui.button_ttmtel->setText( "move ttm" );
-    }
-}
-
-void pupilGuide::on_button_tip_u_pressed()
-{
-    pcf::IndiProperty ip( pcf::IndiProperty::Number );
-
-    if( m_tipmovewhat == MOVE_TTM )
-    {
-        ip.setDevice( "modwfs" );
-        ip.setName( "offset" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = m_stepSize;
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = 0;
-    }
-    else if( m_tipmovewhat == MOVE_WOOF )
-    {
-        double tip, tilt;
-        wooferTipTilt( tip, tilt, 0, m_stepSize );
-
-        ip.setDevice( "wooferModes" );
-        ip.setName( "target_amps" );
-        ip.add( pcf::IndiElement( "0000" ) );
-        ip.add( pcf::IndiElement( "0001" ) );
-        ip["0000"] = m_tip + tip;
-        ip["0001"] = m_tilt + tilt;
-    }
-    else if( m_tipmovewhat == MOVE_TEL )
-    {
-        ip.setDevice( "tcsi" );
-        ip.setName( "pyrNudge" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = m_stepSize * 5.;
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = 0;
-    }
-    else
-        return;
-
-    sendNewProperty( ip );
-}
-
-void pupilGuide::on_button_tip_ul_pressed()
-{
-    pcf::IndiProperty ip( pcf::IndiProperty::Number );
-
-    if( m_tipmovewhat == MOVE_TTM )
-    {
-        ip.setDevice( "modwfs" );
-        ip.setName( "offset" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = m_stepSize / sqrt( 2. );
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = -m_stepSize / sqrt( 2. );
-    }
-    else if( m_tipmovewhat == MOVE_WOOF )
-    {
-        double tip, tilt;
-        wooferTipTilt( tip, tilt, m_stepSize / sqrt( 2. ), m_stepSize / sqrt( 2. ) );
-
-        ip.setDevice( "wooferModes" );
-        ip.setName( "target_amps" );
-        ip.add( pcf::IndiElement( "0000" ) );
-        ip.add( pcf::IndiElement( "0001" ) );
-        ip["0000"] = m_tip + tip;
-        ip["0001"] = m_tilt + tilt;
-    }
-    else if( m_tipmovewhat == MOVE_TEL )
-    {
-        ip.setDevice( "tcsi" );
-        ip.setName( "pyrNudge" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = m_stepSize * 5. / sqrt( 2. );
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = m_stepSize * 5. / sqrt( 2. );
-    }
-
-    sendNewProperty( ip );
-}
-
-void pupilGuide::on_button_tip_l_pressed()
-{
-    pcf::IndiProperty ip( pcf::IndiProperty::Number );
-
-    if( m_tipmovewhat == MOVE_TTM )
-    {
-        ip.setDevice( "modwfs" );
-        ip.setName( "offset" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = 0;
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = -m_stepSize;
-    }
-    else if( m_tipmovewhat == MOVE_WOOF )
-    {
-        double tip, tilt;
-        wooferTipTilt( tip, tilt, m_stepSize, 0 );
-
-        ip.setDevice( "wooferModes" );
-        ip.setName( "target_amps" );
-        ip.add( pcf::IndiElement( "0000" ) );
-        ip.add( pcf::IndiElement( "0001" ) );
-        ip["0000"] = m_tip + tip;
-        ip["0001"] = m_tilt + tilt;
-    }
-    else if( m_tipmovewhat == MOVE_TEL )
-    {
-        ip.setDevice( "tcsi" );
-        ip.setName( "pyrNudge" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = 0;
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = -m_stepSize * 5.;
-    }
-
-    sendNewProperty( ip );
-}
-
-void pupilGuide::on_button_tip_dl_pressed()
-{
-    pcf::IndiProperty ip( pcf::IndiProperty::Number );
-
-    if( m_tipmovewhat == MOVE_TTM )
-    {
-        ip.setDevice( "modwfs" );
-        ip.setName( "offset" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = -m_stepSize / sqrt( 2. );
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = -m_stepSize / sqrt( 2. );
-    }
-    else if( m_tipmovewhat == MOVE_WOOF )
-    {
-        double tip, tilt;
-        wooferTipTilt( tip, tilt, m_stepSize / sqrt( 2. ), -m_stepSize / sqrt( 2. ) );
-
-        ip.setDevice( "wooferModes" );
-        ip.setName( "target_amps" );
-        ip.add( pcf::IndiElement( "0000" ) );
-        ip.add( pcf::IndiElement( "0001" ) );
-        ip["0000"] = m_tip + tip;
-        ip["0001"] = m_tilt + tilt;
-    }
-    else if( m_tipmovewhat == MOVE_TEL )
-    {
-        ip.setDevice( "tcsi" );
-        ip.setName( "pyrNudge" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = -m_stepSize * 5. / sqrt( 2. );
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = -m_stepSize * 5. / sqrt( 2. );
-    }
-
-    sendNewProperty( ip );
-}
-
-void pupilGuide::on_button_tip_d_pressed()
-{
-    pcf::IndiProperty ip( pcf::IndiProperty::Number );
-
-    if( m_tipmovewhat == MOVE_TTM )
-    {
-        ip.setDevice( "modwfs" );
-        ip.setName( "offset" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = -m_stepSize;
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = 0;
-    }
-    else if( m_tipmovewhat == MOVE_WOOF )
-    {
-        double tip, tilt;
-        wooferTipTilt( tip, tilt, 0, -m_stepSize );
-
-        ip.setDevice( "wooferModes" );
-        ip.setName( "target_amps" );
-        ip.add( pcf::IndiElement( "0000" ) );
-        ip.add( pcf::IndiElement( "0001" ) );
-        ip["0000"] = m_tip + tip;
-        ip["0001"] = m_tilt + tilt;
-    }
-    else if( m_tipmovewhat == MOVE_TEL )
-    {
-        ip.setDevice( "tcsi" );
-        ip.setName( "pyrNudge" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = -m_stepSize * 5.;
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = 0;
-    }
-
-    sendNewProperty( ip );
-}
-
-void pupilGuide::on_button_tip_dr_pressed()
-{
-    pcf::IndiProperty ip( pcf::IndiProperty::Number );
-
-    if( m_tipmovewhat == MOVE_TTM )
-    {
-        ip.setDevice( "modwfs" );
-        ip.setName( "offset" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = -m_stepSize / sqrt( 2. );
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = m_stepSize / sqrt( 2. );
-    }
-    else if( m_tipmovewhat == MOVE_WOOF )
-    {
-        double tip, tilt;
-        wooferTipTilt( tip, tilt, -m_stepSize / sqrt( 2. ), -m_stepSize / sqrt( 2. ) );
-
-        ip.setDevice( "wooferModes" );
-        ip.setName( "target_amps" );
-        ip.add( pcf::IndiElement( "0000" ) );
-        ip.add( pcf::IndiElement( "0001" ) );
-        ip["0000"] = m_tip + tip;
-        ip["0001"] = m_tilt + tilt;
-    }
-    else if( m_tipmovewhat == MOVE_TEL )
-    {
-        ip.setDevice( "tcsi" );
-        ip.setName( "pyrNudge" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = -m_stepSize * 5. / sqrt( 2. );
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = m_stepSize * 5. / sqrt( 2. );
-    }
-    else
-        return;
-
-    sendNewProperty( ip );
-}
-
-void pupilGuide::on_button_tip_r_pressed()
-{
-    pcf::IndiProperty ip( pcf::IndiProperty::Number );
-
-    if( m_tipmovewhat == MOVE_TTM )
-    {
-        ip.setDevice( "modwfs" );
-        ip.setName( "offset" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = 0;
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = m_stepSize;
-    }
-    else if( m_tipmovewhat == MOVE_WOOF )
-    {
-        double tip, tilt;
-        wooferTipTilt( tip, tilt, -m_stepSize, 0 );
-
-        ip.setDevice( "wooferModes" );
-        ip.setName( "target_amps" );
-        ip.add( pcf::IndiElement( "0000" ) );
-        ip.add( pcf::IndiElement( "0001" ) );
-        ip["0000"] = m_tip + tip;
-        ip["0001"] = m_tilt + tilt;
-    }
-    else if( m_tipmovewhat == MOVE_TEL )
-    {
-        ip.setDevice( "tcsi" );
-        ip.setName( "pyrNudge" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = 0;
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = m_stepSize * 5.;
-    }
-    else
-        return;
-
-    sendNewProperty( ip );
-}
-
-void pupilGuide::on_button_tip_ur_pressed()
-{
-    pcf::IndiProperty ip( pcf::IndiProperty::Number );
-
-    if( m_tipmovewhat == MOVE_TTM )
-    {
-        ip.setDevice( "modwfs" );
-        ip.setName( "offset" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = m_stepSize / sqrt( 2. );
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = m_stepSize / sqrt( 2. );
-    }
-    else if( m_tipmovewhat == MOVE_WOOF )
-    {
-        double tip, tilt;
-        wooferTipTilt( tip, tilt, -m_stepSize / sqrt( 2. ), m_stepSize / sqrt( 2. ) );
-
-        ip.setDevice( "wooferModes" );
-        ip.setName( "target_amps" );
-        ip.add( pcf::IndiElement( "0000" ) );
-        ip.add( pcf::IndiElement( "0001" ) );
-        ip["0000"] = m_tip + tip;
-        ip["0001"] = m_tilt + tilt;
-    }
-    else if( m_tipmovewhat == MOVE_TEL )
-    {
-        ip.setDevice( "tcsi" );
-        ip.setName( "pyrNudge" );
-        ip.add( pcf::IndiElement( "y" ) );
-        ip["y"] = m_stepSize * 5. / sqrt( 2. );
-        ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = m_stepSize * 5. / sqrt( 2. );
-    }
-    else
-        return;
-
-    sendNewProperty( ip );
-}
-
-void pupilGuide::on_button_tip_scale_pressed()
-{
-    if( ( (int)( 100 * m_stepSize ) ) == 100 )
-    {
-        m_stepSize = 0.5;
-    }
-    else if( ( (int)( 100 * m_stepSize ) ) == 50 )
-    {
-        m_stepSize = 0.1;
-    }
-    else if( ( (int)( 100 * m_stepSize ) ) == 10 )
-    {
-        m_stepSize = 0.05;
-    }
-    else if( ( (int)( 100 * m_stepSize ) ) == 5 )
-    {
-        m_stepSize = 0.01;
-    }
-    else if( ( (int)( 100 * m_stepSize ) ) == 1 )
-    {
-        m_stepSize = 1.0;
-    }
-
-    char ss[5];
-    snprintf( ss, 5, "%0.2f", m_stepSize );
-    ui.button_tip_scale->setText( ss );
-}
-
-void pupilGuide::on_button_focus_p_pressed()
-{
-    pcf::IndiProperty ip( pcf::IndiProperty::Number );
-
-    if( m_tipmovewhat == MOVE_WOOF )
-    {
-
-        ip.setDevice( "wooferModes" );
-        ip.setName( "target_amps" );
-        ip.add( pcf::IndiElement( "0002" ) );
-        ip["0002"] = m_focus + m_focusStepSize * 0.2;
-    }
-    else if( m_tipmovewhat == MOVE_TEL )
-    {
-        ip.setDevice( "tcsi" );
-        ip.setName( "pyrNudge" );
-        ip.add( pcf::IndiElement( "z" ) );
-        ip["z"] = m_stepSize * 100.;
-    }
-    else
-        return;
-
-    sendNewProperty( ip );
-}
-
-void pupilGuide::on_button_focus_m_pressed()
-{
-    pcf::IndiProperty ip( pcf::IndiProperty::Number );
-
-    if( m_tipmovewhat == MOVE_WOOF )
-    {
-
-        ip.setDevice( "wooferModes" );
-        ip.setName( "target_amps" );
-        ip.add( pcf::IndiElement( "0002" ) );
-        ip["0002"] = m_focus - m_focusStepSize * 0.2;
-    }
-    else if( m_tipmovewhat == MOVE_TEL )
-    {
-        ip.setDevice( "tcsi" );
-        ip.setName( "pyrNudge" );
-        ip.add( pcf::IndiElement( "z" ) );
-        ip["z"] = -m_stepSize * 100.;
-    }
-    else
-        return;
-
-    sendNewProperty( ip );
-}
-
-void pupilGuide::on_button_focus_scale_pressed()
-{
-    if( ( (int)( 100 * m_focusStepSize ) ) == 100 )
-    {
-        m_focusStepSize = 0.5;
-    }
-    else if( ( (int)( 100 * m_focusStepSize ) ) == 50 )
-    {
-        m_focusStepSize = 0.1;
-    }
-    else if( ( (int)( 100 * m_focusStepSize ) ) == 10 )
-    {
-        m_focusStepSize = 0.05;
-    }
-    else if( ( (int)( 100 * m_focusStepSize ) ) == 5 )
-    {
-        m_focusStepSize = 0.01;
-    }
-    else if( ( (int)( 100 * m_focusStepSize ) ) == 1 )
-    {
-        m_focusStepSize = 1.0;
-    }
-
-    char ss[5];
-    snprintf( ss, 5, "%0.2f", m_focusStepSize );
-    ui.button_focus_scale->setText( ss );
-}
-
 //----------- picoscix
 
-void pupilGuide::move_picoscix(int delta)
+void pupilGuide::move_picoscix( int delta )
 {
-    if(m_picoState != "READY" || m_picoscixPos < -1000000)
+    if( m_picoState != "READY" || m_picoscixPos < -1000000 )
     {
         return;
     }
@@ -2604,16 +2764,16 @@ void pupilGuide::move_picoscix(int delta)
 
 void pupilGuide::on_picoscix_l_pressed()
 {
-    move_picoscix(+m_picoscix_stepSize);
+    move_picoscix( +m_picoscix_stepSize );
 }
 
 void pupilGuide::on_picoscix_scale_pressed()
 {
-    if( m_picoscix_stepSize  == 1000 )
+    if( m_picoscix_stepSize == 1000 )
     {
         m_picoscix_stepSize = 500;
     }
-    else if( m_picoscix_stepSize  == 500 )
+    else if( m_picoscix_stepSize == 500 )
     {
         m_picoscix_stepSize = 100;
     }
@@ -2627,37 +2787,35 @@ void pupilGuide::on_picoscix_scale_pressed()
     }
 
     char ss[5];
-    snprintf( ss, 5, "%0.2f", m_picoscix_stepSize/1000. );
+    snprintf( ss, 5, "%0.2f", m_picoscix_stepSize / 1000. );
     ui.picoscix_scale->setText( ss );
 }
 
 void pupilGuide::on_picoscix_r_pressed()
 {
-    move_picoscix(-m_picoscix_stepSize);
+    move_picoscix( -m_picoscix_stepSize );
 }
 
 void pupilGuide::on_picoscix_go_pressed()
 {
     QString select = ui.picoscix_combo->currentText();
 
-    if(select == "65-35")
+    if( select == "65-35" )
     {
-        move_picoscix(-7000);
+        move_picoscix( -7000 );
     }
 
-    if(select == "Ha-IR")
+    if( select == "Ha-IR" )
     {
-        move_picoscix(7000);
+        move_picoscix( 7000 );
     }
 
-    ui.picoscix_combo->setCurrentText("    ");
+    ui.picoscix_combo->setCurrentText( "    " );
 }
-
-
 
 //----------- dmtweeter
 
-void pupilGuide::on_buttonTweeterTest_set_pressed()
+void pupilGuide::on_tweeter_set_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
 
@@ -2679,7 +2837,7 @@ void pupilGuide::on_buttonTweeterTest_set_pressed()
 
 //----------- dmtweeter
 
-void pupilGuide::on_buttonNCPCTest_set_pressed()
+void pupilGuide::on_ncpc_set_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
 
@@ -2701,7 +2859,7 @@ void pupilGuide::on_buttonNCPCTest_set_pressed()
 
 //----------- ttmpupil
 
-void pupilGuide::on_buttonPup_rest_pressed()
+void pupilGuide::on_ttmpupil_rest_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
 
@@ -2713,7 +2871,7 @@ void pupilGuide::on_buttonPup_rest_pressed()
     sendNewProperty( ip );
 }
 
-void pupilGuide::on_buttonPup_set_pressed()
+void pupilGuide::on_ttmpupil_set_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
 
@@ -2725,21 +2883,7 @@ void pupilGuide::on_buttonPup_set_pressed()
     sendNewProperty( ip );
 }
 
-void pupilGuide::on_button_camera_pressed()
-{
-    if( m_pupCam == FLOWFS )
-    {
-        m_pupCam = CAMSCIS;
-        ui.button_camera->setText( "camsci1/2" );
-    }
-    else
-    {
-        m_pupCam = FLOWFS;
-        ui.button_camera->setText( "flowfs" );
-    }
-}
-
-void pupilGuide::on_button_pup_ul_pressed()
+void pupilGuide::on_ttmpupil_ul_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
@@ -2747,17 +2891,7 @@ void pupilGuide::on_button_pup_ul_pressed()
     ip.setName( "pos_1" );
     ip.add( pcf::IndiElement( "target" ) );
 
-    if( m_pupCam == FLOWFS )
-    {
-        ip["target"] = m_pupCh1 + m_pupStepSize / sqrt( 2 );
-    }
-    else if( m_pupCam == LLOWFS )
-    {
-    }
-    else if( m_pupCam == CAMSCIS )
-    {
-        ip["target"] = m_pupCh1 + m_pupStepSize / sqrt( 2 );
-    }
+    ip["target"] = m_ttmpupil_ch1 + m_pupStepSize / sqrt( 2 );
 
     sendNewProperty( ip );
 
@@ -2767,22 +2901,12 @@ void pupilGuide::on_button_pup_ul_pressed()
     ip2.setName( "pos_2" );
     ip2.add( pcf::IndiElement( "target" ) );
 
-    if( m_pupCam == FLOWFS )
-    {
-        ip2["target"] = m_pupCh2 + m_pupStepSize / sqrt( 2 );
-    }
-    else if( m_pupCam == LLOWFS )
-    {
-    }
-    else if( m_pupCam == CAMSCIS )
-    {
-        ip2["target"] = m_pupCh2 + m_pupStepSize / sqrt( 2 );
-    }
+    ip2["target"] = m_ttmpupil_ch2 + m_pupStepSize / sqrt( 2 );
 
     sendNewProperty( ip2 );
 }
 
-void pupilGuide::on_button_pup_dl_pressed()
+void pupilGuide::on_ttmpupil_dl_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
@@ -2790,17 +2914,7 @@ void pupilGuide::on_button_pup_dl_pressed()
     ip.setName( "pos_1" );
     ip.add( pcf::IndiElement( "target" ) );
 
-    if( m_pupCam == FLOWFS )
-    {
-        ip["target"] = m_pupCh1 + m_pupStepSize / sqrt( 2 );
-    }
-    else if( m_pupCam == LLOWFS )
-    {
-    }
-    else if( m_pupCam == CAMSCIS )
-    {
-        ip["target"] = m_pupCh1 - m_pupStepSize / sqrt( 2 );
-    }
+    ip["target"] = m_ttmpupil_ch1 - m_pupStepSize / sqrt( 2 );
 
     sendNewProperty( ip );
 
@@ -2810,22 +2924,12 @@ void pupilGuide::on_button_pup_dl_pressed()
     ip2.setName( "pos_2" );
     ip2.add( pcf::IndiElement( "target" ) );
 
-    if( m_pupCam == FLOWFS )
-    {
-        ip2["target"] = m_pupCh2 - m_pupStepSize / sqrt( 2 );
-    }
-    else if( m_pupCam == LLOWFS )
-    {
-    }
-    else if( m_pupCam == CAMSCIS )
-    {
-        ip2["target"] = m_pupCh2 + m_pupStepSize / sqrt( 2 );
-    }
+    ip2["target"] = m_ttmpupil_ch2 + m_pupStepSize / sqrt( 2 );
 
     sendNewProperty( ip2 );
 }
 
-void pupilGuide::on_button_pup_dr_pressed()
+void pupilGuide::on_ttmpupil_dr_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
@@ -2833,17 +2937,7 @@ void pupilGuide::on_button_pup_dr_pressed()
     ip.setName( "pos_1" );
     ip.add( pcf::IndiElement( "target" ) );
 
-    if( m_pupCam == FLOWFS )
-    {
-        ip["target"] = m_pupCh1 - m_pupStepSize / sqrt( 2 );
-    }
-    else if( m_pupCam == LLOWFS )
-    {
-    }
-    else if( m_pupCam == CAMSCIS )
-    {
-        ip["target"] = m_pupCh1 - m_pupStepSize / sqrt( 2 );
-    }
+    ip["target"] = m_ttmpupil_ch1 - m_pupStepSize / sqrt( 2 );
 
     sendNewProperty( ip );
 
@@ -2853,39 +2947,20 @@ void pupilGuide::on_button_pup_dr_pressed()
     ip2.setName( "pos_2" );
     ip2.add( pcf::IndiElement( "target" ) );
 
-    if( m_pupCam == FLOWFS )
-    {
-        ip2["target"] = m_pupCh2 - m_pupStepSize / sqrt( 2 );
-    }
-    else if( m_pupCam == LLOWFS )
-    {
-    }
-    else if( m_pupCam == CAMSCIS )
-    {
-        ip2["target"] = m_pupCh2 - m_pupStepSize / sqrt( 2 );
-    }
+    ip2["target"] = m_ttmpupil_ch2 - m_pupStepSize / sqrt( 2 );
 
     sendNewProperty( ip2 );
 }
 
-void pupilGuide::on_button_pup_ur_pressed()
+void pupilGuide::on_ttmpupil_ur_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "ttmpupil" );
     ip.setName( "pos_1" );
     ip.add( pcf::IndiElement( "target" ) );
-    if( m_pupCam == FLOWFS )
-    {
-        ip["target"] = m_pupCh1 - m_pupStepSize / sqrt( 2 );
-    }
-    else if( m_pupCam == LLOWFS )
-    {
-    }
-    else if( m_pupCam == CAMSCIS )
-    {
-        ip["target"] = m_pupCh1 + m_pupStepSize / sqrt( 2 );
-    }
+
+    ip["target"] = m_ttmpupil_ch1 + m_pupStepSize / sqrt( 2 );
 
     sendNewProperty( ip );
 
@@ -2895,22 +2970,12 @@ void pupilGuide::on_button_pup_ur_pressed()
     ip2.setName( "pos_2" );
     ip2.add( pcf::IndiElement( "target" ) );
 
-    if( m_pupCam == FLOWFS )
-    {
-        ip2["target"] = m_pupCh2 + m_pupStepSize / sqrt( 2 );
-    }
-    else if( m_pupCam == LLOWFS )
-    {
-    }
-    else if( m_pupCam == CAMSCIS )
-    {
-        ip2["target"] = m_pupCh2 - m_pupStepSize / sqrt( 2 );
-    }
+    ip2["target"] = m_ttmpupil_ch2 - m_pupStepSize / sqrt( 2 );
 
     sendNewProperty( ip2 );
 }
 
-void pupilGuide::on_button_pup_scale_pressed()
+void pupilGuide::on_ttmpupil_scale_pressed()
 {
     if( ( (int)( 100 * m_pupStepSize ) ) == 100 )
     {
@@ -2935,10 +3000,10 @@ void pupilGuide::on_button_pup_scale_pressed()
 
     char ss[5];
     snprintf( ss, 5, "%0.2f", m_pupStepSize );
-    ui.button_pup_scale->setText( ss );
+    ui.ttmpupil_scale->setText( ss );
 }
 
-void pupilGuide::on_button_ttmPeri_rest_pressed()
+void pupilGuide::on_ttmperi_rest_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
 
@@ -2950,7 +3015,7 @@ void pupilGuide::on_button_ttmPeri_rest_pressed()
     sendNewProperty( ip );
 }
 
-void pupilGuide::on_button_ttmPeri_set_pressed()
+void pupilGuide::on_ttmperi_set_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
 
@@ -2962,7 +3027,7 @@ void pupilGuide::on_button_ttmPeri_set_pressed()
     sendNewProperty( ip );
 }
 
-void pupilGuide::on_button_ttmPeri_l_pressed()
+void pupilGuide::on_ttmperi_l_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
@@ -2970,22 +3035,12 @@ void pupilGuide::on_button_ttmPeri_l_pressed()
     ip.setName( "axis1_voltage" );
     ip.add( pcf::IndiElement( "target" ) );
 
-    if( m_pupCam == FLOWFS )
-    {
-        ip["target"] = m_ttmPeriCh1 + m_ttmPeriStepSize;
-    }
-    else if( m_pupCam == LLOWFS )
-    {
-    }
-    else if( m_pupCam == CAMSCIS )
-    {
-        ip["target"] = m_ttmPeriCh1 + m_ttmPeriStepSize;
-    }
+    ip["target"] = m_ttmperi_ch1 + m_ttmPeriStepSize;
 
     sendNewProperty( ip );
 }
 
-void pupilGuide::on_button_ttmPeri_r_pressed()
+void pupilGuide::on_ttmperi_r_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
@@ -2993,22 +3048,12 @@ void pupilGuide::on_button_ttmPeri_r_pressed()
     ip.setName( "axis1_voltage" );
     ip.add( pcf::IndiElement( "target" ) );
 
-    if( m_pupCam == FLOWFS )
-    {
-        ip["target"] = m_ttmPeriCh1 - m_ttmPeriStepSize;
-    }
-    else if( m_pupCam == LLOWFS )
-    {
-    }
-    else if( m_pupCam == CAMSCIS )
-    {
-        ip["target"] = m_ttmPeriCh1 - m_ttmPeriStepSize;
-    }
+    ip["target"] = m_ttmperi_ch1 - m_ttmPeriStepSize;
 
     sendNewProperty( ip );
 }
 
-void pupilGuide::on_button_ttmPeri_u_pressed()
+void pupilGuide::on_ttmperi_u_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
@@ -3016,22 +3061,12 @@ void pupilGuide::on_button_ttmPeri_u_pressed()
     ip.setName( "axis2_voltage" );
     ip.add( pcf::IndiElement( "target" ) );
 
-    if( m_pupCam == FLOWFS )
-    {
-        ip["target"] = m_ttmPeriCh2 + m_ttmPeriStepSize;
-    }
-    else if( m_pupCam == LLOWFS )
-    {
-    }
-    else if( m_pupCam == CAMSCIS )
-    {
-        ip["target"] = m_ttmPeriCh2 + m_ttmPeriStepSize;
-    }
+    ip["target"] = m_ttmperi_ch2 + m_ttmPeriStepSize;
 
     sendNewProperty( ip );
 }
 
-void pupilGuide::on_button_ttmPeri_d_pressed()
+void pupilGuide::on_ttmperi_d_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
@@ -3039,22 +3074,12 @@ void pupilGuide::on_button_ttmPeri_d_pressed()
     ip.setName( "axis2_voltage" );
     ip.add( pcf::IndiElement( "target" ) );
 
-    if( m_pupCam == FLOWFS )
-    {
-        ip["target"] = m_ttmPeriCh2 - m_ttmPeriStepSize;
-    }
-    else if( m_pupCam == LLOWFS )
-    {
-    }
-    else if( m_pupCam == CAMSCIS )
-    {
-        ip["target"] = m_ttmPeriCh2 - m_ttmPeriStepSize;
-    }
+    ip["target"] = m_ttmperi_ch2 - m_ttmPeriStepSize;
 
     sendNewProperty( ip );
 }
 
-void pupilGuide::on_button_ttmPeri_scale_pressed()
+void pupilGuide::on_ttmperi_scale_pressed()
 {
     if( ( (int)( m_ttmPeriStepSize ) ) == 50 )
     {
@@ -3075,53 +3100,53 @@ void pupilGuide::on_button_ttmPeri_scale_pressed()
 
     char ss[5];
     snprintf( ss, 5, "%0.2f", m_ttmPeriStepSize / 100. );
-    ui.button_ttmPeri_scale->setText( ss );
+    ui.ttmperi_scale->setText( ss );
 }
 
 void pupilGuide::toggleExpFit( bool st )
 {
 
-    ui.labelD->setVisible( st );
+    ui.pwfs_D_label->setVisible( st );
 
-    ui.labelUR->setVisible( st );
-    ui.coordUR_x->setVisible( st );
-    ui.coordUR_y->setVisible( st );
-    ui.coordUR_D->setVisible( st );
+    ui.pwfs_UR_label->setVisible( st );
+    ui.pwfs_UR_x->setVisible( st );
+    ui.pwfs_UR_y->setVisible( st );
+    ui.pwfs_UR_D->setVisible( st );
 
-    ui.labelUL->setVisible( st );
-    ui.coordUL_x->setVisible( st );
-    ui.coordUL_y->setVisible( st );
-    ui.coordUL_D->setVisible( st );
+    ui.pwfs_UL_label->setVisible( st );
+    ui.pwfs_UL_x->setVisible( st );
+    ui.pwfs_UL_y->setVisible( st );
+    ui.pwfs_UL_D->setVisible( st );
 
-    ui.labelLR->setVisible( st );
-    ui.coordLR_x->setVisible( st );
-    ui.coordLR_y->setVisible( st );
-    ui.coordLR_D->setVisible( st );
+    ui.pwfs_LR_label->setVisible( st );
+    ui.pwfs_LR_x->setVisible( st );
+    ui.pwfs_LR_y->setVisible( st );
+    ui.pwfs_LR_D->setVisible( st );
 
-    ui.labelLL->setVisible( st );
-    ui.coordLL_x->setVisible( st );
-    ui.coordLL_y->setVisible( st );
-    ui.coordLL_D->setVisible( st );
+    ui.pwfs_LL_label->setVisible( st );
+    ui.pwfs_LL_x->setVisible( st );
+    ui.pwfs_LL_y->setVisible( st );
+    ui.pwfs_LL_D->setVisible( st );
 
-    ui.coordAvg_D->setVisible( st );
+    ui.pwfs_avg_D->setVisible( st );
 
     if( st )
     {
-        ui.buttonExpFit->setIcon( QIcon(":/icons/keyboard_double_arrow_up.png") );
+        ui.pwfs_coords_expand->setIcon( QIcon( ":/icons/keyboard_double_arrow_up.png" ) );
     }
     else
     {
-        ui.buttonExpFit->setIcon( QIcon(":/icons/keyboard_double_arrow_down.png") );
+        ui.pwfs_coords_expand->setIcon( QIcon( ":/icons/keyboard_double_arrow_down.png" ) );
     }
 }
 
-void pupilGuide::on_buttonExpFit_pressed()
+void pupilGuide::on_pwfs_coords_expand_pressed()
 {
-    bool st = !ui.labelD->isVisible();
+    bool st = !ui.pwfs_D_label->isVisible();
     toggleExpFit( st );
 }
 
-void pupilGuide::on_button_camlens_u_pressed()
+void pupilGuide::on_camlens_u_pressed()
 {
     if( m_camlensyFsmState != "READY" )
         return;
@@ -3136,7 +3161,7 @@ void pupilGuide::on_button_camlens_u_pressed()
     sendNewProperty( ip );
 }
 
-void pupilGuide::on_button_camlens_l_pressed()
+void pupilGuide::on_camlens_l_pressed()
 {
     if( m_camlensxFsmState != "READY" )
         return;
@@ -3151,7 +3176,7 @@ void pupilGuide::on_button_camlens_l_pressed()
     sendNewProperty( ip );
 }
 
-void pupilGuide::on_button_camlens_d_pressed()
+void pupilGuide::on_camlens_d_pressed()
 {
     if( m_camlensyFsmState != "READY" )
     {
@@ -3168,7 +3193,7 @@ void pupilGuide::on_button_camlens_d_pressed()
     sendNewProperty( ip );
 }
 
-void pupilGuide::on_button_camlens_r_pressed()
+void pupilGuide::on_camlens_r_pressed()
 {
     if( m_camlensxFsmState != "READY" )
     {
@@ -3184,7 +3209,7 @@ void pupilGuide::on_button_camlens_r_pressed()
     sendNewProperty( ip );
 }
 
-void pupilGuide::on_button_camlens_scale_pressed()
+void pupilGuide::on_camlens_scale_pressed()
 {
     if( ( (int)( 1000 * m_camlensStepSize + 0.5 ) ) == 5 )
     {
@@ -3205,9 +3230,9 @@ void pupilGuide::on_button_camlens_scale_pressed()
 
     char ss[5];
     snprintf( ss, 5, "%0.2f", m_camlensStepSize * 10 );
-    ui.button_camlens_scale->setText( ss );
+    ui.camlens_scale->setText( ss );
 }
-
+/*
 void pupilGuide::on_button_startAlignment_pressed()
 {
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
@@ -3225,13 +3250,11 @@ void pupilGuide::on_button_startAlignment_pressed()
 
     sendNewProperty( ip );
 
-
     ip.setDevice( "camwfs-align" );
     ip.setName( "loop_state" );
     ip["toggle"] = pcf::IndiElement::On;
 
     sendNewProperty( ip );
-
 }
 
 void pupilGuide::on_button_stopAlignment_pressed()
@@ -3251,8 +3274,7 @@ void pupilGuide::on_button_stopAlignment_pressed()
 
     sendNewProperty( ip );
 
-
-    if(m_labMode)
+    if( m_tcsiLabMode )
     {
         ip.setDevice( "camwfs-align" );
         ip.setName( "loop_state" );
@@ -3260,7 +3282,7 @@ void pupilGuide::on_button_stopAlignment_pressed()
 
         sendNewProperty( ip );
     }
-}
+}*/
 
 } // namespace xqt
 
