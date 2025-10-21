@@ -32,6 +32,11 @@ else
     log_info "Existing PVCam install found, use the originall installer or /opt/pvcam/pvcam.uninstall.sh to remove"
 fi
 
+chcon -t modules_object_t /opt/pvcam/drivers/in-kernel/pcie/pvcam_pcie.ko
+
+if [ ! -f /etc/modules-load.d/pvcam_pcie.conf ]; then
+    echo pvcam_pcie > /etc/modules-load.d/pvcam_pcie.conf
+fi
 
 # if [[ ! -e /opt/PrincetonInstruments/picam ]]; then
 #     # This (|| true) isn't great, but sometimes it has a nonzero

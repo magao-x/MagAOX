@@ -50,6 +50,8 @@ table Telem_stdcam_fb
 
    cropMode:int8 = -1;
 
+   readout_speed:string;
+
 }
 
 root_type Telem_stdcam_fb;

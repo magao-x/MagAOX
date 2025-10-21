@@ -14,6 +14,34 @@ SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 -include $(SELF_DIR)/../local/common.mk
 include $(SELF_DIR)/config.mk
 
+# Ensure a C++ compiler is defined for the check
+CXX ?= g++
+
+# Probe compiler identification string (lowercased)
+CXX_ID := $(shell $(CXX) --version 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)
+
+# If output mentions "gcc" and does NOT mention "clang" then treat as GCC and enforce version
+ifneq (,$(findstring gcc,$(CXX_ID)))
+ifneq (,$(findstring clang,$(CXX_ID)))
+  # clang (or clang-compatible) detected — allow (clang defines gcc compatibility macros)
+else
+  # Attempt to extract GCC major version
+  GCC_MAJOR := $(shell $(CXX) -dumpfullversion -dumpversion 2>/dev/null | sed 's/^\([0-9]\+\).*/\1/' || true)
+  ifeq ($(GCC_MAJOR),)
+    GCC_MAJOR := $(shell echo "$(CXX_ID)" | sed -n 's/.*gcc[^0-9]*\([0-9]\+\).*/\1/p' || true)
+  endif
+
+  ifeq ($(GCC_MAJOR),)
+    $(warning Could not determine GCC major version for $(CXX); proceeding without strict check)
+  else
+    # Error out if GCC major version is less than 14
+    ifeq ($(shell [ $(GCC_MAJOR) -lt 14 ] 2>/dev/null && echo yes || echo no),yes)
+      $(error Detected GCC $(GCC_MAJOR); GCC >= 14 is required)
+    endif
+  endif
+endif
+endif
+
 ### Set up what libs to require based on the MAGAOX_ROLE
 EDT ?= false
 PYLON ?= false
