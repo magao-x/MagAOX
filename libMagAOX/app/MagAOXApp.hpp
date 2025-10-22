@@ -1836,14 +1836,17 @@ int MagAOXApp<_useINDI>::execute() // virtual
             if( m_powerState < 0 )
             {
                 if( !stateLogged() )
+                {
                     log<text_log>( "waiting for power state" );
+                }
             }
 
             ++nwaits;
             if( nwaits == 30 )
             {
-                log<text_log>( "stalled waiting for power state", logPrio::LOG_ERROR );
+                log<text_log>( "stalled waiting for power state", logPrio::LOG_CRITICAL );
                 state( stateCodes::ERROR );
+                m_shutdown = 1;
             }
 
             // clang-format off
@@ -1888,7 +1891,20 @@ int MagAOXApp<_useINDI>::execute() // virtual
              }                        // LCOV_EXCL_LINE
         #endif // clang-format on
 
-        // First check power state.
+        // Step 0: check if log thread is still running
+        if( m_log.logThreadRunning() == false )
+        {
+            state( stateCodes::FAILURE );
+
+            // Directly ouput the error b/c all other outputs are via the log thread
+            std::cerr << "\nCRITICAL: log thread not running.  Exiting.\n\n";
+
+            m_shutdown = 1;
+
+            break;
+        }
+
+        // Step 1: check power state.
         if( m_powerMgtEnabled )
         {
             if( state() == stateCodes::POWEROFF )
@@ -1990,8 +2006,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
         }
         catch( const std::exception &e )
         {
-            log<software_error>(
-                { __FILE__, __LINE__, std::string( "exception caught from sendDelProperty: " ) + e.what() } );
+            log<software_error>( { __FILE__, __LINE__, std::string( "exception caught from"
+                                   " sendDelProperty: " ) + e.what() } );
         }
 
         m_indiDriver->quitProcess();
