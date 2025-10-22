@@ -77,7 +77,7 @@ TEST_CASE( "Test telemeter Configuration", "[dev::telemeter]" )
         REQUIRE( pdt.m_maxInterval == 25 );
     }
 
-     #ifdef XWCTEST_DOX_REF
+    #ifdef XWCTEST_DOX_REF
     MagAOX::app::dev::telemeter::setupConfig();
     MagAOX::app::dev::telemeter::loadConfig();
     #endif
