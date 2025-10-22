@@ -19,6 +19,10 @@ namespace XWCTEST_NAMESPACE
 {
 #endif
 
+/// Test harness for dev::telemeter
+/**
+ * \ingroup telemeter_tests
+ */
 struct telemeterTest : public MagAOX::app::MagAOXApp<false>, public MAPPNS::telemeter<telemeterTest>
 {
 

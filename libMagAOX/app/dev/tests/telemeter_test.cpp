@@ -13,6 +13,18 @@
 #undef XWCTEST_NAMESPACE
 #undef XWCTEST_TELEMETER_LOGSTART
 
+/** \defgroup app_dev_unit_tests libXWC::app::dev Unit Tests
+ * \ingroup app_unit_test
+*/
+
+/** \defgroup telemeter_tests libXWC::app::dev::telemeter Unit Tests
+ * \ingroup app_dev_unit_tests
+ */
+
+/// Test telemeter Configuration
+/**
+ * \ingroup telemeter_tests
+ */
 TEST_CASE( "Test telemeter Configuration", "[dev::telemeter]" )
 {
     SECTION( "a config file with no [telemeter] section, loading defaults" )
@@ -64,8 +76,17 @@ TEST_CASE( "Test telemeter Configuration", "[dev::telemeter]" )
         REQUIRE( pdt.m_tel.logExt() == "txt" );
         REQUIRE( pdt.m_maxInterval == 25 );
     }
+
+     #ifdef XWCTEST_DOX_REF
+    MagAOX::app::dev::telemeter::setupConfig();
+    MagAOX::app::dev::telemeter::loadConfig();
+    #endif
 }
 
+/// Test telemeter app logic
+/**
+ * \ingroup telemeter_tests
+ */
 TEST_CASE( "Test telemeter app logic", "[dev::telemeter]" )
 {
     SECTION( "no errors" )
@@ -133,8 +154,20 @@ TEST_CASE( "Test telemeter app logic", "[dev::telemeter]" )
         rv = pdt.appShutdown();
         REQUIRE( rv == 0 );
     }
+
+    #ifdef XWCTEST_DOX_REF
+    MagAOX::app::dev::telemeter::setupConfig();
+    MagAOX::app::dev::telemeter::loadConfig();
+    MagAOX::app::dev::telemeter::appStartup();
+    MagAOX::app::dev::telemeter::appLogic();
+    MagAOX::app::dev::telemeter::appShutdown();
+    #endif
 }
 
+/// Test telemeter telem-logger fails to start
+/**
+ * \ingroup telemeter_tests
+ */
 TEST_CASE( "Test telemeter telem-logger fails to start", "[dev::telemeter]" )
 {
     // Just a dummy config setting
@@ -157,4 +190,10 @@ TEST_CASE( "Test telemeter telem-logger fails to start", "[dev::telemeter]" )
 
     rv = pdt.appStartup();
     REQUIRE( rv == -1 );
+
+    #ifdef XWCTEST_DOX_REF
+    MagAOX::app::dev::telemeter::setupConfig();
+    MagAOX::app::dev::telemeter::loadConfig();
+    MagAOX::app::dev::telemeter::appStartup();
+    #endif
 }
