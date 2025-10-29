@@ -581,6 +581,13 @@ class adcCtrl(XDevice):
                 
                 for i in range(self._no_measurements):
                     img = self.camera.grab_stack(self._n_avg)
+
+                    ###temporary fix because XCam is giving me an ndarray right now
+                    extent = 512 * 6/21
+                    pgrid = make_pupil_grid(512,2*extent)
+                    img = Field(img.ravel(),pgrid)
+                    ###end temporary fix
+
                     transpose = Field(img.shaped.T.ravel(),img.grid)
                     img = transpose #hopefully this actually fixes the transpose issue
 
@@ -613,8 +620,13 @@ class adcCtrl(XDevice):
                 measurements = []
                 for i in range(self._no_measurements):
                     img = self.camera.grab_stack(self._n_avg)
-                    img_type = type(img)
-                    self.log.debug(f'image stack has type {img_type}')
+                    
+                    ###temporary fix because XCam is giving me an ndarray right now
+                    extent = 512 * 6/21
+                    pgrid = make_pupil_grid(512,2*extent)
+                    img = Field(img.ravel(),pgrid)
+                    ###end temporary fix
+
                     transpose = Field(img.shaped.T.ravel(),img.grid)
                     img = transpose
                     self.log.debug('images taken and transposed')
