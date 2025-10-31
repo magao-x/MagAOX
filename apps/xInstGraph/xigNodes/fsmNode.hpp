@@ -366,7 +366,12 @@ inline void fsmNode::loadConfigDerived( mx::app::appConfigurator &config )
         m_targetStates[n] = MagAOX::app::stateCodes::str2Code( targetStates[n] );
     }
 
+<<<<<<< HEAD:apps/xInstGraph/xigNodes/fsmNode.hpp
     if( m_parentGraph && m_node )
+=======
+
+    if(m_parentGraph && m_node)
+>>>>>>> d0c87946 (got flippers working in instGraph; cleaned up breadcrubs):utils/instGraph/xigNodes/fsmNode.hpp
     {
         m_parentGraph->valueExtra( m_node->name(), "state", "" );
     }
@@ -394,12 +399,6 @@ inline int fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiPropert
 
     m_stateStr = ipRecv[m_fsmElName].get<std::string>();
 
-    if(m_device == "ttmpupil")
-    {
-        std::cerr << ipRecv.createUniqueKey() << ".state=" << m_stateStr << '\n';
-    }
-
-
     MagAOX::app::stateCodes::stateCodeT state = MagAOX::app::stateCodes::str2CodeFast( m_stateStr );
 
     if( state != m_state )
@@ -423,11 +422,6 @@ inline int fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiPropert
     }
     m_stateOnTarget = stateOnTarget;
 
-    if(m_device == "ttmpupil")
-    {
-        std::cerr << ipRecv.createUniqueKey() << ": m_stateOnTarget=" << m_stateOnTarget << '\n';
-    }
-
     if( m_fsmAction == fsmNodeActionT::threshOff )
     {
         if( m_stateOnTarget )
@@ -446,20 +440,12 @@ inline int fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiPropert
     {
         if( m_stateOnTarget )
         {
-            if(m_device == "ttmpupil")
-            {
-                std::cerr << "toggling on...\n";
-            }
             togglePutsOn();
             actionTaken = true;
             return 0;
         }
         else
         {
-            if(m_device == "ttmpupil")
-            {
-                std::cerr << "toggling off...\n";
-            }
             togglePutsOff();
             actionTaken = true;
             return 0;
