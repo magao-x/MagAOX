@@ -18,7 +18,7 @@ from scipy.optimize import minimize
 from scipy.optimize import curve_fit
 
 class AdcFitter2:
-    def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=28,grating_freq=47,ncpc = False,snr_threshold=2):
+    def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=-28,grating_freq=47,ncpc = False,snr_threshold=2,log=False):
             self.wavelength = wavelength
             self.bandwidth = bandwidth
             self.grating_angle = grating_angle
@@ -28,6 +28,7 @@ class AdcFitter2:
             self.normalized_wavelength = wavelength / 656E-9
             self.normalized_bandwidth = bandwidth / 656E-9
             self.control_matrix = np.array([0,0])
+            self.log = log
 
     def gauss(self,x,mu,sigma2):
         '''standard gaussian function'''
@@ -85,6 +86,7 @@ class AdcFitter2:
             speckle_coords = np.array([[0, self.grating_freq * self.normalized_wavelength],[self.grating_freq * self.normalized_wavelength,0],[0, -self.grating_freq * self.normalized_wavelength],[-self.grating_freq * self.normalized_wavelength,0]])
             speckle_center = speckle_coords[speckle_number]
             rect = make_rotated_aperture(make_rectangular_aperture(size=(extent,extent), center=speckle_center), np.deg2rad(-self.grating_angle))(img.grid)
+            self.log.debug(f'speckle {speckle_number} is approximately centered at {speckle_center}')
         else: #if we are, there's a different rotation angle for speckles 1&3 and 2&4
             speckle_coords = np.array([[ncpc_freq * self.normalized_wavelength,0],[self.grating_freq * self.normalized_wavelength,0],[-ncpc_freq * self.normalized_wavelength,0],[-self.grating_freq * self.normalized_wavelength,0]])
             speckle_center = speckle_coords[speckle_number]
@@ -94,10 +96,13 @@ class AdcFitter2:
                 rect = make_rotated_aperture(make_rectangular_aperture(size=(extent,extent), center=speckle_center), np.deg2rad(-self.grating_angle))(img.grid)
 
         speckle_img = rect * img
+        self.log.debug(f'intensity of speckle {speckle_number}: {np.sum(speckle_img)}')
 
         #find the center of intensity of the speckle area and window the ORIGINAL image around that center
         center_of_intensity = np.array([sum(speckle_img*speckle_img.grid.x)/sum(speckle_img),sum(speckle_img*speckle_img.grid.y)/sum(speckle_img)])
-        window_size=50
+        window_size=40
+        self.log.debug(f'calculated center of intensity for speckle {speckle_number}: {center_of_intensity}')
+
         new_img = self.window_field(img,[center_of_intensity[0],center_of_intensity[1]],window_size,window_size)
         
         shaped = new_img.shaped
@@ -151,11 +156,10 @@ class AdcFitter2:
         '''
         angles = np.zeros(4)
         for i in range(4):
-            #print(i)
             angles[i] = self.slice_speckle_angle(img,i)
         return angles
     
-    def crop_image(self, image,extent=400,mask_diam=60): 
+    def crop_image(self, image,extent,mask_diam=60): 
         '''cuts out a centered PSF with the central core masked'''
         img = image/image.max()
 
@@ -373,15 +377,15 @@ class adcCtrl(XDevice):
 
         if self.client['fwsci1.filterName.i'] == constants.SwitchState.ON:
             self._center_wavelength = 762E-9
-            self._extent = 400
+            self._extent = 480
         elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
             self._center_wavelength = 908E-9
             self._extent = 480
         else: 
             self._center_wavelength = 656E-9
-            self._extent = 400
+            self._extent = 480
 
-        self.ADC = AdcFitter2(wavelength=self._center_wavelength)
+        self.ADC = AdcFitter2(wavelength=self._center_wavelength,log=self.log)
         self.log.debug(f'initial normalized wavelength value: {self.ADC.normalized_wavelength}')
         self.ADC.control_matrix = self._control_mtx
 
@@ -631,25 +635,26 @@ class adcCtrl(XDevice):
                     img = transpose
                     self.log.debug('images taken and transposed')
 
-
-                    img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
                     img = self.ADC.filter_image(img)
+                    img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
+                    
+                    write_field(img,'/data/users/twitchell/test_capture5.fits')
                     
                     if self._knife_edge:
                         pass #don't have this functionality yet
                     else:
                         angles = self.ADC.all_speckle_angles(img)
-                        pairs = self.ADC.speckle_pairs(angles)
-                        command = np.squeeze(self.ADC.calculate_command(pairs))
+                #         pairs = self.ADC.speckle_pairs(angles)
+                #         command = np.squeeze(self.ADC.calculate_command(pairs))
 
-                        self.log.debug(f'measured speckle angles: {angles}')
+                #         self.log.debug(f'measured speckle angles: {angles}')
 
-                    self.log.debug(f'single error measurement: {-command}')
-                    measurements.append(command)
+                #     self.log.debug(f'single error measurement: {-command}')
+                #     measurements.append(command)
 
-                error = np.nanmean(measurements)
+                # error = np.nanmean(measurements)
 
-                self.log.info(f'mean error across {self._no_measurements} measurements: {error} (command calculated but not sent)')          
+                # self.log.info(f'mean error across {self._no_measurements} measurements: {error} (command calculated but not sent)')          
                 self.log.info('transitioning to idle')
                 self.transition_to_idle()
                 self.log.info('successfully transitioned to idle')
