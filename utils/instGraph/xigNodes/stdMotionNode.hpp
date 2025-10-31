@@ -48,6 +48,9 @@ class stdMotionNode : public fsmNode
     /// Contains the names of any puts which are always on if any are on.
     std::set<std::string> m_alwaysOn;
 
+    /// Contains the names of any puts which are not automatically turned on if they are off.
+    std::set<std::string> m_noAutoOn;
+
     /// The INDI key (device.property) for the switch denoting that this stage should be or should not be tracking
     std::string m_trackingReqKey;
 
@@ -362,29 +365,28 @@ inline void stdMotionNode::togglePutsOn()
         return;
     }
 
-    if( m_device == "flipacq" )
-    {
-        std::cerr << "flipacq togglePutsOn()\n";
-    }
-
     if( m_trackingReq )
     {
         if( m_tracking )
         {
             m_curLabel = "tracking";
             m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "tracking" );
+            m_parentGraph->valueExtra( m_node->name(), "state", "tracking" );
             xigNode::togglePutsOn();
         }
         else
         {
             m_curLabel = "not tracking";
             m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "not tracking" );
+            m_parentGraph->valueExtra( m_node->name(), "state", "not tracking" );
             m_parentGraph->stateChange();
         }
     }
     else if( m_state == MagAOX::app::stateCodes::READY )
     {
         m_curLabel = m_curVal;
+
+        m_parentGraph->valueExtra( m_node->name(), "state", m_curLabel );
 
         if( m_presetPutName.size() == 1 ) // There's only one put, it's just on or off with a value
         {
@@ -409,17 +411,13 @@ inline void stdMotionNode::togglePutsOn()
                 }
 
                 // the single node is always on if any are on
+                pptr->enabled(true);
                 pptr->state( ingr::putState::on );
 
                 ingr::putState inst = pptr->state();
-                if(inst != ingr::putState::on)
+                if( inst != ingr::putState::on )
                 {
                     inst = ingr::putState::waiting;
-                }
-
-                if( m_device == "flipacq" )
-                {
-                    std::cerr << "flipacq input: " << ingr::putState2String( pptr->state() ) << "\n";
                 }
 
                 // Now deal with the many
@@ -436,18 +434,21 @@ inline void stdMotionNode::togglePutsOn()
 
                     if( s == m_curVal || m_alwaysOn.count( s ) == 1 )
                     {
-                        std::cerr << m_node->name() << ' ' << s << " on\n";
+                        pptr->enabled( true );
                         pptr->state( inst );
                     }
                     else
                     {
-                        std::cerr << m_node->name() << ' ' << s << " off\n";
-
                         pptr->state( ingr::putState::off );
+
+                        if( m_noAutoOn.count( s ) == 1 ) // if we turn it off, we disable it
+                        {
+                            pptr->enabled( false );
+                        }
                     }
                 }
             }
-            else //m_presetDir == ingr::ioDir::input )
+            else // m_presetDir == ingr::ioDir::input )
             {
                 ingr::instIOPut *pptr; // We get this pointer using the node accessors
                                        // which throw if there's a nullptr
@@ -463,12 +464,8 @@ inline void stdMotionNode::togglePutsOn()
                 }
 
                 // the single node is always on if any are on
+                pptr->enabled(true);
                 pptr->state( ingr::putState::on );
-
-                if( m_device == "flipacq" )
-                {
-                    std::cerr << "flipacq input: " << ingr::putState2String( pptr->state() ) << "\n";
-                }
 
                 // Now deal with the many
                 for( auto s : m_presetPutName )
@@ -484,14 +481,17 @@ inline void stdMotionNode::togglePutsOn()
 
                     if( s == m_curVal || m_alwaysOn.count( s ) == 1 )
                     {
-                        std::cerr << m_node->name() << ' ' << s << " on\n";
+                        pptr->enabled( true );
                         pptr->state( ingr::putState::on );
                     }
                     else
                     {
-                        std::cerr << m_node->name() << ' ' << s << " off\n";
-
                         pptr->state( ingr::putState::off );
+
+                        if( m_noAutoOn.count( s ) == 1 ) // if we turn it off, we disable it
+                        {
+                            pptr->enabled( false );
+                        }
                     }
                 }
             }
@@ -509,27 +509,29 @@ inline void stdMotionNode::togglePutsOff()
         return;
     }
 
-    if( m_device == "flipacq" )
-    {
-        std::cerr << "flipacq togglePutsOff()\n";
-    }
-
     if( m_tracking ) // regardless of whether required, if tracking this is our state
     {
         m_curLabel = "tracking";
         m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "tracking" );
+        m_parentGraph->valueExtra( m_node->name(), "state", "tracking" );
     }
     else if( m_trackingReq ) // we can only be "not tracking" if tracking is required
     {
         m_curLabel = "not tracking";
         m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "not tracking" );
+        m_parentGraph->valueExtra( m_node->name(), "state", "not tracking" );
     }
     else if( m_presetPutName.size() == 1 ) // otherwise, if we have a single node it's off
     {
         m_curLabel = "off";
         m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "off" );
+        m_parentGraph->valueExtra( m_node->name(), "state", "---" );
     }
-    // We don't change labels if m_presetPutName.size() > 1
+    else
+    {
+        // We don't change labels if m_presetPutName.size() > 1
+        m_parentGraph->valueExtra( m_node->name(), "state", "---" );
+    }
 
     // replace xigNode::togglePutsOff() so we can check for always-on
 
@@ -540,6 +542,7 @@ inline void stdMotionNode::togglePutsOff()
             continue;
         }
 
+        // iput.second->enabled(false);
         iput.second->state( ingr::putState::off );
     }
 
@@ -549,8 +552,13 @@ inline void stdMotionNode::togglePutsOff()
         {
             continue;
         }
-
+        // oput.second->enabled(false);
         oput.second->state( ingr::putState::off );
+
+        if( m_noAutoOn.count( oput.second->name() ) == 1 ) // if we turn it off, we disable it
+        {
+            oput.second->enabled( false );
+        }
     }
 }
 
@@ -614,6 +622,23 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
     catch( const std::exception &e )
     {
         std::string msg = XIGN_EXCEPTION( "stdMotionNode::loadConfig", "exception from insert in m_alwaysOn" );
+        msg += ":";
+        msg += e.what();
+        throw std::runtime_error( msg );
+    }
+
+    std::vector<std::string> noAutoOn;
+    config.configUnused( noAutoOn, mx::app::iniFile::makeKey( name(), "noAutoOn" ) );
+    try
+    {
+        for( auto &ao : noAutoOn )
+        {
+            m_noAutoOn.insert( ao );
+        }
+    }
+    catch( const std::exception &e )
+    {
+        std::string msg = XIGN_EXCEPTION( "stdMotionNode::loadConfig", "exception from insert in m_noAutoOn" );
         msg += ":";
         msg += e.what();
         throw std::runtime_error( msg );

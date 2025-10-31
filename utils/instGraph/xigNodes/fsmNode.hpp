@@ -259,6 +259,10 @@ inline void fsmNode::loadConfigDerived( mx::app::appConfigurator &config )
     }
 
 
+    if(m_parentGraph && m_node)
+    {
+        m_parentGraph->valueExtra( m_node->name(), "state", "" );
+    }
 }
 
 inline void fsmNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
@@ -284,12 +288,6 @@ inline void fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiProper
 
     m_stateStr = ipRecv["state"].get<std::string>();
 
-    if(m_device == "ttmpupil")
-    {
-        std::cerr << ipRecv.createUniqueKey() << ".state=" << m_stateStr << '\n';
-    }
-
-
     MagAOX::app::stateCodes::stateCodeT state = MagAOX::app::stateCodes::str2CodeFast( m_stateStr );
 
     if( state != m_state )
@@ -298,8 +296,6 @@ inline void fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiProper
     }
 
     m_state = state;
-
-    std::cerr << m_node->name() << ' ' << " changed fsm state " << m_stateStr << '\n';
 
     m_parentGraph->valueExtra(m_node->name(), "fsmstate", m_stateStr);
 
@@ -314,11 +310,6 @@ inline void fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiProper
         }
     }
     m_stateOnTarget = stateOnTarget;
-
-    if(m_device == "ttmpupil")
-    {
-        std::cerr << ipRecv.createUniqueKey() << ": m_stateOnTarget=" << m_stateOnTarget << '\n';
-    }
 
     if( m_fsmAction == fsmNodeActionT::threshOff )
     {
@@ -338,20 +329,12 @@ inline void fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiProper
     {
         if( m_stateOnTarget )
         {
-            if(m_device == "ttmpupil")
-            {
-                std::cerr << "toggling on...\n";
-            }
             togglePutsOn();
             actionTaken = true;
             return;
         }
         else
         {
-            if(m_device == "ttmpupil")
-            {
-                std::cerr << "toggling off...\n";
-            }
             togglePutsOff();
             actionTaken = true;
             return;

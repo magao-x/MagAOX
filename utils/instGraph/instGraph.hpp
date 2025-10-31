@@ -179,7 +179,7 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
         std::string type;
         config.configUnused( type, mx::app::iniFile::makeKey( sections[i], "type" ) );
 
-        std::cerr << "found node " << sections[i] << ": " << type << "\n";
+        //std::cerr << "found node " << sections[i] << ": " << type << "\n";
 
 
         xigNode * xn = nullptr;

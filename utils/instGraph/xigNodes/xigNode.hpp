@@ -127,11 +127,13 @@ inline void xigNode::togglePutsOn()
 {
     for( auto &&iput : m_node->inputs() )
     {
+        //iput.second->enabled(true);
         iput.second->state( ingr::putState::on );
     }
 
     for( auto &&oput : m_node->outputs() )
     {
+        //oput.second->enabled(true);
         oput.second->state( ingr::putState::on );
     }
 }
@@ -140,11 +142,13 @@ inline void xigNode::togglePutsOff()
 {
     for( auto &&iput : m_node->inputs() )
     {
+        //iput.second->enabled(false);
         iput.second->state( ingr::putState::off );
     }
 
     for( auto &&oput : m_node->outputs() )
     {
+        //oput.second->enabled(false);
         oput.second->state( ingr::putState::off );
     }
 }
