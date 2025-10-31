@@ -11,10 +11,7 @@
 
 #include "../../INDI/libcommon/IndiProperty.hpp"
 
-std::string xign_exception( const std::string & src,
-const std::string & expl,
-const std::string & file,
-int line )
+std::string xign_exception( const std::string &src, const std::string &expl, const std::string &file, int line )
 {
     std::string msg = src + ": " + expl;
     msg += " at ";
@@ -24,12 +21,12 @@ int line )
     return msg;
 }
 
-#define XIGN_EXCEPTION(src, expl) xign_exception(src, expl, __FILE__, __LINE__)
+#define XIGN_EXCEPTION( src, expl ) xign_exception( src, expl, __FILE__, __LINE__ )
 
 /// Implementation of basic instGraph node interface for MagAO-X
 /** This class is pure virtual, derived classes must implement handleSetProperty.
-  *
-  */
+ *
+ */
 class xigNode
 {
   protected:
@@ -46,15 +43,15 @@ class xigNode
 
     /// Constructor.
     /**
-      * Default c'tor is deleted.  Must supply both node name and a parentGraph with a node with the same name in it.
-      */
-    xigNode( const std::string &name, /**< [in] the name of the node */
+     * Default c'tor is deleted.  Must supply both node name and a parentGraph with a node with the same name in it.
+     */
+    xigNode( const std::string  &name, /**< [in] the name of the node */
              ingr::instGraphXML *parentGraph /**< [in] the parent instGraph */ );
 
     /// Get the name of this node
     /**
-      * \returns the nodes' name (the value of m_name).
-      */
+     * \returns the nodes' name (the value of m_name).
+     */
     std::string name();
 
     /// Get the set holding the INDI keys for this node
@@ -76,7 +73,8 @@ class xigNode
     /**
      * This is a pure virtual function in xigNode.
      */
-    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ ) = 0;
+    virtual void
+    handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ ) = 0;
 
     /// Change the state of all inputs and all outputs to on.
     virtual void togglePutsOn();
@@ -84,24 +82,24 @@ class xigNode
     /// Change the state of all inputs and all outputs to off.
     virtual void togglePutsOff();
 
-    #ifdef XWC_XIGNODE_TEST
-    //allow setting m_parentGraph to null for testing
+#ifdef XWC_XIGNODE_TEST
+    // allow setting m_parentGraph to null for testing
     void setParentGraphNull()
     {
         m_parentGraph = nullptr;
     }
-    #endif
+#endif
 };
 
 inline xigNode::xigNode( const std::string &name, ingr::instGraphXML *parentGraph ) : m_parentGraph( parentGraph )
 {
-    if(m_parentGraph == nullptr)
+    if( m_parentGraph == nullptr )
     {
-        std::string msg = XIGN_EXCEPTION("xigNode::loadConfig", "parent graph is null");
-        throw std::runtime_error(msg);
+        std::string msg = XIGN_EXCEPTION( "xigNode::loadConfig", "parent graph is null" );
+        throw std::runtime_error( msg );
     }
 
-    //This will throw if name is not in the parent's nodes
+    // This will throw if name is not in the parent's nodes
     m_node = m_parentGraph->node( name );
 }
 

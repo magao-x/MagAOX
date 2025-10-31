@@ -33,7 +33,8 @@ The standard motion node shows the status of an standard motion stage, which inc
 |----------------|------------------|--------------|-------------|--------------|
 | device         | string           | N            | <node name> | The INDI device name, defaults to the node name specified in the `drawio` file  |
 | presetPrefix   | string           | N            | preset      | The prefix for preset, usually `preset` or `filter` |
-| presetDir      | string           | N            | output      | Allowed values are `input` or `output`. Specifies which put (in or out) which corresponds to the preset. |
+| presetDir      | string           | N            | output      | Allowed values are `input` or `output`. Specifies which put (in or out) corresponds to the preset. |
 | presetPutName  | vector\<string\> | N            | out         | Names for the put which correspond to the preset. If more than one, the preset controls which one is on. |
+| alwaysOn       | vector\<string\> | N            |             | Names of puts which are always on if any put is. |
 | trackerKey     | string           | N            |             | If set, this is the INDI key of the tracking property |
 | trackerElement | string           | N            |             | If set, this is the element of the tracking property |

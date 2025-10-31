@@ -14,11 +14,16 @@ class pwrOnOffNode : public xigNode
 
   protected:
     std::string m_pwrKey;
-    int m_pwrState{ -1 };
+    int         m_pwrState{ -1 };
 
   public:
     pwrOnOffNode( const std::string &name, ingr::instGraphXML *parentGraph ) : xigNode( name, parentGraph )
     {
+        if( m_parentGraph )
+        {
+            m_parentGraph->valueExtra( m_node->name(), "fsmstate", "---" );
+            m_parentGraph->valueExtra( m_node->name(), "state", "" );
+        }
     }
 
     void pwrKey( const std::string &pk );
@@ -33,16 +38,14 @@ class pwrOnOffNode : public xigNode
     void loadConfig( mx::app::appConfigurator &config );
 };
 
-inline
-void pwrOnOffNode::pwrKey( const std::string &pk )
+inline void pwrOnOffNode::pwrKey( const std::string &pk )
 {
     m_pwrKey = pk;
 
     key( m_pwrKey );
 }
 
-inline
-void pwrOnOffNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
+inline void pwrOnOffNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.createUniqueKey() != m_pwrKey )
     {
@@ -64,24 +67,31 @@ void pwrOnOffNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
     }
 }
 
-inline
-void pwrOnOffNode::toggleOn()
+inline void pwrOnOffNode::toggleOn()
 {
     m_pwrState = 1;
 
     togglePutsOn();
+
+    if( m_parentGraph )
+    {
+        m_parentGraph->valueExtra( m_node->name(), "fsmstate", "ON" );
+    }
 }
 
-inline
-void pwrOnOffNode::toggleOff()
+inline void pwrOnOffNode::toggleOff()
 {
     m_pwrState = 1;
 
     togglePutsOff();
+
+    if( m_parentGraph )
+    {
+        m_parentGraph->valueExtra( m_node->name(), "fsmstate", "OFF" );
+    }
 }
 
-inline
-void pwrOnOffNode::loadConfig( mx::app::appConfigurator &config )
+inline void pwrOnOffNode::loadConfig( mx::app::appConfigurator &config )
 {
     if( !m_parentGraph )
     {
@@ -90,13 +100,13 @@ void pwrOnOffNode::loadConfig( mx::app::appConfigurator &config )
         msg += __FILE__;
         msg += " " + std::to_string( __LINE__ );
 
-        throw std::runtime_error(msg);
+        throw std::runtime_error( msg );
     }
 
     std::string type;
-    config.configUnused(type, mx::app::iniFile::makeKey( name(), "type" ));
+    config.configUnused( type, mx::app::iniFile::makeKey( name(), "type" ) );
 
-    if(type != "pwrOnOff")
+    if( type != "pwrOnOff" )
     {
         std::string msg = "pwrOnOffNode::loadConfig: node type is not pwrOnOff";
         msg += " at ";
@@ -115,11 +125,10 @@ void pwrOnOffNode::loadConfig( mx::app::appConfigurator &config )
         msg += __FILE__;
         msg += " " + std::to_string( __LINE__ );
 
-        throw std::runtime_error(msg);
+        throw std::runtime_error( msg );
     }
 
     pwrKey( pk );
-
 }
 
 #endif // pwrOnOffNode_hpp

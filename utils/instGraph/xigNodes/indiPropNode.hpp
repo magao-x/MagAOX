@@ -125,6 +125,10 @@ class indiPropNode : public fsmNode
 
 indiPropNode::indiPropNode( const std::string &name, ingr::instGraphXML *parentGraph ) : fsmNode( name, parentGraph )
 {
+    if(m_parentGraph)
+    {
+        m_parentGraph->valueExtra(m_node->name(), "fsmstate", "");
+    }
 }
 
 inline void indiPropNode::propKey( const std::string &pk )

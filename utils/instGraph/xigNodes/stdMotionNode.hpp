@@ -66,11 +66,10 @@ class stdMotionNode : public fsmNode
     /// Flag indicating whether or not the stage is currently tracking (default false).
     bool m_tracking{ false };
 
-
   public:
     /// Only c'tor.  Must be constructed with node name and a parent graph.
-    stdMotionNode( const std::string &name,        /** [in] the name of this node*/
-                   ingr::instGraphXML *parentGraph /** [in] the graph which this node belongs to*/);
+    stdMotionNode( const std::string  &name, /** [in] the name of this node*/
+                   ingr::instGraphXML *parentGraph /** [in] the graph which this node belongs to*/ );
 
     /// Set the device name.  This can only be done once.
     /**
@@ -114,7 +113,6 @@ class stdMotionNode : public fsmNode
 
     const std::string &trackerElement();
 
-
     /// INDI SetProperty callback
     virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
@@ -125,7 +123,6 @@ class stdMotionNode : public fsmNode
     void loadConfig(
         mx::app::appConfigurator &config /**< [in] the application configurator loaded with this node's options*/ );
 };
-
 
 inline stdMotionNode::stdMotionNode( const std::string &name, ingr::instGraphXML *parentGraph )
     : fsmNode( name, parentGraph )
@@ -312,7 +309,7 @@ inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
                         ++m_changes;
                     }
 
-                    m_curVal = it.second.getName();
+                    m_curVal    = it.second.getName();
                     nothingIsOn = false;
                 }
             }
@@ -365,6 +362,11 @@ inline void stdMotionNode::togglePutsOn()
         return;
     }
 
+    if( m_device == "flipacq" )
+    {
+        std::cerr << "flipacq togglePutsOn()\n";
+    }
+
     if( m_trackingReq )
     {
         if( m_tracking )
@@ -391,37 +393,110 @@ inline void stdMotionNode::togglePutsOn()
         }
         else // There is more than one put, and which one is on is selected by the value of the switch
         {
-            for( auto s : m_presetPutName )
+            if( m_presetDir == ingr::ioDir::output )
             {
                 ingr::instIOPut *pptr; // We get this pointer using the node accessors
                                        // which throw if there's a nullptr
+
+                // first deal with the single input
                 try
                 {
-                    if( m_presetDir == ingr::ioDir::input )
-                    {
-                        pptr = m_node->input( s );
-                    }
-                    else
-                    {
-                        pptr = m_node->output( s );
-                    }
+                    pptr = m_node->inputs().begin()->second;
                 }
                 catch( ... )
                 {
                     return;
                 }
 
-                if( s == m_curVal || m_alwaysOn.count(s) == 1)
+                // the single node is always on if any are on
+                pptr->state( ingr::putState::on );
+
+                ingr::putState inst = pptr->state();
+                if(inst != ingr::putState::on)
                 {
-                    pptr->state( ingr::putState::on );
+                    inst = ingr::putState::waiting;
                 }
-                else
+
+                if( m_device == "flipacq" )
                 {
-                    pptr->state( ingr::putState::off );
+                    std::cerr << "flipacq input: " << ingr::putState2String( pptr->state() ) << "\n";
+                }
+
+                // Now deal with the many
+                for( auto s : m_presetPutName )
+                {
+                    try
+                    {
+                        pptr = m_node->output( s );
+                    }
+                    catch( ... )
+                    {
+                        return;
+                    }
+
+                    if( s == m_curVal || m_alwaysOn.count( s ) == 1 )
+                    {
+                        std::cerr << m_node->name() << ' ' << s << " on\n";
+                        pptr->state( inst );
+                    }
+                    else
+                    {
+                        std::cerr << m_node->name() << ' ' << s << " off\n";
+
+                        pptr->state( ingr::putState::off );
+                    }
                 }
             }
-            m_parentGraph->stateChange();
+            else //m_presetDir == ingr::ioDir::input )
+            {
+                ingr::instIOPut *pptr; // We get this pointer using the node accessors
+                                       // which throw if there's a nullptr
+
+                // first deal with the single input
+                try
+                {
+                    pptr = m_node->outputs().begin()->second;
+                }
+                catch( ... )
+                {
+                    return;
+                }
+
+                // the single node is always on if any are on
+                pptr->state( ingr::putState::on );
+
+                if( m_device == "flipacq" )
+                {
+                    std::cerr << "flipacq input: " << ingr::putState2String( pptr->state() ) << "\n";
+                }
+
+                // Now deal with the many
+                for( auto s : m_presetPutName )
+                {
+                    try
+                    {
+                        pptr = m_node->input( s );
+                    }
+                    catch( ... )
+                    {
+                        return;
+                    }
+
+                    if( s == m_curVal || m_alwaysOn.count( s ) == 1 )
+                    {
+                        std::cerr << m_node->name() << ' ' << s << " on\n";
+                        pptr->state( ingr::putState::on );
+                    }
+                    else
+                    {
+                        std::cerr << m_node->name() << ' ' << s << " off\n";
+
+                        pptr->state( ingr::putState::off );
+                    }
+                }
+            }
         }
+        m_parentGraph->stateChange();
     }
 
     return;
@@ -432,6 +507,11 @@ inline void stdMotionNode::togglePutsOff()
     if( m_node == nullptr || !m_parentGraph || !m_node->auxDataValid() )
     {
         return;
+    }
+
+    if( m_device == "flipacq" )
+    {
+        std::cerr << "flipacq togglePutsOff()\n";
     }
 
     if( m_tracking ) // regardless of whether required, if tracking this is our state
@@ -451,7 +531,27 @@ inline void stdMotionNode::togglePutsOff()
     }
     // We don't change labels if m_presetPutName.size() > 1
 
-    xigNode::togglePutsOff();
+    // replace xigNode::togglePutsOff() so we can check for always-on
+
+    for( auto &&iput : m_node->inputs() )
+    {
+        if( m_alwaysOn.count( iput.second->name() ) > 0 )
+        {
+            continue;
+        }
+
+        iput.second->state( ingr::putState::off );
+    }
+
+    for( auto &&oput : m_node->outputs() )
+    {
+        if( m_alwaysOn.count( oput.second->name() ) > 0 )
+        {
+            continue;
+        }
+
+        oput.second->state( ingr::putState::off );
+    }
 }
 
 inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
@@ -503,22 +603,21 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
     }
 
     std::vector<std::string> alwaysOn;
-    config.configUnused(alwaysOn, mx::app::iniFile::makeKey( name(), "alwaysOn" ));
+    config.configUnused( alwaysOn, mx::app::iniFile::makeKey( name(), "alwaysOn" ) );
     try
     {
-        for(auto & ao : alwaysOn)
+        for( auto &ao : alwaysOn )
         {
-            m_alwaysOn.insert(ao);
+            m_alwaysOn.insert( ao );
         }
     }
-    catch(const std::exception& e)
+    catch( const std::exception &e )
     {
         std::string msg = XIGN_EXCEPTION( "stdMotionNode::loadConfig", "exception from insert in m_alwaysOn" );
         msg += ":";
         msg += e.what();
         throw std::runtime_error( msg );
     }
-
 
     std::string trackReqKey;
     config.configUnused( trackReqKey, mx::app::iniFile::makeKey( name(), "trackingReqKey" ) );
@@ -529,7 +628,8 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
     // Check if both are set
     if( ( trackReqKey == "" && trackReqEl != "" ) || ( trackReqKey != "" && trackReqEl == "" ) )
     {
-        std::string msg = XIGN_EXCEPTION( "stdMotionNode::loadConfig", "trackingReqKey and trackingReqElement must both be provided" );
+        std::string msg = XIGN_EXCEPTION( "stdMotionNode::loadConfig",
+                                          "trackingReqKey and trackingReqElement must both be provided" );
         throw std::runtime_error( msg );
     }
 
@@ -542,14 +642,16 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
     // Check if both are set
     if( ( trackKey == "" && trackEl != "" ) || ( trackKey != "" && trackEl == "" ) )
     {
-        std::string msg = XIGN_EXCEPTION( "stdMotionNode::loadConfig", "trackingKey and trackingElement must both be provided" );
+        std::string msg =
+            XIGN_EXCEPTION( "stdMotionNode::loadConfig", "trackingKey and trackingElement must both be provided" );
         throw std::runtime_error( msg );
     }
 
     // This will catch the case where one or the other pair was set, but not both
     if( ( trackKey == "" && trackReqKey != "" ) || ( trackKey != "" && trackReqKey == "" ) )
     {
-        std::string msg = XIGN_EXCEPTION( "stdMotionNode::loadConfig", "trackingReqKey and trackerKey must both be provided" );
+        std::string msg =
+            XIGN_EXCEPTION( "stdMotionNode::loadConfig", "trackingReqKey and trackerKey must both be provided" );
         throw std::runtime_error( msg );
     }
 
