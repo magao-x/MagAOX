@@ -372,6 +372,11 @@ inline void stdMotionNode::togglePutsOn()
         return;
     }
 
+    if( m_device == "flipacq" )
+    {
+        std::cerr << "flipacq togglePutsOn()\n";
+    }
+
     if( m_trackingReq )
     {
         if( m_tracking )
@@ -514,6 +519,11 @@ inline void stdMotionNode::togglePutsOff()
     if( m_node == nullptr || !m_parentGraph || !m_node->auxDataValid() )
     {
         return;
+    }
+
+    if( m_device == "flipacq" )
+    {
+        std::cerr << "flipacq togglePutsOff()\n";
     }
 
     if( m_tracking ) // regardless of whether required, if tracking this is our state

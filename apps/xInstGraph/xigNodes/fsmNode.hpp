@@ -133,7 +133,7 @@ class fsmNode : public xigNode
      */
     virtual void fsmElName( const std::string &en /**< [in] the new element name */ );
 
-    /// Get the fsm element name 
+    /// Get the fsm element name
     /**
      * \return the current value of m_fsmElName
      */
@@ -394,6 +394,12 @@ inline int fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiPropert
 
     m_stateStr = ipRecv[m_fsmElName].get<std::string>();
 
+    if(m_device == "ttmpupil")
+    {
+        std::cerr << ipRecv.createUniqueKey() << ".state=" << m_stateStr << '\n';
+    }
+
+
     MagAOX::app::stateCodes::stateCodeT state = MagAOX::app::stateCodes::str2CodeFast( m_stateStr );
 
     if( state != m_state )
@@ -417,6 +423,11 @@ inline int fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiPropert
     }
     m_stateOnTarget = stateOnTarget;
 
+    if(m_device == "ttmpupil")
+    {
+        std::cerr << ipRecv.createUniqueKey() << ": m_stateOnTarget=" << m_stateOnTarget << '\n';
+    }
+
     if( m_fsmAction == fsmNodeActionT::threshOff )
     {
         if( m_stateOnTarget )
@@ -435,12 +446,20 @@ inline int fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiPropert
     {
         if( m_stateOnTarget )
         {
+            if(m_device == "ttmpupil")
+            {
+                std::cerr << "toggling on...\n";
+            }
             togglePutsOn();
             actionTaken = true;
             return 0;
         }
         else
         {
+            if(m_device == "ttmpupil")
+            {
+                std::cerr << "toggling off...\n";
+            }
             togglePutsOff();
             actionTaken = true;
             return 0;
