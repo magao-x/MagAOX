@@ -222,8 +222,6 @@ inline void fsmNode::device( const std::string &dev )
     m_device = dev;
     m_fsmKey = m_device + '.' + m_fsmPropName;
 
-    std::cerr << name() << ' ' << m_fsmKey << '\n';
-
     key( m_fsmKey );
 }
 
