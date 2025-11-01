@@ -366,12 +366,7 @@ inline void fsmNode::loadConfigDerived( mx::app::appConfigurator &config )
         m_targetStates[n] = MagAOX::app::stateCodes::str2Code( targetStates[n] );
     }
 
-<<<<<<< HEAD:apps/xInstGraph/xigNodes/fsmNode.hpp
     if( m_parentGraph && m_node )
-=======
-
-    if(m_parentGraph && m_node)
->>>>>>> d0c87946 (got flippers working in instGraph; cleaned up breadcrubs):utils/instGraph/xigNodes/fsmNode.hpp
     {
         m_parentGraph->valueExtra( m_node->name(), "state", "" );
     }
