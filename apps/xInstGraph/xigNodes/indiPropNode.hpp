@@ -25,7 +25,7 @@ class indiPropNode : public fsmNode
     double m_propValNum{ std::numeric_limits<double>::lowest() }; /**< the numeric target value, set from
                                                                        m_propValStr if the property is a number.*/
 
-    /** The switch targwr value, set from m_propValStr if the property is a switch.  In this case
+    /** The switch target value, set from m_propValStr if the property is a switch.  In this case
      *  m_propValStr can have values `On` or `Off`.  The comparison is made insensitive to case (ON and off
      *  are valid).
      */
@@ -39,6 +39,9 @@ class indiPropNode : public fsmNode
     bool m_state{ false }; ///< The current state of the comparison.
 
     bool m_first{ true }; ///< Flag indicating if it's the first call to \ref handleSetProperty
+
+    std::string m_onStr {"ON"};
+    std::string m_offStr {"OFF"};
 
   public:
     /// Only c'tor.  Must be constructed with node name and a parent graph.
@@ -107,11 +110,11 @@ class indiPropNode : public fsmNode
 
   protected:
     /// On first call to handleSetProperty we find the property type and convert the target value
-    virtual void firstSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property*/ );
+    virtual int firstSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property*/ );
 
   public:
     /// INDI SetProperty callback
-    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
+    virtual int handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
     /// Toggle all puts on
     virtual void toggleOn();
@@ -120,14 +123,14 @@ class indiPropNode : public fsmNode
     virtual void toggleOff();
 
     /// Configure this node form an appConfigurator.
-    void loadConfig( mx::app::appConfigurator &config /**< [in] the loaded configuration */);
+    void loadConfig( mx::app::appConfigurator &config /**< [in] the loaded configuration */ );
 };
 
 indiPropNode::indiPropNode( const std::string &name, ingr::instGraphXML *parentGraph ) : fsmNode( name, parentGraph )
 {
-    if(m_parentGraph)
+    if( m_parentGraph )
     {
-        m_parentGraph->valueExtra(m_node->name(), "fsmstate", "");
+        m_parentGraph->valueExtra( m_node->name(), "fsmstate", "" );
     }
 }
 
@@ -188,7 +191,7 @@ const bool &indiPropNode::state() const
     return m_state;
 }
 
-inline void indiPropNode::firstSetProperty( const pcf::IndiProperty &ipRecv )
+inline int indiPropNode::firstSetProperty( const pcf::IndiProperty &ipRecv )
 {
     // On first call we figure what type it is and convert the value
 
@@ -248,33 +251,47 @@ inline void indiPropNode::firstSetProperty( const pcf::IndiProperty &ipRecv )
         std::string msg = XIGN_EXCEPTION( "indiPropNode::firstSetProperty", "INDI property of type not implemented" );
         throw std::runtime_error( msg );
     }
+
+    return 0;
 }
 
-inline void indiPropNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
+inline int indiPropNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
     bool actionTaken = false;
-    fsmNode::handleSetProperty(actionTaken, ipRecv);
 
-    if(actionTaken)
+    int rv = fsmNode::handleSetProperty( actionTaken, ipRecv );
+    if( rv < 0 )
     {
-        return;
+        std::cerr << "Error from fsmNode::handleSetProperty\n";
+        return rv;
+    }
+
+    if( actionTaken )
+    {
+        return 0;
     }
 
     if( ipRecv.createUniqueKey() != m_propKey )
     {
-        return;
+        return 0;
     }
 
     if( !ipRecv.find( m_propEl ) )
     {
-        return;
+        std::cerr << "!ipRecv.find( m_propEl )\n";
+        return -1;
     }
 
     if( m_first )
     {
         try
         {
-            firstSetProperty( ipRecv );
+            int rv = firstSetProperty( ipRecv );
+            if(rv < 0)
+            {
+                std::cerr << "Error from firstSetProperty\n";
+                return rv;
+            }
         }
         catch( const std::exception &e )
         {
@@ -337,13 +354,19 @@ inline void indiPropNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
         m_state = on;
         if( on )
         {
-            return toggleOn();
+            toggleOn();
+            m_parentGraph->valueExtra( m_node->name(), "state", m_onStr );
+            return 0;
         }
         else
         {
-            return toggleOff();
+            toggleOff();
+            m_parentGraph->valueExtra( m_node->name(), "state", m_offStr );
+            return 0;
         }
     }
+
+    return 0;
 }
 
 inline void indiPropNode::toggleOn()
@@ -373,7 +396,7 @@ inline void indiPropNode::loadConfig( mx::app::appConfigurator &config )
         throw std::runtime_error( msg );
     }
 
-    fsmNode::loadConfigDerived(config);
+    fsmNode::loadConfigDerived( config );
 
     std::string pk;
     config.configUnused( pk, mx::app::iniFile::makeKey( name(), "propKey" ) );
@@ -408,6 +431,9 @@ inline void indiPropNode::loadConfig( mx::app::appConfigurator &config )
     propKey( pk );
     m_propEl     = pe;
     m_propValStr = pv;
+
+    config.configUnused( m_onStr, mx::app::iniFile::makeKey( name(), "onStr" ) );
+    config.configUnused( m_offStr, mx::app::iniFile::makeKey( name(), "offStr" ) );
 }
 
 #endif // indiPropNode_hpp

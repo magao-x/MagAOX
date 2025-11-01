@@ -73,7 +73,7 @@ class xigNode
     /**
      * This is a pure virtual function in xigNode.
      */
-    virtual void
+    virtual int
     handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ ) = 0;
 
     /// Change the state of all inputs and all outputs to on.

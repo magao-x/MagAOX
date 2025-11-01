@@ -81,7 +81,7 @@ SCENARIO( "Creating and configuring an fsmNode", "[instGraph::fsmNode]" )
             //check config-ed values
             REQUIRE(tsn->device() == "ttmpupil");
             REQUIRE(tsn->fsmKey() == "ttmpupil.fsm");
-            REQUIRE(tsn->action() == fsmNodeActionT::passive);
+            REQUIRE(tsn->fsmAction() == fsmNodeActionT::passive);
             REQUIRE(tsn->targetStates().size() == 0);
         }
         WHEN("node is in file, setting action to threshOff for two states")
@@ -89,7 +89,7 @@ SCENARIO( "Creating and configuring an fsmNode", "[instGraph::fsmNode]" )
             ingr::instGraphXML parentGraph;
             writeXML();
             mx::app::writeConfigFile( "/tmp/fsmNode_test.conf", {"ttmpupil","ttmpupil","ttmpupil"},
-                                                                {"type", "action",   "targetStates"},
+                                                                {"type", "fsmAction",   "targetStates"},
                                                                  {"fsm", "threshOff", "READY,OPERATING"} );
             mx::app::appConfigurator config;
             config.readConfig("/tmp/fsmNode_test.conf");
@@ -135,7 +135,7 @@ SCENARIO( "Creating and configuring an fsmNode", "[instGraph::fsmNode]" )
             //check config-ed values
             REQUIRE(tsn->device() == "ttmpupil");
             REQUIRE(tsn->fsmKey() == "ttmpupil.fsm");
-            REQUIRE(tsn->action() == fsmNodeActionT::threshOff);
+            REQUIRE(tsn->fsmAction() == fsmNodeActionT::threshOff);
             REQUIRE(tsn->targetStates().size() == 2);
             REQUIRE(tsn->targetStates()[0] == MagAOX::app::stateCodes::READY);
             REQUIRE(tsn->targetStates()[1] == MagAOX::app::stateCodes::OPERATING);
@@ -145,7 +145,7 @@ SCENARIO( "Creating and configuring an fsmNode", "[instGraph::fsmNode]" )
             ingr::instGraphXML parentGraph;
             writeXML();
             mx::app::writeConfigFile( "/tmp/fsmNode_test.conf", {"ttmpupil","ttmpupil","ttmpupil"},
-                                                                {"type", "action",   "targetStates"},
+                                                                {"type", "fsmAction",   "targetStates"},
                                                                  {"fsm", "active", "OPERATING"} );
             mx::app::appConfigurator config;
             config.readConfig("/tmp/fsmNode_test.conf");
@@ -191,7 +191,7 @@ SCENARIO( "Creating and configuring an fsmNode", "[instGraph::fsmNode]" )
             //check config-ed values
             REQUIRE(tsn->device() == "ttmpupil");
             REQUIRE(tsn->fsmKey() == "ttmpupil.fsm");
-            REQUIRE(tsn->action() == fsmNodeActionT::active);
+            REQUIRE(tsn->fsmAction() == fsmNodeActionT::active);
             REQUIRE(tsn->targetStates().size() == 1);
             REQUIRE(tsn->targetStates()[0] == MagAOX::app::stateCodes::OPERATING);
         }

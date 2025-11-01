@@ -117,7 +117,7 @@ class stdMotionNode : public fsmNode
     const std::string &trackerElement();
 
     /// INDI SetProperty callback
-    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
+    virtual int handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
     virtual void togglePutsOn();
 
@@ -248,9 +248,14 @@ inline const std::string &stdMotionNode::trackerElement()
     return m_trackerElement;
 }
 
-inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
+inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
-    fsmNode::handleSetProperty( ipRecv );
+    int rv = fsmNode::handleSetProperty( ipRecv );
+
+    if( rv < 0 )
+    {
+        return rv;
+    }
 
     if( ipRecv.createUniqueKey() == m_trackingReqKey )
     {
@@ -356,6 +361,8 @@ inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
             }
         }
     }
+
+    return 0;
 }
 
 inline void stdMotionNode::togglePutsOn()
@@ -411,7 +418,7 @@ inline void stdMotionNode::togglePutsOn()
                 }
 
                 // the single node is always on if any are on
-                pptr->enabled(true);
+                pptr->enabled( true );
                 pptr->state( ingr::putState::on );
 
                 ingr::putState inst = pptr->state();
@@ -464,7 +471,7 @@ inline void stdMotionNode::togglePutsOn()
                 }
 
                 // the single node is always on if any are on
-                pptr->enabled(true);
+                pptr->enabled( true );
                 pptr->state( ingr::putState::on );
 
                 // Now deal with the many

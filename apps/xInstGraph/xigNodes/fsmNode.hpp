@@ -71,8 +71,11 @@ class fsmNode : public xigNode
     typedef MagAOX::app::stateCodes::stateCodeT stateCodeT;
 
   protected:
-    std::string m_device; ///< The INDI device name. Defaults to the node name set on construction.
-    std::string m_fsmKey; ///< The unique INDI key, `<device>.fsm`, for the FSM state INDI property.
+    std::string m_device;               ///< The INDI device name. Defaults to the node name set on construction.
+    std::string m_fsmPropName{ "fsm" }; ///< The INDI property name for the FSM, normally "fsm".
+    std::string m_fsmElName{ "state" }; ///< The INDI property element name for the FSM, normally "state".
+
+    std::string m_fsmKey; ///< The unique INDI key, `<device>.<fsmPropName>`, for the FSM state INDI property.
 
     fsmNodeActionT m_fsmAction{ fsmNodeActionT::passive };
 
@@ -106,6 +109,36 @@ class fsmNode : public xigNode
      */
     const std::string &device() const;
 
+    /// Set the fsm property name
+    /**
+     * Derived classes may implement this to add extra logic.  The fsm property name defaults
+     * to "fsm"
+     *
+     * This can only be called before device is set
+     */
+    virtual void fsmPropName( const std::string &pn /**< [in] the new property name */ );
+
+    /// Get the fsm property name
+    /**
+     * \return the current value of m_fsmPropName
+     */
+    const std::string &fsmPropName() const;
+
+    /// Set the fsm element name
+    /**
+     * Derived classes may implement this to add extra logic.  The fsm element name defaults
+     * to "state"
+     *
+     * This can be called at any time
+     */
+    virtual void fsmElName( const std::string &en /**< [in] the new element name */ );
+
+    /// Get the fsm element name 
+    /**
+     * \return the current value of m_fsmElName
+     */
+    const std::string &fsmElName() const;
+
     /// Get the FSM unique key
     /**
      * \return the current value of m_fsmKey
@@ -119,7 +152,7 @@ class fsmNode : public xigNode
     fsmNodeActionT fsmAction() const;
 
     /// Set the action
-    void fsmAction(fsmNodeActionT act);
+    void fsmAction( fsmNodeActionT act );
 
     /// Get the target states
     /**
@@ -136,7 +169,7 @@ class fsmNode : public xigNode
     void loadConfig( mx::app::appConfigurator &config /**< [in] the application configurator
                                                                 loaded with this node's options*/ );
 
-protected:
+  protected:
     /// Load this specific node's settings from an application configuration of a derived class
     /**
      * Does not cerifies that the named node is an fsmNode.
@@ -145,20 +178,19 @@ protected:
     void loadConfigDerived( mx::app::appConfigurator &config /**< [in] the application configurator
                                                                 loaded with this node's options*/ );
 
-public:
+  public:
     /// INDI SetProperty callback
-    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
+    virtual int handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
     /// INDI SetProperty callback with indication if action was taken
     /** The possible actions are determined by m_fsmAction.  If the action was taken then the caller
      *  should return without further processing.
      *
      */
-    virtual void handleSetProperty( bool &actionTaken, /** < [out] indicates if action taken (true). */
-                                    const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
+    virtual int handleSetProperty( bool &actionTaken, /** < [out] indicates if action taken (true). */
+                                   const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
+
   public:
-
-
     virtual void updateGUI();
 };
 
@@ -171,6 +203,16 @@ inline void fsmNode::device( const std::string &dev )
     if( m_device != "" && dev != m_device )
     {
         std::string msg = "fsmNode::device attempt to change device name from " + m_device + " to " + dev;
+        msg += " in " + name();
+        msg += " at ";
+        msg += __FILE__;
+        msg += " " + std::to_string( __LINE__ );
+        throw std::runtime_error( msg );
+    }
+
+    if( dev == "" )
+    {
+        std::string msg = "fsmNode::device attempt to set empty device name in " + name();
         msg += " at ";
         msg += __FILE__;
         msg += " " + std::to_string( __LINE__ );
@@ -178,7 +220,9 @@ inline void fsmNode::device( const std::string &dev )
     }
 
     m_device = dev;
-    m_fsmKey = m_device + ".fsm";
+    m_fsmKey = m_device + '.' + m_fsmPropName;
+
+    std::cerr << name() << ' ' << m_fsmKey << '\n';
 
     key( m_fsmKey );
 }
@@ -188,7 +232,64 @@ inline const std::string &fsmNode::device() const
     return m_device;
 }
 
-const std::string & fsmNode::fsmKey() const
+inline void fsmNode::fsmPropName( const std::string &pn )
+{
+    if( m_fsmPropName != "" && m_device != "" )
+    {
+        std::string msg = "fsmNode::fsmPropName attempt to change fsmPropName name from " + m_fsmPropName + " to " + pn;
+        msg += " in " + name();
+        msg += " at ";
+        msg += __FILE__;
+        msg += " " + std::to_string( __LINE__ );
+        throw std::runtime_error( msg );
+    }
+
+    if( m_device != "" )
+    {
+        std::string msg = "fsmNode::fsmPropName attempt to set propName after device already set " + name();
+        msg += " at ";
+        msg += __FILE__;
+        msg += " " + std::to_string( __LINE__ );
+        throw std::runtime_error( msg );
+    }
+
+    if( pn == "" )
+    {
+        std::string msg = "fsmNode::fsmPropName attempt to set propName to empty " + name();
+        msg += " at ";
+        msg += __FILE__;
+        msg += " " + std::to_string( __LINE__ );
+        throw std::runtime_error( msg );
+    }
+
+    m_fsmPropName = pn;
+}
+
+inline const std::string &fsmNode::fsmPropName() const
+{
+    return m_fsmPropName;
+}
+
+inline void fsmNode::fsmElName( const std::string &en )
+{
+    if( en == "" )
+    {
+        std::string msg = "fsmNode::fsmElName attempt to set elName to empty " + name();
+        msg += " at ";
+        msg += __FILE__;
+        msg += " " + std::to_string( __LINE__ );
+        throw std::runtime_error( msg );
+    }
+
+    m_fsmElName = en;
+}
+
+inline const std::string &fsmNode::fsmElName() const
+{
+    return m_fsmElName;
+}
+
+const std::string &fsmNode::fsmKey() const
 {
     return m_fsmKey;
 }
@@ -198,12 +299,12 @@ fsmNodeActionT fsmNode::fsmAction() const
     return m_fsmAction;
 }
 
-void fsmNode::fsmAction(fsmNodeActionT act)
+void fsmNode::fsmAction( fsmNodeActionT act )
 {
     m_fsmAction = act;
 }
 
-const std::vector<fsmNode::stateCodeT> & fsmNode::targetStates() const
+const std::vector<fsmNode::stateCodeT> &fsmNode::targetStates() const
 {
     return m_targetStates;
 }
@@ -231,14 +332,23 @@ inline void fsmNode::loadConfig( mx::app::appConfigurator &config )
         throw std::runtime_error( msg );
     }
 
-    loadConfigDerived(config);
+    loadConfigDerived( config );
 }
 
 inline void fsmNode::loadConfigDerived( mx::app::appConfigurator &config )
 {
+    //This must be first
+    std::string propName = fsmPropName();
+    config.configUnused( propName, mx::app::iniFile::makeKey( name(), "fsmPropName" ) );
+    fsmPropName( propName );
+
     std::string dev = name();
     config.configUnused( dev, mx::app::iniFile::makeKey( name(), "device" ) );
     device( dev );
+
+    std::string elName = fsmElName();
+    config.configUnused( elName, mx::app::iniFile::makeKey( name(), "fsmElName" ) );
+    fsmElName( elName );
 
     std::string action = fsmNodeActionT2String( m_fsmAction );
     config.configUnused( action, mx::app::iniFile::makeKey( name(), "fsmAction" ) );
@@ -258,35 +368,33 @@ inline void fsmNode::loadConfigDerived( mx::app::appConfigurator &config )
         m_targetStates[n] = MagAOX::app::stateCodes::str2Code( targetStates[n] );
     }
 
-
-    if(m_parentGraph && m_node)
+    if( m_parentGraph && m_node )
     {
         m_parentGraph->valueExtra( m_node->name(), "state", "" );
     }
 }
 
-inline void fsmNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
+inline int fsmNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
     bool actionTaken;
-    handleSetProperty( actionTaken, ipRecv );
+    return handleSetProperty( actionTaken, ipRecv );
 }
 
-inline void fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiProperty &ipRecv )
+inline int fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.createUniqueKey() != m_fsmKey )
     {
         actionTaken = false;
-        return;
+        return 0;
     }
 
-
-    if( !ipRecv.find( "state" ) )
+    if( !ipRecv.find( m_fsmElName ) )
     {
         actionTaken = false;
-        return;
+        return 0;
     }
 
-    m_stateStr = ipRecv["state"].get<std::string>();
+    m_stateStr = ipRecv[m_fsmElName].get<std::string>();
 
     MagAOX::app::stateCodes::stateCodeT state = MagAOX::app::stateCodes::str2CodeFast( m_stateStr );
 
@@ -297,7 +405,7 @@ inline void fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiProper
 
     m_state = state;
 
-    m_parentGraph->valueExtra(m_node->name(), "fsmstate", m_stateStr);
+    m_parentGraph->valueExtra( m_node->name(), "fsmstate", m_stateStr );
 
     bool stateOnTarget = false;
 
@@ -316,13 +424,13 @@ inline void fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiProper
         if( m_stateOnTarget )
         {
             actionTaken = false;
-            return;
+            return 0;
         }
         else
         {
             togglePutsOff();
             actionTaken = true;
-            return;
+            return 0;
         }
     }
     else if( m_fsmAction == fsmNodeActionT::active )
@@ -331,19 +439,19 @@ inline void fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiProper
         {
             togglePutsOn();
             actionTaken = true;
-            return;
+            return 0;
         }
         else
         {
             togglePutsOff();
             actionTaken = true;
-            return;
+            return 0;
         }
     }
     else // m_fsmAction == fsmNodeActionT::passive
     {
         actionTaken = false;
-        return;
+        return 0;
     }
 }
 

@@ -29,7 +29,7 @@ class pwrOnOffNode : public xigNode
     void pwrKey( const std::string &pk );
 
     /// INDI SetProperty callback
-    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
+    virtual int handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
     virtual void toggleOn();
 
@@ -45,25 +45,27 @@ inline void pwrOnOffNode::pwrKey( const std::string &pk )
     key( m_pwrKey );
 }
 
-inline void pwrOnOffNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
+inline int pwrOnOffNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.createUniqueKey() != m_pwrKey )
     {
-        return;
+        return -1;
     }
 
     if( !ipRecv.find( "state" ) )
     {
-        return;
+        return -1;
     }
 
     if( ipRecv["state"].get<std::string>() == "On" )
     {
-        return toggleOn();
+        toggleOn();
+        return 0;
     }
     else
     {
-        return toggleOff();
+        toggleOff();
+        return 0;
     }
 }
 

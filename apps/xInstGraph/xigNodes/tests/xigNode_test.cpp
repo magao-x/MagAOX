@@ -29,9 +29,10 @@ public:
     test_xigNode( const std::string &name, ingr::instGraphXML *parentGraph ) : xigNode(name,parentGraph)
     {}
 
-    void handleSetProperty( const pcf::IndiProperty &ipRecv )
+    int handleSetProperty( const pcf::IndiProperty &ipRecv )
     {
         static_cast<void>(ipRecv);
+        return 0;
     }
 };
 
