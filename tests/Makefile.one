@@ -58,6 +58,8 @@ else ifeq ($(notdir $(TESTNAME)),indiPropNode_test)
     LDLIBS += -linstGraph
 else ifeq ($(notdir $(TESTNAME)),pwrOnOffNode_test)
     LDLIBS += -linstGraph
+else ifeq ($(notdir $(TESTNAME)),staticNode_test)
+    LDLIBS += -linstGraph
 else ifeq ($(notdir $(TESTNAME)),stdMotionNode_test)
     LDLIBS += -linstGraph
 else ifeq ($(notdir $(TESTNAME)),xigNode_test)

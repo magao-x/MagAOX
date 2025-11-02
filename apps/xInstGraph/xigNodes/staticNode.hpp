@@ -109,7 +109,7 @@ inline void staticNode::togglePutsAll()
     }
     catch( const std::exception &e )
     {
-        std::string msg = XIGN_EXCEPTION( "staticNode::togglePutsAll", "parent graph is null" );
+        std::string msg = XIGN_EXCEPTION( "staticNode::togglePutsAll", "exception changing state on inputs" );
         msg += "\n    ";
         msg += e.what();
         throw std::runtime_error( msg );

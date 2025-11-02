@@ -78,8 +78,10 @@
 
 ../apps/xInstGraph/xigNodes/tests/xigNode_test
 ../apps/xInstGraph/xigNodes/tests/fsmNode_test
-../apps/xInstGraph/xigNodes/tests/indiPropNode_test 
-../apps/xInstGraph/xigNodes/tests/stdMotionNode_test 
+../apps/xInstGraph/xigNodes/tests/indiPropNode_test
+../apps/xInstGraph/xigNodes/tests/pwrOnOffNode_test
+../apps/xInstGraph/xigNodes/tests/staticNode_test
+../apps/xInstGraph/xigNodes/tests/stdMotionNode_test
 ../apps/xInstGraph/tests/xInstGraph_test
 
 ../apps/xt1121Ctrl/tests/xt1121Ctrl_test
