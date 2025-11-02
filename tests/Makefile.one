@@ -31,7 +31,7 @@ PATHNAME=$(dir $(TARGET))
 OBJNAME = $(PATHNAME)$(notdir $(BASENAME)).o
 TESTNAME = $(PATHNAME)$(notdir $(BASENAME))
 
-# add extra libraries for special cases 
+# add extra libraries for special cases
 
 ifeq ($(notdir $(TESTNAME)),cursesINDI_test)
 	OTHER_HEADERS += cursesTableGrid.hpp
@@ -55,6 +55,8 @@ else ifeq ($(notdir $(TESTNAME)),xInstGraph_test)
 else ifeq ($(notdir $(TESTNAME)),fsmNode_test)
     LDLIBS += -linstGraph
 else ifeq ($(notdir $(TESTNAME)),indiPropNode_test)
+    LDLIBS += -linstGraph
+else ifeq ($(notdir $(TESTNAME)),pwrOnOffNode_test)
     LDLIBS += -linstGraph
 else ifeq ($(notdir $(TESTNAME)),stdMotionNode_test)
     LDLIBS += -linstGraph

@@ -28,6 +28,8 @@ class pwrOnOffNode : public xigNode
 
     void pwrKey( const std::string &pk );
 
+    const std::string & pwrKey() const;
+
     /// INDI SetProperty callback
     virtual int handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
@@ -43,6 +45,11 @@ inline void pwrOnOffNode::pwrKey( const std::string &pk )
     m_pwrKey = pk;
 
     key( m_pwrKey );
+}
+
+inline const std::string & pwrOnOffNode::pwrKey() const
+{
+    return m_pwrKey;
 }
 
 inline int pwrOnOffNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
