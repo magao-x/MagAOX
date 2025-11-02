@@ -31,11 +31,7 @@ PATHNAME=$(dir $(TARGET))
 OBJNAME = $(PATHNAME)$(notdir $(BASENAME)).o
 TESTNAME = $(PATHNAME)$(notdir $(BASENAME))
 
-<<<<<<< HEAD
 # add extra libraries for special cases
-=======
-# add extra libraries for special cases
->>>>>>> e1ec92c0 (updated xInstGraph tests)
 
 ifeq ($(notdir $(TESTNAME)),cursesINDI_test)
 	OTHER_HEADERS += cursesTableGrid.hpp
