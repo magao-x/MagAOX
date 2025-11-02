@@ -32,6 +32,12 @@ using namespace ingr;
  * \ingroup instGraph
  */
 
+//forward for test harness
+namespace xInstGraph_test 
+{
+    class xInstGraph;
+}
+
 namespace MagAOX
 {
 namespace app
@@ -44,7 +50,7 @@ namespace app
 class xInstGraph : public MagAOXApp<true>
 {
     // Give the test harness access.
-    friend class instGraph_test;
+    friend class xInstGraph_test::xInstGraph;
 
   protected:
     /** \name Configurable Parameters
@@ -151,7 +157,7 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
 {
     ///\todo this should be relative to config path
     std::string file;
-    config( file, "graph.file" );
+    _config( file, "graph.file" );
 
     if( file == "" )
     {
@@ -162,7 +168,7 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
 
 
     std::string outputPath = m_graph.outputPath();
-    config( outputPath, "graph.outputPath" );
+    _config( outputPath, "graph.outputPath" );
     m_graph.outputPath( outputPath );
 
     std::string emsg;
@@ -190,7 +196,7 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
         }
 
         std::string type;
-        config.configUnused( type, mx::app::iniFile::makeKey( sections[i], "type" ) );
+        _config.configUnused( type, mx::app::iniFile::makeKey( sections[i], "type" ) );
 
         // std::cerr << "found node " << sections[i] << ": " << type << "\n";
 
@@ -403,7 +409,7 @@ void xInstGraph::loadConfig()
 {
     if( loadConfigImpl( config ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error loading configuation" } );
+        log<software_error>( { __FILE__, __LINE__, "error loading configuration" } );
         m_shutdown = true;
     }
 }
@@ -517,12 +523,15 @@ int xInstGraph::st_igHandleSetProperty( void *igapp, const pcf::IndiProperty &ip
 
 int xInstGraph::igHandleSetProperty( const pcf::IndiProperty &ipRecv )
 {
+    std::cerr << ipRecv.createUniqueKey() << '\n';
     try
     {
         auto range = m_nodeHandleSets.equal_range( ipRecv.createUniqueKey() );
 
         for( auto it = range.first; it != range.second; ++it )
         {
+            std::cerr << it->second->name() << '\n';
+
             int rv = it->second->handleSetProperty( ipRecv );
             if( rv != 0 )
             {

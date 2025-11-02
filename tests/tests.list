@@ -75,6 +75,13 @@
 ../apps/userGainCtrl/tests/userGainCtrl_test
 ../apps/w2tcsOffloader/tests/w2tcsOffloader_test
 ../apps/xindiserver/tests/xindiserver_test
+
+../apps/xInstGraph/xigNodes/tests/xigNode_test
+../apps/xInstGraph/xigNodes/tests/fsmNode_test
+../apps/xInstGraph/xigNodes/tests/indiPropNode_test 
+../apps/xInstGraph/xigNodes/tests/stdMotionNode_test 
+../apps/xInstGraph/tests/xInstGraph_test
+
 ../apps/xt1121Ctrl/tests/xt1121Ctrl_test
 ../apps/xt1121Ctrl/tests/xtChannels_test
 ../apps/xt1121DCDU/tests/xt1121DCDU_test

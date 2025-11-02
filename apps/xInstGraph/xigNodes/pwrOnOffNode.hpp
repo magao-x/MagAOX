@@ -77,6 +77,7 @@ inline void pwrOnOffNode::toggleOn()
 
     if( m_parentGraph )
     {
+        std::cerr << "writing\n";
         m_parentGraph->valueExtra( m_node->name(), "fsmstate", "ON" );
     }
 }
