@@ -18,7 +18,7 @@ from scipy.optimize import minimize
 from scipy.optimize import curve_fit
 
 class AdcFitter2:
-    def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=-28,grating_freq=47,ncpc = False,snr_threshold=2,log=False):
+    def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=28,grating_freq=47,ncpc = False,snr_threshold=2,log=False):
             self.wavelength = wavelength
             self.bandwidth = bandwidth
             self.grating_angle = grating_angle
@@ -95,60 +95,61 @@ class AdcFitter2:
             else:
                 rect = make_rotated_aperture(make_rectangular_aperture(size=(extent,extent), center=speckle_center), np.deg2rad(-self.grating_angle))(img.grid)
 
-        speckle_img = rect * img
+        speckle_img = rect + img
         self.log.debug(f'intensity of speckle {speckle_number}: {np.sum(speckle_img)}')
+        return speckle_img
 
-        #find the center of intensity of the speckle area and window the ORIGINAL image around that center
-        center_of_intensity = np.array([sum(speckle_img*speckle_img.grid.x)/sum(speckle_img),sum(speckle_img*speckle_img.grid.y)/sum(speckle_img)])
-        window_size=40
-        self.log.debug(f'calculated center of intensity for speckle {speckle_number}: {center_of_intensity}')
+        # #find the center of intensity of the speckle area and window the ORIGINAL image around that center
+        # center_of_intensity = np.array([sum(speckle_img*speckle_img.grid.x)/sum(speckle_img),sum(speckle_img*speckle_img.grid.y)/sum(speckle_img)])
+        # window_size=40
+        # self.log.debug(f'calculated center of intensity for speckle {speckle_number}: {center_of_intensity}')
 
-        new_img = self.window_field(img,[center_of_intensity[0],center_of_intensity[1]],window_size,window_size)
+        # new_img = self.window_field(img,[center_of_intensity[0],center_of_intensity[1]],window_size,window_size)
         
-        shaped = new_img.shaped
-        mus = np.zeros(shaped.shape[0])
+        # shaped = new_img.shaped
+        # mus = np.zeros(shaped.shape[0])
 
-        for i in range(shaped.shape[0]):
-            if self.ncpc==True:
-                sliced = shaped[:,i] 
-            elif speckle_number % 2 != 0: #columns vs rows depending on which speckle it is
-                sliced = shaped[:,i] 
-            else: 
-                sliced = shaped[i,:]
+        # for i in range(shaped.shape[0]):
+        #     if self.ncpc==True:
+        #         sliced = shaped[:,i] 
+        #     elif speckle_number % 2 != 0: #columns vs rows depending on which speckle it is
+        #         sliced = shaped[:,i] 
+        #     else: 
+        #         sliced = shaped[i,:]
 
-            zscore = (np.max(sliced) - np.mean(sliced))/np.std(sliced)
+        #     zscore = (np.max(sliced) - np.mean(sliced))/np.std(sliced)
 
-            if zscore > self.snr_threshold:
-                s = self.isolate_gaussian(sliced)
-                s /= s.max()
-                m, std, fwhm = self.mu(s)
-                mus[i] = m
-            else: mus[i] = -1
+        #     if zscore > self.snr_threshold:
+        #         s = self.isolate_gaussian(sliced)
+        #         s /= s.max()
+        #         m, std, fwhm = self.mu(s)
+        #         mus[i] = m
+        #     else: mus[i] = -1
 
-        #take the second derivative so we can isolate the nonlinear region
-        deriv2 = np.gradient(np.gradient(mus))
-        nonlin_region = np.atleast_1d(np.squeeze(np.where(np.abs(deriv2) >= 0.4)))
+        # #take the second derivative so we can isolate the nonlinear region
+        # deriv2 = np.gradient(np.gradient(mus))
+        # nonlin_region = np.atleast_1d(np.squeeze(np.where(np.abs(deriv2) >= 0.4)))
 
-        #start from the middle of the mu vector and move outward to find the bounds of the linear region
-        midpoint = int(np.floor(window_size / 2))
-        leftbound = nonlin_region[nonlin_region < midpoint][-1] if any(nonlin_region < midpoint) else None
-        rightbound = nonlin_region[nonlin_region > midpoint][0] if any(nonlin_region > midpoint) else None
+        # #start from the middle of the mu vector and move outward to find the bounds of the linear region
+        # midpoint = int(np.floor(window_size / 2))
+        # leftbound = nonlin_region[nonlin_region < midpoint][-1] if any(nonlin_region < midpoint) else None
+        # rightbound = nonlin_region[nonlin_region > midpoint][0] if any(nonlin_region > midpoint) else None
 
-        #do a linear regression on the mus in the linear region. if there is no clear linear region, print an error if print_updates is enabled.
-        if leftbound is not None and rightbound is not None:
-            linear_region = mus[leftbound:rightbound]
-            lin_x = np.arange(len(linear_region))
+        # #do a linear regression on the mus in the linear region. if there is no clear linear region, print an error if print_updates is enabled.
+        # if leftbound is not None and rightbound is not None:
+        #     linear_region = mus[leftbound:rightbound]
+        #     lin_x = np.arange(len(linear_region))
 
-            m , b = np.polyfit(lin_x,linear_region,deg=1)
-            angle = np.arctan(m)
-            if print_updates ==True:
-                print(f'slope: {m:.2f}\ncorresponding angle: {angle:.2f} (rad) or {np.degrees(angle):.2f}°')
+        #     m , b = np.polyfit(lin_x,linear_region,deg=1)
+        #     angle = np.arctan(m)
+        #     if print_updates ==True:
+        #         print(f'slope: {m:.2f}\ncorresponding angle: {angle:.2f} (rad) or {np.degrees(angle):.2f}°')
 
-            return np.degrees(angle) #returns the slope of the individual speckle in degrees.
-        else: 
-            if print_updates == True:
-                print(f'unable to fit speckle {speckle_number}')
-            return np.nan
+        #     return np.degrees(angle) #returns the slope of the individual speckle in degrees.
+        # else: 
+        #     if print_updates == True:
+        #         print(f'unable to fit speckle {speckle_number}')
+        #     return np.nan
 
     def all_speckle_angles(self,img):
         '''returns a numpy vector containing the four speckle angles found in the image.
@@ -163,7 +164,7 @@ class AdcFitter2:
         '''cuts out a centered PSF with the central core masked'''
         img = image/image.max()
 
-        img_subtracted = img >0.1
+        img_subtracted = img >0.05
         center_of_intensity = np.array([sum(img_subtracted*img_subtracted.grid.x)/sum(img_subtracted),sum(img_subtracted*img_subtracted.grid.y)/sum(img_subtracted)])
         mask_ap = make_circular_aperture(mask_diam,center_of_intensity)
         mask = mask_ap(img_subtracted.grid)
@@ -627,23 +628,25 @@ class adcCtrl(XDevice):
                     
                     ###temporary fix because XCam is giving me an ndarray right now
                     extent = 512 * 6/21
-                    pgrid = make_pupil_grid(512,2*extent)
+                    pgrid = make_pupil_grid(512,extent)
                     img = Field(img.ravel(),pgrid)
                     ###end temporary fix
 
-                    transpose = Field(img.shaped.T.ravel(),img.grid)
-                    img = transpose
-                    self.log.debug('images taken and transposed')
+                    # transpose = Field(img.shaped.T.ravel(),img.grid)
+                    # img = transpose
+                    self.log.debug('images taken and NOT transposed')
 
                     img = self.ADC.filter_image(img)
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
                     
-                    write_field(img,'/data/users/twitchell/test_capture5.fits')
+                    write_field(img,'/data/users/twitchell/test_capture7.fits')
                     
                     if self._knife_edge:
                         pass #don't have this functionality yet
                     else:
-                        angles = self.ADC.all_speckle_angles(img)
+                        speckle_img = self.ADC.slice_speckle_angle(img,0)
+                        write_field(speckle_img,'/data/users/twitchell/speckle_img0.fits')
+                        #angles = self.ADC.all_speckle_angles(img)
                 #         pairs = self.ADC.speckle_pairs(angles)
                 #         command = np.squeeze(self.ADC.calculate_command(pairs))
 
