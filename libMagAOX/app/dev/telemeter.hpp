@@ -16,6 +16,12 @@ namespace app
 namespace dev
 {
 
+#ifdef XWCTEST_NAMESPACE
+namespace XWCTEST_NAMESPACE
+{
+#endif
+
+
 /// A device base class which saves telemetry.
 /**
   * CRTP class `derivedT` has the following requirements:
@@ -88,15 +94,15 @@ struct telemeter
     template <typename telT>
     int telem(const typename telT::messageT &msg /**< [in] the data to log */);
 
-    /// Make a telemetry recording, for an empty record
-    /** Wrapper for logManager::log, which updates telT::lastRecord.
+    // Make a telemetry recording, for an empty record
+    /* Wrapper for logManager::log, which updates telT::lastRecord.
      *
      * \tparam logT the log entry type
      * \tparam retval the value returned by this method.
      *
      */
-    template <typename telT>
-    int telem();
+    //template <typename telT>
+    //int telem(); I think this shouldn't be defined, because empty telem makes no sense.  Delete after 11/27/2025
 
     /// Setup an application configurator for the device section
     /**
@@ -196,6 +202,7 @@ int telemeter<derivedT>::telem(const typename telT::messageT &msg)
     return 0;
 }
 
+/* I think this shouldn't be defined.  Delete after 11/27/2025
 template <class derivedT>
 template <typename telT>
 int telemeter<derivedT>::telem()
@@ -207,7 +214,7 @@ int telemeter<derivedT>::telem()
     clock_gettime(CLOCK_REALTIME, &telT::lastRecord);
 
     return 0;
-}
+}*/
 
 template <class derivedT>
 int telemeter<derivedT>::setupConfig(mx::app::appConfigurator &config)
@@ -254,6 +261,12 @@ int telemeter<derivedT>::appStartup()
 
     m_tel.logThreadStart();
 
+    // clang-format off
+    #ifdef XWCTEST_TELEMETER_LOGSTART
+    m_tel.logShutdown(true); // LCOV_EXCL_LINE
+    sleep(2); // LCOV_EXCL_LINE
+    #endif // clang-format on
+
     // Give up to 2 secs to make sure log thread has time to get started and try to open a file.
     int w = 0;
     while (m_tel.logThreadRunning() == false && w < 20)
@@ -275,6 +288,18 @@ int telemeter<derivedT>::appStartup()
 template <class derivedT>
 int telemeter<derivedT>::appLogic()
 {
+    if( m_tel.logThreadRunning() == false )
+    {
+        derived().state( stateCodes::FAILURE );
+
+        // Directly ouput the error b/c all other outputs are via the log thread
+        std::cerr << "\nCRITICAL: telemetry thread not running.  Exiting.\n\n";
+
+        derived().m_shutdown = 1;
+
+        return -1;
+    }
+
     return derived().checkRecordTimes();
 }
 
@@ -356,6 +381,12 @@ int telemeter<derivedT>::checkRecordTimes(timespec &ts)
     {                                                                                    \
         log<software_error>({__FILE__, __LINE__, "error from telemeterT::appShutdown"}); \
     }
+
+
+#ifdef XWCTEST_NAMESPACE
+} // namespace XWCTEST_NAMESPACE
+#endif
+
 
 } // namespace dev
 } // namespace tty

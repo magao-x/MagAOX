@@ -8,9 +8,9 @@ OTHER_HEADERS=xigNodes/xigNode.hpp \
 			  xigNodes/staticNode.hpp \
 			  xigNodes/stdMotionNode.hpp
 
-TARGET=instGraph
+TARGET=xInstGraph
 
 LDLIBS += -linstGraph
 
-include ../../Make/magAOXUtil.mk
+include ../../Make/magAOXApp.mk
 

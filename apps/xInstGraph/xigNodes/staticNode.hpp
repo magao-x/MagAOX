@@ -52,7 +52,7 @@ class staticNode : public xigNode
 
   public:
     /// INDI SetProperty callback
-    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
+    virtual int handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
     /// Toggle all puts to their static state
     virtual void togglePutsAll();
@@ -91,9 +91,11 @@ const std::set<std::string> &staticNode::outputsOff() const
     return m_outputsOff;
 }
 
-inline void staticNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
+inline int staticNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
     static_cast<void>( ipRecv );
+
+    return 0;
 }
 
 inline void staticNode::togglePutsAll()
@@ -107,7 +109,7 @@ inline void staticNode::togglePutsAll()
     }
     catch( const std::exception &e )
     {
-        std::string msg = XIGN_EXCEPTION( "staticNode::togglePutsAll", "parent graph is null" );
+        std::string msg = XIGN_EXCEPTION( "staticNode::togglePutsAll", "exception changing state on inputs" );
         msg += "\n    ";
         msg += e.what();
         throw std::runtime_error( msg );

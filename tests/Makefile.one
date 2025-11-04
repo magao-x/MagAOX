@@ -21,27 +21,6 @@
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 include $(SELF_DIR)/../Make/common.mk
 
-ifeq ($(notdir $(t)),cursesINDI_test)
-	OTHER_HEADERS += cursesTableGrid.hpp
-	LDLIBS += -lncurses
-else ifeq ($(notdir $(t)),logdump_test)
-	LDLIBS = -lmxlib -lflatbuffers
-else ifeq ($(notdir $(t)),logstream_test)
-	LDLIBS = -lmxlib -lflatbuffers
-else ifeq ($(notdir $(t)),logsurgeon_test)
-	LDLIBS = -lmxlib -lflatbuffers
-else ifeq ($(notdir $(t)),xrif2fits_test)
-	LDLIBS += -lcfitsio
-else ifeq ($(notdir $(t)),xrif2shmim_test)
-	LDLIBS += -lcfitsio
-else ifeq ($(notdir $(t)),mzmqClient_test)
-	LDLIBS += -lzmq
-else ifeq ($(notdir $(t)),mzmqServer_test)
-	LDLIBS += -lzmq
-endif
-
-LDLIBS+=$(TESTLIBS)
-
 # Single-file app name can be supplied as `TARGET=`,
 # or `t=` for short
 TARGET ?= $(t)
@@ -52,12 +31,50 @@ PATHNAME=$(dir $(TARGET))
 OBJNAME = $(PATHNAME)$(notdir $(BASENAME)).o
 TESTNAME = $(PATHNAME)$(notdir $(BASENAME))
 
+# add extra libraries for special cases
+
+ifeq ($(notdir $(TESTNAME)),cursesINDI_test)
+	OTHER_HEADERS += cursesTableGrid.hpp
+	LDLIBS += -lncurses
+else ifeq ($(notdir $(TESTNAME)),logdump_test)
+	LDLIBS = -lmxlib -lflatbuffers
+else ifeq ($(notdir $(TESTNAME)),logstream_test)
+	LDLIBS = -lmxlib -lflatbuffers
+else ifeq ($(notdir $(TESTNAME)),logsurgeon_test)
+	LDLIBS = -lmxlib -lflatbuffers
+else ifeq ($(notdir $(TESTNAME)),xrif2fits_test)
+	LDLIBS += -lcfitsio
+else ifeq ($(notdir $(TESTNAME)),xrif2shmim_test)
+	LDLIBS += -lcfitsio
+else ifeq ($(notdir $(TESTNAME)),mzmqClient_test)
+	LDLIBS += -lzmq
+else ifeq ($(notdir $(TESTNAME)),mzmqServer_test)
+	LDLIBS += -lzmq
+else ifeq ($(notdir $(TESTNAME)),xInstGraph_test)
+    LDLIBS += -linstGraph
+else ifeq ($(notdir $(TESTNAME)),fsmNode_test)
+    LDLIBS += -linstGraph
+else ifeq ($(notdir $(TESTNAME)),indiPropNode_test)
+    LDLIBS += -linstGraph
+else ifeq ($(notdir $(TESTNAME)),pwrOnOffNode_test)
+    LDLIBS += -linstGraph
+else ifeq ($(notdir $(TESTNAME)),staticNode_test)
+    LDLIBS += -linstGraph
+else ifeq ($(notdir $(TESTNAME)),stdMotionNode_test)
+    LDLIBS += -linstGraph
+else ifeq ($(notdir $(TESTNAME)),xigNode_test)
+    LDLIBS += -linstGraph
+endif
+
+LDLIBS+=$(TESTLIBS)
+
+
 
 ######################
 # setuid             #
 ######################
 #Special handling for tests requiring setuid
-ifeq ($(notdir $(BASENAME)),thSetuid_test)
+ifeq ($(notdir $(TESTNAME)),thSetuid_test)
    SETUID=sudo chown root:root $(TESTNAME) && sudo chmod u+s $(TESTNAME)
 endif
 

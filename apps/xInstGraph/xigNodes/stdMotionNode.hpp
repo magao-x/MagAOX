@@ -48,6 +48,9 @@ class stdMotionNode : public fsmNode
     /// Contains the names of any puts which are always on if any are on.
     std::set<std::string> m_alwaysOn;
 
+    /// Contains the names of any puts which are not automatically turned on if they are off.
+    std::set<std::string> m_noAutoOn;
+
     /// The INDI key (device.property) for the switch denoting that this stage should be or should not be tracking
     std::string m_trackingReqKey;
 
@@ -66,11 +69,10 @@ class stdMotionNode : public fsmNode
     /// Flag indicating whether or not the stage is currently tracking (default false).
     bool m_tracking{ false };
 
-
   public:
     /// Only c'tor.  Must be constructed with node name and a parent graph.
-    stdMotionNode( const std::string &name,        /** [in] the name of this node*/
-                   ingr::instGraphXML *parentGraph /** [in] the graph which this node belongs to*/);
+    stdMotionNode( const std::string  &name, /** [in] the name of this node*/
+                   ingr::instGraphXML *parentGraph /** [in] the graph which this node belongs to*/ );
 
     /// Set the device name.  This can only be done once.
     /**
@@ -114,9 +116,8 @@ class stdMotionNode : public fsmNode
 
     const std::string &trackerElement();
 
-
     /// INDI SetProperty callback
-    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
+    virtual int handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
     virtual void togglePutsOn();
 
@@ -125,7 +126,6 @@ class stdMotionNode : public fsmNode
     void loadConfig(
         mx::app::appConfigurator &config /**< [in] the application configurator loaded with this node's options*/ );
 };
-
 
 inline stdMotionNode::stdMotionNode( const std::string &name, ingr::instGraphXML *parentGraph )
     : fsmNode( name, parentGraph )
@@ -248,9 +248,14 @@ inline const std::string &stdMotionNode::trackerElement()
     return m_trackerElement;
 }
 
-inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
+inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
-    fsmNode::handleSetProperty( ipRecv );
+    int rv = fsmNode::handleSetProperty( ipRecv );
+
+    if( rv < 0 )
+    {
+        return rv;
+    }
 
     if( ipRecv.createUniqueKey() == m_trackingReqKey )
     {
@@ -312,7 +317,7 @@ inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
                         ++m_changes;
                     }
 
-                    m_curVal = it.second.getName();
+                    m_curVal    = it.second.getName();
                     nothingIsOn = false;
                 }
             }
@@ -356,6 +361,8 @@ inline void stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
             }
         }
     }
+
+    return 0;
 }
 
 inline void stdMotionNode::togglePutsOn()
@@ -371,18 +378,22 @@ inline void stdMotionNode::togglePutsOn()
         {
             m_curLabel = "tracking";
             m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "tracking" );
+            m_parentGraph->valueExtra( m_node->name(), "state", "tracking" );
             xigNode::togglePutsOn();
         }
         else
         {
             m_curLabel = "not tracking";
             m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "not tracking" );
+            m_parentGraph->valueExtra( m_node->name(), "state", "not tracking" );
             m_parentGraph->stateChange();
         }
     }
     else if( m_state == MagAOX::app::stateCodes::READY )
     {
         m_curLabel = m_curVal;
+
+        m_parentGraph->valueExtra( m_node->name(), "state", m_curLabel );
 
         if( m_presetPutName.size() == 1 ) // There's only one put, it's just on or off with a value
         {
@@ -391,37 +402,108 @@ inline void stdMotionNode::togglePutsOn()
         }
         else // There is more than one put, and which one is on is selected by the value of the switch
         {
-            for( auto s : m_presetPutName )
+            if( m_presetDir == ingr::ioDir::output )
             {
                 ingr::instIOPut *pptr; // We get this pointer using the node accessors
                                        // which throw if there's a nullptr
+
+                // first deal with the single input
                 try
                 {
-                    if( m_presetDir == ingr::ioDir::input )
-                    {
-                        pptr = m_node->input( s );
-                    }
-                    else
-                    {
-                        pptr = m_node->output( s );
-                    }
+                    pptr = m_node->inputs().begin()->second;
                 }
                 catch( ... )
                 {
                     return;
                 }
 
-                if( s == m_curVal || m_alwaysOn.count(s) == 1)
+                // the single node is always on if any are on
+                pptr->enabled( true );
+                pptr->state( ingr::putState::on );
+
+                ingr::putState inst = pptr->state();
+                if( inst != ingr::putState::on )
                 {
-                    pptr->state( ingr::putState::on );
+                    inst = ingr::putState::waiting;
                 }
-                else
+
+                // Now deal with the many
+                for( auto s : m_presetPutName )
                 {
-                    pptr->state( ingr::putState::off );
+                    try
+                    {
+                        pptr = m_node->output( s );
+                    }
+                    catch( ... )
+                    {
+                        return;
+                    }
+
+                    if( s == m_curVal || m_alwaysOn.count( s ) == 1 )
+                    {
+                        pptr->enabled( true );
+                        pptr->state( inst );
+                    }
+                    else
+                    {
+                        pptr->state( ingr::putState::off );
+
+                        if( m_noAutoOn.count( s ) == 1 ) // if we turn it off, we disable it
+                        {
+                            pptr->enabled( false );
+                        }
+                    }
                 }
             }
-            m_parentGraph->stateChange();
+            else // m_presetDir == ingr::ioDir::input )
+            {
+                ingr::instIOPut *pptr; // We get this pointer using the node accessors
+                                       // which throw if there's a nullptr
+
+                // first deal with the single input
+                try
+                {
+                    pptr = m_node->outputs().begin()->second;
+                }
+                catch( ... )
+                {
+                    return;
+                }
+
+                // the single node is always on if any are on
+                pptr->enabled( true );
+                pptr->state( ingr::putState::on );
+
+                // Now deal with the many
+                for( auto s : m_presetPutName )
+                {
+                    try
+                    {
+                        pptr = m_node->input( s );
+                    }
+                    catch( ... )
+                    {
+                        return;
+                    }
+
+                    if( s == m_curVal || m_alwaysOn.count( s ) == 1 )
+                    {
+                        pptr->enabled( true );
+                        pptr->state( ingr::putState::on );
+                    }
+                    else
+                    {
+                        pptr->state( ingr::putState::off );
+
+                        if( m_noAutoOn.count( s ) == 1 ) // if we turn it off, we disable it
+                        {
+                            pptr->enabled( false );
+                        }
+                    }
+                }
+            }
         }
+        m_parentGraph->stateChange();
     }
 
     return;
@@ -438,20 +520,53 @@ inline void stdMotionNode::togglePutsOff()
     {
         m_curLabel = "tracking";
         m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "tracking" );
+        m_parentGraph->valueExtra( m_node->name(), "state", "tracking" );
     }
     else if( m_trackingReq ) // we can only be "not tracking" if tracking is required
     {
         m_curLabel = "not tracking";
         m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "not tracking" );
+        m_parentGraph->valueExtra( m_node->name(), "state", "not tracking" );
     }
     else if( m_presetPutName.size() == 1 ) // otherwise, if we have a single node it's off
     {
         m_curLabel = "off";
         m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "off" );
+        m_parentGraph->valueExtra( m_node->name(), "state", "---" );
     }
-    // We don't change labels if m_presetPutName.size() > 1
+    else
+    {
+        // We don't change labels if m_presetPutName.size() > 1
+        m_parentGraph->valueExtra( m_node->name(), "state", "---" );
+    }
 
-    xigNode::togglePutsOff();
+    // replace xigNode::togglePutsOff() so we can check for always-on
+
+    for( auto &&iput : m_node->inputs() )
+    {
+        if( m_alwaysOn.count( iput.second->name() ) > 0 )
+        {
+            continue;
+        }
+
+        // iput.second->enabled(false);
+        iput.second->state( ingr::putState::off );
+    }
+
+    for( auto &&oput : m_node->outputs() )
+    {
+        if( m_alwaysOn.count( oput.second->name() ) > 0 )
+        {
+            continue;
+        }
+        // oput.second->enabled(false);
+        oput.second->state( ingr::putState::off );
+
+        if( m_noAutoOn.count( oput.second->name() ) == 1 ) // if we turn it off, we disable it
+        {
+            oput.second->enabled( false );
+        }
+    }
 }
 
 inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
@@ -503,15 +618,15 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
     }
 
     std::vector<std::string> alwaysOn;
-    config.configUnused(alwaysOn, mx::app::iniFile::makeKey( name(), "alwaysOn" ));
+    config.configUnused( alwaysOn, mx::app::iniFile::makeKey( name(), "alwaysOn" ) );
     try
     {
-        for(auto & ao : alwaysOn)
+        for( auto &ao : alwaysOn )
         {
-            m_alwaysOn.insert(ao);
+            m_alwaysOn.insert( ao );
         }
     }
-    catch(const std::exception& e)
+    catch( const std::exception &e )
     {
         std::string msg = XIGN_EXCEPTION( "stdMotionNode::loadConfig", "exception from insert in m_alwaysOn" );
         msg += ":";
@@ -519,6 +634,22 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
         throw std::runtime_error( msg );
     }
 
+    std::vector<std::string> noAutoOn;
+    config.configUnused( noAutoOn, mx::app::iniFile::makeKey( name(), "noAutoOn" ) );
+    try
+    {
+        for( auto &ao : noAutoOn )
+        {
+            m_noAutoOn.insert( ao );
+        }
+    }
+    catch( const std::exception &e )
+    {
+        std::string msg = XIGN_EXCEPTION( "stdMotionNode::loadConfig", "exception from insert in m_noAutoOn" );
+        msg += ":";
+        msg += e.what();
+        throw std::runtime_error( msg );
+    }
 
     std::string trackReqKey;
     config.configUnused( trackReqKey, mx::app::iniFile::makeKey( name(), "trackingReqKey" ) );
@@ -529,7 +660,8 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
     // Check if both are set
     if( ( trackReqKey == "" && trackReqEl != "" ) || ( trackReqKey != "" && trackReqEl == "" ) )
     {
-        std::string msg = XIGN_EXCEPTION( "stdMotionNode::loadConfig", "trackingReqKey and trackingReqElement must both be provided" );
+        std::string msg = XIGN_EXCEPTION( "stdMotionNode::loadConfig",
+                                          "trackingReqKey and trackingReqElement must both be provided" );
         throw std::runtime_error( msg );
     }
 
@@ -542,14 +674,16 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
     // Check if both are set
     if( ( trackKey == "" && trackEl != "" ) || ( trackKey != "" && trackEl == "" ) )
     {
-        std::string msg = XIGN_EXCEPTION( "stdMotionNode::loadConfig", "trackingKey and trackingElement must both be provided" );
+        std::string msg =
+            XIGN_EXCEPTION( "stdMotionNode::loadConfig", "trackingKey and trackingElement must both be provided" );
         throw std::runtime_error( msg );
     }
 
     // This will catch the case where one or the other pair was set, but not both
     if( ( trackKey == "" && trackReqKey != "" ) || ( trackKey != "" && trackReqKey == "" ) )
     {
-        std::string msg = XIGN_EXCEPTION( "stdMotionNode::loadConfig", "trackingReqKey and trackerKey must both be provided" );
+        std::string msg =
+            XIGN_EXCEPTION( "stdMotionNode::loadConfig", "trackingReqKey and trackerKey must both be provided" );
         throw std::runtime_error( msg );
     }
 

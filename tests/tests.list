@@ -5,6 +5,7 @@
 ../libMagAOX/app/tests/stateCodes_test
 ../libMagAOX/app/tests/semUtils_test
 ../libMagAOX/app/dev/tests/outletController_test
+../libMagAOX/app/dev/tests/telemeter_test
 ../libMagAOX/app/dev/tests/dev_test
 
 ../libMagAOX/file/tests/fileTimes_test
@@ -73,6 +74,15 @@
 ../apps/userGainCtrl/tests/userGainCtrl_test
 ../apps/w2tcsOffloader/tests/w2tcsOffloader_test
 ../apps/xindiserver/tests/xindiserver_test
+
+../apps/xInstGraph/xigNodes/tests/xigNode_test
+../apps/xInstGraph/xigNodes/tests/fsmNode_test
+../apps/xInstGraph/xigNodes/tests/indiPropNode_test
+../apps/xInstGraph/xigNodes/tests/pwrOnOffNode_test
+../apps/xInstGraph/xigNodes/tests/staticNode_test
+../apps/xInstGraph/xigNodes/tests/stdMotionNode_test
+../apps/xInstGraph/tests/xInstGraph_test
+
 ../apps/xt1121Ctrl/tests/xt1121Ctrl_test
 ../apps/xt1121Ctrl/tests/xtChannels_test
 ../apps/xt1121DCDU/tests/xt1121DCDU_test
