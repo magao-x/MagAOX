@@ -104,13 +104,13 @@ EXTRA_LDFLAGS ?=
 EXTRA_LDLIBS ?=  -lmxlib \
   -ludev \
   -lpthread \
-  -ltelnet \
   -lcfitsio \
   -lxrif \
   -lfftw3 -lfftw3f -lfftw3l \
   -lgsl \
   -lboost_system \
   -lboost_filesystem \
+  $(abspath $(SELF_DIR)/../libs/libtelnet/libtelnet.a) \
   $(abspath \
   $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
   $(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a)
