@@ -210,7 +210,7 @@ void alpaoCtrl::setupConfig()
    config.add("dm.serialNumber", "", "dm.serialNumber", argType::Required, "dm", "serialNumber", false, "string", "The ALPAO serial number used to find the default config directory.");
    config.add("dm.satThresh", "", "dm.satThresh", argType::Required, "dm", "satThresh", false, "string", "Threshold above which to log saturation.");
 
-   DM_SETUP_CONFIG();
+   DM_SETUP_CONFIG(config);
 
 }
 
@@ -265,7 +265,7 @@ int alpaoCtrl::appLogic()
 {
     DM_APP_LOGIC;
 
-    SHMIMMONITORT_APP_LOGIC;
+    SHMIMMONITOR_APP_LOGIC;
 
    if(state()==stateCodes::POWEROFF) return 0;
 
@@ -276,7 +276,9 @@ int alpaoCtrl::appLogic()
          return 0;
       }
 
-      return initDM();
+      state(stateCodes::NOTHOMED);
+      
+      return dmT::initDM();
    }
 
    if(m_nsat > m_satThresh)

@@ -1100,9 +1100,9 @@ int dm<derivedT, realT>::initDM()
 {
     if(derived().state() != stateCodes::NOTHOMED)
     {
-        derivedT::template log<software_error>({__FILE__, __LINE__, errno, rv, "DM is not ready to be initialized"});
-        state(stateCodes::ERROR);
-        return rv;
+        derivedT::template log<software_error>({__FILE__, __LINE__, errno, "DM is not ready to be initialized"});
+        derived().state(stateCodes::ERROR);
+        return -1;
     }
 
     derived().state(stateCodes::HOMING);
@@ -1366,7 +1366,7 @@ int dm<derivedT, realT>::setFlat(bool update)
         return 0;
     }
 
-    if(!(state() == stateCodes::READY || state() == stateCodes::OPERATING))
+    if(!(derived().state() == stateCodes::READY || derived().state() == stateCodes::OPERATING))
     {
         derivedT::template log<text_log>("can not set flat unless DM is READY or OPERATING", logPrio::LOG_WARNING);
         return -1;
@@ -1453,7 +1453,7 @@ int dm<derivedT, realT>::setFlat(bool update)
         derivedT::template log<text_log>("flat set");
     }
 
-    state(stateCodes::OPERATING);
+    derived().state(stateCodes::OPERATING);
 
     return 0;
 }
@@ -1466,7 +1466,7 @@ int dm<derivedT, realT>::zeroFlat()
         return 0;
     }
 
-    if(!(state() == stateCodes::READY || state() == stateCodes::OPERATING))
+    if(!(derived().state() == stateCodes::READY || derived().state() == stateCodes::OPERATING))
     {
         derivedT::template log<text_log>("can not zero flat unless DM is READY or OPERATING", logPrio::LOG_WARNING);
         return -1;
@@ -1517,7 +1517,7 @@ int dm<derivedT, realT>::zeroFlat()
 
     derivedT::template log<text_log>("flat zeroed");
 
-    state(stateCodes::READY);
+    derived().state(stateCodes::READY);
 
     return 0;
 }
@@ -1899,7 +1899,7 @@ int dm<derivedT, realT>::zeroAll(bool nosem)
     // Also cleanup flat and test
     m_flatSet = false;
     derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);
-    state(stateCodes::READY);
+    derived().state(stateCodes::READY);
 
     // Also cleanup flat and test
     m_testSet = false;
