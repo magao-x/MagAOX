@@ -1517,6 +1517,15 @@ int dm<derivedT, realT>::zeroFlat()
 
     derivedT::template log<text_log>("flat zeroed");
 
+    if(derived().zeroDM() < 0)
+    {
+        derivedT::template log<software_error>({__FILE__, __LINE__, "error from zeroDM"});
+    }
+
+    if(clearSat() < 0 )
+    {
+        derivedT::template log<software_error>({__FILE__, __LINE__, "error from clearSat"});
+    }
     derived().state(stateCodes::READY);
 
     return 0;

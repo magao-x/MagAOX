@@ -285,6 +285,8 @@ int bmcCtrl::appLogic()
    if(state()==stateCodes::POWERON)
    {
       sleep(5);
+
+      state(stateCodes::NOTHOMED);
    }
 
    if(m_nsat > m_satThresh)
