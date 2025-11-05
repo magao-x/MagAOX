@@ -1113,7 +1113,7 @@ int dm<derivedT, realT>::initDM()
         return rv;
     }
 
-    derived().state(stateCodes::READY);
+    
 
     return 0;
 }
@@ -1121,7 +1121,10 @@ int dm<derivedT, realT>::initDM()
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::releaseDM()
 {
-    derived().state(stateCodes::NOTHOMED);
+    if(derived().state() != stateCodes::POWEROFF)
+    {
+        derived().state(stateCodes::NOTHOMED);
+    }
 
     int rv;
     if ((rv = derived().releaseDM()) < 0)

@@ -376,6 +376,8 @@ int alpaoCtrl::initDM()
       return log<software_error, -1>({__FILE__, __LINE__, "DM initialization failed.  null pointer."});
    }
 
+   state(stateCodes::READY);
+
    return 0;
 }
 
