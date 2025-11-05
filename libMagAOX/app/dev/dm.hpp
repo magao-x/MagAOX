@@ -52,19 +52,45 @@ constexpr uint8_t ImageStreamTypeCode<double>()
 /** MagAO-X generic deformable mirror controller
   *
   *
-  * The derived class `derivedT` must expose the following interface
-   \code
-
-   \endcode
-  * Each of the above functions should return 0 on success, and -1 on an error.
+  * The derived class `derivedT` must meet the following requirements:
+  * - Must be a MagAOXApp<true>
   *
-  * This class should be declared a friend in the derived class, like so:
-   \code
-    friend class dev::dm<derivedT,realT>;
-   \endcode
+  * - Must be a dev::shmimMonitor<derivedT>
   *
-  * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`, and `udpdateINDI`
-  * functions must be placed in the derived class's functions of the same name.
+  * - Must NOT call dev::shmimMonitor<derivedT>::setupConfog and dev::shmimMonitor<derivedT>::loadConfig.  These are
+  *   handled by this class.
+  *
+  * - Must expose the following interface
+  *   \code
+  *       int initDM();
+  *       int commandDM(void * cmd);
+  *       int zeroDM();
+  *      int releaseDM();
+  *    \endcode
+  *   Each of the above functions should return 0 on success, and -1 on an error.
+  *
+  * - This class must be declared a friend in the derived class, like so:
+  *   \code
+  *       friend class dev::dm<derivedT,realT>;
+  *   \endcode
+  *
+  * - Must contain the following typedef:
+ *   \code
+ *       typedef dev::dm<derivedT, realT> dmT;
+ *   \endcode
+ *
+  * - Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`, and `udpdateINDI`
+  *   functions must be placed in the derived class's functions of the same name. For convenience the
+ *   following macros are defined to provide error checking:
+ *   \code
+ *       DM_SETUP_CONFIG( cfig )
+ *       DM_LOAD_CONFIG( cfig )
+ *       DM_APP_STARTUP
+ *       DM_APP_LOGIC
+ *       DM_UPDATE_INDI
+ *       DM_APP_SHUTDOWN
+ *   \endcode
+ *
   *
   * \ingroup appdev
   */
@@ -235,6 +261,13 @@ public:
     int processImage(void *curr_src,
                      const dev::shmimT &sp);
 
+    /// Calls derived()->initDM()
+    /**
+     * \returns 0 on success
+     * \returns -1 on error from derived()->initDM()
+     */
+    int initDM();
+
     /// Calls derived()->releaseDM() and then 0s all channels and the sat map.
     /** This is called by the relevant INDI callback
      *
@@ -323,7 +356,7 @@ protected:
     IMAGE m_satImageStream;     ///< The ImageStreamIO shared memory buffer for the sat map.
     IMAGE m_satPercImageStream; ///< The ImageStreamIO shared memory buffer for the sat percentage map.
 
-    /// Clear the saturation maps and zero the shared membory.
+    /// Clear the saturation maps and zero the shared memory.
     /**
      * \returns 0 on success
      * \returns -1 on error
@@ -1063,18 +1096,47 @@ int dm<derivedT, realT>::processImage(void *curr_src,
 }
 
 template <class derivedT, typename realT>
+int dm<derivedT, realT>::initDM()
+{
+    if(derived().state() != stateCodes::NOTHOMED)
+    {
+        derivedT::template log<software_error>({__FILE__, __LINE__, errno, rv, "DM is not ready to be initialized"});
+        state(stateCodes::ERROR);
+        return rv;
+    }
+
+    derived().state(stateCodes::HOMING);
+
+    int rv;
+    if ((rv = derived().initDM()) < 0)
+    {
+        derivedT::template log<software_critical>({__FILE__, __LINE__, errno, rv, "Error from initDM"});
+        derived().state(stateCodes::ERROR);
+        return rv;
+    }
+
+    derived().state(stateCodes::READY);
+
+    return 0;
+}
+
+template <class derivedT, typename realT>
 int dm<derivedT, realT>::releaseDM()
 {
+    derived().state(stateCodes::NOTHOMED);
+
     int rv;
     if ((rv = derived().releaseDM()) < 0)
     {
         derivedT::template log<software_critical>({__FILE__, __LINE__, errno, rv, "Error from releaseDM"});
+        derived().state(stateCodes::ERROR);
         return rv;
     }
 
     if ((rv = zeroAll(true)) < 0)
     {
         derivedT::template log<software_error>({__FILE__, __LINE__, errno, rv, "Error from zeroAll"});
+        derived().state(stateCodes::ERROR);
         return rv;
     }
 
@@ -1244,7 +1306,7 @@ int dm<derivedT, realT>::loadFlat(const std::string &intarget)
     if (errc != mx::error_t::noerror)
     {
         derivedT::template log<text_log>(std::format("error reading flat file {}: "
-                                                     "{} ({})", targetPath, mx::errorMessage(errc), 
+                                                     "{} ({})", targetPath, mx::errorMessage(errc),
                                                      mx::errorName(errc)), logPrio::LOG_ERROR);
         return -1;
     }
@@ -1300,7 +1362,15 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::setFlat(bool update)
 {
     if (m_shmimFlat == "")
+    {
         return 0;
+    }
+
+    if(!(state() == stateCodes::READY || state() == stateCodes::OPERATING))
+    {
+        derivedT::template log<text_log>("can not set flat unless DM is READY or OPERATING", logPrio::LOG_WARNING);
+        return -1;
+    }
 
     if (ImageStreamIO_openIm(&m_flatImageStream, m_shmimFlat.c_str()) != 0)
     {
@@ -1383,6 +1453,8 @@ int dm<derivedT, realT>::setFlat(bool update)
         derivedT::template log<text_log>("flat set");
     }
 
+    state(stateCodes::OPERATING);
+
     return 0;
 }
 
@@ -1390,7 +1462,15 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::zeroFlat()
 {
     if (m_shmimFlat == "")
+    {
         return 0;
+    }
+
+    if(!(state() == stateCodes::READY || state() == stateCodes::OPERATING))
+    {
+        derivedT::template log<text_log>("can not zero flat unless DM is READY or OPERATING", logPrio::LOG_WARNING);
+        return -1;
+    }
 
     if (ImageStreamIO_openIm(&m_flatImageStream, m_shmimFlat.c_str()) != 0)
     {
@@ -1436,6 +1516,8 @@ int dm<derivedT, realT>::zeroFlat()
     derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);
 
     derivedT::template log<text_log>("flat zeroed");
+
+    state(stateCodes::READY);
 
     return 0;
 }
@@ -1563,7 +1645,7 @@ int dm<derivedT, realT>::loadTest(const std::string &intarget)
     if ( errc != mx::error_t::noerror)
     {
         derivedT::template log<text_log>(std::format("error reading test file {}: "
-                                                     "{} ({})", targetPath, mx::errorMessage(errc), 
+                                                     "{} ({})", targetPath, mx::errorMessage(errc),
                                                      mx::errorName(errc)), logPrio::LOG_ERROR);
         return -1;
     }
@@ -1817,6 +1899,7 @@ int dm<derivedT, realT>::zeroAll(bool nosem)
     // Also cleanup flat and test
     m_flatSet = false;
     derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);
+    state(stateCodes::READY);
 
     // Also cleanup flat and test
     m_testSet = false;
@@ -1880,6 +1963,7 @@ int dm<derivedT, realT>::clearSat()
 
         imageStream.md->cnt0++;
         imageStream.md->write = 0;
+        ImageStreamIO_sempost(&imageStream, -1);
 
         ImageStreamIO_closeIm(&imageStream);
     }
@@ -1907,8 +1991,11 @@ void dm<derivedT, realT>::satThreadExec()
     {
         sleep(1);
     }
+
     if (derived().shutdown())
+    {
         return;
+    }
 
     uint32_t imsize[3] = {0, 0, 0};
 
@@ -2075,7 +2162,9 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::updateINDI()
 {
     if (!derived().m_indiDriver)
+    {
         return 0;
+    }
 
     return 0;
 }
@@ -2096,12 +2185,19 @@ int dm<derivedT, realT>::newCallBack_init(const pcf::IndiProperty &ipRecv)
     }
 
     if (!ipRecv.find("request"))
+    {
         return 0;
+    }
 
     if (ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
     {
-        return derived().initDM();
+        int rv = initDM();
+        if(rv < 0 )
+        {
+            return derivedT::template log<software_error, -1>({__FILE__, __LINE__, "error from initDM in INDI callback"});
+        }
     }
+
     return 0;
 }
 

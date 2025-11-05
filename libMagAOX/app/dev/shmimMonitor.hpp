@@ -53,7 +53,7 @@ struct shmimT
  *       friend class dev::shmimMonitor<derivedT, specificT>; //specificT may not need to be included
  *   \endcode
  *
- * * - Must contain the following typedef:
+ *  - Must contain the following typedef:
  *   \code
  *       typedef dev::shmimMonitor<derivedT, specificT> shmimMonitorT; //specificT may not need to be included
  *   \endcode

@@ -35,7 +35,7 @@ namespace app
 {
 
 /// The MagAO-X ALPAO DM Controller
-/** 
+/**
   * \ingroup alpaoCtrl
   */
 class alpaoCtrl : public MagAOXApp<true>, public dev::dm<alpaoCtrl,float>, public dev::shmimMonitor<alpaoCtrl>
@@ -43,21 +43,25 @@ class alpaoCtrl : public MagAOXApp<true>, public dev::dm<alpaoCtrl,float>, publi
 
    //Give the test harness access.
    friend class alpaoCtrl_test;
-   
+
    friend class dev::dm<alpaoCtrl,float>;
-   
+
+   typedef dev::dm<alpaoCtrl,float> dmT;
+
    friend class dev::shmimMonitor<alpaoCtrl>;
-   
+
+   typedef dev::shmimMonitor<alpaoCtrl> shmimMonitorT;
+
    typedef float realT;  ///< This defines the datatype used to signal the DM using the ImageStreamIO library.
-   
+
 protected:
 
    /** \name Configurable Parameters
      *@{
      */
-   
+
    std::string m_serialNumber; ///< The ALPAO serial number used to find the default config directory.
-   
+
    long m_satThresh {100} ;///< Threshold above which to log saturation.
 
    ///@}
@@ -91,100 +95,100 @@ public:
    virtual int appStartup();
 
    /// Implementation of the FSM for alpaoCtrl.
-   /** 
+   /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
    virtual int appLogic();
 
    /// Shutdown the app.
-   /** 
+   /**
      *
      */
    virtual int appShutdown();
 
    /// Cleanup after a power off.
    /**
-     */ 
+     */
    virtual int onPowerOff();
-   
+
    /// Maintenace while powered off.
    /**
      */
    virtual int whilePowerOff();
-   
+
    /** \name DM Base Class Interface
      *
      *@{
      */
-   
+
    /// Initialize the DM and prepare for operation.
    /** Application is in state OPERATING upon successful conclusion.
-     * 
-     * \returns 0 on success 
+     *
+     * \returns 0 on success
      * \returns -1 on error
-     */ 
+     */
    int initDM();
-   
+
    /// Zero all commands on the DM
    /** This does not update the shared memory buffer.
-     * 
-     * \returns 0 on success 
+     *
+     * \returns 0 on success
      * \returns -1 on error
      */
    int zeroDM();
-   
+
    /// Send a command to the DM
    /** This is called by the shmim monitoring thread in response to a semaphore trigger.
-     * 
-     * \returns 0 on success 
+     *
+     * \returns 0 on success
      * \returns -1 on error
      */
    int commandDM(void * curr_src);
-   
+
    /// Release the DM, making it safe to turn off power.
    /** The application will be state READY at the conclusion of this.
-     *  
-     * \returns 0 on success 
+     *
+     * \returns 0 on success
      * \returns -1 on error
      */
    int releaseDM();
-   
+
    ///@}
-   
+
    /** \name ALPAO Interface
      * \todo document these members
      *@{
      */
-   
+
 protected:
    Scalar m_max_stroke {0}; ///< The maximum allowable stroke
    Scalar m_volume_factor {0}; ///< the volume factor to convert from displacement to commands
    UInt m_nbAct {0}; ///< The number of actuators
-   
+
    int * m_actuator_mapping {nullptr}; ///< Array containing the mapping from 2D grid position to linear index in the command vector
-   
+
    Scalar * m_dminputs {nullptr}; ///< Pre-allocated command vector, used only in commandDM
-   
+
    asdkDM * m_dm {nullptr}; ///< ALPAO SDK handle for the DM.
-   
+
 public:
-   
+
    /// Parse the ALPAO calibration file
    /** \returns 0 on success
      * \returns -1 on error
-     */  
-   int parse_calibration_file(); 
-   
+     */
+   int parse_calibration_file();
+
    /// Read the actuator mapping from a FITS file
    /**
      * \todo convert this to use mxlib::fitsFile
      *
      * \returns 0 on success
      * \returns -1 on error
-     */ 
+     */
    int get_actuator_mapping();
-   
+
    ///@}
 };
 
@@ -198,38 +202,42 @@ alpaoCtrl::~alpaoCtrl() noexcept
 {
    if(m_actuator_mapping) free(m_actuator_mapping);
    if(m_dminputs) free(m_dminputs);
-   
-}   
-   
+
+}
+
 void alpaoCtrl::setupConfig()
 {
    config.add("dm.serialNumber", "", "dm.serialNumber", argType::Required, "dm", "serialNumber", false, "string", "The ALPAO serial number used to find the default config directory.");
    config.add("dm.satThresh", "", "dm.satThresh", argType::Required, "dm", "satThresh", false, "string", "Threshold above which to log saturation.");
 
-   dev::dm<alpaoCtrl,float>::setupConfig(config);
-   
+   DM_SETUP_CONFIG();
+
 }
 
 int alpaoCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 {
-   config(m_serialNumber, "dm.serialNumber");
-   config(m_satThresh, "dm.satThresh");
+   _config(m_serialNumber, "dm.serialNumber");
+   _config(m_satThresh, "dm.satThresh");
 
    m_calibRelDir = "dm/alpao_";
-   
+
    std::string ser = mx::ioutils::toLower(m_serialNumber);
-   
+
    m_calibRelDir += ser;
-   dev::dm<alpaoCtrl,float>::loadConfig(_config);
-   
+
+   DM_LOAD_CONFIG(_config);
+
    return 0;
 }
 
 void alpaoCtrl::loadConfig()
 {
-   loadConfigImpl(config);
-   
-   
+   if(loadConfigImpl(config))
+   {
+    log<software_error>({__FILE__,__LINE__, "error loading config"});
+        m_shutdown = 1;
+   }
+
 }
 
 int alpaoCtrl::appStartup()
@@ -239,54 +247,58 @@ int alpaoCtrl::appStartup()
       log<software_critical>({__FILE__,__LINE__});
       return -1;
    }
-   
+
    if(m_max_stroke == 0 || m_volume_factor == 0)
    {
       log<software_critical>({__FILE__,__LINE__, "calibration not loaded properly"});
       return -1;
    }
-   
-   dev::dm<alpaoCtrl,float>::appStartup();
-   shmimMonitor<alpaoCtrl>::appStartup();
-   
+
+   DM_APP_STARTUP;
+
+   SHMIMMONITOR_APP_STARTUP;
+
    return 0;
 }
 
 int alpaoCtrl::appLogic()
 {
-   dev::dm<alpaoCtrl,float>::appLogic();
-   shmimMonitor<alpaoCtrl>::appLogic();
-   
+    DM_APP_LOGIC;
+
+    SHMIMMONITORT_APP_LOGIC;
+
    if(state()==stateCodes::POWEROFF) return 0;
-   
+
    if(state() == stateCodes::POWERON)
    {
-      if(!powerOnWaitElapsed()) 
+      if(!powerOnWaitElapsed())
       {
          return 0;
       }
-      
+
       return initDM();
    }
-   
+
    if(m_nsat > m_satThresh)
    {
       log<text_log>("Saturated actuators in last second: " + std::to_string(m_nsat), logPrio::LOG_WARNING);
    }
    m_nsat = 0;
-   
+
+   DM_UPDATE_INDI;
+   SHMIMMONITOR_UPDATE_INDI;
+
    return 0;
 }
 
 int alpaoCtrl::appShutdown()
 {
    if(m_dm) releaseDM();
-      
-   dev::dm<alpaoCtrl,float>::appShutdown();
-   shmimMonitor<alpaoCtrl>::appShutdown();
-   
 
-   
+   DM_APP_SHUTDOWN;
+
+   SHMIMMONITOR_APP_SHUTDOWN;
+
    return 0;
 }
 
@@ -307,10 +319,10 @@ int alpaoCtrl::initDM()
       log<text_log>("DM is already initialized.  Release first.", logPrio::LOG_ERROR);
       return -1;
    }
-   
+
    std::string ser = mx::ioutils::toUpper(m_serialNumber);
    m_dm = asdkInit(ser.c_str());
-   
+
    acs::UInt aerr = 0;
    asdkGetLastError(&aerr, nullptr, 0);
    if(aerr)
@@ -318,18 +330,17 @@ int alpaoCtrl::initDM()
       char err[1024];
       asdkGetLastError(&aerr, err, sizeof(err));
       log<software_error>({__FILE__, __LINE__, std::string("DM initialization failed: ") + err});
-      
       m_dm = nullptr;
       return -1;
    }
-   
+
    if (m_dm == NULL)
    {
       char err[1024];
       asdkGetLastError(&aerr, err, sizeof(err));
       return log<software_error, -1>({__FILE__, __LINE__, std::string("DM initialization failed.  NULL pointer: ") + err});
    }
-   
+
    log<text_log>("ALPAO " + m_serialNumber + " initialized", logPrio::LOG_NOTICE);
 
    // Get number of actuators
@@ -341,19 +352,19 @@ int alpaoCtrl::initDM()
       return log<software_error, -1>({__FILE__, __LINE__, std::string("Getting number of actuators failed: ") + err});
    }
    m_nbAct = tmp;
-   
+
    if(m_dminputs) free(m_dminputs);
    m_dminputs = (Scalar*) calloc( m_nbAct, sizeof( Scalar ) );
-   
+
    if(zeroDM() < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__, "DM initialization failed.  Error zeroing DM."});
    }
-   
+
    /* get actuator mapping from 2D cacao image to 1D vector for ALPAO input */
    if(m_actuator_mapping) free(m_actuator_mapping);
    m_actuator_mapping = (int *) malloc(m_nbAct * sizeof(int)); /* memory for actuator mapping */
-   
+
    if(get_actuator_mapping() < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__, "DM initialization failed.  Failed to get actuator mapping."});
@@ -363,9 +374,7 @@ int alpaoCtrl::initDM()
    {
       return log<software_error, -1>({__FILE__, __LINE__, "DM initialization failed.  null pointer."});
    }
-   
-   state(stateCodes::OPERATING);
-   
+
    return 0;
 }
 
@@ -375,14 +384,14 @@ int alpaoCtrl::zeroDM()
    {
       return log<software_error, -1>({__FILE__, __LINE__, "DM not initialized (NULL pointer)"});
    }
-   
+
    if(m_nbAct == 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__, "DM not initialized (number of actuators)"});
    }
 
    Scalar * dminputs = (Scalar*) calloc( m_nbAct, sizeof( Scalar ) );
-   
+
    /* Send the all 0 command to the DM */
    int ret = asdkSend(m_dm, dminputs);
 
@@ -397,7 +406,7 @@ int alpaoCtrl::zeroDM()
 
       return log<software_error,-1>({__FILE__, __LINE__, std::string("Error zeroing DM: ") + err});
    }
-   
+
    log<text_log>("DM zeroed");
    return 0;
 }
@@ -407,7 +416,7 @@ int alpaoCtrl::commandDM(void * curr_src)
    COMPL_STAT ret;
 
    //This is based on Kyle Van Gorkoms original sendCommand function.
-   
+
    /*This loop performs the following steps:
      1) converts from float to double (ALPAO Scalar)
      2) convert to volume-normalized displacement (microns)
@@ -422,7 +431,7 @@ int alpaoCtrl::commandDM(void * curr_src)
    }
    mean /= m_nbAct;
 
-   /*This loop performas the following steps:
+   /*This loop performs the following steps:
       1) remove mean from each actuator input
       2) clip to fractional values between -1 and 1.
          The ALPAO SDK doesn't seem to check for this, which
@@ -441,7 +450,7 @@ int alpaoCtrl::commandDM(void * curr_src)
          m_dminputs[idx] = - 1;
       }
    }
-    
+
    /* Finally, send the command to the DM */
    ret = asdkSend(m_dm, m_dminputs);
 
@@ -457,9 +466,9 @@ int alpaoCtrl::commandDM(void * curr_src)
          m_instSatMap.data()[m_actuator_mapping[idx]] = 0;
       }
    }
-   
+
    return ret;
-    
+
 }
 
 int alpaoCtrl::releaseDM()
@@ -470,35 +479,33 @@ int alpaoCtrl::releaseDM()
    {
       return 0;
    }
-   
-   state(stateCodes::READY);
-   
+
    if(!shutdown())
    {
       pthread_kill(m_smThread.native_handle(), SIGUSR1);
    }
-   
+
    sleep(1);
-   
+
    if(zeroDM() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__, "DM release failed.  Error zeroing DM."});
    }
-   
+
    // Reset and release ALPAO
    asdkReset(m_dm);
-    
+
    acs::UInt aerr = 0;
    asdkGetLastError(&aerr, nullptr, 0);
    if(aerr)
    {
       char err[1024];
       asdkGetLastError(&aerr, err, sizeof(err));
-      return log<software_error,-1>({__FILE__, __LINE__, std::string("DM reset failed: ") + err}); 
+      return log<software_error,-1>({__FILE__, __LINE__, std::string("DM reset failed: ") + err});
    }
-   
+
    asdkRelease(m_dm); ///\todo error check
-   
+
    aerr = 0;
    asdkGetLastError(&aerr, nullptr, 0);
    if(aerr)
@@ -509,9 +516,9 @@ int alpaoCtrl::releaseDM()
    }
 
    m_dm = nullptr;
-   
+
    log<text_log>("ALPAO " + m_serialNumber + " reset and released", logPrio::LOG_NOTICE);
-   
+
    return 0;
 }
 
@@ -528,9 +535,9 @@ int alpaoCtrl::parse_calibration_file() //const char * serial, Scalar *max_strok
     Scalar * calibvals;
 
     std::string ser = mx::ioutils::toLower(m_serialNumber);
-    
+
     std::string calibpath = m_calibPath + "/" + ser + "_userconfig.txt";
-    
+
     // open file
     fp = fopen(calibpath.c_str(), "r");
     if (fp == NULL)
@@ -554,7 +561,7 @@ int alpaoCtrl::parse_calibration_file() //const char * serial, Scalar *max_strok
     m_volume_factor = calibvals[1];
 
     free(calibvals);
-    
+
     log<text_log>("ALPAO " + m_serialNumber + ": Using stroke and volume calibration from " + calibpath);
     std::cerr << m_max_stroke << " " << m_volume_factor << "\n";
     return 0;
@@ -567,20 +574,20 @@ int alpaoCtrl::get_actuator_mapping() //const char * serial, int nbAct, int * ac
 
     fitsfile *fptr;  /* FITS file pointer */
     int status = 0;  /* CFITSIO status value MUST be initialized to zero! */
-    
-    
+
+
 
     // get file path to actuator map
     std::string ser = mx::ioutils::toLower(m_serialNumber);
-    
+
     std::string calibpath = m_calibPath + "/" + ser + "_actuator_mapping.fits";
-    
+
     if ( !fits_open_image(&fptr, calibpath.c_str(), READONLY, &status) )
     {
       int hdutype, naxis;
-      long naxes[2];   
-       
-      if (fits_get_hdu_type(fptr, &hdutype, &status) || hdutype != IMAGE_HDU) { 
+      long naxes[2];
+
+      if (fits_get_hdu_type(fptr, &hdutype, &status) || hdutype != IMAGE_HDU) {
         printf("Error: this program only works on images, not tables\n");
         return(1);
       }
@@ -588,7 +595,7 @@ int alpaoCtrl::get_actuator_mapping() //const char * serial, int nbAct, int * ac
       fits_get_img_dim(fptr, &naxis, &status);
       fits_get_img_size(fptr, 2, naxes, &status);
 
-      if (status || naxis != 2) { 
+      if (status || naxis != 2) {
         printf("Error: NAXIS = %d.  Only 2-D images are supported.\n", naxis);
         return(1);
       }
@@ -607,7 +614,7 @@ int alpaoCtrl::get_actuator_mapping() //const char * serial, int nbAct, int * ac
       /* process image one row at a time; increment row # in each loop */
       int ij = 0;/* actuator mapping index */
       for (fpixel[1] = naxes[1]; fpixel[1] >= 1; fpixel[1]--)
-      {  
+      {
          /* give starting pixel coordinate and number of pixels to read */
          if (fits_read_pix(fptr, TINT, fpixel, naxes[0],0, pix,0, &status))
             break;   /* jump out of loop on error */
@@ -621,7 +628,7 @@ int alpaoCtrl::get_actuator_mapping() //const char * serial, int nbAct, int * ac
          }
       }
       fits_close_file(fptr, &status);
-      
+
       free(pix);
     }
 
@@ -629,7 +636,7 @@ int alpaoCtrl::get_actuator_mapping() //const char * serial, int nbAct, int * ac
         fits_report_error(stderr, status); /* print any error message */
     }
 
-    
+
 
     log<text_log>("ALPAO " + m_serialNumber + ": Using actuator mapping from " + calibpath);
     return 0;
