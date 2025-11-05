@@ -16,8 +16,6 @@
 
 #include "shmimMonitor.hpp"
 
-#include "../../ImageStreamIO/ImageStruct.hpp"
-
 namespace MagAOX
 {
 namespace app
