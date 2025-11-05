@@ -156,7 +156,7 @@ class CamHam(XDevice):
                 #self.temp_status = self.cam.prop_getvalue(DCAM_IDPROP.SENSORTEMPERATURE_STATUS) # This one works
                 self.temp_status = self.cam.prop_getvalue(DCAM_IDPROP.SENSORCOOLERSTATUS) # Testing <- this is also working
                 self.log.info(f"TEMP STATUS: {self.temp_status}")
-                self.fan_status = self.cam.prop_getvalue(DCAM_IDPROP.SENSORCOOLER) # Testing this / not working
+                #self.fan_status = self.cam.prop_getvalue(DCAM_IDPROP.SENSORCOOLER) # Testing this / not working
                 self.log.info(f"SENSORCOOLER: {self.fan_status}")
                 #self.lasterr = self.cam.lasterr()
                 #self.log.info(f"LAST DCAM ERROR: {self.lasterr}")
@@ -176,10 +176,10 @@ class CamHam(XDevice):
                 self.log.info(output)
 
                 # quick test of fan on/off here
-                self.cam.prop_setvalue(DCAM_IDPROP.SENSORCOOLER, DCAMPROP.SENSORCOOLER.OFF)
+                #self.cam.prop_setvalue(DCAM_IDPROP.SENSORCOOLER, DCAMPROP.SENSORCOOLER.OFF)
 
-                fanmode = self.cam.prop_getvalue(DCAM_IDPROP.SENSORCOOLER)
-                self.log.info(f'Fan mode is {fanmode}???')
+                #fanmode = self.cam.prop_getvalue(DCAM_IDPROP.SENSORCOOLER)
+                #self.log.info(f'Fan mode is {fanmode}???')
                 #self.log.info(f'Failed with error: {self.cam.lasterr().name}')     
 
                 # testing this being here instead
@@ -608,7 +608,7 @@ class CamHam(XDevice):
             self.fan_status = self.cam.prop_getvalue(DCAM_IDPROP.SENSORCOOLER)
             #cooler = dcamcon.get_propertyvalue(SENSORCOOLER)
             self.log.info(f"In check fan: {cooler}")
-            if cooler == False:
+            if not cooler:
                 self.log.info("ISSUES WITH GRABBING SENSORCOOLER!")
             elif cooler == DCAMPROP.SENSORCOOLER.ON:
                 self.log.info("Cooler is on")
@@ -634,7 +634,7 @@ class CamHam(XDevice):
         ## Need to turn off subarray before modifying
         self.pause_stream()
         subarray = self.check_subarray()
-        if subarray == True:
+        if subarray:
             self.switch_subarray()
 
         if 'target' in new_message and new_message['target'] != existing_property['current']:
@@ -677,7 +677,7 @@ class CamHam(XDevice):
         ## Need to turn off subarray before modifying
         self.pause_stream()
         subarray = self.check_subarray()
-        if subarray == True:
+        if subarray:
             self.switch_subarray()
 
         self.log.debug(f"Setting hsize (width)")
@@ -717,7 +717,7 @@ class CamHam(XDevice):
         ## Need to turn off subarray before modifying
         self.pause_stream()
         subarray = self.check_subarray()
-        if subarray == True:
+        if subarray:
             self.switch_subarray()
 
         self.log.info(f"Setting vpos (y position)")
@@ -757,7 +757,7 @@ class CamHam(XDevice):
         ## Need to turn off subarray before modifying
         self.pause_stream()
         subarray = self.check_subarray()
-        if subarray == True:
+        if subarray:
             self.switch_subarray()
 
         self.log.debug(f"Setting vsize (height)")
@@ -1075,11 +1075,12 @@ class CamHam(XDevice):
             self.log.info(f'Went to an actual exposure time of {exptime_actual}')
             if exptime_requested != exptime_actual:
                 self.log.info(f"Exposure time request does not = exptime actual.")
-            else:
-                existing_property['current'] = new_message['target']
-                existing_property['target'] = new_message['target']
-                self.exptime = exptime_actual
-                self.update_property(existing_property)
+            # FIXME: Should write this better
+            # Testing if this improves the delay Adi is seeing for this
+            existing_property['current'] = new_message[exptime_actual]
+            existing_property['target'] = new_message[exptime_actual]
+            self.exptime = exptime_actual
+            self.update_property(existing_property)
         self.start_stream()
 
     def loop(self):
