@@ -127,6 +127,8 @@ class shmimMonitor
     bool m_getExistingFirst{ false }; ///< If set to true by derivedT, any existing image will be grabbed and sent to
                                       ///< processImage before waiting on the semaphore.
 
+    stateCodes::stateCodeT m_targetState {stateCodes::OPERATING};
+
     shmimMonitorState m_smState{ shmimMonitorState::init };
 
     int m_semaphoreNumber{ 5 }; ///< The image structure semaphore index.
@@ -524,14 +526,16 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
     {
         m_smState = shmimMonitorState::init;
 
-        while( ( derived().state() != stateCodes::OPERATING || m_shmimName == "" ) && !derived().shutdown() &&
+        while( ( derived().state() != m_targetState || m_shmimName == "" ) && !derived().shutdown() &&
                !m_restart )
         {
             sleep( 1 );
         }
 
         if( derived().shutdown() )
+        {
             return;
+        }
 
         /* Initialize ImageStreamIO
          */
@@ -540,7 +544,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
         m_restart = false; // Set this up front, since we're about to restart.
 
         int logged = 0;
-        while( !opened && !derived().m_shutdown && !m_restart && derived().state() == stateCodes::OPERATING )
+        while( !opened && !derived().m_shutdown && !m_restart && derived().state() == m_targetState )
         {
             // b/c ImageStreamIO prints every single time, and latest version don't support stopping it yet, and that
             // isn't thread-safe-able anyway we do our own checks.  This is the same code in ImageStreamIO_openIm...
@@ -608,7 +612,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             continue;
         }
 
-        if( derived().state() != stateCodes::OPERATING )
+        if( derived().state() != m_targetState )
         {
             continue;
         }
@@ -727,7 +731,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
         }
 
         // This is the main image grabbing loop.
-        while( derived().shutdown() == 0 && !m_restart && derived().state() == stateCodes::OPERATING )
+        while( derived().shutdown() == 0 && !m_restart && derived().state() == m_targetState )
         {
 
             timespec ts;
@@ -773,8 +777,10 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
                     break; // exit the nearest while loop and get the new image setup.
                 }
 
-                if( derived().shutdown() != 0 || m_restart || derived().state() != stateCodes::OPERATING )
+                if( derived().shutdown() != 0 || m_restart || derived().state() != m_targetState )
+                {
                     break; // Check for exit signals
+                }
 
                 char *curr_src = (char *)m_imageStream.array.raw + curr_image * m_width * m_height * m_typeSize;
 

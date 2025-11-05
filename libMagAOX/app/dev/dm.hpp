@@ -9,12 +9,6 @@
 #ifndef dm_hpp
 #define dm_hpp
 
-/** Tests
- \todo test that restarting fpsCtrl doesn't scram this
- */
-
-//#define XWC_DMTIMINGS
-
 #include <mx/improc/eigenImage.hpp>
 #include <mx/ioutils/fits/fitsFile.hpp>
 
@@ -163,6 +157,10 @@ protected:
     bool m_intervalSatTrip{0};   // flag to trip the loop opening
 
 public:
+
+    
+        
+
     /// Setup the configuration system
     /**
       * This should be called in `derivedT::setupConfig` as
@@ -721,6 +719,8 @@ int dm<derivedT, realT>::loadConfig(mx::app::appConfigurator &config)
     config(m_satTriggerDevice, "dm.satTriggerDevice");
     config(m_satTriggerProperty, "dm.satTriggerProperty");
 
+    derived().m_getExistingFirst = true;
+    
     return 0;
 }
 
@@ -1439,12 +1439,15 @@ int dm<derivedT, realT>::setFlat(bool update)
 
     m_flatImageStream.md->cnt0++;
     m_flatImageStream.md->write = 0;
+
+    // Post the semaphores
     ImageStreamIO_sempost(&m_flatImageStream, -1);
 
     m_flatSet = true;
 
-    // Post the semaphore
     ImageStreamIO_closeIm(&m_flatImageStream);
+
+    derived().state(stateCodes::OPERATING);
 
     if (!update)
     {
@@ -1453,7 +1456,6 @@ int dm<derivedT, realT>::setFlat(bool update)
         derivedT::template log<text_log>("flat set");
     }
 
-    derived().state(stateCodes::OPERATING);
 
     return 0;
 }
@@ -1887,7 +1889,9 @@ int dm<derivedT, realT>::zeroAll(bool nosem)
 
         // Raise the semaphore on last one.
         if (n == m_channels - 1 && !nosem)
+        {
             ImageStreamIO_sempost(&imageStream, -1);
+        }
 
         ImageStreamIO_closeIm(&imageStream);
     }
@@ -1899,8 +1903,11 @@ int dm<derivedT, realT>::zeroAll(bool nosem)
     // Also cleanup flat and test
     m_flatSet = false;
     derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);
-    derived().state(stateCodes::READY);
-
+    if(derived().state() == stateCodes::OPERATING)
+    {
+        derived().state(stateCodes::READY);
+    }
+    
     // Also cleanup flat and test
     m_testSet = false;
     derived().updateSwitchIfChanged(m_indiP_setTest, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);

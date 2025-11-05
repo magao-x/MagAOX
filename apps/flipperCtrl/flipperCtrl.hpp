@@ -468,7 +468,7 @@ int flipperCtrl::recordStage( bool force )
       std::string ps = "in";
       if(m_pos == m_outPos) ps = "out";
       
-      telem<telem_stage>({ (int8_t) moving, (double) m_pos, ps});
+      telem<telem_stage>({ (int8_t) moving, m_pos, ps});
       
       last_pos = m_pos;
       last_moving = moving;

@@ -285,8 +285,6 @@ int bmcCtrl::appLogic()
    if(state()==stateCodes::POWERON)
    {
       sleep(5);
-      std::cerr << "initing DM" << std::endl;
-      return initDM();
    }
 
    if(m_nsat > m_satThresh)

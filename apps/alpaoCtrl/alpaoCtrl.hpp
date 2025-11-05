@@ -277,8 +277,7 @@ int alpaoCtrl::appLogic()
       }
 
       state(stateCodes::NOTHOMED);
-      
-      return dmT::initDM();
+
    }
 
    if(m_nsat > m_satThresh)
@@ -319,7 +318,7 @@ int alpaoCtrl::initDM()
    if(m_dm != nullptr)
    {
       log<text_log>("DM is already initialized.  Release first.", logPrio::LOG_ERROR);
-      return -1;
+      return 0;
    }
 
    std::string ser = mx::ioutils::toUpper(m_serialNumber);
