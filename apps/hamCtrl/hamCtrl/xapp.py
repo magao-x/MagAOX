@@ -60,6 +60,7 @@ class CamHamConfig(BaseConfig):
     vpos : float = xconf.field(default=0.0, help='y center pixel of window (software)')
     hsize : float = xconf.field(default=4096.0, help='Window width (software)')
     vsize : float = xconf.field(default=2304.0, help='Window height (software)')
+    readout : float = xconf.field(default=2.0, help='Readout Speed')
 
     #camera_stream(dpath='/dev/video2', exptime=args.exptime, gain=args.gain,
                   #window=(args.x0, args.y0, args.width, args.height))"""
@@ -93,6 +94,7 @@ class CamHam(XDevice):
     camstream : Optional[ImageStream] = None
     fan_status : Optional[float] = None # Testing
     protect_status : Optional[float] = None # Testing
+    readout : Optional[float] = None # Testing
     #lasterr = None
     th = threading.Thread()
 
@@ -154,7 +156,7 @@ class CamHam(XDevice):
                 #self.temp_status = self.cam.prop_getvalue(DCAM_IDPROP.SENSORTEMPERATURE_STATUS) # This one works
                 self.temp_status = self.cam.prop_getvalue(DCAM_IDPROP.SENSORCOOLERSTATUS) # Testing <- this is also working
                 self.log.info(f"TEMP STATUS: {self.temp_status}")
-                self.fan_status = self.cam.prop_getvalue(DCAM_IDPROP.SENSORCOOLER) # Testing this / not working
+                #self.fan_status = self.cam.prop_getvalue(DCAM_IDPROP.SENSORCOOLER) # Testing this / not working
                 self.log.info(f"SENSORCOOLER: {self.fan_status}")
                 #self.lasterr = self.cam.lasterr()
                 #self.log.info(f"LAST DCAM ERROR: {self.lasterr}")
@@ -164,7 +166,9 @@ class CamHam(XDevice):
                 self.log.info(f"Width: {self.width}")
                 self.height = int(self.cam.prop_getvalue(DCAM_IDPROP.IMAGE_HEIGHT))
                 self.log.info(f"HEIGHT: {self.height}")
-
+                self.readout = self.cam.prop_getvalue(DCAM_IDPROP.READOUTSPEED)
+                self.log.info(f"READOUTSPEED SETTING: {self.readout}, (1 = Ultra Quiet Scan, 2 = Standard Scan, 3 = Fast Scan)")
+                
                 model = self.cam.dev_getstring(DCAM_IDSTR.MODEL)
                 output = 'MODEL={}'.format(model)
                 cameraid = self.cam.dev_getstring(DCAM_IDSTR.CAMERAID)
@@ -172,10 +176,10 @@ class CamHam(XDevice):
                 self.log.info(output)
 
                 # quick test of fan on/off here
-                self.cam.prop_setvalue(DCAM_IDPROP.SENSORCOOLER, DCAMPROP.SENSORCOOLER.OFF)
+                #self.cam.prop_setvalue(DCAM_IDPROP.SENSORCOOLER, DCAMPROP.SENSORCOOLER.OFF)
 
-                fanmode = self.cam.prop_getvalue(DCAM_IDPROP.SENSORCOOLER)
-                self.log.info(f'Fan mode is {fanmode}???')
+                #fanmode = self.cam.prop_getvalue(DCAM_IDPROP.SENSORCOOLER)
+                #self.log.info(f'Fan mode is {fanmode}???')
                 #self.log.info(f'Failed with error: {self.cam.lasterr().name}')     
 
                 # testing this being here instead
@@ -324,6 +328,19 @@ class CamHam(XDevice):
         ))
         self.add_property(nv, callback=self.set_temp)
 
+        # Camera Mode -----------------------------------------------------------------------
+        # Testing switching camera modes / readout speeds
+        nv = properties.NumberVector(name='', perm=constants.PropertyPerm.READ_WRITE)
+        nv.add_element(DefNumber(
+            name='current', label='Readout Speed', format='%3.1f',
+            min=1, max=3, step=1, _value=self.readout
+        ))
+        nv.add_element(DefNumber(
+            name='target', label='Requested Readout Speed', format='%3.1f',
+            min=-1, max=3, step=1, _value=self.readout
+        ))
+        self.add_property(nv, callback=self.set_readout)
+
         # Temp Status -----------------------------------------------------------------------
         # Testing changing format- previous %d -> Changing to textvector?
         nv = properties.NumberVector(name='temp_status', perm=constants.PropertyPerm.READ_WRITE)
@@ -407,6 +424,7 @@ class CamHam(XDevice):
         self.frame_rate = self.cam.prop_getvalue(DCAM_IDPROP.INTERNALFRAMERATE)
         self.width = int(self.cam.prop_getvalue(DCAM_IDPROP.IMAGE_WIDTH))
         self.height = int(self.cam.prop_getvalue(DCAM_IDPROP.IMAGE_HEIGHT))
+        self.readout = self.cam.prop_getvalue(DCAM_IDPROP.READOUTSPEED)
         # gain = {self.gain}
         self.log.debug(f"Read from camera: exptime = {self.exptime}, hsize = {self.hsize}, vsize = {self.vsize}, hpos = {self.hpos}, vpos = {self.vpos}")
 
@@ -439,6 +457,10 @@ class CamHam(XDevice):
         #self.properties['gain']['current'] = self.gain
         #self.properties['gain']['target'] = self.gain
         #self.update_property(self.properties['gain'])
+
+        self.properties['readout']['current'] = self.readout
+        self.properties['readout']['target'] = self.readout
+        self.update_property(self.properties['readout'])
 
         self.properties['binning']['current'] = self.binning
         self.properties['binning']['target'] = self.binning
@@ -586,7 +608,7 @@ class CamHam(XDevice):
             self.fan_status = self.cam.prop_getvalue(DCAM_IDPROP.SENSORCOOLER)
             #cooler = dcamcon.get_propertyvalue(SENSORCOOLER)
             self.log.info(f"In check fan: {cooler}")
-            if cooler == False:
+            if not cooler:
                 self.log.info("ISSUES WITH GRABBING SENSORCOOLER!")
             elif cooler == DCAMPROP.SENSORCOOLER.ON:
                 self.log.info("Cooler is on")
@@ -612,7 +634,7 @@ class CamHam(XDevice):
         ## Need to turn off subarray before modifying
         self.pause_stream()
         subarray = self.check_subarray()
-        if subarray == True:
+        if subarray:
             self.switch_subarray()
 
         if 'target' in new_message and new_message['target'] != existing_property['current']:
@@ -655,7 +677,7 @@ class CamHam(XDevice):
         ## Need to turn off subarray before modifying
         self.pause_stream()
         subarray = self.check_subarray()
-        if subarray == True:
+        if subarray:
             self.switch_subarray()
 
         self.log.debug(f"Setting hsize (width)")
@@ -695,7 +717,7 @@ class CamHam(XDevice):
         ## Need to turn off subarray before modifying
         self.pause_stream()
         subarray = self.check_subarray()
-        if subarray == True:
+        if subarray:
             self.switch_subarray()
 
         self.log.info(f"Setting vpos (y position)")
@@ -735,7 +757,7 @@ class CamHam(XDevice):
         ## Need to turn off subarray before modifying
         self.pause_stream()
         subarray = self.check_subarray()
-        if subarray == True:
+        if subarray:
             self.switch_subarray()
 
         self.log.debug(f"Setting vsize (height)")
@@ -798,6 +820,43 @@ class CamHam(XDevice):
             self.log.info(f"Target requested is equal to current set value for binning")
         self.start_stream()
 
+    def set_readout(self, existing_property, new_message):
+        """
+        Available Readout Speed Options:
+            [1]- Ultra Quiet Scan
+            [2]- Standard Scan
+            [3]- Fast Scan
+        """
+        self.pause_stream()
+        self.log.debug(f"Setting Readout speed. Warning- Readout speed can only be changed if sensormode is set to 'AREA' (default).")
+
+        if 'target' in new_message and new_message['target'] != existing_property['current']:
+            if self.cam is None:
+                self.log.debug('-NG: Dcamcon is not opened')
+                return False
+            # prop_setvalue(self, idprop: DCAM_IDPROP, fValue)
+            sensormode = self.get_sensormode()
+            self.log.debug(f"Checking sensor mode before switching readout speed...")
+            if sensormode == "area":
+                self.log.debug(f"Sensormode is area / readout speed can be changed")
+                readout_requested = float(new_message['target'])
+                self.log.info(f'Setting readout speed to {readout_requested}')                
+                self.cam.prop_setvalue(DCAM_IDPROP.BINNING, readout_requested)
+                readout_actual = self.cam.prop_getvalue(DCAM_IDPROP.READOUTSPEED)
+                self.log.info(f'Went to a readout speed of {readout_actual}')
+                if readout_requested != readout_actual:
+                    self.log.info(f"Readout speed request does not = actual readout mode.")
+                else:
+                    existing_property['current'] = new_message['target']
+                    existing_property['target'] = new_message['target']
+                    self.readout = readout_actual
+                    self.update_property(existing_property)
+            else:
+                self.log.debug(f"Sensormode is set to progressive. Readout speed cannot be changed until sensormode is changed to area.")
+        else:
+            self.log.info(f"Target requested is equal to current set value for readout speed")
+        self.start_stream()
+
 
     # Might remove / probably don't need to have this like this.
     def check_subarray(self):
@@ -821,6 +880,29 @@ class CamHam(XDevice):
             # Error happened
             self.log.info(f"Issues with detecting subarraymode")
             return False
+        
+    # Testing this with readoutspeed
+    def get_sensormode(self):
+        """
+        Options:
+            DCAM_IDPROP_SENSORMODE_AREA
+            DCAM_IDPROP_SENSORMODE_PROGRESSIVE
+            Default- DCAM_IDPROP_SENSORMODE_AREA
+        """
+
+        sensormode = self.cam.prop_getvalue(DCAM_IDPROP.SENSORMODE)
+        self.log.info(f"In sensor mode check: {sensormode}")
+
+        if sensormode == DCAMPROP.SENSORMODE.AREA:
+            self.log.info(f"DCAMPROP.PROGRESSIVE mode is on")
+            return "area"
+        elif sensormode == DCAMPROP.SENSORMODE.PROGRESSIVE:
+            self.log.info(f"DCAMPROP.PROGRESSIVE mode is on")
+            return "progressive"
+        else:
+            # Error happened
+            self.log.info(f"Issues with detecting sensor mode information")
+            return False
     
     def switch_subarray(self):
         """
@@ -832,19 +914,19 @@ class CamHam(XDevice):
         """
         initialmode = self.check_subarray()
 
-        if initialmode == True:
+        if initialmode:
             self.cam.prop_setvalue(DCAM_IDPROP.SUBARRAYMODE, 1.0)
             newmode = self.check_subarray()
-            if newmode == False:
+            if not newmode:
                 self.log.info(f"Successfully changed to ROI mode / Subarraymode")
                 return True
             else:
                 self.log.info(f"Issues with changing subarraymode off")
                 return False
-        elif initialmode == False:
+        elif not initialmode:
             self.cam.prop_setvalue(DCAM_IDPROP.SUBARRAYMODE, 2.0)
             newmode = self.check_subarray()
-            if newmode == True:
+            if newmode:
                 self.log.info(f"Successfully changed to ROI mode / Subarraymode")
                 return True
             else:
@@ -993,11 +1075,12 @@ class CamHam(XDevice):
             self.log.info(f'Went to an actual exposure time of {exptime_actual}')
             if exptime_requested != exptime_actual:
                 self.log.info(f"Exposure time request does not = exptime actual.")
-            else:
-                existing_property['current'] = new_message['target']
-                existing_property['target'] = new_message['target']
-                self.exptime = exptime_actual
-                self.update_property(existing_property)
+            # FIXME: Should write this better
+            # Testing if this improves the delay Adi is seeing for this
+            existing_property['current'] = new_message[exptime_actual]
+            existing_property['target'] = new_message[exptime_actual]
+            self.exptime = exptime_actual
+            self.update_property(existing_property)
         self.start_stream()
 
     def loop(self):
