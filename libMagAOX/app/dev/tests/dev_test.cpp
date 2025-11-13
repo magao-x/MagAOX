@@ -16,7 +16,6 @@
 #include "../shmimMonitor.hpp"
 #include "../stdCamera.hpp"
 #include "../stdMotionStage.hpp"
-#include "../telemeter.hpp"
 
 using namespace MagAOX::app;
 

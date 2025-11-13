@@ -155,7 +155,7 @@ ifeq ($(MAGAOX_ROLE),AOC)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_aoc)
 else ifeq ($(MAGAOX_ROLE),ICC)
-  apps_to_build += $(apps_basic)  
+  apps_to_build += $(apps_basic)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_icc)
@@ -306,12 +306,12 @@ libs_clean:
 lib_clean:
 	cd libMagAOX && ${MAKE} clean
 
-apps_all: libs_install flatlogs_all
+apps_all: libs_all flatlogs_all
 	for app in ${apps_to_build}; do \
 		(cd apps/$$app && ${MAKE} )|| exit 1; \
 	done
 
-apps_install: flatlogs_all
+apps_install: libs_install flatlogs_all
 	for app in ${apps_to_build}; do \
 		(cd apps/$$app && ${MAKE}  install) || exit 1; \
 	done
@@ -321,12 +321,12 @@ apps_clean:
 		(cd apps/$$app && ${MAKE}  clean) || exit 1; \
 	done
 
-guis_all: libs_install rtimv_plugins_all
+guis_all: libs_all rtimv_plugins_all
 	for gui in ${guis_to_build}; do \
 		(cd gui/apps/$$gui && ${MAKE} )|| exit 1; \
 	done
 
-guis_install: rtimv_plugins_install
+guis_install: libs_install rtimv_plugins_install
 	for gui in ${guis_to_build}; do \
 		(cd gui/apps/$$gui && ${MAKE} install) || exit 1; \
 	done
@@ -336,12 +336,12 @@ guis_clean: rtimv_plugins_clean
 		(cd gui/apps/$$gui && ${MAKE} clean) || exit 1; \
 	done
 
-rtimv_plugins_all: libs_install
+rtimv_plugins_all: libs_all
 	for plg in ${rtimv_plugins_to_build}; do \
 		(cd gui/rtimv/plugins/$$plg && ${MAKE} )|| exit 1; \
 	done
 
-rtimv_plugins_install:
+rtimv_plugins_install: libs_install
 	for plg in ${rtimv_plugins_to_build}; do \
 		(cd gui/rtimv/plugins/$$plg && ${MAKE} install) || exit 1; \
 	done

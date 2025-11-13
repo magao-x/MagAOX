@@ -1,3 +1,3 @@
-The scripts in this folder automate the setup of the MagAO-X software system on new hardware (to the extent it is possible to automate). The code in this repo is tightly coupled to our choice of operating system, as well as the existence of folders, users, groups, and permissions that make the whole thing work.
+# Looking for the MagAO-X automated setup scripts?
 
-For personal use, see [Running MagAO-X from your own computer](https://magao-x.org/docs/handbook/compute/remote_operation.html). For instrument setup, consult the [computer setup section](https://magao-x.org/docs/handbook/compute/computer_setup/computer_setup.html) of the [MagAO-X Handbook](https://magao-x.org/docs/handbook/).
+They now live in their own repository at https://github.com/magao-x/magao-x-setup/
