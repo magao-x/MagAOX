@@ -2,6 +2,7 @@
 ### Hide commands
 AT=@
 GEN_TEST_FILES = ./generated_tests/*_generated_tests.cpp
+C_STD=c++20
 ### default entropy test settings
 # seed
 s=1
@@ -33,7 +34,7 @@ $(GEN_TEST_FILES) :
 	$(AT)python3 generateTemplatedCatch2Tests.py
 
 catch2_tests: ../generated/binarySchemata.inc $(GEN_TEST_FILES) catch2_tests.cpp
-	$(AT)g++ -std=c++14 -I. -I./../types -I../../../flatlogs/include/ $(GEN_TEST_FILES) catch2_tests.cpp -o $@
+	$(AT)g++ -std=$(C_STD) -I. -I./../types -I../../../flatlogs/include/ $(GEN_TEST_FILES) catch2_tests.cpp -o $@
 
 do_catch2_test: catch2_tests
 	$(AT)./catch2_tests
@@ -42,7 +43,7 @@ do_catch2_test: catch2_tests
 ### Build and run Catch2 Entropy tests
 entropy_test: ../generated/binarySchemata.inc catch2_tests.cpp 
 	$(AT)python3 generateEntropyTests.py -e $(e) -n $(n) -s $(s) -f $(f)
-	$(AT)g++ -std=c++14 -I. -I.. -I./../types -I../../../flatlogs/include/ -I./generated_tests gen_entropy_tests/generated_test_e$(e)_n$(n).cpp catch2_tests.cpp -o generated_entropy_test_e$(e)_n$(n)
+	$(AT)g++ -std=$(C_STD) -I. -I.. -I./../types -I../../../flatlogs/include/ -I./generated_tests gen_entropy_tests/generated_test_e$(e)_n$(n).cpp catch2_tests.cpp -o generated_entropy_test_e$(e)_n$(n)
 
 do_entropy_test: entropy_test
 	$(AT)./generated_entropy_test_e$(e)_n$(n) "Scenario: test_e$(e)_n$(n)"

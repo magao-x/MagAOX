@@ -67,6 +67,7 @@ class bmcCtrl : public MagAOXApp<true>, public dev::dm<bmcCtrl,float>, public de
    typedef float realT;  ///< This defines the datatype used to signal the DM using the ImageStreamIO library.
 
    typedef dev::dm<bmcCtrl,float> dmT;
+
    typedef dev::shmimMonitor<bmcCtrl> shmimMonitorT;
 
 
@@ -227,26 +228,28 @@ void bmcCtrl::setupConfig()
    config.add("dm.calibRelDir", "", "dm.calibRelDir", argType::Required, "dm", "calibRelDir", false, "string", "Used to find the default config directory.");
    config.add("dm.satThresh", "", "dm.satThresh", argType::Required, "dm", "satThresh", false, "string", "Threshold above which to log saturation.");
 
-   dev::dm<bmcCtrl,float>::setupConfig(config);
+   DM_SETUP_CONFIG(config);
 
 }
 
 int bmcCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 {
-   config(m_calibRelDir, "dm.calibRelDir");
-   config(m_serialNumber, "dm.serialNumber");
-   config(m_satThresh, "dm.satThresh");
+   _config(m_calibRelDir, "dm.calibRelDir");
+   _config(m_serialNumber, "dm.serialNumber");
+   _config(m_satThresh, "dm.satThresh");
 
-   //m_calibRelDir = "dm/bmc_2k";
-
-   dev::dm<bmcCtrl,float>::loadConfig(_config);
+   DM_LOAD_CONFIG(_config);
 
    return 0;
 }
 
 void bmcCtrl::loadConfig()
 {
-   loadConfigImpl(config);
+    if(loadConfigImpl(config) < 0)
+    {
+        log<software_error>({__FILE__,__LINE__, "error loading config"});
+        m_shutdown = 1;
+    }
 
 }
 
@@ -264,26 +267,26 @@ int bmcCtrl::appStartup()
       return -1;
    }
 
-   dev::dm<bmcCtrl,float>::appStartup();
+   DM_APP_STARTUP;
 
-   shmimMonitor<bmcCtrl>::appStartup();
+   SHMIMMONITOR_APP_STARTUP;
 
    return 0;
 }
 
 int bmcCtrl::appLogic()
 {
-   dev::dm<bmcCtrl,float>::appLogic();
+    DM_APP_LOGIC;
 
-   shmimMonitor<bmcCtrl>::appLogic();
+    SHMIMMONITOR_APP_LOGIC;
 
    if(state()==stateCodes::POWEROFF) return 0;
 
    if(state()==stateCodes::POWERON)
    {
       sleep(5);
-      std::cerr << "initing DM" << std::endl;
-      return initDM();
+
+      state(stateCodes::NOTHOMED);
    }
 
    if(m_nsat > m_satThresh)
@@ -293,6 +296,9 @@ int bmcCtrl::appLogic()
 
    m_nsat = 0;
 
+   DM_UPDATE_INDI;
+   SHMIMMONITOR_UPDATE_INDI;
+
    return 0;
 }
 
@@ -300,9 +306,9 @@ int bmcCtrl::appShutdown()
 {
    if(m_dmopen) releaseDM();
 
-   dev::dm<bmcCtrl,float>::appShutdown();
+   DM_APP_SHUTDOWN;
 
-   shmimMonitor<bmcCtrl>::appShutdown();
+    SHMIMMONITOR_APP_SHUTDOWN;
 
    return 0;
 }
@@ -336,7 +342,6 @@ int bmcCtrl::initDM()
       const char *err;
       err = BMCErrorString(ret);
       log<text_log>(std::string("DM initialization failed: ") + err, logPrio::LOG_ERROR);
-
       m_dm = {};
       return -1;
    }
@@ -346,8 +351,6 @@ int bmcCtrl::initDM()
       log<text_log>("DM initialization failed. Couldn't open DM handle.", logPrio::LOG_ERROR);
       return -1;
    }
-
-   log<text_log>("BMC " + m_serialNumber + " initialized", logPrio::LOG_NOTICE);
 
    // Get number of actuators
    m_nbAct = m_dm.ActCount;
@@ -365,6 +368,8 @@ int bmcCtrl::initDM()
       log<text_log>(std::string("DM initialization failed. Couldn't load map.") + err, logPrio::LOG_ERROR);
 
       m_dm = {};
+
+      state(stateCodes::ERROR);
       return -1;
    }
 
@@ -375,6 +380,7 @@ int bmcCtrl::initDM()
    if(zeroDM() < 0)
    {
       log<text_log>("DM initialization failed.  Error zeroing DM.", logPrio::LOG_ERROR);
+      state(stateCodes::ERROR);
       return -1;
    }
 
@@ -391,16 +397,20 @@ int bmcCtrl::initDM()
    if(get_actuator_mapping() < 0)
    {
       log<text_log>("DM initialization failed.  Failed to get actuator mapping.", logPrio::LOG_ERROR);
+      state(stateCodes::ERROR);
       return -1;
    }
 
    if(m_actuator_mapping == nullptr)
    {
       log<text_log>("DM initialization failed.  null pointer.", logPrio::LOG_ERROR);
+      state(stateCodes::ERROR);
       return -1;
    }
 
-   state(stateCodes::OPERATING);
+
+   log<text_log>("BMC " + m_serialNumber + " initialized", logPrio::LOG_NOTICE);
+   state(stateCodes::READY);
 
    return 0;
 }
@@ -540,7 +550,7 @@ int bmcCtrl::releaseDM()
       return 0;
    }
 
-   state(stateCodes::READY);
+   state(stateCodes::NOTHOMED);
 
    if(!shutdown())
    {
@@ -552,6 +562,7 @@ int bmcCtrl::releaseDM()
    if(zeroDM() < 0)
    {
       log<text_log>("DM release failed.  Error zeroing DM.", logPrio::LOG_ERROR);
+      state(stateCodes::ERROR);
       return -1;
    }
 
@@ -564,6 +575,7 @@ int bmcCtrl::releaseDM()
       const char *err;
       err = BMCErrorString(ret);
       log<text_log>(std::string("DM reset failed: ") + err, logPrio::LOG_ERROR);
+      state(stateCodes::ERROR);
       return -1;
    }
 
@@ -577,6 +589,7 @@ int bmcCtrl::releaseDM()
       const char *err;
       err = BMCErrorString(ret);
       log<text_log>(std::string("DM release failed: ") + err, logPrio::LOG_ERROR);
+      state(stateCodes::ERROR);
       return -1;
    }
 

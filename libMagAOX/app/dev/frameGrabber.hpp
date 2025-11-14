@@ -15,7 +15,7 @@
 #include <mx/math/vectorUtils.hpp>
 #include <mx/improc/imageUtils.hpp>
 
-#include <ImageStreamIO/ImageStruct.h>
+#include "../../ImageStreamIO/ImageStruct.hpp"
 #include <ImageStreamIO/ImageStreamIO.h>
 
 #include "../../common/paths.hpp"
@@ -415,7 +415,7 @@ int frameGrabber<derivedT>::loadConfig( mx::app::appConfigurator &config )
     if( derivedT::c_frameGrabber_flippable )
     {
         std::string flip = "flipNone";
-        
+
         config( flip, "framegrabber.defaultFlip" );
 
         if( flip == "flipNone" )

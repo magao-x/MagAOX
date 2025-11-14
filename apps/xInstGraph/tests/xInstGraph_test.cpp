@@ -28,12 +28,6 @@ class xInstGraph : public MagAOX::app::xInstGraph
         return MagAOX::app::xInstGraph::config;
     }
 
-<<<<<<< HEAD
-
-=======
-
->>>>>>> e1ec92c0 (updated xInstGraph tests)
-
 };
 
 void writeXML()

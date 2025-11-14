@@ -175,8 +175,6 @@ def isValidLogType(lines : list) -> bool:
 
     return (hasEventCode and hasDefaultLevel)
 
-
-
 def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
     returnInfo = dict()
     headerFile = open(hppFname,"r")
@@ -194,18 +192,23 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
     returnInfo["baseType"] = getBaseType(headerLines)
     returnInfo["hasGeneratedHfile"] = hasGeneratedHFile(returnInfo["name"])
 
-
     # cannot generate tests from this file alone, need base type
     if not isValidLogType(headerLines):
         if returnInfo["name"] not in baseTypesDict:
             baseTypesDict[returnInfo["name"]] = set()
         return None # don't render anything from this file
 
-    # find where messageT structs are being made -> describes fields
+    # iterate through all lines in header to:
+    # 1. find where messageT structs are being made -> describes fields
+    # 2. check that is has its own <Get|Create|Verify><name>_fb methods 
+    fbMethodName = f"Create{returnInfo["name"][0].upper() + returnInfo["name"][1:]}_fb"
+    hasFbMethods = False
     messageStructIdxs = []
     for i in range(len(headerLines)):
         if "messageT(" in headerLines[i]:
             messageStructIdxs.append(i)
+        if fbMethodName in headerLines[i]:
+            hasFbMethods = True
 
     schemaTableName, schemaFieldInfo = getSchemaFieldInfo(returnInfo["name"])
     returnInfo["schemaTableName"] = schemaTableName
@@ -220,6 +223,14 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
         baseTypesDict[returnInfo["baseType"]].add(returnInfo["name"])
         return None # don't render me yet!
 
+    # if it does not have its own fb method, find name of class its using
+    if not hasFbMethods:
+        for line in headerLines:
+            if re.search("^.*Create[a-zA-Z_]*_fb.*$", line) and returnInfo["schemaTableName"] == "":
+                # figure out name of fb methods this type is re-using, e.g. ao_observer -> observer
+                startIndex = line.find("Create") + len("Create")
+                endIndex = line.find("_fb")
+                returnInfo["schemaTableName"] = f"{line[startIndex:endIndex]}_fb"
 
     returnInfo["messageTypes"] = getMessageFieldInfo(messageStructIdxs, headerLines, schemaFieldInfo)
     
@@ -231,19 +242,24 @@ Parse out field type and name from string
 def getTypeAndName(lineParts : list) -> tuple[str, str]:
 
     typeIdxStart = 1 if (lineParts[0] == "const") else 0
-    type = lineParts[typeIdxStart]
+    fieldType = lineParts[typeIdxStart]
 
     if lineParts[typeIdxStart + 1] == "&":
         nameIdx = (typeIdxStart + 2)
     elif lineParts[typeIdxStart + 1] == "*":
         nameIdx = (typeIdxStart + 2)
-        type += " " + lineParts[typeIdxStart + 1]
+        fieldType += " *"
     else:
         nameIdx = (typeIdxStart + 1)
 
     name = lineParts[nameIdx].rstrip(")").rstrip(",")
 
-    return type, name
+    if name[0] == "*":
+        fieldType += " *"
+
+    name = name.lstrip("&*")
+
+    return fieldType, name
 
 '''
 Checks if log type has a corresponding generated .h file in ./types/generated
@@ -396,7 +412,7 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
             # trim line to just get field info
             indexStart = (line.find("messageT(") + len("messageT(")) if "messageT(" in line else 0
             indexEnd = line.find("//") if "//" in line else len(line)
-            line = line[indexStart:indexEnd]
+            line = line[indexStart:indexEnd].strip()
 
             lineParts =  [part.strip().split() for part in line.strip().rstrip(",").split(",")]
 
