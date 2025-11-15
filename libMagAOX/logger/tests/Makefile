@@ -13,9 +13,27 @@ n=2
 # types to use
 f=""
 
+ifeq ($(COVERAGE),1)
+  LDFLAGS += --coverage
+  CFLAGS += --coverage
+  CXXFLAGS += --coverage
+endif
+
 ########################################################################
 ### Generate code, run tests
-all: ../generated/binarySchemata.inc do_catch2_test do_test
+all: ../generated/binarySchemata.inc do_catch2_test do_entropy_test
+
+build: ../generated/binarySchemata.inc catch2_tests entropy_test
+
+run: ../generated/binarySchemata.inc do_catch2_test do_entropy_test
+
+.PHONY: coverage_build
+coverage_build:
+	${MAKE} build COVERAGE=1
+
+.PHONY: coverage
+coverage:
+	${MAKE} all COVERAGE=1
 
 ########################################################################
 ### Generate code and flatbuffer binary schema from text schemas (*.fbs)
@@ -34,31 +52,38 @@ $(GEN_TEST_FILES) :
 	$(AT)python3 generateTemplatedCatch2Tests.py
 
 catch2_tests: ../generated/binarySchemata.inc $(GEN_TEST_FILES) catch2_tests.cpp
-	$(AT)g++ -std=$(C_STD) -I. -I./../types -I../../../flatlogs/include/ $(GEN_TEST_FILES) catch2_tests.cpp -o $@
+	$(AT)g++ -std=$(C_STD) $(CXXFLAGS) -I. -I./../types -I../../../flatlogs/include/ $(GEN_TEST_FILES) catch2_tests.cpp -o $@
 
 do_catch2_test: catch2_tests
 	$(AT)./catch2_tests
 
 ########################################################################
 ### Build and run Catch2 Entropy tests
-entropy_test: ../generated/binarySchemata.inc catch2_tests.cpp 
+entropy_test: ../generated/binarySchemata.inc catch2_tests.cpp
 	$(AT)python3 generateEntropyTests.py -e $(e) -n $(n) -s $(s) -f $(f)
-	$(AT)g++ -std=$(C_STD) -I. -I.. -I./../types -I../../../flatlogs/include/ -I./generated_tests gen_entropy_tests/generated_test_e$(e)_n$(n).cpp catch2_tests.cpp -o generated_entropy_test_e$(e)_n$(n)
+	$(AT)g++ -std=$(C_STD) $(CXXFLAGS) -I. -I.. -I./../types -I../../../flatlogs/include/ -I./generated_tests gen_entropy_tests/generated_test_e$(e)_n$(n).cpp catch2_tests.cpp -o generated_entropy_test_e$(e)_n$(n)
 
 do_entropy_test: entropy_test
 	$(AT)./generated_entropy_test_e$(e)_n$(n) "Scenario: test_e$(e)_n$(n)"
 
 ########################################################################
 ### Build and run non-Catch2 test (will probably remove at some point)
-do_tests: ../generated/binarySchemata.inc do_tests.cpp
-	$(AT)g++ -std=c++11 -I. -I./../types -I../../../flatlogs/include/ do_tests.cpp -o $@
+#do_tests: ../generated/binarySchemata.inc do_tests.cpp
+#	$(AT)g++ -std=c++11 -I. -I./../types -I../../../flatlogs/include/ do_tests.cpp -o $@
 
-do_test: do_tests
-	$(AT)./do_tests
+#do_test: do_tests
+#	$(AT)./do_tests
 
 ########################################################################
 clean:
 	$(AT)$(RM) -R "./types/generated/" "./generated/" ./do_tests Schemata_test catch2_tests
+	$(AT)$(RM) -R "./gen_entropy_tests/" generated_entropy_test_e1_n2
 
-really_clean: clean 
-	$(AT)$(RM) -R "./generated_tests/"
+really_clean: clean
+	$(AT)$(RM) -R "./generated_tests/" "./gen_entropy_tests/" __pycache__
+
+coverage_clean:
+	find . -name '*.gcno' -delete
+	find . -name '*.gcda' -delete
+	find . -name '*.gcov' -delete
+	${MAKE} really_clean COVERAGE=1

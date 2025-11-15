@@ -11,6 +11,8 @@
 #define logger_types_empty_log_hpp
 
 
+#include "flatbuffer_log.hpp"
+
 namespace MagAOX
 {
 namespace logger

@@ -425,12 +425,15 @@ print_role:
 .PHONY: coverage
 coverage:
 	${MAKE} all COVERAGE=1 ALL_APPS=1 NO_GUIS=1
+	cd libMagAOX/logger/tests && ${MAKE} build COVERAGE=1
+
 
 coverage_clean:
 	find . -name '*.gcno' -delete
 	find . -name '*.gcda' -delete
 	find . -name '*.gcov' -delete
 	${MAKE} all_clean COVERAGE=1 ALL_APPS=1
+	cd libMagAOX/logger/tests && ${MAKE} really_clean COVERAGE=1
 
 .PHONY: valgrind
 valgrind:
