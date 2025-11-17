@@ -628,13 +628,15 @@ class adcCtrl(XDevice):
                     img = self.camera.grab_stack(self._n_avg)
 
                     ###temporary fix because XCam is giving me an ndarray right now
-                    extent = 512 * 6/21
-                    pgrid = make_pupil_grid(512,2*extent)
+                    dim = np.sqrt(img.size)
+                    self.log.debug(f'camera ROI square with dim {dim} pixels')
+                    extent = dim * 6/21
+                    pgrid = make_pupil_grid(dim,extent)
                     img = Field(img.ravel(),pgrid)
                     ###end temporary fix
 
-                    transpose = Field(img.shaped.T.ravel(),img.grid)
-                    img = transpose #hopefully this actually fixes the transpose issue
+                    # transpose = Field(img.shaped.T.ravel(),img.grid)
+                    # img = transpose #hopefully this actually fixes the transpose issue
 
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
                     img = self.ADC.filter_image(img)
@@ -677,7 +679,7 @@ class adcCtrl(XDevice):
 
                     # transpose = Field(img.shaped.T.ravel(),img.grid)
                     # img = transpose
-                    self.log.debug('images taken and NOT transposed')
+                    #self.log.debug('images taken and transposed')
 
                     #write_field(img,'/data/users/twitchell/full_window.fits')
 
@@ -691,6 +693,7 @@ class adcCtrl(XDevice):
                     write_field(img,'/data/users/twitchell/cropped_img.fits')
                     
                     if self._knife_edge:
+                        command = 0
                         pass #don't have this functionality yet
                     else:
                         angles = self.ADC.all_speckle_angles(img)
