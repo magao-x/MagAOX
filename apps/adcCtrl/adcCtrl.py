@@ -106,7 +106,7 @@ class AdcFitter2:
         window_size=self.speckle_window
         new_img = self.window_field(img,[max_pixel[0],max_pixel[1]],window_size,window_size)
 
-        self.log.debug(f'calculated max pixel for speckle {speckle_number}: {center_of_intensity}')
+        self.log.debug(f'calculated max pixel for speckle {speckle_number}: {max_pixel}')
 
         #new_img = self.window_field(img,[center_of_intensity[0],center_of_intensity[1]],window_size,window_size)
         
@@ -570,14 +570,14 @@ class adcCtrl(XDevice):
     def update_wavelength(self):
         if self.client['fwsci1.filterName.i'] == constants.SwitchState.ON:
             self._center_wavelength = 762E-9
-            self._extent = 400
+            self._extent = 480
         elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
             self._center_wavelength = 908E-9
-            self._extent = 480
+            self._extent = 520
             self.log.debug('filter in zprime')
         else: 
             self._center_wavelength = 656E-9
-            self._extent = 400
+            self._extent = 480
         
         self.ADC.wavelength = self._center_wavelength
         self.ADC.normalized_wavelength = self.ADC.wavelength / 6565E-9
@@ -664,8 +664,10 @@ class adcCtrl(XDevice):
                     img = self.camera.grab_stack(self._n_avg)
                     
                     ###temporary fix because XCam is giving me an ndarray right now
-                    extent = 512 * 6/21
-                    pgrid = make_pupil_grid(512,extent)
+                    dim = np.sqrt(img.size)
+                    self.log.debug(f'camera ROI square with dim {dim} pixels')
+                    extent = dim * 6/21
+                    pgrid = make_pupil_grid(dim,extent)
                     img = Field(img.ravel(),pgrid)
                     ###end temporary fix
 
