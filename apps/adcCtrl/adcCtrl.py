@@ -343,11 +343,11 @@ class adcCtrl(XDevice):
         nv = properties.NumberVector(name='ctrl_mtx')
         nv.add_element(DefNumber( 
             name='m00', label='m00', format='%.4f',
-            min=-10.00, max=10.00, step=0.0001, _value=0.21178766
+            min=-10.00, max=10.00, step=0.0001, _value=0.08902178
         ))
         nv.add_element(DefNumber( 
             name='m01', label='m01', format='%.4f',
-            min=-10.00, max=10.00, step=0.0001, _value=0.19275196 
+            min=-10.00, max=10.00, step=0.0001, _value=-0.1929974
         ))
         self.add_property(nv, callback=self.handle_ctrl_mtx) 
 
