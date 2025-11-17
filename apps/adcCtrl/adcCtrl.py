@@ -400,7 +400,7 @@ class adcCtrl(XDevice):
         self._n_avg = 1
         self._gain = 0.3
         self._command = 0
-        self._control_mtx = np.array([-0.11276422,  0.19904244]) 
+        self._control_mtx = np.array([ 0.08902178, -0.1929974 ]) 
         self._extent = 400
         self.delta_1 = 0
         self.delta_2 = 0
@@ -679,7 +679,11 @@ class adcCtrl(XDevice):
                     # img = transpose
                     self.log.debug('images taken and NOT transposed')
 
-                    write_field(img,'/data/users/twitchell/full_window.fits')
+                    #write_field(img,'/data/users/twitchell/full_window.fits')
+
+                    ################### FAKE CAMERA IMAGE ######################
+                    #img = read_field('/data/users/twitchell/full_img.fits')
+                    #self.log.debug('note that a real picture is not being taken! a loaded image is being used')
 
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
                     img = self.ADC.filter_image(img)
@@ -689,8 +693,6 @@ class adcCtrl(XDevice):
                     if self._knife_edge:
                         pass #don't have this functionality yet
                     else:
-                        # speckle_img = self.ADC.slice_speckle_angle(img,0)
-                        # write_field(speckle_img,'/data/users/twitchell/speckle_img0.fits')
                         angles = self.ADC.all_speckle_angles(img)
                         pairs = self.ADC.speckle_pairs(angles)
                         command = np.squeeze(self.ADC.calculate_command(pairs))
