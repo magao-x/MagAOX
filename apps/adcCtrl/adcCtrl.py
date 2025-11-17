@@ -18,7 +18,7 @@ from scipy.optimize import minimize
 from scipy.optimize import curve_fit
 
 class AdcFitter2:
-    def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=28,grating_freq=47,ncpc = False,snr_threshold=2,log=False,speckle_window=50):
+    def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=28,grating_freq=47,ncpc = False,snr_threshold=2,log=False,speckle_window=40):
             self.wavelength = wavelength
             self.bandwidth = bandwidth
             self.grating_angle = grating_angle
@@ -199,18 +199,21 @@ class AdcFitter2:
     
     def crop_image(self, image,extent,mask_diam=60): 
         '''cuts out a centered PSF with the central core masked'''
-        img = image/image.max()
+        img = image/np.max(image)
+        write_field(img,'/data/users/twitchell/windowed_img.fits')
 
-        img_subtracted = img >0.05
+        img_subtracted = img #>0.05
         center_of_intensity = np.array([sum(img_subtracted*img_subtracted.grid.x)/sum(img_subtracted),sum(img_subtracted*img_subtracted.grid.y)/sum(img_subtracted)])
         mask_ap = make_circular_aperture(mask_diam,center_of_intensity)
-        mask = mask_ap(img_subtracted.grid)
+        mask = mask_ap(img.grid)
         mask = abs(mask - 1)
         masked_img = mask * img
 
         img = masked_img
         img = self.window_field(img,[center_of_intensity[0],center_of_intensity[1]],extent,extent)
-        img /= img.max()
+
+
+        img /= np.max(img)
         
         bk = np.median(img)
         img -= bk
@@ -338,7 +341,7 @@ class adcCtrl(XDevice):
         self.add_property(nv, callback=self.handle_offset)
 
         nv = properties.NumberVector(name='ctrl_mtx')
-        nv.add_element(DefNumber( #first element
+        nv.add_element(DefNumber( 
             name='m00', label='m00', format='%.4f',
             min=-10.00, max=10.00, step=0.0001, _value=0.21178766
         ))
@@ -415,13 +418,13 @@ class adcCtrl(XDevice):
 
         if self.client['fwsci1.filterName.i'] == constants.SwitchState.ON:
             self._center_wavelength = 762E-9
-            self._extent = 480
+            self._extent = 500
         elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
             self._center_wavelength = 908E-9
-            self._extent = 480
+            self._extent = 510
         else: 
             self._center_wavelength = 656E-9
-            self._extent = 480
+            self._extent = 500
 
         self.ADC = AdcFitter2(wavelength=self._center_wavelength,log=self.log)
         self.log.debug(f'initial normalized wavelength value: {self.ADC.normalized_wavelength}')
@@ -573,7 +576,7 @@ class adcCtrl(XDevice):
             self._extent = 480
         elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
             self._center_wavelength = 908E-9
-            self._extent = 520
+            self._extent = 512
             self.log.debug('filter in zprime')
         else: 
             self._center_wavelength = 656E-9
@@ -662,6 +665,7 @@ class adcCtrl(XDevice):
                 measurements = []
                 for i in range(self._no_measurements):
                     img = self.camera.grab_stack(self._n_avg)
+                    self.log.debug(f'extent: {self._extent}')
                     
                     ###temporary fix because XCam is giving me an ndarray right now
                     dim = np.sqrt(img.size)
@@ -675,10 +679,12 @@ class adcCtrl(XDevice):
                     # img = transpose
                     self.log.debug('images taken and NOT transposed')
 
-                    img = self.ADC.filter_image(img)
+                    write_field(img,'/data/users/twitchell/full_window.fits')
+
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
-                    
-                    #write_field(img,'/data/users/twitchell/test_capture7.fits')
+                    img = self.ADC.filter_image(img)
+
+                    write_field(img,'/data/users/twitchell/cropped_img.fits')
                     
                     if self._knife_edge:
                         pass #don't have this functionality yet
