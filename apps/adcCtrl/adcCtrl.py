@@ -87,7 +87,7 @@ class AdcFitter2:
             speckle_coords = np.array([[0, self.grating_freq * self.normalized_wavelength],[self.grating_freq * self.normalized_wavelength,0],[0, -self.grating_freq * self.normalized_wavelength],[-self.grating_freq * self.normalized_wavelength,0]])
             speckle_center = speckle_coords[speckle_number]
             rect = make_rotated_aperture(make_rectangular_aperture(size=(extent,extent), center=speckle_center), np.deg2rad(-self.grating_angle))(img.grid)
-            self.log.debug(f'speckle {speckle_number} is approximately centered at {speckle_center}')
+            #self.log.debug(f'speckle {speckle_number} is approximately centered at {speckle_center}')
         else: #if we are, there's a different rotation angle for speckles 1&3 and 2&4
             speckle_coords = np.array([[ncpc_freq * self.normalized_wavelength,0],[self.grating_freq * self.normalized_wavelength,0],[-ncpc_freq * self.normalized_wavelength,0],[-self.grating_freq * self.normalized_wavelength,0]])
             speckle_center = speckle_coords[speckle_number]
@@ -97,7 +97,7 @@ class AdcFitter2:
                 rect = make_rotated_aperture(make_rectangular_aperture(size=(extent,extent), center=speckle_center), np.deg2rad(-self.grating_angle))(img.grid)
 
         speckle_img = rect * img
-        self.log.debug(f'intensity of speckle {speckle_number}: {np.sum(speckle_img)}')
+        #self.log.debug(f'intensity of speckle {speckle_number}: {np.sum(speckle_img)}')
 
         #find the center of intensity of the speckle area and window the ORIGINAL image around that center
         # center_of_intensity = np.array([sum(speckle_img*speckle_img.grid.x)/sum(speckle_img),sum(speckle_img*speckle_img.grid.y)/sum(speckle_img)])
@@ -106,7 +106,7 @@ class AdcFitter2:
         window_size=self.speckle_window
         new_img = self.window_field(img,[max_pixel[0],max_pixel[1]],window_size,window_size)
 
-        self.log.debug(f'calculated max pixel for speckle {speckle_number}: {max_pixel}')
+        #self.log.debug(f'calculated max pixel for speckle {speckle_number}: {max_pixel}')
 
         #new_img = self.window_field(img,[center_of_intensity[0],center_of_intensity[1]],window_size,window_size)
         
@@ -629,7 +629,7 @@ class adcCtrl(XDevice):
 
                     ###temporary fix because XCam is giving me an ndarray right now
                     dim = np.sqrt(img.size)
-                    self.log.debug(f'camera ROI square with dim {dim} pixels')
+                    #self.log.debug(f'camera ROI square with dim {dim} pixels')
                     extent = dim * 6/21
                     pgrid = make_pupil_grid(dim,extent)
                     img = Field(img.ravel(),pgrid)
@@ -653,14 +653,14 @@ class adcCtrl(XDevice):
                     self.log.debug(f'single error measurement: {-command}')
                     measurements.append(command)
                 
-                error = np.nanmean(measurements)
+                error = -np.nanmean(measurements)
                 self.log.debug(f'mean error across {self._no_measurements} measurements: {-error}')
 
                 if np.abs(error) < 3: #setting a threshold so the prisms don't do anything crazy     
                     self.add_command(error * self._gain,0)
                     self.send_command()
-                    self.log.debug(f'delta command: {error * self._gain}')
-                    self.log.debug(f'total command: {self.delta_1}')
+                    self.log.info(f'delta command: {error * self._gain}')
+                    self.log.info(f'total command: {self.delta_1}')
                 else: self.log.info(f'ADC command {error} exceeds acceptable threshold and was not sent')
 
             elif self._state == States.ONESHOT:
