@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pythonIndiExample"
+description = "Python INDI device implementation example"
+version = "2023.12.21"
+
+authors = [
+  {name = "Joseph D. Long", email = "me@joseph-long.com"},
+]
+
+[project.scripts]
+pythonIndiExample = "pythonIndiExample:pythonIndiExample.console_app"
