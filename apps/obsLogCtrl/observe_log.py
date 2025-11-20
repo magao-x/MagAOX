@@ -15,7 +15,7 @@ class ExampleConfig(BaseConfig):
     """
     configurable_doodad_1 : str = xconf.field(default="abc", help="Configurable doodad 1")
 
-class pythonIndiExample(XDevice):
+class ObserveLog(XDevice):
     config : ExampleConfig
 
     def loop(self):
