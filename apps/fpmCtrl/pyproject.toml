@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fpmCtrl"
+description = "Python INDI device implementation example"
+version = "2023.12.21"
+
+authors = [
+  {name = "Joshua Liberman", email = "jliberman@arizona.edu"},
+]
+
+[project.scripts]
+fpmCtrl = "fpmCtrl:fpmCtrl.console_app"

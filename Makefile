@@ -72,7 +72,8 @@ apps_icc = \
 	corAlign \
 	adcCtrl \
 	picamCtrl \
-	pvcamCtrl
+	pvcamCtrl \
+	fpmCtrl
 
 # 	audibleAlerts
 apps_aoc = \
