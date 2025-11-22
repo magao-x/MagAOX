@@ -385,6 +385,7 @@ class adcCtrl(XDevice):
 
         self.client.get_properties('adctrack')
         self.client.get_properties('fwsci1')
+        self.client.get_properties('fwfpm')
 
         self.log.info("Found camera: {:s}".format(self.config.camera.shmim))
         self.camera = XCam(
@@ -411,6 +412,7 @@ class adcCtrl(XDevice):
         self._knife_edge_zero1 = 26.78175714 #need to re-calibrate these values
         self._knife_edge_zero2 = 26.544759645
         self._no_measurements = 1
+        self._ke_top = True #orientation of the knife mask
 
         if self.client['adctrack.deltaADC1.current'] != 0:
             self.set_command(0,0)
@@ -487,6 +489,10 @@ class adcCtrl(XDevice):
             self.log.debug('changing into knife edge mode')
             existing_property['toggle'] = constants.SwitchState.ON
             self._knife_edge = True
+            if self.client['fwfpm.filterName.knifemask'] == constants.SwitchState.ON:
+                self._ke_top = True
+            elif self.self.client['fwfpm.filterName.knifemaskZ'] == constants.SwitchState.ON:
+                self._ke_top = False
         else:
             self.log.debug('exiting knife edge mode')
             existing_property['toggle'] = constants.SwitchState.OFF
@@ -642,14 +648,21 @@ class adcCtrl(XDevice):
                     img = self.ADC.filter_image(img)
                     
                     if self._knife_edge:
-                        #doing just the top two first
-                        ctrl_mtx_top = np.matrix([[0.23973406, 0.41542301]])
                         zps = np.array([ 26.06322496, -24.34992527,  25.44309035, -26.44816027]) #zero points for each speckle
-                        s1 = self.ADC.slice_speckle_angle(img,0) - zps[0]
-                        self.log.debug(f'speckle 1 angle: {s1 + zps[0]}')
-                        s4 = self.ADC.slice_speckle_angle(img,3) - zps[3]
-                        self.log.debug(f'speckle 4 angle: {s4+zps[0]}')
-                        command = -np.squeeze(ctrl_mtx_top @ np.array([s1,s4]))
+                        if self._ke_top:
+                            ctrl_mtx_top = np.matrix([[0.23973406, 0.41542301]])
+                            s1 = self.ADC.slice_speckle_angle(img,0) - zps[0]
+                            self.log.debug(f'speckle 1 angle: {s1 + zps[0]}')
+                            s4 = self.ADC.slice_speckle_angle(img,3) - zps[3]
+                            self.log.debug(f'speckle 4 angle: {s4+zps[0]}')
+                            command = -np.squeeze(ctrl_mtx_top @ np.array([s1,s4]))
+                        else:
+                            ctrl_mtx_bot = np.matrix([[-0.39625451, -0.19269755]])
+                            s2 = self.ADC.slice_speckle_angle(img,1) - zps[1]
+                            self.log.debug(f'speckle 2 angle: {s1 + zps[0]}')
+                            s3 = self.ADC.slice_speckle_angle(img,2) - zps[2]
+                            self.log.debug(f'speckle 3 angle: {s4+zps[0]}')
+                            command = -np.squeeze(ctrl_mtx_top @ np.array([s1,s4]))
                     else:
                         angles = self.ADC.all_speckle_angles(img)
                         pairs = self.ADC.speckle_pairs(angles)
