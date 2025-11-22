@@ -652,17 +652,17 @@ class adcCtrl(XDevice):
                         if self._ke_top:
                             ctrl_mtx_top = np.matrix([[0.23973406, 0.41542301]])
                             s1 = self.ADC.slice_speckle_angle(img,0) - zps[0]
-                            self.log.debug(f'speckle 1 angle: {s1 + zps[0]}')
+                            #self.log.debug(f'speckle 1 angle: {s1 + zps[0]}')
                             s4 = self.ADC.slice_speckle_angle(img,3) - zps[3]
-                            self.log.debug(f'speckle 4 angle: {s4+zps[0]}')
+                            #self.log.debug(f'speckle 4 angle: {s4+zps[3]}')
                             command = -np.squeeze(ctrl_mtx_top @ np.array([s1,s4]))
                         else:
                             ctrl_mtx_bot = np.matrix([[-0.39625451, -0.19269755]])
                             s2 = self.ADC.slice_speckle_angle(img,1) - zps[1]
-                            self.log.debug(f'speckle 2 angle: {s1 + zps[0]}')
+                            #self.log.debug(f'speckle 2 angle: {s1 + zps[1]}')
                             s3 = self.ADC.slice_speckle_angle(img,2) - zps[2]
-                            self.log.debug(f'speckle 3 angle: {s4+zps[0]}')
-                            command = -np.squeeze(ctrl_mtx_top @ np.array([s1,s4]))
+                            #self.log.debug(f'speckle 3 angle: {s4+zps[2]}')
+                            command = -np.squeeze(ctrl_mtx_bot @ np.array([s2,s3]))
                     else:
                         angles = self.ADC.all_speckle_angles(img)
                         pairs = self.ADC.speckle_pairs(angles)
