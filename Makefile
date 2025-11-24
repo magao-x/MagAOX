@@ -82,7 +82,8 @@ apps_aoc = \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
-	stateRuleEngine
+	stateRuleEngine \
+	obsLogCtrl
 
 
 apps_tic = \
