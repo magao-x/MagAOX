@@ -8,8 +8,6 @@ import pandas as pd
 import psycopg
 import json
 from magaox import db
-from observation_log_listener import match_per_val
-from data.Observation_log.observation_log_control import dash_start
 """
 for history lookups. this one won't cache nor will it auto refresh like the active log. (unless change date period of course.)
 """

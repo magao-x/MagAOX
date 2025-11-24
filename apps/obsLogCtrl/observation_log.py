@@ -10,8 +10,6 @@ import sys
 from contextlib import contextmanager #python with statement
 import logging
 from datetime import datetime, timedelta
-from observation_log_listener import listen_with_update
-from html_reload import open_reload
 
 from threading import Thread
 
@@ -21,7 +19,7 @@ START_UP =False
 LISTENING = True
 FORMAT = '%(asctime)s %(clientip)-15s %(user)-8s %(message)s'
 
-logger = logging.getLogger(__name__)
+#logger = logging.getLogger(__name__)
 logging.basicConfig(filename='mainLog.log', level=logging.INFO, format=FORMAT)
 
 os.environ["XTELEMDB_PASSWORD"] = 'extremeAO!'   #####temp needs to be fixed####

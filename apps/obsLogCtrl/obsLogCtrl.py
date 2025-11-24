@@ -3,6 +3,7 @@ import logging
 import xconf
 from magaox.indi.device import XDevice, BaseConfig
 
+from observe_log import start
 log = logging.getLogger(__name__)
 
 @xconf.config
@@ -19,4 +20,5 @@ class ObsLogCtrl(XDevice):
     config : ExampleConfig
 
     def loop(self):
-        log.info("Looping")
+        log.info("Starting Observation Log(obsLogCtrl)")
+        start()

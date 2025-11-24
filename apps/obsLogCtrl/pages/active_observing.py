@@ -8,8 +8,6 @@ import pandas as pd
 import psycopg
 import json
 from magaox import db
-from observation_log_listener import match_per_val
-from observation_log import dash_start
 """
 this page will only be for the active observing
 """

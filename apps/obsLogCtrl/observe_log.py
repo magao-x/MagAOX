@@ -79,5 +79,15 @@ def switch_theme(dark):
         }
 
 
+def start(debug=False):
+    """Start the Dash observation log server."""
+    # You can tune host and port as needed
+    app.run(
+        debug=debug,
+        use_reloader=debug,
+        host="0.0.0.0",
+        port=8050,
+    )
+
 if __name__ == "__main__":
-    app.run(debug=True, use_reloader=True)
+    start(debug=True)
