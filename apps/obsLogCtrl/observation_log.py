@@ -128,7 +128,7 @@ def find_active_observing(df, collapse_dupes=True):
     # --- 8) tidy up ---
     filtered = filtered.sort_values(['window_id', 'ts_utc', '_seq']).reset_index(drop=True)
     filtered.drop(columns=['start_of_window', '_seq'], errors='ignore', inplace=True)
-    print(f"find_active_time: {time.perf_counter()-find_start}")
+    if DEBUG: print(f"find_active_time: {time.perf_counter()-find_start}")
     return filtered 
 
 def clean_window(df):
@@ -138,7 +138,7 @@ def clean_window(df):
     df = df[df['comments_changes'].str.len() > 0]
     #df = df.loc[(df['comments_changes']==pd.notna)|(df['comments_changes']!='')]
     #df = df.drop(columns=['observing', 'window_id', 'start_of_window'], errors='ignore')
-    print(f"cleaning: {time.perf_counter()-clean_time}")
+    if DEBUG: print(f"cleaning: {time.perf_counter()-clean_time}")
     return df
 
 def get_telem(start_date, end_date):   
@@ -192,7 +192,7 @@ def get_telem(start_date, end_date):
     #time to run query
     query_time = (time.perf_counter() - telem_start)   
     #total run time
-    print(f'telem_time: {time.perf_counter()-telem_start}')
+    if DEBUG: print(f'telem_time: {time.perf_counter()-telem_start}')
     logging.debug(f"total time: {(time.perf_counter()-telem_start)}")
     return df
 #--'2025-02-10'
@@ -257,7 +257,7 @@ def get_logs(start_date=None, end_date=None):
         #fetch user-log
         user_log_df = get_user_logs(start_date= start_date, end_date=end_date)
     #    user_log_df['ts_utc'] = pd.to_datetime(user_log_df['ts_utc'], utc=True, errors='coerce', exact=False)
-        print(f'logtime: {time.perf_counter()-logs_start}')
+        if DEBUG: print(f'logtime: {time.perf_counter()-logs_start}')
     return telem_df, user_log_df
 
 def combine_dataframe(telem_df, user_log_df):
@@ -346,7 +346,7 @@ def annotate_changes(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.sort_values('__orig_index__').drop(columns='__orig_index__')
 
-    print(f'annotate time: {time.perf_counter() - a_start}')
+    if DEBUG: print(f'annotate time: {time.perf_counter() - a_start}')
     return df
 
 def annotate_changes1(df):
@@ -386,7 +386,7 @@ def annotate_changes1(df):
     non_ts_cols = [c for c in df.columns if c != 'ts_utc']
     df.dropna(subset=non_ts_cols, how='all', inplace=True)
     df.fillna('', inplace=True)
-    print(f'annotate time: {time.perf_counter() - a_start}')
+    if DEBUG: print(f'annotate time: {time.perf_counter() - a_start}')
     return df
 
 def dash_start(start_date, end_date, init_df):

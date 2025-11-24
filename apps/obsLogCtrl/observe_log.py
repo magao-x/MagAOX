@@ -85,7 +85,6 @@ def start(debug=False):
     app.run(
         debug=debug,
         use_reloader=debug,
-        host="0.0.0.0",
         port=8050,
     )
 
