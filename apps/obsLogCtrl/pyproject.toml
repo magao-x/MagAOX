@@ -3,7 +3,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "Observation Log"
+name = "obsLogCtrl"
 description = "Active and Historic observations log"
 version = "2023.12.21"
 
@@ -12,4 +12,4 @@ authors = [
 ]
 
 [project.scripts]
-observe_log = "observe_log:observe_log.console_app"
+obsLogCtrl = "obsLogCtrl:ObsLogCtrl.console_app"

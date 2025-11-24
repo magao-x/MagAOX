@@ -1,2 +1,2 @@
-TARGET=observe_log
+TARGET=obsLogCtrl
 include ../../Make/pythonApp.mk
