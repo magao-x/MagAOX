@@ -1,0 +1,11 @@
+body {
+    margin: 0;
+    padding: 0;
+    background-color: #23262a; /*default dark*/
+    color  : #eff0f1;
+}
+
+.export {
+    background-color: #3DA5ff;
+}
+
