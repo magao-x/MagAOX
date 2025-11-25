@@ -1,6 +1,6 @@
 #include "MCP3208.h"
 #include <cstdint>
-#include <lgpio.h>
+#include "lgpio.h"
 #include <stdexcept>
 
 namespace MCP3208Lib {
