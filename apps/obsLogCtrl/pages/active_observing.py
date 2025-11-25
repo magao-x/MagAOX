@@ -4,16 +4,33 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
 from datetime import datetime, timedelta, date, timezone
+import time
 import pandas as pd
 import psycopg
 import json
 from magaox import db
-from observation_log import dash_start as dash_start
+from observation_log import dash_start
 """
 this page will only be for the active observing
 """
+DEBUG = True
+
+COLUMNS_IDS = ['observer', 'obsname', 'target', 'comments_changes', 'ts_utc',
+        'holoop_state', 'fwsci1', 'camsci1_exptime', 'camsci1_emgain',
+        'camsci1_read_out_speed', 'camsci1_shutter_state', 'camsci1_roi',
+        'fwsci2', 'camsci2_exptime', 'camsci2_emgain', 'camsci2_read_out_speed',
+        'camsci2_shutter_state', 'camsci2_roi', 'camwfs_exptime', 'camwfs_gain',
+        'flipacq', 'stagebs', 'fwpupil', 'fwfpm', 'fwlyot', 'stagescibs',
+        'flipwfsf'
+    ]
+COLUMNS = [{'name':col, 'id': col} for col in COLUMNS_IDS]
+
+MIN_INTERVAL = 1_000   # 1 second
+MAX_INTERVAL = 3_000   # 3 seconds
 
 #global cache
+MAX_CACHE_HOURS=12
+
 _obs_cache = None #full combined + annotated df
 _last_ts = None  #last timestamp seen 
 _cache_initialized = False
@@ -65,7 +82,7 @@ layout = html.Div([
         dash_table.DataTable(
             id='active-datatable',
             virtualization=True,
-            columns=[], #start empty
+            columns=COLUMNS, 
             data=[],
             sort_action="native",
             page_size=50,
@@ -92,8 +109,7 @@ layout = html.Div([
         ),
         dcc.Interval(
             id='interval-component',
-            interval= 3*1000,
-            #interval = 500,
+            interval=2*1000,
             n_intervals=-1,
             disabled=True # starts off
         )
@@ -130,36 +146,81 @@ def toggle_interval(*_):
     return dash.no_update
 
 @callback(
-        Output('active-datatable', 'data'),
-        Output('active-datatable', 'columns'),
-        Output('status-msg', 'children'),
-        Output('active-raw-data', 'children'),
+        Output('active-raw-data', 'data'),
         Output('filtered-active-df', 'data'),
+        Output('status-msg', 'children'),
+        Output('interval-component', 'interval'),
         State('my-date-picker-range', 'start_date'),
         State('my-date-picker-range', 'end_date'),
         Input('interval-component', 'n_intervals'),
         prevent_initial_call=False
 )
 def load_data(start_date, end_date, *_):
-    #TODO:update the time to make quicker queries
+    start_cb = time.perf_counter()
     #start at 12:00 today. can adust if started after midnight
     start_dt = datetime.fromisoformat(start_date).replace(hour=12, minute=0,second=0)
     end_dt = datetime.fromisoformat(end_date).replace(hour=12, minute=0,second=0)
     #db query
-    #df= dash_start(start_dt, end_dt) #function to query data
     df = refresh_observation_cache(start_dt, end_dt)
-    df.sort_values(by='ts_utc', ascending=False, inplace=True)
-    #cashe the session for filtering purposes
-    # dcc.Store(id='active-raw-data', data=df.to_dict('records'), storage_type='session')
-    # dcc.Store(id='filtered-active-df', storage_type='session')
-    
-    #prep table
-    columns =[{'name': i, 'id': i} for i in df.columns]
+    #df.sort_values(by='ts_utc', ascending=False, inplace=True)
 
-    status=f"Loaded {len(df)} rows" # from {start_dt} to {end_dt} at {now.time()}"
 
     records = df.to_dict('records')
-    return records, columns, status, records, records
+
+    #cvompute interval time
+    compute_ms = (time.perf_counter()-start_cb) *1000.0
+    new_interval = choose_interval(compute_ms)
+    if DEBUG:
+        status=f"Loaded {len(df)-1} rows @ {new_interval}ms" 
+    else:
+        status=f"Loaded {len(df)-1}"
+
+
+    return records, records, status, new_interval
+
+@callback(
+        Output('active-datatable', 'data'),
+        Input('filtered-active-df', 'data'),
+        prevent_initial_call = False
+)
+def update_table(filtered_records):
+    if not filtered_records:
+        return [], []
+    
+    df = pd.DataFrame(filtered_records)
+    return filtered_records
+
+def choose_interval(compute_ms:float)->int:
+    """
+    Docstring for choose_interval
+    
+    :param compute_ms: Description
+    :type compute_ms: float
+    :return: Description
+    :rtype: int
+    """
+    # if compute_ms <500:
+    #     interval = 1_000
+    if compute_ms <1_500:
+        interval = 1_500
+    elif compute_ms < 2_000:
+        interval = 2_000
+    elif compute_ms <2_500:
+        interval = 2_500
+    elif compute_ms < 3_000:
+        interval = 3_000
+    else:
+        interval = int(min(MAX_INTERVAL, compute_ms*1.5))
+    
+    interval = max(MIN_INTERVAL, min(interval, MAX_INTERVAL))
+    return interval
+
+def prune_cache():
+    global _obs_cache
+    if _obs_cache is None or _obs_cache.empty:
+        return
+    cutoff = _obs_cache['ts_utc'].max() - pd.Timedelta(hours=MAX_CACHE_HOURS)
+    _obs_cache = _obs_cache[_obs_cache['ts_utc'] >= cutoff]
 
 def init_observation_cache(start_dt, end_dt):
     """
@@ -205,4 +266,5 @@ def refresh_observation_cache(start_dt, end_dt):
     _obs_cache = cont_df
     _last_ts = cont_df['ts_utc'] .max()
 
+    prune_cache()
     return _obs_cache
