@@ -77,6 +77,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              logger/types/telem_pico.hpp \
              logger/types/telem_pokecenter.hpp \
 			 logger/types/telem_pokeloop.hpp \
+			 logger/types/telem_poltrack.hpp \
              logger/types/telem_position.hpp \
              logger/types/telem_rhusb.hpp \
              logger/types/telem_saving_state.hpp \
