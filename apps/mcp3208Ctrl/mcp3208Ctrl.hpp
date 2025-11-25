@@ -44,7 +44,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     typedef dev::frameGrabber<mcp3208Ctrl> frameGrabberT;
     typedef dev::telemeter<mcp3208Ctrl>    telemeterT;
 
-    mcp3208Lib::mcp3208 m_adc;
+    MCP3208Lib::MCP3208 m_adc;
 
     static constexpr bool c_frameGrabber_flippable = false; /**< app:dev config to tell framegrabber these images
                                                                  can not be flipped*/
@@ -76,7 +76,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     float m_gain{ .1 };              // Gain used to adjust trigger to keep at correct fps
     float nano_sec_target{ 1e9f / m_fps };
 
-    mcp3208Lib::mcp3208 adc;
+    MCP3208Lib::MCP3208 adc;
 
     std::chrono::time_point<std::chrono::high_resolution_clock> m_time_start;
 
