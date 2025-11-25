@@ -10,6 +10,8 @@ import sys
 from contextlib import contextmanager #python with statement
 import logging
 from datetime import datetime, timedelta
+from observation_log_listener import listen_with_update
+from html_reload import open_reload
 
 from threading import Thread
 
@@ -19,7 +21,7 @@ START_UP =False
 LISTENING = True
 FORMAT = '%(asctime)s %(clientip)-15s %(user)-8s %(message)s'
 
-#logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 logging.basicConfig(filename='mainLog.log', level=logging.INFO, format=FORMAT)
 
 os.environ["XTELEMDB_PASSWORD"] = 'extremeAO!'   #####temp needs to be fixed####
@@ -386,7 +388,7 @@ def annotate_changes1(df):
     non_ts_cols = [c for c in df.columns if c != 'ts_utc']
     df.dropna(subset=non_ts_cols, how='all', inplace=True)
     df.fillna('', inplace=True)
-    if DEBUG: print(f'annotate time: {time.perf_counter() - a_start}')
+    if DEBUG:  print(f'annotate time: {time.perf_counter() - a_start}')
     return df
 
 def dash_start(start_date, end_date, init_df):
@@ -411,7 +413,7 @@ def dash_start(start_date, end_date, init_df):
     else:
         combined_df = new_combined_df
     # in off chance vals got out of wack yo
-    copmbined_df = combined_df.sort_values(by=['ts_utc'])
+    combined_df = combined_df.sort_values(by=['ts_utc'], ascending=False)
 
     combined_df.dropna(subset=[col for col in combined_df.columns if col != 'ts_utc'], how='all', inplace=True)
     combined_df.drop(columns=['window_id', 'observing'], inplace=True)
@@ -427,7 +429,7 @@ if __name__ == "__main__":
     dt_start_object = datetime.strptime(start_dt, dt_format)
     dt_end_object = datetime.strptime(end_dt, dt_format)
     t_start = time.time()
-    dash_start(dt_start_object, dt_end_object)
+    dash_start(dt_start_object, dt_end_object, init_df=None)
     t_end = time.time() - t_start
     print(t_end)
     START_UP=True
