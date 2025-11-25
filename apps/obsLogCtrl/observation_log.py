@@ -10,8 +10,6 @@ import sys
 from contextlib import contextmanager #python with statement
 import logging
 from datetime import datetime, timedelta
-from observation_log_listener import listen_with_update
-from html_reload import open_reload
 
 from threading import Thread
 
