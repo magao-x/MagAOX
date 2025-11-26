@@ -530,7 +530,7 @@ void streamWriter::loadConfig()
     {
         tmpstr = MAGAOX_rawimageRelPath;
     }
-    m_rawimageDir = basePath() + "/" + tmpstr + "/" + m_outName;
+    m_rawimageDir = basePath() + "/" + tmpstr ;
 
     config( m_rawimageDir, "writer.savePath" );
 

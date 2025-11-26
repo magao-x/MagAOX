@@ -78,7 +78,6 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
      *@{
      */
     std::string dataDirs;     // Location where the data (onnx file, engine, WFS reference) is stored
-    std::string onnxFileName; // Name of the onnx files
     std::string engineName;   // Name of the engine
     std::string engineDirs;   // Name of the engine
     bool rebuildEngine;       // If true, it will rebuild the engine and save it at engineName
@@ -93,11 +92,14 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
     int inputH {0};
     int inputW {0};
     int inputSize {0};
+    int input2Size {4};
     int outputSize {0};
 
     float* d_input {nullptr};
+    float* d_input2 {nullptr};
     float* d_output {nullptr};
     bool use_fp16 = false;
+    bool explicit_tt = false;
 
     float imageNorm; // Normalization constant for the image intensities
     float modalNorm; // Normalization constant for the modal coefficients
@@ -114,7 +116,9 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
     float *modeval{ nullptr };
     half *modeval_half{ nullptr };
     float *pp_image{ nullptr };
+    float *pup_Is{ nullptr };
     half *pp_image_half{ nullptr };
+    half *pup_Is_half{ nullptr };
 
     size_t m_pwfsWidth{ 0 };  ///< The width of the image
     size_t m_pwfsHeight{ 0 }; ///< The height of the image.
@@ -226,9 +230,19 @@ void nnReconstructor::create_engine_context(){
     int numIOTensors = engine->getNbIOTensors();
     std::cout << "Number of IO Tensors: " << numIOTensors << std::endl;
 
+
     auto inputName = engine->getIOTensorName(0);
-    auto outputName = engine->getIOTensorName(1);
-    std::cout << "Tensor IO names: " << inputName << " " << outputName << std::endl;
+    const char* outputName ;
+    const char* input2Name = " ";
+    if (explicit_tt) {
+        input2Name = engine->getIOTensorName(1);
+        outputName = engine->getIOTensorName(2);
+    }
+    else{
+        outputName = engine->getIOTensorName(1);
+    }
+    ///auto outputName = engine->getIOTensorName(2);
+    std::cout << "Tensor IO names: " << inputName << ", " << input2Name << ", " << outputName << std::endl;
 
     const auto inputDims = engine->getTensorShape(inputName);
     const auto outputDims = engine->getTensorShape(outputName);
@@ -249,10 +263,16 @@ void nnReconstructor::prepare_engine_memory(){
     if (use_fp16) {
         // Allocate FP16 memory
         cudaMalloc((void**)&d_input, inputSize * sizeof(half));
+        if (explicit_tt) {
+            cudaMalloc((void**)&d_input2, input2Size * sizeof(half));
+        }
         cudaMalloc((void**)&d_output, outputSize * sizeof(half));
     } else {
         // Allocate FP32 memory
         cudaMalloc((void**)&d_input, inputSize * sizeof(float));
+        if (explicit_tt) {
+            cudaMalloc((void**)&d_input2, input2Size * sizeof(float));
+        }
         cudaMalloc((void**)&d_output, outputSize * sizeof(float));
     }
     
@@ -264,6 +284,8 @@ void nnReconstructor::prepare_engine_memory(){
 void nnReconstructor::cleanup_engine_memory(){
     if(d_input)
         cudaFree(d_input);
+    if(d_input2)
+        cudaFree(d_input2);
     
     if(d_output)
         cudaFree(d_output);
@@ -323,15 +345,6 @@ inline void nnReconstructor::setupConfig()
                 "string",
                 "The path to the directory with the TRT engine." );
 
-    config.add( "parameters.onnxFileName",
-                "",
-                "parameters.onnxFileName",
-                argType::Required,
-                "parameters",
-                "onnxFileName",
-                false,
-                "string",
-                "Name of the Neural Net ONNX file" );
 
     config.add( "parameters.engineName",
                 "",
@@ -381,6 +394,16 @@ inline void nnReconstructor::setupConfig()
                 false,
                 "bool",
                 "If true the half precision mode will be used." );
+    
+    config.add( "parameters.explicit_tt",
+                "",
+                "parameters.explicit_tt",
+                argType::Required,
+                "parameters",
+                "explicit_tt",
+                false,
+                "bool",
+                "If true the model will additionally give the pupil intensities as input to the NN." );
 
     config.add( "parameters.channel",
                 "",
@@ -451,13 +474,13 @@ inline int nnReconstructor::loadConfigImpl( mx::app::appConfigurator &_config )
 
     _config( dataDirs, "parameters.dataDirs" );
     _config( engineDirs, "parameters.engineDirs" );
-    _config( onnxFileName, "parameters.onnxFileName" );
     _config( engineName, "parameters.engineName" );
     _config( rebuildEngine, "parameters.rebuildEngine" );
 
     _config( imageNorm, "parameters.imageNorm" );
     _config( modalNorm, "parameters.modalNorm" );
     _config( use_fp16, "parameters.use_fp16" );
+    _config( explicit_tt, "parameters.explicit_tt" );
     _config( m_modevalChannel, "parameters.channel");
 
     _config( m_pupPix, "parameters.m_pupPix" );
@@ -471,12 +494,12 @@ inline int nnReconstructor::loadConfigImpl( mx::app::appConfigurator &_config )
         std::cout << "Debug configuration loading: " << std::endl;
         std::cout << "dataDirs: " << dataDirs << std::endl;
         std::cout << "engineDirs: " << engineDirs << std::endl;
-        std::cout << "onnxFileName: " << onnxFileName << std::endl;
         std::cout << "engineName: " << engineName << std::endl;
         std::cout << "rebuildEngine: " << rebuildEngine << std::endl;
         std::cout << "imageNorm: " << imageNorm << std::endl;
         std::cout << "modalNorm: " << modalNorm << std::endl;
         std::cout << "use_fp16: " << use_fp16 << std::endl;
+        std::cout << "explicit_tt: " << explicit_tt << std::endl;
         std::cout << "modeval Channel: " << m_modevalChannel << std::endl;
 
         std::cout << "m_pupPix: " << m_pupPix << std::endl;
@@ -542,6 +565,14 @@ inline int nnReconstructor::appShutdown()
     {
         delete[] pp_image_half;
     }
+    if( pup_Is )
+    {
+        delete[] pup_Is;
+    }
+    if( pup_Is_half)
+    {
+        delete[] pup_Is_half;
+    }
     if( modeval )
     {
         delete[] modeval;
@@ -570,13 +601,21 @@ inline int nnReconstructor::allocate( const dev::shmimT &dummy )
     pixels_per_quadrant = m_pupPix * m_pupPix;
     std::cout << "Pixels: " << pixels_per_quadrant << std::endl;
     pp_image = new float[Npup * pixels_per_quadrant];
+    pup_Is = new float[4];
     modeval = new float[outputSize];
     memset( pp_image, 0, sizeof( float ) * Npup * pixels_per_quadrant );
+        if (explicit_tt){
+            memset( pup_Is, 0, sizeof( float) * 4);
+        }
     memset( modeval, 0, sizeof( float) * outputSize);
     if (use_fp16){
         pp_image_half = new half[Npup * pixels_per_quadrant];
         modeval_half = new half[outputSize];
+        pup_Is_half = new half[4];
         memset( pp_image_half, 0, sizeof( half ) * Npup * pixels_per_quadrant );
+        if (explicit_tt){
+            memset( pup_Is_half, 0, sizeof( half ) * 4);
+        }
         memset( modeval_half, 0, sizeof( half) * outputSize);
     }
 
@@ -622,35 +661,68 @@ inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dum
 
     // aol_imwfs2 is reference and dark subtracted and is power normalized.
     Eigen::Map<eigenImage<unsigned short>> pwfsIm(static_cast<unsigned short *>( curr_src ), m_pwfsHeight, m_pwfsWidth );
+    float X1 = 0;
+    float X2 = 0;
+    float X3 = 0;
+    float X4 = 0;
 
     // Split up the four pupils for the Neural Network.
     int ki = 0;
 
-    for( int col_i = 0; col_i < m_pupPix; ++col_i )
+   for (int col_i = 0; col_i < m_pupPix; ++col_i)
     {
-        for( int row_i = 0; row_i < m_pupPix; ++row_i )
+        for (int row_i = 0; row_i < m_pupPix; ++row_i)
         {
-            pp_image[ki] = imageNorm * (realT)pwfsIm(pup_offset1_y + row_i, pup_offset1_x + col_i );
-            pp_image[ki + pixels_per_quadrant] = imageNorm * (realT)pwfsIm( pup_offset1_y + row_i, pup_offset2_x + col_i );
-            pp_image[ki + 2 * pixels_per_quadrant] = imageNorm * (realT)pwfsIm( pup_offset2_y + row_i, pup_offset1_x + col_i );
-            pp_image[ki + 3 * pixels_per_quadrant] = imageNorm * (realT)pwfsIm( pup_offset2_y + row_i, pup_offset2_x + col_i );
+            // Read once per pixel/quad, reuse for pp_image and sums
+            const float p0 = imageNorm * static_cast<realT>(pwfsIm(pup_offset1_y + row_i, pup_offset1_x + col_i));
+            const float p1 = imageNorm * static_cast<realT>(pwfsIm(pup_offset1_y + row_i, pup_offset2_x + col_i));
+            const float p2 = imageNorm * static_cast<realT>(pwfsIm(pup_offset2_y + row_i, pup_offset1_x + col_i));
+            const float p3 = imageNorm * static_cast<realT>(pwfsIm(pup_offset2_y + row_i, pup_offset2_x + col_i));
+
+            pp_image[ki]                          = p0;
+            pp_image[ki + pixels_per_quadrant]    = p1;
+            pp_image[ki + 2 * pixels_per_quadrant]= p2;
+            pp_image[ki + 3 * pixels_per_quadrant]= p3;
+
+            X1 += p0;
+            X2 += p1;
+            X3 += p2;
+            X4 += p3;
 
             ++ki;
         }
     }
+    pup_Is[0] = (X1 + X2 - X3 - X4)/(m_pupPix*m_pupPix);
+    pup_Is[1] = (X1 + X3 - X2 - X4)/(m_pupPix*m_pupPix);
+    pup_Is[2] = (X1 + X4 - X2 - X3)/(m_pupPix*m_pupPix);
+    pup_Is[3] = 3e-4;
     // Copy input data to device
     if (use_fp16){
-        floatToHalfArray(pp_image_half, pp_image, outputSize);
+        floatToHalfArray(pp_image_half, pp_image, inputSize);
         cudaMemcpy(d_input, pp_image_half, inputSize * sizeof(half), cudaMemcpyHostToDevice);
+        if (explicit_tt){
+            floatToHalfArray(pup_Is_half, pup_Is, input2Size);
+            cudaMemcpy(d_input2, pup_Is_half, input2Size * sizeof(half), cudaMemcpyHostToDevice);
+        }
     }
     else {
         cudaMemcpy(d_input, pp_image, inputSize * sizeof(float), cudaMemcpyHostToDevice);
+        if (explicit_tt){
+            cudaMemcpy(d_input2, pup_Is, input2Size * sizeof(float), cudaMemcpyHostToDevice);
+
+        }
     }
     
 
     // Run inference
-    void* buffers[] = {d_input, d_output};
-    context->executeV2(buffers);
+    if (explicit_tt){
+        void* buffers[] = {d_input, d_input2, d_output};
+        context->executeV2(buffers);
+    }
+    else {
+        void* buffers[] = {d_input, d_output};
+        context->executeV2(buffers);
+    }
 
     // Copy output data back to host
     if (use_fp16){
