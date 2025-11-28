@@ -54,7 +54,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
      *@{
      */
 
-    int m_numChannels{ 8 }; ///< The number of channels being read out.
+    int m_numChannels{ 4 }; ///< The number of channels being read out.
 
     std::string m_fpsDevice;               ///< Device name for getting fps to set circular buffer length.
     std::string m_fpsProperty{ "fps" };    ///< Property name for getting fps to set circular buffer length.
