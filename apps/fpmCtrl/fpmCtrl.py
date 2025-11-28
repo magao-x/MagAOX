@@ -11,6 +11,8 @@ from matplotlib import pyplot as plt
 from magaox.camera import XCam
 from magaox.deformable_mirror import XDeformableMirror
 
+from magaox.constants import StateCodes
+
 from skimage import feature
 
 from purepyindi2 import device, properties, constants
@@ -25,6 +27,20 @@ log = logging.getLogger(__name__)
 
 
 # TODO: add support for auto aligning the other FPMs (future project)
+
+
+@xconf.config
+class CameraConfig:
+    """Configure camsci to use"""
+
+    shmim: str = xconf.field(
+        help="Name of the camera device (specifically, the associated shmim, if different)"
+    )
+    dark_shmim: str = xconf.field(
+        help="Name of the dark frame shmim associated with this camera device"
+    )
+
+
 @xconf.config
 class FpmCtrlConfig(BaseConfig):
     """Python INDI device for auto aligning the knife edge mask."""
@@ -40,6 +56,13 @@ class FpmCtrlConfig(BaseConfig):
     sigma: float = xconf.field(
         default=4.0, help="width of Gaussian kernel in high pass filter"
     )
+    # support for camera
+    camera: CameraConfig = xconf.field(help="Camera to use")
+
+    # Note: I am assuming that I'll need this for ctrl loop
+    sleep_interval_sec: float = xconf.field(
+        default=0.25, help="Sleep interval between loop() calls"
+    )
 
 
 class fpmCtrl(XDevice):
@@ -51,10 +74,20 @@ class fpmCtrl(XDevice):
         magaox/indi/device.py -> imports properties from purepyindi2 and is within the XDevice class
 
         """
-        self.log.info(f"FPM control is ready. {self.config=}")
+        self.log.info(f"FPM control is congured. {self.config=}")
         fsmstate = properties.TextVector(name="fsm")
-        fsmstate.add_element(DefText(name="state", _value="NODEVICE"))
+        # fsmstate.add_element(DefText(name="state", _value="NODEVICE"))
+        fsmstate.add_element(DefText(name="state", _value=StateCodes.INITIALIZED.name))
         self.add_property(fsmstate)
+
+        # init camera
+        self.log.info("Found camera: {:s}".format(self.config.camera.shmim))
+        self.camera = XCam(
+            self.config.camera.shmim,
+            pixel_size=6.0 / 21.0,
+            use_hcipy=True,
+            indi_client=self.client,
+        )
 
         # ------ initialize INDI properties ------
 
@@ -174,6 +207,18 @@ class fpmCtrl(XDevice):
         )
         self.add_property(nv, callback=self.handle_offset)
 
+        self.log.info("Found camera: {:s}".format(self.config.camera.shmim))
+        self.camera = XCam(
+            self.config.camera.shmim,
+            pixel_size=6.0 / 21.0,
+            use_hcipy=True,
+            indi_client=self.client,
+        )
+
+        self.client.get_properties("fwfpm")
+        self.client.get_properties("fwsci1")
+
+    # TODO: Remove hard coding of knife edge orientation
     def knife_edge_dist(self):
         grid = image.grid
 
