@@ -368,14 +368,6 @@ class adcCtrl(XDevice):
         self.add_property(sv, callback=self.handle_knife_edge) 
 
         sv = properties.SwitchVector(
-            name='knife_edge_findzero',
-            rule=constants.SwitchRule.ONE_OF_MANY,
-            perm=constants.PropertyPerm.READ_WRITE,
-        )
-        sv.add_element(DefSwitch(name="request", _value=constants.SwitchState.OFF))
-        self.add_property(sv, callback=self.handle_knife_edge_findzero) 
-
-        sv = properties.SwitchVector(
             name='reset_deltaADCs',
             rule=constants.SwitchRule.ONE_OF_MANY,
             perm=constants.PropertyPerm.READ_WRITE,
@@ -498,26 +490,6 @@ class adcCtrl(XDevice):
             existing_property['toggle'] = constants.SwitchState.OFF
             self._knife_edge = False
 
-        self.update_property(existing_property)
-
-    def handle_knife_edge_findzero(self,existing_property, new_message):
-        if 'request' in new_message and new_message['request'] is constants.SwitchState.ON:
-            self.log.debug('finding convergence point for use with knife edge ')
-            existing_property['request'] = constants.SwitchState.OFF
-            
-            img = self.camera.grab_stack(self._n_avg)
-            transpose = img.shaped.T 
-            img = transpose.ravel()
-
-            if self._lab == False:
-                img = self.ADC.filter_image(img)
-            
-            self.ADC.set_psf(img)
-            angles = self.ADC.find_speckle_angles2()
-            self._knife_edge_zero1 = angles[1]
-            self._knife_edge_zero2 = angles[2]
-
-        self.log.debug(f'zero points for bottom speckles changed to {self._knife_edge_zero1} and {self._knife_edge_zero2}')
         self.update_property(existing_property)
 
     def handle_reset(self,existing_property, new_message):
@@ -645,16 +617,12 @@ class adcCtrl(XDevice):
                         if self._ke_top:
                             ctrl_mtx_top = np.matrix([[0.23973406, 0.41542301]])
                             s1 = self.ADC.slice_speckle_angle(img,0) - zps[0]
-                            #self.log.debug(f'speckle 1 angle: {s1 + zps[0]}')
                             s4 = self.ADC.slice_speckle_angle(img,3) - zps[3]
-                            #self.log.debug(f'speckle 4 angle: {s4+zps[3]}')
                             command = -np.squeeze(ctrl_mtx_top @ np.array([s1,s4]))
                         else:
                             ctrl_mtx_bot = np.matrix([[-0.39625451, -0.19269755]])
                             s2 = self.ADC.slice_speckle_angle(img,1) - zps[1]
-                            #self.log.debug(f'speckle 2 angle: {s1 + zps[1]}')
                             s3 = self.ADC.slice_speckle_angle(img,2) - zps[2]
-                            #self.log.debug(f'speckle 3 angle: {s4+zps[2]}')
                             command = -np.squeeze(ctrl_mtx_bot @ np.array([s2,s3]))
                     else:
                         angles = self.ADC.all_speckle_angles(img)
@@ -681,20 +649,11 @@ class adcCtrl(XDevice):
                 for i in range(self._no_measurements):
                     img = self.camera.grab_stack(self._n_avg)
                     self.log.debug(f'extent: {self._extent}')
-                    
-                    ###temporary fix because XCam is giving me an ndarray right now
                     dim = np.sqrt(img.size)
                     self.log.debug(f'camera ROI square with dim {dim} pixels')
                     extent = dim * 6/21
                     pgrid = make_pupil_grid(dim,extent)
                     img = Field(img.ravel(),pgrid)
-                    ###end temporary fix
-
-                    # transpose = Field(img.shaped.T.ravel(),img.grid)
-                    # img = transpose
-                    #self.log.debug('images taken and transposed')
-
-                    #write_field(img,'/data/users/twitchell/full_window.fits')
 
                     ################### FAKE CAMERA IMAGE ######################
                     #img = read_field('/data/users/twitchell/full_img.fits')
@@ -702,24 +661,18 @@ class adcCtrl(XDevice):
 
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
                     img = self.ADC.filter_image(img)
-
-                    #write_field(img,'/data/users/twitchell/cropped_img.fits')
                     
                     if self._knife_edge:
                         zps = np.array([ 26.06322496, -24.34992527,  25.44309035, -26.44816027]) #zero points for each speckle
                         if self._ke_top:
                             ctrl_mtx_top = np.matrix([[0.23973406, 0.41542301]])
                             s1 = self.ADC.slice_speckle_angle(img,0) - zps[0]
-                            #self.log.debug(f'speckle 1 angle: {s1 + zps[0]}')
                             s4 = self.ADC.slice_speckle_angle(img,3) - zps[3]
-                            #self.log.debug(f'speckle 4 angle: {s4+zps[3]}')
                             command = -np.squeeze(ctrl_mtx_top @ np.array([s1,s4]))
                         else:
                             ctrl_mtx_bot = np.matrix([[-0.39625451, -0.19269755]])
                             s2 = self.ADC.slice_speckle_angle(img,1) - zps[1]
-                            #self.log.debug(f'speckle 2 angle: {s1 + zps[1]}')
                             s3 = self.ADC.slice_speckle_angle(img,2) - zps[2]
-                            #self.log.debug(f'speckle 3 angle: {s4+zps[2]}')
                             command = -np.squeeze(ctrl_mtx_bot @ np.array([s2,s3]))
 
                     else:
@@ -762,7 +715,7 @@ class adcCtrl(XDevice):
                         diff_pointing_pairs[i,] = pointing_pair
                 else:
                     self.log.debug(f'calibrating in knife-edge mode')
-                    pass #none of the knife edge stuff works yet
+                    pass 
 
                 self.set_command(0,0)
                 self.send_command()
