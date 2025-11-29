@@ -738,9 +738,11 @@ class adcCtrl(XDevice):
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
                     img = self.ADC.filter_image(img)
                     
-                    #if we want to find the magnitude and orientation as well
-
-
+                    #if we want to find the orientation as well
+                    if self._vectorize:
+                        mag,ang = self.ADC.est_mag_dir(img)
+                        self.log.debug(f'estimated dispersion direction {ang}°')
+                        #### then calculate the way you'd rotate the adcs, averaged over the number of measurements specified in indi
 
                     ## if we're in knife edge mode
                     if self._knife_edge:
