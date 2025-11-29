@@ -12,9 +12,6 @@
 #include "xWidgets/stageStatus.hpp"
 #include "xWidgets/toggleSlider.hpp"
 
-
-#include "stage/stage.hpp"
-
 #include <QThread>
 
 namespace xqt
@@ -154,12 +151,6 @@ hwpsequencer::hwpsequencer(QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent
     ui.grid->addWidget(ui_fsmState, 1, 0, 1, 1);
     ui_fsmState->device(m_hwptrack);
 
-   //  QFont qf = ui.lab_camName->font();
-   //  qf.setPixelSize(XW_FONT_SIZE+3);
-   //  ui.lab_camName->setFont(qf);
-
-   //  ui.lab_camName->setText(m_hwptrack.c_str());
-
     onDisconnect();
 }
 
@@ -184,7 +175,6 @@ void hwpsequencer::subscribe()
 
 void hwpsequencer::onConnect()
 {
-    ui.lab_camName->setEnabled(true);
 
     setWindowTitle(QString(("HWP Sequencer").c_str()));
 
@@ -312,7 +302,6 @@ void hwpsequencer::setEnableDisable(bool tf, bool all)
 {
     if(all)
     {
-       ui.lab_camName->setEnabled(tf);
        ui_fsmState->setEnabled(tf);
     }
 
@@ -356,7 +345,6 @@ void hwpsequencer::updateGUI()
     if( m_appState == "NODEVICE" || m_appState == "NOTCONNECTED" || m_appState == "CONNECTED")
     {
        setEnableDisable(false, false);
-       ui.lab_camName->setEnabled(true);
        ui_fsmState->setEnabled(true);
     }
     else if( m_appState != "READY" && m_appState != "OPERATING" && m_appState != "CONFIGURING")
