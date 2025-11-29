@@ -391,7 +391,7 @@ class adcCtrl(XDevice):
         self.camera = XCam(
             self.config.camera.shmim,
             pixel_size=6.0/21.0,
-            use_hcipy=True,
+            use_hcipy=False,
             indi_client=self.client
         )
         
