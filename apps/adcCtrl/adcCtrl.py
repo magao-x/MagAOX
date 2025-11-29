@@ -97,11 +97,6 @@ class AdcFitter2:
                 rect = make_rotated_aperture(make_rectangular_aperture(size=(extent,extent), center=speckle_center), np.deg2rad(-self.grating_angle))(img.grid)
 
         speckle_img = rect * img
-        #self.log.debug(f'intensity of speckle {speckle_number}: {np.sum(speckle_img)}')
-
-        #find the center of intensity of the speckle area and window the ORIGINAL image around that center
-        # center_of_intensity = np.array([sum(speckle_img*speckle_img.grid.x)/sum(speckle_img),sum(speckle_img*speckle_img.grid.y)/sum(speckle_img)])
-        # window_size=40
         max_pixel = speckle_img.grid[np.argmax(speckle_img)]
         window_size=self.speckle_window
         new_img = self.window_field(img,[max_pixel[0],max_pixel[1]],window_size,window_size)
@@ -157,9 +152,6 @@ class AdcFitter2:
             rightbound = 50
             #print('speckle falls off right (top) edge')
         else: rightbound = None        
-
-        # leftbound = nonlin_region[nonlin_region < midpoint][-1] if any(nonlin_region < midpoint) else None
-        # rightbound = nonlin_region[nonlin_region > midpoint][0] if any(nonlin_region > midpoint) else None
 
         #find the centroid for the vector version
         if leftbound != None and rightbound != None:
@@ -422,6 +414,14 @@ class adcCtrl(XDevice):
         self.add_property(sv, callback=self.handle_labmode) 
 
         sv = properties.SwitchVector(
+            name='vectorize',
+            rule=constants.SwitchRule.ONE_OF_MANY,
+            perm=constants.PropertyPerm.READ_WRITE,
+        )
+        sv.add_element(DefSwitch(name="toggle", _value=constants.SwitchState.OFF))
+        self.add_property(sv, callback=self.handle_vectorize) 
+
+        sv = properties.SwitchVector(
             name='knife_edge',
             rule=constants.SwitchRule.ONE_OF_MANY,
             perm=constants.PropertyPerm.READ_WRITE,
@@ -467,6 +467,7 @@ class adcCtrl(XDevice):
         self._knife_edge_zero2 = 26.544759645
         self._no_measurements = 1
         self._ke_top = True #orientation of the knife mask
+        self._vectorize = False #defaults to not calculating dispersion orientation
 
         if self.client['adctrack.deltaADC1.current'] != 0:
             self.set_command(0,0)
@@ -535,6 +536,18 @@ class adcCtrl(XDevice):
             self.log.debug('changing to onsky mode')
             existing_property['toggle'] = constants.SwitchState.OFF
             self._lab = False
+
+        self.update_property(existing_property)
+
+    def handle_vectorize(self,existing_property, new_message):
+        if 'toggle' in new_message and new_message['toggle'] is constants.SwitchState.ON:
+            self.log.debug('vector mode on')
+            existing_property['toggle'] = constants.SwitchState.ON
+            self._vectorize = True
+        else:
+            self.log.debug('vector mode off')
+            existing_property['toggle'] = constants.SwitchState.OFF
+            self._vectorize = False
 
         self.update_property(existing_property)
 
