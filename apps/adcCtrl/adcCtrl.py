@@ -688,14 +688,14 @@ class adcCtrl(XDevice):
                     img = self.ADC.filter_image(img)
                     
                     if self._knife_edge:
-                        zps = np.array([ 26.06322496, -24.34992527,  25.44309035, -26.44816027]) #zero points for each speckle
+                        zps = np.array([ 25.47224616, -25.9758844,   25.82760786, -25.5740744 ]) #zero points for each speckle
                         if self._ke_top:
-                            ctrl_mtx_top = np.matrix([[0.23973406, 0.41542301]])
+                            ctrl_mtx_top = np.matrix([[0.27260458, 0.69552136]])
                             s1 = self.ADC.slice_speckle_angle(img,0) - zps[0]
                             s4 = self.ADC.slice_speckle_angle(img,3) - zps[3]
                             command = -np.squeeze(ctrl_mtx_top @ np.array([s1,s4]))
                         else:
-                            ctrl_mtx_bot = np.matrix([[-0.39625451, -0.19269755]])
+                            ctrl_mtx_bot = np.matrix([[-0.68087296, -0.36395656]])
                             s2 = self.ADC.slice_speckle_angle(img,1) - zps[1]
                             s3 = self.ADC.slice_speckle_angle(img,2) - zps[2]
                             command = -np.squeeze(ctrl_mtx_bot @ np.array([s2,s3]))
