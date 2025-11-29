@@ -20,7 +20,7 @@
 namespace xqt
 {
 
-/// A GUI for an XWC Standard Camera
+/// A GUI for sequencing the HWP for polarimetric differential imaging
 class hwpsequencer : public xWidget
 {
     Q_OBJECT
@@ -29,49 +29,38 @@ protected:
 
     std::string m_appState;
 
-    std::string m_camName;
-    std::string m_darkName;
-    std::string m_avgName;
+    std::string m_hwptrack {"hwptrack"};
+
+    std::string m_stagehwprot {"stagehwprot"};
+
+    std::string m_stagehwplin {"stagehwplin"};
+
+    bool m_tracking;
+
+    float m_hwpsetpoint;
+
+    float m_hwpoffset;
+
+    float m_hwpactual;
+
+    std::string m_hwpname;
+
+    int m_cycleindex;
+
+    int m_cycletotal;
+
 
     fsmDisplay * ui_fsmState {nullptr};
 
-    statusEntry * ui_tempCCD {nullptr};
+    statusEntry * ui_hwpangle {nullptr};
 
-    statusDisplay * ui_tempStatus {nullptr};
+    statusCombo * ui_hwplinstage {nullptr};
 
-    QPushButton * ui_reconfigure {nullptr};
+    toggleSlider * ui_tracking {nullptr};
 
-    std::vector<std::string> m_stageNames;
+    QPushButton * ui_startSequencing {nullptr};
 
-    std::vector<stageStatus *> ui_stage;
-
-    shutterStatus * ui_shutterStatus {nullptr};
-
-    roiStatus * ui_roiStatus {nullptr};
-
-    statusCombo * ui_modes {nullptr};
-
-    statusCombo * ui_readoutSpd {nullptr};
-
-    statusCombo * ui_vshiftSpd {nullptr};
-
-    toggleSlider * ui_cropMode {nullptr};
-
-    statusEntry * ui_expTime {nullptr};
-
-    statusEntry * ui_fps {nullptr};
-
-    statusEntry * ui_emGain {nullptr};
-
-    statusEntry * ui_avgTime {nullptr};
-
-    toggleSlider * ui_synchro {nullptr};
-
-    QPushButton * ui_takeDarks {nullptr};
-
-    float m_temp {-99};
-
-    bool m_takingDark {false};
+    bool m_sequencing {false};
 
     bool m_inUpdate {false};
 
@@ -80,14 +69,11 @@ protected:
     bool m_connected {false};
 
 public:
-    explicit camera( std::string & camName,
-                     QWidget * Parent = 0,
-                     Qt::WindowFlags f = Qt::WindowFlags()
-                   );
+    explicit hwpsequencer( QWidget * Parent = 0, Qt::WindowFlags f = Qt::WindowFlags() );
 
-    ~camera();
+    ~hwpsequencer();
 
-    void subscribe( );
+    void subscribe();
 
     virtual void onConnect();
     virtual void onDisconnect();
@@ -109,41 +95,15 @@ public slots:
 
     void updateGUI();
 
-    void setup_temp_ccd(bool ro);
+    void setup_hwpangle(bool ro);
 
-    void setup_tempStatus();
+    void setup_hwplinstage(bool ro);
 
-    void setup_reconfigure();
+    void setup_tracking();
 
-    void reconfigure();
+    void setup_startSequence();
 
-    void setup_stage();
-
-    void setup_shutter();
-
-    void setup_roiStatus();
-
-    void setup_modes();
-
-    void setup_readoutSpd();
-
-    void setup_vshiftSpd();
-
-    void setup_cropMode();
-
-    void setup_expTime(bool ro);
-
-    void setup_fps(bool ro);
-
-    void setup_emGain(bool ro);
-
-   void setup_avgTime(bool ro);
-
-    void setup_synchro();
-
-    void setup_takeDarks();
-
-    void takeDark();
+    void startSequence();
 
 signals:
 
@@ -152,42 +112,22 @@ signals:
     void updateTimerStop();
     void updateTimerStart(int);
 
-    void add_temp_ccd(bool ro);
-    void add_tempStatus();
 
-    void add_reconfigure();
+    void add_hwpangle(bool ro);
 
-    void add_shutter();
+    void add_hwplinstage(bool ro);
 
-    void add_roiStatus();
-    void add_modes();
+    void add_tracking();
 
-    void add_readoutSpd();
-    void add_vshiftSpd();
-
-    void add_cropMode();
-
-    void add_expTime(bool ro);
-    void add_fps(bool ro);
-    void add_emGain(bool ro);
-
-    void add_avgTime(bool ro);
-
-    void add_synchro();
-
-    void add_takeDarks();
+    void add_startSequence();
 
 private:
 
-    Ui::camera ui;
+    Ui::hwpsequencer ui;
 };
 
-camera::camera( std::string & camName,
-                QWidget * Parent,
-                Qt::WindowFlags f) : xWidget(Parent, f), m_camName{camName}
+hwpsequencer::hwpsequencer(QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f),
 {
-    m_darkName = m_camName + "-dark";
-    m_avgName = m_camName + "-avg";
 
     ui.setupUi(this);
 
@@ -199,27 +139,12 @@ camera::camera( std::string & camName,
     connect(this, SIGNAL(updateTimerStop()), m_updateTimer, SLOT(stop()));
     connect(this, SIGNAL(updateTimerStart(int)), m_updateTimer, SLOT(start(int)));
 
-    connect(this, SIGNAL(add_temp_ccd(bool)), this, SLOT(setup_temp_ccd(bool)));
-    connect(this, SIGNAL(add_tempStatus()), this, SLOT(setup_tempStatus()));
 
-    connect(this, SIGNAL(add_reconfigure()), this, SLOT(setup_reconfigure()));
+    connect(this, SIGNAL(add_hwpangle(bool)), this, SLOT(setup_hwpangle(bool)));
+    connect(this, SIGNAL(add_hwplinstage(bool)), this, SLOT(setup_hwplinstage(bool)));
+    connect(this, SIGNAL(add_tracking()), this, SLOT(setup_tracking()));
 
-    connect(this, SIGNAL(add_shutter()), this, SLOT(setup_shutter()));
-
-    connect(this, SIGNAL(add_roiStatus()), this, SLOT(setup_roiStatus()));
-    connect(this, SIGNAL(add_modes()), this, SLOT(setup_modes()));
-
-    connect(this, SIGNAL(add_readoutSpd()), this, SLOT(setup_readoutSpd()));
-    connect(this, SIGNAL(add_vshiftSpd()), this, SLOT(setup_vshiftSpd()));
-    connect(this, SIGNAL(add_cropMode()), this, SLOT(setup_cropMode()));
-
-    connect(this, SIGNAL(add_expTime(bool)), this, SLOT(setup_expTime(bool)));
-    connect(this, SIGNAL(add_fps(bool)), this, SLOT(setup_fps(bool)));
-    connect(this, SIGNAL(add_emGain(bool)), this, SLOT(setup_emGain(bool)));
-    connect(this, SIGNAL(add_avgTime(bool)), this, SLOT(setup_avgTime(bool)));
-    connect(this, SIGNAL(add_synchro()), this, SLOT(setup_synchro()));
-
-    connect(this, SIGNAL(add_takeDarks()), this, SLOT(setup_takeDarks()));
+    connect(this, SIGNAL(add_startSequence()), this, SLOT(setup_startSequence()));
 
     QSpacerItem *holder = new QSpacerItem(10,0, QSizePolicy::Expanding, QSizePolicy::Expanding);
     ui.grid->addItem(holder, 2,1,1,1);
@@ -227,70 +152,43 @@ camera::camera( std::string & camName,
     ui_fsmState = new xqt::fsmDisplay(this);
     ui_fsmState->setObjectName(QString::fromUtf8("fsmState"));
     ui.grid->addWidget(ui_fsmState, 1, 0, 1, 1);
-    ui_fsmState->device(m_camName);
+    ui_fsmState->device(m_hwptrack);
 
-    QFont qf = ui.lab_camName->font();
-    qf.setPixelSize(XW_FONT_SIZE+3);
-    ui.lab_camName->setFont(qf);
+   //  QFont qf = ui.lab_camName->font();
+   //  qf.setPixelSize(XW_FONT_SIZE+3);
+   //  ui.lab_camName->setFont(qf);
 
-    ui.lab_camName->setText(m_camName.c_str());
+   //  ui.lab_camName->setText(m_hwptrack.c_str());
 
     onDisconnect();
 }
 
-camera::~camera()
+hwpsequencer::~hwpsequencer()
 {
 }
 
-void camera::subscribe()
+void hwpsequencer::subscribe()
 {
     if(!m_parent) return;
 
-    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "");
-    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "fsm");
-    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "");
-    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "start");
-    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_avgName, "");
-    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_avgName, "avgTime");
+    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_hwptrack, "");
+    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_hwptrack, "fsm");
 
     m_parent->addSubscriber(ui_fsmState);
-
-    if(ui_tempCCD) m_parent->addSubscriber(ui_tempCCD);
-    if(ui_tempStatus) m_parent->addSubscriber(ui_tempStatus);
-
-    if(ui_stage.size() > 0)
-    {
-        for(size_t n = 0; n < ui_stage.size(); ++n)
-        {
-            m_parent->addSubscriber(ui_stage[n]);
-        }
-    }
-
-    if(ui_shutterStatus) m_parent->addSubscriber(ui_shutterStatus);
-    if(ui_roiStatus) m_parent->addSubscriber(ui_roiStatus);
-    if(ui_modes) m_parent->addSubscriber(ui_modes);
-    if(ui_readoutSpd) m_parent->addSubscriber(ui_readoutSpd);
-    if(ui_vshiftSpd) m_parent->addSubscriber(ui_vshiftSpd);
-    if(ui_cropMode) m_parent->addSubscriber(ui_cropMode);
-    if(ui_expTime) m_parent->addSubscriber(ui_expTime);
-    if(ui_fps) m_parent->addSubscriber(ui_fps);
-    if(ui_emGain) m_parent->addSubscriber(ui_emGain);
-    if(ui_avgTime) m_parent->addSubscriber(ui_avgTime);
-    if(ui_synchro) m_parent->addSubscriber(ui_synchro);
+    if(ui_hwpangle) m_parent->addSubscriber(ui_hwpangle);
+    if(ui_hwplinstage) m_parent->addSubscriber(ui_hwplinstage);
+    if(ui_tracking) m_parent->addSubscriber(ui_tracking);
 
     return;
 }
 
-void camera::onConnect()
+void hwpsequencer::onConnect()
 {
     ui.lab_camName->setEnabled(true);
 
-    setWindowTitle(QString((m_camName+"Ctrl").c_str()));
+    setWindowTitle(QString(("HWP Sequencer").c_str()));
 
     ui_fsmState->onConnect();
-
-    if(ui_tempCCD) ui_tempCCD->onConnect();
-    if(ui_tempStatus) ui_tempStatus->onConnect();
 
     if(ui_stage.size() > 0)
     {
@@ -300,20 +198,13 @@ void camera::onConnect()
         }
     }
 
-    if(ui_shutterStatus) ui_shutterStatus->onConnect();
-
-    if(ui_roiStatus) ui_roiStatus->onConnect();
     if(ui_modes) ui_modes->onConnect();
-    if(ui_readoutSpd) ui_readoutSpd->onConnect();
-    if(ui_vshiftSpd) ui_readoutSpd->onConnect();
-    if(ui_cropMode) ui_cropMode->onConnect();
 
-    if(ui_expTime) ui_expTime->onConnect();
-    if(ui_fps) ui_fps->onConnect();
-    if(ui_emGain) ui_emGain->onConnect();
-    if(ui_avgTime) ui_avgTime->onConnect();
+    if(ui_hwpangle) ui_hwpangle->onConnect();
 
-    if(ui_synchro) ui_synchro->onConnect();
+    if(ui_hwplinstage) ui_hwplinstage->onConnect();
+
+    if(ui_tracking) ui_tracking->onConnect();
 
     clearFocus();
 
@@ -322,15 +213,13 @@ void camera::onConnect()
     emit doUpdateGUI();
 }
 
-void camera::onDisconnect()
+void hwpsequencer::onDisconnect()
 {
 
-    setWindowTitle(QString((m_camName+"Ctrl").c_str()) + QString(" (disconnected)"));
+    setWindowTitle(QString(("HWP Sequencer").c_str())) + QString(" (disconnected)"));
 
     ui_fsmState->onDisconnect();
 
-    if(ui_tempCCD) ui_tempCCD->onDisconnect();
-    if(ui_tempStatus) ui_tempStatus->onDisconnect();
 
     if(ui_stage.size() > 0)
     {
@@ -340,20 +229,13 @@ void camera::onDisconnect()
         }
     }
 
-    if(ui_shutterStatus) ui_shutterStatus->onDisconnect();
-
-    if(ui_roiStatus) ui_roiStatus->onDisconnect();
     if(ui_modes) ui_modes->onDisconnect();
-    if(ui_readoutSpd) ui_readoutSpd->onDisconnect();
-    if(ui_vshiftSpd) ui_readoutSpd->onDisconnect();
-    if(ui_cropMode) ui_cropMode->onDisconnect();
 
-    if(ui_expTime) ui_expTime->onDisconnect();
-    if(ui_fps) ui_fps->onDisconnect();
-    if(ui_emGain) ui_emGain->onDisconnect();
-    if(ui_avgTime) ui_avgTime->onDisconnect();
+    if(ui_hwpangle) ui_hwpangle->onDisconnect();
 
-    if(ui_synchro) ui_synchro->onDisconnect();
+    if(ui_hwplinstage) ui_hwplinstage->onDisconnect();
+
+    if(ui_tracking) ui_tracking->onDisconnect();
 
     clearFocus();
 
@@ -367,16 +249,16 @@ void camera::onDisconnect()
     setEnableDisable(false);
 }
 
-void camera::handleDefProperty( const pcf::IndiProperty & ipRecv)
+void hwpsequencer::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {
    return handleSetProperty(ipRecv);
 }
 
-void camera::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void hwpsequencer::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
-   if(ipRecv.getDevice() != m_camName && ipRecv.getDevice() != m_darkName && ipRecv.getDevice() != m_avgName) return;
+   if(ipRecv.getDevice() != m_hwptrack && ipRecv.getDevice() != m_darkName && ipRecv.getDevice() != m_avgName) return;
 
-   if(ipRecv.getDevice() == m_camName)
+   if(ipRecv.getDevice() == m_hwptrack)
    {
       if(ipRecv.getName() == "fsm")
       {
@@ -386,156 +268,47 @@ void camera::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
 
-      if(ipRecv.getName() == "temp_ccd")
+      if(ipRecv.getName() == "tracking")
       {
-         if(!ui_tempCCD)
+         if(!ui_tracking)
+         {
+            emit add_tracking();
+         }
+      }
+
+      if(ipRecv.getName() == "hwpangle")
+      {
+         if(!ui_hwpangle)
          {
             bool ro = true;
             if(ipRecv.find("target")) ro = false;
 
-            emit add_temp_ccd(ro);
+            emit add_hwpangle(ro);
          }
       }
 
-      if(ipRecv.getName() == "temp_control")
+      if(ipRecv.getName() == "hwplinstage")
       {
-         if(!ui_tempStatus)
-         {
-            emit add_tempStatus();
-         }
-      }
-
-      if(ipRecv.getName() == "reconfigure")
-      {
-         if(!ui_reconfigure)
-         {
-            emit add_reconfigure();
-         }
-      }
-
-      if(ipRecv.getName() == "shutter")
-      {
-         if(!ui_shutterStatus)
-         {
-            emit add_shutter();
-         }
-      }
-
-      if(ipRecv.getName() == "roi_set")
-      {
-         if(!ui_roiStatus)
-         {
-            emit add_roiStatus();
-         }
-      }
-
-      if(ipRecv.getName() == "mode")
-      {
-         if(!ui_modes)
-         {
-            emit add_modes();
-         }
-      }
-
-      if(ipRecv.getName() == "readout_speed")
-      {
-         if(!ui_readoutSpd)
-         {
-            emit add_readoutSpd();
-         }
-      }
-
-      if(ipRecv.getName() == "vshift_speed")
-      {
-         if(!ui_vshiftSpd)
-         {
-            emit add_vshiftSpd();
-         }
-      }
-
-      if(ipRecv.getName() == "roi_crop_mode")
-      {
-         if(!ui_cropMode)
-         {
-            emit add_cropMode();
-         }
-      }
-
-      if(ipRecv.getName() == "exptime")
-      {
-         if(!ui_expTime)
+         if(!ui_hwplinstage)
          {
             bool ro = true;
             if(ipRecv.find("target")) ro = false;
 
-            emit add_expTime(ro);
+            emit add_hwplinstage(ro);
          }
       }
 
-      if(ipRecv.getName() == "fps")
-      {
-         if(!ui_fps)
-         {
-            bool ro = true;
-            if(ipRecv.find("target")) ro = false;
-
-            emit add_fps(ro);
-         }
-      }
-
-      if(ipRecv.getName() == "emgain")
-      {
-         if(!ui_emGain)
-         {
-            bool ro = true;
-            if(ipRecv.find("target")) ro = false;
-
-            emit add_emGain(ro);
-         }
-      }
-
-      if(ipRecv.getName() == "synchro")
-      {
-         if(!ui_synchro)
-         {
-            emit add_synchro();
-         }
-      }
-
-   }
-   else if(ipRecv.getDevice() == m_darkName)
-   {
-      if(!ui_takeDarks) emit add_takeDarks();
-
-      if(ipRecv.getName() == "start" && ipRecv.find("toggle"))
-      {
-         if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
-         {
-            m_takingDark = true;
-         }
-         else
-         {
-            m_takingDark = false;
-         }
-      }
-   }
-   else if(ipRecv.getDevice() == m_avgName)
-   {
-      if(!ui_avgTime)
-      {
-         emit add_avgTime(false);
-      }
    }
 
    emit doUpdateGUI();
 }
 
-void camera::hideAll()
+void hwpsequencer::hideAll()
 {
-   if(ui_roiStatus) ui_roiStatus->hide();
+   return;
 }
 
-void camera::setEnableDisable(bool tf, bool all)
+void hwpsequencer::setEnableDisable(bool tf, bool all)
 {
     if(all)
     {
@@ -543,18 +316,9 @@ void camera::setEnableDisable(bool tf, bool all)
        ui_fsmState->setEnabled(tf);
     }
 
-    if(ui_reconfigure) ui_reconfigure->setEnabled(tf);
-    if(ui_tempCCD) ui_tempCCD->setEnabled(tf);
-    if(ui_tempStatus) ui_tempStatus->setEnabled(tf);
+    if(ui_hwpangle) ui_hwpangle->setEnabled(tf);
 
-    if(ui_roiStatus) ui_roiStatus->setEnabled(tf);
-    if(ui_modes) ui_modes->setEnabled(tf);
-    if(ui_readoutSpd) ui_readoutSpd->setEnabled(tf);
-    if(ui_vshiftSpd) ui_vshiftSpd->setEnabled(tf);
-    if(ui_expTime) ui_expTime->setEnabled(tf);
-    if(ui_fps) ui_fps->setEnabled(tf);
-    if(ui_emGain) ui_emGain->setEnabled(tf);
-    if(ui_avgTime) ui_avgTime->setEnabled(tf);
+    if(ui_hwplinstage) ui_hwplinstage->setEnabled(tf);
 
     if(ui_stage.size() > 0)
     {
@@ -564,20 +328,18 @@ void camera::setEnableDisable(bool tf, bool all)
         }
     }
 
-    if(ui_shutterStatus) ui_shutterStatus->setEnabled(tf);
-
-    if(ui_takeDarks) ui_takeDarks->setEnabled(tf);
+    if(ui_startSequence) ui_startSequence->setEnabled(tf);
 
 }
 
-void camera::setupConfig( mx::app::appConfigurator & config )
+void hwpsequencer::setupConfig( mx::app::appConfigurator & config )
 {
-   config.add("camera.stages", "", "camera.stages", mx::app::argType::Required, "camera", "stages", false, "vector<string>", "List of stages associated with this camera");
+   config.add("hwpsequencer.stages", "", "hwpsequencer.stages", mx::app::argType::Required, "hwpsequencer", "stages", false, "vector<string>", "List of stages associated with this app");
 }
 
-void camera::loadConfig( mx::app::appConfigurator & config )
+void hwpsequencer::loadConfig( mx::app::appConfigurator & config )
 {
-    config(m_stageNames, "camera.stages");
+    config(m_stageNames, "hwpsequencer.stages");
     for(size_t n = 0; n < m_stageNames.size(); ++n)
     {
         setup_stage();
@@ -585,7 +347,7 @@ void camera::loadConfig( mx::app::appConfigurator & config )
     onDisconnect();
 }
 
-void camera::updateGUI()
+void hwpsequencer::updateGUI()
 {
     if(m_inUpdate || !m_connected) return;
     emit updateTimerStop();
@@ -611,8 +373,6 @@ void camera::updateGUI()
     }
 
     //Update the component GUIs to ensure they update for connection state, etc.
-    if(ui_tempCCD) ui_tempCCD->updateGUI();
-    if(ui_roiStatus) ui_roiStatus->updateGUI();
 
     if(ui_stage.size() > 0)
     {
@@ -622,26 +382,19 @@ void camera::updateGUI()
         }
     }
 
-    if(ui_shutterStatus) ui_shutterStatus->updateGUI();
-    if(ui_modes) ui_modes->updateGUI();
-    if(ui_readoutSpd) ui_readoutSpd->updateGUI();
-    if(ui_vshiftSpd) ui_vshiftSpd->updateGUI();
-    if(ui_cropMode) ui_cropMode->updateGUI();
-    if(ui_expTime) ui_expTime->updateGUI();
-    if(ui_fps) ui_fps->updateGUI();
-    if(ui_emGain) ui_emGain->updateGUI();
-    if(ui_avgTime) ui_avgTime->updateGUI();
-    if(ui_synchro) ui_synchro->updateGUI();
+    if(ui_hwpangle) ui_hwpangle->updateGUI();
+    if(ui_hwplinstage) ui_hwplinstage->updateGUI();
+    if(ui_tracking) ui_tracking->updateGUI();
 
-    if( (m_appState == "READY" || m_appState == "OPERATING") && ui_takeDarks )
+    if( (m_appState == "READY" || m_appState == "OPERATING") && ui_startSequence )
     {
-       if(m_takingDark)
+       if(m_sequencing)
        {
-          ui_takeDarks->setEnabled(false);
+          ui_startSequence->setEnabled(false);
        }
        else
        {
-          ui_takeDarks->setEnabled(true);
+          ui_startSequence->setEnabled(true);
        }
     }
 
@@ -650,86 +403,65 @@ void camera::updateGUI()
 
 } //updateGUI()
 
-void camera::setup_temp_ccd(bool ro)
+
+void hwpsequencer::setup_hwpangle(bool ro)
 {
-   if(ui_tempCCD) return;
+   if(ui_hwpangle) return;
 
-   ui_tempCCD = new statusEntry(this);
-   ui_tempCCD->setObjectName(QString::fromUtf8("tempCCD"));
-   ui_tempCCD->setup(m_camName, "temp_ccd", statusEntry::FLOAT, "Detector Temp.", "C");
-   ui_tempCCD->highlightChanges(false);
-   ui_tempCCD->readOnly(ro);
+   ui_hwpangle = new statusEntry(this);
+   ui_hwpangle->setObjectName(QString::fromUtf8("hwpangle"));
+   ui_hwpangle->setup(m_hwptrack, "hwpangle", statusEntry::FLOAT, "HWP Angle", "deg");
+   ui_hwpangle->highlightChanges(true);
+   ui_hwpangle->readOnly(ro);
 
-   ui.grid->addWidget(ui_tempCCD, 0, 1, 1, 1);
+   ui.grid->addWidget(ui_hwpangle, 7, 1, 1, 1);
 
-   ui_tempCCD->onDisconnect();
+   ui_hwpangle->onDisconnect();
 
-   m_parent->addSubscriber(ui_tempCCD);
-
+   m_parent->addSubscriber(ui_hwpangle);
 }
 
-void camera::setup_tempStatus()
+void hwpsequencer::setup_hwplinstage(bool ro)
 {
-   if(ui_tempStatus) return;
+   if(ui_hwplinstage) return;
 
-   ui_tempStatus = new statusDisplay(m_camName,"temp_control", "status", "Temp. Ctrl.", "", this, Qt::WindowFlags());
-   ui_tempStatus->setObjectName(QString::fromUtf8("tempStatus"));
+   ui_hwplinstage = new statusEntry(this);
+   ui_hwplinstage->setObjectName(QString::fromUtf8("hwplinstage"));
+   // ui_hwplinstage->setup(m_hwptrack, "hwplinstage", statusCombo::, "HWP Angle", "deg");
+   ui_hwplinstage->highlightChanges(true);
+   ui_hwplinstage->readOnly(ro);
 
-   ui.grid->addWidget(ui_tempStatus, 1, 1, 1, 1);
+   ui.grid->addWidget(ui_hwplinstage, 7, 1, 1, 1);
 
-   ui_tempStatus->onDisconnect();
+   ui_hwplinstage->onDisconnect();
 
-   m_parent->addSubscriber(ui_tempStatus);
+   m_parent->addSubscriber(ui_hwplinstage);
 }
 
-void camera::setup_reconfigure()
+void hwpsequencer::setup_tracking()
 {
-   if(ui_reconfigure) return;
+   if(ui_tracking) return;
 
-   ui_reconfigure = new QPushButton(this);
-   ui_reconfigure->setObjectName(QString::fromUtf8("reconfigure"));
-   ui_reconfigure->setText("reconfigure");
-   ui_reconfigure->setMaximumWidth(200);
-   connect(ui_reconfigure, SIGNAL(pressed()), this, SLOT(reconfigure()));
-   ui.grid->addWidget(ui_reconfigure, 3, 0, 1, 1, Qt::AlignHCenter);
+   ui_tracking = new toggleSlider(m_hwptrack, "tracking", "Tracking", this);
+   ui_tracking->setObjectName(QString::fromUtf8("tracking"));
 
+   ui.grid->addWidget(ui_tracking, 10, 1, 1, 1);
+
+   ui_tracking->onDisconnect();
+
+   m_parent->addSubscriber(ui_tracking);
 }
 
-void camera::reconfigure()
+void hwpsequencer::setup_startSequence()
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+    if(ui_startSequence) return;
 
-   ipFreq.setDevice(m_camName);
-   ipFreq.setName("reconfigure");
-   ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
-
-   sendNewProperty(ipFreq);
-}
-
-void camera::setup_stage()
-{
-    if(ui_stage.size() >= m_stageNames.size()) return;
-
-    size_t n = ui_stage.size();
-
-    ui_stage.push_back(new stageStatus(m_stageNames[n], this));
-
-    ui_stage[n]->setObjectName(QString::fromUtf8(m_stageNames[n].c_str()));
-
-    ui.grid->addWidget(ui_stage[n], 4+n, 0, 1, 1);
-
-    ui_stage[n]->onDisconnect();
-
-}
-
-void camera::setup_shutter()
-{
-    if(ui_shutterStatus) return;
-
-    ui_shutterStatus = new shutterStatus(m_camName, this);
-
-    ui_shutterStatus->setObjectName(QString::fromUtf8("shutter"));
+    ui_startSequence = new QPushButton(this);
+    ui_startSequence->setObjectName(QString::fromUtf8("startSequence"));
+    ui_startSequence->setText("Start sequence");
+    ui_startSequence->setMaximumWidth(200);
+    ui_startSequence->setFocusPolicy(Qt::NoFocus);
+    connect(ui_startSequence, SIGNAL(pressed()), this, SLOT(startSequence()));
 
     int doff = 0;
     if(ui_stage.size() > 4)
@@ -737,207 +469,18 @@ void camera::setup_shutter()
         doff = ui_stage.size() - 4;
     }
 
-    ui.grid->addWidget(ui_shutterStatus, 8 + doff, 0, 1, 1);
-
-    ui_shutterStatus->onDisconnect();
-
-    m_parent->addSubscriber(ui_shutterStatus);
-}
-
-void camera::setup_roiStatus()
-{
-   if(ui_roiStatus) return; //can get called from several threads
-
-   ui_roiStatus = new roiStatus(m_camName, this);
-   ui_roiStatus->setObjectName(QString::fromUtf8("roiStatus"));
-
-   ui.grid->addWidget(ui_roiStatus, 3, 1, 1, 1);
-
-   ui_roiStatus->onDisconnect();
-
-   m_parent->addSubscriber(ui_roiStatus);
-}
-
-void camera::setup_modes()
-{
-   if(ui_modes) return;
-
-   ui_modes = new statusCombo(m_camName, "mode", "", "Mode", "", this);
-
-   ui_modes->setObjectName(QString::fromUtf8("modes"));
-
-   ui.grid->addWidget(ui_modes, 3, 1, 1, 1);
-
-   ui_modes->onDisconnect();
-
-   m_parent->addSubscriber(ui_modes);
+    ui.grid->addWidget(ui_startSequence, 9 + doff, 0, 1, 1,Qt::AlignHCenter);
 
 }
 
-void camera::setup_readoutSpd()
+void hwpsequencer::startSequence()
 {
-   if(ui_readoutSpd) return;
 
-   ui_readoutSpd = new statusCombo(m_camName,"readout_speed", "", "Readout Spd", "", this);
-   ui_readoutSpd->ctrlWidget(nullptr);
-
-   ui_readoutSpd->setObjectName(QString::fromUtf8("readoutSpd"));
-
-   ui.grid->addWidget(ui_readoutSpd, 4, 1, 1, 1);
-
-   ui_readoutSpd->onDisconnect();
-
-   m_parent->addSubscriber(ui_readoutSpd);
-}
-
-void camera::setup_vshiftSpd()
-{
-   if(ui_vshiftSpd) return;
-
-   ui_vshiftSpd = new statusCombo(m_camName,"vshift_speed", "", "Vert. Shift Spd", "", this);
-   ui_vshiftSpd->ctrlWidget(nullptr);
-
-   ui_vshiftSpd->setObjectName(QString::fromUtf8("vshiftSpd"));
-
-   ui.grid->addWidget(ui_vshiftSpd, 5, 1, 1, 1);
-
-   ui_vshiftSpd->onDisconnect();
-
-   m_parent->addSubscriber(ui_vshiftSpd);
-}
-
-void camera::setup_cropMode()
-{
-   if(ui_cropMode) return;
-
-   ui_cropMode = new toggleSlider(m_camName, "roi_crop_mode", "Crop Mode", this);
-   ui_cropMode->setObjectName(QString::fromUtf8("cropMode"));
-
-   ui.grid->addWidget(ui_cropMode, 6, 1, 1, 1);
-
-   ui_cropMode->onDisconnect();
-
-   m_parent->addSubscriber(ui_cropMode);
-}
-
-void camera::setup_expTime(bool ro)
-{
-   if(ui_expTime) return;
-
-   ui_expTime = new statusEntry(this);
-   ui_expTime->setObjectName(QString::fromUtf8("expTime"));
-   ui_expTime->setup(m_camName, "exptime", statusEntry::FLOAT, "Exp. Time", "sec");
-   ui_expTime->highlightChanges(true);
-   ui_expTime->readOnly(ro);
-
-   ui.grid->addWidget(ui_expTime, 7, 1, 1, 1);
-
-   ui_expTime->onDisconnect();
-
-   m_parent->addSubscriber(ui_expTime);
-}
-
-void camera::setup_fps(bool ro)
-{
-   if(ui_fps) return;
-
-   ui_fps = new statusEntry(this);
-   ui_fps->setObjectName(QString::fromUtf8("fps"));
-   ui_fps->setup(m_camName, "fps", statusEntry::FLOAT, "Frame Rate", "F.P.S.");
-   ui_fps->highlightChanges(true);
-   ui_fps->readOnly(ro);
-
-   ui.grid->addWidget(ui_fps, 8, 1, 1, 1);
-
-   ui_fps->onDisconnect();
-
-   m_parent->addSubscriber(ui_fps);
-}
-
-void camera::setup_emGain(bool ro)
-{
-   if(ui_emGain) return;
-
-   ui_emGain = new statusEntry(this);
-   ui_emGain->setObjectName(QString::fromUtf8("emgain"));
-   ui_emGain->setup(m_camName, "emgain", statusEntry::FLOAT, "E.M. Gain", "");
-   ui_emGain->highlightChanges(true);
-   ui_emGain->readOnly(ro);
-
-   ui.grid->addWidget(ui_emGain, 9, 1, 1, 1);
-
-   ui_emGain->onDisconnect();
-
-   m_parent->addSubscriber(ui_emGain);
-}
-
-void camera::setup_avgTime(bool ro)
-{
-   if(ui_avgTime) return;
-
-   ui_avgTime = new statusEntry(this);
-   ui_avgTime->setObjectName(QString::fromUtf8("avgTime"));
-   ui_avgTime->setup(m_avgName, "avgTime", statusEntry::FLOAT, "Avg. Time", "");
-   ui_avgTime->highlightChanges(true);
-   ui_avgTime->readOnly(ro);
-
-   ui.grid->addWidget(ui_avgTime, 11, 1, 1, 1);
-
-   ui_avgTime->onDisconnect();
-
-   m_parent->addSubscriber(ui_avgTime);
-}
-
-void camera::setup_synchro()
-{
-   if(ui_synchro) return;
-
-   ui_synchro = new toggleSlider(m_camName, "synchro", "Synchro", this);
-   ui_synchro->setObjectName(QString::fromUtf8("synchro"));
-
-   ui.grid->addWidget(ui_synchro, 10, 1, 1, 1);
-
-   ui_synchro->onDisconnect();
-
-   m_parent->addSubscriber(ui_synchro);
-}
-
-void camera::setup_takeDarks()
-{
-    if(ui_takeDarks) return;
-
-    ui_takeDarks = new QPushButton(this);
-    ui_takeDarks->setObjectName(QString::fromUtf8("takeDarks"));
-    ui_takeDarks->setText("take darks");
-    ui_takeDarks->setMaximumWidth(200);
-    ui_takeDarks->setFocusPolicy(Qt::NoFocus);
-    connect(ui_takeDarks, SIGNAL(pressed()), this, SLOT(takeDark()));
-
-    int doff = 0;
-    if(ui_stage.size() > 4)
-    {
-        doff = ui_stage.size() - 4;
-    }
-
-    ui.grid->addWidget(ui_takeDarks, 9 + doff, 0, 1, 1,Qt::AlignHCenter);
-
-}
-
-void camera::takeDark()
-{
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-
-   ipFreq.setDevice(m_darkName);
-   ipFreq.setName("start");
-   ipFreq.add(pcf::IndiElement("toggle"));
-   ipFreq["toggle"].setSwitchState(pcf::IndiElement::On);
-
-   sendNewProperty(ipFreq);
 }
 
 
 } //namespace xqt
 
-#include "moc_camera.cpp"
+#include "moc_hwpsequencer.cpp"
 
 #endif
