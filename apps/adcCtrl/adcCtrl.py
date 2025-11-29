@@ -75,7 +75,7 @@ class AdcFitter2:
         return Field(cutout.ravel(), sub_grid)
         
 
-    def slice_speckle_angle(self,img,speckle_number,print_updates=False):
+    def slice_speckle_angle(self,img,speckle_number,print_updates=False,positions=False):
         '''calculate the angle of a single speckle using the gaussian slicing method. image must be an hcipy field.
         returns the slope of the designated speckle in degrees.'''
     
@@ -182,7 +182,10 @@ class AdcFitter2:
             if print_updates ==True:
                 self.log.debug(f'slope: {m:.2f}\ncorresponding angle: {angle:.2f} (rad) or {np.degrees(angle):.2f}°')
 
-            return np.degrees(angle) #returns the slope of the individual speckle in degrees.
+            if positions:
+                return np.degrees(angle),centroid
+            else:
+                return np.degrees(angle) #returns the slope of the individual speckle in degrees.
         else: 
             if print_updates == True:
                 self.log.debug(f'unable to fit speckle {speckle_number}')
