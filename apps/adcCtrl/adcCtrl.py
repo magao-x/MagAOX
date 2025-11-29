@@ -632,18 +632,11 @@ class adcCtrl(XDevice):
                 
                 for i in range(self._no_measurements):
                     img = self.camera.grab_stack(self._n_avg)
-
-                    ###temporary fix because XCam is giving me an ndarray right now
                     dim = np.sqrt(img.size)
-                    #self.log.debug(f'camera ROI square with dim {dim} pixels')
                     extent = dim * 6/21
                     pgrid = make_pupil_grid(dim,extent)
                     img = Field(img.ravel(),pgrid)
-                    ###end temporary fix
-
-                    # transpose = Field(img.shaped.T.ravel(),img.grid)
-                    # img = transpose #hopefully this actually fixes the transpose issue
-
+                    img -= np.median(img) ############## not sure if this will help or hurt. gotta test it
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
                     img = self.ADC.filter_image(img)
                     
