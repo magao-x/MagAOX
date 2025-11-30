@@ -18,7 +18,7 @@ from scipy.optimize import minimize
 from scipy.optimize import curve_fit
 
 class AdcFitter2:
-    def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=28,grating_freq=47,ncpc = False,snr_threshold=2,log=False,speckle_window=50):
+    def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=28,grating_freq=47,ncpc = False,snr_threshold=2,log=False,speckle_window=60):
             self.wavelength = wavelength
             self.bandwidth = bandwidth
             self.grating_angle = grating_angle
@@ -195,7 +195,6 @@ class AdcFitter2:
     def crop_image(self, image,extent,mask_diam=60): 
         '''cuts out a centered PSF with the central core masked'''
         img = image/np.max(image)
-        write_field(img,'/data/users/twitchell/windowed_img.fits')
 
         img_subtracted = img #>0.05
         center_of_intensity = np.array([sum(img_subtracted*img_subtracted.grid.x)/sum(img_subtracted),sum(img_subtracted*img_subtracted.grid.y)/sum(img_subtracted)])
@@ -455,7 +454,7 @@ class adcCtrl(XDevice):
         self._n_avg = 1
         self._gain = 0.3
         self._command = 0
-        self._control_mtx = np.array([ 0.08902178, -0.1929974 ]) 
+        self._control_mtx = np.array([ 0.08902178, -0.1929974]) 
         self._extent = 400
         self.delta_1 = 0
         self.delta_2 = 0
@@ -557,9 +556,9 @@ class adcCtrl(XDevice):
             existing_property['toggle'] = constants.SwitchState.ON
             self._knife_edge = True
             if self.client['fwfpm.filterName.knifemask'] == constants.SwitchState.ON:
-                self._ke_top = True
-            elif self.self.client['fwfpm.filterName.knifemaskZ'] == constants.SwitchState.ON:
                 self._ke_top = False
+            elif self.client['fwfpm.filterName.knifemaskZ'] == constants.SwitchState.ON:
+                self._ke_top = True
         else:
             self.log.debug('exiting knife edge mode')
             existing_property['toggle'] = constants.SwitchState.OFF
@@ -693,12 +692,12 @@ class adcCtrl(XDevice):
                             ctrl_mtx_top = np.matrix([[0.27260458, 0.69552136]])
                             s1 = self.ADC.slice_speckle_angle(img,0) - zps[0]
                             s4 = self.ADC.slice_speckle_angle(img,3) - zps[3]
-                            command = -np.squeeze(ctrl_mtx_top @ np.array([s1,s4]))
+                            command = np.squeeze(ctrl_mtx_top @ np.array([s1,s4]))
                         else:
                             ctrl_mtx_bot = np.matrix([[-0.68087296, -0.36395656]])
                             s2 = self.ADC.slice_speckle_angle(img,1) - zps[1]
                             s3 = self.ADC.slice_speckle_angle(img,2) - zps[2]
-                            command = -np.squeeze(ctrl_mtx_bot @ np.array([s2,s3]))
+                            command = np.squeeze(ctrl_mtx_bot @ np.array([s2,s3]))
                     else:
                         angles = self.ADC.all_speckle_angles(img)
                         pairs = self.ADC.speckle_pairs(angles)
