@@ -7,12 +7,13 @@
 
 #include "xWidgets/xWidget.hpp"
 #include "xWidgets/fsmDisplay.hpp"
+#include "xWidgets/statusCombo.hpp"
 #include "xWidgets/statusEntry.hpp"
 #include "xWidgets/statusDisplay.hpp"
-#include "xWidgets/stageStatus.hpp"
 #include "xWidgets/toggleSlider.hpp"
 
 #include <QThread>
+#include <QPushButton>
 
 namespace xqt
 {
@@ -55,7 +56,7 @@ protected:
 
     toggleSlider * ui_tracking {nullptr};
 
-    QPushButton * ui_startSequencing {nullptr};
+    QPushButton * ui_startSequence {nullptr};
 
     bool m_sequencing {false};
 
@@ -94,7 +95,7 @@ public slots:
 
     void setup_hwpangle(bool ro);
 
-    void setup_hwplinstage(bool ro);
+    // void setup_hwplinstage(bool ro);
 
     void setup_tracking();
 
@@ -123,7 +124,7 @@ private:
     Ui::hwpsequencer ui;
 };
 
-hwpsequencer::hwpsequencer(QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f),
+hwpsequencer::hwpsequencer(QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f)
 {
 
     ui.setupUi(this);
@@ -138,7 +139,7 @@ hwpsequencer::hwpsequencer(QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent
 
 
     connect(this, SIGNAL(add_hwpangle(bool)), this, SLOT(setup_hwpangle(bool)));
-    connect(this, SIGNAL(add_hwplinstage(bool)), this, SLOT(setup_hwplinstage(bool)));
+    // connect(this, SIGNAL(add_hwplinstage(bool)), this, SLOT(setup_hwplinstage(bool)));
     connect(this, SIGNAL(add_tracking()), this, SLOT(setup_tracking()));
 
     connect(this, SIGNAL(add_startSequence()), this, SLOT(setup_startSequence()));
@@ -176,19 +177,9 @@ void hwpsequencer::subscribe()
 void hwpsequencer::onConnect()
 {
 
-    setWindowTitle(QString(("HWP Sequencer").c_str()));
+    setWindowTitle(QString("HWP Sequencer"));
 
     ui_fsmState->onConnect();
-
-    if(ui_stage.size() > 0)
-    {
-        for(size_t n = 0; n < ui_stage.size(); ++n)
-        {
-            ui_stage[n]->onConnect();
-        }
-    }
-
-    if(ui_modes) ui_modes->onConnect();
 
     if(ui_hwpangle) ui_hwpangle->onConnect();
 
@@ -206,20 +197,9 @@ void hwpsequencer::onConnect()
 void hwpsequencer::onDisconnect()
 {
 
-    setWindowTitle(QString(("HWP Sequencer").c_str())) + QString(" (disconnected)"));
+    setWindowTitle(QString("HWP Sequencer (disconnected)"));
 
     ui_fsmState->onDisconnect();
-
-
-    if(ui_stage.size() > 0)
-    {
-        for(size_t n =0; n < ui_stage.size(); ++n)
-        {
-            ui_stage[n]->onDisconnect();
-        }
-    }
-
-    if(ui_modes) ui_modes->onDisconnect();
 
     if(ui_hwpangle) ui_hwpangle->onDisconnect();
 
@@ -246,7 +226,7 @@ void hwpsequencer::handleDefProperty( const pcf::IndiProperty & ipRecv)
 
 void hwpsequencer::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
-   if(ipRecv.getDevice() != m_hwptrack && ipRecv.getDevice() != m_darkName && ipRecv.getDevice() != m_avgName) return;
+   if(ipRecv.getDevice() != m_hwptrack) return;
 
    if(ipRecv.getDevice() == m_hwptrack)
    {
@@ -309,30 +289,17 @@ void hwpsequencer::setEnableDisable(bool tf, bool all)
 
     if(ui_hwplinstage) ui_hwplinstage->setEnabled(tf);
 
-    if(ui_stage.size() > 0)
-    {
-        for(size_t n = 0; n < ui_stage.size(); ++n)
-        {
-            ui_stage[n]->setEnabled(tf);
-        }
-    }
-
     if(ui_startSequence) ui_startSequence->setEnabled(tf);
 
 }
 
 void hwpsequencer::setupConfig( mx::app::appConfigurator & config )
 {
-   config.add("hwpsequencer.stages", "", "hwpsequencer.stages", mx::app::argType::Required, "hwpsequencer", "stages", false, "vector<string>", "List of stages associated with this app");
+    return;
 }
 
 void hwpsequencer::loadConfig( mx::app::appConfigurator & config )
 {
-    config(m_stageNames, "hwpsequencer.stages");
-    for(size_t n = 0; n < m_stageNames.size(); ++n)
-    {
-        setup_stage();
-    }
     onDisconnect();
 }
 
@@ -361,14 +328,6 @@ void hwpsequencer::updateGUI()
     }
 
     //Update the component GUIs to ensure they update for connection state, etc.
-
-    if(ui_stage.size() > 0)
-    {
-        for(size_t n = 0; n < ui_stage.size(); ++n)
-        {
-            ui_stage[n]->updateGUI();
-        }
-    }
 
     if(ui_hwpangle) ui_hwpangle->updateGUI();
     if(ui_hwplinstage) ui_hwplinstage->updateGUI();
@@ -409,22 +368,22 @@ void hwpsequencer::setup_hwpangle(bool ro)
    m_parent->addSubscriber(ui_hwpangle);
 }
 
-void hwpsequencer::setup_hwplinstage(bool ro)
-{
-   if(ui_hwplinstage) return;
+// void hwpsequencer::setup_hwplinstage(bool ro)
+// {
+//    if(ui_hwplinstage) return;
 
-   ui_hwplinstage = new statusEntry(this);
-   ui_hwplinstage->setObjectName(QString::fromUtf8("hwplinstage"));
-   // ui_hwplinstage->setup(m_hwptrack, "hwplinstage", statusCombo::, "HWP Angle", "deg");
-   ui_hwplinstage->highlightChanges(true);
-   ui_hwplinstage->readOnly(ro);
+//    ui_hwplinstage = new statusCombo(this);
+//    ui_hwplinstage->setObjectName(QString::fromUtf8("hwplinstage"));
+//    // ui_hwplinstage->setup(m_hwptrack, "hwplinstage", statusCombo::, "HWP Angle", "deg");
+//    ui_hwplinstage->m_highlightChanges(true);
+//    ui_hwplinstage->m_readOnly(ro);
 
-   ui.grid->addWidget(ui_hwplinstage, 7, 1, 1, 1);
+//    ui.grid->addWidget(ui_hwplinstage, 7, 1, 1, 1);
 
-   ui_hwplinstage->onDisconnect();
+//    ui_hwplinstage->onDisconnect();
 
-   m_parent->addSubscriber(ui_hwplinstage);
-}
+//    m_parent->addSubscriber(ui_hwplinstage);
+// }
 
 void hwpsequencer::setup_tracking()
 {
@@ -451,13 +410,7 @@ void hwpsequencer::setup_startSequence()
     ui_startSequence->setFocusPolicy(Qt::NoFocus);
     connect(ui_startSequence, SIGNAL(pressed()), this, SLOT(startSequence()));
 
-    int doff = 0;
-    if(ui_stage.size() > 4)
-    {
-        doff = ui_stage.size() - 4;
-    }
-
-    ui.grid->addWidget(ui_startSequence, 9 + doff, 0, 1, 1,Qt::AlignHCenter);
+    ui.grid->addWidget(ui_startSequence, 9, 0, 1, 1,Qt::AlignHCenter);
 
 }
 
