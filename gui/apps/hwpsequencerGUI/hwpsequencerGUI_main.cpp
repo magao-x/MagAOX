@@ -1,23 +1,33 @@
+#include <QApplication>
+#include <QFile>
+#include <QTextStream>
 
-#include "app.hpp"
 #include "hwpsequencer/hwpsequencer.hpp"
 
+#include "multiIndiManager.hpp"
 
 int main(int argc, char *argv[])
 {
+      
+   //int data_type;
+   QApplication app(argc, argv);
 
-    QApplication qapp(argc, argv);
+   // set stylesheet
+   QFile file(":/magaox.qss");
+   file.open(QFile::ReadOnly | QFile::Text);
+   QTextStream stream(&file);
+   app.setStyleSheet(stream.readAll());
 
-    xqt::app<xqt::hwpsequencer> app;
+   multiIndiManager mgr("hwpsequencer", "127.0.0.1", 7624);
+   
+   xqt::hwpsequencer ca;
+   mgr.addSubscriber(&ca);
+   mgr.activate();
+      
+   ca.show();
 
-    try
-    {
-        return app.main(argc, argv);
-    }
-    catch(const std::exception & e)
-    {
-        std::cerr << e.what() << "\n";
-        std::cerr << "try " << argv[0] << " -h for more information." << std::endl;
-    }
+   int rv = app.exec();
+   
+   return rv;
 }
-
+   
