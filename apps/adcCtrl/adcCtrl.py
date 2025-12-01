@@ -194,9 +194,11 @@ class AdcFitter2:
     
     def crop_image(self, image,extent,mask_diam=60): 
         '''cuts out a centered PSF with the central core masked'''
+        bk = np.median(image)
+        image -= bk
         img = image/np.max(image)
 
-        img_subtracted = img #>0.05
+        img_subtracted = img >0.03
         center_of_intensity = np.array([sum(img_subtracted*img_subtracted.grid.x)/sum(img_subtracted),sum(img_subtracted*img_subtracted.grid.y)/sum(img_subtracted)])
         mask_ap = make_circular_aperture(mask_diam,center_of_intensity)
         mask = mask_ap(img.grid)
@@ -208,9 +210,6 @@ class AdcFitter2:
 
 
         img /= np.max(img)
-        
-        bk = np.median(img)
-        img -= bk
         
         mask2 = make_circular_aperture(mask_diam,np.array([0,0]))(img.grid)
         mask2 = abs(mask2-1)
@@ -692,12 +691,12 @@ class adcCtrl(XDevice):
                             ctrl_mtx_top = np.matrix([[0.27260458, 0.69552136]])
                             s1 = self.ADC.slice_speckle_angle(img,0) - zps[0]
                             s4 = self.ADC.slice_speckle_angle(img,3) - zps[3]
-                            command = np.squeeze(ctrl_mtx_top @ np.array([s1,s4]))
+                            command = -np.squeeze(ctrl_mtx_top @ np.array([s1,s4]))
                         else:
                             ctrl_mtx_bot = np.matrix([[-0.68087296, -0.36395656]])
                             s2 = self.ADC.slice_speckle_angle(img,1) - zps[1]
                             s3 = self.ADC.slice_speckle_angle(img,2) - zps[2]
-                            command = np.squeeze(ctrl_mtx_bot @ np.array([s2,s3]))
+                            command = -np.squeeze(ctrl_mtx_bot @ np.array([s2,s3]))
                     else:
                         angles = self.ADC.all_speckle_angles(img)
                         pairs = self.ADC.speckle_pairs(angles)
@@ -711,7 +710,7 @@ class adcCtrl(XDevice):
                 error = -np.nanmean(measurements)
                 self.log.debug(f'mean error across {self._no_measurements} measurements: {-error}')
 
-                if np.abs(error) < 3: #setting a threshold so the prisms don't do anything crazy     
+                if np.abs(error*self._gain) < 0.7: #setting a threshold so the prisms don't do anything crazy     
                     self.add_command(error * self._gain,0)
                     self.send_command()
                     self.log.info(f'delta command: {error * self._gain}')
