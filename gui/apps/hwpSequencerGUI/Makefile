@@ -1,2 +1,2 @@
-TARGET=hwpsequencerGUI
+TARGET=hwpSequencerGUI
 include ../../../Make/magAOXGUI.mk
