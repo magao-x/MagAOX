@@ -1,8 +1,8 @@
 ######################################################################
-# project file for hwpsequencerGUI
+# project file for hwpSequencerGUI
 ######################################################################
 
-TARGET = hwpsequencerGUI
+TARGET = hwpSequencerGUI
 include(../magaoxQtApp.pri)
 
 # Input
@@ -18,10 +18,10 @@ HEADERS += ../../widgets/xWidgets/app.hpp \
            ../../widgets/xWidgets/selectionSw.hpp \
            ../../widgets/xWidgets/toggleSlider.hpp \
            ../../widgets/xWidgets/statusCombo.hpp \
-           ../../widgets/hwpsequencer/hwpsequencer.hpp \
+           ../../widgets/hwpSequencer/hwpSequencer.hpp \
            ../../lib/multiIndiManager.hpp 
 
-SOURCES += hwpsequencerGUI_main.cpp
+SOURCES += hwpSequencerGUI_main.cpp
 
 FORMS += ../../widgets/xWidgets/fsmDisplay.ui \
          ../../widgets/xWidgets/statusEntry.ui \
@@ -29,7 +29,7 @@ FORMS += ../../widgets/xWidgets/fsmDisplay.ui \
          ../../widgets/xWidgets/statusCombo.ui \
          ../../widgets/xWidgets/toggleSlider.ui \
          ../../widgets/xWidgets/selectionSw.ui \
-         ../../widgets/hwpsequencer/hwpsequencer.ui
+         ../../widgets/hwpSequencer/hwpSequencer.ui
 
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a \
