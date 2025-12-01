@@ -56,7 +56,7 @@ private:
 
 hwpSequencer::hwpSequencer(
                 QWidget * Parent,
-                Qt::WindowFlags f) : xWidget(Parent, f), m_dmName{dmName}
+                Qt::WindowFlags f) : xWidget(Parent, f)
 {
    ui.setupUi(this);
    //ui.labelDMName->setText(m_dmName.c_str());
@@ -118,21 +118,7 @@ void hwpSequencer::handleDefProperty( const pcf::IndiProperty & ipRecv)
 
 void hwpSequencer::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
-   if(ipRecv.getDevice() != m_dmName)
-   {
-      return;
-   }
-   else if(ipRecv.getName() == "fsm")
-   {
-      if(ipRecv.find("state"))
-      {
-         m_appState = ipRecv["state"].get<std::string>();
-      }
-   }
-   
-
    emit doUpdateGUI();
-
 }
 
 void hwpSequencer::updateGUI()
@@ -145,13 +131,26 @@ void hwpSequencer::on_buttonStartSequence_pressed()
 {
    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
 
-   ipFreq.setDevice(m_dmName);
-   ipFreq.setName("test_set");
+   // ipFreq.setDevice(m_dmName);
+   // ipFreq.setName("test_set");
+   // ipFreq.add(pcf::IndiElement("toggle"));
+   // ipFreq["toggle"] = pcf::IndiElement::Off;
+
+   // sendNewProperty(ipFreq);
+}
+
+void hwpSequencer::on_buttonStopNow_pressed()
+{
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+
+   ipFreq.setDevice("observers");
+   ipFreq.setName("obs_on");
    ipFreq.add(pcf::IndiElement("toggle"));
    ipFreq["toggle"] = pcf::IndiElement::Off;
 
    sendNewProperty(ipFreq);
 }
+
 
 } //namespace xqt
 
