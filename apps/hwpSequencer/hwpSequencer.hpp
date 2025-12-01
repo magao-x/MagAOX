@@ -56,7 +56,7 @@ class hwpSequencer : public MagAOXApp<true>, public dev::telemeter<hwpSequencer>
 
         int m_curCycleNumber{ 0 };
 
-        int m_hwpPosIndex{ 0 };
+        u_int m_hwpPosIndex{ 0 };
 
         bool m_sequencing{ false };
 
@@ -65,6 +65,34 @@ class hwpSequencer : public MagAOXApp<true>, public dev::telemeter<hwpSequencer>
         std::vector<float> m_hwpPositions{ {0.0, 45.0, 22.5, 67.5} };
 
         float m_updateInterval{ 1 };
+
+
+        ///<
+
+        unsigned m_hwpWait {100};  ///< The time to pause between checks of the hwp state during open/shut [msec]. Default is 100.
+
+        unsigned m_hwpTimeout {5000}; ///< Total time to wait for sensor to change state before timing out [msec]. Default is 2000.
+        ///@}
+
+        bool m_doMoveHwp {false}; ///< Flag telling the open thread that it should actually open the shutter, not just go back to sleep.
+
+        bool m_moveHwpThreadInit {true}; ///< Initialization flag for the open thread.
+
+        pid_t m_moveHwpThreadID {0}; ///< Open thread PID.
+
+        pcf::IndiProperty m_moveHwpThreadProp; ///< The property to hold the open thread details.
+
+        std::thread m_moveHwpThread; ///< The opening thread.
+
+        /// Open thread starter function
+        static void moveHwpThreadStart( hwpSequencer * h /**< [in] pointer to this */);
+
+        /// Open thread function
+        /** Runs until m_shutdown is true.
+             */
+        void moveHwpThreadExec();
+
+
 
     public:
         /// Default c'tor.
@@ -104,6 +132,7 @@ class hwpSequencer : public MagAOXApp<true>, public dev::telemeter<hwpSequencer>
          */
         virtual int appShutdown();
 
+        virtual int
 
         virtual int moveHwp();
 
@@ -128,9 +157,12 @@ class hwpSequencer : public MagAOXApp<true>, public dev::telemeter<hwpSequencer>
 
         pcf::IndiProperty m_indiP_lastCycle;
 
-        pcf::IndiProperty m_indiP_hwpTracker;
+        pcf::IndiProperty m_indiP_hwpTracker_target;
+
+        pcf::IndiProperty m_indiP_hwpTracker_current;
 
         pcf::IndiProperty m_indiP_observers;
+
 
     public:
 
@@ -217,15 +249,25 @@ int hwpSequencer::appStartup()
     m_indiP_curCycleNumber.add( pcf::IndiElement( "value" ) );
     m_indiP_curCycleNumber["value"].set( m_curCycleNumber );
 
-    m_indiP_hwpTracker = pcf::IndiProperty( pcf::IndiProperty::Number );
-    m_indiP_hwpTracker.setDevice( m_hwpTracker );
-    m_indiP_hwpTracker.setName( "hwp_position" );
-    m_indiP_hwpTracker.add( pcf::IndiElement( "target" ) );
+    m_indiP_hwpTracker_target = pcf::IndiProperty( pcf::IndiProperty::Number );
+    m_indiP_hwpTracker_target.setDevice( m_hwpTracker );
+    m_indiP_hwpTracker_target.setName( "hwp_position" );
+    m_indiP_hwpTracker_target.add( pcf::IndiElement( "target" ) );
 
     m_indiP_observers = pcf::IndiProperty( pcf::IndiProperty::Switch );
     m_indiP_observers.setDevice( m_observers );
     m_indiP_observers.setName( "obs_on" );
     m_indiP_observers.add( pcf::IndiElement( "toggle" ) );
+
+
+
+    if(threadStart( m_moveHwpThread, m_moveHwpThreadInit, m_moveHwpThreadID, m_moveHwpThreadProp, 0, "", "moveHwp", this, moveHwpThreadStart) < 0)
+    {
+        log<software_error>({__FILE__, __LINE__});
+        return -1;
+    }
+
+
 
     state( stateCodes::READY );
 
@@ -239,7 +281,8 @@ int hwpSequencer::appLogic()
 
     if (m_sequencing && mx::sys::get_curr_time() - lastupdate > m_updateInterval )
     {
-        if (mx::sys::get_curr_time() - lastchange > m_timePerPos){
+        if (mx::sys::get_curr_time() - lastchange > m_timePerPos)
+        {
 
             m_hwpPosIndex += 1;
             if (m_hwpPosIndex == m_hwpPositions.size())
@@ -248,13 +291,15 @@ int hwpSequencer::appLogic()
                 m_hwpPosIndex = 0;
                 m_curCycleNumber += 1;
                 updateIfChanged( m_indiP_curCycleNumber, "value", m_curCycleNumber );
-                if (m_lastCycle || (m_numCycles > 1 && m_curCycleNumber > m_numCycles)) {
+
+                if (m_lastCycle || (m_numCycles > 0 && m_curCycleNumber >= m_numCycles)) {
                     stopSequencing();
                     return 0;
                 }
             }
             updateIfChanged( m_indiP_hwpPosIndex, "value", m_hwpPosIndex );
 
+            std::cerr << "Number of completed cycles: " << m_curCycleNumber << " / " << m_numCycles << std::endl;
             // Pause saving and move HWP
             m_indiP_observers["toggle"] = pcf::IndiElement::Off;
             sendNewProperty(m_indiP_observers);
@@ -271,7 +316,7 @@ int hwpSequencer::appLogic()
     else if (!m_sequencing)
     {
         lastupdate = 0;
-        lastchange = 0;
+        lastchange = mx::sys::get_curr_time();
     }
 
     return 0;
@@ -280,14 +325,74 @@ int hwpSequencer::appLogic()
 int hwpSequencer::appShutdown()
 {
     if (m_sequencing) stopSequencing();
+
+    if (m_moveHwpThread.joinable())
+    {
+        pthread_kill(m_moveHwpThread.native_handle(), SIGUSR1)
+    }
+
+    if(m_moveHwpThread.joinable())
+    {
+        try m_moveHwpThread.join(); //this will throw if it was already joined
+        catch(...)
+    }
     return 0;
 }
 
 int hwpSequencer::moveHwp()
 {
-    m_indiP_hwpTracker["target"] = m_hwpPositions[m_hwpPosIndex];
-    sendNewProperty(m_indiP_hwpTracker);
-    sleep(0.8);
+    float target_hwp_angle = m_hwpPositions[m_hwpPosIndex];
+
+    std::cerr << "Current HWP index: " << m_hwpPosIndex + 1 << " / " << m_hwpPositions.size() << std::endl;
+    std::cerr << "Moving HWP to " << target_hwp_angle << std::endl;
+
+    m_indiP_hwpTracker_target["target"] = target_hwp_angle;
+    sendNewProperty(m_indiP_hwpTracker_target);
+
+    // block until HWP in position
+    double t0 = mx::sys::get_curr_time();
+    float angle_tol = 0.05;
+    while (fabs(m_indiP_hwpTracker_target["current"].get<float>() - target_hwp_angle) > angle_tol)
+    {
+        std::cerr << "Current hwpTracker posn " << m_indiP_hwpTracker_target["current"].get<float>();
+        mx::sys::milliSleep(m_hwpWait);
+        if ((mx::sys::get_curr_time() - t0) * 1000 > m_hwpTimeout)) break;
+    }
+
+    return 0;
+}
+
+
+void hwpSequencer::moveHwpThreadStart( hwpSequencer * h )
+{
+   h->moveHwpThreadExec();
+}
+
+void hwpSequencer::moveHwpThreadExec( )
+{
+   m_moveHwpThreadID = syscall(SYS_gettid);
+
+   while( m_moveHwpThreadInit == true && this.shutdown() == 0)
+   {
+      sleep(1);
+   }
+
+   while(this.shutdown() == 0)
+   {
+      if( m_doMoveHwp )
+      {
+         if(moveHwp() < 0)
+         {
+            log<software_error>({__FILE__,__LINE__});
+         }
+         m_doMoveHwp = false;
+      }
+
+      sleep(1);
+
+   }
+
+   return;
 }
 
 int hwpSequencer::startSequencing()
@@ -303,8 +408,10 @@ int hwpSequencer::startSequencing()
 
     moveHwp();
 
+    std::cerr << "Starting sequence" << std::endl;
+
     m_sequencing = true;
-    updateSwitchIfChanged( m_indiP_sequence, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+    updateSwitchIfChanged( m_indiP_sequence, "toggle", pcf::IndiElement::On, INDI_IDLE);
 
     m_indiP_observers["toggle"] = pcf::IndiElement::On;
     sendNewProperty(m_indiP_observers);
@@ -315,6 +422,8 @@ int hwpSequencer::startSequencing()
 int hwpSequencer::stopSequencing()
 {
     if (!m_sequencing) return 0;
+
+    std::cerr << "Stopping sequence" << std::endl;
 
     m_indiP_observers["toggle"] = pcf::IndiElement::Off;
     sendNewProperty(m_indiP_observers);
