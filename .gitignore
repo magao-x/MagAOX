@@ -83,6 +83,7 @@ gui/rtimv/plugins/acquisition/makefile.acquisition
 #h
 apps/hoPredCtrl/hoPredCtrl
 apps/hsfwCtrl/hsfwCtrl
+apps/hwpSequencer/hwpSequencer
 apps/hwpTracker/hwpTracker
 
 #i
