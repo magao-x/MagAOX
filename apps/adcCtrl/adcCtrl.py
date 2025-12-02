@@ -18,7 +18,7 @@ from scipy.optimize import minimize
 from scipy.optimize import curve_fit
 
 class AdcFitter2:
-    def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=28,grating_freq=47,ncpc = False,snr_threshold=2,log=False,speckle_window=60):
+    def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=28,grating_freq=47,ncpc = False,snr_threshold=1.6,log=False,speckle_window=30):
             self.wavelength = wavelength
             self.bandwidth = bandwidth
             self.grating_angle = grating_angle
@@ -721,6 +721,7 @@ class adcCtrl(XDevice):
                 measurements = []
                 for i in range(self._no_measurements):
                     img = self.camera.grab_stack(self._n_avg)
+                    img = np.pad(img,pad_width=50, mode='constant', constant_values=0)
                     self.log.debug(f'extent: {self._extent}')
                     dim = np.sqrt(img.size)
                     self.log.debug(f'camera ROI square with dim {dim} pixels')
@@ -729,6 +730,8 @@ class adcCtrl(XDevice):
                     img = Field(img.ravel(),pgrid)
                     img -= np.median(img)
 
+                    write_field(img,'/tmp/adcDebug_onsky.fits')
+
                     ################### FAKE CAMERA IMAGE ######################
                     #img = read_field('/data/users/twitchell/full_img.fits')
                     #self.log.debug('note that a real picture is not being taken! a loaded image is being used')
@@ -736,6 +739,7 @@ class adcCtrl(XDevice):
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
                     img = self.ADC.filter_image(img)
                     
+
                     #if we want to find the orientation as well
                     if self._vectorize:
                         mag,ang = self.ADC.est_mag_dir(img)
