@@ -288,10 +288,12 @@ int hwpTracker::appStartup()
     m_indiP_hwpActualPos.add( pcf::IndiElement( "value" ) );
     m_indiP_hwpActualPos["value"].set( 0 );
 
-    m_indiP_hwpStagePos = pcf::IndiProperty( pcf::IndiProperty::Number );
-    m_indiP_hwpStagePos.setDevice( m_devName );
-    m_indiP_hwpStagePos.setName( "position" );
-    m_indiP_hwpStagePos.add( pcf::IndiElement( "target" ) );
+    m_indiP_hwpStagePos_target = pcf::IndiProperty( pcf::IndiProperty::Number );
+    m_indiP_hwpStagePos_target.setDevice( m_devName );
+    m_indiP_hwpStagePos_target.setName( "position" );
+    m_indiP_hwpStagePos_target.add( pcf::IndiElement( "target" ) );
+
+    REG_INDI_SETPROP(m_indiP_hwpStagePos_current, m_devName, "position");
 
     TELEMETER_APP_STARTUP;
 
