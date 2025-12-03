@@ -216,11 +216,11 @@ void hwpSequencer::setupConfig()
 
 }
 
-int hwpSequencer::loadConfigImpl( mx::app::appConfigurator &config )
+int hwpSequencer::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-    config( m_hwpTracker, "sequencer.devName" );
-    config( m_observers, "sequencer.obsName" );
-    config( m_updateInterval, "sequencer.updateInterval" );
+    _config( m_hwpTracker, "sequencer.devName" );
+    _config( m_observers, "sequencer.obsName" );
+    _config( m_updateInterval, "sequencer.updateInterval" );
 
     return 0;
 }
@@ -256,7 +256,7 @@ int hwpSequencer::appStartup()
     m_indiP_hwpTracker_target.setName( "hwp_position" );
     m_indiP_hwpTracker_target.add( pcf::IndiElement( "target" ) );
 
-    REG_INDI_SETPROP( m_indiP_hwpTracker_current, "hwp_position", "current" );
+    REG_INDI_SETPROP( m_indiP_hwpTracker_current, m_hwpTracker, "hwp_position");
 
     m_indiP_observers = pcf::IndiProperty( pcf::IndiProperty::Switch );
     m_indiP_observers.setDevice( m_observers );
@@ -320,7 +320,7 @@ int hwpSequencer::appShutdown()
 
     if(m_hwpThread.joinable())
     {
-        try 
+        try
         {
             m_hwpThread.join(); //this will throw if it was already joined
         }
@@ -379,7 +379,6 @@ int hwpSequencer::doHwpAction()
     m_indiP_hwpTracker_target["target"] = target_hwp_angle;
     sendNewProperty(m_indiP_hwpTracker_target);
 
-
     // check if the HWP is in position (note, depends on the callback for m_reportedHwpPos)
     float angle_tol = 0.5;
     double t0 = mx::sys::get_curr_time();
@@ -413,6 +412,7 @@ int hwpSequencer::startSequencing()
     state( stateCodes::OPERATING );
 
     std::cerr << "Starting sequence" << std::endl;
+    log<text_log>( "Starting sequence" );
 
     m_sequencing = true;
     updateSwitchIfChanged( m_indiP_sequence, "toggle", pcf::IndiElement::On, INDI_IDLE);
@@ -427,6 +427,7 @@ int hwpSequencer::stopSequencing()
     if (!m_sequencing) return 0;
 
     std::cerr << "Stopping sequence" << std::endl;
+    log<text_log>( "Stopping sequence" );
 
     m_indiP_observers["toggle"] = pcf::IndiElement::Off;
     sendNewProperty(m_indiP_observers);
@@ -476,7 +477,7 @@ INDI_NEWCALLBACK_DEFN( hwpSequencer, m_indiP_numCycles )( const pcf::IndiPropert
         return -1;
     }
 
-    if( !ipRecv.find( "target" ) ) 
+    if( !ipRecv.find( "target" ) )
         return 0;
 
     if (m_sequencing)
