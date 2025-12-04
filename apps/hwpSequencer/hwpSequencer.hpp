@@ -35,7 +35,7 @@ namespace app
 /**
  * \ingroup hwpSequencer
  */
-class hwpSequencer : public MagAOXApp<true>, public dev::telemeter<hwpSequencer>
+class hwpSequencer : public MagAOXApp<true>
 {
 
     // Give the test harness access.
@@ -48,7 +48,11 @@ class hwpSequencer : public MagAOXApp<true>, public dev::telemeter<hwpSequencer>
 
         std::string m_hwpTracker{ "hwptrack" };
 
-        std::string m_observers{ "observers" };
+        std::string m_fxngenName{ "fxngensync" };
+
+        std::string m_fxngenChannel{ "C2" };
+
+        std::string m_obsAppName{ "observers" };
 
         double m_timePerPos{ 0 };
 
@@ -62,12 +66,11 @@ class hwpSequencer : public MagAOXApp<true>, public dev::telemeter<hwpSequencer>
 
         bool m_lastCycle{ false };
 
+        bool m_startSaving{ false };
+
         std::vector<float> m_hwpPositions{ {0.0, 45.0, 22.5, 67.5} };
 
         float m_reportedHwpPos{ 0 };
-
-        float m_updateInterval{ 1 };
-
         ///<
 
         unsigned m_hwpWait {100};  ///< The time to pause between checks of the hwp state during open/shut [msec]. Default is 100.
@@ -77,28 +80,27 @@ class hwpSequencer : public MagAOXApp<true>, public dev::telemeter<hwpSequencer>
 
         bool m_doMoveHwp {false}; ///< Flag telling the hwp thread that it should actually move the hwp, not just go back to sleep.
 
-        bool m_hwpThreadInit {true}; ///< Initialization flag for the open thread.
+        bool m_sequencerThreadInit {true}; ///< Initialization flag for the open thread.
 
-        pid_t m_hwpThreadID {0}; ///< Open thread PID.
+        pid_t m_sequencerThreadID {0}; ///< Open thread PID.
 
-        pcf::IndiProperty m_hwpThreadProp; ///< The property to hold the open thread details.
+        pcf::IndiProperty m_sequencerThreadProp; ///< The property to hold the open thread details.
 
-        std::thread m_hwpThread; ///< The opening thread.
+        std::thread m_sequencerThread; ///< The opening thread.
 
         /// Open thread starter function
-        static void hwpThreadStart( hwpSequencer * h /**< [in] pointer to this */);
+        static void sequencerThreadStart( hwpSequencer * h /**< [in] pointer to this */);
 
         /// Open thread function
         /** Runs until m_shutdown is true.
              */
-        void hwpThreadExec();
+        void sequencerThreadExec();
 
         int doHwpAction();
 
         int startSequencing();
 
         int stopSequencing();
-
 
 
     public:
@@ -160,7 +162,9 @@ class hwpSequencer : public MagAOXApp<true>, public dev::telemeter<hwpSequencer>
 
         pcf::IndiProperty m_indiP_hwpTracker_current;
 
-        pcf::IndiProperty m_indiP_observers;
+        pcf::IndiProperty m_indiP_fxngenOutput;
+
+        pcf::IndiProperty m_indiP_obsSaving;
 
 
     public:
@@ -184,43 +188,54 @@ hwpSequencer::hwpSequencer() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIF
 
 void hwpSequencer::setupConfig()
 {
-    config.add( "sequencer.devName",
-                "",
-                "sequencer.devName",
-                argType::Required,
-                "sequencer",
-                "devName",
-                false,
-                "string",
-                "HWP tracker app name" );
+    config.add("hwp.devName",
+               "",
+               "hwp.devName",
+               argType::Required,
+               "hwp",
+               "devName",
+               false,
+               "string",
+               "HWP tracker app name, default is 'hwptracker'" );
 
-    config.add( "sequencer.obsName",
-                "",
-                "sequencer.obsName",
-                argType::Required,
-                "sequencer",
-                "obsName",
-                false,
-                "string",
-                "Observers app name." );
+    config.add("fxngen.devName",
+               "",
+               "fxngen.devName",
+               argType::Required,
+               "fxngen",
+               "devName",
+               false,
+               "string",
+               "Function generator device name, default is 'fxngensync'." );
 
-    config.add( "sequencer.updateInterval",
-                "",
-                "sequencer.updateInterval",
-                argType::Required,
-                "sequencer",
-                "updateInterval",
-                false,
-                "float",
-                "Update interval, default is 1 second." );
+    config.add("fxngen.channel",
+               "",
+               "fxngen.channel",
+               argType::Required,
+               "fxngen",
+               "channel",
+               false,
+               "string",
+               "Function generator output channel, default is 'C2'.");
+
+    config.add("observers.devName",
+               "",
+               "observers.devName",
+               argType::Required,
+               "observers",
+               "devName",
+               false,
+               "string",
+               "Observers application name, default is 'observers'");
 
 }
 
 int hwpSequencer::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-    _config( m_hwpTracker, "sequencer.devName" );
-    _config( m_observers, "sequencer.obsName" );
-    _config( m_updateInterval, "sequencer.updateInterval" );
+    _config( m_hwpTracker, "hwp.devName" );
+    _config( m_fxngenName, "fxngen.devName" );
+    _config( m_fxngenChannel, "fxngen.channel" );
+    _config( m_obsAppName, "observers.devName" );
 
     return 0;
 }
@@ -258,13 +273,18 @@ int hwpSequencer::appStartup()
 
     REG_INDI_SETPROP( m_indiP_hwpTracker_current, m_hwpTracker, "hwp_position");
 
-    m_indiP_observers = pcf::IndiProperty( pcf::IndiProperty::Switch );
-    m_indiP_observers.setDevice( m_observers );
-    m_indiP_observers.setName( "obs_on" );
-    m_indiP_observers.add( pcf::IndiElement( "toggle" ) );
+    m_indiP_fxngenOutput = pcf::IndiProperty( pcf::IndiProperty::Text );
+    m_indiP_fxngenOutput.setDevice( m_fxngenName );
+    m_indiP_fxngenOutput.setName( m_fxngenChannel + "outp" );
+    m_indiP_fxngenOutput.add( pcf::IndiElement( "value" ) );
+
+    m_indiP_obsSaving = pcf::IndiProperty( pcf::IndiProperty::Switch );
+    m_indiP_obsSaving.setDevice( m_obsAppName );
+    m_indiP_obsSaving.setName( "obs_on" );
+    m_indiP_obsSaving.add( pcf::IndiElement( "toggle" ) );
 
 
-    if(threadStart( m_hwpThread, m_hwpThreadInit, m_hwpThreadID, m_hwpThreadProp, 0, "", "hwpThread", this, hwpThreadStart) < 0)
+    if(threadStart( m_sequencerThread, m_sequencerThreadInit, m_sequencerThreadID, m_sequencerThreadProp, 0, "", "sequencerThread", this, sequencerThreadStart) < 0)
     {
         log<software_error>({__FILE__, __LINE__});
         return -1;
@@ -313,16 +333,16 @@ int hwpSequencer::appShutdown()
     if (m_sequencing)
         stopSequencing();
 
-    if (m_hwpThread.joinable())
+    if (m_sequencerThread.joinable())
     {
-        pthread_kill(m_hwpThread.native_handle(), SIGUSR1);
+        pthread_kill(m_sequencerThread.native_handle(), SIGUSR1);
     }
 
-    if(m_hwpThread.joinable())
+    if(m_sequencerThread.joinable())
     {
         try
         {
-            m_hwpThread.join(); //this will throw if it was already joined
+            m_sequencerThread.join(); //this will throw if it was already joined
         }
         catch(...) {}
     }
@@ -330,18 +350,18 @@ int hwpSequencer::appShutdown()
 }
 
 
-void hwpSequencer::hwpThreadStart( hwpSequencer * h )
+void hwpSequencer::sequencerThreadStart( hwpSequencer * h )
 {
-   h->hwpThreadExec();
+   h->sequencerThreadExec();
 }
 
 
-void hwpSequencer::hwpThreadExec( )
+void hwpSequencer::sequencerThreadExec( )
 {
     // thread prep
-    m_hwpThreadID = syscall(SYS_gettid);
+    m_sequencerThreadID = syscall(SYS_gettid);
 
-    while( m_hwpThreadInit == true && shutdown() == 0)
+    while( m_sequencerThreadInit == true && shutdown() == 0)
         sleep(1);
 
     // busy loop
@@ -357,7 +377,7 @@ void hwpSequencer::hwpThreadExec( )
             m_doMoveHwp = false;
         }
 
-        mx::sys::sleep(0.5);
+        mx::sys::sleep(0.1);
     }
 
     return;
@@ -367,8 +387,8 @@ void hwpSequencer::hwpThreadExec( )
 int hwpSequencer::doHwpAction()
 {
     // Stop logging
-    m_indiP_observers["toggle"] = pcf::IndiElement::Off;
-    sendNewProperty(m_indiP_observers);
+    m_indiP_fxngenOutput["value"] = "Off";
+    sendNewProperty(m_indiP_fxngenOutput);
 
     // move HWP
     float target_hwp_angle = m_hwpPositions[m_hwpPosIndex];
@@ -392,8 +412,16 @@ int hwpSequencer::doHwpAction()
         }
     }
 
-    m_indiP_observers["toggle"] = pcf::IndiElement::On;
-    sendNewProperty(m_indiP_observers);
+    if (m_startSaving)
+    {
+        m_indiP_obsSaving["toggle"] = pcf::IndiElement::On;
+        sendNewProperty(m_indiP_obsSaving);
+
+        m_startSaving = false;
+    }
+
+    m_indiP_fxngenOutput["value"] = "On";
+    sendNewProperty(m_indiP_fxngenOutput);
 
     return 0;
 }
@@ -417,6 +445,8 @@ int hwpSequencer::startSequencing()
     m_sequencing = true;
     updateSwitchIfChanged( m_indiP_sequence, "toggle", pcf::IndiElement::On, INDI_IDLE);
 
+    m_startSaving = true;
+
     m_doMoveHwp = true;
 
     return 0;
@@ -429,13 +459,18 @@ int hwpSequencer::stopSequencing()
     std::cerr << "Stopping sequence" << std::endl;
     log<text_log>( "Stopping sequence" );
 
-    m_indiP_observers["toggle"] = pcf::IndiElement::Off;
-    sendNewProperty(m_indiP_observers);
+    // Turn the data acquisition off, but let's make sure the camera trigger is still rolling
+    m_indiP_obsSaving["toggle"] = pcf::IndiElement::Off;
+    sendNewProperty(m_indiP_obsSaving);
+    m_startSaving = false;
+
+    m_indiP_fxngenOutput["value"] = "On";
+    sendNewProperty(m_indiP_fxngenOutput);
+
+    m_doMoveHwp = false;
 
     m_sequencing = false;
     updateSwitchIfChanged( m_indiP_sequence, "toggle", pcf::IndiElement::Off, INDI_IDLE);
-
-    m_doMoveHwp = false;
 
     m_lastCycle = false;
     updateSwitchIfChanged( m_indiP_lastCycle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
