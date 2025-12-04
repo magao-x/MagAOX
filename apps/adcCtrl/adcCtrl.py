@@ -104,7 +104,8 @@ class AdcFitter2:
         window_size=self.speckle_window
         new_img = self.window_field(img,[max_pixel[0],max_pixel[1]],window_size,window_size)
 
-        write_field(new_img,'/tmp/adc_speck_prefilter.fits')
+        if speckle_number == 0:
+            write_field(new_img,'/tmp/adc_speck_prefilter.fits')
 
         hp = self.hpf(new_img,self.hpf_sigma)
         lp = hp - self.hpf(hp,self.lpf_sigma)
@@ -112,8 +113,9 @@ class AdcFitter2:
         lp[lp < 0 ] = 0
         new_img = lp
         new_img = new_img / np.max(new_img)
-
-        write_field(new_img,'/tmp/adc_speck_postfilter.fits')
+        
+        if speckle_number == 0:
+            write_field(new_img,'/tmp/adc_speck_postfilter.fits')
         #self.log.debug(f'calculated max pixel for speckle {speckle_number}: {max_pixel}')
 
         #new_img = self.window_field(img,[center_of_intensity[0],center_of_intensity[1]],window_size,window_size)
@@ -725,7 +727,7 @@ class adcCtrl(XDevice):
                     extent = dim * 6/21
                     pgrid = make_pupil_grid(dim,extent)
                     img = Field(img.ravel(),pgrid)
-                    img -= np.median(img) ############## not sure if this will help or hurt. gotta test it
+                    img -= np.median(img) 
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
                     img = self.ADC.filter_image(img)
                     
