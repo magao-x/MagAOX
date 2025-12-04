@@ -485,7 +485,7 @@ class adcCtrl(XDevice):
         self.delta_1 = 0
         self.delta_2 = 0
         self._offset = 0
-        self._mask_diam = 45
+        self._mask_diam = 30
         self._lab = False
         self._knife_edge = False
         self._knife_edge_zero1 = 26.78175714 #need to re-calibrate these values
@@ -774,7 +774,7 @@ class adcCtrl(XDevice):
                     img = Field(img.ravel(),pgrid)
                     img -= np.median(img)
 
-                    write_field(img,'/tmp/adcDebug.fits')
+                    #write_field(img,'/tmp/adcDebug.fits')
 
                     ################### FAKE CAMERA IMAGE ######################
                     #img = read_field('/data/users/twitchell/full_img.fits')
@@ -782,6 +782,7 @@ class adcCtrl(XDevice):
 
                     img = self.ADC.hpf(img,20)
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
+                    write_field(img,'/tmp/adc_cropped_filtered.fits')
                     #img = self.ADC.filter_image(img)
 
                     #if we want to find the orientation as well
