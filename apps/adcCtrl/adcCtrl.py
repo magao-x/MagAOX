@@ -142,13 +142,13 @@ class AdcFitter2:
 
         if any(nonlin_region < midpoint):
             leftbound = nonlin_region[nonlin_region < midpoint][-1]
-        elif deriv2[-1] <= 0.4:
+        elif deriv2[0] <= 0.4:
             leftbound = 0
         else: leftbound = None
 
         if any(nonlin_region > midpoint):
             rightbound = nonlin_region[nonlin_region > midpoint][0]
-        elif deriv2[0] <= 0.4:
+        elif deriv2[-1] <= 0.4:
             rightbound = 50
             #print('speckle falls off right (top) edge')
         else: rightbound = None        
@@ -677,6 +677,7 @@ class adcCtrl(XDevice):
                 
                 for i in range(self._no_measurements):
                     img = self.camera.grab_stack(self._n_avg)
+                    img = np.pad(img,pad_width=50, mode='constant', constant_values=0)
                     dim = np.sqrt(img.size)
                     extent = dim * 6/21
                     pgrid = make_pupil_grid(dim,extent)
