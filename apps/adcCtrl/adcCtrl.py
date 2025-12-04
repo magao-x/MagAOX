@@ -19,7 +19,7 @@ from scipy.optimize import curve_fit
 from scipy import ndimage
 
 class AdcFitter2:
-    def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=28,grating_freq=47,ncpc = False,snr_threshold=1.6,log=False,speckle_window=30):
+    def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=28,grating_freq=47,ncpc = False,snr_threshold=1.6,log=False,speckle_window=30,hpf_sigma=8,lpf_sigma=4):
             self.wavelength = wavelength
             self.bandwidth = bandwidth
             self.grating_angle = grating_angle
@@ -31,6 +31,8 @@ class AdcFitter2:
             self.control_matrix = np.array([0,0])
             self.log = log
             self.speckle_window = speckle_window
+            self.hpf_sigma = hpf_sigma
+            self.lpf_sigma = lpf_sigma
 
     def gauss(self,x,mu,sigma2):
         '''standard gaussian function'''
@@ -102,6 +104,16 @@ class AdcFitter2:
         window_size=self.speckle_window
         new_img = self.window_field(img,[max_pixel[0],max_pixel[1]],window_size,window_size)
 
+        write_field(new_img,'/tmp/adc_speck_prefilter.fits')
+
+        hp = self.hpf(new_img,self.hpf_sigma)
+        lp = hp - self.hpf(hp,self.lpf_sigma)
+        lp -= np.median(lp)
+        lp[lp < 0 ] = 0
+        new_img = lp
+        new_img = new_img / np.max(new_img)
+
+        write_field(new_img,'/tmp/adc_speck_postfilter.fits')
         #self.log.debug(f'calculated max pixel for speckle {speckle_number}: {max_pixel}')
 
         #new_img = self.window_field(img,[center_of_intensity[0],center_of_intensity[1]],window_size,window_size)
@@ -193,7 +205,7 @@ class AdcFitter2:
             angles[i] = self.slice_speckle_angle(img,i)
         return angles
 
-    def hpf(data,sigma):
+    def hpf(self,data,sigma):
         return Field((data.shaped - ndimage.gaussian_filter(data.shaped,sigma)).ravel(),data.grid)
     
     def crop_image(self, image,extent,mask_diam=60): 
@@ -768,7 +780,7 @@ class adcCtrl(XDevice):
                     #img = read_field('/data/users/twitchell/full_img.fits')
                     #self.log.debug('note that a real picture is not being taken! a loaded image is being used')
 
-                    img = self.hpf(img,20)
+                    img = self.ADC.hpf(img,20)
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
                     #img = self.ADC.filter_image(img)
 
