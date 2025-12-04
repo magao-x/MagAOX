@@ -762,16 +762,15 @@ def handle_ctrl_mtx(self, existing_property, new_message):
                     img = Field(img.ravel(),pgrid)
                     img -= np.median(img)
 
-                    write_field(img,'/tmp/adcDebug_onsky.fits')
+                    write_field(img,'/tmp/adcDebug.fits')
 
                     ################### FAKE CAMERA IMAGE ######################
                     #img = read_field('/data/users/twitchell/full_img.fits')
                     #self.log.debug('note that a real picture is not being taken! a loaded image is being used')
 
+                    img = self.hpf(img,20)
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
                     #img = self.ADC.filter_image(img)
-
-                    
 
                     #if we want to find the orientation as well
                     if self._vectorize:
