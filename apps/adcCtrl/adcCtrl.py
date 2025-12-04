@@ -410,11 +410,11 @@ class adcCtrl(XDevice):
         nv = properties.NumberVector(name='filterParams')
         nv.add_element(DefNumber( 
             name='hpf', label='hpf', format='%i',
-            min=0, max=500, step=1, _value=self._hpf_sigma
+            min=0, max=500, step=1, _value=8
         ))
         nv.add_element(DefNumber( 
             name='lpf', label='lpf', format='%i',
-            min=0, max=10.00, step=1, _value=self._lpf_sigma
+            min=0, max=10.00, step=1, _value=3
         ))
         self.add_property(nv, callback=self.handle_filter) 
 
@@ -639,7 +639,7 @@ class adcCtrl(XDevice):
         self.update_property(existing_property)
 
 
-def handle_ctrl_mtx(self, existing_property, new_message):
+    def handle_filter(self, existing_property, new_message):
         old_matrix = self._control_mtx
         if 'hpf' in new_message and new_message['hpf'] != existing_property['hpf']:
             existing_property['hpf'] = new_message['hpf']
