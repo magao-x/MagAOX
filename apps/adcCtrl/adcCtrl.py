@@ -16,6 +16,7 @@ from purepyindi2.messages import DefNumber, DefSwitch, DefLight, DefText
 from hcipy import *
 from scipy.optimize import minimize
 from scipy.optimize import curve_fit
+from scipy import ndimage
 
 class AdcFitter2:
     def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=28,grating_freq=47,ncpc = False,snr_threshold=1.6,log=False,speckle_window=30):
@@ -191,6 +192,9 @@ class AdcFitter2:
         for i in range(4):
             angles[i] = self.slice_speckle_angle(img,i)
         return angles
+
+    def hpf(data,sigma):
+        return Field((data.shaped - ndimage.gaussian_filter(data.shaped,sigma)).ravel(),data.grid)
     
     def crop_image(self, image,extent,mask_diam=60): 
         '''cuts out a centered PSF with the central core masked'''
@@ -403,6 +407,17 @@ class adcCtrl(XDevice):
         ))
         self.add_property(nv, callback=self.handle_ctrl_mtx) 
 
+        nv = properties.NumberVector(name='filterParams')
+        nv.add_element(DefNumber( 
+            name='hpf', label='hpf', format='%i',
+            min=0, max=500, step=1, _value=self._hpf_sigma
+        ))
+        nv.add_element(DefNumber( 
+            name='lpf', label='lpf', format='%i',
+            min=0, max=10.00, step=1, _value=self._lpf_sigma
+        ))
+        self.add_property(nv, callback=self.handle_filter) 
+
         sv = properties.SwitchVector(
             name='labmode',
             rule=constants.SwitchRule.ONE_OF_MANY,
@@ -466,6 +481,8 @@ class adcCtrl(XDevice):
         self._no_measurements = 1
         self._ke_top = True #orientation of the knife mask
         self._vectorize = False #defaults to not calculating dispersion orientation
+        self._hpf_sigma = 8
+        self._lpf_sigma = 3
 
         if self.client['adctrack.deltaADC1.current'] != 0:
             self.set_command(0,0)
@@ -620,6 +637,20 @@ class adcCtrl(XDevice):
         self.ADC.control_matrix = self._control_mtx
         self.log.debug(f'control matrix changed to {self._control_mtx}')
         self.update_property(existing_property)
+
+
+def handle_ctrl_mtx(self, existing_property, new_message):
+        old_matrix = self._control_mtx
+        if 'hpf' in new_message and new_message['hpf'] != existing_property['hpf']:
+            existing_property['hpf'] = new_message['hpf']
+            self._hpf_sigma = new_message['hpf']
+
+        if 'lpf' in new_message and new_message['lpf'] != existing_property['lpf']:
+            existing_property['lpf'] = new_message['lpf']
+            self._lpf_sigma = new_message['lpf']
+        
+        self.log.debug(f'filtering parameters changed to (high, low) = ({self._hpf_sigma},{self._lpf_sigma})')
+        self.update_property(existing_property)
         
     def update_wavelength(self):
         if self.client['fwsci1.filterName.i'] == constants.SwitchState.ON:
@@ -738,7 +769,8 @@ class adcCtrl(XDevice):
                     #self.log.debug('note that a real picture is not being taken! a loaded image is being used')
 
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
-                    img = self.ADC.filter_image(img)
+                    #img = self.ADC.filter_image(img)
+
                     
 
                     #if we want to find the orientation as well
