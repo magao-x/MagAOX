@@ -467,6 +467,7 @@ class adcCtrl(XDevice):
         self.client.get_properties('adctrack')
         self.client.get_properties('fwsci1')
         self.client.get_properties('fwfpm')
+        self.client.get_properties('fwsci2')
 
         self.log.info("Found camera: {:s}".format(self.config.camera.shmim))
         self.camera = XCam(
@@ -508,9 +509,11 @@ class adcCtrl(XDevice):
         elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
             self._center_wavelength = 908E-9
             self._extent = 512
-        else: 
-            self._center_wavelength = 656E-9
-            self._extent = 500
+        elif self.client['fwsci2.filterName.r'] == constants.SwitchState.ON: 
+            self._center_wavelength = 613E-9
+            self._extent = 512
+        else:
+            self._center_wavelength = 525E-9
 
         self.ADC = AdcFitter2(wavelength=self._center_wavelength,log=self.log)
         self.log.debug(f'initial normalized wavelength value: {self.ADC.normalized_wavelength}')
