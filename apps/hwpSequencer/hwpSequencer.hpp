@@ -417,8 +417,10 @@ int hwpSequencer::doHwpAction()
     m_indiP_fxngenOutput["value"] = "Off";
     sendNewProperty(m_indiP_fxngenOutput);
 
+    std::cerr << "DEBUG: Begin wait for sem" << std::endl;
     // Wait for current frame to arrive
     ImageStreamIO_semwait(&m_shmIm, m_semID);
+    std::cerr << "DEBUG: End wait for sem" << std::endl;
 
     // move HWP
     float target_hwp_angle = m_hwpPositions[m_hwpPosIndex];
