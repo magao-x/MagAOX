@@ -10,6 +10,9 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+#include <ImageStreamIO/ImageStreamIO.h>
+#include <ImageStreamIO/ImageStruct.h>
+
 #include <mx/math/gslInterpolation.hpp>
 #include <mx/ioutils/readColumns.hpp>
 
@@ -79,6 +82,12 @@ class hwpSequencer : public MagAOXApp<true>
         ///@}
 
         bool m_doMoveHwp {false}; ///< Flag telling the hwp thread that it should actually move the hwp, not just go back to sleep.
+
+        std::string m_shmName {"camsci1 "};
+
+        IMAGE m_shmIm;
+
+        long m_semID;
 
         bool m_sequencerThreadInit {true}; ///< Initialization flag for the open thread.
 
@@ -228,6 +237,16 @@ void hwpSequencer::setupConfig()
                "string",
                "Observers application name, default is 'observers'");
 
+    config.add("shm.shmName",
+               "", 
+               "shm.shmName", 
+               argType::Required, 
+               "shm", 
+               "shmName", 
+               false, 
+               "string", 
+               "SHM name to watch for readout semaphore, default is 'camsci1'");
+
 }
 
 int hwpSequencer::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -236,6 +255,7 @@ int hwpSequencer::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fxngenName, "fxngen.devName" );
     _config( m_fxngenChannel, "fxngen.channel" );
     _config( m_obsAppName, "observers.devName" );
+    _config( m_shmName, "shm.shmName" );
 
     return 0;
 }
@@ -282,6 +302,14 @@ int hwpSequencer::appStartup()
     m_indiP_obsSaving.setDevice( m_obsAppName );
     m_indiP_obsSaving.setName( "obs_on" );
     m_indiP_obsSaving.add( pcf::IndiElement( "toggle" ) );
+
+    std::string shm_path = "/milk/shm/" + m_shmName + ".im.shm";
+    if (ImageStreamIO_openIm(&m_shmIm, shm_path.c_str()))
+    {
+        log<software_error>({ __FILE__, __LINE__, "could not open SHM with name " + m_shmName });
+        return -1;
+    }
+    m_semID = ImageStreamIO_getsemwaitindex(&m_shmIm, 0);
 
 
     if(threadStart( m_sequencerThread, m_sequencerThreadInit, m_sequencerThreadID, m_sequencerThreadProp, 0, "", "sequencerThread", this, sequencerThreadStart) < 0)
@@ -389,6 +417,9 @@ int hwpSequencer::doHwpAction()
     // Stop logging
     m_indiP_fxngenOutput["value"] = "Off";
     sendNewProperty(m_indiP_fxngenOutput);
+
+    // Wait for current frame to arrive
+    ImageStreamIO_semwait(&m_shmIm, m_semID);
 
     // move HWP
     float target_hwp_angle = m_hwpPositions[m_hwpPosIndex];
