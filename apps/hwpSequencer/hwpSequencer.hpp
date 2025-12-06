@@ -83,7 +83,7 @@ class hwpSequencer : public MagAOXApp<true>
 
         bool m_doMoveHwp {false}; ///< Flag telling the hwp thread that it should actually move the hwp, not just go back to sleep.
 
-        std::string m_shmName {"camsci1 "};
+        std::string m_shmimName {"camsci1 "};
 
         IMAGE m_shmIm;
 
@@ -237,12 +237,12 @@ void hwpSequencer::setupConfig()
                "string",
                "Observers application name, default is 'observers'");
 
-    config.add("shm.shmName",
+    config.add("shm.shmimName",
                "", 
-               "shm.shmName", 
+               "shm.shmimName", 
                argType::Required, 
                "shm", 
-               "shmName", 
+               "shmimName", 
                false, 
                "string", 
                "SHM name to watch for readout semaphore, default is 'camsci1'");
@@ -255,7 +255,7 @@ int hwpSequencer::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fxngenName, "fxngen.devName" );
     _config( m_fxngenChannel, "fxngen.channel" );
     _config( m_obsAppName, "observers.devName" );
-    _config( m_shmName, "shm.shmName" );
+    _config( m_shmimName, "shm.shmimName" );
 
     return 0;
 }
@@ -303,10 +303,9 @@ int hwpSequencer::appStartup()
     m_indiP_obsSaving.setName( "obs_on" );
     m_indiP_obsSaving.add( pcf::IndiElement( "toggle" ) );
 
-    std::string shm_path = "/milk/shm/" + m_shmName + ".im.shm";
-    if (ImageStreamIO_openIm(&m_shmIm, shm_path.c_str()))
+    if (ImageStreamIO_openIm(&m_shmIm, m_shmimName.c_str()))
     {
-        log<software_error>({ __FILE__, __LINE__, "could not open SHM with name " + m_shmName });
+        log<software_error>({ __FILE__, __LINE__, "could not open SHM with name " + m_shmimName });
         return -1;
     }
     m_semID = ImageStreamIO_getsemwaitindex(&m_shmIm, 0);
