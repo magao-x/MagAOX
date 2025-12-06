@@ -17,6 +17,10 @@ protected:
 
    std::string m_appState;
 
+   float m_hwpSetAngle;
+   float m_hwpTrackingOffset;
+   float m_hwpActualAngle;
+   std::string m_hwpAngleName;
 
 
 public:
@@ -39,11 +43,11 @@ public:
 public slots:
    void updateGUI();
 
-   void on_comboSelectPolLin_activated(int);
+   // void on_comboSelectPolLin_activated(int);
 
-   void on_buttonStartSequence_pressed();
-   void on_buttonLastCycle_pressed();
-   void on_buttonStopNow_pressed();
+   // void on_buttonStartSequence_pressed();
+   // void on_buttonLastCycle_pressed();
+   // void on_buttonStopSequence_pressed();
 
 signals:
 
@@ -63,12 +67,15 @@ hwpSequencer::hwpSequencer(
 
    setWindowTitle(QString("HWP Sequencer (disconnected)"));
 
-   ui.fsmState->READY("");
-
    setXwFont(ui.buttonStartSequence);
    setXwFont(ui.buttonLastCycle);
-   setXwFont(ui.buttonStopNow);
-   setXwFont(ui.comboSelectPolLin);
+   setXwFont(ui.buttonStopSequence);
+   // setXwFont(ui.comboSelectPolLin);
+
+
+
+   ui.sliderTracking->setup("hwptrack", "tracking", "toggle", "");
+   ui.sliderTracking->setStretch(0, 0, 3, true, true);
 
    connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
 
@@ -85,28 +92,30 @@ void hwpSequencer::subscribe()
    if(!m_parent) return;
 
    m_parent->addSubscriberProperty(this, "hwptrack", "fsm");
-   m_parent->addSubscriber(ui.fsmState);
+   m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position");
+   m_parent->addSubscriberProperty(this, "hwptrack", "hwp_tracking_offset");
+   m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position_actual");
+   m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position_name");
+
+   m_parent->addSubscriber(ui.sliderTracking);
 
    return;
 }
 
 void hwpSequencer::onConnect()
 {
-   ui.fsmState->setEnabled(true);
-
-   ui.fsmState->onConnect();
 
    setWindowTitle(QString("HWP Sequencer"));
+   ui.sliderTracking->onConnect();
 }
 
 void hwpSequencer::onDisconnect()
 {
    //ui.labelDMName->setEnabled(false);
-   ui.fsmState->setEnabled(false);
 
    setWindowTitle(QString("HWP Sequencer (disconnected)"));
-
-   ui.fsmState->onDisconnect();
+   
+   ui.sliderTracking->onDisconnect();
 
    multiIndiSubscriber::onDisconnect();
 }
@@ -118,38 +127,75 @@ void hwpSequencer::handleDefProperty( const pcf::IndiProperty & ipRecv)
 
 void hwpSequencer::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
+   if (ipRecv.getDevice() == "hwptrack")
+   {
+      if (ipRecv.getName() == "hwp_position")
+      {
+         if (ipRecv.find("current"))
+         {
+            m_hwpSetAngle = ipRecv["current"].get<float>();
+         }
+      }
+      else if (ipRecv.getName() == "hwp_tracking_offset")
+      {
+         if (ipRecv.find("value"))
+         {
+            m_hwpTrackingOffset = ipRecv["value"].get<float>();
+         }
+      }
+      else if (ipRecv.getName() == "hwp_position_actual")
+      {
+         if (ipRecv.find("value"))
+         {
+            m_hwpActualAngle = ipRecv["value"].get<float>();
+         }
+      }
+      else if (ipRecv.getName() == "hwp_position_name")
+      {
+         if (ipRecv.find("value"))
+         {
+            m_hwpAngleName = ipRecv["value"].get<std::string>();
+         }
+      }
+   }
+   else if (ipRecv.getDevice() == "hwpsequence")
+   {
+
+   }
+   else if (ipRecv.getDevice() == "stagepollin")
+   {
+
+   }
+   else
+   {
+      return;
+   }
+
+
+
    emit doUpdateGUI();
 }
 
+
 void hwpSequencer::updateGUI()
 {
+   ui.hwpSetAngle->setText(QString("%1°").arg(m_hwpSetAngle, 0, 'f', 1));
+   ui.hwpTrackingOffset->setText(QString("%1°").arg(m_hwpTrackingOffset, 0, 'f', 1));
+   ui.hwpActualAngle->setText(QString("%1°").arg(m_hwpActualAngle, 0, 'f', 1));
+   ui.hwpAngleName->setText(QString(m_hwpAngleName.c_str()));
 
 
 } //updateGUI()
 
-void hwpSequencer::on_buttonStartSequence_pressed()
-{
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+// void hwpSequencer::on_buttonStartSequence_pressed()
+// {
 
-   // ipFreq.setDevice(m_dmName);
-   // ipFreq.setName("test_set");
-   // ipFreq.add(pcf::IndiElement("toggle"));
-   // ipFreq["toggle"] = pcf::IndiElement::Off;
+// }
 
-   // sendNewProperty(ipFreq);
-}
+// void hwpSequencer::on_buttonStopSequence_pressed()
+// {
 
-void hwpSequencer::on_buttonStopNow_pressed()
-{
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-
-   ipFreq.setDevice("observers");
-   ipFreq.setName("obs_on");
-   ipFreq.add(pcf::IndiElement("toggle"));
-   ipFreq["toggle"] = pcf::IndiElement::Off;
-
-   sendNewProperty(ipFreq);
-}
+// }
 
 
 } //namespace xqt

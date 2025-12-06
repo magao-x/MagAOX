@@ -6,7 +6,7 @@ TARGET = hwpSequencerGUI
 include(../magaoxQtApp.pri)
 
 # Input
-INCLUDEPATH += ../../lib ../../widgets ../../widgets/xWidgets
+INCLUDEPATH += ../../lib ../../widgets ../../widgets/xWidgets ../../widgets/hwpSequencer
 
 HEADERS += ../../widgets/xWidgets/app.hpp \
            ../../widgets/xWidgets/xWidget.hpp \
