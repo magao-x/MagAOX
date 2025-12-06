@@ -273,6 +273,7 @@ int hwpSequencer::appStartup()
     CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_lastCycle, "lastCycle" );
 
     CREATE_REG_INDI_NEW_NUMBERD( m_indiP_timePerPos, "timePerPos", 1, 600, 0.1, "%0.1f", "Time per position", "Sequencer");
+    m_indiP_timePerPos["current"].set( m_timePerPos );
 
     CREATE_REG_INDI_NEW_NUMBERI( m_indiP_numCycles, "numCycles", -1, 10800, 1, "%d", "Number of cycles", "Sequencer");
     m_indiP_numCycles["current"].set( m_numCycles );
@@ -337,6 +338,7 @@ int hwpSequencer::appLogic()
 
 
             std::cerr << "Number of completed cycles: " << m_curCycleNumber;
+            log<text_log>( "Number of completed cycles: " + std::to_string(m_curCycleNumber) );
             if (m_numCycles > 0)
             {
                 std::cerr << " / " << m_numCycles;
@@ -402,6 +404,8 @@ void hwpSequencer::sequencerThreadExec( )
             mx::sys::sleep(m_timePerPos);
 
             m_doMoveHwp = false;
+
+            ImageStreamIO_semflush(&m_shmIm, m_semID);
         }
 
         mx::sys::sleep(0.1);
@@ -417,10 +421,12 @@ int hwpSequencer::doHwpAction()
     m_indiP_fxngenOutput["value"] = "Off";
     sendNewProperty(m_indiP_fxngenOutput);
 
-    std::cerr << "DEBUG: Begin wait for sem" << std::endl;
     // Wait for current frame to arrive
-    ImageStreamIO_semwait(&m_shmIm, m_semID);
-    std::cerr << "DEBUG: End wait for sem" << std::endl;
+    if (ImageStreamIO_semwait(&m_shmIm, m_semID))
+    {
+        log<software_error>({ __FILE__, __LINE__, "failed waiting for semaphore" });
+        return -1;
+    }
 
     // move HWP
     float target_hwp_angle = m_hwpPositions[m_hwpPosIndex];
@@ -462,6 +468,13 @@ int hwpSequencer::doHwpAction()
 int hwpSequencer::startSequencing()
 {
     if (m_sequencing) return 0;
+    
+    if (m_timePerPos == 0)
+    {
+        log<text_log>( "Cannot sequence with " + std::to_string(m_timePerPos) + " time per HWP position" );
+        return 0;
+    }
+
     // Move HWP to first position
     m_hwpPosIndex = 0;
     updateIfChanged( m_indiP_hwpPosIndex, "value", m_hwpPosIndex );
@@ -480,6 +493,8 @@ int hwpSequencer::startSequencing()
     m_startSaving = true;
 
     m_doMoveHwp = true;
+
+    ImageStreamIO_semflush(&m_shmIm, m_semID);
 
     return 0;
 }
