@@ -6,8 +6,8 @@
             <rect>
                 <x>0</x>
                 <y>0</y>
-                <width>360</width>
-                <height>400</height>
+                <width>420</width>
+                <height>520</height>
             </rect>
         </property>
         <property name="leftMargin">
@@ -22,14 +22,35 @@
         <property name="bottomMargin">
             <number>20</number>
         </property>
+        <property name="windowIcon">
+            <iconset>
+                <normaloff>:/icons/cog.png</normaloff>:/icons/cog.png
+            </iconset>
+        </property>
         <layout class="QVBoxLayout" name="">
             <property name="spacing">
                 <number>0</number>
             </property>
             <item>
-                <widget class="QWidget" name="widgetFsmStatus">
+
+                <spacer>
+                    <property name="orientation">
+                        <enum>Qt::Horizontal</enum>
+                    </property>
                     <property name="sizePolicy">
                         <sizepolicy hsizetype="Expanding" vsizetype="Minimum" />
+                    </property>
+                    <property name="sizeHint">
+                        <size>
+                            <height>0</height>
+                        </size>
+                    </property>
+                </spacer>
+            </item>
+            <item>
+                <widget class="QWidget" name="widgetFsmStatus">
+                    <property name="sizePolicy">
+                        <sizepolicy hsizetype="Expanding" vsizetype="Fixed" />
                     </property>
                     <layout class="QGridLayout" name="gridFsmStatus">
                         <item row="0" column="0">
@@ -60,7 +81,7 @@
                 </widget>
             </item>
             <item>
-                <spacer name="horizontalSpacer">
+                <spacer>
                     <property name="orientation">
                         <enum>Qt::Horizontal</enum>
                     </property>
@@ -78,6 +99,9 @@
                 <widget class="QFrame" name="widgetHwpAngles">
                     <property name="styleSheet">
                         <string notr="true">background-color: #1d2023;</string>
+                    </property>
+                    <property name="sizePolicy">
+                        <sizepolicy hsizetype="Expanding" vsizetype="Fixed" />
                     </property>
                     <layout class="QGridLayout" name="gridHwpAngles">
                         <item row="0" column="1">
@@ -200,6 +224,9 @@
                     <property name="styleSheet">
                         <string notr="true">background-color: #1d2023;</string>
                     </property>
+                    <property name="sizePolicy">
+                        <sizepolicy hsizetype="Expanding" vsizetype="Fixed" />
+                    </property>
                     <layout class="QGridLayout" name="gridCycleStatus">
                         <item row="0" column="0">
                             <widget class="QLabel" name="labelCycleStatus">
@@ -224,7 +251,7 @@
                         <item row="0" column="2">
                             <widget class="QLabel" name="labelCycleNum">
                                 <property name="text">
-                                    <string>Cycle no:</string>
+                                    <string>Total cycles:</string>
                                 </property>
                                 <property name="alignment">
                                     <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -245,7 +272,7 @@
                 </widget>
             </item>
             <item>
-                <spacer name="horizontalSpacer">
+                <spacer>
                     <property name="orientation">
                         <enum>Qt::Horizontal</enum>
                     </property>
@@ -304,7 +331,7 @@
                 </widget>
             </item>
             <item>
-                <spacer name="horizontalSpacer">
+                <spacer>
                     <property name="orientation">
                         <enum>Qt::Horizontal</enum>
                     </property>
