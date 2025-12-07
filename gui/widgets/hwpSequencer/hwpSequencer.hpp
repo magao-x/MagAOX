@@ -97,25 +97,25 @@ hwpSequencer::hwpSequencer(
    ui.buttonLastCycle->setProperty("isHighlightButton", true);
 
 
-   ui.entryHwpAngle->setup("hwptrack", "hwp_position", statusEntry::FLOAT, "HWP target", "deg");
+   ui.entryHwpAngle->setup("hwptrack", "hwp_position", statusEntry::FLOAT, "HWP target", "°");
    ui.entryHwpAngle->format("%.01f");
    ui.entryHwpAngle->readOnly(false);
-   ui.entryHwpAngle->setStretch(0, 3, 3);
+   ui.entryHwpAngle->setStretch(0, 2, 1);
 
    ui.sliderTracking->setup("hwptrack", "tracking", "toggle", "Tracking");
-   ui.sliderTracking->setStretch(0, 0, 3, true, false);
+   ui.sliderTracking->setStretch(0, 1, 3, true, false);
 
    // ui.comboHwpLin->setup("stagepollin", "", "", "HWP lin. stage", "");
    // ui.comboHwpLin->ctrlWidget(nullptr);
 
    ui.entryNumCycles->setup("hwpsequence", "numCycles", statusEntry::INT, "Num. cycles", "");
    ui.entryNumCycles->readOnly(false);
-   ui.entryNumCycles->setStretch(0, 3, 3);
+   ui.entryNumCycles->setStretch(0, 2, 1);
 
    ui.entryTimePerPos->setup("hwpsequence", "timePerPos", statusEntry::FLOAT, "Time per pos.", "s");
    ui.entryTimePerPos->format("%.01f");
    ui.entryTimePerPos->readOnly(false);
-   ui.entryTimePerPos->setStretch(0, 3, 3);
+   ui.entryTimePerPos->setStretch(0, 2, 1);
 
 
    connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
@@ -302,12 +302,26 @@ void hwpSequencer::updateGUI()
    if (m_sequencing)
    {
       ui.hwpPosIndex->setText(QString("%1 / 4").arg(m_hwpPosIndex, 0, 'd'));
+      QFont font = ui.hwpPosIndex->font();
+      font.setBold(true);
+      ui.hwpPosIndex->setFont(font);
+
       ui.cycleNumStatus->setText(QString("%1").arg(m_curCycle, 0, 'd'));
+      font = ui.cycleNumStatus->font();
+      font.setBold(true);
+      ui.cycleNumStatus->setFont(font);
    }
    else
    {
       ui.hwpPosIndex->setText(QString("---"));
+      QFont font = ui.hwpPosIndex->font();
+      font.setBold(false);
+      ui.hwpPosIndex->setFont(font);
+
       ui.cycleNumStatus->setText(QString("---"));
+      font = ui.cycleNumStatus->font();
+      font.setBold(false);
+      ui.cycleNumStatus->setFont(font);
    }
 
 
