@@ -674,6 +674,13 @@ QPushButton[isScaleButton="true"]
    font-size: 15px;
 }
 
+QPushButton[isHighlightButton="true"]:checked
+{
+    background-color: #3DA5FF;
+    padding-top: -1.5ex;
+    padding-bottom: -1.7ex;
+}
+
 QComboBox
 {
     selection-background-color: #3DA5FF;

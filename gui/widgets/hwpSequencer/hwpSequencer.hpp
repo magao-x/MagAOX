@@ -26,7 +26,6 @@ protected:
    bool m_sequencing{false};
    int m_hwpPosIndex{0};
    int m_curCycle{0};
-   bool m_lastCycle{false};
 
 
 public:
@@ -52,7 +51,7 @@ public slots:
    // void on_comboSelectPolLin_activated(int);
 
    void on_buttonStartSequence_pressed();
-   void on_buttonLastCycle_pressed();
+   void on_buttonLastCycle_clicked(bool);
    void on_buttonStopSequence_pressed();
 
 signals:
@@ -93,6 +92,9 @@ hwpSequencer::hwpSequencer(
    setXwFont(ui.buttonLastCycle);
    setXwFont(ui.buttonStopSequence);
    setXwFont(ui.negOneLabel);
+
+   ui.buttonLastCycle->setCheckable(true);
+   ui.buttonLastCycle->setProperty("isHighlightButton", true);
 
 
    ui.entryHwpAngle->setup("hwptrack", "hwp_position", statusEntry::FLOAT, "HWP target", "deg");
@@ -262,7 +264,7 @@ void hwpSequencer::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if (ipRecv.find("toggle"))
          {
-            //m_lastCycle = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+            ui.buttonLastCycle->setChecked(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On);
          }
       }
    }
@@ -284,29 +286,28 @@ void hwpSequencer::updateGUI()
    ui.hwpActualAngle->setText(QString("%1°").arg(m_hwpActualAngle, 0, 'f', 1));
    ui.hwpAngleName->setText(QString(m_hwpAngleName.c_str()));
 
+   // disable things that we shouldn't change while sequencing
    ui.entryHwpAngle->setEnabled(!m_sequencing);
    ui.sliderTracking->setEnabled(!m_sequencing);
    ui.entryNumCycles->setEnabled(!m_sequencing);
    ui.negOneLabel->setEnabled(!m_sequencing);
    ui.entryTimePerPos->setEnabled(!m_sequencing);
+   ui.buttonStartSequence->setVisible(!m_sequencing);
+   ui.buttonStartSequence->setEnabled(!m_sequencing);
+   ui.buttonStopSequence->setVisible(m_sequencing);
+   ui.buttonStopSequence->setEnabled(m_sequencing);
+   ui.buttonLastCycle->setVisible(m_sequencing);
+   ui.buttonLastCycle->setEnabled(m_sequencing);
 
    if (m_sequencing)
    {
       ui.hwpPosIndex->setText(QString("%1 / 4").arg(m_hwpPosIndex, 0, 'd'));
       ui.cycleNumStatus->setText(QString("%1").arg(m_curCycle, 0, 'd'));
-
-      ui.buttonStartSequence->hide();
-      ui.buttonStopSequence->show();
-      ui.buttonLastCycle->show();
    }
    else
    {
       ui.hwpPosIndex->setText(QString("---"));
       ui.cycleNumStatus->setText(QString("---"));
-
-      ui.buttonStopSequence->hide();
-      ui.buttonLastCycle->hide();
-      ui.buttonStartSequence->show();
    }
 
 
@@ -317,7 +318,14 @@ void hwpSequencer::on_buttonStartSequence_pressed()
    m_sequencing = true;
    std::cerr << "Pretend mode: starting sequencing" << std::endl;
 
-   emit updateGUI();
+   // pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   // ip.setDevice("hwpsequence");
+   // ip.setName("sequence");
+   // ip.add(pcf::IndiElement("toggle"));
+   // ip["toggle"] = pcf::IndiElement::On;
+   // sendNewProperty(ip);
+
+   emit doUpdateGUI();
    return;
 }
 
@@ -326,16 +334,29 @@ void hwpSequencer::on_buttonStopSequence_pressed()
    m_sequencing = false;
    std::cerr << "Pretend mode: stopping sequencing" << std::endl;
 
-   emit updateGUI();
+   // pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   // ip.setDevice("hwpsequence");
+   // ip.setName("sequence");
+   // ip.add(pcf::IndiElement("toggle"));
+   // ip["toggle"] = pcf::IndiElement::Off;
+   // sendNewProperty(ip);
+
+   emit doUpdateGUI();
    return;
 }
 
-void hwpSequencer::on_buttonLastCycle_pressed()
+void hwpSequencer::on_buttonLastCycle_clicked(bool checked)
 {
-   m_lastCycle = true;
-   std::cerr << "Pretend mode: last cycle" << std::endl;
+   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   ip.setDevice("hwpsequence");
+   ip.setName("lastCycle");
+   ip.add(pcf::IndiElement("toggle"));
+   ip["toggle"] = checked ? pcf::IndiElement::On : pcf::IndiElement::Off;
+   sendNewProperty(ip);
 
-   emit updateGUI();
+   std::cerr << "lastCycle toggled to: " << (checked ? "On" : "Off") << std::endl;
+
+   emit doUpdateGUI();
    return;
 }
 
