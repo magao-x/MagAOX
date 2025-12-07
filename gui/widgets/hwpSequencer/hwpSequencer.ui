@@ -288,30 +288,26 @@
             </item>
             <item>
                 <widget class="QWidget" name="widgetControls">
+                                        <property name="sizePolicy">
+                        <sizepolicy hsizetype="Expanding" vsizetype="Fixed" />
+                    </property>
                     <layout class="QGridLayout" name="gridControls" columnstretch="2,1,1">
                         <item row="0" column="0">
-                            <widget class="xqt::statusEntry" name="entryHwpAngle">
-                                <property name="sizePolicy">
-                                    <sizepolicy hsizetype="Expanding" vsizetype="Fixed" />
-                                </property>
-                            </widget>
+                            <widget class="xqt::statusEntry" name="entryHwpAngle"/>
                         </item>
                         <item row="1" column="0">
                             <widget class="xqt::toggleSlider" name="sliderTracking">
-                                <property name="sizePolicy">
-                                    <sizepolicy hsizetype="Expanding" vsizetype="Fixed" />
-                                </property>
+
                             </widget>
+                        </item>
+                        <item row="1" column="1">
+                            <widget class="QLabel" name="labelTracking"/>
                         </item>
                         <!-- <item row="2" column="0">
                     <widget class="xqt::statusCombo" name="comboHwpLin"/>
                 </item> -->
                         <item row="3" column="0">
-                            <widget class="xqt::statusEntry" name="entryNumCycles">
-                                <property name="sizePolicy">
-                                    <sizepolicy hsizetype="Expanding" vsizetype="Fixed" />
-                                </property>
-                            </widget>
+                            <widget class="xqt::statusEntry" name="entryNumCycles"/>
                         </item>
                         <item row="3" column="1" alignment="Qt::AlignLeft">
                             <widget class="QLabel" name="negOneLabel">
@@ -321,11 +317,7 @@
                             </widget>
                         </item>
                         <item row="4" column="0">
-                            <widget class="xqt::statusEntry" name="entryTimePerPos">
-                                <property name="sizePolicy">
-                                    <sizepolicy hsizetype="Expanding" vsizetype="Fixed" />
-                                </property>
-                            </widget>
+                            <widget class="xqt::statusEntry" name="entryTimePerPos"/>
                         </item>
                     </layout>
                 </widget>
@@ -379,7 +371,7 @@
                                     <sizepolicy hsizetype="Fixed" vsizetype="Fixed" />
                                 </property>
                                 <property name="text">
-                                    <string>Last cycle</string>
+                                    <string>Toggle last cycle</string>
                                 </property>
                             </widget>
                         </item>
