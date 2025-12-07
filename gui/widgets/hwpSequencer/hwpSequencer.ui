@@ -23,8 +23,62 @@
             <number>20</number>
         </property>
         <layout class="QVBoxLayout" name="">
+            <property name="spacing">
+                <number>0</number>
+            </property>
             <item>
-                <widget class="QWidget" name="widgetHwpAngles">
+                <widget class="QWidget" name="widgetFsmStatus">
+                    <property name="sizePolicy">
+                        <sizepolicy hsizetype="Expanding" vsizetype="Minimum" />
+                    </property>
+                    <layout class="QGridLayout" name="gridFsmStatus">
+                        <item row="0" column="0">
+                            <widget class="QLabel" name="labelHwptrack" />
+                        </item>
+                        <item row="0" column="1">
+                            <widget class="xqt::fsmDisplay" name="hwptrackFsm" />
+                        </item>
+                        <item row="0" column="2">
+                            <widget class="QLabel" name="labelHwpseq" />
+                        </item>
+                        <item row="0" column="3">
+                            <widget class="xqt::fsmDisplay" name="hwpseqFsm" />
+                        </item>
+                        <item row="1" column="0">
+                            <widget class="QLabel" name="labelStagePolRot" />
+                        </item>
+                        <item row="1" column="1">
+                            <widget class="xqt::fsmDisplay" name="stagePolRotFsm" />
+                        </item>
+                        <item row="1" column="2">
+                            <widget class="QLabel" name="labelStagePolLin" />
+                        </item>
+                        <item row="1" column="3">
+                            <widget class="xqt::fsmDisplay" name="stagePolLinFsm" />
+                        </item>
+                    </layout>
+                </widget>
+            </item>
+            <item>
+                <spacer name="horizontalSpacer">
+                    <property name="orientation">
+                        <enum>Qt::Horizontal</enum>
+                    </property>
+                    <property name="sizePolicy">
+                        <sizepolicy hsizetype="Expanding" vsizetype="Minimum" />
+                    </property>
+                    <property name="sizeHint">
+                        <size>
+                            <height>20</height>
+                        </size>
+                    </property>
+                </spacer>
+            </item>
+            <item>
+                <widget class="QFrame" name="widgetHwpAngles">
+                    <property name="styleSheet">
+                        <string notr="true">background-color: #1d2023;</string>
+                    </property>
                     <layout class="QGridLayout" name="gridHwpAngles">
                         <item row="0" column="1">
                             <widget class="QLabel" name="labelAngle">
@@ -142,7 +196,10 @@
                 </widget>
             </item>
             <item>
-                <widget class="QWidget" name="widgetCycleStatus">
+                <widget class="QFrame" name="widgetCycleStatus">
+                    <property name="styleSheet">
+                        <string notr="true">background-color: #1d2023;</string>
+                    </property>
                     <layout class="QGridLayout" name="gridCycleStatus">
                         <item row="0" column="0">
                             <widget class="QLabel" name="labelCycleStatus">
@@ -336,9 +393,9 @@
             <header>../xWidgets/statusEntry.hpp</header>
         </customwidget>
         <customwidget>
-            <class>xqt::statusDisplay</class>
-            <extends>QLineEdit</extends>
-            <header>../xWidgets/statusDisplay.hpp</header>
+            <class>xqt::fsmDisplay</class>
+            <extends>QWidget</extends>
+            <header>../xWidgets/fsmDisplay.hpp</header>
         </customwidget>
         <!-- <customwidget>
             <class>xqt::statusCombo</class>
