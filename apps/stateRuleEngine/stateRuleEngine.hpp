@@ -312,47 +312,52 @@ int stateRuleEngine::appStartup()
     return 0;
 }
 
+
 int stateRuleEngine::appLogic()
 {
     for(auto it = m_ruleMaps.rules.begin(); it != m_ruleMaps.rules.end(); ++it)
     {
-
         indiCompRule::boolorerr_t validity = it->second->valid();
-
         if(it->second->priority() != rulePriority::none && !it->second->isError(validity))
         {
+        try
+        {
+                bool val = it->second->value();
 
-            bool val = it->second->value();
+                pcf::IndiElement::SwitchStateType onoff = pcf::IndiElement::Off;
+                if(val) onoff = pcf::IndiElement::On;
 
-            pcf::IndiElement::SwitchStateType onoff = pcf::IndiElement::Off;
-            if(val) onoff = pcf::IndiElement::On;
-
-            if(it->second->priority() == rulePriority::info)
-            {
-                updateSwitchIfChanged(m_indiP_info, it->first, onoff);
+                if(it->second->priority() == rulePriority::info)
+                {
+                    updateSwitchIfChanged(m_indiP_info, it->first, onoff);
+                }
+                else if(it->second->priority() == rulePriority::caution)
+                {
+                    updateSwitchIfChanged(m_indiP_caution, it->first, onoff);
+                }
+                else if(it->second->priority() == rulePriority::warning)
+                {
+                    updateSwitchIfChanged(m_indiP_warning, it->first, onoff);
+                }
+                else
+                {
+                    updateSwitchIfChanged(m_indiP_alert, it->first, onoff);
+                }
             }
-            else if(it->second->priority() == rulePriority::caution)
+            catch(std::exception & e)
             {
-                updateSwitchIfChanged(m_indiP_caution, it->first, onoff);
+               std::cerr << "Exception: " << e.what() << "\n(" << __FILE__ << " " << __LINE__ << ")\n";
             }
-            else if(it->second->priority() == rulePriority::warning)
-            {
-                updateSwitchIfChanged(m_indiP_warning, it->first, onoff);
-            }
-            else
-            {
-                updateSwitchIfChanged(m_indiP_alert, it->first, onoff);
-            }
-
         } else if (it->second->isError(validity)) {
-            log<software_info>( { __FILE__,
+            log<software_debug>( { __FILE__,
                                   __LINE__,
-                                  std::format("Error: {}", std::get<std::string>(validity)) } );
+                                  std::format("Checking state rule {} gave error: {}", it->first, std::get<std::string>(validity)) } );
         }
     }
 
     return 0;
 }
+
 
 int stateRuleEngine::appShutdown()
 {
