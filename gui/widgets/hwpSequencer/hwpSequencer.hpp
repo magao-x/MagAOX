@@ -27,6 +27,9 @@ protected:
    int m_hwpPosIndex{0};
    int m_curCycle{0};
    int m_numCycles{-1};
+   bool m_tracking{false};
+
+   void setBold(QLabel*, bool);
 
 
 public:
@@ -85,6 +88,7 @@ hwpSequencer::hwpSequencer(
 
    setXwFont(ui.hwpSetAngle);
    setXwFont(ui.hwpTrackingOffset);
+   setXwFont(ui.labelTracking);
    setXwFont(ui.hwpActualAngle);
    setXwFont(ui.hwpAngleName);
 
@@ -98,6 +102,13 @@ hwpSequencer::hwpSequencer(
    setXwFont(ui.buttonStopSequence);
    setXwFont(ui.negOneLabel);
 
+   ui.hwptrackFsm->highlightChanges(false);
+   ui.hwpseqFsm->highlightChanges(false);
+   ui.stagePolRotFsm->highlightChanges(false);
+   ui.stagePolLinFsm->highlightChanges(false);
+
+   ui.labelTracking->setVisible(false);
+   ui.labelTracking->setText(QString("SYNCHRO_ADI"));
 
    ui.labelHwptrack->setText(QString("hwptrack"));
    ui.hwptrackFsm->device("hwptrack");
@@ -152,6 +163,7 @@ void hwpSequencer::subscribe()
    m_parent->addSubscriberProperty(this, "hwptrack", "hwp_tracking_offset");
    m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position_actual");
    m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position_name");
+   m_parent->addSubscriberProperty(this, "hwptrack", "tracking");
 
    m_parent->addSubscriberProperty(this, "hwpsequence", "sequence");
    m_parent->addSubscriberProperty(this, "hwpsequence", "hwpPosIndex");
@@ -181,6 +193,12 @@ void hwpSequencer::onConnect()
    ui.stagePolRotFsm->onConnect();
    // ui.stagePolLinFsm->onConnect();
 
+
+   setBold(ui.hwpSetAngle, true);
+   setBold(ui.hwpTrackingOffset, true);
+   setBold(ui.hwpActualAngle, true);
+   setBold(ui.hwpAngleName, true);
+
    ui.entryHwpAngle->onConnect();
    ui.sliderTracking->onConnect();
    // ui.comboHwpLin->onConnect();
@@ -199,6 +217,7 @@ void hwpSequencer::onConnect()
    ui.buttonStopSequence->setEnabled(true);
 }
 
+
 void hwpSequencer::onDisconnect()
 {
    //ui.labelDMName->setEnabled(false);
@@ -209,6 +228,20 @@ void hwpSequencer::onDisconnect()
    ui.hwpseqFsm->onDisconnect();
    ui.stagePolRotFsm->onDisconnect();
    // ui.stagePolLinFsm->onDisconnect();
+
+   ui.hwpSetAngle->setText(QString("---"));
+   ui.hwpTrackingOffset->setText(QString("---"));
+   ui.hwpActualAngle->setText(QString("---"));
+   ui.hwpAngleName->setText(QString("---"));
+   setBold(ui.hwpSetAngle, false);
+   setBold(ui.hwpTrackingOffset, false);
+   setBold(ui.hwpActualAngle, false);
+   setBold(ui.hwpAngleName, false);
+
+   ui.hwpPosIndex->setText(QString("---"));
+   ui.cycleNumStatus->setText(QString("---"));
+   setBold(ui.hwpPosIndex, false);
+   setBold(ui.cycleNumStatus, false);
 
    ui.entryHwpAngle->onDisconnect();
    ui.sliderTracking->onDisconnect();
@@ -266,6 +299,13 @@ void hwpSequencer::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if (ipRecv.find("value"))
          {
             m_hwpAngleName = ipRecv["value"].get<std::string>();
+         }
+      }
+      else if (ipRecv.getName() == "tracking")
+      {
+         if (ipRecv.find("toggle"))
+         {
+            m_tracking = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
          }
       }
    }
@@ -326,6 +366,7 @@ void hwpSequencer::updateGUI()
    // disable things that we shouldn't change while sequencing
    ui.entryHwpAngle->setEnabled(!m_sequencing);
    ui.sliderTracking->setEnabled(!m_sequencing);
+   ui.labelTracking->setVisible(m_tracking);
    ui.entryNumCycles->setEnabled(!m_sequencing);
    ui.negOneLabel->setEnabled(!m_sequencing);
    ui.entryTimePerPos->setEnabled(!m_sequencing);
@@ -342,9 +383,6 @@ void hwpSequencer::updateGUI()
    if (m_sequencing)
    {
       ui.hwpPosIndex->setText(QString("%1 / 4").arg(m_hwpPosIndex + 1, 0, 'd'));
-      QFont font = ui.hwpPosIndex->font();
-      font.setBold(true);
-      ui.hwpPosIndex->setFont(font);
 
       if (m_numCycles > 0)
       {
@@ -354,22 +392,16 @@ void hwpSequencer::updateGUI()
       {
          ui.cycleNumStatus->setText(QString("%1").arg(m_curCycle, 0, 'd'));
       }
-      font = ui.cycleNumStatus->font();
-      font.setBold(true);
-      ui.cycleNumStatus->setFont(font);
    }
    else
    {
       ui.hwpPosIndex->setText(QString("---"));
-      QFont font = ui.hwpPosIndex->font();
-      font.setBold(false);
-      ui.hwpPosIndex->setFont(font);
 
       ui.cycleNumStatus->setText(QString("---"));
-      font = ui.cycleNumStatus->font();
-      font.setBold(false);
-      ui.cycleNumStatus->setFont(font);
    }
+
+   setBold(ui.hwpPosIndex, m_sequencing);
+   setBold(ui.cycleNumStatus, m_sequencing);
 
 
 } //updateGUI()
@@ -415,6 +447,12 @@ void hwpSequencer::on_buttonLastCycle_clicked(bool checked)
    return;
 }
 
+void hwpSequencer::setBold(QLabel *label, bool onoff)
+{
+   QFont font = label->font();
+   font.setBold(onoff);
+   label->setFont(font);
+}
 
 } //namespace xqt
 
