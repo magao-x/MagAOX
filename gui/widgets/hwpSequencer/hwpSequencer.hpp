@@ -26,6 +26,7 @@ protected:
    bool m_sequencing{false};
    int m_hwpPosIndex{0};
    int m_curCycle{0};
+   int m_numCycles{-1};
 
 
 public:
@@ -68,7 +69,6 @@ hwpSequencer::hwpSequencer(
                 Qt::WindowFlags f) : xWidget(Parent, f)
 {
    ui.setupUi(this);
-   //ui.labelDMName->setText(m_dmName.c_str());
 
    setWindowTitle(QString("HWP Sequencer (disconnected)"));
 
@@ -148,7 +148,6 @@ void hwpSequencer::subscribe()
 {
    if(!m_parent) return;
 
-   m_parent->addSubscriberProperty(this, "hwptrack", "fsm");
    m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position");
    m_parent->addSubscriberProperty(this, "hwptrack", "hwp_tracking_offset");
    m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position_actual");
@@ -158,6 +157,7 @@ void hwpSequencer::subscribe()
    m_parent->addSubscriberProperty(this, "hwpsequence", "hwpPosIndex");
    m_parent->addSubscriberProperty(this, "hwpsequence", "curCycle");
    m_parent->addSubscriberProperty(this, "hwpsequence", "lastCycle");
+   m_parent->addSubscriberProperty(this, "hwpsequence", "numCycles");
 
    m_parent->addSubscriber(ui.hwptrackFsm);
    m_parent->addSubscriber(ui.hwpseqFsm);
@@ -275,7 +275,7 @@ void hwpSequencer::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if (ipRecv.find("toggle"))
          {
-            //m_sequencing = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+            m_sequencing = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
          }
       }
       else if (ipRecv.getName() == "curCycle")
@@ -299,13 +299,18 @@ void hwpSequencer::handleSetProperty( const pcf::IndiProperty & ipRecv)
             ui.buttonLastCycle->setChecked(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On);
          }
       }
+      else if (ipRecv.getName() == "numCycles")
+      {
+         if (ipRecv.find("current"))
+         {
+            m_numCycles = ipRecv["current"].get<int>();
+         }
+      }
    }
    else
    {
       return;
    }
-
-
 
    emit doUpdateGUI();
 }
@@ -336,12 +341,19 @@ void hwpSequencer::updateGUI()
 
    if (m_sequencing)
    {
-      ui.hwpPosIndex->setText(QString("%1 / 4").arg(m_hwpPosIndex, 0, 'd'));
+      ui.hwpPosIndex->setText(QString("%1 / 4").arg(m_hwpPosIndex + 1, 0, 'd'));
       QFont font = ui.hwpPosIndex->font();
       font.setBold(true);
       ui.hwpPosIndex->setFont(font);
 
-      ui.cycleNumStatus->setText(QString("%1").arg(m_curCycle, 0, 'd'));
+      if (m_numCycles > 0)
+      {
+         ui.cycleNumStatus->setText(QString("%1 / %2").arg(m_curCycle, 0, 'd').arg(m_numCycles, 0, 'd'));
+      }
+      else
+      {
+         ui.cycleNumStatus->setText(QString("%1").arg(m_curCycle, 0, 'd'));
+      }
       font = ui.cycleNumStatus->font();
       font.setBold(true);
       ui.cycleNumStatus->setFont(font);
@@ -364,15 +376,12 @@ void hwpSequencer::updateGUI()
 
 void hwpSequencer::on_buttonStartSequence_pressed()
 {
-   m_sequencing = true;
-   std::cerr << "Pretend mode: starting sequencing" << std::endl;
-
-   // pcf::IndiProperty ip(pcf::IndiProperty::Switch);
-   // ip.setDevice("hwpsequence");
-   // ip.setName("sequence");
-   // ip.add(pcf::IndiElement("toggle"));
-   // ip["toggle"] = pcf::IndiElement::On;
-   // sendNewProperty(ip);
+   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   ip.setDevice("hwpsequence");
+   ip.setName("sequence");
+   ip.add(pcf::IndiElement("toggle"));
+   ip["toggle"] = pcf::IndiElement::On;
+   sendNewProperty(ip);
 
    emit doUpdateGUI();
    return;
@@ -380,15 +389,12 @@ void hwpSequencer::on_buttonStartSequence_pressed()
 
 void hwpSequencer::on_buttonStopSequence_pressed()
 {
-   m_sequencing = false;
-   std::cerr << "Pretend mode: stopping sequencing" << std::endl;
-
-   // pcf::IndiProperty ip(pcf::IndiProperty::Switch);
-   // ip.setDevice("hwpsequence");
-   // ip.setName("sequence");
-   // ip.add(pcf::IndiElement("toggle"));
-   // ip["toggle"] = pcf::IndiElement::Off;
-   // sendNewProperty(ip);
+   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   ip.setDevice("hwpsequence");
+   ip.setName("sequence");
+   ip.add(pcf::IndiElement("toggle"));
+   ip["toggle"] = pcf::IndiElement::Off;
+   sendNewProperty(ip);
 
    emit doUpdateGUI();
    return;
