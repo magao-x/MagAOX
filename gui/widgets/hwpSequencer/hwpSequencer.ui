@@ -10,249 +10,320 @@
                 <height>400</height>
             </rect>
         </property>
-        <property name="windowTitle">
-            <string>Form</string>
+        <property name="leftMargin">
+            <number>20</number>
         </property>
-        <widget class="QPushButton" name="buttonStartSequence">
-            <property name="geometry">
-                <rect>
-                    <x>110</x>
-                    <y>330</y>
-                    <width>145</width>
-                    <height>32</height>
-                </rect>
-            </property>
-            <property name="text">
-                <string>Start sequencing</string>
-            </property>
-        </widget>
-        <widget class="QPushButton" name="buttonStopSequence">
-            <property name="visible">
-                <bool>false</bool>
-            </property>
-            <property name="geometry">
-                <rect>
-                    <x>190</x>
-                    <y>330</y>
-                    <width>145</width>
-                    <height>32</height>
-                </rect>
-            </property>
-            <property name="text">
-                <string>Stop sequencing</string>
-            </property>
-        </widget>
-        <widget class="QWidget" name="">
-            <property name="geometry">
-                <rect>
-                    <x>20</x>
-                    <y>30</y>
-                    <width>321</width>
-                    <height>44</height>
-                </rect>
-            </property>
-            <layout class="QGridLayout" name="gridHwpAngles">
-                <item row="0" column="1">
-                    <widget class="QLabel" name="labelAngle">
-                        <property name="text">
-                            <string>Angle</string>
-                        </property>
-                        <property name="alignment">
-                            <set>Qt::AlignBottom|Qt::AlignHCenter</set>
-                        </property>
-                    </widget>
-                </item>
-                <item row="0" column="2">
-                    <widget class="QLabel" name="labelOffset">
-                        <property name="text">
-                            <string>Offset</string>
-                        </property>
-                        <property name="alignment">
-                            <set>Qt::AlignBottom|Qt::AlignHCenter</set>
-                        </property>
-                    </widget>
-                </item>
-                <item row="0" column="3">
-                    <widget class="QLabel" name="labelActual">
-                        <property name="text">
-                            <string>Actual</string>
-                        </property>
-                        <property name="alignment">
-                            <set>Qt::AlignBottom|Qt::AlignHCenter</set>
-                        </property>
-                    </widget>
-                </item>
-                <item row="0" column="4">
-                    <widget class="QLabel" name="labelName">
-                        <property name="text">
-                            <string>Name</string>
-                        </property>
-                        <property name="alignment">
-                            <set>Qt::AlignBottom|Qt::AlignHCenter</set>
-                        </property>
-                    </widget>
-                </item>
-                <item row="1" column="0">
-                    <widget class="QLabel" name="labelHwp">
-                        <property name="text">
-                            <string>HWP Angle:</string>
-                        </property>
-                        <property name="alignment">
-                            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-                        </property>
-                    </widget>
-                </item>
-                <item row="1" column="1">
-                    <widget class="QLabel" name="hwpSetAngle">
-                        <property name="text">
-                            <string></string>
-                        </property>
-                        <property name="alignment">
-                            <set>Qt::AlignCenter</set>
-                        </property>
-                    </widget>
-                </item>
-                <item row="1" column="2">
-                    <widget class="QLabel" name="hwpTrackingOffset">
-                        <property name="text">
-                            <string></string>
-                        </property>
-                        <property name="alignment">
-                            <set>Qt::AlignCenter</set>
-                        </property>
-                    </widget>
-                </item>
-                <item row="1" column="3">
-                    <widget class="QLabel" name="hwpActualAngle">
-                        <property name="text">
-                            <string></string>
-                        </property>
-                        <property name="alignment">
-                            <set>Qt::AlignCenter</set>
-                        </property>
-                    </widget>
-                </item>
-                <item row="1" column="4">
-                    <widget class="QLabel" name="hwpAngleName">
-                        <property name="text">
-                            <string></string>
-                        </property>
-                        <property name="alignment">
-                            <set>Qt::AlignCenter</set>
-                        </property>
-                    </widget>
-                </item>
-            </layout>
-        </widget>
-        <widget class="QWidget" name="">
-            <property name="geometry">
-                <rect>
-                    <x>20</x>
-                    <y>90</y>
-                    <width>321</width>
-                    <height>31</height>
-                </rect>
-            </property>
-            <layout class="QGridLayout" name="gridCycleStatus">
-                <item row="0" column="0">
-                    <widget class="QLabel" name="labelCycleStatus">
-                        <property name="text">
-                            <string>Cycle status:</string>
-                        </property>
-                        <property name="alignment">
-                            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-                        </property>
-                    </widget>
-                </item>
-                <item row="0" column="1">
-                    <widget class="QLabel" name="hwpPosIndex">
-                        <property name="text">
-                            <string> / 4</string>
-                        </property>
-                        <property name="alignment">
-                            <set>Qt::AlignCenter</set>
-                        </property>
-                    </widget>
-                </item>
-                <item row="0" column="2">
-                    <widget class="QLabel" name="labelCycleNum">
-                        <property name="text">
-                            <string>Cycle no:</string>
-                        </property>
-                        <property name="alignment">
-                            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-                        </property>
-                    </widget>
-                </item>
-                <item row="0" column="3">
-                    <widget class="QLabel" name="cycleNumStatus">
-                        <property name="text">
-                            <string></string>
-                        </property>
-                        <property name="alignment">
-                            <set>Qt::AlignCenter</set>
-                        </property>
-                    </widget>
-                </item>
-            </layout>
-        </widget>
-        <widget class="QWidget" name="">
-            <property name="geometry">
-                <rect>
-                    <x>20</x>
-                    <y>130</y>
-                    <width>314</width>
-                    <height>177</height>
-                </rect>
-            </property>
-            <layout class="QGridLayout" name="gridControls" columnstretch="0,0,0,0">
-                <item row="0" column="0">
-                    <widget class="xqt::statusEntry" name="entryHwpAngle" />
-                </item>
-                <item row="1" column="0">
-                    <widget class="xqt::toggleSlider" name="sliderTracking"/>
-                </item>
-                <item row="2" column="0">
-                    <widget class="xqt::statusDisplay" name="offset"/>
-                </item>
-                <!-- <item row="2" column="0">
+        <property name="topMargin">
+            <number>20</number>
+        </property>
+        <property name="rightMargin">
+            <number>20</number>
+        </property>
+        <property name="bottomMargin">
+            <number>20</number>
+        </property>
+        <layout class="QVBoxLayout" name="">
+            <item>
+                <widget class="QWidget" name="widgetHwpAngles">
+                    <layout class="QGridLayout" name="gridHwpAngles">
+                        <item row="0" column="1">
+                            <widget class="QLabel" name="labelAngle">
+                                <property name="text">
+                                    <string>Angle</string>
+                                </property>
+                                <property name="alignment">
+                                    <set>Qt::AlignBottom|Qt::AlignHCenter</set>
+                                </property>
+                            </widget>
+                        </item>
+                        <item row="0" column="2">
+                            <widget class="QLabel" name="labelOffset">
+                                <property name="text">
+                                    <string>Offset</string>
+                                </property>
+                                <property name="alignment">
+                                    <set>Qt::AlignBottom|Qt::AlignHCenter</set>
+                                </property>
+                            </widget>
+                        </item>
+                        <item row="0" column="3">
+                            <widget class="QLabel" name="labelActual">
+                                <property name="text">
+                                    <string>Actual</string>
+                                </property>
+                                <property name="alignment">
+                                    <set>Qt::AlignBottom|Qt::AlignHCenter</set>
+                                </property>
+                            </widget>
+                        </item>
+                        <item row="0" column="4">
+                            <widget class="QLabel" name="labelName">
+                                <property name="text">
+                                    <string>Name</string>
+                                </property>
+                                <property name="alignment">
+                                    <set>Qt::AlignBottom|Qt::AlignHCenter</set>
+                                </property>
+                            </widget>
+                        </item>
+                        <item row="1" column="0">
+                            <widget class="QLabel" name="labelHwp">
+                                <property name="text">
+                                    <string>HWP Angle:</string>
+                                </property>
+                                <property name="alignment">
+                                    <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+                                </property>
+                            </widget>
+                        </item>
+                        <item row="1" column="1">
+                            <widget class="QLabel" name="hwpSetAngle">
+                                <property name="text">
+                                    <string></string>
+                                </property>
+                                <property name="alignment">
+                                    <set>Qt::AlignCenter</set>
+                                </property>
+                                <property name="font">
+                                    <font>
+                                        <bold>true</bold>
+                                    </font>
+                                </property>
+                            </widget>
+                        </item>
+                        <item row="1" column="2">
+                            <widget class="QLabel" name="hwpTrackingOffset">
+                                <property name="text">
+                                    <string></string>
+                                </property>
+                                <property name="alignment">
+                                    <set>Qt::AlignCenter</set>
+                                </property>
+
+                                <property name="font">
+                                    <font>
+                                        <bold>true</bold>
+                                    </font>
+                                </property>
+                            </widget>
+                        </item>
+                        <item row="1" column="3">
+                            <widget class="QLabel" name="hwpActualAngle">
+                                <property name="text">
+                                    <string></string>
+                                </property>
+                                <property name="alignment">
+                                    <set>Qt::AlignCenter</set>
+                                </property>
+
+                                <property name="font">
+                                    <font>
+                                        <bold>true</bold>
+                                    </font>
+                                </property>
+                            </widget>
+                        </item>
+                        <item row="1" column="4">
+                            <widget class="QLabel" name="hwpAngleName">
+                                <property name="text">
+                                    <string></string>
+                                </property>
+                                <property name="alignment">
+                                    <set>Qt::AlignCenter</set>
+                                </property>
+                                <property name="font">
+                                    <font>
+                                        <bold>true</bold>
+                                    </font>
+                                </property>
+                            </widget>
+                        </item>
+                    </layout>
+                </widget>
+            </item>
+            <item>
+                <widget class="QWidget" name="widgetCycleStatus">
+                    <layout class="QGridLayout" name="gridCycleStatus">
+                        <item row="0" column="0">
+                            <widget class="QLabel" name="labelCycleStatus">
+                                <property name="text">
+                                    <string>Cycle status:</string>
+                                </property>
+                                <property name="alignment">
+                                    <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+                                </property>
+                            </widget>
+                        </item>
+                        <item row="0" column="1">
+                            <widget class="QLabel" name="hwpPosIndex">
+                                <property name="text">
+                                    <string>---</string>
+                                </property>
+                                <property name="alignment">
+                                    <set>Qt::AlignCenter</set>
+                                </property>
+                            </widget>
+                        </item>
+                        <item row="0" column="2">
+                            <widget class="QLabel" name="labelCycleNum">
+                                <property name="text">
+                                    <string>Cycle no:</string>
+                                </property>
+                                <property name="alignment">
+                                    <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+                                </property>
+                            </widget>
+                        </item>
+                        <item row="0" column="3">
+                            <widget class="QLabel" name="cycleNumStatus">
+                                <property name="text">
+                                    <string>---</string>
+                                </property>
+                                <property name="alignment">
+                                    <set>Qt::AlignCenter</set>
+                                </property>
+                            </widget>
+                        </item>
+                    </layout>
+                </widget>
+            </item>
+            <item>
+                <spacer name="horizontalSpacer">
+                    <property name="orientation">
+                        <enum>Qt::Horizontal</enum>
+                    </property>
+                    <property name="sizePolicy">
+                        <sizepolicy hsizetype="Expanding" vsizetype="Minimum" />
+                    </property>
+                    <property name="sizeHint">
+                        <size>
+                            <height>20</height>
+                        </size>
+                    </property>
+                </spacer>
+            </item>
+            <item>
+                <widget class="QWidget" name="widgetControls">
+                    <layout class="QGridLayout" name="gridControls" columnstretch="2,1,1">
+                        <item row="0" column="0">
+                            <widget class="xqt::statusEntry" name="entryHwpAngle">
+                                <property name="sizePolicy">
+                                    <sizepolicy hsizetype="Expanding" vsizetype="Fixed" />
+                                </property>
+                            </widget>
+                        </item>
+                        <item row="1" column="0">
+                            <widget class="xqt::toggleSlider" name="sliderTracking">
+                                <property name="sizePolicy">
+                                    <sizepolicy hsizetype="Expanding" vsizetype="Fixed" />
+                                </property>
+                            </widget>
+                        </item>
+                        <!-- <item row="2" column="0">
                     <widget class="xqt::statusCombo" name="comboHwpLin"/>
                 </item> -->
-                <item row="3" column="0">
-                    <widget class="xqt::statusEntry" name="entryNumCycles" />
-                </item>
-                <item row="3" column="1">
-                    <widget class="QLabel" name="negOneLabel">
-                        <property name="text">
-                            <string>(-1 for infinite)</string>
-                        </property>
-                        <property name="alignment">
-                            <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
-                        </property>
-                    </widget>
-                </item>
-                <item row="4" column="0">
-                    <widget class="xqt::statusEntry" name="entryTimePerPos" />
-                </item>
-            </layout>
-        </widget>
-        <widget class="QPushButton" name="buttonLastCycle">
-            <property name="visible">
-                <bool>false</bool>
-            </property>
-            <property name="geometry">
-                <rect>
-                    <x>30</x>
-                    <y>330</y>
-                    <width>145</width>
-                    <height>32</height>
-                </rect>
-            </property>
-            <property name="text">
-                <string>Last cycle</string>
-            </property>
-        </widget>
+                        <item row="3" column="0">
+                            <widget class="xqt::statusEntry" name="entryNumCycles">
+                                <property name="sizePolicy">
+                                    <sizepolicy hsizetype="Expanding" vsizetype="Fixed" />
+                                </property>
+                            </widget>
+                        </item>
+                        <item row="3" column="1" alignment="Qt::AlignLeft">
+                            <widget class="QLabel" name="negOneLabel">
+                                <property name="text">
+                                    <string>(-1 for infinite)</string>
+                                </property>
+                            </widget>
+                        </item>
+                        <item row="4" column="0">
+                            <widget class="xqt::statusEntry" name="entryTimePerPos">
+                                <property name="sizePolicy">
+                                    <sizepolicy hsizetype="Expanding" vsizetype="Fixed" />
+                                </property>
+                            </widget>
+                        </item>
+                    </layout>
+                </widget>
+            </item>
+            <item>
+                <spacer name="horizontalSpacer">
+                    <property name="orientation">
+                        <enum>Qt::Horizontal</enum>
+                    </property>
+                    <property name="sizePolicy">
+                        <sizepolicy hsizetype="Expanding" vsizetype="Minimum" />
+                    </property>
+                    <property name="sizeHint">
+                        <size>
+                            <height>20</height>
+                        </size>
+                    </property>
+                </spacer>
+            </item>
+            <item>
+                <widget class="QWidget" name="widgetButtons">
+                    <layout class="QHBoxLayout" name="widgetStartSequence">
+                        <item>
+                            <widget class="QPushButton" name="buttonStartSequence">
+                                <property name="geometry">
+                                    <rect>
+                                        <width>145</width>
+                                        <height>32</height>
+                                    </rect>
+                                </property>
+                                <property name="sizePolicy">
+                                    <sizepolicy hsizetype="Fixed" vsizetype="Fixed" />
+                                </property>
+                                <property name="text">
+                                    <string>Start sequencing</string>
+                                </property>
+                            </widget>
+                        </item>
+                        <item>
+                            <widget class="QPushButton" name="buttonLastCycle">
+                                <property name="visible">
+                                    <bool>false</bool>
+                                </property>
+                                <property name="geometry">
+                                    <rect>
+                                        <width>145</width>
+                                        <height>32</height>
+                                    </rect>
+                                </property>
+                                <property name="sizePolicy">
+                                    <sizepolicy hsizetype="Fixed" vsizetype="Fixed" />
+                                </property>
+                                <property name="text">
+                                    <string>Last cycle</string>
+                                </property>
+                            </widget>
+                        </item>
+                        <item>
+                            <widget class="QPushButton" name="buttonStopSequence">
+                                <property name="visible">
+                                    <bool>false</bool>
+                                </property>
+                                <property name="geometry">
+                                    <rect>
+                                        <width>145</width>
+                                        <height>32</height>
+                                    </rect>
+                                </property>
+                                <property name="sizePolicy">
+                                    <sizepolicy hsizetype="Fixed" vsizetype="Fixed" />
+                                </property>
+                                <property name="text">
+                                    <string>Stop sequencing</string>
+                                </property>
+                            </widget>
+                        </item>
+                    </layout>
+                </widget>
+            </item>
+        </layout>
     </widget>
+
     <customwidgets>
         <customwidget>
             <class>xqt::toggleSlider</class>
