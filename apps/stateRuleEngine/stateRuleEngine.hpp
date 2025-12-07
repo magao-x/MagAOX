@@ -225,6 +225,9 @@ int stateRuleEngine::appStartup()
             }
 
             pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
+            if (it->second->message() != "") {
+                elem.setLabel(it->second->message());
+            }
             m_indiP_info.add(elem);
         }
 
@@ -240,6 +243,9 @@ int stateRuleEngine::appStartup()
             }
 
             pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
+            if (it->second->message() != "") {
+                elem.setLabel(it->second->message());
+            }
             m_indiP_caution.add(elem);
         }
 
@@ -255,6 +261,9 @@ int stateRuleEngine::appStartup()
             }
 
             pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
+            if (it->second->message() != "") {
+                elem.setLabel(it->second->message());
+            }
             m_indiP_warning.add(elem);
         }
 
@@ -270,6 +279,9 @@ int stateRuleEngine::appStartup()
             }
 
             pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
+            if (it->second->message() != "") {
+                elem.setLabel(it->second->message());
+            }
             m_indiP_alert.add(elem);
         }
     }
@@ -288,7 +300,12 @@ int stateRuleEngine::appStartup()
         }
 
         registerIndiPropertySet( *it->second, devName, propName, st_newCallBack_ruleProp);
+        log<software_info>( { __FILE__,
+                              __LINE__,
+                              std::format("added set property listener for {}.{}", devName, propName) } );
     }
+
+
 
     state(stateCodes::READY);
 
@@ -299,55 +316,40 @@ int stateRuleEngine::appLogic()
 {
     for(auto it = m_ruleMaps.rules.begin(); it != m_ruleMaps.rules.end(); ++it)
     {
-        #if 0
-        try
+
+        indiCompRule::boolorerr_t validity = it->second->valid();
+
+        if(it->second->priority() != rulePriority::none && !it->second->isError(validity))
         {
+
             bool val = it->second->value();
-            std::cerr << it->first << " " << val << "\n";
-        }
-        catch(...){}
-        #endif
 
-        if(it->second->priority() != rulePriority::none)
-        {
-            try
+            pcf::IndiElement::SwitchStateType onoff = pcf::IndiElement::Off;
+            if(val) onoff = pcf::IndiElement::On;
+
+            if(it->second->priority() == rulePriority::info)
             {
-                bool val = it->second->value();
-
-                pcf::IndiElement::SwitchStateType onoff = pcf::IndiElement::Off;
-                if(val) onoff = pcf::IndiElement::On;
-
-                if(it->second->priority() == rulePriority::info)
-                {
-                    updateSwitchIfChanged(m_indiP_info, it->first, onoff);
-                }
-                else if(it->second->priority() == rulePriority::caution)
-                {
-                    updateSwitchIfChanged(m_indiP_caution, it->first, onoff);
-                }
-                else if(it->second->priority() == rulePriority::warning)
-                {
-                    updateSwitchIfChanged(m_indiP_warning, it->first, onoff);
-                }
-                else
-                {
-                    updateSwitchIfChanged(m_indiP_alert, it->first, onoff);
-                }
-
+                updateSwitchIfChanged(m_indiP_info, it->first, onoff);
             }
-            catch(const std::exception & e)
+            else if(it->second->priority() == rulePriority::caution)
             {
-                ///\todo how to handle startup vs misconfiguration
-
-                /*
-                if(it->second->priority() == rulePriority::none)
-                {
-                    updateSwitchIfChanged(m_indiP_info, it->first, pcf::IndiElement::Off);
-                }*/
+                updateSwitchIfChanged(m_indiP_caution, it->first, onoff);
             }
+            else if(it->second->priority() == rulePriority::warning)
+            {
+                updateSwitchIfChanged(m_indiP_warning, it->first, onoff);
+            }
+            else
+            {
+                updateSwitchIfChanged(m_indiP_alert, it->first, onoff);
+            }
+
+        } else if (it->second->isError(validity)) {
+            log<software_info>( { __FILE__,
+                                  __LINE__,
+                                  std::format("Error: {}", std::get<std::string>(validity)) } );
         }
     }
-
 
     return 0;
 }
