@@ -225,6 +225,9 @@ int stateRuleEngine::appStartup()
             }
 
             pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
+            if (it->second->message() != "") {
+                elem.setLabel(it->second->message());
+            }
             m_indiP_info.add(elem);
         }
 
@@ -240,6 +243,9 @@ int stateRuleEngine::appStartup()
             }
 
             pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
+            if (it->second->message() != "") {
+                elem.setLabel(it->second->message());
+            }
             m_indiP_caution.add(elem);
         }
 
@@ -255,6 +261,9 @@ int stateRuleEngine::appStartup()
             }
 
             pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
+            if (it->second->message() != "") {
+                elem.setLabel(it->second->message());
+            }
             m_indiP_warning.add(elem);
         }
 
@@ -270,6 +279,9 @@ int stateRuleEngine::appStartup()
             }
 
             pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
+            if (it->second->message() != "") {
+                elem.setLabel(it->second->message());
+            }
             m_indiP_alert.add(elem);
         }
     }
