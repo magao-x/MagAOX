@@ -2,6 +2,7 @@
 #ifndef hwpSequencer_hpp
 #define hwpSequencer_hpp
 
+#include <iostream>
 #include "ui_hwpSequencer.h"
 
 #include "../xWidgets/xWidget.hpp"
@@ -17,10 +18,15 @@ protected:
 
    std::string m_appState;
 
-   float m_hwpSetAngle;
-   float m_hwpTrackingOffset;
-   float m_hwpActualAngle;
-   std::string m_hwpAngleName;
+   float m_hwpSetAngle{0};
+   float m_hwpTrackingOffset{0};
+   float m_hwpActualAngle{0};
+   std::string m_hwpAngleName{""};
+
+   bool m_sequencing{false};
+   int m_hwpPosIndex{0};
+   int m_curCycle{0};
+   bool m_lastCycle{false};
 
 
 public:
@@ -45,9 +51,9 @@ public slots:
 
    // void on_comboSelectPolLin_activated(int);
 
-   // void on_buttonStartSequence_pressed();
-   // void on_buttonLastCycle_pressed();
-   // void on_buttonStopSequence_pressed();
+   void on_buttonStartSequence_pressed();
+   void on_buttonLastCycle_pressed();
+   void on_buttonStopSequence_pressed();
 
 signals:
 
@@ -67,15 +73,48 @@ hwpSequencer::hwpSequencer(
 
    setWindowTitle(QString("HWP Sequencer (disconnected)"));
 
+   setXwFont(ui.labelAngle);
+   setXwFont(ui.labelOffset);
+   setXwFont(ui.labelActual);
+   setXwFont(ui.labelName);
+   setXwFont(ui.labelHwp);
+
+   setXwFont(ui.hwpSetAngle);
+   setXwFont(ui.hwpTrackingOffset);
+   setXwFont(ui.hwpActualAngle);
+   setXwFont(ui.hwpAngleName);
+
+   setXwFont(ui.labelCycleStatus);
+   setXwFont(ui.hwpPosIndex);
+   setXwFont(ui.labelCycleNum);
+   setXwFont(ui.cycleNumStatus);
+
    setXwFont(ui.buttonStartSequence);
    setXwFont(ui.buttonLastCycle);
    setXwFont(ui.buttonStopSequence);
-   // setXwFont(ui.comboSelectPolLin);
+   setXwFont(ui.negOneLabel);
 
 
+   ui.entryHwpAngle->setup("hwptrack", "hwp_position", statusEntry::FLOAT, "HWP target", "deg");
+   ui.entryHwpAngle->format("%.01f");
+   ui.entryHwpAngle->readOnly(false);
+   ui.entryHwpAngle->setStretch(0, 3, 3);
 
-   ui.sliderTracking->setup("hwptrack", "tracking", "toggle", "");
-   ui.sliderTracking->setStretch(0, 0, 3, true, true);
+   ui.sliderTracking->setup("hwptrack", "tracking", "toggle", "Tracking");
+   ui.sliderTracking->setStretch(0, 0, 3, true, false);
+
+   // ui.comboHwpLin->setup("stagepollin", "", "", "HWP lin. stage", "");
+   // ui.comboHwpLin->ctrlWidget(nullptr);
+
+   ui.entryNumCycles->setup("hwpsequence", "numCycles", statusEntry::INT, "Num. cycles", "");
+   ui.entryNumCycles->readOnly(false);
+   ui.entryNumCycles->setStretch(0, 3, 3);
+
+   ui.entryTimePerPos->setup("hwpsequence", "timePerPos", statusEntry::FLOAT, "Time per pos.", "s");
+   ui.entryTimePerPos->format("%.01f");
+   ui.entryTimePerPos->readOnly(false);
+   ui.entryTimePerPos->setStretch(0, 3, 3);
+
 
    connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
 
@@ -97,7 +136,16 @@ void hwpSequencer::subscribe()
    m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position_actual");
    m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position_name");
 
+   m_parent->addSubscriberProperty(this, "hwpsequence", "sequence");
+   m_parent->addSubscriberProperty(this, "hwpsequence", "hwpPosIndex");
+   m_parent->addSubscriberProperty(this, "hwpsequence", "curCycle");
+   m_parent->addSubscriberProperty(this, "hwpsequence", "lastCycle");
+
+   m_parent->addSubscriber(ui.entryHwpAngle);
    m_parent->addSubscriber(ui.sliderTracking);
+   // m_parent->addSubscriber(ui.comboHwpLin);
+   m_parent->addSubscriber(ui.entryNumCycles);
+   m_parent->addSubscriber(ui.entryTimePerPos);
 
    return;
 }
@@ -106,7 +154,21 @@ void hwpSequencer::onConnect()
 {
 
    setWindowTitle(QString("HWP Sequencer"));
+   ui.entryHwpAngle->onConnect();
    ui.sliderTracking->onConnect();
+   // ui.comboHwpLin->onConnect();
+   ui.entryNumCycles->onConnect();
+   ui.entryTimePerPos->onConnect();
+
+   ui.entryHwpAngle->setEnabled(true);
+   ui.sliderTracking->setEnabled(true);
+   // ui.comboHwpLin->setEnabled(false);
+   ui.entryNumCycles->setEnabled(true);
+   ui.entryTimePerPos->setEnabled(true);
+
+   ui.buttonStartSequence->setEnabled(true);
+   ui.buttonLastCycle->setEnabled(true);
+   ui.buttonStopSequence->setEnabled(true);
 }
 
 void hwpSequencer::onDisconnect()
@@ -114,8 +176,23 @@ void hwpSequencer::onDisconnect()
    //ui.labelDMName->setEnabled(false);
 
    setWindowTitle(QString("HWP Sequencer (disconnected)"));
-   
+
+   ui.entryHwpAngle->onDisconnect();
    ui.sliderTracking->onDisconnect();
+   // ui.comboHwpLin->onDisconnect();
+   ui.entryNumCycles->onDisconnect();
+   ui.entryTimePerPos->onDisconnect();
+
+
+   ui.entryHwpAngle->setEnabled(false);
+   ui.sliderTracking->setEnabled(false);
+   // ui.comboHwpLin->setEnabled(false);
+   ui.entryNumCycles->setEnabled(false);
+   ui.entryTimePerPos->setEnabled(false);
+
+   ui.buttonStartSequence->setEnabled(false);
+   ui.buttonLastCycle->setEnabled(false);
+   ui.buttonStopSequence->setEnabled(false);
 
    multiIndiSubscriber::onDisconnect();
 }
@@ -160,11 +237,34 @@ void hwpSequencer::handleSetProperty( const pcf::IndiProperty & ipRecv)
    }
    else if (ipRecv.getDevice() == "hwpsequence")
    {
-
-   }
-   else if (ipRecv.getDevice() == "stagepollin")
-   {
-
+      if (ipRecv.getName() == "sequence")
+      {
+         if (ipRecv.find("toggle"))
+         {
+            //m_sequencing = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+         }
+      }
+      else if (ipRecv.getName() == "curCycle")
+      {
+         if (ipRecv.find("value"))
+         {
+            m_curCycle = ipRecv["value"].get<int>();
+         }
+      }
+      else if (ipRecv.getName() == "hwpPosIndex")
+      {
+         if (ipRecv.find("value"))
+         {
+            m_hwpPosIndex = ipRecv["value"].get<int>();
+         }
+      }
+      else if (ipRecv.getName() == "lastCycle")
+      {
+         if (ipRecv.find("toggle"))
+         {
+            //m_lastCycle = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+         }
+      }
    }
    else
    {
@@ -184,18 +284,60 @@ void hwpSequencer::updateGUI()
    ui.hwpActualAngle->setText(QString("%1°").arg(m_hwpActualAngle, 0, 'f', 1));
    ui.hwpAngleName->setText(QString(m_hwpAngleName.c_str()));
 
+   ui.entryHwpAngle->setEnabled(!m_sequencing);
+   ui.sliderTracking->setEnabled(!m_sequencing);
+   ui.entryNumCycles->setEnabled(!m_sequencing);
+   ui.negOneLabel->setEnabled(!m_sequencing);
+   ui.entryTimePerPos->setEnabled(!m_sequencing);
+
+   if (m_sequencing)
+   {
+      ui.hwpPosIndex->setText(QString("%1 / 4").arg(m_hwpPosIndex, 0, 'd'));
+      ui.cycleNumStatus->setText(QString("%1").arg(m_curCycle, 0, 'd'));
+
+      ui.buttonStartSequence->hide();
+      ui.buttonStopSequence->show();
+      ui.buttonLastCycle->show();
+   }
+   else
+   {
+      ui.hwpPosIndex->setText(QString("---"));
+      ui.cycleNumStatus->setText(QString("---"));
+
+      ui.buttonStopSequence->hide();
+      ui.buttonLastCycle->hide();
+      ui.buttonStartSequence->show();
+   }
+
 
 } //updateGUI()
 
-// void hwpSequencer::on_buttonStartSequence_pressed()
-// {
+void hwpSequencer::on_buttonStartSequence_pressed()
+{
+   m_sequencing = true;
+   std::cerr << "Pretend mode: starting sequencing" << std::endl;
 
-// }
+   emit updateGUI();
+   return;
+}
 
-// void hwpSequencer::on_buttonStopSequence_pressed()
-// {
+void hwpSequencer::on_buttonStopSequence_pressed()
+{
+   m_sequencing = false;
+   std::cerr << "Pretend mode: stopping sequencing" << std::endl;
 
-// }
+   emit updateGUI();
+   return;
+}
+
+void hwpSequencer::on_buttonLastCycle_pressed()
+{
+   m_lastCycle = true;
+   std::cerr << "Pretend mode: last cycle" << std::endl;
+
+   emit updateGUI();
+   return;
+}
 
 
 } //namespace xqt
