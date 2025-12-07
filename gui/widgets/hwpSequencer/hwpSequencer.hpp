@@ -72,6 +72,11 @@ hwpSequencer::hwpSequencer(
 
    setWindowTitle(QString("HWP Sequencer (disconnected)"));
 
+   setXwFont(ui.labelHwptrack);
+   setXwFont(ui.labelHwpseq);
+   setXwFont(ui.labelStagePolRot);
+   setXwFont(ui.labelStagePolLin);
+
    setXwFont(ui.labelAngle);
    setXwFont(ui.labelOffset);
    setXwFont(ui.labelActual);
@@ -93,13 +98,26 @@ hwpSequencer::hwpSequencer(
    setXwFont(ui.buttonStopSequence);
    setXwFont(ui.negOneLabel);
 
+
+   ui.labelHwptrack->setText(QString("hwptrack"));
+   ui.hwptrackFsm->device("hwptrack");
+   
+   ui.labelHwpseq->setText(QString("hwpsequence"));
+   ui.hwpseqFsm->device("hwpsequence");
+   
+   ui.labelStagePolRot->setText(QString("stagepolrot"));
+   ui.stagePolRotFsm->device("stagepolrot");
+
+   ui.labelStagePolLin->setText(QString("stagepollin"));
+   ui.labelStagePolLin->setEnabled(false);
+   ui.stagePolLinFsm->setEnabled(false);
+   
+
    ui.buttonLastCycle->setCheckable(true);
    ui.buttonLastCycle->setProperty("isHighlightButton", true);
 
-
    ui.entryHwpAngle->setup("hwptrack", "hwp_position", statusEntry::FLOAT, "HWP target", "°");
    ui.entryHwpAngle->format("%.01f");
-   ui.entryHwpAngle->readOnly(false);
    ui.entryHwpAngle->setStretch(0, 2, 1);
 
    ui.sliderTracking->setup("hwptrack", "tracking", "toggle", "Tracking");
@@ -109,12 +127,10 @@ hwpSequencer::hwpSequencer(
    // ui.comboHwpLin->ctrlWidget(nullptr);
 
    ui.entryNumCycles->setup("hwpsequence", "numCycles", statusEntry::INT, "Num. cycles", "");
-   ui.entryNumCycles->readOnly(false);
    ui.entryNumCycles->setStretch(0, 2, 1);
 
    ui.entryTimePerPos->setup("hwpsequence", "timePerPos", statusEntry::FLOAT, "Time per pos.", "s");
    ui.entryTimePerPos->format("%.01f");
-   ui.entryTimePerPos->readOnly(false);
    ui.entryTimePerPos->setStretch(0, 2, 1);
 
 
@@ -143,6 +159,10 @@ void hwpSequencer::subscribe()
    m_parent->addSubscriberProperty(this, "hwpsequence", "curCycle");
    m_parent->addSubscriberProperty(this, "hwpsequence", "lastCycle");
 
+   m_parent->addSubscriber(ui.hwptrackFsm);
+   m_parent->addSubscriber(ui.hwpseqFsm);
+   m_parent->addSubscriber(ui.stagePolRotFsm);
+   // m_parent->addSubscriber(ui.stagePolLinFsm);
    m_parent->addSubscriber(ui.entryHwpAngle);
    m_parent->addSubscriber(ui.sliderTracking);
    // m_parent->addSubscriber(ui.comboHwpLin);
@@ -156,6 +176,11 @@ void hwpSequencer::onConnect()
 {
 
    setWindowTitle(QString("HWP Sequencer"));
+   ui.hwptrackFsm->onConnect();
+   ui.hwpseqFsm->onConnect();
+   ui.stagePolRotFsm->onConnect();
+   // ui.stagePolLinFsm->onConnect();
+
    ui.entryHwpAngle->onConnect();
    ui.sliderTracking->onConnect();
    // ui.comboHwpLin->onConnect();
@@ -166,6 +191,7 @@ void hwpSequencer::onConnect()
    ui.sliderTracking->setEnabled(true);
    // ui.comboHwpLin->setEnabled(false);
    ui.entryNumCycles->setEnabled(true);
+   ui.negOneLabel->setEnabled(true);
    ui.entryTimePerPos->setEnabled(true);
 
    ui.buttonStartSequence->setEnabled(true);
@@ -179,6 +205,11 @@ void hwpSequencer::onDisconnect()
 
    setWindowTitle(QString("HWP Sequencer (disconnected)"));
 
+   ui.hwptrackFsm->onDisconnect();
+   ui.hwpseqFsm->onDisconnect();
+   ui.stagePolRotFsm->onDisconnect();
+   // ui.stagePolLinFsm->onDisconnect();
+
    ui.entryHwpAngle->onDisconnect();
    ui.sliderTracking->onDisconnect();
    // ui.comboHwpLin->onDisconnect();
@@ -190,6 +221,7 @@ void hwpSequencer::onDisconnect()
    ui.sliderTracking->setEnabled(false);
    // ui.comboHwpLin->setEnabled(false);
    ui.entryNumCycles->setEnabled(false);
+   ui.negOneLabel->setEnabled(false);
    ui.entryTimePerPos->setEnabled(false);
 
    ui.buttonStartSequence->setEnabled(false);
@@ -292,10 +324,13 @@ void hwpSequencer::updateGUI()
    ui.entryNumCycles->setEnabled(!m_sequencing);
    ui.negOneLabel->setEnabled(!m_sequencing);
    ui.entryTimePerPos->setEnabled(!m_sequencing);
+
    ui.buttonStartSequence->setVisible(!m_sequencing);
    ui.buttonStartSequence->setEnabled(!m_sequencing);
+   
    ui.buttonStopSequence->setVisible(m_sequencing);
    ui.buttonStopSequence->setEnabled(m_sequencing);
+   
    ui.buttonLastCycle->setVisible(m_sequencing);
    ui.buttonLastCycle->setEnabled(m_sequencing);
 
