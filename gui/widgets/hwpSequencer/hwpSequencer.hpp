@@ -365,8 +365,20 @@ void hwpSequencer::updateGUI()
 
    // disable things that we shouldn't change while sequencing
    ui.entryHwpAngle->setEnabled(!m_sequencing);
-   ui.sliderTracking->setEnabled(!m_sequencing);
+   // we actually don't want to disable the toggleSlider because it will appear "off" even if tracking is on
+   if (m_sequencing)
+   {
+      ui.sliderTracking->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+      ui.sliderTracking->setFocusPolicy(Qt::NoFocus);
+   }
+   else
+   {
+      ui.sliderTracking->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+      ui.sliderTracking->setFocusPolicy(Qt::StrongFocus);
+   }
+   ui.sliderTracking->setLabelEnabled(!m_sequencing);
    ui.labelTracking->setVisible(m_tracking);
+   ui.labelTracking->setEnabled(!m_sequencing);
    ui.entryNumCycles->setEnabled(!m_sequencing);
    ui.negOneLabel->setEnabled(!m_sequencing);
    ui.entryTimePerPos->setEnabled(!m_sequencing);
