@@ -503,12 +503,12 @@ class adcCtrl(XDevice):
             self.set_command(0,0)
             self.send_command()
 
-        if self.client['fwsci1.filterName.i'] == constants.SwitchState.ON:
-            self._center_wavelength = 762E-9
-            self._extent = 512
-        elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
-            self._center_wavelength = 908E-9
-            self._extent = 512
+        # if self.client['fwsci1.filterName.i'] == constants.SwitchState.ON:
+        #     self._center_wavelength = 762E-9
+        #     self._extent = 512
+        # elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
+        #     self._center_wavelength = 908E-9
+        #     self._extent = 512
         elif self.client['fwsci2.filterName.r'] == constants.SwitchState.ON: 
             self._center_wavelength = 613E-9
             self._extent = 512
