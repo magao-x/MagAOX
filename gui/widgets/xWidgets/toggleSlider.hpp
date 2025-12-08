@@ -100,7 +100,9 @@ public:
    virtual void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
 
    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   
 
+   void setLabelEnabled(bool);
    //------------------------------------------------------
 
 public slots:
@@ -198,6 +200,11 @@ void toggleSlider::label(const std::string &nlab)
 std::string toggleSlider::label()
 {
    return ui.label->text().toStdString();
+}
+
+void toggleSlider::setLabelEnabled(bool onoff)
+{
+   ui.label->setEnabled(onoff);
 }
 
 void toggleSlider::setStretch( int sSpacer,
