@@ -83,6 +83,8 @@ class hwpSequencer : public MagAOXApp<true>
 
         bool m_doMoveHwp {false}; ///< Flag telling the hwp thread that it should actually move the hwp, not just go back to sleep.
 
+        bool m_fxngenOutp {false};
+
         std::string m_shmimName {"camsci1 "};
 
         IMAGE m_shmIm;
@@ -173,6 +175,8 @@ class hwpSequencer : public MagAOXApp<true>
 
         pcf::IndiProperty m_indiP_fxngenOutput;
 
+        pcf::IndiProperty m_indiP_fxngenOutput_status;
+
         pcf::IndiProperty m_indiP_obsSaving;
 
 
@@ -187,6 +191,8 @@ class hwpSequencer : public MagAOXApp<true>
         INDI_NEWCALLBACK_DECL( hwpSequencer, m_indiP_lastCycle );
 
         INDI_SETCALLBACK_DECL( hwpSequencer, m_indiP_hwpTracker_current );
+
+        INDI_SETCALLBACK_DECL( hwpSequencer, m_indiP_fxngenOutput_status );
 
 };
 
@@ -238,13 +244,13 @@ void hwpSequencer::setupConfig()
                "Observers application name, default is 'observers'");
 
     config.add("shm.shmimName",
-               "", 
-               "shm.shmimName", 
-               argType::Required, 
-               "shm", 
-               "shmimName", 
-               false, 
-               "string", 
+               "",
+               "shm.shmimName",
+               argType::Required,
+               "shm",
+               "shmimName",
+               false,
+               "string",
                "SHM name to watch for readout semaphore, default is 'camsci1'");
 
 }
@@ -299,10 +305,13 @@ int hwpSequencer::appStartup()
     m_indiP_fxngenOutput.setName( m_fxngenChannel + "outp" );
     m_indiP_fxngenOutput.add( pcf::IndiElement( "value" ) );
 
+    REG_INDI_SETPROP(m_indiP_fxngenOutput_status, m_fxngenName, m_fxngenChannel + "outp");
+
     m_indiP_obsSaving = pcf::IndiProperty( pcf::IndiProperty::Switch );
     m_indiP_obsSaving.setDevice( m_obsAppName );
     m_indiP_obsSaving.setName( "obs_on" );
     m_indiP_obsSaving.add( pcf::IndiElement( "toggle" ) );
+
 
     if (ImageStreamIO_openIm(&m_shmIm, m_shmimName.c_str()))
     {
@@ -417,9 +426,15 @@ void hwpSequencer::sequencerThreadExec( )
 
 int hwpSequencer::doHwpAction()
 {
-    // Stop logging
+    // Stop triggering
     m_indiP_fxngenOutput["value"] = "Off";
     sendNewProperty(m_indiP_fxngenOutput);
+
+    // Wait for trigger to stop
+    while (m_fxngenOutp)
+    {
+        mx::sys::milliSleep(m_hwpWait);
+    }
 
     // Wait for current frame to arrive
     if (ImageStreamIO_semwait(&m_shmIm, m_semID))
@@ -450,6 +465,9 @@ int hwpSequencer::doHwpAction()
         }
     }
 
+    // this only triggers when calling startSequencing--we wan't to turn
+    // the observer obs_on toggle on once and let the external trigger
+    // dictate the intermediate stops and starts
     if (m_startSaving)
     {
         m_indiP_obsSaving["toggle"] = pcf::IndiElement::On;
@@ -468,7 +486,7 @@ int hwpSequencer::doHwpAction()
 int hwpSequencer::startSequencing()
 {
     if (m_sequencing) return 0;
-    
+
     if (m_timePerPos == 0)
     {
         log<text_log>( "Cannot sequence with " + std::to_string(m_timePerPos) + " time per HWP position" );
@@ -505,6 +523,13 @@ int hwpSequencer::stopSequencing()
 
     std::cerr << "Stopping sequence" << std::endl;
     log<text_log>( "Stopping sequence" );
+
+    // Wait for current frame to arrive
+    if (ImageStreamIO_semwait(&m_shmIm, m_semID))
+    {
+        log<software_error>({ __FILE__, __LINE__, "failed waiting for semaphore" });
+        return -1;
+    }
 
     // Turn the data acquisition off, but let's make sure the camera trigger is still rolling
     m_indiP_obsSaving["toggle"] = pcf::IndiElement::Off;
@@ -670,6 +695,35 @@ INDI_SETCALLBACK_DEFN(hwpSequencer, m_indiP_hwpTracker_current)(const pcf::IndiP
    if(!ipRecv.find("current")) return 0;
 
    m_reportedHwpPos = ipRecv["current"].get<float>();
+
+   return 0;
+}
+
+
+
+INDI_SETCALLBACK_DEFN(hwpSequencer, m_indiP_fxngenOutput_status)(const pcf::IndiProperty &ipRecv)
+{
+
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_fxngenOutput_status, ipRecv );
+
+   if(ipRecv.getName() != m_indiP_fxngenOutput_status.getName())
+   {
+      log<software_error>({__FILE__,__LINE__,"wrong INDI property received"});
+
+      return -1;
+   }
+
+   if(!ipRecv.find("value")) return 0;
+
+   std::string fxngenOutp = ipRecv["value"].get<std::string>();
+   if (fxngenOutp == "On")
+   {
+      m_fxngenOutp = true;
+   }
+   else if (fxngenOutp == "Off")
+   {
+      m_fxngenOutp = false;
+   }
 
    return 0;
 }
