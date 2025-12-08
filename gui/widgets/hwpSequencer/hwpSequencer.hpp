@@ -441,8 +441,6 @@ void hwpSequencer::on_buttonLastCycle_clicked(bool checked)
    ip["toggle"] = checked ? pcf::IndiElement::On : pcf::IndiElement::Off;
    sendNewProperty(ip);
 
-   std::cerr << "lastCycle toggled to: " << (checked ? "On" : "Off") << std::endl;
-
    emit doUpdateGUI();
    return;
 }
