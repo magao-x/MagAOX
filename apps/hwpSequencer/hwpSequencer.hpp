@@ -114,12 +114,9 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
 
         int stopSequencing();
 
-        int allocate( const dev::shmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
+        int allocate( const dev::shmimT &);
 
-
-        int processImage( void *curr_src, ///< [in] pointer to start of current frame.
-                    const dev::shmimT &dummy     ///< [in] tag to differentiate shmimMonitor parents.
-        );
+        int processImage( void *, const dev::shmimT &);
 
 
     public:
@@ -136,8 +133,7 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
         /// Implementation of loadConfig logic, separated for testing.
         /** This is called by loadConfig().
          */
-        int loadConfigImpl(
-            mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
+        int loadConfigImpl(mx::app::appConfigurator &_config); /**< [in] an application configuration from which to load values*/
 
         virtual void loadConfig();
 
@@ -431,12 +427,6 @@ int hwpSequencer::sequencerThreadExec( )
     return 0;
 }
 
-int hwpSequencer::allocate(const dev::shmimT &dummy)
-{
-    // nothing to allocate
-    return 0;
-}
-
 int hwpSequencer::doHwpAction()
 {
     // Stop triggering
@@ -564,7 +554,15 @@ int hwpSequencer::stopSequencing()
     return 0;
 }
 
-int hwpSequencer::processImage( void* curr_src, const dev::shmimT &dummy)
+/* shmimMonitor interface impl */
+
+int hwpSequencer::allocate(const dev::shmimT &)
+{
+    // nothing to allocate
+    return 0;
+}
+
+int hwpSequencer::processImage( void*, const dev::shmimT &)
 {
     // Now tell the f.g. to get going
     if( sem_post( &m_smSemaphore ) < 0 )
