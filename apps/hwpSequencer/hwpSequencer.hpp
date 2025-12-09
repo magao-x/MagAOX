@@ -342,11 +342,9 @@ int hwpSequencer::appLogic()
             // We've reached the end of the cycle
             m_hwpPosIndex = 0;
             m_curCycleNumber += 1;
-            updateIfChanged( m_indiP_curCycleNumber, "value", m_curCycleNumber );
 
-
-            std::cerr << "Number of completed cycles: " << m_curCycleNumber;
-            log<text_log>( "Number of completed cycles: " + std::to_string(m_curCycleNumber) );
+            std::cerr << "Current cycle: " << m_curCycleNumber;
+            log<text_log>( "Current cycle: " + std::to_string(m_curCycleNumber) );
             if (m_numCycles > 0)
             {
                 std::cerr << " / " << m_numCycles;
@@ -358,7 +356,6 @@ int hwpSequencer::appLogic()
                 return 0;
             }
         }
-        updateIfChanged( m_indiP_hwpPosIndex, "value", m_hwpPosIndex );
         m_doMoveHwp = true;
     }
 
@@ -385,6 +382,11 @@ int hwpSequencer::appShutdown()
         }
         catch(...) {}
     }
+
+    // Make sure in case of borked state that we turn the fxngen output back on
+    m_indiP_fxngenOutput["value"] = "On";
+    sendNewProperty(m_indiP_fxngenOutput);
+
     return 0;
 }
 
@@ -468,6 +470,11 @@ int hwpSequencer::doHwpAction()
         }
     }
 
+    // update index in here so it comes AFTER the hwp has moved
+    updateIfChanged( m_indiP_hwpPosIndex, "value", m_hwpPosIndex );
+    updateIfChanged( m_indiP_curCycleNumber, "value", m_curCycleNumber );
+
+
     // this only triggers when calling startSequencing--we wan't to turn
     // the observer obs_on toggle on once and let the external trigger
     // dictate the intermediate stops and starts
@@ -500,7 +507,7 @@ int hwpSequencer::startSequencing()
     m_hwpPosIndex = 0;
     updateIfChanged( m_indiP_hwpPosIndex, "value", m_hwpPosIndex );
 
-    m_curCycleNumber = 0;
+    m_curCycleNumber = 1;
     updateIfChanged( m_indiP_curCycleNumber, "value", m_curCycleNumber );
 
     state( stateCodes::OPERATING );
