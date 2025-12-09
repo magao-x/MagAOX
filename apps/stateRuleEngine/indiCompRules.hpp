@@ -439,11 +439,11 @@ public:
         boolorerr_t rv;
         if(m_property == nullptr)
         {
-            rv = "property is null";
+            rv = std::format("property {}.{} is not found", m_property->getDevice(), m_property->getName());
         }
         else if(!m_property->find(m_element))
         {
-            rv = "element is not found";
+            rv = std::format("element {}.{}.{} is not found", m_property->getDevice(), m_property->getName(), m_element);
         }
         else
         {
@@ -580,25 +580,25 @@ public:
 
         if(m_property1 == nullptr)
         {
-            rv = "property1 is null";
+            rv = std::format("property1 {}.{} is not found", m_property1->getDevice(), m_property1->getName());
             return rv;
         }
 
         if(!m_property1->find(m_element1))
         {
-            rv = "element1 is not found";
+            rv = std::format("element1 {}.{}.{} is not found", m_property1->getDevice(), m_property1->getName(), m_element1);
             return rv;
         }
 
         if(m_property2 == nullptr)
         {
-            rv = "property2 is null";
+            rv = std::format("property2 {}.{} is not found", m_property2->getDevice(), m_property2->getName());
             return rv;
         }
 
         if(!m_property2->find(m_element2))
         {
-            rv = "element2 is not found";
+            rv = std::format("element2 {}.{}.{} is not found", m_property2->getDevice(), m_property2->getName(), m_element2);
             return rv;
         }
 

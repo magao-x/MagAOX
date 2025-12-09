@@ -225,6 +225,7 @@ int stateRuleEngine::appStartup()
             }
 
             pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
+            elem.setLabel(it->second->message());
             m_indiP_info.add(elem);
         }
 
@@ -240,6 +241,7 @@ int stateRuleEngine::appStartup()
             }
 
             pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
+            elem.setLabel(it->second->message());
             m_indiP_caution.add(elem);
         }
 
@@ -255,6 +257,7 @@ int stateRuleEngine::appStartup()
             }
 
             pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
+            elem.setLabel(it->second->message());
             m_indiP_warning.add(elem);
         }
 
@@ -270,6 +273,7 @@ int stateRuleEngine::appStartup()
             }
 
             pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
+            elem.setLabel(it->second->message());
             m_indiP_alert.add(elem);
         }
     }
@@ -288,30 +292,28 @@ int stateRuleEngine::appStartup()
         }
 
         registerIndiPropertySet( *it->second, devName, propName, st_newCallBack_ruleProp);
+        log<software_info>( { __FILE__,
+                              __LINE__,
+                              std::format("added set property listener for {}.{}", devName, propName) } );
     }
+
+
 
     state(stateCodes::READY);
 
     return 0;
 }
 
+
 int stateRuleEngine::appLogic()
 {
     for(auto it = m_ruleMaps.rules.begin(); it != m_ruleMaps.rules.end(); ++it)
     {
-        #if 0
+        indiCompRule::boolorerr_t validity = it->second->valid();
+        if(it->second->priority() != rulePriority::none && !it->second->isError(validity))
+        {
         try
         {
-            bool val = it->second->value();
-            std::cerr << it->first << " " << val << "\n";
-        }
-        catch(...){}
-        #endif
-
-        if(it->second->priority() != rulePriority::none)
-        {
-            try
-            {
                 bool val = it->second->value();
 
                 pcf::IndiElement::SwitchStateType onoff = pcf::IndiElement::Off;
@@ -333,24 +335,21 @@ int stateRuleEngine::appLogic()
                 {
                     updateSwitchIfChanged(m_indiP_alert, it->first, onoff);
                 }
-
             }
-            catch(const std::exception & e)
+            catch(std::exception & e)
             {
-                ///\todo how to handle startup vs misconfiguration
-
-                /*
-                if(it->second->priority() == rulePriority::none)
-                {
-                    updateSwitchIfChanged(m_indiP_info, it->first, pcf::IndiElement::Off);
-                }*/
+               std::cerr << "Exception: " << e.what() << "\n(" << __FILE__ << " " << __LINE__ << ")\n";
             }
+        } else if (it->second->isError(validity)) {
+            log<software_debug>( { __FILE__,
+                                  __LINE__,
+                                  std::format("Checking state rule {} gave error: {}", it->first, std::get<std::string>(validity)) } );
         }
     }
 
-
     return 0;
 }
+
 
 int stateRuleEngine::appShutdown()
 {
