@@ -334,6 +334,9 @@ int hwpSequencer::appLogic()
     SHMIMMONITOR_APP_LOGIC;
     SHMIMMONITOR_UPDATE_INDI;
 
+    if (!m_sequencing)
+        return 0;
+
     if (!m_doMoveHwp)
     {
         m_hwpPosIndex += 1;
@@ -410,7 +413,7 @@ int hwpSequencer::sequencerThreadExec( )
     {
         if(m_sequencing && m_doMoveHwp)
         {
-            if(doHwpAction() < 0)
+            if(doHwpAction())
             {
                 log<software_error>({__FILE__,__LINE__});
                 return -1;
@@ -419,8 +422,6 @@ int hwpSequencer::sequencerThreadExec( )
             mx::sys::sleep(m_timePerPos);
 
             m_doMoveHwp = false;
-
-            XWC_SEM_FLUSH(m_smSemaphore);
         }
 
         mx::sys::sleep(0.1);
@@ -431,21 +432,28 @@ int hwpSequencer::sequencerThreadExec( )
 
 int hwpSequencer::doHwpAction()
 {
-    // Stop triggering
-    m_indiP_fxngenOutput["value"] = "Off";
-    sendNewProperty(m_indiP_fxngenOutput);
-
-    // Wait for trigger to stop
-    while (m_fxngenOutp)
+    // on the first iteration we don't really care to wait for the current frame since we'll
+    // do that later. Just move HWP immediately
+    if (!m_startSaving)
     {
-        mx::sys::milliSleep(m_hwpWait);
-    }
+        XWC_SEM_FLUSH(m_smSemaphore);
 
-    // Wait for current frame to arrive
-    if (sem_wait(&m_smSemaphore))
-    {
-        log<software_error>({ __FILE__, __LINE__, "failed waiting for semaphore" });
-        return -1;
+         // Stop triggering
+        m_indiP_fxngenOutput["value"] = "Off";
+        sendNewProperty(m_indiP_fxngenOutput);
+
+        // Wait for trigger to stop
+        while (m_fxngenOutp)
+            mx::sys::milliSleep(m_hwpWait);
+
+
+
+        // Wait for current frame to arrive
+        if (sem_wait(&m_smSemaphore))
+        {
+            log<software_error>({ __FILE__, __LINE__, "failed waiting for semaphore" });
+            return -1;
+        }
     }
 
     // move HWP
@@ -458,7 +466,7 @@ int hwpSequencer::doHwpAction()
     sendNewProperty(m_indiP_hwpTracker_target);
 
     // check if the HWP is in position (note, depends on the callback for m_reportedHwpPos)
-    float angle_tol = 0.5;
+    float angle_tol = 0.1;
     double t0 = mx::sys::get_curr_time();
     while (fabs(m_reportedHwpPos - target_hwp_angle) > angle_tol)
     {
@@ -474,12 +482,31 @@ int hwpSequencer::doHwpAction()
     updateIfChanged( m_indiP_hwpPosIndex, "value", m_hwpPosIndex );
     updateIfChanged( m_indiP_curCycleNumber, "value", m_curCycleNumber );
 
-
-    // this only triggers when calling startSequencing--we wan't to turn
+    // this only triggers when calling startSequencing--we want to turn
     // the observer obs_on toggle on once and let the external trigger
     // dictate the intermediate stops and starts
     if (m_startSaving)
     {
+        // when using slow exposure times we want to make sure we start saving on a new frame, not
+        // a frame that has been half-exposed
+
+        XWC_SEM_FLUSH(m_smSemaphore);
+
+        // Stop triggering
+        m_indiP_fxngenOutput["value"] = "Off";
+        sendNewProperty(m_indiP_fxngenOutput);
+
+        while (m_fxngenOutp)
+            mx::sys::milliSleep(m_hwpWait);
+
+        // Wait for current frame to arrive
+        if (sem_wait(&m_smSemaphore))
+        {
+            log<software_error>({ __FILE__, __LINE__, "failed waiting for semaphore" });
+            return -1;
+        }
+
+
         m_indiP_obsSaving["toggle"] = pcf::IndiElement::On;
         sendNewProperty(m_indiP_obsSaving);
 
@@ -503,6 +530,10 @@ int hwpSequencer::startSequencing()
         return 0;
     }
 
+    // If we're already logging, don't
+    m_indiP_obsSaving["toggle"] = pcf::IndiElement::Off;
+    sendNewProperty(m_indiP_obsSaving);
+
     // Move HWP to first position
     m_hwpPosIndex = 0;
     updateIfChanged( m_indiP_hwpPosIndex, "value", m_hwpPosIndex );
@@ -521,8 +552,6 @@ int hwpSequencer::startSequencing()
     m_startSaving = true;
 
     m_doMoveHwp = true;
-
-    XWC_SEM_FLUSH(m_smSemaphore);
 
     return 0;
 }
@@ -547,6 +576,10 @@ int hwpSequencer::stopSequencing()
 
     m_indiP_fxngenOutput["value"] = "On";
     sendNewProperty(m_indiP_fxngenOutput);
+
+    // Go ahead and move HWP back to 0 in prep for next sequence
+    m_indiP_hwpTracker_target["target"] = 0;
+    sendNewProperty(m_indiP_hwpTracker_target);
 
     m_doMoveHwp = false;
 
