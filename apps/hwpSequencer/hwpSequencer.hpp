@@ -38,11 +38,15 @@ namespace app
 /**
  * \ingroup hwpSequencer
  */
-class hwpSequencer : public MagAOXApp<true>
+class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequencer>
 {
 
     // Give the test harness access.
     friend class hwpSequencer_test;
+
+    friend class dev::shmimMonitor<hwpSequencer>;
+
+    typedef dev::shmimMonitor<hwpSequencer> shmimMonitorT;
 
     protected:
         /** \name Configurable Parameters
@@ -85,11 +89,8 @@ class hwpSequencer : public MagAOXApp<true>
 
         bool m_fxngenOutp {false};
 
-        std::string m_shmimName {"camsci1 "};
+        sem_t m_smSemaphore{ 0 }; ///< Semaphore used to synchronize the hwp thread and the sm thread.
 
-        IMAGE m_shmIm;
-
-        long m_semID;
 
         bool m_sequencerThreadInit {true}; ///< Initialization flag for the open thread.
 
@@ -105,13 +106,20 @@ class hwpSequencer : public MagAOXApp<true>
         /// Open thread function
         /** Runs until m_shutdown is true.
              */
-        void sequencerThreadExec();
+        int sequencerThreadExec();
 
         int doHwpAction();
 
         int startSequencing();
 
         int stopSequencing();
+
+        int allocate( const dev::shmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
+
+
+        int processImage( void *curr_src, ///< [in] pointer to start of current frame.
+                    const dev::shmimT &dummy     ///< [in] tag to differentiate shmimMonitor parents.
+        );
 
 
     public:
@@ -243,16 +251,7 @@ void hwpSequencer::setupConfig()
                "string",
                "Observers application name, default is 'observers'");
 
-    config.add("shm.shmimName",
-               "",
-               "shm.shmimName",
-               argType::Required,
-               "shm",
-               "shmimName",
-               false,
-               "string",
-               "SHM name to watch for readout semaphore, default is 'camsci1'");
-
+    SHMIMMONITOR_SETUP_CONFIG(config);
 }
 
 int hwpSequencer::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -261,7 +260,8 @@ int hwpSequencer::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fxngenName, "fxngen.devName" );
     _config( m_fxngenChannel, "fxngen.channel" );
     _config( m_obsAppName, "observers.devName" );
-    _config( m_shmimName, "shm.shmimName" );
+
+    SHMIMMONITOR_LOAD_CONFIG(_config);
 
     return 0;
 }
@@ -313,13 +313,13 @@ int hwpSequencer::appStartup()
     m_indiP_obsSaving.add( pcf::IndiElement( "toggle" ) );
 
 
-    if (ImageStreamIO_openIm(&m_shmIm, m_shmimName.c_str()))
+    SHMIMMONITOR_APP_STARTUP;
+
+    if( sem_init( &m_smSemaphore, 0, 0 ) < 0 )
     {
-        log<software_error>({ __FILE__, __LINE__, "could not open SHM with name " + m_shmimName });
+        log<software_critical>( { __FILE__, __LINE__, errno, 0, "Initializing S.M. semaphore" } );
         return -1;
     }
-    m_semID = ImageStreamIO_getsemwaitindex(&m_shmIm, 0);
-
 
     if(threadStart( m_sequencerThread, m_sequencerThreadInit, m_sequencerThreadID, m_sequencerThreadProp, 0, "", "sequencerThread", this, sequencerThreadStart) < 0)
     {
@@ -334,6 +334,9 @@ int hwpSequencer::appStartup()
 
 int hwpSequencer::appLogic()
 {
+
+    SHMIMMONITOR_APP_LOGIC;
+    SHMIMMONITOR_UPDATE_INDI;
 
     if (!m_doMoveHwp)
     {
@@ -368,6 +371,8 @@ int hwpSequencer::appLogic()
 
 int hwpSequencer::appShutdown()
 {
+    SHMIMMONITOR_APP_SHUTDOWN;
+
     if (m_sequencing)
         stopSequencing();
 
@@ -394,7 +399,7 @@ void hwpSequencer::sequencerThreadStart( hwpSequencer * h )
 }
 
 
-void hwpSequencer::sequencerThreadExec( )
+int hwpSequencer::sequencerThreadExec( )
 {
     // thread prep
     m_sequencerThreadID = syscall(SYS_gettid);
@@ -408,21 +413,29 @@ void hwpSequencer::sequencerThreadExec( )
         if(m_sequencing && m_doMoveHwp)
         {
             if(doHwpAction() < 0)
+            {
                 log<software_error>({__FILE__,__LINE__});
+                return -1;
+            }
 
             mx::sys::sleep(m_timePerPos);
 
             m_doMoveHwp = false;
 
-            ImageStreamIO_semflush(&m_shmIm, m_semID);
+            XWC_SEM_FLUSH(m_smSemaphore);
         }
 
         mx::sys::sleep(0.1);
     }
 
-    return;
+    return 0;
 }
 
+int hwpSequencer::allocate(const dev::shmimT &dummy)
+{
+    // nothing to allocate
+    return 0;
+}
 
 int hwpSequencer::doHwpAction()
 {
@@ -437,7 +450,7 @@ int hwpSequencer::doHwpAction()
     }
 
     // Wait for current frame to arrive
-    if (ImageStreamIO_semwait(&m_shmIm, m_semID))
+    if (sem_wait(&m_smSemaphore))
     {
         log<software_error>({ __FILE__, __LINE__, "failed waiting for semaphore" });
         return -1;
@@ -512,7 +525,7 @@ int hwpSequencer::startSequencing()
 
     m_doMoveHwp = true;
 
-    ImageStreamIO_semflush(&m_shmIm, m_semID);
+    XWC_SEM_FLUSH(m_smSemaphore);
 
     return 0;
 }
@@ -524,8 +537,7 @@ int hwpSequencer::stopSequencing()
     std::cerr << "Stopping sequence" << std::endl;
     log<text_log>( "Stopping sequence" );
 
-    // Wait for current frame to arrive
-    if (ImageStreamIO_semwait(&m_shmIm, m_semID))
+    if (sem_wait(&m_smSemaphore))
     {
         log<software_error>({ __FILE__, __LINE__, "failed waiting for semaphore" });
         return -1;
@@ -551,6 +563,18 @@ int hwpSequencer::stopSequencing()
 
     return 0;
 }
+
+int hwpSequencer::processImage( void* curr_src, const dev::shmimT &dummy)
+{
+    // Now tell the f.g. to get going
+    if( sem_post( &m_smSemaphore ) < 0 )
+    {
+        log<software_critical>( { __FILE__, __LINE__, errno, 0, "Error posting to semaphore" } );
+        return -1;
+    }
+    return 0;
+}
+
 
 INDI_NEWCALLBACK_DEFN( hwpSequencer, m_indiP_sequence )( const pcf::IndiProperty &ipRecv )
 {
