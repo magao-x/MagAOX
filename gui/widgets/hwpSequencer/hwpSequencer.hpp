@@ -29,6 +29,10 @@ protected:
    int m_numCycles{-1};
    bool m_tracking{false};
 
+   bool m_hwptrackFsmOk{ false };
+   bool m_hwpseqFsmOk{ false };
+
+
    void setBold(QLabel*, bool);
 
 
@@ -159,12 +163,14 @@ void hwpSequencer::subscribe()
 {
    if(!m_parent) return;
 
+   m_parent->addSubscriberProperty(this, "hwptrack", "fsm");
    m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position");
    m_parent->addSubscriberProperty(this, "hwptrack", "hwp_tracking_offset");
    m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position_actual");
    m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position_name");
    m_parent->addSubscriberProperty(this, "hwptrack", "tracking");
 
+   m_parent->addSubscriberProperty(this, "hwpsequence", "fsm");
    m_parent->addSubscriberProperty(this, "hwpsequence", "sequence");
    m_parent->addSubscriberProperty(this, "hwpsequence", "hwpPosIndex");
    m_parent->addSubscriberProperty(this, "hwpsequence", "curCycle");
@@ -273,7 +279,15 @@ void hwpSequencer::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
    if (ipRecv.getDevice() == "hwptrack")
    {
-      if (ipRecv.getName() == "hwp_position")
+      if (ipRecv.getName() == "fsm")
+      {
+         if (ipRecv.find("state"))
+         {
+            std::string fsmString = ipRecv["state"].get<std::string>();
+            m_hwptrackFsmOk = fsmString == "READY" || fsmString == "OPERATING";
+         }
+      }
+      else if (ipRecv.getName() == "hwp_position")
       {
          if (ipRecv.find("current"))
          {
@@ -311,7 +325,15 @@ void hwpSequencer::handleSetProperty( const pcf::IndiProperty & ipRecv)
    }
    else if (ipRecv.getDevice() == "hwpsequence")
    {
-      if (ipRecv.getName() == "sequence")
+      if (ipRecv.getName() == "fsm")
+      {
+         if (ipRecv.find("state"))
+         {
+            std::string fsmString = ipRecv["state"].get<std::string>();
+            m_hwpseqFsmOk = fsmString == "READY" || fsmString == "OPERATING";
+         }
+      }
+      else if (ipRecv.getName() == "sequence")
       {
          if (ipRecv.find("toggle"))
          {
@@ -364,9 +386,9 @@ void hwpSequencer::updateGUI()
    ui.hwpAngleName->setText(QString(m_hwpAngleName.c_str()));
 
    // disable things that we shouldn't change while sequencing
-   ui.entryHwpAngle->setEnabled(!m_sequencing);
+   ui.entryHwpAngle->setEnabled(!m_sequencing && m_hwptrackFsmOk);
    // we actually don't want to disable the toggleSlider because it will appear "off" even if tracking is on
-   if (m_sequencing)
+   if (m_sequencing || !m_hwptrackFsmOk)
    {
       ui.sliderTracking->setAttribute(Qt::WA_TransparentForMouseEvents, true);
       ui.sliderTracking->setFocusPolicy(Qt::NoFocus);
@@ -376,21 +398,21 @@ void hwpSequencer::updateGUI()
       ui.sliderTracking->setAttribute(Qt::WA_TransparentForMouseEvents, false);
       ui.sliderTracking->setFocusPolicy(Qt::StrongFocus);
    }
-   ui.sliderTracking->setLabelEnabled(!m_sequencing);
+   ui.sliderTracking->setLabelEnabled(!m_sequencing && m_hwptrackFsmOk);
    ui.labelTracking->setVisible(m_tracking);
-   ui.labelTracking->setEnabled(!m_sequencing);
-   ui.entryNumCycles->setEnabled(!m_sequencing);
-   ui.negOneLabel->setEnabled(!m_sequencing);
-   ui.entryTimePerPos->setEnabled(!m_sequencing);
+   ui.labelTracking->setEnabled(!m_sequencing && m_hwptrackFsmOk);
+   ui.entryNumCycles->setEnabled(!m_sequencing && m_hwpseqFsmOk);
+   ui.negOneLabel->setEnabled(!m_sequencing && m_hwpseqFsmOk);
+   ui.entryTimePerPos->setEnabled(!m_sequencing && m_hwpseqFsmOk);
 
    ui.buttonStartSequence->setVisible(!m_sequencing);
-   ui.buttonStartSequence->setEnabled(!m_sequencing);
+   ui.buttonStartSequence->setEnabled(!m_sequencing && m_hwpseqFsmOk);
    
    ui.buttonStopSequence->setVisible(m_sequencing);
-   ui.buttonStopSequence->setEnabled(m_sequencing);
+   ui.buttonStopSequence->setEnabled(m_sequencing && m_hwpseqFsmOk);
    
    ui.buttonLastCycle->setVisible(m_sequencing);
-   ui.buttonLastCycle->setEnabled(m_sequencing);
+   ui.buttonLastCycle->setEnabled(m_sequencing && m_hwpseqFsmOk);
 
    if (m_sequencing)
    {
