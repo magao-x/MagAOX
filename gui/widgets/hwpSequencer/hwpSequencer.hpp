@@ -380,10 +380,26 @@ void hwpSequencer::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
 void hwpSequencer::updateGUI()
 {
-   ui.hwpSetAngle->setText(QString("%1°").arg(m_hwpSetAngle, 0, 'f', 1));
-   ui.hwpTrackingOffset->setText(QString("%1°").arg(m_hwpTrackingOffset, 0, 'f', 1));
-   ui.hwpActualAngle->setText(QString("%1°").arg(m_hwpActualAngle, 0, 'f', 1));
-   ui.hwpAngleName->setText(QString(m_hwpAngleName.c_str()));
+   if (m_hwptrackFsmOk)
+   {
+      ui.hwpSetAngle->setText(QString("%1°").arg(m_hwpSetAngle, 0, 'f', 1));
+      ui.hwpTrackingOffset->setText(QString("%1°").arg(m_hwpTrackingOffset, 0, 'f', 1));
+      ui.hwpActualAngle->setText(QString("%1°").arg(m_hwpActualAngle, 0, 'f', 1));
+      ui.hwpAngleName->setText(QString(m_hwpAngleName.c_str()));
+   }
+   else
+   {
+      ui.hwpSetAngle->setText(QString("---"));
+      ui.hwpTrackingOffset->setText(QString("---"));
+      ui.hwpActualAngle->setText(QString("---"));
+      ui.hwpAngleName->setText(QString("---"));
+   }
+
+   setBold(ui.hwpSetAngle, m_hwptrackFsmOk);
+   setBold(ui.hwpTrackingOffset, m_hwptrackFsmOk);
+   setBold(ui.hwpActualAngle, m_hwptrackFsmOk);
+   setBold(ui.hwpAngleName, m_hwptrackFsmOk);
+   
 
    // disable things that we shouldn't change while sequencing
    ui.entryHwpAngle->setEnabled(!m_sequencing && m_hwptrackFsmOk);
@@ -406,7 +422,7 @@ void hwpSequencer::updateGUI()
    ui.entryTimePerPos->setEnabled(!m_sequencing && m_hwpseqFsmOk);
 
    ui.buttonStartSequence->setVisible(!m_sequencing);
-   ui.buttonStartSequence->setEnabled(!m_sequencing && m_hwpseqFsmOk);
+   ui.buttonStartSequence->setEnabled(!m_sequencing && m_hwpseqFsmOk && m_hwptrackFsmOk);
    
    ui.buttonStopSequence->setVisible(m_sequencing);
    ui.buttonStopSequence->setEnabled(m_sequencing && m_hwpseqFsmOk);
