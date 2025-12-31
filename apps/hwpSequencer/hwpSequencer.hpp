@@ -417,12 +417,12 @@ int hwpSequencer::sequencerThreadExec( )
                 return -1;
             }
 
-            mx::sys::sleep(m_timePerPos);
+            mx::sys::microSleep(m_timePerPos*1e6);
 
             m_doMoveHwp = false;
         }
 
-        mx::sys::sleep(0.1);
+        mx::sys::microSleep(0.1 * 1e6);
     }
 
     return 0;
