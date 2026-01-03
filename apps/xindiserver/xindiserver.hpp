@@ -231,7 +231,7 @@ public:
 };
 
 inline
-xindiserver::xindiserver() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+xindiserver::xindiserver() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED, MAGAOX_URL, MAGAOX_BRANCH, MAGAOX_SRCPATH, MAGAOX_REPO_UNTRACKED)
 {
    //Use the sshTunnels.conf config file
    m_configBase = "sshTunnels";
@@ -273,8 +273,10 @@ void xindiserver::loadConfig()
    config(m_remote, "remote.drivers");
    config(m_remoteServers, "remote.servers");
 
-   if(loadSSHTunnelConfigs(m_tunnels, config) < 0)
+   int rv = loadSSHTunnelConfigs(m_tunnels, config);
+   if(rv < 0 && rv != SSHTUNNEL_E_NOTUNNELS) //not finding any tunnels isn't an error (yet)
    {
+      log<software_critical>({__FILE__, __LINE__});
       m_shutdown = true;
       return;
    }

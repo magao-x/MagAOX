@@ -7,6 +7,10 @@ table Git_state_fb
    repo:string;
    sha1:string;
    modified:ubyte;
+   url:string;
+   branch:string;
+   path:string;
+   untracked:ubyte;
 }
 
 root_type Git_state_fb;

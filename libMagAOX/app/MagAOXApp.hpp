@@ -82,7 +82,9 @@ namespace XWCTEST_NAMESPACE
  * Through various optional CRTP base classes, many different standard functionalities can be included.
  * The following figure illustrates the facilities provided by a typical app.
  *
- * \image html xwcapp.png "Block diagram of a typical XWCApp. Note that ImageStreamIO (ISIO) is not included by default, but there are several ways to interface with 'image streams' provided in XWCTk.  Many different hardware device interfaces are similarly provided."
+ * \image html xwcapp.png "Block diagram of a typical XWCApp. Note that ImageStreamIO (ISIO) is not included by default,
+ * but there are several ways to interface with 'image streams' provided in XWCTk.  Many different hardware device
+ * interfaces are similarly provided."
  *
  * The following figure illustrates the logic of the XWCApp finite state machine (FSM).
  *
@@ -92,15 +94,16 @@ namespace XWCTEST_NAMESPACE
  * Many XWCApps can be connected across many computers.  Inter-process communication can be conducted with
  * INDI or ISIO.
  *
- * \image html xwcapps_connections.png "Connecting XWCApps across several machines, controlling various hardware" width=1200
+ * \image html xwcapps_connections.png "Connecting XWCApps across several machines, controlling various hardware"
+ * width=1200
  *
- * XWCApps are designed to be part of control loops. In the following diagram a camera at the focal plane of a coronagraph
- * is used as the wavefront sensor.  An XWCApp reads out the images and publishes them to shared memory with ISIO.
- * Loop process, which may themselves be XWCApps or, e.g., CACAO processes, perform loop calculations.
- * Finally, the deformable mirror controller sends the resultant command to the hardware device.
+ * XWCApps are designed to be part of control loops. In the following diagram a camera at the focal plane of a
+ * coronagraph is used as the wavefront sensor.  An XWCApp reads out the images and publishes them to shared memory with
+ * ISIO. Loop process, which may themselves be XWCApps or, e.g., CACAO processes, perform loop calculations. Finally,
+ * the deformable mirror controller sends the resultant command to the hardware device.
  *
  * \image html xwcapp_loops.png "XWCApps controlling hardware in a control loop." width=1200
-*/
+ */
 
 /// The base-class for XWCTk applications.
 /**
@@ -207,6 +210,7 @@ class MagAOXApp : public application
     MagAOXApp() = delete;
 
   public:
+
     /// Public c'tor.  Handles uid, logs git repo status, and initializes static members.
     /**
      * Only one MagAOXApp can be instantiated per program.  Hence this c'tor will issue exit(-1)
@@ -222,6 +226,16 @@ class MagAOXApp : public application
      * sha1 and modified flags.
      *
      */
+    MagAOXApp( const std::string &git_sha1, ///< [in] The current SHA1 hash of the git repository
+               const bool git_modified,      ///< [in] Whether or not the repo is modified.
+               const std::string & git_url, ///< [in] The current url of the git repository
+               const std::string & git_branch, ///< [in] The current branch of the git repository
+               const std::string & git_path, ///< [in] The current path of the git repository
+               const bool git_untracked ///< [in] Whether ot not the repo has untracked files
+    );
+
+
+    [[deprecated("Use the full git-state MagAOXApp c'tor instead")]]
     MagAOXApp( const std::string &git_sha1, ///< [in] The current SHA1 hash of the git repository
                const bool git_modified      ///< [in] Whether or not the repo is modified.
     );
@@ -1279,6 +1293,51 @@ MagAOXApp<_useINDI> *MagAOXApp<_useINDI>::m_self = nullptr;
 // Define the logger
 template <bool _useINDI>
 typename MagAOXApp<_useINDI>::logManagerT MagAOXApp<_useINDI>::m_log;
+
+template <bool _useINDI>
+MagAOXApp<_useINDI>::MagAOXApp( const std::string &git_sha1,
+               const bool git_modified,
+               const std::string & git_url,
+               const std::string & git_branch,
+               const std::string & git_path,
+               const bool git_untracked
+         )
+{
+    if( m_self != nullptr )
+    {
+        throw std::logic_error("Attempt to instantiate 2nd MagAOXApp");
+    }
+
+    m_self = this;
+
+    // Get the uids of this process.
+    getresuid( &m_euidReal, &m_euidCalled, &m_suid );
+    setEuidReal(); // immediately step down to unpriveleged uid.
+
+    m_log.parent( this );
+
+    // Set up config logging
+    config.m_sources = true;
+    config.configLog = configLog;
+
+    // We log the current GIT status.
+    logPrioT gl = logPrio::LOG_INFO;
+    if( git_modified || git_untracked )
+    {
+        gl = logPrio::LOG_WARNING;
+        m_gitAlert = true;
+    }
+    log<git_state>( git_state::messageT( "MagAOX", git_sha1, git_modified,git_url,git_branch,git_path,git_untracked ), gl );
+
+    gl = logPrio::LOG_INFO;
+    if( MXLIB_UNCOMP_REPO_MODIFIED || MXLIB_UNCOMP_REPO_UNTRACKED)
+    {
+        gl = logPrio::LOG_WARNING;
+        m_gitAlert = true;
+    }
+
+    log<git_state>( git_state::messageT( "mxlib", MXLIB_UNCOMP_CURRENT_SHA1, MXLIB_UNCOMP_REPO_MODIFIED, MXLIB_UNCOMP_URL, MXLIB_UNCOMP_BRANCH, MXLIB_UNCOMP_SRCPATH, MXLIB_UNCOMP_REPO_UNTRACKED ), gl );
+}
 
 template <bool _useINDI>
 MagAOXApp<_useINDI>::MagAOXApp( const std::string &git_sha1, const bool git_modified )
