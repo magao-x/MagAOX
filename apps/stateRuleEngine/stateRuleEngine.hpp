@@ -299,7 +299,9 @@ int stateRuleEngine::appStartup()
     for( auto it = m_ruleMaps.props.begin(); it != m_ruleMaps.props.end(); ++it )
     {
         if( it->second == nullptr )
+        {
             continue;
+        }
 
         std::string devName, propName;
 
@@ -307,8 +309,8 @@ int stateRuleEngine::appStartup()
         if( rv != 0 )
         {
             log<software_error>( { 0, rv, "error parsing INDI key: " + it->first } );
+            return -1;
         }
-        return -1;
 
         registerIndiPropertySet( *it->second, devName, propName, st_newCallBack_ruleProp );
     }
