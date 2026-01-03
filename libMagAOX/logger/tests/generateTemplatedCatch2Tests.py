@@ -16,15 +16,15 @@ import random
 import getopt
 
 
-gNextVals = {    
+gNextVals = {
     "string" : 0,
-    "int64"  : 0, 
+    "int64"  : 0,
     "uint64" : 0,
-    "int32"  : 0, 
-    "uint32" : 0, 
-    "int16"  : 0, 
+    "int32"  : 0,
+    "uint32" : 0,
+    "int16"  : 0,
     "uint16" : 0,
-    "int8"   : 0, 
+    "int8"   : 0,
     "uint8"  : 0,
     "float"  : 0,
     "double" : 0
@@ -120,7 +120,7 @@ def getSchemaFieldInfo(fname : str) -> tuple[str, tuple] :
 
     if len(subTables) == 0:
         return schemaTableName, tuple(schemaFieldInfo)
-    
+
 
     # go through sub tables and add them in
     newSchemaFieldInfo = []
@@ -135,7 +135,7 @@ def getSchemaFieldInfo(fname : str) -> tuple[str, tuple] :
 
 
 '''
-Quick check that the types in .fbs correspond, mainly strings match to strings, 
+Quick check that the types in .fbs correspond, mainly strings match to strings,
 and vectors to vectors.
 If they do not correspond, the behavior for comparing the fb values in the tests
 is undefined, and action beyond this generator will need to be taken.
@@ -146,9 +146,9 @@ def typesCorrespond(fbsType : str, cType : str) -> bool:
 
     if ("string" in fbsType) or ("string" in cType or "char *" in cType):
         return (("string" in fbsType) and ("string" in cType or "char *" in cType))
-    
+
     return True
-    
+
 
 '''
 Check it is not a base log type.
@@ -165,7 +165,7 @@ def isValidLogType(lines : list) -> bool:
             hasEventCode = True
 
         # check default level
-        defaultLevel = re.search("flatlogs::logPrioT defaultLevel = flatlogs::logPrio::[A-Za-z_0-9]*;", line)
+        defaultLevel = re.search("flatlogs::logPrio defaultLevel = flatlogs::logPrio::[A-Za-z_0-9]*;", line)
         if defaultLevel != None:
             hasDefaultLevel = True
 
@@ -200,7 +200,7 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
 
     # iterate through all lines in header to:
     # 1. find where messageT structs are being made -> describes fields
-    # 2. check that is has its own <Get|Create|Verify><name>_fb methods 
+    # 2. check that is has its own <Get|Create|Verify><name>_fb methods
     fbMethodName = f"Create{returnInfo["name"][0].upper() + returnInfo["name"][1:]}_fb"
     hasFbMethods = False
     messageStructIdxs = []
@@ -233,7 +233,7 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
                 returnInfo["schemaTableName"] = f"{line[startIndex:endIndex]}_fb"
 
     returnInfo["messageTypes"] = getMessageFieldInfo(messageStructIdxs, headerLines, schemaFieldInfo)
-    
+
     return returnInfo
 
 '''
@@ -290,7 +290,7 @@ def getRandInt(type : str) -> int:
     unsigned = True if "uint" in type else False
 
     intSizeBits = getIntSize(type)
-    
+
     if not unsigned:
         intSizeBits -= 1
 
@@ -322,7 +322,7 @@ def getIncrementingInt(type : str) -> int:
     elif "uint32_t" in type:
         gNextVals["uint32"] = (gNextVals["uint32"] + 1) % max
         return gNextVals["uint32"]
-    elif  "int64_t" in type:   
+    elif  "int64_t" in type:
         gNextVals["int64"] =  (gNextVals["int64"]  + 1) % max
         return gNextVals["int64"]
     elif "uint64_t" in type:
@@ -346,7 +346,7 @@ def getTestValFromType(fieldType : str, schemaFieldType = None) -> str:
             return str(getIncrementingInt(fieldType))
         # need 'u' suffix for randomly generated uint64_t to avoid:
         # "warning: integer constant is so large that it is unsigned"
-        return f'{str(getRandInt(fieldType))}u' if "uint64_t" in fieldType else str(getRandInt(fieldType)) 
+        return f'{str(getRandInt(fieldType))}u' if "uint64_t" in fieldType else str(getRandInt(fieldType))
     elif "float" in fieldType:
         if gIncrementingVals:
             gNextVals["float"] += 1
@@ -373,9 +373,9 @@ def makeTestVal(fieldDict : dict) -> str:
 
     if "schemaType" in fieldDict:
         return getTestValFromType(fieldDict["type"], fieldDict["schemaType"])
-    
+
     return getTestValFromType(fieldDict["type"])
-    
+
 
 
 '''
@@ -450,14 +450,14 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
                             # reset dictionary index if we need to
                             subTableDictIndex = 0
                             fieldCount += 1
-                    
+
                     # check schemaType correlates to type in .hpp file
                     if not typesCorrespond(fieldDict["schemaType"], fieldDict["type"]):
                         # if types don't correspond, then use name in messageT and hope for best.
-                        # this is why if types are different, then names MUST correspond between 
+                        # this is why if types are different, then names MUST correspond between
                         # .fbs and .hpp file
                         del fieldDict["schemaName"]
-                
+
                 fieldDict["testVal"] = makeTestVal(fieldDict)
 
                 # add field dict to list of fields
@@ -513,12 +513,12 @@ def main():
         print("Error: Python version must be >= 3.9")
         exit(0)
 
-    
+
     global gIncrementingVals
     gIncrementingVals = False
 
     # getopt for random seed or incrementing vals
-    try: 
+    try:
         opts, args = getopt.getopt(sys.argv[1:], "is:")
         if len(opts) > 1:
             print("Error: Only one option allowed. -s <seed> or -i for incrementing values.")
@@ -536,7 +536,7 @@ def main():
             random.seed(int(arg))
         if opt in ["-i"]:
             gIncrementingVals = True
-    
+
     # load template
     env = jinja2.Environment(
         loader = jinja2.FileSystemLoader(searchpath=os.path.dirname(__file__))

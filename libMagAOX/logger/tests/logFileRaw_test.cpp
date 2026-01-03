@@ -202,7 +202,7 @@ struct dummyLog
     static const flatlogs::eventCodeT eventCode = 1;
 
     /// The default level
-    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_NOTICE;
+    static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_NOTICE;
 
     typedef std::string messageT;
 

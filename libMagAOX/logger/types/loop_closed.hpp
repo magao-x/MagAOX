@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-08-18 created by JRM
   */
@@ -26,11 +26,11 @@ struct loop_closed : public empty_log<loop_closed>
    static const flatlogs::eventCodeT eventCode = eventCodes::LOOP_CLOSED;
 
    ///The default level
-   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_NOTICE;
+   static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_NOTICE;
 
    ///The message string
    static const char * msg() {return "LOOP CLOSED";}
-   
+
 };
 
 } //namespace logger

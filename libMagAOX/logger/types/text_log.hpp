@@ -26,7 +26,7 @@ struct text_log : public string_log
    static const flatlogs::eventCodeT eventCode = eventCodes::TEXT_LOG;
 
    ///The default level
-   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_INFO;
+   static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_INFO;
 
    /// Get the logMetaDetail for a member by name
     /**

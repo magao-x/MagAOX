@@ -24,11 +24,11 @@ namespace logger
   */
 struct ttmmod_params : public flatbuffer_log
 {
-   ///The event code
+   ///The event co
    static const flatlogs::eventCodeT eventCode = eventCodes::TTMMOD_PARAMS;
 
    ///The default level
-   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_INFO;
+   static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_INFO;
 
 
    ///The type of the input message

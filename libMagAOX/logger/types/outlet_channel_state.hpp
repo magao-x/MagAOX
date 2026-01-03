@@ -28,7 +28,7 @@ struct outlet_channel_state : public flatbuffer_log
    static const flatlogs::eventCodeT eventCode = eventCodes::OUTLET_CHANNEL_STATE;
 
    //The default level
-   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_NOTICE;
+   static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_NOTICE;
 
    ///The type of the message
    struct messageT : public fbMessage

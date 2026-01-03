@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-08-18 created by JRM
   */
@@ -26,7 +26,7 @@ struct telem_saving_state : public saving_state_change
    static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_SAVING_STATE;
 
    ///The default level
-   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
+   static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
    static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
 

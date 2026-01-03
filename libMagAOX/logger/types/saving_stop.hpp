@@ -26,7 +26,7 @@ struct saving_stop : public saving_state_change
    static const flatlogs::eventCodeT eventCode = eventCodes::SAVING_STOP;
 
    ///The default level
-   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_NOTICE;
+   static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_NOTICE;
 
    static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
 

@@ -26,7 +26,7 @@ struct saving_start : public saving_state_change
    static const flatlogs::eventCodeT eventCode = eventCodes::SAVING_START;
 
    ///The default level
-   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_NOTICE;
+   static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_NOTICE;
 
    /// Get an empty logMetaDetail because meta data doesn't make sense for this log
    /**

@@ -1,12 +1,11 @@
 /** \file stateRuleEngine.hpp
-  * \brief The MagAO-X stateRuleEngine application header file
-  *
-  * \ingroup stateRuleEngine_files
-  */
+ * \brief The MagAO-X stateRuleEngine application header file
+ *
+ * \ingroup stateRuleEngine_files
+ */
 
 #ifndef stateRuleEngine_hpp
 #define stateRuleEngine_hpp
-
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -14,17 +13,17 @@
 #include "indiCompRuleConfig.hpp"
 
 /** \defgroup stateRuleEngine
-  * \brief The MagAO-X stateRuleEngine application
-  *
-  * <a href="../handbook/operating/software/apps/stateRuleEngine.html">Application Documentation</a>
-  *
-  * \ingroup apps
-  *
-  */
+ * \brief The MagAO-X stateRuleEngine application
+ *
+ * <a href="../handbook/operating/software/apps/stateRuleEngine.html">Application Documentation</a>
+ *
+ * \ingroup apps
+ *
+ */
 
 /** \defgroup stateRuleEngine_files
-  * \ingroup stateRuleEngine
-  */
+ * \ingroup stateRuleEngine
+ */
 
 namespace MagAOX
 {
@@ -33,90 +32,92 @@ namespace app
 
 /// The MagAO-X stateRuleEngine
 /**
-  * \ingroup stateRuleEngine
-  */
+ * \ingroup stateRuleEngine
+ */
 class stateRuleEngine : public MagAOXApp<true>
 {
 
-    //Give the test harness access.
+    // Give the test harness access.
     friend class stateRuleEngine_test;
 
-protected:
-
+  protected:
     /** \name Configurable Parameters
-      *@{
-      */
+     *@{
+     */
 
-     std::string m_ruleDir; /**< Directory containing config files containing rules to load. Relative to config directory.  If this is
-                                 set, then rules in the device config file are ignored*/
+    std::string m_ruleDir; /**< Directory containing config files containing rules to load. Relative to config
+                              directory.  If this is set, then rules in the device config file are ignored*/
 
     indiRuleMaps m_ruleMaps;
 
     ///@}
 
-public:
+  public:
     /// Default c'tor.
     stateRuleEngine();
 
     /// D'tor, declared and defined for noexcept.
     ~stateRuleEngine() noexcept
-    {}
+    {
+    }
 
     virtual void setupConfig();
 
     /// Implementation of loadConfig logic, separated for testing.
     /** This is called by loadConfig().
-      */
-    int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
+     */
+    int loadConfigImpl(
+        mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
 
     virtual void loadConfig();
 
     /// Startup function
     /**
-      *
-      */
+     *
+     */
     virtual int appStartup();
 
     /// Implementation of the FSM for stateRuleEngine.
     /**
-      * \returns 0 on no critical error
-      * \returns -1 on an error requiring shutdown
-      */
+     * \returns 0 on no critical error
+     * \returns -1 on an error requiring shutdown
+     */
     virtual int appLogic();
 
     /// Shutdown the app.
     /**
-      *
-      */
+     *
+     */
     virtual int appShutdown();
-
 
     /// The static callback function to be registered for rule properties
     /**
-      *
-      * \returns 0 on success.
-      * \returns -1 on error.
-      */
-    static int st_newCallBack_ruleProp( void * app,                     ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                      );
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    static int st_newCallBack_ruleProp(
+        void                    *app,   ///< [in] a pointer to this, will be static_cast-ed to derivedT.
+        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+    );
 
     /// Callback to process a NEW preset position request
     /**
-      * \returns 0 on success.
-      * \returns -1 on error.
-      */
-    int newCallBack_ruleProp( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_ruleProp(
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
 
     pcf::IndiProperty m_indiP_info;
     pcf::IndiProperty m_indiP_caution;
     pcf::IndiProperty m_indiP_warning;
     pcf::IndiProperty m_indiP_alert;
-
 };
 
-stateRuleEngine::stateRuleEngine() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+stateRuleEngine::stateRuleEngine()
+    : MagAOXApp(
+          MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED, MAGAOX_URL, MAGAOX_BRANCH, MAGAOX_SRCPATH, MAGAOX_REPO_UNTRACKED )
 {
     return;
 }
@@ -135,66 +136,67 @@ void stateRuleEngine::setupConfig()
                 "set, then rules in the device config file are ignored" );
 }
 
-int stateRuleEngine::loadConfigImpl( mx::app::appConfigurator & _config )
+int stateRuleEngine::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-    _config(m_ruleDir, "rules.dir");
+    _config( m_ruleDir, "rules.dir" );
 
     std::map<std::string, ruleRuleKeys> rrkMap;
 
-    if(m_ruleDir == "")
+    if( m_ruleDir == "" )
     {
         try
         {
-            loadRuleConfig(m_ruleMaps, rrkMap, _config);
-            finalizeRuleValRules(m_ruleMaps, rrkMap);
+            loadRuleConfig( m_ruleMaps, rrkMap, _config );
+            finalizeRuleValRules( m_ruleMaps, rrkMap );
         }
-        catch(mx::err::mxException & e)
+        catch( mx::err::mxException &e )
         {
-            return log<software_critical,-1>({__FILE__,__LINE__, std::string("Rule config exception caught:\n") + e.what()});
+            return log<software_critical, -1>( std::format( "Rule config exception caught:\n{}", e.what() ) );
         }
     }
     else
     {
         std::vector<std::string> conffiles;
-        if(mx::ioutils::getFileNames(conffiles, m_configDir + "/" + m_ruleDir, "", "", ".conf") != mx::error_t::noerror)
+        if( mx::ioutils::getFileNames( conffiles, m_configDir + "/" + m_ruleDir, "", "", ".conf" ) !=
+            mx::error_t::noerror )
         {
-            return log<software_critical,-1>({__FILE__,__LINE__, "Error reading rules"});
+            return log<software_critical, -1>( { "Error reading rules" } );
         }
 
-        for(auto & cnf : conffiles)
+        for( auto &cnf : conffiles )
         {
-            //Create a configurator and set it up to log
+            // Create a configurator and set it up to log
             mx::app::appConfigurator fcfg;
 
             fcfg.m_sources = true;
             fcfg.configLog = configLog;
 
-            //now process the config file
-            if( fcfg.readConfig(cnf) < 0 )
+            // now process the config file
+            if( fcfg.readConfig( cnf ) < 0 )
             {
-                return log<software_critical,-1>({__FILE__,__LINE__, "error reading rule config file: " + cnf});
+                return log<software_critical, -1>( "error reading rule config file: " + cnf );
             }
 
             try
             {
-                //and finally add to our rule map
-                loadRuleConfig(m_ruleMaps, rrkMap, fcfg);
+                // and finally add to our rule map
+                loadRuleConfig( m_ruleMaps, rrkMap, fcfg );
             }
-            catch(mx::err::mxException & e)
+            catch( mx::err::mxException &e )
             {
-                return log<software_critical,-1>({__FILE__,__LINE__, std::string("Rule config exception caught from ") + cnf + ":\n" + e.what()});
+                return log<software_critical, -1>(
+                    std::format( "Rule config exception caught from {}:\n{}", cnf, e.what() ) );
             }
         }
 
         try
         {
-            finalizeRuleValRules(m_ruleMaps, rrkMap);
+            finalizeRuleValRules( m_ruleMaps, rrkMap );
         }
-        catch(const std::exception& e)
+        catch( const std::exception &e )
         {
-            return log<software_critical,-1>({__FILE__,__LINE__, std::string("Error finalizing rules:\n") + e.what()});
+            return log<software_critical, -1>( { std::string( "Error finalizing rules:\n" ) + e.what() } );
         }
-
     }
 
     return 0;
@@ -202,141 +204,161 @@ int stateRuleEngine::loadConfigImpl( mx::app::appConfigurator & _config )
 
 void stateRuleEngine::loadConfig()
 {
-    if(loadConfigImpl(config) < 0)
+    if( loadConfigImpl( config ) < 0 )
     {
-        log<software_critical>({__FILE__,__LINE__,"error in configuration"});
+        log<software_critical>( { "error in configuration" } );
         m_shutdown = true;
     }
 }
 
 int stateRuleEngine::appStartup()
 {
-    for(auto it = m_ruleMaps.rules.begin(); it != m_ruleMaps.rules.end(); ++it)
+    for( auto it = m_ruleMaps.rules.begin(); it != m_ruleMaps.rules.end(); ++it )
     {
-        if(it->second->priority() == rulePriority::info)
+        if( it->second->priority() == rulePriority::info )
         {
-            if(m_indiP_info.getDevice() != m_configName)
+            if( m_indiP_info.getDevice() != m_configName )
             {
-                if(registerIndiPropertyNew( m_indiP_info, "info", pcf::IndiProperty::Switch, pcf::IndiProperty::ReadOnly,
-                                                                pcf::IndiProperty::Idle, pcf::IndiProperty::AnyOfMany, nullptr) < 0)
+                if( registerIndiPropertyNew( m_indiP_info,
+                                             "info",
+                                             pcf::IndiProperty::Switch,
+                                             pcf::IndiProperty::ReadOnly,
+                                             pcf::IndiProperty::Idle,
+                                             pcf::IndiProperty::AnyOfMany,
+                                             nullptr ) < 0 )
                 {
-                    return log<software_critical,-1>({__FILE__, __LINE__});
+                    return log<software_critical, -1>( std::source_location::current() );
                 }
             }
 
-            m_indiP_info.add(pcf::IndiElement(it->first, pcf::IndiElement::Off));
-            m_indiP_info[it->first].setLabel(it->second->message());
+            m_indiP_info.add( pcf::IndiElement( it->first, pcf::IndiElement::Off ) );
+            m_indiP_info[it->first].setLabel( it->second->message() );
         }
 
-        if(it->second->priority() == rulePriority::caution)
+        if( it->second->priority() == rulePriority::caution )
         {
-            if(m_indiP_caution.getDevice() != m_configName)
+            if( m_indiP_caution.getDevice() != m_configName )
             {
-                if(registerIndiPropertyNew( m_indiP_caution, "caution", pcf::IndiProperty::Switch, pcf::IndiProperty::ReadOnly,
-                                                                pcf::IndiProperty::Idle, pcf::IndiProperty::AnyOfMany, nullptr) < 0)
+                if( registerIndiPropertyNew( m_indiP_caution,
+                                             "caution",
+                                             pcf::IndiProperty::Switch,
+                                             pcf::IndiProperty::ReadOnly,
+                                             pcf::IndiProperty::Idle,
+                                             pcf::IndiProperty::AnyOfMany,
+                                             nullptr ) < 0 )
                 {
-                    return log<software_critical,-1>({__FILE__, __LINE__});
+                    return log<software_critical, -1>( std::source_location::current() );
                 }
             }
 
-            m_indiP_caution.add(pcf::IndiElement(it->first, pcf::IndiElement::Off));
-            m_indiP_caution[it->first].setLabel(it->second->message());
+            m_indiP_caution.add( pcf::IndiElement( it->first, pcf::IndiElement::Off ) );
+            m_indiP_caution[it->first].setLabel( it->second->message() );
         }
 
-        if(it->second->priority() == rulePriority::warning)
+        if( it->second->priority() == rulePriority::warning )
         {
-            if(m_indiP_warning.getDevice() != m_configName)
+            if( m_indiP_warning.getDevice() != m_configName )
             {
-                if(registerIndiPropertyNew( m_indiP_warning, "warning", pcf::IndiProperty::Switch, pcf::IndiProperty::ReadOnly,
-                                                                pcf::IndiProperty::Idle, pcf::IndiProperty::AnyOfMany, nullptr) < 0)
+                if( registerIndiPropertyNew( m_indiP_warning,
+                                             "warning",
+                                             pcf::IndiProperty::Switch,
+                                             pcf::IndiProperty::ReadOnly,
+                                             pcf::IndiProperty::Idle,
+                                             pcf::IndiProperty::AnyOfMany,
+                                             nullptr ) < 0 )
                 {
-                    return log<software_critical,-1>({__FILE__, __LINE__});
+                    return log<software_critical, -1>( std::source_location::current() );
                 }
             }
 
-            m_indiP_warning.add(pcf::IndiElement(it->first, pcf::IndiElement::Off));
-            m_indiP_warning[it->first].setLabel(it->second->message());
+            m_indiP_warning.add( pcf::IndiElement( it->first, pcf::IndiElement::Off ) );
+            m_indiP_warning[it->first].setLabel( it->second->message() );
         }
 
-        if(it->second->priority() == rulePriority::alert)
+        if( it->second->priority() == rulePriority::alert )
         {
-            if(m_indiP_alert.getDevice() != m_configName)
+            if( m_indiP_alert.getDevice() != m_configName )
             {
-                if(registerIndiPropertyNew( m_indiP_alert, "alert", pcf::IndiProperty::Switch, pcf::IndiProperty::ReadOnly,
-                                                                pcf::IndiProperty::Idle, pcf::IndiProperty::AnyOfMany, nullptr) < 0)
+                if( registerIndiPropertyNew( m_indiP_alert,
+                                             "alert",
+                                             pcf::IndiProperty::Switch,
+                                             pcf::IndiProperty::ReadOnly,
+                                             pcf::IndiProperty::Idle,
+                                             pcf::IndiProperty::AnyOfMany,
+                                             nullptr ) < 0 )
                 {
-                    return log<software_critical,-1>({__FILE__, __LINE__});
+                    return log<software_critical, -1>( std::source_location::current() );
                 }
             }
 
-            m_indiP_alert.add(pcf::IndiElement(it->first, pcf::IndiElement::Off));
-            m_indiP_alert[it->first].setLabel(it->second->message());
-
+            m_indiP_alert.add( pcf::IndiElement( it->first, pcf::IndiElement::Off ) );
+            m_indiP_alert[it->first].setLabel( it->second->message() );
         }
     }
 
-    for(auto it = m_ruleMaps.props.begin(); it != m_ruleMaps.props.end(); ++it)
+    for( auto it = m_ruleMaps.props.begin(); it != m_ruleMaps.props.end(); ++it )
     {
-        if(it->second == nullptr) continue;
+        if( it->second == nullptr )
+            continue;
 
         std::string devName, propName;
 
-        int rv = indi::parseIndiKey(devName, propName, it->first);
-        if(rv != 0)
+        int rv = indi::parseIndiKey( devName, propName, it->first );
+        if( rv != 0 )
         {
-            log<software_error>({__FILE__, __LINE__, 0, rv, "error parsing INDI key: " + it->first});
-            return -1;
+            log<software_error>( { 0, rv, "error parsing INDI key: " + it->first } );
         }
+        return -1;
 
-        registerIndiPropertySet( *it->second, devName, propName, st_newCallBack_ruleProp);
+        registerIndiPropertySet( *it->second, devName, propName, st_newCallBack_ruleProp );
     }
 
-    state(stateCodes::READY);
+    state( stateCodes::READY );
 
     return 0;
 }
 
 int stateRuleEngine::appLogic()
 {
-    for(auto it = m_ruleMaps.rules.begin(); it != m_ruleMaps.rules.end(); ++it)
+    for( auto it = m_ruleMaps.rules.begin(); it != m_ruleMaps.rules.end(); ++it )
     {
-        #if 0
+#if 0
         try
         {
             bool val = it->second->value();
             std::cerr << it->first << " " << val << "\n";
         }
         catch(...){}
-        #endif
+#endif
 
-        if(it->second->priority() != rulePriority::none)
+        if( it->second->priority() != rulePriority::none )
         {
             try
             {
                 bool val = it->second->value();
 
                 pcf::IndiElement::SwitchStateType onoff = pcf::IndiElement::Off;
-                if(val) onoff = pcf::IndiElement::On;
+                if( val )
+                    onoff = pcf::IndiElement::On;
 
-                if(it->second->priority() == rulePriority::info)
+                if( it->second->priority() == rulePriority::info )
                 {
-                    updateSwitchIfChanged(m_indiP_info, it->first, onoff);
+                    updateSwitchIfChanged( m_indiP_info, it->first, onoff );
                 }
-                else if(it->second->priority() == rulePriority::caution)
+                else if( it->second->priority() == rulePriority::caution )
                 {
-                    updateSwitchIfChanged(m_indiP_caution, it->first, onoff);
+                    updateSwitchIfChanged( m_indiP_caution, it->first, onoff );
                 }
-                else if(it->second->priority() == rulePriority::warning)
+                else if( it->second->priority() == rulePriority::warning )
                 {
-                    updateSwitchIfChanged(m_indiP_warning, it->first, onoff);
+                    updateSwitchIfChanged( m_indiP_warning, it->first, onoff );
                 }
                 else
                 {
-                    updateSwitchIfChanged(m_indiP_alert, it->first, onoff);
+                    updateSwitchIfChanged( m_indiP_alert, it->first, onoff );
                 }
-
             }
-            catch(const std::exception & e)
+            catch( const std::exception &e )
             {
                 ///\todo how to handle startup vs misconfiguration
 
@@ -349,7 +371,6 @@ int stateRuleEngine::appLogic()
         }
     }
 
-
     return 0;
 }
 
@@ -358,27 +379,25 @@ int stateRuleEngine::appShutdown()
     return 0;
 }
 
-int stateRuleEngine::st_newCallBack_ruleProp( void * app,
-                                              const pcf::IndiProperty &ipRecv
-                                            )
+int stateRuleEngine::st_newCallBack_ruleProp( void *app, const pcf::IndiProperty &ipRecv )
 {
-    stateRuleEngine * sre = static_cast<stateRuleEngine *>(app);
+    stateRuleEngine *sre = static_cast<stateRuleEngine *>( app );
 
-    sre->newCallBack_ruleProp(ipRecv);
+    sre->newCallBack_ruleProp( ipRecv );
 
     return 0;
 }
 
-int stateRuleEngine::newCallBack_ruleProp( const pcf::IndiProperty &ipRecv)
+int stateRuleEngine::newCallBack_ruleProp( const pcf::IndiProperty &ipRecv )
 {
     std::string key = ipRecv.createUniqueKey();
 
-    if(m_ruleMaps.props.count(key) == 0)
+    if( m_ruleMaps.props.count( key ) == 0 )
     {
         return 0;
     }
 
-    if(m_ruleMaps.props[key] == nullptr) //
+    if( m_ruleMaps.props[key] == nullptr ) //
     {
         return 0;
     }
@@ -388,7 +407,7 @@ int stateRuleEngine::newCallBack_ruleProp( const pcf::IndiProperty &ipRecv)
     return 0;
 }
 
-} //namespace app
-} //namespace MagAOX
+} // namespace app
+} // namespace MagAOX
 
-#endif //stateRuleEngine_hpp
+#endif // stateRuleEngine_hpp

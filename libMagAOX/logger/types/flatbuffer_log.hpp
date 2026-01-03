@@ -32,7 +32,7 @@ struct fbMessage
 
 
 ///Base class for logs consisting of a flatbuffer message.
-/** Such logs are used to log arbitrary data structures using the flatbuffer protocol. Does not have 
+/** Such logs are used to log arbitrary data structures using the flatbuffer protocol. Does not have
   * eventCode or defaultLevel,
   * so this can not be used as a log type directly.
   *

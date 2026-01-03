@@ -554,7 +554,7 @@ int xindiserver::forkIndiserver()
    int filedes[2];
    if (pipe(filedes) == -1)
    {
-      log<software_error>({__FILE__, __LINE__, errno});
+      log<software_error>({errno});
       return -1;
    }
 
@@ -741,7 +741,7 @@ int xindiserver::processISLog( std::string logs )
 
    std::string logstr = logs.substr(st, logs.size()-st);
 
-   logPrioT prio = logPrio::LOG_INFO;
+   logPrio prio = logPrio::LOG_INFO;
 
    //Look for fatal errors
    if(logstr.find("xindidriver") != std::string::npos) //Errors from xindidriver
@@ -785,8 +785,8 @@ int xindiserver::appStartup()
 
       if(rv < 0 && errno != EEXIST)
       {
-         log<software_error>({__FILE__, __LINE__, errno});
-         log<software_error>({__FILE__, __LINE__, "Failed to create symlink for driver: " + m_local[i] + ". Continuing."});
+         log<software_error>({errno});
+         log<software_error>({"Failed to create symlink for driver: " + m_local[i] + ". Continuing."});
       }
    }
 

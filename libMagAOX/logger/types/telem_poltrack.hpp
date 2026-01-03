@@ -25,7 +25,7 @@ struct telem_poltrack : public flatbuffer_log
     static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_POLTRACK;
 
     /// The default level
-    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
+    static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
     static timespec
         lastRecord; ///< The timestamp of the last time this log was recorded.  Used by the telemetry system.
@@ -41,7 +41,7 @@ struct telem_poltrack : public flatbuffer_log
         )
         {
             auto _pos_name = builder.CreateString(pos_name);
-         
+
             auto fp = CreateTelem_poltrack_fb( builder, set_angle, actual_angle, _pos_name, tracking);
             builder.Finish( fp );
         }
@@ -80,11 +80,11 @@ struct telem_poltrack : public flatbuffer_log
         }
 
         msg += "tracking: ";
-        if (fbs->tracking()) 
+        if (fbs->tracking())
         {
             msg += "SYNCHRO_ADI ";
-        } 
-        else 
+        }
+        else
         {
             msg += "NONE ";
         }

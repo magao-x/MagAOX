@@ -315,7 +315,7 @@ void sshDigger::genArgsV( std::vector<std::string> &argsV )
     {
         comp = "-C";
     }
-    
+
     argsV = { "autossh", "-M" + std::to_string( m_monitorPort ), comp, "-nNTL", tunnelSpec(), m_remoteHost };
 }
 
@@ -476,7 +476,7 @@ inline void sshDigger::sshLogThreadExec()
 
 inline int sshDigger::processSSHLog( const std::string &logs )
 {
-    logPrioT lp = logPrio::LOG_INFO;
+    logPrio lp = logPrio::LOG_INFO;
 
     if( logs.find( "bind: Address already in use" ) != std::string::npos )
     {

@@ -94,7 +94,7 @@ protected:
    unsigned long m_writePause {MAGAOX_default_writePause}; ///< Time, in nanoseconds, to pause between successive batch writes to the file. Default is 1e9. Configure with logger.writePause.
 
 public:
-   logPrioT m_logLevel {logPrio::LOG_INFO}; ///< The minimum log level to actually record.  Logs with level below this are rejected. Default is INFO. Configure with logger.logLevel.
+   logPrio m_logLevel {logPrio::LOG_INFO}; ///< The minimum log level to actually record.  Logs with level below this are rejected. Default is INFO. Configure with logger.logLevel.
 
 protected:
    int m_logThreadPrio {0};
@@ -154,12 +154,12 @@ public:
      * \returns 0 on success
      * \returns -1 on error.
      */
-   int logLevel( logPrioT newLev /**< [in] the new value of logLevel */);
+   int logLevel( logPrio newLev /**< [in] the new value of logLevel */);
 
    /// Get the current value of logLevel
    /** \returns the value m_logLevel
      */
-   logPrioT logLevel();
+   logPrio logLevel();
 
    /// Set a new value of logThreadPrio
    /** Updates m_logThreadPrio with new value.
@@ -209,7 +209,7 @@ public:
    template<typename logT>
    static int createLog( bufferPtrT & logBuffer, ///< [out] a shared_ptr\<logBuffer\>, which will be allocated and populated with the log entry
                          const typename logT::messageT & msg, ///< [in] the message to log (could be of type emptyMessage)
-                         const logPrioT & level  ///< [in] the level (verbosity) of this log
+                         const logPrio & level  ///< [in] the level (verbosity) of this log
                        );
 
    /// Create a log formatted log entry, filling in a buffer.
@@ -223,7 +223,7 @@ public:
    static int createLog( bufferPtrT & logBuffer, ///< [out] a shared_ptr\<logBuffer\>, which will be allocated and populated with the log entry
                          const timespecX & ts, ///< [in] the timestamp of this log entry.
                          const typename logT::messageT & msg, ///< [in] the message to log (could be of type emptyMessage)
-                         const logPrioT & level ///< [in] the level (verbosity) of this log
+                         const logPrio & level ///< [in] the level (verbosity) of this log
                        );
 
    /// Make a log entry, including a message.
@@ -232,7 +232,7 @@ public:
      */
    template<typename logT>
    void log( const typename logT::messageT & msg, ///< [in] the message to log
-             logPrioT level = logPrio::LOG_DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
+             logPrio level = logPrio::LOG_DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
            );
 
    /// Make a log entry, including a message.
@@ -242,7 +242,7 @@ public:
    template<typename logT>
    void log( timespecX & ts, ///< [in] the timestamp of the log entry
              const typename logT::messageT & msg, ///< [in] the message to log
-             logPrioT level = logPrio::LOG_DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
+             logPrio level = logPrio::LOG_DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
            );
 
    /// Make a log entry with no message.
@@ -250,7 +250,7 @@ public:
      * \tparam logT is a log entry type
      */
    template<typename logT>
-   void log( logPrioT level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
+   void log( logPrio level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
 
    /// Make a log entry with no message.
    /**
@@ -258,7 +258,7 @@ public:
      */
    template<typename logT>
    void log( timespecX & ts, ///< [in] the timestamp of the log entry
-             logPrioT level = logPrio::LOG_DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
+             logPrio level = logPrio::LOG_DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
            );
 
 };
@@ -322,7 +322,7 @@ unsigned long logManager<parentT, logFileT>::writePause()
 }
 
 template<class parentT, class logFileT>
-int logManager<parentT, logFileT>::logLevel( logPrioT newLev )
+int logManager<parentT, logFileT>::logLevel( logPrio newLev )
 {
 
 
@@ -332,7 +332,7 @@ int logManager<parentT, logFileT>::logLevel( logPrioT newLev )
 }
 
 template<class parentT, class logFileT>
-logPrioT logManager<parentT, logFileT>::logLevel()
+logPrio logManager<parentT, logFileT>::logLevel()
 {
    return m_logLevel;
 }
@@ -385,7 +385,7 @@ int logManager<parentT, logFileT>::loadConfig( mx::app::appConfigurator & config
    config(tmp, m_configSection+".logLevel");
    if(tmp != "")
    {
-      logPrioT lev;
+      logPrio lev;
 
       lev = logLevelFromString(tmp);
 
@@ -529,7 +529,7 @@ template<class parentT, class logFileT>
 template<typename logT>
 int logManager<parentT, logFileT>::createLog( bufferPtrT & logBuffer,
                                      const typename logT::messageT & msg,
-                                     const logPrioT & level
+                                     const logPrio & level
                                    )
 {
    //Very first step is to get the current time.
@@ -544,7 +544,7 @@ template<typename logT>
 int logManager<parentT, logFileT>::createLog( bufferPtrT & logBuffer,
                                               const timespecX & ts,
                                               const typename logT::messageT & msg,
-                                              const logPrioT & level
+                                              const logPrio & level
                                             )
 {
    return logHeader::createLog<logT>(logBuffer, ts, msg, level);
@@ -553,7 +553,7 @@ int logManager<parentT, logFileT>::createLog( bufferPtrT & logBuffer,
 template<class parentT, class logFileT>
 template<typename logT>
 void logManager<parentT, logFileT>::log( const typename logT::messageT & msg,
-                                         logPrioT level
+                                         logPrio level
                                        )
 {
    //Step 0 check level.
@@ -576,7 +576,7 @@ template<class parentT, class logFileT>
 template<typename logT>
 void logManager<parentT, logFileT>::log( timespecX & ts,
                                          const typename logT::messageT & msg,
-                                         logPrioT level
+                                         logPrio level
                                        )
 {
    //Step 0 check level.
@@ -596,7 +596,7 @@ void logManager<parentT, logFileT>::log( timespecX & ts,
 
 template<class parentT, class logFileT>
 template<typename logT>
-void logManager<parentT, logFileT>::log( logPrioT level )
+void logManager<parentT, logFileT>::log( logPrio level )
 {
    log<logT>( emptyMessage(), level );
 }
@@ -604,7 +604,7 @@ void logManager<parentT, logFileT>::log( logPrioT level )
 template<class parentT, class logFileT>
 template<typename logT>
 void logManager<parentT, logFileT>::log( timespecX & ts,
-                                logPrioT level
+                                logPrio level
                               )
 {
    log<logT>( ts, emptyMessage(), level );

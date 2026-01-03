@@ -145,13 +145,41 @@ struct software_log : public flatbuffer_log
                   const int32_t otherCode,  ///< [in] Some other error code, such as a return value or library code.
                   const char   *explanation, ///< [in] explanatory text about the software event
                   const std::source_location &loc /**< [in] [opt] source location */
-                  = std::source_location::current() 
+                  = std::source_location::current()
         )
         {
             auto _file = builder.CreateString( loc.file_name() );
             auto _expl = builder.CreateString( explanation );
 
             auto gs = CreateSoftware_log_fb( builder, _file, loc.line(), errnoCode, otherCode, _expl );
+            builder.Finish( gs );
+        }
+
+        messageT( const int32_t  errnoCode, /**< [in] The errno code at the time of the log entry. Only errno should be
+                                                       passed here, so strerror can be used later.*/
+                  const int32_t otherCode,  ///< [in] Some other error code, such as a return value or library code.
+                  const std::string  & explanation, ///< [in] explanatory text about the software event
+                  const std::source_location &loc /**< [in] [opt] source location */
+                  = std::source_location::current()
+        )
+        {
+            auto _file = builder.CreateString( loc.file_name() );
+            auto _expl = builder.CreateString( explanation );
+
+            auto gs = CreateSoftware_log_fb( builder, _file, loc.line(), errnoCode, otherCode, _expl );
+            builder.Finish( gs );
+        }
+
+        messageT( const int32_t  errnoCode, /**< [in] The errno code at the time of the log entry. Only errno should be
+                                                       passed here, so strerror can be used later.*/
+                  const int32_t otherCode,  ///< [in] Some other error code, such as a return value or library code.
+                  const std::source_location &loc /**< [in] [opt] source location */
+                  = std::source_location::current()
+        )
+        {
+            auto _file = builder.CreateString( loc.file_name() );
+
+            auto gs = CreateSoftware_log_fb( builder, _file, loc.line(), errnoCode, otherCode, 0 );
             builder.Finish( gs );
         }
 
@@ -206,7 +234,7 @@ struct software_log : public flatbuffer_log
             auto _expl = builder.CreateString( explanation );
 
             auto gs = CreateSoftware_log_fb( builder, _file, loc.line(), 0, 0, _expl );
-            
+
             builder.Finish( gs );
         }
 
@@ -294,7 +322,7 @@ struct software_log : public flatbuffer_log
 struct software_emergency : public software_log
 {
     /// The default level
-    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_EMERGENCY;
+    static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_EMERGENCY;
 };
 
 /// Software ALERT log entry
@@ -306,7 +334,7 @@ struct software_emergency : public software_log
 struct software_alert : public software_log
 {
     /// The default level
-    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_ALERT;
+    static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_ALERT;
 };
 
 /// Software CRITICAL log entry
@@ -317,7 +345,7 @@ struct software_alert : public software_log
 struct software_critical : public software_log
 {
     /// The default level
-    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_CRITICAL;
+    static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_CRITICAL;
 };
 
 /// Software ERR log entry
@@ -328,7 +356,7 @@ struct software_critical : public software_log
 struct software_error : public software_log
 {
     /// The default level
-    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_ERROR;
+    static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_ERROR;
 };
 
 /// Software WARN log entry
@@ -339,7 +367,7 @@ struct software_error : public software_log
 struct software_warning : public software_log
 {
     /// The default level
-    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_WARNING;
+    static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_WARNING;
 };
 
 /// Software NOTICE log entry
@@ -350,7 +378,7 @@ struct software_warning : public software_log
 struct software_notice : public software_log
 {
     /// The default level
-    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_NOTICE;
+    static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_NOTICE;
 };
 
 /// Software INFO log entry
@@ -361,7 +389,7 @@ struct software_notice : public software_log
 struct software_info : public software_log
 {
     /// The default level
-    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_INFO;
+    static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_INFO;
 };
 
 /// Software DEBUG log entry
@@ -371,7 +399,7 @@ struct software_info : public software_log
 struct software_debug : public software_log
 {
     /// The default level
-    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_DEBUG;
+    static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_DEBUG;
 };
 
 /// Software DEBUG2 log entry
@@ -381,7 +409,7 @@ struct software_debug : public software_log
 struct software_debug2 : public software_log
 {
     /// The default level
-    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_DEBUG2;
+    static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_DEBUG2;
 };
 
 } // namespace logger

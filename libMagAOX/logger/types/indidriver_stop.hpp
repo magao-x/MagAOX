@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-08-18 created by JRM
   */
@@ -26,7 +26,7 @@ struct indidriver_stop : public empty_log<indidriver_stop>
    static const flatlogs::eventCodeT eventCode = eventCodes::INDIDRIVER_STOP;
 
    ///The default level
-   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_INFO;
+   static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_INFO;
 
    ///The message string
    static const char * msg() { return "INDI driver communications stopped"; }

@@ -356,7 +356,7 @@ class MagAOXApp : public application
      */
     template <typename logT, int retval = 0>
     static int log( const typename logT::messageT &msg,   ///< [in] the message to log
-                    logPrioT level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default
+                    logPrio level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default
                                                                                is used if not specified.*/
     );
 
@@ -368,7 +368,7 @@ class MagAOXApp : public application
      *
      */
     template <typename logT, int retval = 0>
-    static int log( logPrioT level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default is
+    static int log( logPrio level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default is
                                                                                used if not specified.*/
     );
 
@@ -1321,7 +1321,7 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string &git_sha1,
     config.configLog = configLog;
 
     // We log the current GIT status.
-    logPrioT gl = logPrio::LOG_INFO;
+    logPrio gl = logPrio::LOG_INFO;
     if( git_modified || git_untracked )
     {
         gl = logPrio::LOG_WARNING;
@@ -1360,7 +1360,7 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string &git_sha1, const bool git_modi
     config.configLog = configLog;
 
     // We log the current GIT status.
-    logPrioT gl = logPrio::LOG_INFO;
+    logPrio gl = logPrio::LOG_INFO;
     if( git_modified )
     {
         gl = logPrio::LOG_WARNING;
@@ -2086,7 +2086,7 @@ int MagAOXApp<_useINDI>::execute() // virtual
 
 template <bool _useINDI>
 template <typename logT, int retval>
-int MagAOXApp<_useINDI>::log( const typename logT::messageT &msg, logPrioT level )
+int MagAOXApp<_useINDI>::log( const typename logT::messageT &msg, logPrio level )
 {
     m_log.template log<logT>( msg, level );
     return retval;
@@ -2094,7 +2094,7 @@ int MagAOXApp<_useINDI>::log( const typename logT::messageT &msg, logPrioT level
 
 template <bool _useINDI>
 template <typename logT, int retval>
-int MagAOXApp<_useINDI>::log( logPrioT level )
+int MagAOXApp<_useINDI>::log( logPrio level )
 {
     m_log.template log<logT>( level );
     return retval;
@@ -2624,7 +2624,7 @@ void MagAOXApp<_useINDI>::state( const stateCodes::stateCodeT &s, bool stateAler
     // Only log anything if it's a change
     if( m_state != s )
     {
-        logPrioT lvl = logPrio::LOG_INFO;
+        logPrio lvl = logPrio::LOG_INFO;
         if( s == stateCodes::ERROR )
             lvl = logPrio::LOG_ERROR;
         if( s == stateCodes::FAILURE )

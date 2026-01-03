@@ -26,7 +26,7 @@ struct indidriver_start : public empty_log<indidriver_start>
    static const flatlogs::eventCodeT eventCode = eventCodes::INDIDRIVER_START;
 
    ///The default level
-   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_INFO;
+   static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_INFO;
 
    ///The message string
    static const char * msg() { return "INDI driver communications started"; }

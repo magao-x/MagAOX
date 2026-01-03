@@ -25,7 +25,7 @@ struct telem_offloading : public flatbuffer_log
     static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_OFFLOADING;
 
     /// The default level
-    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
+    static const flatlogs::logPrio defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
     static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
 
