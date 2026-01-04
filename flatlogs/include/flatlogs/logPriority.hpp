@@ -23,7 +23,6 @@ enum class logPrio: logPrioT
 
 
   /// Normal operations of the entire system should be shut down immediately.
-<<<<<<< HEAD
   LOG_EMERGENCY = 0,
 
   /// This should only be used if some action is required by operators to keep the system safe.
@@ -58,42 +57,6 @@ enum class logPrio: logPrioT
 
   /// Used to denote an unkown log type for internal error handling.
   LOG_UNKNOWN = std::numeric_limits<logPrioT>::max(),
-=======
-  constexpr static logPrioT LOG_EMERGENCY = 0;
-
-  /// This should only be used if some action is required by operators to keep the system safe.
-  constexpr static logPrioT LOG_ALERT = 1;
-
-  /// The process can not continue and will shut down (fatal)
-  constexpr static logPrioT LOG_CRITICAL = 2;
-
-  /// An error has occured which the software will attempt to correct.
-  constexpr static logPrioT LOG_ERROR = 3;
-
-  /// A condition has occurred which may become an error, but the process continues.
-  constexpr static logPrioT LOG_WARNING = 4;
-
-  /// A normal but significant condition
-  constexpr static logPrioT LOG_NOTICE = 5;
-
-  /// Informational.  The info log level is the lowest level recorded during normal operations.
-  constexpr static logPrioT LOG_INFO = 6;
-
-  /// Used for debugging
-  constexpr static logPrioT LOG_DEBUG = 7;
-
-  /// Used for debugging, providing a 2nd level.
-  constexpr static logPrioT LOG_DEBUG2 = 8;
-
-  /// A telemetry recording
-  constexpr static logPrioT LOG_TELEM = 64;
-
-  /// Used to denote "use the default level for this log type".
-  constexpr static logPrioT LOG_DEFAULT = std::numeric_limits<logPrioT>::max() - 1;
-
-  /// Used to denote an unkown log type for internal error handling.
-  constexpr static logPrioT LOG_UNKNOWN = std::numeric_limits<logPrioT>::max();
->>>>>>> dev
 
 };
 
