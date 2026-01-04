@@ -45,7 +45,7 @@ int za_connect(z_port *port, const char *port_name)
 {
 	DCB dcb = { 0 };
 	COMMTIMEOUTS timeouts;
-	
+
 	if (port_name == NULL)
 	{
 		PRINT_ERROR("[ERROR] port name cannot be NULL.");
@@ -156,7 +156,7 @@ int za_receive(z_port port, char *destination, int length)
 	for (;;)
 	{
 		SYSCALL(ReadFile(port, &c, 1, &nlast, NULL));
-		
+
 		if (nlast == 0) /* timed out */
 		{
 			PRINTF_ERROR("[INFO] Read timed out after reading %d "
@@ -164,21 +164,21 @@ int za_receive(z_port port, char *destination, int length)
 			return Z_ERROR_SYSTEM_ERROR;
 		}
 
-		if (destination != NULL) 
+		if (destination != NULL)
 		{
 			destination[nread] = c;
 		}
 		nread += nlast;
-		
+
 		if (nread == length)
 		{
 			PRINTF_ERROR("[ERROR] Read destination buffer not large "
-					"enough. Recommended size: 256B. Your size: %dB.", 
+					"enough. Recommended size: 256B. Your size: %dB.",
 					length);
 			return Z_ERROR_BUFFER_TOO_SMALL;
 		}
 
-		if (c == '\n') 
+		if (c == '\n')
 		{
 			nread -= 2; /* prepare to cut off the "\r\n" */
 			if (nread < 0)
@@ -212,14 +212,14 @@ int za_setbaud(z_port port, int baud)
 	SYSCALL(GetCommState(port, &dcb));
 	dcb.BaudRate = baud;
 	SYSCALL(SetCommState(port, &dcb));
-	
+
 	return Z_SUCCESS;
 }
 
 /* First flushes the input buffer, then tries to read until nothing comes in.
  * This unfortunately guarantees that this function will take at least 100ms
- * to complete, as this function waits 100ms for additional input to be 
- * available before returning. This is necessary, as without it, this function 
+ * to complete, as this function waits 100ms for additional input to be
+ * available before returning. This is necessary, as without it, this function
  * would be essentially useless: it would frequently chop any incoming message
  * in half, leaving the second half to be read later.
  */
@@ -244,7 +244,7 @@ int za_drain(z_port port)
 
 	timeouts.ReadTotalTimeoutConstant = old_timeout;
 	SYSCALL(SetCommTimeouts(port, &timeouts));
-	
+
 	return Z_SUCCESS;
 }
 
@@ -270,7 +270,7 @@ int za_drain(z_port port)
 		__FILE__, __LINE__, strerror(errno)); } } while(0)
 #endif
 /* A little sugar for checking return values from system calls.
- * I would have liked to use GNU/GCC's "statement expressions" so that one 
+ * I would have liked to use GNU/GCC's "statement expressions" so that one
  * do something like "z_port port = SYSCALL(open([parameters]))", but they're
  * a GNU extension, and therefore unfriendly to non-GCC compilers.
  * Workaround to avoid dependence on statement expressions for SYSCALL macro:
@@ -334,7 +334,7 @@ int za_disconnect(z_port port)
  * if you pass a pointer to a 0-length string (ie. just a \0) for command,
  * za_send() will send the minimal command of "/\n" automagically, as it will
  * assume you are sending a command without content, and that you have
- * forgotten the leading '/' and trailing '\n'. Mention of this is probably 
+ * forgotten the leading '/' and trailing '\n'. Mention of this is probably
  * best left out of the official docs since it's a hacky way to use za_send().
  */
 int za_send(z_port port, const char *command)
@@ -375,7 +375,7 @@ int za_send(z_port port, const char *command)
 
 int za_receive(z_port port, char *destination, int length)
 {
-	int nread = 0, 
+	int nread = 0,
 		nlast;
 	char c;
 
@@ -395,16 +395,16 @@ int za_receive(z_port port, char *destination, int length)
 			destination[nread] = c;
 		}
 		nread += nlast;
-		
+
 		if (nread == length)
 		{
 			PRINTF_ERROR("[ERROR] Read destination buffer not large "
-					"enough. Recommended size: 256B. Your size: %dB.", 
+					"enough. Recommended size: 256B. Your size: %dB.",
 					length);
 			return Z_ERROR_BUFFER_TOO_SMALL;
 		}
 
-		if (c == '\n') 
+		if (c == '\n')
 		{
 			nread -= 2; /* prepare to cut off the "\r\n" */
 			if (nread < 0)
@@ -482,16 +482,16 @@ int za_drain(z_port port)
 
 #endif /* if defined(__unix__) || defined(__APPLE__) -- OS detection */
 
-/* A helper for za_decode. Copies from source to destination, until delim or 
- * a '\0' is found, then null-terminates destination. 
+/* A helper for za_decode. Copies from source to destination, until delim or
+ * a '\0' is found, then null-terminates destination.
  *
  * Returns the number of bytes copied, including the added null-terminator. */
-static size_t copy_until_delim(char *destination, const char *source, 
+static size_t copy_until_delim(char *destination, const char *source,
 		const char delim, size_t destination_length)
 {
 	size_t i;
 
-	for(i = 0; source[i] != delim && source[i] != '\0' 
+	for(i = 0; source[i] != delim && source[i] != '\0'
 			&& i < destination_length - 1; i++)
 	{
 		destination[i] = source[i];
@@ -504,7 +504,7 @@ static size_t copy_until_delim(char *destination, const char *source,
 
 static int decode_reply(struct za_reply *destination, char *reply)
 {
-	char buffer[8]; /* needs to be at least 5B: set to 8 because 
+	char buffer[8]; /* needs to be at least 5B: set to 8 because
 					   it will be padded to 8 from 5 anyway. */
 	size_t offset,
 		   length;
@@ -524,23 +524,23 @@ static int decode_reply(struct za_reply *destination, char *reply)
 	 * The device address is part of the same "token" as the message type,
 	 * so we call strtol on the same token, skipping the first char.
 	 *
-	 * We don't check the length here for future-proofing: 
-	 * if we add support for more device addresses (ie. more digits), 
+	 * We don't check the length here for future-proofing:
+	 * if we add support for more device addresses (ie. more digits),
 	 * this should handle it gracefully. */
 	offset = copy_until_delim(buffer, reply, ' ', sizeof(buffer));
 	destination->device_address = (int) strtol(buffer + 1, NULL, 10);
 	reply += offset;
 
-	/* axis number: 1 digit, 0-9 
+	/* axis number: 1 digit, 0-9
 	 *
 	 * The axis number may be 2 digits (or more) in the future, but it's
-	 * unlikely to go over 2^31 - 1 any time soon, so we convert to 
+	 * unlikely to go over 2^31 - 1 any time soon, so we convert to
 	 * standard int and use that. */
 	offset = copy_until_delim(buffer, reply, ' ', sizeof(buffer));
 	destination->axis_number = (int) strtol(buffer, NULL, 10);
 	reply += offset;
-	
-	/* reply flags: 2 letters 
+
+	/* reply flags: 2 letters
 	 *
 	 * Only replies have reply flags. Value is either "OK" or "RJ". */
 	offset = copy_until_delim(buffer, reply, ' ', sizeof(buffer));
@@ -554,8 +554,8 @@ static int decode_reply(struct za_reply *destination, char *reply)
 	}
 	strcpy(destination->reply_flags, buffer);
 	reply += offset;
-	
-	/* device status: 4 letters 
+
+	/* device status: 4 letters
 	 *
 	 * Replies and alerts have a "status" field. Value is either "IDLE" or
 	 * "BUSY", depending on what the device is doing at the time. */
@@ -571,10 +571,10 @@ static int decode_reply(struct za_reply *destination, char *reply)
 	strcpy(destination->device_status, buffer);
 	reply += offset;
 
-	/* warning flags: 2 letters 
+	/* warning flags: 2 letters
 	 *
 	 * Replies and alerts have warning flags. Warning flags are typically
-	 * "--". All other possible warning flag values should be two 
+	 * "--". All other possible warning flag values should be two
 	 * consecutive capital letters. */
 	offset = copy_until_delim(buffer, reply, ' ', sizeof(buffer));
 	if (offset > sizeof(destination->warning_flags))
@@ -609,7 +609,7 @@ static int decode_reply(struct za_reply *destination, char *reply)
 static int decode_alert(struct za_reply *destination, char *reply)
 {
 	size_t offset;
-	char buffer[8]; /* needs to be at least 5B: set to 8 because 
+	char buffer[8]; /* needs to be at least 5B: set to 8 because
 					   it will be padded to 8 from 5 anyway. */
 
 	if (strlen(reply) < 13)
@@ -619,7 +619,7 @@ static int decode_alert(struct za_reply *destination, char *reply)
 				"Reply value: %s", reply);
 		return Z_ERROR_COULD_NOT_DECODE;
 	}
-	
+
 	destination->message_type = '!';
 
 	/* device address: 2 digits, 00-99
@@ -627,25 +627,25 @@ static int decode_alert(struct za_reply *destination, char *reply)
 	 * The device address is part of the same "token" as the message type,
 	 * so we call strtol on the same token, skipping the first char.
 	 *
-	 * We don't check the length here for future-proofing: 
-	 * if we add support for more device addresses (ie. more digits), 
+	 * We don't check the length here for future-proofing:
+	 * if we add support for more device addresses (ie. more digits),
 	 * this should handle it gracefully. */
 	offset = copy_until_delim(buffer, reply, ' ', sizeof(buffer));
 	destination->device_address = (int) strtol(buffer + 1, NULL, 10);
 	reply += offset;
 
-	/* axis number: 1 digit, 0-9 
+	/* axis number: 1 digit, 0-9
 	 *
 	 * The axis number may be 2 digits (or more) in the future, but it's
-	 * unlikely to go over 2^31 - 1 any time soon, so we convert to 
+	 * unlikely to go over 2^31 - 1 any time soon, so we convert to
 	 * standard int and use that. */
 	offset = copy_until_delim(buffer, reply, ' ', sizeof(buffer));
 	destination->axis_number = (int) strtol(buffer, NULL, 10);
 	reply += offset;
 
 	destination->reply_flags[0] = '\0';
-	
-	/* device status: 4 letters 
+
+	/* device status: 4 letters
 	 *
 	 * Replies and alerts have a "status" field. Value is either "IDLE" or
 	 * "BUSY", depending on what the device is doing at the time. */
@@ -661,10 +661,10 @@ static int decode_alert(struct za_reply *destination, char *reply)
 	strcpy(destination->device_status, buffer);
 	reply += offset;
 
-	/* warning flags: 2 letters 
+	/* warning flags: 2 letters
 	 *
 	 * Replies and alerts have warning flags. Warning flags are typically
-	 * "--". All other possible warning flag values should be two 
+	 * "--". All other possible warning flag values should be two
 	 * consecutive capital letters. */
 	offset = copy_until_delim(buffer, reply, ' ', sizeof(buffer));
 	if (offset > sizeof(destination->warning_flags))
@@ -686,7 +686,7 @@ static int decode_info(struct za_reply *destination, char *reply)
 {
 	size_t length,
 		   offset;
-	char buffer[8]; /* needs to be at least 5B: set to 8 because 
+	char buffer[8]; /* needs to be at least 5B: set to 8 because
 					   it will be padded to 8 from 5 anyway. */
 
 	if (strlen(reply) < 7)
@@ -704,17 +704,17 @@ static int decode_info(struct za_reply *destination, char *reply)
 	 * The device address is part of the same "token" as the message type,
 	 * so we call strtol on the same token, skipping the first char.
 	 *
-	 * We don't check the length here for future-proofing: 
-	 * if we add support for more device addresses (ie. more digits), 
+	 * We don't check the length here for future-proofing:
+	 * if we add support for more device addresses (ie. more digits),
 	 * this should handle it gracefully. */
 	offset = copy_until_delim(buffer, reply, ' ', sizeof(buffer));
 	destination->device_address = (int) strtol(buffer + 1, NULL, 10);
 	reply += offset;
 
-	/* axis number: 1 digit, 0-9 
+	/* axis number: 1 digit, 0-9
 	 *
 	 * The axis number may be 2 digits (or more) in the future, but it's
-	 * unlikely to go over 2^31 - 1 any time soon, so we convert to 
+	 * unlikely to go over 2^31 - 1 any time soon, so we convert to
 	 * standard int and use that. */
 	offset = copy_until_delim(buffer, reply, ' ', sizeof(buffer));
 	destination->axis_number = (int) strtol(buffer, NULL, 10);
@@ -741,14 +741,14 @@ static int decode_info(struct za_reply *destination, char *reply)
 	return Z_SUCCESS;
 }
 
-/* This function tokenizes using the above helper function to copy 
+/* This function tokenizes using the above helper function to copy
  * token-by-token from reply into buffer, or directly into destination,
  * depending on the field in destination we are populating. It could probably
  * be prettier, more clever, or more efficient, but it's written to be
  * readable, reliable, and robust first.
  *
  * Note that we can safely use strcpy here because the above helper function is
- * guaranteed to write a NUL at the end of its destination string. 
+ * guaranteed to write a NUL at the end of its destination string.
  *
  * See http://www.zaber.com/wiki/Manuals/ASCII_Protocol_Manual#Replies for
  * more info on replies.
@@ -785,6 +785,6 @@ int za_decode(struct za_reply *destination, char *reply)
 					"message type. Valid types are '@' (reply), '!' (alert), "
 					"and '#' (info). Your type: '%c'. \n", message_type);
 			return Z_ERROR_COULD_NOT_DECODE;
-	}		
+	}
 }
 

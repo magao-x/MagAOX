@@ -224,8 +224,8 @@ int stateRuleEngine::appStartup()
                 }
             }
 
-            pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
-            m_indiP_info.add(elem);
+            m_indiP_info.add(pcf::IndiElement(it->first, pcf::IndiElement::Off));
+            m_indiP_info[it->first].setLabel(it->second->message());
         }
 
         if(it->second->priority() == rulePriority::caution)
@@ -239,8 +239,8 @@ int stateRuleEngine::appStartup()
                 }
             }
 
-            pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
-            m_indiP_caution.add(elem);
+            m_indiP_caution.add(pcf::IndiElement(it->first, pcf::IndiElement::Off));
+            m_indiP_caution[it->first].setLabel(it->second->message());
         }
 
         if(it->second->priority() == rulePriority::warning)
@@ -254,8 +254,8 @@ int stateRuleEngine::appStartup()
                 }
             }
 
-            pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
-            m_indiP_warning.add(elem);
+            m_indiP_warning.add(pcf::IndiElement(it->first, pcf::IndiElement::Off));
+            m_indiP_warning[it->first].setLabel(it->second->message());
         }
 
         if(it->second->priority() == rulePriority::alert)
@@ -269,8 +269,9 @@ int stateRuleEngine::appStartup()
                 }
             }
 
-            pcf::IndiElement elem = pcf::IndiElement(it->first, pcf::IndiElement::Off);
-            m_indiP_alert.add(elem);
+            m_indiP_alert.add(pcf::IndiElement(it->first, pcf::IndiElement::Off));
+            m_indiP_alert[it->first].setLabel(it->second->message());
+
         }
     }
 

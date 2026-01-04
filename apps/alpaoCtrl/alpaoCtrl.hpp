@@ -418,7 +418,12 @@ int alpaoCtrl::commandDM(void * curr_src)
 {
    COMPL_STAT ret;
 
+
    //This is based on Kyle Van Gorkoms original sendCommand function.
+
+   #ifdef XWC_DMTIMINGS
+   dmT::m_tact0 = mx::sys::get_curr_time();
+   #endif
 
    /*This loop performs the following steps:
      1) converts from float to double (ALPAO Scalar)
@@ -426,10 +431,14 @@ int alpaoCtrl::commandDM(void * curr_src)
      3) convert to fractional stroke (-1 to +1) that the ALPAO SDK expects
      4) calculate the mean
    */
-   Scalar mean = 0;
+   double mean = 0;
+
+   double gain_scale = m_volume_factor/m_max_stroke;
+   float inv_gain_scale = 1.0/gain_scale;
+
    for (UInt idx = 0; idx < m_nbAct; ++idx)
    {
-     m_dminputs[idx] = ((Scalar)  ((realT *) curr_src)[m_actuator_mapping[idx]]) * m_volume_factor/m_max_stroke;
+     m_dminputs[idx] = reinterpret_cast<realT *>(curr_src)[m_actuator_mapping[idx]] * gain_scale;
      mean += m_dminputs[idx];
    }
    mean /= m_nbAct;
@@ -440,22 +449,43 @@ int alpaoCtrl::commandDM(void * curr_src)
          The ALPAO SDK doesn't seem to check for this, which
          is scary and a little odd.
    */
+   m_outputShape.setWrite(1);
+
    for (UInt idx = 0 ; idx < m_nbAct ; ++idx)
    {
       m_dminputs[idx] -= mean;
+
       if (m_dminputs[idx] > 1)
       {
          ++m_nsat;
          m_dminputs[idx] = 1;
-      } else if (m_dminputs[idx] < -1)
+      }
+      else if (m_dminputs[idx] < -1)
       {
          ++m_nsat;
          m_dminputs[idx] = - 1;
       }
+
+      m_outputShape[m_actuator_mapping[idx]] = m_dminputs[idx] * inv_gain_scale;
+
    }
+
+   m_outputShape.post();
+
+   #ifdef XWC_DMTIMINGS
+   dmT::m_tact1 = mx::sys::get_curr_time();
+   #endif
 
    /* Finally, send the command to the DM */
    ret = asdkSend(m_dm, m_dminputs);
+
+   #ifdef XWC_DMTIMINGS
+   dmT::m_tact2 = mx::sys::get_curr_time();
+   #endif
+
+   #ifdef XWC_DMTIMINGS
+   dmT::m_tact3 = mx::sys::get_curr_time();
+   #endif
 
    /* Now update the instantaneous sat map */
    for (UInt idx = 0; idx < m_nbAct; ++idx)
@@ -469,6 +499,10 @@ int alpaoCtrl::commandDM(void * curr_src)
          m_instSatMap.data()[m_actuator_mapping[idx]] = 0;
       }
    }
+
+   #ifdef XWC_DMTIMINGS
+   dmT::m_tact4 = mx::sys::get_curr_time();
+   #endif
 
    return ret;
 

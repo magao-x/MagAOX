@@ -6,6 +6,7 @@
 ../libMagAOX/app/tests/semUtils_test
 ../libMagAOX/app/dev/tests/outletController_test
 ../libMagAOX/app/dev/tests/telemeter_test
+../libMagAOX/app/dev/tests/dm_test
 ../libMagAOX/app/dev/tests/dev_test
 
 ../libMagAOX/file/tests/fileTimes_test
@@ -105,9 +106,10 @@
 ../libMagAOX/tty/tests/tty_test
 ../libMagAOX/tty/tests/ttyIOUtils_test
 
+../utils/logsurgeon/tests/logsurgeon_config_test
+
 ../utils/tests/cursesINDI_test
 ../utils/tests/logdump_test
-../utils/tests/logsurgeon_test
 ../utils/tests/shmimLat_test
 ../utils/tests/shmimPlot_test
 ../utils/tests/xrif2fits_test

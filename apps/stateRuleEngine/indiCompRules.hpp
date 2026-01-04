@@ -8,10 +8,10 @@
 #define stateRuleEngine_indiCompRules_hpp
 
 #include <variant>
-#include <mx/mxException.hpp>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
                                          //Included here for standalone testing of this file
+#include <mx/mxException.hpp>
 
 /// Logical comparisons for the INDI rules
 enum class ruleComparison
@@ -26,6 +26,8 @@ enum class ruleComparison
     Nand,      ///< boolean nand
     Or,        ///< boolean or
     Nor,       ///< boolean nor
+    Imply,
+    Nimply,
     Xor = Neq, ///< boolean xor, equivalent to not equal
     Xnor = Eq  ///< boolean xnor, equivalent to equal
 };
@@ -82,6 +84,14 @@ ruleComparison string2comp( const std::string & cstr )
     else if(cstr == "Xnor")
     {
         return ruleComparison::Xnor;
+    }
+    else if(cstr == "Imply")
+    {
+        return ruleComparison::Imply;
+    }
+    else if(cstr == "Nimply")
+    {
+        return ruleComparison::Nimply;
     }
     else
     {
@@ -353,6 +363,14 @@ public:
                 break;
             case ruleComparison::Nor:
                 if(!b1 && !b2) rv = true;
+                break;
+            case ruleComparison::Imply:
+                // https://en.wikipedia.org/wiki/Material_conditional
+                if(!b1 || b2) rv=true;
+                break;
+            case ruleComparison::Nimply:
+                // https://en.wikipedia.org/wiki/Material_nonimplication
+                if(b1 && !b2) rv=true;
                 break;
             default:
                 rv = "operator not valid for ruleCompRule";

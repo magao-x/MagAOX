@@ -17,7 +17,7 @@ using namespace MagAOX::app;
 namespace CACAOITEST
 {
 
-class cacaoInterface_test : public cacaoInterface 
+class cacaoInterface_test : public cacaoInterface
 {
 
 public:
@@ -30,7 +30,7 @@ public:
         XWCTEST_SETUP_INDI_NEW_PROP(loopZero);
         XWCTEST_SETUP_INDI_NEW_PROP(multCoeff);
         XWCTEST_SETUP_INDI_NEW_PROP(maxLim);
-        
+
     }
 };
 
@@ -46,4 +46,4 @@ SCENARIO( "INDI Callbacks", "[cacaoInterface]" )
 }
 
 
-} //namespace cacaoInterface_test 
+} //namespace cacaoInterface_test

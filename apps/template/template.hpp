@@ -30,7 +30,7 @@ namespace app
 {
 
 /// The MagAO-X xxxxxxxx
-/** 
+/**
   * \ingroup template
   */
 class template : public MagAOXApp<true>
@@ -44,9 +44,9 @@ protected:
    /** \name Configurable Parameters
      *@{
      */
-   
+
    //here add parameters which will be config-able at runtime
-   
+
    ///@}
 
 
@@ -76,14 +76,14 @@ public:
    virtual int appStartup();
 
    /// Implementation of the FSM for template.
-   /** 
+   /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
    virtual int appLogic();
 
    /// Shutdown the app.
-   /** 
+   /**
      *
      */
    virtual int appShutdown();
@@ -93,7 +93,7 @@ public:
 
 template::template() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   
+
    return;
 }
 
@@ -104,7 +104,7 @@ void template::setupConfig()
 int template::loadConfigImpl( mx::app::appConfigurator & _config )
 {
 
-   
+
    return 0;
 }
 
@@ -115,7 +115,7 @@ void template::loadConfig()
 
 int template::appStartup()
 {
-   
+
    return 0;
 }
 

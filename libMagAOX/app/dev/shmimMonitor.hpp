@@ -65,7 +65,7 @@ struct shmimT
  *       //It should check that the buffer has the expected size, and perform any internal allocations
  *       //to prepare for processing.
  *       int derivedT::allocate( const specificT & ///< [in] tag to differentiate shmimMonitor parents.  Normally this
- * is dev::shmimT for a single parent.
+ *                                                           is dev::shmimT for a single parent.
  *                             );
  *
  *       int derivedT::processImage( void * curr_src,   ///< [in] pointer to the start of the current frame
@@ -127,7 +127,7 @@ class shmimMonitor
     bool m_getExistingFirst{ false }; ///< If set to true by derivedT, any existing image will be grabbed and sent to
                                       ///< processImage before waiting on the semaphore.
 
-    stateCodes::stateCodeT m_targetState {stateCodes::OPERATING};
+    stateCodes::stateCodeT m_targetState{ stateCodes::OPERATING };
 
     shmimMonitorState m_smState{ shmimMonitorState::init };
 
@@ -522,12 +522,13 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
     // bool semgot = false;
 
+    std::cerr << m_shmimName <<  " smThreadExec\n";
+
     while( derived().shutdown() == 0 )
     {
         m_smState = shmimMonitorState::init;
 
-        while( ( derived().state() != m_targetState || m_shmimName == "" ) && !derived().shutdown() &&
-               !m_restart )
+        while( ( derived().state() != m_targetState || m_shmimName == "" ) && !derived().shutdown() && !m_restart )
         {
             sleep( 1 );
         }
@@ -572,8 +573,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
             if( ImageStreamIO_openIm( &m_imageStream, m_shmimName.c_str() ) == 0 )
             {
-                if( m_imageStream.md[0].sem <=
-                    m_semaphoreNumber ) ///<\todo this isn't right--> isn't there a define in cacao to use?
+                if( m_imageStream.md[0].sem < SEMAPHORE_MAXVAL )
                 {
                     ImageStreamIO_closeIm( &m_imageStream );
                     mx::sys::sleep( 1 ); // We just need to wait for the server process to finish startup.
@@ -598,6 +598,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
                         ImageStreamIO_closeIm( &m_imageStream );
                         return;
                     }
+
                     m_inode = buffer.st_ino;
                 }
             }
@@ -640,11 +641,6 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             return;
         }
 
-        derivedT::template log<software_info>(
-            { __FILE__,
-              __LINE__,
-              "got semaphore index " + std::to_string( m_semaphoreNumber ) + " for " + m_shmimName } );
-
         ImageStreamIO_semflush( &m_imageStream, m_semaphoreNumber );
 
         sem_t *sem = m_imageStream.semptr[m_semaphoreNumber]; ///< The semaphore to monitor for new image data
@@ -674,7 +670,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             m_depth  = 1;
         }
 
-        m_smState = shmimMonitorState::connected; // this means we now have vaild sizes, etc.
+        m_smState = shmimMonitorState::connected; // this means we now have valid sizes, etc.
 
         if( derived().allocate( specificT() ) < 0 )
         {
@@ -686,8 +682,8 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
         size_t   snx, sny, snz;
         uint64_t curr_image; // The current cnt1 index
 
-        if( m_getExistingFirst && !m_restart &&
-            derived().shutdown() == 0 ) // If true, we always get the existing image without waiting on the semaphore.
+        // If true, we always get the existing image without waiting on the semaphore.
+        if( m_getExistingFirst && !m_restart && derived().shutdown() == 0 )
         {
             if( m_imageStream.md[0].size[2] > 0 ) ///\todo change to naxis?
             {
@@ -751,7 +747,9 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
                     curr_image = m_imageStream.md[0].cnt1;
                 }
                 else
+                {
                     curr_image = 0;
+                }
 
                 atype = m_imageStream.md[0].datatype;
                 snx   = m_imageStream.md[0].size[0];

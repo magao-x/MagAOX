@@ -463,31 +463,43 @@ int bmcCtrl::commandDM(void * curr_src)
    dmT::m_tact0 = mx::sys::get_curr_time();
    #endif
 
+   double gain_scale = m_volume_factor/m_act_gain;
+   float inv_gain_scale = 1.0/gain_scale;
+
+   m_outputShape.setWrite(1);
+
    for (uint32_t idx = 0; idx < m_nbAct; ++idx)
    {
       int address = m_actuator_mapping[idx];
-      if(address == -1)
+      if(address < 0)
       {
          m_dminputs[idx] = 0.; // addressable but ignored actuators set to 0
       }
       else
       {
-         m_dminputs[idx] = ((double)  (static_cast<realT *>(curr_src)[address])) * m_volume_factor/m_act_gain;
+         realT input = reinterpret_cast<realT *>(curr_src)[address];
+
+         m_dminputs[idx] = input * gain_scale;
 
          if (m_dminputs[idx] > 1)
          {
             m_dminputs[idx] = 1;
+            m_outputShape[address] = inv_gain_scale;
          }
          else if (m_dminputs[idx] < 0)
          {
             m_dminputs[idx] = 0;
+            m_outputShape[address] = 0;
          }
          else
          {
             m_dminputs[idx] = sqrt(m_dminputs[idx]);
+            m_outputShape[address] = input;
          }
       }
    }
+
+   m_outputShape.post();
 
    #ifdef XWC_DMTIMINGS
    dmT::m_tact1 = mx::sys::get_curr_time();

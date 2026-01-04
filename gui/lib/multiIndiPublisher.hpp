@@ -18,19 +18,19 @@
 /// An INDI client which serves as a publisher for many subscribers.
 /** This allows many widgets to use a single INDI client connection from within
   * one overall application (e.g. a GUI window).
-  * 
+  *
   * Subscribers, instances of classes derived from multiIndiSubscriber, register
   * callbacks to be notified when a specific property is changed.
-  * 
-  */ 
+  *
+  */
 class multiIndiPublisher : public pcf::IndiClient, public multiIndiSubscriber
 {
 
 protected:
-   
+
    std::string m_hostAddress;
    std::string m_hostPort;
-   
+
 public:
 
    /// Constructor, which establishes the INDI client connection.
@@ -38,24 +38,24 @@ public:
                        const std::string & hostAddress,
                        const int hostPort
                      );
-   
+
    ~multiIndiPublisher() noexcept {};
-   
+
 
    /// Subscribes the given instance of multiIndiSubscriber for notifications on the given property.
    /**
      * \returns 0 on success.
      * \returns -1 on error.
-     */ 
-   virtual int addSubscriberProperty( multiIndiSubscriber * sub, ///< [in] pointer to the subscriber 
+     */
+   virtual int addSubscriberProperty( multiIndiSubscriber * sub, ///< [in] pointer to the subscriber
                                       pcf::IndiProperty & ipSub  ///< [in] the property being subscribed to.
                                     );
-   
-   virtual int addSubscriberProperty( multiIndiSubscriber * sub, ///< [in] pointer to the subscriber 
+
+   virtual int addSubscriberProperty( multiIndiSubscriber * sub, ///< [in] pointer to the subscriber
                                       const std::string & device,  ///< [in] the property being subscribed to.
                                       const std::string & propName
                                     )
-   {            
+   {
       pcf::IndiProperty ipSub;
       ipSub.setDevice(device);
       ipSub.setName(propName);
@@ -64,24 +64,24 @@ public:
    }
 
    virtual void handleDefProperty( const pcf::IndiProperty &ipRecv );
-   
+
    virtual void handleDelProperty( const pcf::IndiProperty &ipRecv );
 
    /// Responds to SET PROPERTY
    /** This is the implementation of the pcf::IndiClient interface function.
      * Calls the handleSetProperty callback for any subscribers registered on the property.
-     */ 
+     */
    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the INDI property which has changed */);
-   
+
    /// Implementation of the pcf::IndiClient interface, called by activate to actually beging the INDI event loop.
-   /** 
+   /**
      */
    void execute();
-   
+
    /// Called once the parent is connected.
    virtual void onConnect()
    {
-      multiIndiSubscriber::onConnect(); 
+      multiIndiSubscriber::onConnect();
    }
 
    virtual void sendNewProperty( const pcf::IndiProperty &ipSend)
@@ -124,20 +124,20 @@ int multiIndiPublisher::addSubscriberProperty( multiIndiSubscriber * sub,
 
 inline
 void multiIndiPublisher::handleDefProperty( const pcf::IndiProperty &ipRecv )
-{   
+{
    for(subSetIteratorT it = subscribers.begin(); it != subscribers.end(); ++it)
    {
       (*it)->handleDefProperty(ipRecv);
-   }      
+   }
 }
 
 inline
 void multiIndiPublisher::handleDelProperty( const pcf::IndiProperty &ipRecv )
-{   
+{
    for(subSetIteratorT it = subscribers.begin(); it != subscribers.end(); ++it)
    {
       (*it)->handleDelProperty(ipRecv);
-   }   
+   }
 }
 
 inline

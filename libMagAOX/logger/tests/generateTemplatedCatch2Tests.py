@@ -16,15 +16,15 @@ import random
 import getopt
 
 
-gNextVals = {    
+gNextVals = {
     "string" : 0,
-    "int64"  : 0, 
+    "int64"  : 0,
     "uint64" : 0,
-    "int32"  : 0, 
-    "uint32" : 0, 
-    "int16"  : 0, 
+    "int32"  : 0,
+    "uint32" : 0,
+    "int16"  : 0,
     "uint16" : 0,
-    "int8"   : 0, 
+    "int8"   : 0,
     "uint8"  : 0,
     "float"  : 0,
     "double" : 0
@@ -120,7 +120,7 @@ def getSchemaFieldInfo(fname : str) -> tuple[str, tuple] :
 
     if len(subTables) == 0:
         return schemaTableName, tuple(schemaFieldInfo)
-    
+
 
     # go through sub tables and add them in
     newSchemaFieldInfo = []
@@ -135,7 +135,7 @@ def getSchemaFieldInfo(fname : str) -> tuple[str, tuple] :
 
 
 '''
-Quick check that the types in .fbs correspond, mainly strings match to strings, 
+Quick check that the types in .fbs correspond, mainly strings match to strings,
 and vectors to vectors.
 If they do not correspond, the behavior for comparing the fb values in the tests
 is undefined, and action beyond this generator will need to be taken.
@@ -146,9 +146,9 @@ def typesCorrespond(fbsType : str, cType : str) -> bool:
 
     if ("string" in fbsType) or ("string" in cType or "char *" in cType):
         return (("string" in fbsType) and ("string" in cType or "char *" in cType))
-    
+
     return True
-    
+
 
 '''
 Check it is not a base log type.
@@ -196,11 +196,12 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
     if not isValidLogType(headerLines):
         if returnInfo["name"] not in baseTypesDict:
             baseTypesDict[returnInfo["name"]] = set()
+
         return None # don't render anything from this file
 
     # iterate through all lines in header to:
     # 1. find where messageT structs are being made -> describes fields
-    # 2. check that is has its own <Get|Create|Verify><name>_fb methods 
+    # 2. check that is has its own <Get|Create|Verify><name>_fb methods
     fbMethodName = f"Create{returnInfo["name"][0].upper() + returnInfo["name"][1:]}_fb"
     hasFbMethods = False
     messageStructIdxs = []
@@ -221,6 +222,7 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
 
         # add inhertied type to dict where val is the base type it inherits from
         baseTypesDict[returnInfo["baseType"]].add(returnInfo["name"])
+
         return None # don't render me yet!
 
     # if it does not have its own fb method, find name of class its using
@@ -233,7 +235,7 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
                 returnInfo["schemaTableName"] = f"{line[startIndex:endIndex]}_fb"
 
     returnInfo["messageTypes"] = getMessageFieldInfo(messageStructIdxs, headerLines, schemaFieldInfo)
-    
+
     return returnInfo
 
 '''
@@ -290,7 +292,7 @@ def getRandInt(type : str) -> int:
     unsigned = True if "uint" in type else False
 
     intSizeBits = getIntSize(type)
-    
+
     if not unsigned:
         intSizeBits -= 1
 
@@ -322,7 +324,7 @@ def getIncrementingInt(type : str) -> int:
     elif "uint32_t" in type:
         gNextVals["uint32"] = (gNextVals["uint32"] + 1) % max
         return gNextVals["uint32"]
-    elif  "int64_t" in type:   
+    elif  "int64_t" in type:
         gNextVals["int64"] =  (gNextVals["int64"]  + 1) % max
         return gNextVals["int64"]
     elif "uint64_t" in type:
@@ -346,7 +348,7 @@ def getTestValFromType(fieldType : str, schemaFieldType = None) -> str:
             return str(getIncrementingInt(fieldType))
         # need 'u' suffix for randomly generated uint64_t to avoid:
         # "warning: integer constant is so large that it is unsigned"
-        return f'{str(getRandInt(fieldType))}u' if "uint64_t" in fieldType else str(getRandInt(fieldType)) 
+        return f'{str(getRandInt(fieldType))}u' if "uint64_t" in fieldType else str(getRandInt(fieldType))
     elif "float" in fieldType:
         if gIncrementingVals:
             gNextVals["float"] += 1
@@ -373,9 +375,9 @@ def makeTestVal(fieldDict : dict) -> str:
 
     if "schemaType" in fieldDict:
         return getTestValFromType(fieldDict["type"], fieldDict["schemaType"])
-    
+
     return getTestValFromType(fieldDict["type"])
-    
+
 
 
 '''
@@ -400,7 +402,7 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
 
             # check if this is a closing line
             if ")" in line:
-                if "//" in line and line.find(")") > line.find("//"):
+                if ("//" in line and line.find(")") > line.find("//")):
                     # parenthesis is in comment
                     pass
                 elif line.strip().strip(")") == "":
@@ -411,7 +413,17 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
 
             # trim line to just get field info
             indexStart = (line.find("messageT(") + len("messageT(")) if "messageT(" in line else 0
-            indexEnd = line.find("//") if "//" in line else len(line)
+
+            indexEnd = len(line)
+            if "//" in line:
+                indexEnd = line.find("//")
+            elif "/*" in line and line.find("/*") < indexEnd:
+                indexEnd = line.find("/*")
+
+            #ignore default argument
+            if "=" in line and line.find("=") < indexEnd:
+                indexEnd = line.find("=")
+
             line = line[indexStart:indexEnd].strip()
 
             lineParts =  [part.strip().split() for part in line.strip().rstrip(",").split(",")]
@@ -419,6 +431,8 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
             for field in lineParts:
                 fieldDict = {}
                 if len(field) > 0 and "//" in field[0]:
+                    break
+                if len(field) == 0:
                     break
 
                 # find type and name
@@ -450,14 +464,14 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
                             # reset dictionary index if we need to
                             subTableDictIndex = 0
                             fieldCount += 1
-                    
+
                     # check schemaType correlates to type in .hpp file
                     if not typesCorrespond(fieldDict["schemaType"], fieldDict["type"]):
                         # if types don't correspond, then use name in messageT and hope for best.
-                        # this is why if types are different, then names MUST correspond between 
+                        # this is why if types are different, then names MUST correspond between
                         # .fbs and .hpp file
                         del fieldDict["schemaName"]
-                
+
                 fieldDict["testVal"] = makeTestVal(fieldDict)
 
                 # add field dict to list of fields
@@ -513,12 +527,12 @@ def main():
         print("Error: Python version must be >= 3.9")
         exit(0)
 
-    
+
     global gIncrementingVals
     gIncrementingVals = False
 
     # getopt for random seed or incrementing vals
-    try: 
+    try:
         opts, args = getopt.getopt(sys.argv[1:], "is:")
         if len(opts) > 1:
             print("Error: Only one option allowed. -s <seed> or -i for incrementing values.")
@@ -536,7 +550,7 @@ def main():
             random.seed(int(arg))
         if opt in ["-i"]:
             gIncrementingVals = True
-    
+
     # load template
     env = jinja2.Environment(
         loader = jinja2.FileSystemLoader(searchpath=os.path.dirname(__file__))
@@ -569,8 +583,19 @@ def main():
     baseTypesDict = dict() # map baseTypes to the types that inherit from them
     for type in types:
 
+        print(type)
         # check valid type to generate tests for
         if ".hpp" not in type:
+            continue
+
+        # workaround for software_log issues with source_location
+        if "software" in type:
+            print("software")
+            continue
+
+        # workaround for telsee deprecated fields
+        if "telsee" in type:
+            print("telsee")
             continue
 
         typePath = os.path.join(typesFolderPath, type)

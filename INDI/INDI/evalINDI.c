@@ -574,7 +574,7 @@ onAlarm (int dummy)
 		while (nops-- > 0)
 		    fprintf (stderr, " %s", ops[nops]);
 		fprintf (stderr, "\n");
-	    } else 
+	    } else
 		fprintf (stderr, "Timed out waiting for new values\n");
 	}
 

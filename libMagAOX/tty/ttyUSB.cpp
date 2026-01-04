@@ -14,7 +14,6 @@
 #include <string>
 #include <cstring>
 
-#include <boost/filesystem.hpp>
 #include <mx/ioutils/fileUtils.hpp>
 
 #include "ttyUSB.hpp"
@@ -119,7 +118,7 @@ int ttyUSBDevName( std::string & devName,       // [out] the /dev/ttyUSBX device
       }
 
       //If we make it through all comparisons we found it!
-      boost::filesystem::path p(devNames[i]);
+      std::filesystem::path p(devNames[i]);
       devName = "/dev/" + p.filename().string();
 
       udev_device_unref(dev0);
@@ -205,7 +204,7 @@ int ttyUSBDevNames( std::vector<std::string> & devNames, // [out] the /dev/ttyUS
       }
 
       //If we make it through all comparisons we found it!
-      boost::filesystem::path p(pdevNames[i]);
+      std::filesystem::path p(pdevNames[i]);
       devNames.push_back( "/dev/" + p.filename().string());
 
       udev_device_unref(dev0);

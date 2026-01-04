@@ -10,10 +10,10 @@
 
 using namespace MagAOX::app;
 
-namespace KCCTEST 
+namespace KCCTEST
 {
 
-class kcubeCtrl_test : public kcubeCtrl 
+class kcubeCtrl_test : public kcubeCtrl
 {
 
 public:

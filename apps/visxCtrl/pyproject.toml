@@ -16,4 +16,4 @@ authors = [
 ]
 
 [project.scripts]
-visxCtrl = "visxCtrl.xapp:VisX.console_app"
+visxCtrl = "xapp.visxCtrl:main"

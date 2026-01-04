@@ -1241,12 +1241,12 @@ int modalGainOpt::allocate( const psdShmimT &dummy )
     m_gmaxSI.resize( m_nModes );
     m_modeVarSI.resize( m_nModes );
     m_timesOnSI.resize( m_nModes, 5 );
-    
+
 
     m_optGainLP.resize( m_nModes );
     m_modeVarLP.resize( m_nModes );
     m_timesOnLP.resize( m_nModes, 5 );
-    
+
     if( m_olPSDStream != nullptr &&
         ( m_olPSDStream->md->size[0] != m_nFreq || m_olPSDStream->md->size[1] != m_nModes ) )
     {
@@ -1687,7 +1687,7 @@ int modalGainOpt::processImage( void *curr_src, const gainFactShmimT &dummy )
 
             m_modesOn = modesOn;
         }
-            
+
 
         m_updating = false;
         std::cerr << "got gains: " << m_gainFacts.size() << "\n";
@@ -2955,7 +2955,7 @@ void modalGainOpt::goptThreadExec()
                 // flagOff = false;
 
                 MGO_BREADCRUMB;
-                
+
                 if( flagOff )
                 {
                     MGO_BREADCRUMB;
@@ -3243,9 +3243,9 @@ void modalGainOpt::goptThreadExec()
             m_modesOnSI = m_nModes - off;
             m_modesOnLP = m_nModes - offLP;
 
-            
 
-            
+
+
             if( m_updating )
             {
                 continue; // don't break b/c of omp
@@ -3583,7 +3583,7 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGainUpdate )( const pcf::Ind
         {
             m_opticalGainUpdate = false;
         }
-        else 
+        else
         {
             m_opticalGainUpdate = true;
 
@@ -3606,7 +3606,7 @@ INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGainSource )( const pcf::Ind
         float opticalg = ipRecv[m_opticalGainElement].get<float>();
 
         opticalg = (floor(opticalg * 100 + 0.5))/100.;
-        
+
         if(opticalg > 0 && opticalg < 1)
         {
             m_opticalGainSource = opticalg;

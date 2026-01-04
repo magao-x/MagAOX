@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 set -ex
-# If not started as root, sudo yourself
-if [[ "$EUID" != 0 ]]; then
-    sudo -H bash -l $0 "$@"
-    exit $?
-fi
 if [[ $(hostname) != "exao1" ]]; then
     echo "Must run on exao1"
     exit 1
@@ -15,12 +10,16 @@ else
     dest="$1"
 fi
 
-if ! mount | grep -q "on $dest"; then
-    echo "External drive mount appears not to be active for $dest"
-    exit 1
+declare -a dataFolders=("opt/MagAOX/rawimages" "opt/MagAOX/telem" "opt/MagAOX/cacao" "opt/MagAOX/logs" "opt/MagAOX/calib")
+
+if [[ $dest == /mnt/backup ]]; then
+    if ! mount | grep -q "on $dest"; then
+        echo "External drive mount appears not to be active for $dest"
+        exit 1
+    fi
 fi
 for remote in icc rtc; do
-    for folder in data calib; do
+    for folder in "${dataFolders[@]}"; do
         if ! mount | grep -q "on /srv/$remote/$folder"; then
             echo "NFS mount appears not to be active for on /srv/$remote/$folder"
             exit 1
@@ -28,17 +27,22 @@ for remote in icc rtc; do
     done
 done
 
-rsyncWithOptions="rsync --exclude=obs --exclude='*_2022*' --exclude='.Trash*' --exclude='*_2023*' --exclude='*_2024*' -a --info=progress2"
+rsyncWithOptions="rsync -rt --info=progress2 --info=name0 $extraRsyncOptions"
 
-mkdir -p $dest/rtc/
-$rsyncWithOptions /srv/rtc/data/ $dest/rtc/
-$rsyncWithOptions /srv/rtc/calib/ $dest/rtc/calib/
+for remote in rtc icc; do
+    for folder in "${dataFolders[@]}"; do
+        mkdir -p "$dest/$remote/$folder/"
+        $rsyncWithOptions "/srv/$remote/$folder/" "$dest/$remote/$folder/"
+    done
+done
 
-mkdir -p $dest/icc/
-$rsyncWithOptions /srv/icc/data/ $dest/icc/
-$rsyncWithOptions /srv/icc/calib/ $dest/icc/calib/
-
-mkdir -p $dest/aoc/
-$rsyncWithOptions /data/ $dest/aoc/
-
-
+for folder in "${dataFolders[@]}"; do
+    mkdir -p "$dest/aoc/$folder"
+    $rsyncWithOptions "/$folder/" "$dest/aoc/$folder"
+done
+for home in /home/*; do
+	if [[ $(basename $home) != "data" && $(basename $home) != "guestobs" ]]; then
+        mkdir -p "$dest/aoc/$home/"
+        $rsyncWithOptions "$home/" "$dest/aoc/$home/"
+    fi
+done

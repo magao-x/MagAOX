@@ -12,11 +12,11 @@ RecursiveLeastSquares::RecursiveLeastSquares(int num_predictors, int num_feature
 	_initial_covariance = initial_covariance;
 	_num_features = num_features;
 	_num_predictors = num_predictors;
-	
+
 	// Set size of all the arrays
 	prediction_matrix.resize(_num_predictors, _num_features);
 	prediction_matrix.setZero();
-    
+
     prediction_output.resize(_num_predictors, 1);
     prediction_output.setZero();
 
@@ -59,7 +59,7 @@ void RecursiveLeastSquares::update(eigenImage<realT> *x, eigenImage<realT> *y){
     K = xtP;
     K /= cn;
     prediction_matrix += err * K;
-	
+
     inverse_covariance *= _inverse_gamma;
     inverse_covariance -= K.transpose() * xtP;
 }
@@ -74,7 +74,7 @@ void RecursiveLeastSquares::update(Matrix *x, Matrix *y){
     K = xtP;
     K /= cn;
     prediction_matrix += err * K;
-	
+
     inverse_covariance *= _inverse_gamma;
     inverse_covariance -= K.transpose() * xtP;
 }

@@ -530,7 +530,7 @@ void streamWriter::loadConfig()
     {
         tmpstr = MAGAOX_rawimageRelPath;
     }
-    m_rawimageDir = basePath() + "/" + tmpstr + "/" + m_outName;
+    m_rawimageDir = basePath() + "/" + tmpstr ;
 
     config( m_rawimageDir, "writer.savePath" );
 
@@ -1145,8 +1145,7 @@ void streamWriter::fgThreadExec()
 
             if( ImageStreamIO_openIm( &image, m_shmimName.c_str() ) == 0 )
             {
-                if( image.md[0].sem <=
-                    m_semaphoreNumber ) ///<\todo this isn't right--> isn't there a define in cacao to use?
+                if( image.md[0].sem < SEMAPHORE_MAXVAL )
                 {
                     ImageStreamIO_closeIm( &image );
                     mx::sys::sleep( 1 ); // We just need to wait for the server process to finish startup.

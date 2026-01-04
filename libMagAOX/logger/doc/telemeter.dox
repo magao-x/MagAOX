@@ -15,7 +15,7 @@ It is also possible to log telemetry when certain changes or events take place (
 \section add_telem Steps to adding telemetry
 
 -# To add a new log type that is not an empty log (assume it is called "telem_type") follow steps 2-5 from \ref add_logs :
-   - Create a flatbuffer schema in logger/types/schemas  
+   - Create a flatbuffer schema in logger/types/schemas
    - Create a new file \p "telem_type.hpp" in the logger/types directory (see template in \ref add_logs).
    - Add the new \p "types/telem_type.hpp" file to the libMagAOX Makefile INCLUDEDEPS list.
    - Add the log type to \p "logger/logCodes.dat" (see instructions and restrictions in \ref add_logs)
@@ -66,13 +66,13 @@ int appCtrl::recordTelem(const telem_type *) // DO NOT CHANGE NAME
 int appCtrl::recordApp( bool force ) // UPDATE NAME AS NEEDED
 {
    static dataStruct lastTelem; ///< Structure holding previous telemetery data measurement.
-   
+
    if(!(lastTelem == newTelem) || force)
    {
       telem<telem_type>({newTelem.data1, newTelem.data2, newTelem.data3, ...}); // OUTPUT TELEM LOG
       lastTelem = newTelem;
    }
-   
+
    return 0;
 }
 \endcode
@@ -140,7 +140,7 @@ int fsmCtrl::appShutdown()
 -# Compile the app
 
 \section read_telem Reading telemetry files
-The telemetry logs are saved by default in \p /opt/MagAOX/telem . 
+The telemetry logs are saved by default in \p /opt/MagAOX/telem .
 
 To read them, use the logdump utility (see the <a href="https://magao-x.org/docs/handbook/operating/software/utils/logdump.html">handbook</a> for usage) with the command line args `--dir=/opt/MagAOX/telem --ext=.bintel`, e.g.:
 \code

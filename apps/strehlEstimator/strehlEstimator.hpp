@@ -505,9 +505,9 @@ INDI_SETCALLBACK_DEFN( strehlEstimator, m_indiP_tcsi_seeing )( const pcf::IndiPr
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_tcsi_seeing, ipRecv );
 
-    if( ipRecv.find( "dimm_fwhm" ) )
+    if( ipRecv.find( "dimm_fwhm_corr" ) )
     {
-        float seeing = ipRecv["dimm_fwhm"].get<float>();
+        float seeing = ipRecv["dimm_fwhm_corr"].get<float>();
 
         if( seeing != m_seeing )
         {
@@ -517,6 +517,7 @@ INDI_SETCALLBACK_DEFN( strehlEstimator, m_indiP_tcsi_seeing )( const pcf::IndiPr
             m_r0 = 0.2063 * 0.5 / m_seeing;
         }
     }
+
     return 0;
 }
 

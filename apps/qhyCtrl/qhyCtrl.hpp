@@ -53,7 +53,7 @@ void FirmWareVersion(qhyccd_handle *h)
 	unsigned int ret;
 	memset (FWInfo, 0x00, sizeof(FWInfo));
 	ret = GetQHYCCDFWVersion(h, fwv);
-	
+
 	if(ret == QHYCCD_SUCCESS){
 		if((fwv[0] >> 4) <= 9){
 			sprintf((char *)FWInfo, "Firmware version:20%d_%d_%d\n", ((fwv[0] >> 4) + 0x10), (fwv[0]&~0xf0),fwv[1]);
@@ -72,7 +72,7 @@ std::string qhyccdSDKErrorName(CONTROL_ID error)
 	/*
 		Fill and complete error messages.
 	*/
-	
+
    switch(error)
    {
       case QHYCCD_SUCCESS:
@@ -98,7 +98,7 @@ std::string qhyccdSDKErrorName(CONTROL_ID error)
 /** MagAO-X application to control a QHYCCD USB3 Camera
   *
   * \ingroup qhyCtrl
-  * 
+  *
   */
 class qhyCtrl : public MagAOXApp<>, public dev::stdCamera<qhyCtrl>, public dev::frameGrabber<qhyCtrl>, public dev::telemeter<qhyCtrl>
 {
@@ -106,46 +106,46 @@ class qhyCtrl : public MagAOXApp<>, public dev::stdCamera<qhyCtrl>, public dev::
    friend class dev::stdCamera<qhyCtrl>;
    friend class dev::frameGrabber<qhyCtrl>;
    friend class dev::telemeter<qhyCtrl>;
-   
+
 public:
    /** \name app::dev Configurations
      *@{
      */
    static constexpr bool c_stdCamera_tempControl = true; ///< app::dev config to tell stdCamera to not expose temperature controls
-   
+
    static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature
-   
+
    static constexpr bool c_stdCamera_readoutSpeed = false; ///< app::dev config to tell stdCamera not to  expose readout speed controls
-   
+
    static constexpr bool c_stdCamera_vShiftSpeed = false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
 
-   static constexpr bool c_stdCamera_emGain = false; ///< app::dev config to tell stdCamera to not expose EM gain controls 
-   
+   static constexpr bool c_stdCamera_emGain = false; ///< app::dev config to tell stdCamera to not expose EM gain controls
+
    static constexpr bool c_stdCamera_exptimeCtrl = true; ///< app::dev config to tell stdCamera to expose exposure time controls
-   
+
    static constexpr bool c_stdCamera_fpsCtrl = false; ///< app::dev config to tell stdCamera to expose FPS controls
-   
+
    static constexpr bool c_stdCamera_fps = false; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl=true)
-   
+
    static constexpr bool c_stdCamera_usesModes = false; ///< app:dev config to tell stdCamera not to expose mode controls
-   
+
    static constexpr bool c_stdCamera_usesROI = false; ///< app:dev config to tell stdCamera to expose ROI controls
 
    static constexpr bool c_stdCamera_cropMode = false; ///< app:dev config to tell stdCamera not to expose Crop Mode controls
-   
+
    static constexpr bool c_stdCamera_hasShutter = false; ///< app:dev config to tell stdCamera to expose shutter controls
 
    static constexpr bool c_stdCamera_usesStateString = false; ///< app::dev confg to tell stdCamera to expose the state string property
-   
+
    static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber that this camera can be flipped
-   
+
    ///@}
-   
+
 protected:
 
-	/** \name configurable parameters 
+	/** \name configurable parameters
 	*@{
-	*/ 
+	*/
 
 	std::string m_serialNumber; ///< The camera's identifying serial number
 	char m_camId[32]; ///< The camera's ID
@@ -155,16 +155,16 @@ protected:
 
 	unsigned int m_retVal {0}; ///< Return code for QHYCCD cameras
 	double m_ccdTemp;
-	
+
 	double m_expTimeSet;
 	double m_expTime;
-	
+
 	unsigned int channels {1};
 	uint32_t m_frame_length;
 	uint8_t * m_frame_data;
 
 	qhyccd_handle *m_camera {nullptr}; ///< The library camera handle
-   
+
 public:
 
    ///Default c'tor
@@ -192,7 +192,7 @@ public:
    virtual int appShutdown();
 
    int connect();
-   
+
    int configureAcquisition();
    int startAcquisition();
    int AbortAcquisition();
@@ -204,18 +204,18 @@ public:
   * \code
   * int powerOnDefaults(); // called on power-on after powerOnWaitElapsed has occurred.
   * \endcode
-  * 
+  *
   * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`
   * `onPowerOff`, and `whilePowerOff`,  must be placed in the derived class's functions of the same name.
   */
 
 protected:
-   
-   /// Get the current detector temperature 
-   /** 
+
+   /// Get the current detector temperature
+   /**
      * \returns 0 on success
      * \returns -1 on an error.
-     */ 
+     */
    int getTemp();
 
    /// Set the CCD temperature setpoint [stdCamera interface].
@@ -224,44 +224,44 @@ protected:
      * \returns -1 on error
      */
    int setTempSetPt(){};
-   
-   /// Get the current exposure time 
-   /** 
+
+   /// Get the current exposure time
+   /**
      * \returns 0 on success
      * \returns -1 on an error.
-     */   
+     */
    int getExpTime();
-   
+
    /// Get the current framerate
-   /** 
+   /**
      * \returns 0 on success
      * \returns -1 on an error.
      */
    int getFPS(){return 1/m_expTime;};
-   
+
    float fps(){return m_fps;};
-   
-   /** \name stdCamera Interface 
-     * 
+
+   /** \name stdCamera Interface
+     *
      * @{
      */
-   
+
    /// Set defaults for a power on state.
-   /** 
+   /**
      * \returns 0 on success
      * \returns -1 on error
-     */ 
+     */
    int powerOnDefaults();
-   
-   
+
+
    /// Set the Exposure Time. [stdCamera interface]
    /** Sets the frame rate to m_expTimeSet.
-     * 
+     *
      * \returns 0 on success
      * \returns -1 on error
      */
    int setExpTime();
-   
+
    /// Check the next ROI
    /** Checks if the target values are valid and adjusts them to the closest valid values if needed.
      *
@@ -274,27 +274,27 @@ protected:
      * \returns 0 always
      */
    int setNextROI();
-      
+
    ///@}
-   
+
    /** \name Telemeter Interface
-     * 
+     *
      * @{
-     */ 
+     */
 
    int checkRecordTimes();
-   
+
    int recordTelem( const telem_stdcam * );
-   
+
    ///@}
-   
+
 };
 
 inline
 qhyCtrl::qhyCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    m_powerMgtEnabled = false;
-   
+
    return;
 }
 
@@ -308,12 +308,12 @@ inline
 void qhyCtrl::setupConfig()
 {
    dev::stdCamera<qhyCtrl>::setupConfig(config);
-   
+
    dev::frameGrabber<qhyCtrl>::setupConfig(config);
-   
+
    config.add("camera.serialNumber", "", "camera.serialNumber", argType::Required, "camera", "serialNumber", false, "string", "The identifying serial number of the camera.");
    config.add("camera.bits", "", "camera.bits", argType::Required, "camera", "bits", false, "int", "The number of bits used by the camera.  Default is 16.");
-   
+
    dev::telemeter<qhyCtrl>::setupConfig(config);
 }
 
@@ -321,7 +321,7 @@ inline
 void qhyCtrl::loadConfig()
 {
    dev::stdCamera<qhyCtrl>::loadConfig(config);
-   
+
    config(m_serialNumber, "camera.serialNumber");
    // m_camId = &m_serialNumber[0];
    for(int i=0; i < 32; ++i){
@@ -329,17 +329,17 @@ void qhyCtrl::loadConfig()
    }
 
    config(m_bits, "camera.bits");
-   
+
    dev::frameGrabber<qhyCtrl>::loadConfig(config);
-   
+
    dev::telemeter<qhyCtrl>::loadConfig(config);
 }
-   
+
 
 inline
 int qhyCtrl::appStartup()
 {
-   
+
 	//=================================
 	// Do camera configuration here
 	unsigned int m_retVal = InitQHYCCDResource();
@@ -349,24 +349,24 @@ int qhyCtrl::appStartup()
 		printf("Cannot initialize SDK resources, error: %d\n", m_retVal);
 		return 1;
 	}
-   
+
    if(dev::stdCamera<qhyCtrl>::appStartup() < 0)
    {
       return log<software_critical,-1>({__FILE__,__LINE__});
    }
-   
+
    if(dev::frameGrabber<qhyCtrl>::appStartup() < 0)
    {
       return log<software_critical,-1>({__FILE__,__LINE__});
    }
-   
+
    if(dev::telemeter<qhyCtrl>::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
    }
-   
+
    state(stateCodes::NOTCONNECTED);
-   
+
    return 0;
 
 }
@@ -379,13 +379,13 @@ int qhyCtrl::appLogic()
    {
       return log<software_error, -1>({__FILE__, __LINE__});
    }
-   
+
    //and run frameGrabber's appLogic to see if the f.g. thread has exited.
    if(dev::frameGrabber<qhyCtrl>::appLogic() < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__});
    }
-   
+
 
    ///\todo Fall through check?
 
@@ -398,9 +398,9 @@ inline
 int qhyCtrl::appShutdown()
 {
 	dev::stdCamera<qhyCtrl>::appShutdown();
-	
+
 	dev::frameGrabber<qhyCtrl>::appShutdown();
-	
+
 	if(m_camera){
 		// close camera handle
 		m_retVal = CloseQHYCCD(m_camera);
@@ -420,9 +420,9 @@ int qhyCtrl::appShutdown()
 		return 1;
 	}
 
-      
+
    dev::telemeter<qhyCtrl>::appShutdown();
-    
+
    return 0;
 }
 
@@ -431,24 +431,24 @@ inline
 int qhyCtrl::connect()
 {
 	try {
-		if(m_camera) 
+		if(m_camera)
 			m_retVal = CloseQHYCCD(m_camera);
 
 		m_camera = nullptr;
 		m_camera = OpenQHYCCD(m_camId);
 
 	}catch(...){
-		if(m_camera) 
+		if(m_camera)
 			m_retVal = CloseQHYCCD(m_camera);
 		m_camera = nullptr;
-		
+
 		state(stateCodes::NODEVICE);
 		if(!stateLogged())
 			log<text_log>("no camera with serial number " + m_serialNumber + " found.");
 
 		return 0;
 	}
-   
+
    return 0;
 }
 
@@ -470,12 +470,12 @@ int qhyCtrl::configureAcquisition()
       state(stateCodes::ERROR);
       return log<software_error,-1>({__FILE__, __LINE__, "QHYCCD SDK Error from GetStatus: " });
    }
-   
+
 	m_retVal = SetQHYCCDBinMode(&m_camera, m_nextROI.bin_x, m_nextROI.bin_y);
 	if(m_retVal != QHYCCD_SUCCESS){
 		// Do error handling
 	}
-	
+
 	//QHYCCD expects the top left corner as starting point
 	int x0 = (m_nextROI.x - 0.5 * (m_nextROI.w - 1)) + 1;
 	int y0 = (m_nextROI.y - 0.5 * (m_nextROI.h - 1)) + 1;
@@ -490,10 +490,10 @@ int qhyCtrl::configureAcquisition()
 	m_dataType = _DATATYPE_INT16;
 
 	uint32_t new_frame_length = GetQHYCCDMemLength(&m_camera);
-	
+
 	// Only allocate memory if the frame size has changed
 	if(new_frame_length != m_frame_length){
-		
+
 		m_frame_length = new_frame_length;
 
 		if(m_frame_data){
@@ -521,14 +521,14 @@ int qhyCtrl::configureAcquisition()
 
 	getFPS();
 
-	recordCamera(true); 
+	recordCamera(true);
 
 	return 0;
 }
 
 int qhyCtrl::startAcquisition()
-{    
-	
+{
+
    try
    {
       //m_camera->StartGrabbing(GrabStrategy_LatestImageOnly); // Start grabbing, and always grab just the last image.
@@ -538,14 +538,14 @@ int qhyCtrl::startAcquisition()
       state(stateCodes::NOTCONNECTED);
       return -1;
    }
-   
+
    state(stateCodes::OPERATING);
-    
+
    return 0;
 }
 
 int qhyCtrl::AbortAcquisition()
-{    
+{
 	m_retVal = CancelQHYCCDExposing(&m_camera);
 	if(m_retVal != QHYCCD_SUCCESS){
 		// Error handling
@@ -567,9 +567,9 @@ int qhyCtrl::acquireAndCheckValid()
       state(stateCodes::NOTCONNECTED);
       return -1;
    }
-   
+
    /*
-   if (ptrGrabResult->GrabSucceeded()) // If image is grabbed successfully 
+   if (ptrGrabResult->GrabSucceeded()) // If image is grabbed successfully
    {
       clock_gettime(CLOCK_REALTIME, &m_currImageTimestamp);
       return 0;
@@ -589,9 +589,9 @@ int qhyCtrl::loadImageIntoStream(void * dest)
    	// pixelT * src = nullptr;
 	// src = (pixelT *) ptrGrabResult->GetBuffer();
 
-   try 
+   try
    {
-	  m_retVal = GetQHYCCDSingleFrame(m_camera, &m_width, &m_height, &m_bits, &channels, m_frame_data);  
+	  m_retVal = GetQHYCCDSingleFrame(m_camera, &m_width, &m_height, &m_bits, &channels, m_frame_data);
 	  // Do error handling
    }
    catch(...)
@@ -600,24 +600,24 @@ int qhyCtrl::loadImageIntoStream(void * dest)
       return -1;
    }
 
-	// if(src == nullptr) return -1;      
+	// if(src == nullptr) return -1;
 	if( frameGrabber<qhyCtrl>::loadImageIntoStreamCopy(dest, m_frame_data, m_width, m_height, sizeof(pixelT)) == nullptr) return -1;
-   
+
    return 0;
 }
 
 int qhyCtrl::reconfig()
-{  
+{
    return 0;
 }
-   
+
 
 inline
 int qhyCtrl::getTemp()
 {
    if( m_camera == nullptr) return 0;
-   
-   try 
+
+   try
    {
       m_ccdTemp = GetQHYCCDParam(&m_camera, CONTROL_CURTEMP);
       recordCamera();
@@ -629,7 +629,7 @@ int qhyCtrl::getTemp()
       state(stateCodes::NOTCONNECTED);
       return -1;
    }
-      
+
    return 0;
 
 }
@@ -638,8 +638,8 @@ inline
 int qhyCtrl::getExpTime()
 {
    if( m_camera == nullptr) return 0;
-   
-   try 
+
+   try
    {
 	  m_expTime = GetQHYCCDParam(&m_camera, CONTROL_EXPOSURE); // returns exposure time in us.
 	  m_expTime /= 1e6;	// divide by 1e6 to get exposure time in seconds
@@ -653,7 +653,7 @@ int qhyCtrl::getExpTime()
       state(stateCodes::NOTCONNECTED);
       return -1;
    }
-      
+
    return 0;
 
 }
@@ -668,7 +668,7 @@ int qhyCtrl::powerOnDefaults()
    m_nextROI.h = m_default_h;
    m_nextROI.bin_x = m_default_bin_x;
    m_nextROI.bin_y = m_default_bin_y;
-   
+
    return 0;
 }
 
@@ -677,7 +677,7 @@ inline
 int qhyCtrl::setExpTime()
 {
    if( m_camera == nullptr) return 0;
-    
+
    try
    {
       recordCamera(true);
@@ -688,9 +688,9 @@ int qhyCtrl::setExpTime()
       log<software_error>({__FILE__, __LINE__, "Error setting exposure time"});
       return -1;
    }
-   
+
    log<text_log>( "Set exposure time: " + std::to_string(m_expTimeSet) + " sec");
-   
+
    return 0;
 }
 
@@ -703,7 +703,7 @@ int qhyCtrl::checkNextROI()
 
 inline
 int qhyCtrl::setNextROI()
-{  
+{
 
 	std::cerr << "setNextROI:\n";
 	std::cerr << "  m_nextROI.x = " << m_nextROI.x << "\n";
@@ -712,16 +712,16 @@ int qhyCtrl::setNextROI()
 	std::cerr << "  m_nextROI.h = " << m_nextROI.h << "\n";
 	std::cerr << "  m_nextROI.bin_x = " << m_nextROI.bin_x << "\n";
 	std::cerr << "  m_nextROI.bin_y = " << m_nextROI.bin_y << "\n";
-	
+
 	recordCamera(true);
 	AbortAcquisition();
 	state(stateCodes::CONFIGURING);
-	
+
 	m_nextMode = m_modeName;
 	m_reconfig = true;
 
 	updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::Off, INDI_IDLE);
-	
+
 	return 0;
 }
 

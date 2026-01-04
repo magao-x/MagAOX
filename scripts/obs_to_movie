@@ -136,7 +136,7 @@ def frames_to_movie(
 def main(args):
     now = datetime.datetime.utcnow()
     datestamp = ''.join(filter(str.isdigit, now.isoformat()))
-    
+
     frames = list(sorted(glob.glob(f"{args.CAMSCI_FITS_DIR}/*.fits")))
     log.info(f"Found {len(frames)} in directory {args.CAMSCI_FITS_DIR}")
     frames_to_movie(

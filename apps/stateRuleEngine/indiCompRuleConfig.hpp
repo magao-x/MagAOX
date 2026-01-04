@@ -91,6 +91,81 @@ void extractRuleProp( pcf::IndiProperty ** prop,            ///< [out] pointer t
 
 }
 
+/// \cond
+// strip leading and trailing whitespace and then opening and closing "".  leaves spaces between "".
+inline void stripQuotesWS( std::string &str )
+{
+    if( str.size() == 0 )
+    {
+        return;
+    }
+
+    if( str[0] != '\"' && str[0] != ' ' && str.back() != ' ' ) // get out fast if we can
+    {
+        return;
+    }
+
+    // strip white space at front
+    size_t ns = str.find_first_not_of( " \t\r\n" );
+    if( ns != std::string::npos && ns != 0 )
+    {
+        str.erase( 0, ns );
+
+        if( str.size() == 0 )
+        {
+            return;
+        }
+    }
+    else if( ns == std::string::npos ) // the rare all spaces
+    {
+        str = "";
+        return;
+    }
+
+    // strip white space at back
+    ns = str.find_last_not_of( " \t\r\n" );
+    if( ns != std::string::npos && ns != str.size() - 1 )
+    {
+        str.erase( ns + 1 );
+
+        if( str.size() == 0 )
+        {
+            return;
+        }
+    }
+
+    if( str[0] == '\"' && str.back() == '\"' )
+    {
+        if( str.size() == 1 || str.size() == 2 )
+        {
+            str = "";
+            return;
+        }
+        str.erase( str.size() - 1, 1 );
+        str.erase( 0, 1 );
+    }
+    else if( str[0] == '\"')
+    {
+        if( str.size() == 1 )
+        {
+            str = "";
+            return;
+        }
+        str.erase( 0, 1 );
+    }
+    else if( str.back() == '\"' )
+    {
+        if( str.size() == 1 || str.size() == 2 )
+        {
+            str = "";
+            return;
+        }
+        str.erase( str.size() - 1, 1 );
+    }
+}
+/// \endcond
+
+
 /// Load the rule and properties maps for a rule engine from a configuration file
 /** ///\todo check for insertion failure
   * ///\todo add a constructor that has priority, message, and comparison, to reduce duplication
@@ -109,7 +184,7 @@ void loadRuleConfig( indiRuleMaps & maps,              ///< [out] contains the r
         mxThrowException(mx::err::invalidconfig, "loadRuleConfig", "no rules found in config");
     }
 
-    
+
     for(size_t i=0; i< sections.size(); ++i)
     {
         bool ruleTypeSet = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "ruleType" ));
@@ -132,6 +207,9 @@ void loadRuleConfig( indiRuleMaps & maps,              ///< [out] contains the r
 
         std::string message;
         config.configUnused(message, mx::app::iniFile::makeKey(sections[i], "message" ));
+        stripQuotesWS(message); //strips "" and any leading/trailing whitespace
+
+
 
         std::string compstr="Eq";
         config.configUnused(compstr, mx::app::iniFile::makeKey(sections[i], "comp" ));

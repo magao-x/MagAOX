@@ -32,7 +32,7 @@
 
 // Mark: -UEI data struct
 
-/// Typedef Enum #dataType 
+/// Typedef Enum #dataType
 
 /**
  * UEI datatype
@@ -54,12 +54,12 @@ typedef struct {
     uint8_t command; ///< Command code.
     uint8_t option; ///< option code & UEI operation.
     uint8_t specifier; ///< Entity index & response specifier.
-    union { 
+    union {
         uint8_t byteVal; ///< Char value union member.
         uint16_t shortVal; ///< Short value union member.
         uint32_t intVal; ///< Int value union member.
     } v;
-    
+
     dataType type; ///< Union dataType.
 } uei;
 
@@ -83,7 +83,7 @@ extern "C" {
      * \param v Short value to store.
      */
     void aUEI_StoreShort(uint8_t* p, uint16_t v);
-    
+
     /// Retreive an Int from a UEI.
 
     /**
@@ -91,16 +91,16 @@ extern "C" {
      * \returns uint32_t The integer value.
      */
     aLIBEXPORT uint32_t aUEI_RetrieveInt(const uint8_t* p);
-    
+
     /// Store an Int in a UEI.
 
-    /** 
+    /**
      * \param p Pointer to the IntVal of a UEI.
      * \param v The value to store.
      */
     void aUEI_StoreInt(uint8_t* p, uint32_t v);
-    
-    
+
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

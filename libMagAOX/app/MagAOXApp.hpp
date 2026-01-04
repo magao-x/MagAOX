@@ -82,17 +82,24 @@ namespace XWCTEST_NAMESPACE
  * Through various optional CRTP base classes, many different standard functionalities can be included.
  * The following figure illustrates the facilities provided by a typical app.
  *
- * \image html xwcapp.png "Block diagram of a typical XWCApp. Note that ImageStreamIO (ISIO) is not included by default,
- but there are several ways to interface with 'image streams' provided in XWCTk.  Many different hardware device
- interfaces are similarly provided."
+ * \image html xwcapp.png "Block diagram of a typical XWCApp. Note that ImageStreamIO (ISIO) is not included by default, but there are several ways to interface with 'image streams' provided in XWCTk.  Many different hardware device interfaces are similarly provided."
  *
  * The following figure illustrates the logic of the XWCApp finite state machine (FSM).
  *
  * \image html xwcapp_fsm.png "The XWCApp FSM. The blue sequence highlights the normal 'appLogic' loop."
-
  *
  *
+ * Many XWCApps can be connected across many computers.  Inter-process communication can be conducted with
+ * INDI or ISIO.
  *
+ * \image html xwcapps_connections.png "Connecting XWCApps across several machines, controlling various hardware" width=1200
+ *
+ * XWCApps are designed to be part of control loops. In the following diagram a camera at the focal plane of a coronagraph
+ * is used as the wavefront sensor.  An XWCApp reads out the images and publishes them to shared memory with ISIO.
+ * Loop process, which may themselves be XWCApps or, e.g., CACAO processes, perform loop calculations.
+ * Finally, the deformable mirror controller sends the resultant command to the hardware device.
+ *
+ * \image html xwcapp_loops.png "XWCApps controlling hardware in a control loop." width=1200
 */
 
 /// The base-class for XWCTk applications.
@@ -1456,7 +1463,9 @@ void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
                 "",
                 false,
                 "bool",
-                "Validate the configuration.  App will exit after loading the configuration, but before entering the event loop. Errors from configuratin processing will be shown. Always safe to run." );
+                "Validate the configuration.  App will exit after loading the configuration, but before "
+                "entering the event loop. Errors from configuration processing will be shown. "
+                "Always safe to run." );
 
     // App stuff
     config.add( "loopPause",

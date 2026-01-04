@@ -1,5 +1,5 @@
 
-allall: all 
+allall: all
 
 OTHER_HEADERS = linux.c usbtemp.h platform.h
 OTHER_OBJS=usbtemp.o

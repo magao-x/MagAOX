@@ -12,7 +12,7 @@ include $(SELF_DIR)/../../Make/common.mk
 
 CFLAGS=-fPIC
 all: liblilxml.a
-	$(CC) -shared -Wl,-soname,liblilxml.so -o liblilxml.so lilxml*.o -rdynamic 
+	$(CC) -shared -Wl,-soname,liblilxml.so -o liblilxml.so lilxml*.o -rdynamic
 
 install: all
 	sudo install -d $(LIB_PATH)

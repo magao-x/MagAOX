@@ -1075,7 +1075,8 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
             }
             if( ipRecv.find( "0002" ) )
             {
-                m_focus = ipRecv["0002"].get<double>();
+                //round to avoid INDI f.p. precision probs.
+                m_focus = std::round(ipRecv["0002"].get<double>() * 1e5)/1e5;
             }
         }
     }

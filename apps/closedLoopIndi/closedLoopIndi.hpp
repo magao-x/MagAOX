@@ -30,7 +30,7 @@ namespace app
 {
 
 /// The MagAO-X application to do closed-loop control using INDI properties
-/** 
+/**
   * \ingroup closedLoopIndi
   */
 class closedLoopIndi : public MagAOXApp<true>
@@ -43,7 +43,7 @@ protected:
     /** \name Configurable Parameters
       *@{
       */
-    
+
     std::string m_inputDevice;                           ///< The device with the input disturbances and frame counter.
     std::string m_inputProperty;                         ///< The property with the input disturbances and frame counter.
     std::vector<std::string> m_inputElements {"x", "y"}; ///< The elements with the input disturbances.  Must be two, defaults are "x" and "y".
@@ -65,72 +65,72 @@ protected:
     mx::improc::eigenImage<float> m_intMat; ///< The interaction matrix.  Default is [1 0][0 1].
 
     std::vector<float> m_defaultGains; ///< The default gains, per-axis
-    
+
     std::string m_upstreamDevice;                  ///< The upstream device to monitor to automatically open this loop if it's loop opens
     std::string m_upstreamProperty {"loop_state"}; ///< The name of the toggle switch to monitor
-    
+
     ///@}
-    
+
     int64_t m_counter = -1; ///< The latest value of the loop counter
     mx::improc::eigenImage<float> m_measurements; ///< The latest value of the measurements
     float m_delta0 {0};
     float m_delta1 {0};
 
     mx::improc::eigenImage<float> m_commands; ///< The latest commands
-    
+
     float m_ggain {0}; ///< The global gain
-    
+
     std::vector<float> m_gains; ///< The axis gains
-    
+
     bool m_loopClosed {false}; ///< Whether or not the loop is closed
 
 public:
     /// Default c'tor.
     closedLoopIndi();
- 
+
     /// D'tor, declared and defined for noexcept.
     ~closedLoopIndi() noexcept
     {}
- 
+
     virtual void setupConfig();
- 
+
     /// Implementation of loadConfig logic, separated for testing.
     /** This is called by loadConfig().
       */
     int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
- 
+
     virtual void loadConfig();
- 
+
     /// Startup function
     /**
       *
       */
     virtual int appStartup();
- 
+
     /// Implementation of the FSM for closedLoopIndi.
-    /** 
+    /**
       * \returns 0 on no critical error
       * \returns -1 on an error requiring shutdown
       */
     virtual int appLogic();
- 
+
     /// Shutdown the app.
-    /** 
+    /**
       *
       */
     virtual int appShutdown();
- 
+
     /// Change the loop state
     int toggleLoop( bool onoff );
 
     /// Update the loop with a new command
     int updateLoop();
- 
+
     /// Send commands to the control devices
     int sendCommands(std::vector<float> & commands);
-    
-    //INDI 
- 
+
+    //INDI
+
     pcf::IndiProperty m_indiP_deltas;
 
     pcf::IndiProperty m_indiP_reference0;
@@ -144,10 +144,10 @@ public:
 
     pcf::IndiProperty m_indiP_ggain;
     INDI_NEWCALLBACK_DECL(closedLoopIndi, m_indiP_ggain);
-    
+
     pcf::IndiProperty m_indiP_ctrlEnabled;
     INDI_NEWCALLBACK_DECL(closedLoopIndi, m_indiP_ctrlEnabled);
- 
+
     pcf::IndiProperty m_indiP_counterReset;
     INDI_NEWCALLBACK_DECL(closedLoopIndi, m_indiP_counterReset);
 
@@ -163,7 +163,7 @@ public:
     pcf::IndiProperty m_indiP_ctrl1; ///< The INDI property used for control of axis 1
     INDI_SETCALLBACK_DECL(closedLoopIndi, m_indiP_ctrl1);
 
-    pcf::IndiProperty m_indiP_upstream; ///< Property used to report the upstream loop state    
+    pcf::IndiProperty m_indiP_upstream; ///< Property used to report the upstream loop state
     INDI_SETCALLBACK_DECL(closedLoopIndi, m_indiP_upstream);
 };
 
@@ -212,13 +212,13 @@ int closedLoopIndi::loadConfigImpl( mx::app::appConfigurator & _config )
         m_shutdown = 1;
         return log<software_error, -1>({__FILE__, __LINE__, "no input device specified"});
     }
-    
+
     if(m_inputProperty == "")
     {
         m_shutdown = 1;
         return log<software_error, -1>({__FILE__, __LINE__, "no input property specified"});
     }
-    
+
     if(m_inputElements.size() != 2)
     {
         m_shutdown = 1;
@@ -252,31 +252,31 @@ int closedLoopIndi::loadConfigImpl( mx::app::appConfigurator & _config )
         m_shutdown = 1;
         return log<software_error, -1>({__FILE__, __LINE__, "must specify two ctrl.devices"});
     }
-    
+
     if(m_ctrlProperties.size() != 2)
     {
         m_shutdown = 1;
         return log<software_error, -1>({__FILE__, __LINE__, "must specify two ctrl.properties"});
     }
-    
+
     if(m_ctrlTargets.size() != 2)
     {
         m_shutdown = 1;
         return log<software_error, -1>({__FILE__, __LINE__, "must specify two ctrl.targets"});
     }
-    
+
     if(m_ctrlCurrents.size() != 2)
     {
         m_shutdown = 1;
         return log<software_error, -1>({__FILE__, __LINE__, "must specify two ctrl.currents"});
     }
-    
+
     if(m_ctrlTargets.size() != 2)
     {
         m_shutdown = 1;
         return log<software_error, -1>({__FILE__, __LINE__, "must specify two ctrl.targets"});
     }
- 
+
     float im00 = 1;
     float im01 = 0;
     float im10 = 0;
@@ -292,9 +292,9 @@ int closedLoopIndi::loadConfigImpl( mx::app::appConfigurator & _config )
     m_intMat(0,1) = im01;
     m_intMat(1,0) = im10;
     m_intMat(1,1) = im11;
-    
+
     _config(m_ggain, "loop.gain");
-    
+
     _config(m_defaultGains, "loop.gains");
     _config(m_upstreamDevice, "loop.upstream");
     _config(m_upstreamProperty, "loop.upstreamProperty");
@@ -310,7 +310,7 @@ void closedLoopIndi::loadConfig()
 int closedLoopIndi::appStartup()
 {
     REG_INDI_SETPROP(m_indiP_inputs, m_inputDevice, m_inputProperty);
- 
+
     CREATE_REG_INDI_RO_NUMBER( m_indiP_deltas, "deltas", "Deltas", "Deltas");
     m_indiP_deltas.add(pcf::IndiElement("delta0"));
     m_indiP_deltas["delta0"] = 0;
@@ -324,7 +324,7 @@ int closedLoopIndi::appStartup()
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_reference1, "reference1", -1e15, 1e15, 1, "%g", "reference1", "references");
     m_indiP_reference1["current"] = m_references(1,0);
     m_indiP_reference1["target"] = m_references(1,0);
- 
+
     if(m_ctrlTargets.size() != m_defaultGains.size())
     {
         if(m_defaultGains.size()==1)
@@ -337,15 +337,15 @@ int closedLoopIndi::appStartup()
            return log<software_error, -1>({__FILE__, __LINE__, "ctrl.Targets and loop.gains are not the same size"});
         }
     }
- 
+
     m_gains.resize(m_defaultGains.size());
     for(size_t n=0; n < m_defaultGains.size(); ++n) m_gains[n] = m_defaultGains[n];
- 
+
     CREATE_REG_INDI_NEW_NUMBERU( m_indiP_ggain, "loop_gain", 0, 1, 0, "%0.2f", "gain", "loop");
     m_indiP_ggain["current"] = m_ggain;
-    m_indiP_ggain["target"] = m_ggain;  
-    
- 
+    m_indiP_ggain["target"] = m_ggain;
+
+
     CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_ctrlEnabled, "loop_state");
 
     CREATE_REG_INDI_NEW_REQUESTSWITCH( m_indiP_counterReset, "counter_reset");
@@ -354,7 +354,7 @@ int closedLoopIndi::appStartup()
     m_measurements.setZero();
 
     m_currents.resize(m_ctrlDevices.size(), -1e15);
- 
+
     REG_INDI_SETPROP(m_indiP_ctrl0_fsm, m_ctrlDevices[0], "fsm");
 
     REG_INDI_SETPROP(m_indiP_ctrl0, m_ctrlDevices[0], m_ctrlProperties[0]);
@@ -365,7 +365,7 @@ int closedLoopIndi::appStartup()
     }
 
     REG_INDI_SETPROP(m_indiP_ctrl1, m_ctrlDevices[1], m_ctrlProperties[1]);
- 
+
     m_commands.resize(2, 2);
     m_commands.setZero();
 
@@ -388,7 +388,7 @@ int closedLoopIndi::appLogic()
     {
         state(stateCodes::READY);
     }
-   
+
     return 0;
 }
 
@@ -400,7 +400,7 @@ int closedLoopIndi::appShutdown()
 int closedLoopIndi::toggleLoop(bool onoff)
 {
    if(!m_loopClosed && onoff) //not enabled so change
-   {      
+   {
       m_loopClosed = true;
       log<loop_closed>();
       updateSwitchIfChanged(m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::On, INDI_OK);
@@ -412,7 +412,7 @@ int closedLoopIndi::toggleLoop(bool onoff)
       m_loopClosed = false;
       log<loop_open>();
       updateSwitchIfChanged(m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::Off, INDI_IDLE);
-   
+
       return 0;
    }
 
@@ -464,14 +464,14 @@ int closedLoopIndi::updateLoop()
     {
         commands[cc] = m_currents[cc] - m_ggain*m_gains[cc]*m_commands(cc,0);
     }
-  
+
     //And send commands.
     int rv;
     if(m_loopClosed)
     {
         rv = sendCommands(commands);
     }
-    else 
+    else
     {
         rv = 0;
     }
@@ -486,55 +486,55 @@ int closedLoopIndi::sendCommands(std::vector<float> & commands)
     for(size_t n=0; n < m_ctrlDevices.size(); ++n)
     {
        pcf::IndiProperty ip(pcf::IndiProperty::Number);
-    
+
        ip.setDevice(m_ctrlDevices[n]);
        ip.setName(m_ctrlProperties[n]);
        ip.add(pcf::IndiElement(m_ctrlTargets[n]));
        ip[m_ctrlTargets[n]] = commands[n];
-    
+
        sendNewProperty(ip);
     }
- 
+
     return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(closedLoopIndi, m_indiP_reference0)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(ipRecv, m_indiP_reference0);
-   
+
     float target;
-    
+
     if( indiTargetUpdate( m_indiP_reference0, target, ipRecv, true) < 0)
     {
        return log<software_error, -1>({__FILE__,__LINE__});
     }
-    
+
     m_references(0,0) = target;
-    
+
     updateIfChanged(m_indiP_reference0, std::vector<std::string>({"current", "target"}), std::vector<float>({m_references(0,0), m_references(0,0)}));
 
     log<text_log>("set reference0 to " + std::to_string(m_references(0,0)), logPrio::LOG_NOTICE);
-    
+
     return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(closedLoopIndi, m_indiP_reference1)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(ipRecv, m_indiP_reference1);
-   
+
     float target;
-    
+
     if( indiTargetUpdate( m_indiP_reference1, target, ipRecv, true) < 0)
     {
        return log<software_error, -1>({__FILE__,__LINE__});
     }
-    
+
     m_references(1,0) = target;
-    
+
     updateIfChanged(m_indiP_reference1, std::vector<std::string>({"current", "target"}), std::vector<float>({m_references(1,0), m_references(1,0)}));
 
     log<text_log>("set reference1 to " + std::to_string(m_references(1,0)), logPrio::LOG_NOTICE);
-    
+
     return 0;
 }
 
@@ -563,22 +563,22 @@ INDI_SETCALLBACK_DEFN(closedLoopIndi, m_indiP_inputs)(const pcf::IndiProperty &i
 INDI_NEWCALLBACK_DEFN(closedLoopIndi, m_indiP_ggain)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(ipRecv, m_indiP_ggain);
-   
+
     float target;
-    
+
     if( indiTargetUpdate( m_indiP_ggain, target, ipRecv, true) < 0)
     {
        log<software_error>({__FILE__,__LINE__});
        return -1;
     }
-    
+
     m_ggain = target;
-    
+
     updateIfChanged(m_indiP_ggain, "current", m_ggain);
     updateIfChanged(m_indiP_ggain, "target", m_ggain);
-    
+
     log<text_log>("set global gain to " + std::to_string(m_ggain), logPrio::LOG_NOTICE);
-    
+
     return 0;
 }
 
@@ -591,13 +591,13 @@ INDI_NEWCALLBACK_DEFN(closedLoopIndi, m_indiP_ctrlEnabled)(const pcf::IndiProper
     {
        return toggleLoop(true);
     }
- 
+
     //switch is toggle to off
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
     {
        return toggleLoop(false);
     }
-    
+
     return 0;
 }
 
@@ -610,8 +610,8 @@ INDI_NEWCALLBACK_DEFN(closedLoopIndi, m_indiP_counterReset)(const pcf::IndiPrope
     {
        m_counter = -1;
     }
- 
-    
+
+
     return 0;
 }
 
@@ -668,7 +668,7 @@ INDI_SETCALLBACK_DEFN(closedLoopIndi, m_indiP_upstream)(const pcf::IndiProperty 
     INDI_VALIDATE_CALLBACK_PROPS(ipRecv, m_indiP_upstream);
 
     if(!ipRecv.find("toggle")) return 0;
- 
+
     if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
     {
        std::cerr << "upstream on\n";
@@ -679,7 +679,7 @@ INDI_SETCALLBACK_DEFN(closedLoopIndi, m_indiP_upstream)(const pcf::IndiProperty 
        std::cerr << "upstream off\n";
        return toggleLoop(false);
     }
- 
+
     return 0;
 }
 

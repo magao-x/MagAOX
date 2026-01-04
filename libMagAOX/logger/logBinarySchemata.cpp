@@ -3,7 +3,7 @@
   * \author Joseph D. Long (jdl@fastmail.com)
   *
   * \ingroup logger_files
-  * 
+  *
   */
 
 

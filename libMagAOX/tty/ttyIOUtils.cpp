@@ -1,7 +1,7 @@
 /** \file ttyIOUtils.cpp
   * \brief Utilities for i/o on a file descriptor pointing to a tty device.
   * \author Jared R. Males (jaredmales@gmail.com)
-  * 
+  *
   * \ingroup tty_files
   */
 
@@ -27,8 +27,8 @@ int telnetCRLF( std::string & telnetStr,     // [out] the string with \\r an \\n
                 const std::string & inputStr // [in] the string to be converted
               )
 {
-   telnetStr.resize(inputStr.size()); 
-      
+   telnetStr.resize(inputStr.size());
+
    size_t N = inputStr.size();
    size_t j = 0;
    for(size_t i=0;i<N; ++i)
@@ -65,7 +65,7 @@ int telnetCRLF( std::string & telnetStr,     // [out] the string with \\r an \\n
       }
       ++j;
    }
-   
+
    return 0;
 }
 
@@ -190,13 +190,13 @@ int ttyReadRaw( std::vector<unsigned char> & vecRead, // [out] The buffer in whi
    if( rv < 0 ) return TTY_E_ERRORONREADPOLL;
 
    readBytes = 0;
-   
+
    rv = read(fd, vecRead.data(), vecRead.size());
    if( rv < 0 ) return TTY_E_ERRORONREAD;
 
 
    readBytes = rv;
-   
+
 
    return TTY_E_NOERROR;
 
@@ -240,7 +240,7 @@ int ttyRead( std::string & strRead,   // [out] The string in which to store the 
    strRead.append( buffRead, rv);
 
    int totBytes = rv;
-   
+
    while( totBytes < bytes )
    {
       timeoutCurrent = timeoutRead - (mx::sys::get_curr_time()-t0)*1000;
@@ -256,7 +256,7 @@ int ttyRead( std::string & strRead,   // [out] The string in which to store the 
 
       strRead.append( buffRead, rv);
       totBytes += rv;
-      
+
       #ifdef TTY_DEBUG
       std::cerr << "ttyRead: read " << rv << " bytes. buffRead=" << buffRead << "\n";
       #endif
@@ -361,7 +361,7 @@ int ttyWriteRead( std::string & strRead,        // [out] The string in which to 
       struct pollfd pfd;
       pfd.fd = fd;
       pfd.events = POLLIN;
-   
+
       size_t totrv = 0;
       char buffRead[TTY_BUFFSIZE];
 

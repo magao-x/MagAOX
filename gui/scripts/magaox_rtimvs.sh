@@ -1,8 +1,8 @@
 #!/bin/bash
 
-dmdisp.sh woofer 
-dmdisp.sh tweeter 
-dmdisp.sh ncpc 
+dmdisp.sh woofer
+dmdisp.sh tweeter
+dmdisp.sh ncpc
 
 sleep 2
 

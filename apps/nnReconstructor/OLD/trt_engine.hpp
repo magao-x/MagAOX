@@ -99,7 +99,7 @@ bool TensorrtEngine::build(std::string dataDirs, std::string onnxFileName, std::
     }
 
     auto parser = std::unique_ptr<nvonnxparser::IParser>(nvonnxparser::createParser(*network, gLogger));
-    if (!parser) 
+    if (!parser)
     {
         std::cerr << "Couldn't createParser" << std::endl;
         return false;
@@ -120,7 +120,7 @@ bool TensorrtEngine::build(std::string dataDirs, std::string onnxFileName, std::
         return false;
     }
     config->setProfileStream(*profileStream);
-	
+
     // Register a single optimization profile
     nvinfer1::IOptimizationProfile *optProfile = builder->createOptimizationProfile();
     const auto input = network->getInput(0);
@@ -128,8 +128,8 @@ bool TensorrtEngine::build(std::string dataDirs, std::string onnxFileName, std::
 
     const auto inputDims = input->getDimensions();
     const auto outputDims = output->getDimensions();
-	
-	
+
+
     inputName = input->getName();
     outputName = output->getName();
 
@@ -208,7 +208,7 @@ bool TensorrtEngine::load(const std::string enginePath)
     std::cerr << engineBuffer.data() << std::endl;
     std::cerr << engineBuffer.size() << std::endl;
 	mEngine = std::shared_ptr<nvinfer1::ICudaEngine>(mRuntime->deserializeCudaEngine(engineBuffer.data(), engineBuffer.size()));
-	
+
 	int numIOTensors = mEngine->getNbIOTensors();
 	std::cout << "Number of IO Tensors: " << numIOTensors << std::endl;
 
@@ -278,13 +278,13 @@ bool TensorrtEngine::infer(float* inputData)
 	for (int i = 0; i < (inputC * inputH * inputW); i++){
         test += inputData[i] / 10000.0;
     }
-	
+
 	float test2 = 0;
 	for (int i = 0; i < (inputC * inputH * inputW); i++){
         test2 += hostDataBuffer[i] / 10000.0;
     }
 	std::cout << "test: " << test << " " << "test2: "<< test2 << std::endl;
-	
+
 	// Memcpy from host input buffers to device input buffers
     buffers->copyInputToDevice();
 

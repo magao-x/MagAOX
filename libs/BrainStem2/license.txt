@@ -29,7 +29,7 @@ Lib USB
 
 This binary distribution uses libUSB v1.0 (https://libusb.info). LibUSB is licensed under GNU Lesser General Public License (LGPL) v2.1. Acroname will provide, at request (support@acroname.com), object code sufficient to recompile the Acroname BrainStem binary distribution with an updated interface compatible copy of the libUSB library.
 
-Lib USB is licensed under LGPL v2.1 
+Lib USB is licensed under LGPL v2.1
 =========================================================================================
 
 Full license text included at the end of this document (Appendix 1) and at https://www.gnu.org/licenses/lgpl-2.1.html

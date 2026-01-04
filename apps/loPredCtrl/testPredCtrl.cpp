@@ -1,4 +1,4 @@
-#define EIGEN_DONT_PARALLELIZE 
+#define EIGEN_DONT_PARALLELIZE
 #include "testPredCtrl.hpp"
 #include "ar_controller.hpp"
 
@@ -30,7 +30,38 @@ double standard_dev(double data[], int size, int num_skip=0){
     return std::sqrt(variance(data, size, num_skip));
 }
 
+
+float variance(float data[], int size, int num_skip=0){
+    float mean = 0.0;
+    for(int i=num_skip; i<size; i++){
+        mean += data[i];
+    }
+    mean /= (size - num_skip);
+    std::cout << "Mean: " << mean << std::endl;
+
+    float var = 0.0;
+    for(int i=num_skip; i<size; i++){
+        var += (data[i] - mean) * (data[i] - mean);
+    }
+
+    return var / (size - num_skip);
+}
+
+float standard_dev(float data[], int size, int num_skip=0){
+    return std::sqrt(variance(data, size, num_skip));
+}
+
 void write_to_file(std::string filename, double data[], int size){
+    std::ofstream out(filename);
+    for(int i=0; i<size; i++){
+        out << data[i];
+        if(i < (size - 1))
+            out << ',';
+    }
+}
+
+
+void write_to_file(std::string filename, float data[], int size){
     std::ofstream out(filename);
     for(int i=0; i<size; i++){
         out << data[i];
@@ -54,14 +85,14 @@ int main(int argc, char **argv){
     for(int i=0; i<num_steps; i++){
         x[i] = std::sin(2 * 3.14 * 20.0 * i / 1000.0);
     }
-    
+
     DDSPC::realT gain = 0.5;
     DDSPC::realT gamma = 1.001;
     DDSPC::realT initial_regularization = 100.0;
     int num_history = 50;
     int num_future = 10;
     int num_actuators = 1;
-    
+
     DDSPC::Matrix measurement;
     measurement.resize(num_actuators,1);
 
@@ -81,12 +112,12 @@ int main(int argc, char **argv){
             controller.set_regularization(1.0);
         if(i == 500)
             controller.set_regularization(0.1);
-        
+
         if(i < 500){
             exploration_noise(0,0) = 0.1 * distribution(generator);
         }else{
             exploration_noise(0,0) = 0.0;
-        }            
+        }
 
         err[i] = x[i] + signal[i];
         signal[i+1] = signal[i] - gain * err[i] + exploration_noise(0, 0);
@@ -100,7 +131,7 @@ int main(int argc, char **argv){
         command_calc += std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
 
         signal_pc[i + 1] = signal_pc[i] + new_command(0,0);
-        
+
         if((i+1) > (num_future + num_history)){
             begin = std::chrono::steady_clock::now();
             controller.update_system();
@@ -113,13 +144,13 @@ int main(int argc, char **argv){
             update_controller += std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
         }
     }
-    
+
     std::cout << command_calc / num_steps / 1000.0 << "  " << update_system / num_steps / 1000.0 << "  " << update_controller / num_steps / 1000.0 << std::endl;
 
     std::cout<< standard_dev(x, num_steps, 500) << std::endl;
     std::cout<< standard_dev(err, num_steps, 500) << std::endl;
     std::cout<< standard_dev(err_pc, num_steps, 500) << std::endl;
-    
+
     write_to_file("x.csv", x, num_steps);
     write_to_file("err.csv", err, num_steps);
     write_to_file("err_pc.csv", err_pc, num_steps);

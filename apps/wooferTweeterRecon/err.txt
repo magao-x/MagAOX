@@ -1,0 +1,17 @@
+In file included from wooferTweeterRecon.cpp:7:
+wooferTweeterRecon.hpp: In member function ‘int MagAOX::app::wooferTweeterRecon::processImage(void*, const MagAOX::app::wooferCommandShmimT&)’:
+wooferTweeterRecon.hpp:373:45: warning: unused parameter ‘curr_src’ [-Wunused-parameter]
+  373 | int wooferTweeterRecon::processImage( void *curr_src, const wooferCommandShmimT & )
+      |                                       ~~~~~~^~~~~~~~
+wooferTweeterRecon.hpp: In member function ‘int MagAOX::app::wooferTweeterRecon::processImage(void*, const MagAOX::app::tweeterModesShmimT&)’:
+wooferTweeterRecon.hpp:384:45: warning: unused parameter ‘curr_src’ [-Wunused-parameter]
+  384 | int wooferTweeterRecon::processImage( void *curr_src, const tweeterModesShmimT & )
+      |                                       ~~~~~~^~~~~~~~
+wooferTweeterRecon.hpp: In member function ‘int MagAOX::app::wooferTweeterRecon::processImage(void*, const MagAOX::app::tweeterMaskShmimT&)’:
+wooferTweeterRecon.hpp:395:45: warning: unused parameter ‘curr_src’ [-Wunused-parameter]
+  395 | int wooferTweeterRecon::processImage( void *curr_src, const tweeterMaskShmimT & )
+      |                                       ~~~~~~^~~~~~~~
+wooferTweeterRecon.hpp: In member function ‘int MagAOX::app::wooferTweeterRecon::processImage(void*, const MagAOX::app::tweeterCommandShmimT&)’:
+wooferTweeterRecon.hpp:406:45: warning: unused parameter ‘curr_src’ [-Wunused-parameter]
+  406 | int wooferTweeterRecon::processImage( void *curr_src, const tweeterCommandShmimT & )
+      |                                       ~~~~~~^~~~~~~~

@@ -4,9 +4,9 @@
 #include <QTextStream>
 
 #include "stage.hpp"
-   
+
 #include "multiIndiManager.hpp"
-   
+
 int main(int argc, char *argv[])
 {
    if(argc < 2)
@@ -14,9 +14,9 @@ int main(int argc, char *argv[])
       std::cerr << "Must specify stage INDI name.\n";
       return -1;
    }
-   
+
    std::string stageName = argv[1];
-   
+
    QApplication app(argc, argv);
 
    // set stylesheet
@@ -30,11 +30,11 @@ int main(int argc, char *argv[])
    xqt::stage stage(stageName);
    mgr.addSubscriber(&stage);
    mgr.activate();
-   
+
    stage.show();
-   
+
    int rv = app.exec();
-   
+
    return rv;
 }
-   
+

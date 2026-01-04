@@ -294,42 +294,45 @@ struct telem_blockgains : public flatbuffer_log
                                     logMeta::valTypes::Vector_Float,
                                     logMeta::metaTypes::State,
                                     reinterpret_cast<void *>( &gains ),
-                                    false } );
+                                    true } );
         else if( member == "gains_constant" )
             return logMetaDetail( { "BLOCK GAINS CONSTANT",
                                     "whether or not all modes have same gain in block",
                                     logMeta::valTypes::Vector_Bool,
                                     logMeta::metaTypes::State,
                                     reinterpret_cast<void *>( &gains_constant ),
-                                    false } );
+                                    true } );
         else if( member == "mcs" )
             return logMetaDetail( { "BLOCK MULT COEFS",
                                     "mode block mult. coefs.",
                                     logMeta::valTypes::Vector_Float,
                                     logMeta::metaTypes::State,
                                     reinterpret_cast<void *>( &mcs ),
-                                    false } );
+                                    true } );
+
         else if( member == "mcs_constant" )
             return logMetaDetail( { "BLOCK MULT COEFS CONSTANT",
                                     "whether or not all modes have same mult. coefs. in block",
                                     logMeta::valTypes::Vector_Bool,
                                     logMeta::metaTypes::State,
                                     reinterpret_cast<void *>( &mcs_constant ),
-                                    false } );
+                                    true } );
+
         else if( member == "lims" )
             return logMetaDetail( { "BLOCK LIMITS",
                                     "mode block limits",
                                     logMeta::valTypes::Vector_Float,
                                     logMeta::metaTypes::State,
                                     reinterpret_cast<void *>( &lims ),
-                                    false } );
+                                    true } );
+
         else if( member == "lims_constant" )
             return logMetaDetail( { "BLOCK LIMITS CONSTANT",
                                     "whether or not all modes have same limit in block",
                                     logMeta::valTypes::Vector_Bool,
                                     logMeta::metaTypes::State,
                                     reinterpret_cast<void *>( &lims_constant ),
-                                    false } );
+                                    true } );
         else
         {
             std::cerr << "No member " << member << " in telem_blockgains\n";

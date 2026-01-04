@@ -180,7 +180,7 @@ setOperand (char *name, double valu)
 }
 
 /* return 0 if all operands are set, else -1 */
-int 
+int
 allOperandsSet ()
 {
 	int i;
@@ -425,7 +425,7 @@ static int
 compile (int prec)
 {
 	int expect_binop = 0;	/* set after we have seen any operand.
-				 * used by SUB so it can tell if it really 
+				 * used by SUB so it can tell if it really
 				 * should be taken to be a NEG instead.
 				 */
 	int tok = next_token ();
@@ -571,7 +571,7 @@ compile (int prec)
 static int
 execute(double *result)
 {
-	int instr; 
+	int instr;
 
 	do {
 	    instr = *pc++;

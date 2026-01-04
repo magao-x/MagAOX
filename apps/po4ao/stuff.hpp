@@ -10,18 +10,18 @@ class CircularBuffer {
 
     public:
         CircularBuffer(size_t _num_rows, size_t _num_cols, size_t _historySize)
-            : num_rows(_num_rows), num_cols(_num_cols), 
-              historySize(_historySize), 
-              size(_num_rows * _num_cols), 
+            : num_rows(_num_rows), num_cols(_num_cols),
+              historySize(_historySize),
+              size(_num_rows * _num_cols),
               head(0), tail(0), is_full(false) {
-            
+
             buffer = new float[size * historySize];
         }
 
         ~CircularBuffer(){
             delete buffer;
         }
-    
+
         // Adds an image (array of floats) to the buffer (overwrites if full)
         void add(float* image) {
             memcpy(buffer[(head % historySize) * size], image, sizeof(float) * size);
@@ -52,7 +52,7 @@ class CircularBuffer {
         void reset_head(){
             head = 0;
         }
-    
+
         // Returns the n-th image in the buffer in the order of addition
         std::vector<float> getItem(size_t n) const {
             std::cout << "HOI" << std::endl;
@@ -65,6 +65,6 @@ class CircularBuffer {
         std::vector<std::vector<float>> getBuffer() const {
             return buffer;
         }
-    
+
 
 };

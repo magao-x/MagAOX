@@ -4,7 +4,7 @@
   *
   * This code is taken from the LBTAO/MagAO supervisor source code, modifications
   * mainly for c++.
-  * 
+  *
   * \ingroup tty_files
   */
 
@@ -21,44 +21,44 @@ namespace MagAOX
 namespace tty
 {
 
-/// Manage a connectio to a serial device over a network 
+/// Manage a connectio to a serial device over a network
 /**
   *
   * \todo document this, including methods
   * \todo add errors to ttyErrors
-  */ 
+  */
 struct netSerial
 {
-   
+
 protected:
    int m_sockfd {-1};
-   
+
 public:
 
-   int serialInit( const char *address, 
+   int serialInit( const char *address,
                    int port
                  );
-   
+
    int serialClose(void);
-   
-   int serialOut( const char *buf, 
+
+   int serialOut( const char *buf,
                   int len
                 );
-   
-   int serialIn( char *buf, 
-                 int len, 
+
+   int serialIn( char *buf,
+                 int len,
                  int timeout
                );
-   
-   int serialInString( char *buf, 
-                       int len, 
-                       int timeout, 
+
+   int serialInString( char *buf,
+                       int len,
+                       int timeout,
                        char terminator
                      );
-   
-   int serialInString2( char *buf, 
-                        int len, 
-                        int timeout, 
+
+   int serialInString2( char *buf,
+                        int len,
+                        int timeout,
                         char *terminator
                       );
 

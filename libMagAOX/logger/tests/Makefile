@@ -78,6 +78,7 @@ do_entropy_test: entropy_test
 clean:
 	$(AT)$(RM) -R "./types/generated/" "./generated/" ./do_tests Schemata_test catch2_tests
 	$(AT)$(RM) -R "./gen_entropy_tests/" generated_entropy_test_e1_n2
+	$(AT)$(RM) -R "./generated_tests/"
 
 really_clean: clean
 	$(AT)$(RM) -R "./generated_tests/" "./gen_entropy_tests/" __pycache__

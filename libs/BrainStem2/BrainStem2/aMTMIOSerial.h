@@ -115,12 +115,12 @@ public:
         app[3].init(this, 3);
 
         i2c[0].init(this, 0);
-        
+
         uart[0].init(this, 0);
         uart[1].init(this, 1);
         uart[2].init(this, 2);
         uart[3].init(this, 3);
-        
+
         pointer[0].init(this, 0);
         pointer[1].init(this, 1);
         pointer[2].init(this, 2);

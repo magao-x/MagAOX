@@ -1,15 +1,22 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
 
 [project]
-name = "corAlign"
+name = "xapp-corAlign"
 description = "Python INDI device to align the coronagraph focal plane masks."
 version = "2024.01.12"
-
+dependencies = [
+  "xconf",
+  "purepyindi2",
+]
 authors = [
   {name = "Sebastiaan Y. Haffert", email = "shaffert@arizona.edu"},
 ]
 
 [project.scripts]
-coralign = "corAlign:corAlign.console_app"
+corAlign = "xapp.corAlign:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["xapp*"]

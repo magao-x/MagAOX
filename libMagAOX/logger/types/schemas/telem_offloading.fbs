@@ -1,0 +1,13 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_offloading_fb
+{
+   num_modes:uint32;
+   num_average:uint32;
+   fps:float;
+}
+
+root_type Telem_offloading_fb;
+

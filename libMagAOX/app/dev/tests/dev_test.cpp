@@ -6,7 +6,6 @@
 #include "../../../../tests/catch2/catch.hpp"
 
 #include "../../MagAOXApp.hpp"
-#include "../dm.hpp"
 #include "../dmPokeWFS.hpp"
 #include "../dssShutter.hpp"
 #include "../edtCamera.hpp"

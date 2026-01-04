@@ -1160,7 +1160,7 @@ driverStderrReaderThread (void *vp)
 	    /* prefix each whole line to our stderr, save extra for next time */
 	    logMessage ("Driver %s: %s", dp->name, buf);	/* includes nl */
 	}
-    
+
 
 	/* for lint */
 	return (NULL);
@@ -1981,7 +1981,10 @@ logDvrMsg (XMLEle *root, char *dev)
                 exit(1);
             }
 	} else
-	    fprintf (stderr, "%s: %s: %s\n", ts, dev, ms);
+    {
+        //In MagAO-X we don't print messages to stderr b/c they end up double-logged
+	    //fprintf (stderr, "%s: %s: %s\n", ts, dev, ms);
+    }
 
 	/* release log file */
 	pthread_mutex_unlock (&log_lock);

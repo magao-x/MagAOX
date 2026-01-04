@@ -50,34 +50,34 @@ extern "C" {
 #endif
 
 
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Create a Mutex.
-    
+
     /**
      * Creates a Mutex element and uses the character array as the name
-     * of the mutex. 
+     * of the mutex.
      * \returns aMutexRef on success or NULL on failure.
      */
     aLIBEXPORT aMutexRef aMutex_Create(const char* name /* can be NULL */);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Mutex Identifier.
-    
+
     /**
      * Gets the character array that represents the mutex' name.
      * \returns A const null terminated character array. This call
      *          does not copy the character array, only presents it for use.
      */
     aLIBEXPORT const char* aMutex_Identifier(aMutexRef mutex);
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Mutex Destroy.
-    
+
     /**
      * Safely destroys a MutexRef, and frees its associated memory.
-     * Free should not be called on a MutexRef directly, and all Mutexs 
+     * Free should not be called on a MutexRef directly, and all Mutexs
      * created with aMutex_Create must use aMutex_Destroy to free associated
      * resources properly.
      *
@@ -87,11 +87,11 @@ extern "C" {
      * \retval aErrParam - If the MutexRef was invalid.
      */
     aLIBEXPORT aErr aMutex_Destroy(aMutexRef* mutex);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Mutex Lock.
-    
+
     /**
      * Blocking attempt to Lock the mutex. The call will not return until,
      * the requesting thread gains control of the mutex, and successfully
@@ -103,10 +103,10 @@ extern "C" {
      * \return aErrDuplicate - If a specific error occured locking the mutex.
      */
     aLIBEXPORT aErr aMutex_Lock(aMutexRef mutex);
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Mutex TryLock.
-    
+
     /**
      * Non Blocking attempt to Lock the mutex. The call will return immediately
      * with aErrBusy if another process or thread owns the lock.
@@ -117,10 +117,10 @@ extern "C" {
      * \retval aErrBusy - If the lock was already in use.
      */
     aLIBEXPORT aErr aMutex_TryLock(aMutexRef mutex);
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Mutex Unlock.
-    
+
     /**
      * Relenquish the lock on the mutex.
      *
@@ -130,7 +130,7 @@ extern "C" {
      * \retval aErrPermission - If the lock is owned by another thread.
      */
     aLIBEXPORT aErr aMutex_Unlock(aMutexRef mutex);
-    
+
 #ifdef __cplusplus
 }
 #endif

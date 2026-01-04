@@ -1,16 +1,16 @@
 /**
  * \file z_common.h
  * \author Eric Dand
- * \version 1.0 
+ * \version 1.0
  * \date 28 November 2014
  * \copyright Apache Software License Version 2.0
  *
  * \brief Defines a few things that all of the serial API has in common.
- * 
+ *
  * This file should not be included directly: only include either za_serial.h
  * or zb_serial.h, which will in turn include this file. The purpose of this
  * file is to avoid code duplication and to enable a user to include both
- * halves of the API in one source file without too many include guards and 
+ * halves of the API in one source file without too many include guards and
  * other preprocessor mess.
  */
 #if !defined(Z_COMMON_H)
@@ -33,34 +33,34 @@ typedef HANDLE z_port;
 typedef int z_port;
 #endif /* if defined(_WIN32) and other OS checks */
 
-/** Defines how long, in milliseconds, za_receive() and zb_receive() should 
- * wait for input before returning without a full message. 
+/** Defines how long, in milliseconds, za_receive() and zb_receive() should
+ * wait for input before returning without a full message.
  *
  * This number acts as an upper bound on how long the receive functions will
  * take: they will return immediately once a full message is received.
  *
  * A note about the read timeout on *NIX operating systems: because of the way
- * the POSIX "termios" functions work, this value will be rounded down to the 
+ * the POSIX "termios" functions work, this value will be rounded down to the
  * nearest tenth of a second (eg. 200ms = 246ms = 0.2s). A value between 0 and
- * 100 will be rounded up to 100 instead of down to 0 to give slightly more 
+ * 100 will be rounded up to 100 instead of down to 0 to give slightly more
  * consistent behaviour between Windows and *NIX systems.
  *
- * Change this value with caution. It is set to two seconds by default, 
- * but a shorter time may be desired if many operations in your program 
- * depend on reading until a timeout. See zb_set_timeout() for more 
+ * Change this value with caution. It is set to two seconds by default,
+ * but a shorter time may be desired if many operations in your program
+ * depend on reading until a timeout. See zb_set_timeout() for more
  * info on how this value affects the behaviour of zb_serial.h.
  */
 #define READ_TIMEOUT 2000
 
 /** \enum z_returns Defines a set of return values in case things go wrong.
  *
- * All errors are negative values in order to not be confused with the 
+ * All errors are negative values in order to not be confused with the
  * 0-or-greater regular return values. This was done so that a user can check
  * whether a return value is < 0 to check for all error codes simultaneously.
  *
  * Remember to check your return values! It's good for you.
  */
-enum z_returns { 
+enum z_returns {
 	/** Everything is OK! */
 	Z_SUCCESS = 0,
 	/** Something went wrong in system code */
@@ -71,7 +71,7 @@ enum z_returns {
 	Z_ERROR_NULL_PARAMETER = -3,
 	/** Tried to set an unsupported baudrate */
 	Z_ERROR_INVALID_BAUDRATE = -4,
-	/** Tried to decode a partial reply, 
+	/** Tried to decode a partial reply,
 	 * or a string that wasn't a reply at all */
 	Z_ERROR_COULD_NOT_DECODE = -5,
 	/** A imeout occurred (added by JRM for MagAO-X) */

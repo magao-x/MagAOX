@@ -438,28 +438,28 @@ int ocam2KCtrl::appStartup()
 
    if(dev::stdCamera<ocam2KCtrl>::appStartup() < 0)
    {
-      return log<software_critical,-1>({__FILE__,__LINE__});
+      return log<software_critical,-1>({""});
    }
 
    if(dev::edtCamera<ocam2KCtrl>::appStartup() < 0)
    {
-      return log<software_critical,-1>({__FILE__,__LINE__});
+      return log<software_critical,-1>({""});
    }
 
    if(dev::frameGrabber<ocam2KCtrl>::appStartup() < 0)
    {
-      return log<software_critical,-1>({__FILE__,__LINE__});
+      return log<software_critical,-1>({""});
    }
 
    if(dev::dssShutter<ocam2KCtrl>::appStartup() < 0)
    {
-      return log<software_critical,-1>({__FILE__,__LINE__});
+      return log<software_critical,-1>({""});
    }
 
    m_temps.setInvalid();
    if(dev::telemeter<ocam2KCtrl>::appStartup() < 0)
    {
-      return log<software_error,-1>({__FILE__,__LINE__});
+      return log<software_error,-1>({""});
    }
 
    return 0;
@@ -475,25 +475,25 @@ int ocam2KCtrl::appLogic()
    //and run stdCamera's appLogic
    if(dev::stdCamera<ocam2KCtrl>::appLogic() < 0)
    {
-      return log<software_error, -1>({__FILE__, __LINE__});
+      return log<software_error, -1>({""});
    }
 
    //and run edtCamera's appLogic
    if(dev::edtCamera<ocam2KCtrl>::appLogic() < 0)
    {
-      return log<software_error, -1>({__FILE__, __LINE__});
+      return log<software_error, -1>({""});
    }
 
    //first run frameGrabber's appLogic to see if the f.g. thread has exited.
    if(dev::frameGrabber<ocam2KCtrl>::appLogic() < 0)
    {
-      return log<software_error, -1>({__FILE__, __LINE__});
+      return log<software_error, -1>({""});
    }
 
    //and run dssShutter's appLogic
    if(dev::dssShutter<ocam2KCtrl>::appLogic() < 0)
    {
-      return log<software_error, -1>({__FILE__, __LINE__});
+      return log<software_error, -1>({""});
    }
 
    if( state() == stateCodes::POWERON) return 0;
@@ -535,7 +535,7 @@ int ocam2KCtrl::appLogic()
             if(setTempSetPt() < 0)
             {
                if(powerState() != 1 || powerStateTarget() != 1) return 0;
-               return log<software_error,0>({__FILE__,__LINE__});
+               return log<software_error,0>({""});
             }
          }
 
@@ -543,14 +543,14 @@ int ocam2KCtrl::appLogic()
          m_synchroSet = false;
          if( setSynchro() != 0 )
          {
-            log<software_error>({__FILE__, __LINE__, "error from setSynchro on CONNECT"});
+            log<software_error>({"error from setSynchro on CONNECT"});
          }
       }
       else
       {
          if(powerState() != 1 || powerStateTarget() != 1) return 0;
          state(stateCodes::ERROR);
-         return log<software_error,0>({__FILE__,__LINE__});
+         return log<software_error,0>({""});
       }
    }
 
@@ -598,28 +598,28 @@ int ocam2KCtrl::appLogic()
 
       if(frameGrabber<ocam2KCtrl>::updateINDI() < 0)
       {
-         log<software_error>({__FILE__, __LINE__});
+         log<software_error>({""});
          state(stateCodes::ERROR);
          return 0;
       }
 
       if(stdCamera<ocam2KCtrl>::updateINDI() < 0)
       {
-         log<software_error>({__FILE__, __LINE__});
+         log<software_error>({""});
          state(stateCodes::ERROR);
          return 0;
       }
 
       if(edtCamera<ocam2KCtrl>::updateINDI() < 0)
       {
-         log<software_error>({__FILE__, __LINE__});
+         log<software_error>({""});
          state(stateCodes::ERROR);
          return 0;
       }
 
       if(telemeter<ocam2KCtrl>::appLogic() < 0)
       {
-         log<software_error>({__FILE__, __LINE__});
+         log<software_error>({""});
          return 0;
       }
 
@@ -652,22 +652,22 @@ int ocam2KCtrl::onPowerOff()
 
    if(stdCamera<ocam2KCtrl>::onPowerOff() < 0)
    {
-      log<software_error>({__FILE__, __LINE__});
+      log<software_error>({""});
    }
 
    if(edtCamera<ocam2KCtrl>::onPowerOff() < 0)
    {
-      log<software_error>({__FILE__, __LINE__});
+      log<software_error>({""});
    }
 
    if(frameGrabber<ocam2KCtrl>::onPowerOff() < 0)
    {
-      log<software_error>({__FILE__, __LINE__});
+      log<software_error>({""});
    }
 
    if(dssShutter<ocam2KCtrl>::onPowerOff() < 0)
    {
-      log<software_error>({__FILE__, __LINE__});
+      log<software_error>({""});
    }
 
    //Setting m_poweredOn
@@ -684,17 +684,17 @@ int ocam2KCtrl::whilePowerOff()
 
    if(stdCamera<ocam2KCtrl>::whilePowerOff() < 0)
    {
-      log<software_error>({__FILE__, __LINE__});
+      log<software_error>({""});
    }
 
    if(edtCamera<ocam2KCtrl>::whilePowerOff() < 0)
    {
-      log<software_error>({__FILE__, __LINE__});
+      log<software_error>({""});
    }
 
    if(dssShutter<ocam2KCtrl>::whilePowerOff() < 0)
    {
-      log<software_error>({__FILE__, __LINE__});
+      log<software_error>({""});
    }
 
    return 0;
@@ -744,7 +744,7 @@ int ocam2KCtrl::getTemps()
          std::cerr << "Temp. parse error. Response:\n" << response << std::endl;
 
          //We don't trust the temps, but don't reconfig just for this.
-         return log<software_error, 0>({__FILE__, __LINE__, "Temp. parse error"});
+         return log<software_error, 0>({"Temp. parse error"});
       }
 
       m_temps = temps;
@@ -800,7 +800,7 @@ int ocam2KCtrl::getTemps()
    else
    {
       if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({__FILE__, __LINE__});
+      return log<software_error,-1>({""});
    }
 }
 
@@ -853,7 +853,7 @@ int ocam2KCtrl::setTempControl()
    else
    {
       if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({__FILE__, __LINE__});
+      return log<software_error,-1>({""});
    }
 
    if( m_tempControlStatusSet && m_ccdTempSetpt > -999)
@@ -893,7 +893,7 @@ int ocam2KCtrl::setTempSetPt()
    else
    {
       if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({__FILE__, __LINE__});
+      return log<software_error,-1>({""});
    }
 
 }
@@ -914,7 +914,7 @@ int ocam2KCtrl::getFPS()
 
                 std::cerr << "fps parse error. Response:\n" << response << "\n";
 
-                return log<software_error, 0>({__FILE__, __LINE__, "fps parse error"});
+                return log<software_error, 0>({"fps parse error"});
             }
             m_fps = fps;
 
@@ -925,7 +925,7 @@ int ocam2KCtrl::getFPS()
         }
         else
         {
-            return log<software_error,-1>({__FILE__, __LINE__});
+            return log<software_error,-1>({""});
         }
     }
     else
@@ -961,7 +961,7 @@ int ocam2KCtrl::setFPS()
         else
         {
             if(powerState() != 1 || powerStateTarget() != 1) return -1;
-            return log<software_error,-1>({__FILE__, __LINE__});
+            return log<software_error,-1>({""});
         }
     }
     else
@@ -1000,7 +1000,7 @@ int ocam2KCtrl::setSynchro()
     else
     {
         if(powerState() != 1 || powerStateTarget() != 1) return -1;
-        return log<software_error,-1>({__FILE__, __LINE__});
+        return log<software_error,-1>({""});
     }
 
     //Now actually turn synchro on
@@ -1027,7 +1027,7 @@ int ocam2KCtrl::setSynchro()
     else
     {
         if(powerState() != 1 || powerStateTarget() != 1) return -1;
-        return log<software_error,-1>({__FILE__, __LINE__});
+        return log<software_error,-1>({""});
     }
 
     //Finally we set the FPS of the synchro device
@@ -1102,7 +1102,7 @@ int ocam2KCtrl::resetEMProtection()
    else
    {
       if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({__FILE__, __LINE__});
+      return log<software_error,-1>({""});
    }
 }
 
@@ -1122,13 +1122,13 @@ int ocam2KCtrl::getEMGain()
          {
             m_emGain = 1;
             updateIfChanged(m_indiP_emProt, "status", std::string("TRIPPED"), INDI_ALERT);
-            return log<software_warning, -1>({__FILE__, __LINE__, "EM Gain tripped!"});
+            return log<software_warning, -1>({"EM Gain tripped!"});
 
          }
 
          std::cerr << "EM Gain parse error, response:\n" << response << "\n";
 
-         return log<software_error, -1>({__FILE__, __LINE__, "EM Gain parse error"});
+         return log<software_error, -1>({"EM Gain parse error"});
       }
 
       m_emGain = emGain;
@@ -1139,7 +1139,7 @@ int ocam2KCtrl::getEMGain()
    else
    {
       if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({__FILE__, __LINE__});
+      return log<software_error,-1>({""});
    }
 }
 
@@ -1179,7 +1179,7 @@ int ocam2KCtrl::setEMGain( )
    else
    {
       if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({__FILE__, __LINE__});
+      return log<software_error,-1>({""});
    }
 
 }
@@ -1196,7 +1196,7 @@ int ocam2KCtrl::configureAcquisition()
     {
         if(powerState() != 1 || powerStateTarget() != 1) return -1;
 
-        log<software_error>({__FILE__, __LINE__, "Error sending command to set mode"});
+        log<software_error>({"Error sending command to set mode"});
         sleep(1);
         return -1;
     }
@@ -1233,7 +1233,7 @@ int ocam2KCtrl::configureAcquisition()
 
     if(setSynchro() < 0)
     {
-        log<software_error>({__FILE__, __LINE__, "Error setting synchro during configureAcquisition"});
+        log<software_error>({"Error setting synchro during configureAcquisition"});
     }
 
     /* Initialize the OCAM2 SDK
@@ -1455,7 +1455,7 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emProtReset)(const pcf::IndiProperty &
 
    if (ipRecv.getName() != m_indiP_emProtReset.getName())
    {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      log<software_error>({"wrong INDI property received."});
       return -1;
    }
 

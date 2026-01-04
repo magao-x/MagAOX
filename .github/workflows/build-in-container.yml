@@ -47,3 +47,10 @@ jobs:
           build-args: |
             BASE_IMAGE=${{ env.REGISTRY }}/${{ env.BASE_IMAGE_NAME }}:gui
             MAGAOX_ROLE=workstation
+      - name: Clean up old packages
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: magaox
+          package-type: container
+          min-versions-to-keep: 5
+          delete-only-untagged-versions: 'true'

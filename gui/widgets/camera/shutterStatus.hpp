@@ -6,51 +6,51 @@
 #include "../xWidgets/xWidget.hpp"
 #include "../../lib/multiIndiSubscriber.hpp"
 
-namespace xqt 
+namespace xqt
 {
-   
+
 /// Widget to display a camera's shutter status and allow changing
 class shutterStatus : public xWidget
 {
    Q_OBJECT
-   
+
 protected:
-   
+
    std::string m_camName; ///< INDI device name of camera
 
    std::string m_status; ///< Current status of the shutter (OFF, READY, etc.)
    int m_state {0}; ///< Current state of the shutter, 0 is open, 1 is shut.
    int m_tgt_state {-1}; ///< Target state of the shutter in this widget.  Used to avoid bouncing gui.
-   
+
 
 public:
    explicit shutterStatus( const std::string & camName,
-                           QWidget * Parent = 0, 
+                           QWidget * Parent = 0,
                            Qt::WindowFlags f = Qt::WindowFlags()
                          );
-   
+
    ~shutterStatus();
 
    virtual void subscribe();
-             
+
    virtual void onConnect();
 
    virtual void onDisconnect();
-   
+
    virtual void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
+
    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
    virtual void updateGUI();
 
 
 protected:
-     
+
    Ui::shutterStatus ui;
 };
-   
+
 shutterStatus::shutterStatus( const std::string & camName,
-                              QWidget * Parent, 
+                              QWidget * Parent,
                               Qt::WindowFlags f) : xWidget(Parent, f), m_camName{camName}
 {
    ui.setupUi(this);
@@ -60,7 +60,7 @@ shutterStatus::shutterStatus( const std::string & camName,
 
    onDisconnect();
 }
-   
+
 shutterStatus::~shutterStatus()
 {
 }
@@ -68,13 +68,13 @@ shutterStatus::~shutterStatus()
 void shutterStatus::subscribe()
 {
    if(!m_parent) return;
-   
+
    m_parent->addSubscriber(ui.shutter);
    m_parent->addSubscriberProperty(this, m_camName, "shutter_status");
 
    return;
 }
-  
+
 void shutterStatus::onConnect()
 {
 }
@@ -90,9 +90,9 @@ void shutterStatus::handleDefProperty( const pcf::IndiProperty & ipRecv)
 }
 
 void shutterStatus::handleSetProperty( const pcf::IndiProperty & ipRecv)
-{  
+{
    if(ipRecv.getDevice() != m_camName) return;
-   
+
    if(ipRecv.getName() == "shutter")
    {
       if(ipRecv.find("toggle"))
@@ -144,7 +144,7 @@ void shutterStatus::updateGUI()
 
 
 } //namespace xqt
-   
+
 #include "moc_shutterStatus.cpp"
 
 #endif

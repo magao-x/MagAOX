@@ -70,11 +70,11 @@ typedef uint8_t (*aPacketMatchPacketProc) (const aPacket* p, const void* vpRef);
 #ifdef __cplusplus
 extern "C" {
 #endif
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Check packet pointer for validity.
-    
+
     /**
      * Checks to make sure a packet was allocated using aPacket_Create.
      *
@@ -82,21 +82,21 @@ extern "C" {
      * \returns bool - True for valid false otherwise.
      */
     aLIBEXPORT bool aVALIDPACKET(const aPacket* packet);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Create a BrainStem packet.
-    
+
     /**
      * Create a BrainStem packet.
      *
      * \returns aPacket - Pointer or NULL on error.
      */
     aLIBEXPORT aPacket* aPacket_Create(void);
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Create a BrainStem packet, containing the given data.
-    
+
     /**
      * Create a BrainStem packet with data.
      *
@@ -108,10 +108,10 @@ extern "C" {
     aLIBEXPORT aPacket* aPacket_CreateWithData(const uint8_t address,
                                                const uint8_t dataLength,
                                                const uint8_t* data);
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Reset an existing packet.
-    
+
     /**
      * Zero out any data the packet contains.
      *
@@ -120,10 +120,10 @@ extern "C" {
      * \retval aErrParam - If the packet is not valid.
      */
     aLIBEXPORT aErr aPacket_Reset(aPacket* packet);
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Accumulate a Byte into a packet.
-    
+
     /**
      * A packet can be constructed byte by byte. the first byte added will
      * be the BrainStem module address, the second byte the data length, and
@@ -136,11 +136,11 @@ extern "C" {
      * \retval aErrPacket - The byte added violates the BrainStem protocol.
      */
     aLIBEXPORT aErr aPacket_AddByte(aPacket* packet, const uint8_t byte);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Determine whether a packet is complete.
-    
+
     /**
      * A packet can be constructed byte by byte. This call determines whether such a
      * packet has been completed. It checks that dataSize is equal to the currentSize
@@ -149,10 +149,10 @@ extern "C" {
      * \returns bool - True if complete false if not complete.
      */
     aLIBEXPORT bool aPacket_IsComplete(const aPacket* packet);
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Destroy a BrainStem packet.
-    
+
     /**
      * Safely destroy a brainstem packet and deallocate the associated resources.
      *
@@ -164,7 +164,7 @@ extern "C" {
      * \retval aErrParam - The packetRef is invalid.
      */
     aLIBEXPORT aErr aPacket_Destroy(aPacket** packet);
-    
+
 #ifdef __cplusplus
 }
 #endif

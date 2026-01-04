@@ -22,14 +22,14 @@ class QWT_EXPORT XqwtMultiDial: public QwtDial
     Q_OBJECT
 
 protected:
-   
+
    QString m_unitsText;
-   
+
    //QLabel * m_unitsTextLabel {nullptr};
-   
+
 public:
    explicit XqwtMultiDial( QWidget* parent = NULL );
-   
+
    virtual ~XqwtMultiDial();
 
    void setNumNeedles( int numNeedles );
@@ -41,7 +41,7 @@ public:
 
    QString unitsText();
    void unitsText( QString & utext);
-   
+
 public Q_SLOTS:
     void setValue( int needleNo,
                    double val
@@ -57,13 +57,13 @@ protected:
 private:
     // use setHand instead
     void setNeedle( QwtDialNeedle * );
-    
+
     //void setNeedleNum( int needleNo, QwtDialNeedle *);
 
     int d_numNeedles;
-    
+
     QwtDialNeedle **d_needles;
-    
+
     std::vector<double> d_values;
 };
 
