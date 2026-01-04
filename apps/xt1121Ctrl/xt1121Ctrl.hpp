@@ -148,7 +148,7 @@ public:
 };
 
 inline
-xt1121Ctrl::xt1121Ctrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+xt1121Ctrl::xt1121Ctrl() : MagAOXApp(MAGAOX_GIT_SHA1, MAGAOX_GIT_MODIFIED, MAGAOX_GIT_URL, MAGAOX_GIT_BRANCH, MAGAOX_SOURCE_PATH, MAGAOX_GIT_UNTRACKED)
 {
    m_powerMgtEnabled = true;
    m_powerOnWait = 2; //set default.

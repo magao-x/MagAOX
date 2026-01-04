@@ -166,9 +166,6 @@ class CircularBuffer2 {
 
 */
 
-// #define MAGAOX_CURRENT_SHA1 0
-// #define MAGAOX_REPO_MODIFIED 0
-
 namespace MagAOX
 {
 namespace app
@@ -473,7 +470,7 @@ inline int po4ao::send_obs_to_shmim()
     return 0;
 }
 
-inline po4ao::po4ao() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
+inline po4ao::po4ao() : MagAOXApp( MAGAOX_GIT_SHA1, MAGAOX_GIT_MODIFIED, MAGAOX_GIT_URL, MAGAOX_GIT_BRANCH, MAGAOX_SOURCE_PATH, MAGAOX_GIT_UNTRACKED )
 {
     return;
 }

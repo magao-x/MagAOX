@@ -308,7 +308,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
 // Set self pointer to null so app starts up uninitialized.
 streamWriter *streamWriter::m_selfWriter = nullptr;
 
-streamWriter::streamWriter() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
+streamWriter::streamWriter() : MagAOXApp( MAGAOX_GIT_SHA1, MAGAOX_GIT_MODIFIED, MAGAOX_GIT_URL, MAGAOX_GIT_BRANCH, MAGAOX_SOURCE_PATH, MAGAOX_GIT_UNTRACKED )
 {
     m_powerMgtEnabled = false;
 

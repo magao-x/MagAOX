@@ -32,9 +32,6 @@ class Logger : public ILogger {
     }
 };
 
-// #define MAGAOX_CURRENT_SHA1 0
-// #define MAGAOX_REPO_MODIFIED 0
-
 void halfToFloatArray(float* dst, const half* src, size_t num_elements) {
     for (size_t i = 0; i < num_elements; ++i) {
         dst[i] = __half2float(src[i]);
@@ -364,7 +361,7 @@ void nnReconstructor::cleanup_engine_context(){
         delete runtime;
 };
 
-inline nnReconstructor::nnReconstructor() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
+inline nnReconstructor::nnReconstructor() : MagAOXApp( MAGAOX_GIT_SHA1, MAGAOX_GIT_MODIFIED, MAGAOX_GIT_URL, MAGAOX_GIT_BRANCH, MAGAOX_SOURCE_PATH, MAGAOX_GIT_UNTRACKED )
 {
     return;
 }

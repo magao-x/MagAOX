@@ -247,7 +247,7 @@ inline int dlDataCollection::send_to_shmim()
     return 0;
 }
 
-inline dlDataCollection::dlDataCollection() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
+inline dlDataCollection::dlDataCollection() : MagAOXApp( MAGAOX_GIT_SHA1, MAGAOX_GIT_MODIFIED, MAGAOX_GIT_URL, MAGAOX_GIT_BRANCH, MAGAOX_SOURCE_PATH, MAGAOX_GIT_UNTRACKED )
 {
     return;
 }

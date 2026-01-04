@@ -139,7 +139,7 @@ public:
   double lerp(double x0, double y0, double x1, double y1, double xnew);
 };
 
-timeSeriesSimulator::timeSeriesSimulator() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+timeSeriesSimulator::timeSeriesSimulator() : MagAOXApp(MAGAOX_GIT_SHA1, MAGAOX_GIT_MODIFIED, MAGAOX_GIT_URL, MAGAOX_GIT_BRANCH, MAGAOX_SOURCE_PATH, MAGAOX_GIT_UNTRACKED)
 {
   m_loopPause = nanos_in_milli * 200; // 200 ms sampling rate for signal
   return;

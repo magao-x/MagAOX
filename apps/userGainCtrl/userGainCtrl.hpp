@@ -498,7 +498,7 @@ public:
 };
 
 inline
-userGainCtrl::userGainCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+userGainCtrl::userGainCtrl() : MagAOXApp(MAGAOX_GIT_SHA1, MAGAOX_GIT_MODIFIED, MAGAOX_GIT_URL, MAGAOX_GIT_BRANCH, MAGAOX_SOURCE_PATH, MAGAOX_GIT_UNTRACKED)
 {
 
    shmimMonitorT::m_getExistingFirst = true;

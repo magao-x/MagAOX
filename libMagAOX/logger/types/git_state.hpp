@@ -33,7 +33,6 @@ struct git_state : public flatbuffer_log
     struct messageT : public fbMessage
     {
         // Construct from components of early versions
-        [[deprecated("use the full git state version instead")]]
         messageT( const std::string &repoName, ///< [in] the name of the repo
                   const std::string &sha1,     ///< [in] the SHA1 hash of the repo
                   const bool         modified  ///< [in] the modified status (true or false)

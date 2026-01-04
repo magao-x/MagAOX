@@ -258,7 +258,7 @@ class psfAcq : public MagAOXApp<true>,
     ///@}
 };
 
-inline psfAcq::psfAcq() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
+inline psfAcq::psfAcq() : MagAOXApp( MAGAOX_GIT_SHA1, MAGAOX_GIT_MODIFIED, MAGAOX_GIT_URL, MAGAOX_GIT_BRANCH, MAGAOX_SOURCE_PATH, MAGAOX_GIT_UNTRACKED )
 {
     darkShmimMonitorT::m_getExistingFirst = true;
     return;

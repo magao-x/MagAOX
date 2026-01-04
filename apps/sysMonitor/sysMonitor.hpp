@@ -360,7 +360,7 @@ public:
 
 };
 
-inline sysMonitor::sysMonitor() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+inline sysMonitor::sysMonitor() : MagAOXApp(MAGAOX_GIT_SHA1, MAGAOX_GIT_MODIFIED, MAGAOX_GIT_URL, MAGAOX_GIT_BRANCH, MAGAOX_SOURCE_PATH, MAGAOX_GIT_UNTRACKED)
 {
    //m_loopPause = 100000; //Set default to 1 milli-second due to mpstat averaging time of 1 sec.
    return;

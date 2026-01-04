@@ -140,7 +140,7 @@ protected:
 
 };
 
-rhusbMon::rhusbMon() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+rhusbMon::rhusbMon() : MagAOXApp(MAGAOX_GIT_SHA1, MAGAOX_GIT_MODIFIED, MAGAOX_GIT_URL, MAGAOX_GIT_BRANCH, MAGAOX_SOURCE_PATH, MAGAOX_GIT_UNTRACKED)
 {
    dev::ioDevice::m_readTimeout = 2000;
    dev::ioDevice::m_writeTimeout = 1000;

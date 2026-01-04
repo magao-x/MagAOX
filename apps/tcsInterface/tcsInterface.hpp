@@ -401,7 +401,7 @@ class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::t
     ///@}
 };
 
-inline tcsInterface::tcsInterface() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
+inline tcsInterface::tcsInterface() : MagAOXApp( MAGAOX_GIT_SHA1, MAGAOX_GIT_MODIFIED, MAGAOX_GIT_URL, MAGAOX_GIT_BRANCH, MAGAOX_SOURCE_PATH, MAGAOX_GIT_UNTRACKED )
 {
     return;
 }

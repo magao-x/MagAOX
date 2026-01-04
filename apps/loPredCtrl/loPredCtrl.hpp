@@ -25,8 +25,6 @@ using namespace mx::improc;
 
 #include "ar_controller.hpp"
 
- // #define MAGAOX_CURRENT_SHA1 0
- // #define MAGAOX_REPO_MODIFIED 0
  namespace MagAOX
  {
  namespace app
@@ -195,7 +193,7 @@ using namespace mx::improc;
     return 0;
  }
 
- inline loPredCtrl::loPredCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
+ inline loPredCtrl::loPredCtrl() : MagAOXApp( MAGAOX_GIT_SHA1, MAGAOX_GIT_MODIFIED, MAGAOX_GIT_URL, MAGAOX_GIT_BRANCH, MAGAOX_SOURCE_PATH, MAGAOX_GIT_UNTRACKED )
  {
      return;
  }

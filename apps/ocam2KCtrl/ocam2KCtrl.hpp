@@ -345,7 +345,7 @@ public:
 };
 
 inline
-ocam2KCtrl::ocam2KCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+ocam2KCtrl::ocam2KCtrl() : MagAOXApp(MAGAOX_GIT_SHA1, MAGAOX_GIT_MODIFIED, MAGAOX_GIT_URL, MAGAOX_GIT_BRANCH, MAGAOX_SOURCE_PATH, MAGAOX_GIT_UNTRACKED)
 {
    //--- MagAOXApp Power Mgt. ---
    m_powerMgtEnabled = true;

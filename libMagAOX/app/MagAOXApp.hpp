@@ -1330,13 +1330,37 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string &git_sha1,
     log<git_state>( git_state::messageT( "MagAOX", git_sha1, git_modified,git_url,git_branch,git_path,git_untracked ), gl );
 
     gl = logPrio::LOG_INFO;
-    if( MXLIB_UNCOMP_REPO_MODIFIED || MXLIB_UNCOMP_REPO_UNTRACKED)
+    if( MXLIB_UNCOMP_GIT_MODIFIED || MXLIB_UNCOMP_GIT_UNTRACKED)
     {
         gl = logPrio::LOG_WARNING;
         m_gitAlert = true;
     }
 
-    log<git_state>( git_state::messageT( "mxlib", MXLIB_UNCOMP_CURRENT_SHA1, MXLIB_UNCOMP_REPO_MODIFIED, MXLIB_UNCOMP_URL, MXLIB_UNCOMP_BRANCH, MXLIB_UNCOMP_SRCPATH, MXLIB_UNCOMP_REPO_UNTRACKED ), gl );
+    log<git_state>( git_state::messageT( "mxlib-uncomp",
+                                         MXLIB_UNCOMP_GIT_SHA1,
+                                         MXLIB_UNCOMP_GIT_MODIFIED,
+                                         MXLIB_UNCOMP_GIT_URL,
+                                         MXLIB_UNCOMP_GIT_BRANCH,
+                                         MXLIB_UNCOMP_SOURCE_PATH,
+                                         MXLIB_UNCOMP_GIT_UNTRACKED ),
+                     gl );
+
+    gl = logPrio::LOG_INFO;
+    if( mx::mxlib_comp_git_modified() || mx::mxlib_comp_git_untracked())
+    {
+        gl = logPrio::LOG_WARNING;
+        m_gitAlert = true;
+    }
+
+    log<git_state>( git_state::messageT( "mxlib-comp",
+                                         mx::mxlib_comp_git_sha1(),
+                                         mx::mxlib_comp_git_modified(),
+                                         mx::mxlib_comp_git_url(),
+                                         mx::mxlib_comp_git_branch(),
+                                         mx::mxlib_comp_source_path(),
+                                         mx::mxlib_comp_git_untracked() ),
+                     gl );
+
 }
 
 template <bool _useINDI>
@@ -1369,13 +1393,13 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string &git_sha1, const bool git_modi
     log<git_state>( git_state::messageT( "MagAOX", git_sha1, git_modified ), gl );
 
     gl = logPrio::LOG_INFO;
-    if( MXLIB_UNCOMP_REPO_MODIFIED )
+    if( MXLIB_UNCOMP_GIT_MODIFIED )
     {
         gl = logPrio::LOG_WARNING;
         m_gitAlert = true;
     }
 
-    log<git_state>( git_state::messageT( "mxlib", MXLIB_UNCOMP_CURRENT_SHA1, MXLIB_UNCOMP_REPO_MODIFIED ), gl );
+    log<git_state>( git_state::messageT( "mxlib", MXLIB_UNCOMP_GIT_SHA1, MXLIB_UNCOMP_GIT_MODIFIED ), gl );
 }
 
 template <bool _useINDI>
