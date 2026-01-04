@@ -688,6 +688,16 @@ def main():
         if ".hpp" not in type:
             continue
 
+        # workaround for software_log issues with source_location
+        if "software" in type:
+            print("software")
+            continue
+
+        # workaround for telsee deprecated fields
+        if "telsee" in type:
+            print("telsee")
+            continue
+
         typePath = os.path.join(typesFolderPath, type)
 
         # make dictionary with info for template
