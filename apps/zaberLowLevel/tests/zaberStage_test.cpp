@@ -15,7 +15,7 @@ extern "C"
 
 using namespace MagAOX::app;
 
-namespace zaberStage_test 
+namespace zaberStage_test
 {
 
 SCENARIO( "Parsing the warnings response", "[zaberStage]" )
@@ -29,11 +29,11 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
          zaberLowLevel zll;
 
          zaberStage<zaberLowLevel> zstg(&zll);
-         
+
          std::string tstr = "00";
- 
+
          rv = zstg.parseWarnings(tstr);
-         
+
          REQUIRE(rv == 0);
          REQUIRE(zstg.warningState() == false);
          REQUIRE(zstg.warnFD() == false);
@@ -57,7 +57,7 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
          REQUIRE(zstg.warnNJ() == false);
          REQUIRE(zstg.warnUNK()== false);
       }
-   
+
       WHEN("Valid response, one warning")
       {
          zaberLowLevel zll;
@@ -65,9 +65,9 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
          zaberStage<zaberLowLevel> zstg(&zll);
 
          std::string tstr = "01 WR";
- 
+
          rv = zstg.parseWarnings(tstr);
-         
+
          REQUIRE(rv == 0);
          REQUIRE(zstg.warningState() == true);
          REQUIRE(zstg.warnFD() == false);
@@ -91,7 +91,7 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
          REQUIRE(zstg.warnNJ() == false);
          REQUIRE(zstg.warnUNK()== false);
       }
-      
+
       WHEN("Valid response, five warnings")
       {
          zaberLowLevel zll;
@@ -99,9 +99,9 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
          zaberStage<zaberLowLevel> zstg(&zll);
 
          std::string tstr = "05 FD FQ FS FT FB";
- 
+
          rv = zstg.parseWarnings(tstr);
-         
+
          REQUIRE(rv == 0);
          REQUIRE(zstg.warningState() == true);
          REQUIRE(zstg.warnFD() == true);
@@ -125,7 +125,7 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
          REQUIRE(zstg.warnNJ() == false);
          REQUIRE(zstg.warnUNK()== false);
       }
-      
+
       WHEN("Valid response, ten warnings")
       {
          zaberLowLevel zll;
@@ -133,9 +133,9 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
          zaberStage<zaberLowLevel> zstg(&zll);
 
          std::string tstr = "10 FP FE WH WL WP WV WT WM WR NC";
- 
+
          rv = zstg.parseWarnings(tstr);
-         
+
          REQUIRE(rv == 0);
          REQUIRE(zstg.warningState() == true);
          REQUIRE(zstg.warnFD() == false);
@@ -164,11 +164,11 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
          zaberLowLevel zll;
 
          zaberStage<zaberLowLevel> zstg(&zll);
-         
+
          std::string tstr = "02 NI ND";
-      
+
          rv = zstg.parseWarnings(tstr);
-         
+
          REQUIRE(rv == 0);
          REQUIRE(zstg.warningState() == true);
          REQUIRE(zstg.warnFD() == false);
@@ -198,11 +198,11 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
 
          zaberStage<zaberLowLevel> zstg(&zll);
 
-         
+
          std::string tstr = "03 NU NJ UN";
-      
+
          rv = zstg.parseWarnings(tstr);
-         
+
          REQUIRE(rv == 0);
          REQUIRE(zstg.warningState() == true);
          REQUIRE(zstg.warnFD() == false);
@@ -226,7 +226,7 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
          REQUIRE(zstg.warnNJ() == true);
          REQUIRE(zstg.warnUNK()== true);
       }
-   }   
+   }
 }
-   
-} //namespace zaberStage_test 
+
+} //namespace zaberStage_test

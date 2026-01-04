@@ -2239,9 +2239,9 @@ INDI_NEWCALLBACK_DEFN( picamCtrl, m_indiP_receiveExptime )( const pcf::IndiPrope
     m_expTimeSet = ipRecv["target"].get<double>();
 
     updatesIfChanged<double>(m_indiP_receiveExptime, { "current" }, { m_expTimeSet });
-    
+
     // we don't need to strictly reconfig because setExpTime works online, but this
-    // eludes an infinite loop of triggering the 'otherCam' in setExptime 
+    // eludes an infinite loop of triggering the 'otherCam' in setExptime
     m_reconfig = 1;
 
     return 0;

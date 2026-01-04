@@ -32,7 +32,7 @@ namespace app
 
 /// Local derivation of tmcController to implement MagAO-X logging
 template<class parentT>
-class tmcCon : public tmcController 
+class tmcCon : public tmcController
 {
 public:
 
@@ -50,9 +50,9 @@ public:
         logs << src << ": " << msg << " [ libftdi1: " << ftdi_get_error_string(m_ftdi) << " ] ";
         uint32_t ln = line; //avoid narrowing warning
         parentT::template log<software_error>({file.c_str(), ln, 0, rv, logs.str()});
-    }       
+    }
 
-    /// Print a message to MagAO-X logs describing an error 
+    /// Print a message to MagAO-X logs describing an error
     /** Intended to be overriden in a derived class to provide custom error messaging.
       */
     virtual void otherErrmsg( const std::string & src,  ///< [in] The source of the error (the tmcController function)
@@ -85,7 +85,7 @@ protected:
      */
 
     // here add parameters which will be config-able at runtime
-    
+
     ///@}
 
     tmcCon<kcubeCtrl> m_kAxis1;
@@ -140,7 +140,7 @@ public:
      */
     int modIdentify(){return 0;}
 
-    ///@} 
+    ///@}
 
     int axis1Initialize();
 
@@ -160,10 +160,10 @@ public:
 
     int set();
 
-    int rest(); 
+    int rest();
 
     /** \name INDI
-     * 
+     *
      * @{
      */
 
@@ -223,21 +223,21 @@ void kcubeCtrl::loadConfig()
 
 int kcubeCtrl::appStartup()
 {
-    createStandardIndiRequestSw( m_indiP_axis1_identify, "axis1_identify");  
+    createStandardIndiRequestSw( m_indiP_axis1_identify, "axis1_identify");
     if( registerIndiPropertyNew( m_indiP_axis1_identify, INDI_NEWCALLBACK(m_indiP_axis1_identify)) < 0)
     {
         log<software_error>({__FILE__,__LINE__ - 2});
         return -1;
     }
 
-    createStandardIndiToggleSw( m_indiP_axis1_enable, "axis1_enable");  
+    createStandardIndiToggleSw( m_indiP_axis1_enable, "axis1_enable");
     if( registerIndiPropertyNew( m_indiP_axis1_enable, INDI_NEWCALLBACK(m_indiP_axis1_enable)) < 0)
     {
         log<software_error>({__FILE__,__LINE__ - 2});
         return -1;
     }
     ///\todo if format is "" this crashes INDI startup... wtf
-    createStandardIndiNumber<float>( m_indiP_axis1_voltage, "axis1_voltage", 0, 150, 1.0/32767, "%0.4f");  
+    createStandardIndiNumber<float>( m_indiP_axis1_voltage, "axis1_voltage", 0, 150, 1.0/32767, "%0.4f");
     if( registerIndiPropertyNew( m_indiP_axis1_voltage, INDI_NEWCALLBACK(m_indiP_axis1_voltage)) < 0)
     {
         log<software_error>({__FILE__,__LINE__ - 2});
@@ -246,21 +246,21 @@ int kcubeCtrl::appStartup()
     m_indiP_axis1_voltage["current"]=0;
     m_indiP_axis1_voltage["target"]=0;
 
-    createStandardIndiRequestSw( m_indiP_axis2_identify, "axis2_identify");  
+    createStandardIndiRequestSw( m_indiP_axis2_identify, "axis2_identify");
     if( registerIndiPropertyNew( m_indiP_axis2_identify, INDI_NEWCALLBACK(m_indiP_axis2_identify)) < 0)
     {
         log<software_error>({__FILE__,__LINE__ - 2});
         return -1;
     }
 
-    createStandardIndiToggleSw( m_indiP_axis2_enable, "axis2_enable");  
+    createStandardIndiToggleSw( m_indiP_axis2_enable, "axis2_enable");
     if( registerIndiPropertyNew( m_indiP_axis2_enable, INDI_NEWCALLBACK(m_indiP_axis2_enable)) < 0)
     {
         log<software_error>({__FILE__,__LINE__ - 2});
         return -1;
     }
 
-    createStandardIndiNumber<float>( m_indiP_axis2_voltage, "axis2_voltage",0,150,1.0/32767, "%0.4f");  
+    createStandardIndiNumber<float>( m_indiP_axis2_voltage, "axis2_voltage",0,150,1.0/32767, "%0.4f");
     if( registerIndiPropertyNew( m_indiP_axis2_voltage, INDI_NEWCALLBACK(m_indiP_axis2_voltage)) < 0)
     {
         log<software_error>({__FILE__,__LINE__ - 2});
@@ -269,7 +269,7 @@ int kcubeCtrl::appStartup()
     m_indiP_axis2_voltage["current"]=0;
     m_indiP_axis2_voltage["target"]=0;
 
-    createStandardIndiToggleSw( m_indiP_set, "set");  
+    createStandardIndiToggleSw( m_indiP_set, "set");
     if( registerIndiPropertyNew( m_indiP_set, INDI_NEWCALLBACK(m_indiP_set)) < 0)
     {
         log<software_error>({__FILE__,__LINE__ - 2});
@@ -355,7 +355,7 @@ int kcubeCtrl::appLogic()
 
             state(stateCodes::ERROR);
             return 0;
-        }        
+        }
     }
 
     if( state() == stateCodes::NOTCONNECTED )
@@ -371,9 +371,9 @@ int kcubeCtrl::appLogic()
         if(rv < 0)
         {
             //if connect failed, and there is a device, then we have some other problem.
-            sleep(1); //wait to see if power state updates 
+            sleep(1); //wait to see if power state updates
             if(m_powerState == 0) return -1;
-            
+
             log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::connect failed. "});
             std::cerr << "tmcController::connectFailed\n";
             state(stateCodes::ERROR);
@@ -388,11 +388,11 @@ int kcubeCtrl::appLogic()
         if(rv < 0)
         {
             //if connect failed, and there is a device, then we have some other problem.
-            sleep(1); //wait to see if power state updates 
+            sleep(1); //wait to see if power state updates
             if(m_powerState == 0) return -1;
-            
+
             log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::connect failed. "});
-            
+
             state(stateCodes::ERROR);
             return 0;
         }
@@ -425,12 +425,12 @@ int kcubeCtrl::appLogic()
         {
             std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
             if(!lock.owns_lock()) return 0;
-        
+
             float ov;
             int rv = m_kAxis1.pz_req_outputvolts(ov);
             if(rv < 0)
             {
-                sleep(1); //wait to see if power state updates 
+                sleep(1); //wait to see if power state updates
                 if(m_powerState == 0) return -1;
 
                 log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::pz_req_outputvolts failed. "});
@@ -457,12 +457,12 @@ int kcubeCtrl::appLogic()
 
             //but don't wait for it, just go back around.
             if(!lock.owns_lock()) return 0;
-        
+
             float ov;
             int rv = m_kAxis2.pz_req_outputvolts(ov);
             if(rv < 0)
             {
-                sleep(1); //wait to see if power state updates 
+                sleep(1); //wait to see if power state updates
                 if(m_powerState == 0) return -1;
 
                 log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::pz_req_outputvolts failed. "});
@@ -484,7 +484,7 @@ int kcubeCtrl::appLogic()
 
 
         //Update the Properties that don't need to talk to device here
-        {   
+        {
             std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
             if(!lock.owns_lock()) return 0;
 
@@ -543,26 +543,26 @@ int kcubeCtrl::axis1Initialize()
     int rv;
 
     tmcController::HWInfo hwi;
-    
+
     rv = m_kAxis1.hw_req_info(hwi);
     if( rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::hw_req_info failed. "});
         return -1;
     }
-    
+
     std::stringstream logs1;
-    logs1 << "Axis-1 "; 
+    logs1 << "Axis-1 ";
     hwi.dump(logs1);
     log<text_log>(logs1.str());
 
     rv = m_kAxis1.mod_set_chanenablestate(0x01, tmcController::EnableState::disabled);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::mod_set_chanenablestate failed. "});
@@ -575,7 +575,7 @@ int kcubeCtrl::axis1Initialize()
     rv = m_kAxis1.hw_stop_updatemsgs();
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::hw_stop_updatemsgs failed. "});
@@ -586,7 +586,7 @@ int kcubeCtrl::axis1Initialize()
     rv = m_kAxis1.kpz_req_kcubemmiparams(par);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::kpz_req_kcubemmiparams failed. "});
@@ -598,7 +598,7 @@ int kcubeCtrl::axis1Initialize()
     rv = m_kAxis1.kpz_set_kcubemmiparams(par);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::kpz_set_kcubemmiparams failed. "});
@@ -608,7 +608,7 @@ int kcubeCtrl::axis1Initialize()
     rv = m_kAxis1.kpz_req_kcubemmiparams(par);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::kpz_req_kcubemmiparams failed. "});
@@ -626,18 +626,18 @@ int kcubeCtrl::axis1Initialize()
     rv = m_kAxis1.pz_req_tpz_iosettings(tios);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::pz_req_tpz_iosettings failed. "});
         return -1;
     }
     tios.VoltageLimit = tmcController::VoltLimit::V150;
-    
+
     rv = m_kAxis1.pz_set_tpz_iosettings(tios);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::pz_set_tpz_iosettings failed. "});
@@ -647,13 +647,13 @@ int kcubeCtrl::axis1Initialize()
     rv = m_kAxis1.pz_req_tpz_iosettings(tios);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::pz_req_tpz_iosettings failed. "});
         return -1;
     }
-    
+
     logs1.str("");
     logs1 << "Axis-1 ";
     tios.dump(logs1);
@@ -667,7 +667,7 @@ int kcubeCtrl::axis1Enable()
     int rv = m_kAxis1.mod_set_chanenablestate(0x01, tmcController::EnableState::enabled);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::mod_set_chanenablestate failed. "});
@@ -686,7 +686,7 @@ int kcubeCtrl::axis1Disable()
     int rv = m_kAxis1.mod_set_chanenablestate(0x01, tmcController::EnableState::disabled);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::mod_set_chanenablestate failed. "});
@@ -703,7 +703,7 @@ int kcubeCtrl::axis1Disable()
 
 int kcubeCtrl::axis1Voltage(float & v)
 {
-    if(v < 0) 
+    if(v < 0)
     {
         log<text_log>("axis 1 voltage clamped at 0 (" + std::to_string(v) + ")", logPrio::LOG_WARNING);
         v = 0;
@@ -713,11 +713,11 @@ int kcubeCtrl::axis1Voltage(float & v)
         log<text_log>("axis 1 voltage clamped at 150 (" + std::to_string(v) + ")", logPrio::LOG_WARNING);
         v = 150;
     }
-    
+
     int rv = m_kAxis1.pz_set_outputvolts(v/150.0);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::pz_set_outputvolts failed. "});
@@ -733,26 +733,26 @@ int kcubeCtrl::axis2Initialize()
     int rv;
 
     tmcController::HWInfo hwi;
-    
+
     rv = m_kAxis2.hw_req_info(hwi);
     if( rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::hw_req_info failed. "});
         return -1;
     }
-    
+
     std::stringstream logs1;
-    logs1 << "Axis-2 "; 
+    logs1 << "Axis-2 ";
     hwi.dump(logs1);
     log<text_log>(logs1.str());
 
     rv = m_kAxis2.mod_set_chanenablestate(0x01, tmcController::EnableState::disabled);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::mod_set_chanenablestate failed. "});
@@ -765,7 +765,7 @@ int kcubeCtrl::axis2Initialize()
     rv = m_kAxis2.hw_stop_updatemsgs();
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::hw_stop_updatemsgs failed. "});
@@ -776,7 +776,7 @@ int kcubeCtrl::axis2Initialize()
     rv = m_kAxis2.kpz_req_kcubemmiparams(par);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::kpz_req_kcubemmiparams failed. "});
@@ -788,7 +788,7 @@ int kcubeCtrl::axis2Initialize()
     rv = m_kAxis2.kpz_set_kcubemmiparams(par);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
 
@@ -799,7 +799,7 @@ int kcubeCtrl::axis2Initialize()
     rv = m_kAxis2.kpz_req_kcubemmiparams(par);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::kpz_req_kcubemmiparams failed. "});
@@ -817,18 +817,18 @@ int kcubeCtrl::axis2Initialize()
     rv = m_kAxis2.pz_req_tpz_iosettings(tios);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::pz_req_tpz_iosettings failed. "});
         return -1;
     }
     tios.VoltageLimit = tmcController::VoltLimit::V150;
-    
+
     rv = m_kAxis2.pz_set_tpz_iosettings(tios);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::pz_set_tpz_iosettings failed. "});
@@ -838,13 +838,13 @@ int kcubeCtrl::axis2Initialize()
     rv = m_kAxis2.pz_req_tpz_iosettings(tios);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::pz_req_tpz_iosettings failed. "});
         return -1;
     }
-    
+
     logs1.str("");
     logs1 << "Axis-2 ";
     tios.dump(logs1);
@@ -858,7 +858,7 @@ int kcubeCtrl::axis2Enable()
     int rv = m_kAxis2.mod_set_chanenablestate(0x01, tmcController::EnableState::enabled);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::mod_set_chanenablestate failed. "});
@@ -877,7 +877,7 @@ int kcubeCtrl::axis2Disable()
     int rv = m_kAxis2.mod_set_chanenablestate(0x01, tmcController::EnableState::disabled);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::mod_set_chanenablestate failed. "});
@@ -894,7 +894,7 @@ int kcubeCtrl::axis2Disable()
 
 int kcubeCtrl::axis2Voltage(float & v)
 {
-    if(v < 0) 
+    if(v < 0)
     {
         log<text_log>("axis 2 voltage clamped at 0 (" + std::to_string(v) + ")", logPrio::LOG_WARNING);
         v = 0;
@@ -904,11 +904,11 @@ int kcubeCtrl::axis2Voltage(float & v)
         log<text_log>("axis 2 voltage clamped at 150 (" + std::to_string(v) + ")", logPrio::LOG_WARNING);
         v = 150;
     }
-    
+
     int rv = m_kAxis2.pz_set_outputvolts(v/150.0);
     if(rv < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::pz_set_outputvolts failed. "});
@@ -926,7 +926,7 @@ int kcubeCtrl::set()
 
     if(axis1Enable() < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         return log<software_error,-1>({__FILE__, __LINE__, "axis 1 enable error in set"});
@@ -934,7 +934,7 @@ int kcubeCtrl::set()
 
     if(axis1Voltage(v) < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         return log<software_error,-1>({__FILE__, __LINE__, "axis 1 enable voltage in set"});
@@ -942,7 +942,7 @@ int kcubeCtrl::set()
 
     if(axis2Enable() < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         return log<software_error,-1>({__FILE__, __LINE__, "axis 2 enable error in set"});
@@ -950,7 +950,7 @@ int kcubeCtrl::set()
 
     if(axis2Voltage(v) < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         return log<software_error,-1>({__FILE__, __LINE__, "axis 2 enable voltage in set"});
@@ -971,7 +971,7 @@ int kcubeCtrl::rest()
 
     if(axis1Voltage(v) < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         return log<software_error,-1>({__FILE__, __LINE__, "axis 1 enable voltage in rest"});
@@ -979,7 +979,7 @@ int kcubeCtrl::rest()
 
     if(axis1Disable() < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         return log<software_error,-1>({__FILE__, __LINE__, "axis 1 disable error in rest"});
@@ -987,7 +987,7 @@ int kcubeCtrl::rest()
 
     if(axis2Voltage(v) < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         return log<software_error,-1>({__FILE__, __LINE__, "axis 2 enable voltage in rest"});
@@ -995,7 +995,7 @@ int kcubeCtrl::rest()
 
     if(axis2Disable() < 0)
     {
-        sleep(1); //wait to see if power state updates 
+        sleep(1); //wait to see if power state updates
         if(m_powerState == 0) return -1;
 
         return log<software_error,-1>({__FILE__, __LINE__, "axis 2 disable error in rest"});
@@ -1021,7 +1021,7 @@ INDI_NEWCALLBACK_DEFN(kcubeCtrl, m_indiP_axis1_identify)(const pcf::IndiProperty
         updateSwitchIfChanged(m_indiP_axis1_identify, "request", pcf::IndiElement::On, INDI_BUSY);
         return m_kAxis1.mod_identify();
     }
-   
+
     return 0;
 }
 
@@ -1030,7 +1030,7 @@ INDI_NEWCALLBACK_DEFN(kcubeCtrl, m_indiP_axis1_enable)(const pcf::IndiProperty &
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_axis1_enable, ipRecv);
 
     if(!(state() == stateCodes::READY || state() == stateCodes::OPERATING) ) return 0;
-    
+
     //switch is toggled to on
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
     {
@@ -1050,7 +1050,7 @@ INDI_NEWCALLBACK_DEFN(kcubeCtrl, m_indiP_axis1_enable)(const pcf::IndiProperty &
             log<software_error,-1>({__FILE__, __LINE__, "axis 1 disable error in INDI callback"});
         }
     }
-   
+
    return 0;
 }
 
@@ -1070,7 +1070,7 @@ INDI_NEWCALLBACK_DEFN(kcubeCtrl, m_indiP_axis1_voltage)(const pcf::IndiProperty 
         if(m_powerState == 0) return 0;
         return log<software_error,-1>({__FILE__, __LINE__, "axis 1 voltage error in INDI callback"});
     }
-    
+
     return 0;
 }
 
@@ -1087,7 +1087,7 @@ INDI_NEWCALLBACK_DEFN(kcubeCtrl, m_indiP_axis2_identify)(const pcf::IndiProperty
         updateSwitchIfChanged(m_indiP_axis2_identify, "request", pcf::IndiElement::On, INDI_BUSY);
         return m_kAxis2.mod_identify();
     }
-   
+
    return 0;
 }
 
@@ -1116,7 +1116,7 @@ INDI_NEWCALLBACK_DEFN(kcubeCtrl, m_indiP_axis2_enable)(const pcf::IndiProperty &
             return log<software_error,-1>({__FILE__, __LINE__, "axis 2 disable error in INDI callback"});
         }
     }
-   
+
    return 0;
 }
 
@@ -1178,7 +1178,7 @@ INDI_NEWCALLBACK_DEFN(kcubeCtrl, m_indiP_set)(const pcf::IndiProperty &ipRecv)
             return log<software_error,-1>({__FILE__, __LINE__, "rest error in INDI callback"});
         }
     }
-   
+
    return 0;
 }
 

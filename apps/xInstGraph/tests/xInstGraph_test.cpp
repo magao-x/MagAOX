@@ -14,7 +14,7 @@
 namespace xInstGraph_test
 {
 
-class xInstGraph : public MagAOX::app::xInstGraph 
+class xInstGraph : public MagAOX::app::xInstGraph
 {
     public:
 
@@ -28,7 +28,7 @@ class xInstGraph : public MagAOX::app::xInstGraph
         return MagAOX::app::xInstGraph::config;
     }
 
-    
+
 
 };
 

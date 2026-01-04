@@ -31,41 +31,41 @@ using namespace mx::improc;
  {
  namespace app
  {
- 
+
  class loPredCtrl : public MagAOXApp<true>, public dev::shmimMonitor<loPredCtrl>
  {
      // Give the test harness access.
      friend class loPredCtrl_test;
- 
+
      friend class dev::shmimMonitor<loPredCtrl>;
- 
+
      // The base shmimMonitor type
      typedef dev::shmimMonitor<loPredCtrl> shmimMonitorT;
- 
+
      /// Floating point type in which to do all calculations.
      typedef float realT;
- 
+
    public:
      /** \name app::dev Configurations
       *@{
       */
- 
+
      ///@}
- 
+
    protected:
      /** \name Configurable Parameters
       *@{
       */
- 
+
     // variables for sending the output to an output shmim.
     std::string m_outputName;
-	IMAGE m_outputStream; 
+	IMAGE m_outputStream;
 	uint32_t m_outputWidth {0}; ///< The width of the image
 	uint32_t m_outputHeight {0}; ///< The height of the image.
-	
+
 	uint8_t m_outputDataType{0}; ///< The ImageStreamIO type code.
-	size_t m_outputTypeSize {0}; ///< The size of the type, in bytes.  
-	
+	size_t m_outputTypeSize {0}; ///< The size of the type, in bytes.
+
 	bool m_outputOpened {false};
 	bool m_outputRestart {false};
 
@@ -96,7 +96,7 @@ using namespace mx::improc;
     // Process control parameters
     bool is_learning {false};
     bool is_predictive_control {false};
-    
+
     //  Learning variables
     std::vector<float> m_exploration_noise_strength_01;
     std::vector<int> m_exploration_steps_01;
@@ -130,47 +130,47 @@ using namespace mx::improc;
 
      /// Default c'tor.
      loPredCtrl();
- 
+
      /// D'tor, declared and defined for noexcept.
      ~loPredCtrl() noexcept
      {
      }
- 
+
      virtual void setupConfig();
- 
+
      /// Implementation of loadConfig logic, separated for testing.
      /** This is called by loadConfig().
       */
      int loadConfigImpl(
          mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
- 
+
      virtual void loadConfig();
- 
+
      /// Startup function
      /**
       *
       */
      virtual int appStartup();
- 
+
      /// Implementation of the FSM for loPredCtrl.
      /**
       * \returns 0 on no critical error
       * \returns -1 on an error requiring shutdown
       */
      virtual int appLogic();
- 
+
      /// Shutdown the app.
      /**
       *
       */
      virtual int appShutdown();
- 
+
      // Custom functions
      int send_to_shmim();
-    
+
    protected:
      int allocate( const dev::shmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
- 
+
      int processImage( void *curr_src,          ///< [in] pointer to start of current frame.
                        const dev::shmimT &dummy ///< [in] tag to differentiate shmimMonitor parents.
      );
@@ -178,13 +178,13 @@ using namespace mx::improc;
      // TODO ::: ADD SAVE AND LOAD FUNCTIONALITY
      void save(std::string directory);
      void load(std::string directory);
- }; 
- 
+ };
+
  inline int loPredCtrl::send_to_shmim()
  {
     // Check if processImage is running
     // while(m_outputStream.md[0].write == 1);
-    
+
     // m_outputStream.md[0].write = 1;
     // memcpy( m_outputStream.array.raw, full_command.data(), m_modevalWidth * m_modevalTypeSize );
     // m_outputStream.md[0].cnt0++;
@@ -194,12 +194,12 @@ using namespace mx::improc;
 
     return 0;
  }
- 
+
  inline loPredCtrl::loPredCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
  {
      return;
  }
- 
+
  inline void loPredCtrl::setupConfig()
  {
      shmimMonitorT::setupConfig( config );
@@ -214,7 +214,7 @@ using namespace mx::improc;
      config.add("parameters.history", "", "parameters.history", argType::Required, "parameters", "history", false, "int", "The number of past measurements for the prediction.");
      config.add("parameters.future", "", "parameters.future", argType::Required, "parameters", "future", false, "int", "The number of future steps that are predicted.");
  }
- 
+
  inline int loPredCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
  {
      shmimMonitorT::loadConfig( config );
@@ -242,50 +242,50 @@ using namespace mx::improc;
 
      return 0;
  }
- 
+
  inline void loPredCtrl::loadConfig()
  {
      loadConfigImpl( config );
  }
- 
+
  inline int loPredCtrl::appStartup()
  {
      if( shmimMonitorT::appStartup() < 0 )
      {
          return log<software_error, -1>( { __FILE__, __LINE__ } );
      }
-     
+
      CREATE_REG_INDI_NEW_TEXT( m_indiP_exploration, "exploration_sequence", "", "");
 
      createStandardIndiToggleSw( m_indiP_learningToggle, "learn", "Learning State", "Learn Controls");
 	 registerIndiPropertyNew( m_indiP_learningToggle, INDI_NEWCALLBACK(m_indiP_learningToggle) );
-     
+
      createStandardIndiToggleSw( m_indiP_predictingToggle, "predict", "Predict State", "Predictive Controls");
 	 registerIndiPropertyNew( m_indiP_predictingToggle, INDI_NEWCALLBACK(m_indiP_predictingToggle) );
 
      createStandardIndiRequestSw( m_indiP_resetToggle, "reset_model", "Reset the RLS model", "Reset Model");
-	 registerIndiPropertyNew( m_indiP_resetToggle, INDI_NEWCALLBACK(m_indiP_resetToggle) ); 
+	 registerIndiPropertyNew( m_indiP_resetToggle, INDI_NEWCALLBACK(m_indiP_resetToggle) );
 
      // state(stateCodes::READY);
      state( stateCodes::OPERATING );
      return 0;
  }
- 
+
  inline int loPredCtrl::appLogic()
  {
      if( shmimMonitorT::appLogic() < 0 )
      {
          return log<software_error, -1>( { __FILE__, __LINE__ } );
      }
- 
+
      std::unique_lock<std::mutex> lock( m_indiMutex );
- 
+
      if( shmimMonitorT::updateINDI() < 0 )
      {
          log<software_error>( { __FILE__, __LINE__ } );
      }
 
-     updatesIfChanged<std::string>( m_indiP_exploration, { "current", "target" }, { m_exploration_sequence, m_exploration_sequence } );     
+     updatesIfChanged<std::string>( m_indiP_exploration, { "current", "target" }, { m_exploration_sequence, m_exploration_sequence } );
 
      if(is_learning){
 		 updateSwitchIfChanged(m_indiP_learningToggle, "toggle", pcf::IndiElement::On, INDI_OK);
@@ -298,10 +298,10 @@ using namespace mx::improc;
     }else{
         updateSwitchIfChanged(m_indiP_predictingToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
     }
- 
+
      return 0;
  }
- 
+
  inline int loPredCtrl::appShutdown()
  {
      shmimMonitorT::appShutdown();
@@ -311,7 +311,7 @@ using namespace mx::improc;
 
      return 0;
  }
- 
+
  inline int loPredCtrl::allocate( const dev::shmimT &dummy )
  {
     static_cast<void>( dummy ); // be unused
@@ -328,7 +328,7 @@ using namespace mx::improc;
 
     generator = std::default_random_engine();
     distribution = std::normal_distribution<DDSPC::realT>(0.0, 1.0);
-    
+
     /*
     // Allocate the DM
 	if(m_outputOpened){
@@ -345,18 +345,18 @@ using namespace mx::improc;
 			m_outputOpened = true;
 		}
 	}
-	
+
 	if(!m_outputOpened){
-		log<text_log>( m_outputName + " not opened.", logPrio::LOG_NOTICE); 
+		log<text_log>( m_outputName + " not opened.", logPrio::LOG_NOTICE);
 		return -1;
 	}else{
-		m_outputWidth = m_outputStream.md->size[0]; 
-		m_outputHeight = m_outputStream.md->size[1]; 
+		m_outputWidth = m_outputStream.md->size[0];
+		m_outputHeight = m_outputStream.md->size[1];
 
 		m_outputDataType = m_outputStream.md->datatype;
 		m_outputTypeSize = sizeof(float);
-		
-		log<text_log>( "Opened " + m_outputName + " " + std::to_string(m_outputWidth) + " x " + std::to_string(m_outputHeight) + " with data type: " + std::to_string(m_outputDataType), logPrio::LOG_NOTICE); 
+
+		log<text_log>( "Opened " + m_outputName + " " + std::to_string(m_outputWidth) + " x " + std::to_string(m_outputHeight) + " with data type: " + std::to_string(m_outputDataType), logPrio::LOG_NOTICE);
 	}
     */
 
@@ -364,10 +364,10 @@ using namespace mx::improc;
 
     return 0;
  }
- 
+
  inline int loPredCtrl::processImage( void *curr_src, const dev::shmimT &dummy )
  {
-    // static_cast<void>( dummy ); // be unused   
+    // static_cast<void>( dummy ); // be unused
     // This could be made more efficient by doing only a single copy statement.
     Eigen::Map<eigenImage<realT>> m_modeval( static_cast<realT *>(curr_src), m_modevalWidth, m_modevalHeight);
 
@@ -391,19 +391,19 @@ using namespace mx::improc;
             controller->set_regularization(m_regularization_steps_02[0]);
         }
     }
-    
+
     if(use_set_01){
         if(!m_exploration_steps_01.empty() and !m_exploration_noise_strength_01.empty()){
             for(int i=0; i < m_num_modes; i++){
                 exp_noise(i,0) = m_exploration_noise_strength_01[0] * distribution(generator);
             }
-            
+
             // If no more steps are left pop it!
             m_exploration_steps_01[0]--;
             if(m_exploration_steps_01[0] == 0){
                 m_exploration_steps_01.erase(m_exploration_steps_01.begin());
                 m_exploration_noise_strength_01.erase(m_exploration_noise_strength_01.begin());
-                
+
                 // Erase and apply the next regularization step?
                 m_regularization_steps_01.erase(m_regularization_steps_01.begin());
                 if(!m_regularization_steps_01.empty())
@@ -415,13 +415,13 @@ using namespace mx::improc;
             for(int i=0; i < m_num_modes; i++){
                 exp_noise(i,0) = m_exploration_noise_strength_02[0] * distribution(generator);
             }
-            
+
             // If no more steps are left pop it!
             m_exploration_steps_02[0]--;
             if(m_exploration_steps_02[0] == 0){
                 m_exploration_steps_02.erase(m_exploration_steps_02.begin());
                 m_exploration_noise_strength_02.erase(m_exploration_noise_strength_02.begin());
-                
+
                 // Erase and apply the next regularization step?
                 m_regularization_steps_02.erase(m_regularization_steps_02.begin());
                 if(!m_regularization_steps_02.empty())
@@ -429,7 +429,7 @@ using namespace mx::improc;
             }
         }
     }
-    
+
 
     for(int i=0; i < m_num_modes; i++){
         new_measurement(i, 0) = m_modeval(i,0);
@@ -444,11 +444,11 @@ using namespace mx::improc;
             full_command(i, 0) = new_command(i, 0);
         }else{
             full_command(i, 0) = m_modeval(i,0);
-        }   
+        }
     }
 
     // send_to_shmim();
-    
+
     if(is_learning){
         controller->update_system();
         controller->update_controller();
@@ -457,7 +457,7 @@ using namespace mx::improc;
     if(frame_counter % 20 == 0){
         std::cout << "HOWDY" << std::endl;
     }
- 
+
      frame_counter++;
      return 0;
  }
@@ -465,7 +465,7 @@ using namespace mx::improc;
  INDI_NEWCALLBACK_DEFN( loPredCtrl, m_indiP_exploration )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_exploration, ipRecv );
-    // Called in indi like: num_explore, std, regularization, num_explore, std, regularization, .... 
+    // Called in indi like: num_explore, std, regularization, num_explore, std, regularization, ....
 
     std::string target;
 
@@ -483,7 +483,7 @@ using namespace mx::improc;
 
     std::stringstream csvStringStream(m_exploration_sequence);
     std::string entry;
-    
+
     int k = 0;
     while (getline(csvStringStream, entry, ',')){
         if(k % 3 == 0){
@@ -492,7 +492,7 @@ using namespace mx::improc;
                 m_exploration_steps_02.push_back(std::stoi(entry));
             }else{
                 m_exploration_steps_01.push_back(std::stoi(entry));
-            }            
+            }
         }else if(k % 3 == 1){
             // std::cout << static_cast<DDSPC::realT>() << std::endl;
             if(use_set_01){
@@ -521,7 +521,7 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_learningToggle )(const pcf::IndiProper
       log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
    }
-   
+
    //switch is toggled to on
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
@@ -545,7 +545,7 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_learningToggle )(const pcf::IndiProper
       }
       return 0;
    }
-   
+
    return 0;
 }
 
@@ -556,7 +556,7 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_predictingToggle )(const pcf::IndiProp
       log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
    }
-   
+
    //switch is toggled to on
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
@@ -581,7 +581,7 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_predictingToggle )(const pcf::IndiProp
       }
       return 0;
    }
-   
+
    return 0;
 }
 
@@ -597,20 +597,19 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_resetToggle )(const pcf::IndiProperty 
 	if(!ipRecv.find("request")) return 0;
 
 	if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
-	{   
+	{
 		std::lock_guard<std::mutex> guard(m_indiMutex);
-		
+
         //controller->reset();
         do_reset_model = true;
         log<text_log>("request reset.", logPrio::LOG_NOTICE);
 		updateSwitchIfChanged(m_indiP_resetToggle, "request", pcf::IndiElement::Off, INDI_IDLE);
 	}
-   
+
    return 0;
 }
- 
+
  } // namespace app
  } // namespace MagAOX
- 
+
  #endif // loPredCtrl_hpp
- 

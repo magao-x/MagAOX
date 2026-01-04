@@ -1,5 +1,5 @@
 
-allall: all 
+allall: all
 
 OTHER_HEADERS=
 TARGET=hwpTracker

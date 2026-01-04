@@ -109,7 +109,7 @@ int za_disconnect(z_port port)
  * forgotten the leading '/' and trailing '\n'. Mention of this is probably
  * best left out of the official docs since it's a hacky way to use za_send().
  */
-int za_send( z_port port, 
+int za_send( z_port port,
              const char *command,
              size_t sMaxSz
            )
@@ -276,7 +276,7 @@ static size_t copy_until_delim(char *destination, const char *source,
 	return i + 1;
 }
 
-static int decode_reply( struct za_reply *destination, 
+static int decode_reply( struct za_reply *destination,
                          const char *reply,
                          size_t sMaxSz
                        )
@@ -383,7 +383,7 @@ static int decode_reply( struct za_reply *destination,
 
 }
 
-static int decode_alert( struct za_reply *destination, 
+static int decode_alert( struct za_reply *destination,
                          const char *reply,
                          size_t sMaxSz
                        )
@@ -462,7 +462,7 @@ static int decode_alert( struct za_reply *destination,
 	return Z_SUCCESS;
 }
 
-static int decode_info( struct za_reply *destination, 
+static int decode_info( struct za_reply *destination,
                         const char *reply,
                         size_t sMaxSz
                       )
@@ -536,7 +536,7 @@ static int decode_info( struct za_reply *destination,
  * See http://www.zaber.com/wiki/Manuals/ASCII_Protocol_Manual#Replies for
  * more info on replies.
  */
-int za_decode( struct za_reply *destination, 
+int za_decode( struct za_reply *destination,
                const char *reply,
                size_t sMaxSz
              )

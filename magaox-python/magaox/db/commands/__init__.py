@@ -1,5 +1,4 @@
 from .backfill import Backfill
-from .inventory import Inventory
 from .setup import Setup
 
 __all__ = [

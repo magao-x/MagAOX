@@ -48,7 +48,7 @@
       <file name="katie.wav" />
     </walk-up>
     <walk-up email="tonucci@strw.leidenuniv.nl">
-      <file name="elena.mp3" />
+      <file name="elena.wav" />
     </walk-up>
     <walk-up email="edenmcewen@arizona.edu">
       <file name="eden.wav" />
@@ -70,9 +70,6 @@
     </walk-up>
     <walk-up email="aweinberger@carnegiescience.edu">
       <file name="alycia.mp3" />
-    </walk-up>
-    <walk-up email="lalbrow@mit.edu">
-      <file name="leah.mp3"/>
     </walk-up>
   </walk-ups>
   <soundboard>
@@ -121,14 +118,8 @@
     <button name="Shenanigans">
       <file name="panther.mp3" />
     </button>
-    <button name="AngryTurbulence">
+     <button name="AngryTurbulence">
       <file name="batushka_clip.wav" />
-    </button>
-    <button name="Espresso">
-      <file name="espresso.mp3" />
-    </button>
-    <button name="Macchiato">
-      <file name="macchiato.mp3" />
     </button>
   </soundboard>
   <react-to indi-id="fwfpm.filterName.cmc">

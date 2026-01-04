@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup flatlogs_files
-  * 
+  *
   * History:
   * - 2018-08-17 created by JRM
   */

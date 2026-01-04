@@ -17,7 +17,7 @@ using namespace MagAOX::app;
 namespace SMCTEST
 {
 
-class observerCtrl_test : public observerCtrl 
+class observerCtrl_test : public observerCtrl
 {
 
 public:
@@ -46,4 +46,4 @@ SCENARIO( "INDI Callbacks", "[observerCtrl]" )
 }
 
 
-} //namespace observerCtrl_test 
+} //namespace observerCtrl_test

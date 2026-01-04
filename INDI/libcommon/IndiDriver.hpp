@@ -24,7 +24,7 @@ class IndiDriver : public pcf::IndiConnection
     IndiDriver( const std::string &szName,
                 const std::string &szVersion,
                 const std::string &szProtocolVersion );
-                
+
     /// Standard destructor.
     virtual ~IndiDriver() noexcept(true);
 

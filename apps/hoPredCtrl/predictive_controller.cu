@@ -6,7 +6,7 @@
 #include <sstream>
 
 namespace DDSPC
-{	
+{
 	PredictiveController::PredictiveController(int num_history, int num_future, int num_modes, int num_measurements, float gamma, float lambda, float P0, int num_actuators){
 		cudaError_t cudaerr = cudaSetDevice(0);
 		check_cuda_error(cudaerr);
@@ -32,7 +32,7 @@ namespace DDSPC
 		m_wfs_measurement = new Matrix(0.0, num_measurements, 1);
 		m_wfs_measurement->set_handle(&handle);
 
-		//m_measurement = make_col_vector(0.0, num_modes, 1);		
+		//m_measurement = make_col_vector(0.0, num_modes, 1);
 		m_measurement = new Matrix(0.0, num_modes, 1);
 		m_measurement->set_handle(&handle);
 
@@ -43,7 +43,7 @@ namespace DDSPC
 		// }
 		m_exploration_signal->to_gpu();
 		m_exploration_buffer = nullptr;
-		
+
 
 		//
 		// m_voltages = make_col_vector(0.0, num_actuators, 1);
@@ -60,7 +60,7 @@ namespace DDSPC
 
 		controller = new DistributedAutoRegressiveController(&handle, m_num_history, m_num_future, m_num_modes, m_gamma, m_lambda, m_P0);
 		controller->set_handle(&handle);
-		
+
 		// m_command = new Matrix(0.0, num_modes, 1);
 		// m_command->set_handle(&handle);
 
@@ -74,9 +74,9 @@ namespace DDSPC
 		cublasDestroy(handle);
 		delete [] m_lambda;
 		//delete controller;
-		
+
 		delete m_wfs_measurement;
-		
+
 		delete m_measurement;
 		delete m_exploration_signal;
 		delete m_command;
@@ -84,7 +84,7 @@ namespace DDSPC
 
 		delete m_interaction_matrix;
 		delete m_mode_mapping_matrix;
-		
+
 		if (m_exploration_buffer){
 			delete m_exploration_buffer;
 		}
@@ -137,10 +137,10 @@ namespace DDSPC
 		m_mode_mapping_matrix->to_gpu();
 		// std::cout << "shape of mode mapping matrix: ";
 		// m_mode_mapping_matrix->print_shape();
-		
+
 		// std::cout << "shape of command: ";
 		// m_command->print_shape();
-		
+
 		// std::cout << "shape of voltages: ";
 		// m_voltages->print_shape();
 
@@ -158,9 +158,9 @@ namespace DDSPC
 		// Copy measurement to GPU
 		cpu_full_copy(m_wfs_measurement, new_wfs_measurement);
 		m_wfs_measurement->to_gpu();
-		
+
 		m_interaction_matrix->dot(m_wfs_measurement, m_measurement);
-		
+
 		// Add data to controller
 		controller->add_measurement(m_measurement);
 	};
@@ -171,7 +171,7 @@ namespace DDSPC
 
 	float* PredictiveController::get_command(float clip_val){
 		get_next_exploration_signal();
-		
+
 		// Determine the command vector
 		m_command = controller->get_new_control_command(clip_val, m_exploration_signal);
 
@@ -188,7 +188,7 @@ namespace DDSPC
 		// auto elapsed_time = std::chrono::duration_cast<std::chrono::seconds>(p1.time_since_epoch()).count();
 		using namespace std::chrono;
 		uint64_t elapsed_time = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-		
+
 		std::ostringstream oss;
 		oss << elapsed_time;
 		std::string timestamp(oss.str());
@@ -199,7 +199,7 @@ namespace DDSPC
 		std::fstream f;
 		f.open(path + "header_" + timestamp + ".txt", std::ios::out);
 		f << "Header file for the Predictive controller. \n\r";
-		
+
 		f << "Time: " << timestamp << "\n\r";
 		f << "History: " << m_num_history << "\n\r";
 		f << "Future: " << m_num_future << "\n\r";
@@ -217,7 +217,7 @@ namespace DDSPC
 		// The modal reconstructor
 		m_mode_mapping_matrix->to_file(path + "mode_mapping_matrix_" + timestamp + ".csv");
 		m_interaction_matrix->to_file(path + "interaction_matrix_" + timestamp + ".csv");
-		
+
 
 	}
 
@@ -225,7 +225,7 @@ namespace DDSPC
 		// Save the current controller
 		controller->rls->A->from_file(path + "prediction_matrix_" + timestamp + ".csv"); // These are learned
 		controller->rls->P->from_file(path + "covariance_matrix_" + timestamp + ".csv"); // These are learned
-		
+
 		// Create the controller
 		update_controller();
 	}

@@ -25,9 +25,9 @@ protected:
     std::string m_deviceName;
 
     std::vector<std::string> m_cautionKeys;
-    
+
     std::vector<std::string> m_warningKeys;
-    
+
     std::vector<std::string> m_alertKeys;
 
     char m_blob[512]; ///< Memory for copying rtimvDictionary blobs

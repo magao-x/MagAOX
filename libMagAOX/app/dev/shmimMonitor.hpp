@@ -573,7 +573,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
             if( ImageStreamIO_openIm( &m_imageStream, m_shmimName.c_str() ) == 0 )
             {
-                if( m_imageStream.md[0].sem < SEMAPHORE_MAXVAL ) 
+                if( m_imageStream.md[0].sem < SEMAPHORE_MAXVAL )
                 {
                     ImageStreamIO_closeIm( &m_imageStream );
                     mx::sys::sleep( 1 ); // We just need to wait for the server process to finish startup.

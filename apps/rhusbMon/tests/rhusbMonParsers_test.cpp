@@ -10,7 +10,7 @@
 
 using namespace MagAOX::app;
 
-namespace rhusbMonParsers_test 
+namespace rhusbMonParsers_test
 {
 
 SCENARIO( "Parsing the temp response", "[rhusbMonParsers]" )
@@ -257,4 +257,4 @@ SCENARIO( "Parsing the humidity response", "[rhusbMonParsers]" )
    }
 }
 
-} //namespace ocamUtils_test 
+} //namespace ocamUtils_test

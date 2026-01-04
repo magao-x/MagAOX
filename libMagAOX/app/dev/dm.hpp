@@ -1877,7 +1877,7 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
     // clang-format off
     #ifdef XWC_DMTIMINGS
     m_tdeltaf = mx::sys::get_curr_time();
-    
+
     m_tf = m_tdeltaf;
     #endif // clang-format on
 

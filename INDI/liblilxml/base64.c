@@ -2,7 +2,7 @@
  * under the terms of the GNU General Public License as published by the Free
  * Software Foundation; either version 2 of the License, or (at your option) any
  * later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  * FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
@@ -39,7 +39,7 @@ static const char base64val[] = {
 };
 #define DECODE64(c)  (isascii(c) ? base64val[c] : BAD)
 
-/* convert inlen raw bytes at in to base64 string (NUL-terminated) at out. 
+/* convert inlen raw bytes at in to base64 string (NUL-terminated) at out.
  * out size should be at least 4*inlen/3 + 4.
  * return length of out (sans trailing NUL).
  */
@@ -59,7 +59,7 @@ to64frombits(unsigned char *out, const unsigned char *in, int inlen)
     if (inlen > 0)
     {
         unsigned char fragment;
-    
+
         *out++ = base64digits[in[0] >> 2];
         fragment = (in[0] << 4) & 0x30;
         if (inlen > 1)
@@ -93,7 +93,7 @@ from64tobits(char *out, const char *in)
             return(-2);
 	do {digit3 = *in++;} while (isspace(digit3));
         if (digit3 != '=' && DECODE64(digit3) == BAD)
-            return(-3); 
+            return(-3);
 	do {digit4 = *in++;} while (isspace(digit4));
         if (digit4 != '=' && DECODE64(digit4) == BAD)
             return(-4);

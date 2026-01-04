@@ -1145,7 +1145,7 @@ void streamWriter::fgThreadExec()
 
             if( ImageStreamIO_openIm( &image, m_shmimName.c_str() ) == 0 )
             {
-                if( image.md[0].sem < SEMAPHORE_MAXVAL ) 
+                if( image.md[0].sem < SEMAPHORE_MAXVAL )
                 {
                     ImageStreamIO_closeIm( &image );
                     mx::sys::sleep( 1 ); // We just need to wait for the server process to finish startup.

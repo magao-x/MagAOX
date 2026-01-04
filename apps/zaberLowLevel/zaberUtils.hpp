@@ -24,9 +24,9 @@ namespace app
 /**
   * \returns 0 on success
   * \returns \<0 on error with error code primarily meant for unit testing
-  * 
-  * \ingroup zaberLowLevel 
-  */  
+  *
+  * \ingroup zaberLowLevel
+  */
 int parseSystemSerial( std::vector<int> & address,
                        std::vector<std::string> & serial,
                        const std::string & response
@@ -38,41 +38,41 @@ int parseSystemSerial( std::vector<int> & address,
    {
       return ZUTILS_E_NOAT;
    }
-   
+
    while(at != std::string::npos)
    {
       size_t sp = response.find(' ', at);
-      
+
       if(sp == std::string::npos)
       {
          return ZUTILS_E_NOSP;
       }
-      
+
       if(sp-at  != 3 ) //Address should be 2 characters
       {
          return ZUTILS_E_BADADD;
       }
-      
+
       int add = std::stoi( response.substr(at+1, sp-at-1));
-      
+
       address.push_back(add);
-      
+
       at = response.find('@', at+1);
-      
+
       sp = response.rfind(' ', at);
       size_t ed = response.find_first_of("\n@", sp);
       if(ed == std::string::npos) ed = response.size();
-      
+
       if(ed-sp-1 > 6)
       {
          return ZUTILS_E_SERIALSIZE;
       }
-      
+
       std::string ser = response.substr(sp+1, ed - sp-1);
-      
+
       serial.push_back(ser);
    }
-   
+
    return 0;
 }
 

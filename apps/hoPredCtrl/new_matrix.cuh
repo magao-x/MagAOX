@@ -14,7 +14,7 @@ class Matrix{
 	private:
 		cublasHandle_t* handle;
 
-	public:	
+	public:
 		int size_;
 		size_t element_size_;
 		int total_size_;
@@ -22,24 +22,24 @@ class Matrix{
 		int batch_size_;
 		int nrows_;
 		int ncols_;
-			
+
 		float** cpu_data; // Host side pointers to host data
 		float** gpu_data; // Host side pointers to device data
 		float** dev_gpu_data; // Device side pointers to device data
 		int *info;
-	
+
 		Matrix(float initialization_value, int num_rows, int num_columns, int num_batches=1);
 		~Matrix();
 
 		void set_to_zero();
 		void divide_by_scalar(Matrix* scalar, Matrix* out=nullptr);
-		
+
 		void transpose();
 		/*
 		// Data manipulations functions
 		// I/O functions
 		void print(bool print_gpu=false);
-		
+
 		*/
 
 		void shift_columns_cpu();
@@ -49,9 +49,9 @@ class Matrix{
 		void add(Matrix* other, float value=1);
 		void subtract(Matrix* other, float value=-1);
 		void scale(float scale_param);
-		
+
 		void print(bool print_gpu);
-		
+
 		long int num_elements(){
 			return ncols_ * nrows_;
 		}
@@ -59,7 +59,7 @@ class Matrix{
 		void set_handle(cublasHandle_t* new_handle){
 			handle = new_handle;
 		};
-		
+
 		void set(float value, int row_index, int column_index, int batch_index=1){
 			cpu_data[0][BIDX2C(row_index, column_index, batch_index, nrows_, ncols_)] = value;
 		}
@@ -75,7 +75,7 @@ class Matrix{
 		float* get_data_ptr(){
 			return cpu_data[0];
 		}
-		
+
 		// Data transfer commands
 		void to_gpu();
 		void to_cpu();

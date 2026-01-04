@@ -105,9 +105,10 @@
 ../libMagAOX/tty/tests/tty_test
 ../libMagAOX/tty/tests/ttyIOUtils_test
 
+../utils/logsurgeon/tests/logsurgeon_config_test
+
 ../utils/tests/cursesINDI_test
 ../utils/tests/logdump_test
-../utils/tests/logsurgeon_test
 ../utils/tests/shmimLat_test
 ../utils/tests/shmimPlot_test
 ../utils/tests/xrif2fits_test

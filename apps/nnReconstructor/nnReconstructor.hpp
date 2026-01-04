@@ -8,7 +8,7 @@
 #define nnReconstructor_hpp
 
 #include <NvInfer.h>
-#include <cuda_fp16.h>  
+#include <cuda_fp16.h>
 #include <cuda_runtime_api.h>
 #include <iostream>
 #include <fstream>
@@ -68,9 +68,9 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
     typedef dev::frameGrabber<nnReconstructor> frameGrabberT;
 
     friend class dev::telemeter<nnReconstructor>;
-    
+
     typedef dev::telemeter<nnReconstructor> telemeterT;
-    
+
     /// Floating point type in which to do all calculations.
     typedef float realT;
 
@@ -78,7 +78,7 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
     /** \name app::dev Configurations
      *@{
      */
-    
+
     /// This framegrabber can't be flipped
     static constexpr bool c_frameGrabber_flippable = false;
 
@@ -92,12 +92,12 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
     std::string engineName;   // Name of the engine
     std::string engineDirs;   // Name of the engine
     bool rebuildEngine {false};       // If true, it will rebuild the engine and save it at engineName
-    
+
     std::string m_fpsSource{ "camwfs" }; /**< Device name for getting fps of the loop.
                                               This device must have *.fps.current.  Default is camwfs*/
 
                                               ///@}
-                                              
+
     Logger logger;			  // The tensorRT logger
     std::vector<char> engineData; // for loading the engine file.
 
@@ -167,8 +167,8 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
     /** This is called by loadConfig().
      */
     int loadConfigImpl(
-        mx::app::appConfigurator &_config /**< [in] an application configuration 
-        from which to load values*/ 
+        mx::app::appConfigurator &_config /**< [in] an application configuration
+        from which to load values*/
     );
 
     virtual void loadConfig();
@@ -194,7 +194,7 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
 
     // Custom functions
     //int send_to_shmim();
-    
+
     void load_engine(const std::string filename);
     void create_engine_context();
     void prepare_engine_memory();
@@ -211,40 +211,40 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
     );
 
 
-    /** \name frameGrabber Interface 
+    /** \name frameGrabber Interface
      * @{
      */
-  
+
     /// Configure the output stream for acquistion.
-    /** Tests if stream exists and is expected size.  Creates it if needed. 
+    /** Tests if stream exists and is expected size.  Creates it if needed.
      *  will set m_width, m_height, and m_dataType.
      */
     int configureAcquisition();
- 
+
     /// Gets the frames-per-second readout rate
     /** Used for the latency statistics
       */
     float fps();
- 
+
     /// Start acquisition.
     /** A no-op in this class.
-     */ 
+     */
     int startAcquisition();
- 
+
     /// Acquire data.
     /** Here just waits on the semaphore.
      */
     int acquireAndCheckValid();
- 
+
     /// Loads the modevals into the stream
     int loadImageIntoStream(void * dest);
- 
+
     ///Take any actions needed to reconfigure the system.  Called if m_reconfig is set to true.
     int reconfig();
 
     ///@}
 
-    /** \name INDI interface 
+    /** \name INDI interface
      * @{
     */
 
@@ -258,7 +258,7 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
     /** \name Telemeter Interface
      * @{
      */
-    
+
     int checkRecordTimes();
 
     int recordTelem( const telem_fgtimings * );
@@ -267,14 +267,14 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
 };
 
 void nnReconstructor::load_engine(const std::string filename) {
-    
+
     std::ifstream file(filename, std::ios::binary);
     if (!file) {
         std::cout << "Error opening " << filename << std::endl;
     }
 
     file.seekg(0, std::ios::end);
-    
+
     engineData = std::vector<char>(file.tellg());
     file.seekg(0, std::ios::beg);
     file.read(engineData.data(), engineData.size());
@@ -288,14 +288,14 @@ void nnReconstructor::create_engine_context(){
     if (!runtime) {
         std::cout << "Failed to createInferRuntime\n";
     }
-    
+
     engine = runtime->deserializeCudaEngine(engineData.data(), engineData.size());
     if (!engine) {
         std::cout << "Failed to deserialize CUDA engine.\n";
     } else {
         std::cout << "Deserialized CUDA engine.\n";
     }
-    
+
     context = engine->createExecutionContext();
 
 
@@ -339,7 +339,7 @@ void nnReconstructor::prepare_engine_memory(){
         }
         cudaMalloc((void**)&d_output, outputSize * sizeof(float));
     }
-    
+
     //cudaMalloc((void**)&d_input, inputSize * sizeof(float));
     //cudaMalloc((void**)&d_output, outputSize * sizeof(float));
 
@@ -350,7 +350,7 @@ void nnReconstructor::cleanup_engine_memory(){
         cudaFree(d_input);
     if(d_input2)
         cudaFree(d_input2);
-    
+
     if(d_output)
         cudaFree(d_output);
 }
@@ -446,7 +446,7 @@ inline void nnReconstructor::setupConfig()
                 false,
                 "bool",
                 "If true the half precision mode will be used." );
-    
+
     config.add( "parameters.explicit_tt",
                 "",
                 "parameters.explicit_tt",
@@ -567,7 +567,7 @@ inline void nnReconstructor::loadConfig()
 
 inline int nnReconstructor::appStartup()
 {
-    
+
     REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsSource, std::string( "fps" ) );
 
     createROIndiNumber( m_indiP_fps, "fps" );
@@ -595,7 +595,7 @@ inline int nnReconstructor::appStartup()
     FRAMEGRABBER_APP_STARTUP;
 
     SHMIMMONITOR_APP_STARTUP;
-  
+
     TELEMETER_APP_STARTUP;
 
     state( stateCodes::OPERATING );
@@ -679,7 +679,7 @@ inline int nnReconstructor::allocate( const dev::shmimT &dummy )
         }
     //memset( modeval, 0, sizeof( float) * outputSize);
     modeval.setZero();
-    
+
     if (use_fp16){
         pp_image_half = new half[Npup * pixels_per_quadrant];
         modeval_half = new half[outputSize];
@@ -749,7 +749,7 @@ inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dum
 
         }
     }
-    
+
 
     // Run inference
     if (explicit_tt){
@@ -814,17 +814,17 @@ int nnReconstructor::configureAcquisition()
 
     return 0;
 }
- 
+
 float nnReconstructor::fps()
 {
     return m_fps;
 }
- 
+
 int nnReconstructor::startAcquisition()
-{    
+{
     return 0;
 }
- 
+
 int nnReconstructor::acquireAndCheckValid()
 {
     timespec ts;
@@ -854,7 +854,7 @@ int nnReconstructor::acquireAndCheckValid()
         return 1;
     }
 }
- 
+
 int nnReconstructor::loadImageIntoStream(void * dest)
 {
     memcpy( dest, modeval.data(), modeval.rows() * frameGrabberT::m_typeSize );
@@ -863,7 +863,7 @@ int nnReconstructor::loadImageIntoStream(void * dest)
 
     return 0;
 }
- 
+
 int nnReconstructor::reconfig()
 {
     return 0;

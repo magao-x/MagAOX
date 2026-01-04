@@ -74,27 +74,27 @@ public:
         app[1].init(this, 1);
         app[2].init(this, 2);
         app[3].init(this, 3);
-        
+
         digital[0].init(this, 0);
         digital[1].init(this, 1);
 
         i2c[0].init(this, 0);
-        
+
         pointer[0].init(this, 0);
         pointer[1].init(this, 1);
         pointer[2].init(this, 2);
         pointer[3].init(this, 3);
-        
+
         rail[0].init(this, 0);
         rail[1].init(this, 1);
-        
+
         store[storeInternalStore].init(this, storeInternalStore);
         store[storeRAMStore].init(this, storeRAMStore);
-        
+
         system.init(this, 0);
-        
+
         temperature.init(this, 0);
-        
+
         timer[0].init(this, 0);
         timer[1].init(this, 1);
         timer[2].init(this, 2);
@@ -103,11 +103,11 @@ public:
         timer[5].init(this, 5);
         timer[6].init(this, 6);
         timer[7].init(this, 7);
-        
+
 
 
     }
-    
+
     AppClass app[aMTMPM1_NUM_APPS];
     DigitalClass digital[aMTMPM1_NUM_DIGITALS];
     I2CClass i2c[aMTMPM1_NUM_I2C];
@@ -117,8 +117,8 @@ public:
     SystemClass system;
     TemperatureClass temperature;
     TimerClass timer[aMTMPM1_NUM_TIMERS];
-    
-    
+
+
 };
 
 #endif /* __aMTMPM1_H__ */

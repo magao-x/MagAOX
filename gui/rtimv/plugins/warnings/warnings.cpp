@@ -14,29 +14,29 @@ warnings::~warnings()
 int warnings::attachOverlay( rtimvOverlayAccess & roa,
                              mx::app::appConfigurator & config
                            )
-{   
+{
     m_roa = roa;
-   
+
     config.configUnused(m_deviceName, mx::app::iniFile::makeKey("rules", "device"));
-   
+
     if(m_deviceName == "")
     {
         m_enableable = false;
         disableOverlay();
         return 1; //Tell rtimv to unload me since not configured.
     }
-   
+
     config.configUnused(m_cautionKeys, mx::app::iniFile::makeKey("rules", "cautions"));
     config.configUnused(m_warningKeys, mx::app::iniFile::makeKey("rules", "warnings"));
     config.configUnused(m_alertKeys, mx::app::iniFile::makeKey("rules", "alerts"));
 
-    if(m_cautionKeys.size() == 0 && m_warningKeys.size() == 0 && m_alertKeys.size() == 0) 
+    if(m_cautionKeys.size() == 0 && m_warningKeys.size() == 0 && m_alertKeys.size() == 0)
     {
         m_enableable = false;
         disableOverlay();
         return 1;
     }
-    
+
     connect(this, SIGNAL(warningLevel(rtimv::warningLevel)), m_roa.m_mainWindowObject, SLOT(borderWarningLevel(rtimv::warningLevel)));
 
     if(m_roa.m_dictionary != nullptr)
@@ -55,7 +55,7 @@ int warnings::attachOverlay( rtimvOverlayAccess & roa,
         {
             (*m_roa.m_dictionary)[m_deviceName + ".alert." + m_alertKeys[n]].setBlob(nullptr, 0);
         }
-        
+
     }
 
     m_enableable = true;
@@ -64,20 +64,20 @@ int warnings::attachOverlay( rtimvOverlayAccess & roa,
 
     return 0;
 }
-      
+
 int warnings::updateOverlay()
 {
     if(!m_enabled) return 0;
-   
+
     if(m_roa.m_dictionary == nullptr) return 0;
 
     if(m_roa.m_graphicsView == nullptr) return 0;
-   
+
     bool caution = false;
 
     for(size_t n = 0; n < m_cautionKeys.size(); ++n)
     {
-        if( ((*m_roa.m_dictionary)[m_deviceName + ".caution." + m_cautionKeys[n]].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) 
+        if( ((*m_roa.m_dictionary)[m_deviceName + ".caution." + m_cautionKeys[n]].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) )
         {
             errPrint("bad string"); //Don't trust this as a string.
             continue;
@@ -90,7 +90,7 @@ int warnings::updateOverlay()
 
     for(size_t n = 0; n < m_warningKeys.size(); ++n)
     {
-        if( ((*m_roa.m_dictionary)[m_deviceName + ".warning." + m_warningKeys[n]].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) 
+        if( ((*m_roa.m_dictionary)[m_deviceName + ".warning." + m_warningKeys[n]].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) )
         {
             errPrint("bad string"); //Don't trust this as a string.
             continue;
@@ -103,7 +103,7 @@ int warnings::updateOverlay()
 
     for(size_t n = 0; n < m_alertKeys.size(); ++n)
     {
-        if( ((*m_roa.m_dictionary)[m_deviceName + ".alert." + m_alertKeys[n]].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) 
+        if( ((*m_roa.m_dictionary)[m_deviceName + ".alert." + m_alertKeys[n]].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) )
         {
             errPrint("bad string"); //Don't trust this as a string.
             continue;
@@ -145,7 +145,7 @@ bool warnings::overlayEnabled()
 void warnings::enableOverlay()
 {
    if(m_enableable == false) return;
-   
+
    m_enabled = true;
 }
 
@@ -155,7 +155,7 @@ void warnings::disableOverlay()
    {
       m_roa.m_graphicsView->statusTextText(n, "");
    }
-   
+
    m_enabled = false;
 }
 
@@ -167,6 +167,6 @@ std::vector<std::string> warnings::info()
     {
         vinfo.push_back("                   " + m_deviceName);
     }*/
-    
+
     return vinfo;
 }

@@ -307,7 +307,7 @@ pupilGuide::pupilGuide( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, 
 
     ui.setupUi( this );
 
-    
+
     ui.button_focus_scale->setProperty( "isScaleButton", true );
     ui.button_pup_scale->setProperty( "isScaleButton", true );
     ui.button_ttmPeri_scale->setProperty( "isScaleButton", true );
@@ -2562,7 +2562,7 @@ void pupilGuide::on_button_focus_m_pressed()
 
     sendNewProperty( ip );
 
-    
+
 }
 
 void pupilGuide::on_button_focus_scale_pressed()

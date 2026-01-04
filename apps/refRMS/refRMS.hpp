@@ -20,13 +20,13 @@ namespace MagAOX
 namespace app
 {
 
-struct refShmimT 
+struct refShmimT
 {
    static std::string configSection()
    {
       return "refShmim";
    };
-   
+
    static std::string indiPrefix()
    {
       return "refShmim";
@@ -34,13 +34,13 @@ struct refShmimT
 };
 
 
-struct maskShmimT 
+struct maskShmimT
 {
    static std::string configSection()
    {
       return "maskShmim";
    };
-   
+
    static std::string indiPrefix()
    {
       return "maskShmim";
@@ -63,9 +63,9 @@ struct maskShmimT
 /** MagAO-X application to calculate the RMS of the reference subtracted WFS image.
   *
   * \ingroup refRMS
-  * 
+  *
   */
-class refRMS : public MagAOXApp<true>, public dev::shmimMonitor<refRMS, refShmimT>, 
+class refRMS : public MagAOXApp<true>, public dev::shmimMonitor<refRMS, refShmimT>,
                      public dev::shmimMonitor<refRMS,maskShmimT>
 {
 
@@ -74,7 +74,7 @@ class refRMS : public MagAOXApp<true>, public dev::shmimMonitor<refRMS, refShmim
 
    friend class dev::shmimMonitor<refRMS,refShmimT>;
    friend class dev::shmimMonitor<refRMS,maskShmimT>;
-  
+
 public:
 
    //The base shmimMonitor type
@@ -83,7 +83,7 @@ public:
 
    ///Floating point type in which to do all calculations.
    typedef float realT;
-   
+
    typedef int32_t cbIndexT;
 
 protected:
@@ -91,18 +91,18 @@ protected:
    /** \name Configurable Parameters
      *@{
      */
-   
+
    std::string m_fpsSource; ///< Device name for getting fps. This device should have *.fps.current.
 
    ///@}
- 
+
    mx::improc::eigenImage<realT> m_currRef;
    mx::improc::eigenImage<realT> m_mask;
    bool m_maskValid {false};
    realT m_maskSum {0};
 
    mx::sigproc::circularBufferIndex<float, cbIndexT> m_rms;
-   
+
    mx::sigproc::circularBufferIndex<float, cbIndexT> m_mean;
 
    double m_rms_1sec;
@@ -136,14 +136,14 @@ public:
    virtual int appStartup();
 
    /// Implementation of the FSM for refRMS.
-   /** 
+   /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
    virtual int appLogic();
 
    /// Shutdown the app.
-   /** 
+   /**
      *
      */
    virtual int appShutdown();
@@ -152,14 +152,14 @@ protected:
 
 
    int allocate( const refShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
-   
+
    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
                      const refShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                    );
-   
+
 
    int allocate( const maskShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
-   
+
    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
                      const maskShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                    );
@@ -179,7 +179,7 @@ refRMS::refRMS() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 
    refShmimMonitorT::m_getExistingFirst = true;
    maskShmimMonitorT::m_getExistingFirst = true;
-   
+
    return;
 }
 
@@ -187,9 +187,9 @@ inline
 void refRMS::setupConfig()
 {
    refShmimMonitorT::setupConfig(config);
-   maskShmimMonitorT::setupConfig(config); 
+   maskShmimMonitorT::setupConfig(config);
 
-   config.add("rms.fpsSource", "", "rms.fpsSource", argType::Required, "rms", "fpsSource", false, "string", "Device name for getting fps.  This device should have *.fps.current."); 
+   config.add("rms.fpsSource", "", "rms.fpsSource", argType::Required, "rms", "fpsSource", false, "string", "Device name for getting fps.  This device should have *.fps.current.");
 }
 
 inline
@@ -236,14 +236,14 @@ int refRMS::appStartup()
    }
 
    state(stateCodes::OPERATING);
-    
+
    return 0;
 }
 
 inline
 int refRMS::appLogic()
 {
-   
+
    if( refShmimMonitorT::appLogic() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
@@ -320,7 +320,7 @@ int refRMS::appLogic()
          updateIfChanged(m_indiP_refrms, std::vector<std::string>({"one_sec","two_sec","five_sec","ten_sec"}), std::vector<double>({m_rms_1sec, m_rms_2sec, m_rms_5sec, m_rms_10sec}));
 
       }
-   }     
+   }
 
 
    std::unique_lock<std::mutex> lock(m_indiMutex);
@@ -329,7 +329,7 @@ int refRMS::appLogic()
    {
       log<software_error>({__FILE__, __LINE__});
    }
-   
+
    if(maskShmimMonitorT::updateINDI() < 0)
    {
       log<software_error>({__FILE__, __LINE__});
@@ -343,7 +343,7 @@ int refRMS::appShutdown()
 {
    refShmimMonitorT::appShutdown();
    maskShmimMonitorT::appShutdown();
-   
+
    return 0;
 }
 
@@ -352,9 +352,9 @@ inline
 int refRMS::allocate(const refShmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
-  
+
    std::unique_lock<std::mutex> lock(m_indiMutex);
-     
+
    m_currRef.resize(refShmimMonitorT::m_width, refShmimMonitorT::m_height);
 
    std::cerr << "got ref: " << refShmimMonitorT::m_width << " " << refShmimMonitorT::m_height << "\n";
@@ -385,13 +385,13 @@ int refRMS::allocate(const refShmimT & dummy)
 }
 
 inline
-int refRMS::processImage( void * curr_src, 
-                          const refShmimT & dummy 
+int refRMS::processImage( void * curr_src,
+                          const refShmimT & dummy
                         )
 {
    static_cast<void>(dummy); //be unused
-  
-   //Copy it out first so we can afford to be slow and skipping frames 
+
+   //Copy it out first so we can afford to be slow and skipping frames
    m_currRef = Eigen::Map<Eigen::Matrix<float,-1,-1>>((float *)curr_src,  refShmimMonitorT::m_width, refShmimMonitorT::m_height);//,1);
 
    //std::cerr << "pi\n";
@@ -405,13 +405,13 @@ int refRMS::processImage( void * curr_src,
       return 0;
    }
 
-   //mult by mask, etc.      
+   //mult by mask, etc.
    float mean = (m_currRef * m_mask).sum()/m_maskSum;
    float rms = sqrt(((m_currRef - mean)*m_mask).square().sum()/m_maskSum);
 
    m_mean.nextEntry(mean);
    m_rms.nextEntry(rms);
-   
+
    return 0;
 }
 
@@ -420,9 +420,9 @@ inline
 int refRMS::allocate(const maskShmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
-  
+
    std::unique_lock<std::mutex> lock(m_indiMutex);
-     
+
    std::cerr << "got mask: " << maskShmimMonitorT::m_width << " " << maskShmimMonitorT::m_height << "\n";
 
    m_mask.resize(maskShmimMonitorT::m_width, maskShmimMonitorT::m_height);
@@ -431,12 +431,12 @@ int refRMS::allocate(const maskShmimT & dummy)
 }
 
 inline
-int refRMS::processImage( void * curr_src, 
-                          const maskShmimT & dummy 
+int refRMS::processImage( void * curr_src,
+                          const maskShmimT & dummy
                         )
 {
    static_cast<void>(dummy); //be unused
-  
+
    //copy curr_src to mask
    m_mask = Eigen::Map<Eigen::Matrix<float,-1,-1>>((float *)curr_src,  maskShmimMonitorT::m_width,maskShmimMonitorT::m_height);
 
@@ -457,12 +457,12 @@ INDI_SETCALLBACK_DEFN( refRMS, m_indiP_fpsSource )(const pcf::IndiProperty &ipRe
       log<software_error>({__FILE__, __LINE__, "Invalid INDI property."});
       return -1;
    }
-   
+
    if( ipRecv.find("current") != true ) //this isn't valie
    {
       return 0;
    }
-   
+
    //std::lock<std::mutex> mut(m_indiMutex);
 
    realT fps = ipRecv["current"].get<float>();
@@ -471,7 +471,7 @@ INDI_SETCALLBACK_DEFN( refRMS, m_indiP_fpsSource )(const pcf::IndiProperty &ipRe
    if(fps != m_fps)
    {
       m_fps = fps;
-      std::cout << "Got fps: " << m_fps << "\n";   
+      std::cout << "Got fps: " << m_fps << "\n";
       refShmimMonitorT::m_restart = true;
    }
 

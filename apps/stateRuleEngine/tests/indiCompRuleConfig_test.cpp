@@ -367,7 +367,7 @@ SCENARIO( "rule configurations with errors", "[stateRuleEngine::ruleConfig]" )
             bool caught = false;
             try
             {
-                loadRuleConfig(maps, rrkMap, config);            
+                loadRuleConfig(maps, rrkMap, config);
             }
             catch(...)
             {
@@ -446,7 +446,7 @@ SCENARIO( "rule configurations with errors", "[stateRuleEngine::ruleConfig]" )
 
             indiRuleMaps maps;
             std::map<std::string, ruleRuleKeys> rrkMap;
-            
+
             bool caught = false;
             try
             {

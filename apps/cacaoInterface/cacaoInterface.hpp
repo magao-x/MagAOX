@@ -29,7 +29,7 @@ namespace app
 {
 
 /// The MagAO-X CACAO Interface
-/** 
+/**
   * \ingroup cacaoInterface
   */
 class cacaoInterface : public MagAOXApp<true>, public dev::telemeter<cacaoInterface>
@@ -48,31 +48,31 @@ protected:
      *@{
      */
    std::string m_loopNumber; ///< The loop number, X in aolX.  We keep it a string because that's how it gets used.
-   
+
    ///@}
 
    std::string m_aoCalDir;
    std::string m_aoCalArchiveTime;
    std::string m_aoCalLoadTime;
-   
+
    std::string m_loopName; ///< the loop name
-   
+
 
    std::string m_fpsName;
    std::string m_fpsFifo;
 
-   
+
    int m_loopState {0}; ///< The loop state.  0 = off, 1 = paused (on, 0 gain), 2 = on
-   
+
    bool m_loopProcesses {false}; ///< Status of the loop processes.
    bool m_loopProcesses_stat {false}; ///< What the cacao status file says the state of loop processes is.
-   
+
    float m_gain {0.0}; ///< The current loop gain.
    float m_gain_target {0.0}; ///< The target loop gain.
-   
+
    float m_multCoeff {0.0}; ///< The current multiplicative coefficient (1-leak)
    float m_multCoeff_target {0.0}; ///< The target multiplicative coefficient (1-leak)
-   
+
    std::vector<int> m_modeBlockStart;
    std::vector<int> m_modeBlockN;
 
@@ -85,7 +85,7 @@ protected:
 
    float m_maxLim {0.0}; ///< The current max limit
    float m_maxLim_target {0.0}; ///< The target max limit
-   
+
 public:
    /// Default c'tor.
    cacaoInterface();
@@ -110,19 +110,19 @@ public:
    virtual int appStartup();
 
    /// Implementation of the FSM for cacaoInterface.
-   /** 
+   /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
    virtual int appLogic();
 
    /// Shutdown the app.
-   /** 
+   /**
      *
      */
    virtual int appShutdown();
 
-   
+
    /** \name CACAO Interface Functions
      * @{
      */
@@ -147,95 +147,95 @@ public:
 
    /// Get the calibration details
    /** This is done each loop
-     * 
+     *
      * \returns 0 on success
      * \returns -1 on an error
-     */   
+     */
    int getAOCalib();
-   
+
    int getModeBlocks();
-   
-   /// Check if the loop processes are running 
+
+   /// Check if the loop processes are running
    /** sets m_loopProcesses to true or false depending on what it finds out.
-     * 
+     *
      * \returns 0 on success
      * \returns -1 on an error
      */
    int checkLoopProcesses();
-   
+
    /// Set loop gain to the value of m_gain_target;
    /**
-     * 
+     *
      * \returns 0 on success
      * \returns -1 on an error
-     */ 
+     */
    int setGain();
-   
+
    /// Set loop multiplication coefficient to the value of m_multCoeff_target;
-   /** 
-     * 
+   /**
+     *
      * \returns 0 on success
      * \returns -1 on an error
-     */ 
+     */
    int setMultCoeff();
-   
+
    /// Set loop max lim to the value of m_maxLim_target;
-   /** 
-     * 
+   /**
+     *
      * \returns 0 on success
      * \returns -1 on an error
-     */ 
+     */
    int setMaxLim();
-   
+
    /// Turn the loop on
    /**
      * \returns 0 on success
      * \returns -1 on an error
-     */ 
+     */
    int loopOn();
-   
+
    /// Turn the loop off
    /**
      * \returns 0 on success
      * \returns -1 on an error
-     */ 
+     */
    int loopOff();
-   
+
    /// Zero the loop control channel
    /**
      * \returns 0 on success
      * \returns -1 on an error
-     */ 
+     */
    int loopZero();
 
    /// @}
-   
+
    /** \name File Monitoring Thread
      * Handling of offloads from the average woofer shape
      * @{
      */
    int m_fmThreadPrio {0}; ///< Priority of the filemonitoring thread.
-   
+
    std::thread m_fmThread; ///< The file monitoring thread.
-   
+
    bool m_fmThreadInit {true}; ///< Initialization flag for the file monitoring thread.
 
    pid_t m_fmThreadID {0}; ///< File monitor thread PID.
 
    pcf::IndiProperty m_fmThreadProp; ///< The property to hold the f.m. thread details.
-   
+
    /// File monitoring thread starter function
    static void fmThreadStart( cacaoInterface * c /**< [in] pointer to this */);
-   
+
 
    /// File monitoring thread function
    /** Runs until m_shutdown is true.
      */
    void fmThreadExec();
-   
-   
+
+
    ///@}
-   
+
    pcf::IndiProperty m_indiP_loop;
    pcf::IndiProperty m_indiP_loopProcesses;
 
@@ -244,7 +244,7 @@ public:
    pcf::IndiProperty m_indiP_loopGain;
    pcf::IndiProperty m_indiP_multCoeff;
    pcf::IndiProperty m_indiP_maxLim;
-         
+
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopState);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopZero);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopGain);
@@ -252,23 +252,23 @@ public:
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_maxLim);
 
    /** \name Telemeter Interface
-     * 
+     *
      * @{
-     */ 
+     */
    int checkRecordTimes();
-   
+
    int recordTelem( const telem_loopgain * );
 
    int recordLoopGain( bool force = false );
-   
+
    ///@}
 
-   
+
 };
 
 cacaoInterface::cacaoInterface() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   
+
    return;
 }
 
@@ -282,7 +282,7 @@ void cacaoInterface::setupConfig()
 int cacaoInterface::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    _config(m_loopNumber, "loop.number");
-   
+
    if(telemeterT::loadConfig(_config) < 0)
    {
       log<text_log>("Error during telemeter config", logPrio::LOG_CRITICAL);
@@ -304,37 +304,37 @@ int cacaoInterface::appStartup()
    {
       return log<software_critical, -1>({__FILE__, __LINE__, "loop number not set"});
    }
-   
+
    createROIndiText( m_indiP_loop, "loop", "name", "Loop Description", "Loop Controls", "Name");
    indi::addTextElement(m_indiP_loop, "number", "Number");
    m_indiP_loop["number"] = m_loopNumber;
    m_indiP_loop["name"] = m_loopName;
    registerIndiPropertyReadOnly(m_indiP_loop);
-   
+
    createStandardIndiToggleSw( m_indiP_loopProcesses, "loop_processes", "Loop Processes", "Loop Controls");
-   registerIndiPropertyReadOnly( m_indiP_loopProcesses);  
+   registerIndiPropertyReadOnly( m_indiP_loopProcesses);
 
    createStandardIndiToggleSw( m_indiP_loopState, "loop_state", "Loop State", "Loop Controls");
-   registerIndiPropertyNew( m_indiP_loopState, INDI_NEWCALLBACK(m_indiP_loopState) );  
-   
+   registerIndiPropertyNew( m_indiP_loopState, INDI_NEWCALLBACK(m_indiP_loopState) );
+
    createStandardIndiRequestSw( m_indiP_loopZero, "loop_zero", "Loop Zero", "Loop Controls");
-   registerIndiPropertyNew( m_indiP_loopZero,INDI_NEWCALLBACK(m_indiP_loopZero) );  
-   
+   registerIndiPropertyNew( m_indiP_loopZero,INDI_NEWCALLBACK(m_indiP_loopZero) );
+
    createStandardIndiNumber<float>( m_indiP_loopGain, "loop_gain", 0.0, 10.0, 0.01, "%0.3f", "Loop Gain", "Loop Controls");
-   registerIndiPropertyNew( m_indiP_loopGain, INDI_NEWCALLBACK(m_indiP_loopGain) );  
-   
+   registerIndiPropertyNew( m_indiP_loopGain, INDI_NEWCALLBACK(m_indiP_loopGain) );
+
    createStandardIndiNumber<float>( m_indiP_multCoeff, "loop_multcoeff", 0.0, 1.0, 0.001, "%0.3f", "Mult. Coefficient", "Loop Controls");
-   registerIndiPropertyNew( m_indiP_multCoeff, INDI_NEWCALLBACK(m_indiP_multCoeff) );  
-   
+   registerIndiPropertyNew( m_indiP_multCoeff, INDI_NEWCALLBACK(m_indiP_multCoeff) );
+
    createStandardIndiNumber<float>( m_indiP_maxLim, "loop_max_limit", 0.0, 10.0, 0.001, "%0.3f", "Max. Limit", "Loop Controls");
-   registerIndiPropertyNew( m_indiP_maxLim, INDI_NEWCALLBACK(m_indiP_maxLim) );  
-   
+   registerIndiPropertyNew( m_indiP_maxLim, INDI_NEWCALLBACK(m_indiP_maxLim) );
+
    if(threadStart( m_fmThread, m_fmThreadInit, m_fmThreadID, m_fmThreadProp, m_fmThreadPrio, "", "loopmon", this, fmThreadStart) < 0)
    {
       log<software_error>({__FILE__, __LINE__});
       return -1;
    }
-   
+
    if(telemeterT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
@@ -349,10 +349,10 @@ int cacaoInterface::appLogic()
    if(pthread_tryjoin_np(m_fmThread.native_handle(),0) == 0)
    {
       log<software_critical>({__FILE__, __LINE__, "cacao file monitoring thread has exited"});
-      
+
       return -1;
    }
-   
+
    //These could change if a new calibration is loaded
    if(getAOCalib() < 0 )
    {
@@ -373,7 +373,7 @@ int cacaoInterface::appLogic()
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
    updateIfChanged(m_indiP_loop, std::vector<std::string>({"name", "number"}), std::vector<std::string>({m_loopName, m_loopNumber}));
-   
+
    if(m_loopProcesses)
    {
       updateSwitchIfChanged(m_indiP_loopProcesses, "toggle", pcf::IndiElement::On, INDI_OK);
@@ -382,7 +382,7 @@ int cacaoInterface::appLogic()
    {
       updateSwitchIfChanged(m_indiP_loopProcesses, "toggle", pcf::IndiElement::Off, INDI_IDLE);
    }
-   
+
    if(m_loopState == 0)
    {
       updateSwitchIfChanged(m_indiP_loopState, "toggle", pcf::IndiElement::Off, INDI_IDLE);
@@ -395,7 +395,7 @@ int cacaoInterface::appLogic()
    {
       updateSwitchIfChanged(m_indiP_loopState, "toggle", pcf::IndiElement::On, INDI_OK);
    }
-   
+
    updateIfChanged(m_indiP_loop, "name", m_loopName);
    updateIfChanged(m_indiP_loop, "number", m_loopNumber);
 
@@ -408,7 +408,7 @@ int cacaoInterface::appLogic()
 
 int cacaoInterface::appShutdown()
 {
-   
+
    if(m_fmThread.joinable())
    {
       try
@@ -419,7 +419,7 @@ int cacaoInterface::appShutdown()
       {
       }
    }
-   
+
    telemeterT::appShutdown();
 
    return 0;
@@ -440,13 +440,13 @@ int cacaoInterface::setFPSVal( const std::string & fps,
    }
 
    int w = write(wfd, comout.c_str(), comout.size());
-      
+
    if(w != (int) comout.size())
    {
       log<software_error>({__FILE__, __LINE__, errno, "error on write to " + m_fpsFifo});
       return -1;
    }
-      
+
    close(wfd);
 
    return 0;
@@ -463,7 +463,7 @@ int cacaoInterface::setFPSVal( const std::string & fps,
 }
 
 std::string cacaoInterface::getFPSValStr( const std::string & fps,
-                                          const std::string & param 
+                                          const std::string & param
                                         )
 {
     std::string outfile = "/dev/shm/" + m_loopName + "_out_" + fps + "-" + m_loopNumber + "." + param;
@@ -478,15 +478,15 @@ std::string cacaoInterface::getFPSValStr( const std::string & fps,
     }
 
     int w = write(wfd, comout.c_str(), comout.size());
-      
+
     if(w != (int) comout.size())
     {
         log<software_error>({__FILE__, __LINE__, errno, "error on write to " + m_fpsFifo});
         return "";
     }
-      
+
     close(wfd);
-      
+
     char inbuff [4096];
 
     int rfd = -1;
@@ -540,7 +540,7 @@ std::string cacaoInterface::getFPSValStr( const std::string & fps,
 }
 
 std::string cacaoInterface::getFPSValNum( const std::string & fps,
-                                          const std::string & param 
+                                          const std::string & param
                                         )
 {
     std::string outfile = "/dev/shm/" + m_loopName + "_out_" + fps + "-" + m_loopNumber + "." + param;
@@ -562,7 +562,7 @@ std::string cacaoInterface::getFPSValNum( const std::string & fps,
         return "";
     }
     close(wfd);
-      
+
     char inbuff [4096];
 
     int rfd = -1;
@@ -591,7 +591,7 @@ std::string cacaoInterface::getFPSValNum( const std::string & fps,
     }
 
     remove(outfile.c_str());
-      
+
     inbuff[r] = '\0';
 
     std::string instr = inbuff;
@@ -643,7 +643,7 @@ int cacaoInterface::getAOCalib()
    fin >> aoCalDir;
 
    fin.close();
-  
+
    bool newcal = false;
    if(aoCalDir != m_aoCalDir)
    {
@@ -683,9 +683,9 @@ int cacaoInterface::getAOCalib()
    }
 
    fin.close();
-   
+
    calsrc = m_aoCalDir + "/calib_archived.txt";
-   
+
    fin.open(calsrc);
    if(!fin)
    {
@@ -697,7 +697,7 @@ int cacaoInterface::getAOCalib()
       fin >> m_aoCalArchiveTime;
    }
    fin.close();
-   
+
 
    return 0;
 }
@@ -705,14 +705,14 @@ int cacaoInterface::getAOCalib()
 int cacaoInterface::checkLoopProcesses()
 {
    ///\todo look for actual evidence of processes, such as interrogating ps.
-   
+
    m_loopProcesses = m_loopProcesses_stat;
-   
+
    return 0;
 }
 
 int cacaoInterface::setGain()
-{   
+{
    recordLoopGain(true);
    return setFPSVal("mfilt", "loopgain", m_gain_target);
 }
@@ -736,11 +736,11 @@ int cacaoInterface::loopOn()
    {
       return log<software_error,-1>({__FILE__, __LINE__, "error setting FPS val"});
    }
-   
+
    log<loop_closed>();
-      
+
    return 0;
-   
+
 }
 
 int cacaoInterface::loopOff()
@@ -759,9 +759,9 @@ int cacaoInterface::loopOff()
    {
       log<loop_paused>();
    }
-   
+
    return 0;
-   
+
 }
 
 int cacaoInterface::loopZero()
@@ -772,7 +772,7 @@ int cacaoInterface::loopZero()
    }
 
    log<text_log>("loop zeroed", logPrio::LOG_NOTICE);
-   
+
    return 0;
 
 }
@@ -786,12 +786,12 @@ void cacaoInterface::fmThreadStart( cacaoInterface * c )
 void cacaoInterface::fmThreadExec( )
 {
    m_fmThreadID = syscall(SYS_gettid);
-   
+
    while( m_fmThreadInit == true && shutdown() == 0)
    {
       sleep(1);
    }
-      
+
    while(shutdown() == 0)
    {
       if(m_fpsFifo == "")
@@ -813,12 +813,12 @@ void cacaoInterface::fmThreadExec( )
       try
       {
          m_gain = std::stof(ans);
-      }   
+      }
       catch(const std::exception& e)
       {
          m_gain = 0;
       }
-      
+
       ans = getFPSValNum("mfilt", "loopmult");
       try
       {
@@ -843,27 +843,27 @@ void cacaoInterface::fmThreadExec( )
       mx::sys::milliSleep(500);
 
    }
-   
+
    return;
 }
 
 INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_loopState )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_loopState, ipRecv);
-      
+
     if(!ipRecv.find("toggle")) return 0;
-           
+
     std::unique_lock<std::mutex> lock(m_indiMutex);
-      
+
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
     {
         return loopOn();
-    }   
+    }
     else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
     {
         return loopOff();
     }
-      
+
     log<software_error>({__FILE__,__LINE__, "switch state fall through."});
     return -1;
 }
@@ -871,7 +871,7 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_loopState )(const pcf::IndiPropert
 INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_loopGain )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_loopGain, ipRecv);
-   
+
     float current = -1;
     float target = -1;
 
@@ -886,16 +886,16 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_loopGain )(const pcf::IndiProperty
     }
 
     if(target == -1) target = current;
-   
+
     if(target == -1)
     {
         return 0;
     }
 
     std::lock_guard<std::mutex> guard(m_indiMutex);
-   
+
     m_gain_target = target;
-   
+
     updateIfChanged(m_indiP_loopGain, "target", m_gain_target);
 
     return setGain();
@@ -906,21 +906,21 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_loopZero )(const pcf::IndiProperty
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_loopZero, ipRecv);
 
     if(!ipRecv.find("request")) return 0;
-           
+
     std::unique_lock<std::mutex> lock(m_indiMutex);
-      
+
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
     {
         return loopZero();
-    }   
-    
+    }
+
     return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_multCoeff )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_multCoeff, ipRecv);
-   
+
     float current = -1;
     float target = -1;
 
@@ -935,7 +935,7 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_multCoeff )(const pcf::IndiPropert
     }
 
     if(target == -1) target = current;
-   
+
     if(target == -1)
     {
         return 0;
@@ -945,14 +945,14 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_multCoeff )(const pcf::IndiPropert
 
     m_multCoeff_target = target;
     updateIfChanged(m_indiP_multCoeff, "target", target);
-      
+
     return setMultCoeff();
 }
 
 INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_maxLim )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_maxLim, ipRecv);
-   
+
     float current = -1;
     float target = -1;
 
@@ -967,7 +967,7 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_maxLim )(const pcf::IndiProperty &
     }
 
     if(target == -1) target = current;
-   
+
     if(target == -1)
     {
         return 0;
@@ -976,7 +976,7 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_maxLim )(const pcf::IndiProperty &
     std::lock_guard<std::mutex> guard(m_indiMutex);
     m_maxLim_target = target;
     updateIfChanged(m_indiP_maxLim, "target", target);
-      
+
     return setMaxLim();
 }
 

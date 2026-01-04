@@ -1,5 +1,5 @@
 
-allall: all 
+allall: all
 
 sim: CXXFLAGS += -DXWC_SIM_MODE
 sim: all

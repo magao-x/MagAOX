@@ -19,7 +19,7 @@ namespace MagAOX
 {
 namespace app
 {
-   
+
 /** \defgroup w2tcsOffloader Woofer to TCS Offloading
   * \brief Monitors the averaged woofer shape, fits Zernikes, and sends it to INDI.
   *
@@ -36,7 +36,7 @@ namespace app
 /** MagAO-X application to control offloading the woofer to the TCS.
   *
   * \ingroup w2tcsOffloader
-  * 
+  *
   */
 class w2tcsOffloader : public MagAOXApp<true>, public dev::shmimMonitor<w2tcsOffloader>
 {
@@ -45,19 +45,19 @@ class w2tcsOffloader : public MagAOXApp<true>, public dev::shmimMonitor<w2tcsOff
    friend class w2tcsOffloader_test;
 
    friend class dev::shmimMonitor<w2tcsOffloader>;
-   
+
    //The base shmimMonitor type
    typedef dev::shmimMonitor<w2tcsOffloader> shmimMonitorT;
-      
+
    ///Floating point type in which to do all calculations.
    typedef float realT;
-   
+
 protected:
 
    /** \name Configurable Parameters
      *@{
      */
-   
+
    std::string m_wZModesPath;
    std::string m_wMaskPath;
    std::vector<std::string> m_elNames;
@@ -65,13 +65,13 @@ protected:
    float m_gain {0.1};
    int m_nModes {2};
    float m_norm {1.0};
-   
+
    ///@}
 
    mx::improc::eigenCube<realT> m_wZModes;
    mx::improc::eigenImage<realT> m_woofer;
    mx::improc::eigenImage<realT> m_wMask;
-   
+
 public:
    /// Default c'tor.
    w2tcsOffloader();
@@ -96,36 +96,36 @@ public:
    virtual int appStartup();
 
    /// Implementation of the FSM for w2tcsOffloader.
-   /** 
+   /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
    virtual int appLogic();
 
    /// Shutdown the app.
-   /** 
+   /**
      *
      */
    virtual int appShutdown();
 
-   
-   
-   
+
+
+
    int allocate( const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
-   
+
    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
                      const dev::shmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                    );
-   
+
 
 protected:
-   
+
    pcf::IndiProperty m_indiP_gain;
    pcf::IndiProperty m_indiP_nModes;
    pcf::IndiProperty m_indiP_zCoeffs;
-   
+
    pcf::IndiProperty m_indiP_zero;
-   
+
    INDI_NEWCALLBACK_DECL(w2tcsOffloader, m_indiP_gain);
    INDI_NEWCALLBACK_DECL(w2tcsOffloader, m_indiP_nModes);
    INDI_NEWCALLBACK_DECL(w2tcsOffloader, m_indiP_zero);
@@ -142,7 +142,7 @@ inline
 void w2tcsOffloader::setupConfig()
 {
    shmimMonitorT::setupConfig(config);
-   
+
    config.add("offload.wZModesPath", "", "offload.wZModesPath", argType::Required, "offload", "wZModesPath", false, "string", "The path to the woofer Zernike modes.");
    config.add("offload.wMaskPath", "", "offload.wMaskPath", argType::Required, "offload", "wMaskPath", false, "string", "Path to the woofer Zernike mode mask.");
    config.add("offload.gain", "", "offload.gain", argType::Required, "offload", "gain", false, "float", "The starting offload gain.  Default is 0.1.");
@@ -152,14 +152,14 @@ void w2tcsOffloader::setupConfig()
 inline
 int w2tcsOffloader::loadConfigImpl( mx::app::appConfigurator & _config )
 {
-   
+
    shmimMonitorT::loadConfig(_config);
-   
+
    _config(m_wZModesPath, "offload.wZModesPath");
    _config(m_wMaskPath, "offload.wMaskPath");
    _config(m_gain, "offload.gain");
    _config(m_nModes, "offload.nModes");
-   
+
    return 0;
 }
 
@@ -174,15 +174,15 @@ int w2tcsOffloader::appStartup(){
 
    mx::fits::fitsFile<float> ff;
    mx::error_t errc = ff.read(m_wZModes, m_wZModesPath);
-   if(errc != mx::error_t::noerror) 
+   if(errc != mx::error_t::noerror)
    {
       return log<text_log,-1>("Could not open mode cube file", logPrio::LOG_ERROR);
    }
-   
+
    m_zCoeffs.resize(m_wZModes.planes(), 0);
 
    errc = ff.read(m_wMask, m_wMaskPath);
-   if( errc != mx::error_t::noerror) 
+   if( errc != mx::error_t::noerror)
    {
      return log<text_log,-1>("Could not open mode mask file", logPrio::LOG_ERROR);
    }
@@ -192,7 +192,7 @@ int w2tcsOffloader::appStartup(){
    createStandardIndiNumber<unsigned>( m_indiP_gain, "gain", 0, 1, 0, "%0.2f");
    m_indiP_gain["current"] = m_gain;
    m_indiP_gain["target"] = m_gain;
-   
+
    if( registerIndiPropertyNew( m_indiP_gain, INDI_NEWCALLBACK(m_indiP_gain)) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
@@ -216,26 +216,26 @@ int w2tcsOffloader::appStartup(){
    {
       //std::string el = std::to_string(n);
       m_elNames[n] = mx::ioutils::convertToString<size_t, 2, '0'>(n);
-      
+
       m_indiP_zCoeffs.add( pcf::IndiElement(m_elNames[n]) );
       m_indiP_zCoeffs[m_elNames[n]].set(0);
    }
-   
+
    if(shmimMonitorT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
    }
-   
-   
+
+
    createStandardIndiRequestSw( m_indiP_zero, "zero", "zero loop");
    if( registerIndiPropertyNew( m_indiP_zero, INDI_NEWCALLBACK(m_indiP_zero)) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
       return -1;
    }
-   
+
    state(stateCodes::OPERATING);
-    
+
    return 0;
 }
 
@@ -246,16 +246,16 @@ int w2tcsOffloader::appLogic()
    {
       return log<software_error,-1>({__FILE__,__LINE__});
    }
-   
-   
+
+
    std::unique_lock<std::mutex> lock(m_indiMutex);
-   
+
    if(shmimMonitorT::updateINDI() < 0)
    {
       log<software_error>({__FILE__, __LINE__});
    }
-   
-   
+
+
    return 0;
 }
 
@@ -263,8 +263,8 @@ inline
 int w2tcsOffloader::appShutdown()
 {
    shmimMonitorT::appShutdown();
-   
-   
+
+
    return 0;
 }
 
@@ -272,23 +272,23 @@ inline
 int w2tcsOffloader::allocate(const dev::shmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
-   
+
    //std::unique_lock<std::mutex> lock(m_indiMutex);
-      
+
    m_woofer.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
 
    //state(stateCodes::OPERATING);
-   
+
    return 0;
 }
 
 inline
-int w2tcsOffloader::processImage( void * curr_src, 
-                                const dev::shmimT & dummy 
+int w2tcsOffloader::processImage( void * curr_src,
+                                const dev::shmimT & dummy
                               )
 {
    static_cast<void>(dummy); //be unused (what is this?)
-   
+
    // Replace this:
    // project zernikes onto avg image
    // update INDI properties with coeffs
@@ -327,22 +327,22 @@ int w2tcsOffloader::processImage( void * curr_src,
 INDI_NEWCALLBACK_DEFN(w2tcsOffloader, m_indiP_gain)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_gain, ipRecv);
-  
+
     float target;
-    
+
     if( indiTargetUpdate( m_indiP_gain, target, ipRecv, true) < 0)
     {
         log<software_error>({__FILE__,__LINE__});
         return -1;
     }
-    
+
     m_gain = target;
-    
+
     updateIfChanged(m_indiP_gain, "current", m_gain);
     updateIfChanged(m_indiP_gain, "target", m_gain);
-    
+
     log<text_log>("set gain to " + std::to_string(m_gain), logPrio::LOG_NOTICE);
-    
+
     return 0;
 }
 
@@ -351,20 +351,20 @@ INDI_NEWCALLBACK_DEFN(w2tcsOffloader, m_indiP_nModes)(const pcf::IndiProperty &i
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_nModes, ipRecv);
 
     unsigned target;
-    
+
     if( indiTargetUpdate( m_indiP_nModes, target, ipRecv, true) < 0)
     {
         log<software_error>({__FILE__,__LINE__});
         return -1;
     }
-    
+
     m_nModes = target;
- 
+
     updateIfChanged(m_indiP_nModes, "current", m_nModes);
     updateIfChanged(m_indiP_nModes, "target", m_nModes);
-    
+
     log<text_log>("set nModes to " + std::to_string(m_nModes), logPrio::LOG_NOTICE);
-    
+
     return 0;
 }
 
@@ -382,17 +382,17 @@ INDI_NEWCALLBACK_DEFN(w2tcsOffloader, m_indiP_zCoeffs)(const pcf::IndiProperty &
         }
     }
     return 0;
-   
-   
+
+
    return log<software_error,-1>({__FILE__,__LINE__, "invalid indi property name"});
 }
 
 INDI_NEWCALLBACK_DEFN(w2tcsOffloader, m_indiP_zero)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_zero, ipRecv);
-   
+
     float target;
-   
+
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
     {
         m_woofer.setZero();
@@ -405,4 +405,3 @@ INDI_NEWCALLBACK_DEFN(w2tcsOffloader, m_indiP_zero)(const pcf::IndiProperty &ipR
 } //namespace MagAOX
 
 #endif //w2tcsOffloader_hpp
-  

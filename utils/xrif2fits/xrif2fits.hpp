@@ -90,7 +90,7 @@ class xrif2fits : public mx::app::application
 
     bool m_noHeader{ false }; /**< if true then no camera header is generated */
 
-    std::string m_dir; /**< The directory to search for files.  Can be empty if full path given in files.  
+    std::string m_dir; /**< The directory to search for files.  Can be empty if full path given in files.
                             If files is empty, all archives in dir will be used.  Defaults to `./`.*/
 
     bool m_overWriteDir {false}; ///< Overwrite an existing directory.  Default is to stop if directory exists.
@@ -1020,7 +1020,7 @@ inline mx::error_t xrif2fits::prepareFiles()
                 if(!!errc)
                 {
                     return mx::error_report<verboseT>(errc, "Checking " + m_outDir);
-                }   
+                }
             }
 
             mx_error_check( mx::ioutils::createDirectories(m_outDir) );

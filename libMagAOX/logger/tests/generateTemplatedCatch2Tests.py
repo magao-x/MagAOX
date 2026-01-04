@@ -196,6 +196,7 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
     if not isValidLogType(headerLines):
         if returnInfo["name"] not in baseTypesDict:
             baseTypesDict[returnInfo["name"]] = set()
+
         return None # don't render anything from this file
 
     # iterate through all lines in header to:
@@ -221,6 +222,7 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
 
         # add inhertied type to dict where val is the base type it inherits from
         baseTypesDict[returnInfo["baseType"]].add(returnInfo["name"])
+
         return None # don't render me yet!
 
     # if it does not have its own fb method, find name of class its using
@@ -400,7 +402,7 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
 
             # check if this is a closing line
             if ")" in line:
-                if "//" in line and line.find(")") > line.find("//"):
+                if ("//" in line and line.find(")") > line.find("//")):
                     # parenthesis is in comment
                     pass
                 elif line.strip().strip(")") == "":
@@ -411,7 +413,17 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
 
             # trim line to just get field info
             indexStart = (line.find("messageT(") + len("messageT(")) if "messageT(" in line else 0
-            indexEnd = line.find("//") if "//" in line else len(line)
+
+            indexEnd = len(line)
+            if "//" in line:
+                indexEnd = line.find("//")
+            elif "/*" in line and line.find("/*") < indexEnd:
+                indexEnd = line.find("/*")
+
+            #ignore default argument
+            if "=" in line and line.find("=") < indexEnd:
+                indexEnd = line.find("=")
+
             line = line[indexStart:indexEnd].strip()
 
             lineParts =  [part.strip().split() for part in line.strip().rstrip(",").split(",")]
@@ -419,6 +431,8 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
             for field in lineParts:
                 fieldDict = {}
                 if len(field) > 0 and "//" in field[0]:
+                    break
+                if len(field) == 0:
                     break
 
                 # find type and name
@@ -569,8 +583,19 @@ def main():
     baseTypesDict = dict() # map baseTypes to the types that inherit from them
     for type in types:
 
+        print(type)
         # check valid type to generate tests for
         if ".hpp" not in type:
+            continue
+
+        # workaround for software_log issues with source_location
+        if "software" in type:
+            print("software")
+            continue
+
+        # workaround for telsee deprecated fields
+        if "telsee" in type:
+            print("telsee")
             continue
 
         typePath = os.path.join(typesFolderPath, type)

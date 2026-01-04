@@ -517,7 +517,7 @@ INDI_SETCALLBACK_DEFN( strehlEstimator, m_indiP_tcsi_seeing )( const pcf::IndiPr
             m_r0 = 0.2063 * 0.5 / m_seeing;
         }
     }
-    
+
     return 0;
 }
 

@@ -33,3 +33,7 @@ for test in $tests; do \
    echo '' >> test_stderr.txt; \
 done
 
+cd ../libMagAOX/logger/tests
+make run COVERAGE=1
+
+

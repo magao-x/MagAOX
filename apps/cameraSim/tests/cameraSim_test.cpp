@@ -17,7 +17,7 @@ using namespace MagAOX::app;
 namespace SMCTEST
 {
 
-class cameraSim_test : public cameraSim 
+class cameraSim_test : public cameraSim
 {
 
 public:
@@ -84,4 +84,4 @@ SCENARIO( "INDI Callbacks", "[cameraSim]" )
 }
 
 
-} //namespace cameraSim_test 
+} //namespace cameraSim_test

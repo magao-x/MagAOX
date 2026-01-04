@@ -33,7 +33,7 @@ Switch vectors evalute to 0 or 1 based on the state values of Off and On, respec
 for _STATE.
 
 .PP
-The arithmetic expression, 
+The arithmetic expression,
 .I exp,
 follows the form of that used in the C programming language. The operators
 supported include:

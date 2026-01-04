@@ -17,7 +17,7 @@ using namespace MagAOX::app;
 //namespace MPSDTEST
 //{
 
-class modalPSDs_test : public modalPSDs 
+class modalPSDs_test : public modalPSDs
 {
 
 public:
@@ -39,4 +39,4 @@ SCENARIO( "INDI Callbacks", "[modalPSDs]" )
 }
 
 
-//} //namespace modalPSDs_test 
+//} //namespace modalPSDs_test

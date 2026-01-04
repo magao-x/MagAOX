@@ -3,9 +3,9 @@
 
   \brief   The purpose of the libocam2sdk library is to provide an easy way to achieve ocam2 specific opération.
            The main feature is ocam2 raw image descrambling.
- 
-  \author FIRSTLIGHT  
-    
+
+  \author FIRSTLIGHT
+
   \note    You will find in this header ocam2 camera characteristic constants and functions protoypes.
 */
 
@@ -250,7 +250,7 @@ typedef enum workMode
 } ocam2_mode;
 
 
-/** 
+/**
   \typedef ocam2_rc
   \brief Enum of ocam2 library return code
 */
@@ -261,7 +261,7 @@ typedef enum
 
 } ocam2_rc;
 
-/** 
+/**
   \typedef ocam2_id
   \brief Library camera identifier
 */
@@ -306,7 +306,7 @@ const char * ocam2_sdkBuild();
 /**
   \fn ocam2_rc ocam2_init(ocam2_mode mode, const char *descrbFile, ocam2_id *id)
   \brief Create a camera instance with the provided mode
-  \param[in]  mode  camera mode 
+  \param[in]  mode  camera mode
   \param[in]  descrbFile  descrambling file to use
   \param[out] id  camera identifier
 
@@ -317,11 +317,11 @@ ocam2_rc ocam2_init(ocam2_mode mode, const char *descrbFile, ocam2_id *id);
 /**
   \fn void ocam2_descramble(int id, unsigned int *number, short *image, const short *imageRaw)
   \brief Create a camera instance with the provided mode
-  \param[in]  id      camera identifier 
+  \param[in]  id      camera identifier
   \param[out] number  Image number
   \param[out] image   Descrambled image
   \param[in] imageRaw Raw image
-  
+
   \return none
 */
 void ocam2_descramble(ocam2_id id, unsigned int *number, short *image, const short *imageRaw);
@@ -329,8 +329,8 @@ void ocam2_descramble(ocam2_id id, unsigned int *number, short *image, const sho
 /**
   \fn ocam2_rc ocam2_exit(ocam2_id id)
   \brief Clear a camera instance
-  \param[in]  id      camera identifier 
-  
+  \param[in]  id      camera identifier
+
   \return Return OK or Error
 */
 ocam2_rc ocam2_exit(ocam2_id id);
@@ -338,7 +338,7 @@ ocam2_rc ocam2_exit(ocam2_id id);
 /**
   \fn ocam2_mode ocam2_getMode(ocam2_id id)
   \brief Return the camera mode
-  \param[in]  id      camera identifier 
+  \param[in]  id      camera identifier
 
   \return camera mode as ocam2_mode
 */
@@ -347,8 +347,8 @@ ocam2_mode ocam2_getMode(ocam2_id id);
 /**
   \fn const char *ocam2_modeStr(ocam2_mode mode)
   \brief Return a description text for camera mode
-  \param[in]  mode    camera mode 
-  
+  \param[in]  mode    camera mode
+
   \return camera mode description as a string
 */
 const char *ocam2_modeStr(ocam2_mode mode);

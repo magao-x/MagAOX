@@ -32,24 +32,24 @@ def wait_for_ready(client, device, timeout=0.1):
 def make_horizontal_probe(grid, direction='left'):
     probe = grid.zeros()
     probe = probe.shaped
-    
+
     width = 4
     height = 4
     x = (-1.0)**(np.arange(width) - width//2)
     y = (-1.0)**(np.arange(height) - height//2)
-    
+
     # 34 - 15 16 17 18 19 20
     probe[15:19, 6:10] = np.outer(x, y)
     probe[15:19, 6:10] = np.outer(y, x)
     if direction == 'right':
         probe = probe[:,::-1]
-    
+
     return probe.ravel()
 
 def make_vertical_probe(grid, direction='down'):
     probe = grid.zeros()
     probe = probe.shaped
-    
+
     width = 4
     height = 4
     x = (-1.0)**(np.arange(width) - width//2)
@@ -61,7 +61,7 @@ def make_vertical_probe(grid, direction='down'):
     probe = np.sign(probe)
     if direction == 'up':
         probe = probe[::-1,:]
-    
+
     return probe.ravel()
 
 def make_ncpc_alignment_poke_pattern():
@@ -83,7 +83,7 @@ def wait_for_state(client, indi_property, value, wait_time=1, tolerance=None):
 
 def calibrate_indi_device(client, device_name, device_property, delta_pertubation, camera, measurement_function, num_stack=50, do_wait=False):
     client.get_properties('{:s}'.format(device_name))
-    
+
     property_current = '{:s}.{:s}.current'.format(device_name, device_property)
     property_target = '{:s}.{:s}.target'.format(device_name, device_property)
     current_position = client[property_current]
@@ -99,7 +99,7 @@ def calibrate_indi_device(client, device_name, device_property, delta_pertubatio
         # Take measurement
         camera.grab_stack(3)
         im = camera.grab_stack(num_stack)
-       
+
         measurement = measurement_function(im)
         slope += s * measurement / (2 * delta_pertubation)
 
@@ -108,17 +108,17 @@ def calibrate_indi_device(client, device_name, device_property, delta_pertubatio
         wait_for_state(client, property_current, current_position, tolerance=0.1 * delta_pertubation)
     else:
         time.sleep(2)
-    
+
     return slope
 
 class XCorrShift():
     def __init__(self, reference_image, domain_pixels=480, domain_size=40, filter_size=None):
         self._reference_image = reference_image
         self._xgrid = hp.make_pupil_grid(domain_pixels, domain_size)
-        
+
         self._fft = hp.FastFourierTransform(self._reference_image.grid)
         self._mft = hp.MatrixFourierTransform(self._xgrid, self._fft.output_grid)
-        
+
         self._filter_size = filter_size
         if filter_size is not None:
             # Change this to a super gaussian filter to remove ringing.
@@ -131,8 +131,8 @@ class XCorrShift():
     def cross_correlate(self, image):
         xcorr = np.real(self._mft.backward(self._fft.forward(image + 0j) * self._spatial_filter * self._kernel))
         return xcorr
-        
-    def measure(self, image):           
+
+    def measure(self, image):
         # Do a cross-correlation and find the peak pixel
         # TODO: implement sub-pixel precision with polynomial fitting
         xcorr = self.cross_correlate(image)

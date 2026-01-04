@@ -106,7 +106,7 @@ public:
 
 indiDictionary::indiDictionary() : rtimvDictionaryInterface()
 {
-   
+
 }
 
 indiDictionary::~indiDictionary()
@@ -119,17 +119,17 @@ int indiDictionary::attachDictionary( dictionaryT * dict,
                                     )
 {
    m_dict = dict;
-   
+
    config.configUnused(m_ipAddress, mx::app::iniFile::makeKey("indi", "ipAddress"));
-   
+
    config.configUnused(m_port, mx::app::iniFile::makeKey("indi", "port"));
-   
+
    config.configUnused(m_checkTimeout, mx::app::iniFile::makeKey("indi", "checkTimeout"));
 
    if(m_ipAddress == "" || m_port <= 0)
    {
       m_enabled = false;
-      return 1; 
+      return 1;
    }
    else
    {
@@ -147,7 +147,7 @@ int indiDictionary::attachDictionary( dictionaryT * dict,
 
    return 0;
 }
-      
+
 void indiDictionary::checkConnection()
 {
    if(!m_enabled) return;
@@ -159,7 +159,7 @@ void indiDictionary::checkConnection()
       try
       {
          m_client = new rtimvIndiClient("rtimvIndiClient", "1.7", "1.7", m_ipAddress, m_port, m_dict);
-      }   
+      }
       catch(...)
       {
          //This means failed to connect, often b/c tunnel not open.  m_client will still be nullptr.
@@ -187,12 +187,12 @@ void indiDictionary::checkConnection()
 
       size_t np = elKey.find('.', 0);
       std::string dev = elKey.substr(0, np);
-      
+
       size_t ap = elKey.find('.', np+1);
       std::string prop = elKey.substr(np+1, ap-(np+1));
 
       std::string key = dev + "." + prop;
-      
+
       auto res = m_client->m_subscribed.insert(key);
       if(res.second == true) //If we have inserted it, we snoop it
       {
@@ -201,9 +201,9 @@ void indiDictionary::checkConnection()
          ipSend.setName(prop);
          m_client->sendGetProperties(ipSend);
       }
-      
+
    }
-   
+
 }
 
 std::vector<std::string> indiDictionary::info()

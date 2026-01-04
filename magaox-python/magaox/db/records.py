@@ -113,7 +113,7 @@ class UserLog:
             ec = payload['ec'],
             msg = payload['msg']
         )
-    
+
     def get_msg_json_bytes(self) -> bytes:
         return orjson.dumps(self.msg)
     def get_msg_json(self) -> str:

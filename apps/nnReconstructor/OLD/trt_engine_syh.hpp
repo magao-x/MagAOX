@@ -261,7 +261,7 @@ bool TensorRTEngine::infer()
 //! \brief Reads the input and stores the result in a managed buffer
 //!
 bool TensorRTEngine::processInput(float* filedata, const samplesCommon::BufferManager& buffers)
-{	
+{
 	const int inputC = mInputDims.d[1];
     const int inputH = mInputDims.d[2];
     const int inputW = mInputDims.d[3];

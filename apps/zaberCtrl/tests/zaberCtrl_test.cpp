@@ -17,7 +17,7 @@ using namespace MagAOX::app;
 namespace ZCTRLTEST
 {
 
-class zaberCtrl_test : public zaberCtrl 
+class zaberCtrl_test : public zaberCtrl
 {
 
 public:
@@ -61,4 +61,4 @@ SCENARIO( "INDI Callbacks", "[zaberCtrl]" )
 }
 
 
-} //namespace zaberCtrl_test 
+} //namespace zaberCtrl_test

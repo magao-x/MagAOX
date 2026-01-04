@@ -35,15 +35,15 @@
 class aEtherStem : public a40PinModule
 {
 public:
-    
+
     aEtherStem(const uint8_t module = aETHERSTEM_MODULE_ADDRESS,
                bool bAutoNetworking = true,
                const uint8_t model = aMODULE_TYPE_EtherStem_1) :
     a40PinModule(module, bAutoNetworking, model)
     {
-        
+
     }
-    
+
 };
 
 #endif

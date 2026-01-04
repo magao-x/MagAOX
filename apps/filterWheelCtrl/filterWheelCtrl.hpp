@@ -44,9 +44,9 @@ class filterWheelCtrl : public MagAOXApp<>, public tty::usbDevice, public dev::s
 {
 
    friend class dev::stdMotionStage<filterWheelCtrl>;
-   
+
    friend class dev::telemeter<filterWheelCtrl>;
-   
+
 protected:
 
    /** \name Non-configurable parameters
@@ -71,7 +71,7 @@ protected:
    long m_circleSteps {0}; ///< The number of position counts in 1 360-degree revolution.
    long m_homeOffset {0}; ///< The number of position counts to offset from the home position
 
-   
+
 
    ///@}
 
@@ -80,7 +80,7 @@ protected:
      */
 
    bool m_switch{false}; ///< The home switch status
-   
+
    long m_rawPos {0}; ///< The position of the wheel in motor counts.
 
    int m_homingState{0}; ///< The homing state, tracks the stages of homing.
@@ -138,7 +138,7 @@ public:
      * \returns -1 on any error which means the app should exit.
      */
    virtual int whilePowerOff();
-   
+
 protected:
 
    //declare our properties
@@ -182,17 +182,17 @@ protected:
 
    /// Start a high-level homing sequence.
    /** For this device this includes the homing dither.
-     * 
+     *
      * \returns 0 on success.
      * \returns -1 on error.
      */
    int startHoming();
-   
+
    int presetNumber();
-   
+
    /// Start a low-level homing sequence.
    /** This initiates the device homing sequence.
-     * 
+     *
      * \returns 0 on success.
      * \returns -1 on error.
      */
@@ -227,17 +227,17 @@ protected:
    int moveTo( const double & filters /**< [in] The new position in absolute filter units*/ );
 
    /** \name Telemeter Interface
-     * 
+     *
      * @{
-     */ 
+     */
    int checkRecordTimes();
-   
+
    int recordTelem( const telem_stage * );
-   
+
    int recordTelem( const telem_position * );
 
    int recordStage( bool force = false );
-   
+
    int recordPosition( bool force = false );
 
    ///@}
@@ -247,9 +247,9 @@ inline
 filterWheelCtrl::filterWheelCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    m_presetNotation = "filter"; //sets the name of the configs, etc.
-   
+
    m_powerMgtEnabled = true;
-   
+
    return;
 }
 
@@ -266,9 +266,9 @@ void filterWheelCtrl::setupConfig()
    config.add("motor.speed", "", "motor.speed", argType::Required, "motor", "speed", false, "real", "The motor speed parameter.  Default=3000.");
    config.add("motor.circleSteps", "", "motor.circleSteps", argType::Required, "motor", "circleSteps", false, "long", "The number of steps in 1 revolution.");
    config.add("stage.homeOffset", "", "stage.homeOffset", argType::Required, "stage", "homeOffset", false, "long", "The homing offset in motor counts.");
-   
+
    dev::stdMotionStage<filterWheelCtrl>::setupConfig(config);
-   
+
    dev::telemeter<filterWheelCtrl>::setupConfig(config);
 }
 
@@ -292,7 +292,7 @@ void filterWheelCtrl::loadConfig()
    config(m_motorSpeed, "motor.speed");
    config(m_circleSteps, "motor.circleSteps");
    config(m_homeOffset, "stage.homeOffset");
-   
+
 
    dev::stdMotionStage<filterWheelCtrl>::loadConfig(config);
 
@@ -312,14 +312,14 @@ int filterWheelCtrl::appStartup()
    createStandardIndiNumber<long>( m_indiP_counts, "counts", std::numeric_limits<long>::lowest(), std::numeric_limits<long>::max(), 0.0, "%ld");
    registerIndiPropertyNew( m_indiP_counts, INDI_NEWCALLBACK(m_indiP_counts)) ;
 
-   
+
    dev::stdMotionStage<filterWheelCtrl>::appStartup();
-   
+
    if(dev::telemeter<filterWheelCtrl>::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
    }
-   
+
    return 0;
 }
 
@@ -343,7 +343,7 @@ int filterWheelCtrl::appLogic()
          log<text_log>(logs.str());
       }
    }
-   
+
    if( state() == stateCodes::NODEVICE )
    {
       int rv = tty::usbDevice::getDeviceName();
@@ -413,9 +413,9 @@ int filterWheelCtrl::appLogic()
          }
 
          //if connect failed, and there is a device, then we have some other problem.
-         sleep(1); //wait to see if power state updates 
+         sleep(1); //wait to see if power state updates
          if(m_powerState == 0) return 0;
-         
+
          //Ok we can't figure this out, die.
          state(stateCodes::FAILURE);
          if(!stateLogged()) log<software_error>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
@@ -511,7 +511,7 @@ int filterWheelCtrl::appLogic()
       }
       else
       {
-         if(state() == stateCodes::OPERATING) 
+         if(state() == stateCodes::OPERATING)
          {
             if(m_movingState == 1)
             {
@@ -520,7 +520,7 @@ int filterWheelCtrl::appLogic()
                {
                   sleep(1);
                   if(m_powerState == 0) return 0;
-                  
+
                   state(stateCodes::ERROR);
                   return log<software_error,0>({__FILE__,__LINE__});
                }
@@ -534,7 +534,7 @@ int filterWheelCtrl::appLogic()
                {
                   sleep(1);
                   if(m_powerState == 0) return 0;
-                  
+
                   state(stateCodes::ERROR);
                   return log<software_error,0>({__FILE__,__LINE__});
                }
@@ -546,7 +546,7 @@ int filterWheelCtrl::appLogic()
                m_movingState = 0;
                state(stateCodes::READY); //stopped moving but was just changing pos
             }
-            
+
          }
          else if (state() == stateCodes::HOMING) //stopped moving but was in the homing sequence
          {
@@ -557,7 +557,7 @@ int filterWheelCtrl::appLogic()
                {
                   sleep(1);
                   if(m_powerState == 0) return 0;
-                  
+
                   state(stateCodes::ERROR);
                   return log<software_error,0>({__FILE__,__LINE__});
                }
@@ -571,7 +571,7 @@ int filterWheelCtrl::appLogic()
                {
                   sleep(1);
                   if(m_powerState == 0) return 0;
-                  
+
                   state(stateCodes::ERROR);
                   return log<software_error,0>({__FILE__,__LINE__});
                }
@@ -584,7 +584,7 @@ int filterWheelCtrl::appLogic()
                {
                   sleep(1);
                   if(m_powerState == 0) return 0;
-                  
+
                   state(stateCodes::ERROR);
                   return log<software_error,0>({__FILE__,__LINE__});
                }
@@ -596,7 +596,7 @@ int filterWheelCtrl::appLogic()
                {
                   m_preset_target = m_presetPositions[m_homePreset];
                   updateIfChanged(m_indiP_preset, "target",  m_preset_target, INDI_BUSY);
-   
+
                   moveTo(m_preset_target);
                }
                m_homingState = 5;
@@ -605,14 +605,14 @@ int filterWheelCtrl::appLogic()
             {
                m_homingState = 0;
                state(stateCodes::READY);
-               
+
                m_preset_target = ((double) m_rawPos-m_homeOffset)/m_circleSteps*m_presetNames.size() + 1.0;
             }
          }
       }
 
       std::lock_guard<std::mutex> guard(m_indiMutex);
-      
+
       if(m_moving)
       {
          updateIfChanged(m_indiP_counts, "current", m_rawPos, INDI_BUSY);
@@ -621,18 +621,18 @@ int filterWheelCtrl::appLogic()
       {
          updateIfChanged(m_indiP_counts, "current", m_rawPos, INDI_IDLE);
       }
-      
+
       m_preset = ((double) m_rawPos-m_homeOffset)/m_circleSteps*m_presetNames.size() + 1.0;
-      
+
       stdMotionStage<filterWheelCtrl>::updateINDI();
       recordStage();
-      
+
       if(telemeter<filterWheelCtrl>::appLogic() < 0)
       {
          log<software_error>({__FILE__, __LINE__});
          return 0;
       }
-      
+
       return 0;
    }
 
@@ -640,7 +640,7 @@ int filterWheelCtrl::appLogic()
    {
       sleep(1);
       if(m_powerState == 0) return 0;
-                  
+
       return log<software_error,-1>({__FILE__,__LINE__, "In state ERROR but no recovery implemented.  Terminating."});
    }
 
@@ -664,10 +664,10 @@ int filterWheelCtrl::onPowerOff()
    {
       log<software_error>({__FILE__,__LINE__});
    }
-   
+
    recordStage(true);
    recordPosition(true);
-   
+
    return 0;
 }
 
@@ -678,20 +678,20 @@ int filterWheelCtrl::whilePowerOff()
    {
       log<software_error>({__FILE__,__LINE__});
    }
-   
+
    //record telem if it's been longer than 10 sec:
    if(telemeter<filterWheelCtrl>::appLogic() < 0)
    {
       log<software_error>({__FILE__, __LINE__});
    }
-   
+
    return 0;
 }
-   
+
 INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_counts)(const pcf::IndiProperty &ipRecv)
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_counts, ipRecv); 
-   
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_counts, ipRecv);
+
     double counts = -1;
     double target_abs = -1;
     if(ipRecv.find("current"))
@@ -703,12 +703,12 @@ INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_counts)(const pcf::IndiProperty &
        target_abs = ipRecv["target"].get<double>();
     }
     if(target_abs == -1) target_abs = counts;
-    
-    
+
+
     m_preset_target = ((double) target_abs - m_homeOffset)/m_circleSteps*m_presetNames.size() + 1.0;
     std::lock_guard<std::mutex> guard(m_indiMutex);
     return moveToRaw(target_abs);
-   
+
 }
 
 
@@ -781,7 +781,7 @@ int filterWheelCtrl::getMoving()
       try{ speed = std::stol(resp.c_str());}
       catch(...){speed=0;}
 
-      if(fabs(speed) > 0.1*m_motorSpeed) 
+      if(fabs(speed) > 0.1*m_motorSpeed)
       {
          if(m_homingState) m_moving = 2;
          else m_moving = 1;
@@ -820,7 +820,7 @@ int filterWheelCtrl::startHoming()
    m_moving = 2;
    recordStage(true);
    recordPosition(true);
-   
+
    updateSwitchIfChanged(m_indiP_home, "request", pcf::IndiElement::Off, INDI_IDLE);
    return home();
 }
@@ -837,19 +837,19 @@ int filterWheelCtrl::presetNumber()
    {
       while( n > (long) m_presetNames.size()-1 ) n -= m_presetNames.size();
    }
-   
+
    if( n < 0)
    {
       log<software_error>({__FILE__,__LINE__, "error calculating " + m_presetNotation + " index, n < 0"});
       return -1;
    }
-      
+
    return n;
 }
 
 int filterWheelCtrl::home()
 {
-   
+
    state(stateCodes::HOMING);
 
    int rv;
@@ -892,7 +892,7 @@ int filterWheelCtrl::stop()
    int rv = tty::ttyWrite( "DI\r", m_fileDescrip, m_writeTimeOut);
 
    updateSwitchIfChanged(m_indiP_stop, "request", pcf::IndiElement::Off, INDI_IDLE);
-   
+
    if(rv < 0) return log<software_error,-1>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
 
    return 0;
@@ -903,7 +903,7 @@ int filterWheelCtrl::moveToRaw( const long & counts )
 
    std::string com;
    int rv;
-   
+
    m_moving = 1;
    recordStage(true);
    recordPosition(true);
@@ -917,9 +917,9 @@ int filterWheelCtrl::moveToRaw( const long & counts )
 
    rv = tty::ttyWrite( "M\r", m_fileDescrip, m_writeTimeOut);
    if(rv < 0) return log<software_error,-1>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
-   
+
    updateIfChanged(m_indiP_counts, "target", counts, pcf::IndiProperty::Busy);
-    
+
    return 0;
 }
 
@@ -932,7 +932,7 @@ int filterWheelCtrl::moveToRawRelative( const long & counts_relative )
    m_moving = 1;
    recordStage(true);
    recordPosition(true);
-   
+
    rv = tty::ttyWrite( "EN\r", m_fileDescrip, m_writeTimeOut);
    if(rv < 0) return log<software_error,-1>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
 
@@ -963,7 +963,7 @@ int filterWheelCtrl::checkRecordTimes()
 {
    return dev::telemeter<filterWheelCtrl>::checkRecordTimes(telem_stage(), telem_position());
 }
-   
+
 int filterWheelCtrl::recordTelem( const telem_stage * )
 {
    return recordStage(true);

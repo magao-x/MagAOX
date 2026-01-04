@@ -224,7 +224,7 @@ int loadCameraConfig( cameraConfigMap &ccmap, ///< [out] the map in which to pla
  *             static constexpr bool c_stdCamera_usesROI = true; //or: false
  *         \endcode
  *
- *       - The default values of m_full_x/y/w/h must be set before calling stdCamera::appStartup(). These 
+ *       - The default values of m_full_x/y/w/h must be set before calling stdCamera::appStartup(). These
  *         are configured by stdCamera::loadConfig(), but only if set in the config file.
  *
  *       - The derived class must implement:

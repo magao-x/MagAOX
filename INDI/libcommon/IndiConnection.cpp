@@ -91,7 +91,7 @@ IndiConnection::~IndiConnection()
     {
         //do nothing
     }
-    
+
     if(m_fstreamOutput && m_fstreamOutput != m_fstreamSTDOUT)
     {
         fclose(m_fstreamOutput);
@@ -119,8 +119,8 @@ void IndiConnection::construct( const string &szName,
   // These are the two descriptors we will use to talk to the outside world.
   m_fdInput = STDIN_FILENO;
 
-  //We start with STDOUT.  
-  m_fstreamSTDOUT = fdopen(STDOUT_FILENO, "w+");  
+  //We start with STDOUT.
+  m_fstreamSTDOUT = fdopen(STDOUT_FILENO, "w+");
   setOutputFd(STDOUT_FILENO);
 
   // setup the signal handler.
@@ -139,7 +139,7 @@ void IndiConnection::construct( const string &szName,
   // This is the same if we are in simulation mode or not.
   // The default is one second.
   setInterval(1000);
-  
+
   // What is our CPU affinity? This is the CPU we will run on.
   // A -1 indicates we don't care where it runs.
   m_iCpuAffinity = -1;
@@ -374,12 +374,12 @@ void IndiConnection::process()
 
 ////////////////////////////////////////////////////////////////////////////////
 /// \brief IndiConnection::sendXml
-/// Sends an XML string out. 
+/// Sends an XML string out.
 /// \param szXml The XML to send.
 void IndiConnection::sendXml( const string &szXml ) const
 {
   MutexLock::AutoLock autoOut( &m_mutOutput );
-  
+
   if(!m_fstreamOutput)
   {
     return;

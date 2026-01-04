@@ -22,7 +22,7 @@ using namespace MagAOX::app;
 namespace ZLLTEST
 {
 
-class zaberLowLevel_test : public zaberLowLevel 
+class zaberLowLevel_test : public zaberLowLevel
 {
 
 public:
@@ -51,4 +51,4 @@ SCENARIO( "INDI Callbacks", "[zaberLowLevel]" )
 }
 
 
-} //namespace zaberLowLevel_test 
+} //namespace zaberLowLevel_test

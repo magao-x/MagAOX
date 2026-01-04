@@ -388,7 +388,7 @@ INDI_NEWCALLBACK_DEFN( hwpTracker, m_indiP_hwpSetPos )( const pcf::IndiProperty 
         return 0;
 
     m_hwpSetPos = ipRecv["target"].get<float>();
-    
+
     updateIfChanged<float>(m_indiP_hwpSetPos, "target", m_hwpSetPos);
 
     updateHwpPos();
@@ -485,7 +485,7 @@ INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_stagePolRot )( const pcf::IndiPropert
         return 0;
 
     float hwpStagePos = ipRecv["current"].get<float>();
-    
+
     m_hwpActualPos = m_sign * (hwpStagePos - m_zero);
     if (fabs(m_hwpActualPos) < 1e-2)
         m_hwpActualPos = 0;
@@ -523,7 +523,7 @@ INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_stagePolRotFsm )( const pcf::IndiProp
     std::string stagepolrot_state = ipRecv["state"].get<std::string>();
 
     state(stateCodes::str2CodeFast(stagepolrot_state));
-        
+
     return 0;
 }
 

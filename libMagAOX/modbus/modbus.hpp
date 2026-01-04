@@ -1,6 +1,6 @@
 
 // header only version of modbuspp
-// 
+//
 //
 // Moduspp was created by Fanzhe on 5/28/2017.
 //
@@ -103,7 +103,7 @@ public:
 };
 
 
-#if 0 
+#if 0
 //-- leaving in for comments until can be normalized.
 
 /**
@@ -112,8 +112,8 @@ public:
  * @param port Port for the TCP Connection
  * @return     A Modbus Connector Object
  */
-  
-modbus::modbus( const std::string & host, 
+
+modbus::modbus( const std::string & host,
                 uint16_t port
               ) : PORT {port}, HOST{host} {}
 
@@ -123,14 +123,14 @@ modbus::modbus( const std::string & host,
  * @param host  IP Address of Host
  * @return      A Modbus Connector Object
  */
-  
+
 modbus::modbus(const std::string & host) : HOST{host} {}
 
 
 /**
  * Destructor of Modbus Connector Object
  */
-  
+
 modbus::~modbus(void) {
 }
 
@@ -139,7 +139,7 @@ modbus::~modbus(void) {
  * Modbus Slave ID Setter
  * @param id  ID of the Modbus Server Slave
  */
-  
+
 void modbus::modbus_set_slave_id(int id) {
     _slaveid = id;
 }
@@ -150,7 +150,7 @@ void modbus::modbus_set_slave_id(int id) {
  * Build up a Modbus/TCP Connection
  * @return   If A Connection Is Successfully Built
  */
-  
+
 bool modbus::modbus_connect() {
     if(HOST == "" || PORT == 0) {
         //std::cout << "Missing Host and Port" << std::endl;
@@ -185,7 +185,7 @@ bool modbus::modbus_connect() {
 /**
  * Close the Modbus/TCP Connection
  */
-  
+
 void modbus::modbus_close() {
     close(_socket);
     //std::cout <<"Socket Closed" <<std::endl;
@@ -198,7 +198,7 @@ void modbus::modbus_close() {
  * @param address   Reference Address
  * @param func      Modbus Functional Code
  */
-  
+
 void modbus::modbus_build_request(uint8_t *to_send, int address, int func) {
     to_send[0] = (uint8_t) _msg_id >> 8;
     to_send[1] = (uint8_t) (_msg_id & 0x00FF);
@@ -219,7 +219,7 @@ void modbus::modbus_build_request(uint8_t *to_send, int address, int func) {
  * @param func      Modbus Functional Code
  * @param value     Data to Be Written
  */
-  
+
 void modbus::modbus_write(int address, int amount, int func, uint16_t *value) {
     if(func == WRITE_COIL || func == WRITE_REG) {
         uint8_t to_send[12];
@@ -261,7 +261,7 @@ void modbus::modbus_write(int address, int amount, int func, uint16_t *value) {
  * @param amount    Amount of Data to Read
  * @param func      Modbus Functional Code
  */
-  
+
 void modbus::modbus_read(int address, int amount, int func){
     uint8_t to_send[12];
     modbus_build_request(to_send, address, func);
@@ -279,7 +279,7 @@ void modbus::modbus_read(int address, int amount, int func){
  * @param amount     Amount of Registers to Read
  * @param buffer     Buffer to Store Data Read from Registers
  */
-  
+
 void modbus::modbus_read_holding_registers(int address, int amount, uint16_t *buffer) {
     if(_connected) {
         if(amount > 65535 || address > 65535) {
@@ -304,13 +304,13 @@ void modbus::modbus_read_holding_registers(int address, int amount, uint16_t *bu
 
 
 /**
- * Read Input Registers 
+ * Read Input Registers
  * MODBUS FUNCTION 0x04
  * @param address     Reference Address
  * @param amount      Amount of Registers to Read
  * @param buffer      Buffer to Store Data Read from Registers
  */
-  
+
 void modbus::modbus_read_input_registers(int address, int amount, uint16_t *buffer) {
     if(_connected){
         if(amount > 65535 || address > 65535) {
@@ -335,13 +335,13 @@ void modbus::modbus_read_input_registers(int address, int amount, uint16_t *buff
 
 
 /**
- * Read Coils           
+ * Read Coils
  * MODBUS FUNCTION 0x01
  * @param address     Reference Address
  * @param amount      Amount of Coils to Read
  * @param buffer      Buffer to Store Data Read from Coils
  */
-  
+
 void modbus::modbus_read_coils(int address, int amount, bool *buffer) {
     if(_connected) {
         if(amount > 2040 || address > 65535) {
@@ -371,7 +371,7 @@ void modbus::modbus_read_coils(int address, int amount, bool *buffer) {
  * @param amount    Amount of Bits to Read
  * @param buffer    Buffer to store Data Read from Input Bits
  */
-  
+
 void modbus::modbus_read_input_bits(int address, int amount, bool* buffer) {
     if(_connected) {
         if(amount > 2040 || address > 65535) {
@@ -400,7 +400,7 @@ void modbus::modbus_read_input_bits(int address, int amount, bool* buffer) {
  * @param address    Reference Address
  * @param to_write   Value to be Written to Coil
  */
-  
+
 void modbus::modbus_write_coil(int address, bool to_write) {
     if(_connected) {
         if(address > 65535) {
@@ -427,7 +427,7 @@ void modbus::modbus_write_coil(int address, bool to_write) {
  * @param address   Reference Address
  * @param value     Value to Be Written to Register
  */
-  
+
 void modbus::modbus_write_register(int address, uint16_t value) {
     if(_connected) {
         if(address > 65535) {
@@ -448,13 +448,13 @@ void modbus::modbus_write_register(int address, uint16_t value) {
 
 
 /**
- * Write Multiple Coils 
+ * Write Multiple Coils
  * MODBUS FUNCTION 0x0F
  * @param address  Reference Address
  * @param amount   Amount of Coils to Write
  * @param value    Values to Be Written to Coils
  */
-  
+
 void modbus::modbus_write_coils(int address, int amount, bool *value) {
     if(_connected) {
         if(address > 65535 || amount > 65535) {
@@ -479,13 +479,13 @@ void modbus::modbus_write_coils(int address, int amount, bool *value) {
 
 
 /**
- * Write Multiple Registers 
+ * Write Multiple Registers
  * MODBUS FUNCION 0x10
  * @param address Reference Address
  * @param amount  Amount of Value to Write
  * @param value   Values to Be Written to the Registers
  */
-  
+
 void modbus::modbus_write_registers(int address, int amount, uint16_t *value) {
     if(_connected) {
         if(address > 65535 || amount > 65535) {
@@ -511,7 +511,7 @@ void modbus::modbus_write_registers(int address, int amount, uint16_t *value) {
  * @param length  Length of the Request
  * @return        Size of the request
  */
-  
+
 ssize_t modbus::modbus_send(uint8_t *to_send, int length) {
     _msg_id++;
     return send(_socket, to_send, (size_t)length, 0);
@@ -523,7 +523,7 @@ ssize_t modbus::modbus_send(uint8_t *to_send, int length) {
  * @param buffer Buffer to Store the Data Retrieved
  * @return       Size of Incoming Data
  */
-  
+
 ssize_t modbus::modbus_receive(uint8_t *buffer) {
     return recv(_socket, (char *) buffer, MAX_MSG_LENGTH, 0);
 }
@@ -534,7 +534,7 @@ ssize_t modbus::modbus_receive(uint8_t *buffer) {
  * @param msg   Message Received from the Server
  * @param func  Modbus Functional Code
  */
-  
+
 void modbus::modbus_error_handle(uint8_t *msg, int func) {
     if(msg[7] == func + 0x80) {
         switch(msg[8]){

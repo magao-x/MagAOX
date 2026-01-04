@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #####################################################
-## MagAO-X ICC cpuset configuration 
-## 
+## MagAO-X ICC cpuset configuration
+##
 ## See https://linux.die.net/man/7/cpuset
 ##
 ## Run this as sudo at startup of the system
@@ -29,7 +29,7 @@ done
 # Disable processors 96-127, the hardware threads
 for cpu in {96..127}
 do
-   /bin/echo 0 > /sys/devices/system/cpu/cpu$cpu/online 
+   /bin/echo 0 > /sys/devices/system/cpu/cpu$cpu/online
 done
 
 cd $cpusetMount
@@ -51,7 +51,7 @@ while read i; do
    /bin/echo -n $i 2>/dev/null || true
 done < tasks > system/tasks
 
-#A guess at how to setup load balancing 
+#A guess at how to setup load balancing
 echo 0 > cpuset.sched_load_balance
 echo 1 > system/cpuset.sched_load_balance
 
@@ -114,7 +114,7 @@ mkdir -p $cpusetMount/camsci2
 /bin/echo 1 > $cpusetMount/camsci2/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/camsci2/cpuset.mems
 
-#camsci2_sw offload process 
+#camsci2_sw offload process
 mkdir -p $cpusetMount/camsci2_sw
 /bin/echo 41 > $cpusetMount/camsci2_sw/cpuset.cpus
 /bin/echo 1 > $cpusetMount/camsci2_sw/cpuset.cpu_exclusive

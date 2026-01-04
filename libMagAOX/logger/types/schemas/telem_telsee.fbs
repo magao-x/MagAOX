@@ -8,7 +8,7 @@ table Telem_telsee_fb
    dimm_el:double (deprecated);
    dimm_fwhm_corr:double;
    dimm_fwhm_bad:double (deprecated);
-   
+
    mag1_time:int;
    mag1_el:double (deprecated);
    mag1_fwhm:double (deprecated);

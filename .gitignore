@@ -177,6 +177,13 @@ apps/zaberCtrl/zaberCtrl
 apps/zaberLowLevel/zaberLowLevel
 apps/zylaCtrl/zylaCtrl
 
+
+#libMagAOX/...
+libMagAOX/logger/tests/catch2_tests
+libMagAOX/logger/tests/gen_entropy_tests
+libMagAOX/logger/tests/generated_entropy_test_e1_n2
+libMagAOX/logger/tests/generated_tests
+
 ##########################################
 #Executables and util specifics to ignore:
 
@@ -223,14 +230,6 @@ vm/
 __pycache__
 installed_python_interface_timestamp.txt
 magaox-python/build
-
-libMagAOX/doc/diag/Makefile
-libMagAOX/doc/diag/xwcapp_fsm.drawio
-libMagAOX/doc/diag/xwcapp.drawio
-libMagAOX/doc/diag/xwcapps_connections.drawio
-libMagAOX/doc/diag/png/xwcapp_fsm.png
-libMagAOX/doc/diag/png/xwcapp.png
-libMagAOX/doc/diag/png/xwcapps_connections.png
 
 
 # Coverage files

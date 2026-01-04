@@ -4,7 +4,7 @@
   *
   * History:
   * - 2018-05-26 created by JRM
-  * 
+  *
   * \ingroup app_files
   */
 
@@ -36,8 +36,8 @@ public:
              ) : pcf::IndiClient( clientName, "none", "1.7", hostAddress, hostPort)
    {
    }
-   
-   
+
+
    /// Implementation of the pcf::IndiClient interface, called by activate to actually begins the INDI event loop.
    /** This is necessary to detect server restarts.
      */
@@ -45,9 +45,9 @@ public:
    {
       processIndiRequests(false);
    }
-   
-};   
-   
+
+};
+
 template<class _parentT>
 class indiDriver : public pcf::IndiDriver
 {
@@ -152,7 +152,7 @@ indiDriver<parentT>::indiDriver ( parentT * parent,
       return;
    }
    setOutputFd(fd);
-   
+
    // Open the ctrl fifo and write a single byte to it to trigger a restart
    // of the xindidriver process.
    // This allows indiserver to refresh everything.
@@ -171,8 +171,8 @@ indiDriver<parentT>::indiDriver ( parentT * parent,
       parentT::template log<logger::software_error>({__FILE__, __LINE__, errno, "Error writing to control INDI FIFO."});
       m_good = false;
    }
-   
-   
+
+
    close(fd);
 }
 
@@ -233,7 +233,7 @@ int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
          m_outGoing = nullptr;
       }
    }
-   
+
    //Connect if needed
    if( m_outGoing == nullptr)
    {
@@ -247,16 +247,16 @@ int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
          parentT::template log<logger::software_error>({__FILE__, __LINE__, "Exception thrown while creating IndiClient connection"});
          return -1;
       }
-      
+
       if(m_outGoing == nullptr)
       {
          parentT::template log<logger::software_error>({__FILE__, __LINE__, "Failed to allocate IndiClient connection"});
          return -1;
       }
-      
+
       parentT::template log<logger::text_log>("INDI client connected and activated");
    }
-   
+
    try
    {
       m_outGoing->sendNewProperty(ipRecv);
@@ -265,7 +265,7 @@ int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
          parentT::template log<logger::software_error>({__FILE__, __LINE__, "INDI client appears to be disconnected -- NEW not sent."});
          return -1;
       }
-      
+
       //m_outGoing->quitProcess();
       //delete m_outGoing;
       //m_outGoing = nullptr;

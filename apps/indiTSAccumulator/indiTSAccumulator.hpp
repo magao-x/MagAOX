@@ -31,8 +31,8 @@ namespace app
 {
 
 /// The MagAO-X indiTSAccumulator
-/** An application to accumulate a time-series from an INDI element. 
-  * 
+/** An application to accumulate a time-series from an INDI element.
+  *
   * \ingroup indiTSAccumulator
   */
 class indiTSAccumulator : public MagAOXApp<true>
@@ -46,15 +46,15 @@ protected:
    /** \name Configurable Parameters
      *@{
      */
-   
+
    int m_maxEntries {36000};
-   
+
    ///@}
 
    struct element
    {
       std::string m_name;
-      
+
       timespec m_lastUpdate {0,0};
 
       IMAGE * m_imageStream {nullptr};
@@ -77,7 +77,7 @@ protected:
       return static_cast<indiTSAccumulator *>(app)->setCallBack_all(ipRecv);
    }
 
-   
+
 
 public:
    /// Default c'tor.
@@ -103,14 +103,14 @@ public:
    virtual int appStartup();
 
    /// Implementation of the FSM for indiTSAccumulator.
-   /** 
+   /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
    virtual int appLogic();
 
    /// Shutdown the app.
-   /** 
+   /**
      *
      */
    virtual int appShutdown();
@@ -122,7 +122,7 @@ pcf::IndiProperty prop;
 
 indiTSAccumulator::indiTSAccumulator() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   
+
    return;
 }
 
@@ -135,7 +135,7 @@ int indiTSAccumulator::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    std::vector<std::string> elements;
    _config(elements, "elements");
-   
+
    if(elements.size() < 1)
    {
       log<text_log>("no elements specified", logPrio::LOG_CRITICAL);
@@ -203,15 +203,15 @@ int indiTSAccumulator::appStartup()
       for(size_t n=0; n < it->second.m_elements.size(); ++n)
       {
          it->second.m_elements[n].m_imageStream = (IMAGE *) malloc(sizeof(IMAGE));
-         
+
          uint32_t imsize[3] = {0,0,0};
-         imsize[0] = 1; 
+         imsize[0] = 1;
          imsize[1] = 1;
          imsize[2] = m_maxEntries;
          std::string shmimName = devName + "." + propName + "." + it->second.m_elements[n].m_name;
-      
+
          std::cerr << "Creating: " << shmimName << " " << imsize[0] << " " << imsize[1] << " " << imsize[2] << "\n";
-      
+
          ImageStreamIO_createIm_gpu(it->second.m_elements[n].m_imageStream, shmimName.c_str(), 3, imsize, IMAGESTRUCT_FLOAT, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL, 0);
 
          it->second.m_elements[n].m_imageStream->md->cnt1 = it->second.m_elements[n].m_imageStream->md->size[2] - 1;
@@ -246,7 +246,7 @@ int indiTSAccumulator::setCallBack_all( const pcf::IndiProperty &ipRecv )
    std::string key = ipRecv.createUniqueKey();
    if(m_properties.count(key) > 0)
    {
-      if(ipRecv.getType() != pcf::IndiProperty::Number) 
+      if(ipRecv.getType() != pcf::IndiProperty::Number)
       {
          log<text_log>(key + " is not a Number property.  Can't time-series this.", logPrio::LOG_WARNING);
          return -1; //only numbers are supported for now.
@@ -258,8 +258,8 @@ int indiTSAccumulator::setCallBack_all( const pcf::IndiProperty &ipRecv )
          if(!ipRecv.find( m_properties[key].m_elements[n].m_name)) continue;
 
          IMAGE * image = m_properties[key].m_elements[n].m_imageStream;
-         
-         if(image == nullptr) 
+
+         if(image == nullptr)
          {
             log<software_error>({__FILE__, __LINE__, "Image for " + key + "." + m_properties[key].m_elements[n].m_name + " is nullptr"});
             continue;
@@ -281,16 +281,16 @@ int indiTSAccumulator::setCallBack_all( const pcf::IndiProperty &ipRecv )
             //Set the writing flag
             image->md->write=1;
 
-            //Set the times            
+            //Set the times
             clock_gettime(CLOCK_REALTIME, &image->md->writetime);
             image->writetimearray[cnt1] = image->md->writetime;
 
             image->md->atime = ts;
             image->atimearray[cnt1] = ts;
-            
+
             //Set the value
             image->array.F[cnt1] = val;
-            
+
             //Now update counters
             image->md->cnt0++;
             image->cntarray[cnt1] = image->md->cnt0;

@@ -67,7 +67,7 @@ IndiProperty::IndiProperty(const IndiProperty &ipRhs ) : m_szDevice(ipRhs.m_szDe
                                                            m_szMessage(ipRhs.m_szMessage), m_szName(ipRhs.m_szName), m_tPerm(ipRhs.m_tPerm),
                                                             m_tRule(ipRhs.m_tRule), m_tState(ipRhs.m_tState), m_xTimeout(ipRhs.m_xTimeout),
                                                               m_oRequested(ipRhs.m_oRequested),  m_tsTimeStamp(ipRhs.m_tsTimeStamp),
-                                                                m_szVersion(ipRhs.m_szVersion), m_beValue(ipRhs.m_beValue), 
+                                                                m_szVersion(ipRhs.m_szVersion), m_beValue(ipRhs.m_beValue),
                                                                  m_mapElements(ipRhs.m_mapElements), m_tType(ipRhs.m_tType)
 {
 }

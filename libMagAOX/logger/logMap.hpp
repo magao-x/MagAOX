@@ -64,7 +64,7 @@ struct logMap
     typedef std::map<std::string, logInMemory> appToBufferMapT;
 
     int m_searchDaySpan {100}; ///< Maximum number of days to search for files in the past/future.
-    
+
     appToFileMapT m_appToFileMap;
 
     appToBufferMapT m_appToBufferMap;
@@ -222,7 +222,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
 
     int ndays = 0;
 
-    while( prevLogFound == false && ndays < m_searchDaySpan ) 
+    while( prevLogFound == false && ndays < m_searchDaySpan )
     {
         ++ndays;
 
@@ -379,7 +379,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
         while(!exists && n < m_searchDaySpan)
         {
             follLogSubDir.subDay();
-            
+
             DEBUG_CRUMB("checking for: " + basedir + follLogSubDir.path());
 
             exists = mx::ioutils::dir_exists_is(basedir + follLogSubDir.path(), errc);

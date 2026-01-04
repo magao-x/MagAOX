@@ -77,19 +77,19 @@ public:
         app[1].init(this, 1);
         app[2].init(this, 2);
         app[3].init(this, 3);
-        
+
         pointer[0].init(this, 0);
         pointer[1].init(this, 1);
         pointer[2].init(this, 2);
         pointer[3].init(this, 3);
-        
+
         store[storeInternalStore].init(this, storeInternalStore);
         store[storeRAMStore].init(this, storeRAMStore);
-        
+
         system.init(this, 0);
-        
+
         temperature.init(this, 0);
-        
+
         timer[0].init(this, 0);
         timer[1].init(this, 1);
         timer[2].init(this, 2);
@@ -98,10 +98,10 @@ public:
         timer[5].init(this, 5);
         timer[6].init(this, 6);
         timer[7].init(this, 7);
-        
+
         usb.init(this, 0);
     }
-    
+
     AppClass app[aUSBHUB2X4_NUM_APPS];
     PointerClass pointer[aUSBHUB2X4_NUM_POINTERS];
     StoreClass store[aUSBHUB2X4_NUM_STORES];

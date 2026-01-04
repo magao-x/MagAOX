@@ -1,4 +1,4 @@
-/** \file ttyErrors.hpp 
+/** \file ttyErrors.hpp
   * \brief Error numbers for the tty utilities.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
@@ -18,7 +18,7 @@
 #define TTY_E_SETOSPEED          (-42003)
 #define TTY_E_TCSETATTR          (-42004)
 #define TTY_E_TIMEOUTONWRITEPOLL (-42011)
-#define TTY_E_ERRORONWRITEPOLL   (-42012) 
+#define TTY_E_ERRORONWRITEPOLL   (-42012)
 #define TTY_E_ERRORONWRITE       (-42013)
 #define TTY_E_TIMEOUTONWRITE     (-42014)
 #define TTY_E_TIMEOUTONREADPOLL  (-42015)
@@ -39,19 +39,19 @@
 #define TELNET_E_EHERROR            (-42045)
 #define TELNET_E_LOGINTIMEOUT       (-42046)
 
-namespace MagAOX 
+namespace MagAOX
 {
-namespace tty 
+namespace tty
 {
-  
+
 /// Get a text explanation of a TTY_E_ error code.
-/** 
-  * \ingroup tty 
-  */ 
+/**
+  * \ingroup tty
+  */
 std::string ttyErrorString( int ec /**< [in] the error code */ );
 
-} //namespace tty 
-} //namespace MagAOX 
+} //namespace tty
+} //namespace MagAOX
 
 #endif //tty_ttyErrors_hpp
- 
+

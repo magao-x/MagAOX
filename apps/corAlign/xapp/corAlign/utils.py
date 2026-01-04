@@ -1,8 +1,8 @@
 import hcipy as hp
 import numpy as np
-import time 
+import time
 import datetime
-import os 
+import os
 
 ### Make the save directory
 def make_savedir_for_today(start_path='./Data/'):
@@ -32,24 +32,24 @@ def wait_for_ready(client, device, timeout=0.1):
 def make_horizontal_probe(grid, direction='left'):
     probe = grid.zeros()
     probe = probe.shaped
-    
+
     width = 4
     height = 4
     x = (-1.0)**(np.arange(width) - width//2)
     y = (-1.0)**(np.arange(height) - height//2)
-    
+
     # 34 - 15 16 17 18 19 20
     probe[15:19, 6:10] = np.outer(x, y)
     probe[15:19, 6:10] = np.outer(y, x)
     if direction == 'right':
         probe = probe[:,::-1]
-    
+
     return probe.ravel()
 
 def make_vertical_probe(grid, direction='down'):
     probe = grid.zeros()
     probe = probe.shaped
-    
+
     width = 4
     height = 4
     x = (-1.0)**(np.arange(width) - width//2)
@@ -61,7 +61,7 @@ def make_vertical_probe(grid, direction='down'):
     probe = np.sign(probe)
     if direction == 'up':
         probe = probe[::-1,:]
-    
+
     return probe.ravel()
 
 def make_ncpc_alignment_poke_pattern():
@@ -83,7 +83,7 @@ def wait_for_state(client, indi_property, value, wait_time=1, tolerance=None):
 
 def calibrate_indi_device(client, device_name, device_property, delta_pertubation, camera, measurement_function, num_stack=50, do_wait=False):
     client.get_properties('{:s}'.format(device_name))
-    
+
     property_current = '{:s}.{:s}.current'.format(device_name, device_property)
     property_target = '{:s}.{:s}.target'.format(device_name, device_property)
     current_position = client[property_current]
@@ -99,7 +99,7 @@ def calibrate_indi_device(client, device_name, device_property, delta_pertubatio
         # Take measurement
         camera.grab_stack(3)
         im = camera.grab_stack(num_stack)
-       
+
         measurement = measurement_function(im)
         slope += s * measurement / (2 * delta_pertubation)
 
@@ -108,17 +108,17 @@ def calibrate_indi_device(client, device_name, device_property, delta_pertubatio
         wait_for_state(client, property_current, current_position, tolerance=0.1 * delta_pertubation)
     else:
         time.sleep(2)
-    
+
     return slope
 
 class XCorrShift():
     def __init__(self, reference_image, domain_pixels=480, domain_size=40, filter_size=None):
         self._reference_image = reference_image
         self._xgrid = hp.make_pupil_grid(domain_pixels, domain_size)
-        
+
         self._fft = hp.FastFourierTransform(self._reference_image.grid)
         self._mft = hp.MatrixFourierTransform(self._xgrid, self._fft.output_grid)
-        
+
         self._filter_size = filter_size
         if filter_size is not None:
             # Change this to a super gaussian filter to remove ringing.
@@ -131,8 +131,8 @@ class XCorrShift():
     def cross_correlate(self, image):
         xcorr = np.real(self._mft.backward(self._fft.forward(image + 0j) * self._spatial_filter * self._kernel))
         return xcorr
-        
-    def measure(self, image):           
+
+    def measure(self, image):
         # Do a cross-correlation and find the peak pixel
         # TODO: implement sub-pixel precision with polynomial fitting
         xcorr = self.cross_correlate(image)
@@ -143,19 +143,19 @@ class XCorrShift():
 def align_pupil_mask(camera, reference_image, client, indi_targets, reconstruction_matrix, num_steps=None, shift_offset = np.array([0,0]), options = {'num_stack' : 4}, do_pad=False):
 
     xcorr_class = XCorrShift(reference_image, 1001, 101, filter_size=1)
-    
+
     cmd = np.array([0,0])
     current_positions = [client['{:s}.current'.format(indi_targets[i])] for i in [0, 1]]
 
     if num_steps is not None:
-        for k in range(num_steps):      
+        for k in range(num_steps):
             im = camera.grab_stack(options['num_stack'])
             shift = xcorr_class.measure(im) - shift_offset
-            print(shift)            
-            
+            print(shift)
+
             err = reconstruction_matrix.dot(shift)
             cmd = cmd - 0.25 * err
-            
+
             client['{:s}.target'.format(indi_targets[0])] = current_positions[0] + cmd[0]
             client['{:s}.target'.format(indi_targets[1])] = current_positions[1] + cmd[1]
             time.sleep(2)
@@ -170,17 +170,17 @@ def align_pupil_mask(camera, reference_image, client, indi_targets, reconstructi
 
                 w_center = (1024 - roi_w // 2)
                 h_center = (1024 - roi_h // 2)
-                
+
                 im_padded = np.zeros(1024, 1024)
                 im_padded = im[h_center:h_center + roi_h//2, w_center:w_center + roi_w//2]
                 im = im_padded.copy()
-                
+
             shift = xcorr_class.measure(im) - shift_offset
             print(shift)
-            
+
             err = reconstruction_matrix.dot(shift)
             cmd = cmd - 0.25 * err
-    
+
             client['{:s}.target'.format(indi_targets[0])] = current_positions[0] + cmd[0]
             client['{:s}.target'.format(indi_targets[1])] = current_positions[1] + cmd[1]
             time.sleep(2)

@@ -57,7 +57,7 @@ public:
               const uint8_t model = aMODULE_TYPE_MTM_Relay) :
     Module(module, bAutoNetworking, model)
     {
-        
+
         app[0].init(this, 0);
         app[1].init(this, 1);
         app[2].init(this, 2);
@@ -69,7 +69,7 @@ public:
         digital[3].init(this, 3);
 
         i2c[0].init(this, 0);
-        
+
         pointer[0].init(this, 0);
         pointer[1].init(this, 1);
         pointer[2].init(this, 2);

@@ -62,13 +62,13 @@ class RefStates(Enum):
 
 class pupilCorAlign(XDevice):
     config : pupilCorAlignConfig
-    
+
     def setup(self):
         self.log.debug(f"I was configured! See? {self.config=}")
 
         self.log.info("Found camera: {:s}".format(self.config.camera.shmim))
         self.camera = XCam(self.config.camera.shmim, use_hcipy=True)
-        
+
         self.ncpc_act_grid = hp.make_pupil_grid(34, 34/30.0 * np.array([1.0, np.sqrt(2)]))
         self.ncpc_dm = XDeformableMirror(dm=self.config.dm.shmim, channel=self.config.dm.channel)
 
@@ -96,7 +96,7 @@ class pupilCorAlign(XDevice):
         self._reference_state_names = ['idle', 'fwpupilRef', 'fwlyotRef', 'centroidRef']
         self._reference_state_callbacks = [None, self.handle_fwpupil_ref, self.handle_fwlyot_ref, self.handle_centroid_ref]
         self._reference_state_machine = XStateMachine(self, self._reference_state_names, RefStates, self._reference_state_callbacks, 'reference')
-        
+
         # Should I make these files configurable?
         # Or should these be auto discoverable?
         self.pupil_reference = hp.read_field(self.config.calibration.path + "reference_pupil_image.fits")
@@ -105,7 +105,7 @@ class pupilCorAlign(XDevice):
         self.actuator_reference = hp.read_field(self.config.calibration.path + "actuator_reference_image.fits")
         self.xcorr_actuators = XCorrShift(self.actuator_reference, 1001, 101, filter_size=1)
 
-        self.fwpupil_references = [hp.read_field(self.config.calibration.path + "reference_{:s}_image.fits".format(mode.replace('-', '_'))) for mode in self.config.calibration.fwpupil_modes] 
+        self.fwpupil_references = [hp.read_field(self.config.calibration.path + "reference_{:s}_image.fits".format(mode.replace('-', '_'))) for mode in self.config.calibration.fwpupil_modes]
         self.xcorr_fwpupil = [XCorrShift(im, 1001, 101, filter_size=1) for im in self.fwpupil_references]
 
         self.fwlyot_references = [hp.read_field(self.config.calibration.path + "reference_{:s}_image.fits".format(mode.replace('-', '_'))) for mode in self.config.calibration.fwlyot_modes]
@@ -169,20 +169,20 @@ class pupilCorAlign(XDevice):
             name='dx', label='dx', format='%.4f',
             min=-50.00, max=50.00, step=0.0001, _value=0.21178766
         ))
-        nv.add_element(DefNumber( 
+        nv.add_element(DefNumber(
             name='dy', label='dy', format='%.4f',
-            min=-50.00, max=50.00, step=0.0001, _value=0.19275196 
+            min=-50.00, max=50.00, step=0.0001, _value=0.19275196
         ))
-        self.add_property(nv, callback=self.handle_fwpupil_error) 
+        self.add_property(nv, callback=self.handle_fwpupil_error)
 
         nv = properties.NumberVector(name='fwlyot')
         nv.add_element(DefNumber( #first element
             name='dx', label='dx', format='%.4f',
             min=-50.00, max=50.00, step=0.0001, _value=0.21178766
         ))
-        nv.add_element(DefNumber( 
+        nv.add_element(DefNumber(
             name='dy', label='dy', format='%.4f',
-            min=-50.00, max=50.00, step=0.0001, _value=0.19275196 
+            min=-50.00, max=50.00, step=0.0001, _value=0.19275196
         ))
         self.add_property(nv, callback=self.handle_fwlyot_error)
 
@@ -205,7 +205,7 @@ class pupilCorAlign(XDevice):
         '''
         if self.stages_are_ready():
             current_positions = [self.client['{:s}.current'.format(indi_targets[i])] for i in [0, 1]]
-            cmd = reconstruction_matrix.dot(shift)        
+            cmd = reconstruction_matrix.dot(shift)
             self.client['{:s}.target'.format(indi_targets[0])] = current_positions[0] - self.gain * cmd[0]
             self.client['{:s}.target'.format(indi_targets[1])] = current_positions[1] - self.gain * cmd[1]
             time.sleep(self.sleep_time)
@@ -225,7 +225,7 @@ class pupilCorAlign(XDevice):
             for s in [-1, 1]:
                 self.ncpc_dm.actuators += s * self.amp * self.actuator_probe_pattern
                 self.ncpc_dm.send(0.05)
-                
+
                 self.camera.grab_stack(2, check_before_wait=True)
                 actuator_im += s * self.camera.grab_stack(self.num_stack, check_before_wait=True)
 
@@ -240,7 +240,7 @@ class pupilCorAlign(XDevice):
         for name in self.client[indi_property]:
             if self.client[indi_property + '.' + name] == constants.SwitchState.ON:
                 return name
-   
+
     def handle_fwpupil(self):
         '''
         '''
@@ -290,10 +290,10 @@ class pupilCorAlign(XDevice):
         current_name = self.get_current_state('fwlyot.filterName')
         filename = "reference_{:s}_image.fits".format(current_name.replace('-', '_'))
         print(current_name)
-        
+
         print("Writing file to {:s}".format(self.config.calibration.path + filename))
         hp.write_field(im, self.config.calibration.path + filename)
-        
+
         print("transition back")
         self._reference_state_machine.transition_to_idle()
 
@@ -318,7 +318,7 @@ class pupilCorAlign(XDevice):
         self.properties['fwpupil']['dx'] = float(self.fwpupil_error[0])
         self.properties['fwpupil']['dy'] = float(self.fwpupil_error[1])
         self.update_property(self.properties['fwpupil'])
-        
+
         self.properties['fwlyot']['dx'] = float(self.fwlyot_error[0])
         self.properties['fwlyot']['dy'] = float(self.fwlyot_error[1])
         self.update_property(self.properties['fwlyot'])
@@ -326,7 +326,7 @@ class pupilCorAlign(XDevice):
     def handle_nstack(self, existing_property, new_message):
         '''
         '''
-        if 'target' in new_message and new_message['target'] != existing_property['current']: 
+        if 'target' in new_message and new_message['target'] != existing_property['current']:
             existing_property['current'] = new_message['target']
             existing_property['target'] = new_message['target']
             self.num_stack = int(new_message['target'])
@@ -336,7 +336,7 @@ class pupilCorAlign(XDevice):
     def handle_gain(self, existing_property, new_message):
         '''
         '''
-        if 'target' in new_message and new_message['target'] != existing_property['current']: 
+        if 'target' in new_message and new_message['target'] != existing_property['current']:
             existing_property['current'] = new_message['target']
             existing_property['target'] = new_message['target']
             self.gain = float(new_message['target'])

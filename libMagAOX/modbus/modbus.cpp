@@ -3,7 +3,7 @@
 #include "modbus.hpp"
 
 
-modbus::modbus( const std::string & host, 
+modbus::modbus( const std::string & host,
                 uint16_t port
               ) : PORT {port}, HOST{host} {}
 

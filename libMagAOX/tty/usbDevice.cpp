@@ -1,7 +1,7 @@
 /** \file usbDevice.cpp
  * \author Jared R. Males
  * \brief Manage a USB TTY device in the MagAOXApp context
- * 
+ *
  * \ingroup tty_files
  *
  */
@@ -41,7 +41,7 @@ int usbDevice::loadConfig( mx::app::appConfigurator & config )
    //Then multiply by 10 for the switch statement.
    float baud = 0;
    config(baud, "usb.baud");
-   
+
    switch((int)(baud*10))
    {
       case 0:
@@ -112,7 +112,7 @@ int usbDevice::connect()
       ::close(m_fileDescrip);
       m_fileDescrip = 0;
    }
-   
+
    return ttyOpenRaw( m_fileDescrip, m_deviceName, m_baudRate );
 }
 

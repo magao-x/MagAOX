@@ -477,6 +477,7 @@ test: tests_clean
 .PHONY: tests_clean
 tests_clean:
 	cd tests && ${MAKE} clean || exit 1;
+	cd libMagAOX/logger/tests && ${MAKE} clean || exit 1;
 
 .PHONY: doc
 doc:

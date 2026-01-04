@@ -24,7 +24,7 @@ class XStateMachine:
         self._device.add_property(sv, callback=self.handle_state)
 
         self._state = self._state_enum.IDLE
-        
+
     def transition_to_idle(self):
         for name in self._state_names:
             self._device.properties[self.top_level_name][name] = constants.SwitchState.OFF
@@ -33,16 +33,16 @@ class XStateMachine:
         self._state = self._state_enum.IDLE
 
     def handle_state(self, existing_property, new_message):
-        for key in self._state_names: 
-            if existing_property[key] == constants.SwitchState.ON: 
+        for key in self._state_names:
+            if existing_property[key] == constants.SwitchState.ON:
                 current_state = key
-        
-        if current_state not in new_message: 
-            for key in self._state_names:
-                existing_property[key] = constants.SwitchState.OFF 
 
-                if key in new_message: 
-                    existing_property[key] = new_message[key] 
+        if current_state not in new_message:
+            for key in self._state_names:
+                existing_property[key] = constants.SwitchState.OFF
+
+                if key in new_message:
+                    existing_property[key] = new_message[key]
 
                     for ti, test_state in enumerate(self._state_names):
                         if key == test_state:

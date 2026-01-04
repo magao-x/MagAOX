@@ -21,7 +21,7 @@ namespace app
   * \todo need a frequency-dependent max amp facility.
   * \todo convert to ioDevice
   * \todo need telnet device, with optional username/password.
-  * 
+  *
   */
 class siglentSDG : public MagAOXApp<>, public dev::telemeter<siglentSDG>
 {
@@ -29,7 +29,7 @@ class siglentSDG : public MagAOXApp<>, public dev::telemeter<siglentSDG>
     friend class siglentSDG_test;
 
    friend class dev::telemeter<siglentSDG>;
-   
+
    //constexpr static double cs_MaxAmp = 0.87;//2.1;//0.87;
    constexpr static double cs_MaxOfst = 10.0;
    constexpr static double cs_MaxVolts = 10.0;
@@ -65,7 +65,7 @@ protected:
    tty::telnetConn m_telnetConn; ///< The telnet connection manager
 
    std::string m_waveform; ///< The chosen funciton to generate
-   /// std::string m_clock; ///<INTernal or EXTernal 
+   /// std::string m_clock; ///<INTernal or EXTernal
 
    uint8_t m_C1outp {0}; ///< The output status channel 1
    double m_C1frequency {0}; ///< The output frequency of channel 1
@@ -89,7 +89,7 @@ protected:
 
    double m_C1frequency_tgt {-1};
    double m_C1vpp_tgt {-1};
-   
+
    double m_C2frequency_tgt {-1};
    double m_C2vpp_tgt {-1};
 
@@ -206,8 +206,8 @@ public:
      * \returns 0 on success
      * \returns -1 on an error.
      */
-   int querySYNC( bool & sync, /// < [in] the sync state for this channel 
-                  int channel  /// < [in] the channel to query  
+   int querySYNC( bool & sync, /// < [in] the sync state for this channel
+                  int channel  /// < [in] the channel to query
                 );
 
    /// Check the setup is correct and safe for PI TTM control.
@@ -317,7 +317,7 @@ public:
    int changePhse( int channel,                    ///< [in] the channel to send the command to.
                    const pcf::IndiProperty &ipRecv ///< [in] INDI property containing the requested new phase [deg]
                  );
-   
+
    /// Send a width command to the device.
    /**
      * \returns 0 on success
@@ -375,7 +375,7 @@ public:
 
    /** \name INDI
      * @{
-     */ 
+     */
 protected:
 
    //declare our properties
@@ -391,7 +391,7 @@ protected:
    pcf::IndiProperty m_indiP_C1hlev;
    pcf::IndiProperty m_indiP_C1llev;
    pcf::IndiProperty m_indiP_C1phse;
-   pcf::IndiProperty m_indiP_C1wdth; 
+   pcf::IndiProperty m_indiP_C1wdth;
    pcf::IndiProperty m_indiP_C1sync;
 
    pcf::IndiProperty m_indiP_C2outp;
@@ -404,9 +404,9 @@ protected:
    pcf::IndiProperty m_indiP_C2hlev;
    pcf::IndiProperty m_indiP_C2llev;
    pcf::IndiProperty m_indiP_C2phse;
-   pcf::IndiProperty m_indiP_C2wdth; 
+   pcf::IndiProperty m_indiP_C2wdth;
    pcf::IndiProperty m_indiP_C2sync;
-   
+
 public:
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1outp);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1freq);
@@ -426,19 +426,19 @@ public:
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2wvtp);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2sync);
    ///@}
-   
-   
-   /** \name Telemeter Interface 
+
+
+   /** \name Telemeter Interface
      *
      * @{
      */
-   
+
    int checkRecordTimes();
-   
+
    int recordTelem( const telem_fxngen * );
-   
+
    int recordParams(bool force = false);
-   
+
    /// @}
 
 };
@@ -459,18 +459,18 @@ void siglentSDG::setupConfig()
 
    config.add("timeouts.write", "", "timeouts.write", argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
    config.add("timeouts.read", "", "timeouts.read", argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
-   
+
    config.add("fxngen.waveform", "w", "fxngen.waveform", argType::Required, "fxngen", "waveform", false, "string", "The waveform to populate function.");
-   
+
    config.add("fxngen.C1outpOn", "", "fxngen.C1outpOn", argType::Required, "fxngen", "C1outpOn", false, "bool", "Whether (true) or not (false) C1 output is enabled at startup. Only effective wavefrom is pulse. Default is false.");
    config.add("fxngen.C2outpOn", "", "fxngen.C2outpOn", argType::Required, "fxngen", "C2outpOn", false, "bool", "Whether (true) or not (false) C2 output is enabled at startup. Only effective wavefrom is pulse. Default is false.");
-   
+
    config.add("fxngen.C1ampDefault", "", "fxngen.C1ampDefault", argType::Required, "fxngen", "C1ampDefault", false, "float", "C1 Default P2V Amplitude of waveform. Default = 0.0");
    config.add("fxngen.C2ampDefault", "", "fxngen.C2ampDefault", argType::Required, "fxngen", "C2ampDefault", false, "float", "C2 Default P2V Amplitude of waveform. Default = 0.0");
 
    config.add("fxngen.C1ofstDefault", "", "fxngen.C1ofstDefault", argType::Required, "fxngen", "C1ofstDefault", false, "float", "C1 Default Offset Amplitude of waveform. Default = 0.0");
    config.add("fxngen.C2ofstDefault", "", "fxngen.C2ofstDefault", argType::Required, "fxngen", "C2ofstDefault", false, "float", "C2 Default Offset Amplitude of waveform. Default = 0.0");
-   
+
    config.add("fxngen.C1ampMax", "", "fxngen.C1ampMax", argType::Required, "fxngen", "C1ampMax", false, "float", "C1 Maximum amplitude");
    config.add("fxngen.C2ampMax", "", "fxngen.C2ampMax", argType::Required, "fxngen", "C2ampMax", false, "float", "C2 Maximum amplitude");
 
@@ -485,7 +485,7 @@ void siglentSDG::loadConfig()
 
    config(m_writeTimeOut, "timeouts.write");
    config(m_readTimeOut, "timeouts.read");
-   
+
    config(m_waveform, "fxngen.waveform"); // todo: check if this is a valid waveform?
    config(m_C1outpOn, "fxngen.C1outpOn");
    config(m_C2outpOn, "fxngen.C2outpOn");
@@ -533,7 +533,7 @@ int siglentSDG::appStartup()
 
    if(m_waveform == "SINE"){
       REG_INDI_NEWPROP(m_indiP_C1phse, "C1phse", pcf::IndiProperty::Number);
-      m_indiP_C1phse.add (pcf::IndiElement("value")); 
+      m_indiP_C1phse.add (pcf::IndiElement("value"));
       m_indiP_C1phse["value"].set(0);
    }
 
@@ -563,7 +563,7 @@ int siglentSDG::appStartup()
    m_indiP_C1llev.add (pcf::IndiElement("value"));
    m_indiP_C1llev["value"].set(0);
 
-   createStandardIndiToggleSw( m_indiP_C1sync, "C1synchro", "C1 Sync Output", "C1 Sync Output");  
+   createStandardIndiToggleSw( m_indiP_C1sync, "C1synchro", "C1 Sync Output", "C1 Sync Output");
    if(registerIndiPropertyNew( m_indiP_C1sync, st_newCallBack_m_indiP_C1sync) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
@@ -620,7 +620,7 @@ int siglentSDG::appStartup()
    m_indiP_C2llev.add (pcf::IndiElement("value"));
    m_indiP_C2llev["value"].set(0);
 
-   createStandardIndiToggleSw( m_indiP_C2sync, "C2synchro", "C2 Sync Output", "C2 Sync Output");  
+   createStandardIndiToggleSw( m_indiP_C2sync, "C2synchro", "C2 Sync Output", "C2 Sync Output");
    if(registerIndiPropertyNew( m_indiP_C2sync, st_newCallBack_m_indiP_C2sync) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
@@ -631,7 +631,7 @@ int siglentSDG::appStartup()
    {
       return log<software_error,-1>({__FILE__,__LINE__});
    }
-   
+
    return 0;
 }
 
@@ -660,7 +660,7 @@ int siglentSDG::appLogic()
          return 0;
       }
    }
-   
+
    if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR )
    {
       int rv = m_telnetConn.connect(m_deviceAddr, m_devicePort);
@@ -788,7 +788,7 @@ int siglentSDG::appLogic()
             state(stateCodes::READY);
          }
 
-         recordParams(true); 
+         recordParams(true);
 
       }
       else
@@ -907,7 +907,7 @@ int siglentSDG::appLogic()
          {
             state(stateCodes::READY);
          }
-         
+
          recordParams(); //This will check if anything changed.
       }
 
@@ -916,7 +916,7 @@ int siglentSDG::appLogic()
          log<software_error>({__FILE__, __LINE__});
          return 0;
       }
-      
+
       return 0;
 
    }
@@ -952,14 +952,14 @@ int siglentSDG::onPowerOff()
 
    m_C1frequency_tgt = -1;
    m_C1vpp_tgt = -1;
-   
+
    updateIfChanged(m_indiP_C1wvtp, "value", m_C1wvtp);
 
    updateIfChanged(m_indiP_C1freq, "current", 0.0);
    updateIfChanged(m_indiP_C1freq, "target", 0.0);
 
    updateIfChanged(m_indiP_C1peri, "value", 0.0);
-   
+
    updateIfChanged(m_indiP_C1amp, "current", 0.0);
    updateIfChanged(m_indiP_C1amp, "target", 0.0);
 
@@ -967,11 +967,11 @@ int siglentSDG::onPowerOff()
    updateIfChanged(m_indiP_C1ofst, "value", 0.0);
    updateIfChanged(m_indiP_C1hlev, "value", 0.0);
    updateIfChanged(m_indiP_C1llev, "value", 0.0);
-   if(m_waveform == "SINE"){updateIfChanged(m_indiP_C1phse, "value", 0.0);} 
+   if(m_waveform == "SINE"){updateIfChanged(m_indiP_C1phse, "value", 0.0);}
    if(m_waveform == "PULSE"){updateIfChanged(m_indiP_C1wdth, "value", 0.0);}
    updateIfChanged(m_indiP_C1outp, "value", std::string("Off"));
    updateSwitchIfChanged(m_indiP_C1sync, "toggle", pcf::IndiElement::Off, INDI_IDLE);
-   
+
 
    m_C2wvtp = "NONE";
    m_C2frequency = 0.0;
@@ -981,14 +981,14 @@ int siglentSDG::onPowerOff()
 
    m_C2frequency_tgt = -1;
    m_C2vpp_tgt = -1;
-   
+
    updateIfChanged(m_indiP_C2wvtp, "value", m_C2wvtp);
-   
+
    updateIfChanged(m_indiP_C2freq, "current", 0.0);
    updateIfChanged(m_indiP_C2freq, "target", 0.0);
 
    updateIfChanged(m_indiP_C2peri, "value", 0.0);
- 
+
    updateIfChanged(m_indiP_C2amp, "current", 0.0);
    updateIfChanged(m_indiP_C2amp, "target", 0.0);
 
@@ -1000,7 +1000,7 @@ int siglentSDG::onPowerOff()
    if(m_waveform == "PULSE"){updateIfChanged(m_indiP_C2wdth, "value", 0.0);}
    updateIfChanged(m_indiP_C1outp, "value", std::string("Off"));
    updateSwitchIfChanged(m_indiP_C2sync, "toggle", pcf::IndiElement::Off, INDI_IDLE);
-   
+
    return 0;
 }
 
@@ -1014,7 +1014,7 @@ inline
 int siglentSDG::appShutdown()
 {
    dev::telemeter<siglentSDG>::appShutdown();
-   
+
    return 0;
 }
 
@@ -1321,13 +1321,13 @@ int siglentSDG::queryBSWV( int channel)
 
          if(m_C1frequency_tgt == -1) m_C1frequency_tgt = m_C1frequency;
          if(m_C1vpp_tgt == -1) m_C1vpp_tgt = m_C1vpp;
-         
+
          recordParams();
-         
+
          updateIfChanged(m_indiP_C1wvtp, "value", resp_wvtp);
          updateIfChanged(m_indiP_C1freq, "current", resp_freq);
          updateIfChanged(m_indiP_C1peri, "value", resp_peri);
-         
+
          updateIfChanged(m_indiP_C1amp, "current", resp_amp);
 
          updateIfChanged(m_indiP_C1ampvrms, "value", resp_ampvrms);
@@ -1345,12 +1345,12 @@ int siglentSDG::queryBSWV( int channel)
          m_C2ofst = resp_ofst;
          m_C2phse = resp_phse;
          m_C2wdth = resp_wdth;
-         
+
          if(m_C2frequency_tgt == -1) m_C2frequency_tgt = m_C2frequency;
          if(m_C2vpp_tgt == -1) m_C2vpp_tgt = m_C2vpp;
-         
+
          recordParams();
-         
+
          updateIfChanged(m_indiP_C2wvtp, "value", resp_wvtp);
          updateIfChanged(m_indiP_C2freq, "current", resp_freq);
          updateIfChanged(m_indiP_C2peri, "value", resp_peri);
@@ -1374,7 +1374,7 @@ int siglentSDG::queryBSWV( int channel)
 
 inline
 int siglentSDG::querySYNC( bool & sync,
-                           int channel 
+                           int channel
                          )
 {
    int rv;
@@ -1689,7 +1689,7 @@ int siglentSDG::normalizeSetup()
    {
       changeOutp(1, "ON");
    }
-   else 
+   else
    {
       changeOutp(1, "OFF");
    }
@@ -1697,7 +1697,7 @@ int siglentSDG::normalizeSetup()
    {
       changeOutp(2, "ON");
    }
-   else 
+   else
    {
       changeOutp(2, "OFF");
    }
@@ -1799,7 +1799,7 @@ int siglentSDG::changeFreq( int channel,
    {
       newFreq = m_maxFreq.back();
    }
-   
+
    if(newFreq < 0)
    {
       newFreq = 0;
@@ -1810,16 +1810,16 @@ int siglentSDG::changeFreq( int channel,
 
       double amp = m_C1vpp_tgt;
       if(channel == 2) amp = m_C2vpp_tgt;
-      
+
       size_t i =0;
       while( i < m_ampMax.size())
       {
          if(m_maxFreq[i] >= newFreq) break;
          ++i;
       }
-      
-      std::cerr << "Max Amp @ " << amp << " = " << m_ampMax[i] << " (freq)\n"; 
-      
+
+      std::cerr << "Max Amp @ " << amp << " = " << m_ampMax[i] << " (freq)\n";
+
       if( amp > m_ampMax[i] )
       {
          log<text_log>("Ch. " + std::to_string(channel) + " FREQ not set due to amplitude exceeding limit for " + std::to_string(newFreq), logPrio::LOG_WARNING);
@@ -1827,7 +1827,7 @@ int siglentSDG::changeFreq( int channel,
       }
 
    }
-   
+
    //Now we update target
    if(channel==1)
    {
@@ -1837,8 +1837,8 @@ int siglentSDG::changeFreq( int channel,
    {
       m_C2frequency_tgt = newFreq;
    }
-   
-   
+
+
    std::string afterColon = "BSWV FRQ," + mx::ioutils::convertToString<double>(newFreq);
    std::string command = makeCommand(channel, afterColon);
 
@@ -1927,18 +1927,18 @@ int siglentSDG::changeAmp( int channel,
       log<text_log>("Ch. " + std::to_string(channel) + " AMP max-limited by config value to " + std::to_string(newAmp), logPrio::LOG_WARNING);
 
    }
-   
+
    // Do not limit freq if a PULSE wave
    if(m_waveform != "PULSE")
    {
 
       //Ensure we won't excede the 0-10V range for SINE
-      if(offst + 0.5*newAmp > 10) 
+      if(offst + 0.5*newAmp > 10)
       {
          newAmp = 2.*(10.0 - offst);
          log<text_log>("Ch. " + std::to_string(channel) + " AMP limited at 10 V by OFST to " + std::to_string(newAmp), logPrio::LOG_WARNING);
       }
-      
+
       if(offst - 0.5*newAmp < 0)
       {
          newAmp = 2*(offst);
@@ -1947,7 +1947,7 @@ int siglentSDG::changeAmp( int channel,
 
       double freq = m_C1frequency_tgt;
       if(channel == 2) freq = m_C2frequency_tgt;
-      
+
       double ampMax;
       size_t i=0;
       while(i < m_ampMax.size())
@@ -1955,23 +1955,23 @@ int siglentSDG::changeAmp( int channel,
          if( m_maxFreq[i] >= freq ) break;
          ++i;
       }
-      
+
       std::cerr << "Max Amp @ " << freq << " = " << ampMax << "\n";
-      
+
       //Ensure we don't exced safe ranges for device
       if(newAmp > ampMax)
       {
          newAmp = ampMax;
          log<text_log>("Ch. " + std::to_string(channel) + " AMP max-limited to " + std::to_string(newAmp), logPrio::LOG_WARNING);
       }
-      
+
       if(newAmp < 0)
       {
          newAmp = 0;
          log<text_log>("Ch. " + std::to_string(channel) + " AMP min-limited to " + std::to_string(newAmp), logPrio::LOG_WARNING);
       }
    }
-   
+
    //Now update target
    if(channel==1)
    {
@@ -1981,8 +1981,8 @@ int siglentSDG::changeAmp( int channel,
    {
       m_C2vpp_tgt = newAmp;
    }
-   
-   
+
+
    std::string afterColon = "BSWV AMP," + mx::ioutils::convertToString<double>(newAmp);
    std::string command = makeCommand(channel, afterColon);
 
@@ -2042,25 +2042,25 @@ int siglentSDG::changeOfst( int channel,
 {
    if(channel < 1 || channel > 2) return -1;
 
-   double amp = m_C1vpp; 
+   double amp = m_C1vpp;
    if(channel == 2) amp = m_C2vpp;
 
    double ampMax = m_C1ampMax;
    if(channel == 2) ampMax = m_C2ampMax;
 
-   
-   if(newOfst + 0.5*amp > ampMax) 
+
+   if(newOfst + 0.5*amp > ampMax)
    {
       newOfst = ampMax - 0.5*amp;
       log<text_log>("Ch. " + std::to_string(channel) + " OFST limited at " + std::to_string(ampMax) + " V by AMP to " + std::to_string(newOfst), logPrio::LOG_WARNING);
    }
-   
+
    if(newOfst - 0.5*amp < 0)
    {
       newOfst = 0.5*amp;
       log<text_log>("Ch. " + std::to_string(channel) + " OFST limited at 0 V by AMP to " + std::to_string(newOfst), logPrio::LOG_WARNING);
    }
-   
+
    if(newOfst > cs_MaxOfst)
    {
       newOfst = cs_MaxOfst;
@@ -2346,12 +2346,12 @@ int siglentSDG::changeSync( int channel,
    bool newSync;
 
    if(!ipRecv.find("toggle")) return 0;
-   
+
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
    {
       newSync = false;
    }
-   
+
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
    {
       newSync = true;
@@ -2374,9 +2374,9 @@ int siglentSDG::changeSync( int channel,
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1outp)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1outp, ipRecv);
-   
+
     return changeOutp(1, ipRecv);
-   
+
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1freq)(const pcf::IndiProperty &ipRecv)
@@ -2431,7 +2431,7 @@ INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1sync)(const pcf::IndiProperty &ipRec
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2outp)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2outp, ipRecv);
- 
+
     return changeOutp(2, ipRecv);
 }
 
@@ -2452,14 +2452,14 @@ INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2amp)(const pcf::IndiProperty &ipRecv
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2ofst)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2ofst, ipRecv);
-   
+
     return changeOfst(2, ipRecv);
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2phse)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2phse, ipRecv);
-  
+
     return changePhse(2, ipRecv);
 }
 
@@ -2493,35 +2493,35 @@ int siglentSDG::checkRecordTimes()
 {
    return telemeter<siglentSDG>::checkRecordTimes(telem_fxngen());
 }
-   
+
 inline
 int siglentSDG::recordTelem( const telem_fxngen * )
 {
    return recordParams(true);
 }
- 
-inline 
+
+inline
 int siglentSDG::recordParams(bool force)
 {
    static double old_C1outp = -1e30; //Ensure first time writes
-   static double old_C1frequency = m_C1frequency; 
-   static double old_C1vpp = m_C1vpp; 
-   static double old_C1ofst = m_C1ofst; 
+   static double old_C1frequency = m_C1frequency;
+   static double old_C1vpp = m_C1vpp;
+   static double old_C1ofst = m_C1ofst;
    static double old_C1phse = m_C1phse;
    static double old_C1wdth = m_C1wdth;
    static std::string old_C1wvtp = m_C1wvtp;
    static bool old_C1sync = m_C1sync;
-   static double old_C2outp = m_C2outp; 
-   static double old_C2frequency = m_C2frequency; 
-   static double old_C2vpp = m_C2vpp; 
-   static double old_C2ofst = m_C2ofst; 
+   static double old_C2outp = m_C2outp;
+   static double old_C2frequency = m_C2frequency;
+   static double old_C2vpp = m_C2vpp;
+   static double old_C2ofst = m_C2ofst;
    static double old_C2phse = m_C2phse;
    static double old_C2wdth = m_C2wdth;
    static std::string old_C2wvtp = m_C2wvtp;
    static bool old_C2sync = m_C2sync;
 
    bool write = false;
-   
+
    if(!force)
    {
       if( old_C1outp != m_C1outp ) write = true;
@@ -2541,7 +2541,7 @@ int siglentSDG::recordParams(bool force)
       else if( old_C2wvtp != m_C2wvtp ) write = true;
       else if( old_C2sync != m_C2sync ) write = true;
    }
-   
+
    // todo: add if statement for all of the write??
 
    if(force || write)
@@ -2556,10 +2556,10 @@ int siglentSDG::recordParams(bool force)
       else if(m_C2wvtp == "SINE") C2wvtp = TELEM_FXNGEN_WVTP_SINE;
       else if(m_C2wvtp == "PULSE") C2wvtp = TELEM_FXNGEN_WVTP_PULSE;
 
-      telem<telem_fxngen>({m_C1outp, m_C1frequency, m_C1vpp, m_C1ofst, m_C1phse, C1wvtp, 
+      telem<telem_fxngen>({m_C1outp, m_C1frequency, m_C1vpp, m_C1ofst, m_C1phse, C1wvtp,
                              m_C2outp, m_C2frequency, m_C2vpp, m_C2ofst, m_C2phse, C2wvtp,
                                 m_C1sync, m_C2sync, m_C1wdth, m_C2wdth});
-      
+
       old_C1outp = m_C1outp;
       old_C1frequency = m_C1frequency;
       old_C1vpp = m_C1vpp;
@@ -2568,7 +2568,7 @@ int siglentSDG::recordParams(bool force)
       old_C1wdth = m_C1wdth;
       old_C1wvtp = m_C1wvtp;
       old_C1sync = m_C1sync;
-      
+
       old_C2outp = m_C2outp;
       old_C2frequency = m_C2frequency;
       old_C2vpp = m_C2vpp;
@@ -2578,10 +2578,10 @@ int siglentSDG::recordParams(bool force)
       old_C2wvtp = m_C2wvtp;
       old_C2sync = m_C2sync;
    }
-   
+
    return 0;
 }
-   
+
 } //namespace app
 } //namespace MagAOX
 

@@ -27,7 +27,7 @@ protected:
 
     std::vector<std::string> m_filterDeviceNames;
     std::vector<std::string> m_presetNames; //one per filter device, based on its name
-    
+
     QGraphicsScene *m_qgs{nullptr};
 
     StretchBox *m_roiBox{nullptr};

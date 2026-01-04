@@ -41,7 +41,7 @@ class States(Enum):
 
 class corAlign(XDevice):
     config : CorAlignConfig
-    
+
     def setup(self):
         self.log.debug(f"I was configured! See? {self.config=}")
         fsm = properties.TextVector(name='fsm')
@@ -127,12 +127,12 @@ class corAlign(XDevice):
             self._n_avg = int(new_message['target'])
         self.update_property(existing_property)
 
-    def handle_state(self, existing_property, new_message):           
+    def handle_state(self, existing_property, new_message):
         target_list = ['idle', 'psf', 'fpm']
         for key in target_list:
             if existing_property[key] == constants.SwitchState.ON:
                 current_state = key
-        
+
         if current_state not in new_message:
 
             for key in target_list:
@@ -142,7 +142,7 @@ class corAlign(XDevice):
 
                     if key == 'idle':
                         self._state = States.IDLE
-                        self.properties['fsm']['state'] = StateCodes.READY.name                    
+                        self.properties['fsm']['state'] = StateCodes.READY.name
                     elif key == 'psf':
                         self._state = States.PSF
                         self.properties['fsm']['state'] = StateCodes.OPERATING.name
@@ -196,7 +196,7 @@ class corAlign(XDevice):
         else:
             # Do nothing if in an unspecified position.
             return np.array([0.0, 0.0])
-    
+
     def measure_psf_position(self, image):
         return np.array([0.0, 0.0])
 
@@ -205,7 +205,7 @@ class corAlign(XDevice):
         self.properties['state']['fpm'] = constants.SwitchState.OFF
         self.properties['state']['idle'] = constants.SwitchState.ON
         self.update_property(self.properties['state'])
-        self._state = States.IDLE            
+        self._state = States.IDLE
 
     def loop(self):
         if self._state == States.CLOSED_LOOP:

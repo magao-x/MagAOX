@@ -10,7 +10,7 @@ table Telem_fxngen_fb
    C1ofst:double;
    C1phse:double;
    C1wvtp:uint8;
-   
+
    C2outp:uint8;
    C2freq:double;
    C2vpp:double;

@@ -1,7 +1,7 @@
 /*
  * \file zb_serial.c
  * \author Eric Dand
- * \version 1.0 
+ * \version 1.0
  * \date 28 November 2014
  * \copyright Apache Software License Version 2.0
  *
@@ -22,7 +22,7 @@ void zb_set_verbose(int value)
 	zb_verbose = value;
 }
 
-int zb_encode(uint8_t *destination, uint8_t device_number, 
+int zb_encode(uint8_t *destination, uint8_t device_number,
 		uint8_t command_number, int32_t data)
 {
 	unsigned int i;
@@ -36,7 +36,7 @@ int zb_encode(uint8_t *destination, uint8_t device_number,
 	destination[0] = device_number;
 	destination[1] = command_number;
 
-	for (i = 2; i < 6; i++) 
+	for (i = 2; i < 6; i++)
 	{
 		destination[i] = (uint8_t)udata;
 		udata >>= 8;
@@ -49,7 +49,7 @@ int zb_decode(int32_t *destination, const uint8_t *reply)
 {
 	unsigned int i;
 	uint32_t data = 0;
-	
+
 	if (destination == NULL)
 	{
 		return Z_ERROR_NULL_PARAMETER;
@@ -94,13 +94,13 @@ int zb_connect(z_port *port, const char *port_name)
 {
 	DCB dcb = { 0 };
 	COMMTIMEOUTS timeouts;
-	
+
 	if (port_name == NULL)
 	{
 		PRINT_ERROR("[ERROR] port name cannot be NULL.");
 		return Z_ERROR_NULL_PARAMETER;
 	}
-	
+
 	*port = CreateFileA(port_name,
 			GENERIC_READ | GENERIC_WRITE,
 			0,
@@ -163,7 +163,7 @@ int zb_send(z_port port, const uint8_t *command)
 		PRINT_ERROR("[ERROR] command cannot be NULL.");
 		return Z_ERROR_NULL_PARAMETER;
 	}
-	
+
 	SYSCALL(WriteFile(port, command, 6, &nbytes, NULL));
 	if (nbytes == 6)
 	{
@@ -173,9 +173,9 @@ int zb_send(z_port port, const uint8_t *command)
 }
 
 /* We read bytes one-at-a-time as ReadFile(port, destination, 6, &nread, NULL)
- * often enough will "read" bytes of \0 in the middle of a message when it 
+ * often enough will "read" bytes of \0 in the middle of a message when it
  * should instead be waiting for a real byte of data down the line.
- * Worse, it reports afterwards that it has read a full 6 bytes, making this 
+ * Worse, it reports afterwards that it has read a full 6 bytes, making this
  * behaviour hard to track and harder to debug and compensate for. */
 int zb_receive(z_port port, uint8_t *destination)
 {
@@ -199,7 +199,7 @@ int zb_receive(z_port port, uint8_t *destination)
 	if (i == 6)
 	{
 		return i;
-	} 
+	}
 	/* if we didn't read a whole 6 bytes, we count that as an error. */
 	return Z_ERROR_SYSTEM_ERROR;
 }
@@ -248,13 +248,13 @@ int zb_set_timeout(z_port port, int milliseconds)
 #include <unistd.h>
 
 /* A little sugar for checking return values from system calls.
- * I would have liked to use GNU/GCC's "statement expressions" so that one 
+ * I would have liked to use GNU/GCC's "statement expressions" so that one
  * do something like "z_port port = SYSCALL(open([parameters]))", but they're
  * a GNU extension, and therefore unfriendly to non-GCC compilers.
  * Workaround to avoid dependence on statement expressions for SYSCALL macro:
  * use SYSCALL on result of assignment instead. */
 #if defined(NDEBUG)
-#define PRINT_ERROR(M) 
+#define PRINT_ERROR(M)
 #define PRINT_SYSCALL_ERROR(M)
 #else
 #include <errno.h>
@@ -265,7 +265,7 @@ int zb_set_timeout(z_port port, int milliseconds)
 		__FILE__, __LINE__, strerror(errno)); } } while(0)
 #endif
 /* A little sugar for checking return values from system calls.
- * I would have liked to use GNU/GCC's "statement expressions" so that one 
+ * I would have liked to use GNU/GCC's "statement expressions" so that one
  * do something like "z_port port = SYSCALL(open([parameters]))", but they're
  * a GNU extension, and therefore unfriendly to non-GCC compilers.
  * Workaround to avoid dependence on statement expressions for SYSCALL macro:
@@ -319,16 +319,16 @@ int zb_connect(z_port *port, const char *port_name)
 	return Z_SUCCESS;
 }
 
-int zb_disconnect(z_port port) 
+int zb_disconnect(z_port port)
 {
 	SYSCALL(close(port));
 	return Z_SUCCESS;
 }
 
-int zb_send(z_port port, const uint8_t *command) 
+int zb_send(z_port port, const uint8_t *command)
 {
 	int nbytes;
-	
+
 	SYSCALL(nbytes = write(port, command, 6));
 	if (nbytes == 6)
 	{
@@ -339,8 +339,8 @@ int zb_send(z_port port, const uint8_t *command)
 
 /* More struggles with termios: we're forced to read one byte at a time on
  * *NIX because of how termios.c_cc[VTIME] and [VMIN] work. From the termios
- * man page: 
- * 
+ * man page:
+ *
  * * if MIN == 0; TIME > 0: "read(2) returns either when at least one
  * byte of data is available, or when the timer expires."
  * * if MIN > 0; TIME > 0: "Because the timer is started only after the

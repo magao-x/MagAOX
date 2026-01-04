@@ -13,7 +13,7 @@ namespace DDSPC
 {
 
 class PredictiveController{
-    
+
 	private:
         RecursiveLeastSquares* rls;
 
@@ -22,7 +22,7 @@ class PredictiveController{
         uint command_head {0};
         Matrix measurement_buffer;
         Matrix command_buffer;
-        
+
         Matrix* regularization_matrix;
         bool use_regularization_matrix_01 {true};
         bool do_switch_regularization_matrix {false};
@@ -52,7 +52,7 @@ class PredictiveController{
         inline Matrix get_prediction_matrix(){
             return rls->prediction_matrix;
         };
-        
+
         void reset();
 
         Matrix get_measurement_future();
@@ -65,7 +65,7 @@ class PredictiveController{
         Matrix get_current_measurement_past(int num_steps);
 
         void get_current_past();
-        
+
         Matrix calculate_command(Matrix new_measurement, Matrix exploration_noise);
         void update_system();
         void update_controller();

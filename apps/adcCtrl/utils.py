@@ -11,7 +11,7 @@ class AdcFitter:
         self.grating_angle = grating_angle
         self.grating_freq = grating_freq
         self.normalized_wavelength = wavelength / 656E-9 #normalizing the wavelengths to the ha values
-        self.normalized_bandwidth = bandwidth / 656E-9 
+        self.normalized_bandwidth = bandwidth / 656E-9
         self.maxiter = 6
         self.control_mtx = np.matrix([[0,0],])
         self.current_speckle = None
@@ -31,7 +31,7 @@ class AdcFitter:
 
     def satellite_spot(self, amplitude, mu_x, mu_y, sigma_x, sigma_y, orientation, background):
         def func(grid):
-            return hp.Field(amplitude * self.make_gaussian(mu_x, mu_y, sigma_x, sigma_y, orientation)(grid) + background, grid) 
+            return hp.Field(amplitude * self.make_gaussian(mu_x, mu_y, sigma_x, sigma_y, orientation)(grid) + background, grid)
         return func
 
     def cost(self, theta):
@@ -50,11 +50,11 @@ class AdcFitter:
                 j+= 1E3 * 1/aspect_ratio**2
 
         return j
-    
+
     def fit(self,theta_est):
         fitting = minimize(self.cost,theta_est,options={'maxiter':self.maxiter})
         return fitting
-    
+
     def estimate_centroid(self):
         M00 = np.sum(self.data)
         M10 = np.sum(self.data * self.data.grid.x)
@@ -62,12 +62,12 @@ class AdcFitter:
 
         centroid = [M10/M00,M01/M00]
         return centroid
-    
+
     def estimate_angle(self):
         M00 = np.sum(self.data)
         M10 = np.sum(self.data * self.data.grid.x)
         M01 = np.sum(self.data * self.data.grid.y)
-        
+
         M20 = np.sum(self.data * self.data.grid.x**2)
         M02 = np.sum(self.data * self.data.grid.y**2)
         M11 = np.sum(self.data * self.data.grid.y * self.data.grid.x)
@@ -93,10 +93,10 @@ class AdcFitter:
         rect = hp.make_rotated_aperture(hp.make_rectangular_aperture(size=sizes[speckle_number], center=corners[speckle_number]), np.deg2rad(-grating_angle))(image.grid)
         speckle_img = rect * image
         return speckle_img
-    
+
 
     def set_psf(self,psf):
-        self.psf = psf  
+        self.psf = psf
 
     def find_speckle_angles2(self):
 
@@ -127,14 +127,14 @@ class AdcFitter:
             background = 0
 
             theta_est = np.array([amplitude, mu_x, mu_y, sigma_x, sigma_y, orientation, background])
-            fit = self.fit(theta_est) 
+            fit = self.fit(theta_est)
             speckle_angles[i] = np.degrees(fit.x[5])
 
         self.current_speckle = None
         speckle_angles = np.array(speckle_angles).T
 
         return speckle_angles
-    
+
     def speckle_pairs(self, speckle_angles):
         pair02 = speckle_angles[0] - speckle_angles[2]
         pair13 = speckle_angles[1] - speckle_angles[3]
@@ -159,8 +159,8 @@ class AdcFitter:
         cutout = data.shaped[(y_ind-height//2):(y_ind + height//2), (x_ind-width//2):(x_ind+width//2)]
         sub_grid = hp.make_pupil_grid([width, height], [width * data.grid.delta[0], height * data.grid.delta[1]])
         return hp.Field(cutout.ravel(), sub_grid)
-    
-    def crop_image(self, image,extent=400,mask_diam=60): 
+
+    def crop_image(self, image,extent=400,mask_diam=60):
         #cutout a centered PSF
         img = image/image.max()
 
@@ -174,7 +174,7 @@ class AdcFitter:
         img = masked_img
         img = self.window_field(img,[center_of_intensity[0],center_of_intensity[1]],extent,extent)
         img /= img.max()
-        
+
         bk = np.median(img)
         img -= bk
         img = hp.Field([x if x>0 else 0 for x in img],img.grid)
@@ -204,6 +204,6 @@ class AdcFitter:
         # radial_map = np.interp(r_coordinates, binc, profile)
 
         filtered_subtracted = img #- radial_map
-        
+
         return filtered_subtracted
 
