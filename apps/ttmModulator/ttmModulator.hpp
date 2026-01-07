@@ -52,9 +52,9 @@ protected:
    int m_modState {MODSTATE_UNKNOWN}; ///< -1 = unknown, 0 = off, 1 = rest, 2 = midset, 3 = set, 4 = modulating
    int m_modStateRequested {MODSTATE_UNKNOWN};  ///< The requested TTM state
    double m_modRad {0}; ///< The current modulation radius, in lam/D.
-   double m_modRadRequested {-1}; ///< The requested modulation radius, in lam/D.
+   double m_modRadRequested {0}; ///< The requested modulation radius, in lam/D.
    double m_modFreq {0}; ///< The current modulation frequency, in Hz.
-   double m_modFreqRequested {-1}; ///< The requested modulation frequency, in Hz.
+   double m_modFreqRequested {0}; ///< The requested modulation frequency, in Hz.
 
 
    int m_C1outp {-1};     ///< Output state of fxn gen channel 1.
@@ -354,12 +354,9 @@ int ttmModulator::appLogic()
 
    { //mutex scope
       std::lock_guard<std::mutex> lock(m_indiMutex);
-      updateIfChanged(m_indiP_modState, "current", m_modState);
-      updateIfChanged(m_indiP_modState, "target", m_modStateRequested);
-      updateIfChanged(m_indiP_modRadius, "current", m_modRad);
-      updateIfChanged(m_indiP_modRadius, "target", m_modRadRequested);
-      updateIfChanged(m_indiP_modFrequency, "current", m_modFreq);
-      updateIfChanged(m_indiP_modFrequency, "target", m_modFreqRequested);
+      updatesIfChanged<int>(m_indiP_modState,  {"current", "target"}, {m_modState, m_modStateRequested});
+      updatesIfChanged<double>(m_indiP_modRadius, {"current", "target"}, {m_modRad, m_modRadRequested});
+      updatesIfChanged<double>(m_indiP_modFrequency, {"current", "target"}, {m_modFreq, m_modFreqRequested});
    }
 
    //This is set by an INDI newProperty
@@ -997,21 +994,6 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modState)(const pcf::IndiProperty &i
 
     m_modStateRequested = target;
 
-    /*m_references(0,0) = target;
-
-    int state = 0;
-    try
-    {
-        state = ipRecv["target"].get<int>();
-    }
-    catch(...)
-    {
-        log<software_error>({__FILE__, __LINE__, "exception caught"});
-        return -1;
-    }
-
-    m_modStateRequested = state;*/
-
     return 0;
 }
 
@@ -1061,20 +1043,6 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modRadius)(const pcf::IndiProperty &
     {
         m_modRadRequested = target;
     }
-
-/*
-    ///\todo use find to test
-    try
-    {
-        double nr = -1;
-        nr = ipRecv["target"].get<double>();
-        if(nr > 0) m_modRadRequested = nr;
-    }
-    catch(...)
-    {
-        //do nothing, just means no requested in command.
-    }
-      */
 
     return 0;
 
