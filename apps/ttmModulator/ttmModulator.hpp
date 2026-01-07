@@ -3,17 +3,15 @@
 #ifndef ttmModulator_hpp
 #define ttmModulator_hpp
 
-
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
-
-#define MODSTATE_UNKNOWN (-1)
-#define MODSTATE_OFF (0)
-#define MODSTATE_REST (1)
-#define MODSTATE_MIDSET (2)
-#define MODSTATE_SET (3)
-#define MODSTATE_MODULATING (4)
+#define MODSTATE_UNKNOWN ( -1 )
+#define MODSTATE_OFF ( 0 )
+#define MODSTATE_REST ( 1 )
+#define MODSTATE_MIDSET ( 2 )
+#define MODSTATE_SET ( 3 )
+#define MODSTATE_MODULATING ( 4 )
 
 namespace MagAOX
 {
@@ -21,726 +19,882 @@ namespace app
 {
 
 /** MagAO-X application to control TTM modulation
-  *
-  * \todo need tests fo ttmModulator
-  */
+ *
+ * \todo need tests fo ttmModulator
+ */
 class ttmModulator : public MagAOXApp<>
 {
 
-protected:
-
-   /** \name Configurable Parameters
+  protected:
+    /** \name Configurable Parameters
      * @{
      */
 
-   double m_maxFreq {3000.0}; ///< The maximum modulation frequency settable by this program
-   double m_maxVolt {1.2801}; ///< The maximum modulation voltage settable by this program
+    double m_maxFreq{ 3000.0 }; ///< The maximum modulation frequency settable by this program
+    double m_maxVolt{ 1.2801 }; ///< The maximum modulation voltage settable by this program
 
-   double m_setVoltage_1 {5.0}; ///< the set position voltage of Ch. 1.
-   double m_setVoltage_2 {5.0}; ///< the set position voltage of Ch. 2.
+    double m_setVoltage_1{ 5.0 }; ///< the set position voltage of Ch. 1.
+    double m_setVoltage_2{ 5.0 }; ///< the set position voltage of Ch. 2.
 
-   double m_setDVolts {1.0}; ///< The setting ramp step size [volts].
+    double m_setDVolts{ 1.0 }; ///< The setting ramp step size [volts].
 
-   double m_modDFreq {500}; ///< The modulation ramp frequency step size [Hz].
-   double m_modDVolts {0.5}; ///< The modulation ramp voltage step size [Volts].
+    double m_modDFreq{ 500 };  ///< The modulation ramp frequency step size [Hz].
+    double m_modDVolts{ 0.5 }; ///< The modulation ramp voltage step size [Volts].
 
-   double m_rotAngle {0};
-   double m_rotParity {1};
+    double m_rotAngle{ 0 };
+    double m_rotParity{ 1 };
 
-   ///@}
+    ///@}
 
-   int m_modState {MODSTATE_UNKNOWN}; ///< -1 = unknown, 0 = off, 1 = rest, 2 = midset, 3 = set, 4 = modulating
-   int m_modStateRequested {MODSTATE_UNKNOWN};  ///< The requested TTM state
-   double m_modRad {0}; ///< The current modulation radius, in lam/D.
-   double m_modRadRequested {0}; ///< The requested modulation radius, in lam/D.
-   double m_modFreq {0}; ///< The current modulation frequency, in Hz.
-   double m_modFreqRequested {0}; ///< The requested modulation frequency, in Hz.
+    int    m_modState{ MODSTATE_UNKNOWN }; ///< -1 = unknown, 0 = off, 1 = rest, 2 = midset, 3 = set, 4 = modulating
+    int    m_modStateRequested{ MODSTATE_UNKNOWN }; ///< The requested TTM state
+    double m_modRad{ 0 };                           ///< The current modulation radius, in lam/D.
+    double m_modRadRequested{ 0 };                  ///< The requested modulation radius, in lam/D.
+    double m_modFreq{ 0 };                          ///< The current modulation frequency, in Hz.
+    double m_modFreqRequested{ 0 };                 ///< The requested modulation frequency, in Hz.
 
+    int    m_C1outp{ -1 };  ///< Output state of fxn gen channel 1.
+    double m_C1freq{ -1 };  ///< Frequency of fxn gen channel 1.
+    double m_C1volts{ -1 }; ///< Voltage p2p of fxn gen channel 1.
+    double m_C1ofst{ -1 };  ///< DC offset of fxn gen channel 1.
+    double m_C1phse{ -1 };  ///< Phase of fxn gen channel 1.
 
-   int m_C1outp {-1};     ///< Output state of fxn gen channel 1.
-   double m_C1freq {-1};  ///< Frequency of fxn gen channel 1.
-   double m_C1volts {-1}; ///< Voltage p2p of fxn gen channel 1.
-   double m_C1ofst {-1};  ///< DC offset of fxn gen channel 1.
-   double m_C1phse {-1};  ///< Phase of fxn gen channel 1.
+    int    m_C2outp{ -1 };  ///< Output state of fxn gen channel 2
+    double m_C2freq{ -1 };  ///< Frequency of fxn gen channel 2.
+    double m_C2volts{ -1 }; ///< Voltage p2p of fxn gen channel 2.
+    double m_C2ofst{ -1 };  ///< DC offset of fxn gen channel 2.
+    double m_C2phse{ -1 };  ///< Phase of fxn gen channel 2.
 
-   int m_C2outp {-1};     ///< Output state of fxn gen channel 2
-   double m_C2freq {-1};  ///< Frequency of fxn gen channel 2.
-   double m_C2volts {-1}; ///< Voltage p2p of fxn gen channel 2.
-   double m_C2ofst {-1};  ///< DC offset of fxn gen channel 2.
-   double m_C2phse {-1};  ///< Phase of fxn gen channel 2.
+    double m_calRadius{ 1.0 };
 
-   double m_calRadius {1.0};
+    /* Old Cal:
+    std::vector<double> m_calFreqs =
+    {100,400,500,600,700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000}; std::vector<double>
+    m_calC1Amps = {0.61,0.61,0.57,0.55,0.53,0.51,0.51,0.49,0.46,0.44,0.44,0.43,0.44,0.46,0.49,0.54,0.58,0.62};
+    std::vector<double> m_calC2Amps =
+    {0.6,0.6,0.6,0.57,0.55,0.53,0.51,0.49,0.49,0.49,0.49,0.5,0.52,0.54,0.59,0.64,0.70,0.77}; std::vector<double>
+    m_calC2Phse = { 75, 75, 75,  75,  75,  75,  75,  75,  75,  75,  75,  75,  75,  72,  72,  70,  70,  70} ;*/
 
-   /* Old Cal:
-   std::vector<double> m_calFreqs = {100,400,500,600,700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000};
-   std::vector<double> m_calC1Amps = {0.61,0.61,0.57,0.55,0.53,0.51,0.51,0.49,0.46,0.44,0.44,0.43,0.44,0.46,0.49,0.54,0.58,0.62};
-   std::vector<double> m_calC2Amps = {0.6,0.6,0.6,0.57,0.55,0.53,0.51,0.49,0.49,0.49,0.49,0.5,0.52,0.54,0.59,0.64,0.70,0.77};
-   std::vector<double> m_calC2Phse = { 75, 75, 75,  75,  75,  75,  75,  75,  75,  75,  75,  75,  75,  72,  72,  70,  70,  70} ;*/
+    /* Cal on 2022-09-18:
+    std::vector<double> m_calFreqs = { 250,  500,   750,  1000,  1250,  1500,  1750,  2000,  2250,  2500,  2750,  3000,
+    3250,  3500}; std::vector<double> m_calC1Amps = {0.66, 0.62, 0.58,  0.49,  0.44,  0.41,  0.43,  0.41,  0.35,
+    0.75,  1.0,   1.03,  1.08,  1.58 }; std::vector<double> m_calC2Amps = {0.64, 0.61, 0.56, 0.54,   0.55,  0.57,  0.65,
+    0.78,  0.95,  1.15,   1.15,   2.25,  2.15,  1.97}; std::vector<double> m_calC2Phse = {  75, 75,    75,   75,    75,
+    75,    72,    67,    63,     35,    5,    18,    10,    -40} ; */
 
-   /* Cal on 2022-09-18:
-   std::vector<double> m_calFreqs = { 250,  500,   750,  1000,  1250,  1500,  1750,  2000,  2250,  2500,  2750,  3000,  3250,  3500};
-   std::vector<double> m_calC1Amps = {0.66, 0.62, 0.58,  0.49,  0.44,  0.41,  0.43,  0.41,  0.35,  0.75,  1.0,   1.03,  1.08,  1.58 };
-   std::vector<double> m_calC2Amps = {0.64, 0.61, 0.56, 0.54,   0.55,  0.57,  0.65,  0.78,  0.95,  1.15,   1.15,   2.25,  2.15,  1.97};
-   std::vector<double> m_calC2Phse = {  75, 75,    75,   75,    75,    75,    72,    67,    63,     35,    5,    18,    10,    -40} ; */
-
-   /* Cal on 2023-12-03 (w. strain gauges ON):*/
-   /*std::vector<double> m_calFreqs =  { 100,  250,  500,  750, 1000, 1250, 1500, 1750, 2000};
-   std::vector<double> m_calC1Amps = {0.22, 0.28, 0.43, 0.61, 0.82, 1.06, 1.35, 1.70, 2.045};
-   std::vector<double> m_calC2Amps = {0.23, 0.23, 0.56, 0.85, 1.16, 1.58, 1.96, 2.60, 3.63};
-   std::vector<double> m_calC2Phse = {  79,   82,   82,   82,   82,   82,   84,   88,   93}; */
+    /* Cal on 2023-12-03 (w. strain gauges ON):*/
+    /*std::vector<double> m_calFreqs =  { 100,  250,  500,  750, 1000, 1250, 1500, 1750, 2000};
+    std::vector<double> m_calC1Amps = {0.22, 0.28, 0.43, 0.61, 0.82, 1.06, 1.35, 1.70, 2.045};
+    std::vector<double> m_calC2Amps = {0.23, 0.23, 0.56, 0.85, 1.16, 1.58, 1.96, 2.60, 3.63};
+    std::vector<double> m_calC2Phse = {  79,   82,   82,   82,   82,   82,   84,   88,   93}; */
 
     /* Cal on 2023-12-03 (w. strain gauges OFF):*/
-    std::vector<double> m_calFreqs =  { 100,   250,   500,   750,  1000,  1250,  1500,  1750,  2000,     2250, 2500,  2750, 3000};
-    std::vector<double> m_calC1Amps = {0.310, 0.317, 0.327, 0.327, 0.333, 0.333, 0.343, 0.350, 0.373,    0.39, 0.405, 0.425, 0.435};
-    std::vector<double> m_calC2Amps = {0.313, 0.317, 0.327, 0.340, 0.357, 0.363, 0.380, 0.407, 0.426667, 0.45, 0.475, 0.490, 0.510}; //have to go to this many sig-figs for max voltage reasons
-    std::vector<double> m_calC2Phse = {  74,   74,    74,    74,    74,    71,   71,     68,    68,      68,   68,     68,   68};
+    std::vector<double> m_calFreqs  = { 100, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000 };
+    std::vector<double> m_calC1Amps = {
+        0.310, 0.317, 0.327, 0.327, 0.333, 0.333, 0.343, 0.350, 0.373, 0.39, 0.405, 0.425, 0.435 };
+    std::vector<double> m_calC2Amps = { 0.313,
+                                        0.317,
+                                        0.327,
+                                        0.340,
+                                        0.357,
+                                        0.363,
+                                        0.380,
+                                        0.407,
+                                        0.426667,
+                                        0.45,
+                                        0.475,
+                                        0.490,
+                                        0.510 }; // have to go to this many sig-figs for max voltage reasons
+    std::vector<double> m_calC2Phse = { 74, 74, 74, 74, 74, 71, 71, 68, 68, 68, 68, 68, 68 };
 
-public:
+  public:
+    /// Default c'tor.
+    ttmModulator();
 
-   /// Default c'tor.
-   ttmModulator();
+    /// D'tor, declared and defined for noexcept.
+    ~ttmModulator() noexcept
+    {
+    }
 
-   /// D'tor, declared and defined for noexcept.
-   ~ttmModulator() noexcept
-   {}
+    /// Setup the configuration system (called by MagAOXApp::setup())
+    virtual void setupConfig();
 
-   /// Setup the configuration system (called by MagAOXApp::setup())
-   virtual void setupConfig();
+    /// load the configuration system results (called by MagAOXApp::setup())
+    virtual void loadConfig();
 
-   /// load the configuration system results (called by MagAOXApp::setup())
-   virtual void loadConfig();
-
-   /// Startup functions
-   /** Setsup the INDI vars.
+    /// Startup functions
+    /** Setsup the INDI vars.
      *
      * \returns 0 on success
      * \returns -1 on error.
      */
-   virtual int appStartup();
+    virtual int appStartup();
 
-   /// Implementation of the FSM for the TTM Modulator
-   /**
+    /// Implementation of the FSM for the TTM Modulator
+    /**
      * \returns 0 on success
      * \returns -1 on error.
      */
-   virtual int appLogic();
+    virtual int appLogic();
 
-   /// Do any needed shutdown tasks.  Currently nothing in this app.
-   /**
+    /// Do any needed shutdown tasks.  Currently nothing in this app.
+    /**
      * \returns 0 on success
      * \returns -1 on error.
      */
-   virtual int appShutdown();
+    virtual int appShutdown();
 
-
-   /// Calculate the state of the modulator from the fxn gen params.
-   /**
+    /// Calculate the state of the modulator from the fxn gen params.
+    /**
      * \returns 0 on success
      * \returns -1 on error.
      */
-   int calcState();
+    int calcState();
 
-   /// Rest the TTM
-   /**
+    /// Rest the TTM
+    /**
      * \returns 0 on success
      * \returns -1 on error.
      */
-   int restTTM();
+    int restTTM();
 
-   /// Set the TTM
-   /**
+    /// Set the TTM
+    /**
      * \returns 0 on success
      * \returns -1 on error.
      */
-   int setTTM();
+    int setTTM();
 
-   /// Begin modulating or modify current modulation parameters.
-   /**
+    /// Begin modulating or modify current modulation parameters.
+    /**
      * \returns 0 on success
      * \returns -1 on error.
      */
-   int modTTM( double newRad, ///< The new radius for modulation [lam/D]
-               double newFreq ///< The new frequency for modulation [Hz]
-             );
+    int modTTM( double newRad, ///< The new radius for modulation [lam/D]
+                double newFreq ///< The new frequency for modulation [Hz]
+    );
 
-   int offset12( double d1,
-                 double d2
-               );
+    int offset12( double d1, double d2 );
 
-   int offsetXY( double dx,
-                 double dy
-               );
+    int offsetXY( double dx, double dy );
 
-protected:
+  protected:
+    // declare our properties
+    pcf::IndiProperty m_indiP_modState;
 
-   //declare our properties
-   pcf::IndiProperty m_indiP_modState;
+    pcf::IndiProperty m_indiP_modRadius;
+    pcf::IndiProperty m_indiP_modFrequency;
 
-   pcf::IndiProperty m_indiP_modRadius;
-   pcf::IndiProperty m_indiP_modFrequency;
+    pcf::IndiProperty m_indiP_offset12;
+    pcf::IndiProperty m_indiP_offset;
 
-   pcf::IndiProperty m_indiP_offset12;
-   pcf::IndiProperty m_indiP_offset;
+    pcf::IndiProperty m_indiP_FGState;
 
+    pcf::IndiProperty m_indiP_C1outp;
+    pcf::IndiProperty m_indiP_C1freq;
+    pcf::IndiProperty m_indiP_C1volts;
+    pcf::IndiProperty m_indiP_C1ofst;
+    pcf::IndiProperty m_indiP_C1phse;
 
-   pcf::IndiProperty m_indiP_FGState;
+    pcf::IndiProperty m_indiP_C2outp;
+    pcf::IndiProperty m_indiP_C2freq;
+    pcf::IndiProperty m_indiP_C2volts;
+    pcf::IndiProperty m_indiP_C2ofst;
+    pcf::IndiProperty m_indiP_C2phse;
 
-   pcf::IndiProperty m_indiP_C1outp;
-   pcf::IndiProperty m_indiP_C1freq;
-   pcf::IndiProperty m_indiP_C1volts;
-   pcf::IndiProperty m_indiP_C1ofst;
-   pcf::IndiProperty m_indiP_C1phse;
+  public:
+    INDI_NEWCALLBACK_DECL( ttmModulator, m_indiP_modState );
+    INDI_NEWCALLBACK_DECL( ttmModulator, m_indiP_modRadius );
+    INDI_NEWCALLBACK_DECL( ttmModulator, m_indiP_modFrequency );
+    INDI_NEWCALLBACK_DECL( ttmModulator, m_indiP_offset12 );
+    INDI_NEWCALLBACK_DECL( ttmModulator, m_indiP_offset );
 
-   pcf::IndiProperty m_indiP_C2outp;
-   pcf::IndiProperty m_indiP_C2freq;
-   pcf::IndiProperty m_indiP_C2volts;
-   pcf::IndiProperty m_indiP_C2ofst;
-   pcf::IndiProperty m_indiP_C2phse;
+    INDI_SETCALLBACK_DECL( ttmModulator, m_indiP_C1outp );
+    INDI_SETCALLBACK_DECL( ttmModulator, m_indiP_C1freq );
+    INDI_SETCALLBACK_DECL( ttmModulator, m_indiP_C1volts );
+    INDI_SETCALLBACK_DECL( ttmModulator, m_indiP_C1ofst );
+    INDI_SETCALLBACK_DECL( ttmModulator, m_indiP_C1phse );
 
-public:
-   INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_modState);
-   INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_modRadius);
-   INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_modFrequency);
-   INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_offset12);
-   INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_offset);
-
-   INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C1outp);
-   INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C1freq);
-   INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C1volts);
-   INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C1ofst);
-   INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C1phse);
-
-   INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C2outp);
-   INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C2freq);
-   INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C2volts);
-   INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C2ofst);
-   INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C2phse);
-
+    INDI_SETCALLBACK_DECL( ttmModulator, m_indiP_C2outp );
+    INDI_SETCALLBACK_DECL( ttmModulator, m_indiP_C2freq );
+    INDI_SETCALLBACK_DECL( ttmModulator, m_indiP_C2volts );
+    INDI_SETCALLBACK_DECL( ttmModulator, m_indiP_C2ofst );
+    INDI_SETCALLBACK_DECL( ttmModulator, m_indiP_C2phse );
 };
 
-inline
-ttmModulator::ttmModulator() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+inline ttmModulator::ttmModulator() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
-   m_powerMgtEnabled = true;
-   return;
+    m_powerMgtEnabled = true;
+    return;
 }
 
-inline
-void ttmModulator::setupConfig()
+inline void ttmModulator::setupConfig()
 {
-   config.add("limits.maxfreq", "", "limits.maxfreq", argType::Required, "limits", "maxfreq", false, "real", "The maximum frequency [Hz] which can be set through this program.");
-   config.add("limits.maxamp", "", "limits.maxamp", argType::Required, "limits", "maxamp", false, "real", "The maximum amplitude [lam/D] which can be set throught this program.");
+    config.add( "limits.maxfreq",
+                "",
+                "limits.maxfreq",
+                argType::Required,
+                "limits",
+                "maxfreq",
+                false,
+                "real",
+                "The maximum frequency [Hz] which can be set through this program." );
 
-   config.add("cal.voltsperld1", "", "cal.voltsperld1", argType::Required, "cal", "voltsperld1", false, "real", "The voltage per lam/D for channel 1.");
-   config.add("cal.voltsperld2", "", "cal.voltsperld2", argType::Required, "cal", "voltsperld2", false, "real", "The voltage per lam/D for channel 2.");
-   config.add("cal.phase", "", "cal.phase", argType::Required, "cal", "phase", false, "real", "The axis phase offset, which is applied to channel 2.");
+    config.add( "limits.maxamp",
+                "",
+                "limits.maxamp",
+                argType::Required,
+                "limits",
+                "maxamp",
+                false,
+                "real",
+                "The maximum amplitude [lam/D] which can be set throught this program." );
 
-   config.add("cal.setv1", "", "cal.setv1", argType::Required, "cal", "setv1", false, "real", "The set position voltage of chaannel 1.");
-   config.add("cal.setv2", "", "cal.setv2", argType::Required, "cal", "setv2", false, "real", "The set position voltage of chaannel 2.");
+    config.add( "cal.voltsperld1",
+                "",
+                "cal.voltsperld1",
+                argType::Required,
+                "cal",
+                "voltsperld1",
+                false,
+                "real",
+                "The voltage per lam/D for channel 1." );
 
-   config.add("cal.setDvolts", "", "cal.setDvolts", argType::Required, "cal", "setDvolts", false, "real", "The setting ramp step size [Volts]");
+    config.add( "cal.voltsperld2",
+                "",
+                "cal.voltsperld2",
+                argType::Required,
+                "cal",
+                "voltsperld2",
+                false,
+                "real",
+                "The voltage per lam/D for channel 2." );
 
-   config.add("cal.modDfreq", "", "cal.modDfreq", argType::Required, "cal", "modDfreq", false, "real", "The modulation ramp frequency step size [Hz]");
-   config.add("cal.modDvolts", "", "cal.modDvolts", argType::Required, "cal", "modDvolts", false, "real", "The modulation ramp voltage step size [Volts]");
+    config.add( "cal.phase",
+                "",
+                "cal.phase",
+                argType::Required,
+                "cal",
+                "phase",
+                false,
+                "real",
+                "The axis phase offset, which is applied to channel 2." );
 
-   config.add("cal.rotAngle", "", "cal.rotAngle", argType::Required, "cal", "rotAngle", false, "real", "The offset rotation matrix angle in degrees.");
-   config.add("cal.rotParity", "", "cal.rotParity", argType::Required, "cal", "rotParity", false, "real", "The offset rotation matrix parity, +1 or -1.");
+    config.add( "cal.setv1",
+                "",
+                "cal.setv1",
+                argType::Required,
+                "cal",
+                "setv1",
+                false,
+                "real",
+                "The set position voltage of chaannel 1." );
+
+    config.add( "cal.setv2",
+                "",
+                "cal.setv2",
+                argType::Required,
+                "cal",
+                "setv2",
+                false,
+                "real",
+                "The set position voltage of chaannel 2." );
+
+    config.add( "cal.setDvolts",
+                "",
+                "cal.setDvolts",
+                argType::Required,
+                "cal",
+                "setDvolts",
+                false,
+                "real",
+                "The setting ramp step size [Volts]" );
+
+    config.add( "cal.modDfreq",
+                "",
+                "cal.modDfreq",
+                argType::Required,
+                "cal",
+                "modDfreq",
+                false,
+                "real",
+                "The modulation ramp frequency step size [Hz]" );
+
+    config.add( "cal.modDvolts",
+                "",
+                "cal.modDvolts",
+                argType::Required,
+                "cal",
+                "modDvolts",
+                false,
+                "real",
+                "The modulation ramp voltage step size [Volts]" );
+
+    config.add( "cal.rotAngle",
+                "",
+                "cal.rotAngle",
+                argType::Required,
+                "cal",
+                "rotAngle",
+                false,
+                "real",
+                "The offset rotation matrix angle in degrees." );
+
+    config.add( "cal.rotParity",
+                "",
+                "cal.rotParity",
+                argType::Required,
+                "cal",
+                "rotParity",
+                false,
+                "real",
+                "The offset rotation matrix parity, +1 or -1." );
 }
 
-inline
-void ttmModulator::loadConfig()
+inline void ttmModulator::loadConfig()
 {
-   config(m_maxFreq, "limits.maxfreq");
+    config( m_maxFreq, "limits.maxfreq" );
 
-   config(m_setVoltage_1, "cal.setv1");
-   config(m_setVoltage_2, "cal.setv2");
+    config( m_setVoltage_1, "cal.setv1" );
+    config( m_setVoltage_2, "cal.setv2" );
 
-   config(m_setDVolts, "cal.setDvolts");
-   config(m_modDFreq, "cal.modDfreq");
-   config(m_modDVolts, "cal.modDvolts");
+    config( m_setDVolts, "cal.setDvolts" );
+    config( m_modDFreq, "cal.modDfreq" );
+    config( m_modDVolts, "cal.modDvolts" );
 
-   config(m_rotAngle, "cal.rotAngle");
-   m_rotAngle = m_rotAngle*3.14159/180.;
+    config( m_rotAngle, "cal.rotAngle" );
+    m_rotAngle = m_rotAngle * 3.14159 / 180.;
 
-   config(m_rotParity, "cal.rotParity");
-   if(m_rotParity < 0) m_rotParity = -1;
-   else m_rotParity = 1;
-
-
+    config( m_rotParity, "cal.rotParity" );
+    if( m_rotParity < 0 )
+        m_rotParity = -1;
+    else
+        m_rotParity = 1;
 }
 
-inline
-int ttmModulator::appStartup()
+inline int ttmModulator::appStartup()
 {
-   // set up the  INDI properties
-   REG_INDI_NEWPROP(m_indiP_modState, "modState", pcf::IndiProperty::Number);
-   m_indiP_modState.add (pcf::IndiElement("current"));
-   m_indiP_modState.add (pcf::IndiElement("target"));
-   m_indiP_modState["current"].set(m_modState);
-   m_indiP_modState["target"].set(m_modStateRequested);
+    // set up the  INDI properties
+    REG_INDI_NEWPROP( m_indiP_modState, "modState", pcf::IndiProperty::Number );
+    m_indiP_modState.add( pcf::IndiElement( "current" ) );
+    m_indiP_modState.add( pcf::IndiElement( "target" ) );
+    m_indiP_modState["current"].set( m_modState );
+    m_indiP_modState["target"].set( m_modStateRequested );
 
-   REG_INDI_NEWPROP(m_indiP_modFrequency, "modFrequency", pcf::IndiProperty::Number);
-   m_indiP_modFrequency.add (pcf::IndiElement("current"));
-   m_indiP_modFrequency.add (pcf::IndiElement("target"));
-   m_indiP_modFrequency["current"].set(m_modFreq);
-   m_indiP_modFrequency["target"].set(m_modFreqRequested);
+    REG_INDI_NEWPROP( m_indiP_modFrequency, "modFrequency", pcf::IndiProperty::Number );
+    m_indiP_modFrequency.add( pcf::IndiElement( "current" ) );
+    m_indiP_modFrequency.add( pcf::IndiElement( "target" ) );
+    m_indiP_modFrequency["current"].set( m_modFreq );
+    m_indiP_modFrequency["target"].set( m_modFreqRequested );
 
-   REG_INDI_NEWPROP(m_indiP_modRadius, "modRadius", pcf::IndiProperty::Number);
-   m_indiP_modRadius.add (pcf::IndiElement("current"));
-   m_indiP_modRadius.add (pcf::IndiElement("target"));
-   m_indiP_modRadius["current"].set(m_modRad);
-   m_indiP_modRadius["target"].set(m_modRadRequested);
+    REG_INDI_NEWPROP( m_indiP_modRadius, "modRadius", pcf::IndiProperty::Number );
+    m_indiP_modRadius.add( pcf::IndiElement( "current" ) );
+    m_indiP_modRadius.add( pcf::IndiElement( "target" ) );
+    m_indiP_modRadius["current"].set( m_modRad );
+    m_indiP_modRadius["target"].set( m_modRadRequested );
 
-   REG_INDI_NEWPROP(m_indiP_offset12, "offset12", pcf::IndiProperty::Number);
-   m_indiP_offset12.add (pcf::IndiElement("dC1"));
-   m_indiP_offset12.add (pcf::IndiElement("dC2"));
+    REG_INDI_NEWPROP( m_indiP_offset12, "offset12", pcf::IndiProperty::Number );
+    m_indiP_offset12.add( pcf::IndiElement( "dC1" ) );
+    m_indiP_offset12.add( pcf::IndiElement( "dC2" ) );
 
-   REG_INDI_NEWPROP(m_indiP_offset, "offset", pcf::IndiProperty::Number);
-   m_indiP_offset.add (pcf::IndiElement("x"));
-   m_indiP_offset.add (pcf::IndiElement("y"));
+    REG_INDI_NEWPROP( m_indiP_offset, "offset", pcf::IndiProperty::Number );
+    m_indiP_offset.add( pcf::IndiElement( "x" ) );
+    m_indiP_offset.add( pcf::IndiElement( "y" ) );
 
-   REG_INDI_SETPROP(m_indiP_C1outp, "fxngenmodwfs", "C1outp");
-   REG_INDI_SETPROP(m_indiP_C1freq, "fxngenmodwfs", "C1freq");
-   REG_INDI_SETPROP(m_indiP_C1volts, "fxngenmodwfs", "C1amp");
-   REG_INDI_SETPROP(m_indiP_C1ofst, "fxngenmodwfs", "C1ofst");
-   REG_INDI_SETPROP(m_indiP_C1phse, "fxngenmodwfs", "C1phse");
+    REG_INDI_SETPROP( m_indiP_C1outp, "fxngenmodwfs", "C1outp" );
+    REG_INDI_SETPROP( m_indiP_C1freq, "fxngenmodwfs", "C1freq" );
+    REG_INDI_SETPROP( m_indiP_C1volts, "fxngenmodwfs", "C1amp" );
+    REG_INDI_SETPROP( m_indiP_C1ofst, "fxngenmodwfs", "C1ofst" );
+    REG_INDI_SETPROP( m_indiP_C1phse, "fxngenmodwfs", "C1phse" );
 
-   REG_INDI_SETPROP(m_indiP_C2outp, "fxngenmodwfs", "C2outp");
-   REG_INDI_SETPROP(m_indiP_C2freq, "fxngenmodwfs", "C2freq");
-   REG_INDI_SETPROP(m_indiP_C2volts, "fxngenmodwfs", "C2amp");
-   REG_INDI_SETPROP(m_indiP_C2ofst, "fxngenmodwfs", "C2ofst");
-   REG_INDI_SETPROP(m_indiP_C2phse, "fxngenmodwfs", "C2phse");
+    REG_INDI_SETPROP( m_indiP_C2outp, "fxngenmodwfs", "C2outp" );
+    REG_INDI_SETPROP( m_indiP_C2freq, "fxngenmodwfs", "C2freq" );
+    REG_INDI_SETPROP( m_indiP_C2volts, "fxngenmodwfs", "C2amp" );
+    REG_INDI_SETPROP( m_indiP_C2ofst, "fxngenmodwfs", "C2ofst" );
+    REG_INDI_SETPROP( m_indiP_C2phse, "fxngenmodwfs", "C2phse" );
 
-   return 0;
+    return 0;
 }
 
-inline
-int ttmModulator::appLogic()
+inline int ttmModulator::appLogic()
 {
-   if(state()==stateCodes::POWEROFF) return 0;
+    if( state() == stateCodes::POWEROFF )
+        return 0;
 
-   if(state()==stateCodes::POWERON)
-   {
-      sleep(2);
-   }
+    if( state() == stateCodes::POWERON )
+    {
+        sleep( 2 );
+    }
 
-   if( calcState() < 0 )
-   {
-      //application failure if we can't determine state
-      log<software_critical>({__FILE__,__LINE__});
-      return -1;
-   }
+    if( calcState() < 0 )
+    {
+        // application failure if we can't determine state
+        log<software_critical>( { __FILE__, __LINE__ } );
+        return -1;
+    }
 
-   if(m_modState == MODSTATE_REST)
-   {
-      state(stateCodes::NOTHOMED);
-      if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
-   }
-   else if(m_modState == MODSTATE_SET)
-   {
-      state(stateCodes::READY);
-      if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
-   }
-   else if(m_modState == MODSTATE_MIDSET)
-   {
-      state(stateCodes::ERROR);
-      if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
-   }
-   else if(m_modState == MODSTATE_MODULATING)
-   {
-      state(stateCodes::OPERATING);
-      if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
-   }
+    if( m_modState == MODSTATE_REST )
+    {
+        state( stateCodes::NOTHOMED );
+        if( !stateLogged() )
+            log<ttmmod_params>( { (uint8_t)m_modState, m_modFreq, m_modRad, 0, 0 } );
+    }
+    else if( m_modState == MODSTATE_SET )
+    {
+        state( stateCodes::READY );
+        if( !stateLogged() )
+            log<ttmmod_params>( { (uint8_t)m_modState, m_modFreq, m_modRad, 0, 0 } );
+    }
+    else if( m_modState == MODSTATE_MIDSET )
+    {
+        state( stateCodes::ERROR );
+        if( !stateLogged() )
+            log<ttmmod_params>( { (uint8_t)m_modState, m_modFreq, m_modRad, 0, 0 } );
+    }
+    else if( m_modState == MODSTATE_MODULATING )
+    {
+        state( stateCodes::OPERATING );
+        if( !stateLogged() )
+            log<ttmmod_params>( { (uint8_t)m_modState, m_modFreq, m_modRad, 0, 0 } );
+    }
 
-   { //mutex scope
-      std::lock_guard<std::mutex> lock(m_indiMutex);
-      updatesIfChanged<int>(m_indiP_modState,  {"current", "target"}, {m_modState, m_modStateRequested});
-      updatesIfChanged<double>(m_indiP_modRadius, {"current", "target"}, {m_modRad, m_modRadRequested});
-      updatesIfChanged<double>(m_indiP_modFrequency, {"current", "target"}, {m_modFreq, m_modFreqRequested});
-   }
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_indiMutex );
+        updatesIfChanged<int>( m_indiP_modState, { "current", "target" }, { m_modState, m_modStateRequested } );
+        updatesIfChanged<double>( m_indiP_modRadius, { "current", "target" }, { m_modRad, m_modRadRequested } );
+        updatesIfChanged<double>( m_indiP_modFrequency, { "current", "target" }, { m_modFreq, m_modFreqRequested } );
+    }
 
-   //This is set by an INDI newProperty
-   if(m_modStateRequested > 0)
-   {
-      //Step 0: change the requested state to match, so a new request while we're
-      //        processing gets handled.
+    // This is set by an INDI newProperty
+    if( m_modStateRequested > 0 )
+    {
+        // Step 0: change the requested state to match, so a new request while we're
+        //         processing gets handled.
 
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-      int newState = m_modStateRequested;
-      double newRad = m_modRadRequested;
-      double newFreq = m_modFreqRequested;
+        std::unique_lock<std::mutex> lock( m_indiMutex );
+        int                          newState = m_modStateRequested;
+        double                       newRad   = m_modRadRequested;
+        double                       newFreq  = m_modFreqRequested;
 
-      m_modStateRequested = MODSTATE_OFF;
+        m_modStateRequested = MODSTATE_OFF;
 
-      lock.unlock();
+        lock.unlock();
 
-      state(stateCodes::CONFIGURING);
-      if(newState == MODSTATE_REST) restTTM();
-      if(newState == MODSTATE_SET) setTTM();
-      if(newState == MODSTATE_MODULATING)
-      {
-         if(newRad <= 0.1 || newFreq <= 1)
-         {
-            log<text_log>("radius or frequency too low", logPrio::LOG_ERROR);
-         }
-         else
-         {
-            modTTM(newRad, newFreq);
-         }
-      }
-      calcState();
+        state( stateCodes::CONFIGURING );
+        if( newState == MODSTATE_REST )
+            restTTM();
+        if( newState == MODSTATE_SET )
+            setTTM();
+        if( newState == MODSTATE_MODULATING )
+        {
+            if( newRad <= 0.1 || newFreq <= 1 )
+            {
+                log<text_log>( "radius or frequency too low", logPrio::LOG_ERROR );
+            }
+            else
+            {
+                modTTM( newRad, newFreq );
+            }
+        }
+        calcState();
 
-      //Do this now for responsiveness.
-      if(m_modState == MODSTATE_REST)
-      {
-         state(stateCodes::NOTHOMED);
-         if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
-      }
-      else if(m_modState == MODSTATE_SET)
-      {
-         state(stateCodes::READY);
-         if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
-      }
-      else if(m_modState == MODSTATE_MIDSET)
-      {
-         state(stateCodes::ERROR);
-         if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
-      }
-      else if(m_modState == MODSTATE_MODULATING)
-      {
-         state(stateCodes::OPERATING);
-         if(!stateLogged()) log<ttmmod_params>({(uint8_t) m_modState, m_modFreq, m_modRad, 0,0});
-      }
-
-   }
-   return 0;
-
+        // Do this now for responsiveness.
+        if( m_modState == MODSTATE_REST )
+        {
+            state( stateCodes::NOTHOMED );
+            if( !stateLogged() )
+                log<ttmmod_params>( { (uint8_t)m_modState, m_modFreq, m_modRad, 0, 0 } );
+        }
+        else if( m_modState == MODSTATE_SET )
+        {
+            state( stateCodes::READY );
+            if( !stateLogged() )
+                log<ttmmod_params>( { (uint8_t)m_modState, m_modFreq, m_modRad, 0, 0 } );
+        }
+        else if( m_modState == MODSTATE_MIDSET )
+        {
+            state( stateCodes::ERROR );
+            if( !stateLogged() )
+                log<ttmmod_params>( { (uint8_t)m_modState, m_modFreq, m_modRad, 0, 0 } );
+        }
+        else if( m_modState == MODSTATE_MODULATING )
+        {
+            state( stateCodes::OPERATING );
+            if( !stateLogged() )
+                log<ttmmod_params>( { (uint8_t)m_modState, m_modFreq, m_modRad, 0, 0 } );
+        }
+    }
+    return 0;
 }
 
-
-
-inline
-int ttmModulator::appShutdown()
+inline int ttmModulator::appShutdown()
 {
-   //don't bother
-   return 0;
+    // don't bother
+    return 0;
 }
 
-inline
-int ttmModulator::calcState()
+inline int ttmModulator::calcState()
 {
-   //Need TTM power state here.
+    // Need TTM power state here.
 
-   if( m_C1outp < 1 || m_C2outp < 1 ) //At least one channel off
-   {
-      //Need to also check fxn gen pwr state here
-      m_modState = MODSTATE_REST;
-   }
-   else if( (m_C1freq == 0 || m_C1volts <= 0.002) && (m_C2freq == 0 || m_C2volts <= 0.002) )
-   {
-      //To be set:
-      // -- sine wave freq is 0 or amp is 0.002
-      // -- offset V is at setVoltage
-      // -- phase is 0
-      if(/*m_C1ofst == m_setVoltage_1 && m_C2ofst == m_setVoltage_2 &&*/ m_C1phse == 0 && m_C2phse == 0 )
-      {
-         m_modState = MODSTATE_SET;
-      }
-      else
-      {
-         m_modState = MODSTATE_MIDSET; //must be setting
-      }
-   }
-   else
-   {
-      if(m_C1freq != m_C2freq)
-      {
-         m_modState = MODSTATE_MIDSET;
-      }
-      else
-      {
-         //Possibly some more checks
-         m_modFreq = m_C1freq;
+    if( m_C1outp < 1 || m_C2outp < 1 ) // At least one channel off
+    {
+        // Need to also check fxn gen pwr state here
+        m_modState = MODSTATE_REST;
+    }
+    else if( ( m_C1freq == 0 || m_C1volts <= 0.002 ) && ( m_C2freq == 0 || m_C2volts <= 0.002 ) )
+    {
+        // To be set:
+        //  -- sine wave freq is 0 or amp is 0.002
+        //  -- offset V is at setVoltage
+        //  -- phase is 0
+        if( /*m_C1ofst == m_setVoltage_1 && m_C2ofst == m_setVoltage_2 &&*/ m_C1phse == 0 && m_C2phse == 0 )
+        {
+            m_modState = MODSTATE_SET;
+        }
+        else
+        {
+            m_modState = MODSTATE_MIDSET; // must be setting
+        }
+    }
+    else
+    {
+        if( m_C1freq != m_C2freq )
+        {
+            m_modState = MODSTATE_MIDSET;
+        }
+        else
+        {
+            // Possibly some more checks
+            m_modFreq = m_C1freq;
 
-         //Interpolate on C1.
-         size_t ngt = 0;
+            // Interpolate on C1.
+            size_t ngt = 0;
 
-         for(ngt = 0; ngt < m_calFreqs.size(); ++ngt)
-         {
-            if( m_calFreqs[ngt] >= m_modFreq) break;
-         }
+            for( ngt = 0; ngt < m_calFreqs.size(); ++ngt )
+            {
+                if( m_calFreqs[ngt] >= m_modFreq )
+                    break;
+            }
 
-         double terpC1Amp;
-         if(ngt == 0 || m_calFreqs[ngt] == m_modFreq)
-         {
-            terpC1Amp = m_calC1Amps[ngt];
-         }
-         else
-         {
-            size_t nlt = ngt -1;
-            double dfreq = (m_modFreq - m_calFreqs[nlt])/(m_calFreqs[ngt]-m_calFreqs[nlt]);
-            terpC1Amp = m_calC1Amps[nlt] + (m_calC1Amps[ngt]-m_calC1Amps[nlt])*dfreq;
+            double terpC1Amp;
+            if( ngt == 0 || m_calFreqs[ngt] == m_modFreq )
+            {
+                terpC1Amp = m_calC1Amps[ngt];
+            }
+            else
+            {
+                size_t nlt   = ngt - 1;
+                double dfreq = ( m_modFreq - m_calFreqs[nlt] ) / ( m_calFreqs[ngt] - m_calFreqs[nlt] );
+                terpC1Amp    = m_calC1Amps[nlt] + ( m_calC1Amps[ngt] - m_calC1Amps[nlt] ) * dfreq;
+            }
 
-         }
+            m_modRad = m_C1volts / terpC1Amp * m_calRadius;
 
-         m_modRad = m_C1volts/terpC1Amp * m_calRadius;
+            m_modState = MODSTATE_MODULATING;
+        }
+    }
 
-         m_modState = MODSTATE_MODULATING;
-      }
-   }
-
-   return 0;
+    return 0;
 }
 
 void nanoSleep( unsigned long nsec )
 {
-   std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(nsec));
+    std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>( nsec ) );
 }
 
-template<typename T>
-int waitValue( const T & var,
-               const T & tgtVal,
-               unsigned long timeout = 5000000000,
-               unsigned long pauseWait = 1000000
-              )
+template <typename T>
+int waitValue( const T &var, const T &tgtVal, unsigned long timeout = 5000000000, unsigned long pauseWait = 1000000 )
 {
-   if(var == tgtVal) return 0;
+    if( var == tgtVal )
+        return 0;
 
-   struct timespec ts0, ts1;
-   clock_gettime(CLOCK_REALTIME, &ts0);
-   ts1 = ts0;
+    struct timespec ts0, ts1;
+    clock_gettime( CLOCK_REALTIME, &ts0 );
+    ts1 = ts0;
 
+    while( ( ts1.tv_sec - ts0.tv_sec ) * 1e9 + ( ts1.tv_nsec - ts0.tv_nsec ) < timeout )
+    {
+        if( var == tgtVal )
+            return 0;
 
-   while( (ts1.tv_sec - ts0.tv_sec)*1e9 + (ts1.tv_nsec - ts0.tv_nsec) < timeout)
-   {
-      if(var == tgtVal) return 0;
+        nanoSleep( pauseWait );
 
-      nanoSleep(pauseWait);
+        clock_gettime( CLOCK_REALTIME, &ts1 );
+    }
 
-      clock_gettime(CLOCK_REALTIME, &ts1);
-   }
+    if( var == tgtVal )
+        return 0;
 
-   if(var == tgtVal) return 0;
+    std::cerr << "Timeout: " << ( ts1.tv_sec - ts0.tv_sec ) * 1e9 + ( ts1.tv_nsec - ts0.tv_nsec ) << "\n";
 
-   std::cerr << "Timeout: " << (ts1.tv_sec - ts0.tv_sec)*1e9 + (ts1.tv_nsec - ts0.tv_nsec) << "\n";
-
-   return -1;
-
+    return -1;
 }
 
-template<typename T>
-int waitValue( const T & var,
-               const T & tgtVal,
-               double tol,
-               unsigned long timeout = 5000000000,
-               unsigned long pauseWait = 1000000
-              )
+template <typename T>
+int waitValue(
+    const T &var, const T &tgtVal, double tol, unsigned long timeout = 5000000000, unsigned long pauseWait = 1000000 )
 {
-   if(fabs(tgtVal - var) <= tol) return 0;
+    if( fabs( tgtVal - var ) <= tol )
+        return 0;
 
-   struct timespec ts0, ts1;
-   clock_gettime(CLOCK_REALTIME, &ts0);
-   ts1 = ts0;
+    struct timespec ts0, ts1;
+    clock_gettime( CLOCK_REALTIME, &ts0 );
+    ts1 = ts0;
 
-   while( (ts1.tv_sec - ts0.tv_sec)*1e9 + (ts1.tv_nsec - ts0.tv_nsec) < timeout)
-   {
-      if(fabs(tgtVal - var) <= tol) return 0;
+    while( ( ts1.tv_sec - ts0.tv_sec ) * 1e9 + ( ts1.tv_nsec - ts0.tv_nsec ) < timeout )
+    {
+        if( fabs( tgtVal - var ) <= tol )
+            return 0;
 
-      nanoSleep(pauseWait);
+        nanoSleep( pauseWait );
 
-      clock_gettime(CLOCK_REALTIME, &ts1);
-   }
+        clock_gettime( CLOCK_REALTIME, &ts1 );
+    }
 
-   if(fabs(tgtVal - var) <= tol) return 0;
+    if( fabs( tgtVal - var ) <= tol )
+        return 0;
 
-   std::cerr << "Timeout: " << (ts1.tv_sec - ts0.tv_sec)*1e9 + (ts1.tv_nsec - ts0.tv_nsec) << "\n";
-   return -1;
-
+    std::cerr << "Timeout: " << ( ts1.tv_sec - ts0.tv_sec ) * 1e9 + ( ts1.tv_nsec - ts0.tv_nsec ) << "\n";
+    return -1;
 }
 
-inline
-int ttmModulator::restTTM()
+inline int ttmModulator::restTTM()
 {
-   //Steps:
-   //1) Set freqs to 0
-   if( sendNewProperty(m_indiP_C1freq, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2freq, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+    // Steps:
+    // 1) Set freqs to 0
+    if( sendNewProperty( m_indiP_C1freq, "target", 0.0 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    if( sendNewProperty( m_indiP_C2freq, "target", 0.0 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-   //2) Set amps to 0 (really 0.002)
-   if( sendNewProperty(m_indiP_C1volts, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2volts, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+    // 2) Set amps to 0 (really 0.002)
+    if( sendNewProperty( m_indiP_C1volts, "target", 0.0 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    if( sendNewProperty( m_indiP_C2volts, "target", 0.0 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-   //3) Set phase to 0
-   if( sendNewProperty(m_indiP_C1phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+    // 3) Set phase to 0
+    if( sendNewProperty( m_indiP_C1phse, "value", 0.0 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    if( sendNewProperty( m_indiP_C2phse, "value", 0.0 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-   //4) Set offset to 0
-   if( sendNewProperty(m_indiP_C1ofst, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2ofst, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+    // 4) Set offset to 0
+    if( sendNewProperty( m_indiP_C1ofst, "value", 0.0 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    if( sendNewProperty( m_indiP_C2ofst, "value", 0.0 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-   //5) Set outputs to off
-   if( sendNewProperty(m_indiP_C1outp, "value", "Off") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2outp, "value", "Off") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+    // 5) Set outputs to off
+    if( sendNewProperty( m_indiP_C1outp, "value", "Off" ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    if( sendNewProperty( m_indiP_C2outp, "value", "Off" ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-   //Now check if values have changed.
-   if( waitValue(m_C1freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C1volts, 0.002, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2volts, 0.002, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C1phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C1ofst, 0.001, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2ofst, 0.001, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C1outp, 0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2outp, 0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+    // Now check if values have changed.
+    if( waitValue( m_C1freq, 0.0 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+    if( waitValue( m_C2freq, 0.0 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+    if( waitValue( m_C1volts, 0.002, 1e-6 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+    if( waitValue( m_C2volts, 0.002, 1e-6 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+    if( waitValue( m_C1phse, 0.0 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+    if( waitValue( m_C2phse, 0.0 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+    if( waitValue( m_C1ofst, 0.001, 1e-6 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+    if( waitValue( m_C2ofst, 0.001, 1e-6 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+    if( waitValue( m_C1outp, 0 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+    if( waitValue( m_C2outp, 0 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
 
-   log<text_log>("The PyWFS TTM is rested.", logPrio::LOG_NOTICE);
+    log<text_log>( "The PyWFS TTM is rested.", logPrio::LOG_NOTICE );
 
-   return 0;
+    return 0;
 }
 
-inline
-int ttmModulator::setTTM()
+inline int ttmModulator::setTTM()
 {
-   if(m_modState == MODSTATE_SET) //already Set.
-   {
-      return 0;
-   }
+    if( m_modState == MODSTATE_SET ) // already Set.
+    {
+        return 0;
+    }
 
-   if(m_modState == MODSTATE_MODULATING) //Modulating
-   {
-      log<text_log>("Stopping modulation.", logPrio::LOG_INFO);
+    if( m_modState == MODSTATE_MODULATING ) // Modulating
+    {
+        log<text_log>( "Stopping modulation.", logPrio::LOG_INFO );
 
-      //Steps:
-      //1) Set freqs to 0
-      if( sendNewProperty(m_indiP_C1freq, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+        // Steps:
+        // 1) Set freqs to 0
+        if( sendNewProperty( m_indiP_C1freq, "target", 0.0 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      if( sendNewProperty(m_indiP_C2freq, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+        if( sendNewProperty( m_indiP_C2freq, "target", 0.0 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      //2) Set amps to 0 (really 0.002)
-      if( sendNewProperty(m_indiP_C1volts, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+        // 2) Set amps to 0 (really 0.002)
+        if( sendNewProperty( m_indiP_C1volts, "target", 0.0 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      if( sendNewProperty(m_indiP_C2volts, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+        if( sendNewProperty( m_indiP_C2volts, "target", 0.0 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      //3) Set phase to 0
-      if( sendNewProperty(m_indiP_C1phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+        // 3) Set phase to 0
+        if( sendNewProperty( m_indiP_C1phse, "value", 0.0 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      if( sendNewProperty(m_indiP_C2phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+        if( sendNewProperty( m_indiP_C2phse, "value", 0.0 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      //Now check if values have changed.
-      if( waitValue(m_C1freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-      if( waitValue(m_C2freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-      if( waitValue(m_C1volts, 0.002, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-      if( waitValue(m_C2volts, 0.002,1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-      if( waitValue(m_C1phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-      if( waitValue(m_C2phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+        // Now check if values have changed.
+        if( waitValue( m_C1freq, 0.0 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        if( waitValue( m_C2freq, 0.0 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        if( waitValue( m_C1volts, 0.002, 1e-6 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        if( waitValue( m_C2volts, 0.002, 1e-6 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        if( waitValue( m_C1phse, 0.0 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        if( waitValue( m_C2phse, 0.0 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
 
-      m_modFreq = 0;
-      m_modFreqRequested = 0;
-      m_modRad = 0;
-      m_modRadRequested = 0;
+        m_modFreq          = 0;
+        m_modFreqRequested = 0;
+        m_modRad           = 0;
+        m_modRadRequested  = 0;
 
-      log<text_log>("PyWFS TTM is set.", logPrio::LOG_NOTICE);
-      return 0;
-   }
+        log<text_log>( "PyWFS TTM is set.", logPrio::LOG_NOTICE );
+        return 0;
+    }
 
-   //Ok, we're in not set or modulating.  Possibly rested, or in a partially set state.
+    // Ok, we're in not set or modulating.  Possibly rested, or in a partially set state.
 
-   //Steps:
-   //1) Make sure we're fully rested:
-   if( m_modState != MODSTATE_REST)
-   {
-      if( restTTM() < 0 ) return log<software_error, -1>({__FILE__, __LINE__});
+    // Steps:
+    // 1) Make sure we're fully rested:
+    if( m_modState != MODSTATE_REST )
+    {
+        if( restTTM() < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      sleep(1);
-   }
+        sleep( 1 );
+    }
 
-   log<text_log>("Setting the PyWFS TTM.", logPrio::LOG_INFO);
+    log<text_log>( "Setting the PyWFS TTM.", logPrio::LOG_INFO );
 
-   //2) Set outputs to on
-   if( sendNewProperty(m_indiP_C1outp, "value", "On") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2outp, "value", "On") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+    // 2) Set outputs to on
+    if( sendNewProperty( m_indiP_C1outp, "value", "On" ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    if( sendNewProperty( m_indiP_C2outp, "value", "On" ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-   if( waitValue(m_C1outp, 1) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2outp, 1) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+    if( waitValue( m_C1outp, 1 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+    if( waitValue( m_C2outp, 1 ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
 
-   //3) Now we begin ramp . . .
-   size_t N1 = m_setVoltage_1/m_setDVolts;
-   size_t N2 = m_setVoltage_2/m_setDVolts;
+    // 3) Now we begin ramp . . .
+    size_t N1 = m_setVoltage_1 / m_setDVolts;
+    size_t N2 = m_setVoltage_2 / m_setDVolts;
 
-   size_t N = N1;
-   if(N2 < N1) N = N2;
+    size_t N = N1;
+    if( N2 < N1 )
+        N = N2;
 
-   log<text_log>("Ramping with " + std::to_string(N) + " steps. [" + std::to_string(N1) + " " + std::to_string(N2) + "]", logPrio::LOG_DEBUG);
+    log<text_log>( "Ramping with " + std::to_string( N ) + " steps. [" + std::to_string( N1 ) + " " +
+                       std::to_string( N2 ) + "]",
+                   logPrio::LOG_DEBUG );
 
-   for(size_t i=1; i< N ; ++i)
-   {
-      double nv = i*m_setDVolts;
+    for( size_t i = 1; i < N; ++i )
+    {
+        double nv = i * m_setDVolts;
 
-      if(nv < 0 || nv > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
+        if( nv < 0 || nv > 10 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "Bad voltage calculated.  Refusing." } );
 
-      if( sendNewProperty(m_indiP_C1ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+        if( sendNewProperty( m_indiP_C1ofst, "value", nv ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      if( waitValue(m_C1ofst, nv, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+        if( waitValue( m_C1ofst, nv, 1e-10 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
 
-      sleep(1);
+        sleep( 1 );
 
-      if( sendNewProperty(m_indiP_C2ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+        if( sendNewProperty( m_indiP_C2ofst, "value", nv ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      if( waitValue(m_C2ofst, nv, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+        if( waitValue( m_C2ofst, nv, 1e-6 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
 
-      sleep(1);
-   }
+        sleep( 1 );
+    }
 
-   for(size_t j=N; j< N1;++j)
-   {
-      double nv = j*m_setDVolts;
+    for( size_t j = N; j < N1; ++j )
+    {
+        double nv = j * m_setDVolts;
 
-      if(nv < 0 || nv > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
+        if( nv < 0 || nv > 10 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "Bad voltage calculated.  Refusing." } );
 
-      if( sendNewProperty(m_indiP_C1ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+        if( sendNewProperty( m_indiP_C1ofst, "value", nv ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      if( waitValue(m_C1ofst, nv, 1e-6) < 0 ) return log<software_error, -1>({__FILE__,__LINE__, "fxngen timeout"});
+        if( waitValue( m_C1ofst, nv, 1e-6 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
 
-      sleep(1);
-   }
+        sleep( 1 );
+    }
 
-   for(size_t j=N; j< N2;++j)
-   {
-      double nv = j*m_setDVolts;
+    for( size_t j = N; j < N2; ++j )
+    {
+        double nv = j * m_setDVolts;
 
-      if(nv < 0 || nv > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
+        if( nv < 0 || nv > 10 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "Bad voltage calculated.  Refusing." } );
 
-      if( sendNewProperty(m_indiP_C2ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+        if( sendNewProperty( m_indiP_C2ofst, "value", nv ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      if( waitValue(m_C2ofst, nv, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+        if( waitValue( m_C2ofst, nv, 1e-6 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
 
-      sleep(1);
-   }
+        sleep( 1 );
+    }
 
-   if(m_C1ofst < m_setVoltage_1)
-   {
-      if( m_setVoltage_1 < 0 ||  m_setVoltage_1 > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
+    if( m_C1ofst < m_setVoltage_1 )
+    {
+        if( m_setVoltage_1 < 0 || m_setVoltage_1 > 10 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "Bad voltage calculated.  Refusing." } );
 
-      if( (sendNewProperty(m_indiP_C1ofst, "value", m_setVoltage_1) < 0 ) ) return log<software_error,-1>({__FILE__,__LINE__});
+        if( ( sendNewProperty( m_indiP_C1ofst, "value", m_setVoltage_1 ) < 0 ) )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      if(waitValue(m_C1ofst, m_setVoltage_1, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+        if( waitValue( m_C1ofst, m_setVoltage_1, 1e-6 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+    }
 
-   }
+    if( m_C2ofst < m_setVoltage_2 )
+    {
+        if( m_setVoltage_2 < 0 || m_setVoltage_2 > 10 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "Bad voltage calculated.  Refusing." } );
 
-   if(m_C2ofst < m_setVoltage_2)
-   {
-      if( m_setVoltage_2 < 0 ||  m_setVoltage_2 > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
+        if( ( sendNewProperty( m_indiP_C2ofst, "value", m_setVoltage_2 ) < 0 ) )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      if( (sendNewProperty(m_indiP_C2ofst, "value", m_setVoltage_2) < 0 ) ) return log<software_error,-1>({__FILE__,__LINE__});
+        if( waitValue( m_C2ofst, m_setVoltage_2, 1e-6 ) < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+    }
 
-      if( waitValue(m_C2ofst, m_setVoltage_2, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+    log<text_log>( "PyWFS TTM is set.", logPrio::LOG_NOTICE );
 
-   }
-
-   log<text_log>("PyWFS TTM is set.", logPrio::LOG_NOTICE);
-
-   return 0;
+    return 0;
 }
 
 /*double maxRadAtFrequency( const std::vector<double> freqs,
@@ -750,246 +904,326 @@ int ttmModulator::setTTM()
 {
 }*/
 
-inline
-int ttmModulator::modTTM( double newRad,
-                          double newFreq
-                        )
+inline int ttmModulator::modTTM( double newRad, double newFreq )
 {
-   /// \todo log this
-   if(newRad < 0 || newFreq < 0) return 0;
+    /// \todo log this
+    if( newRad < 0 || newFreq < 0 )
+        return 0;
 
-   /// \todo logging in these steps
+    /// \todo logging in these steps
 
-   //For now: if we enter modulating, we stop modulating.
-   /// \todo Implement changing modulation without setting first.
-   if( m_modState == MODSTATE_MODULATING)
-   {
-      if(newRad == m_modRad && newFreq == m_modFreq) return 0;
+    // For now: if we enter modulating, we stop modulating.
+    /// \todo Implement changing modulation without setting first.
+    if( m_modState == MODSTATE_MODULATING )
+    {
+        if( newRad == m_modRad && newFreq == m_modFreq )
+            return 0;
 
-      if( setTTM() < 0 ) return log<software_error, -1>({__FILE__, __LINE__});
+        if( setTTM() < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      if( calcState() < 0) return log<software_error, -1>({__FILE__,__LINE__});
+        if( calcState() < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
 
-   }
+    // If not set, we first check if we are fully rested.
+    if( m_modState < MODSTATE_SET )
+    {
+        if( setTTM() < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-   //If not set, we first check if we are fully rested.
-   if( m_modState < MODSTATE_SET )
-   {
-      if( setTTM() < 0 ) return log<software_error, -1>({__FILE__, __LINE__});
+        if( calcState() < 0 )
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-      if( calcState() < 0 ) return log<software_error, -1>({__FILE__,__LINE__});
+        if( m_modState < MODSTATE_SET )
+            return log<software_error, -1>( { __FILE__, __LINE__, "TTM not set/setable." } );
+    }
 
-      if( m_modState < MODSTATE_SET) return log<software_error, -1>({__FILE__,__LINE__, "TTM not set/setable."});
-   }
+    // Check frequency for safety.
+    if( newFreq > m_maxFreq )
+    {
+        log<text_log>( "Requested frequency " + std::to_string( newFreq ) + " Hz exceeds limit (" +
+                           std::to_string( m_maxFreq ) + " Hz). Limiting.",
+                       logPrio::LOG_WARNING );
+        newFreq = m_maxFreq;
+    }
 
-   //Check frequency for safety.
-   if(newFreq > m_maxFreq)
-   {
-      log<text_log>("Requested frequency " + std::to_string(newFreq) + " Hz exceeds limit (" + std::to_string(m_maxFreq) + " Hz). Limiting.", logPrio::LOG_WARNING);
-      newFreq = m_maxFreq;
-   }
+    // Calculate voltage, and normalize and safety-check Parameters
+    double voltageC1, voltageC2;
 
-   //Calculate voltage, and normalize and safety-check Parameters
-   double voltageC1, voltageC2;
+    ///\todo here maximum radius should be frequency dependent.
 
-   ///\todo here maximum radius should be frequency dependent.
+    double terpC1Amp  = 0;
+    double terpC2Amp  = 0;
+    double terpC2Phse = 0;
 
+    size_t ngt = 0;
 
+    for( ngt = 0; ngt < m_calFreqs.size(); ++ngt )
+    {
+        if( m_calFreqs[ngt] >= newFreq )
+            break;
+    }
 
-   double terpC1Amp = 0;
-   double terpC2Amp = 0;
-   double terpC2Phse = 0;
+    if( ngt == 0 || m_calFreqs[ngt] == newFreq )
+    {
+        terpC1Amp  = m_calC1Amps[ngt];
+        terpC2Amp  = m_calC2Amps[ngt];
+        terpC2Phse = m_calC2Phse[ngt];
+    }
+    else
+    {
+        size_t nlt   = ngt - 1;
+        double dfreq = ( newFreq - m_calFreqs[nlt] ) / ( m_calFreqs[ngt] - m_calFreqs[nlt] );
 
-   size_t ngt = 0;
+        terpC1Amp  = m_calC1Amps[nlt] + ( m_calC1Amps[ngt] - m_calC1Amps[nlt] ) * dfreq;
+        terpC2Amp  = m_calC2Amps[nlt] + ( m_calC2Amps[ngt] - m_calC2Amps[nlt] ) * dfreq;
+        terpC2Phse = m_calC2Phse[nlt] + ( m_calC2Phse[ngt] - m_calC2Phse[nlt] ) * dfreq;
+    }
 
-   for(ngt = 0; ngt < m_calFreqs.size(); ++ngt)
-   {
-      if( m_calFreqs[ngt] >= newFreq) break;
-   }
+    voltageC1 = terpC1Amp * ( newRad / m_calRadius );
+    voltageC2 = terpC2Amp * ( newRad / m_calRadius );
 
-   if(ngt == 0 || m_calFreqs[ngt] == newFreq)
-   {
-      terpC1Amp = m_calC1Amps[ngt];
-      terpC2Amp = m_calC2Amps[ngt];
-      terpC2Phse = m_calC2Phse[ngt];
-   }
-   else
-   {
-      size_t nlt = ngt -1;
-      double dfreq = (newFreq - m_calFreqs[nlt])/(m_calFreqs[ngt]-m_calFreqs[nlt]);
+    if( voltageC1 > m_maxVolt )
+    {
+        log<text_log>( "Requested ch-1 voltge " + std::to_string( voltageC1 ) + " V exceeds limit (" +
+                           std::to_string( m_maxVolt ) + " V). Limiting.",
+                       logPrio::LOG_WARNING );
+        voltageC1 = m_maxVolt;
+    }
 
-      terpC1Amp = m_calC1Amps[nlt] + (m_calC1Amps[ngt]-m_calC1Amps[nlt])*dfreq;
-      terpC2Amp = m_calC2Amps[nlt] + (m_calC2Amps[ngt]-m_calC2Amps[nlt])*dfreq;
-      terpC2Phse = m_calC2Phse[nlt] + (m_calC2Phse[ngt]-m_calC2Phse[nlt])*dfreq;
-   }
+    if( voltageC2 > m_maxVolt )
+    {
+        log<text_log>( "Requested ch-2 voltge " + std::to_string( voltageC2 ) + " V exceeds limit (" +
+                           std::to_string( m_maxVolt ) + " V). Limiting.",
+                       logPrio::LOG_WARNING );
+        voltageC2 = m_maxVolt;
+    }
 
+    // At this point we have safe calibrated voltage for the frequency.
 
-   voltageC1 = terpC1Amp*(newRad/m_calRadius);
-   voltageC2 = terpC2Amp*(newRad/m_calRadius);
+    if( m_modState == MODSTATE_SET )
+    {
+        // 0) set phase
+        if( sendNewProperty( m_indiP_C2phse, "value", terpC2Phse ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
+        /// \todo should we set the offset here just to be sure?
 
-   if(voltageC1 > m_maxVolt)
-   {
-      log<text_log>("Requested ch-1 voltge " + std::to_string(voltageC1) + " V exceeds limit (" + std::to_string(m_maxVolt) + " V). Limiting.", logPrio::LOG_WARNING);
-      voltageC1 = m_maxVolt;
-   }
+        // Now check if values have changed.
+        if( waitValue( m_C2phse, terpC2Phse, 1e-4 ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
 
-   if(voltageC2 > m_maxVolt)
-   {
-      log<text_log>("Requested ch-2 voltge " + std::to_string(voltageC2) + " V exceeds limit (" + std::to_string(m_maxVolt) + " V). Limiting.", logPrio::LOG_WARNING);
-      voltageC2 = m_maxVolt;
-   }
+        // 1) set freq to 100 Hz (or requested if < 100 Hz)
+        double nextFreq = 100.0;
+        if( nextFreq > newFreq )
+        {
+            nextFreq = newFreq;
+        }
 
+        // send to device
+        if( sendNewProperty( m_indiP_C1freq, "target", nextFreq ) < 0 )
+        {
+            log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
-   //At this point we have safe calibrated voltage for the frequency.
+        if( sendNewProperty( m_indiP_C2freq, "target", nextFreq ) < 0 )
+        {
+            log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
-   if( m_modState == MODSTATE_SET)
-   {
-      // 0) set phase
-      if( sendNewProperty(m_indiP_C2phse, "value", terpC2Phse) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+        // Now check if values have changed.
+        if( waitValue( m_C1freq, nextFreq, 1e-6 ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
 
-      /// \todo should we set the offset here just to be sure?
+        if( waitValue( m_C2freq, nextFreq, 1e-6 ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
 
-      //Now check if values have changed.
-      if( waitValue(m_C2phse, terpC2Phse, 1e-4) < 0  ) return log<software_error, -1>({__FILE__,__LINE__, "fxngen timeout"});
+        // 2) set amp to 0.1 V (or requested if < 0.1 V)
+        double nextVolts1 = 0.1;
+        if( nextVolts1 > voltageC1 )
+        {
+            nextVolts1 = voltageC1;
+        }
 
-      // 1) set freq to 100 Hz (or requested if < 100 Hz)
-      double nextFreq = 100.0;
-      if(nextFreq > newFreq) nextFreq = newFreq;
+        double nextVolts2 = 0.1;
+        if( nextVolts2 > voltageC2 )
+        {
+            nextVolts2 = voltageC2;
+        }
 
-      //send to device
-      if( sendNewProperty(m_indiP_C1freq, "target", nextFreq) < 0 ) log<software_error,-1>({__FILE__,__LINE__});
-      if( sendNewProperty(m_indiP_C2freq, "target", nextFreq) < 0 ) log<software_error,-1>({__FILE__,__LINE__});
+        // send to device
+        if( sendNewProperty( m_indiP_C1volts, "target", nextVolts1 ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
+        if( sendNewProperty( m_indiP_C2volts, "target", nextVolts2 ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
-      //Now check if values have changed.
-      if( waitValue(m_C1freq, nextFreq, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-      if( waitValue(m_C2freq, nextFreq, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+        // Now check if values have changed.
+        if( waitValue( m_C1volts, nextVolts1, 1e-6 ) < 0 )
+        {
+            log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
+        if( waitValue( m_C2volts, nextVolts2, 1e-6 ) < 0 )
+        {
+            log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
 
-      // 2) set amp to 0.1 V (or requested if < 0.1 V)
-      double nextVolts1 = 0.1;
-      if(nextVolts1 > voltageC1) nextVolts1 = voltageC1;
+        // 3) Increase freq to 500 Hz, then in 500 Hz increments
+        double currFreq = m_C1freq;
 
-      double nextVolts2 = 0.1;
-      if(nextVolts2 > voltageC2) nextVolts2 = voltageC2;
+        nextFreq = 500.0;
+        if( nextFreq > newFreq )
+        {
+            nextFreq = newFreq;
+        }
 
-      //send to device
-      if( sendNewProperty(m_indiP_C1volts, "target", nextVolts1) < 0 ) return log<software_error, -1>({__FILE__,__LINE__});
-      if( sendNewProperty(m_indiP_C2volts, "target", nextVolts2) < 0 ) return log<software_error, -1>({__FILE__,__LINE__});
+        ///\todo make frequency tolerance a configurable
+        while( fabs( currFreq - newFreq ) > 1e-4 )
+        {
+            if( sendNewProperty( m_indiP_C1freq, "target", nextFreq ) < 0 )
+            {
+                return log<software_error, -1>( { __FILE__, __LINE__ } );
+            }
+            if( sendNewProperty( m_indiP_C2freq, "target", nextFreq ) < 0 )
+            {
+                return log<software_error, -1>( { __FILE__, __LINE__ } );
+            }
 
+            // Now check if values have changed.
+            if( waitValue( m_C1freq, nextFreq, 1e-6 ) < 0 )
+            {
+                return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+            }
+            if( waitValue( m_C2freq, nextFreq, 1e-6 ) < 0 )
+            {
+                return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+            }
 
-      //Now check if values have changed.
-      if( waitValue(m_C1volts, nextVolts1, 1e-6) < 0 ) log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-      if( waitValue(m_C2volts, nextVolts2, 1e-6) < 0 ) log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+            ///\todo make sleep-time configurable
+            sleep( 1 );
+            currFreq = m_C1freq;
+            nextFreq = currFreq + m_modDFreq;
+            if( nextFreq > newFreq )
+            {
+                nextFreq = newFreq;
+            }
+        }
 
-      // 3) Increase freq to 500 Hz, then in 500 Hz increments
-      double currFreq = m_C1freq;
+        // 4) Now increase amplitude in 0.1 V increments.
+        double currVolts1 = m_C1volts;
+        double currVolts2 = m_C2volts;
 
-      nextFreq = 500.0;
-      if(nextFreq > newFreq) nextFreq = newFreq;
+        nextVolts1 = 0.2;
+        if( nextVolts1 > voltageC1 )
+        {
+            nextVolts1 = voltageC1;
+        }
 
-      ///\todo make frequency tolerance a configurable
-      while( fabs(currFreq - newFreq) > 1e-4)
-      {
-         if( sendNewProperty(m_indiP_C1freq, "target", nextFreq) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-         if( sendNewProperty(m_indiP_C2freq, "target", nextFreq) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+        nextVolts2 = 0.2;
+        if( nextVolts2 > voltageC2 )
+        {
+            nextVolts2 = voltageC2;
+        }
 
-         //Now check if values have changed.
-         if( waitValue(m_C1freq, nextFreq, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-         if( waitValue(m_C2freq, nextFreq, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+        ///\todo make voltage tolerance a configurable.
+        while( fabs( currVolts1 - voltageC1 ) > 1e-4 || fabs( currVolts2 - voltageC2 ) > 1e-4 )
+        {
+            if( sendNewProperty( m_indiP_C1volts, "target", nextVolts1 ) < 0 )
+            {
+                return log<software_error, -1>( { __FILE__, __LINE__ } );
+            }
+            if( sendNewProperty( m_indiP_C2volts, "target", nextVolts2 ) < 0 )
+            {
+                return log<software_error, -1>( { __FILE__, __LINE__ } );
+            }
 
-         ///\todo make sleep-time configurable
-         sleep(1);
-         currFreq = m_C1freq;
-         nextFreq = currFreq + m_modDFreq;
-         if(nextFreq > newFreq) nextFreq = newFreq;
-      }
+            // Now check if values have changed.
+            if( waitValue( m_C1volts, nextVolts1, 1e-3 ) < 0 )
+            {
+                return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout C1" } );
+            }
 
-      // 4) Now increase amplitude in 0.1 V increments.
-      double currVolts1 = m_C1volts;
-      double currVolts2 = m_C2volts;
+            if( waitValue( m_C2volts, nextVolts2, 1e-3 ) < 0 )
+            {
+                return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout C2" } );
+            }
 
-      nextVolts1 = 0.2;
-      if(nextVolts1 > voltageC1) nextVolts1 = voltageC1;
+            sleep( 1 );
+            currVolts1 = m_C1volts;
+            nextVolts1 = currVolts1 + m_modDVolts;
+            if( nextVolts1 > voltageC1 )
+                nextVolts1 = voltageC1;
 
-      nextVolts2 = 0.2;
-      if(nextVolts2 > voltageC2) nextVolts2 = voltageC2;
-      ///\todo make voltage tolerance a configurable.
-      while( fabs(currVolts1 - voltageC1) > 1e-4 || fabs(currVolts2 - voltageC2) > 1e-4)
-      {
-         if( sendNewProperty(m_indiP_C1volts, "target", nextVolts1) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-         if( sendNewProperty(m_indiP_C2volts, "target", nextVolts2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+            currVolts2 = m_C2volts;
+            nextVolts2 = currVolts2 + m_modDVolts;
+            if( nextVolts2 > voltageC2 )
+                nextVolts2 = voltageC2;
+        }
 
-         //Now check if values have changed.
-         if( waitValue(m_C1volts, nextVolts1, 1e-3) < 0 )
-         {
-            return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout C1"});
-         }
+        m_modRad  = newRad;
+        m_modFreq = newFreq;
+    }
+    else
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "TTM not set but should be by now." } );
+    }
 
-         if( waitValue(m_C2volts, nextVolts2, 1e-3) < 0 )
-         {
-            return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout C2"});
-         }
-
-         sleep(1);
-         currVolts1 = m_C1volts;
-         nextVolts1 = currVolts1 + m_modDVolts;
-         if(nextVolts1 > voltageC1) nextVolts1 = voltageC1;
-
-         currVolts2 = m_C2volts;
-         nextVolts2 = currVolts2 + m_modDVolts;
-         if(nextVolts2 > voltageC2) nextVolts2 = voltageC2;
-
-      }
-
-      m_modRad = newRad;
-      m_modFreq = newFreq;
-   }
-   else return log<software_error,-1>({__FILE__,__LINE__, "TTM not set but should be by now."});
-
-
-   return 0;
+    return 0;
 }
 
-inline
-int ttmModulator::offset12( double d1,
-                            double d2
-                          )
+inline int ttmModulator::offset12( double d1, double d2 )
 {
 
-   if( sendNewProperty(m_indiP_C1ofst, "value", m_C1ofst + d1) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2ofst, "value", m_C2ofst + d2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+    if( sendNewProperty( m_indiP_C1ofst, "value", m_C1ofst + d1 ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
 
-   return 0;
+    if( sendNewProperty( m_indiP_C2ofst, "value", m_C2ofst + d2 ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
 
+    return 0;
 }
 
-inline
-int ttmModulator::offsetXY( double dx,
-                            double dy
-                          )
+inline int ttmModulator::offsetXY( double dx, double dy )
 {
-   double cs = cos(m_rotAngle);
-   double ss = sin(m_rotAngle);
+    double cs = cos( m_rotAngle );
+    double ss = sin( m_rotAngle );
 
-   double rdx = dx * cs - dy * ss;
-   double rdy = m_rotParity*(dx * ss + dy * cs);
+    double rdx = dx * cs - dy * ss;
+    double rdy = m_rotParity * ( dx * ss + dy * cs );
 
-   if( sendNewProperty(m_indiP_C1ofst, "value", m_C1ofst + rdx) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2ofst, "value", m_C2ofst + rdy) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+    if( sendNewProperty( m_indiP_C1ofst, "value", m_C1ofst + rdx ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    if( sendNewProperty( m_indiP_C2ofst, "value", m_C2ofst + rdy ) < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
 
-   return 0;
-
+    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modState)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN( ttmModulator, m_indiP_modState )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_modState, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_modState, ipRecv );
 
     int target;
 
-    if( indiTargetUpdate( m_indiP_modState, target, ipRecv, false) < 0)
+    if( indiTargetUpdate( m_indiP_modState, target, ipRecv, false ) < 0 )
     {
-       return log<software_error, -1>({__FILE__,__LINE__});
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
     m_modStateRequested = target;
@@ -997,348 +1231,319 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modState)(const pcf::IndiProperty &i
     return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modFrequency)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN( ttmModulator, m_indiP_modFrequency )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_modFrequency, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_modFrequency, ipRecv );
 
     double target;
-    if( indiTargetUpdate( m_indiP_modFrequency, target, ipRecv, false) < 0)
+    if( indiTargetUpdate( m_indiP_modFrequency, target, ipRecv, false ) < 0 )
     {
-       return log<software_error, -1>({__FILE__,__LINE__});
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
-    if(target > 0)
+    if( target > 0 )
     {
         m_modFreqRequested = target;
     }
-    /*
-    ///\todo use find to test
-    try
-    {
-        double nf = -1;
-        nf = ipRecv["target"].get<double>();
-        if(nf > 0) m_modFreqRequested = nf;
-    }
-    catch(...)
-    {
-        //do nothing, just means no requested in command.
-    }
-    */
 
     return 0;
-
 }
 
-INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modRadius)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN( ttmModulator, m_indiP_modRadius )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_modRadius, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_modRadius, ipRecv );
 
     double target;
-    if( indiTargetUpdate( m_indiP_modRadius, target, ipRecv, false) < 0)
+    if( indiTargetUpdate( m_indiP_modRadius, target, ipRecv, false ) < 0 )
     {
-       return log<software_error, -1>({__FILE__,__LINE__});
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
-    if(target > 0)
+    if( target > 0 )
     {
         m_modRadRequested = target;
     }
 
     return 0;
-
 }
 
-INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offset12)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN( ttmModulator, m_indiP_offset12 )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offset12, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offset12, ipRecv );
 
     double dx = 0;
-    if(ipRecv.find("dC1"))
+    if( ipRecv.find( "dC1" ) )
     {
-       dx = ipRecv["dC1"].get<double>();
+        dx = ipRecv["dC1"].get<double>();
     }
     std::cerr << "dC1: " << dx << "\n";
 
     double dy = 0;
-    if(ipRecv.find("dC2"))
+    if( ipRecv.find( "dC2" ) )
     {
-       dy = ipRecv["dC2"].get<double>();
+        dy = ipRecv["dC2"].get<double>();
     }
 
     std::cerr << "dC2: " << dy << "\n\n";
 
-
-    return offset12(dx, dy);
-
+    return offset12( dx, dy );
 }
 
-INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offset)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN( ttmModulator, m_indiP_offset )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offset, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offset, ipRecv );
 
     double dx = 0;
-    if(ipRecv.find("x"))
+    if( ipRecv.find( "x" ) )
     {
-       dx = ipRecv["x"].get<double>();
+        dx = ipRecv["x"].get<double>();
     }
     std::cerr << "dx: " << dx << "\n";
 
     double dy = 0;
-    if(ipRecv.find("y"))
+    if( ipRecv.find( "y" ) )
     {
-       dy = ipRecv["y"].get<double>();
+        dy = ipRecv["y"].get<double>();
     }
 
     std::cerr << "dy: " << dy << "\n\n";
 
-
-    return offsetXY(dx, dy);
-
+    return offsetXY( dx, dy );
 }
 
-
-INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1outp)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN( ttmModulator, m_indiP_C1outp )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1outp, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_C1outp, ipRecv );
 
     ///\todo use find to test
     try
     {
-       m_indiP_C1outp = ipRecv;
-       std::string outp = ipRecv["value"].getValue();
+        m_indiP_C1outp   = ipRecv;
+        std::string outp = ipRecv["value"].getValue();
 
-       if( outp == "Off" )
-       {
-          m_C1outp = 0;
-       }
-       else if (outp == "On")
-       {
-          m_C1outp = 1;
-       }
-       else
-       {
-          m_C1outp = -1;
-       }
+        if( outp == "Off" )
+        {
+            m_C1outp = 0;
+        }
+        else if( outp == "On" )
+        {
+            m_C1outp = 1;
+        }
+        else
+        {
+            m_C1outp = -1;
+        }
 
-       return 0;
+        return 0;
     }
-    catch(...)
+    catch( ... )
     {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        log<software_error>( { __FILE__, __LINE__, "exception from libcommon" } );
+        return -1;
     }
-
 }
 
-INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1freq)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN( ttmModulator, m_indiP_C1freq )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1freq, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_C1freq, ipRecv );
 
     ///\todo use find to test
     try
     {
-       m_indiP_C1freq = ipRecv;
-       double nv = ipRecv["current"].get<double>();
+        m_indiP_C1freq = ipRecv;
+        double nv      = ipRecv["current"].get<double>();
 
-       m_C1freq = nv;
+        m_C1freq = nv;
 
-       return 0;
+        return 0;
     }
-    catch(...)
+    catch( ... )
     {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        log<software_error>( { __FILE__, __LINE__, "exception from libcommon" } );
+        return -1;
     }
-
 }
 
-INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1volts)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN( ttmModulator, m_indiP_C1volts )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1volts, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_C1volts, ipRecv );
 
     ///\todo use find to test
     try
     {
-       m_indiP_C1volts = ipRecv;
-       double nv = ipRecv["current"].get<double>();
+        m_indiP_C1volts = ipRecv;
+        double nv       = ipRecv["current"].get<double>();
 
-       m_C1volts = nv;
-       return 0;
+        m_C1volts = nv;
+        return 0;
     }
-    catch(...)
+    catch( ... )
     {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        log<software_error>( { __FILE__, __LINE__, "exception from libcommon" } );
+        return -1;
     }
-
 }
 
-INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1ofst)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN( ttmModulator, m_indiP_C1ofst )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1ofst, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_C1ofst, ipRecv );
 
     ///\todo use find to test
     try
     {
-       m_indiP_C1ofst = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+        m_indiP_C1ofst = ipRecv;
+        double nv      = ipRecv["value"].get<double>();
 
-       m_C1ofst = nv;
+        m_C1ofst = nv;
 
-       return 0;
+        return 0;
     }
-    catch(...)
+    catch( ... )
     {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        log<software_error>( { __FILE__, __LINE__, "exception from libcommon" } );
+        return -1;
     }
-
 }
 
-INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1phse)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN( ttmModulator, m_indiP_C1phse )( const pcf::IndiProperty &ipRecv )
 {
 
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1phse, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_C1phse, ipRecv );
 
     ///\todo use find to test
     try
     {
-       m_indiP_C1phse = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+        m_indiP_C1phse = ipRecv;
+        double nv      = ipRecv["value"].get<double>();
 
-       m_C1phse = nv;
+        m_C1phse = nv;
 
-       return 0;
+        return 0;
     }
-    catch(...)
+    catch( ... )
     {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        log<software_error>( { __FILE__, __LINE__, "exception from libcommon" } );
+        return -1;
     }
-
 }
 
-INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2outp)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN( ttmModulator, m_indiP_C2outp )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2outp, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_C2outp, ipRecv );
 
     ///\todo use find to test
     try
     {
-       m_indiP_C2outp = ipRecv;
-       std::string outp = ipRecv["value"].getValue();
+        m_indiP_C2outp   = ipRecv;
+        std::string outp = ipRecv["value"].getValue();
 
-       if( outp == "Off" )
-       {
-          m_C2outp = 0;
-       }
-       else if (outp == "On")
-       {
-          m_C2outp = 1;
-       }
-       else
-       {
-          m_C2outp = -1;
-       }
+        if( outp == "Off" )
+        {
+            m_C2outp = 0;
+        }
+        else if( outp == "On" )
+        {
+            m_C2outp = 1;
+        }
+        else
+        {
+            m_C2outp = -1;
+        }
 
-       return 0;
+        return 0;
     }
-    catch(...)
+    catch( ... )
     {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        log<software_error>( { __FILE__, __LINE__, "exception from libcommon" } );
+        return -1;
     }
-
 }
 
-INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2freq)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN( ttmModulator, m_indiP_C2freq )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2freq, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_C2freq, ipRecv );
 
     ///\todo use find to test
     try
     {
-       m_indiP_C2freq = ipRecv;
-       double nv = ipRecv["current"].get<double>();
+        m_indiP_C2freq = ipRecv;
+        double nv      = ipRecv["current"].get<double>();
 
-       m_C2freq = nv;
+        m_C2freq = nv;
 
-       return 0;
+        return 0;
     }
-    catch(...)
+    catch( ... )
     {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        log<software_error>( { __FILE__, __LINE__, "exception from libcommon" } );
+        return -1;
     }
-
 }
 
-INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2volts)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN( ttmModulator, m_indiP_C2volts )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2volts, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_C2volts, ipRecv );
 
     ///\todo use find to test
     try
     {
-       m_indiP_C2volts = ipRecv;
-       double nv = ipRecv["current"].get<double>();
+        m_indiP_C2volts = ipRecv;
+        double nv       = ipRecv["current"].get<double>();
 
-       m_C2volts = nv;
-       return 0;
+        m_C2volts = nv;
+        return 0;
     }
-    catch(...)
+    catch( ... )
     {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        log<software_error>( { __FILE__, __LINE__, "exception from libcommon" } );
+        return -1;
     }
-
 }
 
-INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2ofst)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN( ttmModulator, m_indiP_C2ofst )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2ofst, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_C2ofst, ipRecv );
 
     ///\todo use find to test
     try
     {
-       m_indiP_C2ofst = ipRecv;
+        m_indiP_C2ofst = ipRecv;
 
-       double nv = ipRecv["value"].get<double>();
+        double nv = ipRecv["value"].get<double>();
 
-       m_C2ofst = nv;
+        m_C2ofst = nv;
 
-       return 0;
+        return 0;
     }
-    catch(...)
+    catch( ... )
     {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        log<software_error>( { __FILE__, __LINE__, "exception from libcommon" } );
+        return -1;
     }
-
 }
 
-INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2phse)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN( ttmModulator, m_indiP_C2phse )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2phse, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_C2phse, ipRecv );
 
     ///\todo use find to test
     try
     {
-       m_indiP_C2phse = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+        m_indiP_C2phse = ipRecv;
+        double nv      = ipRecv["value"].get<double>();
 
-       m_C2phse = nv;
+        m_C2phse = nv;
 
-       return 0;
+        return 0;
     }
-    catch(...)
+    catch( ... )
     {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        log<software_error>( { __FILE__, __LINE__, "exception from libcommon" } );
+        return -1;
     }
 }
 
-} //namespace app
-} //namespace MagAOX
+} // namespace app
+} // namespace MagAOX
 
-#endif //ttmModulator_hpp
+#endif // ttmModulator_hpp
