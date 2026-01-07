@@ -49,6 +49,16 @@ public slots:
 
     void updateGUI();
 
+    void on_nModes_Z_pressed();
+
+    void on_nModes_2_pressed();
+
+    void on_nModes_3_pressed();
+
+    void on_nModes_10_pressed();
+
+    void on_nModes_20_pressed();
+
     void on_button_zero_pressed();
 
     void on_button_TelTTDump_pressed();
@@ -249,6 +259,13 @@ void offloadCtrl::updateGUI()
 
         ui.slider_loop->setEnabled(false);
         ui.nModes->setEnabled(false);
+
+        ui.nModes_Z->setEnabled(false);
+        ui.nModes_2->setEnabled(false);
+        ui.nModes_3->setEnabled(false);
+        ui.nModes_10->setEnabled(false);
+        ui.nModes_20->setEnabled(false);
+
         ui.button_zero->setEnabled(false);
         ui.gainCtrl->setEnabled(false);
         ui.mcCtrl->setEnabled(false);
@@ -268,6 +285,13 @@ void offloadCtrl::updateGUI()
 
         ui.slider_loop->setEnabled(true);
         ui.nModes->setEnabled(true);
+
+        ui.nModes_Z->setEnabled(true);
+        ui.nModes_2->setEnabled(true);
+        ui.nModes_3->setEnabled(true);
+        ui.nModes_10->setEnabled(true);
+        ui.nModes_20->setEnabled(true);
+
         ui.button_zero->setEnabled(true);
         ui.gainCtrl->setEnabled(true);
         ui.mcCtrl->setEnabled(true);
@@ -315,6 +339,71 @@ void offloadCtrl::updateGUI()
     }
 
 } //updateGUI()
+
+void offloadCtrl::on_nModes_Z_pressed()
+{
+    pcf::IndiProperty ipFreq(pcf::IndiProperty::Number);
+
+    ipFreq.setDevice("t2wOffloader");
+    ipFreq.setName("numModes");
+    ipFreq.add(pcf::IndiElement("target"));
+
+    ipFreq["target"] = 0;
+
+    sendNewProperty(ipFreq);
+}
+
+void offloadCtrl::on_nModes_2_pressed()
+{
+    pcf::IndiProperty ipFreq(pcf::IndiProperty::Number);
+
+    ipFreq.setDevice("t2wOffloader");
+    ipFreq.setName("numModes");
+    ipFreq.add(pcf::IndiElement("target"));
+
+    ipFreq["target"] = 2;
+
+    sendNewProperty(ipFreq);
+}
+
+void offloadCtrl::on_nModes_3_pressed()
+{
+    pcf::IndiProperty ipFreq(pcf::IndiProperty::Number);
+
+    ipFreq.setDevice("t2wOffloader");
+    ipFreq.setName("numModes");
+    ipFreq.add(pcf::IndiElement("target"));
+
+    ipFreq["target"] = 3;
+
+    sendNewProperty(ipFreq);
+}
+
+void offloadCtrl::on_nModes_10_pressed()
+{
+    pcf::IndiProperty ipFreq(pcf::IndiProperty::Number);
+
+    ipFreq.setDevice("t2wOffloader");
+    ipFreq.setName("numModes");
+    ipFreq.add(pcf::IndiElement("target"));
+
+    ipFreq["target"] = 10;
+
+    sendNewProperty(ipFreq);
+}
+
+void offloadCtrl::on_nModes_20_pressed()
+{
+    pcf::IndiProperty ipFreq(pcf::IndiProperty::Number);
+
+    ipFreq.setDevice("t2wOffloader");
+    ipFreq.setName("numModes");
+    ipFreq.add(pcf::IndiElement("target"));
+
+    ipFreq["target"] = 20;
+
+    sendNewProperty(ipFreq);
+}
 
 void offloadCtrl::on_button_zero_pressed()
 {
