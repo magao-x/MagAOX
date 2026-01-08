@@ -7,11 +7,15 @@
     <x>0</x>
     <y>0</y>
     <width>2201</width>
-    <height>992</height>
+    <height>994</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Form</string>
+  </property>
+  <property name="windowIcon">
+   <iconset resource="../../resources/magaox.qrc">
+    <normaloff>:/icons/arrow-all.png</normaloff>:/icons/arrow-all.png</iconset>
   </property>
   <layout class="QHBoxLayout" name="horizontalLayout">
    <item>
