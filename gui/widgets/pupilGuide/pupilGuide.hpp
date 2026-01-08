@@ -221,7 +221,7 @@ class pupilGuide : public xWidget
     float       m_camlensy_pos{ 0 };
 
     float m_camlensStepSize{ 0.025 }; // this will set it to 0.01 after init
-    // --- Camera Lens Buttons --- //
+                                      // --- Camera Lens Buttons --- //
   protected slots:
     void on_camlens_u_pressed();
     void on_camlens_l_pressed();
@@ -414,10 +414,12 @@ pupilGuide::pupilGuide( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, 
     ui.modwfs_freq->setup( "modwfs", "modFrequency", statusEntry::FLOAT, "", "" );
     ui.modwfs_freq->setStretch( 0, 0, 6 ); // removes spacer and maximizes text field
     ui.modwfs_freq->format( "%0.1f" );
+    ui.modwfs_freq->showTarget( true );
 
     ui.modwfs_rad->setup( "modwfs", "modRadius", statusEntry::FLOAT, "", "" );
     ui.modwfs_rad->setStretch( 0, 0, 6 ); // removes spacer and maximizes text field
     ui.modwfs_rad->format( "%0.1f" );
+    ui.modwfs_rad->showTarget( true );
 
     setXwFont( ui.modwfs_rest );
     setXwFont( ui.modwfs_set );
@@ -1075,8 +1077,8 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
             }
             if( ipRecv.find( "0002" ) )
             {
-                //round to avoid INDI f.p. precision probs.
-                m_focus = std::round(ipRecv["0002"].get<double>() * 1e5)/1e5;
+                // round to avoid INDI f.p. precision probs.
+                m_focus = std::round( ipRecv["0002"].get<double>() * 1e5 ) / 1e5;
             }
         }
     }

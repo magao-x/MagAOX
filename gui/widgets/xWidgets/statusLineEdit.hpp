@@ -90,6 +90,11 @@ public:
      */
    QString currText();
 
+   void currText( const QString & ct )
+   {
+    m_currText = ct;
+   }
+
    /// Get the edited text
    /** Is independent of the current text
      *
@@ -168,6 +173,9 @@ public:
 
    /// Set the edit text as if editing with keyboard
    void setEditText( const QString & etext /** [in] the new edit text */);
+
+   /// Set the disabled text
+   void setDisabledText();
 
    /// Stop editing
    /** Calls the editTimerOut slot.
@@ -346,6 +354,11 @@ void statusLineEdit::setEditText( const QString & etext)
 
    emit editTimerStart(m_editTimeout.count());
    update();
+}
+
+void statusLineEdit::setDisabledText()
+{
+    QLineEdit::setText("---");
 }
 
 void statusLineEdit::stopEditing()
