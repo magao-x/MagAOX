@@ -733,38 +733,67 @@ inline int ttmModulator::setTTM()
         // Steps:
         // 1) Set freqs to 0
         if( sendNewProperty( m_indiP_C1freq, "target", 0.0 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
         if( sendNewProperty( m_indiP_C2freq, "target", 0.0 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
         // 2) Set amps to 0 (really 0.002)
         if( sendNewProperty( m_indiP_C1volts, "target", 0.0 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
         if( sendNewProperty( m_indiP_C2volts, "target", 0.0 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
         // 3) Set phase to 0
         if( sendNewProperty( m_indiP_C1phse, "value", 0.0 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
         if( sendNewProperty( m_indiP_C2phse, "value", 0.0 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
         // Now check if values have changed.
         if( waitValue( m_C1freq, 0.0 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
+
         if( waitValue( m_C2freq, 0.0 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
+
         if( waitValue( m_C1volts, 0.002, 1e-6 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
+
         if( waitValue( m_C2volts, 0.002, 1e-6 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
+
         if( waitValue( m_C1phse, 0.0 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
+
         if( waitValue( m_C2phse, 0.0 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
 
         m_modFreq          = 0;
         m_modFreqRequested = 0;
@@ -782,7 +811,9 @@ inline int ttmModulator::setTTM()
     if( m_modState != MODSTATE_REST )
     {
         if( restTTM() < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
         sleep( 1 );
     }
@@ -791,14 +822,24 @@ inline int ttmModulator::setTTM()
 
     // 2) Set outputs to on
     if( sendNewProperty( m_indiP_C1outp, "value", "On" ) < 0 )
+    {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
+
     if( sendNewProperty( m_indiP_C2outp, "value", "On" ) < 0 )
+    {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
 
     if( waitValue( m_C1outp, 1 ) < 0 )
+    {
         return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+    }
+
     if( waitValue( m_C2outp, 1 ) < 0 )
+    {
         return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+    }
 
     // 3) Now we begin ramp . . .
     size_t N1 = m_setVoltage_1 / m_setDVolts;
@@ -806,7 +847,9 @@ inline int ttmModulator::setTTM()
 
     size_t N = N1;
     if( N2 < N1 )
+    {
         N = N2;
+    }
 
     log<text_log>( "Ramping with " + std::to_string( N ) + " steps. [" + std::to_string( N1 ) + " " +
                        std::to_string( N2 ) + "]",
@@ -817,21 +860,31 @@ inline int ttmModulator::setTTM()
         double nv = i * m_setDVolts;
 
         if( nv < 0 || nv > 10 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "Bad voltage calculated.  Refusing." } );
+        }
 
         if( sendNewProperty( m_indiP_C1ofst, "value", nv ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
         if( waitValue( m_C1ofst, nv, 1e-10 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
 
         sleep( 1 );
 
         if( sendNewProperty( m_indiP_C2ofst, "value", nv ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
         if( waitValue( m_C2ofst, nv, 1e-6 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
 
         sleep( 1 );
     }
@@ -841,13 +894,19 @@ inline int ttmModulator::setTTM()
         double nv = j * m_setDVolts;
 
         if( nv < 0 || nv > 10 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "Bad voltage calculated.  Refusing." } );
+        }
 
         if( sendNewProperty( m_indiP_C1ofst, "value", nv ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
         if( waitValue( m_C1ofst, nv, 1e-6 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
 
         sleep( 1 );
     }
@@ -857,13 +916,19 @@ inline int ttmModulator::setTTM()
         double nv = j * m_setDVolts;
 
         if( nv < 0 || nv > 10 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "Bad voltage calculated.  Refusing." } );
+        }
 
         if( sendNewProperty( m_indiP_C2ofst, "value", nv ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
         if( waitValue( m_C2ofst, nv, 1e-6 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
 
         sleep( 1 );
     }
@@ -871,26 +936,43 @@ inline int ttmModulator::setTTM()
     if( m_C1ofst < m_setVoltage_1 )
     {
         if( m_setVoltage_1 < 0 || m_setVoltage_1 > 10 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "Bad voltage calculated.  Refusing." } );
+        }
 
         if( ( sendNewProperty( m_indiP_C1ofst, "value", m_setVoltage_1 ) < 0 ) )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
         if( waitValue( m_C1ofst, m_setVoltage_1, 1e-6 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
     }
 
     if( m_C2ofst < m_setVoltage_2 )
     {
         if( m_setVoltage_2 < 0 || m_setVoltage_2 > 10 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "Bad voltage calculated.  Refusing." } );
+        }
 
         if( ( sendNewProperty( m_indiP_C2ofst, "value", m_setVoltage_2 ) < 0 ) )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
 
         if( waitValue( m_C2ofst, m_setVoltage_2, 1e-6 ) < 0 )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "fxngen timeout" } );
+        }
     }
+
+    m_modFreq          = 0;
+    m_modFreqRequested = 0;
+    m_modRad           = 0;
+    m_modRadRequested  = 0;
 
     log<text_log>( "PyWFS TTM is set.", logPrio::LOG_NOTICE );
 
