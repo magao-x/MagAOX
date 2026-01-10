@@ -374,7 +374,7 @@ int picoMotorCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 
       if(channel < 1 || channel > m_nChannels)
       {
-         log<text_log>("Bad channel specificiation: " + sections[i] + " channel: " + std::to_string(channel), logPrio::LOG_CRITICAL);
+         log<text_log>("Bad channel specification: " + sections[i] + " channel: " + std::to_string(channel), logPrio::LOG_CRITICAL);
 
          return PICOMOTORCTRL_E_BADCHANNEL;
       }
@@ -384,7 +384,7 @@ int picoMotorCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 
       if(address < 1)
       {
-         log<text_log>("Bad channel specificiation: " + sections[i] + " address: " + std::to_string(address), logPrio::LOG_CRITICAL);
+         log<text_log>("Bad channel specification: " + sections[i] + " address: " + std::to_string(address), logPrio::LOG_CRITICAL);
 
          return PICOMOTORCTRL_E_BADCHANNEL;
       }
@@ -394,7 +394,7 @@ int picoMotorCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 
       if(type < 1)
       {
-         log<text_log>("Bad motor type specificiation: " + sections[i] + " type: " + std::to_string(type), logPrio::LOG_CRITICAL);
+         log<text_log>("Bad motor type specification: " + sections[i] + " type: " + std::to_string(type), logPrio::LOG_CRITICAL);
 
          return PICOMOTORCTRL_E_BADCHANNEL;
       }
@@ -404,7 +404,7 @@ int picoMotorCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 
       if(insert.second == false)
       {
-         log<text_log>("Duplicate motor specificiation: " + sections[i] + " " + std::to_string(channel), logPrio::LOG_CRITICAL);
+         log<text_log>("Duplicate motor specification: " + sections[i] + " " + std::to_string(channel), logPrio::LOG_CRITICAL);
          return PICOMOTORCTRL_E_DUPMOTOR;
       }
       else
@@ -450,9 +450,6 @@ void picoMotorCtrl::loadConfig()
       log<text_log>("Error during ioDevice config", logPrio::LOG_CRITICAL);
       m_shutdown = true;
    }
-
-
-
 }
 
 int picoMotorCtrl::appStartup()
