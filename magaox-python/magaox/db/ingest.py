@@ -141,27 +141,21 @@ def update_file_inventory(conn: psycopg.Connection, host: str, data_dirs: list[p
                     if file_pattern.match(fn):
                         log.debug(f"Skipping {fn} because it matches the ignored files pattern")
                         continue
-                    log.info(f"Inventorying {len(new_files)} new files")
-                    log.debug("\n".join(new_files))
                     origin_records = []
-                    for fn in tqdm(new_files):
-                        if file_pattern.match(fn):
-                            log.debug(f"Skipping {fn} because it matches the ignored files pattern")
-                            continue
-                        try:
-                            stat_result = os.stat(fn)
-                            origin_records.append(FileOrigin(
-                                origin_host=host,
-                                origin_path=fn,
-                                creation_time=creation_time_from_filename(fn, stat_result=stat_result),
-                                modification_time=datetime.datetime.fromtimestamp(stat_result.st_mtime, tz=timezone.utc),
-                                size_bytes=stat_result.st_size,
-                            ))
-                        except FileNotFoundError:
-                            log.info(f"Skipped {fn} (broken link?)")
-                            continue
-                        except OSError as e:
-                            log.info(f"Skipping {fn} because of error ({e})")
+                    try:
+                        stat_result = os.stat(fn)
+                        origin_records.append(FileOrigin(
+                            origin_host=host,
+                            origin_path=fn,
+                            creation_time=creation_time_from_filename(fn, stat_result=stat_result),
+                            modification_time=datetime.datetime.fromtimestamp(stat_result.st_mtime, tz=timezone.utc),
+                            size_bytes=stat_result.st_size,
+                        ))
+                    except FileNotFoundError:
+                        log.info(f"Skipped {fn} (broken link?)")
+                        continue
+                    except OSError as e:
+                        log.info(f"Skipping {fn} because of error ({e})")
                     batch_file_origins(conn, origin_records)
 
 def record_file_ingest_time(cur: psycopg.Cursor, rec : FileIngestTime):
