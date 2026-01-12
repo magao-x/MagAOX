@@ -2,15 +2,16 @@ CREATE OR REPLACE FUNCTION public.observations_between(
   p_start timestamptz,
   p_end   timestamptz
 )
-RETURNS TABLE (start_ts timestamptz, end_ts timestamptz, email text, obsname text)
+RETURNS TABLE (start_ts timestamptz, end_ts timestamptz, email text, obsname text, tgt_name text)
 LANGUAGE sql
 STABLE
 AS $$
 WITH obs AS (
   SELECT t.ts,
          (t.msg ->> 'observing')::boolean AS observing,
-         t.msg ->> 'email'               AS email,
-         t.msg ->> 'obsName'             AS obsname
+         t.msg ->> 'email'                AS email,
+         t.msg ->> 'obsName'              AS obsname,
+		     t.msg ->> 'tgt_name'             AS tgt_name
   FROM telem t
   WHERE t.device = 'observers'
     AND t.msg ->> 'obsName' <> ''
@@ -23,20 +24,19 @@ edges AS (
   FROM obs o
 ),
 transitions AS (
-  SELECT e.ts, e.email, e.obsname, e.next_paired_observing AS observing
+  SELECT e.ts, e.email, e.obsname, e.tgt_name, e.next_paired_observing AS observing
   FROM edges e
   WHERE e.observing IS DISTINCT FROM e.next_paired_observing
 ),
 spans AS (
   SELECT t.ts AS start_ts,
          lag(t.ts) OVER (ORDER BY t.ts DESC) AS end_ts,
-         t.email, t.obsname, t.observing
+         t.email, t.obsname, t.tgt_name, t.observing
   FROM transitions t
 )
-SELECT start_ts, end_ts, email, obsname
+SELECT start_ts, end_ts, email, obsname, tgt_name
 FROM spans
 WHERE observing = true
-  -- (optional redundancy; keeps semantics obvious)
   AND start_ts BETWEEN p_start AND p_end
   AND end_ts   BETWEEN p_start AND p_end
 ORDER BY start_ts DESC;
