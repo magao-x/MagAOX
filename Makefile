@@ -169,6 +169,7 @@ libs_to_build = libtelnet
 apps_to_build = $(apps_basic)
 pythonapps_to_install = $(pythonapps_basic)
 
+has_cacao = 0
 ifeq ($(MAGAOX_ROLE),AOC)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_aoc)
@@ -178,17 +179,20 @@ else ifeq ($(MAGAOX_ROLE),ICC)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_icc)
   pythonapps_to_install += $(pythonapps_icc)
+  has_cacao = 1
 else ifeq ($(MAGAOX_ROLE),RTC)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_rtc)
   pythonapps_to_install += $(pythonapps_rtc)
+  has_cacao = 1
 else ifeq ($(findstring ACC,$(MAGAOX_ROLE)),ACC)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_acc)
 else ifeq ($(MAGAOX_ROLE),TIC)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_tic)
+  has_cacao = 1
 else ifeq ($(MAGAOX_ROLE),SS)
   apps_to_build += $(apps_sim)
 endif
@@ -273,17 +277,38 @@ scripts_to_install = \
 	git_check_all \
 	collect_camera_configs_for_darks \
 	shot_in_the_dark \
-	howfs_apply \
-	lowfs_switch \
 	write_magaox_pidfile \
 	mount_cgroups1_cpuset \
 	killIndiZombies \
 	xlog \
-	hoblockleaks \
 	inventory_files \
 	list_xfiles_by_semester \
 	loop_instrument_backup_sync \
 	cyverse_replicate
+
+ifeq ($(MAGAOX_ROLE),RTC)
+  scripts_to_install += cacao/RTC/cacao-startup
+  scripts_to_install += cacao/RTC/cacao-shutdown
+  scripts_to_install += cacao/RTC/tweeter-vispyr-rootdir-scripts/pre-calib-apply
+  scripts_to_install += cacao/RTC/tweeter-vispyr-rootdir-scripts/post-calib-apply
+  scripts_to_install += cacao/RTC/woofer-vispyr-rootdir-scripts/pre-calib-apply
+  scripts_to_install += cacao/RTC/woofer-vispyr-rootdir-scripts/post-calib-apply
+  scripts_to_install += cacao/hoblockleaks
+else ifeq ($(MAGAOX_ROLE),ICC)
+  scripts_to_install += cacao/ICC/cacao-startup
+  scripts_to_install += cacao/ICC/cacao-shutdown
+  scripts_to_install += cacao/ICC/ncpc-rootdir-scripts/pre-calib-apply
+  scripts_to_install += cacao/ICC/ncpc-rootdir-scripts/post-calib-apply
+  scripts_to_install += cacao/hoblockleaks
+  scripts_to_install += cacao/ICC/lowfs_switch
+
+else ifeq ($(MAGAOX_ROLE),TIC)
+  scripts_to_install += cacao/TIC/cacao-startup
+  scripts_to_install += cacao/TIC/cacao-shutdown
+  scripts_to_install += cacao/TIC/kilo-rootdir-scripts/pre-calib-apply
+  scripts_to_install += cacao/TIC/kilo-rootdir-scripts/post-calib-apply
+  scripts_to_install += cacao/hoblockleaks
+endif
 
 .PHONY: all
 all: indi_all libs_all flatlogs/bin/flatlogcodes apps_all guis_all utils_all
@@ -434,7 +459,9 @@ rtimv_plugins_clean:
 scripts_install:
 	for script in ${scripts_to_install}; do \
 		sudo -H install -d /opt/MagAOX/bin && \
-		sudo -H install scripts/$$script /opt/MagAOX/bin  && \
+		sudo -H install scripts/$$script /opt/MagAOX/bin ; \
+	done
+	for script in $(notdir ${scripts_to_install}); do \
 		sudo -H ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
 	done
 

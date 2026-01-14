@@ -1691,7 +1691,8 @@ int dm<derivedT, realT>::findDMChannels()
 
     ++m_numChannels;
 
-    derivedT::template log<text_log>( {std::format("Found {} chanels for {} ", m_numChannels, derived().m_shmimName )} );
+    derivedT::template log<text_log>(
+        { std::format( "Found {} chanels for {} ", m_numChannels, derived().m_shmimName ) } );
 
     m_channels.resize( m_numChannels, nullptr );
 
@@ -1968,9 +1969,23 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::checkFlats()
 {
     std::vector<std::string> tfs;
-    mx::error_t              errc = mx::ioutils::getFileNames( tfs, m_flatPath, "", "", ".fits" );
 
-    mx_error_check_rv( errc, -1 );
+    bool gfn_logged = false;
+
+    mx::error_t errc = mx::ioutils::getFileNames( tfs, m_flatPath, "", "", ".fits" );
+
+    if( errc != mx::error_t::noerror )
+    {
+        if( !gfn_logged )
+        {
+            derivedT::template log<software_error>(
+                { std::format( "error getting flat files: {}", mx::errorMessage( errc ) ) } );
+        }
+        gfn_logged = true;
+        return -1;
+    }
+
+    gfn_logged = false;
 
     // First remove default, b/c we always add it and don't want to include it in timestamp selected ones
     for( size_t n = 0; n < tfs.size(); ++n )
@@ -2387,7 +2402,23 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::checkTests()
 {
     std::vector<std::string> tfs;
-    mx::error_t              errc = mx::ioutils::getFileNames( tfs, m_testPath, "", "", ".fits" );
+
+    static bool gfn_logged = false; // tracks if not finding the test path is logged
+
+    mx::error_t errc = mx::ioutils::getFileNames( tfs, m_testPath, "", "", ".fits" );
+
+    if( errc != mx::error_t::noerror )
+    {
+        if( !gfn_logged )
+        {
+            derivedT::template log<software_error>(
+                { std::format( "error getting test files: {}", mx::errorMessage( errc ) ) } );
+        }
+        gfn_logged = true;
+        return -1;
+    }
+
+    gfn_logged = false;
 
     mx_error_check_rv( errc, -1 );
 

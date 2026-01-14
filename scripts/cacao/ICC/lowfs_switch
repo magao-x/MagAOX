@@ -4,7 +4,10 @@
 # switch LOWFS cameras and reload CACAO
 #
 # usage: lowfs_switch camsci1
+#
+# This script is under version control in the MagAO-X source
 #########################################################
+
 
 
 echo 'Switching LOWFS to' $1
