@@ -372,45 +372,46 @@ int zaberLowLevel::appStartup()
     }
 
     REG_INDI_NEWPROP_NOCB( m_indiP_curr_state, "curr_state", pcf::IndiProperty::Text );
-    
+
     REG_INDI_NEWPROP_NOCB( m_indiP_max_pos, "max_pos", pcf::IndiProperty::Text );
-    
+
     REG_INDI_NEWPROP_NOCB( m_indiP_parked, "parked", pcf::IndiProperty::Number );
-    
+
     REG_INDI_NEWPROP_NOCB( m_indiP_lastHomed, "last_homed", pcf::IndiProperty::Number );
-    
+
     REG_INDI_NEWPROP_NOCB( m_indiP_curr_pos, "curr_pos", pcf::IndiProperty::Number );
 
     REG_INDI_NEWPROP_NOCB( m_indiP_temp, "temp", pcf::IndiProperty::Number );
-    
+
     REG_INDI_NEWPROP_NOCB( m_indiP_warn, "warning", pcf::IndiProperty::Switch );
     m_indiP_warn.setRule( pcf::IndiProperty::AnyOfMany );
-    
+
     REG_INDI_NEWPROP( m_indiP_tgt_pos, "tgt_pos", pcf::IndiProperty::Number );
 
-    /*--> Make a switch */
-    REG_INDI_NEWPROP( m_indiP_req_home, "req_home", pcf::IndiProperty::Number );
+    REG_INDI_NEWPROP( m_indiP_req_home, "req_home", pcf::IndiProperty::Switch );
+    m_indiP_req_home.setRule( pcf::IndiProperty::AtMostOne );
 
-    /*--> Make a switch */
-    REG_INDI_NEWPROP( m_indiP_req_halt, "req_halt", pcf::IndiProperty::Number );
+    CREATE_REG_INDI_NEW_REQUESTSWITCH( m_indiP_req_home_all, "home_all" );
 
-    /*--> Make a switch */
-    REG_INDI_NEWPROP( m_indiP_req_ehalt, "req_ehalt", pcf::IndiProperty::Number );
-    
+    REG_INDI_NEWPROP( m_indiP_req_halt, "req_halt", pcf::IndiProperty::Switch );
+    m_indiP_req_halt.setRule( pcf::IndiProperty::AtMostOne );
+
+    REG_INDI_NEWPROP( m_indiP_req_ehalt, "req_ehalt", pcf::IndiProperty::Switch );
+    m_indiP_req_ehalt.setRule( pcf::IndiProperty::AtMostOne );
 
     for( size_t n = 0; n < m_stages.size(); ++n )
     {
         m_indiP_curr_state.add( pcf::IndiElement( m_stages[n].name() ) );
-        
+
         m_indiP_max_pos.add( pcf::IndiElement( m_stages[n].name() ) );
         m_indiP_max_pos[m_stages[n].name()] = -1;
-        
+
         m_indiP_parked.add( pcf::IndiElement( m_stages[n].name() ) );
-        
+
         m_indiP_lastHomed.add( pcf::IndiElement( m_stages[n].name() ) );
-        
+
         m_indiP_curr_pos.add( pcf::IndiElement( m_stages[n].name() ) );
-        
+
         m_indiP_temp.add( pcf::IndiElement( m_stages[n].name() ) );
 
         m_indiP_warn.add( pcf::IndiElement( m_stages[n].name() ) );
@@ -419,12 +420,15 @@ int zaberLowLevel::appStartup()
         m_indiP_tgt_pos.add( pcf::IndiElement( m_stages[n].name() ) );
 
         m_indiP_req_home.add( pcf::IndiElement( m_stages[n].name() ) );
+        m_indiP_req_home[m_stages[n].name()].setSwitchState( pcf::IndiElement::Off );
 
         m_indiP_req_halt.add( pcf::IndiElement( m_stages[n].name() ) );
+        m_indiP_req_halt[m_stages[n].name()].setSwitchState( pcf::IndiElement::Off );
 
         m_indiP_req_ehalt.add( pcf::IndiElement( m_stages[n].name() ) );
+        m_indiP_req_ehalt[m_stages[n].name()].setSwitchState( pcf::IndiElement::Off );
 
-        //Now load last state from disk
+        // Now load last state from disk
         std::ifstream posIn;
         posIn.open( std::format( "{}/{}/{}", m_sysPath, m_configName, m_stages[n].name() ) );
 
@@ -889,26 +893,8 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_home )( const pcf::IndiPropert
         {
             if( found )
             {
-                if( m_stages[n].deviceAddress() < 1 )
-                {
-                    return log<software_error, -1>( { "stage " + m_stages[n].name() + " with with s/n " +
-                                                      m_stages[n].serial() + " not found in system." } );
-                }
-                std::lock_guard<std::mutex> guard( m_indiMutex );
-
-                if( m_stages[n].homing() )
-                {
-                    continue;
-                }
-
-                if( m_stages[n].home( m_port ) < 0 )
-                {
-                    return log<software_error, -1>( { "error from home for " + m_stages[n].name() } );
-                }
-
-                updateIfChanged( m_indiP_tgt_pos, m_stages[n].name(), 0 );
-                updateIfChanged( m_indiP_parked, m_stages[n].name(), m_stages[n].parked() );
-                updateIfChanged( m_indiP_curr_state, m_stages[n].name(), std::string( "HOMING" ) );
+                log<software_error>( { "more than one stage specified in req_home, rejecting request" } );
+                return -1;
             }
 
             if( m_stages[n].deviceAddress() < 1 )
@@ -1011,18 +997,7 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_halt )( const pcf::IndiPropert
         {
             if( found )
             {
-                if( m_stages[n].deviceAddress() < 1 )
-                {
-                    return log<software_error, -1>( { "stage " + m_stages[n].name() + " with with s/n " +
-                                                      m_stages[n].serial() + " not found in system." } );
-                }
-
-                std::lock_guard<std::mutex> guard( m_indiMutex );
-
-                if( m_stages[n].stop( m_port ) < 0 )
-                {
-                    return log<software_error, -1>( { "error from stop for " + m_stages[n].name() } );
-                }
+                return log<software_error, -1>( "more than one stage specified in req_halt, rejecting request" );
             }
 
             if( m_stages[n].deviceAddress() < 1 )
@@ -1074,8 +1049,11 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_ehalt )( const pcf::IndiProper
             {
                 if( m_stages[n].deviceAddress() < 1 )
                 {
-                    return log<software_error, -1>( { "stage " + m_stages[n].name() + " with with s/n " +
-                                                      m_stages[n].serial() + " not found in system." } );
+                    log<software_error>( std::format( "stage {} with s/n {} "
+                                                      "not present",
+                                                      m_stages[n].name(),
+                                                      m_stages[n].serial() ) );
+                    continue;
                 }
 
                 std::lock_guard<std::mutex> guard( m_indiMutex );
