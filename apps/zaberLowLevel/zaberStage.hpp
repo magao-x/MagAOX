@@ -43,7 +43,7 @@ class zaberStage
 
     bool m_homing{ false };
 
-    timespec m_lastHomed{ 0, 0 }; ///< Time stamp of the last time the stage was homed
+    time_t m_lastHomed {0}; ///< Time stamp of the last time the stage was homed
 
     bool m_parked{ false };
 
@@ -180,7 +180,7 @@ class zaberStage
      */
     bool homing();
 
-    /// Get the time of last homing
+    /// Get the time of last homing 
     /**
      * \returns the current value of m_lastHomed
      */
@@ -367,9 +367,9 @@ class zaberStage
     /// Clear all state so that when the system is powered back on we get the correct new state.
     int onPowerOff();
 
-    int writeStateFile( std::ofstream &fout /**< [in] an open ofstream to write to */ );
+    int writeStateFile( std::ofstream & fout /**< [in] an open ofstream to write to */);
 
-    int readStateFile( std::ifstream &fin /**< [in] an open ofstream to write to */ );
+    int readStateFile( std::ifstream & fin /**< [in] an open ofstream to write to */);
 };
 
 template <class parentT>
@@ -445,11 +445,11 @@ bool zaberStage<parentT>::homing()
 template <class parentT>
 time_t zaberStage<parentT>::lastHomed()
 {
-    return m_lastHomed.tv_sec;
+    return m_lastHomed;
 }
 
 template <class parentT>
-int zaberStage<parentT>::parked()
+bool zaberStage<parentT>::parked()
 {
     return m_parked;
 }
@@ -647,12 +647,9 @@ int zaberStage<parentT>::getResponse( std::string &response, const za_reply &rep
 
         if( m_deviceStatus == 'I' && m_homing )
         {
-            m_warnWR    = false; // Clear preemptively
-            m_homing    = false;
-            if(clock_gettime(CLOCK_ISIO, &m_lastHomed) < 0)
-            {
-                MagAOXAppT::log<software_error>( {errno, 0, "clock_gettime for last homed"});
-            }
+            m_warnWR = false; // Clear preemptively
+            m_homing = false;
+            m_lastHomed = time(nullptr);
         }
 
         if( rep.warning_flags[0] == '-' )
@@ -1605,83 +1602,84 @@ int zaberStage<parentT>::onPowerOff()
 }
 
 template <class parentT>
-int zaberStage<parentT>::writeStateFile( std::ofstream &fout )
+int zaberStage<parentT>::writeStateFile( std::ofstream & fout )
 {
-    fout << m_rawPos << '\n';
+   fout << m_rawPos << '\n';
 
-    if( !fout )
-    {
-        return MagAOXAppT::log<software_error, -1>( { "error writing raw position" } );
-    }
+   if(!fout)
+   {
+      return MagAOXAppT::log<software_error, -1>( { "error writing raw position"} );
+   }
 
-    fout << m_parked << '\n';
+   fout << m_parked << '\n';
 
-    if( !fout )
-    {
-        return MagAOXAppT::log<software_error, -1>( { "error writing parked state" } );
-    }
+   if(!fout)
+   {
+      return MagAOXAppT::log<software_error, -1>( { "error writing parked state"} );
+   }
 
-    fout << m_maxPos << '\n';
+   fout << m_maxPos << '\n';
 
-    if( !fout )
-    {
-        return MagAOXAppT::log<software_error, -1>( { "error writing max position" } );
-    }
+   if(!fout)
+   {
+      return MagAOXAppT::log<software_error, -1>( { "error writing max position"} );
+   }
 
-    fout << m_lastHomed.tv_sec << '\n';
+   fout << m_lastHomed << '\n';
 
-    if( !fout )
-    {
-        return MagAOXAppT::log<software_error, -1>( { "error writing last home time" } );
-    }
+   if(!fout)
+   {
+      return MagAOXAppT::log<software_error, -1>( { "error writing last home time"} );
+   }
 
-    return 0;
+   return 0;
 }
 
 template <class parentT>
-int zaberStage<parentT>::readStateFile( std::ifstream &fin )
+int zaberStage<parentT>::readStateFile( std::ifstream & fin )
 {
-    long   rawPos;
-    bool   parked;
-    long   maxPos;
-    time_t lastHomed;
+   long rawPos;
+   bool parked;
+   long maxPos;
+   time_t lastHomed;
 
-    fin >> rawPos;
+   fin >> rawPos;
 
-    if( !fin )
-    {
-        return MagAOXAppT::log<software_error, -1>( { "error reading raw position" } );
-    }
+   if(!fin)
+   {
+      return MagAOXAppT::log<software_error, -1>( { "error reading raw position"} );
+   }
 
-    fin >> parked;
+   fin >> parked;
 
-    if( !fin )
-    {
-        return MagAOXAppT::log<software_error, -1>( { "error reading parked state" } );
-    }
+   if(!fin)
+   {
+      return MagAOXAppT::log<software_error, -1>( { "error reading parked state"} );
+   }
 
-    fin >> maxPos;
+   fin >> maxPos;
 
-    if( !fin )
-    {
-        return MagAOXAppT::log<software_error, -1>( { "error reading max position" } );
-    }
+   if(!fin)
+   {
+      return MagAOXAppT::log<software_error, -1>( { "error reading max position"} );
+   }
 
-    fin >> lastHomed;
+   
+   fin >> lastHomed;
 
-    if( !fin )
-    {
-        return MagAOXAppT::log<software_error, -1>( { "error reading last home time" } );
-    }
+   if(!fin)
+   {
+      return MagAOXAppT::log<software_error, -1>( { "error reading last home time"} );
+   }
 
-    m_rawPos    = rawPos;
-    m_tgtPos    = rawPos;
-    m_parked    = parked;
-    m_maxPos    = maxPos;
-    m_lastHomed.tv_sec = lastHomed;
-    m_lastHomed.tv_nsec = 0;
+   m_rawPos = rawPos;
+   m_tgtPos = rawPos;
+   m_parked = parked;
+   m_maxPos = maxPos;
+   m_lastHomed = lastHomed;
 
-    return 0;
+   return 0;
+
 }
 
 } // namespace app

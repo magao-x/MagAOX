@@ -66,9 +66,15 @@ class zaberCtrl : public MagAOXApp<>, public dev::stdMotionStage<zaberCtrl>, pub
     double m_pos{ 0 };    ///< Current position in mm
     double m_tgtPos{ 0 }; ///< Target position in mm.
 
-    bool m_wason = true; ///< Whether the stage was in state power on before power off
+   bool m_wason = true; ///< Whether the stage was in state power on before power off
 
-    int m_homingState{ 0 }; ///< The homing state, tracks the stages of homing.
+   int m_homingState{0}; ///< The homing state, tracks the stages of homing.
+
+   time_t m_lastHomed {0}; ///< Time stamp of the last time the stage was homed
+
+public:
+   /// Default c'tor.
+   zaberCtrl();
 
     time_t m_lastHomed{ 0 }; ///< Time stamp of the last time the stage was homed
 
@@ -148,9 +154,12 @@ class zaberCtrl : public MagAOXApp<>, public dev::stdMotionStage<zaberCtrl>, pub
     pcf::IndiProperty m_indiP_temp;
     pcf::IndiProperty m_indiP_lastHomed;
 
-  public:
-    INDI_NEWCALLBACK_DECL( zaberCtrl, m_indiP_pos );
-    INDI_NEWCALLBACK_DECL( zaberCtrl, m_indiP_rawPos );
+   //INDI properties for user interaction:
+   pcf::IndiProperty m_indiP_pos;
+   pcf::IndiProperty m_indiP_rawPos;
+   pcf::IndiProperty m_indiP_maxPos;
+   pcf::IndiProperty m_indiP_temp;
+   pcf::IndiProperty m_indiP_lastHomed;
 
     // INDI properties for interacting with Low-Level
     pcf::IndiProperty m_indiP_stageState;
@@ -168,7 +177,23 @@ class zaberCtrl : public MagAOXApp<>, public dev::stdMotionStage<zaberCtrl>, pub
     INDI_SETCALLBACK_DECL( zaberCtrl, m_indiP_stageTemp );
     INDI_SETCALLBACK_DECL( zaberCtrl, m_indiP_stageLastHomed );
 
-    /** \name Telemeter Interface
+   //INDI properties for interacting with Low-Level
+   pcf::IndiProperty m_indiP_stageState;
+   pcf::IndiProperty m_indiP_stageMaxRawPos;
+   pcf::IndiProperty m_indiP_stageRawPos;
+   pcf::IndiProperty m_indiP_stageTgtPos;
+   pcf::IndiProperty m_indiP_stageTemp;
+   pcf::IndiProperty m_indiP_stageLastHomed;
+
+public:
+   INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageState);
+   INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageMaxRawPos);
+   INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageRawPos);
+   INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageTgtPos);
+   INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageTemp);
+   INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageLastHomed);
+
+   /** \name Telemeter Interface
      *
      * @{
      */
@@ -299,9 +324,17 @@ int zaberCtrl::appStartup()
     indi::addNumberElement( m_indiP_temp, "current", -50, 100, 0, "%0.1f" );
     registerIndiPropertyReadOnly( m_indiP_temp );
 
-    createROIndiNumber( m_indiP_lastHomed, "last_homed", "Time of last home [sec]" );
-    indi::addNumberElement<time_t>( m_indiP_lastHomed, "time_sec", 0, std::numeric_limits<time_t>::max(), 1, "%d" );
-    registerIndiPropertyReadOnly( m_indiP_lastHomed );
+   createROIndiNumber( m_indiP_lastHomed, "last_homed", "Time of last home [sec]");
+   indi::addNumberElement<time_t>( m_indiP_lastHomed, "time_sec", 0,std::numeric_limits<time_t>::max(), 1, "%d");
+   registerIndiPropertyReadOnly(m_indiP_lastHomed);
+
+   //Register for the low level status reports
+   REG_INDI_SETPROP(m_indiP_stageState, m_lowLevelName, "curr_state");
+   REG_INDI_SETPROP(m_indiP_stageMaxRawPos, m_lowLevelName, std::string("max_pos"));
+   REG_INDI_SETPROP(m_indiP_stageRawPos, m_lowLevelName, std::string("curr_pos"));
+   REG_INDI_SETPROP(m_indiP_stageTgtPos, m_lowLevelName, std::string("tgt_pos"));
+   REG_INDI_SETPROP(m_indiP_stageTemp, m_lowLevelName, std::string("temp"));
+   REG_INDI_SETPROP(m_indiP_stageLastHomed, m_lowLevelName, std::string("last_homed"));
 
     // Register for the low level status reports
     REG_INDI_SETPROP( m_indiP_stageState, m_lowLevelName, "curr_state" );
@@ -336,15 +369,26 @@ int zaberCtrl::appLogic()
         state( stateCodes::NOTCONNECTED );
     }
 
-    if( state() == stateCodes::POWEROFF )
-    {
-        if( m_wason )
-        {
-            // Here do poweroff update
-            if( stdMotionStage<zaberCtrl>::onPowerOff() < 0 )
-            {
-                log<software_error>( { __FILE__, __LINE__ } );
-            }
+   if(state() == stateCodes::POWEROFF)
+   {
+      if(m_wason)
+      {
+         //Here do poweroff update
+         if( stdMotionStage<zaberCtrl>::onPowerOff() < 0)
+         {
+            log<software_error>({__FILE__,__LINE__});
+         }
+
+         m_wason = false;
+      }
+      else 
+      {
+         //Here do poweroff update
+         if( stdMotionStage<zaberCtrl>::whilePowerOff() < 0)
+         {
+            log<software_error>({__FILE__,__LINE__});
+         }
+      }
 
             m_wason = false;
         }
@@ -365,12 +409,37 @@ int zaberCtrl::appLogic()
             log<software_error>( { __FILE__, __LINE__ } );
         }
 
-        return 0;
-    }
+   if(state() == stateCodes::NOTCONNECTED)
+   {
+      recordStage();
 
-    if( state() == stateCodes::NOTCONNECTED )
-    {
-        recordStage();
+      //record telem if it's been longer than 10 sec:
+      if(telemeter<zaberCtrl>::appLogic() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+      }
+
+      return 0;
+   }
+
+   if(state() == stateCodes::POWERON)
+   {
+      m_wason = true;
+      recordStage();
+      return 0;
+   }
+
+   if(state() == stateCodes::NOTHOMED)
+   {
+      if(m_powerOnHome) 
+      {
+         startHoming();
+         sleep(1); //give it time to start 
+      }
+
+      return 0;
+
+   }
 
         // record telem if it's been longer than 10 sec:
         if( telemeter<zaberCtrl>::appLogic() < 0 )
@@ -882,6 +951,24 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageLastHomed )( const pcf::IndiPrope
     m_lastHomed = ipRecv[m_stageName].get<double>();
 
     updateIfChanged( m_indiP_lastHomed, "time_sec", m_lastHomed );
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageLastHomed )(const pcf::IndiProperty &ipRecv)
+{
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stageLastHomed, ipRecv);
+
+    if( ipRecv.find(m_stageName) != true ) //Just not our stage.
+    {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> guard(m_indiMutex);
+
+    m_lastHomed = ipRecv[m_stageName].get<double>();
+
+    updateIfChanged(m_indiP_lastHomed, "time_sec", m_lastHomed);
 
     return 0;
 }
