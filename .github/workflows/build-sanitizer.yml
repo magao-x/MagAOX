@@ -1,0 +1,61 @@
+name: Sanitizer
+
+on:
+  workflow_dispatch:
+    inputs:
+      sanitizer_type:
+        description: 'Choose the sanitizer type'
+        required: true
+        default: 'address'
+        options:
+          - address
+          - thread
+          - undefined
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/joseph-long/magao-x-setup-develop:main
+      options: --user root
+    steps:
+      - name: Install Packages
+        run: dnf install -y lcov make libusb-devel libusbx-devel
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - name: Configure Git Safe Directory
+        run: git config --global --add safe.directory "$(pwd)"
+      - name: Sanitize
+        run: |
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
+          pkg-config --modversion openblas
+
+          SAN="${{ github.event.inputs.sanitizer_type }}"
+          echo "Selected sanitizer: $SAN"
+
+          # Go to workspace root
+          cd "$GITHUB_WORKSPACE"
+
+          # Build project with the requested sanitizer
+          make SANITIZE="$SAN"
+
+          # Build tests with requirested sanitizer
+          cd tests
+          make SANITIZE="$SAN"
+
+          # Run tests with sane runtime options per sanitizer
+          case "$SAN" in
+            address)
+              make test_asan
+              ;;
+            thread)
+              make test_tsan
+              ;;
+            undefined)
+              make test_ubsan
+              ;;
+            *)
+              echo "Unknown sanitizer: $SAN" >&2
+              exit 2
+              ;;
+          esac

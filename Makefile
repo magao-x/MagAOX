@@ -321,7 +321,7 @@ install: indi_install libs_install pythonlibs_install apps_install pythonapps_in
 
 #We clean just libMagAOX, and the apps, guis, and utils for normal devel work.
 .PHONY: clean
-clean: libs_clean apps_clean pythonapps_clean guis_clean utils_clean tests_clean
+clean: libs_clean apps_clean guis_clean utils_clean tests_clean
 
 #Clean everything.
 .PHONY: all_clean
@@ -530,6 +530,10 @@ setup:
 print_role:
 	@echo "MAGAOX_ROLE=$(MAGAOX_ROLE)"
 
+########################################
+## Coverage build
+########################################
+
 .PHONY: coverage
 coverage:
 	${MAKE} all COVERAGE=1 ALL_APPS=1 NO_GUIS=1
@@ -541,6 +545,49 @@ coverage_clean:
 	find . -name '*.gcov' -delete
 	${MAKE} all_clean COVERAGE=1 ALL_APPS=1
 
+########################################
+## Valgrind build - WIP
+########################################
+
 .PHONY: valgrind
 valgrind:
 	${MAKE} all ALL_APPS=1 DEBUG=1
+
+##########################################################################
+## Sanitizer build
+## These build all apps with sanitizer instrumentation for testing.
+##
+## Profiles:
+##   sanitize_address  - Memory safety (ASan + UBSan + LSan)
+##   sanitize_thread   - Concurrency/race detection (TSan + UBSan)
+##   sanitize_undefined - Lightweight undefined behavior checks (UBSan only)
+##
+## Should set the following runtime environment variables when running 
+## sanitized binaries (the tests aliases do this automatically):
+##   ASAN_OPTIONS=halt_on_error=0:detect_leaks=1
+##   TSAN_OPTIONS=halt_on_error=0:second_deadlock_stack=1
+##   UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=0
+##########################################################################
+
+.PHONY: sanitize_address
+sanitize_address:
+	${MAKE} all SANITIZE=address ALL_APPS=1 NO_GUIS=1
+
+.PHONY: sanitize_thread
+sanitize_thread:
+	${MAKE} all SANITIZE=thread ALL_APPS=1 NO_GUIS=1
+
+.PHONY: sanitize_undefined
+sanitize_undefined:
+	${MAKE} all SANITIZE=undefined ALL_APPS=1 NO_GUIS=1
+
+# Aliases
+.PHONY: asan tsan ubsan
+asan: sanitize_address
+tsan: sanitize_thread
+ubsan: sanitize_undefined
+
+# For sanitizer builds need to ensure no objects are left over
+.PHONY: sanitize_clean
+sanitize_clean:
+	${MAKE} all_clean ALL_APPS=1

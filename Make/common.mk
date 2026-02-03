@@ -53,6 +53,59 @@ ifeq ($(COVERAGE),1)
   CXXFLAGS += --coverage
 endif
 
+#####################################################################################
+## Sanitizer support
+## Usage: make SANITIZE=address|thread|undefined
+##
+## Profiles:
+##   address (or asan)    - AddressSanitizer + UBSan + LeakSanitizer (memory safety)
+##   thread (or tsan)     - ThreadSanitizer + UBSan (concurrency/race detection)
+##   undefined (or ubsan) - UndefinedBehaviorSanitizer only (lightweight UB checks)
+##
+## Note: address and thread are mutually exclusive and cannot be combined.
+#####################################################################################
+
+# AddressSanitizer (address, asan)
+ifneq ($(filter address asan,$(SANITIZE)),)
+  SANITIZE_FLAGS = -fsanitize=address,undefined,leak
+  SANITIZE_FLAGS += -fno-optimize-sibling-calls
+endif
+
+# ThreadSanitizer (thread, tsan)
+ifneq ($(filter thread tsan,$(SANITIZE)),)
+  SANITIZE_FLAGS = -fsanitize=thread,undefined
+  SANITIZE_FLAGS += -fno-optimize-sibling-calls
+  # ThreadSanitizer requires disabling PIE (position-independent executable) so the 
+  # executable is not placed into sanitizer-reserved shadow memory. Disable PIE for thread builds.
+  SANITIZE_FLAGS += -fno-pie -no-pie
+endif
+
+# UndefinedBehaviorSanitizer (undefined, ubsan)
+ifneq ($(filter undefined ubsan,$(SANITIZE)),)
+  SANITIZE_FLAGS = -fsanitize=undefined,float-divide-by-zero,float-cast-overflow
+endif
+
+# Common flags for all sanitizers
+ifneq ($(filter address asan thread tsan undefined ubsan,$(SANITIZE)),)
+  SANITIZE_FLAGS += -fno-omit-frame-pointer
+  ifeq ($(DEBUG),)
+    SANITIZE_FLAGS += -g
+  endif
+endif
+
+# Error on unknown SANITIZE value
+ifneq ($(SANITIZE),)
+  ifeq ($(SANITIZE_FLAGS),)
+    $(error Unknown SANITIZE option '$(SANITIZE)'. Valid options: address, thread, undefined (or aliases: asan, tsan, ubsan))
+  endif
+endif
+
+# Apply sanitizer flags to compiler and linker
+ifneq ($(SANITIZE_FLAGS),)
+  CFLAGS += $(SANITIZE_FLAGS)
+  CXXFLAGS += $(SANITIZE_FLAGS)
+endif
+
 ifeq ($(MAGAOX_ROLE),SS)
   CXXFLAGS += -DXWC_SIM_MODE
 endif
@@ -126,6 +179,11 @@ LDFLAGS += $(EXTRA_LDFLAGS)
 
 ifeq ($(COVERAGE),1)
   LDFLAGS += --coverage
+endif
+
+# Pass sanitizer flags to linker
+ifneq ($(SANITIZE_FLAGS),)
+  LDFLAGS += $(SANITIZE_FLAGS)
 endif
 
 #Hard-code the paths to system libraries so setuid works
