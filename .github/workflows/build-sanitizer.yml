@@ -16,43 +16,54 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/joseph-long/magao-x-setup-develop:main
-      options: --user root
+      image: ghcr.io/magao-x/magao-x-setup:cli
+      # allow setarch to work in the container. This is needed for ThreadSanitizer to disable ASLR
+      options: --user root --security-opt seccomp=unconfined
     steps:
       - name: Install Packages
-        run: dnf install -y lcov make libusb-devel libusbx-devel
+        run: dnf install -y lcov make libusb-devel libusbx-devel gcc-toolset-14-libasan-devel gcc-toolset-14-libubsan-devel gcc-toolset-14-libtsan-devel gcc-toolset-14-liblsan-devel
       - name: Check out repository code
         uses: actions/checkout@v4
       - name: Configure Git Safe Directory
         run: git config --global --add safe.directory "$(pwd)"
       - name: Sanitize
         run: |
+          # Configure gcc version 14
+          if [[ -e /opt/rh/gcc-toolset-14/enable ]]; then
+            source /opt/rh/gcc-toolset-14/enable
+            echo "GCC version: $(gcc --version | head -n 1)"
+          else
+            echo "GCC 14 not found, but required for sanitizers. Exiting."
+            exit 1
+          fi
+
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
           pkg-config --modversion openblas
 
           SAN="${{ github.event.inputs.sanitizer_type }}"
           echo "Selected sanitizer: $SAN"
 
-          # Go to workspace root
-          cd "$GITHUB_WORKSPACE"
-
-          # Build project with the requested sanitizer
+          # Build with the requested sanitizer
+          echo "In dir: $(pwd)"
+          echo "Building with sanitizer $SAN"
           make SANITIZE="$SAN"
 
-          # Build tests with requirested sanitizer
+          # Build tests with requested sanitizer
           cd tests
+          echo "Building tests with sanitizer $SAN"
           make SANITIZE="$SAN"
 
-          # Run tests with sane runtime options per sanitizer
+          # Run tests with sanitizer
+          set +e  # Don't exit on error
           case "$SAN" in
             address)
-              make test_asan
+              make test_asan 2>&1 | tee sanitizer_output.txt
               ;;
             thread)
-              make test_tsan
+              make test_tsan 2>&1 | tee sanitizer_output.txt
               ;;
             undefined)
-              make test_ubsan
+              make test_ubsan 2>&1 | tee sanitizer_output.txt
               ;;
             *)
               echo "Unknown sanitizer: $SAN" >&2

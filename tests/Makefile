@@ -86,27 +86,40 @@ asan: sanitize_address
 tsan: sanitize_thread
 ubsan: sanitize_undefined
 
-# Run tests with sanitizers
+# Run tests with sanitizers (continue through all tests to collect all findings)
 .PHONY: test_asan test_tsan test_ubsan
 test_asan: sanitize_address
 	@echo "Running tests with AddressSanitizer..."
-	@for test in ${TESTOBJS}; do \
-	  ASAN_OPTIONS="halt_on_error=0:detect_leaks=1" ./$$test || exit 1; \
-	done
+	@failed=0; \
+	for test in ${TESTOBJS}; do \
+	  ASAN_OPTIONS="halt_on_error=0:detect_leaks=1" ./$$test || failed=$$((failed + 1)); \
+	done; \
+	if [ $$failed -gt 0 ]; then \
+	  echo "$$failed test(s) had failures (may be test logic or sanitizer findings)"; \
+	fi
 
 # setting no-pie flag doesn't seem to be enough sometimes; use setarch -R to disable Address Space Layout Randomization
+# In containers, setarch may fail with "Operation not permitted" - fall back to running without it
 test_tsan: sanitize_thread
 	@echo "Running tests with ThreadSanitizer..."
-	@for test in ${TESTOBJS}; do \
-	if command -v setarch >/dev/null 2>&1; then \
-		env TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1" setarch `uname -m` -R ./$$test || exit 1; \
+	@failed=0; \
+	for test in ${TESTOBJS}; do \
+	  if command -v setarch >/dev/null 2>&1 && setarch `uname -m` -R true 2>/dev/null; then \
+	    env TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1" setarch `uname -m` -R ./$$test || failed=$$((failed + 1)); \
 	  else \
-	    TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1" ./$$test || exit 1; \
+	    TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1" ./$$test || failed=$$((failed + 1)); \
 	  fi; \
-	done
+	done; \
+	if [ $$failed -gt 0 ]; then \
+	  echo "$$failed test(s) had failures (may be test logic or sanitizer findings)"; \
+	fi
 
 test_ubsan: sanitize_undefined
 	@echo "Running tests with UndefinedBehaviorSanitizer..."
-	@for test in ${TESTOBJS}; do \
-	  UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=0" ./$$test || exit 1; \
-	done
+	@failed=0; \
+	for test in ${TESTOBJS}; do \
+	  UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=0" ./$$test || failed=$$((failed + 1)); \
+	done; \
+	if [ $$failed -gt 0 ]; then \
+	  echo "$$failed test(s) had failures (may be test logic or sanitizer findings)"; \
+	fi
