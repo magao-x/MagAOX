@@ -552,10 +552,10 @@ int picamCtrl::appStartup()
    m_indiP_fxngensync_freq.setName( m_fxngenCh + "freq" );
    m_indiP_fxngensync_freq.add( pcf::IndiElement( "target" ) );
 
-   m_indiP_fxngensync_output = pcf::IndiProperty( pcf::IndiProperty::Text );
+   m_indiP_fxngensync_output = pcf::IndiProperty( pcf::IndiProperty::Switch );
    m_indiP_fxngensync_output.setDevice( m_fxngenName );
    m_indiP_fxngensync_output.setName( m_fxngenCh + "outp" );
-   m_indiP_fxngensync_output.add( pcf::IndiElement( "value" ) );
+   m_indiP_fxngensync_output.add( pcf::IndiElement( "toggle" ) );
 
 
    CREATE_REG_INDI_NEW_NUMBERD(m_indiP_receiveExptime, "receiveExptime", m_minExpTime, m_maxExpTime, m_stepExpTime, "%0.3f", "Exptime", "Other cam");
@@ -1322,7 +1322,7 @@ void picamCtrl::updateFxnGenSync()
    sendNewProperty(m_indiP_fxngensync_freq);
 
    // make sure fxngen is on!
-   m_indiP_fxngensync_output["value"] = "On";
+   m_indiP_fxngensync_output["toggle"] = pcf::IndiElement::On;
    sendNewProperty(m_indiP_fxngensync_output);
 }
 
