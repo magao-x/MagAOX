@@ -582,8 +582,8 @@ int ttmModulator::restTTM()
    if( sendNewProperty(m_indiP_C2ofst, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //5) Set outputs to off
-   if( sendNewProperty(m_indiP_C1outp, "value", "Off") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2outp, "value", "Off") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1outp, "toggle", pcf::IndiElement::Off) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2outp, "toggle", pcf::IndiElement::Off) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //Now check if values have changed.
    if( waitValue(m_C1freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
@@ -661,8 +661,8 @@ int ttmModulator::setTTM()
    log<text_log>("Setting the PyWFS TTM.", logPrio::LOG_INFO);
 
    //2) Set outputs to on
-   if( sendNewProperty(m_indiP_C1outp, "value", "On") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2outp, "value", "On") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1outp, "toggle", pcf::IndiElement::On) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2outp, "toggle", pcf::IndiElement::On) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    if( waitValue(m_C1outp, 1) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C2outp, 1) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
@@ -1137,13 +1137,13 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1outp)(const pcf::IndiProperty &ipR
     try
     {
        m_indiP_C1outp = ipRecv;
-       std::string outp = ipRecv["value"].getValue();
+       pcf::IndiElement outp = ipRecv["toggle"].getSwitchState();
 
-       if( outp == "Off" )
+       if( outp == pcf::IndiElement::Off )
        {
           m_C1outp = 0;
        }
-       else if (outp == "On")
+       else if (outp == pcf::IndiElement::On)
        {
           m_C1outp = 1;
        }
@@ -1258,13 +1258,13 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2outp)(const pcf::IndiProperty &ipR
     try
     {
        m_indiP_C2outp = ipRecv;
-       std::string outp = ipRecv["value"].getValue();
+       pcf::IndiElement outp = ipRecv["toggle"].getSwitchState();
 
-       if( outp == "Off" )
+       if( outp == pcf::IndiElement::Off )
        {
           m_C2outp = 0;
        }
-       else if (outp == "On")
+       else if (outp == pcf::IndiElement::On)
        {
           m_C2outp = 1;
        }
