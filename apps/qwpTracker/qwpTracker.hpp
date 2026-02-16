@@ -599,18 +599,18 @@ int qwpTracker::recordTelem( const telem_qwptrack * )
 
 int qwpTracker::recordQwpTrack( bool force )
 {
-    static float qwp1Pos = 0;
+    static float qwp1_angle = 0;
 
-    static float qwp2Pos = 0;
+    static float qwp2_angle = 0;
 
     static bool tracking = false;
 
-    if( m_qwp1_curPos != qwp1Pos || m_qwp2_curPos != qwp2Pos || m_tracking != tracking || force )
+    if( m_qwp1_curPos != qwp1_angle || m_qwp2_curPos != qwp2_angle || m_tracking != tracking || force )
     {
         telem<telem_qwptrack>( { m_qwp1_curPos, m_qwp2_curPos, m_tracking } );
 
-        qwp1Pos    = m_qwp1_curPos;
-        qwp2Pos    = m_qwp2_curPos;
+        qwp1_angle = m_qwp1_curPos;
+        qwp2_angle = m_qwp2_curPos;
         tracking   = m_tracking;
     }
 
