@@ -56,8 +56,10 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
     int m_qwp2_sign{ -1 };
 
     // positions
-    float m_qwp1Pos{ 0 };
-    float m_qwp2Pos{ 0 };
+    float m_qwp1_tgtPos{ 0 };
+    float m_qwp1_curPos{ 0 };
+    float m_qwp2_tgtPos{ 0 };
+    float m_qwp2_curPos{ 0 };
     float m_kmirror{ 0 };
 
     // indi
@@ -123,10 +125,10 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
   protected:
     pcf::IndiProperty m_indiP_stagek;
 
-    pcf::IndiProperty m_indiP_stageQwp1Rot;
-    pcf::IndiProperty m_indiP_stageQwp1RotFsm;
-    pcf::IndiProperty m_indiP_stageQwp2Rot;
-    pcf::IndiProperty m_indiP_stageQwp2RotFsm;
+    pcf::IndiProperty m_indiP_stageqwp1rot;
+    pcf::IndiProperty m_indiP_stagewp1rotFsm;
+    pcf::IndiProperty m_indiP_stageqwp2rot;
+    pcf::IndiProperty m_indiP_stageqwp2rotFsm;
 
     pcf::IndiProperty m_indiP_tracking;
     pcf::IndiProperty m_indiP_qwp1Pos;
@@ -137,14 +139,14 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
 
     INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stagek );
 
-    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stageQwp1Rot );
-    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stageQwp1RotFsm );
-    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stageQwp2Rot );
-    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stageQwp2RotFsm );
+    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stageqwp1rot );
+    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stagewp1rotFsm );
+    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stageqwp2rot );
+    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stageqwp2rotFsm );
 
     INDI_NEWCALLBACK_DECL( qwpTracker, m_indiP_tracking );
     INDI_NEWCALLBACK_DECL( qwpTracker, m_indiP_qwp1Pos );
-    INDI_NEWCALLBACK_DECL( qwpTracker, m_indiP_qwp1Pos );
+    INDI_NEWCALLBACK_DECL( qwpTracker, m_indiP_qwp2Pos );
 
     ///@}
 
@@ -276,19 +278,23 @@ int qwpTracker::appStartup()
 
     REG_INDI_SETPROP( m_indiP_stagek, m_imrDevName, "position" );
 
-    REG_INDI_SETPROP( m_indiP_stageQwp1Rot, m_qwp1_devName, "position" );
+    REG_INDI_SETPROP( m_indiP_stageqwp1rot, m_qwp1_devName, "position" );
 
-    REG_INDI_SETPROP( m_indiP_stageQwp1RotFsm, m_qwp1_devName, "fsm" );
+    REG_INDI_SETPROP( m_indiP_stagewp1rotFsm, m_qwp1_devName, "fsm" );
 
-    REG_INDI_SETPROP( m_indiP_stageQwp2Rot, m_qwp2_devName, "position" );
+    REG_INDI_SETPROP( m_indiP_stageqwp2rot, m_qwp2_devName, "position" );
 
-    REG_INDI_SETPROP( m_indiP_stageQwp2RotFsm, m_qwp2_devName, "fsm" );
+    REG_INDI_SETPROP( m_indiP_stageqwp2rotFsm, m_qwp2_devName, "fsm" );
 
     CREATE_REG_INDI_NEW_TOGGLESWITCH(m_indiP_tracking, "tracking");
 
-    CREATE_REG_INDI_NEW_NUMBERF(m_indiP_qwp1Pos, "qwp1", -360, 360, 1e-3, "%g", "qwptrack", "qwp1");
-
-    CREATE_REG_INDI_NEW_NUMBERF(m_indiP_qwp2Pos, "qwp2", -360, 360, 1e-3, "%g", "qwptrack", "qwp2");
+    CREATE_REG_INDI_NEW_NUMBERF(m_indiP_qwp1Pos, "qwp1", -360, 360, 1e-3, "%g", "", "");
+    m_indiP_qwp1Pos["current"].setValue(m_qwp1_curPos);
+    m_indiP_qwp1Pos["target"].setValue(m_qwp1_tgtPos);
+    
+    CREATE_REG_INDI_NEW_NUMBERF(m_indiP_qwp2Pos, "qwp2", -360, 360, 1e-3, "%g", "", "");
+    m_indiP_qwp2Pos["current"].setValue(m_qwp2_curPos);
+    m_indiP_qwp2Pos["target"].setValue(m_qwp2_tgtPos);
 
     TELEMETER_APP_STARTUP;
 
@@ -332,34 +338,37 @@ int qwpTracker::appShutdown()
 
 void qwpTracker::getQwp1Angle()
 {
-    m_qwp1Pos = 0.0;
+    m_qwp1_tgtPos = 0.0 * m_kmirror;
 }
 
 void qwpTracker::getQwp2Angle()
 {
-    m_qwp2Pos = 0.0;
+    m_qwp2_tgtPos = 0.0 * m_kmirror;
 }
 
 void qwpTracker::updateQwpStages()
 {
     /* QWP 2 */
 
-    float qwp1_stage_angle = m_qwp1_sign * (m_qwp1Pos - m_qwp1_zero);
+    updateIfChanged<float>(m_indiP_qwp1Pos, "target", m_qwp1_tgtPos);
+    float qwp1_stage_angle = m_qwp1_sign * (m_qwp1_tgtPos - m_qwp1_zero);
 
-    std::cerr << "QWP1 set to: " << m_qwp1Pos << "\n";
+    std::cerr << "QWP1 set to: " << m_qwp1_tgtPos << "\n";
     std::cerr << "Sending QWP1 stage to: " << qwp1_stage_angle << "\n";
-    log<text_log>( "QWP1 set to: " + std::to_string( m_qwp1Pos ) );
+    log<text_log>( "QWP1 set to: " + std::to_string( m_qwp1_tgtPos ) );
 
     m_indiP_qwp1Pos["target"] = qwp1_stage_angle;
     sendNewProperty( m_indiP_qwp1Pos );
 
+
     /* QWP 2 */
 
-    float qwp2_stage_angle = m_qwp2_sign * (m_qwp2Pos - m_qwp2_zero);
+    updateIfChanged<float>(m_indiP_qwp2Pos, "target", m_qwp2_tgtPos);
+    float qwp2_stage_angle = m_qwp2_sign * (m_qwp2_tgtPos - m_qwp2_zero);
 
-    std::cerr << "QWP2 set to: " << m_qwp2Pos << "\n";
+    std::cerr << "QWP2 set to: " << m_qwp2_tgtPos << "\n";
     std::cerr << "Sending QWP2 stage to: " << qwp2_stage_angle << "\n";
-    log<text_log>( "QWP2 set to: " + std::to_string( m_qwp2Pos ) );
+    log<text_log>( "QWP2 set to: " + std::to_string( m_qwp2_tgtPos ) );
 
     m_indiP_qwp2Pos["target"] = qwp2_stage_angle;
     sendNewProperty( m_indiP_qwp2Pos );
@@ -385,9 +394,7 @@ INDI_NEWCALLBACK_DEFN( qwpTracker, m_indiP_qwp1Pos )( const pcf::IndiProperty &i
 
     if (m_tracking) return 0;
 
-    m_qwp1Pos = ipRecv["target"].get<float>();
-
-    updateIfChanged<float>(m_indiP_qwp1Pos, "target", m_qwp1Pos);
+    m_qwp1_tgtPos = ipRecv["target"].get<float>();
 
     updateQwpStages();
 
@@ -410,9 +417,7 @@ INDI_NEWCALLBACK_DEFN( qwpTracker, m_indiP_qwp2Pos )( const pcf::IndiProperty &i
 
     if (m_tracking) return 0;
 
-    m_qwp2Pos = ipRecv["target"].get<float>();
-
-    updateIfChanged<float>(m_indiP_qwp2Pos, "target", m_qwp2Pos);
+    m_qwp2_tgtPos = ipRecv["target"].get<float>();
 
     updateQwpStages();
 
@@ -454,6 +459,8 @@ INDI_NEWCALLBACK_DEFN( qwpTracker, m_indiP_tracking )( const pcf::IndiProperty &
 
         m_tracking = false;
 
+        updateQwpStages();
+
         log<text_log>( "stopped QWP rotation tracking" );
     }
 
@@ -480,12 +487,12 @@ INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stagek )( const pcf::IndiProperty &ip
     return 0;
 }
 
-INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stageQwp1Rot )( const pcf::IndiProperty &ipRecv )
+INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stageqwp1rot )( const pcf::IndiProperty &ipRecv )
 {
 
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stageQwp1Rot, ipRecv );
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stageqwp1rot, ipRecv );
 
-    if( ipRecv.getName() != m_indiP_stageQwp1Rot.getName() )
+    if( ipRecv.getName() != m_indiP_stageqwp1rot.getName() )
     {
         log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
@@ -496,24 +503,24 @@ INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stageQwp1Rot )( const pcf::IndiProper
         return 0;
 
     float qwp1StagePos = ipRecv["current"].get<float>();
-    float qwp1Pos = m_qwp1_sign * qwp1StagePos + m_qwp1_zero;
+    m_qwp1_curPos = m_qwp1_sign * qwp1StagePos + m_qwp1_zero;
 
     // round to two decimal points
-    qwp1Pos = std::round(qwp1Pos * 100) / 100;
+    m_qwp1_curPos = std::round(m_qwp1_curPos * 100) / 100;
 
-    updateIfChanged<float>(m_indiP_qwp1Pos, "current", qwp1Pos);
+    updateIfChanged<float>(m_indiP_qwp1Pos, "current", m_qwp1_curPos);
 
     recordQwpTrack();
 
     return 0;
 }
 
-INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stageQwp1RotFsm )( const pcf::IndiProperty &ipRecv )
+INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stagewp1rotFsm )( const pcf::IndiProperty &ipRecv )
 {
 
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stageQwp1RotFsm, ipRecv );
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stagewp1rotFsm, ipRecv );
 
-    if( ipRecv.getName() != m_indiP_stageQwp1RotFsm.getName() )
+    if( ipRecv.getName() != m_indiP_stagewp1rotFsm.getName() )
     {
         log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
@@ -530,12 +537,12 @@ INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stageQwp1RotFsm )( const pcf::IndiPro
     return 0;
 }
 
-INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stageQwp2Rot )( const pcf::IndiProperty &ipRecv )
+INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stageqwp2rot )( const pcf::IndiProperty &ipRecv )
 {
 
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stageQwp2Rot, ipRecv );
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stageqwp2rot, ipRecv );
 
-    if( ipRecv.getName() != m_indiP_stageQwp2Rot.getName() )
+    if( ipRecv.getName() != m_indiP_stageqwp2rot.getName() )
     {
         log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
@@ -546,24 +553,24 @@ INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stageQwp2Rot )( const pcf::IndiProper
         return 0;
 
     float qwp2StagePos = ipRecv["current"].get<float>();
-    float qwp2Pos = m_qwp2_sign * qwp2StagePos + m_qwp2_zero;
+    m_qwp2_curPos = m_qwp2_sign * qwp2StagePos + m_qwp2_zero;
 
     // round to two decimal points
-    qwp2Pos = std::round(qwp2Pos * 100) / 100;
+    m_qwp2_curPos = std::round(m_qwp2_curPos * 100) / 100;
 
-    updateIfChanged<float>(m_indiP_qwp2Pos, "current", qwp2Pos);
+    updateIfChanged<float>(m_indiP_qwp2Pos, "current", m_qwp2_curPos);
 
     recordQwpTrack();
 
     return 0;
 }
 
-INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stageQwp2RotFsm )( const pcf::IndiProperty &ipRecv )
+INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stageqwp2rotFsm )( const pcf::IndiProperty &ipRecv )
 {
 
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stageQwp2RotFsm, ipRecv );
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stageqwp2rotFsm, ipRecv );
 
-    if( ipRecv.getName() != m_indiP_stageQwp2RotFsm.getName() )
+    if( ipRecv.getName() != m_indiP_stageqwp2rotFsm.getName() )
     {
         log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
@@ -587,7 +594,7 @@ int qwpTracker::checkRecordTimes()
 
 int qwpTracker::recordTelem( const telem_qwptrack * )
 {
-    return recordPolTrack( true );
+    return recordQwpTrack( true );
 }
 
 int qwpTracker::recordQwpTrack( bool force )
@@ -598,12 +605,12 @@ int qwpTracker::recordQwpTrack( bool force )
 
     static bool tracking = false;
 
-    if( m_qwp1Pos != qwp1Pos || m_qwp2Pos != qwp2Pos || m_tracking != tracking || force )
+    if( m_qwp1_curPos != qwp1Pos || m_qwp2_curPos != qwp2Pos || m_tracking != tracking || force )
     {
-        telem<telem_qwptrack>( { m_qwp1Pos, m_qwp2Pos, m_tracking } );
+        telem<telem_qwptrack>( { m_qwp1_curPos, m_qwp2_curPos, m_tracking } );
 
-        qwp1Pos    = m_qwp1Pos;
-        qwp2Pos    = m_qwp2Pos;
+        qwp1Pos    = m_qwp1_curPos;
+        qwp2Pos    = m_qwp2_curPos;
         tracking   = m_tracking;
     }
 
