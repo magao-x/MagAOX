@@ -57,13 +57,13 @@ protected:
    double m_modFreqRequested {-1}; ///< The requested modulation frequency, in Hz.
 
 
-   int m_C1outp {-1};     ///< Output state of fxn gen channel 1.
+   bool m_C1outp {false};     ///< Output state of fxn gen channel 1.
    double m_C1freq {-1};  ///< Frequency of fxn gen channel 1.
    double m_C1volts {-1}; ///< Voltage p2p of fxn gen channel 1.
    double m_C1ofst {-1};  ///< DC offset of fxn gen channel 1.
    double m_C1phse {-1};  ///< Phase of fxn gen channel 1.
 
-   int m_C2outp {-1};     ///< Output state of fxn gen channel 2
+   bool m_C2outp {false};     ///< Output state of fxn gen channel 2
    double m_C2freq {-1};  ///< Frequency of fxn gen channel 2.
    double m_C2volts {-1}; ///< Voltage p2p of fxn gen channel 2.
    double m_C2ofst {-1};  ///< DC offset of fxn gen channel 2.
@@ -434,7 +434,7 @@ int ttmModulator::calcState()
 {
    //Need TTM power state here.
 
-   if( m_C1outp < 1 || m_C2outp < 1 ) //At least one channel off
+   if( !m_C1outp || !m_C2outp ) //At least one channel off
    {
       //Need to also check fxn gen pwr state here
       m_modState = MODSTATE_REST;
@@ -594,8 +594,8 @@ int ttmModulator::restTTM()
    if( waitValue(m_C2phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C1ofst, 0.001, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C2ofst, 0.001, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C1outp, 0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2outp, 0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C1outp, false) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C2outp, false) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
    log<text_log>("The PyWFS TTM is rested.", logPrio::LOG_NOTICE);
 
@@ -664,8 +664,8 @@ int ttmModulator::setTTM()
    if( sendNewProperty(m_indiP_C1outp, "toggle", pcf::IndiElement::On) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    if( sendNewProperty(m_indiP_C2outp, "toggle", pcf::IndiElement::On) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-   if( waitValue(m_C1outp, 1) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2outp, 1) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C1outp, true) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C2outp, true) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
    //3) Now we begin ramp . . .
    size_t N1 = m_setVoltage_1/m_setDVolts;
@@ -1137,20 +1137,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1outp)(const pcf::IndiProperty &ipR
     try
     {
        m_indiP_C1outp = ipRecv;
-       pcf::IndiElement outp = ipRecv["toggle"].getSwitchState();
-
-       if( outp == pcf::IndiElement::Off )
-       {
-          m_C1outp = 0;
-       }
-       else if (outp == pcf::IndiElement::On)
-       {
-          m_C1outp = 1;
-       }
-       else
-       {
-          m_C1outp = -1;
-       }
+       m_C1outp = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
 
        return 0;
     }
@@ -1258,20 +1245,8 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2outp)(const pcf::IndiProperty &ipR
     try
     {
        m_indiP_C2outp = ipRecv;
-       pcf::IndiElement outp = ipRecv["toggle"].getSwitchState();
 
-       if( outp == pcf::IndiElement::Off )
-       {
-          m_C2outp = 0;
-       }
-       else if (outp == pcf::IndiElement::On)
-       {
-          m_C2outp = 1;
-       }
-       else
-       {
-          m_C2outp = -1;
-       }
+       m_C2outp = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
 
        return 0;
     }

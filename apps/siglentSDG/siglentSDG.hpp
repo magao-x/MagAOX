@@ -26,9 +26,11 @@ namespace app
 class siglentSDG : public MagAOXApp<>, public dev::telemeter<siglentSDG>
 {
 
-    friend class siglentSDG_test;
+   friend class siglentSDG_test;
 
    friend class dev::telemeter<siglentSDG>;
+
+   typedef dev::telemeter<siglentSDG> telemeterT;
 
    //constexpr static double cs_MaxAmp = 0.87;//2.1;//0.87;
    constexpr static double cs_MaxOfst = 10.0;
@@ -113,6 +115,12 @@ public:
 
    /// Setup the configuration system (called by MagAOXApp::setup())
    virtual void setupConfig();
+
+    /// Implementation of loadConfig logic, separated for testing.
+    /** This is called by loadConfig().
+     */
+    int loadConfigImpl(
+        mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
 
    /// load the configuration system results (called by MagAOXApp::setup())
    virtual void loadConfig();
@@ -234,7 +242,7 @@ public:
      * \returns -1 on error.
      */
    int changeOutp( int channel,                ///< [in] the channel to send the command to.
-                   const std::string & newOutp ///< [in] The requested output state [On/Off]
+                   bool newOutp ///< [in] The requested output state [On/Off]
                  );
 
    /// Change the output status (on/off) of one channel in response to an INDI property. This locks the mutex.
@@ -474,34 +482,42 @@ void siglentSDG::setupConfig()
    config.add("fxngen.C1ampMax", "", "fxngen.C1ampMax", argType::Required, "fxngen", "C1ampMax", false, "float", "C1 Maximum amplitude");
    config.add("fxngen.C2ampMax", "", "fxngen.C2ampMax", argType::Required, "fxngen", "C2ampMax", false, "float", "C2 Maximum amplitude");
 
-   dev::telemeter<siglentSDG>::setupConfig(config);
+   TELEMETER_SETUP_CONFIG(config);
+}
+
+inline
+int siglentSDG::loadConfigImpl(mx::app::appConfigurator &_config )
+{
+   _config(m_deviceAddr, "device.address");
+   _config(m_devicePort, "device.port");
+
+   _config(m_writeTimeOut, "timeouts.write");
+   _config(m_readTimeOut, "timeouts.read");
+
+   _config(m_waveform, "fxngen.waveform"); // todo: check if this is a valid waveform?
+   _config(m_C1outpOn, "fxngen.C1outpOn");
+   _config(m_C2outpOn, "fxngen.C2outpOn");
+
+   _config(m_C1vppDefault, "fxngen.C1ampDefault");
+   _config(m_C2vppDefault, "fxngen.C2ampDefault");
+
+   _config(m_C1ofst, "fxngen.C1ofstDefault");
+   _config(m_C2ofst, "fxngen.C2ofstDefault");
+
+   _config(m_C1ampMax, "fxngen.C1ampMax");
+   _config(m_C2ampMax, "fxngen.C2ampMax");
+
+   TELEMETER_LOAD_CONFIG(_config);
+
+   return 0;
 }
 
 inline
 void siglentSDG::loadConfig()
 {
-   config(m_deviceAddr, "device.address");
-   config(m_devicePort, "device.port");
-
-   config(m_writeTimeOut, "timeouts.write");
-   config(m_readTimeOut, "timeouts.read");
-
-   config(m_waveform, "fxngen.waveform"); // todo: check if this is a valid waveform?
-   config(m_C1outpOn, "fxngen.C1outpOn");
-   config(m_C2outpOn, "fxngen.C2outpOn");
-
-   config(m_C1vppDefault, "fxngen.C1ampDefault");
-   config(m_C2vppDefault, "fxngen.C2ampDefault");
-
-   config(m_C1ofst, "fxngen.C1ofstDefault");
-   config(m_C2ofst, "fxngen.C2ofstDefault");
-
-   config(m_C1ampMax, "fxngen.C1ampMax");
-   config(m_C2ampMax, "fxngen.C2ampMax");
-   /// config(m_clock, "fxngen.clock");
-
-   dev::telemeter<siglentSDG>::loadConfig(config);
+   loadConfigImpl( config );
 }
+
 
 inline
 int siglentSDG::appStartup()
@@ -890,11 +906,7 @@ int siglentSDG::appLogic()
          recordParams(); //This will check if anything changed.
       }
 
-      if(telemeter<siglentSDG>::appLogic() < 0)
-      {
-         log<software_error>({__FILE__, __LINE__});
-         return 0;
-      }
+      TELEMETER_APP_LOGIC;
 
       return 0;
 
@@ -992,7 +1004,7 @@ int siglentSDG::whilePowerOff()
 inline
 int siglentSDG::appShutdown()
 {
-   dev::telemeter<siglentSDG>::appShutdown();
+   TELEMETER_APP_SHUTDOWN;
 
    return 0;
 }
@@ -1067,12 +1079,7 @@ std::string makeCommand( int channel,
                          const std::string & afterColon
                        )
 {
-   std::string command = "C";
-   command += mx::ioutils::convertToString<int>(channel);
-   command += ":";
-   command += afterColon;
-   command += "\r\n";
-
+   std::string command = std::format("C{}:{}\r\n", channel, afterColon);
    return command;
 }
 
@@ -1093,7 +1100,7 @@ int siglentSDG::queryMDWV( std::string & state,
 
    if(rv < 0)
    {
-      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>("Error on MDWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>(std::format("Error on MDWV? for channel {}", channel), logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1138,7 +1145,7 @@ int siglentSDG::querySWWV( std::string & state,
 
    if(rv < 0)
    {
-      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>("Error on SWWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>(std::format("Error on SWWV? for channel {}", channel), logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1183,7 +1190,7 @@ int siglentSDG::queryBTWV( std::string & state,
 
    if(rv < 0)
    {
-      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>("Error on BTWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>(std::format("Error on BTWV? for channel {}", channel), logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1228,7 +1235,7 @@ int siglentSDG::queryARWV( int & index,
 
    if(rv < 0)
    {
-      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>("Error on ARWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>(std::format("Error on ARWV? for channel {}", channel), logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1271,7 +1278,7 @@ int siglentSDG::queryBSWV( int channel)
 
    if(rv < 0)
    {
-      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>("Error on BSWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>(std::format("Error on BSWV? for channel {}", channel), logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1366,7 +1373,7 @@ int siglentSDG::querySYNC( bool & sync,
 
    if(rv < 0)
    {
-      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>("Error on SYNC? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>(std::format("Error on SYNC? for channel {}", channel), logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1409,7 +1416,7 @@ int siglentSDG::queryOUTP( int channel )
 
    if(rv < 0)
    {
-      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>("Error on OUTP? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>(std::format("Error on OUTP? for channel {}", channel), logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1712,7 +1719,7 @@ int siglentSDG::changeOutp( int channel,
    std::string afterColon = "OUTP " + no;
    std::string command = makeCommand(channel, afterColon);
 
-   log<text_log>("Ch. " + std::to_string(channel) + " OUTP to " + newOutp, logPrio::LOG_NOTICE);
+   log<text_log>("Ch. " + std::to_string(channel) + " OUTP to " + no, logPrio::LOG_NOTICE);
 
    recordParams(true);
    int rv = writeCommand(command);
@@ -1744,7 +1751,7 @@ int siglentSDG::changeOutp( int channel,
 
    if(state() != stateCodes::READY && state() != stateCodes::OPERATING) return 0;
 
-   bool output = ipRecv["toggle"].getSwitchState() == pcf::IndiElement:On;
+   bool output = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
 
    //Make sure we don't change things while other things are being updated.
    std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting any communications.
@@ -1767,14 +1774,14 @@ int siglentSDG::changeFreq( int channel,
 {
    if(channel < 1 || channel > 2) return -1;
 
-   newFreq = std::clamp(newFreq, 0, m_maxFreq.back());
+   newFreq = std::clamp(newFreq, 0.0, m_maxFreq.back());
 
    if(m_waveform == "SINE"){
       // Limit amp for SINE waves
 
       double amp = (channel == 1) ? m_C1vpp_tgt : m_C2vpp_tgt;
 
-      size_t i =0
+      size_t i = 0;
       while( i < m_ampMax.size())
       {
          if(m_maxFreq[i] >= newFreq) break;
@@ -1802,7 +1809,7 @@ int siglentSDG::changeFreq( int channel,
    }
 
 
-   std::string afterColon = "BSWV FRQ," + mx::ioutils::convertToString<double>(newFreq);
+   std::string afterColon = std::format("BSWV FRQ,{}", newFreq);
    std::string command = makeCommand(channel, afterColon);
 
    log<text_log>("Ch. " + std::to_string(channel) + " FREQ to " + std::to_string(newFreq), logPrio::LOG_NOTICE);
@@ -1949,7 +1956,7 @@ int siglentSDG::changeAmp( int channel,
    }
 
 
-   std::string afterColon = "BSWV AMP," + mx::ioutils::convertToString<double>(newAmp);
+   std::string afterColon = std::format("BSWV AMP,{}", newAmp);
    std::string command = makeCommand(channel, afterColon);
 
    log<text_log>("Ch. " + std::to_string(channel) + " AMP set to " + std::to_string(newAmp), logPrio::LOG_NOTICE);
@@ -2042,7 +2049,7 @@ int siglentSDG::changeOfst( int channel,
       log<text_log>("Ch. " + std::to_string(channel) + " OFST min-limited to " + std::to_string(newOfst), logPrio::LOG_WARNING);
    }
 
-   std::string afterColon = "BSWV OFST," + mx::ioutils::convertToString<double>(newOfst);
+   std::string afterColon = std::format("BSWV OFST,{}", newOfst);
    std::string command = makeCommand(channel, afterColon);
 
    log<text_log>("Ch. " + std::to_string(channel) + " OFST set to " + std::to_string(newOfst), logPrio::LOG_NOTICE);
@@ -2107,7 +2114,7 @@ int siglentSDG::changePhse( int channel,
       return 0;
    }
 
-   std::string afterColon = "BSWV PHSE," + mx::ioutils::convertToString<double>(newPhse);
+   std::string afterColon = std::format("BSWV PHSE,{}", newPhse);
    std::string command = makeCommand(channel, afterColon);
 
    log<text_log>("Ch. " + std::to_string(channel) + " PHSE to " + std::to_string(newPhse), logPrio::LOG_NOTICE);
@@ -2172,7 +2179,7 @@ int siglentSDG::changeWdth( int channel,
       return 0;
    }
 
-   std::string afterColon = "BSWV WIDTH," + mx::ioutils::convertToString<double>(newWdth);
+   std::string afterColon = std::format("BSWV WIDTH,{}", newWdth);
    std::string command = makeCommand(channel, afterColon);
 
    log<text_log>("Ch. " + std::to_string(channel) + " WDTH to " + std::to_string(newWdth), logPrio::LOG_NOTICE);
