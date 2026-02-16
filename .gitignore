@@ -129,6 +129,9 @@ apps/pvcamCtrl/pvcamCtrl
 apps/pwfsSlopeCalc/pwfsSlopeCalc
 apps/photonCounter
 
+#q
+apps/qwpTracker/qwpTracker
+
 #r
 apps/rhusbMon/rhusbMon
 apps/refRMS/refRMS

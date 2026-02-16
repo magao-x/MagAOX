@@ -30,6 +30,7 @@ apps_aoc = \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
+	qwpTracker \
 	stateRuleEngine
 pythonapps_aoc = \
 	audibleAlerts
