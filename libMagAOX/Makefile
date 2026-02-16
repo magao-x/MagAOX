@@ -105,6 +105,7 @@ INCLUDEDEPS= \
 	logger/types/telem_psfacq.hpp \
 	logger/types/telem_pupilfit.hpp \
 	logger/types/telem_pupilfit_state.hpp \
+	logger/types/telem_qwptrack.hpp \
 	logger/types/telem_rhusb.hpp \
 	logger/types/telem_saving_state.hpp \
 	logger/types/telem_saving.hpp \
