@@ -1,5 +1,5 @@
 /** \file qwpTracker.hpp
- * \brief The MagAO-X HWP rotation tracker header file
+ * \brief The MagAO-X QWP rotation tracker header file
  *
  * \ingroup qwpTracker_files
  */
@@ -14,7 +14,7 @@
 #include <mx/ioutils/readColumns.hpp>
 
 /** \defgroup qwpTracker
- * \brief The MagAO-X application to track pupil rotation with the HWP.
+ * \brief The MagAO-X application to track pupil rotation with the dual rotating QWP compensator.
  *
  * <a href="../handbook/operating/software/apps/qwpTracker.html">Application Documentation</a>
  *
@@ -188,7 +188,7 @@ void qwpTracker::setupConfig()
                 "sign",
                 false,
                 "int",
-                "The HWP rotation sign. Default is 1." );
+                "The QWP1 rotation sign. Default is 1." );
 
     config.add( "qwp1.devName",
                 "",
@@ -198,7 +198,7 @@ void qwpTracker::setupConfig()
                 "devName",
                 false,
                 "string",
-                "The device name of the HWP stage.  Default is 'stageqwp1rot'" );
+                "The device name of the QWP1 stage.  Default is 'stageqwp1rot'" );
     config.add( "qwp2.zero",
                 "",
                 "qwp2.zero",
@@ -217,7 +217,7 @@ void qwpTracker::setupConfig()
                 "sign",
                 false,
                 "int",
-                "The HWP rotation sign. Default is -1." );
+                "The QWP2 rotation sign. Default is -1." );
 
     config.add( "qwp2.devName",
                 "",
@@ -227,7 +227,7 @@ void qwpTracker::setupConfig()
                 "devName",
                 false,
                 "string",
-                "The device name of the HWP stage.  Default is 'stageqwp2rot'" );
+                "The device name of the QWP2 stage.  Default is 'stageqwp2rot'" );
 
     config.add( "imr.devName",
                 "",
