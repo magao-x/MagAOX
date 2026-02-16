@@ -574,12 +574,12 @@ int ttmModulator::restTTM()
    if( sendNewProperty(m_indiP_C2volts, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //3) Set phase to 0
-   if( sendNewProperty(m_indiP_C1phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1phse, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2phse, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //4) Set offset to 0
-   if( sendNewProperty(m_indiP_C1ofst, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2ofst, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1ofst, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2ofst, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //5) Set outputs to off
    if( sendNewProperty(m_indiP_C1outp, "toggle", pcf::IndiElement::Off) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
@@ -626,9 +626,9 @@ int ttmModulator::setTTM()
       if( sendNewProperty(m_indiP_C2volts, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       //3) Set phase to 0
-      if( sendNewProperty(m_indiP_C1phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C1phse, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( sendNewProperty(m_indiP_C2phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C2phse, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       //Now check if values have changed.
       if( waitValue(m_C1freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
@@ -1213,7 +1213,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1ofst)(const pcf::IndiProperty &ipR
     try
     {
        m_indiP_C1ofst = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+       double nv = ipRecv["current"].get<double>();
 
        m_C1ofst = nv;
 
@@ -1236,7 +1236,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1phse)(const pcf::IndiProperty &ipR
     try
     {
        m_indiP_C1phse = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+       double nv = ipRecv["current"].get<double>();
 
        m_C1phse = nv;
 
@@ -1335,7 +1335,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2ofst)(const pcf::IndiProperty &ipR
     {
        m_indiP_C2ofst = ipRecv;
 
-       double nv = ipRecv["value"].get<double>();
+       double nv = ipRecv["current"].get<double>();
 
        m_C2ofst = nv;
 
@@ -1357,7 +1357,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2phse)(const pcf::IndiProperty &ipR
     try
     {
        m_indiP_C2phse = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+       double nv = ipRecv["current"].get<double>();
 
        m_C2phse = nv;
 
