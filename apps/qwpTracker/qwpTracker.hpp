@@ -66,7 +66,7 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
     std::string m_qwp1_devName{ "stageqwp1rot" }; ///< The device name of the QWP stage.
     std::string m_qwp2_devName{ "stageqwp2rot" }; ///< The device name of the QWP stage.
 
-    std::string m_imrDevName{"ktrack" }; ///< The device name of the TCS Interface providing 'teldata.altitude'.  Default is 'tcsi'
+    std::string m_imrDevName{"stagek" }; ///< The device name of the TCS Interface providing 'teldata.altitude'.  Default is 'tcsi'
 
     // tracking
     float m_updateInterval{ 10 }; ///< The interval at which to update positions, in seconds.  Default is 10 secs.
