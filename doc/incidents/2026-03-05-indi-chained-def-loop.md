@@ -3,7 +3,7 @@
 - Date: 2026-03-05
 - Branch under test: `dev-resurrector`
 - Affected component: `apps/xindiserver` (`INDI/INDI/indiserver.c`)
-- Status: Resolved and reproduced fix
+- Status: Resolved on `dev-resurrector`; equivalent `dev` patch prepared, pending full system validation
 
 ## Summary
 
@@ -58,6 +58,15 @@ This blocks the remote `def*` reflection edge while preserving normal client for
 - Applied patch and rebuilt `xindiserver`.
 - Re-tested same scenario: loop stopped.
 - User confirmation: issue resolved.
+
+## Follow-Up (dev branch)
+
+- After RTC improvement on `dev-resurrector`, similar but less severe loop behavior was observed on AOC/ICC where `dev` branch `indiserver` is used.
+- A logically equivalent fix was ported to `dev` in the threaded `indiserver` implementation:
+  - Branch: `jrmales/dev-indiserver-chained-def-loop`
+  - Commit: `a784e57f`
+  - Core behavior: suppress forwarding of remote-driver `def*` updates to chained clients.
+- Full multi-host validation on AOC/ICC remains pending due to test configuration timing.
 
 ## Notes
 
