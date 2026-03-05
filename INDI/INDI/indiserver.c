@@ -710,7 +710,8 @@ static int msgQSize(FQ *q)
  * if BLOB always honor current mode.
  * return -1 if had to shut down any clients, else 0.
  */
-static int q2Clients(ClInfo *notme, int isblob, const char *dev, const char *name, Msg *mp, XMLEle *root)
+static int q2Clients(ClInfo *notme, int isblob, const char *dev, const char *name, Msg *mp, XMLEle *root,
+                     int srcIsRemote, const char *roottag)
 {
     int shutany = 0;
     ClInfo *cp;
@@ -722,6 +723,14 @@ static int q2Clients(ClInfo *notme, int isblob, const char *dev, const char *nam
         /* cp in use? notme? want this dev/name? blob? */
         if (!cp->active || cp == notme) { continue; }
         if (findClDevice(cp, dev, name) < 0) { continue; }
+
+        /* Avoid chained-server reflection loops: if a remote driver emits
+         * defXXX, do not forward that defXXX to chained-server clients.
+         */
+        if (srcIsRemote && cp->allprops == 2 && roottag && !strncmp(roottag, "def", 3))
+        {
+            continue;
+        }
 
         //if ((isblob && cp->blob==B_NEVER) || (!isblob && cp->blob==B_ONLY))
         if (!isblob && cp->blob == B_ONLY) { continue; }
@@ -1099,7 +1108,7 @@ static void shutdownDvr(DvrInfo *dp, int restart)
         mp = newMsg();
 
         /* Allocate Msg, queue it to clients snooping this device */
-        q2Clients(NULL, 0, dp->dev[i], NULL, mp, root);
+        q2Clients(NULL, 0, dp->dev[i], NULL, mp, root, dp->isremot, tagXMLEle(root));
 
         /* Write message content if any clients cared, else forget it */
         if (mp->count > 0) { setMsgXMLEle(mp, root); }
@@ -1703,7 +1712,6 @@ static void traceMsg(XMLEle *root, char* ts)
 
 } // static void traceMsg(XMLEle *root, char* ts)
 
-
 /* add the given device and property to the devs[] list of client if new.
  */
 static void addClDevice(ClInfo *cp, const char *dev, const char *name, int isblob)
@@ -2045,7 +2053,7 @@ static int readFromClient(ClInfo *cp)
             /* Queue newXXX message to clients snooping the device */
             if (!strncmp(roottag, "new", 3))
             {
-                if (q2Clients(cp, isblob, dev, name, mp, root) < 0)
+                if (q2Clients(cp, isblob, dev, name, mp, root, 0, roottag) < 0)
                     shutany++;
             }
 
@@ -2350,7 +2358,7 @@ static int readFromDriver(DvrInfo *dp)
         mp = newMsg();
 
         /* Queue to interested clients */
-        if (q2Clients(NULL, isblob, dev, name, mp, root) < 0) { shutany++; }
+        if (q2Clients(NULL, isblob, dev, name, mp, root, dp->isremot, roottag) < 0) { shutany++; }
 
         /* Queue to snooping drivers */
         q2SDrivers(dp, isblob, dev, name, mp, root);
