@@ -731,7 +731,7 @@ class adcCtrl(XDevice):
                     img = Field(img.ravel(),pgrid)
                     img -= np.median(img) 
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
-                    img = self.ADC.filter_image(img)
+                    #img = self.ADC.filter_image(img)
                     
                     angles = self.ADC.all_speckle_angles(img)
                     pairs = self.ADC.speckle_pairs(angles)
