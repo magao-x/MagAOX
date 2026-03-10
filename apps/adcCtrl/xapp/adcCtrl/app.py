@@ -78,7 +78,7 @@ class AdcFitter2:
         return Field(cutout.ravel(), sub_grid)
         
 
-    def slice_speckle_angle(self,img,speckle_number,print_updates=False,positions=False):
+    def slice_speckle_angle(self,img,speckle_number,print_updates=False,positions=False,speckle_filter=False):
         '''calculate the angle of a single speckle using the gaussian slicing method. image must be an hcipy field.
         returns the slope of the designated speckle in degrees.'''
     
@@ -104,21 +104,13 @@ class AdcFitter2:
         window_size=self.speckle_window
         new_img = self.window_field(img,[max_pixel[0],max_pixel[1]],window_size,window_size)
 
-        if speckle_number == 0:
-            write_field(new_img,'/tmp/adc_speck_prefilter.fits')
-
-        hp = self.hpf(new_img,self.hpf_sigma)
-        lp = hp - self.hpf(hp,self.lpf_sigma)
-        lp -= np.median(lp)
-        lp[lp < 0 ] = 0
-        new_img = lp
-        new_img = new_img / np.max(new_img)
-        
-        if speckle_number == 0:
-            write_field(new_img,'/tmp/adc_speck_postfilter.fits')
-        #self.log.debug(f'calculated max pixel for speckle {speckle_number}: {max_pixel}')
-
-        #new_img = self.window_field(img,[center_of_intensity[0],center_of_intensity[1]],window_size,window_size)
+        if speckle_filter:
+            hp = self.hpf(new_img,self.hpf_sigma)
+            lp = hp - self.hpf(hp,self.lpf_sigma)
+            lp -= np.median(lp)
+            lp[lp < 0 ] = 0
+            new_img = lp
+            new_img = new_img / np.max(new_img)
         
         shaped = new_img.shaped
         mus = np.zeros(shaped.shape[0])
@@ -778,11 +770,11 @@ class adcCtrl(XDevice):
 
                     #if we want to find the orientation as well
                     if self._vectorize:
+                        self.log.debug('estimating both magnitude and direction')
                         mag,ang = self.ADC.est_mag_dir(img)
                         self.log.debug(f'estimated dispersion direction {ang}°')
                         #### then calculate the way you'd rotate the adcs, averaged over the number of measurements specified in indi
 
-                    ## if we're in knife edge mode
                     angles = self.ADC.all_speckle_angles(img)
                     pairs = self.ADC.speckle_pairs(angles)
                     command = np.squeeze(self.ADC.calculate_command(pairs))
