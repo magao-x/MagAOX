@@ -190,13 +190,13 @@ class AdcFitter2:
                 self.log.debug(f'unable to fit speckle {speckle_number}')
             return np.nan
 
-    def all_speckle_angles(self,img):
+    def all_speckle_angles(self,img,speckle_filter=False):
         '''returns a numpy vector containing the four speckle angles found in the image.
         need a way to incorporate the snr threshold??
         '''
         angles = np.zeros(4)
         for i in range(4):
-            angles[i] = self.slice_speckle_angle(img,i)
+            angles[i] = self.slice_speckle_angle(img,i,speckle_filter)
         return angles
 
     def hpf(self,data,sigma):
@@ -261,49 +261,109 @@ class AdcFitter2:
         predicted_disp = np.array(predicted_disp)
         return -predicted_disp
 
-    #dispersion vector estimator
-    def est_mag_dir(self,psf,logged=False):
+    # #dispersion vector estimator
+    # def est_mag_dir(self,psf,logged=False):
+    #     slopes = np.zeros(4)
+    #     intercepts = np.zeros(4)
+    #     points = []
+    #     lines = np.zeros((4,3))
+
+    #     for i in range(4):
+    #         try:
+    #             angle,point = self.slice_speckle_angle(psf,i,positions=True)
+    #         except:
+    #             print(f'fitting not successful for speckle {i}')
+    #             return np.nan
+    #         if i == 0 or i ==2:
+    #             angle = 90 - angle
+
+    #         slope = np.tan(np.radians(angle))
+    #         slopes[i] = slope
+    #         points.append(point)
+    #         intercepts[i] = -slope * point[0] + point[1]
+
+    #     for j in range(4):
+    #         lines[j,0] = slopes[j]
+    #         lines[j,1] = -1
+    #         lines[j,2] = points[j][1] - slopes[j]*points[j][0]
+
+    #     A = lines[:,0]
+    #     B = lines[:,1]
+    #     C = lines[:,2]
+    #     norm = np.sqrt(A**2 + B**2)
+
+    #     A /= norm
+    #     B /= norm
+    #     C /= norm
+
+    #     M = np.stack((A.T,B.T),axis=1)
+    #     C = -C
+
+    #     (x, y), *_ = np.linalg.lstsq(M, C)
+    #     if printed:
+    #         print(f'least-squares solution: ({x},{y})')
+    #     magnitude_guess = np.sqrt(x**2+y**2) 
+
+    #     #added logic for quadrants
+    #     if x > 0 and y > 0: #i
+    #         orientation_guess = np.degrees(np.atan(y/x))
+    #     elif x < 0 and y >0: #ii
+    #         orientation_guess = 180+np.degrees(np.atan(y/x))
+    #     elif x < 0 and y < 0: #iii
+    #         orientation_guess = -np.degrees(np.atan(y/x))
+    #     else: #iv
+    #         orientation_guess = -180-np.degrees(np.atan(y/x))
+
+    #     if logged:  
+    #         self.log.debug(f'Estimated dispersion direction {orientation_guess}°')
+    #         self.log.debug(f'Estimated dispersion magnitude {magnitude_guess}')
+            
+    #     return magnitude_guess,orientation_guess
+
+    #different version of ^^^
+    def speckles_dxdy(self,psf,center=np.array([0,0]),plotted=False,printed=False,filtered=False):
         slopes = np.zeros(4)
         intercepts = np.zeros(4)
         points = []
         lines = np.zeros((4,3))
-
+    
         for i in range(4):
             try:
-                angle,point = self.slice_speckle_angle(psf,i,positions=True)
+                angle,point = self.slice_speckle_angle(psf,i,positions=True,speckle_filter=filtered)
             except:
-                print(f'fitting not successful for speckle {i}')
+                self.log.debug(f'fitting not successful for speckle {i}')
                 return np.nan
             if i == 0 or i ==2:
                 angle = 90 - angle
-
+    
             slope = np.tan(np.radians(angle))
             slopes[i] = slope
             points.append(point)
             intercepts[i] = -slope * point[0] + point[1]
-
+    
         for j in range(4):
             lines[j,0] = slopes[j]
             lines[j,1] = -1
             lines[j,2] = points[j][1] - slopes[j]*points[j][0]
-
+    
         A = lines[:,0]
         B = lines[:,1]
         C = lines[:,2]
         norm = np.sqrt(A**2 + B**2)
-
+    
         A /= norm
         B /= norm
         C /= norm
-
+    
         M = np.stack((A.T,B.T),axis=1)
         C = -C
-
+    
         (x, y), *_ = np.linalg.lstsq(M, C)
-        if printed:
-            print(f'least-squares solution: ({x},{y})')
-        magnitude_guess = np.sqrt(x**2+y**2) 
+        x -= center[0]
+        y -= center[1]
 
+        magnitude_guess = np.sqrt(x**2+y**2) 
+    
         #added logic for quadrants
         if x > 0 and y > 0: #i
             orientation_guess = np.degrees(np.atan(y/x))
@@ -313,12 +373,8 @@ class AdcFitter2:
             orientation_guess = -np.degrees(np.atan(y/x))
         else: #iv
             orientation_guess = -180-np.degrees(np.atan(y/x))
-
-        if logged:  
-            self.log.debug(f'Estimated dispersion direction {orientation_guess}°')
-            self.log.debug(f'Estimated dispersion magnitude {magnitude_guess}')
             
-        return magnitude_guess,orientation_guess
+        return x,y
 
 
 @xconf.config
@@ -771,8 +827,13 @@ class adcCtrl(XDevice):
                     #if we want to find the orientation as well
                     if self._vectorize:
                         self.log.debug('estimating both magnitude and direction')
-                        mag,ang = self.ADC.est_mag_dir(img)
+                        dx,dy = self.ADC.speckles_dxdy(img)
+
+                        sq = np.sqrt(est_x**2+est_y**2)
+                        ang = np.degrees(np.arctan2(est_y,est_x))
+
                         self.log.debug(f'estimated dispersion direction {ang}°')
+                        self.log.debug(f'estimated dispersion magnitude {sq}')
                         #### then calculate the way you'd rotate the adcs, averaged over the number of measurements specified in indi
 
                     angles = self.ADC.all_speckle_angles(img)
