@@ -19,7 +19,7 @@ from scipy.optimize import curve_fit
 from scipy import ndimage
 
 class AdcFitter2:
-    def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=28,grating_freq=47,ncpc = False,snr_threshold=1.6,log=False,speckle_window=30,hpf_sigma=8,lpf_sigma=4):
+    def __init__(self,wavelength=656E-9,bandwidth=100E-9,grating_angle=28,grating_freq=47,ncpc = False,snr_threshold=1.6,log=False,speckle_window=60,hpf_sigma=8,lpf_sigma=4):
             self.wavelength = wavelength
             self.bandwidth = bandwidth
             self.grating_angle = grating_angle
@@ -178,8 +178,8 @@ class AdcFitter2:
 
             m , b = np.polyfit(lin_x,linear_region,deg=1)
             angle = np.arctan(m)
-            if print_updates ==True:
-                self.log.debug(f'slope: {m:.2f}\ncorresponding angle: {angle:.2f} (rad) or {np.degrees(angle):.2f}°')
+            #if print_updates ==True:
+                #self.log.debug(f'slope: {m:.2f}\ncorresponding angle: {angle:.2f} (rad) or {np.degrees(angle):.2f}°')
 
             if positions:
                 return np.degrees(angle),centroid
@@ -551,15 +551,15 @@ class adcCtrl(XDevice):
             self.set_command(0,0)
             self.send_command()
 
-        # if self.client['fwsci1.filterName.i'] == constants.SwitchState.ON:
-        #     self._center_wavelength = 762E-9
-        #     self._extent = 512
-        # elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
-        #     self._center_wavelength = 908E-9
-        #     self._extent = 512
-        elif self.client['fwsci2.filterName.r'] == constants.SwitchState.ON: 
-            self._center_wavelength = 613E-9
+        if self.client['fwsci1.filterName.i'] == constants.SwitchState.ON:
+            self._center_wavelength = 762E-9
             self._extent = 512
+        elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
+            self._center_wavelength = 908E-9
+            self._extent = 512
+        # elif self.client['fwsci2.filterName.r'] == constants.SwitchState.ON: 
+        #     self._center_wavelength = 613E-9
+        #     self._extent = 512
         else:
             self._center_wavelength = 525E-9
 
@@ -781,7 +781,7 @@ class adcCtrl(XDevice):
                     img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
                     #img = self.ADC.filter_image(img)
                     
-                    angles = self.ADC.all_speckle_angles(img)
+                    angles = self.ADC.all_speckle_angles(img,speckle_filter=True)
                     pairs = self.ADC.speckle_pairs(angles)
                     command = np.squeeze(self.ADC.calculate_command(pairs))
 
@@ -805,9 +805,9 @@ class adcCtrl(XDevice):
                 for i in range(self._no_measurements):
                     img = self.camera.grab_stack(self._n_avg)
                     img = np.pad(img,pad_width=50, mode='constant', constant_values=0)
-                    self.log.debug(f'extent: {self._extent}')
+                    #self.log.debug(f'extent: {self._extent}')
                     dim = np.sqrt(img.size)
-                    self.log.debug(f'camera ROI square with dim {dim} pixels')
+                    #self.log.debug(f'camera ROI square with dim {dim} pixels')
                     extent = dim * 6/21
                     pgrid = make_pupil_grid(dim,extent)
                     img = Field(img.ravel(),pgrid)
@@ -836,7 +836,7 @@ class adcCtrl(XDevice):
                         self.log.debug(f'estimated dispersion magnitude {sq}')
                         #### then calculate the way you'd rotate the adcs, averaged over the number of measurements specified in indi
 
-                    angles = self.ADC.all_speckle_angles(img)
+                    angles = self.ADC.all_speckle_angles(img,speckle_filter=True)
                     pairs = self.ADC.speckle_pairs(angles)
                     command = np.squeeze(self.ADC.calculate_command(pairs))
                     self.log.debug(f'measured speckle angles: {angles}')
