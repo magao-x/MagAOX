@@ -32,6 +32,10 @@ class XDeformableMirror(DeformableMirror):
             self.dmindex = 2
             self.num_across = 34
             self.size = np.array([1, np.sqrt(2.0)])
+        elif dm == 'dmkilo': # cacti dm
+            self.dmindex = 0
+            self.num_across = 32 
+            self.size = np.array([1, 1])
         else:
             self.dmindex = 0
             self.num_across = 11
