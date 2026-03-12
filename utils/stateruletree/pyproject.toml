@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stateruletree"
+description = "Convert draw.io fault-tree / state-tree diagrams to MagAO-X stateRuleEngine .conf files"
+version = "2025.11.30"
+authors = []
+
+[project.scripts]
+stateruletree = "stateruletree.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["stateruletree*"]
+
+[tool.setuptools.package-data]
+"stateruletree" = ["examples/*.drawio"]
