@@ -35,7 +35,7 @@ int parseOUTP( int & channel, ///< [out] the channel indicated by this response.
 
    if(v[0][0] != 'C') return -3;
    if(v[0].size() < 2) return -4;
-   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
+   channel = mx::ioutils::stoT<int>(v[0].substr(1, v[0].size()-1));
 
    if(v.size() < 3) return -5;
 
@@ -93,7 +93,7 @@ int parseBSWV( int & channel, ///< [out] the channel indicated by this response.
 
    if(v[0][0] != 'C') return -3;
    if(v[0].size() < 2) return -4;
-   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
+   channel = mx::ioutils::stoT<int>(v[0].substr(1, v[0].size()-1));
 
    if(v[2] != "WVTP") return -5;
    wvtp = v[3];
@@ -106,7 +106,7 @@ int parseBSWV( int & channel, ///< [out] the channel indicated by this response.
 
       if(v[4] != "OFST") return -8;
 
-      ofst = mx::ioutils::convertFromString<double>(v[5]);
+      ofst = mx::ioutils::stoT<double>(v[5]);
 
       return 0;
    }
@@ -114,36 +114,36 @@ int parseBSWV( int & channel, ///< [out] the channel indicated by this response.
    if(v.size() < 20) return -9;
 
    if(v[4] != "FRQ") return -10;
-   freq = mx::ioutils::convertFromString<double>(v[5]);
+   freq = mx::ioutils::stoT<double>(v[5]);
 
    if(v[6] != "PERI") return -11;
-   peri = mx::ioutils::convertFromString<double>(v[7]);
+   peri = mx::ioutils::stoT<double>(v[7]);
 
    if(v[8] != "AMP") return -12;
-   amp = mx::ioutils::convertFromString<double>(v[9]);
+   amp = mx::ioutils::stoT<double>(v[9]);
 
    if(v[10] != "AMPVRMS") return -13;
-   ampvrms = mx::ioutils::convertFromString<double>(v[11]);
+   ampvrms = mx::ioutils::stoT<double>(v[11]);
 
    if(v[12] != "OFST") return -14;
-   ofst = mx::ioutils::convertFromString<double>(v[13]);
+   ofst = mx::ioutils::stoT<double>(v[13]);
 
    if(v[14] != "HLEV") return -15;
-   hlev = mx::ioutils::convertFromString<double>(v[15]);
+   hlev = mx::ioutils::stoT<double>(v[15]);
 
    if(v[16] != "LLEV") return -16;
-   llev = mx::ioutils::convertFromString<double>(v[17]);
+   llev = mx::ioutils::stoT<double>(v[17]);
 
    if(wvtp == "SINE")
    {
       if(v[18] != "PHSE") return -17;
-      phse = mx::ioutils::convertFromString<double>(v[19]);
+      phse = mx::ioutils::stoT<double>(v[19]);
    }
 
    if(wvtp == "PULSE")
    {
       if(v[20] != "WIDTH") return -18;
-      wdth = mx::ioutils::convertFromString<double>(v[21]);
+      wdth = mx::ioutils::stoT<double>(v[21]);
    }
 
    return 0;
@@ -175,7 +175,7 @@ int parseMDWV( int & channel, ///< [out] the channel indicated by this response.
    if(v[1] != "MDWV") return -2;
 
    if(v[0][0] != 'C') return -3;
-   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
+   channel = mx::ioutils::stoT<int>(v[0].substr(1, v[0].size()-1));
 
    if(v[2] != "STATE") return -4;
    state = v[3];
@@ -209,7 +209,7 @@ int parseSWWV( int & channel, ///< [out] the channel indicated by this response.
    if(v[1] != "SWWV") return -2;
 
    if(v[0][0] != 'C') return -3;
-   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
+   channel = mx::ioutils::stoT<int>(v[0].substr(1, v[0].size()-1));
 
    if(v[2] != "STATE") return -4;
    state = v[3];
@@ -243,7 +243,7 @@ int parseBTWV( int & channel, ///< [out] the channel indicated by this response.
    if(v[1] != "BTWV") return -2;
 
    if(v[0][0] != 'C') return -3;
-   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
+   channel = mx::ioutils::stoT<int>(v[0].substr(1, v[0].size()-1));
 
    if(v[2] != "STATE") return -4;
    state = v[3];
@@ -277,10 +277,10 @@ int parseARWV( int & channel, ///< [out] the channel indicated by this response.
    if(v[1] != "ARWV") return -2;
 
    if(v[0][0] != 'C') return -3;
-   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
+   channel = mx::ioutils::stoT<int>(v[0].substr(1, v[0].size()-1));
 
    if(v[2] != "INDEX") return -4;
-   index = mx::ioutils::convertFromString<int>(v[3]);
+   index = mx::ioutils::stoT<int>(v[3]);
 
    return 0;
 }
@@ -312,7 +312,7 @@ int parseSYNC( int & channel, ///< [out] the channel indicated by this response.
    if(v[1] != "SYNC") return -2;
 
    if(v[0][0] != 'C') return -3;
-   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
+   channel = mx::ioutils::stoT<int>(v[0].substr(1, v[0].size()-1));
 
    if(v[2] == "ON")
    {
