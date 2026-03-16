@@ -57,13 +57,13 @@ protected:
    double m_modFreqRequested {-1}; ///< The requested modulation frequency, in Hz.
 
 
-   int m_C1outp {-1};     ///< Output state of fxn gen channel 1.
+   bool m_C1outp {false};     ///< Output state of fxn gen channel 1.
    double m_C1freq {-1};  ///< Frequency of fxn gen channel 1.
    double m_C1volts {-1}; ///< Voltage p2p of fxn gen channel 1.
    double m_C1ofst {-1};  ///< DC offset of fxn gen channel 1.
    double m_C1phse {-1};  ///< Phase of fxn gen channel 1.
 
-   int m_C2outp {-1};     ///< Output state of fxn gen channel 2
+   bool m_C2outp {false};     ///< Output state of fxn gen channel 2
    double m_C2freq {-1};  ///< Frequency of fxn gen channel 2.
    double m_C2volts {-1}; ///< Voltage p2p of fxn gen channel 2.
    double m_C2ofst {-1};  ///< DC offset of fxn gen channel 2.
@@ -434,7 +434,7 @@ int ttmModulator::calcState()
 {
    //Need TTM power state here.
 
-   if( m_C1outp < 1 || m_C2outp < 1 ) //At least one channel off
+   if( !m_C1outp || !m_C2outp ) //At least one channel off
    {
       //Need to also check fxn gen pwr state here
       m_modState = MODSTATE_REST;
@@ -574,16 +574,16 @@ int ttmModulator::restTTM()
    if( sendNewProperty(m_indiP_C2volts, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //3) Set phase to 0
-   if( sendNewProperty(m_indiP_C1phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1phse, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2phse, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //4) Set offset to 0
-   if( sendNewProperty(m_indiP_C1ofst, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2ofst, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1ofst, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2ofst, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //5) Set outputs to off
-   if( sendNewProperty(m_indiP_C1outp, "value", "Off") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2outp, "value", "Off") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1outp, "toggle", pcf::IndiElement::Off) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2outp, "toggle", pcf::IndiElement::Off) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //Now check if values have changed.
    if( waitValue(m_C1freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
@@ -594,8 +594,8 @@ int ttmModulator::restTTM()
    if( waitValue(m_C2phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C1ofst, 0.001, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C2ofst, 0.001, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C1outp, 0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2outp, 0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C1outp, false) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C2outp, false) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
    log<text_log>("The PyWFS TTM is rested.", logPrio::LOG_NOTICE);
 
@@ -626,9 +626,9 @@ int ttmModulator::setTTM()
       if( sendNewProperty(m_indiP_C2volts, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       //3) Set phase to 0
-      if( sendNewProperty(m_indiP_C1phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C1phse, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( sendNewProperty(m_indiP_C2phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C2phse, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       //Now check if values have changed.
       if( waitValue(m_C1freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
@@ -661,11 +661,11 @@ int ttmModulator::setTTM()
    log<text_log>("Setting the PyWFS TTM.", logPrio::LOG_INFO);
 
    //2) Set outputs to on
-   if( sendNewProperty(m_indiP_C1outp, "value", "On") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2outp, "value", "On") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1outp, "toggle", pcf::IndiElement::On) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2outp, "toggle", pcf::IndiElement::On) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-   if( waitValue(m_C1outp, 1) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2outp, 1) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C1outp, true) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C2outp, true) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
    //3) Now we begin ramp . . .
    size_t N1 = m_setVoltage_1/m_setDVolts;
@@ -1137,20 +1137,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1outp)(const pcf::IndiProperty &ipR
     try
     {
        m_indiP_C1outp = ipRecv;
-       std::string outp = ipRecv["value"].getValue();
-
-       if( outp == "Off" )
-       {
-          m_C1outp = 0;
-       }
-       else if (outp == "On")
-       {
-          m_C1outp = 1;
-       }
-       else
-       {
-          m_C1outp = -1;
-       }
+       m_C1outp = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
 
        return 0;
     }
@@ -1213,7 +1200,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1ofst)(const pcf::IndiProperty &ipR
     try
     {
        m_indiP_C1ofst = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+       double nv = ipRecv["current"].get<double>();
 
        m_C1ofst = nv;
 
@@ -1236,7 +1223,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1phse)(const pcf::IndiProperty &ipR
     try
     {
        m_indiP_C1phse = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+       double nv = ipRecv["current"].get<double>();
 
        m_C1phse = nv;
 
@@ -1258,20 +1245,8 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2outp)(const pcf::IndiProperty &ipR
     try
     {
        m_indiP_C2outp = ipRecv;
-       std::string outp = ipRecv["value"].getValue();
 
-       if( outp == "Off" )
-       {
-          m_C2outp = 0;
-       }
-       else if (outp == "On")
-       {
-          m_C2outp = 1;
-       }
-       else
-       {
-          m_C2outp = -1;
-       }
+       m_C2outp = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
 
        return 0;
     }
@@ -1335,7 +1310,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2ofst)(const pcf::IndiProperty &ipR
     {
        m_indiP_C2ofst = ipRecv;
 
-       double nv = ipRecv["value"].get<double>();
+       double nv = ipRecv["current"].get<double>();
 
        m_C2ofst = nv;
 
@@ -1357,7 +1332,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2phse)(const pcf::IndiProperty &ipR
     try
     {
        m_indiP_C2phse = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+       double nv = ipRecv["current"].get<double>();
 
        m_C2phse = nv;
 
