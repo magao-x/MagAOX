@@ -1928,10 +1928,11 @@ int siglentSDG::changeAmp( int channel,
          if( m_maxFreq[i] >= freq ) break;
          ++i;
       }
+      ampMax = fmin(m_ampMax[i], confAmpMax);
 
       std::cerr << "Max Amp @ " << freq << " = " << ampMax << "\n";
 
-      //Ensure we don't exced safe ranges for device
+      //Ensure we don't exceed safe ranges for device
       if(newAmp > ampMax)
       {
          newAmp = ampMax;
