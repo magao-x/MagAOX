@@ -111,6 +111,7 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker, im
     std::thread             m_computeThread;
     bool                    m_computeRun{ false };
     bool                    m_computePending{ false };
+    bool                    m_streamMissingLogged{ false };
 
   public:
     /// Default c'tor.
@@ -520,6 +521,7 @@ inline int ogTracker::refreshCalibration()
     m_calibFolder = formatCalibFolder( m_sep, m_ang, m_amp, m_freq );
 
     const std::filesystem::path folderPath = std::filesystem::path( m_calibRoot ) / m_calibFolder;
+    log<text_log>( "ogTracker looking for calibration folder: " + folderPath.string(), logPrio::LOG_NOTICE );
     if( !std::filesystem::exists( folderPath ) )
     {
         m_calibLoaded = false;
@@ -647,6 +649,21 @@ inline int ogTracker::appLogic()
 {
     SHMIMMONITORT_APP_LOGIC( imWFS2ShmimMonitorT );
     SHMIMMONITORT_UPDATE_INDI( imWFS2ShmimMonitorT );
+    if( imWFS2ShmimMonitorT::m_smState == dev::shmimMonitorState::notfound )
+    {
+        if( !m_streamMissingLogged )
+        {
+            log<text_log>( "ogTracker stream not found: " + imWFS2ShmimMonitorT::m_shmimName +
+                               " (polling until available)",
+                           logPrio::LOG_NOTICE );
+            m_streamMissingLogged = true;
+        }
+    }
+    else if( imWFS2ShmimMonitorT::m_smState == dev::shmimMonitorState::connected && m_streamMissingLogged )
+    {
+        log<text_log>( "ogTracker stream connected: " + imWFS2ShmimMonitorT::m_shmimName, logPrio::LOG_NOTICE );
+        m_streamMissingLogged = false;
+    }
 
     bool paramsDirty = false;
     bool modulating  = false;
