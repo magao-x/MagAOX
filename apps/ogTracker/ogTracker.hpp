@@ -53,7 +53,6 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker, im
     typedef dev::shmimMonitor<ogTracker, imWFS2ShmimT> imWFS2ShmimMonitorT;
 
   protected:
-    int         m_loopNum{ 1 };
     std::string m_streamName{ "aol1_imWFS2" };
     std::string m_calibRoot{ "/home/eden/data/spark_calib" };
     const std::string m_tweeterDevice{ "tweeterSpeck" };
@@ -238,16 +237,6 @@ ogTracker::normalizeByReference( const Eigen::Matrix<realT, -1, 1> &rmsVals,
 
 inline void ogTracker::setupConfig()
 {
-    config.add( "loop.number",
-                "",
-                "loop.number",
-                argType::Required,
-                "loop",
-                "number",
-                false,
-                "int",
-                "Loop number used for stream naming." );
-
     config.add( "stream.name",
                 "",
                 "stream.name",
@@ -303,7 +292,6 @@ inline void ogTracker::setupConfig()
 
 inline int ogTracker::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-    _config( m_loopNum, "loop.number" );
     _config( m_streamName, "stream.name" );
     _config( m_calibRoot, "calib.root" );
     _config( m_bufferN, "pca.bufferN" );
@@ -326,9 +314,7 @@ inline int ogTracker::loadConfigImpl( mx::app::appConfigurator &_config )
 
     if( m_streamName.empty() )
     {
-        char shmim[128];
-        std::snprintf( shmim, sizeof( shmim ), "aol%d_imWFS2", m_loopNum );
-        m_streamName = shmim;
+        m_streamName = "aol1_imWFS2";
     }
 
     imWFS2ShmimMonitorT::m_shmimName = m_streamName;
