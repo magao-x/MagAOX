@@ -72,6 +72,7 @@ apps_rtc = \
 	dmPokeXCorr \
 	psfAcq \
 	strehlEstimator \
+	ogTracker \
 	modalFilter \
 	dmRecon
 pythonapps_rtc = \
@@ -150,6 +151,7 @@ all_buildable_apps = \
 	streamCircBuff \
 	streamWriter \
 	strehlEstimator \
+	ogTracker \
 	sysMonitor \
 	t2wOffloader \
 	tcsInterface \

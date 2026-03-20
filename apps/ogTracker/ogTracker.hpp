@@ -1,0 +1,681 @@
+/** \file ogTracker.hpp
+ * \brief Rolling PCA tracker for sparkle operating point validation.
+ *
+ * \ingroup ogTracker_files
+ */
+
+#ifndef ogTracker_hpp
+#define ogTracker_hpp
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <limits>
+#include <mutex>
+#include <string>
+#include <vector>
+
+#include <mx/improc/eigenImage.hpp>
+#include <mx/ioutils/fits/fitsFile.hpp>
+
+#include "../../libMagAOX/libMagAOX.hpp"
+#include "../../magaox_git_version.h"
+
+namespace MagAOX
+{
+namespace app
+{
+
+struct imWFS2ShmimT
+{
+    static std::string configSection()
+    {
+        return "imWFS2Shmim";
+    };
+
+    static std::string indiPrefix()
+    {
+        return "imwfs2";
+    };
+};
+
+class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker, imWFS2ShmimT>
+{
+    typedef float realT;
+
+    friend class ogTracker_test;
+    friend class dev::shmimMonitor<ogTracker, imWFS2ShmimT>;
+
+  public:
+    typedef dev::shmimMonitor<ogTracker, imWFS2ShmimT> imWFS2ShmimMonitorT;
+
+  protected:
+    int         m_loopNum{ 1 };
+    std::string m_streamName{ "aol1_imWFS2" };
+    std::string m_calibRoot{ "/home/eden/data/spark_calib" };
+    std::string m_tweeterDevice{ "tweeterSpeck" };
+    int         m_bufferN{ 2000 };
+    int         m_minSamples{ 100 };
+    int         m_klipMax{ 3 };
+
+    float m_sep{ 0.0f };
+    float m_ang{ 0.0f };
+    float m_amp{ 0.0f };
+    float m_freq{ 0.0f };
+    bool  m_modulating{ false };
+
+    std::string m_calibFolder;
+    std::string m_calibError;
+    bool        m_calibLoaded{ false };
+    bool        m_paramsDirty{ true };
+
+    int m_frameWidth{ 0 };
+    int m_frameHeight{ 0 };
+    int m_framePixels{ 0 };
+
+    int                                   m_ringWrite{ 0 };
+    int                                   m_ringCount{ 0 };
+    Eigen::Matrix<realT, -1, -1, Eigen::RowMajor> m_ringFrames;
+
+    Eigen::Matrix<realT, -1, -1> m_refPca; // [pixels, modes]
+    Eigen::Matrix<realT, -1, 1>  m_refRms; // [modes]
+    int                           m_activeModes{ 0 };
+
+    Eigen::Matrix<realT, -1, 1> m_latestRms;
+    Eigen::Matrix<realT, -1, 1> m_latestNorm;
+    bool                         m_metricsValid{ false };
+
+    std::vector<std::string> m_modeEls;
+
+    pcf::IndiProperty m_indiP_sep;
+    pcf::IndiProperty m_indiP_ang;
+    pcf::IndiProperty m_indiP_amp;
+    pcf::IndiProperty m_indiP_freq;
+    pcf::IndiProperty m_indiP_modulating;
+
+    pcf::IndiProperty m_indiP_calibFolder;
+    pcf::IndiProperty m_indiP_calibError;
+    pcf::IndiProperty m_indiP_calibLoaded;
+    pcf::IndiProperty m_indiP_buffer;
+    pcf::IndiProperty m_indiP_pcaRms;
+    pcf::IndiProperty m_indiP_pcaNorm;
+
+    std::mutex m_dataMutex;
+
+  public:
+    ogTracker();
+    ~ogTracker() noexcept
+    {
+    }
+
+    virtual void setupConfig();
+    int loadConfigImpl( mx::app::appConfigurator &_config );
+    virtual void loadConfig();
+    virtual int appStartup();
+    virtual int appLogic();
+    virtual int appShutdown();
+
+    int allocate( const imWFS2ShmimT & );
+    int processImage( void *curr_src, const imWFS2ShmimT & );
+
+    static std::string formatCalibFolder( float sep, float ang, float amp, float freq );
+    static int         ringStartIndex( int writeIndex, int count, int capacity );
+    static Eigen::Matrix<realT, -1, 1> rmsPerMode( const Eigen::Matrix<realT, -1, -1> &projection );
+    static Eigen::Matrix<realT, -1, 1>
+    normalizeByReference( const Eigen::Matrix<realT, -1, 1> &rmsVals, const Eigen::Matrix<realT, -1, 1> &refVals, realT eps );
+
+  protected:
+    int  refreshCalibration();
+    int  loadCalibrationFiles( const std::filesystem::path &folderPath );
+    int  setupRingBufferLocked( int pixels );
+    void computeMetricsLocked();
+
+  public:
+    INDI_SETCALLBACK_DECL( ogTracker, m_indiP_sep );
+    INDI_SETCALLBACK_DECL( ogTracker, m_indiP_ang );
+    INDI_SETCALLBACK_DECL( ogTracker, m_indiP_amp );
+    INDI_SETCALLBACK_DECL( ogTracker, m_indiP_freq );
+    INDI_SETCALLBACK_DECL( ogTracker, m_indiP_modulating );
+};
+
+inline ogTracker::ogTracker() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
+{
+    imWFS2ShmimMonitorT::m_getExistingFirst = true;
+}
+
+inline std::string ogTracker::formatCalibFolder( float sep, float ang, float amp, float freq )
+{
+    char folder[256];
+    std::snprintf( folder,
+                   sizeof( folder ),
+                   "sep%02d_ang%02d_amp%01.3f_freq%02d",
+                   static_cast<int>( sep ),
+                   static_cast<int>( ang ),
+                   amp,
+                   static_cast<int>( freq ) );
+    return folder;
+}
+
+inline int ogTracker::ringStartIndex( int writeIndex, int count, int capacity )
+{
+    if( capacity < 1 )
+    {
+        return 0;
+    }
+    int idx = ( writeIndex - count ) % capacity;
+    if( idx < 0 )
+    {
+        idx += capacity;
+    }
+    return idx;
+}
+
+inline Eigen::Matrix<ogTracker::realT, -1, 1> ogTracker::rmsPerMode( const Eigen::Matrix<realT, -1, -1> &projection )
+{
+    Eigen::Matrix<realT, -1, 1> rmsVals( projection.cols() );
+    for( int mode = 0; mode < projection.cols(); ++mode )
+    {
+        rmsVals[mode] = std::sqrt( projection.col( mode ).array().square().mean() );
+    }
+    return rmsVals;
+}
+
+inline Eigen::Matrix<ogTracker::realT, -1, 1>
+ogTracker::normalizeByReference( const Eigen::Matrix<realT, -1, 1> &rmsVals,
+                                 const Eigen::Matrix<realT, -1, 1> &refVals,
+                                 realT                               eps )
+{
+    const int nm = std::min( rmsVals.size(), refVals.size() );
+    Eigen::Matrix<realT, -1, 1> normVals( nm );
+    for( int mode = 0; mode < nm; ++mode )
+    {
+        if( std::abs( refVals[mode] ) > eps )
+        {
+            normVals[mode] = rmsVals[mode] / refVals[mode];
+        }
+        else
+        {
+            normVals[mode] = std::numeric_limits<realT>::quiet_NaN();
+        }
+    }
+    return normVals;
+}
+
+inline void ogTracker::setupConfig()
+{
+    config.add( "loop.number",
+                "",
+                "loop.number",
+                argType::Required,
+                "loop",
+                "number",
+                false,
+                "int",
+                "Loop number used for stream naming." );
+
+    config.add( "stream.name",
+                "",
+                "stream.name",
+                argType::Required,
+                "stream",
+                "name",
+                false,
+                "string",
+                "Input shmim stream name." );
+
+    config.add( "calib.root",
+                "",
+                "calib.root",
+                argType::Required,
+                "calib",
+                "root",
+                false,
+                "string",
+                "Sparkle calibration root directory." );
+
+    config.add( "sparkle.device",
+                "",
+                "sparkle.device",
+                argType::Required,
+                "sparkle",
+                "device",
+                false,
+                "string",
+                "INDI device for sparkle parameters." );
+
+    config.add( "pca.bufferN",
+                "",
+                "pca.bufferN",
+                argType::Required,
+                "pca",
+                "bufferN",
+                false,
+                "int",
+                "Rolling frame buffer size for PCA metrics." );
+
+    config.add( "pca.minSamples",
+                "",
+                "pca.minSamples",
+                argType::Required,
+                "pca",
+                "minSamples",
+                false,
+                "int",
+                "Minimum buffered frames before metric updates." );
+
+    config.add( "pca.klipMax",
+                "",
+                "pca.klipMax",
+                argType::Required,
+                "pca",
+                "klipMax",
+                false,
+                "int",
+                "Maximum number of PCA modes to use." );
+
+    SHMIMMONITORT_SETUP_CONFIG( imWFS2ShmimMonitorT, config );
+}
+
+inline int ogTracker::loadConfigImpl( mx::app::appConfigurator &_config )
+{
+    _config( m_loopNum, "loop.number" );
+    _config( m_streamName, "stream.name" );
+    _config( m_calibRoot, "calib.root" );
+    _config( m_tweeterDevice, "sparkle.device" );
+    _config( m_bufferN, "pca.bufferN" );
+    _config( m_minSamples, "pca.minSamples" );
+    _config( m_klipMax, "pca.klipMax" );
+
+    if( m_bufferN < 1 )
+    {
+        m_bufferN = 1;
+    }
+    if( m_klipMax < 1 )
+    {
+        m_klipMax = 1;
+    }
+    if( m_minSamples < 1 )
+    {
+        m_minSamples = 1;
+    }
+    m_minSamples = std::max( m_minSamples, 10 * m_klipMax );
+
+    if( m_streamName.empty() )
+    {
+        char shmim[128];
+        std::snprintf( shmim, sizeof( shmim ), "aol%d_imWFS2", m_loopNum );
+        m_streamName = shmim;
+    }
+
+    imWFS2ShmimMonitorT::m_shmimName = m_streamName;
+    SHMIMMONITORT_LOAD_CONFIG( imWFS2ShmimMonitorT, _config );
+
+    m_modeEls.clear();
+    m_modeEls.reserve( static_cast<size_t>( m_klipMax ) );
+    for( int n = 0; n < m_klipMax; ++n )
+    {
+        m_modeEls.push_back( "mode" + std::to_string( n ) );
+    }
+
+    return 0;
+}
+
+inline void ogTracker::loadConfig()
+{
+    loadConfigImpl( config );
+}
+
+inline int ogTracker::appStartup()
+{
+    SHMIMMONITORT_APP_STARTUP( imWFS2ShmimMonitorT );
+
+    REG_INDI_SETPROP( m_indiP_sep, m_tweeterDevice, "separation" );
+    REG_INDI_SETPROP( m_indiP_ang, m_tweeterDevice, "angle" );
+    REG_INDI_SETPROP( m_indiP_amp, m_tweeterDevice, "amp" );
+    REG_INDI_SETPROP( m_indiP_freq, m_tweeterDevice, "frequency" );
+    REG_INDI_SETPROP( m_indiP_modulating, m_tweeterDevice, "modulating" );
+
+    createROIndiText( m_indiP_calibFolder, "calib_folder", "name", "Calibration Folder", "PCA", "Exact match folder" );
+    createROIndiText( m_indiP_calibError, "calib_error", "state", "Calibration Error", "PCA", "Calibration status" );
+
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_calibLoaded, "calib_loaded", "Calibration Loaded", "PCA" );
+    m_indiP_calibLoaded.add( pcf::IndiElement( "current", 0 ) );
+
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_buffer, "buffer", "Rolling Buffer", "PCA" );
+    m_indiP_buffer.add( pcf::IndiElement( "count", 0 ) );
+    m_indiP_buffer.add( pcf::IndiElement( "capacity", m_bufferN ) );
+
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaRms, "pca_rms", "Rolling PCA RMS", "PCA" );
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaNorm, "pca_norm", "Rolling PCA RMS / Ref RMS", "PCA" );
+    for( const auto &el : m_modeEls )
+    {
+        m_indiP_pcaRms.add( pcf::IndiElement( el, 0 ) );
+        m_indiP_pcaNorm.add( pcf::IndiElement( el, 0 ) );
+    }
+
+    m_indiP_calibFolder["name"] = "";
+    m_indiP_calibError["state"] = "uninitialized";
+
+    state( stateCodes::OPERATING );
+    return 0;
+}
+
+inline int ogTracker::setupRingBufferLocked( int pixels )
+{
+    if( pixels <= 0 )
+    {
+        return -1;
+    }
+
+    if( m_ringFrames.rows() != m_bufferN || m_ringFrames.cols() != pixels )
+    {
+        m_ringFrames.resize( m_bufferN, pixels );
+        m_ringFrames.setZero();
+    }
+
+    m_ringWrite = 0;
+    m_ringCount = 0;
+    return 0;
+}
+
+inline int ogTracker::loadCalibrationFiles( const std::filesystem::path &folderPath )
+{
+    const auto pcaPath = folderPath / "ref_pca.fits";
+    const auto rmsPath = folderPath / "ref_rms.fits";
+
+    if( !std::filesystem::exists( pcaPath ) )
+    {
+        m_calibError  = "missing ref_pca.fits";
+        m_calibLoaded = false;
+        return -1;
+    }
+    if( !std::filesystem::exists( rmsPath ) )
+    {
+        m_calibError  = "missing ref_rms.fits";
+        m_calibLoaded = false;
+        return -1;
+    }
+
+    mx::improc::eigenImage<realT> pcaRaw;
+    mx::improc::eigenImage<realT> rmsRaw;
+    mx::fits::fitsFile<realT>     ff;
+
+    auto errc = ff.read( pcaRaw, pcaPath.string() );
+    if( errc != mx::error_t::noerror )
+    {
+        m_calibError  = "failed reading ref_pca.fits";
+        m_calibLoaded = false;
+        return -1;
+    }
+
+    errc = ff.read( rmsRaw, rmsPath.string() );
+    if( errc != mx::error_t::noerror )
+    {
+        m_calibError  = "failed reading ref_rms.fits";
+        m_calibLoaded = false;
+        return -1;
+    }
+
+    Eigen::Matrix<realT, -1, -1> pcaCanonical;
+    if( pcaRaw.rows() >= pcaRaw.cols() )
+    {
+        pcaCanonical = pcaRaw;
+    }
+    else
+    {
+        pcaCanonical = pcaRaw.transpose();
+    }
+
+    if( pcaCanonical.cols() < 1 )
+    {
+        m_calibError  = "ref_pca.fits has zero modes";
+        m_calibLoaded = false;
+        return -1;
+    }
+
+    const int rmsCount = static_cast<int>( rmsRaw.size() );
+    if( rmsCount < 1 )
+    {
+        m_calibError  = "ref_rms.fits has zero length";
+        m_calibLoaded = false;
+        return -1;
+    }
+
+    const int maxModesFromFiles = std::min( static_cast<int>( pcaCanonical.cols() ), rmsCount );
+    m_activeModes               = std::min( m_klipMax, maxModesFromFiles );
+    if( m_activeModes < 1 )
+    {
+        m_calibError  = "no overlapping modes";
+        m_calibLoaded = false;
+        return -1;
+    }
+
+    m_refPca = pcaCanonical.leftCols( m_activeModes );
+
+    m_refRms.resize( m_activeModes );
+    const realT *rmsPtr = rmsRaw.data();
+    for( int n = 0; n < m_activeModes; ++n )
+    {
+        m_refRms[n] = rmsPtr[n];
+    }
+
+    if( m_framePixels > 0 && m_refPca.rows() != m_framePixels )
+    {
+        m_calibError  = "pixel mismatch with stream";
+        m_calibLoaded = false;
+        return -1;
+    }
+
+    m_latestRms.resize( m_activeModes );
+    m_latestNorm.resize( m_activeModes );
+    m_latestRms.setZero();
+    m_latestNorm.setZero();
+    m_metricsValid = false;
+
+    m_calibError  = "ok";
+    m_calibLoaded = true;
+    return 0;
+}
+
+inline int ogTracker::refreshCalibration()
+{
+    std::lock_guard<std::mutex> lock( m_dataMutex );
+    m_paramsDirty = false;
+    m_calibFolder = formatCalibFolder( m_sep, m_ang, m_amp, m_freq );
+
+    const std::filesystem::path folderPath = std::filesystem::path( m_calibRoot ) / m_calibFolder;
+    if( !std::filesystem::exists( folderPath ) )
+    {
+        m_calibLoaded = false;
+        m_calibError  = "missing calibration folder";
+        return -1;
+    }
+
+    return loadCalibrationFiles( folderPath );
+}
+
+inline void ogTracker::computeMetricsLocked()
+{
+    if( !m_calibLoaded || m_ringCount < m_minSamples || m_activeModes < 1 )
+    {
+        return;
+    }
+
+    if( m_refPca.rows() != m_framePixels )
+    {
+        m_calibLoaded = false;
+        m_calibError  = "pixel mismatch with stream";
+        return;
+    }
+
+    Eigen::Matrix<realT, -1, -1, Eigen::RowMajor> frames( m_ringCount, m_framePixels );
+
+    const int start = ringStartIndex( m_ringWrite, m_ringCount, m_bufferN );
+    for( int n = 0; n < m_ringCount; ++n )
+    {
+        const int srcRow = ( start + n ) % m_bufferN;
+        frames.row( n )  = m_ringFrames.row( srcRow );
+    }
+
+    Eigen::Matrix<realT, 1, -1> meanFrame = frames.colwise().mean();
+    frames.rowwise() -= meanFrame;
+
+    const Eigen::Matrix<realT, -1, -1> proj = frames * m_refPca; // [ringCount, modes]
+    m_latestRms                            = rmsPerMode( proj );
+    m_latestNorm                           = normalizeByReference( m_latestRms, m_refRms, static_cast<realT>( 1e-8 ) );
+    m_metricsValid = true;
+}
+
+inline int ogTracker::allocate( const imWFS2ShmimT &dummy )
+{
+    static_cast<void>( dummy );
+
+    std::lock_guard<std::mutex> lock( m_dataMutex );
+    m_frameWidth  = static_cast<int>( imWFS2ShmimMonitorT::m_width );
+    m_frameHeight = static_cast<int>( imWFS2ShmimMonitorT::m_height );
+    m_framePixels = m_frameWidth * m_frameHeight;
+
+    setupRingBufferLocked( m_framePixels );
+
+    if( m_refPca.rows() > 0 && m_refPca.rows() != m_framePixels )
+    {
+        m_calibLoaded = false;
+        m_calibError  = "pixel mismatch with stream";
+    }
+
+    return 0;
+}
+
+inline int ogTracker::processImage( void *curr_src, const imWFS2ShmimT &dummy )
+{
+    static_cast<void>( dummy );
+
+    std::lock_guard<std::mutex> lock( m_dataMutex );
+    if( m_framePixels <= 0 )
+    {
+        return 0;
+    }
+
+    Eigen::Map<Eigen::Matrix<realT, -1, -1>> img( reinterpret_cast<realT *>( curr_src ),
+                                                   imWFS2ShmimMonitorT::m_width,
+                                                   imWFS2ShmimMonitorT::m_height );
+    Eigen::Map<Eigen::Matrix<realT, -1, 1>> flat( img.data(), m_framePixels );
+
+    m_ringFrames.row( m_ringWrite ) = flat.transpose();
+    m_ringWrite                      = ( m_ringWrite + 1 ) % m_bufferN;
+    m_ringCount                      = std::min( m_ringCount + 1, m_bufferN );
+
+    computeMetricsLocked();
+    return 0;
+}
+
+inline int ogTracker::appLogic()
+{
+    SHMIMMONITORT_APP_LOGIC( imWFS2ShmimMonitorT );
+    SHMIMMONITORT_UPDATE_INDI( imWFS2ShmimMonitorT );
+
+    bool paramsDirty = false;
+    {
+        std::lock_guard<std::mutex> lock( m_dataMutex );
+        paramsDirty = m_paramsDirty;
+    }
+    if( paramsDirty )
+    {
+        refreshCalibration();
+    }
+
+    std::lock_guard<std::mutex> lock( m_dataMutex );
+
+    updateIfChanged( m_indiP_calibFolder, "name", m_calibFolder );
+    updateIfChanged( m_indiP_calibError, "state", m_calibError );
+    updateIfChanged( m_indiP_calibLoaded, "current", m_calibLoaded ? 1.0 : 0.0 );
+    updatesIfChanged<double>(
+        m_indiP_buffer, { "count", "capacity" }, { static_cast<double>( m_ringCount ), static_cast<double>( m_bufferN ) } );
+
+    std::vector<double> rmsOut( static_cast<size_t>( m_klipMax ), 0.0 );
+    std::vector<double> normOut( static_cast<size_t>( m_klipMax ), 0.0 );
+    if( m_metricsValid )
+    {
+        for( int n = 0; n < m_activeModes; ++n )
+        {
+            rmsOut[static_cast<size_t>( n )]  = static_cast<double>( m_latestRms[n] );
+            normOut[static_cast<size_t>( n )] = static_cast<double>( m_latestNorm[n] );
+        }
+    }
+
+    updatesIfChanged<double>( m_indiP_pcaRms, m_modeEls, rmsOut );
+    updatesIfChanged<double>( m_indiP_pcaNorm, m_modeEls, normOut );
+
+    return 0;
+}
+
+inline int ogTracker::appShutdown()
+{
+    SHMIMMONITORT_APP_SHUTDOWN( imWFS2ShmimMonitorT );
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_sep )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_sep, ipRecv );
+    if( ipRecv.find( "current" ) )
+    {
+        std::lock_guard<std::mutex> lock( m_dataMutex );
+        m_sep        = ipRecv["current"].get<float>();
+        m_paramsDirty = true;
+    }
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_ang )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_ang, ipRecv );
+    if( ipRecv.find( "current" ) )
+    {
+        std::lock_guard<std::mutex> lock( m_dataMutex );
+        m_ang        = ipRecv["current"].get<float>();
+        m_paramsDirty = true;
+    }
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_amp )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_amp, ipRecv );
+    if( ipRecv.find( "current" ) )
+    {
+        std::lock_guard<std::mutex> lock( m_dataMutex );
+        m_amp        = ipRecv["current"].get<float>();
+        m_paramsDirty = true;
+    }
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_freq )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_freq, ipRecv );
+    if( ipRecv.find( "current" ) )
+    {
+        std::lock_guard<std::mutex> lock( m_dataMutex );
+        m_freq       = ipRecv["current"].get<float>();
+        m_paramsDirty = true;
+    }
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_modulating )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_modulating, ipRecv );
+    if( ipRecv.find( "toggle" ) )
+    {
+        std::lock_guard<std::mutex> lock( m_dataMutex );
+        m_modulating = ( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On );
+    }
+    return 0;
+}
+
+} // namespace app
+} // namespace MagAOX
+
+#endif // ogTracker_hpp
