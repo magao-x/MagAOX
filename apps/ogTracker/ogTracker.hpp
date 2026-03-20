@@ -149,6 +149,8 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker, im
     normalizeByReference( const Eigen::Matrix<realT, -1, 1> &rmsVals, const Eigen::Matrix<realT, -1, 1> &refVals, realT eps );
 
   protected:
+    /// Updates m_calibError and logs only on change. Must hold m_dataMutex.
+    void setCalibErrorLocked( const std::string &msg, logPrioT prio = logPrio::LOG_WARNING );
     /// Update calibration files on new sparkle params
     int  refreshCalibration();
     /// Load the calibration PCA and RMS from calibFolder
@@ -393,6 +395,15 @@ inline int ogTracker::setupRingBufferLocked( int pixels )
     return 0;
 }
 
+inline void ogTracker::setCalibErrorLocked( const std::string &msg, logPrioT prio )
+{
+    if( m_calibError != msg )
+    {
+        m_calibError = msg;
+        log<text_log>( "ogTracker calibration state: " + msg, prio );
+    }
+}
+
 inline int ogTracker::loadCalibrationFiles( const std::filesystem::path &folderPath )
 {
     const auto pcaPath = folderPath / "ref_pca.fits";
@@ -400,13 +411,13 @@ inline int ogTracker::loadCalibrationFiles( const std::filesystem::path &folderP
 
     if( !std::filesystem::exists( pcaPath ) )
     {
-        m_calibError  = "missing ref_pca.fits";
+        setCalibErrorLocked( "missing ref_pca.fits", logPrio::LOG_WARNING );
         m_calibLoaded = false;
         return -1;
     }
     if( !std::filesystem::exists( rmsPath ) )
     {
-        m_calibError  = "missing ref_rms.fits";
+        setCalibErrorLocked( "missing ref_rms.fits", logPrio::LOG_WARNING );
         m_calibLoaded = false;
         return -1;
     }
@@ -418,7 +429,7 @@ inline int ogTracker::loadCalibrationFiles( const std::filesystem::path &folderP
     auto errc = ff.read( pcaRaw, pcaPath.string() );
     if( errc != mx::error_t::noerror )
     {
-        m_calibError  = "failed reading ref_pca.fits";
+        setCalibErrorLocked( "failed reading ref_pca.fits", logPrio::LOG_ERROR );
         m_calibLoaded = false;
         return -1;
     }
@@ -426,7 +437,7 @@ inline int ogTracker::loadCalibrationFiles( const std::filesystem::path &folderP
     errc = ff.read( rmsRaw, rmsPath.string() );
     if( errc != mx::error_t::noerror )
     {
-        m_calibError  = "failed reading ref_rms.fits";
+        setCalibErrorLocked( "failed reading ref_rms.fits", logPrio::LOG_ERROR );
         m_calibLoaded = false;
         return -1;
     }
@@ -443,7 +454,7 @@ inline int ogTracker::loadCalibrationFiles( const std::filesystem::path &folderP
 
     if( pcaCanonical.cols() < 1 )
     {
-        m_calibError  = "ref_pca.fits has zero modes";
+        setCalibErrorLocked( "ref_pca.fits has zero modes", logPrio::LOG_ERROR );
         m_calibLoaded = false;
         return -1;
     }
@@ -451,7 +462,7 @@ inline int ogTracker::loadCalibrationFiles( const std::filesystem::path &folderP
     const int rmsCount = static_cast<int>( rmsRaw.size() );
     if( rmsCount < 1 )
     {
-        m_calibError  = "ref_rms.fits has zero length";
+        setCalibErrorLocked( "ref_rms.fits has zero length", logPrio::LOG_ERROR );
         m_calibLoaded = false;
         return -1;
     }
@@ -460,7 +471,7 @@ inline int ogTracker::loadCalibrationFiles( const std::filesystem::path &folderP
     m_activeModes               = std::min( m_klipMax, maxModesFromFiles );
     if( m_activeModes < 1 )
     {
-        m_calibError  = "no overlapping modes";
+        setCalibErrorLocked( "no overlapping modes", logPrio::LOG_ERROR );
         m_calibLoaded = false;
         return -1;
     }
@@ -476,7 +487,7 @@ inline int ogTracker::loadCalibrationFiles( const std::filesystem::path &folderP
 
     if( m_framePixels > 0 && m_refPca.rows() != m_framePixels )
     {
-        m_calibError  = "pixel mismatch with stream";
+        setCalibErrorLocked( "pixel mismatch with stream", logPrio::LOG_ERROR );
         m_calibLoaded = false;
         return -1;
     }
@@ -487,7 +498,7 @@ inline int ogTracker::loadCalibrationFiles( const std::filesystem::path &folderP
     m_latestNorm.setZero();
     m_metricsValid = false;
 
-    m_calibError  = "ok";
+    setCalibErrorLocked( "ok", logPrio::LOG_NOTICE );
     m_calibLoaded = true;
     m_waitForParamChange = false;
     m_computePending = true;
@@ -502,7 +513,7 @@ inline int ogTracker::refreshCalibration()
     if( !m_modulating )
     {
         m_calibLoaded = false;
-        m_calibError  = "sparkle not modulating";
+        setCalibErrorLocked( "sparkle not modulating", logPrio::LOG_INFO );
         return 0;
     }
 
@@ -512,7 +523,7 @@ inline int ogTracker::refreshCalibration()
     if( !std::filesystem::exists( folderPath ) )
     {
         m_calibLoaded = false;
-        m_calibError  = "missing calibration folder";
+        setCalibErrorLocked( "missing calibration folder", logPrio::LOG_WARNING );
         m_waitForParamChange = true;
         return -1;
     }
@@ -541,7 +552,7 @@ inline void ogTracker::computeMetricsFromSnapshot()
         if( m_refPca.rows() != m_framePixels )
         {
             m_calibLoaded = false;
-            m_calibError  = "pixel mismatch with stream";
+            setCalibErrorLocked( "pixel mismatch with stream", logPrio::LOG_ERROR );
             return;
         }
 
@@ -602,7 +613,7 @@ inline int ogTracker::allocate( const imWFS2ShmimT &dummy )
     if( m_refPca.rows() > 0 && m_refPca.rows() != m_framePixels )
     {
         m_calibLoaded = false;
-        m_calibError  = "pixel mismatch with stream";
+        setCalibErrorLocked( "pixel mismatch with stream", logPrio::LOG_ERROR );
     }
 
     return 0;
@@ -649,7 +660,7 @@ inline int ogTracker::appLogic()
     {
         std::lock_guard<std::mutex> lock( m_dataMutex );
         m_calibLoaded = false;
-        m_calibError  = "sparkle not modulating";
+        setCalibErrorLocked( "sparkle not modulating", logPrio::LOG_INFO );
     }
     else if( paramsDirty )
     {
