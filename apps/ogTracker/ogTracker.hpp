@@ -70,6 +70,7 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker, im
     std::string m_calibError; ///< Error message from calibration loading
     bool        m_calibLoaded{ false };
     bool        m_paramsDirty{ true };
+    bool        m_waitForParamChange{ false };
 
     int m_frameWidth{ 0 };
     int m_frameHeight{ 0 };
@@ -488,6 +489,7 @@ inline int ogTracker::loadCalibrationFiles( const std::filesystem::path &folderP
 
     m_calibError  = "ok";
     m_calibLoaded = true;
+    m_waitForParamChange = false;
     m_computePending = true;
     return 0;
 }
@@ -496,6 +498,14 @@ inline int ogTracker::refreshCalibration()
 {
     std::lock_guard<std::mutex> lock( m_dataMutex );
     m_paramsDirty = false;
+
+    if( !m_modulating )
+    {
+        m_calibLoaded = false;
+        m_calibError  = "sparkle not modulating";
+        return 0;
+    }
+
     m_calibFolder = formatCalibFolder( m_sep, m_ang, m_amp, m_freq );
 
     const std::filesystem::path folderPath = std::filesystem::path( m_calibRoot ) / m_calibFolder;
@@ -503,6 +513,7 @@ inline int ogTracker::refreshCalibration()
     {
         m_calibLoaded = false;
         m_calibError  = "missing calibration folder";
+        m_waitForParamChange = true;
         return -1;
     }
 
@@ -522,7 +533,7 @@ inline void ogTracker::computeMetricsFromSnapshot()
 
     {
         std::lock_guard<std::mutex> lock( m_dataMutex );
-        if( !m_calibLoaded || m_ringCount < m_minSamples || m_activeModes < 1 )
+        if( !m_modulating || m_waitForParamChange || !m_calibLoaded || m_ringCount < m_minSamples || m_activeModes < 1 )
         {
             return;
         }
@@ -603,7 +614,7 @@ inline int ogTracker::processImage( void *curr_src, const imWFS2ShmimT &dummy )
     static_cast<void>( dummy );
 
     std::lock_guard<std::mutex> lock( m_dataMutex );
-    if( m_framePixels <= 0 )
+    if( m_framePixels <= 0 || !m_modulating || m_waitForParamChange || !m_calibLoaded )
     {
         return 0;
     }
@@ -627,11 +638,20 @@ inline int ogTracker::appLogic()
     SHMIMMONITORT_UPDATE_INDI( imWFS2ShmimMonitorT );
 
     bool paramsDirty = false;
+    bool modulating  = false;
     {
         std::lock_guard<std::mutex> lock( m_dataMutex );
         paramsDirty = m_paramsDirty;
+        modulating  = m_modulating;
     }
-    if( paramsDirty )
+
+    if( !modulating )
+    {
+        std::lock_guard<std::mutex> lock( m_dataMutex );
+        m_calibLoaded = false;
+        m_calibError  = "sparkle not modulating";
+    }
+    else if( paramsDirty )
     {
         refreshCalibration();
     }
@@ -646,6 +666,12 @@ inline int ogTracker::appLogic()
 
     std::vector<double> rmsOut( static_cast<size_t>( m_klipMax ), 0.0 );
     std::vector<double> normOut( static_cast<size_t>( m_klipMax ), 0.0 );
+    std::vector<const char *> modeElNames;
+    modeElNames.reserve( m_modeEls.size() );
+    for( const auto &el : m_modeEls )
+    {
+        modeElNames.push_back( el.c_str() );
+    }
     if( m_metricsValid )
     {
         for( int n = 0; n < m_activeModes; ++n )
@@ -655,8 +681,8 @@ inline int ogTracker::appLogic()
         }
     }
 
-    updatesIfChanged<double>( m_indiP_pcaRms, m_modeEls, rmsOut );
-    updatesIfChanged<double>( m_indiP_pcaNorm, m_modeEls, normOut );
+    updatesIfChanged<double>( m_indiP_pcaRms, modeElNames, rmsOut );
+    updatesIfChanged<double>( m_indiP_pcaNorm, modeElNames, normOut );
 
     return 0;
 }
@@ -683,8 +709,13 @@ INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_sep )( const pcf::IndiProperty &ipRecv
     if( ipRecv.find( "current" ) )
     {
         std::lock_guard<std::mutex> lock( m_dataMutex );
-        m_sep        = ipRecv["current"].get<float>();
-        m_paramsDirty = true;
+        const float nextSep = ipRecv["current"].get<float>();
+        if( std::abs( nextSep - m_sep ) > 1e-6f )
+        {
+            m_sep               = nextSep;
+            m_paramsDirty       = true;
+            m_waitForParamChange = false;
+        }
     }
     return 0;
 }
@@ -695,8 +726,13 @@ INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_ang )( const pcf::IndiProperty &ipRecv
     if( ipRecv.find( "current" ) )
     {
         std::lock_guard<std::mutex> lock( m_dataMutex );
-        m_ang        = ipRecv["current"].get<float>();
-        m_paramsDirty = true;
+        const float nextAng = ipRecv["current"].get<float>();
+        if( std::abs( nextAng - m_ang ) > 1e-6f )
+        {
+            m_ang               = nextAng;
+            m_paramsDirty       = true;
+            m_waitForParamChange = false;
+        }
     }
     return 0;
 }
@@ -707,8 +743,13 @@ INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_amp )( const pcf::IndiProperty &ipRecv
     if( ipRecv.find( "current" ) )
     {
         std::lock_guard<std::mutex> lock( m_dataMutex );
-        m_amp        = ipRecv["current"].get<float>();
-        m_paramsDirty = true;
+        const float nextAmp = ipRecv["current"].get<float>();
+        if( std::abs( nextAmp - m_amp ) > 1e-6f )
+        {
+            m_amp               = nextAmp;
+            m_paramsDirty       = true;
+            m_waitForParamChange = false;
+        }
     }
     return 0;
 }
@@ -719,8 +760,13 @@ INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_freq )( const pcf::IndiProperty &ipRec
     if( ipRecv.find( "current" ) )
     {
         std::lock_guard<std::mutex> lock( m_dataMutex );
-        m_freq       = ipRecv["current"].get<float>();
-        m_paramsDirty = true;
+        const float nextFreq = ipRecv["current"].get<float>();
+        if( std::abs( nextFreq - m_freq ) > 1e-6f )
+        {
+            m_freq              = nextFreq;
+            m_paramsDirty       = true;
+            m_waitForParamChange = false;
+        }
     }
     return 0;
 }
@@ -731,7 +777,16 @@ INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_modulating )( const pcf::IndiProperty 
     if( ipRecv.find( "toggle" ) )
     {
         std::lock_guard<std::mutex> lock( m_dataMutex );
-        m_modulating = ( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On );
+        const bool nextModulating = ( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On );
+        if( nextModulating != m_modulating )
+        {
+            m_modulating  = nextModulating;
+            m_paramsDirty = true;
+            if( m_modulating )
+            {
+                m_waitForParamChange = false;
+            }
+        }
     }
     return 0;
 }
