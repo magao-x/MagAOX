@@ -473,14 +473,14 @@ void siglentSDG::setupConfig()
    config.add("fxngen.C1outpOn", "", "fxngen.C1outpOn", argType::Required, "fxngen", "C1outpOn", false, "bool", "Whether (true) or not (false) C1 output is enabled at startup. Only effective wavefrom is pulse. Default is false.");
    config.add("fxngen.C2outpOn", "", "fxngen.C2outpOn", argType::Required, "fxngen", "C2outpOn", false, "bool", "Whether (true) or not (false) C2 output is enabled at startup. Only effective wavefrom is pulse. Default is false.");
 
-   config.add("fxngen.C1ampDefault", "", "fxngen.C1ampDefault", argType::Required, "fxngen", "C1ampDefault", false, "float", "C1 Default P2V Amplitude of waveform. Default = 0.0");
-   config.add("fxngen.C2ampDefault", "", "fxngen.C2ampDefault", argType::Required, "fxngen", "C2ampDefault", false, "float", "C2 Default P2V Amplitude of waveform. Default = 0.0");
+   config.add("fxngen.C1ampDefault", "", "fxngen.C1ampDefault", argType::Required, "fxngen", "C1ampDefault", false, "double", "C1 Default P2V Amplitude of waveform. Default = 0.0");
+   config.add("fxngen.C2ampDefault", "", "fxngen.C2ampDefault", argType::Required, "fxngen", "C2ampDefault", false, "double", "C2 Default P2V Amplitude of waveform. Default = 0.0");
 
-   config.add("fxngen.C1ofstDefault", "", "fxngen.C1ofstDefault", argType::Required, "fxngen", "C1ofstDefault", false, "float", "C1 Default Offset Amplitude of waveform. Default = 0.0");
-   config.add("fxngen.C2ofstDefault", "", "fxngen.C2ofstDefault", argType::Required, "fxngen", "C2ofstDefault", false, "float", "C2 Default Offset Amplitude of waveform. Default = 0.0");
+   config.add("fxngen.C1ofstDefault", "", "fxngen.C1ofstDefault", argType::Required, "fxngen", "C1ofstDefault", false, "double", "C1 Default Offset Amplitude of waveform. Default = 0.0");
+   config.add("fxngen.C2ofstDefault", "", "fxngen.C2ofstDefault", argType::Required, "fxngen", "C2ofstDefault", false, "double", "C2 Default Offset Amplitude of waveform. Default = 0.0");
 
-   config.add("fxngen.C1ampMax", "", "fxngen.C1ampMax", argType::Required, "fxngen", "C1ampMax", false, "float", "C1 Maximum amplitude");
-   config.add("fxngen.C2ampMax", "", "fxngen.C2ampMax", argType::Required, "fxngen", "C2ampMax", false, "float", "C2 Maximum amplitude");
+   config.add("fxngen.C1ampMax", "", "fxngen.C1ampMax", argType::Required, "fxngen", "C1ampMax", false, "double", "C1 Maximum amplitude");
+   config.add("fxngen.C2ampMax", "", "fxngen.C2ampMax", argType::Required, "fxngen", "C2ampMax", false, "double", "C2 Maximum amplitude");
 
    TELEMETER_SETUP_CONFIG(config);
 }
@@ -529,28 +529,28 @@ int siglentSDG::appStartup()
 
    CREATE_REG_INDI_NEW_TOGGLESWITCH(m_indiP_C1outp, "C1outp");
 
-   CREATE_REG_INDI_NEW_NUMBERF( m_indiP_C1freq, "C1freq", -1e15, 1e15, 1, "%g", "C1freq", "C1freq");
+   CREATE_REG_INDI_NEW_NUMBERD( m_indiP_C1freq, "C1freq", -1e15, 1e15, 1, "%g", "C1freq", "C1freq");
    m_indiP_C1freq["current"].set(0);
    m_indiP_C1freq["target"].set(0);
 
-   CREATE_REG_INDI_NEW_NUMBERF( m_indiP_C1amp, "C1amp", -1e15, 1e15, 1, "%g", "C1amp", "C1amp");
+   CREATE_REG_INDI_NEW_NUMBERD( m_indiP_C1amp, "C1amp", -1e15, 1e15, 1, "%g", "C1amp", "C1amp");
    m_indiP_C1amp["current"].set(0);
    m_indiP_C1amp["target"].set(0);
-
-   REG_INDI_NEWPROP(m_indiP_C1ofst, "C1ofst", pcf::IndiProperty::Number);
-   m_indiP_C1ofst.add (pcf::IndiElement("value"));
-   m_indiP_C1ofst["value"].set(0);
+   
+   CREATE_REG_INDI_NEW_NUMBERD( m_indiP_C1ofst, "C1ofst", -1e15, 1e15, 1, "%g", "C1ofst", "C1ofst");
+   m_indiP_C1ofst["current"].set(0);
+   m_indiP_C1ofst["target"].set(0);
 
    if(m_waveform == "SINE"){
-      REG_INDI_NEWPROP(m_indiP_C1phse, "C1phse", pcf::IndiProperty::Number);
-      m_indiP_C1phse.add (pcf::IndiElement("value"));
-      m_indiP_C1phse["value"].set(0);
+      CREATE_REG_INDI_NEW_NUMBERD( m_indiP_C1phse, "C1phse", -1e15, 1e15, 1, "%g", "C1phse", "C1phse");
+      m_indiP_C1phse["current"].set(0);
+      m_indiP_C1phse["target"].set(0);
    }
    else if(m_waveform == "PULSE")
    {
-      REG_INDI_NEWPROP(m_indiP_C1wdth, "C1wdth", pcf::IndiProperty::Number);
-      m_indiP_C1wdth.add (pcf::IndiElement("value"));
-      m_indiP_C1wdth["value"].set(0);
+      CREATE_REG_INDI_NEW_NUMBERD( m_indiP_C1wdth, "C1wdth", -1e15, 1e15, 1, "%g", "C1wdth", "C1wdth");
+      m_indiP_C1phse["current"].set(0);
+      m_indiP_C1phse["target"].set(0);
    }
 
    CREATE_REG_INDI_NEW_TEXT(m_indiP_C1wvtp, "C1wvtp", "C1wvtp", "C1wvtp");
@@ -578,28 +578,28 @@ int siglentSDG::appStartup()
    /* Channel 2 */
    CREATE_REG_INDI_NEW_TOGGLESWITCH(m_indiP_C2outp, "C2outp");
 
-   CREATE_REG_INDI_NEW_NUMBERF( m_indiP_C2freq, "C2freq", -1e15, 1e15, 1, "%g", "C2freq", "C2freq");
+   CREATE_REG_INDI_NEW_NUMBERD( m_indiP_C2freq, "C2freq", -1e15, 1e15, 1, "%g", "C2freq", "C2freq");
    m_indiP_C2freq["current"].set(0);
    m_indiP_C2freq["target"].set(0);
 
-   CREATE_REG_INDI_NEW_NUMBERF( m_indiP_C2amp, "C2amp", -1e15, 1e15, 1, "%g", "C2amp", "C2amp");
+   CREATE_REG_INDI_NEW_NUMBERD( m_indiP_C2amp, "C2amp", -1e15, 1e15, 1, "%g", "C2amp", "C2amp");
    m_indiP_C2amp["current"].set(0);
    m_indiP_C2amp["target"].set(0);
 
-   REG_INDI_NEWPROP(m_indiP_C2ofst, "C2ofst", pcf::IndiProperty::Number);
-   m_indiP_C2ofst.add (pcf::IndiElement("value"));
-   m_indiP_C2ofst["value"].set(0);
+   CREATE_REG_INDI_NEW_NUMBERD( m_indiP_C2ofst , "C2ofst", -1e15, 1e15, 1, "%g", "C2ofst", "C2ofst");
+   m_indiP_C2ofst["current"].set(0);
+   m_indiP_C2ofst["target"].set(0);
 
    if(m_waveform == "SINE"){
-      REG_INDI_NEWPROP(m_indiP_C2phse, "C2phse", pcf::IndiProperty::Number);
-      m_indiP_C2phse.add (pcf::IndiElement("value"));
-      m_indiP_C2phse["value"].set(0);
+      CREATE_REG_INDI_NEW_NUMBERD( m_indiP_C2phse, "C2phse", -1e15, 1e15, 1, "%g", "C2phse", "C2phse");
+      m_indiP_C2phse["current"].set(0);
+      m_indiP_C2phse["target"].set(0);
    }
    else if(m_waveform == "PULSE")
    {
-      REG_INDI_NEWPROP(m_indiP_C2wdth, "C2wdth", pcf::IndiProperty::Number);
-      m_indiP_C2wdth.add (pcf::IndiElement("value"));
-      m_indiP_C2wdth["value"].set(0);
+      CREATE_REG_INDI_NEW_NUMBERD( m_indiP_C2wdth, "C2wdth", -1e15, 1e15, 1, "%g", "C2wdth", "C2wdth");
+      m_indiP_C2phse["current"].set(0);
+      m_indiP_C2phse["target"].set(0);
    }
 
    CREATE_REG_INDI_NEW_TEXT(m_indiP_C2wvtp, "C2wvtp", "C2wvtp", "C2wvtp");
@@ -946,12 +946,12 @@ int siglentSDG::onPowerOff()
 
    updatesIfChanged<std::string>(m_indiP_C1wvtp, {"current", "target"}, {m_C1wvtp, m_C1wvtp});
    updatesIfChanged<double>(m_indiP_C1freq, {"current", "target"}, {0.0, 0.0});
-   updatesIfChanged<double>(m_indiP_C1peri, {"current", "target"}, {0.0, 0.0});
    updatesIfChanged<double>(m_indiP_C1amp, {"current", "target"}, {0.0, 0.0});
    updatesIfChanged<double>(m_indiP_C1ofst, {"current", "target"}, {0.0, 0.0});
    updateIfChanged(m_indiP_C1ampvrms, "value", 0.0);
    updateIfChanged(m_indiP_C1hlev, "value", 0.0);
    updateIfChanged(m_indiP_C1llev, "value", 0.0);
+   updateIfChanged(m_indiP_C1peri, "value", 0.0);
    if(m_waveform == "SINE")
    {
       updatesIfChanged<double>(m_indiP_C1phse, {"current", "target"}, {0.0, 0.0});
@@ -975,12 +975,12 @@ int siglentSDG::onPowerOff()
 
    updatesIfChanged<std::string>(m_indiP_C2wvtp,{"current", "target"}, {m_C2wvtp, m_C2wvtp});
    updatesIfChanged<double>(m_indiP_C2freq, {"current", "target"}, {0.0, 0.0});
-   updatesIfChanged<double>(m_indiP_C2peri, {"current", "target"}, {0.0, 0.0});
    updatesIfChanged<double>(m_indiP_C2amp, {"current", "target"}, {0.0, 0.0});
    updatesIfChanged<double>(m_indiP_C2ofst, {"current", "target"}, {0.0, 0.0});
    updateIfChanged(m_indiP_C2ampvrms, "value", 0.0);
    updateIfChanged(m_indiP_C2hlev, "value", 0.0);
    updateIfChanged(m_indiP_C2llev, "value", 0.0);
+   updateIfChanged(m_indiP_C2peri, "value", 0.0);
    if(m_waveform == "SINE")
    {
       updatesIfChanged<double>(m_indiP_C2phse, {"current", "target"}, {0.0, 0.0});
@@ -1312,12 +1312,12 @@ int siglentSDG::queryBSWV( int channel)
 
          updateIfChanged(m_indiP_C1wvtp, "current", resp_wvtp);
          updateIfChanged(m_indiP_C1freq, "current", resp_freq);
-         updateIfChanged(m_indiP_C1peri, "current", resp_peri);
          updateIfChanged(m_indiP_C1amp, "current", resp_amp);
          updateIfChanged(m_indiP_C1ofst, "current", resp_ofst);
          updateIfChanged(m_indiP_C1ampvrms, "value", resp_ampvrms);
          updateIfChanged(m_indiP_C1hlev, "value", resp_hlev);
          updateIfChanged(m_indiP_C1llev, "value", resp_llev);
+         updateIfChanged(m_indiP_C1peri, "value", resp_peri);
          if(m_waveform == "SINE"){updateIfChanged(m_indiP_C1phse, "current", resp_phse);}
          else if(m_waveform == "PULSE"){updateIfChanged(m_indiP_C1wdth, "current", resp_wdth);}
       }
@@ -1337,12 +1337,12 @@ int siglentSDG::queryBSWV( int channel)
 
          updateIfChanged(m_indiP_C2wvtp, "current", resp_wvtp);
          updateIfChanged(m_indiP_C2freq, "current", resp_freq);
-         updateIfChanged(m_indiP_C2peri, "current", resp_peri);
          updateIfChanged(m_indiP_C2amp, "current", resp_amp);
          updateIfChanged(m_indiP_C2ofst, "current", resp_ofst);
          updateIfChanged(m_indiP_C2ampvrms, "value", resp_ampvrms);
          updateIfChanged(m_indiP_C2hlev, "value", resp_hlev);
          updateIfChanged(m_indiP_C2llev, "value", resp_llev);
+         updateIfChanged(m_indiP_C2peri, "value", resp_peri);
          if(m_waveform == "SINE"){updateIfChanged(m_indiP_C2phse, "current", resp_phse);}
          else if(m_waveform == "PULSE"){updateIfChanged(m_indiP_C2wdth, "current", resp_wdth);}
       }
@@ -1739,6 +1739,11 @@ int siglentSDG::changeOutp( int channel,
          return log<software_error,-1>({__FILE__, __LINE__});
       }
    }
+
+   pcf::IndiElement::SwitchStateType toggle_state = newOutp ? pcf::IndiElement::On : pcf::IndiElement::Off;
+   if (channel == 1) updateSwitchIfChanged(m_indiP_C1outp, "toggle", toggle_state);
+   else updateSwitchIfChanged(m_indiP_C2outp, "toggle", toggle_state);
+
    return 0;
 }
 
@@ -1842,6 +1847,9 @@ int siglentSDG::changeFreq( int channel,
       changeWdth(channel, newWdth);
    }
 
+   if (channel == 1) updateIfChanged(m_indiP_C1freq, "current", newFreq);
+   else updateIfChanged(m_indiP_C2freq, "current", newFreq);
+
    return 0;
 }
 
@@ -1894,11 +1902,11 @@ int siglentSDG::changeAmp( int channel,
    double confAmpMax = m_C1ampMax;
    if(channel == 2) confAmpMax = m_C2ampMax;
 
-   if (0.5 * newAmp + offst > confAmpMax)
+   if (0.5 * newAmp + offst > fmin(10, confAmpMax))
    {
       newAmp = 2 * (confAmpMax - offst);
       log<text_log>("Ch. " + std::to_string(channel) + " AMP max-limited by config value to " + std::to_string(newAmp), logPrio::LOG_WARNING);
-
+      
    }
 
    // Do not limit freq if a PULSE wave
@@ -1906,12 +1914,6 @@ int siglentSDG::changeAmp( int channel,
    {
 
       //Ensure we won't excede the 0-10V range for SINE
-      if(offst + 0.5*newAmp > 10)
-      {
-         newAmp = 2.*(10.0 - offst);
-         log<text_log>("Ch. " + std::to_string(channel) + " AMP limited at 10 V by OFST to " + std::to_string(newAmp), logPrio::LOG_WARNING);
-      }
-
       if(offst - 0.5*newAmp < 0)
       {
          newAmp = 2*(offst);
@@ -1928,7 +1930,7 @@ int siglentSDG::changeAmp( int channel,
          if( m_maxFreq[i] >= freq ) break;
          ++i;
       }
-      ampMax = fmin(m_ampMax[i], confAmpMax);
+      ampMax = m_ampMax[i];
 
       std::cerr << "Max Amp @ " << freq << " = " << ampMax << "\n";
 
@@ -1947,15 +1949,8 @@ int siglentSDG::changeAmp( int channel,
    }
 
    //Now update target
-   if(channel==1)
-   {
-      m_C1vpp_tgt = newAmp;
-   }
-   else
-   {
-      m_C2vpp_tgt = newAmp;
-   }
-
+   if(channel==1) m_C1vpp_tgt = newAmp;
+   else m_C2vpp_tgt = newAmp;
 
    std::string afterColon = std::format("BSWV AMP,{}", newAmp);
    std::string command = makeCommand(channel, afterColon);
@@ -1971,6 +1966,9 @@ int siglentSDG::changeAmp( int channel,
       if((m_powerState != 1 || m_powerTargetState != 1)) log<software_error>({__FILE__, __LINE__});
       return -1;
    }
+
+   if (channel == 1) updateIfChanged(m_indiP_C1amp, "current", newAmp);
+   else updateIfChanged(m_indiP_C2amp, "current", newAmp);
 
    return 0;
 }
@@ -2017,6 +2015,7 @@ int siglentSDG::changeOfst( int channel,
                             double newOfst
                           )
 {
+   std::cerr << "Changing offset | Channel " << channel << " to " << newOfst << std::endl;
    if(channel < 1 || channel > 2) return -1;
 
    double amp = m_C1vpp;
@@ -2062,6 +2061,9 @@ int siglentSDG::changeOfst( int channel,
       if((m_powerState != 1 || m_powerTargetState != 1)) log<software_error>({__FILE__, __LINE__});
       return -1;
    }
+
+   if (channel == 1) updateIfChanged(m_indiP_C1ofst, "current", newOfst);
+   else updateIfChanged(m_indiP_C2ofst, "current", newOfst);
 
    return 0;
 }
@@ -2128,6 +2130,9 @@ int siglentSDG::changePhse( int channel,
       return -1;
    }
 
+   if (channel == 1) updateIfChanged(m_indiP_C1phse, "current", newPhse);
+   else updateIfChanged(m_indiP_C2phse, "current", newPhse);
+
    return 0;
 }
 
@@ -2153,7 +2158,6 @@ int siglentSDG::changePhse( int channel,
 
    if (channel==1) updateIfChanged(m_indiP_C1phse, "target", newPhse);
    else updateIfChanged(m_indiP_C2phse, "target", newPhse);
-
    //Make sure we don't change things while other things are being updated.
    std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting any communications.
 
@@ -2164,6 +2168,7 @@ int siglentSDG::changePhse( int channel,
    if(rv < 0) log<software_error>({__FILE__, __LINE__});
 
    state(enterState);
+
 
    return rv;
 }
@@ -2192,6 +2197,9 @@ int siglentSDG::changeWdth( int channel,
       if((m_powerState != 1 || m_powerTargetState != 1)) log<software_error>({__FILE__, __LINE__});
       return -1;
    }
+
+   if (channel == 1) updateIfChanged(m_indiP_C1wdth, "current", newWdth);
+   else updateIfChanged(m_indiP_C2wdth, "current", newWdth);
 
    return 0;
 }
@@ -2253,6 +2261,10 @@ int siglentSDG::changeWvtp( int channel,
       if((m_powerState != 1 || m_powerTargetState != 1)) log<software_error>({__FILE__, __LINE__});
       return -1;
    }
+
+
+   if (channel == 1) updateIfChanged(m_indiP_C1wvtp, "current", newWvtp);
+   else updateIfChanged(m_indiP_C2wvtp, "current", newWvtp);
 
    return 0;
 }
@@ -2319,6 +2331,10 @@ int siglentSDG::changeSync( int channel,
       if((m_powerState != 1 || m_powerTargetState != 1)) log<software_error>({__FILE__, __LINE__});
       return -1;
    }
+
+   pcf::IndiElement::SwitchStateType toggle_state = newSync ? pcf::IndiElement::On : pcf::IndiElement::Off;
+   if (channel == 1) updateSwitchIfChanged(m_indiP_C1sync, "toggle", toggle_state);
+   else updateSwitchIfChanged(m_indiP_C2sync, "toggle", toggle_state);
 
    return 0;
 }
