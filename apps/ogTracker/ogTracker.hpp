@@ -34,7 +34,7 @@ struct imWFS2ShmimT
     /// Configuration subsection used by shmimMonitor.
     static std::string configSection()
     {
-        return "wfsim";
+        return "wfsimShmim";
     };
 
     /// INDI prefix used by shmimMonitor properties.
@@ -72,8 +72,7 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker, im
     /** \name Configuration - Data
      * @{
      */
-    std::string m_streamName{ "aol1_imWFS2" }; ///< Input ImageStreamIO stream name, default.
-    std::string m_calibRoot{ "/home/eden/data/spark_calib" }; ///< Root directory holding sparkle PCA calibrations.
+    std::string m_calibRoot{ calibDir() + "/sparkPCA" }; ///< Root directory holding sparkle PCA calibrations.
     const std::string m_tweeterDevice{ "tweeterSpeck" }; ///< Fixed INDI device name for sparkle parameters.
     int         m_bufferN{ 2000 }; ///< Rolling frame-buffer length used for PCA statistics.
     int         m_minSamples{ 100 }; ///< Minimum buffered frames before statistics are considered valid.
@@ -237,8 +236,6 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker, im
     INDI_SETCALLBACK_DECL( ogTracker, m_indiP_modulating );
 };
 
-
-
 inline ogTracker::ogTracker() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     /// Make sure the image stream is running 
@@ -306,16 +303,6 @@ ogTracker::normalizeByReference( const Eigen::Matrix<realT, -1, 1> &rmsVals,
 
 inline void ogTracker::setupConfig()
 {
-    config.add( "stream.name",
-                "",
-                "stream.name",
-                argType::Required,
-                "stream",
-                "name",
-                false,
-                "string",
-                "Input shmim stream name." );
-
     config.add( "calib.root", // TODO: this is really a MagAO-X configuration thing
                 "",
                 "calib.root",
@@ -361,7 +348,6 @@ inline void ogTracker::setupConfig()
 
 inline int ogTracker::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-    _config( m_streamName, "stream.name" );
     _config( m_calibRoot, "calib.root" );
     _config( m_bufferN, "pca.bufferN" );
     _config( m_minSamples, "pca.minSamples" );
@@ -381,12 +367,6 @@ inline int ogTracker::loadConfigImpl( mx::app::appConfigurator &_config )
     }
     m_minSamples = std::max( m_minSamples, 10 * m_klipMax );
 
-    if( m_streamName.empty() )
-    {
-        m_streamName = "aol1_imWFS2";
-    }
-
-    imWFS2ShmimMonitorT::m_shmimName = m_streamName;
     SHMIMMONITORT_LOAD_CONFIG( imWFS2ShmimMonitorT, _config );
 
     m_modeEls.clear();
@@ -406,7 +386,7 @@ inline void ogTracker::loadConfig()
 
 inline int ogTracker::appStartup()
 {
-    SHMIMMONITORT_APP_STARTUP( imWFS2ShmimMonitorT );
+    SHMIMMONITORT_APP_STARTUP(imWFS2ShmimMonitorT);
 
     REG_INDI_SETPROP( m_indiP_sep, m_tweeterDevice, "separation" );
     REG_INDI_SETPROP( m_indiP_ang, m_tweeterDevice, "angle" );
@@ -714,6 +694,7 @@ inline int ogTracker::appLogic()
 {
     SHMIMMONITORT_APP_LOGIC( imWFS2ShmimMonitorT );
     SHMIMMONITORT_UPDATE_INDI( imWFS2ShmimMonitorT );
+
     if( imWFS2ShmimMonitorT::m_smState == dev::shmimMonitorState::notfound )
     {
         if( !m_streamMissingLogged )
