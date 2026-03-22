@@ -1,0 +1,54 @@
+#!/bin/bash
+
+#####################################################
+## MagAO-X ACC cpuset configuration (RPI 5)
+## 
+## See https://linux.die.net/man/7/cpuset
+##
+## Run this as sudo at startup of the system
+## Then run acc_procset after starting all loop processes
+##
+####################################################
+
+source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
+cpusetMount=$CGROUPS1_CPUSET_MOUNTPOINT
+
+set -xeuo pipefail
+
+cd $cpusetMount
+
+#########
+# System cpuset (CPUs 0-1)
+#########
+mkdir -p system
+echo 0 > system/cpuset.mems
+echo 0-1 > system/cpuset.cpus
+
+# Move all tasks to system cpuset
+while read i; do
+   echo -n $i 2>/dev/null || true
+done < tasks > system/tasks
+
+# Load balancing config
+echo 0 > cpuset.sched_load_balance
+echo 1 > system/cpuset.sched_load_balance
+
+##########
+# ACC real-time cpusets
+##########
+
+make_rt_set () {
+    name=$1
+    cpu=$2
+
+    mkdir -p $name
+    echo 0 > $name/cpuset.mems
+    echo $cpu > $name/cpuset.cpus
+    echo 1 > $name/cpuset.cpu_exclusive
+}
+
+# Dedicated cores
+make_rt_set acqu 2
+make_rt_set shmimTCP 3
+
+echo "ACC cpusets configured successfully"
