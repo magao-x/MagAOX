@@ -129,6 +129,9 @@ using namespace mx::improc;
     pcf::IndiProperty m_indiP_predictingToggle;
     pcf::IndiProperty m_indiP_resetToggle;
 
+    pcf::IndiProperty m_indiP_saveToggle;
+    pcf::IndiProperty m_indiP_loadToggle;
+
    public:
 
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_exploration );
@@ -137,6 +140,9 @@ using namespace mx::improc;
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_integratingToggle );
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_predictingToggle );
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_resetToggle );
+
+    INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_saveToggle );
+    INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_loadToggle );
 
      /// Default c'tor.
      loPredCtrl();
@@ -185,9 +191,17 @@ using namespace mx::improc;
                        const dev::shmimT &dummy ///< [in] tag to differentiate shmimMonitor parents.
      );
 
-     // TODO ::: ADD SAVE AND LOAD FUNCTIONALITY
-     void save(std::string directory);
-     void load(std::string directory);
+     inline void save(std::string directory)
+     {
+         if(controller)
+             controller->save_state(directory);
+     }
+
+     inline void load(std::string directory)
+     {
+         if(controller)
+             controller->load_state(directory);
+     }
  };
 
  inline int loPredCtrl::send_to_shmim()
@@ -282,7 +296,11 @@ using namespace mx::improc;
      createStandardIndiRequestSw( m_indiP_resetToggle, "reset_model", "Reset the RLS model", "Reset Model");
 	 registerIndiPropertyNew( m_indiP_resetToggle, INDI_NEWCALLBACK(m_indiP_resetToggle) );
 
-     // state(stateCodes::READY);
+     createStandardIndiRequestSw( m_indiP_saveToggle, "save_state", "Save the controller state", "Save State");
+	 registerIndiPropertyNew( m_indiP_saveToggle, INDI_NEWCALLBACK(m_indiP_saveToggle) );
+
+     createStandardIndiRequestSw( m_indiP_loadToggle, "load_state", "Load the controller state", "Load State");
+	 registerIndiPropertyNew( m_indiP_loadToggle, INDI_NEWCALLBACK(m_indiP_loadToggle) );
      state( stateCodes::OPERATING );
      return 0;
  }
@@ -704,6 +722,50 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_resetToggle )(const pcf::IndiProperty 
         do_reset_model = true;
         log<text_log>("request reset.", logPrio::LOG_NOTICE);
 		updateSwitchIfChanged(m_indiP_resetToggle, "request", pcf::IndiElement::Off, INDI_IDLE);
+	}
+
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_saveToggle )(const pcf::IndiProperty &ipRecv)
+{
+	if(ipRecv.getName() != m_indiP_saveToggle.getName())
+	{
+		log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+		return -1;
+	}
+
+	if(!ipRecv.find("request")) return 0;
+
+	if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+	{
+		std::lock_guard<std::mutex> guard(m_indiMutex);
+
+        save(m_filename);
+        log<text_log>("saved state to " + m_filename, logPrio::LOG_NOTICE);
+		updateSwitchIfChanged(m_indiP_saveToggle, "request", pcf::IndiElement::Off, INDI_IDLE);
+	}
+
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_loadToggle )(const pcf::IndiProperty &ipRecv)
+{
+	if(ipRecv.getName() != m_indiP_loadToggle.getName())
+	{
+		log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+		return -1;
+	}
+
+	if(!ipRecv.find("request")) return 0;
+
+	if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+	{
+		std::lock_guard<std::mutex> guard(m_indiMutex);
+
+        load(m_filename);
+        log<text_log>("loaded state from " + m_filename, logPrio::LOG_NOTICE);
+		updateSwitchIfChanged(m_indiP_loadToggle, "request", pcf::IndiElement::Off, INDI_IDLE);
 	}
 
    return 0;
