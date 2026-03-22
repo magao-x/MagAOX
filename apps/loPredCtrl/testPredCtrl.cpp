@@ -93,7 +93,7 @@ int main(int argc, char **argv){
 
     int num_history = 10;
     int num_future = 3;
-    int num_actuators = 1;
+    int num_actuators = 2;
 
     DDSPC::Matrix measurement;
     measurement.resize(num_actuators,1);
@@ -102,6 +102,11 @@ int main(int argc, char **argv){
     exploration_noise.resize(num_actuators,1);
 
     DDSPC::PredictiveController controller = DDSPC::PredictiveController(num_actuators, num_history, num_future, gain, gamma, initial_regularization, initial_covariance);
+
+    std::vector<std::vector<DDSPC::realT>> signal(num_actuators, std::vector<DDSPC::realT>(num_steps, 0.0));
+    std::vector<std::vector<DDSPC::realT>> err(num_actuators, std::vector<DDSPC::realT>(num_steps, 0.0));
+    std::vector<std::vector<DDSPC::realT>> signal_pc(num_actuators, std::vector<DDSPC::realT>(num_steps, 0.0));
+    std::vector<std::vector<DDSPC::realT>> err_pc(num_actuators, std::vector<DDSPC::realT>(num_steps, 0.0));
 
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
@@ -115,24 +120,28 @@ int main(int argc, char **argv){
         if(i == 500)
             controller.set_regularization(0.1);
 
-        if(i < 500){
-            exploration_noise(0,0) = 0.1 * distribution(generator);
-        }else{
-            exploration_noise(0,0) = 0.0;
+        for(int k=0; k<num_actuators; k++){
+            if(i < 500){
+                exploration_noise(k,0) = 0.1 * distribution(generator);
+            } else {
+                exploration_noise(k,0) = 0.0;
+            }
+
+            err[k][i] = x[i] + signal[k][i];
+            signal[k][i+1] = signal[k][i] - gain * err[k][i] + exploration_noise(k, 0);
+
+            err_pc[k][i] = x[i] + signal_pc[k][i];
+            measurement(k,0) = err_pc[k][i];
         }
-
-        err[i] = x[i] + signal[i];
-        signal[i+1] = signal[i] - gain * err[i] + exploration_noise(0, 0);
-
-        err_pc[i] = x[i] + signal_pc[i];
-        measurement(0,0) = err_pc[i];
 
         begin = std::chrono::steady_clock::now();
         DDSPC::Matrix new_command = controller.calculate_command(measurement, exploration_noise);
         end = std::chrono::steady_clock::now();
         command_calc += std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
 
-        signal_pc[i + 1] = signal_pc[i] + new_command(0,0);
+        for(int k=0; k<num_actuators; k++){
+            signal_pc[k][i + 1] = signal_pc[k][i] + new_command(k,0);
+        }
 
         if((i+1) > (num_future + num_history)){
             begin = std::chrono::steady_clock::now();
@@ -150,12 +159,12 @@ int main(int argc, char **argv){
     std::cout << command_calc / num_steps / 1000.0 << "  " << update_system / num_steps / 1000.0 << "  " << update_controller / num_steps / 1000.0 << std::endl;
 
     std::cout<< standard_dev(x, num_steps, 500) << std::endl;
-    std::cout<< standard_dev(err, num_steps, 500) << std::endl;
-    std::cout<< standard_dev(err_pc, num_steps, 500) << std::endl;
+    std::cout<< standard_dev(err[0].data(), num_steps, 500) << std::endl;
+    std::cout<< standard_dev(err_pc[0].data(), num_steps, 500) << std::endl;
 
     write_to_file("x.csv", x, num_steps);
-    write_to_file("err.csv", err, num_steps);
-    write_to_file("err_pc.csv", err_pc, num_steps);
+    write_to_file("err.csv", err[0].data(), num_steps);
+    write_to_file("err_pc.csv", err_pc[0].data(), num_steps);
 
     return 0;
 
