@@ -91,6 +91,8 @@ using namespace mx::improc;
     DDSPC::Matrix new_command;
     DDSPC::Matrix new_measurement;
     DDSPC::Matrix full_command;
+    DDSPC::Matrix zero_exp_noise;
+    
 
     DDSPC::PredictiveController* controller {nullptr};
 
@@ -374,6 +376,10 @@ using namespace mx::improc;
     if(new_measurement.rows() != m_num_modes || new_measurement.cols() != 1) {
         new_measurement = DDSPC::Matrix(m_num_modes, 1);
     }
+    
+    // allocate the exploration noise matrix
+    zero_exp_noise.resize(m_num_modes, 1);
+    zero_exp_noise.setZero();
 
     generator = std::default_random_engine();
     distribution = std::normal_distribution<DDSPC::realT>(0.0, 1.0);
@@ -440,40 +446,42 @@ using namespace mx::improc;
         }
     }
 
-    if(use_set_01){
-        if(!m_exploration_steps_01.empty() and !m_exploration_noise_strength_01.empty()){
-            for(int i=0; i < m_num_modes; i++){
-                exp_noise(i,0) = m_exploration_noise_strength_01[0] * distribution(generator);
+    if(is_learning){
+        if(use_set_01){
+            if(!m_exploration_steps_01.empty() and !m_exploration_noise_strength_01.empty()){
+                for(int i=0; i < m_num_modes; i++){
+                    exp_noise(i,0) = m_exploration_noise_strength_01[0] * distribution(generator);
+                }
+
+                // If no more steps are left pop it!
+                m_exploration_steps_01[0]--;
+                if(m_exploration_steps_01[0] == 0){
+                    m_exploration_steps_01.erase(m_exploration_steps_01.begin());
+                    m_exploration_noise_strength_01.erase(m_exploration_noise_strength_01.begin());
+
+                    // Erase and apply the next regularization step?
+                    m_regularization_steps_01.erase(m_regularization_steps_01.begin());
+                    if(!m_regularization_steps_01.empty())
+                        controller->set_regularization(m_regularization_steps_01[0]);
+                }
             }
+        }else{
+            if(!m_exploration_steps_02.empty() and !m_exploration_noise_strength_02.empty()){
+                for(int i=0; i < m_num_modes; i++){
+                    exp_noise(i,0) = m_exploration_noise_strength_02[0] * distribution(generator);
+                }
 
-            // If no more steps are left pop it!
-            m_exploration_steps_01[0]--;
-            if(m_exploration_steps_01[0] == 0){
-                m_exploration_steps_01.erase(m_exploration_steps_01.begin());
-                m_exploration_noise_strength_01.erase(m_exploration_noise_strength_01.begin());
+                // If no more steps are left pop it!
+                m_exploration_steps_02[0]--;
+                if(m_exploration_steps_02[0] == 0){
+                    m_exploration_steps_02.erase(m_exploration_steps_02.begin());
+                    m_exploration_noise_strength_02.erase(m_exploration_noise_strength_02.begin());
 
-                // Erase and apply the next regularization step?
-                m_regularization_steps_01.erase(m_regularization_steps_01.begin());
-                if(!m_regularization_steps_01.empty())
-                    controller->set_regularization(m_regularization_steps_01[0]);
-            }
-        }
-    }else{
-        if(!m_exploration_steps_02.empty() and !m_exploration_noise_strength_02.empty()){
-            for(int i=0; i < m_num_modes; i++){
-                exp_noise(i,0) = m_exploration_noise_strength_02[0] * distribution(generator);
-            }
-
-            // If no more steps are left pop it!
-            m_exploration_steps_02[0]--;
-            if(m_exploration_steps_02[0] == 0){
-                m_exploration_steps_02.erase(m_exploration_steps_02.begin());
-                m_exploration_noise_strength_02.erase(m_exploration_noise_strength_02.begin());
-
-                // Erase and apply the next regularization step?
-                m_regularization_steps_02.erase(m_regularization_steps_02.begin());
-                if(!m_regularization_steps_02.empty())
-                    controller->set_regularization(m_regularization_steps_02[0]);
+                    // Erase and apply the next regularization step?
+                    m_regularization_steps_02.erase(m_regularization_steps_02.begin());
+                    if(!m_regularization_steps_02.empty())
+                        controller->set_regularization(m_regularization_steps_02[0]);
+                }
             }
         }
     }
@@ -482,10 +490,15 @@ using namespace mx::improc;
     for(int i=0; i < m_num_modes; i++){
         new_measurement(i, 0) = m_modeval(i,0);
     }
-    DDSPC::print_matrix(new_measurement, "new measurement");
+    // DDSPC::print_matrix(new_measurement, "new measurement");
 
     if(is_predictive_control){
-        new_command = controller->calculate_command(new_measurement, exp_noise);
+        if(is_learning){
+            new_command = controller->calculate_command(new_measurement, exp_noise);
+        }else{
+            new_command = controller->calculate_command(new_measurement, zero_exp_noise);
+        }
+        
     }else{
         for(int i=0; i < m_num_modes; i++){
             new_command(i,0) = -m_gainCtrl * new_measurement(i, 0);
