@@ -1,0 +1,72 @@
+#!/bin/bash
+set -eo pipefail
+
+#######################################################
+# shmimTCPbridge: generic shmimTCP stream bridge
+#
+# gets a stream from a remote computer and puts it on
+# this computer
+#######################################################
+
+pname=$(basename "$0")
+
+function printHELP {
+echo "------------------------------------------------------------------------"
+echo " $pname : bridge a shmim stream from a remote host to this machine"
+echo "------------------------------------------------------------------------"
+echo "USAGE:"
+echo "  $pname <stream_name> <remote_host> <local_ip> <port>"
+echo ""
+echo "INPUT:"
+echo "  <stream_name> : shmim name on remote machine"
+echo "  <remote_host> : user@host of sender (e.g. parker@192.168.21.5)"
+echo "  <local_ip>    : IP of this machine (receiver)"
+echo "  <port>        : TCP port to use"
+echo ""
+echo "EXAMPLE:"
+echo "  $pname acc001 parker@192.168.21.5 192.168.21.3 8886"
+echo "------------------------------------------------------------------------"
+}
+
+# check args
+if [ $# -lt 4 ]; then
+    printHELP
+    exit 1
+fi
+
+STREAM=$1
+REMOTE=$2
+LOCAL_IP=$3
+PORT=$4
+
+ME=$(hostname)
+
+# tmux session names
+RX_SESSION="sTCPrc-${ME}-${PORT}"
+TX_SESSION="sTCPtx-${PORT}"
+
+# Start receiver locally
+echo "Starting receiver on $(hostname) (port ${PORT})"
+
+tmux new -d -s ${RX_SESSION} || true
+tmux send -t ${RX_SESSION} C-c C-m "shmimTCPreceive ${PORT}" C-m
+
+# Start transmitter on remote machine
+echo "Starting transmitter on ${REMOTE}"
+
+ssh -t ${REMOTE} "tmux new -d -s ${TX_SESSION}" || true
+
+ssh -t ${REMOTE} \
+"tmux send -t ${TX_SESSION} C-c C-m 'shmimTCPtransmit ${STREAM} ${LOCAL_IP} ${PORT}' C-m"
+
+
+echo ""
+echo "Bridge established:"
+echo "  Stream      : ${STREAM}"
+echo "  From        : ${REMOTE}"
+echo "  To (local)  : ${LOCAL_IP}:${PORT}"
+echo ""
+echo "Debug:"
+echo "  Receiver: tmux attach -t ${RX_SESSION}"
+echo "  Sender  : ssh ${REMOTE} -t 'tmux attach -t ${TX_SESSION}'"
+echo ""
