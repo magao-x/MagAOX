@@ -1,135 +1,80 @@
-/** \file cred2Ctrl.hpp
-  * \brief The MagAO-X XXXXXX header file
-  *
-  * \ingroup cred2Ctrl_files
-  */
+/**
+ * \file cred2Ctrl.hpp
+ * \brief MagAO-X C-RED 2 USB camera controller application
+ *
+ * \ingroup cred2Ctrl_files
+ */
 
 #ifndef cred2Ctrl_hpp
 #define cred2Ctrl_hpp
 
+#include <mutex>
+#include <condition_variable>
+#include <vector>
+#include <atomic>
+#include <cstring>
 
-#include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
-#include "../../magaox_git_version.h"
+#include "cred2_sdk.h"   // Provided by user
+#include "libMagAOX.hpp"
+#include "stdCamera.hpp"
 
-/** \defgroup cred2Ctrl
-  * \brief The XXXXXX application to control the CRED2 camera.
-  *
-  * <a href="../handbook/operating/software/apps/XXXXXX.html">Application Documentation</a>
-  *
-  * \ingroup apps
-  *
-  */
-
-/** \defgroup cred2Ctrl_files
-  * \ingroup cred2Ctrl
-  */
-
-namespace MagAOX
-{
-namespace app
-{
-
-/// The MagAO-X xxxxxxxx
 /**
-  * \ingroup cred2Ctrl
-  */
-class cred2Ctrl : public MagAOXApp<true>
+ * \class cred2Ctrl
+ * \brief MagAO-X application controlling a First Light Imaging C-RED 2 camera.
+ *
+ * This application uses the USB SDK callback mechanism and stores the latest frame
+ * in a latch buffer. The MagAO-X FSM retrieves frames inside appLogic().
+ */
+class cred2Ctrl :
+    public MagAOX::app::dev::stdCamera<cred2Ctrl>   // <-- Standard camera interface
 {
-
-   //Give the test harness access.
-   friend class cred2Ctrl_test;
-
-protected:
-
-   /** \name Configurable Parameters
-     *@{
-     */
-
-   //here add parameters which will be config-able at runtime
-
-   ///@}
-
-
-
-
 public:
-   /// Default c'tor.
-   cred2Ctrl();
+    cred2Ctrl();
+    virtual ~cred2Ctrl() noexcept;
 
-   /// D'tor, declared and defined for noexcept.
-   ~cred2Ctrl() noexcept
-   {}
+    // ---------- FSM Methods ----------
 
-   virtual void setupConfig();
+    /// Setup configuration declarations
+    void setupConfig(mx::app::appConfigurator &config);
 
-   /// Implementation of loadConfig logic, separated for testing.
-   /** This is called by loadConfig().
-     */
-   int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
+    /// Load configurables from file
+    void loadConfig(mx::app::appConfigurator &config);
 
-   virtual void loadConfig();
+    /// Startup of device
+    int appStartup();
 
-   /// Startup function
-   /**
-     *
-     */
-   virtual int appStartup();
+    /// Main FSM loop: publish frame to MagAO-X shmim
+    int appLogic();
 
-   /// Implementation of the FSM for cred2Ctrl.
-   /**
-     * \returns 0 on no critical error
-     * \returns -1 on an error requiring shutdown
-     */
-   virtual int appLogic();
+    /// Actions when powered off
+    int onPowerOff();
 
-   /// Shutdown the app.
-   /**
-     *
-     */
-   virtual int appShutdown();
+    /// Actions while powered off
+    int whilePowerOff();
 
+    /// Shutdown actions
+    int appShutdown();
 
+    // ---------- C-RED2 Callbacks ----------
+
+    static void errorCallback(void *userctx, int error, const char *diag);
+    static void frameCallback(void *userctx, int16_t *frame);
+
+private:
+    // C-RED2 handle
+    void *m_ctx = nullptr;
+
+    // Dimensions (loaded from configuration)
+    int m_width = 640;
+    int m_height = 512;
+
+    // Latest-frame latch
+    std::vector<uint16_t> m_frame;
+    std::mutex m_mtx;
+    std::condition_variable m_cv;
+    bool m_haveNewFrame = false;
+
+    std::atomic<bool> m_running{false};
 };
 
-cred2Ctrl::cred2Ctrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
-{
-
-   return;
-}
-
-void cred2Ctrl::setupConfig()
-{
-}
-
-int cred2Ctrl::loadConfigImpl( mx::app::appConfigurator & _config )
-{
-
-
-   return 0;
-}
-
-void cred2Ctrl::loadConfig()
-{
-   loadConfigImpl(config);
-}
-
-int cred2Ctrl::appStartup()
-{
-
-   return 0;
-}
-
-int cred2Ctrl::appLogic()
-{
-   return 0;
-}
-
-int cred2Ctrl::appShutdown()
-{
-   return 0;
-}
-
-} //namespace app
-} //namespace MagAOX
-
-#endif //cred2Ctrl_hpp
+#endif
