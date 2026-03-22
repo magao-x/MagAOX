@@ -97,7 +97,7 @@ using namespace mx::improc;
     // Process control parameters
     bool is_learning {false};
     bool is_predictive_control {false};
-    bool is_integrating {false};
+    bool is_integrating {true};
 
     double loop_time_elapsed {0.0};
 
@@ -120,7 +120,10 @@ using namespace mx::improc;
 
     std::string m_exploration_sequence {""};
 
+    std::string m_filename {""};
+
     pcf::IndiProperty m_indiP_exploration;
+    pcf::IndiProperty m_indiP_filename;
     pcf::IndiProperty m_indiP_learningToggle;
     pcf::IndiProperty m_indiP_integratingToggle;
     pcf::IndiProperty m_indiP_predictingToggle;
@@ -129,6 +132,7 @@ using namespace mx::improc;
    public:
 
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_exploration );
+    INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_filename );
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_learningToggle );
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_integratingToggle );
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_predictingToggle );
@@ -264,11 +268,16 @@ using namespace mx::improc;
 
      CREATE_REG_INDI_NEW_TEXT( m_indiP_exploration, "exploration_sequence", "", "");
 
+     CREATE_REG_INDI_NEW_TEXT( m_indiP_filename, "filename", "", "");
+
      createStandardIndiToggleSw( m_indiP_learningToggle, "learn", "Learning State", "Learn Controls");
 	 registerIndiPropertyNew( m_indiP_learningToggle, INDI_NEWCALLBACK(m_indiP_learningToggle) );
 
      createStandardIndiToggleSw( m_indiP_predictingToggle, "predict", "Predict State", "Predictive Controls");
 	 registerIndiPropertyNew( m_indiP_predictingToggle, INDI_NEWCALLBACK(m_indiP_predictingToggle) );
+
+     createStandardIndiToggleSw( m_indiP_integratingToggle, "integrate", "Integration State", "Integration Controls");
+	 registerIndiPropertyNew( m_indiP_integratingToggle, INDI_NEWCALLBACK(m_indiP_integratingToggle) );
 
      createStandardIndiRequestSw( m_indiP_resetToggle, "reset_model", "Reset the RLS model", "Reset Model");
 	 registerIndiPropertyNew( m_indiP_resetToggle, INDI_NEWCALLBACK(m_indiP_resetToggle) );
@@ -293,6 +302,8 @@ using namespace mx::improc;
      }
 
      updatesIfChanged<std::string>( m_indiP_exploration, { "current", "target" }, { m_exploration_sequence, m_exploration_sequence } );
+
+     updatesIfChanged<std::string>( m_indiP_filename, { "current", "target" }, { m_filename, m_filename } );
 
      if(is_learning){
 		 updateSwitchIfChanged(m_indiP_learningToggle, "toggle", pcf::IndiElement::On, INDI_OK);
@@ -544,6 +555,26 @@ using namespace mx::improc;
         k++;
     }
     switch_exploration = true;
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( loPredCtrl, m_indiP_filename )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_filename, ipRecv );
+
+    std::string target;
+
+    std::unique_lock<std::mutex> lock( m_indiMutex );
+
+    if( indiTargetUpdate( m_indiP_filename, target, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    m_filename = target;
+    log<text_log>( "Filename set to: " + m_filename, logPrio::LOG_NOTICE );
 
     return 0;
 }
