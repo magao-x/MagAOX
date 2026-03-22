@@ -69,6 +69,9 @@ class PredictiveController{
         Matrix calculate_command(Matrix new_measurement, Matrix exploration_noise);
         void update_system();
         void update_controller();
+
+        void save_state(const std::string &filename);
+        void load_state(const std::string &filename);
 };
 
 }
