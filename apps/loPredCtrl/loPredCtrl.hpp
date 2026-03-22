@@ -297,6 +297,7 @@ using namespace mx::improc;
 
     frameGrabberT::m_ownShmim = false;
     FRAMEGRABBER_LOAD_CONFIG(_config);
+    TELEMETER_LOAD_CONFIG(_config);
 
     _config(m_fpsSource, "parameters.fpsSource");
 
