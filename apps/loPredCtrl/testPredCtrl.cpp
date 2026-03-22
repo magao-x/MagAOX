@@ -89,8 +89,10 @@ int main(int argc, char **argv){
     DDSPC::realT gain = 0.5;
     DDSPC::realT gamma = 1.001;
     DDSPC::realT initial_regularization = 100.0;
-    int num_history = 50;
-    int num_future = 10;
+    DDSPC::realT initial_covariance = 1.e5;
+
+    int num_history = 10;
+    int num_future = 3;
     int num_actuators = 1;
 
     DDSPC::Matrix measurement;
@@ -99,7 +101,7 @@ int main(int argc, char **argv){
     DDSPC::Matrix exploration_noise;
     exploration_noise.resize(num_actuators,1);
 
-    DDSPC::PredictiveController controller = DDSPC::PredictiveController(num_actuators, num_history, num_future, gain, gamma, initial_regularization, 1.0e5);
+    DDSPC::PredictiveController controller = DDSPC::PredictiveController(num_actuators, num_history, num_future, gain, gamma, initial_regularization, initial_covariance);
 
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
