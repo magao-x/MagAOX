@@ -30,6 +30,9 @@ namespace DDSPC
 
     void save_matrix(std::string fileName, Matrix mat);
     Matrix load_matrix(std::string fileName);
+
+    std::string trim(const std::string &s);
+    std::string parse_json_value(const std::string &line);
 }
 
 #endif // utils_hpp
