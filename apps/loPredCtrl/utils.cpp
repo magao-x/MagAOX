@@ -56,4 +56,28 @@ namespace DDSPC
         return  Eigen::Map<Matrix>(matrixEntries.data(), matrixRowNumber, matrixEntries.size() / matrixRowNumber);
 
     }
+
+    std::string trim(const std::string &s){
+        auto start = s.find_first_not_of(" \t\n\r");
+        if(start == std::string::npos) return "";
+        auto end = s.find_last_not_of(" \t\n\r");
+        return s.substr(start, end - start + 1);
+    }
+
+    std::string parse_json_value(const std::string &line){
+        auto colon = line.find(':');
+        if(colon == std::string::npos){
+            throw std::runtime_error("Invalid metadata line in JSON metadata");
+        }
+        std::string value = line.substr(colon + 1);
+        value = trim(value);
+        if(!value.empty() && value.back() == ','){
+            value.pop_back();
+            value = trim(value);
+        }
+        if(!value.empty() && value.front() == '"' && value.back() == '"'){
+            value = value.substr(1, value.size() - 2);
+        }
+        return value;
+    }
 }
