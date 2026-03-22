@@ -76,6 +76,7 @@ using namespace mx::improc;
     uint32_t m_modevalTypeSize{0};
 
     long long frame_counter {0};
+    std::chrono::high_resolution_clock::time_point m_lastPrintTime { std::chrono::high_resolution_clock::now() };
 
     // The predictive control parameters
     float m_gainCtrl {0.0};
@@ -96,6 +97,7 @@ using namespace mx::improc;
     // Process control parameters
     bool is_learning {false};
     bool is_predictive_control {false};
+    double loop_time_elapsed {0.0};
 
     //  Learning variables
     std::vector<float> m_exploration_noise_strength_01;
@@ -185,10 +187,10 @@ using namespace mx::improc;
     // Check if processImage is running
     // while(m_outputStream.md[0].write == 1);
 
-    // m_outputStream.md[0].write = 1;
-    // memcpy( m_outputStream.array.raw, full_command.data(), m_modevalWidth * m_modevalTypeSize );
-    // m_outputStream.md[0].cnt0++;
-    // m_outputStream.md[0].write = 0;
+    m_outputStream.md[0].write = 1;
+    memcpy( m_outputStream.array.raw, full_command.data(), m_modevalWidth * m_modevalTypeSize );
+    m_outputStream.md[0].cnt0++;
+    m_outputStream.md[0].write = 0;
 
     //ImageStreamIO_sempost( &m_outputStream, -1 );
 
@@ -235,6 +237,7 @@ using namespace mx::improc;
     std::cout << "Regularization " << m_regularizationCtrl << std::endl;
     std::cout << "Gamma " << m_gammaCtrl << std::endl;
 
+    std::cout << "num modes " << m_num_modes << std::endl;
     std::cout << "History " << m_history << std::endl;
     std::cout << "Future " << m_future << std::endl;
 
@@ -322,14 +325,21 @@ using namespace mx::improc;
     std::cout << "m_modevalWidth: " << m_modevalWidth << std::endl;
     std::cout << "m_modevalHeight: " << m_modevalHeight << std::endl;
 
-    full_command.resize(m_modevalWidth, m_modevalHeight);
-    new_command.resize(m_num_modes, 1);
-    new_measurement.resize(m_num_modes, 1);
+    // Only resize if dimensions change to avoid Eigen block resize issues
+    if(full_command.rows() != (int)m_modevalWidth || full_command.cols() != (int)m_modevalHeight) {
+        full_command = DDSPC::Matrix(m_modevalWidth, m_modevalHeight);
+    }
+    if(new_command.rows() != m_num_modes || new_command.cols() != 1) {
+        new_command = DDSPC::Matrix(m_num_modes, 1);
+    }
+    if(new_measurement.rows() != m_num_modes || new_measurement.cols() != 1) {
+        new_measurement = DDSPC::Matrix(m_num_modes, 1);
+    }
 
     generator = std::default_random_engine();
     distribution = std::normal_distribution<DDSPC::realT>(0.0, 1.0);
 
-    /*
+
     // Allocate the DM
 	if(m_outputOpened){
 		ImageStreamIO_closeIm(&m_outputStream);
@@ -358,7 +368,6 @@ using namespace mx::improc;
 
 		log<text_log>( "Opened " + m_outputName + " " + std::to_string(m_outputWidth) + " x " + std::to_string(m_outputHeight) + " with data type: " + std::to_string(m_outputDataType), logPrio::LOG_NOTICE);
 	}
-    */
 
     controller = new DDSPC::PredictiveController(m_num_modes, m_history, m_future, m_gainCtrl, m_gammaCtrl, m_regularizationCtrl, m_covarianceCtrl);
 
@@ -367,6 +376,7 @@ using namespace mx::improc;
 
  inline int loPredCtrl::processImage( void *curr_src, const dev::shmimT &dummy )
  {
+    auto start = std::chrono::high_resolution_clock::now();
     // static_cast<void>( dummy ); // be unused
     // This could be made more efficient by doing only a single copy statement.
     Eigen::Map<eigenImage<realT>> m_modeval( static_cast<realT *>(curr_src), m_modevalWidth, m_modevalHeight);
@@ -434,32 +444,43 @@ using namespace mx::improc;
     for(int i=0; i < m_num_modes; i++){
         new_measurement(i, 0) = m_modeval(i,0);
     }
+    DDSPC::print_matrix(new_measurement, "new measurement");
 
     if(is_predictive_control){
         new_command = controller->calculate_command(new_measurement, exp_noise);
+    }else{
+        for(int i=0; i < m_num_modes; i++){
+            new_command(i,0) = new_measurement(i, 0);
+        }
     }
-
+    
+    // add an integrator for now 
+    // TODO: remove for real production version!
     for(int i=0; i < m_modevalWidth; i++){
         if(i < m_num_modes){
-            full_command(i, 0) = new_command(i, 0);
+            full_command(i, 0) = full_command(i, 0) - 0.25 * new_command(i, 0);
         }else{
             full_command(i, 0) = m_modeval(i,0);
         }
     }
 
-    // send_to_shmim();
+    send_to_shmim();
 
     if(is_learning){
         controller->update_system();
         controller->update_controller();
     }
 
-    if(frame_counter % 20 == 0){
-        std::cout << "HOWDY" << std::endl;
+    auto end = std::chrono::high_resolution_clock::now();
+    loop_time_elapsed += std::chrono::duration_cast<std::chrono::duration<double, std::micro>>(end - start).count();
+    
+    if(frame_counter % 5 == 0){
+        std::cout << "HOWDY elapsed us: " << loop_time_elapsed / 4000.0 << " us" << std::endl;
+        loop_time_elapsed = 0.0;
     }
-
-     frame_counter++;
-     return 0;
+    
+    frame_counter++;
+    return 0;
  }
 
  INDI_NEWCALLBACK_DEFN( loPredCtrl, m_indiP_exploration )( const pcf::IndiProperty &ipRecv )
