@@ -79,10 +79,10 @@ using namespace mx::improc;
     std::chrono::high_resolution_clock::time_point m_lastPrintTime { std::chrono::high_resolution_clock::now() };
 
     // The predictive control parameters
-    float m_gainCtrl {0.0};
-    float m_regularizationCtrl {1.0};
-    float m_gammaCtrl {1.00};
-    float m_covarianceCtrl {100000.0};
+    realT m_gainCtrl {0.0};
+    realT m_regularizationCtrl {1.0};
+    realT m_gammaCtrl {1.00};
+    realT m_covarianceCtrl {100000.0};
 
     int m_num_modes {1};
     int m_history {5};
@@ -104,13 +104,13 @@ using namespace mx::improc;
     double loop_time_elapsed {0.0};
 
     //  Learning variables
-    std::vector<float> m_exploration_noise_strength_01;
+    std::vector<realT> m_exploration_noise_strength_01;
     std::vector<int> m_exploration_steps_01;
-    std::vector<float> m_regularization_steps_01;
+    std::vector<realT> m_regularization_steps_01;
 
-    std::vector<float> m_exploration_noise_strength_02;
+    std::vector<realT> m_exploration_noise_strength_02;
     std::vector<int> m_exploration_steps_02;
-    std::vector<float> m_regularization_steps_02;
+    std::vector<realT> m_regularization_steps_02;
 
     bool switch_exploration {false};
     bool use_set_01 {true};
