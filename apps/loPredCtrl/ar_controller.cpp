@@ -1,4 +1,6 @@
 #include "ar_controller.hpp"
+#include <fstream>
+#include <stdexcept>
 
 namespace DDSPC
 {
@@ -242,6 +244,106 @@ Matrix PredictiveController::calculate_command(Matrix new_measurement, Matrix ex
     command_head++;
 
     return new_delta;
+}
+
+void PredictiveController::save_state(const std::string &filename) {
+    // Save metadata in a JSON sidecar file
+    std::string metadata_file = filename + ".meta";
+    std::ofstream ofs(metadata_file);
+    if (!ofs.is_open()) {
+        throw std::runtime_error("Could not open file for save_state metadata: " + metadata_file);
+    }
+
+    ofs << "{\n";
+    ofs << "  \"num_modes\": " << _num_modes << ",\n";
+    ofs << "  \"num_future\": " << _num_future << ",\n";
+    ofs << "  \"num_history\": " << _num_history << ",\n";
+    ofs << "  \"gain\": " << _gain << ",\n";
+    ofs << "  \"delta_max\": " << _delta_max << ",\n";
+    ofs << "  \"regularization\": " << _regularization << ",\n";
+    ofs << "  \"buffer_size\": " << buffer_size << ",\n";
+    ofs << "  \"measurement_head\": " << measurement_head << ",\n";
+    ofs << "  \"command_head\": " << command_head << ",\n";
+    ofs << "  \"use_regularization_matrix_01\": " << (use_regularization_matrix_01 ? "true" : "false") << ",\n";
+    ofs << "  \"do_switch_regularization_matrix\": " << (do_switch_regularization_matrix ? "true" : "false") << "\n";
+    ofs << "}\n";
+    ofs.close();
+
+    // Save matrices using utils helpers
+    DDSPC::save_matrix(filename + ".measurement_buffer", measurement_buffer);
+    DDSPC::save_matrix(filename + ".command_buffer", command_buffer);
+    DDSPC::save_matrix(filename + ".controller", controller);
+    DDSPC::save_matrix(filename + ".integrator", integrator);
+    DDSPC::save_matrix(filename + ".regularization_matrix_01", regularization_matrix_01);
+    DDSPC::save_matrix(filename + ".regularization_matrix_02", regularization_matrix_02);
+
+    DDSPC::save_matrix(filename + ".rls_prediction_matrix", rls->prediction_matrix);
+    DDSPC::save_matrix(filename + ".rls_inverse_covariance", rls->inverse_covariance);
+    DDSPC::save_matrix(filename + ".rls_K", rls->K);
+    DDSPC::save_matrix(filename + ".rls_err", rls->err);
+    DDSPC::save_matrix(filename + ".rls_prediction_output", rls->prediction_output);
+}
+
+void PredictiveController::load_state(const std::string &filename) {
+    std::string metadata_file = filename + ".meta";
+    std::ifstream ifs(metadata_file);
+    if (!ifs.is_open()) {
+        throw std::runtime_error("Could not open file for load_state metadata: " + metadata_file);
+    }
+
+    auto parse_numeric = [&](const std::string &line) -> std::string {
+        auto colon = line.find(':');
+        if (colon == std::string::npos) throw std::runtime_error("Invalid metadata format in " + metadata_file);
+        auto value = line.substr(colon + 1);
+        // trim spaces and commas
+        auto start = value.find_first_not_of(" \t\n\r");
+        if (start == std::string::npos) throw std::runtime_error("Invalid metadata line in " + metadata_file);
+        auto end = value.find_last_not_of(" \t\n\r,");
+        return value.substr(start, end - start + 1);
+    };
+
+    auto parse_bool = [&](const std::string &line) -> bool {
+        std::string val = parse_numeric(line);
+        if (val == "true") return true;
+        if (val == "false") return false;
+        throw std::runtime_error("Invalid boolean value in " + metadata_file);
+    };
+
+    std::string line;
+    std::getline(ifs, line); // {
+
+    std::getline(ifs, line); _num_modes = std::stoi(parse_numeric(line));
+    std::getline(ifs, line); _num_future = std::stoi(parse_numeric(line));
+    std::getline(ifs, line); _num_history = std::stoi(parse_numeric(line));
+    std::getline(ifs, line); _gain = static_cast<realT>(std::stod(parse_numeric(line)));
+    std::getline(ifs, line); _delta_max = static_cast<realT>(std::stod(parse_numeric(line)));
+    std::getline(ifs, line); _regularization = static_cast<realT>(std::stod(parse_numeric(line)));
+    std::getline(ifs, line); buffer_size = static_cast<uint>(std::stoul(parse_numeric(line)));
+    std::getline(ifs, line); measurement_head = static_cast<uint>(std::stoul(parse_numeric(line)));
+    std::getline(ifs, line); command_head = static_cast<uint>(std::stoul(parse_numeric(line)));
+    std::getline(ifs, line); use_regularization_matrix_01 = parse_bool(line);
+    std::getline(ifs, line); do_switch_regularization_matrix = parse_bool(line);
+
+    ifs.close();
+
+    measurement_buffer = DDSPC::load_matrix(filename + ".measurement_buffer");
+    command_buffer = DDSPC::load_matrix(filename + ".command_buffer");
+    controller = DDSPC::load_matrix(filename + ".controller");
+    integrator = DDSPC::load_matrix(filename + ".integrator");
+    regularization_matrix_01 = DDSPC::load_matrix(filename + ".regularization_matrix_01");
+    regularization_matrix_02 = DDSPC::load_matrix(filename + ".regularization_matrix_02");
+
+    if (use_regularization_matrix_01) {
+        regularization_matrix = &regularization_matrix_01;
+    } else {
+        regularization_matrix = &regularization_matrix_02;
+    }
+
+    rls->prediction_matrix = DDSPC::load_matrix(filename + ".rls_prediction_matrix");
+    rls->inverse_covariance = DDSPC::load_matrix(filename + ".rls_inverse_covariance");
+    rls->K = DDSPC::load_matrix(filename + ".rls_K");
+    rls->err = DDSPC::load_matrix(filename + ".rls_err");
+    rls->prediction_output = DDSPC::load_matrix(filename + ".rls_prediction_output");
 }
 
 }

@@ -97,6 +97,8 @@ using namespace mx::improc;
     // Process control parameters
     bool is_learning {false};
     bool is_predictive_control {false};
+    bool is_integrating {false};
+
     double loop_time_elapsed {0.0};
 
     //  Learning variables
@@ -120,6 +122,7 @@ using namespace mx::improc;
 
     pcf::IndiProperty m_indiP_exploration;
     pcf::IndiProperty m_indiP_learningToggle;
+    pcf::IndiProperty m_indiP_integratingToggle;
     pcf::IndiProperty m_indiP_predictingToggle;
     pcf::IndiProperty m_indiP_resetToggle;
 
@@ -127,6 +130,7 @@ using namespace mx::improc;
 
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_exploration );
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_learningToggle );
+    INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_integratingToggle );
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_predictingToggle );
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_resetToggle );
 
@@ -296,6 +300,12 @@ using namespace mx::improc;
 		 updateSwitchIfChanged(m_indiP_learningToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
 	 }
 
+     if(is_integrating){
+		 updateSwitchIfChanged(m_indiP_integratingToggle, "toggle", pcf::IndiElement::On, INDI_OK);
+	 }else{
+		 updateSwitchIfChanged(m_indiP_integratingToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+	 }
+
      if(is_predictive_control){
         updateSwitchIfChanged(m_indiP_predictingToggle, "toggle", pcf::IndiElement::On, INDI_OK);
     }else{
@@ -390,7 +400,6 @@ using namespace mx::improc;
         do_reset_model = false;
     }
 
-
     if(switch_exploration){
         use_set_01 = !use_set_01;
         switch_exploration = false;
@@ -450,15 +459,18 @@ using namespace mx::improc;
         new_command = controller->calculate_command(new_measurement, exp_noise);
     }else{
         for(int i=0; i < m_num_modes; i++){
-            new_command(i,0) = new_measurement(i, 0);
+            new_command(i,0) = -m_gainCtrl * new_measurement(i, 0);
         }
     }
     
-    // add an integrator for now 
-    // TODO: remove for real production version!
+    //
     for(int i=0; i < m_modevalWidth; i++){
         if(i < m_num_modes){
-            full_command(i, 0) = full_command(i, 0) - 0.25 * new_command(i, 0);
+            if(is_integrating){
+                full_command(i, 0) = full_command(i, 0) + new_command(i, 0);
+            }else{
+                full_command(i, 0) = new_command(i, 0);
+            }
         }else{
             full_command(i, 0) = m_modeval(i,0);
         }
@@ -474,8 +486,8 @@ using namespace mx::improc;
     auto end = std::chrono::high_resolution_clock::now();
     loop_time_elapsed += std::chrono::duration_cast<std::chrono::duration<double, std::micro>>(end - start).count();
     
-    if(frame_counter % 5 == 0){
-        std::cout << "HOWDY elapsed us: " << loop_time_elapsed / 4000.0 << " us" << std::endl;
+    if(frame_counter % 2000 == 0){
+        std::cout << "HOWDY elapsed us: " << loop_time_elapsed / 2000.0 << " us" << std::endl;
         loop_time_elapsed = 0.0;
     }
     
@@ -508,20 +520,21 @@ using namespace mx::improc;
     int k = 0;
     while (getline(csvStringStream, entry, ',')){
         if(k % 3 == 0){
-            // std::cout << std::stoi(entry) << std::endl;
+            std::cout << std::stoi(entry) << std::endl;
             if(use_set_01){
                 m_exploration_steps_02.push_back(std::stoi(entry));
             }else{
                 m_exploration_steps_01.push_back(std::stoi(entry));
             }
         }else if(k % 3 == 1){
-            // std::cout << static_cast<DDSPC::realT>() << std::endl;
+            std::cout << static_cast<DDSPC::realT>(std::stod(entry)) << std::endl;
             if(use_set_01){
                 m_exploration_noise_strength_02.push_back(std::stod(entry));
             }else{
                 m_exploration_noise_strength_01.push_back(std::stod(entry));
             }
         }else{
+            std::cout << static_cast<DDSPC::realT>(std::stof(entry)) << std::endl;
             if(use_set_01){
                 m_regularization_steps_02.push_back(std::stof(entry));
             }else{
@@ -563,6 +576,41 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_learningToggle )(const pcf::IndiProper
         is_learning = false;
         log<text_log>("stopped learning", logPrio::LOG_NOTICE);
         updateSwitchIfChanged(m_indiP_learningToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+      }
+      return 0;
+   }
+
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_integratingToggle )(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_integratingToggle.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+
+   //switch is toggled to on
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   {
+      if(!is_integrating) //is actively integrating so change it
+      {
+		is_integrating = true;
+		log<text_log>("started integrating", logPrio::LOG_NOTICE);
+		updateSwitchIfChanged(m_indiP_integratingToggle, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      }
+      return 0;
+   }
+
+   //switch is toggle to off
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+   {
+      if(is_integrating) //is actively integrating so change it
+      {
+        is_integrating = false;
+        log<text_log>("stopped integrating", logPrio::LOG_NOTICE);
+        updateSwitchIfChanged(m_indiP_integratingToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
       }
       return 0;
    }
