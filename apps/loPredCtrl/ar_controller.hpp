@@ -2,9 +2,6 @@
 #define PCARC_HPP
 
 #include <Eigen/Dense>
-#include <mx/improc/eigenCube.hpp>
-#include <mx/improc/eigenImage.hpp>
-using namespace mx::improc;
 
 #include "utils.hpp"
 #include "recursive_least_squares.hpp"
