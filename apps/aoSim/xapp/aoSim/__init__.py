@@ -124,7 +124,7 @@ class aoSim(XDevice):
         """
         self._current_dm_state = self._dm_command_history[0]
         self._dm_command_history = np.roll(self._dm_command_history, shift=-1, axis=0)
-        self._dm_command_history[-1] = self._dm.get_data(wait=False)
+        self._dm_command_history[-1,:,0] = self._dm.get_data(wait=False)
         
     def update_wfs(self):
         """Update the wavefront sensor measurement in shared memory.
