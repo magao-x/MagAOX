@@ -93,6 +93,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     virtual void setupConfig();
 
+    std::string m_fgCpuset; ///< The cpuset to assign the framegrabber thread to.  Not used if empty, the default.
     /// Implementation of loadConfig logic, separated for testing.
     /** This is called by loadConfig().
      */
@@ -235,6 +236,16 @@ void mcp3208Ctrl::setupConfig()
                 false,
                 "int",
                 "Setting the number of channels needed to readout accelerometers" );
+
+    config.add( "framegrabber.cpuset",
+                "",
+                "framegrabber.cpuset",
+                argType::Required,
+                "framegrabber",
+                "cpuset",
+                false,
+                "string",
+                "The cpuset to assign the framegrabber thread to." );
 }
 
 int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -249,6 +260,8 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fpsTol, "fps.tol" );
 
     _config( m_numChannels, "accel.numChannels" ); // making number of mcp3208 channels we read out configurable
+
+    _config(m_fgCpuset, "framegrabber.cpuset");
 
     return 0;
 }
