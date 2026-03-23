@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
-    <class>hwpSequencer</class>
-    <widget class="QWidget" name="hwpSequencer">
+    <class>polarimetry</class>
+    <widget class="QWidget" name="polarimetry">
         <property name="geometry">
             <rect>
                 <x>0</x>
@@ -303,9 +303,9 @@
                         <item row="1" column="1">
                             <widget class="QLabel" name="labelTracking"/>
                         </item>
-                        <!-- <item row="2" column="0">
-                    <widget class="xqt::statusCombo" name="comboHwpLin"/>
-                </item> -->
+                        <item row="2" column="0">
+                            <widget class="xqt::statusCombo" name="comboHwpLin"/>
+                        </item>
                         <item row="3" column="0">
                             <widget class="xqt::statusEntry" name="entryNumCycles"/>
                         </item>
@@ -416,11 +416,11 @@
             <extends>QWidget</extends>
             <header>../xWidgets/fsmDisplay.hpp</header>
         </customwidget>
-        <!-- <customwidget>
+        <customwidget>
             <class>xqt::statusCombo</class>
             <extends>QLineEdit</extends>
             <header>../xWidgets/statusCombo.hpp</header>
-        </customwidget> -->
+        </customwidget>
     </customwidgets>
     <resources />
     <connections />

@@ -1,16 +1,16 @@
 
-#ifndef hwpSequencer_hpp
-#define hwpSequencer_hpp
+#ifndef polarimetry_hpp
+#define polarimetry_hpp
 
 #include <iostream>
-#include "ui_hwpSequencer.h"
+#include "ui_polarimetry.h"
 
 #include "../xWidgets/xWidget.hpp"
 
 namespace xqt
 {
 
-class hwpSequencer : public xWidget
+class polarimetry : public xWidget
 {
    Q_OBJECT
 
@@ -37,11 +37,11 @@ protected:
 
 
 public:
-   explicit hwpSequencer( QWidget * Parent = 0,
+   explicit polarimetry( QWidget * Parent = 0,
                     Qt::WindowFlags f = Qt::WindowFlags()
                   );
 
-   ~hwpSequencer();
+   ~polarimetry();
 
    void subscribe();
 
@@ -56,8 +56,6 @@ public:
 public slots:
    void updateGUI();
 
-   
-   void on_comboSelectPolLin_activated(int);
    void on_buttonStartSequence_pressed();
    void on_buttonLastCycle_clicked(bool);
    void on_buttonStopSequence_pressed();
@@ -68,16 +66,16 @@ signals:
 
 private:
 
-   Ui::hwpSequencer ui;
+   Ui::polarimetry ui;
 };
 
-hwpSequencer::hwpSequencer(
+polarimetry::polarimetry(
                 QWidget * Parent,
                 Qt::WindowFlags f) : xWidget(Parent, f)
 {
    ui.setupUi(this);
 
-   setWindowTitle(QString("HWP Sequencer (disconnected)"));
+   setWindowTitle(QString("Polarimetry (disconnected)"));
 
    setXwFont(ui.labelHwptrack);
    setXwFont(ui.labelHwpseq);
@@ -116,17 +114,16 @@ hwpSequencer::hwpSequencer(
 
    ui.labelHwptrack->setText(QString("hwptrack"));
    ui.hwptrackFsm->device("hwptrack");
-   
+
    ui.labelHwpseq->setText(QString("hwpsequence"));
    ui.hwpseqFsm->device("hwpsequence");
-   
+
    ui.labelStagePolRot->setText(QString("stagepolrot"));
    ui.stagePolRotFsm->device("stagepolrot");
 
    ui.labelStagePolLin->setText(QString("stagepollin"));
-   ui.labelStagePolLin->setEnabled(false);
-   ui.stagePolLinFsm->setEnabled(false);
-   
+   ui.stagePolLinFsm->device("stagepollin");
+
 
    ui.buttonLastCycle->setCheckable(true);
    ui.buttonLastCycle->setProperty("isHighlightButton", true);
@@ -135,7 +132,7 @@ hwpSequencer::hwpSequencer(
    ui.entryHwpAngle->format("%.01f");
    ui.entryHwpAngle->setStretch(0, 2, 1);
 
-   ui.sliderTracking->setup("hwptrack", "tracking", "toggle", "Tracking");
+   ui.sliderTracking->setup("hwptrack", "tracking", "toggle", "HWP Tracking");
    ui.sliderTracking->setStretch(0, 1, 3, true, false);
 
    ui.comboHwpLin->setup("stagepollin", "", "", "HWP lin. stage", "");
@@ -154,12 +151,12 @@ hwpSequencer::hwpSequencer(
    onDisconnect();
 }
 
-hwpSequencer::~hwpSequencer()
+polarimetry::~polarimetry()
 {
    if(m_parent) m_parent->unsubscribe(this);
 }
 
-void hwpSequencer::subscribe()
+void polarimetry::subscribe()
 {
    if(!m_parent) return;
 
@@ -190,10 +187,10 @@ void hwpSequencer::subscribe()
    return;
 }
 
-void hwpSequencer::onConnect()
+void polarimetry::onConnect()
 {
 
-   setWindowTitle(QString("HWP Sequencer"));
+   setWindowTitle(QString("Polarimetry"));
    ui.hwptrackFsm->onConnect();
    ui.hwpseqFsm->onConnect();
    ui.stagePolRotFsm->onConnect();
@@ -224,9 +221,9 @@ void hwpSequencer::onConnect()
 }
 
 
-void hwpSequencer::onDisconnect()
+void polarimetry::onDisconnect()
 {
-   setWindowTitle(QString("HWP Sequencer (disconnected)"));
+   setWindowTitle(QString("Polarimetry (disconnected)"));
 
    ui.hwptrackFsm->onDisconnect();
    ui.hwpseqFsm->onDisconnect();
@@ -268,12 +265,12 @@ void hwpSequencer::onDisconnect()
    multiIndiSubscriber::onDisconnect();
 }
 
-void hwpSequencer::handleDefProperty( const pcf::IndiProperty & ipRecv)
+void polarimetry::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {
    return handleSetProperty(ipRecv);
 }
 
-void hwpSequencer::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void polarimetry::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
    if (ipRecv.getDevice() == "hwptrack")
    {
@@ -376,7 +373,7 @@ void hwpSequencer::handleSetProperty( const pcf::IndiProperty & ipRecv)
 }
 
 
-void hwpSequencer::updateGUI()
+void polarimetry::updateGUI()
 {
    if (m_hwptrackFsmOk)
    {
@@ -397,7 +394,7 @@ void hwpSequencer::updateGUI()
    setBold(ui.hwpTrackingOffset, m_hwptrackFsmOk);
    setBold(ui.hwpActualAngle, m_hwptrackFsmOk);
    setBold(ui.hwpAngleName, m_hwptrackFsmOk);
-   
+
 
    // disable things that we shouldn't change while sequencing
    ui.entryHwpAngle->setEnabled(!m_sequencing && m_hwptrackFsmOk);
@@ -421,10 +418,10 @@ void hwpSequencer::updateGUI()
 
    ui.buttonStartSequence->setVisible(!m_sequencing);
    ui.buttonStartSequence->setEnabled(!m_sequencing && m_hwpseqFsmOk && m_hwptrackFsmOk);
-   
+
    ui.buttonStopSequence->setVisible(m_sequencing);
    ui.buttonStopSequence->setEnabled(m_sequencing && m_hwpseqFsmOk);
-   
+
    ui.buttonLastCycle->setVisible(m_sequencing);
    ui.buttonLastCycle->setEnabled(m_sequencing && m_hwpseqFsmOk);
 
@@ -454,7 +451,7 @@ void hwpSequencer::updateGUI()
 
 } //updateGUI()
 
-void hwpSequencer::on_buttonStartSequence_pressed()
+void polarimetry::on_buttonStartSequence_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Switch);
    ip.setDevice("hwpsequence");
@@ -467,7 +464,7 @@ void hwpSequencer::on_buttonStartSequence_pressed()
    return;
 }
 
-void hwpSequencer::on_buttonStopSequence_pressed()
+void polarimetry::on_buttonStopSequence_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Switch);
    ip.setDevice("hwpsequence");
@@ -480,7 +477,7 @@ void hwpSequencer::on_buttonStopSequence_pressed()
    return;
 }
 
-void hwpSequencer::on_buttonLastCycle_clicked(bool checked)
+void polarimetry::on_buttonLastCycle_clicked(bool checked)
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Switch);
    ip.setDevice("hwpsequence");
@@ -494,20 +491,7 @@ void hwpSequencer::on_buttonLastCycle_clicked(bool checked)
 
 }
 
-void on_comboSelectPolLin_activated(int preset)
-{
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   ip.setDevice("stagepollin");
-   ip.setName("preset");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = preset;
-   sendNewProperty(ip);
-
-   emit doUpdateGUI();
-   return;
-}
-
-void hwpSequencer::setBold(QLabel *label, bool onoff)
+void polarimetry::setBold(QLabel *label, bool onoff)
 {
    QFont font = label->font();
    font.setBold(onoff);
@@ -516,6 +500,6 @@ void hwpSequencer::setBold(QLabel *label, bool onoff)
 
 } //namespace xqt
 
-#include "moc_hwpSequencer.cpp"
+#include "moc_polarimetry.cpp"
 
 #endif

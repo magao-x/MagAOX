@@ -251,7 +251,7 @@ all_guis = \
 	roiGUI \
 	cameraGUI \
 	stageGUI \
-	hwpSequencerGUI \
+	polarimetryGUI \
 
 # If building for coverage, don't build guis for now
 ifeq ($(NO_GUIS),1)
