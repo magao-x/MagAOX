@@ -60,10 +60,6 @@ ssh -t ${REMOTE} "tmux new -d -s ${TX_SESSION}" || true
 ssh -t ${REMOTE} \
 "tmux send -t ${TX_SESSION} C-c C-m 'export PATH=/usr/local/milk/bin:/usr/local/bin:\$PATH; shmimTCPtransmit ${STREAM} ${LOCAL_IP} ${PORT}' C-m"
 
-#ssh -t ${REMOTE} \
-#"tmux send -t ${TX_SESSION} C-c C-m 'shmimTCPtransmit ${STREAM} ${LOCAL_IP} ${PORT}' C-m"
-
-
 echo ""
 echo "Bridge established:"
 echo "  Stream      : ${STREAM}"
