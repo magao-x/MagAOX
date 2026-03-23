@@ -13,7 +13,7 @@ echo "confstop mvalC2dm-1" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
 echo "runstop mfilt-1" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
 echo "confstop mfilt-1" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
 
-cmd='ln -sf /milk/shm/'$1'.im.shm /milk/shm/aol1_mfiltInput.im.shm'
+cmd='ln -sf /milk/shm/'$1'.im.shm /milk/shm/aol1_mfiltINPUT.im.shm'
 $cmd
 
 sleep 1
