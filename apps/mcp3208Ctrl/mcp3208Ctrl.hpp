@@ -54,13 +54,17 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
      *@{
      */
 
-    int m_numChannels{ 4 }; ///< The number of channels being read out.
-
     std::string m_fpsDevice;               ///< Device name for getting fps to set circular buffer length.
     std::string m_fpsProperty{ "fps" };    ///< Property name for getting fps to set circular buffer length.
     std::string m_fpsElement{ "current" }; ///< Element name for getting fps to set circular buffer length.
 
     float m_fpsTol{ 0 }; ///< The tolerance for detecting a change in FPS.
+
+    std::string m_numChannelsDevice;               ///< Device name for getting numChannels to set circular buffer length.
+    std::string m_numChannelsProperty{ "numChannels" };    ///< Property name for getting numChannels to set circular buffer length.
+    std::string m_numChannelsElement{ "current" }; ///< Element name for getting numChannels to set circular buffer length.
+
+    float m_numChannelsTol{ 0 }; ///< The tolerance for detecting a change in numChannels.
 
     ///@}
 
@@ -75,6 +79,16 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     float m_trigger{ 1e9f / m_fps }; ///< The trigger time to readout.  Adjusts to match desired FPS.
     float m_gain{ .1 };              // Gain used to adjust trigger to keep at correct fps
     float nano_sec_target{ 1e9f / m_fps };
+
+    // Creating INDI property for number of channels to read out
+    pcf::IndiProperty m_indiP_numChannels;
+    INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_numChannels );
+
+    pcf::IndiProperty m_indiP_numChannelsSource;
+    INDI_SETCALLBACK_DECL( mcp3208Ctrl, m_indiP_numChannelsSource );
+    
+    int m_numChannels{ 4 }; ///< The number of channels being read out.
+
 
     MCP3208Lib::MCP3208 adc;
 
@@ -134,6 +148,8 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     /** Just returns the value of m_fps
      */
     float fps();
+
+    float numChannels();
 
     /// Implementation of the framegrabber startAcquisition interface
     /**
@@ -227,15 +243,45 @@ void mcp3208Ctrl::setupConfig()
                 "float",
                 "Tolerance for detecting a change in FPS.  Default is 0." );
 
-    config.add( "accel.numChannels",
+    config.add( "numChannels.device",
                 "",
-                "accel.numChannels",
+                "numChannels.device",
                 argType::Required,
-                "accel",
                 "numChannels",
+                "device",
                 false,
                 "int",
                 "Setting the number of channels needed to readout accelerometers" );
+
+    config.add( "numChannels.property",
+                "",
+                "numChannels.property",
+                argType::Required,
+                "numChannels",
+                "property",
+                false,
+                "string",
+                "Property name for getting numChannels to set circular buffer length. Default is 'numChannels'." );
+
+    config.add( "numChannels.element",
+                "",
+                "numChannels.element",
+                argType::Required,
+                "numChannels",
+                "element",
+                false,
+                "string",
+                "Property name for getting numChannels to set circular buffer length. Default is 'current'." );
+
+    config.add( "numChannels.tol",
+                "",
+                "numChannels.tol",
+                argType::Required,
+                "numChannels",
+                "tol",
+                false,
+                "float",
+                "Tolerance for detecting a change in numChannels.  Default is 0." );
 
     config.add( "framegrabber.cpuset",
                 "",
@@ -259,7 +305,10 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fpsElement, "fps.element" );
     _config( m_fpsTol, "fps.tol" );
 
-    _config( m_numChannels, "accel.numChannels" ); // making number of mcp3208 channels we read out configurable
+    _config( m_numChannelsDevice, "numChannels.device" );
+    _config( m_numChannelsProperty, "numChannels.property" );
+    _config( m_numChannelsElement, "numChannels.element" );
+    _config( m_numChannelsTol, "numChannels.tol" );
 
     _config(m_fgCpuset, "framegrabber.cpuset");
 
@@ -281,9 +330,19 @@ int mcp3208Ctrl::appStartup()
     m_indiP_fps["current"].setValue( m_fps );
     m_indiP_fps["target"].setValue( m_fps );
 
+    // INDI prop for user to set number of channels A/D reads out
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_numChannels, "numChannels", 0, 8, 1, "%d", "", "" );
+    m_indiP_numChannels["current"].setValue( m_numChannels );
+    m_indiP_numChannels["target"].setValue( m_numChannels );
+
     if( m_fpsDevice != "" )
     {
         REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsDevice, m_fpsProperty );
+    }
+
+    if( m_numChannelsDevice != "" )
+    {
+        REG_INDI_SETPROP( m_indiP_numChannelsSource, m_numChannelsDevice, m_numChannelsProperty );
     }
 
     {
@@ -305,6 +364,8 @@ int mcp3208Ctrl::appLogic()
     FRAMEGRABBER_UPDATE_INDI;
 
     updatesIfChanged<float>( m_indiP_fps, { "current", "target" }, { m_fps, m_fps } );
+
+    updatesIfChanged<float>( m_indiP_numChannels, { "current", "target" }, { m_numChannels, m_numChannels } );
 
     return 0;
 }
@@ -333,6 +394,11 @@ int mcp3208Ctrl::configureAcquisition()
 float mcp3208Ctrl::fps()
 {
     return m_fps;
+}
+
+float mcp3208Ctrl::numChannels()
+{
+    return m_numChannels;
 }
 
 int mcp3208Ctrl::startAcquisition()
@@ -368,7 +434,7 @@ int mcp3208Ctrl::acquireAndCheckValid()
         }
         else
         {
-            mx::sys::nanoSleep( 10000 );
+            mx::sys::nanoSleep( 100 );
         }
     }
 
@@ -396,7 +462,6 @@ int mcp3208Ctrl::recordTelem( const telem_fgtimings * )
     return recordFGTimings( true );
 }
 
-// Testing for user to select star number
 INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_fps )( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getName() != m_indiP_fps.getName() )
@@ -433,11 +498,76 @@ INDI_SETCALLBACK_DEFN( mcp3208Ctrl, m_indiP_fpsSource )( const pcf::IndiProperty
 
     float target = ipRecv[m_fpsElement].get<float>();
 
+    m_fps = target;
+
+    log<text_log>( "set fps from " + m_fpsDevice + " = " + std::to_string( m_fps ));
+    return 0;
+
+} // INDI_SETCALLBACK_DEFN(mcp3208Ctrl, m_indiP_fpsSource)
+
+/*
+INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_numChannels )( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getName() != m_indiP_numChannels.getName() )
+    {
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
+        return -1;
+    }
+
+    float target;
+
+    if( indiTargetUpdate( m_indiP_numChannels, target, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
     m_fps           = target;
     m_trigger       = 1e9f / m_fps; // Update trigger value based off new fps
     nano_sec_target = 1e9f / m_fps;
 
-    log<text_log>( "set fps from " + m_fpsDevice + " = " + std::to_string( m_fps ));
+    log<text_log>( "set fps = " + std::to_string( m_fps ));
+    return 0;
+}
+*/
+
+INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_numChannels )( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getName() != m_indiP_numChannels.getName() )
+    {
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
+        return -1;
+    }
+
+    float ch_target;
+
+    if( indiTargetUpdate( m_indiP_numChannels, ch_target, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    m_numChannels = ch_target;
+
+    log<text_log>( "set numChannels = " + std::to_string( m_numChannels ));
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( mcp3208Ctrl, m_indiP_numChannelsSource )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_numChannelsSource, ipRecv );
+
+    if( ipRecv.find( m_numChannelsElement ) != true ) // this isn't valid
+    {
+        log<software_error>( { __FILE__, __LINE__, "No current property in numChannels source." } );
+        return 0;
+    }
+
+    float ch_target = ipRecv[m_numChannelsElement].get<float>();
+
+    m_numChannels = ch_target;
+
+    log<text_log>( "set numChannels from " + m_numChannelsDevice + " = " + std::to_string( m_numChannels ));
     return 0;
 
 } // INDI_SETCALLBACK_DEFN(mcp3208Ctrl, m_indiP_fpsSource)
