@@ -806,6 +806,15 @@ void cursesINDI::deviceSearch( int ch )
    bool updated = false;
    if( m_deviceSearching == true )
    {
+      // CTRL+L clears search bar
+      if (ch == (0x1F & 'L'))
+      {
+         std::lock_guard<std::mutex> lock(m_drawMutex);
+         m_deviceTarget.erase();
+         wprintw(w_interactWin, "\b \b");
+         wrefresh(w_interactWin);
+         return;
+      }
       if( ch == KEY_BACKSPACE )
       {
          if(m_deviceTarget.size() > 0)
