@@ -139,7 +139,7 @@ class hwpTracker : public MagAOXApp<true>, public dev::telemeter<hwpTracker>
 
     pcf::IndiProperty m_indiP_hwpActualPos;
 
-    pcf::IndiProperty m_indiP_hwpStagePos;
+    pcf::IndiProperty m_indiP_hwpStagePos_target;
 
     pcf::IndiProperty m_indiP_stagePolRot;
 
@@ -293,8 +293,6 @@ int hwpTracker::appStartup()
     m_indiP_hwpStagePos_target.setName( "position" );
     m_indiP_hwpStagePos_target.add( pcf::IndiElement( "target" ) );
 
-    REG_INDI_SETPROP(m_indiP_hwpStagePos_current, m_devName, "position");
-
     TELEMETER_APP_STARTUP;
 
     state( stateCodes::READY );
@@ -366,8 +364,8 @@ void hwpTracker::updateHwpPos()
     std::cerr << "Sending HWP stage to: " << hwpStagePos << "\n";
     log<text_log>( "HWP set to: " + std::to_string( hwpActualPos ) );
 
-    m_indiP_hwpStagePos["target"] = hwpStagePos;
-    sendNewProperty( m_indiP_hwpStagePos );
+    m_indiP_hwpStagePos_target["target"] = hwpStagePos;
+    sendNewProperty( m_indiP_hwpStagePos_target );
 
     recordPolTrack();
 }
