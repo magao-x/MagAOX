@@ -56,8 +56,8 @@ public:
 public slots:
    void updateGUI();
 
-   // void on_comboSelectPolLin_activated(int);
-
+   
+   void on_comboSelectPolLin_activated(int);
    void on_buttonStartSequence_pressed();
    void on_buttonLastCycle_clicked(bool);
    void on_buttonStopSequence_pressed();
@@ -138,8 +138,8 @@ hwpSequencer::hwpSequencer(
    ui.sliderTracking->setup("hwptrack", "tracking", "toggle", "Tracking");
    ui.sliderTracking->setStretch(0, 1, 3, true, false);
 
-   // ui.comboHwpLin->setup("stagepollin", "", "", "HWP lin. stage", "");
-   // ui.comboHwpLin->ctrlWidget(nullptr);
+   ui.comboHwpLin->setup("stagepollin", "", "", "HWP lin. stage", "");
+   ui.comboHwpLin->ctrlWidget(nullptr);
 
    ui.entryNumCycles->setup("hwpsequence", "numCycles", statusEntry::INT, "Num. cycles", "");
    ui.entryNumCycles->setStretch(0, 2, 1);
@@ -180,10 +180,10 @@ void hwpSequencer::subscribe()
    m_parent->addSubscriber(ui.hwptrackFsm);
    m_parent->addSubscriber(ui.hwpseqFsm);
    m_parent->addSubscriber(ui.stagePolRotFsm);
-   // m_parent->addSubscriber(ui.stagePolLinFsm);
+   m_parent->addSubscriber(ui.stagePolLinFsm);
    m_parent->addSubscriber(ui.entryHwpAngle);
    m_parent->addSubscriber(ui.sliderTracking);
-   // m_parent->addSubscriber(ui.comboHwpLin);
+   m_parent->addSubscriber(ui.comboHwpLin);
    m_parent->addSubscriber(ui.entryNumCycles);
    m_parent->addSubscriber(ui.entryTimePerPos);
 
@@ -197,7 +197,7 @@ void hwpSequencer::onConnect()
    ui.hwptrackFsm->onConnect();
    ui.hwpseqFsm->onConnect();
    ui.stagePolRotFsm->onConnect();
-   // ui.stagePolLinFsm->onConnect();
+   ui.stagePolLinFsm->onConnect();
 
 
    setBold(ui.hwpSetAngle, true);
@@ -207,13 +207,13 @@ void hwpSequencer::onConnect()
 
    ui.entryHwpAngle->onConnect();
    ui.sliderTracking->onConnect();
-   // ui.comboHwpLin->onConnect();
+   ui.comboHwpLin->onConnect();
    ui.entryNumCycles->onConnect();
    ui.entryTimePerPos->onConnect();
 
    ui.entryHwpAngle->setEnabled(true);
    ui.sliderTracking->setEnabled(true);
-   // ui.comboHwpLin->setEnabled(false);
+   ui.comboHwpLin->setEnabled(false);
    ui.entryNumCycles->setEnabled(true);
    ui.negOneLabel->setEnabled(true);
    ui.entryTimePerPos->setEnabled(true);
@@ -226,14 +226,12 @@ void hwpSequencer::onConnect()
 
 void hwpSequencer::onDisconnect()
 {
-   //ui.labelDMName->setEnabled(false);
-
    setWindowTitle(QString("HWP Sequencer (disconnected)"));
 
    ui.hwptrackFsm->onDisconnect();
    ui.hwpseqFsm->onDisconnect();
    ui.stagePolRotFsm->onDisconnect();
-   // ui.stagePolLinFsm->onDisconnect();
+   ui.stagePolLinFsm->onDisconnect();
 
    ui.hwpSetAngle->setText(QString("---"));
    ui.hwpTrackingOffset->setText(QString("---"));
@@ -251,14 +249,14 @@ void hwpSequencer::onDisconnect()
 
    ui.entryHwpAngle->onDisconnect();
    ui.sliderTracking->onDisconnect();
-   // ui.comboHwpLin->onDisconnect();
+   ui.comboHwpLin->onDisconnect();
    ui.entryNumCycles->onDisconnect();
    ui.entryTimePerPos->onDisconnect();
 
 
    ui.entryHwpAngle->setEnabled(false);
    ui.sliderTracking->setEnabled(false);
-   // ui.comboHwpLin->setEnabled(false);
+   ui.comboHwpLin->setEnabled(false);
    ui.entryNumCycles->setEnabled(false);
    ui.negOneLabel->setEnabled(false);
    ui.entryTimePerPos->setEnabled(false);
@@ -489,6 +487,20 @@ void hwpSequencer::on_buttonLastCycle_clicked(bool checked)
    ip.setName("lastCycle");
    ip.add(pcf::IndiElement("toggle"));
    ip["toggle"] = checked ? pcf::IndiElement::On : pcf::IndiElement::Off;
+   sendNewProperty(ip);
+
+   emit doUpdateGUI();
+   return;
+
+}
+
+void on_comboSelectPolLin_activated(int preset)
+{
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   ip.setDevice("stagepollin");
+   ip.setName("preset");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = preset;
    sendNewProperty(ip);
 
    emit doUpdateGUI();
