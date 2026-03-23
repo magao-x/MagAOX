@@ -289,6 +289,7 @@ scripts_to_install = \
 	dmdispbridge \
 	shmimTCPreceive \
 	shmimTCPtransmit \
+	shmimTCPbridge \
 	obs_to_movie \
 	instrument_backup_sync \
 	cacao_startup_if_present \
