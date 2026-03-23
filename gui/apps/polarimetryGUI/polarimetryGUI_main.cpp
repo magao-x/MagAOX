@@ -2,7 +2,7 @@
 #include <QFile>
 #include <QTextStream>
 
-#include "hwpSequencer.hpp"
+#include "polarimetry.hpp"
 
 #include "multiIndiManager.hpp"
 
@@ -18,13 +18,13 @@ int main(int argc, char *argv[])
    QTextStream stream(&file);
    app.setStyleSheet(stream.readAll());
 
-   multiIndiManager mgr("hwpSequencer", "127.0.0.1", 7624);
+   multiIndiManager mgr("polarimetry", "127.0.0.1", 7624);
 
-   xqt::hwpSequencer hwpSeq;
-   mgr.addSubscriber(&hwpSeq);
+   xqt::polarimetry polGui;
+   mgr.addSubscriber(&polGui);
    mgr.activate();
 
-   hwpSeq.show();
+   polGui.show();
 
    return app.exec();
 }
