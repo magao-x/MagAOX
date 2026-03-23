@@ -27,11 +27,13 @@ protected:
    int m_hwpPosIndex{0};
    int m_curCycle{0};
    int m_numCycles{-1};
-   bool m_tracking{false};
-
+   bool m_hwpTracking{false};
+   
    bool m_hwptrackFsmOk{ false };
    bool m_hwpseqFsmOk{ false };
-
+   bool m_qwptrackFsmOk{ false };
+   
+   bool m_qwpTracking{false};
 
    void setBold(QLabel*, bool);
 
@@ -81,6 +83,8 @@ polarimetry::polarimetry(
    setXwFont(ui.labelHwpseq);
    setXwFont(ui.labelStagePolRot);
    setXwFont(ui.labelStagePolLin);
+   setXwFont(ui.labelQwpTrack);
+   setXwFont(ui.labelStageQwpLin);
 
    setXwFont(ui.labelAngle);
    setXwFont(ui.labelOffset);
@@ -90,7 +94,7 @@ polarimetry::polarimetry(
 
    setXwFont(ui.hwpSetAngle);
    setXwFont(ui.hwpTrackingOffset);
-   setXwFont(ui.labelTracking);
+   setXwFont(ui.labelHwpTracking);
    setXwFont(ui.hwpActualAngle);
    setXwFont(ui.hwpAngleName);
 
@@ -108,22 +112,32 @@ polarimetry::polarimetry(
    ui.hwpseqFsm->highlightChanges(false);
    ui.stagePolRotFsm->highlightChanges(false);
    ui.stagePolLinFsm->highlightChanges(false);
+   ui.qwpTrackFsm->highlightChanges(false);
+   ui.stageQwpLinFsm->highlightChanges(false);
 
-   ui.labelTracking->setVisible(false);
-   ui.labelTracking->setText(QString("SYNCHRO_ADI"));
-
+   ui.labelHwpTracking->setVisible(false);
+   ui.labelHwpTracking->setText(QString("SYNCHRO_ADI"));
+   
    ui.labelHwptrack->setText(QString("hwptrack"));
    ui.hwptrackFsm->device("hwptrack");
-
+   
    ui.labelHwpseq->setText(QString("hwpsequence"));
    ui.hwpseqFsm->device("hwpsequence");
-
+   
    ui.labelStagePolRot->setText(QString("stagepolrot"));
    ui.stagePolRotFsm->device("stagepolrot");
-
+   
    ui.labelStagePolLin->setText(QString("stagepollin"));
    ui.stagePolLinFsm->device("stagepollin");
+   
+   ui.labelQwpTracking->setVisible(false);
+   ui.labelQwpTracking->setText(QString("COMP_IMR"));
 
+   ui.labelQwpTrack->setText(QString("qwptrack"));
+   ui.qwpTrackFsm->device("qwptrack");
+
+   ui.labelStageQwpLin->setText(QString("stageqwplin"));
+   ui.stageQwpLinFsm->device("stageqwplin");
 
    ui.buttonLastCycle->setCheckable(true);
    ui.buttonLastCycle->setProperty("isHighlightButton", true);
@@ -132,11 +146,18 @@ polarimetry::polarimetry(
    ui.entryHwpAngle->format("%.01f");
    ui.entryHwpAngle->setStretch(0, 2, 1);
 
-   ui.sliderTracking->setup("hwptrack", "tracking", "toggle", "HWP Tracking");
-   ui.sliderTracking->setStretch(0, 1, 3, true, false);
+   ui.sliderHwpTracking->setup("hwptrack", "tracking", "toggle", "HWP Tracking");
+   ui.sliderHwpTracking->setStretch(0, 1, 3, true, false);
 
    ui.comboHwpLin->setup("stagepollin", "", "", "HWP lin. stage", "");
    ui.comboHwpLin->ctrlWidget(nullptr);
+
+
+   ui.sliderQwpTracking->setup("qwptrack", "tracking", "toggle", "QWP Tracking");
+   ui.sliderQwpTracking->setStretch(0, 1, 3, true, false);
+
+   ui.comboQwpLin->setup("stageqwplin", "", "", "QWP lin. stage", "");
+   ui.comboQwpLin->ctrlWidget(nullptr);
 
    ui.entryNumCycles->setup("hwpsequence", "numCycles", statusEntry::INT, "Num. cycles", "");
    ui.entryNumCycles->setStretch(0, 2, 1);
@@ -174,13 +195,19 @@ void polarimetry::subscribe()
    m_parent->addSubscriberProperty(this, "hwpsequence", "lastCycle");
    m_parent->addSubscriberProperty(this, "hwpsequence", "numCycles");
 
+   // m_parent->addSubscriberProperty(this, "qwptrack", "tracking");
+
    m_parent->addSubscriber(ui.hwptrackFsm);
    m_parent->addSubscriber(ui.hwpseqFsm);
    m_parent->addSubscriber(ui.stagePolRotFsm);
    m_parent->addSubscriber(ui.stagePolLinFsm);
+   m_parent->addSubscriber(ui.qwpTrackFsm);
+   m_parent->addSubscriber(ui.stageQwpLinFsm);
    m_parent->addSubscriber(ui.entryHwpAngle);
-   m_parent->addSubscriber(ui.sliderTracking);
+   m_parent->addSubscriber(ui.sliderHwpTracking);
    m_parent->addSubscriber(ui.comboHwpLin);
+   m_parent->addSubscriber(ui.sliderQwpTracking);
+   m_parent->addSubscriber(ui.comboQwpLin);
    m_parent->addSubscriber(ui.entryNumCycles);
    m_parent->addSubscriber(ui.entryTimePerPos);
 
@@ -195,6 +222,9 @@ void polarimetry::onConnect()
    ui.hwpseqFsm->onConnect();
    ui.stagePolRotFsm->onConnect();
    ui.stagePolLinFsm->onConnect();
+   ui.qwpTrackFsm->onConnect();
+   ui.stageQwpLinFsm->onConnect();
+   ui.labelQwpTrack->setEnabled(false);
 
 
    setBold(ui.hwpSetAngle, true);
@@ -203,14 +233,18 @@ void polarimetry::onConnect()
    setBold(ui.hwpAngleName, true);
 
    ui.entryHwpAngle->onConnect();
-   ui.sliderTracking->onConnect();
+   ui.sliderHwpTracking->onConnect();
    ui.comboHwpLin->onConnect();
+   ui.sliderQwpTracking->onConnect();
+   ui.comboQwpLin->onConnect();
    ui.entryNumCycles->onConnect();
    ui.entryTimePerPos->onConnect();
 
    ui.entryHwpAngle->setEnabled(true);
-   ui.sliderTracking->setEnabled(true);
-   ui.comboHwpLin->setEnabled(false);
+   ui.sliderHwpTracking->setEnabled(true);
+   ui.comboHwpLin->setEnabled(true);
+   ui.sliderQwpTracking->setEnabled(false);
+   ui.comboQwpLin->setEnabled(true);
    ui.entryNumCycles->setEnabled(true);
    ui.negOneLabel->setEnabled(true);
    ui.entryTimePerPos->setEnabled(true);
@@ -229,6 +263,8 @@ void polarimetry::onDisconnect()
    ui.hwpseqFsm->onDisconnect();
    ui.stagePolRotFsm->onDisconnect();
    ui.stagePolLinFsm->onDisconnect();
+   ui.qwpTrackFsm->onDisconnect();
+   ui.stageQwpLinFsm->onDisconnect();
 
    ui.hwpSetAngle->setText(QString("---"));
    ui.hwpTrackingOffset->setText(QString("---"));
@@ -245,15 +281,18 @@ void polarimetry::onDisconnect()
    setBold(ui.cycleNumStatus, false);
 
    ui.entryHwpAngle->onDisconnect();
-   ui.sliderTracking->onDisconnect();
+   ui.sliderHwpTracking->onDisconnect();
    ui.comboHwpLin->onDisconnect();
+   ui.sliderQwpTracking->onDisconnect();
+   ui.comboQwpLin->onDisconnect();
    ui.entryNumCycles->onDisconnect();
    ui.entryTimePerPos->onDisconnect();
 
-
    ui.entryHwpAngle->setEnabled(false);
-   ui.sliderTracking->setEnabled(false);
+   ui.sliderHwpTracking->setEnabled(false);
    ui.comboHwpLin->setEnabled(false);
+   ui.sliderQwpTracking->setEnabled(false);
+   ui.comboQwpLin->setEnabled(false);
    ui.entryNumCycles->setEnabled(false);
    ui.negOneLabel->setEnabled(false);
    ui.entryTimePerPos->setEnabled(false);
@@ -314,7 +353,7 @@ void polarimetry::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if (ipRecv.find("toggle"))
          {
-            m_tracking = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+            m_hwpTracking = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
          }
       }
    }
@@ -364,6 +403,24 @@ void polarimetry::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
    }
+   else if (ipRecv.getDevice() == "qwptrack")
+   {
+      if (ipRecv.getName() == "fsm")
+      {
+         if (ipRecv.find("state"))
+         {
+            std::string fsmString = ipRecv["state"].get<std::string>();
+            m_qwptrackFsmOk = fsmString == "READY" || fsmString == "OPERATING";
+         }
+      }
+      else if (ipRecv.getName() == "tracking")
+      {
+         if (ipRecv.find("toggle"))
+         {
+            m_qwpTracking = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+         }
+      }
+   }
    else
    {
       return;
@@ -395,23 +452,38 @@ void polarimetry::updateGUI()
    setBold(ui.hwpActualAngle, m_hwptrackFsmOk);
    setBold(ui.hwpAngleName, m_hwptrackFsmOk);
 
-
    // disable things that we shouldn't change while sequencing
    ui.entryHwpAngle->setEnabled(!m_sequencing && m_hwptrackFsmOk);
    // we actually don't want to disable the toggleSlider because it will appear "off" even if tracking is on
    if (m_sequencing || !m_hwptrackFsmOk)
    {
-      ui.sliderTracking->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-      ui.sliderTracking->setFocusPolicy(Qt::NoFocus);
+      ui.sliderHwpTracking->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+      ui.sliderHwpTracking->setFocusPolicy(Qt::NoFocus);
+
+      ui.sliderQwpTracking->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+      ui.sliderQwpTracking->setFocusPolicy(Qt::NoFocus);
    }
    else
    {
-      ui.sliderTracking->setAttribute(Qt::WA_TransparentForMouseEvents, false);
-      ui.sliderTracking->setFocusPolicy(Qt::StrongFocus);
+      ui.sliderHwpTracking->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+      ui.sliderHwpTracking->setFocusPolicy(Qt::StrongFocus);
+
+      ui.sliderQwpTracking->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+      ui.sliderQwpTracking->setFocusPolicy(Qt::StrongFocus);
    }
-   ui.sliderTracking->setLabelEnabled(!m_sequencing && m_hwptrackFsmOk);
-   ui.labelTracking->setVisible(m_tracking);
-   ui.labelTracking->setEnabled(!m_sequencing && m_hwptrackFsmOk);
+   
+   ui.sliderHwpTracking->setLabelEnabled(!m_sequencing && m_hwptrackFsmOk);
+   ui.labelHwpTracking->setVisible(m_hwpTracking);
+   ui.labelHwpTracking->setEnabled(!m_sequencing && m_hwptrackFsmOk);
+   
+   ui.comboHwpLin->setEnabled(!m_sequencing);
+
+   ui.sliderQwpTracking->setLabelEnabled(!m_sequencing && m_qwptrackFsmOk);
+   ui.labelQwpTracking->setVisible(m_qwpTracking);
+   ui.labelQwpTracking->setEnabled(!m_sequencing && m_qwptrackFsmOk);
+
+   ui.comboQwpLin->setEnabled(!m_sequencing);
+   
    ui.entryNumCycles->setEnabled(!m_sequencing && m_hwpseqFsmOk);
    ui.negOneLabel->setEnabled(!m_sequencing && m_hwpseqFsmOk);
    ui.entryTimePerPos->setEnabled(!m_sequencing && m_hwpseqFsmOk);
