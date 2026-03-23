@@ -34,7 +34,7 @@ namespace MagAOX
 namespace app
 {
 
-/// The MagAO-X ADC Tracker
+/// The MagAO-X HWP Sequencer
 /**
  * \ingroup hwpSequencer
  */
@@ -49,32 +49,44 @@ class hwpSequencer : public MagAOXApp<true>
          *@{
         */
 
+        ///< the device for controlling the HWP
         std::string m_hwpTracker{ "hwptrack" };
 
+        ///< the fxngen device for synchronizing the camscis
         std::string m_fxngenName{ "fxngensync" };
 
+        ///< the channel of the fxngen for synchronizing the camscis
         std::string m_fxngenChannel{ "C2" };
 
+        ///< the app for controlling observers
         std::string m_obsAppName{ "observers" };
 
+        ///< time (seconds) per HWP position
         double m_timePerPos{ 0 };
 
+        ///< number of HWP cycles (-1 for infinite)
         int m_numCycles{ -1 };
 
+        ///< the current HWP cycle
         int m_curCycleNumber{ 0 };
 
+        ///< the index for the HWP position within a cycle
         u_int m_hwpPosIndex{ 0 };
 
+        ///< is the sequencer sequencing
         bool m_sequencing{ false };
 
+        ///< if true, the sequencer will stop after the current cycle is complete
         bool m_lastCycle{ false };
 
+        ///< the flag to enable sequencing on the next appLogic loop
         bool m_startSaving{ false };
 
+        ///< the HWP positions, in degrees, corresponds to +Q, -Q, +U, -U
         std::vector<float> m_hwpPositions{ {0.0, 45.0, 22.5, 67.5} };
 
+        ///< the HWP position, in degrees, as reported by hwptrack
         float m_reportedHwpPos{ 0 };
-        ///<
 
         unsigned m_hwpWait {100};  ///< The time to pause between checks of the hwp state during open/shut [msec]. Default is 100.
 
@@ -83,12 +95,16 @@ class hwpSequencer : public MagAOXApp<true>
 
         bool m_doMoveHwp {false}; ///< Flag telling the hwp thread that it should actually move the hwp, not just go back to sleep.
 
+        ///< whether the fxngen output is on.
         bool m_fxngenOutp {false};
 
+        ///< the shmim name for counting frames within the cycle
         std::string m_shmimName {"camsci1 "};
 
+        ///< the shmim for counting frames within the cycle
         IMAGE m_shmIm;
 
+        ///< ID for the semaphore tracking when frames are read out
         long m_semID;
 
         bool m_sequencerThreadInit {true}; ///< Initialization flag for the open thread.
@@ -410,14 +426,14 @@ void hwpSequencer::sequencerThreadExec( )
             if(doHwpAction() < 0)
                 log<software_error>({__FILE__,__LINE__});
 
-            mx::sys::sleep(m_timePerPos);
+            mx::sys::microSleep(m_timePerPos * 1e6);
 
             m_doMoveHwp = false;
 
             ImageStreamIO_semflush(&m_shmIm, m_semID);
         }
 
-        mx::sys::sleep(0.1);
+        mx::sys::microSleep(0.1 * 1e6);
     }
 
     return;
