@@ -28,6 +28,7 @@ timespec telem_fxngen::lastRecord = {0,0};
 timespec telem_loopgain::lastRecord = {0,0};
 timespec telem_observer::lastRecord = {0,0};
 timespec telem_offloading::lastRecord = {0,0};
+timespec telem_w2tcsoffloader::lastRecord = {0,0};
 timespec telem_pi335::lastRecord = {0,0};
 timespec telem_pico::lastRecord = {0,0};
 timespec telem_position::lastRecord = {0,0};
@@ -52,4 +53,3 @@ timespec telem_zaber::lastRecord = {0,0};
 
 } //namespace logger
 } //namespace MagAOX
-

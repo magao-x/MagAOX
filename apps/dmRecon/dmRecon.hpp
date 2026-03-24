@@ -7,6 +7,7 @@
 #ifndef dmRecon_hpp
 #define dmRecon_hpp
 
+#include <atomic>
 #include <limits>
 
 #include <mx/improc/eigenCube.hpp>
@@ -158,23 +159,23 @@ class dmRecon : public MagAOXApp<true>,
     #endif
     // clang-format on
 
-    bool m_dmModesReady{ false }; ///< Flag indicating that the DM modes are ready for processing
+    std::atomic<bool> m_dmModesReady{ false }; ///< Flag indicating that the DM modes are ready for processing
 
     mx::improc::eigenImage<float> m_mask;
 
     std::vector<size_t> m_maskIDX; ///< The index of masked pixels
 
-    bool m_dmMaskReady{ false }; ///< Flag indicating that the DM mask is ready for processing
+    std::atomic<bool> m_dmMaskReady{ false }; ///< Flag indicating that the DM mask is ready for processing
 
-    bool m_commandReady{ false }; ///< Flag indicating that all sizes match and arrays are ready for processing
+    std::atomic<bool> m_commandReady{ false }; ///< Flag indicating that all sizes match and arrays are ready for processing
 
-    bool m_fgWaiting{ false }; ///< Flag indicating that the FG thread is waiting for the command thread
+    std::atomic<bool> m_fgWaiting{ false }; ///< Flag indicating that the FG thread is waiting for the command thread
 
     mx::improc::eigenImage<float> m_command; ///< The DM command, copied out of the incoming shmim
 
     mx::improc::eigenImage<float> m_modevals; ///< The calculated mode amplitudes
 
-    bool m_writeDMf{ false };
+    std::atomic<bool> m_writeDMf{ false };
 
     std::string                  m_monShmimName;
     mx::improc::milkImage<float> m_modevalMon; ///< The actual calculated modevals.
@@ -194,7 +195,9 @@ class dmRecon : public MagAOXApp<true>,
 
     sem_t m_smSemaphore{ 0 }; ///< Semaphore used to synchronize the fg thread and the dm command thread.
 
-    bool m_updated{ false }; ///< Flag indicating that the mode vals have been updated
+    std::atomic<bool> m_updated{ false }; ///< Flag indicating that the mode vals have been updated
+
+    std::mutex m_modevalsMutex; ///< Guards the modevals buffer during producer/consumer handoff.
 
     mx::cuda::cublasHandle m_cublas; ///< Handle for the cuBLAS library
 
@@ -522,7 +525,7 @@ int dmRecon::appLogic()
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
-    if( m_writeDMf )
+    if( m_writeDMf.load() )
     {
         updateSwitchIfChanged( m_indiP_writeDMf, "toggle", pcf::IndiElement::On );
     }
@@ -741,7 +744,7 @@ int dmRecon::allocate( const dmModesShmimT & )
     }
 
     // Can't process modes until mask is ready.
-    if( m_width != dmMaskSMT::m_width || m_height != dmMaskSMT::m_height || !m_dmMaskReady )
+    if( m_width != dmMaskSMT::m_width || m_height != dmMaskSMT::m_height || !m_dmMaskReady.load() )
     {
         mx::sys::milliSleep( 1000 );
         dmModesSMT::m_restart = true;
@@ -756,7 +759,7 @@ int dmRecon::allocate( const dmModesShmimT & )
 
 int dmRecon::processImage( void *curr_src, const dmModesShmimT & )
 {
-    if( m_dmModesReady == true )
+    if( m_dmModesReady.load() == true )
     {
         // This means new image has come in.  We need to reset and restart everything.
         dmModesSMT::m_restart   = true;
@@ -773,7 +776,7 @@ int dmRecon::processImage( void *curr_src, const dmModesShmimT & )
     }
 
     // Wait for m_commandReady to become false
-    while( m_commandReady == true && !m_shutdown && dmModesSMT::m_restart == false )
+    while( m_commandReady.load() == true && !m_shutdown && dmModesSMT::m_restart == false )
     {
         mx::sys::milliSleep( 1000 );
     }
@@ -867,7 +870,7 @@ int dmRecon::allocate( const dmMaskShmimT & )
 
 int dmRecon::processImage( void *curr_src, const dmMaskShmimT & )
 {
-    if( m_dmMaskReady == true )
+    if( m_dmMaskReady.load() == true )
     {
         // This means an new image has come in.  We need to reset and restart everything.
         dmModesSMT::m_restart = true;
@@ -879,7 +882,7 @@ int dmRecon::processImage( void *curr_src, const dmMaskShmimT & )
     }
 
     // Wait for m_commandReady to become false
-    while( m_commandReady == true && !m_shutdown && dmMaskSMT::m_restart == false )
+    while( m_commandReady.load() == true && !m_shutdown && dmMaskSMT::m_restart == false )
     {
         mx::sys::milliSleep( 1000 );
     }
@@ -922,7 +925,7 @@ int dmRecon::allocate( const dmCommandShmimT & )
     m_commandReady = false;
     std::cerr << "command not ready\n";
 
-    if( !m_dmModesReady || !m_dmMaskReady || dmCommandSMT::m_width != m_width || dmCommandSMT::m_height != m_height ||
+    if( !m_dmModesReady.load() || !m_dmMaskReady.load() || dmCommandSMT::m_width != m_width || dmCommandSMT::m_height != m_height ||
         dmCommandSMT::m_width != dmMaskSMT::m_width || dmCommandSMT::m_height != dmMaskSMT::m_height )
     {
         dmCommandSMT::m_restart   = true;
@@ -933,7 +936,7 @@ int dmRecon::allocate( const dmCommandShmimT & )
         return 0; // This won't log an error, but setting m_restart will cause it to reconnect again until sizes match
     }
 
-    if( !m_fgWaiting )
+    if( !m_fgWaiting.load() )
     {
         frameGrabberT::m_reconfig = true;
         mx::sys::milliSleep( 1000 );
@@ -1004,7 +1007,7 @@ int dmRecon::allocate( const dmCommandShmimT & )
 
 int dmRecon::processImage( void *curr_src, const dmCommandShmimT & )
 {
-    if( !m_commandReady )
+    if( !m_commandReady.load() )
     {
         dmCommandSMT::m_restart = true;
         return 0;
@@ -1024,6 +1027,7 @@ int dmRecon::processImage( void *curr_src, const dmCommandShmimT & )
     if( !m_useGPU )
     {
         //  CPU:
+        std::lock_guard<std::mutex> guard( m_modevalsMutex );
         m_modevals = ( m_PInv.matrix() * m_command.matrix() ).array();
     }
     else
@@ -1059,6 +1063,7 @@ int dmRecon::processImage( void *curr_src, const dmCommandShmimT & )
                                                            cublasGetStatusString( cbs ) ) } );
         }
 
+        std::lock_guard<std::mutex> guard( m_modevalsMutex );
         ec = m_modevals_GPU.download( m_modevals.data() );
         if( ec != mx::error_t::noerror )
         {
@@ -1078,7 +1083,7 @@ int dmRecon::processImage( void *curr_src, const dmCommandShmimT & )
 
     m_updated = true;
 
-    if( m_writeDMf )
+    if( m_writeDMf.load() )
     {
         // trigger framegrabber
         if( sem_post( &m_smSemaphore ) < 0 )
@@ -1105,7 +1110,7 @@ int dmRecon::processImage( void *curr_src, const dmCommandShmimT & )
 
 int dmRecon::configureAcquisition()
 {
-    if( !m_commandReady )
+    if( !m_commandReady.load() )
     {
         m_fgWaiting = true;
         mx::sys::milliSleep( 100 );
@@ -1226,14 +1231,14 @@ int dmRecon::acquireAndCheckValid()
 
     ts.tv_sec += 1;
 
-    if( !m_commandReady )
+    if( !m_commandReady.load() )
     {
         return 1;
     }
 
     if( sem_timedwait( &m_smSemaphore, &ts ) == 0 )
     {
-        if( m_updated && m_commandReady )
+        if( m_updated.load() && m_commandReady.load() )
         {
             return 0;
         }
@@ -1252,6 +1257,7 @@ int dmRecon::acquireAndCheckValid()
 
 int dmRecon::loadImageIntoStream( void *dest )
 {
+    std::lock_guard<std::mutex> guard( m_modevalsMutex );
     memcpy( dest, m_modevals.data(), m_modevals.rows() * m_modevals.cols() * sizeof( float ) );
 
     return 0;

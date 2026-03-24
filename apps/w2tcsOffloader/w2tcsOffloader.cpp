@@ -1,16 +1,14 @@
 /** \file w2tcsOffloader.cpp
-  * \brief The MagAO-X Woofer To Telescope Control System (TCS) Offloader
-  *
-  * \ingroup w2tcsOffloader_files
-  */
+ * \brief The MagAO-X Woofer To Telescope Control System (TCS) offloader main program.
+ *
+ * \ingroup w2tcsOffloader_files
+ */
 
 #include "w2tcsOffloader.hpp"
-
-
-int main(int argc, char **argv)
+/// Run the w2tcsOffloader application entry point.
+int main( int argc, char **argv )
 {
-   MagAOX::app::w2tcsOffloader xapp;
+    MagAOX::app::w2tcsOffloader xapp;
 
-   return xapp.main(argc, argv);
-
+    return xapp.main( argc, argv );
 }

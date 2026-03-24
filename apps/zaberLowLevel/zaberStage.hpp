@@ -55,6 +55,10 @@ class zaberStage
 
     float m_temp{ -999 }; ///< The driver temperature, in C.
 
+    bool m_knobEnabled{ false };
+
+    bool m_ledEnabled{ false };
+
     bool m_warn{ false };
 
     bool m_warnFD{ false };
@@ -192,6 +196,18 @@ class zaberStage
      */
     int parked();
 
+    /// Get the knob status
+    /**
+     * \returns the current value of m_knobEnabled
+     */
+    bool knobEnabled();
+
+    /// Get the LED status
+    /**
+     * \returns the current value of m_ledEnabled
+     */
+    bool ledEnabled();
+
     /// Get the current raw position, in counts
     /**
      * \returns the current value of m_rawPos
@@ -303,14 +319,21 @@ class zaberStage
     /// Get the parked state from the stage
     int getParked( z_port port /**< [in] the port with which to communicate */ );
 
+    int getKnob( z_port port /**< [in] the port with which to communicate */ );
+
+    int getLED( z_port port /**< [in] the port with which to communicate */ );
+
     /// Update the position of the stage
     int updatePos( z_port port /**< [in] the port with which to communicate */ );
 
     /// Update the stage temperature
     int updateTemp( z_port port /**< [in] the port with which to communicate */ );
 
-    /// Disable the knob
-    int disableKnob( z_port port );
+    /// Enable/Disable the knob
+    int enableKnob( z_port port, bool enable );
+
+    // Enable/disable LED
+    int enableLED( z_port port, bool enable );
 
     /// Stop the stage
     int stop( z_port port );
@@ -452,6 +475,18 @@ template <class parentT>
 int zaberStage<parentT>::parked()
 {
     return m_parked;
+}
+
+template <class parentT>
+bool zaberStage<parentT>::knobEnabled()
+{
+    return m_knobEnabled;
+}
+
+template <class parentT>
+bool zaberStage<parentT>::ledEnabled()
+{
+    return m_ledEnabled;
 }
 
 template <class parentT>
@@ -819,6 +854,44 @@ int zaberStage<parentT>::getParked( z_port port )
     return 0;
 }
 
+
+template <class parentT>
+int zaberStage<parentT>::getKnob( z_port port )
+{
+    int rv = getValue( m_knobEnabled, port, "get knob.enable" );
+
+    if( rv < 0 )
+    {
+        if( m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1 )
+        {
+            return -1; // don't log, but propagate error
+        }
+
+        return MagAOXAppT::log<software_error, -1>();
+    }
+
+    return 0;
+}
+
+template <class parentT>
+int zaberStage<parentT>::getLED( z_port port )
+{
+    int rv = getValue( m_ledEnabled, port, "get system.led.enable");
+
+    if( rv < 0 )
+    {
+        if( m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1 )
+        {
+            return -1; // don't log, but propagate error
+        }
+
+        return MagAOXAppT::log<software_error, -1>();
+    }
+
+    return 0;
+}
+
+
 template <class parentT>
 int zaberStage<parentT>::updatePos( z_port port )
 {
@@ -887,7 +960,7 @@ int zaberStage<parentT>::sendCommand( z_port port, const std::string &command )
     }
     else
     {
-        if( m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1 )
+         if( m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1 )
         {
             return -1; // don't log, but propagate error
         }
@@ -898,9 +971,31 @@ int zaberStage<parentT>::sendCommand( z_port port, const std::string &command )
 }
 
 template <class parentT>
-int zaberStage<parentT>::disableKnob( z_port port )
+int zaberStage<parentT>::enableKnob( z_port port, bool enable )
 {
-    int rv = sendCommand( port, "set knob.enable 0" );
+    std::string cmd = std::format("set knob.enable {}", enable ? "1" : "0");
+
+    int rv = sendCommand( port, cmd);
+
+    if( rv < 0 )
+    {
+        if( m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1 )
+        {
+            return -1; // don't log, but propagate error
+        }
+
+        return MagAOXAppT::log<software_error, -1>();
+    }
+
+    return 0;
+}
+
+template <class parentT>
+int zaberStage<parentT>::enableLED( z_port port, bool enable )
+{
+    std::string cmd = std::format("set system.led.enable {}", enable ? "1" : "0");
+
+    int rv = sendCommand( port, cmd );
 
     if( rv < 0 )
     {

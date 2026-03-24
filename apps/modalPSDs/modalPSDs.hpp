@@ -10,6 +10,8 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+#include <atomic>
+#include <condition_variable>
 #include <mx/sigproc/circularBuffer.hpp>
 #include <mx/sigproc/signalWindows.hpp>
 
@@ -56,7 +58,7 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
     typedef dev::shmimMonitor<modalPSDs> shmimMonitorT;
 
     /// The amplitude circular buffer type
-    typedef mx::sigproc::circularBufferIndex<realT *, cbIndexT> ampCircBuffT;
+    typedef mx::sigproc::circularBufferIndex<realT *, cbIndexT, true> ampCircBuffT;
 
   protected:
     /** \name Configurable Parameters
@@ -76,8 +78,8 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
 
     realT m_fpsTol{ 0 }; ///< The tolerance for detecting a change in FPS.
 
-    realT m_psdTime{ 1 };     ///< The length of time over which to calculate PSDs.  The default is 1 sec.
-    realT m_psdAvgTime{ 10 }; ///< The time over which to average PSDs.  The default is 10 sec.
+    std::atomic<realT> m_psdTime{ 1 };     ///< The length of time over which to calculate PSDs.  The default is 1 sec.
+    std::atomic<realT> m_psdAvgTime{ 10 }; ///< The time over which to average PSDs.  The default is 10 sec.
 
     // realT m_overSize {10}; ///< Multiplicative factor by which to oversize the circular buffer, to give good mean
     // estimates and account for time-to-calculate.
@@ -94,7 +96,7 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
 
     // std::vector<ampCircBuffT> m_ampCircBuffs;
 
-    realT m_fps{ 0 };
+    std::atomic<realT> m_fps{ 0 }; ///< The current input frame rate used to size PSD windows.
 
     realT m_df{ 1 };
 
@@ -105,6 +107,9 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
     cbIndexT m_meanSize{ 20000 }; ///< The length of the time series over which to calculate the mean
 
     std::vector<realT> m_win; ///< The window function.  By default this is Hann.
+
+    std::vector<realT *> m_tsPtrs;   ///< Snapshot of the latest time-series window pointers for PSD computation.
+    std::vector<realT *> m_meanPtrs; ///< Snapshot of the latest mean-window pointers for PSD computation.
 
     realT *m_tsWork{ nullptr };
     size_t m_tsWorkSize{ 0 };
@@ -129,11 +134,14 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
 
     bool m_psdThreadInit{ true }; ///< Initialization flag for the PSD Calculation thread.
 
-    bool m_psdRestarting{ true }; /**< Synchronization flag.  This will only become false
-                                       after a successful call to allocate.*/
+    std::atomic<bool> m_psdRestarting{ true }; /**< Synchronization flag.  This will only become false
+                                                    after a successful call to allocate.*/
 
-    bool m_psdWaiting{ false }; ///< Synchronization flag.  This is set to true when the PSD thread is safely waiting
-                                ///< for allocation to complete.
+    bool m_psdWaiting{ false }; ///< Synchronization flag protected by m_psdMutex.
+
+    std::mutex m_psdMutex; ///< Protects restart handoff between allocate() and the PSD thread.
+
+    std::condition_variable m_psdCond; ///< Coordinates quiescence during restart.
 
     pid_t m_psdThreadID{ 0 }; ///< PSD Calculation thread PID.
 
@@ -146,6 +154,24 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
     /** Runs until m_shutdown is true.
      */
     void psdThreadExec();
+
+    /// Compute the reference entry for the latest logical window while preserving historical semantics.
+    /** The returned window ends at the sample immediately preceding snapshot.latest. This matches the
+     *  longstanding modalPSDs behavior and keeps the writable/latest publication edge out of the PSD window.
+     */
+    static cbIndexT latestWindowRefEntry( const ampCircBuffT::snapshotT &sn,   ///< [in] the snapshot to use
+                                          cbIndexT                       count ///< [in] the requested window length
+    );
+
+    /// Compute the reference entry for a logical window immediately preceding another logical window.
+    static cbIndexT precedingWindowRefEntry( const ampCircBuffT::snapshotT &sn, ///< [in] the snapshot to use
+                                             cbIndexT refEntry,                 ///< [in] later window reference entry
+                                             cbIndexT count                     ///< [in] the requested window length
+    );
+
+    /// Load the PSD and mean pointer windows from a single validated snapshot.
+    bool loadPsdInputWindows( ampCircBuffT::snapshotT &sn ///< [out] the snapshot used for both windows
+    );
 
     IMAGE *m_freqStream{ nullptr }; ///< The ImageStreamIO shared memory buffer to hold the frequency scale
 
@@ -335,7 +361,9 @@ int modalPSDs::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fpsElement, "circBuff.fpsElement" );
     _config( m_fpsTol, "circBuff.fpsTol" );
 
-    _config( m_psdTime, "circBuff.psdTime" );
+    realT psdTime = m_psdTime.load();
+    _config( psdTime, "circBuff.psdTime" );
+    m_psdTime.store( psdTime );
 
     return 0;
 }
@@ -348,12 +376,12 @@ void modalPSDs::loadConfig()
 int modalPSDs::appStartup()
 {
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_psdTime, "psdTime", 0, 60, 0.1, "%0.1f", "PSD time", "PSD Setup" );
-    m_indiP_psdTime["current"].set( m_psdTime );
-    m_indiP_psdTime["target"].set( m_psdTime );
+    m_indiP_psdTime["current"].set( m_psdTime.load() );
+    m_indiP_psdTime["target"].set( m_psdTime.load() );
 
     CREATE_REG_INDI_NEW_NUMBERU( m_indiP_psdAvgTime, "psdAvgTime", 0, 60, 0.1, "%0.1f", "PSD Avg. Time", "PSD Setup" );
-    m_indiP_psdAvgTime["current"].set( m_psdAvgTime );
-    m_indiP_psdAvgTime["target"].set( m_psdAvgTime );
+    m_indiP_psdAvgTime["current"].set( m_psdAvgTime.load() );
+    m_indiP_psdAvgTime["target"].set( m_psdAvgTime.load() );
 
     if( m_fpsDevice == "" )
     {
@@ -365,7 +393,7 @@ int modalPSDs::appStartup()
 
     CREATE_REG_INDI_RO_NUMBER( m_indiP_fps, "fps", "current", "Circular Buffer" );
     m_indiP_fps.add( pcf::IndiElement( "current" ) );
-    m_indiP_fps["current"] = m_fps;
+    m_indiP_fps["current"] = m_fps.load();
 
     SHMIMMONITOR_APP_STARTUP;
 
@@ -398,6 +426,11 @@ int modalPSDs::appLogic()
 
 int modalPSDs::appShutdown()
 {
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_psdMutex );
+        m_psdWaiting = false;
+    }
+    m_psdCond.notify_all();
 
     XWCAPP_THREAD_STOP( m_psdThread );
 
@@ -438,12 +471,12 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
 
-    m_psdRestarting = true;
+    m_psdRestarting.store( true, std::memory_order_release );
 
     // Wait for FPS to become not 0
     // We wait indefinitely, the other process just might not be alive
     bool logged = false;
-    while( m_fps <= 0 && !shutdown() )
+    while( m_fps.load( std::memory_order_acquire ) <= 0 && !shutdown() )
     {
         if( !logged ) // log every thirty seconds
         {
@@ -453,14 +486,9 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
         mx::sys::sleep( 1 );
     }
 
-    if( m_psdWaiting == false )
-    {
-        std::cerr << "PSD not waiting  . . .\n";
-    }
-    // Prevent reallocation while the psd thread might be calculating
-    while( m_psdWaiting == false && !shutdown() )
-    {
-        mx::sys::microSleep( 100 );
+    { // mutex scope
+        std::unique_lock<std::mutex> lock( m_psdMutex );
+        m_psdCond.wait( lock, [this]() { return m_psdWaiting || shutdown(); } );
     }
 
     std::cerr << "PSD waiting \n";
@@ -491,7 +519,11 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
 
     m_nModes = shmimMonitorT::m_width * shmimMonitorT::m_height;
 
-    m_tsSize = m_fps * m_psdTime;
+    realT fps        = m_fps.load( std::memory_order_acquire );
+    realT psdTime    = m_psdTime.load( std::memory_order_acquire );
+    realT psdAvgTime = m_psdAvgTime.load( std::memory_order_acquire );
+
+    m_tsSize = fps * psdTime;
 
     // Adjust length if odd to ensure we get the Nyquist frequency
     if( m_tsSize % 2 == 1 )
@@ -508,7 +540,7 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
         return -1;
     }
 
-    m_meanSize = m_fps * m_psdAvgTime;
+    m_meanSize = fps * psdAvgTime;
 
     if( static_cast<uint32_t>( m_meanSize ) > shmimMonitorT::m_depth )
     {
@@ -526,6 +558,9 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
     {
         m_ampCircBuff.maxEntries( 2 * m_meanSize );
     }
+
+    m_tsPtrs.resize( m_tsSize );
+    m_meanPtrs.resize( m_meanSize );
 
     // Create the window
     m_win.resize( m_tsSize );
@@ -549,7 +584,7 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
 
     m_psd.resize( m_tsSize / 2 + 1 );
 
-    m_df = 1.0 / ( m_tsSize / m_fps );
+    m_df = 1.0 / ( m_tsSize / fps );
 
     // Create the shared memory images
     uint32_t imsize[3];
@@ -600,7 +635,12 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
 
     std::cerr << "done restarting\n";
 
-    m_psdRestarting = false;
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_psdMutex );
+        m_psdWaiting = false;
+        m_psdRestarting.store( false, std::memory_order_release );
+    }
+    m_psdCond.notify_all();
 
     return 0;
 }
@@ -687,22 +727,29 @@ void modalPSDs::psdThreadExec()
 
     while( shutdown() == 0 )
     {
-        if( m_psdRestarting == true || m_ampCircBuff.maxEntries() == 0 )
-        {
-            m_psdWaiting = true;
-        }
+        { // mutex scope
+            std::unique_lock<std::mutex> lock( m_psdMutex );
 
-        while( ( m_psdRestarting == true || m_ampCircBuff.maxEntries() == 0 ) && !shutdown() )
-        {
-            mx::sys::microSleep( 100 );
+            if( m_psdRestarting.load( std::memory_order_acquire ) == true || m_ampCircBuff.maxEntries() == 0 )
+            {
+                m_psdWaiting = true;
+                m_psdCond.notify_all();
+            }
+
+            m_psdCond.wait( lock,
+                            [this]()
+                            {
+                                return shutdown() || ( m_psdRestarting.load( std::memory_order_acquire ) == false &&
+                                                       m_ampCircBuff.maxEntries() != 0 );
+                            } );
+
+            m_psdWaiting = false;
         }
 
         if( shutdown() )
         {
             break;
         }
-
-        m_psdWaiting = false;
 
         if( m_ampCircBuff.maxEntries() == 0 )
         {
@@ -711,47 +758,26 @@ void modalPSDs::psdThreadExec()
         }
 
         std::cerr << "waiting to grow\n";
-        while( m_ampCircBuff.size() < m_ampCircBuff.maxEntries() && m_psdRestarting == false && !shutdown() )
+        while( m_ampCircBuff.size() < m_ampCircBuff.maxEntries() &&
+               m_psdRestarting.load( std::memory_order_acquire ) == false && !shutdown() )
         {
             // shrinking sleep
-            double stime = ( 1.0 * m_ampCircBuff.maxEntries() - 1.0 * m_ampCircBuff.size() ) / m_fps * 0.5 * 1e9;
+            double stime = ( 1.0 * m_ampCircBuff.maxEntries() - 1.0 * m_ampCircBuff.size() ) / m_fps.load() * 0.5 * 1e9;
             mx::sys::nanoSleep( stime );
         }
 
         std::cerr << "all grown.  starting to calculate\n";
 
-        ampCircBuffT::indexT ne0;
-        ampCircBuffT::indexT mne0;
-        ampCircBuffT::indexT ne1 = m_ampCircBuff.latest();
-        if( ne1 >= m_tsSize )
-        {
-            ne1 -= m_tsSize;
-        }
-        else
-        {
-            ne1 = m_ampCircBuff.size() + ne1 - m_tsSize;
-        }
-        // std::cerr << __LINE__ << " " << ne1 << " " << m_tsSize << " " << m_ampCircBuff.size() << '\n';
-
-        while( m_psdRestarting == false && !shutdown() )
+        while( m_psdRestarting.load( std::memory_order_acquire ) == false && !shutdown() )
         {
             // Used to check if we are getting too behind
             uint64_t mono0 = m_ampCircBuff.mono();
 
-            // Calc PSDs here
-            ne0 = ne1;
-
-            if( ne0 >= m_meanSize )
+            ampCircBuffT::snapshotT tsSnap;
+            if( !loadPsdInputWindows( tsSnap ) )
             {
-                mne0 = ne0 - m_meanSize;
+                continue;
             }
-            else
-            {
-                mne0 = m_ampCircBuff.size() + ne0 - m_meanSize;
-            }
-
-            // std::cerr << "calculating: " << ne0 << " " << " " << m_tsSize << ' ' << m_ampCircBuff.size() << '\n';
-            //   double t0 = mx::sys::get_curr_time();
 
             for( size_t m = 0; m < m_nModes; ++m ) // Loop over each mode
             {
@@ -759,7 +785,7 @@ void modalPSDs::psdThreadExec()
                 realT mn = 0;
                 for( cbIndexT n = 0; n < m_meanSize; ++n )
                 {
-                    mn += ( m_ampCircBuff.at( mne0, n ) )[m];
+                    mn += m_meanPtrs[n][m];
                 }
                 mn /= m_meanSize;
 
@@ -767,7 +793,7 @@ void modalPSDs::psdThreadExec()
 
                 for( cbIndexT n = 0; n < m_tsSize; ++n )
                 {
-                    m_tsWork[n] = ( m_ampCircBuff.at( ne0, n )[m] - mn ); // load mean subtracted chunk
+                    m_tsWork[n] = m_tsPtrs[n][m] - mn; // load mean subtracted chunk
 
                     var += pow( m_tsWork[n], 2 );
 
@@ -821,7 +847,9 @@ void modalPSDs::psdThreadExec()
 
             //-------------------------- now average the psds ----------------------------
 
-            int nPSDAverage = ( m_psdAvgTime / m_psdTime ) / m_psdOverlapFraction;
+            int nPSDAverage =
+                ( m_psdAvgTime.load( std::memory_order_acquire ) / m_psdTime.load( std::memory_order_acquire ) ) /
+                m_psdOverlapFraction;
 
             if( nPSDAverage <= 0 )
             {
@@ -882,28 +910,79 @@ void modalPSDs::psdThreadExec()
             }
             else
             {
-                while( m_ampCircBuff.mono() - mono0 < static_cast<uint32_t>( m_tsOverlapSize ) && !m_psdRestarting )
+                while( m_ampCircBuff.mono() - mono0 < static_cast<uint32_t>( m_tsOverlapSize ) &&
+                       !m_psdRestarting.load( std::memory_order_acquire ) )
                 {
-                    mx::sys::microSleep( 0.2 * 1000000.0 / m_fps );
+                    mx::sys::microSleep( 0.2 * 1000000.0 / m_fps.load( std::memory_order_acquire ) );
                 }
             }
 
-            if( m_psdRestarting )
+            if( m_psdRestarting.load( std::memory_order_acquire ) )
             {
                 continue;
             }
-
-            ne1 = m_ampCircBuff.latest();
-            if( ne1 > m_tsSize )
-            {
-                ne1 -= m_tsSize;
-            }
-            else
-            {
-                ne1 = m_ampCircBuff.size() + ne1 - m_tsSize;
-            }
         }
     }
+}
+
+modalPSDs::cbIndexT modalPSDs::latestWindowRefEntry( const ampCircBuffT::snapshotT &sn, cbIndexT count )
+{
+    if( sn.latest >= count )
+    {
+        return sn.latest - count;
+    }
+
+    return sn.maxEntries + sn.latest - count;
+}
+
+modalPSDs::cbIndexT
+modalPSDs::precedingWindowRefEntry( const ampCircBuffT::snapshotT &sn, cbIndexT refEntry, cbIndexT count )
+{
+    if( refEntry >= count )
+    {
+        return refEntry - count;
+    }
+
+    return sn.maxEntries + refEntry - count;
+}
+
+bool modalPSDs::loadPsdInputWindows( ampCircBuffT::snapshotT &sn )
+{
+    for( int retry = 0; retry < 3; ++retry )
+    {
+        ampCircBuffT::snapshotT seedSnap = m_ampCircBuff.snapshot();
+        if( seedSnap.validEntries < m_ampCircBuff.maxEntries() )
+        {
+            return false;
+        }
+
+        cbIndexT tsRefEntry = latestWindowRefEntry( seedSnap, m_tsSize );
+
+        if( !m_ampCircBuff.loadSequence( tsRefEntry, m_tsSize, m_tsPtrs.data(), sn ) )
+        {
+            return false;
+        }
+
+        if( sn.mono != seedSnap.mono )
+        {
+            continue;
+        }
+
+        cbIndexT meanRefEntry = precedingWindowRefEntry( sn, tsRefEntry, m_meanSize );
+
+        ampCircBuffT::snapshotT meanSnap;
+        if( !m_ampCircBuff.loadSequence( meanRefEntry, m_meanSize, m_meanPtrs.data(), meanSnap ) )
+        {
+            return false;
+        }
+
+        if( meanSnap.mono == sn.mono )
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 INDI_NEWCALLBACK_DEFN( modalPSDs, m_indiP_psdTime )( const pcf::IndiProperty &ipRecv )
@@ -918,18 +997,18 @@ INDI_NEWCALLBACK_DEFN( modalPSDs, m_indiP_psdTime )( const pcf::IndiProperty &ip
         return -1;
     }
 
-    if( m_psdTime != target )
+    if( m_psdTime.load( std::memory_order_acquire ) != target )
     {
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
-        m_psdTime = target;
+        m_psdTime.store( target, std::memory_order_release );
 
-        updateIfChanged( m_indiP_psdTime, "current", m_psdTime, INDI_IDLE );
-        updateIfChanged( m_indiP_psdTime, "target", m_psdTime, INDI_IDLE );
+        updateIfChanged( m_indiP_psdTime, "current", m_psdTime.load(), INDI_IDLE );
+        updateIfChanged( m_indiP_psdTime, "target", m_psdTime.load(), INDI_IDLE );
 
         shmimMonitorT::m_restart = true;
 
-        log<text_log>( "set psdTime to " + std::to_string( m_psdTime ), logPrio::LOG_NOTICE );
+        log<text_log>( "set psdTime to " + std::to_string( m_psdTime.load() ), logPrio::LOG_NOTICE );
     }
 
     return 0;
@@ -947,16 +1026,16 @@ INDI_NEWCALLBACK_DEFN( modalPSDs, m_indiP_psdAvgTime )( const pcf::IndiProperty 
         return -1;
     }
 
-    if( m_psdAvgTime != target )
+    if( m_psdAvgTime.load( std::memory_order_acquire ) != target )
     {
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
-        m_psdAvgTime = target;
+        m_psdAvgTime.store( target, std::memory_order_release );
 
-        updateIfChanged( m_indiP_psdAvgTime, "current", m_psdAvgTime, INDI_IDLE );
-        updateIfChanged( m_indiP_psdAvgTime, "target", m_psdAvgTime, INDI_IDLE );
+        updateIfChanged( m_indiP_psdAvgTime, "current", m_psdAvgTime.load(), INDI_IDLE );
+        updateIfChanged( m_indiP_psdAvgTime, "target", m_psdAvgTime.load(), INDI_IDLE );
 
-        log<text_log>( "set psdAvgTime to " + std::to_string( m_psdAvgTime ), logPrio::LOG_NOTICE );
+        log<text_log>( "set psdAvgTime to " + std::to_string( m_psdAvgTime.load() ), logPrio::LOG_NOTICE );
     }
 
     return 0;
@@ -976,11 +1055,11 @@ INDI_SETCALLBACK_DEFN( modalPSDs, m_indiP_fpsSource )( const pcf::IndiProperty &
 
     realT fps = ipRecv[m_fpsElement].get<realT>();
 
-    if( fabs( fps - m_fps ) > m_fpsTol + .0001)
+    if( fabs( fps - m_fps.load( std::memory_order_acquire ) ) > m_fpsTol + .0001 )
     {
-        m_fps = fps;
-        log<text_log>( "set fps to " + std::to_string( m_fps ), logPrio::LOG_NOTICE );
-        updateIfChanged( m_indiP_fps, "current", m_fps, INDI_IDLE );
+        m_fps.store( fps, std::memory_order_release );
+        log<text_log>( "set fps to " + std::to_string( m_fps.load() ), logPrio::LOG_NOTICE );
+        updateIfChanged( m_indiP_fps, "current", m_fps.load(), INDI_IDLE );
 
         shmimMonitorT::m_restart = true;
     }

@@ -164,7 +164,7 @@ class wooferTweeterRecon : public MagAOXApp<true>,
 
     std::vector<float> m_r0;
     std::vector<float> m_sig;
-    size_t             m_lastr0;
+    size_t             m_lastr0{ 0 };
 
   public:
     /// Default c'tor.
@@ -542,7 +542,7 @@ int wooferTweeterRecon::allocate( const wooferModesShmimT & )
     for( auto &val : m_wooferVals )
     {
         val.t = 0;
-        val.vals.resize( tweeterModesSMT::m_width, 0 );
+        val.vals.resize( wooferModesSMT::m_width, 0 );
         val.reconstructed = false;
     }
 
@@ -670,7 +670,7 @@ int wooferTweeterRecon::processImage( void *curr_src, const wfsModesShmimT & )
         next = 0;
     }
 
-    for( size_t n = 0; n < wooferModesSMT::m_width; ++n )
+    for( size_t n = 0; n < wfsModesSMT::m_width; ++n )
     {
         m_wfsVals[next].vals[n] = reinterpret_cast<float *>( curr_src )[n];
     }

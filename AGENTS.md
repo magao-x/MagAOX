@@ -79,11 +79,23 @@ Follow these code style and documentation rules exactly.
   - When a file is touched, update documentation quality across the full changed file, not only in modified lines.
 
 16) Keep This File Current
-  - Add new standing style/documentation instructions to `agent_context.md` as they are introduced.
+  - Add new standing style/documentation instructions to this `AGENTS.md` file as they are introduced.
 
 17) Commit Branch Discipline
   - Do not commit directly to shared/integration branches (e.g. `dev`, `main`, `master`).
   - Always create/switch to a feature branch that follows rule #12 before committing.
+
+18) dev Base-Class Macros
+  - When integrating a `dev::<base-class>` helper into an app, prefer the corresponding interface macros provided by that helper header when they exist.
+  - Examples include `TELEMETER_*` for `dev::telemeter` and `FRAMEGRABBER_*` for `dev::frameGrabber`.
+
+19) Commit Separation
+  - Keep changes separated into clean commits on feature branches.
+  - Make functional changes first.
+  - Keep relevant plan files up to date as implementation progresses when they capture engineering decisions or execution notes for the work.
+  - Commit relevant plan files with the associated code changes when they serve as part of the engineering record for that work.
+  - Follow with documentation-only changes.
+  - Make formatting-only cleanup a separate final commit when needed.
 
 When you finish:
 - Summarize what changed.

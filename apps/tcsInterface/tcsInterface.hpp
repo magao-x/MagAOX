@@ -1244,6 +1244,9 @@ inline int tcsInterface::appLogic()
                 log<software_error>( { __FILE__, __LINE__, errno } );
                 lasterrno = errno;
             }
+
+             telemeter<tcsInterface>::appLogic();
+
             return 0;
         }
     }

@@ -94,6 +94,7 @@ INCLUDEDEPS= \
 	logger/types/telem_telvane.hpp \
 	logger/types/telem_temps.hpp \
 	logger/types/telem_usage.hpp \
+	logger/types/telem_w2tcsoffloader.hpp \
 	logger/types/telem_zaber.hpp \
 	logger/types/text_log.hpp \
 	logger/types/ttmmod_params.hpp \

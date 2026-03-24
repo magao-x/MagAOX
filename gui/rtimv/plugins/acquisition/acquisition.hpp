@@ -14,7 +14,7 @@
 class acquisition : public rtimvOverlayInterface
 {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.2")
+    Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.4")
     Q_INTERFACES(rtimvOverlayInterface)
 
 protected:

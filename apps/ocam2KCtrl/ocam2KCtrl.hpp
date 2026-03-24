@@ -134,6 +134,8 @@ protected:
 
     float m_syncFreq {0};
 
+    std::recursive_mutex m_cameraMutex; ///< Protects EDT PDV access and OCAM SDK lifetime across reconfigure, grab, and control paths.
+
 public:
 
    ///Default c'tor
@@ -507,7 +509,11 @@ int ocam2KCtrl::appLogic()
       //Might have gotten here because of a power off.
       if(MagAOXAppT::m_powerState == 0) return 0;
 
-      int ret = pdvSerialWriteRead( response, "fps"); //m_pdv, "fps", m_readTimeout);
+      int ret = 0;
+      { //mutex scope
+         std::lock_guard<std::recursive_mutex> guard(m_cameraMutex);
+         ret = pdvSerialWriteRead( response, "fps"); //m_pdv, "fps", m_readTimeout);
+      }
       if( ret == 0)
       {
          state(stateCodes::CONNECTED);
@@ -724,7 +730,15 @@ int ocam2KCtrl::getTemps()
 {
    std::string response;
 
-   if( pdvSerialWriteRead( response, "temp") == 0)
+   { //mutex scope
+      std::lock_guard<std::recursive_mutex> guard(m_cameraMutex);
+      if( pdvSerialWriteRead( response, "temp") != 0)
+      {
+         if(powerState() != 1 || powerStateTarget() != 1) return -1;
+         return log<software_error,-1>({""});
+      }
+   }
+
    {
       ocamTemps temps;
 
@@ -797,11 +811,6 @@ int ocam2KCtrl::getTemps()
       return 0;
 
    }
-   else
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({""});
-   }
 }
 
 inline
@@ -844,16 +853,19 @@ int ocam2KCtrl::setTempControl()
 
    comStr += command;
 
-   if( pdvSerialWriteRead( response, comStr) == 0)
+   { //mutex scope
+      std::lock_guard<std::recursive_mutex> guard(m_cameraMutex);
+      if( pdvSerialWriteRead( response, comStr) != 0)
+      {
+         if(powerState() != 1 || powerStateTarget() != 1) return -1;
+         return log<software_error,-1>({""});
+      }
+   }
+
    {
       std::cerr << "response: " << response << "\n";
       ///\todo check response
       log<text_log,0>({"Set temperature control to " + command});
-   }
-   else
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({""});
    }
 
    if( m_tempControlStatusSet && m_ccdTempSetpt > -999)
@@ -879,7 +891,15 @@ int ocam2KCtrl::setTempSetPt()
       return log<text_log,-1>({"attempt to set temperature outside valid range: " + tempStr}, logPrio::LOG_ERROR);
    }
 
-   if( pdvSerialWriteRead( response, "temp " + tempStr) == 0)
+   { //mutex scope
+      std::lock_guard<std::recursive_mutex> guard(m_cameraMutex);
+      if( pdvSerialWriteRead( response, "temp " + tempStr) != 0)
+      {
+         if(powerState() != 1 || powerStateTarget() != 1) return -1;
+         return log<software_error,-1>({""});
+      }
+   }
+
    {
       std::cerr << "response: " << response << "\n";
 
@@ -890,12 +910,6 @@ int ocam2KCtrl::setTempSetPt()
 
       return log<text_log,0>({"set temperature: " + tempStr});
    }
-   else
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({""});
-   }
-
 }
 
 inline
@@ -905,7 +919,11 @@ int ocam2KCtrl::getFPS()
     {
         std::string response;
 
-        if( pdvSerialWriteRead( response, "fps") == 0) // m_pdv, "fps", m_readTimeout) == 0)
+        { //mutex scope
+            std::lock_guard<std::recursive_mutex> guard(m_cameraMutex);
+            if( pdvSerialWriteRead( response, "fps") != 0) return log<software_error,-1>({""}); // m_pdv, "fps", m_readTimeout) == 0)
+        }
+
         {
             float fps;
             if(parseFPS( fps, response ) < 0)
@@ -922,10 +940,6 @@ int ocam2KCtrl::getFPS()
 
             return 0;
 
-        }
-        else
-        {
-            return log<software_error,-1>({""});
         }
     }
     else
@@ -946,7 +960,15 @@ int ocam2KCtrl::setFPS()
     {
         std::string response;
 
-        if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0)
+        { //mutex scope
+            std::lock_guard<std::recursive_mutex> guard(m_cameraMutex);
+            if( pdvSerialWriteRead( response, "fps " + fpsStr ) != 0)
+            {
+                if(powerState() != 1 || powerStateTarget() != 1) return -1;
+                return log<software_error,-1>({""});
+            }
+        }
+
         {
             ///\todo check response
             std::cerr << "fps " << fpsStr << " response: " << response << "\n";
@@ -957,11 +979,6 @@ int ocam2KCtrl::setFPS()
             m_nextMode = m_modeName;
             m_reconfig = true;
 
-        }
-        else
-        {
-            if(powerState() != 1 || powerStateTarget() != 1) return -1;
-            return log<software_error,-1>({""});
         }
     }
     else
@@ -989,45 +1006,49 @@ int ocam2KCtrl::setSynchro()
 {
     std::string response;
 
-    //First set the actual FPS to 0 to get to max
-    std::string fpsStr= std::to_string(0);
-    if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0)
-    {
-        ///\todo check response
-        std::cerr << "fps " << fpsStr << " response: " << response << "\n";
-        log<text_log>({"set fps: " + fpsStr});
-    }
-    else
-    {
-        if(powerState() != 1 || powerStateTarget() != 1) return -1;
-        return log<software_error,-1>({""});
-    }
+    { //mutex scope
+        std::lock_guard<std::recursive_mutex> guard(m_cameraMutex);
 
-    //Now actually turn synchro on
-    std::string sStr;
-    if(m_synchroSet) sStr = "on";
-    else sStr = "off";
-    if( pdvSerialWriteRead( response, "synchro " + sStr ) == 0)
-    {
-        ///\todo check response
-        std::cerr << "synchro " << sStr << " resonse: " << response << "\n";
-        log<text_log>({"set synchro: " + sStr});
-
-        m_synchro = m_synchroSet;
-
-        if(m_synchro == false)
+        //First set the actual FPS to 0 to get to max
+        std::string fpsStr= std::to_string(0);
+        if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0)
         {
-            updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+            ///\todo check response
+            std::cerr << "fps " << fpsStr << " response: " << response << "\n";
+            log<text_log>({"set fps: " + fpsStr});
         }
         else
         {
-            updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::On, INDI_OK);
+            if(powerState() != 1 || powerStateTarget() != 1) return -1;
+            return log<software_error,-1>({""});
         }
-    }
-    else
-    {
-        if(powerState() != 1 || powerStateTarget() != 1) return -1;
-        return log<software_error,-1>({""});
+
+        //Now actually turn synchro on
+        std::string sStr;
+        if(m_synchroSet) sStr = "on";
+        else sStr = "off";
+        if( pdvSerialWriteRead( response, "synchro " + sStr ) == 0)
+        {
+            ///\todo check response
+            std::cerr << "synchro " << sStr << " resonse: " << response << "\n";
+            log<text_log>({"set synchro: " + sStr});
+
+            m_synchro = m_synchroSet;
+
+            if(m_synchro == false)
+            {
+                updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+            }
+            else
+            {
+                updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::On, INDI_OK);
+            }
+        }
+        else
+        {
+            if(powerState() != 1 || powerStateTarget() != 1) return -1;
+            return log<software_error,-1>({""});
+        }
     }
 
     //Finally we set the FPS of the synchro device
@@ -1080,7 +1101,15 @@ int ocam2KCtrl::resetEMProtection()
 {
    std::string response;
 
-   if( pdvSerialWriteRead( response, "protection reset") == 0)
+   { //mutex scope
+      std::lock_guard<std::recursive_mutex> guard(m_cameraMutex);
+      if( pdvSerialWriteRead( response, "protection reset") != 0)
+      {
+         if(powerState() != 1 || powerStateTarget() != 1) return -1;
+         return log<software_error,-1>({""});
+      }
+   }
+
    {
       std::cerr << "\n******************************************\n";
       std::cerr << "protection reset:\n";
@@ -1099,11 +1128,6 @@ int ocam2KCtrl::resetEMProtection()
       return 0;
 
    }
-   else
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({""});
-   }
 }
 
 inline
@@ -1111,7 +1135,15 @@ int ocam2KCtrl::getEMGain()
 {
    std::string response;
 
-   if( pdvSerialWriteRead( response, "gain") == 0)
+   { //mutex scope
+      std::lock_guard<std::recursive_mutex> guard(m_cameraMutex);
+      if( pdvSerialWriteRead( response, "gain") != 0)
+      {
+         if(powerState() != 1 || powerStateTarget() != 1) return -1;
+         return log<software_error,-1>({""});
+      }
+   }
+
    {
       unsigned emGain;
       if(parseEMGain( emGain, response ) < 0)
@@ -1135,11 +1167,6 @@ int ocam2KCtrl::getEMGain()
 
       return 0;
 
-   }
-   else
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({""});
    }
 }
 
@@ -1167,7 +1194,15 @@ int ocam2KCtrl::setEMGain( )
    }
 
    std::string emgStr= std::to_string(emg);
-   if( pdvSerialWriteRead( response, "gain " + emgStr ) == 0) //m_pdv, "gain " + emgStr, m_readTimeout) == 0)
+   { //mutex scope
+      std::lock_guard<std::recursive_mutex> guard(m_cameraMutex);
+      if( pdvSerialWriteRead( response, "gain " + emgStr ) != 0) //m_pdv, "gain " + emgStr, m_readTimeout) == 0)
+      {
+         if(powerState() != 1 || powerStateTarget() != 1) return -1;
+         return log<software_error,-1>({""});
+      }
+   }
+
    {
       ///\todo check response
       std::cerr << "gain " << emgStr << " response: " << emgStr << "\n";
@@ -1176,12 +1211,6 @@ int ocam2KCtrl::setEMGain( )
 
       return 0;
    }
-   else
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({""});
-   }
-
 }
 
 inline
@@ -1189,6 +1218,7 @@ int ocam2KCtrl::configureAcquisition()
 {
     //lock mutex
     std::unique_lock<std::mutex> lock(m_indiMutex);
+    std::lock_guard<std::recursive_mutex> cameraGuard(m_cameraMutex);
 
     //Send command to camera to place it in the correct mode
     std::string response;
@@ -1242,6 +1272,7 @@ int ocam2KCtrl::configureAcquisition()
     if(m_ocam2_id > 0)
     {
         ocam2_exit(m_ocam2_id);
+        m_ocam2_id = 0;
     }
     ocam2_rc rc;
     ocam2_mode mode;
@@ -1282,7 +1313,8 @@ int ocam2KCtrl::configureAcquisition()
 
     std::cerr << "ocamDescrambleFile: " << ocamDescrambleFile << std::endl;
 
-    rc=ocam2_init(mode, ocamDescrambleFile.c_str(), &m_ocam2_id);
+    ocam2_id nextOcam2Id = 0;
+    rc=ocam2_init(mode, ocamDescrambleFile.c_str(), &nextOcam2Id);
 
     if (rc != OCAM2_OK)
     {
@@ -1290,6 +1322,8 @@ int ocam2KCtrl::configureAcquisition()
         log<text_log>("ocam2_init error. Failed to initialize OCAM SDK with descramble file: " + ocamDescrambleFile, logPrio::LOG_ERROR);
         return -1;
     }
+
+    m_ocam2_id = nextOcam2Id;
 
 
     log<text_log>("OCAM2K initialized. id: " + std::to_string(m_ocam2_id));
@@ -1433,13 +1467,13 @@ int ocam2KCtrl::loadImageIntoStream(void * dest)
         }
     }
 
-
    return 0;
 }
 
 inline
 int ocam2KCtrl::reconfig()
 {
+   std::lock_guard<std::recursive_mutex> guard(m_cameraMutex);
    int rv = edtCamera<ocam2KCtrl>::pdvReconfig();
    if(rv < 0) return rv;
    state(stateCodes::READY);

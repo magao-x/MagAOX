@@ -129,12 +129,21 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
     /// Command a stage to safely immediately halt.
     pcf::IndiProperty m_indiP_req_ehalt;
 
+    /// Enable or disable a stages potentiometer
+    pcf::IndiProperty m_indiP_knob_enable;
+
+    /// Enable or disable a stages LED
+    pcf::IndiProperty m_indiP_led_enable;
+
+
   public:
     INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_tgt_pos );
     INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_req_home );
     INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_req_home_all );
     INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_req_halt );
     INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_req_ehalt );
+    INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_knob_enable );
+    INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_led_enable );
 };
 
 zaberLowLevel::zaberLowLevel() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
@@ -399,6 +408,16 @@ int zaberLowLevel::appStartup()
     REG_INDI_NEWPROP( m_indiP_req_ehalt, "req_ehalt", pcf::IndiProperty::Switch );
     m_indiP_req_ehalt.setRule( pcf::IndiProperty::AtMostOne );
 
+    REG_INDI_NEWPROP( m_indiP_knob_enable, "knob_enable", pcf::IndiProperty::Switch );
+    m_indiP_knob_enable.setPerm( pcf::IndiProperty::ReadWrite );
+    m_indiP_knob_enable.setState( pcf::IndiProperty::Idle );
+    m_indiP_knob_enable.setRule( pcf::IndiProperty::AtMostOne );
+
+    REG_INDI_NEWPROP( m_indiP_led_enable, "led_enable", pcf::IndiProperty::Switch );
+    m_indiP_led_enable.setPerm( pcf::IndiProperty::ReadWrite );
+    m_indiP_led_enable.setState( pcf::IndiProperty::Idle );
+    m_indiP_led_enable.setRule( pcf::IndiProperty::AtMostOne );
+
     for( size_t n = 0; n < m_stages.size(); ++n )
     {
         m_indiP_curr_state.add( pcf::IndiElement( m_stages[n].name() ) );
@@ -428,6 +447,12 @@ int zaberLowLevel::appStartup()
         m_indiP_req_ehalt.add( pcf::IndiElement( m_stages[n].name() ) );
         m_indiP_req_ehalt[m_stages[n].name()].setSwitchState( pcf::IndiElement::Off );
 
+        m_indiP_knob_enable.add( pcf::IndiElement( m_stages[n].name() ) );
+        m_indiP_knob_enable[m_stages[n].name()].setSwitchState( pcf::IndiElement::Off );
+
+        m_indiP_led_enable.add( pcf::IndiElement( m_stages[n].name() ) );
+        m_indiP_led_enable[m_stages[n].name()].setSwitchState( pcf::IndiElement::Off );
+
         // Now load last state from disk
         std::ifstream posIn;
         posIn.open( std::format( "{}/{}/{}", m_sysPath, m_configName, m_stages[n].name() ) );
@@ -447,6 +472,9 @@ int zaberLowLevel::appStartup()
         m_indiP_parked[m_stages[n].name()].set( m_stages[n].parked() );
         m_indiP_lastHomed[m_stages[n].name()].set( m_stages[n].lastHomed() );
         m_indiP_max_pos[m_stages[n].name()].set( m_stages[n].maxPos() );
+        m_indiP_knob_enable[m_stages[n].name()].set( m_stages[n].knobEnabled() ? pcf::IndiElement::On : pcf::IndiElement::Off );
+        m_indiP_led_enable[m_stages[n].name()].set( m_stages[n].ledEnabled() ? pcf::IndiElement::On : pcf::IndiElement::Off );
+
     }
 
     return 0;
@@ -573,7 +601,9 @@ int zaberLowLevel::appLogic()
 
             std::lock_guard<std::mutex> guard( m_indiMutex ); // Inside loop so INDI requests can steal it
 
-            m_stages[i].disableKnob( m_port ); // Always disable the knob on startup
+            m_stages[i].enableKnob( m_port, false ); // Always disable the knob on startup
+
+            m_stages[i].enableLED( m_port, false ); // Always disable the LEDs on startup
 
             m_stages[i].getMaxPos( m_port );
 
@@ -622,6 +652,12 @@ int zaberLowLevel::appLogic()
             }
 
             std::lock_guard<std::mutex> guard( m_indiMutex ); // Inside loop so INDI requests can steal it
+
+            m_stages[i].getKnob( m_port );
+            updateSwitchIfChanged( m_indiP_knob_enable, m_stages[i].name(),  (m_stages[i].knobEnabled() ? pcf::IndiElement::On : pcf::IndiElement::Off) );
+            
+            m_stages[i].getLED( m_port );
+            updateSwitchIfChanged( m_indiP_led_enable, m_stages[i].name(),  (m_stages[i].ledEnabled() ? pcf::IndiElement::On : pcf::IndiElement::Off) );
 
             m_stages[i].getParked( m_port );
 
@@ -1015,7 +1051,7 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_halt )( const pcf::IndiPropert
 
     if( !found || stageno == std::numeric_limits<size_t>::max() )
     {
-        return log<software_error, -1>( "no valid stage specified in req_home, rejecting request" );
+        return log<software_error, -1>( "no valid stage specified in req_halt, rejecting request" );
     }
 
     if( ipRecv[m_stages[stageno].name()].getSwitchState() != pcf::IndiElement::On )
@@ -1064,6 +1100,103 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_ehalt )( const pcf::IndiProper
                 }
             }
         }
+    }
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_knob_enable )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_knob_enable, ipRecv );
+
+    // Make sure only one request is sent to avoid racing
+    size_t stageno = std::numeric_limits<size_t>::max();
+
+    bool found = false;
+
+    for( size_t n = 0; n < m_stages.size(); ++n )
+    {
+        if( ipRecv.find( m_stages[n].name() ) )
+        {
+            if( found )
+            {
+                return log<software_error, -1>( "more than one stage specified in req_halt, rejecting request" );
+            }
+
+            if( m_stages[n].deviceAddress() < 1 )
+            {
+                return log<software_error, -1>( std::format( "stage {} with with "
+                                                             "s/n {} not present",
+                                                             m_stages[n].name(),
+                                                             m_stages[n].serial() ) );
+            }
+
+            stageno = n;
+            found   = true;
+        }
+    }
+
+    if( !found || stageno == std::numeric_limits<size_t>::max() )
+    {
+        return log<software_error, -1>( "no valid stage specified in req_knob, rejecting request" );
+    }
+    
+    bool enable_knob = ipRecv[m_stages[stageno].name()].getSwitchState() == pcf::IndiElement::On;
+    
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    if( m_stages[stageno].enableKnob(m_port, enable_knob) < 0 )
+    {
+        return log<software_error, -1>( std::format( "error from enable knob for {}", m_stages[stageno].name() ) );
+    }
+
+    return 0;
+}
+
+
+INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_led_enable )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_led_enable, ipRecv );
+
+    // Make sure only one request is sent to avoid racing
+    size_t stageno = std::numeric_limits<size_t>::max();
+
+    bool found = false;
+
+    for( size_t n = 0; n < m_stages.size(); ++n )
+    {
+        if( ipRecv.find( m_stages[n].name() ) )
+        {
+            if( found )
+            {
+                return log<software_error, -1>( "more than one stage specified in req_halt, rejecting request" );
+            }
+
+            if( m_stages[n].deviceAddress() < 1 )
+            {
+                return log<software_error, -1>( std::format( "stage {} with with "
+                                                             "s/n {} not present",
+                                                             m_stages[n].name(),
+                                                             m_stages[n].serial() ) );
+            }
+
+            stageno = n;
+            found   = true;
+        }
+    }
+
+    if( !found || stageno == std::numeric_limits<size_t>::max() )
+    {
+        return log<software_error, -1>( "no valid stage specified in req_led, rejecting request" );
+    }
+    
+    bool enable_led = ipRecv[m_stages[stageno].name()].getSwitchState() == pcf::IndiElement::On;
+    
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    if( m_stages[stageno].enableLED(m_port, enable_led) < 0 )
+    {
+        return log<software_error, -1>( std::format( "error from enable led for {}", m_stages[stageno].name() ) );
     }
 
     return 0;

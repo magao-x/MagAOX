@@ -164,7 +164,11 @@ void statusDisplay::setup( const std::string & device,
 
 void statusDisplay::ctrlWidget (xWidget * cw)
 {
-   if(m_ctrlWidget) m_ctrlWidget->deleteLater();
+   if(m_ctrlWidget)
+   {
+      m_ctrlWidget->deleteLater();
+      m_ctrlWidget = nullptr;
+   }
    m_ctrlWidget = cw;
 }
 
