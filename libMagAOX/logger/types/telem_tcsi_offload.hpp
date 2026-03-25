@@ -25,35 +25,6 @@ namespace logger
  */
 struct telem_tcsi_offload : public flatbuffer_log
 {
-  protected:
-    /// Format a shared offload-control message body with a caller-supplied label.
-    static std::string
-    formatMsgString( const char       *label,     /**< [in] Label identifying the telemetry type. */
-                     void             *msgBuffer, /**< [in] Buffer containing the flatbuffer serialized message. */
-                     flatlogs::msgLenT len        /**< [in] [unused] length of msgBuffer. */
-    )
-    {
-        static_cast<void>( len );
-
-        auto fbs = GetTelem_tcsi_offload_fb( msgBuffer );
-
-        std::string msg = "[";
-        msg += label;
-        msg += "] ";
-
-        msg += "enabled: ";
-        msg += std::to_string( fbs->enabled() );
-        msg += " avgInt: ";
-        msg += std::to_string( fbs->avgInt() );
-        msg += " gain: ";
-        msg += std::to_string( fbs->gain() );
-        msg += " thresh: ";
-        msg += std::to_string( fbs->thresh() );
-
-        return msg;
-    }
-
-  public:
     /// The type of the input message
     struct messageT : public fbMessage
     {
@@ -83,7 +54,22 @@ struct telem_tcsi_offload : public flatbuffer_log
                                   flatlogs::msgLenT len /**< [in] [unused] length of msgBuffer.*/
     )
     {
-        return formatMsgString( "tcsi_offload", msgBuffer, len );
+        static_cast<void>( len );
+
+        auto fbs = GetTelem_tcsi_offload_fb( msgBuffer );
+
+        std::string msg = "[tcsi_offload] ";
+
+        msg += "enabled: ";
+        msg += std::to_string( fbs->enabled() );
+        msg += " avgInt: ";
+        msg += std::to_string( fbs->avgInt() );
+        msg += " gain: ";
+        msg += std::to_string( fbs->gain() );
+        msg += " thresh: ";
+        msg += std::to_string( fbs->thresh() );
+
+        return msg;
     }
 
     /// Access the enabled state.
