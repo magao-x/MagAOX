@@ -2,11 +2,11 @@
  * \brief Catch2 tests for the tcsInterface app.
  * \author Jared R. Males (jaredmales@gmail.com)
  *
- * \ingroup tcsInterface_files
+ * History:
  */
 
-#include "../../../tests/testXWC.hpp"
-#include "../../../tests/testMacrosINDI.hpp"
+#include "../../../tests/catch2/catch.hpp"
+#include "../../tests/testMacrosINDI.hpp"
 
 #include "../tcsInterface.hpp"
 
@@ -54,21 +54,8 @@ class tcsInterface_test : public tcsInterface
 };
 /// \endcond
 
-/// Verify the tcsInterface callback validators accept only the expected properties.
-/**
- * \ingroup tcsInterface_unit_test
- */
 SCENARIO( "INDI Callbacks", "[tcsInterface]" )
 {
-    // clang-format off
-    #ifdef TCSINTERFACE_TEST_DOXYGEN_REF
-    tcsInterface::newCallBack_m_indiP_pyrNudge( pcf::IndiProperty() );
-    tcsInterface::newCallBack_m_indiP_acqFromGuider( pcf::IndiProperty() );
-    tcsInterface::newCallBack_m_indiP_labMode( pcf::IndiProperty() );
-    tcsInterface::parse_xms( *(double *)nullptr, *(double *)nullptr, *(double *)nullptr, "" );
-    #endif
-    // clang-format on
-
     XWCTEST_INDI_NEW_CALLBACK( tcsInterface, pyrNudge );
     XWCTEST_INDI_NEW_CALLBACK( tcsInterface, acqFromGuider );
     XWCTEST_INDI_NEW_CALLBACK( tcsInterface, labMode );
@@ -355,6 +342,4 @@ SCENARIO( "Parsing times in x:m:s format", "[tcsInterface]" )
     }
 }
 
-} // namespace tcsInterfaceTest
-
-} // namespace libXWCTest
+} // namespace TCSITEST
