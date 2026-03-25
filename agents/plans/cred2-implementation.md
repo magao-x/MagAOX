@@ -117,8 +117,8 @@ Plan
      - `m_tempControlStatusStr` reports `ON TARGET`, `OFF TARGET`, or `UNKNOWN`
    - Important design note:
      - the manual documents a setpoint, but not a true cooler on/off command
-     - if we keep `stdCamera` temperature-control enabled, define and document what INDI “off” means for this camera
-     - the least surprising first-pass mapping is: “off” means returning the setpoint to the default warm value of `20 C`, not disabling hardware cooling outright
+     - for this camera, temperature control should be treated as setpoint-only control
+     - keep `stdCamera` temperature-control enabled, but define INDI “off” as returning the setpoint to the default warm value of `20 C`, not disabling cooling hardware outright
 
 7. Implement FPS query/set and keep FPS limits dynamic.
    - Use `fps raw` for current rate.
@@ -180,8 +180,9 @@ Plan
    - Set:
      - `m_dataType = _DATATYPE_INT16`
      - `m_width` and `m_height` from the active ROI
-   - Verify with hardware that the example EDT config already delivers correctly ordered 4-tap images.
-   - Only add extra descrambling/deinterleaving if live frames prove it is necessary.
+   - Proceed on the assumption that the supplied EDT config already delivers correctly ordered 4-tap images.
+   - Do not add a descrambling or deinterleaving path in the first implementation.
+   - Verify image ordering with hardware once the camera is connected.
 
 12. Use a dedicated camera mutex around serial, reconfigure, and grab paths.
    - Mirror the `m_cameraMutex` approach from `ocam2KCtrl`.
@@ -193,8 +194,8 @@ Plan
 13. Add telemetry in two layers.
    - Always record `telem_stdcam` through `dev::telemeter`.
    - Expose the full temperature set through INDI in the first functional pass.
-   - If full archival of all C-RED-specific temperatures is important, add a dedicated logger type in a follow-up patterned after `ocam_temps`.
-   - The first implementation does not need to block on a new custom logger type unless operations specifically require it.
+   - Defer any dedicated `cred2_temps` logger for now.
+   - If full archival of all C-RED-specific temperatures becomes important later, add a dedicated logger type in a follow-up patterned after `ocam_temps`.
 
 14. Verify in stages.
    - Build-only verification:
@@ -223,38 +224,35 @@ Plan
    - Persistence commands such as `save`
    - Any camera-mode abstraction beyond the one synthetic dynamic EDT mode
 
-Open Questions / Expected Decisions
+Resolved Decisions
 
-- Temperature enable semantics:
-  - the camera clearly supports setpoint control, but the manual does not show a true cooler enable/disable command
-  - if the existing `stdCamera` on/off UI is retained, document that “off” is a warm setpoint request, not a hard cooler disable
+- Temperature control semantics:
+  - colleagues familiar with the camera confirmed that C-RED 2 is effectively controlled by target temperature setpoint, not by a separate cooler on/off command
+  - the first implementation should therefore treat INDI “off” as “go to `20 C`”
 
 - ROI public API:
-  - recommendation for the first pass is to derive cropping on/off from full-frame vs subframe ROI
-  - only expose a separate crop-mode property later if operations need independent control
+  - keep `c_stdCamera_cropMode = false` for the first pass
+  - derive camera cropping behavior from the requested ROI rather than exposing a separate crop-mode property
 
 - Telemetry scope:
-  - `telem_stdcam` plus a live `temps` INDI property is enough for a first functional implementation
-  - a custom `cred2_temps` logger can be added later if the full sensor set needs long-term archival
+  - implement `telem_stdcam` plus the live INDI `temps` property in the first pass
+  - defer any dedicated `cred2_temps` logger
 
 - Image ordering:
-  - assume the supplied EDT config is close to correct
-  - verify with live images before introducing any extra descramble path
+  - proceed with the assumption that the supplied EDT config delivers correctly ordered images
+  - do not implement descrambling in the first pass
 
 Follow-Up Items / Edge Cases
 
 - Verify that `edtCamera::pdvSerialWriteRead()` handles the C-RED 2 trailing `\r\nfli-cli>` prompt cleanly and does not turn a valid response into a timeout path.
 
-- Decide and document the exact semantics of the `stdCamera` temperature-controller toggle for C-RED 2.
-  - The current recommended first-pass mapping is that INDI “off” means restoring a warm `20 C` setpoint, not disabling cooling hardware outright.
-
-- Confirm with hardware that the sample EDT 4-tap configuration produces correctly ordered images before adding any extra descrambling or deinterleaving logic.
+- Confirm with hardware that the sample EDT 4-tap configuration produces correctly ordered images, while proceeding under the assumption that no descrambling is needed in the first pass.
 
 - Confirm whether EDT needs explicit active-region directives in addition to `width` and `height` for subframe ROIs, or whether the camera-side cropping commands alone are sufficient once the temporary config is rewritten.
+  - Current assumption: EDT does not normally need them, so the first implementation should try `width`/`height` only.
 
 - Validate that ROI rounding in `checkNextROI()` preserves the requested science target location as closely as possible when enforcing the C-RED 2 column/row granularities.
 
-- Decide whether the first functional pass should log only `telem_stdcam` plus live INDI temperatures, or whether operations require a dedicated `cred2_temps` logger immediately.
-
 - Treat the first implementation as volatile runtime control only.
   - Do not issue `save` automatically from the controller unless operations explicitly ask for persisted camera settings.
+
