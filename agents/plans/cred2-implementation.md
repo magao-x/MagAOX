@@ -1,0 +1,257 @@
+Task: review AGENTS.md, then consider: we need to create a MagAO-X app to control a C-RED 2 camera.  We will use an EDT framegrabber.  Examples of similar apps are the ocam2KCtrl and andorCtrl.  Some points:
+  - This is a First Light Imaging camera, and so is very similar to the ocam2KCtrl case.  We expect to use serial-over-cameralink in almost the same way
+  - The manual for the C-RED 2 is here /home/jrmales/Documents/MyPapers/Projects/MagAOX/Electronics/Cameras/C-RED_2/C-RED2_UserManual_20180625-2.pdf.  c.f. Section 9.1 and 9.2 for details of serial commands.
+  - An important difference in the C-RED 2 compared to OCAM-2K is that C-RED 2 supports arbitrary ROIs.  This is implemented for EDT configuration in andorCtrl which writes tmp config files for loading.
+For this first attemp we want to implement the same functionality that is in ocam2KCtrl, to include:
+  - monitoring of temperatures
+  - temperature setpoint control and status
+  - setting of FPS and status
+-Differences from ocam2KCtrl:
+  - no EM gain
+  - no shutter
+  - use of arbitary ROIs (see andorCtrl)
+An example cameralink config for this camera is here: /home/jrmales/Documents/MyPapers/Projects/MagAOX/Electronics/Cameras/C-RED_2/edt.cfg
+
+Please develop a plan and upate this document with it below:
+
+Plan
+
+1. Create a new `apps/cred2Ctrl` app using the same overall structure as `andorCtrl` and `ocam2KCtrl`.
+   - Add:
+     - `apps/cred2Ctrl/cred2Ctrl.hpp`
+     - `apps/cred2Ctrl/cred2Ctrl.cpp`
+     - `apps/cred2Ctrl/Makefile`
+   - Register the new app in the top-level [Makefile](/home/jrmales/Source/MagAOX/Makefile), most likely under `apps_rtc`.
+   - Base classes should be:
+     - `MagAOXApp<>`
+     - `dev::stdCamera<cred2Ctrl>`
+     - `dev::edtCamera<cred2Ctrl>`
+     - `dev::frameGrabber<cred2Ctrl>`
+     - `dev::telemeter<cred2Ctrl>`
+   - Do not include `dev::dssShutter` or EM-gain-specific logic.
+
+2. Configure the new app around the C-RED 2 feature set rather than copying `ocam2KCtrl` blindly.
+   - Recommended `stdCamera` compile-time settings for the first pass:
+     - `c_stdCamera_tempControl = true`
+     - `c_stdCamera_temp = true`
+     - `c_stdCamera_readoutSpeed = false`
+     - `c_stdCamera_vShiftSpeed = false`
+     - `c_stdCamera_emGain = false`
+     - `c_stdCamera_exptimeCtrl = false`
+     - `c_stdCamera_fpsCtrl = true`
+     - `c_stdCamera_fps = true`
+     - `c_stdCamera_synchro = false` for the first pass
+     - `c_stdCamera_usesModes = false`
+     - `c_stdCamera_usesROI = true`
+     - `c_stdCamera_cropMode = false` for the first pass
+     - `c_stdCamera_hasShutter = false`
+   - Follow the `andorCtrl` pattern of using one synthetic EDT mode backed by a temporary config file, rather than fixed named camera modes.
+
+3. Reuse the EDT serial-over-Camera-Link path from `ocam2KCtrl`, but make the C-RED 2 response handling explicit.
+   - The manual says the CLI uses ASCII commands terminated by line feed (`\n`).
+   - The example EDT config already shows the needed serial settings:
+     - `serial_term: <0A>`
+     - `serial_waitc: 0D`
+   - The manual also says each response is followed by `CR LF fli-cli>`.
+   - Before relying on the existing `edtCamera::pdvSerialWriteRead()` behavior, verify that it does not treat the trailing prompt as a timeout/error case.
+   - If needed, add a small helper layer in `cred2Ctrl` or `cred2Utils.hpp` that:
+     - sends a command
+     - truncates the response at the first `\r`
+     - ignores the trailing prompt
+     - returns the clean payload for parsing
+
+4. Prefer the camera’s `raw` CLI responses wherever possible.
+   - This should simplify parsing compared to the verbose strings described in the manual.
+   - Core commands for the initial implementation:
+     - `temperatures snake raw`
+     - `temperatures snake setpoint raw`
+     - `temperatures motherboard raw`
+     - `temperatures frontend raw`
+     - `temperatures powerboard raw`
+     - `temperatures peltier raw`
+     - `temperatures heatsink raw`
+     - `fps raw`
+     - `minfps raw`
+     - `maxfps raw`
+     - `cropping raw`
+     - `cropping columns raw`
+     - `cropping rows raw`
+     - `set temperatures snake <value>`
+     - `set fps <value>`
+     - `set cropping on|off`
+     - `set cropping columns <value>`
+     - `set cropping rows <value>`
+   - Do not issue `save` from the controller. Runtime control should remain volatile unless an operator explicitly persists settings out-of-band.
+
+5. Implement a small C-RED utility/parser layer modeled after [ocamUtils.hpp](/home/jrmales/Source/MagAOX/apps/ocam2KCtrl/ocamUtils.hpp).
+   - Add a `cred2Utils.hpp` with:
+     - a struct holding the relevant temperatures
+     - parsing helpers for raw numeric responses
+     - ROI conversion helpers from MagAO-X center/size form to C-RED start/end rows/columns
+   - Add unit tests for parser behavior, especially:
+     - numeric raw responses
+     - responses with the `fli-cli>` prompt suffix
+     - invalid/malformed responses
+
+6. Implement temperature monitoring and temperature setpoint/status handling first.
+   - Mirror the `ocam2KCtrl` flow for:
+     - a live multi-value INDI `temps` property
+     - updating `m_ccdTemp`
+     - updating `m_ccdTempSetpt`
+     - logging and telemetry refresh when values change
+   - Suggested `temps` elements:
+     - `motherboard`
+     - `frontend`
+     - `powerboard`
+     - `snake`
+     - `setpoint`
+     - `peltier`
+     - `heatsink`
+   - Recommended initial status logic:
+     - `m_ccdTemp` comes from `temperatures snake`
+     - `m_ccdTempSetpt` comes from `temperatures snake setpoint`
+     - `m_tempControlOnTarget` is derived from `fabs( m_ccdTemp - m_ccdTempSetpt )`
+     - `m_tempControlStatusStr` reports `ON TARGET`, `OFF TARGET`, or `UNKNOWN`
+   - Important design note:
+     - the manual documents a setpoint, but not a true cooler on/off command
+     - if we keep `stdCamera` temperature-control enabled, define and document what INDI “off” means for this camera
+     - the least surprising first-pass mapping is: “off” means returning the setpoint to the default warm value of `20 C`, not disabling hardware cooling outright
+
+7. Implement FPS query/set and keep FPS limits dynamic.
+   - Use `fps raw` for current rate.
+   - Use `set fps <value>` to apply the requested rate.
+   - Query `minfps raw` and `maxfps raw` after startup and after ROI changes rather than hardcoding 400/600 fps limits.
+   - Update `m_fps`, `m_minFPS`, and `m_maxFPS` from camera-reported values.
+
+8. Implement arbitrary ROI support by combining `stdCamera` ROI handling with an `andorCtrl`-style temporary EDT config.
+   - The manual says:
+     - columns have granularity 32
+     - rows have granularity 4
+     - column start range is `0-639`
+     - row start range is `0-511`
+   - Set the full-frame ROI to:
+     - center `x = 319.5`
+     - center `y = 255.5`
+     - width `640`
+     - height `512`
+   - `checkNextROI()` should:
+     - clamp to sensor bounds
+     - round start coordinates to the required granularity
+     - round width/height to the required granularity
+     - restore the last valid ROI on impossible requests
+   - `setNextROI()` should:
+     - update the pending target ROI
+     - mark `m_reconfig = true`
+     - leave the actual hardware change to the reconfigure path
+
+9. Generate the EDT config file dynamically, following the [andorCtrl.hpp](/home/jrmales/Source/MagAOX/apps/andorCtrl/andorCtrl.hpp) `writeConfig()` approach.
+   - Write to a temp file such as `/tmp/cred2_<configName>.cfg`.
+   - Use `c_edtCamera_relativeConfigPath = false` so the generated config can live outside the MagAO-X config tree.
+   - Seed the generated file from the provided example `edt.cfg`, preserving at minimum:
+     - 4-tap layout
+     - `CL_DATA_PATH_NORM`
+     - `CL_CFG_NORM`
+     - `CL_CFG2_NORM`
+     - `htaps`
+     - `method_framesync`
+     - serial termination/wait-char settings
+   - Rewrite only the ROI-dependent parts:
+     - `width`
+     - `height`
+     - any active-region fields needed by EDT if padding/cropping directives are used
+
+10. Apply ROI changes in the camera and the framegrabber as one reconfiguration step.
+   - On reconfigure:
+     - stop/abort acquisition
+     - send the camera’s cropping commands for the target ROI
+     - write the matching EDT config
+     - call `edtCamera::pdvReconfig()`
+     - update `m_currentROI`, `m_width`, `m_height`, and INDI current/target fields
+   - For the first pass, treat ROI state as:
+     - full-frame ROI => `set cropping off`
+     - subframe ROI => `set cropping on`, then push column/row settings
+   - This keeps the public interface simpler than exposing a separate crop-mode toggle immediately.
+
+11. Keep acquisition and image handling minimal unless live testing shows additional work is needed.
+   - Start with direct frame copies through `frameGrabber::loadImageIntoStreamCopy(...)`.
+   - Set:
+     - `m_dataType = _DATATYPE_INT16`
+     - `m_width` and `m_height` from the active ROI
+   - Verify with hardware that the example EDT config already delivers correctly ordered 4-tap images.
+   - Only add extra descrambling/deinterleaving if live frames prove it is necessary.
+
+12. Use a dedicated camera mutex around serial, reconfigure, and grab paths.
+   - Mirror the `m_cameraMutex` approach from `ocam2KCtrl`.
+   - Guard:
+     - serial command/response traffic
+     - ROI reconfiguration
+     - any framegrabber restart path that can race with control commands
+
+13. Add telemetry in two layers.
+   - Always record `telem_stdcam` through `dev::telemeter`.
+   - Expose the full temperature set through INDI in the first functional pass.
+   - If full archival of all C-RED-specific temperatures is important, add a dedicated logger type in a follow-up patterned after `ocam_temps`.
+   - The first implementation does not need to block on a new custom logger type unless operations specifically require it.
+
+14. Verify in stages.
+   - Build-only verification:
+     - app target compiles cleanly
+     - parser/unit tests pass
+   - Controller verification without live acquisition changes:
+     - connect
+     - query temperatures
+     - query fps
+     - set a new temperature setpoint
+     - set a new fps
+   - ROI/reconfigure verification:
+     - full-frame startup matches 640x512
+     - representative subframe ROI loads with the expected dimensions
+     - returning to full frame restores the original size
+   - Runtime safety checks:
+     - no serial timeouts caused by the C-RED prompt suffix
+     - no stale ROI metadata after reconfigure
+     - no EDT/camera geometry mismatch after ROI changes
+
+15. Defer non-core features until the first pass is stable.
+   - Explicit external sync control
+   - Tint/exposure-time control
+   - Fan control
+   - Bias/flat/bad-pixel toggles
+   - Persistence commands such as `save`
+   - Any camera-mode abstraction beyond the one synthetic dynamic EDT mode
+
+Open Questions / Expected Decisions
+
+- Temperature enable semantics:
+  - the camera clearly supports setpoint control, but the manual does not show a true cooler enable/disable command
+  - if the existing `stdCamera` on/off UI is retained, document that “off” is a warm setpoint request, not a hard cooler disable
+
+- ROI public API:
+  - recommendation for the first pass is to derive cropping on/off from full-frame vs subframe ROI
+  - only expose a separate crop-mode property later if operations need independent control
+
+- Telemetry scope:
+  - `telem_stdcam` plus a live `temps` INDI property is enough for a first functional implementation
+  - a custom `cred2_temps` logger can be added later if the full sensor set needs long-term archival
+
+- Image ordering:
+  - assume the supplied EDT config is close to correct
+  - verify with live images before introducing any extra descramble path
+
+Follow-Up Items / Edge Cases
+
+- Verify that `edtCamera::pdvSerialWriteRead()` handles the C-RED 2 trailing `\r\nfli-cli>` prompt cleanly and does not turn a valid response into a timeout path.
+
+- Decide and document the exact semantics of the `stdCamera` temperature-controller toggle for C-RED 2.
+  - The current recommended first-pass mapping is that INDI “off” means restoring a warm `20 C` setpoint, not disabling cooling hardware outright.
+
+- Confirm with hardware that the sample EDT 4-tap configuration produces correctly ordered images before adding any extra descrambling or deinterleaving logic.
+
+- Confirm whether EDT needs explicit active-region directives in addition to `width` and `height` for subframe ROIs, or whether the camera-side cropping commands alone are sufficient once the temporary config is rewritten.
+
+- Validate that ROI rounding in `checkNextROI()` preserves the requested science target location as closely as possible when enforcing the C-RED 2 column/row granularities.
+
+- Decide whether the first functional pass should log only `telem_stdcam` plus live INDI temperatures, or whether operations require a dedicated `cred2_temps` logger immediately.
+
+- Treat the first implementation as volatile runtime control only.
+  - Do not issue `save` automatically from the controller unless operations explicitly ask for persisted camera settings.
