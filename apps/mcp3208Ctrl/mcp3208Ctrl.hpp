@@ -87,7 +87,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     pcf::IndiProperty m_indiP_numChannelsSource;
     INDI_SETCALLBACK_DECL( mcp3208Ctrl, m_indiP_numChannelsSource );
     
-    int m_numChannels{ 4 }; ///< The number of channels being read out.
+    int m_numChannels{ 2 }; ///< The number of channels being read out.
 
 
     MCP3208Lib::MCP3208 adc;
