@@ -2,14 +2,17 @@ Task: review AGENTS.md, then consider: we need to create a MagAO-X app to contro
   - This is a First Light Imaging camera, and so is very similar to the ocam2KCtrl case.  We expect to use serial-over-cameralink in almost the same way
   - The manual for the C-RED 2 is here /home/jrmales/Documents/MyPapers/Projects/MagAOX/Electronics/Cameras/C-RED_2/C-RED2_UserManual_20180625-2.pdf.  c.f. Section 9.1 and 9.2 for details of serial commands.
   - An important difference in the C-RED 2 compared to OCAM-2K is that C-RED 2 supports arbitrary ROIs.  This is implemented for EDT configuration in andorCtrl which writes tmp config files for loading.
-For this first attemp we want to implement the same functionality that is in ocam2KCtrl, to include:
+
+For this first attempt we want to implement the same functionality that is in ocam2KCtrl, to include:
   - monitoring of temperatures
   - temperature setpoint control and status
   - setting of FPS and status
--Differences from ocam2KCtrl:
+
+Differences from ocam2KCtrl:
   - no EM gain
   - no shutter
   - use of arbitary ROIs (see andorCtrl)
+
 An example cameralink config for this camera is here: /home/jrmales/Documents/MyPapers/Projects/MagAOX/Electronics/Cameras/C-RED_2/edt.cfg
 
 Please develop a plan and upate this document with it below:
