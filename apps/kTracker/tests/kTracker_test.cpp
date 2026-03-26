@@ -1,27 +1,39 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
+/** \file kTracker_test.cpp
+ * \brief Catch2 tests for the kTracker app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * History:
+ */
+
 #include "../../../tests/catch2/catch.hpp"
+#include "../../../tests/testMacrosINDI.hpp"
 
 #include "../kTracker.hpp"
 
 using namespace MagAOX::app;
 
-namespace template_test
+namespace KTRACKERTEST
 {
 
-SCENARIO( "xxxx", "[template]" )
+class kTracker_test : public kTracker
 {
-   GIVEN("xxxxx")
-   {
-      WHEN("xxxx")
-      {
-         int rv = 0;
 
-         REQUIRE(rv == 0);
-      }
-   }
+  public:
+    kTracker_test( const std::string device )
+    {
+        m_configName = device;
+
+        XWCTEST_SETUP_INDI_NEW_PROP( tracking );
+
+        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_teldata, tcsi, zd );
+    }
+};
+
+SCENARIO( "INDI Callbacks", "[kTracker]" )
+{
+    XWCTEST_INDI_NEW_CALLBACK( kTracker, tracking );
+
+    XWCTEST_INDI_SET_CALLBACK( kTracker, m_indiP_teldata, tcsi, zd );
 }
-} //namespace template_test
+
+} // namespace KTRACKERTEST
