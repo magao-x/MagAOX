@@ -18,6 +18,7 @@
 #include <thread>
 #include <vector>
 
+#include <mx/sigproc/circularBuffer.hpp>
 #include <mx/improc/eigenImage.hpp>
 #include <mx/ioutils/fits/fitsFile.hpp>
 
@@ -28,21 +29,6 @@ namespace MagAOX
 {
 namespace app
 {
-
-struct imWFS2ShmimT
-{
-    /// Configuration subsection used by shmimMonitor.
-    static std::string configSection()
-    {
-        return "wfsimShmim";
-    };
-
-    /// INDI prefix used by shmimMonitor properties.
-    static std::string indiPrefix()
-    {
-        return "wfsim";
-    };
-};
 
 /** \defgroup ogTracker ogTracker
  * \brief Rolling PCA tracker for sparkle operating-point validation.
@@ -58,15 +44,17 @@ struct imWFS2ShmimT
 /**
  * \ingroup ogTracker
  */
-class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker, imWFS2ShmimT>
+class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker>
 {
     typedef float realT;
 
     friend class ogTracker_test;
-    friend class dev::shmimMonitor<ogTracker, imWFS2ShmimT>;
+    friend class dev::shmimMonitor<ogTracker>;
 
   public:
-    typedef dev::shmimMonitor<ogTracker, imWFS2ShmimT> imWFS2ShmimMonitorT;
+    typedef int32_t cbIndexT;
+    typedef dev::shmimMonitor<ogTracker> shmimMonitorT;
+    typedef mx::sigproc::circularBufferIndex<realT *, cbIndexT> frameCircBuffT;
 
   protected:
     /** \name Configuration - Data
@@ -99,16 +87,15 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker, im
     bool        m_waitForParamChange{ false }; ///< Hold retries after missing folder until a parameter changes.
     ///@}
 
-    /** \name Frame Geometry and Ring Buffer - Data
+    /** \name Frame Geometry and External Circular Buffer - Data
      * @{
      */
     int m_frameWidth{ 0 }; ///< Width of input frames from the monitored stream.
     int m_frameHeight{ 0 }; ///< Height of input frames from the monitored stream.
     int m_framePixels{ 0 }; ///< Cached flattened frame size (`width * height`).
 
-    int m_ringWrite{ 0 }; ///< Next write index in `m_ringFrames`.
-    int m_ringCount{ 0 }; ///< Number of valid entries currently stored in `m_ringFrames`.
-    Eigen::Matrix<realT, -1, -1, Eigen::RowMajor> m_ringFrames; ///< Circular frame store, each row is one flattened frame.
+    frameCircBuffT m_frameCircBuff; ///< Pointer circular buffer storing incoming `curr_src` frame pointers.
+    int            m_bufferCapacity{ 0 }; ///< Effective capacity used by `m_frameCircBuff` after depth/config bounds.
     ///@}
 
     /** \name PCA Products and Outputs - Data
@@ -180,10 +167,10 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker, im
     virtual int appShutdown();
 
     /// => SHMIMMON INTERFACE <= ///
-    int allocate( const imWFS2ShmimT & );
-    /// Consume one frame from the monitored stream and append it to the rolling ring buffer.
+    int allocate( const dev::shmimT & );
+    /// Consume one frame from the monitored stream and append its pointer to the external circular buffer.
     int processImage( void *curr_src /**< [in] pointer to current frame pixel data */,
-                      const imWFS2ShmimT & /**< [in] shmimMonitor tag to disambiguate overloads */ );
+                      const dev::shmimT & /**< [in] shmimMonitor tag to disambiguate overloads */ );
 
     /// => OGTRACKER INTERNAL FUNCTIONS <= ///
     /// Format sparkle parameters into the exact calibration-folder naming convention.
@@ -192,10 +179,10 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker, im
                                           float amp /**< [in] sparkle amplitude */,
                                           float freq /**< [in] sparkle modulation frequency */ );
 
-    /// Compute oldest-frame index for a logical ring-buffer window.
-    static int ringStartIndex( int writeIndex /**< [in] next write position in ring */,
-                               int count /**< [in] number of valid frames in ring */,
-                               int capacity /**< [in] total ring capacity */ );
+    /// Compute oldest-frame index for a latest-ended circular-buffer window.
+    static int cbWindowStartIndex( int latestIndex /**< [in] index of most recent sample */,
+                                   int count /**< [in] number of samples to include */,
+                                   int size /**< [in] circular-buffer size used for wrapping */ );
 
     /// Compute RMS of each PCA-mode column in a projection matrix.
     static Eigen::Matrix<realT, -1, 1>
@@ -218,8 +205,8 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker, im
     /// Load reference PCA and RMS files from a resolved calibration folder.
     int loadCalibrationFiles( const std::filesystem::path &folderPath /**< [in] fully-qualified calibration folder */ );
 
-    /// Allocate/reset ring-buffer storage while mutex is held.
-    int setupRingBufferLocked( int pixels /**< [in] flattened frame size */ );
+    /// Allocate/reset external pointer-cbuffer storage while mutex is held.
+    int setupFrameCircBuffLocked( int pixels /**< [in] flattened frame size */ );
 
     /// Worker that computes metrics from ring snapshots.
     void computeThreadExec();
@@ -238,8 +225,9 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker, im
 
 inline ogTracker::ogTracker() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
+    shmimMonitorT::m_shmimName = "aol1_imWFS2_cbuff";
     /// Make sure the image stream is running 
-    imWFS2ShmimMonitorT::m_getExistingFirst = true;
+    shmimMonitorT::m_getExistingFirst = true;
     /// TODO: make sure that sparkles are running?
 }
 
@@ -256,16 +244,16 @@ inline std::string ogTracker::formatCalibFolder( float sep, float ang, float amp
     return folder;
 }
 
-inline int ogTracker::ringStartIndex( int writeIndex, int count, int capacity )
+inline int ogTracker::cbWindowStartIndex( int latestIndex, int count, int size )
 {
-    if( capacity < 1 )
+    if( size < 1 || count < 1 )
     {
         return 0;
     }
-    int idx = ( writeIndex - count ) % capacity;
+    int idx = ( latestIndex + 1 - count ) % size;
     if( idx < 0 )
     {
-        idx += capacity;
+        idx += size;
     }
     return idx;
 }
@@ -343,7 +331,7 @@ inline void ogTracker::setupConfig()
                 "int",
                 "Maximum number of PCA modes to use." );
 
-    SHMIMMONITORT_SETUP_CONFIG( imWFS2ShmimMonitorT, config );
+    SHMIMMONITOR_SETUP_CONFIG( config );
 }
 
 inline int ogTracker::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -367,7 +355,7 @@ inline int ogTracker::loadConfigImpl( mx::app::appConfigurator &_config )
     }
     m_minSamples = std::max( m_minSamples, 10 * m_klipMax );
 
-    SHMIMMONITORT_LOAD_CONFIG( imWFS2ShmimMonitorT, _config );
+    SHMIMMONITOR_LOAD_CONFIG( _config );
 
     m_modeEls.clear();
     m_modeEls.reserve( static_cast<size_t>( m_klipMax ) );
@@ -386,7 +374,7 @@ inline void ogTracker::loadConfig()
 
 inline int ogTracker::appStartup()
 {
-    SHMIMMONITORT_APP_STARTUP(imWFS2ShmimMonitorT);
+    SHMIMMONITOR_APP_STARTUP;
 
     REG_INDI_SETPROP( m_indiP_sep, m_tweeterDevice, "separation" );
     REG_INDI_SETPROP( m_indiP_ang, m_tweeterDevice, "angle" );
@@ -402,7 +390,7 @@ inline int ogTracker::appStartup()
 
     CREATE_REG_INDI_RO_NUMBER( m_indiP_buffer, "buffer", "Rolling Buffer", "PCA" );
     m_indiP_buffer.add( pcf::IndiElement( "count", 0 ) );
-    m_indiP_buffer.add( pcf::IndiElement( "capacity", m_bufferN ) );
+    m_indiP_buffer.add( pcf::IndiElement( "capacity", 0 ) );
 
     CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaRms, "pca_rms", "Rolling PCA RMS", "PCA" );
     CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaNorm, "pca_norm", "Rolling PCA RMS / Ref RMS", "PCA" );
@@ -422,21 +410,23 @@ inline int ogTracker::appStartup()
     return 0;
 }
 
-inline int ogTracker::setupRingBufferLocked( int pixels )
+inline int ogTracker::setupFrameCircBuffLocked( int pixels )
 {
     if( pixels <= 0 )
     {
         return -1;
     }
 
-    if( m_ringFrames.rows() != m_bufferN || m_ringFrames.cols() != pixels )
+    if( shmimMonitorT::m_depth < 1 )
     {
-        m_ringFrames.resize( m_bufferN, pixels );
-        m_ringFrames.setZero();
+        return -1;
     }
 
-    m_ringWrite = 0;
-    m_ringCount = 0;
+    const int depthCap = static_cast<int>( shmimMonitorT::m_depth );
+    m_bufferCapacity   = std::max( 1, std::min( m_bufferN, depthCap ) );
+    m_frameCircBuff = frameCircBuffT();
+    m_frameCircBuff.maxEntries( static_cast<cbIndexT>( m_bufferCapacity ) );
+    m_metricsValid   = false;
     m_computePending = true;
     return 0;
 }
@@ -591,7 +581,8 @@ inline void ogTracker::computeMetricsFromSnapshot()
 
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_dataMutex );
-        if( !m_modulating || m_waitForParamChange || !m_calibLoaded || m_ringCount < m_minSamples || m_activeModes < 1 )
+        const int cbCount = static_cast<int>( m_frameCircBuff.size() );
+        if( !m_modulating || m_waitForParamChange || !m_calibLoaded || cbCount < m_minSamples || m_activeModes < 1 )
         {
             return;
         }
@@ -603,12 +594,19 @@ inline void ogTracker::computeMetricsFromSnapshot()
             return;
         }
 
-        frames.resize( m_ringCount, m_framePixels );
-        const int start = ringStartIndex( m_ringWrite, m_ringCount, m_bufferN );
-        for( int n = 0; n < m_ringCount; ++n )
+        const int latest = static_cast<int>( m_frameCircBuff.latest() );
+        const int start  = cbWindowStartIndex( latest, cbCount, cbCount );
+        frames.resize( cbCount, m_framePixels );
+        for( int n = 0; n < cbCount; ++n )
         {
-            const int srcRow = ( start + n ) % m_bufferN;
-            frames.row( n )  = m_ringFrames.row( srcRow );
+            realT *srcFrame =
+                m_frameCircBuff.at( static_cast<cbIndexT>( start ), static_cast<cbIndexT>( n ) );
+            if( srcFrame == nullptr )
+            {
+                return;
+            }
+            Eigen::Map<Eigen::Matrix<realT, -1, 1>> flat( srcFrame, m_framePixels );
+            frames.row( n ) = flat.transpose();
         }
 
         refPca = m_refPca;
@@ -646,16 +644,24 @@ inline void ogTracker::computeThreadExec()
     }
 }
 
-inline int ogTracker::allocate( const imWFS2ShmimT &dummy )
+inline int ogTracker::allocate( const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
 
     std::lock_guard<std::mutex> lock( m_dataMutex );
-    m_frameWidth  = static_cast<int>( imWFS2ShmimMonitorT::m_width );
-    m_frameHeight = static_cast<int>( imWFS2ShmimMonitorT::m_height );
+    m_frameWidth  = static_cast<int>( shmimMonitorT::m_width );
+    m_frameHeight = static_cast<int>( shmimMonitorT::m_height );
     m_framePixels = m_frameWidth * m_frameHeight;
 
-    setupRingBufferLocked( m_framePixels );
+    if( shmimMonitorT::m_dataType != IMAGESTRUCT_FLOAT )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "unsupported data type: expected float stream" } );
+    }
+    if( setupFrameCircBuffLocked( m_framePixels ) < 0 )
+    {
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "invalid stream geometry/depth for pointer circular buffer" } );
+    }
 
     if( m_refPca.rows() > 0 && m_refPca.rows() != m_framePixels )
     {
@@ -666,8 +672,7 @@ inline int ogTracker::allocate( const imWFS2ShmimT &dummy )
     return 0;
 }
 
-// TODO: check that the ring buffer is working as desired
-inline int ogTracker::processImage( void *curr_src, const imWFS2ShmimT &dummy )
+inline int ogTracker::processImage( void *curr_src, const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
 
@@ -677,37 +682,30 @@ inline int ogTracker::processImage( void *curr_src, const imWFS2ShmimT &dummy )
         return 0;
     }
 
-    Eigen::Map<Eigen::Matrix<realT, -1, -1>> img( reinterpret_cast<realT *>( curr_src ),
-                                                   imWFS2ShmimMonitorT::m_width,
-                                                   imWFS2ShmimMonitorT::m_height );
-    Eigen::Map<Eigen::Matrix<realT, -1, 1>> flat( img.data(), m_framePixels );
-
-    m_ringFrames.row( m_ringWrite ) = flat.transpose();
-    m_ringWrite                      = ( m_ringWrite + 1 ) % m_bufferN;
-    m_ringCount                      = std::min( m_ringCount + 1, m_bufferN );
-    m_computePending                 = true;
+    m_frameCircBuff.nextEntry( reinterpret_cast<realT *>( curr_src ) );
+    m_computePending = true;
     m_computeCv.notify_one();
     return 0;
 }
 
 inline int ogTracker::appLogic()
 {
-    SHMIMMONITORT_APP_LOGIC( imWFS2ShmimMonitorT );
-    SHMIMMONITORT_UPDATE_INDI( imWFS2ShmimMonitorT );
+    SHMIMMONITOR_APP_LOGIC;
+    SHMIMMONITOR_UPDATE_INDI;
 
-    if( imWFS2ShmimMonitorT::m_smState == dev::shmimMonitorState::notfound )
+    if( shmimMonitorT::m_smState == dev::shmimMonitorState::notfound )
     {
         if( !m_streamMissingLogged )
         {
-            log<text_log>( "ogTracker stream not found: " + imWFS2ShmimMonitorT::m_shmimName +
+            log<text_log>( "ogTracker stream not found: " + shmimMonitorT::m_shmimName +
                                " (polling until available)",
                            logPrio::LOG_NOTICE );
             m_streamMissingLogged = true;
         }
     }
-    else if( imWFS2ShmimMonitorT::m_smState == dev::shmimMonitorState::connected && m_streamMissingLogged )
+    else if( shmimMonitorT::m_smState == dev::shmimMonitorState::connected && m_streamMissingLogged )
     {
-        log<text_log>( "ogTracker stream connected: " + imWFS2ShmimMonitorT::m_shmimName, logPrio::LOG_NOTICE );
+        log<text_log>( "ogTracker stream connected: " + shmimMonitorT::m_shmimName, logPrio::LOG_NOTICE );
         m_streamMissingLogged = false;
     }
 
@@ -736,7 +734,9 @@ inline int ogTracker::appLogic()
     updateIfChanged( m_indiP_calibError, "state", m_calibError );
     updateIfChanged( m_indiP_calibLoaded, "current", m_calibLoaded ? 1.0 : 0.0 );
     updatesIfChanged<double>(
-        m_indiP_buffer, { "count", "capacity" }, { static_cast<double>( m_ringCount ), static_cast<double>( m_bufferN ) } );
+        m_indiP_buffer,
+        { "count", "capacity" },
+        { static_cast<double>( m_frameCircBuff.size() ), static_cast<double>( m_bufferCapacity ) } );
 
     std::vector<double> rmsOut( static_cast<size_t>( m_klipMax ), 0.0 );
     std::vector<double> normOut( static_cast<size_t>( m_klipMax ), 0.0 );
@@ -773,7 +773,7 @@ inline int ogTracker::appShutdown()
         m_computeThread.join();
     }
 
-    SHMIMMONITORT_APP_SHUTDOWN( imWFS2ShmimMonitorT );
+    SHMIMMONITOR_APP_SHUTDOWN;
     return 0;
 }
 

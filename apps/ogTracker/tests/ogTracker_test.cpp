@@ -19,10 +19,35 @@ SCENARIO( "calibration folder naming is stable", "[ogTracker]" )
     }
 }
 
-SCENARIO( "ring buffer start index wraps correctly", "[ogTracker]" )
+SCENARIO( "circular window start index wraps correctly", "[ogTracker]" )
 {
-    REQUIRE( ogTracker::ringStartIndex( 3, 3, 10 ) == 0 );
-    REQUIRE( ogTracker::ringStartIndex( 1, 4, 10 ) == 7 );
+    REQUIRE( ogTracker::cbWindowStartIndex( 2, 3, 10 ) == 0 );
+    REQUIRE( ogTracker::cbWindowStartIndex( 0, 4, 10 ) == 7 );
+}
+
+SCENARIO( "pointer circular-buffer extraction follows temporal order", "[ogTracker]" )
+{
+    using cbT = ogTracker::frameCircBuffT;
+
+    cbT cb;
+    cb.maxEntries( 4 );
+
+    std::vector<std::vector<float>> frames( 5, std::vector<float>( 1, 0.0f ) );
+    for( int i = 0; i < 5; ++i )
+    {
+        frames[static_cast<size_t>( i )][0] = static_cast<float>( i );
+        cb.nextEntry( frames[static_cast<size_t>( i )].data() );
+    }
+
+    const int count  = static_cast<int>( cb.size() );
+    const int latest = static_cast<int>( cb.latest() );
+    REQUIRE( count == 4 );
+
+    const int start = ogTracker::cbWindowStartIndex( latest, count, count );
+    REQUIRE( (*cb.at( static_cast<ogTracker::cbIndexT>( start ), 0 )) == Approx( 1.0f ) );
+    REQUIRE( (*cb.at( static_cast<ogTracker::cbIndexT>( start ), 1 )) == Approx( 2.0f ) );
+    REQUIRE( (*cb.at( static_cast<ogTracker::cbIndexT>( start ), 2 )) == Approx( 3.0f ) );
+    REQUIRE( (*cb.at( static_cast<ogTracker::cbIndexT>( start ), 3 )) == Approx( 4.0f ) );
 }
 
 SCENARIO( "RMS normalization follows ref_rms scaling", "[ogTracker]" )
