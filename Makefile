@@ -323,6 +323,7 @@ scripts_to_install = \
 	list_xfiles_by_semester \
 	loop_instrument_backup_sync \
 	cyverse_replicate \
+	howfs_mfilt_switch \
 	xnormconfig
 
 ifeq ($(MAGAOX_ROLE),RTC)
