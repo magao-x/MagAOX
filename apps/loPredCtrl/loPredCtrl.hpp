@@ -545,11 +545,9 @@ using namespace mx::improc;
         }
     }
 
-
     for(int i=0; i < m_num_modes; i++){
         new_measurement(i, 0) = m_modeval(i,0);
     }
-    // DDSPC::print_matrix(new_measurement, "new measurement");
 
     if(is_predictive_control){
         if(is_learning){
@@ -560,7 +558,7 @@ using namespace mx::improc;
         
     }else{
         for(int i=0; i < m_num_modes; i++){
-            new_command(i,0) = -m_gainCtrl * new_measurement(i, 0);
+            new_command(i,0) = m_gainCtrl * new_measurement(i, 0);
         }
     }
     
