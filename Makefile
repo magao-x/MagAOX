@@ -23,24 +23,19 @@ apps_common = \
 	closedLoopIndi
 
 apps_aoc = \
-	virtualPDU \
 	trippLitePDU \
 	xt1121Ctrl \
 	xt1121DCDU \
 	tcsInterface \
 	adcTracker \
-	hwpSequencer \
 	hwpTracker \
-	qwpPupilTracker \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
-	qwpTracker \
 	stateRuleEngine \
 	xInstGraph
 
 pythonapps_aoc = \
-	virtualPDU \
 	audibleAlerts
 
 # Apps common to RTC and ICC on MagAO-X
@@ -77,8 +72,6 @@ apps_rtc = \
 	pupilFit \
 	t2wOffloader \
 	dmSpeckle \
-	dmSyncopation \
-	loopTimingMonitor \
 	w2tcsOffloader \
 	pwfsSlopeCalc \
     kcubeCtrl \
@@ -88,14 +81,11 @@ apps_rtc = \
 	modalFilter \
 	dmRecon
 pythonapps_rtc = \
-	efcControl \
-	po4aoTrainer
+	efcControl
 
 # Apps needed on ICC
 apps_icc = \
 	dmPokeCenter \
-	elliptecCtrl \
-	elliptecLowLevel \
 	filterWheelCtrl \
 	smc100ccCtrl \
 	usbtempMon \
@@ -127,12 +117,9 @@ apps_tic = \
 
 # Apps with simulator mode
 apps_sim = \
-	virtualPDU \
 	trippLitePDU
 
 all_buildable_apps = \
-	virtualPDU \
-	acronameUsbHub \
 	adcTracker \
 	alignLoop \
 	cacaoInterface \
@@ -141,10 +128,6 @@ all_buildable_apps = \
 	dmPokeCenter \
 	dmPokeXCorr \
 	dmSpeckle \
-	dmSyncopation \
-	elliptecCtrl \
-	elliptecLowLevel \
-	loopTimingMonitor \
 	filterWheelCtrl \
 	flipperCtrl \
 	flowRPM \
@@ -166,7 +149,6 @@ all_buildable_apps = \
 	psfFit \
 	pupilFit \
 	pwfsSlopeCalc \
-	qwpPupilTracker \
 	refRMS \
 	rhusbMon \
 	shmimIntegrator \
@@ -239,7 +221,6 @@ ifeq ($(ALL_APPS),1)
 endif
 
 all_guis = \
-	po4aoGUI \
 	dmCtrlGUI \
 	dmModeGUI \
 	offloadCtrlGUI \
@@ -247,7 +228,6 @@ all_guis = \
 	pwr \
 	coronAlignGUI \
 	loopCtrlGUI \
-	timingGUI \
 	roiGUI \
 	cameraGUI \
 	stageGUI
@@ -266,7 +246,7 @@ else ifeq ($(findstring ACC,$(MAGAOX_ROLE)),ACC)
   guis_to_build =
 else ifeq ($(MAGAOX_ROLE),TIC)
   guis_to_build =
-else ifeq ($(MAGAOX_ROLE),headless)
+else ifeq ($(MAGAOX_ROLE),container)
   guis_to_build =
 else
   guis_to_build = $(all_guis)
@@ -278,8 +258,7 @@ all_rtimv_plugins = \
 	pwfsAlignment \
 	dmStatus \
 	warnings \
-	acquisition \
-	valueDisplay
+	acquisition
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =
@@ -289,7 +268,7 @@ else ifeq ($(findstring ACC,$(MAGAOX_ROLE)),ACC)
   rtimv_plugins_to_build =
 else ifeq ($(MAGAOX_ROLE),TIC)
   rtimv_plugins_to_build =
-else ifeq ($(MAGAOX_ROLE),headless)
+else ifeq ($(MAGAOX_ROLE),container)
   rtimv_plugins_to_build =
 else
   rtimv_plugins_to_build = $(all_rtimv_plugins)
@@ -299,7 +278,6 @@ utils_to_build = \
 	logdump \
 	logsurgeon \
 	cursesINDI \
-	shmimDelta \
 	xrif2fits \
 	xrif2shmim
 
@@ -325,7 +303,7 @@ scripts_to_install = \
 	list_xfiles_by_semester \
 	loop_instrument_backup_sync \
 	cyverse_replicate \
-	xnormconfig
+	howfs_mfilt_switch
 
 ifeq ($(MAGAOX_ROLE),RTC)
   scripts_to_install += cacao/RTC/cacao-startup
@@ -352,13 +330,13 @@ else ifeq ($(MAGAOX_ROLE),TIC)
 endif
 
 .PHONY: all
-all: indi_all libs_all flatlogs/bin/flatlogcodes apps_all guis_all rtimv_plugins_all utils_all
+all: indi_all libs_all flatlogs/bin/flatlogcodes apps_all guis_all utils_all
 
 .PHONY: basic
 basic: indi_all libs_all flatlogs/bin/flatlogcodes
 
 .PHONY: install
-install: indi_install libs_install pythonlibs_install apps_install pythonapps_install guis_install rtimv_plugins_install utils_install scripts_install rtscripts_install
+install: indi_install libs_install pythonlibs_install apps_install pythonapps_install utils_install scripts_install rtscripts_install
 
 #We clean just libMagAOX, and the apps, guis, and utils for normal devel work.
 .PHONY: clean
@@ -508,7 +486,7 @@ scripts_install:
 
 .PHONY: rtscripts_install
 rtscripts_install:
-	for scriptname in make_cpusets move_irqs remove_cpusets; do \
+	for scriptname in make_cpusets move_irqs; do \
 		sudo -H install -d /opt/MagAOX/bin && \
 		if [ -e rtSetup/$(MAGAOX_ROLE)/$$scriptname ]; then \
 			sudo -H install rtSetup/$(MAGAOX_ROLE)/$$scriptname /opt/MagAOX/bin/$$scriptname && \
@@ -537,34 +515,6 @@ utils_clean:
 		for app in ${utils_to_build}; do \
 			(cd utils/$$app && ${MAKE} clean) || exit 1; \
 		done
-
-# INDI-client-only machines: INDI tools (getINDI, setINDI, etc.), cursesINDI,
-# rtimv plugins, and GUIs.  None of these link libMagAOX, so no apps, libs,
-# or log utilities are built.
-# If mxlib and rtimv have successfully been installed the only additional
-# dependencies will be qwt and maybe svg:
-#  On Ubuntu 24/26: sudo apt install -y libqt5svg5-dev libqwtmathml-qt5-dev
-
-client_utils = cursesINDI
-
-# Run make (with optional goal $(3)) in each directory $(2) under $(1)
-make_each = for d in $(2); do (cd $(1)/$$d && ${MAKE} $(3)) || exit 1; done
-
-.PHONY: client
-client: indi_all
-	$(call make_each,gui/rtimv/plugins,${rtimv_plugins_to_build})
-	$(call make_each,gui/apps,${guis_to_build})
-	$(call make_each,utils,${client_utils})
-
-.PHONY: client_install
-client_install: indi_install
-	$(call make_each,gui/rtimv/plugins,${rtimv_plugins_to_build},install)
-	$(call make_each,gui/apps,${guis_to_build},install)
-	$(call make_each,utils,${client_utils},install)
-
-.PHONY: client_clean
-client_clean: indi_clean guis_clean
-	$(call make_each,utils,${client_utils},clean)
 
 .PHONY: test
 test: tests_clean
