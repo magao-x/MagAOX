@@ -295,7 +295,7 @@ using namespace mx::improc;
  {
      shmimMonitorT::loadConfig( config );
 
-    frameGrabberT::m_ownShmim = false;
+    frameGrabberT::m_ownShmim = true;
     FRAMEGRABBER_LOAD_CONFIG(_config);
     TELEMETER_LOAD_CONFIG(_config);
 
@@ -595,8 +595,8 @@ using namespace mx::improc;
     auto end = std::chrono::high_resolution_clock::now();
     loop_time_elapsed += std::chrono::duration_cast<std::chrono::duration<double, std::micro>>(end - start).count();
     
-    if(frame_counter % 20 == 0){
-        std::cout << "HOWDY elapsed us: " << loop_time_elapsed / 20.0 << " us" << std::endl;
+    if(frame_counter % 4000 == 0){
+        std::cout << "HOWDY elapsed us: " << loop_time_elapsed / 4000.0 << " us" << std::endl;
         loop_time_elapsed = 0.0;
     }
     
@@ -606,27 +606,9 @@ using namespace mx::improc;
 
 int loPredCtrl::configureAcquisition()
 {
-    static bool logged = false;
-
-    int rv = openShmim();
-    if(rv != 0)
-    {
-        return rv;
-    }
-
-    if( frameGrabberT::m_width != (uint32_t)(m_modevalWidth * m_modevalHeight) || frameGrabberT::m_height != 1 ||
-        frameGrabberT::m_dataType != _DATATYPE_FLOAT )
-    {
-        if( !logged )
-        {
-            log<text_log>( frameGrabberT::m_shmimName + " is wrong size (" + std::to_string(frameGrabberT::m_width) + "x" + std::to_string(frameGrabberT::m_height) + ") or type (" + std::to_string(frameGrabberT::m_dataType) + ")",
-                           logPrio::LOG_INFO );
-            logged = true;
-        }
-        return 1;
-    }
-
-    logged = false;
+    frameGrabberT::m_width = m_modevalWidth;
+    frameGrabberT::m_height = 1;
+    frameGrabberT::m_dataType = _DATATYPE_FLOAT;
 
     return 0;
 }
