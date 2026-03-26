@@ -242,6 +242,22 @@ Resolved Decisions
   - proceed with the assumption that the supplied EDT config delivers correctly ordered images
   - do not implement descrambling in the first pass
 
+Implementation Status
+
+- Initial `cred2Ctrl` first-pass scaffolding is now in the tree, including:
+  - `dev::stdCamera`, `dev::edtCamera`, `dev::frameGrabber`, and `dev::telemeter` integration
+  - C-RED 2 serial helpers and ROI/config generation helpers
+  - temperature/FPS/ROI control paths
+  - focused helper tests for response parsing and ROI formatting
+
+- Local verification completed so far:
+  - `cred2Utils_test` passes
+  - `cred2Ctrl.o` syntax-checks successfully when the EDT headers are stubbed locally for compile validation
+
+- Remaining environment limitation on this host:
+  - full `cred2Ctrl` app builds still require a real EDT SDK install and headers on the machine
+  - the app `Makefile` now sets `EDT=true` explicitly so the controller is built in EDT-enabled mode when that dependency is present
+
 Follow-Up Items / Edge Cases
 
 - Verify that `edtCamera::pdvSerialWriteRead()` handles the C-RED 2 trailing `\r\nfli-cli>` prompt cleanly and does not turn a valid response into a timeout path.
@@ -255,4 +271,3 @@ Follow-Up Items / Edge Cases
 
 - Treat the first implementation as volatile runtime control only.
   - Do not issue `save` automatically from the controller unless operations explicitly ask for persisted camera settings.
-

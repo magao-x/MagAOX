@@ -60,6 +60,7 @@ apps_rtc = \
 	alpaoCtrl \
 	ocam2KCtrl \
 	andorCtrl \
+	cred2Ctrl \
 	siglentSDG \
 	ttmModulator \
 	pi335Ctrl \
@@ -117,6 +118,7 @@ all_buildable_apps = \
 	alignLoop \
 	cacaoInterface \
 	closedLoopIndi \
+	cred2Ctrl \
 	dmMode \
 	dmPokeCenter \
 	dmPokeXCorr \

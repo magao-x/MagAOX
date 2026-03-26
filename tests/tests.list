@@ -44,6 +44,7 @@
 ../apps/mzmqServer/tests/mzmqServer_test
 ../apps/observerCtrl/tests/observerCtrl_test
 ../apps/ocam2KCtrl/tests/ocamUtils_test
+../apps/cred2Ctrl/tests/cred2Utils_test
 ../apps/pi335Ctrl/tests/pi335Ctrl_test
 ../apps/picoMotorCtrl/tests/picoMotorCtrl_test
 ../apps/psfAcq/tests/psfAcq_test

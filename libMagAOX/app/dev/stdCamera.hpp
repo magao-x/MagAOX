@@ -2152,7 +2152,7 @@ int stdCamera<derivedT>::newCallBack_temp_controller( const pcf::IndiProperty &i
             derived().updateSwitchIfChanged( m_indiP_tempcont, "toggle", pcf::IndiElement::Off, INDI_BUSY );
         }
 
-        mx::meta::trueFalseT<derivedT::c_stdCamera_emGain> tf;
+        mx::meta::trueFalseT<derivedT::c_stdCamera_tempControl> tf;
         return setTempControl( tf );
     }
     else
@@ -3270,7 +3270,7 @@ int stdCamera<derivedT>::recordCamera( bool force )
         m_ccdTempSetpt != last_ccdTempSetpt || m_tempControlStatus != last_tempControlStatus ||
         m_tempControlOnTarget != last_tempControlOnTarget || m_tempControlStatusStr != last_tempControlStatusStr ||
         m_shutterStatus != last_shutterStatus || m_shutterState != last_shutterState || m_synchro != last_synchro ||
-        m_vshiftSpeed != last_vshiftSpeed || m_cropMode != last_cropMode || m_readoutSpeedName != last_readoutSpeed)
+        m_vshiftSpeed != last_vshiftSpeed || m_cropMode != last_cropMode || m_readoutSpeedName != last_readoutSpeed )
     {
         derived().template telem<telem_stdcam>( { m_modeName,
                                                   m_currentROI.x,
