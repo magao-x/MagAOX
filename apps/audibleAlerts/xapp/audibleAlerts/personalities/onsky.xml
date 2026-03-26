@@ -345,5 +345,10 @@
       <speak>Free running</speak>
     </transition>
   </react-to>
+  <react-to indi-id="pdu3.blower.state">
+    <transition value="On">
+      <file name="noonoo.mp3" />
+    </transition>
+  </react-to>
 
 </personality>
