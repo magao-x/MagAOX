@@ -43,6 +43,8 @@ Plan
      - `c_stdCamera_exptimeCtrl = false`
      - `c_stdCamera_fpsCtrl = true`
      - `c_stdCamera_fps = true`
+     - `c_stdCamera_fan = true`
+     - `c_stdCamera_led = true`
      - `c_stdCamera_synchro = false` for the first pass
      - `c_stdCamera_usesModes = false`
      - `c_stdCamera_usesROI = true`
@@ -79,11 +81,18 @@ Plan
      - `fps raw`
      - `minfps raw`
      - `maxfps raw`
+     - `fan mode raw`
+     - `fan speed raw`
+     - `led raw`
      - `cropping raw`
      - `cropping columns raw`
      - `cropping rows raw`
      - `set temperatures snake <value>`
      - `set fps <value>`
+     - `set fan mode automatic`
+     - `set fan mode manual`
+     - `set fan speed <value>`
+     - `set led on|off`
      - `set cropping on|off`
      - `set cropping columns <value>`
      - `set cropping rows <value>`
@@ -222,7 +231,6 @@ Plan
 15. Defer non-core features until the first pass is stable.
    - Explicit external sync control
    - Tint/exposure-time control
-   - Fan control
    - Bias/flat/bad-pixel toggles
    - Persistence commands such as `save`
    - Any camera-mode abstraction beyond the one synthetic dynamic EDT mode
@@ -263,6 +271,7 @@ Implementation Status
   - temperature setpoint control works
   - FPS query/set works
   - ROI reconfiguration is the next hardware validation target
+  - fan and LED control remain to be validated on hardware
 
 - Remaining environment limitation on this host:
   - full `cred2Ctrl` app builds still require a real EDT SDK install and headers on the machine

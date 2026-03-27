@@ -71,6 +71,8 @@ class cred2Ctrl : public MagAOXApp<>,
     static constexpr bool c_stdCamera_exptimeCtrl  = false; ///< Do not expose exposure-time controls.
     static constexpr bool c_stdCamera_fpsCtrl      = true;  ///< Expose FPS controls.
     static constexpr bool c_stdCamera_fps          = true;  ///< Expose FPS status.
+    static constexpr bool c_stdCamera_fan          = true;  ///< Expose fan-speed controls.
+    static constexpr bool c_stdCamera_led          = true;  ///< Expose status LED controls.
     static constexpr bool c_stdCamera_synchro      = false; ///< Do not expose synchro controls in the first pass.
     static constexpr bool c_stdCamera_usesModes    = false; ///< Use one synthetic runtime mode rather than INDI modes.
     static constexpr bool c_stdCamera_usesROI      = true;  ///< Expose ROI controls.
@@ -150,6 +152,12 @@ class cred2Ctrl : public MagAOXApp<>,
     /// Query and update the current camera FPS limits.
     int updateFPSLimits();
 
+    /// Query and update the current fan-control state.
+    int getFanSpeed();
+
+    /// Query and update the current LED state.
+    int getLEDState();
+
     /** \name stdCamera Interface
      * @{
      */
@@ -165,6 +173,12 @@ class cred2Ctrl : public MagAOXApp<>,
 
     /// Send the requested frame rate to the camera.
     int setFPS();
+
+    /// Send the requested fan-control mode to the camera.
+    int setFanSpeed();
+
+    /// Send the requested LED state to the camera.
+    int setLED();
 
     /// Required by `stdCamera`, but unused for C-RED 2.
     int setExpTime();
@@ -232,6 +246,87 @@ class cred2Ctrl : public MagAOXApp<>,
     int issueCommand( const std::string &command /**< [in] CLI command to send */ );
 };
 
+namespace
+{
+
+/// Normalize a C-RED 2 text response for tolerant string parsing.
+inline std::string cred2LowerResponse( const std::string &response /**< [in] raw or cleaned CLI response */ )
+{
+    std::string clean = cred2CleanResponse( response );
+    std::transform( clean.begin(),
+                    clean.end(),
+                    clean.begin(),
+                    []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+
+    return clean;
+}
+
+/// Convert a C-RED 2 fan percentage into the nearest exposed preset name.
+inline std::string cred2FanPresetName( float fanPercent /**< [in] current or requested fan percentage */ )
+{
+    if( fanPercent <= 0.5f )
+    {
+        return "off";
+    }
+
+    if( fanPercent < 37.5f )
+    {
+        return "p25";
+    }
+
+    if( fanPercent < 62.5f )
+    {
+        return "p50";
+    }
+
+    if( fanPercent < 87.5f )
+    {
+        return "p75";
+    }
+
+    return "p100";
+}
+
+/// Convert an exposed fan preset name into the corresponding manual fan percentage.
+inline int cred2FanPresetPercent( int               &fanPercent, ///< [out] mapped manual fan percentage
+                                  const std::string &fanPreset   /**< [in] exposed fan preset name */
+)
+{
+    if( fanPreset == "off" )
+    {
+        fanPercent = 0;
+        return 0;
+    }
+
+    if( fanPreset == "p25" )
+    {
+        fanPercent = 25;
+        return 0;
+    }
+
+    if( fanPreset == "p50" )
+    {
+        fanPercent = 50;
+        return 0;
+    }
+
+    if( fanPreset == "p75" )
+    {
+        fanPercent = 75;
+        return 0;
+    }
+
+    if( fanPreset == "p100" )
+    {
+        fanPercent = 100;
+        return 0;
+    }
+
+    return -1;
+}
+
+} // namespace
+
 inline cred2Ctrl::cred2Ctrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     m_powerMgtEnabled = true;
@@ -286,6 +381,11 @@ inline cred2Ctrl::cred2Ctrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODI
     m_minROIBinning_y  = 1;
     m_maxROIBinning_y  = 1;
     m_stepROIBinning_y = 1;
+
+    m_fanSpeedNames      = { "off", "p25", "p50", "p75", "p100", "auto" };
+    m_fanSpeedNameLabels = { "Off", "25", "50", "75", "100", "Auto" };
+    m_fanSpeedNameSet    = "auto";
+    m_ledStateSet        = true;
 
     m_temps.setInvalid();
 }
@@ -439,7 +539,7 @@ inline int cred2Ctrl::appLogic()
     {
         std::unique_lock<std::mutex> lock( m_indiMutex );
 
-        if( updateFPSLimits() < 0 || getTemps() < 0 || getFPS() < 0 )
+        if( updateFPSLimits() < 0 || getTemps() < 0 || getFPS() < 0 || getFanSpeed() < 0 || getLEDState() < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
             {
@@ -487,6 +587,28 @@ inline int cred2Ctrl::appLogic()
         }
 
         if( getFPS() < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+            {
+                return 0;
+            }
+
+            state( stateCodes::ERROR );
+            return 0;
+        }
+
+        if( getFanSpeed() < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+            {
+                return 0;
+            }
+
+            state( stateCodes::ERROR );
+            return 0;
+        }
+
+        if( getLEDState() < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
             {
@@ -786,6 +908,116 @@ inline int cred2Ctrl::getFPS()
     return 0;
 }
 
+inline int cred2Ctrl::getFanSpeed()
+{
+    std::string response;
+    std::string fanMode;
+    float       fanPercent = 0;
+
+    if( sendCommand( response, "fan mode raw" ) < 0 )
+    {
+        return -1;
+    }
+
+    fanMode = cred2LowerResponse( response );
+    if( fanMode.find( "auto" ) == std::string::npos && fanMode.find( "manual" ) == std::string::npos )
+    {
+        if( sendCommand( response, "fan mode" ) < 0 )
+        {
+            return -1;
+        }
+
+        fanMode = cred2LowerResponse( response );
+    }
+
+    if( fanMode.find( "auto" ) != std::string::npos )
+    {
+        m_fanSpeedName    = "auto";
+        m_fanSpeedNameSet = m_fanSpeedName;
+        m_fanSpeedValid   = true;
+        return 0;
+    }
+
+    if( fanMode.find( "manual" ) == std::string::npos )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "failed to parse fan mode response: " + response } );
+    }
+
+    if( sendCommand( response, "fan speed raw" ) < 0 )
+    {
+        return -1;
+    }
+
+    if( cred2ParseFloat( fanPercent, response ) < 0 )
+    {
+        if( sendCommand( response, "fan speed" ) < 0 || cred2ParseFloat( fanPercent, response ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "failed to parse fan speed response: " + response } );
+        }
+    }
+
+    m_fanSpeedName    = cred2FanPresetName( fanPercent );
+    m_fanSpeedNameSet = m_fanSpeedName;
+    m_fanSpeedValid   = true;
+
+    return 0;
+}
+
+inline int cred2Ctrl::getLEDState()
+{
+    std::string response;
+    bool        ledState = false;
+
+    if( sendCommand( response, "led raw" ) < 0 )
+    {
+        if( sendCommand( response, "led" ) < 0 )
+        {
+            return -1;
+        }
+    }
+
+    if( cred2ParseBool( ledState, response ) < 0 )
+    {
+        std::string clean = cred2LowerResponse( response );
+
+        if( clean.find( "off" ) != std::string::npos )
+        {
+            ledState = false;
+        }
+        else if( clean.find( "on" ) != std::string::npos )
+        {
+            ledState = true;
+        }
+        else
+        {
+            if( sendCommand( response, "led" ) < 0 )
+            {
+                return -1;
+            }
+
+            clean = cred2LowerResponse( response );
+            if( clean.find( "off" ) != std::string::npos )
+            {
+                ledState = false;
+            }
+            else if( clean.find( "on" ) != std::string::npos )
+            {
+                ledState = true;
+            }
+            else
+            {
+                return log<software_error, -1>( { __FILE__, __LINE__, "failed to parse led response: " + response } );
+            }
+        }
+    }
+
+    m_ledState      = ledState;
+    m_ledStateSet   = ledState;
+    m_ledStateValid = true;
+
+    return 0;
+}
+
 inline int cred2Ctrl::updateFPSLimits()
 {
     std::string response;
@@ -818,6 +1050,10 @@ inline int cred2Ctrl::powerOnDefaults()
     m_tempControlStatusStr = "TEMP OFF";
     m_tempControlOnTarget  = false;
     m_cameraCropEnabled    = false;
+    m_fanSpeedValid        = false;
+    m_ledStateValid        = false;
+    m_fanSpeedNameSet      = "auto";
+    m_ledStateSet          = true;
 
     m_currentROI.x     = m_default_x;
     m_currentROI.y     = m_default_y;
@@ -894,6 +1130,57 @@ inline int cred2Ctrl::setFPS()
     log<text_log>( "set fps: " + std::to_string( m_fpsSet ) );
 
     return getFPS();
+}
+
+inline int cred2Ctrl::setFanSpeed()
+{
+    if( m_fanSpeedNameSet == "auto" )
+    {
+        if( issueCommand( "set fan mode automatic" ) < 0 )
+        {
+            return -1;
+        }
+    }
+    else
+    {
+        int fanPercent = 0;
+        if( cred2FanPresetPercent( fanPercent, m_fanSpeedNameSet ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "unknown fan speed preset: " + m_fanSpeedNameSet } );
+        }
+
+        if( issueCommand( "set fan mode manual" ) < 0 )
+        {
+            return -1;
+        }
+
+        if( issueCommand( "set fan speed " + std::to_string( fanPercent ) ) < 0 )
+        {
+            return -1;
+        }
+    }
+
+    return getFanSpeed();
+}
+
+inline int cred2Ctrl::setLED()
+{
+    if( m_ledStateSet )
+    {
+        if( issueCommand( "set led on" ) < 0 )
+        {
+            return -1;
+        }
+    }
+    else
+    {
+        if( issueCommand( "set led off" ) < 0 )
+        {
+            return -1;
+        }
+    }
+
+    return getLEDState();
 }
 
 inline int cred2Ctrl::setExpTime()
