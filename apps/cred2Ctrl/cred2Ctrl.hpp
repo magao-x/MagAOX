@@ -96,6 +96,8 @@ class cred2Ctrl : public MagAOXApp<>,
 
     bool m_poweredOn{ false }; ///< True after a power cycle until the startup setpoint has been re-applied.
 
+    bool m_cameraCropEnabled{ false }; ///< Tracks whether this controller has enabled camera-side cropping.
+
     std::recursive_mutex m_cameraMutex; ///< Protects serial command traffic and EDT reconfiguration.
     ///@}
 
@@ -830,6 +832,7 @@ inline int cred2Ctrl::powerOnDefaults()
     m_tempControlStatusSet = false;
     m_tempControlStatusStr = "TEMP OFF";
     m_tempControlOnTarget  = false;
+    m_cameraCropEnabled    = false;
 
     m_currentROI.x     = m_default_x;
     m_currentROI.y     = m_default_y;
@@ -1019,11 +1022,13 @@ inline int cred2Ctrl::configureAcquisition()
 
     if( roi.fullFrame )
     {
-        if( issueCommand( "set cropping off" ) < 0 )
+        if( m_cameraCropEnabled && issueCommand( "set cropping off" ) < 0 )
         {
             state( stateCodes::ERROR );
             return -1;
         }
+
+        m_cameraCropEnabled = false;
     }
     else
     {
@@ -1033,6 +1038,8 @@ inline int cred2Ctrl::configureAcquisition()
             state( stateCodes::ERROR );
             return -1;
         }
+
+        m_cameraCropEnabled = true;
     }
 
     m_currentROI = m_nextROI;
