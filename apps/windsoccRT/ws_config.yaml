@@ -1,0 +1,46 @@
+# Step 1: REDUCE
+FILE_PREFIX: "camwfs_"
+SUBTRACT_DARK: False
+SKIP_DARK: false
+NSTACK: null  # use all raw FITS files when building the reference
+CREATE_REFERENCE: true
+REMAKE_REFERENCE: false
+WORKERS: null  # default to cpu_count()
+DIAM_PUPILS: 56  # pixels
+UL_CENTER: [30, 90]
+UR_CENTER: [90, 90]
+LL_CENTER: [30, 30]
+LR_CENTER: [90, 30]
+
+# Step 2: XCORR
+START_FRAME: 0 # start the dataset on this frame; sparkle pattern zero point?
+STEP_FRAME: 1 # skip this number of frames to form the dataset; to remove sparkle bkg.
+GROUP_SIZE: 8 # number of frames to average to remove the sparkle pattern
+MIN_DELAY: 0 # minimum delay to use for cross-correlation
+MAX_DELAY: 256 # maximum delay to use for cross-correlation
+DELAY_STEP: 1 # step size for delay values
+SEGMENT_LENGTH: 11 # number of cubes to use per segment during cross-correlation
+FFT_PAD_SHAPE: [128, 128]
+XCORR_DIR: "xcorr_results" # directory to save the cross-correlation results to (default: "xcorr_results")
+
+# Step 3: DISTILL
+DISTILL_DIR: "distill_results" # directory to save the distilled cubes to (default: "combined")
+# Define template for the matched filter
+TEMPLATE_SIZE: 65 #size of central square of the first frame of the CC cube
+
+# Step 4: MEASURE
+MEASURE_DIR: "measure_results" # directory to save the measure results to (default: "measure_results")
+# Section for writing the wind lookup table
+TIME_TRANSIT: "2023-03-10T06:09:11.342216344Z"  # parity change in wind PA
+WRITE_CSV: results_iz.csv
+INNER_RADIUS: 23 #pixels; tripwire region inner radius
+OUTER_RADIUS: 28 #pixels; tripwire region outer radius
+IMAGE_CENTER: [65, 65]
+N_WEDGES: 72
+D_MIRROR: 6.5
+DEBUG: false
+PA_OFFSET: 28  # degrees
+SEP_THRESH: 3.0 #s/n threshold for sep to detect sources
+SEP_MINAREA: 2.0 #minimum area in pixels for sep to detect sources
+MAKE_MOVIE: true
+TIME_PER_FRAME: 0.004 #seconds
