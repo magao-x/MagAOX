@@ -83,6 +83,8 @@ class cred2Ctrl : public MagAOXApp<>,
      * @{
      */
     std::string m_configFile; ///< Absolute path to the temporary EDT configuration file.
+
+    int m_serialBaud{ 115200 }; ///< Camera Link serial baud rate used for C-RED 2 CLI access.
     ///@}
 
     /** \name C-RED 2 State - Data
@@ -209,6 +211,9 @@ class cred2Ctrl : public MagAOXApp<>,
     ///@}
 
   protected:
+    /// Apply and verify the configured Camera Link serial baud rate.
+    int setSerialBaud();
+
     /// Send a command over Camera Link serial and clean the response.
     int sendCommand( std::string       &response, ///< [out] cleaned command response
                      const std::string &command   /**< [in] CLI command to send */
@@ -286,11 +291,23 @@ inline void cred2Ctrl::setupConfig()
     dev::edtCamera<cred2Ctrl>::setupConfig( config );
     dev::frameGrabber<cred2Ctrl>::setupConfig( config );
     dev::telemeter<cred2Ctrl>::setupConfig( config );
+
+    config.add( "camera.serialBaud",
+                "",
+                "camera.serialBaud",
+                argType::Required,
+                "camera",
+                "serialBaud",
+                false,
+                "int",
+                "The Camera Link serial baud rate for C-RED 2 CLI commands. Default is 115200." );
 }
 
 inline void cred2Ctrl::loadConfig()
 {
     dev::stdCamera<cred2Ctrl>::loadConfig( config );
+
+    config( m_serialBaud, "camera.serialBaud" );
 
     m_configFile = "/tmp/cred2_" + configName() + ".cfg";
 
@@ -343,6 +360,11 @@ inline int cred2Ctrl::appStartup()
     }
 
     if( dev::edtCamera<cred2Ctrl>::appStartup() < 0 )
+    {
+        return log<software_critical, -1>( { __FILE__, __LINE__ } );
+    }
+
+    if( setSerialBaud() < 0 )
     {
         return log<software_critical, -1>( { __FILE__, __LINE__ } );
     }
@@ -599,6 +621,32 @@ inline int cred2Ctrl::issueCommand( const std::string &command )
     {
         return log<text_log, -1>( "C-RED 2 rejected command '" + command + "' with response: " + response,
                                   logPrio::LOG_ERROR );
+    }
+
+    return 0;
+}
+
+inline int cred2Ctrl::setSerialBaud()
+{
+    if( m_pdv == nullptr )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "cannot set serial baud with null PDV handle" } );
+    }
+
+    if( pdv_serial_set_baud( m_pdv, m_serialBaud ) < 0 )
+    {
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "failed to set C-RED 2 serial baud to " + std::to_string( m_serialBaud ) } );
+    }
+
+    int actualBaud = pdv_serial_get_baud( m_pdv );
+    if( actualBaud != m_serialBaud )
+    {
+        return log<software_error, -1>( { __FILE__,
+                                          __LINE__,
+                                          "EDT serial baud verification failed: expected " +
+                                              std::to_string( m_serialBaud ) + ", got " +
+                                              std::to_string( actualBaud ) } );
     }
 
     return 0;
@@ -913,7 +961,7 @@ inline int cred2Ctrl::writeConfig()
     fout << "CL_CFG2_NORM:                  40\n";
     fout << "method_framesync:              EMULATE_TIMEOUT\n";
     fout << "htaps:                         4\n";
-    fout << "serial_baud:                  115200\n";
+    fout << "serial_baud:                  " << m_serialBaud << "\n";
     fout << "serial_term:                   <0A>\n";
     fout << "serial_waitc:                  0D\n";
 
@@ -1028,6 +1076,11 @@ inline int cred2Ctrl::reconfig()
     if( rv < 0 )
     {
         return rv;
+    }
+
+    if( setSerialBaud() < 0 )
+    {
+        return -1;
     }
 
     state( stateCodes::READY );
