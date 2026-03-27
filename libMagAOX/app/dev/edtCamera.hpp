@@ -314,6 +314,20 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string &response, const std::s
         return -1;
     }
 
+    // Drain any immediate trailing bytes so CR/LF endings or prompt suffixes
+    // do not become the next command's apparent response.
+    ret = pdv_serial_wait( m_pdv, 10, 1 );
+    while( ret > 0 )
+    {
+        ret = pdv_serial_read( m_pdv, buf, MAGAOX_PDV_SERBUFSIZE );
+
+        if( ret > 0 )
+        {
+            response.append( buf, ret );
+            ret = pdv_serial_wait( m_pdv, 10, 1 );
+        }
+    }
+
     return 0;
 }
 
