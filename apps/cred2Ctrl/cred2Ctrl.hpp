@@ -13,6 +13,7 @@
 #include <cmath>
 #include <dlfcn.h>
 #include <fstream>
+#include <iostream>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -606,6 +607,8 @@ inline int cred2Ctrl::sendCommand( std::string &response, const std::string &com
     }
 
     response = cred2CleanResponse( rawResponse );
+
+    std::cout << "cred2Ctrl sendCommand '" << command << "' -> [" << response << "]" << std::endl;
 
     return 0;
 }
