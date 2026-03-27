@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <dlfcn.h>
 #include <fstream>
 #include <mutex>
 #include <sstream>
@@ -628,18 +629,31 @@ inline int cred2Ctrl::issueCommand( const std::string &command )
 
 inline int cred2Ctrl::setSerialBaud()
 {
+    typedef int ( *setBaudFnT )( PdvDev *, int );
+    typedef int ( *getBaudFnT )( PdvDev * );
+
     if( m_pdv == nullptr )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "cannot set serial baud with null PDV handle" } );
     }
 
-    if( pdv_serial_set_baud( m_pdv, m_serialBaud ) < 0 )
+    static setBaudFnT setBaudFn = reinterpret_cast<setBaudFnT>( dlsym( RTLD_DEFAULT, "pdv_serial_set_baud" ) );
+    static getBaudFnT getBaudFn = reinterpret_cast<getBaudFnT>( dlsym( RTLD_DEFAULT, "pdv_serial_get_baud" ) );
+
+    if( setBaudFn == nullptr || getBaudFn == nullptr )
+    {
+        return log<text_log, 0>(
+            "EDT library does not expose pdv_serial_set_baud/get_baud; relying on serial_baud from the config file",
+            logPrio::LOG_WARNING );
+    }
+
+    if( setBaudFn( m_pdv, m_serialBaud ) < 0 )
     {
         return log<software_error, -1>(
             { __FILE__, __LINE__, "failed to set C-RED 2 serial baud to " + std::to_string( m_serialBaud ) } );
     }
 
-    int actualBaud = pdv_serial_get_baud( m_pdv );
+    int actualBaud = getBaudFn( m_pdv );
     if( actualBaud != m_serialBaud )
     {
         return log<software_error, -1>( { __FILE__,

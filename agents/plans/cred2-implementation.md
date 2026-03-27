@@ -59,6 +59,7 @@ Plan
    - Hardware testing with EDT `serial_cmd` indicates the practical response path is a plain line such as `10.000000`, without a visible `fli-cli>` prompt.
    - Treat any prompt suffix described in the manual as optional rather than required.
    - Reassert the configured baud on the live PDV handle after `edtCamera::appStartup()` and after `pdvReconfig()`, since opening/reopening the PDV device can otherwise leave serial at the default rate before the first real command.
+   - Keep that runtime baud-reset path compatible with EDT installs whose headers do not declare the baud helpers, for example by resolving those symbols dynamically and falling back to cfg-only behavior when unavailable.
    - If needed, add a small helper layer in `cred2Ctrl` or `cred2Utils.hpp` that:
      - sends a command
      - truncates the response at the first `\r`
