@@ -781,21 +781,39 @@ inline int cred2Ctrl::getFPS()
 inline int cred2Ctrl::updateFPSLimits()
 {
     std::string response;
-    float       minFPS = 0;
-    float       maxFPS = 0;
+    float       minFPS = m_minFPS;
+    float       maxFPS = m_maxFPS;
+    bool        gotMin = false;
+    bool        gotMax = false;
 
-    if( sendCommand( response, "minfps raw" ) < 0 || cred2ParseFloat( minFPS, response ) < 0 )
+    if( sendCommand( response, "minfps raw" ) == 0 && cred2ParseFloat( minFPS, response ) == 0 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "failed to parse minfps response: " + response } );
+        gotMin = true;
+    }
+    else
+    {
+        log<text_log>( "could not query C-RED 2 minimum FPS; keeping existing lower limit", logPrio::LOG_WARNING );
     }
 
-    if( sendCommand( response, "maxfps raw" ) < 0 || cred2ParseFloat( maxFPS, response ) < 0 )
+    if( sendCommand( response, "maxfps raw" ) == 0 && cred2ParseFloat( maxFPS, response ) == 0 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "failed to parse maxfps response: " + response } );
+        gotMax = true;
+    }
+    else
+    {
+        log<text_log>( "could not query C-RED 2 maximum FPS; keeping existing upper limit", logPrio::LOG_WARNING );
     }
 
-    m_minFPS = minFPS;
-    m_maxFPS = maxFPS;
+    if( gotMin )
+    {
+        m_minFPS = minFPS;
+    }
+
+    if( gotMax )
+    {
+        m_maxFPS = maxFPS;
+    }
+
     m_fpsSet = std::clamp( m_fpsSet, m_minFPS, m_maxFPS );
 
     recordCamera();
