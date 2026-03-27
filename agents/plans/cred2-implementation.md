@@ -257,13 +257,20 @@ Implementation Status
   - `cred2Utils_test` passes
   - `cred2Ctrl.o` syntax-checks successfully when the EDT headers are stubbed locally for compile validation
 
+- Hardware validation completed so far on the EDT host:
+  - serial command/response handling is now working reliably with the generated config
+  - live image streaming works
+  - temperature setpoint control works
+  - FPS query/set works
+  - ROI reconfiguration is the next hardware validation target
+
 - Remaining environment limitation on this host:
   - full `cred2Ctrl` app builds still require a real EDT SDK install and headers on the machine
   - the app `Makefile` now sets `EDT=true` explicitly so the controller is built in EDT-enabled mode when that dependency is present
 
 Follow-Up Items / Edge Cases
 
-- Verify that `edtCamera::pdvSerialWriteRead()` handles the C-RED 2 trailing `\r\nfli-cli>` prompt cleanly and does not turn a valid response into a timeout path.
+- Keep the EDT serial-response handling changes that preserve partial reads and drain trailing bytes between commands, since those were required for reliable hardware communication with the C-RED 2.
 
 - Confirm with hardware that the sample EDT 4-tap configuration produces correctly ordered images, while proceeding under the assumption that no descrambling is needed in the first pass.
 

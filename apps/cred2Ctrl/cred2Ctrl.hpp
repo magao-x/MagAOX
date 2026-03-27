@@ -13,7 +13,6 @@
 #include <cmath>
 #include <dlfcn.h>
 #include <fstream>
-#include <iostream>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -55,7 +54,10 @@ class cred2Ctrl : public MagAOXApp<>,
     friend class dev::frameGrabber<cred2Ctrl>;
     friend class dev::telemeter<cred2Ctrl>;
 
-    typedef MagAOXApp<> MagAOXAppT;
+    typedef MagAOXApp<>                  MagAOXAppT;
+    typedef dev::stdCamera<cred2Ctrl>    stdCameraT;
+    typedef dev::frameGrabber<cred2Ctrl> frameGrabberT;
+    typedef dev::telemeter<cred2Ctrl>    telemeterT;
 
   public:
     /** \name app::dev Configurations
@@ -120,6 +122,9 @@ class cred2Ctrl : public MagAOXApp<>,
 
     /// Load the configuration system results.
     virtual void loadConfig();
+
+    /// Implementation of loadConfig logic with standard helper-macro error handling.
+    int loadConfigImpl( mx::app::appConfigurator &config /**< [in] application configurator with loaded values */ );
 
     /// Startup function.
     virtual int appStartup();
@@ -291,10 +296,13 @@ inline cred2Ctrl::~cred2Ctrl() noexcept
 
 inline void cred2Ctrl::setupConfig()
 {
-    dev::stdCamera<cred2Ctrl>::setupConfig( config );
+    STDCAMERA_SETUP_CONFIG( config );
+
     dev::edtCamera<cred2Ctrl>::setupConfig( config );
-    dev::frameGrabber<cred2Ctrl>::setupConfig( config );
-    dev::telemeter<cred2Ctrl>::setupConfig( config );
+
+    FRAMEGRABBER_SETUP_CONFIG( config );
+
+    TELEMETER_SETUP_CONFIG( config );
 
     config.add( "camera.serialBaud",
                 "",
@@ -307,9 +315,9 @@ inline void cred2Ctrl::setupConfig()
                 "The Camera Link serial baud rate for C-RED 2 CLI commands. Default is 115200." );
 }
 
-inline void cred2Ctrl::loadConfig()
+inline int cred2Ctrl::loadConfigImpl( mx::app::appConfigurator &config )
 {
-    dev::stdCamera<cred2Ctrl>::loadConfig( config );
+    STDCAMERA_LOAD_CONFIG( config );
 
     config( m_serialBaud, "camera.serialBaud" );
 
@@ -330,14 +338,25 @@ inline void cred2Ctrl::loadConfig()
 
     if( writeConfig() < 0 )
     {
-        log<software_critical>( { __FILE__, __LINE__, "could not write initial C-RED 2 EDT config" } );
-        m_shutdown = true;
-        return;
+        return log<software_critical, -1>( { __FILE__, __LINE__, "could not write initial C-RED 2 EDT config" } );
     }
 
     dev::edtCamera<cred2Ctrl>::loadConfig( config );
-    dev::frameGrabber<cred2Ctrl>::loadConfig( config );
-    dev::telemeter<cred2Ctrl>::loadConfig( config );
+
+    FRAMEGRABBER_LOAD_CONFIG( config );
+
+    TELEMETER_LOAD_CONFIG( config );
+
+    return 0;
+}
+
+inline void cred2Ctrl::loadConfig()
+{
+    if( loadConfigImpl( config ) < 0 )
+    {
+        log<software_critical>( { __FILE__, __LINE__, "error loading config" } );
+        m_shutdown = true;
+    }
 }
 
 inline int cred2Ctrl::appStartup()
@@ -358,10 +377,7 @@ inline int cred2Ctrl::appStartup()
     m_indiP_temps.add( pcf::IndiElement( "heatsink" ) );
     m_indiP_temps["heatsink"].set( 0 );
 
-    if( dev::stdCamera<cred2Ctrl>::appStartup() < 0 )
-    {
-        return log<software_critical, -1>( { __FILE__, __LINE__ } );
-    }
+    STDCAMERA_APP_STARTUP;
 
     if( dev::edtCamera<cred2Ctrl>::appStartup() < 0 )
     {
@@ -373,35 +389,23 @@ inline int cred2Ctrl::appStartup()
         return log<software_critical, -1>( { __FILE__, __LINE__ } );
     }
 
-    if( dev::frameGrabber<cred2Ctrl>::appStartup() < 0 )
-    {
-        return log<software_critical, -1>( { __FILE__, __LINE__ } );
-    }
+    FRAMEGRABBER_APP_STARTUP;
 
-    if( dev::telemeter<cred2Ctrl>::appStartup() < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
-    }
+    TELEMETER_APP_STARTUP;
 
     return 0;
 }
 
 inline int cred2Ctrl::appLogic()
 {
-    if( dev::stdCamera<cred2Ctrl>::appLogic() < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
-    }
+    STDCAMERA_APP_LOGIC;
 
     if( dev::edtCamera<cred2Ctrl>::appLogic() < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
-    if( dev::frameGrabber<cred2Ctrl>::appLogic() < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
-    }
+    FRAMEGRABBER_APP_LOGIC;
 
     if( state() == stateCodes::POWERON )
     {
@@ -583,10 +587,13 @@ inline int cred2Ctrl::whilePowerOff()
 
 inline int cred2Ctrl::appShutdown()
 {
-    dev::stdCamera<cred2Ctrl>::appShutdown();
+    STDCAMERA_APP_SHUTDOWN;
+
     dev::edtCamera<cred2Ctrl>::appShutdown();
-    dev::frameGrabber<cred2Ctrl>::appShutdown();
-    dev::telemeter<cred2Ctrl>::appShutdown();
+
+    FRAMEGRABBER_APP_SHUTDOWN;
+
+    TELEMETER_APP_SHUTDOWN;
 
     return 0;
 }
@@ -609,8 +616,6 @@ inline int cred2Ctrl::sendCommand( std::string &response, const std::string &com
     }
 
     response = cred2CleanResponse( rawResponse );
-
-    std::cout << "cred2Ctrl sendCommand '" << command << "' -> [" << response << "]" << std::endl;
 
     return 0;
 }
@@ -647,9 +652,7 @@ inline int cred2Ctrl::setSerialBaud()
 
     if( setBaudFn == nullptr || getBaudFn == nullptr )
     {
-        return log<text_log, 0>(
-            "EDT library does not expose pdv_serial_set_baud/get_baud; relying on serial_baud from the config file",
-            logPrio::LOG_WARNING );
+        return 0;
     }
 
     if( setBaudFn( m_pdv, m_serialBaud ) < 0 )
@@ -786,39 +789,21 @@ inline int cred2Ctrl::getFPS()
 inline int cred2Ctrl::updateFPSLimits()
 {
     std::string response;
-    float       minFPS = m_minFPS;
-    float       maxFPS = m_maxFPS;
-    bool        gotMin = false;
-    bool        gotMax = false;
+    float       minFPS = 0;
+    float       maxFPS = 0;
 
-    if( sendCommand( response, "minfps raw" ) == 0 && cred2ParseFloat( minFPS, response ) == 0 )
+    if( sendCommand( response, "minfps raw" ) < 0 || cred2ParseFloat( minFPS, response ) < 0 )
     {
-        gotMin = true;
-    }
-    else
-    {
-        log<text_log>( "could not query C-RED 2 minimum FPS; keeping existing lower limit", logPrio::LOG_WARNING );
+        return log<software_error, -1>( { __FILE__, __LINE__, "failed to parse minfps response: " + response } );
     }
 
-    if( sendCommand( response, "maxfps raw" ) == 0 && cred2ParseFloat( maxFPS, response ) == 0 )
+    if( sendCommand( response, "maxfps raw" ) < 0 || cred2ParseFloat( maxFPS, response ) < 0 )
     {
-        gotMax = true;
-    }
-    else
-    {
-        log<text_log>( "could not query C-RED 2 maximum FPS; keeping existing upper limit", logPrio::LOG_WARNING );
+        return log<software_error, -1>( { __FILE__, __LINE__, "failed to parse maxfps response: " + response } );
     }
 
-    if( gotMin )
-    {
-        m_minFPS = minFPS;
-    }
-
-    if( gotMax )
-    {
-        m_maxFPS = maxFPS;
-    }
-
+    m_minFPS = minFPS;
+    m_maxFPS = maxFPS;
     m_fpsSet = std::clamp( m_fpsSet, m_minFPS, m_maxFPS );
 
     recordCamera();
