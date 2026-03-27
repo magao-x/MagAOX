@@ -308,7 +308,7 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string &response, const std::s
         }
     } while( ret > 0 );
 
-    if( ret == 0 && pdv_get_waitchar( m_pdv, &waitc ) )
+    if( ret == 0 && response.empty() && pdv_get_waitchar( m_pdv, &waitc ) )
     {
         derivedT::template log<software_error>( { __FILE__, __LINE__, "PDV: timeout in serial response" } );
         return -1;
