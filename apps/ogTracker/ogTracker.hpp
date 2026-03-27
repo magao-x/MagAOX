@@ -65,6 +65,7 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker>
     int         m_bufferN{ 2000 }; ///< Rolling frame-buffer length used for PCA statistics.
     int         m_minSamples{ 100 }; ///< Minimum buffered frames before statistics are considered valid.
     int         m_klipMax{ 3 }; ///< Maximum number of PCA modes to load/publish.
+    int         m_ogAvgN{ 100 }; ///< Number of measurements used in the running average of `pca_og`.
     ///@}
 
     /** \name Sparkle Parameter State - Data
@@ -107,7 +108,12 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker>
 
     Eigen::Matrix<realT, -1, 1> m_latestRms; ///< Latest rolling RMS per PCA mode.
     Eigen::Matrix<realT, -1, 1> m_latestNorm; ///< Latest rolling RMS normalized by reference RMS.
+    Eigen::Matrix<realT, -1, 1> m_latestOgAvg; ///< Running-average output values for `pca_og`.
     bool                         m_metricsValid{ false }; ///< True once at least one valid metrics computation completes.
+    Eigen::Matrix<realT, -1, -1> m_ogAvgHistory; ///< History matrix for running-average updates, shaped `[ogAvgN, modes]`.
+    Eigen::Matrix<realT, -1, 1>  m_ogAvgSum; ///< Running sum across `m_ogAvgHistory`.
+    int                           m_ogAvgWrite{ 0 }; ///< Next row index to overwrite in `m_ogAvgHistory`.
+    int                           m_ogAvgCount{ 0 }; ///< Number of valid rows currently accumulated in `m_ogAvgHistory`.
 
     std::vector<std::string> m_modeEls; ///< Cached INDI element names (`mode0`, `mode1`, ...).
     ///@}
@@ -125,8 +131,8 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker>
     pcf::IndiProperty m_indiP_calibError; ///< Published calibration-error property.
     pcf::IndiProperty m_indiP_calibLoaded; ///< Published calibration-loaded numeric flag.
     pcf::IndiProperty m_indiP_buffer; ///< Published ring-buffer occupancy/capacity property.
-    pcf::IndiProperty m_indiP_pcaRms; ///< Published rolling RMS values by PCA mode.
-    pcf::IndiProperty m_indiP_pcaNorm; ///< Published normalized rolling RMS values by PCA mode.
+    pcf::IndiProperty m_indiP_ogAvgN; ///< INDI control for `pca_og` running-average measurement count.
+    pcf::IndiProperty m_indiP_pcaOG; ///< Published normalized rolling RMS values by PCA mode.
     ///@}
 
     /** \name Concurrency and Background Compute - Data
@@ -208,6 +214,9 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker>
     /// Allocate/reset external pointer-cbuffer storage while mutex is held.
     int setupFrameCircBuffLocked( int pixels /**< [in] flattened frame size */ );
 
+    /// Allocate/reset `pca_og` running-average history while mutex is held.
+    int setupOgAverageLocked( int modes /**< [in] number of active PCA modes */ );
+
     /// Worker that computes metrics from ring snapshots.
     void computeThreadExec();
 
@@ -221,6 +230,7 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker>
     INDI_SETCALLBACK_DECL( ogTracker, m_indiP_amp );
     INDI_SETCALLBACK_DECL( ogTracker, m_indiP_freq );
     INDI_SETCALLBACK_DECL( ogTracker, m_indiP_modulating );
+    INDI_NEWCALLBACK_DECL( ogTracker, m_indiP_ogAvgN );
 };
 
 inline ogTracker::ogTracker() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
@@ -330,6 +340,15 @@ inline void ogTracker::setupConfig()
                 false,
                 "int",
                 "Maximum number of PCA modes to use." );
+    config.add( "pca.ogAvgN",
+                "",
+                "pca.ogAvgN",
+                argType::Required,
+                "pca",
+                "ogAvgN",
+                false,
+                "int",
+                "Number of measurements to average for pca_og output." );
 
     SHMIMMONITOR_SETUP_CONFIG( config );
 }
@@ -340,6 +359,7 @@ inline int ogTracker::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_bufferN, "pca.bufferN" );
     _config( m_minSamples, "pca.minSamples" );
     _config( m_klipMax, "pca.klipMax" );
+    _config( m_ogAvgN, "pca.ogAvgN" );
 
     if( m_bufferN < 1 )
     {
@@ -352,6 +372,10 @@ inline int ogTracker::loadConfigImpl( mx::app::appConfigurator &_config )
     if( m_minSamples < 1 )
     {
         m_minSamples = 1;
+    }
+    if( m_ogAvgN < 1 )
+    {
+        m_ogAvgN = 1;
     }
     m_minSamples = std::max( m_minSamples, 10 * m_klipMax );
 
@@ -392,12 +416,21 @@ inline int ogTracker::appStartup()
     m_indiP_buffer.add( pcf::IndiElement( "count", 0 ) );
     m_indiP_buffer.add( pcf::IndiElement( "capacity", 0 ) );
 
-    CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaRms, "pca_rms", "Rolling PCA RMS", "PCA" );
-    CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaNorm, "pca_norm", "Rolling PCA RMS / Ref RMS", "PCA" );
+    createStandardIndiNumber<int>( m_indiP_ogAvgN, "ogAvgN", 1, 1000000, 1, "%d", "pca_og average count", "PCA" );
+    m_indiP_ogAvgN["current"] = m_ogAvgN;
+    m_indiP_ogAvgN["target"]  = m_ogAvgN;
+    if( registerIndiPropertyNew( m_indiP_ogAvgN, INDI_NEWCALLBACK( m_indiP_ogAvgN ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    //CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaRms, "pca_rms", "Rolling PCA RMS", "PCA" );
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOG, "pca_og", "Rolling PCA RMS / Ref RMS", "PCA" );
     for( const auto &el : m_modeEls )
     {
-        m_indiP_pcaRms.add( pcf::IndiElement( el, 0 ) );
-        m_indiP_pcaNorm.add( pcf::IndiElement( el, 0 ) );
+        //m_indiP_pcaRms.add( pcf::IndiElement( el, 0 ) );
+        m_indiP_pcaOG.add( pcf::IndiElement( el, 0 ) );
     }
 
     m_indiP_calibFolder["name"] = "";
@@ -422,12 +455,34 @@ inline int ogTracker::setupFrameCircBuffLocked( int pixels )
         return -1;
     }
 
+    // setting up a circBuff struct
+    m_frameCircBuff = frameCircBuffT();
+
+    // setting the max entries to the depth of the shmim
     const int depthCap = static_cast<int>( shmimMonitorT::m_depth );
     m_bufferCapacity   = std::max( 1, std::min( m_bufferN, depthCap ) );
-    m_frameCircBuff = frameCircBuffT();
     m_frameCircBuff.maxEntries( static_cast<cbIndexT>( m_bufferCapacity ) );
+
     m_metricsValid   = false;
     m_computePending = true;
+    return 0;
+}
+
+inline int ogTracker::setupOgAverageLocked( int modes )
+{
+    if( modes <= 0 || m_ogAvgN <= 0 )
+    {
+        return -1;
+    }
+
+    m_ogAvgHistory.resize( m_ogAvgN, modes );
+    m_ogAvgHistory.setZero();
+    m_ogAvgSum.resize( modes );
+    m_ogAvgSum.setZero();
+    m_latestOgAvg.resize( modes );
+    m_latestOgAvg.setZero();
+    m_ogAvgWrite = 0;
+    m_ogAvgCount = 0;
     return 0;
 }
 
@@ -532,6 +587,7 @@ inline int ogTracker::loadCalibrationFiles( const std::filesystem::path &folderP
     m_latestNorm.resize( m_activeModes );
     m_latestRms.setZero();
     m_latestNorm.setZero();
+    setupOgAverageLocked( m_activeModes );
     m_metricsValid = false;
 
     setCalibErrorLocked( "ok", logPrio::LOG_NOTICE );
@@ -623,6 +679,33 @@ inline void ogTracker::computeMetricsFromSnapshot()
     std::lock_guard<std::mutex> lock( m_dataMutex );
     m_latestRms   = rms;
     m_latestNorm  = norm;
+    if( m_activeModes > 0 && m_ogAvgN > 0 )
+    {
+        if( m_ogAvgHistory.rows() != m_ogAvgN || m_ogAvgHistory.cols() != m_activeModes )
+        {
+            setupOgAverageLocked( m_activeModes );
+        }
+
+        if( m_ogAvgCount < m_ogAvgN )
+        {
+            m_ogAvgHistory.row( m_ogAvgWrite ) = norm.transpose();
+            m_ogAvgSum += norm;
+            ++m_ogAvgCount;
+            m_ogAvgWrite = ( m_ogAvgWrite + 1 ) % m_ogAvgN;
+        }
+        else
+        {
+            m_ogAvgSum -= m_ogAvgHistory.row( m_ogAvgWrite ).transpose();
+            m_ogAvgHistory.row( m_ogAvgWrite ) = norm.transpose();
+            m_ogAvgSum += norm;
+            m_ogAvgWrite = ( m_ogAvgWrite + 1 ) % m_ogAvgN;
+        }
+
+        if( m_ogAvgCount > 0 )
+        {
+            m_latestOgAvg = m_ogAvgSum / static_cast<realT>( m_ogAvgCount );
+        }
+    }
     m_metricsValid = true;
 }
 
@@ -663,6 +746,9 @@ inline int ogTracker::allocate( const dev::shmimT &dummy )
             { __FILE__, __LINE__, "invalid stream geometry/depth for pointer circular buffer" } );
     }
 
+    std::cerr << "connected to " << shmimMonitorT::m_shmimName << " " << shmimMonitorT::m_width << " "
+              << shmimMonitorT::m_height << " " << shmimMonitorT::m_depth << "\n";
+
     if( m_refPca.rows() > 0 && m_refPca.rows() != m_framePixels )
     {
         m_calibLoaded = false;
@@ -682,7 +768,8 @@ inline int ogTracker::processImage( void *curr_src, const dev::shmimT &dummy )
         return 0;
     }
 
-    m_frameCircBuff.nextEntry( reinterpret_cast<realT *>( curr_src ) );
+    float *f_src = reinterpret_cast<realT *>( curr_src );
+    m_frameCircBuff.nextEntry( f_src );
     m_computePending = true;
     m_computeCv.notify_one();
     return 0;
@@ -751,12 +838,14 @@ inline int ogTracker::appLogic()
         for( int n = 0; n < m_activeModes; ++n )
         {
             rmsOut[static_cast<size_t>( n )]  = static_cast<double>( m_latestRms[n] );
-            normOut[static_cast<size_t>( n )] = static_cast<double>( m_latestNorm[n] );
+            normOut[static_cast<size_t>( n )] = static_cast<double>( m_latestOgAvg[n] );
         }
     }
 
-    updatesIfChanged<double>( m_indiP_pcaRms, modeElNames, rmsOut );
-    updatesIfChanged<double>( m_indiP_pcaNorm, modeElNames, normOut );
+    //updatesIfChanged<double>( m_indiP_pcaRms, modeElNames, rmsOut );
+    updatesIfChanged<double>( m_indiP_pcaOG, modeElNames, normOut );
+    updateIfChanged( m_indiP_ogAvgN, "current", m_ogAvgN, INDI_IDLE );
+    updateIfChanged( m_indiP_ogAvgN, "target", m_ogAvgN, INDI_IDLE );
 
     return 0;
 }
@@ -862,6 +951,41 @@ INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_modulating )( const pcf::IndiProperty 
             }
         }
     }
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( ogTracker, m_indiP_ogAvgN )( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getName() != m_indiP_ogAvgN.getName() )
+    {
+        log<software_error>( { __FILE__, __LINE__, "invalid indi property received" } );
+        return -1;
+    }
+
+    int target;
+    if( indiTargetUpdate( m_indiP_ogAvgN, target, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    std::lock_guard<std::mutex> lock( m_dataMutex );
+    if( target < 1 )
+    {
+        target = 1;
+    }
+    if( target != m_ogAvgN )
+    {
+        m_ogAvgN = target;
+        if( m_activeModes > 0 )
+        {
+            setupOgAverageLocked( m_activeModes );
+        }
+        log<text_log>( "set pca_og averaging count to " + std::to_string( m_ogAvgN ), logPrio::LOG_NOTICE );
+    }
+
+    updateIfChanged( m_indiP_ogAvgN, "current", m_ogAvgN, INDI_IDLE );
+    updateIfChanged( m_indiP_ogAvgN, "target", m_ogAvgN, INDI_IDLE );
     return 0;
 }
 
