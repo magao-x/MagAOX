@@ -15,6 +15,16 @@ namespace cred2Utils_test
 
 SCENARIO( "Cleaning CLI responses", "[cred2Utils]" )
 {
+    GIVEN( "A raw C-RED 2 response without a prompt" )
+    {
+        WHEN( "The response is cleaned" )
+        {
+            std::string clean = cred2CleanResponse( "400\r\n" );
+
+            REQUIRE( clean == "400" );
+        }
+    }
+
     GIVEN( "A raw C-RED 2 response with a prompt" )
     {
         WHEN( "The response is cleaned" )

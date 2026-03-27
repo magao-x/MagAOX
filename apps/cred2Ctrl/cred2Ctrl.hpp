@@ -913,6 +913,7 @@ inline int cred2Ctrl::writeConfig()
     fout << "CL_CFG2_NORM:                  40\n";
     fout << "method_framesync:              EMULATE_TIMEOUT\n";
     fout << "htaps:                         4\n";
+    fout << "serial_baud:                  115200\n";
     fout << "serial_term:                   <0A>\n";
     fout << "serial_waitc:                  0D\n";
 

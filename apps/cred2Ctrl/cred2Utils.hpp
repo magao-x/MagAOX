@@ -72,7 +72,7 @@ struct cred2Roi
     bool fullFrame{ true }; ///< True when the ROI spans the full detector.
 };
 
-/// Strip the prompt and surrounding whitespace from a C-RED 2 CLI response.
+/// Strip an optional prompt and surrounding whitespace from a C-RED 2 CLI response.
 inline std::string cred2CleanResponse( const std::string &response /**< [in] raw CLI response */ )
 {
     std::string clean = response;

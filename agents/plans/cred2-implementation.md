@@ -53,14 +53,15 @@ Plan
 3. Reuse the EDT serial-over-Camera-Link path from `ocam2KCtrl`, but make the C-RED 2 response handling explicit.
    - The manual says the CLI uses ASCII commands terminated by line feed (`\n`).
    - The example EDT config already shows the needed serial settings:
+     - `serial_baud: 115200`
      - `serial_term: <0A>`
      - `serial_waitc: 0D`
-   - The manual also says each response is followed by `CR LF fli-cli>`.
-   - Before relying on the existing `edtCamera::pdvSerialWriteRead()` behavior, verify that it does not treat the trailing prompt as a timeout/error case.
+   - Hardware testing with EDT `serial_cmd` indicates the practical response path is a plain line such as `10.000000`, without a visible `fli-cli>` prompt.
+   - Treat any prompt suffix described in the manual as optional rather than required.
    - If needed, add a small helper layer in `cred2Ctrl` or `cred2Utils.hpp` that:
      - sends a command
      - truncates the response at the first `\r`
-     - ignores the trailing prompt
+     - ignores any trailing prompt when present
      - returns the clean payload for parsing
 
 4. Prefer the camera’s `raw` CLI responses wherever possible.
