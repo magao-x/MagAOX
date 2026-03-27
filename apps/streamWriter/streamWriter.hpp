@@ -110,9 +110,9 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
 
     size_t m_currImage{ 0 };
 
-    double m_currImageTime{ 0 }; ///< The write-time of the current image
+    uint64_t m_currImageTime{ 0 }; ///< The write-time of the current image in nanoseconds.
 
-    double m_currChunkStartTime{ 0 }; ///< The write-time of the first image in the chunk
+    uint64_t m_currChunkStartTime{ 0 }; ///< The write-time of the first image in the chunk in nanoseconds.
 
     std::atomic<uint64_t> m_skippedFrameCount{
         0 }; ///< Count of skipped frames accumulated by the framegrabber thread since the last summary log.
@@ -1293,9 +1293,13 @@ void streamWriter::fgThreadExec()
         // mistake startup backlog for repeated identical frames.
         ImageStreamIO_semflush( &image, m_semaphoreNumber );
 
-        uint8_t atype;
-        size_t  snx, sny, snz;
-        bool    useFrameArrays = image.cntarray != nullptr && length > 1;
+        uint8_t  atype;
+        size_t   snx, sny, snz;
+        bool     useFrameArrays = image.cntarray != nullptr && length > 1;
+        bool     useCnt1        = length > 1;
+        bool     streamIsCube   = image.md[0].naxis == 3;
+        size_t   frameBytes     = m_width * m_height * m_typeSize;
+        uint64_t maxChunkTimeNs = static_cast<uint64_t>( m_maxChunkTime * 1e9 );
 
         uint64_t curr_image; // The current cnt1 index
         m_currImage      = 0;
@@ -1303,7 +1307,7 @@ void streamWriter::fgThreadExec()
         m_nextChunkStart = 0;
 
         // Initialize curr_image after the post-setup flush.
-        if( image.md[0].naxis > 2 && length > 1 )
+        if( useCnt1 )
         {
             curr_image = image.md[0].cnt1;
         }
@@ -1336,7 +1340,7 @@ void streamWriter::fgThreadExec()
 
             if( sem_timedwait( sem, &ts ) == 0 )
             {
-                if( image.md[0].naxis > 2 && length > 1 )
+                if( useCnt1 )
                 {
                     curr_image = image.md[0].cnt1;
                 }
@@ -1348,7 +1352,7 @@ void streamWriter::fgThreadExec()
                 atype = image.md[0].datatype;
                 snx   = image.md[0].size[0];
                 sny   = image.md[0].size[1];
-                if( image.md[0].naxis == 3 )
+                if( streamIsCube )
                 {
                     snz = image.md[0].size[2];
                 }
@@ -1402,11 +1406,10 @@ void streamWriter::fgThreadExec()
 
                 last_cnt0 = new_cnt0;
 
-                char *curr_dest = m_rawImageCircBuff + m_currImage * m_width * m_height * m_typeSize;
-                char *curr_src =
-                    reinterpret_cast<char *>( image.array.raw ) + curr_image * m_width * m_height * m_typeSize;
+                char *curr_dest = m_rawImageCircBuff + m_currImage * frameBytes;
+                char *curr_src  = reinterpret_cast<char *>( image.array.raw ) + curr_image * frameBytes;
 
-                memcpy( curr_dest, curr_src, m_width * m_height * m_typeSize );
+                memcpy( curr_dest, curr_src, frameBytes );
 
                 uint64_t *curr_timing = m_timingCircBuff + 5 * m_currImage;
 
@@ -1448,7 +1451,7 @@ void streamWriter::fgThreadExec()
                     curr_timing[4] = curr_timing[2];
                 }
 
-                m_currImageTime = 1.0 * curr_timing[3] + ( 1.0 * curr_timing[4] ) / 1e9;
+                m_currImageTime = curr_timing[3] * 1000000000ULL + curr_timing[4];
 
                 if( m_shutdown && m_writing == WRITING )
                 {
@@ -1486,7 +1489,7 @@ void streamWriter::fgThreadExec()
                         std::cerr << __FILE__ << " " << __LINE__ << " WRITING " << m_currImage << " "
                                   << m_nextChunkStart << " "
                                   << ( m_currImage - m_nextChunkStart == m_writeChunkLength - 1 ) << " "
-                                  << ( m_currImageTime - m_currChunkStartTime > m_maxChunkTime ) << " " << new_cnt0
+                                  << ( m_currImageTime - m_currChunkStartTime > maxChunkTimeNs ) << " " << new_cnt0
                                   << "\n";
 #endif
 
@@ -1506,7 +1509,7 @@ void streamWriter::fgThreadExec()
                         m_currChunkStart     = m_nextChunkStart;
                         m_currChunkStartTime = m_currImageTime;
                     }
-                    else if( m_currImageTime - m_currChunkStartTime > m_maxChunkTime )
+                    else if( m_currImageTime - m_currChunkStartTime > maxChunkTimeNs )
                     {
                         m_currSaveStart       = m_currChunkStart;
                         m_currSaveStop        = m_currImage + 1;
@@ -1516,7 +1519,7 @@ void streamWriter::fgThreadExec()
                         std::cerr << __FILE__ << " " << __LINE__ << " IMAGE TIME WRITING " << m_currImage << " "
                                   << m_nextChunkStart << " "
                                   << ( m_currImage - m_nextChunkStart == m_writeChunkLength - 1 ) << " "
-                                  << ( m_currImageTime - m_currChunkStartTime > m_maxChunkTime ) << " " << new_cnt0
+                                  << ( m_currImageTime - m_currChunkStartTime > maxChunkTimeNs ) << " " << new_cnt0
                                   << "\n";
 #endif
 
@@ -1570,7 +1573,8 @@ void streamWriter::fgThreadExec()
                     // Here, if there is at least 1 image, we check for delta-time > m_maxChunkTime
                     //  then write
                     if( ( m_currImage - m_nextChunkStart > 0 ) &&
-                        ( mx::sys::get_curr_time() - m_currChunkStartTime > m_maxChunkTime ) )
+                        ( static_cast<uint64_t>( mx::sys::get_curr_time() * 1e9 ) - m_currChunkStartTime >
+                          maxChunkTimeNs ) )
                     {
                         m_currSaveStart       = m_currChunkStart;
                         m_currSaveStop        = m_currImage;
