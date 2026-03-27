@@ -9,6 +9,7 @@
 #ifndef streamWriter_hpp
 #define streamWriter_hpp
 
+#include <atomic>
 #include <filesystem>
 
 #include <ImageStreamIO/ImageStruct.h>
@@ -112,6 +113,16 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     double m_currImageTime{ 0 }; ///< The write-time of the current image
 
     double m_currChunkStartTime{ 0 }; ///< The write-time of the first image in the chunk
+
+    std::atomic<uint64_t> m_skippedFrameCount{
+        0 }; ///< Count of skipped frames accumulated by the framegrabber thread since the last summary log.
+
+    std::atomic<uint64_t> m_repeatSemaphoreCount{
+        0 }; ///< Count of repeated semaphore wakes with unchanged frame count since the last summary log.
+
+    double m_skipSummaryIntervalSec{ 10.0 }; ///< Current interval between summary skip logs.
+
+    double m_nextSkipSummaryTime{ 0.0 }; ///< Time after which the next summary skip log may be emitted.
 
     // Writer book-keeping:
     int m_writing{ NOT_WRITING }; /**< Controls whether or not images are being written,
@@ -690,6 +701,43 @@ int streamWriter::appStartup()
 
 int streamWriter::appLogic()
 {
+    double now = mx::sys::get_curr_time();
+    if( m_nextSkipSummaryTime == 0 )
+    {
+        m_nextSkipSummaryTime = now + m_skipSummaryIntervalSec;
+    }
+
+    if( now >= m_nextSkipSummaryTime )
+    {
+        uint64_t skippedFrames   = m_skippedFrameCount.exchange( 0 );
+        uint64_t repeatedSems    = m_repeatSemaphoreCount.exchange( 0 );
+        double   summaryInterval = m_skipSummaryIntervalSec;
+
+        if( skippedFrames > 0 || repeatedSems > 0 )
+        {
+            std::string msg = "stream ingest backlog: ";
+            msg += std::to_string( skippedFrames ) + " skipped frames";
+            if( repeatedSems > 0 )
+            {
+                msg += ", " + std::to_string( repeatedSems ) + " repeated semaphore wakes";
+            }
+            msg += " in last " + std::to_string( static_cast<int>( summaryInterval ) ) + " sec";
+
+            log<text_log>( msg, logPrio::LOG_WARNING );
+
+            m_skipSummaryIntervalSec *= 2.0;
+            if( m_skipSummaryIntervalSec > 60.0 )
+            {
+                m_skipSummaryIntervalSec = 60.0;
+            }
+        }
+        else
+        {
+            m_skipSummaryIntervalSec = 10.0;
+        }
+
+        m_nextSkipSummaryTime = now + m_skipSummaryIntervalSec;
+    }
 
     // first do a join check to see if other threads have exited.
     // these will throw if the threads are really gone
@@ -1336,8 +1384,7 @@ void streamWriter::fgThreadExec()
                 ///\todo cleanup skip frame handling.
                 if( new_cnt0 == last_cnt0 ) //<- this probably isn't useful really
                 {
-                    log<text_log>( "semaphore raised but cnt0 has not changed -- we're probably getting behind",
-                                   logPrio::LOG_WARNING );
+                    ++m_repeatSemaphoreCount;
                     ++cnt0flag;
                     if( cnt0flag > 10 )
                     {
@@ -1348,7 +1395,7 @@ void streamWriter::fgThreadExec()
 
                 if( new_cnt0 - last_cnt0 > 1 ) //<- this is what we want to check.
                 {
-                    log<text_log>( "cnt0 changed by more than 1. Frame skipped.", logPrio::LOG_WARNING );
+                    m_skippedFrameCount += ( new_cnt0 - last_cnt0 - 1 );
                 }
 
                 cnt0flag = 0;
