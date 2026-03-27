@@ -1,0 +1,44 @@
+[build-system]
+requires = ["uv_build>=0.7.19,<0.8.0"]
+build-backend = "uv_build"
+
+[project]
+name = "windsocc"
+version = "0.1.0"
+description = "Do post-observation analysis of turbulence using MagAO-X camwfs images."
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    {name = "Jay Kueny", email = "jkueny@arizona.edu"}
+]
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "numpy>=1.18.0",
+    "astropy>=5.0.0",
+    "scipy>=1.7.0",
+    "scikit-image>=0.18.0",
+    "matplotlib>=3.5.0",
+    "sep",
+    "pyyaml>=6.0",
+    "pandas>=2.0.3",
+    "polars>=1.8.2",
+]
+
+[project.scripts]
+ws_partition = "windsocc.partition:main"
+ws_reduce = "windsocc.reduce:main"
+ws_xcorr = "windsocc.xcorr:main"
+ws_distill = "windsocc.distill:main"
+ws_measure = "windsocc.measure:main"
+ws_realtime = "windsocc.realtime:main"
+ws_profile_cc_cube = "windsocc.profile.cc_cube:main"
+
+[project.optional-dependencies]
+profile = [
+    "snakeviz>=2.0",
+]
