@@ -44,16 +44,21 @@ namespace app
 /**
  * \ingroup ogTracker
  */
-class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker>
+class ogTracker :
+    public MagAOXApp<true>,
+    public dev::shmimMonitor<ogTracker>,
+    public dev::telemeter<ogTracker>
 {
     typedef float realT;
 
     friend class ogTracker_test;
     friend class dev::shmimMonitor<ogTracker>;
+    friend class dev::telemeter<ogTracker>;
 
   public:
     typedef int32_t cbIndexT;
     typedef dev::shmimMonitor<ogTracker> shmimMonitorT;
+    typedef dev::telemeter<ogTracker>    telemeterT;
     typedef mx::sigproc::circularBufferIndex<realT *, cbIndexT> frameCircBuffT;
 
   protected:
@@ -82,6 +87,7 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker>
      * @{
      */
     std::string m_calibFolder; ///< Exact-match calibration folder name derived from sparkle parameters.
+    std::string m_calibPath; ///< Full calibration folder path resolved from sparkle parameters.
     std::string m_calibError; ///< Human-readable calibration state/error string published to INDI.
     bool        m_calibLoaded{ false }; ///< True when reference PCA/RMS files are loaded and dimensionally valid.
     bool        m_paramsDirty{ true }; ///< Set when sparkle parameters change and calibration must be re-resolved.
@@ -227,6 +233,19 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker>
     /// Builds snapshot under lock then computes outside lock.
     void computeMetricsFromSnapshot();
 
+    /// Telemetry periodic-record callback.
+    int checkRecordTimes();
+
+    /// Telemetry dispatch from telemeter.
+    int recordTelem( const telem_dmspeck * );
+    int recordTelem( const telem_dmmodes * );
+
+    /// Emit sparkle/calibration-state telemetry.
+    int recordDmSpeck( bool force = false );
+
+    /// Emit og summary + mode-average telemetry.
+    int recordOgModes( bool force = false );
+
   public:
     /// INDI properties we're tracking  
     INDI_SETCALLBACK_DECL( ogTracker, m_indiP_sep );
@@ -354,6 +373,7 @@ inline void ogTracker::setupConfig()
                 "int",
                 "Number of measurements to average for pca_og output." );
 
+    TELEMETER_SETUP_CONFIG( config );
     SHMIMMONITOR_SETUP_CONFIG( config );
 }
 
@@ -383,6 +403,8 @@ inline int ogTracker::loadConfigImpl( mx::app::appConfigurator &_config )
     }
     m_minSamples = std::max( m_minSamples, 10 * m_klipMax );
 
+    TELEMETER_LOAD_CONFIG( _config );
+    m_maxInterval = 1.0; // Publish telemetry at 1 Hz.
     SHMIMMONITOR_LOAD_CONFIG( _config );
 
     m_modeEls.clear();
@@ -402,6 +424,7 @@ inline void ogTracker::loadConfig()
 
 inline int ogTracker::appStartup()
 {
+    TELEMETER_APP_STARTUP;
     SHMIMMONITOR_APP_STARTUP;
 
     REG_INDI_SETPROP( m_indiP_sep, m_tweeterDevice, "separation" );
@@ -621,6 +644,7 @@ inline int ogTracker::refreshCalibration()
     m_calibFolder = formatCalibFolder( m_sep, m_ang, m_amp, m_freq );
 
     const std::filesystem::path folderPath = std::filesystem::path( m_calibRoot ) / m_calibFolder;
+    m_calibPath                         = folderPath.string();
     log<text_log>( "ogTracker looking for calibration folder: " + folderPath.string(), logPrio::LOG_NOTICE );
     if( !std::filesystem::exists( folderPath ) )
     {
@@ -855,6 +879,10 @@ inline int ogTracker::appLogic()
         refreshCalibration();
     }
 
+    recordDmSpeck( false );
+    recordOgModes( false );
+    TELEMETER_APP_LOGIC;
+
     std::lock_guard<std::mutex> lock( m_dataMutex );
 
     updateIfChanged( m_indiP_calibFolder, "name", m_calibFolder );
@@ -904,7 +932,186 @@ inline int ogTracker::appShutdown()
         m_computeThread.join();
     }
 
+    TELEMETER_APP_SHUTDOWN;
     SHMIMMONITOR_APP_SHUTDOWN;
+    return 0;
+}
+
+inline int ogTracker::checkRecordTimes()
+{
+    return telemeterT::checkRecordTimes( telem_dmspeck(), telem_dmmodes() );
+}
+
+inline int ogTracker::recordTelem( const telem_dmspeck * )
+{
+    return recordDmSpeck( true );
+}
+
+inline int ogTracker::recordTelem( const telem_dmmodes * )
+{
+    return recordOgModes( true );
+}
+
+inline int ogTracker::recordDmSpeck( bool force )
+{
+    bool        modulating;
+    float       sep;
+    float       ang;
+    float       amp;
+    float       freq;
+    std::string calibFolder;
+    std::string calibPath;
+    std::string calibError;
+    bool        calibLoaded;
+
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_dataMutex );
+        modulating = m_modulating;
+        sep        = m_sep;
+        ang        = m_ang;
+        amp        = m_amp;
+        freq       = m_freq;
+        calibFolder = m_calibFolder;
+        calibPath   = m_calibPath;
+        calibError  = m_calibError;
+        calibLoaded = m_calibLoaded;
+    }
+
+    static bool        lastModulating = false;
+    static float       lastSep        = std::numeric_limits<float>::quiet_NaN();
+    static float       lastAng        = std::numeric_limits<float>::quiet_NaN();
+    static float       lastAmp        = std::numeric_limits<float>::quiet_NaN();
+    static float       lastFreq       = std::numeric_limits<float>::quiet_NaN();
+    static std::string lastCalibFolder;
+    static std::string lastCalibPath;
+    static std::string lastCalibError;
+    static bool        lastCalibLoaded = false;
+    constexpr float    floatEps        = 1e-6f;
+
+    auto floatChanged = []( float oldV, float newV, float eps ) {
+        if( std::isnan( oldV ) && std::isnan( newV ) )
+        {
+            return false;
+        }
+        if( std::isnan( oldV ) || std::isnan( newV ) )
+        {
+            return true;
+        }
+        return std::abs( oldV - newV ) > eps;
+    };
+
+    const bool changed = ( lastModulating != modulating ) || floatChanged( lastSep, sep, floatEps ) ||
+                         floatChanged( lastAng, ang, floatEps ) || floatChanged( lastAmp, amp, floatEps ) ||
+                         floatChanged( lastFreq, freq, floatEps ) || ( lastCalibFolder != calibFolder ) ||
+                         ( lastCalibPath != calibPath ) || ( lastCalibError != calibError ) ||
+                         ( lastCalibLoaded != calibLoaded );
+
+    if( changed || force )
+    {
+        telem<telem_dmspeck>(
+            { modulating, false, freq, { sep }, { ang }, { amp }, std::vector<bool>( { false } ) } );
+
+        if( ( lastCalibPath != calibPath ) || ( lastCalibError != calibError ) || ( lastCalibLoaded != calibLoaded ) )
+        {
+            const std::string pathMsg = calibPath.empty() ? "no calibration folder resolved" : calibPath;
+            log<text_log>( "ogTracker calibration path/status: " + pathMsg + " | state=" + calibError +
+                               " | loaded=" + ( calibLoaded ? "1" : "0" ),
+                           logPrio::LOG_NOTICE );
+        }
+
+        lastModulating = modulating;
+        lastSep        = sep;
+        lastAng        = ang;
+        lastAmp        = amp;
+        lastFreq       = freq;
+        lastCalibFolder = calibFolder;
+        lastCalibPath   = calibPath;
+        lastCalibError  = calibError;
+        lastCalibLoaded = calibLoaded;
+    }
+
+    return 0;
+}
+
+inline int ogTracker::recordOgModes( bool force )
+{
+    bool               metricsValid;
+    std::vector<float> ogModeAvg;
+
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_dataMutex );
+        metricsValid        = m_metricsValid;
+        const int modeCount = std::max( 0, m_activeModes );
+        if( metricsValid && m_latestOgAvg.size() >= modeCount )
+        {
+            ogModeAvg.resize( static_cast<size_t>( modeCount ), 0 );
+            for( int n = 0; n < modeCount; ++n )
+            {
+                ogModeAvg[static_cast<size_t>( n )] = m_latestOgAvg[n];
+            }
+        }
+    }
+
+    float summary = std::numeric_limits<float>::quiet_NaN();
+    if( !ogModeAvg.empty() )
+    {
+        float sum = 0;
+        int   nOk = 0;
+        for( float v : ogModeAvg )
+        {
+            if( std::isfinite( v ) )
+            {
+                sum += v;
+                ++nOk;
+            }
+        }
+        if( nOk > 0 )
+        {
+            summary = sum / static_cast<float>( nOk );
+        }
+    }
+
+    // Publish convention: [0] = og summary, [1..N] = per-mode rolling averages.
+    std::vector<float> publishVals;
+    publishVals.reserve( ogModeAvg.size() + 1 );
+    publishVals.push_back( summary );
+    publishVals.insert( publishVals.end(), ogModeAvg.begin(), ogModeAvg.end() );
+
+    static bool               lastMetricsValid = false;
+    static std::vector<float> lastPublishVals;
+    constexpr float           floatEps = 1e-6f;
+
+    bool modeAvgChanged = ( lastPublishVals.size() != publishVals.size() );
+    if( !modeAvgChanged )
+    {
+        for( size_t n = 0; n < publishVals.size(); ++n )
+        {
+            if( std::isnan( lastPublishVals[n] ) && std::isnan( publishVals[n] ) )
+            {
+                continue;
+            }
+            if( std::isnan( lastPublishVals[n] ) || std::isnan( publishVals[n] ) )
+            {
+                modeAvgChanged = true;
+                break;
+            }
+            if( std::abs( lastPublishVals[n] - publishVals[n] ) <= floatEps )
+            {
+                continue;
+            }
+
+            modeAvgChanged = true;
+            break;
+        }
+    }
+
+    if( modeAvgChanged || ( lastMetricsValid != metricsValid ) || force )
+    {
+        telem<telem_dmmodes>( publishVals );
+        lastPublishVals  = publishVals;
+        lastMetricsValid = metricsValid;
+    }
+
     return 0;
 }
 
