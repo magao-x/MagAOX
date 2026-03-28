@@ -1037,6 +1037,7 @@ inline int cred2Ctrl::getFanSpeed()
     m_fanSpeedName    = cred2FanPresetName( fanPercent );
     m_fanSpeedNameSet = m_fanSpeedName;
     m_fanSpeedValid   = true;
+    recordCamera();
 
     return 0;
 }
@@ -1059,6 +1060,7 @@ inline int cred2Ctrl::getAnalogGain()
     m_analogGainName    = analogGain;
     m_analogGainNameSet = m_analogGainName;
     m_analogGainValid   = true;
+    recordCamera();
 
     return 0;
 }
@@ -1114,6 +1116,7 @@ inline int cred2Ctrl::getLEDState()
     m_ledState      = ledState;
     m_ledStateSet   = ledState;
     m_ledStateValid = true;
+    recordCamera();
 
     return 0;
 }

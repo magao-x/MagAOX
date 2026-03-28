@@ -58,6 +58,8 @@ struct telem_stdcam : public flatbuffer_log
                   const float       &vshift,          ///<[in]
                   const uint8_t     &cropMode,        ///<[in]
                   const std::string &readout_speed,   ///<[in]
+                  const std::string &fan_speed,       ///<[in]
+                  const std::string &analog_gain,     ///<[in]
                   const int8_t      &led              ///<[in]
         )
         {
@@ -71,6 +73,8 @@ struct telem_stdcam : public flatbuffer_log
             auto _shutter          = CreateShutter( builder, _shutterStatusStr, shutterState );
 
             auto _readoutSpeed = builder.CreateString( readout_speed );
+            auto _fanSpeed     = builder.CreateString( fan_speed );
+            auto _analogGain   = builder.CreateString( analog_gain );
 
             auto fp = CreateTelem_stdcam_fb( builder,
                                              _mode,
@@ -85,6 +89,8 @@ struct telem_stdcam : public flatbuffer_log
                                              vshift,
                                              cropMode,
                                              _readoutSpeed,
+                                             _fanSpeed,
+                                             _analogGain,
                                              led );
             builder.Finish( fp );
         }
@@ -209,6 +215,24 @@ struct telem_stdcam : public flatbuffer_log
             {
                 msg += " rospd: ";
                 msg += fbs->readout_speed()->c_str();
+            }
+        }
+
+        if( fbs->fan_speed() != nullptr )
+        {
+            if( fbs->fan_speed()->size() > 0 )
+            {
+                msg += " fan: ";
+                msg += fbs->fan_speed()->c_str();
+            }
+        }
+
+        if( fbs->analog_gain() != nullptr )
+        {
+            if( fbs->analog_gain()->size() > 0 )
+            {
+                msg += " again: ";
+                msg += fbs->analog_gain()->c_str();
             }
         }
 
@@ -428,6 +452,28 @@ struct telem_stdcam : public flatbuffer_log
             return "";
     }
 
+    static std::string fan_speed( void *msgBuffer )
+    {
+        auto fbs = GetTelem_stdcam_fb( msgBuffer );
+        if( fbs->fan_speed() != nullptr )
+        {
+            return std::string( fbs->fan_speed()->c_str() );
+        }
+        else
+            return "";
+    }
+
+    static std::string analog_gain( void *msgBuffer )
+    {
+        auto fbs = GetTelem_stdcam_fb( msgBuffer );
+        if( fbs->analog_gain() != nullptr )
+        {
+            return std::string( fbs->analog_gain()->c_str() );
+        }
+        else
+            return "";
+    }
+
     static bool led( void *msgBuffer )
     {
         auto fbs = GetTelem_stdcam_fb( msgBuffer );
@@ -547,6 +593,16 @@ struct telem_stdcam : public flatbuffer_log
                                     logMeta::valTypes::String,
                                     logMeta::metaTypes::State,
                                     reinterpret_cast<void *>( &readout_speed ) } );
+        else if( member == "fan_speed" )
+            return logMetaDetail( { "FAN SPEED",
+                                    logMeta::valTypes::String,
+                                    logMeta::metaTypes::State,
+                                    reinterpret_cast<void *>( &fan_speed ) } );
+        else if( member == "analog_gain" )
+            return logMetaDetail( { "ANALOG GAIN",
+                                    logMeta::valTypes::String,
+                                    logMeta::metaTypes::State,
+                                    reinterpret_cast<void *>( &analog_gain ) } );
         else if( member == "led" )
             return logMetaDetail(
                 { "LED", logMeta::valTypes::Bool, logMeta::metaTypes::State, reinterpret_cast<void *>( &led ) } );

@@ -3785,7 +3785,9 @@ int stdCamera<derivedT>::recordCamera( bool force )
     static bool        last_synchro      = false;
     static float       last_vshiftSpeed  = -1;
     static bool        last_cropMode     = false;
-    static bool        last_ledState     = false;
+    static std::string last_fanSpeed;
+    static std::string last_analogGain;
+    static bool        last_ledState = false;
     static std::string last_readoutSpeed;
 
     if( force || m_modeName != last_mode || m_currentROI.x != last_roi.x || m_currentROI.y != last_roi.y ||
@@ -3796,6 +3798,8 @@ int stdCamera<derivedT>::recordCamera( bool force )
         m_tempControlOnTarget != last_tempControlOnTarget || m_tempControlStatusStr != last_tempControlStatusStr ||
         m_shutterStatus != last_shutterStatus || m_shutterState != last_shutterState || m_synchro != last_synchro ||
         m_vshiftSpeed != last_vshiftSpeed || m_cropMode != last_cropMode || m_readoutSpeedName != last_readoutSpeed ||
+        ( c_hasFan && m_fanSpeedValid && m_fanSpeedName != last_fanSpeed ) ||
+        ( c_hasAnalogGain && m_analogGainValid && m_analogGainName != last_analogGain ) ||
         ( c_hasLED && m_ledStateValid && m_ledState != last_ledState ) )
     {
         derived().template telem<telem_stdcam>(
@@ -3821,6 +3825,8 @@ int stdCamera<derivedT>::recordCamera( bool force )
               m_vshiftSpeed,
               (uint8_t)m_cropMode,
               m_readoutSpeedName,
+              c_hasFan && m_fanSpeedValid ? m_fanSpeedName : std::string( "" ),
+              c_hasAnalogGain && m_analogGainValid ? m_analogGainName : std::string( "" ),
               c_hasLED && m_ledStateValid ? static_cast<int8_t>( m_ledState ? 1 : 0 ) : static_cast<int8_t>( -1 ) } );
 
         last_mode                 = m_modeName;
@@ -3839,6 +3845,8 @@ int stdCamera<derivedT>::recordCamera( bool force )
         last_synchro              = m_synchro;
         last_vshiftSpeed          = m_vshiftSpeed;
         last_cropMode             = m_cropMode;
+        last_fanSpeed             = c_hasFan && m_fanSpeedValid ? m_fanSpeedName : std::string( "" );
+        last_analogGain           = c_hasAnalogGain && m_analogGainValid ? m_analogGainName : std::string( "" );
         last_ledState             = m_ledState;
         last_readoutSpeed         = m_readoutSpeedName;
     }

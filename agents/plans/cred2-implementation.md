@@ -273,9 +273,12 @@ Implementation Status
   - live image streaming works
   - temperature setpoint control works
   - FPS query/set works
-  - framegrabber flip control is now enabled and ready for hardware validation
+  - framegrabber flip control works
+  - fan control works
+  - analog gain control works
+  - LED control works
+  - `telem_stdcam` now carries fan speed, analog gain, and LED state
   - ROI reconfiguration is the next hardware validation target
-  - fan, analog gain, and LED control remain to be validated on hardware
 
 - Remaining environment limitation on this host:
   - full `cred2Ctrl` app builds still require a real EDT SDK install and headers on the machine
