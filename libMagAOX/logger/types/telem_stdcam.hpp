@@ -57,6 +57,7 @@ struct telem_stdcam : public flatbuffer_log
                 const uint8_t & synchro,             ///<[in]
                 const float & vshift,                ///<[in]
                 const uint8_t & cropMode,            ///<[in]
+                const std::string & fan_speed,       ///<[in]
                 const std::string & readout_speed     ///<[in]
               )
       {
@@ -69,9 +70,10 @@ struct telem_stdcam : public flatbuffer_log
          auto _shutterStatusStr = builder.CreateString(shutterStatusSr);
          auto _shutter = CreateShutter(builder, _shutterStatusStr, shutterState);
 
+         auto _fanSpeed = builder.CreateString(fan_speed);
          auto _readoutSpeed = builder.CreateString(readout_speed);
 
-         auto fp = CreateTelem_stdcam_fb(builder, _mode, _roi, exptime, fps, emGain, adcSpeed, _tempCtrl, _shutter, synchro, vshift, cropMode, _readoutSpeed);
+         auto fp = CreateTelem_stdcam_fb(builder, _mode, _roi, exptime, fps, emGain, adcSpeed, _tempCtrl, _shutter, synchro, vshift, cropMode, _fanSpeed, _readoutSpeed);
          builder.Finish(fp);
       }
 
@@ -188,6 +190,15 @@ struct telem_stdcam : public flatbuffer_log
          {
             msg += " rospd: ";
             msg += fbs->readout_speed()->c_str();
+         }
+      }
+
+      if(fbs->fan_speed() != nullptr)
+      {
+         if(fbs->fan_speed()->size() > 0)
+         {
+            msg += " fan: ";
+            msg += fbs->fan_speed()->c_str();
          }
       }
 
@@ -355,6 +366,16 @@ struct telem_stdcam : public flatbuffer_log
       else return false;
    }
 
+   static std::string fan_speed( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->fan_speed() != nullptr)
+      {
+         return std::string(fbs->fan_speed()->c_str());
+      }
+      else return "";
+   }
+
    static std::string readout_speed( void * msgBuffer )
    {
       auto fbs = GetTelem_stdcam_fb(msgBuffer);
@@ -393,6 +414,7 @@ struct telem_stdcam : public flatbuffer_log
       else if(member == "synchro") return logMetaDetail({"SYNCHRO", logMeta::valTypes::Bool, logMeta::metaTypes::State, reinterpret_cast<void*>(&synchro)});
       else if(member == "vshift") return logMetaDetail({"VERT SHIFT SPEED", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&vshift)});
       else if(member == "cropMode") return logMetaDetail({"CROP MODE", logMeta::valTypes::Bool, logMeta::metaTypes::State, reinterpret_cast<void*>(&cropMode)});
+      else if(member == "fan_speed") return logMetaDetail({"FAN SPEED", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&fan_speed)});
       else if(member == "readout_speed") return logMetaDetail({"READOUT SPEED", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&readout_speed)});
       else
       {
@@ -409,4 +431,3 @@ struct telem_stdcam : public flatbuffer_log
 } //namespace MagAOX
 
 #endif //logger_types_telem_stdcam_hpp
-

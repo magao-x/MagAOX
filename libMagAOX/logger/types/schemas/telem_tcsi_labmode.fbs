@@ -1,0 +1,8 @@
+namespace MagAOX.logger;
+
+table Telem_tcsi_labmode_fb
+{
+   labMode:bool;
+}
+
+root_type Telem_tcsi_labmode_fb;

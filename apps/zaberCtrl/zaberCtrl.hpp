@@ -1,5 +1,6 @@
 /** \file zaberCtrl.hpp
  * \brief The MagAO-X Zaber Stage Controller header file
+ * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup zaberCtrl_files
  */
@@ -62,9 +63,10 @@ class zaberCtrl : public MagAOXApp<>, public dev::stdMotionStage<zaberCtrl>, pub
     double m_tgtRawPos{ 0 }; ///< Target raw position in counts
     double m_stageTemp{ 0 }; ///< Temperature reported by the stage
 
-    double m_maxPos{ 0 }; ///< Maximum position in mm available on this stage
-    double m_pos{ 0 };    ///< Current position in mm
-    double m_tgtPos{ 0 }; ///< Target position in mm.
+    double m_maxPos{ 0 };     ///< Maximum position in mm available on this stage
+    double m_pos{ 0 };        ///< Current position in mm
+    double m_tgtPos{ 0 };     ///< Target position in mm.
+    bool   m_parked{ false }; ///< Whether the low-level Zaber stage reports a parked state.
 
     bool m_wason = true; ///< Whether the stage was in state power on before power off
 
@@ -146,6 +148,7 @@ class zaberCtrl : public MagAOXApp<>, public dev::stdMotionStage<zaberCtrl>, pub
     pcf::IndiProperty m_indiP_rawPos;
     pcf::IndiProperty m_indiP_maxPos;
     pcf::IndiProperty m_indiP_temp;
+    pcf::IndiProperty m_indiP_parked;
     pcf::IndiProperty m_indiP_lastHomed;
 
   public:
@@ -158,6 +161,7 @@ class zaberCtrl : public MagAOXApp<>, public dev::stdMotionStage<zaberCtrl>, pub
     pcf::IndiProperty m_indiP_stageRawPos;
     pcf::IndiProperty m_indiP_stageTgtPos;
     pcf::IndiProperty m_indiP_stageTemp;
+    pcf::IndiProperty m_indiP_stageParked;
     pcf::IndiProperty m_indiP_stageLastHomed;
 
   public:
@@ -166,6 +170,7 @@ class zaberCtrl : public MagAOXApp<>, public dev::stdMotionStage<zaberCtrl>, pub
     INDI_SETCALLBACK_DECL( zaberCtrl, m_indiP_stageRawPos );
     INDI_SETCALLBACK_DECL( zaberCtrl, m_indiP_stageTgtPos );
     INDI_SETCALLBACK_DECL( zaberCtrl, m_indiP_stageTemp );
+    INDI_SETCALLBACK_DECL( zaberCtrl, m_indiP_stageParked );
     INDI_SETCALLBACK_DECL( zaberCtrl, m_indiP_stageLastHomed );
 
     /** \name Telemeter Interface
@@ -179,6 +184,16 @@ class zaberCtrl : public MagAOXApp<>, public dev::stdMotionStage<zaberCtrl>, pub
     int recordTelem( const telem_zaber * );
 
     int recordZaber( bool force = false );
+
+    /// Update the stage telemetry values used while the low-level stage is powered off.
+    /**
+     * When a parked stage transitions to `POWEROFF`, preserve the logical
+     * preset derived from the last reported position so telemetry consumers
+     * such as `xrif2fits` can keep writing valid preset headers.
+     *
+     * \returns 0 on success
+     */
+    int syncPowerOffStageTelemetry();
 
     ///@}
 };
@@ -299,6 +314,11 @@ int zaberCtrl::appStartup()
     indi::addNumberElement( m_indiP_temp, "current", -50, 100, 0, "%0.1f" );
     registerIndiPropertyReadOnly( m_indiP_temp );
 
+    createROIndiNumber( m_indiP_parked, "parked", "Parked State" );
+    indi::addNumberElement<int>( m_indiP_parked, "current", 0, 1, 1, "%d" );
+    m_indiP_parked["current"].set<int>( 0 );
+    registerIndiPropertyReadOnly( m_indiP_parked );
+
     createROIndiNumber( m_indiP_lastHomed, "last_homed", "Time of last home [sec]" );
     indi::addNumberElement<time_t>( m_indiP_lastHomed, "time_sec", 0, std::numeric_limits<time_t>::max(), 1, "%d" );
     registerIndiPropertyReadOnly( m_indiP_lastHomed );
@@ -309,6 +329,7 @@ int zaberCtrl::appStartup()
     REG_INDI_SETPROP( m_indiP_stageRawPos, m_lowLevelName, std::string( "curr_pos" ) );
     REG_INDI_SETPROP( m_indiP_stageTgtPos, m_lowLevelName, std::string( "tgt_pos" ) );
     REG_INDI_SETPROP( m_indiP_stageTemp, m_lowLevelName, std::string( "temp" ) );
+    REG_INDI_SETPROP( m_indiP_stageParked, m_lowLevelName, std::string( "parked" ) );
     REG_INDI_SETPROP( m_indiP_stageLastHomed, m_lowLevelName, std::string( "last_homed" ) );
 
     if( m_presetNames.size() != m_presetPositions.size() )
@@ -484,6 +505,30 @@ int zaberCtrl::appLogic()
     return 0;
 }
 
+int zaberCtrl::syncPowerOffStageTelemetry()
+{
+    if( !m_parked )
+    {
+        m_preset        = 0;
+        m_preset_target = 0;
+        return 0;
+    }
+
+    int n = presetNumber();
+    if( n == 0 )
+    {
+        m_preset        = 0;
+        m_preset_target = 0;
+    }
+    else
+    {
+        m_preset        = n;
+        m_preset_target = n;
+    }
+
+    return 0;
+}
+
 int zaberCtrl::appShutdown()
 {
     return 0;
@@ -499,7 +544,7 @@ int zaberCtrl::startHoming()
     indiP_stageHome.setPerm( pcf::IndiProperty::ReadWrite );
     indiP_stageHome.setState( pcf::IndiProperty::Idle );
     indiP_stageHome.add( pcf::IndiElement( m_stageName ) );
-    indiP_stageHome[m_stageName].setSwitchState(pcf::IndiElement::On);
+    indiP_stageHome[m_stageName].setSwitchState( pcf::IndiElement::On );
 
     m_moving      = 2;
     m_homingState = 1;
@@ -522,7 +567,7 @@ int zaberCtrl::stop()
     indiP_stageHalt.setPerm( pcf::IndiProperty::ReadWrite );
     indiP_stageHalt.setState( pcf::IndiProperty::Idle );
     indiP_stageHalt.add( pcf::IndiElement( m_stageName ) );
-    indiP_stageHalt[m_stageName].setSwitchState(pcf::IndiElement::On);
+    indiP_stageHalt[m_stageName].setSwitchState( pcf::IndiElement::On );
 
     if( sendNewProperty( indiP_stageHalt ) < 0 )
     {
@@ -560,7 +605,7 @@ int zaberCtrl::moveTo( const double &target )
     indiP_stageTgtPos.setPerm( pcf::IndiProperty::ReadWrite );
     indiP_stageTgtPos.setState( pcf::IndiProperty::Idle );
     indiP_stageTgtPos.add( pcf::IndiElement( m_stageName ) );
-    indiP_stageTgtPos[m_stageName].set(m_tgtRawPos);
+    indiP_stageTgtPos[m_stageName].set( m_tgtRawPos );
 
     m_moving = 1;
     dev::stdMotionStage<zaberCtrl>::recordStage( true );
@@ -646,7 +691,7 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawPos )( const pcf::IndiProperty &ipR
     indiP_stageTgtPos.setPerm( pcf::IndiProperty::ReadWrite );
     indiP_stageTgtPos.setState( pcf::IndiProperty::Idle );
     indiP_stageTgtPos.add( pcf::IndiElement( m_stageName ) );
-    indiP_stageTgtPos[m_stageName].set(target);
+    indiP_stageTgtPos[m_stageName].set( target );
 
     dev::stdMotionStage<zaberCtrl>::recordStage( true );
 
@@ -681,6 +726,8 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState )( const pcf::IndiProperty 
     {
         state( stateCodes::POWEROFF );
         m_moving = -2;
+        syncPowerOffStageTelemetry();
+        dev::stdMotionStage<zaberCtrl>::recordStage( true );
     }
     else if( sstr == "POWERON" )
     {
@@ -864,6 +911,30 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageTemp )( const pcf::IndiProperty &
     m_stageTemp = ipRecv[m_stageName].get<double>();
 
     updateIfChanged( m_indiP_temp, "current", m_stageTemp );
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageParked )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stageParked, ipRecv );
+
+    if( ipRecv.find( m_stageName ) != true ) // Just not our stage.
+    {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    m_parked = ( ipRecv[m_stageName].get<int>() != 0 );
+
+    if( state() == stateCodes::POWEROFF )
+    {
+        syncPowerOffStageTelemetry();
+        dev::stdMotionStage<zaberCtrl>::recordStage( true );
+    }
+
+    updateIfChanged( m_indiP_parked, "current", static_cast<int>( m_parked ) );
 
     return 0;
 }

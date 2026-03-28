@@ -30,6 +30,7 @@ class CalibrationConfig:
     """
     """
     path : str = xconf.field(help="Path to the calibration files for the pupil alignment.")
+    superuser : bool = xconf.field(default=False, help="Whether to enable super user options for calibration.")
     fwpupil_modes : list[str] = xconf.field(help="List of calibrated fwpupil masks.")
     fwlyot_modes : list[str] = xconf.field(help="List of calibrated fwlyot masks.")
 
@@ -87,23 +88,23 @@ class pupilCorAlign(XDevice):
         fsm.add_element(DefText(name='state', _value=StateCodes.INITIALIZED.name))
         self.add_property(fsm)
 
-        #, 'fwpupilRef', 'fwlyotRef', 'centroidRef']
-        #, self.handle_fwpupil_ref, self.handle_fwlyot_ref, self.handle_centroid_ref]
         self._state_names = ['idle', 'fwpupil', 'fwlyot', 'centroid']
         self._state_callbacks = [None, self.handle_fwpupil, self.handle_fwlyot, self.handle_centroid]
         self._state_machine = XStateMachine(self, self._state_names, States, self._state_callbacks)
 
-        self._reference_state_names = ['idle', 'fwpupilRef', 'fwlyotRef', 'centroidRef']
-        self._reference_state_callbacks = [None, self.handle_fwpupil_ref, self.handle_fwlyot_ref, self.handle_centroid_ref]
-        self._reference_state_machine = XStateMachine(self, self._reference_state_names, RefStates, self._reference_state_callbacks, 'reference')
+        if self.config.calibration.superuser:
+            print(self.config.calibration.superuser)
+            #self._reference_state_names = ['idle', 'fwpupilRef', 'fwlyotRef', 'centroidRef']
+            #self._reference_state_callbacks = [None, self.handle_fwpupil_ref, self.handle_fwlyot_ref, self.handle_centroid_ref]
+            #self._reference_state_machine = XStateMachine(self, self._reference_state_names, RefStates, self._reference_state_callbacks, 'reference')
 
-        # Should I make these files configurable?
-        # Or should these be auto discoverable?
         self.pupil_reference = hp.read_field(self.config.calibration.path + "reference_pupil_image.fits")
         self.xcorr_pupil = XCorrShift(self.pupil_reference, 1001, 101, filter_size=1)
 
         self.actuator_reference = hp.read_field(self.config.calibration.path + "actuator_reference_image.fits")
         self.xcorr_actuators = XCorrShift(self.actuator_reference, 1001, 101, filter_size=1)
+        self.xcorr_actuators_global = XCorrShift(self.actuator_reference, 1001, 950, filter_size=1)
+        self.global_reference_shift = np.array([0., 0.])
 
         self.fwpupil_references = [hp.read_field(self.config.calibration.path + "reference_{:s}_image.fits".format(mode.replace('-', '_'))) for mode in self.config.calibration.fwpupil_modes]
         self.xcorr_fwpupil = [XCorrShift(im, 1001, 101, filter_size=1) for im in self.fwpupil_references]
@@ -214,7 +215,7 @@ class pupilCorAlign(XDevice):
         '''
         '''
         im = self.camera.grab_stack(self.num_stack, check_before_wait=True)
-        shift = correlator.measure(im) - self.actuators_shift
+        shift = correlator.measure(im, self.actuators_shift)
         return shift
 
     def measure_actuator(self):
@@ -269,7 +270,8 @@ class pupilCorAlign(XDevice):
         '''
         '''
         actuator_im = self.measure_actuator()
-        self.actuators_shift = self.xcorr_actuators.measure(actuator_im)
+        self.global_reference_shift = self.xcorr_actuators_global.measure(actuator_im)
+        self.actuators_shift = self.xcorr_actuators.measure(actuator_im, self.global_reference_shift)
         self.taken_reference = True
         self._state_machine.transition_to_idle()
 

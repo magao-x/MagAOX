@@ -111,6 +111,7 @@
 
 ../utils/tests/cursesINDI_test
 ../utils/tests/logdump_test
+../utils/tests/shmimInfo_test
 ../utils/tests/shmimLat_test
 ../utils/tests/shmimPlot_test
 ../utils/tests/xrif2fits_test

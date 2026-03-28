@@ -65,6 +65,7 @@ public:
     static constexpr bool c_stdCamera_readoutSpeed = false; ///< app::dev config to tell stdCamera not to expose readout speed controls
 
     static constexpr bool c_stdCamera_vShiftSpeed = false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
+    static constexpr bool c_stdCamera_fanSpeed = false; ///< app::dev config to tell stdCamera not to expose fan-speed control
 
     static constexpr bool c_stdCamera_emGain = true; ///< app::dev config to tell stdCamera to expose EM gain controls
 

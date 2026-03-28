@@ -47,6 +47,9 @@ telem_telvane            20002    telem_telvane
 telem_telenv             20003    telem_telenv
 telem_telcat             20004    telem_telcat
 telem_telsee             20005    telem_telsee
+telem_tcsi_tiptilt       20006    telem_tcsi_offload
+telem_tcsi_focus         20007    telem_tcsi_offload
+telem_tcsi_labmode       20008    telem_tcsi_labmode
 
 telem_stage              20050    telem_stage
 telem_zaber              20055    telem_zaber
