@@ -181,6 +181,17 @@ void windsoccRT::setupConfig()
               "bool",
               "When true with windsocc.debugTrace, set process minimum log level to DEBUG after config load "
               "(records LOG_DEBUG from all components; overrides logger.logLevel for this run). Default is false.");
+
+   config.add("windsocc.importBeforeShmim",
+              "",
+              "windsocc.importBeforeShmim",
+              argType::Required,
+              "windsocc",
+              "importBeforeShmim",
+              false,
+              "bool",
+              "When true for debugging, initialize the embedded Python bridge before shmim startup so import-time "
+              "crashes can be tested without the shmim thread already running. Default is false.");
 }
 
 int windsoccRT::loadConfigImpl(mx::app::appConfigurator &_config)
@@ -201,6 +212,7 @@ int windsoccRT::loadConfigImpl(mx::app::appConfigurator &_config)
    _config(m_workerThreadCpuset, "windsocc.workerThreadCpuset");
    _config(m_debugTrace, "windsocc.debugTrace");
    _config(m_debugTraceLoggerDebug, "windsocc.debugTraceLoggerDebug");
+   _config(m_importBeforeShmim, "windsocc.importBeforeShmim");
 
    if(m_debugTrace && m_debugTraceLoggerDebug)
    {
@@ -355,15 +367,32 @@ void windsoccRT::shutdownPythonBridge()
 
 int windsoccRT::appStartup()
 {
+   if(m_importBeforeShmim)
+   {
+      traceDebug("appStartup: importBeforeShmim enabled; initializing Python bridge before shmim startup");
+
+      if(initializePythonBridge() < 0)
+      {
+         return -1;
+      }
+   }
+
    traceDebug("appStartup: before SHMIMMONITOR_APP_STARTUP");
 
    SHMIMMONITOR_APP_STARTUP;
 
    traceDebug("appStartup: after SHMIMMONITOR_APP_STARTUP");
 
-   if(initializePythonBridge() < 0)
+   if(!m_importBeforeShmim)
    {
-      return -1;
+      if(initializePythonBridge() < 0)
+      {
+         return -1;
+      }
+   }
+   else
+   {
+      traceDebug("appStartup: skipping second initializePythonBridge after shmim startup");
    }
 
    traceDebug("appStartup: before XWCAPP_THREAD_START (batch worker)");

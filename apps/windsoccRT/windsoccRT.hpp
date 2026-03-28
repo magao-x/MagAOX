@@ -66,6 +66,7 @@ class windsoccRT : public MagAOXApp<true>, public dev::shmimMonitor<windsoccRT>
    std::string m_workerThreadCpuset; ///< Cpuset assigned to the batch worker thread.
    bool m_debugTrace{false}; ///< When true, emit trace breadcrumbs for embedded Python and worker startup (see `windsocc.debugTrace`).
    bool m_debugTraceLoggerDebug{false}; ///< When true with `m_debugTrace`, lower process minimum log level to DEBUG (see `windsocc.debugTraceLoggerDebug`).
+   bool m_importBeforeShmim{false}; ///< When true for debugging, initialize the embedded Python bridge before shmim startup (see `windsocc.importBeforeShmim`).
    ///@}
 
    float (*m_pixget)(void *, size_t){nullptr}; ///< Pixel-conversion helper for non-float shmim data types.
