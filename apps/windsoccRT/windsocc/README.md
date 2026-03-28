@@ -86,3 +86,24 @@ Interpretation:
 - Use `--report-ids` to compare the probe's real/effective ids against the installed `windsoccRT` process context before investigating setuid-related behavior further.
 
 For in-app A/B testing, compare `windsoccRT` with and without `windsocc.importBeforeShmim=true` while leaving the other debug flags enabled.
+
+To isolate the full `MagAOXApp` lifecycle without `shmimMonitor`, build and run `windsoccAppImportProbe` from `apps/windsoccRT/` (or `/opt/MagAOX/bin/` after `make install`):
+
+```bash
+./windsoccAppImportProbe -n windsoccAppProbe --windsocc.pythonImportRoot=/opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src
+```
+
+Recommended comparison flow:
+
+```bash
+ws_debug_imports
+./windsoccImportProbe --python-import-root /opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src
+./windsoccImportProbe --python-import-root /opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src --spawn-thread --install-signal-handlers
+./windsoccAppImportProbe -n windsoccAppProbe --windsocc.pythonImportRoot=/opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src
+/opt/MagAOX/bin/windsoccRT -n windsocc --windsocc.importBeforeShmim=true ...
+```
+
+Interpretation:
+
+- If only `windsoccAppImportProbe` fails, the remaining suspect is the true `MagAOXApp` lifecycle or deployment context.
+- If `windsoccAppImportProbe` succeeds but `windsoccRT` fails, the crash still depends on `windsoccRT`-specific state beyond the base app setup.
