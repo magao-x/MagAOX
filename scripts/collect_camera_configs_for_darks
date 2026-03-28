@@ -10,23 +10,70 @@ import tqdm
 import orjson
 import logging
 from collections import defaultdict
+from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
 
 SCIENCE_CAMERAS = ['camsci1', 'camsci2']
-IGNORED_KEYS = ['TEMP', 'WIDTH', 'HEIGHT', 'XCEN', 'YCEN', 'FPS', 'MODE',]
+IGNORED_KEYS = ['TEMP', 'WIDTH', 'HEIGHT','FPS', 'MODE','SYNCHRO', 'TEMP ONTGT', 'TEMP SETPT', 'TEMP STATUS', 'TEMP STATUSSTR']
 
-def collect_camera_settings(semester, night, camname, check_only_n=None, progress=False):
+
+def parse_night_timestamp(night):
+    try:
+        return datetime.datetime.strptime(night, "%Y-%m-%d_%H%M%S").replace(tzinfo=datetime.UTC)
+    except ValueError:
+        return None
+
+
+def parse_obs_dir_timestamp_from_file(fn):
+    obs_dir = pathlib.Path(fn).parent.parent.name
+    return parse_night_timestamp(obs_dir[:17])
+
+
+def get_fits_files_for_nights(semester, nights, camname):
+    fits_files = []
+    time_filters = []
+    for night in nights:
+        night_ts = parse_night_timestamp(night)
+        if night_ts is not None:
+            date_part = night.split('_', 1)[0]
+            glob_pattern = f"/home/guestobs/obs/{semester}/*/{date_part}*/{camname}/*.fits"
+            time_filters.append(night_ts)
+        else:
+            glob_pattern = f"/home/guestobs/obs/{semester}/*/{night}*/{camname}/*.fits"
+        fits_files.extend(glob.glob(glob_pattern))
+
+    files = sorted(set(fits_files))
+    if not time_filters:
+        return files
+
+    lower_bound = min(time_filters)
+    upper_bound = max(time_filters) if len(time_filters) > 1 else None
+    filtered_files = []
+    for fn in files:
+        obs_ts = parse_obs_dir_timestamp_from_file(fn)
+        if obs_ts is None:
+            continue
+        if upper_bound is None:
+            if obs_ts >= lower_bound:
+                filtered_files.append(fn)
+        elif lower_bound <= obs_ts < upper_bound:
+            filtered_files.append(fn)
+    return filtered_files
+
+
+def collect_camera_settings(semester, nights, camname, check_only_n=None, progress=False):
     open_shutter_settings = defaultdict(lambda: 0)
     shut_shutter_settings = defaultdict(lambda: 0)
-    glob_pattern = f"/data/obs/{semester}/{night}/*/*/*/{camname}/*.fits"
-    iterable = glob.glob(glob_pattern)[:check_only_n]
+    iterable = get_fits_files_for_nights(semester, nights, camname)[:check_only_n]
     if progress:
         iterable = tqdm.tqdm(iterable)
     for fn in iterable:
         head_part, _ = os.path.split(fn)
-        parts = head_part.replace('/data/obs/', '').split('/')
-        _, day_span, target_name, fn_observer, fn_obs_name, _ = parts
+        parts = head_part.replace('/home/guestobs/obs/', '').split('/')
+        # this isn't used, and the target_name and obs_name are now degenerate
+        #_, day_span, target_name, fn_observer, fn_obs_name, _ = parts
+        _, fn_observer, fn_datetime_target_obs_name, _ = parts
         was_shut = None
         with open(fn, 'rb') as fh:
             try:
@@ -84,13 +131,44 @@ def make_settings_jsonable(config_kind):
             darks_dict[camname].append({'frames_count': setup_meta['frames_count'], 'setup': setup_dict})
     return darks_dict
 
+
+def get_last_night_dates(now_utc):
+    chile_tz = ZoneInfo("America/Santiago")
+    now_chile = now_utc.astimezone(chile_tz)
+    current_noon_chile = datetime.datetime.combine(now_chile.date(), datetime.time(12, 0, 0), tzinfo=chile_tz)
+    previous_noon_chile = current_noon_chile - datetime.timedelta(days=1)
+    previous_noon_utc = previous_noon_chile.astimezone(datetime.UTC)
+    current_noon_utc = current_noon_chile.astimezone(datetime.UTC)
+    return [
+        previous_noon_utc.strftime("%Y-%m-%d_%H%M%S"),
+        current_noon_utc.strftime("%Y-%m-%d_%H%M%S")
+    ]
+
 def main(args):
     invalid_config = defaultdict(list)
     needed_darks = defaultdict(list)
     have_darks = defaultdict(list)
+    nights = args.night if args.night is not None else ['*']
+    if args.last_night:
+        nights = get_last_night_dates(args.now_utc)
+        log.info(
+            "Using --last-night UTC window: "
+            f"{nights[0]} -> {nights[1]}"
+        )
     cameras = args.cameras if args.cameras is not None else SCIENCE_CAMERAS
     for camname in cameras:
-        all_open_settings, all_shut_settings = collect_camera_settings(args.semester, args.night, camname, args.check_only_n, progress=True)
+        all_open_settings, all_shut_settings = collect_camera_settings(
+            args.semester,
+            nights,
+            camname,
+            args.check_only_n,
+            progress=True
+        )
+        if args.check_only_n is not None and len(all_open_settings) == 0 and len(all_shut_settings) > 0:
+            log.warning(
+                f"{camname}: sampled frames include only closed-shutter (dark) configurations. "
+                "Try a larger --check-only-n, or constrain --night to a science run."
+            )
         for setup, frames_count in all_open_settings.items():
             log.info("=" * 72)
             log.info(f"{camname} setup:")
@@ -130,26 +208,39 @@ def main(args):
     return
 
 if __name__ == "__main__":
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.UTC)
     this_year = now.year
-    this_semester = str(this_year) + "B" if now.month > 6 else "A"
+    this_semester = str(this_year) + ("B" if now.month > 6 else "A")
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('-v', '--verbose', help="Turn on debug output", action='store_true')
     parser.add_argument('-s', '--semester', help=f"Semester to search in, default: {this_semester}", default=this_semester)
-    parser.add_argument('-n', '--night', help=f"Night to search in, e.g. 2022-12-02_03", default='*')
-    # parser.add_argument('-p', '--prefix', help=f"Quicklook files root, default: {QUICKLOOK_PATH.as_posix()}", type=pathlib.Path, default=QUICKLOOK_PATH)
+    parser.add_argument('-n','--night',
+        help=(
+            "Night selector to search. Supports date (e.g. 2026-03-25) or UTC timestamp "
+            "(e.g. 2026-01-19_171535). Pass multiple times for multiple nights/bounds."
+        ),
+        action='append', default=None,
+    )
+    parser.add_argument('-ln', '--last-night',
+        help=(
+            "Search the previous-noon to current-noon Chile window, expressed as UTC "
+            "bounds in YYYY-MM-DD_HHMMSS format."
+        ),
+        action='store_true',
+    )
     parser.add_argument('-c', '--cameras', help=f"Cameras to check, default: {SCIENCE_CAMERAS}", action='append', default=None)
-    # parser.add_argument('-a', '--show-all', help=f"Whether to show camera configurations for which darks are already present", action='store_true')
     parser.add_argument('--check-only-n', help=f"Number to check per camera, default all", type=int, default=None)
+    # parser.add_argument('-a', '--show-all', help=f"Whether to show camera configurations for which darks are already present", action='store_true')
+    # parser.add_argument('-p', '--prefix', help=f"Quicklook files root, default: {QUICKLOOK_PATH.as_posix()}", type=pathlib.Path, default=QUICKLOOK_PATH)
     args = parser.parse_args()
+    args.now_utc = now
     ch = logging.StreamHandler()
     ch.setLevel(logging.DEBUG if args.verbose else logging.INFO)
     formatter = logging.Formatter('%(asctime)s %(levelname)s - %(message)s')
     ch.setFormatter(formatter)
     log.addHandler(ch)
     log.setLevel(logging.DEBUG)
-    now = datetime.datetime.utcnow()
     datestamp = ''.join(filter(str.isdigit, now.isoformat()))
     logfile = f'collect_camera_configs_for_darks_{datestamp}.log'
     log.addHandler(logging.FileHandler(logfile))

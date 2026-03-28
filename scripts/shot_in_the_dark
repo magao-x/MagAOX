@@ -76,8 +76,8 @@ def take_darks(indi, camname, configuration, max_n_frames, max_dark_time_sec, dr
         f"{camname}.roi_region_bin_y.target": max(configuration['ROI YBIN'], 1),
         f"{camname}.roi_region_w.target": configuration['HEIGHT'],
         f"{camname}.roi_region_h.target": configuration['WIDTH'],
-        f"{camname}.roi_region_y.target": 511.5,
-        f"{camname}.roi_region_x.target": 511.5,
+        f"{camname}.roi_region_y.target": configuration.get('ROI YCEN', 511.5),
+        f"{camname}.roi_region_x.target": configuration.get('ROI XCEN', 511.5),
     }
     wait_state = {}
     for key, val in roi_state.items():
@@ -120,6 +120,8 @@ def generate_needed_properties(cameras):
         props.append(f"{camname}.readout_speed")
         props.append(f"{camname}.roi_region_bin_x")
         props.append(f"{camname}.roi_region_bin_y")
+        props.append(f"{camname}.roi_region_x")
+        props.append(f"{camname}.roi_region_y")
     return props
 
 def dark_taker_task(c, camname, configs, max_n_frames, max_dark_time_sec, dry_run):
@@ -189,8 +191,6 @@ def main(args):
             for camname in cameras
         }, timeout=MAX_COMMAND_TIMEOUT_SEC)
         log.debug("Ensured relevant streamwriters are off")
-
-
 
 if __name__ == "__main__":
     this_year = datetime.datetime.now().year
