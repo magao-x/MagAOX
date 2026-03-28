@@ -1340,6 +1340,16 @@ void streamWriter::fgThreadExec()
 
             if( sem_timedwait( sem, &ts ) == 0 )
             {
+                while( sem_trywait( sem ) == 0 )
+                {
+                }
+
+                if( errno != EAGAIN && errno != EINTR )
+                {
+                    log<software_error>( { __FILE__, __LINE__, errno, "sem_trywait" } );
+                    break;
+                }
+
                 if( useCnt1 )
                 {
                     curr_image = image.md[0].cnt1;
