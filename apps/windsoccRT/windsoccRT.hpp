@@ -1,5 +1,5 @@
 /** \file windsoccRT.hpp
- * \brief The MagAO-X windsoccRT app header file
+ * \brief The MagAO-X windsoccRT app header file (embedded Python bridge and optional debug trace).
  *
  * \ingroup windsoccRT_files
  */
@@ -64,6 +64,7 @@ class windsoccRT : public MagAOXApp<true>, public dev::shmimMonitor<windsoccRT>
    bool m_cleanupIntermediate{false}; ///< Remove heavier intermediate pipeline products after the batch completes.
    int m_workerThreadPrio{0}; ///< Scheduling priority requested for the batch worker thread.
    std::string m_workerThreadCpuset; ///< Cpuset assigned to the batch worker thread.
+   bool m_debugTrace{false}; ///< When true, emit LOG_DEBUG breadcrumbs for embedded Python and worker startup (see `windsocc.debugTrace`).
    ///@}
 
    float (*m_pixget)(void *, size_t){nullptr}; ///< Pixel-conversion helper for non-float shmim data types.
@@ -90,6 +91,7 @@ class windsoccRT : public MagAOXApp<true>, public dev::shmimMonitor<windsoccRT>
    std::atomic<uint64_t> m_batchesProcessed{0}; ///< Count of batches successfully completed by embedded Python.
    std::atomic<uint64_t> m_batchesDropped{0}; ///< Count of batches dropped because the worker could not keep up.
    std::atomic<double> m_lastPythonLatencySec{0.0}; ///< Wall-clock latency of the most recent embedded Python call.
+   std::atomic<bool> m_loggedFirstBatch{false}; ///< Set when the first dequeue-to-Python batch is logged under debug trace.
 
    pid_t m_workerThreadID{0}; ///< Linux thread ID of the batch worker thread.
    std::thread m_workerThread; ///< Dedicated worker thread that invokes the Python pipeline.
@@ -123,6 +125,9 @@ class windsoccRT : public MagAOXApp<true>, public dev::shmimMonitor<windsoccRT>
 
    /// Format a POSIX timestamp into the string layout expected by the Python realtime layer.
    std::string formatTimestamp(const timespec &ts /**< [in] timespec to format */) const;
+
+   /// Emit a debug-priority trace line when `m_debugTrace` is true.
+   void traceDebug(const std::string &msg /**< [in] message text */);
 
  public:
    /// Default c'tor.

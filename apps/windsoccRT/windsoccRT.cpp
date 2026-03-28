@@ -1,5 +1,5 @@
 /** \file windsoccRT.cpp
-  * \brief The MagAO-X windsoccRT main program source file.
+  * \brief The MagAO-X windsoccRT main program source file (embedded Python, batch worker, optional debug trace).
   *
   * \ingroup windsoccRT_files
   */
@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -19,6 +20,16 @@ namespace app
 windsoccRT::windsoccRT() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    return;
+}
+
+void windsoccRT::traceDebug(const std::string &msg)
+{
+   if(!m_debugTrace)
+   {
+      return;
+   }
+
+   log<text_log>("windsoccRT trace: " + msg, logPrio::LOG_DEBUG);
 }
 
 void windsoccRT::setupConfig()
@@ -144,6 +155,19 @@ void windsoccRT::setupConfig()
               false,
               "string",
               "Cpuset assigned to the windsocc batch worker thread.");
+
+   // Verbose LOG_DEBUG breadcrumbs for embedded Python, worker thread, and shmim allocate. Default false. If aborts
+   // occur inside the shmim monitor thread or inside Python/BLAS without returning here, only the last milestone
+   // line may appear; combine with e.g. OMP_NUM_THREADS=1 for narrowing.
+   config.add("windsocc.debugTrace",
+              "",
+              "windsocc.debugTrace",
+              argType::Required,
+              "windsocc",
+              "debugTrace",
+              false,
+              "bool",
+              "Enable verbose debug trace for embedded Python and batch worker startup. Default is false.");
 }
 
 int windsoccRT::loadConfigImpl(mx::app::appConfigurator &_config)
@@ -162,6 +186,12 @@ int windsoccRT::loadConfigImpl(mx::app::appConfigurator &_config)
    _config(m_cleanupIntermediate, "windsocc.cleanupIntermediate");
    _config(m_workerThreadPrio, "windsocc.workerThreadPrio");
    _config(m_workerThreadCpuset, "windsocc.workerThreadCpuset");
+   _config(m_debugTrace, "windsocc.debugTrace");
+
+   if(m_debugTrace)
+   {
+      traceDebug("configuration loaded: windsocc.debugTrace enabled");
+   }
 
    return 0;
 }
@@ -173,6 +203,8 @@ void windsoccRT::loadConfig()
 
 int windsoccRT::initializePythonBridge()
 {
+   traceDebug("initializePythonBridge: enter");
+
    if(m_pythonImportRoot.empty())
    {
       log<software_error>({__FILE__, __LINE__, "windsocc.pythonImportRoot must be configured"});
@@ -187,6 +219,7 @@ int windsoccRT::initializePythonBridge()
 
    if(!Py_IsInitialized())
    {
+      traceDebug("initializePythonBridge: calling Py_Initialize");
       Py_Initialize();
    }
 
@@ -195,6 +228,8 @@ int windsoccRT::initializePythonBridge()
       log<software_error>({__FILE__, __LINE__, "Failed to initialize embedded CPython"});
       return -1;
    }
+
+   traceDebug(std::string("initializePythonBridge: Py_IsInitialized ok; version ") + Py_GetVersion());
 
    PyObject *sysPath = PySys_GetObject("path");
    if(sysPath == nullptr)
@@ -224,24 +259,33 @@ int windsoccRT::initializePythonBridge()
    }
    Py_DECREF(importRoot);
 
+   traceDebug("initializePythonBridge: sys.path prepended with pythonImportRoot=" + m_pythonImportRoot);
+
+   traceDebug("initializePythonBridge: calling ensurePythonCallable");
    if(ensurePythonCallable() < 0)
    {
       return -1;
    }
 
+   traceDebug("initializePythonBridge: calling PyEval_SaveThread");
    m_pyMainThreadState = PyEval_SaveThread();
    m_pythonInitialized = true;
+
+   traceDebug("initializePythonBridge: GIL released; Python bridge ready");
 
    return 0;
 }
 
 int windsoccRT::ensurePythonCallable()
 {
+   traceDebug("ensurePythonCallable: enter");
+
    Py_XDECREF(m_pyCallableObj);
    m_pyCallableObj = nullptr;
    Py_XDECREF(m_pyModule);
    m_pyModule = nullptr;
 
+   traceDebug("ensurePythonCallable: importing module " + m_pythonModule);
    m_pyModule = PyImport_ImportModule(m_pythonModule.c_str());
    if(m_pyModule == nullptr)
    {
@@ -250,6 +294,7 @@ int windsoccRT::ensurePythonCallable()
       return -1;
    }
 
+   traceDebug("ensurePythonCallable: resolving callable " + m_pythonCallable);
    m_pyCallableObj = PyObject_GetAttrString(m_pyModule, m_pythonCallable.c_str());
    if(m_pyCallableObj == nullptr || !PyCallable_Check(m_pyCallableObj))
    {
@@ -257,6 +302,8 @@ int windsoccRT::ensurePythonCallable()
       log<software_error>({__FILE__, __LINE__, "Configured realtime Python callable is missing or not callable"});
       return -1;
    }
+
+   traceDebug("ensurePythonCallable: ok");
 
    return 0;
 }
@@ -286,12 +333,18 @@ void windsoccRT::shutdownPythonBridge()
 
 int windsoccRT::appStartup()
 {
+   traceDebug("appStartup: before SHMIMMONITOR_APP_STARTUP");
+
    SHMIMMONITOR_APP_STARTUP;
+
+   traceDebug("appStartup: after SHMIMMONITOR_APP_STARTUP");
 
    if(initializePythonBridge() < 0)
    {
       return -1;
    }
+
+   traceDebug("appStartup: before XWCAPP_THREAD_START (batch worker)");
 
    XWCAPP_THREAD_START(m_workerThread,
                        m_workerThreadInit,
@@ -302,7 +355,11 @@ int windsoccRT::appStartup()
                        "windsoccrt",
                        batchThreadStart);
 
+   traceDebug("appStartup: after XWCAPP_THREAD_START");
+
    state(stateCodes::OPERATING);
+
+   traceDebug("appStartup: state OPERATING");
 
    return 0;
 }
@@ -390,10 +447,16 @@ int windsoccRT::allocate(const dev::shmimT &dummy)
       m_workerWaiting = false;
       m_batchesDropped.store(0, std::memory_order_release);
 
+      m_loggedFirstBatch.store(false, std::memory_order_release);
+
       m_workerRestarting.store(false, std::memory_order_release);
    }
 
    m_workerCond.notify_all();
+
+   traceDebug("allocate: shmim " + std::to_string(m_frameWidth) + "x" + std::to_string(m_frameHeight) +
+              " dataType=" + std::to_string(static_cast<unsigned>(shmimMonitorT::m_dataType)) +
+              " inputIsFloat=" + std::string(m_inputIsFloat ? "true" : "false"));
 
    return 0;
 }
@@ -501,6 +564,8 @@ int windsoccRT::runPythonBatch(const realT *batchData, size_t frameCount, const 
       log<software_error>({__FILE__, __LINE__, "Python bridge is not initialized"});
       return -1;
    }
+
+   traceDebug("runPythonBatch: enter frameCount=" + std::to_string(frameCount) + " firstTimestamp=" + firstTimestamp);
 
    const PyGILState_STATE gilState = PyGILState_Ensure();
 
@@ -616,6 +681,8 @@ int windsoccRT::runPythonBatch(const realT *batchData, size_t frameCount, const 
       }
    }
 
+   traceDebug("runPythonBatch: PyObject_Call returned ok");
+
    status = 0;
 
 cleanup:
@@ -631,10 +698,14 @@ void windsoccRT::batchThreadExec()
 {
    m_workerThreadID = syscall(SYS_gettid);
 
+   traceDebug("batchThreadExec: thread started tid=" + std::to_string(static_cast<long long>(m_workerThreadID)));
+
    while(m_workerThreadInit == true && shutdown() == 0)
    {
       sleep(1);
    }
+
+   traceDebug("batchThreadExec: worker init gate cleared; entering batch wait loop");
 
    while(shutdown() == 0)
    {
@@ -672,6 +743,15 @@ void windsoccRT::batchThreadExec()
          frameCount = m_processFrameCount;
          batchData = m_processBuffer.data();
          firstTimestamp = formatTimestamp(m_processFirstTimestamp);
+      }
+
+      {
+         bool expected = false;
+         if(m_debugTrace && m_loggedFirstBatch.compare_exchange_strong(expected, true))
+         {
+            traceDebug("batchThreadExec: first batch dequeued frames=" + std::to_string(frameCount) + " ts=" +
+                       firstTimestamp);
+         }
       }
 
       const double t0 = mx::sys::get_curr_time();
