@@ -99,6 +99,12 @@ class zaberCtrl_test : public zaberCtrl
         return activePresetName( presetNumber() );
     }
 
+    /// Resolve the preset name that telemetry should record.
+    std::string telemetryAliasName()
+    {
+        return telemetryPresetName();
+    }
+
     /// Invoke the base-class power-off handling under test.
     int stageOnPowerOff()
     {
@@ -215,10 +221,11 @@ SCENARIO( "Preset-name aliases follow the selected shared-position preset", "[za
 
         REQUIRE( zct.stageOnPowerOff() == 0 );
         REQUIRE( zct.movingState() == -2 );
-        REQUIRE( zct.presetValue() == 0 );
-        REQUIRE( zct.presetTargetValue() == 0 );
-        REQUIRE( zct.activeAliasIndex() == 2 );
-        REQUIRE( zct.activeAliasName() == "science" );
+        REQUIRE( zct.presetValue() == 3 );
+        REQUIRE( zct.presetTargetValue() == 3 );
+        REQUIRE( zct.activeAliasIndex() == 3 );
+        REQUIRE( zct.activeAliasName() == "focus" );
+        REQUIRE( zct.telemetryAliasName() == "focus" );
     }
 }
 

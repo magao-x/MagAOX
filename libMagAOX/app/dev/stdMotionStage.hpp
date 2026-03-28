@@ -276,10 +276,18 @@ class stdMotionStage
     std::string
     activePresetName( int presetIndex /**< [in] the current preset index reported by the derived stage */ ) const;
 
+    /// Resolve the preset name that should be recorded in telemetry.
+    std::string telemetryPresetName();
+
   private:
     derivedT &derived()
     {
         return *static_cast<derivedT *>( this );
+    }
+
+    const derivedT &derived() const
+    {
+        return *static_cast<const derivedT *>( this );
     }
 };
 
@@ -429,10 +437,7 @@ int stdMotionStage<derivedT>::appLogic()
 template <class derivedT>
 int stdMotionStage<derivedT>::onPowerOff()
 {
-    m_moving        = -2;
-    m_preset        = 0;
-    m_preset_target = 0;
-    clearPresetNameTracking();
+    m_moving = -2;
 
     return 0;
 }
@@ -650,9 +655,7 @@ int stdMotionStage<derivedT>::recordStage( bool force )
     static float       last_preset;
     static std::string last_presetName;
 
-    int n = derived().presetNumber();
-
-    std::string presetName = activePresetName( n );
+    std::string presetName = telemetryPresetName();
 
     if( m_moving != last_moving || m_preset != last_preset || presetName != last_presetName || force )
     {
@@ -720,6 +723,17 @@ std::string stdMotionStage<derivedT>::activePresetName( int presetIndex ) const
     }
 
     return "";
+}
+
+template <class derivedT>
+std::string stdMotionStage<derivedT>::telemetryPresetName()
+{
+    if( m_preset <= 0 )
+    {
+        return "";
+    }
+
+    return activePresetName( derived().presetNumber() );
 }
 
 } // namespace dev
