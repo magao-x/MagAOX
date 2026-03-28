@@ -100,6 +100,7 @@ ws_debug_imports
 ./windsoccImportProbe --python-import-root /opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src
 ./windsoccImportProbe --python-import-root /opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src --spawn-thread --install-signal-handlers
 ./windsoccAppImportProbe -n windsoccAppProbe --windsocc.pythonImportRoot=/opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src
+./windsoccShmimImportProbe -n windsoccShmimProbe --windsocc.pythonImportRoot=/opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src
 /opt/MagAOX/bin/windsoccRT -n windsocc --windsocc.importBeforeShmim=true ...
 ```
 
@@ -107,3 +108,14 @@ Interpretation:
 
 - If only `windsoccAppImportProbe` fails, the remaining suspect is the true `MagAOXApp` lifecycle or deployment context.
 - If `windsoccAppImportProbe` succeeds but `windsoccRT` fails, the crash still depends on `windsoccRT`-specific state beyond the base app setup.
+
+To isolate `shmimMonitor` inheritance and config/load behavior without starting the shmim thread, run `windsoccShmimImportProbe` from `apps/windsoccRT/` (or `/opt/MagAOX/bin/` after `make install`):
+
+```bash
+./windsoccShmimImportProbe -n windsoccShmimProbe --windsocc.pythonImportRoot=/opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src
+```
+
+Additional interpretation:
+
+- If only `windsoccShmimImportProbe` fails, `shmimMonitor` inheritance or its config/load path is the leading suspect.
+- If `windsoccShmimImportProbe` succeeds but `windsoccRT` still fails, the remaining culprit is likely in `windsoccRT`-specific state or startup sequencing beyond the mixin.

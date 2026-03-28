@@ -6,6 +6,8 @@ PROBE_TARGET=windsoccImportProbe
 PROBE_OBJ=$(PROBE_TARGET).o
 APP_PROBE_TARGET=windsoccAppImportProbe
 APP_PROBE_OBJ=$(APP_PROBE_TARGET).o
+SHMIM_PROBE_TARGET=windsoccShmimImportProbe
+SHMIM_PROBE_OBJ=$(SHMIM_PROBE_TARGET).o
 
 INCLUDES += $(shell python3-config --includes)
 EXTRA_LDFLAGS += $(shell python3-config --embed --ldflags)
@@ -18,6 +20,7 @@ include ../../Make/magAOXApp.mk
 
 all: $(PROBE_TARGET)
 all: $(APP_PROBE_TARGET)
+all: $(SHMIM_PROBE_TARGET)
 
 $(PROBE_OBJ): $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.hpp.gch) $(PROBE_TARGET).cpp
 
@@ -28,6 +31,11 @@ $(APP_PROBE_OBJ): $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.hpp.gch) $(APP_PR
 
 $(APP_PROBE_TARGET): $(APP_PROBE_OBJ)
 	$(LINK.o) -o $(APP_PROBE_TARGET) $(APP_PROBE_OBJ) $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.a) $(LDFLAGS) $(LDLIBS)
+
+$(SHMIM_PROBE_OBJ): $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.hpp.gch) $(SHMIM_PROBE_TARGET).hpp $(SHMIM_PROBE_TARGET).cpp
+
+$(SHMIM_PROBE_TARGET): $(SHMIM_PROBE_OBJ)
+	$(LINK.o) -o $(SHMIM_PROBE_TARGET) $(SHMIM_PROBE_OBJ) $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.a) $(LDFLAGS) $(LDLIBS)
 
 # Path to the installable WindsoCC package (pyproject.toml lives here).
 WINDSOCC_PYTHON_DIR := ./windsocc
@@ -41,6 +49,7 @@ install: all install-windsocc-python
 	sudo install $(TARGET) $(BIN_PATH) --mode=4755 --owner=root
 	sudo install $(PROBE_TARGET) $(BIN_PATH) --mode=0755 --owner=root
 	sudo install $(APP_PROBE_TARGET) $(BIN_PATH) --mode=4755 --owner=root
+	sudo install $(SHMIM_PROBE_TARGET) $(BIN_PATH) --mode=4755 --owner=root
 
 .PHONY: clean-probes
 clean: clean-probes
@@ -48,3 +57,4 @@ clean: clean-probes
 clean-probes:
 	rm -f $(PROBE_TARGET)
 	rm -f $(APP_PROBE_TARGET)
+	rm -f $(SHMIM_PROBE_TARGET)
