@@ -80,7 +80,7 @@ class cred2Ctrl : public MagAOXApp<>,
     static constexpr bool c_stdCamera_hasShutter   = false; ///< Do not expose shutter controls.
     static constexpr bool c_stdCamera_usesStateString    = false; ///< Do not expose a dark-management state string.
     static constexpr bool c_edtCamera_relativeConfigPath = false; ///< Use an absolute temporary EDT config path.
-    static constexpr bool c_frameGrabber_flippable       = false; ///< Do not expose image flip controls.
+    static constexpr bool c_frameGrabber_flippable = true; ///< Expose image flip controls through the framegrabber.
 
     ///@}
 

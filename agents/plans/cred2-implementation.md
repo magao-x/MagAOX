@@ -270,6 +270,7 @@ Implementation Status
   - live image streaming works
   - temperature setpoint control works
   - FPS query/set works
+  - framegrabber flip control is now enabled and ready for hardware validation
   - ROI reconfiguration is the next hardware validation target
   - fan and LED control remain to be validated on hardware
 
