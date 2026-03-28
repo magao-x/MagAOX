@@ -209,8 +209,7 @@ Plan
 13. Add telemetry in two layers.
    - Always record `telem_stdcam` through `dev::telemeter`.
    - Expose the full temperature set through INDI in the first functional pass.
-   - Defer any dedicated `cred2_temps` logger for now.
-   - If full archival of all C-RED-specific temperatures becomes important later, add a dedicated logger type in a follow-up patterned after `ocam_temps`.
+   - Record the full C-RED 2 temperature set in a dedicated `cred2_temps` logger patterned after `ocam_temps`.
 
 14. Verify in stages.
    - Build-only verification:
@@ -249,8 +248,7 @@ Resolved Decisions
   - derive camera cropping behavior from the requested ROI rather than exposing a separate crop-mode property
 
 - Telemetry scope:
-  - implement `telem_stdcam` plus the live INDI `temps` property in the first pass
-  - defer any dedicated `cred2_temps` logger
+  - implement `telem_stdcam`, the live INDI `temps` property, and a dedicated `cred2_temps` logger for the full temperature set
 
 - Image ordering:
   - proceed with the assumption that the supplied EDT config delivers correctly ordered images
@@ -263,6 +261,7 @@ Implementation Status
   - C-RED 2 serial helpers and ROI/config generation helpers
   - temperature/FPS/ROI control paths
   - focused helper tests for response parsing and ROI formatting
+  - dedicated `cred2_temps` telemetry for the full detailed camera temperature set
 
 - Local verification completed so far:
   - `cred2Utils_test` passes

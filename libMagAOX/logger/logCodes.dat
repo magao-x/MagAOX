@@ -35,6 +35,7 @@ ttmmod_params            12110    ttmmod_params
 
 #this is a telemetry entry:
 ocam_temps               12120    ocam_temps
+cred2_temps              12121    cred2_temps
 
 saving_start             12500    saving_state_change
 saving_stop              12501    saving_state_change

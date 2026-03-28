@@ -232,11 +232,17 @@ class cred2Ctrl : public MagAOXApp<>,
     /// Check the telemetry record timers.
     int checkRecordTimes();
 
+    /// Record the detailed C-RED 2 temperature telemetry.
+    int recordTelem( const cred2_temps * /**< [in] type-dispatch tag */ );
+
     /// Record standard camera telemetry.
     int recordTelem( const telem_stdcam * /**< [in] type-dispatch tag */ );
 
     /// Record framegrabber timing telemetry.
     int recordTelem( const telem_fgtimings * /**< [in] type-dispatch tag */ );
+
+    /// Record the detailed C-RED 2 temperature telemetry when values change.
+    int recordTemps( bool force = false /**< [in] force a telemetry record even if the cached values match */ );
 
     ///@}
 
@@ -960,6 +966,7 @@ inline int cred2Ctrl::getTemps()
     updateIfChanged( m_indiP_temps, "peltier", m_temps.peltier );
     updateIfChanged( m_indiP_temps, "heatsink", m_temps.heatsink );
 
+    recordTemps();
     recordCamera();
 
     return 0;
@@ -1527,7 +1534,12 @@ inline int cred2Ctrl::reconfig()
 
 inline int cred2Ctrl::checkRecordTimes()
 {
-    return telemeter<cred2Ctrl>::checkRecordTimes( telem_stdcam(), telem_fgtimings() );
+    return telemeter<cred2Ctrl>::checkRecordTimes( cred2_temps(), telem_stdcam(), telem_fgtimings() );
+}
+
+inline int cred2Ctrl::recordTelem( const cred2_temps * )
+{
+    return recordTemps( true );
 }
 
 inline int cred2Ctrl::recordTelem( const telem_stdcam * )
@@ -1538,6 +1550,25 @@ inline int cred2Ctrl::recordTelem( const telem_stdcam * )
 inline int cred2Ctrl::recordTelem( const telem_fgtimings * )
 {
     return recordFGTimings( true );
+}
+
+inline int cred2Ctrl::recordTemps( bool force )
+{
+    static cred2Temps lastTemps;
+
+    if( !( lastTemps == m_temps ) || force )
+    {
+        telem<cred2_temps>( { m_temps.motherboard,
+                              m_temps.frontend,
+                              m_temps.powerboard,
+                              m_temps.snake,
+                              m_temps.setpoint,
+                              m_temps.peltier,
+                              m_temps.heatsink } );
+        lastTemps = m_temps;
+    }
+
+    return 0;
 }
 
 } // namespace app
