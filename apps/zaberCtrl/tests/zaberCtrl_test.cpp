@@ -69,6 +69,42 @@ class zaberCtrl_test : public zaberCtrl
         m_preset_target = presetTarget;
     }
 
+    /// Set the current motion-state classification for testing.
+    void setMovingState( int8_t movingState )
+    {
+        m_movingState = movingState;
+    }
+
+    /// Track a specific preset-name alias for testing.
+    int setPresetAliasIndex( int presetNameIndex )
+    {
+        return setPresetNameTracking( presetNameIndex );
+    }
+
+    /// Clear any tracked preset-name alias for testing.
+    void clearPresetAliasIndex()
+    {
+        clearPresetNameTracking();
+    }
+
+    /// Resolve the active preset-name index for the current position.
+    int activeAliasIndex()
+    {
+        return activePresetNameIndex( presetNumber() );
+    }
+
+    /// Resolve the active preset name for the current position.
+    std::string activeAliasName()
+    {
+        return activePresetName( presetNumber() );
+    }
+
+    /// Invoke the base-class power-off handling under test.
+    int stageOnPowerOff()
+    {
+        return dev::stdMotionStage<zaberCtrl>::onPowerOff();
+    }
+
     /// Invoke the powered-off telemetry sync under test.
     int syncPoweredOffTelemetry()
     {
@@ -136,6 +172,53 @@ SCENARIO( "Power-off stage telemetry", "[zaberCtrl]" )
         REQUIRE( zct.syncPoweredOffTelemetry() == 0 );
         REQUIRE( zct.presetValue() == 0 );
         REQUIRE( zct.presetTargetValue() == 0 );
+    }
+}
+
+SCENARIO( "Preset-name aliases follow the selected shared-position preset", "[zaberCtrl]" )
+{
+    zaberCtrl_test zct( "stest" );
+
+    zct.setPresets( { -1, 10, 20, 20 }, { "none", "open", "science", "focus" } );
+    zct.setStagePosition( 20.0, 1000.0 );
+    zct.setStageTelemetry( 0, 3, 3 );
+
+    WHEN( "a specific alias was selected for a shared preset position" )
+    {
+        REQUIRE( zct.setPresetAliasIndex( 3 ) == 0 );
+
+        REQUIRE( zct.activeAliasIndex() == 3 );
+        REQUIRE( zct.activeAliasName() == "focus" );
+    }
+
+    WHEN( "the stage is moving toward a selected alias" )
+    {
+        REQUIRE( zct.setPresetAliasIndex( 3 ) == 0 );
+        zct.setMovingState( 1 );
+        zct.setStageTelemetry( 1, 2, 3 );
+
+        REQUIRE( zct.activeAliasIndex() == 3 );
+        REQUIRE( zct.activeAliasName() == "focus" );
+    }
+
+    WHEN( "no alias is being tracked" )
+    {
+        zct.clearPresetAliasIndex();
+
+        REQUIRE( zct.activeAliasIndex() == 2 );
+        REQUIRE( zct.activeAliasName() == "science" );
+    }
+
+    WHEN( "the alias tracking is cleared on power off" )
+    {
+        REQUIRE( zct.setPresetAliasIndex( 3 ) == 0 );
+
+        REQUIRE( zct.stageOnPowerOff() == 0 );
+        REQUIRE( zct.movingState() == -2 );
+        REQUIRE( zct.presetValue() == 0 );
+        REQUIRE( zct.presetTargetValue() == 0 );
+        REQUIRE( zct.activeAliasIndex() == 2 );
+        REQUIRE( zct.activeAliasName() == "science" );
     }
 }
 

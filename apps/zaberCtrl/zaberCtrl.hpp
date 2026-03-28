@@ -645,6 +645,8 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_pos )( const pcf::IndiProperty &ipRecv
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
     m_tgtPos = target;
+    clearPresetNameTracking();
+    m_movingState = 0;
 
     moveTo( m_tgtPos );
     updateIfChanged( m_indiP_pos, "target", m_tgtPos, INDI_BUSY );
@@ -684,6 +686,8 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawPos )( const pcf::IndiProperty &ipR
     log<text_log>( "moving stage by " + std::to_string( target ) );
 
     std::lock_guard<std::mutex> guard( m_indiMutex );
+    clearPresetNameTracking();
+    m_movingState = 0;
 
     pcf::IndiProperty indiP_stageTgtPos = pcf::IndiProperty( pcf::IndiProperty::Text );
     indiP_stageTgtPos.setDevice( m_lowLevelName );
