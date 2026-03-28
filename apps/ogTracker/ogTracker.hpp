@@ -1008,6 +1008,12 @@ inline int ogTracker::recordDmSpeck( bool force )
 
     if( changed || force )
     {
+        // Suppress periodic/forced telemetry while modulation is off or calibration is unavailable.
+        if( force && ( !modulating || !calibLoaded ) )
+        {
+            return 0;
+        }
+
         telem<telem_dmspeck>(
             { modulating, false, freq, { sep }, { ang }, { amp }, std::vector<bool>( { false } ) } );
 
@@ -1036,11 +1042,15 @@ inline int ogTracker::recordDmSpeck( bool force )
 inline int ogTracker::recordOgModes( bool force )
 {
     bool               metricsValid;
+    bool               modulating;
+    bool               calibLoaded;
     std::vector<float> ogModeAvg;
 
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_dataMutex );
         metricsValid        = m_metricsValid;
+        modulating          = m_modulating;
+        calibLoaded         = m_calibLoaded;
         const int modeCount = std::max( 0, m_activeModes );
         if( metricsValid && m_latestOgAvg.size() >= modeCount )
         {
@@ -1107,6 +1117,12 @@ inline int ogTracker::recordOgModes( bool force )
 
     if( modeAvgChanged || ( lastMetricsValid != metricsValid ) || force )
     {
+        // Suppress periodic/forced telemetry while modulation is off or calibration is unavailable.
+        if( force && ( !modulating || !calibLoaded ) )
+        {
+            return 0;
+        }
+
         telem<telem_dmmodes>( telem_dmmodes::messageT( publishVals ) );
         lastPublishVals  = publishVals;
         lastMetricsValid = metricsValid;
@@ -1192,11 +1208,30 @@ INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_modulating )( const pcf::IndiProperty 
         const bool nextModulating = ( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On );
         if( nextModulating != m_modulating )
         {
+            const bool wasModulating = m_modulating;
             m_modulating  = nextModulating;
             m_paramsDirty = true;
             if( m_modulating )
             {
                 m_waitForParamChange = false;
+            }
+            else if( wasModulating )
+            {
+                // Flush stale OG outputs/history when modulation turns OFF.
+                m_metricsValid    = false;
+                m_latestOgSummary = 0;
+                if( m_activeModes > 0 )
+                {
+                    m_latestRms.resize( m_activeModes );
+                    m_latestNorm.resize( m_activeModes );
+                    m_latestRms.setZero();
+                    m_latestNorm.setZero();
+                    setupOgAverageLocked( m_activeModes );
+                }
+                if( m_framePixels > 0 && shmimMonitorT::m_depth > 0 )
+                {
+                    setupFrameCircBuffLocked( m_framePixels );
+                }
             }
         }
     }
