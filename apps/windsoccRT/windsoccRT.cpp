@@ -608,6 +608,18 @@ std::string windsoccRT::formatTimestamp(const timespec &ts) const
    return std::string(buffer);
 }
 
+std::string windsoccRT::describeBatchCall(size_t frameCount, const std::string &firstTimestamp, size_t byteCount) const
+{
+   return "frames=" + std::to_string(frameCount) + " dims=" + std::to_string(m_frameHeight) + "x" +
+          std::to_string(m_frameWidth) + " pixels=" + std::to_string(m_framePixels) +
+          " bytes=" + std::to_string(byteCount) + " firstTimestamp=" + firstTimestamp +
+          " configPath=" + m_configPath + " outputRoot=" + m_outputRoot +
+          " framesPerCube=" + std::to_string(m_framesPerCube) +
+          " noMovie=" + std::string(m_noMovie ? "true" : "false") +
+          " saveDistillPNGs=" + std::string(m_saveDistillPNGs ? "true" : "false") +
+          " cleanupIntermediate=" + std::string(m_cleanupIntermediate ? "true" : "false");
+}
+
 int windsoccRT::runPythonBatch(const realT *batchData, size_t frameCount, const std::string &firstTimestamp)
 {
    if(!m_pythonInitialized || m_pyCallableObj == nullptr)
@@ -618,7 +630,9 @@ int windsoccRT::runPythonBatch(const realT *batchData, size_t frameCount, const 
 
    traceDebug("runPythonBatch: enter frameCount=" + std::to_string(frameCount) + " firstTimestamp=" + firstTimestamp);
 
+   traceDebug("runPythonBatch: before PyGILState_Ensure");
    const PyGILState_STATE gilState = PyGILState_Ensure();
+   traceDebug("runPythonBatch: after PyGILState_Ensure");
 
    const Py_ssize_t byteCount = static_cast<Py_ssize_t>(frameCount * m_framePixels * sizeof(realT));
    PyObject *bufferView =
@@ -708,12 +722,19 @@ int windsoccRT::runPythonBatch(const realT *batchData, size_t frameCount, const 
       Py_DECREF(value);
    }
 
+   traceDebug("runPythonBatch: args/kwargs prepared " +
+              describeBatchCall(frameCount, firstTimestamp, static_cast<size_t>(byteCount)));
+
+   traceDebug("runPythonBatch: before PyObject_Call");
    result = PyObject_Call(m_pyCallableObj, args, kwargs);
    if(result == nullptr)
    {
       PyErr_Print();
+      traceDebug("runPythonBatch: PyObject_Call returned nullptr");
       goto cleanup;
    }
+
+   traceDebug("runPythonBatch: after PyObject_Call");
 
    if(PyDict_Check(result))
    {
@@ -737,10 +758,22 @@ int windsoccRT::runPythonBatch(const realT *batchData, size_t frameCount, const 
    status = 0;
 
 cleanup:
+   if(status != 0)
+   {
+      traceDebug("runPythonBatch: cleanup after failure");
+   }
+   else
+   {
+      traceDebug("runPythonBatch: cleanup after success");
+   }
+
    Py_XDECREF(result);
    Py_XDECREF(kwargs);
    Py_XDECREF(args);
+
+   traceDebug("runPythonBatch: before PyGILState_Release");
    PyGILState_Release(gilState);
+   traceDebug("runPythonBatch: after PyGILState_Release");
 
    return status;
 }
@@ -805,10 +838,16 @@ void windsoccRT::batchThreadExec()
          }
       }
 
+      traceDebug("batchThreadExec: invoking runPythonBatch frames=" + std::to_string(frameCount) + " ts=" +
+                 firstTimestamp);
+
       const double t0 = mx::sys::get_curr_time();
       int pythonStatus = runPythonBatch(batchData, frameCount, firstTimestamp);
       const double t1 = mx::sys::get_curr_time();
       m_lastPythonLatencySec.store(t1 - t0, std::memory_order_release);
+
+      traceDebug("batchThreadExec: runPythonBatch returned status=" + std::to_string(pythonStatus) +
+                 " latencySec=" + std::to_string(t1 - t0));
 
       { //mutex scope
          std::lock_guard<std::mutex> lock(m_workerMutex);

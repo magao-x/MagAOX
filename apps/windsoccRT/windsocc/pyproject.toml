@@ -38,6 +38,7 @@ ws_measure = "windsocc.measure:main"
 ws_realtime = "windsocc.realtime:main"
 ws_profile_cc_cube = "windsocc.profile.cc_cube:main"
 ws_debug_imports = "windsocc.debug_imports:main"
+ws_debug_stream_grab = "windsocc.debug_stream_grab:main"
 
 [project.optional-dependencies]
 profile = [

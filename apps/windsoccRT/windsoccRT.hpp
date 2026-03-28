@@ -125,6 +125,11 @@ class windsoccRT : public MagAOXApp<true>, public dev::shmimMonitor<windsoccRT>
                       size_t frameCount /**< [in] number of frames stored in `batchData` */,
                       const std::string &firstTimestamp /**< [in] timestamp string for the first batch frame */);
 
+   /// Summarize one Python batch call for debug tracing.
+   std::string describeBatchCall(size_t frameCount /**< [in] number of frames in the batch */,
+                                 const std::string &firstTimestamp /**< [in] timestamp string for the batch */,
+                                 size_t byteCount /**< [in] size of the backing float buffer in bytes */) const;
+
    /// Format a POSIX timestamp into the string layout expected by the Python realtime layer.
    std::string formatTimestamp(const timespec &ts /**< [in] timespec to format */) const;
 
