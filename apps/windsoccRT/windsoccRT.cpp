@@ -29,7 +29,9 @@ void windsoccRT::traceDebug(const std::string &msg)
       return;
    }
 
-   log<text_log>("windsoccRT trace: " + msg, logPrio::LOG_DEBUG);
+   // LOG_NOTICE (5) is stored when default logger.logLevel is LOG_INFO (6): logManager rejects levels with
+   // level > m_logLevel. LOG_DEBUG (7) was therefore dropped before; NOTICE is not.
+   log<text_log>("windsoccRT trace: " + msg, logPrio::LOG_NOTICE);
 }
 
 void windsoccRT::setupConfig()
@@ -156,9 +158,9 @@ void windsoccRT::setupConfig()
               "string",
               "Cpuset assigned to the windsocc batch worker thread.");
 
-   // Verbose LOG_DEBUG breadcrumbs for embedded Python, worker thread, and shmim allocate. Default false. If aborts
-   // occur inside the shmim monitor thread or inside Python/BLAS without returning here, only the last milestone
-   // line may appear; combine with e.g. OMP_NUM_THREADS=1 for narrowing.
+   // Trace breadcrumbs at LOG_NOTICE (stored with default logger.logLevel=INFO). If aborts occur inside the shmim
+   // monitor thread or inside Python/BLAS without returning here, only the last milestone line may appear; combine
+   // with e.g. OMP_NUM_THREADS=1 for narrowing.
    config.add("windsocc.debugTrace",
               "",
               "windsocc.debugTrace",
@@ -167,7 +169,18 @@ void windsoccRT::setupConfig()
               "debugTrace",
               false,
               "bool",
-              "Enable verbose debug trace for embedded Python and batch worker startup. Default is false.");
+              "Enable trace lines (LOG_NOTICE) for embedded Python and batch worker startup. Default is false.");
+
+   config.add("windsocc.debugTraceLoggerDebug",
+              "",
+              "windsocc.debugTraceLoggerDebug",
+              argType::Required,
+              "windsocc",
+              "debugTraceLoggerDebug",
+              false,
+              "bool",
+              "When true with windsocc.debugTrace, set process minimum log level to DEBUG after config load "
+              "(records LOG_DEBUG from all components; overrides logger.logLevel for this run). Default is false.");
 }
 
 int windsoccRT::loadConfigImpl(mx::app::appConfigurator &_config)
@@ -187,6 +200,15 @@ int windsoccRT::loadConfigImpl(mx::app::appConfigurator &_config)
    _config(m_workerThreadPrio, "windsocc.workerThreadPrio");
    _config(m_workerThreadCpuset, "windsocc.workerThreadCpuset");
    _config(m_debugTrace, "windsocc.debugTrace");
+   _config(m_debugTraceLoggerDebug, "windsocc.debugTraceLoggerDebug");
+
+   if(m_debugTrace && m_debugTraceLoggerDebug)
+   {
+      m_log.logLevel(logPrio::LOG_DEBUG);
+      log<text_log>("windsoccRT: minimum log level set to DEBUG (windsocc.debugTraceLoggerDebug=true); overrides "
+                    "logger.logLevel for this process.",
+                    logPrio::LOG_NOTICE);
+   }
 
    if(m_debugTrace)
    {

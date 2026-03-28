@@ -64,7 +64,8 @@ class windsoccRT : public MagAOXApp<true>, public dev::shmimMonitor<windsoccRT>
    bool m_cleanupIntermediate{false}; ///< Remove heavier intermediate pipeline products after the batch completes.
    int m_workerThreadPrio{0}; ///< Scheduling priority requested for the batch worker thread.
    std::string m_workerThreadCpuset; ///< Cpuset assigned to the batch worker thread.
-   bool m_debugTrace{false}; ///< When true, emit LOG_DEBUG breadcrumbs for embedded Python and worker startup (see `windsocc.debugTrace`).
+   bool m_debugTrace{false}; ///< When true, emit trace breadcrumbs for embedded Python and worker startup (see `windsocc.debugTrace`).
+   bool m_debugTraceLoggerDebug{false}; ///< When true with `m_debugTrace`, lower process minimum log level to DEBUG (see `windsocc.debugTraceLoggerDebug`).
    ///@}
 
    float (*m_pixget)(void *, size_t){nullptr}; ///< Pixel-conversion helper for non-float shmim data types.
@@ -126,7 +127,7 @@ class windsoccRT : public MagAOXApp<true>, public dev::shmimMonitor<windsoccRT>
    /// Format a POSIX timestamp into the string layout expected by the Python realtime layer.
    std::string formatTimestamp(const timespec &ts /**< [in] timespec to format */) const;
 
-   /// Emit a debug-priority trace line when `m_debugTrace` is true.
+   /// Emit a LOG_NOTICE trace line when `m_debugTrace` is true (visible with default `logger.logLevel`).
    void traceDebug(const std::string &msg /**< [in] message text */);
 
  public:
