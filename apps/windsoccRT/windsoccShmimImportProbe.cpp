@@ -50,6 +50,36 @@ void windsoccShmimImportProbe::setupConfig()
               "string",
               "Python module imported by the MagAO-X shmim-mixin probe.");
 
+   config.add("windsocc.pythonCallable",
+              "",
+              "windsocc.pythonCallable",
+              argType::Required,
+              "windsocc",
+              "pythonCallable",
+              false,
+              "string",
+              "Python callable resolved from windsocc.pythonModule when windsocc.resolveCallable is true.");
+
+   config.add("windsocc.resolveCallable",
+              "",
+              "windsocc.resolveCallable",
+              argType::Required,
+              "windsocc",
+              "resolveCallable",
+              false,
+              "bool",
+              "When true, resolve and verify windsocc.pythonCallable after module import. Default is true.");
+
+   config.add("windsocc.saveThread",
+              "",
+              "windsocc.saveThread",
+              argType::Required,
+              "windsocc",
+              "saveThread",
+              false,
+              "bool",
+              "When true, call PyEval_SaveThread after the optional callable-resolution stage. Default is false.");
+
    config.add("windsocc.debugTrace",
               "",
               "windsocc.debugTrace",
@@ -78,6 +108,9 @@ int windsoccShmimImportProbe::loadConfigImpl(mx::app::appConfigurator &_config)
 
    _config(m_pythonImportRoot, "windsocc.pythonImportRoot");
    _config(m_pythonModule, "windsocc.pythonModule");
+   _config(m_pythonCallable, "windsocc.pythonCallable");
+   _config(m_resolveCallable, "windsocc.resolveCallable");
+   _config(m_saveThread, "windsocc.saveThread");
    _config(m_debugTrace, "windsocc.debugTrace");
    _config(m_debugTraceLoggerDebug, "windsocc.debugTraceLoggerDebug");
 
@@ -165,9 +198,42 @@ int windsoccShmimImportProbe::initializePythonImport()
       return -1;
    }
 
-   m_pythonInitialized = true;
-
    traceDebug("initializePythonImport: module import succeeded");
+
+   if(m_resolveCallable)
+   {
+      traceDebug("initializePythonImport: resolving callable " + m_pythonCallable);
+
+      Py_XDECREF(m_pyCallableObj);
+      m_pyCallableObj = nullptr;
+
+      m_pyCallableObj = PyObject_GetAttrString(m_pyModule, m_pythonCallable.c_str());
+      if(m_pyCallableObj == nullptr || !PyCallable_Check(m_pyCallableObj))
+      {
+         PyErr_Print();
+         log<software_error>({__FILE__, __LINE__, "Configured Python callable is missing or not callable"});
+         return -1;
+      }
+
+      traceDebug("initializePythonImport: callable resolution succeeded");
+   }
+   else
+   {
+      traceDebug("initializePythonImport: skipping callable resolution (windsocc.resolveCallable=false)");
+   }
+
+   if(m_saveThread)
+   {
+      traceDebug("initializePythonImport: calling PyEval_SaveThread");
+      m_pyMainThreadState = PyEval_SaveThread();
+      traceDebug("initializePythonImport: GIL released via PyEval_SaveThread");
+   }
+   else
+   {
+      traceDebug("initializePythonImport: skipping PyEval_SaveThread (windsocc.saveThread=false)");
+   }
+
+   m_pythonInitialized = true;
 
    return 0;
 }
@@ -179,11 +245,21 @@ void windsoccShmimImportProbe::shutdownPythonImport()
       return;
    }
 
+   if(m_pyMainThreadState != nullptr && Py_IsInitialized())
+   {
+      traceDebug("shutdownPythonImport: restoring main thread state");
+      PyEval_RestoreThread(m_pyMainThreadState);
+      m_pyMainThreadState = nullptr;
+   }
+
+   Py_XDECREF(m_pyCallableObj);
+   m_pyCallableObj = nullptr;
    Py_XDECREF(m_pyModule);
    m_pyModule = nullptr;
 
    if(Py_IsInitialized())
    {
+      traceDebug("shutdownPythonImport: calling Py_Finalize");
       Py_Finalize();
    }
 

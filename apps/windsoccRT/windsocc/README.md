@@ -115,6 +115,21 @@ To isolate `shmimMonitor` inheritance and config/load behavior without starting 
 ./windsoccShmimImportProbe -n windsoccShmimProbe --windsocc.pythonImportRoot=/opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src
 ```
 
+To mirror more of `windsoccRT` after import, the shmim probe now supports callable resolution and an optional `PyEval_SaveThread()` handoff:
+
+```bash
+./windsoccShmimImportProbe -n windsoccShmimProbe --windsocc.pythonImportRoot=/opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src --windsocc.pythonCallable=run_embedded_batch_buffer
+./windsoccShmimImportProbe -n windsoccShmimProbe --windsocc.pythonImportRoot=/opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src --windsocc.pythonCallable=run_embedded_batch_buffer --windsocc.saveThread=true
+```
+
+Interpret the two passes in order:
+
+- First run the callable-resolution pass with the default `windsocc.resolveCallable=true` and `windsocc.saveThread=false`.
+- Then enable `windsocc.saveThread=true` only if the callable-resolution pass succeeds cleanly.
+- If the first pass fails, the remaining suspect is callable lookup or `PyCallable_Check()` rather than bare module import.
+- If the first pass succeeds but the second fails, the remaining suspect is `PyEval_SaveThread()` / interpreter thread-state handoff.
+- If both passes succeed but `windsoccRT` still fails, the next suspect is later worker-thread behavior such as the first `PyEval_RestoreThread()` and actual batch invocation path.
+
 Additional interpretation:
 
 - If only `windsoccShmimImportProbe` fails, `shmimMonitor` inheritance or its config/load path is the leading suspect.

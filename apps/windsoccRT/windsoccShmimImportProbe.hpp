@@ -37,12 +37,17 @@ protected:
     */
    std::string m_pythonImportRoot; ///< Root path prepended to `sys.path` before importing the WindsoCC module.
    std::string m_pythonModule{"windsocc.realtime"}; ///< Python module imported during `appStartup()`.
+   std::string m_pythonCallable{"run_embedded_batch_buffer"}; ///< Callable resolved inside `m_pythonModule` when enabled.
+   bool m_resolveCallable{true}; ///< When true, resolve `m_pythonCallable` after importing the module.
+   bool m_saveThread{false}; ///< When true, call `PyEval_SaveThread()` after the optional callable-resolution stage.
    bool m_debugTrace{false}; ///< When true, emit trace breadcrumbs at `LOG_NOTICE`.
    bool m_debugTraceLoggerDebug{false}; ///< When true with `m_debugTrace`, lower process minimum log level to DEBUG.
    ///@}
 
    bool m_pythonInitialized{false}; ///< True once CPython has been initialized by this probe.
+   PyThreadState *m_pyMainThreadState{nullptr}; ///< Main interpreter thread state saved when `m_saveThread` is enabled.
    PyObject *m_pyModule{nullptr}; ///< Borrowed module handle for the imported Python module.
+   PyObject *m_pyCallableObj{nullptr}; ///< Borrowed callable handle resolved from `m_pyModule` when enabled.
 
    /// Import the configured Python module into an embedded interpreter.
    int initializePythonImport();
