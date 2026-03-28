@@ -109,6 +109,7 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker>
     Eigen::Matrix<realT, -1, 1> m_latestRms; ///< Latest rolling RMS per PCA mode.
     Eigen::Matrix<realT, -1, 1> m_latestNorm; ///< Latest rolling RMS normalized by reference RMS.
     Eigen::Matrix<realT, -1, 1> m_latestOgAvg; ///< Running-average output values for `pca_og`.
+    realT                        m_latestOgSummary{ 0 }; ///< Mean of `pca_og_avg` modes using only finite values `<= 1`.
     bool                         m_metricsValid{ false }; ///< True once at least one valid metrics computation completes.
     Eigen::Matrix<realT, -1, -1> m_ogAvgHistory; ///< History matrix for running-average updates, shaped `[ogAvgN, modes]`.
     Eigen::Matrix<realT, -1, 1>  m_ogAvgSum; ///< Running sum across `m_ogAvgHistory`.
@@ -132,7 +133,9 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker>
     pcf::IndiProperty m_indiP_calibLoaded; ///< Published calibration-loaded numeric flag.
     pcf::IndiProperty m_indiP_buffer; ///< Published ring-buffer occupancy/capacity property.
     pcf::IndiProperty m_indiP_ogAvgN; ///< INDI control for `pca_og` running-average measurement count.
-    pcf::IndiProperty m_indiP_pcaOG; ///< Published normalized rolling RMS values by PCA mode.
+    pcf::IndiProperty m_indiP_pcaOG; ///< Published instantaneous normalized rolling RMS values by PCA mode.
+    pcf::IndiProperty m_indiP_pcaOGAvg; ///< Published running-average normalized values by PCA mode.
+    pcf::IndiProperty m_indiP_pcaOGSummary; ///< Published scalar summary of `pca_og_avg` across modes.
     ///@}
 
     /** \name Concurrency and Background Compute - Data
@@ -144,6 +147,7 @@ class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker>
     bool                    m_computeRun{ false }; ///< Thread run flag, cleared during shutdown.
     bool                    m_computePending{ false }; ///< Set when a new compute pass should run.
     bool                    m_streamMissingLogged{ false }; ///< Debounce flag for missing/connected stream log transitions.
+    bool                    m_waitModulationLogged{ false }; ///< Debounce flag for waiting/resume modulation logs.
     ///@}
 
   public:
@@ -426,12 +430,16 @@ inline int ogTracker::appStartup()
     }
 
     //CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaRms, "pca_rms", "Rolling PCA RMS", "PCA" );
-    CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOG, "pca_og", "Rolling PCA RMS / Ref RMS", "PCA" );
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOG, "pca_og", "Instantaneous PCA RMS / Ref RMS", "PCA" );
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOGAvg, "pca_og_avg", "Running-average PCA RMS / Ref RMS", "PCA" );
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOGSummary, "og_summary", "Mean pca_og_avg across modes <= 1", "PCA" );
     for( const auto &el : m_modeEls )
     {
         //m_indiP_pcaRms.add( pcf::IndiElement( el, 0 ) );
         m_indiP_pcaOG.add( pcf::IndiElement( el, 0 ) );
+        m_indiP_pcaOGAvg.add( pcf::IndiElement( el, 0 ) );
     }
+    m_indiP_pcaOGSummary.add( pcf::IndiElement( "current", 0 ) );
 
     m_indiP_calibFolder["name"] = "";
     m_indiP_calibError["state"] = "uninitialized";
@@ -481,6 +489,7 @@ inline int ogTracker::setupOgAverageLocked( int modes )
     m_ogAvgSum.setZero();
     m_latestOgAvg.resize( modes );
     m_latestOgAvg.setZero();
+    m_latestOgSummary = 0;
     m_ogAvgWrite = 0;
     m_ogAvgCount = 0;
     return 0;
@@ -705,6 +714,26 @@ inline void ogTracker::computeMetricsFromSnapshot()
         {
             m_latestOgAvg = m_ogAvgSum / static_cast<realT>( m_ogAvgCount );
         }
+
+        realT sumSummary = 0;
+        int   nSummary   = 0;
+        for( int n = 0; n < m_activeModes; ++n )
+        {
+            const realT v = m_latestOgAvg[n];
+            if( std::isfinite( v ) && v <= static_cast<realT>( 1.0 ) )
+            {
+                sumSummary += v;
+                ++nSummary;
+            }
+        }
+        if( nSummary > 0 )
+        {
+            m_latestOgSummary = sumSummary / static_cast<realT>( nSummary );
+        }
+        else
+        {
+            m_latestOgSummary = 0;
+        }
     }
     m_metricsValid = true;
 }
@@ -806,12 +835,23 @@ inline int ogTracker::appLogic()
 
     if( !modulating )
     {
+        if( !m_waitModulationLogged )
+        {
+            log<text_log>( "ogTracker waiting for tweeterSpeck modulation to turn ON; processing is paused.",
+                           logPrio::LOG_NOTICE );
+            m_waitModulationLogged = true;
+        }
         std::lock_guard<std::mutex> lock( m_dataMutex );
         m_calibLoaded = false;
         setCalibErrorLocked( "sparkle not modulating", logPrio::LOG_INFO );
     }
     else if( paramsDirty )
     {
+        if( m_waitModulationLogged )
+        {
+            log<text_log>( "ogTracker detected modulation ON; resuming calibration/processing.", logPrio::LOG_NOTICE );
+            m_waitModulationLogged = false;
+        }
         refreshCalibration();
     }
 
@@ -825,8 +865,8 @@ inline int ogTracker::appLogic()
         { "count", "capacity" },
         { static_cast<double>( m_frameCircBuff.size() ), static_cast<double>( m_bufferCapacity ) } );
 
-    std::vector<double> rmsOut( static_cast<size_t>( m_klipMax ), 0.0 );
-    std::vector<double> normOut( static_cast<size_t>( m_klipMax ), 0.0 );
+    std::vector<double> normInstantOut( static_cast<size_t>( m_klipMax ), 0.0 );
+    std::vector<double> normAvgOut( static_cast<size_t>( m_klipMax ), 0.0 );
     std::vector<const char *> modeElNames;
     modeElNames.reserve( m_modeEls.size() );
     for( const auto &el : m_modeEls )
@@ -837,13 +877,15 @@ inline int ogTracker::appLogic()
     {
         for( int n = 0; n < m_activeModes; ++n )
         {
-            rmsOut[static_cast<size_t>( n )]  = static_cast<double>( m_latestRms[n] );
-            normOut[static_cast<size_t>( n )] = static_cast<double>( m_latestOgAvg[n] );
+            normInstantOut[static_cast<size_t>( n )] = static_cast<double>( m_latestNorm[n] );
+            normAvgOut[static_cast<size_t>( n )]     = static_cast<double>( m_latestOgAvg[n] );
         }
     }
 
     //updatesIfChanged<double>( m_indiP_pcaRms, modeElNames, rmsOut );
-    updatesIfChanged<double>( m_indiP_pcaOG, modeElNames, normOut );
+    updatesIfChanged<double>( m_indiP_pcaOG, modeElNames, normInstantOut );
+    updatesIfChanged<double>( m_indiP_pcaOGAvg, modeElNames, normAvgOut );
+    updateIfChanged( m_indiP_pcaOGSummary, "current", static_cast<double>( m_latestOgSummary ) );
     updateIfChanged( m_indiP_ogAvgN, "current", m_ogAvgN, INDI_IDLE );
     updateIfChanged( m_indiP_ogAvgN, "target", m_ogAvgN, INDI_IDLE );
 
