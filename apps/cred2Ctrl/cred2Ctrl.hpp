@@ -72,6 +72,7 @@ class cred2Ctrl : public MagAOXApp<>,
     static constexpr bool c_stdCamera_fpsCtrl      = true;  ///< Expose FPS controls.
     static constexpr bool c_stdCamera_fps          = true;  ///< Expose FPS status.
     static constexpr bool c_stdCamera_fan          = true;  ///< Expose fan-speed controls.
+    static constexpr bool c_stdCamera_analogGain   = true;  ///< Expose discrete analog-gain controls.
     static constexpr bool c_stdCamera_led          = true;  ///< Expose status LED controls.
     static constexpr bool c_stdCamera_synchro      = false; ///< Do not expose synchro controls in the first pass.
     static constexpr bool c_stdCamera_usesModes    = false; ///< Use one synthetic runtime mode rather than INDI modes.
@@ -155,6 +156,9 @@ class cred2Ctrl : public MagAOXApp<>,
     /// Query and update the current fan-control state.
     int getFanSpeed();
 
+    /// Query and update the current analog-gain state.
+    int getAnalogGain();
+
     /// Query and update the current LED state.
     int getLEDState();
 
@@ -176,6 +180,9 @@ class cred2Ctrl : public MagAOXApp<>,
 
     /// Send the requested fan-control mode to the camera.
     int setFanSpeed();
+
+    /// Send the requested analog-gain mode to the camera.
+    int setAnalogGain();
 
     /// Send the requested LED state to the camera.
     int setLED();
@@ -325,6 +332,60 @@ inline int cred2FanPresetPercent( int               &fanPercent, ///< [out] mapp
     return -1;
 }
 
+/// Parse a C-RED 2 sensibility response into the exposed analog-gain preset name.
+inline int cred2AnalogGainName( std::string       &gainName, ///< [out] exposed analog-gain preset name
+                                const std::string &response  /**< [in] raw or cleaned sensibility response */
+)
+{
+    std::string clean = cred2LowerResponse( response );
+
+    if( clean.find( "medium" ) != std::string::npos || clean == "med" )
+    {
+        gainName = "med";
+        return 0;
+    }
+
+    if( clean.find( "high" ) != std::string::npos )
+    {
+        gainName = "high";
+        return 0;
+    }
+
+    if( clean.find( "low" ) != std::string::npos )
+    {
+        gainName = "low";
+        return 0;
+    }
+
+    return -1;
+}
+
+/// Convert an exposed analog-gain preset name into the C-RED 2 command argument.
+inline int cred2AnalogGainCommand( std::string       &commandGain, ///< [out] C-RED 2 sensibility command argument
+                                   const std::string &gainName     /**< [in] exposed analog-gain preset name */
+)
+{
+    if( gainName == "low" )
+    {
+        commandGain = "low";
+        return 0;
+    }
+
+    if( gainName == "med" )
+    {
+        commandGain = "medium";
+        return 0;
+    }
+
+    if( gainName == "high" )
+    {
+        commandGain = "high";
+        return 0;
+    }
+
+    return -1;
+}
+
 } // namespace
 
 inline cred2Ctrl::cred2Ctrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
@@ -385,7 +446,12 @@ inline cred2Ctrl::cred2Ctrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODI
     m_fanSpeedNames      = { "off", "p25", "p50", "p75", "p100", "auto" };
     m_fanSpeedNameLabels = { "Off", "25", "50", "75", "100", "Auto" };
     m_fanSpeedNameSet    = "auto";
-    m_ledStateSet        = true;
+
+    m_analogGainNames      = { "low", "med", "high" };
+    m_analogGainNameLabels = { "Low", "Med", "High" };
+    m_analogGainNameSet    = "med";
+
+    m_ledStateSet = true;
 
     m_temps.setInvalid();
 }
@@ -539,7 +605,8 @@ inline int cred2Ctrl::appLogic()
     {
         std::unique_lock<std::mutex> lock( m_indiMutex );
 
-        if( updateFPSLimits() < 0 || getTemps() < 0 || getFPS() < 0 || getFanSpeed() < 0 || getLEDState() < 0 )
+        if( updateFPSLimits() < 0 || getTemps() < 0 || getFPS() < 0 || getFanSpeed() < 0 || getAnalogGain() < 0 ||
+            getLEDState() < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
             {
@@ -598,6 +665,17 @@ inline int cred2Ctrl::appLogic()
         }
 
         if( getFanSpeed() < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+            {
+                return 0;
+            }
+
+            state( stateCodes::ERROR );
+            return 0;
+        }
+
+        if( getAnalogGain() < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
             {
@@ -963,6 +1041,28 @@ inline int cred2Ctrl::getFanSpeed()
     return 0;
 }
 
+inline int cred2Ctrl::getAnalogGain()
+{
+    std::string response;
+    std::string analogGain;
+
+    if( sendCommand( response, "sensibility" ) < 0 )
+    {
+        return -1;
+    }
+
+    if( cred2AnalogGainName( analogGain, response ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "failed to parse sensibility response: " + response } );
+    }
+
+    m_analogGainName    = analogGain;
+    m_analogGainNameSet = m_analogGainName;
+    m_analogGainValid   = true;
+
+    return 0;
+}
+
 inline int cred2Ctrl::getLEDState()
 {
     std::string response;
@@ -1051,8 +1151,10 @@ inline int cred2Ctrl::powerOnDefaults()
     m_tempControlOnTarget  = false;
     m_cameraCropEnabled    = false;
     m_fanSpeedValid        = false;
+    m_analogGainValid      = false;
     m_ledStateValid        = false;
     m_fanSpeedNameSet      = "auto";
+    m_analogGainNameSet    = "med";
     m_ledStateSet          = true;
 
     m_currentROI.x     = m_default_x;
@@ -1161,6 +1263,23 @@ inline int cred2Ctrl::setFanSpeed()
     }
 
     return getFanSpeed();
+}
+
+inline int cred2Ctrl::setAnalogGain()
+{
+    std::string commandGain;
+
+    if( cred2AnalogGainCommand( commandGain, m_analogGainNameSet ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "unknown analog gain preset: " + m_analogGainNameSet } );
+    }
+
+    if( issueCommand( "set sensibility " + commandGain ) < 0 )
+    {
+        return -1;
+    }
+
+    return getAnalogGain();
 }
 
 inline int cred2Ctrl::setLED()

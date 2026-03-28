@@ -80,6 +80,19 @@ struct stdCameraHasLED<derivedT, std::void_t<decltype( derivedT::c_stdCamera_led
 {
 };
 
+/// Detect whether a derived camera exposes stdCamera analog-gain control support.
+template <class derivedT, class = void>
+struct stdCameraHasAnalogGain : std::false_type
+{
+};
+
+/// Specialization for cameras that define `c_stdCamera_analogGain`.
+template <class derivedT>
+struct stdCameraHasAnalogGain<derivedT, std::void_t<decltype( derivedT::c_stdCamera_analogGain )>>
+    : std::bool_constant<derivedT::c_stdCamera_analogGain>
+{
+};
+
 /// MagAO-X standard camera interface
 /** Implements the standard interface to a MagAO-X camera.  The derived class `derivedT` must
  * meet the following requirements:
@@ -217,6 +230,22 @@ struct stdCameraHasLED<derivedT, std::void_t<decltype( derivedT::c_stdCamera_led
  *         and should populate \ref m_fanSpeedNames (and optionally \ref m_fanSpeedNameLabels) before
  *         stdCamera::appStartup().
  *
+ *     - Analog Gain:
+ *
+ *       - A static configuration variable may be defined in derivedT as
+ *         \code
+ *             static constexpr bool c_stdCamera_analogGain = true; //or: false
+ *         \endcode
+ *         which determines whether or not discrete analog-gain controls are exposed. If omitted, analog-gain
+ *         controls default to off.
+ *
+ *       - If that is set to true the derivedT must implement
+ *         \code
+ *             int setAnalogGain(); // configure the camera based on m_analogGainNameSet
+ *         \endcode
+ *         and should populate \ref m_analogGainNames (and optionally \ref m_analogGainNameLabels) before
+ *         stdCamera::appStartup().
+ *
  *     - LED Control:
  *
  *       - A static configuration variable may be defined in derivedT as
@@ -351,6 +380,8 @@ class stdCamera
         stdCameraHasFan<derivedT>::value; ///< True when the derived camera exposes fan control.
     static constexpr bool c_hasLED =
         stdCameraHasLED<derivedT>::value; ///< True when the derived camera exposes LED control.
+    static constexpr bool c_hasAnalogGain =
+        stdCameraHasAnalogGain<derivedT>::value; ///< True when the derived camera exposes analog-gain control.
 
     /** \name Configurable Parameters
      * @{
@@ -455,6 +486,19 @@ class stdCamera
     bool                     m_fanSpeedValid{ false }; ///< True once the current fan-control state is known.
 
     pcf::IndiProperty m_indiP_fanSpeed; ///< Property used to select the fan-control mode.
+
+    ///@}
+
+    /** \name Analog Gain
+     * @{
+     */
+    std::vector<std::string> m_analogGainNames;      ///< Valid analog-gain option names for the INDI selection switch.
+    std::vector<std::string> m_analogGainNameLabels; ///< Optional GUI labels for the analog-gain options.
+    std::string              m_analogGainName{ "" }; ///< Current analog-gain option name.
+    std::string              m_analogGainNameSet{ "" };  ///< Requested analog-gain option name.
+    bool                     m_analogGainValid{ false }; ///< True once the current analog-gain state is known.
+
+    pcf::IndiProperty m_indiP_analogGain; ///< Property used to select the analog-gain mode.
 
     ///@}
 
@@ -897,6 +941,26 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_fanSpeed(
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+
+    /// Interface to setAnalogGain when the derivedT exposes analog-gain controls.
+    /** Tag-dispatch resolution of analog-gain control availability will call this function.
+     * Calls derivedT::setAnalogGain.
+     */
+    int setAnalogGain( const mx::meta::trueFalseT<true> &t );
+
+    /// Interface to setAnalogGain when the derivedT does not expose analog-gain controls.
+    /** Tag-dispatch resolution of analog-gain control availability will call this function.
+     * This prevents requiring derivedT to have its own setAnalogGain().
+     */
+    int setAnalogGain( const mx::meta::trueFalseT<false> &f );
+
+    /// Callback to process a NEW analog-gain request.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_analogGain(
         const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
 
     /// Interface to setLED when the derivedT exposes LED controls.
@@ -1652,6 +1716,36 @@ int stdCamera<derivedT>::appStartup()
         }
     }
 
+    if( c_hasAnalogGain )
+    {
+        if( m_analogGainNames.empty() )
+        {
+#ifndef STDCAMERA_TEST_NOLOG
+            derivedT::template log<software_error>( { __FILE__, __LINE__, "no analog gain options configured" } );
+#endif
+            return -1;
+        }
+
+        if( m_analogGainNameLabels.size() == m_analogGainNames.size() )
+        {
+            derived().createStandardIndiSelectionSw(
+                m_indiP_analogGain, "analog_gain", m_analogGainNames, m_analogGainNameLabels, "Analog Gain", "Gain" );
+        }
+        else
+        {
+            derived().createStandardIndiSelectionSw(
+                m_indiP_analogGain, "analog_gain", m_analogGainNames, "Analog Gain", "Gain" );
+        }
+
+        if( derived().registerIndiPropertyNew( m_indiP_analogGain, st_newCallBack_stdCamera ) < 0 )
+        {
+#ifndef STDCAMERA_TEST_NOLOG
+            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+#endif
+            return -1;
+        }
+    }
+
     if( c_hasLED )
     {
         derived().createStandardIndiToggleSw( m_indiP_led, "led", "Status LED", "LED" );
@@ -2008,6 +2102,12 @@ int stdCamera<derivedT>::appLogic()
                     m_indiP_fanSpeed, m_fanSpeedName, derived().m_indiDriver, INDI_IDLE );
             }
 
+            if( c_hasAnalogGain && m_analogGainValid )
+            {
+                indi::updateSelectionSwitchIfChanged(
+                    m_indiP_analogGain, m_analogGainName, derived().m_indiDriver, INDI_IDLE );
+            }
+
             if( c_hasLED && m_ledStateValid )
             {
                 if( m_ledState )
@@ -2135,6 +2235,11 @@ int stdCamera<derivedT>::onPowerOff()
         indi::updateSelectionSwitchIfChanged( m_indiP_fanSpeed, m_fanSpeedName, derived().m_indiDriver, INDI_IDLE );
     }
 
+    if( c_hasAnalogGain && m_analogGainValid )
+    {
+        indi::updateSelectionSwitchIfChanged( m_indiP_analogGain, m_analogGainName, derived().m_indiDriver, INDI_IDLE );
+    }
+
     if( c_hasLED && m_ledStateValid )
     {
         if( m_ledState )
@@ -2182,6 +2287,11 @@ int stdCamera<derivedT>::whilePowerOff()
     if( c_hasFan && m_fanSpeedValid )
     {
         indi::updateSelectionSwitchIfChanged( m_indiP_fanSpeed, m_fanSpeedName, derived().m_indiDriver, INDI_IDLE );
+    }
+
+    if( c_hasAnalogGain && m_analogGainValid )
+    {
+        indi::updateSelectionSwitchIfChanged( m_indiP_analogGain, m_analogGainName, derived().m_indiDriver, INDI_IDLE );
     }
 
     if( c_hasLED && m_ledStateValid )
@@ -2247,6 +2357,8 @@ int stdCamera<derivedT>::newCallBack_stdCamera( const pcf::IndiProperty &ipRecv 
         return newCallBack_fps( ipRecv );
     else if( c_hasFan && name == "fan_speed" )
         return newCallBack_fanSpeed( ipRecv );
+    else if( c_hasAnalogGain && name == "analog_gain" )
+        return newCallBack_analogGain( ipRecv );
     else if( c_hasLED && name == "led" )
         return newCallBack_led( ipRecv );
     else if( derivedT::c_stdCamera_synchro && name == "synchro" )
@@ -2690,6 +2802,68 @@ int stdCamera<derivedT>::newCallBack_fanSpeed( const pcf::IndiProperty &ipRecv )
 
         mx::meta::trueFalseT<c_hasFan> tf;
         return setFanSpeed( tf );
+    }
+
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setAnalogGain( const mx::meta::trueFalseT<true> &t )
+{
+    static_cast<void>( t );
+    return derived().setAnalogGain();
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setAnalogGain( const mx::meta::trueFalseT<false> &f )
+{
+    static_cast<void>( f );
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::newCallBack_analogGain( const pcf::IndiProperty &ipRecv )
+{
+    if( c_hasAnalogGain )
+    {
+#ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+        return 0;
+#endif
+
+        std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+        std::string newAnalogGain;
+
+        for( size_t i = 0; i < m_analogGainNames.size(); ++i )
+        {
+            if( !ipRecv.find( m_analogGainNames[i] ) )
+            {
+                continue;
+            }
+
+            if( ipRecv[m_analogGainNames[i]].getSwitchState() == pcf::IndiElement::On )
+            {
+                if( newAnalogGain != "" )
+                {
+                    derivedT::template log<text_log>( "More than one analog gain selected", logPrio::LOG_ERROR );
+                    return -1;
+                }
+
+                newAnalogGain = m_analogGainNames[i];
+            }
+        }
+
+        if( newAnalogGain == "" )
+        {
+            m_analogGainNameSet = m_analogGainName;
+        }
+        else
+        {
+            m_analogGainNameSet = newAnalogGain;
+        }
+
+        mx::meta::trueFalseT<c_hasAnalogGain> tf;
+        return setAnalogGain( tf );
     }
 
     return 0;
