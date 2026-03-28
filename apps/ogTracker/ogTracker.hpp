@@ -1107,7 +1107,7 @@ inline int ogTracker::recordOgModes( bool force )
 
     if( modeAvgChanged || ( lastMetricsValid != metricsValid ) || force )
     {
-        telem<telem_dmmodes>( publishVals );
+        telem<telem_dmmodes>( telem_dmmodes::messageT( publishVals ) );
         lastPublishVals  = publishVals;
         lastMetricsValid = metricsValid;
     }
