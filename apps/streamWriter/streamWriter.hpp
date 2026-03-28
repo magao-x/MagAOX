@@ -90,6 +90,11 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     unsigned m_semWaitNSec{ 500000000 }; /**< The time in nsec to wait on the semaphore, added to m_semWaitSec.
                                               Max is 999999999. Default is 5e8 nsec. */
 
+    unsigned m_busyWaitUsec{
+        0 }; /**< If non-zero, poll the semaphore for this many microseconds instead of blocking. */
+
+    unsigned m_busySleepNsec{ 50000 }; /**< The sleep interval in nanoseconds between busy-wait semaphore polls. */
+
     int m_lz4accel{ 1 };
 
     bool m_compress{ true };
@@ -480,6 +485,26 @@ void streamWriter::setupConfig()
                 "int",
                 "The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec." );
 
+    config.add( "framegrabber.busyWaitUsec",
+                "",
+                "framegrabber.busyWaitUsec",
+                argType::Required,
+                "framegrabber",
+                "busyWaitUsec",
+                false,
+                "int",
+                "If non-zero, poll the semaphore for this many microseconds instead of blocking on it." );
+
+    config.add( "framegrabber.busySleepNsec",
+                "",
+                "framegrabber.busySleepNsec",
+                argType::Required,
+                "framegrabber",
+                "busySleepNsec",
+                false,
+                "int",
+                "The sleep interval in nanoseconds between busy-wait semaphore polls." );
+
     config.add( "framegrabber.threadPrio",
                 "",
                 "framegrabber.threadPrio",
@@ -530,6 +555,8 @@ void streamWriter::loadConfig()
 
     config( m_semaphoreNumber, "framegrabber.semaphoreNumber" );
     config( m_semWaitNSec, "framegrabber.semWait" );
+    config( m_busyWaitUsec, "framegrabber.busyWaitUsec" );
+    config( m_busySleepNsec, "framegrabber.busySleepNsec" );
 
     config( m_fgThreadPrio, "framegrabber.threadPrio" );
     config( m_fgCpuset, "framegrabber.cpuset" );
@@ -1335,10 +1362,63 @@ void streamWriter::fgThreadExec()
         // This is the main image grabbing loop.
         while( !m_shutdown && !m_restart )
         {
-            timespec ts;
-            XWC_SEM_WAIT_TS_RETVOID( ts, m_semWaitSec, m_semWaitNSec );
+            bool woke = false;
 
-            if( sem_timedwait( sem, &ts ) == 0 )
+            if( m_busyWaitUsec == 0 )
+            {
+                timespec ts;
+                XWC_SEM_WAIT_TS_RETVOID( ts, m_semWaitSec, m_semWaitNSec );
+                woke = ( sem_timedwait( sem, &ts ) == 0 );
+            }
+            else
+            {
+                timespec start;
+                timespec now;
+                timespec sleepTs{ 0, static_cast<long>( m_busySleepNsec ) };
+
+                if( clock_gettime( CLOCK_MONOTONIC, &start ) < 0 )
+                {
+                    log<software_critical>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
+                    return;
+                }
+
+                uint64_t startNs    = start.tv_sec * 1000000000ULL + start.tv_nsec;
+                uint64_t busyWaitNs = m_busyWaitUsec * 1000ULL;
+
+                while( !m_shutdown && !m_restart )
+                {
+                    if( sem_trywait( sem ) == 0 )
+                    {
+                        woke = true;
+                        break;
+                    }
+
+                    if( errno != EAGAIN && errno != EINTR )
+                    {
+                        break;
+                    }
+
+                    if( clock_gettime( CLOCK_MONOTONIC, &now ) < 0 )
+                    {
+                        log<software_critical>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
+                        return;
+                    }
+
+                    uint64_t nowNs = now.tv_sec * 1000000000ULL + now.tv_nsec;
+                    if( nowNs - startNs >= busyWaitNs )
+                    {
+                        errno = ETIMEDOUT;
+                        break;
+                    }
+
+                    if( m_busySleepNsec > 0 )
+                    {
+                        nanosleep( &sleepTs, nullptr );
+                    }
+                }
+            }
+
+            if( woke )
             {
                 while( sem_trywait( sem ) == 0 )
                 {
