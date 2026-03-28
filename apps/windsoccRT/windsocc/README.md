@@ -67,3 +67,22 @@ For embedded-Python tests, build and run `windsoccImportProbe` from `apps/windso
 ./windsoccImportProbe --python-import-root /opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src
 ./windsoccImportProbe --python-import-root /opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src --stepwise
 ```
+
+Recommended follow-up matrix:
+
+```bash
+./windsoccImportProbe --python-import-root /opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src
+./windsoccImportProbe --python-import-root /opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src --stepwise
+./windsoccImportProbe --python-import-root /opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src --spawn-thread
+./windsoccImportProbe --python-import-root /opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src --spawn-thread --install-signal-handlers
+./windsoccImportProbe --python-import-root /opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src --report-ids
+```
+
+Interpretation:
+
+- If baseline succeeds but `--spawn-thread` fails, a pre-existing thread is the leading suspect.
+- If baseline succeeds and only `--install-signal-handlers` changes behavior, signal context matters.
+- If all probe modes succeed but `windsoccRT` still fails, the remaining gap is likely deeper `MagAOXApp` context (especially the real log thread or privilege transitions).
+- Use `--report-ids` to compare the probe's real/effective ids against the installed `windsoccRT` process context before investigating setuid-related behavior further.
+
+For in-app A/B testing, compare `windsoccRT` with and without `windsocc.importBeforeShmim=true` while leaving the other debug flags enabled.
