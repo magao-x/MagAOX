@@ -161,6 +161,7 @@ apps/userGainCtrl/userGainCtrl
 #w
 apps/w2tcsOffloader/w2tcsOffloader
 apps/wooferTweeterRecon/wooferTweeterRecon
+apps/windsoccRT/exao2
 
 #x
 apps/xindiserver/tests/remoteDriver_test
