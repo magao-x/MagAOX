@@ -1367,13 +1367,17 @@ void streamWriter::fgThreadExec()
 
             if( sem_timedwait( sem, &ts ) == 0 )
             {
+                // Drain
                 while( sem_trywait( sem ) == 0 )
                 {
                 }
 
                 if( errno != EAGAIN && errno != EINTR )
                 {
-                    log<software_error>( { __FILE__, __LINE__, errno, "sem_trywait" } );
+                    if( !m_shutdown && !m_restart )
+                    {
+                        log<software_error>( { __FILE__, __LINE__, errno, "sem_trywait" } );
+                    }
                     break;
                 }
 
@@ -1418,16 +1422,17 @@ void streamWriter::fgThreadExec()
                     new_cnt0 = image.md[0].cnt0;
                 }
 
-#ifdef SW_DEBUG
+                // clang-format off
+                #ifdef SW_DEBUG
                 std::cerr << "new_cnt0: " << new_cnt0 << "\n";
-#endif
+                #endif
+                // clang-format on
 
-                ///\todo cleanup skip frame handling.
-                if( new_cnt0 == last_cnt0 ) //<- this probably isn't useful really
+                if( new_cnt0 == last_cnt0 )
                 {
                     ++m_repeatSemaphoreCount;
                     ++cnt0flag;
-                    if( cnt0flag > 10 )
+                    if( cnt0flag > 10 ) // Because of the drain this shouldn't happen
                     {
                         m_restart = true; // if we get here 10 times then something else is wrong.
                     }
@@ -1552,13 +1557,15 @@ void streamWriter::fgThreadExec()
                         m_currSaveStop        = m_currImage + 1;
                         m_currSaveStopFrameNo = new_cnt0;
 
-#ifdef SW_DEBUG
+                        // clang-format off
+                        #ifdef SW_DEBUG
                         std::cerr << __FILE__ << " " << __LINE__ << " IMAGE TIME WRITING " << m_currImage << " "
                                   << m_nextChunkStart << " "
                                   << ( m_currImage - m_nextChunkStart == m_writeChunkLength - 1 ) << " "
                                   << ( m_currImageTime - m_currChunkStartTime > maxChunkTimeNs ) << " " << new_cnt0
                                   << "\n";
-#endif
+                        #endif
+                        // clang-format on
 
                         // Now tell the writer to get going
                         if( sem_post( &m_swSemaphore ) < 0 )
@@ -1577,9 +1584,11 @@ void streamWriter::fgThreadExec()
                     m_currSaveStop        = m_currImage + 1;
                     m_currSaveStopFrameNo = new_cnt0;
 
-#ifdef SW_DEBUG
+                    // clang-format off
+                    #ifdef SW_DEBUG
                     std::cerr << __FILE__ << " " << __LINE__ << " STOP_WRITING\n";
-#endif
+                    #endif
+                    // clang-format on
 
                     // Now tell the writer to get going
                     if( sem_post( &m_swSemaphore ) < 0 )
