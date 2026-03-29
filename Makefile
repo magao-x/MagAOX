@@ -329,7 +329,7 @@ clean: libs_clean apps_clean pythonapps_clean guis_clean utils_clean tests_clean
 
 #Clean everything.
 .PHONY: all_clean
-all_clean: indi_clean libs_clean flatlogs_clean libs_clean apps_clean guis_clean utils_clean doc_clean tests_clean
+all_clean: indi_clean libs_clean flatlogs_clean libs_clean apps_clean guis_clean rtimv_plugins_clean utils_clean doc_clean tests_clean
 
 flatlogs/bin/flatlogcodes: flatlogs/src/flatlogcodes.cpp
 	cd flatlogs/src/ && ${MAKE} install
