@@ -455,7 +455,7 @@ inline int ogTracker::appStartup()
     //CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaRms, "pca_rms", "Rolling PCA RMS", "PCA" );
     CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOG, "pca_og", "Instantaneous PCA RMS / Ref RMS", "PCA" );
     CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOGAvg, "pca_og_avg", "Running-average PCA RMS / Ref RMS", "PCA" );
-    CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOGSummary, "og_summary", "Mean pca_og_avg across modes <= 1", "PCA" );
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOGSummary, "og_summary", "Mean of valid pca_og_avg across modes, "PCA" );
     for( const auto &el : m_modeEls )
     {
         //m_indiP_pcaRms.add( pcf::IndiElement( el, 0 ) );
