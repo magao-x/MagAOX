@@ -378,7 +378,10 @@ int zaberCtrl::appLogic()
             }
         }
 
-        recordStage();
+        if( dev::stdMotionStage<zaberCtrl>::updateINDI() < 0 )
+        {
+            log<software_error>( { __FILE__, __LINE__ } );
+        }
 
         // record telem if it's been longer than 10 sec:
         if( telemeter<zaberCtrl>::appLogic() < 0 )
@@ -731,6 +734,7 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState )( const pcf::IndiProperty 
         state( stateCodes::POWEROFF );
         m_moving = -2;
         syncPowerOffStageTelemetry();
+        dev::stdMotionStage<zaberCtrl>::updateINDI();
         dev::stdMotionStage<zaberCtrl>::recordStage( true );
     }
     else if( sstr == "POWERON" )
@@ -935,6 +939,7 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageParked )( const pcf::IndiProperty
     if( state() == stateCodes::POWEROFF )
     {
         syncPowerOffStageTelemetry();
+        dev::stdMotionStage<zaberCtrl>::updateINDI();
         dev::stdMotionStage<zaberCtrl>::recordStage( true );
     }
 
