@@ -5,8 +5,9 @@ This script performs the initial data reduction steps:
   1. Dark subtraction using a provided dark FITS file (calibration data taken 
      with a closed shutter but nonzero exposure time). The dark file is assumed 
      to have shape (120, 120).
-  2. Reference subtraction: either load an existing reference or create one
-     from a mean stack of a specified number of raw FITS files.
+  2. Reference subtraction (optional via ``SUBTRACT_REFERENCE``): either load an existing
+     reference or create one from a mean stack. When disabled, frames are only divided by
+     the noise map (per-pixel std + 1) after dark subtraction.
   3. Cropping each frame in the data cube to extract a single pupil (one quadrant)
      of the pyramid wavefront sensor. The data cube is assumed to have shape 
      (512, 120, 120) where each of the 512 frames is processed.
@@ -201,6 +202,12 @@ def get_reduce_settings(args, config_params):
             fallback_key="SUBTRACT_DARK",
             default=False,
         ),
+        "subtract_reference": resolve_bool_setting(
+            getattr(args, "subtract_reference", None),
+            config_params,
+            "SUBTRACT_REFERENCE",
+            default=True,
+        ),
     }
 
 
@@ -232,14 +239,28 @@ def create_reference_from_cubes(cubes, nstack, dark_img=None):
     return reference, noise
 
 
-def process_cube(cube, reference, noise, quadrant, pupil_centers, pupil_mask_radius,
-                 start_frame, num_frames_skip, group_size, dark=None):
+def process_cube(
+    cube,
+    reference,
+    noise,
+    quadrant,
+    pupil_centers,
+    pupil_mask_radius,
+    start_frame,
+    num_frames_skip,
+    group_size,
+    dark=None,
+    subtract_reference=True,
+):
     """Process one in-memory raw cube and return the reduced cropped cube."""
     if dark is not None:
         cube_ds = cube - dark
     else:
         cube_ds = cube
-    cube_rs = cube_ds - reference
+    if subtract_reference:
+        cube_rs = cube_ds - reference
+    else:
+        cube_rs = cube_ds
     cube_norm = cube_rs / noise
     cube_reduced = block_reduce(cube_norm, block_size=(group_size, 1, 1), func=np.mean)
     cube_no_spark = cube_reduced[start_frame::num_frames_skip]
@@ -252,16 +273,28 @@ def process_cube(cube, reference, noise, quadrant, pupil_centers, pupil_mask_rad
     return np.array(cropped_frames)
 
 
-def process_file(filepath, reference, noise, quadrant, pupil_centers, pupil_mask_radius,
-                 start_frame, num_frames_skip, group_size, dark=None):
+def process_file(
+    filepath,
+    reference,
+    noise,
+    quadrant,
+    pupil_centers,
+    pupil_mask_radius,
+    start_frame,
+    num_frames_skip,
+    group_size,
+    dark=None,
+    subtract_reference=True,
+):
     """
     Process a single FITS cube file:
       - Reads the cube (shape: (512, 120, 120)).
       - Applies dark subtraction by subtracting the dark image (of shape (120,120))
         from each frame.
-      - Subtracts the reference image from each dark-subtracted frame.
+      - Optionally subtracts the reference image from each dark-subtracted frame.
+      - Divides by the noise map (normalization).
       - Crops each frame to extract the specified pupil quadrant.
-    
+
     Returns:
       The processed cube where each frame has been cropped to the desired quadrant.
     """
@@ -279,6 +312,7 @@ def process_file(filepath, reference, noise, quadrant, pupil_centers, pupil_mask
         num_frames_skip,
         group_size,
         dark,
+        subtract_reference=subtract_reference,
     )
 
 def find_subdirectories(top_level_dir):
@@ -397,9 +431,20 @@ def load_dark_file(data_dir, top_level_dir):
     logging.info("Skipping dark subtraction step...")
     return None
 
-def process_dataset(data_dir, top_level_dir, nstack, pupil_centers, pupil_mask_radius,
-                    start_frame=0, step_frame=1, group_size=8, create_reference_flag=True,
-                    remake_ref=False, skip_dark=False):
+def process_dataset(
+    data_dir,
+    top_level_dir,
+    nstack,
+    pupil_centers,
+    pupil_mask_radius,
+    start_frame=0,
+    step_frame=1,
+    group_size=8,
+    create_reference_flag=True,
+    remake_ref=False,
+    skip_dark=False,
+    subtract_reference=True,
+):
     """
     Process all FITS files in the raw data directory:
       - Loads the dark file (from top-level or subdirectory).
@@ -415,6 +460,7 @@ def process_dataset(data_dir, top_level_dir, nstack, pupil_centers, pupil_mask_r
         group_size: Number of frames to average
         remake_ref: Force recreation of reference
         skip_dark: Skip dark subtraction entirely
+        subtract_reference: If False, skip reference subtraction; still normalize by noise.
     """
     subdir_name = os.path.basename(data_dir)
     logging.info("=" * 60)
@@ -475,7 +521,13 @@ def process_dataset(data_dir, top_level_dir, nstack, pupil_centers, pupil_mask_r
             dark,
             remake_ref=True,
         )
-    
+
+    if not subtract_reference:
+        logging.info(
+            "[%s] SUBTRACT_REFERENCE is false: noise normalization only (no reference subtraction).",
+            subdir_name,
+        )
+
     for pup in quadrants:
         saveprocessed_to = f"{processed_dir}/{pup}"
         os.makedirs(saveprocessed_to, exist_ok=True)
@@ -493,6 +545,7 @@ def process_dataset(data_dir, top_level_dir, nstack, pupil_centers, pupil_mask_r
                 step_frame,
                 group_size,
                 dark,
+                subtract_reference=subtract_reference,
             )
             output_path = os.path.join(saveprocessed_to, f)
             write_fits_cube(output_path, processed_cube)
@@ -501,9 +554,22 @@ def process_dataset(data_dir, top_level_dir, nstack, pupil_centers, pupil_mask_r
     return True
 
 
-def process_batch_in_memory(frames, data_dir, top_level_dir, nstack, pupil_centers, pupil_mask_radius,
-                            frames_per_cube, start_frame=0, step_frame=1, group_size=8,
-                            create_reference_flag=True, remake_ref=False, skip_dark=False):
+def process_batch_in_memory(
+    frames,
+    data_dir,
+    top_level_dir,
+    nstack,
+    pupil_centers,
+    pupil_mask_radius,
+    frames_per_cube,
+    start_frame=0,
+    step_frame=1,
+    group_size=8,
+    create_reference_flag=True,
+    remake_ref=False,
+    skip_dark=False,
+    subtract_reference=True,
+):
     """Reduce a realtime batch in memory and return concatenated quadrant cubes."""
     if frames.ndim != 3:
         raise ValueError(f"Expected batch frames with shape (n_frames, y, x), got {frames.shape}")
@@ -542,6 +608,9 @@ def process_batch_in_memory(frames, data_dir, top_level_dir, nstack, pupil_cente
     else:
         reference, noise = create_reference_from_cubes(raw_cubes, nstack, dark_img=dark)
 
+    if not subtract_reference:
+        logging.info("SUBTRACT_REFERENCE is false: applying noise normalization only (no reference subtraction).")
+
     reduced_quadrants = {}
     reduced_frames_per_cube = None
     for quadrant in QUADRANTS:
@@ -557,6 +626,7 @@ def process_batch_in_memory(frames, data_dir, top_level_dir, nstack, pupil_cente
                 step_frame,
                 group_size,
                 dark,
+                subtract_reference=subtract_reference,
             )
             for cube in raw_cubes
         ]
@@ -573,9 +643,20 @@ def process_batch_in_memory(frames, data_dir, top_level_dir, nstack, pupil_cente
         "noise": noise,
     }
 
-def process_subdirectory(subdir_path, top_level_dir, nstack, pupil_centers, pupil_mask_radius,
-                        start_frame, step_frame, group_size, create_reference_flag,
-                        remake_ref, skip_dark):
+def process_subdirectory(
+    subdir_path,
+    top_level_dir,
+    nstack,
+    pupil_centers,
+    pupil_mask_radius,
+    start_frame,
+    step_frame,
+    group_size,
+    create_reference_flag,
+    remake_ref,
+    skip_dark,
+    subtract_reference=True,
+):
     """
     Wrapper function to process a single subdirectory.
     This is designed to be called in parallel.
@@ -596,6 +677,7 @@ def process_subdirectory(subdir_path, top_level_dir, nstack, pupil_centers, pupi
             create_reference_flag,
             remake_ref,
             skip_dark,
+            subtract_reference=subtract_reference,
         )
         return (subdir_path, success)
     except Exception as e:
@@ -637,6 +719,21 @@ def main():
                         help="Skip the dark frame subtraction.")
     parser.add_argument('--no-skip-dark', dest='skip_dark', action='store_false',
                         help="Apply dark subtraction when dark files are available.")
+    ref_sub = parser.add_mutually_exclusive_group()
+    ref_sub.add_argument(
+        '--subtract-reference',
+        dest='subtract_reference',
+        action='store_true',
+        default=None,
+        help="Subtract mean reference before dividing by noise (overrides SUBTRACT_REFERENCE in config).",
+    )
+    ref_sub.add_argument(
+        '--no-subtract-reference',
+        dest='subtract_reference',
+        action='store_false',
+        default=None,
+        help="Noise normalization only; do not subtract reference (overrides config).",
+    )
     parser.add_argument('--workers', type=int, default=None,
                         help="Number of parallel workers (default: number of CPU cores)")
     
@@ -713,6 +810,7 @@ def main():
                 settings["create_reference"],
                 settings["remake_reference"],
                 settings["skip_dark"],
+                settings["subtract_reference"],
             )
             results.append(result)
     else:
@@ -732,6 +830,7 @@ def main():
                     settings["create_reference"],
                     settings["remake_reference"],
                     settings["skip_dark"],
+                    settings["subtract_reference"],
                 ): subdir
                 for subdir in subdirs
             }

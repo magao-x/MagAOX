@@ -378,6 +378,7 @@ def resolve_reduce_settings(config_params: dict) -> dict:
             config_params.get("REMAKE_REFERENCE", config_params.get("REMAKE_REF", False))
         ),
         "skip_dark": bool(config_params.get("SKIP_DARK", config_params.get("SUBTRACT_DARK", False))),
+        "subtract_reference": bool(config_params.get("SUBTRACT_REFERENCE", True)),
     }
 
 
@@ -472,6 +473,7 @@ def process_collected_batch(
         reduce_settings["create_reference"],
         reduce_settings["remake_reference"],
         reduce_settings["skip_dark"],
+        subtract_reference=reduce_settings["subtract_reference"],
     )
     if reduce_result["dropped_frames"] > 0:
         logging.info(

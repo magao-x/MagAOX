@@ -7,6 +7,7 @@ SKIP_DARK: false
 NSTACK: null  # use all raw FITS files when building the reference
 CREATE_REFERENCE: true
 REMAKE_REFERENCE: false
+SUBTRACT_REFERENCE: true # when false, skip subtracting the mean reference; still divide by noise (per-frame std map)
 WORKERS: null  # default to cpu_count()
 DIAM_PUPILS: 56  # pixels
 UL_CENTER: [30, 90]
