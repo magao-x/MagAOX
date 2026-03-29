@@ -445,11 +445,12 @@ def process_single_cc_cube(
             "track_id_num": pl.Int64,
             "flux": pl.Float64,
             "flux_err": pl.Float64,
+            "source_area": pl.Float64,
         }
     )
     if (
         not cube_sources.is_empty()
-        and {"track_id", "frames", "flux", "flux_err"}.issubset(set(cube_sources.columns))
+        and {"track_id", "frames", "flux", "flux_err", "source_area"}.issubset(set(cube_sources.columns))
     ):
         first_five_flux = (
             cube_sources.with_columns(
@@ -457,6 +458,7 @@ def process_single_cc_cube(
                 frame_num=_numeric_expr("frames"),
                 flux_num=_numeric_expr("flux"),
                 flux_err_num=_numeric_expr("flux_err"),
+                source_area_num=_numeric_expr("source_area"),
             )
             .drop_nulls(subset=["track_id_num", "frame_num"])
             .sort(["track_id_num", "frame_num"])
@@ -468,6 +470,7 @@ def process_single_cc_cube(
                 [
                     pl.col("flux_num").mean().alias("flux"),
                     pl.col("flux_err_num").mean().alias("flux_err"),
+                    pl.col("source_area_num").mean().alias("source_area"),
                 ]
             )
         # drop the first 3 measurements of flux bc they are noisy
@@ -477,6 +480,7 @@ def process_single_cc_cube(
                 [
                     pl.col("flux_num").mean().alias("flux"),
                     pl.col("flux_err_num").mean().alias("flux_err"),
+                    pl.col("source_area_num").mean().alias("source_area"),
                 ]
             )
     summary_tracks = cube_sources.clone()
@@ -502,8 +506,11 @@ def process_single_cc_cube(
                 .with_columns(
                     pl.coalesce([pl.col("flux_first3"), pl.col("flux")]).alias("flux"),
                     pl.coalesce([pl.col("flux_err_first3"), pl.col("flux_err")]).alias("flux_err"),
+                    pl.coalesce([pl.col("source_area_first3"), pl.col("source_area")]).alias(
+                        "source_area"
+                    ),
                 )
-                .drop(["track_id_num", "flux_first3", "flux_err_first3"])
+                .drop(["track_id_num", "flux_first3", "flux_err_first3", "source_area_first3"])
             )
     # cc_cube_clamped = np.clip(cc_cube, 0, None)
     mask_cube = np.stack(mask_frames, axis=0) if mask_frames else np.empty((0, *cc_cube[0].shape))

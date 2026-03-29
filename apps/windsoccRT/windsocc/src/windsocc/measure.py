@@ -44,7 +44,6 @@ Things like the PA offset, time of transit, how to mask the pupils, etc.
 All of the measure code has been converted to polars by GPT Codex 5.4
 for performance reasons. I've so far observed a x2 speedup JKK 03/21/2026
 
-TODO output source area in final JSON output
 TODO apply parity flip when HA is positive
 
 """
@@ -161,6 +160,7 @@ def summarize_wind_tracks(cube_sources: object) -> dict:
         "frames",
         "flux",
         "flux_err",
+        "source_area",
     }
     if not required_cols.issubset(set(cube_sources.columns)):
         return {"tracks": []}
@@ -174,6 +174,7 @@ def summarize_wind_tracks(cube_sources: object) -> dict:
             pl.col("frames").cast(pl.Int64, strict=False).alias("frames"),
             pl.col("flux").cast(pl.Float64, strict=False).alias("flux"),
             pl.col("flux_err").cast(pl.Float64, strict=False).alias("flux_err"),
+            pl.col("source_area").cast(pl.Float64, strict=False).alias("source_area"),
         ]
     ).drop_nulls(
         subset=["track_id", "direction", "velocity_m_per_s", "matches", "frames"]
@@ -191,6 +192,7 @@ def summarize_wind_tracks(cube_sources: object) -> dict:
                 pl.col("matches").max().alias("matches"),
                 pl.col("flux").mean().alias("flux"),
                 pl.col("flux_err").mean().alias("flux_err"),
+                pl.col("source_area").mean().alias("source_area"),
             ]
         )
         .sort("track_id")
@@ -203,6 +205,7 @@ def summarize_wind_tracks(cube_sources: object) -> dict:
             "matches": int(row["matches"]),
             "flux": float(row["flux"]),
             "flux_err": float(row["flux_err"]),
+            "source_area": float(row["source_area"]),
         }
         for row in summarized.iter_rows(named=True)
     ]

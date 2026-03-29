@@ -1,4 +1,9 @@
-"""Realtime orchestration for the WindsoCC pipeline."""
+"""Realtime orchestration for the WindsoCC pipeline.
+
+
+TODO check the pupil coordinates using references made from
+today's data
+"""
 
 from __future__ import annotations
 

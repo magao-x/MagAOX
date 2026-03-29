@@ -27,6 +27,7 @@ SOURCE_SCHEMA: dict[str, pl.DataType] = {
     "a": pl.Float64,
     "b": pl.Float64,
     "theta": pl.Float64,
+    "source_area": pl.Float64,
 }
 SOURCE_COLUMNS = list(SOURCE_SCHEMA.keys())
 REJECTED_SOURCE_SCHEMA: dict[str, pl.DataType] = {
@@ -224,6 +225,12 @@ class WindTracker:
         source_a = sources_in_frame["a"]
         source_b = sources_in_frame["b"]
         source_theta = sources_in_frame["theta"]
+        if "npix" in source_field_names:
+            source_area = np.asarray(sources_in_frame["npix"], dtype=np.float64)
+        elif "tnpix" in source_field_names:
+            source_area = np.asarray(sources_in_frame["tnpix"], dtype=np.float64)
+        else:
+            source_area = np.full(len(source_xs), np.nan, dtype=np.float64)
 
         time_elapsed = max(frame_index * time_per_frame, time_per_frame)
         distance_traveled_px = source_dists_from_origin
@@ -263,6 +270,7 @@ class WindTracker:
                 "a": source_a,
                 "b": source_b,
                 "theta": source_theta,
+                "source_area": source_area,
             },
             schema=SOURCE_SCHEMA,
         )
