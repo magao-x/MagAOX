@@ -1,5 +1,7 @@
 # Step 1: REDUCE
 FILE_PREFIX: "camwfs_"
+REDUCE_DIR: "reduce_results" # directory for optional saved reduced quadrant FITS cubes (default: "reduce_results")
+SAVE_REDUCED_QUADRANTS: false # when true, write one FITS cube per quadrant here after reduce (for debugging)
 SUBTRACT_DARK: False
 SKIP_DARK: false
 NSTACK: null  # use all raw FITS files when building the reference

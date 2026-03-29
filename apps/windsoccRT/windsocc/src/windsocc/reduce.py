@@ -55,6 +55,60 @@ def write_fits_cube(filepath, data):
     hdu = fits.PrimaryHDU(data)
     hdu.writeto(filepath, overwrite=True)
 
+
+def save_reduced_quadrant_cubes(
+    run_dir: str,
+    reduced_quadrants: dict,
+    group_suffix: str,
+    reduce_dir_name: str = "reduce_results",
+) -> list[str]:
+    """Write each quadrant's reduced cube under ``run_dir/reduce_dir_name``.
+
+    Filenames follow ``{group_suffix}_{quadrant}_reduced.fits``, consistent with
+    the batch ``group_suffix`` used elsewhere in the realtime pipeline.
+
+    Parameters
+    ----------
+    run_dir:
+        Realtime run root (e.g. ``camwfs_<timestamp>/``).
+    reduced_quadrants:
+        Mapping quadrant name -> array with shape ``(n_frames, height, width)``.
+    group_suffix:
+        Stem shared with other products (e.g. ``camwfs_<timestamp>_00000``).
+    reduce_dir_name:
+        Subdirectory of ``run_dir``, or an absolute path; default ``reduce_results`` matches
+        ``REDUCE_DIR`` in config (same convention as ``XCORR_DIR`` / ``DISTILL_DIR``).
+
+    Returns
+    -------
+    list of str
+        Paths written, in quadrant order ``ul``, ``ur``, ``ll``, ``lr``.
+    """
+    out_dir = (
+        reduce_dir_name
+        if os.path.isabs(reduce_dir_name)
+        else os.path.join(run_dir, reduce_dir_name)
+    )
+    os.makedirs(out_dir, exist_ok=True)
+    paths: list[str] = []
+    for quadrant in QUADRANTS:
+        cube = reduced_quadrants.get(quadrant)
+        if cube is None:
+            logging.warning("Missing reduced cube for quadrant %s; skipping save.", quadrant)
+            continue
+        fname = f"{group_suffix}_{quadrant}_reduced.fits"
+        fpath = os.path.join(out_dir, fname)
+        write_fits_cube(fpath, np.asarray(cube, dtype=np.float32))
+        paths.append(fpath)
+    if paths:
+        logging.info(
+            "Saved %d reduced quadrant cube(s) under %s",
+            len(paths),
+            out_dir,
+        )
+    return paths
+
+
 # --- Processing Functions ---
 def parse_config_file(config_path):
     """Load the pipeline configuration file."""

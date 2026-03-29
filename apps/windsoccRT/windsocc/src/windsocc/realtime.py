@@ -18,7 +18,13 @@ from astropy.io import fits
 
 from windsocc.distill import run_distill_stage, run_distill_stage_in_memory
 from windsocc.measure import run_measure_stage
-from windsocc.reduce import get_pupil_geometry, parse_config_file, process_batch_in_memory, process_dataset
+from windsocc.reduce import (
+    get_pupil_geometry,
+    parse_config_file,
+    process_batch_in_memory,
+    process_dataset,
+    save_reduced_quadrant_cubes,
+)
 from windsocc.xcorr import run_xcorr_stage, run_xcorr_stage_in_memory
 
 DEFAULT_FRAMES_PER_CUBE = 512
@@ -474,6 +480,14 @@ def process_collected_batch(
             frames_per_cube,
         )
     reduce_result["group_suffix"] = f"{file_prefix}{format_batch_timestamp(batch.first_timestamp)}_00000"
+    if config_params.get("SAVE_REDUCED_QUADRANTS", False):
+        reduce_dir = config_params.get("REDUCE_DIR", "reduce_results")
+        save_reduced_quadrant_cubes(
+            run_dir,
+            reduce_result["reduced_quadrants"],
+            reduce_result["group_suffix"],
+            reduce_dir_name=reduce_dir,
+        )
     timings_s["reduce"] = perf_counter() - t0
 
     t0 = perf_counter()
