@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import inspect
 import json
 import logging
 import os
@@ -76,6 +77,100 @@ def format_batch_timestamp(timestamp: datetime) -> str:
     return timestamp.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
 
 
+def parity_flip_needed_from_hour_angle(ha_deg: float) -> bool:
+    """Infer parity-flip bookkeeping from hour angle (degrees) alone.
+
+    Uses the usual equatorial convention: negative HA is east of the meridian
+    (before transit), positive HA is west (after transit). Here
+    "parity_flip_needed" is True when ``ha_deg > 0`` (after meridian). At
+    ``ha_deg == 0`` returns False.
+    """
+    return ha_deg > 0.0
+
+
+def _indi_number_member_to_float(node) -> float:
+    """Best-effort float from a purepyindi2 number element or mapping."""
+    if isinstance(node, (int, float)):
+        return float(node)
+    if isinstance(node, dict):
+        for key in ("current", "value"):
+            if key in node and node[key] is not None:
+                return float(node[key])
+    for attr in ("value",):
+        if hasattr(node, attr):
+            v = getattr(node, attr)
+            if v is not None:
+                return float(v)
+    if hasattr(node, "__getitem__"):
+        for key in ("current", "value"):
+            try:
+                return float(node[key])
+            except (KeyError, TypeError, ValueError):
+                continue
+    return float(node)
+
+
+def _construct_indi_client(host: str, port: int):
+    """Instantiate ``IndiClient`` with host/port when the installed API supports it."""
+    import purepyindi2 as indi
+
+    cls = indi.client.IndiClient
+    try:
+        sig = inspect.signature(cls.__init__)
+        params = sig.parameters
+    except (TypeError, ValueError):
+        return cls()
+
+    kwargs = {}
+    if "host" in params:
+        kwargs["host"] = host
+    if "port" in params:
+        kwargs["port"] = port
+    if "hostname" in params and "host" not in kwargs:
+        kwargs["hostname"] = host
+    if "address" in params:
+        kwargs["address"] = (host, port)
+    try:
+        return cls(**kwargs) if kwargs else cls()
+    except TypeError:
+        return cls()
+
+
+def fetch_hour_angle_deg(config_params: dict) -> float | None:
+    """Read ``telpos.ha`` (degrees) from INDI when ``FETCH_HOUR_ANGLE`` is true.
+
+    Requires optional dependency ``purepyindi2`` (``pip install windsocc[indi]``).
+    Returns ``None`` if disabled, import fails, or the read errors.
+    """
+    if not config_params.get("FETCH_HOUR_ANGLE", False):
+        return None
+    try:
+        import purepyindi2  # noqa: F401
+    except ImportError:
+        logging.warning(
+            "FETCH_HOUR_ANGLE is enabled but purepyindi2 is not installed "
+            "(install: pip install 'windsocc[indi]')."
+        )
+        return None
+
+    device = str(config_params.get("TCS_INDI_DEVICE", "tcsi"))
+    host = str(config_params.get("INDI_HOST", "127.0.0.1"))
+    port = int(config_params.get("INDI_PORT", 7624))
+
+    try:
+        client = _construct_indi_client(host, port)
+        client.connect()
+        client.wait_to_connect()
+        client.get_properties_and_wait(device)
+        telpos = client[device]["telpos"]
+        ha_deg = _indi_number_member_to_float(telpos["ha"])
+        logging.info("INDI telpos.ha = %.6f deg (device=%s)", ha_deg, device)
+        return ha_deg
+    except Exception as exc:
+        logging.warning("Could not read hour angle from INDI: %s", exc)
+        return None
+
+
 @dataclass
 class FrameBatch:
     """A collected batch of camwfs frames."""
@@ -93,6 +188,8 @@ class BatchRunSummary:
     timings_s: dict[str, float]
     json_paths: list[str]
     movie_paths: list[str]
+    hour_angle_deg: float | None = None
+    parity_flip_needed: bool | None = None
 
 
 class FrameSource(ABC):
@@ -379,6 +476,7 @@ def resolve_reduce_settings(config_params: dict) -> dict:
         ),
         "skip_dark": bool(config_params.get("SKIP_DARK", config_params.get("SUBTRACT_DARK", False))),
         "subtract_reference": bool(config_params.get("SUBTRACT_REFERENCE", True)),
+        "inspect_reduction": bool(config_params.get("INSPECT_REDUCTION", False)),
     }
 
 
@@ -417,18 +515,19 @@ def maybe_cleanup_intermediate(run_dir: str, config_params: dict):
 
 def write_batch_summary(summary: BatchRunSummary):
     summary_path = os.path.join(summary.run_dir, "realtime_batch_summary.json")
+    payload = {
+        "run_dir": summary.run_dir,
+        "raw_cube_paths": summary.raw_cube_paths,
+        "timings_s": summary.timings_s,
+        "json_paths": summary.json_paths,
+        "movie_paths": summary.movie_paths,
+    }
+    if summary.hour_angle_deg is not None:
+        payload["hour_angle_deg"] = summary.hour_angle_deg
+    if summary.parity_flip_needed is not None:
+        payload["parity_flip_needed"] = summary.parity_flip_needed
     with open(summary_path, "w", encoding="utf-8") as outfile:
-        json.dump(
-            {
-                "run_dir": summary.run_dir,
-                "raw_cube_paths": summary.raw_cube_paths,
-                "timings_s": summary.timings_s,
-                "json_paths": summary.json_paths,
-                "movie_paths": summary.movie_paths,
-            },
-            outfile,
-            indent=2,
-        )
+        json.dump(payload, outfile, indent=2)
 
 
 def process_collected_batch(
@@ -445,6 +544,18 @@ def process_collected_batch(
     config_params = parse_config_file(config_path)
     file_prefix = config_params.get("FILE_PREFIX", "camwfs_")
     validate_frame_batch(batch.frames)
+
+    hour_angle_deg: float | None = None
+    parity_flip_needed: bool | None = None
+    if config_params.get("FETCH_HOUR_ANGLE", False):
+        hour_angle_deg = fetch_hour_angle_deg(config_params)
+        if hour_angle_deg is not None:
+            parity_flip_needed = parity_flip_needed_from_hour_angle(hour_angle_deg)
+            logging.info(
+                "Hour angle %.6f deg -> parity_flip_needed=%s",
+                hour_angle_deg,
+                parity_flip_needed,
+            )
 
     timings_s = dict(initial_timings_s or {})
 
@@ -474,6 +585,7 @@ def process_collected_batch(
         reduce_settings["remake_reference"],
         reduce_settings["skip_dark"],
         subtract_reference=reduce_settings["subtract_reference"],
+        inspect_reduction=reduce_settings["inspect_reduction"],
     )
     if reduce_result["dropped_frames"] > 0:
         logging.info(
@@ -482,13 +594,15 @@ def process_collected_batch(
             frames_per_cube,
         )
     reduce_result["group_suffix"] = f"{file_prefix}{format_batch_timestamp(batch.first_timestamp)}_00000"
-    if config_params.get("SAVE_REDUCED_QUADRANTS", False):
+    if reduce_settings["inspect_reduction"]:
         reduce_dir = config_params.get("REDUCE_DIR", "reduce_results")
         save_reduced_quadrant_cubes(
             run_dir,
             reduce_result["reduced_quadrants"],
             reduce_result["group_suffix"],
             reduce_dir_name=reduce_dir,
+            max_frames=reduce_result["reduced_frames_per_cube"],
+            name_suffix="_inspect",
         )
     timings_s["reduce"] = perf_counter() - t0
 
@@ -541,6 +655,8 @@ def process_collected_batch(
         timings_s=timings_s,
         json_paths=measure_result["json_paths"],
         movie_paths=measure_result["movie_paths"],
+        hour_angle_deg=hour_angle_deg,
+        parity_flip_needed=parity_flip_needed,
     )
     write_batch_summary(summary)
 

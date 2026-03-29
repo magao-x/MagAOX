@@ -4,6 +4,12 @@ Optimized for high-rate streams (e.g. ~2 kHz): by default each sample reads the
 current shmim buffer without blocking on a new frame, so consecutive rows may
 repeat or skip updates relative to the writer. Use ``--wait-new-frame`` when you
 need semaphore-synced frames at lower rates.
+
+After each ``get_data``, the script compares ``image.md.cnt0`` to the previous
+grab: a step greater than 1 means the writer advanced faster than consecutive
+grabs (missed frames). With ``--wait-new-frame``, a step of 1 each time indicates
+you are keeping up with new frames. Use ``--cnt0-diagnostics`` for per-grab
+duplicate/skip detail when not waiting.
 """
 
 from __future__ import annotations
@@ -19,6 +25,14 @@ from windsocc.realtime import (
     run_embedded_batch,
     validate_frame_batch,
 )
+
+
+def _shmim_cnt0(image) -> int | None:
+    """Return ImageStreamIO ``cnt0`` (writer frame counter) if available."""
+    try:
+        return int(image.md.cnt0)
+    except (AttributeError, TypeError, ValueError):
+        return None
 
 
 def parse_args():
@@ -113,6 +127,15 @@ def parse_args():
         default="INFO",
         help="Logging level for the debug script.",
     )
+    parser.add_argument(
+        "--cnt0-diagnostics",
+        action="store_true",
+        help=(
+            "After each grab, compare shmim md.cnt0 to the previous sample: log gaps (skipped writer frames) "
+            "and, when not using --wait-new-frame, duplicate cnt0 (same frame sampled twice). "
+            "Summary is always logged at end when cnt0 is readable."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -147,12 +170,52 @@ def collect_live_batch(args) -> tuple[np.ndarray, datetime]:
     first_timestamp = None
     wait = args.wait_new_frame
 
+    prev_cnt0: int | None = None
+    cnt0_first: int | None = None
+    cnt0_last: int | None = None
+    skipped_writer_frames = 0
+    max_cnt0_gap = 0
+    duplicate_cnt0_reads = 0
+    cnt0_unavailable = False
+
     for frame_index in range(args.frame_count):
         frame = image.get_data(
             wait=wait,
             timeout_sec=args.timeout_seconds,
             check_before_wait=args.check_before_wait,
         )
+        cnt0_now = _shmim_cnt0(image)
+        if cnt0_now is None:
+            cnt0_unavailable = True
+        else:
+            if cnt0_first is None:
+                cnt0_first = cnt0_now
+            if prev_cnt0 is not None:
+                delta = cnt0_now - prev_cnt0
+                if delta > 1:
+                    gap = delta - 1
+                    skipped_writer_frames += gap
+                    max_cnt0_gap = max(max_cnt0_gap, delta)
+                    msg = (
+                        "cnt0 advanced by %d from %d to %d at grab %d/%d — "
+                        "writer published %d frame(s) between consecutive grabs (possible miss)."
+                    ) % (delta, prev_cnt0, cnt0_now, frame_index + 1, args.frame_count, gap)
+                    if wait:
+                        logging.warning(msg)
+                    elif args.cnt0_diagnostics:
+                        logging.warning(msg)
+                elif delta == 0 and not wait:
+                    duplicate_cnt0_reads += 1
+                    if args.cnt0_diagnostics:
+                        logging.debug(
+                            "cnt0 unchanged at %d on grab %d/%d (same buffer sampled twice; expected without wait).",
+                            cnt0_now,
+                            frame_index + 1,
+                            args.frame_count,
+                        )
+            prev_cnt0 = cnt0_now
+            cnt0_last = cnt0_now
+
         frame_array = np.asarray(frame, dtype=np.float32)
         if frame_array.ndim != 2:
             frame_array = np.squeeze(frame_array)
@@ -175,6 +238,32 @@ def collect_live_batch(args) -> tuple[np.ndarray, datetime]:
 
     validate_frame_batch(batch, (args.frame_height, args.frame_width))
     logging.info("Collected live batch with shape=%s dtype=%s", batch.shape, batch.dtype)
+
+    if cnt0_unavailable:
+        logging.info("shmim cnt0 not read (md.cnt0 missing); skip gap/duplicate counter diagnostics.")
+    elif cnt0_first is not None and cnt0_last is not None:
+        total_cnt0_span = cnt0_last - cnt0_first
+        expected_steps = args.frame_count - 1
+        logging.info(
+            "cnt0 summary: first=%d last=%d span=%d (expected ~%d steps for consecutive grabs with no writer skips)",
+            cnt0_first,
+            cnt0_last,
+            total_cnt0_span,
+            expected_steps,
+        )
+        if skipped_writer_frames:
+            logging.warning(
+                "cnt0: implied %d writer frame(s) skipped between grabs (max single gap=%d).",
+                skipped_writer_frames,
+                max_cnt0_gap,
+            )
+        elif wait:
+            logging.info("cnt0: no gaps >1 between grabs — consistent with receiving each new frame once.")
+        if not wait and duplicate_cnt0_reads:
+            logging.info(
+                "cnt0: %d grab(s) saw the same cnt0 as the previous grab (non-blocking mode; not every writer frame).",
+                duplicate_cnt0_reads,
+            )
     return batch, first_timestamp or datetime.now(timezone.utc)
 
 

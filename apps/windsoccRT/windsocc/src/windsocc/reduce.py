@@ -22,6 +22,8 @@ camsci1: 242.5 (SW) or 62.5 (NE) degree sparkle orientation
 
 """
 
+from __future__ import annotations
+
 import os
 import glob
 import argparse
@@ -62,10 +64,13 @@ def save_reduced_quadrant_cubes(
     reduced_quadrants: dict,
     group_suffix: str,
     reduce_dir_name: str = "reduce_results",
+    *,
+    max_frames: int | None = None,
+    name_suffix: str = "",
 ) -> list[str]:
     """Write each quadrant's reduced cube under ``run_dir/reduce_dir_name``.
 
-    Filenames follow ``{group_suffix}_{quadrant}_reduced.fits``, consistent with
+    Filenames follow ``{group_suffix}_{quadrant}_reduced{name_suffix}.fits``, consistent with
     the batch ``group_suffix`` used elsewhere in the realtime pipeline.
 
     Parameters
@@ -79,6 +84,11 @@ def save_reduced_quadrant_cubes(
     reduce_dir_name:
         Subdirectory of ``run_dir``, or an absolute path; default ``reduce_results`` matches
         ``REDUCE_DIR`` in config (same convention as ``XCORR_DIR`` / ``DISTILL_DIR``).
+    max_frames:
+        If set, only the first ``max_frames`` frames along axis 0 are written (e.g. one raw
+        cube's worth when ``INSPECT_REDUCTION`` is enabled).
+    name_suffix:
+        Inserted before ``.fits`` (e.g. ``_inspect`` for debug products).
 
     Returns
     -------
@@ -97,9 +107,12 @@ def save_reduced_quadrant_cubes(
         if cube is None:
             logging.warning("Missing reduced cube for quadrant %s; skipping save.", quadrant)
             continue
-        fname = f"{group_suffix}_{quadrant}_reduced.fits"
+        arr = np.asarray(cube, dtype=np.float32)
+        if max_frames is not None:
+            arr = arr[: int(max_frames)]
+        fname = f"{group_suffix}_{quadrant}_reduced{name_suffix}.fits"
         fpath = os.path.join(out_dir, fname)
-        write_fits_cube(fpath, np.asarray(cube, dtype=np.float32))
+        write_fits_cube(fpath, arr)
         paths.append(fpath)
     if paths:
         logging.info(
@@ -569,8 +582,13 @@ def process_batch_in_memory(
     remake_ref=False,
     skip_dark=False,
     subtract_reference=True,
+    inspect_reduction=False,
 ):
-    """Reduce a realtime batch in memory and return concatenated quadrant cubes."""
+    """Reduce a realtime batch in memory and return concatenated quadrant cubes.
+
+    When ``inspect_reduction`` is true, writes ``reference.fits`` and ``noise.fits`` under
+    ``data_dir/references/`` (same layout as batch file reduction) for debugging.
+    """
     if frames.ndim != 3:
         raise ValueError(f"Expected batch frames with shape (n_frames, y, x), got {frames.shape}")
 
@@ -633,6 +651,21 @@ def process_batch_in_memory(
         if reduced_frames_per_cube is None:
             reduced_frames_per_cube = reduced_cubes[0].shape[0]
         reduced_quadrants[quadrant] = np.concatenate(reduced_cubes, axis=0)
+
+    if inspect_reduction:
+        os.makedirs(reference_dir, exist_ok=True)
+        write_fits_cube(
+            reference_file,
+            np.asarray(reference, dtype=np.float32),
+        )
+        write_fits_cube(
+            noise_file,
+            np.asarray(noise, dtype=np.float32),
+        )
+        logging.info(
+            "INSPECT_REDUCTION: wrote reference and noise to %s",
+            reference_dir,
+        )
 
     return {
         "reduced_quadrants": reduced_quadrants,

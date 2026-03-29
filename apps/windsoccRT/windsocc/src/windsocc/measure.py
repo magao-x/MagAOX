@@ -44,6 +44,9 @@ Things like the PA offset, time of transit, how to mask the pupils, etc.
 All of the measure code has been converted to polars by GPT Codex 5.4
 for performance reasons. I've so far observed a x2 speedup JKK 03/21/2026
 
+TODO output source area in final JSON output
+TODO apply parity flip when HA is positive
+
 """
 
 import sys, os
@@ -128,6 +131,20 @@ def filter_sources_by_angle(
     mask = is_circular | (~is_circular & angle_ok)
     return sources[mask]
 
+
+
+def _apply_pa_offset_to_direction_rows(rows: list[dict], pa_offset_deg: float) -> None:
+    """Add ``pa_offset_deg`` to each row's ``direction``, wrapping to ``[0, 360)``."""
+    if not rows or pa_offset_deg == 0.0:
+        return
+    for row in rows:
+        if row is None or "direction" not in row:
+            continue
+        try:
+            d = float(row["direction"])
+        except (TypeError, ValueError):
+            continue
+        row["direction"] = (d + pa_offset_deg) % 360.0
 
 
 def summarize_wind_tracks(cube_sources: object) -> dict:
@@ -474,6 +491,8 @@ def process_mf_response_cubes(
         wind_summary = summarize_wind_tracks(wind_summary_cube)
         for track in wind_summary.get("tracks", []):
             track["inferred_origin"] = inferred_origin_means_vetted.get(track["track_id"])
+        pa_offset_deg = float(config_params.get("PA_OFFSET", 0) or 0)
+        _apply_pa_offset_to_direction_rows(wind_summary.get("tracks", []), pa_offset_deg)
         wind_save_path = os.path.join(wind_data_dir, f"{cube_stem}_wind_attributes.json")
         with open(wind_save_path, "w", encoding="utf-8") as f:
             json.dump(wind_summary, f, indent=2)
@@ -482,6 +501,7 @@ def process_mf_response_cubes(
         wind_rejected_all.append(wind_rejected_cube)
         model_rejected_all.append(wind_model_rejected_cube)
         rejected_summary = summarize_rejected_tracks(wind_rejected_cube)
+        _apply_pa_offset_to_direction_rows(rejected_summary.get("rejected", []), pa_offset_deg)
         rejected_track_ids = {int(t["track_id"]) for t in rejected_summary.get("rejected", []) if t.get("track_id") is not None}
         inferred_origin_means_rejected = mean_inferred_origin_by_track_id(
             wind_track_history,
@@ -490,6 +510,7 @@ def process_mf_response_cubes(
         for track in rejected_summary.get("rejected", []):
             track["inferred_origin"] = inferred_origin_means_rejected.get(track["track_id"])
         model_rejected_summary = summarize_model_rejected_tracks(wind_model_rejected_cube)
+        _apply_pa_offset_to_direction_rows(model_rejected_summary.get("model_rejected", []), pa_offset_deg)
         # Save the rejected sources to a JSON file
         rejected_save_path = os.path.join(rejected_dir, f"{cube_stem}_rejected_sources.json")
         with open(rejected_save_path, "w", encoding="utf-8") as f:

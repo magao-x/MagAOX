@@ -44,3 +44,6 @@ ws_debug_stream_grab = "windsocc.debug_stream_grab:main"
 profile = [
     "snakeviz>=2.0",
 ]
+indi = [
+    "purepyindi2>=2.0.0",
+]
