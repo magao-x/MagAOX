@@ -333,7 +333,6 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string &response, const std::s
 
         if( ret > 0 )
         {
-            response.append( buf, ret );
             ret = pdv_serial_wait( m_pdv, 10, 1 );
         }
     }

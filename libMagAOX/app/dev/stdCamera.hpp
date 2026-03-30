@@ -3936,8 +3936,8 @@ int stdCamera<derivedT>::recordCamera( bool force )
               (uint8_t)m_synchro,
               m_vshiftSpeed,
               (uint8_t)m_cropMode,
-              m_readoutSpeedName,
               c_hasFan && m_fanSpeedValid ? m_fanSpeedName : std::string( "" ),
+              m_readoutSpeedName,
               c_hasAnalogGain && m_analogGainValid ? m_analogGainName : std::string( "" ),
               c_hasLED && m_ledStateValid ? static_cast<int8_t>( m_ledState ? 1 : 0 ) : static_cast<int8_t>( -1 ) } );
 

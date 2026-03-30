@@ -57,8 +57,8 @@ struct telem_stdcam : public flatbuffer_log
                   const uint8_t     &synchro,         ///<[in]
                   const float       &vshift,          ///<[in]
                   const uint8_t     &cropMode,        ///<[in]
-                  const std::string &readout_speed,   ///<[in]
                   const std::string &fan_speed,       ///<[in]
+                  const std::string &readout_speed,   ///<[in]
                   const std::string &analog_gain,     ///<[in]
                   const int8_t      &led              ///<[in]
         )
@@ -72,8 +72,8 @@ struct telem_stdcam : public flatbuffer_log
             auto _shutterStatusStr = builder.CreateString( shutterStatusSr );
             auto _shutter          = CreateShutter( builder, _shutterStatusStr, shutterState );
 
-            auto _readoutSpeed = builder.CreateString( readout_speed );
             auto _fanSpeed     = builder.CreateString( fan_speed );
+            auto _readoutSpeed = builder.CreateString( readout_speed );
             auto _analogGain   = builder.CreateString( analog_gain );
 
             auto fp = CreateTelem_stdcam_fb( builder,
@@ -88,8 +88,8 @@ struct telem_stdcam : public flatbuffer_log
                                              synchro,
                                              vshift,
                                              cropMode,
-                                             _readoutSpeed,
                                              _fanSpeed,
+                                             _readoutSpeed,
                                              _analogGain,
                                              led );
             builder.Finish( fp );

@@ -50,9 +50,9 @@ table Telem_stdcam_fb
 
    cropMode:int8 = -1;
 
-   readout_speed:string;
-
    fan_speed:string;
+
+   readout_speed:string;
 
    analog_gain:string;
 
