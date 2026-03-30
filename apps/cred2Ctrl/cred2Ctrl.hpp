@@ -1480,8 +1480,8 @@ inline int cred2Ctrl::configureAcquisition()
 
     if( updateFPSLimits() < 0 )
     {
-        state( stateCodes::ERROR );
-        return -1;
+        log<text_log>( "C-RED 2 FPS limits unavailable immediately after ROI reconfigure; will retry in normal polling",
+                       logPrio::LOG_WARNING );
     }
 
     recordCamera( true );
