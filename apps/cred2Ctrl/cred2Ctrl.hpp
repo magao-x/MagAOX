@@ -163,6 +163,9 @@ class cred2Ctrl : public MagAOXApp<>,
     /// Query and update the current LED state.
     int getLEDState();
 
+    /// Query the camera for its current ROI and synchronize local state.
+    int syncROIFromCamera();
+
     /** \name stdCamera Interface
      * @{
      */
@@ -565,6 +568,29 @@ inline int cred2Ctrl::appStartup()
         return log<software_critical, -1>( { __FILE__, __LINE__ } );
     }
 
+    if( syncROIFromCamera() < 0 )
+    {
+        return log<software_critical, -1>( { __FILE__, __LINE__ } );
+    }
+
+    if( m_currentROI.w != m_raw_width || m_currentROI.h != m_raw_height )
+    {
+        if( writeConfig() < 0 )
+        {
+            return log<software_critical, -1>( { __FILE__, __LINE__ } );
+        }
+
+        if( dev::edtCamera<cred2Ctrl>::pdvReconfig() < 0 )
+        {
+            return log<software_critical, -1>( { __FILE__, __LINE__ } );
+        }
+
+        if( setSerialBaud() < 0 )
+        {
+            return log<software_critical, -1>( { __FILE__, __LINE__ } );
+        }
+    }
+
     FRAMEGRABBER_APP_STARTUP;
 
     TELEMETER_APP_STARTUP;
@@ -851,8 +877,7 @@ inline int cred2Ctrl::issueCommand( const std::string &command, bool allowNoResp
     {
         if( allowNoResponse )
         {
-            return log<text_log, 0>( "C-RED 2 command returned no response; proceeding: " + command,
-                                     logPrio::LOG_WARNING );
+            return 0;
         }
 
         return -1;
@@ -863,6 +888,79 @@ inline int cred2Ctrl::issueCommand( const std::string &command, bool allowNoResp
         return log<text_log, -1>( "C-RED 2 rejected command '" + command + "' with response: " + response,
                                   logPrio::LOG_ERROR );
     }
+
+    return 0;
+}
+
+inline int cred2Ctrl::syncROIFromCamera()
+{
+    std::string response;
+    bool        cropEnabled = false;
+
+    if( sendCommand( response, "cropping raw", false ) < 0 || cred2ParseBool( cropEnabled, response ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "failed to query current cropping mode: " + response } );
+    }
+
+    if( !cropEnabled )
+    {
+        m_cameraCropEnabled = false;
+        m_currentROI.x      = m_full_x;
+        m_currentROI.y      = m_full_y;
+        m_currentROI.w      = m_full_w;
+        m_currentROI.h      = m_full_h;
+        m_currentROI.bin_x  = m_full_bin_x;
+        m_currentROI.bin_y  = m_full_bin_y;
+    }
+    else
+    {
+        cred2Roi cameraROI;
+
+        if( sendCommand( response, "cropping columns raw", false ) < 0 ||
+            cred2ParseRange( cameraROI.startColumn, cameraROI.endColumn, response ) < 0 )
+        {
+            return log<software_error, -1>(
+                { __FILE__, __LINE__, "failed to query current cropping columns: " + response } );
+        }
+
+        if( sendCommand( response, "cropping rows raw", false ) < 0 ||
+            cred2ParseRange( cameraROI.startRow, cameraROI.endRow, response ) < 0 )
+        {
+            return log<software_error, -1>(
+                { __FILE__, __LINE__, "failed to query current cropping rows: " + response } );
+        }
+
+        cameraROI.fullFrame = false;
+
+        if( cred2RoiToCenter(
+                m_currentROI.x, m_currentROI.y, m_currentROI.w, m_currentROI.h, cameraROI, m_full_w, m_full_h ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "camera reported an invalid startup ROI" } );
+        }
+
+        m_currentROI.bin_x  = 1;
+        m_currentROI.bin_y  = 1;
+        m_cameraCropEnabled = true;
+    }
+
+    m_nextROI  = m_currentROI;
+    m_width    = m_currentROI.w;
+    m_height   = m_currentROI.h;
+    m_dataType = _DATATYPE_INT16;
+
+    updateIfChanged( m_indiP_roi_x, "current", m_currentROI.x, INDI_OK );
+    updateIfChanged( m_indiP_roi_y, "current", m_currentROI.y, INDI_OK );
+    updateIfChanged( m_indiP_roi_w, "current", m_currentROI.w, INDI_OK );
+    updateIfChanged( m_indiP_roi_h, "current", m_currentROI.h, INDI_OK );
+    updateIfChanged( m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_OK );
+    updateIfChanged( m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_OK );
+
+    updateIfChanged( m_indiP_roi_x, "target", m_nextROI.x, INDI_OK );
+    updateIfChanged( m_indiP_roi_y, "target", m_nextROI.y, INDI_OK );
+    updateIfChanged( m_indiP_roi_w, "target", m_nextROI.w, INDI_OK );
+    updateIfChanged( m_indiP_roi_h, "target", m_nextROI.h, INDI_OK );
+    updateIfChanged( m_indiP_roi_bin_x, "target", m_nextROI.bin_x, INDI_OK );
+    updateIfChanged( m_indiP_roi_bin_y, "target", m_nextROI.bin_y, INDI_OK );
 
     return 0;
 }

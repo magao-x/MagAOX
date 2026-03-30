@@ -273,6 +273,31 @@ inline int cred2RoiFromCenter( cred2Roi &roi,       ///< [out] the corresponding
     return 0;
 }
 
+/// Convert C-RED 2 ROI corners into a MagAO-X ROI center/size description.
+inline int cred2RoiToCenter( float          &centerX,   ///< [out] ROI x center coordinate
+                             float          &centerY,   ///< [out] ROI y center coordinate
+                             int            &width,     ///< [out] ROI width in pixels
+                             int            &height,    ///< [out] ROI height in pixels
+                             const cred2Roi &roi,       /**< [in] the C-RED 2 ROI to convert */
+                             int             fullWidth, /**< [in] detector full-frame width */
+                             int             fullHeight /**< [in] detector full-frame height */
+)
+{
+    if( roi.startColumn < 0 || roi.startRow < 0 || roi.endColumn < roi.startColumn || roi.endRow < roi.startRow ||
+        roi.endColumn >= fullWidth || roi.endRow >= fullHeight )
+    {
+        return -1;
+    }
+
+    width  = roi.endColumn - roi.startColumn + 1;
+    height = roi.endRow - roi.startRow + 1;
+
+    centerX = roi.startColumn + 0.5f * ( static_cast<float>( width ) - 1.0f );
+    centerY = roi.startRow + 0.5f * ( static_cast<float>( height ) - 1.0f );
+
+    return 0;
+}
+
 /// Format the column command payload for `set cropping columns`.
 inline std::string cred2ColumnsSpec( const cred2Roi &roi /**< [in] the ROI to format */ )
 {

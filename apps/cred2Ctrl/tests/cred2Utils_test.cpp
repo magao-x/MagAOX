@@ -166,6 +166,32 @@ SCENARIO( "Formatting C-RED 2 ROI commands", "[cred2Utils]" )
             REQUIRE( roi.fullFrame == false );
         }
     }
+
+    GIVEN( "A valid C-RED 2 subframe ROI" )
+    {
+        cred2Roi roi;
+        roi.startColumn = 192;
+        roi.endColumn   = 447;
+        roi.startRow    = 128;
+        roi.endRow      = 383;
+        roi.fullFrame   = false;
+
+        WHEN( "The ROI is converted back to a MagAO-X center and size" )
+        {
+            float centerX = 0;
+            float centerY = 0;
+            int   width   = 0;
+            int   height  = 0;
+
+            int rv = cred2RoiToCenter( centerX, centerY, width, height, roi, 640, 512 );
+
+            REQUIRE( rv == 0 );
+            REQUIRE( centerX == Approx( 319.5f ) );
+            REQUIRE( centerY == Approx( 255.5f ) );
+            REQUIRE( width == 256 );
+            REQUIRE( height == 256 );
+        }
+    }
 }
 
 } // namespace cred2Utils_test
