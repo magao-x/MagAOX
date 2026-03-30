@@ -580,6 +580,8 @@ inline int cred2Ctrl::appStartup()
             return log<software_critical, -1>( { __FILE__, __LINE__ } );
         }
 
+        m_nextMode = m_modeName.empty() ? m_startupMode : m_modeName;
+
         if( dev::edtCamera<cred2Ctrl>::pdvReconfig() < 0 )
         {
             return log<software_critical, -1>( { __FILE__, __LINE__ } );
