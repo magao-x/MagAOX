@@ -67,6 +67,19 @@ struct stdCameraHasFan<derivedT, std::void_t<decltype( derivedT::c_stdCamera_fan
 {
 };
 
+/// Detect whether a derived camera exposes legacy stdCamera fan-speed control support.
+template <class derivedT, class = void>
+struct stdCameraHasLegacyFanSpeed : std::false_type
+{
+};
+
+/// Specialization for cameras that define `c_stdCamera_fanSpeed`.
+template <class derivedT>
+struct stdCameraHasLegacyFanSpeed<derivedT, std::void_t<decltype( derivedT::c_stdCamera_fanSpeed )>>
+    : std::bool_constant<derivedT::c_stdCamera_fanSpeed>
+{
+};
+
 /// Detect whether a derived camera exposes stdCamera LED control support.
 template <class derivedT, class = void>
 struct stdCameraHasLED : std::false_type
@@ -400,7 +413,10 @@ class stdCamera
 {
   protected:
     static constexpr bool c_hasFan =
-        stdCameraHasFan<derivedT>::value; ///< True when the derived camera exposes fan control.
+        stdCameraHasFan<derivedT>::value ||
+        stdCameraHasLegacyFanSpeed<derivedT>::value; ///< True when the derived camera exposes fan control.
+    static constexpr bool c_hasLegacyFanSpeed =
+        stdCameraHasLegacyFanSpeed<derivedT>::value; ///< True when the derived camera uses the legacy fan config path.
     static constexpr bool c_hasLED =
         stdCameraHasLED<derivedT>::value; ///< True when the derived camera exposes LED control.
     static constexpr bool c_hasAnalogGain =
@@ -475,20 +491,6 @@ class stdCamera
     pcf::IndiProperty m_indiP_vShiftSpeed;
 
     pcf::IndiProperty m_indiP_emGain;
-
-    ///@}
-
-    /** \name Fan Speed Control
-     * @{
-     */
-
-    std::vector<std::string> m_fanSpeedNames;      ///< The selectable fan-speed names.
-    std::vector<std::string> m_fanSpeedNameLabels; ///< User-facing labels for the fan-speed names.
-
-    std::string m_fanSpeedName;    ///< The current fan-speed name.
-    std::string m_fanSpeedNameSet; ///< The requested fan-speed name to be applied by derivedT.
-
-    pcf::IndiProperty m_indiP_fanSpeed; ///< Property used to control the selected fan speed.
 
     ///@}
 
@@ -904,26 +906,6 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_vShiftSpeed(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
-
-    /// Interface to setFanSpeed when the derivedT has fan-speed control
-    /** Tag-dispatch resolution of c_stdCamera_fanSpeed==true will call this function.
-     * Calls derivedT::setFanSpeed.
-     */
-    int setFanSpeed( const mx::meta::trueFalseT<true> &t );
-
-    /// Interface to setFanSpeed when the derivedT does not have fan-speed control
-    /** Tag-dispatch resolution of c_stdCamera_fanSpeed==false will call this function.
-     * Just returns 0.
-     */
-    int setFanSpeed( const mx::meta::trueFalseT<false> &f );
-
-    /// Callback to process a NEW fan-speed request
-    /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-    int newCallBack_fanSpeed(
         const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
 
     /// Interface to setEMGain when the derivedT has EM Gain
@@ -1348,7 +1330,7 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
                     "The default vertical shift speed." );
     }
 
-    if( derivedT::c_stdCamera_fanSpeed )
+    if( c_hasLegacyFanSpeed )
     {
         config.add( "camera.fanSpeedControl",
                     "",
@@ -1481,7 +1463,7 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
         config( m_defaultVShiftSpeed, "camera.defaultVShiftSpeed" );
     }
 
-    if( derivedT::c_stdCamera_fanSpeed )
+    if( c_hasLegacyFanSpeed )
     {
         config( m_fanSpeedControlEnabled, "camera.fanSpeedControl" );
         config( m_defaultFanSpeed, "camera.defaultFanSpeed" );
@@ -1762,18 +1744,6 @@ int stdCamera<derivedT>::appStartup()
         }
     }
 
-    if( derivedT::c_stdCamera_fanSpeed && m_fanSpeedControlEnabled )
-    {
-        mx::meta::trueFalseT<derivedT::c_stdCamera_fanSpeed> tf;
-        if( createFanSpeed( tf ) < 0 )
-        {
-#ifndef STDCAMERA_TEST_NOLOG
-            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
-#endif
-            return -1;
-        }
-    }
-
     if( derivedT::c_stdCamera_emGain )
     {
         derived().createStandardIndiNumber( m_indiP_emGain, "emgain", 0, 1000, 1, "%0.3f" );
@@ -1828,7 +1798,7 @@ int stdCamera<derivedT>::appStartup()
         }
     }
 
-    if( c_hasFan )
+    if( c_hasFan && ( !c_hasLegacyFanSpeed || m_fanSpeedControlEnabled ) )
     {
         if( m_fanSpeedNames.empty() )
         {
@@ -2491,8 +2461,6 @@ int stdCamera<derivedT>::newCallBack_stdCamera( const pcf::IndiProperty &ipRecv 
         return newCallBack_readoutSpeed( ipRecv );
     else if( derivedT::c_stdCamera_vShiftSpeed && name == "vshift_speed" )
         return newCallBack_vShiftSpeed( ipRecv );
-    else if( derivedT::c_stdCamera_fanSpeed && m_fanSpeedControlEnabled && name == "fan_speed" )
-        return newCallBack_fanSpeed( ipRecv );
     else if( derivedT::c_stdCamera_emGain && name == "emgain" )
         return newCallBack_emgain( ipRecv );
     else if( derivedT::c_stdCamera_exptimeCtrl && name == "exptime" )
@@ -2758,66 +2726,6 @@ int stdCamera<derivedT>::newCallBack_vShiftSpeed( const pcf::IndiProperty &ipRec
 
         mx::meta::trueFalseT<derivedT::c_stdCamera_vShiftSpeed> tf;
         return setVShiftSpeed( tf );
-    }
-
-    return 0;
-}
-
-template <class derivedT>
-int stdCamera<derivedT>::setFanSpeed( const mx::meta::trueFalseT<true> &t )
-{
-    static_cast<void>( t );
-    return derived().setFanSpeed();
-}
-
-template <class derivedT>
-int stdCamera<derivedT>::setFanSpeed( const mx::meta::trueFalseT<false> &f )
-{
-    static_cast<void>( f );
-    return 0;
-}
-
-template <class derivedT>
-int stdCamera<derivedT>::newCallBack_fanSpeed( const pcf::IndiProperty &ipRecv )
-{
-    if( derivedT::c_stdCamera_fanSpeed && m_fanSpeedControlEnabled )
-    {
-#ifdef XWCTEST_INDI_CALLBACK_VALIDATION
-        return 0;
-#endif
-
-        std::unique_lock<std::mutex> lock( derived().m_indiMutex );
-
-        std::string newspeed;
-
-        for( size_t i = 0; i < m_fanSpeedNames.size(); ++i )
-        {
-            if( !ipRecv.find( m_fanSpeedNames[i] ) )
-                continue;
-
-            if( ipRecv[m_fanSpeedNames[i]].getSwitchState() == pcf::IndiElement::On )
-            {
-                if( newspeed != "" )
-                {
-                    derivedT::template log<text_log>( "More than one fan speed selected", logPrio::LOG_ERROR );
-                    return -1;
-                }
-
-                newspeed = m_fanSpeedNames[i];
-            }
-        }
-
-        if( newspeed == "" )
-        {
-            m_fanSpeedNameSet = m_fanSpeedName;
-        }
-        else
-        {
-            m_fanSpeedNameSet = newspeed;
-        }
-
-        mx::meta::trueFalseT<derivedT::c_stdCamera_fanSpeed> tf;
-        return setFanSpeed( tf );
     }
 
     return 0;
@@ -3801,11 +3709,6 @@ int stdCamera<derivedT>::updateINDI()
         {
             indi::updateSelectionSwitchIfChanged(
                 m_indiP_vShiftSpeed, m_vShiftSpeedName, derived().m_indiDriver, INDI_OK );
-        }
-
-        if( derivedT::c_stdCamera_fanSpeed && m_fanSpeedControlEnabled )
-        {
-            indi::updateSelectionSwitchIfChanged( m_indiP_fanSpeed, m_fanSpeedName, derived().m_indiDriver, INDI_OK );
         }
 
         if( derivedT::c_stdCamera_emGain )
