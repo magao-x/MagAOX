@@ -257,7 +257,9 @@ class cred2Ctrl : public MagAOXApp<>,
     );
 
     /// Send a command that should return a success acknowledgement.
-    int issueCommand( const std::string &command /**< [in] CLI command to send */ );
+    int issueCommand( const std::string &command,                /**< [in] CLI command to send */
+                      bool               allowNoResponse = false /**< [in] treat a missing response as acceptable */
+    );
 };
 
 namespace
@@ -834,11 +836,17 @@ inline int cred2Ctrl::sendCommand( std::string &response, const std::string &com
     return 0;
 }
 
-inline int cred2Ctrl::issueCommand( const std::string &command )
+inline int cred2Ctrl::issueCommand( const std::string &command, bool allowNoResponse )
 {
     std::string response;
-    if( sendCommand( response, command ) < 0 )
+    if( sendCommand( response, command, !allowNoResponse ) < 0 )
     {
+        if( allowNoResponse )
+        {
+            return log<text_log, 0>( "C-RED 2 command returned no response; proceeding: " + command,
+                                     logPrio::LOG_WARNING );
+        }
+
         return -1;
     }
 
@@ -1427,7 +1435,7 @@ inline int cred2Ctrl::configureAcquisition()
 
     if( roi.fullFrame )
     {
-        if( m_cameraCropEnabled && issueCommand( "set cropping off" ) < 0 )
+        if( m_cameraCropEnabled && issueCommand( "set cropping off", true ) < 0 )
         {
             state( stateCodes::ERROR );
             return -1;
@@ -1437,8 +1445,9 @@ inline int cred2Ctrl::configureAcquisition()
     }
     else
     {
-        if( issueCommand( "set cropping columns " + cred2ColumnsSpec( roi ) ) < 0 ||
-            issueCommand( "set cropping rows " + cred2RowsSpec( roi ) ) < 0 || issueCommand( "set cropping on" ) < 0 )
+        if( issueCommand( "set cropping columns " + cred2ColumnsSpec( roi ), true ) < 0 ||
+            issueCommand( "set cropping rows " + cred2RowsSpec( roi ), true ) < 0 ||
+            issueCommand( "set cropping on", true ) < 0 )
         {
             state( stateCodes::ERROR );
             return -1;
