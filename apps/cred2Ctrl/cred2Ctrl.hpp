@@ -112,7 +112,8 @@ class cred2Ctrl : public MagAOXApp<>,
     /** \name INDI - Data
      * @{
      */
-    pcf::IndiProperty m_indiP_temps; ///< Property reporting the detailed C-RED 2 temperature channels.
+    pcf::IndiProperty m_indiP_temps;     ///< Property reporting the detailed C-RED 2 temperature channels.
+    pcf::IndiProperty m_indiP_fpsLimits; ///< Property reporting the current C-RED 2 minimum and maximum FPS.
 
     ///@}
 
@@ -557,6 +558,19 @@ inline int cred2Ctrl::appStartup()
     m_indiP_temps["peltier"].set( 0 );
     m_indiP_temps.add( pcf::IndiElement( "heatsink" ) );
     m_indiP_temps["heatsink"].set( 0 );
+
+    createROIndiNumber( m_indiP_fpsLimits, "fps_limits" );
+    m_indiP_fpsLimits.add( pcf::IndiElement( "min" ) );
+    m_indiP_fpsLimits["min"].set( m_minFPS );
+    m_indiP_fpsLimits["min"].setFormat( "%0.6f" );
+    m_indiP_fpsLimits.add( pcf::IndiElement( "max" ) );
+    m_indiP_fpsLimits["max"].set( m_maxFPS );
+    m_indiP_fpsLimits["max"].setFormat( "%0.6f" );
+
+    if( registerIndiPropertyReadOnly( m_indiP_fpsLimits ) < 0 )
+    {
+        return log<software_critical, -1>( { __FILE__, __LINE__ } );
+    }
 
     STDCAMERA_APP_STARTUP;
 
@@ -1286,6 +1300,9 @@ inline int cred2Ctrl::updateFPSLimits()
     m_minFPS = minFPS;
     m_maxFPS = maxFPS;
     m_fpsSet = std::clamp( m_fpsSet, m_minFPS, m_maxFPS );
+
+    updateIfChanged( m_indiP_fpsLimits, "min", m_minFPS, INDI_IDLE );
+    updateIfChanged( m_indiP_fpsLimits, "max", m_maxFPS, INDI_IDLE );
 
     recordCamera();
 
