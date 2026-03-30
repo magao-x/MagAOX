@@ -107,7 +107,9 @@ apps_tic = \
 	baslerCtrl \
 	bmcCtrl \
 	trippLitePDU \
-	rhusbMon
+	rhusbMon \
+	dmSpeckle
+
 
 # Apps with simulator mode
 apps_sim = \

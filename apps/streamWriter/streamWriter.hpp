@@ -530,7 +530,7 @@ void streamWriter::loadConfig()
     {
         tmpstr = MAGAOX_rawimageRelPath;
     }
-    m_rawimageDir = basePath() + "/" + tmpstr ;
+    m_rawimageDir = basePath() + "/" + tmpstr;
 
     config( m_rawimageDir, "writer.savePath" );
 
@@ -815,7 +815,7 @@ int streamWriter::initialize_xrif()
         }
     }
 
-    errno         = 0;
+    errno = 0;
 
     m_xrif_header = reinterpret_cast<char *>( malloc( XRIF_HEADER_SIZE * sizeof( char ) ) );
     if( m_xrif_header == NULL )
@@ -837,7 +837,7 @@ int streamWriter::initialize_xrif()
         return log<software_critical, -1>( { __FILE__, __LINE__, 0, rv, "xrif handle configuration error." } );
     }
 
-    errno                = 0;
+    errno = 0;
 
     m_xrif_timing_header = reinterpret_cast<char *>( malloc( XRIF_HEADER_SIZE * sizeof( char ) ) );
     if( m_xrif_timing_header == NULL )
@@ -1225,9 +1225,8 @@ void streamWriter::fgThreadExec()
         {
             length = 1;
         }
-        std::cerr << "connected"
-                  << " " << m_width << "x" << m_height << "x" << (int)m_dataType << " (" << m_typeSize << ")"
-                  << std::endl;
+        std::cerr << "connected" << " " << m_width << "x" << m_height << "x" << (int)m_dataType << " (" << m_typeSize
+                  << ")" << std::endl;
 
         // Now allocate the circBuffs
         if( allocate_circbufs() < 0 )
@@ -1250,7 +1249,7 @@ void streamWriter::fgThreadExec()
         m_nextChunkStart = 0;
 
         // Initialized curr_image ...
-        if( image.md[0].naxis > 2 )
+        if( image.md[0].naxis > 2 && length > 1 )
         {
             curr_image = image.md[0].cnt1;
         }
@@ -1283,7 +1282,7 @@ void streamWriter::fgThreadExec()
 
             if( sem_timedwait( sem, &ts ) == 0 )
             {
-                if( image.md[0].naxis > 2 )
+                if( image.md[0].naxis > 2 && length > 1 )
                 {
                     curr_image = image.md[0].cnt1;
                 }
@@ -1872,11 +1871,11 @@ int streamWriter::doEncode()
     std::string fileName;
     std::string relPath;
     mx::error_t errc = file::fileTimeRelPath( fileName, relPath, m_outName, "xrif", fts->tv_sec, fts->tv_nsec );
-    if(errc != mx::error_t::noerror)
+    if( errc != mx::error_t::noerror )
     {
         std::string msg = "error from file::fileTimeRePath: ";
-        msg += mx::errorMessage(errc);
-        msg += " (" + std::string(mx::errorName(errc)) + ")";
+        msg += mx::errorMessage( errc );
+        msg += " (" + std::string( mx::errorName( errc ) ) + ")";
         return log<software_error, -1>( { __FILE__, __LINE__, msg } );
     }
 
