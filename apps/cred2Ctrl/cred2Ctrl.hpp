@@ -702,6 +702,17 @@ inline int cred2Ctrl::appLogic()
         }
         else
         {
+            if( updateFPSLimits() < 0 )
+            {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                {
+                    return 0;
+                }
+
+                state( stateCodes::ERROR );
+                return 0;
+            }
+
             if( getTemps() < 0 )
             {
                 if( powerState() != 1 || powerStateTarget() != 1 )
