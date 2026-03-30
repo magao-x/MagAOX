@@ -90,7 +90,8 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     unsigned m_semWaitNSec{ 500000000 }; /**< The time in nsec to wait on the semaphore, added to m_semWaitSec.
                                               Max is 999999999. Default is 5e8 nsec. */
 
-    bool m_warnSkippedFrames{ true }; ///< Whether skipped-frame backlog summaries should be emitted.
+    bool m_warnMissedData{
+        true }; ///< Whether missed-data backlog summaries should be emitted as warnings instead of informational logs.
 
     int m_lz4accel{ 1 };
 
@@ -482,15 +483,15 @@ void streamWriter::setupConfig()
                 "int",
                 "The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec." );
 
-    config.add( "framegrabber.warnSkippedFrames",
+    config.add( "framegrabber.warnMissedData",
                 "",
-                "framegrabber.warnSkippedFrames",
+                "framegrabber.warnMissedData",
                 argType::Required,
                 "framegrabber",
-                "warnSkippedFrames",
+                "warnMissedData",
                 false,
                 "bool",
-                "Whether skipped-frame backlog summaries should be emitted. Default is true." );
+                "Whether missed-data backlog summaries should be emitted at warning priority. Default is true." );
 
     config.add( "framegrabber.threadPrio",
                 "",
@@ -542,7 +543,7 @@ void streamWriter::loadConfig()
 
     config( m_semaphoreNumber, "framegrabber.semaphoreNumber" );
     config( m_semWaitNSec, "framegrabber.semWait" );
-    config( m_warnSkippedFrames, "framegrabber.warnSkippedFrames" );
+    config( m_warnMissedData, "framegrabber.warnMissedData" );
 
     config( m_fgThreadPrio, "framegrabber.threadPrio" );
     config( m_fgCpuset, "framegrabber.cpuset" );
@@ -726,7 +727,7 @@ int streamWriter::appLogic()
         uint64_t repeatedSems    = m_repeatSemaphoreCount.exchange( 0 );
         double   summaryInterval = m_skipSummaryIntervalSec;
 
-        bool shouldLogSkippedFrames = m_warnSkippedFrames && skippedFrames > 0;
+        bool shouldLogSkippedFrames = skippedFrames > 0;
         bool shouldLog              = shouldLogSkippedFrames || repeatedSems > 0;
 
         if( shouldLog )
@@ -750,7 +751,7 @@ int streamWriter::appLogic()
             }
             msg += " in last " + std::to_string( static_cast<int>( summaryInterval ) ) + " sec";
 
-            log<text_log>( msg, logPrio::LOG_WARNING );
+            log<text_log>( msg, m_warnMissedData ? logPrio::LOG_WARNING : logPrio::LOG_INFO );
 
             m_skipSummaryIntervalSec *= 2.0;
             if( m_skipSummaryIntervalSec > 60.0 )
