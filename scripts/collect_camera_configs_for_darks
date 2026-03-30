@@ -25,55 +25,106 @@ def parse_night_timestamp(night):
         return None
 
 
-def parse_obs_dir_timestamp_from_file(fn):
-    obs_dir = pathlib.Path(fn).parent.parent.name
-    return parse_night_timestamp(obs_dir[:17])
+def parse_obs_dir_timestamp(obs_dir_name):
+    return parse_night_timestamp(obs_dir_name[:17])
 
 
-def get_fits_files_for_nights(semester, nights, camname):
-    fits_files = []
-    time_filters = []
-    for night in nights:
+def parse_date_or_timestamp(value, is_end=False):
+    ts = parse_night_timestamp(value)
+    if ts is not None:
+        return ts
+    try:
+        day = datetime.datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError(
+            f"Could not parse '{value}'. Expected YYYY-MM-DD or YYYY-MM-DD_HHMMSS"
+        ) from exc
+    dt = datetime.datetime.combine(day, datetime.time(0, 0, 0), tzinfo=datetime.UTC)
+    # For end boundaries, date-only includes the full day.
+    if is_end:
+        dt += datetime.timedelta(days=1)
+    return dt
+
+
+def iter_date_parts(start_dt, end_dt):
+    cur = start_dt.date()
+    last = (end_dt - datetime.timedelta(seconds=1)).date()
+    while cur <= last:
+        yield cur.isoformat()
+        cur += datetime.timedelta(days=1)
+
+
+def get_observation_dirs(semester, night=None, date_start=None, date_end=None):
+    if night is not None and (date_start is not None or date_end is not None):
+        raise ValueError("Use either --night OR --date-start/--date-end, not both")
+
+    observation_dirs = []
+    lower_bound = None
+    upper_bound = None
+
+    if date_start is not None or date_end is not None:
+        if date_start is None or date_end is None:
+            raise ValueError("Both --date-start and --date-end are required together")
+        lower_bound = parse_date_or_timestamp(date_start, is_end=False)
+        upper_bound = parse_date_or_timestamp(date_end, is_end=True)
+        if lower_bound >= upper_bound:
+            raise ValueError("--date-start must be earlier than --date-end")
+        for date_part in iter_date_parts(lower_bound, upper_bound):
+            observation_dirs.extend(glob.glob(f"/home/guestobs/obs/{semester}/*/{date_part}*/"))
+    elif night is not None and night != '*':
         night_ts = parse_night_timestamp(night)
         if night_ts is not None:
+            lower_bound = night_ts
+            upper_bound = (night_ts + datetime.timedelta(days=1)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
             date_part = night.split('_', 1)[0]
-            glob_pattern = f"/home/guestobs/obs/{semester}/*/{date_part}*/{camname}/*.fits"
-            time_filters.append(night_ts)
         else:
-            glob_pattern = f"/home/guestobs/obs/{semester}/*/{night}*/{camname}/*.fits"
-        fits_files.extend(glob.glob(glob_pattern))
+            date_part = parse_date_or_timestamp(night).date().isoformat()
+        observation_dirs.extend(glob.glob(f"/home/guestobs/obs/{semester}/*/{date_part}*/"))
+    else:
+        observation_dirs.extend(glob.glob(f"/home/guestobs/obs/{semester}/*/*/"))
 
-    files = sorted(set(fits_files))
-    if not time_filters:
-        return files
+    dirs = sorted(set(d for d in observation_dirs if os.path.isdir(d)))
+    if lower_bound is None and upper_bound is None:
+        return dirs
 
-    lower_bound = min(time_filters)
-    upper_bound = max(time_filters) if len(time_filters) > 1 else None
-    filtered_files = []
-    for fn in files:
-        obs_ts = parse_obs_dir_timestamp_from_file(fn)
+    filtered_dirs = []
+    for obs_dir in dirs:
+        obs_ts = parse_obs_dir_timestamp(pathlib.Path(obs_dir).name)
         if obs_ts is None:
             continue
-        if upper_bound is None:
-            if obs_ts >= lower_bound:
-                filtered_files.append(fn)
-        elif lower_bound <= obs_ts < upper_bound:
-            filtered_files.append(fn)
-    return filtered_files
+        if lower_bound is not None and obs_ts < lower_bound:
+            continue
+        if upper_bound is not None and obs_ts >= upper_bound:
+            continue
+        filtered_dirs.append(obs_dir)
+    return filtered_dirs
 
 
-def collect_camera_settings(semester, nights, camname, check_only_n=None, progress=False):
+def get_fits_files_for_observation_dirs(observation_dirs, camname):
+    fits_files = []
+    for obs_dir in observation_dirs:
+        fits_files.extend(glob.glob(f"{obs_dir}/{camname}/*.fits"))
+    return sorted(set(fits_files))
+
+
+def collect_camera_settings(semester, camname, night=None, date_start=None, date_end=None, check_only_n=None, progress=False):
     open_shutter_settings = defaultdict(lambda: 0)
     shut_shutter_settings = defaultdict(lambda: 0)
-    iterable = get_fits_files_for_nights(semester, nights, camname)[:check_only_n]
+    open_shutter_obs_dirs = defaultdict(set)
+    shut_shutter_obs_dirs = defaultdict(set)
+    observation_dirs = get_observation_dirs(
+        semester,
+        night=night,
+        date_start=date_start,
+        date_end=date_end,
+    )
+    iterable = get_fits_files_for_observation_dirs(observation_dirs, camname)[:check_only_n]
     if progress:
         iterable = tqdm.tqdm(iterable)
     for fn in iterable:
-        head_part, _ = os.path.split(fn)
-        parts = head_part.replace('/home/guestobs/obs/', '').split('/')
-        # this isn't used, and the target_name and obs_name are now degenerate
-        #_, day_span, target_name, fn_observer, fn_obs_name, _ = parts
-        _, fn_observer, fn_datetime_target_obs_name, _ = parts
+        obs_dir = pathlib.Path(fn).parent.parent
         was_shut = None
         with open(fn, 'rb') as fh:
             try:
@@ -114,9 +165,16 @@ def collect_camera_settings(semester, nights, camname, check_only_n=None, progre
         camera_settings = tuple(camera_settings)
         if was_shut:
             shut_shutter_settings[camera_settings] += 1
+            shut_shutter_obs_dirs[camera_settings].add(obs_dir.as_posix())
         else:
             open_shutter_settings[camera_settings] += 1
-    return open_shutter_settings, shut_shutter_settings
+            open_shutter_obs_dirs[camera_settings].add(obs_dir.as_posix())
+    return (
+        open_shutter_settings,
+        shut_shutter_settings,
+        open_shutter_obs_dirs,
+        shut_shutter_obs_dirs,
+    )
 
 def make_settings_jsonable(config_kind):
     cameras = list(config_kind.keys())
@@ -128,7 +186,12 @@ def make_settings_jsonable(config_kind):
             setup = setup_meta['setup']
             for key, value in setup:
                 setup_dict[key] = value
-            darks_dict[camname].append({'frames_count': setup_meta['frames_count'], 'setup': setup_dict})
+            out_meta = {'frames_count': setup_meta['frames_count'], 'setup': setup_dict}
+            if 'observation_dirs' in setup_meta:
+                out_meta['observation_dirs'] = setup_meta['observation_dirs']
+            if 'dark_observation_dirs' in setup_meta:
+                out_meta['dark_observation_dirs'] = setup_meta['dark_observation_dirs']
+            darks_dict[camname].append(out_meta)
     return darks_dict
 
 
@@ -146,22 +209,36 @@ def get_last_night_dates(now_utc):
 
 def main(args):
     invalid_config = defaultdict(list)
+    incomplete_header = defaultdict(list)
     needed_darks = defaultdict(list)
     have_darks = defaultdict(list)
-    nights = args.night if args.night is not None else ['*']
+    night = args.night if args.night is not None else '*'
+    date_start = args.date_start
+    date_end = args.date_end
     if args.last_night:
-        nights = get_last_night_dates(args.now_utc)
+        date_start, date_end = get_last_night_dates(args.now_utc)
+        night = None
         log.info(
             "Using --last-night UTC window: "
-            f"{nights[0]} -> {nights[1]}"
+            f"{date_start} -> {date_end}"
         )
+    elif date_start is not None or date_end is not None:
+        night = None
+        log.info(
+            "Using explicit UTC window: "
+            f"{date_start} -> {date_end}"
+        )
+    else:
+        log.info(f"Using night selector: {night}")
     cameras = args.cameras if args.cameras is not None else SCIENCE_CAMERAS
     for camname in cameras:
-        all_open_settings, all_shut_settings = collect_camera_settings(
+        all_open_settings, all_shut_settings, open_obs_dirs, shut_obs_dirs = collect_camera_settings(
             args.semester,
-            nights,
             camname,
-            args.check_only_n,
+            night=night,
+            date_start=date_start,
+            date_end=date_end,
+            check_only_n=args.check_only_n,
             progress=True
         )
         if args.check_only_n is not None and len(all_open_settings) == 0 and len(all_shut_settings) > 0:
@@ -173,16 +250,47 @@ def main(args):
             log.info("=" * 72)
             log.info(f"{camname} setup:")
             invalid = False
+            observation_dirs = sorted(open_obs_dirs[setup])
+            for obs_dir in observation_dirs:
+                log.info(f"\tOBS DIR: {obs_dir}")
             for key, value in setup:
                 log.info(f"\t{key}: {value}")
                 if (key == 'ADC SPEED' and value == 0) or (isinstance(value, str) and 'invalid' in value):
                     invalid = True
+            if {key for key, _ in setup} <= {'WIDTH', 'HEIGHT'}:
+                incomplete_header[camname].append({
+                    'setup': setup,
+                    'frames_count': frames_count,
+                    'observation_dirs': observation_dirs,
+                })
+                log.warning(
+                    f"{camname}: skipping setup with incomplete headers "
+                    f"(only WIDTH/HEIGHT present) from {len(observation_dirs)} observation directories"
+                )
+                log.info(f"open shutter count:\t{frames_count}")
+                log.info("closed shutter count:\tSkipped due to incomplete headers")
+                log.info("=" * 72)
+                log.info("\n\n")
+                continue
             if invalid:
-                invalid_config[camname].append({'setup': setup, 'frames_count': frames_count})
+                invalid_config[camname].append({
+                    'setup': setup,
+                    'frames_count': frames_count,
+                    'observation_dirs': observation_dirs,
+                })
             elif setup not in all_shut_settings:
-                needed_darks[camname].append({'setup': setup, 'frames_count': frames_count})
+                needed_darks[camname].append({
+                    'setup': setup,
+                    'frames_count': frames_count,
+                    'observation_dirs': observation_dirs,
+                })
             else:
-                have_darks[camname].append({'setup': setup, 'frames_count': frames_count})
+                have_darks[camname].append({
+                    'setup': setup,
+                    'frames_count': frames_count,
+                    'observation_dirs': observation_dirs,
+                    'dark_observation_dirs': sorted(shut_obs_dirs[setup]),
+                })
             log.info(f"open shutter count:\t{frames_count}")
             if setup in all_shut_settings:
                 log.info(f"closed shutter count:\t{all_shut_settings[setup]}")
@@ -192,11 +300,17 @@ def main(args):
             log.info("\n\n")
         log.info(f"Distinct {camname} configurations to do: {len(needed_darks[camname])}")
         log.info(f"Distinct {camname} configurations with darks: {len(have_darks[camname])}")
+        log.info(f"Distinct {camname} configurations with incomplete headers: {len(incomplete_header[camname])}")
     log.info(f"Total distinct camera configurations to do: {sum(len(needed_darks[camname]) for camname in cameras)}")
     log.info(f"Total distinct camera configurations with darks: {sum(len(have_darks[camname]) for camname in cameras)}")
     log.info(f"Total distinct camera configurations with invalid info: {sum(len(invalid_config[camname]) for camname in cameras)}")
+    log.info(f"Total distinct camera configurations with incomplete headers: {sum(len(incomplete_header[camname]) for camname in cameras)}")
     log.info(pformat(invalid_config))
-    for config_kind, outfile_path in ((needed_darks, 'needed_darks.json'), (have_darks, 'have_darks.json')):
+    for config_kind, outfile_path in (
+        (needed_darks, 'needed_darks.json'),
+        (have_darks, 'have_darks.json'),
+        (incomplete_header, 'incomplete_header.json'),
+    ):
         with open(outfile_path, 'wb') as fh:
             darks_dict = make_settings_jsonable(config_kind)
             darks_out = orjson.dumps(darks_dict, option=orjson.OPT_INDENT_2)
@@ -215,25 +329,38 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-v', '--verbose', help="Turn on debug output", action='store_true')
     parser.add_argument('-s', '--semester', help=f"Semester to search in, default: {this_semester}", default=this_semester)
-    parser.add_argument('-n','--night',
-        help=(
-            "Night selector to search. Supports date (e.g. 2026-03-25) or UTC timestamp "
-            "(e.g. 2026-01-19_171535). Pass multiple times for multiple nights/bounds."
-        ),
-        action='append', default=None,
-    )
-    parser.add_argument('-ln', '--last-night',
-        help=(
-            "Search the previous-noon to current-noon Chile window, expressed as UTC "
-            "bounds in YYYY-MM-DD_HHMMSS format."
-        ),
-        action='store_true',
-    )
     parser.add_argument('-c', '--cameras', help=f"Cameras to check, default: {SCIENCE_CAMERAS}", action='append', default=None)
     parser.add_argument('--check-only-n', help=f"Number to check per camera, default all", type=int, default=None)
+    parser.add_argument('-ln', '--last-night', help=("Search the previous-noon to current-noon Chile window."), action='store_true',)
+    parser.add_argument('-n','--night', help=("Single night selector. Supports date (e.g. 2026-03-25)"), default=None,)
+    parser.add_argument(
+        '--date-start',
+        help=(
+            "Start of UTC search window (YYYY-MM-DD or YYYY-MM-DD_HHMMSS). "
+            "If --date-end is omitted, it defaults to now (UTC)."
+        ),
+        default=None,
+    )
+    parser.add_argument(
+        '--date-end',
+        help=(
+            "End of UTC search window (YYYY-MM-DD or YYYY-MM-DD_HHMMSS). "
+            "Optional when --date-start is provided; defaults to now (UTC)."
+        ),
+        default=None,
+    )
+    
     # parser.add_argument('-a', '--show-all', help=f"Whether to show camera configurations for which darks are already present", action='store_true')
     # parser.add_argument('-p', '--prefix', help=f"Quicklook files root, default: {QUICKLOOK_PATH.as_posix()}", type=pathlib.Path, default=QUICKLOOK_PATH)
     args = parser.parse_args()
+    if args.night is not None and (args.date_start is not None or args.date_end is not None):
+        parser.error("Use either --night OR --date-start/--date-end, not both.")
+    if args.last_night and (args.night is not None or args.date_start is not None or args.date_end is not None):
+        parser.error("--last-night cannot be combined with --night or --date-start/--date-end.")
+    if args.date_end is not None and args.date_start is None:
+        parser.error("--date-end requires --date-start.")
+    if args.date_start is not None and args.date_end is None:
+        args.date_end = now.strftime("%Y-%m-%d_%H%M%S")
     args.now_utc = now
     ch = logging.StreamHandler()
     ch.setLevel(logging.DEBUG if args.verbose else logging.INFO)
