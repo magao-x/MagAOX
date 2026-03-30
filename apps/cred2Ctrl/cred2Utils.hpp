@@ -200,6 +200,58 @@ inline int cred2ParseBool( bool              &value,   ///< [out] parsed boolean
 inline int cred2ParseRange( int               &firstValue,  ///< [out] first parsed range value
                             int               &secondValue, ///< [out] second parsed range value
                             const std::string &response     /**< [in] raw or cleaned CLI response */
+);
+
+/// Parse a raw cropping status response such as `on` or `on:192-447:128-383`.
+inline int cred2ParseCropState( bool              &enabled,     ///< [out] parsed cropping-enabled flag
+                                int               &startColumn, ///< [out] parsed first included column
+                                int               &endColumn,   ///< [out] parsed last included column
+                                int               &startRow,    ///< [out] parsed first included row
+                                int               &endRow,      ///< [out] parsed last included row
+                                const std::string &response     /**< [in] raw or cleaned CLI response */
+)
+{
+    std::string              clean = cred2CleanResponse( response );
+    std::vector<std::string> tokens;
+
+    mx::ioutils::parseStringVector( tokens, clean, ":" );
+
+    if( tokens.empty() )
+    {
+        return -1;
+    }
+
+    if( cred2ParseBool( enabled, tokens[0] ) < 0 )
+    {
+        return -1;
+    }
+
+    if( tokens.size() == 1 )
+    {
+        startColumn = 0;
+        endColumn   = 0;
+        startRow    = 0;
+        endRow      = 0;
+        return 0;
+    }
+
+    if( tokens.size() != 3 )
+    {
+        return -1;
+    }
+
+    if( cred2ParseRange( startColumn, endColumn, tokens[1] ) < 0 || cred2ParseRange( startRow, endRow, tokens[2] ) < 0 )
+    {
+        return -1;
+    }
+
+    return 0;
+}
+
+/// Parse a raw range response such as `0-639`.
+inline int cred2ParseRange( int               &firstValue,  ///< [out] first parsed range value
+                            int               &secondValue, ///< [out] second parsed range value
+                            const std::string &response     /**< [in] raw or cleaned CLI response */
 )
 {
     std::string              clean = cred2CleanResponse( response );

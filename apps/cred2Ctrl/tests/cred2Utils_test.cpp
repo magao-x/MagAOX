@@ -133,6 +133,30 @@ SCENARIO( "Parsing raw boolean responses", "[cred2Utils]" )
     }
 }
 
+SCENARIO( "Parsing raw cropping responses", "[cred2Utils]" )
+{
+    GIVEN( "A bundled cropping status response" )
+    {
+        bool enabled     = false;
+        int  startColumn = 0;
+        int  endColumn   = 0;
+        int  startRow    = 0;
+        int  endRow      = 0;
+
+        WHEN( "The response contains the enabled flag and row/column limits" )
+        {
+            int rv = cred2ParseCropState( enabled, startColumn, endColumn, startRow, endRow, "on:192-447:128-383\r\n" );
+
+            REQUIRE( rv == 0 );
+            REQUIRE( enabled == true );
+            REQUIRE( startColumn == 192 );
+            REQUIRE( endColumn == 447 );
+            REQUIRE( startRow == 128 );
+            REQUIRE( endRow == 383 );
+        }
+    }
+}
+
 SCENARIO( "Formatting C-RED 2 ROI commands", "[cred2Utils]" )
 {
     GIVEN( "A valid MagAO-X full-frame ROI" )

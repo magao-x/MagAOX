@@ -896,8 +896,13 @@ inline int cred2Ctrl::syncROIFromCamera()
 {
     std::string response;
     bool        cropEnabled = false;
+    int         startColumn = 0;
+    int         endColumn   = 0;
+    int         startRow    = 0;
+    int         endRow      = 0;
 
-    if( sendCommand( response, "cropping raw", false ) < 0 || cred2ParseBool( cropEnabled, response ) < 0 )
+    if( sendCommand( response, "cropping raw", false ) < 0 ||
+        cred2ParseCropState( cropEnabled, startColumn, endColumn, startRow, endRow, response ) < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "failed to query current cropping mode: " + response } );
     }
@@ -916,18 +921,28 @@ inline int cred2Ctrl::syncROIFromCamera()
     {
         cred2Roi cameraROI;
 
-        if( sendCommand( response, "cropping columns raw", false ) < 0 ||
-            cred2ParseRange( cameraROI.startColumn, cameraROI.endColumn, response ) < 0 )
+        if( startColumn == 0 && endColumn == 0 && startRow == 0 && endRow == 0 )
         {
-            return log<software_error, -1>(
-                { __FILE__, __LINE__, "failed to query current cropping columns: " + response } );
-        }
+            if( sendCommand( response, "cropping columns raw", false ) < 0 ||
+                cred2ParseRange( cameraROI.startColumn, cameraROI.endColumn, response ) < 0 )
+            {
+                return log<software_error, -1>(
+                    { __FILE__, __LINE__, "failed to query current cropping columns: " + response } );
+            }
 
-        if( sendCommand( response, "cropping rows raw", false ) < 0 ||
-            cred2ParseRange( cameraROI.startRow, cameraROI.endRow, response ) < 0 )
+            if( sendCommand( response, "cropping rows raw", false ) < 0 ||
+                cred2ParseRange( cameraROI.startRow, cameraROI.endRow, response ) < 0 )
+            {
+                return log<software_error, -1>(
+                    { __FILE__, __LINE__, "failed to query current cropping rows: " + response } );
+            }
+        }
+        else
         {
-            return log<software_error, -1>(
-                { __FILE__, __LINE__, "failed to query current cropping rows: " + response } );
+            cameraROI.startColumn = startColumn;
+            cameraROI.endColumn   = endColumn;
+            cameraROI.startRow    = startRow;
+            cameraROI.endRow      = endRow;
         }
 
         cameraROI.fullFrame = false;
