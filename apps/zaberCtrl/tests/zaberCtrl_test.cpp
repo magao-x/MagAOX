@@ -23,6 +23,7 @@ class zaberCtrl_test : public zaberCtrl
     zaberCtrl_test( const std::string &device )
     {
         m_configName = device;
+        m_stageName  = "stage";
 
         XWCTEST_SETUP_INDI_NEW_PROP( pos );
         XWCTEST_SETUP_INDI_NEW_PROP( rawPos );
@@ -75,6 +76,12 @@ class zaberCtrl_test : public zaberCtrl
         m_movingState = movingState;
     }
 
+    /// Set the configured home-preset index for testing.
+    void setHomePresetIndex( int homePresetIndex )
+    {
+        m_homePreset = homePresetIndex;
+    }
+
     /// Track a specific preset-name alias for testing.
     int setPresetAliasIndex( int presetNameIndex )
     {
@@ -115,6 +122,30 @@ class zaberCtrl_test : public zaberCtrl
     int syncPoweredOffTelemetry()
     {
         return syncPowerOffStageTelemetry();
+    }
+
+    /// Apply a stage-state INDI update for the configured test stage.
+    int applyStageState( const std::string &stageState )
+    {
+        pcf::IndiProperty ip;
+        ip.setDevice( "stest" );
+        ip.setName( "curr_state" );
+        ip.add( pcf::IndiElement( m_stageName ) );
+        ip[m_stageName].set( stageState );
+
+        return setCallBack_m_indiP_stageState( ip );
+    }
+
+    /// Get the current FSM state.
+    stateCodes::stateCodeT fsmState()
+    {
+        return state();
+    }
+
+    /// Get the current homing bookkeeping state.
+    int homingState() const
+    {
+        return m_homingState;
     }
 
     /// Get the current logged moving state.
@@ -178,6 +209,37 @@ SCENARIO( "Power-off stage telemetry", "[zaberCtrl]" )
         REQUIRE( zct.syncPoweredOffTelemetry() == 0 );
         REQUIRE( zct.presetValue() == 0 );
         REQUIRE( zct.presetTargetValue() == 0 );
+    }
+}
+
+SCENARIO( "Homing READY transitions update the controller FSM promptly", "[zaberCtrl]" )
+{
+    zaberCtrl_test zct( "stest" );
+
+    WHEN( "homing completes without a configured post-home preset move" )
+    {
+        zct.setHomePresetIndex( -1 );
+
+        REQUIRE( zct.applyStageState( "HOMING" ) == 0 );
+        REQUIRE( zct.fsmState() == stateCodes::HOMING );
+        REQUIRE( zct.homingState() == 1 );
+
+        REQUIRE( zct.applyStageState( "READY" ) == 0 );
+        REQUIRE( zct.fsmState() == stateCodes::READY );
+        REQUIRE( zct.homingState() == 0 );
+    }
+
+    WHEN( "homing completes and a post-home preset move is still pending" )
+    {
+        zct.setHomePresetIndex( 1 );
+
+        REQUIRE( zct.applyStageState( "HOMING" ) == 0 );
+        REQUIRE( zct.fsmState() == stateCodes::HOMING );
+        REQUIRE( zct.homingState() == 1 );
+
+        REQUIRE( zct.applyStageState( "READY" ) == 0 );
+        REQUIRE( zct.fsmState() == stateCodes::HOMING );
+        REQUIRE( zct.homingState() == 2 );
     }
 }
 
