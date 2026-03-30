@@ -102,6 +102,7 @@ class cred2Ctrl : public MagAOXApp<>,
     bool m_poweredOn{ false }; ///< True after a power cycle until the startup setpoint has been re-applied.
 
     bool m_cameraCropEnabled{ false }; ///< Tracks whether this controller has enabled camera-side cropping.
+    int  m_roiSettleCounter{ 0 };      ///< Number of main-loop cycles to skip serial status polling after ROI changes.
 
     std::recursive_mutex m_cameraMutex; ///< Protects serial command traffic and EDT reconfiguration.
     ///@}
@@ -651,59 +652,66 @@ inline int cred2Ctrl::appLogic()
             return 0;
         }
 
-        if( getTemps() < 0 )
+        if( m_roiSettleCounter > 0 )
         {
-            if( powerState() != 1 || powerStateTarget() != 1 )
-            {
-                return 0;
-            }
-
-            state( stateCodes::ERROR );
-            return 0;
+            --m_roiSettleCounter;
         }
-
-        if( getFPS() < 0 )
+        else
         {
-            if( powerState() != 1 || powerStateTarget() != 1 )
+            if( getTemps() < 0 )
             {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                {
+                    return 0;
+                }
+
+                state( stateCodes::ERROR );
                 return 0;
             }
 
-            state( stateCodes::ERROR );
-            return 0;
-        }
-
-        if( getFanSpeed() < 0 )
-        {
-            if( powerState() != 1 || powerStateTarget() != 1 )
+            if( getFPS() < 0 )
             {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                {
+                    return 0;
+                }
+
+                state( stateCodes::ERROR );
                 return 0;
             }
 
-            state( stateCodes::ERROR );
-            return 0;
-        }
-
-        if( getAnalogGain() < 0 )
-        {
-            if( powerState() != 1 || powerStateTarget() != 1 )
+            if( getFanSpeed() < 0 )
             {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                {
+                    return 0;
+                }
+
+                state( stateCodes::ERROR );
                 return 0;
             }
 
-            state( stateCodes::ERROR );
-            return 0;
-        }
-
-        if( getLEDState() < 0 )
-        {
-            if( powerState() != 1 || powerStateTarget() != 1 )
+            if( getAnalogGain() < 0 )
             {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                {
+                    return 0;
+                }
+
+                state( stateCodes::ERROR );
                 return 0;
             }
 
-            state( stateCodes::ERROR );
-            return 0;
+            if( getLEDState() < 0 )
+            {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                {
+                    return 0;
+                }
+
+                state( stateCodes::ERROR );
+                return 0;
+            }
         }
 
         if( frameGrabber<cred2Ctrl>::updateINDI() < 0 )
@@ -1483,6 +1491,10 @@ inline int cred2Ctrl::configureAcquisition()
         log<text_log>( "C-RED 2 FPS limits unavailable immediately after ROI reconfigure; will retry in normal polling",
                        logPrio::LOG_WARNING );
     }
+
+    // Give the camera a few app-logic cycles to settle after crop changes
+    // before resuming serial status polls such as fps and temperatures.
+    m_roiSettleCounter = 5;
 
     recordCamera( true );
     state( stateCodes::READY );
