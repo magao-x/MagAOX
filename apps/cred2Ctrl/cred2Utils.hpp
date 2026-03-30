@@ -130,6 +130,46 @@ inline int cred2ParseFloat( float             &value,   ///< [out] parsed floati
     return 0;
 }
 
+/// Parse a delimited list of raw numeric responses into a float vector.
+inline int cred2ParseFloatVector( std::vector<float> &values,        ///< [out] parsed floating-point values
+                                  const std::string  &response,      /**< [in] raw or cleaned CLI response */
+                                  size_t              expectedValues /**< [in] expected number of parsed values, or 0 */
+)
+{
+    std::string              clean = cred2CleanResponse( response );
+    std::vector<std::string> tokens;
+
+    mx::ioutils::parseStringVector( tokens, clean, ":, \t\r\n" );
+
+    if( tokens.empty() )
+    {
+        return -1;
+    }
+
+    if( expectedValues > 0 && tokens.size() != expectedValues )
+    {
+        return -1;
+    }
+
+    values.clear();
+    values.reserve( tokens.size() );
+
+    for( const auto &token : tokens )
+    {
+        float value = 0;
+
+        if( cred2ParseFloat( value, token ) < 0 )
+        {
+            values.clear();
+            return -1;
+        }
+
+        values.push_back( value );
+    }
+
+    return 0;
+}
+
 /// Parse a raw on/off response into a boolean.
 inline int cred2ParseBool( bool              &value,   ///< [out] parsed boolean value
                            const std::string &response /**< [in] raw or cleaned CLI response */

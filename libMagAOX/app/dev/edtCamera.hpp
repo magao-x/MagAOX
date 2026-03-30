@@ -91,8 +91,9 @@ class edtCamera : public ioDevice
     ~edtCamera() noexcept;
 
     /// Send a serial command over cameralink and retrieve the response
-    int pdvSerialWriteRead( std::string       &response, ///< [out] the response to the command from the device
-                            const std::string &command   ///< [in] the command to send to the device
+    int pdvSerialWriteRead( std::string       &response,        ///< [out] the response to the command from the device
+                            const std::string &command,         /**< [in] the command to send to the device */
+                            bool               logErrors = true /**< [in] log serial transport failures when true */
     );
 
     /// Configure the EDT framegrabber
@@ -252,7 +253,7 @@ edtCamera<derivedT>::~edtCamera() noexcept
     #define MAGAOX_PDV_SERBUFSIZE 512
 
 template <class derivedT>
-int edtCamera<derivedT>::pdvSerialWriteRead( std::string &response, const std::string &command )
+int edtCamera<derivedT>::pdvSerialWriteRead( std::string &response, const std::string &command, bool logErrors )
 {
     char buf[MAGAOX_PDV_SERBUFSIZE + 1];
 
@@ -262,7 +263,10 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string &response, const std::s
 
     if( pdv_serial_command( m_pdv, command.c_str() ) < 0 )
     {
-        derivedT::template log<software_error>( { __FILE__, __LINE__, "PDV: error sending serial command" } );
+        if( logErrors )
+        {
+            derivedT::template log<software_error>( { __FILE__, __LINE__, "PDV: error sending serial command" } );
+        }
         return -1;
     }
 
@@ -275,7 +279,10 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string &response, const std::s
         if( derived().powerState() != 1 || derived().powerStateTarget() != 1 )
             return -1;
 
-        derivedT::template log<software_error>( { __FILE__, __LINE__, "PDV: timeout, no serial response" } );
+        if( logErrors )
+        {
+            derivedT::template log<software_error>( { __FILE__, __LINE__, "PDV: timeout, no serial response" } );
+        }
         return -1;
     }
 
@@ -310,7 +317,10 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string &response, const std::s
 
     if( ret == 0 && response.empty() && pdv_get_waitchar( m_pdv, &waitc ) )
     {
-        derivedT::template log<software_error>( { __FILE__, __LINE__, "PDV: timeout in serial response" } );
+        if( logErrors )
+        {
+            derivedT::template log<software_error>( { __FILE__, __LINE__, "PDV: timeout in serial response" } );
+        }
         return -1;
     }
 

@@ -251,8 +251,9 @@ class cred2Ctrl : public MagAOXApp<>,
     int setSerialBaud();
 
     /// Send a command over Camera Link serial and clean the response.
-    int sendCommand( std::string       &response, ///< [out] cleaned command response
-                     const std::string &command   /**< [in] CLI command to send */
+    int sendCommand( std::string       &response,         ///< [out] cleaned command response
+                     const std::string &command,          /**< [in] CLI command to send */
+                     bool               logFailure = true /**< [in] log transport failures when true */
     );
 
     /// Send a command that should return a success acknowledgement.
@@ -804,15 +805,22 @@ inline int cred2Ctrl::appShutdown()
     return 0;
 }
 
-inline int cred2Ctrl::sendCommand( std::string &response, const std::string &command )
+inline int cred2Ctrl::sendCommand( std::string &response, const std::string &command, bool logFailure )
 {
     std::string rawResponse;
 
+    response.clear();
+
     { // mutex scope
         std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
-        if( pdvSerialWriteRead( rawResponse, command ) != 0 )
+        if( pdvSerialWriteRead( rawResponse, command, logFailure ) != 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
+            {
+                return -1;
+            }
+
+            if( !logFailure )
             {
                 return -1;
             }
@@ -882,48 +890,44 @@ inline int cred2Ctrl::setSerialBaud()
 
 inline int cred2Ctrl::getTemps()
 {
-    cred2Temps   temps;
-    std::string  response;
-    const double diffLimit = 1.0;
-
-    if( sendCommand( response, "temperatures motherboard raw" ) < 0 ||
-        cred2ParseFloat( temps.motherboard, response ) < 0 )
+    cred2Temps         temps;
+    std::string        response;
+    std::vector<float> bundledTemps;
+    const double       diffLimit = 1.0;
+    const std::string  bundledCommand( "temperatures raw" );
+    const std::string  setpointCommand( "temperatures snake setpoint raw" );
+    const auto         keepLastTemps = [this]( const std::string &detail )
     {
-        return log<software_error, -1>(
-            { __FILE__, __LINE__, "failed to parse motherboard temperature: " + response } );
+        return log<text_log, 0>( "transient C-RED 2 temperature refresh failure; keeping previous cached values: " +
+                                     detail,
+                                 logPrio::LOG_WARNING );
+    };
+
+    if( sendCommand( response, bundledCommand, false ) < 0 )
+    {
+        return keepLastTemps( bundledCommand );
     }
 
-    if( sendCommand( response, "temperatures frontend raw" ) < 0 || cred2ParseFloat( temps.frontend, response ) < 0 )
+    if( cred2ParseFloatVector( bundledTemps, response, 6 ) < 0 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "failed to parse frontend temperature: " + response } );
+        return keepLastTemps( bundledCommand + " -> " + response );
     }
 
-    if( sendCommand( response, "temperatures powerboard raw" ) < 0 ||
-        cred2ParseFloat( temps.powerboard, response ) < 0 )
+    temps.motherboard = bundledTemps[0];
+    temps.frontend    = bundledTemps[1];
+    temps.powerboard  = bundledTemps[2];
+    temps.snake       = bundledTemps[3];
+    temps.peltier     = bundledTemps[4];
+    temps.heatsink    = bundledTemps[5];
+
+    if( sendCommand( response, setpointCommand, false ) < 0 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "failed to parse powerboard temperature: " + response } );
+        return keepLastTemps( setpointCommand );
     }
 
-    if( sendCommand( response, "temperatures snake raw" ) < 0 || cred2ParseFloat( temps.snake, response ) < 0 )
+    if( cred2ParseFloat( temps.setpoint, response ) < 0 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "failed to parse detector temperature: " + response } );
-    }
-
-    if( sendCommand( response, "temperatures snake setpoint raw" ) < 0 ||
-        cred2ParseFloat( temps.setpoint, response ) < 0 )
-    {
-        return log<software_error, -1>(
-            { __FILE__, __LINE__, "failed to parse detector setpoint temperature: " + response } );
-    }
-
-    if( sendCommand( response, "temperatures peltier raw" ) < 0 || cred2ParseFloat( temps.peltier, response ) < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__, "failed to parse peltier temperature: " + response } );
-    }
-
-    if( sendCommand( response, "temperatures heatsink raw" ) < 0 || cred2ParseFloat( temps.heatsink, response ) < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__, "failed to parse heatsink temperature: " + response } );
+        return keepLastTemps( setpointCommand + " -> " + response );
     }
 
     m_temps        = temps;

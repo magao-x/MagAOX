@@ -64,6 +64,41 @@ SCENARIO( "Parsing raw float responses", "[cred2Utils]" )
     }
 }
 
+SCENARIO( "Parsing raw float-vector responses", "[cred2Utils]" )
+{
+    GIVEN( "A valid delimited float response" )
+    {
+        std::vector<float> values;
+
+        WHEN( "The response contains the bundled temperature values" )
+        {
+            int rv = cred2ParseFloatVector( values, "40.50:37.00:40.25:-14.92:2.29:27.50\r\n", 6 );
+
+            REQUIRE( rv == 0 );
+            REQUIRE( values.size() == 6 );
+            REQUIRE( values[0] == Approx( 40.50f ) );
+            REQUIRE( values[1] == Approx( 37.00f ) );
+            REQUIRE( values[2] == Approx( 40.25f ) );
+            REQUIRE( values[3] == Approx( -14.92f ) );
+            REQUIRE( values[4] == Approx( 2.29f ) );
+            REQUIRE( values[5] == Approx( 27.50f ) );
+        }
+    }
+
+    GIVEN( "A malformed delimited float response" )
+    {
+        std::vector<float> values;
+
+        WHEN( "The value count does not match" )
+        {
+            int rv = cred2ParseFloatVector( values, "40.50:37.00:40.25\r\n", 6 );
+
+            REQUIRE( rv == -1 );
+            REQUIRE( values.empty() );
+        }
+    }
+}
+
 SCENARIO( "Parsing raw range responses", "[cred2Utils]" )
 {
     GIVEN( "A valid range response" )
