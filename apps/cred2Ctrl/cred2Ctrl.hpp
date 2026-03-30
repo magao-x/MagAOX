@@ -102,7 +102,9 @@ class cred2Ctrl : public MagAOXApp<>,
     bool m_poweredOn{ false }; ///< True after a power cycle until the startup setpoint has been re-applied.
 
     bool m_cameraCropEnabled{ false }; ///< Tracks whether this controller has enabled camera-side cropping.
-    int  m_roiSettleCounter{ 0 };      ///< Number of main-loop cycles to skip serial status polling after ROI changes.
+    bool m_haveStartupROI{ false };    ///< True once startup ROI detection has cached the camera's pre-existing ROI.
+    stdCameraT::roi m_startupROI;      ///< Startup ROI cached from the camera before stdCamera power-on defaults run.
+    int m_roiSettleCounter{ 0 };       ///< Number of main-loop cycles to skip serial status polling after ROI changes.
 
     std::recursive_mutex m_cameraMutex; ///< Protects serial command traffic and EDT reconfiguration.
     ///@}
@@ -960,10 +962,12 @@ inline int cred2Ctrl::syncROIFromCamera()
         m_cameraCropEnabled = true;
     }
 
-    m_nextROI  = m_currentROI;
-    m_width    = m_currentROI.w;
-    m_height   = m_currentROI.h;
-    m_dataType = _DATATYPE_INT16;
+    m_nextROI        = m_currentROI;
+    m_width          = m_currentROI.w;
+    m_height         = m_currentROI.h;
+    m_dataType       = _DATATYPE_INT16;
+    m_startupROI     = m_currentROI;
+    m_haveStartupROI = true;
 
     updateIfChanged( m_indiP_roi_x, "current", m_currentROI.x, INDI_OK );
     updateIfChanged( m_indiP_roi_y, "current", m_currentROI.y, INDI_OK );
@@ -1294,20 +1298,29 @@ inline int cred2Ctrl::powerOnDefaults()
     m_tempControlStatusSet = false;
     m_tempControlStatusStr = "TEMP OFF";
     m_tempControlOnTarget  = false;
-    m_cameraCropEnabled    = false;
-    m_fanSpeedValid        = false;
-    m_analogGainValid      = false;
-    m_ledStateValid        = false;
-    m_fanSpeedNameSet      = "auto";
-    m_analogGainNameSet    = "med";
-    m_ledStateSet          = true;
+    if( m_haveStartupROI )
+    {
+        m_currentROI        = m_startupROI;
+        m_cameraCropEnabled = !( m_currentROI.w == m_full_w && m_currentROI.h == m_full_h );
+        m_haveStartupROI    = false;
+    }
+    else
+    {
+        m_cameraCropEnabled = false;
+        m_currentROI.x      = m_default_x;
+        m_currentROI.y      = m_default_y;
+        m_currentROI.w      = m_default_w;
+        m_currentROI.h      = m_default_h;
+        m_currentROI.bin_x  = m_default_bin_x;
+        m_currentROI.bin_y  = m_default_bin_y;
+    }
 
-    m_currentROI.x     = m_default_x;
-    m_currentROI.y     = m_default_y;
-    m_currentROI.w     = m_default_w;
-    m_currentROI.h     = m_default_h;
-    m_currentROI.bin_x = m_default_bin_x;
-    m_currentROI.bin_y = m_default_bin_y;
+    m_fanSpeedValid     = false;
+    m_analogGainValid   = false;
+    m_ledStateValid     = false;
+    m_fanSpeedNameSet   = "auto";
+    m_analogGainNameSet = "med";
+    m_ledStateSet       = true;
 
     m_nextROI = m_currentROI;
 
