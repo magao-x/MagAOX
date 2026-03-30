@@ -1486,14 +1486,16 @@ inline int cred2Ctrl::configureAcquisition()
     m_height   = m_currentROI.h;
     m_dataType = _DATATYPE_INT16;
 
-    if( updateFPSLimits() < 0 )
+    // Use the current FPS target while the camera settles so the framegrabber
+    // does not keep reconfiguring latency buffers on a stale pre-ROI value.
+    if( m_fpsSet > 0 )
     {
-        log<text_log>( "C-RED 2 FPS limits unavailable immediately after ROI reconfigure; will retry in normal polling",
-                       logPrio::LOG_WARNING );
+        m_fps = m_fpsSet;
     }
 
     // Give the camera a few app-logic cycles to settle after crop changes
-    // before resuming serial status polls such as fps and temperatures.
+    // before resuming serial status polls such as fps, temperatures, and
+    // refreshed FPS limits.
     m_roiSettleCounter = 5;
 
     recordCamera( true );
