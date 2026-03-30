@@ -144,6 +144,38 @@ class zaberLowLevelBinary_test : public zaberLowLevelBinary
     std::filesystem::path m_testRoot; ///< Temporary directory backing the test FIFOs and state snapshot.
 };
 
+class zaberBinaryStage_test : public zaberBinaryStage<zaberLowLevelBinary_test>
+{
+  public:
+    /// Construct a test binary-stage helper.
+    zaberBinaryStage_test( zaberLowLevelBinary_test *parent ) : zaberBinaryStage<zaberLowLevelBinary_test>( parent )
+    {
+    }
+
+    /// Set the fields used to detect homing completion.
+    void setHomeState( bool homing, bool warnWR, long tgtPos, long rawPos, time_t lastHomed )
+    {
+        m_homing            = homing;
+        m_warnWR            = warnWR;
+        m_tgtPos            = tgtPos;
+        m_rawPos            = rawPos;
+        m_lastHomed.tv_sec  = lastHomed;
+        m_lastHomed.tv_nsec = 0;
+    }
+
+    /// Invoke the last-home timestamp refresh logic under test.
+    int refreshLastHomed( bool wasHoming )
+    {
+        return updateLastHomed( wasHoming );
+    }
+
+    /// Get the stored last-home seconds value.
+    time_t lastHomedSec() const
+    {
+        return m_lastHomed.tv_sec;
+    }
+};
+
 SCENARIO( "INDI Callbacks", "[zaberLowLevelBinary]" )
 {
     XWCTEST_INDI_NEW_CALLBACK( zaberLowLevelBinary, tgt_pos );
@@ -169,6 +201,28 @@ SCENARIO( "Power-off INDI snapshot retains stage state", "[zaberLowLevelBinary]"
     REQUIRE( zllbt.maxPosValue( "stageA" ) == "54321" );
     REQUIRE( zllbt.currStateValue( "stageA" ) == "POWEROFF" );
     REQUIRE( zllbt.warnValue( "stageA" ) == "Off" );
+}
+
+SCENARIO( "Binary last-home timestamps refresh after homing completes", "[zaberLowLevelBinary]" )
+{
+    zaberLowLevelBinary_test zllbt( "zllbtest" );
+    zaberBinaryStage_test    stage( &zllbt );
+
+    WHEN( "a homing sequence completes with a stale stored timestamp" )
+    {
+        stage.setHomeState( false, false, 0, 0, 77 );
+
+        REQUIRE( stage.refreshLastHomed( true ) == 0 );
+        REQUIRE( stage.lastHomedSec() != 77 );
+    }
+
+    WHEN( "the stage is merely idle at home with an existing timestamp" )
+    {
+        stage.setHomeState( false, false, 0, 0, 77 );
+
+        REQUIRE( stage.refreshLastHomed( false ) == 0 );
+        REQUIRE( stage.lastHomedSec() == 77 );
+    }
 }
 
 } // namespace ZLLBTEST

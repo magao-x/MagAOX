@@ -304,7 +304,7 @@ class zaberBinaryStage
     int getParked( z_port port /**< [in] the port with which to communicate */ );
 
     /// Get the knob enabled status
-    int getKnob( z_port port  /**< [in] the port with which to communicate */ );
+    int getKnob( z_port port /**< [in] the port with which to communicate */ );
 
     /// Update the current position and derived motion state.
     int updatePos( z_port port /**< [in] the port with which to communicate */ );
@@ -355,6 +355,9 @@ class zaberBinaryStage
 
     /// Refresh warning-equivalent state from firmware 5.xx information.
     int getWarnings( z_port port /**< [in] the port with which to communicate */ );
+
+    /// Refresh the stored last-home timestamp when a home completion is detected.
+    int updateLastHomed( bool wasHoming /**< [in] whether the stage was homing before the latest status refresh */ );
 
     /// Clear transient state on power-off.
     int onPowerOff();
@@ -745,7 +748,7 @@ int zaberBinaryStage<parentT>::getParked( z_port )
 }
 
 template <class parentT>
-int zaberBinaryStage<parentT>::getKnob( z_port port)
+int zaberBinaryStage<parentT>::getKnob( z_port port )
 {
     int32_t value;
     int     rv = getSetting( value, port, cmdSetDeviceMode );
@@ -753,14 +756,16 @@ int zaberBinaryStage<parentT>::getKnob( z_port port)
     {
         return rv;
     }
-    m_knobEnabled = !(value & modeDisablePotentiometer);
-    
+    m_knobEnabled = !( value & modeDisablePotentiometer );
+
     return 0;
 }
 
 template <class parentT>
 int zaberBinaryStage<parentT>::updatePos( z_port port )
 {
+    bool wasHoming = m_homing;
+
     int32_t status;
     int     rv = queryCommand( status, port, cmdReturnStatus, 0, cmdReturnStatus );
     if( rv < 0 )
@@ -788,16 +793,13 @@ int zaberBinaryStage<parentT>::updatePos( z_port port )
 
     m_rawPos = pos;
 
-    if( status == 0 && m_homing == false && m_warnWR == false && m_tgtPos == 0 && m_rawPos == 0 &&
-        m_lastHomed.tv_sec == 0 )
+    rv = getWarnings( port );
+    if( rv < 0 )
     {
-        if( clock_gettime( CLOCK_REALTIME, &m_lastHomed ) < 0 )
-        {
-            MagAOXAppT::log<software_error>( { errno, 0, "clock_gettime for last homed" } );
-        }
+        return rv;
     }
 
-    return getWarnings( port );
+    return updateLastHomed( wasHoming );
 }
 
 template <class parentT>
@@ -818,15 +820,16 @@ int zaberBinaryStage<parentT>::enableKnob( z_port port, bool enable )
     }
 
     mode |= modeDisableAutoReply;
-    if (enable) mode &= ~modeDisablePotentiometer;  // clear the bit to enable
-    else mode |= modeDisablePotentiometer;   // set the bit to disable
+    if( enable )
+        mode &= ~modeDisablePotentiometer; // clear the bit to enable
+    else
+        mode |= modeDisablePotentiometer; // set the bit to disable
 
     rv = sendCommandNoReply( port, cmdSetDeviceMode, mode );
     if( rv < 0 )
     {
         return rv;
     }
-
 
     int32_t appliedMode;
     rv = getSetting( appliedMode, port, cmdSetDeviceMode );
@@ -835,14 +838,13 @@ int zaberBinaryStage<parentT>::enableKnob( z_port port, bool enable )
         return rv;
     }
 
-    bool knobOk = enable
-        ? !(appliedMode & modeDisablePotentiometer)   // bit should be 0
-        :  (appliedMode & modeDisablePotentiometer);  // bit should be 1
+    bool knobOk = enable ? !( appliedMode & modeDisablePotentiometer ) // bit should be 0
+                         : ( appliedMode & modeDisablePotentiometer ); // bit should be 1
 
-    if (!knobOk || !(appliedMode & modeDisableAutoReply))
+    if( !knobOk || !( appliedMode & modeDisableAutoReply ) )
     {
         return MagAOXAppT::log<software_error, -1>(
-            std::format("device {} did not apply requested device mode {}, got {}", m_name, mode, appliedMode));
+            std::format( "device {} did not apply requested device mode {}, got {}", m_name, mode, appliedMode ) );
     }
 
     return 0;
@@ -1095,11 +1097,17 @@ int zaberBinaryStage<parentT>::getWarnings( z_port port )
         m_warnWR = true;
     }
 
-    if( m_warnWR == false && m_homing == false && m_tgtPos == 0 && m_rawPos == 0 && m_lastHomed.tv_sec == 0 )
+    return 0;
+}
+
+template <class parentT>
+int zaberBinaryStage<parentT>::updateLastHomed( bool wasHoming )
+{
+    if( !m_homing && !m_warnWR && m_tgtPos == 0 && m_rawPos == 0 && ( wasHoming || m_lastHomed.tv_sec == 0 ) )
     {
-        if( clock_gettime( CLOCK_REALTIME, &m_lastHomed ) < 0 )
+        if( clock_gettime( CLOCK_ISIO, &m_lastHomed ) < 0 )
         {
-            MagAOXAppT::log<software_error>( { errno, 0, "clock_gettime for last homed" } );
+            return MagAOXAppT::log<software_error, -1>( { errno, 0, "clock_gettime for last homed" } );
         }
     }
 
