@@ -70,6 +70,14 @@ def cleanup_observing_state(indi, cameras):
         log.debug("Ensured relevant streamwriters are off")
     except Exception:
         log.exception("Failed to ensure streamwriters are OFF during cleanup")
+    try:
+        indi.wait_for_state({
+            f"{camname}.emgain.target": 1
+            for camname in cameras
+        }, timeout=MAX_COMMAND_TIMEOUT_SEC)
+        log.debug("Ensured EGAIN set to 1")
+    except Exception:
+        log.exception("Failed to ensure EGAIN set to 1 during cleanup")
 
 def take_darks(indi, camname, configuration, max_n_frames, max_dark_time_sec, dry_run, stop_event):
     if stop_event.is_set():
