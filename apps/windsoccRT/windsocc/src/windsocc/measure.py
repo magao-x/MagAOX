@@ -429,7 +429,9 @@ def process_mf_response_cubes(
     roi_masks_dir: str,
     wind_data_dir: str,
     make_movie: bool = False,
-    rejected_dir: str = None):
+    rejected_dir: str = None,
+    parity_flip_needed: bool = False,
+):
     """Define the tripwire region then process the matched-filter response cubes.
 
     Parameters:
@@ -496,6 +498,8 @@ def process_mf_response_cubes(
         for track in wind_summary.get("tracks", []):
             track["inferred_origin"] = inferred_origin_means_vetted.get(track["track_id"])
         pa_offset_deg = float(config_params.get("PA_OFFSET", 0) or 0)
+        if parity_flip_needed:
+            pa_offset_deg = -pa_offset_deg
         _apply_pa_offset_to_direction_rows(wind_summary.get("tracks", []), pa_offset_deg)
         wind_summaries_all.append(wind_summary)
         wind_save_path = os.path.join(wind_data_dir, f"{cube_stem}_wind_attributes.json")
@@ -540,6 +544,7 @@ def run_measure_stage(
     config_params: dict | None = None,
     make_movie: bool | None = None,
     limit_cubes: int | None = None,
+    parity_flip_needed: bool = False,
 ) -> dict:
     """Run the measure stage and return generated output paths."""
     if config_params is None:
@@ -580,6 +585,7 @@ def run_measure_stage(
         wind_data_dir=dirs["wind_data_dir"],
         make_movie=make_movie,
         rejected_dir=dirs["rejected_directory"],
+        parity_flip_needed=parity_flip_needed,
     )
 
     json_paths = []

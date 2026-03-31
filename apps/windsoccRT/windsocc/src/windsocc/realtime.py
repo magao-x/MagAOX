@@ -776,6 +776,7 @@ def process_collected_batch(
         config_params=config_params,
         make_movie=(not no_movie) and config_params.get("MAKE_MOVIE", False),
         limit_cubes=None,
+        parity_flip_needed=parity_flip_needed,
     )
     if not measure_result["json_paths"]:
         raise RuntimeError("Measure stage produced no wind-summary JSON outputs.")
