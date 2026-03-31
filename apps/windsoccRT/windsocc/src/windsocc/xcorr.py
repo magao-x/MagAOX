@@ -196,8 +196,8 @@ def process_quadrant_directory(quadrant_dir_path, quadrant, subdir_name, min_del
         output_path = os.path.join(output_base_dir, output_filename)
 
         save_xcorr_products(result["cc_cube"], result["bias"], result["header"], output_path, bias_path)
-        logging.info(f"[{subdir_name}/{quadrant}] Saved cross-correlation maps cube to {output_path}")
-        logging.info(f"[{subdir_name}/{quadrant}] Saved bias cube to {bias_path}")
+        # logging.info(f"[{subdir_name}/{quadrant}] Saved cross-correlation maps cube to {output_path}")
+        # logging.info(f"[{subdir_name}/{quadrant}] Saved bias cube to {bias_path}")
         elapsed_time = datetime.now() - result["starttime"]
         logging.info(f"[{subdir_name}/{quadrant}] Processing took {elapsed_time}")
         
@@ -212,14 +212,14 @@ def compute_quadrant_xcorr_from_series(time_series, n_per_cube, quadrant, subdir
                                        max_delay, delay_step, segment_cubes, overlap, fft_pad_shape):
     """Compute xcorr products for one quadrant time series without persisting them."""
     try:
-        logging.info(f"[{subdir_name}/{quadrant}] Computing aperture bias")
+        # logging.info(f"[{subdir_name}/{quadrant}] Computing aperture bias")
         time_series_median = np.median(time_series, axis=0)
         bias = compute_aperture_bias(time_series_median, fft_pad_shape=fft_pad_shape)
         delays = list(range(min_delay, max_delay + 1, delay_step))
         starttime = datetime.now()
 
-        logging.info(f"[{subdir_name}/{quadrant}] Computing cross-correlation maps for all delays (optimized FFT pre-computation)")
-        logging.info(f"[{subdir_name}/{quadrant}] Processing {len(delays)} delays: {min_delay} to {max_delay} (step {delay_step})")
+        # logging.info(f"[{subdir_name}/{quadrant}] Computing cross-correlation maps for all delays (optimized FFT pre-computation)")
+        # logging.info(f"[{subdir_name}/{quadrant}] Processing {len(delays)} delays: {min_delay} to {max_delay} (step {delay_step})")
 
         cc_maps = compute_all_delays_welch_optimized(
             time_series,
@@ -522,13 +522,13 @@ def main():
         logging.error("max-delay must be provided either via --max-delay argument or MAX_DELAY in config file")
         return
     
-    logging.info("Cross-correlation parameters:")
-    logging.info(f"  min_delay: {min_delay}")
-    logging.info(f"  max_delay: {max_delay}")
-    logging.info(f"  delay_step: {delay_step}")
-    logging.info(f"  segment_cubes: {segment_cubes}")
-    logging.info(f"  overlap: {overlap}")
-    logging.info(f"  fft_pad_shape: {fft_pad_shape}")
+    # logging.info("Cross-correlation parameters:")
+    # logging.info(f"  min_delay: {min_delay}")
+    # logging.info(f"  max_delay: {max_delay}")
+    # logging.info(f"  delay_step: {delay_step}")
+    # logging.info(f"  segment_cubes: {segment_cubes}")
+    # logging.info(f"  overlap: {overlap}")
+    # logging.info(f"  fft_pad_shape: {fft_pad_shape}")
     
     # Find all quadrant directories
     quadrant_dirs = find_quadrant_directories(top_level_dir)
