@@ -25,7 +25,8 @@ void hideStarOverlay( StretchCircle *sc, QTextEdit *te )
     }
 }
 
-void clearStarOverlays( std::vector<StretchCircle *> &starCircles, std::vector<QTextEdit *> &starLabels )
+void clearStarOverlays( std::vector<QPointer<StretchCircle>> &starCircles,
+                        std::vector<QPointer<QTextEdit>>     &starLabels )
 {
     for( size_t s = 0; s < starCircles.size(); ++s )
     {
@@ -57,6 +58,39 @@ acquisition::~acquisition()
 {
     std::lock_guard<std::mutex> guard( m_starCircleMutex );
     clearStarOverlays( m_starCircles, m_starLabels );
+}
+
+void acquisition::ensureStarOverlay( size_t n )
+{
+    if( n >= m_starCircles.size() || n >= m_starLabels.size() )
+    {
+        return;
+    }
+
+    if( m_starCircles[n].isNull() )
+    {
+        StretchCircle *sc = new StretchCircle;
+        sc->setPenColor( m_color.c_str() );
+        sc->setPenWidth( 0 );
+        sc->setVisible( false );
+        sc->setStretchable( false );
+        sc->setRemovable( false );
+        connect( sc, SIGNAL( remove( StretchCircle * ) ), this, SLOT( stretchCircleRemove( StretchCircle * ) ) );
+        emit newStretchCircle( sc );
+        m_starCircles[n] = sc;
+    }
+
+    if( m_starLabels[n].isNull() )
+    {
+        QTextEdit *te = new QTextEdit( m_roa.m_graphicsView );
+        QFont      qf = te->currentFont();
+        qf.setPixelSize( m_fontSize );
+        te->setCurrentFont( qf );
+        te->setVisible( false );
+        te->setTextColor( m_color.c_str() );
+        m_roa.m_graphicsView->textEditSetup( te );
+        m_starLabels[n] = te;
+    }
 }
 
 int acquisition::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurator &config )
@@ -119,25 +153,7 @@ int acquisition::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurato
         {
             // Pre-create the full bounded overlay set so delayed INDI updates only
             // show and hide items instead of tearing down Qt objects mid-stream.
-            m_starCircles[n] = new StretchCircle;
-            m_starCircles[n]->setPenColor( m_color.c_str() );
-            m_starCircles[n]->setPenWidth( 0 );
-            m_starCircles[n]->setVisible( false );
-            m_starCircles[n]->setStretchable( false );
-            m_starCircles[n]->setRemovable( false );
-            connect( m_starCircles[n],
-                     SIGNAL( remove( StretchCircle * ) ),
-                     this,
-                     SLOT( stretchCircleRemove( StretchCircle * ) ) );
-            emit newStretchCircle( m_starCircles[n] );
-
-            m_starLabels[n] = new QTextEdit( m_roa.m_graphicsView );
-            QFont qf        = m_starLabels[n]->currentFont();
-            qf.setPixelSize( m_fontSize );
-            m_starLabels[n]->setCurrentFont( qf );
-            m_starLabels[n]->setVisible( false );
-            m_starLabels[n]->setTextColor( m_color.c_str() );
-            m_roa.m_graphicsView->textEditSetup( m_starLabels[n] );
+            ensureStarOverlay( n );
         }
     }
 
@@ -270,6 +286,8 @@ int acquisition::updateOverlay()
     {
         std::lock_guard<std::mutex> guard( m_starCircleMutex );
 
+        ensureStarOverlay( n );
+
         StretchCircle *sc = m_starCircles[n];
         QTextEdit     *te = m_starLabels[n];
 
@@ -375,26 +393,16 @@ void acquisition::disableOverlay()
 
 void acquisition::stretchCircleRemove( StretchCircle *sb )
 {
-    static_cast<void>( sb );
-    /*
-    std::cerr << "acquisition::stretchBoxRemove 1\n";
-    std::lock_guard<std::mutex> guard(m_roiBoxMutex);
-    if(!m_roiBox)
+    std::lock_guard<std::mutex> guard( m_starCircleMutex );
+
+    for( size_t n = 0; n < m_starCircles.size(); ++n )
     {
-        return;
+        if( m_starCircles[n] == sb )
+        {
+            m_starCircles[n] = nullptr;
+            return;
+        }
     }
-
-    std::cerr << "acquisition::stretchBoxRemove 2\n";
-
-    if(sb != m_roiBox)
-    {
-        return;
-    }
-
-    std::cerr << "acquisition::stretchBoxRemove 3\n";
-
-    m_roiBox = nullptr;
-    */
 }
 
 std::vector<std::string> acquisition::info()
