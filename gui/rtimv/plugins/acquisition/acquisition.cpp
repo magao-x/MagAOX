@@ -109,6 +109,38 @@ int acquisition::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurato
              m_roa.m_mainWindowObject,
              SLOT( addStretchCircle( StretchCircle * ) ) );
 
+    {
+        std::lock_guard<std::mutex> guard( m_starCircleMutex );
+
+        m_starCircles.resize( c_maxTrackedStars, nullptr );
+        m_starLabels.resize( c_maxTrackedStars, nullptr );
+
+        for( size_t n = 0; n < c_maxTrackedStars; ++n )
+        {
+            // Pre-create the full bounded overlay set so delayed INDI updates only
+            // show and hide items instead of tearing down Qt objects mid-stream.
+            m_starCircles[n] = new StretchCircle;
+            m_starCircles[n]->setPenColor( m_color.c_str() );
+            m_starCircles[n]->setPenWidth( 0 );
+            m_starCircles[n]->setVisible( false );
+            m_starCircles[n]->setStretchable( false );
+            m_starCircles[n]->setRemovable( false );
+            connect( m_starCircles[n],
+                     SIGNAL( remove( StretchCircle * ) ),
+                     this,
+                     SLOT( stretchCircleRemove( StretchCircle * ) ) );
+            emit newStretchCircle( m_starCircles[n] );
+
+            m_starLabels[n] = new QTextEdit( m_roa.m_graphicsView );
+            QFont qf        = m_starLabels[n]->currentFont();
+            qf.setPixelSize( m_fontSize );
+            m_starLabels[n]->setCurrentFont( qf );
+            m_starLabels[n]->setVisible( false );
+            m_starLabels[n]->setTextColor( m_color.c_str() );
+            m_roa.m_graphicsView->textEditSetup( m_starLabels[n] );
+        }
+    }
+
     if( m_enabled )
         enableOverlay();
     else
@@ -220,48 +252,13 @@ int acquisition::updateOverlay()
 
     size_t nstars = std::min( static_cast<size_t>( rawStarCount ), c_maxTrackedStars );
 
-    if( m_nStars != nstars )
-    {
-        m_nStars = nstars;
-
-        std::lock_guard<std::mutex> guard( m_starCircleMutex );
-        clearStarOverlays( m_starCircles, m_starLabels );
-
-        m_starCircles.resize( m_nStars, nullptr );
-        m_starLabels.resize( m_nStars, nullptr );
-
-        for( size_t n = 0; n < m_nStars; ++n )
-        {
-            // create circle
-            m_starCircles[n] = new StretchCircle;
-            m_starCircles[n]->setPenColor( m_color.c_str() );
-            m_starCircles[n]->setPenWidth( 0 );
-            m_starCircles[n]->setVisible( false );
-            m_starCircles[n]->setStretchable( false );
-            m_starCircles[n]->setRemovable( false );
-            connect( m_starCircles[n],
-                     SIGNAL( remove( StretchCircle * ) ),
-                     this,
-                     SLOT( stretchCircleRemove( StretchCircle * ) ) );
-            emit newStretchCircle( m_starCircles[n] );
-
-            // create label
-            m_starLabels[n] = new QTextEdit( m_roa.m_graphicsView );
-            QFont qf;
-            qf = m_starLabels[n]->currentFont();
-            qf.setPixelSize( m_fontSize );
-            m_starLabels[n]->setCurrentFont( qf );
-            m_starLabels[n]->setVisible( false );
-            m_starLabels[n]->setTextColor( m_color.c_str() );
-            m_roa.m_graphicsView->textEditSetup( m_starLabels[n] );
-        }
-    }
+    m_nStars = nstars;
 
     if( m_width <= 0 || m_height <= 0 )
     {
         std::lock_guard<std::mutex> guard( m_starCircleMutex );
 
-        for( size_t n = 0; n < m_nStars; ++n )
+        for( size_t n = 0; n < m_starCircles.size(); ++n )
         {
             hideStarOverlay( m_starCircles[n], m_starLabels[n] );
         }
@@ -269,17 +266,8 @@ int acquisition::updateOverlay()
         return 0;
     }
 
-    std::vector<float> xs( m_nStars, -1 );
-    std::vector<float> ys( m_nStars, -1 );
-
-    for( size_t n = 0; n < m_nStars; ++n )
+    for( size_t n = 0; n < m_starCircles.size(); ++n )
     {
-        std::string star = "star_" + std::to_string( n );
-
-        xs[n] = getBlobVal<float>( star + ".x", -1 );
-        ys[n] = getBlobVal<float>( star + ".y", -1 );
-
-        // Now for each valid star position, set up the overlay
         std::lock_guard<std::mutex> guard( m_starCircleMutex );
 
         StretchCircle *sc = m_starCircles[n];
@@ -290,11 +278,22 @@ int acquisition::updateOverlay()
             continue;
         }
 
-        if( xs[n] >= 0 && ys[n] >= 0 )
+        if( n >= m_nStars )
+        {
+            hideStarOverlay( sc, te );
+            continue;
+        }
+
+        std::string star = "star_" + std::to_string( n );
+
+        float x = getBlobVal<float>( star + ".x", -1 );
+        float y = getBlobVal<float>( star + ".y", -1 );
+
+        if( x >= 0 && y >= 0 )
         {
             // Move the circle
-            float xc = xs[n] - 0.5 * ( m_circRad );
-            float yc = ( m_height - ys[n] ) - 0.5 * ( m_circRad );
+            float xc = x - 0.5 * ( m_circRad );
+            float yc = ( m_height - y ) - 0.5 * ( m_circRad );
 
             sc->setRect( xc, yc, m_circRad, m_circRad );
             sc->setVisible( true );
