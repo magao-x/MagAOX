@@ -141,6 +141,138 @@ def _construct_indi_client(host: str, port: int):
         return cls()
 
 
+WINDSOC_INDI_DEVICE_NAME = "windsocc"
+_windsoc_indi_publisher = None
+
+
+class _WindsocIndiPublisher:
+    """Publish windsocc wind layers to INDI using a fixed property schema."""
+
+    def __init__(self, max_layers: int):
+        self.max_layers = int(max_layers)
+
+        try:
+            from magaox.indi.device import XDevice
+            from purepyindi2 import properties, constants
+            from purepyindi2.messages import DefNumber
+        except ImportError as exc:
+            raise RuntimeError(
+                "INDI publishing requires optional dependency `purepyindi2` "
+                "and MagAOX Python INDI wrapper modules."
+            ) from exc
+
+        # Minimal config object; MagAOX XDevice only requires this attribute.
+        class _DummyConfig:
+            sleep_interval_sec = 1.0
+
+        self._device = XDevice(WINDSOC_INDI_DEVICE_NAME, _DummyConfig())
+
+        # `windsocc.nlayers.current`
+        nlayers_prop = properties.NumberVector(
+            name="nlayers",
+            perm=constants.PropertyPerm.READ_ONLY,
+        )
+        nlayers_prop.add_element(
+            DefNumber(
+                name="current",
+                label="Number of wind layers",
+                format="%i",
+                min=0,
+                max=self.max_layers,
+                step=1,
+                _value=0,
+            )
+        )
+        self._device.add_property(nlayers_prop)
+
+        # `windsocc.layer_XX.{speed,dir,str}`
+        for i in range(self.max_layers):
+            layer_prop = properties.NumberVector(
+                name=f"layer_{i:02d}",
+                perm=constants.PropertyPerm.READ_ONLY,
+            )
+            layer_prop.add_element(
+                DefNumber(
+                    name="speed",
+                    label=f"Layer {i:02d} speed (m/s)",
+                    format="%0.4f",
+                    min=-1e6,
+                    max=1e6,
+                    step=0.0001,
+                    _value=0.0,
+                )
+            )
+            layer_prop.add_element(
+                DefNumber(
+                    name="dir",
+                    label=f"Layer {i:02d} dir (deg)",
+                    format="%0.3f",
+                    min=0.0,
+                    max=360.0,
+                    step=0.001,
+                    _value=0.0,
+                )
+            )
+            layer_prop.add_element(
+                DefNumber(
+                    name="str",
+                    label=f"Layer {i:02d} rel strength",
+                    format="%0.4f",
+                    min=0.0,
+                    max=1.0,
+                    step=0.0001,
+                    _value=0.0,
+                )
+            )
+            self._device.add_property(layer_prop)
+
+        # Ensure subscribers see a defined state immediately.
+        self.update_layers([])
+
+    def update_layers(self, layers: list[dict[str, float]]):
+        """Update all INDI properties for a new wind layer set."""
+        nlayers_current = min(len(layers), self.max_layers)
+
+        nlayers_prop = self._device.properties["nlayers"]
+        nlayers_prop["current"] = float(nlayers_current)
+        self._device.update_property(nlayers_prop)
+
+        for i in range(self.max_layers):
+            layer_name = f"layer_{i:02d}"
+            layer_prop = self._device.properties[layer_name]
+
+            if i < nlayers_current:
+                layer = layers[i]
+                layer_prop["speed"] = float(layer.get("speed", 0.0))
+                layer_prop["dir"] = float(layer.get("dir", 0.0))
+                layer_prop["str"] = float(layer.get("str", 0.0))
+            else:
+                # Keep arrow length at 0 by forcing normalized strength to 0.
+                layer_prop["speed"] = 0.0
+                layer_prop["dir"] = 0.0
+                layer_prop["str"] = 0.0
+
+            self._device.update_property(layer_prop)
+
+
+def _maybe_get_windsoc_publisher(max_layers: int) -> _WindsocIndiPublisher | None:
+    global _windsoc_indi_publisher
+
+    if (
+        _windsoc_indi_publisher is not None
+        and _windsoc_indi_publisher.max_layers == int(max_layers)
+    ):
+        return _windsoc_indi_publisher
+
+    try:
+        _windsoc_indi_publisher = _WindsocIndiPublisher(max_layers=max_layers)
+        return _windsoc_indi_publisher
+    except Exception as exc:
+        logging.warning("Could not initialize windsocc INDI publisher: %s", exc)
+        _windsoc_indi_publisher = None
+        return None
+
+
 def fetch_hour_angle_deg(config_params: dict) -> float | None:
     """Read ``telpos.ha`` (degrees) from INDI when ``FETCH_HOUR_ANGLE`` is true.
 
@@ -648,6 +780,57 @@ def process_collected_batch(
     if not measure_result["json_paths"]:
         raise RuntimeError("Measure stage produced no wind-summary JSON outputs.")
     timings_s["measure"] = perf_counter() - t0
+
+    if config_params.get("PUBLISH_WINDSOC_INDI", False):
+        max_layers = int(config_params.get("WINDSOC_MAX_LAYERS", 10))
+
+        wind_summaries = measure_result.get("wind_summaries", [])
+        tracks = wind_summaries[0].get("tracks", []) if wind_summaries else []
+
+        # Select top tracks by `flux` and compute relative normalized strength.
+        def _flux_sort_key(t: dict) -> float:
+            f = float(t.get("flux", float("-inf")))
+            return f if np.isfinite(f) else float("-inf")
+
+        tracks_sorted = sorted(
+            tracks,
+            key=_flux_sort_key,
+            reverse=True,
+        )
+        selected = tracks_sorted[:max_layers]
+
+        flux_vals: list[float] = []
+        for t in selected:
+            f = float(t.get("flux", 0.0))
+            if np.isfinite(f):
+                flux_vals.append(f)
+        max_flux = max(flux_vals) if flux_vals else 0.0
+
+        layer_values: list[dict[str, float]] = []
+        for t in selected:
+            flux = float(t.get("flux", 0.0))
+            if (not np.isfinite(flux)) or (max_flux == 0.0) or (not np.isfinite(max_flux)):
+                rel_strength = 0.0
+            else:
+                rel_strength = flux / max_flux
+
+            speed = float(t.get("velocity_m_per_s", 0.0))
+            dir_deg = float(t.get("direction", 0.0))
+            if not np.isfinite(speed):
+                speed = 0.0
+            if not np.isfinite(dir_deg):
+                dir_deg = 0.0
+            layer_values.append(
+                {
+                    "speed": float(speed),
+                    "dir": float(dir_deg),
+                    "str": float(rel_strength),
+                }
+            )
+
+        publisher = _maybe_get_windsoc_publisher(max_layers=max_layers)
+        if publisher is not None:
+            publisher.update_layers(layer_values)
 
     timings_s["total"] = sum(timings_s.values())
 

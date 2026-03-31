@@ -454,6 +454,7 @@ def process_mf_response_cubes(
     --------
     """
     wind_peaks_all = []
+    wind_summaries_all = []
     wind_rejected_all = []
     model_rejected_all = []
     # Feed the cubes into sep to collect the sources
@@ -496,6 +497,7 @@ def process_mf_response_cubes(
             track["inferred_origin"] = inferred_origin_means_vetted.get(track["track_id"])
         pa_offset_deg = float(config_params.get("PA_OFFSET", 0) or 0)
         _apply_pa_offset_to_direction_rows(wind_summary.get("tracks", []), pa_offset_deg)
+        wind_summaries_all.append(wind_summary)
         wind_save_path = os.path.join(wind_data_dir, f"{cube_stem}_wind_attributes.json")
         with open(wind_save_path, "w", encoding="utf-8") as f:
             json.dump(wind_summary, f, indent=2)
@@ -530,7 +532,7 @@ def process_mf_response_cubes(
                 fps=5,
                 cmap="Blues_r"
             )
-    return wind_peaks_all, wind_rejected_all, model_rejected_all
+    return wind_peaks_all, wind_summaries_all, wind_rejected_all, model_rejected_all
 
 
 def run_measure_stage(
@@ -560,6 +562,7 @@ def run_measure_stage(
             "json_paths": [],
             "movie_paths": [],
             "sources_all": [],
+            "wind_summaries": [],
             "rejected_all": [],
             "model_rejected_all": [],
         }
@@ -568,7 +571,7 @@ def run_measure_stage(
         mf_response_cube_paths = mf_response_cube_paths[:limit_cubes]
         mf_response_cube_fnames = mf_response_cube_fnames[:limit_cubes]
 
-    sources_all, rejected_all, model_rejected_all = process_mf_response_cubes(
+    sources_all, wind_summaries, rejected_all, model_rejected_all = process_mf_response_cubes(
         mf_response_cube_paths,
         mf_response_cube_fnames,
         movie_output_dir=dirs["movies_dir"],
@@ -600,6 +603,7 @@ def run_measure_stage(
         "json_paths": json_paths,
         "movie_paths": movie_paths,
         "sources_all": sources_all,
+        "wind_summaries": wind_summaries,
         "rejected_all": rejected_all,
         "model_rejected_all": model_rejected_all,
     }
