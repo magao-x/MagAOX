@@ -46,6 +46,41 @@ DEFAULT_REMAKE_REFERENCE = False
 DEFAULT_PUPIL_MASK_RADIUS = 28
 QUADRANTS = ("ul", "ur", "ll", "lr")
 
+
+def _tukey_window_1d(length, alpha):
+    """Return a 1D Tukey window of given length and shape parameter alpha in [0, 1]."""
+    if length <= 0:
+        raise ValueError("Tukey window length must be positive.")
+
+    if alpha <= 0:
+        return np.ones(length, dtype=np.float32)
+
+    if alpha >= 1:
+        return np.hanning(length).astype(np.float32)
+
+    n = length - 1
+    w = np.ones(length, dtype=np.float32)
+    edge = int(alpha * n / 2.0)
+    if edge == 0:
+        return w
+
+    for i in range(edge):
+        w[i] = 0.5 * (1.0 + np.cos(np.pi * (2.0 * i / (alpha * n) - 1.0)))
+        w[n - i] = w[i]
+
+    return w
+
+
+def _tukey_window_2d(shape, alpha):
+    """Return a 2D Tukey window with the given (ny, nx) shape."""
+    if len(shape) != 2:
+        raise ValueError(f"Tukey window requires a 2D shape, got {shape!r}")
+    ny, nx = shape
+    wy = _tukey_window_1d(ny, alpha)
+    wx = _tukey_window_1d(nx, alpha)
+    return np.outer(wy, wx).astype(np.float32)
+
+
 # --- I/O Helper Functions ---
 def read_fits_cube(filepath):
     """Read a FITS cube using astropy.io.fits."""
@@ -221,6 +256,8 @@ def get_reduce_settings(args, config_params):
             "SUBTRACT_REFERENCE",
             default=True,
         ),
+        "apply_tukey_window": bool(config_params.get("APPLY_TUKEY_WINDOW", False)),
+        "tukey_alpha": float(config_params.get("TUKEY_ALPHA", 0.5)),
     }
 
 
@@ -264,6 +301,8 @@ def process_cube(
     group_size,
     dark=None,
     subtract_reference=True,
+    apply_tukey_window=False,
+    tukey_alpha=0.5,
 ):
     """Process one in-memory raw cube and return the reduced cropped cube."""
     if dark is not None:
@@ -279,8 +318,13 @@ def process_cube(
     cube_no_spark = cube_reduced[start_frame::num_frames_skip]
 
     cropped_frames = []
+    tukey_kernel = None
     for frame in cube_no_spark:
         cropped = crop_quadrant(frame, quadrant, pupil_centers, pupil_mask_radius)
+        if apply_tukey_window:
+            if tukey_kernel is None:
+                tukey_kernel = _tukey_window_2d(cropped.shape, tukey_alpha)
+            cropped = cropped * tukey_kernel
         cropped_frames.append(cropped)
 
     return np.array(cropped_frames)
@@ -298,6 +342,8 @@ def process_file(
     group_size,
     dark=None,
     subtract_reference=True,
+    apply_tukey_window=False,
+    tukey_alpha=0.5,
 ):
     """
     Process a single FITS cube file:
@@ -326,6 +372,8 @@ def process_file(
         group_size,
         dark,
         subtract_reference=subtract_reference,
+        apply_tukey_window=apply_tukey_window,
+        tukey_alpha=tukey_alpha,
     )
 
 def find_subdirectories(top_level_dir):
@@ -457,6 +505,8 @@ def process_dataset(
     remake_ref=False,
     skip_dark=False,
     subtract_reference=True,
+    apply_tukey_window=False,
+    tukey_alpha=0.5,
 ):
     """
     Process all FITS files in the raw data directory:
@@ -559,6 +609,8 @@ def process_dataset(
                 group_size,
                 dark,
                 subtract_reference=subtract_reference,
+                apply_tukey_window=apply_tukey_window,
+                tukey_alpha=tukey_alpha,
             )
             output_path = os.path.join(saveprocessed_to, f)
             write_fits_cube(output_path, processed_cube)
@@ -583,6 +635,8 @@ def process_batch_in_memory(
     skip_dark=False,
     subtract_reference=True,
     inspect_reduction=False,
+    apply_tukey_window=False,
+    tukey_alpha=0.5,
 ):
     """Reduce a realtime batch in memory and return concatenated quadrant cubes.
 
@@ -645,6 +699,8 @@ def process_batch_in_memory(
                 group_size,
                 dark,
                 subtract_reference=subtract_reference,
+                apply_tukey_window=apply_tukey_window,
+                tukey_alpha=tukey_alpha,
             )
             for cube in raw_cubes
         ]
@@ -689,6 +745,8 @@ def process_subdirectory(
     remake_ref,
     skip_dark,
     subtract_reference=True,
+    apply_tukey_window=False,
+    tukey_alpha=0.5,
 ):
     """
     Wrapper function to process a single subdirectory.
@@ -711,6 +769,8 @@ def process_subdirectory(
             remake_ref,
             skip_dark,
             subtract_reference=subtract_reference,
+            apply_tukey_window=apply_tukey_window,
+            tukey_alpha=tukey_alpha,
         )
         return (subdir_path, success)
     except Exception as e:
@@ -844,6 +904,8 @@ def main():
                 settings["remake_reference"],
                 settings["skip_dark"],
                 settings["subtract_reference"],
+                settings["apply_tukey_window"],
+                settings["tukey_alpha"],
             )
             results.append(result)
     else:
@@ -864,6 +926,8 @@ def main():
                     settings["remake_reference"],
                     settings["skip_dark"],
                     settings["subtract_reference"],
+                    settings["apply_tukey_window"],
+                    settings["tukey_alpha"],
                 ): subdir
                 for subdir in subdirs
             }
