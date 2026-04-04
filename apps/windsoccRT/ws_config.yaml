@@ -38,6 +38,7 @@ MEASURE_DIR: "measure_results" # directory to save the measure results to (defau
 # Section for writing the wind lookup table
 TIME_TRANSIT: "2023-03-10T06:09:11.342216344Z"  # parity change in wind PA
 WRITE_CSV: results_iz.csv
+LIMIT_CUBES: 1 # limit the number of cubes to process (for debugging; default is None)
 INNER_RADIUS: 23 #pixels; tripwire region inner radius
 OUTER_RADIUS: 28 #pixels; tripwire region outer radius
 IMAGE_CENTER: [65, 65]

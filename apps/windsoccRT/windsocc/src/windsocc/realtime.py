@@ -775,7 +775,6 @@ def process_collected_batch(
         basedir=run_dir,
         config_params=config_params,
         make_movie=(not no_movie) and config_params.get("MAKE_MOVIE", False),
-        limit_cubes=None,
         parity_flip_needed=parity_flip_needed,
     )
     if not measure_result["json_paths"]:

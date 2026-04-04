@@ -73,7 +73,7 @@ def parse_args():
         description="Measure wind layers using matched-filter response cubes from ws_distill."
     )
     parser.add_argument(
-        "--data_dir", type=str, default=".",
+        "-d","--data_dir", type=str, default=".",
         help="Path to the directory containing the camwfs sub-directories."
     )
     # parser.add_argument(
@@ -557,7 +557,6 @@ def run_measure_stage(
     basedir: str,
     config_params: dict | None = None,
     make_movie: bool | None = None,
-    limit_cubes: int | None = None,
     parity_flip_needed: bool | None = None,
 ) -> dict:
     """Run the measure stage and return generated output paths."""
@@ -585,7 +584,7 @@ def run_measure_stage(
             "rejected_all": [],
             "model_rejected_all": [],
         }
-
+    limit_cubes = config_params.get("LIMIT_CUBES", None)
     if limit_cubes is not None:
         mf_response_cube_paths = mf_response_cube_paths[:limit_cubes]
         mf_response_cube_fnames = mf_response_cube_fnames[:limit_cubes]
@@ -652,7 +651,7 @@ def are_we_past_transit(current_time, transit_time):
     past_transit  = dt_current > dt_transit
 
 
-    return past_transit
+    return past_transit.item()
 
 
 
@@ -678,8 +677,7 @@ def main():
         basedir=basedir,
         config_params=config_params,
         make_movie=config_params.get("MAKE_MOVIE", False),
-        limit_cubes=1,
-        # limit_cubes=None,
+
     )
 
 if __name__ == '__main__':
