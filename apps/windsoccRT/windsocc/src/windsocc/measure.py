@@ -430,7 +430,7 @@ def process_mf_response_cubes(
     wind_data_dir: str,
     make_movie: bool = False,
     rejected_dir: str = None,
-    parity_flip_needed: bool = False,
+    parity_flip_needed: bool | None = None,
 ):
     """Define the tripwire region then process the matched-filter response cubes.
 
@@ -462,6 +462,20 @@ def process_mf_response_cubes(
     # Feed the cubes into sep to collect the sources
     for cube_name, cube_path in zip(mf_response_cube_fnames, mf_response_cube_paths):
         logging.info("Processing cube: %s", cube_name)
+        if parity_flip_needed is None:
+            # Determine if a parity flip is needed
+            current_time = extract_time_from_fname(cube_name)
+            if are_we_past_transit(current_time, config_params.get("TIME_TRANSIT", None)):
+                parity_flip_needed = True
+                logging.info("Parity flip needed for cube: %s", cube_name)
+            else:
+                parity_flip_needed = False
+                logging.info("No parity flip needed for cube: %s", cube_name)
+        else:
+            if parity_flip_needed:
+                logging.info("Parity flip needed for cube: %s", cube_name)
+            else:
+                logging.info("No parity flip needed for cube: %s", cube_name)
         cube_data = fits.getdata(cube_path)
         (
             image_center,
@@ -544,7 +558,7 @@ def run_measure_stage(
     config_params: dict | None = None,
     make_movie: bool | None = None,
     limit_cubes: int | None = None,
-    parity_flip_needed: bool = False,
+    parity_flip_needed: bool | None = None,
 ) -> dict:
     """Run the measure stage and return generated output paths."""
     if config_params is None:
@@ -626,13 +640,17 @@ def extract_time_from_fname(fname):
 def are_we_past_transit(current_time, transit_time):
     #Prepare the formatting for each timestamp
     # Ex. transit_time 2023-03-10T06:09:11.342216344Z
-    dt_transit = pd.to_datetime(transit_time)
+    # dt_transit = pd.to_datetime(transit_time)
+    s_transit = pl.Series(name="transit_time", values=[transit_time])
+    dt_transit = s_transit.str.to_datetime(
+        "%Y-%m-%dT%H:%M:%S%.9fZ",time_zone="UTC")
     # Ex. current_time 20230310054802555791000
-    dt_current = pd.to_datetime(current_time[:-3], #truncate to microsecs
-                          format="%Y%m%d%H%M%S%f",
-                          utc=True)
-
+    s_current = pl.Series(name="current_time", values=[current_time[:-3]])
+    dt_current = s_current.str.to_datetime(
+        "%Y%m%d%H%M%S%f",time_zone="UTC"
+    )
     past_transit  = dt_current > dt_transit
+
 
     return past_transit
 
@@ -655,12 +673,13 @@ def main():
             Creating it...")
         os.makedirs(output_dir, exist_ok=True)
     config_params = parse_config_file(path_yaml)
+    
     run_measure_stage(
         basedir=basedir,
         config_params=config_params,
         make_movie=config_params.get("MAKE_MOVIE", False),
-        # limit_cubes=1,
-        limit_cubes=None,
+        limit_cubes=1,
+        # limit_cubes=None,
     )
 
 if __name__ == '__main__':
