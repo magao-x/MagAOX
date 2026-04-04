@@ -1,7 +1,7 @@
 # Step 1: REDUCE
 FILE_PREFIX: "camwfs_"
 REDUCE_DIR: "reduce_results" # directory for optional saved reduced quadrant FITS cubes (default: "reduce_results")
-SAVE_REDUCED_QUADRANTS: false # when true, write one FITS cube per quadrant here after reduce (for debugging)
+INSPECT_REDUCTION: false # when true, save reference/noise and first reduced pupil products (for debugging)
 SUBTRACT_DARK: False
 SKIP_DARK: false
 NSTACK: null  # use all raw FITS files when building the reference
@@ -14,6 +14,8 @@ UL_CENTER: [30, 90]
 UR_CENTER: [90, 90]
 LL_CENTER: [30, 30]
 LR_CENTER: [90, 30]
+APPLY_TUKEY_WINDOW: true  # apply a Tukey window to cropped pupil thumbnails before cross-correlation
+TUKEY_ALPHA: 0.2          # Tukey window shape parameter in [0, 1]
 
 # Step 2: XCORR
 START_FRAME: 0 # start the dataset on this frame; sparkle pattern zero point?
@@ -47,3 +49,7 @@ SEP_THRESH: 3.0 #s/n threshold for sep to detect sources
 SEP_MINAREA: 2.0 #minimum area in pixels for sep to detect sources
 MAKE_MOVIE: true
 TIME_PER_FRAME: 0.004 #seconds
+
+# Realtime / INDI (optional)
+PUBLISH_WINDSOC_INDI: false # when true, publish wind layers to INDI device `windsocc`
+WINDSOC_MAX_LAYERS: 10 # maximum number of layers published (layer_00..layer_{WINDSOC_MAX_LAYERS-1})
