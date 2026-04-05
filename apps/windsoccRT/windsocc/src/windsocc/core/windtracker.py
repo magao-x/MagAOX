@@ -102,9 +102,13 @@ class WindTracker:
         self.track_match_counts: dict[int, int] = {}
 
     def _numeric_expr(self, column: str) -> pl.Expr:
+        """Cast the column to a float.
+        """
         return pl.col(column).cast(pl.Float64, strict=False)
 
     def _int_expr(self, column: str) -> pl.Expr:
+        """Cast the column to an integer.
+        """
         return pl.col(column).cast(pl.Int64, strict=False)
 
     def _df_to_numeric(self, df: pl.DataFrame, column: str) -> pl.Series:
@@ -118,9 +122,19 @@ class WindTracker:
         return new_ids
 
     def get_track_matches(self, track_id: int) -> int:
+        """Pull the match count for a given track_id.
+        Returns 0 if the track_id is not found.
+
+        track_match_counts is a *dict* of track_id to match count.
+        """
         return int(self.track_match_counts.get(int(track_id), 0))
 
     def set_track_matches(self, track_id: int, matches: int) -> int:
+        """Set the match count for a given track_id.
+
+        Normalize the matches to be at least 0....
+        I don't think this is necessary?.. but its cheap
+        """
         normalized = max(0, int(matches))
         self.track_match_counts[int(track_id)] = normalized
         return normalized
@@ -130,10 +144,15 @@ class WindTracker:
         return self.set_track_matches(track_id, current + 1)
 
     def merge_track_matches(self, old_id: int, new_id: int) -> int:
-        merged = max(self.get_track_matches(old_id), self.get_track_matches(new_id))
-        self.set_track_matches(new_id, merged)
+        """
+        Merge track IDs by preferring the stronger track.
+        The old_id should always have 0 matches by design.
+        """
+        matches = max(self.get_track_matches(old_id), self.get_track_matches(new_id))
+        self.set_track_matches(new_id, matches)
+        # remove the old_id from the track_match_counts if it exists
         self.track_match_counts.pop(int(old_id), None)
-        return merged
+        return matches
 
     def _frame_from_dicts(self, rows: list[dict[str, Any]]) -> pl.DataFrame:
         if not rows:
@@ -172,8 +191,10 @@ class WindTracker:
     def _find_row_index_by_track_id(self, df: pl.DataFrame, track_id: int) -> int | None:
         if df.is_empty():
             return None
+        # add a "row_index" as the first col to the dataframe
+        df_with_index = df.with_row_index("row_index")
         matches = (
-            df.with_row_index("row_index")
+            df_with_index
             .filter(self._int_expr("track_id") == track_id)
             .select("row_index")
             .to_series()
@@ -386,16 +407,24 @@ class WindTracker:
             extra_rows (pl.DataFrame): 
         """
         if extra_rows.is_empty():
+            print(f"extra_rows in promote_confirmed_track_rows is empty,\
+                this should not happen")
             return
         track_rows = extra_rows.filter(self._int_expr("track_id") == track_id)
         if track_rows.is_empty():
+            print(f"track_rows in promote_confirmed_track_rows is empty,\
+                this should not happen")
             return
 
         active_rows = self.candidate_sources.filter(self._int_expr("track_id") == track_id)
         if active_rows.is_empty():
+            print(f"active_rows in promote_confirmed_track_rows is empty,\
+                this should not happen")
             return
         current_matches = self.get_track_matches(track_id)
         if current_matches is None:
+            print(f"current_matches in promote_confirmed_track_rows is None,\
+                this should not happen")
             return
         if track_id in self.confirmed_track_ids:
             self._append_vetted_sources(track_rows)
@@ -409,6 +438,8 @@ class WindTracker:
         )
         promote_rows = history_with_current.filter(self._int_expr("track_id") == track_id)
         if promote_rows.is_empty():
+            print(f"promote_rows in promote_confirmed_track_rows is empty,\
+                this should not happen")
             return
         self._append_vetted_sources(promote_rows)
         self.confirmed_track_ids.add(track_id)
@@ -619,17 +650,24 @@ class WindTracker:
         self,
         sources_this_frame: pl.DataFrame,
         frame_index: int,
-        image_center: tuple[int, int],
     ) -> pl.DataFrame:
-        """Match frame-local detections against one-step predictions and update active state."""
+        """Take all the current frame detections and try to 
+        match them to the predicted sources from the previous frame.
+
+        If a detection is matched to a predicted source, update the
+        active track's state.
+        """
         if sources_this_frame.is_empty():
+            # if there are no detections in this frame...
             if not self.candidate_sources.is_empty():
+                # but there are active tracks from the previous frame...
                 prior_ids = set(
                     self.candidate_sources.get_column("track_id")
                     .cast(pl.Int64, strict=False)
                     .drop_nulls()
                     .to_list()
                 )
+                # then everything gets a strike
                 candidate_with_strikes = self.candidate_sources.with_columns(
                         (self._int_expr("strikes").fill_null(0) + 1).alias("strikes")
                     )
@@ -641,12 +679,14 @@ class WindTracker:
                     rejected_rows,
                     reject_reason="max_missed_frames",
                 )
+                # prune the striked out tracks
                 self.candidate_sources = (
                     candidate_with_strikes.filter(
                         (self._int_expr("strikes").fill_null(0) <= self.max_missed_frames)
                         | (self._int_expr("matches").fill_null(0) >= self.prune_immunity_matches)
                     )
                     .select(SOURCE_COLUMNS)
+                # select SOURCE_COLUMNS is likely redundant, but it's cheap
                 )
                 kept_ids = set(
                     self.candidate_sources.get_column("track_id")
@@ -654,21 +694,27 @@ class WindTracker:
                     .drop_nulls()
                     .to_list()
                 )
-                for removed_track_id in (prior_ids - kept_ids):
+                for removed_track_id in (prior_ids - kept_ids): # set operations are cool
+                    # pop method for dict removes the key-value pair for the given key
+                    # syntax dict.pop(keyname, defaultvalue) where defaultvalue is optional
                     self.track_match_counts.pop(int(removed_track_id), None)
             return self.candidate_sources
-
+        # add a row index as the first col to the sources_this_frame dataframe
+        # source_index is the named col
         history_rows = sources_this_frame.with_row_index("source_index")
+        # filter the predicted_sources dataframe to only include the
+        # sources from the current frame
         predicted_subset = self.predicted_sources.filter(
             self._int_expr("frames") == frame_index
         )
 
         if predicted_subset.is_empty() or self.candidate_sources.is_empty():
+            # process is still spooling up...
             self.candidate_sources = sources_this_frame.select(SOURCE_COLUMNS)
             self._append_history_sources(history_rows)
             return self.candidate_sources
 
-        this_frame_data = (
+        this_frame_data = ( #still a dataframe
             sources_this_frame.with_row_index("source_index")
             .select(
                 [
@@ -682,7 +728,7 @@ class WindTracker:
             )
             .drop_nulls(subset=["x", "y", "track_id", "dist_traveled_px"])
         )
-        predicted_data = predicted_subset.select(
+        predicted_data = predicted_subset.select( #still a dataframe
             [
                 self._numeric_expr("x_coords").alias("x"),
                 self._numeric_expr("y_coords").alias("y"),
@@ -694,6 +740,8 @@ class WindTracker:
             self._append_history_sources(history_rows)
             if this_frame_data.is_empty():
                 return self.candidate_sources
+            # no predictions yet, so just add the new detections as new tracks
+            # and return the candidate sources
             self.candidate_sources = pl.concat(
                 [self.candidate_sources, sources_this_frame.select(SOURCE_COLUMNS)],
                 how="vertical",
@@ -740,7 +788,7 @@ class WindTracker:
                 rejected_row["reject_reason"] = "assignment_distance_exceeded"
                 self._append_rejected_sources(rows=[rejected_row])
                 continue
-
+            # get the row index of candidate_sources using the track_id
             active_idx = self._find_row_index_by_track_id(self.candidate_sources, predicted_track_id)
             if active_idx is None:
                 rejected_row = dict(sources_this_frame.row(source_idx, named=True))
@@ -749,6 +797,7 @@ class WindTracker:
                 self._append_rejected_sources(rows=[rejected_row])
                 continue
 
+            # return the row as a dictionary (named=True triggers dict not tuple)
             active_row = self.candidate_sources.row(active_idx, named=True)
             prior_radius = self._as_float(active_row.get("dist_traveled_px"))
             current_radius = float(candidate_row["dist_traveled_px"])
@@ -759,9 +808,11 @@ class WindTracker:
                 rejected_row["reject_reason"] = "inward_motion"
                 self._append_rejected_sources(rows=[rejected_row])
                 continue
-
-            prior_matches = self.get_track_matches(predicted_track_id)
+            #TODO add the inward motion check to the gating
+            # prior_matches = self.get_track_matches(predicted_track_id)
+            # return the row as a dictionary (named=True triggers dict not tuple)
             updated_row = dict(sources_this_frame.row(source_idx, named=True))
+
             valid_match, reject_reason, inferred_origin = self._match_passes_gating(active_row, updated_row)
             if not valid_match:
                 rejected_row = dict(updated_row)
@@ -781,6 +832,7 @@ class WindTracker:
             )
             matched_pred_track_ids.add(predicted_track_id)
             matched_detection_indices.add(source_idx)
+            # track_id_remap is a dict of candidate_track_id to predicted_track_id
             track_id_remap[candidate_track_id] = predicted_track_id
             vetted_rows.append(updated_row)
             inferred_origin_updates[source_idx] = float(inferred_origin)
@@ -801,7 +853,8 @@ class WindTracker:
                 )
                 .drop("inferred_origin_new")
             )
-
+        # need to match the track_ids
+        # recall track_id_remap[candidate_track_id] = predicted_track_id; from above
         if track_id_remap:
             for old_track_id, new_track_id in track_id_remap.items():
                 merged_matches = self.merge_track_matches(old_track_id, new_track_id)
@@ -810,15 +863,15 @@ class WindTracker:
                     .then(pl.lit(new_track_id))
                     .otherwise(pl.col("track_id"))
                     .alias("track_id")
-                ).with_columns(
+                ).with_columns( #add new col "track_id"
                     pl.when(self._int_expr("track_id") == new_track_id)
                     .then(pl.lit(merged_matches))
                     .otherwise(pl.col("matches"))
-                    .alias("matches")
+                    .alias("matches") #rename added col "track_id" to "matches"
                 )
-
-        if vetted_rows:
+        if vetted_rows: # True if vetted_rows is not empty
             vetted_frame = self._frame_from_dicts(vetted_rows)
+            # here we are tracking the active vetted tracks in this frame
             unique_track_ids = (
                 vetted_frame.get_column("track_id")
                 .cast(pl.Int64, strict=False)
@@ -826,9 +879,11 @@ class WindTracker:
                 .unique()
                 .to_list()
             )
+
             for track_id in unique_track_ids:
                 self._promote_confirmed_track_rows(int(track_id), vetted_frame)
-
+        # aggregate the track_ids with predictions into a set
+        # so that we can use set operations
         predicted_track_ids = {
             int(tid)
             for tid in (
@@ -842,7 +897,8 @@ class WindTracker:
         strike_track_ids = predicted_track_ids - matched_pred_track_ids
         # and some will be inward predictions
         strike_track_ids = strike_track_ids.union(inward_pred_track_ids)
-        if strike_track_ids:
+        # these all get a strike
+        if strike_track_ids: # if not empty
             # increment a strike for these tracks
             for track_id in strike_track_ids:
                 self.candidate_sources = self.candidate_sources.with_columns(
@@ -851,22 +907,25 @@ class WindTracker:
                     .otherwise(pl.col("strikes"))
                     .alias("strikes")
                 )
-
+        # of course, some sources have just appeared in this frame
         unmatched_sources = (
             sources_this_frame.with_row_index("source_index")
             .filter(~pl.col("source_index").is_in(list(matched_detection_indices)))
             .drop("source_index")
             .select(SOURCE_COLUMNS)
         )
+        # treat them as new candidates
         if not unmatched_sources.is_empty():
             self.candidate_sources = pl.concat(
                 [self.candidate_sources, unmatched_sources],
                 how="vertical",
             )
 
+        # append all detections to the history df
         self._append_history_sources(history_rows)
-
-        active_state = (
+        # a bit redundant but need to convert these values to ints
+        # for the unique operation
+        active_state = ( #add cols track_id_num and frame_num
             self.candidate_sources.with_columns(
                 track_id_num=self._int_expr("track_id"),
                 frame_num=self._int_expr("frames"),
@@ -875,13 +934,15 @@ class WindTracker:
             .sort("frame_num")
         )
         if not active_state.is_empty():
+            # collapse to one row per track_id
+            # retaining the row from the most recent frame
             self.candidate_sources = (
                 active_state.unique(subset=["track_id_num"], keep="last")
-                .select(SOURCE_COLUMNS)
+                .select(SOURCE_COLUMNS) #drop helper cols track_id_num and frame_num
                 .with_columns(
                     pl.col("track_id")
                     .cast(pl.Int64, strict=False)
-                    .map_elements(
+                    .map_elements( #use track_id to pull match count
                         lambda tid: (
                             self.get_track_matches(int(tid))
                             if tid is not None
@@ -889,7 +950,7 @@ class WindTracker:
                         ),
                         return_dtype=pl.Int64,
                     )
-                    .alias("matches")
+                    .alias("matches") #rename added col "track_id" to "matches"
                 )
             )
 
@@ -990,7 +1051,6 @@ class WindTracker:
         self.candidate_sources = self.match(
             sources_this_frame=sources_in_frame,
             frame_index=cc_frame_ind,
-            image_center=image_center,
         )
         self.predicted_sources = self.predict(
             frame_index=cc_frame_ind,

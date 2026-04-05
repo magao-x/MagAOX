@@ -7,6 +7,12 @@ matched-filter response cubes from ws_distill.
 Usage (must be run from the root dir of the camwfs data):
     uv run ws_measure
 
+Profiling (cProfile + Snakeviz):
+
+    uv run ws_measure --profile
+    uv sync --extra profile   # optional: pip install snakeviz for the viewer CLI
+    snakeviz <output_dir>/ws_measure_profile.prof
+
 From camwfs experiment:
 
 Sine pattern travelling E --> W (270 deg) on DM:
@@ -48,7 +54,9 @@ TODO apply parity flip when HA is positive
 
 """
 
-import sys, os
+import cProfile
+import os
+import sys
 import argparse
 import logging
 import csv
@@ -61,7 +69,6 @@ from astropy.io import fits
 import yaml
 import pandas as pd
 import polars as pl
-import sys
 
 from windsocc.io.dir_handling import allocate_measure_dirs
 from windsocc.io.fits_handling import load_mf_response_cubes, load_collapsed_unsharp_response_maps
@@ -84,7 +91,18 @@ def parse_args():
         "--output_dir", type=str,
         default=None,help="Path to the output directory (default: data_dir/measure_results)"
         )
-    
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Enable cProfile for the measure stage; write binary stats for use with snakeviz.",
+    )
+    parser.add_argument(
+        "--profile-output",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Destination .prof file (default: <output_dir>/ws_measure_profile.prof).",
+    )
 
     args = parser.parse_args()
     
@@ -673,13 +691,40 @@ def main():
             Creating it...")
         os.makedirs(output_dir, exist_ok=True)
     config_params = parse_config_file(path_yaml)
-    
-    run_measure_stage(
-        basedir=basedir,
-        config_params=config_params,
-        make_movie=config_params.get("MAKE_MOVIE", False),
 
-    )
+    if args.profile:
+        profile_path = args.profile_output
+        if profile_path is None:
+            profile_path = os.path.join(output_dir, "ws_measure_profile.prof")
+        profile_path = os.path.abspath(profile_path)
+        prof = cProfile.Profile()
+        prof.enable()
+        try:
+            run_measure_stage(
+                basedir=basedir,
+                config_params=config_params,
+                make_movie=config_params.get("MAKE_MOVIE", False),
+            )
+        finally:
+            prof.disable()
+            _profile_dir = os.path.dirname(profile_path)
+            if _profile_dir:
+                os.makedirs(_profile_dir, exist_ok=True)
+            prof.dump_stats(profile_path)
+        logging.info(
+            "cProfile stats written to %s — view with: snakeviz %s",
+            profile_path,
+            profile_path,
+        )
+        logging.info(
+            "Install snakeviz if needed: pip install 'windsocc[profile]' or uv sync --extra profile"
+        )
+    else:
+        run_measure_stage(
+            basedir=basedir,
+            config_params=config_params,
+            make_movie=config_params.get("MAKE_MOVIE", False),
+        )
 
 if __name__ == '__main__':
     main()
