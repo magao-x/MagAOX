@@ -50,6 +50,12 @@ Things like the PA offset, time of transit, how to mask the pupils, etc.
 All of the measure code has been converted to polars by GPT Codex 5.4
 for performance reasons. I've so far observed a x2 speedup JKK 03/21/2026
 
+Per-track wind JSON (e.g. ``*_wind_attributes.json``, ``*_rejected_sources.json``, and
+``*_model_rejected.json``)
+includes ``raw_direction`` (degrees in the camwfs cube frame) and ``corrected_direction``
+(after ``PA_OFFSET``, with parity handled by negating that offset when a parity flip applies).
+``direction`` is set equal to ``corrected_direction`` for backward compatibility.
+
 TODO apply parity flip when HA is positive
 
 """
@@ -150,18 +156,27 @@ def filter_sources_by_angle(
 
 
 
-def _apply_pa_offset_to_direction_rows(rows: list[dict], pa_offset_deg: float) -> None:
-    """Add ``pa_offset_deg`` to each row's ``direction``, wrapping to ``[0, 360)``."""
-    if not rows or pa_offset_deg == 0.0:
+def _apply_direction_corrections_to_rows(rows: list[dict], pa_offset_deg: float) -> None:
+    """Set ``raw_direction``, ``corrected_direction``, and ``direction`` on each row.
+
+    ``direction`` values coming from summarization are the mean angle in the camwfs
+    cube frame (deg, ``[0, 360)``). ``pa_offset_deg`` is the value from config after
+    parity bookkeeping (sign flip when a parity flip applies), matching the previous
+    single-field behavior for ``direction``.
+    """
+    if not rows:
         return
     for row in rows:
         if row is None or "direction" not in row:
             continue
         try:
-            d = float(row["direction"])
+            raw = float(row["direction"])
         except (TypeError, ValueError):
             continue
-        row["direction"] = (d + pa_offset_deg) % 360.0
+        raw_wrapped = raw % 360.0
+        row["raw_direction"] = raw_wrapped
+        row["corrected_direction"] = (raw_wrapped + pa_offset_deg) % 360.0
+        row["direction"] = row["corrected_direction"]
 
 
 def summarize_wind_tracks(cube_sources: object) -> dict:
@@ -258,17 +273,26 @@ def mean_inferred_origin_by_track_id(
     )
     return {int(r["track_id_num"]): float(r["inferred_origin_mean"]) for r in grouped.iter_rows(named=True)}
 
-def summarize_rejected_tracks(rejected_sources: object) -> dict:
+def summarize_rejected_tracks(
+    rejected_sources: object,
+    *,
+    pa_offset_deg: float = 0.0,
+) -> dict:
+    """Aggregate per-track rejected rows for JSON (``*_rejected_sources.json``).
+
+    Applies the same ``raw_direction`` / ``corrected_direction`` / ``direction``
+    convention as accepted tracks (see ``_apply_direction_corrections_to_rows``).
+    """
     if isinstance(rejected_sources, pd.DataFrame):
         rejected_sources = pl.DataFrame(rejected_sources.to_dict("records"))
     if not isinstance(rejected_sources, pl.DataFrame) or rejected_sources.is_empty():
-        return {"tracks": []}
+        return {"rejected": []}
     required_cols = {
         "track_id", "reject_reason",
         "frames", "direction",
         "velocity_m_per_s", "matches"}
     if not required_cols.issubset(set(rejected_sources.columns)):
-        return {"tracks": []}
+        return {"rejected": []}
     tracked = rejected_sources.with_columns(
         pl.col("track_id").cast(pl.Int64, strict=False).alias("track_id"),
         pl.col("reject_reason").cast(pl.String, strict=False).alias("reject_reason"),
@@ -277,7 +301,7 @@ def summarize_rejected_tracks(rejected_sources: object) -> dict:
         pl.col("velocity_m_per_s").cast(pl.Float64, strict=False).alias("velocity_m_per_s"),
     ).drop_nulls(subset=["track_id", "reject_reason", "frames", "direction", "velocity_m_per_s"])
     if tracked.is_empty():
-        return {"tracks": []}
+        return {"rejected": []}
     matches_sorted = tracked.with_columns(
         pl.col("matches").cast(pl.Int64, strict=False).fill_null(0).alias("matches")
     ).sort(["track_id", "frames", "matches"])
@@ -304,6 +328,7 @@ def summarize_rejected_tracks(rejected_sources: object) -> dict:
         }
         for row in summarized.iter_rows(named=True)
     ]
+    _apply_direction_corrections_to_rows(rejected_tracks, pa_offset_deg)
     return {"rejected": rejected_tracks}
 
 
@@ -532,7 +557,7 @@ def process_mf_response_cubes(
         pa_offset_deg = float(config_params.get("PA_OFFSET", 0) or 0)
         if parity_flip_needed:
             pa_offset_deg = -pa_offset_deg
-        _apply_pa_offset_to_direction_rows(wind_summary.get("tracks", []), pa_offset_deg)
+        _apply_direction_corrections_to_rows(wind_summary.get("tracks", []), pa_offset_deg)
         wind_summaries_all.append(wind_summary)
         wind_save_path = os.path.join(wind_data_dir, f"{cube_stem}_wind_attributes.json")
         with open(wind_save_path, "w", encoding="utf-8") as f:
@@ -541,8 +566,10 @@ def process_mf_response_cubes(
         wind_peaks_all.append(wind_vetted_cube)
         wind_rejected_all.append(wind_rejected_cube)
         model_rejected_all.append(wind_model_rejected_cube)
-        rejected_summary = summarize_rejected_tracks(wind_rejected_cube)
-        _apply_pa_offset_to_direction_rows(rejected_summary.get("rejected", []), pa_offset_deg)
+        rejected_summary = summarize_rejected_tracks(
+            wind_rejected_cube,
+            pa_offset_deg=pa_offset_deg,
+        )
         rejected_track_ids = {int(t["track_id"]) for t in rejected_summary.get("rejected", []) if t.get("track_id") is not None}
         inferred_origin_means_rejected = mean_inferred_origin_by_track_id(
             wind_track_history,
@@ -551,7 +578,7 @@ def process_mf_response_cubes(
         for track in rejected_summary.get("rejected", []):
             track["inferred_origin"] = inferred_origin_means_rejected.get(track["track_id"])
         model_rejected_summary = summarize_model_rejected_tracks(wind_model_rejected_cube)
-        _apply_pa_offset_to_direction_rows(model_rejected_summary.get("model_rejected", []), pa_offset_deg)
+        _apply_direction_corrections_to_rows(model_rejected_summary.get("model_rejected", []), pa_offset_deg)
         # Save the rejected sources to a JSON file
         rejected_save_path = os.path.join(rejected_dir, f"{cube_stem}_rejected_sources.json")
         with open(rejected_save_path, "w", encoding="utf-8") as f:

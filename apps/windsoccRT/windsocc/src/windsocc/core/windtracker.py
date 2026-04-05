@@ -498,7 +498,7 @@ class WindTracker:
 
         velocity_min_px_per_frame = current_distance_px / (current_frame * self.time_per_frame)
         velocity_min_m_per_s = velocity_min_px_per_frame * self.meters_per_pixel
-        fudge_factor = 1.05
+        fudge_factor = 1.01
         if current_speed_px > velocity_min_px_per_frame * fudge_factor:
             reject_reason = "unphysical_velocity"
             return False, reject_reason, float(inferred_origin_dist)
@@ -623,6 +623,7 @@ class WindTracker:
         sep_frame = np.ascontiguousarray(cc_frame, dtype=np.float32)
         # sep_frame_clamped = np.clip(sep_frame, 0, None)
         bkg = sep.Background(sep_frame)
+        # TODO make the error map using stddev in rings around the center
         data_sub = sep_frame - bkg
         sources_in_frame = sep.extract(
             data_sub,

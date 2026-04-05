@@ -361,7 +361,7 @@ def process_single_cc_cube(
     outer_bound: int,
     time_per_frame: float,
     min_matches_for_dynamic_mask: int = 3,
-    dynamic_window_radius: int = 6,
+    dynamic_window_radius: int = 10,
     tripwire_smoothing_sigma: float = 1.0,
     min_track_matches: int = 10,
     min_track_detections: int = 4,

@@ -1,3 +1,8 @@
+"""
+TODO the extrapolated and filtered sep results movies
+are showing inconsistencies.
+"""
+
 import numpy as np
 import pandas as pd
 import polars as pl
