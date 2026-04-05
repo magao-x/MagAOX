@@ -7,7 +7,7 @@ name = "windsocc"
 version = "0.1.0"
 description = "Do post-observation analysis of turbulence using MagAO-X camwfs images."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10,<3.13"
 authors = [
     {name = "Jay Kueny", email = "jkueny@arizona.edu"}
 ]
@@ -43,7 +43,4 @@ ws_debug_stream_grab = "windsocc.debug_stream_grab:main"
 [project.optional-dependencies]
 profile = [
     "snakeviz>=2.0",
-]
-indi = [
-    "purepyindi2>=2.0.0",
 ]

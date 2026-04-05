@@ -75,10 +75,12 @@ class WindTracker:
         max_missed_frames: int = 3,
         image_center: tuple[int, int] = (None, None),
         time_per_frame: float = 0.004,
+        meters_per_pixel: float = (6.5 / 60),
     ):
         if image_center[0] is None or image_center[1] is None:
             raise ValueError("image_center must be defined (not None)")
         self.time_per_frame = time_per_frame
+        self.meters_per_pixel = meters_per_pixel
         self.max_distance = max_distance
         self.max_missed_frames = max_missed_frames
         self.image_center = image_center
@@ -439,6 +441,7 @@ class WindTracker:
         current_frame = self._as_int(this_frame_row.get("frames"))
         prior_radius = self._as_float(active_row.get("dist_traveled_px"))
 
+
         # recompute the speed based on current and prior distance
         update_dist_traveled = current_distance_px - prior_distance_px #pixels
         update_time_elapsed = (current_frame - prior_frame) #frames
@@ -461,6 +464,13 @@ class WindTracker:
         # valid_dist = inferred_origin_dist <= self.max_distance
         diff_speed = current_speed_px - inferred_speed
         valid_speed = np.abs(diff_speed) < 1.0
+
+        velocity_min_px_per_frame = current_distance_px / (current_frame * self.time_per_frame)
+        velocity_min_m_per_s = velocity_min_px_per_frame * self.meters_per_pixel
+        fudge_factor = 1.05
+        if current_speed_px > velocity_min_px_per_frame * fudge_factor:
+            reject_reason = "unphysical_velocity"
+            return False, reject_reason, float(inferred_origin_dist)
 
         if prior_matches >= 1 and not np.isnan(prior_direction) and not np.isnan(current_direction):
             if _angle_diff_deg(prior_direction, current_direction) > self.max_direction_delta_deg:

@@ -586,6 +586,7 @@ def run_measure_stage(
         }
     limit_cubes = config_params.get("LIMIT_CUBES", None)
     if limit_cubes is not None:
+        logging.info(f"Limiting the number of cubes to process to {limit_cubes}")
         mf_response_cube_paths = mf_response_cube_paths[:limit_cubes]
         mf_response_cube_fnames = mf_response_cube_fnames[:limit_cubes]
 

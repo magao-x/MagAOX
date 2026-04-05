@@ -165,6 +165,9 @@ def _model_reject_row(
 def _keep_track_ids_by_model(
     cube_sources: pl.DataFrame,
     image_center: tuple[int, int],
+    inner_bound: int,
+    meters_per_pixel: float,
+    time_per_frame: float,
     min_matches: int = 5,
     min_detections: int = 4,
     origin_tol_px: float = 10.0,
@@ -239,6 +242,20 @@ def _keep_track_ids_by_model(
         radial_dist = group.get_column("dist_num").to_numpy()
         # if np.any(np.diff(radial_dist) < -outward_tol_px):
         #     reject_rows.append(_model_reject_row(track_id, "outward_motion", group))
+        #     continue
+        
+        # # filter by unphysical velocity
+        # velocity_vals = group.get_column("velocity_num").to_numpy()
+        # avg_velocity = np.mean(velocity_vals)
+        # last_frame = group.get_column("frame_num").to_numpy().max()
+        # first_frame = group.get_column("frame_num").to_numpy().min()
+        # # max velocity is radius of tripwire region / time per frame
+        # radius_of_interest = inner_bound * meters_per_pixel
+        # max_dist_traveled_px = group.get_column("dist_traveled_px").to_numpy().max()
+        # max_velocity = (inner_bound * meters_per_pixel) / (time_per_frame * first_frame)
+        # fudge_factor = 1.05
+        # if avg_velocity > max_velocity * fudge_factor:
+        #     reject_rows.append(_model_reject_row(track_id, "unphysical_velocity", group))
         #     continue
 
         direction_vals = group.get_column("direction_num").to_numpy() % 360.0
@@ -367,7 +384,11 @@ def process_single_cc_cube(
     image_center = (cc_cube[0].shape[1] // 2, cc_cube[0].shape[0] // 2)
     # init the wind tracker
     wind_tracker = WindTracker(
-        image_center=image_center,max_distance=10.0, time_per_frame=time_per_frame)
+        image_center=image_center,
+        max_distance=10.0,
+        time_per_frame=time_per_frame,
+        meters_per_pixel=meters_per_pixel,
+    )
     base_tripwire_mask = make_annular_mask(cc_cube[0].shape, inner_bound, outer_bound).astype(np.float32)
     yy, xx = np.ogrid[:cc_cube[0].shape[0], :cc_cube[0].shape[1]]
     mask_frames: list[np.ndarray] = []
@@ -425,6 +446,9 @@ def process_single_cc_cube(
     keep_track_ids, model_rejected_by_track = _keep_track_ids_by_model(
         cube_sources,
         image_center=image_center,
+        meters_per_pixel=meters_per_pixel,
+        inner_bound=inner_bound,
+        time_per_frame=time_per_frame,
         min_matches=min_track_matches,
         min_detections=min_track_detections,
         origin_tol_px=36.0,
