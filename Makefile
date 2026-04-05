@@ -24,13 +24,17 @@ apps_common = \
 
 apps_aoc = \
 	trippLitePDU \
+	xt1121Ctrl \
+	xt1121DCDU \
 	tcsInterface \
 	adcTracker \
 	hwpTracker \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
-	stateRuleEngine
+	stateRuleEngine \
+	xInstGraph
+
 pythonapps_aoc = \
 	audibleAlerts
 
@@ -83,8 +87,6 @@ apps_icc = \
 	filterWheelCtrl \
 	smc100ccCtrl \
 	usbtempMon \
-	xt1121Ctrl \
-	xt1121DCDU \
 	koolanceCtrl \
 	corAlign \
 	adcCtrl \
