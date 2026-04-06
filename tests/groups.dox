@@ -35,6 +35,9 @@ $ bash ./testMagAOX.bash
   * \ingroup testing
   */
 
+/** \defgroup app_unit_test Application Unit Tests
+ * \ingroup unit_test
+*/
 
 
 

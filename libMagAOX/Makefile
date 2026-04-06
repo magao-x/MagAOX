@@ -70,6 +70,7 @@ INCLUDEDEPS= \
 	logger/types/telem_dmspeck.hpp \
 	logger/types/telem_drivetemps.hpp \
 	logger/types/telem_fgtimings.hpp \
+	logger/types/telem_flowrpm.hpp \
 	logger/types/telem_fxngen.hpp \
 	logger/types/telem_loopgain.hpp \
 	logger/types/telem_observer.hpp \

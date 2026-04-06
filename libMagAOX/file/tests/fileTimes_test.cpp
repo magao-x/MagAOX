@@ -270,7 +270,7 @@ TEST_CASE( "Getting timestamp and broken-down time with errors", "[libMagAOX::fi
 /**
  * This is in a separate file due to need to define a buffer size too small to generate errors
  *
- * \anchor tests_libMagAOX_file_fileTimes_timestamp_only_errors
+ * \ingroup fileTimes_unit_test
  */
 TEST_CASE( "Getting timestamp only with errors", "[libMagAOX::file::fileTimes]" )
 {

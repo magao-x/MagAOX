@@ -41,6 +41,7 @@ apps_rtcicc = \
 	baslerCtrl \
     bmcCtrl \
 	flipperCtrl \
+	flowRPM \
     hsfwCtrl \
     rhusbMon \
 	cacaoInterface \
@@ -83,6 +84,7 @@ apps_icc = \
 	filterWheelCtrl \
 	smc100ccCtrl \
 	usbtempMon \
+	flowRPM \
 	xt1121Ctrl \
 	xt1121DCDU \
 	koolanceCtrl \
@@ -125,6 +127,7 @@ all_buildable_apps = \
 	dmSpeckle \
 	filterWheelCtrl \
 	flipperCtrl \
+	flowRPM \
 	hwpTracker \
 	indiTSAccumulator \
 	koolanceCtrl \

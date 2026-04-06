@@ -32,6 +32,7 @@
 ../apps/dmSpeckle/tests/dmSpeckle_test
 ../apps/filterWheelCtrl/tests/filterWheelCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_test
+../apps/flowRPM/tests/flowRPM_test
 ../apps/indiTSAccumulator/tests/indiTSAccumulator_test
 ../apps/koolanceCtrl/tests/koolanceCtrl_test
 ../apps/kTracker/tests/kTracker_test
