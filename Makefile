@@ -105,9 +105,10 @@ apps_tic = \
 	acronameUsbHub \
 	baslerCtrl \
 	bmcCtrl \
-	trippLitePDU \
+	dmSpeckle \
+	hamCtrl \
 	rhusbMon \
-	dmSpeckle
+	trippLitePDU \
 
 
 # Apps with simulator mode
@@ -126,6 +127,7 @@ all_buildable_apps = \
 	filterWheelCtrl \
 	flipperCtrl \
 	hwpTracker \
+	hamCtrl \
 	indiTSAccumulator \
 	koolanceCtrl \
 	kTracker \
