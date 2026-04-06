@@ -72,7 +72,7 @@ class WindTracker:
     def __init__(
         self,
         max_distance: int = 56,
-        max_missed_frames: int = 3,
+        max_missed_frames: int = 5,
         image_center: tuple[int, int] = (None, None),
         time_per_frame: float = 0.004,
         meters_per_pixel: float = (6.5 / 60),
@@ -88,7 +88,7 @@ class WindTracker:
         self.max_direction_delta_deg = 20.0
         self.max_theta_delta_deg = 35.0
         self.max_speed_delta_px = 2.5
-        self.prune_immunity_matches = 20
+        self.prune_immunity_matches = 30
         self.candidate_sources = make_empty_source_dataframe()
         self.predicted_sources = make_empty_source_dataframe()
         self.vetted_sources = make_empty_source_dataframe()
@@ -749,9 +749,10 @@ class WindTracker:
             )
             return self.candidate_sources
 
-        candidate_coords = this_frame_data.select(["x", "y"]).to_numpy()
+        new_detections_coords = this_frame_data.select(["x", "y"]).to_numpy()
         predicted_coords = predicted_data.select(["x", "y"]).to_numpy()
-        raw_distance = cdist(predicted_coords, candidate_coords)
+        # print(f"predicted_coords.shape: {predicted_coords.shape}")
+        raw_distance = cdist(predicted_coords, new_detections_coords)
         distance = raw_distance.copy()
 
         unphysically_fast_candidates = (
@@ -779,10 +780,10 @@ class WindTracker:
 
         for row_i, col_i, is_match in zip(row_ind, col_ind, accepted):
             predicted_row = predicted_data.row(int(row_i), named=True)
-            candidate_row = this_frame_data.row(int(col_i), named=True)
+            new_detection_row = this_frame_data.row(int(col_i), named=True)
             predicted_track_id = int(predicted_row["track_id"])
-            candidate_track_id = int(candidate_row["track_id"])
-            source_idx = int(candidate_row["source_index"])
+            new_detection_track_id = int(new_detection_row["track_id"])
+            source_idx = int(new_detection_row["source_index"])
             if not is_match:
                 rejected_row = dict(sources_this_frame.row(source_idx, named=True))
                 rejected_row["track_id"] = predicted_track_id
@@ -801,7 +802,7 @@ class WindTracker:
             # return the row as a dictionary (named=True triggers dict not tuple)
             active_row = self.candidate_sources.row(active_idx, named=True)
             prior_radius = self._as_float(active_row.get("dist_traveled_px"))
-            current_radius = float(candidate_row["dist_traveled_px"])
+            current_radius = float(new_detection_row["dist_traveled_px"])
             if not np.isnan(prior_radius) and current_radius < prior_radius:
                 inward_pred_track_ids.add(predicted_track_id)
                 rejected_row = dict(sources_this_frame.row(source_idx, named=True))
@@ -834,7 +835,7 @@ class WindTracker:
             matched_pred_track_ids.add(predicted_track_id)
             matched_detection_indices.add(source_idx)
             # track_id_remap is a dict of candidate_track_id to predicted_track_id
-            track_id_remap[candidate_track_id] = predicted_track_id
+            track_id_remap[new_detection_track_id] = predicted_track_id
             vetted_rows.append(updated_row)
             inferred_origin_updates[source_idx] = float(inferred_origin)
 
@@ -908,6 +909,15 @@ class WindTracker:
                     .otherwise(pl.col("strikes"))
                     .alias("strikes")
                 )
+        # de-increment strikes for the matched tracks
+        if matched_pred_track_ids:
+            for track_id in matched_pred_track_ids:
+                self.candidate_sources = self.candidate_sources.with_columns(
+                    pl.when(self._int_expr("track_id") == track_id)
+                    .then((self._int_expr("strikes").fill_null(0) - 1).clip(lower_bound=0))
+                    .otherwise(pl.col("strikes"))
+                    .alias("strikes")
+                )
         # of course, some sources have just appeared in this frame
         unmatched_sources = (
             sources_this_frame.with_row_index("source_index")
@@ -954,7 +964,14 @@ class WindTracker:
                     .alias("matches") #rename added col "track_id" to "matches"
                 )
             )
-
+        # TODO somehow a track gets a detection added to it many frames later
+        # how can this happen? Might be during stitching of tracks, or from
+        # a track with immunity that is getting matched much later than expected
+        # stitching of tracks not likely bc some tracks are only getting a single detection
+        # much later, which is not a valid track typically. I think candidate_sources
+        # is not getting cleared out correctly, and thus also predicted_sources.
+        # Indeed, immune tracks are just left alone and the Hungarian algo is then
+        # just always looking for a match even in much later frames.
         rejected_rows = self.candidate_sources.filter(
             (self._int_expr("strikes").fill_null(0) > self.max_missed_frames)
             & (self._int_expr("matches").fill_null(0) < self.prune_immunity_matches)
@@ -972,7 +989,7 @@ class WindTracker:
         self.candidate_sources = (
             self.candidate_sources.filter(
                 (self._int_expr("strikes").fill_null(0) <= self.max_missed_frames)
-                | (self._int_expr("matches").fill_null(0) >= self.prune_immunity_matches)
+                # | (self._int_expr("matches").fill_null(0) >= self.prune_immunity_matches)
             )
             .select(SOURCE_COLUMNS)
         )

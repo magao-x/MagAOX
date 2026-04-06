@@ -385,7 +385,7 @@ def process_single_cc_cube(
     tripwire_smoothing_sigma: float = 1.0,
     min_track_matches: int = 10,
     min_track_detections: int = 10,
-    track_direction_scatter_tol_deg: float = 5.0,
+    track_direction_scatter_tol_deg: float = 20.0,
     track_velocity_scatter_tol_mps: float = 5.0,
     ) -> tuple[pl.DataFrame, pl.DataFrame, np.ndarray, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """
@@ -471,7 +471,7 @@ def process_single_cc_cube(
         time_per_frame=time_per_frame,
         min_matches=min_track_matches,
         min_detections=min_track_detections,
-        origin_tol_px=15.0,
+        origin_tol_px=10.0,
         rmse_tol_px=10.0,
         outward_tol_px=0.0,
         direction_scatter_tol_deg=track_direction_scatter_tol_deg,
