@@ -513,6 +513,7 @@ def main():
     segment_cubes = args.segment_cubes if args.segment_cubes is not None else config_params.get('SEGMENT_CUBES', 22)
     overlap = args.overlap if args.overlap is not None else config_params.get('OVERLAP', 0.5)
     fft_pad_shape = args.fft_pad_shape if args.fft_pad_shape is not None else config_params.get('FFT_PAD_SHAPE', None)
+    workers = args.workers if args.workers is not None else config_params.get('WORKERS')
 
     # Validate required parameters
     if min_delay is None:
@@ -544,10 +545,10 @@ def main():
 
     
     # Determine number of workers
-    if args.workers is None:
+    if workers is None:
         n_workers = cpu_count()
     else:
-        n_workers = min(args.workers, len(quadrant_dirs))  # Don't use more workers than quadrants
+        n_workers = min(workers, len(quadrant_dirs))  # Don't use more workers than quadrants
     
     
     # Process each quadrant directory in parallel

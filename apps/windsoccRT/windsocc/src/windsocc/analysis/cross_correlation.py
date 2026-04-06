@@ -53,7 +53,7 @@ def load_reduced_series(data_dir):
     sort them, and concatenate along the time axis.
     """
     file_list = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir)
-                        if f.endswith('.fits')])
+                        if (f.endswith('.fits') and f.startswith('camwfs_'))])
     series = []
     file_skips = 0
     expect_cube_length = None

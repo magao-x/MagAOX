@@ -4,7 +4,6 @@ are showing inconsistencies.
 """
 
 import numpy as np
-import pandas as pd
 import polars as pl
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
@@ -131,43 +130,49 @@ def _empty_sources_array() -> np.ndarray:
     return np.zeros(0, dtype=TRACKED_SOURCE_DTYPE)
 
 
-def _as_pandas_tracked(cube_sources: object) -> object:
-    if isinstance(cube_sources, pl.DataFrame):
-        return pd.DataFrame(cube_sources.to_dicts(), columns=cube_sources.columns)
-    return cube_sources
-
 def tracked_df_to_frame_sources(
     cube_sources: object,
     n_frames: int,
 ) -> list[np.ndarray]:
     if isinstance(cube_sources, list):
         return cube_sources
-    cube_sources = _as_pandas_tracked(cube_sources)
-    if not isinstance(cube_sources, pd.DataFrame) or cube_sources.empty:
+    if not isinstance(cube_sources, pl.DataFrame) or cube_sources.is_empty():
         return [_empty_sources_array() for _ in range(n_frames)]
 
-    tracked = cube_sources.copy()
+    tracked = cube_sources.clone()
     required_cols = {"frames", "x_coords", "y_coords", "a", "b", "theta"}
     if not required_cols.issubset(set(tracked.columns)):
         return [_empty_sources_array() for _ in range(n_frames)]
 
-    tracked = tracked.assign(
-        frames=pd.to_numeric(tracked["frames"], errors="coerce"),
-        x=pd.to_numeric(tracked["x_coords"], errors="coerce"),
-        y=pd.to_numeric(tracked["y_coords"], errors="coerce"),
-        a=pd.to_numeric(tracked["a"], errors="coerce"),
-        b=pd.to_numeric(tracked["b"], errors="coerce"),
-        theta=pd.to_numeric(tracked["theta"], errors="coerce"),
-        track_id=pd.to_numeric(tracked.get("track_id"), errors="coerce"),
-    ).dropna(subset=["frames", "x", "y", "a", "b", "theta"])
-    tracked = tracked[(tracked["frames"] >= 0) & (tracked["frames"] < n_frames)]
+    cols: list[pl.Expr] = [
+        pl.col("frames").cast(pl.Float64, strict=False),
+        pl.col("x_coords").cast(pl.Float64, strict=False).alias("x"),
+        pl.col("y_coords").cast(pl.Float64, strict=False).alias("y"),
+        pl.col("a").cast(pl.Float64, strict=False),
+        pl.col("b").cast(pl.Float64, strict=False),
+        pl.col("theta").cast(pl.Float64, strict=False),
+    ]
+    if "track_id" in tracked.columns:
+        cols.append(pl.col("track_id").cast(pl.Float64, strict=False))
+    tracked = tracked.with_columns(cols).drop_nulls(
+        subset=["frames", "x", "y", "a", "b", "theta"]
+    )
+    tracked = tracked.filter(
+        (pl.col("frames") >= 0) & (pl.col("frames") < float(n_frames))
+    )
 
     if "track_id" in tracked.columns:
-        tracked = tracked.sort_values("frames").drop_duplicates(
+        tracked = tracked.sort("frames").unique(
             subset=["frames", "track_id"], keep="last"
         )
 
-    grouped = {int(frame): frame_df for frame, frame_df in tracked.groupby("frames")}
+    grouped: dict[int, pl.DataFrame] = {}
+    for frame_val in tracked["frames"].unique().sort().to_list():
+        if frame_val is None or (isinstance(frame_val, float) and np.isnan(frame_val)):
+            continue
+        fi = int(frame_val)
+        grouped[fi] = tracked.filter(pl.col("frames") == frame_val)
+
     frame_sources = []
     for frame_idx in range(n_frames):
         if frame_idx not in grouped:
@@ -175,12 +180,17 @@ def tracked_df_to_frame_sources(
             continue
         frame_df = grouped[frame_idx]
         arr = np.zeros(len(frame_df), dtype=TRACKED_SOURCE_DTYPE)
-        arr["track_id"] = frame_df["track_id"].fillna(-1).to_numpy(dtype=np.int64)
-        arr["x"] = frame_df["x"].to_numpy(dtype=np.float64)
-        arr["y"] = frame_df["y"].to_numpy(dtype=np.float64)
-        arr["a"] = frame_df["a"].to_numpy(dtype=np.float64)
-        arr["b"] = frame_df["b"].to_numpy(dtype=np.float64)
-        arr["theta"] = frame_df["theta"].to_numpy(dtype=np.float64)
+        if "track_id" in frame_df.columns:
+            arr["track_id"] = (
+                frame_df["track_id"].fill_null(-1).cast(pl.Int64).to_numpy()
+            )
+        else:
+            arr["track_id"] = -1
+        arr["x"] = frame_df["x"].to_numpy()
+        arr["y"] = frame_df["y"].to_numpy()
+        arr["a"] = frame_df["a"].to_numpy()
+        arr["b"] = frame_df["b"].to_numpy()
+        arr["theta"] = frame_df["theta"].to_numpy()
         frame_sources.append(arr)
     return frame_sources
 
@@ -191,11 +201,10 @@ def tracked_df_to_origin_propagated_sources(
     center_x: float,
     center_y: float,
 ) -> list[np.ndarray]:
-    cube_sources = _as_pandas_tracked(cube_sources)
-    if not isinstance(cube_sources, pd.DataFrame) or cube_sources.empty:
+    if not isinstance(cube_sources, pl.DataFrame) or cube_sources.is_empty():
         return [_empty_sources_array() for _ in range(n_frames)]
 
-    tracked = cube_sources.copy()
+    tracked = cube_sources.clone()
     required_cols = {
         "track_id",
         "frames",
@@ -208,17 +217,15 @@ def tracked_df_to_origin_propagated_sources(
     if not required_cols.issubset(set(tracked.columns)):
         return [_empty_sources_array() for _ in range(n_frames)]
 
-    tracked = tracked.assign(
-        track_id=pd.to_numeric(tracked["track_id"], errors="coerce"),
-        frames=pd.to_numeric(tracked["frames"], errors="coerce"),
-        a=pd.to_numeric(tracked["a"], errors="coerce"),
-        b=pd.to_numeric(tracked["b"], errors="coerce"),
-        theta=pd.to_numeric(tracked["theta"], errors="coerce"),
-        direction=pd.to_numeric(tracked["direction"], errors="coerce"),
-        velocity_px_per_frame=pd.to_numeric(
-            tracked["velocity_px_per_frame"], errors="coerce"
-        ),
-    ).dropna(
+    tracked = tracked.with_columns(
+        pl.col("track_id").cast(pl.Float64, strict=False),
+        pl.col("frames").cast(pl.Float64, strict=False),
+        pl.col("a").cast(pl.Float64, strict=False),
+        pl.col("b").cast(pl.Float64, strict=False),
+        pl.col("theta").cast(pl.Float64, strict=False),
+        pl.col("direction").cast(pl.Float64, strict=False),
+        pl.col("velocity_px_per_frame").cast(pl.Float64, strict=False),
+    ).drop_nulls(
         subset=[
             "track_id",
             "frames",
@@ -229,19 +236,24 @@ def tracked_df_to_origin_propagated_sources(
             "velocity_px_per_frame",
         ]
     )
-    if tracked.empty:
+    if tracked.is_empty():
         return [_empty_sources_array() for _ in range(n_frames)]
 
     per_frame: list[list[tuple[float, float, float, float, float]]] = [
         [] for _ in range(n_frames)
     ]
-    for _, group in tracked.groupby("track_id"):
-        mean_a = float(np.mean(group["a"].to_numpy(dtype=np.float64)))
-        mean_b = float(np.mean(group["b"].to_numpy(dtype=np.float64)))
-        mean_theta = float(np.mean(group["theta"].to_numpy(dtype=np.float64)))
-        last_row = group.sort_values("frames").iloc[-1]
-        direction_rad = np.deg2rad(float(last_row["direction"]))
-        speed_px = float(last_row["velocity_px_per_frame"])
+    for track_id in tracked["track_id"].unique().sort().to_list():
+        if track_id is None or (
+            isinstance(track_id, float) and np.isnan(track_id)
+        ):
+            continue
+        group = tracked.filter(pl.col("track_id") == track_id)
+        mean_a = float(np.mean(group["a"].to_numpy()))
+        mean_b = float(np.mean(group["b"].to_numpy()))
+        mean_theta = float(np.mean(group["theta"].to_numpy()))
+        last_one = group.sort("frames").tail(1)
+        direction_rad = np.deg2rad(float(last_one["direction"][0]))
+        speed_px = float(last_one["velocity_px_per_frame"][0])
         dx_per_frame = speed_px * np.cos(direction_rad + np.pi / 2.0)
         dy_per_frame = speed_px * np.sin(direction_rad + np.pi / 2.0)
         for frame_idx in range(n_frames):
@@ -263,6 +275,7 @@ def tracked_df_to_origin_propagated_sources(
             arr["theta"][i] = theta_val
         frame_sources.append(arr)
     return frame_sources
+
 
 def make_source_detection_movie(
     mf_response_cube_path: str,

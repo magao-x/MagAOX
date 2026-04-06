@@ -37,7 +37,7 @@ from multiprocessing import cpu_count
 # Import helper functions from your modules (ensure these exist in src/)
 from windsocc.preprocessing.reference_camwfs import create_reference
 from windsocc.preprocessing.crop_pupil_camwfs import crop_quadrant
-
+# import matplotlib.pyplot as plt
 DEFAULT_START_FRAME = 0
 DEFAULT_STEP_FRAME = 1
 DEFAULT_GROUP_SIZE = 8
@@ -324,6 +324,12 @@ def process_cube(
         if apply_tukey_window:
             if tukey_kernel is None:
                 tukey_kernel = _tukey_window_2d(cropped.shape, tukey_alpha)
+            # # debug: view the kernel and the windowed image
+            # plt.imshow(tukey_kernel, cmap='viridis')
+            # plt.show()
+            # plt.imshow(cropped*tukey_kernel, cmap='viridis')
+            # plt.show()
+            # exit()
             cropped = cropped * tukey_kernel
         cropped_frames.append(cropped)
 
