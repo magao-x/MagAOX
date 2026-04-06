@@ -6,6 +6,7 @@ are showing inconsistencies.
 import numpy as np
 import polars as pl
 import matplotlib.pyplot as plt
+from matplotlib.artist import Artist
 from matplotlib.patches import Ellipse
 from matplotlib.animation import FuncAnimation
 from matplotlib.animation import FFMpegWriter
@@ -239,7 +240,7 @@ def tracked_df_to_origin_propagated_sources(
     if tracked.is_empty():
         return [_empty_sources_array() for _ in range(n_frames)]
 
-    per_frame: list[list[tuple[float, float, float, float, float]]] = [
+    per_frame: list[list[tuple[int, float, float, float, float, float]]] = [
         [] for _ in range(n_frames)
     ]
     for track_id in tracked["track_id"].unique().sort().to_list():
@@ -247,6 +248,7 @@ def tracked_df_to_origin_propagated_sources(
             isinstance(track_id, float) and np.isnan(track_id)
         ):
             continue
+        tid = int(track_id)
         group = tracked.filter(pl.col("track_id") == track_id)
         mean_a = float(np.mean(group["a"].to_numpy()))
         mean_b = float(np.mean(group["b"].to_numpy()))
@@ -260,14 +262,17 @@ def tracked_df_to_origin_propagated_sources(
             x_here = center_x + dx_per_frame * frame_idx
             y_here = center_y + dy_per_frame * frame_idx
             per_frame[frame_idx].append(
-                (x_here, y_here, mean_a, mean_b, mean_theta)
+                (tid, x_here, y_here, mean_a, mean_b, mean_theta)
             )
 
     frame_sources = []
     for frame_idx in range(n_frames):
         entries = per_frame[frame_idx]
         arr = np.zeros(len(entries), dtype=TRACKED_SOURCE_DTYPE)
-        for i, (x_here, y_here, a_val, b_val, theta_val) in enumerate(entries):
+        for i, (tid, x_here, y_here, a_val, b_val, theta_val) in enumerate(
+            entries
+        ):
+            arr["track_id"][i] = tid
             arr["x"][i] = x_here
             arr["y"][i] = y_here
             arr["a"][i] = a_val
@@ -321,14 +326,14 @@ def make_source_detection_movie(
         ax.set_ylabel("Y pixels")
         fig.tight_layout()
 
-        current_patches: list[Ellipse] = []
+        current_overlay: list[Artist] = []
 
-        def _clear_patches() -> None:
-            for patch in list[Ellipse](current_patches):
-                patch.remove()
-            current_patches.clear()
+        def _clear_overlay() -> None:
+            for artist in list(current_overlay):
+                artist.remove()
+            current_overlay.clear()
 
-        def _add_patches(sources: np.ndarray) -> None:
+        def _add_overlay(sources: np.ndarray) -> None:
             for source in sources:
                 ellipse = Ellipse(
                     (source["x"], source["y"]),
@@ -340,14 +345,33 @@ def make_source_detection_movie(
                     linewidth=1.5,
                 )
                 ax.add_patch(ellipse)
-                current_patches.append(ellipse)
+                current_overlay.append(ellipse)
+                tid = int(source["track_id"])
+                if tid >= 0:
+                    r = float(
+                        max(3.0 * source["a"], 3.0 * source["b"], 2.0)
+                    )
+                    tx = float(source["x"]) + 0.35 * r
+                    ty = float(source["y"]) + 0.35 * r
+                    label = ax.text(
+                        tx,
+                        ty,
+                        str(tid),
+                        color="red",
+                        fontsize=8,
+                        fontweight="bold",
+                        ha="left",
+                        va="bottom",
+                        clip_on=True,
+                    )
+                    current_overlay.append(label)
 
         def _update(frame_idx: int):
             image.set_data(mf_response_cube[frame_idx])
-            _clear_patches()
-            _add_patches(sources_by_frame[frame_idx])
+            _clear_overlay()
+            _add_overlay(sources_by_frame[frame_idx])
             title.set_text(f"{mf_response_cube_fname}; Slice {frame_idx} of {len(mf_response_cube)}")
-            return [image, title, *current_patches]
+            return [image, title, *current_overlay]
 
         anim = FuncAnimation(
             fig,

@@ -88,7 +88,7 @@ class WindTracker:
         self.max_direction_delta_deg = 20.0
         self.max_theta_delta_deg = 35.0
         self.max_speed_delta_px = 2.5
-        self.prune_immunity_matches = 10
+        self.prune_immunity_matches = 20
         self.candidate_sources = make_empty_source_dataframe()
         self.predicted_sources = make_empty_source_dataframe()
         self.vetted_sources = make_empty_source_dataframe()

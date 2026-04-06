@@ -60,7 +60,7 @@ TODO apply parity flip when HA is positive
 
 """
 
-import cProfile
+# import cProfile
 import os
 import sys
 import argparse

@@ -159,7 +159,8 @@ def _model_reject_row(
         "velocity_m_per_s": float(np.mean(velocity_vals)),
         "matches": int(np.max(matches_vals)),
         "inferred_origin": float(np.mean(inferred_origin_vals)),
-    }
+    }    
+
 
 
 def _keep_track_ids_by_model(
@@ -168,8 +169,8 @@ def _keep_track_ids_by_model(
     inner_bound: int,
     meters_per_pixel: float,
     time_per_frame: float,
-    min_matches: int = 5,
-    min_detections: int = 4,
+    min_matches: int = 10,
+    min_detections: int = 10,
     origin_tol_px: float = 10.0,
     rmse_tol_px: float = 10.0,
     outward_tol_px: float = 0.0,
@@ -230,8 +231,12 @@ def _keep_track_ids_by_model(
             .sort("frame_num")
             .unique(subset=["frame_num"], keep="last")
         )
+        # if track_id == 40:
+        #     print(group.select("frame_num", "matches_num"))
+        #     exit()
         if group.is_empty():
             continue
+        # TODO see if these two checks can be consolidated
         if float(group.get_column("matches_num").max()) < float(min_matches):
             reject_rows.append(_model_reject_row(track_id, "min_matches", group))
             continue
@@ -273,23 +278,38 @@ def _keep_track_ids_by_model(
         if len(velocity_vals) >= 2 and np.std(velocity_vals) > velocity_scatter_tol_mps:
             reject_rows.append(_model_reject_row(track_id, "velocity_scatter", group))
             continue
-
+        
+        x_coords = group.get_column("x_num").to_numpy()
+        y_coords = group.get_column("y_num").to_numpy()
+        slope, intercept = np.polyfit(x_coords, y_coords, 1)
+        y_pred_origin = slope * image_center[0] + intercept
+        y_dist_origin = y_pred_origin - image_center[1]
+        # if track_id == 1106:
+        #     print(f"track_id: {track_id}")
+        #     print(f"y_pred_origin: {y_pred_origin}")
+        #     print(f"y_coords: {y_coords}")
+        #     print(f"x_coords: {x_coords}")
+        #     print(f"y_dist_origin: {y_dist_origin}")
         x_centered = group.get_column("x_num").to_numpy() - image_center[0]
         y_centered = group.get_column("y_num").to_numpy() - image_center[1]
-        points = np.column_stack((x_centered, y_centered))
-        centroid = np.mean(points, axis=0)
-        _, _, vh = np.linalg.svd(points - centroid, full_matrices=False)
+        points_centered = np.column_stack((x_centered, y_centered))
+        centroid = np.mean(points_centered, axis=0)
+        _, _, vh = np.linalg.svd(points_centered - centroid, full_matrices=False)
         direction = vh[0]
         direction_norm = np.linalg.norm(direction)
         if direction_norm == 0:
             reject_rows.append(_model_reject_row(track_id, "degenerate_line", group))
             continue
         direction = direction / direction_norm
-        origin_distance = group.get_column("inferred_origin_num").to_numpy()
-        along_line = np.outer((points - centroid) @ direction, direction)
-        residuals = points - centroid - along_line
+        origin_distances = group.get_column("inferred_origin_num").to_numpy()
+        mean_origin_distance = np.mean(origin_distances)
+        along_line = np.outer((points_centered - centroid) @ direction, direction)
+        residuals = points_centered - centroid - along_line
         rmse = np.sqrt(np.mean(np.sum(residuals**2, axis=1)))
-        if np.mean(origin_distance) > origin_tol_px:
+        if mean_origin_distance > origin_tol_px:
+            reject_rows.append(_model_reject_row(track_id, "origin_distance", group))
+            continue
+        if y_dist_origin > origin_tol_px:
             reject_rows.append(_model_reject_row(track_id, "origin_distance", group))
             continue
         if rmse > rmse_tol_px:
@@ -364,7 +384,7 @@ def process_single_cc_cube(
     dynamic_window_radius: int = 10,
     tripwire_smoothing_sigma: float = 1.0,
     min_track_matches: int = 10,
-    min_track_detections: int = 4,
+    min_track_detections: int = 10,
     track_direction_scatter_tol_deg: float = 5.0,
     track_velocity_scatter_tol_mps: float = 5.0,
     ) -> tuple[pl.DataFrame, pl.DataFrame, np.ndarray, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
@@ -451,7 +471,7 @@ def process_single_cc_cube(
         time_per_frame=time_per_frame,
         min_matches=min_track_matches,
         min_detections=min_track_detections,
-        origin_tol_px=36.0,
+        origin_tol_px=15.0,
         rmse_tol_px=10.0,
         outward_tol_px=0.0,
         direction_scatter_tol_deg=track_direction_scatter_tol_deg,
