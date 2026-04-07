@@ -174,11 +174,19 @@ def compute_mf_response_cube(cube, template):
     return response_cube
 
 def compute_snr_cube(cube):
-    """Compute per-frame SNR using per-pixel std across time."""
-    std_map = np.std(cube, axis=0)
+    """Compute SNR using a single noise map from the cube's last quarter."""
+    if cube.ndim != 3:
+        raise ValueError(f"Cube must be 3D, got shape {cube.shape}.")
+    n_frames = cube.shape[0]
+    last_quarter_start = int(np.floor(0.75 * n_frames))
+    last_quarter = cube[last_quarter_start:]
+    if last_quarter.size == 0:
+        last_quarter = cube
+
+    error_map = np.nanstd(last_quarter, axis=0)
     with np.errstate(divide="ignore", invalid="ignore"):
-        snr_cube = np.where(std_map > 0, cube / std_map, 0.0)
-    return snr_cube
+        snr_cube = np.where(error_map > 0, cube / error_map, 0.0)
+    return snr_cube, error_map
 
 def convolve_cube_with_kernel(cube, kernel_2d):
     """Convolve each frame of a cube with a 2D kernel."""
@@ -220,10 +228,13 @@ def process_distill_group(suffix, averaged_cube, averaged_bias, header, distille
     high_pass_cube = apply_unsharp_mask_cube(averaged_cube, fwhm_pixels=3.0)
     mf_template_unsharp = build_template(high_pass_cube[0])
     mf_output_path = os.path.join(distilled_dir, "mf_templates", f"{suffix}_mf_template.fits")
-    write_cube(mf_output_path, mf_template_unsharp, header)
+    mf_output_path_unsharp = os.path.join(distilled_dir, "mf_templates", f"{suffix}_mf_template_unsharp.fits")
+    write_cube(mf_output_path_unsharp, mf_template_unsharp, header)
+    write_cube(mf_output_path, mf_template, header)
 
     mf_response_cube = compute_mf_response_cube(averaged_cube, mf_template)
     mf_response_unsharp_cube = compute_mf_response_cube(high_pass_cube, mf_template_unsharp)
+    # clamped_mf_response_unsharp_cube = np.clip(mf_response_unsharp_cube, 0, None)
     mf_response_output_path = os.path.join(
         distilled_dir, "mf_response_cubes", f"{suffix}_mf_response.fits"
     )
@@ -266,12 +277,16 @@ def process_distill_group(suffix, averaged_cube, averaged_bias, header, distille
     # write_cube(output_path_unsharp, high_pass_cube, header)
     # write_cube(output_path, averaged_cube, header)
 
-    snr_map = compute_snr_cube(mf_response_cube)
-    snr_map_unsharp = compute_snr_cube(mf_response_unsharp_cube)
+    snr_map, error_map = compute_snr_cube(mf_response_cube)
+    snr_map_unsharp, error_map_unsharp = compute_snr_cube(mf_response_unsharp_cube)
     snr_output_path = os.path.join(distilled_dir, "sn_maps", f"{suffix}_snr.fits")
     snr_map_unsharp_output_path = os.path.join(
         distilled_dir, "sn_maps", f"{suffix}_snr_unsharp.fits"
     )
+    error_map_output_path = os.path.join(distilled_dir, "noise_maps", f"{suffix}_error_map.fits")
+    error_map_unsharp_output_path = os.path.join(distilled_dir, "noise_maps", f"{suffix}_error_map_unsharp.fits")
+    write_cube(error_map_output_path, error_map, header)
+    write_cube(error_map_unsharp_output_path, error_map_unsharp, header)
     write_cube(snr_output_path, snr_map, header)
     write_cube(snr_map_unsharp_output_path, snr_map_unsharp, header)
 

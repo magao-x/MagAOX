@@ -6,7 +6,6 @@ import sep
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
 
-
 SOURCE_SCHEMA: dict[str, pl.DataType] = {
     "x_coords": pl.Float64,
     "y_coords": pl.Float64,
@@ -641,6 +640,7 @@ class WindTracker:
     def extract(
         self,
         cc_frame: np.ndarray,
+        error_map: np.ndarray | None,
         tripwire_mask: np.ndarray,
         sep_thresh: float,
         sep_minarea: int,
@@ -655,17 +655,23 @@ class WindTracker:
         """
         sep_frame = np.ascontiguousarray(cc_frame, dtype=np.float32)
         # sep_frame_clamped = np.clip(sep_frame, 0, None)
+        # data_sub = sep_frame_clamped
         bkg = sep.Background(sep_frame)
-        # TODO make the error map using stddev in rings around the center
-        data_sub = sep_frame - bkg
+        data_sub = sep_frame - bkg.rms()
+        sep_err = None
+        if error_map is not None:
+            sep_err = np.ascontiguousarray(error_map, dtype=np.float32)
         sources_in_frame = sep.extract(
             data_sub,
             mask=tripwire_mask,
             thresh=sep_thresh,
+            # err=sep_err,
             err=bkg.globalrms,
             minarea=sep_minarea,
             filter_kernel=None,
-            deblend_cont=0.001,
+            deblend_cont=0.0005, # default is 0.005 (0.05%), lower is more sensitive
+            deblend_nthresh=32,    # default is 32, higher better for saddles
+            clean=False,
         )
 
         if sources_in_frame.size > 0 and sources_in_frame.shape[0] > 0:
@@ -1080,6 +1086,7 @@ class WindTracker:
         cc_frame: np.ndarray,
         cc_frame_ind: int,
         image_center: tuple[int, int],
+        error_map: np.ndarray | None,
         tripwire_mask: np.ndarray,
         sep_thresh: float,
         sep_minarea: int,
@@ -1091,6 +1098,7 @@ class WindTracker:
 
         sources_in_frame = self.extract(
             cc_frame,
+            error_map,
             tripwire_mask,
             sep_thresh,
             sep_minarea,

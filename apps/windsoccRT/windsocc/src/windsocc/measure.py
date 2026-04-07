@@ -56,11 +56,9 @@ includes ``raw_direction`` (degrees in the camwfs cube frame) and ``corrected_di
 (after ``PA_OFFSET``, with parity handled by negating that offset when a parity flip applies).
 ``direction`` is set equal to ``corrected_direction`` for backward compatibility.
 
-TODO apply parity flip when HA is positive
-
 """
 
-# import cProfile
+import cProfile
 import os
 import sys
 import argparse
@@ -133,6 +131,24 @@ def process_mf_response_cube_paths(mf_response_cube_paths: list) -> tuple[list, 
     fname_prefixes = [os.path.basename(path).split("_")[0] for path in mf_response_cube_paths]
     times_from_fnames = [extract_time_from_fname(path) for path in mf_response_cube_paths]
     return fname_prefixes, times_from_fnames
+
+
+def find_error_map_for_cube(cube_path: str, noise_maps_dir: str) -> str | None:
+    """Match a distill noise-map FITS file to a given MF response cube."""
+    cube_stem = os.path.splitext(os.path.basename(cube_path))[0]
+    candidates = []
+    if cube_stem.endswith("_mf_response_unsharp"):
+        candidates.append(cube_stem.replace("_mf_response_unsharp", "_error_map_unsharp"))
+    if cube_stem.endswith("_mf_response"):
+        candidates.append(cube_stem.replace("_mf_response", "_error_map"))
+    candidates.append(f"{cube_stem}_error_map")
+    candidates.append(f"{cube_stem}_error_map_unsharp")
+
+    for candidate in candidates:
+        candidate_path = os.path.join(noise_maps_dir, f"{candidate}.fits")
+        if os.path.exists(candidate_path):
+            return candidate_path
+    return None
 
 
 def filter_sources_by_angle(
@@ -383,7 +399,9 @@ def summarize_model_rejected_tracks(model_rejected: object) -> dict:
 
 
 def build_measure_runtime_params(config_params: dict, cube_data: np.ndarray) -> tuple:
-    """Resolve runtime parameters for ``process_single_cc_cube``."""
+    """Resolve runtime parameters for ``process_single_cc_cube``.
+    TODO add SEP parameters to the config file (deblending)
+    """
     sep_thresh = config_params.get("SEP_THRESH", None)
     sep_minarea = config_params.get("SEP_MINAREA", None)
     inner_radius = config_params.get("INNER_RADIUS", None)
@@ -473,6 +491,7 @@ def build_measure_runtime_params(config_params: dict, cube_data: np.ndarray) -> 
 def process_mf_response_cubes(
     mf_response_cube_paths: list,
     mf_response_cube_fnames: list,
+    noise_maps_dir: str,
     movie_output_dir: str,
     config_params: dict,
     roi_masks_dir: str,
@@ -526,6 +545,24 @@ def process_mf_response_cubes(
             else:
                 logging.info("No parity flip needed for cube: %s", cube_name)
         cube_data = fits.getdata(cube_path)
+        error_map_path = find_error_map_for_cube(cube_path, noise_maps_dir)
+        if error_map_path is None:
+            logging.warning(
+                "No matching noise map found for cube %s in %s; SEP will run without per-pixel error map.",
+                cube_name,
+                noise_maps_dir,
+            )
+            error_map = None
+        else:
+            error_map = np.asarray(fits.getdata(error_map_path), dtype=np.float32)
+            if error_map.ndim != 2 or error_map.shape != cube_data[0].shape:
+                logging.warning(
+                    "Noise map shape mismatch for cube %s: expected %s got %s; ignoring noise map.",
+                    cube_name,
+                    cube_data[0].shape,
+                    error_map.shape,
+                )
+                error_map = None
         (
             image_center,
             meters_per_pixel,
@@ -544,6 +581,7 @@ def process_mf_response_cubes(
             wind_model_rejected_cube,
         ) = process_single_cc_cube(
             cube_data,
+            error_map,
             image_center,
             meters_per_pixel,
             sep_thresh,
@@ -619,6 +657,7 @@ def run_measure_stage(
 
     dirs = allocate_measure_dirs(basedir=basedir, params_yaml=config_params)
     mf_response_cubes_loc = os.path.join(dirs["distill_directory"], "mf_response_cubes")
+    noise_maps_loc = os.path.join(dirs["distill_directory"], "noise_maps")
     mf_response_cube_fnames, mf_response_cube_paths = load_mf_response_cubes(mf_response_cubes_loc)
     _collapsed_unsharp_names, _collapsed_unsharp_paths = load_collapsed_unsharp_response_maps(
         mf_response_cubes_loc
@@ -652,6 +691,7 @@ def run_measure_stage(
                 process_mf_response_cubes,
                 [cube_path],
                 [cube_fname],
+                noise_maps_dir=noise_maps_loc,
                 movie_output_dir=dirs["movies_dir"],
                 config_params=config_params,
                 roi_masks_dir=dirs["roi_masks_dir"],
@@ -669,6 +709,7 @@ def run_measure_stage(
         sources_all, wind_summaries, rejected_all, model_rejected_all = process_mf_response_cubes(
             mf_response_cube_paths,
             mf_response_cube_fnames,
+            noise_maps_dir=noise_maps_loc,
             movie_output_dir=dirs["movies_dir"],
             config_params=config_params,
             roi_masks_dir=dirs["roi_masks_dir"],

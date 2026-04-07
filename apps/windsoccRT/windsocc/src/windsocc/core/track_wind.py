@@ -411,6 +411,7 @@ def _enforce_monotonic_matches(sources: pl.DataFrame) -> pl.DataFrame:
 
 def process_single_cc_cube(
     cc_cube: np.ndarray,
+    error_map: np.ndarray | None,
     image_center: tuple[int, int],
     meters_per_pixel: float,
     sep_thresh: float,
@@ -486,6 +487,7 @@ def process_single_cc_cube(
             frame,
             frame_index,
             image_center,
+            error_map,
             tripwire_mask,
             sep_thresh,
             sep_minarea,

@@ -320,7 +320,7 @@ if __name__ == "__main__":
         "camwfs_20230313071325997167000_mf_response_unsharp_wind_attributes.json"
     )
 
-    # Placeholder geometry shared across layers (hand-tune).
+    # Tunable params
     _BETA = 1.0
     _H0 = 15.0
     _SIGMA = 30.0
@@ -369,23 +369,4 @@ if __name__ == "__main__":
     psf_estimate = match_array_shape_to_reference(psf_estimate, raw.shape)
 
     _demo_plot(raw, raw - psf_estimate, wdh_model, title_left="Raw science", title_right="WDH model (sum)")
-    exit()
-    scale, residual, rms, history = fit_wdh_scale_from_raw_and_psf(
-        raw, wdh_model, psf_estimate
-    )
-    print(
-        "Newton iterations (minimize ||(raw − PSF) − s·WDH||_2, same as "
-        "||(raw − s·WDH) − PSF||_2):"
-    )
-    for row in history:
-        print(
-            f"  iter {int(row['iter'])}: scale={row['scale']:.8g} "
-            f"RSS={row['rss']:.6g} RMS={row['rms']:.6g}"
-        )
-    print(f"Final scale: {scale:.8g}")
-    print(f"Final RMS residual (PSF-subtracted): {rms:.8g}")
 
-    science_psf_sub = raw - psf_estimate
-    scaled_wdh = scale * wdh_model
-
-    _plot_scaled_fit(science_psf_sub, scaled_wdh, scale, residual, rms)

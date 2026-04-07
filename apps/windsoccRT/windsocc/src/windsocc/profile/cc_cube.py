@@ -66,6 +66,7 @@ def _params_for_process_single_cc(
         )
 
     return (
+        None,
         image_center,
         meters_per_pixel,
         sep_thresh,
