@@ -41,6 +41,24 @@ def _angle_diff_deg(a: float, b: float) -> float:
     return min(delta, 360.0 - delta)
 
 
+def _require_finite(name: str, value: Any) -> None:
+    """Raise ValueError if value is not a finite float (for gating diagnostics)."""
+    if value is None:
+        raise ValueError(f"non-finite value: {name} (None)")
+    try:
+        x = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"non-finite value: {name} (not convertible to float)") from exc
+    if not np.isfinite(x):
+        raise ValueError(f"non-finite value: {name} ({x!r})")
+
+
+def _require_all_finite(name_value_pairs: list[tuple[str, Any]]) -> None:
+    """Raise ValueError on the first name whose value is not finite."""
+    for name, value in name_value_pairs:
+        _require_finite(name, value)
+
+
 def make_empty_source_dataframe() -> pl.DataFrame:
     return pl.DataFrame(schema=SOURCE_SCHEMA)
 
@@ -472,7 +490,6 @@ class WindTracker:
         current_theta = self._as_float(this_frame_row.get("theta"))
         current_frame = self._as_int(this_frame_row.get("frames"))
 
-        # TODO add a helper function to check for NaNs to replace all the np.isnan checks
         # recompute the speed based on current and prior distance
         update_dist_traveled = current_distance_px - prior_distance_px #pixels
         update_time_elapsed = (current_frame - prior_frame) #frames
@@ -514,12 +531,54 @@ class WindTracker:
         #     print(f"prior_distance_px: {prior_distance_px}")
         #     print(f"current_distance_px: {current_distance_px}")
         #     # exit()
-        valid_direction = np.abs(diff_direction) < self.max_direction_delta_deg # degrees
         diff_distance = inferred_distance_traveled - current_distance_m
         valid_dist = diff_distance <= self.max_distance
         # valid_dist = inferred_origin_dist <= self.max_distance
         diff_speed = current_speed_px - inferred_speed
         valid_speed = np.abs(diff_speed) < 1.0
+
+        if prior_matches >= 1:
+            _require_all_finite(
+                [
+                    ("prior_direction", prior_direction),
+                    ("prior_x", prior_x),
+                    ("prior_y", prior_y),
+                    ("prior_speed_px", prior_speed_px),
+                    ("prior_speed_m_per_s", prior_speed_m_per_s),
+                    ("prior_distance_px", prior_distance_px),
+                    ("prior_a", prior_a),
+                    ("prior_b", prior_b),
+                    ("prior_frame", prior_frame),
+                    ("current_direction", current_direction),
+                    ("current_x", current_x),
+                    ("current_y", current_y),
+                    ("current_distance_px", current_distance_px),
+                    ("current_distance_m", current_distance_m),
+                    ("current_speed_px", current_speed_px),
+                    ("current_speed_m_per_s", current_speed_m_per_s),
+                    ("current_a", current_a),
+                    ("current_b", current_b),
+                    ("current_frame", float(current_frame)),
+                    ("update_speed_px", update_speed_px),
+                    ("update_speed_m_per_s", update_speed_m_per_s),
+                    ("inferred_speed", inferred_speed),
+                    ("inferred_direction", inferred_direction),
+                    ("measured_direction_deg", measured_direction_deg),
+                    ("assumed_direction_deg", assumed_direction_deg),
+                    ("diff_direction", diff_direction),
+                    ("diff_speed", diff_speed),
+                    ("diff_distance", diff_distance),
+                    ("inferred_origin_dist", inferred_origin_dist),
+                ]
+            )
+            if current_frame == 0:
+                raise ValueError(
+                    "invalid gating: current_frame (must be non-zero when prior_matches >= 1)"
+                )
+            if update_time_elapsed == 0:
+                raise ValueError(
+                    "invalid gating: update_time_elapsed (zero when prior_matches >= 1)"
+                )
 
         velocity_min_px_per_frame = current_distance_px / (current_frame * self.time_per_frame)
         velocity_min_m_per_s = velocity_min_px_per_frame * self.meters_per_pixel
@@ -527,54 +586,43 @@ class WindTracker:
         if current_speed_px > velocity_min_px_per_frame * fudge_factor:
             reject_reason = "unphysical_velocity"
             return False, reject_reason, float(inferred_origin_dist)
-        # if prior_matches >= 1 and not np.isnan(assumed_direction_deg) and not np.isnan(measured_direction_deg):
-        #     if not valid_direction:
-        #         reject_reason = "non_physical_trajectory"
-        #         return False, reject_reason, float(inferred_origin_dist)
-        if prior_matches >= 1 and not np.isnan(prior_distance_px) and not np.isnan(current_distance_px):
-            if current_distance_px - prior_distance_px < 0.:
+        if update_speed_m_per_s < 1.0:
+            reject_reason = "static_source"
+            return False, reject_reason, float(inferred_origin_dist)
+        if prior_matches >= 1:
+            if current_distance_px - prior_distance_px < 0.0:
                 reject_reason = "inward_motion"
                 return False, reject_reason, float(inferred_origin_dist)
-        if prior_matches >= 1 and not np.isnan(prior_direction) and not np.isnan(current_direction):
             if _angle_diff_deg(prior_direction, current_direction) > self.max_direction_delta_deg:
                 reject_reason = "prior_frame_direction_mismatch"
                 return False, reject_reason, float(inferred_origin_dist)
-        if prior_matches >= 1 and not np.isnan(prior_speed_px) and not np.isnan(current_speed_px):
             if abs(current_speed_px - prior_speed_px) > self.max_speed_delta_px:
                 reject_reason = "prior_frame_speed_mismatch"
                 return False, reject_reason, float(inferred_origin_dist)
-        if prior_matches >= 1 and not np.isnan(prior_a) and not np.isnan(current_a):
             if current_a > (2.0 * max(prior_a, 1e-6)) or current_a < (0.5 * prior_a):
                 reject_reason = "a_delta"
                 return False, reject_reason, float(inferred_origin_dist)
-        if prior_matches >= 1 and not np.isnan(prior_b) and not np.isnan(current_b):
             if current_b > (2.0 * max(prior_b, 1e-6)) or current_b < (0.5 * prior_b):
                 reject_reason = "b_delta"
                 return False, reject_reason, float(inferred_origin_dist)
-        if prior_matches >= 1 and not np.isnan(valid_speed):
             if not valid_speed:
                 reject_reason = "inferred_speed_mismatch"
                 return False, reject_reason, float(inferred_origin_dist)
-        if prior_matches >= 1 and not np.isnan(valid_dist):
             if not valid_dist:
                 reject_reason = "origin_traceback_invalid"
                 return False, reject_reason, float(inferred_origin_dist)
 
         elongated = False
-        if (
-            not np.isnan(prior_a)
-            and not np.isnan(prior_b)
-            and prior_a > 0
-            and prior_b > 0
-        ):
+        if prior_a > 0 and prior_b > 0:
             axis_ratio = max(prior_a / prior_b, prior_b / prior_a)
             elongated = axis_ratio >= 1.3
-        if (
-            elongated
-            and prior_matches >= 1
-            and not np.isnan(prior_theta)
-            and not np.isnan(current_theta)
-        ):
+        if elongated and prior_matches >= 1:
+            _require_all_finite(
+                [
+                    ("prior_theta", prior_theta),
+                    ("current_theta", current_theta),
+                ]
+            )
             theta_delta = abs(np.degrees(current_theta - prior_theta)) % 180.0
             theta_delta = min(theta_delta, 180.0 - theta_delta)
             if theta_delta > self.max_theta_delta_deg:

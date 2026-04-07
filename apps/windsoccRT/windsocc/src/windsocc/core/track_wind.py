@@ -309,13 +309,20 @@ def _keep_track_ids_by_model(
         
         x_coords = group.get_column("x_num").to_numpy()
         y_coords = group.get_column("y_num").to_numpy()
-        slope, intercept = np.polyfit(x_coords - image_center[0], y_coords - image_center[1], 1)
-        slope = max(slope, 1e-3)
-        y_dist_origin = np.abs(intercept)
-        x_intercept = -intercept / slope
-        x_dist_origin = np.abs(x_intercept)
-        xy_dist_origin = np.asarray([x_dist_origin, y_dist_origin])
-        dist_closest = np.abs(intercept) / np.sqrt(1 + slope**2)
+        try:
+            slope, intercept = np.polyfit(x_coords - image_center[0], y_coords - image_center[1], 1)
+            slope = max(slope, 1e-3)
+            y_dist_origin = np.abs(intercept)
+            x_intercept = -intercept / slope
+            x_dist_origin = np.abs(x_intercept)
+            xy_dist_origin = np.asarray([x_dist_origin, y_dist_origin])
+            dist_closest = np.abs(intercept) / np.sqrt(1 + slope**2)
+            if dist_closest > origin_tol_px:
+                reject_rows.append(_model_reject_row(track_id, "origin_distance", group))
+                continue
+        except ValueError:
+            reject_rows.append(_model_reject_row(track_id, "slope_divergence", group))
+            continue
         # if track_id == 36:
         #     print(f"track_id: {track_id}")
         #     print(f"y_coords: {y_coords}")
@@ -345,9 +352,6 @@ def _keep_track_ids_by_model(
         residuals = points_centered - centroid - along_line
         rmse = np.sqrt(np.mean(np.sum(residuals**2, axis=1)))
         if mean_origin_distance > origin_tol_px:
-            reject_rows.append(_model_reject_row(track_id, "origin_distance", group))
-            continue
-        if dist_closest > origin_tol_px:
             reject_rows.append(_model_reject_row(track_id, "origin_distance", group))
             continue
         if rmse > rmse_tol_px:
