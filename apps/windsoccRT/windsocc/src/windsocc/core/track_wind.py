@@ -263,15 +263,43 @@ def _keep_track_ids_by_model(
         #     reject_rows.append(_model_reject_row(track_id, "unphysical_velocity", group))
         #     continue
 
+        # the direction col contains the PAs of the tracks wrt the center of image
+        # if this peak is garbage, this direction is *not* meaningful
+        # we can filter garbage by comparing this value from the direction
+        # measured manually using the recorded coordinates
         direction_vals = group.get_column("direction_num").to_numpy() % 360.0
         angles = np.deg2rad(direction_vals)
         mean_angle = (np.degrees(np.arctan2(np.mean(np.sin(angles)), np.mean(np.cos(angles)))) + 360.0) % 360.0
+        xs = group.get_column("x_num").to_numpy()
+        ys = group.get_column("y_num").to_numpy()
+        xs_c = xs - image_center[0]
+        ys_c = ys - image_center[1]
+        delta_x = xs_c[-1] - xs_c[0]
+        delta_y = ys_c[-1] - ys_c[0]
+        measured_direction = np.arctan2(delta_y, delta_x) - np.pi / 2 #radians
+        measured_direction_deg = np.rad2deg(measured_direction) % 360.0
         direction_deltas = np.asarray(
             [_angle_diff_deg(float(angle), float(mean_angle)) for angle in direction_vals],
             dtype=np.float64,
         )
+        # if track_id == 2014:
+        #     print(f"track_id: {track_id}")
+        #     print(f"xs: {xs}")
+        #     print(f"ys: {ys}")
+        #     print(f"xs_c: {xs_c}")
+        #     print(f"ys_c: {ys_c}")
+        #     print(f"delta_x: {delta_x}")
+        #     print(f"delta_y: {delta_y}")
+        #     print(f"direction_vals: {direction_vals}")
+        #     print(f"mean_angle: {mean_angle}")
+        #     print(f"measured_direction_deg: {measured_direction_deg}")
+        #     exit()
         if np.max(direction_deltas) > direction_scatter_tol_deg:
             reject_rows.append(_model_reject_row(track_id, "direction_scatter", group))
+            continue
+        
+        if np.abs(measured_direction_deg - mean_angle) > direction_scatter_tol_deg:
+            reject_rows.append(_model_reject_row(track_id, "non_physical_trajectory", group))
             continue
 
         velocity_vals = group.get_column("velocity_num").to_numpy()
@@ -281,15 +309,25 @@ def _keep_track_ids_by_model(
         
         x_coords = group.get_column("x_num").to_numpy()
         y_coords = group.get_column("y_num").to_numpy()
-        slope, intercept = np.polyfit(x_coords, y_coords, 1)
-        y_pred_origin = slope * image_center[0] + intercept
-        y_dist_origin = y_pred_origin - image_center[1]
-        # if track_id == 1106:
+        slope, intercept = np.polyfit(x_coords - image_center[0], y_coords - image_center[1], 1)
+        slope = max(slope, 1e-3)
+        y_dist_origin = np.abs(intercept)
+        x_intercept = -intercept / slope
+        x_dist_origin = np.abs(x_intercept)
+        xy_dist_origin = np.asarray([x_dist_origin, y_dist_origin])
+        dist_closest = np.abs(intercept) / np.sqrt(1 + slope**2)
+        # if track_id == 36:
         #     print(f"track_id: {track_id}")
-        #     print(f"y_pred_origin: {y_pred_origin}")
         #     print(f"y_coords: {y_coords}")
         #     print(f"x_coords: {x_coords}")
+        #     print(f"slope: {slope}")
+        #     print(f"intercept: {intercept}")
         #     print(f"y_dist_origin: {y_dist_origin}")
+        #     print(f"x_intercept: {x_intercept}")
+        #     print(f"x_dist_origin: {x_dist_origin}")
+        #     print(f"xy_dist_origin: {xy_dist_origin}")
+        #     print(f"dist_closest: {dist_closest}")
+        #     exit()
         x_centered = group.get_column("x_num").to_numpy() - image_center[0]
         y_centered = group.get_column("y_num").to_numpy() - image_center[1]
         points_centered = np.column_stack((x_centered, y_centered))
@@ -309,7 +347,7 @@ def _keep_track_ids_by_model(
         if mean_origin_distance > origin_tol_px:
             reject_rows.append(_model_reject_row(track_id, "origin_distance", group))
             continue
-        if y_dist_origin > origin_tol_px:
+        if dist_closest > origin_tol_px:
             reject_rows.append(_model_reject_row(track_id, "origin_distance", group))
             continue
         if rmse > rmse_tol_px:

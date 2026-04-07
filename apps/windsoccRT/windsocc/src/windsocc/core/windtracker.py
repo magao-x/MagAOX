@@ -85,7 +85,7 @@ class WindTracker:
         self.max_missed_frames = max_missed_frames
         self.image_center = image_center
         self.confirmation_matches = 2
-        self.max_direction_delta_deg = 20.0
+        self.max_direction_delta_deg = 2000.0
         self.max_theta_delta_deg = 35.0
         self.max_speed_delta_px = 2.5
         self.prune_immunity_matches = 30
@@ -450,6 +450,8 @@ class WindTracker:
         this_frame_row: Mapping[str, Any],
     ) -> tuple[bool, str | None, float]:
         prior_direction = self._as_float(active_row.get("direction"))
+        prior_x = self._as_float(active_row.get("x_coords"))
+        prior_y = self._as_float(active_row.get("y_coords"))
         prior_speed_px = self._as_float(active_row.get("velocity_px_per_frame"))
         prior_speed_m_per_s = self._as_float(active_row.get("velocity_m_per_s"))
         prior_distance_px = self._as_float(active_row.get("dist_traveled_px"))
@@ -470,9 +472,8 @@ class WindTracker:
         current_b = self._as_float(this_frame_row.get("b"))
         current_theta = self._as_float(this_frame_row.get("theta"))
         current_frame = self._as_int(this_frame_row.get("frames"))
-        prior_radius = self._as_float(active_row.get("dist_traveled_px"))
 
-
+        # TODO add a helper function to check for NaNs to replace all the np.isnan checks
         # recompute the speed based on current and prior distance
         update_dist_traveled = current_distance_px - prior_distance_px #pixels
         update_time_elapsed = (current_frame - prior_frame) #frames
@@ -481,6 +482,17 @@ class WindTracker:
         inferred_distance_traveled = update_speed_m_per_s * current_frame * self.time_per_frame
         inferred_speed = current_distance_px / current_frame #
         inferred_direction = np.deg2rad(np.mean([prior_direction, current_direction])) + np.pi / 2.0
+        prior_xc = prior_x - self.image_center[0]
+        prior_yc = prior_y - self.image_center[1]
+        current_xc = current_x - self.image_center[0]
+        current_yc = current_y - self.image_center[1]
+        prior_coords = np.asarray([prior_x, prior_y])
+        current_coords = np.asarray([current_x, current_y])
+        delta_coords = current_coords - prior_coords
+        measured_direction = np.arctan2(delta_coords[1], delta_coords[0]) - np.pi / 2 #radians
+        measured_direction_deg = np.rad2deg(measured_direction) % 360.0
+        assumed_direction = np.arctan2(-current_xc, current_yc) + 2*np.pi #radians
+        assumed_direction_deg = np.rad2deg(assumed_direction) % 360.0
         # traceback_x = current_x - inferred_speed * np.cos(inferred_direction) * current_frame
         # traceback_y = current_y - inferred_speed * np.sin(inferred_direction) * current_frame
         traceback_x = current_x - update_speed_px * np.cos(inferred_direction) * current_frame
@@ -490,6 +502,20 @@ class WindTracker:
             (traceback_x - self.image_center[0]) ** 2 + (traceback_y - self.image_center[1]) ** 2
         )
         # inferred_origin_dist = inferred_distance_traveled - current_distance_m
+        # compare inferred direction with measured direction
+        diff_direction = measured_direction_deg - assumed_direction_deg # degrees
+        # if active_row.get('track_id') == 21:
+        #     print(f"track_id: {this_frame_row.get('track_id')}")
+        #     print(f"prior_coords: {prior_coords}")
+        #     print(f"current_coords: {current_coords}")
+        #     print(f"delta_coords: {delta_coords}")
+        #     print(f"measured_direction: {measured_direction_deg}")
+        #     print(f"assumed_direction: {assumed_direction_deg}")
+        #     print(f"diff_direction: {diff_direction}")
+        #     print(f"prior_distance_px: {prior_distance_px}")
+        #     print(f"current_distance_px: {current_distance_px}")
+        #     # exit()
+        valid_direction = np.abs(diff_direction) < self.max_direction_delta_deg # degrees
         diff_distance = inferred_distance_traveled - current_distance_m
         valid_dist = diff_distance <= self.max_distance
         # valid_dist = inferred_origin_dist <= self.max_distance
@@ -502,7 +528,14 @@ class WindTracker:
         if current_speed_px > velocity_min_px_per_frame * fudge_factor:
             reject_reason = "unphysical_velocity"
             return False, reject_reason, float(inferred_origin_dist)
-
+        # if prior_matches >= 1 and not np.isnan(assumed_direction_deg) and not np.isnan(measured_direction_deg):
+        #     if not valid_direction:
+        #         reject_reason = "non_physical_trajectory"
+        #         return False, reject_reason, float(inferred_origin_dist)
+        if prior_matches >= 1 and not np.isnan(prior_distance_px) and not np.isnan(current_distance_px):
+            if current_distance_px - prior_distance_px < 0.:
+                reject_reason = "inward_motion"
+                return False, reject_reason, float(inferred_origin_dist)
         if prior_matches >= 1 and not np.isnan(prior_direction) and not np.isnan(current_direction):
             if _angle_diff_deg(prior_direction, current_direction) > self.max_direction_delta_deg:
                 reject_reason = "prior_frame_direction_mismatch"
