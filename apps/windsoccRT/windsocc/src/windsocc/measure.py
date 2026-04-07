@@ -77,7 +77,10 @@ from astropy.io import fits
 
 import yaml
 import pandas as pd
+os.environ["POLARS_MAX_THREADS"] = "1"
+
 import polars as pl
+
 
 from windsocc.io.dir_handling import allocate_measure_dirs
 from windsocc.io.fits_handling import load_mf_response_cubes, load_collapsed_unsharp_response_maps
