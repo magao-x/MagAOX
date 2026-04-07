@@ -70,6 +70,9 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
+from multiprocessing import cpu_count
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
 from astropy.io import fits
 
 import yaml
@@ -223,7 +226,7 @@ def summarize_wind_tracks(cube_sources: object) -> dict:
                 pl.col("direction").mean().alias("direction"),
                 pl.col("velocity_m_per_s").mean().alias("velocity_m_per_s"),
                 pl.col("matches").max().alias("matches"),
-                pl.col("flux").mean().alias("flux"),
+                pl.col("flux").max().alias("flux"),
                 pl.col("flux_err").mean().alias("flux_err"),
                 pl.col("source_area").mean().alias("source_area"),
             ]
@@ -634,18 +637,43 @@ def run_measure_stage(
         logging.info(f"Limiting the number of cubes to process to {limit_cubes}")
         mf_response_cube_paths = mf_response_cube_paths[:limit_cubes]
         mf_response_cube_fnames = mf_response_cube_fnames[:limit_cubes]
-
-    sources_all, wind_summaries, rejected_all, model_rejected_all = process_mf_response_cubes(
-        mf_response_cube_paths,
-        mf_response_cube_fnames,
-        movie_output_dir=dirs["movies_dir"],
-        config_params=config_params,
-        roi_masks_dir=dirs["roi_masks_dir"],
-        wind_data_dir=dirs["wind_data_dir"],
-        make_movie=make_movie,
-        rejected_dir=dirs["rejected_directory"],
-        parity_flip_needed=parity_flip_needed,
-    )
+    parallelized = config_params.get("PARALLELIZED", False)
+    if parallelized and len(mf_response_cube_paths) > 1:
+        sources_all = []
+        wind_summaries = []
+        rejected_all = []
+        model_rejected_all = []
+        logging.info("Parallelizing the measure process...")
+        with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
+            futures = {executor.submit(
+                process_mf_response_cubes,
+                [cube_path],
+                [cube_fname],
+                movie_output_dir=dirs["movies_dir"],
+                config_params=config_params,
+                roi_masks_dir=dirs["roi_masks_dir"],
+                wind_data_dir=dirs["wind_data_dir"],
+                make_movie=make_movie,
+                rejected_dir=dirs["rejected_directory"],
+                parity_flip_needed=parity_flip_needed): cube_path for cube_path, cube_fname in zip(mf_response_cube_paths, mf_response_cube_fnames)}
+            for future in as_completed(futures):
+                sources_i, wind_summaries_i, rejected_i, model_rejected_i = future.result()
+                sources_all.extend(sources_i)
+                wind_summaries.extend(wind_summaries_i)
+                rejected_all.extend(rejected_i)
+                model_rejected_all.extend(model_rejected_i)
+    else:
+        sources_all, wind_summaries, rejected_all, model_rejected_all = process_mf_response_cubes(
+            mf_response_cube_paths,
+            mf_response_cube_fnames,
+            movie_output_dir=dirs["movies_dir"],
+            config_params=config_params,
+            roi_masks_dir=dirs["roi_masks_dir"],
+            wind_data_dir=dirs["wind_data_dir"],
+            make_movie=make_movie,
+            rejected_dir=dirs["rejected_directory"],
+            parity_flip_needed=parity_flip_needed,
+        )
 
     json_paths = []
     movie_paths = []
