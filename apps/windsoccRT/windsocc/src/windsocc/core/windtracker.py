@@ -705,7 +705,8 @@ class WindTracker:
         # sep_frame_clamped = np.clip(sep_frame, 0, None)
         # data_sub = sep_frame_clamped
         bkg = sep.Background(sep_frame)
-        data_sub = sep_frame - bkg.rms()
+        data_sub = sep_frame - bkg
+
         sep_err = None
         if error_map is not None:
             sep_err = np.ascontiguousarray(error_map, dtype=np.float32)

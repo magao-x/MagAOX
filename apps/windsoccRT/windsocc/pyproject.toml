@@ -27,6 +27,8 @@ dependencies = [
     "pyyaml>=6.0",
     "pandas>=2.0.3",
     "polars>=1.8.2",
+    "imageio>=2.0",
+    "imageio-ffmpeg>=0.4",
 ]
 
 [project.scripts]
