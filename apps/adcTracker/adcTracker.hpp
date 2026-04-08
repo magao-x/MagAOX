@@ -1,5 +1,6 @@
 /** \file adcTracker.hpp
  * \brief The MagAO-X ADC Tracker header file
+ * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup adcTracker_files
  */
@@ -37,11 +38,15 @@ namespace app
 /**
  * \ingroup adcTracker
  */
-class adcTracker : public MagAOXApp<true>
+class adcTracker : public MagAOXApp<true>, public dev::telemeter<adcTracker>
 {
 
     // Give the test harness access.
     friend class adcTracker_test;
+
+    friend class dev::telemeter<adcTracker>;
+
+    typedef dev::telemeter<adcTracker> telemeterT;
 
   protected:
     /** \name Configurable Parameters
@@ -101,6 +106,22 @@ class adcTracker : public MagAOXApp<true>
 
     double m_lastUpdate{ 0 }; ///< Timestamp of the last ADC command dispatched by the tracker.
 
+    pcf::IndiProperty m_indiP_belowMinZD; ///< Status switch indicating that the current ZD is below minZD.
+    pcf::IndiProperty m_indiP_aboveMaxZD; ///< Status switch indicating that the current ZD is above maxZD.
+
+    enum class zdLimitState
+    {
+        unknown,  ///< No valid range status is currently available.
+        inRange,  ///< The current ZD is within the usable lookup-table range.
+        belowMin, ///< The current ZD is below minZD.
+        aboveMax  ///< The current ZD is above maxZD.
+    };
+
+    zdLimitState m_zdLimitState{
+        zdLimitState::unknown }; ///< Current ZD limit state reflected in the status properties.
+    zdLimitState m_lastLoggedZDLimitState{
+        zdLimitState::unknown }; ///< Last ZD limit state already announced by appLogic threshold-crossing warnings.
+
   public:
     /// Default c'tor.
     adcTracker();
@@ -141,6 +162,41 @@ class adcTracker : public MagAOXApp<true>
      */
     virtual int appShutdown();
 
+  protected:
+    /// Send the ADC 1 target command.
+    virtual int sendADC1Position( float adc1 /**< [in] the ADC 1 target position */ );
+
+    /// Send the ADC 2 target command.
+    virtual int sendADC2Position( float adc2 /**< [in] the ADC 2 target position */ );
+
+    /// Initialize the ADC lookup interpolators from the loaded lookup-table data.
+    virtual void setupInterpolators();
+
+    /// Interpolate the ADC 1 lookup-table value for a zenith distance.
+    virtual float interpolateADC1( float zd /**< [in] the zenith distance to interpolate */ );
+
+    /// Interpolate the ADC 2 lookup-table value for a zenith distance.
+    virtual float interpolateADC2( float zd /**< [in] the zenith distance to interpolate */ );
+
+    /// Extract the zenith distance from the incoming TCS INDI property.
+    virtual float extractZD( const pcf::IndiProperty &ipRecv /**< [in] the incoming teldata property */ );
+
+    /// Update a local status switch and publish it if INDI is active.
+    void updateStatusSwitch( pcf::IndiProperty &prop, /**< [in/out] the status property to update */
+                             bool               on /**< [in] true to set the switch on */ );
+
+    /// Update the min/max ZD status properties and return the resulting ZD limit state.
+    zdLimitState updateZDLimitState( bool  haveZD, /**< [in] true when a valid ZD is available */
+                                     float zd,     /**< [in] the current zenith distance */
+                                     float minZD,  /**< [in] the active minimum ZD threshold */
+                                     float maxZD /**< [in] the active maximum ZD threshold */ );
+
+    /// Emit a one-time threshold-crossing warning when appLogic enters a new out-of-range state.
+    void logZDLimitCrossing( zdLimitState state, /**< [in] the current ZD limit state */
+                             float        zd,    /**< [in] the current zenith distance */
+                             float        minZD, /**< [in] the active minimum ZD threshold */
+                             float        maxZD /**< [in] the active maximum ZD threshold */ );
+
     /** @name INDI
      *
      * @{
@@ -175,6 +231,18 @@ class adcTracker : public MagAOXApp<true>
 
     /// Handle incoming telescope data updates.
     INDI_SETCALLBACK_DECL( adcTracker, m_indiP_teldata );
+
+    ///@}
+
+    /** \name Telemeter Interface
+     *
+     * @{
+     */
+    int checkRecordTimes();
+
+    int recordTelem( const telem_adctrack * );
+
+    int recordADCTrack( bool force = false );
 
     ///@}
 };
@@ -319,6 +387,8 @@ void adcTracker::setupConfig()
                 false,
                 "float",
                 "The interval at which to update positions, in seconds.  Default is 10 secs." );
+
+    TELEMETER_SETUP_CONFIG( config );
 }
 
 int adcTracker::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -339,6 +409,8 @@ int adcTracker::loadConfigImpl( mx::app::appConfigurator &_config )
 
     _config( m_updateInterval, "tracking.updateInterval" );
 
+    TELEMETER_LOAD_CONFIG( _config );
+
     return 0;
 }
 
@@ -349,69 +421,56 @@ void adcTracker::loadConfig()
 
 int adcTracker::appStartup()
 {
+    TELEMETER_APP_STARTUP;
 
     std::string luppath = m_calibDir + "/" + m_lookupFile;
-
-    std::cerr << "Reading " << luppath << "\n";
 
     if( mx::ioutils::readColumns<mx::ioutils::readColCommaDelim>( luppath, m_lupZD, m_lupADC1, m_lupADC2 ) !=
         mx::error_t::noerror )
     {
-        log<software_critical>( { __FILE__, __LINE__, "error reading lookup table from " + luppath } );
-        return -1;
+        return log<software_critical, -1>( "error reading lookup table from " + luppath );
     }
 
     if( m_lupZD.size() != m_lupADC1.size() || m_lupZD.size() != m_lupADC2.size() )
     {
-        log<software_critical>( { __FILE__, __LINE__, "inconsistent sizes in " + luppath } );
-        return -1;
+        return log<software_critical, -1>( "inconsistent sizes in " + luppath );
     }
 
     if( m_lupZD.size() < 2 )
     {
-        log<software_critical>( { __FILE__, __LINE__, "lookup table must contain at least two rows in " + luppath } );
-        return -1;
+        return log<software_critical, -1>( "lookup table must contain at least two rows in " + luppath );
     }
 
     for( size_t n = 0; n < m_lupZD.size(); ++n )
     {
         if( !std::isfinite( m_lupZD[n] ) || !std::isfinite( m_lupADC1[n] ) || !std::isfinite( m_lupADC2[n] ) )
         {
-            log<software_critical>(
-                { __FILE__,
-                  __LINE__,
-                  "non-finite lookup table value at row " + std::to_string( n ) + " in " + luppath } );
-            return -1;
+            return log<software_critical, -1>( "non-finite lookup table value at row " + std::to_string( n ) + " in " +
+                                               luppath );
         }
 
         if( n > 0 && m_lupZD[n] <= m_lupZD[n - 1] )
         {
-            log<software_critical>(
-                { __FILE__, __LINE__, "lookup table zenith distances must be strictly increasing in " + luppath } );
-            return -1;
+            return log<software_critical, -1>( "lookup table zenith distances must be strictly increasing in " +
+                                               luppath );
         }
     }
 
-    log<text_log>( "Read " + std::to_string( m_lupZD.size() ) + " points from " + m_lookupFile );
+    log<text_log>( "Read ADC lookup table " + luppath + " with " + std::to_string( m_lupZD.size() ) +
+                   " entries spanning ZD 0 to " + std::to_string( m_lupZD.back() ) );
 
     try
     {
-        m_terpADC1.setup( m_lupZD, m_lupADC1 );
-        m_terpADC2.setup( m_lupZD, m_lupADC2 );
+        setupInterpolators();
     }
     catch( const std::exception &e )
     {
-        log<software_critical>(
-            { __FILE__,
-              __LINE__,
-              std::string( "exception setting up ADC interpolators from " ) + luppath + ": " + e.what() } );
-        return -1;
+        return log<software_critical, -1>( std::string( "exception setting up ADC interpolators from " ) + luppath +
+                                           ": " + e.what() );
     }
     catch( ... )
     {
-        log<software_critical>(
-            { __FILE__, __LINE__, "unknown exception setting up ADC interpolators from " + luppath } );
-        return -1;
+        return log<software_critical, -1>( "unknown exception setting up ADC interpolators from " + luppath );
     }
 
     m_maxZD       = static_cast<float>( m_lupZD.back() );
@@ -440,6 +499,30 @@ int adcTracker::appStartup()
     m_indiP_minZD["current"].set( m_minZD );
     registerIndiPropertyNew( m_indiP_minZD, INDI_NEWCALLBACK( m_indiP_minZD ) );
 
+    m_indiP_belowMinZD = pcf::IndiProperty( pcf::IndiProperty::Switch );
+    m_indiP_belowMinZD.setDevice( configName() );
+    m_indiP_belowMinZD.setName( "belowMinZD" );
+    m_indiP_belowMinZD.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_belowMinZD.setState( INDI_IDLE );
+    m_indiP_belowMinZD.setLabel( "Below minZD" );
+    m_indiP_belowMinZD.setGroup( "status" );
+    m_indiP_belowMinZD.add( pcf::IndiElement( "state" ) );
+    m_indiP_belowMinZD["state"].setSwitchState( pcf::IndiElement::Off );
+    m_indiP_belowMinZD.setPerm( pcf::IndiProperty::ReadOnly );
+    registerIndiPropertyNew( m_indiP_belowMinZD, nullptr );
+
+    m_indiP_aboveMaxZD = pcf::IndiProperty( pcf::IndiProperty::Switch );
+    m_indiP_aboveMaxZD.setDevice( configName() );
+    m_indiP_aboveMaxZD.setName( "aboveMaxZD" );
+    m_indiP_aboveMaxZD.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_aboveMaxZD.setState( INDI_IDLE );
+    m_indiP_aboveMaxZD.setLabel( "Above maxZD" );
+    m_indiP_aboveMaxZD.setGroup( "status" );
+    m_indiP_aboveMaxZD.add( pcf::IndiElement( "state" ) );
+    m_indiP_aboveMaxZD["state"].setSwitchState( pcf::IndiElement::Off );
+    m_indiP_aboveMaxZD.setPerm( pcf::IndiProperty::ReadOnly );
+    registerIndiPropertyNew( m_indiP_aboveMaxZD, nullptr );
+
     REG_INDI_SETPROP( m_indiP_teldata, m_tcsDevName, "teldata" );
 
     m_indiP_adc1pos = pcf::IndiProperty( pcf::IndiProperty::Number );
@@ -452,6 +535,9 @@ int adcTracker::appStartup()
     m_indiP_adc2pos.setName( "position" );
     m_indiP_adc2pos.add( pcf::IndiElement( "target" ) );
 
+    recordADCTrack( true );
+    updateZDLimitState( false, 0.0f, m_minZD, m_maxZD );
+
     state( stateCodes::READY );
 
     return 0;
@@ -459,8 +545,13 @@ int adcTracker::appStartup()
 
 int adcTracker::appLogic()
 {
+    TELEMETER_APP_LOGIC;
+
     const double now = mx::sys::get_curr_time();
 
+    bool  tracking    = false;
+    bool  lookupReady = false;
+    bool  haveZD      = false;
     float zd          = 0;
     float minZD       = 0;
     float deltaAngle  = 0;
@@ -469,6 +560,7 @@ int adcTracker::appLogic()
     float adc1zero    = 0;
     float adc2zero    = 0;
     float maxZD       = 0;
+    float lastUpdate  = 0;
     int   adc1lupsign = 1;
     int   adc2lupsign = 1;
 
@@ -480,17 +572,9 @@ int adcTracker::appLogic()
             return 0;
         }
 
-        if( !m_tracking )
-        {
-            m_lastUpdate = 0;
-            return 0;
-        }
-
-        if( !m_lookupReady || !m_haveZD || now - m_lastUpdate <= m_updateInterval )
-        {
-            return 0;
-        }
-
+        tracking    = m_tracking;
+        lookupReady = m_lookupReady;
+        haveZD      = m_haveZD;
         zd          = m_zd;
         minZD       = m_minZD;
         deltaAngle  = m_deltaAngle;
@@ -501,13 +585,37 @@ int adcTracker::appLogic()
         adc1lupsign = m_adc1lupsign;
         adc2lupsign = m_adc2lupsign;
         maxZD       = m_maxZD;
+        lastUpdate  = m_lastUpdate;
 
+        if( !tracking )
+        {
+            m_lastUpdate = 0;
+        }
+    } // mutex scope
+
+    zdLimitState limitState = updateZDLimitState( lookupReady && haveZD, zd, minZD, maxZD );
+
+    if( !tracking )
+    {
+        m_lastLoggedZDLimitState = zdLimitState::unknown;
+        return 0;
+    }
+
+    logZDLimitCrossing( limitState, zd, minZD, maxZD );
+
+    if( !lookupReady || !haveZD || now - lastUpdate <= m_updateInterval )
+    {
+        return 0;
+    }
+
+    { // mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
         m_lastUpdate = now;
     } // mutex scope
 
     if( !std::isfinite( zd ) )
     {
-        log<software_error>( { __FILE__, __LINE__, "received non-finite zenith distance in ADC tracker" } );
+        log<software_error>( "received non-finite zenith distance in ADC tracker" );
         return 0;
     }
 
@@ -516,7 +624,6 @@ int adcTracker::appLogic()
 
     if( zd > maxZD )
     {
-        std::cerr << "end of lup\n";
         dadc1 = static_cast<float>( m_lupADC1.back() );
         dadc2 = static_cast<float>( m_lupADC2.back() );
     }
@@ -524,24 +631,22 @@ int adcTracker::appLogic()
     {
         try
         {
-            dadc1 = static_cast<float>( std::fabs( m_terpADC1( zd ) ) );
-            dadc2 = static_cast<float>( std::fabs( m_terpADC2( zd ) ) );
+            dadc1 = interpolateADC1( zd );
+            dadc2 = interpolateADC2( zd );
         }
         catch( const std::exception &e )
         {
-            log<software_error>(
-                { __FILE__, __LINE__, std::string( "exception interpolating ADC targets: " ) + e.what() } );
+            log<software_error>( std::string( "exception interpolating ADC targets: " ) + e.what() );
             return 0;
         }
         catch( ... )
         {
-            log<software_error>( { __FILE__, __LINE__, "unknown exception interpolating ADC targets" } );
+            log<software_error>( "unknown exception interpolating ADC targets" );
             return 0;
         }
     }
     else
     {
-        std::cerr << "zenith limit\n";
     }
 
     float adc1 = adc1zero + adc1lupsign * ( dadc1 + adc1delta + deltaAngle );
@@ -549,20 +654,13 @@ int adcTracker::appLogic()
 
     if( !std::isfinite( adc1 ) || !std::isfinite( adc2 ) )
     {
-        log<software_error>( { __FILE__, __LINE__, "computed non-finite ADC target" } );
+        log<software_error>( "computed non-finite ADC target" );
         return 0;
     }
 
-    std::cerr << "Sending adcs to: " << adc1 << " " << adc2 << "\n";
-
-    if( sendNewProperty( m_indiP_adc1pos, "target", adc1 ) < 0 )
+    if( sendADC1Position( adc1 ) < 0 || sendADC2Position( adc2 ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "failed to send ADC 1 target" } );
-    }
-
-    if( sendNewProperty( m_indiP_adc2pos, "target", adc2 ) < 0 )
-    {
-        log<software_error>( { __FILE__, __LINE__, "failed to send ADC 2 target" } );
+        log<software_error>( "failed to send ADC target positions" );
     }
 
     return 0;
@@ -570,7 +668,124 @@ int adcTracker::appLogic()
 
 int adcTracker::appShutdown()
 {
+    TELEMETER_APP_SHUTDOWN;
+
     return 0;
+}
+
+int adcTracker::sendADC1Position( float adc1 )
+{
+    if( sendNewProperty( m_indiP_adc1pos, "target", adc1 ) < 0 )
+    {
+        return log<software_error, -1>( "failed to send ADC 1 target" );
+    }
+
+    return 0;
+}
+
+int adcTracker::sendADC2Position( float adc2 )
+{
+    if( sendNewProperty( m_indiP_adc2pos, "target", adc2 ) < 0 )
+    {
+        return log<software_error, -1>( "failed to send ADC 2 target" );
+    }
+
+    return 0;
+}
+
+void adcTracker::setupInterpolators()
+{
+    m_terpADC1.setup( m_lupZD, m_lupADC1 );
+    m_terpADC2.setup( m_lupZD, m_lupADC2 );
+}
+
+float adcTracker::interpolateADC1( float zd )
+{
+    return static_cast<float>( std::fabs( m_terpADC1( zd ) ) );
+}
+
+float adcTracker::interpolateADC2( float zd )
+{
+    return static_cast<float>( std::fabs( m_terpADC2( zd ) ) );
+}
+
+float adcTracker::extractZD( const pcf::IndiProperty &ipRecv )
+{
+    return ipRecv["zd"].get<float>();
+}
+
+void adcTracker::updateStatusSwitch( pcf::IndiProperty &prop, bool on )
+{
+    if( !prop.find( "state" ) )
+    {
+        return;
+    }
+
+    pcf::IndiElement::SwitchStateType    newVal = on ? pcf::IndiElement::On : pcf::IndiElement::Off;
+    pcf::IndiProperty::PropertyStateType state  = on ? INDI_OK : INDI_IDLE;
+
+    if( prop["state"].getSwitchState() == newVal && prop.getState() == state )
+    {
+        return;
+    }
+
+    prop["state"].setSwitchState( newVal );
+    prop.setState( state );
+    prop.setTimeStamp( pcf::TimeStamp() );
+
+    if( m_indiDriver )
+    {
+        m_indiDriver->sendSetProperty( prop );
+    }
+}
+
+adcTracker::zdLimitState adcTracker::updateZDLimitState( bool haveZD, float zd, float minZD, float maxZD )
+{
+    zdLimitState nextState = zdLimitState::unknown;
+
+    if( haveZD && std::isfinite( zd ) )
+    {
+        if( zd < minZD )
+        {
+            nextState = zdLimitState::belowMin;
+        }
+        else if( zd > maxZD )
+        {
+            nextState = zdLimitState::aboveMax;
+        }
+        else
+        {
+            nextState = zdLimitState::inRange;
+        }
+    }
+
+    updateStatusSwitch( m_indiP_belowMinZD, nextState == zdLimitState::belowMin );
+    updateStatusSwitch( m_indiP_aboveMaxZD, nextState == zdLimitState::aboveMax );
+
+    m_zdLimitState = nextState;
+
+    return nextState;
+}
+
+void adcTracker::logZDLimitCrossing( zdLimitState state, float zd, float minZD, float maxZD )
+{
+    if( state == m_lastLoggedZDLimitState )
+    {
+        return;
+    }
+
+    if( state == zdLimitState::belowMin )
+    {
+        log<text_log>( "ADC tracker below minZD: zd=" + std::to_string( zd ) + " minZD=" + std::to_string( minZD ),
+                       logPrio::LOG_WARNING );
+    }
+    else if( state == zdLimitState::aboveMax )
+    {
+        log<text_log>( "ADC tracker above maxZD: zd=" + std::to_string( zd ) + " maxZD=" + std::to_string( maxZD ),
+                       logPrio::LOG_WARNING );
+    }
+
+    m_lastLoggedZDLimitState = state;
 }
 
 INDI_NEWCALLBACK_DEFN( adcTracker, m_indiP_tracking )( const pcf::IndiProperty &ipRecv )
@@ -598,12 +813,15 @@ INDI_NEWCALLBACK_DEFN( adcTracker, m_indiP_tracking )( const pcf::IndiProperty &
 
         { // mutex scope
             std::lock_guard<std::mutex> guard( m_indiMutex );
-            m_tracking   = false;
-            m_lastUpdate = 0;
+            m_tracking               = false;
+            m_lastUpdate             = 0;
+            m_lastLoggedZDLimitState = zdLimitState::unknown;
         }
 
         log<text_log>( "stopped ADC rotation tracking" );
     }
+
+    recordADCTrack();
 
     return 0;
 }
@@ -616,16 +834,19 @@ INDI_NEWCALLBACK_DEFN( adcTracker, m_indiP_deltaAngle )( const pcf::IndiProperty
 
     if( indiTargetUpdate( m_indiP_deltaAngle, target, ipRecv ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
-        return -1;
+        return log<software_error, -1>();
     }
 
-    std::lock_guard<std::mutex> guard( m_indiMutex );
+    { // mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    m_deltaAngle = target;
-    updateIfChanged( m_indiP_deltaAngle, "current", m_deltaAngle );
+        m_deltaAngle = target;
+        updateIfChanged( m_indiP_deltaAngle, "current", m_deltaAngle );
+    } // mutex scope
 
     log<text_log>( "set deltaAngle to " + std::to_string( m_deltaAngle ) );
+
+    recordADCTrack();
 
     return 0;
 }
@@ -638,16 +859,19 @@ INDI_NEWCALLBACK_DEFN( adcTracker, m_indiP_deltaADC1 )( const pcf::IndiProperty 
 
     if( indiTargetUpdate( m_indiP_deltaADC1, target, ipRecv ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
-        return -1;
+        return log<software_error, -1>();
     }
 
-    std::lock_guard<std::mutex> guard( m_indiMutex );
+    { // mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    m_adc1delta = target;
-    updateIfChanged( m_indiP_deltaADC1, "current", m_adc1delta );
+        m_adc1delta = target;
+        updateIfChanged( m_indiP_deltaADC1, "current", m_adc1delta );
+    } // mutex scope
 
     log<text_log>( "set deltaADC1 to " + std::to_string( m_adc1delta ) );
+
+    recordADCTrack();
 
     return 0;
 }
@@ -660,16 +884,19 @@ INDI_NEWCALLBACK_DEFN( adcTracker, m_indiP_deltaADC2 )( const pcf::IndiProperty 
 
     if( indiTargetUpdate( m_indiP_deltaADC2, target, ipRecv ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
-        return -1;
+        return log<software_error, -1>();
     }
 
-    std::lock_guard<std::mutex> guard( m_indiMutex );
+    { // mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    m_adc2delta = target;
-    updateIfChanged( m_indiP_deltaADC2, "current", m_adc2delta );
+        m_adc2delta = target;
+        updateIfChanged( m_indiP_deltaADC2, "current", m_adc2delta );
+    } // mutex scope
 
     log<text_log>( "set deltaADC2 to " + std::to_string( m_adc2delta ) );
+
+    recordADCTrack();
 
     return 0;
 }
@@ -679,19 +906,29 @@ INDI_NEWCALLBACK_DEFN( adcTracker, m_indiP_minZD )( const pcf::IndiProperty &ipR
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_minZD, ipRecv );
 
     float target;
+    float zd     = 0;
+    float maxZD  = 0;
+    bool  haveZD = false;
 
     if( indiTargetUpdate( m_indiP_minZD, target, ipRecv ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
-        return -1;
+        return log<software_error, -1>();
     }
 
-    std::lock_guard<std::mutex> guard( m_indiMutex );
+    { // mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    m_minZD = target;
-    updateIfChanged( m_indiP_minZD, "current", m_minZD );
+        m_minZD = target;
+        updateIfChanged( m_indiP_minZD, "current", m_minZD );
+        zd     = m_zd;
+        maxZD  = m_maxZD;
+        haveZD = m_lookupReady && m_haveZD;
+    } // mutex scope
 
     log<text_log>( "set minZD to " + std::to_string( m_minZD ) );
+
+    recordADCTrack();
+    updateZDLimitState( haveZD, zd, target, maxZD );
 
     return 0;
 }
@@ -703,33 +940,90 @@ INDI_SETCALLBACK_DEFN( adcTracker, m_indiP_teldata )( const pcf::IndiProperty &i
     if( !ipRecv.find( "zd" ) )
         return 0;
 
-    float zd = 0;
+    float zd          = 0;
+    bool  lookupReady = false;
+    float minZD       = 0;
+    float maxZD       = 0;
 
     try
     {
-        zd = ipRecv["zd"].get<float>();
+        zd = extractZD( ipRecv );
     }
     catch( const std::exception &e )
     {
-        log<software_error>( { __FILE__, __LINE__, std::string( "exception reading teldata.zd: " ) + e.what() } );
+        log<software_error>( std::string( "exception reading teldata.zd: " ) + e.what() );
         return 0;
     }
     catch( ... )
     {
-        log<software_error>( { __FILE__, __LINE__, "unknown exception reading teldata.zd" } );
+        log<software_error>( "unknown exception reading teldata.zd" );
         return 0;
     }
 
     if( !std::isfinite( zd ) )
     {
-        log<software_error>( { __FILE__, __LINE__, "received non-finite teldata.zd" } );
+        log<software_error>( "received non-finite teldata.zd" );
         return 0;
     }
 
     { // mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
-        m_zd     = zd;
-        m_haveZD = true;
+        m_zd        = zd;
+        m_haveZD    = true;
+        lookupReady = m_lookupReady;
+        minZD       = m_minZD;
+        maxZD       = m_maxZD;
+    } // mutex scope
+
+    updateZDLimitState( lookupReady, zd, minZD, maxZD );
+
+    return 0;
+}
+
+int adcTracker::checkRecordTimes()
+{
+    return telemeterT::checkRecordTimes( telem_adctrack() );
+}
+
+int adcTracker::recordTelem( const telem_adctrack * )
+{
+    return recordADCTrack( true );
+}
+
+int adcTracker::recordADCTrack( bool force )
+{
+    static bool  tracking   = false;
+    static float deltaAngle = 0;
+    static float adc1delta  = 0;
+    static float adc2delta  = 0;
+    static float minZD      = 0;
+
+    bool  nextTracking   = false;
+    float nextDeltaAngle = 0;
+    float nextADC1delta  = 0;
+    float nextADC2delta  = 0;
+    float nextMinZD      = 0;
+
+    { // mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        nextTracking   = m_tracking;
+        nextDeltaAngle = m_deltaAngle;
+        nextADC1delta  = m_adc1delta;
+        nextADC2delta  = m_adc2delta;
+        nextMinZD      = m_minZD;
+    } // mutex scope
+
+    if( nextTracking != tracking || nextDeltaAngle != deltaAngle || nextADC1delta != adc1delta ||
+        nextADC2delta != adc2delta || nextMinZD != minZD || force )
+    {
+        telem<telem_adctrack>( { nextTracking, nextDeltaAngle, nextADC1delta, nextADC2delta, nextMinZD } );
+
+        tracking   = nextTracking;
+        deltaAngle = nextDeltaAngle;
+        adc1delta  = nextADC1delta;
+        adc2delta  = nextADC2delta;
+        minZD      = nextMinZD;
     }
 
     return 0;

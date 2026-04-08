@@ -75,3 +75,14 @@ clean:
 	rm -f $(SELF_DIR)/../magaox_git_version.h
 	rm -f *.o
 	rm -f *~
+
+.PHONY: test_clean
+test_clean: clean
+	rm -f tests/$(TARGETNAME)_test
+	rm -f tests/*.o
+	rm -f tests/*~
+
+.PHONE: coverage_clean
+coverage_clean: clean test_clean
+	rm -f *.gc*
+	rm -f tests/*.gc*
