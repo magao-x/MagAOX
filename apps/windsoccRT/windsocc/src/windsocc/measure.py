@@ -497,6 +497,7 @@ def process_mf_response_cubes(
     roi_masks_dir: str,
     wind_data_dir: str,
     make_movie: bool = False,
+    png_only_movies: bool = False,
     rejected_dir: str = None,
     parity_flip_needed: bool | None = None,
 ):
@@ -636,8 +637,9 @@ def process_mf_response_cubes(
                 mf_response_cube_fname=cube_name,
                 sources_all=wind_peaks_all,
                 output_dir=movie_output_dir,
-                fps=5,
-                cmap="Blues_r"
+                fps=30,
+                cmap="Blues_r",
+                png_only=png_only_movies,
             )
     return wind_peaks_all, wind_summaries_all, wind_rejected_all, model_rejected_all
 
@@ -681,6 +683,7 @@ def run_measure_stage(
         mf_response_cube_fnames = mf_response_cube_fnames[:limit_cubes]
     parallelized = config_params.get("PARALLELIZED", False)
     if parallelized and len(mf_response_cube_paths) > 1:
+        png_only_movies = True
         sources_all = []
         wind_summaries = []
         rejected_all = []
@@ -697,6 +700,7 @@ def run_measure_stage(
                 roi_masks_dir=dirs["roi_masks_dir"],
                 wind_data_dir=dirs["wind_data_dir"],
                 make_movie=make_movie,
+                png_only_movies=png_only_movies,
                 rejected_dir=dirs["rejected_directory"],
                 parity_flip_needed=parity_flip_needed): cube_path for cube_path, cube_fname in zip(mf_response_cube_paths, mf_response_cube_fnames)}
             for future in as_completed(futures):
@@ -706,6 +710,7 @@ def run_measure_stage(
                 rejected_all.extend(rejected_i)
                 model_rejected_all.extend(model_rejected_i)
     else:
+        png_only_movies = False
         sources_all, wind_summaries, rejected_all, model_rejected_all = process_mf_response_cubes(
             mf_response_cube_paths,
             mf_response_cube_fnames,
@@ -715,6 +720,7 @@ def run_measure_stage(
             roi_masks_dir=dirs["roi_masks_dir"],
             wind_data_dir=dirs["wind_data_dir"],
             make_movie=make_movie,
+            png_only_movies=png_only_movies,
             rejected_dir=dirs["rejected_directory"],
             parity_flip_needed=parity_flip_needed,
         )

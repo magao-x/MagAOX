@@ -3,15 +3,15 @@ TODO the extrapolated and filtered sep results movies
 are showing inconsistencies.
 """
 
-import os
-
 import numpy as np
 import polars as pl
+import matplotlib.pyplot as plt
+from matplotlib.artist import Artist
+from matplotlib.patches import Ellipse
+from matplotlib.animation import FuncAnimation
+from matplotlib.animation import FFMpegWriter
+import os
 from astropy.io import fits
-from matplotlib import pyplot as plt
-from skimage.draw import ellipse_perimeter
-from skimage.transform import resize
-import imageio
 
 TRACKED_SOURCE_DTYPE = np.dtype(
     [
@@ -129,155 +129,6 @@ def plot_flux_decay(
 
 def _empty_sources_array() -> np.ndarray:
     return np.zeros(0, dtype=TRACKED_SOURCE_DTYPE)
-
-
-_DIGIT_FONT_5X3: dict[str, np.ndarray] = {
-    "0": np.array(
-        [
-            [0, 1, 0],
-            [1, 0, 1],
-            [1, 0, 1],
-            [1, 0, 1],
-            [0, 1, 0],
-        ],
-        dtype=bool,
-    ),
-    "1": np.array(
-        [
-            [0, 1, 0],
-            [1, 1, 0],
-            [0, 1, 0],
-            [0, 1, 0],
-            [1, 1, 1],
-        ],
-        dtype=bool,
-    ),
-    "2": np.array(
-        [
-            [1, 1, 0],
-            [0, 0, 1],
-            [0, 1, 0],
-            [1, 0, 0],
-            [1, 1, 1],
-        ],
-        dtype=bool,
-    ),
-    "3": np.array(
-        [
-            [1, 1, 0],
-            [0, 0, 1],
-            [0, 1, 0],
-            [0, 0, 1],
-            [1, 1, 0],
-        ],
-        dtype=bool,
-    ),
-    "4": np.array(
-        [
-            [1, 0, 1],
-            [1, 0, 1],
-            [1, 1, 1],
-            [0, 0, 1],
-            [0, 0, 1],
-        ],
-        dtype=bool,
-    ),
-    "5": np.array(
-        [
-            [1, 1, 1],
-            [1, 0, 0],
-            [1, 1, 0],
-            [0, 0, 1],
-            [1, 1, 0],
-        ],
-        dtype=bool,
-    ),
-    "6": np.array(
-        [
-            [0, 1, 1],
-            [1, 0, 0],
-            [1, 1, 0],
-            [1, 0, 1],
-            [0, 1, 0],
-        ],
-        dtype=bool,
-    ),
-    "7": np.array(
-        [
-            [1, 1, 1],
-            [0, 0, 1],
-            [0, 1, 0],
-            [0, 1, 0],
-            [0, 1, 0],
-        ],
-        dtype=bool,
-    ),
-    "8": np.array(
-        [
-            [0, 1, 0],
-            [1, 0, 1],
-            [0, 1, 0],
-            [1, 0, 1],
-            [0, 1, 0],
-        ],
-        dtype=bool,
-    ),
-    "9": np.array(
-        [
-            [0, 1, 0],
-            [1, 0, 1],
-            [0, 1, 1],
-            [0, 0, 1],
-            [1, 1, 0],
-        ],
-        dtype=bool,
-    ),
-    "-": np.array(
-        [
-            [0, 0, 0],
-            [0, 0, 0],
-            [1, 1, 1],
-            [0, 0, 0],
-            [0, 0, 0],
-        ],
-        dtype=bool,
-    ),
-}
-
-
-def _draw_label_small_font(
-    rgb: np.ndarray,
-    text: str,
-    row: int,
-    col: int,
-    color: tuple[int, int, int] = (255, 0, 0),
-) -> None:
-    """Draw a small raster-font label onto an RGB image in-place."""
-    h, w, _ = rgb.shape
-    max_chars = 4
-    text = text[:max_chars]
-    glyph_h = 5
-    glyph_w = 3
-    spacing = 1
-    for i, ch in enumerate(text):
-        glyph = _DIGIT_FONT_5X3.get(ch)
-        if glyph is None:
-            continue
-        r0 = row
-        c0 = col + i * (glyph_w + spacing)
-        r1 = r0 + glyph_h
-        c1 = c0 + glyph_w
-        if r0 >= h or c0 >= w or r1 <= 0 or c1 <= 0:
-            continue
-        gr0 = max(r0, 0)
-        gc0 = max(c0, 0)
-        gr1 = min(r1, h)
-        gc1 = min(c1, w)
-        sub_glyph = glyph[gr0 - r0 : gr1 - r0, gc0 - c0 : gc1 - c0]
-        mask = sub_glyph
-        if not np.any(mask):
-            continue
-        rgb[gr0:gr1, gc0:gc1][mask] = color
 
 
 def tracked_df_to_frame_sources(
@@ -438,16 +289,15 @@ def make_source_detection_movie(
     output_dir: str,
     fps: int = 10,
     cmap: str = "Blues_r",
-):
+    png_only: bool = False,
+) -> bool:
     """Make a movie of the source detections."""
     detections_dir = os.path.join(os.path.dirname(output_dir), "sep_detections")
     decay_dir = os.path.join(os.path.dirname(output_dir), "decay_plots")
     os.makedirs(detections_dir, exist_ok=True)
     os.makedirs(decay_dir, exist_ok=True)
     cube_sources = sources_all[-1]
-    mf_response_cube = fits.getdata(
-        mf_response_cube_path
-    )  # 3D array of shape (n_frames, y_size, x_size)
+    mf_response_cube = fits.getdata(mf_response_cube_path) #3D array of shape (n_frames, y_size, x_size)
     ny, nx = mf_response_cube.shape[1:]
     center_x = mf_response_cube.shape[2] / 2.0 - 0.5
     center_y = mf_response_cube.shape[1] / 2.0 - 0.5
@@ -463,106 +313,169 @@ def make_source_detection_movie(
         cube_sources=cube_sources,
         n_frames=len(mf_response_cube),
     )
-    vmin, vmax = np.percentile(mf_response_cube, [0.1, 99.9])
+    response_stack = np.stack(mf_response_cube)
+    vmin, vmax = np.percentile(response_stack, [0.1, 99.9])
     cube_stem = os.path.splitext(mf_response_cube_fname)[0]
 
-    def _write_movie_imageio(
-        sources_by_frame: list[np.ndarray],
-        movie_name: str,
-        scale_factor: float = 3.0,
+    def _render_movie_funcanimation(
+        sources_by_frame: list[np.ndarray], movie_name: str
     ) -> None:
-        final_path = os.path.join(output_dir, movie_name)
-        n_frames = len(mf_response_cube)
-        h, w = mf_response_cube.shape[1:]
-        with imageio.get_writer(
-            final_path,
-            fps=fps,
-            codec="libx264",
-            format="FFMPEG",
-        ) as writer:
-            for frame_idx in range(n_frames):
-                frame = mf_response_cube[frame_idx].astype(np.float32)
-                if not np.isfinite(frame).any():
-                    frame[:] = 0.0
-                if vmax > vmin:
-                    norm = (frame - vmin) / (vmax - vmin)
-                else:
-                    norm = np.zeros_like(frame, dtype=np.float32)
-                norm = np.clip(norm, 0.0, 1.0)
-                # Map normalized intensities to a simple dark-to-light blue gradient,
-                # roughly resembling matplotlib's ``Blues_r``.
-                # low -> dark blue, high -> very light blue.
-                dark_blue = np.array([8, 48, 107], dtype=np.float32)
-                light_blue = np.array([239, 243, 255], dtype=np.float32)
-                rgb = (dark_blue + (light_blue - dark_blue) * norm[..., None]).astype(
-                    np.uint8
+        fig, ax = plt.subplots()
+        image = ax.imshow(
+            mf_response_cube[0], origin="lower", cmap=cmap, vmin=vmin, vmax=vmax
+        )
+        title = ax.set_title("Source Extractor Detections")
+        ax.set_xlabel("X pixels")
+        ax.set_ylabel("Y pixels")
+        fig.tight_layout()
+
+        current_overlay: list[Artist] = []
+
+        def _clear_overlay() -> None:
+            for artist in list(current_overlay):
+                artist.remove()
+            current_overlay.clear()
+
+        def _add_overlay(sources: np.ndarray) -> None:
+            for source in sources:
+                ellipse = Ellipse(
+                    (source["x"], source["y"]),
+                    width=3.0 * source["a"],
+                    height=3.0 * source["b"],
+                    angle=np.degrees(source["theta"]),
+                    fill=False,
+                    edgecolor="red",
+                    linewidth=1.5,
                 )
+                ax.add_patch(ellipse)
+                current_overlay.append(ellipse)
+                tid = int(source["track_id"])
+                if tid >= 0:
+                    r = float(
+                        max(3.0 * source["a"], 3.0 * source["b"], 2.0)
+                    )
+                    tx = float(source["x"]) + 0.35 * r
+                    ty = float(source["y"]) + 0.35 * r
+                    label = ax.text(
+                        tx,
+                        ty,
+                        str(tid),
+                        color="red",
+                        fontsize=8,
+                        fontweight="bold",
+                        ha="left",
+                        va="bottom",
+                        clip_on=True,
+                    )
+                    current_overlay.append(label)
 
-                sources = sources_by_frame[frame_idx]
-                if sources.size > 0:
-                    for source in sources:
-                        y0 = float(source["y"])
-                        x0 = float(source["x"])
-                        a_val = float(source["a"])
-                        b_val = float(source["b"])
-                        theta = float(source["theta"])
-                        if not np.isfinite([x0, y0, a_val, b_val, theta]).all():
-                            continue
-                        r_radius = max(int(abs(1.5 * b_val)), 1)
-                        c_radius = max(int(abs(1.5 * a_val)), 1)
-                        rr, cc = ellipse_perimeter(
-                            int(round(y0)),
-                            int(round(x0)),
-                            r_radius,
-                            c_radius,
-                            orientation=theta,
-                            shape=(h, w),
-                        )
-                        rgb[rr, cc] = (255, 0, 0)
+        def _update(frame_idx: int):
+            image.set_data(mf_response_cube[frame_idx])
+            _clear_overlay()
+            _add_overlay(sources_by_frame[frame_idx])
+            split_fname = mf_response_cube_fname.split("_")
+            timestamp = split_fname[1]
+            title.set_text(f"{timestamp}; Slice {frame_idx} of {len(mf_response_cube)}")
+            return [image, title, *current_overlay]
 
-                        tid = int(source["track_id"])
-                        if tid >= 0:
-                            r_scale = float(
-                                max(3.0 * a_val, 3.0 * b_val, 2.0)
-                            )
-                            tx = int(round(x0 + 0.35 * r_scale))
-                            ty = int(round(y0 + 0.35 * r_scale))
-                            _draw_label_small_font(
-                                rgb,
-                                str(tid),
-                                row=ty,
-                                col=tx,
-                                color=(255, 0, 0),
-                            )
+        anim = FuncAnimation(
+            fig,
+            _update,
+            frames=len(mf_response_cube),
+            interval=1000.0 / max(fps, 1e-3),
+            blit=False,
+        )
+        writer = FFMpegWriter(fps=fps)
+        final_path = os.path.join(output_dir, movie_name)
+        anim.save(final_path, writer=writer)
+        plt.close(fig)
 
-                # Optional upsampling to improve visual resolution for track-id labels.
-                if scale_factor != 1.0:
-                    out_h = max(int(round(h * scale_factor)), 1)
-                    out_w = max(int(round(w * scale_factor)), 1)
-                    rgb_out = resize(
-                        rgb,
-                        (out_h, out_w, 3),
-                        order=1,
-                        preserve_range=True,
-                        anti_aliasing=True,
-                    ).astype(np.uint8)
-                else:
-                    rgb_out = rgb
+    def _render_movie_png_frames(
+        sources_by_frame: list[np.ndarray], movie_name: str
+    ) -> None:
+        """Render individual PNG frames instead of an MP4 movie."""
+        measure_results_dir = os.path.dirname(output_dir)
+        pngs_base_dir = os.path.join(measure_results_dir, "pngs")
+        os.makedirs(pngs_base_dir, exist_ok=True)
 
-                writer.append_data(rgb_out)
+        movie_stem, _ = os.path.splitext(movie_name)
+        movie_png_dir = os.path.join(pngs_base_dir, movie_stem)
+        os.makedirs(movie_png_dir, exist_ok=True)
 
-    try:
-        _write_movie_imageio(
+        n_frames = len(mf_response_cube)
+        for frame_idx in range(n_frames):
+            fig, ax = plt.subplots()
+            image = ax.imshow(
+                mf_response_cube[frame_idx],
+                origin="lower",
+                cmap=cmap,
+                vmin=vmin,
+                vmax=vmax,
+            )
+            title = ax.set_title("Source Extractor Detections")
+            ax.set_xlabel("X pixels")
+            ax.set_ylabel("Y pixels")
+            fig.tight_layout()
+
+            # Draw overlays for this frame (mirrors _add_overlay logic).
+            sources = sources_by_frame[frame_idx]
+            current_overlay: list[Artist] = []
+            for source in sources:
+                ellipse = Ellipse(
+                    (source["x"], source["y"]),
+                    width=3.0 * source["a"],
+                    height=3.0 * source["b"],
+                    angle=np.degrees(source["theta"]),
+                    fill=False,
+                    edgecolor="red",
+                    linewidth=1.5,
+                )
+                ax.add_patch(ellipse)
+                current_overlay.append(ellipse)
+                tid = int(source["track_id"])
+                if tid >= 0:
+                    r = float(max(3.0 * source["a"], 3.0 * source["b"], 2.0))
+                    tx = float(source["x"]) + 0.35 * r
+                    ty = float(source["y"]) + 0.35 * r
+                    label = ax.text(
+                        tx,
+                        ty,
+                        str(tid),
+                        color="red",
+                        fontsize=8,
+                        fontweight="bold",
+                        ha="left",
+                        va="bottom",
+                        clip_on=True,
+                    )
+                    current_overlay.append(label)
+
+            split_fname = mf_response_cube_fname.split("_")
+            timestamp = split_fname[1] if len(split_fname) > 1 else mf_response_cube_fname
+            title.set_text(f"{timestamp}; Slice {frame_idx} of {len(mf_response_cube)}")
+
+            frame_name = f"frame_{frame_idx:04d}.png"
+            frame_path = os.path.join(movie_png_dir, frame_name)
+            fig.savefig(frame_path, dpi=150)
+            plt.close(fig)
+
+    if png_only:
+        _render_movie_png_frames(
             extrapolated_sources_by_frame,
             f"{cube_stem}_extrapolated.mp4",
         )
-        _write_movie_imageio(
+        _render_movie_png_frames(
             sep_sources_by_frame,
             f"{cube_stem}_sep_results.mp4",
         )
-    except Exception as exc:  # pragma: no cover - best-effort logging
-        print(
-            f"WARNING: failed to write detection movies for {cube_stem}: {exc!r}"
+    else:
+        _render_movie_funcanimation(
+            extrapolated_sources_by_frame,
+            f"{cube_stem}_extrapolated.mp4",
+        )
+        _render_movie_funcanimation(
+            sep_sources_by_frame,
+            f"{cube_stem}_sep_results.mp4",
         )
     plot_flux_decay(
         mf_response_cube=mf_response_cube,
