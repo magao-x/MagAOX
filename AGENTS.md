@@ -114,6 +114,9 @@ Follow these code style and documentation rules exactly.
   - In the common app pattern, the `.cpp` file should contain only the main entrypoint, while the class declaration and out-of-class inline definitions live in the `.hpp`.
   - If deviating from this pattern for a specific app, preserve the local convention already established in that app or directory.
 
+23) Always Use Braces
+  - Always use `{}` for the body of control-flow statements, even when the body is a single statement.
+
 When you finish:
 - Summarize what changed.
 - List affected files.
