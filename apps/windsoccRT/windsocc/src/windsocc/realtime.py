@@ -33,6 +33,7 @@ from windsocc.reduce import (
 )
 from windsocc.xcorr import run_xcorr_stage, run_xcorr_stage_in_memory
 
+
 DEFAULT_FRAMES_PER_CUBE = 512
 DEFAULT_FRAME_SHAPE = (120, 120)
 
@@ -117,7 +118,7 @@ def _indi_number_member_to_float(node) -> float:
 
 def _construct_indi_client(host: str, port: int):
     """Instantiate ``IndiClient`` with host/port when the installed API supports it."""
-    import purepyindi2 as indi
+    import purepyindi2 as indi # pyright: ignore[reportMissingImports]
 
     cls = indi.client.IndiClient
     try:
@@ -152,9 +153,9 @@ class _WindsocIndiPublisher:
         self.max_layers = int(max_layers)
 
         try:
-            from magaox.indi.device import XDevice
-            from purepyindi2 import properties, constants
-            from purepyindi2.messages import DefNumber
+            from magaox.indi.device import XDevice # pyright: ignore[reportMissingImports]
+            from purepyindi2 import properties, constants # pyright: ignore[reportMissingImports]
+            from purepyindi2.messages import DefNumber # pyright: ignore[reportMissingImports]
         except ImportError as exc:
             raise RuntimeError(
                 "INDI publishing requires optional dependency `purepyindi2` "
@@ -282,7 +283,7 @@ def fetch_hour_angle_deg(config_params: dict) -> float | None:
     if not config_params.get("FETCH_HOUR_ANGLE", False):
         return None
     try:
-        import purepyindi2  # noqa: F401
+        import purepyindi2  # noqa: F401 # pyright: ignore[reportMissingImports]
     except ImportError:
         logging.warning(
             "FETCH_HOUR_ANGLE is enabled but purepyindi2 is not installed "
