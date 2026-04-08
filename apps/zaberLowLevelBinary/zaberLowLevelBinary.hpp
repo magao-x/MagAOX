@@ -559,7 +559,8 @@ int zaberLowLevelBinary::appStartup()
         m_indiP_parked[m_stages[n].name()].set( m_stages[n].parked() );
         m_indiP_lastHomed[m_stages[n].name()].set( m_stages[n].lastHomed() );
         m_indiP_max_pos[m_stages[n].name()].set( m_stages[n].maxPos() );
-        m_indiP_knob_enable[m_stages[n].name()].set( m_stages[n].knobEnabled() ? pcf::IndiElement::On : pcf::IndiElement::Off );
+        m_indiP_knob_enable[m_stages[n].name()].set( m_stages[n].knobEnabled() ? pcf::IndiElement::On
+                                                                               : pcf::IndiElement::Off );
     }
 
     return 0;
@@ -764,11 +765,9 @@ int zaberLowLevelBinary::appLogic()
             updateIfChanged( m_indiP_curr_pos, m_stages[i].name(), m_stages[i].rawPos() );
             updateIfChanged( m_indiP_tgt_pos, m_stages[i].name(), m_stages[i].tgtPos() );
 
-            updateSwitchIfChanged( 
-                m_indiP_knob_enable, 
-                m_stages[i].name(), 
-                m_stages[i].knobEnabled() ? pcf::IndiElement::On : pcf::IndiElement::Off 
-            );
+            updateSwitchIfChanged( m_indiP_knob_enable,
+                                   m_stages[i].name(),
+                                   m_stages[i].knobEnabled() ? pcf::IndiElement::On : pcf::IndiElement::Off );
 
             if( m_stages[i].deviceStatus() == 'B' )
             {
@@ -920,8 +919,19 @@ inline int zaberLowLevelBinary::onPowerOff()
     std::lock_guard<std::mutex> lock( m_indiMutex );
     for( size_t i = 0; i < m_stages.size(); ++i )
     {
-        updateIfChanged( m_indiP_temp, m_stages[i].name(), std::string( "" ) );
         m_stages[i].onPowerOff();
+
+        // Publish the retained stage snapshot before advertising POWEROFF so
+        // subscribers can consume the last known parked/position state first.
+        updateIfChanged( m_indiP_max_pos, m_stages[i].name(), m_stages[i].maxPos() );
+        updateIfChanged( m_indiP_parked, m_stages[i].name(), m_stages[i].parked() );
+        updateIfChanged( m_indiP_lastHomed, m_stages[i].name(), m_stages[i].lastHomed() );
+        updateIfChanged( m_indiP_curr_pos, m_stages[i].name(), m_stages[i].rawPos() );
+        updateIfChanged( m_indiP_tgt_pos, m_stages[i].name(), m_stages[i].tgtPos() );
+        updateSwitchIfChanged( m_indiP_knob_enable,
+                               m_stages[i].name(),
+                               ( m_stages[i].knobEnabled() ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
+        updateIfChanged( m_indiP_temp, m_stages[i].name(), std::string( "" ) );
         updateIfChanged( m_indiP_curr_state, m_stages[i].name(), std::string( "POWEROFF" ) );
         updateIfChanged( m_indiP_warn, m_stages[i].name(), pcf::IndiElement::Off );
     }
@@ -1185,12 +1195,12 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_knob_enable )( const pcf::In
     {
         return log<software_error, -1>( "no valid stage specified in req_knob, rejecting request" );
     }
-    
+
     bool enable_knob = ipRecv[m_stages[stageno].name()].getSwitchState() == pcf::IndiElement::On;
-    
+
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    if( m_stages[stageno].enableKnob(m_port, enable_knob) < 0 )
+    if( m_stages[stageno].enableKnob( m_port, enable_knob ) < 0 )
     {
         return log<software_error, -1>( std::format( "error from enable knob for {}", m_stages[stageno].name() ) );
     }

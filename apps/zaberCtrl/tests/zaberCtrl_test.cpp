@@ -23,6 +23,7 @@ class zaberCtrl_test : public zaberCtrl
     zaberCtrl_test( const std::string &device )
     {
         m_configName = device;
+        m_stageName  = "stage";
 
         XWCTEST_SETUP_INDI_NEW_PROP( pos );
         XWCTEST_SETUP_INDI_NEW_PROP( rawPos );
@@ -69,10 +70,82 @@ class zaberCtrl_test : public zaberCtrl
         m_preset_target = presetTarget;
     }
 
+    /// Set the current motion-state classification for testing.
+    void setMovingState( int8_t movingState )
+    {
+        m_movingState = movingState;
+    }
+
+    /// Set the configured home-preset index for testing.
+    void setHomePresetIndex( int homePresetIndex )
+    {
+        m_homePreset = homePresetIndex;
+    }
+
+    /// Track a specific preset-name alias for testing.
+    int setPresetAliasIndex( int presetNameIndex )
+    {
+        return setPresetNameTracking( presetNameIndex );
+    }
+
+    /// Clear any tracked preset-name alias for testing.
+    void clearPresetAliasIndex()
+    {
+        clearPresetNameTracking();
+    }
+
+    /// Resolve the active preset-name index for the current position.
+    int activeAliasIndex()
+    {
+        return activePresetNameIndex( presetNumber() );
+    }
+
+    /// Resolve the active preset name for the current position.
+    std::string activeAliasName()
+    {
+        return activePresetName( presetNumber() );
+    }
+
+    /// Resolve the preset name that telemetry should record.
+    std::string telemetryAliasName()
+    {
+        return telemetryPresetName();
+    }
+
+    /// Invoke the base-class power-off handling under test.
+    int stageOnPowerOff()
+    {
+        return dev::stdMotionStage<zaberCtrl>::onPowerOff();
+    }
+
     /// Invoke the powered-off telemetry sync under test.
     int syncPoweredOffTelemetry()
     {
         return syncPowerOffStageTelemetry();
+    }
+
+    /// Apply a stage-state INDI update for the configured test stage.
+    int applyStageState( const std::string &stageState )
+    {
+        pcf::IndiProperty ip;
+        ip.setDevice( "stest" );
+        ip.setName( "curr_state" );
+        ip.add( pcf::IndiElement( m_stageName ) );
+        ip[m_stageName].set( stageState );
+
+        return setCallBack_m_indiP_stageState( ip );
+    }
+
+    /// Get the current FSM state.
+    stateCodes::stateCodeT fsmState()
+    {
+        return state();
+    }
+
+    /// Get the current homing bookkeeping state.
+    int homingState() const
+    {
+        return m_homingState;
     }
 
     /// Get the current logged moving state.
@@ -136,6 +209,85 @@ SCENARIO( "Power-off stage telemetry", "[zaberCtrl]" )
         REQUIRE( zct.syncPoweredOffTelemetry() == 0 );
         REQUIRE( zct.presetValue() == 0 );
         REQUIRE( zct.presetTargetValue() == 0 );
+    }
+}
+
+SCENARIO( "Homing READY transitions update the controller FSM promptly", "[zaberCtrl]" )
+{
+    zaberCtrl_test zct( "stest" );
+
+    WHEN( "homing completes without a configured post-home preset move" )
+    {
+        zct.setHomePresetIndex( -1 );
+
+        REQUIRE( zct.applyStageState( "HOMING" ) == 0 );
+        REQUIRE( zct.fsmState() == stateCodes::HOMING );
+        REQUIRE( zct.homingState() == 1 );
+
+        REQUIRE( zct.applyStageState( "READY" ) == 0 );
+        REQUIRE( zct.fsmState() == stateCodes::READY );
+        REQUIRE( zct.homingState() == 0 );
+    }
+
+    WHEN( "homing completes and a post-home preset move is still pending" )
+    {
+        zct.setHomePresetIndex( 1 );
+
+        REQUIRE( zct.applyStageState( "HOMING" ) == 0 );
+        REQUIRE( zct.fsmState() == stateCodes::HOMING );
+        REQUIRE( zct.homingState() == 1 );
+
+        REQUIRE( zct.applyStageState( "READY" ) == 0 );
+        REQUIRE( zct.fsmState() == stateCodes::HOMING );
+        REQUIRE( zct.homingState() == 2 );
+    }
+}
+
+SCENARIO( "Preset-name aliases follow the selected shared-position preset", "[zaberCtrl]" )
+{
+    zaberCtrl_test zct( "stest" );
+
+    zct.setPresets( { -1, 10, 20, 20 }, { "none", "open", "science", "focus" } );
+    zct.setStagePosition( 20.0, 1000.0 );
+    zct.setStageTelemetry( 0, 3, 3 );
+
+    WHEN( "a specific alias was selected for a shared preset position" )
+    {
+        REQUIRE( zct.setPresetAliasIndex( 3 ) == 0 );
+
+        REQUIRE( zct.activeAliasIndex() == 3 );
+        REQUIRE( zct.activeAliasName() == "focus" );
+    }
+
+    WHEN( "the stage is moving toward a selected alias" )
+    {
+        REQUIRE( zct.setPresetAliasIndex( 3 ) == 0 );
+        zct.setMovingState( 1 );
+        zct.setStageTelemetry( 1, 2, 3 );
+
+        REQUIRE( zct.activeAliasIndex() == 3 );
+        REQUIRE( zct.activeAliasName() == "focus" );
+    }
+
+    WHEN( "no alias is being tracked" )
+    {
+        zct.clearPresetAliasIndex();
+
+        REQUIRE( zct.activeAliasIndex() == 2 );
+        REQUIRE( zct.activeAliasName() == "science" );
+    }
+
+    WHEN( "the alias tracking is cleared on power off" )
+    {
+        REQUIRE( zct.setPresetAliasIndex( 3 ) == 0 );
+
+        REQUIRE( zct.stageOnPowerOff() == 0 );
+        REQUIRE( zct.movingState() == -2 );
+        REQUIRE( zct.presetValue() == 3 );
+        REQUIRE( zct.presetTargetValue() == 3 );
+        REQUIRE( zct.activeAliasIndex() == 3 );
+        REQUIRE( zct.activeAliasName() == "focus" );
+        REQUIRE( zct.telemetryAliasName() == "focus" );
     }
 }
 

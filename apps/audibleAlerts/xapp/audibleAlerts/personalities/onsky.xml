@@ -80,6 +80,9 @@
     <walk-up email="robert.j.harris@durham.ac.uk">
       <file name="robert.mp3" />
     </walk-up>
+    <walk-up email="jkueny@arizona.edu">
+      <file name="jay_walkup.mp3" />
+    </walk-up>
   </walk-ups>
   <soundboard>
     <button name="NotJared">

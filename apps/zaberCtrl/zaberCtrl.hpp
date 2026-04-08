@@ -378,7 +378,10 @@ int zaberCtrl::appLogic()
             }
         }
 
-        recordStage();
+        if( dev::stdMotionStage<zaberCtrl>::updateINDI() < 0 )
+        {
+            log<software_error>( { __FILE__, __LINE__ } );
+        }
 
         // record telem if it's been longer than 10 sec:
         if( telemeter<zaberCtrl>::appLogic() < 0 )
@@ -645,6 +648,8 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_pos )( const pcf::IndiProperty &ipRecv
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
     m_tgtPos = target;
+    clearPresetNameTracking();
+    m_movingState = 0;
 
     moveTo( m_tgtPos );
     updateIfChanged( m_indiP_pos, "target", m_tgtPos, INDI_BUSY );
@@ -684,6 +689,8 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawPos )( const pcf::IndiProperty &ipR
     log<text_log>( "moving stage by " + std::to_string( target ) );
 
     std::lock_guard<std::mutex> guard( m_indiMutex );
+    clearPresetNameTracking();
+    m_movingState = 0;
 
     pcf::IndiProperty indiP_stageTgtPos = pcf::IndiProperty( pcf::IndiProperty::Text );
     indiP_stageTgtPos.setDevice( m_lowLevelName );
@@ -727,6 +734,7 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState )( const pcf::IndiProperty 
         state( stateCodes::POWEROFF );
         m_moving = -2;
         syncPowerOffStageTelemetry();
+        dev::stdMotionStage<zaberCtrl>::updateINDI();
         dev::stdMotionStage<zaberCtrl>::recordStage( true );
     }
     else if( sstr == "POWERON" )
@@ -762,8 +770,9 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState )( const pcf::IndiProperty 
     }
     else if( sstr == "READY" )
     {
-        if( m_homingState == 0 )
+        if( m_homingState == 0 || m_homePreset < 0 )
         {
+            m_homingState = 0;
             state( stateCodes::READY );
         }
         else
@@ -931,6 +940,7 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageParked )( const pcf::IndiProperty
     if( state() == stateCodes::POWEROFF )
     {
         syncPowerOffStageTelemetry();
+        dev::stdMotionStage<zaberCtrl>::updateINDI();
         dev::stdMotionStage<zaberCtrl>::recordStage( true );
     }
 
