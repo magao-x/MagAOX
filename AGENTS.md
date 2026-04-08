@@ -100,7 +100,7 @@ Follow these code style and documentation rules exactly.
 20) Application Unit Test Documentation
   - For application unit tests, place Doxygen grouping under `application_unit_test` in `tests/groups.dox`.
   - Prefer the structure:
-  - `namespace libXWCTest { namespace <appName>Test { ... } }`
+     - `namespace libXWCTest { namespace <appName>Test { ... } }`
   - Define `\defgroup <appName>_unit_test` in the corresponding `*_test.cpp` file, not in `tests/groups.dox`, and keep the file itself only in `\ingroup <appName>_files`.
   - Add a brief Doxygen block for each `TEST_CASE`, not just the file header.
 
@@ -109,7 +109,6 @@ Follow these code style and documentation rules exactly.
   - For MagAO-X app unit tests, prefer the local `#ifdef <APP>_TEST_DOXYGEN_REF` pattern with raw member references that need not compile, and wrap those blocks in `// clang-format off` and `// clang-format on`.
   - Use this for methods/functions actually under test, especially in unit-test files that rely on wrapper namespaces, injected subclasses, or macro-based indirection.
   - Hide test-harness-only classes or helpers from Doxygen with `\cond ... \endcond` when they would otherwise dominate the generated links.
-
 
 22) App Header-Only Preference
   - For MagAOX applications, prefer header-only implementation when it matches existing app patterns and keeps the app easy to include in unit tests.
