@@ -71,6 +71,7 @@ apps/filterWheelCtrl/filterWheelCtrl
 apps/flipperCtrl/flipperCtrl
 
 apps/magAOXMaths/magAOXMaths
+apps/flowRPM/flowRPM
 
 #g/gui
 gui/rtimv/plugins/cameraStatus/makefile.cameraStatus

@@ -45,7 +45,6 @@ apps_rtcicc = \
 	baslerCtrl \
     bmcCtrl \
 	flipperCtrl \
-	flowRPM \
     hsfwCtrl \
     rhusbMon \
 	cacaoInterface \
