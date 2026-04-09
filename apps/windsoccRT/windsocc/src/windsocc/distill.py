@@ -174,7 +174,7 @@ def compute_mf_response_cube(cube, template):
     return response_cube
 
 def compute_snr_cube(cube):
-    """Compute SNR using a single noise map from the cube's last quarter."""
+    """Compute SNR plus last-quarter and whole-cube noise maps."""
     if cube.ndim != 3:
         raise ValueError(f"Cube must be 3D, got shape {cube.shape}.")
     n_frames = cube.shape[0]
@@ -184,9 +184,10 @@ def compute_snr_cube(cube):
         last_quarter = cube
 
     error_map = np.nanstd(last_quarter, axis=0)
+    error_map_wholecube = np.nanstd(cube, axis=0)
     with np.errstate(divide="ignore", invalid="ignore"):
         snr_cube = np.where(error_map > 0, cube / error_map, 0.0)
-    return snr_cube, error_map
+    return snr_cube, error_map, error_map_wholecube
 
 def convolve_cube_with_kernel(cube, kernel_2d):
     """Convolve each frame of a cube with a 2D kernel."""
@@ -277,16 +278,36 @@ def process_distill_group(suffix, averaged_cube, averaged_bias, header, distille
     # write_cube(output_path_unsharp, high_pass_cube, header)
     # write_cube(output_path, averaged_cube, header)
 
-    snr_map, error_map = compute_snr_cube(mf_response_cube)
-    snr_map_unsharp, error_map_unsharp = compute_snr_cube(mf_response_unsharp_cube)
+    snr_map, error_map, error_map_wholecube = compute_snr_cube(mf_response_cube)
+    (
+        snr_map_unsharp,
+        error_map_unsharp,
+        error_map_unsharp_wholecube,
+    ) = compute_snr_cube(mf_response_unsharp_cube)
     snr_output_path = os.path.join(distilled_dir, "sn_maps", f"{suffix}_snr.fits")
     snr_map_unsharp_output_path = os.path.join(
         distilled_dir, "sn_maps", f"{suffix}_snr_unsharp.fits"
     )
     error_map_output_path = os.path.join(distilled_dir, "noise_maps", f"{suffix}_error_map.fits")
     error_map_unsharp_output_path = os.path.join(distilled_dir, "noise_maps", f"{suffix}_error_map_unsharp.fits")
+    error_map_wholecube_output_path = os.path.join(
+        distilled_dir,
+        "noise_maps",
+        f"{suffix}_error_map_wholecube.fits",
+    )
+    error_map_unsharp_wholecube_output_path = os.path.join(
+        distilled_dir,
+        "noise_maps",
+        f"{suffix}_error_map_unsharp_wholecube.fits",
+    )
     write_cube(error_map_output_path, error_map, header)
     write_cube(error_map_unsharp_output_path, error_map_unsharp, header)
+    write_cube(error_map_wholecube_output_path, error_map_wholecube, header)
+    write_cube(
+        error_map_unsharp_wholecube_output_path,
+        error_map_unsharp_wholecube,
+        header,
+    )
     write_cube(snr_output_path, snr_map, header)
     write_cube(snr_map_unsharp_output_path, snr_map_unsharp, header)
 

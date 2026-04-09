@@ -318,7 +318,7 @@ def _keep_track_ids_by_model(
             xy_dist_origin = np.asarray([x_dist_origin, y_dist_origin])
             dist_closest = np.abs(intercept) / np.sqrt(1 + slope**2)
             if dist_closest > origin_tol_px:
-                reject_rows.append(_model_reject_row(track_id, "origin_distance", group))
+                reject_rows.append(_model_reject_row(track_id, "track_origin_distance", group))
                 continue
         except ValueError:
             reject_rows.append(_model_reject_row(track_id, "slope_divergence", group))
@@ -346,11 +346,11 @@ def _keep_track_ids_by_model(
             reject_rows.append(_model_reject_row(track_id, "degenerate_line", group))
             continue
         direction = direction / direction_norm
-        # origin_distances = group.get_column("inferred_origin_num").to_numpy()
-        # mean_origin_distance = np.mean(origin_distances)
-        # if mean_origin_distance > origin_tol_px:
-        #     reject_rows.append(_model_reject_row(track_id, "inferred_origin_distance", group))
-        #     continue
+        origin_distances = group.get_column("inferred_origin_num").to_numpy()
+        mean_origin_distance = np.mean(origin_distances)
+        if mean_origin_distance > origin_tol_px:
+            reject_rows.append(_model_reject_row(track_id, "inferred_origin_distance", group))
+            continue
         along_line = np.outer((points_centered - centroid) @ direction, direction)
         residuals = points_centered - centroid - along_line
         rmse = np.sqrt(np.mean(np.sum(residuals**2, axis=1)))

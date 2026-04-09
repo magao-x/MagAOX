@@ -12,8 +12,6 @@ import argparse
 import logging
 import os
 import re
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from multiprocessing import cpu_count
 from pathlib import Path
 
 import imageio
@@ -43,18 +41,6 @@ def resolve_fps(config: dict, cli_fps: float | None) -> float:
     return 30.0
 
 
-def resolve_parallelized(
-    config: dict,
-    cli_parallel: bool,
-    cli_serial: bool,
-) -> bool:
-    if cli_serial:
-        return False
-    if cli_parallel:
-        return True
-    return bool(config.get("PARALLELIZED", False))
-
-
 def list_frame_pngs(png_dir: Path) -> list[Path]:
     """Return ``frame_NNNN.png`` paths sorted by numeric suffix."""
     frames: list[tuple[int, Path]] = []
@@ -73,7 +59,7 @@ def stitch_png_dir_to_mp4(
     out_mp4: str,
     fps: float,
     *,
-    force: bool = False,
+    clobber: bool = False,
 ) -> str | None:
     """
     Write one MP4 from ordered PNG frames.
@@ -86,8 +72,8 @@ def stitch_png_dir_to_mp4(
     if not frames:
         logging.warning("No frame_*.png files in %s; skipping.", png_dir)
         return None
-    if out_path.is_file() and not force:
-        logging.warning("Output exists (use --force to overwrite): %s", out_mp4)
+    if out_path.is_file() and not clobber:
+        logging.warning("Output exists (use --clobber to overwrite): %s", out_mp4)
         return None
     out_path.parent.mkdir(parents=True, exist_ok=True)
     logging.info(
@@ -126,37 +112,12 @@ def discover_stitch_jobs(pngs_root: Path, movies_dir: Path) -> list[tuple[str, s
 def run_stitch_serial(
     jobs: list[tuple[str, str]],
     fps: float,
-    force: bool,
+    clobber: bool,
 ) -> list[str | None]:
     results: list[str | None] = []
     for png_dir, out_mp4 in jobs:
-        results.append(stitch_png_dir_to_mp4(png_dir, out_mp4, fps, force=force))
+        results.append(stitch_png_dir_to_mp4(png_dir, out_mp4, fps, clobber=clobber))
     return results
-
-
-def _stitch_job(args: tuple[str, str, float, bool]) -> str | None:
-    """Picklable worker for :class:`ProcessPoolExecutor`."""
-    png_dir, out_mp4, fps, force = args
-    return stitch_png_dir_to_mp4(png_dir, out_mp4, fps, force=force)
-
-
-def run_stitch_parallel(
-    jobs: list[tuple[str, str]],
-    fps: float,
-    force: bool,
-    max_workers: int | None,
-) -> list[str | None]:
-    if max_workers is None:
-        max_workers = cpu_count()
-    worker_args = [(png_dir, out_mp4, fps, force) for png_dir, out_mp4 in jobs]
-
-    results_map: dict[int, str | None] = {}
-    with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        futures = {ex.submit(_stitch_job, a): i for i, a in enumerate(worker_args)}
-        for fut in as_completed(futures):
-            idx = futures[fut]
-            results_map[idx] = fut.result()
-    return [results_map[i] for i in range(len(jobs))]
 
 
 def parse_args() -> argparse.Namespace:
@@ -183,25 +144,10 @@ def parse_args() -> argparse.Namespace:
         help="Output frame rate (overrides ws_config MOVIE_FPS / FPS; default 30 if unset).",
     )
     p.add_argument(
-        "--parallelized",
+        "--clobber",
         action="store_true",
-        help="Use process pool when multiple PNG directories exist (overrides config).",
-    )
-    p.add_argument(
-        "--no-parallelized",
-        action="store_true",
-        help="Force serial encoding (overrides config and --parallelized).",
-    )
-    p.add_argument(
-        "--force",
-        action="store_true",
-        help="Overwrite existing MP4 files.",
-    )
-    p.add_argument(
-        "--max-workers",
-        type=int,
         default=None,
-        help="Max worker processes when parallelized (default: cpu_count()).",
+        help="Overwrite existing MP4 files.",
     )
     return p.parse_args()
 
@@ -222,11 +168,6 @@ def main() -> int:
     movies_dir.mkdir(parents=True, exist_ok=True)
 
     fps = resolve_fps(config, args.fps)
-    parallelized = resolve_parallelized(
-        config,
-        cli_parallel=args.parallelized,
-        cli_serial=args.no_parallelized,
-    )
 
     jobs = discover_stitch_jobs(pngs_root, movies_dir)
     if not jobs:
@@ -234,17 +175,14 @@ def main() -> int:
         return 1
 
     logging.info(
-        "measure_results=%s  fps=%.3g  parallelized=%s  jobs=%d",
+        "measure_results=%s  fps=%.3g  jobs=%d",
         measure_results,
         fps,
-        parallelized,
         len(jobs),
     )
 
-    if parallelized and len(jobs) > 1:
-        run_stitch_parallel(jobs, fps, args.force, args.max_workers)
-    else:
-        run_stitch_serial(jobs, fps, args.force)
+    clobber: bool = config.get("CLOBBER", False) if args.clobber is None else args.clobber
+    run_stitch_serial(jobs, fps, clobber)
 
     logging.info("Done.")
     return 0
