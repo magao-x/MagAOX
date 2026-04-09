@@ -41,8 +41,7 @@ $ bash ./testMagAOX.bash
 
 /** \defgroup application_unit_test Application Unit Tests
   * \brief Unit tests for XWCTk applications.
-
- * \ingroup unit_test
+  * \ingroup unit_test
 */
 
 
