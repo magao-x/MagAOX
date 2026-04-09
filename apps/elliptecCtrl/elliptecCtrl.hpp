@@ -199,9 +199,6 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Last status byte returned by the `gs` query.
     uint8_t m_gs{ 0x00 };
 
-    /// Standard motion-stage state: `-2` off, `-1` not homed, `0` idle, `1` moving, `2` homing.
-    int8_t m_moving{ -1 };
-
     /// Relative step size in degrees used by the `relMove` request.
     double m_relStepDeg{ 1.0 };
 
@@ -388,6 +385,7 @@ inline elliptecCtrl::elliptecCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REP
     m_presetNotation   = "preset";
     m_powerMgtEnabled  = true;
     m_defaultPositions = false;
+    m_moving           = -1;
 }
 
 /* ---------- Config ---------- */
