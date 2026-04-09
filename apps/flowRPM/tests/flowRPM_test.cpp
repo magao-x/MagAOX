@@ -1,5 +1,6 @@
 /** \file flowRPM_test.cpp
  * \brief Catch2 tests for the flowRPM app.
+ * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup flowRPM_files
  */
@@ -18,7 +19,9 @@ namespace libXWCTest
 {
 
 /** \defgroup flowRPM_unit_test flowRPM Unit Tests
- * \ingroup application_unit_test
+ * \brief Unit tests for the flowRPM application.
+ *
+ * \ingroup app_unit_test
  */
 
 /// Namespace for `flowRPM` unit tests.
@@ -127,7 +130,12 @@ TEST_CASE( "flowRPM configuration defaults load correctly", "[flowRPM]" )
     app.config.readConfig( "/tmp/flowRPM_test.conf" );
 
     app.loadConfig();
-    XWCTEST_DOXYGEN_REF( app.loadConfig() );
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::setupConfig();
+    flowRPM::loadConfig();
+    #endif
+    // clang-format on
 
     REQUIRE( app.m_shutdown == 0 );
     REQUIRE( app.inputPath() == "/tmp/fac_flow.txt" );
@@ -154,7 +162,12 @@ TEST_CASE( "flowRPM configuration overrides load correctly", "[flowRPM]" )
     app.config.readConfig( "/tmp/flowRPM_test_override.conf" );
 
     app.loadConfig();
-    XWCTEST_DOXYGEN_REF( app.loadConfig() );
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::setupConfig();
+    flowRPM::loadConfig();
+    #endif
+    // clang-format on
 
     REQUIRE( app.m_shutdown == 0 );
     REQUIRE( app.inputPath() == "/tmp/custom_flow.txt" );
@@ -174,7 +187,12 @@ TEST_CASE( "flowRPM loadConfig sets shutdown on configuration failure", "[flowRP
 
     app.setupConfig();
     app.loadConfig();
-    XWCTEST_DOXYGEN_REF( app.loadConfig() );
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::setupConfig();
+    flowRPM::loadConfig();
+    #endif
+    // clang-format on
 
     REQUIRE( app.m_shutdown == 1 );
 }
@@ -185,6 +203,11 @@ TEST_CASE( "flowRPM loadConfig sets shutdown on configuration failure", "[flowRP
  */
 TEST_CASE( "flowRPM helper token parsing handles whitespace-only input", "[flowRPM]" )
 {
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPMDetail::trimToken( "" );
+    #endif
+    // clang-format on
     REQUIRE( flowRPMDetail::trimToken( "  CHA_FAN1 \t\r" ) == "CHA_FAN1" );
     REQUIRE( flowRPMDetail::trimToken( " \t\r " ).empty() );
 }
@@ -195,6 +218,11 @@ TEST_CASE( "flowRPM helper token parsing handles whitespace-only input", "[flowR
  */
 TEST_CASE( "flowRPM helper logical-line splitting handles CRLF and blank lines", "[flowRPM]" )
 {
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPMDetail::splitLogicalLines( "" );
+    #endif
+    // clang-format on
     const std::vector<std::string> lines =
         flowRPMDetail::splitLogicalLines( "\r\n \t \r\n1775430287 145131374\r\n"
                                           "36 | CHA_FAN1         | Fan          | 1900.00    | RPM   | 'OK'\r\n" );
@@ -210,6 +238,11 @@ TEST_CASE( "flowRPM helper logical-line splitting handles CRLF and blank lines",
  */
 TEST_CASE( "flowRPM parseResult defaults to the invalid sentinel state", "[flowRPM]" )
 {
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::parseResult();
+    #endif
+    // clang-format on
     flowRPM::parseResult result;
 
     REQUIRE( result.m_status == flowRPM::parseStatus::fileReadError );
@@ -227,7 +260,11 @@ TEST_CASE( "flowRPM timestamp parsing covers valid and malformed inputs", "[flow
 {
     flowRPM  app;
     timespec ts;
-    XWCTEST_DOXYGEN_REF( app.parseTimestamp( ts, "1775430287 145131374" ) );
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::parseTimestamp( ts, "" );
+    #endif
+    // clang-format on
 
     SECTION( "a valid timestamp parses successfully" )
     {
@@ -260,7 +297,11 @@ TEST_CASE( "flowRPM record-line parsing covers all parse branches", "[flowRPM]" 
 {
     flowRPM app;
     double  flowRate = app.badValue();
-    XWCTEST_DOXYGEN_REF( app.parseRecordLine( flowRate, "36 | CHA_FAN1 | Fan | 1900.00 | RPM | 'OK'" ) );
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::parseRecordLine( flowRate, "" );
+    #endif
+    // clang-format on
 
     SECTION( "a valid record converts RPM to LPM" )
     {
@@ -309,7 +350,11 @@ TEST_CASE( "flowRPM file parsing", "[flowRPM]" )
     flowRPM              app;
     timespec             now{ 1775430290, 145131374 };
     flowRPM::parseResult result;
-    XWCTEST_DOXYGEN_REF( app.parseFileContents( result, "", now ) );
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::parseFileContents( result, "", now );
+    #endif
+    // clang-format on
 
     SECTION( "empty contents are reported as missing timestamps" )
     {
@@ -430,7 +475,11 @@ TEST_CASE( "flowRPM reads and parses configured files", "[flowRPM]" )
     flowRPM              app;
     flowRPM::parseResult result;
     const timespec       now{ 1775430290, 145131374 };
-    XWCTEST_DOXYGEN_REF( app.readAndParse( result, now ) );
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::readAndParse( result, now );
+    #endif
+    // clang-format on
 
     SECTION( "a missing file reports fileReadError without crashing" )
     {
@@ -468,7 +517,11 @@ TEST_CASE( "flowRPM appStartup initializes state and published status", "[flowRP
     flowRPM app;
 
     REQUIRE( app.appStartup() == 0 );
-    XWCTEST_DOXYGEN_REF( app.appStartup() );
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::appStartup();
+    #endif
+    // clang-format on
     REQUIRE( app.state() == stateCodes::READY );
     REQUIRE( indiNumberValue( app.m_indiP_status, "flow_rate" ) == Approx( app.badValue() ) );
     REQUIRE( indiNumberValue( app.m_indiP_status, "age" ) == Approx( app.badValue() ) );
@@ -484,7 +537,12 @@ TEST_CASE( "flowRPM appShutdown completes cleanly", "[flowRPM]" )
 
     REQUIRE( app.appStartup() == 0 );
     REQUIRE( app.appShutdown() == 0 );
-    XWCTEST_DOXYGEN_REF( app.appShutdown() );
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::appStartup();
+    flowRPM::appShutdown();
+    #endif
+    // clang-format on
 }
 
 /// Verify repeated error logging is rate-limited per status key.
@@ -494,6 +552,11 @@ TEST_CASE( "flowRPM appShutdown completes cleanly", "[flowRPM]" )
 TEST_CASE( "flowRPM log backoff is per error key and interval", "[flowRPM]" )
 {
     flowRPM app;
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::shouldLogError( "", timespec{ 0, 0 } );
+    #endif
+    // clang-format on
 
     REQUIRE( app.shouldLogError( "open_failed", timespec{ 10, 0 } ) == true );
     REQUIRE( app.shouldLogError( "open_failed", timespec{ 20, 0 } ) == false );
@@ -516,7 +579,11 @@ TEST_CASE( "flowRPM recordTelem forces telemetry bookkeeping refresh", "[flowRPM
     app.m_lastTelemValid    = false;
 
     REQUIRE( app.recordTelem( static_cast<const MagAOX::logger::telem_flowrpm *>( nullptr ) ) == 0 );
-    XWCTEST_DOXYGEN_REF( app.recordTelem( static_cast<const MagAOX::logger::telem_flowrpm *>( nullptr ) ) );
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::recordTelem( static_cast<const MagAOX::logger::telem_flowrpm *>( nullptr ) );
+    #endif
+    // clang-format on
     REQUIRE( app.m_lastTelemFlowRate == Approx( 2.5 ) );
     REQUIRE( app.m_lastTelemValid == true );
 }
@@ -530,7 +597,12 @@ TEST_CASE( "flowRPM appLogic drives end-to-end display-state updates", "[flowRPM
     flowRPM app;
 
     REQUIRE( app.appStartup() == 0 );
-    XWCTEST_DOXYGEN_REF( app.appLogic() );
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::appStartup();
+    flowRPM::appLogic();
+    #endif
+    // clang-format on
 
     SECTION( "a valid file publishes a fresh good reading" )
     {
@@ -634,7 +706,12 @@ TEST_CASE( "flowRPM appLogic returns errors when internal steps fail", "[flowRPM
     flowRPMFaultInject app;
 
     REQUIRE( app.appStartup() == 0 );
-    XWCTEST_DOXYGEN_REF( app.appLogic() );
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::appStartup();
+    flowRPM::appLogic();
+    #endif
+    // clang-format on
 
     SECTION( "readAndParse failures propagate as appLogic errors" )
     {
@@ -668,8 +745,12 @@ TEST_CASE( "flowRPM display-state reconciliation", "[flowRPM]" )
     flowRPM::parseResult lastGood;
     flowRPM::parseResult partialWrite;
     flowRPM              app;
-    XWCTEST_DOXYGEN_REF( app.publishResult( result ) );
-    XWCTEST_DOXYGEN_REF( app.reconcileResult( result, timespec{ 0, 0 } ) );
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::publishResult( result );
+    flowRPM::reconcileResult( result, timespec{ 0, 0 } );
+    #endif
+    // clang-format on
 
     SECTION( "publishResult updates valid and invalid states" )
     {
@@ -739,7 +820,11 @@ TEST_CASE( "flowRPM display-state reconciliation", "[flowRPM]" )
  */
 TEST_CASE( "flowRPM statusKey maps parse statuses consistently", "[flowRPM]" )
 {
-    XWCTEST_DOXYGEN_REF( flowRPM::statusKey( flowRPM::parseStatus::success ) );
+    // clang-format off
+    #ifdef FLOWRPM_TEST_DOXYGEN_REF
+    flowRPM::statusKey( flowRPM::parseStatus::success );
+    #endif
+    // clang-format on
     REQUIRE( flowRPM::statusKey( flowRPM::parseStatus::success ) == "success" );
     REQUIRE( flowRPM::statusKey( flowRPM::parseStatus::fileReadError ) == "open_failed" );
     REQUIRE( flowRPM::statusKey( flowRPM::parseStatus::missingTimestamp ) == "missing_timestamp" );
