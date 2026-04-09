@@ -58,7 +58,7 @@ Follow these code style and documentation rules exactly.
 - Preferred format:
   - `This work was performed by <current agent model name> in response to the prompt: "...".`
 - Substitute the actual model name used for the work instead of hardcoding a specific release name.
-- Include the primary user prompt verbatim (or a faithful condensed version if it is extremely long).
+- Include the primary user prompt verbatim (or a faithful condensed version if it is extremely long). If the primary prompt referred to a planning file the planning file does not need to be summarized.
 - Provide the PR description in a copyable md text block
 
 12) Branch Naming (MagAOX)
@@ -96,6 +96,26 @@ Follow these code style and documentation rules exactly.
   - Commit relevant plan files with the associated code changes when they serve as part of the engineering record for that work.
   - Follow with documentation-only changes.
   - Make formatting-only cleanup a separate final commit when needed.
+
+20) Application Unit Test Documentation
+  - For application unit tests, place Doxygen grouping under `app_unit_test` in `tests/groups.dox`.
+  - Prefer the structure:
+  - `namespace libXWCTest { namespace <appName>Test { ... } }`
+  - Define `\defgroup <appName>_unit_test` in the corresponding `*_test.cpp` file, not in `tests/groups.dox`, and keep the file itself only in `\ingroup <appName>_files`.
+  - Add a brief Doxygen block for each `TEST_CASE`, not just the file header.
+
+21) Test Doxygen Link Preservation
+  - When test harness indirection, fault-injection wrappers, alternate namespaces, or protected/private access would prevent Doxygen from auto-linking the real API under test, include `tests/testXWC.hpp` and add explicit Doxygen-only references to the real symbol inside the relevant `TEST_CASE` or `SCENARIO`.
+  - For MagAO-X app unit tests, prefer the local `#ifdef <APP>_TEST_DOXYGEN_REF` pattern with raw member references that need not compile, and wrap those blocks in `// clang-format off` and `// clang-format on`.
+  - Hide test-harness-only classes or helpers from Doxygen with `\cond ... \endcond` when they would otherwise dominate the generated links.
+
+22) App Header-Only Preference
+  - For MagAOX applications, prefer header-only implementation when it matches existing app patterns and keeps the app easy to include in unit tests.
+  - In the common app pattern, the `.cpp` file should contain only the main entrypoint, while the class declaration and out-of-class inline definitions live in the `.hpp`.
+  - If deviating from this pattern for a specific app, preserve the local convention already established in that app or directory.
+
+23) Always Use Braces
+  - Always use `{}` for the body of control-flow statements, even when the body is a single statement.
 
 When you finish:
 - Summarize what changed.
