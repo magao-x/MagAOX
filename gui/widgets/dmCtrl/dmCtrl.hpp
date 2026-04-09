@@ -283,11 +283,49 @@ void dmCtrl::handleDelProperty( const pcf::IndiProperty &ipRecv )
         return;
     }
 
-    if( ipRecv.getName() == "fsm" || ipRecv.getName() == "sm_shmimName" || ipRecv.getName() == "flat" ||
-        ipRecv.getName() == "flat_shmim" || ipRecv.getName() == "flat_set" || ipRecv.getName() == "test" ||
-        ipRecv.getName() == "test_shmim" || ipRecv.getName() == "test_set" )
+    if( ipRecv.getName() == "fsm" )
     {
         emit doOnDisconnect();
+        return;
+    }
+
+    if( ipRecv.getName() == "sm_shmimName" )
+    {
+        { // mutex scope
+            std::lock_guard<std::mutex> lock( m_stateMutex );
+            m_shmimName.clear();
+        }
+
+        emit doUpdateGUI();
+        return;
+    }
+
+    if( ipRecv.getName() == "flat" || ipRecv.getName() == "flat_shmim" || ipRecv.getName() == "flat_set" )
+    {
+        { // mutex scope
+            std::lock_guard<std::mutex> lock( m_stateMutex );
+            m_flatShmim.clear();
+            m_flatSet = false;
+            m_flatName.clear();
+            m_flatOptions.clear();
+        }
+
+        emit doUpdateGUI();
+        return;
+    }
+
+    if( ipRecv.getName() == "test" || ipRecv.getName() == "test_shmim" || ipRecv.getName() == "test_set" )
+    {
+        { // mutex scope
+            std::lock_guard<std::mutex> lock( m_stateMutex );
+            m_testShmim.clear();
+            m_testSet = false;
+            m_testName.clear();
+            m_testOptions.clear();
+        }
+
+        emit doUpdateGUI();
+        return;
     }
 }
 
