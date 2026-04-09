@@ -107,4 +107,15 @@ Implementation status after the first refactor stage:
 - The app now uses the standard `stdMotionStage` preset/home/stop INDI surface instead of the previous parallel local interface.
 - `telem_position` support was added alongside `telem_stage`, with forced `recordStage(true)` plus `recordPosition(true)` used on software-initiated state changes to bias toward over-recording rather than missing a transition.
 - The ambiguous public `moveTo(double)` overload was removed in favor of a named internal helper so the only public `moveTo(...)` entrypoint remains the required `moveTo(float)` from `stdMotionStage`.
-- Test work is still pending. When that stage starts, use `TEST_CASE` rather than `SCENARIO`.
+
+Implementation status after the test stage:
+- Added `apps/elliptecCtrl/tests/elliptecCtrl_test.cpp` using `TEST_CASE` and the current `app_unit_test` Doxygen structure from `AGENTS.md`.
+- Registered the new test in `tests/tests.list` and added the shared `app_unit_test` grouping entry in `tests/groups.dox`.
+- Expanded the harness to cover:
+  - `elliptecCtrl` configuration loading, lifecycle, serial helpers, callback glue, motion helpers, parser/error paths, and poll-resolution state handling.
+  - `stdMotionStage` default-position synthesis, integer preset formatting, startup error branches, and callback edge cases through a dedicated probe harness.
+- The tests exposed a real bug in `apps/elliptecCtrl/elliptecCtrl.hpp`: `elliptecCtrl` had a local `m_moving` that shadowed `stdMotionStage::m_moving`. This was removed, and the inherited state is now initialized in the constructor.
+- Latest coverage report after the test pass:
+  - `apps/elliptecCtrl/elliptecCtrl.hpp`: `96.4%` line coverage, `100%` function coverage.
+  - `libMagAOX/app/dev/stdMotionStage.hpp`: `99.0%` line coverage, `100%` function coverage.
+- Those results satisfy the repo-standard coverage target for this work item (`100%` function coverage and at least `95%` statement/line coverage).

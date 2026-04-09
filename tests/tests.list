@@ -30,6 +30,7 @@
 ../apps/dmPokeCenter/tests/dmPokeCenter_test
 ../apps/dmPokeXCorr/tests/dmPokeXCorr_test
 ../apps/dmSpeckle/tests/dmSpeckle_test
+../apps/elliptecCtrl/tests/elliptecCtrl_test
 ../apps/filterWheelCtrl/tests/filterWheelCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_test
 ../apps/indiTSAccumulator/tests/indiTSAccumulator_test
