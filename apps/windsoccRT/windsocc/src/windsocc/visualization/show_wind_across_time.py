@@ -13,16 +13,17 @@ and writes:
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import glob
 import logging
 import os
 import re
 from typing import Iterable
 
-import imageio
 import numpy as np
 from astropy.io import fits
-from matplotlib import cm
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, FFMpegWriter
 
 
 def _extract_sort_key(path: str) -> tuple[str, str]:
@@ -61,41 +62,111 @@ def _compute_sequence_limits(paths: Iterable[str]) -> tuple[float, float]:
     return float(vmin), float(vmax)
 
 
-def _frame_to_rgb(frame: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
-    frame = np.asarray(frame, dtype=np.float32)
-    norm = np.zeros_like(frame, dtype=np.float32)
-    if vmax > vmin:
-        norm = (frame - vmin) / (vmax - vmin)
-    norm = np.clip(norm, 0.0, 1.0)
-    rgba = cm.viridis(norm)
-    rgb = (rgba[..., :3] * 255.0).astype(np.uint8)
-    return rgb
+def _parse_filename_timestamp(path: str) -> datetime | None:
+    """Parse timestamp token at index 1 after splitting basename by underscores."""
+    base = os.path.basename(path)
+    stem = os.path.splitext(base)[0]
+    parts = stem.split("_")
+    if len(parts) < 2:
+        return None
+    token = parts[1]
+    if not token.isdigit():
+        return None
+    # Python datetime supports up to microseconds (6 digits); trim if needed.
+    if len(token) > 20:
+        token = token[:20]
+    try:
+        return datetime.strptime(token, "%Y%m%d%H%M%S%f")
+    except ValueError:
+        return None
 
 
-def _write_movie(map_paths: list[str], out_path: str, fps: float) -> None:
+def _format_elapsed_hhmm(seconds: float) -> str:
+    total_minutes = max(int(seconds // 60), 0)
+    hours = total_minutes // 60
+    minutes = total_minutes % 60
+    return f"{hours:02d}:{minutes:02d}"
+
+
+def _build_elapsed_labels(map_paths: list[str]) -> list[str]:
+    """Build elapsed-time labels (hh:mm) relative to first valid timestamp."""
+    timestamps = [_parse_filename_timestamp(p) for p in map_paths]
+    ref = next((t for t in timestamps if t is not None), None)
+    if ref is None:
+        return ["00:00"] * len(map_paths)
+    labels: list[str] = []
+    for ts in timestamps:
+        if ts is None:
+            labels.append("00:00")
+        else:
+            labels.append(_format_elapsed_hhmm((ts - ref).total_seconds()))
+    return labels
+
+
+def _write_movie(
+    map_paths: list[str],
+    out_path: str,
+    fps: float,
+    movie_label: str,
+) -> None:
     if not map_paths:
         logging.warning("No maps found for %s; skipping.", out_path)
         return
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     vmin, vmax = _compute_sequence_limits(map_paths)
+    elapsed_labels = _build_elapsed_labels(map_paths)
     logging.info(
         "Encoding %d frames at %.3g fps -> %s",
         len(map_paths),
         fps,
         out_path,
     )
-    with imageio.get_writer(
-        out_path,
-        fps=fps,
-        codec="libx264",
-        format="FFMPEG",
-    ) as writer:
-        for p in map_paths:
-            frame = fits.getdata(p)
-            if frame.ndim != 2:
-                logging.warning("Skipping non-2D map %s with shape %s", p, np.shape(frame))
-                continue
-            writer.append_data(_frame_to_rgb(frame, vmin, vmax))
+    frames: list[np.ndarray] = []
+    labels: list[str] = []
+    for p, elapsed in zip(map_paths, elapsed_labels):
+        frame = fits.getdata(p)
+        if frame.ndim != 2:
+            logging.warning("Skipping non-2D map %s with shape %s", p, np.shape(frame))
+            continue
+        frames.append(np.asarray(frame, dtype=np.float32))
+        labels.append(elapsed)
+    if not frames:
+        logging.warning("No valid 2D frames found for %s; skipping.", out_path)
+        return
+
+    fig, ax = plt.subplots()
+    image = ax.imshow(
+        frames[0],
+        origin="lower",
+        cmap="Blues_r",
+        vmin=vmin,
+        vmax=vmax,
+    )
+    ax.set_xlabel("X pixels")
+    ax.set_ylabel("Y pixels")
+    title = ax.set_title("")
+    # fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
+    fig.tight_layout()
+
+    n_frames = len(frames)
+
+    def _update(i: int):
+        image.set_data(frames[i])
+        title.set_text(
+            f"{movie_label} | frame {i + 1}/{n_frames} | Elapsed {labels[i]}"
+        )
+        return [image, title]
+
+    anim = FuncAnimation(
+        fig,
+        _update,
+        frames=n_frames,
+        interval=1000.0 / max(fps, 1e-3),
+        blit=False,
+    )
+    writer = FFMpegWriter(fps=fps)
+    anim.save(out_path, writer=writer)
+    plt.close(fig)
 
 
 def parse_args() -> argparse.Namespace:
@@ -157,11 +228,13 @@ def main() -> int:
         regular_maps,
         os.path.join(out_dir, "wholecube_error_map.mp4"),
         fps=args.fps,
+        movie_label="wholecube_error_map",
     )
     _write_movie(
         unsharp_maps,
         os.path.join(out_dir, "wholecube_error_map_unsharp.mp4"),
         fps=args.fps,
+        movie_label="wholecube_error_map_unsharp",
     )
 
     logging.info("Done.")
