@@ -245,21 +245,21 @@ def process_distill_group(suffix, averaged_cube, averaged_bias, header, distille
     write_cube(mf_response_unsharp_output_path, mf_response_unsharp_cube, header)
 
     # collapsed_mf_response = np.mean(mf_response_cube, axis=0)
-    # collapsed_mf_response_unsharp = np.mean(mf_response_unsharp_cube, axis=0)
+    collapsed_mf_response_unsharp = np.mean(mf_response_unsharp_cube, axis=0)
     # collapsed_mf_response_output_path = os.path.join(
     #     distilled_dir, "mf_response_cubes", f"{suffix}_mf_response_mean_collapsed.fits"
     # )
-    # collapsed_mf_response_unsharp_output_path = os.path.join(
-    #     distilled_dir,
-    #     "mf_response_cubes",
-    #     f"{suffix}_mf_response_unsharp_mean_collapsed.fits",
-    # )
+    collapsed_mf_response_unsharp_output_path = os.path.join(
+        distilled_dir,
+        "mf_response_cubes",
+        f"{suffix}_mf_response_unsharp_mean_collapsed.fits",
+    )
     # write_cube(collapsed_mf_response_output_path, collapsed_mf_response, header)
-    # write_cube(
-    #     collapsed_mf_response_unsharp_output_path,
-    #     collapsed_mf_response_unsharp,
-    #     header,
-    # )
+    write_cube(
+        collapsed_mf_response_unsharp_output_path,
+        collapsed_mf_response_unsharp,
+        header,
+    )
     # if save_pngs:
     #     save_png(
     #         collapsed_mf_response_output_path.replace(".fits", ".png"),
