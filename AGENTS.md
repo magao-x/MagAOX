@@ -58,7 +58,7 @@ Follow these code style and documentation rules exactly.
 - Preferred format:
   - `This work was performed by <current agent model name> in response to the prompt: "...".`
 - Substitute the actual model name used for the work instead of hardcoding a specific release name.
-- Include the primary user prompt verbatim (or a faithful condensed version if it is extremely long).
+- Include the primary user prompt verbatim (or a faithful condensed version if it is extremely long). If the primary prompt referred to a planning file the planning file does not need to be summarized.
 - Provide the PR description in a copyable md text block
 
 12) Branch Naming (MagAOX)
@@ -96,6 +96,22 @@ Follow these code style and documentation rules exactly.
   - Commit relevant plan files with the associated code changes when they serve as part of the engineering record for that work.
   - Follow with documentation-only changes.
   - Make formatting-only cleanup a separate final commit when needed.
+
+20) Application Unit Test Documentation
+  - For application unit tests, place Doxygen grouping under `app_unit_test` in `tests/groups.dox`.
+  - Prefer the structure:
+  - `namespace libXWCTest { namespace <appName>Test { ... } }`
+  - Add a `\defgroup <appName>_unit_test` block and `\ingroup app_unit_test`.
+  - Add a brief Doxygen block for each `TEST_CASE`, not just the file header.
+
+21) Test Doxygen Link Preservation
+  - When test harness indirection, fault-injection wrappers, alternate namespaces, or protected/private access would prevent Doxygen from auto-linking the real API under test, include `tests/testXWC.hpp` and use `XWCTEST_DOXYGEN_REF(...)` to add an unreachable reference to the real symbol.
+  - Use this for methods/functions actually under test, especially in unit-test files that rely on wrapper namespaces, injected subclasses, or macro-based indirection.
+
+22) App Header-Only Preference
+  - For MagAOX applications, prefer header-only implementation when it matches existing app patterns and keeps the app easy to include in unit tests.
+  - In the common app pattern, the `.cpp` file should contain only the main entrypoint, while the class declaration and out-of-class inline definitions live in the `.hpp`.
+  - If deviating from this pattern for a specific app, preserve the local convention already established in that app or directory.
 
 When you finish:
 - Summarize what changed.
