@@ -22,6 +22,8 @@ ui*.h
 makefile.*GUI
 gui/**/makefile.*
 
+**/*.gcov
+
 #Ignore any old folders
 **/old/
 
