@@ -91,6 +91,7 @@ def _format_elapsed_hhmm(seconds: float) -> str:
 def _build_elapsed_labels(map_paths: list[str]) -> list[str]:
     """Build elapsed-time labels (hh:mm) relative to first valid timestamp."""
     timestamps = [_parse_filename_timestamp(p) for p in map_paths]
+    start_of_obs = timestamps[0].strftime("%Y-%m-%d %H:%M:%S")
     ref = next((t for t in timestamps if t is not None), None)
     if ref is None:
         return ["00:00"] * len(map_paths)
@@ -100,7 +101,7 @@ def _build_elapsed_labels(map_paths: list[str]) -> list[str]:
             labels.append("00:00")
         else:
             labels.append(_format_elapsed_hhmm((ts - ref).total_seconds()))
-    return labels
+    return start_of_obs, labels
 
 
 def _write_movie(
@@ -114,7 +115,7 @@ def _write_movie(
         return
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     vmin, vmax = _compute_sequence_limits(map_paths)
-    elapsed_labels = _build_elapsed_labels(map_paths)
+    start_of_obs, elapsed_labels = _build_elapsed_labels(map_paths)
     logging.info(
         "Encoding %d frames at %.3g fps -> %s",
         len(map_paths),
@@ -146,14 +147,14 @@ def _write_movie(
     ax.set_ylabel("Y pixels")
     title = ax.set_title("")
     # fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
 
     n_frames = len(frames)
 
     def _update(i: int):
         image.set_data(frames[i])
         title.set_text(
-            f"{movie_label} | frame {i + 1}/{n_frames} | Elapsed {labels[i]}"
+            f"{start_of_obs} | frame {i + 1}/{n_frames} | Elapsed {labels[i]}"
         )
         return [image, title]
 

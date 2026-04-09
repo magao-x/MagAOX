@@ -301,11 +301,12 @@ def main():
     else:
         args.directory = os.path.abspath(args.directory)
 
+    if args.undo:
+        undo_organize(args.directory)
+        
     if not check_directory_validity(args.directory):
         print(f"Directory {args.directory} is not valid. Please check the directory and try again.")
         return
-    if args.undo:
-        undo_organize(args.directory)
     else:
         if not os.path.exists(os.path.join(args.directory, 'ws_config.yaml')):
             print(f"No config file found in {args.directory}. Creating one...")
