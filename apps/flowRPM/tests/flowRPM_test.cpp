@@ -21,7 +21,7 @@ namespace libXWCTest
 /** \defgroup flowRPM_unit_test flowRPM Unit Tests
  * \brief Unit tests for the flowRPM application.
  *
- * \ingroup app_unit_test
+ * \ingroup application_unit_test
  */
 
 /// Namespace for `flowRPM` unit tests.
