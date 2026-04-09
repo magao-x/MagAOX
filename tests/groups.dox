@@ -35,10 +35,15 @@ $ bash ./testMagAOX.bash
   * \ingroup testing
   */
 
-/** \defgroup app_unit_test Application Unit Testing
-  * \brief Unit tests for MagAO-X applications.
+/** \defgroup app_unit_test libXWC::app Unit Testing
   * \ingroup unit_test
   */
+
+/** \defgroup application_unit_test Application Unit Tests
+  * \brief Unit tests for XWCTk applications.
+
+ * \ingroup unit_test
+*/
 
 
 
