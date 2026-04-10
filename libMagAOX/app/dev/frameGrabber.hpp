@@ -75,6 +75,12 @@ namespace dev
  *   For `acquireAndCheckValid` >0 will indicate no data but not an error.  In most cases,
  *   an appropriate state code, such as NOTCONNECTED, should be set as well.
  *
+ * - A derived class may optionally expose
+ *   \code
+ *       int derivedT::frameGrabberPostPublish( IMAGE *imageStream );
+ *   \endcode
+ *   to perform additional publication work immediately after the main image stream semaphores are posted.
+ *
  * - A static configuration variable must be defined in derivedT as
  *   \code
  *       static constexpr bool c_frameGrabber_flippable =true; //or: false
@@ -306,11 +312,44 @@ class frameGrabber
     /// @}
 
   private:
+    /// Call an optional derived-class hook after the main stream publication completes.
+    template <class hookT>
+    static auto postPublishHook( hookT &hookOwner,      /**< [in] derived object that may expose the hook */
+                                 IMAGE *imageStream,    /**< [in] published image stream */
+                                 int    callPriorityTag /**< [in] overload selector preferring the hook */
+                                 ) -> decltype( hookOwner.frameGrabberPostPublish( imageStream ) );
+
+    /// Return success when the derived class does not expose a post-publication hook.
+    static int postPublishHook( derivedT &hookOwner,      /**< [in] derived object lacking the optional hook */
+                                IMAGE    *imageStream,    /**< [in] published image stream */
+                                long      callPriorityTag /**< [in] fallback overload selector */
+    );
+
     derivedT &derived()
     {
         return *static_cast<derivedT *>( this );
     }
 };
+
+template <class derivedT>
+template <class hookT>
+auto frameGrabber<derivedT>::postPublishHook( hookT &hookOwner, IMAGE *imageStream, int callPriorityTag )
+    -> decltype( hookOwner.frameGrabberPostPublish( imageStream ) )
+{
+    static_cast<void>( callPriorityTag );
+
+    return hookOwner.frameGrabberPostPublish( imageStream );
+}
+
+template <class derivedT>
+int frameGrabber<derivedT>::postPublishHook( derivedT &hookOwner, IMAGE *imageStream, long callPriorityTag )
+{
+    static_cast<void>( hookOwner );
+    static_cast<void>( imageStream );
+    static_cast<void>( callPriorityTag );
+
+    return 0;
+}
 
 template <class derivedT>
 int frameGrabber<derivedT>::setupConfig( mx::app::appConfigurator &config )
@@ -707,8 +746,8 @@ int frameGrabber<derivedT>::onPowerOff()
     m_mnwa  = 0;
     m_varwa = 0;
 
-    m_width  = 0;
-    m_height = 0;
+    m_width          = 0;
+    m_height         = 0;
     m_circBuffLength = 1;
 
     updateINDI();
@@ -974,6 +1013,11 @@ void frameGrabber<derivedT>::fgThreadExec()
             m_imageStream->md->write = 0;
             ImageStreamIO_sempost( m_imageStream, -1 );
 
+            if( postPublishHook( derived(), m_imageStream, 0 ) < 0 )
+            {
+                break;
+            }
+
             // Update the latency circ. buffs
             if( m_atimes.maxEntries() > 0 )
             {
@@ -1123,9 +1167,9 @@ int frameGrabber<derivedT>::openShmim()
 
             if( rv != 0 )
             {
-                derivedT::template log<software_critical>( { errno,
-                                                             "Could not get inode for " + m_shmimName +
-                                                                 ". Source process will need to be restarted." } );
+                derivedT::template log<software_critical>(
+                    { errno,
+                      "Could not get inode for " + m_shmimName + ". Source process will need to be restarted." } );
 
                 ImageStreamIO_closeIm( m_imageStream );
 
@@ -1142,20 +1186,20 @@ int frameGrabber<derivedT>::openShmim()
 
             m_width = m_imageStream->md->size[0];
 
-            if( m_imageStream->md->naxis == 2  )
+            if( m_imageStream->md->naxis == 2 )
             {
-                m_height = m_imageStream->md->size[1];
-                m_circBuffLength  = 1;
+                m_height         = m_imageStream->md->size[1];
+                m_circBuffLength = 1;
             }
             else if( m_imageStream->md->naxis == 3 )
             {
-                m_height = m_imageStream->md->size[1];
-                m_circBuffLength  = m_imageStream->md->size[2];
+                m_height         = m_imageStream->md->size[1];
+                m_circBuffLength = m_imageStream->md->size[2];
             }
             else
             {
-                m_height = 1;
-                m_circBuffLength  = 1;
+                m_height         = 1;
+                m_circBuffLength = 1;
             }
 
             m_dataType = m_imageStream->md->datatype;

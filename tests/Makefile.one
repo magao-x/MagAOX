@@ -64,6 +64,11 @@ else ifeq ($(notdir $(TESTNAME)),stdMotionNode_test)
     LDLIBS += -linstGraph
 else ifeq ($(notdir $(TESTNAME)),xigNode_test)
     LDLIBS += -linstGraph
+else ifeq ($(notdir $(TESTNAME)),ocam2KCtrl_test)
+	CPPFLAGS += -I$(PATHNAME)
+	CXXFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CXXFLAGS))
+	CFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CFLAGS))
+	CPPFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CPPFLAGS))
 endif
 
 LDLIBS+=$(TESTLIBS)

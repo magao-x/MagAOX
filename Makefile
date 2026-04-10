@@ -540,7 +540,7 @@ print_role:
 	@echo "MAGAOX_ROLE=$(MAGAOX_ROLE)"
 
 .PHONY: coverage
-coverage:
+coverage: coverage_clean
 	${MAKE} all COVERAGE=1 ALL_APPS=1 NO_GUIS=1
 
 .PHONY: coverage_clean
@@ -549,6 +549,8 @@ coverage_clean:
 	find . -name '*.gcda' -delete
 	find . -name '*.gcov' -delete
 	${MAKE} all_clean COVERAGE=1 ALL_APPS=1
+	cd tests && ${MAKE} realclean COVERAGE=1 || exit 1;
+	cd libMagAOX/logger/tests && ${MAKE} really_clean COVERAGE=1 || exit 1;
 
 .PHONY: valgrind
 valgrind:
