@@ -503,6 +503,7 @@ int adcTracker::appStartup()
     m_indiP_belowMinZD.setDevice( configName() );
     m_indiP_belowMinZD.setName( "belowMinZD" );
     m_indiP_belowMinZD.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_belowMinZD.setRule( pcf::IndiProperty::AtMostOne );
     m_indiP_belowMinZD.setState( INDI_IDLE );
     m_indiP_belowMinZD.setLabel( "Below minZD" );
     m_indiP_belowMinZD.setGroup( "status" );
@@ -515,6 +516,7 @@ int adcTracker::appStartup()
     m_indiP_aboveMaxZD.setDevice( configName() );
     m_indiP_aboveMaxZD.setName( "aboveMaxZD" );
     m_indiP_aboveMaxZD.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_aboveMaxZD.setRule( pcf::IndiProperty::AtMostOne );
     m_indiP_aboveMaxZD.setState( INDI_IDLE );
     m_indiP_aboveMaxZD.setLabel( "Above maxZD" );
     m_indiP_aboveMaxZD.setGroup( "status" );
