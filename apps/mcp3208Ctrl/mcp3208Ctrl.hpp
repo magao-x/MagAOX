@@ -62,6 +62,9 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     float m_fpsTol{ 0 }; ///< The tolerance for detecting a change in FPS.
 
+    std::string m_synchroShmimName; ///< The ImageStreamIO stream used to synchronize acquisition.
+    int         m_synchroPostDelay{ 0 }; ///< Delay after an A/D read in microseconds.
+
     ///@}
 
     // Creating INDI property for desired fps
@@ -81,6 +84,29 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     std::chrono::time_point<std::chrono::high_resolution_clock> m_time_start;
 
     std::vector<uint16_t> m_values; ///< The values read out from the chip
+
+    IMAGE  m_synchroStream{};
+    bool   m_synchroStreamOpen{ false };
+    int    m_synchroSemaphoreNumber{ 5 };
+    sem_t *m_synchroSemaphore{ nullptr };
+
+    virtual int openSynchroStream();
+
+    virtual int claimSynchroSemaphore();
+
+    void closeSynchroStream();
+
+    int acquireTimerAndCheckValid();
+
+    int acquireSynchroAndCheckValid();
+
+    virtual int getRealtime( timespec &ts );
+
+    virtual int waitOnSemaphore( sem_t *sem, timespec &ts );
+
+    virtual int readChannelValue( int channel, uint16_t &value );
+
+    virtual void sleepAfterRead( int usec );
 
   public:
     /// Default c'tor.
@@ -226,6 +252,26 @@ void mcp3208Ctrl::setupConfig()
                 "float",
                 "Tolerance for detecting a change in FPS.  Default is 0." );
 
+    config.add( "synchro.shmimName",
+                "",
+                "synchro.shmimName",
+                argType::Required,
+                "synchro",
+                "shmimName",
+                false,
+                "string",
+                "The ImageStreamIO stream used to synchronize acquisition. Default is timer-driven operation." );
+
+    config.add( "synchro.postDelay",
+                "",
+                "synchro.postDelay",
+                argType::Required,
+                "synchro",
+                "postDelay",
+                false,
+                "int",
+                "Delay after a synchronized A/D read in microseconds. Default is 0." );
+
     config.add( "accel.numChannels",
                 "",
                 "accel.numChannels",
@@ -247,8 +293,15 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fpsProperty, "fps.property" );
     _config( m_fpsElement, "fps.element" );
     _config( m_fpsTol, "fps.tol" );
+    _config( m_synchroShmimName, "synchro.shmimName" );
+    _config( m_synchroPostDelay, "synchro.postDelay" );
 
     _config( m_numChannels, "accel.numChannels" ); // making number of mcp3208 channels we read out configurable
+
+    if( m_synchroPostDelay < 0 )
+    {
+        m_synchroPostDelay = 0;
+    }
 
     return 0;
 }
@@ -301,6 +354,8 @@ int mcp3208Ctrl::appShutdown()
     FRAMEGRABBER_APP_SHUTDOWN;
     TELEMETER_APP_SHUTDOWN;
 
+    closeSynchroStream();
+
     return 0;
 }
 
@@ -314,6 +369,20 @@ int mcp3208Ctrl::configureAcquisition()
     m_height   = 1;
     m_dataType = _DATATYPE_UINT16;
 
+    if( !m_synchroShmimName.empty() )
+    {
+        if( openSynchroStream() != 0 )
+        {
+            return 1;
+        }
+
+        if( claimSynchroSemaphore() != 0 )
+        {
+            closeSynchroStream();
+            return 1;
+        }
+    }
+
     return 0;
 }
 
@@ -326,12 +395,119 @@ int mcp3208Ctrl::startAcquisition()
 {
     /** \todo @PARKER Do anything needed to start the mcp3208 reading out ... probably nothing*/
 
+    if( !m_synchroShmimName.empty() )
+    {
+        if( !m_synchroStreamOpen )
+        {
+            return -1;
+        }
+
+        if( m_synchroSemaphore == nullptr && claimSynchroSemaphore() != 0 )
+        {
+            return -1;
+        }
+
+        ImageStreamIO_semflush( &m_synchroStream, m_synchroSemaphoreNumber );
+    }
+
     m_time_start = std::chrono::high_resolution_clock::now();
 
     return 0;
 }
 
 int mcp3208Ctrl::acquireAndCheckValid()
+{
+    if( !m_synchroShmimName.empty() )
+    {
+        return acquireSynchroAndCheckValid();
+    }
+
+    return acquireTimerAndCheckValid();
+}
+
+int mcp3208Ctrl::loadImageIntoStream( void *dest )
+{
+    memcpy( dest, m_values.data(), m_values.size() * sizeof( uint16_t ) );
+    return 0;
+}
+
+int mcp3208Ctrl::reconfig()
+{
+    closeSynchroStream();
+    return 0;
+}
+
+int mcp3208Ctrl::openSynchroStream()
+{
+    if( m_synchroShmimName.empty() || m_synchroStreamOpen )
+    {
+        return 0;
+    }
+
+    if( ImageStreamIO_openIm( &m_synchroStream, m_synchroShmimName.c_str() ) != 0 )
+    {
+        return 1;
+    }
+
+    if( m_synchroStream.md[0].sem < SEMAPHORE_MAXVAL )
+    {
+        ImageStreamIO_closeIm( &m_synchroStream );
+        memset( &m_synchroStream, 0, sizeof( m_synchroStream ) );
+        return 1;
+    }
+
+    m_synchroStreamOpen = true;
+    return 0;
+}
+
+int mcp3208Ctrl::claimSynchroSemaphore()
+{
+    if( !m_synchroStreamOpen )
+    {
+        return -1;
+    }
+
+    if( m_synchroSemaphore != nullptr )
+    {
+        return 0;
+    }
+
+    m_synchroSemaphoreNumber = ImageStreamIO_getsemwaitindex( &m_synchroStream, m_synchroSemaphoreNumber );
+    if( m_synchroSemaphoreNumber < 0 )
+    {
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "No valid semaphore found for " + m_synchroShmimName } );
+    }
+
+    m_synchroSemaphore = m_synchroStream.semptr[m_synchroSemaphoreNumber];
+
+    if( m_synchroSemaphore == nullptr )
+    {
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "No valid semaphore pointer found for " + m_synchroShmimName } );
+    }
+
+    return 0;
+}
+
+void mcp3208Ctrl::closeSynchroStream()
+{
+    if( m_synchroStreamOpen )
+    {
+        if( m_synchroSemaphore != nullptr && m_synchroSemaphoreNumber >= 0 )
+        {
+            m_synchroStream.semReadPID[m_synchroSemaphoreNumber] = 0;
+        }
+
+        ImageStreamIO_closeIm( &m_synchroStream );
+    }
+
+    memset( &m_synchroStream, 0, sizeof( m_synchroStream ) );
+    m_synchroSemaphore  = nullptr;
+    m_synchroStreamOpen = false;
+}
+
+int mcp3208Ctrl::acquireTimerAndCheckValid()
 {
     while( !m_shutdown && !m_reconfig )
     {
@@ -346,7 +522,10 @@ int mcp3208Ctrl::acquireAndCheckValid()
 
             for( int i = 0; i < m_numChannels; ++i )
             {
-                m_values[i] = m_adc.read( i );
+                if( readChannelValue( i, m_values[i] ) < 0 )
+                {
+                    return 1;
+                }
             }
 
             m_trigger = m_trigger - m_gain * ( elapsed.count() - nano_sec_target );
@@ -362,15 +541,78 @@ int mcp3208Ctrl::acquireAndCheckValid()
     return 0;
 }
 
-int mcp3208Ctrl::loadImageIntoStream( void *dest )
+int mcp3208Ctrl::acquireSynchroAndCheckValid()
 {
-    memcpy( dest, m_values.data(), m_values.size() * sizeof( uint16_t ) );
+    timespec ts;
+
+    if( m_synchroSemaphore == nullptr )
+    {
+        m_reconfig = true;
+        return 1;
+    }
+
+    errno = 0;
+    if( getRealtime( ts ) < 0 )
+    {
+        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
+    }
+
+    ts.tv_sec += 1;
+
+    errno = 0;
+    if( waitOnSemaphore( m_synchroSemaphore, ts ) != 0 )
+    {
+        if( errno == ETIMEDOUT || errno == EINTR )
+        {
+            return 1;
+        }
+
+        log<software_error>( { __FILE__, __LINE__, errno, "sem_timedwait" } );
+        m_reconfig = true;
+        return 1;
+    }
+
+    for( int i = 0; i < m_numChannels; ++i )
+    {
+        if( readChannelValue( i, m_values[i] ) < 0 )
+        {
+            m_reconfig = true;
+            return 1;
+        }
+    }
+
+    if( getRealtime( m_currImageTimestamp ) < 0 )
+    {
+        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
+    }
+
+    sleepAfterRead( m_synchroPostDelay );
+
     return 0;
 }
 
-int mcp3208Ctrl::reconfig()
+int mcp3208Ctrl::getRealtime( timespec &ts )
 {
+    return clock_gettime( CLOCK_REALTIME, &ts );
+}
+
+int mcp3208Ctrl::waitOnSemaphore( sem_t *sem, timespec &ts )
+{
+    return sem_timedwait( sem, &ts );
+}
+
+int mcp3208Ctrl::readChannelValue( int channel, uint16_t &value )
+{
+    value = m_adc.read( channel );
     return 0;
+}
+
+void mcp3208Ctrl::sleepAfterRead( int usec )
+{
+    if( usec > 0 )
+    {
+        mx::sys::microSleep( usec );
+    }
 }
 
 int mcp3208Ctrl::checkRecordTimes()
