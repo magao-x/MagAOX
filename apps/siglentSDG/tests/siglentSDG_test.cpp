@@ -16,7 +16,7 @@ using namespace MagAOX::app;
 namespace SDGTEST
 {
 
-class siglentSDG_test : public siglentSDG 
+class siglentSDG_test : public siglentSDG
 {
 
 public:
@@ -113,7 +113,7 @@ SCENARIO( "Parsing the OUTP? response", "[siglentSDG]" )
    GIVEN("An invalid response to OUTP from the SDG")
    {
       int rv;
-      
+
       WHEN("Invalid OUTP passed, no sp")
       {
          int channel = -10;
@@ -191,7 +191,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          REQUIRE(phse ==4.3567 );
       }
    }
-   
+
    GIVEN("An invalid response to BSWV from the SDG")
    {
       int rv;
@@ -214,7 +214,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -1);
       }
-      
+
       WHEN("An invalid BSWV passed - wrong response")
       {
          int channel = -10;
@@ -233,7 +233,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -2);
       }
-   
+
       WHEN("An invalid BSWV passed - bad channel spec, no C")
       {
          int channel = -10;
@@ -252,7 +252,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -3);
       }
-      
+
       WHEN("An invalid BSWV passed - bad channel spec, too short ")
       {
          int channel = -10;
@@ -271,7 +271,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -4);
       }
-      
+
       WHEN("An invalid BSWV passed - bad WVTP indicator")
       {
          int channel = -10;
@@ -290,7 +290,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -5);
       }
-      
+
       WHEN("An invalid BSWV passed - wvtp not SINE")
       {
          int channel = -10;
@@ -328,7 +328,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -10);
       }
-      
+
       WHEN("An invalid BSWV passed - bad PERI indicator")
       {
          int channel = -10;
@@ -347,7 +347,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -11);
       }
-      
+
       WHEN("An invalid BSWV passed - bad AMP indicator")
       {
          int channel = -10;
@@ -366,7 +366,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -12);
       }
-      
+
       WHEN("An invalid BSWV passed - bad AMPVRMS indicator")
       {
          int channel = -10;
@@ -385,7 +385,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -13);
       }
-      
+
       WHEN("An invalid BSWV passed - bad OFST indicator")
       {
          int channel = -10;
@@ -404,7 +404,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -14);
       }
-      
+
       WHEN("An invalid BSWV passed - bad HLEV indicator")
       {
          int channel = -10;
@@ -423,7 +423,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -15);
       }
-      
+
       WHEN("An invalid BSWV passed - bad LLEV indicator")
       {
          int channel = -10;
@@ -442,7 +442,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -16);
       }
-      
+
       WHEN("An invalid BSWV passed - bad PHSE indicator")
       {
          int channel = -10;
@@ -481,7 +481,7 @@ SCENARIO( "Parsing the MDWV? response", "[siglentSDG]" )
          REQUIRE(channel == 1);
          REQUIRE(state == "OFF");
      }
-     
+
       WHEN("Valid MDWV passed, with state on")
       {
         //We ignore the rest of the string
@@ -495,7 +495,7 @@ SCENARIO( "Parsing the MDWV? response", "[siglentSDG]" )
          REQUIRE(state == "ON");
      }
    }
-   
+
    GIVEN("An invalid response to MDWV from the SDG")
    {
       int rv;
@@ -509,7 +509,7 @@ SCENARIO( "Parsing the MDWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -1);
       }
-     
+
       WHEN("invalid MDWV passed - wrong command")
       {
          int channel = -10;
@@ -519,7 +519,7 @@ SCENARIO( "Parsing the MDWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -2);
       }
-     
+
       WHEN("invalid MDWV passed - no C")
       {
          int channel = -10;
@@ -529,7 +529,7 @@ SCENARIO( "Parsing the MDWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -3);
       }
-     
+
       WHEN("invalid MDWV passed - no channel")
       {
          int channel = -10;
@@ -539,8 +539,8 @@ SCENARIO( "Parsing the MDWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == 0);
          REQUIRE(channel == 0);
-      }   
-     
+      }
+
       WHEN("invalid MDWV passed - no STATE")
       {
          int channel = -10;
@@ -570,7 +570,7 @@ SCENARIO( "Parsing the SWWV? response", "[siglentSDG]" )
          REQUIRE(channel == 1);
          REQUIRE(state == "OFF");
      }
-     
+
       WHEN("Valid SWWV passed, with state on")
       {
         //We ignore the rest of the string
@@ -584,7 +584,7 @@ SCENARIO( "Parsing the SWWV? response", "[siglentSDG]" )
          REQUIRE(state == "ON");
      }
    }
-   
+
    GIVEN("An invalid response to SWWV from the SDG")
    {
       int rv;
@@ -598,7 +598,7 @@ SCENARIO( "Parsing the SWWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -1);
       }
-     
+
       WHEN("invalid SWWV passed - wrong command")
       {
          int channel = -10;
@@ -608,7 +608,7 @@ SCENARIO( "Parsing the SWWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -2);
       }
-     
+
       WHEN("invalid SWWV passed - no C")
       {
          int channel = -10;
@@ -618,7 +618,7 @@ SCENARIO( "Parsing the SWWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -3);
       }
-     
+
       WHEN("invalid SWWV passed - no channel")
       {
          int channel = -10;
@@ -628,8 +628,8 @@ SCENARIO( "Parsing the SWWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == 0);
          REQUIRE(channel == 0);
-      }   
-     
+      }
+
       WHEN("invalid SWWV passed - no STATE")
       {
          int channel = -10;
@@ -660,7 +660,7 @@ SCENARIO( "Parsing the BTWV? response", "[siglentSDG]" )
          REQUIRE(channel == 1);
          REQUIRE(state == "OFF");
      }
-     
+
       WHEN("Valid BTWV passed, with state on")
       {
         //We ignore the rest of the string
@@ -674,7 +674,7 @@ SCENARIO( "Parsing the BTWV? response", "[siglentSDG]" )
          REQUIRE(state == "ON");
      }
    }
-   
+
    GIVEN("An invalid response to BTWV from the SDG")
    {
       int rv;
@@ -688,7 +688,7 @@ SCENARIO( "Parsing the BTWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -1);
       }
-     
+
       WHEN("invalid BTWV passed - wrong command")
       {
          int channel = -10;
@@ -698,7 +698,7 @@ SCENARIO( "Parsing the BTWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -2);
       }
-     
+
       WHEN("invalid BTWV passed - no C")
       {
          int channel = -10;
@@ -708,7 +708,7 @@ SCENARIO( "Parsing the BTWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -3);
       }
-     
+
       WHEN("invalid BTWV passed - no channel")
       {
          int channel = -10;
@@ -718,8 +718,8 @@ SCENARIO( "Parsing the BTWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == 0);
          REQUIRE(channel == 0);
-      }   
-     
+      }
+
       WHEN("invalid BTWV passed - no STATE")
       {
          int channel = -10;
@@ -750,7 +750,7 @@ SCENARIO( "Parsing the ARWV? response", "[siglentSDG]" )
          REQUIRE(channel == 1);
          REQUIRE(index == 0);
      }
-     
+
       WHEN("Valid ARWV passed, with index 1")
       {
         //We ignore the rest of the string
@@ -764,7 +764,7 @@ SCENARIO( "Parsing the ARWV? response", "[siglentSDG]" )
          REQUIRE(index == 1);
      }
    }
-   
+
    GIVEN("An invalid response to ARWV from the SDG")
    {
       int rv;
@@ -778,7 +778,7 @@ SCENARIO( "Parsing the ARWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -1);
       }
-     
+
       WHEN("invalid ARWV passed - wrong command")
       {
          int channel = -10;
@@ -788,7 +788,7 @@ SCENARIO( "Parsing the ARWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -2);
       }
-     
+
       WHEN("invalid ARWV passed - no C")
       {
          int channel = -10;
@@ -798,7 +798,7 @@ SCENARIO( "Parsing the ARWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == -3);
       }
-     
+
       WHEN("invalid ARWV passed - no channel")
       {
          int channel = -10;
@@ -808,8 +808,8 @@ SCENARIO( "Parsing the ARWV? response", "[siglentSDG]" )
 
          REQUIRE(rv == 0);
          REQUIRE(channel == 0);
-      }   
-     
+      }
+
       WHEN("invalid ARWV passed - no INDEX")
       {
          int channel = -10;
@@ -822,4 +822,4 @@ SCENARIO( "Parsing the ARWV? response", "[siglentSDG]" )
    }
 }
 
-} //namespace siglentSDG_test 
+} //namespace siglentSDG_test

@@ -7,6 +7,7 @@
 #ifndef dmRecon_hpp
 #define dmRecon_hpp
 
+#include <atomic>
 #include <limits>
 
 #include <mx/improc/eigenCube.hpp>
@@ -20,6 +21,8 @@
 #include <mx/math/cuda/cudaPtr.hpp>
 #include <mx/math/cuda/cublasHandle.hpp>
 #include <mx/math/cuda/templateCublas.hpp>
+#include <mx/math/eigenLapack.hpp>
+#include <mx/sigproc/basisUtils2D.hpp>
 
 namespace MagAOX
 {
@@ -118,10 +121,17 @@ class dmRecon : public MagAOXApp<true>,
      *@{
      */
 
-    std::string m_loopNumber{ "1" }; ///< The loop number.  Default is 1 as in aol1.
+    int m_loopNumber{ 1 }; ///< The loop number.  Default is 1 as in aol1.
+
+    std::string m_respMPath; ///< Optional response matrix.  If set then CM modes are converted by this response.
 
     std::string m_fpsSource{ "camwfs" }; /**< Device name for getting fps of the loop.
                                               This device must have *.fps.current.  Default is camwfs*/
+
+    int m_numModes{ 0 }; ///< Number of modes to reconstruct.  If 0 (default) all modes in CM are used.
+
+    int m_inverseNumModes{
+        0 }; /**< Number of modes to use for pseudo-inverse truncation.  If 0 (default) all modes are used.*/
 
     uint16_t m_gpuIndex{ 0 }; /**< Index of the GPU to use for calculations */
 
@@ -129,33 +139,49 @@ class dmRecon : public MagAOXApp<true>,
 
     ///@}
 
+    mx::improc::eigenImage<float> m_respM;
+
+    uint32_t m_width{ 0 };
+
+    uint32_t m_height{ 0 };
+
+    uint32_t m_depth{ 0 };
+
     float m_fps{ 0 }; ///< Current FPS from the FPS source.
 
-    mx::improc::eigenImage<float> m_maskedDMModes;
+    mx::improc::eigenImage<realT> m_PInv; ///< The pseudo-inverse
 
     // clang-format off
     #ifdef MXLIB_CUDA
 
-    mx::cuda::cudaPtr<float> m_maskedDMModes_GPU;
+    mx::cuda::cudaPtr<realT> m_PInv_GPU; ///< The pseudo-inverse on the GPU
 
     #endif
     // clang-format on
 
-    bool m_dmModesReady{ false }; ///< Flag indicating that the DM modes are ready for processing
+    std::atomic<bool> m_dmModesReady{ false }; ///< Flag indicating that the DM modes are ready for processing
 
     mx::improc::eigenImage<float> m_mask;
 
     std::vector<size_t> m_maskIDX; ///< The index of masked pixels
 
-    bool m_dmMaskReady{ false }; ///< Flag indicating that the DM mask is ready for processing
+    std::atomic<bool> m_dmMaskReady{ false }; ///< Flag indicating that the DM mask is ready for processing
 
-    bool m_commandReady{ false }; ///< Flag indicating that all sizes match and arrays are ready for processing
+    std::atomic<bool> m_commandReady{ false }; ///< Flag indicating that all sizes match and arrays are ready for processing
 
-    bool m_fgWaiting{ false }; ///< Flag indicating that the FG thread is waiting for the command thread
+    std::atomic<bool> m_fgWaiting{ false }; ///< Flag indicating that the FG thread is waiting for the command thread
 
     mx::improc::eigenImage<float> m_command; ///< The DM command, copied out of the incoming shmim
 
     mx::improc::eigenImage<float> m_modevals; ///< The calculated mode amplitudes
+
+    std::atomic<bool> m_writeDMf{ false };
+
+    std::string                  m_monShmimName;
+    mx::improc::milkImage<float> m_modevalMon; ///< The actual calculated modevals.
+
+    mx::improc::milkImage<float> m_modeval;
+    mx::improc::milkImage<float> m_modevalDiff;
 
     // clang-format off
     #ifdef MXLIB_CUDA
@@ -169,7 +195,9 @@ class dmRecon : public MagAOXApp<true>,
 
     sem_t m_smSemaphore{ 0 }; ///< Semaphore used to synchronize the fg thread and the dm command thread.
 
-    bool m_updated{ false }; ///< Flag indicating that the mode vals have been updated
+    std::atomic<bool> m_updated{ false }; ///< Flag indicating that the mode vals have been updated
+
+    std::mutex m_modevalsMutex; ///< Guards the modevals buffer during producer/consumer handoff.
 
     mx::cuda::cublasHandle m_cublas; ///< Handle for the cuBLAS library
 
@@ -294,6 +322,9 @@ class dmRecon : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_fps;
 
+    pcf::IndiProperty m_indiP_writeDMf;
+    INDI_NEWCALLBACK_DECL( dmRecon, m_indiP_writeDMf );
+
     ///@}
 
     /** \name Telemeter Interface
@@ -310,6 +341,8 @@ class dmRecon : public MagAOXApp<true>,
 
 inline dmRecon::dmRecon() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
+    frameGrabberT::m_ownShmim = false;
+
     return;
 }
 
@@ -324,6 +357,36 @@ inline void dmRecon::setupConfig()
                 false,
                 "int",
                 "The loop number.  Default is 1 as in aol1." );
+
+    config.add( "recon.respMPath",
+                "",
+                "recon.respMPath",
+                argType::Required,
+                "recon",
+                "respMPath",
+                false,
+                "int",
+                "Optional response matrix.  If set then CM modes are converted by this response." );
+
+    config.add( "recon.numModes",
+                "",
+                "recon.numModes",
+                argType::Required,
+                "recon",
+                "numModes",
+                false,
+                "int",
+                "Number of modes to reconstruct.  If 0 (default) all modes in CM are used." );
+
+    config.add( "recon.inverseNumModes",
+                "",
+                "recon.inverseNumModes",
+                argType::Required,
+                "recon",
+                "inverseNumModes",
+                false,
+                "int",
+                "Number of modes to use for pseudo-inverse truncation.  If 0 (default) all modes are used." );
 
     config.add( "recon.fpsSource",
                 "",
@@ -369,25 +432,32 @@ inline void dmRecon::setupConfig()
 
 inline int dmRecon::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-
     _config( m_loopNumber, "recon.loopNumber" );
+    _config( m_respMPath, "recon.respMPath" );
+    _config( m_numModes, "recon.numModes" );
+    _config( m_inverseNumModes, "recon.inverseNumModes" );
     _config( m_fpsSource, "recon.fpsSource" );
     _config( m_gpuIndex, "recon.gpuIndex" );
     _config( m_useGPU, "recon.useGPU" );
 
-    std::string loopName = "aol" + m_loopNumber;
+    std::string loopName = std::format( "aol{}", m_loopNumber );
 
-    dmModesSMT::m_shmimName = loopName + "_CMmodesDM";
+    dmModesSMT::m_shmimName        = loopName + "_CMmodesDM";
+    dmModesSMT::m_getExistingFirst = true;
     SHMIMMONITORT_LOAD_CONFIG( dmModesSMT, _config );
 
-    dmMaskSMT::m_shmimName = loopName + "_dmmask";
-    SHMIMMONITORT_LOAD_CONFIG( dmMaskSMT, _config );
-
-    dmCommandSMT::m_shmimName = "dm01disp_delta";
+    dmCommandSMT::m_shmimName        = std::format( "dm{:02}disp_delta", m_loopNumber );
+    dmCommandSMT::m_getExistingFirst = true;
     SHMIMMONITORT_LOAD_CONFIG( dmCommandSMT, _config );
+
+    dmMaskSMT::m_shmimName        = std::format( "dm{:02}disp_actmask", m_loopNumber );
+    dmMaskSMT::m_getExistingFirst = true;
+    SHMIMMONITORT_LOAD_CONFIG( dmMaskSMT, _config );
 
     frameGrabberT::m_shmimName = loopName + "_modevalDMf";
     FRAMEGRABBER_LOAD_CONFIG( _config );
+
+    m_monShmimName = frameGrabberT::m_shmimName + "_mon";
 
     TELEMETER_LOAD_CONFIG( _config );
 
@@ -401,21 +471,31 @@ inline void dmRecon::loadConfig()
 
 inline int dmRecon::appStartup()
 {
-
     REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsSource, std::string( "fps" ) );
 
     createROIndiNumber( m_indiP_fps, "fps" );
     m_indiP_fps.add( pcf::IndiElement( "current" ) );
     if( registerIndiPropertyReadOnly( m_indiP_fps ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
+        log<software_error>( { "" } );
         return -1;
     }
 
+    CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_writeDMf, "writeDMf" );
+
     if( sem_init( &m_smSemaphore, 0, 0 ) < 0 )
     {
-        log<software_critical>( { __FILE__, __LINE__, errno, 0, "Initializing S.M. semaphore" } );
+        log<software_critical>( { errno, "Initializing S.M. semaphore" } );
         return -1;
+    }
+
+    if( m_respMPath != "" )
+    {
+        mx::fits::fitsFile<float> ff;
+        ff.read( m_respM, m_respMPath );
+
+        m_width  = sqrt( m_respM.rows() );
+        m_height = m_width;
     }
 
     dmModesSMT::m_getExistingFirst = true;
@@ -445,6 +525,15 @@ int dmRecon::appLogic()
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
+    if( m_writeDMf.load() )
+    {
+        updateSwitchIfChanged( m_indiP_writeDMf, "toggle", pcf::IndiElement::On );
+    }
+    else
+    {
+        updateSwitchIfChanged( m_indiP_writeDMf, "toggle", pcf::IndiElement::Off );
+    }
+
     SHMIMMONITORT_UPDATE_INDI( dmModesSMT );
     SHMIMMONITORT_UPDATE_INDI( dmMaskSMT );
     SHMIMMONITORT_UPDATE_INDI( dmCommandSMT );
@@ -469,7 +558,8 @@ inline int dmRecon::appShutdown()
 
 int dmRecon::setGPU()
 {
-#ifdef MXLIB_CUDA
+    // clang-format off
+    #ifdef MXLIB_CUDA // clang-format on
 
     if( !m_useGPU )
     {
@@ -484,9 +574,7 @@ int dmRecon::setGPU()
     if( ce != cudaSuccess )
     {
 
-        log<software_error>( { __FILE__,
-                               __LINE__,
-                               std::format( "cudaGetDeviceCount returned error: "
+        log<software_error>( { std::format( "cudaGetDeviceCount returned error: "
                                             "[{}] {}\nNOT USING GPU",
                                             cudaGetErrorName( ce ),
                                             cudaGetErrorString( ce ) ) } );
@@ -511,7 +599,7 @@ int dmRecon::setGPU()
     if( deviceCount == 0 )
     {
         msg += "      no devices found!\nNOT USING GPU";
-        log<software_error>( { __FILE__, __LINE__, msg } );
+        log<software_error>( { msg } );
         m_useGPU = false;
         state( state(), true );
         return -1;
@@ -528,7 +616,7 @@ int dmRecon::setGPU()
                                 "[{}] {}\nNOT USING GPU",
                                 cudaGetErrorName( ce ),
                                 cudaGetErrorString( ce ) );
-            log<software_error>( { __FILE__, __LINE__, msg } );
+            log<software_error>( { msg } );
             m_useGPU = false;
             state( state(), true );
             return -1;
@@ -543,7 +631,7 @@ int dmRecon::setGPU()
                                 "[{}] {}\nNOT USING GPU",
                                 cudaGetErrorName( ce ),
                                 cudaGetErrorString( ce ) );
-            log<software_error>( { __FILE__, __LINE__, msg } );
+            log<software_error>( { msg } );
             m_useGPU = false;
             state( state(), true );
             return -1;
@@ -566,7 +654,7 @@ int dmRecon::setGPU()
     if( m_gpuIndex >= deviceCount )
     {
         msg += std::format( "gpuIndex = {} is not valid for {} devices\nNOT USING GPU", m_gpuIndex, deviceCount );
-        log<software_error>( { __FILE__, __LINE__, msg } );
+        log<software_error>( { msg } );
         m_useGPU = false;
         state( state(), true );
         return -1;
@@ -580,7 +668,7 @@ int dmRecon::setGPU()
                             "[{}] {}\nNOT USING GPU",
                             cudaGetErrorName( ce ),
                             cudaGetErrorString( ce ) );
-        log<software_error>( { __FILE__, __LINE__, msg } );
+        log<software_error>( { msg } );
         m_useGPU = false;
         state( state(), true );
         return -1;
@@ -596,7 +684,7 @@ int dmRecon::setGPU()
                             "[{}] {}\nNOT USING GPU",
                             cublasGetStatusName( cbs ),
                             cublasGetStatusString( cbs ) );
-        log<software_error>( { __FILE__, __LINE__, msg } );
+        log<software_error>( { msg } );
         m_useGPU = false;
         state( state(), true );
         return -1;
@@ -608,29 +696,55 @@ int dmRecon::setGPU()
 
     return 0;
 
-#else // MXLIB_CUDA
+        // clang-format off
+    #else // MXLIB_CUDA
+    // clang-format on
 
     if( m_useGPU )
     {
-        log<software_error>( { __FILE__, __LINE__, "mxlib was compiled without CUDA support. NOT USING GPU" } );
+        log<software_error>( { "mxlib was compiled without CUDA support. NOT USING GPU" } );
 
         m_useGPU = false;
         state( state(), true );
         return -1;
     }
+
     return 0;
 
-#endif // MXLIB_CUDA
+        // clang-format off
+    #endif // MXLIB_CUDA
+    // clang-format on
 }
 
 int dmRecon::allocate( const dmModesShmimT & )
 {
     m_dmModesReady = false;
 
+    std::cerr << "modes not ready\n";
+
     dmCommandSMT::m_restart = true;
 
+    if( m_respM.rows() == 0 )
+    {
+        m_width  = dmModesSMT::m_width;
+        m_height = dmModesSMT::m_height;
+    }
+
+    if( m_numModes == 0 )
+    {
+        m_depth = dmModesSMT::m_depth;
+    }
+    else
+    {
+        m_depth = m_numModes;
+        if( m_depth > dmModesSMT::m_depth )
+        {
+            m_depth = dmModesSMT::m_depth;
+        }
+    }
+
     // Can't process modes until mask is ready.
-    if( dmModesSMT::m_width != dmMaskSMT::m_width || dmModesSMT::m_height != dmMaskSMT::m_height || !m_dmMaskReady )
+    if( m_width != dmMaskSMT::m_width || m_height != dmMaskSMT::m_height || !m_dmMaskReady.load() )
     {
         mx::sys::milliSleep( 1000 );
         dmModesSMT::m_restart = true;
@@ -645,62 +759,108 @@ int dmRecon::allocate( const dmModesShmimT & )
 
 int dmRecon::processImage( void *curr_src, const dmModesShmimT & )
 {
-    if( m_dmModesReady == true )
+    if( m_dmModesReady.load() == true )
     {
-        // This means an new image has come in.  We need to reset and restart everything.
+        // This means new image has come in.  We need to reset and restart everything.
         dmModesSMT::m_restart   = true;
         dmMaskSMT::m_restart    = true;
         dmCommandSMT::m_restart = true;
         return 0;
     }
 
-    mx::improc::eigenCube<float> dmModes(dmModesSMT::m_width, dmModesSMT::m_height, dmModesSMT::m_depth);
+    mx::improc::eigenCube<float> dmModes( dmModesSMT::m_width, dmModesSMT::m_height, m_depth );
 
-    for(size_t n =0; n < dmModesSMT::m_width * dmModesSMT::m_height* dmModesSMT::m_depth; ++n)
+    for( size_t n = 0; n < dmModesSMT::m_width * dmModesSMT::m_height * m_depth; ++n )
     {
         dmModes.data()[n] = reinterpret_cast<float *>( curr_src )[n];
     }
-        
 
     // Wait for m_commandReady to become false
-    while( m_commandReady == true && !m_shutdown && dmModesSMT::m_restart == false )
+    while( m_commandReady.load() == true && !m_shutdown && dmModesSMT::m_restart == false )
     {
         mx::sys::milliSleep( 1000 );
     }
 
-    /*mx::improc::eigenCube<float> dmModes(
-        reinterpret_cast<float *>( curr_src ), dmModesSMT::m_width, dmModesSMT::m_height, dmModesSMT::m_depth );
-    */
+    if( m_respM.rows() > 0 )
+    {
+        mx::improc::eigenCube<realT> tmpc;
 
-    /*int w = dmModesSMT::m_width;
-    int h = dmModesSMT::m_height;
-    float * dmModes = reinterpret_cast<float *>( curr_src );*/
+        int nr = sqrt( m_respM.rows() );
 
+        tmpc.resize( nr, nr, dmModes.planes() );
 
-    std::cerr << "DM modes: " << dmModesSMT::m_width << ' ' << dmModesSMT::m_height << ' ' << dmModesSMT::m_depth << '\n';
-    //std::cerr << dmModes.asVectors().square().sum() << '\n';
-    
-    std::cerr << "Mask pixels: " << m_maskIDX.size() << '\n';
+        std::cerr << __LINE__ << '\n';
 
-    m_maskedDMModes.resize( dmModesSMT::m_depth, m_maskIDX.size() );
+        for( int p = 0; p < tmpc.planes(); ++p )
+        {
+            // cast to matrices for math
+            Eigen::Map<Eigen::Matrix<float,-1,-1>> outim(tmpc.image(p).data(), nr*nr,1);
+            Eigen::Map<Eigen::Matrix<float,-1,-1>> inim(dmModes.image(p).data(), dmModes.rows()*dmModes.cols(),1);
+
+            outim = (m_respM.matrix() * inim);
+
+            float norm = sqrt(tmpc.image(p).square().sum()/m_maskIDX.size());
+            float scale = sqrt(dmModes.image(p).square().sum()/ (dmModes.rows()*dmModes.cols()));
+
+            tmpc.image(p) *= scale/norm;
+        }
+
+        dmModes = tmpc;
+
+        mx::fits::fitsFile<float> ff;
+        ff.write( "wmodes.fits", dmModes );
+    }
+
+    mx::improc::eigenImage<float> maskedDMModes;
+
+    maskedDMModes.resize( m_maskIDX.size(), dmModes.planes() );
 
     // Load only the unmasked pixels
-    for( int rr = 0; rr < m_maskedDMModes.rows(); ++rr )
+    for( int rr = 0; rr < maskedDMModes.cols(); ++rr )
     {
         for( size_t n = 0; n < m_maskIDX.size(); ++n )
         {
-            m_maskedDMModes(rr,n) = 0;
+            maskedDMModes( n, rr ) = dmModes.image( rr ).data()[m_maskIDX[n]];
         }
     }
 
-    std::cerr << "DM modes masked sum: " << m_maskedDMModes.square().sum() << '\n';
+    realT condition;
+
+    int nRejected;
+
+    realT maxCondition = -1 * m_inverseNumModes; // Specify number of modes to keep.  If 0 it's all.
+
+    int rv = mx::math::eigenPseudoInverse( m_PInv, condition, nRejected, maskedDMModes, maxCondition );
+
+    if( rv < 0 )
+    {
+        log<software_error>( { 0, rv, "error in eigenPseudoInverse " } );
+        m_shutdown = 1;
+        return -1;
+    }
+
+    std::cerr << "PInv: " << m_PInv.rows() << ' ' << m_PInv.cols() << '\n';
+
+    mx::fits::fitsFile<float> ff;
+    ff.write( "PInv.fits", m_PInv );
+
+    log<text_log>( std::format( "Inverted CMmodesDM. Rejected {} "
+                                "of {} modes, condition numer = {}",
+                                nRejected,
+                                dmModes.planes(),
+                                condition ) );
+
     m_dmModesReady = true;
+
+    std::cerr << "modes ready\n";
     return 0;
 }
 
 int dmRecon::allocate( const dmMaskShmimT & )
 {
     m_dmMaskReady = false;
+
+    std::cerr << "mask not ready\n";
 
     dmCommandSMT::m_restart = true;
 
@@ -710,18 +870,19 @@ int dmRecon::allocate( const dmMaskShmimT & )
 
 int dmRecon::processImage( void *curr_src, const dmMaskShmimT & )
 {
-    if( m_dmMaskReady == true )
+    if( m_dmMaskReady.load() == true )
     {
         // This means an new image has come in.  We need to reset and restart everything.
-        dmModesSMT::m_restart   = true;
-        dmMaskSMT::m_restart    = true;
+        dmModesSMT::m_restart = true;
+        dmMaskSMT::m_restart  = true;
+
         dmCommandSMT::m_restart = true;
 
         return 0;
     }
 
     // Wait for m_commandReady to become false
-    while( m_commandReady == true && !m_shutdown && dmMaskSMT::m_restart == false )
+    while( m_commandReady.load() == true && !m_shutdown && dmMaskSMT::m_restart == false )
     {
         mx::sys::milliSleep( 1000 );
     }
@@ -748,24 +909,25 @@ int dmRecon::processImage( void *curr_src, const dmMaskShmimT & )
         }
     }
 
-    std::cerr << n <<  ' ' << nmax << '\n';
+    std::cerr << n << ' ' << nmax << '\n';
 
     std::cerr << "Got mask of size " << m_mask.rows() << " x " << m_mask.cols() << " with " << m_maskIDX.size()
               << " good pixels.\n";
 
     m_dmMaskReady = true;
+    std::cerr << "mask ready\n";
     return 0;
 }
 
 int dmRecon::allocate( const dmCommandShmimT & )
 {
     // This is the only place that m_commandReady can be changed
-    if( !m_dmModesReady || !m_dmMaskReady || dmCommandSMT::m_width != dmModesSMT::m_width ||
-        dmCommandSMT::m_height != dmModesSMT::m_height || dmCommandSMT::m_width != dmMaskSMT::m_width ||
-        dmCommandSMT::m_height != dmMaskSMT::m_height )
-    {
-        m_commandReady = false;
+    m_commandReady = false;
+    std::cerr << "command not ready\n";
 
+    if( !m_dmModesReady.load() || !m_dmMaskReady.load() || dmCommandSMT::m_width != m_width || dmCommandSMT::m_height != m_height ||
+        dmCommandSMT::m_width != dmMaskSMT::m_width || dmCommandSMT::m_height != dmMaskSMT::m_height )
+    {
         dmCommandSMT::m_restart   = true;
         frameGrabberT::m_reconfig = true;
 
@@ -774,8 +936,9 @@ int dmRecon::allocate( const dmCommandShmimT & )
         return 0; // This won't log an error, but setting m_restart will cause it to reconnect again until sizes match
     }
 
-    if( !m_fgWaiting )
+    if( !m_fgWaiting.load() )
     {
+        frameGrabberT::m_reconfig = true;
         mx::sys::milliSleep( 1000 );
 
         dmCommandSMT::m_restart = true;
@@ -784,68 +947,73 @@ int dmRecon::allocate( const dmCommandShmimT & )
 
     m_command.resize( m_maskIDX.size(), 1 );
 
-    m_modevals.resize( m_maskedDMModes.rows(), 1 );
+    m_modevals.resize( m_PInv.rows(), 1 );
 
-#ifdef MXLIB_CUDA
+    m_modevalMon.create( m_monShmimName, m_PInv.rows(), 1 );
+
+    m_modeval.open(std::format("aol{}_modevalDM", m_loopNumber));
+
+    m_modevalDiff.create( std::format("aol{}_modevalDMf_diff", m_loopNumber), m_PInv.rows(), 1 );
+
+    // clang-format off
+    #ifdef MXLIB_CUDA
+    // clang-format on
+
     if( m_useGPU )
     {
         // Do all initializations and uploads here so it's in the right thread on the right device
         if( setGPU() < 0 )
         {
-            log<software_error>( { __FILE__, __LINE__, "setting GPU device failed." } );
+            log<software_error>( { "setting GPU device failed." } );
             m_useGPU = false;
             state( state(), true );
             return -1;
         }
 
-        mx::error_t ec =
-            m_maskedDMModes_GPU.upload( m_maskedDMModes.data(), m_maskedDMModes.rows(), m_maskedDMModes.cols() );
+        mx::error_t ec = m_PInv_GPU.upload( m_PInv.data(), m_PInv.rows(), m_PInv.cols() );
+
         if( ec != mx::error_t::noerror )
         {
-            return log<software_error, -1>( { __FILE__,
-                                              __LINE__,
-                                              std::format( "error uploading modes to GPU: [{}] {}",
-                                                           mx::errorName( ec ),
-                                                           mx::errorMessage( ec ) ) } );
+            return log<software_error, -1>( { std::format(
+                "error uploading PInv to GPU: [{}] {}", mx::errorName( ec ), mx::errorMessage( ec ) ) } );
         }
 
         ec = m_command_GPU.resize( m_command.rows() * m_command.cols() );
         if( ec != mx::error_t::noerror )
         {
-            return log<software_error, -1>( { __FILE__,
-                                              __LINE__,
-                                              std::format( "error allocating command on GPU: [{}] {}",
-                                                           mx::errorName( ec ),
-                                                           mx::errorMessage( ec ) ) } );
+            return log<software_error, -1>( { std::format(
+                "error allocating command on GPU: [{}] {}", mx::errorName( ec ), mx::errorMessage( ec ) ) } );
         }
 
         ec = m_modevals_GPU.resize( m_modevals.rows() * m_modevals.cols() );
         if( ec != mx::error_t::noerror )
         {
-            return log<software_error, -1>( { __FILE__,
-                                              __LINE__,
-                                              std::format( "error allocating modevals on GPU: [{}] {}",
-                                                           mx::errorName( ec ),
-                                                           mx::errorMessage( ec ) ) } );
+            return log<software_error, -1>( { std::format(
+                "error allocating modevals on GPU: [{}] {}", mx::errorName( ec ), mx::errorMessage( ec ) ) } );
         }
     }
-#endif // MXLIB_CUDA
+
+        // clang-format off
+    #endif // MXLIB_CUDA
+    // clang-format on
 
     m_updated      = false;
     m_commandReady = true;
+
+    std::cerr << "command ready\n";
 
     return 0;
 }
 
 int dmRecon::processImage( void *curr_src, const dmCommandShmimT & )
 {
-    if( !m_commandReady )
+    if( !m_commandReady.load() )
     {
         dmCommandSMT::m_restart = true;
         return 0;
     }
 
-    //Set atime to now
+    // Set atime to now
     clock_gettime( CLOCK_REALTIME, &m_currImageTimestamp );
 
     // extract masked pixels
@@ -858,9 +1026,9 @@ int dmRecon::processImage( void *curr_src, const dmCommandShmimT & )
     #ifdef MXLIB_CUDA // clang-format on
     if( !m_useGPU )
     {
-        //std::cerr << __LINE__ << '\n';
-        // CPU:
-        m_modevals = m_maskedDMModes * m_command;
+        //  CPU:
+        std::lock_guard<std::mutex> guard( m_modevalsMutex );
+        m_modevals = ( m_PInv.matrix() * m_command.matrix() ).array();
     }
     else
     {
@@ -868,11 +1036,8 @@ int dmRecon::processImage( void *curr_src, const dmCommandShmimT & )
         mx::error_t ec = m_command_GPU.upload( m_command.data() );
         if( ec != mx::error_t::noerror )
         {
-            return log<software_error, -1>( { __FILE__,
-                                              __LINE__,
-                                              std::format( "error uploading command to GPU: [{}] {}",
-                                                           mx::errorName( ec ),
-                                                           mx::errorMessage( ec ) ) } );
+            return log<software_error, -1>( { std::format(
+                "error uploading command to GPU: [{}] {}", mx::errorName( ec ), mx::errorMessage( ec ) ) } );
         }
 
         float alpha = 1;
@@ -880,11 +1045,11 @@ int dmRecon::processImage( void *curr_src, const dmCommandShmimT & )
 
         cublasStatus_t cbs = mx::cuda::cublasTgemv( m_cublas,
                                                     CUBLAS_OP_N,
-                                                    m_maskedDMModes_GPU.rows(),
-                                                    m_maskedDMModes_GPU.cols(),
+                                                    m_PInv_GPU.rows(),
+                                                    m_PInv_GPU.cols(),
                                                     &alpha,
-                                                    m_maskedDMModes_GPU.data(),
-                                                    m_maskedDMModes_GPU.rows(),
+                                                    m_PInv_GPU.data(),
+                                                    m_PInv_GPU.rows(),
                                                     m_command_GPU.data(),
                                                     1,
                                                     &beta,
@@ -893,52 +1058,59 @@ int dmRecon::processImage( void *curr_src, const dmCommandShmimT & )
 
         if( cbs != CUBLAS_STATUS_SUCCESS )
         {
-            return log<software_error, -1>( { __FILE__,
-                                              __LINE__,
-                                              std::format( "error downloading modevals from GPU: [{}] {}",
+            return log<software_error, -1>( { std::format( "error downloading modevals from GPU: [{}] {}",
                                                            cublasGetStatusName( cbs ),
                                                            cublasGetStatusString( cbs ) ) } );
         }
 
+        std::lock_guard<std::mutex> guard( m_modevalsMutex );
         ec = m_modevals_GPU.download( m_modevals.data() );
         if( ec != mx::error_t::noerror )
         {
-            return log<software_error, -1>( { __FILE__,
-                                              __LINE__,
-                                              std::format( "error downloading modevals from GPU: [{}] {}",
-                                                           mx::errorName( ec ),
-                                                           mx::errorMessage( ec ) ) } );
+            return log<software_error, -1>( { std::format(
+                "error downloading modevals from GPU: [{}] {}", mx::errorName( ec ), mx::errorMessage( ec ) ) } );
         }
     }
 
-    // clang-format off
+        // clang-format off
     #else // MXLIB_CUDA
 
     // CPU:
-    m_modevals = m_maskedDMModes * m_command;
+    m_modevals = (m_PInv.matrix() * m_command.matrix()).array()
 
     #endif // MXLIB_CUDA
     // clang-format on
 
     m_updated = true;
 
-    //std::cerr << __LINE__ << '\n';
-
-    // trigger framegrabber
-    if( sem_post( &m_smSemaphore ) < 0 )
+    if( m_writeDMf.load() )
     {
-        log<software_critical>( { __FILE__, __LINE__, errno, 0, "Error posting to semaphore" } );
-        return -1;
+        // trigger framegrabber
+        if( sem_post( &m_smSemaphore ) < 0 )
+        {
+            log<software_critical>( { errno, 0, "Error posting to semaphore" } );
+            return -1;
+        }
     }
 
-    //std::cerr << __LINE__ << '\n';
+    // write to the monitor stream
+    m_modevalMon.setWrite(1);
+    m_modevalDiff.setWrite();
+    for(uint32_t r = 0; r < m_modevalMon.rows(); ++r)
+    {
+        m_modevalMon(r,0) = m_modevals(r,0);
+        m_modevalDiff(r,0) = m_modevals(r,0) - m_modeval(r,0);
+    }
+
+    m_modevalMon.post();
+    m_modevalDiff.post();
 
     return 0;
 }
 
 int dmRecon::configureAcquisition()
 {
-    if( !m_commandReady )
+    if( !m_commandReady.load() )
     {
         m_fgWaiting = true;
         mx::sys::milliSleep( 100 );
@@ -951,6 +1123,86 @@ int dmRecon::configureAcquisition()
     frameGrabberT::m_height   = m_modevals.cols();
     frameGrabberT::m_dataType = _DATATYPE_FLOAT;
 
+    static int logged = 0;
+
+    if( frameGrabberT::m_imageStream != nullptr )
+    {
+        ImageStreamIO_closeIm( frameGrabberT::m_imageStream );
+        free( frameGrabberT::m_imageStream );
+        frameGrabberT::m_imageStream = nullptr;
+    }
+
+    // b/c ImageStreamIO prints every single time, and latest version don't support stopping it yet, and that
+    // isn't thread-safe-able anyway we do our own checks.  This is the same code in ImageStreamIO_openIm...
+    int  SM_fd;
+    char SM_fname[200];
+    ImageStreamIO_filename( SM_fname, sizeof( SM_fname ), frameGrabberT::m_shmimName.c_str() );
+    SM_fd = open( SM_fname, O_RDWR );
+
+    if( SM_fd == -1 )
+    {
+        if( !logged )
+        {
+            log<text_log>( "ImageStream " + frameGrabberT::m_shmimName + " not found (yet).  Retrying . . .",
+                           logPrio::LOG_NOTICE );
+            logged = 1;
+        }
+
+        return 1;
+    }
+
+    // Found and opened,  close it and then use ImageStreamIO
+    logged = 0;
+    close( SM_fd );
+
+    frameGrabberT::m_imageStream = reinterpret_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
+
+    if( ImageStreamIO_openIm( frameGrabberT::m_imageStream, frameGrabberT::m_shmimName.c_str() ) == 0 )
+    {
+        if( frameGrabberT::m_imageStream->md[0].sem < SEMAPHORE_MAXVAL )
+        {
+            ImageStreamIO_closeIm( frameGrabberT::m_imageStream );
+            free( frameGrabberT::m_imageStream );
+            frameGrabberT::m_imageStream = nullptr;
+
+            return 1; // We just need to wait for the server process to finish startup.
+        }
+        else
+        {
+            char SM_fname[200];
+            ImageStreamIO_filename( SM_fname, sizeof( SM_fname ), frameGrabberT::m_shmimName.c_str() );
+
+            struct stat buffer;
+            int         rv = stat( SM_fname, &buffer );
+
+            if( rv != 0 )
+            {
+                log<software_critical>( { errno,
+                                          "Could not get inode for " + frameGrabberT::m_shmimName +
+                                              ". Source process will need to be restarted." } );
+
+                ImageStreamIO_closeIm( frameGrabberT::m_imageStream );
+
+                free( frameGrabberT::m_imageStream );
+
+                frameGrabberT::m_imageStream = nullptr;
+
+                m_shutdown = true;
+
+                return -1;
+            }
+
+            frameGrabberT::m_inode = buffer.st_ino;
+        }
+    }
+    else
+    {
+        free( frameGrabberT::m_imageStream );
+        frameGrabberT::m_imageStream = nullptr;
+
+        return 1; // be patient
+    }
+
     return 0;
 }
 
@@ -961,7 +1213,8 @@ float dmRecon::fps()
 
 int dmRecon::startAcquisition()
 {
-    
+
+    std::cerr << "startAcquisition\n";
     return 0;
 }
 
@@ -972,36 +1225,30 @@ int dmRecon::acquireAndCheckValid()
     errno = 0;
     if( clock_gettime( CLOCK_REALTIME, &ts ) < 0 )
     {
-        log<software_critical>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
+        log<software_critical>( { errno, "clock_gettime" } );
         return -1;
     }
 
     ts.tv_sec += 1;
 
-    if( !m_commandReady )
+    if( !m_commandReady.load() )
     {
         return 1;
     }
 
-    //std::cerr << __LINE__ << '\n';
-    //mx::sys::microSleep(1000);
     if( sem_timedwait( &m_smSemaphore, &ts ) == 0 )
     {
-        //std::cerr << __LINE__ << '\n';
-
-        if( m_updated && m_commandReady )
+        if( m_updated.load() && m_commandReady.load() )
         {
             return 0;
         }
         else
         {
-            //std::cerr << __LINE__ << '\n';
             return 1;
         }
     }
     else
     {
-        //std::cerr << __LINE__ << '\n';
         return 1;
     }
 
@@ -1010,8 +1257,8 @@ int dmRecon::acquireAndCheckValid()
 
 int dmRecon::loadImageIntoStream( void *dest )
 {
+    std::lock_guard<std::mutex> guard( m_modevalsMutex );
     memcpy( dest, m_modevals.data(), m_modevals.rows() * m_modevals.cols() * sizeof( float ) );
-    m_updated = false;
 
     return 0;
 }
@@ -1038,6 +1285,33 @@ INDI_SETCALLBACK_DEFN( dmRecon, m_indiP_fpsSource )( const pcf::IndiProperty &ip
     {
         m_fps = fps;
         updateIfChanged( m_indiP_fps, "current", m_fps );
+    }
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( dmRecon, m_indiP_writeDMf )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_writeDMf, ipRecv );
+
+    if( ipRecv.find( "toggle" ) != true ) // this isn't valid
+    {
+        return -1;
+    }
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
+    {
+        m_writeDMf = true;
+        log<text_log>( "writing modevalDMf", logPrio::LOG_INFO );
+        updateSwitchIfChanged( m_indiP_writeDMf, "toggle", pcf::IndiElement::On );
+    }
+    else
+    {
+        m_writeDMf = false;
+        log<text_log>( "not writing modevalDMf", logPrio::LOG_INFO );
+        updateSwitchIfChanged( m_indiP_writeDMf, "toggle", pcf::IndiElement::Off );
     }
 
     return 0;

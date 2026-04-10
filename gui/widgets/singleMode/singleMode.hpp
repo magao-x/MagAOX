@@ -42,6 +42,8 @@ class singleMode : public xWidget
 
     void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
 
+    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/ );
+
     void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
 
     void sendNewGain( double ng );
@@ -124,6 +126,9 @@ void singleMode::onConnect()
 
 void singleMode::onDisconnect()
 {
+    m_appState.clear();
+    m_modeNumber = 0;
+
     std::string tit = m_windowTitle + " (disconnected)";
     setWindowTitle( QString( tit.c_str() ) );
 
@@ -138,6 +143,17 @@ void singleMode::onDisconnect()
 void singleMode::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
     return handleSetProperty( ipRecv );
+}
+
+void singleMode::handleDelProperty( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getDevice() != m_procName )
+        return;
+
+    if( ipRecv.getName() == "fsm" || ipRecv.getName() == "singleModeNo" )
+    {
+        onDisconnect();
+    }
 }
 
 void singleMode::handleSetProperty( const pcf::IndiProperty &ipRecv )

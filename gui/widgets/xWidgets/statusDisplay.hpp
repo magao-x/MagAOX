@@ -71,6 +71,8 @@ public:
 
    virtual void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
+   virtual void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
 public:
@@ -162,7 +164,11 @@ void statusDisplay::setup( const std::string & device,
 
 void statusDisplay::ctrlWidget (xWidget * cw)
 {
-   if(m_ctrlWidget) m_ctrlWidget->deleteLater();
+   if(m_ctrlWidget)
+   {
+      m_ctrlWidget->deleteLater();
+      m_ctrlWidget = nullptr;
+   }
    m_ctrlWidget = cw;
 }
 
@@ -201,6 +207,10 @@ void statusDisplay::onConnect()
 
 void statusDisplay::onDisconnect()
 {
+   m_fsmState.clear();
+   m_value.clear();
+   m_showVal = false;
+   m_valChanged = false;
    ui.status->setText("---");
    if(m_ctrlWidget) m_ctrlWidget->onDisconnect();
 }
@@ -208,6 +218,16 @@ void statusDisplay::onDisconnect()
 void statusDisplay::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {
    return handleSetProperty(ipRecv);
+}
+
+void statusDisplay::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
+    if(ipRecv.getDevice() != m_device) return;
+
+    if(ipRecv.getName() == "fsm" || ipRecv.getName() == m_property)
+    {
+        onDisconnect();
+    }
 }
 
 void statusDisplay::handleSetProperty( const pcf::IndiProperty & ipRecv)

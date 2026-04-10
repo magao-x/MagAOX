@@ -36,7 +36,7 @@ struct wfsShmimT
    {
       return "wfscam";
    };
-   
+
    static std::string indiPrefix()
    {
       return "wfscam";
@@ -53,7 +53,7 @@ namespace app
 {
 
 /// The MagAO-X DM Pupil Centering Application
-/** 
+/**
   * \ingroup dmPokeCenter
   */
 class dmPokeCenter : public MagAOXApp<true>, public dev::shmimMonitor<dmPokeCenter, wfsShmimT>, public dev::telemeter<dmPokeCenter>
@@ -74,7 +74,7 @@ protected:
     /** \name Configurable Parameters
       *@{
       */
-   
+
     std::string m_wfsCamDevName; ///<INDI device name of the WFS camera.  Default is wfscam.shmimName.
 
     double m_wfsSemWait {1.5}; ///< The time in sec to wait on the WFS semaphore.  Default 0.5 sec.
@@ -106,7 +106,7 @@ protected:
     float m_pupilMedThresh = {0.9}; ///< Threshold in the magnified image as a fraction of the median.  />0, /<=1, default 0.9.
 
     int m_pokeBlockW  {64}; ///< The size of the sub-image for the poke analysis
-    
+
     int m_pokeFWHMGuess {2}; ///< The initial guess for the FWHM of the Gaussian fit to the poke.
 
     float m_smoothWidth {3}; ///< Median smoothing kernal width
@@ -116,7 +116,7 @@ protected:
     std::mutex m_wfsImageMutex;
 
     milkImage<float> m_rawImage;
-    
+
     milkImage<float> m_wfsDark;
 
     milkImage<float> m_pupilImage;
@@ -132,7 +132,7 @@ protected:
     milkImage<float> m_dmStream;
 
     eigenImage<float> m_dmImage;
-    
+
     //Working memory for pupil fitting
     eigenImage<float> m_pupilCopy;
     eigenImage<float> m_fullEdge;
@@ -146,7 +146,7 @@ protected:
 
     float m_pupilX {0};
     float m_pupilY {0};
-    
+
     //Working memory for poke fitting
     mx::math::fit::fitGaussian2Dsym<float> m_gfit;
     eigenImage<float> m_pokeBlock;
@@ -165,7 +165,7 @@ public:
 
     /**\name MagAOX Interface
       *
-      * @{ 
+      * @{
       */
     virtual void setupConfig();
 
@@ -183,14 +183,14 @@ public:
      virtual int appStartup();
 
     /// Implementation of the FSM for dmPokeCenter.
-    /** 
+    /**
       * \returns 0 on no critical error
       * \returns -1 on an error requiring shutdown
       */
     virtual int appLogic();
 
     /// Shutdown the app.
-    /** 
+    /**
       *
       */
     virtual int appShutdown();
@@ -202,17 +202,17 @@ public:
       */
 
     int allocate( const wfsShmimT & /**< [in] tag to differentiate shmimMonitor parents.*/);
-    
-    int processImage( void * curr_src,   ///< [in] pointer to the start of the current frame 
-                      const wfsShmimT &  ///< [in] tag to differentiate shmimMonitor parents. 
+
+    int processImage( void * curr_src,   ///< [in] pointer to the start of the current frame
+                      const wfsShmimT &  ///< [in] tag to differentiate shmimMonitor parents.
                     );
     ///@}
 
-    /** \name WFS Thread 
+    /** \name WFS Thread
       * This thread coordinates the WFS process
       *
       * @{
-      */ 
+      */
 protected:
 
     int m_wfsThreadPrio {1}; ///< Priority of the WFS thread, should normally be > 00.
@@ -222,11 +222,11 @@ protected:
     std::thread m_wfsThread; ///< A separate thread for the actual WFSing
 
     bool m_wfsThreadInit {true}; ///< Synchronizer to ensure wfs thread initializes before doing dangerous things.
-  
+
     pid_t m_wfsThreadID {0}; ///< WFS thread PID.
 
     pcf::IndiProperty m_wfsThreadProp; ///< The property to hold the WFS thread details.
- 
+
     ///Thread starter, called by wfsThreadStart on thread construction.  Calls wfsThreadExec.
     static void wfsThreadStart( dmPokeCenter * s /**< [in] a pointer to an streamWriter instance (normally this) */);
 
@@ -250,12 +250,12 @@ protected:
     ///@}
 
     sem_t m_imageSemaphore; ///< Semaphore used to signal that an image is ready
-    
+
     unsigned m_imageSemWait_sec {1}; ///< The timeout for the image semaphore, seconds component.
 
     unsigned m_imageSemWait_nsec {0}; ///< The timeout for the image semaphore, nanoseconds component.
 
-    /// Run the sensor steps 
+    /// Run the sensor steps
     /** Coordinates the actions of poking and collecting images.
       * Upon completion this calls runSensor.  If \p firstRun == true, then this takes a dark.
       *
@@ -273,21 +273,21 @@ protected:
     int analyzeSensor();
 
     /// Fit the pupil parameters
-    /** 
+    /**
       * \returns 0 on success
       * \returns \< 0 on an error
       */
     int fitPupil();
 
     /// Fit the poke parameters
-    /** 
+    /**
       * \returns 0 on success
       * \returns \< 0 on an error
       */
     int fitPokes();
 
-    /** \name INDI Interface 
-      * @{ 
+    /** \name INDI Interface
+      * @{
       */
 protected:
 
@@ -327,11 +327,11 @@ protected:
     ///@}
 
     /** \name Telemeter Interface
-     * 
+     *
      * @{
-     */ 
+     */
    int checkRecordTimes();
-   
+
    int recordTelem( const telem_pokecenter * );
 
    int recordPokeCenter( bool force = false );
@@ -427,7 +427,7 @@ int dmPokeCenter::appStartup()
     {
         return log<software_error, -1>({__FILE__,__LINE__});
     }
-    
+
     if(telemeterT::appStartup() < 0)
     {
         return log<software_error,-1>({__FILE__, __LINE__});
@@ -446,7 +446,7 @@ int dmPokeCenter::appStartup()
     m_indiP_nPokeImages["target"].setValue(m_nPokeImages);
 
     REG_INDI_SETPROP(m_indiP_wfsFps, m_wfsCamDevName, std::string("fps"));
-    
+
     REG_INDI_SETPROP(m_indiP_shutter, m_wfsCamDevName, std::string("shutter"));
 
     CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_single, "single");
@@ -458,7 +458,7 @@ int dmPokeCenter::appStartup()
     registerIndiPropertyReadOnly( m_indiP_pupilPos, "pupil_position", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
     m_indiP_pupilPos.add({"x", 0.0});
     m_indiP_pupilPos.add({"y", 0.0});
-        
+
     registerIndiPropertyReadOnly( m_indiP_pokePos, "poke_position", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
     m_indiP_pokePos.add({"avg_x", 0.0});
     m_indiP_pokePos.add({"avg_y", 0.0});
@@ -481,12 +481,12 @@ int dmPokeCenter::appStartup()
     m_indiP_deltaPos.add({"delta_y", 0.0});
     m_indiP_deltaPos.add({"counter", 0});
 
-    if(sem_init(&m_wfsSemaphore, 0,0) < 0) 
+    if(sem_init(&m_wfsSemaphore, 0,0) < 0)
     {
         return log<software_critical, -1>({__FILE__, __LINE__, errno,0, "Initializing wfs semaphore"});
     }
 
-    if(sem_init(&m_imageSemaphore, 0,0) < 0) 
+    if(sem_init(&m_imageSemaphore, 0,0) < 0)
     {
         return log<software_critical, -1>({__FILE__, __LINE__, errno,0, "Initializing image semaphore"});
     }
@@ -582,7 +582,7 @@ int dmPokeCenter::appShutdown()
 int dmPokeCenter::allocate( const wfsShmimT & dummy)
 {
     static_cast<void>(dummy); //be unused
-  
+
     //This is a call to the pokeSensor::allocate, unless we can have dev::pokeSensor : public shmimMonitor<pokeSensor>
     std::unique_lock<std::mutex> lock(m_wfsImageMutex);
 
@@ -596,24 +596,24 @@ int dmPokeCenter::allocate( const wfsShmimT & dummy)
 
     try
     {
-        m_dmStream.open(m_dmChan);    
+        m_dmStream.open(m_dmChan);
     }
     catch(const std::exception& e) //this can check for invalid_argument and distinguish not existing
     {
         return log<software_error,-1>({__FILE__, __LINE__, std::string("exception opening DM: ") + e.what()});
     }
-    
+
     m_dmImage.resize(m_dmStream.rows(), m_dmStream.cols());
 
     //end of call to pokeSensor::allocate
 
     m_pokeImage.create(m_configName + "_poke",shmimMonitorT::m_width, shmimMonitorT::m_height);
-    
-    
+
+
     return 0;
 }
-    
-int dmPokeCenter::processImage( void * curr_src,    
+
+int dmPokeCenter::processImage( void * curr_src,
                                 const wfsShmimT &  dummy
                               )
 {
@@ -657,13 +657,13 @@ void dmPokeCenter::wfsThreadExec()
     {
         timespec ts;
         XWC_SEM_WAIT_TS_RETVOID(ts, m_wfsSemWait_sec, m_wfsSemWait_nsec);
-      
+
         XWC_SEM_TIMEDWAIT_LOOP( m_wfsSemaphore, ts )
 
         //Lock a mutex here
         if(m_single)
         {
-            m_measuring = 1;    
+            m_measuring = 1;
         }
         else if(m_continuous)
         {
@@ -688,7 +688,7 @@ void dmPokeCenter::wfsThreadExec()
                 log<software_error>({__FILE__, __LINE__, "runSensor returned error"});
                 break;
             }
-            
+
             firstRun = false;
 
             if(m_measuring == 1)
@@ -703,7 +703,7 @@ void dmPokeCenter::wfsThreadExec()
 
         state(stateCodes::READY);
 
-        
+
     } //outer loop, will exit if m_shutdown==true
 
     return;
@@ -717,8 +717,8 @@ int dmPokeCenter::runSensor(bool firstRun)
     mx::fits::fitsFile<float> tmpFF;
 
     timespec ts;
-    
-    //Wait two seconds for it to shut 
+
+    //Wait two seconds for it to shut
     ///\todo this should be configurable and based on fps
     unsigned n = 0;
     while(!m_wfsDark.valid() && n < 200)
@@ -740,7 +740,7 @@ int dmPokeCenter::runSensor(bool firstRun)
             return log<software_error,-1>({__FILE__,__LINE__});
         }
 
-        //Wait two seconds for it to shut 
+        //Wait two seconds for it to shut
         ///\todo this should be configurable
         n = 0;
         while(m_shutter != 1 && n < 200)
@@ -772,7 +772,7 @@ int dmPokeCenter::runSensor(bool firstRun)
             }
 
             if(m_stopMeasurement || m_shutdown)
-            {   
+            {
                 m_dmImage.setZero();
                 m_dmStream = m_dmImage;
                 return 0;
@@ -818,7 +818,7 @@ int dmPokeCenter::runSensor(bool firstRun)
     m_pupilImage.setWrite();
     m_pupilImage().setZero();
     n = 0;
-        
+
     //flush semaphore so we take the _next_ good image
     XWC_SEM_FLUSH(m_imageSemaphore);
 
@@ -848,7 +848,7 @@ int dmPokeCenter::runSensor(bool firstRun)
 
         //If here we got an image.  m_rawImage will have been updated
         m_pupilImage() += m_rawImage();
-        ++n;            
+        ++n;
     }
 
     m_pupilImage() = m_pupilImage()/m_nPupilImages - m_wfsDark();
@@ -862,10 +862,10 @@ int dmPokeCenter::runSensor(bool firstRun)
     {
         m_dmImage( m_poke_x[nn], m_poke_y[nn]) = m_poke_amp;
     }
-        
+
     m_pokeImage.setWrite();
     m_pokeImage().setZero();
-        
+
     m_dmStream = m_dmImage;
 
     mx::sys::microSleep(m_dmSleep);
@@ -883,7 +883,7 @@ int dmPokeCenter::runSensor(bool firstRun)
         {
             ready = true;
         }
-        
+
         if(m_stopMeasurement || m_shutdown)
         {
             m_dmImage.setZero();
@@ -894,7 +894,7 @@ int dmPokeCenter::runSensor(bool firstRun)
 
     n = 0;
     while(n < m_nPokeImages && !m_stopMeasurement && !m_shutdown)
-    {    
+    {
         /* POSITIVE POKE */
 
         //** Now we record the poke image **//
@@ -906,8 +906,8 @@ int dmPokeCenter::runSensor(bool firstRun)
 
         ++n;
     }
-        
-    if(m_stopMeasurement || m_shutdown) 
+
+    if(m_stopMeasurement || m_shutdown)
     {
         m_dmImage.setZero();
         m_dmStream = m_dmImage;
@@ -920,7 +920,7 @@ int dmPokeCenter::runSensor(bool firstRun)
     {
         m_dmImage( m_poke_x[nn], m_poke_y[nn]) = -m_poke_amp;
     }
-       
+
     m_dmStream = m_dmImage;
 
     mx::sys::microSleep(m_dmSleep);
@@ -949,7 +949,7 @@ int dmPokeCenter::runSensor(bool firstRun)
 
     n = 0;
     while(n < m_nPokeImages && !m_stopMeasurement && !m_shutdown)
-    {    
+    {
         /* NEGATIVE POKE */
 
         //** Now we record the poke image **//
@@ -974,7 +974,7 @@ int dmPokeCenter::runSensor(bool firstRun)
     m_pokeImage.post();
 
     tmpFF.write("/tmp/poke.fits", m_pokeImage());
-    
+
 
     m_dmImage.setZero();
     m_dmStream = m_dmImage;
@@ -1000,7 +1000,7 @@ int dmPokeCenter::analyzeSensor()
         return log<software_error,-1>({__FILE__, __LINE__, "error from fitPupil"});
     }
 
-    if(m_stopMeasurement) 
+    if(m_stopMeasurement)
     {
         return 0;
     }
@@ -1029,7 +1029,7 @@ int dmPokeCenter::fitPupil()
 
     //Threshold to find the initial pupil mask geometrically
     size_t pos = (1-threshPerc)*m_pupilImage().rows()*m_pupilImage().cols();
-    
+
     eigenImage<float> sm;
     int xmx, ymx;
     float mx;
@@ -1055,7 +1055,7 @@ int dmPokeCenter::fitPupil()
 
     float x0, y0, avgr0, avgx, avgy, avgr;
 
-    
+
     m_fullMask.resize(sm.rows(), sm.cols());
 
     for(int cc=0; cc < m_fullMask.cols(); ++cc)
@@ -1107,7 +1107,7 @@ int dmPokeCenter::fitPupil()
     }
 
     m_pupilCut = sm.block( cutx, cuty, cutw, cutw);
-    
+
     m_pupilMagnified.resize(m_pupilCut.rows()*m_pupilMag, m_pupilCut.cols()*m_pupilMag);
 
     imageMagnify(m_pupilMagnified, m_pupilCut, mx::improc::bilinearTransform<float>());
@@ -1115,7 +1115,7 @@ int dmPokeCenter::fitPupil()
     ff.write("/tmp/pupilMagnified.fits", m_pupilMagnified);
 
     float med = imageMedian(m_pupilMagnified); /// \todo use work version
-    
+
     float dthresh = pupilThresh; //med * m_pupilMedThresh;
 
     m_magMask.resize(m_pupilMagnified.rows(), m_pupilMagnified.cols()); //This is a different mask-- maskMag
@@ -1157,7 +1157,7 @@ int dmPokeCenter::fitPupil()
     m_pupilY = avgy;
 
     updateIfChanged(m_indiP_pupilPos, std::vector<std::string>({"x", "y"}), std::vector<float>({m_pupilX, m_pupilY}));
-    
+
     return 0;
 
 }
@@ -1168,10 +1168,10 @@ int dmPokeCenter::fitPokes()
     eigenImage<float> sm, tim;
 
     sm.resize(m_pokeImage.rows(), m_pokeImage.cols());
-    
+
     int xmx = 0;
     int ymx = 0;
-        
+
     float mx = 0;
 
     medianSmooth(sm, xmx, ymx, mx, m_pokeImage(), m_smoothWidth);
@@ -1190,7 +1190,7 @@ int dmPokeCenter::fitPokes()
     ff.write("/tmp/sm.fits", sm);
     m_pokeX = 0;
     m_pokeY = 0;
-    
+
     for(size_t nn = 0; nn < m_poke_x.size(); ++nn)
     {
         //bool good = false;
@@ -1228,7 +1228,7 @@ int dmPokeCenter::fitPokes()
 
         m_pokeX += x0 + m_gfit.x0();
         m_pokeY += y0 + m_gfit.y0();
-        
+
         /*m_pokePositions[nn*2 + 0] = xmx;
         m_pokePositions[nn*2 + 1] = ymx;
 
@@ -1237,7 +1237,7 @@ int dmPokeCenter::fitPokes()
     }
 
 
-    
+
     m_pokeX /= m_poke_x.size();
     m_pokeY /= m_poke_x.size();
 
@@ -1253,7 +1253,7 @@ int dmPokeCenter::fitPokes()
 INDI_NEWCALLBACK_DEFN( dmPokeCenter, m_indiP_nPupilImages )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_nPupilImages, ipRecv)
-   
+
     float target;
 
     if( indiTargetUpdate(m_indiP_nPupilImages, target, ipRecv, false) < 0)
@@ -1269,7 +1269,7 @@ INDI_NEWCALLBACK_DEFN( dmPokeCenter, m_indiP_nPupilImages )(const pcf::IndiPrope
 INDI_NEWCALLBACK_DEFN( dmPokeCenter, m_indiP_nPokeImages )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_nPokeImages, ipRecv)
-   
+
     float target;
 
     if( indiTargetUpdate(m_indiP_nPokeImages, target, ipRecv, false) < 0)
@@ -1285,7 +1285,7 @@ INDI_NEWCALLBACK_DEFN( dmPokeCenter, m_indiP_nPokeImages )(const pcf::IndiProper
 INDI_NEWCALLBACK_DEFN( dmPokeCenter, m_indiP_poke_amp )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_poke_amp, ipRecv)
-   
+
     float target;
 
     if( indiTargetUpdate(m_indiP_poke_amp, target, ipRecv, false) < 0)
@@ -1301,12 +1301,12 @@ INDI_NEWCALLBACK_DEFN( dmPokeCenter, m_indiP_poke_amp )(const pcf::IndiProperty 
 INDI_SETCALLBACK_DEFN( dmPokeCenter, m_indiP_wfsFps )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_wfsFps, ipRecv)
-   
+
     if( ipRecv.find("current") != true ) //this isn't valid
     {
         return 0;
     }
-   
+
     m_wfsFps = ipRecv["current"].get<float>();
 
     return 0;
@@ -1315,12 +1315,12 @@ INDI_SETCALLBACK_DEFN( dmPokeCenter, m_indiP_wfsFps )(const pcf::IndiProperty &i
 INDI_SETCALLBACK_DEFN( dmPokeCenter, m_indiP_shutter )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_shutter, ipRecv)
-   
+
     if( ipRecv.find("toggle") != true ) //this isn't valid
     {
         return -1;
     }
-   
+
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
     {
         m_shutter = false; //open
@@ -1329,14 +1329,14 @@ INDI_SETCALLBACK_DEFN( dmPokeCenter, m_indiP_shutter )(const pcf::IndiProperty &
     {
         m_shutter = true; //shut
     }
-   
+
     return 0;
 }
 
 INDI_NEWCALLBACK_DEFN( dmPokeCenter, m_indiP_single )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_single, ipRecv)
-   
+
     if( ipRecv.find("toggle") != true ) //this isn't valid
     {
         return -1;
@@ -1361,7 +1361,7 @@ INDI_NEWCALLBACK_DEFN( dmPokeCenter, m_indiP_single )(const pcf::IndiProperty &i
 INDI_NEWCALLBACK_DEFN( dmPokeCenter, m_indiP_continuous )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_continuous, ipRecv)
-   
+
     if( ipRecv.find("toggle") != true ) //this isn't valid
     {
         return -1;
@@ -1393,7 +1393,7 @@ INDI_NEWCALLBACK_DEFN( dmPokeCenter, m_indiP_continuous )(const pcf::IndiPropert
 INDI_NEWCALLBACK_DEFN( dmPokeCenter, m_indiP_stop )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stop, ipRecv)
-   
+
     if( ipRecv.find("request") != true ) //this isn't valid
     {
         return -1;
@@ -1415,7 +1415,7 @@ int dmPokeCenter::checkRecordTimes()
 {
    return telemeterT::checkRecordTimes(telem_pokecenter());
 }
-   
+
 inline
 int dmPokeCenter::recordTelem( const telem_pokecenter * )
 {
@@ -1452,7 +1452,7 @@ int dmPokeCenter::recordPokeCenter( bool force )
                 }
             }
         }
-    }   
+    }
 
     if(changed || force)
     {

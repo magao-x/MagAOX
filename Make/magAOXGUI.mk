@@ -1,9 +1,9 @@
 ####################################################
 # Makefile for building MagAOX Qt GUIs
 #
-# The only thing that needs to be customized here is TARGET. The 
+# The only thing that needs to be customized here is TARGET. The
 # remaing app-specific details are handled by the Qt .pro file.
-# 
+#
 # Usage: In the folder of a GUI app, create a Makefile with a minimum of:
 #       TARGET=<name>
 #       include ../../../Make/magAOXGUI.mk
@@ -13,7 +13,7 @@
 
 
 #############################
-# The qt5 qmake 
+# The qt5 qmake
 #
 # On a system where qt5 qmake is the one in the bath, then no
 # argument is needed.  If not, then invoke with, e.g., `make QMAKE=qmake-qt5`

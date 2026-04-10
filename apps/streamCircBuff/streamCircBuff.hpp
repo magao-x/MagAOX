@@ -30,12 +30,12 @@ namespace app
 {
 
 /// Class for application to keep a circular buffer of a stream and publish it to another stream
-/** 
+/**
   * \ingroup streamCircBuff
   */
-class streamCircBuff : public MagAOXApp<true>, 
-                       public dev::shmimMonitor<streamCircBuff>, 
-                       public dev::frameGrabber<streamCircBuff>, 
+class streamCircBuff : public MagAOXApp<true>,
+                       public dev::shmimMonitor<streamCircBuff>,
+                       public dev::frameGrabber<streamCircBuff>,
                        public dev::telemeter<streamCircBuff>
 {
    friend class dev::shmimMonitor<streamCircBuff>;
@@ -47,9 +47,9 @@ public:
    /** \name app::dev Configurations
      *@{
      */
-   
+
    static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber these images can not be flipped
-   
+
    ///@}
 
    typedef float realT;
@@ -63,7 +63,7 @@ public:
    /// The telemeter type
    typedef dev::telemeter<streamCircBuff> telemeterT;
 
-   
+
 protected:
 
    /** \name Configurable Parameters
@@ -99,26 +99,26 @@ public:
    virtual int appStartup();
 
    /// Implementation of the FSM for streamCircBuff.
-   /** 
+   /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
    virtual int appLogic();
 
    /// Shutdown the app.
-   /** 
+   /**
      *
      */
    virtual int appShutdown();
 
-   
+
 protected:
 
    float (*pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as float
 
    //shmimMonitor Interface
    int allocate( const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
-   
+
    int allocatePSDStreams();
 
    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
@@ -129,57 +129,57 @@ protected:
      *
      * @{
      */
-   
+
    /// Implementation of the framegrabber configureAcquisition interface
-   /** 
+   /**
      * \returns 0 on success
      * \returns -1 on error
      */
    int configureAcquisition();
-   
+
    /// Implementation of the framegrabber fps interface
    /**
      * \todo this needs to infer the stream fps and return it
-     */  
+     */
    float fps()
    {
       return 1.0;
    }
-   
+
    /// Implementation of the framegrabber startAcquisition interface
-   /** 
+   /**
      * \returns 0 on success
      * \returns -1 on error
      */
    int startAcquisition();
-   
+
    /// Implementation of the framegrabber acquireAndCheckValid interface
-   /** 
+   /**
      * \returns 0 on success
      * \returns -1 on error
      */
    int acquireAndCheckValid();
-   
+
    /// Implementation of the framegrabber loadImageIntoStream interface
-   /** 
+   /**
      * \returns 0 on success
      * \returns -1 on error
      */
    int loadImageIntoStream( void * dest  /**< [in] */);
-   
+
    /// Implementation of the framegrabber reconfig interface
-   /** 
+   /**
      * \returns 0 on success
      * \returns -1 on error
      */
    int reconfig();
 
    /** \name Telemeter Interface
-     * 
+     *
      * @{
-     */ 
+     */
    int checkRecordTimes();
-   
+
    int recordTelem( const telem_fgtimings * );
 
    ///@}
@@ -188,28 +188,28 @@ protected:
 
 streamCircBuff::streamCircBuff() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   
+
    return;
 }
 
 void streamCircBuff::setupConfig()
 {
    SHMIMMONITOR_SETUP_CONFIG(config);
-   
+
    FRAMEGRABBER_SETUP_CONFIG(config);
 
    TELEMETER_SETUP_CONFIG(config);
-   
+
 }
 
 int streamCircBuff::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    SHMIMMONITOR_LOAD_CONFIG(_config);
-   
+
    FRAMEGRABBER_LOAD_CONFIG(_config);
 
    TELEMETER_LOAD_CONFIG(config);
-   
+
    return 0;
 }
 
@@ -275,7 +275,7 @@ int streamCircBuff::allocate( const dev::shmimT & dummy)
 
    return 0;
 }
-   
+
 int streamCircBuff::processImage( void * curr_src,
                                   const dev::shmimT & dummy
                                 )
@@ -306,11 +306,11 @@ int streamCircBuff::configureAcquisition()
       sleep(1);
       return -1;
    }
-   
+
    frameGrabberT::m_width = shmimMonitorT::m_width;
    frameGrabberT::m_height = shmimMonitorT::m_height;
    frameGrabberT::m_dataType = IMAGESTRUCT_FLOAT;
-   
+
    return 0;
 }
 
@@ -322,15 +322,15 @@ int streamCircBuff::startAcquisition()
 int streamCircBuff::acquireAndCheckValid()
 {
    timespec ts;
-         
+
    if(clock_gettime(CLOCK_REALTIME, &ts) < 0)
    {
-      log<software_critical>({__FILE__,__LINE__,errno,0,"clock_gettime"}); 
+      log<software_critical>({__FILE__,__LINE__,errno,0,"clock_gettime"});
       return -1;
    }
-         
+
    ts.tv_sec += 1;
-        
+
    if(sem_timedwait(&m_smSemaphore, &ts) == 0)
    {
       clock_gettime(CLOCK_REALTIME, &m_currImageTimestamp);
@@ -360,7 +360,7 @@ int streamCircBuff::loadImageIntoStream(void * dest)
    {
       fdest[n] = pixget(m_currSrc,n);
    }
-      
+
    //memcpy(dest, m_currSrc, shmimMonitorT::m_width*shmimMonitorT::m_height*frameGrabberT::m_typeSize  );
    return 0;
 }
@@ -374,7 +374,7 @@ int streamCircBuff::checkRecordTimes()
 {
    return telemeterT::checkRecordTimes(telem_fgtimings());
 }
-   
+
 int streamCircBuff::recordTelem( const telem_fgtimings * )
 {
    return recordFGTimings(true);

@@ -50,7 +50,7 @@ namespace app
   * \todo test for load warnings
   * \todo load warnings/crit values can be logged on parse errors -- make this an issue
   * \todo segfaults if device can not be reached on network -- make this an issue
-  * 
+  *
   * \ingroup trippLitePDU
   */
 class trippLitePDU : public MagAOXApp<>, public dev::outletController<trippLitePDU>, public dev::ioDevice
@@ -99,39 +99,39 @@ public:
 
     /// Default c'tor.
     trippLitePDU();
- 
+
     /// D'tor, declared and defined for noexcept.
     ~trippLitePDU() noexcept
     {}
- 
+
     /** \name MagAOXApp Interface
       *
-      * @{ 
+      * @{
       */
 
     /// Setup the configuration system (called by MagAOXApp::setup())
     virtual void setupConfig();
- 
+
     /// load the configuration system results (called by MagAOXApp::setup())
     virtual void loadConfig();
- 
+
     /// Startup functions
     /** Setsup the INDI vars.
       * Checks if the device was found during loadConfig.
       */
     virtual int appStartup();
- 
+
     /// Implementation of the FSM for the tripp lite PDU.
     virtual int appLogic();
- 
+
     /// Do any needed shutdown tasks.  Currently nothing in this app.
     virtual int appShutdown();
- 
+
     ///@}
 
     /** \name outletController Interface
       *
-      * @{ 
+      * @{
       */
 
     /// Update a single outlet state
@@ -141,7 +141,7 @@ public:
       * \returns -1 on error
       */
     virtual int updateOutletState( int outletNum /**< [in] the outlet number to update */);
- 
+
     /// Queries the device to find the state of each outlet, as well as other parameters.
     /** Sends `devstatus` to the device, and parses the result.
       *
@@ -149,31 +149,31 @@ public:
       * \returns -1 on error
       */
     virtual int updateOutletStates();
- 
+
     /// Turn on an outlet.
     /**
       * \returns 0 on success
       * \returns -1 on error
       */
     virtual int turnOutletOn( int outletNum /**< [in] the outlet number to turn on */);
- 
+
     /// Turn off an outlet.
     /**
       * \returns 0 on success
       * \returns -1 on error
       */
     virtual int turnOutletOff( int outletNum /**< [in] the outlet number to turn off */);
- 
+
     ///@}
 
-    /** \name Device Interface 
+    /** \name Device Interface
       *
-      * These functions invoke the simulator code when enabled. 
+      * These functions invoke the simulator code when enabled.
       *
       * @{
       */
     int devConnect();
-    
+
     int devLogin();
 
     void devPostLogin();
@@ -211,9 +211,11 @@ public:
 trippLitePDU::trippLitePDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    m_firstOne = true;
+   m_stateDelay = 5;
+
    setNumberOfOutlets(8);
    m_loopPause=2000000000;//Default to 2 sec loop pause to lessen the load on the PDUs.
-   
+
    return;
 }
 
@@ -246,7 +248,7 @@ void trippLitePDU::setupConfig()
    config.add("limits.currEmerg", "", "limits.currEmerg", argType::Required, "limits", "currEmerg", false, "int", "The high-current emergency threshold");
 
    dev::outletController<trippLitePDU>::setupConfig(config);
-   
+
 }
 
 
@@ -257,7 +259,7 @@ void trippLitePDU::loadConfig()
    config(m_deviceUsername, "device.username");
    config(m_devicePassFile, "device.passfile");
    config(m_deviceVersion, "device.powerAlertVersion");
-   
+
    dev::ioDevice::loadConfig(config);
 
    config(m_freqLowWarn, "limits.freqLowWarn");
@@ -279,7 +281,7 @@ void trippLitePDU::loadConfig()
    config(m_currEmerg, "limits.currEmerg");
 
    dev::outletController<trippLitePDU>::loadConfig(config);
-   
+
 
 }
 
@@ -298,7 +300,7 @@ int trippLitePDU::appStartup()
     m_indiP_load.add (pcf::IndiElement("voltage"));
     m_indiP_load.add (pcf::IndiElement("current"));
 
-    if(dev::outletController<trippLitePDU>::setupINDI() < 0)
+    if(dev::outletController<trippLitePDU>::appStartup() < 0)
     {
         return log<text_log,-1>("Error setting up INDI for outlet control.", logPrio::LOG_CRITICAL);
     }
@@ -314,7 +316,7 @@ int trippLitePDU::appLogic()
     {
         static int lastrv = 0; //Used to handle a change in error within the same state.  Make general?
         static int lasterrno = 0;
-         
+
         int rv = devConnect();
 
         if(rv == 0)
@@ -348,7 +350,7 @@ int trippLitePDU::appLogic()
             return 0;
         }
     }
- 
+
     if( state() == stateCodes::CONNECTED )
     {
         int rv = devLogin();
@@ -371,32 +373,32 @@ int trippLitePDU::appLogic()
            return -1;
         }
     }
- 
+
     if(state() == stateCodes::LOGGEDIN)
     {
         devPostLogin();
 
         state(stateCodes::READY);
     }
- 
+
     if(state() == stateCodes::READY)
     {
        std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
- 
+
        if( !lock.owns_lock())
        {
           return 0;
        }
- 
+
        int rv = updateOutletStates();
- 
-       if(rv < 0) return log<software_error,-1>({__FILE__, __LINE__});
- 
+
+       if(rv < 0) return log<software_error,-1>();
+
        updateAlarmsAndWarnings();
- 
+
        return 0;
     }
- 
+
     state(stateCodes::FAILURE);
     log<text_log>("appLogic fell through", logPrio::LOG_CRITICAL);
     return -1;
@@ -426,7 +428,7 @@ int trippLitePDU::updateOutletStates()
 
     if(rv < 0 )
     {
-        log<software_error>({__FILE__, __LINE__, "error getting device status"});
+        log<software_error>("error getting device status");
         state(stateCodes::NOTCONNECTED);
         return 0;
     }
@@ -452,7 +454,7 @@ int trippLitePDU::updateOutletStates()
     }
     else
     {
-        log<software_error>({__FILE__, __LINE__, 0, rv, "parse error"});
+        log<software_error>({0, rv, "parse error"});
     }
 
     return 0;
@@ -463,19 +465,20 @@ int trippLitePDU::turnOutletOn( int outletNum )
     std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing anything
 
     #ifndef XWC_SIM_MODE
-    std::string cmd = "loadctl on -o ";
-    cmd += mx::ioutils::convertToString<int>(outletNum+1); //Internally 0 counted, device starts at 1.
-    cmd += " --force\r";
+    std::string cmd = std::format("loadctl on -o {} --force\r", (outletNum+1)); //Internally 0 counted, device starts at 1.
 
     int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeout, m_readTimeout);
 
-    #else 
+    #else
 
     int rv = m_simulator.turnOutletOn(outletNum);
 
     #endif
 
-    if(rv < 0) return log<software_error, -1>({__FILE__, __LINE__, 0, rv, "telnet error"});
+    if(rv < 0) 
+    {
+        return log<software_error, -1>({0, rv, "telnet error"});
+    }
 
     return 0;
 }
@@ -485,9 +488,7 @@ int trippLitePDU::turnOutletOff( int outletNum )
     std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing anything
 
     #ifndef XWC_SIM_MODE
-    std::string cmd = "loadctl off -o ";
-    cmd += mx::ioutils::convertToString<int>(outletNum+1); //Internally 0 counted, device starts at 1.
-    cmd += " --force\r";
+    std::string cmd = std::format("loadctl off -o {} --force\r", (outletNum+1)); //Internally 0 counted, device starts at 1.
 
     int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeout, m_readTimeout);
 
@@ -511,10 +512,10 @@ int trippLitePDU::devConnect()
     #else
 
     return m_simulator.connect(m_deviceAddr, m_devicePort);
-        
+
     #endif
 }
-    
+
 int trippLitePDU::devLogin()
 {
     #ifndef XWC_SIM_MODE
@@ -526,12 +527,12 @@ int trippLitePDU::devLogin()
         m_telnetConn.m_prompt = ">>";
     }
 
-    return m_telnetConn.login("localadmin", "localadmin");    
-        
+    return m_telnetConn.login("localadmin", "localadmin");
+
     #else
-        
+
     return m_simulator.login("localadmin", "localadmin");
-        
+
     #endif
 }
 
@@ -539,7 +540,7 @@ void trippLitePDU::devPostLogin()
 {
 
     #ifndef XWC_SIM_MODE
-  
+
     //For newer version of power alert we need to select C.L.I.
     if(m_deviceVersion > 0)
     {
@@ -573,7 +574,7 @@ int trippLitePDU::devStatus(std::string & strRead)
         }
 
         log<text_log>("devstatus timeout, re-read successful");
-      
+
         return 1;
     }
     else if(rv < 0 )
@@ -592,7 +593,7 @@ int trippLitePDU::devStatus(std::string & strRead)
 }
 
 int trippLitePDU::parsePDUStatus( std::string & strRead )
-{  
+{
     size_t curpos = 0;
 
     curpos = strRead.find_first_of("\r\n", curpos);
@@ -618,52 +619,52 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
 
         if(sstr[0] == 'I')
         {
-            if(sstr[6] == 'V') 
+            if(sstr[6] == 'V')
             {
                 size_t begin = sstr.find(' ',6);
-                if(begin == std::string::npos) 
+                if(begin == std::string::npos)
                 {
                     return -1;
                 }
 
                 begin = sstr.find_first_not_of(' ', begin);
-                if(begin == std::string::npos) 
+                if(begin == std::string::npos)
                 {
                     return -2;
                 }
 
                 size_t end = sstr.find('V', begin);
-                if(end == std::string::npos) 
+                if(end == std::string::npos)
                 {
                     return -3;
                 }
 
-                float V = mx::ioutils::convertFromString<float>( sstr.substr(begin, end-begin) );
+                float V = mx::ioutils::stoT<float>( sstr.substr(begin, end-begin) );
 
                 m_voltage = V;
             }
 
-            else if(sstr[6] == 'F') 
+            else if(sstr[6] == 'F')
             {
                 size_t begin = sstr.find(' ',6);
-                if(begin == std::string::npos) 
+                if(begin == std::string::npos)
                 {
                     return -4;
                 }
 
                 begin = sstr.find_first_not_of(' ', begin);
-                if(begin == std::string::npos) 
+                if(begin == std::string::npos)
                 {
                     return -5;
                 }
 
                 size_t end = sstr.find('H', begin);
-                if(end == std::string::npos) 
+                if(end == std::string::npos)
                 {
                     return -6;
                 }
 
-                float F = mx::ioutils::convertFromString<float>( sstr.substr(begin, end-begin) );
+                float F = mx::ioutils::stoT<float>( sstr.substr(begin, end-begin) );
 
                 m_frequency = F;
             }
@@ -671,43 +672,43 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
         }
         else if(sstr[0] == 'O')
         {
-            if(sstr[7] == 'C') 
+            if(sstr[7] == 'C')
             {
                 size_t begin = sstr.find(' ',7);
-                if(begin == std::string::npos) 
+                if(begin == std::string::npos)
                 {
                     return -7;
                 }
 
                 begin = sstr.find_first_not_of(' ', begin);
-                if(begin == std::string::npos) 
+                if(begin == std::string::npos)
                 {
                     return -8;
                 }
 
                 size_t end = sstr.find('A', begin);
-                if(end == std::string::npos) 
+                if(end == std::string::npos)
                 {
                     return -9;
                 }
 
-                float C = mx::ioutils::convertFromString<float>( sstr.substr(begin, end-begin) );
+                float C = mx::ioutils::stoT<float>( sstr.substr(begin, end-begin) );
 
                 m_current = C;
             }
-            else if(sstr[8] == 'O') 
+            else if(sstr[8] == 'O')
             {
                 std::vector<int> outletStates(m_outletStates.size(),OUTLET_STATE_OFF);
 
                 size_t begin = sstr.find(' ',8);
-                if(begin == std::string::npos) 
+                if(begin == std::string::npos)
                 {
-                    return -10; 
+                    return -10;
                 }
 
                 begin = sstr.find_first_not_of(' ', begin);
 
-                if(begin == std::string::npos) 
+                if(begin == std::string::npos)
                 {
                     return -11;
                 }
@@ -715,7 +716,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
                 while(begin < sstr.size())
                 {
                     size_t end = sstr.find(' ', begin);
-                    if(end == std::string::npos) 
+                    if(end == std::string::npos)
                     {
                         end = sstr.size();
                     }
@@ -729,21 +730,21 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
                     begin = sstr.find_first_not_of(' ', end+1);
                 }
 
-                for(size_t i=0;i<m_outletStates.size();++i) 
+                for(size_t i=0;i<m_outletStates.size();++i)
                 {
                     m_outletStates[i]=outletStates[i];
                 }
             }
-            else if( sstr[7] == 'V' || sstr[7] == 'F') 
+            else if( sstr[7] == 'V' || sstr[7] == 'F')
             {
                 continue;
             }
-            else 
+            else
             {
                 return -12;
             }
         }
-        else 
+        else
         {
             return -13;
         }
@@ -756,79 +757,79 @@ void trippLitePDU::updateAlarmsAndWarnings()
 {
     if (m_frequency <= m_freqLowEmerg)
     {
-        log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, below " + 
+        log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, below " +
                               std::to_string(m_freqLowEmerg) + " Hz.",  logPrio::LOG_EMERGENCY);
     }
     else if (m_frequency >= m_freqHighEmerg)
     {
-        log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, above " + 
+        log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, above " +
                              std::to_string(m_freqHighEmerg) + " Hz.",  logPrio::LOG_EMERGENCY);
     }
     else if (m_frequency <= m_freqLowAlert)
     {
-        log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, below " + 
+        log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, below " +
                                   std::to_string(m_freqLowAlert) + " Hz.",  logPrio::LOG_ALERT);
     }
     else if (m_frequency >= m_freqHighAlert)
     {
-        log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, above " + 
+        log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, above " +
                                   std::to_string(m_freqHighAlert) + " Hz.",  logPrio::LOG_ALERT);
     }
     else if(m_frequency <= m_freqLowWarn)
     {
-        log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, below " + 
+        log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, below " +
                                     std::to_string(m_freqLowWarn) + " Hz.",  logPrio::LOG_WARNING);
     }
     else if (m_frequency >= m_freqHighWarn)
     {
-        log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, above " + 
+        log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, above " +
                                             std::to_string(m_freqHighWarn) + " Hz.",  logPrio::LOG_WARNING);
     }
- 
+
     if (m_voltage <= m_voltLowEmerg)
     {
-        log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, below " + 
+        log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, below " +
                                             std::to_string(m_voltLowEmerg) + " V.",  logPrio::LOG_EMERGENCY);
     }
     else if (m_voltage >= m_voltHighEmerg)
     {
-        log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, above " + 
+        log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, above " +
                                             std::to_string(m_voltHighEmerg) + " V.",  logPrio::LOG_EMERGENCY);
     }
     else if (m_voltage <= m_voltLowAlert)
     {
-        log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, below " + 
+        log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, below " +
                                             std::to_string(m_voltLowAlert) + " V.",  logPrio::LOG_ALERT);
     }
     else if (m_voltage >= m_voltHighAlert)
     {
-        log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, above " + 
+        log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, above " +
                                                         std::to_string(m_voltHighAlert) + " V.",  logPrio::LOG_ALERT);
     }
     else if(m_voltage <= m_voltLowWarn)
     {
-        log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, below " + 
+        log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, below " +
                                                 std::to_string(m_voltLowWarn) + " V.",  logPrio::LOG_WARNING);
     }
     else if (m_voltage >= m_voltHighWarn)
     {
-        log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, above " + 
+        log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, above " +
                                                 std::to_string(m_voltHighWarn) + " V.",  logPrio::LOG_WARNING);
     }
- 
+
     if (m_current >= m_currEmerg)
     {
-        log<text_log>("Current is " + std::to_string(m_current) + " A, above " + 
+        log<text_log>("Current is " + std::to_string(m_current) + " A, above " +
                                                     std::to_string(m_currEmerg) + " A.",  logPrio::LOG_EMERGENCY);
     }
     else if (m_current >= m_currAlert)
     {
-        log<text_log>("Current is " + std::to_string(m_current) + " A, above " + 
+        log<text_log>("Current is " + std::to_string(m_current) + " A, above " +
                                                         std::to_string(m_currAlert) + " A.",  logPrio::LOG_ALERT);
     }
     else if (m_current >= m_currWarn)
     {
-        log<text_log>("Current is " + std::to_string(m_current) + " A, above " + 
+        log<text_log>("Current is " + std::to_string(m_current) + " A, above " +
                                                             std::to_string(m_currWarn) + " A.",  logPrio::LOG_WARNING);
     }
 }

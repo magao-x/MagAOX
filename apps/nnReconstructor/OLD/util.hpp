@@ -67,7 +67,7 @@ inline void parseCSV(std::string filepath, float * fileData)
     std::string line;
     int i =0;
     int arrayLength = sizeof(&fileData) / sizeof(float);
-    while (i<arrayLength) 
+    while (i<arrayLength)
     {
         getline(file, line);
         std::stringstream ss(line);

@@ -93,30 +93,30 @@ using Acroname::BrainStem::EqualizerClass;
 class aUSBCSwitch : public Module
 {
 public:
-    
+
     aUSBCSwitch(const uint8_t module = aUSBCSWITCH_MODULE,
                 bool bAutoNetworking = true,
                 const uint8_t model = aMODULE_TYPE_USBC_Switch) :
     Module(module, bAutoNetworking, model)
     {
-        
+
         app[0].init(this, 0);
         app[1].init(this, 1);
         app[2].init(this, 2);
         app[3].init(this, 3);
-        
+
         pointer[0].init(this, 0);
         pointer[1].init(this, 1);
         pointer[2].init(this, 2);
         pointer[3].init(this, 3);
-        
+
         store[storeInternalStore].init(this, storeInternalStore);
         store[storeRAMStore].init(this, storeRAMStore);
-        
+
         system.init(this, 0);
-        
+
         mux.init(this, 0);
-        
+
         timer[0].init(this, 0);
         timer[1].init(this, 1);
         timer[2].init(this, 2);
@@ -125,13 +125,13 @@ public:
         timer[5].init(this, 5);
         timer[6].init(this, 6);
         timer[7].init(this, 7);
-        
+
         usb.init(this, 0);
-        
+
         equalizer[equalizer2p0].init(this, equalizer2p0);
         equalizer[equalizer3p0].init(this, equalizer3p0);
     }
-    
+
     AppClass app[aUSBCSWITCH_NUM_APPS];
     MuxClass mux;
     PointerClass pointer[aUSBCSWITCH_NUM_POINTERS];
@@ -140,7 +140,7 @@ public:
     TimerClass timer[aUSBCSWITCH_NUM_TIMERS];
     USBClass usb;
     EqualizerClass equalizer[aUSBCSWITCH_NUM_EQ];
-    
+
     enum EQUALIZER_3P0_TRANSMITTER_CONFIGS {
         MUX_1db_COM_0db_900mV = 0,
         MUX_0db_COM_1db_900mV,
@@ -152,7 +152,7 @@ public:
         MUX_2db_COM_2db_1100mV,
         MUX_0db_COM_0db_1300mV,
     };
-    
+
     enum EQUALIZER_3P0_RECEIVER_CONFIGS {
         LEVEL_1_3P0 = 0,
         LEVEL_2_3P0,
@@ -171,31 +171,31 @@ public:
         LEVEL_15_3P0,
         LEVEL_16_3P0,
     };
-    
+
     enum EQUALIZER_2P0_TRANSMITTER_CONFIGS {
         TRANSMITTER_2P0_40mV = 0,
         TRANSMITTER_2P0_60mV,
         TRANSMITTER_2P0_80mV,
     };
-    
+
     enum EQUALIZER_2P0_RECEIVER_CONFIGS {
         LEVEL_1_2P0 = 0,
         LEVEL_2_2P0,
     };
-    
+
     enum EQUALIZER_CHANNELS {
         BOTH = 0,
         MUX,
         COMMON
     };
-    
+
     enum daughtercard_type {
         NO_DAUGHTERCARD = 0,
         PASSIVE_DAUGHTERCARD,
         REDRIVER_DAUGHTERCARD,
         UNKNOWN_DAUGHTERCARD
     };
-    
+
 };
 
 

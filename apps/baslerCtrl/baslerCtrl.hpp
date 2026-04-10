@@ -80,6 +80,8 @@ class baslerCtrl : public MagAOXApp<>,
 
     static constexpr bool c_stdCamera_vShiftSpeed =
         false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
+    static constexpr bool c_stdCamera_fanSpeed =
+        false; ///< app::dev config to tell stdCamera not to expose fan-speed control
 
     static constexpr bool c_stdCamera_emGain =
         false; ///< app::dev config to tell stdCamera to not expose EM gain controls
@@ -339,7 +341,7 @@ void baslerCtrl::loadConfig()
 {
     if( loadConfigImpl( config ) < 0 )
     {
-        log<software_critical>( { __FILE__, __LINE__, "error loading config" } );
+        log<software_critical>( { "error loading config" } );
         m_shutdown = 1;
     }
 }
@@ -372,7 +374,7 @@ int baslerCtrl::appLogic()
         std::unique_lock<std::mutex> lock( m_indiMutex );
         if( connect() < 0 )
         {
-            log<software_error>( { __FILE__, __LINE__ } );
+            log<software_error>( { "" } );
         }
 
         if( state() != stateCodes::CONNECTED )
@@ -668,22 +670,22 @@ int baslerCtrl::connect()
 
     if( m_full_w != m_camera->SensorWidth.GetValue() )
     {
-        return log<software_critical, -1>( { __FILE__, __LINE__, "full ROI w (camera.full_w) mismatch with camera" } );
+        return log<software_critical, -1>( { "full ROI w (camera.full_w) mismatch with camera" } );
     }
 
     if( m_full_h != m_camera->SensorHeight.GetValue() )
     {
-        return log<software_critical, -1>( { __FILE__, __LINE__, "full ROI h (camera.full_h) mismatch with camera" } );
+        return log<software_critical, -1>( { "full ROI h (camera.full_h) mismatch with camera" } );
     }
 
     if( m_full_x != 0.5 * ( (float)m_full_w - 1.0 ) )
     {
-        return log<software_critical, -1>( { __FILE__, __LINE__, "full ROI x (camera.full_x) mismatch with camera" } );
+        return log<software_critical, -1>( { "full ROI x (camera.full_x) mismatch with camera" } );
     }
 
     if( m_full_y != 0.5 * ( (float)m_full_h - 1.0 ) )
     {
-        return log<software_critical, -1>( { __FILE__, __LINE__, "full ROI y (camera.full_y) mismatch with camera" } );
+        return log<software_critical, -1>( { "full ROI y (camera.full_y) mismatch with camera" } );
     }
 
     return 0;
@@ -713,7 +715,7 @@ int baslerCtrl::configureAcquisition()
 
         if( checkNextROI() < 0 )
         {
-            log<software_error>( { __FILE__, __LINE__, "error from checkNextROI()" } );
+            log<software_error>( { "error from checkNextROI()" } );
             return -1;
         }
 
@@ -860,7 +862,7 @@ int baslerCtrl::configureAcquisition()
     }
     catch( ... )
     {
-        log<software_error>( { __FILE__, __LINE__, "invalid ROI specifications" } );
+        log<software_error>( { "invalid ROI specifications" } );
         state( stateCodes::NOTCONNECTED );
         return -1;
     }
@@ -1042,7 +1044,7 @@ int baslerCtrl::setFPS()
         }
         catch( ... )
         {
-            return log<software_error, -1>( { __FILE__, __LINE__, "Error disabling frame rate limit." } );
+            return log<software_error, -1>( { "Error disabling frame rate limit." } );
         }
     }
     else
@@ -1054,7 +1056,7 @@ int baslerCtrl::setFPS()
         }
         catch( ... )
         {
-            return log<software_error, -1>( { __FILE__, __LINE__, "Error setting frame rate limit." } );
+            return log<software_error, -1>( { "Error setting frame rate limit." } );
         }
     }
 
@@ -1073,7 +1075,7 @@ int baslerCtrl::setExpTime()
     }
     catch( ... )
     {
-        log<software_error>( { __FILE__, __LINE__, "Error setting exposure time" } );
+        log<software_error>( { "Error setting exposure time" } );
         return -1;
     }
 
@@ -1232,7 +1234,7 @@ int baslerCtrl::checkNextROI()
     }
     catch( const std::exception &e )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, std::string( "Exception caught: " ) + e.what() } );
+        return log<software_error, -1>( { std::string( "Exception caught: " ) + e.what() } );
     }
 }
 

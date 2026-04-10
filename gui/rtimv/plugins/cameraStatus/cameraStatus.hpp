@@ -13,7 +13,7 @@
 class cameraStatus : public rtimvOverlayInterface
 {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.2")
+    Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.4")
     Q_INTERFACES(rtimvOverlayInterface)
 
 protected:
@@ -27,7 +27,7 @@ protected:
 
     std::vector<std::string> m_filterDeviceNames;
     std::vector<std::string> m_presetNames; //one per filter device, based on its name
-    
+
     QGraphicsScene *m_qgs{nullptr};
 
     StretchBox *m_roiBox{nullptr};

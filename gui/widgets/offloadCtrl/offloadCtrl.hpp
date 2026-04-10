@@ -11,15 +11,15 @@
 #include "../xWidgets/gainCtrl.hpp"
 #include "../xWidgets/statusEntry.hpp"
 
-namespace xqt 
+namespace xqt
 {
-   
+
 class offloadCtrl : public xWidget
 {
      Q_OBJECT
-   
+
 protected:
-   
+
     std::string m_t2wFsmState;
     bool m_offlState {false};
 
@@ -29,28 +29,30 @@ protected:
     QTimer * m_updateTimer {nullptr};
 
 public:
-    offloadCtrl( QWidget * Parent = 0, 
+    offloadCtrl( QWidget * Parent = 0,
                  Qt::WindowFlags f = Qt::WindowFlags()
                );
-   
+
     ~offloadCtrl();
-   
+
     void subscribe();
 
     void onConnect();
 
-    void onDisconnect();                               
-    
+    void onDisconnect();
+
     void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-    
+
+    void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
     void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
 public slots:
 
     void updateGUI();
-   
+
     void on_button_zero_pressed();
-   
+
     void on_button_TelTTDump_pressed();
 
     void on_button_TelFocusDump_pressed();
@@ -60,12 +62,12 @@ signals:
     void doUpdateGUI();
 
 private:
-     
+
     Ui::offloadCtrl ui;
 };
 
 
-offloadCtrl::offloadCtrl( QWidget * Parent, 
+offloadCtrl::offloadCtrl( QWidget * Parent,
                           Qt::WindowFlags f) : xWidget(Parent, f)
 {
     ui.setupUi(this);
@@ -85,7 +87,7 @@ offloadCtrl::offloadCtrl( QWidget * Parent,
     ui.avgInt->setup("dmtweeter-avg", "nAverage", statusEntry::INT , "", "");
     ui.avgInt->setStretch(0,0,1);
 
-   
+
     setXwFont(ui.label_nModes);
     setXwFont(ui.nModes);
     ui.nModes->setup("t2wOffloader", "numModes", statusEntry::INT , "", "");
@@ -117,7 +119,7 @@ offloadCtrl::offloadCtrl( QWidget * Parent,
     ui.telFocusThresh->setStretch(0,3,9);
     ui.telFocusAvgInt->setup("tcsi", "offlF_avgInt", statusEntry::FLOAT, "Avg.", "sec");
     ui.telFocusAvgInt->setStretch(0,3,9);
-    
+
     setXwFont(ui.button_TelTTDump);
     setXwFont(ui.button_TelFocusDump);
 
@@ -150,7 +152,7 @@ void offloadCtrl::subscribe()
     m_parent->addSubscriber(ui.slider_loop);
     m_parent->addSubscriber(ui.avgInt);
     m_parent->addSubscriber(ui.nModes);
-    
+
     m_parent->addSubscriber(ui.gainCtrl);
     m_parent->addSubscriber(ui.mcCtrl);
 
@@ -177,6 +179,11 @@ void offloadCtrl::onConnect()
 
 void offloadCtrl::onDisconnect()
 {
+    m_t2wFsmState.clear();
+    m_offlState = false;
+    m_tweeterAvgFsmState.clear();
+    m_tcsiFsmState.clear();
+
     setWindowTitle(QString("Offloading Ctrl (disconnected)"));
 
     xWidget::onDisconnect();
@@ -184,12 +191,37 @@ void offloadCtrl::onDisconnect()
 }
 
 void offloadCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
-{  
+{
    return handleSetProperty(ipRecv);
 }
 
+void offloadCtrl::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
+    if(ipRecv.getDevice() == "t2wOffloader")
+    {
+        if(ipRecv.getName() == "fsm" || ipRecv.getName() == "offload")
+        {
+            onDisconnect();
+        }
+    }
+    else if(ipRecv.getDevice() == "dmtweeter-avg")
+    {
+        if(ipRecv.getName() == "fsm")
+        {
+            onDisconnect();
+        }
+    }
+    else if(ipRecv.getDevice() == "tcsi")
+    {
+        if(ipRecv.getName() == "fsm")
+        {
+            onDisconnect();
+        }
+    }
+}
+
 void offloadCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
-{  
+{
     if(ipRecv.getDevice() == "t2wOffloader")
     {
         if(ipRecv.getName() == "fsm")
@@ -210,10 +242,10 @@ void offloadCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
                 else
                 {
                     m_offlState = false;
-                }    
+                }
             }
         }
-        
+
     }
     else if(ipRecv.getDevice() == "dmtweeter-avg")
     {
@@ -240,7 +272,7 @@ void offloadCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
 }
 
 void offloadCtrl::updateGUI()
-{      
+{
 
     if(m_t2wFsmState != "READY" && m_t2wFsmState != "OPERATING")
     {
@@ -298,7 +330,7 @@ void offloadCtrl::updateGUI()
         ui.button_TelFocusDump->setEnabled(false);
 
     }
-    else 
+    else
     {
         ui.sliderTelTTEnable->setEnabled(true);
         ui.sliderTelFocusEnable->setEnabled(true);
@@ -319,39 +351,39 @@ void offloadCtrl::updateGUI()
 void offloadCtrl::on_button_zero_pressed()
 {
     pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-   
+
     ipFreq.setDevice("t2wOffloader");
     ipFreq.setName("zero");
     ipFreq.add(pcf::IndiElement("request"));
-   
+
     ipFreq["request"] = pcf::IndiElement::On;
-   
+
     sendNewProperty(ipFreq);
 }
 
 void offloadCtrl::on_button_TelTTDump_pressed()
 {
     pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-   
+
     ipFreq.setDevice("tcsi");
     ipFreq.setName("offlTT_dump");
     ipFreq.add(pcf::IndiElement("request"));
-   
+
     ipFreq["request"] = pcf::IndiElement::On;
-   
+
     sendNewProperty(ipFreq);
 }
 
 void offloadCtrl::on_button_TelFocusDump_pressed()
 {
     pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-   
+
     ipFreq.setDevice("tcsi");
     ipFreq.setName("offlF_dump");
     ipFreq.add(pcf::IndiElement("request"));
-   
+
     ipFreq["request"] = pcf::IndiElement::On;
-   
+
     sendNewProperty(ipFreq);
 }
 

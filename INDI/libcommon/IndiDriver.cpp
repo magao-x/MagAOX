@@ -251,7 +251,7 @@ bool IndiDriver::handleDriverNewProperty( const IndiProperty &ipRecv )
   // Assume we didn't handle the NEW and it will be handled by
   // the derived class.
   bool oHandledProperty = false;
-  
+
   return oHandledProperty;
 }
 
@@ -435,9 +435,9 @@ void IndiDriver::sendMessage( const IndiProperty &ipSend )
 void IndiDriver::sendSetProperty( const IndiProperty &ipSend ) const
 {
    IndiProperty _ipSend = ipSend;
-   
+
    _ipSend.setTimeStamp(TimeStamp::now());
-   
+
   if ( isResponseModeEnabled() == true )
   {
     IndiXmlParser ixp( IndiMessage( IndiMessage::SetProperty, _ipSend ),

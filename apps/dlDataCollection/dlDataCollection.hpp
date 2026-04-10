@@ -8,7 +8,7 @@
 #define dlDataCollection_hpp
 
 #include <NvInfer.h>
-#include <cuda_fp16.h>  
+#include <cuda_fp16.h>
 #include <cuda_runtime_api.h>
 #include <iostream>
 #include <fstream>
@@ -25,7 +25,7 @@ using namespace nvinfer1;
 
 bool loadCSV(const std::string& filename, int numValues, float*& dest) {
     std::ifstream file(filename);
-    
+
     if (!file.is_open()) {
         std::cerr << "Error opening file!" << std::endl;
         return false;
@@ -33,7 +33,7 @@ bool loadCSV(const std::string& filename, int numValues, float*& dest) {
 
     std::string line;
 
-    
+
     for (int i = 0; i < numValues; ++i) {
         std::getline(file, line);
         dest[i] = std::stof(line);
@@ -54,11 +54,11 @@ class ImageBuffer {
 
     public:
         ImageBuffer(size_t _num_channels, size_t _num_rows, size_t _num_cols, size_t _num_images)
-            : num_channels(_num_channels), num_rows(_num_rows), num_cols(_num_cols), 
-              num_images(_num_images), 
-              size(_num_channels * _num_rows * _num_cols), 
+            : num_channels(_num_channels), num_rows(_num_rows), num_cols(_num_cols),
+              num_images(_num_images),
+              size(_num_channels * _num_rows * _num_cols),
               head(0), is_full(false) {
-            
+
             buffer = new float[size * num_images];
             memset( buffer, 0, sizeof( float) * size * num_images);
         }
@@ -66,7 +66,7 @@ class ImageBuffer {
         ~ImageBuffer(){
             delete buffer;
         }
-    
+
         // Adds an image (array of floats) to the buffer (overwrites if full)
         void add(float* image) {
             memcpy(&buffer[head  * size], image, sizeof(float) * size);
@@ -84,12 +84,12 @@ class ImageBuffer {
                 std::cerr << "Error opening file for writing: " << filename << std::endl;
                 return;
             }
-            
+
             file.write(reinterpret_cast<char*>(buffer), sizeof(float) * size * num_images);
-            
+
             file.close();
         }
-        
+
 
 };
 
@@ -129,7 +129,7 @@ class dlDataCollection : public MagAOXApp<true>, public dev::shmimMonitor<dlData
     int Nset {0}; // Number of images per dataset file
     int NumFrameSkip {0}; // Number of frames to skip to ensure latency is not an issue
     int Nmodes {0}; // Number of modes to control
-    
+
     int inputC {0};
     int inputH {0};
     int inputW {0};
@@ -214,7 +214,7 @@ class dlDataCollection : public MagAOXApp<true>, public dev::shmimMonitor<dlData
 
     // Custom functions
     int send_to_shmim();
-    
+
     void loadRandomAmps(int dataset_i);
 
     // void build_engine(){};
@@ -296,7 +296,7 @@ inline void dlDataCollection::setupConfig()
                 false,
                 "int",
                 "Number of dataset files to generate" );
-    
+
     config.add( "parameters.NumFrameSkip",
                 "",
                 "parameters.NumFrameSkip",
@@ -336,7 +336,7 @@ inline void dlDataCollection::setupConfig()
                 false,
                 "string",
                 "The output channel." );
-    
+
     config.add( "parameters.Nmodes",
                 "",
                 "parameters.Nmodes",
@@ -454,7 +454,7 @@ inline int dlDataCollection::appStartup()
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
-  
+
     // state(stateCodes::READY);
     state( stateCodes::OPERATING );
     return 0;
@@ -628,7 +628,7 @@ inline int dlDataCollection::processImage( void *curr_src, const dev::shmimT &du
     frame_wait++;
     frame_counter++;
 
-    
+
 
     return 0;
 }

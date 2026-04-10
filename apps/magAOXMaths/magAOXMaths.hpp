@@ -39,7 +39,7 @@ protected:
    pcf::IndiProperty m_indiP_otherVal;
 
    pcf::IndiProperty m_indiP_setOtherVal;
-   
+
    std::string m_myVal {"x"};
    std::string m_otherDevName;
    std::string m_otherValName;
@@ -75,7 +75,7 @@ public:
    INDI_NEWCALLBACK_DECL(magAOXMaths, m_indiP_myVal);
 
    INDI_SETCALLBACK_DECL(magAOXMaths, m_indiP_otherVal);
-   
+
    INDI_NEWCALLBACK_DECL(magAOXMaths,  m_indiP_setOtherVal);
 
 };
@@ -124,7 +124,7 @@ int magAOXMaths::appStartup()
     m_indiP_setOtherVal["current"].set<double>(0.0);
     m_indiP_setOtherVal["target"].set<double>(0.0);
    registerIndiPropertyNew( m_indiP_setOtherVal, INDI_NEWCALLBACK( m_indiP_setOtherVal));
-   
+
    updateVals();
    state(stateCodes::READY);
    return 0;
@@ -152,7 +152,7 @@ int magAOXMaths::updateVals()
    if(v == -3) log<text_log>( "value set to -3!", logPrio::LOG_CRITICAL);
    if(v == -4) log<text_log>( "value set to -4!", logPrio::LOG_ALERT);
    if(v == -5) log<text_log>( "value set to -5!", logPrio::LOG_EMERGENCY);
-   
+
    // fill maths
    m_indiP_myVal_maths["value"] = v;
    m_indiP_myVal_maths["sqr"] = v*v;
@@ -201,14 +201,14 @@ INDI_NEWCALLBACK_DEFN(magAOXMaths,  m_indiP_setOtherVal)(const pcf::IndiProperty
    if (ipRecv.getName() ==  m_indiP_setOtherVal.getName())
    {
       std::cerr << " m_indiP_setOtherVal\n";
-      
+
       // received a new value for property val
        m_indiP_setOtherVal["target"] = ipRecv["target"].get<double>();
        m_indiP_setOtherVal.setState (pcf::IndiProperty::Ok);
       //m_indiDriver->sendSetProperty (m_indiP_myVal);
 
       sendNewProperty(m_indiP_otherVal, "value",  m_indiP_setOtherVal["target"].get<double>());
-      
+
       updateVals();
 
       return 0;

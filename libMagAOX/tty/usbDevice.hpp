@@ -1,7 +1,7 @@
 /** \file usbDevice.hpp
  * \author Jared R. Males
  * \brief Manage a USB TTY device in the MagAOXApp context
- * 
+ *
  * \ingroup tty_files
  *
  */
@@ -26,16 +26,16 @@ namespace tty
 {
 
 /// A USB device as a TTY device.
-/**   
+/**
   * \ingroup tty
-  */ 
+  */
 struct usbDevice
 {
    std::string m_idVendor;  ///< The vendor id 4-digit code
    std::string m_idProduct; ///< The product id 4-digit code
    std::string m_serial;    ///< The serial number
 
-   speed_t m_baudRate {0}; ///< The baud rate specification. 
+   speed_t m_baudRate {0}; ///< The baud rate specification.
 
    std::string m_deviceName; ///< The device path name, e.g. /dev/ttyUSB0
 
@@ -45,7 +45,7 @@ struct usbDevice
    /**
      * \returns 0 on success.
      * \returns -1 on error (nothing implemented yet)
-     */ 
+     */
    int setupConfig( mx::app::appConfigurator & config /**< [in] an application configuration to setup */);
 
    ///Load the USB section from an application configurator
@@ -63,7 +63,7 @@ struct usbDevice
 
    ///Connect to the device.
    /** Closes the device file descriptor if open, then calls ttyOpenRaw.
-     * 
+     *
      * \returns TTY_E_NOERROR on success.
      * \returns TTY_E_TCGETATTR on a error from tcgetattr.
      * \returns TTY_E_TCSETATTR on an error from tcsetattr.

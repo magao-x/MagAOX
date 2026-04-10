@@ -8,7 +8,7 @@
 #define nnReconstructor_hpp
 
 #include <NvInfer.h>
-#include <cuda_fp16.h>  
+#include <cuda_fp16.h>
 #include <cuda_runtime_api.h>
 #include <iostream>
 #include <fstream>
@@ -82,7 +82,7 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
     std::string engineName;   // Name of the engine
     std::string engineDirs;   // Name of the engine
     bool rebuildEngine;       // If true, it will rebuild the engine and save it at engineName
-    
+
     Logger logger;			  // The tensorRT logger
     std::vector<char> engineData; // for loading the engine file.
 
@@ -171,7 +171,7 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
 
     // Custom functions
     int send_to_shmim();
-    
+
     void load_engine(const std::string filename);
     void create_engine_context();
     void prepare_engine_memory();
@@ -189,14 +189,14 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
 };
 
 void nnReconstructor::load_engine(const std::string filename) {
-    
+
     std::ifstream file(filename, std::ios::binary);
     if (!file) {
         std::cout << "Error opening " << filename << std::endl;
     }
 
     file.seekg(0, std::ios::end);
-    
+
     engineData = std::vector<char>(file.tellg());
     file.seekg(0, std::ios::beg);
     file.read(engineData.data(), engineData.size());
@@ -210,14 +210,14 @@ void nnReconstructor::create_engine_context(){
     if (!runtime) {
         std::cout << "Failed to createInferRuntime\n";
     }
-    
+
     engine = runtime->deserializeCudaEngine(engineData.data(), engineData.size());
     if (!engine) {
         std::cout << "Failed to deserialize CUDA engine.\n";
     } else {
         std::cout << "Deserialized CUDA engine.\n";
     }
-    
+
     context = engine->createExecutionContext();
 
 
@@ -253,7 +253,7 @@ void nnReconstructor::prepare_engine_memory(){
         cudaMalloc((void**)&d_input, inputSize * sizeof(float));
         cudaMalloc((void**)&d_output, outputSize * sizeof(float));
     }
-    
+
     //cudaMalloc((void**)&d_input, inputSize * sizeof(float));
     //cudaMalloc((void**)&d_output, outputSize * sizeof(float));
 
@@ -262,7 +262,7 @@ void nnReconstructor::prepare_engine_memory(){
 void nnReconstructor::cleanup_engine_memory(){
     if(d_input)
         cudaFree(d_input);
-    
+
     if(d_output)
         cudaFree(d_output);
 }
@@ -486,7 +486,7 @@ inline int nnReconstructor::appStartup()
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
-  
+
     std::string full_filepath = engineDirs + "/" + engineName;
     std::cout << "file: " << full_filepath << std::endl;
 

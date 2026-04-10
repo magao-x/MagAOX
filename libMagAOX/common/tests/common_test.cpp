@@ -11,7 +11,7 @@
 #include "../paths.hpp"
 
 
-namespace template_test 
+namespace template_test
 {
 
 SCENARIO( "xxxx", "[template]" )
@@ -28,4 +28,4 @@ SCENARIO( "xxxx", "[template]" )
       }
    }
 }
-} //namespace template_test 
+} //namespace template_test

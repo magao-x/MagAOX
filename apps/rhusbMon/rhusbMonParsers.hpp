@@ -15,14 +15,14 @@ namespace app
 {
 namespace RH
 {
-   
+
 /// Parse the RH probe C temp command
 /**
   * \returns -1 if the end of transmission string is not found
   * \returns -2 if there is no value in the string
-  * \returns -3 if the parsed string does not begin with a digit 
+  * \returns -3 if the parsed string does not begin with a digit
   * \returns 0 on success
-  */ 
+  */
 int parseC( float & temp,           ///< [out] the reported temperature
             const std::string & str ///< [in] the string returned by the device
           )
@@ -33,7 +33,7 @@ int parseC( float & temp,           ///< [out] the reported temperature
       temp = -999;
       return -1;
    }
-   
+
    if(st == 0)
    {
       temp = -999;
@@ -47,14 +47,14 @@ int parseC( float & temp,           ///< [out] the reported temperature
    }
 
    temp = std::stof( str.substr(0, st) );
-   
+
    return 0;
 }
 
 /// Parse the RH probe H humidity command
 /**
   * \returns -1 if the end of transmission string is not found
-  * \returns -2 if there is not value in the string 
+  * \returns -2 if there is not value in the string
   * \returns -3 if the parsed string does not begin with a digit
   * \returns 0 on success
   */
@@ -68,7 +68,7 @@ int parseH( float & humid,          ///< [out] the reported temperature
       humid = -999;
       return -1;
    }
-   
+
    if(st == 0)
    {
       humid = -999;
@@ -82,7 +82,7 @@ int parseH( float & humid,          ///< [out] the reported temperature
    }
 
    humid = std::stof( str.substr(0, st) );
-   
+
    return 0;
 }
 

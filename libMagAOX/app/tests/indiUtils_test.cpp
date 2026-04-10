@@ -3,9 +3,9 @@
 
 #include "../indiUtils.hpp"
 using namespace MagAOX::app::indi;
-   
 
-SCENARIO( "Parsing INDI unique key", "[indiUtils]" ) 
+
+SCENARIO( "Parsing INDI unique key", "[indiUtils]" )
 {
     GIVEN("valid keys")
     {

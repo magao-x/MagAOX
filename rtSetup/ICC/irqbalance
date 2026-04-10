@@ -4,7 +4,7 @@
 # Edit the IRQBALANCE_BANNED_CPUS bitmask to match the r/t cpusets created in make_cpusets
 #
 # Edit the irqbalance_policyscript to include IRQs to ban
-# 
+#
 # To Install:
 #
 # If first time after new installation: $ cp /etc/sysconfig/irqbalance /etc/sysconfig/irqbalance.bup
@@ -14,7 +14,7 @@
 # Then start irqbalance:
 # $ systemctl start irqbalance
 # $ systemctl status irqbalance
-# 
+#
 
 # irqbalance is a daemon process that distributes interrupts across
 # CPUS on SMP systems. The default is to rebalance once every 10
@@ -31,7 +31,7 @@
 #
 # IRQBALANCE_BANNED_CPUS
 #
-# For RTC this is 128 bits.  Currently bans 32-63 and 96-127 (which are the h/t pairs)                      
+# For RTC this is 128 bits.  Currently bans 32-63 and 96-127 (which are the h/t pairs)
 IRQBALANCE_BANNED_CPULIST=32-63,96-127
 
 #

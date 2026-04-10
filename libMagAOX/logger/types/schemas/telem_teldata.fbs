@@ -33,7 +33,7 @@ table Telem_teldata_fb
 
    /// dome status
    domeStat:int;
-   
+
 }
 
 root_type Telem_teldata_fb;

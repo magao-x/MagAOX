@@ -5,7 +5,7 @@ OTHER_HEADERS=
 TARGET=acronameUsbHub
 
 INCLUDES += -I../../libs/BrainStem2/
-LDLIBS += ../../libs/BrainStem2/libBrainStem2.a 
+LDLIBS += ../../libs/BrainStem2/libBrainStem2.a
 
 
 

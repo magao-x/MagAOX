@@ -12,14 +12,14 @@
 class pwfsAlignment : public rtimvOverlayInterface
 {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.2")
+    Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.4")
     Q_INTERFACES(rtimvOverlayInterface)
 
 protected:
     rtimvOverlayAccess m_roa;
 
     bool m_enabled{false};
-    
+
     char m_blob[512]; ///< Memory for copying rtimvDictionary blobs
 
     double m_1x{0};

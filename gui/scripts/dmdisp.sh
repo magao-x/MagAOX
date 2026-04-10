@@ -26,8 +26,8 @@ case ${DMNAME} in
       echo 'must provide DM name: woofer, tweeter, or ncpc'
       exit 1
 esac
-    
-#Only use the rtimv config for the combine channel    
+
+#Only use the rtimv config for the combine channel
 rtimv -c "rtimv_dm"$dmindex"disp.conf" &
 
 
@@ -39,13 +39,13 @@ do
    else
       chnum="$i"
    fi
-   
+
    channel="dm"$dmindex"disp"$chnum
-   
+
    echo $channel
-   
+
    #remaining channels don't get the rtimv config
-   rtimv --autoscale --nofpsgage $channel & 
+   rtimv --autoscale --nofpsgage $channel &
 done
 
 

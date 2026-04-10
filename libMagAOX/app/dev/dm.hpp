@@ -100,6 +100,8 @@ class dm
     std::string m_flatPath;  ///< The path to this DM's flat files (usually the same as calibPath)
     std::string m_testPath;  ///< The path to this DM's test files (default is calibPath/tests;
 
+    std::string m_actMaskPath; ///< The file name of the actuator mask for this DM
+
     std::string m_flatDefault; ///< The file name of the this DM's default flat command. Path and extension will be
                                ///< ignored and can be omitted.
     std::string m_testDefault; ///< The file name of the this DM's default test command. Path and extension will be
@@ -116,6 +118,7 @@ class dm
 
     std::string m_shmimShape; ///< The name of the shmim stream to write the desaturated true shape to.
     std::string m_shmimDelta; ///< The name of the shmim stream to write the desaturated delta command to.
+    std::string m_shmimDiff;  ///< The name of the shmim stream to write the difference to.
 
     uint32_t m_dmWidth{ 0 };  ///< The width of the images in the stream
     uint32_t m_dmHeight{ 0 }; ///< The height of the images in the stream
@@ -153,6 +156,8 @@ class dm
     IMAGE m_flatImageStream;  ///< The ImageStreamIO shared memory buffer for the flat.
     bool  m_flatSet{ false }; ///< Flag indicating whether the flat command has been set.
 
+    mx::improc::milkImage<realT> m_actMask;
+
     std::map<std::string, std::string> m_testCommands; ///< Map of test file name to full path
     std::string                        m_testCurrent;
 
@@ -182,11 +187,15 @@ class dm
 
     std::vector<std::string> m_deltaChannels; ///< The names of channels which are treated as delta commands
 
+    std::vector<size_t> m_deltas;    ///< Indices of the channels which are delta commands
     std::vector<size_t> m_notDeltas; ///< Indices of the channels which are not delta commands
 
-    mx::improc::eigenImage<realT> m_totalFlat; ///< the total of all non-delta channels
+    mx::improc::eigenImage<realT> m_totalFlat;  ///< the total of all non-delta channels
+    mx::improc::eigenImage<realT> m_totalDelta; ///< the total of all delta channels
 
     mx::improc::milkImage<realT> m_outputDelta; ///< The true output delta command after saturation.
+    mx::improc::milkImage<realT>
+        m_outputDiff; ///< The difference between command and true delta command after saturation.
 
     /** \name Saturation Thread Data
      * This thread processes the saturation maps
@@ -1024,6 +1033,16 @@ int dm<derivedT, realT>::setupConfig( mx::app::appConfigurator &config )
                 "string",
                 "The default test file (path and extension are not required)." );
 
+    config.add( "dm.actMaskPath",
+                "",
+                "dm.actMaskPath",
+                argType::Required,
+                "dm",
+                "actMaskPath",
+                false,
+                "string",
+                "The path to the actuator mask for this DM, relative to the calib path." );
+
     // Overriding the shmimMonitor setup so that these all go in the dm section
     // Otherwise, would call shmimMonitor<dm<derivedT,realT>>::setupConfig();
     ///\todo shmimMonitor now has configSection so this isn't necessary.
@@ -1137,17 +1156,17 @@ int dm<derivedT, realT>::setupConfig( mx::app::appConfigurator &config )
                 "The name of the ImageStreamIO shared memory image to write the desaturated shape to.  Default is "
                 "shmimName with _shape apended (i.e. dm00disp -> dm00disp_shape).  This is created." );
 
-    config.add(
-        "dm.shmimDelta",
-        "",
-        "dm.shmimDelta",
-        argType::Required,
-        "dm",
-        "shmimDelta",
-        false,
-        "string",
-        "The name of the ImageStreamIO shared memory image to write the desaturated delta-shape to.  Default is "
-        "shmimName with _delta apended (i.e. dm00disp -> dm00disp_delta).  This is created." );
+    config.add( "dm.shmimDelta",
+                "",
+                "dm.shmimDelta",
+                argType::Required,
+                "dm",
+                "shmimDelta",
+                false,
+                "string",
+                "The name of the ImageStreamIO shared memory image to write the "
+                "desaturated delta-shape to.  Default is "
+                "shmimName with _delta apended (i.e. dm00disp -> dm00disp_delta).  This is created." );
 
     config.add( "dm.deltaChannels",
                 "",
@@ -1261,6 +1280,8 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
         m_testCurrent = "default";
     }
 
+    config( m_actMaskPath, "dm.actMaskPath" );
+
     // Overriding the shmimMonitor setup so that these all go in the dm section
     // Otherwise, would call shmimMonitor<dm<derivedT,realT>>::loadConfig(config);
     config( derived().m_smThreadPrio, "dm.threadPrio" );
@@ -1295,6 +1316,9 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
         m_shmimDelta = derived().m_shmimName + "_delta";
         config( m_shmimDelta, "dm.shmimDelta" );
 
+        m_shmimDiff = derived().m_shmimName + "_diff";
+        config( m_shmimDiff, "dm.shmimDiff" );
+
         config( m_deltaChannels, "dm.deltaChannels" );
     }
     else
@@ -1319,6 +1343,61 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
     config( m_satTriggerDevice, "dm.satTriggerDevice" );
     config( m_satTriggerProperty, "dm.satTriggerProperty" );
 
+    if( m_dmWidth > 0 && m_dmHeight > 0 )
+    {
+        try
+        {
+            m_actMask.create( derived().m_shmimName + "_actmask", m_dmWidth, m_dmHeight );
+        }
+        catch( const std::exception &e )
+        {
+            derivedT::template log<text_log>( std::format( "exception caught creating actuator mask: "
+                                                           "{}: {}",
+                                                           derived().m_shmimName + "_actmask",
+                                                           e.what(),
+                                                           logPrio::LOG_ERROR ) );
+            return -1;
+        }
+
+        if( m_actMaskPath != "" )
+        {
+            mx::improc::eigenImage<realT> actMask;
+
+            mx::fits::fitsFile<realT> ff;
+
+            mx::error_t errc = ff.read( actMask, m_calibPath + '/' + m_actMaskPath );
+
+            if( errc != mx::error_t::noerror )
+            {
+                derivedT::template log<text_log>( std::format( "error reading actuator mask file {}: "
+                                                               "{} ({})",
+                                                               m_calibPath + '/' + m_actMaskPath,
+                                                               mx::errorMessage( errc ),
+                                                               mx::errorName( errc ) ),
+                                                  logPrio::LOG_ERROR );
+                return -1;
+            }
+
+            if( actMask.rows() != m_dmWidth || actMask.cols() != m_dmHeight )
+            {
+                derivedT::template log<text_log>( std::format( "actuaor mask {}x{} is not same size as flag {}x{}",
+                                                               actMask.rows(),
+                                                               actMask.cols(),
+                                                               m_dmWidth,
+                                                               m_dmHeight ),
+                                                  logPrio::LOG_ERROR );
+
+                return -1;
+            }
+
+            m_actMask = actMask;
+        }
+        else
+        {
+            m_actMask().setConstant( 1.0 );
+        }
+    }
+
     return 0;
 }
 
@@ -1327,7 +1406,7 @@ int dm<derivedT, realT>::appStartup()
 {
     if( m_dmDataType == 0 )
     {
-        derivedT::template log<software_error>( { __FILE__, __LINE__, "unsupported DM data type" } );
+        derivedT::template log<software_error>( { "unsupported DM data type" } );
         return -1;
     }
 
@@ -1347,7 +1426,7 @@ int dm<derivedT, realT>::appStartup()
     if( derived().registerIndiPropertyReadOnly( m_indiP_flatShmim ) < 0 )
     {
 #ifndef DM_TEST_NOLOG
-        derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+        derivedT::template log<software_error>( { "" } );
 #endif
         return -1;
     }
@@ -1357,7 +1436,7 @@ int dm<derivedT, realT>::appStartup()
     if( derived().registerIndiPropertyNew( m_indiP_setFlat, st_newCallBack_setFlat ) < 0 )
     {
 #ifndef DM_TEST_NOLOG
-        derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+        derivedT::template log<software_error>( { "" } );
 #endif
         return -1;
     }
@@ -1378,7 +1457,7 @@ int dm<derivedT, realT>::appStartup()
     if( derived().registerIndiPropertyReadOnly( m_indiP_testShmim ) < 0 )
     {
 #ifndef DM_TEST_NOLOG
-        derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+        derivedT::template log<software_error>( { "" } );
 #endif
         return -1;
     }
@@ -1388,7 +1467,7 @@ int dm<derivedT, realT>::appStartup()
     if( derived().registerIndiPropertyNew( m_indiP_setTest, st_newCallBack_setTest ) < 0 )
     {
 #ifndef DM_TEST_NOLOG
-        derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+        derivedT::template log<software_error>( { "" } );
 #endif
         return -1;
     }
@@ -1399,7 +1478,7 @@ int dm<derivedT, realT>::appStartup()
     {
         // clang-format off
         #ifndef DM_TEST_NOLOG
-        derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+        derivedT::template log<software_error>( {""} );
         #endif
         // clang-format on
 
@@ -1413,7 +1492,7 @@ int dm<derivedT, realT>::appStartup()
     {
         // clang-format off
         #ifndef DM_TEST_NOLOG
-        derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+        derivedT::template log<software_error>( {""} );
         #endif
         // clang-format on
 
@@ -1424,14 +1503,14 @@ int dm<derivedT, realT>::appStartup()
     derived().createStandardIndiRequestSw( m_indiP_release, "releaseDM" );
     if( derived().registerIndiPropertyNew( m_indiP_release, st_newCallBack_release ) < 0 )
     {
-        return derivedT::template log<software_error, -1>( { __FILE__, __LINE__ } );
+        return derivedT::template log<software_error, -1>( { "" } );
     }
 
     derived().createStandardIndiRequestSw( m_indiP_zeroAll, "zeroAll" );
     if( derived().registerIndiPropertyNew( m_indiP_zeroAll, st_newCallBack_zeroAll ) < 0 )
     {
 #ifndef DM_TEST_NOLOG
-        derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+        derivedT::template log<software_error>( { "" } );
 #endif
         return -1;
     }
@@ -1448,8 +1527,7 @@ int dm<derivedT, realT>::appStartup()
 
     if( sem_init( &m_satSemaphore, 0, 0 ) < 0 )
     {
-        return derivedT::template log<software_critical, -1>(
-            { __FILE__, __LINE__, errno, 0, "Initializing sat semaphore" } );
+        return derivedT::template log<software_critical, -1>( { errno, 0, "Initializing sat semaphore" } );
     }
 
     if( derived().threadStart( m_satThread,
@@ -1462,7 +1540,7 @@ int dm<derivedT, realT>::appStartup()
                                this,
                                satThreadStart ) < 0 )
     {
-        derivedT::template log<software_error, -1>( { __FILE__, __LINE__ } );
+        derivedT::template log<software_error, -1>( { "" } );
         return -1;
     }
 
@@ -1475,7 +1553,7 @@ int dm<derivedT, realT>::appLogic()
     // do a join check to see if other threads have exited.
     if( pthread_tryjoin_np( m_satThread.native_handle(), 0 ) == 0 )
     {
-        derivedT::template log<software_error>( { __FILE__, __LINE__, "saturation thread has exited" } );
+        derivedT::template log<software_error>( { "saturation thread has exited" } );
 
         return -1;
     }
@@ -1511,7 +1589,7 @@ int dm<derivedT, realT>::appLogic()
             m_actProcD[n] = m_actProc.at( refEntry, n );
             m_actComD[n]  = m_actCom.at( refEntry, n );
             m_satUpD[n]   = m_satUp.at( refEntry, n );
-            m_deltaUpD[n]   = m_deltaUp.at( refEntry, n );
+            m_deltaUpD[n] = m_deltaUp.at( refEntry, n );
         }
 
         std::cerr << "Act. Process:   " << mx::math::vectorMean( m_actProcD ) << " +/- "
@@ -1586,8 +1664,7 @@ int dm<derivedT, realT>::findDMChannels()
 
     if( dmlist.size() == 0 )
     {
-        derivedT::template log<software_error>(
-            { __FILE__, __LINE__, "no dm channels found for " + derived().m_shmimName } );
+        derivedT::template log<software_error>( { "no dm channels found for " + derived().m_shmimName } );
 
         return -1;
     }
@@ -1615,15 +1692,16 @@ int dm<derivedT, realT>::findDMChannels()
     ++m_numChannels;
 
     derivedT::template log<text_log>(
-        { std::string( "Found " ) + std::to_string( m_numChannels ) + " channels for " + derived().m_shmimName } );
+        { std::format( "Found {} chanels for {} ", m_numChannels, derived().m_shmimName ) } );
 
     m_channels.resize( m_numChannels, nullptr );
 
+    m_notDeltas.clear();
+    m_deltas.clear();
+
     for( size_t n = 0; n < m_channels.size(); ++n )
     {
-        char nstr[16];
-        snprintf( nstr, sizeof( nstr ), "%02d", (int)n );
-        std::string sname = derived().m_shmimName + nstr;
+        std::string sname = std::format( "{}{:02}", derived().m_shmimName, n );
 
         try
         {
@@ -1631,16 +1709,36 @@ int dm<derivedT, realT>::findDMChannels()
         }
         catch( const std::exception &e )
         {
-            derivedT::template log<software_error>(
-                { __FILE__, __LINE__, "exception opening " + sname + ": " + e.what() } );
+            derivedT::template log<software_error>( { "exception opening " + sname + ": " + e.what() } );
         }
 
+        std::cerr << "looking for " << sname << '\n';
         auto res = std::find( m_deltaChannels.begin(), m_deltaChannels.end(), sname );
         if( res == m_deltaChannels.end() )
         {
+            std::cerr << "  not a delta\n";
             m_notDeltas.push_back( n );
         }
+        else
+        {
+            std::cerr << "  is a delta\n";
+            m_deltas.push_back( n );
+        }
     }
+
+    std::cerr << "not deltas: ";
+    for( size_t n = 0; n < m_notDeltas.size(); ++n )
+    {
+        std::cerr << m_notDeltas[n] << ' ';
+    }
+    std::cerr << '\n';
+
+    std::cerr << "deltas: ";
+    for( size_t n = 0; n < m_deltas.size(); ++n )
+    {
+        std::cerr << m_deltas[n] << ' ';
+    }
+    std::cerr << '\n';
 
     return 0;
 }
@@ -1654,22 +1752,19 @@ int dm<derivedT, realT>::allocate( const dev::shmimT &sp )
 
     if( derived().m_width != m_dmWidth )
     {
-        derivedT::template log<software_critical>(
-            { __FILE__, __LINE__, "shmim width does not match configured DM width" } );
+        derivedT::template log<software_critical>( { "shmim width does not match configured DM width" } );
         ++err;
     }
 
     if( derived().m_height != m_dmHeight )
     {
-        derivedT::template log<software_critical>(
-            { __FILE__, __LINE__, "shmim height does not match configured DM height" } );
+        derivedT::template log<software_critical>( { "shmim height does not match configured DM height" } );
         ++err;
     }
 
     if( derived().m_dataType != m_dmDataType )
     {
-        derivedT::template log<software_critical>(
-            { __FILE__, __LINE__, "shmim data type does not match configured DM data type" } );
+        derivedT::template log<software_critical>( { "shmim data type does not match configured DM data type" } );
         ++err;
     }
 
@@ -1689,7 +1784,7 @@ int dm<derivedT, realT>::allocate( const dev::shmimT &sp )
 
     if( findDMChannels() < 0 )
     {
-        derivedT::template log<software_critical>( { __FILE__, __LINE__, "error finding DM channels" } );
+        derivedT::template log<software_critical>( { "error finding DM channels" } );
 
         return -1;
     }
@@ -1702,7 +1797,7 @@ int dm<derivedT, realT>::allocate( const dev::shmimT &sp )
     catch( const std::exception &e )
     {
         return derivedT::template log<software_error, -1>(
-            { __FILE__, __LINE__, std::string( "creating output shape shmim: " ) + e.what() } );
+            { std::string( "creating output shape shmim: " ) + e.what() } );
     }
 
     try
@@ -1713,11 +1808,25 @@ int dm<derivedT, realT>::allocate( const dev::shmimT &sp )
     catch( const std::exception &e )
     {
         return derivedT::template log<software_error, -1>(
-            { __FILE__, __LINE__, std::string( "creating output delta shmim: " ) + e.what() } );
+            { std::string( "creating output delta shmim: " ) + e.what() } );
+    }
+
+    try
+    {
+        m_outputDiff.create( m_shmimDiff, m_dmWidth, m_dmHeight );
+        m_outputDiff().setZero();
+    }
+    catch( const std::exception &e )
+    {
+        return derivedT::template log<software_error, -1>(
+            { std::string( "creating output diff shmim: " ) + e.what() } );
     }
 
     m_totalFlat.resize( m_dmWidth, m_dmHeight );
     m_totalFlat.setZero();
+
+    m_totalDelta.resize( m_dmWidth, m_dmHeight );
+    m_totalDelta.setZero();
 
     // clang-format off
     #ifdef XWC_DMTIMINGS
@@ -1746,7 +1855,7 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
 
     if( rv < 0 )
     {
-        derivedT::template log<software_critical>( { __FILE__, __LINE__, errno, rv, "Error from commandDM" } );
+        derivedT::template log<software_critical>( { errno, rv, "Error from commandDM" } );
         return rv;
     }
 
@@ -1761,7 +1870,7 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
 
         if( rv < 0 )
         {
-            derivedT::template log<software_critical>( { __FILE__, __LINE__, errno, rv, "Error from makeDelta" } );
+            derivedT::template log<software_critical>( { errno, rv, "Error from makeDelta" } );
             return rv;
         }
     }
@@ -1769,7 +1878,7 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
     // clang-format off
     #ifdef XWC_DMTIMINGS
     m_tdeltaf = mx::sys::get_curr_time();
-    
+
     m_tf = m_tdeltaf;
     #endif // clang-format on
 
@@ -1781,7 +1890,7 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
     // Tell the sat thread to get going
     if( sem_post( &m_satSemaphore ) < 0 )
     {
-        derivedT::template log<software_critical>( { __FILE__, __LINE__, errno, 0, "Error posting to semaphore" } );
+        derivedT::template log<software_critical>( { errno, 0, "Error posting to semaphore" } );
         return -1;
     }
 
@@ -1798,7 +1907,7 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
         m_actProc.nextEntry( m_tact1 - m_tact0 );
         m_actCom.nextEntry( m_tact2 - m_tact1 );
         m_satUp.nextEntry( m_tact4 - m_tact3 );
-        m_deltaUp.nextEntry( m_tdeltaf - m_tdelta0);
+        m_deltaUp.nextEntry( m_tdeltaf - m_tdelta0 );
     }
 
         // clang-format off
@@ -1812,7 +1921,7 @@ int dm<derivedT, realT>::baseInitDM()
 {
     if( derived().state() != stateCodes::NOTHOMED )
     {
-        derivedT::template log<software_error>( { __FILE__, __LINE__, errno, "DM is not ready to be initialized" } );
+        derivedT::template log<software_error>( { errno, "DM is not ready to be initialized" } );
         derived().state( stateCodes::ERROR );
         return -1;
     }
@@ -1822,7 +1931,7 @@ int dm<derivedT, realT>::baseInitDM()
     int rv;
     if( ( rv = derived().initDM() ) < 0 )
     {
-        derivedT::template log<software_critical>( { __FILE__, __LINE__, errno, rv, "Error from initDM" } );
+        derivedT::template log<software_critical>( { errno, rv, "Error from initDM" } );
         derived().state( stateCodes::ERROR );
         return rv;
     }
@@ -1841,14 +1950,14 @@ int dm<derivedT, realT>::baseReleaseDM()
     int rv;
     if( ( rv = derived().releaseDM() ) < 0 )
     {
-        derivedT::template log<software_critical>( { __FILE__, __LINE__, errno, rv, "Error from releaseDM" } );
+        derivedT::template log<software_critical>( { errno, rv, "Error from releaseDM" } );
         derived().state( stateCodes::ERROR );
         return rv;
     }
 
     if( ( rv = zeroAll( true ) ) < 0 )
     {
-        derivedT::template log<software_error>( { __FILE__, __LINE__, errno, rv, "Error from zeroAll" } );
+        derivedT::template log<software_error>( { errno, rv, "Error from zeroAll" } );
         derived().state( stateCodes::ERROR );
         return rv;
     }
@@ -1860,9 +1969,23 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::checkFlats()
 {
     std::vector<std::string> tfs;
-    mx::error_t              errc = mx::ioutils::getFileNames( tfs, m_flatPath, "", "", ".fits" );
 
-    mx_error_check_rv( errc, -1 );
+    bool gfn_logged = false;
+
+    mx::error_t errc = mx::ioutils::getFileNames( tfs, m_flatPath, "", "", ".fits" );
+
+    if( errc != mx::error_t::noerror )
+    {
+        if( !gfn_logged )
+        {
+            derivedT::template log<software_error>(
+                { std::format( "error getting flat files: {}", mx::errorMessage( errc ) ) } );
+        }
+        gfn_logged = true;
+        return -1;
+    }
+
+    gfn_logged = false;
 
     // First remove default, b/c we always add it and don't want to include it in timestamp selected ones
     for( size_t n = 0; n < tfs.size(); ++n )
@@ -1975,7 +2098,7 @@ int dm<derivedT, realT>::checkFlats()
         {
             // clang-format off
             #ifndef DM_TEST_NOLOG
-            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+            derivedT::template log<software_error>( {""} );
             #endif
             // clang-format on
 
@@ -2017,9 +2140,12 @@ int dm<derivedT, realT>::loadFlat( const std::string &intarget )
     }
 
     m_flatLoaded = false;
+
     // load into memory.
     mx::fits::fitsFile<realT> ff;
-    mx::error_t               errc = ff.read( m_flatCommand, targetPath );
+
+    mx::error_t errc = ff.read( m_flatCommand, targetPath );
+
     if( errc != mx::error_t::noerror )
     {
         derivedT::template log<text_log>( std::format( "error reading flat file {}: "
@@ -2030,6 +2156,20 @@ int dm<derivedT, realT>::loadFlat( const std::string &intarget )
                                           logPrio::LOG_ERROR );
         return -1;
     }
+
+    if( m_actMask.rows() != m_flatCommand.rows() || m_actMask.cols() != m_flatCommand.cols() )
+    {
+        derivedT::template log<text_log>( std::format( "actuaor mask {}x{} is not same size as flag {}x{}",
+                                                       m_actMask.rows(),
+                                                       m_actMask.cols(),
+                                                       m_flatCommand.rows(),
+                                                       m_flatCommand.cols() ),
+                                          logPrio::LOG_ERROR );
+
+        return -1;
+    }
+
+    m_flatCommand *= m_actMask();
 
     derivedT::template log<text_log>( "loaded flat file " + targetPath );
     m_flatLoaded = true;
@@ -2246,12 +2386,12 @@ int dm<derivedT, realT>::zeroFlat()
 
     if( derived().zeroDM() < 0 )
     {
-        derivedT::template log<software_error>( { __FILE__, __LINE__, "error from zeroDM" } );
+        derivedT::template log<software_error>( { "error from zeroDM" } );
     }
 
     if( clearSat() < 0 )
     {
-        derivedT::template log<software_error>( { __FILE__, __LINE__, "error from clearSat" } );
+        derivedT::template log<software_error>( { "error from clearSat" } );
     }
     derived().state( stateCodes::READY );
 
@@ -2262,7 +2402,23 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::checkTests()
 {
     std::vector<std::string> tfs;
-    mx::error_t              errc = mx::ioutils::getFileNames( tfs, m_testPath, "", "", ".fits" );
+
+    static bool gfn_logged = false; // tracks if not finding the test path is logged
+
+    mx::error_t errc = mx::ioutils::getFileNames( tfs, m_testPath, "", "", ".fits" );
+
+    if( errc != mx::error_t::noerror )
+    {
+        if( !gfn_logged )
+        {
+            derivedT::template log<software_error>(
+                { std::format( "error getting test files: {}", mx::errorMessage( errc ) ) } );
+        }
+        gfn_logged = true;
+        return -1;
+    }
+
+    gfn_logged = false;
 
     mx_error_check_rv( errc, -1 );
 
@@ -2339,7 +2495,7 @@ int dm<derivedT, realT>::checkTests()
         if( derived().registerIndiPropertyNew( m_indiP_tests, st_newCallBack_tests ) < 0 )
         {
 #ifndef DM_TEST_NOLOG
-            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+            derivedT::template log<software_error>( { "" } );
 #endif
             return -1;
         }
@@ -2661,7 +2817,7 @@ int dm<derivedT, realT>::zeroAll( bool nosem )
     int rv;
     if( ( rv = clearSat() ) < 0 )
     {
-        derivedT::template log<software_error>( { __FILE__, __LINE__, errno, rv, "Error from clearSat" } );
+        derivedT::template log<software_error>( { errno, rv, "Error from clearSat" } );
         return rv;
     }
 
@@ -2683,8 +2839,16 @@ int dm<derivedT, realT>::makeDelta()
         m_totalFlat += ( *m_channels[m_notDeltas[n]] )();
     }
 
-    m_outputDelta.setWrite( true );
-    m_outputDelta = m_outputShape() - m_totalFlat; //this posts and everything
+    m_outputDelta = m_outputShape() - m_totalFlat; // this posts and everything
+
+    m_totalDelta = ( *m_channels[m_deltas[0]] )();
+
+    for( size_t n = 1; n < m_deltas.size(); ++n )
+    {
+        m_totalDelta += ( *m_channels[m_deltas[n]] )();
+    }
+
+    m_outputDiff = m_totalDelta - m_outputDelta();
 
     return 0;
 }
@@ -2831,7 +2995,7 @@ void dm<derivedT, realT>::satThreadExec()
         timespec ts;
         if( clock_gettime( CLOCK_REALTIME, &ts ) < 0 )
         {
-            derivedT::template log<software_critical>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
+            derivedT::template log<software_critical>( { errno, 0, "clock_gettime" } );
             return;
         }
         ts.tv_sec += 1;
@@ -2941,7 +3105,7 @@ void dm<derivedT, realT>::satThreadExec()
             // Otherwise, report an error.
             if( errno != ETIMEDOUT )
             {
-                derivedT::template log<software_error>( { __FILE__, __LINE__, errno, "sem_timedwait" } );
+                derivedT::template log<software_error>( { errno, "sem_timedwait" } );
                 break;
             }
         }
@@ -3005,7 +3169,7 @@ int dm<derivedT, realT>::newCallBack_init( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.createUniqueKey() != m_indiP_init.createUniqueKey() )
     {
-        return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, "wrong INDI-P in callback" } );
+        return derivedT::template log<software_error, -1>( { "wrong INDI-P in callback" } );
     }
 
     if( !ipRecv.find( "request" ) )
@@ -3018,8 +3182,7 @@ int dm<derivedT, realT>::newCallBack_init( const pcf::IndiProperty &ipRecv )
         int rv = baseInitDM();
         if( rv < 0 )
         {
-            return derivedT::template log<software_error, -1>(
-                { __FILE__, __LINE__, "error from initDM in INDI callback" } );
+            return derivedT::template log<software_error, -1>( { "error from initDM in INDI callback" } );
         }
     }
 
@@ -3037,7 +3200,7 @@ int dm<derivedT, realT>::newCallBack_zero( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.createUniqueKey() != m_indiP_zero.createUniqueKey() )
     {
-        return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, "wrong INDI-P in callback" } );
+        return derivedT::template log<software_error, -1>( { "wrong INDI-P in callback" } );
     }
 
     if( !ipRecv.find( "request" ) )
@@ -3061,7 +3224,7 @@ int dm<derivedT, realT>::newCallBack_release( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.createUniqueKey() != m_indiP_release.createUniqueKey() )
     {
-        return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, "wrong INDI-P in callback" } );
+        return derivedT::template log<software_error, -1>( { "wrong INDI-P in callback" } );
     }
 
     if( !ipRecv.find( "request" ) )
@@ -3085,7 +3248,7 @@ int dm<derivedT, realT>::newCallBack_flats( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.createUniqueKey() != m_indiP_flats.createUniqueKey() )
     {
-        derivedT::template log<software_error>( { __FILE__, __LINE__, "invalid indi property received" } );
+        derivedT::template log<software_error>( { "invalid indi property received" } );
         return -1;
     }
 
@@ -3136,7 +3299,7 @@ int dm<derivedT, realT>::newCallBack_setFlat( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.createUniqueKey() != m_indiP_setFlat.createUniqueKey() )
     {
-        return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, "wrong INDI-P in callback" } );
+        return derivedT::template log<software_error, -1>( { "wrong INDI-P in callback" } );
     }
 
     if( !ipRecv.find( "toggle" ) )
@@ -3163,7 +3326,7 @@ int dm<derivedT, realT>::newCallBack_tests( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.createUniqueKey() != m_indiP_tests.createUniqueKey() )
     {
-        derivedT::template log<software_error>( { __FILE__, __LINE__, "invalid indi property received" } );
+        derivedT::template log<software_error>( { "invalid indi property received" } );
         return -1;
     }
 
@@ -3214,7 +3377,7 @@ int dm<derivedT, realT>::newCallBack_setTest( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.createUniqueKey() != m_indiP_setTest.createUniqueKey() )
     {
-        return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, "wrong INDI-P in callback" } );
+        return derivedT::template log<software_error, -1>( { "wrong INDI-P in callback" } );
     }
 
     if( !ipRecv.find( "toggle" ) )
@@ -3241,7 +3404,7 @@ int dm<derivedT, realT>::newCallBack_zeroAll( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.createUniqueKey() != m_indiP_zeroAll.createUniqueKey() )
     {
-        return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, "wrong INDI-P in callback" } );
+        return derivedT::template log<software_error, -1>( { "wrong INDI-P in callback" } );
     }
 
     if( !ipRecv.find( "request" ) )
@@ -3265,7 +3428,7 @@ int dm<derivedT, realT>::newCallBack_zeroAll( const pcf::IndiProperty &ipRecv )
 #define DM_SETUP_CONFIG( cfig )                                                                                        \
     if( dmT::setupConfig( cfig ) < 0 )                                                                                 \
     {                                                                                                                  \
-        log<software_error>( { __FILE__, __LINE__, "Error from dmT::setupConfig" } );                                  \
+        log<software_error>( { "Error from dmT::setupConfig" } );                                                      \
         m_shutdown = true;                                                                                             \
         return;                                                                                                        \
     }
@@ -3277,35 +3440,35 @@ int dm<derivedT, realT>::newCallBack_zeroAll( const pcf::IndiProperty &ipRecv )
 #define DM_LOAD_CONFIG( cfig )                                                                                         \
     if( dmT::loadConfig( cfig ) < 0 )                                                                                  \
     {                                                                                                                  \
-        return log<software_error, -1>( { __FILE__, __LINE__, "Error from dmT::loadConfig" } );                        \
+        return log<software_error, -1>( { "Error from dmT::loadConfig" } );                                            \
     }
 
 /// Call shmimMonitorT::appStartup with error checking for dm
 #define DM_APP_STARTUP                                                                                                 \
     if( dmT::appStartup() < 0 )                                                                                        \
     {                                                                                                                  \
-        return log<software_error, -1>( { __FILE__, __LINE__, "Error from dmT::appStartup" } );                        \
+        return log<software_error, -1>( { "Error from dmT::appStartup" } );                                            \
     }
 
 /// Call dmT::appLogic with error checking for dm
 #define DM_APP_LOGIC                                                                                                   \
     if( dmT::appLogic() < 0 )                                                                                          \
     {                                                                                                                  \
-        return log<software_error, -1>( { __FILE__, __LINE__, "Error from dmT::appLogic" } );                          \
+        return log<software_error, -1>( { "Error from dmT::appLogic" } );                                              \
     }
 
 /// Call dmT::updateINDI with error checking for dm
 #define DM_UPDATE_INDI                                                                                                 \
     if( dmT::updateINDI() < 0 )                                                                                        \
     {                                                                                                                  \
-        return log<software_error, -1>( { __FILE__, __LINE__, "Error from dmT::updateINDI" } );                        \
+        return log<software_error, -1>( { "Error from dmT::updateINDI" } );                                            \
     }
 
 /// Call dmT::appShutdown with error checking for dm
 #define DM_APP_SHUTDOWN                                                                                                \
     if( dmT::appShutdown() < 0 )                                                                                       \
     {                                                                                                                  \
-        return log<software_error, -1>( { __FILE__, __LINE__, "Error from dmT::appShutdown" } );                       \
+        return log<software_error, -1>( { "Error from dmT::appShutdown" } );                                           \
     }
 
 } // namespace dev

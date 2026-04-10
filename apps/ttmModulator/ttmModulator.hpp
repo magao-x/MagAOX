@@ -46,7 +46,7 @@ protected:
 
    double m_rotAngle {0};
    double m_rotParity {1};
-   
+
    ///@}
 
    int m_modState {MODSTATE_UNKNOWN}; ///< -1 = unknown, 0 = off, 1 = rest, 2 = midset, 3 = set, 4 = modulating
@@ -70,26 +70,26 @@ protected:
    double m_C2phse {-1};  ///< Phase of fxn gen channel 2.
 
    double m_calRadius {1.0};
-   
+
    /* Old Cal:
    std::vector<double> m_calFreqs = {100,400,500,600,700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000};
    std::vector<double> m_calC1Amps = {0.61,0.61,0.57,0.55,0.53,0.51,0.51,0.49,0.46,0.44,0.44,0.43,0.44,0.46,0.49,0.54,0.58,0.62};
    std::vector<double> m_calC2Amps = {0.6,0.6,0.6,0.57,0.55,0.53,0.51,0.49,0.49,0.49,0.49,0.5,0.52,0.54,0.59,0.64,0.70,0.77};
    std::vector<double> m_calC2Phse = { 75, 75, 75,  75,  75,  75,  75,  75,  75,  75,  75,  75,  75,  72,  72,  70,  70,  70} ;*/
-   
+
    /* Cal on 2022-09-18:
    std::vector<double> m_calFreqs = { 250,  500,   750,  1000,  1250,  1500,  1750,  2000,  2250,  2500,  2750,  3000,  3250,  3500};
    std::vector<double> m_calC1Amps = {0.66, 0.62, 0.58,  0.49,  0.44,  0.41,  0.43,  0.41,  0.35,  0.75,  1.0,   1.03,  1.08,  1.58 };
    std::vector<double> m_calC2Amps = {0.64, 0.61, 0.56, 0.54,   0.55,  0.57,  0.65,  0.78,  0.95,  1.15,   1.15,   2.25,  2.15,  1.97};
    std::vector<double> m_calC2Phse = {  75, 75,    75,   75,    75,    75,    72,    67,    63,     35,    5,    18,    10,    -40} ; */
-   
-   /* Cal on 2023-12-03 (w. strain gauges ON):*/ 
+
+   /* Cal on 2023-12-03 (w. strain gauges ON):*/
    /*std::vector<double> m_calFreqs =  { 100,  250,  500,  750, 1000, 1250, 1500, 1750, 2000};
-   std::vector<double> m_calC1Amps = {0.22, 0.28, 0.43, 0.61, 0.82, 1.06, 1.35, 1.70, 2.045}; 
-   std::vector<double> m_calC2Amps = {0.23, 0.23, 0.56, 0.85, 1.16, 1.58, 1.96, 2.60, 3.63}; 
+   std::vector<double> m_calC1Amps = {0.22, 0.28, 0.43, 0.61, 0.82, 1.06, 1.35, 1.70, 2.045};
+   std::vector<double> m_calC2Amps = {0.23, 0.23, 0.56, 0.85, 1.16, 1.58, 1.96, 2.60, 3.63};
    std::vector<double> m_calC2Phse = {  79,   82,   82,   82,   82,   82,   84,   88,   93}; */
 
-    /* Cal on 2023-12-03 (w. strain gauges OFF):*/ 
+    /* Cal on 2023-12-03 (w. strain gauges OFF):*/
     std::vector<double> m_calFreqs =  { 100,   250,   500,   750,  1000,  1250,  1500,  1750,  2000,     2250, 2500,  2750, 3000};
     std::vector<double> m_calC1Amps = {0.310, 0.317, 0.327, 0.327, 0.333, 0.333, 0.343, 0.350, 0.373,    0.39, 0.405, 0.425, 0.435};
     std::vector<double> m_calC2Amps = {0.313, 0.317, 0.327, 0.340, 0.357, 0.363, 0.380, 0.407, 0.426667, 0.45, 0.475, 0.490, 0.510}; //have to go to this many sig-figs for max voltage reasons
@@ -166,11 +166,11 @@ public:
    int offset12( double d1,
                  double d2
                );
-   
+
    int offsetXY( double dx,
                  double dy
                );
-   
+
 protected:
 
    //declare our properties
@@ -181,8 +181,8 @@ protected:
 
    pcf::IndiProperty m_indiP_offset12;
    pcf::IndiProperty m_indiP_offset;
-   
-   
+
+
    pcf::IndiProperty m_indiP_FGState;
 
    pcf::IndiProperty m_indiP_C1outp;
@@ -203,7 +203,7 @@ public:
    INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_modFrequency);
    INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_offset12);
    INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_offset);
-   
+
    INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C1outp);
    INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C1freq);
    INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C1volts);
@@ -258,15 +258,15 @@ void ttmModulator::loadConfig()
    config(m_setDVolts, "cal.setDvolts");
    config(m_modDFreq, "cal.modDfreq");
    config(m_modDVolts, "cal.modDvolts");
-   
+
    config(m_rotAngle, "cal.rotAngle");
    m_rotAngle = m_rotAngle*3.14159/180.;
-   
+
    config(m_rotParity, "cal.rotParity");
    if(m_rotParity < 0) m_rotParity = -1;
    else m_rotParity = 1;
-   
-   
+
+
 }
 
 inline
@@ -290,15 +290,15 @@ int ttmModulator::appStartup()
    m_indiP_modRadius.add (pcf::IndiElement("target"));
    m_indiP_modRadius["current"].set(m_modRad);
    m_indiP_modRadius["target"].set(m_modRadRequested);
-  
+
    REG_INDI_NEWPROP(m_indiP_offset12, "offset12", pcf::IndiProperty::Number);
    m_indiP_offset12.add (pcf::IndiElement("dC1"));
    m_indiP_offset12.add (pcf::IndiElement("dC2"));
-   
+
    REG_INDI_NEWPROP(m_indiP_offset, "offset", pcf::IndiProperty::Number);
    m_indiP_offset.add (pcf::IndiElement("x"));
    m_indiP_offset.add (pcf::IndiElement("y"));
-   
+
    REG_INDI_SETPROP(m_indiP_C1outp, "fxngenmodwfs", "C1outp");
    REG_INDI_SETPROP(m_indiP_C1freq, "fxngenmodwfs", "C1freq");
    REG_INDI_SETPROP(m_indiP_C1volts, "fxngenmodwfs", "C1amp");
@@ -318,12 +318,12 @@ inline
 int ttmModulator::appLogic()
 {
    if(state()==stateCodes::POWEROFF) return 0;
-   
+
    if(state()==stateCodes::POWERON)
    {
       sleep(2);
    }
-   
+
    if( calcState() < 0 )
    {
       //application failure if we can't determine state
@@ -374,13 +374,13 @@ int ttmModulator::appLogic()
       double newFreq = m_modFreqRequested;
 
       m_modStateRequested = MODSTATE_OFF;
- 
+
       lock.unlock();
 
       state(stateCodes::CONFIGURING);
       if(newState == MODSTATE_REST) restTTM();
       if(newState == MODSTATE_SET) setTTM();
-      if(newState == MODSTATE_MODULATING) 
+      if(newState == MODSTATE_MODULATING)
       {
          if(newRad <= 0.1 || newFreq <= 1)
          {
@@ -464,15 +464,15 @@ int ttmModulator::calcState()
       {
          //Possibly some more checks
          m_modFreq = m_C1freq;
-         
+
          //Interpolate on C1.
          size_t ngt = 0;
-   
+
          for(ngt = 0; ngt < m_calFreqs.size(); ++ngt)
          {
             if( m_calFreqs[ngt] >= m_modFreq) break;
          }
-   
+
          double terpC1Amp;
          if(ngt == 0 || m_calFreqs[ngt] == m_modFreq)
          {
@@ -483,11 +483,11 @@ int ttmModulator::calcState()
             size_t nlt = ngt -1;
             double dfreq = (m_modFreq - m_calFreqs[nlt])/(m_calFreqs[ngt]-m_calFreqs[nlt]);
             terpC1Amp = m_calC1Amps[nlt] + (m_calC1Amps[ngt]-m_calC1Amps[nlt])*dfreq;
-      
+
          }
-   
+
          m_modRad = m_C1volts/terpC1Amp * m_calRadius;
-         
+
          m_modState = MODSTATE_MODULATING;
       }
    }
@@ -797,19 +797,19 @@ int ttmModulator::modTTM( double newRad,
 
    ///\todo here maximum radius should be frequency dependent.
 
-   
-   
+
+
    double terpC1Amp = 0;
    double terpC2Amp = 0;
    double terpC2Phse = 0;
-   
+
    size_t ngt = 0;
-   
+
    for(ngt = 0; ngt < m_calFreqs.size(); ++ngt)
    {
       if( m_calFreqs[ngt] >= newFreq) break;
    }
-   
+
    if(ngt == 0 || m_calFreqs[ngt] == newFreq)
    {
       terpC1Amp = m_calC1Amps[ngt];
@@ -820,30 +820,30 @@ int ttmModulator::modTTM( double newRad,
    {
       size_t nlt = ngt -1;
       double dfreq = (newFreq - m_calFreqs[nlt])/(m_calFreqs[ngt]-m_calFreqs[nlt]);
-      
+
       terpC1Amp = m_calC1Amps[nlt] + (m_calC1Amps[ngt]-m_calC1Amps[nlt])*dfreq;
       terpC2Amp = m_calC2Amps[nlt] + (m_calC2Amps[ngt]-m_calC2Amps[nlt])*dfreq;
       terpC2Phse = m_calC2Phse[nlt] + (m_calC2Phse[ngt]-m_calC2Phse[nlt])*dfreq;
    }
-   
+
 
    voltageC1 = terpC1Amp*(newRad/m_calRadius);
-   voltageC2 = terpC2Amp*(newRad/m_calRadius); 
+   voltageC2 = terpC2Amp*(newRad/m_calRadius);
 
-   
+
    if(voltageC1 > m_maxVolt)
    {
       log<text_log>("Requested ch-1 voltge " + std::to_string(voltageC1) + " V exceeds limit (" + std::to_string(m_maxVolt) + " V). Limiting.", logPrio::LOG_WARNING);
       voltageC1 = m_maxVolt;
    }
-   
+
    if(voltageC2 > m_maxVolt)
    {
       log<text_log>("Requested ch-2 voltge " + std::to_string(voltageC2) + " V exceeds limit (" + std::to_string(m_maxVolt) + " V). Limiting.", logPrio::LOG_WARNING);
       voltageC2 = m_maxVolt;
    }
-   
-   
+
+
    //At this point we have safe calibrated voltage for the frequency.
 
    if( m_modState == MODSTATE_SET)
@@ -923,12 +923,12 @@ int ttmModulator::modTTM( double newRad,
          if( sendNewProperty(m_indiP_C2volts, "target", nextVolts2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
          //Now check if values have changed.
-         if( waitValue(m_C1volts, nextVolts1, 1e-3) < 0 ) 
+         if( waitValue(m_C1volts, nextVolts1, 1e-3) < 0 )
          {
             return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout C1"});
          }
 
-         if( waitValue(m_C2volts, nextVolts2, 1e-3) < 0 ) 
+         if( waitValue(m_C2volts, nextVolts2, 1e-3) < 0 )
          {
             return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout C2"});
          }
@@ -958,12 +958,12 @@ int ttmModulator::offset12( double d1,
                             double d2
                           )
 {
-   
+
    if( sendNewProperty(m_indiP_C1ofst, "value", m_C1ofst + d1) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    if( sendNewProperty(m_indiP_C2ofst, "value", m_C2ofst + d2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   
+
    return 0;
-   
+
 }
 
 inline
@@ -973,23 +973,23 @@ int ttmModulator::offsetXY( double dx,
 {
    double cs = cos(m_rotAngle);
    double ss = sin(m_rotAngle);
-   
+
    double rdx = dx * cs - dy * ss;
    double rdy = m_rotParity*(dx * ss + dy * cs);
-   
+
    if( sendNewProperty(m_indiP_C1ofst, "value", m_C1ofst + rdx) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    if( sendNewProperty(m_indiP_C2ofst, "value", m_C2ofst + rdy) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   
+
    return 0;
-   
+
 }
 
 INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modState)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_modState, ipRecv);
-    
+
     int target;
-    
+
     if( indiTargetUpdate( m_indiP_modState, target, ipRecv, false) < 0)
     {
        return log<software_error, -1>({__FILE__,__LINE__});
@@ -1024,7 +1024,7 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modFrequency)(const pcf::IndiPropert
     {
        return log<software_error, -1>({__FILE__,__LINE__});
     }
-    
+
     if(target > 0)
     {
         m_modFreqRequested = target;
@@ -1044,7 +1044,7 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modFrequency)(const pcf::IndiPropert
     */
 
     return 0;
-   
+
 }
 
 INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modRadius)(const pcf::IndiProperty &ipRecv)
@@ -1056,7 +1056,7 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modRadius)(const pcf::IndiProperty &
     {
        return log<software_error, -1>({__FILE__,__LINE__});
     }
-    
+
     if(target > 0)
     {
         m_modRadRequested = target;
@@ -1077,20 +1077,20 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modRadius)(const pcf::IndiProperty &
       */
 
     return 0;
-  
+
 }
 
 INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offset12)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offset12, ipRecv);
-    
+
     double dx = 0;
     if(ipRecv.find("dC1"))
     {
        dx = ipRecv["dC1"].get<double>();
     }
     std::cerr << "dC1: " << dx << "\n";
-    
+
     double dy = 0;
     if(ipRecv.find("dC2"))
     {
@@ -1099,7 +1099,7 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offset12)(const pcf::IndiProperty &i
 
     std::cerr << "dC2: " << dy << "\n\n";
 
-    
+
     return offset12(dx, dy);
 
 }
@@ -1114,7 +1114,7 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offset)(const pcf::IndiProperty &ipR
        dx = ipRecv["x"].get<double>();
     }
     std::cerr << "dx: " << dx << "\n";
-    
+
     double dy = 0;
     if(ipRecv.find("y"))
     {
@@ -1123,7 +1123,7 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offset)(const pcf::IndiProperty &ipR
 
     std::cerr << "dy: " << dy << "\n\n";
 
-    
+
     return offsetXY(dx, dy);
 
 }
@@ -1159,7 +1159,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1outp)(const pcf::IndiProperty &ipR
        log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
        return -1;
     }
-  
+
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1freq)(const pcf::IndiProperty &ipRecv)
@@ -1224,7 +1224,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1ofst)(const pcf::IndiProperty &ipR
        log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
        return -1;
     }
-   
+
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1phse)(const pcf::IndiProperty &ipRecv)
@@ -1253,7 +1253,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1phse)(const pcf::IndiProperty &ipR
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2outp)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2outp, ipRecv);
-    
+
     ///\todo use find to test
     try
     {
@@ -1280,7 +1280,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2outp)(const pcf::IndiProperty &ipR
        log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
        return -1;
     }
-   
+
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2freq)(const pcf::IndiProperty &ipRecv)
@@ -1302,7 +1302,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2freq)(const pcf::IndiProperty &ipR
        log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
        return -1;
     }
-   
+
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2volts)(const pcf::IndiProperty &ipRecv)
@@ -1323,13 +1323,13 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2volts)(const pcf::IndiProperty &ip
        log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
        return -1;
     }
-   
+
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2ofst)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2ofst, ipRecv);
-   
+
     ///\todo use find to test
     try
     {
@@ -1346,13 +1346,13 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2ofst)(const pcf::IndiProperty &ipR
        log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
        return -1;
     }
-   
+
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2phse)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2phse, ipRecv);
-   
+
     ///\todo use find to test
     try
     {
@@ -1367,7 +1367,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2phse)(const pcf::IndiProperty &ipR
     {
        log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
        return -1;
-    }   
+    }
 }
 
 } //namespace app

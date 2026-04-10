@@ -48,9 +48,9 @@ public:
              const uint8_t model = aMODULE_TYPE_USBStem_1) :
     a40PinModule(module, bAutoNetworking, model)
     {
-        
+
     }
-    
+
 };
 
 #endif

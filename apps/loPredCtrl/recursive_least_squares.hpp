@@ -17,7 +17,7 @@ namespace DDSPC
 */
 
 class RecursiveLeastSquares{
-    
+
 	private:
 
 	public:
@@ -30,20 +30,20 @@ class RecursiveLeastSquares{
         Matrix K;           // The gain matrix
 		Matrix err;         // The a-priori prediction error
 		Matrix xtP;         // A convenience variable
-        
-		
+
+
 		Matrix prediction_matrix;         // Prediction matrix
 		Matrix inverse_covariance;       // Inverse covariance
 
         Matrix prediction_output;
-		
+
 		RecursiveLeastSquares(int num_predictors, int num_features, realT forgetting_factor, realT inverse_covariance);
 		~RecursiveLeastSquares();
 
         // This interface might need to change
 		void update(eigenImage<realT> *x, eigenImage<realT> *y);
 		void update(Matrix *x, Matrix *y);
-        
+
         //Matrix* predict(eigenImage<realT> *x);
 		void reset();
 		void save_state(std::string filaname);

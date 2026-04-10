@@ -122,7 +122,6 @@ public:
         qApp->setStyleSheet(stream.readAll());
 
         multiIndiManager mgr(m_deviceName, m_ipAddress, m_port);
-
         widgetT device(m_deviceName);
 
         device.loadConfig(config);
@@ -135,6 +134,8 @@ public:
         device.show();
 
         int rv = qApp->exec();
+
+        mgr.unsubscribe(&device);
 
         return rv;
     }

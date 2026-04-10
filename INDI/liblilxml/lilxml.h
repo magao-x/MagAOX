@@ -32,7 +32,7 @@
 extern "C"
 {
 #endif
-   
+
 /* opaque handle types */
 typedef struct _xml_att XMLAtt;
 typedef struct _xml_ele XMLEle;
@@ -112,7 +112,7 @@ extern void lilxmlMalloc (void *(*newmalloc)(size_t size),
 	    if (errmsg[0])
 		error ("Error: %s\n", errmsg);
 	}
- 
+
         print the tag and pcdata content of each child element within the root
 
         for (ep = nextXMLEle (root, 1); ep != NULL; ep = nextXMLEle (root, 0))
@@ -132,5 +132,5 @@ extern void lilxmlMalloc (void *(*newmalloc)(size_t size),
 #ifdef __cplusplus
 } //extern "C"
 #endif
-   
+
 #endif	/* LILXML_H */

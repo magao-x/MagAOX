@@ -120,11 +120,11 @@ class IndiConnection : public pcf::Thread
     /// This will cause the process to quit, the same as if a ctrl-c was sent.
     void quitProcess();
 
-    bool getQuitProcess() 
+    bool getQuitProcess()
     {
        return m_oQuitProcess;
     }
-    
+
   // Helper functions.
   protected:
     /// 'pthread_create' needs a static function to get the thread going.
@@ -144,25 +144,20 @@ class IndiConnection : public pcf::Thread
     int m_iCpuAffinity;
     /// allocate a big buffer to hold the input data.
     std::vector<unsigned char> m_vecInputBuf;
-    
+
     /// The flag to tell this to quit.
     //Changed from static to prevent app-wide INDI shutdown.
     bool m_oQuitProcess {false};
-    
+
     /// This is the object that conglomerates all the INDI XML
     pcf::IndiXmlParser m_ixpIndi;
     /// A mutex to protect output.
     mutable pcf::MutexLock m_mutOutput;
     /// The file descriptor to read from.
     int m_fdInput;
-    
+
     /// The file descriptor to write to.
     int m_fdOutput;
-
-    /// Stream for safer output
-    FILE * m_fstreamOutput {NULL};
-
-    FILE * m_fstreamSTDOUT {NULL};
 
     /// If the processing of INDI messages is put in a separate thread,
     /// this is the thread id of it.

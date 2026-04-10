@@ -1,7 +1,7 @@
 /** \file ioDevice.hpp
  * \author Jared R. Males
  * \brief Configuration and control of an input and output device
- * 
+ *
  * \ingroup app_files
  *
  */
@@ -15,14 +15,14 @@ namespace MagAOX
 {
 namespace app
 {
-namespace dev 
+namespace dev
 {
-   
+
 /// An input/output capable device.
 /** Standardizes read and write timeout configuration.
-  * 
+  *
   * \ingroup appdev
-  */ 
+  */
 struct ioDevice
 {
    unsigned m_readTimeout {1000};  ///< The read timeout [msec]
@@ -32,7 +32,7 @@ struct ioDevice
    /**
      * \returns 0 on success.
      * \returns -1 on error (nothing implemented yet)
-     */ 
+     */
    int setupConfig( mx::app::appConfigurator & config /**< [in] an application configuration to setup */);
 
    ///Load the device section from an application configurator
@@ -42,22 +42,22 @@ struct ioDevice
      * \returns -1 on error (nothing implemented yet)
      */
    int loadConfig( mx::app::appConfigurator & config /**< [in] an application configuration from which to load values */);
-   
+
    /// Perform application startup steps specific to an ioDevice
    /**
      * This is currently an empty function which always returns 0.  Could be ignored,
      * but for future changes it is recommended to include a call to this in derivedT::appStartup().
-     * 
+     *
      * \returns 0 on success
      * \returns -1 on error
      */
    int appStartup();
-   
+
    /// Perform application logic steps specific to an ioDevice during the main event loop
    /**
      * This is currently an empty function which always returns 0.  Could be ignored,
      * but for future changes it is recommended to include a call to this in derivedT::appLogic().
-     * 
+     *
      * \returns 0 on success
      * \returns -1 on error
      */

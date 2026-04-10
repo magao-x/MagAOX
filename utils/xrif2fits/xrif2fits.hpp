@@ -26,6 +26,10 @@ using namespace mx::sys::tsop;
 
 #include "../../libMagAOX/libMagAOX.hpp"
 
+#ifndef DEBUG_CRUMB
+#define DEBUG_CRUMB(msg) {std::cerr << msg << '(' << __FILE__ << ' ' << __LINE__ << "\n";}
+#endif
+
 #define ERR_INVOKED_NAME( msg )                                                                                        \
     std::cerr << invokedName + ": " << msg << "\n  at:" << __FILE__ << ' ' << __LINE__ << '\n';
 
@@ -86,8 +90,10 @@ class xrif2fits : public mx::app::application
 
     bool m_noHeader{ false }; /**< if true then no camera header is generated */
 
-    std::string m_dir; ///< The directory to search for files.  Can be empty if full path given in files.  If files is
-                       ///< empty, all archives in dir will be used.  Defaults to `./`.
+    std::string m_dir; /**< The directory to search for files.  Can be empty if full path given in files.
+                            If files is empty, all archives in dir will be used.  Defaults to `./`.*/
+
+    bool m_overWriteDir {false}; ///< Overwrite an existing directory.  Default is to stop if directory exists.
 
     std::vector<std::string> m_files; /**< List of files to use.  If dir is not empty,
                                            it will be pre-pended to each name.*/
@@ -251,6 +257,16 @@ inline void xrif2fits::setupConfig()
                 "string",
                 "The directory to search for files. Can be empty if full path given in files." );
 
+    config.add( "overwrite",
+                "O",
+                "overwrite",
+                argType::True,
+                "",
+                "overwrite",
+                false,
+                "bool",
+                "Overwrite an existing directory.  Default is to stop if directory exists." );
+
     config.add( "files",
                 "f",
                 "files",
@@ -347,6 +363,7 @@ inline void xrif2fits::loadConfig()
     config( m_noHeader, "noHeader" );
 
     config( m_dir, "dir" );
+    config(m_overWriteDir, "overwrite");
     config( m_files, "files" );
     config( m_outDir, "outDir" );
     config( m_logDir, "logdir" );
@@ -378,6 +395,8 @@ inline mx::error_t xrif2fits::readHeaderConfig( const std::string &hcfile )
 
     try
     {
+        DEBUG_CRUMB("reading: " + hcfile);
+
         if( hconfig.readConfig( hcfile, true ) != 0 )
         {
             return mx::error_report<verboseT>( mx::error_t::error, "Error reading header config: " + hcfile );
@@ -401,6 +420,8 @@ inline mx::error_t xrif2fits::readHeaderConfig( const std::string &hcfile )
                 include += ".conf";
             }
         }
+
+        DEBUG_CRUMB("reading include: " + mx::app::application::m_configPathCLBase + include);
 
         mx_error_check( readHeaderConfig( mx::app::application::m_configPathCLBase + include ) );
     }
@@ -432,6 +453,7 @@ inline mx::error_t xrif2fits::readHeaderConfig( const std::string &hcfile )
 
                     for( auto &field : fields )
                     {
+                        std::cerr << "adding: " << device << ' ' << ec << ' ' << field << '\n';
                         m_logMetas.push_back( logMetaSpec( { device, ec, field } ) );
                     }
                 }
@@ -987,11 +1009,21 @@ inline mx::error_t xrif2fits::prepareFiles()
 
         if( !m_timesOnly )
         {
-            errno = 0;
-            if( mkdir( m_outDir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH ) < 0 )
+            if(!m_overWriteDir)
             {
-                return mx::error_report<verboseT>(mx::errno2error_t(errno), "Creating directory " + m_outDir);
+                mx::error_t errc;
+                if(mx::ioutils::dir_exists_is(m_outDir, errc))
+                {
+                    return mx::error_report<verboseT>(mx::error_t::eexist, "Directory " + m_outDir + " already exists.");
+                }
+
+                if(!!errc)
+                {
+                    return mx::error_report<verboseT>(errc, "Checking " + m_outDir);
+                }
             }
+
+            mx_error_check( mx::ioutils::createDirectories(m_outDir) );
         }
     }
 
@@ -1006,11 +1038,13 @@ inline mx::error_t xrif2fits::prepareFiles()
     if( m_camera == "" )
     {
         m_camera = m_fileNames[0].appName();
+        std::cerr << "Set camera to: " << m_camera << '\n';
     }
 
     if( m_cameraHeader == "" )
     {
         m_cameraHeader = m_camera + "_header.conf";
+        std::cerr << "Set camera header to: " << m_cameraHeader << '\n';
     }
 
     if( !m_noHeader )

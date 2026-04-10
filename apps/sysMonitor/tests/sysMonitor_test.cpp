@@ -19,7 +19,7 @@
 
 using namespace MagAOX::app;
 
-SCENARIO( "System monitor is constructed and CPU temperature results are passed in", "[sysMonitor]" ) 
+SCENARIO( "System monitor is constructed and CPU temperature results are passed in", "[sysMonitor]" )
 {
    GIVEN("A default constructed system monitor object and an empty vector for temperatures")
    {
@@ -28,28 +28,28 @@ SCENARIO( "System monitor is constructed and CPU temperature results are passed 
       float temps = -1;
 
       // Fails with whitespace in front, but is this necessary to correct for?
-      
+
       WHEN("Correct line is given")
       {
          rv = sm.parseCPUTemperatures(temps, "Core 0:         +42.0°C  (high = +100.0°C, crit = +100.0°C)");
          REQUIRE(rv == 0);
          REQUIRE(temps == 42);
       }
-      
+
       WHEN("Correct line is given")
       {
          rv = sm.parseCPUTemperatures(temps, "Core 1:         +45.0°C    (high = +100.0°C, crit = +100.0°C)");
          REQUIRE(rv == 0);
          REQUIRE(temps == 45);
       }
-      
+
       WHEN("Correct line is given")
       {
          rv = sm.parseCPUTemperatures(temps, "Core 2:         +91.0°C  (high = +100.0°C, crit = +100.0°C)");
          REQUIRE(rv == 0);
          REQUIRE(temps == 91);
       }
-      
+
       WHEN("Blank line is given")
       {
          rv = sm.parseCPUTemperatures(temps, "");
@@ -63,7 +63,7 @@ SCENARIO( "System monitor is constructed and CPU temperature results are passed 
          REQUIRE(rv == -1);
          REQUIRE(temps == -999);
       }
-      
+
       WHEN("Corrupted line is given")
       {
          rv = sm.parseCPUTemperatures(temps, "Core 3:+91.0° XXXXXXX");
@@ -80,7 +80,7 @@ SCENARIO( "System monitor is constructed and CPU temperature results are passed 
    }
 }
 
-SCENARIO( "System monitor is constructed and CPU load results are passed in", "[sysMonitor]" ) 
+SCENARIO( "System monitor is constructed and CPU load results are passed in", "[sysMonitor]" )
 {
    GIVEN("A default constructed system monitor object and an empty vector for loads")
    {
@@ -89,28 +89,28 @@ SCENARIO( "System monitor is constructed and CPU load results are passed in", "[
       float loads = -1;
 
       // Fails with whitespace in front, but is this necessary to correct for?
-      
+
       WHEN("Correct line is given")
       {
          rv = sm.parseCPULoads(loads, "02:35:43 PM    0    6.57    0.02    1.32    0.24    0.00    0.00    0.00    0.00    0.00   91.85");
          REQUIRE(rv == 0);
          REQUIRE((loads - 0.0815) < 0.0005);
       }
-      
+
       WHEN("Correct line is given")
       {
          rv = sm.parseCPULoads(loads, "10:32:28 AM    1    6.54    0.21    2.75   24.64    0.00    0.06    0.00    0.00    0.00   65.81");
          REQUIRE(rv == 0);
          REQUIRE((loads - 0.3419) < 0.0005);
       }
-      
+
       WHEN("Correct line is given")
       {
          rv = sm.parseCPULoads(loads, "10:32:28 AM    3    4.24    0.03    1.97    5.52    0.00    0.00    0.00    0.00    0.00   88.24");
          REQUIRE(rv == 0);
          REQUIRE((loads - 0.1176) < 0.0005);
       }
-      
+
       WHEN("Blank line is given")
       {
          rv = sm.parseCPULoads(loads, "");
@@ -134,7 +134,7 @@ SCENARIO( "System monitor is constructed and CPU load results are passed in", "[
    }
 }
 
-SCENARIO( "System monitor is constructed and disk temperature result is passed in", "[sysMonitor]" ) 
+SCENARIO( "System monitor is constructed and disk temperature result is passed in", "[sysMonitor]" )
 {
    GIVEN("A default constructed system monitor object and an empty float for temperature")
    {
@@ -142,9 +142,9 @@ SCENARIO( "System monitor is constructed and disk temperature result is passed i
       int rv;
       float hdd_temp = -1;
       std::string dname;
-      
+
       // Fails with whitespace in front, but is this necessary to correct for?
-      
+
       WHEN("Correct line is given for hard drive")
       {
          rv = sm.parseDiskTemperature(dname, hdd_temp, "/dev/sda: ST1000LM024 HN-M101MBB: 31°C");
@@ -152,7 +152,7 @@ SCENARIO( "System monitor is constructed and disk temperature result is passed i
          REQUIRE(dname == "sda");
          REQUIRE(hdd_temp == 31);
       }
-      
+
       WHEN("Correct line is given for ssd")
       {
          rv = sm.parseDiskTemperature(dname, hdd_temp, "/dev/sda: Samsung SSD 860 EVO 500GB: 27°C");
@@ -160,7 +160,7 @@ SCENARIO( "System monitor is constructed and disk temperature result is passed i
          REQUIRE(dname == "sda");
          REQUIRE(hdd_temp == 27);
       }
-      
+
       WHEN("Correct line is given for ssd")
       {
          rv = sm.parseDiskTemperature(dname, hdd_temp, "/dev/sdd: Samsung SSD 860 EVO 1TB: 100°C");
@@ -168,7 +168,7 @@ SCENARIO( "System monitor is constructed and disk temperature result is passed i
          REQUIRE(dname == "sdd");
          REQUIRE(hdd_temp == 100);
       }
-      
+
       WHEN("Blank line is given")
       {
          rv = sm.parseDiskTemperature(dname,  hdd_temp,"");
@@ -195,7 +195,7 @@ SCENARIO( "System monitor is constructed and disk temperature result is passed i
    }
 }
 
-SCENARIO( "System monitor is constructed and disk usage result is passed in", "[sysMonitor]" ) 
+SCENARIO( "System monitor is constructed and disk usage result is passed in", "[sysMonitor]" )
 {
    GIVEN("A default constructed system monitor object and an empty float for usage")
    {
@@ -206,28 +206,28 @@ SCENARIO( "System monitor is constructed and disk usage result is passed in", "[
       float bootUsage = -1;
 
       // Fails with whitespace in front, but is this necessary to correct for?
-      
+
       WHEN("Correct line is given for root")
       {
          rv = sm.parseDiskUsage("/dev/mapper/cl-root  52403200 12321848  40081352  24% /", rootUsage, dataUsage, bootUsage);
          REQUIRE(rv == 0);
          REQUIRE((rootUsage - 0.24f) < 0.0005);
       }
-      
+
       WHEN("Correct line for /data is given")
       {
          rv = sm.parseDiskUsage("/dev/md124     1952297568    81552 1952216016   1% /data", rootUsage, dataUsage, bootUsage);
          REQUIRE(rv == 0);
          REQUIRE((dataUsage - 0.01f) < 0.0005);
       }
-      
+
       WHEN("Correct line for /boot is given")
       {
          rv = sm.parseDiskUsage("/dev/md126         484004   289264     194740  60% /boot", rootUsage, dataUsage, bootUsage);
          REQUIRE(rv == 0);
          REQUIRE((bootUsage - 0.6f) < 0.0005);
       }
-      
+
       WHEN("Blank line is given")
       {
          rv = sm.parseDiskUsage("", rootUsage, dataUsage, bootUsage);
@@ -257,7 +257,7 @@ SCENARIO( "System monitor is constructed and disk usage result is passed in", "[
    }
 }
 
-SCENARIO( "System monitor is constructed and ram usage result is passed in", "[sysMonitor]" ) 
+SCENARIO( "System monitor is constructed and ram usage result is passed in", "[sysMonitor]" )
 {
    GIVEN("A default constructed system monitor object and an float for usage")
    {
@@ -266,21 +266,21 @@ SCENARIO( "System monitor is constructed and ram usage result is passed in", "[s
       float ramUsage = -1;
 
       // Fails with whitespace in front, but is this necessary to correct for?
-      
+
       WHEN("Correct line is given")
       {
          rv = sm.parseRamUsage("Mem:           7714        1308        4550         288        1855        5807", ramUsage);
          REQUIRE(rv == 0);
          REQUIRE(ramUsage == (float) 1308/7714);
       }
-      
+
       WHEN("Correct line is given")
       {
          rv = sm.parseRamUsage("Mem:           7777        7700        4550         288        1855        5807", ramUsage);
          REQUIRE(rv == 0);
          REQUIRE(ramUsage == (float)7700/7777);
       }
-      
+
       WHEN("Blank line is given")
       {
          rv = sm.parseRamUsage("", ramUsage);
@@ -308,7 +308,7 @@ SCENARIO( "System monitor is constructed and ram usage result is passed in", "[s
 namespace SYSMONTEST
 {
 
-class sysMonitor_test : public sysMonitor 
+class sysMonitor_test : public sysMonitor
 {
 
 public:

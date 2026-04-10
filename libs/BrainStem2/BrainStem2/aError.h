@@ -81,20 +81,20 @@ typedef enum {
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
-    
+
 #ifdef _WIN32
 #define aLIBEXPORT                             __declspec(dllexport)
 #endif
-    
+
     // Defined with an ifndef here because arc does not understand #else.
 #ifndef _WIN32 // Not Windows.
 #define aLIBEXPORT           __attribute__((visibility ("default")))
 #endif
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Returns a printable error string.
     aLIBEXPORT const char* aError_GetErrorText(aErr err);
-    
+
 #ifdef __cplusplus
 }
 #endif // __cplusplus

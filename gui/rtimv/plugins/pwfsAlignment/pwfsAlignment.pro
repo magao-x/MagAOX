@@ -18,6 +18,8 @@ SOURCES       = pwfsAlignment.cpp
 TARGET        = $$qtLibraryTarget(rtimv_pwfsAlignmentPlugin)
 DESTDIR       = ./
 
+CONFIG += link_pkgconfig
+PKGCONFIG += mxlib
 
 unix:target.path=/usr/local/bin/plugins
 INSTALLS+=target

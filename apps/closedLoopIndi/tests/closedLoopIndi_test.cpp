@@ -13,7 +13,7 @@ using namespace MagAOX::app;
 namespace closedLoopIndi_test
 {
 
-class closedLoopIndi_test : public closedLoopIndi 
+class closedLoopIndi_test : public closedLoopIndi
 {
 
 public:
@@ -54,4 +54,4 @@ SCENARIO( "INDI Callbacks", "[closedLoopIndi]" )
 }
 
 
-} //namespace closedLoopIndi_test 
+} //namespace closedLoopIndi_test

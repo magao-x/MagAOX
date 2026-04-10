@@ -3,9 +3,9 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dbIngest"
+name = "xapp-dbIngest"
 description = "Per-instrument-computer database ingest virtual device"
-version = "2023.12.21"
+version = "2025.12.1"
 dependencies = [
   "xconf",
   "purepyindi2",
@@ -15,4 +15,4 @@ authors = [
 ]
 
 [project.scripts]
-dbIngest = "dbIngest:dbIngest.console_app"
+dbIngest = "xapp.dbIngest:main"

@@ -11,6 +11,7 @@
 
 #include <mx/improc/eigenCube.hpp>
 #include <mx/improc/eigenImage.hpp>
+#include <mx/improc/milkImage.hpp>
 #include <mx/sigproc/gramSchmidt.hpp>
 #include <mx/math/templateBLAS.hpp>
 
@@ -77,22 +78,36 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     std::string m_tweeterModeFile; ///< File containing the tweeter modes to use for offloading
     std::string m_tweeterMaskFile;
 
+    std::string m_wooferMaskFile;
+
     uint32_t m_maxModes{ 50 };
 
     uint32_t m_numModes{ 0 };
+
+    int m_loopNumber{ 0 };
     ///@}
 
     mx::improc::eigenImage<realT> m_twRespM;
     mx::improc::eigenImage<realT> m_tweeter;
     mx::improc::eigenImage<realT> m_woofer;
     mx::improc::eigenImage<realT> m_wooferDelta;
-    mx::improc::eigenImage<realT> m_modeAmps;
+    mx::improc::eigenImage<realT> m_modeDeltaAmps;
+
+    mx::improc::milkImage<realT> m_modevalDM;
+    mx::improc::milkImage<realT> m_modevalDMf;
+
+    uint64_t m_lastDMf_cnt0{ 0 };
+    uint64_t m_updatedDMf {0};
 
     mx::improc::eigenImage<realT> m_tweeterMask;
 
     mx::improc::eigenCube<float> m_tModesOrtho;
 
+    mx::improc::milkImage<float> m_wooferMask;
+
     mx::improc::eigenCube<float> m_wModes;
+
+    IMAGE *m_wModesStream{ nullptr };
 
     float    m_fps{ 0 };  ///< Current FPS from the FPS source.
     uint32_t m_navg{ 0 }; ///< Current navg from the averager
@@ -329,6 +344,16 @@ inline void t2wOffloader::setupConfig()
                 "string",
                 "File containing the tweeter mask." );
 
+    config.add( "offload.wooferMask",
+                "",
+                "offload.wooferMask",
+                argType::Required,
+                "offload",
+                "wooferMask",
+                false,
+                "string",
+                "File containing the woofer mask." );
+
     config.add( "offload.maxModes",
                 "",
                 "offload.maxModes",
@@ -348,6 +373,16 @@ inline void t2wOffloader::setupConfig()
                 false,
                 "string",
                 "Number of modes to offload. 0 means use actuator offloading." );
+
+    config.add( "offload.loopNumber",
+                "",
+                "offload.loopNUmber",
+                argType::Required,
+                "offload",
+                "loopNumber",
+                false,
+                "string",
+                "The aol loop number to use. Default is 0." );
 }
 
 inline int t2wOffloader::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -367,6 +402,7 @@ inline int t2wOffloader::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_actLim, "offload.actLim" );
     _config( m_tweeterModeFile, "offload.tweeterModes" );
     _config( m_tweeterMaskFile, "offload.tweeterMask" );
+    _config( m_wooferMaskFile, "offload.wooferMask" );
     _config( m_maxModes, "offload.maxModes" );
     _config( m_numModes, "offload.numModes" );
 
@@ -395,7 +431,7 @@ inline int t2wOffloader::appStartup()
 
     if( registerIndiPropertyNew( m_indiP_gain, INDI_NEWCALLBACK( m_indiP_gain ) ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
+        log<software_error>( { "" } );
         return -1;
     }
 
@@ -405,7 +441,7 @@ inline int t2wOffloader::appStartup()
 
     if( registerIndiPropertyNew( m_indiP_leak, INDI_NEWCALLBACK( m_indiP_leak ) ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
+        log<software_error>( { "" } );
         return -1;
     }
 
@@ -415,13 +451,13 @@ inline int t2wOffloader::appStartup()
 
     if( registerIndiPropertyNew( m_indiP_actLim, INDI_NEWCALLBACK( m_indiP_actLim ) ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
+        log<software_error>( { "" } );
         return -1;
     }
 
     if( prepareModes() < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
+        log<software_error>( { "" } );
         return -1;
     }
 
@@ -430,7 +466,7 @@ inline int t2wOffloader::appStartup()
     createStandardIndiRequestSw( m_indiP_zero, "zero", "zero loop" );
     if( registerIndiPropertyNew( m_indiP_zero, INDI_NEWCALLBACK( m_indiP_zero ) ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
+        log<software_error>( { "" } );
         return -1;
     }
 
@@ -440,14 +476,14 @@ inline int t2wOffloader::appStartup()
 
     if( registerIndiPropertyNew( m_indiP_numModes, INDI_NEWCALLBACK( m_indiP_numModes ) ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
+        log<software_error>( { "" } );
         return -1;
     }
 
     createStandardIndiToggleSw( m_indiP_offloadToggle, "offload" );
     if( registerIndiPropertyNew( m_indiP_offloadToggle, INDI_NEWCALLBACK( m_indiP_offloadToggle ) ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
+        log<software_error>( { "" } );
         return -1;
     }
 
@@ -458,7 +494,7 @@ inline int t2wOffloader::appStartup()
     m_indiP_fps.add( pcf::IndiElement( "current" ) );
     if( registerIndiPropertyReadOnly( m_indiP_fps ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
+        log<software_error>( { "" } );
         return -1;
     }
 
@@ -471,6 +507,8 @@ inline int t2wOffloader::appStartup()
 
 inline int t2wOffloader::appLogic()
 {
+    static uint64_t lastUpdateDMf = 0;
+
     SHMIMMONITOR_APP_LOGIC;
 
     TELEMETER_APP_LOGIC;
@@ -478,6 +516,12 @@ inline int t2wOffloader::appLogic()
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
     SHMIMMONITOR_UPDATE_INDI;
+
+    if(lastUpdateDMf != m_updatedDMf)
+    {
+        std::cerr << std::format("DMf updated {} times\n", m_updatedDMf - lastUpdateDMf);
+        lastUpdateDMf = m_updatedDMf;
+    }
 
     return 0;
 }
@@ -542,7 +586,7 @@ inline int t2wOffloader::allocate( const dev::shmimT &dummy )
 
     if( !m_dmOpened )
     {
-        log<software_error>( { __FILE__, __LINE__, m_dmChannel + " not opened." } );
+        log<software_error>( { m_dmChannel + " not opened." } );
         return -1;
     }
     else
@@ -560,7 +604,12 @@ inline int t2wOffloader::allocate( const dev::shmimT &dummy )
         m_woofer.setZero();
     }
 
-    m_modeAmps.resize( 1, m_tModesOrtho.planes() );
+    m_modeDeltaAmps.resize( 1, m_tModesOrtho.planes() );
+
+    m_modevalDM.create( "aol0_modevalDM", m_tModesOrtho.planes(), 1 );
+    m_modevalDMf.create( "aol0_modevalDMf", m_tModesOrtho.planes(), 1 );
+
+    m_lastDMf_cnt0 = m_modevalDMf.cnt0();
 
     ///\todo size checks here.
 
@@ -580,65 +629,135 @@ inline int t2wOffloader::processImage( void *curr_src, const dev::shmimT &dummy 
     {
         m_wooferDelta =
             m_twRespM.matrix() * Eigen::Map<Eigen::Matrix<float, -1, -1>>( (float *)curr_src, m_width * m_height, 1 );
-    }
-    else
-    {
-        m_modeAmps = Eigen::Map<Eigen::Matrix<float, -1, -1>>( (float *)curr_src, 1, m_width * m_height ) *
-                     Eigen::Map<Eigen::Matrix<float, -1, -1>>(
-                         m_tModesOrtho.data(), m_tModesOrtho.rows() * m_tModesOrtho.cols(), m_tModesOrtho.planes() );
 
-        m_wooferDelta = m_modeAmps( 0, 0 ) * m_wModes.image( 0 );
-        for( uint32_t p = 1; p < m_numModes && p < m_maxModes; ++p )
+        std::lock_guard<std::mutex> guard( m_shmimMutex );
+
+        size_t n = 0;
+        while( m_dmStream.md[0].write == 1 && n < 10000 ) // Check if zero() is running
         {
-            m_wooferDelta += m_modeAmps( 0, p ) * m_wModes.image( p );
+            ++n;
+            mx::sys::microSleep( 1 );
         }
-    }
 
-    std::lock_guard<std::mutex> guard( m_shmimMutex );
-
-    size_t n = 0;
-    while( m_dmStream.md[0].write == 1 && n < 10000 ) // Check if zero() is running
-    {
-        ++n;
-        mx::sys::microSleep( 1 );
-    }
-
-    if( m_dmStream.md[0].write == 1 || n > 10000 - 1 )
-    {
-        log<software_warning>( { __FILE__, __LINE__, "timed out with write==1" } );
-        return 0;
-    }
-
-    m_woofer = m_gain * Eigen::Map<Eigen::Array<float, -1, -1>>( m_wooferDelta.data(), m_dmWidth, m_dmHeight ) +
-               ( 1.0 - m_leak ) * m_woofer;
-
-    for( int jj = 0; jj < m_woofer.cols(); ++jj )
-    {
-        for( int ii = 0; ii < m_woofer.rows(); ++ii )
+        if( m_dmStream.md[0].write == 1 || n > 10000 - 1 )
         {
-            float val = m_woofer( ii, jj );
-            if( fabs( val ) > m_actLim )
+            log<software_warning>( { "timed out with write==1" } );
+            return 0;
+        }
+
+        m_woofer = m_gain * Eigen::Map<Eigen::Array<float, -1, -1>>( m_wooferDelta.data(), m_dmWidth, m_dmHeight ) +
+                   ( 1.0 - m_leak ) * m_woofer;
+
+        for( int jj = 0; jj < m_woofer.cols(); ++jj )
+        {
+            for( int ii = 0; ii < m_woofer.rows(); ++ii )
             {
-                if( val > 0 )
+                float val = m_woofer( ii, jj );
+                if( fabs( val ) > m_actLim )
                 {
-                    m_woofer( ii, jj ) = m_actLim;
-                }
-                else
-                {
-                    m_woofer( ii, jj ) = -m_actLim;
+                    if( val > 0 )
+                    {
+                        m_woofer( ii, jj ) = m_actLim;
+                    }
+                    else
+                    {
+                        m_woofer( ii, jj ) = -m_actLim;
+                    }
                 }
             }
         }
+
+        m_dmStream.md[0].write = 1;
+
+        memcpy( m_dmStream.array.raw, m_woofer.data(), m_woofer.rows() * m_woofer.cols() * m_typeSize );
+
+        m_dmStream.md[0].cnt0++;
+
+        m_dmStream.md->write = 0;
+        ImageStreamIO_sempost( &m_dmStream, -1 );
     }
+    else // modal offloading
+    {
+        m_modeDeltaAmps = Eigen::Map<Eigen::Matrix<float, -1, -1>>( (float *)curr_src, 1, m_width * m_height ) *
+                          Eigen::Map<Eigen::Matrix<float, -1, -1>>( m_tModesOrtho.data(),
+                                                                    m_tModesOrtho.rows() * m_tModesOrtho.cols(),
+                                                                    m_tModesOrtho.planes() );
 
-    m_dmStream.md[0].write = 1;
+        m_modevalDM.setWrite( true );
 
-    memcpy( m_dmStream.array.raw, m_woofer.data(), m_woofer.rows() * m_woofer.cols() * m_typeSize );
+        if( m_modevalDMf.cnt0() > m_lastDMf_cnt0 )
+        {
+            for( uint32_t p = 0; p < m_modevalDM.rows() && p < m_modevalDMf.rows(); ++p )
+            {
+                m_modevalDM( p, 0 ) = m_modevalDMf(p,0);
+            }
 
-    m_dmStream.md[0].cnt0++;
+            ++m_updatedDMf;
+        }
 
-    m_dmStream.md->write = 0;
-    ImageStreamIO_sempost( &m_dmStream, -1 );
+        m_lastDMf_cnt0 = m_modevalDMf.cnt0();
+
+        uint32_t p = 0;
+        for( ; p < m_numModes && p < m_maxModes; ++p )
+        {
+            m_modevalDM( p, 0 ) = m_gain * m_modeDeltaAmps( 0, p ) + ( 1.0 - m_leak ) * m_modevalDM( p, 0 );
+        }
+        for( ; p < m_numModes; ++p )
+        {
+            m_modevalDM( p, 0 ) = 0;
+        }
+
+        m_modevalDM.post();
+
+        std::lock_guard<std::mutex> guard( m_shmimMutex );
+
+        size_t n = 0;
+        while( m_dmStream.md[0].write == 1 && n < 10000 ) // Check if zero() is running
+        {
+            ++n;
+            mx::sys::microSleep( 1 );
+        }
+
+        if( m_dmStream.md[0].write == 1 || n > 10000 - 1 )
+        {
+            log<software_warning>( { "timed out with write==1" } );
+            return 0;
+        }
+
+        m_woofer = m_modevalDM( 0, 0 ) * m_wModes.image( 0 );
+        for( uint32_t p = 1; p < m_numModes && p < m_maxModes; ++p )
+        {
+            m_woofer += m_modevalDM( p, 0 ) * m_wModes.image( p );
+        }
+
+        for( int jj = 0; jj < m_woofer.cols(); ++jj )
+        {
+            for( int ii = 0; ii < m_woofer.rows(); ++ii )
+            {
+                float val = m_woofer( ii, jj );
+                if( fabs( val ) > m_actLim )
+                {
+                    if( val > 0 )
+                    {
+                        m_woofer( ii, jj ) = m_actLim;
+                    }
+                    else
+                    {
+                        m_woofer( ii, jj ) = -m_actLim;
+                    }
+                }
+            }
+        }
+
+        m_dmStream.md[0].write = 1;
+
+        memcpy( m_dmStream.array.raw, m_woofer.data(), m_woofer.rows() * m_woofer.cols() * m_typeSize );
+
+        m_dmStream.md[0].cnt0++;
+
+        m_dmStream.md->write = 0;
+        ImageStreamIO_sempost( &m_dmStream, -1 );
+    }
 
     return 0;
 }
@@ -656,11 +775,15 @@ int t2wOffloader::zero()
 
     if( m_dmStream.md[0].write == 1 || n > 10000 - 1 )
     {
-        log<software_warning>( { __FILE__, __LINE__, "timed out with write==1, processImage() might be stuck" } );
+        log<software_warning>( { "timed out with write==1, processImage() might be stuck" } );
         return 0;
     }
 
     m_dmStream.md[0].write = 1;
+
+    m_modevalDM.setWrite( true );
+    m_modevalDM().setZero();
+    m_modevalDM.post();
 
     m_woofer.setZero();
 
@@ -688,6 +811,10 @@ int t2wOffloader::prepareModes()
 
     ff.read( m_twRespM, m_twRespMPath );
 
+    eigenImage<float> wm;
+    ff.read( wm, m_wooferMaskFile );
+    m_wooferMask.create( std::format( "aol{}_dmmask", m_loopNumber ), wm );
+
     for( int p = 0; p < tmodes.planes(); ++p )
     {
         tmodes.image( p ) *= m_tweeterMask;
@@ -707,36 +834,65 @@ int t2wOffloader::prepareModes()
     m_wModes.resize( 11, 11, m_tModesOrtho.planes() );
     mx::improc::eigenImage<realT> win, wout;
 
-    win.resize( 11, 11 );
+    // win.resize( 11, 11 );
     wout.resize( 11, 11 );
 
     // Calculate the woofer modes corresponding to the tweeter modes
     for( int p = 0; p < m_tModesOrtho.planes(); ++p )
     {
         win = m_tModesOrtho.image( p );
+
         Eigen::Map<Eigen::Matrix<float, -1, -1>>( wout.data(), wout.rows() * wout.cols(), 1 ) =
             m_twRespM.matrix() * Eigen::Map<Eigen::Matrix<float, -1, -1>>( win.data(), win.rows() * win.cols(), 1 );
-        m_wModes.image( p ) = wout;
+
+        m_wModes.image( p ) = wout * m_wooferMask();
     }
 
     ff.write( "/tmp/wModes.fits", m_wModes );
+
+    m_wModesStream = new IMAGE;
+
+    uint32_t imsize[3];
+    imsize[0] = m_wModes.rows();
+    imsize[1] = m_wModes.cols();
+    imsize[2] = m_wModes.planes();
+
+    std::string imname = std::format( "aol{}_CMmodesDM", m_loopNumber );
+    errno_t     rv     = ImageStreamIO_createIm_gpu( m_wModesStream,
+                                             imname.c_str(),
+                                             3,
+                                             imsize,
+                                             _DATATYPE_FLOAT,
+                                             -1,
+                                             1,
+                                             IMAGE_NB_SEMAPHORE,
+                                             0,
+                                             CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
+                                             0 );
+
+    if( rv != IMAGESTREAMIO_SUCCESS )
+    {
+        delete m_wModesStream;
+        m_wModesStream = nullptr;
+        return log<software_error, -1>( "failed to create " + imname );
+    }
+
+    memcpy( m_wModesStream->array.raw,
+            m_wModes.data(),
+            m_wModes.rows() * m_wModes.cols() * m_wModes.planes() * sizeof( float ) );
 
     return 0;
 }
 
 INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_gain )( const pcf::IndiProperty &ipRecv )
 {
-    if( ipRecv.getName() != m_indiP_gain.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "invalid indi property received" } );
-        return -1;
-    }
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_gain, ipRecv );
 
     float target;
 
     if( indiTargetUpdate( m_indiP_gain, target, ipRecv, true ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
+        log<software_error>( { "" } );
         return -1;
     }
 
@@ -756,17 +912,13 @@ INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_gain )( const pcf::IndiProperty &ip
 
 INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_leak )( const pcf::IndiProperty &ipRecv )
 {
-    if( ipRecv.getName() != m_indiP_leak.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "invalid indi property received" } );
-        return -1;
-    }
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_leak, ipRecv );
 
     float target;
 
     if( indiTargetUpdate( m_indiP_leak, target, ipRecv, true ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
+        log<software_error>( { "" } );
         return -1;
     }
 
@@ -784,17 +936,13 @@ INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_leak )( const pcf::IndiProperty &ip
 
 INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_actLim )( const pcf::IndiProperty &ipRecv )
 {
-    if( ipRecv.getName() != m_indiP_actLim.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "invalid indi property received" } );
-        return -1;
-    }
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_actLim, ipRecv );
 
     float target;
 
     if( indiTargetUpdate( m_indiP_actLim, target, ipRecv, true ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
+        log<software_error>( { "" } );
         return -1;
     }
 
@@ -814,11 +962,7 @@ INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_actLim )( const pcf::IndiProperty &
 
 INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_zero )( const pcf::IndiProperty &ipRecv )
 {
-    if( ipRecv.getName() != m_indiP_zero.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "invalid indi property received" } );
-        return -1;
-    }
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_zero, ipRecv );
 
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
@@ -829,17 +973,13 @@ INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_zero )( const pcf::IndiProperty &ip
 
 INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_numModes )( const pcf::IndiProperty &ipRecv )
 {
-    if( ipRecv.getName() != m_indiP_numModes.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "invalid indi property received" } );
-        return -1;
-    }
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_numModes, ipRecv );
 
     float target;
 
     if( indiTargetUpdate( m_indiP_numModes, target, ipRecv, true ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
+        log<software_error>( { "" } );
         return -1;
     }
 
@@ -849,6 +989,7 @@ INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_numModes )( const pcf::IndiProperty
 
     if( m_numModes > m_maxModes )
     {
+        log<text_log>( std::format( "maximum number of offloadings modes is {}", m_maxModes ), logPrio::LOG_WARNING );
         m_numModes = m_maxModes;
     }
 
@@ -862,11 +1003,7 @@ INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_numModes )( const pcf::IndiProperty
 
 INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_offloadToggle )( const pcf::IndiProperty &ipRecv )
 {
-    if( ipRecv.getName() != m_indiP_offloadToggle.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "invalid indi property received" } );
-        return -1;
-    }
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloadToggle, ipRecv );
 
     // switch is toggled to on
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
@@ -906,11 +1043,7 @@ INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_offloadToggle )( const pcf::IndiPro
 
 INDI_SETCALLBACK_DEFN( t2wOffloader, m_indiP_fpsSource )( const pcf::IndiProperty &ipRecv )
 {
-    if( ipRecv.getName() != m_indiP_fpsSource.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "Invalid INDI property." } );
-        return -1;
-    }
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_fpsSource, ipRecv );
 
     if( ipRecv.find( "current" ) != true ) // this isn't valie
     {
@@ -932,11 +1065,7 @@ INDI_SETCALLBACK_DEFN( t2wOffloader, m_indiP_fpsSource )( const pcf::IndiPropert
 
 INDI_SETCALLBACK_DEFN( t2wOffloader, m_indiP_navgSource )( const pcf::IndiProperty &ipRecv )
 {
-    if( ipRecv.getName() != m_indiP_navgSource.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "Invalid INDI property." } );
-        return -1;
-    }
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_navgSource, ipRecv );
 
     if( ipRecv.find( "current" ) != true ) // this isn't valie
     {

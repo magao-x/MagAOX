@@ -32,6 +32,7 @@
 ../apps/dmSpeckle/tests/dmSpeckle_test
 ../apps/filterWheelCtrl/tests/filterWheelCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_test
+../apps/flowRPM/tests/flowRPM_test
 ../apps/indiTSAccumulator/tests/indiTSAccumulator_test
 ../apps/koolanceCtrl/tests/koolanceCtrl_test
 ../apps/kTracker/tests/kTracker_test
@@ -58,9 +59,11 @@
 ../apps/smc100ccCtrl/tests/smc100ccCtrl_test
 ../apps/sparkleClock/tests/sparkleClock_test
 ../apps/sshDigger/tests/sshDigger_test
+
 ../apps/stateRuleEngine/tests/indiCompRuleConfig_test
 ../apps/stateRuleEngine/tests/indiCompRules_test
 ../apps/stateRuleEngine/tests/stateRuleEngine_test
+
 ../apps/streamCircBuff/tests/streamCircBuff_test
 ../apps/streamWriter/tests/streamWriter_test
 ../apps/streamWriter/tests/streamWriterSizing_test
@@ -105,9 +108,11 @@
 ../libMagAOX/tty/tests/tty_test
 ../libMagAOX/tty/tests/ttyIOUtils_test
 
+../utils/logsurgeon/tests/logsurgeon_config_test
+
 ../utils/tests/cursesINDI_test
 ../utils/tests/logdump_test
-../utils/tests/logsurgeon_test
+../utils/tests/shmimInfo_test
 ../utils/tests/shmimLat_test
 ../utils/tests/shmimPlot_test
 ../utils/tests/xrif2fits_test

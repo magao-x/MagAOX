@@ -66,14 +66,14 @@ public:
         analog[1].init(this, 1);
         analog[2].init(this, 2);
         analog[3].init(this, 3);
-        
+
         app[0].init(this, 0);
         app[1].init(this, 1);
         app[2].init(this, 2);
         app[3].init(this, 3);
-        
+
         clock.init(this, 0);
-        
+
         digital[0].init(this, 0);
         digital[1].init(this, 1);
         digital[2].init(this, 2);
@@ -89,15 +89,15 @@ public:
         digital[12].init(this, 12);
         digital[13].init(this, 13);
         digital[14].init(this, 14);
-        
+
         i2c[0].init(this,0);
         i2c[1].init(this,1);
-        
+
         pointer[0].init(this, 0);
         pointer[1].init(this, 1);
         pointer[2].init(this, 2);
         pointer[3].init(this, 3);
-        
+
         servo[0].init(this, 0);
         servo[1].init(this, 1);
         servo[2].init(this, 2);
@@ -106,13 +106,13 @@ public:
         servo[5].init(this, 5);
         servo[6].init(this, 6);
         servo[7].init(this, 7);
-        
+
         store[storeInternalStore].init(this, storeInternalStore);
         store[storeRAMStore].init(this, storeRAMStore);
         store[storeSDStore].init(this, storeSDStore);
-        
+
         system.init(this, 0);
-        
+
         timer[0].init(this, 0);
         timer[1].init(this, 1);
         timer[2].init(this, 2);
@@ -121,9 +121,9 @@ public:
         timer[5].init(this, 5);
         timer[6].init(this, 6);
         timer[7].init(this, 7);
-        
+
     }
-    
+
     AnalogClass analog[aMTM_STEM_NUM_A2D];
     AppClass app[aMTM_STEM_NUM_APPS];
     ClockClass clock;
@@ -134,8 +134,8 @@ public:
     StoreClass store[aMTM_STEM_NUM_STORES];
     SystemClass system;
     TimerClass timer[aMTM_STEM_NUM_TIMERS];
-   
-    
+
+
 };
 
 #endif

@@ -36,8 +36,8 @@ case ${DMNAME} in
       echo 'must provide DM name: woofer, tweeter, or ncpc'
       exit 1
 esac
-    
-#for 4 monitors:    
+
+#for 4 monitors:
 x0=3840
 #for 3 monitors:
 #x0=7680
@@ -94,11 +94,11 @@ do
    else
       chnum="$i"
    fi
-   
+
    channel="dm"$dmindex"disp"$chnum
-   
+
    echo $channel
-   
+
    wmctrl -F -r $channel -e 0,$(( x0+$dmctrlWidth+i*$dmdispSize)),$y0,$dmdispSize,$dmdispSize
 done
 

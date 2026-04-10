@@ -20,7 +20,7 @@ int main(int argc, char *argv[])
     multiIndiManager mgr("offloadCtrl", "127.0.0.1", 7624);
 
     xqt::offloadCtrl oc;
-   
+
     mgr.addSubscriber(&oc);
 
     mgr.activate();
@@ -28,7 +28,7 @@ int main(int argc, char *argv[])
     oc.show();
 
     int rv = app.exec();
-   
+
     return rv;
 }
-   
+

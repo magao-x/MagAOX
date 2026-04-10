@@ -1,5 +1,5 @@
 // header only version of modbuspp
-// 
+//
 //
 // Created by Fanzhe on 5/29/2017.
 //
@@ -11,9 +11,9 @@
 //
 // Header only version created by Jared Males
 // -- removed "using namespace std".
-// 
 //
-// 
+//
+//
 //
 
 #ifndef MODBUSPP_MODBUS_EXCEPTION_H
@@ -76,12 +76,12 @@ public:
  */
 class modbus_illegal_address_exception: public modbus_exception {
 public:
-   
+
    modbus_illegal_address_exception()
    {
       msg = "test";
    }
-   
+
     const char* what() const throw()
     {
         return "Illegal Address";

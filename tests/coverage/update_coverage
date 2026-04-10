@@ -19,7 +19,8 @@ cd ..
 
 lcov --directory . --capture --output-file coverage.info
 
-lcov --remove coverage.info "*/tests/*" "/usr/*" "/sys/*" "/tty/*" --output-file coverage_filtered.info
+lcov --remove coverage.info "*/tests/*" "/usr/*" "/sys/*" "/tty/*" \
+         --ignore-errors unused,unused --ignore-errors inconsistent,inconsistent --output-file coverage_filtered.info
 
 genhtml coverage_filtered.info --output-directory coverage_report \
                                --title "MagAOX" \

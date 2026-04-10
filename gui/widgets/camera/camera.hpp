@@ -98,6 +98,8 @@ public:
 
     void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
+    void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
     void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
     void hideAll();
@@ -309,7 +311,7 @@ void camera::onConnect()
     if(ui_roiStatus) ui_roiStatus->onConnect();
     if(ui_modes) ui_modes->onConnect();
     if(ui_readoutSpd) ui_readoutSpd->onConnect();
-    if(ui_vshiftSpd) ui_readoutSpd->onConnect();
+    if(ui_vshiftSpd) ui_vshiftSpd->onConnect();
     if(ui_cropMode) ui_cropMode->onConnect();
 
     if(ui_expTime) ui_expTime->onConnect();
@@ -349,7 +351,7 @@ void camera::onDisconnect()
     if(ui_roiStatus) ui_roiStatus->onDisconnect();
     if(ui_modes) ui_modes->onDisconnect();
     if(ui_readoutSpd) ui_readoutSpd->onDisconnect();
-    if(ui_vshiftSpd) ui_readoutSpd->onDisconnect();
+    if(ui_vshiftSpd) ui_vshiftSpd->onDisconnect();
     if(ui_cropMode) ui_cropMode->onDisconnect();
 
     if(ui_expTime) ui_expTime->onDisconnect();
@@ -374,6 +376,28 @@ void camera::onDisconnect()
 void camera::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {
    return handleSetProperty(ipRecv);
+}
+
+void camera::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
+   if(ipRecv.getDevice() != m_camName && ipRecv.getDevice() != m_darkName && ipRecv.getDevice() != m_avgName) return;
+
+   if(ipRecv.getDevice() == m_camName)
+   {
+      if(ipRecv.getName() == "fsm")
+      {
+         m_appState.clear();
+      }
+   }
+   else if(ipRecv.getDevice() == m_darkName)
+   {
+      if(ipRecv.getName() == "start")
+      {
+         m_takingDark = false;
+      }
+   }
+
+   emit doUpdateGUI();
 }
 
 void camera::handleSetProperty( const pcf::IndiProperty & ipRecv)

@@ -1,6 +1,6 @@
 /** \file logsurgeon.cpp
   * \brief A simple utility to dump MagAO-X binary logs to stdout.
-  * 
+  *
   * \ingroup logsurgeon_files
   */
 

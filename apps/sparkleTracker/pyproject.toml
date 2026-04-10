@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sparkleTracker"
+description = "Automatic sparkle tracker for coronagraphy."
+version = "2025.12.01"
+
+authors = [
+  {name = "Sebastiaan Haffert", email = "haffert@strw.leidenuniv.nl"},
+]
+
+[project.scripts]
+sparkleTracker = "sparkleTracker:sparkleTracker.console_app"

@@ -119,6 +119,8 @@ public:
 
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
+   void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
    /// Set the stretch of the horizontal layout
@@ -357,12 +359,25 @@ void statusEntry::onConnect()
 
 void statusEntry::onDisconnect()
 {
+    m_current.clear();
+    m_target.clear();
+    m_valChanged = false;
     ui.value->setText("---");
 }
 
 void statusEntry::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {
    return handleSetProperty(ipRecv);
+}
+
+void statusEntry::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
+   if(ipRecv.getDevice() != m_device) return;
+
+   if(ipRecv.getName() == m_property)
+   {
+      onDisconnect();
+   }
 }
 
 void statusEntry::handleSetProperty( const pcf::IndiProperty & ipRecv)

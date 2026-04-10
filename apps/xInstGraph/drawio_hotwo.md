@@ -1,5 +1,5 @@
 
-Copy and paste, then positon the new node.  In the drawio file a basic node will have 5 new components, with numbers for ids in sequential order.  
+Copy and paste, then positon the new node.  In the drawio file a basic node will have 5 new components, with numbers for ids in sequential order.
 
 Note: in order to prevent breaking other things (that might have the same numbers in them!) it is recommended that you cut the new components, paste them into a blank document, and make the following changes there.  After you are done, then paste it back.
 
@@ -13,7 +13,7 @@ The next cell is the input.  Here we select-all-and-replace "40" with "input:cam
 
 Do the same with "41" to make it "output:camera:out".
 
-Finally we change "42" into "link:camera:in2out".  
+Finally we change "42" into "link:camera:in2out".
 
 ```
 <mxCell id="38" value="" style="group" connectable="0" vertex="1" parent="1">

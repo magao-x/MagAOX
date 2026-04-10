@@ -354,13 +354,13 @@ namespace Acroname {
             /// \param state The state to be set. 0 is logic low, 1 is logic high.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr setState(const uint8_t state);
-            
+
             /// Get the state.
             /// \param state The current state of the digital entity. 0 is logic low,
             /// 1 is logic high. Note: If in high Z state an error will be returned.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr getState(uint8_t* state);
-            
+
             /// Sets the logical state of all available digitals based on the bit mapping.
             /// Number of digitals varies across BrainStem modules.  Refer
             /// to the datasheet for the capabilities  of your module.
@@ -368,7 +368,7 @@ namespace Acroname {
             /// 0 is logic low, 1 is logic high. Where bit 0 = digital 0, bit 1 = digital 1 etc.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr setStateAll(const uint32_t state);
-            
+
             /// Gets the logical state of all available digitals in a bit mapped representation.
             /// Number of digitals varies across BrainStem modules.  Refer
             /// to the datasheet for the capabilities  of your module.
@@ -593,28 +593,28 @@ namespace Acroname {
             /// datasheet to determine the analog bit depth and reference voltage.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr getChannelVoltage(const uint8_t channel, int32_t* microVolts);
-            
+
             /// Get the configuration of the mux.
             /// \param config integer representing the mux configuration either default, or split-mode.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr getConfiguration(int32_t* config);
-            
+
             /// Set the configuration of the mux.
             /// \param config integer representing the mux configuration either muxConfig_default, or muxConfig_splitMode.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr setConfiguration(const int32_t config);
-            
+
             /// Get the current mux mode.
             /// \param splitMode integer representing the channel selection for each sub-channel within the mux. See the data-sheet for the device for specific information.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr getSplitMode(int32_t* splitMode);
-            
+
             /// Set the current mux mode.
             /// \param splitMode integer representing the channel selection for each sub-channel within the mux. See the data-sheet for the device for specific information.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr setSplitMode(const int32_t splitMode);
-            
-            
+
+
 
         };
 
@@ -956,7 +956,7 @@ namespace Acroname {
             aErr getTemperature(int32_t* microcelsius);
 
         };
-        
+
         // MARK: - Signal Class
         /////////////////////////////////////////////////////////////////////
         /// SignalClass. Interface to digital pins configured to produce square wave signals.
@@ -968,25 +968,25 @@ namespace Acroname {
         public:
             /// Constructor.
             SignalClass(void);
-            
+
             /// Destructor
             ~SignalClass(void);
-            
+
             /// Initialize the class.
             /// \param pModule The module.
             /// \param index The index.
             void init(Module* pModule, const uint8_t index);
-            
+
             ///  Enable/Disable the signal output.
             /// \param enable True to enable, false to disable
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr setEnable(const uint8_t enable);
-            
+
             /// Get the Enable/Disable of the signal.
             /// \param enable True to enable, false to disable
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr getEnable(uint8_t* enable);
-            
+
             /// Invert the signal output.
             ///
             /// Normal mode is High on t0 then low at t2.
@@ -995,7 +995,7 @@ namespace Acroname {
             /// \param invert to invert, false for normal mode.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr setInvert(const uint8_t invert);
-            
+
             /// Get the invert status the signal output.
             ///
             /// Normal mode is High on t0 then low at t2.
@@ -1004,39 +1004,39 @@ namespace Acroname {
             /// \param invert to invert, false for normal mode.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr getInvert(uint8_t* invert);
-            
+
             /// Set the signal period or T3 in nanoseconds.
             ///
             /// \param t3_nsec Integer not larger than unsigned 32 bit max value representing
             ///        the wave period in nanoseconds.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr setT3Time(const uint32_t t3_nsec);
-            
+
             /// Get the signal period or T3 in nanoseconds.
             ///
             /// \param t3_nsec Integer not larger than unsigned 32 bit max value representing
             ///        the wave period in nanoseconds.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr getT3Time(uint32_t* t3_nsec);
-        
+
             /// Set the signal active period or T2 in nanoseconds.
             ///
             /// \param t2_nsec Integer not larger than unsigned 32 bit max value representing
             ///        the wave active period in nanoseconds.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr setT2Time(const uint32_t t2_nsec);
-            
+
             /// Get the signal active period or T2 in nanoseconds.
             ///
             /// \param t2_nsec Integer not larger than unsigned 32 bit max value representing
             ///        the wave active period in nanoseconds.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr getT2Time(uint32_t* t2_nsec);
-            
+
         };
-        
-        
-        
+
+
+
         // MARK: - Equalizer Class
         /////////////////////////////////////////////////////////////////////
         /// EqualizerClass. Provides receiver and transmitter gain/boost/emphasis
@@ -1047,39 +1047,39 @@ namespace Acroname {
         public:
             /// Constructor.
             EqualizerClass(void);
-            
+
             /// Destructor.
             ~EqualizerClass(void);
-            
+
             /// Initialize the class.
             /// \param pModule The module.
             /// \param index The index.
             void init(Module* pModule, const uint8_t index);
-            
+
             /// Sets the receiver configuration for a given channel.
             /// \param channel The equalizer receiver channel.
             /// \param config Configuration to be applied to the receiver.
             /// \return Returns \ref EntityReturnValues "common entity" return values.
             aErr setReceiverConfig(const uint8_t channel, const uint8_t config);
-            
+
             /// Gets the receiver configuration for a given channel.
             /// \param channel The equalizer receiver channel.
             /// \param config Configuration of the receiver.
             /// \return Returns \ref EntityReturnValues "common entity" return values.
             aErr getReceiverConfig(const uint8_t channel, uint8_t* config);
-            
+
             /// Sets the transmitter configuration
             /// \param config Configuration to be applied to the transmitter.
             /// \return Returns \ref EntityReturnValues "common entity" return values.
             aErr setTransmitterConfig(const uint8_t config);
-            
+
             /// Gets the transmitter configuration
             /// \param config Configuration of the Transmitter.
             /// \return Returns \ref EntityReturnValues "common entity" return values.
             aErr getTransmitterConfig(uint8_t* config);
-            
+
         };
-        
+
 
         // MARK:  - Store Class
         /////////////////////////////////////////////////////////////////////
@@ -1764,13 +1764,13 @@ namespace Acroname {
             /// \param pEnable The enable/disable status of cable flip.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr getCableFlip(const uint8_t channel, uint8_t* pEnable);
-            
+
             /// Set USB Alt Mode Configuration.
             /// \param channel The USB sub channel
             /// \param configuration The USB configuration to be set for the given channel.
             /// \return Returns \ref EntityReturnValues "common entity" return values
             aErr setAltModeConfig(const uint8_t channel, const uint32_t configuration);
-            
+
             /// Set USB Alt Mode Configuration.
             /// \param channel The USB sub channel
             /// \param configuration The USB configuration for the given channel.

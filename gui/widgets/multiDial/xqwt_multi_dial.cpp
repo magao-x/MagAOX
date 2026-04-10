@@ -21,10 +21,10 @@ XqwtMultiDial::XqwtMultiDial( QWidget *parent ): QwtDial( parent )
    setWrapping( true );
    setReadOnly( true );
 
-   
+
    d_numNeedles = 0;
    d_needles = 0;
-   
+
 //m_unitsTextLabel = new QLabel(this);
 //    auto c = QWidget::rect().center();
 //    std::cerr << "c: " << c.x() << " " << c.y() << "\n";
@@ -40,9 +40,9 @@ XqwtMultiDial::~XqwtMultiDial()
 {
     for ( int i = 0; i < d_numNeedles; i++ )
         delete d_needles[i];
-    
+
     delete[] d_needles;
-    
+
     //delete m_unitsTextLabel;
 }
 
@@ -51,22 +51,22 @@ void XqwtMultiDial::setNumNeedles(int numNeedles)
    if(d_needles)
    {
       for(int i=0; i< d_numNeedles; ++i) delete d_needles[i];
-      
+
       delete[] d_needles;
    }
-   
+
    d_numNeedles = numNeedles;
    d_needles = new QwtDialNeedle*[d_numNeedles];
-   
+
    QColor needleColor = palette().color( QPalette::Active, QPalette::BrightText );
    QColor knobColor = palette().color( QPalette::Active, QPalette::Text );
    //needleColor = Qt::red; //needleColor.dark( 120 );
-   
+
    for ( int i = 0; i < d_numNeedles; i++ )
    {
       d_needles[i] = new QwtDialSimpleNeedle( QwtDialSimpleNeedle::Arrow, true, needleColor, knobColor );
    }
-   
+
    d_values.resize( d_numNeedles, 0.0);
 }
 
@@ -87,11 +87,11 @@ void XqwtMultiDial::setNeedle( QwtDialNeedle * )
    \param needle Hand
    \sa hand()
 */
-void XqwtMultiDial::setNeedle( int needleNo, 
+void XqwtMultiDial::setNeedle( int needleNo,
                                   QwtDialNeedle *needle )
 {
    if(d_needles == nullptr) return;
-   
+
     if ( needleNo >= 0 && needleNo < d_numNeedles && needle)
     {
         delete d_needles[needleNo];
@@ -104,9 +104,9 @@ void XqwtMultiDial::setValue( int needleNo,
                             )
 {
    if(needleNo < 0 || needleNo >= d_numNeedles) return;
-   
+
    d_values[needleNo] = value;
-   
+
    update();
 
 }
@@ -132,7 +132,7 @@ void XqwtMultiDial::drawNeedle( QPainter *painter, const QPointF &center,
     Q_UNUSED( dir );
 
     if(d_needles == nullptr) return;
-    
+
     if ( isValid() )
     {
         for ( int i = 0; i < d_numNeedles; ++i )
@@ -166,7 +166,7 @@ void XqwtMultiDial::drawNeedle( QPainter *painter, int needlNo,
     QPalette::ColorGroup cg ) const
 {
    if(d_needles == nullptr) return;
-   
+
     const QwtDialNeedle *needle = d_needles[ needlNo ];
     if ( needle )
     {

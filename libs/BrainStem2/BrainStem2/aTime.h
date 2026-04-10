@@ -37,24 +37,24 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Get the current tick count in milliseconds.
-    
+
     /**
      * This call returns a number of milliseconds. Depending on the platform,
 	 * this can be the number of milliseconds since the last boot, or from the
 	 * epoc start. As such, this call should not be used as an external reference
 	 * clock. It is accurate when used as a differential, i.e. internal, measurement only.
      *
-     * \return unsigned long number of milliseconds elapsed. 
+     * \return unsigned long number of milliseconds elapsed.
      */
     aLIBEXPORT unsigned long aTime_GetMSTicks(void);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Sleep the current process for msTime milliseconds.
-    
+
     /**
      * Sleeps the current process. This is not an active sleep, there are no
      * signals which will "wake" the process.
@@ -66,7 +66,7 @@ extern "C" {
      * \retval aErrUnknown Um unknown what went wrong.
      */
     aLIBEXPORT aErr aTime_MSSleep(const unsigned long msTime);
-    
+
 #ifdef __cplusplus
 }
 #endif

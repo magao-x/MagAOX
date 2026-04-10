@@ -18,27 +18,27 @@ done
 
 edt=$(grep edt /proc/interrupts | awk '{print $1}' | sed 's/.$//')
 cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/camwfs/cpuset.cpus)
-echo "edt: " $edt " to " $cpu 
+echo "edt: " $edt " to " $cpu
 echo $cpu > /proc/irq/$edt/smp_affinity_list
 
 nvidias=$(grep nvidia /proc/interrupts | awk '{print $1}' | sed 's/.$//')
 cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/acqu_mvm/cpuset.cpus)
 for nvidia in $nvidias; do
-    echo "nvidia: " $nvidia " to " $cpu 
+    echo "nvidia: " $nvidia " to " $cpu
     echo $cpu > /proc/irq/$nvidia/smp_affinity_list
 done
 
 dmws=$(grep cp2x72c /proc/interrupts | awk '{print $1}' | sed 's/.$//')
 cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/woofer/cpuset.cpus)
 for dmw in $dmws; do
-    echo "alpao: " $dmw " to " $cpu 
+    echo "alpao: " $dmw " to " $cpu
     echo $cpu > /proc/irq/$dmw/smp_affinity_list
 done
 
 enxs=$(grep enx98b78501aebc /proc/interrupts | awk '{print $1}' | sed 's/.$//')
 cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/shmimTCP/cpuset.cpus)
 for enx in $enxs; do
-    echo "shmimTCP enx: " $enx " to " $cpu 
+    echo "shmimTCP enx: " $enx " to " $cpu
     echo $cpu > /proc/irq/$enx/smp_affinity_list
 done
 

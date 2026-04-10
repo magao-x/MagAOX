@@ -29,19 +29,19 @@ namespace MagAOX
 namespace app
 {
 
-struct darkShmimT 
+struct darkShmimT
 {
    static std::string configSection()
    {
       return "darkShmim";
    };
-   
+
    static std::string indiPrefix()
    {
       return "dark";
    };
 };
-   
+
 /** \defgroup hoPredCtrl Tweeter to Woofer Offloading
   * \brief Monitors the averaged tweeter shape, and sends it to the woofer.
   *
@@ -58,7 +58,7 @@ struct darkShmimT
 /** MagAO-X application to control offloading the tweeter to the woofer.
   *
   * \ingroup hoPredCtrl
-  * 
+  *
   */
 class hoPredCtrl : public MagAOXApp<true>, public dev::shmimMonitor<hoPredCtrl>, public dev::shmimMonitor<hoPredCtrl,darkShmimT>
 {
@@ -74,10 +74,10 @@ class hoPredCtrl : public MagAOXApp<true>, public dev::shmimMonitor<hoPredCtrl>,
 
     //The dark shmimMonitor type
    typedef dev::shmimMonitor<hoPredCtrl, darkShmimT> darkMonitorT;
-      
+
    ///Floating point type in which to do all calculations.
    typedef float realT;
-   
+
 protected:
 
 	/** \name Configurable Parameters
@@ -91,16 +91,16 @@ protected:
 	// float m_actLim {7.0}; ///< the upper limit on woofer actuator commands.  default is 7.0.
 
 	///@}
-   
+
 	std::string m_pupilMaskFilename;			// aol1_wfsmask.fits
 	std::string m_interaction_matrix_filename; 	// aol1_modesWFS.fits in cacao
 	std::string m_mapping_matrix_filename; 		// aol1_DMmodes.fits
-	std::string m_refWavefront_filename;		// aol1_wfsref.fits 
+	std::string m_refWavefront_filename;		// aol1_wfsref.fits
 	uint64_t loading_timestamp;
 
-	// std::string m_actuator_mask_filename;		// 
-	
-	// IMAGE m_dmStream; 
+	// std::string m_actuator_mask_filename;		//
+
+	// IMAGE m_dmStream;
 	size_t m_pwfsWidth {0}; ///< The width of the image
 	size_t m_pwfsHeight {0}; ///< The height of the image.
 
@@ -108,22 +108,22 @@ protected:
 	size_t m_quadHeight {0}; ///< The height of the image.
 
 	uint8_t m_pwfsDataType{0}; ///< The ImageStreamIO type code.
-	size_t m_pwfsTypeSize {0}; ///< The size of the type, in bytes.  
-	
+	size_t m_pwfsTypeSize {0}; ///< The size of the type, in bytes.
+
 	unsigned long long duration;
 	unsigned long long iterations;
 
 	// The wavefront sensor variables
 	size_t m_illuminatedPixels;
 	size_t m_measurement_size;
-	
+
 	eigenImage<realT> m_interaction_matrix;
 	eigenImage<realT> m_mapping_matrix;
 
 	eigenImage<realT> m_pupilMask;
 	eigenImage<realT> m_measurementVector;
 	eigenImage<realT> m_refWavefront;
-	
+
 	realT average_pupil_intensity;
 
 	bool use_full_image_reconstructor;
@@ -142,10 +142,10 @@ protected:
 	int m_numHist;			///< The number of past states to use for the prediction
 	int m_numFut;			///< The number of future states to predict
 	realT m_gamma;			///< The forgetting factore (0, 1)
-	
+
 	realT m_inv_covariance; ///< The starting point of the inverse covariance matrix
 	realT m_lambda;		///< The regularization parameter
-	
+
 	// Integrator commands
 	bool m_use_predictive_control;
 	realT m_intgain;
@@ -173,13 +173,13 @@ protected:
 	eigenImage<realT> m_shaped_command;	// 50x50
 
 	std::string m_dmChannel;
-	IMAGE m_dmStream; 
+	IMAGE m_dmStream;
 	uint32_t m_dmWidth {0}; ///< The width of the image
 	uint32_t m_dmHeight {0}; ///< The height of the image.
-	
+
 	uint8_t m_dmDataType{0}; ///< The ImageStreamIO type code.
-	size_t m_dmTypeSize {0}; ///< The size of the type, in bytes.  
-	
+	size_t m_dmTypeSize {0}; ///< The size of the type, in bytes.
+
 	bool m_dmOpened {false};
 	bool m_dmRestart {false};
 
@@ -199,7 +199,7 @@ protected:
 	pcf::IndiProperty m_indiP_explorationSteps;
 	pcf::IndiProperty m_indiP_reset_exploreRequest;
 	pcf::IndiProperty m_indiP_zeroRequest;
-	
+
 	pcf::IndiProperty m_indiP_saveRequest;
 	pcf::IndiProperty m_indiP_loadRequest;
 	pcf::IndiProperty m_indiP_timestamp;
@@ -237,7 +237,7 @@ protected:
 	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_saveRequest);
 	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_loadRequest);
 	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_timestamp);
-	
+
 
 	// Control parameters
 	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_learningSteps);
@@ -276,29 +276,29 @@ public:
    virtual int appStartup();
 
    /// Implementation of the FSM for hoPredCtrl.
-   /** 
+   /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
    virtual int appLogic();
 
    /// Shutdown the app.
-   /** 
+   /**
      *
      */
    virtual int appShutdown();
-   
+
    int allocate( const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
                      const dev::shmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                    );
 
    int allocate( const darkShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
-   
+
    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
                      const darkShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                    );
-   
+
    int zero();
    int send_dm_command();
    int map_command_vector_to_dmshmim();
@@ -338,7 +338,7 @@ void hoPredCtrl::setupConfig()
 	config.add("parameters.inv_covariance", "", "parameters.inv_covariance", argType::Required, "parameters", "inv_covariance", false, "float", "The prediction horizon.");
 	config.add("parameters.lambda", "", "parameters.lambda", argType::Required, "parameters", "lambda", false, "float", "The prediction horizon.");
 	config.add("parameters.clip_val", "", "parameters.clip_val", argType::Required, "parameters", "clip_val", false, "float", "The update clip value.");
-	
+
 	//
 	config.add("parameters.learning_steps", "", "parameters.learning_steps", argType::Required, "parameters", "learning_steps", false, "int", "The update clip value.");
 	config.add("parameters.learning_iterations", "", "parameters.learning_iterations", argType::Required, "parameters", "learning_iterations", false, "int", "The amount of learning cycles.");
@@ -361,7 +361,7 @@ void hoPredCtrl::setupConfig()
 inline
 int hoPredCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 {
-   
+
 	shmimMonitorT::loadConfig(_config);
 	darkMonitorT::loadConfig(_config);
 
@@ -372,7 +372,7 @@ int hoPredCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 	// Calibration files
 	std::string calibration_directory;
 	_config(calibration_directory, "parameters.calib_directory");
-	
+
 	_config(m_pupilMaskFilename, "parameters.pupil_mask");
 	m_pupilMaskFilename = calibration_directory + m_pupilMaskFilename;
 	std::cout << m_pupilMaskFilename << std::endl;
@@ -388,7 +388,7 @@ int hoPredCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 	_config(m_refWavefront_filename, "parameters.reference_image");
 	m_refWavefront_filename = calibration_directory + m_refWavefront_filename;
 	std::cout << m_refWavefront_filename << std::endl;
-	
+
 	// Controller parameters
 	_config(m_numHist, "parameters.Nhist");
 	std::cout << "Nhist="<< m_numHist << std::endl;
@@ -441,70 +441,70 @@ int hoPredCtrl::appStartup()
 	}
 
 	createStandardIndiToggleSw( m_indiP_controlToggle, "control", "Control State", "Loop Controls");
-	registerIndiPropertyNew( m_indiP_controlToggle, INDI_NEWCALLBACK(m_indiP_controlToggle) ); 
+	registerIndiPropertyNew( m_indiP_controlToggle, INDI_NEWCALLBACK(m_indiP_controlToggle) );
 
 	createStandardIndiRequestSw( m_indiP_reset_bufferRequest, "reset_buffer", "Reset the data buffers", "Loop Controls");
-	registerIndiPropertyNew( m_indiP_reset_bufferRequest, INDI_NEWCALLBACK(m_indiP_reset_bufferRequest) ); 
+	registerIndiPropertyNew( m_indiP_reset_bufferRequest, INDI_NEWCALLBACK(m_indiP_reset_bufferRequest) );
 
 	createStandardIndiRequestSw( m_indiP_reset_modelRequest, "reset_model", "Reset the RLS model", "Loop Controls");
-	registerIndiPropertyNew( m_indiP_reset_modelRequest, INDI_NEWCALLBACK(m_indiP_reset_modelRequest) ); 
-	
+	registerIndiPropertyNew( m_indiP_reset_modelRequest, INDI_NEWCALLBACK(m_indiP_reset_modelRequest) );
+
 	createStandardIndiRequestSw( m_indiP_reset_cleanRequest, "clean", "Clean the complete model.", "Loop Controls");
-	registerIndiPropertyNew( m_indiP_reset_cleanRequest, INDI_NEWCALLBACK(m_indiP_reset_cleanRequest) ); 
+	registerIndiPropertyNew( m_indiP_reset_cleanRequest, INDI_NEWCALLBACK(m_indiP_reset_cleanRequest) );
 
 	createStandardIndiRequestSw( m_indiP_updateControllerRequest, "calc_controller", "Update the controller.", "Loop Controls");
-	registerIndiPropertyNew( m_indiP_updateControllerRequest, INDI_NEWCALLBACK(m_indiP_updateControllerRequest) ); 
+	registerIndiPropertyNew( m_indiP_updateControllerRequest, INDI_NEWCALLBACK(m_indiP_updateControllerRequest) );
 
 	createStandardIndiRequestSw( m_indiP_reset_exploreRequest, "reset_exploration", "Reset the exploration model", "Loop Controls");
-	registerIndiPropertyNew( m_indiP_reset_exploreRequest, INDI_NEWCALLBACK(m_indiP_reset_exploreRequest) ); 
+	registerIndiPropertyNew( m_indiP_reset_exploreRequest, INDI_NEWCALLBACK(m_indiP_reset_exploreRequest) );
 
 	createStandardIndiRequestSw( m_indiP_zeroRequest, "zero", "Zero the dm", "Loop Controls");
-	registerIndiPropertyNew( m_indiP_zeroRequest, INDI_NEWCALLBACK(m_indiP_zeroRequest) ); 
+	registerIndiPropertyNew( m_indiP_zeroRequest, INDI_NEWCALLBACK(m_indiP_zeroRequest) );
 
 	createStandardIndiRequestSw( m_indiP_saveRequest, "save", "Save the controller", "Loop Controls");
-	registerIndiPropertyNew( m_indiP_saveRequest, INDI_NEWCALLBACK(m_indiP_saveRequest) ); 
+	registerIndiPropertyNew( m_indiP_saveRequest, INDI_NEWCALLBACK(m_indiP_saveRequest) );
 
 	createStandardIndiRequestSw( m_indiP_loadRequest, "load", "Load the controller", "Loop Controls");
-	registerIndiPropertyNew( m_indiP_loadRequest, INDI_NEWCALLBACK(m_indiP_loadRequest) ); 
-	
+	registerIndiPropertyNew( m_indiP_loadRequest, INDI_NEWCALLBACK(m_indiP_loadRequest) );
+
 	createStandardIndiNumber<uint64_t>( m_indiP_timestamp, "timestamp", -1, 20000000000000000, 1, "%d", "Timestamp", "Loading the controller");
-	registerIndiPropertyNew( m_indiP_timestamp, INDI_NEWCALLBACK(m_indiP_timestamp) );  
+	registerIndiPropertyNew( m_indiP_timestamp, INDI_NEWCALLBACK(m_indiP_timestamp) );
 
 	createStandardIndiNumber<int>( m_indiP_learningSteps, "learning_steps", -1, 200000, 1, "%d", "Learning Steps", "Learning control");
-	registerIndiPropertyNew( m_indiP_learningSteps, INDI_NEWCALLBACK(m_indiP_learningSteps) );  
+	registerIndiPropertyNew( m_indiP_learningSteps, INDI_NEWCALLBACK(m_indiP_learningSteps) );
 
 	createStandardIndiNumber<int>( m_indiP_learningSteps, "learning_steps", -1, 200000, 1, "%d", "Learning Steps", "Learning control");
-	registerIndiPropertyNew( m_indiP_learningSteps, INDI_NEWCALLBACK(m_indiP_learningSteps) );  
+	registerIndiPropertyNew( m_indiP_learningSteps, INDI_NEWCALLBACK(m_indiP_learningSteps) );
 
 	createStandardIndiNumber<int>( m_indiP_learningIterations, "learning_iterations", -1, 200000, 1, "%d", "Learning iterations", "Learning control");
-	registerIndiPropertyNew( m_indiP_learningIterations, INDI_NEWCALLBACK(m_indiP_learningIterations) );  
+	registerIndiPropertyNew( m_indiP_learningIterations, INDI_NEWCALLBACK(m_indiP_learningIterations) );
 
 	createStandardIndiNumber<float>( m_indiP_explorationRms, "exploration_rms", 0.0, 1.0, 0.00001, "%0.4f", "Learning Steps", "Learning control");
-	registerIndiPropertyNew( m_indiP_explorationRms, INDI_NEWCALLBACK(m_indiP_explorationRms) );  
+	registerIndiPropertyNew( m_indiP_explorationRms, INDI_NEWCALLBACK(m_indiP_explorationRms) );
 
 	createStandardIndiNumber<float>( m_indiP_explorationSteps, "exploration_steps", 0, 200000, 1, "%d", "Exploration Steps", "Learning control");
-	registerIndiPropertyNew( m_indiP_explorationSteps, INDI_NEWCALLBACK(m_indiP_explorationSteps) );  
+	registerIndiPropertyNew( m_indiP_explorationSteps, INDI_NEWCALLBACK(m_indiP_explorationSteps) );
 
 	createStandardIndiNumber<float>( m_indiP_gamma, "gamma", 0, 1.0, 0.0001, "%0.3f", "Forgetting parameter", "Learning control");
-	registerIndiPropertyNew( m_indiP_gamma, INDI_NEWCALLBACK(m_indiP_gamma) );  
+	registerIndiPropertyNew( m_indiP_gamma, INDI_NEWCALLBACK(m_indiP_gamma) );
 
 	createStandardIndiNumber<float>( m_indiP_lambda, "lambda", 0, 1000.0, 0.0001, "%0.3f", "Regularization", "Learning control");
 	registerIndiPropertyNew( m_indiP_lambda, INDI_NEWCALLBACK(m_indiP_lambda) );
 
 	createStandardIndiNumber<float>( m_indiP_clipval, "clipval", 0, 1000.0, 0.0001, "%0.3f", "Regularization", "Learning control");
-	registerIndiPropertyNew( m_indiP_clipval, INDI_NEWCALLBACK(m_indiP_clipval) );  
+	registerIndiPropertyNew( m_indiP_clipval, INDI_NEWCALLBACK(m_indiP_clipval) );
 
 	// createStandardIndiNumber<int>( m_indiP_inv_cov, "lambda", 0, 1e8, 0.1, "%0.3f", "Inverse Covariance", "Learning control");
-	// registerIndiPropertyNew( m_indiP_inv_cov, INDI_NEWCALLBACK(m_indiP_inv_cov) );  
+	// registerIndiPropertyNew( m_indiP_inv_cov, INDI_NEWCALLBACK(m_indiP_inv_cov) );
 
 	createStandardIndiToggleSw( m_indiP_predictorToggle, "use_predictor", "Choose controller", "Loop Controls");
-	registerIndiPropertyNew( m_indiP_predictorToggle, INDI_NEWCALLBACK(m_indiP_predictorToggle) ); 
-	
+	registerIndiPropertyNew( m_indiP_predictorToggle, INDI_NEWCALLBACK(m_indiP_predictorToggle) );
+
 	createStandardIndiNumber<float>( m_indiP_intgain, "intgain", 0, 1.0, 0.0001, "%0.3f", "Integrator gain", "Learning control");
-	registerIndiPropertyNew( m_indiP_intgain, INDI_NEWCALLBACK(m_indiP_intgain) );  
-	
+	registerIndiPropertyNew( m_indiP_intgain, INDI_NEWCALLBACK(m_indiP_intgain) );
+
 	createStandardIndiNumber<float>( m_indiP_intleak, "intleak", 0, 1.0, 0.0001, "%0.3f", "Integrator gain", "Learning control");
-	registerIndiPropertyNew( m_indiP_intleak, INDI_NEWCALLBACK(m_indiP_intleak) );  
+	registerIndiPropertyNew( m_indiP_intleak, INDI_NEWCALLBACK(m_indiP_intleak) );
 
 	state(stateCodes::OPERATING);
 
@@ -519,7 +519,7 @@ int hoPredCtrl::appLogic()
 		return log<software_error,-1>({__FILE__,__LINE__});
 	}
 
-		
+
 	if( darkMonitorT::appLogic() < 0)
 	{
 		return log<software_error,-1>({__FILE__,__LINE__});
@@ -589,7 +589,7 @@ inline
 int hoPredCtrl::allocate(const dev::shmimT & dummy)
 {
 	static_cast<void>(dummy); //be unused
-	
+
 	// Or get from config
 	use_full_image_reconstructor = true;
 
@@ -608,7 +608,7 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 	// Read in the pupil mask
 	mx::fits::fitsFile<realT> ff;
 	eigenCube<realT>  temp_matrix;
-	
+
 	//
 	ff.read(temp_matrix, m_interaction_matrix_filename);
 	// std::cout << temp_matrix.shape() << "\n";
@@ -621,14 +621,14 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 
 	bool use_cacao_calib = true;
 	if(use_cacao_calib){
-		
+
 		for(int row_i = 0; row_i < m_interaction_matrix.rows(); row_i++ ){
-			
+
 			realT norm = 0;
 			for(int col_i = 0; col_i < m_interaction_matrix.cols(); col_i++ ){
 				if(col_i==(25*30))
 					std::cout << m_interaction_matrix(row_i, col_i) << std::endl;
-				
+
 				norm += m_interaction_matrix(row_i, col_i) * m_interaction_matrix(row_i, col_i);
 			}
 
@@ -641,7 +641,7 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 				if(col_i==(25*30))
 					std::cout << m_interaction_matrix(row_i, col_i) << std::endl;
 
-				// 
+				//
 			}
 
 			realT test_norm = 0.0;
@@ -649,8 +649,8 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 				test_norm += m_interaction_matrix(row_i, col_i) * m_interaction_matrix(row_i, col_i);
 			}
 			std::cout << "Test Norm for mode " << row_i << " " << test_norm << std::endl;
-		}	
-		
+		}
+
 	}
 
 	// Read in the reference image
@@ -686,20 +686,20 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 			m_dmOpened = true;
 		}
 	}
-		
+
 	if(!m_dmOpened){
 		// log<software_error>({__FILE__, __LINE__, m_dmChannel + " not opened."});
 
-		log<text_log>( m_dmChannel + " not opened.", logPrio::LOG_NOTICE); 
+		log<text_log>( m_dmChannel + " not opened.", logPrio::LOG_NOTICE);
 		return -1;
 	}else{
-		m_dmWidth = m_dmStream.md->size[0]; 
-		m_dmHeight = m_dmStream.md->size[1]; 
+		m_dmWidth = m_dmStream.md->size[0];
+		m_dmHeight = m_dmStream.md->size[1];
 
 		m_dmDataType = m_dmStream.md->datatype;
 		m_dmTypeSize = sizeof(float);
-		
-		log<text_log>( "Opened " + m_dmChannel + " " + std::to_string(m_dmWidth) + " x " + std::to_string(m_dmHeight) + " with data type: " + std::to_string(m_dmDataType), logPrio::LOG_NOTICE); 
+
+		log<text_log>( "Opened " + m_dmChannel + " " + std::to_string(m_dmWidth) + " x " + std::to_string(m_dmHeight) + " with data type: " + std::to_string(m_dmDataType), logPrio::LOG_NOTICE);
 		m_shaped_command.resize(m_dmWidth, m_dmHeight);
 		std::cout << m_shaped_command.rows() << " x " << m_shaped_command.cols() << '\n';
 		m_shaped_command.setZero();
@@ -736,17 +736,17 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 
 	average_pupil_intensity = -100000.0;
 
-	savepath = "/data/users/xsup/PredCtrlData/"; 
+	savepath = "/data/users/xsup/PredCtrlData/";
 	return 0;
 }
 
 inline
 int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 {
-		
+
 	static_cast<void>(dummy); //be unused
 	auto start = std::chrono::steady_clock::now();
-	
+
 	Eigen::Map<eigenImage<unsigned short>> pwfsIm( static_cast<unsigned short *>(curr_src), m_pwfsHeight, m_pwfsWidth);
 	// Calculate the norm
 	realT pwfs_norm = 0;
@@ -756,20 +756,20 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 		realT Ia = 0, Ib = 0, Ic = 0, Id = 0;
 		realT total_norm = 0;
 		size_t number_of_pixels = 0;
-		
+
 		size_t ki = 0;
 		for(uint32_t col_i=0; col_i < m_quadWidth; ++col_i){
 			for(uint32_t row_i=0; row_i < m_quadHeight; ++row_i){
-				// Select the pixel from the correct quadrant and subtract dark			
-				Ic = (realT)pwfsIm(row_i, col_i) - m_darkImage(row_i, col_i);															
-				Id = (realT)pwfsIm(row_i + m_quadWidth, col_i) - m_darkImage(row_i + m_quadWidth, col_i);								
-				Ia = (realT)pwfsIm(row_i, col_i + m_quadHeight) - m_darkImage(row_i, col_i + m_quadHeight);								
+				// Select the pixel from the correct quadrant and subtract dark
+				Ic = (realT)pwfsIm(row_i, col_i) - m_darkImage(row_i, col_i);
+				Id = (realT)pwfsIm(row_i + m_quadWidth, col_i) - m_darkImage(row_i + m_quadWidth, col_i);
+				Ia = (realT)pwfsIm(row_i, col_i + m_quadHeight) - m_darkImage(row_i, col_i + m_quadHeight);
 				Ib = (realT)pwfsIm(row_i + m_quadWidth, col_i + m_quadHeight) - m_darkImage(row_i + m_quadWidth, col_i + m_quadHeight);
 
 				// Calculate the norm
 				// TODO: Add an exponential learning to the PWFS norm?
 				pwfs_norm = Ia + Ib + Ic + Id;
-				
+
 				// Take all linear combinations of the measurements and concatenate in vector
 				if(m_pupilMask(row_i, col_i) > 0.5){
 					m_measurementVector(ki, 0) = (Ia - Ib + Ic - Id) / pwfs_norm;
@@ -780,7 +780,7 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 				}
 			}
 		}
-		
+
 		total_norm /= ki;
 
 	}else{
@@ -790,7 +790,7 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 				pwfs_norm += m_pupilMask(row_i,col_i) * ((realT)pwfsIm(row_i, col_i) - m_darkImage(row_i, col_i));
 			}
 		}
-		
+
 		// Extract the illuminated pixels.
 		size_t ki = 0;
 		for(uint32_t col_i=0; col_i < m_pwfsWidth; ++col_i){
@@ -802,7 +802,7 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 		}
 
 	}
-	
+
 	controller->add_measurement(m_measurementVector.data());
 
 	// Okay reconstruction matrix is used correctly!
@@ -815,18 +815,18 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 			map_command_vector_to_dmshmim();
 		}
 		send_dm_command();
-				 
+
 		// Only learn if we have a predictor
 		if(m_use_predictive_control){
 
 			// If -1 always learn, otherwise learn for N steps
 			if(m_learning_counter == -1){
-				
+
 				controller->update_predictor();
 				controller->update_controller();
 
 			}else if(m_learning_counter > 0){
-				
+
 				controller->update_predictor();
 				controller->update_controller();
 				m_learning_counter -= 1;
@@ -838,21 +838,21 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 				m_learning_counter = m_learning_steps;
 
 				m_lambda /= 10.0;
-		
+
 				controller->set_zero(); 														// set current control to zero
 				zero();																			// set the DM shape to zero
 				controller->create_exploration_buffer(m_exploration_rms, m_exploration_steps);  // Make a new buffer
 				controller->set_new_regularization(m_lambda); 									// set a new regularization
 				controller->reset_data_buffer();												// remove the history
 			}
-			
+
 
 		}
 
 	}
 
 	auto end = std::chrono::steady_clock::now();
-	
+
 
 	if(iterations == 0){
 		duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
@@ -860,7 +860,7 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 		duration = 0.95 * duration + 0.05 * std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 	}
 	iterations += 1;
-	
+
 	if(iterations % 10000 == 0){
 		// std::cout << "PWFS NORM: " << pwfs_norm << std::endl;
 		// std::cout << m_measurementVector(25*30,0)/1e-5 <<  " " << m_measurementVector(25*30+1,0)/1e-5 <<  " " << m_measurementVector(25*30+2,0)/1e-5 << std::endl;
@@ -872,12 +872,12 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 	return 0;
 }
 
-inline 
+inline
 int hoPredCtrl::set_pupil_mask(std::string pupil_mask_filename){
 /*
 	This function reads in the filename to create a pupil mask and to initialize the measurement vector.
 */
-	
+
 	// Read in the pupil mask
 	mx::fits::fitsFile<realT> ff;
 	ff.read(m_pupilMask, pupil_mask_filename);
@@ -903,7 +903,7 @@ int hoPredCtrl::set_pupil_mask(std::string pupil_mask_filename){
 	// Create the measurement vector
 	m_measurementVector.resize(m_measurement_size, 1);
     m_measurementVector.setZero();
-	
+
 	return 0;
 }
 
@@ -911,44 +911,44 @@ int hoPredCtrl::set_pupil_mask(std::string pupil_mask_filename){
 inline
 int hoPredCtrl::allocate(const darkShmimT & dummy)
 {
-	
+
    static_cast<void>(dummy); //be unused
-   
+
    m_darkSet = false;
-   
+
    m_darkImage.resize(darkMonitorT::m_width, darkMonitorT::m_height);
-   
+
    dark_pixget = getPixPointer<realT>(darkMonitorT::m_dataType);
-   
+
    if(dark_pixget == nullptr)
    {
       log<software_error>({__FILE__, __LINE__, "bad data type"});
       return -1;
    }
    std::cout << "Allocated dark frames stuff. \n";
-	
+
 
    return 0;
 }
 
 inline
-int hoPredCtrl::processImage( void * curr_src, 
-                                       const darkShmimT & dummy 
+int hoPredCtrl::processImage( void * curr_src,
+                                       const darkShmimT & dummy
                                      )
 {
-	
+
    static_cast<void>(dummy); //be unused
-   
+
    realT * data = m_darkImage.data();
-   
+
    for(unsigned nn=0; nn < darkMonitorT::m_width*darkMonitorT::m_height; ++nn)
    {
       //data[nn] = *( (int16_t * ) (curr_src + nn*shmimMonitorT::m_dmDataType));
       data[nn] = dark_pixget(curr_src, nn);
    }
-   
+
    m_darkSet = true;
-	
+
 
    return 0;
 }
@@ -957,22 +957,22 @@ int hoPredCtrl::processImage( void * curr_src,
 inline
 int hoPredCtrl::zero()
 {
-	
+
 	m_shaped_command.setZero();
 	send_dm_command();
 	return 0;
-	
+
 }
 
 inline
 int hoPredCtrl::map_command_vector_to_dmshmim(){
-	
+
 	// Convert the actuators modes into a 50x50 image.
 	/*
 		This function maps the command vector to a masked 2D image. A mapping is implicitely assumed due to the way the array is accessed.
 	*/
 
-	
+
 	// The new output of the controller is a nact length vector. So this can be replaced by a single copy statement.
 	// For now let's keep the dumb copy.
 	int ki = 0;
@@ -982,7 +982,7 @@ int hoPredCtrl::map_command_vector_to_dmshmim(){
 			ki += 1;
 		}
 	}
-	
+
 
 	return 0;
 }
@@ -1243,7 +1243,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_gamma )(const pcf::IndiProperty &ipRec
 
 	if(!m_is_closed_loop){
 		m_gamma = target;
-		
+
 		controller->set_new_gamma(m_gamma);
 		updateIfChanged(m_indiP_gamma, "target", m_gamma);
 	}else{
@@ -1280,7 +1280,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_intgain )(const pcf::IndiProperty &ipR
 	m_intgain = target;
 	controller->controller->set_integrator(m_use_predictive_control, m_intgain, m_intleak);
 	updateIfChanged(m_indiP_intgain, "target", m_intgain);
-	
+
 	// if(!m_is_closed_loop){
 	// }else{
 	// 	 log<text_log>("Integrator gain value not changed. Loop is still running.", logPrio::LOG_NOTICE);
@@ -1312,11 +1312,11 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_intleak )(const pcf::IndiProperty &ipR
 
 	std::lock_guard<std::mutex> guard(m_indiMutex);
 
-	
+
 	m_intleak = target;
 	controller->controller->set_integrator(m_use_predictive_control, m_intgain, m_intleak);
 	updateIfChanged(m_indiP_intleak, "target", m_intleak);
-	
+
 	// if(!m_is_closed_loop){
 	// }else{
 	// 	 log<text_log>("Integrator leakage value not changed. Loop is still running.", logPrio::LOG_NOTICE);
@@ -1363,7 +1363,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_controlToggle )(const pcf::IndiPropert
       log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
    }
-   
+
    //switch is toggled to on
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
@@ -1391,7 +1391,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_controlToggle )(const pcf::IndiPropert
       }
       return 0;
    }
-   
+
    return 0;
 }
 
@@ -1402,7 +1402,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_predictorToggle )(const pcf::IndiPrope
       log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
    }
-   
+
    //switch is toggled to on
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
@@ -1425,7 +1425,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_predictorToggle )(const pcf::IndiPrope
       }
       return 0;
    }
-   
+
    return 0;
 }
 
@@ -1445,7 +1445,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_reset_bufferRequest )(const pcf::IndiP
 		controller->reset_data_buffer();
 		updateSwitchIfChanged(m_indiP_reset_bufferRequest, "request", pcf::IndiElement::Off, INDI_IDLE);
 	}
-   
+
    return 0;
 }
 
@@ -1466,7 +1466,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_reset_exploreRequest )(const pcf::Indi
 		controller->create_exploration_buffer(m_exploration_rms, m_exploration_steps);
 		updateSwitchIfChanged(m_indiP_reset_exploreRequest, "request", pcf::IndiElement::Off, INDI_IDLE);
 	}
-   
+
    return 0;
 }
 
@@ -1487,7 +1487,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_reset_modelRequest )(const pcf::IndiPr
 		controller->reset_controller();
 		updateSwitchIfChanged(m_indiP_reset_modelRequest, "request", pcf::IndiElement::Off, INDI_IDLE);
 	}
-   
+
    return 0;
 }
 
@@ -1520,7 +1520,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_reset_cleanRequest )(const pcf::IndiPr
 
 		updateSwitchIfChanged(m_indiP_reset_cleanRequest, "request", pcf::IndiElement::Off, INDI_IDLE);
 	}
-   
+
    return 0;
 }
 
@@ -1543,7 +1543,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_updateControllerRequest )(const pcf::I
 		controller->update_controller();
 		updateSwitchIfChanged(m_indiP_updateControllerRequest, "request", pcf::IndiElement::Off, INDI_IDLE);
 	}
-   
+
    return 0;
 }
 
@@ -1560,7 +1560,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_zeroRequest )(const pcf::IndiProperty 
 
 	if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
 	{
-		
+
 		if(!m_is_closed_loop){
 			zero();
 			controller->set_zero();
@@ -1570,7 +1570,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_zeroRequest )(const pcf::IndiProperty 
 
 		updateSwitchIfChanged(m_indiP_zeroRequest, "request", pcf::IndiElement::Off, INDI_IDLE);
 	}
-   
+
    return 0;
 }
 
@@ -1589,7 +1589,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_saveRequest )(const pcf::IndiProperty 
 		controller->save_state(savepath);
 		updateSwitchIfChanged(m_indiP_saveRequest, "request", pcf::IndiElement::Off, INDI_IDLE);
 	}
-   
+
    return 0;
 }
 
@@ -1609,7 +1609,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_loadRequest )(const pcf::IndiProperty 
 		controller->load_state(savepath, std::to_string(loading_timestamp));
 		updateSwitchIfChanged(m_indiP_loadRequest, "request", pcf::IndiElement::Off, INDI_IDLE);
 	}
-   
+
    return 0;
 }
 

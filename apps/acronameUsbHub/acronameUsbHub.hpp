@@ -38,28 +38,28 @@ namespace app
   *
   * \todo add current, temperature, etc. monitoring
   * \todo telemetry
-  * 
+  *
   * \ingroup acronameUsbHub
-  * 
+  *
   */
 class acronameUsbHub : public MagAOXApp<>, public dev::outletController<acronameUsbHub>
 {
 
 protected:
 
-   /** \name configurable parameters 
+   /** \name configurable parameters
      *@{
-     */ 
+     */
 
    uint32_t m_serialNumber {0}; ///< The Acroname device serial number.
-   
+
    ///@}
-   
-   
+
+
    aUSBHub3p m_hub; ///< BrainStem library handle
-   
+
    bool m_connected {false}; ///< Whether or not the hub is currently connected
-   
+
 public:
 
    ///Default c'tor
@@ -91,7 +91,7 @@ public:
 
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
-   
+
    /// Get the state of the outlet from the device.
    /** dev::outletController interface.
      *
@@ -123,9 +123,9 @@ inline
 acronameUsbHub::acronameUsbHub() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    m_powerMgtEnabled = false;
-   
+
    setNumberOfOutlets(8);
-   
+
    return;
 }
 
@@ -133,9 +133,9 @@ inline
 acronameUsbHub::~acronameUsbHub() noexcept
 {
    // Disconnect
-    
+
    m_hub.disconnect();
-    
+
    return;
 }
 
@@ -143,7 +143,7 @@ inline
 void acronameUsbHub::setupConfig()
 {
    config.add("device.serialNumber", "", "device.serialNumber", argType::Required, "device", "serialNumber", false, "uint32", "The identifying serial number of the hub.");
-   
+
    dev::outletController<acronameUsbHub>::setupConfig(config);
 }
 
@@ -167,9 +167,9 @@ int acronameUsbHub::appStartup()
    {
       return log<text_log,-1>("Error setting up INDI for outlet control.", logPrio::LOG_CRITICAL);
    }
-   
+
    state(stateCodes::NOTCONNECTED);
-   
+
    return 0;
 
 }
@@ -181,7 +181,7 @@ int acronameUsbHub::appLogic()
    {
       state(stateCodes::NOTCONNECTED);
    }
-   
+
    if( state() == stateCodes::NOTCONNECTED )
    {
 
@@ -190,50 +190,50 @@ int acronameUsbHub::appLogic()
          m_hub.disconnect();
          m_connected = false;
       }
-      
+
       aErr err = aErrNone;
 
       elevatedPrivileges ep(this);
-      
+
       //std::cerr << m_serialNumber << "\n";
       //err = m_hub.discoverAndConnect(USB, m_serialNumber);
       err = m_hub.connect(USB, m_serialNumber);
-      if (err != aErrNone) 
+      if (err != aErrNone)
       {
          if(!stateLogged())
          {
             log<text_log>("Failed to connect to usb hub", logPrio::LOG_ERROR);
          }
-         
+
          m_connected = false;
          return 0;
-      } 
-      else 
+      }
+      else
       {
          state(stateCodes::CONNECTED);
 
          SystemClass sys;
          sys.init(&m_hub,0);
-   
+
          uint8_t model;
          sys.getModel(&model);
          std::string modelName = aDefs_GetModelName(model);
-         
+
          uint32_t version;
          sys.getVersion(&version);
          char versionStr[256];
          aVersion_ParseString(version, versionStr, sizeof(versionStr));
-      
+
          uint32_t serial;
          sys.getSerialNumber(&serial);
-   
+
          log<text_log>("Connected to " + modelName + " #" + std::to_string(serial) + " w/fimrware version " + versionStr, logPrio::LOG_INFO);
-         
+
          m_connected = true;
          state(stateCodes::READY);
       }
    }
-   
+
    if( state() == stateCodes::READY )
    {
       if(! m_hub.isConnected() )
@@ -243,14 +243,14 @@ int acronameUsbHub::appLogic()
          state(stateCodes::NOTCONNECTED);
          return 0;
       }
-      
-      
+
+
       dev::outletController<acronameUsbHub>::updateOutletStates();
-      
+
       std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing INDI
       dev::outletController<acronameUsbHub>::updateINDI();
    }
-   
+
    return 0;
 
 }
@@ -263,7 +263,7 @@ int acronameUsbHub::onPowerOff()
       m_hub.disconnect();
       m_connected = false;
    }
-   
+
    for(size_t n=0;n<m_outletStates.size();++n)
    {
       m_outletStates[n] = OUTLET_STATE_OFF;
@@ -275,11 +275,11 @@ int acronameUsbHub::onPowerOff()
    //Update INDI targets to off.
    for(auto it = m_channels.begin(); it != m_channels.end(); ++it)
    {
-      updateIfChanged( it->second.m_indiP_prop, "target", "Off"); 
+      updateIfChanged( it->second.m_indiP_prop, "target", "Off");
    }
 
 
-   
+
    return 0;
 }
 
@@ -299,9 +299,9 @@ inline
 int acronameUsbHub::updateOutletState( int outletNum )
 {
    uint32_t state = 0;
-   
+
    aErr err = m_hub.usb.getPortState(outletNum, &state);
-   
+
    if(err != aErrNone)
    {
       if(err == aErrTimeout)
@@ -313,7 +313,7 @@ int acronameUsbHub::updateOutletState( int outletNum )
          return log<software_error,-1>({__FILE__, __LINE__, "loss of connection detected when enabling port"});
       }
    }
-   
+
    if(state & 1)
    {
       m_outletStates[outletNum] = OUTLET_STATE_ON;
@@ -330,7 +330,7 @@ inline
 int acronameUsbHub::turnOutletOn( int outletNum )
 {
    aErr err = m_hub.usb.setPortEnable(outletNum);
-   
+
    if(err != aErrNone)
    {
       if(err == aErrTimeout)
@@ -342,7 +342,7 @@ int acronameUsbHub::turnOutletOn( int outletNum )
          return log<software_error,-1>({__FILE__, __LINE__, "loss of connection detected when enabling port"});
       }
    }
-      
+
    return 0;
 }
 
@@ -361,7 +361,7 @@ int acronameUsbHub::turnOutletOff( int outletNum )
       {
          return log<software_error,-1>({__FILE__, __LINE__, "loss of connection detected when disabling port"});
       }
-   }   
+   }
    return 0;
 }
 

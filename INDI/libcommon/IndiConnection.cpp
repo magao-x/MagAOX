@@ -91,11 +91,13 @@ IndiConnection::~IndiConnection()
     {
         //do nothing
     }
-    
-    if(m_fstreamOutput && m_fstreamOutput != m_fstreamSTDOUT)
+
+    MutexLock::AutoLock autoOut( &m_mutOutput );
+    if(m_fdOutput >= 0 && m_fdOutput != STDOUT_FILENO)
     {
-        fclose(m_fstreamOutput);
+        ::close(m_fdOutput);
     }
+    m_fdOutput = -1;
 
 }
 
@@ -119,9 +121,8 @@ void IndiConnection::construct( const string &szName,
   // These are the two descriptors we will use to talk to the outside world.
   m_fdInput = STDIN_FILENO;
 
-  //We start with STDOUT.  
-  m_fstreamSTDOUT = fdopen(STDOUT_FILENO, "w+");  
-  setOutputFd(STDOUT_FILENO);
+  // We start with STDOUT.
+  m_fdOutput = STDOUT_FILENO;
 
   // setup the signal handler.
   //::signal( SIGHUP, IndiConnection::handleSignal );
@@ -139,7 +140,7 @@ void IndiConnection::construct( const string &szName,
   // This is the same if we are in simulation mode or not.
   // The default is one second.
   setInterval(1000);
-  
+
   // What is our CPU affinity? This is the CPU we will run on.
   // A -1 indicates we don't care where it runs.
   m_iCpuAffinity = -1;
@@ -374,19 +375,37 @@ void IndiConnection::process()
 
 ////////////////////////////////////////////////////////////////////////////////
 /// \brief IndiConnection::sendXml
-/// Sends an XML string out. 
+/// Sends an XML string out.
 /// \param szXml The XML to send.
 void IndiConnection::sendXml( const string &szXml ) const
 {
   MutexLock::AutoLock autoOut( &m_mutOutput );
-  
-  if(!m_fstreamOutput)
+
+  if(m_fdOutput < 0)
   {
     return;
   }
 
-  ::fprintf( m_fstreamOutput, "%s", szXml.c_str() );
-  fflush(m_fstreamOutput);
+  const char * buf = szXml.c_str();
+  size_t remaining = szXml.size();
+
+  while(remaining > 0)
+  {
+    ssize_t nwr = ::write(m_fdOutput, buf, remaining);
+    if(nwr > 0)
+    {
+      buf += nwr;
+      remaining -= static_cast<size_t>(nwr);
+      continue;
+    }
+
+    if(nwr < 0 && errno == EINTR)
+    {
+      continue;
+    }
+
+    break;
+  }
 
 }
 
@@ -427,22 +446,19 @@ void IndiConnection::setInputFd( const int &iFd )
 
 void IndiConnection::setOutputFd( const int &iFd )
 {
+    MutexLock::AutoLock autoOut( &m_mutOutput );
+
+    if(iFd == m_fdOutput)
+    {
+        return;
+    }
+
+    if(m_fdOutput >= 0 && m_fdOutput != STDOUT_FILENO)
+    {
+        ::close(m_fdOutput);
+    }
+
     m_fdOutput = iFd;
-
-    //Close if it's open as long as it isn't STDOUT
-    if(m_fstreamOutput && m_fstreamOutput != m_fstreamSTDOUT)
-    {
-        fclose(m_fstreamOutput);
-    }
-
-    if(iFd == STDOUT_FILENO)
-    {
-        m_fstreamOutput = m_fstreamSTDOUT;
-    }
-    else
-    {
-        m_fstreamOutput = fdopen(m_fdOutput, "w+");
-    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

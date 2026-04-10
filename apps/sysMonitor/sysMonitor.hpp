@@ -191,7 +191,7 @@ public:
      * \returns -1 on error with system command or output reading
      * \returns 0 on successful completion otherwise
      */
-   int findDiskTemperature( std::vector<std::string>& hdd_names, ///< [out] the names of the drives reported by hddtemp 
+   int findDiskTemperature( std::vector<std::string>& hdd_names, ///< [out] the names of the drives reported by hddtemp
                             std::vector<float>& hdd_temps        ///< [out] the vector of measured drive temperatures
                           );
 
@@ -763,7 +763,7 @@ int sysMonitor::parseCPUTemperaturesAMD( float& temp,
       }
 
       str = line.substr(7, ((ed - 1) - 7)); //ed-1 to eat degree.
-      
+
       try
       {
          temp = std::stof(str);
@@ -855,7 +855,7 @@ int sysMonitor::parseCPULoads( float & loadVal,
       return -1;
    }
    std::istringstream iss(line);
-   
+
    std::vector<std::string> tokens(std::istream_iterator<std::string>{iss}, std::istream_iterator<std::string>{});
    if (tokens.size() < 8) return 1;
 
@@ -901,7 +901,7 @@ int sysMonitor::findDiskTemperature( std::vector<std::string>& hdd_names,
          {
             continue;
          }
-         
+
          log<software_error>({ __FILE__, __LINE__, "hddtemp stderr: " + commandError[n] });
       }
    }
@@ -1420,11 +1420,11 @@ INDI_NEWCALLBACK_DEFN(sysMonitor, m_indiP_setlat)(const pcf::IndiProperty& ipRec
 inline
 int sysMonitor::checkRecordTimes()
 {
-   return telemeter<sysMonitor>::checkRecordTimes( telem_coreloads(), 
-                                                   telem_coretemps(), 
-                                                   telem_drivetemps(), 
-                                                   telem_usage(), 
-                                                   telem_chrony_status(), 
+   return telemeter<sysMonitor>::checkRecordTimes( telem_coreloads(),
+                                                   telem_coretemps(),
+                                                   telem_drivetemps(),
+                                                   telem_usage(),
+                                                   telem_chrony_status(),
                                                    telem_chrony_stats()
                                                  );
 }

@@ -22,7 +22,7 @@ namespace DDSPC
     void print_matrix(Matrix mat, std::string name=""){
         if(name.length() > 0)
             std::cout << name << std::endl;
-        
+
         for(int i=0; i < mat.rows(); i++){
             std::cout << "[";
             for(int j=0; j < mat.cols(); j++){
@@ -44,7 +44,7 @@ namespace DDSPC
         int matrixRowNumber = 0;
 
         while (getline(matrixDataFile, matrixRowString)){
-            
+
             std::stringstream matrixRowStringStream(matrixRowString);
 
             while (getline(matrixRowStringStream, matrixEntry, ',')){
@@ -52,7 +52,7 @@ namespace DDSPC
             }
             matrixRowNumber++;
         }
-        
+
         return  Eigen::Map<Matrix>(matrixEntries.data(), matrixRowNumber, matrixEntries.size() / matrixRowNumber);
 
     }

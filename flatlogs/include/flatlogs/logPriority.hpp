@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup flatlogs_files
-  * 
+  *
   * History:
   * - 2017-07-22 created by JRM
   * - 2018-08-17 renamed and moved to flatlogs
@@ -25,44 +25,44 @@ namespace flatlogs
   */
 namespace logPrio
 {
-    
-  
-  /// Normal operations of the entire system should be shut down immediately. 
-  constexpr static logPrioT LOG_EMERGENCY = 0;  
+
+
+  /// Normal operations of the entire system should be shut down immediately.
+  constexpr static logPrioT LOG_EMERGENCY = 0;
 
   /// This should only be used if some action is required by operators to keep the system safe.
   constexpr static logPrioT LOG_ALERT = 1;
-  
+
   /// The process can not continue and will shut down (fatal)
   constexpr static logPrioT LOG_CRITICAL = 2;
-  
+
   /// An error has occured which the software will attempt to correct.
   constexpr static logPrioT LOG_ERROR = 3;
-  
+
   /// A condition has occurred which may become an error, but the process continues.
   constexpr static logPrioT LOG_WARNING = 4;
-  
+
   /// A normal but significant condition
   constexpr static logPrioT LOG_NOTICE = 5;
-  
-  /// Informational.  The info log level is the lowest level recorded during normal operations. 
+
+  /// Informational.  The info log level is the lowest level recorded during normal operations.
   constexpr static logPrioT LOG_INFO = 6;
-  
+
   /// Used for debugging
   constexpr static logPrioT LOG_DEBUG = 7;
-  
+
   /// Used for debugging, providing a 2nd level.
   constexpr static logPrioT LOG_DEBUG2 = 8;
-   
+
   /// A telemetry recording
   constexpr static logPrioT LOG_TELEM = 64;
-  
+
   /// Used to denote "use the default level for this log type".
   constexpr static logPrioT LOG_DEFAULT = std::numeric_limits<logPrioT>::max() - 1;
-  
+
   /// Used to denote an unkown log type for internal error handling.
   constexpr static logPrioT LOG_UNKNOWN = std::numeric_limits<logPrioT>::max();
-  
+
 };
 
 ///Get the string representation of a log priority
@@ -88,13 +88,13 @@ std::string priorityString( logPrioT & prio /**< [in] the log priority */)
       case logPrio::LOG_INFO:
          return "INFO";
       case logPrio::LOG_DEBUG:
-         return "DBG ";   
+         return "DBG ";
       case logPrio::LOG_DEBUG2:
-         return "DBG2";   
+         return "DBG2";
       case logPrio::LOG_DEFAULT:
          return "DEF?";
       case logPrio::LOG_TELEM:
-         return "TELM";   
+         return "TELM";
       default:
          return "UNK?";
    }
@@ -142,23 +142,23 @@ logPrioT logLevelFromString( const std::string & str )
 
    //Convert to upper case
    for(size_t i=0; i< s.size(); ++i) s[i] = ::toupper(s[i]);
-   
+
    if(s[0] == 'A') return logPrio::LOG_ALERT;
    if(s[0] == 'C') return logPrio::LOG_CRITICAL;
    if(s[0] == 'W') return logPrio::LOG_WARNING;
    if(s[0] == 'N') return logPrio::LOG_NOTICE;
    if(s[0] == 'I') return logPrio::LOG_INFO;
 
-   if(s[0] == 'E') 
+   if(s[0] == 'E')
    {
       if(s.size() == 1) return logPrio::LOG_UNKNOWN;
-      
+
       if(s[1] == 'M') return logPrio::LOG_EMERGENCY;
       if(s[2] == 'R') return logPrio::LOG_ERROR;
-      
+
       return logPrio::LOG_UNKNOWN;
    }
-      
+
    if(s[0] == 'D')
    {
       //Accept D by itself for DEBUG
@@ -207,7 +207,7 @@ logPrioT logLevelFromString( const std::string & str )
    {
       return logPrio::LOG_TELEM;
    }
-   
+
    return logPrio::LOG_UNKNOWN;
 }
 

@@ -4,8 +4,11 @@
 #include <mx/sys/timeUtils.hpp>
 
 #define OUTLET_CTRL_TEST_NOINDI
-#define OUTLET_CTRL_TEST_NOLOG
+//#define OUTLET_CTRL_TEST_NOLOG
+#include "../../MagAOXApp.hpp"
 #include "../outletController.hpp"
+
+using namespace MagAOX::app;
 
 /** \defgroup outletController_tests libXWC::app::dev::outletController Unit Tests
  * \ingroup app_dev_unit_tests
@@ -13,11 +16,12 @@
 namespace outletController_tests
 {
 
-struct outletControllerTest : public MagAOX::app::dev::outletController<outletControllerTest>
+struct outletControllerTest : public MagAOXApp<false>, dev::outletController<outletControllerTest>
 {
    std::vector<double> m_timestamps;
 
    outletControllerTest()
+        : MagAOX::app::MagAOXApp<false>( "", false )
    {
       setNumberOfOutlets(4);
       m_timestamps.resize(4,0);
@@ -27,13 +31,40 @@ struct outletControllerTest : public MagAOX::app::dev::outletController<outletCo
       turnOutletOff(3);
    }
 
-   virtual int updateOutletState( int outletNum )
+   ~outletControllerTest() noexcept
+   {}
+
+   int setupConfig( mx::app::appConfigurator & config)
+   {
+      return dev::outletController<outletControllerTest>::setupConfig(config);
+   }
+
+   int loadConfig( mx::app::appConfigurator & config)
+   {
+      return dev::outletController<outletControllerTest>::loadConfig(config);
+   }
+
+   int appStartup()
+   {
+      return 0;
+   }
+
+   int appLogic()
+   {
+      return 0;
+   }
+
+   int appShutdown()
+   {
+      return 0;
+   }
+
+   int updateOutletState( int outletNum )
    {
       return m_outletStates[outletNum];
    }
 
-
-   virtual int turnOutletOn( int outletNum )
+   int turnOutletOn( int outletNum )
    {
       m_outletStates[outletNum] = 2;
       mx::sys::nanoSleep(1);
@@ -42,7 +73,7 @@ struct outletControllerTest : public MagAOX::app::dev::outletController<outletCo
       return 0;
    }
 
-   virtual int turnOutletOff( int outletNum )
+   int turnOutletOff( int outletNum )
    {
       m_outletStates[outletNum] = 0;
       mx::sys::nanoSleep(1);
@@ -632,9 +663,10 @@ SCENARIO( "outletController Operation", "[outletController]" )
 {
    GIVEN("a config file with 4 channels for 4 outlets, only outlet specified")
    {
-      mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1", "channel2",     "channel3",      "channel4"},
-                                                        {"outlet",   "outlet",       "outlet",          "outlet"},
-                                                        {"0",         "1",             "2",                "3"} );
+      mx::app::writeConfigFile( "/tmp/outletController_test.conf", 
+                                {"channel1", "channel2",     "channel3",      "channel4"},
+                                {"outlet",   "outlet",       "outlet",          "outlet"},
+                                {"0",         "1",             "2",                "3"} );
 
       mx::app::appConfigurator config;
       config.readConfig("/tmp/outletController_test.conf");
@@ -657,6 +689,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          REQUIRE( pdt.channelState("channel3") == 0 );
          REQUIRE( pdt.channelState("channel4") == 0 );
       }
+
       WHEN("operating a single channel")
       {
          //Turn on channel1
@@ -704,7 +737,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          REQUIRE( pdt.channelState("channel3") == 0 );
          REQUIRE( pdt.channelState("channel4") == 0 );
 
-         //Turn off channel1
+         //Turn off channel2
          pdt.turnChannelOff("channel2");
 
          //Verify outlet state
@@ -734,7 +767,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          REQUIRE( pdt.channelState("channel3") == 2 );
          REQUIRE( pdt.channelState("channel4") == 0 );
 
-         //Turn off channel1
+         //Turn off channel3
          pdt.turnChannelOff("channel3");
 
          //Verify outlet state
@@ -764,7 +797,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          REQUIRE( pdt.channelState("channel3") == 0 );
          REQUIRE( pdt.channelState("channel4") == 2 );
 
-         //Turn off channel1
+         //Turn off channel4
          pdt.turnChannelOff("channel4");
 
          //Verify outlet startup state
@@ -779,6 +812,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          REQUIRE( pdt.channelState("channel3") == 0 );
          REQUIRE( pdt.channelState("channel4") == 0 );
       }
+
       WHEN("operating multiple channels")
       {
          //Turn on channel1&2
@@ -829,7 +863,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          REQUIRE( pdt.channelState("channel3") == 2 );
          REQUIRE( pdt.channelState("channel4") == 2 );
 
-         //Turn off channel2&4
+         //Turn off channel3&4
          pdt.turnChannelOff("channel3");
          pdt.turnChannelOff("channel4");
 
@@ -850,6 +884,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          pdt.turnChannelOn("channel3");
 
          //Verify outlet state
+         REQUIRE( pdt.m_outletStates[0] == 2);
          REQUIRE( pdt.outletState(0) == 2 );
          REQUIRE( pdt.outletState(1) == 0 );
          REQUIRE( pdt.outletState(2) == 2 );
@@ -909,6 +944,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          REQUIRE( pdt.channelState("channel3") == 0 );
          REQUIRE( pdt.channelState("channel4") == 0 );
       }
+
       WHEN("outlets intermediate")
       {
          pdt.m_outletStates[0] = 1;

@@ -144,7 +144,7 @@ class psfAcq : public MagAOXApp<true>,
     float m_threshold = { 7.0 }; // how many sigma away from the mean you want to classify a detection, default to
                                  // 7sigma
     float m_fwhm_threshold = { 4.0 }; // minumum fwhm to consider something a star
-    float m_max_fwhm = { 40.0 }; // max fwhm to consider a star 
+    float m_max_fwhm = { 40.0 }; // max fwhm to consider a star
 
     std::vector<float> m_first_x_vals = {};
     std::vector<float> m_first_y_vals = {};
@@ -156,9 +156,9 @@ class psfAcq : public MagAOXApp<true>,
     double m_plate_scale = .0795336;
     int m_old_num_stars{ 0 };
     int m_num_stars{ 0 };
-    float m_seeing{ 0 }; 
+    float m_seeing{ 0 };
     int m_acquire_star{ -1 }; // Testing for user to select star
-    int m_seeing_star { -1 }; // default star to calc seeing 
+    int m_seeing_star { -1 }; // default star to calc seeing
     int m_x_center{};     // 'center' of image or hot spot
     int m_y_center{};
 
@@ -238,7 +238,7 @@ class psfAcq : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_seeing_star;
     INDI_NEWCALLBACK_DECL( psfAcq, m_indiP_seeing_star );
 
-    // toggling 
+    // toggling
     pcf::IndiProperty m_indiP_restartAcq;
     INDI_NEWCALLBACK_DECL( psfAcq, m_indiP_restartAcq );
 
@@ -385,7 +385,7 @@ inline int psfAcq::appStartup()
 
     // creating toggling to restart the acquisition
     createStandardIndiRequestSw( m_indiP_restartAcq, "restart_acq", "Restart Acquisition", "psfAcq");
-    registerIndiPropertyNew( m_indiP_restartAcq, INDI_NEWCALLBACK(m_indiP_restartAcq) );  
+    registerIndiPropertyNew( m_indiP_restartAcq, INDI_NEWCALLBACK(m_indiP_restartAcq) );
 
     // INDI prop for seeing
     createROIndiNumber(m_indiP_seeing, "seeing");
@@ -400,7 +400,7 @@ inline int psfAcq::appStartup()
     {
        log<software_error>({__FILE__,__LINE__});
        return -1;
-    } 
+    }
 
     // INDI prop for user to select star
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_acquire_star, "acquire_star", 0, 20, 1, "%d", "", "" );
@@ -623,7 +623,7 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
                 {
                     m_image( i, j ) = 0; // m_zero_area is defaulted to 20 to zero out a pixel array around the star
                 }
-            }  
+            }
             max = m_image.maxCoeff( &x, &y );
             z_score = ( max - mean ) / stddev;
         }
@@ -768,18 +768,18 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
         delta_x = m_detectedStars[m_acquire_star].x - m_x_center;
         delta_y = m_detectedStars[m_acquire_star].y - m_y_center;
         std::cout << "delta_x = " << delta_x << "    delta_y = " << delta_y << std::endl;
-        
+
         // negative signs because we want to move scope opposite of how far it is from 'center'
         double x_arcsec = -1*delta_y * plate_scale; //positive x_arcsec moves up, negetive moves down
         double y_arcsec = -1*delta_x * plate_scale; //positive y_arcsec moves right, negetive moves left
-        std::cout << "x_arcsec=" << x_arcsec << "  y_arcsec=" << y_arcsec << std::endl; 
+        std::cout << "x_arcsec=" << x_arcsec << "  y_arcsec=" << y_arcsec << std::endl;
 
-        // for moving telescope 
+        // for moving telescope
         pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
         ip.setDevice( "tcsi" );
         ip.setName( "pyrNudge" );
-        //send telescope x and y offsets in acrsec 
+        //send telescope x and y offsets in acrsec
         ip.add( pcf::IndiElement( "y" ) );
         ip["y"] = x_arcsec; //how far to move in y direction in arcsec?
         ip.add( pcf::IndiElement( "x" ) );
@@ -794,7 +794,7 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
         m_seeing = m_detectedStars[m_current_acq_star].seeing;
     }
 
-    m_updated = true; 
+    m_updated = true;
     return 0;
 }
 
@@ -844,7 +844,7 @@ void psfAcq::resetAcq(){
         }
     }
     std::cout << "size=" << m_detectedStars.size() << std::endl;
-    m_detectedStars.clear(); 
+    m_detectedStars.clear();
 }
 
 //for toggling Restart Acquisition
@@ -853,37 +853,37 @@ INDI_NEWCALLBACK_DEFN( psfAcq, m_indiP_restartAcq )(const pcf::IndiProperty &ipR
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_restartAcq, ipRecv);
     if(!ipRecv.find("request")) return 0;
     std::unique_lock<std::mutex> lock(m_indiMutex);
-      
+
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
     {
         std::cout << "size=" << m_detectedStars.size() << std::endl;
         resetAcq();
         std::cout << "size=" << m_detectedStars.size() << std::endl;
         return 0;
-    }   
+    }
     else if( ipRecv["request"].getSwitchState() == pcf::IndiElement::Off)
     {
         return 0;
     }
-      
+
     log<software_error>({__FILE__,__LINE__, "switch state fall through."});
     return -1;
 }
 
-//for toggling Recording Seeing 
+//for toggling Recording Seeing
 INDI_NEWCALLBACK_DEFN( psfAcq, m_indiP_recordSeeing )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_recordSeeing, ipRecv);
     if(!ipRecv.find("toggle")) return 0;
     std::unique_lock<std::mutex> lock(m_indiMutex);
-      
+
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
     {
         m_current_acq_star = m_temp_acq_star;
         updateSwitchIfChanged(m_indiP_recordSeeing, "toggle", pcf::IndiElement::On, INDI_BUSY);
         //m_seeing = m_detectedStars[m_current_acq_star].seeing;
         return 0;
-    }   
+    }
     else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
     {
         m_current_acq_star = -1;

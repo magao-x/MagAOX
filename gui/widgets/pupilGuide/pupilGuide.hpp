@@ -64,9 +64,10 @@ class pupilGuide : public xWidget
 
     float m_stepSize{ 0.1 };
 
-    int m_tipmovewhat{ MOVE_TTM };
+    int m_tipmovewhat{ MOVE_WOOF };
 
-
+    float m_focusWooferStep {0.2};
+    float m_focusTelStep {100};
 
     // --- TCS
 
@@ -199,6 +200,7 @@ class pupilGuide : public xWidget
     virtual void onDisconnect();
 
     void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/ );
     void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
 
     void modGUISetEnable( bool enableModGUI, bool enableModArrows );
@@ -306,6 +308,7 @@ pupilGuide::pupilGuide( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, 
 
     ui.setupUi( this );
 
+
     ui.button_focus_scale->setProperty( "isScaleButton", true );
     ui.button_pup_scale->setProperty( "isScaleButton", true );
     ui.button_ttmPeri_scale->setProperty( "isScaleButton", true );
@@ -371,9 +374,13 @@ pupilGuide::pupilGuide( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, 
 
 
     //-----------orphans ------------
+    m_tipmovewhat = MOVE_TTM; //This will make it be "move woofer" on startup
+    on_button_ttmtel_pressed();
+
     ui.button_tip_scale->setProperty( "isScaleButton", true );
     snprintf( ss, 5, "%0.2f", m_stepSize );
     ui.button_tip_scale->setText( ss );
+
 
     snprintf( ss, 5, "%0.2f", m_focusStepSize );
     ui.button_focus_scale->setText( ss );
@@ -867,6 +874,20 @@ void pupilGuide::handleDefProperty( const pcf::IndiProperty &ipRecv )
     return handleSetProperty( ipRecv );
 }
 
+void pupilGuide::handleDelProperty( const pcf::IndiProperty &ipRecv )
+{
+    const std::string dev = ipRecv.getDevice();
+
+    if( dev == "modwfs" || dev == "camwfs" || dev == "tcsi" || dev == "dmwoofer" || dev == "wooferModes" ||
+        dev == "picomotors" || dev == "camwfs-fit" || dev == "camwfs-avg" || dev == "ttmpupil" ||
+        dev == "ttmperi" || dev == "dmtweeter" || dev == "dmncpc" || dev == "camwfs-align" ||
+        dev == "twAlign-camwfs-ctrl" || dev == "twAlign-camwfs-wfs" || dev == "stagecamlensx" ||
+        dev == "stagecamlensy" )
+    {
+        onDisconnect();
+    }
+}
+
 void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
     std::string dev = ipRecv.getDevice();
@@ -953,7 +974,8 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
             }
             if( ipRecv.find( "0002" ) )
             {
-                m_focus = ipRecv["0002"].get<double>();
+                //round to avoid INDI f.p. precision probs.
+                m_focus = std::round(ipRecv["0002"].get<double>() * 1e5)/1e5;
             }
         }
     }
@@ -2512,14 +2534,16 @@ void pupilGuide::on_button_focus_p_pressed()
         ip.setDevice( "wooferModes" );
         ip.setName( "target_amps" );
         ip.add( pcf::IndiElement( "0002" ) );
-        ip["0002"] = m_focus + m_focusStepSize * 0.2;
+
+        //round to avoid INDI f.p. precision probs
+        ip["0002"] = std::round((m_focus + m_focusStepSize * m_focusWooferStep)*1e5)/1e5;
     }
     else if( m_tipmovewhat == MOVE_TEL )
     {
         ip.setDevice( "tcsi" );
         ip.setName( "pyrNudge" );
         ip.add( pcf::IndiElement( "z" ) );
-        ip["z"] = m_stepSize * 100.;
+        ip["z"] = m_focusStepSize * m_focusTelStep;
     }
     else
         return;
@@ -2537,19 +2561,23 @@ void pupilGuide::on_button_focus_m_pressed()
         ip.setDevice( "wooferModes" );
         ip.setName( "target_amps" );
         ip.add( pcf::IndiElement( "0002" ) );
-        ip["0002"] = m_focus - m_focusStepSize * 0.2;
+
+        //round to avoid INDI f.p. precision probs
+        ip["0002"] = std::round((m_focus - m_focusStepSize * m_focusWooferStep)*1e5)/1e5;
     }
     else if( m_tipmovewhat == MOVE_TEL )
     {
         ip.setDevice( "tcsi" );
         ip.setName( "pyrNudge" );
         ip.add( pcf::IndiElement( "z" ) );
-        ip["z"] = -m_stepSize * 100.;
+        ip["z"] = -m_focusStepSize * m_focusTelStep;
     }
     else
         return;
 
     sendNewProperty( ip );
+
+
 }
 
 void pupilGuide::on_button_focus_scale_pressed()

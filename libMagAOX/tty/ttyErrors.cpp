@@ -1,4 +1,4 @@
-/** \file ttyErrors.cpp 
+/** \file ttyErrors.cpp
   * \brief Error numbers for the tty utilities.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
@@ -7,9 +7,9 @@
 
 #include "ttyErrors.hpp"
 
-namespace MagAOX 
+namespace MagAOX
 {
-namespace tty 
+namespace tty
 {
 
 std::string ttyErrorString( int ec )
@@ -50,7 +50,7 @@ std::string ttyErrorString( int ec )
          return "TTY: no matching device found";
       case TTY_E_BADBAUDRATE:
          return "TTY: bad baud rate specified";
-         
+
       case TELNET_E_GETADDR:
          return "TTY: getaddr failed";
       case TELNET_E_SOCKET:
@@ -70,7 +70,7 @@ std::string ttyErrorString( int ec )
    };
 }
 
-} //namespace tty 
-} //namespace MagAOX 
+} //namespace tty
+} //namespace MagAOX
 
- 
+

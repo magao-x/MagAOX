@@ -2,7 +2,7 @@
 # export diagrams to png with drawio CLI                               #
 ########################################################################
 
-all: png/xwcapp.png png/xwcapp_fsm.png png/xwcapps_connections.png
+all: png/xwcapp.png png/xwcapp_fsm.png png/xwcapps_connections.png png/xwcapp_loops.png png/global_state.png
 
 png/xwcapp.png: xwcapp.drawio
 	drawio -t -f png --export -o png/ xwcapp.drawio
@@ -12,5 +12,11 @@ png/xwcapp_fsm.png: xwcapp_fsm.drawio
 
 png/xwcapps_connections.png: xwcapps_connections.drawio
 	drawio -t -f png --export -o png/ xwcapps_connections.drawio
+
+png/xwcapp_loops.png: xwcapp_loops.drawio
+	drawio -t -f png --export -o png/ xwcapp_loops.drawio
+
+png/global_state.png: global_state.drawio
+	drawio -t -f png --export -o png/ global_state.drawio
 
 #note: no clean.  we commit the pngs so dox can be built without running drawio

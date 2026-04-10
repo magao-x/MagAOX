@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# This script is under version control in the MagAO-X source
+
+echo $1
+echo $2
+echo ${CACAO_LOOPNUMBER}
+
+#zero the gain factors
+milk-shmim-zero "aol${CACAO_LOOPNUMBER}_mgainfact"
+
+hoblockleaks 5 0.98
+
+
+

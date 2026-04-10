@@ -1,10 +1,10 @@
-/** \file H5Utils.hpp 
+/** \file H5Utils.hpp
   * \brief Utilities for HDF5.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * History:
   * - 2017-08-28 created by JRM
-  */ 
+  */
 
 #ifndef utils_H5Utils_hpp
 #define utils_H5Utils_hpp
@@ -13,7 +13,7 @@
 
 namespace MagAOX
 {
-namespace utils 
+namespace utils
 {
 
 struct H5FileT
@@ -62,26 +62,26 @@ struct H5AttributeT
   * set the handle, and the hid_t conversion operator allows this to be passed directly to hdf5 library functions.
   *
   * \note You must never call the raw hdf5 close function (e.g. H5Fclose) on one of these handles.
-  * 
+  *
   * \tparam T is one of the handle types.
-  */ 
+  */
 template<class T>
-class H5Handle 
+class H5Handle
 {
 protected:
    hid_t _hand {0}; ///< The underlying handle.
 
-public: 
+public:
    //Have to define since we're deleting the copy constructor apparently.
    H5Handle(){;}
-   
-   
+
+
    //Prevent copying, which would risk deleting the handle without all copies knowing about it.
-   H5Handle(const H5Handle &) = delete; 
+   H5Handle(const H5Handle &) = delete;
    H5Handle & operator=(const H5Handle &) = delete;
 
-   
-   
+
+
    ///Assignment from a basic hdf5 handle.
    /** Note that if the handle has already been assigned, then it is closed first.
      *
@@ -89,32 +89,32 @@ public:
    hid_t & operator=(const hid_t & hand /**< [in] the basic handle*/)
    {
       if(_hand) close();
-      
+
       _hand = hand;
-      
+
       return _hand; ///\returns a reference to the handle
    }
-   
+
    ///Conversion operator
    operator hid_t()
    {
       return _hand;
    }
-   
+
    ///Close the handle
    /** Calls the close function of the handle type T
      */
    herr_t close()
-   {      
+   {
       if(_hand == 0) return 0;
-      
+
       herr_t rv = T::close(_hand); /// \returns the herr_t code from the hdf5 close function
-      
+
       _hand = 0;
-      
+
       return rv;
    }
-   
+
    ///Destructor.  Calls the close function.
    ~H5Handle()
    {

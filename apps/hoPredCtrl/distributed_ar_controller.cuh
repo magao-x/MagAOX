@@ -14,12 +14,12 @@ class DistributedAutoRegressiveController{
 
 	public:
 		RecursiveLeastSquares* rls;
-		
+
 		Matrix *measurement_buffer;
 		Matrix *command_buffer;
 		Matrix *phi;
 		Matrix *xf;
-		
+
 		Matrix* newest_measurement;
 		Matrix *command;
 		Matrix *delta_command;
@@ -65,7 +65,7 @@ class DistributedAutoRegressiveController{
 		void update_controller();
 
 		void save_controller_state(std::string filename);
-		
+
 		inline Matrix* get_command(){
 			return command;
 		};

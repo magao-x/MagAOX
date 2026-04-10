@@ -128,7 +128,7 @@ namespace Acroname {
             /// \return ::aErrNotFound if no devices were found.
             /// \return ::aErrNone on success.
             static aErr sDiscover(const linkType type,
-                                  list<linkSpec>* devices) 
+                                  list<linkSpec>* devices)
             {
                 return sDiscover(type, sFindAll, devices);
             };
@@ -178,16 +178,16 @@ namespace Acroname {
             /// \return ::aErrNone If the connect was successful.
             aErr connect(void);
 
-            
+
             /// Check to see if a module is connected.
             /// isConnected looks for a connection to an active module.
             /// \return true: connected, false: not connected.
             bool isConnected(void);
-            
+
             /// Check the status of the module connection.
             /// \return linkStatus (see aLink.h for status values)
             linkStatus getStatus(void);
-            
+
 
             /// Disconnect from the BrainStem module.
             /// \return ::aErrResource - If the there is no valid connection.
@@ -195,7 +195,7 @@ namespace Acroname {
             /// communication issue.
             /// \return ::aErrNone If the disconnect was successful.
             aErr disconnect(void);
-            
+
             /// Reset The underlying link stream.
             /// \return ::aErrResource - If the there is no valid connection.
             /// \return ::aErrConnection - If the reset failed, due to a
@@ -208,7 +208,7 @@ namespace Acroname {
             // access routines
             //
             /////////////////////////////////////////////////////////////////////
-            
+
             /// Accessor for link Name.
             /// Returns a pointer to the string representing the link. This string
             /// is part of the link, and will be destroyed with it. If you need access
@@ -238,7 +238,7 @@ namespace Acroname {
             // Send/Receive Packets to/from the Brainstem
             //
             /////////////////////////////////////////////////////////////////////
-            
+
             /// Sends a BrainStem protocol UEI packet on the link.
             /// This is an advanced interface, please see the relevant section of the
             ///  reference manual for more information about UEIs.
@@ -341,13 +341,13 @@ namespace Acroname {
                                uint8_t* length,
                                uint8_t* data);
 
-            
+
             /////////////////////////////////////////////////////////////////////
             //
             // Routines for handling slots at the module
             //
             /////////////////////////////////////////////////////////////////////
-            
+
             /// Loads data into a BrainStem Slot. See the relevant section of the BrainStem
             /// reference for information about BrainStem Slots and Stores.
             /// \param module - Module address.
@@ -419,7 +419,7 @@ namespace Acroname {
                                    const uint8_t store,
                                    const uint8_t slot,
                                    size_t* capacity);
-            
+
             /////////////////////////////////////////////////////////////////////
             //
             // Routines to handle packet logging
@@ -433,14 +433,14 @@ namespace Acroname {
             /// \param logname the path and filename indicating where to write the packet log.
             /// \return aErr returns appropriate errors if it fails to enable the packet log.
             aErr enablePacketLog(const char* logname);
-            
+
             /// Disable Packet logging.
             ///
             /// disable packet logging for this link. Disables the packet log.
             /// \return aErr returns appropriate errors if it fails to disable the debug log.
             aErr disablePacketLog(void);
-            
-            
+
+
         private:
 
             class impl; impl* zit;
@@ -456,7 +456,7 @@ namespace Acroname {
         class aLIBEXPORT Module
         {
         public:
-			
+
             /// Constructor. Implicitly creates a link object with no specifier. Most often objects
             /// created with this constructor will use linkDiscoverAndConnect to find and connect to a module.
             /// \param address The BrainStem network address of the module. The default address
@@ -464,13 +464,13 @@ namespace Acroname {
             /// module's "Defs.h" header.
             /// \param model Acroname model number.
             Module(const uint8_t address, const uint8_t model = 0);
-            
+
             Module(const uint8_t address, bool bAutoNetworking, const uint8_t model = 0);
-            
+
             /// Destructor.
             virtual ~Module(void);
-            
-            
+
+
             /// Connect using the current link specifier.
             /// \param type - Transport on which to search for available BrainStem link
             /// modules. See the \ref linkType "transport" enum for supported transports.
@@ -482,7 +482,7 @@ namespace Acroname {
             /// \return ::aErrNone If the connect was successful.
             aErr connect(const linkType type,
                          const uint32_t serialNum);
-            
+
             /// Connect to a link with a fully defined specifier.
             /// \param linkSpecifier - Connect to module with specifier.
             /// \return ::aErrInitialization - If there is currently no link object.
@@ -491,7 +491,7 @@ namespace Acroname {
             /// \return ::aErrNotFound - if the module cannot be found.
             /// \return ::aErrNone If the connect was successful.
             aErr connectFromSpec(const linkSpec linkSpecifier);
-            
+
             /// A discovery-based connect.
             /// This member function will connect to the first available BrainStem
             /// found on the given transport. If the
@@ -509,7 +509,7 @@ namespace Acroname {
             /// \return ::aErrNone If the connect was successful.
             aErr discoverAndConnect(linkType type,
                                       const uint32_t serialNum = 0);
-            
+
             /// Connect using link from another Module.
             /// This member function will connect to the same BrainStem used by given Module.
             /// If a link module is found on the specified transport, a connection will
@@ -517,15 +517,15 @@ namespace Acroname {
             /// \return ::aErrParam - if the module is undefined.
             /// \return ::aErrNone  - if the connect was successful.
             aErr connectThroughLinkModule(Module* pModule);
-            
-            
+
+
             /// Is the link connected to the BrainStem Module.
             bool isConnected(void);
-            
+
             /// Check the status of the BrainStem module connection.
             /// \return linkStatus (see aLink.h for status values)
             linkStatus getStatus(void);
-            
+
 
             /// Disconnect from the BrainStem module.
             /// \return ::aErrResource - If the there is no valid connection.
@@ -533,7 +533,7 @@ namespace Acroname {
             /// communication issue.
             /// \return ::aErrNone If the disconnect was successful.
             aErr disconnect(void);
-            
+
             /// Reconnect using the current link specifier.
             /// \return ::aErrBusy - if the module is already in use.
             /// \return ::aErrParam - if the specifier is incorrect.
@@ -544,25 +544,25 @@ namespace Acroname {
             /// Get the current link object.
             /// \return The link associated with the module.
             Link* getLink(void) const;
-            
+
 
             /// Accessor to get the address of the BrainStem module associated with the instance
             /// on the host machine.  (Not to be confused with the System entity which effects the
             /// device hardware.)
             /// \return The module address.
             uint8_t getModuleAddress(void) const;
-            
+
             /// Accessor to set the address of the BrainStem module associated with the instance
             /// on the host machine.  (Not to be confused with the System entity which effects the
             /// device hardware.)
             /// \param address The module address.
             void setModuleAddress(const uint8_t address);
-            
+
             /// Get linkSpecifier
             /// \param spec - allocated linkspec struct will be filled with spec.
             /// \return aErrNone - If the module does not have a spec.
             aErr getLinkSpecifier(linkSpec* spec);
-            
+
             /// Queries the module to determine if it implements a UEI. Each
             /// UEI has a command, option or variant, index and flag. The hasUEI method
             /// queries for a fully specified UEI.
@@ -629,7 +629,7 @@ namespace Acroname {
                              const uint8_t index,
                              uint8_t* group);
 
-            
+
             /// Sends a debug packet to the module containing the provided data.
             /// Modules receiving debug packets simply echo the packet back to the sender.
             /// If the round-trip is successful, the reply data will match the data sent.
@@ -642,8 +642,8 @@ namespace Acroname {
             /// \return ::aErrConnection - No active link exists.
             aErr debug(const uint8_t* pData,
                        const uint8_t length);
-            
-            
+
+
             /// Sets the networking mode of the module object.
             /// By default the module object is configure to automatically adjust
             /// its address based on the devices current module address. So that,
@@ -652,12 +652,12 @@ namespace Acroname {
             /// the auto networking mode can be turned off.
             /// \param mode True/1 for Auto Networking, False/0 for manual networking
             void setNetworkingMode(const bool mode);
-            
-            
+
+
             aErr enablePacketLog(const char* packetLogName = "StemDebug");
-            
+
             aErr disablePacketLog(void);
-            
+
 
         private:
             Module();
@@ -665,7 +665,7 @@ namespace Acroname {
             uint8_t m_address;
             bool m_bAutoNetworking;
             uint8_t m_model;
-            
+
             void _autoNetwork(void);
         };
 
@@ -798,7 +798,7 @@ namespace Acroname {
             /// Get the UEI entity index.
             /// \return The 1 byte index of the UEI entity.
             uint8_t getIndex(void) const;
-            
+
             /// Drain all packets matching this UEI from the packet fifo.
             ///
             /// This functionality is useful in rare cases where packet

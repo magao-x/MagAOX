@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+# Script to shutdown the CACTI TIC cacao processes
+#
+# This script is under version control in the MagAO-X source
+
+cpath=$(pwd)
+
+cd /opt/MagAOX/cacao/kilo/kilo-rootdir
+cacao-setup -C kilo
+
+cd $cpath

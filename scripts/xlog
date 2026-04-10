@@ -3,7 +3,7 @@
 set -eo pipefail
 
 #######################################################
-# xlog: make a log entry in the observers log 
+# xlog: make a log entry in the observers log
 #
 #
 #######################################################

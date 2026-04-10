@@ -252,6 +252,41 @@ SCENARIO( "basic INDI Property Element-value rules", "[stateRuleEngine::rules]" 
             REQUIRE(rule1.value() == false);
         }
     }
+
+    GIVEN("time-diff comparison")
+    {
+        pcf::IndiProperty prop1(pcf::IndiProperty::Number);
+        prop1.setDevice("ruleTest");
+        prop1.setName("prop1");
+        prop1.setPerm(pcf::IndiProperty::ReadWrite);
+        prop1.setState(pcf::IndiProperty::Idle);
+        prop1.add(pcf::IndiElement("current"));
+
+        timespec now;
+        clock_gettime(CLOCK_ISIO, &now);
+
+        prop1["current"].setValue(now.tv_sec);
+
+        timeDiffRule rule1;
+
+        rule1.property(&prop1);
+        rule1.element("current");
+
+        WHEN("time is less than target")
+        {
+            rule1.comparison(ruleComparison::Gt);
+            rule1.target(10);
+            REQUIRE(rule1.value() == false);
+        }
+
+        WHEN("time is greater than target")
+        {
+            sleep(5); //make sure
+            rule1.comparison(ruleComparison::Gt);
+            rule1.target(3);
+            REQUIRE(rule1.value() == true);
+        }
+    }
 }
 
 SCENARIO( "INDI element comparison", "[stateRuleEngine::rules]" )
@@ -499,7 +534,7 @@ SCENARIO( "basic rule comparisons", "[stateRuleEngine::rules]" )
     }
 }
 
-SCENARIO( "compound rule compariaons", "[stateRuleEngine::rules]" )
+SCENARIO( "compound rule comparisons", "[stateRuleEngine::rules]" )
 {
     GIVEN("(A && B) || C")
     {

@@ -22,6 +22,10 @@ using namespace mx::sys::tscomp;
 #include <flatlogs/flatlogs.hpp>
 #include "../file/stdFileName.hpp"
 
+#ifndef DEBUG_CRUMB
+#define DEBUG_CRUMB(msg) {std::cerr << msg << '(' << __FILE__ << ' ' << __LINE__ << "\n";}
+#endif
+
 namespace MagAOX
 {
 namespace logger
@@ -58,6 +62,8 @@ struct logMap
 
     /// The app-name to buffer map type, for looking up the currently loaded logs for a given app.
     typedef std::map<std::string, logInMemory> appToBufferMapT;
+
+    int m_searchDaySpan {100}; ///< Maximum number of days to search for files in the past/future.
 
     appToFileMapT m_appToFileMap;
 
@@ -216,7 +222,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
 
     int ndays = 0;
 
-    while( prevLogFound == false && ndays < 5 ) // 5 is a config setting
+    while( prevLogFound == false && ndays < m_searchDaySpan )
     {
         ++ndays;
 
@@ -269,6 +275,8 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
                 prevLogFound  = true;
                 prevLogSubDir = subdir;
                 prevLogFile_n = n;
+
+                std::cerr << "found previous log: " << tmp_flist[n] << '\n';
                 break;
             }
         } // iteration over tmp_flist
@@ -289,7 +297,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
 
     ndays = 0;
 
-    while( follLogFound == false && ndays < 5 ) // 5 is a config setting
+    while( follLogFound == false && ndays < m_searchDaySpan )
     {
         try
         {
@@ -363,11 +371,28 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
         follLogSubDir = lastFile.subDir( &errc );
         mx_error_check_code( errc );
 
+        DEBUG_CRUMB("checking for: " + basedir + follLogSubDir.path());
+
+        bool exists = mx::ioutils::dir_exists_is(basedir + follLogSubDir.path(), errc);
+
+        int n =0;
+        while(!exists && n < m_searchDaySpan)
+        {
+            follLogSubDir.subDay();
+
+            DEBUG_CRUMB("checking for: " + basedir + follLogSubDir.path());
+
+            exists = mx::ioutils::dir_exists_is(basedir + follLogSubDir.path(), errc);
+            ++n;
+        }
+
         follLogFile_n = static_cast<size_t>( -1 );
     }
 
     if( prevLogSubDir == follLogSubDir ) // special case, probably most common
     {
+        DEBUG_CRUMB("prevLogSubDir == follLogSubDir");
+
         try
         {
             #ifdef XWCTEST_LOGMAP_LATFM_BADALL3
@@ -404,6 +429,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
     }
     else
     {
+        std::cerr << "prevLogSubDir != follLogSubDir\n";
         try
         {
             // clang-format off
@@ -479,23 +505,34 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
 
             std::vector<std::string> tmp_flist;
 
+            /*mx::error_t errc = mx::ioutils::getFileNames( tmp_flist, basedir + subdir.path(), dev, "", ext );
+            if(errc != mx::error_t::dirnotfound)
+            {
+                return mx::error_report<verboseT>(errc);
+            }*/
+
             mx_error_check( mx::ioutils::getFileNames( tmp_flist, basedir + subdir.path(), dev, "", ext ) );
 
-            if( follLogFile_n == static_cast<size_t>( -1 ) )
-            {
-                follLogFile_n = tmp_flist.size();
-            }
-            else
-            {
-                ++follLogFile_n;
-                if( follLogFile_n > tmp_flist.size() )
-                {
-                    return mx::error_report<verboseT>( mx::error_t::sizeerr,
-                                                       "miscounted the number of files somewhere" );
-                }
-            }
 
-            mx_error_check( addFileListToFileMap( dev, tmp_flist, 0, follLogFile_n ) );
+            if(errc == mx::error_t::noerror)
+            {
+
+                if( follLogFile_n == static_cast<size_t>( -1 ) )
+                {
+                    follLogFile_n = tmp_flist.size();
+                }
+                else
+                {
+                    ++follLogFile_n;
+                    if( follLogFile_n > tmp_flist.size() )
+                    {
+                        return mx::error_report<verboseT>( mx::error_t::sizeerr,
+                                                       "miscounted the number of files somewhere" );
+                    }
+                }
+
+                mx_error_check( addFileListToFileMap( dev, tmp_flist, 0, follLogFile_n ) );
+            }
         }
         catch( ... )
         {
@@ -515,9 +552,7 @@ int logMap<verboseT>::getPriorLog( char                      *&logBefore,
 {
     flatlogs::eventCodeT evL;
 
-#ifdef DEBUG
-    std::cerr << __FILE__ << " " << __LINE__ << "\n";
-#endif
+    DEBUG_CRUMB("");
 
     if( m_appToFileMap[appName].size() == 0 )
     {
@@ -525,9 +560,7 @@ int logMap<verboseT>::getPriorLog( char                      *&logBefore,
         return -1;
     }
 
-#ifdef DEBUG
-    std::cerr << __FILE__ << " " << __LINE__ << "\n";
-#endif
+    DEBUG_CRUMB("");
 
     logInMemory &lim = m_appToBufferMap[appName];
 
@@ -535,9 +568,7 @@ int logMap<verboseT>::getPriorLog( char                      *&logBefore,
     et.time_s += 30;
     if( lim.m_startTime > ts || et < ts )
     {
-#ifdef DEBUG
-        std::cerr << __FILE__ << " " << __LINE__ << "\n";
-#endif
+        DEBUG_CRUMB("");
 
         if( loadFiles( appName, ts ) < 0 )
         {
@@ -551,13 +582,18 @@ int logMap<verboseT>::getPriorLog( char                      *&logBefore,
     if( hint )
     {
         if( flatlogs::logHeader::timespec( hint ) <= ts )
+        {
             buffer = hint;
+        }
         else
+        {
             buffer = lim.m_memory.data();
+        }
     }
-
     else
+    {
         buffer = lim.m_memory.data();
+    }
 
     priorBuffer = buffer;
     evL         = flatlogs::logHeader::eventCode( buffer );

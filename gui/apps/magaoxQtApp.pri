@@ -22,4 +22,7 @@ exists( $$(CONDA_PREFIX)/lib ) {
     INCLUDEPATH += $$(CONDA_PREFIX)/lib
 }
 
+CONFIG += link_pkgconfig
+PKGCONFIG += mxlib
+
 MAKEFILE = makefile.$${TARGET}

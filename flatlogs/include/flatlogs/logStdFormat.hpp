@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup flatlogs_files
-  * 
+  *
   * History:
   * - 2017-12-24 created by JRM
   * - 2018-08-18 moved to flatlogs
@@ -52,7 +52,7 @@ iosT & jsonFormat( iosT & ios, ///< [out] the iostream to output the log too
 
 
 /// Worker function that formats a log into the standard text representation.
-/** 
+/**
   *
   * \ingroup logformat
   */
@@ -69,12 +69,12 @@ iosT & stdFormat( iosT & ios, ///< [out] the iostream to output the log too
    logHeader::extractBasicLog( prio, ec, ts, len, logBuffer);
 
    ios << ts.ISO8601DateTimeStrX() << " " << priorityString(prio) << " " << logT::msgString(logHeader::messageBuffer(logBuffer) , len);
-   
+
    return ios;
 }
 
 /// Worker function that formats a log into the standard text representation with short timespec.
-/** 
+/**
   *
   * \ingroup logformat
   */
@@ -92,7 +92,7 @@ iosT & stdShortFormat( iosT & ios, ///< [out] the iostream to output the log to
    logHeader::extractBasicLog( prio, ec, ts, len, logBuffer);
 
    std::string outApp;
-   
+
    if(appName.size() > 15)
    {
       outApp.resize(17, ' ');
@@ -109,15 +109,15 @@ iosT & stdShortFormat( iosT & ios, ///< [out] the iostream to output the log to
       outApp += ":";
       outApp += std::string( 15-appName.size(), ' ');
    }
-      
-   
+
+
    ios << outApp << " " << ts.secondStrX() << " " << priorityString(prio) << " " << logT::msgString(logHeader::messageBuffer(logBuffer) , len);
-   
+
    return ios;
 }
 
 /// Worker function that formats a log into the standard text representation.
-/** 
+/**
   *
   * \ingroup logformat
   */
@@ -134,7 +134,7 @@ iosT & minFormat( iosT & ios, ///< [out] the iostream to output the log too
    logHeader::extractBasicLog( prio, ec, ts, len, logBuffer);
 
    ios << priorityString(prio) << " " << logT::msgString(logHeader::messageBuffer(logBuffer) , len);
-   
+
    return ios;
 }
 

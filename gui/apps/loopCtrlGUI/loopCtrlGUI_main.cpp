@@ -6,10 +6,10 @@
 
 #include "loopCtrl.hpp"
 
-   
+
 #include "multiIndiManager.hpp"
-   
-   
+
+
 int main(int argc, char *argv[])
 {
    if(argc < 2)
@@ -17,9 +17,9 @@ int main(int argc, char *argv[])
       std::cerr << "Must specify loop INDI name.\n";
       return -1;
    }
-   
+
    std::string procName = argv[1];
-   
+
    QApplication app(argc, argv);
 
    // set stylesheet
@@ -36,10 +36,10 @@ int main(int argc, char *argv[])
    mgr.activate();
 
    loop.show();
-   
+
    int rv = app.exec();
-   
-   
+
+
    return rv;
 }
-   
+

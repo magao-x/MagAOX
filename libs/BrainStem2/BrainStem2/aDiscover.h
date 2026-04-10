@@ -69,7 +69,7 @@ typedef struct linkSpec {
     uint32_t model; /**< The model type */
     /** @} */
 
-    
+
     /** \name Transport Specifics
      *
      * The transport specifics are contained in a union named \ref t.

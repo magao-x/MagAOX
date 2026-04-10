@@ -30,7 +30,7 @@ namespace app
 {
 
 /// The MagAO-X xxxxxxxx
-/** 
+/**
   * \ingroup alignLoop
   */
 class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>
@@ -67,7 +67,7 @@ protected:
    std::string m_upstreamProperty {"loop_state"};
    bool m_upstreamFollowClosed {false};
 
-   
+
    ///@}
 
    mx::improc::eigenImage<float> m_intMat;
@@ -108,14 +108,14 @@ public:
    virtual int appStartup();
 
    /// Implementation of the FSM for alignLoop.
-   /** 
+   /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
    virtual int appLogic();
 
    /// Shutdown the app.
-   /** 
+   /**
      *
      */
    virtual int appShutdown();
@@ -124,14 +124,14 @@ public:
 
    // shmimMonitor interface:
    int allocate( const dev::shmimT &);
-   
+
    int processImage( void* curr_src,
                      const dev::shmimT &
                     );
 
    int sendCommands(std::vector<float> & commands);
-   
-   //INDI 
+
+   //INDI
 
    pcf::IndiProperty m_indiP_deltas;
 
@@ -150,13 +150,13 @@ public:
 
    int m_upstreamState {0};
    pcf::IndiProperty m_indiP_upstream; ///< Property used to report the loop state
-   
+
    INDI_SETCALLBACK_DECL(alignLoop, m_indiP_upstream);
 };
 
 alignLoop::alignLoop() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   
+
    return;
 }
 
@@ -245,14 +245,14 @@ int alignLoop::appStartup()
 
    createStandardIndiNumber<unsigned>( m_indiP_ggain, "loop_gain", 0, 1, 0, "%0.2f");
    m_indiP_ggain["current"] = m_ggain;
-   m_indiP_ggain["target"] = m_ggain;  
+   m_indiP_ggain["target"] = m_ggain;
    if( registerIndiPropertyNew( m_indiP_ggain, INDI_NEWCALLBACK(m_indiP_ggain)) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
       return -1;
    }
 
-   createStandardIndiToggleSw( m_indiP_ctrlEnabled, "loop_state");  
+   createStandardIndiToggleSw( m_indiP_ctrlEnabled, "loop_state");
    if( registerIndiPropertyNew( m_indiP_ctrlEnabled, INDI_NEWCALLBACK(m_indiP_ctrlEnabled)) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
@@ -267,7 +267,7 @@ int alignLoop::appStartup()
    {
       registerIndiPropertySet( m_indiP_ctrl[n], m_ctrlDevices[n], m_ctrlProperties[n], &st_setCallBack_ctrl);
    }
-   
+
    m_commands.resize(m_ctrlTargets.size(), m_ctrlTargets.size()) ;
    m_commands.setZero();
 
@@ -279,8 +279,8 @@ int alignLoop::appStartup()
    m_intMat(0,1) = 0.926;
 
 /*
-   std::string intMatPath = m_calibDir + "/" + m_intMatFile; 
- 
+   std::string intMatPath = m_calibDir + "/" + m_intMatFile;
+
    mx::fits::fitsFile<float> ff;
    try
    {
@@ -333,7 +333,7 @@ int alignLoop::appShutdown()
 int alignLoop::toggleLoop(bool onoff)
 {
    if(!m_ctrlEnabled && onoff) //not enabled so change
-   {      
+   {
       m_ctrlEnabled = true;
       log<loop_closed>();
       updateSwitchIfChanged(m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::On, INDI_OK);
@@ -345,7 +345,7 @@ int alignLoop::toggleLoop(bool onoff)
       m_ctrlEnabled = false;
       log<loop_open>();
       updateSwitchIfChanged(m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::Off, INDI_IDLE);
-   
+
       return 0;
    }
 
@@ -356,12 +356,12 @@ inline
 int alignLoop::allocate(const dev::shmimT & dummy)
 {
    static_cast<void>(dummy);
-   
+
    std::lock_guard<std::mutex> guard(m_indiMutex);
 
    std::cerr << shmimMonitorT::m_width << shmimMonitorT::m_height << "\n";
    m_measurements.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
-   
+
    return 0;
 }
 
@@ -371,7 +371,7 @@ int alignLoop::processImage( void* curr_src,
                            )
 {
    static_cast<void>(dummy);
-   
+
    for(unsigned nn=0; nn < shmimMonitorT::m_width*shmimMonitorT::m_height; ++nn)
    {
       m_measurements.data()[nn] = (static_cast<float*>(curr_src)) [nn];
@@ -392,7 +392,7 @@ int alignLoop::processImage( void* curr_src,
 
    m_commands.matrix() = m_intMat.matrix() * m_measurements.matrix();
 
-   
+
 
    std::cout << "delta commands:    ";
    for(int cc = 0; cc < m_measurements.rows(); ++cc)
@@ -411,14 +411,14 @@ int alignLoop::processImage( void* curr_src,
       std::cout << commands[cc] << " ";
    }
    std::cout << "\n";
-  
+
    //And send commands.
    int rv;
    if(m_ctrlEnabled)
    {
       rv = sendCommands(commands);
    }
-   else 
+   else
    {
       rv = 0;
    }
@@ -433,12 +433,12 @@ int alignLoop::sendCommands(std::vector<float> & commands)
    for(size_t n=0; n < m_ctrlDevices.size(); ++n)
    {
       pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
+
       ip.setDevice(m_ctrlDevices[n]);
       ip.setName(m_ctrlProperties[n]);
       ip.add(pcf::IndiElement(m_ctrlTargets[n]));
       ip[m_ctrlTargets[n]] = commands[n];
-   
+
       sendNewProperty(ip);
    }
 
@@ -452,22 +452,22 @@ INDI_NEWCALLBACK_DEFN(alignLoop, m_indiP_ggain)(const pcf::IndiProperty &ipRecv)
       log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
    }
-   
+
    float target;
-   
+
    if( indiTargetUpdate( m_indiP_ggain, target, ipRecv, true) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
       return -1;
    }
-   
+
    m_ggain = target;
-   
+
    updateIfChanged(m_indiP_ggain, "current", m_ggain);
    updateIfChanged(m_indiP_ggain, "target", m_ggain);
-   
+
    log<text_log>("set global gain to " + std::to_string(m_ggain), logPrio::LOG_NOTICE);
-   
+
    return 0;
 }
 
@@ -490,7 +490,7 @@ INDI_NEWCALLBACK_DEFN(alignLoop, m_indiP_ctrlEnabled)(const pcf::IndiProperty &i
    {
       return toggleLoop(false);
    }
-   
+
    return 0;
 }
 

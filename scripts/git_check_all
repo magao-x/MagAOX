@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-source /etc/profile.d/magaox_role.sh  
+source /etc/profile.d/magaox_role.sh
 if [[ $USER != xsup ]]; then
   /usr/bin/sudo -H -u xsup $0 "$@"
   exit

@@ -7,7 +7,7 @@ RecursiveLeastSquares::RecursiveLeastSquares(cublasHandle_t* new_handle, int num
 	// A = make_random_matrix(1e-7, num_predictors, num_features, batch_size);
 	A = new Matrix(0.0, num_predictors, num_features, batch_size);
 	P = make_identity_matrix_from_scalar(P0, num_features, batch_size);
-	
+
 	gamma = forgetting_factor;
 	_initial_covariance = P0;
 	_num_features = num_features;
@@ -54,9 +54,9 @@ void RecursiveLeastSquares::reset(){
 	err->set_to_zero();
 	xtP->set_to_zero();
 	cn->set_to_zero();
-	
+
 	// delete P;
-	// P = make_identity_matrix_from_scalar(P0, num_features, batch_size);		
+	// P = make_identity_matrix_from_scalar(P0, num_features, batch_size);
 	P->set_to_zero();
 	set_identity_matrix(P, _initial_covariance, _num_features, _batch_size);
 }
@@ -64,14 +64,14 @@ void RecursiveLeastSquares::reset(){
 
 void RecursiveLeastSquares::update(Matrix *x, Matrix *y){
 	// Total time ~	0.275 ms
-	
+
 	// This seems to take 0.03ms on average
 	x->dot(P, xtP, 1.0, 0.0, CUBLAS_OP_T, CUBLAS_OP_N);
 
 	// calculate the gain vector
 	// 0.248328 -> 0.22522 = 0.0231
 	xtP->dot(x, cn);
-	
+
 	// The computation time is within the error of 0.005
 	cn->add(gamma_vec);
 	xtP->divide_by_scalar(cn, K);

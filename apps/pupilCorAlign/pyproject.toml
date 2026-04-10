@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pupilCorAlign"
+description = "Automatic pupil alignment for coronagraph"
+version = "2025.11.28"
+dependencies = [
+  "xconf",
+  "purepyindi2",
+]
+authors = [
+  {name = "Sebastiaan Haffert", email = "haffert@strw.leidenuniv.nl"},
+]
+
+[project.scripts]
+pupilCorAlign = "xapp.pupilCorAlign:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["xapp*"]

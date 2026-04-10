@@ -9,7 +9,7 @@ from generateTemplatedCatch2Tests import *
 import json
 
 '''
-command line options: 
+command line options:
     -n number of flatlog types to include
     -e entropy number. how many flatlogs will be created and checked
 Future add:
@@ -26,10 +26,10 @@ except ModuleNotFoundError:
 
 
 def usage():
-    print("Usage: python3 ./generateEntropyTests.py\n" + 
-          "-n <number of types>\n" + 
-          "-e <entropy>\n" + 
-          "-s <random seed>\n" + 
+    print("Usage: python3 ./generateEntropyTests.py\n" +
+          "-n <number of types>\n" +
+          "-e <entropy>\n" +
+          "-s <random seed>\n" +
           "-f <flatlog types to use>")
     exit(0)
 
@@ -40,12 +40,12 @@ def main():
     nTypes = 2
     desiredTypes = []
 
-    # path to .hpp files 
+    # path to .hpp files
     typesFolderPath = "./../types"
     typesFolderPath = os.path.abspath(
         os.path.join(os.path.dirname(__file__), typesFolderPath)
     )
-    
+
     # path to gen tests
     genTestsFolderPath = "./generated_tests"
     genTestsFolderPath = os.path.abspath(
@@ -59,8 +59,8 @@ def main():
         exit(0)
     allTypes.sort()
 
-    # get opt 
-    try: 
+    # get opt
+    try:
         opts, args = getopt.getopt(sys.argv[1:], "n:e:s:f:")
     except getopt.GetoptError:
         usage()
@@ -120,7 +120,7 @@ def main():
     # randomly select remaining nTypes
     for _ in range(nTypes - len(desiredTypes)):
 
-        randomIdx = random.randint(0, len(allTypes) - 1) 
+        randomIdx = random.randint(0, len(allTypes) - 1)
         testTypes.append(allTypes[randomIdx])
 
         del allTypes[randomIdx]
@@ -159,16 +159,16 @@ def main():
     for _ in range(entropy):
 
         for type in typesInfoList:
-            
+
             objName    = f"{type["classVarName"]}_{objCount}"
             initObjStr = f"{type["className"]}_0 {objName} = {type["className"]}_0("
 
             for field in type["messageTypes"][0]:
-                
+
                 # make test variable
                 testValName = f"{type["classVarName"]}{field["name"].capitalize()}_{str(totalFieldCount).rjust(8, '0')}"
 
-                initObjStr += f"(char *) {testValName}, " if "char *" in field["type"] else f"{testValName}, " 
+                initObjStr += f"(char *) {testValName}, " if "char *" in field["type"] else f"{testValName}, "
                 if field == type["messageTypes"][0][-1]:
                     initObjStr = initObjStr[:-2] + ");"  # remove comma if last member of class
 
@@ -178,18 +178,18 @@ def main():
                 # make catch 2 assertion
                 if "char *" in field["type"]:
                     catchAssertStr = f"REQUIRE(strcmp({objName}.m_{field["name"]}, {testValName}) == 0);"
-                else: 
+                else:
                     catchAssertStr = f"REQUIRE({objName}.m_{field["name"]} == {testValName});"
                 catchAsserts.append(catchAssertStr)
 
                 totalFieldCount += 1
-            
+
             catchAsserts.append(f"REQUIRE({objName}.m_verify);")
             initObjStr = initObjStr[:-2] if (len(type["messageTypes"][0]) != 0) else initObjStr
             initObjStr += ");"
             objectCtors.append(initObjStr)
             objCount += 1
-    
+
     jinjaDict = dict()
     jinjaDict["types"]         = typesInfoList
     jinjaDict["seedOpt"]       = seed
@@ -199,11 +199,11 @@ def main():
     jinjaDict["objectCtors"]   = objectCtors
     jinjaDict["catchAsserts"]  = catchAsserts
     jinjaDict["testVariables"] = testVariables
-    
+
 
     # print(json.dumps(jinjaDict, indent=4))
 
-    # render 
+    # render
     renderedTest = testTemplate.render(jinjaDict)
 
     # generated tests output path
@@ -215,7 +215,7 @@ def main():
     # make directory if it doesn't exist
     pathlib.Path(outFolderPath).mkdir(exist_ok=True)
 
-    # write out file 
+    # write out file
     outFilename = f"generated_test_e{entropy}_n{nTypes}.cpp"
     outPath = os.path.abspath(
         os.path.join(outFolderPath, outFilename)

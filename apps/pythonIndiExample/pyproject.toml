@@ -3,13 +3,23 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pythonIndiExample"
+name = "xapp-pythonIndiExample"
 description = "Python INDI device implementation example"
-version = "2023.12.21"
-
+version = "2025.11.30"
+dependencies = [
+  "xconf",
+  "purepyindi2",
+]
 authors = [
-  {name = "Joseph D. Long", email = "me@joseph-long.com"},
+  {name = "MagAO-X Team", email = "lynx@magao-x.org"},
 ]
 
 [project.scripts]
-pythonIndiExample = "pythonIndiExample:pythonIndiExample.console_app"
+pythonIndiExample = "xapp.pythonIndiExample:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["xapp*"]
+
+[tool.setuptools.package-data]
+"xapp.pythonIndiExample" = ["refdata/*"]

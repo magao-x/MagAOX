@@ -1,7 +1,7 @@
 /** \file ttyUSB.hpp
  * \author Jared R. Males
  * \brief Find the details for USB serial devices
- * 
+ *
  * \ingroup tty_files
  *
  */
@@ -24,8 +24,8 @@ namespace tty
   * \returns TTY_E_NODEVNAMES if no device names found in sys
   * \returns TTY_E_UDEVNEWFAILED if initializing libudev failed.
   * \returns TTY_E_DEVNOTFOUND if no matching device found.
-  * 
-  * \ingroup tty 
+  *
+  * \ingroup tty
   */
 int ttyUSBDevName( std::string & devName,       ///< [out] the /dev/ttyUSBX device name.
                    const std::string & vendor,  ///< [in] the 4-digit vendor identifier.
@@ -39,8 +39,8 @@ int ttyUSBDevName( std::string & devName,       ///< [out] the /dev/ttyUSBX devi
   * \returns TTY_E_NODEVNAMES if no device names found in sys
   * \returns TTY_E_UDEVNEWFAILED if initializing libudev failed.
   * \returns TTY_E_DEVNOTFOUND if no matching device found.
-  * 
-  * \ingroup tty 
+  *
+  * \ingroup tty
   */
 int ttyUSBDevNames( std::vector<std::string> & devNames, ///< [out] the /dev/ttyUSBX device names for all matching devices.
                     const std::string & vendor,           ///< [in] the 4-digit vendor identifier.

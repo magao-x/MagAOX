@@ -1,0 +1,10 @@
+namespace MagAOX.logger;
+
+table Telem_flowrpm_fb
+{
+   flowRate:double;
+   age:double;
+   valid:bool;
+}
+
+root_type Telem_flowrpm_fb;

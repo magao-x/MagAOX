@@ -48,7 +48,7 @@ static unsigned char lsb_crc8(unsigned char *data_in, unsigned int len, const un
   unsigned char i;
   unsigned char crc = 0;
 
-  for (i = 0; i < len; i++) 
+  for (i = 0; i < len; i++)
   {
     crc ^= *(data_in + i);
     unsigned char bit_counter = 8;

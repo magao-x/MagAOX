@@ -116,6 +116,7 @@ public:
    virtual void onDisconnect();
 
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
    void enablePicoButtons();
@@ -484,6 +485,20 @@ void coronAlign::handleDefProperty( const pcf::IndiProperty & ipRecv)
    }
 
    return;
+}
+
+void coronAlign::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
+   std::string dev = ipRecv.getDevice();
+   if( dev == "picomotors" ||
+       dev == "fwpupil" ||
+       dev == "fwlyot" ||
+       dev == "fwfpm" ||
+       dev == "stagepiaa" ||
+       dev == "stageipiaa" )
+   {
+      onDisconnect();
+   }
 }
 
 void coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)

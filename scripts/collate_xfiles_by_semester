@@ -1,0 +1,97 @@
+#!/usr/bin/env python
+import pathlib
+import datetime
+import logging
+from collections import namedtuple
+
+from magaox.utils import XFile, parse_xname
+
+run_ts = datetime.datetime.now().replace(tzinfo=timezone.utc).strftime("%Y-%m-%dT%H%M%S")
+outfile = f'organize_xfiles_{run_ts}.log'
+log = logging.getLogger('organize_xfiles')
+fmt = logging.Formatter('%(asctime)s %(levelname)-8s %(name)-15s %(message)s')
+stderr_stream = logging.StreamHandler()
+stderr_stream.setFormatter(fmt)
+log_to_file = logging.FileHandler(outfile)
+log_to_file.setFormatter(fmt)
+log.addHandler(stderr_stream)
+log.addHandler(log_to_file)
+log.setLevel(logging.DEBUG)
+log.debug(f"Logging to {outfile}")
+
+EXISTING_DIRS: set[pathlib.Path] = set()
+
+def construct_output_dir(xfile: XFile, output_root: pathlib.Path, dry_run: bool) -> pathlib.Path:
+    is_a_semester = (xfile.year, xfile.month, xfile.day) < (xfile.year, 6, 15)
+    if is_a_semester:
+        semester_name = f"{xfile.year}A"
+    else:
+        semester_name = f"{xfile.year}B"
+
+    outdir: pathlib.Path = output_root / xfile.devname / f"{xfile.year}_{xfile.month}_{xfile.day}"
+    if not (outdir in EXISTING_DIRS or outdir.is_dir()):
+        if dry_run:
+            log.debug(f"Would have created destination directory: {outdir}")
+        else:
+            outdir.mkdir(parents=True, exist_ok=True)
+    else:
+        log.debug(f"Would reuse destination directory: {outdir}")
+
+    EXISTING_DIRS.add(outdir)
+    return outdir
+
+def handle_xfile(source_path: pathlib.Path, xfile: XFile, role: str, root_dir: pathlib.Path, dry_run: bool):
+    outdir = construct_output_dir(xfile, output_root, dry_run=dry_run)
+    copy_if_needed(xfile, dry_run=dry_run)
+
+def handle_other_file(source_path: pathlib.Path, role: str, root_dir: pathlib.Path, relative_path: pathlib.Path, dry_run: bool):
+    outdir = construct_output_dir(xfile, output_root, dry_run=dry_run)
+    copy_if_needed(xfile, dry_run=dry_run)
+
+def visit_root_dir(role: str, root_dir: pathlib.Path, dry_run: bool):
+    for root, dirs, files in root_dir.walk():
+        assert isinstance(root, pathlib.Path)
+        log.debug(f"Walking {root_dir}: {root}: {len(dirs)} dirs, {len(files)} files")
+        for fn in files:
+            source_path: pathlib.Path = root / fn
+            try:
+                # check if files are xfiles or other files
+                xfile = parse_xname(fn)
+                handle_xfile(source_path, xfile, role, root_dir, dry_run=dry_run)
+            except ValueError:
+                relative_path = root.relative_to(root_dir)
+                handle_other_file(source_path, role, root_dir, relative_path, dry_run)
+
+def main(role: str, root_dir_str, dry_run: bool):
+    root_dir = pathlib.Path(root_dir_str)
+    if not root_dir.is_dir():
+        log.error(f"{root_dir_str} does not exist or is not a directory")
+        return 1
+    # construct subdir roots
+    all_subdir_roots = [root_dir / name for name in BASE_DIR_NAMES]
+    # prune any that are not present
+    subdir_roots = []
+    for root_dir in all_subdir_roots:
+        if not root_dir.is_dir():
+            log.warn(f"Didn't find a {root_dir} directory, skipping")
+        else:
+            log.info(f"Will visit {root_dir}")
+            subdir_roots.append(root_dir)
+
+    for root_dir in subdir_roots:
+        visit_root_dir(role, root_dir, dry_run=dry_run)
+
+    # recursively walk
+    return 0
+
+if __name__ == "__main__":
+    import sys
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('ROLE_ROOT_DIR')
+    parser.add_argument('--role', required=True)
+    parser.add_argument('--apply-changes', action='store_true')
+    args = parser.parse_args()
+    dry_run = not args.apply_changes
+    print(args)
+    sys.exit(main(args.role, args.ROLE_ROOT_DIR, dry_run=args.dry_run))

@@ -35,7 +35,6 @@
 #undef XWCTEST_NAMESPACE
 #undef XWCTEST_MAGAOXAPP_EXEC_NORM
 
-
 namespace libXWCTest
 {
 namespace appTest
@@ -43,7 +42,7 @@ namespace appTest
 
 /** \defgroup app_unit_test libXWC::app Unit Tests
  * \ingroup unit_test
-*/
+ */
 
 /** \defgroup MagAOXApp_unit_test MagAOXApp Unit Tests
  * \ingroup app_unit_test
@@ -80,10 +79,9 @@ TEST_CASE( "MagAOXApp 2nd instance", "[app::MagAOXApp]" )
         REQUIRE( caught == true );
     }
 
-    #ifdef XWCTEST_DOXYGEN_REF_PROTECTED
-    MagAOX::app::MagAOXApp<true> app("", true);
-    #endif
-
+#ifdef XWCTEST_DOXYGEN_REF_PROTECTED
+    MagAOX::app::MagAOXApp<true> app( "", true );
+#endif
 }
 
 /// MagAOXApp INDI NewProperty
@@ -131,18 +129,91 @@ SCENARIO( "MagAOXApp INDI NewProperty", "[app::MagAOXApp]" )
         }
     }
 
-    #ifdef XWCTEST_DOXYGEN_REF_PROTECTED
-    MagAOX::app::MagAOXApp<true> app("", true);
+#ifdef XWCTEST_DOXYGEN_REF_PROTECTED
+    MagAOX::app::MagAOXApp<true> app( "", true );
     app.configName();
     pcf::IndiProperty prop;
-    app.registerIndiPropertyNew( prop,
-                                 "nprop",
-                                         pcf::IndiProperty::Number,
-                                         pcf::IndiProperty::ReadWrite,
-                                         pcf::IndiProperty::Idle,
-                                         callback );
-    app.handleNewProperty(prop);
-    #endif
+    app.registerIndiPropertyNew(
+        prop, "nprop", pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle, callback );
+    app.handleNewProperty( prop );
+#endif
+}
+
+/// Setting defaults
+/**
+ * \ingroup MagAOXApp_unit_test
+ */
+TEST_CASE( "MagAOXApp INDI SetProperty retry backoff", "[app::MagAOXApp]" )
+{
+    using namespace std::chrono;
+
+    MagAOXApp_test app;
+
+    pcf::IndiProperty prop;
+    REQUIRE( app.registerIndiPropertySet( prop, "publisher", "property", callback ) == 0 );
+
+    std::string key = app.setPropertyKey( prop );
+
+    auto now = steady_clock::now();
+
+    REQUIRE( app.shouldRequestSetProperty( key, false, now ) == true );
+
+    app.noteSetPropertyRequested( key, now );
+    REQUIRE( app.setPropertyRetryCount( key ) == 1 );
+    REQUIRE( app.setPropertyRetryDelay( key ) == seconds( 1 ) );
+    REQUIRE( app.shouldRequestSetProperty( key, false, now ) == false );
+    REQUIRE( app.shouldRequestSetProperty( key, false, now + seconds( 1 ) ) == true );
+
+    app.noteSetPropertyRequested( key, now + seconds( 1 ) );
+    REQUIRE( app.setPropertyRetryCount( key ) == 2 );
+    REQUIRE( app.setPropertyRetryDelay( key ) == seconds( 2 ) );
+    REQUIRE( app.shouldRequestSetProperty( key, false, now + seconds( 2 ) ) == false );
+    REQUIRE( app.shouldRequestSetProperty( key, false, now + seconds( 3 ) ) == true );
+
+    app.noteSetPropertyRequested( key, now + seconds( 3 ) );
+    app.noteSetPropertyRequested( key, now + seconds( 7 ) );
+    app.noteSetPropertyRequested( key, now + seconds( 15 ) );
+    app.noteSetPropertyRequested( key, now + seconds( 31 ) );
+    REQUIRE( app.setPropertyRetryDelay( key ) == seconds( 32 ) );
+    REQUIRE( app.setPropertyMissingLogged( key ) == false );
+
+    app.noteSetPropertyRequested( key, now + seconds( 63 ) );
+    REQUIRE( app.setPropertyRetryDelay( key ) == seconds( 60 ) );
+    REQUIRE( app.setPropertyMissingLogged( key ) == true );
+
+    app.noteSetPropertyRequested( key, now + seconds( 123 ) );
+    REQUIRE( app.setPropertyRetryDelay( key ) == seconds( 60 ) );
+    REQUIRE( app.setPropertyRetryCount( key ) == 8 );
+}
+
+TEST_CASE( "MagAOXApp INDI SetProperty retry reset", "[app::MagAOXApp]" )
+{
+    using namespace std::chrono;
+
+    MagAOXApp_test app;
+
+    pcf::IndiProperty prop;
+    REQUIRE( app.registerIndiPropertySet( prop, "publisher", "property", callback ) == 0 );
+
+    std::string key = app.setPropertyKey( prop );
+
+    auto now = steady_clock::now();
+
+    app.noteSetPropertyRequested( key, now );
+    app.noteSetPropertyRequested( key, now + seconds( 1 ) );
+
+    REQUIRE( app.setPropertyRetryCount( key ) == 2 );
+    REQUIRE( app.setPropertyRetryDelay( key ) == seconds( 2 ) );
+
+    app.resetSetPropertyRetry( key );
+    REQUIRE( app.setPropertyRetryCount( key ) == 0 );
+    REQUIRE( app.setPropertyRetryDelay( key ) == steady_clock::duration::zero() );
+    REQUIRE( app.setPropertyMissingLogged( key ) == false );
+    REQUIRE( app.shouldRequestSetProperty( key, false, now ) == true );
+
+    app.markSetPropertyReceived( key, true );
+    REQUIRE( app.shouldRequestSetProperty( key, false, now ) == false );
+    REQUIRE( app.shouldRequestSetProperty( key, true, now ) == true );
 }
 
 /// Setting defaults
@@ -1226,8 +1297,6 @@ TEST_CASE( "Setting Euid", "[app::MagAOXApp]" )
     REQUIRE( app.setEuidReal( 0 ) == -1 );
     REQUIRE( app.setEuidCalled( 0 ) == -1 );
 }
-
-
 
 /// Tests of utilities in cpp
 /**

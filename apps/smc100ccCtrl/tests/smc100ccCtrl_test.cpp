@@ -17,7 +17,7 @@ using namespace MagAOX::app;
 namespace SMCTEST
 {
 
-class smc100ccCtrl_test : public smc100ccCtrl 
+class smc100ccCtrl_test : public smc100ccCtrl
 {
 
 public:
@@ -47,4 +47,4 @@ SCENARIO( "INDI Callbacks", "[smc100ccCtrl]" )
 }
 
 
-} //namespace smc100ccCtrl_test 
+} //namespace smc100ccCtrl_test

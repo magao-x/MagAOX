@@ -32,7 +32,7 @@ standard INDI port of 7624.
 .TP
 -v
 arranges for additional trace information to be printed to stderr. These are
-cumulative. One (-v) reports each client connect and disconnect and driver 
+cumulative. One (-v) reports each client connect and disconnect and driver
 snoops. Two (-vv)
 adds key information about each message being sent or received in the form of
 the client channel or device name; the toplevel INDI XML element; the device,
@@ -46,7 +46,7 @@ INDI Device on a remote indiserver.
 .PP
 A local program is specified as the path name of the execuble to run (not the
 name of the Device it implements).
-The program is presumed to implement the INDI 
+The program is presumed to implement the INDI
 protocol on its stdin and stdout channels to implement exactly one Device.
 The program may send ad-hoc out-of-band error or trace messages to its stderr,
 each line of which will be prefixed with the name of the Device and a timestamp

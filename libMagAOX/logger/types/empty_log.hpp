@@ -10,6 +10,7 @@
 #ifndef logger_types_empty_log_hpp
 #define logger_types_empty_log_hpp
 
+#include "../logMeta.hpp"
 
 namespace MagAOX
 {

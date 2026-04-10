@@ -6,15 +6,25 @@ TARGET ?= $(t)
 all:
 	@echo "*** $(TARGET) is a Python app, skipping 'build' step. Use 'make install' to install. ***"
 
-install:
-	sudo -H $(PYTHON) -c 'import purepyindi2' || (echo "Need purepyindi2 installed to $(shell which python)" && exit 1)
-	sudo -H $(PYTHON) -c 'import xconf' || (echo "Need xconf installed to $(shell which python)" && exit 1)
-	sudo -H $(PYTHON) -m pip install .
-	sudo -H ln -sfv $(PYTHON_SCRIPTS_PREFIX)/$(TARGET) /opt/MagAOX/bin/$(TARGET)
-	@echo "*** Install succeeded, app located in /opt/MagAOX/bin/$(TARGET) ***"
-
-.PHONY: all install
-
 .PHONY: clean
 clean:
-	@echo "Nothing to clean for $(TARGET)"
+	rm -rf $(SELF_DIR)/build
+	rm -rf $(SELF_DIR)/xapp_$(TARGET).egg-info
+
+.PHONY: check
+check:
+	$(PYTHON) -c 'import purepyindi2' || (echo "Need purepyindi2 installed to $(PYTHON)" && exit 1)
+	$(PYTHON) -c 'import xconf' || (echo "Need xconf installed to $(PYTHON)" && exit 1)
+
+.PHONY: pipinstall
+pipinstall: check
+	sudo -H $(PYTHON) -m pip install . || (echo "Unable to install $(TARGET) with $(PYTHON)" && exit 1)
+	sudo -H ln -sfv $(PYTHON_SCRIPTS_PREFIX)/$(TARGET) /opt/MagAOX/bin/$(TARGET) || (echo "Couldn't symlink /opt/MagAOX/bin/$(TARGET) to $(PYTHON_SCRIPTS_PREFIX)/$(TARGET)" && exit 1)
+
+.PHONY: normalize_permissions
+normalize_permissions: pipinstall
+	sudo chmod -R o+rX $(shell cd && $(PYTHON) -c "import xapp.$(TARGET), os.path;print(os.path.dirname(xapp.$(TARGET).__file__))")
+
+.PHONY: install
+install: normalize_permissions
+	@echo "*** Install succeeded, app located in /opt/MagAOX/bin/$(TARGET) ***"

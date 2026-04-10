@@ -19,4 +19,3 @@ namespace logger
 } //namespace MagAOX
 
 #endif //logger_logBinarySchemata_hpp
- 

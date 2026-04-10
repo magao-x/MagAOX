@@ -14,27 +14,29 @@ dmStatus::~dmStatus()
 int dmStatus::attachOverlay( rtimvOverlayAccess & roa,
                              mx::app::appConfigurator & config
                            )
-{   
+{
    m_roa = roa;
    m_qgs = roa.m_graphicsView->scene();
-   
-   
+
+
    config.configUnused(m_deviceName, mx::app::iniFile::makeKey("dm", "name"));
-   
+
    if(m_deviceName == "")
    {
+      pluginLogInfo("not configured");
       m_enableable = false;
       disableOverlay();
       return 1; //Tell rtimv to unload me since not configured.
    }
-   
+
    m_enableable = true;
    m_enabled = true;
-   
+
    config.configUnused(m_rhDeviceName, mx::app::iniFile::makeKey("dm", "rhDevice"));
-      
-   if(m_enabled) enableOverlay();
-   else disableOverlay();
+
+   pluginLogInfo(std::format("enabling for {}/{}", m_deviceName, m_rhDeviceName));
+
+   enableOverlay();
    
    if(m_roa.m_dictionary != nullptr)
    {
@@ -44,20 +46,20 @@ int dmStatus::attachOverlay( rtimvOverlayAccess & roa,
 
    return 0;
 }
-      
+
 int dmStatus::updateOverlay()
 {
    if(!m_enabled) return 0;
-   
+
    if(m_roa.m_dictionary == nullptr) return 0;
-   
+
    if(m_roa.m_graphicsView == nullptr) return 0;
-   
+
    size_t n = 0;
 
    char tstr[128];
    std::string sstr;
-   
+
    if( m_roa.m_dictionary->count(m_rhDeviceName + ".humidity.current") > 0)
    {
       timespec t0;
@@ -84,8 +86,8 @@ int dmStatus::updateOverlay()
    }
 
    if(n > m_roa.m_graphicsView->statusTextNo()-1) return 0;
-   
-   
+
+
    return 0;
 }
 
@@ -102,7 +104,7 @@ bool dmStatus::overlayEnabled()
 void dmStatus::enableOverlay()
 {
    if(m_enableable == false) return;
-   
+
    m_enabled = true;
 }
 
@@ -112,7 +114,7 @@ void dmStatus::disableOverlay()
    {
       m_roa.m_graphicsView->statusTextText(n, "");
    }
-   
+
    m_enabled = false;
 }
 
@@ -124,6 +126,6 @@ std::vector<std::string> dmStatus::info()
     {
         vinfo.push_back("                   " + m_rhDeviceName);
     }
-    
+
     return vinfo;
 }

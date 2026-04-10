@@ -115,16 +115,16 @@ int logMeta::setLog( const logMetaSpec & lms )
             m_spec.format = "%lu";
             break;
          case valTypes::Float:
-            m_spec.format = "%g";
+            m_spec.format = "%G";
             break;
          case valTypes::Double:
-            m_spec.format = "%g";
+            m_spec.format = "%G";
             break;
          case valTypes::Vector_Bool:
             m_spec.format = "%d";
             break;
          case valTypes::Vector_Float:
-            m_spec.format = "%g";
+            m_spec.format = "%G";
             break;
          default:
             std::cerr << "Unrecognised value type for " + m_spec.device + " " + m_spec.keyword + ".  Using format %d/\n";
@@ -314,6 +314,7 @@ std::string logMeta::valueNumber( logMap<verboseT> & lm,
             snprintf(str, sizeof(str), m_spec.format.c_str(), val.back());
             res += str;
 
+            std::cerr << "State Vector_Float " << res << '\n';
             return res;
          }
          default:
@@ -488,7 +489,7 @@ mx::fits::fitsHeaderCard<logMeta::verboseT> logMeta::card( logMap<verboseT> &lm,
       return mx::fits::fitsHeaderCard<verboseT>(keyw, vstr, m_spec.comment);
    }
 
-   if(m_detail.valType == valTypes::String)
+   if(m_detail.valType == valTypes::String || m_detail.valType == valTypes::Vector_Bool || m_detail.valType == valTypes::Vector_Float)
    {
       return mx::fits::fitsHeaderCard<verboseT>(keyw, vstr, m_spec.comment);
    }

@@ -32,7 +32,7 @@
 /// Platform Independent Stream Abstraction.
 
 /** \defgroup aStream Stream Interface
- * \ref aStream "aStream.h" provides a platform independent stream abstraction for 
+ * \ref aStream "aStream.h" provides a platform independent stream abstraction for
  * common I/O streams. Provides facilities for creating and destroying
  * as well as writing and reading from streams.
  */
@@ -159,17 +159,17 @@ typedef enum {
 #ifdef __cplusplus
 extern "C" {
 #endif
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Base Stream creation procedure.
-    
+
     /**
      * Creates a Stream Reference.
      *
      * \param getProc - Callback for reading bytes from the underlying stream.
      * \param putProc - Callback for writing bytes to the underlying stream.
-     * \param writeProc - Optional callback for optimized writing of multiple 
+     * \param writeProc - Optional callback for optimized writing of multiple
      *                    bytes.
      * \param deleteProc - Callback for safe destruction of underlying resource.
      * \param procRef - opaque reference to the underlying resource,
@@ -181,11 +181,11 @@ extern "C" {
                                          aStreamWriteProc writeProc,
                                          aStreamDeleteProc deleteProc,
                                          const void* procRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Create a file input stream.
-    
+
     /**
      * Creates a file input stream.
      *
@@ -199,11 +199,11 @@ extern "C" {
      */
     aLIBEXPORT aErr aStream_CreateFileInput(const char *pFilename,
                                             aStreamRef* pStreamRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Create a file output stream.
-    
+
     /**
      * Creates a file output stream.
      *
@@ -216,11 +216,11 @@ extern "C" {
      */
     aLIBEXPORT aErr aStream_CreateFileOutput(const char *pFilename,
                                              aStreamRef* pStreamRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Create a serial communication stream.
-    
+
     /**
      * Creates a serial stream.
      *
@@ -242,11 +242,11 @@ extern "C" {
                                          const aSerial_Bits bits,
                                          const aSerial_Stop_bits stop,
                                          aStreamRef* pStreamRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Create a TCP/IP socket stream.
-    
+
     /**
      * Creates a TCP/IP socket stream.
      *
@@ -262,14 +262,14 @@ extern "C" {
     aLIBEXPORT aErr aStream_CreateSocket(const uint32_t address,
                                          const uint16_t port,
                                          aStreamRef* pStreamRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Create a stream accessor for a block of memory.
-    
+
     /**
      * Creates a stream accessor for a block of allocated memory. Reads and
-     * Writes like any other stream. The memory stream does not make a copy 
+     * Writes like any other stream. The memory stream does not make a copy
      * of the memory and doesn't free it but rather provides a stream layer to
      * access it.
      *
@@ -285,8 +285,8 @@ extern "C" {
     aLIBEXPORT aErr aStream_CreateMemory(const aMemPtr pMemory,
                                          const size_t size,
                                          aStreamRef* pStreamRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Create a stream to a USB device.
 
@@ -294,7 +294,7 @@ extern "C" {
      * Creates a BrainStem link stream to a USB based module.
      *
      * \param serialNum - The BrainStem serial number.
-     * \param pStreamRef - The resulting stream accessor for the BrainStem 
+     * \param pStreamRef - The resulting stream accessor for the BrainStem
      *                     module.
      *
      * \returns Function returns aErr values.
@@ -304,11 +304,11 @@ extern "C" {
      */
     aLIBEXPORT aErr aStream_CreateUSB(const uint32_t serialNum,
                                       aStreamRef* pStreamRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Create a stream buffer.
-    
+
     /**
      * Creates a stream buffer.
      *
@@ -321,24 +321,24 @@ extern "C" {
      * threads doing reads and writes, it is not the best candidate for
      * managing a pipe between threads.  Use the aStream_CreatePipe in
      * that scenario as it can be filled and emptied over and over which
-     * is typically the use case for cross-thread pipes. 
+     * is typically the use case for cross-thread pipes.
      *
-     * \param nIncSize - The Increment size to expand the buffer by when it 
+     * \param nIncSize - The Increment size to expand the buffer by when it
      *                   becomes full.
      * \param pBufferStreamRef - The buffer stream resulting from the call.
-     * 
+     *
      * \returns Function returns aErr values.
      * \retval aErrNone - The buffer was successfully created.
      * \retval aErrResource - The resources were not available to create the buffer.
      */
     aLIBEXPORT aErr aStreamBuffer_Create(const size_t nIncSize,
                                          aStreamRef* pBufferStreamRef);
-    
-    
-    
+
+
+
     /////////////////////////////////////////////////////////////////////
     /// Get the contents of the buffer.
-    
+
     /**
      * Get the contents of the buffer.
      *
@@ -365,15 +365,15 @@ extern "C" {
     aLIBEXPORT aErr aStreamBuffer_Get(aStreamRef bufferStreamRef,
                                       size_t* aSize,
                                       uint8_t** ppData);
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Create a pipe buffered stream.
-    
+
     /**
-     * Get the contents of the buffer. Offers a pipe that is thread-safe 
+     * Get the contents of the buffer. Offers a pipe that is thread-safe
      * for reading and writing between two different contexts.  Returns
-     * aErrNotReady when data is not available on reads.  Expands a buffer 
-     * internally to hold data when written to until it is read out (FIFO). 
+     * aErrNotReady when data is not available on reads.  Expands a buffer
+     * internally to hold data when written to until it is read out (FIFO).
      *
      * \param pBufferStreamRef - The buffered stream to create the pipe out of.
      *
@@ -382,11 +382,11 @@ extern "C" {
      * \retval aErrParam - The bufferStream is invalid.
      */
     aLIBEXPORT aErr aStream_CreatePipe(aStreamRef* pBufferStreamRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Flush the cotents of the buffer.
-    
+
     /**
      * Flushes the content of the buffer into the flushStream.
      *
@@ -400,11 +400,11 @@ extern "C" {
      */
     aLIBEXPORT aErr aStreamBuffer_Flush(aStreamRef bufferStreamRef,
                                         aStreamRef flushStream);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Create a Logging stream.
-    
+
     /**
      * Creates a stream which contains an upstream log stream and a downstream
      * log stream. The logging stream logs reads to the upstream log and writes
@@ -425,16 +425,16 @@ extern "C" {
                                             const aStreamRef upStreamLog,
                                             const aStreamRef downStreamLog,
                                             aStreamRef* pLogStreamRef);
-    
-    
+
+
     /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
      * Stream Operations... READ and Write FLUSH....                           *
      * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Read a byte array record from a stream.
-    
+
     /**
      * Read a byte array record from a stream.
      *
@@ -450,11 +450,11 @@ extern "C" {
     aLIBEXPORT aErr aStream_Read(aStreamRef streamRef,
                                  uint8_t* pBuffer,
                                  const size_t length);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Write a byte array to a Stream.
-    
+
     /**
      * Write a byte array to a Stream.
      *
@@ -470,11 +470,11 @@ extern "C" {
     aLIBEXPORT aErr aStream_Write(aStreamRef streamRef,
                                   const uint8_t* pBuffer,
                                   const size_t length);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Read a byte array record from a stream with a record terminator.
-    
+
     /**
      * Read a byte array record from a stream with a record terminator.
      *
@@ -496,11 +496,11 @@ extern "C" {
                                        const size_t maxLength,
                                        const uint8_t* recordTerminator,
                                        const size_t terminatorLength);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Write a byte array with a record terminator to a Stream.
-    
+
     /**
      * Write a byte array with a record terminator to a Stream.
      *
@@ -520,11 +520,11 @@ extern "C" {
                                         const size_t bufferLength,
                                         const uint8_t* recordTerminator,
                                         const size_t terminatorLength);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Read a null terminated string from Stream.
-    
+
     /**
      * Read a null terminated string from Stream.
      *
@@ -540,11 +540,11 @@ extern "C" {
     aLIBEXPORT aErr aStream_ReadCString(aStreamRef streamRef,
                                         char* pBuffer,
                                         const size_t maxLength);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Write a null terminated string.
-    
+
     /**
      * Write a null terminated string.
      *
@@ -558,11 +558,11 @@ extern "C" {
      */
     aLIBEXPORT aErr aStream_WriteCString(aStreamRef streamRef,
                                          const char* pBuffer);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Read a null terminated string with a record terminator to pBuffer.
-    
+
     /**
      * Read a null terminated string with a record terminator to pBuffer.
      *
@@ -580,11 +580,11 @@ extern "C" {
                                               char* pBuffer,
                                               const size_t maxLength,
                                               const char* recordTerminator);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Write a null terminated string with a record terminator to the stream.
-    
+
     /**
      * Write a null terminated string with a record terminator to the stream.
      *
@@ -600,11 +600,11 @@ extern "C" {
     aLIBEXPORT aErr aStream_WriteCStringRecord(aStreamRef streamRef,
                                                const char* pBuffer,
                                                const char* recordTerminator);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Flush contents of inStream into outStream.
-    
+
     /**
      * Flush the entire current content of the instream into the outstream.
      *
@@ -618,10 +618,10 @@ extern "C" {
      */
     aLIBEXPORT aErr aStream_Flush(aStreamRef inStreamRef,
                                   aStreamRef outStreamRef);
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Destroy a Stream.
-    
+
     /**
      * Safely destroy a stream and deallocate the associated resources.
      *
@@ -633,7 +633,7 @@ extern "C" {
      * \retval aErrParam - If the streamRef is invalid.
      */
     aLIBEXPORT aErr aStream_Destroy(aStreamRef* pStreamRef);
-    
+
 #ifdef __cplusplus
 }
 #endif

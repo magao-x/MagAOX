@@ -58,25 +58,25 @@ using Acroname::BrainStem::TimerClass;
 class a40PinModule : public Module
 {
 public:
-    
+
     a40PinModule(const uint8_t module = a40PINSTEM_MODULE,
                  bool bAutoNetworking = true,
                  const uint8_t model = 0) :
     Module(module, bAutoNetworking, model)
     {
-        
+
         analog[0].init(this, 0);
         analog[1].init(this, 1);
         analog[2].init(this, 2);
         analog[3].init(this, 3);
-        
+
         app[0].init(this, 0);
         app[1].init(this, 1);
         app[2].init(this, 2);
         app[3].init(this, 3);
-        
+
         clock.init(this, 0);
-        
+
         digital[0].init(this, 0);
         digital[1].init(this, 1);
         digital[2].init(this, 2);
@@ -92,15 +92,15 @@ public:
         digital[12].init(this, 12);
         digital[13].init(this, 13);
         digital[14].init(this, 14);
-        
+
         i2c[0].init(this,0);
         i2c[1].init(this,1);
-        
+
         pointer[0].init(this, 0);
         pointer[1].init(this, 1);
         pointer[2].init(this, 2);
         pointer[3].init(this, 3);
-        
+
         servo[0].init(this, 0);
         servo[1].init(this, 1);
         servo[2].init(this, 2);
@@ -109,13 +109,13 @@ public:
         servo[5].init(this, 5);
         servo[6].init(this, 6);
         servo[7].init(this, 7);
-        
+
         store[storeInternalStore].init(this, storeInternalStore);
         store[storeRAMStore].init(this, storeRAMStore);
         store[storeSDStore].init(this, storeSDStore);
-        
+
         system.init(this, 0);
-        
+
         timer[0].init(this, 0);
         timer[1].init(this, 1);
         timer[2].init(this, 2);
@@ -124,9 +124,9 @@ public:
         timer[5].init(this, 5);
         timer[6].init(this, 6);
         timer[7].init(this, 7);
-        
+
     }
-    
+
     AnalogClass analog[a40PINSTEM_NUM_A2D];
     AppClass app[a40PINSTEM_NUM_APPS];
     ClockClass clock;
@@ -137,8 +137,8 @@ public:
     StoreClass store[a40PINSTEM_NUM_STORES];
     SystemClass system;
     TimerClass timer[a40PINSTEM_NUM_TIMERS];
-    
-    
+
+
 };
 
 #endif

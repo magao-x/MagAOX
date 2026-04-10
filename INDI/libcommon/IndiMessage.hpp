@@ -62,7 +62,7 @@ class IndiMessage
 
     // Members.
   private:
-    
+
     /// The property contained here.
     pcf::IndiProperty m_ipMsg;
 

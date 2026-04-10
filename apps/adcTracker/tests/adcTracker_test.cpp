@@ -17,7 +17,7 @@ using namespace MagAOX::app;
 namespace ADCTTEST
 {
 
-class adcTracker_test : public adcTracker 
+class adcTracker_test : public adcTracker
 {
 
 public:
@@ -49,4 +49,4 @@ SCENARIO( "INDI Callbacks", "[adcTracker]" )
 }
 
 
-} //namespace adcTracker_test 
+} //namespace adcTracker_test

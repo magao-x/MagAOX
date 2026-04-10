@@ -9,7 +9,7 @@
 
 int main(int argc, char *argv[])
 {
-      
+
    //int data_type;
    QApplication app(argc, argv);
 
@@ -20,15 +20,15 @@ int main(int argc, char *argv[])
    app.setStyleSheet(stream.readAll());
 
    multiIndiManager mgr("coronAlign", "127.0.0.1", 7624);
-   
+
    xqt::coronAlign ca;
    mgr.addSubscriber(&ca);
    mgr.activate();
-      
+
    ca.show();
 
    int rv = app.exec();
-   
+
    return rv;
 }
-   
+

@@ -34,7 +34,7 @@ IndiPropertyMap::~IndiPropertyMap()
 /// @param rhs Another version of the driver.
 
 IndiPropertyMap::IndiPropertyMap( const IndiPropertyMap &ipmRhs ) : m_mapProperties(ipmRhs.m_mapProperties)
-{ 
+{
 }
 
 ////////////////////////////////////////////////////////////////////////////////

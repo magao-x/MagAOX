@@ -32,6 +32,8 @@ class stageStatus : public statusCombo
 
     virtual void subscribe();
 
+    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/ );
+
     void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
 
     // void updateGUI();
@@ -120,6 +122,23 @@ void stageStatus::handleSetProperty( const pcf::IndiProperty &ipRecv )
     }
 
     statusCombo::handleSetProperty( ipRecv ); //always emit updateGUI
+}
+
+void stageStatus::handleDelProperty( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getDevice() != m_device )
+        return;
+
+    if( ipRecv.getName() == "position" || ipRecv.getName() == "filter" )
+    {
+        m_position = 0;
+        if( m_value == "none" || m_value == "" )
+        {
+            m_valChanged = true;
+        }
+    }
+
+    statusCombo::handleDelProperty( ipRecv );
 }
 
 } // namespace xqt

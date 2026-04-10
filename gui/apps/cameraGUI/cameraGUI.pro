@@ -40,8 +40,7 @@ FORMS += ../../widgets/camera/camera.ui \
          ../../widgets/xWidgets/selectionSw.ui
 
 LIBS += ../../../INDI/libcommon/libcommon.a \
-        ../../../INDI/liblilxml/liblilxml.a \
-        -lmxlib
+        ../../../INDI/liblilxml/liblilxml.a 
 
 RESOURCES += ../../resources/magaox.qrc
 RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc

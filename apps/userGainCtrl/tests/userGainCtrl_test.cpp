@@ -17,7 +17,7 @@ using namespace MagAOX::app;
 namespace SMCTEST
 {
 
-class userGainCtrl_test : public userGainCtrl 
+class userGainCtrl_test : public userGainCtrl
 {
 
 public:
@@ -29,7 +29,7 @@ public:
         XWCTEST_SETUP_INDI_NEW_PROP(singleModeNo);
         XWCTEST_SETUP_INDI_NEW_PROP(singleGain);
         XWCTEST_SETUP_INDI_NEW_PROP(singleMC);
-    
+
     }
 };
 
@@ -117,7 +117,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[2] == 7);
             REQUIRE(blocks[3] == 14);
 
-            
+
             rv = blockModes(blocks, names, 80, 5, false);
 
             REQUIRE(rv == 0);
@@ -253,7 +253,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[3] == 7);
             REQUIRE(blocks[4] == 14);
 
-            
+
             rv = blockModes(blocks, names, 80, 5, true);
 
             REQUIRE(rv == 0);
@@ -400,7 +400,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[1] == 1);
             REQUIRE(blocks[2] == 1);
             REQUIRE(blocks[3] == 78);
- 
+
             rv = blockModes(blocks, names, 85, 81, true);
 
             REQUIRE(rv == 0);
@@ -451,4 +451,4 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
 }
 
 
-} //namespace userGainCtrl_test 
+} //namespace userGainCtrl_test

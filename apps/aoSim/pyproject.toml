@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aoSim"
+description = "AO simulator for interface checking."
+version = "2026.03.20"
+dependencies = [
+  "xconf",
+  "purepyindi2",
+]
+authors = [
+  {name = "Sebastiaan Haffert", email = "haffert@strw.leidenuniv.nl"},
+]
+
+[project.scripts]
+aoSim = "xapp.aoSim:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["xapp*"]

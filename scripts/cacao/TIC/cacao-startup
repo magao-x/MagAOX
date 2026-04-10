@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+#Script to startup the CACTI TIC cacao processes
+#
+# This script is under version control in the MagAO-X source
+
+cpath=$(pwd)
+
+cd /opt/MagAOX/cacao/kilo/kilo-rootdir
+cacao-setup kilo
+
+echo "runstart DMch2disp-00" >> /milk/shm/kilo_fpsCTRL.fifo
+
+cd $cpath

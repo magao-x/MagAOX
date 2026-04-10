@@ -187,8 +187,8 @@ typedef struct telnet_telopt_t telnet_telopt_t;
 #define TELNET_PFLAG_DEFLATE (1<<7)
 /*@}*/
 
-/*! 
- * error codes 
+/*!
+ * error codes
  */
 enum telnet_error_t {
 	TELNET_EOK = 0,   /*!< no error */
@@ -200,8 +200,8 @@ enum telnet_error_t {
 };
 typedef enum telnet_error_t telnet_error_t; /*!< Error code type. */
 
-/*! 
- * event codes 
+/*!
+ * event codes
  */
 enum telnet_event_type_t {
 	TELNET_EV_DATA = 0,        /*!< raw text data has been received */
@@ -222,8 +222,8 @@ enum telnet_event_type_t {
 };
 typedef enum telnet_event_type_t telnet_event_type_t; /*!< Telnet event type. */
 
-/*! 
- * environ/MSSP command information 
+/*!
+ * environ/MSSP command information
  */
 struct telnet_environ_t {
 	unsigned char type; /*!< either TELNET_ENVIRON_VAR or TELNET_ENVIRON_USERVAR */
@@ -231,22 +231,22 @@ struct telnet_environ_t {
 	char *value;        /*!< value of variable being set; empty string if no value */
 };
 
-/*! 
- * event information 
+/*!
+ * event information
  */
 union telnet_event_t {
-	/*! 
+	/*!
 	 * \brief Event type
 	 *
 	 * The type field will determine which of the other event structure fields
 	 * have been filled in.  For instance, if the event type is TELNET_EV_ZMP,
 	 * then the zmp event field (and ONLY the zmp event field) will be filled
 	 * in.
-	 */ 
+	 */
 	enum telnet_event_type_t type;
 
-	/*! 
-	 * data event: for DATA and SEND events 
+	/*!
+	 * data event: for DATA and SEND events
 	 */
 	struct data_t {
 		enum telnet_event_type_t _type; /*!< alias for type */
@@ -254,8 +254,8 @@ union telnet_event_t {
 		size_t size;                    /*!< number of bytes in buffer */
 	} data;
 
-	/*! 
-	 * WARNING and ERROR events 
+	/*!
+	 * WARNING and ERROR events
 	 */
 	struct error_t {
 		enum telnet_event_type_t _type; /*!< alias for type */
@@ -266,24 +266,24 @@ union telnet_event_t {
 		telnet_error_t errcode;         /*!< error code */
 	} error;
 
-	/*! 
-	 * command event: for IAC 
+	/*!
+	 * command event: for IAC
 	 */
 	struct iac_t {
 		enum telnet_event_type_t _type; /*!< alias for type */
 		unsigned char cmd;              /*!< telnet command received */
 	} iac;
 
-	/*! 
-	 * negotiation event: WILL, WONT, DO, DONT 
+	/*!
+	 * negotiation event: WILL, WONT, DO, DONT
 	 */
 	struct negotiate_t {
 		enum telnet_event_type_t _type; /*!< alias for type */
 		unsigned char telopt;           /*!< option being negotiated */
 	} neg;
 
-	/*! 
-	 * subnegotiation event 
+	/*!
+	 * subnegotiation event
 	 */
 	struct subnegotiate_t {
 		enum telnet_event_type_t _type; /*!< alias for type */
@@ -292,8 +292,8 @@ union telnet_event_t {
 		unsigned char telopt;           /*!< option code for negotiation */
 	} sub;
 
-	/*! 
-	 * ZMP event 
+	/*!
+	 * ZMP event
 	 */
 	struct zmp_t {
 		enum telnet_event_type_t _type; /*!< alias for type */
@@ -301,8 +301,8 @@ union telnet_event_t {
 		size_t argc;                    /*!< number of elements in argv */
 	} zmp;
 
-	/*! 
-	 * TTYPE event 
+	/*!
+	 * TTYPE event
 	 */
 	struct ttype_t {
 		enum telnet_event_type_t _type; /*!< alias for type */
@@ -310,8 +310,8 @@ union telnet_event_t {
 		const char* name;               /*!< terminal type name (IS only) */
 	} ttype;
 
-	/*! 
-	 * COMPRESS event 
+	/*!
+	 * COMPRESS event
 	 */
 	struct compress_t {
 		enum telnet_event_type_t _type; /*!< alias for type */
@@ -319,7 +319,7 @@ union telnet_event_t {
 	                                         0 if disabled */
 	} compress;
 
-	/*! 
+	/*!
 	 * ENVIRON/NEW-ENVIRON event
 	 */
 	struct environ_t {
@@ -328,7 +328,7 @@ union telnet_event_t {
 		size_t size;                           /*!< number of elements in values */
 		unsigned char cmd;                     /*!< SEND, IS, or INFO */
 	} environ;
-	
+
 	/*!
 	 * MSSP event
 	 */
@@ -339,7 +339,7 @@ union telnet_event_t {
 	} mssp;
 };
 
-/*! 
+/*!
  * \brief event handler
  *
  * This is the type of function that must be passed to
@@ -354,8 +354,8 @@ union telnet_event_t {
 typedef void (*telnet_event_handler_t)(telnet_t *telnet,
 		telnet_event_t *event, void *user_data);
 
-/*! 
- * telopt support table element; use telopt of -1 for end marker 
+/*!
+ * telopt support table element; use telopt of -1 for end marker
  */
 struct telnet_telopt_t {
 	short telopt;      /*!< one of the TELOPT codes or -1 */
@@ -363,8 +363,8 @@ struct telnet_telopt_t {
 	unsigned char him; /*!< TELNET_DO or TELNET_DONT */
 };
 
-/*! 
- * state tracker -- private data structure 
+/*!
+ * state tracker -- private data structure
  */
 struct telnet_t;
 

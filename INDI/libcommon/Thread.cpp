@@ -32,9 +32,9 @@ int pcf::Thread::sm_nStopSignal = SIGQUIT;
 ////////////////////////////////////////////////////////////////////////////////
 /// Standard constructor.
 
-Thread::Thread() : m_idThis(0), m_uiInterval(1000), m_tState(Idle), m_oStop(true), 
+Thread::Thread() : m_idThis(0), m_uiInterval(1000), m_tState(Idle), m_oStop(true),
                     m_oOneShot(false), m_oIsRunning(false), m_oIsPaused(false), m_psocTrigger(NULL)
-{ 
+{
   // We are not running in 'execute' yet.
   m_mutReady.lock();
 
@@ -90,7 +90,7 @@ const Thread &Thread::operator=( const Thread &copy )
 /// parameters will be copied, but if the original is running, this one will not
 /// be.
 
-Thread::Thread( const Thread &copy ) : m_idThis(0), m_uiInterval(copy.m_uiInterval), m_tState(Idle), m_oStop(true), 
+Thread::Thread( const Thread &copy ) : m_idThis(0), m_uiInterval(copy.m_uiInterval), m_tState(Idle), m_oStop(true),
                                       m_oOneShot(copy.m_oOneShot), m_oIsRunning(false), m_oIsPaused(false), m_psocTrigger(NULL)
 {
   // We are not running in 'execute' yet.

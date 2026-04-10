@@ -205,7 +205,7 @@ static void _send(telnet_t *telnet, const char *buffer,
 	/* if we have a deflate (compression) zlib box, use it */
 	if (telnet->z != 0 && telnet->flags & TELNET_PFLAG_DEFLATE) {
 		char deflate_buffer[1024];
-		
+
 
 		/* initialize z state */
 		telnet->z->next_in = (unsigned char *)buffer;
@@ -922,7 +922,7 @@ void telnet_free(telnet_t *telnet) {
 static telnet_error_t _buffer_byte(telnet_t *telnet,
 		unsigned char byte) {
 	char *new_buffer;
-	
+
 
 	/* check if we're out of room */
 	if (telnet->buffer_pos == telnet->buffer_size) {
@@ -1172,7 +1172,7 @@ void telnet_recv(telnet_t *telnet, const char *buffer,
 	/* if we have an inflate (decompression) zlib stream, use it */
 	if (telnet->z != 0 && !(telnet->flags & TELNET_PFLAG_DEFLATE)) {
 		char inflate_buffer[1024];
-		
+
 
 		/* initialize zlib state */
 		telnet->z->next_in = (unsigned char*)buffer;

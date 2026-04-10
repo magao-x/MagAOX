@@ -32,15 +32,15 @@ multiple "random" types and compile, run and report their results.
 
 The test generator is composed of two files, `generateTemplatedCatch2Tests.py`
 and `catch2TestTemplate.jinja2`. When run, Catch2 test files for each flatlog
-type will be created.  
+type will be created.
 
 
 ## How To Run
 
 ### Pre-requisites
  1. Python must be installed with version >= 3.9. This is checked by the script.
-  (As of this writing, the generator has been tested with Python 3.12.) 
-  
+  (As of this writing, the generator has been tested with Python 3.12.)
+
  2. jinja2 must be installed. The script will check for jinja2 and automatically
  install it if not present. It can be installed manually with the following
  command:
@@ -59,7 +59,7 @@ To run the generator, do:
 
 `python3 ./generateTemplatedCatch2Tests.py`
 
-or 
+or
 
 `make generated_tests`
 
@@ -95,7 +95,7 @@ Makefile.
 - To handle subtle differences in field names in the .fbs and .hpp files, the
   generator reads field names from both .fbs and .hpp names and uses the correct
   name when appropriate. The caveat to this is that the order in which those
-  names appear MUST correspond between the two files. 
+  names appear MUST correspond between the two files.
 
 - This script detects a 'base' type if it does not have eventCode and
   defaultLevel in the .hpp file. It is noted in these log types that they cannot
@@ -107,7 +107,7 @@ Makefile.
     - saving_state_change (not explicitly noted, but inferred)
 
   It is assumed that these base types do not explicitly require tests, but will
-  be tested through their children types. 
+  be tested through their children types.
 
   **software_log is a special case since the base type is contained in the same
   file as its child types. The template uses LOG_NOTICE for all software logs.
@@ -163,7 +163,7 @@ and the test executable is `generated_test_e3_n12`.
 ### Options
 
 - `s` : random seed
-- `n` : number of distinct flatlog types to use. 
+- `n` : number of distinct flatlog types to use.
 - `e` : entropy level. The number of total flatlogs that will be tested is e * n
 - `t` : specific types of flatlogs to use, in quotes, comma-separated. The types
   will be randomly selected if this option is not used.
@@ -191,4 +191,4 @@ well.
   the entropy test, you must specify the scenario:
 
   `./generated_entropy_test_e<E>_n<N> "Scenario: test_e<E>_n<N>"`
-  
+

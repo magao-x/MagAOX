@@ -21,7 +21,7 @@ namespace DDSPC
 class RecursiveLeastSquares{
 
 	private:
-		
+
 
 	public:
 		Matrix* K; // Gain matrix
@@ -35,10 +35,10 @@ class RecursiveLeastSquares{
 		Matrix* xtP;
 		Matrix* cn;
 		cublasHandle_t* handle;
-		
+
 		Matrix* A; // Prediction matrix
 		Matrix* P; // Inverse covariance
-		
+
 		RecursiveLeastSquares(cublasHandle_t* new_handle, int num_features, int num_predictors, int batch_size, float forgetting_factor, float P0);
 		~RecursiveLeastSquares();
 

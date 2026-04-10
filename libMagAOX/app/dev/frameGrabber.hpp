@@ -28,73 +28,73 @@ namespace dev
 {
 
 /** MagAO-X generic frame grabber
-  *
-  *
-  * The derived class `derivedT` has the following requirements:
-  *
-  * - Must be derived from MagAOXApp<true>
-  *
-  * - Must be derived from telemeter<derivedT> (see below for required interface)
-  *
-  * - Must contain the following friend declaration:
-  *   \code
-  *       friend class dev::frameGrabber<derivedT>; //replace derivedT
-  *   \endcode
-  *
-  * - Must declare the following typedef:
-  *   \code
-  *       typedef dev::frameGrabber<derivedT> frameGrabberT; //replace derivedT
-  *   \endcode
-  *
-  * - must expose the following interface
-  *   \code
-  *       //Configures the camera for acquistion, must also set m_width, m_height, and m_dataType
-  *       //so that the shared memory can be allocated
-  *       int derivedT::configureAcquisition();
-  *
-  *       //Gets the frames-per-second readout rate
-  *       //used for the latency statistics
-  *       float derivedT::fps();
-  *
-  *       //Start acquisition.
-  *       int derivedT::startAcquisition();
-  *
-  *       //Acquires the data, and checks if it is valid.
-  *       //This should set m_currImageTimestamp to the image timestamp.
-  *       // returns 0 if valid, < 0 on error, > 0 on no data.
-  *       int derivedT::acquireAndCheckValid()
-  *
-  *       //Loads the acquired image into the stream, copying it to the appropriate member of m_imageStream->array.
-  *       //This could simply be a memcpy.
-  *       int derivedT::loadImageIntoStream(void * dest);
-  *
-  *       //Take any actions needed to reconfigure the system.  Called if m_reconfig is set to true.
-  *       int derivedT::reconfig()
-  *   \endcode
-  *   Each of the above functions should return 0 on success, and -1 on an error (except fps).
-  *   For `acquireAndCheckValid` >0 will indicate no data but not an error.  In most cases,
-  *   an appropriate state code, such as NOTCONNECTED, should be set as well.
-  *
-  * - A static configuration variable must be defined in derivedT as
-  *   \code
-  *       static constexpr bool c_frameGrabber_flippable =true; //or: false
-  *   \endcode
-  *   which determines whether or not the images can be flipped programmatically.
-  *
-  * - Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `updateINDI`, and `appShutdown`
-  *   functions must be placed in the derived class's functions of the same name. For convenience the
-  *   following macros are defined to provide error checking:
-  *   \code
-  *       FRAMEGRABBER_SETUP_CONFIG( cfig )
-  *       FRAMEGRABBER_LOAD_CONFIG( cfig )
-  *       FRAMEGRABBER_APP_STARTUP
-  *       FRAMEGRABBER_APP_LOGIC
-  *       FRAMEGRABBER_UPDATE_INDI
-  *       FRAMEGRABBER_APP_SHUTDOWN
-  *   \endcode
-  *
-  * \ingroup appdev
-  */
+ *
+ *
+ * The derived class `derivedT` has the following requirements:
+ *
+ * - Must be derived from MagAOXApp<true>
+ *
+ * - Must be derived from telemeter<derivedT> (see below for required interface)
+ *
+ * - Must contain the following friend declaration:
+ *   \code
+ *       friend class dev::frameGrabber<derivedT>; //replace derivedT
+ *   \endcode
+ *
+ * - Must declare the following typedef:
+ *   \code
+ *       typedef dev::frameGrabber<derivedT> frameGrabberT; //replace derivedT
+ *   \endcode
+ *
+ * - must expose the following interface
+ *   \code
+ *       //Configures the camera for acquistion, must also set m_width, m_height, and m_dataType
+ *       //so that the shared memory can be allocated
+ *       int derivedT::configureAcquisition();
+ *
+ *       //Gets the frames-per-second readout rate
+ *       //used for the latency statistics
+ *       float derivedT::fps();
+ *
+ *       //Start acquisition.
+ *       int derivedT::startAcquisition();
+ *
+ *       //Acquires the data, and checks if it is valid.
+ *       //This should set m_currImageTimestamp to the image timestamp.
+ *       // returns 0 if valid, < 0 on error, > 0 on no data.
+ *       int derivedT::acquireAndCheckValid()
+ *
+ *       //Loads the acquired image into the stream, copying it to the appropriate member of m_imageStream->array.
+ *       //This could simply be a memcpy.
+ *       int derivedT::loadImageIntoStream(void * dest);
+ *
+ *       //Take any actions needed to reconfigure the system.  Called if m_reconfig is set to true.
+ *       int derivedT::reconfig()
+ *   \endcode
+ *   Each of the above functions should return 0 on success, and -1 on an error (except fps).
+ *   For `acquireAndCheckValid` >0 will indicate no data but not an error.  In most cases,
+ *   an appropriate state code, such as NOTCONNECTED, should be set as well.
+ *
+ * - A static configuration variable must be defined in derivedT as
+ *   \code
+ *       static constexpr bool c_frameGrabber_flippable =true; //or: false
+ *   \endcode
+ *   which determines whether or not the images can be flipped programmatically.
+ *
+ * - Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `updateINDI`, and `appShutdown`
+ *   functions must be placed in the derived class's functions of the same name. For convenience the
+ *   following macros are defined to provide error checking:
+ *   \code
+ *       FRAMEGRABBER_SETUP_CONFIG( cfig )
+ *       FRAMEGRABBER_LOAD_CONFIG( cfig )
+ *       FRAMEGRABBER_APP_STARTUP
+ *       FRAMEGRABBER_APP_LOGIC
+ *       FRAMEGRABBER_UPDATE_INDI
+ *       FRAMEGRABBER_APP_SHUTDOWN
+ *   \endcode
+ *
+ * \ingroup appdev
+ */
 template <class derivedT>
 class frameGrabber
 {
@@ -143,6 +143,10 @@ class frameGrabber
     bool m_reconfig{ false }; ///< Flag to set if a camera reconfiguration requires a framegrabber reset.
 
     IMAGE *m_imageStream{ nullptr }; ///< The ImageStreamIO shared memory buffer.
+
+    bool m_ownShmim{ true }; ///< Flag controlling if the shmim is owned.  If true it will be destroyed as needed.
+
+    ino_t m_inode{ 0 }; ///< The inode of the image stream file
 
     float m_cbFPS{ 0 }; ///< The FPS used to configure the circular buffers
 
@@ -265,6 +269,8 @@ class frameGrabber
     ///@}
 
     void *loadImageIntoStreamCopy( void *dest, void *src, size_t width, size_t height, size_t szof );
+
+    int openShmim();
 
     /** \name INDI
      *
@@ -397,8 +403,13 @@ int frameGrabber<derivedT>::loadConfig( mx::app::appConfigurator &config )
     {
         m_shmimName = derived().configName();
     }
-    
+
     config( m_shmimName, "framegrabber.shmimName" );
+
+    if( m_shmimName == "" )
+    {
+        return derivedT::template log<software_critical, -1>( { "framegrabber.shmimName can't be empty" } );
+    }
 
     config( m_circBuffLength, "framegrabber.circBuffLength" );
 
@@ -468,8 +479,9 @@ int frameGrabber<derivedT>::appStartup()
     if( derived().registerIndiPropertyNew( m_indiP_shmimName, nullptr ) < 0 )
     {
 #ifndef FRAMEGRABBER_TEST_NOLOG
-        derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+        derivedT::template log<software_error>( { std::source_location::current() } );
 #endif
+
         return -1;
     }
 
@@ -483,12 +495,15 @@ int frameGrabber<derivedT>::appStartup()
     m_indiP_frameSize["width"] = 0;
     m_indiP_frameSize.add( pcf::IndiElement( "height" ) );
     m_indiP_frameSize["height"] = 0;
+    m_indiP_frameSize.add( pcf::IndiElement( "depth" ) );
+    m_indiP_frameSize["depth"] = 0;
 
     if( derived().registerIndiPropertyNew( m_indiP_frameSize, nullptr ) < 0 )
     {
 #ifndef FRAMEGRABBER_TEST_NOLOG
-        derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+        derivedT::template log<software_error>( { std::source_location::current() } );
 #endif
+
         return -1;
     }
 
@@ -507,9 +522,10 @@ int frameGrabber<derivedT>::appStartup()
 
     if( derived().registerIndiPropertyReadOnly( m_indiP_timing ) < 0 )
     {
-#ifndef STDCAMERA_TEST_NOLOG
-        derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+#ifndef FRAMEGRABBER_TEST_NOLOG
+        derivedT::template log<software_error>( { std::source_location::current() } );
 #endif
+
         return -1;
     }
 
@@ -524,7 +540,7 @@ int frameGrabber<derivedT>::appStartup()
                                this,
                                fgThreadStart ) < 0 )
     {
-        derivedT::template log<software_error, -1>( { __FILE__, __LINE__ } );
+        derivedT::template log<software_error, -1>( { std::source_location::current() } );
         return -1;
     }
 
@@ -537,7 +553,7 @@ int frameGrabber<derivedT>::appLogic()
     // do a join check to see if other threads have exited.
     if( pthread_tryjoin_np( m_fgThread.native_handle(), 0 ) == 0 )
     {
-        derivedT::template log<software_error>( { __FILE__, __LINE__, "framegrabber thread has exited" } );
+        derivedT::template log<software_error>( { "framegrabber thread has exited" } );
 
         return -1;
     }
@@ -548,7 +564,6 @@ int frameGrabber<derivedT>::appLogic()
         {
             if( m_atimes.size() >= m_atimes.maxEntries() )
             {
-
                 cbIndexT latTime = m_latencyCircBuffMaxTime * m_cbFPS;
                 if( latTime >= m_atimes.maxEntries() )
                 {
@@ -583,10 +598,12 @@ int frameGrabber<derivedT>::appLogic()
 
                 for( size_t n = 1; n <= m_atimesD.size(); ++n )
                 {
-                    ts       = m_atimes.at( refEntry, n );
+                    ts = m_atimes.at( refEntry, n );
+
                     double a = ts.tv_sec + ( (double)ts.tv_nsec ) / 1e9;
 
-                    ts       = m_wtimes.at( refEntry, n );
+                    ts = m_wtimes.at( refEntry, n );
+
                     double w = ts.tv_sec + ( (double)ts.tv_nsec ) / 1e9;
 
                     m_atimesD[n - 1]  = a - a0;
@@ -619,8 +636,9 @@ int frameGrabber<derivedT>::appLogic()
                     {
                         std::cerr << "negative wtime: " << m_wtimesD[n - 1] << ' ' << n << ' ' << m_atimesD.size()
                                   << ' ' << refEntry << ' ' << m_atimes.maxEntries() << ' ' << latTime << '\n';
-                        return derivedT::template log<software_error, 0>(
-                            { __FILE__, __LINE__, "negative write time. latency circ buff is not long enought" } );
+
+                        return derivedT::template log<software_error, 0>( { "negative write time. latency "
+                                                                            "circ buff is not long enought" } );
                     }
                 }
 
@@ -691,6 +709,7 @@ int frameGrabber<derivedT>::onPowerOff()
 
     m_width  = 0;
     m_height = 0;
+    m_circBuffLength = 1;
 
     updateINDI();
 
@@ -734,7 +753,6 @@ int frameGrabber<derivedT>::configCircBuffs()
     else
     {
         // Set up the latency circ. buffs
-        std::cerr << "Circ Buff setup: " << m_latencyCircBuffMaxTime << ' ' << m_cbFPS << ' ';
         cbIndexT cbSz = 2 * m_latencyCircBuffMaxTime * m_cbFPS;
         if( cbSz > m_latencyCircBuffMaxLength )
         {
@@ -744,8 +762,6 @@ int frameGrabber<derivedT>::configCircBuffs()
         {
             cbSz = 3; // Make variance meaningful
         }
-
-        std::cerr << cbSz << '\n';
 
         m_atimes.maxEntries( cbSz );
         m_wtimes.maxEntries( cbSz );
@@ -775,7 +791,10 @@ void frameGrabber<derivedT>::fgThreadExec()
     }
 
     uint32_t    imsize[3] = { 0, 0, 0 };
+    bool        cbuff     = false;
     std::string shmimName;
+
+    static bool logged_wrong_size = false;
 
     while( derived().shutdown() == 0 )
     {
@@ -793,8 +812,9 @@ void frameGrabber<derivedT>::fgThreadExec()
         }
 
         // At the end of this, must have m_width, m_height, m_dataType set, and derived()->fps must be valid.
-        if( derived().configureAcquisition() < 0 )
+        if( derived().configureAcquisition() != 0 )
         {
+            sleep( 1 );
             continue;
         }
 
@@ -802,29 +822,61 @@ void frameGrabber<derivedT>::fgThreadExec()
 
         if( configCircBuffs() < 0 )
         {
-            derivedT::template log<software_error>( { __FILE__, __LINE__, "error configuring latency circ. buffs" } );
+            derivedT::template log<software_error>( { "error configuring latency circ. buffs" } );
         }
 
         /* Initialize ImageStreamIO
          */
-        if( m_shmimName == "" )
-            m_shmimName = derived().configName();
 
-        if( m_width != imsize[0] || m_height != imsize[1] || static_cast<uint32_t>( m_circBuffLength ) != imsize[2] ||
-            m_shmimName != shmimName || m_imageStream == nullptr )
+        // Check if we are already connected by configureAcquisition
+        if( m_imageStream != nullptr )
         {
-            if( m_imageStream != nullptr )
+            imsize[0] = m_imageStream->md[0].size[0];
+
+            if( m_imageStream->md[0].naxis > 1 )
+            {
+                imsize[1] = m_imageStream->md[0].size[1];
+            }
+
+            if( m_imageStream->md[0].naxis > 2 )
+            {
+                imsize[2] = m_imageStream->md[0].size[2];
+                cbuff     = true;
+            }
+            else
+            {
+                imsize[2] = 1;
+                cbuff     = false;
+            }
+        }
+
+        if( m_width != imsize[0] || m_height != imsize[1] || m_circBuffLength != imsize[2] || m_imageStream == nullptr )
+        {
+            if( m_imageStream != nullptr && m_ownShmim )
             {
                 ImageStreamIO_destroyIm( m_imageStream );
                 free( m_imageStream );
             }
+            else if( m_imageStream != nullptr && !m_ownShmim )
+            {
+                if( !logged_wrong_size )
+                {
+                    derivedT::template log<text_log>(
+                        std::format( "image stream {} is not expected size", m_shmimName ), logPrio::LOG_WARNING );
+                    logged_wrong_size = true;
+                }
+
+                sleep( 1 );
+                continue; // we go around and try again, waiting for the shmim to get resized to our expectations
+            }
+
+            logged_wrong_size = false;
 
             m_imageStream = reinterpret_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
 
             imsize[0] = m_width;
             imsize[1] = m_height;
             imsize[2] = m_circBuffLength;
-            shmimName = m_shmimName;
 
             std::cerr << "Creating: " << m_shmimName << " " << m_width << " " << m_height << " " << m_circBuffLength
                       << "\n";
@@ -842,6 +894,8 @@ void frameGrabber<derivedT>::fgThreadExec()
                                         0 );
 
             m_imageStream->md->cnt1 = m_circBuffLength - 1;
+
+            cbuff = true; // because we created it!
         }
 
         // This completes the reconfiguration.
@@ -852,11 +906,19 @@ void frameGrabber<derivedT>::fgThreadExec()
             continue;
         }
 
-        uint64_t  next_cnt1     = 0;
-        char     *next_dest     = reinterpret_cast<char *>( m_imageStream->array.raw );
-        timespec *next_wtimearr = &m_imageStream->writetimearray[0];
-        timespec *next_atimearr = &m_imageStream->atimearray[0];
-        uint64_t *next_cntarr   = &m_imageStream->cntarray[0];
+        uint64_t next_cnt1 = 0;
+        char    *next_dest = reinterpret_cast<char *>( m_imageStream->array.raw );
+
+        timespec *next_wtimearr = nullptr;
+        timespec *next_atimearr = nullptr;
+        uint64_t *next_cntarr   = nullptr;
+
+        if( cbuff )
+        {
+            next_wtimearr = &m_imageStream->writetimearray[0];
+            next_atimearr = &m_imageStream->atimearray[0];
+            next_cntarr   = &m_imageStream->cntarray[0];
+        }
 
         // This is the main image grabbing loop.
         while( !derived().shutdown() && !m_reconfig && derived().powerState() > 0 )
@@ -880,9 +942,6 @@ void frameGrabber<derivedT>::fgThreadExec()
             // Ok, no timeout, so we process the image and publish it.
             m_imageStream->md->write = 1;
 
-            // Set the time of last write
-            // clock_gettime(CLOCK_REALTIME, &writestart);
-
             if( derived().loadImageIntoStream( next_dest ) < 0 )
             {
                 break;
@@ -892,7 +951,7 @@ void frameGrabber<derivedT>::fgThreadExec()
             // clock_gettime(CLOCK_REALTIME, &m_imageStream->md->writetime);
             if( clock_gettime( CLOCK_REALTIME, &m_imageStream->md->writetime ) < 0 )
             {
-                derivedT::template log<software_critical>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
+                derivedT::template log<software_critical>( { errno, "clock_gettime" } );
             }
 
             // Set the image acquisition timestamp
@@ -904,9 +963,12 @@ void frameGrabber<derivedT>::fgThreadExec()
             // Update cnt0
             m_imageStream->md->cnt0++;
 
-            *next_wtimearr = m_imageStream->md->writetime;
-            *next_atimearr = m_currImageTimestamp;
-            *next_cntarr   = m_imageStream->md->cnt0;
+            if( cbuff )
+            {
+                *next_wtimearr = m_imageStream->md->writetime;
+                *next_atimearr = m_currImageTimestamp;
+                *next_cntarr   = m_imageStream->md->cnt0;
+            }
 
             // And post
             m_imageStream->md->write = 0;
@@ -928,21 +990,29 @@ void frameGrabber<derivedT>::fgThreadExec()
 
             next_dest =
                 reinterpret_cast<char *>( m_imageStream->array.raw ) + next_cnt1 * m_width * m_height * m_typeSize;
-            next_wtimearr = &m_imageStream->writetimearray[next_cnt1];
-            next_atimearr = &m_imageStream->atimearray[next_cnt1];
-            next_cntarr   = &m_imageStream->cntarray[next_cnt1];
+
+            if( cbuff )
+            {
+                next_wtimearr = &m_imageStream->writetimearray[next_cnt1];
+                next_atimearr = &m_imageStream->atimearray[next_cnt1];
+                next_cntarr   = &m_imageStream->cntarray[next_cnt1];
+            }
 
             // Touch them to make sure we move
-            m_dummy_c         = next_dest[0];
-            m_dummy_ts.tv_sec = next_wtimearr[0].tv_sec + next_atimearr[0].tv_sec;
-            m_dummy_cnt       = next_cntarr[0];
+            m_dummy_c = next_dest[0];
+
+            if( cbuff )
+            {
+                m_dummy_ts.tv_sec = next_wtimearr[0].tv_sec + next_atimearr[0].tv_sec;
+                m_dummy_cnt       = next_cntarr[0];
+            }
 
             if( m_cbFPS != derived().fps() )
             {
+                std::cerr << "configuring due to mismatch m_cbFPS\n";
                 if( configCircBuffs() < 0 )
                 {
-                    derivedT::template log<software_error>(
-                        { __FILE__, __LINE__, "error configuring latency circ. buffs" } );
+                    derivedT::template log<software_error>( { "error configuring latency circ. buffs" } );
                 }
             }
         }
@@ -956,7 +1026,15 @@ void frameGrabber<derivedT>::fgThreadExec()
 
     if( m_imageStream != nullptr )
     {
-        ImageStreamIO_destroyIm( m_imageStream );
+        if( m_ownShmim )
+        {
+            ImageStreamIO_destroyIm( m_imageStream );
+        }
+        else
+        {
+            ImageStreamIO_closeIm( m_imageStream );
+        }
+
         free( m_imageStream );
         m_imageStream = nullptr;
     }
@@ -988,6 +1066,114 @@ void *frameGrabber<derivedT>::loadImageIntoStreamCopy( void *dest, void *src, si
 }
 
 template <class derivedT>
+int frameGrabber<derivedT>::openShmim()
+{
+    static bool logged = false;
+
+    if( m_imageStream != nullptr )
+    {
+        ImageStreamIO_closeIm( m_imageStream );
+        free( m_imageStream );
+        m_imageStream = nullptr;
+    }
+
+    // b/c ImageStreamIO prints every single time, and latest version don't support stopping it yet, and that
+    // isn't thread-safe-able anyway we do our own checks.  This is the same code in ImageStreamIO_openIm...
+    int  SM_fd;
+    char SM_fname[1024];
+    ImageStreamIO_filename( SM_fname, sizeof( SM_fname ), m_shmimName.c_str() );
+    SM_fd = open( SM_fname, O_RDWR );
+
+    if( SM_fd == -1 )
+    {
+        if( !logged )
+        {
+            derivedT::template log<text_log>( "ImageStream " + m_shmimName + " not found (yet).  Retrying . . .",
+                                              logPrio::LOG_NOTICE );
+            logged = true;
+        }
+
+        return 1;
+    }
+
+    // Found and opened,  close it and then use ImageStreamIO
+    logged = false;
+    close( SM_fd );
+
+    m_imageStream = reinterpret_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
+
+    if( ImageStreamIO_openIm( m_imageStream, m_shmimName.c_str() ) == 0 )
+    {
+        if( m_imageStream->md[0].sem < SEMAPHORE_MAXVAL )
+        {
+            ImageStreamIO_closeIm( m_imageStream );
+            free( m_imageStream );
+            m_imageStream = nullptr;
+
+            return 1; // We just need to wait for the server process to finish startup.
+        }
+        else
+        {
+            char SM_fname[1024];
+            ImageStreamIO_filename( SM_fname, sizeof( SM_fname ), m_shmimName.c_str() );
+
+            struct stat buffer;
+
+            int rv = stat( SM_fname, &buffer );
+
+            if( rv != 0 )
+            {
+                derivedT::template log<software_critical>( { errno,
+                                                             "Could not get inode for " + m_shmimName +
+                                                                 ". Source process will need to be restarted." } );
+
+                ImageStreamIO_closeIm( m_imageStream );
+
+                free( m_imageStream );
+
+                m_imageStream = nullptr;
+
+                derived().m_shutdown = true;
+
+                return -1;
+            }
+
+            m_inode = buffer.st_ino;
+
+            m_width = m_imageStream->md->size[0];
+
+            if( m_imageStream->md->naxis == 2  )
+            {
+                m_height = m_imageStream->md->size[1];
+                m_circBuffLength  = 1;
+            }
+            else if( m_imageStream->md->naxis == 3 )
+            {
+                m_height = m_imageStream->md->size[1];
+                m_circBuffLength  = m_imageStream->md->size[2];
+            }
+            else
+            {
+                m_height = 1;
+                m_circBuffLength  = 1;
+            }
+
+            m_dataType = m_imageStream->md->datatype;
+            m_typeSize = ImageStreamIO_typesize( m_dataType );
+
+            return 0;
+        }
+    }
+    else
+    {
+        free( m_imageStream );
+        m_imageStream = nullptr;
+
+        return 1; // be patient
+    }
+}
+
+template <class derivedT>
 int frameGrabber<derivedT>::updateINDI()
 {
     if( !derived().m_indiDriver )
@@ -996,6 +1182,7 @@ int frameGrabber<derivedT>::updateINDI()
     indi::updateIfChanged( m_indiP_shmimName, "name", m_shmimName, derived().m_indiDriver );
     indi::updateIfChanged( m_indiP_frameSize, "width", m_width, derived().m_indiDriver );
     indi::updateIfChanged( m_indiP_frameSize, "height", m_height, derived().m_indiDriver );
+    indi::updateIfChanged( m_indiP_frameSize, "depth", m_circBuffLength, derived().m_indiDriver );
 
     double fpsa = 0;
     double fpsw = 0;
@@ -1058,7 +1245,7 @@ int frameGrabber<derivedT>::recordFGTimings( bool force )
 #define FRAMEGRABBER_SETUP_CONFIG( cfig )                                                                              \
     if( frameGrabberT::setupConfig( cfig ) < 0 )                                                                       \
     {                                                                                                                  \
-        log<software_error>( { __FILE__, __LINE__, "Error from frameGrabberT::setupConfig" } );                        \
+        log<software_error>( { "Error from frameGrabberT::setupConfig" } );                                            \
         m_shutdown = true;                                                                                             \
         return;                                                                                                        \
     }
@@ -1070,35 +1257,35 @@ int frameGrabber<derivedT>::recordFGTimings( bool force )
 #define FRAMEGRABBER_LOAD_CONFIG( cfig )                                                                               \
     if( frameGrabberT::loadConfig( cfig ) < 0 )                                                                        \
     {                                                                                                                  \
-        return log<software_error, -1>( { __FILE__, __LINE__, "Error from frameGrabberT::loadConfig" } );              \
+        return log<software_error, -1>( { "Error from frameGrabberT::loadConfig" } );                                  \
     }
 
 /// Call frameGrabberT::appStartup with error checking for frameGrabber
 #define FRAMEGRABBER_APP_STARTUP                                                                                       \
     if( frameGrabberT::appStartup() < 0 )                                                                              \
     {                                                                                                                  \
-        return log<software_error, -1>( { __FILE__, __LINE__, "Error from frameGrabberT::appStartup" } );              \
+        return log<software_error, -1>( { "Error from frameGrabberT::appStartup" } );                                  \
     }
 
 /// Call frameGrabberT::appLogic with error checking for frameGrabber
 #define FRAMEGRABBER_APP_LOGIC                                                                                         \
     if( frameGrabberT::appLogic() < 0 )                                                                                \
     {                                                                                                                  \
-        return log<software_error, -1>( { __FILE__, __LINE__, "Error from frameGrabberT::appLogic" } );                \
+        return log<software_error, -1>( { "Error from frameGrabberT::appLogic" } );                                    \
     }
 
 /// Call frameGrabberT::updateINDI with error checking for frameGrabber
 #define FRAMEGRABBER_UPDATE_INDI                                                                                       \
     if( frameGrabberT::updateINDI() < 0 )                                                                              \
     {                                                                                                                  \
-        return log<software_error, -1>( { __FILE__, __LINE__, "Error from frameGrabberT::updateINDI" } );              \
+        return log<software_error, -1>( { "Error from frameGrabberT::updateINDI" } );                                  \
     }
 
 /// Call frameGrabberT::appShutdown with error checking for frameGrabber
 #define FRAMEGRABBER_APP_SHUTDOWN                                                                                      \
     if( frameGrabberT::appShutdown() < 0 )                                                                             \
     {                                                                                                                  \
-        return log<software_error, -1>( { __FILE__, __LINE__, "Error from frameGrabberT::appShutdown" } );             \
+        return log<software_error, -1>( { "Error from frameGrabberT::appShutdown" } );                                 \
     }
 
 } // namespace dev

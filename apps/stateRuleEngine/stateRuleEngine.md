@@ -34,7 +34,7 @@ target=READY
 ```
 The above rule will be `true` if and only if `fwfpm.fsm_state.state==READY`.
 
-Now we combine these into a rule to test if `fwfpm` is stopped 
+Now we combine these into a rule to test if `fwfpm` is stopped
 in the `fpm` position:
 
 ```toml
@@ -48,7 +48,7 @@ rule2=fwfpm-fpm
 
 The above rule performs the logical AND comparison between two rules, and so is `true` if and only if both are `true`.
 
-One more rule we need is a test if the two devices `fwfpm` and `stagesci1` are not in the corresponding position. 
+One more rule we need is a test if the two devices `fwfpm` and `stagesci1` are not in the corresponding position.
 ```toml
 #this rule tests if the preset names for fwfpm and stagesci1 are different
 [fwfpm-stagesci1-neq]
@@ -77,10 +77,10 @@ Now the user can be notified to take caution whenever this out-of-focus state oc
 
 ## Rule Configuration
 
-The rules are configured using the usual MagAO-X TOML .conf files.  A rule is named by its TOML section heading, e.g. `[rule-name]`, and then 
+The rules are configured using the usual MagAO-X TOML .conf files.  A rule is named by its TOML section heading, e.g. `[rule-name]`, and then
 specified by the keywords.  Which keywords are valid depends on the ruleType.  The following table lists the keywords.
 
-| keyword     | Required | Default | ruleTypes  | Purpose                    | 
+| keyword     | Required | Default | ruleTypes  | Purpose                    |
 |:-----------:|:--------:|:-------:|------------|--------------------|
 | ruleType    | Y        |         |            | the type of rule |
 | priority    | N        | none    | all        | the reporting priority |
@@ -96,7 +96,7 @@ specified by the keywords.  Which keywords are valid depends on the ruleType.  T
 | rule2       | Y        |         | ruleComp   | the second rule |
 | tol         | N        | 1e-6    | numVal, elCompNum | the tolerance for equality of numbers |
 
-Note that required keywords are only required in their respective ruleTypes. 
+Note that required keywords are only required in their respective ruleTypes.
 
 Additional information about keywords is provided below.
 
@@ -109,10 +109,13 @@ The `ruleType` keyword specifies the type of rule, and the `comp` keyword specif
 numVal      | compare the value of a number element to a numeric value | Eq, Neq, Lt, LtEq, Gt, GtEq          | equality is tested with a tolerance|
 txtVal      | compare the value of a text element to a text value     | Eq, Neq                            ||
 swVal       | compare the state of a switch to either `On` or `Off`   | Eq, Neq                            ||
+timeDiff    | compare the difference between now and a time           | Eq, Neq, Lt, LtEq, Gt, GtEq          | equality is tested with a tolerance|
 elCompNum   | compare the value of two number elements to each other    | Eq, Neq, Lt, LtEq, Gt, GtEq          | equality is tested with a tolerance|
 elCompTxt   | compare the value of two text elements to each other      | Eq, Neq                            ||
 elCompSw    | compare the value of two switch elements to each other    | Eq, Neq                            ||
-ruleComp    | compare the value of two rules to each other                   | Eq/Xnor, Neq/Xor, And, Nand, Or, Nor ||
+ruleComp    | compare the value of two rules to each other                   | Eq/Xnor, Neq/Xor, And, Nand, Or, Nor, Imply, Nimply ||
+
+(Note: [Imply](https://en.wikipedia.org/wiki/IMPLY) and [Nimply](https://en.wikipedia.org/wiki/NIMPLY) are not commutative; the rule order matters)
 
 ### Keyword priority
 |`priority`  | Description                                                   | Notes                       |
@@ -130,4 +133,4 @@ For numerical comparisons, equality is tested with a tolerance, specified by the
 
 - [ ] compare attributes, e.g. timestamp
 - [ ] add support for lights for completeness
-- [ ] add a "which switch in a SwitchVector" is on rule 
+- [ ] add a "which switch in a SwitchVector" is on rule

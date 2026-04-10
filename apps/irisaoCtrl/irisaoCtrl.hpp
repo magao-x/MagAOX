@@ -33,7 +33,7 @@ X re-enable power management
 #include <irisao.mirrors.h>
 
 
-/** \defgroup irisaoCtrl 
+/** \defgroup irisaoCtrl
   * \brief The MagAO-X application to control an IrisAO DM
   *
   * <a href="..//apps_html/page_module_irisaoCtrl.html">Application Documentation</a>
@@ -52,7 +52,7 @@ namespace app
 {
 
 /// The MagAO-X IrisAO DM Controller
-/** 
+/**
   * \ingroup irisaoCtrl
   */
 class irisaoCtrl : public MagAOXApp<true>, public dev::dm<irisaoCtrl,float>, public dev::shmimMonitor<irisaoCtrl>
@@ -60,25 +60,25 @@ class irisaoCtrl : public MagAOXApp<true>, public dev::dm<irisaoCtrl,float>, pub
 
    //Give the test harness access.
    friend class irisaoCtrl_test;
-   
+
    friend class dev::dm<irisaoCtrl,float>;
-   
+
    friend class dev::shmimMonitor<irisaoCtrl>;
-   
+
    typedef float realT;  ///< This defines the datatype used to signal the DM using the ImageStreamIO library.
-   
+
    size_t m_nsat {0};
-   
+
 protected:
 
    /** \name Configurable Parameters
      *@{
      */
-   
+
    std::string m_mserialNumber; ///< The IrisAO MIRROR serial number
    std::string m_dserialNumber; ///< The IrisAO DRIVER serial number
    bool m_hardwareDisable; ///< Hardware disable flag (set to true to disable sending commands)
-   
+
    ///@}
 
 public:
@@ -106,83 +106,83 @@ public:
    virtual int appStartup();
 
    /// Implementation of the FSM for irisaoCtrl.
-   /** 
+   /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
    virtual int appLogic();
 
    /// Shutdown the app.
-   /** 
+   /**
      *
      */
    virtual int appShutdown();
 
    /// Cleanup after a power off.
    /**
-     */ 
+     */
    virtual int onPowerOff();
-   
+
    /// Maintenace while powered off.
    /**
      */
    virtual int whilePowerOff();
-   
+
    /** \name DM Base Class Interface
      *
      *@{
      */
-   
+
    /// Initialize the DM and prepare for operation.
    /** Application is in state OPERATING upon successful conclusion.
-     * 
-     * \returns 0 on success 
+     *
+     * \returns 0 on success
      * \returns -1 on error
-     */ 
+     */
    int initDM();
-   
+
    /// Zero all commands on the DM
    /** This does not update the shared memory buffer.
-     * 
-     * \returns 0 on success 
+     *
+     * \returns 0 on success
      * \returns -1 on error
      */
    int zeroDM();
-   
+
    /// Send a command to the DM
    /** This is called by the shmim monitoring thread in response to a semaphore trigger.
-     * 
-     * \returns 0 on success 
+     *
+     * \returns 0 on success
      * \returns -1 on error
      */
    int commandDM(void * curr_src);
-   
+
    /// Release the DM, making it safe to turn off power.
    /** The application will be state READY at the conclusion of this.
-     *  
-     * \returns 0 on success 
+     *
+     * \returns 0 on success
      * \returns -1 on error
      */
    int releaseDM();
-   
+
    ///@}
-   
+
    /** \name IrisAO Interface
      *@{
      */
-   
+
 protected:
 
    uint32_t m_nbAct {0}; ///< The number of actuators
-   
+
    double * m_dminputs {nullptr}; ///< Pre-allocated command vector, used only in commandDM
-   
+
    MirrorHandle m_dm; ///< IrisAO SDK handle for the DM.
-   
+
    bool m_dmopen {false}; ///< Track whether the DM connection has been opened
-   
+
 public:
-   
+
 };
 
 irisaoCtrl::irisaoCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -195,9 +195,9 @@ irisaoCtrl::~irisaoCtrl() noexcept
 {
    //f(m_actuator_mapping) free(m_actuator_mapping);
    if(m_dminputs) free(m_dminputs);
-   
-}   
-   
+
+}
+
 void irisaoCtrl::setupConfig()
 {
    config.add("dm.mserialNumber", "", "dm.mserialNumber", argType::Required, "dm", "mserialNumber", false, "string", "The IrisAO MIRROR serial number used to find correct DM Profile.");
@@ -205,7 +205,7 @@ void irisaoCtrl::setupConfig()
    config.add("dm.hardwareDisable", "", "dm.hardwareDisable", argType::Required, "dm", "hardwareDisable", false, "bool", "Set to true to disable hardware for testing purposes.");
    config.add("dm.calibRelDir", "", "dm.calibRelDir", argType::Required, "dm", "calibRelDir", false, "string", "Used to find the default config directory.");
    dev::dm<irisaoCtrl,float>::setupConfig(config);
-   
+
 }
 
 int irisaoCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
@@ -214,16 +214,16 @@ int irisaoCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
    config(m_mserialNumber, "dm.mserialNumber");
    config(m_dserialNumber, "dm.dserialNumber");
    config(m_hardwareDisable, "dm.hardwareDisable");
-         
+
    dev::dm<irisaoCtrl,float>::loadConfig(_config);
-   
+
    return 0;
 }
 
 void irisaoCtrl::loadConfig()
 {
    loadConfigImpl(config);
-   
+
 }
 
 int irisaoCtrl::appStartup()
@@ -231,7 +231,7 @@ int irisaoCtrl::appStartup()
 
    dev::dm<irisaoCtrl,float>::appStartup();
    shmimMonitor<irisaoCtrl>::appStartup();
-   
+
    return 0;
 }
 
@@ -239,32 +239,32 @@ int irisaoCtrl::appLogic()
 {
    dev::dm<irisaoCtrl,float>::appLogic();
    shmimMonitor<irisaoCtrl>::appLogic();
-   
+
    if(state()==stateCodes::POWEROFF) return 0;
-   
+
    if(state()==stateCodes::POWERON)
    {
       log<text_log>("detected POWERON");
       sleep(5);
       return initDM();
    }
-   
+
    if(m_nsat > 0)
    {
       log<text_log>("Saturated actuators in last second: " + std::to_string(m_nsat), logPrio::LOG_WARNING);
    }
    m_nsat = 0;
-   
+
    return 0;
 }
 
 int irisaoCtrl::appShutdown()
 {
    if(m_dmopen) releaseDM();
-      
+
    dev::dm<irisaoCtrl,float>::appShutdown();
    shmimMonitor<irisaoCtrl>::appShutdown();
-   
+
    return 0;
 }
 
@@ -308,24 +308,24 @@ int irisaoCtrl::initDM()
    // not sure the irisAO API gives us any output to check for success/failure
    m_dmopen = true;
 
-   /*if(ret == NO_ERR) m_dmopen = true; // remember that the DM connection has been opened 
+   /*if(ret == NO_ERR) m_dmopen = true; // remember that the DM connection has been opened
 
    if(ret != NO_ERR)
    {
       const char *err;
       err = IrisAOErrorString(ret);
       log<text_log>(std::string("DM initialization failed: ") + err, logPrio::LOG_ERROR);
-      
+
       m_dm = {};
       return -1;
    }
-   
+
    if (!m_dmopen)
    {
       log<text_log>("DM initialization failed. Couldn't open DM handle.", logPrio::LOG_ERROR);
       return -1;
    }*/
-   
+
    log<text_log>("IrisAO mirror " + mser + "with driver " +  dser + " initialized", logPrio::LOG_NOTICE);
 
    // Get number of actuators
@@ -340,15 +340,15 @@ int irisaoCtrl::initDM()
    // cacao input -- FIX ME?
    if(m_dminputs) free(m_dminputs);
    m_dminputs = (double*) calloc( m_nbAct, sizeof( double ) );
-   
+
    if(zeroDM() < 0)
    {
       log<text_log>("DM initialization failed.  Error zeroing DM.", logPrio::LOG_ERROR);
       return -1;
    }
-   
+
    state(stateCodes::OPERATING);
-   
+
    return 0;
 }
 
@@ -359,13 +359,13 @@ int irisaoCtrl::zeroDM()
       log<text_log>("DM not initialized (NULL pointer)", logPrio::LOG_ERROR);
       return -1;
    }
-   
+
    if(m_nbAct == 0)
    {
       log<text_log>("DM not initialized (number of actuators)", logPrio::LOG_ERROR);
       return -1;
    }
-   
+
    /* Send the all 0 command to the DM */
    SegmentNumber segment = 0;
    while (MirrorIterate(m_dm, segment)){
@@ -373,7 +373,7 @@ int irisaoCtrl::zeroDM()
       segment++;
    }
    MirrorCommand(m_dm, MirrorSendSettings);
-   
+
    log<text_log>("DM zeroed");
    return 0;
 }
@@ -389,7 +389,7 @@ int irisaoCtrl::commandDM(void * curr_src)
       // need shmim array formatted in a way that's consistent with this loop
       idx = segment * 3; // may need (segment - 1) if they start counting segments at 1
       SetMirrorPosition(m_dm, segment, ((float *)curr_src)[idx], ((float *)curr_src)[idx+1], ((float *)curr_src)[idx+2]); // z, xgrad, ygrad
-   
+
       // check if the current segment was saturated
       // not sure you can do this here. might need to send the commands first (depends on what this is actually querying)
       // not sure how to handle ptt in the m_instSatMap. I guess I need to saturate a whole row/column at once??
@@ -412,7 +412,7 @@ int irisaoCtrl::commandDM(void * curr_src)
 
    /* Finally, send the command to the DM */
    MirrorCommand(m_dm, MirrorSendSettings);
-   
+
    return 0 ;
 }
 
@@ -425,30 +425,30 @@ int irisaoCtrl::releaseDM()
       log<text_log>("dm is not initialized", logPrio::LOG_ERROR);
       return -1;
    }
-   
+
    state(stateCodes::READY);
-   
+
    if(!shutdown())
    {
       pthread_kill(m_smThread.native_handle(), SIGUSR1);
    }
-   
+
    sleep(1); ///\todo need to trigger shmimMonitor loop to pause it.
-   
+
    if(zeroDM() < 0)
    {
       log<text_log>("DM release failed.  Error zeroing DM.", logPrio::LOG_ERROR);
       return -1;
    }
-   
+
    // Close IrisAO connection
    MirrorRelease(m_dm);
 
    m_dmopen = false;
    m_dm = {};
-   
+
    log<text_log>("IrisAO " + m_mserialNumber + " with driver " + m_dserialNumber + " reset and released", logPrio::LOG_NOTICE);
-   
+
    return 0;
 }
 

@@ -1,51 +1,56 @@
 #!/usr/bin/env python
+import os
 import sys
-from urllib.request import urlopen
+import urllib.request
+import urllib.parse
 import datetime
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
-import math
-import ssl
 
-endpoints = ['Dimm', 'Mag1', 'Mag2']
-endpoint_template = "https://weather.lco.cl/clima/weather/Magellan/PHP/grab{name}.php"
+scopes = ['dimm', 'clay', 'baade']
 
 def retrieve_one(name):
-    context = ssl._create_unverified_context()
-    fh = urlopen(endpoint_template.format(name=name), context=context)
-    points = json.load(fh)
-    new_points = []
-    for pt in points:
-        new_points.append({
-            'tm': pt['tm'],
-            'dt': datetime.fromisoformat(pt['tm']).replace(tzinfo=timezone.utc),
-            'el': float(pt['el']),
-            'fw': float(pt['fw']),
-        })
-    new_points.sort(key=lambda x: x['dt'], reverse=True)
-    return new_points[0]
-    
-def main(debug):
-    for ep in endpoints:
-        try:
-            point = retrieve_one(ep)
-        except Exception as e:
-            print(e, file=sys.stderr)
-            point = {
-                'tm': '1970-01-01 00:00:00',
-                'el': 0.0,
-                'fw': -1.0,
-            }
-        with open(f"/tmp/{ep.lower()}.tsv", 'w') as fh:
-            fh.write(f"datetime fwhm elevation\n")
-            fh.write(f"{point['tm']} {point['fw']} {point['el']}\n")
-            if debug:
-                print(ep)
-                print("datetime fwhm elevation")
-                print(f"{point['tm']} {point['fw']} {point['el']}")
-                print()
+    now = datetime.now(timezone.utc)
+    start_ts = (now - timedelta(minutes=5)).isoformat()
+    end_ts = now.isoformat()
+
+    # First request for seeing
+    params = urllib.parse.urlencode({
+        'source': name,
+        'start_ts': start_ts,
+        'end_ts': end_ts,
+    })
+    url = f"https://weather-dev.lco.cl/api/metrics/seeing?{params}"
+    req = urllib.request.Request(url, headers={
+        'Referer': 'https://weather-dev.lco.cl/stations/magellan',
+    })
+    with urllib.request.urlopen(req) as response:
+        seeing_data = json.loads(response.read().decode('utf-8'))
+    seeing_points = seeing_data['results']
+    seeing_points = list(sorted(seeing_points, key=lambda x: x['ts'], reverse=True))
+
+    return seeing_points[0] if len(seeing_points) else None
+
+def main():
+    scopes = ['dimm', 'baade', 'clay']
+    with open(f"/tmp/{os.environ.get('USER', 'xsup')}_query_seeing.txt", "w") as fh:
+        outstr = "utcdate utctime scope fwhm_corr"
+        fh.write(outstr + "\n")
+        for name in scopes:
+            seeing = retrieve_one(name)
+            if seeing is None:
+                now_date, now_time = datetime.now(timezone.utc).isoformat().split('T')
+                now_time, _ = now_time.rsplit('.', 1)
+                outstr = f"{now_date} {now_time} {name} -1"
+            else:
+                utcdate, utctime_usec = seeing['ts'].split('T')
+                utctime = utctime_usec.split('.', 1)[0]
+                seeing_corr = seeing['seeing'] if seeing['seeing'] > 0 else -1
+                outstr = f"{utcdate} {utctime} {name} {seeing_corr}"
+            print(outstr)
+            fh.write(outstr + "\n")
+
     return 0
 
 if __name__ == "__main__":
-    debug = sys.argv[-1] == '--debug'
-    sys.exit(main(debug))
+    sys.exit(main())

@@ -143,3 +143,17 @@ Setup of stagellowfs
 serial: 122400
 max: 1066667
 
+
+stagellowfs removed
+
+setup of stagevp
+serial: 141812
+max: 209974
+
+When adding a new device:
+/renumber
+
+/ get system.serial
+/ get limit.max
+
+xctrl restart stagesci1 stagesc2 stagevp zaberLowLevel

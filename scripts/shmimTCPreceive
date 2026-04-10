@@ -32,7 +32,7 @@ echo "------------------------------------------------------------------------"
 
 printHELP1 ()
 {
-    printf "%20s       Receive image stream over TCP\n" "$0" 
+    printf "%20s       Receive image stream over TCP\n" "$0"
 }
 
 
@@ -42,8 +42,8 @@ for arg in "$@"; do
   shift
   case "$arg" in
     "--help") set -- "$@" "-h" ;;
-    "--help1") 
-set -- "$@" "-h" 
+    "--help1")
+set -- "$@" "-h"
 singlelinehelp=1;
 ;;
     *)        set -- "$@" "$arg"
@@ -76,7 +76,7 @@ while getopts :hp: FLAG; do
   esac
 done
 
-shift $((OPTIND-1))  
+shift $((OPTIND-1))
 
 
 

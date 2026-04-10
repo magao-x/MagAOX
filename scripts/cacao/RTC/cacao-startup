@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+#Script to startup the MagAO-X RTC cacao processes
+#
+# This script is under version control in the MagAO-X source
+
+cpath=$(pwd)
+
+cd /opt/MagAOX/cacao/woofer-vispyr/woofer-vispyr-rootdir
+cacao-setup woofer-vispyr
+
+cd ../../tweeter-vispyr/tweeter-vispyr-rootdir
+cacao-setup tweeter-vispyr
+
+cd ../../
+
+echo "runstart DMch2disp-00" >> /milk/shm/woofer-vispyr_fpsCTRL.fifo
+
+echo "runstart DMch2disp-01" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
+
+
+ln -sf /milk/shm/camwfs_dark.im.shm /milk/shm/aol0_wfsdark.im.shm
+ln -sf /milk/shm/camwfs_dark.im.shm /milk/shm/aol1_wfsdark.im.shm
+ln -sf /milk/shm/aol1_wfsref.im.shm /milk/shm/camwfs_ref.im.shm
+ln -sf /milk/shm/aol1_wfsrefc.im.shm /milk/shm/camwfs_refc.im.shm
+ln -sf /milk/shm/aol1_imWFS2.im.shm /milk/shm/camwfs_refsub.im.shm
+
+ln -sf /milk/shm/camwfs_avg.im.shm /milk/shm/aol1_wfsavg.im.shm
+
+#start NVIDIA CUDA MPS server for this user
+nvidia-cuda-mps-control -d
+
+cd $cpath
