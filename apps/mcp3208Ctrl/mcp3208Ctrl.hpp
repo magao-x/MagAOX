@@ -62,7 +62,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     float m_fpsTol{ 0 }; ///< The tolerance for detecting a change in FPS.
 
-    std::string m_synchroShmimName; ///< The ImageStreamIO stream used to synchronize acquisition.
+    std::string m_synchroShmimName;      ///< The ImageStreamIO stream used to synchronize acquisition.
     int         m_synchroPostDelay{ 0 }; ///< Delay after an A/D read in microseconds.
 
     ///@}
@@ -87,12 +87,15 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     IMAGE  m_synchroStream{};
     bool   m_synchroStreamOpen{ false };
+    ino_t  m_synchroStreamInode{ 0 };
     int    m_synchroSemaphoreNumber{ 5 };
     sem_t *m_synchroSemaphore{ nullptr };
 
-    virtual int openSynchroStream();
+    int openSynchroStream();
 
-    virtual int claimSynchroSemaphore();
+    int claimSynchroSemaphore();
+
+    bool synchroStreamStale();
 
     void closeSynchroStream();
 
@@ -100,13 +103,13 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     int acquireSynchroAndCheckValid();
 
-    virtual int getRealtime( timespec &ts );
+    int getRealtime( timespec &ts );
 
-    virtual int waitOnSemaphore( sem_t *sem, timespec &ts );
+    int waitOnSemaphore( sem_t *sem, timespec &ts );
 
-    virtual int readChannelValue( int channel, uint16_t &value );
+    int readChannelValue( int channel, uint16_t &value );
 
-    virtual void sleepAfterRead( int usec );
+    void sleepAfterRead( int usec );
 
   public:
     /// Default c'tor.
@@ -439,6 +442,9 @@ int mcp3208Ctrl::reconfig()
 
 int mcp3208Ctrl::openSynchroStream()
 {
+    char        shmimFilename[1024];
+    struct stat buffer;
+
     if( m_synchroShmimName.empty() || m_synchroStreamOpen )
     {
         return 0;
@@ -456,7 +462,16 @@ int mcp3208Ctrl::openSynchroStream()
         return 1;
     }
 
-    m_synchroStreamOpen = true;
+    ImageStreamIO_filename( shmimFilename, sizeof( shmimFilename ), m_synchroShmimName.c_str() );
+    if( stat( shmimFilename, &buffer ) != 0 )
+    {
+        ImageStreamIO_closeIm( &m_synchroStream );
+        memset( &m_synchroStream, 0, sizeof( m_synchroStream ) );
+        return log<software_error, 1>( { __FILE__, __LINE__, errno, "stat" } );
+    }
+
+    m_synchroStreamInode = buffer.st_ino;
+    m_synchroStreamOpen  = true;
     return 0;
 }
 
@@ -475,8 +490,7 @@ int mcp3208Ctrl::claimSynchroSemaphore()
     m_synchroSemaphoreNumber = ImageStreamIO_getsemwaitindex( &m_synchroStream, m_synchroSemaphoreNumber );
     if( m_synchroSemaphoreNumber < 0 )
     {
-        return log<software_error, -1>(
-            { __FILE__, __LINE__, "No valid semaphore found for " + m_synchroShmimName } );
+        return log<software_error, -1>( { __FILE__, __LINE__, "No valid semaphore found for " + m_synchroShmimName } );
     }
 
     m_synchroSemaphore = m_synchroStream.semptr[m_synchroSemaphoreNumber];
@@ -488,6 +502,35 @@ int mcp3208Ctrl::claimSynchroSemaphore()
     }
 
     return 0;
+}
+
+bool mcp3208Ctrl::synchroStreamStale()
+{
+    int         shmimFd;
+    char        shmimFilename[1024];
+    struct stat buffer;
+
+    if( !m_synchroStreamOpen || m_synchroStream.md[0].sem <= 0 )
+    {
+        return true;
+    }
+
+    ImageStreamIO_filename( shmimFilename, sizeof( shmimFilename ), m_synchroShmimName.c_str() );
+
+    shmimFd = open( shmimFilename, O_RDWR );
+    if( shmimFd == -1 )
+    {
+        return true;
+    }
+
+    close( shmimFd );
+
+    if( stat( shmimFilename, &buffer ) != 0 )
+    {
+        return true;
+    }
+
+    return buffer.st_ino != m_synchroStreamInode;
 }
 
 void mcp3208Ctrl::closeSynchroStream()
@@ -503,8 +546,10 @@ void mcp3208Ctrl::closeSynchroStream()
     }
 
     memset( &m_synchroStream, 0, sizeof( m_synchroStream ) );
-    m_synchroSemaphore  = nullptr;
-    m_synchroStreamOpen = false;
+    m_synchroSemaphore       = nullptr;
+    m_synchroSemaphoreNumber = 5;
+    m_synchroStreamInode     = 0;
+    m_synchroStreamOpen      = false;
 }
 
 int mcp3208Ctrl::acquireTimerAndCheckValid()
@@ -562,8 +607,19 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
     errno = 0;
     if( waitOnSemaphore( m_synchroSemaphore, ts ) != 0 )
     {
-        if( errno == ETIMEDOUT || errno == EINTR )
+        if( errno == EINTR )
         {
+            return 1;
+        }
+
+        if( errno == ETIMEDOUT )
+        {
+            if( synchroStreamStale() )
+            {
+                log<text_log>( "Synchronized trigger stream changed, reconfiguring.", logPrio::LOG_NOTICE );
+                m_reconfig = true;
+            }
+
             return 1;
         }
 
@@ -646,7 +702,7 @@ INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_fps )( const pcf::IndiProperty &ipRe
     m_trigger       = 1e9f / m_fps; // Update trigger value based off new fps
     nano_sec_target = 1e9f / m_fps;
 
-    log<text_log>( "set fps = " + std::to_string( m_fps ));
+    log<text_log>( "set fps = " + std::to_string( m_fps ) );
     return 0;
 }
 
@@ -666,7 +722,7 @@ INDI_SETCALLBACK_DEFN( mcp3208Ctrl, m_indiP_fpsSource )( const pcf::IndiProperty
     m_trigger       = 1e9f / m_fps; // Update trigger value based off new fps
     nano_sec_target = 1e9f / m_fps;
 
-    log<text_log>( "set fps from " + m_fpsDevice + " = " + std::to_string( m_fps ));
+    log<text_log>( "set fps from " + m_fpsDevice + " = " + std::to_string( m_fps ) );
     return 0;
 
 } // INDI_SETCALLBACK_DEFN(mcp3208Ctrl, m_indiP_fpsSource)
