@@ -101,13 +101,14 @@ Follow these code style and documentation rules exactly.
   - For application unit tests, place Doxygen grouping under `app_unit_test` in `tests/groups.dox`.
   - Prefer the structure:
   - `namespace libXWCTest { namespace <appName>Test { ... } }`
-  - Define `\defgroup <appName>_unit_test` in the corresponding `*_test.cpp` file, not in `tests/groups.dox`, and keep the file itself only in `\ingroup <appName>_files`.
+  - Add a `\defgroup <appName>_unit_test` block and `\ingroup app_unit_test`.
   - Add a brief Doxygen block for each `TEST_CASE`, not just the file header.
 
 21) Test Doxygen Link Preservation
-  - When test harness indirection, fault-injection wrappers, alternate namespaces, or protected/private access would prevent Doxygen from auto-linking the real API under test, include `tests/testXWC.hpp` and add explicit Doxygen-only references to the real symbol inside the relevant `TEST_CASE` or `SCENARIO`.
+  - When test harness indirection, fault-injection wrappers, alternate namespaces, or protected/private access would prevent Doxygen from auto-linking the real API under test, include `tests/testXWC.hpp` and add explicit Doxygen-only references to the real symbol inside the relevant `TEST_CASE`.
   - For MagAO-X app unit tests, prefer the local `#ifdef <APP>_TEST_DOXYGEN_REF` pattern with raw member references that need not compile, and wrap those blocks in `// clang-format off` and `// clang-format on`.
-  - Hide test-harness-only classes or helpers from Doxygen with `\cond ... \endcond` when they would otherwise dominate the generated links.
+  - Hide test-harness-only classes or helpers from Doxygen with `\cond ... \endcond` when they would otherwise dominate the generated links. 
+  - Use this for methods/functions actually under test, especially in unit-test files that rely on wrapper namespaces, injected subclasses, or macro-based indirection.
 
 22) App Header-Only Preference
   - For MagAOX applications, prefer header-only implementation when it matches existing app patterns and keeps the app easy to include in unit tests.
