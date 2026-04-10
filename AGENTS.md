@@ -98,10 +98,11 @@ Follow these code style and documentation rules exactly.
   - Make formatting-only cleanup a separate final commit when needed.
 
 20) Application Unit Test Documentation
-  - For application unit tests, place Doxygen grouping under `app_unit_test` in `tests/groups.dox`.
+  - For application unit tests, place Doxygen grouping under `application_unit_test` in `tests/groups.dox`.
+  - Reserve `app_unit_test` for tests of the `libMagAOX` app namespace, not end applications.
   - Prefer the structure:
   - `namespace libXWCTest { namespace <appName>Test { ... } }`
-  - Add a `\defgroup <appName>_unit_test` block and `\ingroup app_unit_test`.
+  - Add a `\defgroup <appName>_unit_test` block and `\ingroup application_unit_test`.
   - Add a brief Doxygen block for each `TEST_CASE`, not just the file header.
 
 21) Test Doxygen Link Preservation
