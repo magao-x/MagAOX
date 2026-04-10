@@ -51,6 +51,7 @@ class PredictiveController{
         };
 
         void reset();
+        void reset_buffers();
 
         Matrix get_measurement_future();
         Matrix get_measurement_past();
