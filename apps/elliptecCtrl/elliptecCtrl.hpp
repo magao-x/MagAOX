@@ -427,6 +427,7 @@ inline void elliptecCtrl::setupConfig()
                 false,
                 "int",
                 "Read timeout (ms) while device is BUSY/pending" );
+
     config.add( "serial.postWriteSleepMs",
                 "0",
                 "serial.postWriteSleepMs",
@@ -447,6 +448,7 @@ inline void elliptecCtrl::setupConfig()
                 false,
                 "double",
                 "Relative offset (deg) to move after homing" );
+
     config.add( "stage.allowMultiturn",
                 "false",
                 "stage.allowMultiturn",
@@ -489,6 +491,7 @@ inline void elliptecCtrl::setupConfig()
                 false,
                 "string",
                 "Optimize command" );
+
     config.add( "device.saveCmd",
                 "us",
                 "device.saveCmd",
@@ -1187,8 +1190,13 @@ inline speed_t elliptecCtrl::to_termios_baud_( int b )
 
 inline int elliptecCtrl::openPort_()
 {
+
     closePort_();
+
+    elevatedPrivileges elPriv( this );
+
     m_fd = ::open( m_port.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK );
+
     if( m_fd < 0 )
     {
         return -1;
