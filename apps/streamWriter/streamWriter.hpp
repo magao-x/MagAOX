@@ -9,6 +9,7 @@
 #ifndef streamWriter_hpp
 #define streamWriter_hpp
 
+#include <atomic>
 #include <filesystem>
 
 #include <ImageStreamIO/ImageStruct.h>
@@ -89,6 +90,9 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     unsigned m_semWaitNSec{ 500000000 }; /**< The time in nsec to wait on the semaphore, added to m_semWaitSec.
                                               Max is 999999999. Default is 5e8 nsec. */
 
+    bool m_warnMissedData{
+        true }; ///< Whether missed-data backlog summaries should be emitted as warnings instead of informational logs.
+
     int m_lz4accel{ 1 };
 
     bool m_compress{ true };
@@ -109,9 +113,19 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
 
     size_t m_currImage{ 0 };
 
-    double m_currImageTime{ 0 }; ///< The write-time of the current image
+    uint64_t m_currImageTime{ 0 }; ///< The write-time of the current image in nanoseconds.
 
-    double m_currChunkStartTime{ 0 }; ///< The write-time of the first image in the chunk
+    uint64_t m_currChunkStartTime{ 0 }; ///< The write-time of the first image in the chunk in nanoseconds.
+
+    std::atomic<uint64_t> m_skippedFrameCount{
+        0 }; ///< Count of skipped frames accumulated by the framegrabber thread since the last summary log.
+
+    std::atomic<uint64_t> m_repeatSemaphoreCount{
+        0 }; ///< Count of repeated semaphore wakes with unchanged frame count since the last summary log.
+
+    double m_skipSummaryIntervalSec{ 10.0 }; ///< Current interval between summary skip logs.
+
+    double m_nextSkipSummaryTime{ 0.0 }; ///< Time after which the next summary skip log may be emitted.
 
     // Writer book-keeping:
     int m_writing{ NOT_WRITING }; /**< Controls whether or not images are being written,
@@ -469,6 +483,16 @@ void streamWriter::setupConfig()
                 "int",
                 "The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec." );
 
+    config.add( "framegrabber.warnMissedData",
+                "",
+                "framegrabber.warnMissedData",
+                argType::Required,
+                "framegrabber",
+                "warnMissedData",
+                false,
+                "bool",
+                "Whether missed-data backlog summaries should be emitted at warning priority. Default is true." );
+
     config.add( "framegrabber.threadPrio",
                 "",
                 "framegrabber.threadPrio",
@@ -519,6 +543,7 @@ void streamWriter::loadConfig()
 
     config( m_semaphoreNumber, "framegrabber.semaphoreNumber" );
     config( m_semWaitNSec, "framegrabber.semWait" );
+    config( m_warnMissedData, "framegrabber.warnMissedData" );
 
     config( m_fgThreadPrio, "framegrabber.threadPrio" );
     config( m_fgCpuset, "framegrabber.cpuset" );
@@ -690,6 +715,57 @@ int streamWriter::appStartup()
 
 int streamWriter::appLogic()
 {
+    double now = mx::sys::get_curr_time();
+    if( m_nextSkipSummaryTime == 0 )
+    {
+        m_nextSkipSummaryTime = now + m_skipSummaryIntervalSec;
+    }
+
+    if( now >= m_nextSkipSummaryTime )
+    {
+        uint64_t skippedFrames   = m_skippedFrameCount.exchange( 0 );
+        uint64_t repeatedSems    = m_repeatSemaphoreCount.exchange( 0 );
+        double   summaryInterval = m_skipSummaryIntervalSec;
+
+        bool shouldLogSkippedFrames = skippedFrames > 0;
+        bool shouldLog              = shouldLogSkippedFrames || repeatedSems > 0;
+
+        if( shouldLog )
+        {
+            std::string msg      = "stream ingest backlog: ";
+            bool        appended = false;
+
+            if( shouldLogSkippedFrames )
+            {
+                msg += std::to_string( skippedFrames ) + " skipped frames";
+                appended = true;
+            }
+
+            if( repeatedSems > 0 )
+            {
+                if( appended )
+                {
+                    msg += ", ";
+                }
+                msg += std::to_string( repeatedSems ) + " repeated semaphore wakes";
+            }
+            msg += " in last " + std::to_string( static_cast<int>( summaryInterval ) ) + " sec";
+
+            log<text_log>( msg, m_warnMissedData ? logPrio::LOG_WARNING : logPrio::LOG_INFO );
+
+            m_skipSummaryIntervalSec *= 2.0;
+            if( m_skipSummaryIntervalSec > 60.0 )
+            {
+                m_skipSummaryIntervalSec = 60.0;
+            }
+        }
+        else
+        {
+            m_skipSummaryIntervalSec = 10.0;
+        }
+
+        m_nextSkipSummaryTime = now + m_skipSummaryIntervalSec;
+    }
 
     // first do a join check to see if other threads have exited.
     // these will throw if the threads are really gone
@@ -1240,16 +1316,26 @@ void streamWriter::fgThreadExec()
             return; // Will cause shutdown!
         }
 
-        uint8_t atype;
-        size_t  snx, sny, snz;
+        // Buffer and XRIF setup can take long enough for monitor streams to accumulate
+        // stale semaphore posts. Flush again and re-baseline counters so we do not
+        // mistake startup backlog for repeated identical frames.
+        ImageStreamIO_semflush( &image, m_semaphoreNumber );
+
+        uint8_t  atype;
+        size_t   snx, sny, snz;
+        bool     useFrameArrays = image.cntarray != nullptr && length > 1;
+        bool     useCnt1        = length > 1;
+        bool     streamIsCube   = image.md[0].naxis == 3;
+        size_t   frameBytes     = m_width * m_height * m_typeSize;
+        uint64_t maxChunkTimeNs = static_cast<uint64_t>( m_maxChunkTime * 1e9 );
 
         uint64_t curr_image; // The current cnt1 index
         m_currImage      = 0;
         m_currChunkStart = 0;
         m_nextChunkStart = 0;
 
-        // Initialized curr_image ...
-        if( image.md[0].naxis > 2 && length > 1 )
+        // Initialize curr_image after the post-setup flush.
+        if( useCnt1 )
         {
             curr_image = image.md[0].cnt1;
         }
@@ -1261,7 +1347,7 @@ void streamWriter::fgThreadExec()
         uint64_t last_cnt0; // = ((uint64_t)-1);
 
         // so we can initialize last_cnt0 to avoid frame skip on startup
-        if( image.cntarray )
+        if( useFrameArrays )
         {
             last_cnt0 = image.cntarray[curr_image];
         }
@@ -1282,7 +1368,21 @@ void streamWriter::fgThreadExec()
 
             if( sem_timedwait( sem, &ts ) == 0 )
             {
-                if( image.md[0].naxis > 2 && length > 1 )
+                // Drain
+                while( sem_trywait( sem ) == 0 )
+                {
+                }
+
+                if( errno != EAGAIN && errno != EINTR )
+                {
+                    if( !m_shutdown && !m_restart )
+                    {
+                        log<software_error>( { __FILE__, __LINE__, errno, "sem_trywait" } );
+                    }
+                    break;
+                }
+
+                if( useCnt1 )
                 {
                     curr_image = image.md[0].cnt1;
                 }
@@ -1294,7 +1394,7 @@ void streamWriter::fgThreadExec()
                 atype = image.md[0].datatype;
                 snx   = image.md[0].size[0];
                 sny   = image.md[0].size[1];
-                if( image.md[0].naxis == 3 )
+                if( streamIsCube )
                 {
                     snz = image.md[0].size[2];
                 }
@@ -1314,7 +1414,7 @@ void streamWriter::fgThreadExec()
                 }
 
                 uint64_t new_cnt0;
-                if( image.cntarray )
+                if( useFrameArrays )
                 {
                     new_cnt0 = image.cntarray[curr_image];
                 }
@@ -1323,17 +1423,17 @@ void streamWriter::fgThreadExec()
                     new_cnt0 = image.md[0].cnt0;
                 }
 
-#ifdef SW_DEBUG
+                // clang-format off
+                #ifdef SW_DEBUG
                 std::cerr << "new_cnt0: " << new_cnt0 << "\n";
-#endif
+                #endif
+                // clang-format on
 
-                ///\todo cleanup skip frame handling.
-                if( new_cnt0 == last_cnt0 ) //<- this probably isn't useful really
+                if( new_cnt0 == last_cnt0 )
                 {
-                    log<text_log>( "semaphore raised but cnt0 has not changed -- we're probably getting behind",
-                                   logPrio::LOG_WARNING );
+                    ++m_repeatSemaphoreCount;
                     ++cnt0flag;
-                    if( cnt0flag > 10 )
+                    if( cnt0flag > 10 ) // Because of the drain this shouldn't happen
                     {
                         m_restart = true; // if we get here 10 times then something else is wrong.
                     }
@@ -1342,22 +1442,21 @@ void streamWriter::fgThreadExec()
 
                 if( new_cnt0 - last_cnt0 > 1 ) //<- this is what we want to check.
                 {
-                    log<text_log>( "cnt0 changed by more than 1. Frame skipped.", logPrio::LOG_WARNING );
+                    m_skippedFrameCount += ( new_cnt0 - last_cnt0 - 1 );
                 }
 
                 cnt0flag = 0;
 
                 last_cnt0 = new_cnt0;
 
-                char *curr_dest = m_rawImageCircBuff + m_currImage * m_width * m_height * m_typeSize;
-                char *curr_src =
-                    reinterpret_cast<char *>( image.array.raw ) + curr_image * m_width * m_height * m_typeSize;
+                char *curr_dest = m_rawImageCircBuff + m_currImage * frameBytes;
+                char *curr_src  = reinterpret_cast<char *>( image.array.raw ) + curr_image * frameBytes;
 
-                memcpy( curr_dest, curr_src, m_width * m_height * m_typeSize );
+                memcpy( curr_dest, curr_src, frameBytes );
 
                 uint64_t *curr_timing = m_timingCircBuff + 5 * m_currImage;
 
-                if( image.cntarray )
+                if( useFrameArrays )
                 {
                     curr_timing[0] = image.cntarray[curr_image];
                     curr_timing[1] = image.atimearray[curr_image].tv_sec;
@@ -1395,7 +1494,7 @@ void streamWriter::fgThreadExec()
                     curr_timing[4] = curr_timing[2];
                 }
 
-                m_currImageTime = 1.0 * curr_timing[3] + ( 1.0 * curr_timing[4] ) / 1e9;
+                m_currImageTime = curr_timing[3] * 1000000000ULL + curr_timing[4];
 
                 if( m_shutdown && m_writing == WRITING )
                 {
@@ -1433,7 +1532,7 @@ void streamWriter::fgThreadExec()
                         std::cerr << __FILE__ << " " << __LINE__ << " WRITING " << m_currImage << " "
                                   << m_nextChunkStart << " "
                                   << ( m_currImage - m_nextChunkStart == m_writeChunkLength - 1 ) << " "
-                                  << ( m_currImageTime - m_currChunkStartTime > m_maxChunkTime ) << " " << new_cnt0
+                                  << ( m_currImageTime - m_currChunkStartTime > maxChunkTimeNs ) << " " << new_cnt0
                                   << "\n";
 #endif
 
@@ -1453,19 +1552,21 @@ void streamWriter::fgThreadExec()
                         m_currChunkStart     = m_nextChunkStart;
                         m_currChunkStartTime = m_currImageTime;
                     }
-                    else if( m_currImageTime - m_currChunkStartTime > m_maxChunkTime )
+                    else if( m_currImageTime - m_currChunkStartTime > maxChunkTimeNs )
                     {
                         m_currSaveStart       = m_currChunkStart;
                         m_currSaveStop        = m_currImage + 1;
                         m_currSaveStopFrameNo = new_cnt0;
 
-#ifdef SW_DEBUG
+                        // clang-format off
+                        #ifdef SW_DEBUG
                         std::cerr << __FILE__ << " " << __LINE__ << " IMAGE TIME WRITING " << m_currImage << " "
                                   << m_nextChunkStart << " "
                                   << ( m_currImage - m_nextChunkStart == m_writeChunkLength - 1 ) << " "
-                                  << ( m_currImageTime - m_currChunkStartTime > m_maxChunkTime ) << " " << new_cnt0
+                                  << ( m_currImageTime - m_currChunkStartTime > maxChunkTimeNs ) << " " << new_cnt0
                                   << "\n";
-#endif
+                        #endif
+                        // clang-format on
 
                         // Now tell the writer to get going
                         if( sem_post( &m_swSemaphore ) < 0 )
@@ -1484,9 +1585,11 @@ void streamWriter::fgThreadExec()
                     m_currSaveStop        = m_currImage + 1;
                     m_currSaveStopFrameNo = new_cnt0;
 
-#ifdef SW_DEBUG
+                    // clang-format off
+                    #ifdef SW_DEBUG
                     std::cerr << __FILE__ << " " << __LINE__ << " STOP_WRITING\n";
-#endif
+                    #endif
+                    // clang-format on
 
                     // Now tell the writer to get going
                     if( sem_post( &m_swSemaphore ) < 0 )
@@ -1517,7 +1620,8 @@ void streamWriter::fgThreadExec()
                     // Here, if there is at least 1 image, we check for delta-time > m_maxChunkTime
                     //  then write
                     if( ( m_currImage - m_nextChunkStart > 0 ) &&
-                        ( mx::sys::get_curr_time() - m_currChunkStartTime > m_maxChunkTime ) )
+                        ( static_cast<uint64_t>( mx::sys::get_curr_time() * 1e9 ) - m_currChunkStartTime >
+                          maxChunkTimeNs ) )
                     {
                         m_currSaveStart       = m_currChunkStart;
                         m_currSaveStop        = m_currImage;
