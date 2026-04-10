@@ -104,9 +104,6 @@ void RecursiveLeastSquares::save_state(const std::string &filename){
 
     DDSPC::save_matrix(filename + ".prediction_matrix", prediction_matrix);
     DDSPC::save_matrix(filename + ".inverse_covariance", inverse_covariance);
-    DDSPC::save_matrix(filename + ".K", K);
-    DDSPC::save_matrix(filename + ".err", err);
-    DDSPC::save_matrix(filename + ".prediction_output", prediction_output);
 }
 
 void RecursiveLeastSquares::load_state(const std::string &filename){
@@ -129,9 +126,6 @@ void RecursiveLeastSquares::load_state(const std::string &filename){
 
     prediction_matrix = DDSPC::load_matrix(filename + ".prediction_matrix");
     inverse_covariance = DDSPC::load_matrix(filename + ".inverse_covariance");
-    K = DDSPC::load_matrix(filename + ".K");
-    err = DDSPC::load_matrix(filename + ".err");
-    prediction_output = DDSPC::load_matrix(filename + ".prediction_output");
 }
 
 }

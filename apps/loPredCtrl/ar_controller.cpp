@@ -42,7 +42,7 @@ PredictiveController::PredictiveController(int num_actuators, int num_history, i
 
     for(int i=0; i < _num_modes; i++){
         int index = (_num_history - 1) * _num_modes + i;
-        integrator(i, index) = -_gain;
+        integrator(i, index) = _gain;
     }
 
     // Set the regularization matrix
@@ -70,6 +70,20 @@ void PredictiveController::reset(){
     controller.setZero();
 
     rls->reset();
+
+    reset_buffers();
+
+}
+
+void PredictiveController::reset_buffers(){
+    measurement_head = 0;
+    measurement_buffer.resize(buffer_size, _num_modes);
+    measurement_buffer.setZero();
+
+    command_head = 0;
+    command_buffer.resize(buffer_size, _num_modes);
+    command_buffer.setZero();
+
 }
 
 void PredictiveController::set_regularization(realT new_regularization){
@@ -265,22 +279,11 @@ void PredictiveController::save_state(const std::string &filename) {
     ofs << "  \"gain\": " << _gain << ",\n";
     ofs << "  \"delta_max\": " << _delta_max << ",\n";
     ofs << "  \"regularization\": " << _regularization << ",\n";
-    ofs << "  \"buffer_size\": " << buffer_size << ",\n";
-    ofs << "  \"measurement_head\": " << measurement_head << ",\n";
-    ofs << "  \"command_head\": " << command_head << ",\n";
-    ofs << "  \"use_regularization_matrix_01\": " << (use_regularization_matrix_01 ? "true" : "false") << ",\n";
-    ofs << "  \"do_switch_regularization_matrix\": " << (do_switch_regularization_matrix ? "true" : "false") << "\n";
     ofs << "}\n";
     ofs.close();
 
     // Save matrices using utils helpers
-    DDSPC::save_matrix(filename + ".measurement_buffer", measurement_buffer);
-    DDSPC::save_matrix(filename + ".command_buffer", command_buffer);
     DDSPC::save_matrix(filename + ".controller", controller);
-    DDSPC::save_matrix(filename + ".integrator", integrator);
-    DDSPC::save_matrix(filename + ".regularization_matrix_01", regularization_matrix_01);
-    DDSPC::save_matrix(filename + ".regularization_matrix_02", regularization_matrix_02);
-
     rls->save_state(filename + ".rls");
 }
 
@@ -300,34 +303,13 @@ void PredictiveController::load_state(const std::string &filename) {
     std::getline(ifs, line); _gain = static_cast<realT>(std::stod(DDSPC::parse_json_value(line)));
     std::getline(ifs, line); _delta_max = static_cast<realT>(std::stod(DDSPC::parse_json_value(line)));
     std::getline(ifs, line); _regularization = static_cast<realT>(std::stod(DDSPC::parse_json_value(line)));
-    std::getline(ifs, line); buffer_size = static_cast<uint>(std::stoul(DDSPC::parse_json_value(line)));
-    std::getline(ifs, line); measurement_head = static_cast<uint>(std::stoul(DDSPC::parse_json_value(line)));
-    std::getline(ifs, line); command_head = static_cast<uint>(std::stoul(DDSPC::parse_json_value(line)));
-    std::getline(ifs, line); {
-        std::string val = DDSPC::parse_json_value(line);
-        use_regularization_matrix_01 = (val == "true");
-    }
-    std::getline(ifs, line); {
-        std::string val = DDSPC::parse_json_value(line);
-        do_switch_regularization_matrix = (val == "true");
-    }
 
     ifs.close();
 
-    measurement_buffer = DDSPC::load_matrix(filename + ".measurement_buffer");
-    command_buffer = DDSPC::load_matrix(filename + ".command_buffer");
     controller = DDSPC::load_matrix(filename + ".controller");
-    integrator = DDSPC::load_matrix(filename + ".integrator");
-    regularization_matrix_01 = DDSPC::load_matrix(filename + ".regularization_matrix_01");
-    regularization_matrix_02 = DDSPC::load_matrix(filename + ".regularization_matrix_02");
-
-    if (use_regularization_matrix_01) {
-        regularization_matrix = &regularization_matrix_01;
-    } else {
-        regularization_matrix = &regularization_matrix_02;
-    }
-
+    set_regularization(_regularization);
     rls->load_state(filename + ".rls");
+    reset_buffers();
 }
 
 }

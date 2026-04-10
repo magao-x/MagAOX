@@ -99,7 +99,7 @@ using namespace mx::improc;
     // Process control parameters
     bool is_learning {false};
     bool is_predictive_control {false};
-    bool is_integrating {true};
+    bool is_integrating {false};
 
     double loop_time_elapsed {0.0};
 
@@ -115,6 +115,8 @@ using namespace mx::improc;
     bool switch_exploration {false};
     bool use_set_01 {true};
     bool do_reset_model {false};
+    bool do_trigger_load {false};
+    bool do_trigger_save {false};
 
     //
     std::default_random_engine generator;
@@ -492,6 +494,16 @@ using namespace mx::improc;
     if(do_reset_model){
         controller->reset();
         do_reset_model = false;
+    }
+
+    if(do_trigger_load){
+        load("/opt/MagAOX/calib/loPredCtrl/" + m_filename);
+        do_trigger_load = false;
+    }
+
+    if(do_trigger_save){
+        save("/opt/MagAOX/calib/loPredCtrl/" + m_filename);
+        do_trigger_save = false;
     }
 
     if(switch_exploration){
@@ -892,7 +904,8 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_saveToggle )(const pcf::IndiProperty &
 	{
 		std::lock_guard<std::mutex> guard(m_indiMutex);
 
-        save(m_filename);
+        // save(m_filename);
+        do_trigger_save = true;
         log<text_log>("saved state to " + m_filename, logPrio::LOG_NOTICE);
 		updateSwitchIfChanged(m_indiP_saveToggle, "request", pcf::IndiElement::Off, INDI_IDLE);
 	}
@@ -914,7 +927,8 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_loadToggle )(const pcf::IndiProperty &
 	{
 		std::lock_guard<std::mutex> guard(m_indiMutex);
 
-        load(m_filename);
+        // load(m_filename);
+        do_trigger_load = true;
         log<text_log>("loaded state from " + m_filename, logPrio::LOG_NOTICE);
 		updateSwitchIfChanged(m_indiP_loadToggle, "request", pcf::IndiElement::Off, INDI_IDLE);
 	}
