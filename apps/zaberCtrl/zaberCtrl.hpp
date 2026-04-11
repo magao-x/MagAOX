@@ -770,8 +770,9 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState )( const pcf::IndiProperty 
     }
     else if( sstr == "READY" )
     {
-        if( m_homingState == 0 )
+        if( m_homingState == 0 || m_homePreset < 0 )
         {
+            m_homingState = 0;
             state( stateCodes::READY );
         }
         else

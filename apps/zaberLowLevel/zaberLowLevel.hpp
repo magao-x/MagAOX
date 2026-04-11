@@ -770,6 +770,7 @@ int zaberLowLevel::appLogic()
                             log<software_error>( std::format( "error writing state file for {}", m_stages[i].name() ) );
                         }
 
+                        updateIfChanged( m_indiP_parked, m_stages[i].name(), m_stages[i].parked() );
                         updateIfChanged( m_indiP_curr_state, m_stages[i].name(), std::string( "READY" ) );
                     }
                 }
@@ -902,12 +903,23 @@ inline int zaberLowLevel::onPowerOff()
 
     for( size_t i = 0; i < m_stages.size(); ++i )
     {
-        updateIfChanged( m_indiP_temp, m_stages[i].name(), std::string( "" ) );
-
         m_stages[i].onPowerOff();
 
+        // Publish the retained stage snapshot before advertising POWEROFF so
+        // subscribers can consume the last known parked/position state first.
+        updateIfChanged( m_indiP_max_pos, m_stages[i].name(), m_stages[i].maxPos() );
+        updateIfChanged( m_indiP_parked, m_stages[i].name(), m_stages[i].parked() );
+        updateIfChanged( m_indiP_lastHomed, m_stages[i].name(), m_stages[i].lastHomed() );
+        updateIfChanged( m_indiP_curr_pos, m_stages[i].name(), m_stages[i].rawPos() );
+        updateIfChanged( m_indiP_tgt_pos, m_stages[i].name(), m_stages[i].tgtPos() );
+        updateSwitchIfChanged( m_indiP_knob_enable,
+                               m_stages[i].name(),
+                               ( m_stages[i].knobEnabled() ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
+        updateSwitchIfChanged( m_indiP_led_enable,
+                               m_stages[i].name(),
+                               ( m_stages[i].ledEnabled() ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
+        updateIfChanged( m_indiP_temp, m_stages[i].name(), std::string( "" ) );
         updateIfChanged( m_indiP_curr_state, m_stages[i].name(), std::string( "POWEROFF" ) );
-
         updateIfChanged( m_indiP_warn, m_stages[i].name(), pcf::IndiElement::Off );
     }
 

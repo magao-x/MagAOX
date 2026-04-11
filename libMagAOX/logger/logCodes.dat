@@ -86,9 +86,11 @@ telem_loopgain           20915    telem_loopgain
 telem_blockgains         20920    telem_blockgains
 telem_offloading         20923    telem_offloading
 telem_w2tcsoffloader     20924    telem_w2tcsoffloader
+telem_flowrpm            20925    telem_flowrpm
 
 telem_pi335              20930    telem_pi335
 
 telem_sparkleclock       20940    telem_sparkleclock
 
 telem_poltrack           20945    telem_poltrack
+telem_adctrack           20946    telem_adctrack

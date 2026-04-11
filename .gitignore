@@ -72,6 +72,7 @@ apps/filterWheelCtrl/filterWheelCtrl
 apps/flipperCtrl/flipperCtrl
 
 apps/magAOXMaths/magAOXMaths
+apps/flowRPM/flowRPM
 
 #g/gui
 gui/rtimv/plugins/cameraStatus/makefile.cameraStatus
@@ -172,6 +173,8 @@ apps/xindiserver/xindiserver
 apps/xt1121Ctrl/xt1121Ctrl
 
 apps/xt1121DCDU/xt1121DCDU
+
+apps/xInstGraph/xInstGraph
 
 #z
 apps/zaberCtrl/zaberCtrl

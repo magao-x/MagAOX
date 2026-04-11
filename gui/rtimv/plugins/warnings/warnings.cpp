@@ -48,6 +48,10 @@ int warnings::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurator &
              SIGNAL( warningLevel( rtimv::warningLevel ) ),
              m_roa.m_mainWindowObject,
              SLOT( borderWarningLevel( rtimv::warningLevel ) ) );
+    connect( this,
+             SIGNAL( textOverlayRefreshRequested( char ) ),
+             m_roa.m_mainWindowObject,
+             SLOT( textOverlayRefreshRequested( char ) ) );
 
     if( m_roa.m_dictionary != nullptr )
     {
@@ -85,9 +89,22 @@ int warnings::updateOverlay()
     if( m_roa.m_graphicsView == nullptr )
         return 0;
 
-    bool caution = anyOn( m_cautionKeys, ".caution." );
-    bool warn    = anyOn( m_warningKeys, ".warning." );
-    bool alert   = anyOn( m_alertKeys, ".alert." );
+    std::vector<std::string> activeCautions = activeKeys( m_cautionKeys, ".caution." );
+    std::vector<std::string> activeWarnings = activeKeys( m_warningKeys, ".warning." );
+    std::vector<std::string> activeAlerts   = activeKeys( m_alertKeys, ".alert." );
+
+    if( activeCautions != m_activeCautions || activeWarnings != m_activeWarnings || activeAlerts != m_activeAlerts )
+    {
+        m_activeCautions = std::move( activeCautions );
+        m_activeWarnings = std::move( activeWarnings );
+        m_activeAlerts   = std::move( activeAlerts );
+
+        emit textOverlayRefreshRequested( textOverlayKey() );
+    }
+
+    bool caution = !m_activeCautions.empty();
+    bool warn    = !m_activeWarnings.empty();
+    bool alert   = !m_activeAlerts.empty();
 
     if( alert )
     {
@@ -158,11 +175,17 @@ void warnings::enableOverlay()
 
 void warnings::disableOverlay()
 {
-    for( size_t n = 0; n < m_roa.m_graphicsView->statusTextNo(); ++n )
+    if( m_roa.m_graphicsView != nullptr )
     {
-        m_roa.m_graphicsView->statusTextText( n, "" );
+        for( size_t n = 0; n < m_roa.m_graphicsView->statusTextNo(); ++n )
+        {
+            m_roa.m_graphicsView->statusTextText( n, "" );
+        }
     }
 
+    m_activeCautions.clear();
+    m_activeWarnings.clear();
+    m_activeAlerts.clear();
     m_enabled = false;
 }
 
@@ -201,6 +224,21 @@ bool warnings::anyOn( const std::vector<std::string> &keys, const std::string &p
     }
 
     return false;
+}
+
+std::vector<std::string> warnings::activeKeys( const std::vector<std::string> &keys, const std::string &prefix )
+{
+    std::vector<std::string> active;
+
+    for( size_t n = 0; n < keys.size(); ++n )
+    {
+        if( keyOn( m_deviceName + prefix + keys[n] ) )
+        {
+            active.push_back( keys[n] );
+        }
+    }
+
+    return active;
 }
 
 void warnings::appendActive( std::string                    &text,
