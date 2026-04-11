@@ -14,9 +14,10 @@
 #include "../../../tests/testXWC.hpp"
 
 #include <chrono>
-#include <deque>
 #include <array>
+#include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <semaphore.h>
 #include <stdexcept>
 #include <string>
@@ -53,6 +54,7 @@ struct edtStubState
         waitTimeSec       = 0;
         waitTimeNsec      = 0;
         waitImage.fill( 0 );
+        readcfgReturn = 0;
         serialResponses.clear();
         serialCommands.clear();
         activeSerialResponse.clear();
@@ -68,6 +70,7 @@ struct edtStubState
     uint                       waitTimeSec{ 0 };        ///< Seconds returned by `pdv_wait_last_image_timed`.
     uint                       waitTimeNsec{ 0 };       ///< Nanoseconds returned by `pdv_wait_last_image_timed`.
     std::array<u_char, 32>     waitImage{};             ///< Raw EDT frame buffer returned to the app.
+    int                        readcfgReturn{ 0 };      ///< Return code forced from `pdv_readcfg`.
     std::deque<serialResponse> serialResponses;         ///< Scripted serial responses queued for future commands.
     std::vector<std::string>   serialCommands;          ///< Serial commands issued by the app under test.
     std::string                activeSerialResponse;    ///< Active serial response returned by the current command.
@@ -125,14 +128,15 @@ void resetStubState()
 }
 
 /// Store a frame number into the raw EDT image buffer at the OCAM metadata offset.
-void setStubFrameNumber( unsigned int frameNumber )
+[[maybe_unused]] void setStubFrameNumber( unsigned int frameNumber )
 {
     reinterpret_cast<int *>( g_edtStubState.waitImage.data() )[OCAM2_IMAGE_NB_OFFSET / 4] =
         static_cast<int>( frameNumber );
 }
 
 /// Queue one scripted serial response for the next `pdvSerialWriteRead` invocation.
-void queueSerialResponse( const std::string &response, int commandResult = 0, int initialWaitResult = 1 )
+[[maybe_unused]] void
+queueSerialResponse( const std::string &response, int commandResult = 0, int initialWaitResult = 1 )
 {
     g_edtStubState.serialResponses.push_back( { response, commandResult, initialWaitResult } );
 }
@@ -152,7 +156,7 @@ extern "C"
         static_cast<void>( configFile );
         static_cast<void>( dd_p );
         static_cast<void>( edtinfo );
-        return 0;
+        return g_edtStubState.readcfgReturn;
     }
 
     EdtDev *edt_open_channel( const char *deviceName, int unit, int channel )
@@ -444,7 +448,7 @@ std::string uniqueShmimName( const std::string &suffix )
 }
 
 /// Build a unique temporary config-file path for one test.
-std::string uniqueConfigPath( const std::string &suffix )
+[[maybe_unused]] std::string uniqueConfigPath( const std::string &suffix )
 {
     return "/tmp/ocam2KCtrl_test_" + suffix + "_" + std::to_string( ::getpid() ) + ".conf";
 }
@@ -528,10 +532,40 @@ class ocam2KCtrl_test : public MagAOX::app::ocam2KCtrl
 };
 
 /// Put the app into the nominal powered-on state used by the serial helpers.
-void setPoweredOn( ocam2KCtrl_test &app )
+[[maybe_unused]] void setPoweredOn( ocam2KCtrl_test &app )
 {
     static_cast<MagAOXAppT &>( app ).m_powerState = 1;
     app.m_powerTargetState                        = 1;
+}
+
+/// Seed one minimal but internally consistent camera-mode setup for startup and acquisition tests.
+[[maybe_unused]] void configureStartupMode( ocam2KCtrl_test   &app,
+                                            const std::string &modeName       = "science",
+                                            const std::string &serialCommand  = "mode science",
+                                            const std::string &configFileName = "stub.cfg" )
+{
+    dev::cameraConfig config;
+
+    app.m_startupMode                                                  = modeName;
+    app.m_modeName                                                     = modeName;
+    app.m_configDir                                                    = "/tmp";
+    static_cast<dev::dssShutter<ocam2KCtrl> &>( app ).m_powerDevice    = "pwr";
+    static_cast<dev::dssShutter<ocam2KCtrl> &>( app ).m_powerChannel   = "cam";
+    static_cast<dev::dssShutter<ocam2KCtrl> &>( app ).m_dioDevice      = "dio";
+    static_cast<dev::dssShutter<ocam2KCtrl> &>( app ).m_sensorChannel  = "sensor";
+    static_cast<dev::dssShutter<ocam2KCtrl> &>( app ).m_triggerChannel = "trigger";
+    static_cast<dev::dssShutter<ocam2KCtrl> &>( app ).m_shutterWait    = 0;
+    static_cast<dev::dssShutter<ocam2KCtrl> &>( app ).m_shutterTimeout = 0.1;
+    app.m_tel.logPath( "/tmp" );
+    app.m_tel.logName( app.m_configName );
+    app.m_tel.logExt( "bintel" );
+    config.m_serialCommand      = serialCommand;
+    config.m_configFile         = configFileName;
+    config.m_binningX           = 1;
+    config.m_binningY           = 1;
+    config.m_digitalBinX        = 1;
+    config.m_digitalBinY        = 1;
+    app.m_cameraModes[modeName] = config;
 }
 
 /// Start a short-lived framegrabber thread so `frameGrabber::appLogic()` sees a running worker.
@@ -568,13 +602,44 @@ struct fgThreadScope
     }
 };
 
+/// Ensure startup-driven telemetry resources are shut down when a test exits early.
+struct startupScope
+{
+    ocam2KCtrl_test &m_app;     ///< App whose startup resources are managed by this scope.
+    bool             m_started; ///< Tracks whether `appStartup()` completed successfully in the test.
+
+    /// Construct a startup guard for one test app instance.
+    explicit startupScope( ocam2KCtrl_test &app ) : m_app( app ), m_started( false )
+    {
+    }
+
+    /// Record whether startup completed so shutdown only runs when needed.
+    void markStarted( bool started )
+    {
+        m_started = started;
+    }
+
+    /// Shut down telemetry logging and app resources on scope exit after a successful startup.
+    ~startupScope()
+    {
+        if( m_started )
+        {
+            m_app.m_shutdown = 1;
+            m_app.m_tel.logShutdown( true );
+            static_cast<void>( m_app.appShutdown() );
+        }
+    }
+};
+
 /// Report whether a telemetry timestamp has been written at least once.
-bool hasRecordedTime( const timespec &ts )
+[[maybe_unused]] bool hasRecordedTime( const timespec &ts )
 {
     return ts.tv_sec != 0 || ts.tv_nsec != 0;
 }
 
 } // namespace
+
+#ifndef OCAM2KCTRL_TEST_SUPPORT_ONLY
 
 /// Verify the sync stream is created as a 1x1 uint8 ImageStreamIO buffer.
 /**
@@ -628,39 +693,52 @@ TEST_CASE( "ocam2KCtrl sync stream publication mirrors metadata and posts semaph
     #endif
     // clang-format on
 
-    REQUIRE( app.ensureSyncStream() == 0 );
+    SECTION( "null source streams are ignored" )
+    {
+        REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+    }
 
-    sourceStream.image()->md[0].writetime.tv_sec  = 1234;
-    sourceStream.image()->md[0].writetime.tv_nsec = 5678;
-    sourceStream.image()->md[0].atime.tv_sec      = 1234;
-    sourceStream.image()->md[0].atime.tv_nsec     = 4321;
-    sourceStream.image()->md[0].cnt0              = 77;
-    sourceStream.image()->md[0].cnt1              = 0;
-    sourceStream.image()->writetimearray[0]       = sourceStream.image()->md[0].writetime;
-    sourceStream.image()->atimearray[0]           = sourceStream.image()->md[0].atime;
-    sourceStream.image()->cntarray[0]             = sourceStream.image()->md[0].cnt0;
+    SECTION( "publication fails cleanly if the sync stream has not been prepared" )
+    {
+        REQUIRE( app.frameGrabberPostPublish( sourceStream.image() ) == -1 );
+    }
 
-    semIndex = ImageStreamIO_getsemwaitindex( app.m_syncImageStream, 0 );
-    REQUIRE( semIndex >= 0 );
-    ImageStreamIO_semflush( app.m_syncImageStream, semIndex );
-    REQUIRE( sem_getvalue( app.m_syncImageStream->semptr[semIndex], &semValue ) == 0 );
-    REQUIRE( semValue == 0 );
+    SECTION( "publication mirrors metadata and posts one semaphore on the sync stream" )
+    {
+        REQUIRE( app.ensureSyncStream() == 0 );
 
-    app.m_syncImageStream->array.UI8[0] = 99;
+        sourceStream.image()->md[0].writetime.tv_sec  = 1234;
+        sourceStream.image()->md[0].writetime.tv_nsec = 5678;
+        sourceStream.image()->md[0].atime.tv_sec      = 1234;
+        sourceStream.image()->md[0].atime.tv_nsec     = 4321;
+        sourceStream.image()->md[0].cnt0              = 77;
+        sourceStream.image()->md[0].cnt1              = 0;
+        sourceStream.image()->writetimearray[0]       = sourceStream.image()->md[0].writetime;
+        sourceStream.image()->atimearray[0]           = sourceStream.image()->md[0].atime;
+        sourceStream.image()->cntarray[0]             = sourceStream.image()->md[0].cnt0;
 
-    REQUIRE( app.frameGrabberPostPublish( sourceStream.image() ) == 0 );
-    REQUIRE( sem_getvalue( app.m_syncImageStream->semptr[semIndex], &semValue ) == 0 );
-    REQUIRE( semValue == 1 );
-    REQUIRE( app.m_syncImageStream->array.UI8[0] == 0 );
-    REQUIRE( app.m_syncImageStream->md[0].writetime.tv_sec == sourceStream.image()->md[0].writetime.tv_sec );
-    REQUIRE( app.m_syncImageStream->md[0].writetime.tv_nsec == sourceStream.image()->md[0].writetime.tv_nsec );
-    REQUIRE( app.m_syncImageStream->md[0].atime.tv_sec == sourceStream.image()->md[0].atime.tv_sec );
-    REQUIRE( app.m_syncImageStream->md[0].atime.tv_nsec == sourceStream.image()->md[0].atime.tv_nsec );
-    REQUIRE( app.m_syncImageStream->md[0].cnt0 == sourceStream.image()->md[0].cnt0 );
-    REQUIRE( app.m_syncImageStream->md[0].cnt1 == 0 );
-    REQUIRE( app.m_syncImageStream->writetimearray[0].tv_sec == sourceStream.image()->md[0].writetime.tv_sec );
-    REQUIRE( app.m_syncImageStream->atimearray[0].tv_nsec == sourceStream.image()->md[0].atime.tv_nsec );
-    REQUIRE( app.m_syncImageStream->cntarray[0] == sourceStream.image()->md[0].cnt0 );
+        semIndex = ImageStreamIO_getsemwaitindex( app.m_syncImageStream, 0 );
+        REQUIRE( semIndex >= 0 );
+        ImageStreamIO_semflush( app.m_syncImageStream, semIndex );
+        REQUIRE( sem_getvalue( app.m_syncImageStream->semptr[semIndex], &semValue ) == 0 );
+        REQUIRE( semValue == 0 );
+
+        app.m_syncImageStream->array.UI8[0] = 99;
+
+        REQUIRE( app.frameGrabberPostPublish( sourceStream.image() ) == 0 );
+        REQUIRE( sem_getvalue( app.m_syncImageStream->semptr[semIndex], &semValue ) == 0 );
+        REQUIRE( semValue == 1 );
+        REQUIRE( app.m_syncImageStream->array.UI8[0] == 0 );
+        REQUIRE( app.m_syncImageStream->md[0].writetime.tv_sec == sourceStream.image()->md[0].writetime.tv_sec );
+        REQUIRE( app.m_syncImageStream->md[0].writetime.tv_nsec == sourceStream.image()->md[0].writetime.tv_nsec );
+        REQUIRE( app.m_syncImageStream->md[0].atime.tv_sec == sourceStream.image()->md[0].atime.tv_sec );
+        REQUIRE( app.m_syncImageStream->md[0].atime.tv_nsec == sourceStream.image()->md[0].atime.tv_nsec );
+        REQUIRE( app.m_syncImageStream->md[0].cnt0 == sourceStream.image()->md[0].cnt0 );
+        REQUIRE( app.m_syncImageStream->md[0].cnt1 == 0 );
+        REQUIRE( app.m_syncImageStream->writetimearray[0].tv_sec == sourceStream.image()->md[0].writetime.tv_sec );
+        REQUIRE( app.m_syncImageStream->atimearray[0].tv_nsec == sourceStream.image()->md[0].atime.tv_nsec );
+        REQUIRE( app.m_syncImageStream->cntarray[0] == sourceStream.image()->md[0].cnt0 );
+    }
 }
 
 /// Verify sync-stream preparation reuses valid streams and recovers from stale or mismatched ones.
@@ -734,6 +812,21 @@ TEST_CASE( "ocam2KCtrl ensureSyncStream reuses and replaces existing stream stat
         REQUIRE( app.m_syncImageStream->md[0].size[0] == 1 );
         REQUIRE( app.m_syncImageStream->md[0].size[1] == 1 );
         REQUIRE( app.m_syncImageStream->md[0].size[2] == 1 );
+    }
+
+    SECTION( "an invalid pre-existing sync-stream file returns an error" )
+    {
+        char syncFileName[1024];
+        ImageStreamIO_filename( syncFileName, sizeof( syncFileName ), app.m_syncShmimName.c_str() );
+
+        std::FILE *syncFile = std::fopen( syncFileName, "w" );
+        REQUIRE( syncFile != nullptr );
+        REQUIRE( std::fputs( "not an ImageStreamIO stream\n", syncFile ) >= 0 );
+        REQUIRE( std::fclose( syncFile ) == 0 );
+
+        REQUIRE( app.ensureSyncStream() == -1 );
+        REQUIRE( app.m_syncImageStream == nullptr );
+        REQUIRE( ::unlink( syncFileName ) == 0 );
     }
 }
 
@@ -929,6 +1022,52 @@ TEST_CASE( "ocam2KCtrl getTemps handles valid and malformed serial responses", "
         REQUIRE( app.m_tempControlStatusStr == "UNKNOWN" );
         REQUIRE( app.m_tempControlOnTarget == false );
     }
+
+    SECTION( "low cooling power with a warm detector reports temperature control off" )
+    {
+        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                             "SET[165]\nCooling Power [2]mW.\n\n" );
+
+        REQUIRE( app.getTemps() == 0 );
+        REQUIRE( app.m_temps.CCD == Approx( 20.4f ) );
+        REQUIRE( app.m_temps.SET == Approx( 16.5f ) );
+        REQUIRE( app.m_tempControlStatus == false );
+        REQUIRE( app.m_tempControlStatusStr == "TEMP OFF" );
+        REQUIRE( app.m_tempControlOnTarget == false );
+    }
+
+    SECTION( "serial failures while powered off return -1 immediately" )
+    {
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.getTemps() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "temp" );
+    }
+
+    SECTION( "serial failures while powered on return a software error" )
+    {
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.getTemps() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "temp" );
+    }
+
+    SECTION( "malformed temperature responses while powered off return -1" )
+    {
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+
+        queueSerialResponse( "Temperatures : CCD[20.4]\n" );
+
+        REQUIRE( app.getTemps() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "temp" );
+    }
 }
 
 /// Verify FPS queries handle valid and malformed serial responses, plus synchro mode.
@@ -970,6 +1109,35 @@ TEST_CASE( "ocam2KCtrl getFPS handles valid and malformed serial responses", "[o
         queueSerialResponse( "fps 150.5\n" );
 
         REQUIRE( app.getFPS() == 0 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "fps" );
+        REQUIRE( app.m_fps == Approx( 75.0f ) );
+    }
+
+    SECTION( "malformed fps responses while powered off return -1" )
+    {
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.m_synchro                                 = false;
+        app.m_fps                                     = 75.0f;
+
+        queueSerialResponse( "fps 150.5\n" );
+
+        REQUIRE( app.getFPS() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "fps" );
+        REQUIRE( app.m_fps == Approx( 75.0f ) );
+    }
+
+    SECTION( "serial failures while powered on return a software error" )
+    {
+        setPoweredOn( app );
+        app.m_synchro = false;
+        app.m_fps     = 75.0f;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.getFPS() == -1 );
         REQUIRE( g_edtStubState.serialCommands.size() == 1 );
         REQUIRE( g_edtStubState.serialCommands[0] == "fps" );
         REQUIRE( app.m_fps == Approx( 75.0f ) );
@@ -1049,6 +1217,34 @@ TEST_CASE( "ocam2KCtrl temperature control helpers handle valid and invalid requ
         REQUIRE( app.m_tempControlStatus == true );
     }
 
+    SECTION( "setTempControl returns -1 on serial failure once power is already off" )
+    {
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.m_tempControlStatusSet                    = true;
+        app.m_tempControlStatus                       = false;
+        app.m_ccdTempSetpt                            = 15.5f;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.setTempControl() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "temp on" );
+    }
+
+    SECTION( "setTempControl returns a software error on serial failure while still powered" )
+    {
+        app.m_tempControlStatusSet = true;
+        app.m_tempControlStatus    = false;
+        app.m_ccdTempSetpt         = 15.5f;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.setTempControl() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "temp on" );
+    }
+
     SECTION( "setTempSetPt rejects out-of-range high setpoints without serial traffic" )
     {
         app.m_ccdTempSetpt = 30.0f;
@@ -1072,6 +1268,30 @@ TEST_CASE( "ocam2KCtrl temperature control helpers handle valid and invalid requ
         queueSerialResponse( "setpoint updated\n" );
 
         REQUIRE( app.setTempSetPt() == 0 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "temp 12.250000" );
+    }
+
+    SECTION( "setTempSetPt returns -1 on serial failure once power is already off" )
+    {
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.m_ccdTempSetpt                            = 12.25f;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.setTempSetPt() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "temp 12.250000" );
+    }
+
+    SECTION( "setTempSetPt returns a software error on serial failure while still powered" )
+    {
+        app.m_ccdTempSetpt = 12.25f;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.setTempSetPt() == -1 );
         REQUIRE( g_edtStubState.serialCommands.size() == 1 );
         REQUIRE( g_edtStubState.serialCommands[0] == "temp 12.250000" );
     }
@@ -1285,21 +1505,49 @@ TEST_CASE( "ocam2KCtrl loadImageIntoStream uses the OCAM descramble output", "[o
     #endif
     // clang-format on
 
-    app.m_ocam2_id   = 7;
-    app.m_digitalBin = false;
-    app.m_image_p    = reinterpret_cast<u_char *>( rawImage.data() );
+    SECTION( "the non-digital path writes the descrambled frame directly to the destination" )
+    {
+        app.m_ocam2_id   = 7;
+        app.m_digitalBin = false;
+        app.m_image_p    = reinterpret_cast<u_char *>( rawImage.data() );
 
-    g_ocam2StubState.imageNumber = 44;
-    g_ocam2StubState.outputImage = { 10, 20, 30, 40 };
+        g_ocam2StubState.imageNumber = 44;
+        g_ocam2StubState.outputImage = { 10, 20, 30, 40 };
 
-    REQUIRE( app.loadImageIntoStream( destImage.data() ) == 0 );
-    REQUIRE( g_ocam2StubState.lastId == 7 );
-    REQUIRE( g_ocam2StubState.lastRaw == rawImage.data() );
-    REQUIRE( g_ocam2StubState.lastOutput == destImage.data() );
-    REQUIRE( destImage[0] == 10 );
-    REQUIRE( destImage[1] == 20 );
-    REQUIRE( destImage[2] == 30 );
-    REQUIRE( destImage[3] == 40 );
+        REQUIRE( app.loadImageIntoStream( destImage.data() ) == 0 );
+        REQUIRE( g_ocam2StubState.lastId == 7 );
+        REQUIRE( g_ocam2StubState.lastRaw == rawImage.data() );
+        REQUIRE( g_ocam2StubState.lastOutput == destImage.data() );
+        REQUIRE( destImage[0] == 10 );
+        REQUIRE( destImage[1] == 20 );
+        REQUIRE( destImage[2] == 30 );
+        REQUIRE( destImage[3] == 40 );
+    }
+
+    SECTION( "the digital-binning path descrambles into the work image before filling the output frame" )
+    {
+        app.m_ocam2_id    = 8;
+        app.m_digitalBin  = true;
+        app.m_digitalBinX = 2;
+        app.m_digitalBinY = 1;
+        app.m_width       = 2;
+        app.m_height      = 2;
+        app.m_image_p     = reinterpret_cast<u_char *>( rawImage.data() );
+        app.m_digitalBinWork.resize( 4, 2 );
+
+        destImage.fill( 0 );
+        g_ocam2StubState.imageNumber = 55;
+        g_ocam2StubState.outputImage = { 7, 7, 7, 7, 7, 7, 7, 7 };
+
+        REQUIRE( app.loadImageIntoStream( destImage.data() ) == 0 );
+        REQUIRE( g_ocam2StubState.lastId == 8 );
+        REQUIRE( g_ocam2StubState.lastRaw == rawImage.data() );
+        REQUIRE( g_ocam2StubState.lastOutput == app.m_digitalBinWork.data() );
+        REQUIRE( destImage[0] == 7 );
+        REQUIRE( destImage[1] == 7 );
+        REQUIRE( destImage[2] == 7 );
+        REQUIRE( destImage[3] == 7 );
+    }
 }
 
 /// Verify the serial gain helpers accept valid responses and handle malformed or tripped ones.
@@ -1346,6 +1594,20 @@ TEST_CASE( "ocam2KCtrl serial gain helpers handle valid and invalid responses", 
         REQUIRE( app.m_emGain == 77 );
     }
 
+    SECTION( "malformed EM gain responses while powered off return -1 immediately" )
+    {
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.m_emGain                                  = 77;
+
+        queueSerialResponse( "Gain set to \n\n" );
+
+        REQUIRE( app.getEMGain() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "gain" );
+        REQUIRE( app.m_emGain == 77 );
+    }
+
     SECTION( "HV trip response forces the cached EM gain back to the safe minimum" )
     {
         app.m_emGain = 77;
@@ -1370,6 +1632,31 @@ TEST_CASE( "ocam2KCtrl serial gain helpers handle valid and invalid responses", 
         REQUIRE( g_edtStubState.serialCommands[0] == "protection reset" );
         REQUIRE( app.m_protectionReset == true );
         REQUIRE( app.m_protectionResetConfirmed == 0 );
+    }
+
+    SECTION( "resetEMProtection returns a software error while still powered" )
+    {
+        app.m_indiP_emProt = pcf::IndiProperty( pcf::IndiProperty::Text );
+        app.m_indiP_emProt.add( pcf::IndiElement( "status" ) );
+        app.m_indiP_emProt["status"].set( "CONFIRM" );
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.resetEMProtection() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "protection reset" );
+    }
+
+    SECTION( "resetEMProtection returns -1 once power is already off" )
+    {
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.resetEMProtection() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "protection reset" );
     }
 
     SECTION( "setEMGain refuses unsafe requests before protection reset" )
@@ -1400,6 +1687,34 @@ TEST_CASE( "ocam2KCtrl serial gain helpers handle valid and invalid responses", 
         queueSerialResponse( "Gain set to 25 \n\n" );
 
         REQUIRE( app.setEMGain() == 0 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "gain 25" );
+    }
+
+    SECTION( "setEMGain returns -1 on serial failure once power is already off" )
+    {
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.m_protectionReset                         = true;
+        app.m_maxEMGain                               = 600;
+        app.m_emGainSet                               = 25;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.setEMGain() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "gain 25" );
+    }
+
+    SECTION( "setEMGain returns a software error on serial failure while still powered" )
+    {
+        app.m_protectionReset = true;
+        app.m_maxEMGain       = 600;
+        app.m_emGainSet       = 25;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.setEMGain() == -1 );
         REQUIRE( g_edtStubState.serialCommands.size() == 1 );
         REQUIRE( g_edtStubState.serialCommands[0] == "gain 25" );
     }
@@ -1441,10 +1756,47 @@ TEST_CASE( "ocam2KCtrl serial setter commands send the expected sequence", "[oca
         REQUIRE( app.m_reconfig == true );
     }
 
+    SECTION( "setFPS returns a software error on serial failure while still powered" )
+    {
+        app.m_synchro = false;
+        app.m_fpsSet  = 250.5f;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.setFPS() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "fps 250.500000" );
+    }
+
+    SECTION( "setFPS uses the sync-device property path when synchro is enabled" )
+    {
+        app.m_synchro = true;
+        app.m_fpsSet  = 88.5f;
+
+        REQUIRE( app.setFPS() == 0 );
+        REQUIRE( g_edtStubState.serialCommands.empty() );
+    }
+
+    SECTION( "setFPS returns -1 on serial failure once power is already off" )
+    {
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.m_synchro                                 = false;
+        app.m_fpsSet                                  = 250.5f;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.setFPS() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "fps 250.500000" );
+    }
+
     SECTION( "setSynchro off uses the OCAM serial path for both synchro and FPS" )
     {
-        app.m_synchroSet = false;
-        app.m_fpsSet     = 175.0f;
+        app.m_synchroSet    = false;
+        app.m_fpsSet        = 175.0f;
+        app.m_indiP_synchro = pcf::IndiProperty( pcf::IndiProperty::Switch );
+        app.m_indiP_synchro.add( pcf::IndiElement( "toggle", pcf::IndiElement::On ) );
 
         queueSerialResponse( "fps max\n" );
         queueSerialResponse( "synchro off\n" );
@@ -1456,6 +1808,79 @@ TEST_CASE( "ocam2KCtrl serial setter commands send the expected sequence", "[oca
         REQUIRE( g_edtStubState.serialCommands[1] == "synchro off" );
         REQUIRE( g_edtStubState.serialCommands[2] == "fps 175.000000" );
         REQUIRE( app.m_synchro == false );
+    }
+
+    SECTION( "setSynchro on updates the local synchro state and leaves FPS to the sync device" )
+    {
+        app.m_synchroSet    = true;
+        app.m_fpsSet        = 175.0f;
+        app.m_indiP_synchro = pcf::IndiProperty( pcf::IndiProperty::Switch );
+        app.m_indiP_synchro.add( pcf::IndiElement( "toggle", pcf::IndiElement::Off ) );
+
+        queueSerialResponse( "fps max\n" );
+        queueSerialResponse( "synchro on\n" );
+
+        REQUIRE( app.setSynchro() == 0 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 2 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "fps 0" );
+        REQUIRE( g_edtStubState.serialCommands[1] == "synchro on" );
+        REQUIRE( app.m_synchro == true );
+    }
+
+    SECTION( "setSynchro returns a software error when the initial fps-max command fails on powered hardware" )
+    {
+        app.m_synchroSet = false;
+        app.m_fpsSet     = 175.0f;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.setSynchro() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "fps 0" );
+    }
+
+    SECTION( "setSynchro returns a software error when the synchro command fails on powered hardware" )
+    {
+        app.m_synchroSet = true;
+        app.m_fpsSet     = 175.0f;
+
+        queueSerialResponse( "fps max\n" );
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.setSynchro() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 2 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "fps 0" );
+        REQUIRE( g_edtStubState.serialCommands[1] == "synchro on" );
+    }
+
+    SECTION( "setSynchro returns -1 when the initial fps-max command fails while powered off" )
+    {
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.m_synchroSet                              = false;
+        app.m_fpsSet                                  = 175.0f;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.setSynchro() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "fps 0" );
+    }
+
+    SECTION( "setSynchro returns -1 when the synchro command fails while powered off" )
+    {
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.m_synchroSet                              = true;
+        app.m_fpsSet                                  = 175.0f;
+
+        queueSerialResponse( "fps max\n" );
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.setSynchro() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 2 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "fps 0" );
+        REQUIRE( g_edtStubState.serialCommands[1] == "synchro on" );
     }
 }
 
@@ -1527,6 +1952,169 @@ TEST_CASE( "ocam2KCtrl configureAcquisition handles valid and invalid OCAM modes
         REQUIRE( app.state() == stateCodes::OPERATING );
     }
 
+    SECTION( "configureAcquisition keeps the full OCAM frame size when digital binning is disabled" )
+    {
+        app.m_raw_height                           = 121;
+        app.m_fpsSet                               = 0.0f;
+        app.m_synchroSet                           = false;
+        app.m_cameraModes["science"].m_digitalBinX = 1;
+        app.m_cameraModes["science"].m_digitalBinY = 1;
+
+        queueSerialResponse( "mode set\n" );
+        queueSerialResponse( "fps max\n" );
+        queueSerialResponse( "synchro off\n" );
+        queueSerialResponse( "fps restored\n" );
+
+        REQUIRE( app.configureAcquisition() == 0 );
+        REQUIRE( g_ocam2StubState.lastInitMode == OCAM2_NORMAL );
+        REQUIRE( app.m_digitalBin == false );
+        REQUIRE( app.m_width == 240 );
+        REQUIRE( app.m_height == 240 );
+    }
+
+    SECTION( "configureAcquisition selects OCAM binning mode for 62-row raw frames" )
+    {
+        app.m_raw_height                           = 62;
+        app.m_fpsSet                               = 0.0f;
+        app.m_synchroSet                           = false;
+        app.m_cameraModes["science"].m_digitalBinX = 1;
+        app.m_cameraModes["science"].m_digitalBinY = 1;
+
+        queueSerialResponse( "mode set\n" );
+        queueSerialResponse( "fps max\n" );
+        queueSerialResponse( "synchro off\n" );
+        queueSerialResponse( "fps restored\n" );
+
+        REQUIRE( app.configureAcquisition() == 0 );
+        REQUIRE( g_ocam2StubState.lastInitMode == OCAM2_BINNING );
+        REQUIRE( app.m_width == 120 );
+        REQUIRE( app.m_height == 120 );
+    }
+
+    SECTION( "configureAcquisition selects OCAM 1x3 binning mode for 41-row raw frames" )
+    {
+        app.m_raw_height                           = 41;
+        app.m_fpsSet                               = 0.0f;
+        app.m_synchroSet                           = false;
+        app.m_cameraModes["science"].m_digitalBinX = 1;
+        app.m_cameraModes["science"].m_digitalBinY = 1;
+
+        queueSerialResponse( "mode set\n" );
+        queueSerialResponse( "fps max\n" );
+        queueSerialResponse( "synchro off\n" );
+        queueSerialResponse( "fps restored\n" );
+
+        REQUIRE( app.configureAcquisition() == 0 );
+        REQUIRE( g_ocam2StubState.lastInitMode == OCAM2_BINNING1x3 );
+        REQUIRE( app.m_width == 240 );
+        REQUIRE( app.m_height == 80 );
+    }
+
+    SECTION( "configureAcquisition selects OCAM 1x4 binning mode for 31-row raw frames" )
+    {
+        app.m_raw_height                           = 31;
+        app.m_fpsSet                               = 0.0f;
+        app.m_synchroSet                           = false;
+        app.m_cameraModes["science"].m_digitalBinX = 1;
+        app.m_cameraModes["science"].m_digitalBinY = 1;
+
+        queueSerialResponse( "mode set\n" );
+        queueSerialResponse( "fps max\n" );
+        queueSerialResponse( "synchro off\n" );
+        queueSerialResponse( "fps restored\n" );
+
+        REQUIRE( app.configureAcquisition() == 0 );
+        REQUIRE( g_ocam2StubState.lastInitMode == OCAM2_BINNING1x4 );
+        REQUIRE( app.m_width == 240 );
+        REQUIRE( app.m_height == 60 );
+    }
+
+    SECTION( "configureAcquisition reports a set-mode serial failure on powered hardware" )
+    {
+        app.m_raw_height = 121;
+        app.m_fpsSet     = 0.0f;
+        app.m_synchroSet = false;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.configureAcquisition() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "mode science" );
+    }
+
+    SECTION( "configureAcquisition returns -1 quietly once power is already off during the set-mode command" )
+    {
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.m_raw_height                              = 121;
+        app.m_fpsSet                                  = 0.0f;
+        app.m_synchroSet                              = false;
+
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.configureAcquisition() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "mode science" );
+    }
+
+    SECTION( "configureAcquisition logs but continues when setSynchro fails" )
+    {
+        app.m_raw_height                           = 121;
+        app.m_fpsSet                               = 0.0f;
+        app.m_synchroSet                           = false;
+        app.m_cameraModes["science"].m_digitalBinX = 1;
+        app.m_cameraModes["science"].m_digitalBinY = 1;
+
+        queueSerialResponse( "mode set\n" );
+        queueSerialResponse( "fps max\n" );
+        queueSerialResponse( "", -1 );
+
+        REQUIRE( app.configureAcquisition() == 0 );
+        REQUIRE( g_edtStubState.serialCommands.size() == 3 );
+        REQUIRE( g_edtStubState.serialCommands[0] == "mode science" );
+        REQUIRE( g_edtStubState.serialCommands[1] == "fps 0" );
+        REQUIRE( g_edtStubState.serialCommands[2] == "synchro off" );
+        REQUIRE( g_ocam2StubState.lastInitMode == OCAM2_NORMAL );
+    }
+
+    SECTION( "configureAcquisition returns -1 if OCAM initialization fails after power is lost" )
+    {
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.m_raw_height                              = 121;
+        app.m_fpsSet                                  = 0.0f;
+        app.m_synchroSet                              = false;
+        app.m_cameraModes["science"].m_digitalBinX    = 1;
+        app.m_cameraModes["science"].m_digitalBinY    = 1;
+        g_ocam2StubState.initReturn                   = OCAM2_ERROR;
+
+        queueSerialResponse( "mode set\n" );
+        queueSerialResponse( "fps max\n" );
+        queueSerialResponse( "synchro off\n" );
+        queueSerialResponse( "fps restored\n" );
+
+        REQUIRE( app.configureAcquisition() == -1 );
+        REQUIRE( app.m_syncImageStream == nullptr );
+    }
+
+    SECTION( "configureAcquisition returns -1 if OCAM initialization fails on powered hardware" )
+    {
+        app.m_raw_height                           = 121;
+        app.m_fpsSet                               = 0.0f;
+        app.m_synchroSet                           = false;
+        app.m_cameraModes["science"].m_digitalBinX = 1;
+        app.m_cameraModes["science"].m_digitalBinY = 1;
+        g_ocam2StubState.initReturn                = OCAM2_ERROR;
+
+        queueSerialResponse( "mode set\n" );
+        queueSerialResponse( "fps max\n" );
+        queueSerialResponse( "synchro off\n" );
+        queueSerialResponse( "fps restored\n" );
+
+        REQUIRE( app.configureAcquisition() == -1 );
+        REQUIRE( app.m_syncImageStream == nullptr );
+    }
+
     SECTION( "configureAcquisition rejects unsupported raw frame heights" )
     {
         app.m_raw_height = 100;
@@ -1593,6 +2181,56 @@ TEST_CASE( "ocam2KCtrl INDI callbacks update local state", "[ocam2KCtrl]" )
         REQUIRE( app.m_protectionResetConfirmed == 0 );
     }
 
+    SECTION( "EM protection reset callback ignores requests while power is off" )
+    {
+        pcf::IndiProperty ipRecv( pcf::IndiProperty::Switch );
+
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.m_indiP_emProtReset.setDevice( "ocam2KCtrl" );
+        app.m_indiP_emProtReset.setName( "emProtReset" );
+        ipRecv.setDevice( "ocam2KCtrl" );
+        ipRecv.setName( "emProtReset" );
+        ipRecv.add( pcf::IndiElement( "request", pcf::IndiElement::On ) );
+
+        REQUIRE( app.newCallBack_m_indiP_emProtReset( ipRecv ) == 0 );
+        REQUIRE( app.m_protectionResetConfirmed == 0 );
+        REQUIRE( g_edtStubState.serialCommands.empty() );
+    }
+
+    SECTION( "EM protection reset callback rejects the wrong property name" )
+    {
+        pcf::IndiProperty ipRecv( pcf::IndiProperty::Switch );
+
+        app.m_indiP_emProtReset.setDevice( "ocam2KCtrl" );
+        app.m_indiP_emProtReset.setName( "emProtReset" );
+        ipRecv.setDevice( "ocam2KCtrl" );
+        ipRecv.setName( "wrongName" );
+        ipRecv.add( pcf::IndiElement( "request", pcf::IndiElement::On ) );
+
+        REQUIRE( app.newCallBack_m_indiP_emProtReset( ipRecv ) == -1 );
+    }
+
+    SECTION( "EM protection reset callback ignores requests without the request element or with it off" )
+    {
+        pcf::IndiProperty missingReq( pcf::IndiProperty::Switch );
+        pcf::IndiProperty offReq( pcf::IndiProperty::Switch );
+
+        app.m_indiP_emProtReset.setDevice( "ocam2KCtrl" );
+        app.m_indiP_emProtReset.setName( "emProtReset" );
+
+        missingReq.setDevice( "ocam2KCtrl" );
+        missingReq.setName( "emProtReset" );
+        offReq.setDevice( "ocam2KCtrl" );
+        offReq.setName( "emProtReset" );
+        offReq.add( pcf::IndiElement( "request", pcf::IndiElement::Off ) );
+
+        REQUIRE( app.newCallBack_m_indiP_emProtReset( missingReq ) == 0 );
+        REQUIRE( app.newCallBack_m_indiP_emProtReset( offReq ) == 0 );
+        REQUIRE( app.m_protectionResetConfirmed == 0 );
+        REQUIRE( g_edtStubState.serialCommands.empty() );
+    }
+
     SECTION( "sync frequency callback queues a reconfiguration when synchro mode changes the effective FPS" )
     {
         pcf::IndiProperty ipRecv( pcf::IndiProperty::Number );
@@ -1616,6 +2254,18 @@ TEST_CASE( "ocam2KCtrl INDI callbacks update local state", "[ocam2KCtrl]" )
         REQUIRE( app.m_fps == Approx( 123.4f ) );
         REQUIRE( app.m_nextMode == "science" );
         REQUIRE( app.m_reconfig == true );
+    }
+
+    SECTION( "sync frequency callback rejects updates that do not include the current element" )
+    {
+        pcf::IndiProperty ipRecv( pcf::IndiProperty::Number );
+
+        app.m_indiP_syncFreq.setDevice( "syncDevice" );
+        app.m_indiP_syncFreq.setName( "C1freq" );
+        ipRecv.setDevice( "syncDevice" );
+        ipRecv.setName( "C1freq" );
+
+        REQUIRE( app.setCallBack_m_indiP_syncFreq( ipRecv ) == -1 );
     }
 }
 
@@ -1760,41 +2410,6 @@ TEST_CASE( "ocam2KCtrl telemetry wrappers record snapshots and stale intervals",
     }
 }
 
-/// Verify lifecycle entrypoints cover startup failure handling and the POWERON fast-return path.
-/**
- * \ingroup ocam2KCtrl_unit_test
- */
-TEST_CASE( "ocam2KCtrl lifecycle entrypoints handle startup failures and POWERON logic", "[ocam2KCtrl]" )
-{
-    resetStubState();
-
-    // clang-format off
-    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
-    XWCTEST_DOXYGEN_REF( ocam2KCtrl::appStartup() );
-    XWCTEST_DOXYGEN_REF( ocam2KCtrl::appLogic() );
-    #endif
-    // clang-format on
-
-    SECTION( "appStartup reports failure when the startup mode cannot be configured" )
-    {
-        ocam2KCtrl_test app;
-
-        app.m_startupMode = "";
-
-        REQUIRE( app.appStartup() < 0 );
-    }
-
-    SECTION( "appLogic returns immediately while the app is still in POWERON" )
-    {
-        ocam2KCtrl_test app;
-
-        app.state( stateCodes::POWERON );
-        fgThreadScope fgThread( app );
-
-        REQUIRE( app.appLogic() == 0 );
-    }
-}
-
 /// Verify appLogic covers connection transitions, error handling, and READY-state housekeeping.
 /**
  * \ingroup ocam2KCtrl_unit_test
@@ -1824,6 +2439,20 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         REQUIRE( app.appLogic() == 0 );
         REQUIRE( app.state() == stateCodes::NOTCONNECTED );
         REQUIRE( app.m_temps.CCD == Approx( -999.0f ) );
+        REQUIRE( g_edtStubState.serialCommands.empty() );
+    }
+
+    SECTION( "POWEROFF falls through to the final return without camera traffic" )
+    {
+        ocam2KCtrl_test app;
+
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.state( stateCodes::POWEROFF );
+        fgThreadScope fgThread( app );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::POWEROFF );
         REQUIRE( g_edtStubState.serialCommands.empty() );
     }
 
@@ -1871,6 +2500,51 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
                      "fps", "fps", "temp 18.500000", "fps 0", "synchro off", "fps 0.000000", "temp", "fps", "gain" } );
     }
 
+    SECTION( "NOTCONNECTED returns after a failed connectivity probe while power remains on" )
+    {
+        ocam2KCtrl_test app;
+
+        setPoweredOn( app );
+        app.state( stateCodes::NOTCONNECTED );
+
+        queueSerialResponse( "", -1 );
+
+        fgThreadScope fgThread( app );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::NOTCONNECTED );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "fps" } );
+    }
+
+    SECTION( "CONNECTED with a requested FPS transitions through OPERATING before housekeeping" )
+    {
+        ocam2KCtrl_test app;
+
+        setPoweredOn( app );
+
+        app.state( stateCodes::CONNECTED );
+        app.m_fpsSet                   = 10.0f;
+        app.m_poweredOn                = false;
+        app.m_protectionResetConfirmed = 0;
+
+        queueSerialResponse( "fps [150.5] Hz\n" );
+        queueSerialResponse( "fps max\n" );
+        queueSerialResponse( "synchro off\n" );
+        queueSerialResponse( "fps 10.000000 restored\n" );
+        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                             "SET[205]\nCooling Power [102]mW.\n\n" );
+        queueSerialResponse( "fps [150.5] Hz\n" );
+        queueSerialResponse( "Gain set to 42 \n\n" );
+
+        fgThreadScope fgThread( app );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::FAILURE );
+        REQUIRE( app.m_shutdown == 1 );
+        REQUIRE( g_edtStubState.serialCommands ==
+                 std::vector<std::string>{ "fps", "fps 0", "synchro off", "fps 10.000000", "temp", "fps", "gain" } );
+    }
+
     SECTION( "CONNECTED enters ERROR when getFPS fails on powered hardware" )
     {
         ocam2KCtrl_test app;
@@ -1885,6 +2559,92 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         REQUIRE( app.appLogic() == 0 );
         REQUIRE( app.state() == stateCodes::ERROR );
         REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "fps" } );
+    }
+
+    SECTION( "CONNECTED returns quietly if getFPS fails after power is lost" )
+    {
+        ocam2KCtrl_test app;
+
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.state( stateCodes::CONNECTED );
+
+        queueSerialResponse( "", -1 );
+
+        fgThreadScope fgThread( app );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::CONNECTED );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "fps" } );
+    }
+
+    SECTION( "CONNECTED returns quietly when setTempSetPt fails after power is lost" )
+    {
+        ocam2KCtrl_test app;
+
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.state( stateCodes::CONNECTED );
+        app.m_fpsSet       = 0.0f;
+        app.m_poweredOn    = true;
+        app.m_ccdTempSetpt = 18.5f;
+
+        queueSerialResponse( "fps [150.5] Hz\n" );
+        queueSerialResponse( "", -1 );
+
+        fgThreadScope fgThread( app );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::READY );
+        REQUIRE( app.m_poweredOn == false );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "fps", "temp 18.500000" } );
+    }
+
+    SECTION( "CONNECTED returns a software error when setTempSetPt fails on powered hardware" )
+    {
+        ocam2KCtrl_test app;
+
+        setPoweredOn( app );
+        app.state( stateCodes::CONNECTED );
+        app.m_fpsSet       = 0.0f;
+        app.m_poweredOn    = true;
+        app.m_ccdTempSetpt = 18.5f;
+
+        queueSerialResponse( "fps [150.5] Hz\n" );
+        queueSerialResponse( "", -1 );
+
+        fgThreadScope fgThread( app );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::READY );
+        REQUIRE( app.m_poweredOn == false );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "fps", "temp 18.500000" } );
+    }
+
+    SECTION( "CONNECTED logs but continues when setSynchro fails during the initial connect" )
+    {
+        ocam2KCtrl_test app;
+
+        setPoweredOn( app );
+        app.state( stateCodes::CONNECTED );
+        app.m_fpsSet    = 0.0f;
+        app.m_poweredOn = false;
+
+        queueSerialResponse( "fps [150.5] Hz\n" );
+        queueSerialResponse( "fps max\n" );
+        queueSerialResponse( "", -1 );
+        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                             "SET[205]\nCooling Power [102]mW.\n\n" );
+        queueSerialResponse( "fps [150.5] Hz\n" );
+        queueSerialResponse( "Gain set to 42 \n\n" );
+
+        fgThreadScope fgThread( app );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::FAILURE );
+        REQUIRE( app.m_shutdown == 1 );
+        REQUIRE( g_edtStubState.serialCommands ==
+                 std::vector<std::string>{ "fps", "fps 0", "synchro off", "temp", "fps", "gain" } );
     }
 
     SECTION( "READY expires stale protection resets and completes housekeeping before telemetry shutdown" )
@@ -1916,6 +2676,20 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         REQUIRE( app.m_emGain == 42 );
     }
 
+    SECTION( "READY returns immediately if the INDI mutex is already locked elsewhere" )
+    {
+        ocam2KCtrl_test app;
+
+        setPoweredOn( app );
+        app.state( stateCodes::READY );
+
+        std::unique_lock<std::mutex> hold( app.m_indiMutex );
+        fgThreadScope                fgThread( app );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( g_edtStubState.serialCommands.empty() );
+    }
+
     SECTION( "READY moves to ERROR when temperature polling fails on powered hardware" )
     {
         ocam2KCtrl_test app;
@@ -1931,6 +2705,99 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         REQUIRE( app.state() == stateCodes::ERROR );
         REQUIRE( app.m_temps.CCD == Approx( -999.0f ) );
         REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "temp" } );
+    }
+
+    SECTION( "READY returns quietly when temperature polling fails after power is lost" )
+    {
+        ocam2KCtrl_test app;
+
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.state( stateCodes::READY );
+
+        queueSerialResponse( "", -1 );
+
+        fgThreadScope fgThread( app );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::READY );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "temp" } );
+    }
+
+    SECTION( "READY moves to ERROR when FPS polling fails after temperatures succeed" )
+    {
+        ocam2KCtrl_test app;
+
+        setPoweredOn( app );
+        app.state( stateCodes::READY );
+
+        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                             "SET[205]\nCooling Power [102]mW.\n\n" );
+        queueSerialResponse( "", -1 );
+
+        fgThreadScope fgThread( app );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::ERROR );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "temp", "fps" } );
+    }
+
+    SECTION( "READY returns quietly when FPS polling fails after power is lost" )
+    {
+        ocam2KCtrl_test app;
+
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.state( stateCodes::READY );
+
+        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                             "SET[205]\nCooling Power [102]mW.\n\n" );
+        queueSerialResponse( "", -1 );
+
+        fgThreadScope fgThread( app );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::READY );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "temp", "fps" } );
+    }
+
+    SECTION( "READY returns quietly when EM gain polling fails after power is lost" )
+    {
+        ocam2KCtrl_test app;
+
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        app.m_powerTargetState                        = 0;
+        app.state( stateCodes::READY );
+
+        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                             "SET[205]\nCooling Power [102]mW.\n\n" );
+        queueSerialResponse( "fps [150.5] Hz\n" );
+        queueSerialResponse( "", -1 );
+
+        fgThreadScope fgThread( app );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::READY );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "temp", "fps", "gain" } );
+    }
+
+    SECTION( "READY moves to ERROR when EM gain polling fails on powered hardware" )
+    {
+        ocam2KCtrl_test app;
+
+        setPoweredOn( app );
+        app.state( stateCodes::READY );
+
+        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                             "SET[205]\nCooling Power [102]mW.\n\n" );
+        queueSerialResponse( "fps [150.5] Hz\n" );
+        queueSerialResponse( "", -1 );
+
+        fgThreadScope fgThread( app );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::ERROR );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "temp", "fps", "gain" } );
     }
 }
 
@@ -1964,7 +2831,10 @@ TEST_CASE( "ocam2KCtrl reconfig reloads the next mode through edtCamera", "[ocam
     REQUIRE( app.m_raw_height == 121 );
     REQUIRE( app.m_raw_depth == 16 );
     REQUIRE( app.m_cameraType == "stub_pdv" );
+    REQUIRE( app.fps() == Approx( app.m_fps ) );
 }
+
+#endif // OCAM2KCTRL_TEST_SUPPORT_ONLY
 
 } // namespace ocam2KCtrlTest
 } // namespace libXWCTest

@@ -27,6 +27,7 @@ EOF
 }
 
 mode="full"
+repo_root=$(pwd)
 
 case "${1:-}" in
     "")
@@ -78,5 +79,6 @@ genhtml coverage_filtered.info --output-directory coverage_report \
                                --merge-aliases \
                                --suppress-aliases \
                                --filter function \
+                               --prefix "$repo_root" \
                                --demangle-cpp \
                                --css-file tests/coverage/gcov.css
