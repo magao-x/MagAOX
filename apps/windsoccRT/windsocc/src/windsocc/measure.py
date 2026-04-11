@@ -56,6 +56,10 @@ includes ``raw_direction`` (degrees in the camwfs cube frame) and ``corrected_di
 (after ``PA_OFFSET``, with parity handled by negating that offset when a parity flip applies).
 ``direction`` is set equal to ``corrected_direction`` for backward compatibility.
 
+TODO refactoring: 
+- move all but main function and logic to core/measure.py
+- rename this script to ws_measure.py
+
 """
 
 import cProfile

@@ -1,3 +1,10 @@
+"""Distill stage for the WindsoCC pipeline.
+
+TODO refactoring: 
+- move all but main function and logic to core/distill.py
+- rename this script to ws_distill.py
+"""
+
 #!/usr/bin/env python3
 import os
 import glob
@@ -227,6 +234,10 @@ def process_distill_group(suffix, averaged_cube, averaged_bias, header, distille
 
     mf_template = build_template(averaged_cube[0])
     high_pass_cube = apply_unsharp_mask_cube(averaged_cube, fwhm_pixels=3.0)
+    averaged_cube_output_path = os.path.join(distilled_dir, f"{suffix}.fits")
+    high_pass_cube_output_path = os.path.join(distilled_dir, f"{suffix}_unsharp.fits")
+    write_cube(averaged_cube_output_path, averaged_cube, header)
+    write_cube(high_pass_cube_output_path, high_pass_cube, header)
     mf_template_unsharp = build_template(high_pass_cube[0])
     mf_output_path = os.path.join(distilled_dir, "mf_templates", f"{suffix}_mf_template.fits")
     mf_output_path_unsharp = os.path.join(distilled_dir, "mf_templates", f"{suffix}_mf_template_unsharp.fits")
@@ -246,21 +257,21 @@ def process_distill_group(suffix, averaged_cube, averaged_bias, header, distille
     write_cube(mf_response_unsharp_output_path, mf_response_unsharp_cube, header)
 
     # collapsed_mf_response = np.mean(mf_response_cube, axis=0)
-    collapsed_mf_response_unsharp = np.mean(mf_response_unsharp_cube, axis=0)
+    # collapsed_mf_response_unsharp = np.mean(mf_response_unsharp_cube, axis=0)
     # collapsed_mf_response_output_path = os.path.join(
     #     distilled_dir, "mf_response_cubes", f"{suffix}_mf_response_mean_collapsed.fits"
     # )
-    collapsed_mf_response_unsharp_output_path = os.path.join(
-        distilled_dir,
-        "mf_response_cubes",
-        f"{suffix}_mf_response_unsharp_mean_collapsed.fits",
-    )
+    # collapsed_mf_response_unsharp_output_path = os.path.join(
+    #     distilled_dir,
+    #     "mf_response_cubes",
+    #     f"{suffix}_mf_response_unsharp_mean_collapsed.fits",
+    # )
     # write_cube(collapsed_mf_response_output_path, collapsed_mf_response, header)
-    write_cube(
-        collapsed_mf_response_unsharp_output_path,
-        collapsed_mf_response_unsharp,
-        header,
-    )
+    # write_cube(
+    #     collapsed_mf_response_unsharp_output_path,
+    #     collapsed_mf_response_unsharp,
+    #     header,
+    # )
     # if save_pngs:
     #     save_png(
     #         collapsed_mf_response_output_path.replace(".fits", ".png"),

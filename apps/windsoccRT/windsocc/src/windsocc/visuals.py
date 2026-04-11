@@ -4,6 +4,10 @@ Stitch per-frame PNG sequences (from parallel ``ws_measure``) into MP4 files.
 
 Reads ``measure_results/pngs/<movie_stem>/frame_*.png`` and writes
 ``measure_results/movies/<movie_stem>.mp4`` using imageio/ffmpeg.
+
+TODO refactoring: 
+- move all but main function and logic to core/visuals.py
+- rename this script to ws_visuals.py
 """
 
 from __future__ import annotations

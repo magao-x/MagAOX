@@ -4,6 +4,10 @@ From camwfs experiment:
 Sine pattern travelling E --> W (270 deg) on DM:
 camwfs: 297.5 deg propagation direction
 camsci1: 242.5 (SW) or 62.5 (NE) degree sparkle orientation
+
+TODO refactoring: 
+- move all but main function and logic to core/xcorr.py
+- rename this script to ws_xcorr.py
 '''
 
 

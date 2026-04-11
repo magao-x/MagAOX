@@ -41,6 +41,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+TODO refactoring: 
+- move all but main function and logic to core/partition.py
+- rename this script to ws_partition.py
+
 '''
 
 #!/usr/bin/env python3
@@ -303,7 +307,7 @@ def main():
 
     if args.undo:
         undo_organize(args.directory)
-        
+
     if not check_directory_validity(args.directory):
         print(f"Directory {args.directory} is not valid. Please check the directory and try again.")
         return

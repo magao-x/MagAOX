@@ -11,6 +11,9 @@ For high-rate shmim streams (e.g. ~2 kHz), default reads are non-blocking; use
 writer skip/duplicate logging.
 
 TODO check the pupil coordinates using references made from today's data
+TODO refactoring: 
+- move all but main function and logic to core/realtime.py
+- rename this script to ws_realtime.py
 """
 
 from __future__ import annotations
