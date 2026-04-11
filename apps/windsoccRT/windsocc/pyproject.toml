@@ -7,7 +7,7 @@ name = "windsocc"
 version = "0.1.0"
 description = "Do post-observation analysis of turbulence using MagAO-X camwfs images."
 readme = "README.md"
-requires-python = ">=3.10,<=3.13"
+requires-python = ">=3.10,<3.14"
 authors = [
     {name = "Jay Kueny", email = "jkueny@arizona.edu"}
 ]
