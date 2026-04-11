@@ -1,8 +1,16 @@
 """Realtime orchestration for the WindsoCC pipeline.
 
+Frame sources:
 
-TODO check the pupil coordinates using references made from
-today's data
+- ``offline-fits``: read frames from FITS files for validation.
+- ``magaox-buffer``: call a user-supplied ``module:function`` reader.
+- ``shmim``: open a live MagAO-X stream with ``magaox.shmim.Image`` (RTC / ``ws_realtime``).
+
+For high-rate shmim streams (e.g. ~2 kHz), default reads are non-blocking; use
+``--wait-new-frame`` for semaphore-synced frames. See ``--cnt0-diagnostics`` for
+writer skip/duplicate logging.
+
+TODO check the pupil coordinates using references made from today's data
 """
 
 from __future__ import annotations
@@ -448,15 +456,204 @@ class MagAOXCircularBufferFrameSource(FrameSource):
         )
 
 
+def _shmim_cnt0(image) -> int | None:
+    """Return ImageStreamIO ``cnt0`` (writer frame counter) if available."""
+    try:
+        return int(image.md.cnt0)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def load_shmim_image(stream_name: str):
+    """Open a MagAO-X shmim stream via ``magaox.shmim.Image``."""
+    try:
+        from magaox.shmim import Image  # pyright: ignore[reportMissingImports]
+    except ImportError as exc:
+        raise RuntimeError(
+            "Failed to import magaox.shmim.Image. Ensure the MagAO-X Python package and "
+            "ImageStreamIOWrap are installed before running ws_realtime --source-type shmim."
+        ) from exc
+
+    return Image(stream_name)
+
+
+def collect_shmim_batch(
+    stream_name: str,
+    target_frames: int,
+    frame_height: int,
+    frame_width: int,
+    *,
+    wait_new_frame: bool = False,
+    timeout_seconds: float = 5.0,
+    check_before_wait: bool = False,
+    cnt0_diagnostics: bool = False,
+) -> FrameBatch:
+    """Collect a contiguous batch from a live shmim stream into a float32 cube."""
+    image = load_shmim_image(stream_name)
+    batch_shape = (target_frames, frame_height, frame_width)
+    expected_frame_shape = (frame_height, frame_width)
+
+    logging.info(
+        "Collecting %d frame(s) from shmim %s into batch shape %s (each frame %s, wait_new_frame=%s)",
+        target_frames,
+        stream_name,
+        batch_shape,
+        expected_frame_shape,
+        wait_new_frame,
+    )
+
+    batch = np.empty(batch_shape, dtype=np.float32)
+    first_timestamp = None
+    wait = wait_new_frame
+
+    prev_cnt0: int | None = None
+    cnt0_first: int | None = None
+    cnt0_last: int | None = None
+    skipped_writer_frames = 0
+    max_cnt0_gap = 0
+    duplicate_cnt0_reads = 0
+    cnt0_unavailable = False
+
+    for frame_index in range(target_frames):
+        frame = image.get_data(
+            wait=wait,
+            timeout_sec=timeout_seconds,
+            check_before_wait=check_before_wait,
+        )
+        cnt0_now = _shmim_cnt0(image)
+        if cnt0_now is None:
+            cnt0_unavailable = True
+        else:
+            if cnt0_first is None:
+                cnt0_first = cnt0_now
+            if prev_cnt0 is not None:
+                delta = cnt0_now - prev_cnt0
+                if delta > 1:
+                    gap = delta - 1
+                    skipped_writer_frames += gap
+                    max_cnt0_gap = max(max_cnt0_gap, delta)
+                    msg = (
+                        "cnt0 advanced by %d from %d to %d at grab %d/%d — "
+                        "writer published %d frame(s) between consecutive grabs (possible miss)."
+                    ) % (delta, prev_cnt0, cnt0_now, frame_index + 1, target_frames, gap)
+                    if wait:
+                        logging.warning(msg)
+                    elif cnt0_diagnostics:
+                        logging.warning(msg)
+                elif delta == 0 and not wait:
+                    duplicate_cnt0_reads += 1
+                    if cnt0_diagnostics:
+                        logging.debug(
+                            "cnt0 unchanged at %d on grab %d/%d (same buffer sampled twice; expected without wait).",
+                            cnt0_now,
+                            frame_index + 1,
+                            target_frames,
+                        )
+            prev_cnt0 = cnt0_now
+            cnt0_last = cnt0_now
+
+        frame_array = np.asarray(frame, dtype=np.float32)
+        if frame_array.ndim != 2:
+            frame_array = np.squeeze(frame_array)
+        if frame_array.shape != expected_frame_shape:
+            raise ValueError(
+                f"Expected stream frames with shape {expected_frame_shape}, got {frame_array.shape} "
+                f"on frame {frame_index + 1}."
+            )
+
+        if first_timestamp is None:
+            first_timestamp = datetime.now(timezone.utc)
+            logging.info(
+                "First frame received from %s with dtype=%s shape=%s",
+                stream_name,
+                frame_array.dtype,
+                frame_array.shape,
+            )
+
+        np.copyto(batch[frame_index], frame_array)
+
+    validate_frame_batch(batch, (frame_height, frame_width))
+    logging.info("Collected live batch with shape=%s dtype=%s", batch.shape, batch.dtype)
+
+    if cnt0_unavailable:
+        logging.info("shmim cnt0 not read (md.cnt0 missing); skip gap/duplicate counter diagnostics.")
+    elif cnt0_first is not None and cnt0_last is not None:
+        total_cnt0_span = cnt0_last - cnt0_first
+        expected_steps = target_frames - 1
+        logging.info(
+            "cnt0 summary: first=%d last=%d span=%d (expected ~%d steps for consecutive grabs with no writer skips)",
+            cnt0_first,
+            cnt0_last,
+            total_cnt0_span,
+            expected_steps,
+        )
+        if skipped_writer_frames:
+            logging.warning(
+                "cnt0: implied %d writer frame(s) skipped between grabs (max single gap=%d).",
+                skipped_writer_frames,
+                max_cnt0_gap,
+            )
+        elif wait:
+            logging.info("cnt0: no gaps >1 between grabs — consistent with receiving each new frame once.")
+        if not wait and duplicate_cnt0_reads:
+            logging.info(
+                "cnt0: %d grab(s) saw the same cnt0 as the previous grab (non-blocking mode; not every writer frame).",
+                duplicate_cnt0_reads,
+            )
+
+    return FrameBatch(
+        frames=batch,
+        first_timestamp=first_timestamp or datetime.now(timezone.utc),
+    )
+
+
+class ShmimFrameSource(FrameSource):
+    """Collect frames from a live MagAO-X shmim stream (``magaox.shmim.Image``)."""
+
+    def __init__(
+        self,
+        stream_name: str,
+        frame_height: int,
+        frame_width: int,
+        *,
+        wait_new_frame: bool = False,
+        timeout_seconds: float = 5.0,
+        check_before_wait: bool = False,
+        cnt0_diagnostics: bool = False,
+    ):
+        self.stream_name = stream_name
+        self.frame_height = frame_height
+        self.frame_width = frame_width
+        self.wait_new_frame = wait_new_frame
+        self.timeout_seconds = timeout_seconds
+        self.check_before_wait = check_before_wait
+        self.cnt0_diagnostics = cnt0_diagnostics
+
+    def collect_frames(self, target_frames: int) -> FrameBatch:
+        return collect_shmim_batch(
+            self.stream_name,
+            target_frames,
+            self.frame_height,
+            self.frame_width,
+            wait_new_frame=self.wait_new_frame,
+            timeout_seconds=self.timeout_seconds,
+            check_before_wait=self.check_before_wait,
+            cnt0_diagnostics=self.cnt0_diagnostics,
+        )
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Run one realtime-style WindsoCC batch in-process."
     )
     parser.add_argument(
         "--source-type",
-        choices=("offline-fits", "magaox-buffer"),
+        choices=("offline-fits", "magaox-buffer", "shmim"),
         default="offline-fits",
-        help="Frame source backend.",
+        help=(
+            "Frame source: offline FITS, external reader callback, or live MagAO-X shmim "
+            "(magaox.shmim.Image)."
+        ),
     )
     parser.add_argument(
         "--offline-source",
@@ -468,7 +665,7 @@ def parse_args():
         "--stream-name",
         type=str,
         default="camwfs",
-        help="MagAO-X stream name for live acquisition.",
+        help="MagAO-X stream name for magaox-buffer and shmim acquisition.",
     )
     parser.add_argument(
         "--reader-callable",
@@ -492,13 +689,57 @@ def parse_args():
         "--integration-seconds",
         type=float,
         default=10.0,
-        help="Length of one processing batch in seconds.",
+        help="Length of one processing batch in seconds (ignored for --source-type shmim).",
     )
     parser.add_argument(
         "--fps",
         type=float,
         default=2000.0,
-        help="Frame rate used to convert integration time into frame count.",
+        help="Frame rate used to convert integration time into frame count (ignored for --source-type shmim).",
+    )
+    parser.add_argument(
+        "--frame-count",
+        type=int,
+        default=None,
+        help="Exact number of frames to collect (required for --source-type shmim).",
+    )
+    parser.add_argument(
+        "--frame-height",
+        type=int,
+        default=DEFAULT_FRAME_SHAPE[0],
+        help="Expected 2D frame height for --source-type shmim.",
+    )
+    parser.add_argument(
+        "--frame-width",
+        type=int,
+        default=DEFAULT_FRAME_SHAPE[1],
+        help="Expected 2D frame width for --source-type shmim.",
+    )
+    parser.add_argument(
+        "--wait-new-frame",
+        action="store_true",
+        help=(
+            "For --source-type shmim: block on the shmim semaphore each sample. "
+            "Default is off (read current buffer as fast as possible)."
+        ),
+    )
+    parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=5.0,
+        help="For --source-type shmim with --wait-new-frame: max seconds to wait per frame.",
+    )
+    parser.add_argument(
+        "--check-before-wait",
+        action="store_true",
+        help="For --source-type shmim with --wait-new-frame: stat the shmim inode before waiting.",
+    )
+    parser.add_argument(
+        "--cnt0-diagnostics",
+        action="store_true",
+        help=(
+            "For --source-type shmim: log cnt0 skips/duplicates (see module docstring)."
+        ),
     )
     parser.add_argument(
         "--frames-per-cube",
@@ -521,6 +762,12 @@ def parse_args():
         action="store_true",
         help="Delete xcorr and distill products after measure completes.",
     )
+    parser.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+        help="Logging level.",
+    )
     return parser.parse_args()
 
 
@@ -529,6 +776,21 @@ def build_frame_source(args) -> FrameSource:
         if args.offline_source is None:
             raise ValueError("--offline-source is required for --source-type offline-fits")
         return OfflineFitsFrameSource(args.offline_source)
+    if args.source_type == "shmim":
+        return ShmimFrameSource(
+            stream_name=args.stream_name,
+            frame_height=args.frame_height,
+            frame_width=args.frame_width,
+            wait_new_frame=args.wait_new_frame,
+            timeout_seconds=args.timeout_seconds,
+            check_before_wait=args.check_before_wait,
+            cnt0_diagnostics=args.cnt0_diagnostics,
+        )
+    if args.reader_callable is None:
+        raise ValueError(
+            "--reader-callable is required for --source-type magaox-buffer "
+            "(use --source-type shmim for magaox.shmim.Image without a custom reader)."
+        )
     return MagAOXCircularBufferFrameSource(
         stream_name=args.stream_name,
         reader_callable=args.reader_callable,
@@ -539,10 +801,11 @@ def required_batch_frames(fps: float, integration_seconds: float) -> int:
     return max(1, int(round(fps * integration_seconds)))
 
 
-def validate_frame_batch(frames: np.ndarray, frame_shape: tuple[int, int] = DEFAULT_FRAME_SHAPE):
+def validate_frame_batch(frames: np.ndarray, frame_shape: tuple[int, int] | None = None):
+    """Validate a frame stack. If ``frame_shape`` is set, enforce spatial dimensions."""
     if frames.ndim != 3:
         raise ValueError(f"Expected a 3D batch of frames, got shape {frames.shape}")
-    if tuple(frames.shape[1:]) != tuple(frame_shape):
+    if frame_shape is not None and tuple(frames.shape[1:]) != tuple(frame_shape):
         raise ValueError(
             f"Expected frame shape {frame_shape}, got {tuple(frames.shape[1:])}"
         )
@@ -883,6 +1146,7 @@ def run_embedded_batch(
       `run_dir`, `raw_cube_paths`, `timings_s`, `json_paths`, `movie_paths`
     """
     batch_array = np.asarray(batch_frames, dtype=np.float32)
+    validate_frame_batch(batch_array, DEFAULT_FRAME_SHAPE)
     batch = FrameBatch(
         frames=batch_array,
         first_timestamp=_coerce_timestamp(first_timestamp),
@@ -950,7 +1214,14 @@ def run_embedded_batch_buffer(
 
 def run_single_batch(args) -> BatchRunSummary:
     """Collect one batch, materialize it, and run the full pipeline."""
-    target_frames = required_batch_frames(args.fps, args.integration_seconds)
+    if args.source_type == "shmim":
+        if args.frame_count is None or args.frame_count < 1:
+            raise ValueError(
+                "--frame-count is required and must be >= 1 when --source-type is shmim"
+            )
+        target_frames = args.frame_count
+    else:
+        target_frames = required_batch_frames(args.fps, args.integration_seconds)
 
     source = build_frame_source(args)
 
@@ -972,8 +1243,11 @@ def run_single_batch(args) -> BatchRunSummary:
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     args = parse_args()
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(levelname)s: %(message)s",
+    )
     run_single_batch(args)
 
 

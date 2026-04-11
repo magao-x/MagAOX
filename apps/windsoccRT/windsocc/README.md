@@ -27,9 +27,8 @@ The following entry points are available after installation:
 - `ws_xcorr` - Cross-correlation analysis
 - `ws_distill` - Background subtraction, bias correction, noise reduction
 - `ws_measure` - Wind measurement and analysis
-- `ws_realtime` - Run realtime WindsoCC processing in Python
+- `ws_realtime` - Run realtime WindsoCC processing in Python (offline FITS, custom reader, or live ``magaox.shmim``)
 - `ws_debug_imports` - Step through WindsoCC imports to isolate the first crashing dependency
-- `ws_debug_stream_grab` - Grab a live MagAO-X shmim stream in Python and hand it directly to WindsoCC
 
 ## Project Structure
 
@@ -63,12 +62,12 @@ ws_debug_imports --start-at polars
 ws_debug_imports --direct-module windsocc.realtime
 ```
 
-To exercise live shmim acquisition and the realtime batch path entirely in Python, use `ws_debug_stream_grab`:
+To exercise live shmim acquisition on the RTC, use `ws_realtime` with `--source-type shmim`:
 
 ```bash
-ws_debug_stream_grab --stream-name aol1_imWFS2 --frame-count 512 --config /opt/MagAOX/source/MagAOX/apps/windsoccRT/ws_config.yaml --output-root /tmp/windsocc-python-stream
+ws_realtime --source-type shmim --stream-name aol1_imWFS2 --frame-count 512 --config /opt/MagAOX/source/MagAOX/apps/windsoccRT/ws_config.yaml --output-root /tmp/windsocc-python-stream
 ```
 
-`ws_debug_stream_grab` uses `magaox.shmim.Image` directly, so it depends on the MagAO-X Python package and `ImageStreamIOWrap` being importable in that environment. It collects a live float32 cube and calls `windsocc.realtime.run_embedded_batch(...)`.
+This uses `magaox.shmim.Image` directly, so the MagAO-X Python package and `ImageStreamIOWrap` must be importable in that environment. The batch is processed with the same in-memory pipeline as other `ws_realtime` modes (`process_collected_batch`).
 
 Historical MagAO-X C++ embedded-Python notes (`windsoccRT`, probe binaries) are preserved under [`../archive/README.md`](../archive/README.md).

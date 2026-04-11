@@ -33,7 +33,6 @@ The following entry points are available after installation:
 - `ws_measure` - Wind measurement and analysis
 - `ws_realtime` - Run one realtime-style WindsoCC batch in-process
 - `ws_debug_imports` - Step through WindsoCC imports to isolate the first crashing dependency
-- `ws_debug_stream_grab` - Grab a live MagAO-X shmim stream in Python and hand it directly to WindsoCC
 
 ## Project Structure
 
@@ -123,7 +122,7 @@ ws_debug_imports
 ./windsoccAppImportProbe -n windsoccAppProbe --windsocc.pythonImportRoot=/opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src
 ./windsoccShmimImportProbe -n windsoccShmimProbe --windsocc.pythonImportRoot=/opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src
 ./windsoccBatchCallProbe --python-import-root /opt/MagAOX/source/MagAOX/apps/windsoccRT/windsocc/src --config-path /opt/MagAOX/source/MagAOX/apps/windsoccRT/ws_config.yaml --output-root /tmp/windsocc-batch-probe --spawn-thread
-/opt/conda/envs/xpy3_13/bin/ws_debug_stream_grab --stream-name aol1_imWFS2 --frame-count 512 --config /opt/MagAOX/source/MagAOX/apps/windsoccRT/ws_config.yaml --output-root /tmp/windsocc-python-stream
+/opt/conda/envs/xpy3_13/bin/ws_realtime --source-type shmim --stream-name aol1_imWFS2 --frame-count 512 --config /opt/MagAOX/source/MagAOX/apps/windsoccRT/ws_config.yaml --output-root /tmp/windsocc-python-stream
 /opt/MagAOX/bin/windsoccRT -n windsocc --windsocc.importBeforeShmim=true ...
 ```
 
@@ -158,14 +157,14 @@ Additional interpretation:
 - If only `windsoccShmimImportProbe` fails, `shmimMonitor` inheritance or its config/load path is the leading suspect.
 - If `windsoccShmimImportProbe` succeeds but `windsoccRT` still fails, the remaining culprit is likely in `windsoccRT`-specific state or startup sequencing beyond the mixin.
 
-To test live image acquisition entirely in Python, run `ws_debug_stream_grab` in the same environment as `windsoccRT`:
+To test live image acquisition entirely in Python, run `ws_realtime --source-type shmim` in the same environment as `windsoccRT`:
 
 ```bash
-ws_debug_stream_grab --stream-name aol1_imWFS2 --frame-count 512 --config /opt/MagAOX/source/MagAOX/apps/windsoccRT/ws_config.yaml --output-root /tmp/windsocc-python-stream
+ws_realtime --source-type shmim --stream-name aol1_imWFS2 --frame-count 512 --config /opt/MagAOX/source/MagAOX/apps/windsoccRT/ws_config.yaml --output-root /tmp/windsocc-python-stream
 ```
 
 Notes:
 
-- `ws_debug_stream_grab` uses `magaox.shmim.Image` directly, so it depends on the MagAO-X Python package and `ImageStreamIOWrap` being importable in that environment.
-- The script intentionally keeps handoff simple: it collects a live float32 cube in Python and then calls `windsocc.realtime.run_embedded_batch(...)`.
+- This uses `magaox.shmim.Image` directly, so it depends on the MagAO-X Python package and `ImageStreamIOWrap` being importable in that environment.
+- The CLI collects a live float32 cube and runs `windsocc.realtime.process_collected_batch` (same in-memory pipeline as other `ws_realtime` modes).
 - If this succeeds while `windsoccRT` still fails, the strongest remaining suspect is the C++ embedding/threading path rather than the Python pipeline itself.
