@@ -615,6 +615,7 @@ def resolve_reduce_settings(config_params: dict) -> dict:
         "skip_dark": bool(config_params.get("SKIP_DARK", config_params.get("SUBTRACT_DARK", False))),
         "subtract_reference": bool(config_params.get("SUBTRACT_REFERENCE", True)),
         "inspect_reduction": bool(config_params.get("INSPECT_REDUCTION", False)),
+        "tukey_alpha": float(config_params.get("TUKEY_ALPHA", 0.0)),
     }
 
 
@@ -724,6 +725,7 @@ def process_collected_batch(
         reduce_settings["skip_dark"],
         subtract_reference=reduce_settings["subtract_reference"],
         inspect_reduction=reduce_settings["inspect_reduction"],
+        tukey_alpha=reduce_settings["tukey_alpha"],
     )
     if reduce_result["dropped_frames"] > 0:
         logging.info(

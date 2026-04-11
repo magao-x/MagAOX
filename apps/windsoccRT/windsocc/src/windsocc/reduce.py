@@ -641,8 +641,8 @@ def process_batch_in_memory(
     skip_dark=False,
     subtract_reference=True,
     inspect_reduction=False,
+    tukey_alpha=0.0,
     apply_tukey_window=False,
-    tukey_alpha=0.5,
 ):
     """Reduce a realtime batch in memory and return concatenated quadrant cubes.
 
@@ -691,6 +691,9 @@ def process_batch_in_memory(
 
     reduced_quadrants = {}
     reduced_frames_per_cube = None
+    if tukey_alpha > 0.0:
+        apply_tukey_window = True
+        logging.info(f"Applying Tukey window with alpha = {tukey_alpha}")
     for quadrant in QUADRANTS:
         reduced_cubes = [
             process_cube(
