@@ -9,7 +9,7 @@
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
-#include "dependencies/MCP3208.h" // Included for adc.connect()
+#include "dependencies/MCP3208.h" // Included for the MCP3208 device interface
 
 /** \defgroup mcp3208Ctrl
  * \brief The MagAO-X application to readout a mcp3208 A/D on a raspberry Pi.
@@ -29,8 +29,11 @@ namespace MagAOX
 namespace app
 {
 
-/// The MagAO-X mcp3208 Controller
-/**
+/** MagAO-X application to read MCP3208 channels on a Raspberry Pi.
+ *
+ * The controller can either acquire on its internal timer loop or synchronize reads to an
+ * ImageStreamIO semaphore.
+ *
  * \ingroup mcp3208Ctrl
  */
 class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl>, public dev::telemeter<mcp3208Ctrl>
@@ -44,152 +47,229 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     typedef dev::frameGrabber<mcp3208Ctrl> frameGrabberT;
     typedef dev::telemeter<mcp3208Ctrl>    telemeterT;
 
+    /// The active MCP3208 device interface used for hardware access.
     MCP3208Lib::MCP3208 m_adc;
 
-    static constexpr bool c_frameGrabber_flippable = false; /**< app:dev config to tell framegrabber these images
-                                                                 can not be flipped*/
+    static constexpr bool c_frameGrabber_flippable = false; /**< app:dev config indicating these images can not be
+                                                                 flipped */
 
   protected:
-    /** \name Configurable Parameters
-     *@{
+    /** \name Configurable Parameters - Data
+     * @{
      */
 
-    int m_numChannels{ 4 }; ///< The number of channels being read out.
+    int m_numChannels{ 4 }; ///< The number of MCP3208 channels read into each output frame.
 
-    std::string m_fpsDevice;               ///< Device name for getting fps to set circular buffer length.
-    std::string m_fpsProperty{ "fps" };    ///< Property name for getting fps to set circular buffer length.
-    std::string m_fpsElement{ "current" }; ///< Element name for getting fps to set circular buffer length.
+    std::string m_fpsDevice;               ///< Device name providing external fps metadata for framegrabber sizing.
+    std::string m_fpsProperty{ "fps" };    ///< Property name providing external fps metadata.
+    std::string m_fpsElement{ "current" }; ///< Property element containing the fps value.
 
-    float m_fpsTol{ 0 }; ///< The tolerance for detecting a change in FPS.
+    float m_fpsTol{ 0 }; ///< The tolerance used when monitoring fps metadata changes.
 
-    std::string m_synchroShmimName;      ///< The ImageStreamIO stream used to synchronize acquisition.
+    std::string m_synchroShmimName;      ///< The synchronization ImageStreamIO stream name; empty selects timer mode.
     int         m_synchroPostDelay{ 0 }; ///< Requested delay between semaphore wake and A/D read in microseconds.
 
     ///@}
 
-    // Creating INDI property for desired fps
-    pcf::IndiProperty m_indiP_fps;
-    INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_fps );
-    float m_fps{ 2000 }; ///< The target FPS
+    /** \name Runtime State - Data
+     * @{
+     */
 
+    /// INDI property exposing the local fps target.
+    pcf::IndiProperty m_indiP_fps;
+
+    /// Handle updates to the local fps target property.
+    INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_fps );
+
+    float m_fps{ 2000 }; ///< The target acquisition rate in frames per second.
+
+    /// INDI property subscription used to follow an external fps source.
     pcf::IndiProperty m_indiP_fpsSource;
+
+    /// Handle updates from the configured external fps source.
     INDI_SETCALLBACK_DECL( mcp3208Ctrl, m_indiP_fpsSource );
 
-    float m_trigger{ 1e9f / m_fps }; ///< The trigger time to readout.  Adjusts to match desired FPS.
-    float m_gain{ .1 };              // Gain used to adjust trigger to keep at correct fps
-    float nano_sec_target{ 1e9f / m_fps };
-    float m_synchroDelay{ 0 };       ///< The controlled delay before a synchronized A/D read in nanoseconds.
-    float m_synchroDelayTarget{ 0 }; ///< The target delay from semaphore wake to synchronized read in nanoseconds.
+    float m_trigger{ 1e9f / m_fps };       ///< The timer-mode read interval in nanoseconds.
+    float m_gain{ .1 };                    ///< The simple integrator gain used for timer and synchro delay control.
+    float nano_sec_target{ 1e9f / m_fps }; ///< The timer-mode target interval in nanoseconds.
+    float m_synchroDelay{ 0 };             ///< The controlled pre-read delay in synchronized mode, in nanoseconds.
+    float m_synchroDelayTarget{ 0 };       ///< The target pre-read delay in synchronized mode, in nanoseconds.
 
+    /// Secondary MCP3208 handle retained with the legacy class state.
     MCP3208Lib::MCP3208 adc;
 
+    /// The timer-mode reference point for the next internal acquisition cycle.
     std::chrono::time_point<std::chrono::high_resolution_clock> m_time_start;
 
-    std::vector<uint16_t> m_values; ///< The values read out from the chip
+    /// The most recently read MCP3208 channel values published to the output stream.
+    std::vector<uint16_t> m_values;
 
-    IMAGE  m_synchroStream{};
-    bool   m_synchroStreamOpen{ false };
-    ino_t  m_synchroStreamInode{ 0 };
-    int    m_synchroSemaphoreNumber{ 5 };
-    sem_t *m_synchroSemaphore{ nullptr };
+    IMAGE  m_synchroStream{};             ///< The opened synchronization stream used for semaphore-triggered reads.
+    bool   m_synchroStreamOpen{ false };  ///< Tracks whether the synchronization stream is currently open.
+    ino_t  m_synchroStreamInode{ 0 };     ///< Cached inode used to detect synchronization stream recreation.
+    int    m_synchroSemaphoreNumber{ 5 }; ///< The claimed semaphore slot for synchronization waits.
+    sem_t *m_synchroSemaphore{ nullptr }; ///< Cached pointer to the claimed synchronization semaphore.
 
+    ///@}
+
+    /** \name Synchronization Helpers
+     * @{
+     */
+
+    /// Open the synchronization stream when semaphore-driven acquisition is enabled.
+    /**
+     * \returns 0 on success.
+     * \returns 1 when the synchronization stream is not yet ready.
+     */
     int openSynchroStream();
 
+    /// Claim a semaphore slot from the synchronization stream.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
     int claimSynchroSemaphore();
 
+    /// Check whether the synchronization stream has disappeared or been recreated.
+    /**
+     * \returns true when the current synchronization stream handle is stale.
+     * \returns false when the synchronization stream still matches the cached inode.
+     */
     bool synchroStreamStale();
 
+    /// Release the synchronization semaphore claim and close the synchronization stream.
     void closeSynchroStream();
 
+    /// Acquire one frame using the internal timer loop.
+    /**
+     * \returns 0 when a new sample is ready.
+     * \returns 1 when the loop should continue without publishing.
+     */
     int acquireTimerAndCheckValid();
 
+    /// Acquire one frame using the synchronization semaphore.
+    /**
+     * \returns 0 when a new sample is ready.
+     * \returns 1 when the loop should continue without publishing.
+     * \returns -1 on a critical timing error.
+     */
     int acquireSynchroAndCheckValid();
 
-    int getRealtime( timespec &ts );
+    /// Read the current realtime clock value.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int getRealtime( timespec &ts /**< [out] the current realtime clock value */ );
 
-    int waitOnSemaphore( sem_t *sem, timespec &ts );
+    /// Wait on the claimed synchronization semaphore until the supplied timeout.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int waitOnSemaphore( sem_t    *sem /**< [in] the semaphore to wait on */,
+                         timespec &ts /**< [in] the absolute timeout for the wait */ );
 
-    int readChannelValue( int channel, uint16_t &value );
+    /// Read one MCP3208 channel value.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int readChannelValue( int       channel /**< [in] the MCP3208 channel index to read */,
+                          uint16_t &value /**< [out] the sampled channel value */ );
 
+    /// Apply the current controlled delay between semaphore wake and ADC read.
     void delayBeforeRead();
 
+    ///@}
+
   public:
-    /// Default c'tor.
+    /** \name Application Lifecycle
+     * @{
+     */
+
+    /// Construct the application with the current repository version metadata.
     mcp3208Ctrl();
 
-    /// D'tor, declared and defined for noexcept.
+    /// Destroy the application.
     ~mcp3208Ctrl() noexcept
     {
     }
 
+    /// Register configuration entries for the application and helper devices.
     virtual void setupConfig();
 
-    /// Implementation of loadConfig logic, separated for testing.
-    /** This is called by loadConfig().
+    /// Load configuration values into the application state.
+    /** This helper is separated from `loadConfig()` to support unit testing.
      */
-    int loadConfigImpl(
-        mx::app::appConfigurator &_config /**< [in] an application configuration
-                                                    from which to load values*/ );
+    int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] the populated application configurator */ );
 
+    /// Load the configured application state.
     virtual void loadConfig();
 
-    /// Startup function
+    /// Start the application and initialize its INDI and hardware state.
     /**
-     *
+     * \returns 0 on success.
+     * \returns -1 on error.
      */
     virtual int appStartup();
 
-    /// Implementation of the FSM for mcp3208Ctrl.
+    /// Execute one iteration of the application FSM.
     /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
     virtual int appLogic();
 
-    /// Shutdown the app.
+    /// Shutdown the application and release synchronization resources.
     /**
-     *
+     * \returns 0 on success.
+     * \returns -1 on error.
      */
     virtual int appShutdown();
 
-    /// Implementation of the framegrabber configureAcquisition interface
+    ///@}
+
+    /** \name Framegrabber Interface
+     * @{
+     */
+
+    /// Configure the output image geometry and acquisition mode.
     /**
-     *
      * \returns 0 on success
-     * \returns -1 on error
+     * \returns 1 when configuration should be retried
      */
     int configureAcquisition();
 
-    /// Implementation of the frameGrabber fps interface
-    /** Just returns the value of m_fps
+    /// Report the current acquisition rate metadata to the framegrabber.
+    /**
+     * \returns the current fps value.
      */
     float fps();
 
-    /// Implementation of the framegrabber startAcquisition interface
+    /// Prepare the selected acquisition mode to begin producing samples.
     /**
-     *
      * \returns 0 on success
      * \returns -1 on error
      */
     int startAcquisition();
 
-    /// Implementation of the framegrabber acquireAndCheckValid interface
+    /// Acquire one sample and indicate whether it should be published.
     /**
-     *
-     * \returns 0 on success
-     * \returns -1 on error
+     * \returns 0 when a new sample is ready.
+     * \returns 1 when no new sample should be published.
+     * \returns -1 on a critical error.
      */
     int acquireAndCheckValid();
 
-    /// Implementation of the framegrabber loadImageIntoStream interface
+    /// Copy the current MCP3208 values into the output image buffer.
     /**
-     *
      * \returns 0 on success
      * \returns -1 on error
      */
-    int loadImageIntoStream( void *dest /**< [in] */ );
+    int loadImageIntoStream( void *dest /**< [out] the destination image buffer */ );
 
-    /// Implementation of the framegrabber reconfig interface
+    /// Reset synchronization resources before the next acquisition configuration.
     /**
      * \returns 0 on success
      * \returns -1 on error
@@ -202,9 +282,21 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
      *
      * @{
      */
+    /// Check whether framegrabber timing telemetry should be recorded this cycle.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
     int checkRecordTimes();
 
-    int recordTelem( const telem_fgtimings * );
+    /// Record framegrabber timing telemetry.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int recordTelem( const telem_fgtimings *telem /**< [in] the telemeter tag requested by the interface */ );
+
+    ///@}
 };
 
 mcp3208Ctrl::mcp3208Ctrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
@@ -702,7 +794,7 @@ int mcp3208Ctrl::recordTelem( const telem_fgtimings * )
     return recordFGTimings( true );
 }
 
-// Testing for user to select star number
+// INDI callback handling for fps configuration.
 INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_fps )( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getName() != m_indiP_fps.getName() )
