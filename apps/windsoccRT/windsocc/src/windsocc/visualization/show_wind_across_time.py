@@ -25,6 +25,8 @@ from astropy.io import fits
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, FFMpegWriter
 
+from windsocc.visualization.ffmpeg_matplotlib import configure_matplotlib_ffmpeg_path
+
 
 def _extract_sort_key(path: str) -> tuple[str, str]:
     """Sort maps by cam timestamp if present, then by basename."""
@@ -167,6 +169,7 @@ def _write_movie(
         interval=1000.0 / max(fps, 1e-3),
         blit=False,
     )
+    configure_matplotlib_ffmpeg_path()
     writer = FFMpegWriter(fps=fps)
     anim.save(out_path, writer=writer)
     plt.close(fig)

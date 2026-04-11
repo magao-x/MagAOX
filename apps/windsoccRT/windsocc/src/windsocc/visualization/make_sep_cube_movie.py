@@ -8,6 +8,8 @@ from matplotlib.animation import FFMpegWriter
 import os
 from astropy.io import fits
 
+from windsocc.visualization.ffmpeg_matplotlib import configure_matplotlib_ffmpeg_path
+
 TRACKED_SOURCE_DTYPE = np.dtype(
     [
         ("x", np.float64),
@@ -245,6 +247,7 @@ def make_source_detection_movie(
                 interval=1000.0 / max(fps, 1e-3),
                 blit=False,
             )
+            configure_matplotlib_ffmpeg_path()
             writer = FFMpegWriter(fps=fps)
             final_path = os.path.join(output_dir, movie_name)
             anim.save(final_path, writer=writer)
