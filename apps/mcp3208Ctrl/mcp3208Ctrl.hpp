@@ -369,8 +369,6 @@ int mcp3208Ctrl::appShutdown()
 
 int mcp3208Ctrl::configureAcquisition()
 {
-    /** \todo @PARKER do anything needed to setup the mcp3208*/
-
     m_values.resize( m_numChannels );
 
     m_width    = m_numChannels;
@@ -379,6 +377,10 @@ int mcp3208Ctrl::configureAcquisition()
 
     if( !m_synchroShmimName.empty() )
     {
+        log<text_log>( "Configuring semaphore-synchronized acquisition from " + m_synchroShmimName +
+                           " with target delay " + std::to_string( m_synchroPostDelay ) + " us.",
+                       logPrio::LOG_INFO );
+
         if( openSynchroStream() != 0 )
         {
             return 1;
@@ -389,6 +391,10 @@ int mcp3208Ctrl::configureAcquisition()
             closeSynchroStream();
             return 1;
         }
+    }
+    else
+    {
+        log<text_log>( "Configuring timer-driven acquisition.", logPrio::LOG_INFO );
     }
 
     return 0;
@@ -401,8 +407,6 @@ float mcp3208Ctrl::fps()
 
 int mcp3208Ctrl::startAcquisition()
 {
-    /** \todo @PARKER Do anything needed to start the mcp3208 reading out ... probably nothing*/
-
     if( !m_synchroShmimName.empty() )
     {
         if( !m_synchroStreamOpen )
@@ -567,7 +571,7 @@ int mcp3208Ctrl::acquireTimerAndCheckValid()
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>( now - m_time_start );
 
         // Read every 500 microseconds
-        if( elapsed.count() >= m_trigger ) /** \todo @PARKER make m_trigger adjust */
+        if( elapsed.count() >= m_trigger )
         {
             m_time_start = now; // Reset start time
 
