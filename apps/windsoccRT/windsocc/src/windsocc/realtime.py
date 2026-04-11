@@ -652,7 +652,8 @@ def parse_args():
         default="offline-fits",
         help=(
             "Frame source: offline FITS, external reader callback, or live MagAO-X shmim "
-            "(magaox.shmim.Image)."
+            "(magaox.shmim.Image). If left at the default and you pass --frame-count or "
+            "shmim-only flags without --offline-source, shmim is inferred."
         ),
     )
     parser.add_argument(
@@ -768,7 +769,30 @@ def parse_args():
         default="INFO",
         help="Logging level.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    _resolve_implicit_source_type(args)
+    return args
+
+
+def _resolve_implicit_source_type(args: argparse.Namespace) -> None:
+    """If default ``offline-fits`` was left in place but RTC-style flags were given, use shmim.
+
+    On the telescope, ``ws_realtime`` is often invoked with ``--stream-name``,
+    ``--frame-count``, and shmim options without ``--source-type shmim``. When
+    there is no ``--offline-source``, treat that as live acquisition.
+    """
+    if args.source_type != "offline-fits":
+        return
+    if args.offline_source is not None:
+        return
+    if (
+        args.frame_count is not None
+        or args.wait_new_frame
+        or args.check_before_wait
+        or args.cnt0_diagnostics
+    ):
+        args.source_type = "shmim"
+        setattr(args, "_implicit_shmim", True)
 
 
 def build_frame_source(args) -> FrameSource:
@@ -1248,6 +1272,11 @@ def main():
         level=getattr(logging, args.log_level),
         format="%(levelname)s: %(message)s",
     )
+    if getattr(args, "_implicit_shmim", False):
+        logging.info(
+            "Inferred --source-type shmim (RTC-style flags without --offline-source). "
+            "Pass --source-type offline-fits explicitly to replay FITS."
+        )
     run_single_batch(args)
 
 
