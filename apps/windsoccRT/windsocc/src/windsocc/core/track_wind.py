@@ -501,9 +501,9 @@ def process_single_cc_cube(
     cube_sources = wind_tracker.vetted_sources.clone()
     cube_sources = _stitch_dropped_tracks(
         cube_sources,
-        max_gap_frames=wind_tracker.max_missed_frames,
+        max_gap_frames=30,
         direction_tol_deg=1.0,
-        velocity_tol_mps=1.0,
+        velocity_tol_mps=0.5,
     )
     cube_sources = _normalize_matches_by_track(cube_sources)
     cube_sources = _enforce_monotonic_matches(cube_sources)

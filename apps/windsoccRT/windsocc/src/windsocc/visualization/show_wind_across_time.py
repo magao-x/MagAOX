@@ -85,6 +85,8 @@ def _format_elapsed_hhmm(seconds: float) -> str:
     total_minutes = max(int(seconds // 60), 0)
     hours = total_minutes // 60
     minutes = total_minutes % 60
+    seconds = int(seconds % 60)
+    # return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
     return f"{hours:02d}:{minutes:02d}"
 
 
@@ -154,7 +156,7 @@ def _write_movie(
     def _update(i: int):
         image.set_data(frames[i])
         title.set_text(
-            f"{start_of_obs} | frame {i + 1}/{n_frames} | Elapsed {labels[i]}"
+            f"Obs. start:{start_of_obs} | frame {i + 1}/{n_frames} | Elapsed {labels[i]} [hh:mm]"
         )
         return [image, title]
 
@@ -218,6 +220,7 @@ def main() -> int:
 
     regular_maps = _list_maps(noise_maps_dir, unsharp=False)
     unsharp_maps = _list_maps(noise_maps_dir, unsharp=True)
+
     if not regular_maps and not unsharp_maps:
         logging.warning(
             "No whole-cube error maps found in %s. Run ws_distill first or adjust --data-dir.",

@@ -440,6 +440,7 @@ def run_xcorr_stage_in_memory(run_dir, reduced_products, config_params=None, ove
 
 def main():
     parser = argparse.ArgumentParser(description="Compute cross-correlation maps for all pupil positions.")
+    # TODO make the data_dir the positional argument
     parser.add_argument('-d', '--data-dir', type=str, default=".",
                         help="Top-level directory containing subdirectories with reduced FITS cubes")
     parser.add_argument('--min-delay', type=int, default=None,
