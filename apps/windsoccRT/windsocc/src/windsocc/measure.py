@@ -63,6 +63,7 @@ import os
 import sys
 import argparse
 import logging
+from datetime import datetime, timezone
 import csv
 import json
 import numpy as np
@@ -760,22 +761,46 @@ def extract_time_from_fname(fname):
     time = fname_array[1]
     return time
 
+
+def normalize_cube_timestamp_compact(current_time: str) -> str:
+    """Return ``YYYYMMDDHHMMSSffffff`` suitable for ``datetime.strptime`` ``%Y%m%d%H%M%S%f``.
+
+    Realtime cubes may use an ISO-like middle token ``20260411T020434811`` (``T`` between
+    date and time). Older distill outputs used a single digit run
+    ``20230310054802555791000``; the last three digits are stripped as nanoseconds so the
+    remainder parses as microseconds.
+    """
+    if "T" in current_time:
+        date_part, rest = current_time.split("T", 1)
+        if len(rest) < 6:
+            raise ValueError(
+                f"Invalid cube timestamp (expected HHMMSS after 'T'): {current_time!r}"
+            )
+        hhmmss = rest[:6]
+        frac = rest[6:]
+        if not frac:
+            micro = "000000"
+        elif len(frac) <= 6:
+            micro = (frac + "000000")[:6]
+        else:
+            micro = frac[:6]
+        return f"{date_part}{hhmmss}{micro}"
+    return current_time[:-3]
+
+
 def are_we_past_transit(current_time, transit_time):
-    #Prepare the formatting for each timestamp
-    # Ex. transit_time 2023-03-10T06:09:11.342216344Z
-    # dt_transit = pd.to_datetime(transit_time)
+    # Transit from config, e.g. 2023-03-10T06:09:11.342216344Z
     s_transit = pl.Series(name="transit_time", values=[transit_time])
     dt_transit = s_transit.str.to_datetime(
-        "%Y-%m-%dT%H:%M:%S%.9fZ",time_zone="UTC")
-    # Ex. current_time 20230310054802555791000
-    s_current = pl.Series(name="current_time", values=[current_time[:-3]])
-    dt_current = s_current.str.to_datetime(
-        "%Y%m%d%H%M%S%f",time_zone="UTC"
+        "%Y-%m-%dT%H:%M:%S%.9fZ", time_zone="UTC"
     )
-    past_transit  = dt_current > dt_transit
+    compact = normalize_cube_timestamp_compact(current_time)
+    dt_current = datetime.strptime(compact, "%Y%m%d%H%M%S%f").replace(
+        tzinfo=timezone.utc
+    )
+    past_transit = dt_current > dt_transit.item()
 
-
-    return past_transit.item()
+    return past_transit
 
 
 
