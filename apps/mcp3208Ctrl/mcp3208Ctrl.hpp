@@ -63,7 +63,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     float m_fpsTol{ 0 }; ///< The tolerance for detecting a change in FPS.
 
     std::string m_synchroShmimName;      ///< The ImageStreamIO stream used to synchronize acquisition.
-    int         m_synchroPostDelay{ 0 }; ///< Delay after an A/D read in microseconds.
+    int         m_synchroPostDelay{ 0 }; ///< Requested delay between semaphore wake and A/D read in microseconds.
 
     ///@}
 
@@ -78,6 +78,8 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     float m_trigger{ 1e9f / m_fps }; ///< The trigger time to readout.  Adjusts to match desired FPS.
     float m_gain{ .1 };              // Gain used to adjust trigger to keep at correct fps
     float nano_sec_target{ 1e9f / m_fps };
+    float m_synchroDelay{ 0 };       ///< The controlled delay before a synchronized A/D read in nanoseconds.
+    float m_synchroDelayTarget{ 0 }; ///< The target delay from semaphore wake to synchronized read in nanoseconds.
 
     MCP3208Lib::MCP3208 adc;
 
@@ -109,7 +111,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     int readChannelValue( int channel, uint16_t &value );
 
-    void sleepAfterRead( int usec );
+    void delayBeforeRead();
 
   public:
     /// Default c'tor.
@@ -273,7 +275,7 @@ void mcp3208Ctrl::setupConfig()
                 "postDelay",
                 false,
                 "int",
-                "Delay after a synchronized A/D read in microseconds. Default is 0." );
+                "Delay between a synchronization semaphore and the A/D read in microseconds. Default is 0." );
 
     config.add( "accel.numChannels",
                 "",
@@ -305,6 +307,9 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     {
         m_synchroPostDelay = 0;
     }
+
+    m_synchroDelayTarget = 1e3f * m_synchroPostDelay;
+    m_synchroDelay       = m_synchroDelayTarget;
 
     return 0;
 }
@@ -411,6 +416,7 @@ int mcp3208Ctrl::startAcquisition()
         }
 
         ImageStreamIO_semflush( &m_synchroStream, m_synchroSemaphoreNumber );
+        m_synchroDelay = m_synchroDelayTarget;
     }
 
     m_time_start = std::chrono::high_resolution_clock::now();
@@ -589,6 +595,7 @@ int mcp3208Ctrl::acquireTimerAndCheckValid()
 int mcp3208Ctrl::acquireSynchroAndCheckValid()
 {
     timespec ts;
+    auto     synchroWake = std::chrono::high_resolution_clock::time_point();
 
     if( m_synchroSemaphore == nullptr )
     {
@@ -628,6 +635,23 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
         return 1;
     }
 
+    synchroWake = std::chrono::high_resolution_clock::now();
+    delayBeforeRead();
+
+    if( getRealtime( m_currImageTimestamp ) < 0 )
+    {
+        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
+    }
+
+    auto readStart = std::chrono::high_resolution_clock::now();
+    auto elapsed   = std::chrono::duration_cast<std::chrono::nanoseconds>( readStart - synchroWake );
+
+    m_synchroDelay = m_synchroDelay - m_gain * ( elapsed.count() - m_synchroDelayTarget );
+    if( m_synchroDelay < 0 )
+    {
+        m_synchroDelay = 0;
+    }
+
     for( int i = 0; i < m_numChannels; ++i )
     {
         if( readChannelValue( i, m_values[i] ) < 0 )
@@ -636,13 +660,6 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
             return 1;
         }
     }
-
-    if( getRealtime( m_currImageTimestamp ) < 0 )
-    {
-        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
-    }
-
-    sleepAfterRead( m_synchroPostDelay );
 
     return 0;
 }
@@ -663,11 +680,11 @@ int mcp3208Ctrl::readChannelValue( int channel, uint16_t &value )
     return 0;
 }
 
-void mcp3208Ctrl::sleepAfterRead( int usec )
+void mcp3208Ctrl::delayBeforeRead()
 {
-    if( usec > 0 )
+    if( m_synchroDelay > 0 )
     {
-        mx::sys::microSleep( usec );
+        mx::sys::nanoSleep( static_cast<unsigned>( m_synchroDelay ) );
     }
 }
 
