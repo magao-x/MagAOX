@@ -403,7 +403,6 @@ inline int cred2AnalogGainCommand( std::string       &commandGain, ///< [out] C-
 inline cred2Ctrl::cred2Ctrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     m_powerMgtEnabled = true;
-    m_powerOnWait     = 10;
 
     m_startupTemp = 20;
     m_minTemp     = -40;
