@@ -99,7 +99,7 @@ class cred2Ctrl : public MagAOXApp<>,
      */
     cred2Temps m_temps; ///< Cached camera temperature values used for INDI and telemetry updates.
 
-    bool m_poweredOn{ false }; ///< True after a power cycle until the startup setpoint has been re-applied.
+    bool m_poweredOn{ false }; ///< True after a power cycle until post-power-on startup settings are re-applied.
 
     bool m_cameraCropEnabled{ false }; ///< Tracks whether this controller has enabled camera-side cropping.
     bool m_haveStartupROI{ false };    ///< True once startup ROI detection has cached the camera's pre-existing ROI.
@@ -589,26 +589,6 @@ inline int cred2Ctrl::appStartup()
         return log<software_critical, -1>( { __FILE__, __LINE__ } );
     }
 
-    if( m_currentROI.w != m_raw_width || m_currentROI.h != m_raw_height )
-    {
-        if( writeConfig() < 0 )
-        {
-            return log<software_critical, -1>( { __FILE__, __LINE__ } );
-        }
-
-        m_nextMode = m_modeName.empty() ? m_startupMode : m_modeName;
-
-        if( dev::edtCamera<cred2Ctrl>::pdvReconfig() < 0 )
-        {
-            return log<software_critical, -1>( { __FILE__, __LINE__ } );
-        }
-
-        if( setSerialBaud() < 0 )
-        {
-            return log<software_critical, -1>( { __FILE__, __LINE__ } );
-        }
-    }
-
     FRAMEGRABBER_APP_STARTUP;
 
     TELEMETER_APP_STARTUP;
@@ -658,6 +638,17 @@ inline int cred2Ctrl::appLogic()
     if( state() == stateCodes::CONNECTED )
     {
         std::unique_lock<std::mutex> lock( m_indiMutex );
+
+        if( m_poweredOn && syncROIFromCamera() < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+            {
+                return 0;
+            }
+
+            state( stateCodes::ERROR );
+            return 0;
+        }
 
         if( updateFPSLimits() < 0 || getTemps() < 0 || getFPS() < 0 || getFanSpeed() < 0 || getAnalogGain() < 0 ||
             getLEDState() < 0 )
@@ -1007,6 +998,26 @@ inline int cred2Ctrl::syncROIFromCamera()
     updateIfChanged( m_indiP_roi_h, "target", m_nextROI.h, INDI_OK );
     updateIfChanged( m_indiP_roi_bin_x, "target", m_nextROI.bin_x, INDI_OK );
     updateIfChanged( m_indiP_roi_bin_y, "target", m_nextROI.bin_y, INDI_OK );
+
+    if( m_poweredOn && ( m_currentROI.w != m_raw_width || m_currentROI.h != m_raw_height ) )
+    {
+        if( writeConfig() < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
+
+        m_nextMode = m_modeName.empty() ? m_startupMode : m_modeName;
+
+        if( dev::edtCamera<cred2Ctrl>::pdvReconfig() < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
+
+        if( setSerialBaud() < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
+    }
 
     return 0;
 }
