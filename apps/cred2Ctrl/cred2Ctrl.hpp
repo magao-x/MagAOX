@@ -99,12 +99,8 @@ class cred2Ctrl : public MagAOXApp<>,
      */
     cred2Temps m_temps; ///< Cached camera temperature values used for INDI and telemetry updates.
 
-    bool m_poweredOn{ false }; ///< True after a power cycle until post-power-on startup settings are re-applied.
-
     bool m_cameraCropEnabled{ false }; ///< Tracks whether this controller has enabled camera-side cropping.
-    bool m_haveStartupROI{ false };    ///< True once startup ROI detection has cached the camera's pre-existing ROI.
-    stdCameraT::roi m_startupROI;      ///< Startup ROI cached from the camera before stdCamera power-on defaults run.
-    int m_roiSettleCounter{ 0 };       ///< Number of main-loop cycles to skip serial status polling after ROI changes.
+    int  m_roiSettleCounter{ 0 };      ///< Number of main-loop cycles to skip serial status polling after ROI changes.
 
     std::recursive_mutex m_cameraMutex; ///< Protects serial command traffic and EDT reconfiguration.
     ///@}
@@ -584,11 +580,6 @@ inline int cred2Ctrl::appStartup()
         return log<software_critical, -1>( { __FILE__, __LINE__ } );
     }
 
-    if( syncROIFromCamera() < 0 )
-    {
-        return log<software_critical, -1>( { __FILE__, __LINE__ } );
-    }
-
     FRAMEGRABBER_APP_STARTUP;
 
     TELEMETER_APP_STARTUP;
@@ -612,7 +603,7 @@ inline int cred2Ctrl::appLogic()
         return 0;
     }
 
-    if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR )
+    if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::NODEVICE || state() == stateCodes::ERROR )
     {
         if( powerState() == 0 )
         {
@@ -627,9 +618,16 @@ inline int cred2Ctrl::appLogic()
             {
                 state( stateCodes::CONNECTED );
             }
+            else
+            {
+                state( stateCodes::NODEVICE );
+                sleep( 1 );
+                return 0;
+            }
         }
         else
         {
+            state( stateCodes::NODEVICE );
             sleep( 1 );
             return 0;
         }
@@ -639,7 +637,7 @@ inline int cred2Ctrl::appLogic()
     {
         std::unique_lock<std::mutex> lock( m_indiMutex );
 
-        if( m_poweredOn && syncROIFromCamera() < 0 )
+        if( syncROIFromCamera() < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
             {
@@ -664,9 +662,8 @@ inline int cred2Ctrl::appLogic()
 
         state( stateCodes::READY );
 
-        if( m_poweredOn && m_ccdTempSetpt > -999 )
+        if( m_ccdTempSetpt > -999 )
         {
-            m_poweredOn = false;
             if( setTempSetPt() < 0 )
             {
                 if( powerState() != 1 || powerStateTarget() != 1 )
@@ -826,8 +823,6 @@ inline int cred2Ctrl::onPowerOff()
         log<software_error>( { __FILE__, __LINE__ } );
     }
 
-    m_poweredOn = true;
-
     return 0;
 }
 
@@ -970,7 +965,7 @@ inline int cred2Ctrl::syncROIFromCamera()
         if( cred2RoiToCenter(
                 m_currentROI.x, m_currentROI.y, m_currentROI.w, m_currentROI.h, cameraROI, m_full_w, m_full_h ) < 0 )
         {
-            return log<software_error, -1>( { __FILE__, __LINE__, "camera reported an invalid startup ROI" } );
+            return log<software_error, -1>( { __FILE__, __LINE__, "camera reported an invalid ROI" } );
         }
 
         m_currentROI.bin_x  = 1;
@@ -978,12 +973,10 @@ inline int cred2Ctrl::syncROIFromCamera()
         m_cameraCropEnabled = true;
     }
 
-    m_nextROI        = m_currentROI;
-    m_width          = m_currentROI.w;
-    m_height         = m_currentROI.h;
-    m_dataType       = _DATATYPE_INT16;
-    m_startupROI     = m_currentROI;
-    m_haveStartupROI = true;
+    m_nextROI  = m_currentROI;
+    m_width    = m_currentROI.w;
+    m_height   = m_currentROI.h;
+    m_dataType = _DATATYPE_INT16;
 
     updateIfChanged( m_indiP_roi_x, "current", m_currentROI.x, INDI_OK );
     updateIfChanged( m_indiP_roi_y, "current", m_currentROI.y, INDI_OK );
@@ -999,7 +992,7 @@ inline int cred2Ctrl::syncROIFromCamera()
     updateIfChanged( m_indiP_roi_bin_x, "target", m_nextROI.bin_x, INDI_OK );
     updateIfChanged( m_indiP_roi_bin_y, "target", m_nextROI.bin_y, INDI_OK );
 
-    if( m_poweredOn && ( m_currentROI.w != m_raw_width || m_currentROI.h != m_raw_height ) )
+    if( m_currentROI.w != m_raw_width || m_currentROI.h != m_raw_height )
     {
         if( writeConfig() < 0 )
         {
@@ -1337,22 +1330,13 @@ inline int cred2Ctrl::powerOnDefaults()
     m_tempControlStatusSet = false;
     m_tempControlStatusStr = "TEMP OFF";
     m_tempControlOnTarget  = false;
-    if( m_haveStartupROI )
-    {
-        m_currentROI        = m_startupROI;
-        m_cameraCropEnabled = !( m_currentROI.w == m_full_w && m_currentROI.h == m_full_h );
-        m_haveStartupROI    = false;
-    }
-    else
-    {
-        m_cameraCropEnabled = false;
-        m_currentROI.x      = m_default_x;
-        m_currentROI.y      = m_default_y;
-        m_currentROI.w      = m_default_w;
-        m_currentROI.h      = m_default_h;
-        m_currentROI.bin_x  = m_default_bin_x;
-        m_currentROI.bin_y  = m_default_bin_y;
-    }
+    m_cameraCropEnabled    = false;
+    m_currentROI.x         = m_default_x;
+    m_currentROI.y         = m_default_y;
+    m_currentROI.w         = m_default_w;
+    m_currentROI.h         = m_default_h;
+    m_currentROI.bin_x     = m_default_bin_x;
+    m_currentROI.bin_y     = m_default_bin_y;
 
     m_fanSpeedValid     = false;
     m_analogGainValid   = false;
