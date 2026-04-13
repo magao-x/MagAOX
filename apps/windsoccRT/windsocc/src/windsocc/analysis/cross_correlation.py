@@ -11,91 +11,60 @@ from scipy.signal import fftconvolve
 # Import your circular template extraction function.
 from windsocc.analysis.templates import make_circular_template
 
-def compute_aperture_xcorr(pupil_diam, centerpt, fft_pad_shape):
+def compute_aperture_overlap(pupil_diam, centerpt, fft_pad_shape):
     '''
-    Compute the cross-correlation of the image with the circular template.
+    Compute the radial overlap profile from autocorrelation of a clear circular aperture.
     '''
-    rad = pupil_diam // 2
-    import matplotlib.pyplot as plt
     if fft_pad_shape is None:
-        raise ValueError("fft_pad_shape must be provided for aperture cross-correlation.")
+        raise ValueError("fft_pad_shape must be provided for aperture overlap calculation.")
     output_h, output_w = int(fft_pad_shape[0]), int(fft_pad_shape[1])
     if output_h < pupil_diam or output_w < pupil_diam:
         raise ValueError(
             f"fft_pad_shape {fft_pad_shape} must be >= pupil_diam {pupil_diam} in both axes."
         )
 
+    rad = pupil_diam / 2.0
     blank_image = np.zeros((pupil_diam, pupil_diam), dtype=np.float64)
-    moving_circle_series = np.zeros((pupil_diam, pupil_diam, pupil_diam), dtype=np.float64)
-    xrange = np.arange(pupil_diam)[None,:] - centerpt[0]
-    yrange = np.arange(pupil_diam)[:,None] - centerpt[1]
-    x_shifts_to_apply = np.arange(pupil_diam)
-    y_shifts_to_apply = np.zeros(pupil_diam)
-    shifts_to_apply = np.column_stack([x_shifts_to_apply, y_shifts_to_apply])
-    for i in range(pupil_diam):
-        rho2d = np.sqrt((xrange - x_shifts_to_apply[i])**2 + (yrange - y_shifts_to_apply[i])**2)
-        shifted_aperture_function = blank_image.copy()
-        shifted_aperture_function[rho2d <= rad] = 1
-        moving_circle_series[i, :, :] = shifted_aperture_function
+    xrange = np.arange(pupil_diam)[None, :] - centerpt[0]
+    yrange = np.arange(pupil_diam)[:, None] - centerpt[1]
+    rho2d = np.sqrt(xrange**2 + yrange**2)
+    blank_image[rho2d <= rad] = 1.0
 
-    # Center each 60x60 aperture frame inside the padded FFT canvas.
     pad_top = (output_h - pupil_diam) // 2
     pad_bottom = output_h - pupil_diam - pad_top
     pad_left = (output_w - pupil_diam) // 2
     pad_right = output_w - pupil_diam - pad_left
-    padded_moving_circle_series = np.pad(
-        moving_circle_series,
-        ((0, 0), (pad_top, pad_bottom), (pad_left, pad_right)),
+    aperture = np.pad(
+        blank_image,
+        ((pad_top, pad_bottom), (pad_left, pad_right)),
         mode="constant",
         constant_values=0.0,
     )
 
-    # FFT the padded moving circle series over spatial axes.
-    fft_moving_circle_series = np.fft.rfft2(
-        padded_moving_circle_series,
-        s=(output_h, output_w),
-        axes=(1, 2),
-    )
-    fft_aperture_function = fft_moving_circle_series[0, :, :].copy()
-    cc_template = np.conj(fft_aperture_function)
-    cc_responses_fourier = np.multiply(fft_moving_circle_series, cc_template[None, :, :])
-    moving_circle_cc_responses = np.fft.irfft2(
-        cc_responses_fourier,
-        s=(output_h, output_w),
-        axes=(1, 2),
-    )
-    moving_circle_cc_responses = np.fft.fftshift(moving_circle_cc_responses, axes=(1, 2))
+    fft_aperture = np.fft.rfft2(aperture, s=(output_h, output_w))
+    cc_fft = fft_aperture * np.conj(fft_aperture)
+    cc_map = np.fft.irfft2(cc_fft, s=(output_h, output_w))
+    cc_map = np.fft.fftshift(cc_map)
 
-    max_val = float(np.max(np.abs(moving_circle_cc_responses)))
+    max_val = float(np.max(np.abs(cc_map)))
     if max_val > 0:
-        normalized_moving_circle_cc_responses = moving_circle_cc_responses / max_val
-    else:
-        normalized_moving_circle_cc_responses = moving_circle_cc_responses
+        cc_map = cc_map / max_val
 
-    return normalized_moving_circle_cc_responses, shifts_to_apply
+    yy, xx = np.indices(cc_map.shape)
+    cy, cx = output_h // 2, output_w // 2
+    radii = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+    r_int = radii.astype(np.int64)
+    max_r = int(r_int.max())
 
+    radial_sum = np.bincount(r_int.ravel(), weights=cc_map.ravel(), minlength=max_r + 1)
+    radial_count = np.bincount(r_int.ravel(), minlength=max_r + 1)
+    valid = radial_count > 0
+    radial_profile = np.zeros_like(radial_sum, dtype=np.float64)
+    radial_profile[valid] = radial_sum[valid] / radial_count[valid]
 
-def measure_xcorr_response(xcorr_cube, applied_shifts):
-    assert xcorr_cube.shape[1] == xcorr_cube.shape[2], "xcorr_cube must be a square"
-    center_of_frame = xcorr_cube.shape[1] // 2
-    peak_values = np.zeros(applied_shifts.shape[0])
-    x_distances = []
-    y_distances = []
-    for i in range(applied_shifts.shape[0]):
-        x_val = int(applied_shifts[i][0] + center_of_frame)
-        y_val = int(applied_shifts[i][1] + center_of_frame)
-        # peak_values[i] = xcorr_cube[i, x_val, y_val]
-        peak_values[i] = np.max(xcorr_cube[i])
-        x_distances.append(x_val - center_of_frame)
-        y_distances.append(y_val - center_of_frame)
-    distances = np.asarray([np.sqrt(x**2 + y**2) for x, y in zip(x_distances, y_distances)])
-    response_curve = np.column_stack([distances.astype(int), peak_values.astype(float)])
-    # #debug inspect the response curve
-    # import matplotlib.pyplot as plt
-    # plt.plot(response_curve[:, 0], response_curve[:, 1])
-    # plt.show()
-    # exit()
-    return response_curve
+    distances = np.arange(max_r + 1, dtype=np.int64)
+
+    return np.column_stack([distances, radial_profile])
 
 
 

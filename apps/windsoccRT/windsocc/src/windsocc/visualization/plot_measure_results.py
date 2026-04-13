@@ -68,6 +68,22 @@ def _ellipse_mask(
     return (x_rot / a_pix) ** 2 + (y_rot / b_pix) ** 2 <= 1.0
 
 
+def _circle_mask(
+    shape: tuple[int, int],
+    x0: float,
+    y0: float,
+    radius: float,
+) -> np.ndarray:
+    """Return a boolean mask for a circular aperture."""
+    if not np.isfinite([x0, y0, radius]).all():
+        return np.zeros(shape, dtype=bool)
+    r_pix = float(abs(radius))
+    if r_pix <= 0.0:
+        return np.zeros(shape, dtype=bool)
+    yy, xx = np.ogrid[:shape[0], :shape[1]]
+    return (xx - float(x0)) ** 2 + (yy - float(y0)) ** 2 <= r_pix ** 2
+
+
 def _load_xcorr_aperture_response_curve(
     measure_root: str,
 ) -> tuple[np.ndarray, np.ndarray] | None:
@@ -112,18 +128,52 @@ def _load_xcorr_aperture_response_curve(
     return uniq_d.astype(np.float64), v_agg.astype(np.float64)
 
 
+def _subtract_background_sep_per_frame(cube: np.ndarray) -> np.ndarray:
+    """Return a copy of ``cube`` with SEP ``Background`` subtracted per 2D frame."""
+    n = len(cube)
+    out = np.empty((n,) + cube.shape[1:], dtype=np.float32)
+    for i in range(n):
+        sep_frame = np.ascontiguousarray(cube[i], dtype=np.float32)
+        estimate_bkg = sep.Background(sep_frame)
+        out[i] = sep_frame - estimate_bkg
+    return out
+
+
 def plot_flux_decay(
-    mf_response_cube: np.ndarray,
+    response_cube: np.ndarray,
     sep_sources_by_frame: list[np.ndarray],
     cube_stem: str,
     decay_dir: str,
-) -> str | None:
-    """Plot normalized aperture-summed flux curves per track across frames."""
+    spatial_noise_map: np.ndarray | None = None,
+    *,
+    extrapolated_sources_by_frame: list[np.ndarray] | None = None,
+    center_x: float | None = None,
+    center_y: float | None = None,
+    output_dir: str | None = None,
+    og_cc_cube_fname: str | None = None,
+    og_cc_cube: np.ndarray | None = None,
+) -> list[str]:
+    """Plot normalized aperture-summed flux curves per track across frames.
+
+    ``response_cube`` is typically the matched-filter (unsharp) cube, or the
+    background-subtracted OG response cube when that is available.
+    """
     track_fluxes: dict[int, list[float]] = {}
     track_frames: dict[int, list[int]] = {}
-    n_frames = min(len(mf_response_cube), len(sep_sources_by_frame))
+    track_flux_sigmas: dict[int, list[float]] = {}
+    n_frames = min(len(response_cube), len(sep_sources_by_frame))
+    sigma_map: np.ndarray | None = None
+    if spatial_noise_map is not None:
+        sigma_map = np.asarray(spatial_noise_map, dtype=np.float64)
+        if sigma_map.ndim != 2 or sigma_map.shape != response_cube.shape[1:]:
+            warnings.warn(
+                f"Spatial noise map shape {getattr(sigma_map, 'shape', None)} does not match "
+                f"response cube frame shape {response_cube.shape[1:]}; ignoring uncertainties.",
+                stacklevel=2,
+            )
+            sigma_map = None
     for frame_idx in range(n_frames):
-        frame = mf_response_cube[frame_idx]
+        frame = response_cube[frame_idx]
         sources = sep_sources_by_frame[frame_idx]
         if sources.size == 0:
             continue
@@ -141,24 +191,37 @@ def plot_flux_decay(
             if not np.any(aperture_mask):
                 continue
             extracted_flux = float(np.nansum(frame[aperture_mask]))
+            if sigma_map is not None:
+                # Spatially varying per-pixel 1-sigma map propagated through aperture sum.
+                sigma_flux = float(np.sqrt(np.nansum(np.square(sigma_map[aperture_mask]))))
+            else:
+                sigma_flux = float("nan")
             track_fluxes.setdefault(track_id, []).append(extracted_flux)
+            track_flux_sigmas.setdefault(track_id, []).append(sigma_flux)
             track_frames.setdefault(track_id, []).append(frame_idx)
 
     if not track_fluxes:
-        return None
+        return []
 
     fig, ax = plt.subplots(figsize=(8, 5))
     for track_id in sorted(track_fluxes):
         flux_values = np.asarray(track_fluxes[track_id], dtype=np.float64)
         frame_values = np.asarray(track_frames[track_id], dtype=np.int64)
+        sigma_values = np.asarray(track_flux_sigmas.get(track_id, []), dtype=np.float64)
         if flux_values.size == 0:
             continue
         max_flux = float(np.nanmax(flux_values))
         if np.isfinite(max_flux) and max_flux > 0.0:
             normalized = flux_values / max_flux
+            normalized_sigma = sigma_values / max_flux if sigma_values.size == flux_values.size else np.full_like(normalized, np.nan)
         else:
             normalized = np.zeros_like(flux_values)
+            normalized_sigma = np.full_like(normalized, np.nan)
         ax.plot(frame_values, normalized, linewidth=1.2, alpha=0.75, label=f"track {track_id}")
+        if np.isfinite(normalized_sigma).any():
+            lower = normalized - normalized_sigma
+            upper = normalized + normalized_sigma
+            ax.fill_between(frame_values, lower, upper, alpha=0.2)
 
     ax.set_xlabel("Frame")
     ax.set_ylabel("Normalized Extracted Flux")
@@ -172,37 +235,28 @@ def plot_flux_decay(
     decay_plot_path = os.path.join(decay_dir, f"{cube_stem}_flux_decay.png")
     fig.savefig(decay_plot_path, dpi=150)
     plt.close(fig)
-    return decay_plot_path
+    saved_paths: list[str] = [decay_plot_path]
 
+    if (
+        og_cc_cube is None
+        or og_cc_cube_fname is None
+        or extrapolated_sources_by_frame is None
+        or center_x is None
+        or center_y is None
+        or output_dir is None
+    ):
+        return saved_paths
 
-def plot_og_cc_aperture_vs_distance(
-    og_response_cube_path: str | None,
-    og_response_cube_fname: str | None,
-    extrapolated_sources_by_frame: list[np.ndarray],
-    mf_response_cube: np.ndarray,
-    center_x: float,
-    center_y: float,
-    output_dir: str,
-) -> list[str]:
-    """Sum OG response inside origin-propagated ellipses; save per-track sum vs distance plots.
-
-    Each track is first scaled so its maximum aperture sum is 1, then (when
-    ``<experiment_root>/xcorr_results/response_curve.txt`` exists from ``ws_xcorr``)
-    divided by the interpolated aperture CC response at the same distance.
-    """
-    if og_response_cube_path is None or og_response_cube_fname is None:
-        return []
-
-    og_cube = np.asarray(fits.getdata(og_response_cube_path))
+    og_cube = np.asarray(og_cc_cube)
     if og_cube.ndim != 3:
         warnings.warn(
-            f"OG response cube {og_response_cube_path!r} is not 3D (shape {og_cube.shape}); "
+            f"OG response cube {og_cc_cube_fname!r} is not 3D (shape {og_cube.shape}); "
             "skipping extracted_cc_responses plots.",
             stacklevel=2,
         )
-        return []
+        return saved_paths
 
-    mf_spatial = mf_response_cube.shape[1:]
+    mf_spatial = response_cube.shape[1:]
     og_spatial = og_cube.shape[1:]
     if mf_spatial != og_spatial:
         warnings.warn(
@@ -210,9 +264,9 @@ def plot_og_cc_aperture_vs_distance(
             "skipping extracted_cc_responses plots.",
             stacklevel=2,
         )
-        return []
+        return saved_paths
 
-    n_mf = len(mf_response_cube)
+    n_mf = len(response_cube)
     n_og = len(og_cube)
     n_list = len(extrapolated_sources_by_frame)
     n_frames = min(n_mf, n_og, n_list)
@@ -223,8 +277,10 @@ def plot_og_cc_aperture_vs_distance(
             stacklevel=2,
         )
 
+    og_cube = og_cube[:n_frames]
+
     measure_root = os.path.dirname(output_dir)
-    og_stem = os.path.splitext(og_response_cube_fname)[0]
+    og_stem = os.path.splitext(og_cc_cube_fname)[0]
     out_dir = os.path.join(measure_root, "extracted_cc_responses", og_stem)
     os.makedirs(out_dir, exist_ok=True)
     # Drop stale per-track PNGs so reruns with new track IDs do not leave old files behind.
@@ -242,9 +298,6 @@ def plot_og_cc_aperture_vs_distance(
 
     for frame_idx in range(n_frames):
         frame = og_cube[frame_idx]
-        sep_frame = np.ascontiguousarray(frame, dtype=np.float32)
-        estimate_bkg = sep.Background(sep_frame)
-        sep_frame_sub = sep_frame - estimate_bkg
         sources = extrapolated_sources_by_frame[frame_idx]
         if sources.size == 0:
             continue
@@ -255,22 +308,29 @@ def plot_og_cc_aperture_vs_distance(
             x = float(source["x"])
             y = float(source["y"])
             dist = float(np.hypot(x - center_x, y - center_y))
-            aperture_mask = _ellipse_mask(
+            # Elliptical aperture path (temporarily disabled while debugging circular apertures):
+            # aperture_mask = _ellipse_mask(
+            #     shape=frame.shape,
+            #     x0=x,
+            #     y0=y,
+            #     a=float(source["a"]) / 2.0,
+            #     b=float(source["b"]) / 2.0,
+            #     theta=float(source["theta"]),
+            #     scale=1.0,
+            # )
+            semimajor_radius = max(float(source["a"]), float(source["b"])) / 2.0
+            aperture_mask = _circle_mask(
                 shape=frame.shape,
                 x0=x,
                 y0=y,
-                a=float(source["a"]) / 2.0,
-                b=float(source["b"]) / 2.0,
-                theta=float(source["theta"]),
-                scale=1.0,
+                radius=semimajor_radius,
             )
             if not np.any(aperture_mask):
                 continue
-            aperture_sum = float(np.nansum(sep_frame_sub[aperture_mask]))
+            aperture_sum = float(np.nansum(frame[aperture_mask]))
             track_distances.setdefault(tid, []).append(dist)
             track_sums.setdefault(tid, []).append(aperture_sum)
 
-    saved_paths: list[str] = []
     for track_id in sorted(track_distances):
         dists = np.asarray(track_distances[track_id], dtype=np.float64)
         sums = np.asarray(track_sums.get(track_id, []), dtype=np.float64)
@@ -281,19 +341,53 @@ def plot_og_cc_aperture_vs_distance(
             sums_norm = sums / smax
         else:
             sums_norm = np.zeros_like(sums)
+        if spatial_noise_map is not None:
+            sigma_map = np.asarray(spatial_noise_map, dtype=np.float64)
+            if sigma_map.ndim == 2 and sigma_map.shape == og_cube.shape[1:]:
+                sigma_track_vals: list[float] = []
+                for frame_idx in range(n_frames):
+                    sources = extrapolated_sources_by_frame[frame_idx]
+                    if sources.size == 0:
+                        continue
+                    match = sources[sources["track_id"] == track_id]
+                    if match.size == 0:
+                        continue
+                    source = match[0]
+                    semimajor_radius = max(float(source["a"]), float(source["b"])) / 2.0
+                    aperture_mask = _circle_mask(
+                        shape=og_cube.shape[1:],
+                        x0=float(source["x"]),
+                        y0=float(source["y"]),
+                        radius=semimajor_radius,
+                    )
+                    sigma_track_vals.append(
+                        float(np.sqrt(np.nansum(np.square(sigma_map[aperture_mask]))))
+                    )
+                sigma_track = np.asarray(sigma_track_vals, dtype=np.float64)
+                if sigma_track.size == sums.size and np.isfinite(smax) and smax > 0.0:
+                    sums_sigma = sigma_track / smax
+                else:
+                    sums_sigma = np.full_like(sums_norm, np.nan)
+            else:
+                sums_sigma = np.full_like(sums_norm, np.nan)
+        else:
+            sums_sigma = np.full_like(sums_norm, np.nan)
         if ref_curve is not None:
             xp, fp = ref_curve
             ref_at_dist = np.interp(dists, xp, fp)
             fp_scale = float(np.nanmax(np.abs(fp))) if fp.size else 1.0
-            eps = max(np.finfo(np.float64).eps * fp_scale, 1e-15)
+            eps = max(np.finfo(np.float64).eps * fp_scale, np.min(fp[fp > 0.0]))
             y_plot = sums_norm / np.maximum(ref_at_dist, eps)
-            # y_plot = sums_norm
+            y_sigma = sums_sigma / np.maximum(ref_at_dist, eps)
             y_label = "Normalized aperture sum / aperture CC response"
         else:
             y_plot = sums_norm
+            y_sigma = sums_sigma
             y_label = "Normalized aperture sum (OG response)"
         fig, ax = plt.subplots(figsize=(8, 5))
         ax.plot(dists, y_plot, linewidth=1.2, color="tab:blue")
+        if np.isfinite(y_sigma).any():
+            ax.fill_between(dists, y_plot - y_sigma, y_plot + y_sigma, alpha=0.2, color="tab:blue")
         ax.set_xlabel("Distance from origin (pixels)")
         ax.set_ylabel(y_label)
         ax.set_title(f"Track {track_id}")
@@ -472,15 +566,16 @@ def make_source_detection_movie(
     fps: int = 10,
     cmap: str = "Blues_r",
     png_only: bool = False,
-    og_response_cube_path: str | None = None,
-    og_response_cube_fname: str | None = None,
+    og_cc_cube_path: str | None = None,
+    og_cc_cube_fname: str | None = None,
+    spatial_noise_map: np.ndarray | None = None,
 ) -> bool:
     """Make a movie of the source detections.
 
-    When ``og_response_cube_path`` and ``og_response_cube_fname`` are set, also
-    writes an ``{og_stem}_extrapolated.mp4`` (or PNG frame sequence) on the OG
-    cube with the same origin-propagated ellipses used for CC extraction, and
-    per-track line plots (aperture sum vs. distance from the image origin) under
+    When ``og_cc_cube_path`` and ``og_cc_cube_fname`` are set, the OG
+    cube is SEP background-subtracted once per frame; that cube is used for the
+    ``{og_stem}_extrapolated.mp4`` (or PNG frames), the flux decay plot, and the
+    per-track CC response plots under
     ``<measure_results>/extracted_cc_responses/<og_cube_stem>/``.
     """
     detections_dir = os.path.join(os.path.dirname(output_dir), "sep_detections")
@@ -507,6 +602,26 @@ def make_source_detection_movie(
     vmin, vmax = np.percentile(response_stack, [0.1, 99.9])
     cube_stem = os.path.splitext(mf_response_cube_fname)[0]
 
+    og_cube_bgsub: np.ndarray | None = None
+    extrap_for_og: list[np.ndarray] | None = None
+    if og_cc_cube_path is not None and og_cc_cube_fname is not None:
+        og_cube_raw = np.asarray(fits.getdata(og_cc_cube_path))
+        if og_cube_raw.ndim == 3 and og_cube_raw.shape[1:] == mf_response_cube.shape[1:]:
+            n_mf_og = len(mf_response_cube)
+            n_og_raw = len(og_cube_raw)
+            n_ext_og = len(extrapolated_sources_by_frame)
+            n_sync_og = min(n_mf_og, n_og_raw, n_ext_og)
+            og_cube_sync = og_cube_raw[:n_sync_og]
+            og_cube_bgsub = _subtract_background_sep_per_frame(og_cube_sync)
+            extrap_for_og = extrapolated_sources_by_frame[:n_sync_og]
+        else:
+            warnings.warn(
+                f"Skipping OG background subtraction and OG visuals: shape "
+                f"{getattr(og_cube_raw, 'shape', None)} vs MF spatial "
+                f"{mf_response_cube.shape[1:]}.",
+                stacklevel=2,
+            )
+
     def _render_movie_funcanimation(
         sources_by_frame: list[np.ndarray],
         movie_name: str,
@@ -514,6 +629,7 @@ def make_source_detection_movie(
         cube_fname: str,
         vmin_c: float,
         vmax_c: float,
+        use_circular_apertures: bool = False,
     ) -> None:
         fig, ax = plt.subplots()
         image = ax.imshow(
@@ -533,22 +649,34 @@ def make_source_detection_movie(
 
         def _add_overlay(sources: np.ndarray) -> None:
             for source in sources:
-                ellipse = Ellipse(
-                    (source["x"], source["y"]),
-                    width=source["a"],
-                    height=source["b"],
-                    angle=np.degrees(source["theta"]),
-                    fill=False,
-                    edgecolor="red",
-                    linewidth=1.5,
-                )
-                ax.add_patch(ellipse)
-                current_overlay.append(ellipse)
+                if use_circular_apertures:
+                    circle_diam = float(max(source["a"], source["b"]))
+                    aperture_artist = Ellipse(
+                        (source["x"], source["y"]),
+                        width=circle_diam,
+                        height=circle_diam,
+                        angle=0.0,
+                        fill=False,
+                        edgecolor="red",
+                        linewidth=1.5,
+                    )
+                    r = 0.5 * circle_diam
+                else:
+                    aperture_artist = Ellipse(
+                        (source["x"], source["y"]),
+                        width=source["a"],
+                        height=source["b"],
+                        angle=np.degrees(source["theta"]),
+                        fill=False,
+                        edgecolor="red",
+                        linewidth=1.5,
+                    )
+                    r = float(max(source["a"], source["b"], 2.0))
+                ax.add_patch(aperture_artist)
+                current_overlay.append(aperture_artist)
                 tid = int(source["track_id"])
                 if tid >= 0:
-                    r = float(
-                        max(source["a"], source["b"], 2.0)
-                    )
+                    r = max(r, 2.0)
                     tx = float(source["x"]) + 0.35 * r
                     ty = float(source["y"]) + 0.35 * r
                     label = ax.text(
@@ -594,6 +722,7 @@ def make_source_detection_movie(
         vmin_c: float,
         vmax_c: float,
         ellipse_scale: float = 3.0,
+        use_circular_apertures: bool = False,
     ) -> None:
         """Render individual PNG frames instead of an MP4 movie."""
         measure_results_dir = os.path.dirname(output_dir)
@@ -623,19 +752,28 @@ def make_source_detection_movie(
             sources = sources_by_frame[frame_idx]
             current_overlay: list[Artist] = []
             for source in sources:
-                ellipse = Ellipse(
-                    (source["x"], source["y"]),
-                    width=ellipse_scale * source["a"],
-                    height=ellipse_scale * source["b"],
-                    angle=np.degrees(source["theta"]),
-                    fill=False,
-                    edgecolor="red",
-                    linewidth=1.5,
-                )
-                ax.add_patch(ellipse)
-                current_overlay.append(ellipse)
-                tid = int(source["track_id"])
-                if tid >= 0:
+                if use_circular_apertures:
+                    circle_diam = ellipse_scale * float(max(source["a"], source["b"]))
+                    aperture_artist = Ellipse(
+                        (source["x"], source["y"]),
+                        width=circle_diam,
+                        height=circle_diam,
+                        angle=0.0,
+                        fill=False,
+                        edgecolor="red",
+                        linewidth=1.5,
+                    )
+                    r = 0.5 * circle_diam
+                else:
+                    aperture_artist = Ellipse(
+                        (source["x"], source["y"]),
+                        width=ellipse_scale * source["a"],
+                        height=ellipse_scale * source["b"],
+                        angle=np.degrees(source["theta"]),
+                        fill=False,
+                        edgecolor="red",
+                        linewidth=1.5,
+                    )
                     r = float(
                         max(
                             ellipse_scale * source["a"],
@@ -643,6 +781,11 @@ def make_source_detection_movie(
                             2.0,
                         )
                     )
+                ax.add_patch(aperture_artist)
+                current_overlay.append(aperture_artist)
+                tid = int(source["track_id"])
+                if tid >= 0:
+                    r = max(r, 2.0)
                     tx = float(source["x"]) + 0.35 * r
                     ty = float(source["y"]) + 0.35 * r
                     label = ax.text(
@@ -704,58 +847,50 @@ def make_source_detection_movie(
             vmax,
         )
 
-    if og_response_cube_path is not None and og_response_cube_fname is not None:
-        og_cube_raw = np.asarray(fits.getdata(og_response_cube_path))
-        if og_cube_raw.ndim == 3 and og_cube_raw.shape[1:] == mf_response_cube.shape[1:]:
-            n_mf = len(mf_response_cube)
-            n_og = len(og_cube_raw)
-            n_ext = len(extrapolated_sources_by_frame)
-            n_sync = min(n_mf, n_og, n_ext)
-            og_cube_sync = og_cube_raw[:n_sync]
-            extrap_for_og = extrapolated_sources_by_frame[:n_sync]
-            og_stack = np.stack(og_cube_sync)
-            og_vmin, og_vmax = np.percentile(og_stack, [0.1, 99.9])
-            og_stem = os.path.splitext(og_response_cube_fname)[0]
-            og_movie_name = f"{og_stem}_extrapolated.mp4"
-            if png_only:
-                _render_movie_png_frames(
-                    extrap_for_og,
-                    og_movie_name,
-                    og_cube_sync,
-                    og_response_cube_fname,
-                    og_vmin,
-                    og_vmax,
-                    ellipse_scale=1.0,
-                )
-            else:
-                _render_movie_funcanimation(
-                    extrap_for_og,
-                    og_movie_name,
-                    og_cube_sync,
-                    og_response_cube_fname,
-                    og_vmin,
-                    og_vmax,
-                )
+    if og_cube_bgsub is not None and extrap_for_og is not None:
+        og_stack = np.stack(og_cube_bgsub)
+        og_vmin, og_vmax = np.percentile(og_stack, [0.1, 99.9])
+        og_stem = os.path.splitext(og_cc_cube_fname)[0]
+        og_movie_name = f"{og_stem}_extrapolated.mp4"
+        if png_only:
+            _render_movie_png_frames(
+                extrap_for_og,
+                og_movie_name,
+                og_cube_bgsub,
+                og_cc_cube_fname,
+                og_vmin,
+                og_vmax,
+                ellipse_scale=1.0,
+                use_circular_apertures=True,
+            )
         else:
-            warnings.warn(
-                f"Skipping OG extrapolated movie: shape {getattr(og_cube_raw, 'shape', None)} "
-                f"vs MF spatial {mf_response_cube.shape[1:]}.",
-                stacklevel=2,
+            _render_movie_funcanimation(
+                extrap_for_og,
+                og_movie_name,
+                og_cube_bgsub,
+                og_cc_cube_fname,
+                og_vmin,
+                og_vmax,
+                use_circular_apertures=True,
             )
 
+    if og_cube_bgsub is not None:
+        decay_cube = og_cube_bgsub
+        decay_sources = sep_sources_by_frame[: len(og_cube_bgsub)]
+    else:
+        decay_cube = mf_response_cube
+        decay_sources = sep_sources_by_frame
     plot_flux_decay(
-        mf_response_cube=mf_response_cube,
-        sep_sources_by_frame=sep_sources_by_frame,
+        response_cube=decay_cube,
+        sep_sources_by_frame=decay_sources,
         cube_stem=cube_stem,
         decay_dir=decay_dir,
-    )
-    plot_og_cc_aperture_vs_distance(
-        og_response_cube_path=og_response_cube_path,
-        og_response_cube_fname=og_response_cube_fname,
+        spatial_noise_map=spatial_noise_map,
         extrapolated_sources_by_frame=extrapolated_sources_by_frame,
-        mf_response_cube=mf_response_cube,
         center_x=center_x,
         center_y=center_y,
         output_dir=output_dir,
+        og_cc_cube_fname=og_cc_cube_fname,
+        og_cc_cube=og_cube_bgsub,
     )
     return True

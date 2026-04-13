@@ -85,7 +85,7 @@ def load_mf_response_cubes(response_cubes_loc: str) -> dict:
         "hp_cube_fnames": hp_cube_fnames,
         "og_cube_fnames": cc_cube_fnames,
         "unsharped_mf_response_cube_paths": unsharped_mf_response_cube_paths,
-        "og_response_cube_paths": cc_response_cube_paths
+        "og_cc_cube_paths": cc_response_cube_paths
     }
     return out_dict
 

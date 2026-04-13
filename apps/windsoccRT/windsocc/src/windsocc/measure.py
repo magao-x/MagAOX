@@ -139,16 +139,26 @@ def process_mf_response_cube_paths(mf_response_cube_paths: list) -> tuple[list, 
 
 
 def find_error_map_for_cube(cube_path: str, noise_maps_dir: str) -> str | None:
-    """Match a distill noise-map FITS file to a given MF response cube."""
-    cube_stem = os.path.splitext(os.path.basename(cube_path))[0]
-    candidates = []
-    if cube_stem.endswith("_mf_response_unsharp"):
-        candidates.append(cube_stem.replace("_mf_response_unsharp", "_error_map_unsharp"))
-    if cube_stem.endswith("_mf_response"):
-        candidates.append(cube_stem.replace("_mf_response", "_error_map"))
-    candidates.append(f"{cube_stem}_error_map")
-    candidates.append(f"{cube_stem}_error_map_unsharp")
+    """Match a distill spatial-noise FITS map to a response cube.
 
+    This intentionally prefers the non-unsharp error-map flavor:
+    ``distill_results/noise_maps/camwfs_*_error_map.fits``.
+    """
+    cube_stem = os.path.splitext(os.path.basename(cube_path))[0]
+    base_stem = cube_stem
+    if base_stem.endswith("_mf_response_unsharp"):
+        base_stem = base_stem[: -len("_mf_response_unsharp")]
+    elif base_stem.endswith("_mf_response"):
+        base_stem = base_stem[: -len("_mf_response")]
+    elif base_stem.endswith("_response_unsharp"):
+        base_stem = base_stem[: -len("_response_unsharp")]
+    elif base_stem.endswith("_response"):
+        base_stem = base_stem[: -len("_response")]
+
+    candidates = (
+        f"{base_stem}_error_map",
+        f"{cube_stem}_error_map",
+    )
     for candidate in candidates:
         candidate_path = os.path.join(noise_maps_dir, f"{candidate}.fits")
         if os.path.exists(candidate_path):
@@ -535,7 +545,7 @@ def process_mf_response_cubes(
     required_keys = (
         "unsharped_mf_response_cube_paths",
         "hp_cube_fnames",
-        "og_response_cube_paths",
+        "og_cc_cube_paths",
         "og_cube_fnames",
     )
     for key in required_keys:
@@ -545,7 +555,7 @@ def process_mf_response_cubes(
             )
     hp_mf_response_cube_paths = mf_response_cubes["unsharped_mf_response_cube_paths"]
     hp_mf_response_cube_fnames = mf_response_cubes["hp_cube_fnames"]
-    og_mf_response_cube_paths = mf_response_cubes["og_response_cube_paths"]
+    og_mf_response_cube_paths = mf_response_cubes["og_cc_cube_paths"]
     og_mf_response_cube_fnames = mf_response_cubes["og_cube_fnames"]
     n_hp = len(hp_mf_response_cube_paths)
     if not (
@@ -587,7 +597,8 @@ def process_mf_response_cubes(
             else:
                 logging.info("No parity flip needed for cube: %s", cube_name)
         cube_data = fits.getdata(cube_path)
-        error_map_path = find_error_map_for_cube(cube_path, noise_maps_dir)
+        # Use OG cube naming for error-map matching to avoid loading unsharp maps.
+        error_map_path = find_error_map_for_cube(og_path, noise_maps_dir)
         if error_map_path is None:
             logging.warning(
                 "No matching noise map found for cube %s in %s; SEP will run without per-pixel error map.",
@@ -676,8 +687,9 @@ def process_mf_response_cubes(
             make_source_detection_movie(
                 mf_response_cube_path=cube_path,
                 mf_response_cube_fname=cube_name,
-                og_response_cube_path=og_path,
-                og_response_cube_fname=og_fname,
+                og_cc_cube_path=og_path,
+                og_cc_cube_fname=og_fname,
+                spatial_noise_map=error_map,
                 sources_all=wind_peaks_all,
                 output_dir=movie_output_dir,
                 fps=30,
@@ -740,7 +752,7 @@ def run_measure_stage(
                     {
                         "unsharped_mf_response_cube_paths": [hp_path],
                         "hp_cube_fnames": [hp_fname],
-                        "og_response_cube_paths": [og_path],
+                        "og_cc_cube_paths": [og_path],
                         "og_cube_fnames": [og_fname],
                     },
                     noise_maps_dir=noise_maps_loc,
@@ -756,7 +768,7 @@ def run_measure_stage(
                 for hp_path, hp_fname, og_path, og_fname in zip(
                     loaded_mf_response_cubes["unsharped_mf_response_cube_paths"],
                     loaded_mf_response_cubes["hp_cube_fnames"],
-                    loaded_mf_response_cubes["og_response_cube_paths"],
+                    loaded_mf_response_cubes["og_cc_cube_paths"],
                     loaded_mf_response_cubes["og_cube_fnames"],
                 )
             }

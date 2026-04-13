@@ -22,8 +22,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
 import sys
 from windsocc.analysis.cross_correlation import load_reduced_series, compute_all_delays_welch_optimized
-from windsocc.analysis.cross_correlation import compute_aperture_bias, compute_aperture_xcorr
-from windsocc.analysis.cross_correlation import measure_xcorr_response
+from windsocc.analysis.cross_correlation import compute_aperture_bias, compute_aperture_overlap
 # from windsocc.preprocessing.radial import radial_profile
 # from windsocc.visualization.make_wind_movie import save_cube_as_movie
 
@@ -570,9 +569,7 @@ def main():
     aperture_center = ((diam_pupils - 1) / 2, (diam_pupils - 1) / 2)
     # aperture_center = (diam_pupils // 2, diam_pupils // 2)
     fft_pad_shape = config_params.get("FFT_PAD_SHAPE", None)
-    aperture_cc, applied_shifts = compute_aperture_xcorr(diam_pupils, aperture_center, fft_pad_shape)
-
-    response_curve = measure_xcorr_response(aperture_cc, applied_shifts)
+    response_curve = compute_aperture_overlap(diam_pupils, aperture_center, fft_pad_shape)
     #save the response curve to a txt file, use integers for the distances and floats for the peak values
     # response_curve = np.column_stack([response_curve[:, 0].astype(int), response_curve[:, 1].astype(float)])
     np.savetxt(os.path.join(output_base_dir, "response_curve.txt"), response_curve, fmt="%d %.6f")
