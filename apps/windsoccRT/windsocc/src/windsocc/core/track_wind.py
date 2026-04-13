@@ -57,7 +57,7 @@ def _stitch_dropped_tracks(
             "start_frame": float(group.get_column("frame_num").min()),
             "end_frame": float(group.get_column("frame_num").max()),
             "direction": float(mean_angle),
-            "velocity": float(np.median(group.get_column("velocity_num").to_numpy())),
+            "velocity": float(np.mean(group.get_column("velocity_num").to_numpy())),
             "matches": int(np.sum(matches)),
         }
 
@@ -78,6 +78,7 @@ def _stitch_dropped_tracks(
             return
         parent[max(ra, rb)] = min(ra, rb)
 
+    # compare each track to every other track
     for i, tid_i in enumerate(track_ids):
         si = summaries[tid_i]
         for tid_j in track_ids[i + 1 :]:
@@ -90,12 +91,15 @@ def _stitch_dropped_tracks(
                 # Overlapping in time; treat as separate concurrent tracks.
                 continue
 
-            if gap > max_gap_frames:
+            # if gap > max_gap_frames:
+            #     continue
+            coinciding_track = _angle_diff_deg(si["direction"], sj["direction"]) < direction_tol_deg
+            wider_direction_net = _angle_diff_deg(si["direction"], sj["direction"]) < (5 * direction_tol_deg)
+            same_velocity = abs(si["velocity"] - sj["velocity"]) < velocity_tol_mps
+            wider_velocity_net = abs(si["velocity"] - sj["velocity"]) < (3 * velocity_tol_mps)
+            if not coinciding_track or not same_velocity:
                 continue
-            if _angle_diff_deg(si["direction"], sj["direction"]) > direction_tol_deg:
-                continue
-            if abs(si["velocity"] - sj["velocity"]) > velocity_tol_mps:
-                continue
+            # union the tracks that need to be merged
             union(tid_i, tid_j)
 
     remap = {tid: find(tid) for tid in track_ids}
@@ -231,8 +235,8 @@ def _keep_track_ids_by_model(
             .sort("frame_num")
             .unique(subset=["frame_num"], keep="last")
         )
-        # if track_id == 40:
-        #     print(group.select("frame_num", "matches_num"))
+        # if track_id == 57:
+        #     print(group.select("frame_num", "matches_num", "velocity_num", "dist_num"))
         #     exit()
         if group.is_empty():
             continue
@@ -282,18 +286,6 @@ def _keep_track_ids_by_model(
             [_angle_diff_deg(float(angle), float(mean_angle)) for angle in direction_vals],
             dtype=np.float64,
         )
-        # if track_id == 2014:
-        #     print(f"track_id: {track_id}")
-        #     print(f"xs: {xs}")
-        #     print(f"ys: {ys}")
-        #     print(f"xs_c: {xs_c}")
-        #     print(f"ys_c: {ys_c}")
-        #     print(f"delta_x: {delta_x}")
-        #     print(f"delta_y: {delta_y}")
-        #     print(f"direction_vals: {direction_vals}")
-        #     print(f"mean_angle: {mean_angle}")
-        #     print(f"measured_direction_deg: {measured_direction_deg}")
-        #     exit()
         if np.max(direction_deltas) > direction_scatter_tol_deg:
             reject_rows.append(_model_reject_row(track_id, "direction_scatter", group))
             continue
@@ -303,15 +295,24 @@ def _keep_track_ids_by_model(
             continue
 
         velocity_vals = group.get_column("velocity_num").to_numpy()
-        if len(velocity_vals) >= 2 and np.std(velocity_vals) > velocity_scatter_tol_mps:
+        velocity_p2p = np.max(velocity_vals) - np.min(velocity_vals)
+        if velocity_p2p > velocity_scatter_tol_mps:
             reject_rows.append(_model_reject_row(track_id, "velocity_scatter", group))
             continue
+        # if track_id == 1:
+        #     print(f"track_id: {track_id}")
+        #     print(f"velocity_vals: {velocity_vals}")
+        #     print(f"velocity_scatter_tol_mps: {velocity_scatter_tol_mps}")
+        #     exit()
+        # if len(velocity_vals) >= 2 and np.std(velocity_vals) > velocity_scatter_tol_mps:
+        #     reject_rows.append(_model_reject_row(track_id, "velocity_scatter", group))
+        #     continue
         
         x_coords = group.get_column("x_num").to_numpy()
         y_coords = group.get_column("y_num").to_numpy()
         try:
             slope, intercept = np.polyfit(x_coords - image_center[0], y_coords - image_center[1], 1)
-            slope = max(slope, 1e-3)
+            slope = max(np.abs(slope), 1e-2)
             y_dist_origin = np.abs(intercept)
             x_intercept = -intercept / slope
             x_dist_origin = np.abs(x_intercept)
@@ -320,24 +321,13 @@ def _keep_track_ids_by_model(
             if dist_closest > origin_tol_px:
                 reject_rows.append(_model_reject_row(track_id, "track_origin_distance", group))
                 continue
+            # if np.any(xy_dist_origin > origin_tol_px):
+            #     reject_rows.append(_model_reject_row(track_id, "track_origin_distance", group))
+            #     continue
         except ValueError:
             reject_rows.append(_model_reject_row(track_id, "slope_divergence", group))
             continue
-        # if track_id == 36:
-        #     print(f"track_id: {track_id}")
-        #     print(f"y_coords: {y_coords}")
-        #     print(f"x_coords: {x_coords}")
-        #     print(f"slope: {slope}")
-        #     print(f"intercept: {intercept}")
-        #     print(f"y_dist_origin: {y_dist_origin}")
-        #     print(f"x_intercept: {x_intercept}")
-        #     print(f"x_dist_origin: {x_dist_origin}")
-        #     print(f"xy_dist_origin: {xy_dist_origin}")
-        #     print(f"dist_closest: {dist_closest}")
-        #     exit()
-        x_centered = group.get_column("x_num").to_numpy() - image_center[0]
-        y_centered = group.get_column("y_num").to_numpy() - image_center[1]
-        points_centered = np.column_stack((x_centered, y_centered))
+        points_centered = np.column_stack((xs_c, ys_c))
         centroid = np.mean(points_centered, axis=0)
         _, _, vh = np.linalg.svd(points_centered - centroid, full_matrices=False)
         direction = vh[0]
@@ -357,6 +347,45 @@ def _keep_track_ids_by_model(
         if rmse > rmse_tol_px:
             reject_rows.append(_model_reject_row(track_id, "linearity_rmse", group))
             continue
+        mean_velocity = np.mean(velocity_vals)
+        last_frame = int(group.get_column("frame_num").to_numpy().max())
+        time_elapsed = last_frame * time_per_frame
+
+        ## this origin inference is noisy, and creates too many false negatives
+        # inferred_traceback_x = xs[1] - mean_velocity * np.cos(measured_direction + np.pi / 2.0) * time_elapsed
+        # inferred_traceback_y = ys[-1] - mean_velocity * np.sin(measured_direction + np.pi / 2.0) * time_elapsed
+        # inferred_origin_dist = np.sqrt(
+        #     (inferred_traceback_x - image_center[0]) ** 2 + (inferred_traceback_y - image_center[1]) ** 2
+        # )
+        # if inferred_origin_dist > origin_tol_px * 1.5:
+        #     reject_rows.append(_model_reject_row(track_id, "origin_traceback_distance", group))
+        #     continue
+        # if track_id == 1:
+        #     print(f"track_id: {track_id}")
+        #     print(f"xs: {xs}")
+        #     print(f"ys: {ys}")
+        #     print(f"xs_c: {xs_c}")
+        #     print(f"ys_c: {ys_c}")
+        #     print(f"delta_x: {delta_x}")
+        #     print(f"delta_y: {delta_y}")
+        #     print(f"direction_vals: {direction_vals}")
+        #     print(f"mean_angle: {mean_angle}")
+        #     print(f"measured_direction_deg: {measured_direction_deg}")
+        #     print(f"slope: {slope}")
+        #     print(f"intercept: {intercept}")
+        #     print(f"xy_dist_origin: {xy_dist_origin}")
+        #     print(f"dist_closest: {dist_closest}")
+        #     print(f"mean_origin_distance: {mean_origin_distance}")
+        #     print(f"rmse: {rmse}")
+        #     print(f"along_line: {along_line}")
+        #     print(f"residuals: {residuals}")
+        #     print(f"direction: {direction}")
+        #     print(f"origin_distances: {origin_distances}")
+        #     print(f"mean_origin_distance: {mean_origin_distance}")
+        #     print(f"inferred_traceback_x: {inferred_traceback_x}")
+        #     print(f"inferred_traceback_y: {inferred_traceback_y}")
+        #     print(f"inferred_origin_dist: {inferred_origin_dist}")
+        #     exit()
 
         keep_track_ids.append(int(track_id))
 
@@ -429,7 +458,7 @@ def process_single_cc_cube(
     min_track_matches: int = 10,
     min_track_detections: int = 10,
     track_direction_scatter_tol_deg: float = 20.0,
-    track_velocity_scatter_tol_mps: float = 5.0,
+    track_velocity_scatter_tol_mps: float = 2.0,
     ) -> tuple[pl.DataFrame, pl.DataFrame, np.ndarray, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """
     - Initialize the wind tracker object
@@ -532,20 +561,18 @@ def process_single_cc_cube(
         schema={
             "track_id_num": pl.Int64,
             "flux": pl.Float64,
-            "flux_err": pl.Float64,
             "source_area": pl.Float64,
         }
     )
     if (
         not cube_sources.is_empty()
-        and {"track_id", "frames", "flux", "flux_err", "source_area"}.issubset(set(cube_sources.columns))
+        and {"track_id", "frames", "flux", "source_area"}.issubset(set(cube_sources.columns))
     ):
         first_five_flux = (
             cube_sources.with_columns(
                 track_id_num=_numeric_expr("track_id").cast(pl.Int64, strict=False),
                 frame_num=_numeric_expr("frames"),
                 flux_num=_numeric_expr("flux"),
-                flux_err_num=_numeric_expr("flux_err"),
                 source_area_num=_numeric_expr("source_area"),
             )
             .drop_nulls(subset=["track_id_num", "frame_num"])
@@ -557,7 +584,6 @@ def process_single_cc_cube(
             flux_summary_lookup = first_five_flux.group_by("track_id_num").agg(
                 [
                     pl.col("flux_num").mean().alias("flux"),
-                    pl.col("flux_err_num").mean().alias("flux_err"),
                     pl.col("source_area_num").mean().alias("source_area"),
                 ]
             )
@@ -567,7 +593,6 @@ def process_single_cc_cube(
             flux_summary_lookup = flux_clipped.group_by("track_id_num").agg(
                 [
                     pl.col("flux_num").mean().alias("flux"),
-                    pl.col("flux_err_num").mean().alias("flux_err"),
                     pl.col("source_area_num").mean().alias("source_area"),
                 ]
             )
@@ -593,12 +618,11 @@ def process_single_cc_cube(
                 .join(flux_summary_lookup, on="track_id_num", how="left", suffix="_first3")
                 .with_columns(
                     pl.coalesce([pl.col("flux_first3"), pl.col("flux")]).alias("flux"),
-                    pl.coalesce([pl.col("flux_err_first3"), pl.col("flux_err")]).alias("flux_err"),
                     pl.coalesce([pl.col("source_area_first3"), pl.col("source_area")]).alias(
                         "source_area"
                     ),
                 )
-                .drop(["track_id_num", "flux_first3", "flux_err_first3", "source_area_first3"])
+                .drop(["track_id_num", "flux_first3", "source_area_first3"])
             )
     # cc_cube_clamped = np.clip(cc_cube, 0, None)
     mask_cube = np.stack(mask_frames, axis=0) if mask_frames else np.empty((0, *cc_cube[0].shape))

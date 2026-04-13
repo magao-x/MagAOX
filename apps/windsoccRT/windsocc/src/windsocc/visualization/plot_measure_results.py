@@ -191,8 +191,8 @@ def tracked_df_to_frame_sources(
             arr["track_id"] = -1
         arr["x"] = frame_df["x"].to_numpy()
         arr["y"] = frame_df["y"].to_numpy()
-        arr["a"] = frame_df["a"].to_numpy()
-        arr["b"] = frame_df["b"].to_numpy()
+        arr["a"] = frame_df["a"].to_numpy() * 3
+        arr["b"] = frame_df["b"].to_numpy() * 3
         arr["theta"] = frame_df["theta"].to_numpy()
         frame_sources.append(arr)
     return frame_sources
@@ -252,8 +252,8 @@ def tracked_df_to_origin_propagated_sources(
             continue
         tid = int(track_id)
         group = tracked.filter(pl.col("track_id") == track_id)
-        mean_a = float(np.mean(group["a"].to_numpy()))
-        mean_b = float(np.mean(group["b"].to_numpy()))
+        mean_a = float(np.mean(group["a"].to_numpy())) * 10
+        mean_b = float(np.mean(group["b"].to_numpy())) * 10
         mean_theta = float(np.mean(group["theta"].to_numpy()))
         last_one = group.sort("frames").tail(1)
         direction_rad = np.deg2rad(float(last_one["direction"][0]))
@@ -342,8 +342,8 @@ def make_source_detection_movie(
             for source in sources:
                 ellipse = Ellipse(
                     (source["x"], source["y"]),
-                    width=3.0 * source["a"],
-                    height=3.0 * source["b"],
+                    width=source["a"],
+                    height=source["b"],
                     angle=np.degrees(source["theta"]),
                     fill=False,
                     edgecolor="red",
@@ -354,7 +354,7 @@ def make_source_detection_movie(
                 tid = int(source["track_id"])
                 if tid >= 0:
                     r = float(
-                        max(3.0 * source["a"], 3.0 * source["b"], 2.0)
+                        max(source["a"], source["b"], 2.0)
                     )
                     tx = float(source["x"]) + 0.35 * r
                     ty = float(source["y"]) + 0.35 * r

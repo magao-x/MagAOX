@@ -219,7 +219,6 @@ def summarize_wind_tracks(cube_sources: object) -> dict:
         "matches",
         "frames",
         "flux",
-        "flux_err",
         "source_area",
     }
     if not required_cols.issubset(set(cube_sources.columns)):
@@ -233,7 +232,6 @@ def summarize_wind_tracks(cube_sources: object) -> dict:
             pl.col("matches").cast(pl.Float64, strict=False).alias("matches"),
             pl.col("frames").cast(pl.Int64, strict=False).alias("frames"),
             pl.col("flux").cast(pl.Float64, strict=False).alias("flux"),
-            pl.col("flux_err").cast(pl.Float64, strict=False).alias("flux_err"),
             pl.col("source_area").cast(pl.Float64, strict=False).alias("source_area"),
         ]
     ).drop_nulls(
@@ -251,7 +249,6 @@ def summarize_wind_tracks(cube_sources: object) -> dict:
                 pl.col("velocity_m_per_s").mean().alias("velocity_m_per_s"),
                 pl.col("matches").max().alias("matches"),
                 pl.col("flux").max().alias("flux"),
-                pl.col("flux_err").mean().alias("flux_err"),
                 pl.col("source_area").mean().alias("source_area"),
             ]
         )
@@ -264,7 +261,6 @@ def summarize_wind_tracks(cube_sources: object) -> dict:
             "velocity_m_per_s": float(row["velocity_m_per_s"]),
             "matches": int(row["matches"]),
             "flux": float(row["flux"]),
-            "flux_err": float(row["flux_err"]),
             "source_area": float(row["source_area"]),
         }
         for row in summarized.iter_rows(named=True)

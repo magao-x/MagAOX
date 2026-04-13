@@ -22,7 +22,6 @@ SOURCE_SCHEMA: dict[str, pl.DataType] = {
     "strikes": pl.Int64,
     "matches": pl.Int64,
     "flux": pl.Float64,
-    "flux_err": pl.Float64,
     "a": pl.Float64,
     "b": pl.Float64,
     "theta": pl.Float64,
@@ -256,12 +255,6 @@ class WindTracker:
         source_erry2 = sources_in_frame["erry2"]
         source_flux = sources_in_frame["flux"]
         source_field_names = set(sources_in_frame.dtype.names or ())
-        if "flux_err" in source_field_names:
-            source_flux_err = sources_in_frame["flux_err"]
-        elif "fluxerr" in source_field_names:
-            source_flux_err = sources_in_frame["fluxerr"]
-        else:
-            source_flux_err = np.full(len(source_xs), np.nan, dtype=np.float64)
         source_a = sources_in_frame["a"]
         source_b = sources_in_frame["b"]
         source_theta = sources_in_frame["theta"]
@@ -306,7 +299,6 @@ class WindTracker:
                 "strikes": np.zeros(len(source_xs), dtype=np.int64),
                 "matches": np.zeros(len(source_xs), dtype=np.int64),
                 "flux": source_flux,
-                "flux_err": source_flux_err,
                 "a": source_a,
                 "b": source_b,
                 "theta": source_theta,
@@ -718,7 +710,7 @@ class WindTracker:
             err=bkg.globalrms,
             minarea=sep_minarea,
             filter_kernel=None,
-            deblend_cont=0.0005, # default is 0.005 (0.05%), lower is more sensitive
+            deblend_cont=0.005, # default is 0.005 (0.05%), lower is more sensitive
             deblend_nthresh=32,    # default is 32, higher better for saddles
             clean=False,
         )

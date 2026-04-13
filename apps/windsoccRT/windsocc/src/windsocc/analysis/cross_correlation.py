@@ -4,7 +4,6 @@ The bias is the cross-correlation of the two circle apertures of the same size.
 '''
 
 import os
-import sys
 import numpy as np
 from astropy.io import fits
 from scipy.signal import fftconvolve

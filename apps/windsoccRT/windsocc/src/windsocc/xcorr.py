@@ -23,7 +23,7 @@ from multiprocessing import cpu_count
 import sys
 from windsocc.analysis.cross_correlation import load_reduced_series, compute_all_delays_welch_optimized
 from windsocc.analysis.cross_correlation import compute_aperture_bias
-from windsocc.preprocessing.radial import radial_profile
+# from windsocc.preprocessing.radial import radial_profile
 # from windsocc.visualization.make_wind_movie import save_cube_as_movie
 
 QUADRANTS = ("ul", "ur", "ll", "lr")
