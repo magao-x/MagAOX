@@ -62,16 +62,32 @@ def mask_outside_radius(data, radius, center=None, fill_value=0):
 
     return data
 
-def load_mf_response_cubes(mf_response_cubes_loc: str) -> tuple[list, list]:
+def load_mf_response_cubes(response_cubes_loc: str) -> dict:
     """Load the matched-filter response cubes."""
-    if not os.path.exists(mf_response_cubes_loc):
+    if not os.path.exists(response_cubes_loc):
         raise FileNotFoundError(
-            f"The matched-filter response cubes directory {mf_response_cubes_loc} does not exist. \
+            f"The matched-filter response cubes directory {response_cubes_loc} does not exist. \
             Is the pipeline being run out of order? \
             Please run ws_distill first.")
-    mf_response_cube_paths = glob.glob(os.path.abspath(os.path.join(mf_response_cubes_loc, "*_response_unsharp.fits")))
-    cube_fnames = [os.path.basename(path) for path in mf_response_cube_paths]
-    return cube_fnames, mf_response_cube_paths
+    unsharped_mf_response_cube_paths = glob.glob(
+        os.path.abspath(os.path.join(
+            response_cubes_loc,
+            "mf_response_cubes",
+            "*_response_unsharp.fits")))
+    cc_response_cube_paths = glob.glob(
+        os.path.abspath(os.path.join(
+            response_cubes_loc,
+            "camwfs*00.fits")))
+    assert len(unsharped_mf_response_cube_paths) == len(cc_response_cube_paths), "Number of unsharp and sharp response cubes must match"
+    hp_cube_fnames = [os.path.basename(path) for path in unsharped_mf_response_cube_paths]
+    cc_cube_fnames = [os.path.basename(path) for path in cc_response_cube_paths]
+    out_dict = {
+        "hp_cube_fnames": hp_cube_fnames,
+        "og_cube_fnames": cc_cube_fnames,
+        "unsharped_mf_response_cube_paths": unsharped_mf_response_cube_paths,
+        "og_response_cube_paths": cc_response_cube_paths
+    }
+    return out_dict
 
 
 def load_collapsed_unsharp_response_maps(mf_response_cubes_loc: str) -> tuple[list, list]:

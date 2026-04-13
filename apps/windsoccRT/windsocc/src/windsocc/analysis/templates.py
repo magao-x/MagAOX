@@ -1,4 +1,4 @@
-from preprocessing.crop_pupil_camwfs import circular_mask, get_square_thumbnail_from_pupil
+from windsocc.preprocessing.crop_pupil_camwfs import circular_mask, get_square_thumbnail_from_pupil
 
 
 def make_circular_template(image, centerpt, rad):

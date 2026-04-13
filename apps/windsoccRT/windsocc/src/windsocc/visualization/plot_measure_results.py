@@ -3,6 +3,7 @@ TODO the extrapolated and filtered sep results movies
 are showing inconsistencies.
 """
 
+import sep
 import numpy as np
 import polars as pl
 import matplotlib.pyplot as plt
@@ -11,6 +12,7 @@ from matplotlib.patches import Ellipse
 from matplotlib.animation import FuncAnimation
 from matplotlib.animation import FFMpegWriter
 import os
+import warnings
 from astropy.io import fits
 
 from windsocc.visualization.ffmpeg_matplotlib import configure_matplotlib_ffmpeg_path
@@ -64,6 +66,50 @@ def _ellipse_mask(
     x_rot = x_shift * cos_t + y_shift * sin_t
     y_rot = -x_shift * sin_t + y_shift * cos_t
     return (x_rot / a_pix) ** 2 + (y_rot / b_pix) ** 2 <= 1.0
+
+
+def _load_xcorr_aperture_response_curve(
+    measure_root: str,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Load distance (pixels) vs aperture CC response from ``ws_xcorr`` output.
+
+    Expected path: ``<experiment_root>/xcorr_results/response_curve.txt`` (sibling of
+    ``measure_results``), two columns: distance, normalized CC response.
+    """
+    experiment_root = os.path.dirname(os.path.abspath(measure_root))
+    path = os.path.join(experiment_root, "xcorr_results", "response_curve.txt")
+    if not os.path.isfile(path):
+        warnings.warn(
+            f"No aperture response curve at {path}; CC extraction plots use raw sums.",
+            stacklevel=2,
+        )
+        return None
+    try:
+        data = np.loadtxt(path)
+    except OSError as exc:
+        warnings.warn(
+            f"Could not read {path}: {exc}; CC extraction plots use raw sums.",
+            stacklevel=2,
+        )
+        return None
+    if data.ndim == 1:
+        data = data.reshape(1, -1)
+    if data.shape[0] < 1 or data.shape[1] < 2:
+        warnings.warn(
+            f"Unexpected shape in {path}: {data.shape}; CC extraction plots use raw sums.",
+            stacklevel=2,
+        )
+        return None
+    d_raw = np.asarray(data[:, 0], dtype=np.float64)
+    v_raw = np.asarray(data[:, 1], dtype=np.float64)
+    order = np.argsort(d_raw)
+    d_sorted = d_raw[order]
+    v_sorted = v_raw[order]
+    uniq_d, inv = np.unique(d_sorted, return_inverse=True)
+    sum_v = np.bincount(inv, weights=v_sorted)
+    cnt = np.bincount(inv)
+    v_agg = sum_v / np.maximum(cnt.astype(np.float64), 1.0)
+    return uniq_d.astype(np.float64), v_agg.astype(np.float64)
 
 
 def plot_flux_decay(
@@ -127,6 +173,140 @@ def plot_flux_decay(
     fig.savefig(decay_plot_path, dpi=150)
     plt.close(fig)
     return decay_plot_path
+
+
+def plot_og_cc_aperture_vs_distance(
+    og_response_cube_path: str | None,
+    og_response_cube_fname: str | None,
+    extrapolated_sources_by_frame: list[np.ndarray],
+    mf_response_cube: np.ndarray,
+    center_x: float,
+    center_y: float,
+    output_dir: str,
+) -> list[str]:
+    """Sum OG response inside origin-propagated ellipses; save per-track sum vs distance plots.
+
+    Each track is first scaled so its maximum aperture sum is 1, then (when
+    ``<experiment_root>/xcorr_results/response_curve.txt`` exists from ``ws_xcorr``)
+    divided by the interpolated aperture CC response at the same distance.
+    """
+    if og_response_cube_path is None or og_response_cube_fname is None:
+        return []
+
+    og_cube = np.asarray(fits.getdata(og_response_cube_path))
+    if og_cube.ndim != 3:
+        warnings.warn(
+            f"OG response cube {og_response_cube_path!r} is not 3D (shape {og_cube.shape}); "
+            "skipping extracted_cc_responses plots.",
+            stacklevel=2,
+        )
+        return []
+
+    mf_spatial = mf_response_cube.shape[1:]
+    og_spatial = og_cube.shape[1:]
+    if mf_spatial != og_spatial:
+        warnings.warn(
+            f"OG cube spatial shape {og_spatial} does not match MF cube {mf_spatial}; "
+            "skipping extracted_cc_responses plots.",
+            stacklevel=2,
+        )
+        return []
+
+    n_mf = len(mf_response_cube)
+    n_og = len(og_cube)
+    n_list = len(extrapolated_sources_by_frame)
+    n_frames = min(n_mf, n_og, n_list)
+    if n_frames < n_mf or n_frames < n_og or n_frames < n_list:
+        warnings.warn(
+            f"Truncating OG aperture analysis to {n_frames} frames "
+            f"(MF={n_mf}, OG={n_og}, extrapolated list={n_list}).",
+            stacklevel=2,
+        )
+
+    measure_root = os.path.dirname(output_dir)
+    og_stem = os.path.splitext(og_response_cube_fname)[0]
+    out_dir = os.path.join(measure_root, "extracted_cc_responses", og_stem)
+    os.makedirs(out_dir, exist_ok=True)
+    # Drop stale per-track PNGs so reruns with new track IDs do not leave old files behind.
+    for name in os.listdir(out_dir):
+        if name.lower().endswith(".png"):
+            try:
+                os.remove(os.path.join(out_dir, name))
+            except OSError:
+                pass
+
+    ref_curve = _load_xcorr_aperture_response_curve(measure_root)
+
+    track_distances: dict[int, list[float]] = {}
+    track_sums: dict[int, list[float]] = {}
+
+    for frame_idx in range(n_frames):
+        frame = og_cube[frame_idx]
+        sep_frame = np.ascontiguousarray(frame, dtype=np.float32)
+        estimate_bkg = sep.Background(sep_frame)
+        sep_frame_sub = sep_frame - estimate_bkg
+        sources = extrapolated_sources_by_frame[frame_idx]
+        if sources.size == 0:
+            continue
+        for source in sources:
+            tid = int(source["track_id"])
+            if tid < 0:
+                continue
+            x = float(source["x"])
+            y = float(source["y"])
+            dist = float(np.hypot(x - center_x, y - center_y))
+            aperture_mask = _ellipse_mask(
+                shape=frame.shape,
+                x0=x,
+                y0=y,
+                a=float(source["a"]) / 2.0,
+                b=float(source["b"]) / 2.0,
+                theta=float(source["theta"]),
+                scale=1.0,
+            )
+            if not np.any(aperture_mask):
+                continue
+            aperture_sum = float(np.nansum(sep_frame_sub[aperture_mask]))
+            track_distances.setdefault(tid, []).append(dist)
+            track_sums.setdefault(tid, []).append(aperture_sum)
+
+    saved_paths: list[str] = []
+    for track_id in sorted(track_distances):
+        dists = np.asarray(track_distances[track_id], dtype=np.float64)
+        sums = np.asarray(track_sums.get(track_id, []), dtype=np.float64)
+        if dists.size == 0 or dists.shape != sums.shape:
+            continue
+        smax = float(np.nanmax(sums))
+        if np.isfinite(smax) and smax > 0.0:
+            sums_norm = sums / smax
+        else:
+            sums_norm = np.zeros_like(sums)
+        if ref_curve is not None:
+            xp, fp = ref_curve
+            ref_at_dist = np.interp(dists, xp, fp)
+            fp_scale = float(np.nanmax(np.abs(fp))) if fp.size else 1.0
+            eps = max(np.finfo(np.float64).eps * fp_scale, 1e-15)
+            y_plot = sums_norm / np.maximum(ref_at_dist, eps)
+            # y_plot = sums_norm
+            y_label = "Normalized aperture sum / aperture CC response"
+        else:
+            y_plot = sums_norm
+            y_label = "Normalized aperture sum (OG response)"
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.plot(dists, y_plot, linewidth=1.2, color="tab:blue")
+        ax.set_xlabel("Distance from origin (pixels)")
+        ax.set_ylabel(y_label)
+        ax.set_title(f"Track {track_id}")
+        ax.grid(True, linestyle="--", alpha=0.3)
+        fig.tight_layout()
+        plot_path = os.path.join(
+            out_dir, f"track_{track_id}_cc_response_vs_distance.png"
+        )
+        fig.savefig(plot_path, dpi=150)
+        plt.close(fig)
+        saved_paths.append(plot_path)
+
+    return saved_paths
 
 
 def _empty_sources_array() -> np.ndarray:
@@ -252,8 +432,8 @@ def tracked_df_to_origin_propagated_sources(
             continue
         tid = int(track_id)
         group = tracked.filter(pl.col("track_id") == track_id)
-        mean_a = float(np.mean(group["a"].to_numpy())) * 10
-        mean_b = float(np.mean(group["b"].to_numpy())) * 10
+        mean_a = float(np.mean(group["a"].to_numpy())) * 5
+        mean_b = float(np.mean(group["b"].to_numpy())) * 5
         mean_theta = float(np.mean(group["theta"].to_numpy()))
         last_one = group.sort("frames").tail(1)
         direction_rad = np.deg2rad(float(last_one["direction"][0]))
@@ -292,15 +472,23 @@ def make_source_detection_movie(
     fps: int = 10,
     cmap: str = "Blues_r",
     png_only: bool = False,
+    og_response_cube_path: str | None = None,
+    og_response_cube_fname: str | None = None,
 ) -> bool:
-    """Make a movie of the source detections."""
+    """Make a movie of the source detections.
+
+    When ``og_response_cube_path`` and ``og_response_cube_fname`` are set, also
+    writes an ``{og_stem}_extrapolated.mp4`` (or PNG frame sequence) on the OG
+    cube with the same origin-propagated ellipses used for CC extraction, and
+    per-track line plots (aperture sum vs. distance from the image origin) under
+    ``<measure_results>/extracted_cc_responses/<og_cube_stem>/``.
+    """
     detections_dir = os.path.join(os.path.dirname(output_dir), "sep_detections")
     decay_dir = os.path.join(os.path.dirname(output_dir), "decay_plots")
     os.makedirs(detections_dir, exist_ok=True)
     os.makedirs(decay_dir, exist_ok=True)
     cube_sources = sources_all[-1]
     mf_response_cube = fits.getdata(mf_response_cube_path) #3D array of shape (n_frames, y_size, x_size)
-    ny, nx = mf_response_cube.shape[1:]
     center_x = mf_response_cube.shape[2] / 2.0 - 0.5
     center_y = mf_response_cube.shape[1] / 2.0 - 0.5
 
@@ -320,11 +508,16 @@ def make_source_detection_movie(
     cube_stem = os.path.splitext(mf_response_cube_fname)[0]
 
     def _render_movie_funcanimation(
-        sources_by_frame: list[np.ndarray], movie_name: str
+        sources_by_frame: list[np.ndarray],
+        movie_name: str,
+        cube_data: np.ndarray,
+        cube_fname: str,
+        vmin_c: float,
+        vmax_c: float,
     ) -> None:
         fig, ax = plt.subplots()
         image = ax.imshow(
-            mf_response_cube[0], origin="lower", cmap=cmap, vmin=vmin, vmax=vmax
+            cube_data[0], origin="lower", cmap=cmap, vmin=vmin_c, vmax=vmax_c
         )
         title = ax.set_title("Source Extractor Detections")
         ax.set_xlabel("X pixels")
@@ -372,18 +565,18 @@ def make_source_detection_movie(
                     current_overlay.append(label)
 
         def _update(frame_idx: int):
-            image.set_data(mf_response_cube[frame_idx])
+            image.set_data(cube_data[frame_idx])
             _clear_overlay()
             _add_overlay(sources_by_frame[frame_idx])
-            split_fname = mf_response_cube_fname.split("_")
-            timestamp = split_fname[1]
-            title.set_text(f"{timestamp}; Slice {frame_idx} of {len(mf_response_cube)}")
+            split_fname = cube_fname.split("_")
+            timestamp = split_fname[1] if len(split_fname) > 1 else cube_fname
+            title.set_text(f"{timestamp}; Slice {frame_idx} of {len(cube_data)}")
             return [image, title, *current_overlay]
 
         anim = FuncAnimation(
             fig,
             _update,
-            frames=len(mf_response_cube),
+            frames=len(cube_data),
             interval=1000.0 / max(fps, 1e-3),
             blit=False,
         )
@@ -394,7 +587,13 @@ def make_source_detection_movie(
         plt.close(fig)
 
     def _render_movie_png_frames(
-        sources_by_frame: list[np.ndarray], movie_name: str
+        sources_by_frame: list[np.ndarray],
+        movie_name: str,
+        cube_data: np.ndarray,
+        cube_fname: str,
+        vmin_c: float,
+        vmax_c: float,
+        ellipse_scale: float = 3.0,
     ) -> None:
         """Render individual PNG frames instead of an MP4 movie."""
         measure_results_dir = os.path.dirname(output_dir)
@@ -405,15 +604,15 @@ def make_source_detection_movie(
         movie_png_dir = os.path.join(pngs_base_dir, movie_stem)
         os.makedirs(movie_png_dir, exist_ok=True)
 
-        n_frames = len(mf_response_cube)
+        n_frames = len(cube_data)
         for frame_idx in range(n_frames):
             fig, ax = plt.subplots()
             image = ax.imshow(
-                mf_response_cube[frame_idx],
+                cube_data[frame_idx],
                 origin="lower",
                 cmap=cmap,
-                vmin=vmin,
-                vmax=vmax,
+                vmin=vmin_c,
+                vmax=vmax_c,
             )
             title = ax.set_title("Source Extractor Detections")
             ax.set_xlabel("X pixels")
@@ -426,8 +625,8 @@ def make_source_detection_movie(
             for source in sources:
                 ellipse = Ellipse(
                     (source["x"], source["y"]),
-                    width=3.0 * source["a"],
-                    height=3.0 * source["b"],
+                    width=ellipse_scale * source["a"],
+                    height=ellipse_scale * source["b"],
                     angle=np.degrees(source["theta"]),
                     fill=False,
                     edgecolor="red",
@@ -437,7 +636,13 @@ def make_source_detection_movie(
                 current_overlay.append(ellipse)
                 tid = int(source["track_id"])
                 if tid >= 0:
-                    r = float(max(3.0 * source["a"], 3.0 * source["b"], 2.0))
+                    r = float(
+                        max(
+                            ellipse_scale * source["a"],
+                            ellipse_scale * source["b"],
+                            2.0,
+                        )
+                    )
                     tx = float(source["x"]) + 0.35 * r
                     ty = float(source["y"]) + 0.35 * r
                     label = ax.text(
@@ -453,9 +658,9 @@ def make_source_detection_movie(
                     )
                     current_overlay.append(label)
 
-            split_fname = mf_response_cube_fname.split("_")
-            timestamp = split_fname[1] if len(split_fname) > 1 else mf_response_cube_fname
-            title.set_text(f"{timestamp}; Slice {frame_idx} of {len(mf_response_cube)}")
+            split_fname = cube_fname.split("_")
+            timestamp = split_fname[1] if len(split_fname) > 1 else cube_fname
+            title.set_text(f"{timestamp}; Slice {frame_idx} of {len(cube_data)}")
 
             frame_name = f"frame_{frame_idx:04d}.png"
             frame_path = os.path.join(movie_png_dir, frame_name)
@@ -466,73 +671,91 @@ def make_source_detection_movie(
         _render_movie_png_frames(
             extrapolated_sources_by_frame,
             f"{cube_stem}_extrapolated.mp4",
+            mf_response_cube,
+            mf_response_cube_fname,
+            vmin,
+            vmax,
+            ellipse_scale=3.0,
         )
         _render_movie_png_frames(
             sep_sources_by_frame,
             f"{cube_stem}_sep_results.mp4",
+            mf_response_cube,
+            mf_response_cube_fname,
+            vmin,
+            vmax,
+            ellipse_scale=3.0,
         )
     else:
         _render_movie_funcanimation(
             extrapolated_sources_by_frame,
             f"{cube_stem}_extrapolated.mp4",
+            mf_response_cube,
+            mf_response_cube_fname,
+            vmin,
+            vmax,
         )
         _render_movie_funcanimation(
             sep_sources_by_frame,
             f"{cube_stem}_sep_results.mp4",
+            mf_response_cube,
+            mf_response_cube_fname,
+            vmin,
+            vmax,
         )
+
+    if og_response_cube_path is not None and og_response_cube_fname is not None:
+        og_cube_raw = np.asarray(fits.getdata(og_response_cube_path))
+        if og_cube_raw.ndim == 3 and og_cube_raw.shape[1:] == mf_response_cube.shape[1:]:
+            n_mf = len(mf_response_cube)
+            n_og = len(og_cube_raw)
+            n_ext = len(extrapolated_sources_by_frame)
+            n_sync = min(n_mf, n_og, n_ext)
+            og_cube_sync = og_cube_raw[:n_sync]
+            extrap_for_og = extrapolated_sources_by_frame[:n_sync]
+            og_stack = np.stack(og_cube_sync)
+            og_vmin, og_vmax = np.percentile(og_stack, [0.1, 99.9])
+            og_stem = os.path.splitext(og_response_cube_fname)[0]
+            og_movie_name = f"{og_stem}_extrapolated.mp4"
+            if png_only:
+                _render_movie_png_frames(
+                    extrap_for_og,
+                    og_movie_name,
+                    og_cube_sync,
+                    og_response_cube_fname,
+                    og_vmin,
+                    og_vmax,
+                    ellipse_scale=1.0,
+                )
+            else:
+                _render_movie_funcanimation(
+                    extrap_for_og,
+                    og_movie_name,
+                    og_cube_sync,
+                    og_response_cube_fname,
+                    og_vmin,
+                    og_vmax,
+                )
+        else:
+            warnings.warn(
+                f"Skipping OG extrapolated movie: shape {getattr(og_cube_raw, 'shape', None)} "
+                f"vs MF spatial {mf_response_cube.shape[1:]}.",
+                stacklevel=2,
+            )
+
     plot_flux_decay(
         mf_response_cube=mf_response_cube,
         sep_sources_by_frame=sep_sources_by_frame,
         cube_stem=cube_stem,
         decay_dir=decay_dir,
     )
-
-        # x_coords = []
-        # y_coords = []
-        # for frame_idx, sources in enumerate(sep_sources_by_frame):
-        #     for source in sources:
-        #         x_coords.append(source["x"])
-        #         y_coords.append(source["y"])
-
-        # plot_stem = f"{cube_stem}_mf_response_sep_results"
-        # if x_coords:
-        #     fig_xy, ax_xy = plt.subplots()
-        #     ax_xy.scatter(
-        #         x_coords, y_coords,
-        #         s=12, alpha=0.15,
-        #         color="k",
-        #         marker="o",
-        #     )
-        #     ax_xy.grid(True, linestyle="--", alpha=0.33)
-        #     # ax_xy.set_facecolor("linen")
-        #     ax_xy.set_xlabel("X-coords")
-        #     ax_xy.set_ylabel("Y-coords")
-        #     ax_xy.set_title("ALL SExtractor src coords")
-        #     ax_xy.set_aspect("equal", adjustable="box")
-        #     fig_xy.tight_layout()
-        #     fig_xy.savefig(os.path.join(detections_dir, f"{plot_stem}_xy.png"))
-        #     plt.close(fig_xy)
-
-        # radius = 0.5 * min(nx, ny)
-        # grid = build_detection_grid(x_coords, y_coords, (ny, nx))
-        # angles, counts = line_sweep_histogram(
-        #     grid,
-        #     center_x=center_x,
-        #     center_y=center_y,
-        #     radius=radius,
-        #     max_dist=3.0,
-        #     bin_step_deg=1.0,
-        # )
-        # counts = counts - np.mean(counts)
-        # counts = np.clip(counts, 0.0, None)
-        # theta = np.deg2rad(angles)
-        # theta = np.append(theta, theta[0])
-        # r_vals = np.append(counts, counts[0])
-        # fig_hist, ax_hist = plt.subplots(subplot_kw={"projection": "polar"})
-        # ax_hist.plot(theta, r_vals, color="tab:blue", linewidth=1.5)
-        # ax_hist.fill(theta, r_vals, color="tab:blue", alpha=0.25)
-        # ax_hist.set_title(f"{cube_stem}: Line-Sweep Radar Plot")
-        # fig_hist.tight_layout()
-        # fig_hist.savefig(os.path.join(detections_dir, f"{plot_stem}_line_hist.png"))
-        # plt.close(fig_hist)
+    plot_og_cc_aperture_vs_distance(
+        og_response_cube_path=og_response_cube_path,
+        og_response_cube_fname=og_response_cube_fname,
+        extrapolated_sources_by_frame=extrapolated_sources_by_frame,
+        mf_response_cube=mf_response_cube,
+        center_x=center_x,
+        center_y=center_y,
+        output_dir=output_dir,
+    )
     return True

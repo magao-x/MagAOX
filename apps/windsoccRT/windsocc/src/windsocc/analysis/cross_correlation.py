@@ -9,7 +9,95 @@ from astropy.io import fits
 from scipy.signal import fftconvolve
 
 # Import your circular template extraction function.
-# from analysis.templates import make_circular_template
+from windsocc.analysis.templates import make_circular_template
+
+def compute_aperture_xcorr(pupil_diam, centerpt, fft_pad_shape):
+    '''
+    Compute the cross-correlation of the image with the circular template.
+    '''
+    rad = pupil_diam // 2
+    import matplotlib.pyplot as plt
+    if fft_pad_shape is None:
+        raise ValueError("fft_pad_shape must be provided for aperture cross-correlation.")
+    output_h, output_w = int(fft_pad_shape[0]), int(fft_pad_shape[1])
+    if output_h < pupil_diam or output_w < pupil_diam:
+        raise ValueError(
+            f"fft_pad_shape {fft_pad_shape} must be >= pupil_diam {pupil_diam} in both axes."
+        )
+
+    blank_image = np.zeros((pupil_diam, pupil_diam), dtype=np.float64)
+    moving_circle_series = np.zeros((pupil_diam, pupil_diam, pupil_diam), dtype=np.float64)
+    xrange = np.arange(pupil_diam)[None,:] - centerpt[0]
+    yrange = np.arange(pupil_diam)[:,None] - centerpt[1]
+    x_shifts_to_apply = np.arange(pupil_diam)
+    y_shifts_to_apply = np.zeros(pupil_diam)
+    shifts_to_apply = np.column_stack([x_shifts_to_apply, y_shifts_to_apply])
+    for i in range(pupil_diam):
+        rho2d = np.sqrt((xrange - x_shifts_to_apply[i])**2 + (yrange - y_shifts_to_apply[i])**2)
+        shifted_aperture_function = blank_image.copy()
+        shifted_aperture_function[rho2d <= rad] = 1
+        moving_circle_series[i, :, :] = shifted_aperture_function
+
+    # Center each 60x60 aperture frame inside the padded FFT canvas.
+    pad_top = (output_h - pupil_diam) // 2
+    pad_bottom = output_h - pupil_diam - pad_top
+    pad_left = (output_w - pupil_diam) // 2
+    pad_right = output_w - pupil_diam - pad_left
+    padded_moving_circle_series = np.pad(
+        moving_circle_series,
+        ((0, 0), (pad_top, pad_bottom), (pad_left, pad_right)),
+        mode="constant",
+        constant_values=0.0,
+    )
+
+    # FFT the padded moving circle series over spatial axes.
+    fft_moving_circle_series = np.fft.rfft2(
+        padded_moving_circle_series,
+        s=(output_h, output_w),
+        axes=(1, 2),
+    )
+    fft_aperture_function = fft_moving_circle_series[0, :, :].copy()
+    cc_template = np.conj(fft_aperture_function)
+    cc_responses_fourier = np.multiply(fft_moving_circle_series, cc_template[None, :, :])
+    moving_circle_cc_responses = np.fft.irfft2(
+        cc_responses_fourier,
+        s=(output_h, output_w),
+        axes=(1, 2),
+    )
+    moving_circle_cc_responses = np.fft.fftshift(moving_circle_cc_responses, axes=(1, 2))
+
+    max_val = float(np.max(np.abs(moving_circle_cc_responses)))
+    if max_val > 0:
+        normalized_moving_circle_cc_responses = moving_circle_cc_responses / max_val
+    else:
+        normalized_moving_circle_cc_responses = moving_circle_cc_responses
+
+    return normalized_moving_circle_cc_responses, shifts_to_apply
+
+
+def measure_xcorr_response(xcorr_cube, applied_shifts):
+    assert xcorr_cube.shape[1] == xcorr_cube.shape[2], "xcorr_cube must be a square"
+    center_of_frame = xcorr_cube.shape[1] // 2
+    peak_values = np.zeros(applied_shifts.shape[0])
+    x_distances = []
+    y_distances = []
+    for i in range(applied_shifts.shape[0]):
+        x_val = int(applied_shifts[i][0] + center_of_frame)
+        y_val = int(applied_shifts[i][1] + center_of_frame)
+        # peak_values[i] = xcorr_cube[i, x_val, y_val]
+        peak_values[i] = np.max(xcorr_cube[i])
+        x_distances.append(x_val - center_of_frame)
+        y_distances.append(y_val - center_of_frame)
+    distances = np.asarray([np.sqrt(x**2 + y**2) for x, y in zip(x_distances, y_distances)])
+    response_curve = np.column_stack([distances.astype(int), peak_values.astype(float)])
+    # #debug inspect the response curve
+    # import matplotlib.pyplot as plt
+    # plt.plot(response_curve[:, 0], response_curve[:, 1])
+    # plt.show()
+    # exit()
+    return response_curve
+
+
 
 def compute_aperture_bias(median_image, fft_pad_shape=None):
     '''
@@ -46,7 +134,7 @@ def compute_aperture_bias(median_image, fft_pad_shape=None):
     
     return bias
 
-def load_reduced_series(data_dir):
+def load_reduced_series(data_dir, diam_pupils):
     """
     Load all reduced FITS cubes (each of shape (512, 120, 120)) from a directory,
     sort them, and concatenate along the time axis.
@@ -55,6 +143,7 @@ def load_reduced_series(data_dir):
                         if (f.endswith('.fits') and f.startswith('camwfs_'))])
     series = []
     file_skips = 0
+    expect_frame_size = (diam_pupils, diam_pupils)
     expect_cube_length = None
     for file in file_list:
         with fits.open(file) as hdul:
@@ -65,9 +154,12 @@ def load_reduced_series(data_dir):
                 if not expect_cube_length == cube.shape[0]:
                     file_skips += 1
                     continue
+            if not expect_frame_size == cube.shape[1:]:
+                file_skips += 1
+                continue
             series.append(cube)
     if series:
-        return np.concatenate(series, axis=0), expect_cube_length, file_skips
+        return np.concatenate(series, axis=0), expect_frame_size, int(file_skips)
     else:
         raise ValueError(f"No FITS files found in {data_dir}.")
 

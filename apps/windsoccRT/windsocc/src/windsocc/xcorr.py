@@ -22,7 +22,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
 import sys
 from windsocc.analysis.cross_correlation import load_reduced_series, compute_all_delays_welch_optimized
-from windsocc.analysis.cross_correlation import compute_aperture_bias
+from windsocc.analysis.cross_correlation import compute_aperture_bias, compute_aperture_xcorr
+from windsocc.analysis.cross_correlation import measure_xcorr_response
 # from windsocc.preprocessing.radial import radial_profile
 # from windsocc.visualization.make_wind_movie import save_cube_as_movie
 
@@ -123,8 +124,10 @@ def find_quadrant_directories(top_level_dir):
     return sorted(quadrant_dirs)
 
 
-def process_quadrant_directory(quadrant_dir_path, quadrant, subdir_name, min_delay, max_delay, 
-                               delay_step, segment_cubes, overlap, output_base_dir, fft_pad_shape):
+def process_quadrant_directory(
+    quadrant_dir_path, quadrant, subdir_name, min_delay, max_delay, 
+    delay_step, segment_cubes, overlap, output_base_dir, fft_pad_shape,
+    diam_pupils):
     """
     Process a single quadrant directory:
       - Loads all FITS files from the quadrant directory
@@ -163,9 +166,11 @@ def process_quadrant_directory(quadrant_dir_path, quadrant, subdir_name, min_del
         first_fits_basename = os.path.splitext(fits_files[0])[0]
         
         logging.info(f"[{subdir_name}/{quadrant}] Loading reduced series from {quadrant_dir_path}")
-        time_series, n_per_cube, skipped_cubes = load_reduced_series(quadrant_dir_path)
+        time_series, n_per_cube, skipped_cubes = load_reduced_series(quadrant_dir_path, diam_pupils)
         logging.info(f"[{subdir_name}/{quadrant}] Loaded reduced series of size {len(time_series)}")
-        logging.info(f"[{subdir_name}/{quadrant}] Skipped {skipped_cubes} cubes due to not having insufficient frames.")
+        if skipped_cubes > 0:
+            logging.info(f"[{subdir_name}/{quadrant}] Skipped {skipped_cubes} cubes due to either \
+                not having sufficient frames or not having the expected frame size.")
         
         result = compute_quadrant_xcorr_from_series(
             time_series,
@@ -560,6 +565,19 @@ def main():
     results = []
     overall_starttime = datetime.now()
     
+    # Compute the aperture xcorr
+    diam_pupils = config_params.get("DIAM_PUPILS")
+    aperture_center = ((diam_pupils - 1) / 2, (diam_pupils - 1) / 2)
+    # aperture_center = (diam_pupils // 2, diam_pupils // 2)
+    fft_pad_shape = config_params.get("FFT_PAD_SHAPE", None)
+    aperture_cc, applied_shifts = compute_aperture_xcorr(diam_pupils, aperture_center, fft_pad_shape)
+
+    response_curve = measure_xcorr_response(aperture_cc, applied_shifts)
+    #save the response curve to a txt file, use integers for the distances and floats for the peak values
+    # response_curve = np.column_stack([response_curve[:, 0].astype(int), response_curve[:, 1].astype(float)])
+    np.savetxt(os.path.join(output_base_dir, "response_curve.txt"), response_curve, fmt="%d %.6f")
+    logging.info(f"Saved response curve to {os.path.join(output_base_dir, 'response_curve.txt')}")
+    
     if len(quadrant_dirs) == 1 or n_workers == 1:
         # Single quadrant or single worker - process sequentially
         logging.info("Processing sequentially...!")
@@ -567,7 +585,8 @@ def main():
             subdir_name = os.path.basename(subdir_path)
             success = process_quadrant_directory(
                 quadrant_path, quadrant, subdir_name, min_delay, max_delay,
-                delay_step, segment_cubes, overlap, output_base_dir, fft_pad_shape
+                delay_step, segment_cubes, overlap, output_base_dir, fft_pad_shape,
+                diam_pupils
             )
             results.append((subdir_name, quadrant, success))
     else:
@@ -576,7 +595,8 @@ def main():
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
             futures = {executor.submit(process_quadrant_directory, quadrant_path, quadrant,
                                       os.path.basename(subdir_path), min_delay, max_delay,
-                                      delay_step, segment_cubes, overlap, output_base_dir, fft_pad_shape): (subdir_path, quadrant)
+                                      delay_step, segment_cubes, overlap, output_base_dir, fft_pad_shape,
+                                      diam_pupils): (subdir_path, quadrant)
                       for subdir_path, quadrant, quadrant_path in quadrant_dirs}
             
             for future in as_completed(futures):

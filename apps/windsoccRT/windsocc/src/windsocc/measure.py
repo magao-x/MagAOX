@@ -489,9 +489,13 @@ def build_measure_runtime_params(config_params: dict, cube_data: np.ndarray) -> 
 
 
 
+def _slice_mf_response_cubes_dict(mf_response_cubes: dict, limit: int) -> dict:
+    """Return a copy of ``mf_response_cubes`` with each list value truncated to ``limit``."""
+    return {k: v[:limit] if isinstance(v, list) else v for k, v in mf_response_cubes.items()}
+
+
 def process_mf_response_cubes(
-    mf_response_cube_paths: list,
-    mf_response_cube_fnames: list,
+    mf_response_cubes: dict,
     noise_maps_dir: str,
     movie_output_dir: str,
     config_params: dict,
@@ -506,8 +510,11 @@ def process_mf_response_cubes(
 
     Parameters:
     -----------
-    mf_response_cube_paths : list
-        List of paths to the matched-filter response cubes.
+    mf_response_cubes : dict
+        Output of ``load_mf_response_cubes``: keys ``unsharped_mf_response_cube_paths``,
+        ``hp_cube_fnames``, ``og_mf_response_cube_paths``, ``og_cube_fnames``. Processing
+        uses the high-pass (unsharp) cubes; OG paths are passed through for downstream
+        plotting (e.g. ``make_source_detection_movie``).
     config_params : dict
         Dictionary of configuration parameters.
 
@@ -525,12 +532,45 @@ def process_mf_response_cubes(
         (``_keep_track_ids_by_model``), with reasons.
     --------
     """
+    required_keys = (
+        "unsharped_mf_response_cube_paths",
+        "hp_cube_fnames",
+        "og_response_cube_paths",
+        "og_cube_fnames",
+    )
+    for key in required_keys:
+        if key not in mf_response_cubes:
+            raise KeyError(
+                f"mf_response_cubes must contain key {key!r} (from load_mf_response_cubes)"
+            )
+    hp_mf_response_cube_paths = mf_response_cubes["unsharped_mf_response_cube_paths"]
+    hp_mf_response_cube_fnames = mf_response_cubes["hp_cube_fnames"]
+    og_mf_response_cube_paths = mf_response_cubes["og_response_cube_paths"]
+    og_mf_response_cube_fnames = mf_response_cubes["og_cube_fnames"]
+    n_hp = len(hp_mf_response_cube_paths)
+    if not (
+        n_hp == len(hp_mf_response_cube_fnames)
+        == len(og_mf_response_cube_paths)
+        == len(og_mf_response_cube_fnames)
+    ):
+        raise ValueError(
+            "mf_response_cubes list values must have equal length "
+            f"(hp paths {n_hp}, hp fnames {len(hp_mf_response_cube_fnames)}, "
+            f"og paths {len(og_mf_response_cube_paths)}, og fnames {len(og_mf_response_cube_fnames)})"
+        )
+
     wind_peaks_all = []
     wind_summaries_all = []
     wind_rejected_all = []
     model_rejected_all = []
-    # Feed the cubes into sep to collect the sources
-    for cube_name, cube_path in zip(mf_response_cube_fnames, mf_response_cube_paths):
+
+    # Feed the cubes into sep to collect the sources (high-pass / unsharp cubes for detection)
+    for cube_name, cube_path, og_path, og_fname in zip(
+        hp_mf_response_cube_fnames,
+        hp_mf_response_cube_paths,
+        og_mf_response_cube_paths,
+        og_mf_response_cube_fnames,
+    ):
         logging.info("Processing cube: %s", cube_name)
         if parity_flip_needed is None:
             # Determine if a parity flip is needed
@@ -636,6 +676,8 @@ def process_mf_response_cubes(
             make_source_detection_movie(
                 mf_response_cube_path=cube_path,
                 mf_response_cube_fname=cube_name,
+                og_response_cube_path=og_path,
+                og_response_cube_fname=og_fname,
                 sources_all=wind_peaks_all,
                 output_dir=movie_output_dir,
                 fps=30,
@@ -659,13 +701,12 @@ def run_measure_stage(
         make_movie = config_params.get("MAKE_MOVIE", False)
 
     dirs = allocate_measure_dirs(basedir=basedir, params_yaml=config_params)
-    mf_response_cubes_loc = os.path.join(dirs["distill_directory"], "mf_response_cubes")
+    response_cubes_loc = os.path.join(dirs["distill_directory"])
     noise_maps_loc = os.path.join(dirs["distill_directory"], "noise_maps")
-    mf_response_cube_fnames, mf_response_cube_paths = load_mf_response_cubes(mf_response_cubes_loc)
-    _collapsed_unsharp_names, _collapsed_unsharp_paths = load_collapsed_unsharp_response_maps(
-        mf_response_cubes_loc
-    )
-    if len(mf_response_cube_paths) == 0:
+    loaded_mf_response_cubes = load_mf_response_cubes(response_cubes_loc)
+    hp_mf_response_cube_paths = loaded_mf_response_cubes["unsharped_mf_response_cube_paths"]
+
+    if len(hp_mf_response_cube_paths) == 0:
         logging.warning("No MF response cubes found; nothing to process.")
         return {
             "dirs": dirs,
@@ -680,10 +721,12 @@ def run_measure_stage(
     limit_cubes = config_params.get("LIMIT_CUBES", None)
     if limit_cubes is not None:
         logging.info(f"Limiting the number of cubes to process to {limit_cubes}")
-        mf_response_cube_paths = mf_response_cube_paths[:limit_cubes]
-        mf_response_cube_fnames = mf_response_cube_fnames[:limit_cubes]
+        loaded_mf_response_cubes = _slice_mf_response_cubes_dict(
+            loaded_mf_response_cubes, limit_cubes
+        )
+        hp_mf_response_cube_paths = loaded_mf_response_cubes["unsharped_mf_response_cube_paths"]
     parallelized = config_params.get("PARALLELIZED", False)
-    if parallelized and len(mf_response_cube_paths) > 1:
+    if parallelized and len(hp_mf_response_cube_paths) > 1:
         png_only_movies = True
         sources_all = []
         wind_summaries = []
@@ -691,19 +734,32 @@ def run_measure_stage(
         model_rejected_all = []
         logging.info("Parallelizing the measure process...")
         with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
-            futures = {executor.submit(
-                process_mf_response_cubes,
-                [cube_path],
-                [cube_fname],
-                noise_maps_dir=noise_maps_loc,
-                movie_output_dir=dirs["movies_dir"],
-                config_params=config_params,
-                roi_masks_dir=dirs["roi_masks_dir"],
-                wind_data_dir=dirs["wind_data_dir"],
-                make_movie=make_movie,
-                png_only_movies=png_only_movies,
-                rejected_dir=dirs["rejected_directory"],
-                parity_flip_needed=parity_flip_needed): cube_path for cube_path, cube_fname in zip(mf_response_cube_paths, mf_response_cube_fnames)}
+            futures = {
+                executor.submit(
+                    process_mf_response_cubes,
+                    {
+                        "unsharped_mf_response_cube_paths": [hp_path],
+                        "hp_cube_fnames": [hp_fname],
+                        "og_response_cube_paths": [og_path],
+                        "og_cube_fnames": [og_fname],
+                    },
+                    noise_maps_dir=noise_maps_loc,
+                    movie_output_dir=dirs["movies_dir"],
+                    config_params=config_params,
+                    roi_masks_dir=dirs["roi_masks_dir"],
+                    wind_data_dir=dirs["wind_data_dir"],
+                    make_movie=make_movie,
+                    png_only_movies=png_only_movies,
+                    rejected_dir=dirs["rejected_directory"],
+                    parity_flip_needed=parity_flip_needed,
+                ): hp_path
+                for hp_path, hp_fname, og_path, og_fname in zip(
+                    loaded_mf_response_cubes["unsharped_mf_response_cube_paths"],
+                    loaded_mf_response_cubes["hp_cube_fnames"],
+                    loaded_mf_response_cubes["og_response_cube_paths"],
+                    loaded_mf_response_cubes["og_cube_fnames"],
+                )
+            }
             for future in as_completed(futures):
                 sources_i, wind_summaries_i, rejected_i, model_rejected_i = future.result()
                 sources_all.extend(sources_i)
@@ -713,8 +769,7 @@ def run_measure_stage(
     else:
         png_only_movies = False
         sources_all, wind_summaries, rejected_all, model_rejected_all = process_mf_response_cubes(
-            mf_response_cube_paths,
-            mf_response_cube_fnames,
+            loaded_mf_response_cubes,
             noise_maps_dir=noise_maps_loc,
             movie_output_dir=dirs["movies_dir"],
             config_params=config_params,
@@ -728,7 +783,7 @@ def run_measure_stage(
 
     json_paths = []
     movie_paths = []
-    for cube_path in mf_response_cube_paths:
+    for cube_path in hp_mf_response_cube_paths:
         cube_stem = os.path.splitext(os.path.basename(cube_path))[0]
         json_paths.append(
             os.path.join(dirs["wind_data_dir"], f"{cube_stem}_wind_attributes.json")
@@ -743,7 +798,7 @@ def run_measure_stage(
 
     return {
         "dirs": dirs,
-        "mf_response_cube_paths": mf_response_cube_paths,
+        "mf_response_cube_paths": hp_mf_response_cube_paths,
         "json_paths": json_paths,
         "movie_paths": movie_paths,
         "sources_all": sources_all,

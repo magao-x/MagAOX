@@ -145,7 +145,8 @@ def main() -> None:
 
     dirs = allocate_measure_dirs(basedir=basedir, params_yaml=config_params)
     mf_response_cubes_loc = os.path.join(dirs["distill_directory"], "mf_response_cubes")
-    _fnames, mf_paths = load_mf_response_cubes(mf_response_cubes_loc)
+    mf_dict = load_mf_response_cubes(mf_response_cubes_loc)
+    mf_paths = mf_dict["unsharped_mf_response_cube_paths"]
 
     if not mf_paths:
         logging.warning("No MF response cubes under %s; nothing to profile.", mf_response_cubes_loc)
