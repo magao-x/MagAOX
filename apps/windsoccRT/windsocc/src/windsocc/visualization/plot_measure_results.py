@@ -207,6 +207,9 @@ def plot_flux_decay(
 
     ref_curve = _load_xcorr_aperture_response_curve(measure_root)
 
+    # Omit noisy outer radii from plots (matches typical pupil scale ~60 px).
+    max_plot_distance_px = 60.0
+
     track_distances: dict[int, list[float]] = {}
     track_sums: dict[int, list[float]] = {}
     track_sigmas: dict[int, list[float]] = {}
@@ -266,6 +269,13 @@ def plot_flux_decay(
         else:
             sigma_sums = np.full_like(sums, np.nan)
 
+        keep = dists <= max_plot_distance_px
+        if not np.any(keep):
+            continue
+        dists = dists[keep]
+        sums = sums[keep]
+        sigma_sums = sigma_sums[keep]
+
         if ref_curve is not None:
             xp, fp = ref_curve
             ref_at_dist = np.interp(dists, xp, fp)
@@ -291,6 +301,7 @@ def plot_flux_decay(
         ax.set_xlabel("Distance from origin (pixels)")
         ax.set_ylabel(y_label)
         ax.set_title(f"Track {track_id}")
+        ax.set_xlim(-1.0, max_plot_distance_px)
         ax.grid(True, linestyle="--", alpha=0.3)
         fig.tight_layout()
         plot_path = os.path.join(
@@ -316,6 +327,14 @@ def plot_flux_decay(
                 sigma_sums = sigma_sums[order]
             else:
                 sigma_sums = np.full_like(sums, np.nan)
+
+            keep = dists <= max_plot_distance_px
+            if not np.any(keep):
+                continue
+            dists = dists[keep]
+            sums = sums[keep]
+            sigma_sums = sigma_sums[keep]
+
             if ref_curve is not None:
                 xp, fp = ref_curve
                 ref_at_dist = np.interp(dists, xp, fp)
@@ -346,6 +365,7 @@ def plot_flux_decay(
         ax.set_xlabel("Distance from origin (pixels)")
         ax.set_ylabel(y_axis_label)
         ax.set_title(f"{og_stem}: All-track flux decay")
+        ax.set_xlim(-1.0, max_plot_distance_px)
         ax.grid(True, linestyle="--", alpha=0.3)
         if len(track_distances) > 0:
             ax.legend(loc="best", fontsize=8, ncol=2)
