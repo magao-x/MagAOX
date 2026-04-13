@@ -289,12 +289,14 @@ def process_distill_group(suffix, averaged_cube, averaged_bias, header, distille
     # write_cube(output_path_unsharp, high_pass_cube, header)
     # write_cube(output_path, averaged_cube, header)
 
-    snr_map, error_map, error_map_wholecube = compute_snr_cube(mf_response_cube)
+    snr_map, _, _ = compute_snr_cube(mf_response_cube)
     (
         snr_map_unsharp,
-        error_map_unsharp,
-        error_map_unsharp_wholecube,
+        _,
+        _,
     ) = compute_snr_cube(mf_response_unsharp_cube)
+    _, error_map, error_map_wholecube = compute_snr_cube(averaged_cube)
+    _, error_map_unsharp, error_map_unsharp_wholecube = compute_snr_cube(high_pass_cube)
     snr_output_path = os.path.join(distilled_dir, "sn_maps", f"{suffix}_snr.fits")
     snr_map_unsharp_output_path = os.path.join(
         distilled_dir, "sn_maps", f"{suffix}_snr_unsharp.fits"

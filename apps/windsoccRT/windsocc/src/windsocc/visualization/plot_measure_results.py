@@ -140,102 +140,17 @@ def _subtract_background_sep_per_frame(cube: np.ndarray) -> np.ndarray:
 
 
 def plot_flux_decay(
-    response_cube: np.ndarray,
-    sep_sources_by_frame: list[np.ndarray],
-    cube_stem: str,
-    decay_dir: str,
-    spatial_noise_map: np.ndarray | None = None,
-    *,
+    og_cc_cube: np.ndarray | None,
+    og_cc_cube_fname: str | None,
     extrapolated_sources_by_frame: list[np.ndarray] | None = None,
     center_x: float | None = None,
     center_y: float | None = None,
     output_dir: str | None = None,
-    og_cc_cube_fname: str | None = None,
-    og_cc_cube: np.ndarray | None = None,
+    spatial_noise_map: np.ndarray | None = None,
+    track_velocity_mps: dict[int, float] | None = None,
 ) -> list[str]:
-    """Plot normalized aperture-summed flux curves per track across frames.
-
-    ``response_cube`` is typically the matched-filter (unsharp) cube, or the
-    background-subtracted OG response cube when that is available.
-    """
-    track_fluxes: dict[int, list[float]] = {}
-    track_frames: dict[int, list[int]] = {}
-    track_flux_sigmas: dict[int, list[float]] = {}
-    n_frames = min(len(response_cube), len(sep_sources_by_frame))
-    sigma_map: np.ndarray | None = None
-    if spatial_noise_map is not None:
-        sigma_map = np.asarray(spatial_noise_map, dtype=np.float64)
-        if sigma_map.ndim != 2 or sigma_map.shape != response_cube.shape[1:]:
-            warnings.warn(
-                f"Spatial noise map shape {getattr(sigma_map, 'shape', None)} does not match "
-                f"response cube frame shape {response_cube.shape[1:]}; ignoring uncertainties.",
-                stacklevel=2,
-            )
-            sigma_map = None
-    for frame_idx in range(n_frames):
-        frame = response_cube[frame_idx]
-        sources = sep_sources_by_frame[frame_idx]
-        if sources.size == 0:
-            continue
-        for source in sources:
-            track_id = int(source["track_id"])
-            aperture_mask = _ellipse_mask(
-                shape=frame.shape,
-                x0=float(source["x"]),
-                y0=float(source["y"]),
-                a=float(source["a"]),
-                b=float(source["b"]),
-                theta=float(source["theta"]),
-                scale=3.0,
-            )
-            if not np.any(aperture_mask):
-                continue
-            extracted_flux = float(np.nansum(frame[aperture_mask]))
-            if sigma_map is not None:
-                # Spatially varying per-pixel 1-sigma map propagated through aperture sum.
-                sigma_flux = float(np.sqrt(np.nansum(np.square(sigma_map[aperture_mask]))))
-            else:
-                sigma_flux = float("nan")
-            track_fluxes.setdefault(track_id, []).append(extracted_flux)
-            track_flux_sigmas.setdefault(track_id, []).append(sigma_flux)
-            track_frames.setdefault(track_id, []).append(frame_idx)
-
-    if not track_fluxes:
-        return []
-
-    fig, ax = plt.subplots(figsize=(8, 5))
-    for track_id in sorted(track_fluxes):
-        flux_values = np.asarray(track_fluxes[track_id], dtype=np.float64)
-        frame_values = np.asarray(track_frames[track_id], dtype=np.int64)
-        sigma_values = np.asarray(track_flux_sigmas.get(track_id, []), dtype=np.float64)
-        if flux_values.size == 0:
-            continue
-        max_flux = float(np.nanmax(flux_values))
-        if np.isfinite(max_flux) and max_flux > 0.0:
-            normalized = flux_values / max_flux
-            normalized_sigma = sigma_values / max_flux if sigma_values.size == flux_values.size else np.full_like(normalized, np.nan)
-        else:
-            normalized = np.zeros_like(flux_values)
-            normalized_sigma = np.full_like(normalized, np.nan)
-        ax.plot(frame_values, normalized, linewidth=1.2, alpha=0.75, label=f"track {track_id}")
-        if np.isfinite(normalized_sigma).any():
-            lower = normalized - normalized_sigma
-            upper = normalized + normalized_sigma
-            ax.fill_between(frame_values, lower, upper, alpha=0.2)
-
-    ax.set_xlabel("Frame")
-    ax.set_ylabel("Normalized Extracted Flux")
-    ax.set_title(f"{cube_stem}: Normalized Flux Decay by Track")
-    ax.set_ylim(-0.05, 1.05)
-    ax.grid(True, linestyle="--", alpha=0.3)
-    # Avoid an unreadable legend when many tracks are present.
-    if 0 < len(track_fluxes) <= 15:
-        ax.legend(loc="best", fontsize=8, ncol=2)
-    fig.tight_layout()
-    decay_plot_path = os.path.join(decay_dir, f"{cube_stem}_flux_decay.png")
-    fig.savefig(decay_plot_path, dpi=150)
-    plt.close(fig)
-    saved_paths: list[str] = [decay_plot_path]
+    """Plot OG extracted flux-vs-distance curves with spatial-noise uncertainty bands."""
+    saved_paths: list[str] = []
 
     if (
         og_cc_cube is None
@@ -256,28 +171,27 @@ def plot_flux_decay(
         )
         return saved_paths
 
-    mf_spatial = response_cube.shape[1:]
-    og_spatial = og_cube.shape[1:]
-    if mf_spatial != og_spatial:
-        warnings.warn(
-            f"OG cube spatial shape {og_spatial} does not match MF cube {mf_spatial}; "
-            "skipping extracted_cc_responses plots.",
-            stacklevel=2,
-        )
-        return saved_paths
-
-    n_mf = len(response_cube)
     n_og = len(og_cube)
     n_list = len(extrapolated_sources_by_frame)
-    n_frames = min(n_mf, n_og, n_list)
-    if n_frames < n_mf or n_frames < n_og or n_frames < n_list:
+    n_frames = min(n_og, n_list)
+    if n_frames < n_og or n_frames < n_list:
         warnings.warn(
             f"Truncating OG aperture analysis to {n_frames} frames "
-            f"(MF={n_mf}, OG={n_og}, extrapolated list={n_list}).",
+            f"(OG={n_og}, extrapolated list={n_list}).",
             stacklevel=2,
         )
 
     og_cube = og_cube[:n_frames]
+    sigma_map: np.ndarray | None = None
+    if spatial_noise_map is not None:
+        sigma_map = np.asarray(spatial_noise_map, dtype=np.float64)
+        if sigma_map.ndim != 2 or sigma_map.shape != og_cube.shape[1:]:
+            warnings.warn(
+                f"Spatial noise map shape {getattr(sigma_map, 'shape', None)} does not match "
+                f"OG cube frame shape {og_cube.shape[1:]}; ignoring uncertainties.",
+                stacklevel=2,
+            )
+            sigma_map = None
 
     measure_root = os.path.dirname(output_dir)
     og_stem = os.path.splitext(og_cc_cube_fname)[0]
@@ -295,6 +209,7 @@ def plot_flux_decay(
 
     track_distances: dict[int, list[float]] = {}
     track_sums: dict[int, list[float]] = {}
+    track_sigmas: dict[int, list[float]] = {}
 
     for frame_idx in range(n_frames):
         frame = og_cube[frame_idx]
@@ -328,62 +243,47 @@ def plot_flux_decay(
             if not np.any(aperture_mask):
                 continue
             aperture_sum = float(np.nansum(frame[aperture_mask]))
+            if sigma_map is not None:
+                sigma_sum = float(np.sqrt(np.nansum(np.square(sigma_map[aperture_mask]))))
+            else:
+                sigma_sum = float("nan")
             track_distances.setdefault(tid, []).append(dist)
             track_sums.setdefault(tid, []).append(aperture_sum)
+            track_sigmas.setdefault(tid, []).append(sigma_sum)
 
+    y_axis_label = "Extracted flux sum (OG response)"
     for track_id in sorted(track_distances):
         dists = np.asarray(track_distances[track_id], dtype=np.float64)
         sums = np.asarray(track_sums.get(track_id, []), dtype=np.float64)
+        sigma_sums = np.asarray(track_sigmas.get(track_id, []), dtype=np.float64)
         if dists.size == 0 or dists.shape != sums.shape:
             continue
-        smax = float(np.nanmax(sums))
-        if np.isfinite(smax) and smax > 0.0:
-            sums_norm = sums / smax
+        order = np.argsort(dists)
+        dists = dists[order]
+        sums = sums[order]
+        if sigma_sums.size == sums.size:
+            sigma_sums = sigma_sums[order]
         else:
-            sums_norm = np.zeros_like(sums)
-        if spatial_noise_map is not None:
-            sigma_map = np.asarray(spatial_noise_map, dtype=np.float64)
-            if sigma_map.ndim == 2 and sigma_map.shape == og_cube.shape[1:]:
-                sigma_track_vals: list[float] = []
-                for frame_idx in range(n_frames):
-                    sources = extrapolated_sources_by_frame[frame_idx]
-                    if sources.size == 0:
-                        continue
-                    match = sources[sources["track_id"] == track_id]
-                    if match.size == 0:
-                        continue
-                    source = match[0]
-                    semimajor_radius = max(float(source["a"]), float(source["b"])) / 2.0
-                    aperture_mask = _circle_mask(
-                        shape=og_cube.shape[1:],
-                        x0=float(source["x"]),
-                        y0=float(source["y"]),
-                        radius=semimajor_radius,
-                    )
-                    sigma_track_vals.append(
-                        float(np.sqrt(np.nansum(np.square(sigma_map[aperture_mask]))))
-                    )
-                sigma_track = np.asarray(sigma_track_vals, dtype=np.float64)
-                if sigma_track.size == sums.size and np.isfinite(smax) and smax > 0.0:
-                    sums_sigma = sigma_track / smax
-                else:
-                    sums_sigma = np.full_like(sums_norm, np.nan)
-            else:
-                sums_sigma = np.full_like(sums_norm, np.nan)
-        else:
-            sums_sigma = np.full_like(sums_norm, np.nan)
+            sigma_sums = np.full_like(sums, np.nan)
+
         if ref_curve is not None:
             xp, fp = ref_curve
             ref_at_dist = np.interp(dists, xp, fp)
-            fp_scale = float(np.nanmax(np.abs(fp))) if fp.size else 1.0
-            eps = max(np.finfo(np.float64).eps * fp_scale, np.min(fp[fp > 0.0]))
-            y_plot = sums_norm / np.maximum(ref_at_dist, eps)
-            y_sigma = sums_sigma / np.maximum(ref_at_dist, eps)
-            y_label = "Normalized aperture sum / aperture CC response"
+            ref_pos = ref_at_dist[ref_at_dist > 0.0]
+            fp_scale = float(np.nanmax(np.abs(ref_at_dist))) if ref_at_dist.size else 1.0
+            eps = max(
+                np.finfo(np.float64).eps * max(fp_scale, 1.0),
+                float(np.nanmin(ref_pos)) if ref_pos.size else np.finfo(np.float64).eps,
+            )
+            denom = np.maximum(ref_at_dist, eps)
+            y_plot = sums / denom
+            y_sigma = sigma_sums / denom
+            y_label = "Extracted flux sum / aperture CC response"
         else:
-            y_plot = sums_norm
-            y_sigma = sums_sigma
-            y_label = "Normalized aperture sum (OG response)"
+            y_plot = sums
+            y_sigma = sigma_sums
+            y_label = "Extracted flux sum (OG response)"
+        y_axis_label = y_label
         fig, ax = plt.subplots(figsize=(8, 5))
         ax.plot(dists, y_plot, linewidth=1.2, color="tab:blue")
         if np.isfinite(y_sigma).any():
@@ -399,6 +299,61 @@ def plot_flux_decay(
         fig.savefig(plot_path, dpi=150)
         plt.close(fig)
         saved_paths.append(plot_path)
+
+    # Also save one master plot with all tracks overlaid.
+    if track_distances:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for track_id in sorted(track_distances):
+            dists = np.asarray(track_distances[track_id], dtype=np.float64)
+            sums = np.asarray(track_sums.get(track_id, []), dtype=np.float64)
+            sigma_sums = np.asarray(track_sigmas.get(track_id, []), dtype=np.float64)
+            if dists.size == 0 or dists.shape != sums.shape:
+                continue
+            order = np.argsort(dists)
+            dists = dists[order]
+            sums = sums[order]
+            if sigma_sums.size == sums.size:
+                sigma_sums = sigma_sums[order]
+            else:
+                sigma_sums = np.full_like(sums, np.nan)
+            if ref_curve is not None:
+                xp, fp = ref_curve
+                ref_at_dist = np.interp(dists, xp, fp)
+                ref_pos = ref_at_dist[ref_at_dist > 0.0]
+                fp_scale = float(np.nanmax(np.abs(ref_at_dist))) if ref_at_dist.size else 1.0
+                eps = max(
+                    np.finfo(np.float64).eps * max(fp_scale, 1.0),
+                    float(np.nanmin(ref_pos)) if ref_pos.size else np.finfo(np.float64).eps,
+                )
+                denom = np.maximum(ref_at_dist, eps)
+                y_plot = sums / denom
+                y_sigma = sigma_sums / denom
+                y_axis_label = "Extracted flux sum / aperture CC response"
+            else:
+                y_plot = sums
+                y_sigma = sigma_sums
+                y_axis_label = "Extracted flux sum (OG response)"
+
+            vel = None if track_velocity_mps is None else track_velocity_mps.get(int(track_id))
+            if vel is None or not np.isfinite(vel):
+                label = f"track {int(track_id)} (v=NA m/s)"
+            else:
+                label = f"track {int(track_id)} (v={float(vel):.2f} m/s)"
+            ax.plot(dists, y_plot, linewidth=2.0, alpha=0.65, label=label)
+            if np.isfinite(y_sigma).any():
+                ax.fill_between(dists, y_plot - y_sigma, y_plot + y_sigma, alpha=0.12)
+
+        ax.set_xlabel("Distance from origin (pixels)")
+        ax.set_ylabel(y_axis_label)
+        ax.set_title(f"{og_stem}: All-track flux decay")
+        ax.grid(True, linestyle="--", alpha=0.3)
+        if len(track_distances) > 0:
+            ax.legend(loc="best", fontsize=8, ncol=2)
+        fig.tight_layout()
+        master_path = os.path.join(out_dir, f"{og_stem}_all_tracks_flux_decay.png")
+        fig.savefig(master_path, dpi=150)
+        plt.close(fig)
+        saved_paths.append(master_path)
 
     return saved_paths
 
@@ -574,15 +529,27 @@ def make_source_detection_movie(
 
     When ``og_cc_cube_path`` and ``og_cc_cube_fname`` are set, the OG
     cube is SEP background-subtracted once per frame; that cube is used for the
-    ``{og_stem}_extrapolated.mp4`` (or PNG frames), the flux decay plot, and the
-    per-track CC response plots under
+    ``{og_stem}_extrapolated.mp4`` (or PNG frames) and per-track extracted
+    CC response plots under
     ``<measure_results>/extracted_cc_responses/<og_cube_stem>/``.
     """
     detections_dir = os.path.join(os.path.dirname(output_dir), "sep_detections")
-    decay_dir = os.path.join(os.path.dirname(output_dir), "decay_plots")
     os.makedirs(detections_dir, exist_ok=True)
-    os.makedirs(decay_dir, exist_ok=True)
     cube_sources = sources_all[-1]
+    track_velocity_mps: dict[int, float] = {}
+    if isinstance(cube_sources, pl.DataFrame) and not cube_sources.is_empty():
+        if {"track_id", "velocity_m_per_s"}.issubset(set(cube_sources.columns)):
+            vel_df = (
+                cube_sources.with_columns(
+                    pl.col("track_id").cast(pl.Int64, strict=False).alias("track_id_i64"),
+                    pl.col("velocity_m_per_s").cast(pl.Float64, strict=False).alias("velocity_mps_f64"),
+                )
+                .drop_nulls(subset=["track_id_i64", "velocity_mps_f64"])
+                .group_by("track_id_i64")
+                .agg(pl.col("velocity_mps_f64").mean().alias("velocity_mps"))
+            )
+            for row in vel_df.iter_rows(named=True):
+                track_velocity_mps[int(row["track_id_i64"])] = float(row["velocity_mps"])
     mf_response_cube = fits.getdata(mf_response_cube_path) #3D array of shape (n_frames, y_size, x_size)
     center_x = mf_response_cube.shape[2] / 2.0 - 0.5
     center_y = mf_response_cube.shape[1] / 2.0 - 0.5
@@ -874,23 +841,14 @@ def make_source_detection_movie(
                 use_circular_apertures=True,
             )
 
-    if og_cube_bgsub is not None:
-        decay_cube = og_cube_bgsub
-        decay_sources = sep_sources_by_frame[: len(og_cube_bgsub)]
-    else:
-        decay_cube = mf_response_cube
-        decay_sources = sep_sources_by_frame
     plot_flux_decay(
-        response_cube=decay_cube,
-        sep_sources_by_frame=decay_sources,
-        cube_stem=cube_stem,
-        decay_dir=decay_dir,
-        spatial_noise_map=spatial_noise_map,
+        og_cc_cube=og_cube_bgsub,
+        og_cc_cube_fname=og_cc_cube_fname,
         extrapolated_sources_by_frame=extrapolated_sources_by_frame,
         center_x=center_x,
         center_y=center_y,
         output_dir=output_dir,
-        og_cc_cube_fname=og_cc_cube_fname,
-        og_cc_cube=og_cube_bgsub,
+        spatial_noise_map=spatial_noise_map,
+        track_velocity_mps=track_velocity_mps,
     )
     return True
