@@ -207,7 +207,8 @@ def get_pupil_geometry(config_params):
             raise KeyError(f"Missing required config key: {config_key}")
         pupil_centers[quadrant] = normalize_center(config_params[config_key], config_key)
 
-    mask_radius = config_params.get("PUPIL_MASK_RADIUS", DEFAULT_PUPIL_MASK_RADIUS)
+    mask_diam = config_params.get("DIAM_PUPILS", DEFAULT_PUPIL_MASK_RADIUS * 2)
+    mask_radius = mask_diam // 2
 
     return pupil_centers, int(round(float(mask_radius)))
 
@@ -427,7 +428,7 @@ def find_subdirectories(top_level_dir):
         # No FITS files in top-level, look for subdirectories
         for item in os.listdir(top_level_dir):
             item_path = os.path.join(top_level_dir, item)
-            if os.path.isdir(item_path) and item not in special_dirs:
+            if os.path.isdir(item_path) and item not in special_dirs and item.startswith("camwfs_"):
                 fits_files = [f for f in os.listdir(item_path) 
                             if f.endswith('.fits') and os.path.isfile(os.path.join(item_path, f))]
                 if fits_files:
@@ -865,9 +866,9 @@ def main():
         pupil_centers, pupil_mask_radius = get_pupil_geometry(config_params) if config_params else (
             {
                 "ul": (30, 90),
-                "ur": (90, 90),
+                "ur": (91, 91),
                 "ll": (30, 30),
-                "lr": (90, 30),
+                "lr": (91, 31),
             },
             DEFAULT_PUPIL_MASK_RADIUS,
         )
