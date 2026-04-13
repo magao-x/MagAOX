@@ -599,29 +599,31 @@ int frameGrabber<derivedT>::appLogic()
 
     try
     {
-        if( derived().state() == stateCodes::OPERATING && m_atimes.size() > 0 && derived().fps() > 0 )
+        if( derived().state() == stateCodes::OPERATING && m_atimes.size() > 1 && derived().fps() > 0 )
         {
-            if( m_atimes.size() >= m_atimes.maxEntries() )
+            cbIndexT latTime = m_latencyCircBuffMaxTime * m_cbFPS;
+            if( latTime >= m_atimes.maxEntries() )
             {
-                cbIndexT latTime = m_latencyCircBuffMaxTime * m_cbFPS;
-                if( latTime >= m_atimes.maxEntries() )
-                {
-                    latTime = m_atimes.maxEntries() - 1;
-                }
+                latTime = m_atimes.maxEntries() - 1;
+            }
 
-                m_atimesD.resize( latTime - 1 );
-                m_wtimesD.resize( latTime - 1 );
-                m_watimesD.resize( latTime - 1 );
+            cbIndexT usedEntries = std::min<cbIndexT>( latTime, m_atimes.size() );
+
+            if( usedEntries >= 2 )
+            {
+                m_atimesD.resize( usedEntries - 1 );
+                m_wtimesD.resize( usedEntries - 1 );
+                m_watimesD.resize( usedEntries - 1 );
 
                 cbIndexT refEntry = m_atimes.latest();
 
-                if( refEntry >= latTime )
+                if( refEntry >= usedEntries )
                 {
-                    refEntry -= latTime;
+                    refEntry -= usedEntries;
                 }
                 else
                 {
-                    refEntry = m_atimes.maxEntries() + refEntry - latTime;
+                    refEntry = m_atimes.maxEntries() + refEntry - usedEntries;
                 }
 
                 timespec ts = m_atimes.at( refEntry, 0 );

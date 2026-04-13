@@ -106,7 +106,9 @@ Follow these code style and documentation rules exactly.
   - Add a brief Doxygen block for each `TEST_CASE`, not just the file header.
 
 21) Test Doxygen Link Preservation
-  - When test harness indirection, fault-injection wrappers, alternate namespaces, or protected/private access would prevent Doxygen from auto-linking the real API under test, include `tests/testXWC.hpp` and use `XWCTEST_DOXYGEN_REF(...)` to add an unreachable reference to the real symbol.
+  - When test harness indirection, fault-injection wrappers, alternate namespaces, or protected/private access would prevent Doxygen from auto-linking the real API under test, include `tests/testXWC.hpp` and add explicit Doxygen-only references to the real symbol inside the relevant `TEST_CASE`.
+  - For MagAO-X app unit tests, prefer the local `#ifdef <APP>_TEST_DOXYGEN_REF` pattern with raw member references that need not compile, and wrap those blocks in `// clang-format off` and `// clang-format on`.
+  - Hide test-harness-only classes or helpers from Doxygen with `\cond ... \endcond` when they would otherwise dominate the generated links. 
   - Use this for methods/functions actually under test, especially in unit-test files that rely on wrapper namespaces, injected subclasses, or macro-based indirection.
 
 22) App Header-Only Preference
