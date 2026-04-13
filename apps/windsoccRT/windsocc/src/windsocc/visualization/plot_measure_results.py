@@ -134,7 +134,7 @@ def _subtract_background_sep_per_frame(cube: np.ndarray) -> np.ndarray:
     out = np.empty((n,) + cube.shape[1:], dtype=np.float32)
     for i in range(n):
         sep_frame = np.ascontiguousarray(cube[i], dtype=np.float32)
-        estimate_bkg = sep.Background(sep_frame)
+        estimate_bkg = sep.Background(sep_frame, bw=32)
         out[i] = sep_frame - estimate_bkg
     return out
 
@@ -148,6 +148,7 @@ def plot_flux_decay(
     output_dir: str | None = None,
     spatial_noise_map: np.ndarray | None = None,
     track_velocity_mps: dict[int, float] | None = None,
+    track_direction_deg: dict[int, float] | None = None,
 ) -> list[str]:
     """Plot OG extracted flux-vs-distance curves with spatial-noise uncertainty bands."""
     saved_paths: list[str] = []
@@ -300,7 +301,17 @@ def plot_flux_decay(
             ax.fill_between(dists, y_plot - y_sigma, y_plot + y_sigma, alpha=0.2, color="tab:blue")
         ax.set_xlabel("Distance from origin (pixels)")
         ax.set_ylabel(y_label)
-        ax.set_title(f"Track {track_id}")
+        vel = None if track_velocity_mps is None else track_velocity_mps.get(int(track_id))
+        direction = None if track_direction_deg is None else track_direction_deg.get(int(track_id))
+        if vel is None or not np.isfinite(vel):
+            vel_txt = "v=NA m/s"
+        else:
+            vel_txt = f"v={float(vel):.2f} m/s"
+        if direction is None or not np.isfinite(direction):
+            dir_txt = "dir=NA deg"
+        else:
+            dir_txt = f"dir={float(direction):.1f} deg"
+        ax.set_title(f"Track {track_id} ({vel_txt}, {dir_txt})")
         ax.set_xlim(-1.0, max_plot_distance_px)
         ax.grid(True, linestyle="--", alpha=0.3)
         fig.tight_layout()
@@ -354,10 +365,16 @@ def plot_flux_decay(
                 y_axis_label = "Extracted flux sum (OG response)"
 
             vel = None if track_velocity_mps is None else track_velocity_mps.get(int(track_id))
+            direction = None if track_direction_deg is None else track_direction_deg.get(int(track_id))
             if vel is None or not np.isfinite(vel):
-                label = f"track {int(track_id)} (v=NA m/s)"
+                vel_txt = "v=NA m/s"
             else:
-                label = f"track {int(track_id)} (v={float(vel):.2f} m/s)"
+                vel_txt = f"v={float(vel):.2f} m/s"
+            if direction is None or not np.isfinite(direction):
+                dir_txt = "dir=NA deg"
+            else:
+                dir_txt = f"dir={float(direction):.1f} deg"
+            label = f"track {int(track_id)} ({vel_txt}, {dir_txt})"
             ax.plot(dists, y_plot, linewidth=2.0, alpha=0.65, label=label)
             if np.isfinite(y_sigma).any():
                 ax.fill_between(dists, y_plot - y_sigma, y_plot + y_sigma, alpha=0.12)
@@ -557,6 +574,7 @@ def make_source_detection_movie(
     os.makedirs(detections_dir, exist_ok=True)
     cube_sources = sources_all[-1]
     track_velocity_mps: dict[int, float] = {}
+    track_direction_deg: dict[int, float] = {}
     if isinstance(cube_sources, pl.DataFrame) and not cube_sources.is_empty():
         if {"track_id", "velocity_m_per_s"}.issubset(set(cube_sources.columns)):
             vel_df = (
@@ -570,6 +588,20 @@ def make_source_detection_movie(
             )
             for row in vel_df.iter_rows(named=True):
                 track_velocity_mps[int(row["track_id_i64"])] = float(row["velocity_mps"])
+        if {"track_id", "direction"}.issubset(set(cube_sources.columns)):
+            dir_df = cube_sources.with_columns(
+                pl.col("track_id").cast(pl.Int64, strict=False).alias("track_id_i64"),
+                pl.col("direction").cast(pl.Float64, strict=False).alias("direction_deg_f64"),
+            ).drop_nulls(subset=["track_id_i64", "direction_deg_f64"])
+            for tid in dir_df["track_id_i64"].unique().to_list():
+                group = dir_df.filter(pl.col("track_id_i64") == int(tid))
+                if group.is_empty():
+                    continue
+                vals = group["direction_deg_f64"].to_numpy().astype(np.float64)
+                mean_sin = np.mean(np.sin(np.radians(vals)))
+                mean_cos = np.mean(np.cos(np.radians(vals)))
+                mean_dir = float(np.degrees(np.arctan2(mean_sin, mean_cos))) % 360.0
+                track_direction_deg[int(tid)] = mean_dir
     mf_response_cube = fits.getdata(mf_response_cube_path) #3D array of shape (n_frames, y_size, x_size)
     center_x = mf_response_cube.shape[2] / 2.0 - 0.5
     center_y = mf_response_cube.shape[1] / 2.0 - 0.5
@@ -870,5 +902,6 @@ def make_source_detection_movie(
         output_dir=output_dir,
         spatial_noise_map=spatial_noise_map,
         track_velocity_mps=track_velocity_mps,
+        track_direction_deg=track_direction_deg,
     )
     return True
