@@ -1,10 +1,10 @@
 /** \file edtinc.h
- * \brief Minimal EDT SDK declarations for `ocam2KCtrl` unit tests.
+ * \brief Shared EDT SDK stub declarations for MagAO-X test builds.
  * \author OpenAI Codex
  */
 
-#ifndef ocam2KCtrl_tests_edtinc_h
-#define ocam2KCtrl_tests_edtinc_h
+#ifndef tests_edtinc_h
+#define tests_edtinc_h
 
 typedef unsigned int  uint;
 typedef unsigned char u_char;
@@ -117,4 +117,4 @@ extern "C"
 }
 #endif
 
-#endif // ocam2KCtrl_tests_edtinc_h
+#endif // tests_edtinc_h

@@ -124,7 +124,6 @@ all_buildable_apps = \
 	alignLoop \
 	cacaoInterface \
 	closedLoopIndi \
-	cred2Ctrl \
 	dmMode \
 	dmPokeCenter \
 	dmPokeXCorr \
@@ -174,6 +173,14 @@ all_buildable_apps = \
 	xt1121DCDU \
 	zaberCtrl \
 	zaberLowLevel
+
+# EDT-backed camera controllers remain in the generic ALL_APPS coverage build
+# only when the SDK headers are present locally. Otherwise they are covered
+# through their unit-test harnesses instead of direct app-binary builds.
+ifneq ($(wildcard /opt/EDTpdv/edtinc.h),)
+all_buildable_apps += \
+	cred2Ctrl
+endif
 
 libs_to_build = libtelnet
 
