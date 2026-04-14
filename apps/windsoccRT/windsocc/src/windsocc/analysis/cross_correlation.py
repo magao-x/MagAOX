@@ -124,11 +124,12 @@ def load_reduced_series(data_dir, diam_pupils):
                     file_skips += 1
                     continue
             if not expect_frame_size == cube.shape[1:]:
-                file_skips += 1
-                continue
+                assert False, f"Expected frame size {expect_frame_size} but got {cube.shape[1:]}"
             series.append(cube)
     if series:
-        return np.concatenate(series, axis=0), expect_frame_size, int(file_skips)
+        # Return frames-per-cube (axis 0 length), not spatial frame shape.
+        # Downstream xcorr segmenting expects a scalar cube length.
+        return np.concatenate(series, axis=0), int(expect_cube_length), int(file_skips)
     else:
         raise ValueError(f"No FITS files found in {data_dir}.")
 

@@ -115,8 +115,11 @@ def find_quadrant_directories(top_level_dir):
                 quadrant_path = os.path.join(reduced_path, quadrant)
                 if os.path.isdir(quadrant_path):
                     # Check if directory contains FITS files
-                    fits_files = [f for f in os.listdir(quadrant_path) 
-                                if f.endswith('.fits') and os.path.isfile(os.path.join(quadrant_path, f))]
+                    fits_files = [
+                        f for f in os.listdir(quadrant_path) 
+                                if f.endswith('.fits') \
+                                     and f.startswith('camwfs_') \
+                                     and os.path.isfile(os.path.join(quadrant_path, f))]
                     if fits_files:
                         quadrant_dirs.append((item_path, quadrant, quadrant_path))
     
@@ -124,9 +127,10 @@ def find_quadrant_directories(top_level_dir):
 
 
 def process_quadrant_directory(
-    quadrant_dir_path, quadrant, subdir_name, min_delay, max_delay, 
+    quadrant_dir_path, quadrant, subdir_name, min_delay, max_delay,
     delay_step, segment_cubes, overlap, output_base_dir, fft_pad_shape,
-    diam_pupils):
+    diam_pupils, raw_frames_per_cube, loop_speed_hz,
+):
     """
     Process a single quadrant directory:
       - Loads all FITS files from the quadrant directory
@@ -150,15 +154,16 @@ def process_quadrant_directory(
     """
     try:
         logging.info(":" * 80)
-        logging.info(f"Processing: {subdir_name} / {quadrant}")
+        logging.info(f"Processing: {subdir_name}/{quadrant}")
         logging.info(f"Path: {quadrant_dir_path}")
         logging.info(":" * 80)
         
         # Get first FITS file for filename generation
         fits_files = sorted([f for f in os.listdir(quadrant_dir_path) 
-                           if f.endswith('.fits') and os.path.isfile(os.path.join(quadrant_dir_path, f))])
-        
-        if not fits_files:
+                           if f.endswith('.fits') and \
+                            os.path.isfile(os.path.join(quadrant_dir_path, f)) and \
+                            f.startswith('camwfs_')])
+        if len(fits_files) == 0:
             logging.warning(f"[{subdir_name}/{quadrant}] No FITS files found in {quadrant_dir_path}")
             return False
 
@@ -182,6 +187,8 @@ def process_quadrant_directory(
             segment_cubes,
             overlap,
             fft_pad_shape,
+            raw_frames_per_cube=raw_frames_per_cube,
+            loop_speed_hz=loop_speed_hz,
         )
         if not result["success"]:
             return False
@@ -216,8 +223,21 @@ def process_quadrant_directory(
         return False
 
 
-def compute_quadrant_xcorr_from_series(time_series, n_per_cube, quadrant, subdir_name, min_delay,
-                                       max_delay, delay_step, segment_cubes, overlap, fft_pad_shape):
+def compute_quadrant_xcorr_from_series(
+    time_series,
+    n_per_cube,
+    quadrant,
+    subdir_name,
+    min_delay,
+    max_delay,
+    delay_step,
+    segment_cubes,
+    overlap,
+    fft_pad_shape,
+    *,
+    raw_frames_per_cube=512,
+    loop_speed_hz=2000.0,
+):
     """Compute xcorr products for one quadrant time series without persisting them."""
     try:
         # logging.info(f"[{subdir_name}/{quadrant}] Computing aperture bias")
@@ -244,7 +264,10 @@ def compute_quadrant_xcorr_from_series(time_series, n_per_cube, quadrant, subdir
         cc_cube -= static_pattern
 
         header = fits.Header()
-        delays_str = ",".join(str((512 / n_per_cube) * 1 / 2000 * d) for d in delays)
+        delays_str = ",".join(
+            str((raw_frames_per_cube / n_per_cube) * (1.0 / loop_speed_hz) * d)
+            for d in delays
+        )
         header["DELAYARR"] = (delays_str, "Comma-separated delays for each frame")
         return {
             "success": True,
@@ -282,7 +305,7 @@ def resolve_xcorr_settings(config_params, overrides=None):
     delay_step = overrides.get("delay_step", config_params.get("DELAY_STEP", 1))
     segment_cubes = overrides.get(
         "segment_cubes",
-        config_params.get("SEGMENT_CUBES", config_params.get("SEGMENT_LENGTH", 22)),
+        config_params.get("SEGMENT_LENGTH", 22),
     )
     overlap = overrides.get("overlap", config_params.get("OVERLAP", 0.5))
     fft_pad_shape = overrides.get("fft_pad_shape", config_params.get("FFT_PAD_SHAPE", None))
@@ -295,6 +318,8 @@ def resolve_xcorr_settings(config_params, overrides=None):
         raise ValueError(
             "max-delay must be provided either via override or MAX_DELAY in config file"
         )
+    raw_frames_per_cube = int(config_params.get("RAW_FRAMES_PER_CUBE", 512))
+    loop_speed_hz = float(config_params.get("LOOP_SPEED", 2000.0))
     return {
         "min_delay": int(min_delay),
         "max_delay": int(max_delay),
@@ -303,6 +328,8 @@ def resolve_xcorr_settings(config_params, overrides=None):
         "overlap": float(overlap),
         "fft_pad_shape": fft_pad_shape,
         "workers": workers,
+        "raw_frames_per_cube": raw_frames_per_cube,
+        "loop_speed_hz": loop_speed_hz,
     }
 
 
@@ -334,6 +361,7 @@ def run_xcorr_stage(run_dir, config_params=None, overrides=None):
         config_params = parse_config_file(config_path)
 
     settings = resolve_xcorr_settings(config_params, overrides=overrides)
+    diam_pupils = config_params.get("DIAM_PUPILS")
     output_dir_name = config_params.get("XCORR_DIR", "xcorr_results")
     output_base_dir = (
         output_dir_name
@@ -371,6 +399,9 @@ def run_xcorr_stage(run_dir, config_params=None, overrides=None):
                         settings["overlap"],
                         output_base_dir,
                         settings["fft_pad_shape"],
+                        diam_pupils,
+                        settings["raw_frames_per_cube"],
+                        settings["loop_speed_hz"],
                     ),
                 )
             )
@@ -389,6 +420,9 @@ def run_xcorr_stage(run_dir, config_params=None, overrides=None):
                     settings["overlap"],
                     output_base_dir,
                     settings["fft_pad_shape"],
+                    diam_pupils,
+                    settings["raw_frames_per_cube"],
+                    settings["loop_speed_hz"],
                 ): quadrant_dir_path
                 for subdir_name, quadrant, quadrant_dir_path in quadrant_dirs
             }
@@ -433,6 +467,8 @@ def run_xcorr_stage_in_memory(run_dir, reduced_products, config_params=None, ove
             settings["segment_cubes"],
             settings["overlap"],
             settings["fft_pad_shape"],
+            raw_frames_per_cube=settings["raw_frames_per_cube"],
+            loop_speed_hz=settings["loop_speed_hz"],
         )
         results.append((quadrant, result["success"]))
         if result["success"]:
@@ -457,8 +493,10 @@ def main():
                         help="Maximum delay (in frames) for cross-correlation. Can be set via config file.")
     parser.add_argument('--delay-step', type=int, default=None,
                         help="Step size for delay values (in frames). Default: 1 or from config.")
-    parser.add_argument('--segment-cubes', type=int, default=None,
-                        help="Number of cubes to use per segment. Default: 22 or from config.")
+    parser.add_argument(
+        '--segment-cubes', type=int, default=None,
+        help="Number of cubes per segment; overrides SEGMENT_LENGTH in config (default: 22).",
+    )
     parser.add_argument('--overlap', type=float, default=None,
                         help="Fractional overlap between segments. Default: 0.5 or from config.")
     parser.add_argument('--fft-pad-shape', type=parse_fft_pad_shape, default=None,
@@ -519,7 +557,9 @@ def main():
     min_delay = args.min_delay if args.min_delay is not None else config_params.get('MIN_DELAY')
     max_delay = args.max_delay if args.max_delay is not None else config_params.get('MAX_DELAY')
     delay_step = args.delay_step if args.delay_step is not None else config_params.get('DELAY_STEP', 1)
-    segment_cubes = args.segment_cubes if args.segment_cubes is not None else config_params.get('SEGMENT_CUBES', 22)
+    segment_cubes = args.segment_cubes if args.segment_cubes is not None else config_params.get('SEGMENT_LENGTH', 22)
+    raw_frames_per_cube = int(config_params.get('RAW_FRAMES_PER_CUBE', 512))
+    loop_speed_hz = float(config_params.get('LOOP_SPEED', 2000.0))
     overlap = args.overlap if args.overlap is not None else config_params.get('OVERLAP', 0.5)
     fft_pad_shape = args.fft_pad_shape if args.fft_pad_shape is not None else config_params.get('FFT_PAD_SHAPE', None)
     workers = args.workers if args.workers is not None else config_params.get('WORKERS')
@@ -583,7 +623,7 @@ def main():
             success = process_quadrant_directory(
                 quadrant_path, quadrant, subdir_name, min_delay, max_delay,
                 delay_step, segment_cubes, overlap, output_base_dir, fft_pad_shape,
-                diam_pupils
+                diam_pupils, raw_frames_per_cube, loop_speed_hz,
             )
             results.append((subdir_name, quadrant, success))
     else:
@@ -593,7 +633,7 @@ def main():
             futures = {executor.submit(process_quadrant_directory, quadrant_path, quadrant,
                                       os.path.basename(subdir_path), min_delay, max_delay,
                                       delay_step, segment_cubes, overlap, output_base_dir, fft_pad_shape,
-                                      diam_pupils): (subdir_path, quadrant)
+                                      diam_pupils, raw_frames_per_cube, loop_speed_hz): (subdir_path, quadrant)
                       for subdir_path, quadrant, quadrant_path in quadrant_dirs}
             
             for future in as_completed(futures):

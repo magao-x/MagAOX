@@ -421,7 +421,6 @@ def build_measure_runtime_params(config_params: dict, cube_data: np.ndarray) -> 
     image_center = config_params.get("IMAGE_CENTER", None)
     diam_pupils = config_params.get("DIAM_PRIMARY", config_params.get("DIAM_PUPILS"))
     mirror_diam = config_params.get("D_MIRROR", None)
-    time_per_frame = config_params.get("TIME_PER_FRAME", None)
     if mirror_diam is None or diam_pupils is None:
         logging.warning(
             "D_MIRROR and DIAM_PRIMARY/DIAM_PUPILS not set in the config file. \
@@ -447,6 +446,20 @@ def build_measure_runtime_params(config_params: dict, cube_data: np.ndarray) -> 
         frame_binning = 8
     else:
         logging.info("Using GROUP_SIZE: %s for frame binning.", frame_binning)
+
+    loop_speed_hz = config_params.get("LOOP_SPEED", None)
+    if loop_speed_hz is not None:
+        time_per_frame = float(frame_binning) / float(loop_speed_hz)
+        logging.info(
+            "TIME_PER_FRAME = GROUP_SIZE / LOOP_SPEED = %s / %s = %s s",
+            frame_binning,
+            loop_speed_hz,
+            time_per_frame,
+        )
+    else:
+        time_per_frame = config_params.get("TIME_PER_FRAME", None)
+        if time_per_frame is not None:
+            logging.info("Using TIME_PER_FRAME from config: %s s", time_per_frame)
 
     if sep_thresh is None or sep_minarea is None:
         logging.warning(
@@ -574,6 +587,10 @@ def process_mf_response_cubes(
     wind_rejected_all = []
     model_rejected_all = []
 
+    movie_fps = float(
+        config_params.get("MOVIE_FPS", config_params.get("FPS", 30))
+    )
+
     # Feed the cubes into sep to collect the sources (high-pass / unsharp cubes for detection)
     for cube_name, cube_path, og_path, og_fname in zip(
         hp_mf_response_cube_fnames,
@@ -692,7 +709,7 @@ def process_mf_response_cubes(
                 spatial_noise_map=error_map,
                 sources_all=wind_peaks_all,
                 output_dir=movie_output_dir,
-                fps=30,
+                fps=movie_fps,
                 cmap="Blues_r",
                 png_only=png_only_movies,
             )

@@ -18,6 +18,8 @@ from scipy.signal import fftconvolve
 import matplotlib.pyplot as plt
 from skimage.feature import match_template
 
+DEFAULT_TEMPLATE_SIZE = 65
+
 
 def parse_config_file(config_path):
     """Load the distill-stage config file."""
@@ -229,6 +231,7 @@ def process_distill_group(
     averaged_bias,
     header,
     distilled_dir,
+    template_size,
     save_pngs=True,
     hp_filter_fwhm=None,
 ):
@@ -240,16 +243,18 @@ def process_distill_group(
     bias_output_path = os.path.join(distilled_dir, "biases", f"{suffix}_bias.fits")
     write_cube(bias_output_path, averaged_bias, header)
 
-    mf_template = build_template(averaged_cube[0])
+    mf_template = build_template(averaged_cube[0], size=template_size)
     if hp_filter_fwhm is not None:
+        logging.info(f"Applying high-pass filter with FWHM {hp_filter_fwhm} pixels.")
         high_pass_cube = apply_unsharp_mask_cube(averaged_cube, fwhm_pixels=hp_filter_fwhm)
     else:
+        logging.warning("No high-pass filter FWHM provided; using default of 5.0 pixels.")
         high_pass_cube = apply_unsharp_mask_cube(averaged_cube)
     averaged_cube_output_path = os.path.join(distilled_dir, f"{suffix}.fits")
     high_pass_cube_output_path = os.path.join(distilled_dir, f"{suffix}_unsharp.fits")
     write_cube(averaged_cube_output_path, averaged_cube, header)
     write_cube(high_pass_cube_output_path, high_pass_cube, header)
-    mf_template_unsharp = build_template(high_pass_cube[0])
+    mf_template_unsharp = build_template(high_pass_cube[0], size=template_size)
     mf_output_path = os.path.join(distilled_dir, "mf_templates", f"{suffix}_mf_template.fits")
     mf_output_path_unsharp = os.path.join(distilled_dir, "mf_templates", f"{suffix}_mf_template_unsharp.fits")
     write_cube(mf_output_path_unsharp, mf_template_unsharp, header)
@@ -382,12 +387,14 @@ def run_distill_stage(directory, config_params=None, save_pngs=True):
         bias_file_list = bias_groups[suffix]
         averaged_bias, bias_header = load_and_average(bias_file_list)
         hp_filter_fwhm = config_params.get("HIGH_PASS_FWHM", None)
+        template_size = int(config_params.get("TEMPLATE_SIZE", DEFAULT_TEMPLATE_SIZE))
         process_distill_group(
             suffix,
             averaged_cube,
             averaged_bias,
             bias_header or header,
             distilled_dir,
+            template_size,
             save_pngs=save_pngs,
             hp_filter_fwhm=hp_filter_fwhm,
         )
@@ -434,12 +441,14 @@ def run_distill_stage_in_memory(directory, xcorr_result, config_params=None, sav
     averaged_cube = np.mean(np.stack(cc_cubes, axis=0), axis=0)
     averaged_bias = np.mean(np.stack(biases, axis=0), axis=0)
     hp_filter_fwhm = config_params.get("HIGH_PASS_FWHM", None)
+    template_size = int(config_params.get("TEMPLATE_SIZE", DEFAULT_TEMPLATE_SIZE))
     process_distill_group(
         suffix,
         averaged_cube,
         averaged_bias,
         header,
         distilled_dir,
+        template_size,
         save_pngs=save_pngs,
         hp_filter_fwhm=hp_filter_fwhm,
     )
