@@ -1,33 +1,50 @@
+/** \file streamWriter_test.cpp
+ * \brief Catch2 tests for the streamWriter app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup streamWriter_files
+ */
 
-#include "../../../tests/catch2/catch.hpp"
-#include "../../tests/testMacrosINDI.hpp"
+#include "../../../tests/testXWC.hpp"
+#include "../../../tests/testMacrosINDI.hpp"
 
+#define protected public
 #include "../streamWriter.hpp"
+#undef protected
 
 using namespace MagAOX::app;
 
-namespace MagAOX
-{
-namespace app
+namespace libXWCTest
 {
 
-//Standard test harness for INDI callbacks
+/** \addtogroup streamWriter_unit_test
+ * \brief Additional unit tests for the streamWriter application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `streamWriter` unit tests.
+/** \ingroup streamWriter_unit_test
+ */
+namespace streamWriterTest
+{
+
+/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 struct streamWriter_test : public streamWriter
 {
     streamWriter *m_sw;
 
-    streamWriter_test(const std::string & device)
+    streamWriter_test( const std::string &device )
     {
         m_configName = device;
-        m_outName = device;
+        m_outName    = device;
 
-        XWCTEST_SETUP_INDI_NEW_PROP(writing);
+        XWCTEST_SETUP_INDI_NEW_PROP( writing );
     }
-
-
 };
+/// \endcond
 
-//Test harness for data writing
+/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 struct streamWriter_data_test
 {
     streamWriter_test *m_sw;
@@ -196,21 +213,33 @@ struct streamWriter_data_test
         return rv;
     }
 };
-} // namespace app
-} // namespace MagAOX
+/// \endcond
 
-using namespace MagAOX::app;
-
+/// Verify the streamWriter INDI callback validator accepts only the expected property.
+/**
+ * \ingroup streamWriter_unit_test
+ */
 SCENARIO( "streamWriter INDI Callbacks", "[streamWriter]" )
 {
-    XWCTEST_INDI_NEW_CALLBACK( streamWriter, writing);
+    // clang-format off
+    #ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    streamWriter::newCallBack_m_indiP_writing( pcf::IndiProperty() );
+    streamWriter::doEncode();
+    #endif
+    // clang-format on
+
+    XWCTEST_INDI_NEW_CALLBACK( streamWriter, writing );
 }
 
+/// Verify the streamWriter test harness exposes the expected default configuration state.
+/**
+ * \ingroup streamWriter_unit_test
+ */
 SCENARIO( "streamWriter Configuration", "[streamWriter]" )
 {
     GIVEN( "A default constructed streamWriter" )
     {
-        streamWriter_test      sw("testdev");
+        streamWriter_test      sw( "testdev" );
         streamWriter_data_test sw_test( &sw );
 
         WHEN( "default configurations" )
@@ -220,11 +249,15 @@ SCENARIO( "streamWriter Configuration", "[streamWriter]" )
     }
 }
 
+/// Verify streamWriter encodes raw image buffers into XRIF archives without corrupting frame data.
+/**
+ * \ingroup streamWriter_unit_test
+ */
 SCENARIO( "streamWriter encoding data", "[streamWriter]" )
 {
     GIVEN( "A default constructed streamWriter and a 120x120 uint16 stream" )
     {
-        streamWriter_test      sw("testdev");
+        streamWriter_test      sw( "testdev" );
         streamWriter_data_test sw_test( &sw );
 
         WHEN( "writing full 1st chunk" )
@@ -247,7 +280,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
             int writeChunkLength = 5;
             REQUIRE( sw_test.setup_circbufs( 120, 120, XRIF_TYPECODE_UINT16, circBuffLength, writeChunkLength ) == 0 );
             REQUIRE( sw_test.setup_xrif() == 0 );
-            //REQUIRE( sw_test.setup_fname() == 0 );
+            // REQUIRE( sw_test.setup_fname() == 0 );
 
             REQUIRE( sw_test.fill_circbuf_uint16() == 0 );
 
@@ -262,7 +295,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
             int writeChunkLength = 5;
             REQUIRE( sw_test.setup_circbufs( 120, 120, XRIF_TYPECODE_UINT16, circBuffLength, writeChunkLength ) == 0 );
             REQUIRE( sw_test.setup_xrif() == 0 );
-            //REQUIRE( sw_test.setup_fname() == 0 );
+            // REQUIRE( sw_test.setup_fname() == 0 );
 
             REQUIRE( sw_test.fill_circbuf_uint16() == 0 );
 
@@ -277,7 +310,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
             int writeChunkLength = 5;
             REQUIRE( sw_test.setup_circbufs( 120, 120, XRIF_TYPECODE_UINT16, circBuffLength, writeChunkLength ) == 0 );
             REQUIRE( sw_test.setup_xrif() == 0 );
-            //REQUIRE( sw_test.setup_fname() == 0 );
+            // REQUIRE( sw_test.setup_fname() == 0 );
 
             REQUIRE( sw_test.fill_circbuf_uint16() == 0 );
 
@@ -287,3 +320,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
         }
     }
 }
+
+} // namespace streamWriterTest
+
+} // namespace libXWCTest

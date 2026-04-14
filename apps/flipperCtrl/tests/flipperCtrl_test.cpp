@@ -1,29 +1,51 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
-#include "../../../tests/catch2/catch.hpp"
+/** \file flipperCtrl_test.cpp
+ * \brief Catch2 tests for the flipperCtrl app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup flipperCtrl_files
+ */
+
+#include "../../../tests/testXWC.hpp"
 
 #include "../flipperCtrl.hpp"
 
 using namespace MagAOX::app;
 
-namespace template_test
+namespace libXWCTest
 {
 
-SCENARIO( "xxxx", "[template]" )
+/** \defgroup flipperCtrl_unit_test flipperCtrl Unit Tests
+ * \brief Unit tests for the flipperCtrl application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `flipperCtrl` unit tests.
+/** \ingroup flipperCtrl_unit_test
+ */
+namespace flipperCtrlTest
 {
-   GIVEN("xxxxx")
-   {
-      int rv;
 
-      WHEN("xxxx")
-      {
-         rv = 0;
+/// Verify the placeholder flipperCtrl test harness instantiates the app cleanly.
+/**
+ * \ingroup flipperCtrl_unit_test
+ */
+TEST_CASE( "flipperCtrl placeholder harness instantiates the app", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl();
+    #endif
+    // clang-format on
 
-         REQUIRE(rv == 0);
-      }
-   }
+    SECTION( "default construction succeeds" )
+    {
+        flipperCtrl app;
+
+        REQUIRE( true );
+    }
 }
-} //namespace template_test
+
+} // namespace flipperCtrlTest
+
+} // namespace libXWCTest

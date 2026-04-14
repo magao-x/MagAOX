@@ -13,16 +13,29 @@ extern "C"
 #include "../zb_serial.c"
 }
 
-#include "../../../tests/catch2/catch.hpp"
-#include "../../tests/testMacrosINDI.hpp"
+#include "../../../tests/testXWC.hpp"
+#include "../../../tests/testMacrosINDI.hpp"
 
 #include "../zaberLowLevelBinary.hpp"
 
 using namespace MagAOX::app;
 
-namespace ZLLBTEST
+namespace libXWCTest
 {
 
+/** \defgroup zaberLowLevelBinary_unit_test zaberLowLevelBinary Unit Tests
+ * \brief Unit tests for the zaberLowLevelBinary application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `zaberLowLevelBinary` unit tests.
+/** \ingroup zaberLowLevelBinary_unit_test
+ */
+namespace zaberLowLevelBinaryTest
+{
+
+/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 class zaberLowLevelBinary_test : public zaberLowLevelBinary
 {
   public:
@@ -175,9 +188,21 @@ class zaberBinaryStage_test : public zaberBinaryStage<zaberLowLevelBinary_test>
         return m_lastHomed.tv_sec;
     }
 };
+/// \endcond
 
+/// Verify zaberLowLevelBinary callback validation, power-off snapshots, and homing timestamp refresh logic.
+/**
+ * \ingroup zaberLowLevelBinary_unit_test
+ */
 SCENARIO( "INDI Callbacks", "[zaberLowLevelBinary]" )
 {
+    // clang-format off
+    #ifdef ZABERLOWLEVELBINARY_TEST_DOXYGEN_REF
+    zaberLowLevelBinary::newCallBack_m_indiP_tgt_pos( pcf::IndiProperty() );
+    zaberLowLevelBinary::onPowerOff();
+    #endif
+    // clang-format on
+
     XWCTEST_INDI_NEW_CALLBACK( zaberLowLevelBinary, tgt_pos );
     XWCTEST_INDI_NEW_CALLBACK( zaberLowLevelBinary, req_home );
     XWCTEST_INDI_NEW_CALLBACK( zaberLowLevelBinary, req_home_all );
@@ -225,4 +250,6 @@ SCENARIO( "Binary last-home timestamps refresh after homing completes", "[zaberL
     }
 }
 
-} // namespace ZLLBTEST
+} // namespace zaberLowLevelBinaryTest
+
+} // namespace libXWCTest

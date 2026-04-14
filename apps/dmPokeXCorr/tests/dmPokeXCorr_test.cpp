@@ -1,29 +1,51 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
-#include "../../../tests/catch2/catch.hpp"
+/** \file dmPokeXCorr_test.cpp
+ * \brief Catch2 tests for the dmPokeXCorr app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup dmPokeXCorr_files
+ */
+
+#include "../../../tests/testXWC.hpp"
 
 #include "../dmPokeXCorr.hpp"
 
 using namespace MagAOX::app;
 
-namespace template_test
+namespace libXWCTest
 {
 
-SCENARIO( "xxxx", "[template]" )
+/** \defgroup dmPokeXCorr_unit_test dmPokeXCorr Unit Tests
+ * \brief Unit tests for the dmPokeXCorr application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `dmPokeXCorr` unit tests.
+/** \ingroup dmPokeXCorr_unit_test
+ */
+namespace dmPokeXCorrTest
 {
-   GIVEN("xxxxx")
-   {
-      int rv;
 
-      WHEN("xxxx")
-      {
-         rv = 0;
+/// Verify the placeholder dmPokeXCorr test harness instantiates the app cleanly.
+/**
+ * \ingroup dmPokeXCorr_unit_test
+ */
+TEST_CASE( "dmPokeXCorr placeholder harness instantiates the app", "[dmPokeXCorr]" )
+{
+    // clang-format off
+    #ifdef DMPOKEXCORR_TEST_DOXYGEN_REF
+    dmPokeXCorr();
+    #endif
+    // clang-format on
 
-         REQUIRE(rv == 0);
-      }
-   }
+    SECTION( "default construction succeeds" )
+    {
+        dmPokeXCorr app;
+
+        REQUIRE( true );
+    }
 }
-} //namespace template_test
+
+} // namespace dmPokeXCorrTest
+
+} // namespace libXWCTest

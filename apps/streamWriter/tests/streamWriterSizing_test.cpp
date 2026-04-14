@@ -1,15 +1,51 @@
+/** \file streamWriterSizing_test.cpp
+ * \brief Catch2 tests for streamWriter buffer sizing helpers.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup streamWriter_files
+ */
 
-#include "../../../tests/catch2/catch.hpp"
-#include "../../tests/testMacrosINDI.hpp"
+#include "../../../tests/testXWC.hpp"
 
 #include "../streamWriter.hpp"
 
 using namespace MagAOX::app;
 
-using namespace MagAOX::app;
+namespace libXWCTest
+{
 
+/** \defgroup streamWriter_unit_test streamWriter Unit Tests
+ * \brief Unit tests for the streamWriter application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `streamWriter` unit tests.
+/** \ingroup streamWriter_unit_test
+ */
+namespace streamWriterTest
+{
+
+/// Verify `streamWriter::getCircBuffLengths()` selects bounded circular-buffer and write-chunk sizes.
+/**
+ * \ingroup streamWriter_unit_test
+ */
 SCENARIO( "streamWriter Buffer Sizing", "[streamWriter]" )
 {
+    // clang-format off
+    #ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    streamWriter::getCircBuffLengths( *(size_t *)nullptr,
+                                      *(double *)nullptr,
+                                      *(size_t *)nullptr,
+                                      0,
+                                      0,
+                                      0,
+                                      0,
+                                      0,
+                                      0 );
+    #endif
+    // clang-format on
+
     GIVEN( "A default constructed streamWriter" )
     {
         WHEN( "default configurations" )
@@ -248,3 +284,7 @@ SCENARIO( "streamWriter Buffer Sizing", "[streamWriter]" )
         }
     }
 }
+
+} // namespace streamWriterTest
+
+} // namespace libXWCTest

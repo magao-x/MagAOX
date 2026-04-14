@@ -12,6 +12,12 @@
 namespace libXWCTest
 {
 
+/** \addtogroup cred2Ctrl_unit_test
+ * \brief Additional lifecycle tests for the cred2Ctrl application.
+ *
+ * \ingroup application_unit_test
+ */
+
 /// Namespace for `cred2Ctrl` lifecycle unit tests.
 /** \ingroup cred2Ctrl_unit_test
  */

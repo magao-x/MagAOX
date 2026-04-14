@@ -12,6 +12,12 @@
 namespace libXWCTest
 {
 
+/** \addtogroup ocam2KCtrl_unit_test
+ * \brief Additional lifecycle tests for the ocam2KCtrl application.
+ *
+ * \ingroup application_unit_test
+ */
+
 /// Namespace for `ocam2KCtrl` lifecycle unit tests.
 /** \ingroup ocam2KCtrl_unit_test
  */

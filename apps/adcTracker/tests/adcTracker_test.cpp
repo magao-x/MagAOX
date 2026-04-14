@@ -8,7 +8,7 @@
 /** \defgroup adcTracker_unit_test adcTracker Unit Tests
  * \brief Unit tests for the adcTracker application.
  *
- * \ingroup app_unit_test
+ * \ingroup application_unit_test
  */
 
 #include "../../../tests/catch2/catch.hpp"

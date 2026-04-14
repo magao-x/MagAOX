@@ -2,7 +2,7 @@
  * \brief Catch2 tests for the zaberLowLevel app.
  * \author Jared R. Males (jaredmales@gmail.com)
  *
- * History:
+ * \ingroup zaberLowLevel_files
  */
 
 #include <filesystem>
@@ -14,16 +14,29 @@ extern "C"
 #include "../za_serial.c"
 }
 
-#include "../../../tests/catch2/catch.hpp"
-#include "../../tests/testMacrosINDI.hpp"
+#include "../../../tests/testXWC.hpp"
+#include "../../../tests/testMacrosINDI.hpp"
 
 #include "../zaberLowLevel.hpp"
 
 using namespace MagAOX::app;
 
-namespace ZLLTEST
+namespace libXWCTest
 {
 
+/** \defgroup zaberLowLevel_unit_test zaberLowLevel Unit Tests
+ * \brief Unit tests for the zaberLowLevel application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `zaberLowLevel` unit tests.
+/** \ingroup zaberLowLevel_unit_test
+ */
+namespace zaberLowLevelTest
+{
+
+/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 class zaberLowLevel_test : public zaberLowLevel
 {
   public:
@@ -145,9 +158,22 @@ class zaberLowLevel_test : public zaberLowLevel
   private:
     std::filesystem::path m_testRoot; ///< Temporary directory backing the test FIFOs and state snapshot.
 };
+/// \endcond
 
+/// Verify zaberLowLevel callback validation and power-off snapshots preserve stage state.
+/**
+ * \ingroup zaberLowLevel_unit_test
+ */
 SCENARIO( "INDI Callbacks", "[zaberLowLevel]" )
 {
+    // clang-format off
+    #ifdef ZABERLOWLEVEL_TEST_DOXYGEN_REF
+    zaberLowLevel::newCallBack_m_indiP_tgt_pos( pcf::IndiProperty() );
+    zaberLowLevel::newCallBack_m_indiP_req_home( pcf::IndiProperty() );
+    zaberLowLevel::onPowerOff();
+    #endif
+    // clang-format on
+
     XWCTEST_INDI_NEW_CALLBACK( zaberLowLevel, tgt_pos );
     XWCTEST_INDI_NEW_CALLBACK( zaberLowLevel, req_home );
     XWCTEST_INDI_NEW_CALLBACK( zaberLowLevel, req_home_all );
@@ -174,4 +200,6 @@ SCENARIO( "Power-off INDI snapshot retains stage state", "[zaberLowLevel]" )
     REQUIRE( zllt.warnValue( "stageA" ) == "Off" );
 }
 
-} // namespace ZLLTEST
+} // namespace zaberLowLevelTest
+
+} // namespace libXWCTest
