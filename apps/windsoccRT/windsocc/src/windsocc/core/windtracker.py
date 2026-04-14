@@ -710,8 +710,8 @@ class WindTracker:
             err=bkg.globalrms,
             minarea=sep_minarea,
             filter_kernel=None,
-            deblend_cont=0.005, # default is 0.005 (0.05%), lower is more sensitive
-            deblend_nthresh=32,    # default is 32, higher better for saddles
+            deblend_cont=0.0005, # default is 0.005 (0.05%), lower is more sensitive
+            deblend_nthresh=64,    # default is 32, higher better for saddles
             clean=False,
         )
 

@@ -126,7 +126,7 @@ def save_png(output_path, image, title=None, cmap="viridis"):
     plt.close(fig)
     logging.info(f"Wrote file to: {output_path}")
 
-def apply_unsharp_mask_cube(cube, fwhm_pixels=10.0):
+def apply_unsharp_mask_cube(cube, fwhm_pixels=5.0):
     """High-pass filter a cube by subtracting a Gaussian blur per frame."""
     if fwhm_pixels is None or fwhm_pixels <= 0:
         return cube
@@ -223,7 +223,15 @@ def ensure_distill_output_dirs(distilled_dir):
     os.makedirs(os.path.join(distilled_dir, "mf_response_cubes"), exist_ok=True)
 
 
-def process_distill_group(suffix, averaged_cube, averaged_bias, header, distilled_dir, save_pngs=True):
+def process_distill_group(
+    suffix,
+    averaged_cube,
+    averaged_bias,
+    header,
+    distilled_dir,
+    save_pngs=True,
+    hp_filter_fwhm=None,
+):
     """Write one distill group from already-averaged xcorr products."""
     output_stem = os.path.join(distilled_dir, suffix)
     output_path = output_stem + ".fits"
@@ -233,7 +241,10 @@ def process_distill_group(suffix, averaged_cube, averaged_bias, header, distille
     write_cube(bias_output_path, averaged_bias, header)
 
     mf_template = build_template(averaged_cube[0])
-    high_pass_cube = apply_unsharp_mask_cube(averaged_cube, fwhm_pixels=3.0)
+    if hp_filter_fwhm is not None:
+        high_pass_cube = apply_unsharp_mask_cube(averaged_cube, fwhm_pixels=hp_filter_fwhm)
+    else:
+        high_pass_cube = apply_unsharp_mask_cube(averaged_cube)
     averaged_cube_output_path = os.path.join(distilled_dir, f"{suffix}.fits")
     high_pass_cube_output_path = os.path.join(distilled_dir, f"{suffix}_unsharp.fits")
     write_cube(averaged_cube_output_path, averaged_cube, header)
@@ -370,7 +381,16 @@ def run_distill_stage(directory, config_params=None, save_pngs=True):
         averaged_cube, header = load_and_average(file_list)
         bias_file_list = bias_groups[suffix]
         averaged_bias, bias_header = load_and_average(bias_file_list)
-        process_distill_group(suffix, averaged_cube, averaged_bias, bias_header or header, distilled_dir, save_pngs=save_pngs)
+        hp_filter_fwhm = config_params.get("HIGH_PASS_FWHM", None)
+        process_distill_group(
+            suffix,
+            averaged_cube,
+            averaged_bias,
+            bias_header or header,
+            distilled_dir,
+            save_pngs=save_pngs,
+            hp_filter_fwhm=hp_filter_fwhm,
+        )
         processed_groups.append(suffix)
 
     return {
@@ -413,7 +433,16 @@ def run_distill_stage_in_memory(directory, xcorr_result, config_params=None, sav
     header = quadrant_results["ul"]["header"]
     averaged_cube = np.mean(np.stack(cc_cubes, axis=0), axis=0)
     averaged_bias = np.mean(np.stack(biases, axis=0), axis=0)
-    process_distill_group(suffix, averaged_cube, averaged_bias, header, distilled_dir, save_pngs=save_pngs)
+    hp_filter_fwhm = config_params.get("HIGH_PASS_FWHM", None)
+    process_distill_group(
+        suffix,
+        averaged_cube,
+        averaged_bias,
+        header,
+        distilled_dir,
+        save_pngs=save_pngs,
+        hp_filter_fwhm=hp_filter_fwhm,
+    )
     return {
         "distill_dir": distilled_dir,
         "processed_groups": [suffix],
