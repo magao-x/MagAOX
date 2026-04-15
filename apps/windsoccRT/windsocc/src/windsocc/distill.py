@@ -12,7 +12,8 @@ import glob
 import argparse
 import yaml
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from astropy.io import fits
 import numpy as np
 from scipy.ndimage import gaussian_filter, rotate
@@ -66,19 +67,43 @@ def resolve_parangs_lookup_path(config_params, directory):
 
 
 def _parse_iso_timestamp_to_utc_seconds(ts_str):
-    """Parse an ISO-like timestamp string to Unix seconds (UTC). Naive times are treated as UTC."""
+    """
+    Parse an ISO-like timestamp string to Unix seconds (UTC).
+
+    Supports nanosecond (or arbitrary-length) fractional seconds; ``datetime.fromisoformat``
+    only accepts up to 6 fractional digits, so sub-microsecond tails are parsed manually.
+    Naive times are treated as UTC. Optional trailing ``Z`` or ``±HH:MM`` offsets are honored.
+    """
     text = str(ts_str).strip()
     if not text:
         raise ValueError("empty timestamp")
-    text_iso = text.replace(" ", "T", 1)
-    if text_iso.endswith("Z"):
-        text_iso = text_iso[:-1] + "+00:00"
-    dt = datetime.fromisoformat(text_iso)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+    text = text.replace(" ", "T", 1)
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+
+    m_tz = re.search(r"([+-])(\d{2}):(\d{2})$", text)
+    if m_tz:
+        sign = 1 if m_tz.group(1) == "+" else -1
+        offset_sec = sign * (int(m_tz.group(2)) * 3600 + int(m_tz.group(3)) * 60)
+        core = text[: m_tz.start()]
+        tzinfo = timezone(timedelta(seconds=offset_sec))
     else:
-        dt = dt.astimezone(timezone.utc)
-    return dt.timestamp()
+        core = text
+        tzinfo = timezone.utc
+
+    if "." in core:
+        main, rest = core.split(".", 1)
+        digits = "".join(c for c in rest if c.isdigit())
+        if digits:
+            frac = Decimal(digits) / (Decimal(10) ** len(digits))
+        else:
+            frac = Decimal(0)
+    else:
+        main = core
+        frac = Decimal(0)
+
+    dt = datetime.strptime(main, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=tzinfo)
+    return dt.timestamp() + float(frac)
 
 
 def load_parangs_lookup(path):
