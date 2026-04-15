@@ -149,6 +149,7 @@ def plot_flux_decay(
     spatial_noise_map: np.ndarray | None = None,
     track_velocity_mps: dict[int, float] | None = None,
     track_direction_deg: dict[int, float] | None = None,
+    diam_pupils: int | None = None,
 ) -> list[str]:
     """Plot OG extracted flux-vs-distance curves with spatial-noise uncertainty bands."""
     saved_paths: list[str] = []
@@ -209,7 +210,7 @@ def plot_flux_decay(
     ref_curve = _load_xcorr_aperture_response_curve(measure_root)
 
     # Omit noisy outer radii from plots (matches typical pupil scale ~60 px).
-    max_plot_distance_px = 60.0
+    max_plot_distance_px = diam_pupils * 0.9
 
     track_distances: dict[int, list[float]] = {}
     track_sums: dict[int, list[float]] = {}
@@ -561,6 +562,7 @@ def make_source_detection_movie(
     og_cc_cube_path: str | None = None,
     og_cc_cube_fname: str | None = None,
     spatial_noise_map: np.ndarray | None = None,
+    diam_pupils: int | None = None,
 ) -> bool:
     """Make a movie of the source detections.
 
@@ -903,5 +905,6 @@ def make_source_detection_movie(
         spatial_noise_map=spatial_noise_map,
         track_velocity_mps=track_velocity_mps,
         track_direction_deg=track_direction_deg,
+        diam_pupils=diam_pupils,
     )
     return True

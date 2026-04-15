@@ -700,6 +700,7 @@ def process_mf_response_cubes(
         model_rejected_save_path = os.path.join(rejected_dir, f"{cube_stem}_model_rejected.json")
         with open(model_rejected_save_path, "w", encoding="utf-8") as f:
             json.dump(model_rejected_summary, f, indent=2)
+        DIAM_PUPILS = config_params.get("DIAM_PUPILS", None)
         if make_movie:
             make_source_detection_movie(
                 mf_response_cube_path=cube_path,
@@ -712,6 +713,7 @@ def process_mf_response_cubes(
                 fps=movie_fps,
                 cmap="Blues_r",
                 png_only=png_only_movies,
+                diam_pupils=DIAM_PUPILS,
             )
     return wind_peaks_all, wind_summaries_all, wind_rejected_all, model_rejected_all
 

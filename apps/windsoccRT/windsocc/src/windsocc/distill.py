@@ -7,24 +7,188 @@ TODO refactoring:
 
 #!/usr/bin/env python3
 import os
+import re
 import glob
 import argparse
 import yaml
 import logging
+from datetime import datetime, timezone
 from astropy.io import fits
 import numpy as np
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, rotate
 from scipy.signal import fftconvolve
 import matplotlib.pyplot as plt
 from skimage.feature import match_template
 
 DEFAULT_TEMPLATE_SIZE = 65
 
+# Batch UTC time embedded in ``group_suffix`` / distill ``suffix`` (see ``realtime.format_batch_timestamp``).
+# Digit-delimited (not ``\\b``) so a trailing underscore after microseconds still matches.
+_BATCH_UTC_TOKEN_RE = re.compile(r"(?<!\d)(\d{8}T\d{6}\d{6})(?!\d)")
+# Compact variant without ``T`` (and optional ``_00000`` trailer), e.g. ``camwfs_20230313071857408144000``.
+_BATCH_UTC_COMPACT_RE = re.compile(r"(?<!\d)(\d{8})(\d{6})(\d*)(?!\d)")
+
 
 def parse_config_file(config_path):
     """Load the distill-stage config file."""
     with open(config_path, "r") as yaml_file:
         return yaml.safe_load(yaml_file) or {}
+
+
+def resolve_parangs_lookup_path(config_params, directory):
+    """
+    Resolve ``PARANGS_LOOKUP`` from config to an absolute path and verify the file exists.
+
+    Raises:
+        FileNotFoundError: If the key is missing/empty or the path is not a file.
+    """
+    raw = config_params.get("PARANGS_LOOKUP")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        raise FileNotFoundError(
+            "Distill requires PARANGS_LOOKUP in ws_config.yaml (path to a tab-separated "
+            "parangs table, e.g. from tests_and_one_offs/extract_obs_parangs.py as parangs.txt "
+            "with columns PARANG, timestamp, elapsed_seconds). "
+            "Set PARANGS_LOOKUP to that file before running the distill stage."
+        )
+    if not isinstance(raw, str):
+        raise FileNotFoundError(
+            f"PARANGS_LOOKUP must be a string path, got {type(raw).__name__!r}."
+        )
+    path = raw.strip()
+    full = path if os.path.isabs(path) else os.path.join(directory, path)
+    if not os.path.isfile(full):
+        raise FileNotFoundError(
+            f"PARANGS_LOOKUP file not found: {full!r}. "
+            "Check the path (relative paths are resolved against the run directory). "
+            "Generate the table from science FITS headers with extract_obs_parangs.py if needed."
+        )
+    return full
+
+
+def _parse_iso_timestamp_to_utc_seconds(ts_str):
+    """Parse an ISO-like timestamp string to Unix seconds (UTC). Naive times are treated as UTC."""
+    text = str(ts_str).strip()
+    if not text:
+        raise ValueError("empty timestamp")
+    text_iso = text.replace(" ", "T", 1)
+    if text_iso.endswith("Z"):
+        text_iso = text_iso[:-1] + "+00:00"
+    dt = datetime.fromisoformat(text_iso)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.timestamp()
+
+
+def load_parangs_lookup(path):
+    """
+    Load PARANG vs time from a TSV (tab-separated) with optional header row.
+
+    Expects at least two columns: PARANG (degrees) and timestamp (ISO-like).
+    Rows are sorted by time; duplicate timestamps keep the last PARANG value.
+
+    Returns:
+        tuple: ``(xp, fp)`` as ``numpy.ndarray`` of increasing times and PARANG values for ``np.interp``.
+    """
+    times = []
+    parangs = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 2:
+                raise ValueError(
+                    f"PARANGS_LOOKUP line must have at least two tab-separated columns: {line!r}"
+                )
+            if parts[0].strip().upper() == "PARANG" and parts[1].strip().lower() == "timestamp":
+                continue
+            try:
+                parang = float(parts[0].strip())
+                t_sec = _parse_iso_timestamp_to_utc_seconds(parts[1])
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    f"Could not parse PARANG/timestamp from PARANGS_LOOKUP line: {line!r}"
+                ) from exc
+            times.append(t_sec)
+            parangs.append(parang)
+    if not times:
+        raise ValueError(f"No data rows found in PARANGS_LOOKUP: {path!r}")
+    order = np.argsort(times, kind="mergesort")
+    xp = np.asarray(times, dtype=np.float64)[order]
+    fp = np.asarray(parangs, dtype=np.float64)[order]
+    # Collapse duplicate times (np.interp requires strictly increasing xp).
+    if np.any(np.diff(xp) == 0):
+        uniq_xp = []
+        uniq_fp = []
+        for x, p in zip(xp, fp):
+            if uniq_xp and uniq_xp[-1] == x:
+                uniq_fp[-1] = p
+            else:
+                uniq_xp.append(x)
+                uniq_fp.append(p)
+        xp = np.asarray(uniq_xp, dtype=np.float64)
+        fp = np.asarray(uniq_fp, dtype=np.float64)
+    return xp, fp
+
+
+def parse_batch_utc_seconds_from_suffix(suffix):
+    """
+    Parse the UTC batch instant embedded in ``suffix``.
+
+    Supports:
+
+    - ``YYYYMMDDTHHMMSSffffff`` as produced by ``realtime.format_batch_timestamp``.
+    - Compact ``YYYYMMDDHHMMSS`` + optional fractional digits (no ``T``), e.g.
+      ``camwfs_20230313071857408144000`` (fractional tail interpreted as
+      ``int(frac) / 10**len(frac)`` seconds).
+    """
+    m = _BATCH_UTC_TOKEN_RE.search(suffix)
+    if m:
+        token = m.group(1)
+        dt = datetime.strptime(token, "%Y%m%dT%H%M%S%f").replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+
+    # Use the rightmost compact match when multiple digit runs appear in ``suffix``.
+    matches = list(_BATCH_UTC_COMPACT_RE.finditer(suffix))
+    if not matches:
+        raise ValueError(
+            "Could not find batch UTC time in distill suffix (expected "
+            "YYYYMMDDTHHMMSSffffff or YYYYMMDDHHMMSS plus optional fractional digits): "
+            f"{suffix!r}"
+        )
+    m2 = matches[-1]
+    ymd, hms, frac = m2.group(1), m2.group(2), m2.group(3)
+    if len(ymd) != 8 or len(hms) != 6:
+        raise ValueError(f"Invalid compact batch date/time in suffix: {suffix!r}")
+    base = datetime.strptime(ymd + hms, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+    if not frac:
+        return base.timestamp()
+    subsec = int(frac, 10) / (10.0 ** len(frac))
+    return base.timestamp() + subsec
+
+
+def derotate_cc_cube(cube, angle_deg, order=3):
+    """
+    Rotate each 2D frame of a CC cube by ``angle_deg`` using ``scipy.ndimage.rotate``.
+
+    Camwfs parity uses negated PARANG at the call site (pass ``-parang`` here).
+    """
+    if cube.ndim != 3:
+        raise ValueError(f"CC cube must be 3D, got shape {cube.shape}.")
+    out = np.empty_like(cube, dtype=np.float64)
+    for i in range(cube.shape[0]):
+        out[i] = rotate(
+            np.asarray(cube[i], dtype=np.float64),
+            float(angle_deg),
+            reshape=False,
+            order=order,
+            prefilter=False,
+        )
+    return out
+
 
 def gaussian_kernel(l=5, sig=1.):
     """\
@@ -234,8 +398,10 @@ def process_distill_group(
     template_size,
     save_pngs=True,
     hp_filter_fwhm=None,
+    cc_header=None,
 ):
     """Write one distill group from already-averaged xcorr products."""
+    out_hdr = cc_header if cc_header is not None else header
     output_stem = os.path.join(distilled_dir, suffix)
     output_path = output_stem + ".fits"
     output_path_unsharp = output_stem + "_unsharp.fits"
@@ -252,13 +418,13 @@ def process_distill_group(
         high_pass_cube = apply_unsharp_mask_cube(averaged_cube)
     averaged_cube_output_path = os.path.join(distilled_dir, f"{suffix}.fits")
     high_pass_cube_output_path = os.path.join(distilled_dir, f"{suffix}_unsharp.fits")
-    write_cube(averaged_cube_output_path, averaged_cube, header)
-    write_cube(high_pass_cube_output_path, high_pass_cube, header)
+    write_cube(averaged_cube_output_path, averaged_cube, out_hdr)
+    write_cube(high_pass_cube_output_path, high_pass_cube, out_hdr)
     mf_template_unsharp = build_template(high_pass_cube[0], size=template_size)
     mf_output_path = os.path.join(distilled_dir, "mf_templates", f"{suffix}_mf_template.fits")
     mf_output_path_unsharp = os.path.join(distilled_dir, "mf_templates", f"{suffix}_mf_template_unsharp.fits")
-    write_cube(mf_output_path_unsharp, mf_template_unsharp, header)
-    write_cube(mf_output_path, mf_template, header)
+    write_cube(mf_output_path_unsharp, mf_template_unsharp, out_hdr)
+    write_cube(mf_output_path, mf_template, out_hdr)
 
     mf_response_cube = compute_mf_response_cube(averaged_cube, mf_template)
     mf_response_unsharp_cube = compute_mf_response_cube(high_pass_cube, mf_template_unsharp)
@@ -269,8 +435,8 @@ def process_distill_group(
     mf_response_unsharp_output_path = os.path.join(
         distilled_dir, "mf_response_cubes", f"{suffix}_mf_response_unsharp.fits"
     )
-    write_cube(mf_response_output_path, mf_response_cube, header)
-    write_cube(mf_response_unsharp_output_path, mf_response_unsharp_cube, header)
+    write_cube(mf_response_output_path, mf_response_cube, out_hdr)
+    write_cube(mf_response_unsharp_output_path, mf_response_unsharp_cube, out_hdr)
 
     # collapsed_mf_response = np.mean(mf_response_cube, axis=0)
     # collapsed_mf_response_unsharp = np.mean(mf_response_unsharp_cube, axis=0)
@@ -329,16 +495,16 @@ def process_distill_group(
         "noise_maps",
         f"{suffix}_error_map_unsharp_wholecube.fits",
     )
-    write_cube(error_map_output_path, error_map, header)
-    write_cube(error_map_unsharp_output_path, error_map_unsharp, header)
-    write_cube(error_map_wholecube_output_path, error_map_wholecube, header)
+    write_cube(error_map_output_path, error_map, out_hdr)
+    write_cube(error_map_unsharp_output_path, error_map_unsharp, out_hdr)
+    write_cube(error_map_wholecube_output_path, error_map_wholecube, out_hdr)
     write_cube(
         error_map_unsharp_wholecube_output_path,
         error_map_unsharp_wholecube,
-        header,
+        out_hdr,
     )
-    write_cube(snr_output_path, snr_map, header)
-    write_cube(snr_map_unsharp_output_path, snr_map_unsharp, header)
+    write_cube(snr_output_path, snr_map, out_hdr)
+    write_cube(snr_map_unsharp_output_path, snr_map_unsharp, out_hdr)
 
 
 def run_distill_stage(directory, config_params=None, save_pngs=True):
@@ -363,6 +529,11 @@ def run_distill_stage(directory, config_params=None, save_pngs=True):
         else os.path.join(directory, distilled_dir_name)
     )
     ensure_distill_output_dirs(distilled_dir)
+    if "parangs.txt" in os.listdir(directory):
+        parangs_path = os.path.join(directory, "parangs.txt")
+    else:
+        parangs_path = resolve_parangs_lookup_path(config_params, directory)
+    xp, fp = load_parangs_lookup(parangs_path)
 
     failed_groups = []
     processed_groups = []
@@ -384,6 +555,19 @@ def run_distill_stage(directory, config_params=None, save_pngs=True):
             continue
 
         averaged_cube, header = load_and_average(file_list)
+        t_batch = parse_batch_utc_seconds_from_suffix(suffix)
+        if t_batch < float(xp[0]) or t_batch > float(xp[-1]):
+            logging.warning(
+                "Batch time for suffix %s is outside PARANGS_LOOKUP time span; "
+                "np.interp will clamp to endpoints.",
+                suffix,
+            )
+        parang = float(np.interp(t_batch, xp, fp))
+        averaged_cube = derotate_cc_cube(averaged_cube, -parang)
+        cc_hdr = header.copy()
+        cc_hdr["PARANG_I"] = (parang, "interpolated PA (deg)")
+        cc_hdr["DEROT_DEG"] = (-parang, "ndimage.rotate angle on CC cube (deg)")
+
         bias_file_list = bias_groups[suffix]
         averaged_bias, bias_header = load_and_average(bias_file_list)
         hp_filter_fwhm = config_params.get("HIGH_PASS_FWHM", None)
@@ -397,6 +581,7 @@ def run_distill_stage(directory, config_params=None, save_pngs=True):
             template_size,
             save_pngs=save_pngs,
             hp_filter_fwhm=hp_filter_fwhm,
+            cc_header=cc_hdr,
         )
         processed_groups.append(suffix)
 
@@ -435,10 +620,26 @@ def run_distill_stage_in_memory(directory, xcorr_result, config_params=None, sav
             "failed_groups": [suffix] if suffix else [],
         }
 
+    parangs_path = resolve_parangs_lookup_path(config_params, directory)
+    xp, fp = load_parangs_lookup(parangs_path)
+
     cc_cubes = [quadrant_results[quadrant]["cc_cube"] for quadrant in ("ul", "ur", "ll", "lr")]
     biases = [quadrant_results[quadrant]["bias"] for quadrant in ("ul", "ur", "ll", "lr")]
     header = quadrant_results["ul"]["header"]
     averaged_cube = np.mean(np.stack(cc_cubes, axis=0), axis=0)
+    t_batch = parse_batch_utc_seconds_from_suffix(suffix)
+    if t_batch < float(xp[0]) or t_batch > float(xp[-1]):
+        logging.warning(
+            "Batch time for suffix %s is outside PARANGS_LOOKUP time span; "
+            "np.interp will clamp to endpoints.",
+            suffix,
+        )
+    parang = float(np.interp(t_batch, xp, fp))
+    averaged_cube = derotate_cc_cube(averaged_cube, -parang)
+    cc_hdr = header.copy()
+    cc_hdr["PARANG_I"] = (parang, "interpolated PA (deg)")
+    cc_hdr["DEROT_DEG"] = (-parang, "ndimage.rotate angle on CC cube (deg)")
+
     averaged_bias = np.mean(np.stack(biases, axis=0), axis=0)
     hp_filter_fwhm = config_params.get("HIGH_PASS_FWHM", None)
     template_size = int(config_params.get("TEMPLATE_SIZE", DEFAULT_TEMPLATE_SIZE))
@@ -451,6 +652,7 @@ def run_distill_stage_in_memory(directory, xcorr_result, config_params=None, sav
         template_size,
         save_pngs=save_pngs,
         hp_filter_fwhm=hp_filter_fwhm,
+        cc_header=cc_hdr,
     )
     return {
         "distill_dir": distilled_dir,
