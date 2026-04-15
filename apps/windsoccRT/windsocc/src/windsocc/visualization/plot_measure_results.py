@@ -16,6 +16,7 @@ import warnings
 from astropy.io import fits
 
 from windsocc.visualization.ffmpeg_matplotlib import configure_matplotlib_ffmpeg_path
+from windsocc.analysis.cross_correlation import compute_aperture_overlap
 
 TRACKED_SOURCE_DTYPE = np.dtype(
     [
@@ -86,20 +87,46 @@ def _circle_mask(
 
 def _load_xcorr_aperture_response_curve(
     measure_root: str,
+    diam_pupils: int | None = None,
+    fft_pad_shape: tuple[int, int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray] | None:
-    """Load distance (pixels) vs aperture CC response from ``ws_xcorr`` output.
+    """Load distance (pixels) vs aperture CC response from ``camwfs/response_curve.txt``.
 
-    Expected path: ``<experiment_root>/xcorr_results/response_curve.txt`` (sibling of
-    ``measure_results``), two columns: distance, normalized CC response.
+    If the file is not present and enough geometry is provided, generate it via
+    ``compute_aperture_overlap`` and save it in the main camwfs directory.
     """
-    experiment_root = os.path.dirname(os.path.abspath(measure_root))
-    path = os.path.join(experiment_root, "xcorr_results", "response_curve.txt")
+    camwfs_root = os.path.dirname(os.path.abspath(measure_root))
+    path = os.path.join(camwfs_root, "response_curve.txt")
     if not os.path.isfile(path):
-        warnings.warn(
-            f"No aperture response curve at {path}; CC extraction plots use raw sums.",
-            stacklevel=2,
-        )
-        return None
+        if diam_pupils is None:
+            warnings.warn(
+                f"No aperture response curve at {path} and DIAM_PUPILS is unavailable; "
+                "CC extraction plots use raw sums.",
+                stacklevel=2,
+            )
+            return None
+        if fft_pad_shape is None:
+            warnings.warn(
+                f"No aperture response curve at {path} and fft_pad_shape is unavailable; "
+                "CC extraction plots use raw sums.",
+                stacklevel=2,
+            )
+            return None
+        try:
+            aperture_center = ((float(diam_pupils) - 1.0) / 2.0, (float(diam_pupils) - 1.0) / 2.0)
+            response_curve = compute_aperture_overlap(
+                int(diam_pupils),
+                aperture_center,
+                (int(fft_pad_shape[0]), int(fft_pad_shape[1])),
+            )
+            np.savetxt(path, response_curve, fmt="%d %.6f")
+        except Exception as exc:  # pragma: no cover
+            warnings.warn(
+                f"Could not create aperture response curve at {path}: {exc}; "
+                "CC extraction plots use raw sums.",
+                stacklevel=2,
+            )
+            return None
     try:
         data = np.loadtxt(path)
     except OSError as exc:
@@ -207,7 +234,11 @@ def plot_flux_decay(
             except OSError:
                 pass
 
-    ref_curve = _load_xcorr_aperture_response_curve(measure_root)
+    ref_curve = _load_xcorr_aperture_response_curve(
+        measure_root,
+        diam_pupils=diam_pupils,
+        fft_pad_shape=(int(og_cube.shape[1]), int(og_cube.shape[2])),
+    )
 
     # Omit noisy outer radii from plots (matches typical pupil scale ~60 px).
     max_plot_distance_px = diam_pupils * 0.9

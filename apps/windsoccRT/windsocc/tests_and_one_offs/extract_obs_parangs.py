@@ -17,10 +17,12 @@ from astropy.io import fits
 # Location of the raw science data
 # raw_science_data_dir = "/Volumes/FantomHD/magaox_data/HR4796a_lco2023a_magao-x_20230309_10/raws_20230310T054736_s_lyot_stop/camsci1"
 # raw_science_data_dir = "/Users/jkueny/data/HR4796_rg_smlyot_20230312_13/unsats_rg_20230313T071732/camsci1"
-raw_science_data_dir = "/Volumes/FantomHD/magaox_data/HR4796_rg_smlyot_20230312_13/raws_rg_smlyot_20230313T043914/camsci1"
+# raw_science_data_dir = "/Volumes/FantomHD/magaox_data/HR4796_rg_smlyot_20230312_13/raws_rg_smlyot_20230313T043914/camsci1"
+raw_science_data_dir = "/Volumes/FantomHD/magaox_data/HR4796_rg_smlyot_20230312_13/unsats_rg_20230313T071732/camsci1"
 # Output path (TSV: PARANG, timestamp, elapsed_seconds)
 # save_obs_parangs_here = "/Users/jkueny/data/HR4796_rg_smlyot_20230312_13/unsats_rg_20230313T071732/parangs.txt"
-save_obs_parangs_here = "/Volumes/FantomHD/magaox_data/HR4796_rg_smlyot_20230312_13/raws_rg_smlyot_20230313T043914/parangs.txt"
+# save_obs_parangs_here = "/Volumes/FantomHD/magaox_data/HR4796_rg_smlyot_20230312_13/raws_rg_smlyot_20230313T043914/parangs.txt"
+save_obs_parangs_here = "/Volumes/FantomHD/magaox_data/HR4796_rg_smlyot_20230312_13/unsats_rg_20230313T071732/parangs.txt"
 
 _ISO_DATE_HEADER_KEYS = ("DATE-OBS", "DATE", "DATE_OBS")
 # FITS DATE-* values sometimes include fractional seconds or a trailing Z.

@@ -570,6 +570,13 @@ def process_mf_response_cubes(
     hp_mf_response_cube_fnames = mf_response_cubes["hp_cube_fnames"]
     og_mf_response_cube_paths = mf_response_cubes["og_cc_cube_paths"]
     og_mf_response_cube_fnames = mf_response_cubes["og_cube_fnames"]
+    DIAM_PUPILS = config_params.get("DIAM_PUPILS", None)
+    if DIAM_PUPILS is None:
+        raise ValueError(
+            "DIAM_PUPILS not set in the config file and this info is needed for this stage."
+        )
+    else:
+        logging.info("Using DIAM_PUPILS from config: %s", DIAM_PUPILS)
     n_hp = len(hp_mf_response_cube_paths)
     if not (
         n_hp == len(hp_mf_response_cube_fnames)
@@ -700,7 +707,6 @@ def process_mf_response_cubes(
         model_rejected_save_path = os.path.join(rejected_dir, f"{cube_stem}_model_rejected.json")
         with open(model_rejected_save_path, "w", encoding="utf-8") as f:
             json.dump(model_rejected_summary, f, indent=2)
-        DIAM_PUPILS = config_params.get("DIAM_PUPILS", None)
         if make_movie:
             make_source_detection_movie(
                 mf_response_cube_path=cube_path,

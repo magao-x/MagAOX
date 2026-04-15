@@ -660,7 +660,8 @@ def run_distill_stage_in_memory(directory, xcorr_result, config_params=None, sav
             suffix,
         )
     parang = float(np.interp(t_batch, xp, fp))
-    averaged_cube = derotate_cc_cube(averaged_cube, -parang)
+    # it's positive parang here
+    averaged_cube = derotate_cc_cube(averaged_cube, parang)
     cc_hdr = header.copy()
     cc_hdr["PARANG_I"] = (parang, "interpolated PA (deg)")
     cc_hdr["DEROT_DEG"] = (-parang, "ndimage.rotate angle on CC cube (deg)")
