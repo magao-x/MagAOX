@@ -589,6 +589,8 @@ int pvcamCtrl::powerOnDefaults()
         m_fanSpeedNameSet.clear();
     }
 
+    m_fanSpeedValid = false;
+
     return 0;
 }
 
@@ -647,7 +649,8 @@ int pvcamCtrl::setFanSpeed()
         return -1;
     }
 
-    m_fanSpeedName = m_fanSpeedNameSet;
+    m_fanSpeedName  = m_fanSpeedNameSet;
+    m_fanSpeedValid = true;
 
     if( m_fanSpeedName != priorFanSpeed )
     {
@@ -1535,6 +1538,8 @@ int pvcamCtrl::getFanSpeed()
         return log<software_error, -1>(
             { __FILE__, __LINE__, "unknown PVCAM fan-speed value: " + std::to_string( fanSpeed ) } );
     }
+
+    m_fanSpeedValid = true;
 
     return 0;
 }
