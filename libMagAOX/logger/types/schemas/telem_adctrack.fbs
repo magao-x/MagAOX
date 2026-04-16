@@ -1,0 +1,12 @@
+namespace MagAOX.logger;
+
+table Telem_adctrack_fb
+{
+   tracking:bool;
+   delta_angle:float;
+   adc1_delta:float;
+   adc2_delta:float;
+   min_zd:float;
+}
+
+root_type Telem_adctrack_fb;

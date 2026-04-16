@@ -56,9 +56,9 @@ class zaberBinaryStage
     /// Device-mode bits used by the implementation.
     enum modeBits : int32_t
     {
-        modeDisableAutoReply   = ( 1 << 0 ),
-        modeDisablePotentiomer = ( 1 << 3 ),
-        modeHomeStatus         = ( 1 << 7 )
+        modeDisableAutoReply     = ( 1 << 0 ),
+        modeDisablePotentiometer = ( 1 << 3 ),
+        modeHomeStatus           = ( 1 << 7 )
     };
 
     /// Stored-position register used to persist the MagAO-X parked position.
@@ -124,6 +124,9 @@ class zaberBinaryStage
 
     /// Last reported stage temperature. Firmware 5.35 does not expose this directly.
     float m_temp{ -999.0 };
+
+    /// whether potentiometer knob is enabled
+    bool m_knobEnabled{ false };
 
     /// Whether any warning-equivalent condition is active.
     bool m_warn{ false };
@@ -205,6 +208,9 @@ class zaberBinaryStage
 
     /// Get the parked state.
     int parked();
+
+    /// Get the knob state.
+    bool knobEnabled();
 
     /// Get the current raw position.
     long rawPos();
@@ -297,6 +303,9 @@ class zaberBinaryStage
     /// Get the parked state for MagAO-X compatibility.
     int getParked( z_port port /**< [in] the port with which to communicate */ );
 
+    /// Get the knob enabled status
+    int getKnob( z_port port /**< [in] the port with which to communicate */ );
+
     /// Update the current position and derived motion state.
     int updatePos( z_port port /**< [in] the port with which to communicate */ );
 
@@ -304,7 +313,7 @@ class zaberBinaryStage
     int updateTemp( z_port port /**< [in] the port with which to communicate */ );
 
     /// Disable the manual knob and asynchronous command replies.
-    int disableKnob( z_port port /**< [in] the port with which to communicate */ );
+    int enableKnob( z_port port, bool enable /**< [in] the port with which to communicate */ );
 
     /// Set the target speed used for absolute and relative moves.
     int setTargetSpeed( z_port  port, /**< [in] the port with which to communicate */
@@ -346,6 +355,9 @@ class zaberBinaryStage
 
     /// Refresh warning-equivalent state from firmware 5.xx information.
     int getWarnings( z_port port /**< [in] the port with which to communicate */ );
+
+    /// Refresh the stored last-home timestamp when a home completion is detected.
+    int updateLastHomed( bool wasHoming /**< [in] whether the stage was homing before the latest status refresh */ );
 
     /// Clear transient state on power-off.
     int onPowerOff();
@@ -437,6 +449,12 @@ template <class parentT>
 int zaberBinaryStage<parentT>::parked()
 {
     return m_parked;
+}
+
+template <class parentT>
+bool zaberBinaryStage<parentT>::knobEnabled()
+{
+    return m_knobEnabled;
 }
 
 template <class parentT>
@@ -730,8 +748,24 @@ int zaberBinaryStage<parentT>::getParked( z_port )
 }
 
 template <class parentT>
+int zaberBinaryStage<parentT>::getKnob( z_port port )
+{
+    int32_t value;
+    int     rv = getSetting( value, port, cmdSetDeviceMode );
+    if( rv < 0 )
+    {
+        return rv;
+    }
+    m_knobEnabled = !( value & modeDisablePotentiometer );
+
+    return 0;
+}
+
+template <class parentT>
 int zaberBinaryStage<parentT>::updatePos( z_port port )
 {
+    bool wasHoming = m_homing;
+
     int32_t status;
     int     rv = queryCommand( status, port, cmdReturnStatus, 0, cmdReturnStatus );
     if( rv < 0 )
@@ -759,16 +793,13 @@ int zaberBinaryStage<parentT>::updatePos( z_port port )
 
     m_rawPos = pos;
 
-    if( status == 0 && m_homing == false && m_warnWR == false && m_tgtPos == 0 && m_rawPos == 0 &&
-        m_lastHomed.tv_sec == 0 )
+    rv = getWarnings( port );
+    if( rv < 0 )
     {
-        if( clock_gettime( CLOCK_REALTIME, &m_lastHomed ) < 0 )
-        {
-            MagAOXAppT::log<software_error>( { errno, 0, "clock_gettime for last homed" } );
-        }
+        return rv;
     }
 
-    return getWarnings( port );
+    return updateLastHomed( wasHoming );
 }
 
 template <class parentT>
@@ -779,7 +810,7 @@ int zaberBinaryStage<parentT>::updateTemp( z_port )
 }
 
 template <class parentT>
-int zaberBinaryStage<parentT>::disableKnob( z_port port )
+int zaberBinaryStage<parentT>::enableKnob( z_port port, bool enable )
 {
     int32_t mode;
     int     rv = getSetting( mode, port, cmdSetDeviceMode );
@@ -789,7 +820,10 @@ int zaberBinaryStage<parentT>::disableKnob( z_port port )
     }
 
     mode |= modeDisableAutoReply;
-    mode |= modeDisablePotentiomer;
+    if( enable )
+        mode &= ~modeDisablePotentiometer; // clear the bit to enable
+    else
+        mode |= modeDisablePotentiometer; // set the bit to disable
 
     rv = sendCommandNoReply( port, cmdSetDeviceMode, mode );
     if( rv < 0 )
@@ -804,10 +838,13 @@ int zaberBinaryStage<parentT>::disableKnob( z_port port )
         return rv;
     }
 
-    if( ( appliedMode & modeDisablePotentiomer ) == 0 || ( appliedMode & modeDisableAutoReply ) == 0 )
+    bool knobOk = enable ? !( appliedMode & modeDisablePotentiometer ) // bit should be 0
+                         : ( appliedMode & modeDisablePotentiometer ); // bit should be 1
+
+    if( !knobOk || !( appliedMode & modeDisableAutoReply ) )
     {
         return MagAOXAppT::log<software_error, -1>(
-            std::format( "device {} did not apply requested device mode {}", m_name, mode ) );
+            std::format( "device {} did not apply requested device mode {}, got {}", m_name, mode, appliedMode ) );
     }
 
     return 0;
@@ -1060,11 +1097,17 @@ int zaberBinaryStage<parentT>::getWarnings( z_port port )
         m_warnWR = true;
     }
 
-    if( m_warnWR == false && m_homing == false && m_tgtPos == 0 && m_rawPos == 0 && m_lastHomed.tv_sec == 0 )
+    return 0;
+}
+
+template <class parentT>
+int zaberBinaryStage<parentT>::updateLastHomed( bool wasHoming )
+{
+    if( !m_homing && !m_warnWR && m_tgtPos == 0 && m_rawPos == 0 && ( wasHoming || m_lastHomed.tv_sec == 0 ) )
     {
-        if( clock_gettime( CLOCK_REALTIME, &m_lastHomed ) < 0 )
+        if( clock_gettime( CLOCK_ISIO, &m_lastHomed ) < 0 )
         {
-            MagAOXAppT::log<software_error>( { errno, 0, "clock_gettime for last homed" } );
+            return MagAOXAppT::log<software_error, -1>( { errno, 0, "clock_gettime for last homed" } );
         }
     }
 

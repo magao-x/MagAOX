@@ -1,3 +1,5 @@
+Implemented by https://github.com/magao-x/MagAOX/pull/335
+
 ## Problem Statement
 
 Implement fan speed control in `apps/pvcamCtrl` using the PVCAM fan-speed setpoint interface described in:

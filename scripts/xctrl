@@ -315,7 +315,6 @@ def _identify_indiserver_name(names, role):
         return "is" + role.upper()
 
 def validate_targets(processes, targets, role, for_restart=False):
-    extra_targets = set()
     if not len(targets):
         targets = set(processes.keys())
     else:
@@ -324,17 +323,12 @@ def validate_targets(processes, targets, role, for_restart=False):
             indiserver_name = _identify_indiserver_name(processes, role)
             if indiserver_name not in targets:
                 targets.add(indiserver_name)
-            for target_name in targets:
-                for process_name in processes:
-                    # restart downstream helper processes (foo-sw, foo-dark, foo-avg, etc.)
-                    if process_name.startswith(target_name):
-                        extra_targets.add(process_name)
         if not targets.issubset(processes.keys()):
             difference = targets - set(processes.keys())
             failure(f'Unknown process names: {difference}')
             sys.exit(1)
 
-    return list(targets | extra_targets)
+    return list(targets)
 
 def startup(processes, targets, role):
     indi_server_name = _identify_indiserver_name(processes, role)

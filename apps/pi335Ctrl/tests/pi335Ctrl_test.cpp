@@ -1,29 +1,51 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
-#include "../../../tests/catch2/catch.hpp"
+/** \file pi335Ctrl_test.cpp
+ * \brief Catch2 tests for the pi335Ctrl app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup pi335Ctrl_files
+ */
+
+#include "../../../tests/testXWC.hpp"
 
 #include "../pi335Ctrl.hpp"
 
 using namespace MagAOX::app;
 
-namespace template_test
+namespace libXWCTest
 {
 
-SCENARIO( "xxxx", "[template]" )
+/** \defgroup pi335Ctrl_unit_test pi335Ctrl Unit Tests
+ * \brief Unit tests for the pi335Ctrl application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `pi335Ctrl` unit tests.
+/** \ingroup pi335Ctrl_unit_test
+ */
+namespace pi335CtrlTest
 {
-   GIVEN("xxxxx")
-   {
-      int rv;
 
-      WHEN("xxxx")
-      {
-         rv = 0;
+/// Verify the placeholder pi335Ctrl test harness instantiates the app cleanly.
+/**
+ * \ingroup pi335Ctrl_unit_test
+ */
+TEST_CASE( "pi335Ctrl placeholder harness instantiates the app", "[pi335Ctrl]" )
+{
+    // clang-format off
+    #ifdef PI335CTRL_TEST_DOXYGEN_REF
+    pi335Ctrl();
+    #endif
+    // clang-format on
 
-         REQUIRE(rv == 0);
-      }
-   }
+    SECTION( "default construction succeeds" )
+    {
+        pi335Ctrl app;
+
+        REQUIRE( true );
+    }
 }
-} //namespace template_test
+
+} // namespace pi335CtrlTest
+
+} // namespace libXWCTest

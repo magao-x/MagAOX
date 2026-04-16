@@ -1,27 +1,51 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
-#include "../../../tests/catch2/catch.hpp"
+/** \file koolanceCtrl_test.cpp
+ * \brief Catch2 tests for the koolanceCtrl app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup koolanceCtrl_files
+ */
+
+#include "../../../tests/testXWC.hpp"
 
 #include "../koolanceCtrl.hpp"
 
 using namespace MagAOX::app;
 
-namespace template_test
+namespace libXWCTest
 {
 
-SCENARIO( "xxxx", "[template]" )
-{
-   GIVEN("xxxxx")
-   {
-      WHEN("xxxx")
-      {
-         int rv = 0;
+/** \defgroup koolanceCtrl_unit_test koolanceCtrl Unit Tests
+ * \brief Unit tests for the koolanceCtrl application.
+ *
+ * \ingroup application_unit_test
+ */
 
-         REQUIRE(rv == 0);
-      }
-   }
+/// Namespace for `koolanceCtrl` unit tests.
+/** \ingroup koolanceCtrl_unit_test
+ */
+namespace koolanceCtrlTest
+{
+
+/// Verify the placeholder koolanceCtrl test harness instantiates the app cleanly.
+/**
+ * \ingroup koolanceCtrl_unit_test
+ */
+TEST_CASE( "koolanceCtrl placeholder harness instantiates the app", "[koolanceCtrl]" )
+{
+    // clang-format off
+    #ifdef KOOLANCECTRL_TEST_DOXYGEN_REF
+    koolanceCtrl();
+    #endif
+    // clang-format on
+
+    SECTION( "default construction succeeds" )
+    {
+        koolanceCtrl app;
+
+        REQUIRE( true );
+    }
 }
-} //namespace template_test
+
+} // namespace koolanceCtrlTest
+
+} // namespace libXWCTest

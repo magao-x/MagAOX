@@ -1,29 +1,51 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
-#include "../../../tests/catch2/catch.hpp"
+/** \file refRMS_test.cpp
+ * \brief Catch2 tests for the refRMS app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup refRMS_files
+ */
+
+#include "../../../tests/testXWC.hpp"
 
 #include "../refRMS.hpp"
 
 using namespace MagAOX::app;
 
-namespace template_test
+namespace libXWCTest
 {
 
-SCENARIO( "xxxx", "[template]" )
+/** \defgroup refRMS_unit_test refRMS Unit Tests
+ * \brief Unit tests for the refRMS application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `refRMS` unit tests.
+/** \ingroup refRMS_unit_test
+ */
+namespace refRMSTest
 {
-   GIVEN("xxxxx")
-   {
-      int rv;
 
-      WHEN("xxxx")
-      {
-         rv = 0;
+/// Verify the placeholder refRMS test harness instantiates the app cleanly.
+/**
+ * \ingroup refRMS_unit_test
+ */
+TEST_CASE( "refRMS placeholder harness instantiates the app", "[refRMS]" )
+{
+    // clang-format off
+    #ifdef REFRMS_TEST_DOXYGEN_REF
+    refRMS();
+    #endif
+    // clang-format on
 
-         REQUIRE(rv == 0);
-      }
-   }
+    SECTION( "default construction succeeds" )
+    {
+        refRMS app;
+
+        REQUIRE( true );
+    }
 }
-} //namespace template_test
+
+} // namespace refRMSTest
+
+} // namespace libXWCTest

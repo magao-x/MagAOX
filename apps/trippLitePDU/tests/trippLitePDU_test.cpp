@@ -1,28 +1,52 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
-#include "../../../tests/catch2/catch.hpp"
+/** \file trippLitePDU_test.cpp
+ * \brief Catch2 tests for the trippLitePDU app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup trippLitePDU_files
+ */
+
+#include "../../../tests/testXWC.hpp"
 
 #include "../trippLitePDU.hpp"
 #include "../trippLitePDU_simulator.hpp"
 
 using namespace MagAOX::app;
 
-namespace template_test
+namespace libXWCTest
 {
 
-SCENARIO( "xxxx", "[template]" )
-{
-   GIVEN("xxxxx")
-   {
-      WHEN("xxxx")
-      {
-         int rv = 0;
+/** \defgroup trippLitePDU_unit_test trippLitePDU Unit Tests
+ * \brief Unit tests for the trippLitePDU application.
+ *
+ * \ingroup application_unit_test
+ */
 
-         REQUIRE(rv == 0);
-      }
-   }
+/// Namespace for `trippLitePDU` unit tests.
+/** \ingroup trippLitePDU_unit_test
+ */
+namespace trippLitePDUTest
+{
+
+/// Verify the placeholder trippLitePDU test harness instantiates the app cleanly.
+/**
+ * \ingroup trippLitePDU_unit_test
+ */
+TEST_CASE( "trippLitePDU placeholder harness instantiates the app", "[trippLitePDU]" )
+{
+    // clang-format off
+    #ifdef TRIPPLITEPDU_TEST_DOXYGEN_REF
+    trippLitePDU();
+    #endif
+    // clang-format on
+
+    SECTION( "default construction succeeds" )
+    {
+        trippLitePDU app;
+
+        REQUIRE( true );
+    }
 }
-} //namespace template_test
+
+} // namespace trippLitePDUTest
+
+} // namespace libXWCTest

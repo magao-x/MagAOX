@@ -2,19 +2,32 @@
  * \brief Catch2 tests for the modalPSDs app.
  * \author Jared R. Males (jaredmales@gmail.com)
  *
- * History:
+ * \ingroup modalPSDs_files
  */
 
-#include "../../../tests/catch2/catch.hpp"
+#include "../../../tests/testXWC.hpp"
 #include "../../../tests/testMacrosINDI.hpp"
 
 #include "../modalPSDs.hpp"
 
 using namespace MagAOX::app;
 
-// namespace MPSDTEST
-//{
+namespace libXWCTest
+{
 
+/** \defgroup modalPSDs_unit_test modalPSDs Unit Tests
+ * \brief Unit tests for the modalPSDs application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `modalPSDs` unit tests.
+/** \ingroup modalPSDs_unit_test
+ */
+namespace modalPSDsTest
+{
+
+/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 class modalPSDs_test : public modalPSDs
 {
 
@@ -73,13 +86,31 @@ class modalPSDs_test : public modalPSDs
         return precedingWindowRefEntry( sn, refEntry, count );
     }
 };
+/// \endcond
 
+/// Verify modalPSDs callback validation and PSD-window extraction logic behave as expected.
+/**
+ * \ingroup modalPSDs_unit_test
+ */
 SCENARIO( "INDI Callbacks", "[modalPSDs]" )
 {
+    // clang-format off
+    #ifdef MODALPSDS_TEST_DOXYGEN_REF
+    modalPSDs::newCallBack_m_indiP_psdTime( pcf::IndiProperty() );
+    modalPSDs::newCallBack_m_indiP_psdAvgTime( pcf::IndiProperty() );
+    modalPSDs::setCallBack_m_indiP_fpsSource( pcf::IndiProperty() );
+    modalPSDs::loadPsdInputWindows( *(ampCircBuffT::snapshotT *)nullptr );
+    #endif
+    // clang-format on
+
     XWCTEST_INDI_NEW_CALLBACK( modalPSDs, psdTime );
     XWCTEST_INDI_NEW_CALLBACK( modalPSDs, psdAvgTime );
     XWCTEST_INDI_SET_CALLBACK( modalPSDs, m_indiP_fpsSource, modeamps, fps );
 }
+
+} // namespace modalPSDsTest
+
+} // namespace libXWCTest
 
 SCENARIO( "PSD input windows come from one validated snapshot", "[modalPSDs]" )
 {

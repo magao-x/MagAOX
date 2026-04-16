@@ -5,23 +5,43 @@
  */
 
 #include <set>
+#include <utility>
+#include <vector>
 
 #include "indiDictionary.hpp"
 
+namespace
+{
+bool dictionaryElementKeyToPropertyKey( const std::string &elKey, std::string &device, std::string &property )
+{
+    size_t np = elKey.find( '.', 0 );
+    if( np == std::string::npos )
+    {
+        return false;
+    }
+
+    size_t ap = elKey.find( '.', np + 1 );
+    if( ap == std::string::npos )
+    {
+        return false;
+    }
+
+    device   = elKey.substr( 0, np );
+    property = elKey.substr( np + 1, ap - ( np + 1 ) );
+
+    return true;
+}
+} // namespace
+
 class rtimvIndiClient : public pcf::IndiClient
 {
-  protected:
-    bool m_shutdown{ false };
-    bool m_connectionLost{ false };
-
   public:
     std::set<std::string> m_subscribed;
-    std::mutex            m_subscribedMutex;
+    std::mutex            m_subscribedMutex; ///< Protects the subscribed-property set.
 
   protected:
-    dictionaryT *m_dict{ nullptr };
-
-    float m_northAngle{ 0 };
+    dictionaryT *m_dict{ nullptr };      ///< Shared rtimv dictionary populated from INDI updates.
+    std::mutex  *m_dictMutex{ nullptr }; ///< Protects dictionary structure while keys are inserted or snapshotted.
 
   public:
     rtimvIndiClient( const std::string &szName,
@@ -29,96 +49,142 @@ class rtimvIndiClient : public pcf::IndiClient
                      const std::string &szProtocolVersion,
                      const std::string &ipAddress,
                      const int          port,
-                     dictionaryT       *dict )
-        : pcf::IndiClient( szName, szVersion, szProtocolVersion, ipAddress, port ) //"127.0.0.1", 7624)
+                     dictionaryT       *dict,
+                     std::mutex        *dictMutex );
+
+    ~rtimvIndiClient();
+
+    virtual void handleDefProperty( const pcf::IndiProperty &ipRecv );
+
+    virtual void handleDelProperty( const pcf::IndiProperty &ipRecv );
+
+    virtual void handleMessage( const pcf::IndiProperty &ipRecv );
+
+    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv );
+
+    virtual void execute();
+};
+
+rtimvIndiClient::rtimvIndiClient( const std::string &szName,
+                                  const std::string &szVersion,
+                                  const std::string &szProtocolVersion,
+                                  const std::string &ipAddress,
+                                  const int          port,
+                                  dictionaryT       *dict,
+                                  std::mutex        *dictMutex )
+    : pcf::IndiClient( szName, szVersion, szProtocolVersion, ipAddress, port )
+{
+    m_dict      = dict;
+    m_dictMutex = dictMutex;
+}
+
+rtimvIndiClient::~rtimvIndiClient()
+{
+    quitProcess();
+    deactivate();
+}
+
+void rtimvIndiClient::handleDefProperty( const pcf::IndiProperty &ipRecv )
+{
+    if( m_dict == nullptr || m_dictMutex == nullptr )
     {
-        m_dict = dict;
+        return;
     }
 
-    ~rtimvIndiClient()
-    {
-        quitProcess();
-        deactivate();
-    }
+    std::string key = ipRecv.createUniqueKey();
 
-    virtual void handleDefProperty( const pcf::IndiProperty &ipRecv )
     {
-        if( m_dict == nullptr )
+        std::lock_guard<std::mutex> guard( m_subscribedMutex );
+        if( m_subscribed.count( key ) == 0 )
+        {
             return;
-
-        std::string key = ipRecv.createUniqueKey();
-
-        {
-            std::lock_guard<std::mutex> guard( m_subscribedMutex );
-            if( m_subscribed.count( key ) == 0 )
-                return;
         }
+    }
 
-        auto elIt = ipRecv.getElements().begin();
+    std::vector<std::pair<std::string, std::string>> updates;
+    updates.reserve( ipRecv.getElements().size() );
 
-        while( elIt != ipRecv.getElements().end() )
+    bool  updateNorthAngle{ false };
+    float northAngle{ 0 };
+
+    auto elIt = ipRecv.getElements().begin();
+
+    while( elIt != ipRecv.getElements().end() )
+    {
+        std::string elName = elIt->second.getName();
+        std::string elKey  = key + "." + elName;
+
+        std::string val;
+
+        if( ipRecv.getType() == pcf::IndiProperty::Switch )
         {
-            std::string elKey = key + "." + elIt->second.getName();
-
-            std::string val;
-
-            if( ipRecv.getType() == pcf::IndiProperty::Switch )
+            if( ipRecv[elName].getSwitchState() == pcf::IndiElement::On )
             {
-                if( ipRecv[elIt->second.getName()].getSwitchState() == pcf::IndiElement::On )
-                    val = "on";
-                else if( ipRecv[elIt->second.getName()].getSwitchState() == pcf::IndiElement::Off )
-                    val = "off";
-                else
-                    val = "unk";
+                val = "on";
+            }
+            else if( ipRecv[elName].getSwitchState() == pcf::IndiElement::Off )
+            {
+                val = "off";
             }
             else
             {
-                val = ipRecv[elIt->second.getName()].get();
+                val = "unk";
             }
-
-            // Subscribed properties can expose dynamic elements. Keep those
-            // element keys populated so overlays can discover active presets.
-            ( *m_dict )[elKey].setBlob( val.c_str(), val.size() + 1 );
-
-            if( elKey == "tcsi.teldata.pa" )
-            {
-                m_northAngle = ipRecv[elIt->second.getName()].get<float>();
-                auto nit     = m_dict->find( "rtimv.north.angle" );
-                if( nit != m_dict->end() )
-                {
-                    nit->second.setBlob( &m_northAngle, sizeof( float ) );
-                }
-            }
-
-            ++elIt;
         }
-    }
-
-    virtual void handleDelProperty( const pcf::IndiProperty &ipRecv )
-    {
-        if( m_dict == nullptr )
+        else
         {
-            return;
+            val = ipRecv[elName].get();
         }
 
-        static_cast<void>( ipRecv );
+        updates.emplace_back( elKey, val );
+
+        if( elKey == "tcsi.teldata.pa" )
+        {
+            northAngle       = ipRecv[elName].get<float>();
+            updateNorthAngle = true;
+        }
+
+        ++elIt;
     }
 
-    virtual void handleMessage( const pcf::IndiProperty &ipRecv )
+    std::lock_guard<std::mutex> guard( *m_dictMutex );
+
+    for( const auto &update : updates )
     {
-        static_cast<void>( ipRecv );
+        // Subscribed properties can expose dynamic elements. Keep those
+        // element keys populated so overlays can discover active presets.
+        ( *m_dict )[update.first].setBlob( update.second.c_str(), update.second.size() + 1 );
     }
 
-    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv )
+    if( updateNorthAngle )
     {
-        handleDefProperty( ipRecv );
+        auto nit = m_dict->find( "rtimv.north.angle" );
+        if( nit != m_dict->end() )
+        {
+            nit->second.setBlob( &northAngle, sizeof( float ) );
+        }
     }
+}
 
-    virtual void execute()
-    {
-        processIndiRequests( false );
-    }
-};
+void rtimvIndiClient::handleDelProperty( const pcf::IndiProperty &ipRecv )
+{
+    static_cast<void>( ipRecv );
+}
+
+void rtimvIndiClient::handleMessage( const pcf::IndiProperty &ipRecv )
+{
+    static_cast<void>( ipRecv );
+}
+
+void rtimvIndiClient::handleSetProperty( const pcf::IndiProperty &ipRecv )
+{
+    handleDefProperty( ipRecv );
+}
+
+void rtimvIndiClient::execute()
+{
+    processIndiRequests( false );
+}
 
 indiDictionary::indiDictionary() : rtimvDictionaryInterface()
 {
@@ -163,6 +229,7 @@ int indiDictionary::attachDictionary( dictionaryT *dict, mx::app::appConfigurato
 
         if( m_dict )
         {
+            std::lock_guard<std::mutex> guard( m_dictMutex );
             ( *m_dict )["tcsi.teldata.pa"].setBlob( nullptr, 0 );
             ( *m_dict )["rtimv.north.angle"].setBlob( nullptr, 0 );
         }
@@ -182,7 +249,8 @@ void indiDictionary::checkConnection()
     {
         try
         {
-            m_client = new rtimvIndiClient( "rtimvIndiClient", "1.7", "1.7", m_ipAddress, m_port, m_dict );
+            m_client =
+                new rtimvIndiClient( "rtimvIndiClient", "1.7", "1.7", m_ipAddress, m_port, m_dict, &m_dictMutex );
         }
         catch( ... )
         {
@@ -205,31 +273,45 @@ void indiDictionary::checkConnection()
     if( !m_client )
         return;
 
-    // Well if we're here we're connected, so now check if we're listening to our props
-    for( auto it = m_dict->begin(); it != m_dict->end(); ++it )
+    std::set<std::pair<std::string, std::string>> propertyKeys;
+
     {
-        std::string elKey = it->first;
+        std::lock_guard<std::mutex> guard( m_dictMutex );
 
-        size_t      np  = elKey.find( '.', 0 );
-        std::string dev = elKey.substr( 0, np );
+        if( m_dict == nullptr )
+        {
+            return;
+        }
 
-        size_t      ap   = elKey.find( '.', np + 1 );
-        std::string prop = elKey.substr( np + 1, ap - ( np + 1 ) );
+        // Well if we're here we're connected, so now check if we're listening to our props.
+        for( auto it = m_dict->begin(); it != m_dict->end(); ++it )
+        {
+            std::string dev;
+            std::string prop;
 
-        std::string key = dev + "." + prop;
+            if( !dictionaryElementKeyToPropertyKey( it->first, dev, prop ) )
+            {
+                continue;
+            }
 
+            propertyKeys.insert( std::make_pair( dev, prop ) );
+        }
+    }
+
+    for( const auto &propertyKey : propertyKeys )
+    {
         bool shouldSnoop = false;
         {
             std::lock_guard<std::mutex> guard( m_client->m_subscribedMutex );
-            auto                        res = m_client->m_subscribed.insert( key );
-            shouldSnoop                     = res.second;
+            auto res    = m_client->m_subscribed.insert( propertyKey.first + "." + propertyKey.second );
+            shouldSnoop = res.second;
         }
 
         if( shouldSnoop == true ) // If we have inserted it, we snoop it
         {
             pcf::IndiProperty ipSend;
-            ipSend.setDevice( dev );
-            ipSend.setName( prop );
+            ipSend.setDevice( propertyKey.first );
+            ipSend.setName( propertyKey.second );
             m_client->sendGetProperties( ipSend );
         }
     }
