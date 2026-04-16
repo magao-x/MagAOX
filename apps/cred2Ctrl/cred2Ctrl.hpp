@@ -71,7 +71,7 @@ class cred2Ctrl : public MagAOXApp<>,
     static constexpr bool c_stdCamera_exptimeCtrl  = false; ///< Do not expose exposure-time controls.
     static constexpr bool c_stdCamera_fpsCtrl      = true;  ///< Expose FPS controls.
     static constexpr bool c_stdCamera_fps          = true;  ///< Expose FPS status.
-    static constexpr bool c_stdCamera_fan          = true;  ///< Expose fan-speed controls.
+    static constexpr bool c_stdCamera_fanSpeed     = true;  ///< Expose fan-speed controls.
     static constexpr bool c_stdCamera_analogGain   = true;  ///< Expose discrete analog-gain controls.
     static constexpr bool c_stdCamera_led          = true;  ///< Expose status LED controls.
     static constexpr bool c_stdCamera_synchro      = false; ///< Do not expose synchro controls in the first pass.
