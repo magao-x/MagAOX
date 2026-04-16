@@ -155,7 +155,7 @@ public:
    static constexpr bool c_stdCamera_readoutSpeed = true; ///< app::dev config to tell stdCamera to expose readout speed controls
 
    static constexpr bool c_stdCamera_vShiftSpeed = true; ///< app:dev config to tell stdCamera to expose vertical shift speed control
-   static constexpr bool c_stdCamera_fanSpeed = false; ///< app::dev config to tell stdCamera not to expose fan-speed control
+   static constexpr bool c_stdCamera_fanSpeed = true; ///< app::dev config to tell stdCamera to expose fan-speed control
 
    static constexpr bool c_stdCamera_emGain = true; ///< app::dev config to tell stdCamera to expose EM gain controls
 
@@ -214,6 +214,8 @@ protected:
 
    std::string m_cameraName;
    std::string m_cameraModel;
+   bool m_fanForcedOn {false}; ///< True while the camera reports the cooling fan is forced on for protection.
+   bool m_fanSpeedLogPending {false}; ///< True when the next successful fan apply should emit a notice even without a state change.
 
 public:
 
@@ -306,6 +308,9 @@ protected:
 
    int getAcquisitionState();
 
+   /// Get the current cooling-fan state from the camera.
+   int getFanSpeed();
+
    int getTemps();
 
    // stdCamera interface:
@@ -320,6 +325,8 @@ protected:
    int setTempSetPt();
    int setReadoutSpeed();
    int setVShiftSpeed();
+   /// Request a cooling-fan state change through the next reconfiguration.
+   int setFanSpeed();
    int setEMGain();
    int setExpTime();
    int capExpTime(piflt& exptime);
@@ -400,6 +407,12 @@ picamCtrl::picamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_vShiftSpeedNames = {"0_7us", "1_2us", "2_0us", "5_0us"};
    m_vShiftSpeedNameLabels = {"0.7 us", "1.2 us", "2.0 us", "5.0 us"};
 
+   m_defaultFanSpeed = "on";
+   m_fanSpeedNames = {"on", "off"};
+   m_fanSpeedNameLabels = {"On", "Off"};
+   m_fanSpeedName = m_defaultFanSpeed;
+   m_fanSpeedNameSet = m_defaultFanSpeed;
+
    m_full_x = 511.5;
    m_full_y = 511.5;
    m_full_w = 1024;
@@ -428,8 +441,6 @@ picamCtrl::~picamCtrl() noexcept
    */
 int picamCtrl::setSynchro()
 {
-   m_reconfig = true;
-
    if (!m_otherCamName.empty())
    {
       if (m_synchroSet)
@@ -451,6 +462,7 @@ int picamCtrl::setSynchro()
    }
 
    recordCamera(true);
+   m_reconfig = true;
 
    return 0;
 }
@@ -634,14 +646,17 @@ int picamCtrl::appLogic()
          return log<software_error,0>({__FILE__,__LINE__});
       }
 
+      if( m_fanSpeedControlEnabled && getFanSpeed() < 0 )
+      {
+         if(powerState() != 1 || powerStateTarget() != 1) return 0;
+         return log<software_error,0>({__FILE__,__LINE__});
+      }
+
 
       if(frameGrabber<picamCtrl>::updateINDI() < 0)
       {
          return log<software_error,0>({__FILE__,__LINE__});
       }
-
-      setPicamParameter(m_modelHandle, PicamParameter_DisableCoolingFan, PicamCoolingFanStatus_Off);
-
 
    }
 
@@ -664,6 +679,14 @@ int picamCtrl::appLogic()
 
 
       if(getTemps() < 0)
+      {
+         if(powerState() != 1 || powerStateTarget() != 1) return 0;
+
+         state(stateCodes::ERROR);
+         return 0;
+      }
+
+      if( m_fanSpeedControlEnabled && getFanSpeed() < 0 )
       {
          if(powerState() != 1 || powerStateTarget() != 1) return 0;
 
@@ -1072,6 +1095,11 @@ int picamCtrl::connect()
 
             m_readoutSpeedNameSet = m_defaultReadoutSpeed;
             m_vShiftSpeedNameSet = m_defaultVShiftSpeed;
+            if(m_fanSpeedControlEnabled)
+            {
+               m_fanSpeedNameSet = m_defaultFanSpeed;
+               m_fanSpeedLogPending = true;
+            }
 
             return 0;
          }
@@ -1200,6 +1228,53 @@ int picamCtrl::getTemps()
 }
 
 inline
+int picamCtrl::getFanSpeed()
+{
+   piint status;
+
+   if(getPicamParameter(status, PicamParameter_CoolingFanStatus) < 0)
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+
+      log<software_error>({__FILE__, __LINE__});
+      state(stateCodes::ERROR);
+      return -1;
+   }
+
+   bool fanForcedOn = false;
+
+   if(status == PicamCoolingFanStatus_Off)
+   {
+      m_fanSpeedName = "off";
+   }
+   else if(status == PicamCoolingFanStatus_On)
+   {
+      m_fanSpeedName = "on";
+   }
+   else if(status == PicamCoolingFanStatus_ForcedOn)
+   {
+      m_fanSpeedName = "on";
+      fanForcedOn = true;
+   }
+   else
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "Unknown cooling-fan status returned by PICam."});
+   }
+
+   if(fanForcedOn && !m_fanForcedOn)
+   {
+      log<text_log>("cooling fan forced on by camera", logPrio::LOG_NOTICE);
+   }
+
+   m_fanForcedOn = fanForcedOn;
+   m_fanSpeedValid = true;
+   recordCamera();
+
+   return 0;
+
+}
+
+inline
 int picamCtrl::setFPS()
 {
    return 0;
@@ -1219,6 +1294,22 @@ int picamCtrl::powerOnDefaults()
 
    m_readoutSpeedName = "emccd_05MHz";
    m_vShiftSpeedName = "1_2us";
+
+   if(m_fanSpeedControlEnabled)
+   {
+      m_fanSpeedName = m_defaultFanSpeed;
+      m_fanSpeedNameSet = m_defaultFanSpeed;
+   }
+   else
+   {
+      m_fanSpeedName.clear();
+      m_fanSpeedNameSet.clear();
+   }
+
+   m_fanForcedOn = false;
+   m_fanSpeedValid = false;
+   m_fanSpeedLogPending = m_fanSpeedControlEnabled;
+
    return 0;
 }
 
@@ -1237,25 +1328,33 @@ inline
 int picamCtrl::setTempSetPt()
 {
    ///\todo bounds check here.
-   m_reconfig = true;
-
    recordCamera(true);
+   m_reconfig = true;
    return 0;
 }
 
 inline
 int picamCtrl::setReadoutSpeed()
 {
-   m_reconfig = true;
    recordCamera(true);
+   m_reconfig = true;
    return 0;
 }
 
 inline
 int picamCtrl::setVShiftSpeed()
 {
-   m_reconfig = true;
    recordCamera(true);
+   m_reconfig = true;
+   return 0;
+}
+
+inline
+int picamCtrl::setFanSpeed()
+{
+   m_fanSpeedLogPending = true;
+   recordCamera(true);
+   m_reconfig = true;
    return 0;
 }
 
@@ -1409,9 +1508,8 @@ int picamCtrl::checkNextROI()
 inline
 int picamCtrl::setNextROI()
 {
-   m_reconfig = true;
-
    updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::Off, INDI_IDLE);
+   m_reconfig = true;
 
    return 0;
 
@@ -1469,6 +1567,60 @@ int picamCtrl::configureAcquisition()
       if(powerState() != 1 || powerStateTarget() != 1) return -1;
       log<software_error>({__FILE__,__LINE__, "Readout Control Mode not configured for frame transfer"}) ;
       return -1;
+   }
+
+   //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+   //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+   // Cooling Fan
+   //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+   //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+
+   if(m_fanSpeedControlEnabled)
+   {
+      static constexpr piint c_enableCoolingFan = 0;
+      static constexpr piint c_disableCoolingFan = 1;
+
+      std::string priorFanSpeed = m_fanSpeedName;
+      piint disableCoolingFan = c_enableCoolingFan;
+
+      if(m_fanSpeedNameSet == "on")
+      {
+         disableCoolingFan = c_enableCoolingFan;
+      }
+      else if(m_fanSpeedNameSet == "off")
+      {
+         disableCoolingFan = c_disableCoolingFan;
+      }
+      else
+      {
+         if(powerState() != 1 || powerStateTarget() != 1) return -1;
+         log<software_error>({__FILE__, __LINE__, "Invalid fan speed: " + m_fanSpeedNameSet});
+         state(stateCodes::ERROR);
+         return -1;
+      }
+
+      if(setPicamParameter(m_modelHandle, PicamParameter_DisableCoolingFan, disableCoolingFan) < 0)
+      {
+         if(powerState() != 1 || powerStateTarget() != 1) return -1;
+         log<software_error>({__FILE__, __LINE__, "Error setting cooling-fan state"});
+         state(stateCodes::ERROR);
+         return -1;
+      }
+
+      m_fanSpeedName = m_fanSpeedNameSet;
+      m_fanSpeedValid = true;
+      m_fanForcedOn = false;
+
+      if(m_fanSpeedName != priorFanSpeed)
+      {
+         log<text_log>("fan speed changed from '" + priorFanSpeed + "' to '" + m_fanSpeedName + "'", logPrio::LOG_NOTICE);
+      }
+      else if(m_fanSpeedLogPending)
+      {
+         log<text_log>("fan speed set to '" + m_fanSpeedName + "'", logPrio::LOG_NOTICE);
+      }
+
+      m_fanSpeedLogPending = false;
    }
 
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*

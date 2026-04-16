@@ -217,7 +217,7 @@ struct stdCameraHasAnalogGain<derivedT, std::void_t<decltype( derivedT::c_stdCam
  *        - The configuration settings "camera.fanSpeedControl" and "camera.defaultFanSpeed"
  *          are also exposed. The former determines whether the INDI control is published, and the latter
  *          sets the default fan speed applied after power-on. The value of \ref m_defaultFanSpeed must
- *          be one of `high`, `medium`, `low`, or `off`.
+ *          match one of the names populated in \ref m_fanSpeedNames.
  *
  *     - Exposure Time:
  *        - A static configuration variable must be defined in derivedT as
@@ -1332,6 +1332,25 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
 
     if( c_hasLegacyFanSpeed )
     {
+        std::string fanSpeedHelp = "The default fan speed. Must be one of the configured fan-control option names.";
+
+        if( !m_fanSpeedNames.empty() )
+        {
+            fanSpeedHelp = "The default fan speed. Must be one of ";
+
+            for( size_t n = 0; n < m_fanSpeedNames.size(); ++n )
+            {
+                if( n > 0 )
+                {
+                    fanSpeedHelp += ", ";
+                }
+
+                fanSpeedHelp += m_fanSpeedNames[n];
+            }
+
+            fanSpeedHelp += ".";
+        }
+
         config.add( "camera.fanSpeedControl",
                     "",
                     "camera.fanSpeedControl",
@@ -1350,7 +1369,7 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
                     "defaultFanSpeed",
                     false,
                     "string",
-                    "The default fan speed. Must be one of high, medium, low, or off." );
+                    fanSpeedHelp );
     }
 
     if( derivedT::c_stdCamera_emGain )
@@ -1468,14 +1487,43 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
         config( m_fanSpeedControlEnabled, "camera.fanSpeedControl" );
         config( m_defaultFanSpeed, "camera.defaultFanSpeed" );
 
-        if( m_defaultFanSpeed != "high" && m_defaultFanSpeed != "medium" && m_defaultFanSpeed != "low" &&
-            m_defaultFanSpeed != "off" )
+        bool fanSpeedValid = false;
+
+        for( size_t n = 0; n < m_fanSpeedNames.size(); ++n )
         {
-            return derivedT::template log<software_critical, -1>(
-                { __FILE__,
-                  __LINE__,
-                  "invalid camera.defaultFanSpeed: '" + m_defaultFanSpeed +
-                      "'. Must be one of high, medium, low, or off." } );
+            if( m_defaultFanSpeed == m_fanSpeedNames[n] )
+            {
+                fanSpeedValid = true;
+                break;
+            }
+        }
+
+        if( !fanSpeedValid )
+        {
+            std::string allowedFanSpeeds;
+
+            if( m_fanSpeedNames.empty() )
+            {
+                allowedFanSpeeds = "<none configured>";
+            }
+            else
+            {
+                for( size_t n = 0; n < m_fanSpeedNames.size(); ++n )
+                {
+                    if( n > 0 )
+                    {
+                        allowedFanSpeeds += ", ";
+                    }
+
+                    allowedFanSpeeds += m_fanSpeedNames[n];
+                }
+            }
+
+            return derivedT::template log<software_critical, -1>( { __FILE__,
+                                                                    __LINE__,
+                                                                    "invalid camera.defaultFanSpeed: '" +
+                                                                        m_defaultFanSpeed + "'. Must be one of " +
+                                                                        allowedFanSpeeds + "." } );
         }
     }
 

@@ -152,8 +152,9 @@ Update `apps/picamCtrl/picamCtrl.hpp` to:
 
 Recommended startup default:
 
-- preserve the current behavior by making the configured default typically `off`
-- but move that decision into `camera.defaultFanSpeed` rather than hardcoding it in the connect path
+- keep the engineering default in code as `on`
+- set site-specific `off` behavior explicitly in config files where desired
+- keep that decision in `camera.defaultFanSpeed` rather than hardcoding it in the connect path
 
 ### C. Add PICam fan readback
 
@@ -184,7 +185,10 @@ This polarity should be verified against the PICam headers during implementation
 
 Recommended behavior:
 
-- update `m_fanSpeedName` on successful apply
+- because `DisableCoolingFan` is not currently onlineable in `picamCtrl`, treat `setFanSpeed()` like the other deferred PICam setters:
+  - mark the app for reconfiguration
+  - apply the actual PICam parameter in `configureAcquisition()`
+- update `m_fanSpeedName` on successful apply inside the reconfiguration path
 - use the same logging behavior as PVCAM:
   - if the applied state differs from prior state:
     - `fan speed changed from '...' to '...'`
@@ -224,7 +228,8 @@ This keeps PICam behavior aligned with PVCAM behavior.
 3. Update `picamCtrl` startup/connect logic
    - remove the hardcoded direct disable-fan write
    - read current fan state after connect
-   - apply the configured default through `setFanSpeed()`
+   - queue the configured default through `setFanSpeed()`
+   - apply the actual parameter in `configureAcquisition()`
    - log startup behavior
 
 4. Update steady-state polling
