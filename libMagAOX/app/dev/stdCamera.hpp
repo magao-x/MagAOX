@@ -214,10 +214,8 @@ struct stdCameraHasAnalogGain<derivedT, std::void_t<decltype( derivedT::c_stdCam
  *          function must be defined which sets the camera according to \ref m_fanSpeedNameSet.
  *          The implementation must also manage \ref m_fanSpeedName, keeping it up to date.
  *
- *        - The configuration settings "camera.fanSpeedControl" and "camera.defaultFanSpeed"
- *          are also exposed. The former determines whether the INDI control is published, and the latter
- *          sets the default fan speed applied after power-on. The value of \ref m_defaultFanSpeed must
- *          match one of the names populated in \ref m_fanSpeedNames.
+ *        - The configuration setting "camera.fanSpeedControl"
+ *          is also exposed. It determines whether the INDI control is published.
  *
  *     - Exposure Time:
  *        - A static configuration variable must be defined in derivedT as
@@ -266,6 +264,10 @@ struct stdCameraHasAnalogGain<derivedT, std::void_t<decltype( derivedT::c_stdCam
  *         and should populate \ref m_fanSpeedNames (and optionally \ref m_fanSpeedNameLabels) before
  *         stdCamera::appStartup().
  *
+ *       - The configuration setting `camera.defaultFanSpeed` is exposed for fan-capable cameras and sets the
+ *         default fan speed applied after power-on. The value of \ref m_defaultFanSpeed must match one of the
+ *         configured entries in \ref m_fanSpeedNames.
+ *
  *     - Analog Gain:
  *
  *       - A static configuration variable may be defined in derivedT as
@@ -295,6 +297,9 @@ struct stdCameraHasAnalogGain<derivedT, std::void_t<decltype( derivedT::c_stdCam
  *             int setLED(); // configure the camera according to m_ledStateSet
  *         \endcode
  *         and should keep \ref m_ledState up to date.
+ *
+ *       - The configuration setting `camera.startupLED` is exposed for LED-capable cameras and sets the default
+ *         LED state applied after power-on.
  *
  *     - Synchro Control:
  *
@@ -436,6 +441,7 @@ class stdCamera
     std::string m_defaultVShiftSpeed;              ///< The default readout speed of the camera.
     bool        m_fanSpeedControlEnabled{ false }; ///< Whether or not fan-speed control is published through INDI.
     std::string m_defaultFanSpeed;                 ///< The default fan speed to apply after power on.
+    bool        m_defaultLEDState{ true };         ///< The default LED state to apply after power on.
 
     ///@}
 
@@ -1332,6 +1338,19 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
 
     if( c_hasLegacyFanSpeed )
     {
+        config.add( "camera.fanSpeedControl",
+                    "",
+                    "camera.fanSpeedControl",
+                    argType::Required,
+                    "camera",
+                    "fanSpeedControl",
+                    false,
+                    "bool",
+                    "Whether or not fan-speed control is exposed." );
+    }
+
+    if( c_hasFan )
+    {
         std::string fanSpeedHelp = "The default fan speed. Must be one of the configured fan-control option names.";
 
         if( !m_fanSpeedNames.empty() )
@@ -1351,25 +1370,28 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
             fanSpeedHelp += ".";
         }
 
-        config.add( "camera.fanSpeedControl",
-                    "",
-                    "camera.fanSpeedControl",
-                    argType::Required,
-                    "camera",
-                    "fanSpeedControl",
-                    false,
-                    "bool",
-                    "Whether or not fan-speed control is exposed." );
-
         config.add( "camera.defaultFanSpeed",
                     "",
                     "camera.defaultFanSpeed",
-                    argType::Required,
+                    argType::Optional,
                     "camera",
                     "defaultFanSpeed",
                     false,
                     "string",
                     fanSpeedHelp );
+    }
+
+    if( c_hasLED )
+    {
+        config.add( "camera.startupLED",
+                    "",
+                    "camera.startupLED",
+                    argType::Optional,
+                    "camera",
+                    "startupLED",
+                    false,
+                    "bool",
+                    "Whether or not the status LED is turned on after power on." );
     }
 
     if( derivedT::c_stdCamera_emGain )
@@ -1485,6 +1507,10 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
     if( c_hasLegacyFanSpeed )
     {
         config( m_fanSpeedControlEnabled, "camera.fanSpeedControl" );
+    }
+
+    if( c_hasFan )
+    {
         config( m_defaultFanSpeed, "camera.defaultFanSpeed" );
 
         bool fanSpeedValid = false;
@@ -1525,6 +1551,11 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
                                                                         m_defaultFanSpeed + "'. Must be one of " +
                                                                         allowedFanSpeeds + "." } );
         }
+    }
+
+    if( c_hasLED )
+    {
+        config( m_defaultLEDState, "camera.startupLED" );
     }
 
     if( derivedT::c_stdCamera_emGain )
