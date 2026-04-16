@@ -123,6 +123,7 @@ Additionally:
 
 - when PICam reports `ForcedOn`, log that as an operational notice or warning
 - do not expose `forced_on` as a switch choice in the writable `fan_speed` property
+- some PICam models may not expose `CoolingFanStatus`; in that case, keep command support if `DisableCoolingFan` exists, but fall back to commanded-state logging/telemetry without hardware fan readback
 
 This preserves the shared control interface while still surfacing the safety-related hardware behavior in logs.
 

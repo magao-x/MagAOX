@@ -214,6 +214,8 @@ protected:
 
    std::string m_cameraName;
    std::string m_cameraModel;
+   bool m_fanControlSupported {false}; ///< True when the camera exposes the DisableCoolingFan control parameter.
+   bool m_fanStatusSupported {false}; ///< True when the camera exposes readable cooling-fan status.
    bool m_fanForcedOn {false}; ///< True while the camera reports the cooling fan is forced on for protection.
    bool m_fanSpeedLogPending {false}; ///< True when the next successful fan apply should emit a notice even without a state change.
 
@@ -646,7 +648,7 @@ int picamCtrl::appLogic()
          return log<software_error,0>({__FILE__,__LINE__});
       }
 
-      if( m_fanSpeedControlEnabled && getFanSpeed() < 0 )
+      if( m_fanSpeedControlEnabled && m_fanStatusSupported && getFanSpeed() < 0 )
       {
          if(powerState() != 1 || powerStateTarget() != 1) return 0;
          return log<software_error,0>({__FILE__,__LINE__});
@@ -686,7 +688,7 @@ int picamCtrl::appLogic()
          return 0;
       }
 
-      if( m_fanSpeedControlEnabled && getFanSpeed() < 0 )
+      if( m_fanSpeedControlEnabled && m_fanStatusSupported && getFanSpeed() < 0 )
       {
          if(powerState() != 1 || powerStateTarget() != 1) return 0;
 
@@ -1088,6 +1090,73 @@ int picamCtrl::connect()
                log<software_error>({__FILE__, __LINE__, "failed to get camera model"});
             }
 
+            m_fanControlSupported = false;
+            m_fanStatusSupported = false;
+
+            if(m_fanSpeedControlEnabled)
+            {
+               pibln exists = false;
+
+               error = Picam_DoesParameterExist( m_cameraHandle, PicamParameter_DisableCoolingFan, &exists );
+               if( error != PicamError_None )
+               {
+                  if(powerState() != 1 || powerStateTarget() != 1) return 0;
+
+                  state(stateCodes::ERROR);
+                  log<software_error>({__FILE__, __LINE__, 0, error, "Error checking DisableCoolingFan support."});
+                  Picam_DestroyCameraIDs(id_array);
+                  return -1;
+               }
+
+               m_fanControlSupported = exists;
+
+               if(!m_fanControlSupported)
+               {
+                  if(powerState() != 1 || powerStateTarget() != 1) return 0;
+
+                  state(stateCodes::ERROR);
+                  log<software_error>({__FILE__, __LINE__, "Fan control enabled in config, but DisableCoolingFan is not supported by this camera."});
+                  Picam_DestroyCameraIDs(id_array);
+                  return -1;
+               }
+
+               exists = false;
+               error = Picam_DoesParameterExist( m_cameraHandle, PicamParameter_CoolingFanStatus, &exists );
+               if( error != PicamError_None )
+               {
+                  if(powerState() != 1 || powerStateTarget() != 1) return 0;
+
+                  state(stateCodes::ERROR);
+                  log<software_error>({__FILE__, __LINE__, 0, error, "Error checking CoolingFanStatus support."});
+                  Picam_DestroyCameraIDs(id_array);
+                  return -1;
+               }
+
+               if(exists)
+               {
+                  pibln readable = false;
+
+                  error = Picam_CanReadParameter( m_cameraHandle, PicamParameter_CoolingFanStatus, &readable );
+                  if( error != PicamError_None )
+                  {
+                     if(powerState() != 1 || powerStateTarget() != 1) return 0;
+
+                     state(stateCodes::ERROR);
+                     log<software_error>({__FILE__, __LINE__, 0, error, "Error checking CoolingFanStatus readability."});
+                     Picam_DestroyCameraIDs(id_array);
+                     return -1;
+                  }
+
+                  m_fanStatusSupported = readable;
+               }
+
+               if(!m_fanStatusSupported)
+               {
+                  log<text_log>("cooling-fan status parameter unavailable; using commanded state without hardware readback",
+                                logPrio::LOG_NOTICE);
+               }
+            }
+
             state(stateCodes::CONNECTED);
             log<text_log>("Connected to " + m_cameraName + " [S/N " + m_serialNumber + "]");
 
@@ -1230,6 +1299,8 @@ int picamCtrl::getTemps()
 inline
 int picamCtrl::getFanSpeed()
 {
+   if(!m_fanStatusSupported) return 0;
+
    piint status;
 
    if(getPicamParameter(status, PicamParameter_CoolingFanStatus) < 0)
@@ -1307,6 +1378,8 @@ int picamCtrl::powerOnDefaults()
    }
 
    m_fanForcedOn = false;
+   m_fanControlSupported = false;
+   m_fanStatusSupported = false;
    m_fanSpeedValid = false;
    m_fanSpeedLogPending = m_fanSpeedControlEnabled;
 
