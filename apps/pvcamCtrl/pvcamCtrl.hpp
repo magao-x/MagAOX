@@ -964,6 +964,20 @@ int pvcamCtrl::configureAcquisition()
         return -1;
     }
 
+    if( m_fanSpeedControlEnabled )
+    {
+        if( getFanSpeed() < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "could not get fan speed after acquisition setup" } );
+        }
+
+        if( m_fanSpeedName != m_fanSpeedNameSet && setFanSpeed() < 0 )
+        {
+            return log<software_error, -1>(
+                { __FILE__, __LINE__, "could not restore configured fan speed after acquisition setup" } );
+        }
+    }
+
     recordCamera( true );
 
     return 0;
