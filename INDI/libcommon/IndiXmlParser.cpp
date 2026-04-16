@@ -154,22 +154,22 @@ void IndiXmlParser::createDefTextVector( const IndiProperty &ip )
   if ( ip.hasValidPerm() == false )
     throw runtime_error( szDescrip + " must have attribute 'perm' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
+  m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
   m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
   m_ssXml << " perm=\"" << ip.getPropertyPermString( ip.getPerm() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidLabel() == true )
-    m_ssXml << " label=\"" << ip.getLabel() << "\"";
+    m_ssXml << " label=\"" << createSafeXmlString( ip.getLabel() ) << "\"";
   if ( ip.hasValidGroup() == true )
-    m_ssXml << " group=\"" << ip.getGroup() << "\"";
+    m_ssXml << " group=\"" << createSafeXmlString( ip.getGroup() ) << "\"";
   if ( ip.hasValidTimeout() == true )
     m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << createSafeXmlString( ip.getMessage() ) << "\"";
 
   m_ssXml << ">\r\n";
 
@@ -182,12 +182,12 @@ void IndiXmlParser::createDefTextVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip[ii].getName() ) << "\"";
 
     // "implied" means that if they are not defined, don't add them. Adding an
     // empty "implied" attribute to the generated XML is an error.
     if ( ip[ii].hasValidLabel() == true )
-      m_ssXml << " label=\"" << ip[ii].getLabel() << "\"";
+      m_ssXml << " label=\"" << createSafeXmlString( ip[ii].getLabel() ) << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -221,8 +221,8 @@ void IndiXmlParser::createSetTextVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
+  m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
@@ -232,7 +232,7 @@ void IndiXmlParser::createSetTextVector( const IndiProperty &ip )
     m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << createSafeXmlString( ip.getMessage() ) << "\"";
 
   m_ssXml << ">\r\n";
 
@@ -245,7 +245,7 @@ void IndiXmlParser::createSetTextVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip[ii].getName() ) << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -279,8 +279,8 @@ void IndiXmlParser::createNewTextVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
+  m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
@@ -297,7 +297,7 @@ void IndiXmlParser::createNewTextVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip[ii].getName() ) << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -336,22 +336,22 @@ void IndiXmlParser::createDefNumberVector( const IndiProperty &ip )
   if ( ip.hasValidPerm() == false )
     throw runtime_error( szDescrip + " must have attribute 'perm' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
+  m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
   m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
   m_ssXml << " perm=\"" << ip.getPropertyPermString( ip.getPerm() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidLabel() == true )
-    m_ssXml << " label=\"" << ip.getLabel() << "\"";
+    m_ssXml << " label=\"" << createSafeXmlString( ip.getLabel() ) << "\"";
   if ( ip.hasValidGroup() == true )
-    m_ssXml << " group=\"" << ip.getGroup() << "\"";
+    m_ssXml << " group=\"" << createSafeXmlString( ip.getGroup() ) << "\"";
   if ( ip.hasValidTimeout() == true )
     m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << createSafeXmlString( ip.getMessage() ) << "\"";
 
   m_ssXml << ">\r\n";
 
@@ -372,7 +372,7 @@ void IndiXmlParser::createDefNumberVector( const IndiProperty &ip )
     if ( ip[ii].hasValidStep() == false )
       throw runtime_error( szElementTag + " must have attribute 'step' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip[ii].getName() ) << "\"";
     m_ssXml << " format=\"" << ip[ii].getFormat() << "\"";
     m_ssXml << " min=\"" << ip[ii].getMin() << "\"";
     m_ssXml << " max=\"" << ip[ii].getMax() << "\"";
@@ -381,7 +381,7 @@ void IndiXmlParser::createDefNumberVector( const IndiProperty &ip )
     // "implied" means that if they are not defined, don't add them. Adding an
     // empty "implied" attribute to the generated XML is an error.
     if ( ip[ii].hasValidLabel() == true )
-      m_ssXml << " label=\"" << ip[ii].getLabel() << "\"";
+      m_ssXml << " label=\"" << createSafeXmlString( ip[ii].getLabel() ) << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -415,8 +415,8 @@ void IndiXmlParser::createSetNumberVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
+  m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
@@ -426,7 +426,7 @@ void IndiXmlParser::createSetNumberVector( const IndiProperty &ip )
     m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << createSafeXmlString( ip.getMessage() ) << "\"";
 
   m_ssXml << ">\r\n";
 
@@ -439,7 +439,7 @@ void IndiXmlParser::createSetNumberVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip[ii].getName() ) << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -473,8 +473,8 @@ void IndiXmlParser::createNewNumberVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
+  m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
@@ -491,7 +491,7 @@ void IndiXmlParser::createNewNumberVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip[ii].getName() ) << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -532,8 +532,8 @@ void IndiXmlParser::createDefSwitchVector( const IndiProperty &ip )
   if ( ip.hasValidRule() == false )
     throw runtime_error( szDescrip + " must have attribute 'rule' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
+  m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
   m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
   m_ssXml << " perm=\"" << ip.getPropertyPermString( ip.getPerm() ) << "\"";
   m_ssXml << " rule=\"" << ip.getSwitchRuleString( ip.getRule() ) << "\"";
@@ -541,14 +541,14 @@ void IndiXmlParser::createDefSwitchVector( const IndiProperty &ip )
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidLabel() == true )
-    m_ssXml << " label=\"" << ip.getLabel() << "\"";
+    m_ssXml << " label=\"" << createSafeXmlString( ip.getLabel() ) << "\"";
   if ( ip.hasValidGroup() == true )
-    m_ssXml << " group=\"" << ip.getGroup() << "\"";
+    m_ssXml << " group=\"" << createSafeXmlString( ip.getGroup() ) << "\"";
   if ( ip.hasValidTimeout() == true )
     m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << createSafeXmlString( ip.getMessage() ) << "\"";
 
   m_ssXml << ">\r\n";
 
@@ -561,12 +561,12 @@ void IndiXmlParser::createDefSwitchVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip[ii].getName() ) << "\"";
 
     // "implied" means that if they are not defined, don't add them. Adding an
     // empty "implied" attribute to the generated XML is an error.
     if ( ip[ii].hasValidLabel() == true )
-      m_ssXml << " label=\"" << ip[ii].getLabel() << "\"";
+      m_ssXml << " label=\"" << createSafeXmlString( ip[ii].getLabel() ) << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -600,8 +600,8 @@ void IndiXmlParser::createSetSwitchVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
+  m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
@@ -611,7 +611,7 @@ void IndiXmlParser::createSetSwitchVector( const IndiProperty &ip )
     m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << createSafeXmlString( ip.getMessage() ) << "\"";
 
   m_ssXml << ">\r\n";
 
@@ -624,7 +624,7 @@ void IndiXmlParser::createSetSwitchVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip[ii].getName() ) << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -658,8 +658,8 @@ void IndiXmlParser::createNewSwitchVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
+  m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
@@ -676,7 +676,7 @@ void IndiXmlParser::createNewSwitchVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip[ii].getName() ) << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -713,19 +713,19 @@ void IndiXmlParser::createDefLightVector( const IndiProperty &ip )
   if ( ip.hasValidState() == false )
     throw runtime_error( szDescrip + " must have attribute 'state' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
+  m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
   m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidLabel() == true )
-    m_ssXml << " label=\"" << ip.getLabel() << "\"";
+    m_ssXml << " label=\"" << createSafeXmlString( ip.getLabel() ) << "\"";
   if ( ip.hasValidGroup() == true )
-    m_ssXml << " group=\"" << ip.getGroup() << "\"";
+    m_ssXml << " group=\"" << createSafeXmlString( ip.getGroup() ) << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << createSafeXmlString( ip.getMessage() ) << "\"";
 
   m_ssXml << ">\r\n";
 
@@ -738,12 +738,12 @@ void IndiXmlParser::createDefLightVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip[ii].getName() ) << "\"";
 
     // "implied" means that if they are not defined, don't add them. Adding an
     // empty "implied" attribute to the generated XML is an error.
     if ( ip[ii].hasValidLabel() == true )
-      m_ssXml << " label=\"" << ip[ii].getLabel() << "\"";
+      m_ssXml << " label=\"" << createSafeXmlString( ip[ii].getLabel() ) << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -777,8 +777,8 @@ void IndiXmlParser::createSetLightVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
+  m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
@@ -786,7 +786,7 @@ void IndiXmlParser::createSetLightVector( const IndiProperty &ip )
     m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << createSafeXmlString( ip.getMessage() ) << "\"";
 
   m_ssXml << ">\r\n";
 
@@ -799,7 +799,7 @@ void IndiXmlParser::createSetLightVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip[ii].getName() ) << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -838,22 +838,22 @@ void IndiXmlParser::createDefBLOBVector( const IndiProperty &ip )
   if ( ip.hasValidPerm() == false )
     throw runtime_error( szDescrip + " must have attribute 'perm' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
+  m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
   m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
   m_ssXml << " perm=\"" << ip.getPropertyPermString( ip.getPerm() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidLabel() == true )
-    m_ssXml << " label=\"" << ip.getLabel() << "\"";
+    m_ssXml << " label=\"" << createSafeXmlString( ip.getLabel() ) << "\"";
   if ( ip.hasValidGroup() == true )
-    m_ssXml << " group=\"" << ip.getGroup() << "\"";
+    m_ssXml << " group=\"" << createSafeXmlString( ip.getGroup() ) << "\"";
   if ( ip.hasValidTimeout() == true )
     m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << createSafeXmlString( ip.getMessage() ) << "\"";
 
   m_ssXml << ">\r\n";
 
@@ -866,12 +866,12 @@ void IndiXmlParser::createDefBLOBVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip[ii].getName() ) << "\"";
 
     // "implied" means that if they are not defined, don't add them. Adding an
     // empty "implied" attribute to the generated XML is an error.
     if ( ip[ii].hasValidLabel() == true )
-      m_ssXml << " label=\"" << ip[ii].getLabel() << "\"";
+      m_ssXml << " label=\"" << createSafeXmlString( ip[ii].getLabel() ) << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -906,8 +906,8 @@ void IndiXmlParser::createSetBLOBVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
+  m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
@@ -917,7 +917,7 @@ void IndiXmlParser::createSetBLOBVector( const IndiProperty &ip )
     m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << createSafeXmlString( ip.getMessage() ) << "\"";
 
   m_ssXml << ">\r\n";
 
@@ -934,7 +934,7 @@ void IndiXmlParser::createSetBLOBVector( const IndiProperty &ip )
     if ( ip[ii].hasValidFormat() == false )
       throw runtime_error( szElementTag + " must have attribute 'format' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip[ii].getName() ) << "\"";
     m_ssXml << " size=\"" << ip[ii].getSize() << "\"";
     m_ssXml << " format=\"" << ip[ii].getFormat() << "\"";
 
@@ -980,8 +980,8 @@ void IndiXmlParser::createNewBLOBVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
+  m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
@@ -1002,7 +1002,7 @@ void IndiXmlParser::createNewBLOBVector( const IndiProperty &ip )
     if ( ip[ii].hasValidFormat() == false )
       throw runtime_error( szElementTag + " must have attribute 'format' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip[ii].getName() ) << "\"";
     m_ssXml << " size=\"" << ip[ii].getSize() << "\"";
     m_ssXml << " format=\"" << ip[ii].getFormat() << "\"";
 
@@ -1041,10 +1041,10 @@ void IndiXmlParser::createMessage( const IndiProperty &ip )
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidDevice() == true )
-    m_ssXml << " device=\"" << ip.getDevice() << "\"";
+    m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << createSafeXmlString( ip.getMessage() ) << "\"";
 
   m_ssXml << ">\r\n";
   m_ssXml << "</" << szTag << ">\r\n";
@@ -1069,15 +1069,15 @@ void IndiXmlParser::createDelProperty( const IndiProperty &ip )
   if ( ip.hasValidDevice() == false )
     throw runtime_error( szDescrip + " must have attribute 'device' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidName() == true )
-    m_ssXml << " name=\"" << ip.getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << createSafeXmlString( ip.getMessage() ) << "\"";
 
   m_ssXml << ">\r\n";
   m_ssXml << "</" << szTag << ">\r\n";
@@ -1099,9 +1099,9 @@ void IndiXmlParser::createGetProperties( const IndiProperty &ip )
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidDevice() == true )
-    m_ssXml << " device=\"" << ip.getDevice() << "\"";
+    m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
   if ( ip.hasValidName() == true )
-    m_ssXml << " name=\"" << ip.getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
 
   m_ssXml << " version=\"" << m_szProtocolVersion << "\"";
 
@@ -1128,12 +1128,12 @@ void IndiXmlParser::createEnableBLOB( const IndiProperty &ip )
   if ( ip.hasValidDevice() == false )
     throw runtime_error( szDescrip + " must have attribute 'device' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
+  m_ssXml << " device=\"" << createSafeXmlString( ip.getDevice() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidName() == true )
-    m_ssXml << " name=\"" << ip.getName() << "\"";
+    m_ssXml << " name=\"" << createSafeXmlString( ip.getName() ) << "\"";
 
   m_ssXml << ">\r\n";
   m_ssXml << IndiProperty::getBLOBEnableString( ip.getBLOBEnable() ) << "\r\n";

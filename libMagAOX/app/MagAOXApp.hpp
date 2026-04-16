@@ -1173,7 +1173,7 @@ class MagAOXApp : public application
     std::string m_powerElement{ "state" }; ///< The INDI element name to monitor for this device's power state.
     std::string m_powerTargetElement{ "target" }; ///< The INDI element name to monitor for this device's power state.
 
-    unsigned long m_powerOnWait{ 0 }; ///< Time in sec to wait for device to boot after power on.
+    unsigned long m_powerOnWait{ 55 }; ///< Default time in sec to wait for device to boot after power on.
 
     /* Power on waiting counter . . . */
     int m_powerOnCounter{ -1 }; ///< Counts numer of loops after power on, implements delay for device bootup.  If -1,

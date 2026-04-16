@@ -1,29 +1,51 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
-#include "../../../tests/catch2/catch.hpp"
+/** \file indiTSAccumulator_test.cpp
+ * \brief Catch2 tests for the indiTSAccumulator app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup indiTSAccumulator_files
+ */
+
+#include "../../../tests/testXWC.hpp"
 
 #include "../indiTSAccumulator.hpp"
 
 using namespace MagAOX::app;
 
-namespace template_test
+namespace libXWCTest
 {
 
-SCENARIO( "xxxx", "[template]" )
+/** \defgroup indiTSAccumulator_unit_test indiTSAccumulator Unit Tests
+ * \brief Unit tests for the indiTSAccumulator application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `indiTSAccumulator` unit tests.
+/** \ingroup indiTSAccumulator_unit_test
+ */
+namespace indiTSAccumulatorTest
 {
-   GIVEN("xxxxx")
-   {
-      int rv;
 
-      WHEN("xxxx")
-      {
-         rv = 0;
+/// Verify the placeholder indiTSAccumulator test harness instantiates the app cleanly.
+/**
+ * \ingroup indiTSAccumulator_unit_test
+ */
+TEST_CASE( "indiTSAccumulator placeholder harness instantiates the app", "[indiTSAccumulator]" )
+{
+    // clang-format off
+    #ifdef INDITSACCUMULATOR_TEST_DOXYGEN_REF
+    indiTSAccumulator();
+    #endif
+    // clang-format on
 
-         REQUIRE(rv == 0);
-      }
-   }
+    SECTION( "default construction succeeds" )
+    {
+        indiTSAccumulator app;
+
+        REQUIRE( true );
+    }
 }
-} //namespace template_test
+
+} // namespace indiTSAccumulatorTest
+
+} // namespace libXWCTest

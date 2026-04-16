@@ -1,12 +1,13 @@
 /** \file w2tcsOffloader.hpp
-  * \brief The MagAO-X Woofer To Telescope Control System (TCS) offloading manager
-  *
-  * \ingroup app_files
-  */
+ * \brief The MagAO-X Woofer To Telescope Control System (TCS) offloading manager.
+ *
+ * \ingroup app_files
+ */
 
 #ifndef w2tcsOffloader_hpp
 #define w2tcsOffloader_hpp
 
+#include <format>
 #include <limits>
 
 #include <mx/improc/eigenCube.hpp>
@@ -21,387 +22,396 @@ namespace app
 {
 
 /** \defgroup w2tcsOffloader Woofer to TCS Offloading
-  * \brief Monitors the averaged woofer shape, fits Zernikes, and sends it to INDI.
-  *
-  * <a href="../handbook/operating/software/apps/w2tcsOffloader.html">Application Documentation</a>
-  *
-  * \ingroup apps
-  *
-  */
+ * \brief Monitors the averaged woofer shape, fits Zernikes, and sends it to INDI.
+ *
+ * <a href="../handbook/operating/software/apps/w2tcsOffloader.html">Application Documentation</a>
+ *
+ * \ingroup apps
+ *
+ */
 
 /** \defgroup w2tcsOffloader_files Woofer to TCS Offloading
-  * \ingroup w2tcsOffloader
-  */
+ * \ingroup w2tcsOffloader
+ */
 
 /** MagAO-X application to control offloading the woofer to the TCS.
-  *
-  * \ingroup w2tcsOffloader
-  *
-  */
-class w2tcsOffloader : public MagAOXApp<true>, public dev::shmimMonitor<w2tcsOffloader>
+ *
+ * \ingroup w2tcsOffloader
+ *
+ */
+class w2tcsOffloader : public MagAOXApp<true>,
+                       public dev::shmimMonitor<w2tcsOffloader>,
+                       public dev::telemeter<w2tcsOffloader>
 {
 
-   //Give the test harness access.
-   friend class w2tcsOffloader_test;
+    // Give the test harness access.
+    friend class w2tcsOffloader_test;
 
-   friend class dev::shmimMonitor<w2tcsOffloader>;
+    friend class dev::shmimMonitor<w2tcsOffloader>;
+    friend class dev::telemeter<w2tcsOffloader>;
 
-   //The base shmimMonitor type
-   typedef dev::shmimMonitor<w2tcsOffloader> shmimMonitorT;
+    // The base helper types.
+    typedef dev::shmimMonitor<w2tcsOffloader> shmimMonitorT;
+    typedef dev::telemeter<w2tcsOffloader>    telemeterT;
 
-   ///Floating point type in which to do all calculations.
-   typedef float realT;
+    /// Floating point type in which to do all calculations.
+    typedef float realT;
 
-protected:
-
-   /** \name Configurable Parameters
+  protected:
+    /** \name Configurable Parameters - Data
      *@{
      */
 
-   std::string m_wZModesPath;
-   std::string m_wMaskPath;
-   std::vector<std::string> m_elNames;
-   std::vector<realT> m_zCoeffs;
-   float m_gain {0.1};
-   int m_nModes {2};
-   float m_norm {1.0};
+    std::string m_wZModesPath; ///< Filesystem path to the woofer Zernike basis cube.
 
-   ///@}
+    std::string m_wMaskPath; ///< Filesystem path to the mask used for coefficient projection.
 
-   mx::improc::eigenCube<realT> m_wZModes;
-   mx::improc::eigenImage<realT> m_woofer;
-   mx::improc::eigenImage<realT> m_wMask;
+    std::vector<std::string>
+        m_elNames; ///< INDI element names corresponding to the coefficient vector, formatted as `00` through `99`.
 
-public:
-   /// Default c'tor.
-   w2tcsOffloader();
+    std::vector<realT> m_zCoeffs; ///< Current coefficient vector sent to INDI and telemetry.
 
-   /// D'tor, declared and defined for noexcept.
-   ~w2tcsOffloader() noexcept
-   {}
+    unsigned m_nModes{
+        5 }; ///< Number of low-order modes to retain when offloading, clamped to the loaded cube size at startup.
 
-   virtual void setupConfig();
+    float m_norm{ 1.0 }; ///< Mask normalization applied to each coefficient measurement.
 
-   /// Implementation of loadConfig logic, separated for testing.
-   /** This is called by loadConfig().
+    ///@}
+
+    /** \name Offloading State - Data
+     * @{
      */
-   int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
+    mx::improc::eigenCube<realT> m_wZModes; ///< Basis cube used to project the incoming woofer image.
 
-   virtual void loadConfig();
+    mx::improc::eigenImage<realT> m_woofer; ///< Copy of the most recently processed woofer image.
 
-   /// Startup function
-   /**
-     *
+    mx::improc::eigenImage<realT> m_wMask; ///< Mask selecting valid pixels for the coefficient projection.
+
+    std::vector<realT> m_lastZCoeffs; ///< Last coefficient vector recorded to telemetry.
+                                      ///@}
+
+  public:
+    /// Default constructor.
+    w2tcsOffloader();
+
+    /// Destructor, declared and defined for noexcept.
+    ~w2tcsOffloader() noexcept
+    {
+    }
+
+    /// Set up the application configuration.
+    virtual void setupConfig();
+
+    /// Implementation of loadConfig logic, separated for testing.
+    /** This is called by loadConfig().
      */
-   virtual int appStartup();
+    int loadConfigImpl(
+        mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
 
-   /// Implementation of the FSM for w2tcsOffloader.
-   /**
+    /// Load the application configuration.
+    virtual void loadConfig();
+
+    /// Start the application and validate the loaded mode cube against the configured mode count.
+    virtual int appStartup();
+
+    /// Implementation of the FSM for w2tcsOffloader.
+    /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
-   virtual int appLogic();
+    virtual int appLogic();
 
-   /// Shutdown the app.
-   /**
-     *
+    /// Shut down the application.
+    virtual int appShutdown();
+
+    /// Allocate image buffers for a new shared-memory image stream.
+    int allocate( const dev::shmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
+
+    /// Process a new woofer image and update offload outputs using the currently allowed mode count.
+    int processImage( void              *curr_src, ///< [in] pointer to start of current frame.
+                      const dev::shmimT &dummy     ///< [in] tag to differentiate shmimMonitor parents.
+    );
+
+    /** \name Telemeter Interface
+     * @{
      */
-   virtual int appShutdown();
+    /// Check whether the telemetry max-interval requires a record.
+    int checkRecordTimes();
 
+    /// Record the current coefficient vector for telemetry when requested by the telemeter.
+    int recordTelem( const logger::telem_w2tcsoffloader * /**< [in] telemetry tag used for overload resolution */ );
 
+    /// Record the current coefficient vector when it changes or when forced.
+    int recordZCoeffs( bool force = false /**< [in] set true to record even if unchanged */ );
+    ///@}
 
+  protected:
+    /** \name Offloading State
+     * @{
+     */
+    pcf::IndiProperty m_indiP_nModes; ///< INDI property publishing the number of active offload modes.
 
-   int allocate( const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
-
-   int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
-                     const dev::shmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
-                   );
-
-
-protected:
-
-   pcf::IndiProperty m_indiP_gain;
-   pcf::IndiProperty m_indiP_nModes;
-   pcf::IndiProperty m_indiP_zCoeffs;
-
-   pcf::IndiProperty m_indiP_zero;
-
-   INDI_NEWCALLBACK_DECL(w2tcsOffloader, m_indiP_gain);
-   INDI_NEWCALLBACK_DECL(w2tcsOffloader, m_indiP_nModes);
-   INDI_NEWCALLBACK_DECL(w2tcsOffloader, m_indiP_zero);
-   INDI_NEWCALLBACK_DECL(w2tcsOffloader, m_indiP_zCoeffs);
+    pcf::IndiProperty m_indiP_zCoeffs; ///< INDI property publishing the current offload coefficients.
+    ///@}
 };
 
-inline
-w2tcsOffloader::w2tcsOffloader() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+inline w2tcsOffloader::w2tcsOffloader() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
-   return;
+    return;
 }
 
-inline
-void w2tcsOffloader::setupConfig()
+inline void w2tcsOffloader::setupConfig()
 {
-   shmimMonitorT::setupConfig(config);
+    shmimMonitorT::setupConfig( config );
+    TELEMETER_SETUP_CONFIG( config );
 
-   config.add("offload.wZModesPath", "", "offload.wZModesPath", argType::Required, "offload", "wZModesPath", false, "string", "The path to the woofer Zernike modes.");
-   config.add("offload.wMaskPath", "", "offload.wMaskPath", argType::Required, "offload", "wMaskPath", false, "string", "Path to the woofer Zernike mode mask.");
-   config.add("offload.gain", "", "offload.gain", argType::Required, "offload", "gain", false, "float", "The starting offload gain.  Default is 0.1.");
-   config.add("offload.nModes", "", "offload.nModes", argType::Required, "offload", "nModes", false, "int", "Number of modes to offload to the TCS.");
+    config.add( "offload.wZModesPath",
+                "",
+                "offload.wZModesPath",
+                argType::Required,
+                "offload",
+                "wZModesPath",
+                false,
+                "string",
+                "The path to the woofer Zernike modes." );
+    config.add( "offload.wMaskPath",
+                "",
+                "offload.wMaskPath",
+                argType::Required,
+                "offload",
+                "wMaskPath",
+                false,
+                "string",
+                "Path to the woofer Zernike mode mask." );
+    config.add( "offload.nModes",
+                "",
+                "offload.nModes",
+                argType::Required,
+                "offload",
+                "nModes",
+                false,
+                "int",
+                "Number of modes to offload to the TCS." );
 }
 
-inline
-int w2tcsOffloader::loadConfigImpl( mx::app::appConfigurator & _config )
+inline int w2tcsOffloader::loadConfigImpl( mx::app::appConfigurator &_config )
 {
 
-   shmimMonitorT::loadConfig(_config);
+    shmimMonitorT::loadConfig( _config );
+    TELEMETER_LOAD_CONFIG( _config );
 
-   _config(m_wZModesPath, "offload.wZModesPath");
-   _config(m_wMaskPath, "offload.wMaskPath");
-   _config(m_gain, "offload.gain");
-   _config(m_nModes, "offload.nModes");
-
-   return 0;
-}
-
-inline
-void w2tcsOffloader::loadConfig()
-{
-   loadConfigImpl(config);
-}
-
-inline
-int w2tcsOffloader::appStartup(){
-
-   mx::fits::fitsFile<float> ff;
-   mx::error_t errc = ff.read(m_wZModes, m_wZModesPath);
-   if(errc != mx::error_t::noerror)
-   {
-      return log<text_log,-1>("Could not open mode cube file", logPrio::LOG_ERROR);
-   }
-
-   m_zCoeffs.resize(m_wZModes.planes(), 0);
-
-   errc = ff.read(m_wMask, m_wMaskPath);
-   if( errc != mx::error_t::noerror)
-   {
-     return log<text_log,-1>("Could not open mode mask file", logPrio::LOG_ERROR);
-   }
-
-   m_norm = m_wMask.sum();
-
-   createStandardIndiNumber<unsigned>( m_indiP_gain, "gain", 0, 1, 0, "%0.2f");
-   m_indiP_gain["current"] = m_gain;
-   m_indiP_gain["target"] = m_gain;
-
-   if( registerIndiPropertyNew( m_indiP_gain, INDI_NEWCALLBACK(m_indiP_gain)) < 0)
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   }
-
-   createStandardIndiNumber<unsigned>( m_indiP_nModes, "nModes", 1, std::numeric_limits<unsigned>::max(), 1, "%u");
-   m_indiP_nModes["current"] = m_nModes;
-
-   if( registerIndiPropertyNew( m_indiP_nModes, INDI_NEWCALLBACK(m_indiP_nModes)) < 0)
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   }
-
-   REG_INDI_NEWPROP(m_indiP_zCoeffs, "zCoeffs", pcf::IndiProperty::Number);
-
-
-   m_elNames.resize(m_zCoeffs.size());
-   for(size_t n=0; n < m_zCoeffs.size(); ++n)
-   {
-      //std::string el = std::to_string(n);
-      m_elNames[n] = mx::ioutils::convertToString<size_t, 2, '0'>(n);
-
-      m_indiP_zCoeffs.add( pcf::IndiElement(m_elNames[n]) );
-      m_indiP_zCoeffs[m_elNames[n]].set(0);
-   }
-
-   if(shmimMonitorT::appStartup() < 0)
-   {
-      return log<software_error,-1>({__FILE__, __LINE__});
-   }
-
-
-   createStandardIndiRequestSw( m_indiP_zero, "zero", "zero loop");
-   if( registerIndiPropertyNew( m_indiP_zero, INDI_NEWCALLBACK(m_indiP_zero)) < 0)
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   }
-
-   state(stateCodes::OPERATING);
-
-   return 0;
-}
-
-inline
-int w2tcsOffloader::appLogic()
-{
-   if( shmimMonitorT::appLogic() < 0)
-   {
-      return log<software_error,-1>({__FILE__,__LINE__});
-   }
-
-
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-
-   if(shmimMonitorT::updateINDI() < 0)
-   {
-      log<software_error>({__FILE__, __LINE__});
-   }
-
-
-   return 0;
-}
-
-inline
-int w2tcsOffloader::appShutdown()
-{
-   shmimMonitorT::appShutdown();
-
-
-   return 0;
-}
-
-inline
-int w2tcsOffloader::allocate(const dev::shmimT & dummy)
-{
-   static_cast<void>(dummy); //be unused
-
-   //std::unique_lock<std::mutex> lock(m_indiMutex);
-
-   m_woofer.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
-
-   //state(stateCodes::OPERATING);
-
-   return 0;
-}
-
-inline
-int w2tcsOffloader::processImage( void * curr_src,
-                                const dev::shmimT & dummy
-                              )
-{
-   static_cast<void>(dummy); //be unused (what is this?)
-
-   // Replace this:
-   // project zernikes onto avg image
-   // update INDI properties with coeffs
-
-   for(size_t i=0; i < m_zCoeffs.size(); ++i)
-   {
-    /* update requested nModes and explicitly zero out any
-    modes that shouldn't be offloaded (but might have been
-    previously set)
-    */
-    if(i < m_nModes)
-    {
-       float coeff;
-       coeff = ( Eigen::Map<mx::improc::eigenImage<realT>>((float *)curr_src, shmimMonitorT::m_width, shmimMonitorT::m_height) * m_wZModes.image(i) * m_wMask).sum() / m_norm;
-       m_indiP_zCoeffs[m_elNames[i]] = m_gain * coeff;
-    }
-    else
-    {
-      m_indiP_zCoeffs[m_elNames[i]] = 0.;
-    }
-   }
-
-   m_indiP_zCoeffs.setState (pcf::IndiProperty::Ok);
-   m_indiDriver->sendSetProperty (m_indiP_zCoeffs);
-
-
-   // loop over something like this
-   //z0 = (im * basis.image(0)*mask).sum()/norm;
-
-
-   return 0;
-}
-
-// update this: mode coefficients (maybe they shouldn't be settable. How to handle?)
-
-INDI_NEWCALLBACK_DEFN(w2tcsOffloader, m_indiP_gain)(const pcf::IndiProperty &ipRecv)
-{
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_gain, ipRecv);
-
-    float target;
-
-    if( indiTargetUpdate( m_indiP_gain, target, ipRecv, true) < 0)
-    {
-        log<software_error>({__FILE__,__LINE__});
-        return -1;
-    }
-
-    m_gain = target;
-
-    updateIfChanged(m_indiP_gain, "current", m_gain);
-    updateIfChanged(m_indiP_gain, "target", m_gain);
-
-    log<text_log>("set gain to " + std::to_string(m_gain), logPrio::LOG_NOTICE);
+    _config( m_wZModesPath, "offload.wZModesPath" );
+    _config( m_wMaskPath, "offload.wMaskPath" );
+    _config( m_nModes, "offload.nModes" );
 
     return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(w2tcsOffloader, m_indiP_nModes)(const pcf::IndiProperty &ipRecv)
+inline void w2tcsOffloader::loadConfig()
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_nModes, ipRecv);
+    loadConfigImpl( config );
+}
 
-    unsigned target;
+inline int w2tcsOffloader::appStartup()
+{
 
-    if( indiTargetUpdate( m_indiP_nModes, target, ipRecv, true) < 0)
+    mx::fits::fitsFile<float> ff;
+    mx::error_t               errc = ff.read( m_wZModes, m_wZModesPath );
+    if( errc != mx::error_t::noerror )
     {
-        log<software_error>({__FILE__,__LINE__});
-        return -1;
+        return log<text_log, -1>( "Could not open mode cube file", logPrio::LOG_ERROR );
     }
 
-    m_nModes = target;
+    m_zCoeffs.resize( m_wZModes.planes(), 0 );
+    m_lastZCoeffs.resize( m_zCoeffs.size(), std::numeric_limits<realT>::max() );
 
-    updateIfChanged(m_indiP_nModes, "current", m_nModes);
-    updateIfChanged(m_indiP_nModes, "target", m_nModes);
+    if( m_nModes > m_zCoeffs.size() )
+    {
+        m_nModes = m_zCoeffs.size();
+    }
 
-    log<text_log>("set nModes to " + std::to_string(m_nModes), logPrio::LOG_NOTICE);
+    if( m_zCoeffs.size() > 100 )
+    {
+        m_shutdown = true;
+        return log<text_log, -1>( "w2tcsOffloader supports at most 100 offload modes because INDI element names are "
+                                  "formatted with two digits.",
+                                  logPrio::LOG_CRITICAL );
+    }
+
+    errc = ff.read( m_wMask, m_wMaskPath );
+    if( errc != mx::error_t::noerror )
+    {
+        return log<text_log, -1>( "Could not open mode mask file", logPrio::LOG_ERROR );
+    }
+
+    m_norm = m_wMask.sum();
+
+    createROIndiNumber( m_indiP_nModes, "nModes", "number of modes calculated" );
+    indi::addNumberElement<unsigned>( m_indiP_nModes, "current", 0, m_zCoeffs.size(), 1, "%d" );
+    m_indiP_nModes["current"] = m_nModes;
+
+    registerIndiPropertyReadOnly( m_indiP_nModes );
+
+    createROIndiNumber( m_indiP_zCoeffs, "zCoeffs", "offload coefficients" );
+
+    m_elNames.resize( m_zCoeffs.size() );
+    for( size_t n = 0; n < m_zCoeffs.size(); ++n )
+    {
+        m_elNames[n] = std::format( "{:02}", n );
+
+        indi::addNumberElement<realT>( m_indiP_zCoeffs,
+                                       m_elNames[n],
+                                       -std::numeric_limits<realT>::max(),
+                                       std::numeric_limits<realT>::max(),
+                                       0,
+                                       "%0.6f" );
+        m_indiP_zCoeffs[m_elNames[n]] = 0;
+    }
+
+    registerIndiPropertyReadOnly( m_indiP_zCoeffs );
+
+    TELEMETER_APP_STARTUP;
+
+    if( shmimMonitorT::appStartup() < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
+
+    state( stateCodes::OPERATING );
 
     return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(w2tcsOffloader, m_indiP_zCoeffs)(const pcf::IndiProperty &ipRecv)
+inline int w2tcsOffloader::appLogic()
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_zCoeffs, ipRecv);
-
-
-    for(size_t n=0; n < m_zCoeffs.size(); ++n)
+    if( shmimMonitorT::appLogic() < 0 )
     {
-        if(ipRecv.find(m_elNames[n]))
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
+
+    {
+        std::unique_lock<std::mutex> lock( m_indiMutex ); // mutex scope
+
+        if( shmimMonitorT::updateINDI() < 0 )
         {
-            realT zcoeff = ipRecv[m_elNames[n]].get<realT>();
-            m_zCoeffs[n] = zcoeff;
+            log<software_error>( { __FILE__, __LINE__ } );
         }
     }
+
+    TELEMETER_APP_LOGIC;
+
     return 0;
-
-
-   return log<software_error,-1>({__FILE__,__LINE__, "invalid indi property name"});
 }
 
-INDI_NEWCALLBACK_DEFN(w2tcsOffloader, m_indiP_zero)(const pcf::IndiProperty &ipRecv)
+inline int w2tcsOffloader::appShutdown()
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_zero, ipRecv);
+    shmimMonitorT::appShutdown();
+    TELEMETER_APP_SHUTDOWN;
 
-    float target;
-
-    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
-    {
-        m_woofer.setZero();
-        log<text_log>("set zero", logPrio::LOG_NOTICE);
-    }
     return 0;
 }
 
-} //namespace app
-} //namespace MagAOX
+inline int w2tcsOffloader::allocate( const dev::shmimT &dummy )
+{
+    static_cast<void>( dummy ); // be unused
 
-#endif //w2tcsOffloader_hpp
+    m_woofer.resize( shmimMonitorT::m_width, shmimMonitorT::m_height );
+
+    return 0;
+}
+
+inline int w2tcsOffloader::processImage( void *curr_src, const dev::shmimT &dummy )
+{
+    static_cast<void>( dummy ); // be unused
+
+    Eigen::Map<mx::improc::eigenImage<realT>> wooferImage(
+        static_cast<realT *>( curr_src ), shmimMonitorT::m_width, shmimMonitorT::m_height );
+
+    {
+        std::unique_lock<std::mutex> lock( m_indiMutex ); // mutex scope
+
+        m_woofer = wooferImage;
+
+        for( size_t i = 0; i < m_zCoeffs.size(); ++i )
+        {
+            if( i < m_nModes )
+            {
+                m_zCoeffs[i] = ( wooferImage * m_wZModes.image( i ) * m_wMask ).sum() / m_norm;
+            }
+            else
+            {
+                m_zCoeffs[i] = 0;
+            }
+
+            m_indiP_zCoeffs[m_elNames[i]] = m_zCoeffs[i];
+        }
+
+        m_indiP_zCoeffs.setState( pcf::IndiProperty::Ok );
+
+        if( m_indiDriver )
+        {
+            m_indiDriver->sendSetProperty( m_indiP_zCoeffs );
+        }
+    }
+
+    recordZCoeffs();
+
+    return 0;
+}
+
+inline int w2tcsOffloader::checkRecordTimes()
+{
+    return telemeterT::checkRecordTimes( logger::telem_w2tcsoffloader() );
+}
+
+inline int w2tcsOffloader::recordTelem( const logger::telem_w2tcsoffloader * )
+{
+    return recordZCoeffs( true );
+}
+
+inline int w2tcsOffloader::recordZCoeffs( bool force )
+{
+    std::vector<float> coeffs;
+    bool               changed{ false };
+
+    {
+        std::unique_lock<std::mutex> lock( m_indiMutex ); // mutex scope
+
+        if( m_lastZCoeffs.size() != m_zCoeffs.size() )
+        {
+            m_lastZCoeffs.resize( m_zCoeffs.size(), std::numeric_limits<realT>::max() );
+        }
+
+        coeffs.resize( m_zCoeffs.size() );
+
+        for( size_t n = 0; n < m_zCoeffs.size(); ++n )
+        {
+            coeffs[n] = m_zCoeffs[n];
+
+            if( m_lastZCoeffs[n] != m_zCoeffs[n] )
+            {
+                changed = true;
+            }
+        }
+
+        if( force || changed )
+        {
+            for( size_t n = 0; n < m_lastZCoeffs.size(); ++n )
+            {
+                m_lastZCoeffs[n] = m_zCoeffs[n];
+            }
+        }
+    }
+
+    if( force || changed )
+    {
+        telem<logger::telem_w2tcsoffloader>( logger::telem_w2tcsoffloader::messageT( coeffs ) );
+    }
+
+    return 0;
+}
+
+} // namespace app
+} // namespace MagAOX
+
+#endif // w2tcsOffloader_hpp

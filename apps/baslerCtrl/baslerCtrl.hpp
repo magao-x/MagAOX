@@ -80,6 +80,8 @@ class baslerCtrl : public MagAOXApp<>,
 
     static constexpr bool c_stdCamera_vShiftSpeed =
         false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
+    static constexpr bool c_stdCamera_fanSpeed =
+        false; ///< app::dev config to tell stdCamera not to expose fan-speed control
 
     static constexpr bool c_stdCamera_emGain =
         false; ///< app::dev config to tell stdCamera to not expose EM gain controls

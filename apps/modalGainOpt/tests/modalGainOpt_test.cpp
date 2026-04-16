@@ -1,27 +1,51 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
-#include "../../../tests/catch2/catch.hpp"
+/** \file modalGainOpt_test.cpp
+ * \brief Catch2 tests for the modalGainOpt app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup modalGainOpt_files
+ */
+
+#include "../../../tests/testXWC.hpp"
 
 #include "../modalGainOpt.hpp"
 
 using namespace MagAOX::app;
 
-namespace template_test
+namespace libXWCTest
 {
 
-SCENARIO( "xxxx", "[template]" )
-{
-   GIVEN("xxxxx")
-   {
-      WHEN("xxxx")
-      {
-         int rv = 0;
+/** \defgroup modalGainOpt_unit_test modalGainOpt Unit Tests
+ * \brief Unit tests for the modalGainOpt application.
+ *
+ * \ingroup application_unit_test
+ */
 
-         REQUIRE(rv == 0);
-      }
-   }
+/// Namespace for `modalGainOpt` unit tests.
+/** \ingroup modalGainOpt_unit_test
+ */
+namespace modalGainOptTest
+{
+
+/// Verify the placeholder modalGainOpt test harness instantiates the app cleanly.
+/**
+ * \ingroup modalGainOpt_unit_test
+ */
+TEST_CASE( "modalGainOpt placeholder harness instantiates the app", "[modalGainOpt]" )
+{
+    // clang-format off
+    #ifdef MODALGAINOPT_TEST_DOXYGEN_REF
+    modalGainOpt();
+    #endif
+    // clang-format on
+
+    SECTION( "default construction succeeds" )
+    {
+        modalGainOpt app;
+
+        REQUIRE( true );
+    }
 }
-} //namespace template_test
+
+} // namespace modalGainOptTest
+
+} // namespace libXWCTest

@@ -70,6 +70,7 @@ INCLUDEDEPS= \
 	logger/types/telem_dmspeck.hpp \
 	logger/types/telem_drivetemps.hpp \
 	logger/types/telem_fgtimings.hpp \
+	logger/types/telem_flowrpm.hpp \
 	logger/types/telem_fxngen.hpp \
 	logger/types/telem_loopgain.hpp \
 	logger/types/telem_observer.hpp \
@@ -89,11 +90,16 @@ INCLUDEDEPS= \
 	logger/types/telem_telcat.hpp \
 	logger/types/telem_teldata.hpp \
 	logger/types/telem_telenv.hpp \
+	logger/types/telem_tcsi_focus.hpp \
+	logger/types/telem_tcsi_labmode.hpp \
+	logger/types/telem_tcsi_offload.hpp \
+	logger/types/telem_tcsi_tiptilt.hpp \
 	logger/types/telem_telpos.hpp \
 	logger/types/telem_telsee.hpp \
 	logger/types/telem_telvane.hpp \
 	logger/types/telem_temps.hpp \
 	logger/types/telem_usage.hpp \
+	logger/types/telem_w2tcsoffloader.hpp \
 	logger/types/telem_zaber.hpp \
 	logger/types/text_log.hpp \
 	logger/types/ttmmod_params.hpp \

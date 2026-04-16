@@ -6,6 +6,8 @@
 #ifndef dmCtrl_hpp
 #define dmCtrl_hpp
 
+#include <QSignalBlocker>
+
 #include <mutex>
 #include <vector>
 
@@ -281,18 +283,54 @@ void dmCtrl::handleDelProperty( const pcf::IndiProperty &ipRecv )
         return;
     }
 
-    if( ipRecv.getName() == "fsm" || ipRecv.getName() == "sm_shmimName" || ipRecv.getName() == "flat" ||
-        ipRecv.getName() == "flat_shmim" || ipRecv.getName() == "flat_set" || ipRecv.getName() == "test" ||
-        ipRecv.getName() == "test_shmim" || ipRecv.getName() == "test_set" )
+    if( ipRecv.getName() == "fsm" )
     {
         emit doOnDisconnect();
+        return;
+    }
+
+    if( ipRecv.getName() == "sm_shmimName" )
+    {
+        { // mutex scope
+            std::lock_guard<std::mutex> lock( m_stateMutex );
+            m_shmimName.clear();
+        }
+
+        emit doUpdateGUI();
+        return;
+    }
+
+    if( ipRecv.getName() == "flat" || ipRecv.getName() == "flat_shmim" || ipRecv.getName() == "flat_set" )
+    {
+        { // mutex scope
+            std::lock_guard<std::mutex> lock( m_stateMutex );
+            m_flatShmim.clear();
+            m_flatSet = false;
+            m_flatName.clear();
+            m_flatOptions.clear();
+        }
+
+        emit doUpdateGUI();
+        return;
+    }
+
+    if( ipRecv.getName() == "test" || ipRecv.getName() == "test_shmim" || ipRecv.getName() == "test_set" )
+    {
+        { // mutex scope
+            std::lock_guard<std::mutex> lock( m_stateMutex );
+            m_testShmim.clear();
+            m_testSet = false;
+            m_testName.clear();
+            m_testOptions.clear();
+        }
+
+        emit doUpdateGUI();
+        return;
     }
 }
 
 void dmCtrl::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
-    std::lock_guard<std::mutex> lock( m_stateMutex );
-
     if( ipRecv.getDevice() != m_dmName )
     {
         return;
@@ -301,6 +339,7 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty &ipRecv )
     {
         if( ipRecv.find( "state" ) )
         {
+            std::lock_guard<std::mutex> lock( m_stateMutex );
             m_appState = ipRecv["state"].get<std::string>();
         }
 
@@ -310,11 +349,13 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty &ipRecv )
     {
         if( ipRecv.find( "name" ) )
         {
+            std::lock_guard<std::mutex> lock( m_stateMutex );
             m_shmimName = ipRecv["name"].get<std::string>();
         }
     }
     else if( ipRecv.getName() == "flat" )
     {
+        std::lock_guard<std::mutex> lock( m_stateMutex );
         m_flatOptions.clear();
         m_flatName = "";
         for( auto it = ipRecv.getElements().begin(); it != ipRecv.getElements().end(); ++it )
@@ -328,6 +369,7 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty &ipRecv )
     {
         if( ipRecv.find( "channel" ) )
         {
+            std::lock_guard<std::mutex> lock( m_stateMutex );
             m_flatShmim = ipRecv["channel"].get<std::string>();
         }
     }
@@ -335,6 +377,7 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty &ipRecv )
     {
         if( ipRecv.find( "toggle" ) )
         {
+            std::lock_guard<std::mutex> lock( m_stateMutex );
             if( ipRecv["toggle"] == pcf::IndiElement::On )
                 m_flatSet = true;
             else
@@ -343,6 +386,7 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty &ipRecv )
     }
     else if( ipRecv.getName() == "test" )
     {
+        std::lock_guard<std::mutex> lock( m_stateMutex );
         m_testOptions.clear();
         m_testName = "";
         for( auto it = ipRecv.getElements().begin(); it != ipRecv.getElements().end(); ++it )
@@ -356,6 +400,7 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty &ipRecv )
     {
         if( ipRecv.find( "channel" ) )
         {
+            std::lock_guard<std::mutex> lock( m_stateMutex );
             m_testShmim = ipRecv["channel"].get<std::string>();
         }
     }
@@ -363,6 +408,7 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty &ipRecv )
     {
         if( ipRecv.find( "toggle" ) )
         {
+            std::lock_guard<std::mutex> lock( m_stateMutex );
             if( ipRecv["toggle"] == pcf::IndiElement::On )
                 m_testSet = true;
             else
@@ -409,17 +455,35 @@ void dmCtrl::updateGUI()
     ui.labelFlatShmim_value->setText( flatShmim.c_str() );
     ui.labelTestShmim_value->setText( testShmim.c_str() );
 
-    ui.comboSelectFlat->clear();
-    for( const auto &opt : flatOptions )
-        ui.comboSelectFlat->addItem( opt.c_str() );
-    if( !flatName.empty() )
-        ui.comboSelectFlat->setCurrentText( flatName.c_str() );
+    { // mutex scope
+        QSignalBlocker blockFlat( ui.comboSelectFlat );
 
-    ui.comboSelectTest->clear();
-    for( const auto &opt : testOptions )
-        ui.comboSelectTest->addItem( opt.c_str() );
-    if( !testName.empty() )
-        ui.comboSelectTest->setCurrentText( testName.c_str() );
+        ui.comboSelectFlat->clear();
+        for( const auto &opt : flatOptions )
+            ui.comboSelectFlat->addItem( opt.c_str() );
+
+        if( !flatName.empty() )
+        {
+            int flatIndex = ui.comboSelectFlat->findText( flatName.c_str() );
+            if( flatIndex >= 0 )
+                ui.comboSelectFlat->setCurrentIndex( flatIndex );
+        }
+    }
+
+    { // mutex scope
+        QSignalBlocker blockTest( ui.comboSelectTest );
+
+        ui.comboSelectTest->clear();
+        for( const auto &opt : testOptions )
+            ui.comboSelectTest->addItem( opt.c_str() );
+
+        if( !testName.empty() )
+        {
+            int testIndex = ui.comboSelectTest->findText( testName.c_str() );
+            if( testIndex >= 0 )
+                ui.comboSelectTest->setCurrentIndex( testIndex );
+        }
+    }
 
     if( appState != "NOTHOMED" && appState != "READY" && appState != "OPERATING" )
     {
@@ -538,6 +602,9 @@ void dmCtrl::on_buttonRelease_pressed()
 
 void dmCtrl::on_comboSelectFlat_activated( int index )
 {
+    if( index < 0 || index >= ui.comboSelectFlat->count() )
+        return;
+
     std::string       choice = ui.comboSelectFlat->itemText( index ).toStdString();
     pcf::IndiProperty ipFreq( pcf::IndiProperty::Switch );
     ipFreq.setDevice( m_dmName );
@@ -582,6 +649,9 @@ void dmCtrl::on_buttonZeroFlat_pressed()
 
 void dmCtrl::on_comboSelectTest_activated( int index )
 {
+    if( index < 0 || index >= ui.comboSelectTest->count() )
+        return;
+
     std::string       choice = ui.comboSelectTest->itemText( index ).toStdString();
     pcf::IndiProperty ipFreq( pcf::IndiProperty::Switch );
     ipFreq.setDevice( m_dmName );

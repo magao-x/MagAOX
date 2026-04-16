@@ -44,6 +44,15 @@ class warnings : public rtimvOverlayInterface
     /// Dictionary keys checked at alert severity.
     std::vector<std::string> m_alertKeys;
 
+    /// Cached active caution keys used to trigger overlay refresh only on changes.
+    std::vector<std::string> m_activeCautions;
+
+    /// Cached active warning keys used to trigger overlay refresh only on changes.
+    std::vector<std::string> m_activeWarnings;
+
+    /// Cached active alert keys used to trigger overlay refresh only on changes.
+    std::vector<std::string> m_activeAlerts;
+
     char m_blob[512]; ///< Memory for copying rtimvDictionary blobs
 
   public:
@@ -99,6 +108,12 @@ class warnings : public rtimvOverlayInterface
                 const std::string &prefix /**< [in] severity-specific key prefix inserted after the device name */
     );
 
+    /// Return the active keys in one severity group.
+    std::vector<std::string>
+    activeKeys( const std::vector<std::string> &keys, /**< [in] configured leaf keys for one severity group */
+                const std::string &prefix /**< [in] severity-specific key prefix inserted after the device name */
+    );
+
     /// Append all active keys from one severity group to the overlay text.
     void
     appendActive( std::string                    &text,    /**< [in,out] accumulated overlay text */
@@ -110,6 +125,9 @@ class warnings : public rtimvOverlayInterface
   signals:
     /// Emit the highest currently active warning level.
     void warningLevel( rtimv::warningLevel lvl /**< [in] highest active warning severity */ );
+
+    /// Request a refresh of the warnings full-screen text overlay.
+    void textOverlayRefreshRequested( char key /**< [in] shortcut key identifying the overlay to refresh */ );
 };
 
 #endif // warnings_hpp

@@ -112,7 +112,8 @@ Suggested structure:
     - `getParked`
     - `updatePos`
     - `updateTemp`
-    - `disableKnob`
+    - `enableKnob`
+    - `enableLED`
     - `stop`
     - `estop`
     - `home`
