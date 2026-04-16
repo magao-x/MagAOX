@@ -15,7 +15,12 @@ cpusetMount=$CGROUPS1_CPUSET_MOUNTPOINT
 
 set -xeuo pipefail
 
-cd $cpusetMount
+# Ensure cpuset cgroup is mounted
+mkdir -p "$cpusetMount"
+umount "$cpusetMount" 2>/dev/null || true
+mount -t cgroup -o cpuset none "$cpusetMount"
+
+cd "$cpusetMount"
 
 #########
 # System cpuset (CPUs 0-1)
