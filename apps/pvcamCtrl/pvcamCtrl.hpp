@@ -1223,6 +1223,11 @@ int pvcamCtrl::connect()
             return log<software_error, -1>( { __FILE__, __LINE__, "could not get fan speed" } );
         }
 
+        if( m_fanSpeedControlEnabled )
+        {
+            m_fanSpeedNameSet = m_defaultFanSpeed;
+        }
+
         if( m_fanSpeedControlEnabled && setFanSpeed() < 0 )
         {
             return log<software_error, -1>( { __FILE__, __LINE__, "could not set fan speed" } );
