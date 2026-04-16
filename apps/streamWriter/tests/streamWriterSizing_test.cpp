@@ -282,6 +282,65 @@ SCENARIO( "streamWriter Buffer Sizing", "[streamWriter]" )
             REQUIRE( writeChunkLength == 1 );
             REQUIRE( ( circBuffLength % writeChunkLength ) == 0 );
         }
+
+        WHEN( "computed odd circular buffers round down and zero write chunks promote to one" )
+        {
+            size_t maxCircBuffLength   = 1000;
+            double maxCircBuffSize     = 11.0 / 1048576.0;
+            size_t maxWriteChunkLength = 1;
+
+            size_t circBuffLength;
+            double circBuffSize;
+            size_t writeChunkLength;
+
+            uint32_t width    = 1;
+            uint32_t height   = 1;
+            size_t   typeSize = 1;
+
+            streamWriter::getCircBuffLengths( circBuffLength,
+                                              circBuffSize,
+                                              writeChunkLength,
+                                              maxCircBuffLength,
+                                              maxCircBuffSize,
+                                              maxWriteChunkLength,
+                                              width,
+                                              height,
+                                              typeSize );
+
+            REQUIRE( circBuffLength == 10 );
+            REQUIRE_THAT( circBuffSize, Catch::Matchers::WithinAbs( 10.0 / 1048576.0, 1e-12 ) );
+            REQUIRE( writeChunkLength == 1 );
+        }
+
+        WHEN( "computed write chunks shrink until they evenly divide the circular buffer" )
+        {
+            size_t maxCircBuffLength   = 10;
+            double maxCircBuffSize     = 9.0 / 1048576.0;
+            size_t maxWriteChunkLength = 4;
+
+            size_t circBuffLength;
+            double circBuffSize;
+            size_t writeChunkLength;
+
+            uint32_t width    = 1;
+            uint32_t height   = 1;
+            size_t   typeSize = 1;
+
+            streamWriter::getCircBuffLengths( circBuffLength,
+                                              circBuffSize,
+                                              writeChunkLength,
+                                              maxCircBuffLength,
+                                              maxCircBuffSize,
+                                              maxWriteChunkLength,
+                                              width,
+                                              height,
+                                              typeSize );
+
+            REQUIRE( circBuffLength == 8 );
+            REQUIRE_THAT( circBuffSize, Catch::Matchers::WithinAbs( 8.0 / 1048576.0, 1e-12 ) );
+            REQUIRE( writeChunkLength == 2 );
+            REQUIRE( ( circBuffLength % writeChunkLength ) == 0 );
+        }
     }
 }
 
