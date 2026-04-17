@@ -57,13 +57,13 @@ protected:
    double m_modFreqRequested {-1}; ///< The requested modulation frequency, in Hz.
 
 
-   int m_C1outp {-1};     ///< Output state of fxn gen channel 1.
+   bool m_C1outp {false};     ///< Output state of fxn gen channel 1.
    double m_C1freq {-1};  ///< Frequency of fxn gen channel 1.
    double m_C1volts {-1}; ///< Voltage p2p of fxn gen channel 1.
    double m_C1ofst {-1};  ///< DC offset of fxn gen channel 1.
    double m_C1phse {-1};  ///< Phase of fxn gen channel 1.
 
-   int m_C2outp {-1};     ///< Output state of fxn gen channel 2
+   bool m_C2outp {false};     ///< Output state of fxn gen channel 2
    double m_C2freq {-1};  ///< Frequency of fxn gen channel 2.
    double m_C2volts {-1}; ///< Voltage p2p of fxn gen channel 2.
    double m_C2ofst {-1};  ///< DC offset of fxn gen channel 2.
@@ -434,7 +434,7 @@ int ttmModulator::calcState()
 {
    //Need TTM power state here.
 
-   if( m_C1outp < 1 || m_C2outp < 1 ) //At least one channel off
+   if( !m_C1outp || !m_C2outp ) //At least one channel off
    {
       //Need to also check fxn gen pwr state here
       m_modState = MODSTATE_REST;
@@ -574,16 +574,16 @@ int ttmModulator::restTTM()
    if( sendNewProperty(m_indiP_C2volts, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //3) Set phase to 0
-   if( sendNewProperty(m_indiP_C1phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1phse, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2phse, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //4) Set offset to 0
-   if( sendNewProperty(m_indiP_C1ofst, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2ofst, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1ofst, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2ofst, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //5) Set outputs to off
-   if( sendNewProperty(m_indiP_C1outp, "value", "Off") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2outp, "value", "Off") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1outp, "toggle", pcf::IndiElement::Off) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2outp, "toggle", pcf::IndiElement::Off) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //Now check if values have changed.
    if( waitValue(m_C1freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
@@ -594,8 +594,8 @@ int ttmModulator::restTTM()
    if( waitValue(m_C2phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C1ofst, 0.001, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C2ofst, 0.001, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C1outp, 0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2outp, 0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C1outp, false) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C2outp, false) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
    log<text_log>("The PyWFS TTM is rested.", logPrio::LOG_NOTICE);
 
@@ -626,9 +626,9 @@ int ttmModulator::setTTM()
       if( sendNewProperty(m_indiP_C2volts, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       //3) Set phase to 0
-      if( sendNewProperty(m_indiP_C1phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C1phse, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( sendNewProperty(m_indiP_C2phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C2phse, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       //Now check if values have changed.
       if( waitValue(m_C1freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
@@ -661,11 +661,11 @@ int ttmModulator::setTTM()
    log<text_log>("Setting the PyWFS TTM.", logPrio::LOG_INFO);
 
    //2) Set outputs to on
-   if( sendNewProperty(m_indiP_C1outp, "value", "On") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2outp, "value", "On") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1outp, "toggle", pcf::IndiElement::On) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2outp, "toggle", pcf::IndiElement::On) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-   if( waitValue(m_C1outp, 1) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2outp, 1) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C1outp, true) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C2outp, true) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
    //3) Now we begin ramp . . .
    size_t N1 = m_setVoltage_1/m_setDVolts;
@@ -682,13 +682,13 @@ int ttmModulator::setTTM()
 
       if(nv < 0 || nv > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
 
-      if( sendNewProperty(m_indiP_C1ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C1ofst, "target", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       if( waitValue(m_C1ofst, nv, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
       sleep(1);
 
-      if( sendNewProperty(m_indiP_C2ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C2ofst, "target", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       if( waitValue(m_C2ofst, nv, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
@@ -701,7 +701,8 @@ int ttmModulator::setTTM()
 
       if(nv < 0 || nv > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
 
-      if( sendNewProperty(m_indiP_C1ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      std::cerr << "setting C1ofst to " << nv << std::endl;
+      if( sendNewProperty(m_indiP_C1ofst, "target", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       if( waitValue(m_C1ofst, nv, 1e-6) < 0 ) return log<software_error, -1>({__FILE__,__LINE__, "fxngen timeout"});
 
@@ -714,7 +715,8 @@ int ttmModulator::setTTM()
 
       if(nv < 0 || nv > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
 
-      if( sendNewProperty(m_indiP_C2ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      std::cerr << "setting C2ofst to " << nv << std::endl;
+      if( sendNewProperty(m_indiP_C2ofst, "target", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       if( waitValue(m_C2ofst, nv, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
@@ -725,7 +727,7 @@ int ttmModulator::setTTM()
    {
       if( m_setVoltage_1 < 0 ||  m_setVoltage_1 > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
 
-      if( (sendNewProperty(m_indiP_C1ofst, "value", m_setVoltage_1) < 0 ) ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( (sendNewProperty(m_indiP_C1ofst, "target", m_setVoltage_1) < 0 ) ) return log<software_error,-1>({__FILE__,__LINE__});
 
       if(waitValue(m_C1ofst, m_setVoltage_1, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
@@ -735,7 +737,7 @@ int ttmModulator::setTTM()
    {
       if( m_setVoltage_2 < 0 ||  m_setVoltage_2 > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
 
-      if( (sendNewProperty(m_indiP_C2ofst, "value", m_setVoltage_2) < 0 ) ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( (sendNewProperty(m_indiP_C2ofst, "target", m_setVoltage_2) < 0 ) ) return log<software_error,-1>({__FILE__,__LINE__});
 
       if( waitValue(m_C2ofst, m_setVoltage_2, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
@@ -849,7 +851,7 @@ int ttmModulator::modTTM( double newRad,
    if( m_modState == MODSTATE_SET)
    {
       // 0) set phase
-      if( sendNewProperty(m_indiP_C2phse, "value", terpC2Phse) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C2phse, "target", terpC2Phse) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       /// \todo should we set the offset here just to be sure?
 
@@ -959,8 +961,8 @@ int ttmModulator::offset12( double d1,
                           )
 {
 
-   if( sendNewProperty(m_indiP_C1ofst, "value", m_C1ofst + d1) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2ofst, "value", m_C2ofst + d2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1ofst, "target", m_C1ofst + d1) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2ofst, "target", m_C2ofst + d2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    return 0;
 
@@ -977,8 +979,8 @@ int ttmModulator::offsetXY( double dx,
    double rdx = dx * cs - dy * ss;
    double rdy = m_rotParity*(dx * ss + dy * cs);
 
-   if( sendNewProperty(m_indiP_C1ofst, "value", m_C1ofst + rdx) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2ofst, "value", m_C2ofst + rdy) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1ofst, "target", m_C1ofst + rdx) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2ofst, "target", m_C2ofst + rdy) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    return 0;
 
@@ -1133,98 +1135,80 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1outp)(const pcf::IndiProperty &ipR
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1outp, ipRecv);
 
-    ///\todo use find to test
-    try
+    if( ipRecv.getName() != m_indiP_C1outp.getName() )
     {
-       m_indiP_C1outp = ipRecv;
-       std::string outp = ipRecv["value"].getValue();
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
-       if( outp == "Off" )
-       {
-          m_C1outp = 0;
-       }
-       else if (outp == "On")
-       {
-          m_C1outp = 1;
-       }
-       else
-       {
-          m_C1outp = -1;
-       }
-
-       return 0;
-    }
-    catch(...)
-    {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        return -1;
     }
 
+    if( !ipRecv.find( "toggle" ) )
+        return -1;
+
+    m_indiP_C1outp = ipRecv;
+    m_C1outp = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+
+    return 0;
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1freq)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1freq, ipRecv);
 
-    ///\todo use find to test
-    try
+    if( ipRecv.getName() != m_indiP_C1freq.getName() )
     {
-       m_indiP_C1freq = ipRecv;
-       double nv = ipRecv["current"].get<double>();
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
-       m_C1freq = nv;
-
-       return 0;
-    }
-    catch(...)
-    {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        return -1;
     }
 
+    if( !ipRecv.find( "current" ) )
+        return -1;
+
+    m_indiP_C1freq = ipRecv;
+    m_C1freq = ipRecv["current"].get<double>();
+
+    return 0;
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1volts)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1volts, ipRecv);
 
-    ///\todo use find to test
-    try
+    if( ipRecv.getName() != m_indiP_C1volts.getName() )
     {
-       m_indiP_C1volts = ipRecv;
-       double nv = ipRecv["current"].get<double>();
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
-       m_C1volts = nv;
-       return 0;
-    }
-    catch(...)
-    {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        return -1;
     }
 
+    if( !ipRecv.find( "current" ) )
+        return -1;
+
+    m_indiP_C1volts = ipRecv;
+    m_C1volts = ipRecv["current"].get<double>();
+
+    return 0;
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1ofst)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1ofst, ipRecv);
 
-    ///\todo use find to test
-    try
+    if( ipRecv.getName() != m_indiP_C1ofst.getName() )
     {
-       m_indiP_C1ofst = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
-       m_C1ofst = nv;
-
-       return 0;
-    }
-    catch(...)
-    {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        return -1;
     }
 
+    if( !ipRecv.find( "current" ) )
+        return -1;
+
+    m_indiP_C1ofst = ipRecv;
+    m_C1ofst = ipRecv["current"].get<double>();
+
+    return 0;
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1phse)(const pcf::IndiProperty &ipRecv)
@@ -1232,142 +1216,120 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1phse)(const pcf::IndiProperty &ipR
 
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1phse, ipRecv);
 
-    ///\todo use find to test
-    try
+    if( ipRecv.getName() != m_indiP_C1phse.getName() )
     {
-       m_indiP_C1phse = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
-       m_C1phse = nv;
-
-       return 0;
-    }
-    catch(...)
-    {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        return -1;
     }
 
+    if( !ipRecv.find( "current" ) )
+        return -1;
+
+    m_indiP_C1phse = ipRecv;
+    m_C1phse = ipRecv["current"].get<double>();
+
+    return 0;
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2outp)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2outp, ipRecv);
 
-    ///\todo use find to test
-    try
+    if( ipRecv.getName() != m_indiP_C2outp.getName() )
     {
-       m_indiP_C2outp = ipRecv;
-       std::string outp = ipRecv["value"].getValue();
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
-       if( outp == "Off" )
-       {
-          m_C2outp = 0;
-       }
-       else if (outp == "On")
-       {
-          m_C2outp = 1;
-       }
-       else
-       {
-          m_C2outp = -1;
-       }
-
-       return 0;
-    }
-    catch(...)
-    {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        return -1;
     }
 
+    if( !ipRecv.find( "toggle" ) )
+        return -1;
+
+    m_indiP_C2outp = ipRecv;
+    m_C2outp = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+
+    return 0;
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2freq)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2freq, ipRecv);
 
-    ///\todo use find to test
-    try
+    if( ipRecv.getName() != m_indiP_C2freq.getName() )
     {
-       m_indiP_C2freq = ipRecv;
-       double nv = ipRecv["current"].get<double>();
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
-       m_C2freq = nv;
-
-       return 0;
-    }
-    catch(...)
-    {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        return -1;
     }
 
+    if( !ipRecv.find( "current" ) )
+        return -1;
+
+    m_indiP_C2freq = ipRecv;
+    m_C2freq = ipRecv["current"].get<double>();
+
+    return 0;
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2volts)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2volts, ipRecv);
 
-    ///\todo use find to test
-    try
+    if( ipRecv.getName() != m_indiP_C2volts.getName() )
     {
-       m_indiP_C2volts = ipRecv;
-       double nv = ipRecv["current"].get<double>();
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
-       m_C2volts = nv;
-       return 0;
-    }
-    catch(...)
-    {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        return -1;
     }
 
+    if( !ipRecv.find( "current" ) )
+        return -1;
+
+    m_indiP_C2volts = ipRecv;
+    m_C2volts = ipRecv["current"].get<double>();
+
+    return 0;
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2ofst)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2ofst, ipRecv);
 
-    ///\todo use find to test
-    try
+    if( ipRecv.getName() != m_indiP_C2ofst.getName() )
     {
-       m_indiP_C2ofst = ipRecv;
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
-       double nv = ipRecv["value"].get<double>();
-
-       m_C2ofst = nv;
-
-       return 0;
-    }
-    catch(...)
-    {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
+        return -1;
     }
 
+    if( !ipRecv.find( "current" ) )
+        return -1;
+
+    m_indiP_C2ofst = ipRecv;
+    m_C2ofst = ipRecv["current"].get<double>();
+
+    return 0;
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2phse)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2phse, ipRecv);
 
-    ///\todo use find to test
-    try
+    if( ipRecv.getName() != m_indiP_C2phse.getName() )
     {
-       m_indiP_C2phse = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
-       m_C2phse = nv;
+        return -1;
+    }
 
-       return 0;
-    }
-    catch(...)
-    {
-       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-       return -1;
-    }
+    if( !ipRecv.find( "current" ) )
+        return -1;
+
+    m_indiP_C2phse = ipRecv;
+    m_C2phse= ipRecv["current"].get<double>();
+
+   return 0;
 }
 
 } //namespace app
