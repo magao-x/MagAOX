@@ -499,7 +499,7 @@ class stdCamera
     std::string              m_fanSpeedNameSet{ "" }; ///< Requested fan-control option name.
     bool                     m_fanSpeedValid{ false }; ///< True once the current fan-control state is known.
 
-    pcf::IndiProperty m_indiP_fanSpeed; ///< Property used to select the fan-control mode.
+    pcf::IndiProperty m_indiP_fanSpeed; ///< Property used to select the fan-speed mode.
 
     ///@}
 
@@ -523,7 +523,7 @@ class stdCamera
     bool m_ledStateSet{ false };   ///< Requested status LED state.
     bool m_ledStateValid{ false }; ///< True once the current LED state is known.
 
-    pcf::IndiProperty m_indiP_led; ///< Property used to control the status LED.
+    pcf::IndiProperty m_indiP_led; ///< Property used to control the status LED state.
 
     ///@}
 
