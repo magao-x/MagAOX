@@ -329,11 +329,16 @@ int zaberLowLevel::loadStages( std::string &serialRes )
     std::vector<std::string> serials;
     std::vector<int>         oldAddresses;
     bool                     firstDiscoveryPass = !m_stageDiscoveryInitialized;
+    size_t                   oldPresentCount    = 0;
 
     oldAddresses.reserve( m_stages.size() );
     for( size_t n = 0; n < m_stages.size(); ++n )
     {
         oldAddresses.push_back( m_stages[n].deviceAddress() );
+        if( m_stages[n].deviceAddress() > 0 )
+        {
+            ++oldPresentCount;
+        }
     }
 
     int rv = parseSystemSerial( addresses, serials, serialRes );
@@ -346,7 +351,11 @@ int zaberLowLevel::loadStages( std::string &serialRes )
     }
     else
     {
-        log<text_log>( "Found " + std::to_string( addresses.size() ) + " stages." );
+        if( firstDiscoveryPass || addresses.size() != oldPresentCount )
+        {
+            log<text_log>( "Found " + std::to_string( addresses.size() ) + " stages." );
+        }
+
         m_stageAddress.clear(); // We clear this map before re-populating.
 
         for( size_t n = 0; n < m_stages.size(); ++n )
