@@ -74,6 +74,12 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
 
     int loadStages( std::string &serialRes );
 
+    int refreshStageDiscovery();
+
+    int resetConnection();
+
+    int recoverFromError( bool devicePresent /**< [in] True if the USB tty still exists in udev. */ );
+
     /// Startup functions
     /** Sets up the INDI vars.
      *
@@ -319,6 +325,13 @@ int zaberLowLevel::loadStages( std::string &serialRes )
 {
     std::vector<int>         addresses;
     std::vector<std::string> serials;
+    std::vector<int>         oldAddresses;
+
+    oldAddresses.reserve( m_stages.size() );
+    for( size_t n = 0; n < m_stages.size(); ++n )
+    {
+        oldAddresses.push_back( m_stages[n].deviceAddress() );
+    }
 
     int rv = parseSystemSerial( addresses, serials, serialRes );
 
@@ -332,15 +345,26 @@ int zaberLowLevel::loadStages( std::string &serialRes )
     {
         log<text_log>( "Found " + std::to_string( addresses.size() ) + " stages." );
         m_stageAddress.clear(); // We clear this map before re-populating.
+
+        for( size_t n = 0; n < m_stages.size(); ++n )
+        {
+            m_stages[n].deviceAddress( -1 );
+        }
+
         for( size_t n = 0; n < addresses.size(); ++n )
         {
             if( m_stageSerial.count( serials[n] ) == 1 )
             {
-                m_stages[m_stageSerial[serials[n]]].deviceAddress( addresses[n] );
+                const size_t stageIndex = m_stageSerial[serials[n]];
 
-                m_stageAddress.insert( { addresses[n], m_stageSerial[serials[n]] } );
-                log<text_log>( "stage @" + std::to_string( addresses[n] ) + " with s/n " + serials[n] +
-                               " corresponds to " + m_stages[m_stageSerial[serials[n]]].name() );
+                m_stages[stageIndex].deviceAddress( addresses[n] );
+
+                m_stageAddress.insert( { addresses[n], stageIndex } );
+                if( stageIndex >= oldAddresses.size() || oldAddresses[stageIndex] != addresses[n] )
+                {
+                    log<text_log>( "stage @" + std::to_string( addresses[n] ) + " with s/n " + serials[n] +
+                                   " corresponds to " + m_stages[stageIndex].name() );
+                }
             }
             else
             {
@@ -353,16 +377,116 @@ int zaberLowLevel::loadStages( std::string &serialRes )
         {
             if( m_stages[n].deviceAddress() < 1 )
             {
-
-                log<text_log>(
-                    std::format( "stage {} with s/n {} not found in system.", m_stages[n].name(), serials[n] ),
-                    logPrio::LOG_ERROR );
-                state( state(), true );
+                if( n >= oldAddresses.size() || oldAddresses[n] > 0 )
+                {
+                    log<text_log>( std::format( "stage {} with s/n {} not found in system.",
+                                                m_stages[n].name(),
+                                                m_stages[n].serial() ),
+                                   logPrio::LOG_ERROR );
+                    state( state(), true );
+                }
             }
         }
     }
 
     return ZC_CONNECTED;
+}
+
+int zaberLowLevel::refreshStageDiscovery()
+{
+    if( m_port <= 0 )
+    {
+        return ZC_NOT_CONNECTED;
+    }
+
+    int rv = za_drain( m_port );
+
+    if( rv != Z_SUCCESS )
+    {
+        log<software_error>( { rv, "error from za_drain" } );
+        state( stateCodes::ERROR );
+        return ZC_ERROR;
+    }
+
+    char        buffer[256];
+    std::string gss = "/ get system.serial";
+    int         nwr = za_send( m_port, gss.c_str(), gss.size() );
+
+    if( nwr == Z_ERROR_SYSTEM_ERROR )
+    {
+        log<text_log>( "Error sending system.serial query to stages", logPrio::LOG_ERROR );
+        state( stateCodes::ERROR );
+        return ZC_ERROR;
+    }
+
+    std::string serialRes;
+    while( 1 )
+    {
+        int nrd = za_receive( m_port, buffer, sizeof( buffer ) );
+        if( nrd >= 0 )
+        {
+            buffer[nrd] = '\0';
+            log<text_log>( std::string( "Received: " ) + buffer, logPrio::LOG_DEBUG );
+            serialRes += buffer;
+        }
+        else if( nrd != Z_ERROR_TIMEOUT )
+        {
+            log<text_log>( "Error receiving from stages", logPrio::LOG_ERROR );
+            state( stateCodes::ERROR );
+            return ZC_ERROR;
+        }
+        else
+        {
+            log<text_log>( "TIMEOUT", logPrio::LOG_DEBUG );
+            break; // Timeout ok.
+        }
+    }
+
+    return loadStages( serialRes );
+}
+
+int zaberLowLevel::resetConnection()
+{
+    if( m_port > 0 )
+    {
+        int rv = za_disconnect( m_port );
+        if( rv < 0 )
+        {
+            log<text_log>( "Error disconnecting from zaber system.", logPrio::LOG_ERROR );
+        }
+    }
+
+    m_port = 0;
+
+    return 0;
+}
+
+int zaberLowLevel::recoverFromError( bool devicePresent )
+{
+    resetConnection();
+
+    if( devicePresent )
+    {
+        state( stateCodes::NOTCONNECTED );
+    }
+    else
+    {
+        state( stateCodes::NODEVICE );
+    }
+
+    for( size_t i = 0; i < m_stages.size(); ++i )
+    {
+        if( devicePresent && m_stages[i].deviceAddress() > 0 )
+        {
+            updateIfChanged( m_indiP_curr_state, m_stages[i].name(), std::string( "NOTCONNECTED" ) );
+        }
+        else
+        {
+            updateIfChanged( m_indiP_curr_state, m_stages[i].name(), std::string( "NODEVICE" ) );
+        }
+    }
+
+    return 0;
 }
 
 int zaberLowLevel::appStartup()
@@ -516,13 +640,12 @@ int zaberLowLevel::appLogic()
                 return 0; // means we're powering off
             }
 
-            state( stateCodes::FAILURE );
-
             if( !stateLogged() )
             {
-                log<software_critical>( { rv, tty::ttyErrorString( rv ) } );
+                log<software_error>( { rv, tty::ttyErrorString( rv ) } );
             }
-            return -1;
+
+            return 0;
         }
 
         if( rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES )
@@ -643,6 +766,22 @@ int zaberLowLevel::appLogic()
 
     if( state() == stateCodes::READY )
     {
+        { // mutex scope
+            std::lock_guard<std::mutex> guard( m_indiMutex );
+
+            int rv = refreshStageDiscovery();
+
+            if( rv == ZC_ERROR )
+            {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                {
+                    return 0; // means we're powering off
+                }
+
+                return 0;
+            }
+        }
+
         // Here we check complete stage state.
         for( size_t i = 0; i < m_stages.size(); ++i )
         {
@@ -825,16 +964,12 @@ int zaberLowLevel::appLogic()
                 return 0; // means we're powering off
             }
 
-            state( stateCodes::FAILURE );
-            for( size_t i = 0; i < m_stages.size(); ++i )
-            {
-                updateIfChanged( m_indiP_curr_state, m_stages[i].name(), std::string( "FAILURE" ) );
-            }
             if( !stateLogged() )
             {
-                log<software_critical>( { rv, tty::ttyErrorString( rv ) } );
+                log<software_error>( { rv, tty::ttyErrorString( rv ) } );
             }
-            return rv;
+
+            return recoverFromError( false );
         }
 
         if( rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES )
@@ -844,20 +979,13 @@ int zaberLowLevel::appLogic()
                 return 0; // means we're powering off
             }
 
-            state( stateCodes::NODEVICE );
-
-            for( size_t i = 0; i < m_stages.size(); ++i )
-            {
-                updateIfChanged( m_indiP_curr_state, m_stages[i].name(), std::string( "NODEVICE" ) );
-            }
-
             if( !stateLogged() )
             {
                 log<text_log>(
                     std::format( "USB Device {}:{}:{} not found in udev", m_idVendor, m_idProduct, m_serial ) );
             }
 
-            return 0;
+            return recoverFromError( false );
         }
 
         if( powerState() != 1 || powerStateTarget() != 1 )
@@ -865,15 +993,13 @@ int zaberLowLevel::appLogic()
             return 0; // means we're powering off
         }
 
-        state( stateCodes::FAILURE );
-
-        for( size_t i = 0; i < m_stages.size(); ++i )
+        if( !stateLogged() )
         {
-            updateIfChanged( m_indiP_curr_state, m_stages[i].name(), std::string( "FAILURE" ) );
+            log<text_log>( "Recovering from stage communication error by resetting the connection.",
+                           logPrio::LOG_WARNING );
         }
 
-        log<software_critical>();
-        log<text_log>( "Error NOT due to loss of USB connection.  I can't fix it myself.", logPrio::LOG_CRITICAL );
+        return recoverFromError( true );
     }
 
     if( powerState() != 1 || powerStateTarget() != 1 )
