@@ -57,6 +57,8 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
     std::unordered_map<std::string, size_t> m_stageSerial;
     std::unordered_map<std::string, size_t> m_stageName;
 
+    bool m_stageDiscoveryInitialized{ false };
+
   public:
     /// Default c'tor.
     zaberLowLevel();
@@ -326,6 +328,7 @@ int zaberLowLevel::loadStages( std::string &serialRes )
     std::vector<int>         addresses;
     std::vector<std::string> serials;
     std::vector<int>         oldAddresses;
+    bool                     firstDiscoveryPass = !m_stageDiscoveryInitialized;
 
     oldAddresses.reserve( m_stages.size() );
     for( size_t n = 0; n < m_stages.size(); ++n )
@@ -377,7 +380,7 @@ int zaberLowLevel::loadStages( std::string &serialRes )
         {
             if( m_stages[n].deviceAddress() < 1 )
             {
-                if( n >= oldAddresses.size() || oldAddresses[n] > 0 )
+                if( firstDiscoveryPass || n >= oldAddresses.size() || oldAddresses[n] > 0 )
                 {
                     log<text_log>( std::format( "stage {} with s/n {} not found in system.",
                                                 m_stages[n].name(),
@@ -388,6 +391,8 @@ int zaberLowLevel::loadStages( std::string &serialRes )
             }
         }
     }
+
+    m_stageDiscoveryInitialized = true;
 
     return ZC_CONNECTED;
 }
