@@ -1,5 +1,6 @@
 /** \file zaberLowLevel.hpp
  * \brief The MagAO-X Low-Level Zaber Controller
+ * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup zaberLowLevel_files
  */
@@ -40,6 +41,13 @@ namespace MagAOX
 namespace app
 {
 
+/// The low-level ASCII-protocol Zaber controller.
+/**
+ * This app manages a daisy-chained ASCII Zaber bus and keeps its discovery,
+ * recovery, and INDI reporting behavior aligned with the binary-protocol app.
+ *
+ * \ingroup zaberLowLevel
+ */
 class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
 {
 
@@ -47,60 +55,82 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
     friend class zaberLowLevel_test;
 
   protected:
+    /** \name Stage Mapping - Data
+     *
+     * @{
+     */
+    /// Number of configured stages.
     int m_numStages{ 0 };
 
+    /// Connected ASCII protocol port.
     z_port m_port{ 0 };
 
+    /// Stage helpers in configuration order.
     std::vector<zaberStage<zaberLowLevel>> m_stages;
 
-    std::unordered_map<int, size_t>         m_stageAddress;
+    /// Map from ASCII device address to configured stage index.
+    std::unordered_map<int, size_t> m_stageAddress;
+
+    /// Map from configured serial number to configured stage index.
     std::unordered_map<std::string, size_t> m_stageSerial;
+
+    /// Map from configured stage name to configured stage index.
     std::unordered_map<std::string, size_t> m_stageName;
 
+    /// Whether the active connection has completed an initial discovery pass.
     bool m_stageDiscoveryInitialized{ false };
+    ///@}
 
   public:
-    /// Default c'tor.
+    /// Default constructor.
     zaberLowLevel();
 
-    /// D'tor, declared and defined for noexcept.
+    /// Destructor, declared and defined for noexcept.
     ~zaberLowLevel() noexcept
     {
     }
 
+    /// Set up application configuration.
     virtual void setupConfig();
 
+    /// Load application configuration.
     virtual void loadConfig();
 
+    /// Connect to the ASCII-protocol stage chain and discover configured devices.
     int connect();
 
-    int loadStages( std::string &serialRes );
+    /// Apply a parsed `system.serial` snapshot to the configured stages.
+    int loadStages( std::string &serialRes /**< [in] the raw response to `/ get system.serial` */ );
 
+    /// Refresh discovery on an already-connected ASCII bus.
     int refreshStageDiscovery();
 
+    /// Reset the active ASCII connection bookkeeping.
     int resetConnection();
 
+    /// Recover from an ASCII-transport error without terminating the app.
     int recoverFromError( bool devicePresent /**< [in] True if the USB tty still exists in udev. */ );
 
-    /// Startup functions
-    /** Sets up the INDI vars.
-     *
-     */
+    /// Set up the INDI properties and restore retained stage state.
     virtual int appStartup();
 
-    /// Implementation of the FSM for zaberLowLevel.
+    /// Execute the main FSM for `zaberLowLevel`.
     virtual int appLogic();
 
-    /// Implementation of the on-power-off FSM logic
+    /// Handle the transition into the powered-off state.
     virtual int onPowerOff();
 
-    /// Implementation of the while-powered-off FSM
+    /// Execute the powered-off loop.
     virtual int whilePowerOff();
 
-    /// Do any needed shutdown tasks.  Currently nothing in this app.
+    /// Perform any shutdown tasks before exit.
     virtual int appShutdown();
 
   protected:
+    /** \name INDI Stage State - Data
+     *
+     * @{
+     */
     /// Current state of the stage.
     pcf::IndiProperty m_indiP_curr_state;
 
@@ -110,7 +140,7 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
     /// Parked state of the stage.
     pcf::IndiProperty m_indiP_parked;
 
-    /// Time of last homing for the state
+    /// Time of last homing for the stage.
     pcf::IndiProperty m_indiP_lastHomed;
 
     /// Current raw position of the stage.
@@ -137,13 +167,18 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
     /// Command a stage to safely immediately halt.
     pcf::IndiProperty m_indiP_req_ehalt;
 
-    /// Enable or disable a stages potentiometer
+    /// Enable or disable a stage's potentiometer.
     pcf::IndiProperty m_indiP_knob_enable;
 
-    /// Enable or disable a stages LED
+    /// Enable or disable a stage's LED.
     pcf::IndiProperty m_indiP_led_enable;
+    ///@}
 
   public:
+    /** \name INDI Stage State
+     *
+     * @{
+     */
     INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_tgt_pos );
     INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_req_home );
     INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_req_home_all );
@@ -151,6 +186,7 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
     INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_req_ehalt );
     INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_knob_enable );
     INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_led_enable );
+    ///@}
 };
 
 zaberLowLevel::zaberLowLevel() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )

@@ -144,19 +144,19 @@ class zaberLowLevelBinary : public MagAOXAppT, public tty::usbDevice
     /// Recover from a binary-transport error without terminating the app.
     int recoverFromError( bool devicePresent /**< [in] true if the USB tty still exists in udev */ );
 
-    /// Startup logic.
+    /// Set up the INDI properties and restore retained stage state.
     virtual int appStartup();
 
-    /// Main FSM implementation.
+    /// Execute the main FSM for `zaberLowLevelBinary`.
     virtual int appLogic();
 
-    /// Power-off transition handler.
+    /// Handle the transition into the powered-off state.
     virtual int onPowerOff();
 
-    /// Powered-off loop handler.
+    /// Execute the powered-off loop.
     virtual int whilePowerOff();
 
-    /// Shutdown handler.
+    /// Perform any shutdown tasks before exit.
     virtual int appShutdown();
 
   protected:
@@ -200,7 +200,7 @@ class zaberLowLevelBinary : public MagAOXAppT, public tty::usbDevice
     /// Per-stage emergency-halt requests.
     pcf::IndiProperty m_indiP_req_ehalt;
 
-    /// Enable or disable a stages potentiometer
+    /// Enable or disable a stage's potentiometer.
     pcf::IndiProperty m_indiP_knob_enable;
 
     ///@}
@@ -1008,7 +1008,7 @@ int zaberLowLevelBinary::appLogic()
         if( !stateLogged() )
         {
             log<text_log>( "Recovering from binary stage communication error by resetting the connection.",
-                           logPrio::LOG_WARNING );
+                           logPrio::LOG_INFO );
         }
 
         return recoverFromError( true );
