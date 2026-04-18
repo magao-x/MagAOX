@@ -636,6 +636,16 @@ int zaberBinaryStage<parentT>::queryCommand(
             std::format( "stage {} with s/n {} not found in system.", m_name, m_serial ) );
     }
 
+    if( port <= 0 )
+    {
+        if( m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1 )
+        {
+            return -1;
+        }
+
+        return MagAOXAppT::log<software_error, -1>( { 0, "invalid zaber binary port" } );
+    }
+
     uint8_t command[6];
     if( zb_encode( command, static_cast<uint8_t>( m_deviceAddress ), commandNumber, data ) != Z_SUCCESS )
     {
@@ -695,6 +705,16 @@ int zaberBinaryStage<parentT>::sendCommandNoReply( z_port port, uint8_t commandN
     {
         return MagAOXAppT::log<software_error, -1>(
             std::format( "stage {} with s/n {} not found in system.", m_name, m_serial ) );
+    }
+
+    if( port <= 0 )
+    {
+        if( m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1 )
+        {
+            return -1;
+        }
+
+        return MagAOXAppT::log<software_error, -1>( { 0, "invalid zaber binary port" } );
     }
 
     uint8_t command[6];
