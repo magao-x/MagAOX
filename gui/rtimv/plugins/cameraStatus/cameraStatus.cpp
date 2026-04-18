@@ -355,7 +355,11 @@ int cameraStatus::updateOverlay()
                 parked = ( atoi( m_blob ) != 0 );
             }
 
-            if( fwstate == "READY" || fwstate == "OPERATING" || ( fwstate == "POWEROFF" && parked ) )
+            if( fwstate == "READY" || fwstate == "OPERATING" ||
+                ( parked && ( fwstate == "UNINITIALIZED" || fwstate == "INITIALIZED" || fwstate == "NODEVICE" ||
+                              fwstate == "POWEROFF" || fwstate == "POWERON" || fwstate == "NOTCONNECTED" ||
+                              fwstate == "LOGGEDIN" || fwstate == "CONFIGURING" || fwstate == "CONNECTED" ||
+                              fwstate == "NOTHOMED" ) ) )
             {
                 dictionaryIteratorT start =
                     m_roa.m_dictionary->lower_bound( m_filterDeviceNames[f] + m_presetNames[f] );
