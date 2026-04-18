@@ -847,7 +847,22 @@ int zaberLowLevelBinary::appLogic()
         { // mutex scope
             std::lock_guard<std::mutex> guard( m_indiMutex );
 
-            int rv = refreshStageDiscovery();
+            bool canRefreshDiscovery = true;
+            for( size_t i = 0; i < m_stages.size(); ++i )
+            {
+                if( m_stages[i].deviceAddress() > 0 && m_stages[i].deviceStatus() == 'B' )
+                {
+                    canRefreshDiscovery = false;
+                    break;
+                }
+            }
+
+            int rv = ZBC_CONNECTED;
+            if( canRefreshDiscovery )
+            {
+                rv = refreshStageDiscovery();
+            }
+
             if( rv == ZBC_ERROR )
             {
                 if( powerState() != 1 || powerStateTarget() != 1 )
