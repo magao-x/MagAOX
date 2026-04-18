@@ -356,6 +356,18 @@ int zaberLowLevel::connect()
         }
     }
 
+    {
+        std::vector<int>         addresses;
+        std::vector<std::string> serials;
+
+        rv = parseSystemSerial( addresses, serials, serialRes );
+        if( rv == ZUTILS_E_BADSERIAL )
+        {
+            log<text_log>( "Ignoring inconclusive system.serial snapshot during stage activity.", logPrio::LOG_DEBUG );
+            return ZC_CONNECTED;
+        }
+    }
+
     return loadStages( serialRes );
 }
 
@@ -821,7 +833,21 @@ int zaberLowLevel::appLogic()
         { // mutex scope
             std::lock_guard<std::mutex> guard( m_indiMutex );
 
-            int rv = refreshStageDiscovery();
+            bool canRefreshDiscovery = true;
+            for( size_t i = 0; i < m_stages.size(); ++i )
+            {
+                if( m_stages[i].deviceAddress() > 0 && m_stages[i].deviceStatus() == 'B' )
+                {
+                    canRefreshDiscovery = false;
+                    break;
+                }
+            }
+
+            int rv = ZC_CONNECTED;
+            if( canRefreshDiscovery )
+            {
+                rv = refreshStageDiscovery();
+            }
 
             if( rv == ZC_ERROR )
             {
