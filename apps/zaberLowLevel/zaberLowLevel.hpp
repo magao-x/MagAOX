@@ -372,7 +372,8 @@ int zaberLowLevel::loadStages( std::string &serialRes )
                 m_stages[stageIndex].deviceAddress( addresses[n] );
 
                 m_stageAddress.insert( { addresses[n], stageIndex } );
-                if( stageIndex >= oldAddresses.size() || oldAddresses[stageIndex] != addresses[n] )
+                if( firstDiscoveryPass || stageIndex >= oldAddresses.size() ||
+                    oldAddresses[stageIndex] != addresses[n] )
                 {
                     log<text_log>( "stage @" + std::to_string( addresses[n] ) + " with s/n " + serials[n] +
                                    " corresponds to " + m_stages[stageIndex].name() );
@@ -470,7 +471,8 @@ int zaberLowLevel::resetConnection()
         }
     }
 
-    m_port = 0;
+    m_port                      = 0;
+    m_stageDiscoveryInitialized = false;
 
     return 0;
 }
@@ -1031,13 +1033,7 @@ int zaberLowLevel::appLogic()
 
 inline int zaberLowLevel::onPowerOff()
 {
-    int rv = za_disconnect( m_port );
-    if( rv < 0 )
-    {
-        log<text_log>( "Error disconnecting from zaber system.", logPrio::LOG_ERROR );
-    }
-
-    m_port = 0;
+    resetConnection();
 
     std::lock_guard<std::mutex> lock( m_indiMutex );
 
