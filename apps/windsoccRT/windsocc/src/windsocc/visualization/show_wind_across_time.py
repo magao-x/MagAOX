@@ -107,6 +107,26 @@ def _build_elapsed_labels(map_paths: list[str]) -> list[str]:
             labels.append(_format_elapsed_hhmm((ts - ref).total_seconds()))
     return start_of_obs, labels
 
+def _stack_error_maps(map_paths: list[str], noise_maps_dir: str) -> np.ndarray:
+    """Stack error maps along the first axis."""
+    frames = []
+    for p in map_paths:
+        frame = fits.getdata(p)
+        if frame.ndim != 2:
+            logging.warning("Skipping non-2D map %s with shape %s", p, np.shape(frame))
+            continue
+        frames.append(np.asarray(frame, dtype=np.float32))
+    if not frames:
+        logging.warning(f"No valid 2D frames found in {noise_maps_dir}; skipping stacking.")
+        return
+    stacked_error_map = np.mean(frames, axis=0)
+    return stacked_error_map
+
+def _save_stacked_error_map(stacked_error_map: np.ndarray, out_dir: str) -> None:
+    """Save the stacked error map to a FITS file."""
+    out_path = os.path.join(out_dir, "noise_stackall_unsharp.fits")
+    fits.writeto(out_path, stacked_error_map, overwrite=True)
+    logging.info(f"Saved stacked error map to {out_path}")
 
 def _write_movie(
     map_paths: list[str],
@@ -230,6 +250,9 @@ def main() -> int:
             noise_maps_dir,
         )
         return 1
+    
+    stacked_error_map_unsharp = _stack_error_maps(unsharp_maps, noise_maps_dir)
+    _save_stacked_error_map(stacked_error_map_unsharp, out_dir)
 
     _write_movie(
         regular_maps,

@@ -829,9 +829,13 @@ class WindTracker:
             )
             return self.candidate_sources
 
+        # this is an array of xy coordinates (with shape (n_detections, 2))
+        # could be fewer than n_predictions if some sources are missed
         new_detections_coords = this_frame_data.select(["x", "y"]).to_numpy()
-        predicted_coords = predicted_data.select(["x", "y"]).to_numpy()
-        # print(f"predicted_coords.shape: {predicted_coords.shape}")
+        # this is an array of xy coordinates (shape (n_predictions, 2));
+        # could be fewer than n_detections 
+        predicted_coords = predicted_data.select(["x", "y"]).to_numpy() 
+        # compute distance, shape (n_predictions, n_detections)
         raw_distance = cdist(predicted_coords, new_detections_coords)
         distance = raw_distance.copy()
 

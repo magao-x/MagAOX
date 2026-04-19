@@ -71,8 +71,6 @@ from datetime import datetime, timezone
 import csv
 import json
 import numpy as np
-import matplotlib.pyplot as plt
-
 from multiprocessing import cpu_count
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -88,7 +86,16 @@ import polars as pl
 from windsocc.io.dir_handling import allocate_measure_dirs
 from windsocc.io.fits_handling import load_mf_response_cubes, load_collapsed_unsharp_response_maps
 from windsocc.core.track_wind import process_single_cc_cube
-from windsocc.visualization.plot_measure_results import make_source_detection_movie
+from windsocc.analysis.wind_stats import (
+    cluster_wind_tracks_hdbscan,
+    flatten_vetted_tracks_to_features,
+    per_cluster_vu_vv_stats,
+)
+from windsocc.visualization.plot_measure_results import (
+    make_source_detection_movie,
+    plot_wind_track_clusters,
+    write_wind_cluster_stats_report,
+)
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -942,11 +949,31 @@ def main():
             "Install snakeviz if needed: pip install 'windsocc[profile]' or uv sync --extra profile"
         )
     else:
-        run_measure_stage(
+        measure_results_dict = run_measure_stage(
             basedir=basedir,
             config_params=config_params,
             make_movie=config_params.get("MAKE_MOVIE", False),
         )
+        wind_summaries = measure_results_dict.get("wind_summaries") or []
+        X = flatten_vetted_tracks_to_features(wind_summaries)
+        if X.shape[0] == 0:
+            logging.info("No vetted wind tracks for clustering; skipping HDBSCAN outputs.")
+        else:
+            labels, probabilities, _hdb = cluster_wind_tracks_hdbscan(X)
+            stats_rows, noise_count = per_cluster_vu_vv_stats(X, labels)
+            cluster_png = os.path.join(output_dir, "wind_track_clusters.png")
+            cluster_txt = os.path.join(output_dir, "wind_track_stats.txt")
+            plot_wind_track_clusters(
+                X[:, 0],
+                X[:, 1],
+                labels,
+                probabilities,
+                cluster_png,
+                title="Wind tracks: vu / vv (HDBSCAN)",
+            )
+            write_wind_cluster_stats_report(cluster_txt, stats_rows, noise_count)
+            logging.info("Wrote wind cluster plot to %s", cluster_png)
+            logging.info("Wrote wind cluster stats to %s", cluster_txt)
 
 if __name__ == '__main__':
     main()

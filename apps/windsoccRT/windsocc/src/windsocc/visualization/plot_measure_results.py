@@ -13,7 +13,10 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.animation import FFMpegWriter
 import os
 import warnings
+from typing import Any
+
 from astropy.io import fits
+from matplotlib.lines import Line2D
 
 from windsocc.visualization.ffmpeg_matplotlib import configure_matplotlib_ffmpeg_path
 from windsocc.analysis.cross_correlation import compute_aperture_overlap
@@ -164,6 +167,138 @@ def _subtract_background_sep_per_frame(cube: np.ndarray) -> np.ndarray:
         estimate_bkg = sep.Background(sep_frame, bw=32)
         out[i] = sep_frame - estimate_bkg
     return out
+
+
+def plot_wind_track_clusters(
+    vu: np.ndarray,
+    vv: np.ndarray,
+    labels: np.ndarray,
+    probabilities: np.ndarray,
+    output_png: str,
+    title: str | None = None,
+) -> None:
+    """Scatter vu vs vv with HDBSCAN clusters; noise drawn first in faint gray.
+
+    Cluster points use per-point alpha from ``probabilities`` (clipped to stay visible).
+    """
+    vu = np.asarray(vu, dtype=np.float64).ravel()
+    vv = np.asarray(vv, dtype=np.float64).ravel()
+    labels = np.asarray(labels, dtype=np.int64).ravel()
+    probs = np.asarray(probabilities, dtype=np.float64).ravel()
+    n = vu.shape[0]
+    if n == 0:
+        warnings.warn("plot_wind_track_clusters: no points; skipping figure.", stacklevel=2)
+        return
+    if vv.shape[0] != n or labels.shape[0] != n:
+        raise ValueError("vu, vv, labels must have the same length.")
+    if probs.shape[0] != n:
+        raise ValueError("probabilities must match vu length.")
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+    noise = labels == -1
+    if np.any(noise):
+        ax.scatter(
+            vu[noise],
+            vv[noise],
+            c="lightgray",
+            s=22,
+            alpha=0.35,
+            zorder=1,
+            edgecolors="none",
+        )
+
+    cmap = plt.get_cmap("tab10")
+    cluster_ids = sorted(x for x in np.unique(labels) if x >= 0)
+    for idx, lab in enumerate(cluster_ids):
+        mask = labels == lab
+        if not np.any(mask):
+            continue
+        rgb = cmap(idx % 10)[:3]
+        n_pts = int(np.sum(mask))
+        rgba = np.zeros((n_pts, 4), dtype=np.float64)
+        rgba[:, :3] = rgb
+        rgba[:, 3] = np.clip(probs[mask], 0.12, 1.0)
+        ax.scatter(
+            vu[mask],
+            vv[mask],
+            c=rgba,
+            s=28,
+            zorder=2,
+            edgecolors="none",
+        )
+
+    ax.set_xlabel(r"$v_u$ (m/s)")
+    ax.set_ylabel(r"$v_v$ (m/s)")
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, linestyle="--", alpha=0.3)
+    if title:
+        ax.set_title(title)
+    else:
+        ax.set_title("Wind tracks in velocity space (HDBSCAN)")
+    legend_elements: list[Line2D] = []
+    if np.any(noise):
+        legend_elements.append(
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                label="Noise",
+                markerfacecolor="lightgray",
+                markersize=8,
+                alpha=0.5,
+            )
+        )
+    for idx, lab in enumerate(cluster_ids):
+        rgb = cmap(idx % 10)[:3]
+        legend_elements.append(
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                label=f"Cluster {int(lab)}",
+                markerfacecolor=rgb,
+                markersize=8,
+            )
+        )
+    if legend_elements:
+        ax.legend(handles=legend_elements, loc="best", fontsize=8)
+    fig.tight_layout()
+    out_png_dir = os.path.dirname(os.path.abspath(output_png))
+    if out_png_dir:
+        os.makedirs(out_png_dir, exist_ok=True)
+    fig.savefig(output_png, dpi=150)
+    plt.close(fig)
+
+
+def write_wind_cluster_stats_report(
+    path: str,
+    rows: list[dict[str, Any]],
+    noise_count: int,
+) -> None:
+    """Write cluster mean/std for vu and vv plus noise point count."""
+    lines = [
+        "Wind track clusters (HDBSCAN) — vu, vv velocity components (m/s)",
+        f"Noise points (label -1): {noise_count}",
+        "",
+    ]
+    for row in rows:
+        cid = row["cluster_id"]
+        lines.append(f"Cluster {cid} (n={row['n_points']})")
+        lines.append(
+            f"  mean_vu = {row['mean_vu']:.6f}  std_vu = {row['std_vu']:.6f}"
+        )
+        lines.append(
+            f"  mean_vv = {row['mean_vv']:.6f}  std_vv = {row['std_vv']:.6f}"
+        )
+        lines.append("")
+    text = "\n".join(lines).rstrip() + "\n"
+    out_dir = os.path.dirname(os.path.abspath(path))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
 
 
 def plot_flux_decay(
