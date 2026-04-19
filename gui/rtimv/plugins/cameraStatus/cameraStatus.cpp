@@ -444,7 +444,7 @@ int cameraStatus::updateOverlay()
             {
                 std::string filn;
 
-                if( findActivePresetSelection( f, filn ) )
+                if( findActivePresetSelection( f, filn ) && filn != "none" )
                 {
                     filn = m_filterDeviceNames[f] + ": " + filn;
                 }
