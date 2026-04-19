@@ -198,8 +198,8 @@ def plot_wind_track_clusters(
     noise = labels == -1
     if np.any(noise):
         ax.scatter(
-            vu[noise],
             vv[noise],
+            vu[noise],
             c="lightgray",
             s=22,
             alpha=0.35,
@@ -219,22 +219,21 @@ def plot_wind_track_clusters(
         rgba[:, :3] = rgb
         rgba[:, 3] = np.clip(probs[mask], 0.12, 1.0)
         ax.scatter(
-            vu[mask],
             vv[mask],
+            vu[mask],
             c=rgba,
             s=28,
             zorder=2,
             edgecolors="none",
         )
 
-    ax.set_xlabel(r"$v_u$ (m/s)")
-    ax.set_ylabel(r"$v_v$ (m/s)")
-    ax.set_aspect("equal", adjustable="box")
+    ax.set_ylabel(r"$V$-component Speed (m/s)")
+    ax.set_xlabel(r"$U$-component Speed (m/s)")
     ax.grid(True, linestyle="--", alpha=0.3)
-    if title:
-        ax.set_title(title)
-    else:
-        ax.set_title("Wind tracks in velocity space (HDBSCAN)")
+    # if title:
+    #     ax.set_title(title)
+    # else:
+    #     ax.set_title("Wind tracks in velocity space (HDBSCAN)")
     legend_elements: list[Line2D] = []
     if np.any(noise):
         legend_elements.append(
@@ -251,19 +250,39 @@ def plot_wind_track_clusters(
         )
     for idx, lab in enumerate(cluster_ids):
         rgb = cmap(idx % 10)[:3]
+        u_mean_v = np.mean(vu[labels == lab])
+        v_mean_v = np.mean(vv[labels == lab])
+        mean_speed = np.sqrt(u_mean_v**2 + v_mean_v**2)
+        mean_dir_rad = np.arctan2(v_mean_v, u_mean_v)
+        mean_dir_deg = np.degrees(mean_dir_rad)
+        mean_dir_deg = (mean_dir_deg + 360.0) % 360.0
         legend_elements.append(
             Line2D(
                 [0],
                 [0],
                 marker="o",
                 color="w",
-                label=f"Cluster {int(lab)}",
+                label=rf"Layer {int(lab)} (avg $v$={mean_speed:.1f} m/s, avg $\theta$={mean_dir_deg:.1f}$^\circ$)",
                 markerfacecolor=rgb,
                 markersize=8,
             )
         )
     if legend_elements:
         ax.legend(handles=legend_elements, loc="best", fontsize=8)
+    # add the noise to the legend
+    legend_elements.append(
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            label="Noise",
+            markerfacecolor="lightgray",
+            markersize=8,
+            alpha=0.5,
+        )
+    )
+    ax.set_aspect("equal", adjustable="box")
     fig.tight_layout()
     out_png_dir = os.path.dirname(os.path.abspath(output_png))
     if out_png_dir:
@@ -284,14 +303,8 @@ def write_wind_cluster_stats_report(
         "",
     ]
     for row in rows:
-        cid = row["cluster_id"]
-        lines.append(f"Cluster {cid} (n={row['n_points']})")
-        lines.append(
-            f"  mean_vu = {row['mean_vu']:.6f}  std_vu = {row['std_vu']:.6f}"
-        )
-        lines.append(
-            f"  mean_vv = {row['mean_vv']:.6f}  std_vv = {row['std_vv']:.6f}"
-        )
+        for line in row:
+            lines.append(line)
         lines.append("")
     text = "\n".join(lines).rstrip() + "\n"
     out_dir = os.path.dirname(os.path.abspath(path))

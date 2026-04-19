@@ -17,7 +17,7 @@ def flatten_vetted_tracks_to_features(wind_summaries: list[dict[str, Any]]) -> n
     Direction is degrees in the camwfs frame; components use radians:
     vu = v * cos(theta), vv = v * sin(theta).
     """
-    rows: list[list[float]] = []
+    features: list[list[float]] = []
     for summary in wind_summaries:
         for track in summary.get("tracks", []):
             try:
@@ -30,10 +30,10 @@ def flatten_vetted_tracks_to_features(wind_summaries: list[dict[str, Any]]) -> n
             theta_rad = np.deg2rad(direction_deg)
             vu = float(v * np.cos(theta_rad))
             vv = float(v * np.sin(theta_rad))
-            rows.append([vu, vv])
-    if not rows:
+            features.append([vu, vv])
+    if not features:
         return np.zeros((0, 2), dtype=np.float64)
-    return np.asarray(rows, dtype=np.float64)
+    return np.asarray(features, dtype=np.float64)
 
 
 def cluster_wind_tracks_hdbscan(
@@ -73,7 +73,7 @@ def per_cluster_vu_vv_stats(
     if X.size == 0 or labels.size == 0:
         return [], 0
     noise_count = int(np.sum(labels == -1))
-    rows: list[dict[str, Any]] = []
+    rows: list[str] = []
     for lab in sorted(set(labels.tolist())):
         if lab < 0:
             continue
@@ -83,14 +83,28 @@ def per_cluster_vu_vv_stats(
             continue
         vu = pts[:, 0]
         vv = pts[:, 1]
+        speeds = np.sqrt(vu**2 + vv**2)
+        directions = np.arctan2(vv, vu)
+        std_speeds = np.std(speeds)
+        std_directions = np.std(directions)
+        mean_vu = float(np.mean(vu))
+        std_vu = float(np.std(vu))
+        mean_vv = float(np.mean(vv))
+        std_vv = float(np.std(vv))
+        mean_speed = np.sqrt(mean_vu**2 + mean_vv**2)
+        mean_dir_rad = np.arctan2(np.mean(vv), np.mean(vu))
+        mean_dir_deg = np.degrees(mean_dir_rad)
+        mean_dir_deg = (mean_dir_deg + 360.0) % 360.0
         rows.append(
-            {
-                "cluster_id": int(lab),
-                "n_points": int(pts.shape[0]),
-                "mean_vu": float(np.mean(vu)),
-                "std_vu": float(np.std(vu, ddof=0)),
-                "mean_vv": float(np.mean(vv)),
-                "std_vv": float(np.std(vv, ddof=0)),
-            }
+            [
+                f"Layer {int(lab)}",
+                f"n_points: {int(pts.shape[0])}",
+                f"Mean U-component speed: {mean_vu:.2f}",
+                f"Std U-component speed: {std_vu:.2f}",
+                f"Mean V-component speed: {mean_vv:.2f}",
+                f"Std V-component speed: {std_vv:.2f}",
+                rf"Layer speed: {float(mean_speed):.2f} $\pm$ {float(std_speeds):.2f} m/s",
+                rf"Layer direction: {float(mean_dir_deg):.2f} $\pm$ {float(std_directions):.2f} deg",
+            ]
         )
     return rows, noise_count

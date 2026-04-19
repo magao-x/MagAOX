@@ -219,7 +219,8 @@ def _apply_direction_corrections_to_rows(rows: list[dict], pa_offset_deg: float)
             continue
         raw_wrapped = raw % 360.0
         row["raw_direction"] = raw_wrapped
-        row["corrected_direction"] = (raw_wrapped + pa_offset_deg) % 360.0
+        # the correction is just a North-South flip of the raw direction
+        row["corrected_direction"] = (540.0 - raw_wrapped) % 360.0
         row["direction"] = row["corrected_direction"]
 
 
@@ -963,17 +964,19 @@ def main():
             stats_rows, noise_count = per_cluster_vu_vv_stats(X, labels)
             cluster_png = os.path.join(output_dir, "wind_track_clusters.png")
             cluster_txt = os.path.join(output_dir, "wind_track_stats.txt")
-            plot_wind_track_clusters(
-                X[:, 0],
-                X[:, 1],
-                labels,
-                probabilities,
-                cluster_png,
-                title="Wind tracks: vu / vv (HDBSCAN)",
+            write_wind_cluster_stats_report(
+                path=cluster_txt,
+                rows=stats_rows,
+                noise_count=noise_count,
             )
-            write_wind_cluster_stats_report(cluster_txt, stats_rows, noise_count)
-            logging.info("Wrote wind cluster plot to %s", cluster_png)
-            logging.info("Wrote wind cluster stats to %s", cluster_txt)
+            plot_wind_track_clusters(
+                vu=X[:, 0],
+                vv=X[:, 1],
+                labels=labels,
+                probabilities=probabilities,
+                output_png=cluster_png,
+                # title="Wind layer attributes",
+            )
 
 if __name__ == '__main__':
     main()
