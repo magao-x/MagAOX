@@ -1,11 +1,36 @@
 
 /** \file cameraStatus.cpp
  * \brief Overlay status rendering for camera-associated devices.
+ *
+ * \author Jared R. Males (jaredmales@gmail.com)
  */
 
 #include "cameraStatus.hpp"
 
 #define errPrint( expl ) std::cerr << "cameraStatus: " << __FILE__ << " " << __LINE__ << " " << expl << std::endl;
+
+namespace
+{
+std::string preferredPresetProperty( const std::string &deviceName )
+{
+    if( deviceName.find( "fw" ) == 0 )
+    {
+        return "filterName";
+    }
+
+    return "presetName";
+}
+
+std::string alternatePresetProperty( const std::string &propertyName )
+{
+    if( propertyName == "filterName" )
+    {
+        return "presetName";
+    }
+
+    return "filterName";
+}
+} // namespace
 
 cameraStatus::cameraStatus() : rtimvOverlayInterface()
 {
@@ -61,20 +86,16 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurat
         ( *m_roa.m_dictionary )[m_deviceName + ".shutter_status.status"].setBlob( nullptr, 0 );
         ( *m_roa.m_dictionary )[m_deviceName + ".shutter.toggle"].setBlob( nullptr, 0 );
 
-        m_presetNames.resize( m_filterDeviceNames.size() );
+        m_primaryPresetProperties.resize( m_filterDeviceNames.size() );
 
         for( size_t f = 0; f < m_filterDeviceNames.size(); ++f )
         {
-            if( m_filterDeviceNames[f].find( "fw" ) == 0 )
-                m_presetNames[f] = ".filterName";
-            else if( m_filterDeviceNames[f].find( "flip" ) == 0 )
-                m_presetNames[f] = ".presetName";
-            else
-                m_presetNames[f] = ".presetName";
+            m_primaryPresetProperties[f] = preferredPresetProperty( m_filterDeviceNames[f] );
 
             ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".fsm.state"].setBlob( nullptr, 0 );
             ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".parked.current"].setBlob( nullptr, 0 );
-            ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + m_presetNames[f]].setBlob( nullptr, 0 );
+            ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".filterName.current"].setBlob( nullptr, 0 );
+            ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".presetName.current"].setBlob( nullptr, 0 );
             ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".position.current"].setBlob( nullptr, 0 );
             ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".filter.current"].setBlob( nullptr, 0 );
         }
@@ -141,6 +162,66 @@ bool cameraStatus::getBlobStr( const std::string &deviceName, const std::string 
 bool cameraStatus::getBlobStr( const std::string &propel )
 {
     return getBlobStr( m_deviceName, propel );
+}
+
+bool cameraStatus::findActivePropertySelection( const std::string &deviceName,
+                                                const std::string &propertyName,
+                                                std::string       &selection )
+{
+    if( m_roa.m_dictionary == nullptr )
+    {
+        return false;
+    }
+
+    std::string propertyPrefix = deviceName + "." + propertyName + ".";
+
+    dictionaryIteratorT it = m_roa.m_dictionary->lower_bound( propertyPrefix );
+
+    while( it != m_roa.m_dictionary->end() )
+    {
+        if( it->first.rfind( propertyPrefix, 0 ) != 0 )
+        {
+            break;
+        }
+
+        if( ( it->second.getBlobStr( m_blob, sizeof( m_blob ) ) ) == sizeof( m_blob ) )
+        {
+            errPrint( "bad string" );
+        }
+
+        if( m_blob[0] != '\0' && std::string( m_blob ) == "on" )
+        {
+            size_t elementPos = it->first.rfind( '.' );
+
+            if( elementPos != std::string::npos && elementPos < it->first.size() - 1 )
+            {
+                selection = it->first.substr( elementPos + 1 );
+                return true;
+            }
+        }
+
+        ++it;
+    }
+
+    return false;
+}
+
+bool cameraStatus::findActivePresetSelection( size_t deviceIndex, std::string &selection )
+{
+    if( deviceIndex >= m_filterDeviceNames.size() || deviceIndex >= m_primaryPresetProperties.size() )
+    {
+        return false;
+    }
+
+    if( findActivePropertySelection(
+            m_filterDeviceNames[deviceIndex], m_primaryPresetProperties[deviceIndex], selection ) )
+    {
+        return true;
+    }
+
+    return findActivePropertySelection( m_filterDeviceNames[deviceIndex],
+                                        alternatePresetProperty( m_primaryPresetProperties[deviceIndex] ),
+                                        selection );
 }
 
 template <>
@@ -361,33 +442,11 @@ int cameraStatus::updateOverlay()
                               fwstate == "LOGGEDIN" || fwstate == "CONFIGURING" || fwstate == "CONNECTED" ||
                               fwstate == "NOTHOMED" ) ) )
             {
-                dictionaryIteratorT start =
-                    m_roa.m_dictionary->lower_bound( m_filterDeviceNames[f] + m_presetNames[f] );
-                dictionaryIteratorT end =
-                    m_roa.m_dictionary->upper_bound( m_filterDeviceNames[f] + m_presetNames[f] + "Z" );
-
-                std::string fkey;
-                while( start != end )
-                {
-                    if( ( start->second.getBlobStr( m_blob, sizeof( m_blob ) ) ) == sizeof( m_blob ) )
-                        errPrint( "bad string" ); // Don't trust this as a string
-
-                    if( m_blob[0] != '\0' )
-                    {
-                        if( std::string( m_blob ) == "on" )
-                        {
-                            fkey = start->first;
-                            break;
-                        }
-                    }
-                    ++start;
-                }
-
-                size_t      pp = fkey.rfind( '.' );
                 std::string filn;
-                if( pp != std::string::npos && pp < fkey.size() - 1 ) // need to be able to add 1
+
+                if( findActivePresetSelection( f, filn ) )
                 {
-                    filn = m_filterDeviceNames[f] + ": " + fkey.substr( pp + 1 ).c_str();
+                    filn = m_filterDeviceNames[f] + ": " + filn;
                 }
                 else
                 {
