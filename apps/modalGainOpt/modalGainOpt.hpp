@@ -7,6 +7,8 @@
 #ifndef modalGainOpt_hpp
 #define modalGainOpt_hpp
 
+#include <atomic>
+
 #include <mx/mxException.hpp>
 #include <mx/ao/analysis/clGainOpt.hpp>
 #include <mx/ao/analysis/clAOLinearPredictor.hpp>
@@ -307,12 +309,12 @@ class modalGainOpt : public MagAOXApp<true>,
     std::string m_psdDevice{ "hopsds" }; /**< The INDI device name of the PSD calculator.  Defaults to aolN_modevalPSDs
                                    where N is m_loopNum.*/
 
-    std::string m_opticalGainDevice {"strehl"};
-    std::string m_opticalGainProperty {"strehl_optimal"};
-    std::string m_opticalGainElement {"pyramid"};
+    std::string m_opticalGainDevice{ "strehl" };
+    std::string m_opticalGainProperty{ "strehl_optimal" };
+    std::string m_opticalGainElement{ "pyramid" };
 
-    bool m_autoUpdate{ false }; ///< Flag controlling whether gains are automatically updated
-    bool m_opticalGainUpdate {false}; ///< Flag controlling whether optical gain is automatically updated;
+    bool m_autoUpdate{ false };        ///< Flag controlling whether gains are automatically updated
+    bool m_opticalGainUpdate{ false }; ///< Flag controlling whether optical gain is automatically updated;
 
     float m_gainGain{ 0.1 }; ///< The gain to use for closed-loop gain updates.  Default is 0.1.
 
@@ -320,7 +322,7 @@ class modalGainOpt : public MagAOXApp<true>,
 
     uint32_t m_defaultNCoeff{ 25 };
 
-    int m_extrapOL {0}; ///< Which extrapolation method to use for the OL PSD.  0 is none.  The only other option is 1.
+    int m_extrapOL{ 0 }; ///< Which extrapolation method to use for the OL PSD.  0 is none.  The only other option is 1.
 
     ///@}
 
@@ -367,19 +369,19 @@ class modalGainOpt : public MagAOXApp<true>,
     std::vector<float> m_gmaxSI; ///< The previously calculated maximum gains for LP
     std::vector<float> m_modeVarSI;
     std::vector<int>   m_timesOnSI;
-    int   m_modesOnSI;
+    int                m_modesOnSI;
 
     std::vector<float> m_optGainLP;
     std::vector<float> m_gmaxLP; ///< The previously calculated maximum gains for LP
     std::vector<float> m_modeVarLP;
     std::vector<int>   m_timesOnLP;
-    int m_modesOnLP;
+    int                m_modesOnLP;
 
     bool m_loop{ false };
 
     float m_opticalGain{ 1 };
 
-    float m_opticalGainSource {1};
+    float m_opticalGainSource{ 1 };
 
     float m_gain{ 0 };
 
@@ -470,6 +472,64 @@ class modalGainOpt : public MagAOXApp<true>,
     IMAGE *m_maxGainLPStream{ nullptr }; ///< The ImageStreamIO shared memory buffer to publish the LP max gains
 
     IMAGE *m_modevarStream{ nullptr }; ///< The ImageStreamIO shared memory buffer to publish the LP optimal gains
+
+    /// Destroy an owned ImageStreamIO output stream and clear its pointer.
+    void destroyImageStream( IMAGE *&stream /**< [in.out] stream pointer to destroy and clear */ );
+
+    /// Allocate and create an owned ImageStreamIO output stream.
+    int createImageStream( IMAGE            *&stream,  /**< [in.out] stream pointer to allocate and create */
+                           const std::string &name,    /**< [in] shmim name for the output stream */
+                           uint32_t           size0,   /**< [in] first axis size */
+                           uint32_t           size1,   /**< [in] second axis size */
+                           uint32_t           size2,   /**< [in] third axis size */
+                           uint8_t            dataType /**< [in] ImageStreamIO datatype for the stream */
+    );
+
+    /// Populate the published gain and variance arrays from the current optimization state.
+    void writePublishedGainArrays( float *currentData, /**< [out] current optimal-gain stream buffer */
+                                   float *siData,      /**< [out] SI optimal-gain stream buffer */
+                                   float *maxSiData,   /**< [out] SI max-gain stream buffer */
+                                   float *lpData,      /**< [out] LP optimal-gain stream buffer */
+                                   float *maxLpData,   /**< [out] LP max-gain stream buffer */
+                                   float *modeVarData  /**< [out] mode-variance buffer, laid out as 3 x N */
+    );
+
+    /// Populate the published predictive-control gain and coefficient arrays.
+    void writePublishedPredictorArrays( float   *pcGainData, /**< [in.out] PC gain-factor stream buffer */
+                                        float   *aCoeffData, /**< [in.out] predictor a-coefficient stream buffer */
+                                        uint32_t aWidth,     /**< [in] entries stored per mode in aCoeffData */
+                                        float   *bCoeffData, /**< [in.out] predictor b-coefficient stream buffer */
+                                        uint32_t bWidth,     /**< [in] entries stored per mode in bCoeffData */
+                                        bool     blend       /**< [in] when true, blend against existing values */
+    );
+
+    /// Count how many modes are enabled by a gain-factor vector.
+    int countEnabledGainFactors( const std::vector<float> &gainFacts /**< [in] gain factors to inspect */ ) const;
+
+    /// Update `m_modesOn` when a changed gain-factor stream matches the active control path.
+    void updateAppliedModeCount( const std::vector<float> &gainFacts, /**< [in] gain factors from the changed stream */
+                                 bool predictorPath /**< [in] true when the values came from the predictor path */
+    );
+
+    /// Apply an incoming gain-factor frame to one of the stored gain vectors.
+    bool applyGainFactorUpdate( std::vector<float> &gainFacts, /**< [in.out] stored gain factors to resize and update */
+                                const float        *incoming,  /**< [in] incoming gain-factor frame */
+                                uint32_t            width,     /**< [in] number of gain factors in `incoming` */
+                                bool predictorPath /**< [in] true when the values came from the predictor path */
+    );
+
+    /// Apply an incoming multiplier frame to one of the stored multiplier vectors.
+    bool applyMultiplierUpdate(
+        std::vector<float> &multFacts,    /**< [in.out] stored multiplier factors to resize and update */
+        const float        *incoming,     /**< [in] incoming multiplier frame */
+        uint32_t            width,        /**< [in] number of multiplier factors in `incoming` */
+        bool                predictorPath /**< [in] true when the values came from the predictor path */
+    );
+
+    /// Apply an incoming frequency frame to the stored frequency scale.
+    bool applyFrequencyUpdate( const float *incoming, /**< [in] incoming frequency frame */
+                               size_t       size      /**< [in] number of frequency samples in `incoming` */
+    );
 
   public:
     /// Default c'tor.
@@ -624,7 +684,7 @@ class modalGainOpt : public MagAOXApp<true>,
     std::mutex m_goptMutex;
 
     /// Flag used to indicate to the goptThread that it should stop calculations ASAP
-    bool m_updating{ false };
+    std::atomic<bool> m_updating{ false };
 
     /** \name Gain Optimization Thread
      *
@@ -642,7 +702,8 @@ class modalGainOpt : public MagAOXApp<true>,
 
     pcf::IndiProperty m_goptThreadProp; ///< The property to hold the gain optimization thread details.
 
-    sem_t m_goptSemaphore; ///< Semaphore used to synchronize the psdShmim thread and the gopt thread.
+    sem_t m_goptSemaphore;              ///< Semaphore used to synchronize the psdShmim thread and the gopt thread.
+    bool  m_goptSemaphoreInit{ false }; ///< Tracks whether the gain optimization semaphore needs cleanup.
 
     float noisePSD( int n );
 
@@ -686,7 +747,6 @@ class modalGainOpt : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_opticalGainSource;
     pcf::IndiProperty m_indiP_opticalGainUpdate;
 
-
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_autoUpdate );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_updateOnce );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_dump );
@@ -704,8 +764,7 @@ class modalGainOpt : public MagAOXApp<true>,
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapOL );
 
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_opticalGainSource );
-    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_opticalGainUpdate);
-
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_opticalGainUpdate );
 
     ///@}
 };
@@ -805,7 +864,7 @@ int modalGainOpt::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_loopNum, "loop.number" );
     _config( m_loopName, "loop.name" );
     _config( m_autoUpdate, "loop.autoUpdate" );
-    _config( m_autoUpdate, "loop.gainGain" );
+    _config( m_gainGain, "loop.gainGain" );
 
     char shmim[1024];
 
@@ -950,19 +1009,20 @@ int modalGainOpt::appStartup()
 
     CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_extrapOL, "extrapOL" );
 
-    CREATE_REG_INDI_RO_NUMBER(m_indiP_modesOn, "num_modes", "number of modes", "Gain Opt.");
-    indi::addNumberElement(m_indiP_modesOn, "current", 0, 2400, 1, "%d", "Applied Modes");
-    indi::addNumberElement(m_indiP_modesOn, "integrator", 0, 2400, 1, "%d", "SI optimal");
-    indi::addNumberElement(m_indiP_modesOn, "predictor", 0, 2400, 1, "%d", "LP optimal");
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_modesOn, "num_modes", "number of modes", "Gain Opt." );
+    indi::addNumberElement( m_indiP_modesOn, "current", 0, 2400, 1, "%d", "Applied Modes" );
+    indi::addNumberElement( m_indiP_modesOn, "integrator", 0, 2400, 1, "%d", "SI optimal" );
+    indi::addNumberElement( m_indiP_modesOn, "predictor", 0, 2400, 1, "%d", "LP optimal" );
 
     REG_INDI_SETPROP( m_indiP_opticalGainSource, m_opticalGainDevice, m_opticalGainProperty );
 
-    CREATE_REG_INDI_NEW_TOGGLESWITCH(m_indiP_opticalGainUpdate, "track_optical_gain");
+    CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_opticalGainUpdate, "track_optical_gain" );
 
     if( sem_init( &m_goptSemaphore, 0, 0 ) < 0 )
     {
         return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "Initializing gopt semaphore" } );
     }
+    m_goptSemaphoreInit = true;
 
     XWCAPP_THREAD_START( m_goptThread,
                          m_goptThreadInit,
@@ -1013,7 +1073,33 @@ int modalGainOpt::appLogic()
     SHMIMMONITORT_UPDATE_INDI( wfsavgShmimMonitorT );
     SHMIMMONITORT_UPDATE_INDI( wfsmaskShmimMonitorT );
 
-    if( m_autoUpdate )
+    bool  autoUpdate        = false;
+    bool  updateOnce        = false;
+    bool  dump              = false;
+    bool  opticalGainUpdate = false;
+    float opticalGain       = 0;
+    float gainGain          = 0;
+    int   extrapOL          = 0;
+    int   modesOn           = 0;
+    int   modesOnSI         = 0;
+    int   modesOnLP         = 0;
+
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+
+        autoUpdate        = m_autoUpdate;
+        updateOnce        = m_updateOnce;
+        dump              = m_dump;
+        opticalGainUpdate = m_opticalGainUpdate;
+        opticalGain       = m_opticalGain;
+        gainGain          = m_gainGain;
+        extrapOL          = m_extrapOL;
+        modesOn           = m_modesOn;
+        modesOnSI         = m_modesOnSI;
+        modesOnLP         = m_modesOnLP;
+    }
+
+    if( autoUpdate )
     {
         updateSwitchIfChanged( m_indiP_autoUpdate, "toggle", pcf::IndiElement::On, INDI_OK );
     }
@@ -1022,7 +1108,7 @@ int modalGainOpt::appLogic()
         updateSwitchIfChanged( m_indiP_autoUpdate, "toggle", pcf::IndiElement::Off, INDI_IDLE );
     }
 
-    if( m_updateOnce )
+    if( updateOnce )
     {
         updateSwitchIfChanged( m_indiP_updateOnce, "request", pcf::IndiElement::On, INDI_OK );
     }
@@ -1031,7 +1117,7 @@ int modalGainOpt::appLogic()
         updateSwitchIfChanged( m_indiP_updateOnce, "request", pcf::IndiElement::Off, INDI_IDLE );
     }
 
-    if( m_dump )
+    if( dump )
     {
         updateSwitchIfChanged( m_indiP_dump, "request", pcf::IndiElement::On, INDI_OK );
     }
@@ -1040,7 +1126,7 @@ int modalGainOpt::appLogic()
         updateSwitchIfChanged( m_indiP_dump, "request", pcf::IndiElement::Off, INDI_IDLE );
     }
 
-    if( m_opticalGainUpdate )
+    if( opticalGainUpdate )
     {
         updateSwitchIfChanged( m_indiP_opticalGainUpdate, "toggle", pcf::IndiElement::On, INDI_OK );
     }
@@ -1049,21 +1135,21 @@ int modalGainOpt::appLogic()
         updateSwitchIfChanged( m_indiP_opticalGainUpdate, "toggle", pcf::IndiElement::Off, INDI_IDLE );
     }
 
-    updatesIfChanged<float>( m_indiP_opticalGain, { "current", "target" }, { m_opticalGain, m_opticalGain } );
+    updatesIfChanged<float>( m_indiP_opticalGain, { "current", "target" }, { opticalGain, opticalGain } );
 
-    updatesIfChanged<float>( m_indiP_gainGain, { "current", "target" }, { m_gainGain, m_gainGain } );
+    updatesIfChanged<float>( m_indiP_gainGain, { "current", "target" }, { gainGain, gainGain } );
 
-    if(m_extrapOL == 0)
+    if( extrapOL == 0 )
     {
-        updateSwitchIfChanged(m_indiP_extrapOL, "toggle", pcf::IndiElement::Off);
+        updateSwitchIfChanged( m_indiP_extrapOL, "toggle", pcf::IndiElement::Off );
     }
     else
     {
-        updateSwitchIfChanged(m_indiP_extrapOL, "toggle", pcf::IndiElement::On);
+        updateSwitchIfChanged( m_indiP_extrapOL, "toggle", pcf::IndiElement::On );
     }
 
-    updatesIfChanged<int>(m_indiP_modesOn, {"current","integrator","predictor"}, {m_modesOn, m_modesOnSI, m_modesOnLP});
-
+    updatesIfChanged<int>(
+        m_indiP_modesOn, { "current", "integrator", "predictor" }, { modesOn, modesOnSI, modesOnLP } );
 
     return 0;
 }
@@ -1088,57 +1174,300 @@ int modalGainOpt::appShutdown()
     SHMIMMONITORT_APP_SHUTDOWN( wfsavgShmimMonitorT );
     SHMIMMONITORT_APP_SHUTDOWN( wfsmaskShmimMonitorT );
 
-    if( m_olPSDStream != nullptr )
+    destroyImageStream( m_olPSDStream );
+    destroyImageStream( m_noisePSDStream );
+    destroyImageStream( m_clXferCurrentStream );
+    destroyImageStream( m_clXferSIStream );
+    destroyImageStream( m_clXferLPStream );
+
+    destroyImageStream( m_optGainStream );
+    destroyImageStream( m_optGainSIStream );
+    destroyImageStream( m_maxGainSIStream );
+    destroyImageStream( m_optGainLPStream );
+    destroyImageStream( m_maxGainLPStream );
+    destroyImageStream( m_modevarStream );
+
+    if( m_goptSemaphoreInit )
     {
-        ImageStreamIO_destroyIm( m_olPSDStream );
-        free( m_olPSDStream );
-        m_olPSDStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_noisePSDStream );
-        free( m_noisePSDStream );
-        m_noisePSDStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_clXferCurrentStream );
-        free( m_clXferCurrentStream );
-        m_clXferCurrentStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_clXferSIStream );
-        free( m_clXferSIStream );
-        m_clXferSIStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_clXferLPStream );
-        free( m_clXferLPStream );
-        m_clXferLPStream = nullptr;
-    }
-
-    if( m_optGainStream != nullptr )
-    {
-        ImageStreamIO_destroyIm( m_optGainStream );
-        free( m_optGainStream );
-        m_optGainStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_optGainSIStream );
-        free( m_optGainSIStream );
-        m_optGainSIStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_maxGainSIStream );
-        free( m_maxGainSIStream );
-        m_maxGainSIStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_optGainLPStream );
-        free( m_optGainLPStream );
-        m_optGainLPStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_maxGainLPStream );
-        free( m_maxGainLPStream );
-        m_maxGainLPStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_modevarStream );
-        free( m_modevarStream );
-        m_modevarStream = nullptr;
+        sem_destroy( &m_goptSemaphore );
+        m_goptSemaphoreInit = false;
     }
 
     return 0;
+}
+
+void modalGainOpt::destroyImageStream( IMAGE *&stream )
+{
+    if( stream == nullptr )
+    {
+        return;
+    }
+
+    ImageStreamIO_destroyIm( stream );
+    free( stream );
+    stream = nullptr;
+}
+
+int modalGainOpt::createImageStream(
+    IMAGE *&stream, const std::string &name, uint32_t size0, uint32_t size1, uint32_t size2, uint8_t dataType )
+{
+    destroyImageStream( stream );
+
+    stream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
+    if( stream == nullptr )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "error allocating stream for " + name } );
+    }
+
+    uint32_t imsize[3];
+    imsize[0] = size0;
+    imsize[1] = size1;
+    imsize[2] = size2;
+
+    if( ImageStreamIO_createIm_gpu( stream,
+                                    name.c_str(),
+                                    3,
+                                    imsize,
+                                    dataType,
+                                    -1,
+                                    1,
+                                    IMAGE_NB_SEMAPHORE,
+                                    0,
+                                    CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
+                                    0 ) != 0 )
+    {
+        free( stream );
+        stream = nullptr;
+        return log<software_error, -1>( { __FILE__, __LINE__, "error creating stream for " + name } );
+    }
+
+    if( stream->md == nullptr )
+    {
+        destroyImageStream( stream );
+        return log<software_error, -1>( { __FILE__, __LINE__, "stream metadata not initialized for " + name } );
+    }
+
+    stream->md->cnt0 = 0;
+    stream->md->cnt1 = 0;
+
+    return 0;
+}
+
+void modalGainOpt::writePublishedGainArrays(
+    float *currentData, float *siData, float *maxSiData, float *lpData, float *maxLpData, float *modeVarData )
+{
+    mx::improc::eigenMap<float> modeVars( modeVarData, 3, m_modeVarSI.size() );
+
+    for( size_t n = 0; n < m_optGainSI.size(); ++n )
+    {
+        currentData[n] = ( m_gainCalFacts[n] * m_optGainSI[n] / m_gainCals[n] ) / m_opticalGain;
+        siData[n]      = currentData[n];
+        maxSiData[n]   = ( m_gainCalFacts[n] * m_gmaxSI[n] / m_gainCals[n] ) / m_opticalGain;
+
+        lpData[n]    = ( m_gainCalFacts[n] * m_optGainLP[n] / m_gainCals[n] ) / m_opticalGain;
+        maxLpData[n] = ( m_gainCalFacts[n] * m_gmaxLP[n] / m_gainCals[n] ) / m_opticalGain;
+
+        modeVars( 0, n ) = m_modeVarOL[n];
+        modeVars( 1, n ) = m_modeVarSI[n];
+        modeVars( 2, n ) = m_modeVarLP[n];
+    }
+}
+
+void modalGainOpt::writePublishedPredictorArrays(
+    float *pcGainData, float *aCoeffData, uint32_t aWidth, float *bCoeffData, uint32_t bWidth, bool blend )
+{
+    for( size_t n = 0; n < m_optGainLP.size(); ++n )
+    {
+        const float targetGain = ( m_gainCalFacts[n] * m_optGainLP[n] / m_gainCals[n] ) / m_opticalGain;
+
+        if( blend )
+        {
+            pcGainData[n] = pcGainData[n] + m_gainGain * ( targetGain - pcGainData[n] );
+        }
+        else
+        {
+            pcGainData[n] = targetGain;
+        }
+
+        const size_t aBase = n * aWidth;
+        const size_t bBase = n * bWidth;
+
+        aCoeffData[aBase] = m_Na[n];
+        bCoeffData[bBase] = m_Nb[n];
+
+        for( uint32_t k = 0; k < m_Na[n]; ++k )
+        {
+            if( blend )
+            {
+                aCoeffData[aBase + 1 + k] =
+                    aCoeffData[aBase + 1 + k] + m_gainGain * ( m_goptLP[n].a()[k] - aCoeffData[aBase + 1 + k] );
+            }
+            else
+            {
+                aCoeffData[aBase + 1 + k] = m_goptLP[n].a()[k];
+            }
+        }
+        for( uint32_t k = m_Na[n]; k < aWidth - 1; ++k )
+        {
+            aCoeffData[aBase + 1 + k] = 0;
+        }
+
+        for( uint32_t k = 0; k < m_Nb[n]; ++k )
+        {
+            if( blend )
+            {
+                bCoeffData[bBase + 1 + k] =
+                    bCoeffData[bBase + 1 + k] + m_gainGain * ( m_goptLP[n].b()[k] - bCoeffData[bBase + 1 + k] );
+            }
+            else
+            {
+                bCoeffData[bBase + 1 + k] = m_goptLP[n].b()[k];
+            }
+        }
+        for( uint32_t k = m_Nb[n]; k < bWidth - 1; ++k )
+        {
+            bCoeffData[bBase + 1 + k] = 0;
+        }
+    }
+}
+
+int modalGainOpt::countEnabledGainFactors( const std::vector<float> &gainFacts ) const
+{
+    int modesOn = 0;
+
+    for( size_t n = 0; n < gainFacts.size(); ++n )
+    {
+        if( gainFacts[n] > 0 )
+        {
+            ++modesOn;
+        }
+    }
+
+    return modesOn;
+}
+
+void modalGainOpt::updateAppliedModeCount( const std::vector<float> &gainFacts, bool predictorPath )
+{
+    if( predictorPath != m_pcOn )
+    {
+        return;
+    }
+
+    m_modesOn = countEnabledGainFactors( gainFacts );
+}
+
+bool modalGainOpt::applyGainFactorUpdate( std::vector<float> &gainFacts,
+                                          const float        *incoming,
+                                          uint32_t            width,
+                                          bool                predictorPath )
+{
+    bool change = false;
+
+    if( width != gainFacts.size() )
+    {
+        gainFacts.resize( width );
+        change = true;
+    }
+
+    for( uint32_t n = 0; n < width; ++n )
+    {
+        if( change || gainFacts[n] != incoming[n] )
+        {
+            gainFacts[n] = incoming[n];
+            change       = true;
+        }
+    }
+
+    if( !change )
+    {
+        return false;
+    }
+
+    if( m_loop )
+    {
+        m_sinceChange = -1;
+    }
+
+    updateAppliedModeCount( gainFacts, predictorPath );
+
+    return true;
+}
+
+bool modalGainOpt::applyMultiplierUpdate( std::vector<float> &multFacts,
+                                          const float        *incoming,
+                                          uint32_t            width,
+                                          bool                predictorPath )
+{
+    bool change = false;
+
+    if( width != multFacts.size() )
+    {
+        multFacts.resize( width );
+        change = true;
+    }
+
+    for( uint32_t n = 0; n < width; ++n )
+    {
+        if( change || multFacts[n] != incoming[n] )
+        {
+            multFacts[n] = incoming[n];
+            change       = true;
+        }
+    }
+
+    if( !change )
+    {
+        return false;
+    }
+
+    if( m_loop )
+    {
+        m_sinceChange = -1;
+    }
+
+    if( predictorPath )
+    {
+        m_pcgoptUpdated = true;
+    }
+    else
+    {
+        m_goptUpdated = true;
+    }
+
+    return true;
+}
+
+bool modalGainOpt::applyFrequencyUpdate( const float *incoming, size_t size )
+{
+    bool change = false;
+
+    if( size != m_freq.size() )
+    {
+        m_freq.resize( size );
+        change = true;
+    }
+
+    for( size_t n = 0; n < size; ++n )
+    {
+        if( change || m_freq[n] != incoming[n] )
+        {
+            m_freq[n] = incoming[n];
+            change    = true;
+        }
+    }
+
+    if( !change )
+    {
+        return false;
+    }
+
+    m_fps = 2 * m_freq.back();
+
+    m_sinceChange = -1;
+    m_goptUpdated = true;
+    m_freqUpdated = true;
+
+    return true;
 }
 
 int modalGainOpt::allocatePCShmims()
@@ -1242,7 +1571,6 @@ int modalGainOpt::allocate( const psdShmimT &dummy )
     m_modeVarSI.resize( m_nModes );
     m_timesOnSI.resize( m_nModes, 5 );
 
-
     m_optGainLP.resize( m_nModes );
     m_modeVarLP.resize( m_nModes );
     m_timesOnLP.resize( m_nModes, 5 );
@@ -1250,254 +1578,93 @@ int modalGainOpt::allocate( const psdShmimT &dummy )
     if( m_olPSDStream != nullptr &&
         ( m_olPSDStream->md->size[0] != m_nFreq || m_olPSDStream->md->size[1] != m_nModes ) )
     {
-        ImageStreamIO_destroyIm( m_olPSDStream );
-        free( m_olPSDStream );
-        m_olPSDStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_noisePSDStream );
-        free( m_noisePSDStream );
-        m_noisePSDStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_clXferCurrentStream );
-        free( m_clXferCurrentStream );
-        m_clXferCurrentStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_clXferSIStream );
-        free( m_clXferSIStream );
-        m_clXferSIStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_clXferLPStream );
-        free( m_clXferLPStream );
-        m_clXferLPStream = nullptr;
+        destroyImageStream( m_olPSDStream );
+        destroyImageStream( m_noisePSDStream );
+        destroyImageStream( m_clXferCurrentStream );
+        destroyImageStream( m_clXferSIStream );
+        destroyImageStream( m_clXferLPStream );
     }
 
     if( m_olPSDStream == nullptr )
     {
-        m_olPSDStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
-        uint32_t imsize[3];
+        if( createImageStream( m_olPSDStream, m_olPSDShmimName, m_nFreq, m_nModes, 1, psdShmimMonitorT::m_dataType ) <
+            0 )
+        {
+            return -1;
+        }
 
-        imsize[0] = m_nFreq;
-        imsize[1] = m_nModes;
-        imsize[2] = 1;
-        ImageStreamIO_createIm_gpu( m_olPSDStream,
-                                    m_olPSDShmimName.c_str(),
-                                    3,
-                                    imsize,
-                                    psdShmimMonitorT::m_dataType,
-                                    -1,
-                                    1,
-                                    IMAGE_NB_SEMAPHORE,
-                                    0,
-                                    CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
-                                    0 );
+        if( createImageStream(
+                m_noisePSDStream, m_noisePSDShmimName, m_nFreq, m_nModes, 1, psdShmimMonitorT::m_dataType ) < 0 )
+        {
+            return -1;
+        }
 
-        m_olPSDStream->md->cnt0 = 0;
-        m_olPSDStream->md->cnt1 = 0;
+        if( createImageStream(
+                m_clXferCurrentStream, m_clXferCurrentShmimName, m_nFreq, m_nModes, 1, psdShmimMonitorT::m_dataType ) <
+            0 )
+        {
+            return -1;
+        }
 
-        m_noisePSDStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
+        if( createImageStream(
+                m_clXferSIStream, m_clXferSIShmimName, m_nFreq, m_nModes, 1, psdShmimMonitorT::m_dataType ) < 0 )
+        {
+            return -1;
+        }
 
-        ImageStreamIO_createIm_gpu( m_noisePSDStream,
-                                    m_noisePSDShmimName.c_str(),
-                                    3,
-                                    imsize,
-                                    psdShmimMonitorT::m_dataType,
-                                    -1,
-                                    1,
-                                    IMAGE_NB_SEMAPHORE,
-                                    0,
-                                    CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
-                                    0 );
-
-        m_noisePSDStream->md->cnt0 = 0;
-        m_noisePSDStream->md->cnt1 = 0;
-
-        m_clXferCurrentStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
-
-        ImageStreamIO_createIm_gpu( m_clXferCurrentStream,
-                                    m_clXferCurrentShmimName.c_str(),
-                                    3,
-                                    imsize,
-                                    psdShmimMonitorT::m_dataType,
-                                    -1,
-                                    1,
-                                    IMAGE_NB_SEMAPHORE,
-                                    0,
-                                    CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
-                                    0 );
-
-        m_clXferCurrentStream->md->cnt0 = 0;
-        m_clXferCurrentStream->md->cnt1 = 0;
-
-        m_clXferSIStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
-
-        ImageStreamIO_createIm_gpu( m_clXferSIStream,
-                                    m_clXferSIShmimName.c_str(),
-                                    3,
-                                    imsize,
-                                    psdShmimMonitorT::m_dataType,
-                                    -1,
-                                    1,
-                                    IMAGE_NB_SEMAPHORE,
-                                    0,
-                                    CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
-                                    0 );
-
-        m_clXferSIStream->md->cnt0 = 0;
-        m_clXferSIStream->md->cnt1 = 0;
-
-        m_clXferLPStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
-
-        ImageStreamIO_createIm_gpu( m_clXferLPStream,
-                                    m_clXferLPShmimName.c_str(),
-                                    3,
-                                    imsize,
-                                    psdShmimMonitorT::m_dataType,
-                                    -1,
-                                    1,
-                                    IMAGE_NB_SEMAPHORE,
-                                    0,
-                                    CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
-                                    0 );
-
-        m_clXferLPStream->md->cnt0 = 0;
-        m_clXferLPStream->md->cnt1 = 0;
+        if( createImageStream(
+                m_clXferLPStream, m_clXferLPShmimName, m_nFreq, m_nModes, 1, psdShmimMonitorT::m_dataType ) < 0 )
+        {
+            return -1;
+        }
     }
 
     if( m_optGainStream != nullptr &&
         ( m_optGainStream->md->size[0] != psdShmimMonitorT::m_height || m_optGainStream->md->size[1] != 1 ) )
     {
-        ImageStreamIO_destroyIm( m_optGainStream );
-        free( m_optGainStream );
-        m_optGainStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_optGainSIStream );
-        free( m_optGainSIStream );
-        m_optGainSIStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_maxGainSIStream );
-        free( m_maxGainSIStream );
-        m_maxGainSIStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_optGainLPStream );
-        free( m_optGainLPStream );
-        m_optGainLPStream = nullptr;
-
-        ImageStreamIO_destroyIm( m_maxGainLPStream );
-        free( m_maxGainLPStream );
-        m_maxGainLPStream = nullptr;
+        destroyImageStream( m_optGainStream );
+        destroyImageStream( m_optGainSIStream );
+        destroyImageStream( m_maxGainSIStream );
+        destroyImageStream( m_optGainLPStream );
+        destroyImageStream( m_maxGainLPStream );
+        destroyImageStream( m_modevarStream );
     }
 
     if( m_optGainStream == nullptr )
     {
-        m_optGainStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
-        uint32_t imsize[3];
+        if( createImageStream( m_optGainStream, m_optGainShmimName, m_nModes, 1, 1, psdShmimMonitorT::m_dataType ) < 0 )
+        {
+            return -1;
+        }
 
-        imsize[0] = m_nModes;
-        imsize[1] = 1;
-        imsize[2] = 1;
-        ImageStreamIO_createIm_gpu( m_optGainStream,
-                                    m_optGainShmimName.c_str(),
-                                    3,
-                                    imsize,
-                                    psdShmimMonitorT::m_dataType,
-                                    -1,
-                                    1,
-                                    IMAGE_NB_SEMAPHORE,
-                                    0,
-                                    CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
-                                    0 );
+        if( createImageStream( m_optGainSIStream, m_optGainSIShmimName, m_nModes, 1, 1, psdShmimMonitorT::m_dataType ) <
+            0 )
+        {
+            return -1;
+        }
 
-        m_optGainStream->md->cnt0 = 0;
-        m_optGainStream->md->cnt1 = 0;
+        if( createImageStream( m_maxGainSIStream, m_maxGainSIShmimName, m_nModes, 1, 1, psdShmimMonitorT::m_dataType ) <
+            0 )
+        {
+            return -1;
+        }
 
-        m_optGainSIStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
+        if( createImageStream( m_optGainLPStream, m_optGainLPShmimName, m_nModes, 1, 1, psdShmimMonitorT::m_dataType ) <
+            0 )
+        {
+            return -1;
+        }
 
-        ImageStreamIO_createIm_gpu( m_optGainSIStream,
-                                    m_optGainSIShmimName.c_str(),
-                                    3,
-                                    imsize,
-                                    psdShmimMonitorT::m_dataType,
-                                    -1,
-                                    1,
-                                    IMAGE_NB_SEMAPHORE,
-                                    0,
-                                    CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
-                                    0 );
+        if( createImageStream( m_maxGainLPStream, m_maxGainLPShmimName, m_nModes, 1, 1, psdShmimMonitorT::m_dataType ) <
+            0 )
+        {
+            return -1;
+        }
 
-        m_optGainSIStream->md->cnt0 = 0;
-        m_optGainSIStream->md->cnt1 = 0;
-
-        m_maxGainSIStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
-
-        ImageStreamIO_createIm_gpu( m_maxGainSIStream,
-                                    m_maxGainSIShmimName.c_str(),
-                                    3,
-                                    imsize,
-                                    psdShmimMonitorT::m_dataType,
-                                    -1,
-                                    1,
-                                    IMAGE_NB_SEMAPHORE,
-                                    0,
-                                    CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
-                                    0 );
-
-        m_maxGainSIStream->md->cnt0 = 0;
-        m_maxGainSIStream->md->cnt1 = 0;
-
-        m_optGainLPStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
-
-        ImageStreamIO_createIm_gpu( m_optGainLPStream,
-                                    m_optGainLPShmimName.c_str(),
-                                    3,
-                                    imsize,
-                                    psdShmimMonitorT::m_dataType,
-                                    -1,
-                                    1,
-                                    IMAGE_NB_SEMAPHORE,
-                                    0,
-                                    CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
-                                    0 );
-
-        m_optGainLPStream->md->cnt0 = 0;
-        m_optGainLPStream->md->cnt1 = 0;
-
-        m_maxGainLPStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
-
-        ImageStreamIO_createIm_gpu( m_maxGainLPStream,
-                                    m_maxGainLPShmimName.c_str(),
-                                    3,
-                                    imsize,
-                                    psdShmimMonitorT::m_dataType,
-                                    -1,
-                                    1,
-                                    IMAGE_NB_SEMAPHORE,
-                                    0,
-                                    CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
-                                    0 );
-
-        m_maxGainLPStream->md->cnt0 = 0;
-        m_maxGainLPStream->md->cnt1 = 0;
-
-        m_modevarStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
-
-        imsize[0] = 3;
-        imsize[1] = psdShmimMonitorT::m_height;
-        imsize[2] = 1;
-
-        ImageStreamIO_createIm_gpu( m_modevarStream,
-                                    m_modevarShmimName.c_str(),
-                                    3,
-                                    imsize,
-                                    psdShmimMonitorT::m_dataType,
-                                    -1,
-                                    1,
-                                    IMAGE_NB_SEMAPHORE,
-                                    0,
-                                    CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
-                                    0 );
-
-        m_modevarStream->md->cnt0 = 0;
-        m_modevarStream->md->cnt1 = 0;
+        if( createImageStream( m_modevarStream, m_modevarShmimName, 3, m_nModes, 1, psdShmimMonitorT::m_dataType ) < 0 )
+        {
+            return -1;
+        }
     }
 
     m_sinceChange = -1;
@@ -1565,52 +1732,38 @@ int modalGainOpt::processImage( void *curr_src, const freqShmimT &dummy )
         return log<software_error, -1>( { __FILE__, __LINE__, "got freq with width not 1" } );
     }
 
-    bool change = false;
-
-    float *f = static_cast<float *>( curr_src );
-
+    float *f  = static_cast<float *>( curr_src );
     size_t sz = freqShmimMonitorT::m_height;
 
-    if( sz != m_freq.size() )
-    {
-        change = true;
-    }
+    bool sizeChange = ( sz != m_freq.size() );
+    bool dataChange = false;
 
-    if( !change ) // f is same size
+    if( !sizeChange )
     {
         for( size_t n = 0; n < sz; ++n )
         {
             if( f[n] != m_freq[n] )
             {
-                change = true;
+                dataChange = true;
                 break;
             }
         }
     }
 
-    if( change )
+    if( sizeChange || dataChange )
     {
         m_updating = true;
         std::lock_guard<std::mutex> lock( m_goptMutex );
 
         m_updating = true; // Make sure it didn't get set to false by thread that had the lock
 
-        m_freq.resize( sz );
-
-        for( size_t n = 0; n < sz; ++n )
+        if( applyFrequencyUpdate( f, sz ) )
         {
-            m_freq[n] = f[n];
+            std::cerr << "got freq: " << sz << '\n';
+            std::cerr << "     fps: " << m_fps << '\n';
         }
 
-        m_fps = 2 * m_freq.back();
-
-        m_sinceChange = -1;
-        m_goptUpdated = true;
-        m_freqUpdated = true;
-
         m_updating = false;
-        std::cerr << "got freq: " << sz << '\n';
-        std::cerr << "     fps: " << m_fps << '\n';
     }
 
     return 0;
@@ -1632,67 +1785,43 @@ int modalGainOpt::processImage( void *curr_src, const gainFactShmimT &dummy )
 {
     static_cast<void>( dummy );
 
-    bool change = false;
-
     uint32_t w = gainFactShmimMonitorT::m_width;
+    float   *g = static_cast<float *>( curr_src );
 
     std::unique_lock<std::mutex> lock( m_goptMutex, std::defer_lock );
 
-    if( w != m_gainFacts.size() )
+    bool sizeChange = ( w != m_gainFacts.size() );
+    bool dataChange = false;
+
+    if( !sizeChange )
+    {
+        for( uint32_t n = 0; n < w; ++n )
+        {
+            if( m_gainFacts[n] != g[n] )
+            {
+                dataChange = true;
+                break;
+            }
+        }
+    }
+
+    if( sizeChange || dataChange )
     {
         m_updating = true;
         lock.lock();
         m_updating = true; // Make sure it didn't get set to false by thread that had the lock
 
-        change = true;
-        m_gainFacts.resize( w );
-    }
-
-    float *g = static_cast<float *>( curr_src );
-
-    for( uint32_t n = 0; n < w; ++n )
-    {
-        if( change || m_gainFacts[n] != g[n] )
+        if( applyGainFactorUpdate( m_gainFacts, g, w, false ) )
         {
-            if( !change )
-            {
-                m_updating = true;
-                lock.lock();
-                m_updating = true; // Make sure it didn't get set to false by thread that had the lock
-                change     = true;
-            }
+            m_updating = false;
+            std::cerr << "got gains: " << m_gainFacts.size() << "\n";
 
-            m_gainFacts[n] = g[n];
+            lock.unlock();
         }
-    }
-
-    if( change )
-    {
-        if( m_loop )
+        else
         {
-            m_sinceChange = -1;
+            m_updating = false;
         }
-
-        if(!m_pcOn)
-        {
-            int modesOn = 0;
-
-            for(size_t n = 0; n < m_gainFacts.size(); ++n)
-            {
-                if(m_gainFacts[n] > 0)
-                {
-                    ++modesOn;
-                }
-            }
-
-            m_modesOn = modesOn;
-        }
-
-
-        m_updating = false;
-        std::cerr << "got gains: " << m_gainFacts.size() << "\n";
-
-        lock.unlock();
     }
 
     return 0;
@@ -1714,53 +1843,43 @@ int modalGainOpt::processImage( void *curr_src, const multFactShmimT &dummy )
 {
     static_cast<void>( dummy );
 
-    bool change = false;
-
     uint32_t w = multFactShmimMonitorT::m_width;
+    float   *m = static_cast<float *>( curr_src );
 
     std::unique_lock<std::mutex> lock( m_goptMutex, std::defer_lock );
 
-    if( w != m_multFacts.size() )
+    bool sizeChange = ( w != m_multFacts.size() );
+    bool dataChange = false;
+
+    if( !sizeChange )
+    {
+        for( uint32_t n = 0; n < w; ++n )
+        {
+            if( m_multFacts[n] != m[n] )
+            {
+                dataChange = true;
+                break;
+            }
+        }
+    }
+
+    if( sizeChange || dataChange )
     {
         m_updating = true;
         lock.lock();
         m_updating = true; // Make sure it didn't get set to false by thread that had the lock
 
-        change = true;
-        m_multFacts.resize( w );
-    }
-
-    float *m = static_cast<float *>( curr_src );
-
-    for( uint32_t n = 0; n < w; ++n )
-    {
-        if( change || m_multFacts[n] != m[n] )
+        if( applyMultiplierUpdate( m_multFacts, m, w, false ) )
         {
-            if( !change )
-            {
-                m_updating = true;
-                lock.lock();
-                m_updating = true; // Make sure it didn't get set to false by thread that had the lock
+            m_updating = false;
+            std::cerr << "got mcs: " << m_multFacts.size() << " " << w << "\n";
 
-                change = true;
-            }
-
-            m_multFacts[n] = m[n];
+            lock.unlock();
         }
-    }
-
-    if( change )
-    {
-        if( m_loop )
+        else
         {
-            m_sinceChange = -1;
+            m_updating = false;
         }
-
-        m_updating    = false;
-        m_goptUpdated = true;
-
-        std::cerr << "got mcs: " << m_multFacts.size() << " " << w << "\n";
-        lock.unlock();
     }
 
     return 0;
@@ -1782,66 +1901,43 @@ int modalGainOpt::processImage( void *curr_src, const pcGainFactShmimT &dummy )
 {
     static_cast<void>( dummy );
 
-    bool change = false;
-
     uint32_t w = pcGainFactShmimMonitorT::m_width;
+    float   *g = static_cast<float *>( curr_src );
 
     std::unique_lock<std::mutex> lock( m_goptMutex, std::defer_lock );
 
-    if( w != m_pcGainFacts.size() )
+    bool sizeChange = ( w != m_pcGainFacts.size() );
+    bool dataChange = false;
+
+    if( !sizeChange )
+    {
+        for( uint32_t n = 0; n < w; ++n )
+        {
+            if( m_pcGainFacts[n] != g[n] )
+            {
+                dataChange = true;
+                break;
+            }
+        }
+    }
+
+    if( sizeChange || dataChange )
     {
         m_updating = true;
         lock.lock();
         m_updating = true; // Make sure it didn't get set to false by thread that had the lock
 
-        change = true;
-        m_pcGainFacts.resize( w );
-    }
-
-    float *g = static_cast<float *>( curr_src );
-
-    for( uint32_t n = 0; n < w; ++n )
-    {
-        if( change || m_pcGainFacts[n] != g[n] )
+        if( applyGainFactorUpdate( m_pcGainFacts, g, w, true ) )
         {
-            if( !change )
-            {
-                m_updating = true;
-                lock.lock();
-                m_updating = true; // Make sure it didn't get set to false by thread that had the lock
-                change     = true;
-            }
+            m_updating = false;
+            std::cerr << "got pc gains: " << m_pcGainFacts.size() << "\n";
 
-            m_pcGainFacts[n] = g[n];
+            lock.unlock();
         }
-    }
-
-    if( change )
-    {
-        if( m_loop )
+        else
         {
-            m_sinceChange = -1;
+            m_updating = false;
         }
-
-        if(m_pcOn)
-        {
-            int modesOn = 0;
-
-            for(size_t n = 0; n < m_pcGainFacts.size(); ++n)
-            {
-                if(m_gainFacts[n] > 0)
-                {
-                    ++modesOn;
-                }
-            }
-
-            m_modesOn = modesOn;
-        }
-
-        m_updating = false;
-        std::cerr << "got pc gains: " << m_pcGainFacts.size() << "\n";
-
-        lock.unlock();
     }
 
     return 0;
@@ -1863,53 +1959,43 @@ int modalGainOpt::processImage( void *curr_src, const pcMultFactShmimT &dummy )
 {
     static_cast<void>( dummy );
 
-    bool change = false;
-
     uint32_t w = pcMultFactShmimMonitorT::m_width;
+    float   *m = static_cast<float *>( curr_src );
 
     std::unique_lock<std::mutex> lock( m_goptMutex, std::defer_lock );
 
-    if( w != m_pcMultFacts.size() )
+    bool sizeChange = ( w != m_pcMultFacts.size() );
+    bool dataChange = false;
+
+    if( !sizeChange )
+    {
+        for( uint32_t n = 0; n < w; ++n )
+        {
+            if( m_pcMultFacts[n] != m[n] )
+            {
+                dataChange = true;
+                break;
+            }
+        }
+    }
+
+    if( sizeChange || dataChange )
     {
         m_updating = true;
         lock.lock();
         m_updating = true; // Make sure it didn't get set to false by thread that had the lock
 
-        change = true;
-        m_pcMultFacts.resize( w );
-    }
-
-    float *m = static_cast<float *>( curr_src );
-
-    for( uint32_t n = 0; n < w; ++n )
-    {
-        if( change || m_pcMultFacts[n] != m[n] )
+        if( applyMultiplierUpdate( m_pcMultFacts, m, w, true ) )
         {
-            if( !change )
-            {
-                m_updating = true;
-                lock.lock();
-                m_updating = true; // Make sure it didn't get set to false by thread that had the lock
+            m_updating = false;
 
-                change = true;
-            }
-
-            m_pcMultFacts[n] = m[n];
+            lock.unlock();
+            std::cerr << "got mcs: " << m_pcMultFacts.size() << "\n";
         }
-    }
-
-    if( change )
-    {
-        if( m_loop )
+        else
         {
-            m_sinceChange = -1;
+            m_updating = false;
         }
-
-        m_updating      = false;
-        m_pcgoptUpdated = true;
-
-        lock.unlock();
-        std::cerr << "got mcs: " << m_multFacts.size() << "\n";
     }
 
     return 0;
@@ -2435,14 +2521,16 @@ int modalGainOpt::processImage( void *curr_src, const wfsavgShmimT &dummy )
 {
     static_cast<void>( dummy );
 
-    m_wfsavg = mx::improc::eigenMap<float>(
-        reinterpret_cast<float *>( curr_src ), wfsavgShmimMonitorT::m_width, wfsavgShmimMonitorT::m_height );
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_goptMutex );
 
-    if( m_wfsavg.rows() == m_wfsmask.rows() && m_wfsavg.cols() == m_wfsmask.cols() )
-    {
-        m_counts = ( m_wfsavg * m_wfsmask ).sum();
+        m_wfsavg = mx::improc::eigenMap<float>(
+            reinterpret_cast<float *>( curr_src ), wfsavgShmimMonitorT::m_width, wfsavgShmimMonitorT::m_height );
 
-        // std::cerr << "counts: " << m_counts << '\n';
+        if( m_wfsavg.rows() == m_wfsmask.rows() && m_wfsavg.cols() == m_wfsmask.cols() )
+        {
+            m_counts = ( m_wfsavg * m_wfsmask ).sum();
+        }
     }
 
     return 0;
@@ -2460,14 +2548,18 @@ int modalGainOpt::processImage( void *curr_src, const wfsmaskShmimT &dummy )
 {
     static_cast<void>( dummy );
 
-    m_wfsmask = mx::improc::eigenMap<float>(
-        reinterpret_cast<float *>( curr_src ), wfsmaskShmimMonitorT::m_width, wfsmaskShmimMonitorT::m_height );
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_goptMutex );
 
-    m_npix = m_wfsmask.sum();
+        m_wfsmask = mx::improc::eigenMap<float>(
+            reinterpret_cast<float *>( curr_src ), wfsmaskShmimMonitorT::m_width, wfsmaskShmimMonitorT::m_height );
 
-    if( m_wfsavg.rows() == m_wfsmask.rows() && m_wfsavg.cols() == m_wfsmask.cols() )
-    {
-        m_counts = ( m_wfsavg * m_wfsmask ).sum();
+        m_npix = m_wfsmask.sum();
+
+        if( m_wfsavg.rows() == m_wfsmask.rows() && m_wfsavg.cols() == m_wfsmask.cols() )
+        {
+            m_counts = ( m_wfsavg * m_wfsmask ).sum();
+        }
     }
 
     return 0;
@@ -2830,7 +2922,7 @@ void modalGainOpt::goptThreadExec()
 
             MGO_BREADCRUMB;
 
-            int off = 0;
+            int off   = 0;
             int offLP = 0;
 
 #pragma omp parallel for num_threads( 15 )
@@ -2943,7 +3035,14 @@ void modalGainOpt::goptThreadExec()
                         ++nexp;
                     }
 
-                    extrap = pow( 10, extrap / nexp );
+                    if( nexp == 0 )
+                    {
+                        flagOff = true;
+                    }
+                    else
+                    {
+                        extrap = pow( 10, extrap / nexp );
+                    }
 
                     MGO_BREADCRUMB;
                     if( noff > 0.5 * ( 0.05 * m_freq.size() - 1 ) && n > 1 )
@@ -2959,7 +3058,7 @@ void modalGainOpt::goptThreadExec()
                 if( flagOff )
                 {
                     MGO_BREADCRUMB;
-                    #pragma omp critical
+#pragma omp critical
                     {
                         ++off;
                     }
@@ -3038,10 +3137,10 @@ void modalGainOpt::goptThreadExec()
 
                     if( ( m_modeVarSI[n] - m_modeVarOL[n] ) / m_modeVarOL[n] > -0.001 )
                     {
-                        #pragma omp critical
-                    {
-                        ++off;
-                    }
+#pragma omp critical
+                        {
+                            ++off;
+                        }
 
                         MGO_BREADCRUMB;
                         m_optGainSI[n] = 0;
@@ -3056,10 +3155,10 @@ void modalGainOpt::goptThreadExec()
                     }
                     else if( m_timesOnSI[n] < 5 )
                     {
-                        #pragma omp critical
-                    {
-                        ++off;
-                    }
+#pragma omp critical
+                        {
+                            ++off;
+                        }
 
                         MGO_BREADCRUMB;
                         // Would be on, but we debounce
@@ -3168,11 +3267,10 @@ void modalGainOpt::goptThreadExec()
                     else*/
                     if( ( m_modeVarLP[n] - m_modeVarSI[n] ) / m_modeVarSI[n] > -0.001 )
                     {
-                        #pragma omp critical
-                    {
-                        ++offLP;
-                    }
-
+#pragma omp critical
+                        {
+                            ++offLP;
+                        }
 
                         MGO_BREADCRUMB;
                         m_optGainLP[n] = m_optGainSI[n];
@@ -3187,11 +3285,10 @@ void modalGainOpt::goptThreadExec()
                     }
                     else if( m_timesOnLP[n] < 5 )
                     {
-                        #pragma omp critical
-                    {
-                        ++offLP;
-                    }
-
+#pragma omp critical
+                        {
+                            ++offLP;
+                        }
 
                         MGO_BREADCRUMB;
                         m_optGainLP[n] = m_optGainSI[n];
@@ -3217,7 +3314,7 @@ void modalGainOpt::goptThreadExec()
                 }
                 else
                 {
-                    #pragma omp critical
+#pragma omp critical
                     {
                         ++offLP;
                     }
@@ -3243,9 +3340,6 @@ void modalGainOpt::goptThreadExec()
             m_modesOnSI = m_nModes - off;
             m_modesOnLP = m_nModes - offLP;
 
-
-
-
             if( m_updating )
             {
                 continue; // don't break b/c of omp
@@ -3268,7 +3362,7 @@ void modalGainOpt::goptThreadExec()
             float *fSI    = m_optGainSIStream->array.F;
             float *fmaxSI = m_maxGainSIStream->array.F;
             float *fLP    = m_optGainLPStream->array.F;
-            float *fmaxLP = m_optGainLPStream->array.F;
+            float *fmaxLP = m_maxGainLPStream->array.F;
 
             mx::improc::eigenMap<float> mvs( m_modevarStream->array.F, 3, m_modeVarSI.size() );
 
@@ -3279,25 +3373,7 @@ void modalGainOpt::goptThreadExec()
             m_maxGainLPStream->md->write = 1;
             m_modevarStream->md->write   = 1;
 
-            for( size_t n = 0; n < m_optGainSI.size(); ++n )
-            {
-                // if( m_timesOnSI[n] > 5 )
-                {
-                    f[n]      = ( m_gainCalFacts[n] * m_optGainSI[n] / m_gainCals[n] ) / m_opticalGain;
-                    fSI[n]    = f[n];
-                    fmaxSI[n] = ( m_gainCalFacts[n] * m_gmaxSI[n] / m_gainCals[n] ) / m_opticalGain;
-                }
-
-                // if( m_timesOnLP[n] > 5 )
-                {
-                    fLP[n]    = ( m_gainCalFacts[n] * m_optGainLP[n] / m_gainCals[n] ) / m_opticalGain;
-                    fmaxLP[n] = ( m_gainCalFacts[n] * m_gmaxLP[n] / m_gainCals[n] ) / m_opticalGain;
-                }
-
-                mvs( 0, n ) = m_modeVarOL[n];
-                mvs( 1, n ) = m_modeVarSI[n];
-                mvs( 2, n ) = m_modeVarLP[n];
-            }
+            writePublishedGainArrays( f, fSI, fmaxSI, fLP, fmaxLP, mvs.data() );
 
             ImageStreamIO_UpdateIm( m_optGainStream );
             ImageStreamIO_UpdateIm( m_optGainSIStream );
@@ -3346,71 +3422,8 @@ void modalGainOpt::goptThreadExec()
                     acoeffShmimMonitorT::m_imageStream.md->write     = 1;
                     bcoeffShmimMonitorT::m_imageStream.md->write     = 1;
 
-                    if( m_dump )
-                    {
-                        for( size_t n = 0; n < m_optGainLP.size(); ++n )
-                        {
-                            // if( m_timesOnLP[n] > 5 )
-                            {
-                                fpc[n] = ( m_gainCalFacts[n] * m_optGainLP[n] / m_gainCals[n] ) / m_opticalGain;
-
-                                // To be safe we treat this as if Na and Nb can be different, but they can't be.
-                                fa[n] = m_Na[n];
-                                fb[n] = m_Nb[n];
-                                for( uint32_t k = 0; k < m_Na[n]; ++k )
-                                {
-                                    fa[1 + k] = m_goptLP[n].a()[k];
-                                }
-                                for( uint32_t k = m_Na[n]; k < acoeffShmimMonitorT::m_width - 1; ++k )
-                                {
-                                    fa[1 + k] = 0;
-                                }
-
-                                for( uint32_t k = 0; k < m_Nb[n]; ++k )
-                                {
-                                    fb[1 + k] = m_goptLP[n].b()[k];
-                                }
-                                for( uint32_t k = m_Nb[n]; k < bcoeffShmimMonitorT::m_width - 1; ++k )
-                                {
-                                    fb[1 + k] = 0;
-                                }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        for( size_t n = 0; n < m_optGainSI.size(); ++n )
-                        {
-                            // if( m_timesOnLP[n] > 5 )
-                            {
-                                fpc[n] = fpc[n] +
-                                         m_gainGain *
-                                             ( ( m_gainCalFacts[n] * m_optGainLP[n] / m_gainCals[n] ) / m_opticalGain -
-                                               fpc[n] );
-
-                                // To be safe we treat this as if Na and Nb can be different, but they can't be.
-                                fa[n] = m_Na[n];
-                                fb[n] = m_Nb[n];
-                                for( uint32_t k = 0; k < m_Na[n]; ++k )
-                                {
-                                    fa[1 + k] = fa[1 + k] + m_gainGain * ( m_goptLP[n].a()[k] - fa[1 + k] );
-                                }
-                                for( uint32_t k = m_Na[n]; k < acoeffShmimMonitorT::m_width - 1; ++k )
-                                {
-                                    fa[1 + k] = 0;
-                                }
-
-                                for( uint32_t k = 0; k < m_Nb[n]; ++k )
-                                {
-                                    fb[1 + k] = fb[1 + k] + m_gainGain * ( m_goptLP[n].b()[k] - fb[1 + k] );
-                                }
-                                for( uint32_t k = m_Nb[n]; k < bcoeffShmimMonitorT::m_width - 1; ++k )
-                                {
-                                    fb[1 + k] = 0;
-                                }
-                            }
-                        }
-                    }
+                    writePublishedPredictorArrays(
+                        fpc, fa, acoeffShmimMonitorT::m_width, fb, bcoeffShmimMonitorT::m_width, !m_dump );
 
                     ImageStreamIO_UpdateIm( &( pcGainFactShmimMonitorT::m_imageStream ) );
                     ImageStreamIO_UpdateIm( &( acoeffShmimMonitorT::m_imageStream ) );
@@ -3498,6 +3511,8 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_autoUpdate )( const pcf::IndiProper
 
     if( ipRecv.find( "toggle" ) )
     {
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+
         if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
         {
             if( !m_autoUpdate )
@@ -3525,6 +3540,8 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_updateOnce )( const pcf::IndiProper
 
     if( ipRecv.find( "request" ) )
     {
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+
         if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
         {
             m_updateOnce = true;
@@ -3544,6 +3561,8 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_dump )( const pcf::IndiProperty &ip
 
     if( ipRecv.find( "request" ) )
     {
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+
         if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
         {
             m_dump = true;
@@ -3568,7 +3587,10 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGain )( const pcf::IndiPrope
         return -1;
     }
 
-    m_opticalGain = target;
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+        m_opticalGain = target;
+    }
 
     return 0;
 }
@@ -3577,9 +3599,11 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGainUpdate )( const pcf::Ind
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_opticalGainUpdate, ipRecv );
 
-    if(ipRecv.find("toggle"))
+    if( ipRecv.find( "toggle" ) )
     {
-        if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+
+        if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
         {
             m_opticalGainUpdate = false;
         }
@@ -3587,7 +3611,7 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGainUpdate )( const pcf::Ind
         {
             m_opticalGainUpdate = true;
 
-            if(m_opticalGainSource > 0 && m_opticalGainSource < 1)
+            if( m_opticalGainSource > 0 && m_opticalGainSource < 1 )
             {
                 m_opticalGain = m_opticalGainSource;
             }
@@ -3603,16 +3627,18 @@ INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGainSource )( const pcf::Ind
 
     if( ipRecv.find( m_opticalGainElement ) )
     {
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+
         float opticalg = ipRecv[m_opticalGainElement].get<float>();
 
-        opticalg = (floor(opticalg * 100 + 0.5))/100.;
+        opticalg = ( floor( opticalg * 100 + 0.5 ) ) / 100.;
 
-        if(opticalg > 0 && opticalg < 1)
+        if( opticalg > 0 && opticalg < 1 )
         {
             m_opticalGainSource = opticalg;
         }
 
-        if(m_opticalGainUpdate)
+        if( m_opticalGainUpdate )
         {
             m_opticalGain = m_opticalGainSource;
         }
@@ -3631,7 +3657,10 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_gainGain )( const pcf::IndiProperty
         return -1;
     }
 
-    m_gainGain = target;
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+        m_gainGain = target;
+    }
 
     return 0;
 }
@@ -3642,6 +3671,8 @@ INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_emg )( const pcf::IndiProperty &ipR
 
     if( ipRecv.find( "current" ) )
     {
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+
         float emg = ipRecv["current"].get<float>();
 
         if( emg != m_emg )
