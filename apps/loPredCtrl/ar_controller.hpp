@@ -5,6 +5,7 @@
 
 #include "utils.hpp"
 #include "recursive_least_squares.hpp"
+#include "qrd_rls.hpp"
 
 namespace DDSPC
 {
@@ -13,6 +14,7 @@ class PredictiveController{
 
 	private:
         RecursiveLeastSquares* rls;
+        QRDRecursiveLeastSquares* qrd_rls;
 
         uint buffer_size;
         uint measurement_head {0};
@@ -25,7 +27,6 @@ class PredictiveController{
         bool do_switch_regularization_matrix {false};
         Matrix regularization_matrix_01;
         Matrix regularization_matrix_02;
-
 
         Matrix controller;
         Matrix integrator;
@@ -42,12 +43,18 @@ class PredictiveController{
         int num_correlations;
 
 	public:
+        bool use_qrd {false};
+        
         PredictiveController(int num_actuators, int num_history, int num_future, realT gain, realT gamma, realT initial_regularization, realT initial_covariance);
 		~PredictiveController();
 
         void set_regularization(realT new_regularization);
         inline Matrix get_prediction_matrix(){
-            return rls->prediction_matrix;
+            if(use_qrd){
+                return qrd_rls->prediction_matrix;
+            }else{
+                return rls->prediction_matrix;
+            }
         };
 
         void reset();
