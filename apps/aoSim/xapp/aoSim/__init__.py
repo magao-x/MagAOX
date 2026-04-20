@@ -51,6 +51,7 @@ class aoSimConfig(BaseConfig):
     lag : int = xconf.field(default=1, help="Lag in timesteps for DM command updates.")
     noise : float = xconf.field(default=0.0, help="Amplitude of noise to add to the wavefront sensor measurements.")
     frequency : float = xconf.field(default=0.5, help="Frequency in Hz at which the AO simulation loop runs.")
+    amplitude : float = xconf.field(default=1.0, help="The amplitude for the sine wave.")
 
 class aoSim(XDevice):
     """Adaptive Optics System Simulator.
@@ -78,7 +79,7 @@ class aoSim(XDevice):
         self._disturbance = Image('aoSim_disturbance')
 
         self._t = np.array([0], dtype=np.float32)
-        self._dt = np.array([0.01], dtype=np.float32)
+        self._dt = np.array([0.001], dtype=np.float32)
         self._current_disturbance = np.zeros((self._nmodes, 1), dtype=np.float32)
         self._current_dm_state = np.zeros((self._nmodes, 1), dtype=np.float32)
 
@@ -87,6 +88,7 @@ class aoSim(XDevice):
 
         self._noise = self.config.noise
         self._frequency = self.config.frequency
+        self._amplitude = self.config.amplitude
         # Update the dm first so that the current shape in the shared memory is correct
         #  before the first WFS update, which relies on the current DM state.
         self.update_dm()
@@ -129,14 +131,14 @@ class aoSim(XDevice):
     def update_wfs(self):
         """Update the wavefront sensor measurement in shared memory.
         """
-        self.err = self._current_disturbance + self._current_dm_state 
+        self.err = self._current_disturbance + np.nan_to_num(self._current_dm_state)
         self.err += self._noise * np.random.randn(self._nmodes, 1).astype(np.float32)
         self._wfs.write(self.err)
 
     def update_disturbance(self):
         """Update the atmospheric/system disturbance for this timestep.
         """
-        self._current_disturbance = 0.1 * np.sin(2 * np.pi * self._frequency * self._t) * np.ones((self._nmodes, 1), dtype=np.float32)
+        self._current_disturbance = self._amplitude * np.sin(2 * np.pi * self._frequency * self._t) * np.ones((self._nmodes, 1), dtype=np.float32)
         self._disturbance.write(self._current_disturbance)
 
     def loop(self):

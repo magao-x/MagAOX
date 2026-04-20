@@ -80,9 +80,9 @@ using namespace mx::improc;
 
     // The predictive control parameters
     realT m_gainCtrl {0.0};
-    realT m_regularizationCtrl {1.0};
+    realT m_regularizationCtrl {100.0};
     realT m_gammaCtrl {1.00};
-    realT m_covarianceCtrl {100000.0};
+    realT m_covarianceCtrl {1.0};
 
     int m_num_modes {1};
     int m_history {5};
@@ -98,6 +98,7 @@ using namespace mx::improc;
 
     // Process control parameters
     bool is_learning {false};
+    bool is_std_learning {false};
     bool is_predictive_control {false};
     bool is_integrating {false};
 
@@ -117,6 +118,7 @@ using namespace mx::improc;
     bool do_reset_model {false};
     bool do_trigger_load {false};
     bool do_trigger_save {false};
+    bool use_qrd{true};
 
     //
     std::default_random_engine generator;
@@ -143,6 +145,7 @@ using namespace mx::improc;
     pcf::IndiProperty m_indiP_exploration;
     pcf::IndiProperty m_indiP_filename;
     pcf::IndiProperty m_indiP_learningToggle;
+    pcf::IndiProperty m_indiP_learningStdToggle;
     pcf::IndiProperty m_indiP_integratingToggle;
     pcf::IndiProperty m_indiP_predictingToggle;
     pcf::IndiProperty m_indiP_resetToggle;
@@ -158,6 +161,7 @@ using namespace mx::improc;
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_exploration );
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_filename );
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_learningToggle );
+    INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_learningStdToggle );
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_integratingToggle );
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_predictingToggle );
     INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_resetToggle );
@@ -291,6 +295,8 @@ using namespace mx::improc;
      config.add("parameters.num_modes", "", "parameters.num_modes", argType::Required, "parameters", "num_modes", false, "int", "The number of modes that will be controlled through predictive control.");
      config.add("parameters.history", "", "parameters.history", argType::Required, "parameters", "history", false, "int", "The number of past measurements for the prediction.");
      config.add("parameters.future", "", "parameters.future", argType::Required, "parameters", "future", false, "int", "The number of future steps that are predicted.");
+
+     config.add("parameters.qrd", "", "parameters.qrd", argType::Required, "parameters", "qrd", false, "bool", "The use QRD-RLS or Classic RLS.");
  }
 
  inline int loPredCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -311,14 +317,17 @@ using namespace mx::improc;
     _config(m_num_modes, "parameters.num_modes");
     _config(m_history, "parameters.history");
     _config(m_future, "parameters.future");
+    _config(use_qrd, "parameters.qrd");
 
 	std::cout << "Gain " << m_gainCtrl << std::endl;
     std::cout << "Regularization " << m_regularizationCtrl << std::endl;
+    std::cout << "Covariance " << m_covarianceCtrl << std::endl;
     std::cout << "Gamma " << m_gammaCtrl << std::endl;
 
     std::cout << "num modes " << m_num_modes << std::endl;
     std::cout << "History " << m_history << std::endl;
     std::cout << "Future " << m_future << std::endl;
+    std::cout << "Use QRD " << use_qrd << std::endl;
 
     std::cout << "Done reading config Impl." << std::endl;
 
@@ -343,6 +352,9 @@ using namespace mx::improc;
 
      createStandardIndiToggleSw( m_indiP_learningToggle, "learn", "Learning State", "Learn Controls");
 	 registerIndiPropertyNew( m_indiP_learningToggle, INDI_NEWCALLBACK(m_indiP_learningToggle) );
+
+     createStandardIndiToggleSw( m_indiP_learningStdToggle, "learn_std", "Learning State", "Learn Controls");
+	 registerIndiPropertyNew( m_indiP_learningStdToggle, INDI_NEWCALLBACK(m_indiP_learningStdToggle) );
 
      createStandardIndiToggleSw( m_indiP_predictingToggle, "predict", "Predict State", "Predictive Controls");
 	 registerIndiPropertyNew( m_indiP_predictingToggle, INDI_NEWCALLBACK(m_indiP_predictingToggle) );
@@ -411,6 +423,12 @@ using namespace mx::improc;
 		 updateSwitchIfChanged(m_indiP_learningToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
 	 }
 
+     if(is_std_learning){
+		 updateSwitchIfChanged(m_indiP_learningStdToggle, "toggle", pcf::IndiElement::On, INDI_OK);
+	 }else{
+		 updateSwitchIfChanged(m_indiP_learningStdToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+	 }
+
      if(is_integrating){
 		 updateSwitchIfChanged(m_indiP_integratingToggle, "toggle", pcf::IndiElement::On, INDI_OK);
 	 }else{
@@ -468,6 +486,7 @@ using namespace mx::improc;
     distribution = std::normal_distribution<DDSPC::realT>(0.0, 1.0);
 
     controller = new DDSPC::PredictiveController(m_num_modes, m_history, m_future, m_gainCtrl, m_gammaCtrl, m_regularizationCtrl, m_covarianceCtrl);
+    controller->use_qrd = use_qrd;
 
     return 0;
  }
@@ -776,6 +795,7 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_learningToggle )(const pcf::IndiProper
 		is_learning = true;
 		log<text_log>("started learning", logPrio::LOG_NOTICE);
 		updateSwitchIfChanged(m_indiP_learningToggle, "toggle", pcf::IndiElement::On, INDI_BUSY);
+
       }
       return 0;
    }
@@ -788,6 +808,73 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_learningToggle )(const pcf::IndiProper
         is_learning = false;
         log<text_log>("stopped learning", logPrio::LOG_NOTICE);
         updateSwitchIfChanged(m_indiP_learningToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+      }
+      return 0;
+   }
+
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_learningStdToggle )(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_learningStdToggle.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+
+   //switch is toggled to on
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   {
+      if(!is_learning) //is actively learning so change it
+      {
+
+        if(use_set_01){
+            m_exploration_steps_02.push_back(1000);
+            m_exploration_noise_strength_02.push_back(0.1);
+            m_regularization_steps_02.push_back(100.0);
+
+            m_exploration_steps_02.push_back(1000);
+            m_exploration_noise_strength_02.push_back(0.1);
+            m_regularization_steps_02.push_back(3.0);
+
+            m_exploration_steps_02.push_back(1000);
+            m_exploration_noise_strength_02.push_back(0.1);
+            m_regularization_steps_02.push_back(0.1);
+        }else{
+            m_exploration_steps_01.push_back(1000);
+            m_exploration_noise_strength_01.push_back(0.1);
+            m_regularization_steps_01.push_back(100.0);
+
+            m_exploration_steps_01.push_back(1000);
+            m_exploration_noise_strength_01.push_back(0.1);
+            m_regularization_steps_01.push_back(3.0);
+
+            m_exploration_steps_01.push_back(1000);
+            m_exploration_noise_strength_01.push_back(0.1);
+            m_regularization_steps_01.push_back(0.1);
+        }
+
+        // Setup all the correct triggers
+        switch_exploration = true;
+        is_predictive_control = true;
+        is_learning = true;
+
+		log<text_log>("started standard learning", logPrio::LOG_NOTICE);
+		updateSwitchIfChanged(m_indiP_learningStdToggle, "toggle", pcf::IndiElement::On, INDI_BUSY);
+
+      }
+      return 0;
+   }
+
+   //switch is toggle to off
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+   {
+      if(is_learning) //is actively learning so change it
+      {
+        is_learning = false;
+        log<text_log>("stopped STD learning", logPrio::LOG_NOTICE);
+        updateSwitchIfChanged(m_indiP_learningStdToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
       }
       return 0;
    }
