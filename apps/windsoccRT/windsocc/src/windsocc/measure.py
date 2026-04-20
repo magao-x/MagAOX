@@ -921,7 +921,7 @@ def main():
             Creating it...")
         os.makedirs(output_dir, exist_ok=True)
     config_params = parse_config_file(path_yaml)
-    min_cluster_size = config_params.get("MIN_CLUSTER_SIZE", 5)
+    min_cluster_size = int(np.asarray(config_params.get("MIN_CLUSTER_SIZE", 5)).item())
 
     if args.profile:
         profile_path = args.profile_output

@@ -271,7 +271,7 @@ def plot_wind_track_clusters(
     # if legend_elements:
     #     ax.legend(handles=legend_elements, loc="best", fontsize=8)
 
-    ax.set_aspect("equal", adjustable="box")
+    # ax.set_aspect("equal", adjustable="box")
     fig.tight_layout()
     out_png_dir = os.path.dirname(os.path.abspath(output_png))
     if out_png_dir:

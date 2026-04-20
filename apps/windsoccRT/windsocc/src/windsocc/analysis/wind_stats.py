@@ -40,6 +40,7 @@ def cluster_wind_tracks_hdbscan(
     X: np.ndarray,
     *,
     min_cluster_size: int = 3,
+    cluster_selection_epsilon: float = 0.0,
     **kwargs: Any,
 ) -> tuple[np.ndarray, np.ndarray, HDBSCAN | None]:
     """
@@ -49,11 +50,25 @@ def cluster_wind_tracks_hdbscan(
     """
     if X.size == 0 or X.shape[0] == 0:
         return np.array([], dtype=np.int64), np.array([], dtype=np.float64), None
+    # HDBSCAN's Cython layer expects Python scalars; numpy scalar types from YAML/config
+    # can raise: TypeError: only 0-dimensional arrays can be converted to Python scalars.
+    mcs = int(np.asarray(min_cluster_size).item())
+    eps = float(np.asarray(cluster_selection_epsilon).item())
+    X_fit = np.ascontiguousarray(np.asarray(X, dtype=np.float64), dtype=np.float64)
+    hdb_kwargs = dict(kwargs)
+    if "min_samples" in hdb_kwargs and hdb_kwargs["min_samples"] is not None:
+        hdb_kwargs["min_samples"] = int(np.asarray(hdb_kwargs["min_samples"]).item())
+    hdb_kwargs.setdefault("copy", False)
+    # sklearn's HDBSCAN: any cluster_selection_epsilon > 0 runs epsilon_search in Cython
+    # (_tree.pyx traverse_upwards). On Python 3.13 + current sklearn, that path can raise
+    # TypeError: only 0-dimensional arrays can be converted to Python scalars. Epsilon=0
+    # skips that branch and uses plain EOM cluster selection.
     model = HDBSCAN(
-        min_cluster_size=min_cluster_size,
-        **kwargs,
+        cluster_selection_epsilon=eps,
+        min_cluster_size=mcs,
+        **hdb_kwargs,
     )
-    model.fit(X)
+    model.fit(X_fit)
     labels = np.asarray(model.labels_, dtype=np.int64)
     probs = np.asarray(model.probabilities_, dtype=np.float64)
     return labels, probs, model
@@ -79,10 +94,11 @@ def per_cluster_vu_vv_stats(
         pts = X[mask]
         if pts.shape[0] == 0:
             continue
-        vu = pts[:, 0]
-        vv = pts[:, 1]
+        vv = pts[:, 0]
+        vu = pts[:, 1]
         speeds = np.sqrt(vu**2 + vv**2)
-        directions = np.arctan2(vv, vu)
+        # directions = np.arctan2(vv, vu)
+        directions = np.arctan2(vu, vv)
         std_speeds = np.std(speeds)
         std_directions = np.std(directions)
         mean_vu = float(np.mean(vu))
@@ -90,7 +106,7 @@ def per_cluster_vu_vv_stats(
         mean_vv = float(np.mean(vv))
         std_vv = float(np.std(vv))
         mean_speed = np.sqrt(mean_vu**2 + mean_vv**2)
-        mean_dir_rad = np.arctan2(np.mean(vv), np.mean(vu))
+        mean_dir_rad = np.mean(directions)
         mean_dir_deg = np.degrees(mean_dir_rad)
         mean_dir_deg = (mean_dir_deg + 360.0) % 360.0
         rows.append(
