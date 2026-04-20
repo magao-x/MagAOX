@@ -19,17 +19,10 @@ import re
 from pathlib import Path
 
 import imageio
-import yaml
 
+from windsocc.io.config_handling import parse_config_file
 _FRAME_RE = re.compile(r"^frame_(\d+)\.png$", re.IGNORECASE)
 
-
-def _parse_config(data_dir: str) -> dict:
-    path = os.path.join(os.path.abspath(data_dir), "ws_config.yaml")
-    if not os.path.isfile(path):
-        return {}
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
 
 
 def resolve_fps(config: dict, cli_fps: float | None) -> float:
@@ -160,7 +153,7 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     args = parse_args()
     data_dir = os.path.abspath(args.data_dir)
-    config = _parse_config(data_dir)
+    config = parse_config_file(os.path.join(data_dir, "ws_config.yaml"))
 
     if args.measure_results:
         measure_results = os.path.abspath(args.measure_results)

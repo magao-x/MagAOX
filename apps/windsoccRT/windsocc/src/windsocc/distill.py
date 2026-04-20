@@ -10,7 +10,7 @@ import os
 import re
 import glob
 import argparse
-import yaml
+from windsocc.io.config_handling import parse_config_file
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -28,12 +28,6 @@ DEFAULT_TEMPLATE_SIZE = 65
 _BATCH_UTC_TOKEN_RE = re.compile(r"(?<!\d)(\d{8}T\d{6}\d{6})(?!\d)")
 # Compact variant without ``T`` (and optional ``_00000`` trailer), e.g. ``camwfs_20230313071857408144000``.
 _BATCH_UTC_COMPACT_RE = re.compile(r"(?<!\d)(\d{8})(\d{6})(\d*)(?!\d)")
-
-
-def parse_config_file(config_path):
-    """Load the distill-stage config file."""
-    with open(config_path, "r") as yaml_file:
-        return yaml.safe_load(yaml_file) or {}
 
 
 def resolve_parangs_lookup_path(config_params, directory):

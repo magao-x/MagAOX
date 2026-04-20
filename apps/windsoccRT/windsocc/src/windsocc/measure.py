@@ -76,8 +76,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from astropy.io import fits
 
-import yaml
 import pandas as pd
+from windsocc.io.config_handling import parse_config_file
 os.environ["POLARS_MAX_THREADS"] = "1"
 
 import polars as pl
@@ -130,12 +130,6 @@ def parse_args():
     
     return args
 
-
-def parse_config_file(config_file: str) -> dict:
-    """Parse the configuration file."""
-    with open(config_file, 'r') as yaml_file:
-        config_params = yaml.safe_load(yaml_file)
-    return config_params
 
 
 def process_mf_response_cube_paths(mf_response_cube_paths: list) -> tuple[list, list]:

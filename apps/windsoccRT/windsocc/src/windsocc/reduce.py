@@ -35,7 +35,7 @@ import logging
 import numpy as np
 from astropy.io import fits
 from skimage.measure import block_reduce
-import yaml
+from windsocc.io.config_handling import parse_config_file
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
 # Import helper functions from your modules (ensure these exist in src/)
@@ -163,11 +163,6 @@ def save_reduced_quadrant_cubes(
 
 
 # --- Processing Functions ---
-def parse_config_file(config_path):
-    """Load the pipeline configuration file."""
-    with open(config_path, "r") as yaml_file:
-        return yaml.safe_load(yaml_file) or {}
-
 
 def resolve_config_path(path_arg, explicit_config=None):
     """

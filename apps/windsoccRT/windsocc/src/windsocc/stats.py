@@ -1,9 +1,9 @@
 import numpy as np
-from scipy.optimize import linear_sum_assignment
+
 
 import os
 import glob
-
+from windsocc.io.config_handling import parse_config_file
 
 def main():
     # stream wind data JSON files from directory

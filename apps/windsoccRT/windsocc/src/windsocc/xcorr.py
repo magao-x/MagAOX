@@ -17,7 +17,7 @@ import logging
 import numpy as np
 from astropy.io import fits
 from datetime import datetime
-import yaml
+from windsocc.io.config_handling import parse_config_file
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
 import sys
@@ -291,12 +291,6 @@ def save_xcorr_products(cc_cube, bias, header, output_path, bias_path):
     fits.writeto(bias_path, bias, overwrite=True)
 
 
-def parse_config_file(config_path):
-    """Load the xcorr-stage config file."""
-    with open(config_path, "r") as yaml_file:
-        return yaml.safe_load(yaml_file) or {}
-
-
 def resolve_xcorr_settings(config_params, overrides=None):
     """Resolve xcorr settings from config with optional overrides."""
     overrides = overrides or {}
@@ -541,8 +535,7 @@ def main():
     if os.path.exists(config_path):
         logging.info(f"Loading config file: {config_path}")
         try:
-            with open(config_path, 'r') as yaml_file:
-                config_params = yaml.safe_load(yaml_file) or {}
+            config_params = parse_config_file(config_path)
             logging.info("Config file loaded successfully!")
         except Exception as e:
             logging.warning(f"Error reading config file: {str(e)}. \
