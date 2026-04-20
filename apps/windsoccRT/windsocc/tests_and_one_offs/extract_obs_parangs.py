@@ -2,6 +2,10 @@
 """
 One-off: read PARANG and timestamps from camsci FITS headers under a raw data directory.
 
+TODO: is there a way to get the PARANG from the camwfs FITS headers? How would
+this work in real-time mode?
+
+
 Writes PARANG, timestamp, and seconds elapsed since the earliest timestamp in the batch.
 """
 
