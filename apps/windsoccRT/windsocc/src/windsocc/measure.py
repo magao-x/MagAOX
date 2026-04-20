@@ -684,8 +684,8 @@ def process_mf_response_cubes(
         for track in wind_summary.get("tracks", []):
             track["inferred_origin"] = inferred_origin_means_vetted.get(track["track_id"])
         pa_offset_deg = float(config_params.get("PA_OFFSET", 0) or 0)
-        if parity_flip_needed:
-            pa_offset_deg = -pa_offset_deg
+        # if parity_flip_needed:
+        #     pa_offset_deg = -pa_offset_deg
         _apply_direction_corrections_to_rows(wind_summary.get("tracks", []), pa_offset_deg)
         wind_summaries_all.append(wind_summary)
         wind_save_path = os.path.join(wind_data_dir, f"{cube_stem}_wind_attributes.json")
@@ -921,6 +921,7 @@ def main():
             Creating it...")
         os.makedirs(output_dir, exist_ok=True)
     config_params = parse_config_file(path_yaml)
+    min_cluster_size = config_params.get("MIN_CLUSTER_SIZE", 5)
 
     if args.profile:
         profile_path = args.profile_output
@@ -960,7 +961,10 @@ def main():
         if X.shape[0] == 0:
             logging.info("No vetted wind tracks for clustering; skipping HDBSCAN outputs.")
         else:
-            labels, probabilities, _hdb = cluster_wind_tracks_hdbscan(X)
+            labels, probabilities, _hdb = cluster_wind_tracks_hdbscan(
+                X,
+                min_cluster_size=min_cluster_size,
+            )
             stats_rows, noise_count = per_cluster_vu_vv_stats(X, labels)
             cluster_png = os.path.join(output_dir, "wind_track_clusters.png")
             cluster_txt = os.path.join(output_dir, "wind_track_stats.txt")

@@ -235,6 +235,7 @@ def plot_wind_track_clusters(
     # else:
     #     ax.set_title("Wind tracks in velocity space (HDBSCAN)")
     legend_elements: list[Line2D] = []
+    # add the noise to the legend
     if np.any(noise):
         legend_elements.append(
             Line2D(
@@ -267,21 +268,9 @@ def plot_wind_track_clusters(
                 markersize=8,
             )
         )
-    if legend_elements:
-        ax.legend(handles=legend_elements, loc="best", fontsize=8)
-    # add the noise to the legend
-    legend_elements.append(
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            label="Noise",
-            markerfacecolor="lightgray",
-            markersize=8,
-            alpha=0.5,
-        )
-    )
+    # if legend_elements:
+    #     ax.legend(handles=legend_elements, loc="best", fontsize=8)
+
     ax.set_aspect("equal", adjustable="box")
     fig.tight_layout()
     out_png_dir = os.path.dirname(os.path.abspath(output_png))

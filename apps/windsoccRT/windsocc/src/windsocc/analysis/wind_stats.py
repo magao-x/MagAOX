@@ -40,7 +40,6 @@ def cluster_wind_tracks_hdbscan(
     X: np.ndarray,
     *,
     min_cluster_size: int = 3,
-    min_samples: int = 3,
     **kwargs: Any,
 ) -> tuple[np.ndarray, np.ndarray, HDBSCAN | None]:
     """
@@ -52,7 +51,6 @@ def cluster_wind_tracks_hdbscan(
         return np.array([], dtype=np.int64), np.array([], dtype=np.float64), None
     model = HDBSCAN(
         min_cluster_size=min_cluster_size,
-        min_samples=min_samples,
         **kwargs,
     )
     model.fit(X)
