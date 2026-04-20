@@ -25,7 +25,7 @@ RecursiveLeastSquares::RecursiveLeastSquares(int num_predictors, int num_feature
 	inverse_covariance.resize(_num_features, _num_features);
 	inverse_covariance.setZero();
 	for(int i=0; i < _num_features; i++)
-		inverse_covariance(i, i) = _initial_covariance;
+		inverse_covariance(i, i) = 1 / _initial_covariance;
 
 	err.resize(_num_predictors, 1);
 	err.setZero();
@@ -47,7 +47,7 @@ void RecursiveLeastSquares::reset(){
 	inverse_covariance.resize(_num_features, _num_features);
 	inverse_covariance.setZero();
 	for(int i=0; i < _num_features; i++)
-		inverse_covariance(i, i) = _initial_covariance;
+		inverse_covariance(i, i) = 1 / _initial_covariance;
 }
 
 // I want to change this interface to make it easier to use.
