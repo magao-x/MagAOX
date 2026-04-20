@@ -226,6 +226,29 @@ def plot_wind_track_clusters(
             zorder=2,
             edgecolors="none",
         )
+        centroid_u = float(np.mean(vv[mask]))
+        centroid_v = float(np.mean(vu[mask]))
+        ax.scatter(
+            [centroid_u],
+            [centroid_v],
+            s=190,
+            marker="o",
+            facecolors=[(*rgb, 0.36)],
+            edgecolors=[(*rgb, 1.0)],
+            linewidths=1.6,
+            zorder=4,
+        )
+        ax.text(
+            centroid_u,
+            centroid_v,
+            f"{int(lab)}",
+            color="white",
+            ha="center",
+            va="center",
+            fontsize=8,
+            fontweight="bold",
+            zorder=5,
+        )
 
     ax.set_ylabel(r"$V$-component Speed (m/s)")
     ax.set_xlabel(r"$U$-component Speed (m/s)")
@@ -249,27 +272,8 @@ def plot_wind_track_clusters(
                 alpha=0.5,
             )
         )
-    for idx, lab in enumerate(cluster_ids):
-        rgb = cmap(idx % 10)[:3]
-        u_mean_v = np.mean(vu[labels == lab])
-        v_mean_v = np.mean(vv[labels == lab])
-        mean_speed = np.sqrt(u_mean_v**2 + v_mean_v**2)
-        mean_dir_rad = np.arctan2(v_mean_v, u_mean_v)
-        mean_dir_deg = np.degrees(mean_dir_rad)
-        mean_dir_deg = (mean_dir_deg + 360.0) % 360.0
-        legend_elements.append(
-            Line2D(
-                [0],
-                [0],
-                marker="o",
-                color="w",
-                label=rf"Layer {int(lab)} (avg $v$={mean_speed:.1f} m/s, avg $\theta$={mean_dir_deg:.1f}$^\circ$)",
-                markerfacecolor=rgb,
-                markersize=8,
-            )
-        )
-    # if legend_elements:
-    #     ax.legend(handles=legend_elements, loc="best", fontsize=8)
+    if legend_elements:
+        ax.legend(handles=legend_elements, loc="best", fontsize=8)
 
     # ax.set_aspect("equal", adjustable="box")
     fig.tight_layout()
