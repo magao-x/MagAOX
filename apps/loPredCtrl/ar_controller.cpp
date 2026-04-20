@@ -32,6 +32,7 @@ PredictiveController::PredictiveController(int num_actuators, int num_history, i
 
     // The learner
     rls = new RecursiveLeastSquares(num_predictors, num_features, gamma, initial_covariance);
+    qrd_rls = new QRDRecursiveLeastSquares(num_predictors, num_features, gamma, initial_covariance);
 
     // Initializing the controller
     controller.resize(_num_modes, (2 * num_history - 1) * _num_modes);
@@ -63,6 +64,7 @@ PredictiveController::PredictiveController(int num_actuators, int num_history, i
 
 PredictiveController::~PredictiveController(){
     delete rls;
+    delete qrd_rls;
 }
 
 void PredictiveController::reset(){
@@ -70,6 +72,7 @@ void PredictiveController::reset(){
     controller.setZero();
 
     rls->reset();
+    qrd_rls->reset();
 
     reset_buffers();
 
@@ -209,11 +212,16 @@ void PredictiveController::update_system(){
     prediction_vector.resize(past_measurement.rows() + past_cmd.rows() + future_cmd.rows(), 1);
     prediction_vector << future_cmd, past_cmd, past_measurement;
 
-    rls->update(&prediction_vector, &future_measurement);
+    if(use_qrd){
+        qrd_rls->update(&prediction_vector, &future_measurement);
+    }else{
+        rls->update(&prediction_vector, &future_measurement);
+    }
+    
 }
 
 void PredictiveController::update_controller(){
-    Matrix H = rls->prediction_matrix.transpose() * rls->prediction_matrix;
+    Matrix H = get_prediction_matrix().transpose() * get_prediction_matrix();
     Matrix H11 = H.block(0, 0, num_correlations, num_correlations);
     Matrix H21 = H.block(0, num_correlations, num_correlations, H.cols() - num_correlations);
 
@@ -285,6 +293,7 @@ void PredictiveController::save_state(const std::string &filename) {
     // Save matrices using utils helpers
     DDSPC::save_matrix(filename + ".controller", controller);
     rls->save_state(filename + ".rls");
+    qrd_rls->save_state(filename + ".qrd_rls");
 }
 
 void PredictiveController::load_state(const std::string &filename) {
@@ -309,6 +318,7 @@ void PredictiveController::load_state(const std::string &filename) {
     controller = DDSPC::load_matrix(filename + ".controller");
     set_regularization(_regularization);
     rls->load_state(filename + ".rls");
+    qrd_rls->load_state(filename + ".qrd_rls");
     reset_buffers();
 }
 
