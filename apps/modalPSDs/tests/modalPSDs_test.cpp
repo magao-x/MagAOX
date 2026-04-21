@@ -52,6 +52,11 @@ class modalPSDs_test : public modalPSDs
         m_meanPtrs.resize( m_meanSize );
     }
 
+    void setModeCount( size_t nModes )
+    {
+        m_nModes = nModes;
+    }
+
     void setCircBuffEntries( cbIndexT entries )
     {
         m_ampCircBuff.maxEntries( entries );
@@ -113,6 +118,32 @@ class modalPSDs_test : public modalPSDs
     cbIndexT requiredInputHistoryDepthForTest()
     {
         return requiredInputHistoryDepth();
+    }
+
+    static cbIndexT circularEntryAdvanceForTest( cbIndexT from, cbIndexT to, cbIndexT maxEntries )
+    {
+        return circularEntryAdvance( from, to, maxEntries );
+    }
+
+    std::vector<double> recomputeMeanSumsForTest() const
+    {
+        std::vector<double> meanSums;
+        recomputeMeanSums( meanSums );
+        return meanSums;
+    }
+
+    std::vector<realT> cacheMeanHeadForTest( cbIndexT count ) const
+    {
+        std::vector<realT> meanHeadCache;
+        cacheMeanHead( meanHeadCache, count );
+        return meanHeadCache;
+    }
+
+    void rollMeanSumsForTest( std::vector<double>      &meanSums,
+                              const std::vector<realT> &meanHeadCache,
+                              cbIndexT                  advance ) const
+    {
+        rollMeanSums( meanSums, meanHeadCache, advance );
     }
 
     uint32_t rawPSDHistoryDepthForTest() const
@@ -277,6 +308,71 @@ TEST_CASE( "modalPSDs PSD input windows use the exact required history depth", "
     REQUIRE( app.tsValue( 0 ) == 3 );
     REQUIRE( app.tsValue( 1 ) == 4 );
     REQUIRE( app.tsValue( 2 ) == 5 );
+}
+
+/// Verify modalPSDs rolling mean updates match a full recomputation after one overlap advance.
+/**
+ * \ingroup modalPSDs_unit_test
+ */
+TEST_CASE( "modalPSDs rolling mean update matches full recompute", "[modalPSDs]" )
+{
+    modalPSDs_test app( "modalPSDs_test_rolling_mean" );
+
+    // clang-format off
+    #ifdef MODALPSDS_TEST_DOXYGEN_REF
+    modalPSDs::circularEntryAdvance( 0, 0, 0 );
+    modalPSDs::recomputeMeanSums( *(std::vector<double> *)nullptr );
+    modalPSDs::rollMeanSums( *(std::vector<double> *)nullptr, *(std::vector<modalPSDs::realT> *)nullptr, 0 );
+    modalPSDs::cacheMeanHead( *(std::vector<modalPSDs::realT> *)nullptr, 0 );
+    #endif
+    // clang-format on
+
+    app.setModeCount( 2 );
+    app.setWindowSizes( 4, 4 );
+    app.setCircBuffEntries( 10 );
+
+    modalPSDs::realT samples[12][2];
+    for( int n = 0; n < 12; ++n )
+    {
+        samples[n][0] = static_cast<modalPSDs::realT>( n );
+        samples[n][1] = static_cast<modalPSDs::realT>( 100 + 2 * n );
+    }
+
+    for( int n = 0; n < 10; ++n )
+    {
+        app.pushSample( samples[n] );
+    }
+
+    modalPSDs_test::snapshotT firstSnap;
+    REQUIRE( app.loadWindows( firstSnap ) );
+
+    auto firstSums = app.recomputeMeanSumsForTest();
+    auto firstHead = app.cacheMeanHeadForTest( 2 );
+
+    modalPSDs::cbIndexT firstTsRef   = app.latestRef( firstSnap, 4 );
+    modalPSDs::cbIndexT firstMeanRef = app.precedingRef( firstSnap, firstTsRef, 4 );
+
+    app.pushSample( samples[10] );
+    app.pushSample( samples[11] );
+
+    modalPSDs_test::snapshotT secondSnap;
+    REQUIRE( app.loadWindows( secondSnap ) );
+
+    modalPSDs::cbIndexT secondTsRef   = app.latestRef( secondSnap, 4 );
+    modalPSDs::cbIndexT secondMeanRef = app.precedingRef( secondSnap, secondTsRef, 4 );
+
+    REQUIRE( modalPSDs_test::circularEntryAdvanceForTest( firstMeanRef, secondMeanRef, secondSnap.maxEntries ) == 2 );
+
+    auto rolledSums = firstSums;
+    app.rollMeanSumsForTest( rolledSums, firstHead, 2 );
+
+    auto recomputedSums = app.recomputeMeanSumsForTest();
+
+    REQUIRE( rolledSums.size() == recomputedSums.size() );
+    for( size_t n = 0; n < rolledSums.size(); ++n )
+    {
+        REQUIRE( rolledSums[n] == Approx( recomputedSums[n] ) );
+    }
 }
 
 SCENARIO( "Snapshot-based circular-buffer loads reject stale snapshots", "[modalPSDs]" )

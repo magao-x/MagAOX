@@ -171,9 +171,30 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
                                              cbIndexT count                     ///< [in] the requested window length
     );
 
+    /// Compute the forward logical advance between two circular-buffer reference entries.
+    static cbIndexT circularEntryAdvance( cbIndexT from,      ///< [in] earlier logical entry
+                                          cbIndexT to,        ///< [in] later logical entry
+                                          cbIndexT maxEntries ///< [in] circular-buffer capacity
+    );
+
     /// Load the PSD and mean pointer windows from a single validated snapshot.
     bool loadPsdInputWindows( ampCircBuffT::snapshotT &sn ///< [out] the snapshot used for both windows
     );
+
+    /// Recompute the per-mode sums for the full mean window from the currently loaded pointers.
+    void recomputeMeanSums( std::vector<double> &meanSums /**< [out] per-mode sums over the full mean window */ ) const;
+
+    /// Update per-mode mean sums using the cached oldest slice and the newest loaded mean-window slice.
+    void
+    rollMeanSums( std::vector<double>      &meanSums,      /**< [in,out] per-mode sums to update */
+                  const std::vector<realT> &meanHeadCache, /**< [in] cached oldest slice from the prior mean window */
+                  cbIndexT                  advance /**< [in] number of samples by which the mean window advanced */
+    ) const;
+
+    /// Cache the oldest slice of the currently loaded mean window for the next rolling-mean update.
+    void cacheMeanHead( std::vector<realT> &meanHeadCache, /**< [out] storage for the cached oldest slice */
+                        cbIndexT            count          /**< [in] number of mean-window samples to cache */
+    ) const;
 
     /// Calculate how many raw PSD estimates are needed to cover the requested averaging time.
     int desiredPSDAverageCount() const;
@@ -784,6 +805,12 @@ void modalPSDs::psdThreadExec()
 {
     m_psdThreadID = syscall( SYS_gettid );
 
+    std::vector<double>     meanSums;
+    std::vector<realT>      meanHeadCache;
+    ampCircBuffT::snapshotT prevSnap;
+    cbIndexT                prevMeanRefEntry = 0;
+    bool                    haveMeanSums     = false;
+
     while( m_psdThreadInit == true && shutdown() == 0 )
     {
         sleep( 1 );
@@ -832,6 +859,12 @@ void modalPSDs::psdThreadExec()
 
         std::cerr << "all grown.  starting to calculate\n";
 
+        meanSums.assign( m_nModes, 0 );
+        meanHeadCache.clear();
+        prevSnap         = ampCircBuffT::snapshotT();
+        prevMeanRefEntry = 0;
+        haveMeanSums     = false;
+
         while( m_psdRestarting.load( std::memory_order_acquire ) == false && !shutdown() )
         {
             // Used to check if we are getting too behind
@@ -843,15 +876,40 @@ void modalPSDs::psdThreadExec()
                 continue;
             }
 
+            cbIndexT tsRefEntry   = latestWindowRefEntry( tsSnap, m_tsSize );
+            cbIndexT meanRefEntry = precedingWindowRefEntry( tsSnap, tsRefEntry, m_meanSize );
+
+            cbIndexT meanCacheCount = std::min( m_meanSize, m_tsOverlapSize );
+            if( meanCacheCount <= 0 )
+            {
+                meanCacheCount = 1;
+            }
+
+            bool canRollMean = false;
+            if( haveMeanSums == true && prevSnap.maxEntries == tsSnap.maxEntries && meanHeadCache.size() > 0 )
+            {
+                cbIndexT advance = circularEntryAdvance( prevMeanRefEntry, meanRefEntry, tsSnap.maxEntries );
+                canRollMean      = ( advance == meanCacheCount );
+
+                if( canRollMean == true )
+                {
+                    rollMeanSums( meanSums, meanHeadCache, advance );
+                }
+            }
+
+            if( canRollMean == false )
+            {
+                recomputeMeanSums( meanSums );
+            }
+
+            cacheMeanHead( meanHeadCache, meanCacheCount );
+            prevSnap         = tsSnap;
+            prevMeanRefEntry = meanRefEntry;
+            haveMeanSums     = true;
+
             for( size_t m = 0; m < m_nModes; ++m ) // Loop over each mode
             {
-                // get mean going over avg time
-                realT mn = 0;
-                for( cbIndexT n = 0; n < m_meanSize; ++n )
-                {
-                    mn += m_meanPtrs[n][m];
-                }
-                mn /= m_meanSize;
+                realT mn = static_cast<realT>( meanSums[m] / m_meanSize );
 
                 double var = 0;
 
@@ -1055,6 +1113,21 @@ modalPSDs::precedingWindowRefEntry( const ampCircBuffT::snapshotT &sn, cbIndexT 
     return sn.maxEntries + refEntry - count;
 }
 
+modalPSDs::cbIndexT modalPSDs::circularEntryAdvance( cbIndexT from, cbIndexT to, cbIndexT maxEntries )
+{
+    if( maxEntries <= 0 )
+    {
+        return 0;
+    }
+
+    if( to >= from )
+    {
+        return to - from;
+    }
+
+    return maxEntries + to - from;
+}
+
 bool modalPSDs::loadPsdInputWindows( ampCircBuffT::snapshotT &sn )
 {
     for( int retry = 0; retry < 3; ++retry )
@@ -1092,6 +1165,57 @@ bool modalPSDs::loadPsdInputWindows( ampCircBuffT::snapshotT &sn )
     }
 
     return false;
+}
+
+void modalPSDs::recomputeMeanSums( std::vector<double> &meanSums ) const
+{
+    meanSums.assign( m_nModes, 0 );
+
+    for( cbIndexT n = 0; n < m_meanSize; ++n )
+    {
+        const realT *sample = m_meanPtrs[n];
+        for( size_t m = 0; m < m_nModes; ++m )
+        {
+            meanSums[m] += sample[m];
+        }
+    }
+}
+
+void modalPSDs::rollMeanSums( std::vector<double>      &meanSums,
+                              const std::vector<realT> &meanHeadCache,
+                              cbIndexT                  advance ) const
+{
+    if( advance <= 0 )
+    {
+        return;
+    }
+
+    for( cbIndexT n = 0; n < advance; ++n )
+    {
+        const realT *oldSample = meanHeadCache.data() + static_cast<size_t>( n ) * m_nModes;
+        const realT *newSample = m_meanPtrs[m_meanSize - advance + n];
+
+        for( size_t m = 0; m < m_nModes; ++m )
+        {
+            meanSums[m] += newSample[m] - oldSample[m];
+        }
+    }
+}
+
+void modalPSDs::cacheMeanHead( std::vector<realT> &meanHeadCache, cbIndexT count ) const
+{
+    if( count <= 0 )
+    {
+        meanHeadCache.clear();
+        return;
+    }
+
+    meanHeadCache.resize( static_cast<size_t>( count ) * m_nModes );
+
+    for( cbIndexT n = 0; n < count; ++n )
+    {
+        memcpy( meanHeadCache.data() + static_cast<size_t>( n ) * m_nModes, m_meanPtrs[n], m_nModes * sizeof( realT ) );
+    }
 }
 
 int modalPSDs::desiredPSDAverageCount() const
