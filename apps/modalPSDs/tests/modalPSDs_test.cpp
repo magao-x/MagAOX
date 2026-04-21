@@ -41,7 +41,8 @@ class modalPSDs_test : public modalPSDs
         XWCTEST_SETUP_INDI_NEW_PROP( psdTime );
         XWCTEST_SETUP_INDI_NEW_PROP( psdAvgTime );
         XWCTEST_SETUP_INDI_NEW_PROP( meanTime );
-        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_fpsSource, modeamps, fps )
+        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_fpsSource, modeamps, fps );
+        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_loop, loopdev, loop_state );
     }
 
     void setWindowSizes( cbIndexT tsSize, cbIndexT meanSize )
@@ -62,9 +63,20 @@ class modalPSDs_test : public modalPSDs
         m_ampCircBuff.maxEntries( entries );
     }
 
+    cbIndexT circBuffSize() const
+    {
+        return m_ampCircBuff.size();
+    }
+
     void pushSample( realT *ptr )
     {
         m_ampCircBuff.nextEntry( ptr );
+    }
+
+    int processImageForTest( realT *ptr )
+    {
+        dev::shmimT dummy;
+        return processImage( ptr, dummy );
     }
 
     bool loadWindows( snapshotT &sn )
@@ -103,6 +115,39 @@ class modalPSDs_test : public modalPSDs
     void setPSDHistoryFloor( int nPSDHistory )
     {
         m_nPSDHistory = nPSDHistory;
+    }
+
+    void
+    configureLoopState( const std::string &device, const std::string &property, const std::string &element = "toggle" )
+    {
+        m_loopStateDevice   = device;
+        m_loopStateProperty = property;
+        m_loopStateElement  = element;
+        m_useLoopState      = !m_loopStateDevice.empty();
+        m_loopClosed.store( m_useLoopState == false, std::memory_order_release );
+
+        m_indiP_loop.setDevice( device );
+        m_indiP_loop.setName( property );
+    }
+
+    void setLoopClosedForTest( bool loopClosed )
+    {
+        m_loopClosed.store( loopClosed, std::memory_order_release );
+    }
+
+    bool acceptLoopStateFrameForTest() const
+    {
+        return acceptLoopStateFrame();
+    }
+
+    bool usesLoopStateForTest() const
+    {
+        return m_useLoopState;
+    }
+
+    bool loopClosedForTest() const
+    {
+        return m_loopClosed.load( std::memory_order_acquire );
     }
 
     int desiredPSDAverageCountForTest() const
@@ -186,6 +231,7 @@ SCENARIO( "INDI Callbacks", "[modalPSDs]" )
     XWCTEST_INDI_NEW_CALLBACK( modalPSDs, psdAvgTime );
     XWCTEST_INDI_NEW_CALLBACK( modalPSDs, meanTime );
     XWCTEST_INDI_SET_CALLBACK( modalPSDs, m_indiP_fpsSource, modeamps, fps );
+    XWCTEST_INDI_SET_CALLBACK( modalPSDs, m_indiP_loop, loopdev, loop_state );
 }
 
 /// Verify modalPSDs derives PSD averaging depth from psdTime and psdAvgTime while mean sizing follows meanTime.
@@ -413,6 +459,44 @@ TEST_CASE( "modalPSDs rolling PSD sum update matches full recompute", "[modalPSD
     {
         REQUIRE( rollingSum[n] == Approx( recomputedSum[n] ) );
     }
+}
+
+/// Verify modalPSDs optionally gates PSD ingestion on the configured loop-state property.
+/**
+ * \ingroup modalPSDs_unit_test
+ */
+TEST_CASE( "modalPSDs loop-state gating is optional and blocks open-loop frames", "[modalPSDs]" )
+{
+    modalPSDs_test app( "modalPSDs_test_loop_state" );
+
+    // clang-format off
+    #ifdef MODALPSDS_TEST_DOXYGEN_REF
+    modalPSDs::acceptLoopStateFrame();
+    modalPSDs::setCallBack_m_indiP_loop( pcf::IndiProperty() );
+    #endif
+    // clang-format on
+
+    modalPSDs::realT sample[1] = { 1.0F };
+
+    app.setCircBuffEntries( 4 );
+    REQUIRE( app.usesLoopStateForTest() == false );
+    REQUIRE( app.acceptLoopStateFrameForTest() == true );
+    REQUIRE( app.processImageForTest( sample ) == 0 );
+    REQUIRE( app.circBuffSize() == 1 );
+
+    app.setCircBuffEntries( 4 );
+    app.configureLoopState( "loopdev", "loop_state" );
+    REQUIRE( app.usesLoopStateForTest() == true );
+    REQUIRE( app.loopClosedForTest() == false );
+    REQUIRE( app.acceptLoopStateFrameForTest() == false );
+    REQUIRE( app.processImageForTest( sample ) == 0 );
+    REQUIRE( app.circBuffSize() == 0 );
+
+    app.setLoopClosedForTest( true );
+    REQUIRE( app.loopClosedForTest() == true );
+    REQUIRE( app.acceptLoopStateFrameForTest() == true );
+    REQUIRE( app.processImageForTest( sample ) == 0 );
+    REQUIRE( app.circBuffSize() == 1 );
 }
 
 SCENARIO( "Snapshot-based circular-buffer loads reject stale snapshots", "[modalPSDs]" )

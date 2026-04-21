@@ -76,6 +76,14 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
     std::string m_fpsProperty{ "fps" };    ///< Property name for getting fps to set circular buffer length.
     std::string m_fpsElement{ "current" }; ///< Element name for getting fps to set circular buffer length.
 
+    std::string m_loopStateDevice;                   ///< Optional device name providing loop-state gating updates.
+    std::string m_loopStateProperty{ "loop_state" }; ///< Optional property name providing loop-state gating updates.
+    std::string m_loopStateElement{ "toggle" };      ///< Element name used to interpret closed-loop state.
+
+    bool m_useLoopState{ false }; ///< Whether PSD ingestion is gated by an external loop-state property.
+
+    std::atomic<bool> m_loopClosed{ true }; ///< Current closed-loop state used to gate PSD ingestion and processing.
+
     realT m_fpsTol{ 0 }; ///< The tolerance for detecting a change in FPS.
 
     std::atomic<realT> m_psdTime{ 1 };     ///< The length of time over which to calculate PSDs.  The default is 1 sec.
@@ -217,6 +225,9 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
                                 size_t       planeElements /**< [in] number of elements per raw PSD plane */
     );
 
+    /// Determine whether incoming frames should currently be accepted into the PSD history.
+    bool acceptLoopStateFrame() const;
+
     /// Calculate how many raw PSD estimates are needed to cover the requested averaging time.
     int desiredPSDAverageCount() const;
 
@@ -303,6 +314,7 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
     pcf::IndiProperty m_indiP_meanTime;
     pcf::IndiProperty m_indiP_overSize;
     pcf::IndiProperty m_indiP_fpsSource;
+    pcf::IndiProperty m_indiP_loop;
     pcf::IndiProperty m_indiP_fps;
 
   public:
@@ -311,6 +323,7 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
     INDI_NEWCALLBACK_DECL( modalPSDs, m_indiP_meanTime );
     INDI_NEWCALLBACK_DECL( modalPSDs, m_indiP_overSize );
     INDI_SETCALLBACK_DECL( modalPSDs, m_indiP_fpsSource );
+    INDI_SETCALLBACK_DECL( modalPSDs, m_indiP_loop );
 };
 
 modalPSDs::modalPSDs() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
@@ -403,6 +416,36 @@ void modalPSDs::setupConfig()
                 "realT",
                 "Default FPS at startup, will enable changing average length with psdTime before INDI available." );
 
+    config.add( "circBuff.loopStateDevice",
+                "",
+                "circBuff.loopStateDevice",
+                argType::Required,
+                "circBuff",
+                "loopStateDevice",
+                false,
+                "string",
+                "Optional device name providing loop-state gating. If unset, PSDs ignore loop state." );
+
+    config.add( "circBuff.loopStateProperty",
+                "",
+                "circBuff.loopStateProperty",
+                argType::Required,
+                "circBuff",
+                "loopStateProperty",
+                false,
+                "string",
+                "Optional property name providing loop-state gating. Default is 'loop_state'." );
+
+    config.add( "circBuff.loopStateElement",
+                "",
+                "circBuff.loopStateElement",
+                argType::Required,
+                "circBuff",
+                "loopStateElement",
+                false,
+                "string",
+                "Element name interpreted as the closed-loop state. Default is 'toggle'." );
+
     config.add( "circBuff.psdTime",
                 "",
                 "circBuff.psdTime",
@@ -449,6 +492,12 @@ int modalPSDs::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fpsProperty, "circBuff.fpsProperty" );
     _config( m_fpsElement, "circBuff.fpsElement" );
     _config( m_fpsTol, "circBuff.fpsTol" );
+    _config( m_loopStateDevice, "circBuff.loopStateDevice" );
+    _config( m_loopStateProperty, "circBuff.loopStateProperty" );
+    _config( m_loopStateElement, "circBuff.loopStateElement" );
+
+    m_useLoopState = !m_loopStateDevice.empty();
+    m_loopClosed.store( m_useLoopState == false, std::memory_order_release );
 
     realT psdTime = m_psdTime.load();
     _config( psdTime, "circBuff.psdTime" );
@@ -491,6 +540,11 @@ int modalPSDs::appStartup()
     }
 
     REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsDevice, m_fpsProperty );
+
+    if( m_useLoopState == true )
+    {
+        REG_INDI_SETPROP( m_indiP_loop, m_loopStateDevice, m_loopStateProperty );
+    }
 
     CREATE_REG_INDI_RO_NUMBER( m_indiP_fps, "fps", "current", "Circular Buffer" );
     m_indiP_fps.add( pcf::IndiElement( "current" ) );
@@ -809,6 +863,11 @@ int modalPSDs::allocatePSDStreams()
 int modalPSDs::processImage( void *curr_src, const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
+
+    if( acceptLoopStateFrame() == false )
+    {
+        return 0;
+    }
 
     float *f_src = static_cast<float *>( curr_src );
 
@@ -1225,6 +1284,11 @@ void modalPSDs::cacheMeanHead( std::vector<realT> &meanHeadCache, cbIndexT count
     }
 }
 
+bool modalPSDs::acceptLoopStateFrame() const
+{
+    return ( m_useLoopState == false ) || m_loopClosed.load( std::memory_order_acquire );
+}
+
 uint64_t modalPSDs::storedRawPSDCount() const
 {
     return std::min<uint64_t>( m_rawpsdStream->md->cnt0, publishedRawPSDHistoryDepth() + m_rawPSDHistoryDepth );
@@ -1470,6 +1534,32 @@ INDI_SETCALLBACK_DEFN( modalPSDs, m_indiP_fpsSource )( const pcf::IndiProperty &
     return 0;
 
 } // INDI_SETCALLBACK_DEFN(modalPSDs, m_indiP_fpsSource)
+
+INDI_SETCALLBACK_DEFN( modalPSDs, m_indiP_loop )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loop, ipRecv );
+
+    if( ipRecv.find( m_loopStateElement ) != true )
+    {
+        log<software_error>( { __FILE__, __LINE__, "No configured loop-state element in loop source." } );
+        return 0;
+    }
+
+    bool loopClosed = ( ipRecv[m_loopStateElement].getSwitchState() == pcf::IndiElement::On );
+
+    if( loopClosed != m_loopClosed.load( std::memory_order_acquire ) )
+    {
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        m_loopClosed.store( loopClosed, std::memory_order_release );
+        shmimMonitorT::m_restart = true;
+
+        log<text_log>( std::string( "loop state is now " ) + ( loopClosed ? "closed" : "open" ), logPrio::LOG_NOTICE );
+    }
+
+    return 0;
+
+} // INDI_SETCALLBACK_DEFN(modalPSDs, m_indiP_loop)
 
 } // namespace app
 } // namespace MagAOX
