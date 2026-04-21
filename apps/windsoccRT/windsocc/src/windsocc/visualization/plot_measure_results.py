@@ -286,7 +286,7 @@ def plot_wind_track_clusters(
 
 def write_wind_cluster_stats_report(
     path: str,
-    rows: list[dict[str, Any]],
+    rows: list[list[str]],
     noise_count: int,
 ) -> None:
     """Write cluster mean/std for vu and vv plus noise point count."""
@@ -305,6 +305,47 @@ def write_wind_cluster_stats_report(
         os.makedirs(out_dir, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
+
+
+def plot_wind_direction_vs_time_for_cluster(
+    df: pl.DataFrame,
+    output_png: str,
+    *,
+    cluster_id: int,
+    sigma: float,
+    mean_speed_mps: float,
+    mean_direction_deg: float,
+) -> None:
+    """Scatter of wind direction (deg) vs cube timestamp for rows in ``df``.
+
+    Rows are expected to already be filtered (e.g. by a ``sigma`` gate in ``(vu, vv)``
+    around the cluster centroid using per-cluster std from HDBSCAN feature members).
+    """
+    if df.is_empty():
+        warnings.warn(
+            f"plot_wind_direction_vs_time_for_cluster: no points for cluster {cluster_id}; skipping.",
+            stacklevel=2,
+        )
+        return
+    times = df["time"].to_list()
+    directions = df["direction"].cast(pl.Float64).to_list()
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    color = f"C{cluster_id % 10}"
+    ax.scatter(times, directions, s=28, alpha=0.75, c=color, edgecolors="k", linewidths=0.3)
+    ax.set_xlabel("Cube time (UTC)")
+    ax.set_ylabel("Wind direction (deg)")
+    ax.set_title(
+        rf"Cluster {cluster_id}: direction vs time ($\sigma$={sigma:g}; "
+        rf"$\langle v\rangle$={mean_speed_mps:.1f} m/s, $\langle\theta\rangle$={mean_direction_deg:.1f}°)"
+    )
+    ax.grid(True, linestyle="--", alpha=0.35)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    out_png_dir = os.path.dirname(os.path.abspath(output_png))
+    if out_png_dir:
+        os.makedirs(out_png_dir, exist_ok=True)
+    fig.savefig(output_png, dpi=150)
+    plt.close(fig)
 
 
 def plot_flux_decay(

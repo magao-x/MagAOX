@@ -37,12 +37,12 @@ from windsocc.distill import run_distill_stage, run_distill_stage_in_memory
 from windsocc.measure import run_measure_stage
 from windsocc.reduce import (
     get_pupil_geometry,
-    parse_config_file,
     process_batch_in_memory,
     process_dataset,
     save_reduced_quadrant_cubes,
 )
 from windsocc.xcorr import run_xcorr_stage, run_xcorr_stage_in_memory
+from windsocc.io.config_handling import parse_config_file
 
 
 DEFAULT_FRAMES_PER_CUBE = 512

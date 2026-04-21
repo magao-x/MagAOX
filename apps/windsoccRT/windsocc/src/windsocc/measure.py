@@ -7,6 +7,9 @@ matched-filter response cubes from ws_distill.
 Usage (must be run from the root dir of the camwfs data):
     uv run ws_measure
 
+Wind-layer HDBSCAN clustering, text report, and direction-vs-time plots are produced
+by the separate stats stage: ``uv run ws_stats`` (see ``windsocc.stats``).
+
 Profiling (cProfile + Snakeviz):
 
     uv run ws_measure --profile
@@ -84,18 +87,10 @@ import polars as pl
 
 
 from windsocc.io.dir_handling import allocate_measure_dirs
-from windsocc.io.fits_handling import load_mf_response_cubes, load_collapsed_unsharp_response_maps
+from windsocc.io.fits_handling import load_mf_response_cubes, \
+    load_collapsed_unsharp_response_maps, extract_time_from_fname
 from windsocc.core.track_wind import process_single_cc_cube
-from windsocc.analysis.wind_stats import (
-    cluster_wind_tracks_hdbscan,
-    flatten_vetted_tracks_to_features,
-    per_cluster_vu_vv_stats,
-)
-from windsocc.visualization.plot_measure_results import (
-    make_source_detection_movie,
-    plot_wind_track_clusters,
-    write_wind_cluster_stats_report,
-)
+from windsocc.visualization.plot_measure_results import make_source_detection_movie
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -848,14 +843,6 @@ def run_measure_stage(
 
 
 
-def extract_time_from_fname(fname):
-    if fname.endswith(".fits"):
-        fname = fname.split(".")[0]
-    fname_array = fname.split("_")
-    time = fname_array[1]
-    return time
-
-
 def normalize_cube_timestamp_compact(current_time: str) -> str:
     """Return ``YYYYMMDDHHMMSSffffff`` suitable for ``datetime.strptime`` ``%Y%m%d%H%M%S%f``.
 
@@ -915,7 +902,6 @@ def main():
             Creating it...")
         os.makedirs(output_dir, exist_ok=True)
     config_params = parse_config_file(path_yaml)
-    min_cluster_size = int(np.asarray(config_params.get("MIN_CLUSTER_SIZE", 5)).item())
 
     if args.profile:
         profile_path = args.profile_output
@@ -945,36 +931,11 @@ def main():
             "Install snakeviz if needed: pip install 'windsocc[profile]' or uv sync --extra profile"
         )
     else:
-        measure_results_dict = run_measure_stage(
+        run_measure_stage(
             basedir=basedir,
             config_params=config_params,
             make_movie=config_params.get("MAKE_MOVIE", False),
         )
-        wind_summaries = measure_results_dict.get("wind_summaries") or []
-        X = flatten_vetted_tracks_to_features(wind_summaries)
-        if X.shape[0] == 0:
-            logging.info("No vetted wind tracks for clustering; skipping HDBSCAN outputs.")
-        else:
-            labels, probabilities, _hdb = cluster_wind_tracks_hdbscan(
-                X,
-                min_cluster_size=min_cluster_size,
-            )
-            stats_rows, noise_count = per_cluster_vu_vv_stats(X, labels)
-            cluster_png = os.path.join(output_dir, "wind_track_clusters.png")
-            cluster_txt = os.path.join(output_dir, "wind_track_stats.txt")
-            write_wind_cluster_stats_report(
-                path=cluster_txt,
-                rows=stats_rows,
-                noise_count=noise_count,
-            )
-            plot_wind_track_clusters(
-                vu=X[:, 0],
-                vv=X[:, 1],
-                labels=labels,
-                probabilities=probabilities,
-                output_png=cluster_png,
-                # title="Wind layer attributes",
-            )
 
 if __name__ == '__main__':
     main()

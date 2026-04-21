@@ -74,51 +74,112 @@ def cluster_wind_tracks_hdbscan(
     return labels, probs, model
 
 
-def per_cluster_vu_vv_stats(
+def cluster_centroids_table(
     X: np.ndarray,
     labels: np.ndarray,
-) -> tuple[list[dict[str, Any]], int]:
+) -> list[dict[str, Any]]:
     """
-    Mean and std of vu, vv for each cluster label >= 0.
+    Per-cluster mean/std in (vu, vv) feature space for labels >= 0.
 
-    Returns (rows, noise_count) where noise_count is the number of points with label -1.
+    Rows are ordered by ``cluster_id``. ``X`` columns are ``[vu, vv]`` (same as
+    ``flatten_vetted_tracks_to_features``).
     """
     if X.size == 0 or labels.size == 0:
-        return [], 0
-    noise_count = int(np.sum(labels == -1))
-    rows: list[str] = []
-    for lab in sorted(set(labels.tolist())):
-        if lab < 0:
-            continue
+        return []
+    out: list[dict[str, Any]] = []
+    for lab in sorted(x for x in np.unique(labels) if x >= 0):
         mask = labels == lab
         pts = X[mask]
         if pts.shape[0] == 0:
             continue
-        vv = pts[:, 0]
-        vu = pts[:, 1]
-        speeds = np.sqrt(vu**2 + vv**2)
-        # directions = np.arctan2(vv, vu)
-        directions = np.arctan2(vu, vv)
-        std_speeds = np.std(speeds)
-        std_directions = np.std(directions)
+        vu = pts[:, 0]
+        vv = pts[:, 1]
         mean_vu = float(np.mean(vu))
         std_vu = float(np.std(vu))
         mean_vv = float(np.mean(vv))
         std_vv = float(np.std(vv))
-        mean_speed = np.sqrt(mean_vu**2 + mean_vv**2)
-        mean_dir_rad = np.mean(directions)
-        mean_dir_deg = np.degrees(mean_dir_rad)
-        mean_dir_deg = (mean_dir_deg + 360.0) % 360.0
+        speeds = np.hypot(vu, vv)
+        mean_speed = float(np.hypot(mean_vu, mean_vv))
+        std_speeds = float(np.std(speeds))
+        mean_dir_deg = float((np.degrees(np.arctan2(mean_vv, mean_vu)) + 360.0) % 360.0)
+        dir_deg_pts = (np.degrees(np.arctan2(vv, vu)) + 360.0) % 360.0
+        std_directions = float(np.std(dir_deg_pts))
+        out.append(
+            {
+                "cluster_id": int(lab),
+                "n_points": int(pts.shape[0]),
+                "mean_vu": mean_vu,
+                "std_vu": std_vu,
+                "mean_vv": mean_vv,
+                "std_vv": std_vv,
+                "mean_speed": mean_speed,
+                "std_speeds": std_speeds,
+                "mean_direction_deg": mean_dir_deg,
+                "std_direction_deg": std_directions,
+            }
+        )
+    return out
+
+
+def cluster_membership_sigma_mask(
+    vu: np.ndarray,
+    vv: np.ndarray,
+    centroid: dict[str, Any],
+    sigma: float,
+    *,
+    std_floor: float = 1e-6,
+) -> np.ndarray:
+    """
+    Boolean mask: rows within ``sigma`` (independent) of centroid in ``(vu, vv)``.
+
+    Uses ``max(std_*, std_floor)`` so a degenerate zero std does not collapse the gate.
+    """
+    vu = np.asarray(vu, dtype=np.float64).ravel()
+    vv = np.asarray(vv, dtype=np.float64).ravel()
+    if vu.shape != vv.shape:
+        raise ValueError("vu and vv must have the same shape.")
+    su = max(float(centroid["std_vu"]), std_floor)
+    sv = max(float(centroid["std_vv"]), std_floor)
+    sig = float(sigma)
+    return (np.abs(vu - float(centroid["mean_vu"])) <= sig * su) & (
+        np.abs(vv - float(centroid["mean_vv"])) <= sig * sv
+    )
+
+
+def wind_cluster_stats_report_rows_from_centroids(
+    centroids: list[dict[str, Any]],
+) -> list[list[str]]:
+    """Human-readable blocks for ``write_wind_cluster_stats_report``."""
+    rows: list[list[str]] = []
+    for c in centroids:
+        lab = int(c["cluster_id"])
         rows.append(
             [
-                f"Layer {int(lab)}",
-                f"n_points: {int(pts.shape[0])}",
-                f"Mean U-component speed: {mean_vu:.2f}",
-                f"Std U-component speed: {std_vu:.2f}",
-                f"Mean V-component speed: {mean_vv:.2f}",
-                f"Std V-component speed: {std_vv:.2f}",
-                rf"Layer speed: {float(mean_speed):.2f} $\pm$ {float(std_speeds):.2f} m/s",
-                rf"Layer direction: {float(mean_dir_deg):.2f} $\pm$ {float(std_directions):.2f} deg",
+                f"Layer {lab}",
+                f"n_points: {int(c['n_points'])}",
+                f"Mean U-component speed: {float(c['mean_vu']):.2f}",
+                f"Std U-component speed: {float(c['std_vu']):.2f}",
+                f"Mean V-component speed: {float(c['mean_vv']):.2f}",
+                f"Std V-component speed: {float(c['std_vv']):.2f}",
+                rf"Layer speed: {float(c['mean_speed']):.2f} $\pm$ {float(c['std_speeds']):.2f} m/s",
+                rf"Layer direction: {float(c['mean_direction_deg']):.2f} $\pm$ {float(c['std_direction_deg']):.2f} deg",
             ]
         )
-    return rows, noise_count
+    return rows
+
+
+def per_cluster_vu_vv_stats(
+    X: np.ndarray,
+    labels: np.ndarray,
+) -> tuple[list[list[str]], int]:
+    """
+    Mean and std of vu, vv for each cluster label >= 0.
+
+    Returns (report_row_blocks, noise_count) where noise_count is the number of
+    points with label -1. Each block is a list of lines for one cluster.
+    """
+    if X.size == 0 or labels.size == 0:
+        return [], 0
+    noise_count = int(np.sum(labels == -1))
+    centroids = cluster_centroids_table(X, labels)
+    return wind_cluster_stats_report_rows_from_centroids(centroids), noise_count

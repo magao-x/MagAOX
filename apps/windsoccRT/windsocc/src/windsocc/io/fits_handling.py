@@ -2,6 +2,37 @@ from astropy.io import fits
 import numpy as np
 import os
 import glob
+import logging
+from datetime import datetime
+def convert_time_to_datetime(time):
+    # Python datetime supports up to microseconds (6 digits); trim if needed.
+    if len(time) > 20:
+        time = time[:20]
+    try:
+        return datetime.strptime(time, "%Y%m%d%H%M%S%f")
+    except:
+        raise ValueError(f"Time {time} does not follow expected format; cannot extract time from time.")
+
+def extract_time_from_fname(fname):
+    if fname.endswith(".fits"):
+        fname = fname.split(".")[0]
+    fname_array = fname.split("_")
+    if fname_array[1].isdigit():
+        #ex. timestamp 20230313071832943473000
+        if len(fname_array[1]) != 23:
+            logging.warning(f"Filename {fname} does not follow expected format; attempting to extract time from filename anyway.")
+            for pc in fname_array:
+                if pc.isdigit() and len(pc) == 23:
+                    return pc
+            raise ValueError(f"Filename {fname} does not follow expected format; cannot extract time from filename.")
+        else:
+            return fname_array[1]
+    else:
+        logging.warning(f"Filename {fname} does not follow expected format; attempting to extract time from filename anyway.")
+        for pc in fname_array:
+            if pc.isdigit() and len(pc) == 23:
+                return pc
+        raise ValueError(f"Filename {fname} does not follow expected format; cannot extract time from filename.")
 
 def collapse_cube(input_cube):
     # Read the FITS cube
