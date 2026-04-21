@@ -86,7 +86,7 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
 
     realT m_psdOverlapFraction{ 0.5 }; ///< The fraction of the sample time to overlap by.
 
-    int m_nPSDHistory{ 100 }; //
+    int m_nPSDHistory{ 100 }; ///< Minimum number of raw PSD estimates to retain in the history stream.
 
     ///@}
 
@@ -172,6 +172,12 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
     /// Load the PSD and mean pointer windows from a single validated snapshot.
     bool loadPsdInputWindows( ampCircBuffT::snapshotT &sn ///< [out] the snapshot used for both windows
     );
+
+    /// Calculate how many raw PSD estimates are needed to cover the requested averaging time.
+    int desiredPSDAverageCount() const;
+
+    /// Calculate the raw PSD history depth required for the current averaging settings.
+    uint32_t rawPSDHistoryDepth() const;
 
     IMAGE *m_freqStream{ nullptr }; ///< The ImageStreamIO shared memory buffer to hold the frequency scale
 
@@ -343,6 +349,16 @@ void modalPSDs::setupConfig()
                 false,
                 "realT",
                 "The length of time over which to calculate PSDs.  The default is 1 sec." );
+
+    config.add( "circBuff.psdAvgTime",
+                "",
+                "circBuff.psdAvgTime",
+                argType::Required,
+                "circBuff",
+                "psdAvgTime",
+                false,
+                "realT",
+                "The length of time over which to average PSD estimates.  The default is 10 sec." );
 }
 
 int modalPSDs::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -364,6 +380,10 @@ int modalPSDs::loadConfigImpl( mx::app::appConfigurator &_config )
     realT psdTime = m_psdTime.load();
     _config( psdTime, "circBuff.psdTime" );
     m_psdTime.store( psdTime );
+
+    realT psdAvgTime = m_psdAvgTime.load();
+    _config( psdAvgTime, "circBuff.psdAvgTime" );
+    m_psdAvgTime.store( psdAvgTime );
 
     return 0;
 }
@@ -656,7 +676,7 @@ int modalPSDs::allocatePSDStreams()
     uint32_t imsize[3];
     imsize[0] = m_psd.size();
     imsize[1] = m_nModes;
-    imsize[2] = m_nPSDHistory;
+    imsize[2] = rawPSDHistoryDepth();
 
     m_rawpsdStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
 
@@ -847,17 +867,18 @@ void modalPSDs::psdThreadExec()
 
             //-------------------------- now average the psds ----------------------------
 
-            int nPSDAverage =
-                ( m_psdAvgTime.load( std::memory_order_acquire ) / m_psdTime.load( std::memory_order_acquire ) ) /
-                m_psdOverlapFraction;
+            int nPSDAverage = desiredPSDAverageCount();
 
-            if( nPSDAverage <= 0 )
+            const uint64_t availableRawPSDs =
+                std::min<uint64_t>( m_rawpsdStream->md->cnt0, m_rawpsdStream->md->size[2] );
+
+            if( availableRawPSDs == 0 )
             {
                 nPSDAverage = 1;
             }
-            else if( static_cast<uint64_t>( nPSDAverage ) > m_rawpsdStream->md->size[2] )
+            else if( static_cast<uint64_t>( nPSDAverage ) > availableRawPSDs )
             {
-                nPSDAverage = m_rawpsdStream->md->size[2];
+                nPSDAverage = static_cast<int>( availableRawPSDs );
             }
 
             memcpy( m_psdBuffer.data(), F, m_psdBuffer.rows() * m_psdBuffer.cols() * sizeof( float ) );
@@ -985,6 +1006,32 @@ bool modalPSDs::loadPsdInputWindows( ampCircBuffT::snapshotT &sn )
     return false;
 }
 
+int modalPSDs::desiredPSDAverageCount() const
+{
+    realT psdTime    = m_psdTime.load( std::memory_order_acquire );
+    realT psdAvgTime = m_psdAvgTime.load( std::memory_order_acquire );
+
+    if( psdTime <= 0 || m_psdOverlapFraction <= 0 )
+    {
+        return 1;
+    }
+
+    int nPSDAverage = static_cast<int>( std::ceil( psdAvgTime / ( psdTime * m_psdOverlapFraction ) ) );
+
+    if( nPSDAverage <= 0 )
+    {
+        return 1;
+    }
+
+    return nPSDAverage;
+}
+
+uint32_t modalPSDs::rawPSDHistoryDepth() const
+{
+    return std::max<uint32_t>( static_cast<uint32_t>( m_nPSDHistory ),
+                               static_cast<uint32_t>( desiredPSDAverageCount() ) );
+}
+
 INDI_NEWCALLBACK_DEFN( modalPSDs, m_indiP_psdTime )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_psdTime, ipRecv );
@@ -1034,6 +1081,8 @@ INDI_NEWCALLBACK_DEFN( modalPSDs, m_indiP_psdAvgTime )( const pcf::IndiProperty 
 
         updateIfChanged( m_indiP_psdAvgTime, "current", m_psdAvgTime.load(), INDI_IDLE );
         updateIfChanged( m_indiP_psdAvgTime, "target", m_psdAvgTime.load(), INDI_IDLE );
+
+        shmimMonitorT::m_restart = true;
 
         log<text_log>( "set psdAvgTime to " + std::to_string( m_psdAvgTime.load() ), logPrio::LOG_NOTICE );
     }

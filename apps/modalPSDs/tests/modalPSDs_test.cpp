@@ -85,6 +85,28 @@ class modalPSDs_test : public modalPSDs
     {
         return precedingWindowRefEntry( sn, refEntry, count );
     }
+
+    void setPSDTiming( realT psdTime, realT psdAvgTime, realT psdOverlapFraction )
+    {
+        m_psdTime.store( psdTime );
+        m_psdAvgTime.store( psdAvgTime );
+        m_psdOverlapFraction = psdOverlapFraction;
+    }
+
+    void setPSDHistoryFloor( int nPSDHistory )
+    {
+        m_nPSDHistory = nPSDHistory;
+    }
+
+    int desiredPSDAverageCountForTest() const
+    {
+        return desiredPSDAverageCount();
+    }
+
+    uint32_t rawPSDHistoryDepthForTest() const
+    {
+        return rawPSDHistoryDepth();
+    }
 };
 /// \endcond
 
@@ -108,9 +130,31 @@ SCENARIO( "INDI Callbacks", "[modalPSDs]" )
     XWCTEST_INDI_SET_CALLBACK( modalPSDs, m_indiP_fpsSource, modeamps, fps );
 }
 
-} // namespace modalPSDsTest
+/// Verify modalPSDs derives PSD averaging depth from psdTime, psdAvgTime, and overlap fraction.
+/**
+ * \ingroup modalPSDs_unit_test
+ */
+TEST_CASE( "modalPSDs PSD averaging depth follows requested averaging time", "[modalPSDs]" )
+{
+    modalPSDs_test app( "modalPSDs_test" );
 
-} // namespace libXWCTest
+    // clang-format off
+    #ifdef MODALPSDS_TEST_DOXYGEN_REF
+    modalPSDs::desiredPSDAverageCount();
+    modalPSDs::rawPSDHistoryDepth();
+    #endif
+    // clang-format on
+
+    app.setPSDHistoryFloor( 100 );
+
+    app.setPSDTiming( 1.0F, 10.0F, 0.5F );
+    REQUIRE( app.desiredPSDAverageCountForTest() == 20 );
+    REQUIRE( app.rawPSDHistoryDepthForTest() == 100 );
+
+    app.setPSDTiming( 1.0F, 60.0F, 0.5F );
+    REQUIRE( app.desiredPSDAverageCountForTest() == 120 );
+    REQUIRE( app.rawPSDHistoryDepthForTest() == 120 );
+}
 
 SCENARIO( "PSD input windows come from one validated snapshot", "[modalPSDs]" )
 {
@@ -207,3 +251,7 @@ SCENARIO( "Snapshot-based circular-buffer loads reject stale snapshots", "[modal
 }
 
 //} //namespace modalPSDs_test
+
+} // namespace modalPSDsTest
+
+} // namespace libXWCTest
