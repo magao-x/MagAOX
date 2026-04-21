@@ -456,7 +456,17 @@ def build_measure_runtime_params(config_params: dict, cube_data: np.ndarray) -> 
     else:
         time_per_frame = config_params.get("TIME_PER_FRAME", None)
         if time_per_frame is not None:
+            time_per_frame = float(time_per_frame)
             logging.info("Using TIME_PER_FRAME from config: %s s", time_per_frame)
+        else:
+            default_loop_speed_hz = 2000.0
+            time_per_frame = float(frame_binning) / default_loop_speed_hz
+            logging.warning(
+                "Neither LOOP_SPEED nor TIME_PER_FRAME is set. "
+                "Falling back to TIME_PER_FRAME = GROUP_SIZE / %s = %s s",
+                default_loop_speed_hz,
+                time_per_frame,
+            )
 
     if sep_thresh is None or sep_minarea is None:
         logging.warning(
