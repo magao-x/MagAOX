@@ -184,6 +184,62 @@ int cameraStatus::updateOverlay()
     // char * str;
     char        tstr[128];
     std::string sstr;
+    bool        statusTextOverflowed{ false };
+
+    auto statusTextSlotAvailable = [&]( size_t slotIndex )
+    {
+        size_t slotCount = m_roa.m_graphicsView->statusTextNo();
+
+        if( slotIndex < slotCount )
+        {
+            return true;
+        }
+
+        statusTextOverflowed = true;
+
+        if( !m_statusTextOverflowWarned )
+        {
+            pluginLogError( std::format( "status text overflow for {}: need slot {}, only {} configured",
+                                         m_deviceName,
+                                         slotIndex + 1,
+                                         slotCount ) );
+            m_statusTextOverflowWarned = true;
+        }
+
+        return false;
+    };
+
+    if( getBlobStr( m_deviceName + "-sw", "fsm.state" ) )
+    {
+        std::string fsmstr = std::string( m_blob );
+
+        std::string swtstr = "off";
+
+        if( getBlobStr( m_deviceName + "-sw", "writing.toggle" ) )
+        {
+            swtstr = std::string( m_blob );
+        }
+
+        if( fsmstr == "OPERATING" )
+        {
+            if( swtstr == "on" )
+            {
+                emit savingState( rtimv::savingState::on );
+            }
+            else
+            {
+                emit savingState( rtimv::savingState::waiting );
+            }
+        }
+        else
+        {
+            emit savingState( rtimv::savingState::off );
+        }
+    }
+    else
+    {
+        emit savingState( rtimv::savingState::off );
+    }
 
     if( getBlobStr( "temp_ccd.current" ) )
     {
@@ -191,7 +247,7 @@ int cameraStatus::updateOverlay()
         m_roa.m_graphicsView->statusTextText( n, tstr );
         ++n;
     }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
+    if( !statusTextSlotAvailable( n ) )
         return 0;
 
     // Get curr size
@@ -287,7 +343,7 @@ int cameraStatus::updateOverlay()
     } // if(blobExists("roi_region_w.current") ...
 
     //***********************
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
+    if( !statusTextSlotAvailable( n ) )
         return 0;
 
     float et = getBlobVal<float>( "exptime.current", -1 );
@@ -320,7 +376,7 @@ int cameraStatus::updateOverlay()
         m_roa.m_graphicsView->statusTextText( n, tstr );
         ++n;
     }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
+    if( !statusTextSlotAvailable( n ) )
         return 0;
 
     float fps = getBlobVal<float>( "fps.current", -1 );
@@ -330,7 +386,7 @@ int cameraStatus::updateOverlay()
         m_roa.m_graphicsView->statusTextText( n, tstr );
         ++n;
     }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
+    if( !statusTextSlotAvailable( n ) )
         return 0;
 
     int emg = getBlobVal<int>( "emgain.current", -1 );
@@ -340,7 +396,7 @@ int cameraStatus::updateOverlay()
         m_roa.m_graphicsView->statusTextText( n, tstr );
         ++n;
     }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
+    if( !statusTextSlotAvailable( n ) )
         return 0;
 
     for( size_t f = 0; f < m_filterDeviceNames.size(); ++f )
@@ -425,7 +481,7 @@ int cameraStatus::updateOverlay()
                 ++n;
             }
         }
-        if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
+        if( !statusTextSlotAvailable( n ) )
             return 0;
     }
 
@@ -454,39 +510,12 @@ int cameraStatus::updateOverlay()
             ++n;
         }
     }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
+    if( !statusTextSlotAvailable( n ) )
         return 0;
 
-    if( getBlobStr( m_deviceName + "-sw", "fsm.state" ) )
+    if( !statusTextOverflowed )
     {
-        std::string fsmstr = std::string( m_blob );
-
-        std::string swtstr = "off";
-
-        if( getBlobStr( m_deviceName + "-sw", "writing.toggle" ) )
-        {
-            swtstr = std::string( m_blob );
-        }
-
-        if( fsmstr == "OPERATING" )
-        {
-            if( swtstr == "on" )
-            {
-                emit savingState( rtimv::savingState::on );
-            }
-            else
-            {
-                emit savingState( rtimv::savingState::waiting );
-            }
-        }
-        else
-        {
-            emit savingState( rtimv::savingState::off );
-        }
-    }
-    else
-    {
-        emit savingState( rtimv::savingState::off );
+        m_statusTextOverflowWarned = false;
     }
 
     return 0;

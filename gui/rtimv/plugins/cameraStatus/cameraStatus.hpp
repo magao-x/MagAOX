@@ -13,71 +13,71 @@
 class cameraStatus : public rtimvOverlayInterface
 {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.4")
-    Q_INTERFACES(rtimvOverlayInterface)
+    Q_PLUGIN_METADATA( IID "rtimv.overlayInterface/1.4" )
+    Q_INTERFACES( rtimvOverlayInterface )
 
-protected:
+  protected:
     rtimvOverlayAccess m_roa;
 
-    bool m_enabled{false};
+    bool m_enabled{ false };
 
-    bool m_enableable{false};
+    bool m_enableable{ false };
 
     std::string m_deviceName;
 
     std::vector<std::string> m_filterDeviceNames;
-    std::vector<std::string> m_presetNames; //one per filter device, based on its name
+    std::vector<std::string> m_presetNames; // one per filter device, based on its name
 
-    QGraphicsScene *m_qgs{nullptr};
+    QGraphicsScene *m_qgs{ nullptr };
 
-    StretchBox *m_roiBox{nullptr};
+    StretchBox *m_roiBox{ nullptr };
 
     std::mutex m_roiBoxMutex;
 
     char m_blob[512]; ///< Memory for copying rtimvDictionary blobs
 
-    int m_width{0};
-    int m_height{0};
+    int m_width{ 0 };
+    int m_height{ 0 };
 
-public:
+    bool m_statusTextOverflowWarned{ false }; ///< True after logging one status-text overflow warning.
+
+  public:
     cameraStatus();
 
     virtual ~cameraStatus();
 
-    virtual int attachOverlay(rtimvOverlayAccess &,
-                              mx::app::appConfigurator &config);
+    virtual int attachOverlay( rtimvOverlayAccess &, mx::app::appConfigurator &config );
 
     virtual int updateOverlay();
 
-    virtual void keyPressEvent(QKeyEvent *ke);
+    virtual void keyPressEvent( QKeyEvent *ke );
 
     virtual bool overlayEnabled();
 
-    bool blobExists(const std::string & propel);
+    bool blobExists( const std::string &propel );
 
-    bool getBlobStr(const std::string &deviceName,
-                    const std::string &propel);
+    bool getBlobStr( const std::string &deviceName, const std::string &propel );
 
-    bool getBlobStr(const std::string &propel);
+    bool getBlobStr( const std::string &propel );
 
     template <typename realT>
-    realT getBlobVal(const std::string &propel, realT defVal);
+    realT getBlobVal( const std::string &propel, realT defVal );
 
     virtual void enableOverlay();
 
     virtual void disableOverlay();
 
-signals:
+  signals:
 
-    void newStretchBox(StretchBox *);
+    void newStretchBox( StretchBox * );
 
-    void savingState(rtimv::savingState);
+    void savingState( rtimv::savingState );
 
-public slots:
+  public slots:
 
-    void stretchBoxRemove(StretchBox * );
+    void stretchBoxRemove( StretchBox * );
 
-public:
+  public:
     virtual std::vector<std::string> info();
 };
 
