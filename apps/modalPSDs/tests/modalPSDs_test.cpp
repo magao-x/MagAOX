@@ -40,6 +40,7 @@ class modalPSDs_test : public modalPSDs
 
         XWCTEST_SETUP_INDI_NEW_PROP( psdTime );
         XWCTEST_SETUP_INDI_NEW_PROP( psdAvgTime );
+        XWCTEST_SETUP_INDI_NEW_PROP( meanTime );
         XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_fpsSource, modeamps, fps )
     }
 
@@ -86,10 +87,11 @@ class modalPSDs_test : public modalPSDs
         return precedingWindowRefEntry( sn, refEntry, count );
     }
 
-    void setPSDTiming( realT psdTime, realT psdAvgTime, realT psdOverlapFraction )
+    void setPSDTiming( realT psdTime, realT psdAvgTime, realT meanTime, realT psdOverlapFraction )
     {
         m_psdTime.store( psdTime );
         m_psdAvgTime.store( psdAvgTime );
+        m_meanTime.store( meanTime );
         m_psdOverlapFraction = psdOverlapFraction;
     }
 
@@ -101,6 +103,11 @@ class modalPSDs_test : public modalPSDs
     int desiredPSDAverageCountForTest() const
     {
         return desiredPSDAverageCount();
+    }
+
+    cbIndexT desiredMeanSampleCountForTest( realT fps ) const
+    {
+        return desiredMeanSampleCount( fps );
     }
 
     uint32_t rawPSDHistoryDepthForTest() const
@@ -125,6 +132,7 @@ SCENARIO( "INDI Callbacks", "[modalPSDs]" )
     #ifdef MODALPSDS_TEST_DOXYGEN_REF
     modalPSDs::newCallBack_m_indiP_psdTime( pcf::IndiProperty() );
     modalPSDs::newCallBack_m_indiP_psdAvgTime( pcf::IndiProperty() );
+    modalPSDs::newCallBack_m_indiP_meanTime( pcf::IndiProperty() );
     modalPSDs::setCallBack_m_indiP_fpsSource( pcf::IndiProperty() );
     modalPSDs::loadPsdInputWindows( *(ampCircBuffT::snapshotT *)nullptr );
     #endif
@@ -132,35 +140,44 @@ SCENARIO( "INDI Callbacks", "[modalPSDs]" )
 
     XWCTEST_INDI_NEW_CALLBACK( modalPSDs, psdTime );
     XWCTEST_INDI_NEW_CALLBACK( modalPSDs, psdAvgTime );
+    XWCTEST_INDI_NEW_CALLBACK( modalPSDs, meanTime );
     XWCTEST_INDI_SET_CALLBACK( modalPSDs, m_indiP_fpsSource, modeamps, fps );
 }
 
-/// Verify modalPSDs derives PSD averaging depth from psdTime, psdAvgTime, and overlap fraction.
+/// Verify modalPSDs derives PSD averaging depth from psdTime and psdAvgTime while mean sizing follows meanTime.
 /**
  * \ingroup modalPSDs_unit_test
  */
-TEST_CASE( "modalPSDs PSD averaging depth follows requested averaging time", "[modalPSDs]" )
+TEST_CASE( "modalPSDs PSD averaging and mean windows are decoupled", "[modalPSDs]" )
 {
     modalPSDs_test app( "modalPSDs_test" );
 
     // clang-format off
     #ifdef MODALPSDS_TEST_DOXYGEN_REF
     modalPSDs::desiredPSDAverageCount();
+    modalPSDs::desiredMeanSampleCount( 0 );
     modalPSDs::rawPSDHistoryDepth();
     #endif
     // clang-format on
 
     app.setPSDHistoryFloor( 100 );
 
-    app.setPSDTiming( 1.0F, 10.0F, 0.5F );
+    app.setPSDTiming( 1.0F, 10.0F, 60.0F, 0.5F );
     REQUIRE( app.desiredPSDAverageCountForTest() == 20 );
+    REQUIRE( app.desiredMeanSampleCountForTest( 1000.0F ) == 60000 );
     REQUIRE( app.rawPSDHistoryDepthForTest() == 0 );
     REQUIRE( app.publishedRawPSDHistoryDepthForTest() == 100 );
 
-    app.setPSDTiming( 1.0F, 60.0F, 0.5F );
+    app.setPSDTiming( 1.0F, 60.0F, 60.0F, 0.5F );
     REQUIRE( app.desiredPSDAverageCountForTest() == 120 );
+    REQUIRE( app.desiredMeanSampleCountForTest( 1000.0F ) == 60000 );
     REQUIRE( app.rawPSDHistoryDepthForTest() == 20 );
     REQUIRE( app.publishedRawPSDHistoryDepthForTest() == 100 );
+
+    app.setPSDTiming( 1.0F, 60.0F, 15.0F, 0.5F );
+    REQUIRE( app.desiredPSDAverageCountForTest() == 120 );
+    REQUIRE( app.desiredMeanSampleCountForTest( 1000.0F ) == 15000 );
+    REQUIRE( app.rawPSDHistoryDepthForTest() == 20 );
 }
 
 SCENARIO( "PSD input windows come from one validated snapshot", "[modalPSDs]" )

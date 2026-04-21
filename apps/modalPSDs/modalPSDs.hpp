@@ -79,7 +79,9 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
     realT m_fpsTol{ 0 }; ///< The tolerance for detecting a change in FPS.
 
     std::atomic<realT> m_psdTime{ 1 };     ///< The length of time over which to calculate PSDs.  The default is 1 sec.
-    std::atomic<realT> m_psdAvgTime{ 10 }; ///< The time over which to average PSDs.  The default is 10 sec.
+    std::atomic<realT> m_psdAvgTime{ 10 }; ///< The time over which to average PSD estimates.  The default is 10 sec.
+    std::atomic<realT> m_meanTime{
+        60 }; ///< The time over which to calculate the mean for detrending.  The default is 60 sec.
 
     // realT m_overSize {10}; ///< Multiplicative factor by which to oversize the circular buffer, to give good mean
     // estimates and account for time-to-calculate.
@@ -176,6 +178,9 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
     /// Calculate how many raw PSD estimates are needed to cover the requested averaging time.
     int desiredPSDAverageCount() const;
 
+    /// Calculate how many samples are needed for the mean-subtraction window at the current FPS.
+    cbIndexT desiredMeanSampleCount( realT fps /**< [in] frame rate used to convert mean time into samples */ ) const;
+
     /// Calculate the additional PSD history depth needed beyond the published raw-PSD shmim.
     uint32_t rawPSDHistoryDepth() const;
 
@@ -250,6 +255,7 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
   protected:
     pcf::IndiProperty m_indiP_psdTime;
     pcf::IndiProperty m_indiP_psdAvgTime;
+    pcf::IndiProperty m_indiP_meanTime;
     pcf::IndiProperty m_indiP_overSize;
     pcf::IndiProperty m_indiP_fpsSource;
     pcf::IndiProperty m_indiP_fps;
@@ -257,6 +263,7 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
   public:
     INDI_NEWCALLBACK_DECL( modalPSDs, m_indiP_psdTime );
     INDI_NEWCALLBACK_DECL( modalPSDs, m_indiP_psdAvgTime );
+    INDI_NEWCALLBACK_DECL( modalPSDs, m_indiP_meanTime );
     INDI_NEWCALLBACK_DECL( modalPSDs, m_indiP_overSize );
     INDI_SETCALLBACK_DECL( modalPSDs, m_indiP_fpsSource );
 };
@@ -370,6 +377,16 @@ void modalPSDs::setupConfig()
                 false,
                 "realT",
                 "The length of time over which to average PSD estimates.  The default is 10 sec." );
+
+    config.add( "circBuff.meanTime",
+                "",
+                "circBuff.meanTime",
+                argType::Required,
+                "circBuff",
+                "meanTime",
+                false,
+                "realT",
+                "The length of time over which to calculate the detrending mean.  The default is 60 sec." );
 }
 
 int modalPSDs::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -396,6 +413,10 @@ int modalPSDs::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( psdAvgTime, "circBuff.psdAvgTime" );
     m_psdAvgTime.store( psdAvgTime );
 
+    realT meanTime = m_meanTime.load();
+    _config( meanTime, "circBuff.meanTime" );
+    m_meanTime.store( meanTime );
+
     return 0;
 }
 
@@ -413,6 +434,10 @@ int modalPSDs::appStartup()
     CREATE_REG_INDI_NEW_NUMBERU( m_indiP_psdAvgTime, "psdAvgTime", 0, 60, 0.1, "%0.1f", "PSD Avg. Time", "PSD Setup" );
     m_indiP_psdAvgTime["current"].set( m_psdAvgTime.load() );
     m_indiP_psdAvgTime["target"].set( m_psdAvgTime.load() );
+
+    CREATE_REG_INDI_NEW_NUMBERU( m_indiP_meanTime, "meanTime", 0, 600, 0.1, "%0.1f", "Mean Time", "PSD Setup" );
+    m_indiP_meanTime["current"].set( m_meanTime.load() );
+    m_indiP_meanTime["target"].set( m_meanTime.load() );
 
     if( m_fpsDevice == "" )
     {
@@ -550,9 +575,8 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
 
     m_nModes = shmimMonitorT::m_width * shmimMonitorT::m_height;
 
-    realT fps        = m_fps.load( std::memory_order_acquire );
-    realT psdTime    = m_psdTime.load( std::memory_order_acquire );
-    realT psdAvgTime = m_psdAvgTime.load( std::memory_order_acquire );
+    realT fps     = m_fps.load( std::memory_order_acquire );
+    realT psdTime = m_psdTime.load( std::memory_order_acquire );
 
     m_tsSize = fps * psdTime;
 
@@ -571,24 +595,25 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
         return -1;
     }
 
-    m_meanSize = fps * psdAvgTime;
+    m_meanSize = desiredMeanSampleCount( fps );
 
-    if( static_cast<uint32_t>( m_meanSize ) > shmimMonitorT::m_depth )
+    if( static_cast<uint32_t>( m_tsSize ) >= shmimMonitorT::m_depth )
     {
-        log<software_error>( { __FILE__, __LINE__, "input circ buff is not long enough for psd avg. time" } );
-        m_meanSize = shmimMonitorT::m_depth;
+        log<software_error>( { __FILE__, __LINE__, "input circ buff is not long enough for psd time" } );
+        return -1;
     }
 
-    // Size the circ buff
-    // we really want 2*m_meanSize but might not be able to
-    if( 2 * static_cast<uint32_t>( m_meanSize ) > shmimMonitorT::m_depth )
+    cbIndexT maxMeanSize = shmimMonitorT::m_depth - m_tsSize;
+    if( m_meanSize > maxMeanSize )
     {
-        m_ampCircBuff.maxEntries( shmimMonitorT::m_depth );
+        log<software_error>( { __FILE__,
+                               __LINE__,
+                               "input circ buff is not long enough for psd avg. time, truncating to " +
+                                   std::to_string( static_cast<double>( maxMeanSize ) / fps ) + " sec" } );
+        m_meanSize = maxMeanSize;
     }
-    else
-    {
-        m_ampCircBuff.maxEntries( 2 * m_meanSize );
-    }
+
+    m_ampCircBuff.maxEntries( m_tsSize + m_meanSize );
 
     m_tsPtrs.resize( m_tsSize );
     m_meanPtrs.resize( m_meanSize );
@@ -1087,6 +1112,25 @@ int modalPSDs::desiredPSDAverageCount() const
     return nPSDAverage;
 }
 
+modalPSDs::cbIndexT modalPSDs::desiredMeanSampleCount( realT fps ) const
+{
+    realT meanTime = m_meanTime.load( std::memory_order_acquire );
+
+    if( fps <= 0 || meanTime <= 0 )
+    {
+        return 1;
+    }
+
+    cbIndexT meanSize = fps * meanTime;
+
+    if( meanSize <= 0 )
+    {
+        return 1;
+    }
+
+    return meanSize;
+}
+
 uint32_t modalPSDs::rawPSDHistoryDepth() const
 {
     const uint32_t desired   = static_cast<uint32_t>( desiredPSDAverageCount() );
@@ -1162,6 +1206,35 @@ INDI_NEWCALLBACK_DEFN( modalPSDs, m_indiP_psdAvgTime )( const pcf::IndiProperty 
 
     return 0;
 } // INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_psdAvgTime)
+
+INDI_NEWCALLBACK_DEFN( modalPSDs, m_indiP_meanTime )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_meanTime, ipRecv );
+
+    realT target;
+
+    if( indiTargetUpdate( m_indiP_meanTime, target, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    if( m_meanTime.load( std::memory_order_acquire ) != target )
+    {
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        m_meanTime.store( target, std::memory_order_release );
+
+        updateIfChanged( m_indiP_meanTime, "current", m_meanTime.load(), INDI_IDLE );
+        updateIfChanged( m_indiP_meanTime, "target", m_meanTime.load(), INDI_IDLE );
+
+        shmimMonitorT::m_restart = true;
+
+        log<text_log>( "set meanTime to " + std::to_string( m_meanTime.load() ), logPrio::LOG_NOTICE );
+    }
+
+    return 0;
+} // INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_meanTime)
 
 INDI_SETCALLBACK_DEFN( modalPSDs, m_indiP_fpsSource )( const pcf::IndiProperty &ipRecv )
 {
