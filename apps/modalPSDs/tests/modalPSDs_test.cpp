@@ -107,6 +107,11 @@ class modalPSDs_test : public modalPSDs
     {
         return rawPSDHistoryDepth();
     }
+
+    uint32_t publishedRawPSDHistoryDepthForTest() const
+    {
+        return publishedRawPSDHistoryDepth();
+    }
 };
 /// \endcond
 
@@ -150,10 +155,12 @@ TEST_CASE( "modalPSDs PSD averaging depth follows requested averaging time", "[m
     app.setPSDTiming( 1.0F, 10.0F, 0.5F );
     REQUIRE( app.desiredPSDAverageCountForTest() == 20 );
     REQUIRE( app.rawPSDHistoryDepthForTest() == 100 );
+    REQUIRE( app.publishedRawPSDHistoryDepthForTest() == 100 );
 
     app.setPSDTiming( 1.0F, 60.0F, 0.5F );
     REQUIRE( app.desiredPSDAverageCountForTest() == 120 );
     REQUIRE( app.rawPSDHistoryDepthForTest() == 120 );
+    REQUIRE( app.publishedRawPSDHistoryDepthForTest() == 100 );
 }
 
 SCENARIO( "PSD input windows come from one validated snapshot", "[modalPSDs]" )

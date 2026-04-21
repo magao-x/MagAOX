@@ -176,12 +176,23 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
     /// Calculate how many raw PSD estimates are needed to cover the requested averaging time.
     int desiredPSDAverageCount() const;
 
-    /// Calculate the raw PSD history depth required for the current averaging settings.
+    /// Calculate the internal PSD history depth required for the current averaging settings.
     uint32_t rawPSDHistoryDepth() const;
+
+    /// Calculate the published raw PSD history depth retained in shared memory.
+    uint32_t publishedRawPSDHistoryDepth() const;
 
     IMAGE *m_freqStream{ nullptr }; ///< The ImageStreamIO shared memory buffer to hold the frequency scale
 
     mx::improc::eigenImage<realT> m_psdBuffer;
+
+    std::vector<realT> m_rawPSDHistory; ///< Heap-backed circular history of raw PSD estimates used for averaging.
+
+    uint32_t m_rawPSDHistoryDepth{ 0 }; ///< Number of raw PSD estimates currently allocated in `m_rawPSDHistory`.
+
+    uint32_t m_rawPSDHistoryNext{ 0 }; ///< Next slot to overwrite in `m_rawPSDHistory`.
+
+    uint64_t m_rawPSDHistoryCount{ 0 }; ///< Number of raw PSD estimates stored since the last restart.
 
     IMAGE *m_rawpsdStream{ nullptr }; ///< The ImageStreamIO shared memory buffer to hold the raw psds
 
@@ -676,7 +687,7 @@ int modalPSDs::allocatePSDStreams()
     uint32_t imsize[3];
     imsize[0] = m_psd.size();
     imsize[1] = m_nModes;
-    imsize[2] = rawPSDHistoryDepth();
+    imsize[2] = publishedRawPSDHistoryDepth();
 
     m_rawpsdStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
 
@@ -716,6 +727,12 @@ int modalPSDs::allocatePSDStreams()
                                 0 );
 
     m_psdBuffer.resize( m_psd.size(), m_nModes );
+
+    size_t planeElements = m_psdBuffer.rows() * m_psdBuffer.cols();
+    m_rawPSDHistoryDepth = rawPSDHistoryDepth();
+    m_rawPSDHistory.assign( planeElements * m_rawPSDHistoryDepth, 0 );
+    m_rawPSDHistoryNext  = 0;
+    m_rawPSDHistoryCount = 0;
 
     return 0;
 }
@@ -869,8 +886,19 @@ void modalPSDs::psdThreadExec()
 
             int nPSDAverage = desiredPSDAverageCount();
 
-            const uint64_t availableRawPSDs =
-                std::min<uint64_t>( m_rawpsdStream->md->cnt0, m_rawpsdStream->md->size[2] );
+            size_t planeElements = m_psdBuffer.rows() * m_psdBuffer.cols();
+            realT *H             = m_rawPSDHistory.data() + planeElements * m_rawPSDHistoryNext;
+            memcpy( H, m_psdBuffer.data(), planeElements * sizeof( realT ) );
+
+            uint32_t historySlot = m_rawPSDHistoryNext;
+            ++m_rawPSDHistoryCount;
+            ++m_rawPSDHistoryNext;
+            if( m_rawPSDHistoryNext >= m_rawPSDHistoryDepth )
+            {
+                m_rawPSDHistoryNext = 0;
+            }
+
+            const uint64_t availableRawPSDs = std::min<uint64_t>( m_rawPSDHistoryCount, m_rawPSDHistoryDepth );
 
             if( availableRawPSDs == 0 )
             {
@@ -881,22 +909,22 @@ void modalPSDs::psdThreadExec()
                 nPSDAverage = static_cast<int>( availableRawPSDs );
             }
 
-            memcpy( m_psdBuffer.data(), F, m_psdBuffer.rows() * m_psdBuffer.cols() * sizeof( float ) );
+            memcpy( m_psdBuffer.data(), H, planeElements * sizeof( realT ) );
 
             for( int n = 1; n < nPSDAverage; ++n )
             {
-                if( cnt1 == 0 )
+                if( historySlot == 0 )
                 {
-                    cnt1 = m_rawpsdStream->md->size[2] - 1;
+                    historySlot = m_rawPSDHistoryDepth - 1;
                 }
                 else
                 {
-                    --cnt1;
+                    --historySlot;
                 }
 
-                F = m_rawpsdStream->array.F + m_psdBuffer.rows() * m_psdBuffer.cols() * cnt1;
+                H = m_rawPSDHistory.data() + planeElements * historySlot;
 
-                m_psdBuffer += Eigen::Map<Eigen::Array<float, -1, -1>>( F, m_psdBuffer.rows(), m_psdBuffer.cols() );
+                m_psdBuffer += Eigen::Map<Eigen::Array<float, -1, -1>>( H, m_psdBuffer.rows(), m_psdBuffer.cols() );
             }
 
             m_psdBuffer /= nPSDAverage;
@@ -1030,6 +1058,11 @@ uint32_t modalPSDs::rawPSDHistoryDepth() const
 {
     return std::max<uint32_t>( static_cast<uint32_t>( m_nPSDHistory ),
                                static_cast<uint32_t>( desiredPSDAverageCount() ) );
+}
+
+uint32_t modalPSDs::publishedRawPSDHistoryDepth() const
+{
+    return std::max<uint32_t>( 1, static_cast<uint32_t>( m_nPSDHistory ) );
 }
 
 INDI_NEWCALLBACK_DEFN( modalPSDs, m_indiP_psdTime )( const pcf::IndiProperty &ipRecv )
