@@ -484,6 +484,10 @@ int cameraStatus::updateOverlay()
             emit savingState( rtimv::savingState::off );
         }
     }
+    else
+    {
+        emit savingState( rtimv::savingState::off );
+    }
 
     return 0;
 }
