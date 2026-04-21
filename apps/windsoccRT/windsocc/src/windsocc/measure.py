@@ -594,6 +594,21 @@ def process_mf_response_cubes(
     movie_fps = float(
         config_params.get("MOVIE_FPS", config_params.get("FPS", 30))
     )
+    frame_binning = config_params.get("GROUP_SIZE", None)
+    loop_speed_hz = config_params.get("LOOP_SPEED", None)
+    if loop_speed_hz is None:
+        raise ValueError(
+            "LOOP_SPEED not set in the config file and this info is needed for this stage."
+        )
+    else:
+        logging.info("Using LOOP_SPEED from config: %s Hz", loop_speed_hz)
+    if frame_binning is None:
+        raise ValueError(
+            "GROUP_SIZE not set in the config file and this info is needed for this stage."
+        )
+    else:
+        logging.info("Using GROUP_SIZE from config: %s", frame_binning)
+    time_per_frame = float(frame_binning) / float(loop_speed_hz)
 
     # Feed the cubes into sep to collect the sources (high-pass / unsharp cubes for detection)
     for cube_name, cube_path, og_path, og_fname in zip(

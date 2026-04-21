@@ -120,9 +120,9 @@ def main() -> None:
 
     min_cluster_size = int(np.asarray(config_params.get("MIN_CLUSTER_SIZE", 5)).item())
     cluster_selection_epsilon = float(
-        np.asarray(config_params.get("CLUSTER_SELECTION_EPSILON", 0.0)).item()
+        np.asarray(config_params.get("CLUSTER_SELECTION_EPSILON", 3.0)).item()
     )
-    layer_sigma = float(np.asarray(config_params.get("WIND_STATS_LAYER_SIGMA", 2.0)).item())
+    layer_sigma = float(np.asarray(config_params.get("WIND_STATS_LAYER_SIGMA", 3.0)).item())
 
     wind_df = _load_wind_attributes_dataframe(dirs_dict["wind_data_dir"])
     if wind_df.is_empty():

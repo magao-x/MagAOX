@@ -30,6 +30,8 @@ XCORR_DIR: "xcorr_results" # directory to save the cross-correlation results to 
 
 # Step 3: DISTILL
 DISTILL_DIR: "distill_results" # directory to save the distilled cubes to (default: "combined")
+# Tab-separated PARANG vs timestamp (e.g. parangs.txt from tests_and_one_offs/extract_obs_parangs.py); required for distill
+PARANGS_LOOKUP: "parangs.txt"
 # Define template for the matched filter
 TEMPLATE_SIZE: 65 #size of central square of the first frame of the CC cube
 
@@ -50,6 +52,11 @@ SEP_THRESH: 3.0 #s/n threshold for sep to detect sources
 SEP_MINAREA: 2.0 #minimum area in pixels for sep to detect sources
 MAKE_MOVIE: true
 TIME_PER_FRAME: 0.004 #seconds
+
+# Step 5: STATS (``ws_stats``: HDBSCAN + reports from ``measure_results/wind_data/*_wind_attributes.json``)
+# Reuses ``MIN_CLUSTER_SIZE`` from this file when set (e.g. under MEASURE); otherwise default 5 in code.
+CLUSTER_SELECTION_EPSILON: 0.0
+WIND_STATS_LAYER_SIGMA: 2.0
 
 # Realtime / INDI (optional)
 PUBLISH_WINDSOC_INDI: false # when true, publish wind layers to INDI device `windsocc`
