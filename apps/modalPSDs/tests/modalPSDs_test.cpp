@@ -146,6 +146,14 @@ class modalPSDs_test : public modalPSDs
         rollMeanSums( meanSums, meanHeadCache, advance );
     }
 
+    static void updatePlaneSumForTest( std::vector<double>      &planeSum,
+                                       const std::vector<realT> &addPlane,
+                                       const std::vector<realT> *removePlane = nullptr )
+    {
+        updatePlaneSum(
+            planeSum, addPlane.data(), removePlane == nullptr ? nullptr : removePlane->data(), addPlane.size() );
+    }
+
     uint32_t rawPSDHistoryDepthForTest() const
     {
         return rawPSDHistoryDepth();
@@ -212,7 +220,7 @@ TEST_CASE( "modalPSDs PSD averaging and mean windows are decoupled", "[modalPSDs
     REQUIRE( app.desiredPSDAverageCountForTest() == 120 );
     REQUIRE( app.desiredMeanSampleCountForTest( 1000.0F ) == 60000 );
     REQUIRE( app.requiredInputHistoryDepthForTest() == 62002 );
-    REQUIRE( app.rawPSDHistoryDepthForTest() == 20 );
+    REQUIRE( app.rawPSDHistoryDepthForTest() == 21 );
     REQUIRE( app.publishedRawPSDHistoryDepthForTest() == 100 );
 
     app.setPSDTiming( 1.0F, 60.0F, 15.0F, 0.5F );
@@ -220,7 +228,7 @@ TEST_CASE( "modalPSDs PSD averaging and mean windows are decoupled", "[modalPSDs
     REQUIRE( app.desiredPSDAverageCountForTest() == 120 );
     REQUIRE( app.desiredMeanSampleCountForTest( 1000.0F ) == 15000 );
     REQUIRE( app.requiredInputHistoryDepthForTest() == 17002 );
-    REQUIRE( app.rawPSDHistoryDepthForTest() == 20 );
+    REQUIRE( app.rawPSDHistoryDepthForTest() == 21 );
 }
 
 SCENARIO( "PSD input windows come from one validated snapshot", "[modalPSDs]" )
@@ -372,6 +380,38 @@ TEST_CASE( "modalPSDs rolling mean update matches full recompute", "[modalPSDs]"
     for( size_t n = 0; n < rolledSums.size(); ++n )
     {
         REQUIRE( rolledSums[n] == Approx( recomputedSums[n] ) );
+    }
+}
+
+/// Verify modalPSDs rolling PSD-sum updates match a full recomputation when one plane enters and one leaves.
+/**
+ * \ingroup modalPSDs_unit_test
+ */
+TEST_CASE( "modalPSDs rolling PSD sum update matches full recompute", "[modalPSDs]" )
+{
+    // clang-format off
+    #ifdef MODALPSDS_TEST_DOXYGEN_REF
+    modalPSDs::updatePlaneSum( *(std::vector<double> *)nullptr, (const modalPSDs::realT *)nullptr, (const modalPSDs::realT *)nullptr, 0 );
+    #endif
+    // clang-format on
+
+    std::vector<double>           rollingSum{ 12.0, 15.0, 18.0 };
+    std::vector<double>           recomputedSum( 3, 0.0 );
+    std::vector<modalPSDs::realT> oldPlane{ 1.0F, 2.0F, 3.0F };
+    std::vector<modalPSDs::realT> keepPlaneA{ 4.0F, 5.0F, 6.0F };
+    std::vector<modalPSDs::realT> keepPlaneB{ 7.0F, 8.0F, 9.0F };
+    std::vector<modalPSDs::realT> newPlane{ 10.0F, 11.0F, 12.0F };
+
+    modalPSDs_test::updatePlaneSumForTest( rollingSum, newPlane, &oldPlane );
+
+    modalPSDs_test::updatePlaneSumForTest( recomputedSum, keepPlaneA );
+    modalPSDs_test::updatePlaneSumForTest( recomputedSum, keepPlaneB );
+    modalPSDs_test::updatePlaneSumForTest( recomputedSum, newPlane );
+
+    REQUIRE( rollingSum.size() == recomputedSum.size() );
+    for( size_t n = 0; n < rollingSum.size(); ++n )
+    {
+        REQUIRE( rollingSum[n] == Approx( recomputedSum[n] ) );
     }
 }
 

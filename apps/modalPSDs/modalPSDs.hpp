@@ -196,6 +196,27 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
                         cbIndexT            count          /**< [in] number of mean-window samples to cache */
     ) const;
 
+    /// Count how many raw PSD planes are currently retained across the published and overflow histories.
+    uint64_t storedRawPSDCount() const;
+
+    /// Locate a retained raw PSD plane by age, where age 0 is the newest plane.
+    const realT *rawPSDPlaneByAge( uint64_t age,          /**< [in] age of the requested raw PSD plane */
+                                   size_t   planeElements /**< [in] number of elements per raw PSD plane */
+    ) const;
+
+    /// Recompute the averaged-PSD running sum from the newest `windowCount` retained raw PSD planes.
+    void recomputeAveragedPSDSum( std::vector<double> &avgPsdSum,    /**< [out] running sum over the averaging window */
+                                  uint64_t             windowCount,  /**< [in] number of raw PSD planes to sum */
+                                  size_t               planeElements /**< [in] number of elements per raw PSD plane */
+    ) const;
+
+    /// Add one raw PSD plane and optionally subtract one outgoing raw PSD plane from the running average sum.
+    static void updatePlaneSum( std::vector<double> &planeSum, /**< [in,out] running sum to update */
+                                const realT         *addPlane, /**< [in] newest raw PSD plane to add */
+                                const realT *removePlane,  /**< [in] outgoing raw PSD plane to subtract, or nullptr */
+                                size_t       planeElements /**< [in] number of elements per raw PSD plane */
+    );
+
     /// Calculate how many raw PSD estimates are needed to cover the requested averaging time.
     int desiredPSDAverageCount() const;
 
@@ -810,6 +831,8 @@ void modalPSDs::psdThreadExec()
     ampCircBuffT::snapshotT prevSnap;
     cbIndexT                prevMeanRefEntry = 0;
     bool                    haveMeanSums     = false;
+    std::vector<double>     avgPsdSum;
+    uint64_t                avgPsdWindowCount = 0;
 
     while( m_psdThreadInit == true && shutdown() == 0 )
     {
@@ -864,6 +887,8 @@ void modalPSDs::psdThreadExec()
         prevSnap         = ampCircBuffT::snapshotT();
         prevMeanRefEntry = 0;
         haveMeanSums     = false;
+        avgPsdSum.clear();
+        avgPsdWindowCount = 0;
 
         while( m_psdRestarting.load( std::memory_order_acquire ) == false && !shutdown() )
         {
@@ -984,68 +1009,50 @@ void modalPSDs::psdThreadExec()
 
             //-------------------------- now average the psds ----------------------------
 
-            int nPSDAverage = desiredPSDAverageCount();
-
-            size_t         planeElements = m_psdBuffer.rows() * m_psdBuffer.cols();
-            const uint64_t publishedRawPSDs =
-                std::min<uint64_t>( m_rawpsdStream->md->cnt0, publishedRawPSDHistoryDepth() );
-            const uint64_t overflowRawPSDs  = std::min<uint64_t>( m_rawPSDHistoryCount, m_rawPSDHistoryDepth );
-            const uint64_t availableRawPSDs = publishedRawPSDs + overflowRawPSDs;
-
-            if( availableRawPSDs == 0 )
+            size_t planeElements = m_psdBuffer.rows() * m_psdBuffer.cols();
+            if( avgPsdSum.size() != planeElements )
             {
-                nPSDAverage = 1;
-            }
-            else if( static_cast<uint64_t>( nPSDAverage ) > availableRawPSDs )
-            {
-                nPSDAverage = static_cast<int>( availableRawPSDs );
+                avgPsdSum.assign( planeElements, 0 );
+                avgPsdWindowCount = 0;
             }
 
-            memcpy( m_psdBuffer.data(), F, planeElements * sizeof( realT ) );
+            uint64_t desiredPsdWindow  = static_cast<uint64_t>( desiredPSDAverageCount() );
+            uint64_t storedRawPsdCount = storedRawPSDCount();
+            uint64_t nextWindowCount   = std::min<uint64_t>( desiredPsdWindow, storedRawPsdCount );
 
-            uint64_t publishedUsed = std::min<uint64_t>( nPSDAverage, publishedRawPSDs );
+            const realT *latestPlane = rawPSDPlaneByAge( 0, planeElements );
 
-            uint64_t historySlot = cnt1;
-            for( uint64_t n = 1; n < publishedUsed; ++n )
+            bool recomputeAvgPsd = ( nextWindowCount == 0 || latestPlane == nullptr || avgPsdWindowCount == 0 ||
+                                     nextWindowCount < avgPsdWindowCount || nextWindowCount > avgPsdWindowCount + 1 );
+
+            if( recomputeAvgPsd == true )
             {
-                if( historySlot == 0 )
+                recomputeAveragedPSDSum( avgPsdSum, nextWindowCount, planeElements );
+            }
+            else if( nextWindowCount == avgPsdWindowCount + 1 )
+            {
+                updatePlaneSum( avgPsdSum, latestPlane, nullptr, planeElements );
+            }
+            else
+            {
+                const realT *outgoingPlane = rawPSDPlaneByAge( nextWindowCount, planeElements );
+                if( outgoingPlane == nullptr )
                 {
-                    historySlot = m_rawpsdStream->md->size[2] - 1;
+                    recomputeAveragedPSDSum( avgPsdSum, nextWindowCount, planeElements );
                 }
                 else
                 {
-                    --historySlot;
+                    updatePlaneSum( avgPsdSum, latestPlane, outgoingPlane, planeElements );
                 }
-
-                F = m_rawpsdStream->array.F + planeElements * historySlot;
-
-                m_psdBuffer += Eigen::Map<Eigen::Array<float, -1, -1>>( F, m_psdBuffer.rows(), m_psdBuffer.cols() );
             }
 
-            uint64_t overflowUsed = nPSDAverage - publishedUsed;
-            if( overflowUsed > 0 )
+            avgPsdWindowCount      = nextWindowCount;
+            uint64_t avgPsdDivisor = ( avgPsdWindowCount == 0 ) ? 1 : avgPsdWindowCount;
+
+            for( size_t n = 0; n < planeElements; ++n )
             {
-                uint64_t overflowSlot =
-                    ( m_rawPSDHistoryNext == 0 ) ? m_rawPSDHistoryDepth - 1 : m_rawPSDHistoryNext - 1;
-
-                for( uint64_t n = 0; n < overflowUsed; ++n )
-                {
-                    realT *H = m_rawPSDHistory.data() + planeElements * overflowSlot;
-
-                    m_psdBuffer += Eigen::Map<Eigen::Array<float, -1, -1>>( H, m_psdBuffer.rows(), m_psdBuffer.cols() );
-
-                    if( overflowSlot == 0 )
-                    {
-                        overflowSlot = m_rawPSDHistoryDepth - 1;
-                    }
-                    else
-                    {
-                        --overflowSlot;
-                    }
-                }
+                m_psdBuffer.data()[n] = static_cast<realT>( avgPsdSum[n] / avgPsdDivisor );
             }
-
-            m_psdBuffer /= nPSDAverage;
 
             m_avgpsdStream->md->write = 1;
 
@@ -1218,6 +1225,70 @@ void modalPSDs::cacheMeanHead( std::vector<realT> &meanHeadCache, cbIndexT count
     }
 }
 
+uint64_t modalPSDs::storedRawPSDCount() const
+{
+    return std::min<uint64_t>( m_rawpsdStream->md->cnt0, publishedRawPSDHistoryDepth() + m_rawPSDHistoryDepth );
+}
+
+const modalPSDs::realT *modalPSDs::rawPSDPlaneByAge( uint64_t age, size_t planeElements ) const
+{
+    const uint64_t publishedCount = std::min<uint64_t>( m_rawpsdStream->md->cnt0, publishedRawPSDHistoryDepth() );
+
+    if( age < publishedCount )
+    {
+        uint64_t publishedDepth = m_rawpsdStream->md->size[2];
+        uint64_t slot           = ( m_rawpsdStream->md->cnt1 + publishedDepth - age ) % publishedDepth;
+        return m_rawpsdStream->array.F + planeElements * slot;
+    }
+
+    uint64_t overflowAge   = age - publishedCount;
+    uint64_t overflowCount = std::min<uint64_t>( m_rawPSDHistoryCount, m_rawPSDHistoryDepth );
+    if( overflowAge >= overflowCount || m_rawPSDHistoryDepth == 0 )
+    {
+        return nullptr;
+    }
+
+    uint64_t slot = ( m_rawPSDHistoryNext + m_rawPSDHistoryDepth - 1 - overflowAge ) % m_rawPSDHistoryDepth;
+    return m_rawPSDHistory.data() + planeElements * slot;
+}
+
+void modalPSDs::recomputeAveragedPSDSum( std::vector<double> &avgPsdSum,
+                                         uint64_t             windowCount,
+                                         size_t               planeElements ) const
+{
+    avgPsdSum.assign( planeElements, 0 );
+
+    for( uint64_t age = 0; age < windowCount; ++age )
+    {
+        const realT *plane = rawPSDPlaneByAge( age, planeElements );
+        if( plane == nullptr )
+        {
+            break;
+        }
+
+        updatePlaneSum( avgPsdSum, plane, nullptr, planeElements );
+    }
+}
+
+void modalPSDs::updatePlaneSum( std::vector<double> &planeSum,
+                                const realT         *addPlane,
+                                const realT         *removePlane,
+                                size_t               planeElements )
+{
+    for( size_t n = 0; n < planeElements; ++n )
+    {
+        if( addPlane != nullptr )
+        {
+            planeSum[n] += addPlane[n];
+        }
+
+        if( removePlane != nullptr )
+        {
+            planeSum[n] -= removePlane[n];
+        }
+    }
+}
+
 int modalPSDs::desiredPSDAverageCount() const
 {
     realT psdTime    = m_psdTime.load( std::memory_order_acquire );
@@ -1273,12 +1344,12 @@ uint32_t modalPSDs::rawPSDHistoryDepth() const
     const uint32_t desired   = static_cast<uint32_t>( desiredPSDAverageCount() );
     const uint32_t published = publishedRawPSDHistoryDepth();
 
-    if( desired <= published )
+    if( desired + 1 <= published )
     {
         return 0;
     }
 
-    return desired - published;
+    return desired + 1 - published;
 }
 
 uint32_t modalPSDs::publishedRawPSDHistoryDepth() const
