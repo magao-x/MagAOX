@@ -329,16 +329,40 @@ def plot_wind_direction_vs_time_for_cluster(
         return
     times = df["time"].to_list()
     directions = df["direction"].cast(pl.Float64).to_list()
+    velocities = np.asarray(df["velocity_m_per_s"].cast(pl.Float64).to_list(), dtype=np.float64)
+    # Normalize speeds by the cluster mean speed for per-point color encoding.
+    if mean_speed_mps > 0:
+        velocities_norm = velocities / float(mean_speed_mps)
+    else:
+        velocities_norm = np.ones_like(velocities, dtype=np.float64)
     fig, ax = plt.subplots(figsize=(9, 4.5))
-    color = f"C{cluster_id % 10}"
-    ax.scatter(times, directions, s=28, alpha=0.75, c=color, edgecolors="k", linewidths=0.3)
-    ax.set_xlabel("Cube time (UTC)")
+    vmin = float(np.nanmin(velocities_norm))
+    vmax = float(np.nanmax(velocities_norm))
+    if not np.isfinite(vmin) or not np.isfinite(vmax):
+        vmin, vmax = 0.0, 1.0
+    if vmax <= vmin:
+        vmax = vmin + 1e-6
+    speed_norm = plt.Normalize(vmin=vmin, vmax=vmax)
+    scat = ax.scatter(
+        times,
+        directions,
+        s=28,
+        alpha=0.9,
+        c=velocities_norm,
+        cmap="Blues",
+        norm=speed_norm,
+        edgecolors="k",
+        linewidths=0.3,
+    )
+    ax.set_xlabel("Time Obs. (UTC)")
     ax.set_ylabel("Wind direction (deg)")
     ax.set_title(
         rf"Cluster {cluster_id}: direction vs time ($\sigma$={sigma:g}; "
         rf"$\langle v\rangle$={mean_speed_mps:.1f} m/s, $\langle\theta\rangle$={mean_direction_deg:.1f}°)"
     )
     ax.grid(True, linestyle="--", alpha=0.35)
+    cbar = fig.colorbar(scat, ax=ax, pad=0.02)
+    cbar.set_label(r"$v / \langle v \rangle$")
     fig.autofmt_xdate()
     fig.tight_layout()
     out_png_dir = os.path.dirname(os.path.abspath(output_png))
