@@ -81,7 +81,7 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
     std::atomic<realT> m_psdTime{ 1 };     ///< The length of time over which to calculate PSDs.  The default is 1 sec.
     std::atomic<realT> m_psdAvgTime{ 10 }; ///< The time over which to average PSD estimates.  The default is 10 sec.
     std::atomic<realT> m_meanTime{
-        60 }; ///< The time over which to calculate the mean for detrending.  The default is 60 sec.
+        10 }; ///< The time over which to calculate the mean for detrending.  The default is 10 sec.
 
     // realT m_overSize {10}; ///< Multiplicative factor by which to oversize the circular buffer, to give good mean
     // estimates and account for time-to-calculate.
@@ -386,7 +386,7 @@ void modalPSDs::setupConfig()
                 "meanTime",
                 false,
                 "realT",
-                "The length of time over which to calculate the detrending mean.  The default is 60 sec." );
+                "The length of time over which to calculate the detrending mean.  The default is 10 sec." );
 }
 
 int modalPSDs::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -606,10 +606,9 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
     cbIndexT maxMeanSize = shmimMonitorT::m_depth - m_tsSize;
     if( m_meanSize > maxMeanSize )
     {
-        log<software_error>( { __FILE__,
-                               __LINE__,
-                               "input circ buff is not long enough for psd avg. time, truncating to " +
-                                   std::to_string( static_cast<double>( maxMeanSize ) / fps ) + " sec" } );
+        log<text_log>( "input circ buff is not long enough for meanTime, truncating to " +
+                           std::to_string( static_cast<double>( maxMeanSize ) / fps ) + " sec",
+                       logPrio::LOG_WARNING );
         m_meanSize = maxMeanSize;
     }
 
