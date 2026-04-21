@@ -267,12 +267,14 @@ int cameraStatus::updateOverlay()
     std::string sstr;
     bool        statusTextOverflowed{ false };
 
-    auto statusTextSlotAvailable = [&]( size_t slotIndex )
+    auto appendStatusText = [&]( const char *text )
     {
         size_t slotCount = m_roa.m_graphicsView->statusTextNo();
 
-        if( slotIndex < slotCount )
+        if( n < slotCount )
         {
+            m_roa.m_graphicsView->statusTextText( n, text );
+            ++n;
             return true;
         }
 
@@ -280,10 +282,8 @@ int cameraStatus::updateOverlay()
 
         if( !m_statusTextOverflowWarned )
         {
-            pluginLogError( std::format( "status text overflow for {}: need slot {}, only {} configured",
-                                         m_deviceName,
-                                         slotIndex + 1,
-                                         slotCount ) );
+            pluginLogError( std::format(
+                "status text overflow for {}: need slot {}, only {} configured", m_deviceName, n + 1, slotCount ) );
             m_statusTextOverflowWarned = true;
         }
 
@@ -325,11 +325,9 @@ int cameraStatus::updateOverlay()
     if( getBlobStr( "temp_ccd.current" ) )
     {
         snprintf( tstr, sizeof( tstr ), "%0.1f C", strtod( m_blob, 0 ) );
-        m_roa.m_graphicsView->statusTextText( n, tstr );
-        ++n;
+        if( !appendStatusText( tstr ) )
+            return 0;
     }
-    if( !statusTextSlotAvailable( n ) )
-        return 0;
 
     // Get curr size
     m_width = -1;
@@ -361,8 +359,8 @@ int cameraStatus::updateOverlay()
             snprintf( tstr, sizeof( tstr ), "%dx%d [%dx%d]", w, h, ibx, iby );
 
             //****************
-            m_roa.m_graphicsView->statusTextText( n, tstr );
-            ++n;
+            if( !appendStatusText( tstr ) )
+                return 0;
 
             float bx = ibx;
             float by = iby;
@@ -424,9 +422,6 @@ int cameraStatus::updateOverlay()
     } // if(blobExists("roi_region_w.current") ...
 
     //***********************
-    if( !statusTextSlotAvailable( n ) )
-        return 0;
-
     float et = getBlobVal<float>( "exptime.current", -1 );
     if( et >= 0 )
     {
@@ -454,31 +449,25 @@ int cameraStatus::updateOverlay()
             }
         }
 
-        m_roa.m_graphicsView->statusTextText( n, tstr );
-        ++n;
+        if( !appendStatusText( tstr ) )
+            return 0;
     }
-    if( !statusTextSlotAvailable( n ) )
-        return 0;
 
     float fps = getBlobVal<float>( "fps.current", -1 );
     if( fps >= 0 )
     {
         snprintf( tstr, sizeof( tstr ), "%0.1f FPS", fps );
-        m_roa.m_graphicsView->statusTextText( n, tstr );
-        ++n;
+        if( !appendStatusText( tstr ) )
+            return 0;
     }
-    if( !statusTextSlotAvailable( n ) )
-        return 0;
 
     int emg = getBlobVal<int>( "emgain.current", -1 );
     if( emg >= 0 )
     {
         snprintf( tstr, sizeof( tstr ), "EMG: %d", emg );
-        m_roa.m_graphicsView->statusTextText( n, tstr );
-        ++n;
+        if( !appendStatusText( tstr ) )
+            return 0;
     }
-    if( !statusTextSlotAvailable( n ) )
-        return 0;
 
     for( size_t f = 0; f < m_filterDeviceNames.size(); ++f )
     {
@@ -530,18 +519,16 @@ int cameraStatus::updateOverlay()
                         filn = m_filterDeviceNames[f] + ": unk";
                     }
                 }
-                m_roa.m_graphicsView->statusTextText( n, filn.c_str() );
-                ++n;
+                if( !appendStatusText( filn.c_str() ) )
+                    return 0;
             }
             else
             {
                 fwstate = m_filterDeviceNames[f] + ": " + fwstate;
-                m_roa.m_graphicsView->statusTextText( n, fwstate.c_str() );
-                ++n;
+                if( !appendStatusText( fwstate.c_str() ) )
+                    return 0;
             }
         }
-        if( !statusTextSlotAvailable( n ) )
-            return 0;
     }
 
     if( getBlobStr( "shutter_status.status" ) )
@@ -557,20 +544,18 @@ int cameraStatus::updateOverlay()
                     sstr = "sh SHUT";
                 else
                     sstr = "sh OPEN";
-                m_roa.m_graphicsView->statusTextText( n, sstr.c_str() );
-                ++n;
+                if( !appendStatusText( sstr.c_str() ) )
+                    return 0;
             }
         }
         else
         {
 
             sstr = "sh " + sstr;
-            m_roa.m_graphicsView->statusTextText( n, sstr.c_str() );
-            ++n;
+            if( !appendStatusText( sstr.c_str() ) )
+                return 0;
         }
     }
-    if( !statusTextSlotAvailable( n ) )
-        return 0;
 
     if( !statusTextOverflowed )
     {
