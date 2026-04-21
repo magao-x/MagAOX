@@ -181,6 +181,9 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
     /// Calculate how many samples are needed for the mean-subtraction window at the current FPS.
     cbIndexT desiredMeanSampleCount( realT fps /**< [in] frame rate used to convert mean time into samples */ ) const;
 
+    /// Calculate the total input-history depth needed to read both windows safely from the fixed-size circular buffer.
+    cbIndexT requiredInputHistoryDepth() const;
+
     /// Calculate the additional PSD history depth needed beyond the published raw-PSD shmim.
     uint32_t rawPSDHistoryDepth() const;
 
@@ -597,13 +600,13 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
 
     m_meanSize = desiredMeanSampleCount( fps );
 
-    if( static_cast<uint32_t>( m_tsSize ) >= shmimMonitorT::m_depth )
+    if( static_cast<uint32_t>( m_tsSize + 2 ) >= shmimMonitorT::m_depth )
     {
-        log<software_error>( { __FILE__, __LINE__, "input circ buff is not long enough for psd time" } );
+        log<software_error>( { __FILE__, __LINE__, "input circ buff is not long enough for psd and mean windows" } );
         return -1;
     }
 
-    cbIndexT maxMeanSize = shmimMonitorT::m_depth - m_tsSize;
+    cbIndexT maxMeanSize = shmimMonitorT::m_depth - m_tsSize - 2;
     if( m_meanSize > maxMeanSize )
     {
         log<text_log>( "input circ buff is not long enough for meanTime, truncating to " +
@@ -612,7 +615,7 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
         m_meanSize = maxMeanSize;
     }
 
-    m_ampCircBuff.maxEntries( m_tsSize + m_meanSize );
+    m_ampCircBuff.maxEntries( requiredInputHistoryDepth() );
 
     m_tsPtrs.resize( m_tsSize );
     m_meanPtrs.resize( m_meanSize );
@@ -1128,6 +1131,17 @@ modalPSDs::cbIndexT modalPSDs::desiredMeanSampleCount( realT fps ) const
     }
 
     return meanSize;
+}
+
+modalPSDs::cbIndexT modalPSDs::requiredInputHistoryDepth() const
+{
+    if( m_tsSize <= 0 || m_meanSize <= 0 )
+    {
+        return 0;
+    }
+
+    // Leave one slot for the excluded latest sample and one for the unreadable overwrite edge.
+    return m_tsSize + m_meanSize + 2;
 }
 
 uint32_t modalPSDs::rawPSDHistoryDepth() const

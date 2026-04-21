@@ -110,6 +110,11 @@ class modalPSDs_test : public modalPSDs
         return desiredMeanSampleCount( fps );
     }
 
+    cbIndexT requiredInputHistoryDepthForTest()
+    {
+        return requiredInputHistoryDepth();
+    }
+
     uint32_t rawPSDHistoryDepthForTest() const
     {
         return rawPSDHistoryDepth();
@@ -156,6 +161,7 @@ TEST_CASE( "modalPSDs PSD averaging and mean windows are decoupled", "[modalPSDs
     #ifdef MODALPSDS_TEST_DOXYGEN_REF
     modalPSDs::desiredPSDAverageCount();
     modalPSDs::desiredMeanSampleCount( 0 );
+    modalPSDs::requiredInputHistoryDepth();
     modalPSDs::rawPSDHistoryDepth();
     #endif
     // clang-format on
@@ -163,20 +169,26 @@ TEST_CASE( "modalPSDs PSD averaging and mean windows are decoupled", "[modalPSDs
     app.setPSDHistoryFloor( 100 );
 
     app.setPSDTiming( 1.0F, 10.0F, 60.0F, 0.5F );
+    app.setWindowSizes( 2000, app.desiredMeanSampleCountForTest( 1000.0F ) );
     REQUIRE( app.desiredPSDAverageCountForTest() == 20 );
     REQUIRE( app.desiredMeanSampleCountForTest( 1000.0F ) == 60000 );
+    REQUIRE( app.requiredInputHistoryDepthForTest() == 62002 );
     REQUIRE( app.rawPSDHistoryDepthForTest() == 0 );
     REQUIRE( app.publishedRawPSDHistoryDepthForTest() == 100 );
 
     app.setPSDTiming( 1.0F, 60.0F, 60.0F, 0.5F );
+    app.setWindowSizes( 2000, app.desiredMeanSampleCountForTest( 1000.0F ) );
     REQUIRE( app.desiredPSDAverageCountForTest() == 120 );
     REQUIRE( app.desiredMeanSampleCountForTest( 1000.0F ) == 60000 );
+    REQUIRE( app.requiredInputHistoryDepthForTest() == 62002 );
     REQUIRE( app.rawPSDHistoryDepthForTest() == 20 );
     REQUIRE( app.publishedRawPSDHistoryDepthForTest() == 100 );
 
     app.setPSDTiming( 1.0F, 60.0F, 15.0F, 0.5F );
+    app.setWindowSizes( 2000, app.desiredMeanSampleCountForTest( 1000.0F ) );
     REQUIRE( app.desiredPSDAverageCountForTest() == 120 );
     REQUIRE( app.desiredMeanSampleCountForTest( 1000.0F ) == 15000 );
+    REQUIRE( app.requiredInputHistoryDepthForTest() == 17002 );
     REQUIRE( app.rawPSDHistoryDepthForTest() == 20 );
 }
 
@@ -233,6 +245,38 @@ SCENARIO( "PSD input windows come from one validated snapshot", "[modalPSDs]" )
             REQUIRE( app.meanValue( 1 ) == 4 );
         }
     }
+}
+
+/// Verify modalPSDs can read both windows when the circular buffer is sized to the exact required history depth.
+/**
+ * \ingroup modalPSDs_unit_test
+ */
+TEST_CASE( "modalPSDs PSD input windows use the exact required history depth", "[modalPSDs]" )
+{
+    modalPSDs_test app( "modalPSDs_test_required_history_depth" );
+
+    app.setWindowSizes( 3, 2 );
+    app.setCircBuffEntries( 7 );
+
+    modalPSDs::realT samples[7];
+    for( int n = 0; n < 7; ++n )
+    {
+        samples[n] = static_cast<modalPSDs::realT>( n );
+        app.pushSample( &samples[n] );
+    }
+
+    modalPSDs_test::snapshotT sn;
+
+    REQUIRE( app.loadWindows( sn ) );
+    REQUIRE( sn.maxEntries == 7 );
+    REQUIRE( sn.validEntries == 7 );
+
+    REQUIRE( app.meanValue( 0 ) == 1 );
+    REQUIRE( app.meanValue( 1 ) == 2 );
+
+    REQUIRE( app.tsValue( 0 ) == 3 );
+    REQUIRE( app.tsValue( 1 ) == 4 );
+    REQUIRE( app.tsValue( 2 ) == 5 );
 }
 
 SCENARIO( "Snapshot-based circular-buffer loads reject stale snapshots", "[modalPSDs]" )
