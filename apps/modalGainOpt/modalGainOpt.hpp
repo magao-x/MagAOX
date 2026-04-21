@@ -531,6 +531,14 @@ class modalGainOpt : public MagAOXApp<true>,
                                size_t       size      /**< [in] number of frequency samples in `incoming` */
     );
 
+    /// Refresh gain-optimization structures after coefficient, multiplier, or frequency changes.
+    /** The gain-optimization mutex must be locked before calling this helper.
+     *
+     * \returns true when a structure refresh was performed
+     * \returns false when no refresh was needed
+     */
+    bool refreshGoptStructures();
+
   public:
     /// Default c'tor.
     modalGainOpt();
@@ -1467,6 +1475,79 @@ bool modalGainOpt::applyFrequencyUpdate( const float *incoming, size_t size )
     m_goptUpdated = true;
     m_freqUpdated = true;
 
+    return true;
+}
+
+bool modalGainOpt::refreshGoptStructures()
+{
+    if( !( m_goptUpdated || m_pcgoptUpdated || m_freqUpdated || m_goptCurrent.size() != m_gainFacts.size() ) )
+    {
+        return false;
+    }
+
+    if( m_goptCurrent.size() != m_gainFacts.size() )
+    {
+        m_freqUpdated = true; // force freq update in this case
+    }
+
+    std::cerr << "updating gopt structures\n";
+
+    m_goptCurrent.resize( m_gainFacts.size() );
+    m_goptSI.resize( m_gainFacts.size() );
+    m_goptLP.resize( m_gainFacts.size() );
+    m_linPred.resize( m_gainFacts.size() );
+
+    for( size_t n = 0; n < m_goptCurrent.size(); ++n )
+    {
+        m_goptCurrent[n].Ti( 1.0 / m_fps );
+        m_goptCurrent[n].tau( m_taus[n] );
+
+        m_goptSI[n].Ti( 1.0 / m_fps );
+        m_goptSI[n].tau( m_taus[n] );
+
+        m_goptLP[n].Ti( 1.0 / m_fps );
+        m_goptLP[n].tau( m_taus[n] );
+
+        if( !m_pcOn )
+        {
+            m_goptCurrent[n].setLeakyIntegrator( m_mult * m_multFacts[n] );
+        }
+        else
+        {
+            std::vector<float> ta( m_NaCurrent[n] );
+            for( size_t m = 0; m < ta.size(); ++m )
+            {
+                ta[m] = m_as( m, n );
+            }
+            m_goptCurrent[n].a( ta );
+
+            std::vector<float> tb( m_NbCurrent[n] );
+            for( size_t m = 0; m < tb.size(); ++m )
+            {
+                tb[m] = m_bs( m, n );
+            }
+            m_goptCurrent[n].b( tb );
+
+            m_goptCurrent[n].remember( m_pcMult * m_pcMultFacts[n] );
+        }
+
+        m_goptSI[n].setLeakyIntegrator( m_mult * m_multFacts[n] );
+
+        if( m_freqUpdated )
+        {
+            m_goptCurrent[n].f( m_freq );
+            m_goptSI[n].f( m_freq );
+            m_goptLP[n].f( m_freq );
+        }
+
+        m_gmaxSI[n] = m_goptSI[n].maxStableGain();
+    }
+
+    m_goptUpdated   = false;
+    m_pcgoptUpdated = false;
+    m_freqUpdated   = false;
+
+    std::cerr << "done.\n";
     return true;
 }
 
@@ -2843,74 +2924,7 @@ void modalGainOpt::goptThreadExec()
                 continue; // we just wait
             }
 
-            // m_doPCCalcs = false;
-
-            if( m_goptUpdated || m_pcgoptUpdated || m_freqUpdated || m_goptCurrent.size() != m_gainFacts.size() )
-            {
-                if( m_goptCurrent.size() != m_gainFacts.size() )
-                {
-                    m_freqUpdated = true; // force freq update in this case
-                }
-
-                std::cerr << "updating gopt structures\n";
-
-                m_goptCurrent.resize( m_gainFacts.size() );
-                m_goptSI.resize( m_gainFacts.size() );
-                m_goptLP.resize( m_gainFacts.size() );
-                m_linPred.resize( m_gainFacts.size() );
-
-                for( size_t n = 0; n < m_goptCurrent.size(); ++n )
-                {
-                    m_goptCurrent[n].Ti( 1.0 / m_fps );
-                    m_goptCurrent[n].tau( m_taus[n] );
-
-                    m_goptSI[n].Ti( 1.0 / m_fps );
-                    m_goptSI[n].tau( m_taus[n] );
-
-                    m_goptLP[n].Ti( 1.0 / m_fps );
-                    m_goptLP[n].tau( m_taus[n] );
-
-                    if( !m_pcOn )
-                    {
-                        m_goptCurrent[n].setLeakyIntegrator( m_mult * m_multFacts[n] );
-                    }
-                    else
-                    {
-                        std::vector<float> ta( m_NaCurrent[n] );
-                        for( size_t m = 0; m < ta.size(); ++m )
-                        {
-                            ta[m] = m_as( m, n );
-                        }
-                        m_goptCurrent[n].a( ta );
-
-                        std::vector<float> tb( m_NbCurrent[n] );
-                        for( size_t m = 0; m < tb.size(); ++m )
-                        {
-                            tb[m] = m_bs( m, n );
-                        }
-                        m_goptCurrent[n].b( tb );
-
-                        m_goptCurrent[n].remember( m_pcMult * m_pcMultFacts[n] );
-                    }
-
-                    m_goptSI[n].setLeakyIntegrator( m_mult * m_multFacts[n] );
-
-                    if( m_freqUpdated )
-                    {
-                        m_goptCurrent[n].f( m_freq );
-                        m_goptSI[n].f( m_freq );
-                        m_goptLP[n].f( m_freq );
-                    }
-
-                    m_gmaxSI[n] = m_goptSI[n].maxStableGain();
-                }
-
-                m_goptUpdated   = false;
-                m_pcgoptUpdated = false;
-                m_freqUpdated   = false;
-
-                std::cerr << "done.\n";
-            }
+            refreshGoptStructures();
 
             MGO_BREADCRUMB;
             if( m_updating )
@@ -3487,8 +3501,12 @@ void modalGainOpt::goptThreadExec()
             /* ETIMEDOUT just means keep waiting */
             if( errno == ETIMEDOUT )
             {
-                // Could Update gopts if needed (requires size checks and requires mutex lock)
-                // Probably not worth it for pred. control anyway.
+                std::lock_guard<std::mutex> lock( m_goptMutex );
+
+                if( checkSizes() >= 0 )
+                {
+                    refreshGoptStructures();
+                }
                 continue;
             }
 

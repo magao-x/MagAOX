@@ -219,6 +219,29 @@ class modalGainOptHarness : public modalGainOpt
     {
         return applyFrequencyUpdate( incoming.data(), incoming.size() );
     }
+
+    void configureGoptStructureInputsForTest( const std::vector<float> &gainFacts,
+                                              const std::vector<float> &taus,
+                                              const std::vector<float> &multFacts,
+                                              const std::vector<float> &freq )
+    {
+        m_gainFacts = gainFacts;
+        m_taus      = taus;
+        m_multFacts = multFacts;
+        m_freq      = freq;
+        m_gmaxSI.resize( gainFacts.size(), 0.0F );
+    }
+
+    size_t goptCurrentSize() const
+    {
+        return m_goptCurrent.size();
+    }
+
+    bool refreshGoptStructuresForTest()
+    {
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+        return refreshGoptStructures();
+    }
 };
 /// \endcond
 
@@ -526,6 +549,37 @@ TEST_CASE( "modalGainOpt frequency updates resize state and refresh derived timi
     REQUIRE( app.sinceChange() == -1 );
     REQUIRE( app.goptUpdated() == true );
     REQUIRE( app.freqUpdated() == true );
+}
+
+/// Verify `modalGainOpt` can refresh gain-optimization structures as soon as metadata changes, without waiting for a
+/// PSD-triggered semaphore post.
+/**
+ * \ingroup modalGainOpt_unit_test
+ */
+TEST_CASE( "modalGainOpt refreshes pending gopt structures without a PSD wakeup", "[modalGainOpt]" )
+{
+    modalGainOptHarness app;
+
+    // clang-format off
+    #ifdef MODALGAINOPT_TEST_DOXYGEN_REF
+    modalGainOpt::refreshGoptStructures();
+    #endif
+    // clang-format on
+
+    app.setFpsForTest( 1000.0F );
+    app.setFreqForTest( { 100.0F, 200.0F, 300.0F } );
+    app.configureGoptStructureInputsForTest( { 1.0F, 2.0F }, { 0.001F, 0.002F }, { 0.5F, 0.75F }, app.freq() );
+    app.setFreqUpdatedForTest( true );
+    app.setGoptUpdatedForTest( true );
+    app.setPcgoptUpdatedForTest( false );
+    app.setPcOnForTest( false );
+
+    REQUIRE( app.goptCurrentSize() == 0 );
+    REQUIRE( app.refreshGoptStructuresForTest() == true );
+    REQUIRE( app.goptCurrentSize() == 2 );
+    REQUIRE( app.goptUpdated() == false );
+    REQUIRE( app.pcgoptUpdated() == false );
+    REQUIRE( app.freqUpdated() == false );
 }
 
 /// Verify `modalGainOpt` writes predictive-control coefficients into per-mode blocks.
