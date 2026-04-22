@@ -840,6 +840,8 @@ void dmCtrl::syncComboOptions( QComboBox *combo, const std::vector<std::string> 
     {
         combo->addItem( option.c_str() );
     }
+
+    updateXwComboBoxPopupWidth( combo );
 }
 
 void dmCtrl::on_buttonInit_pressed()
