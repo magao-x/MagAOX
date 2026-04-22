@@ -58,34 +58,37 @@ class statusCombo : public xWidget
 
     /// Tracks edit state for the combo box.
     int m_statusEditing{ STOPPED };
+    /// Whether a sent selection is still waiting for the live state to confirm it.
+    bool m_statusCommandPending{ false };
     /// Timer that clears staged combo-box edits after inactivity.
     QTimer *m_statusEditTimer{ nullptr };
 
   public:
     /// Construct an unconfigured status combo widget.
-    statusCombo( QWidget *Parent = 0, Qt::WindowFlags f = Qt::WindowFlags() );
+    statusCombo( QWidget        *Parent /**< [in] owning Qt parent widget */   = 0,
+                 Qt::WindowFlags f /**< [in] Qt window flags for the widget */ = Qt::WindowFlags() );
 
     /// Construct and configure a status combo widget.
-    statusCombo( const std::string &device,
-                 const std::string &property,
-                 const std::string &element,
-                 const std::string &label,
-                 const std::string &units,
-                 QWidget           *Parent = 0,
-                 Qt::WindowFlags    f      = Qt::WindowFlags() );
+    statusCombo( const std::string &device /**< [in] INDI device name displayed by the widget */,
+                 const std::string &property /**< [in] INDI property name used for combo-box selections */,
+                 const std::string &element /**< [in] optional direct-value element name */,
+                 const std::string &label /**< [in] label text shown beside the combo box */,
+                 const std::string &units /**< [in] optional units suffix appended to the label */,
+                 QWidget           *Parent /**< [in] owning Qt parent widget */   = 0,
+                 Qt::WindowFlags    f /**< [in] Qt window flags for the widget */ = Qt::WindowFlags() );
 
     /// Destroy the widget.
     ~statusCombo();
 
     /// Configure the device, property, and label metadata for the widget.
-    void setup( const std::string &device,
-                const std::string &property,
-                const std::string &element,
-                const std::string &label,
-                const std::string &units );
+    void setup( const std::string &device /**< [in] INDI device name displayed by the widget */,
+                const std::string &property /**< [in] INDI property name used for combo-box selections */,
+                const std::string &element /**< [in] optional direct-value element name */,
+                const std::string &label /**< [in] label text shown beside the combo box */,
+                const std::string &units /**< [in] optional units suffix appended to the label */ );
 
     /// Replace the optional detailed control widget.
-    void ctrlWidget( xWidget *cw );
+    void ctrlWidget( xWidget *cw /**< [in] replacement detailed control widget, or `nullptr` to hide it */ );
 
     /// Return the optional detailed control widget.
     xWidget *ctrlWidget();
@@ -113,7 +116,7 @@ class statusCombo : public xWidget
 
   public:
     /// Hide the control widget when this summary row becomes disabled.
-    virtual void changeEvent( QEvent *e );
+    virtual void changeEvent( QEvent *e /**< [in] Qt change event being processed */ );
 
   public slots:
 
@@ -121,7 +124,7 @@ class statusCombo : public xWidget
     virtual void updateGUI();
 
     /// Mark the combo box as actively edited.
-    void on_status_activated( int index );
+    void on_status_activated( int index /**< [in] combo-box index selected by the user */ );
 
     /// Send the selected value back to INDI.
     void on_buttonGo_pressed();
@@ -133,17 +136,20 @@ class statusCombo : public xWidget
     void statusEditTimerOut();
 
   signals:
+    /// Start or restart the edit timeout.
+    void statusEditTimerStart( int timeoutMs /**< [in] timeout duration in milliseconds */ );
 
-    void statusEditTimerStart( int );
-
+    /// Queue a GUI refresh onto the Qt event loop.
     void doUpdateGUI();
 
   protected:
     /// Decide whether the widget should show the value instead of FSM text.
     bool shouldShowValue() const;
 
-    virtual void paintEvent( QPaintEvent *e );
+    /// Update styling that reflects whether the combo box is in edit mode.
+    virtual void paintEvent( QPaintEvent *e /**< [in] Qt paint event being processed */ );
 
+    /// Generated Qt UI backing this summary widget.
     Ui::statusCombo ui;
 };
 
@@ -271,7 +277,8 @@ void statusCombo::subscribe()
 
 void statusCombo::onConnect()
 {
-    m_valChanged = true;
+    m_valChanged           = true;
+    m_statusCommandPending = false;
     if( m_ctrlWidget )
     {
         m_ctrlWidget->onConnect();
@@ -282,9 +289,16 @@ void statusCombo::onDisconnect()
 {
     m_fsmState.clear();
     m_value.clear();
-    m_parked     = false;
-    m_showVal    = false;
-    m_valChanged = false;
+    m_parked               = false;
+    m_showVal              = false;
+    m_valChanged           = false;
+    m_statusEditing        = STOPPED;
+    m_statusCommandPending = false;
+
+    if( m_statusEditTimer )
+    {
+        m_statusEditTimer->stop();
+    }
 
     ui.status->clear();
     ui.status->setPlaceholderText( "" );
@@ -424,6 +438,13 @@ void statusCombo::handleSetProperty( const pcf::IndiProperty &ipRecv )
                 m_valChanged = true;
             }
             m_value = value;
+
+            if( m_statusCommandPending && value == ui.status->currentText().toStdString() )
+            {
+                m_statusEditing        = STOPPED;
+                m_statusCommandPending = false;
+                m_valChanged           = true;
+            }
         }
     }
 
@@ -445,6 +466,11 @@ void statusCombo::changeEvent( QEvent *e )
 
 void statusCombo::updateGUI()
 {
+    if( m_statusEditing == STARTED || m_statusCommandPending )
+    {
+        return;
+    }
+
     if( isEnabled() )
     {
         if( m_showVal )
@@ -474,7 +500,8 @@ void statusCombo::on_status_activated( int index )
 {
     static_cast<void>( index );
 
-    m_statusEditing = STARTED;
+    m_statusEditing        = STARTED;
+    m_statusCommandPending = false;
     emit statusEditTimerStart( 10000 );
     update();
 }
@@ -484,6 +511,11 @@ void statusCombo::on_buttonGo_pressed()
     std::string selection = ui.status->currentText().toStdString();
 
     if( selection == "" )
+    {
+        return;
+    }
+
+    if( m_property == "" )
     {
         return;
     }
@@ -518,8 +550,9 @@ void statusCombo::on_buttonGo_pressed()
         std::cerr << "INDI exception thrown in statusCombo::on_buttonGo_pressed\n";
     }
 
-    m_statusEditing = STOPPED;
-    ui.status->setCurrentText( formatValue() );
+    m_statusEditing        = STARTED;
+    m_statusCommandPending = true;
+    emit statusEditTimerStart( 10000 );
     ui.status->clearFocus();
     ui.buttonGo->clearFocus();
     update();
@@ -536,9 +569,11 @@ void statusCombo::on_buttonCtrl_pressed()
 
 void statusCombo::statusEditTimerOut()
 {
-    m_statusEditing = STOPPED;
-    ui.status->setCurrentText( formatValue() );
+    m_statusEditing        = STOPPED;
+    m_statusCommandPending = false;
+    ui.status->setCurrentIndex( -1 );
     ui.status->clearFocus();
+    emit doUpdateGUI();
     update();
 }
 

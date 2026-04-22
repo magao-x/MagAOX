@@ -7,6 +7,7 @@
 #define dmCtrl_hpp
 
 #include <QSignalBlocker>
+#include <QTimer>
 
 #include <mutex>
 #include <vector>
@@ -29,15 +30,21 @@ class dmCtrl : public xWidget
     std::string m_dmName;    ///< INDI device name for the target DM application.
     std::string m_shmimName; ///< Shared-memory stream name reported by the DM app.
 
-    std::string              m_flatShmim;        ///< Shared-memory stream backing the selected flat.
-    bool                     m_flatSet{ false }; ///< True when a flat is currently applied.
-    std::string              m_flatName;         ///< Name of the selected flat option.
-    std::vector<std::string> m_flatOptions;      ///< Available flat options from INDI.
+    std::string              m_flatShmim;         ///< Shared-memory stream backing the selected flat.
+    bool                     m_flatSet{ false };  ///< True when a flat is currently applied.
+    std::string              m_flatName;          ///< Name of the selected flat option.
+    std::vector<std::string> m_flatOptions;       ///< Available flat options from INDI.
+    std::string              m_flatRequestedName; ///< Flat option requested by the user but not yet confirmed.
+    bool    m_flatSelectionPending{ false };      ///< True while the GUI should hold a requested flat selection.
+    QTimer *m_flatSelectionTimer{ nullptr };      ///< Clears unconfirmed flat selections after a timeout.
 
-    std::string              m_testShmim;        ///< Shared-memory stream backing the selected test pattern.
-    bool                     m_testSet{ false }; ///< True when a test pattern is currently applied.
-    std::string              m_testName;         ///< Name of the selected test option.
-    std::vector<std::string> m_testOptions;      ///< Available test options from INDI.
+    std::string              m_testShmim;         ///< Shared-memory stream backing the selected test pattern.
+    bool                     m_testSet{ false };  ///< True when a test pattern is currently applied.
+    std::string              m_testName;          ///< Name of the selected test option.
+    std::vector<std::string> m_testOptions;       ///< Available test options from INDI.
+    std::string              m_testRequestedName; ///< Test option requested by the user but not yet confirmed.
+    bool    m_testSelectionPending{ false };      ///< True while the GUI should hold a requested test selection.
+    QTimer *m_testSelectionTimer{ nullptr };      ///< Clears unconfirmed test selections after a timeout.
 
     std::mutex m_stateMutex; ///< Guards cached state copied into the GUI thread.
 
@@ -112,6 +119,12 @@ class dmCtrl : public xWidget
     /// Sends request to clear applied test.
     void on_buttonZeroTest_pressed();
 
+    /// Clears an unconfirmed flat selection after the timeout expires.
+    void flatSelectionTimerOut();
+
+    /// Clears an unconfirmed test selection after the timeout expires.
+    void testSelectionTimerOut();
+
   signals:
     /// Queues connected-state GUI updates onto the widget thread.
     void doOnConnect();
@@ -160,6 +173,12 @@ dmCtrl::dmCtrl( std::string &dmName, QWidget *Parent, Qt::WindowFlags f ) : xWid
     connect( this, SIGNAL( doOnConnect() ), this, SLOT( onConnectGUI() ), Qt::QueuedConnection );
     connect( this, SIGNAL( doOnDisconnect() ), this, SLOT( onDisconnectGUI() ), Qt::QueuedConnection );
     connect( this, SIGNAL( doUpdateGUI() ), this, SLOT( updateGUI() ), Qt::QueuedConnection );
+
+    m_flatSelectionTimer = new QTimer( this );
+    connect( m_flatSelectionTimer, SIGNAL( timeout() ), this, SLOT( flatSelectionTimerOut() ) );
+
+    m_testSelectionTimer = new QTimer( this );
+    connect( m_testSelectionTimer, SIGNAL( timeout() ), this, SLOT( testSelectionTimerOut() ) );
 
     onDisconnectGUI();
 }
@@ -232,10 +251,24 @@ void dmCtrl::onDisconnectGUI()
         m_flatSet = false;
         m_flatName.clear();
         m_flatOptions.clear();
+        m_flatRequestedName.clear();
+        m_flatSelectionPending = false;
         m_testShmim.clear();
         m_testSet = false;
         m_testName.clear();
         m_testOptions.clear();
+        m_testRequestedName.clear();
+        m_testSelectionPending = false;
+    }
+
+    if( m_flatSelectionTimer )
+    {
+        m_flatSelectionTimer->stop();
+    }
+
+    if( m_testSelectionTimer )
+    {
+        m_testSelectionTimer->stop();
     }
 
     ui.fsmState->setEnabled( false );
@@ -308,6 +341,13 @@ void dmCtrl::handleDelProperty( const pcf::IndiProperty &ipRecv )
             m_flatSet = false;
             m_flatName.clear();
             m_flatOptions.clear();
+            m_flatRequestedName.clear();
+            m_flatSelectionPending = false;
+        }
+
+        if( m_flatSelectionTimer )
+        {
+            m_flatSelectionTimer->stop();
         }
 
         emit doUpdateGUI();
@@ -322,6 +362,13 @@ void dmCtrl::handleDelProperty( const pcf::IndiProperty &ipRecv )
             m_testSet = false;
             m_testName.clear();
             m_testOptions.clear();
+            m_testRequestedName.clear();
+            m_testSelectionPending = false;
+        }
+
+        if( m_testSelectionTimer )
+        {
+            m_testSelectionTimer->stop();
         }
 
         emit doUpdateGUI();
@@ -355,6 +402,8 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty &ipRecv )
     }
     else if( ipRecv.getName() == "flat" )
     {
+        bool flatConfirmed = false;
+
         std::lock_guard<std::mutex> lock( m_stateMutex );
         m_flatOptions.clear();
         m_flatName = "";
@@ -363,6 +412,18 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty &ipRecv )
             m_flatOptions.push_back( it->first );
             if( ipRecv[it->first] == pcf::IndiElement::On )
                 m_flatName = it->first;
+        }
+
+        if( m_flatSelectionPending && m_flatName == m_flatRequestedName )
+        {
+            m_flatRequestedName.clear();
+            m_flatSelectionPending = false;
+            flatConfirmed          = true;
+        }
+
+        if( flatConfirmed && m_flatSelectionTimer )
+        {
+            m_flatSelectionTimer->stop();
         }
     }
     else if( ipRecv.getName() == "flat_shmim" )
@@ -386,6 +447,8 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty &ipRecv )
     }
     else if( ipRecv.getName() == "test" )
     {
+        bool testConfirmed = false;
+
         std::lock_guard<std::mutex> lock( m_stateMutex );
         m_testOptions.clear();
         m_testName = "";
@@ -394,6 +457,18 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty &ipRecv )
             m_testOptions.push_back( it->first );
             if( ipRecv[it->first] == pcf::IndiElement::On )
                 m_testName = it->first;
+        }
+
+        if( m_testSelectionPending && m_testName == m_testRequestedName )
+        {
+            m_testRequestedName.clear();
+            m_testSelectionPending = false;
+            testConfirmed          = true;
+        }
+
+        if( testConfirmed && m_testSelectionTimer )
+        {
+            m_testSelectionTimer->stop();
         }
     }
     else if( ipRecv.getName() == "test_shmim" )
@@ -433,22 +508,30 @@ void dmCtrl::updateGUI()
     bool                     flatSet{ false };
     bool                     testSet{ false };
     std::string              flatName;
+    std::string              flatRequestedName;
     std::string              testName;
+    std::string              testRequestedName;
     std::vector<std::string> flatOptions;
     std::vector<std::string> testOptions;
+    bool                     flatSelectionPending{ false };
+    bool                     testSelectionPending{ false };
 
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_stateMutex );
-        appState    = m_appState;
-        shmimName   = m_shmimName;
-        flatShmim   = m_flatShmim;
-        testShmim   = m_testShmim;
-        flatSet     = m_flatSet;
-        testSet     = m_testSet;
-        flatName    = m_flatName;
-        testName    = m_testName;
-        flatOptions = m_flatOptions;
-        testOptions = m_testOptions;
+        appState             = m_appState;
+        shmimName            = m_shmimName;
+        flatShmim            = m_flatShmim;
+        testShmim            = m_testShmim;
+        flatSet              = m_flatSet;
+        testSet              = m_testSet;
+        flatName             = m_flatName;
+        flatRequestedName    = m_flatRequestedName;
+        testName             = m_testName;
+        testRequestedName    = m_testRequestedName;
+        flatOptions          = m_flatOptions;
+        testOptions          = m_testOptions;
+        flatSelectionPending = m_flatSelectionPending;
+        testSelectionPending = m_testSelectionPending;
     }
 
     ui.labelShmimName_value->setText( shmimName.c_str() );
@@ -462,11 +545,23 @@ void dmCtrl::updateGUI()
         for( const auto &opt : flatOptions )
             ui.comboSelectFlat->addItem( opt.c_str() );
 
-        if( !flatName.empty() )
+        std::string flatDisplayName = flatName;
+        if( flatSelectionPending && !flatRequestedName.empty() )
         {
-            int flatIndex = ui.comboSelectFlat->findText( flatName.c_str() );
+            flatDisplayName = flatRequestedName;
+        }
+
+        if( !flatDisplayName.empty() )
+        {
+            int flatIndex = ui.comboSelectFlat->findText( flatDisplayName.c_str() );
             if( flatIndex >= 0 )
                 ui.comboSelectFlat->setCurrentIndex( flatIndex );
+            else
+                ui.comboSelectFlat->setCurrentIndex( -1 );
+        }
+        else
+        {
+            ui.comboSelectFlat->setCurrentIndex( -1 );
         }
     }
 
@@ -477,11 +572,23 @@ void dmCtrl::updateGUI()
         for( const auto &opt : testOptions )
             ui.comboSelectTest->addItem( opt.c_str() );
 
-        if( !testName.empty() )
+        std::string testDisplayName = testName;
+        if( testSelectionPending && !testRequestedName.empty() )
         {
-            int testIndex = ui.comboSelectTest->findText( testName.c_str() );
+            testDisplayName = testRequestedName;
+        }
+
+        if( !testDisplayName.empty() )
+        {
+            int testIndex = ui.comboSelectTest->findText( testDisplayName.c_str() );
             if( testIndex >= 0 )
                 ui.comboSelectTest->setCurrentIndex( testIndex );
+            else
+                ui.comboSelectTest->setCurrentIndex( -1 );
+        }
+        else
+        {
+            ui.comboSelectTest->setCurrentIndex( -1 );
         }
     }
 
@@ -620,6 +727,18 @@ void dmCtrl::on_comboSelectFlat_activated( int index )
         else
             ipFreq[eln] = pcf::IndiElement::Off;
     }
+
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_stateMutex );
+        m_flatRequestedName    = choice;
+        m_flatSelectionPending = true;
+    }
+
+    if( m_flatSelectionTimer )
+    {
+        m_flatSelectionTimer->start( 10000 );
+    }
+
     sendNewProperty( ipFreq );
 }
 
@@ -666,6 +785,18 @@ void dmCtrl::on_comboSelectTest_activated( int index )
         else
             ipFreq[eln] = pcf::IndiElement::Off;
     }
+
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_stateMutex );
+        m_testRequestedName    = choice;
+        m_testSelectionPending = true;
+    }
+
+    if( m_testSelectionTimer )
+    {
+        m_testSelectionTimer->start( 10000 );
+    }
+
     sendNewProperty( ipFreq );
 }
 
@@ -691,6 +822,28 @@ void dmCtrl::on_buttonZeroTest_pressed()
     ipFreq["toggle"] = pcf::IndiElement::Off;
 
     sendNewProperty( ipFreq );
+}
+
+void dmCtrl::flatSelectionTimerOut()
+{
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_stateMutex );
+        m_flatRequestedName.clear();
+        m_flatSelectionPending = false;
+    }
+
+    emit doUpdateGUI();
+}
+
+void dmCtrl::testSelectionTimerOut()
+{
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_stateMutex );
+        m_testRequestedName.clear();
+        m_testSelectionPending = false;
+    }
+
+    emit doUpdateGUI();
 }
 
 } // namespace xqt
