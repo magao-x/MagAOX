@@ -28,6 +28,14 @@ ifeq "$(QMAKE_PATH)" ""
   QMAKE=qmake-qt5
 endif
 
+QMAKE_PROJECT := $(TARGET).pro
+QMAKE_MAKEFILE := makefile.$(TARGET)
+
+# Most GUIs share the common qmake settings in gui/apps/magaoxQtApp.pri.
+# Generate the qmake makefile only when those inputs change instead of
+# regenerating it on every install pass.
+QMAKE_DEPS := $(QMAKE_PROJECT) ../magaoxQtApp.pri
+
 
 ##############################
 
@@ -35,17 +43,19 @@ endif
 all: $(TARGET)
 
 .PHONY: $(TARGET)
-$(TARGET):
-	$(QMAKE) -makefile $(TARGET).pro
-	$(MAKE) -f makefile.$(TARGET)
+$(TARGET): $(QMAKE_MAKEFILE)
+	$(MAKE) -f $(QMAKE_MAKEFILE)
+
+$(QMAKE_MAKEFILE): $(QMAKE_DEPS)
+	$(QMAKE) -makefile $(QMAKE_PROJECT)
 
 install: $(TARGET)
 	sudo install bin/$(TARGET) /usr/local/bin
 
 clean:
-ifneq (,$(wildcard ./makefile.$(TARGET)))  #Test if the generated makefile exists to avoid errors on 2nd make clean
-	$(MAKE) -f makefile.$(TARGET) distclean
+ifneq (,$(wildcard ./$(QMAKE_MAKEFILE)))  #Test if the generated makefile exists to avoid errors on 2nd make clean
+	$(MAKE) -f $(QMAKE_MAKEFILE) distclean
 endif
 	rm -f *~
 	rm -f bin/$(TARGET)
-	rm -rf bin moc obj res
+	rm -rf bin moc obj res ui
