@@ -73,7 +73,7 @@ rule1=fwfpm-fpm-READY
 rule2=fwfpm-stagesci1-neq
 comp=And
 ```
-Now the user can be notified to take caution whenever this out-of-focus state occurs.  The value of the `message` keyword is used for notifications.
+Now the user can be notified to take caution whenever this out-of-focus state occurs.  The value of the `message` keyword is used for notifications.  When a published rule transitions from `On` to `Off`, `stateRuleEngine` also sends a one-time informational clear notification in the form `INFO: Cleared: <message>`, falling back to the rule name when `message` is not set.
 
 For combinations that depend on several active switch-vector elements, use `multiSwitchCombo` to derive a target preset name from the currently active element in each source switch property:
 ```toml
