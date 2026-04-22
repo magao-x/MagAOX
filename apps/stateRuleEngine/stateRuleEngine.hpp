@@ -48,6 +48,7 @@ class stateRuleEngine : public MagAOXApp<true>
     std::string m_ruleDir; /**< Directory containing config files containing rules to load. Relative to config
                               directory.  If this is set, then rules in the device config file are ignored*/
 
+    /// Owns the configured rules and subscribed INDI property objects.
     indiRuleMaps m_ruleMaps;
 
     ///@}
@@ -109,9 +110,16 @@ class stateRuleEngine : public MagAOXApp<true>
     int newCallBack_ruleProp(
         const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
 
+    /// Published `info`-priority rule states.
     pcf::IndiProperty m_indiP_info;
+
+    /// Published `caution`-priority rule states.
     pcf::IndiProperty m_indiP_caution;
+
+    /// Published `warning`-priority rule states.
     pcf::IndiProperty m_indiP_warning;
+
+    /// Published `alert`-priority rule states.
     pcf::IndiProperty m_indiP_alert;
 };
 
@@ -324,7 +332,13 @@ int stateRuleEngine::appLogic()
         {
             try
             {
-                bool val = it->second->value();
+                bool        val = it->second->value();
+                std::string diagnostic;
+                while( it->second->popRuntimeDiagnostic( diagnostic ) )
+                {
+                    log<software_error>( diagnostic );
+                }
+
                 pcf::IndiElement::SwitchStateType onoff = pcf::IndiElement::Off;
 
                 if( val )
@@ -349,7 +363,7 @@ int stateRuleEngine::appLogic()
                     updateSwitchIfChanged( m_indiP_alert, it->first, onoff );
                 }
 
-                if(val && it->second->timeToSend())
+                if( val && it->second->timeToSend() )
                 {
                     std::string prio;
 
@@ -374,17 +388,17 @@ int stateRuleEngine::appLogic()
                     ip.setDevice( m_configName );
                     std::string msg;
 
-                    if(it->second->message(true) == "") //Set the time no matter what
+                    if( it->second->message( true ) == "" ) // Set the time no matter what
                     {
-                        msg = std::format("{}: {}", prio, it->first);
+                        msg = std::format( "{}: {}", prio, it->first );
                     }
-                    else 
+                    else
                     {
-                        msg = std::format("{}: {}", prio, it->second->message());
+                        msg = std::format( "{}: {}", prio, it->second->message() );
                     }
 
                     it->second->incMessageCount();
-                
+
                     ip.setMessage( msg );
                     try
                     {
@@ -395,13 +409,19 @@ int stateRuleEngine::appLogic()
                         log<software_error>( std::format( "exception caught from sendMessage: {}", e.what() ) );
                     }
                 }
-                else if(!val)
+                else if( !val )
                 {
-                    it->second->messageCount(0); //resets so that next time will get sent
+                    it->second->messageCount( 0 ); // resets so that next time will get sent
                 }
             }
             catch( const std::exception &e )
             {
+                std::string diagnostic;
+                while( it->second->popRuntimeDiagnostic( diagnostic ) )
+                {
+                    log<software_error>( diagnostic );
+                }
+
                 ///\todo how to handle startup vs misconfiguration
 
                 /*

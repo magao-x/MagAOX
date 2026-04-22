@@ -310,10 +310,64 @@ SCENARIO( "configuring basic rules", "[stateRuleEngine::ruleConfig]" )
             finalizeRuleValRules( maps, rrkMap );
 
             REQUIRE( maps.rules["ruleA"]->priority() == rulePriority::none );
-            REQUIRE( maps.rules["ruleA"]->comparison() == ruleComparison::Eq );
+            REQUIRE( maps.rules["ruleA"]->comparison() == ruleComparison::And );
 
             REQUIRE( static_cast<ruleCompRule *>( maps.rules["ruleA"] )->rule1() == maps.rules["rule3"] );
             REQUIRE( static_cast<ruleCompRule *>( maps.rules["ruleA"] )->rule2() == maps.rules["rule4"] );
+        }
+
+        WHEN( "a multiSwitchComboRule using defaults" )
+        {
+            mx::app::writeConfigFile(
+                "/tmp/ruleConfig_test.conf",
+                { "rule1", "rule1", "rule1", "rule1", "rule1", "rule1" },
+                { "ruleType", "numSwitches", "property1", "property2", "format", "targetProperty" },
+                { "multiSwitchCombo", "2", "dev1.prop1", "dev2.prop2", "{}-{}", "dev3.prop3" } );
+            mx::app::appConfigurator config;
+            config.readConfig( "/tmp/ruleConfig_test.conf" );
+
+            indiRuleMaps                        maps;
+            std::map<std::string, ruleRuleKeys> rrkMap;
+
+            loadRuleConfig( maps, rrkMap, config );
+
+            multiSwitchComboRule *mscr = dynamic_cast<multiSwitchComboRule *>( maps.rules["rule1"] );
+
+            REQUIRE( mscr != nullptr );
+            REQUIRE( maps.rules["rule1"]->priority() == rulePriority::none );
+            REQUIRE( maps.rules["rule1"]->comparison() == ruleComparison::Neq );
+            REQUIRE( mscr->ruleName() == "rule1" );
+            REQUIRE( mscr->numSwitches() == 2 );
+            REQUIRE( mscr->property( 0 ) == maps.props["dev1.prop1"] );
+            REQUIRE( mscr->propertyKey( 0 ) == "dev1.prop1" );
+            REQUIRE( mscr->property( 1 ) == maps.props["dev2.prop2"] );
+            REQUIRE( mscr->propertyKey( 1 ) == "dev2.prop2" );
+            REQUIRE( mscr->format() == "{}-{}" );
+            REQUIRE( mscr->targetProperty() == maps.props["dev3.prop3"] );
+            REQUIRE( mscr->targetPropertyKey() == "dev3.prop3" );
+        }
+
+        WHEN( "a multiSwitchComboRule changing defaults" )
+        {
+            mx::app::writeConfigFile(
+                "/tmp/ruleConfig_test.conf",
+                { "rule1", "rule1", "rule1", "rule1", "rule1", "rule1", "rule1", "rule1" },
+                { "ruleType", "priority", "comp", "numSwitches", "property1", "property2", "format", "targetProperty" },
+                { "multiSwitchCombo", "warning", "Eq", "2", "dev1.prop1", "dev2.prop2", "\"{}:{}\"", "dev3.prop3" } );
+            mx::app::appConfigurator config;
+            config.readConfig( "/tmp/ruleConfig_test.conf" );
+
+            indiRuleMaps                        maps;
+            std::map<std::string, ruleRuleKeys> rrkMap;
+
+            loadRuleConfig( maps, rrkMap, config );
+
+            multiSwitchComboRule *mscr = dynamic_cast<multiSwitchComboRule *>( maps.rules["rule1"] );
+
+            REQUIRE( mscr != nullptr );
+            REQUIRE( maps.rules["rule1"]->priority() == rulePriority::warning );
+            REQUIRE( maps.rules["rule1"]->comparison() == ruleComparison::Eq );
+            REQUIRE( mscr->format() == "{}:{}" );
         }
     }
 }
@@ -625,6 +679,153 @@ SCENARIO( "rule configurations with errors", "[stateRuleEngine::ruleConfig]" )
             {
                 loadRuleConfig( maps, rrkMap, config );
                 finalizeRuleValRules( maps, rrkMap );
+            }
+            catch( ... )
+            {
+                caught = true;
+            }
+
+            REQUIRE( caught == true );
+        }
+    }
+
+    GIVEN( "multiSwitchCombo rules with errors" )
+    {
+        WHEN( "numSwitches is zero" )
+        {
+            mx::app::writeConfigFile( "/tmp/ruleConfig_test.conf",
+                                      { "rule1", "rule1", "rule1", "rule1", "rule1" },
+                                      { "ruleType", "numSwitches", "property1", "format", "targetProperty" },
+                                      { "multiSwitchCombo", "0", "dev1.prop1", "{}", "dev2.prop2" } );
+            mx::app::appConfigurator config;
+            config.readConfig( "/tmp/ruleConfig_test.conf" );
+
+            indiRuleMaps                        maps;
+            std::map<std::string, ruleRuleKeys> rrkMap;
+
+            bool caught = false;
+            try
+            {
+                loadRuleConfig( maps, rrkMap, config );
+            }
+            catch( ... )
+            {
+                caught = true;
+            }
+
+            REQUIRE( caught == true );
+        }
+
+        WHEN( "a required propertyK is missing" )
+        {
+            mx::app::writeConfigFile( "/tmp/ruleConfig_test.conf",
+                                      { "rule1", "rule1", "rule1", "rule1", "rule1" },
+                                      { "ruleType", "numSwitches", "property1", "format", "targetProperty" },
+                                      { "multiSwitchCombo", "2", "dev1.prop1", "{}-{}", "dev2.prop2" } );
+            mx::app::appConfigurator config;
+            config.readConfig( "/tmp/ruleConfig_test.conf" );
+
+            indiRuleMaps                        maps;
+            std::map<std::string, ruleRuleKeys> rrkMap;
+
+            bool caught = false;
+            try
+            {
+                loadRuleConfig( maps, rrkMap, config );
+            }
+            catch( ... )
+            {
+                caught = true;
+            }
+
+            REQUIRE( caught == true );
+        }
+
+        WHEN( "a source property conflicts with a non-switch rule type" )
+        {
+            mx::app::writeConfigFile(
+                "/tmp/ruleConfig_test.conf",
+                { "ruleText",
+                  "ruleText",
+                  "ruleText",
+                  "ruleText",
+                  "ruleCombo",
+                  "ruleCombo",
+                  "ruleCombo",
+                  "ruleCombo",
+                  "ruleCombo" },
+                { "ruleType",
+                  "property",
+                  "element",
+                  "target",
+                  "ruleType",
+                  "numSwitches",
+                  "property1",
+                  "format",
+                  "targetProperty" },
+                { "txtVal", "dev1.prop1", "elem", "xxx", "multiSwitchCombo", "1", "dev1.prop1", "{}", "dev2.prop2" } );
+            mx::app::appConfigurator config;
+            config.readConfig( "/tmp/ruleConfig_test.conf" );
+
+            indiRuleMaps                        maps;
+            std::map<std::string, ruleRuleKeys> rrkMap;
+
+            bool caught = false;
+            try
+            {
+                loadRuleConfig( maps, rrkMap, config );
+            }
+            catch( ... )
+            {
+                caught = true;
+            }
+
+            REQUIRE( caught == true );
+        }
+
+        WHEN( "the comparison operator is not valid" )
+        {
+            mx::app::writeConfigFile(
+                "/tmp/ruleConfig_test.conf",
+                { "rule1", "rule1", "rule1", "rule1", "rule1", "rule1", "rule1" },
+                { "ruleType", "comp", "numSwitches", "property1", "property2", "format", "targetProperty" },
+                { "multiSwitchCombo", "And", "2", "dev1.prop1", "dev2.prop2", "{}-{}", "dev3.prop3" } );
+            mx::app::appConfigurator config;
+            config.readConfig( "/tmp/ruleConfig_test.conf" );
+
+            indiRuleMaps                        maps;
+            std::map<std::string, ruleRuleKeys> rrkMap;
+
+            bool caught = false;
+            try
+            {
+                loadRuleConfig( maps, rrkMap, config );
+            }
+            catch( ... )
+            {
+                caught = true;
+            }
+
+            REQUIRE( caught == true );
+        }
+
+        WHEN( "the format placeholder count does not match numSwitches" )
+        {
+            mx::app::writeConfigFile(
+                "/tmp/ruleConfig_test.conf",
+                { "rule1", "rule1", "rule1", "rule1", "rule1", "rule1" },
+                { "ruleType", "numSwitches", "property1", "property2", "format", "targetProperty" },
+                { "multiSwitchCombo", "2", "dev1.prop1", "dev2.prop2", "{}", "dev3.prop3" } );
+            mx::app::appConfigurator config;
+            config.readConfig( "/tmp/ruleConfig_test.conf" );
+
+            indiRuleMaps                        maps;
+            std::map<std::string, ruleRuleKeys> rrkMap;
+
+            bool caught = false;
+            try
+            {
+                loadRuleConfig( maps, rrkMap, config );
             }
             catch( ... )
             {
