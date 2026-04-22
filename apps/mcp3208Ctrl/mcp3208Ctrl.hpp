@@ -81,7 +81,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
      * @{
      */
 
-    float numChannels();
+    int numChannels();
 
     // Creating INDI property for number of channels to read out
     pcf::IndiProperty m_indiP_numChannels;
