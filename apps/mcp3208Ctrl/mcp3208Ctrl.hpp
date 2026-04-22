@@ -58,13 +58,19 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
      * @{
      */
 
-    int m_numChannels{ 4 }; ///< The number of MCP3208 channels read into each output frame.
+    int m_numChannels{ 2 }; ///< The number of MCP3208 channels read into each output frame.
 
     std::string m_fpsDevice;               ///< Device name providing external fps metadata for framegrabber sizing.
     std::string m_fpsProperty{ "fps" };    ///< Property name providing external fps metadata.
     std::string m_fpsElement{ "current" }; ///< Property element containing the fps value.
 
     float m_fpsTol{ 0 }; ///< The tolerance used when monitoring fps metadata changes.
+
+    std::string m_numChannelsDevice;                      ///< Device name for getting numChannels to set circular buffer length.
+    std::string m_numChannelsProperty{ "numChannels" };   ///< Property name for getting numChannels to set circular buffer length.
+    std::string m_numChannelsElement{ "current" };        ///< Element name for getting numChannels to set circular buffer length.
+
+    float m_numChannelsTol{ 0 }; ///< The tolerance for detecting a change in numChannels.
 
     std::string m_synchroShmimName;      ///< The synchronization ImageStreamIO stream name; empty selects timer mode.
     int         m_synchroPostDelay{ 0 }; ///< Requested delay between semaphore wake and A/D read in microseconds.
@@ -75,6 +81,15 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
      * @{
      */
 
+    float numChannels();
+
+    // Creating INDI property for number of channels to read out
+    pcf::IndiProperty m_indiP_numChannels;
+    INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_numChannels );
+
+    pcf::IndiProperty m_indiP_numChannelsSource;
+    INDI_SETCALLBACK_DECL( mcp3208Ctrl, m_indiP_numChannelsSource );
+    
     /// INDI property exposing the local fps target.
     pcf::IndiProperty m_indiP_fps;
 
@@ -369,15 +384,55 @@ void mcp3208Ctrl::setupConfig()
                 "int",
                 "Delay between a synchronization semaphore and the A/D read in microseconds. Default is 0." );
 
-    config.add( "accel.numChannels",
+    config.add( "numChannels.device",
                 "",
-                "accel.numChannels",
+                "numChannels.device",
                 argType::Required,
-                "accel",
                 "numChannels",
+                "device",
                 false,
                 "int",
                 "Setting the number of channels needed to readout accelerometers" );
+
+    config.add( "numChannels.property",
+                "",
+                "numChannels.property",
+                argType::Required,
+                "numChannels",
+                "property",
+                false,
+                "string",
+                "Property name for getting numChannels to set circular buffer length. Default is 'numChannels'." );
+
+    config.add( "numChannels.element",
+                "",
+                "numChannels.element",
+                argType::Required,
+                "numChannels",
+                "element",
+                false,
+                "string",
+                "Property name for getting numChannels to set circular buffer length. Default is 'current'." );
+
+    config.add( "numChannels.tol",
+                "",
+                "numChannels.tol",
+                argType::Required,
+                "numChannels",
+                "tol",
+                false,
+                "float",
+                "Tolerance for detecting a change in numChannels.  Default is 0." );
+
+    config.add( "framegrabber.cpuset",
+                "",
+                "framegrabber.cpuset",
+                argType::Required,
+                "framegrabber",
+                "cpuset",
+                false,
+                "string",
+                "The cpuset to assign the framegrabber thread to." );
 }
 
 int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -394,6 +449,12 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_synchroPostDelay, "synchro.postDelay" );
 
     _config( m_numChannels, "accel.numChannels" ); // making number of mcp3208 channels we read out configurable
+    _config( m_numChannelsDevice, "numChannels.device" );
+    _config( m_numChannelsProperty, "numChannels.property" );
+    _config( m_numChannelsElement, "numChannels.element" );
+    _config( m_numChannelsTol, "numChannels.tol" );
+
+    _config(m_fgCpuset, "framegrabber.cpuset");
 
     if( m_synchroPostDelay < 0 )
     {
@@ -421,9 +482,19 @@ int mcp3208Ctrl::appStartup()
     m_indiP_fps["current"].setValue( m_fps );
     m_indiP_fps["target"].setValue( m_fps );
 
+    // INDI prop for user to set number of channels A/D reads out
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_numChannels, "numChannels", 0, 8, 1, "%d", "", "" );
+    m_indiP_numChannels["current"].setValue( m_numChannels );
+    m_indiP_numChannels["target"].setValue( m_numChannels );
+
     if( m_fpsDevice != "" )
     {
         REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsDevice, m_fpsProperty );
+    }
+
+    if( m_numChannelsDevice != "" )
+    {
+        REG_INDI_SETPROP( m_indiP_numChannelsSource, m_numChannelsDevice, m_numChannelsProperty );
     }
 
     {
@@ -445,6 +516,8 @@ int mcp3208Ctrl::appLogic()
     FRAMEGRABBER_UPDATE_INDI;
 
     updatesIfChanged<float>( m_indiP_fps, { "current", "target" }, { m_fps, m_fps } );
+
+    updatesIfChanged<int>( m_indiP_numChannels, { "current", "target" }, { m_numChannels, m_numChannels } );
 
     return 0;
 }
@@ -490,6 +563,11 @@ int mcp3208Ctrl::configureAcquisition()
     }
 
     return 0;
+}
+
+int mcp3208Ctrl::numChannels()
+{
+    return m_numChannels;
 }
 
 float mcp3208Ctrl::fps()
@@ -681,7 +759,7 @@ int mcp3208Ctrl::acquireTimerAndCheckValid()
         }
         else
         {
-            mx::sys::nanoSleep( 10000 );
+            mx::sys::nanoSleep( 1000 ); // Sleep for 1 microsecond to prevent busy waiting
         }
     }
 
@@ -839,6 +917,46 @@ INDI_SETCALLBACK_DEFN( mcp3208Ctrl, m_indiP_fpsSource )( const pcf::IndiProperty
     return 0;
 
 } // INDI_SETCALLBACK_DEFN(mcp3208Ctrl, m_indiP_fpsSource)
+
+INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_numChannels )( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getName() != m_indiP_numChannels.getName() )
+    {
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
+        return -1;
+    }
+
+    float ch_target;
+
+    if( indiTargetUpdate( m_indiP_numChannels, ch_target, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    m_numChannels = ch_target;
+
+    log<text_log>( "set numChannels = " + std::to_string( m_numChannels ));
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( mcp3208Ctrl, m_indiP_numChannelsSource )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_numChannelsSource, ipRecv );
+
+    if( ipRecv.find( m_numChannelsElement ) != true ) // this isn't valid
+    {
+        log<software_error>( { __FILE__, __LINE__, "No current property in numChannels source." } );
+        return 0;
+    }
+
+    float ch_target = ipRecv[m_numChannelsElement].get<float>();
+
+    m_numChannels = ch_target;
+
+    log<text_log>( "set numChannels from " + m_numChannelsDevice + " = " + std::to_string( m_numChannels ));
+    return 0;
+}
 
 } // namespace app
 } // namespace MagAOX
