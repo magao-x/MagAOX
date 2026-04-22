@@ -53,6 +53,29 @@ class stateRuleEngine : public MagAOXApp<true>
 
     ///@}
 
+    /// Get the published rule-state property for a reporting priority.
+    pcf::IndiProperty *
+    ruleStateProperty( const rulePriority &priority /**< [in] the reporting priority for the rule */ );
+
+    /// Get the notification label for a reporting priority.
+    static std::string
+    notificationLabel( const rulePriority &priority /**< [in] the reporting priority for the rule */ );
+
+    /// Report whether a published rule element is currently `On`.
+    static bool ruleIsOn( pcf::IndiProperty &property, /**< [in] the published property to inspect */
+                          const std::string &ruleName /**< [in] the rule element name to inspect */ );
+
+    /// Format a notification message for a rule.
+    static std::string notificationMessage(
+        const std::string &ruleName,        /**< [in] the rule name used as fallback text */
+        indiCompRule      &rule,            /**< [in] the rule whose message text is used */
+        const std::string &label,           /**< [in] the label prefix, e.g. `INFO` */
+        bool               cleared = false, /**< [in] true when formatting a clear notification */
+        bool               settime = false /**< [in] true when reading the rule message should set its send time */ );
+
+    /// Send one formatted notification through the INDI driver.
+    virtual int sendNotification( const std::string &message /**< [in] the fully formatted notification message */ );
+
   public:
     /// Default c'tor.
     stateRuleEngine();
@@ -126,6 +149,115 @@ class stateRuleEngine : public MagAOXApp<true>
 stateRuleEngine::stateRuleEngine() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     return;
+}
+
+pcf::IndiProperty *stateRuleEngine::ruleStateProperty( const rulePriority &priority )
+{
+    if( priority == rulePriority::info )
+    {
+        return &m_indiP_info;
+    }
+
+    if( priority == rulePriority::caution )
+    {
+        return &m_indiP_caution;
+    }
+
+    if( priority == rulePriority::warning )
+    {
+        return &m_indiP_warning;
+    }
+
+    if( priority == rulePriority::alert )
+    {
+        return &m_indiP_alert;
+    }
+
+    return nullptr;
+}
+
+std::string stateRuleEngine::notificationLabel( const rulePriority &priority )
+{
+    if( priority == rulePriority::info )
+    {
+        return "INFO";
+    }
+
+    if( priority == rulePriority::caution )
+    {
+        return "CAUTION";
+    }
+
+    if( priority == rulePriority::warning )
+    {
+        return "WARNING";
+    }
+
+    if( priority == rulePriority::alert )
+    {
+        return "ALERT";
+    }
+
+    return "INFO";
+}
+
+bool stateRuleEngine::ruleIsOn( pcf::IndiProperty &property, const std::string &ruleName )
+{
+    if( !property.find( ruleName ) )
+    {
+        return false;
+    }
+
+    return property[ruleName].getSwitchState() == pcf::IndiElement::On;
+}
+
+std::string stateRuleEngine::notificationMessage(
+    const std::string &ruleName, indiCompRule &rule, const std::string &label, bool cleared, bool settime )
+{
+    std::string detail;
+    if( settime )
+    {
+        detail = rule.message( true );
+    }
+    else
+    {
+        detail = rule.message();
+    }
+
+    if( detail == "" )
+    {
+        detail = ruleName;
+    }
+
+    if( cleared )
+    {
+        detail = std::format( "Cleared: {}", detail );
+    }
+
+    return std::format( "{}: {}", label, detail );
+}
+
+int stateRuleEngine::sendNotification( const std::string &message )
+{
+    if( m_indiDriver == nullptr )
+    {
+        return 0;
+    }
+
+    pcf::IndiProperty ip;
+    ip.setDevice( m_configName );
+    ip.setMessage( message );
+
+    try
+    {
+        m_indiDriver->sendMessage( ip );
+    }
+    catch( const std::exception &e )
+    {
+        return log<software_error, -1>( std::format( "exception caught from sendMessage: {}", e.what() ) );
+    }
+
+    return 0;
 }
 
 void stateRuleEngine::setupConfig()
@@ -339,6 +471,14 @@ int stateRuleEngine::appLogic()
                     log<software_error>( diagnostic );
                 }
 
+                pcf::IndiProperty *ruleState = ruleStateProperty( it->second->priority() );
+                if( ruleState == nullptr )
+                {
+                    continue;
+                }
+
+                bool wasOn = ruleIsOn( *ruleState, it->first );
+
                 pcf::IndiElement::SwitchStateType onoff = pcf::IndiElement::Off;
 
                 if( val )
@@ -346,71 +486,33 @@ int stateRuleEngine::appLogic()
                     onoff = pcf::IndiElement::On;
                 }
 
-                if( it->second->priority() == rulePriority::info )
-                {
-                    updateSwitchIfChanged( m_indiP_info, it->first, onoff );
-                }
-                else if( it->second->priority() == rulePriority::caution )
-                {
-                    updateSwitchIfChanged( m_indiP_caution, it->first, onoff );
-                }
-                else if( it->second->priority() == rulePriority::warning )
-                {
-                    updateSwitchIfChanged( m_indiP_warning, it->first, onoff );
-                }
-                else
-                {
-                    updateSwitchIfChanged( m_indiP_alert, it->first, onoff );
-                }
+                updateSwitchIfChanged( *ruleState, it->first, onoff );
 
                 if( val && it->second->timeToSend() )
                 {
-                    std::string prio;
-
-                    if( it->second->priority() == rulePriority::info )
-                    {
-                        prio = "INFO";
-                    }
-                    else if( it->second->priority() == rulePriority::caution )
-                    {
-                        prio = "CAUTION";
-                    }
-                    else if( it->second->priority() == rulePriority::warning )
-                    {
-                        prio = "WARNING";
-                    }
-                    else
-                    {
-                        prio = "ALERT";
-                    }
-
-                    pcf::IndiProperty ip;
-                    ip.setDevice( m_configName );
-                    std::string msg;
-
-                    if( it->second->message( true ) == "" ) // Set the time no matter what
-                    {
-                        msg = std::format( "{}: {}", prio, it->first );
-                    }
-                    else
-                    {
-                        msg = std::format( "{}: {}", prio, it->second->message() );
-                    }
+                    std::string msg = notificationMessage(
+                        it->first, *( it->second ), notificationLabel( it->second->priority() ), false, true );
 
                     it->second->incMessageCount();
 
-                    ip.setMessage( msg );
-                    try
+                    if( sendNotification( msg ) < 0 )
                     {
-                        m_indiDriver->sendMessage( ip );
-                    }
-                    catch( const std::exception &e )
-                    {
-                        log<software_error>( std::format( "exception caught from sendMessage: {}", e.what() ) );
+                        return -1;
                     }
                 }
                 else if( !val )
                 {
+                    if( wasOn )
+                    {
+                        std::string msg = notificationMessage(
+                            it->first, *( it->second ), notificationLabel( rulePriority::info ), true );
+
+                        if( sendNotification( msg ) < 0 )
+                        {
+                            return -1;
+                        }
+                    }
+
                     it->second->messageCount( 0 ); // resets so that next time will get sent
                 }
             }
