@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.stats import sigma_clip
 import polars as pl
 
 from windsocc.core.masks import make_annular_mask
@@ -295,7 +296,9 @@ def _keep_track_ids_by_model(
             continue
 
         velocity_vals = group.get_column("velocity_num").to_numpy()
-        velocity_p2p = np.max(velocity_vals) - np.min(velocity_vals)
+        #sigma clip the velocity values
+        velocity_vals_clipped = sigma_clip(velocity_vals, sigma=3)
+        velocity_p2p = np.max(velocity_vals_clipped) - np.min(velocity_vals_clipped)
         if velocity_p2p > velocity_scatter_tol_mps:
             reject_rows.append(_model_reject_row(track_id, "velocity_scatter", group))
             continue
