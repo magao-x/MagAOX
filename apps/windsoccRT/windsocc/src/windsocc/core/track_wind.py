@@ -176,6 +176,7 @@ def _keep_track_ids_by_model(
     time_per_frame: float,
     min_matches: int = 10,
     min_detections: int = 10,
+    velocity_interest = 5.0, #m/s
     origin_tol_px: float = 10.0,
     rmse_tol_px: float = 10.0,
     outward_tol_px: float = 0.0,
@@ -241,13 +242,22 @@ def _keep_track_ids_by_model(
         #     exit()
         if group.is_empty():
             continue
-        # TODO see if these two checks can be consolidated
         if float(group.get_column("matches_num").max()) < float(min_matches):
-            reject_rows.append(_model_reject_row(track_id, "min_matches", group))
-            continue
-        if group.height < max(2, min_detections):
-            reject_rows.append(_model_reject_row(track_id, "min_detections", group))
-            continue
+            mean_velocity = np.mean(group.get_column("velocity_num").to_numpy())
+            if mean_velocity > velocity_interest:
+               if int(group.get_column("matches_num").max()) < int(min_matches // 2):
+                  reject_rows.append(_model_reject_row(track_id, "min_matches", group))
+                  continue
+               else:
+                  pass #keep the track
+            else:
+               reject_rows.append(_model_reject_row(track_id, "min_matches", group))
+               continue
+
+        # I don't think this check is necessary JKK 20260423
+        # if group.height < max(2, min_detections):
+        #     reject_rows.append(_model_reject_row(track_id, "min_detections", group))
+        #     continue
 
         radial_dist = group.get_column("dist_num").to_numpy()
         # if np.any(np.diff(radial_dist) < -outward_tol_px):
