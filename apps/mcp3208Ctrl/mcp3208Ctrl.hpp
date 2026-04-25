@@ -81,6 +81,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
      * @{
      */
 
+    /// Report the configured channel count metadata to the framegrabber.
     int numChannels();
 
     // Creating INDI property for number of channels to read out
@@ -124,6 +125,18 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     ino_t  m_synchroStreamInode{ 0 };     ///< Cached inode used to detect synchronization stream recreation.
     int    m_synchroSemaphoreNumber{ 5 }; ///< The claimed semaphore slot for synchronization waits.
     sem_t *m_synchroSemaphore{ nullptr }; ///< Cached pointer to the claimed synchronization semaphore.
+
+    timespec m_atime{}; ///< The most recent semaphore-arrival timestamp on the local realtime clock.
+
+    timespec m_lastAtime{}; ///< The previous semaphore-arrival timestamp used for period estimation.
+
+    double m_avgSemaphorePeriod_ns{ 0.0 }; ///< Exponential moving-average estimate of semaphore period in nanoseconds.
+
+    bool m_firstSemaphore{ true }; ///< Tracks first-arrival initialization for semaphore period estimation.
+
+    double m_wfs_fps{ 0.0 }; ///< Latest WFS frame rate estimate used to predict WFS integration cadence.
+
+    timespec m_triggerTime{}; ///< Computed trigger timestamp aligned to the estimated WFS integration midpoint.
 
     ///@}
 
@@ -185,6 +198,12 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     int waitOnSemaphore( sem_t    *sem /**< [in] the semaphore to wait on */,
                          timespec &ts /**< [in] the absolute timeout for the wait */ );
 
+    /// Convert a timespec timestamp to nanoseconds.
+    static inline double timespecToNs( const timespec &t /**< [in] the timespec value to convert */ );
+
+    /// Convert nanoseconds to a normalized timespec value.
+    static inline timespec nsToTimespec( double ns /**< [in] the nanosecond value to convert */ );
+
     /// Read one MCP3208 channel value.
     /**
      * \returns 0 on success.
@@ -195,6 +214,9 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     /// Apply the current controlled delay between semaphore wake and ADC read.
     void delayBeforeRead();
+
+    /// Update synchronized trigger timing from the current semaphore arrival.
+    void updateTriggerTiming( const timespec &atime /**< [in] the semaphore-arrival timestamp */ );
 
     ///@}
 
@@ -317,6 +339,87 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 mcp3208Ctrl::mcp3208Ctrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     return;
+}
+
+inline double mcp3208Ctrl::timespecToNs( const timespec &t )
+{
+    return static_cast<double>( t.tv_sec ) * 1e9 + static_cast<double>( t.tv_nsec );
+}
+
+inline timespec mcp3208Ctrl::nsToTimespec( double ns )
+{
+    timespec t;
+
+    t.tv_sec  = static_cast<time_t>( ns / 1e9 );
+    t.tv_nsec = static_cast<long>( ns - static_cast<double>( t.tv_sec ) * 1e9 );
+
+    if( t.tv_nsec >= 1000000000L )
+    {
+        t.tv_nsec -= 1000000000L;
+        ++t.tv_sec;
+    }
+
+    if( t.tv_nsec < 0 )
+    {
+        t.tv_nsec += 1000000000L;
+        --t.tv_sec;
+    }
+
+    return t;
+}
+
+void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
+{
+    double dt_ns = 0.0;
+
+    if( !m_firstSemaphore )
+    {
+        dt_ns = timespecToNs( atime ) - timespecToNs( m_lastAtime );
+
+        constexpr double alpha = 0.1;
+        m_avgSemaphorePeriod_ns = alpha * dt_ns + ( 1.0 - alpha ) * m_avgSemaphorePeriod_ns;
+    }
+    else
+    {
+        m_avgSemaphorePeriod_ns = 0.0;
+        m_firstSemaphore        = false;
+    }
+
+    m_lastAtime = atime;
+
+    double deltaT_wfs_ns = m_avgSemaphorePeriod_ns;
+    if( m_wfs_fps > 0.0 )
+    {
+        deltaT_wfs_ns = 0.7 * ( 1e9 / m_wfs_fps ) + 0.3 * m_avgSemaphorePeriod_ns;
+    }
+
+    constexpr double t_wfs_read_ns    = 276.1e3;
+    constexpr double t_wfs_process_ns = 51.5e3;
+    constexpr double dt_transfer_ns   = 3e3;
+    constexpr double dt_F_ns          = 10e3;
+
+    if( deltaT_wfs_ns <= 0.0 )
+    {
+        return;
+    }
+
+    const double raw_delay_ns =
+        0.5 * deltaT_wfs_ns - ( dt_transfer_ns + t_wfs_process_ns + dt_F_ns + t_wfs_read_ns );
+
+    const long long wrapCycles = static_cast<long long>( raw_delay_ns / deltaT_wfs_ns );
+    double          t_delay_ns = raw_delay_ns - static_cast<double>( wrapCycles ) * deltaT_wfs_ns;
+
+    if( t_delay_ns < 0.0 )
+    {
+        t_delay_ns += deltaT_wfs_ns;
+    }
+    else if( t_delay_ns >= deltaT_wfs_ns )
+    {
+        t_delay_ns -= deltaT_wfs_ns;
+    }
+
+    const double t_trigger_ns = timespecToNs( atime ) + t_delay_ns;
+    m_triggerTime             = nsToTimespec( t_trigger_ns );
 }
 
 void mcp3208Ctrl::setupConfig()
@@ -590,7 +693,13 @@ int mcp3208Ctrl::startAcquisition()
         }
 
         ImageStreamIO_semflush( &m_synchroStream, m_synchroSemaphoreNumber );
+
         m_synchroDelay = m_synchroDelayTarget;
+        m_firstSemaphore        = true;
+        m_avgSemaphorePeriod_ns = 0.0;
+        m_lastAtime             = timespec{};
+        m_atime                 = timespec{};
+        m_triggerTime           = timespec{};
     }
 
     m_time_start = std::chrono::high_resolution_clock::now();
@@ -730,6 +839,11 @@ void mcp3208Ctrl::closeSynchroStream()
     m_synchroSemaphoreNumber = 5;
     m_synchroStreamInode     = 0;
     m_synchroStreamOpen      = false;
+    m_atime                  = timespec{};
+    m_lastAtime              = timespec{};
+    m_avgSemaphorePeriod_ns  = 0.0;
+    m_firstSemaphore         = true;
+    m_triggerTime            = timespec{};
 }
 
 int mcp3208Ctrl::acquireTimerAndCheckValid()
@@ -810,6 +924,13 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
     }
 
     synchroWake = std::chrono::high_resolution_clock::now();
+
+    if( getRealtime( m_atime ) < 0 )
+    {
+        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
+    }
+
+    updateTriggerTiming( m_atime );
     delayBeforeRead();
 
     if( getRealtime( m_currImageTimestamp ) < 0 )
@@ -890,6 +1011,7 @@ INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_fps )( const pcf::IndiProperty &ipRe
     }
 
     m_fps           = target;
+    m_wfs_fps       = m_fps;
     m_trigger       = 1e9f / m_fps; // Update trigger value based off new fps
     nano_sec_target = 1e9f / m_fps;
 
@@ -910,6 +1032,7 @@ INDI_SETCALLBACK_DEFN( mcp3208Ctrl, m_indiP_fpsSource )( const pcf::IndiProperty
     float target = ipRecv[m_fpsElement].get<float>();
 
     m_fps           = target;
+    m_wfs_fps       = m_fps;
     m_trigger       = 1e9f / m_fps; // Update trigger value based off new fps
     nano_sec_target = 1e9f / m_fps;
 
