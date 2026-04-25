@@ -105,6 +105,9 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     /// Handle updates from the configured external fps source.
     INDI_SETCALLBACK_DECL( mcp3208Ctrl, m_indiP_fpsSource );
 
+    /// INDI property exposing runtime timing diagnostics for acquisition health checks.
+    pcf::IndiProperty m_indiP_timingDiag;
+
     float m_trigger{ 1e9f / m_fps };       ///< The timer-mode read interval in nanoseconds.
     float m_gain{ .1 };                    ///< The simple integrator gain used for timer and synchro delay control.
     float nano_sec_target{ 1e9f / m_fps }; ///< The timer-mode target interval in nanoseconds.
@@ -221,6 +224,9 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     /// Update synchronized trigger timing from the current semaphore arrival.
     void updateTriggerTiming( const timespec &atime /**< [in] the semaphore-arrival timestamp */ );
+
+    /// Publish acquisition timing diagnostics to the INDI read-only property.
+    void updateTimingDiagnosticsIndi();
 
     ///@}
 
@@ -589,6 +595,17 @@ int mcp3208Ctrl::appStartup()
     m_indiP_numChannels["current"].setValue( m_numChannels );
     m_indiP_numChannels["target"].setValue( m_numChannels );
 
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_timingDiag, "timingDiag", "Timing Diagnostics", "Diagnostics" );
+    m_indiP_timingDiag.add( pcf::IndiElement( "avg_read_latency_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_target_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "read_latency_error_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "avg_semaphore_period_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "mode_code" ) );
+
     if( m_fpsDevice != "" )
     {
         REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsDevice, m_fpsProperty );
@@ -606,8 +623,40 @@ int mcp3208Ctrl::appStartup()
         m_adc.connect();
     }
 
+    updateTimingDiagnosticsIndi();
+
     state( stateCodes::OPERATING );
     return 0;
+}
+
+void mcp3208Ctrl::updateTimingDiagnosticsIndi()
+{
+    constexpr double c_timerModeCode   = 0.0;
+    constexpr double c_synchroModeCode = 1.0;
+
+    const double readLatencyError_ns = m_avgReadLatency_ns - static_cast<double>( m_synchroDelayTarget );
+    const double triggerTime_ns      = timespecToNs( m_triggerTime );
+    const double modeCode            = m_synchroShmimName.empty() ? c_timerModeCode : c_synchroModeCode;
+
+    updatesIfChanged<double>( m_indiP_timingDiag,
+                              { "avg_read_latency_ns",
+                                "synchro_delay_ns",
+                                "synchro_delay_target_ns",
+                                "read_latency_error_ns",
+                                "avg_semaphore_period_ns",
+                                "wfs_fps",
+                                "trigger_interval_ns",
+                                "trigger_time_ns",
+                                "mode_code" },
+                              { m_avgReadLatency_ns,
+                                static_cast<double>( m_synchroDelay ),
+                                static_cast<double>( m_synchroDelayTarget ),
+                                readLatencyError_ns,
+                                m_avgSemaphorePeriod_ns,
+                                m_wfs_fps,
+                                static_cast<double>( m_trigger ),
+                                triggerTime_ns,
+                                modeCode } );
 }
 
 int mcp3208Ctrl::appLogic()
@@ -620,6 +669,8 @@ int mcp3208Ctrl::appLogic()
     updatesIfChanged<float>( m_indiP_fps, { "current", "target" }, { m_fps, m_fps } );
 
     updatesIfChanged<int>( m_indiP_numChannels, { "current", "target" }, { m_numChannels, m_numChannels } );
+
+    updateTimingDiagnosticsIndi();
 
     return 0;
 }

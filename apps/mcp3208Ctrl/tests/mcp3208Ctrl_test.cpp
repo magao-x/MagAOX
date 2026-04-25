@@ -175,6 +175,22 @@ class mcp3208Ctrl_test : public mcp3208Ctrl
         ip[m_fpsElement].setValue( current );
         return ip;
     }
+
+    /// Initialize the timing-diagnostics INDI property used by diagnostics tests.
+    void setupTimingDiagnosticsProperty()
+    {
+        m_indiP_timingDiag = pcf::IndiProperty( pcf::IndiProperty::Number );
+        m_indiP_timingDiag.setName( "timingDiag" );
+        m_indiP_timingDiag.add( pcf::IndiElement( "avg_read_latency_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_target_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "read_latency_error_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "avg_semaphore_period_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "mode_code" ) );
+    }
 };
 
 } // namespace
@@ -203,6 +219,7 @@ TEST_CASE( "mcp3208Ctrl Doxygen references are preserved", "[mcp3208Ctrl]" )
     XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_fps( app.makeFpsUpdate( 1000.0 ) ) );
     XWCTEST_DOXYGEN_REF( app.setCallBack_m_indiP_fpsSource( app.makeFpsSourceUpdate( 1000.0 ) ) );
     XWCTEST_DOXYGEN_REF( app.updateTriggerTiming( timespec{} ) );
+    XWCTEST_DOXYGEN_REF( app.updateTimingDiagnosticsIndi() );
     XWCTEST_DOXYGEN_REF( app.delayBeforeRead() );
     XWCTEST_DOXYGEN_REF( app.timespecToNs( timespec{} ) );
     XWCTEST_DOXYGEN_REF( app.nsToTimespec( 0.0 ) );
@@ -286,6 +303,62 @@ TEST_CASE( "mcp3208Ctrl fps source callback updates trigger metadata", "[mcp3208
     REQUIRE( app.m_wfs_fps == Approx( 250.0 ) );
     REQUIRE( app.m_trigger == Approx( 1e9f / 250.0f ) );
     REQUIRE( app.nano_sec_target == Approx( 1e9f / 250.0f ) );
+}
+
+/// Verify synchronized-mode timing diagnostics publish loop state and derived error.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.setupTimingDiagnosticsProperty();
+    app.m_synchroShmimName      = "camwfs_sync";
+    app.m_avgReadLatency_ns     = 125000.0;
+    app.m_synchroDelay          = 24000.0f;
+    app.m_synchroDelayTarget    = 17000.0f;
+    app.m_avgSemaphorePeriod_ns = 500000.0;
+    app.m_wfs_fps               = 1500.0;
+    app.m_trigger               = 600000.0f;
+    app.m_triggerTime           = timespec{ 12, 3456789L };
+
+    app.updateTimingDiagnosticsIndi();
+
+    REQUIRE( app.m_indiP_timingDiag["avg_read_latency_ns"].get<double>() == Approx( 125000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["synchro_delay_ns"].get<double>() == Approx( 24000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["synchro_delay_target_ns"].get<double>() == Approx( 17000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["read_latency_error_ns"].get<double>() == Approx( 108000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["avg_semaphore_period_ns"].get<double>() == Approx( 500000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["wfs_fps"].get<double>() == Approx( 1500.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["trigger_interval_ns"].get<double>() == Approx( 600000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["trigger_time_ns"].get<double>() ==
+             Approx( mcp3208Ctrl::timespecToNs( timespec{ 12, 3456789L } ) ) );
+    REQUIRE( app.m_indiP_timingDiag["mode_code"].get<double>() == Approx( 1.0 ) );
+}
+
+/// Verify timing diagnostics report timer mode and update mode code across transitions.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.setupTimingDiagnosticsProperty();
+    app.m_synchroShmimName = "camwfs_sync";
+    app.m_trigger          = 123456.0f;
+    app.updateTimingDiagnosticsIndi();
+
+    REQUIRE( app.m_indiP_timingDiag["mode_code"].get<double>() == Approx( 1.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["trigger_interval_ns"].get<double>() == Approx( 123456.0 ) );
+
+    app.m_synchroShmimName.clear();
+    app.m_trigger = 456789.0f;
+    app.updateTimingDiagnosticsIndi();
+
+    REQUIRE( app.m_indiP_timingDiag["mode_code"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["trigger_interval_ns"].get<double>() == Approx( 456789.0 ) );
 }
 
 /// Verify nanosecond and timespec conversions preserve normalized values.
