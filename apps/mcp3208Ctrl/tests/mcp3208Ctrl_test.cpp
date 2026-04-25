@@ -503,6 +503,94 @@ TEST_CASE( "mcp3208Ctrl synchronized mode reads on semaphore wake", "[mcp3208Ctr
     REQUIRE( app.m_lastAtime.tv_sec > 0 );
     REQUIRE( app.m_triggerTime.tv_sec > 0 );
     REQUIRE( app.m_currImageTimestamp.tv_sec > 0 );
+    REQUIRE( app.m_firstReadLatency == false );
+    REQUIRE( app.m_avgReadLatency_ns ==
+             Approx( mcp3208Ctrl::timespecToNs( app.m_currImageTimestamp ) - mcp3208Ctrl::timespecToNs( app.m_atime ) ) );
+
+    REQUIRE( sem_destroy( &semaphore ) == 0 );
+}
+
+/// Verify synchronized read-latency EMA initializes from the first sample and smooths subsequent samples.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl synchronized read latency EMA initializes and smooths", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+    sem_t            semaphore;
+
+    resetStubState();
+    stubState().m_channelValues = { 77 };
+
+    REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
+
+    app.m_synchroShmimName   = "camwfs_sync";
+    app.m_numChannels        = 1;
+    app.m_values.assign( 1, 0 );
+    app.m_synchroSemaphore   = &semaphore;
+    app.m_synchroDelayTarget = 0.0f;
+    app.m_synchroDelay       = 0.0f;
+    app.m_gain               = 0.0f;
+    app.m_firstReadLatency   = true;
+    app.m_avgReadLatency_ns  = 0.0;
+
+    REQUIRE( sem_post( &semaphore ) == 0 );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+
+    const double readLatency0_ns =
+        mcp3208Ctrl::timespecToNs( app.m_currImageTimestamp ) - mcp3208Ctrl::timespecToNs( app.m_atime );
+
+    REQUIRE( app.m_firstReadLatency == false );
+    REQUIRE( app.m_avgReadLatency_ns == Approx( readLatency0_ns ) );
+
+    REQUIRE( sem_post( &semaphore ) == 0 );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+
+    const double readLatency1_ns =
+        mcp3208Ctrl::timespecToNs( app.m_currImageTimestamp ) - mcp3208Ctrl::timespecToNs( app.m_atime );
+    const double expectedAvgLatency_ns = 0.1 * readLatency1_ns + 0.9 * readLatency0_ns;
+
+    REQUIRE( app.m_avgReadLatency_ns == Approx( expectedAvgLatency_ns ) );
+
+    REQUIRE( sem_destroy( &semaphore ) == 0 );
+}
+
+/// Verify synchronized delay control uses read-latency EMA for the integrator correction.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl synchronized delay controller uses read latency EMA", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+    sem_t            semaphore;
+
+    resetStubState();
+    stubState().m_channelValues = { 99 };
+
+    REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
+    REQUIRE( sem_post( &semaphore ) == 0 );
+
+    app.m_synchroShmimName   = "camwfs_sync";
+    app.m_numChannels        = 1;
+    app.m_values.assign( 1, 0 );
+    app.m_synchroSemaphore   = &semaphore;
+    app.m_synchroDelayTarget = 0.0f;
+    app.m_synchroDelay       = 2000000.0f;
+    app.m_gain               = 1.0f;
+    app.m_firstReadLatency   = false;
+    app.m_avgReadLatency_ns  = 800000.0;
+
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+
+    const double readLatency_ns =
+        mcp3208Ctrl::timespecToNs( app.m_currImageTimestamp ) - mcp3208Ctrl::timespecToNs( app.m_atime );
+    const double expectedAvgLatency_ns = 0.1 * readLatency_ns + 0.9 * 800000.0;
+    const double expectedDelay_ns =
+        ( 2000000.0 - expectedAvgLatency_ns ) > 0.0 ? ( 2000000.0 - expectedAvgLatency_ns ) : 0.0;
+
+    REQUIRE( app.m_avgReadLatency_ns == Approx( expectedAvgLatency_ns ) );
+    REQUIRE( app.m_synchroDelay == Approx( expectedDelay_ns ) );
+    REQUIRE( app.m_values[0] == 99 );
 
     REQUIRE( sem_destroy( &semaphore ) == 0 );
 }
@@ -596,6 +684,8 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     app.m_lastAtime              = timespec{ 2, 2 };
     app.m_avgSemaphorePeriod_ns  = 42.0;
     app.m_firstSemaphore         = false;
+    app.m_avgReadLatency_ns      = 84.0;
+    app.m_firstReadLatency       = false;
     app.m_triggerTime            = timespec{ 3, 3 };
 
     REQUIRE( app.reconfig() == 0 );
@@ -609,6 +699,8 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     REQUIRE( app.m_lastAtime.tv_nsec == 0 );
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( 0.0 ) );
     REQUIRE( app.m_firstSemaphore == true );
+    REQUIRE( app.m_avgReadLatency_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_firstReadLatency == true );
     REQUIRE( app.m_triggerTime.tv_sec == 0 );
     REQUIRE( app.m_triggerTime.tv_nsec == 0 );
 }

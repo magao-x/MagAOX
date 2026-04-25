@@ -134,6 +134,10 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     bool m_firstSemaphore{ true }; ///< Tracks first-arrival initialization for semaphore period estimation.
 
+    double m_avgReadLatency_ns{ 0.0 }; ///< Exponential moving-average estimate of semaphore-to-read latency in nanoseconds.
+
+    bool m_firstReadLatency{ true }; ///< Tracks first-arrival initialization for semaphore-to-read latency estimation.
+
     double m_wfs_fps{ 0.0 }; ///< Latest WFS frame rate estimate used to predict WFS integration cadence.
 
     timespec m_triggerTime{}; ///< Computed trigger timestamp aligned to the estimated WFS integration midpoint.
@@ -692,6 +696,8 @@ int mcp3208Ctrl::startAcquisition()
         m_synchroDelay = m_synchroDelayTarget;
         m_firstSemaphore        = true;
         m_avgSemaphorePeriod_ns = 0.0;
+        m_firstReadLatency      = true;
+        m_avgReadLatency_ns     = 0.0;
         m_lastAtime             = timespec{};
         m_atime                 = timespec{};
         m_triggerTime           = timespec{};
@@ -838,6 +844,8 @@ void mcp3208Ctrl::closeSynchroStream()
     m_lastAtime              = timespec{};
     m_avgSemaphorePeriod_ns  = 0.0;
     m_firstSemaphore         = true;
+    m_avgReadLatency_ns      = 0.0;
+    m_firstReadLatency       = true;
     m_triggerTime            = timespec{};
 }
 
@@ -878,7 +886,6 @@ int mcp3208Ctrl::acquireTimerAndCheckValid()
 int mcp3208Ctrl::acquireSynchroAndCheckValid()
 {
     timespec ts;
-    auto     synchroWake = std::chrono::high_resolution_clock::time_point();
 
     if( m_synchroSemaphore == nullptr )
     {
@@ -918,8 +925,6 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
         return 1;
     }
 
-    synchroWake = std::chrono::high_resolution_clock::now();
-
     if( getRealtime( m_atime ) < 0 )
     {
         return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
@@ -933,10 +938,20 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
         return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
     }
 
-    auto readStart = std::chrono::high_resolution_clock::now();
-    auto elapsed   = std::chrono::duration_cast<std::chrono::nanoseconds>( readStart - synchroWake );
+    const double readLatency_ns = timespecToNs( m_currImageTimestamp ) - timespecToNs( m_atime );
+    constexpr double alpha = 0.1;
 
-    m_synchroDelay = m_synchroDelay - m_gain * ( elapsed.count() - m_synchroDelayTarget );
+    if( !m_firstReadLatency )
+    {
+        m_avgReadLatency_ns = alpha * readLatency_ns + ( 1.0 - alpha ) * m_avgReadLatency_ns;
+    }
+    else
+    {
+        m_avgReadLatency_ns = readLatency_ns;
+        m_firstReadLatency  = false;
+    }
+
+    m_synchroDelay = m_synchroDelay - m_gain * ( m_avgReadLatency_ns - m_synchroDelayTarget );
     if( m_synchroDelay < 0 )
     {
         m_synchroDelay = 0;
