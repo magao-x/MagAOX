@@ -406,16 +406,11 @@ void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
     const double raw_delay_ns =
         0.5 * deltaT_wfs_ns - ( dt_transfer_ns + t_wfs_process_ns + dt_F_ns + t_wfs_read_ns );
 
-    const long long wrapCycles = static_cast<long long>( raw_delay_ns / deltaT_wfs_ns );
-    double          t_delay_ns = raw_delay_ns - static_cast<double>( wrapCycles ) * deltaT_wfs_ns;
+    double t_delay_ns = std::fmod(raw_delay_ns, deltaT_wfs_ns);
 
     if( t_delay_ns < 0.0 )
     {
         t_delay_ns += deltaT_wfs_ns;
-    }
-    else if( t_delay_ns >= deltaT_wfs_ns )
-    {
-        t_delay_ns -= deltaT_wfs_ns;
     }
 
     const double t_trigger_ns = timespecToNs( atime ) + t_delay_ns;
