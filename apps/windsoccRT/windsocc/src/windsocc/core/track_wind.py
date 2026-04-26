@@ -38,7 +38,7 @@ def _stitch_dropped_tracks(
     )
     if numeric.is_empty():
         return cube_sources
-
+    
     summaries: dict[int, dict[str, float]] = {}
     track_ids = sorted(
         int(track_id)
@@ -53,12 +53,20 @@ def _stitch_dropped_tracks(
         if group.is_empty():
             continue
         matches = group.get_column("matches_num").to_numpy().astype(np.int64)
-        mean_angle = np.mean(group.get_column("direction_num").to_numpy())
+        angle_vals = group.get_column("direction_num").to_numpy()
+        velocity_vals = group.get_column("velocity_num").to_numpy()
+        mean_angle = np.mean(angle_vals)
+        mean_velocity = np.mean(velocity_vals)
+        # if track_id == 29:
+        #     print(f"track_id: {track_id}")
+        #     print(f"velocity_vals: {velocity_vals}")
+        #     print(f"direction_vals: {angle_vals}")
+        #     exit()
         summaries[track_id] = {
             "start_frame": float(group.get_column("frame_num").min()),
             "end_frame": float(group.get_column("frame_num").max()),
             "direction": float(mean_angle),
-            "velocity": float(np.mean(group.get_column("velocity_num").to_numpy())),
+            "velocity": float(mean_velocity),
             "matches": int(np.sum(matches)),
         }
 
@@ -95,9 +103,7 @@ def _stitch_dropped_tracks(
             # if gap > max_gap_frames:
             #     continue
             coinciding_track = _angle_diff_deg(si["direction"], sj["direction"]) < direction_tol_deg
-            wider_direction_net = _angle_diff_deg(si["direction"], sj["direction"]) < (5 * direction_tol_deg)
             same_velocity = abs(si["velocity"] - sj["velocity"]) < velocity_tol_mps
-            wider_velocity_net = abs(si["velocity"] - sj["velocity"]) < (3 * velocity_tol_mps)
             if not coinciding_track or not same_velocity:
                 continue
             # union the tracks that need to be merged
@@ -297,7 +303,8 @@ def _keep_track_ids_by_model(
             [_angle_diff_deg(float(angle), float(mean_angle)) for angle in direction_vals],
             dtype=np.float64,
         )
-        if np.max(direction_deltas) > direction_scatter_tol_deg:
+        # if np.max(direction_deltas) > direction_scatter_tol_deg:
+        if np.mean(direction_deltas) > direction_scatter_tol_deg:
             reject_rows.append(_model_reject_row(track_id, "direction_scatter", group))
             continue
         
@@ -309,14 +316,14 @@ def _keep_track_ids_by_model(
         #sigma clip the velocity values
         velocity_vals_clipped, _, _ = sigmaclip(velocity_vals, low=3, high=3)
         velocity_p2p = np.max(velocity_vals_clipped) - np.min(velocity_vals_clipped)
-        if velocity_p2p > velocity_scatter_tol_mps:
-            reject_rows.append(_model_reject_row(track_id, "velocity_scatter", group))
-            continue
-        # if track_id == 1:
+        # if track_id == 29:
         #     print(f"track_id: {track_id}")
         #     print(f"velocity_vals: {velocity_vals}")
         #     print(f"velocity_scatter_tol_mps: {velocity_scatter_tol_mps}")
         #     exit()
+        if velocity_p2p > velocity_scatter_tol_mps:
+            reject_rows.append(_model_reject_row(track_id, "velocity_scatter", group))
+            continue
         # if len(velocity_vals) >= 2 and np.std(velocity_vals) > velocity_scatter_tol_mps:
         #     reject_rows.append(_model_reject_row(track_id, "velocity_scatter", group))
         #     continue
@@ -474,6 +481,7 @@ def process_single_cc_cube(
     track_velocity_scatter_tol_mps: float = 2.0,
     tracker_prune_immunity_matches: int = 20,
     tracker_prune_immunity_speed_mps: float = 15.0,
+    tracker_max_track_radius_px: float | None = None,
     ) -> tuple[pl.DataFrame, pl.DataFrame, np.ndarray, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """
     - Initialize the wind tracker object
@@ -497,6 +505,7 @@ def process_single_cc_cube(
         meters_per_pixel=meters_per_pixel,
         prune_immunity_matches=tracker_prune_immunity_matches,
         prune_immunity_speed_mps=tracker_prune_immunity_speed_mps,
+        max_track_radius_px=tracker_max_track_radius_px,
     )
     base_tripwire_mask = make_annular_mask(cc_cube[0].shape, inner_bound, outer_bound).astype(np.float32)
     yy, xx = np.ogrid[:cc_cube[0].shape[0], :cc_cube[0].shape[1]]
