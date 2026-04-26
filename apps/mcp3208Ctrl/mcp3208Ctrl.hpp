@@ -89,6 +89,8 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     double m_cadenceGuard_ns{ 20e3 }; ///< Reserved per-frame margin protecting synchronized cadence from overruns.
 
+    float m_alpha{ 0.01f }; ///< Global exponential moving-average coefficient applied to timing smoothers.
+
     ///@}
 
     /** \name Runtime State - Data
@@ -118,6 +120,12 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     /// Handle updates from the configured external fps source.
     INDI_SETCALLBACK_DECL( mcp3208Ctrl, m_indiP_fpsSource );
+
+    /// INDI property exposing the global EMA alpha used by timing smoothers.
+    pcf::IndiProperty m_indiP_alpha;
+
+    /// Handle updates to the global EMA alpha property.
+    INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_alpha );
 
     /// INDI property exposing runtime timing diagnostics for acquisition health checks.
     pcf::IndiProperty m_indiP_timingDiag;
@@ -442,7 +450,7 @@ void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
     {
         dt_ns = timespecToNs( atime ) - timespecToNs( m_lastAtime );
 
-        constexpr double alpha = 0.01;
+        const double alpha = static_cast<double>( m_alpha );
         m_avgSemaphorePeriod_ns = alpha * dt_ns + ( 1.0 - alpha ) * m_avgSemaphorePeriod_ns;
     }
     else
@@ -630,6 +638,16 @@ void mcp3208Ctrl::setupConfig()
                 "double",
                 "Reserved nanoseconds in each synchronized cycle for non-delay work. Default is 20000." );
 
+    config.add( "synchro.alpha",
+                "",
+                "synchro.alpha",
+                argType::Required,
+                "synchro",
+                "alpha",
+                false,
+                "float",
+                "Global EMA coefficient for synchronized timing smoothers. Default is 0.01." );
+
     config.add( "numChannels.device",
                 "",
                 "numChannels.device",
@@ -700,6 +718,7 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_delayLockAbsThreshold_ns, "synchro.delayLockAbsThreshold_ns" );
     _config( m_delayLockFracThreshold, "synchro.delayLockFracThreshold" );
     _config( m_cadenceGuard_ns, "synchro.cadenceGuard_ns" );
+    _config( m_alpha, "synchro.alpha" );
 
     _config( m_numChannels, "accel.numChannels" ); // making number of mcp3208 channels we read out configurable
     _config( m_numChannelsDevice, "numChannels.device" );
@@ -749,6 +768,15 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
         m_cadenceGuard_ns = 0.0;
     }
 
+    if( m_alpha < 0.0f )
+    {
+        m_alpha = 0.0f;
+    }
+    else if( m_alpha > 1.0f )
+    {
+        m_alpha = 1.0f;
+    }
+
     m_synchroDelayTarget = 1e3f * m_synchroPostDelay;
     m_synchroDelay       = m_synchroDelayTarget;
     m_delayModel_ns      = static_cast<double>( m_synchroDelayTarget );
@@ -785,6 +813,11 @@ int mcp3208Ctrl::appStartup()
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_fps, "fps", 0, 10000, 1, "%d", "", "" );
     m_indiP_fps["current"].setValue( m_fps );
     m_indiP_fps["target"].setValue( m_fps );
+
+    // INDI prop for user to set global timing EMA alpha
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_alpha, "alpha", 0.0, 1.0, 0.001, "%.3f", "", "" );
+    m_indiP_alpha["current"].setValue( m_alpha );
+    m_indiP_alpha["target"].setValue( m_alpha );
 
     // INDI prop for user to set number of channels A/D reads out
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_numChannels, "numChannels", 0, 8, 1, "%d", "", "" );
@@ -983,6 +1016,8 @@ int mcp3208Ctrl::appLogic()
     FRAMEGRABBER_UPDATE_INDI;
 
     updatesIfChanged<float>( m_indiP_fps, { "current", "target" }, { m_fps, m_fps } );
+
+    updatesIfChanged<float>( m_indiP_alpha, { "current", "target" }, { m_alpha, m_alpha } );
 
     updatesIfChanged<int>( m_indiP_numChannels, { "current", "target" }, { m_numChannels, m_numChannels } );
 
@@ -1373,7 +1408,7 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
                     const double producerPeriod_ns = producerDt_ns / static_cast<double>( producerFrameDelta );
                     m_producerPeriodInst_ns        = producerPeriod_ns;
 
-                    constexpr double alphaProducer = 0.01;
+                    const double alphaProducer = static_cast<double>( m_alpha );
                     if( m_avgProducerPeriod_ns > 0.0 )
                     {
                         m_avgProducerPeriod_ns =
@@ -1443,7 +1478,7 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
     }
 
     const double readLatency_ns = timespecToNs( m_currImageTimestamp ) - timespecToNs( m_atime );
-    constexpr double alpha = 0.01;
+    const double alpha = static_cast<double>( m_alpha );
 
     if( !m_firstReadLatency )
     {
@@ -1483,7 +1518,7 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
     }
 
     m_nonDelayService_ns = nonDelayService_ns;
-    constexpr double alphaService = 0.01;
+    const double alphaService = static_cast<double>( m_alpha );
     if( !m_firstNonDelayService )
     {
         m_avgNonDelayService_ns =
@@ -1556,6 +1591,37 @@ INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_fps )( const pcf::IndiProperty &ipRe
     nano_sec_target = 1e9f / m_fps;
 
     log<text_log>( "set fps = " + std::to_string( m_fps ) );
+    return 0;
+}
+
+// INDI callback handling for global EMA alpha configuration.
+INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_alpha )( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getName() != m_indiP_alpha.getName() )
+    {
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
+        return -1;
+    }
+
+    float target;
+    if( indiTargetUpdate( m_indiP_alpha, target, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    if( target < 0.0f )
+    {
+        target = 0.0f;
+    }
+    else if( target > 1.0f )
+    {
+        target = 1.0f;
+    }
+
+    m_alpha = target;
+
+    log<text_log>( "set alpha = " + std::to_string( m_alpha ) );
     return 0;
 }
 

@@ -176,6 +176,29 @@ class mcp3208Ctrl_test : public mcp3208Ctrl
         return ip;
     }
 
+    /// Initialize the alpha INDI property used by callback tests.
+    void setupAlphaProperty()
+    {
+        m_indiP_alpha = pcf::IndiProperty( pcf::IndiProperty::Number );
+        m_indiP_alpha.setName( "alpha" );
+        m_indiP_alpha.add( pcf::IndiElement( "current" ) );
+        m_indiP_alpha["current"].setValue( m_alpha );
+        m_indiP_alpha.add( pcf::IndiElement( "target" ) );
+        m_indiP_alpha["target"].setValue( m_alpha );
+    }
+
+    /// Build an INDI property update for the alpha callback.
+    pcf::IndiProperty makeAlphaUpdate( const double target /**< [in] requested global EMA alpha */ )
+    {
+        pcf::IndiProperty ip( pcf::IndiProperty::Number );
+        ip.setName( "alpha" );
+        ip.add( pcf::IndiElement( "current" ) );
+        ip["current"].setValue( target );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"].setValue( target );
+        return ip;
+    }
+
     /// Initialize the timing-diagnostics INDI property used by diagnostics tests.
     void setupTimingDiagnosticsProperty()
     {
@@ -217,6 +240,7 @@ TEST_CASE( "mcp3208Ctrl Doxygen references are preserved", "[mcp3208Ctrl]" )
 
     app.setupFpsProperty();
     app.setupFpsSourceProperty();
+    app.setupAlphaProperty();
 
     XWCTEST_DOXYGEN_REF( app.loadConfigImpl( app.config ) );
     XWCTEST_DOXYGEN_REF( app.configureAcquisition() );
@@ -230,6 +254,7 @@ TEST_CASE( "mcp3208Ctrl Doxygen references are preserved", "[mcp3208Ctrl]" )
     XWCTEST_DOXYGEN_REF( app.recordTelem( nullptr ) );
     XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_fps( app.makeFpsUpdate( 1000.0 ) ) );
     XWCTEST_DOXYGEN_REF( app.setCallBack_m_indiP_fpsSource( app.makeFpsSourceUpdate( 1000.0 ) ) );
+    XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_alpha( app.makeAlphaUpdate( 0.01 ) ) );
     XWCTEST_DOXYGEN_REF( app.updateTriggerTiming( timespec{} ) );
     XWCTEST_DOXYGEN_REF( app.updateTimingDiagnosticsIndi() );
     XWCTEST_DOXYGEN_REF( app.delayBeforeRead() );
@@ -262,6 +287,7 @@ TEST_CASE( "mcp3208Ctrl configuration defaults load synchronized settings", "[mc
     REQUIRE( app.m_delayLockAbsThreshold_ns == Approx( 50000.0 ) );
     REQUIRE( app.m_delayLockFracThreshold == Approx( 0.1 ) );
     REQUIRE( app.m_cadenceGuard_ns == Approx( 20000.0 ) );
+    REQUIRE( app.m_alpha == Approx( 0.01f ) );
     REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
     REQUIRE( app.m_wfs_fps == Approx( static_cast<double>( app.m_fps ) ) );
@@ -287,6 +313,7 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
                                 "synchro",
                                 "synchro",
                                 "synchro",
+                                "synchro",
                                 "accel" },
                               { "shmimName",
                                 "postDelay",
@@ -297,8 +324,9 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
                                 "delayLockAbsThreshold_ns",
                                 "delayLockFracThreshold",
                                 "cadenceGuard_ns",
+                                "alpha",
                                 "numChannels" },
-                              { "camwfs_sync", "17", "4000", "62000", "11000", "290000", "75000", "0.2", "15000", "3" } );
+                              { "camwfs_sync", "17", "4000", "62000", "11000", "290000", "75000", "0.2", "15000", "0.25", "3" } );
     app.config.readConfig( "/tmp/mcp3208Ctrl_test_override.conf" );
 
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
@@ -311,6 +339,7 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
     REQUIRE( app.m_delayLockAbsThreshold_ns == Approx( 75000.0 ) );
     REQUIRE( app.m_delayLockFracThreshold == Approx( 0.2 ) );
     REQUIRE( app.m_cadenceGuard_ns == Approx( 15000.0 ) );
+    REQUIRE( app.m_alpha == Approx( 0.25f ) );
     REQUIRE( app.m_numChannels == 3 );
     REQUIRE( app.m_synchroDelayTarget == Approx( 17000.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 17000.0f ) );
@@ -349,6 +378,47 @@ TEST_CASE( "mcp3208Ctrl fps source callback updates trigger metadata", "[mcp3208
     REQUIRE( app.m_wfs_fps == Approx( 250.0 ) );
     REQUIRE( app.m_trigger == Approx( 1e9f / 250.0f ) );
     REQUIRE( app.nano_sec_target == Approx( 1e9f / 250.0f ) );
+}
+
+/// Verify synchronized alpha configuration is clamped to the valid range.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl configuration clamps synchronized alpha", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.setupConfig();
+
+    mx::app::writeConfigFile( "/tmp/mcp3208Ctrl_test_alpha_low.conf", { "synchro" }, { "alpha" }, { "-0.5" } );
+    app.config.readConfig( "/tmp/mcp3208Ctrl_test_alpha_low.conf" );
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.m_alpha == Approx( 0.0f ) );
+
+    mx::app::writeConfigFile( "/tmp/mcp3208Ctrl_test_alpha_high.conf", { "synchro" }, { "alpha" }, { "1.5" } );
+    app.config.readConfig( "/tmp/mcp3208Ctrl_test_alpha_high.conf" );
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.m_alpha == Approx( 1.0f ) );
+}
+
+/// Verify alpha callback updates and clamps the global EMA coefficient.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl alpha callback updates and clamps", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.setupAlphaProperty();
+
+    REQUIRE( app.newCallBack_m_indiP_alpha( app.makeAlphaUpdate( 0.4 ) ) == 0 );
+    REQUIRE( app.m_alpha == Approx( 0.4f ) );
+
+    REQUIRE( app.newCallBack_m_indiP_alpha( app.makeAlphaUpdate( -1.0 ) ) == 0 );
+    REQUIRE( app.m_alpha == Approx( 0.0f ) );
+
+    REQUIRE( app.newCallBack_m_indiP_alpha( app.makeAlphaUpdate( 2.0 ) ) == 0 );
+    REQUIRE( app.m_alpha == Approx( 1.0f ) );
 }
 
 /// Verify synchronized-mode timing diagnostics publish loop state and derived error.
@@ -483,6 +553,7 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming uses measured semaphore period for d
 {
     mcp3208Ctrl_test app;
 
+    app.m_alpha                = 0.2f;
     app.m_firstSemaphore        = false;
     app.m_lastAtime             = timespec{ 10, 100000000L };
     app.m_avgSemaphorePeriod_ns = 500000.0;
@@ -492,9 +563,10 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming uses measured semaphore period for d
 
     app.updateTriggerTiming( secondArrival );
 
-    const double expectedAvg_ns            = 0.01 * 1000000.0 + 0.99 * 500000.0;
+    const double alpha                     = static_cast<double>( app.m_alpha );
+    const double expectedAvg_ns            = alpha * 1000000.0 + ( 1.0 - alpha ) * 500000.0;
     const double expectedMeasuredDeltaT_ns = expectedAvg_ns;
-    const double expectedBlendedDeltaT_ns  = 0.99 * ( 1e9 / 1000.0 ) + 0.01 * expectedAvg_ns;
+    const double expectedBlendedDeltaT_ns  = ( 1.0 - alpha ) * ( 1e9 / 1000.0 ) + alpha * expectedAvg_ns;
     const double rawDelayMeasured_ns =
         0.5 * expectedMeasuredDeltaT_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
     const double rawDelayBlended_ns = 0.5 * expectedBlendedDeltaT_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
@@ -522,6 +594,7 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming falls back to EMA period when fps is
 {
     mcp3208Ctrl_test app;
 
+    app.m_alpha                = 0.2f;
     app.m_firstSemaphore        = false;
     app.m_lastAtime             = timespec{ 0, 0 };
     app.m_avgSemaphorePeriod_ns = 1000000.0;
@@ -530,7 +603,8 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming falls back to EMA period when fps is
     const timespec nextArrival{ 0, 2000000L };
     app.updateTriggerTiming( nextArrival );
 
-    const double expectedAvg_ns       = 0.01 * 2000000.0 + 0.99 * 1000000.0;
+    const double alpha                = static_cast<double>( app.m_alpha );
+    const double expectedAvg_ns       = alpha * 2000000.0 + ( 1.0 - alpha ) * 1000000.0;
     const double rawDelay_ns          = 0.5 * expectedAvg_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
     const double expectedDelay_ns     = wrapDelay( rawDelay_ns, expectedAvg_ns );
     const double expectedTrigger_ns   = mcp3208Ctrl::timespecToNs( nextArrival ) + expectedDelay_ns;
@@ -807,6 +881,7 @@ TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata"
     app.m_synchroDelay     = 0.0f;
     app.m_synchroDelayTarget = 0.0f;
     app.m_gain             = 0.0f;
+    app.m_alpha            = 0.5f;
     app.m_wfs_fps          = 2000.0;
 
     metadata.cnt0  = 100;
@@ -827,11 +902,22 @@ TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata"
     REQUIRE( app.m_avgProducerPeriod_ns == Approx( 500000.0 ) );
     REQUIRE( app.m_lastProducerCnt0 == 102 );
 
+    metadata.cnt0  = 104;
+    metadata.atime = timespec{ 10, 2100000L };
+    REQUIRE( sem_post( &semaphore ) == 0 );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+
+    const double expectedPeriod2_ns = 550000.0;
+    const double expectedAvg2_ns =
+        static_cast<double>( app.m_alpha ) * expectedPeriod2_ns + ( 1.0 - static_cast<double>( app.m_alpha ) ) * 500000.0;
+    REQUIRE( app.m_producerPeriodInst_ns == Approx( expectedPeriod2_ns ) );
+    REQUIRE( app.m_avgProducerPeriod_ns == Approx( expectedAvg2_ns ) );
+
     const double periodBeforeNoAdvance_ns = app.m_producerPeriodInst_ns;
     const double avgBeforeNoAdvance_ns    = app.m_avgProducerPeriod_ns;
 
-    metadata.cnt0  = 102;
-    metadata.atime = timespec{ 10, 2000000L };
+    metadata.cnt0  = 104;
+    metadata.atime = timespec{ 10, 2200000L };
     REQUIRE( sem_post( &semaphore ) == 0 );
     REQUIRE( app.acquireAndCheckValid() == 0 );
 
@@ -862,6 +948,7 @@ TEST_CASE( "mcp3208Ctrl synchronized read latency EMA initializes and smooths", 
     app.m_synchroDelayTarget = 0.0f;
     app.m_synchroDelay       = 0.0f;
     app.m_gain               = 0.0f;
+    app.m_alpha              = 0.2f;
     app.m_firstReadLatency   = true;
     app.m_avgReadLatency_ns  = 0.0;
 
@@ -879,9 +966,54 @@ TEST_CASE( "mcp3208Ctrl synchronized read latency EMA initializes and smooths", 
 
     const double readLatency1_ns =
         mcp3208Ctrl::timespecToNs( app.m_currImageTimestamp ) - mcp3208Ctrl::timespecToNs( app.m_atime );
-    const double expectedAvgLatency_ns = 0.01 * readLatency1_ns + 0.99 * readLatency0_ns;
+    const double alpha = static_cast<double>( app.m_alpha );
+    const double expectedAvgLatency_ns = alpha * readLatency1_ns + ( 1.0 - alpha ) * readLatency0_ns;
 
     REQUIRE( app.m_avgReadLatency_ns == Approx( expectedAvgLatency_ns ) );
+
+    REQUIRE( sem_destroy( &semaphore ) == 0 );
+}
+
+/// Verify synchronized non-delay service EMA uses the configurable global alpha.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl synchronized non-delay service EMA uses global alpha", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+    sem_t            semaphore;
+
+    resetStubState();
+    stubState().m_channelValues = { 55 };
+
+    REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
+
+    app.m_synchroShmimName      = "camwfs_sync";
+    app.m_numChannels           = 1;
+    app.m_values.assign( 1, 0 );
+    app.m_synchroSemaphore      = &semaphore;
+    app.m_synchroDelayTarget    = 0.0f;
+    app.m_synchroDelay          = 0.0f;
+    app.m_gain                  = 0.0f;
+    app.m_alpha                 = 0.2f;
+    app.m_firstNonDelayService  = true;
+    app.m_avgNonDelayService_ns = 0.0;
+
+    REQUIRE( sem_post( &semaphore ) == 0 );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+
+    const double nonDelay0_ns = app.m_nonDelayService_ns;
+    REQUIRE( app.m_firstNonDelayService == false );
+    REQUIRE( app.m_avgNonDelayService_ns == Approx( nonDelay0_ns ) );
+
+    REQUIRE( sem_post( &semaphore ) == 0 );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+
+    const double nonDelay1_ns = app.m_nonDelayService_ns;
+    const double alpha        = static_cast<double>( app.m_alpha );
+    const double expectedAvgNonDelay_ns = alpha * nonDelay1_ns + ( 1.0 - alpha ) * nonDelay0_ns;
+
+    REQUIRE( app.m_avgNonDelayService_ns == Approx( expectedAvgNonDelay_ns ) );
 
     REQUIRE( sem_destroy( &semaphore ) == 0 );
 }
@@ -908,6 +1040,7 @@ TEST_CASE( "mcp3208Ctrl synchronized delay controller uses read latency EMA", "[
     app.m_synchroDelayTarget = 0.0f;
     app.m_synchroDelay       = 2000000.0f;
     app.m_gain               = 1.0f;
+    app.m_alpha              = 0.2f;
     app.m_firstReadLatency   = false;
     app.m_avgReadLatency_ns  = 800000.0;
 
@@ -915,7 +1048,8 @@ TEST_CASE( "mcp3208Ctrl synchronized delay controller uses read latency EMA", "[
 
     const double readLatency_ns =
         mcp3208Ctrl::timespecToNs( app.m_currImageTimestamp ) - mcp3208Ctrl::timespecToNs( app.m_atime );
-    const double expectedAvgLatency_ns = 0.01 * readLatency_ns + 0.99 * 800000.0;
+    const double alpha = static_cast<double>( app.m_alpha );
+    const double expectedAvgLatency_ns = alpha * readLatency_ns + ( 1.0 - alpha ) * 800000.0;
     const double expectedDelay_ns =
         ( 2000000.0 - expectedAvgLatency_ns ) > 0.0 ? ( 2000000.0 - expectedAvgLatency_ns ) : 0.0;
 
