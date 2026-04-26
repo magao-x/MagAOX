@@ -184,8 +184,13 @@ class mcp3208Ctrl_test : public mcp3208Ctrl
         m_indiP_timingDiag.add( pcf::IndiElement( "avg_read_latency_ns" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_ns" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_target_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "delay_applied_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "delay_model_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "delay_phase_error_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "delay_lock" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "read_latency_error_ns" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "avg_semaphore_period_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_measured_ns" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_ns" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_ns" ) );
@@ -243,6 +248,12 @@ TEST_CASE( "mcp3208Ctrl configuration defaults load synchronized settings", "[mc
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
     REQUIRE( app.m_synchroShmimName.empty() );
     REQUIRE( app.m_synchroPostDelay == 0 );
+    REQUIRE( app.m_synchroDtTransfer_ns == Approx( 3000.0 ) );
+    REQUIRE( app.m_synchroWfsProcess_ns == Approx( 51500.0 ) );
+    REQUIRE( app.m_synchroDtF_ns == Approx( 10000.0 ) );
+    REQUIRE( app.m_synchroWfsRead_ns == Approx( 276100.0 ) );
+    REQUIRE( app.m_delayLockAbsThreshold_ns == Approx( 50000.0 ) );
+    REQUIRE( app.m_delayLockFracThreshold == Approx( 0.1 ) );
     REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
     REQUIRE( app.m_wfs_fps == Approx( static_cast<double>( app.m_fps ) ) );
@@ -259,14 +270,36 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
     app.setupConfig();
 
     mx::app::writeConfigFile( "/tmp/mcp3208Ctrl_test_override.conf",
-                              { "synchro", "synchro", "accel" },
-                              { "shmimName", "postDelay", "numChannels" },
-                              { "camwfs_sync", "17", "3" } );
+                              { "synchro",
+                                "synchro",
+                                "synchro",
+                                "synchro",
+                                "synchro",
+                                "synchro",
+                                "synchro",
+                                "synchro",
+                                "accel" },
+                              { "shmimName",
+                                "postDelay",
+                                "dtTransfer_ns",
+                                "wfsProcess_ns",
+                                "dtF_ns",
+                                "wfsRead_ns",
+                                "delayLockAbsThreshold_ns",
+                                "delayLockFracThreshold",
+                                "numChannels" },
+                              { "camwfs_sync", "17", "4000", "62000", "11000", "290000", "75000", "0.2", "3" } );
     app.config.readConfig( "/tmp/mcp3208Ctrl_test_override.conf" );
 
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
     REQUIRE( app.m_synchroShmimName == "camwfs_sync" );
     REQUIRE( app.m_synchroPostDelay == 17 );
+    REQUIRE( app.m_synchroDtTransfer_ns == Approx( 4000.0 ) );
+    REQUIRE( app.m_synchroWfsProcess_ns == Approx( 62000.0 ) );
+    REQUIRE( app.m_synchroDtF_ns == Approx( 11000.0 ) );
+    REQUIRE( app.m_synchroWfsRead_ns == Approx( 290000.0 ) );
+    REQUIRE( app.m_delayLockAbsThreshold_ns == Approx( 75000.0 ) );
+    REQUIRE( app.m_delayLockFracThreshold == Approx( 0.2 ) );
     REQUIRE( app.m_numChannels == 3 );
     REQUIRE( app.m_synchroDelayTarget == Approx( 17000.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 17000.0f ) );
@@ -320,7 +353,10 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     app.m_avgReadLatency_ns     = 125000.0;
     app.m_synchroDelay          = 24000.0f;
     app.m_synchroDelayTarget    = 17000.0f;
+    app.m_delayApplied_ns       = 24000.0;
+    app.m_delayModel_ns         = 17000.0;
     app.m_avgSemaphorePeriod_ns = 500000.0;
+    app.m_wfsPeriodMeasured_ns  = 500000.0;
     app.m_wfs_fps               = 1500.0;
     app.m_triggerInterval_ns    = 600000.0;
     app.m_atime                 = timespec{ 12, 3000000L };
@@ -331,8 +367,13 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     REQUIRE( app.m_indiP_timingDiag["avg_read_latency_ns"].get<double>() == Approx( 125000.0 ) );
     REQUIRE( app.m_indiP_timingDiag["synchro_delay_ns"].get<double>() == Approx( 24000.0 ) );
     REQUIRE( app.m_indiP_timingDiag["synchro_delay_target_ns"].get<double>() == Approx( 17000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_applied_ns"].get<double>() == Approx( 24000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_model_ns"].get<double>() == Approx( 17000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_ns"].get<double>() == Approx( 7000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 1.0 ) );
     REQUIRE( app.m_indiP_timingDiag["read_latency_error_ns"].get<double>() == Approx( 108000.0 ) );
     REQUIRE( app.m_indiP_timingDiag["avg_semaphore_period_ns"].get<double>() == Approx( 500000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["wfs_period_measured_ns"].get<double>() == Approx( 500000.0 ) );
     REQUIRE( app.m_indiP_timingDiag["wfs_fps"].get<double>() == Approx( 1500.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_interval_ns"].get<double>() == Approx( 600000.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_time_ns"].get<double>() ==
@@ -358,6 +399,8 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
     REQUIRE( app.m_indiP_timingDiag["mode_code"].get<double>() == Approx( 1.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_interval_ns"].get<double>() == Approx( 123456.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_time_ns"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_ns"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 0.0 ) );
 
     app.m_synchroShmimName.clear();
     app.m_triggerInterval_ns = 456789.0;
@@ -366,6 +409,36 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
     REQUIRE( app.m_indiP_timingDiag["mode_code"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_interval_ns"].get<double>() == Approx( 456789.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_time_ns"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_ns"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 0.0 ) );
+}
+
+/// Verify timing diagnostics wrap phase error and require both lock thresholds.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl timing diagnostics compute wrapped phase error and lock thresholds", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.setupTimingDiagnosticsProperty();
+    app.m_synchroShmimName        = "camwfs_sync";
+    app.m_delayApplied_ns         = 50.0;
+    app.m_delayModel_ns           = 900.0;
+    app.m_wfsPeriodMeasured_ns    = 1000.0;
+    app.m_delayLockAbsThreshold_ns = 200.0;
+    app.m_delayLockFracThreshold   = 0.1;
+
+    app.updateTimingDiagnosticsIndi();
+
+    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_ns"].get<double>() == Approx( 150.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 0.0 ) );
+
+    app.m_delayLockFracThreshold = 0.2;
+    app.updateTimingDiagnosticsIndi();
+
+    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_ns"].get<double>() == Approx( 150.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 1.0 ) );
 }
 
 /// Verify nanosecond and timespec conversions preserve normalized values.
@@ -382,45 +455,43 @@ TEST_CASE( "mcp3208Ctrl timing helpers convert between nanoseconds and timespec"
     REQUIRE( mcp3208Ctrl::timespecToNs( ts ) == Approx( ns ) );
 }
 
-/// Verify synchronized timing uses EMA semaphore periods with the hybrid WFS model.
+/// Verify synchronized timing uses only the measured semaphore period for delay modeling.
 /**
  * \ingroup mcp3208Ctrl_unit_test
  */
-TEST_CASE( "mcp3208Ctrl updateTriggerTiming uses EMA and hybrid WFS period", "[mcp3208Ctrl]" )
+TEST_CASE( "mcp3208Ctrl updateTriggerTiming uses measured semaphore period for delay model", "[mcp3208Ctrl]" )
 {
     mcp3208Ctrl_test app;
 
+    app.m_firstSemaphore        = false;
+    app.m_lastAtime             = timespec{ 10, 100000000L };
+    app.m_avgSemaphorePeriod_ns = 500000.0;
     app.m_wfs_fps = 1000.0;
 
-    const timespec firstArrival{ 10, 100000000L };
     const timespec secondArrival{ 10, 101000000L };
-
-    app.updateTriggerTiming( firstArrival );
-    REQUIRE( app.m_firstSemaphore == false );
-    REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( 0.0 ) );
-    REQUIRE( app.m_lastAtime.tv_sec == firstArrival.tv_sec );
-    REQUIRE( app.m_lastAtime.tv_nsec == firstArrival.tv_nsec );
-    REQUIRE( app.m_triggerInterval_ns == Approx( 0.0 ) );
-
-    const double firstTrigger_ns = mcp3208Ctrl::timespecToNs( app.m_triggerTime );
 
     app.updateTriggerTiming( secondArrival );
 
-    const double expectedAvg_ns       = 0.1 * 1000000.0;
-    const double expectedDeltaT_ns    = 0.7 * ( 1e9 / 1000.0 ) + 0.3 * expectedAvg_ns;
-    const double rawDelay_ns          = 0.5 * expectedDeltaT_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
-    const double expectedDelay_ns     = wrapDelay( rawDelay_ns, expectedDeltaT_ns );
-    const double expectedTrigger_ns   = mcp3208Ctrl::timespecToNs( secondArrival ) + expectedDelay_ns;
-    const double expectedInterval_ns  = expectedTrigger_ns - firstTrigger_ns;
-    const double measuredTrigger_ns   = mcp3208Ctrl::timespecToNs( app.m_triggerTime );
-    const double measuredDelay_ns     = measuredTrigger_ns - mcp3208Ctrl::timespecToNs( secondArrival );
+    const double expectedAvg_ns            = 0.01 * 1000000.0 + 0.99 * 500000.0;
+    const double expectedMeasuredDeltaT_ns = expectedAvg_ns;
+    const double expectedBlendedDeltaT_ns  = 0.99 * ( 1e9 / 1000.0 ) + 0.01 * expectedAvg_ns;
+    const double rawDelayMeasured_ns =
+        0.5 * expectedMeasuredDeltaT_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
+    const double rawDelayBlended_ns = 0.5 * expectedBlendedDeltaT_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
+    const double expectedDelayMeasured_ns = wrapDelay( rawDelayMeasured_ns, expectedMeasuredDeltaT_ns );
+    const double expectedDelayBlended_ns  = wrapDelay( rawDelayBlended_ns, expectedBlendedDeltaT_ns );
+    const double measuredTrigger_ns       = mcp3208Ctrl::timespecToNs( app.m_triggerTime );
+    const double measuredDelay_ns         = measuredTrigger_ns - mcp3208Ctrl::timespecToNs( secondArrival );
 
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( expectedAvg_ns ) );
-    REQUIRE( measuredTrigger_ns == Approx( expectedTrigger_ns ) );
-    REQUIRE( app.m_triggerInterval_ns == Approx( expectedInterval_ns ) );
-    REQUIRE( app.m_synchroDelayTarget == Approx( static_cast<float>( expectedDelay_ns ) ) );
+    REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( expectedMeasuredDeltaT_ns ) );
+    REQUIRE( app.m_delayModel_ns == Approx( expectedDelayMeasured_ns ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( static_cast<float>( expectedDelayMeasured_ns ) ) );
+    REQUIRE( app.m_triggerInterval_ns == Approx( 0.0 ) );
+    REQUIRE( measuredDelay_ns == Approx( expectedDelayMeasured_ns ) );
+    REQUIRE( expectedDelayMeasured_ns != Approx( expectedDelayBlended_ns ) );
     REQUIRE( measuredDelay_ns >= 0.0 );
-    REQUIRE( measuredDelay_ns < expectedDeltaT_ns );
+    REQUIRE( measuredDelay_ns < expectedMeasuredDeltaT_ns );
 }
 
 /// Verify synchronized timing falls back to EMA period when WFS fps is unavailable.
@@ -439,7 +510,7 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming falls back to EMA period when fps is
     const timespec nextArrival{ 0, 2000000L };
     app.updateTriggerTiming( nextArrival );
 
-    const double expectedAvg_ns       = 0.1 * 2000000.0 + 0.9 * 1000000.0;
+    const double expectedAvg_ns       = 0.01 * 2000000.0 + 0.99 * 1000000.0;
     const double rawDelay_ns          = 0.5 * expectedAvg_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
     const double expectedDelay_ns     = wrapDelay( rawDelay_ns, expectedAvg_ns );
     const double expectedTrigger_ns   = mcp3208Ctrl::timespecToNs( nextArrival ) + expectedDelay_ns;
@@ -470,7 +541,7 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming wraps delay with modulo period", "[m
     app.updateTriggerTiming( nextArrival );
 
     const double expectedAvg_ns    = 100000.0;
-    const double expectedDeltaT_ns = 0.7 * ( 1e9 / 20000.0 ) + 0.3 * expectedAvg_ns;
+    const double expectedDeltaT_ns = expectedAvg_ns;
     const double rawDelay_ns       = 0.5 * expectedDeltaT_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
     const double expectedDelay_ns  = wrapDelay( rawDelay_ns, expectedDeltaT_ns );
     const double measuredDelay_ns  = mcp3208Ctrl::timespecToNs( app.m_triggerTime ) - mcp3208Ctrl::timespecToNs( nextArrival );
@@ -483,6 +554,68 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming wraps delay with modulo period", "[m
     REQUIRE( measuredDelay_ns < expectedDeltaT_ns );
 }
 
+/// Verify synchronized timing leaves positive raw delays unchanged by modulo wrapping.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl updateTriggerTiming preserves positive raw delay", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.m_firstSemaphore        = false;
+    app.m_lastAtime             = timespec{ 4, 0 };
+    app.m_avgSemaphorePeriod_ns = 2000000.0;
+    app.m_wfs_fps               = 0.0;
+
+    const timespec nextArrival{ 4, 2000000L };
+    app.updateTriggerTiming( nextArrival );
+
+    const double expectedAvg_ns   = 2000000.0;
+    const double expectedDeltaT_ns = expectedAvg_ns;
+    const double rawDelay_ns      = 0.5 * expectedDeltaT_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
+    const double measuredDelay_ns = mcp3208Ctrl::timespecToNs( app.m_triggerTime ) - mcp3208Ctrl::timespecToNs( nextArrival );
+
+    REQUIRE( rawDelay_ns > 0.0 );
+    REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( expectedAvg_ns ) );
+    REQUIRE( app.m_delayModel_ns == Approx( rawDelay_ns ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( static_cast<float>( rawDelay_ns ) ) );
+    REQUIRE( measuredDelay_ns == Approx( rawDelay_ns ) );
+}
+
+/// Verify synchronized timing constants directly control the modeled delay target.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl updateTriggerTiming uses configurable timing constants", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.m_firstSemaphore        = false;
+    app.m_lastAtime             = timespec{ 9, 0 };
+    app.m_avgSemaphorePeriod_ns = 1200000.0;
+    app.m_wfs_fps               = 1000.0;
+    app.m_synchroDtTransfer_ns  = 4000.0;
+    app.m_synchroWfsProcess_ns  = 62000.0;
+    app.m_synchroDtF_ns         = 11000.0;
+    app.m_synchroWfsRead_ns     = 290000.0;
+
+    const timespec nextArrival{ 9, 1200000L };
+    app.updateTriggerTiming( nextArrival );
+
+    const double expectedAvg_ns    = 1200000.0;
+    const double rawDelayCustom_ns = 0.5 * expectedAvg_ns - ( 4000.0 + 62000.0 + 11000.0 + 290000.0 );
+    const double rawDelayDefault_ns = 0.5 * expectedAvg_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
+    const double expectedDelayCustom_ns = wrapDelay( rawDelayCustom_ns, expectedAvg_ns );
+    const double measuredDelay_ns =
+        mcp3208Ctrl::timespecToNs( app.m_triggerTime ) - mcp3208Ctrl::timespecToNs( nextArrival );
+
+    REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( expectedAvg_ns ) );
+    REQUIRE( app.m_delayModel_ns == Approx( expectedDelayCustom_ns ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( static_cast<float>( expectedDelayCustom_ns ) ) );
+    REQUIRE( measuredDelay_ns == Approx( expectedDelayCustom_ns ) );
+    REQUIRE( expectedDelayCustom_ns != Approx( wrapDelay( rawDelayDefault_ns, expectedAvg_ns ) ) );
+}
+
 /// Verify synchronized timing leaves trigger time unchanged when period estimate is non-positive.
 /**
  * \ingroup mcp3208Ctrl_unit_test
@@ -491,11 +624,13 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming guards non-positive period", "[mcp32
 {
     mcp3208Ctrl_test app;
 
-    app.m_triggerTime       = timespec{ 7, 12345L };
+    app.m_triggerTime        = timespec{ 7, 12345L };
     app.m_triggerInterval_ns = 42.0;
     app.m_synchroDelayTarget = 12345.0f;
-    app.m_firstSemaphore    = true;
-    app.m_wfs_fps           = 0.0;
+    app.m_delayModel_ns      = 12345.0;
+    app.m_wfsPeriodMeasured_ns = 67890.0;
+    app.m_firstSemaphore       = true;
+    app.m_wfs_fps              = 0.0;
 
     const timespec nextArrival{ 7, 54321L };
     app.updateTriggerTiming( nextArrival );
@@ -508,6 +643,8 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming guards non-positive period", "[mcp32
     REQUIRE( app.m_triggerTime.tv_nsec == 12345L );
     REQUIRE( app.m_triggerInterval_ns == Approx( 0.0 ) );
     REQUIRE( app.m_synchroDelayTarget == Approx( 12345.0f ) );
+    REQUIRE( app.m_delayModel_ns == Approx( 12345.0 ) );
+    REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( 0.0 ) );
 }
 
 /// Verify timer-driven acquisition configures the published frame geometry.
@@ -665,7 +802,7 @@ TEST_CASE( "mcp3208Ctrl synchronized read latency EMA initializes and smooths", 
 
     const double readLatency1_ns =
         mcp3208Ctrl::timespecToNs( app.m_currImageTimestamp ) - mcp3208Ctrl::timespecToNs( app.m_atime );
-    const double expectedAvgLatency_ns = 0.1 * readLatency1_ns + 0.9 * readLatency0_ns;
+    const double expectedAvgLatency_ns = 0.01 * readLatency1_ns + 0.99 * readLatency0_ns;
 
     REQUIRE( app.m_avgReadLatency_ns == Approx( expectedAvgLatency_ns ) );
 
@@ -701,7 +838,7 @@ TEST_CASE( "mcp3208Ctrl synchronized delay controller uses read latency EMA", "[
 
     const double readLatency_ns =
         mcp3208Ctrl::timespecToNs( app.m_currImageTimestamp ) - mcp3208Ctrl::timespecToNs( app.m_atime );
-    const double expectedAvgLatency_ns = 0.1 * readLatency_ns + 0.9 * 800000.0;
+    const double expectedAvgLatency_ns = 0.01 * readLatency_ns + 0.99 * 800000.0;
     const double expectedDelay_ns =
         ( 2000000.0 - expectedAvgLatency_ns ) > 0.0 ? ( 2000000.0 - expectedAvgLatency_ns ) : 0.0;
 
@@ -800,9 +937,14 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     app.m_atime                  = timespec{ 1, 1 };
     app.m_lastAtime              = timespec{ 2, 2 };
     app.m_avgSemaphorePeriod_ns  = 42.0;
+    app.m_wfsPeriodMeasured_ns   = 21.0;
     app.m_firstSemaphore         = false;
     app.m_avgReadLatency_ns      = 84.0;
     app.m_firstReadLatency       = false;
+    app.m_delayModel_ns          = 900.0;
+    app.m_delayApplied_ns        = 875.0;
+    app.m_delayPhaseError_ns     = -25.0;
+    app.m_delayLock              = 1.0;
     app.m_triggerTime            = timespec{ 3, 3 };
     app.m_triggerInterval_ns     = 21.0;
     app.m_lastTriggerTime        = timespec{ 4, 4 };
@@ -819,9 +961,14 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     REQUIRE( app.m_lastAtime.tv_sec == 0 );
     REQUIRE( app.m_lastAtime.tv_nsec == 0 );
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( 0.0 ) );
     REQUIRE( app.m_firstSemaphore == true );
     REQUIRE( app.m_avgReadLatency_ns == Approx( 0.0 ) );
     REQUIRE( app.m_firstReadLatency == true );
+    REQUIRE( app.m_delayModel_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_delayApplied_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_delayPhaseError_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_delayLock == Approx( 0.0 ) );
     REQUIRE( app.m_triggerTime.tv_sec == 0 );
     REQUIRE( app.m_triggerTime.tv_nsec == 0 );
     REQUIRE( app.m_triggerInterval_ns == Approx( 0.0 ) );

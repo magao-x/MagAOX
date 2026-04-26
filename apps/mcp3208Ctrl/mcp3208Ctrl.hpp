@@ -75,6 +75,18 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     std::string m_synchroShmimName;      ///< The synchronization ImageStreamIO stream name; empty selects timer mode.
     int         m_synchroPostDelay{ 0 }; ///< Requested delay between semaphore wake and A/D read in microseconds.
 
+    double m_synchroDtTransfer_ns{ 3e3 }; ///< Transfer-latency term in the synchronized delay model.
+
+    double m_synchroWfsProcess_ns{ 51.5e3 }; ///< WFS processing-latency term in the synchronized delay model.
+
+    double m_synchroDtF_ns{ 10e3 }; ///< Filter/transport-latency term in the synchronized delay model.
+
+    double m_synchroWfsRead_ns{ 276.1e3 }; ///< WFS read-latency term in the synchronized delay model.
+
+    double m_delayLockAbsThreshold_ns{ 50e3 }; ///< Absolute phase-error threshold for declaring delay lock.
+
+    double m_delayLockFracThreshold{ 0.1 }; ///< Fractional period phase-error threshold for declaring delay lock.
+
     ///@}
 
     /** \name Runtime State - Data
@@ -135,6 +147,8 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     double m_avgSemaphorePeriod_ns{ 0.0 }; ///< Exponential moving-average estimate of semaphore period in nanoseconds.
 
+    double m_wfsPeriodMeasured_ns{ 0.0 }; ///< Measured semaphore period used as the synchronized delay-model WFS period.
+
     bool m_firstSemaphore{ true }; ///< Tracks first-arrival initialization for semaphore period estimation.
 
     double m_avgReadLatency_ns{ 0.0 }; ///< Exponential moving-average estimate of semaphore-to-read latency in nanoseconds.
@@ -142,6 +156,14 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     bool m_firstReadLatency{ true }; ///< Tracks first-arrival initialization for semaphore-to-read latency estimation.
 
     double m_wfs_fps{ 0.0 }; ///< WFS frame rate estimate used for timing prediction; initialized from configured fps before callbacks.
+
+    double m_delayModel_ns{ 0.0 }; ///< Current modulo-wrapped delay predicted by the synchronized phase model.
+
+    double m_delayApplied_ns{ 0.0 }; ///< Delay applied to the most recent synchronized ADC read.
+
+    double m_delayPhaseError_ns{ 0.0 }; ///< Wrapped phase error between applied and modeled synchronized delay.
+
+    double m_delayLock{ 0.0 }; ///< Delay-lock state exported to diagnostics as 1.0 (locked) or 0.0 (unlocked).
 
     timespec m_triggerTime{}; ///< Computed trigger timestamp aligned to the estimated WFS integration midpoint.
 
@@ -409,16 +431,8 @@ void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
 
     m_lastAtime = atime;
 
-    double deltaT_wfs_ns = m_avgSemaphorePeriod_ns;
-    if( m_wfs_fps > 0.0 )
-    {
-        deltaT_wfs_ns = 0.7 * ( 1e9 / m_wfs_fps ) + 0.3 * m_avgSemaphorePeriod_ns;
-    }
-
-    constexpr double t_wfs_read_ns    = 276.1e3;
-    constexpr double t_wfs_process_ns = 51.5e3;
-    constexpr double dt_transfer_ns   = 3e3;
-    constexpr double dt_F_ns          = 10e3;
+    const double deltaT_wfs_ns = m_avgSemaphorePeriod_ns;
+    m_wfsPeriodMeasured_ns     = deltaT_wfs_ns;
 
     if( deltaT_wfs_ns <= 0.0 )
     {
@@ -427,15 +441,16 @@ void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
     }
 
     const double raw_delay_ns =
-        0.5 * deltaT_wfs_ns - ( dt_transfer_ns + t_wfs_process_ns + dt_F_ns + t_wfs_read_ns );
+        0.5 * deltaT_wfs_ns - ( m_synchroDtTransfer_ns + m_synchroWfsProcess_ns + m_synchroDtF_ns + m_synchroWfsRead_ns );
 
-    double t_delay_ns = std::fmod(raw_delay_ns, deltaT_wfs_ns);
+    double t_delay_ns = std::fmod( raw_delay_ns, deltaT_wfs_ns );
 
     if( t_delay_ns < 0.0 )
     {
         t_delay_ns += deltaT_wfs_ns;
     }
 
+    m_delayModel_ns      = t_delay_ns;
     m_synchroDelayTarget = static_cast<float>( t_delay_ns );
 
     const double t_trigger_ns = timespecToNs( atime ) + t_delay_ns;
@@ -523,6 +538,66 @@ void mcp3208Ctrl::setupConfig()
                 "int",
                 "Delay between a synchronization semaphore and the A/D read in microseconds. Default is 0." );
 
+    config.add( "synchro.dtTransfer_ns",
+                "",
+                "synchro.dtTransfer_ns",
+                argType::Required,
+                "synchro",
+                "dtTransfer_ns",
+                false,
+                "double",
+                "Transfer-latency term in nanoseconds for synchronized delay modeling. Default is 3000." );
+
+    config.add( "synchro.wfsProcess_ns",
+                "",
+                "synchro.wfsProcess_ns",
+                argType::Required,
+                "synchro",
+                "wfsProcess_ns",
+                false,
+                "double",
+                "WFS processing-latency term in nanoseconds for synchronized delay modeling. Default is 51500." );
+
+    config.add( "synchro.dtF_ns",
+                "",
+                "synchro.dtF_ns",
+                argType::Required,
+                "synchro",
+                "dtF_ns",
+                false,
+                "double",
+                "Filter/transport-latency term in nanoseconds for synchronized delay modeling. Default is 10000." );
+
+    config.add( "synchro.wfsRead_ns",
+                "",
+                "synchro.wfsRead_ns",
+                argType::Required,
+                "synchro",
+                "wfsRead_ns",
+                false,
+                "double",
+                "WFS read-latency term in nanoseconds for synchronized delay modeling. Default is 276100." );
+
+    config.add( "synchro.delayLockAbsThreshold_ns",
+                "",
+                "synchro.delayLockAbsThreshold_ns",
+                argType::Required,
+                "synchro",
+                "delayLockAbsThreshold_ns",
+                false,
+                "double",
+                "Absolute synchronized phase-error threshold in nanoseconds for delay-lock diagnostics. Default is 50000." );
+
+    config.add( "synchro.delayLockFracThreshold",
+                "",
+                "synchro.delayLockFracThreshold",
+                argType::Required,
+                "synchro",
+                "delayLockFracThreshold",
+                false,
+                "double",
+                "Fractional synchronized phase-error threshold for delay-lock diagnostics. Default is 0.1." );
+
     config.add( "numChannels.device",
                 "",
                 "numChannels.device",
@@ -586,6 +661,12 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fpsTol, "fps.tol" );
     _config( m_synchroShmimName, "synchro.shmimName" );
     _config( m_synchroPostDelay, "synchro.postDelay" );
+    _config( m_synchroDtTransfer_ns, "synchro.dtTransfer_ns" );
+    _config( m_synchroWfsProcess_ns, "synchro.wfsProcess_ns" );
+    _config( m_synchroDtF_ns, "synchro.dtF_ns" );
+    _config( m_synchroWfsRead_ns, "synchro.wfsRead_ns" );
+    _config( m_delayLockAbsThreshold_ns, "synchro.delayLockAbsThreshold_ns" );
+    _config( m_delayLockFracThreshold, "synchro.delayLockFracThreshold" );
 
     _config( m_numChannels, "accel.numChannels" ); // making number of mcp3208 channels we read out configurable
     _config( m_numChannelsDevice, "numChannels.device" );
@@ -600,8 +681,43 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
         m_synchroPostDelay = 0;
     }
 
+    if( m_synchroDtTransfer_ns < 0.0 )
+    {
+        m_synchroDtTransfer_ns = 0.0;
+    }
+
+    if( m_synchroWfsProcess_ns < 0.0 )
+    {
+        m_synchroWfsProcess_ns = 0.0;
+    }
+
+    if( m_synchroDtF_ns < 0.0 )
+    {
+        m_synchroDtF_ns = 0.0;
+    }
+
+    if( m_synchroWfsRead_ns < 0.0 )
+    {
+        m_synchroWfsRead_ns = 0.0;
+    }
+
+    if( m_delayLockAbsThreshold_ns < 0.0 )
+    {
+        m_delayLockAbsThreshold_ns = 0.0;
+    }
+
+    if( m_delayLockFracThreshold < 0.0 )
+    {
+        m_delayLockFracThreshold = 0.0;
+    }
+
     m_synchroDelayTarget = 1e3f * m_synchroPostDelay;
     m_synchroDelay       = m_synchroDelayTarget;
+    m_delayModel_ns      = static_cast<double>( m_synchroDelayTarget );
+    m_delayApplied_ns    = static_cast<double>( m_synchroDelayTarget );
+    m_delayPhaseError_ns = 0.0;
+    m_delayLock          = 0.0;
+    m_wfsPeriodMeasured_ns = 0.0;
     m_wfs_fps            = m_fps;
 
     return 0;
@@ -631,8 +747,13 @@ int mcp3208Ctrl::appStartup()
     m_indiP_timingDiag.add( pcf::IndiElement( "avg_read_latency_ns" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_ns" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_target_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "delay_applied_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "delay_model_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "delay_phase_error_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "delay_lock" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "read_latency_error_ns" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "avg_semaphore_period_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_measured_ns" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_ns" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_ns" ) );
@@ -666,8 +787,12 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     constexpr double c_timerModeCode   = 0.0;
     constexpr double c_synchroModeCode = 1.0;
 
-    const double readLatencyError_ns = m_avgReadLatency_ns - static_cast<double>( m_synchroDelayTarget );
-    const double modeCode            = m_synchroShmimName.empty() ? c_timerModeCode : c_synchroModeCode;
+    const bool   synchroMode          = !m_synchroShmimName.empty();
+    const double readLatencyError_ns  = m_avgReadLatency_ns - static_cast<double>( m_synchroDelayTarget );
+    const double modeCode             = synchroMode ? c_synchroModeCode : c_timerModeCode;
+    const double delayAppliedDiag_ns  = synchroMode ? m_delayApplied_ns : 0.0;
+    const double delayModelDiag_ns    = synchroMode ? m_delayModel_ns : 0.0;
+    const double wfsPeriodMeasured_ns = synchroMode ? m_wfsPeriodMeasured_ns : 0.0;
 
     double triggerTime_ns = 0.0;
     if( ( m_atime.tv_sec != 0 || m_atime.tv_nsec != 0 ) &&
@@ -680,12 +805,57 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
         }
     }
 
+    double delayPhaseError_ns = 0.0;
+    double delayLock          = 0.0;
+
+    if( synchroMode && wfsPeriodMeasured_ns > 0.0 )
+    {
+        const double wfsPeriod_ns = wfsPeriodMeasured_ns;
+
+        double delayAppliedWrapped_ns = std::fmod( delayAppliedDiag_ns, wfsPeriod_ns );
+        if( delayAppliedWrapped_ns < 0.0 )
+        {
+            delayAppliedWrapped_ns += wfsPeriod_ns;
+        }
+
+        double delayModelWrapped_ns = std::fmod( delayModelDiag_ns, wfsPeriod_ns );
+        if( delayModelWrapped_ns < 0.0 )
+        {
+            delayModelWrapped_ns += wfsPeriod_ns;
+        }
+
+        delayPhaseError_ns = delayAppliedWrapped_ns - delayModelWrapped_ns;
+        if( delayPhaseError_ns <= -0.5 * wfsPeriod_ns )
+        {
+            delayPhaseError_ns += wfsPeriod_ns;
+        }
+        else if( delayPhaseError_ns > 0.5 * wfsPeriod_ns )
+        {
+            delayPhaseError_ns -= wfsPeriod_ns;
+        }
+
+        const double absDelayPhaseError_ns = std::fabs( delayPhaseError_ns );
+        if( absDelayPhaseError_ns <= m_delayLockAbsThreshold_ns &&
+            absDelayPhaseError_ns <= m_delayLockFracThreshold * wfsPeriod_ns )
+        {
+            delayLock = 1.0;
+        }
+    }
+
+    m_delayPhaseError_ns = delayPhaseError_ns;
+    m_delayLock          = delayLock;
+
     updatesIfChanged<double>( m_indiP_timingDiag,
                               { "avg_read_latency_ns",
                                 "synchro_delay_ns",
                                 "synchro_delay_target_ns",
+                                "delay_applied_ns",
+                                "delay_model_ns",
+                                "delay_phase_error_ns",
+                                "delay_lock",
                                 "read_latency_error_ns",
                                 "avg_semaphore_period_ns",
+                                "wfs_period_measured_ns",
                                 "wfs_fps",
                                 "trigger_interval_ns",
                                 "trigger_time_ns",
@@ -693,8 +863,13 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
                               { m_avgReadLatency_ns,
                                 static_cast<double>( m_synchroDelay ),
                                 static_cast<double>( m_synchroDelayTarget ),
+                                delayAppliedDiag_ns,
+                                delayModelDiag_ns,
+                                m_delayPhaseError_ns,
+                                m_delayLock,
                                 readLatencyError_ns,
                                 m_avgSemaphorePeriod_ns,
+                                wfsPeriodMeasured_ns,
                                 m_wfs_fps,
                                 m_triggerInterval_ns,
                                 triggerTime_ns,
@@ -794,12 +969,20 @@ int mcp3208Ctrl::startAcquisition()
         m_lastAtime             = timespec{};
         m_atime                 = timespec{};
         m_triggerTime           = timespec{};
+        m_wfsPeriodMeasured_ns  = 0.0;
+        m_delayModel_ns         = static_cast<double>( m_synchroDelayTarget );
+        m_delayApplied_ns       = 0.0;
+        m_delayPhaseError_ns    = 0.0;
+        m_delayLock             = 0.0;
     }
 
     m_triggerInterval_ns = 0.0;
     m_lastTriggerTime    = timespec{};
     m_firstTriggerTime   = true;
     m_firstTimerTrigger  = true;
+    m_delayApplied_ns    = 0.0;
+    m_delayPhaseError_ns = 0.0;
+    m_delayLock          = 0.0;
 
     m_time_start = std::chrono::high_resolution_clock::now();
 
@@ -941,9 +1124,14 @@ void mcp3208Ctrl::closeSynchroStream()
     m_atime                  = timespec{};
     m_lastAtime              = timespec{};
     m_avgSemaphorePeriod_ns  = 0.0;
+    m_wfsPeriodMeasured_ns   = 0.0;
     m_firstSemaphore         = true;
     m_avgReadLatency_ns      = 0.0;
     m_firstReadLatency       = true;
+    m_delayModel_ns          = static_cast<double>( m_synchroDelayTarget );
+    m_delayApplied_ns        = 0.0;
+    m_delayPhaseError_ns     = 0.0;
+    m_delayLock              = 0.0;
     m_triggerTime            = timespec{};
     m_triggerInterval_ns     = 0.0;
     m_lastTriggerTime        = timespec{};
@@ -1101,8 +1289,12 @@ void mcp3208Ctrl::delayBeforeRead()
 {
     if( m_synchroDelay > 0 )
     {
+        m_delayApplied_ns = static_cast<double>( m_synchroDelay );
         mx::sys::nanoSleep( static_cast<unsigned>( m_synchroDelay ) );
+        return;
     }
+
+    m_delayApplied_ns = 0.0;
 }
 
 int mcp3208Ctrl::checkRecordTimes()
