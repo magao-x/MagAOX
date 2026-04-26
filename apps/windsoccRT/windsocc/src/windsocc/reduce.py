@@ -293,7 +293,7 @@ def process_cube(
     cube,
     reference,
     noise,
-    quadrant,
+    quadrants,
     pupil_centers,
     pupil_mask_radius,
     start_frame,
@@ -313,34 +313,84 @@ def process_cube(
         cube_rs = cube_ds - reference
     else:
         cube_rs = cube_ds
-    cube_norm = cube_rs / noise
+    noise_mean = np.mean(noise)
+    noise_safe = noise.copy()
+    noise_safe[noise_safe == 0] = noise_mean
+    cube_norm = cube_rs / noise_safe
     cube_reduced = block_reduce(cube_norm, block_size=(group_size, 1, 1), func=np.mean)
     cube_no_spark = cube_reduced[start_frame::num_frames_skip]
 
-    cropped_frames = []
+    ul_cropped_frames = []
+    ur_cropped_frames = []
+    ll_cropped_frames = []
+    lr_cropped_frames = []
     tukey_kernel = None
-    for frame in cube_no_spark:
-        cropped = crop_quadrant(frame, quadrant, pupil_centers, pupil_mask_radius)
-        if apply_tukey_window:
-            if tukey_kernel is None:
-                tukey_kernel = _tukey_window_2d(cropped.shape, tukey_alpha)
-            # # debug: view the kernel and the windowed image
-            # plt.imshow(tukey_kernel, cmap='viridis')
-            # plt.show()
-            # plt.imshow(cropped*tukey_kernel, cmap='viridis')
-            # plt.show()
-            # exit()
-            cropped = cropped * tukey_kernel
-        cropped_frames.append(cropped)
+    for each, frame in enumerate(cube_no_spark):
+        # need to grab the total irradiance from all 4 pupils
+        quadrant_thumbnails = []
+        ul_this_frame = np.zeros((pupil_mask_radius*2, pupil_mask_radius*2))
+        ur_this_frame = np.zeros((pupil_mask_radius*2, pupil_mask_radius*2))
+        ll_this_frame = np.zeros((pupil_mask_radius*2, pupil_mask_radius*2))
+        lr_this_frame = np.zeros((pupil_mask_radius*2, pupil_mask_radius*2))
+        for q in quadrants:
+            cropped = crop_quadrant(
+                frame, q, pupil_centers, pupil_mask_radius)
+            if apply_tukey_window:
+                if tukey_kernel is None:
+                    tukey_kernel = _tukey_window_2d(cropped.shape, tukey_alpha)
+                # # debug: view the kernel and the windowed image
+                # plt.imshow(tukey_kernel, cmap='viridis')
+                # plt.show()
+                # plt.imshow(cropped*tukey_kernel, cmap='viridis')
+                # plt.show()
+                # exit()
+                cropped = cropped * tukey_kernel
+            quadrant_thumbnails.append(cropped)
+            if q == "ul":
+                assert cropped.shape == ul_this_frame.shape
+                ul_this_frame += cropped
+            elif q == "ur":
+                assert cropped.shape == ur_this_frame.shape
+                ur_this_frame += cropped
+            elif q == "ll":
+                assert cropped.shape == ll_this_frame.shape
+                ll_this_frame += cropped
+            elif q == "lr":
+                assert cropped.shape == lr_this_frame.shape
+                lr_this_frame += cropped
+            else:
+                raise ValueError(f"Invalid quadrant name {q}?")
+        # total_irradiance: np.ndarray = np.sum(quadrant_thumbnails, axis=0)
+        # total_irradiance_safe = total_irradiance.copy()
+        # total_irradiance_safe[total_irradiance_safe == 0] = np.nan
+        
+        # # # normalize all pupil thumbnails by total irradiance
+        
+        # ul_this_frame /= total_irradiance_safe
+        # ur_this_frame /= total_irradiance_safe
+        # ll_this_frame /= total_irradiance_safe
+        # lr_this_frame /= total_irradiance_safe
 
-    return np.array(cropped_frames)
+        # then append the norm frames to the main frames list
+        ul_cropped_frames.append(ul_this_frame)
+        ur_cropped_frames.append(ur_this_frame)
+        ll_cropped_frames.append(ll_this_frame)
+        lr_cropped_frames.append(lr_this_frame)
+        
+    reduced_pupil_cubes = {
+        "ul": np.nan_to_num(np.asarray(ul_cropped_frames)),
+        "ur": np.nan_to_num(np.asarray(ur_cropped_frames)),
+        "lr": np.nan_to_num(np.asarray(ll_cropped_frames)),
+        "ll": np.nan_to_num(np.asarray(lr_cropped_frames)),
+    }
+    return reduced_pupil_cubes
 
 
 def process_file(
     filepath,
     reference,
     noise,
-    quadrant,
+    quadrants,
     pupil_centers,
     pupil_mask_radius,
     start_frame,
@@ -370,7 +420,7 @@ def process_file(
         cube,
         reference,
         noise,
-        quadrant,
+        quadrants,
         pupil_centers,
         pupil_mask_radius,
         start_frame,
@@ -590,36 +640,38 @@ def process_dataset(
             dark,
             remake_ref=True,
         )
-
+    # # test no noise normalization
+    # noise = np.ones_like(reference)
     if not subtract_reference:
         logging.info(
             "[%s] SUBTRACT_REFERENCE is false: noise normalization only (no reference subtraction).",
             subdir_name,
         )
-
-    for pup in quadrants:
-        saveprocessed_to = f"{processed_dir}/{pup}"
-        os.makedirs(saveprocessed_to, exist_ok=True)
-        
-        for f in fits_files:
-            input_path = os.path.join(data_dir, f)
-            processed_cube = process_file(
-                input_path,
-                reference,
-                noise,
-                pup,
-                pupil_centers,
-                pupil_mask_radius,
-                start_frame,
-                step_frame,
-                group_size,
-                dark,
-                subtract_reference=subtract_reference,
-                apply_tukey_window=apply_tukey_window,
-                tukey_alpha=tukey_alpha,
-            )
+    # make the pupil quadrant directories
+    # now go through each of the FITS files and process sequentially
+    for f in fits_files:
+        input_path = os.path.join(data_dir, f)
+        processed_cube_dict = process_file(
+            input_path,
+            reference,
+            noise,
+            quadrants,
+            pupil_centers,
+            pupil_mask_radius,
+            start_frame,
+            step_frame,
+            group_size,
+            dark,
+            subtract_reference=subtract_reference,
+            apply_tukey_window=apply_tukey_window,
+            tukey_alpha=tukey_alpha,
+        )
+        for pup in quadrants:
+            processed_quadrant = processed_cube_dict[pup]
+            saveprocessed_to = f"{processed_dir}/{pup}"
+            os.makedirs(saveprocessed_to, exist_ok=True)
             output_path = os.path.join(saveprocessed_to, f)
-            write_fits_cube(output_path, processed_cube)
+            write_fits_cube(output_path, processed_quadrant)
     
     logging.info("[%s] Completed processing", subdir_name)
     return True
@@ -861,9 +913,9 @@ def main():
         pupil_centers, pupil_mask_radius = get_pupil_geometry(config_params) if config_params else (
             {
                 "ul": (30, 90),
-                "ur": (91, 91),
+                "ur": (90, 90),
                 "ll": (30, 30),
-                "lr": (91, 31),
+                "lr": (90, 30),
             },
             DEFAULT_PUPIL_MASK_RADIUS,
         )

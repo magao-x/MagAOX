@@ -92,6 +92,8 @@ class WindTracker:
         image_center: tuple[int, int] = (None, None),
         time_per_frame: float = 0.004,
         meters_per_pixel: float = (6.5 / 60),
+        prune_immunity_matches: int = 20,
+        prune_immunity_speed_mps: float = 15.0,
     ):
         if image_center[0] is None or image_center[1] is None:
             raise ValueError("image_center must be defined (not None)")
@@ -104,7 +106,8 @@ class WindTracker:
         self.max_direction_delta_deg = 2000.0
         self.max_theta_delta_deg = 35.0
         self.max_speed_delta_px = 2.5
-        self.prune_immunity_matches = 30
+        self.prune_immunity_matches = prune_immunity_matches
+        self.prune_immunity_speed_mps = prune_immunity_speed_mps
         self.candidate_sources = make_empty_source_dataframe()
         self.predicted_sources = make_empty_source_dataframe()
         self.vetted_sources = make_empty_source_dataframe()
@@ -752,9 +755,17 @@ class WindTracker:
                 candidate_with_strikes = self.candidate_sources.with_columns(
                         (self._int_expr("strikes").fill_null(0) + 1).alias("strikes")
                     )
+                immunity_match_threshold = (
+                    pl.when(
+                        self._numeric_expr("velocity_m_per_s").fill_null(0.0)
+                        >= self.prune_immunity_speed_mps
+                    )
+                    .then(max(1, int(self.prune_immunity_matches // 2)))
+                    .otherwise(int(self.prune_immunity_matches))
+                )
                 rejected_rows = candidate_with_strikes.filter(
                     (self._int_expr("strikes").fill_null(0) > self.max_missed_frames)
-                    & (self._int_expr("matches").fill_null(0) < self.prune_immunity_matches)
+                    & (self._int_expr("matches").fill_null(0) < immunity_match_threshold)
                 )
                 self._append_terminal_rejected_sources(
                     rejected_rows,
@@ -764,7 +775,7 @@ class WindTracker:
                 self.candidate_sources = (
                     candidate_with_strikes.filter(
                         (self._int_expr("strikes").fill_null(0) <= self.max_missed_frames)
-                        | (self._int_expr("matches").fill_null(0) >= self.prune_immunity_matches)
+                        | (self._int_expr("matches").fill_null(0) >= immunity_match_threshold)
                     )
                     .select(SOURCE_COLUMNS)
                 # select SOURCE_COLUMNS is likely redundant, but it's cheap
@@ -791,6 +802,7 @@ class WindTracker:
 
         if predicted_subset.is_empty() or self.candidate_sources.is_empty():
             # process is still spooling up...
+            # ... or we're in the later frames of the CC response cube
             self.candidate_sources = sources_this_frame.select(SOURCE_COLUMNS)
             self._append_history_sources(history_rows)
             return self.candidate_sources
@@ -850,7 +862,8 @@ class WindTracker:
         # print(f"Distance matrix: {distance}")
         # print(f"Number of unphysically fast candidates: {np.sum(unphysically_fast_candidates)}")
         # exit()
-
+        # linear_sum_assignment works even if the cost matrix is rectangular
+        # i.e., there is a different number of predictions and detections
         row_ind, col_ind = linear_sum_assignment(distance)
         assignment_distance = raw_distance[row_ind, col_ind]
         accepted = assignment_distance < 1.0
@@ -877,6 +890,7 @@ class WindTracker:
             # get the row index of candidate_sources using the track_id
             active_idx = self._find_row_index_by_track_id(self.candidate_sources, predicted_track_id)
             if active_idx is None:
+                # There is no evidence (yet) that this can actually happen
                 rejected_row = dict(sources_this_frame.row(source_idx, named=True))
                 rejected_row["track_id"] = predicted_track_id
                 rejected_row["reject_reason"] = "no_active_track"
@@ -898,7 +912,9 @@ class WindTracker:
             # prior_matches = self.get_track_matches(predicted_track_id)
             # return the row as a dictionary (named=True triggers dict not tuple)
             updated_row = dict(sources_this_frame.row(source_idx, named=True))
-
+            
+            # if a source fails during gating, we do not update it
+            # this causes a strike to incur below
             valid_match, reject_reason, inferred_origin = self._match_passes_gating(active_row, updated_row)
             if not valid_match:
                 rejected_row = dict(updated_row)
@@ -909,7 +925,8 @@ class WindTracker:
 
             updated_row["track_id"] = predicted_track_id
             updated_row["matches"] = self.increment_track_matches(predicted_track_id)
-            updated_row["strikes"] = 0
+            # updated_row["strikes"] = 0
+            updated_row["strikes"] = self._as_int(active_row["strikes"])
             updated_row["inferred_origin"] = inferred_origin
             self.candidate_sources = self._replace_row(
                 self.candidate_sources,
@@ -1056,9 +1073,17 @@ class WindTracker:
         # is not getting cleared out correctly, and thus also predicted_sources.
         # Indeed, immune tracks are just left alone and the Hungarian algo is then
         # just always looking for a match even in much later frames.
+        immunity_match_threshold = (
+            pl.when(
+                self._numeric_expr("velocity_m_per_s").fill_null(0.0)
+                >= self.prune_immunity_speed_mps
+            )
+            .then(max(1, int(self.prune_immunity_matches // 2)))
+            .otherwise(int(self.prune_immunity_matches))
+        )
         rejected_rows = self.candidate_sources.filter(
             (self._int_expr("strikes").fill_null(0) > self.max_missed_frames)
-            & (self._int_expr("matches").fill_null(0) < self.prune_immunity_matches)
+            & (self._int_expr("matches").fill_null(0) < immunity_match_threshold)
         )
         self._append_terminal_rejected_sources(
             rejected_rows,
@@ -1073,7 +1098,7 @@ class WindTracker:
         self.candidate_sources = (
             self.candidate_sources.filter(
                 (self._int_expr("strikes").fill_null(0) <= self.max_missed_frames)
-                # | (self._int_expr("matches").fill_null(0) >= self.prune_immunity_matches)
+                | (self._int_expr("matches").fill_null(0) >= immunity_match_threshold)
             )
             .select(SOURCE_COLUMNS)
         )

@@ -96,7 +96,7 @@ def create_reference(data_dir, nstack, output_ref, output_noise, dark_img=None, 
     batch_means = np.array(batch_means)
     batch_noises = np.array(batch_noises)
     ref = np.mean(batch_means, axis=0)
-    noise_ref = np.mean(batch_noises, axis=0) + 1 # just in case of zeros
+    noise_ref = np.mean(batch_noises, axis=0)
 
     # Save the reference image to the specified output file.
     fits.writeto(output_ref, ref, overwrite=True)

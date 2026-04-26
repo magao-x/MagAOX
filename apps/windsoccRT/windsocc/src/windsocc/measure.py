@@ -619,6 +619,13 @@ def process_mf_response_cubes(
     else:
         logging.info("Using GROUP_SIZE from config: %s", frame_binning)
     time_per_frame = float(frame_binning) / float(loop_speed_hz)
+    model_min_matches = int(config_params.get("MODEL_MIN_MATCHES", 10))
+    tracker_prune_immunity_matches = int(
+        config_params.get("PRUNE_IMMUNITY_MATCHES", 20)
+    )
+    tracker_prune_immunity_speed_mps = float(
+        config_params.get("PRUNE_IMMUNITY_SPEED_MPS", 15.0)
+    )
 
     # Feed the cubes into sep to collect the sources (high-pass / unsharp cubes for detection)
     for cube_name, cube_path, og_path, og_fname in zip(
@@ -688,6 +695,9 @@ def process_mf_response_cubes(
             inner_radius,
             outer_radius,
             time_per_frame,
+            min_track_matches=model_min_matches,
+            tracker_prune_immunity_matches=tracker_prune_immunity_matches,
+            tracker_prune_immunity_speed_mps=tracker_prune_immunity_speed_mps,
         )
         cube_stem = os.path.splitext(os.path.basename(cube_path))[0]
         mask_save_path = os.path.join(roi_masks_dir, f"{cube_stem}_masking.fits")

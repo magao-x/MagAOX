@@ -176,7 +176,7 @@ def _keep_track_ids_by_model(
     time_per_frame: float,
     min_matches: int = 10,
     min_detections: int = 10,
-    velocity_interest = 5.0, #m/s
+    velocity_interest = 15.0, #m/s
     origin_tol_px: float = 10.0,
     rmse_tol_px: float = 10.0,
     outward_tol_px: float = 0.0,
@@ -472,6 +472,8 @@ def process_single_cc_cube(
     min_track_detections: int = 10,
     track_direction_scatter_tol_deg: float = 20.0,
     track_velocity_scatter_tol_mps: float = 2.0,
+    tracker_prune_immunity_matches: int = 20,
+    tracker_prune_immunity_speed_mps: float = 15.0,
     ) -> tuple[pl.DataFrame, pl.DataFrame, np.ndarray, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """
     - Initialize the wind tracker object
@@ -493,6 +495,8 @@ def process_single_cc_cube(
         max_distance=10.0,
         time_per_frame=time_per_frame,
         meters_per_pixel=meters_per_pixel,
+        prune_immunity_matches=tracker_prune_immunity_matches,
+        prune_immunity_speed_mps=tracker_prune_immunity_speed_mps,
     )
     base_tripwire_mask = make_annular_mask(cc_cube[0].shape, inner_bound, outer_bound).astype(np.float32)
     yy, xx = np.ogrid[:cc_cube[0].shape[0], :cc_cube[0].shape[1]]

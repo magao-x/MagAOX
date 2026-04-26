@@ -59,7 +59,7 @@ def get_square_thumbnail_from_pupil(maskedpupilimage):
 
 def crop_quadrant(image2crop, quadrant_pupil, pupil_centers=None, pupil_mask_radius=DEFAULT_PUPIL_MASK_RADIUS):
     framesize = image2crop.shape
-    quadrant_key = quadrant_pupil.lower()
+    quadrant_key: str = quadrant_pupil.lower()
     centers = pupil_centers or DEFAULT_PUPIL_CENTERS
     if quadrant_key not in centers:
         raise ValueError(f"Unknown pupil quadrant: {quadrant_pupil}")
