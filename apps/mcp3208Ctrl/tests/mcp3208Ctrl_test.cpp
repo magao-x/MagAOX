@@ -322,7 +322,7 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     app.m_synchroDelayTarget    = 17000.0f;
     app.m_avgSemaphorePeriod_ns = 500000.0;
     app.m_wfs_fps               = 1500.0;
-    app.m_trigger               = 600000.0f;
+    app.m_triggerInterval_ns    = 600000.0;
     app.m_atime                 = timespec{ 12, 3000000L };
     app.m_triggerTime           = timespec{ 12, 3456789L };
 
@@ -351,8 +351,8 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
 
     app.setupTimingDiagnosticsProperty();
     app.m_synchroShmimName = "camwfs_sync";
-    app.m_atime            = timespec{ 1, 2 };
-    app.m_trigger          = 123456.0f;
+    app.m_atime              = timespec{ 1, 2 };
+    app.m_triggerInterval_ns = 123456.0;
     app.updateTimingDiagnosticsIndi();
 
     REQUIRE( app.m_indiP_timingDiag["mode_code"].get<double>() == Approx( 1.0 ) );
@@ -360,7 +360,7 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
     REQUIRE( app.m_indiP_timingDiag["trigger_time_ns"].get<double>() == Approx( 0.0 ) );
 
     app.m_synchroShmimName.clear();
-    app.m_trigger = 456789.0f;
+    app.m_triggerInterval_ns = 456789.0;
     app.updateTimingDiagnosticsIndi();
 
     REQUIRE( app.m_indiP_timingDiag["mode_code"].get<double>() == Approx( 0.0 ) );
@@ -400,6 +400,9 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming uses EMA and hybrid WFS period", "[m
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( 0.0 ) );
     REQUIRE( app.m_lastAtime.tv_sec == firstArrival.tv_sec );
     REQUIRE( app.m_lastAtime.tv_nsec == firstArrival.tv_nsec );
+    REQUIRE( app.m_triggerInterval_ns == Approx( 0.0 ) );
+
+    const double firstTrigger_ns = mcp3208Ctrl::timespecToNs( app.m_triggerTime );
 
     app.updateTriggerTiming( secondArrival );
 
@@ -408,11 +411,13 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming uses EMA and hybrid WFS period", "[m
     const double rawDelay_ns          = 0.5 * expectedDeltaT_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
     const double expectedDelay_ns     = wrapDelay( rawDelay_ns, expectedDeltaT_ns );
     const double expectedTrigger_ns   = mcp3208Ctrl::timespecToNs( secondArrival ) + expectedDelay_ns;
+    const double expectedInterval_ns  = expectedTrigger_ns - firstTrigger_ns;
     const double measuredTrigger_ns   = mcp3208Ctrl::timespecToNs( app.m_triggerTime );
     const double measuredDelay_ns     = measuredTrigger_ns - mcp3208Ctrl::timespecToNs( secondArrival );
 
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( expectedAvg_ns ) );
     REQUIRE( measuredTrigger_ns == Approx( expectedTrigger_ns ) );
+    REQUIRE( app.m_triggerInterval_ns == Approx( expectedInterval_ns ) );
     REQUIRE( measuredDelay_ns >= 0.0 );
     REQUIRE( measuredDelay_ns < expectedDeltaT_ns );
 }
@@ -483,9 +488,10 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming guards non-positive period", "[mcp32
 {
     mcp3208Ctrl_test app;
 
-    app.m_triggerTime    = timespec{ 7, 12345L };
-    app.m_firstSemaphore = true;
-    app.m_wfs_fps        = 0.0;
+    app.m_triggerTime       = timespec{ 7, 12345L };
+    app.m_triggerInterval_ns = 42.0;
+    app.m_firstSemaphore    = true;
+    app.m_wfs_fps           = 0.0;
 
     const timespec nextArrival{ 7, 54321L };
     app.updateTriggerTiming( nextArrival );
@@ -496,6 +502,7 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming guards non-positive period", "[mcp32
     REQUIRE( app.m_lastAtime.tv_nsec == nextArrival.tv_nsec );
     REQUIRE( app.m_triggerTime.tv_sec == 7 );
     REQUIRE( app.m_triggerTime.tv_nsec == 12345L );
+    REQUIRE( app.m_triggerInterval_ns == Approx( 0.0 ) );
 }
 
 /// Verify timer-driven acquisition configures the published frame geometry.
@@ -535,6 +542,31 @@ TEST_CASE( "mcp3208Ctrl timer mode reads configured channels", "[mcp3208Ctrl]" )
     REQUIRE( app.acquireAndCheckValid() == 0 );
     REQUIRE( app.m_values == std::vector<uint16_t>( { 11, 22, 33 } ) );
     REQUIRE( stubState().m_readOrder == std::vector<int>( { 0, 1, 2 } ) );
+}
+
+/// Verify timer-mode trigger interval diagnostics initialize then report measured intervals.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl timer mode trigger interval initializes then measures", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    resetStubState();
+    stubState().m_channelValues = { 17 };
+
+    app.m_numChannels = 1;
+    app.m_values.assign( 1, 0 );
+    app.m_gain       = 0.0f;
+    app.m_trigger    = 1000.0f;
+
+    app.m_time_start = std::chrono::high_resolution_clock::now() - std::chrono::milliseconds( 2 );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+    REQUIRE( app.m_triggerInterval_ns == Approx( 0.0 ) );
+
+    app.m_time_start = std::chrono::high_resolution_clock::now() - std::chrono::milliseconds( 4 );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+    REQUIRE( app.m_triggerInterval_ns > 1000000.0 );
 }
 
 /// Verify the current MCP3208 values are copied into the output image buffer.
@@ -767,6 +799,10 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     app.m_avgReadLatency_ns      = 84.0;
     app.m_firstReadLatency       = false;
     app.m_triggerTime            = timespec{ 3, 3 };
+    app.m_triggerInterval_ns     = 21.0;
+    app.m_lastTriggerTime        = timespec{ 4, 4 };
+    app.m_firstTriggerTime       = false;
+    app.m_firstTimerTrigger      = false;
 
     REQUIRE( app.reconfig() == 0 );
     REQUIRE( app.m_synchroSemaphore == nullptr );
@@ -783,6 +819,11 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     REQUIRE( app.m_firstReadLatency == true );
     REQUIRE( app.m_triggerTime.tv_sec == 0 );
     REQUIRE( app.m_triggerTime.tv_nsec == 0 );
+    REQUIRE( app.m_triggerInterval_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_lastTriggerTime.tv_sec == 0 );
+    REQUIRE( app.m_lastTriggerTime.tv_nsec == 0 );
+    REQUIRE( app.m_firstTriggerTime == true );
+    REQUIRE( app.m_firstTimerTrigger == true );
 }
 
 } // namespace mcp3208CtrlTest

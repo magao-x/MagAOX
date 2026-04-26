@@ -145,6 +145,14 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     timespec m_triggerTime{}; ///< Computed trigger timestamp aligned to the estimated WFS integration midpoint.
 
+    double m_triggerInterval_ns{ 0.0 }; ///< Measured interval between consecutive trigger events in nanoseconds.
+
+    timespec m_lastTriggerTime{}; ///< Previous trigger timestamp used to compute the synchronized trigger interval.
+
+    bool m_firstTriggerTime{ true }; ///< Tracks first-trigger initialization for synchronized trigger-interval measurement.
+
+    bool m_firstTimerTrigger{ true }; ///< Tracks first-trigger initialization for timer-mode trigger-interval measurement.
+
     ///@}
 
     /** \name Synchronization Helpers
@@ -226,7 +234,9 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     void updateTriggerTiming( const timespec &atime /**< [in] the semaphore-arrival timestamp */ );
 
     /// Publish acquisition timing diagnostics to the INDI read-only property.
-    /** The exported `trigger_time_ns` value is relative to the latest semaphore arrival (`m_atime`).
+    /** The exported `trigger_interval_ns` value reports measured current-to-previous trigger interval.
+     *
+     * The exported `trigger_time_ns` value is relative to the latest semaphore arrival (`m_atime`).
      */
     void updateTimingDiagnosticsIndi();
 
@@ -412,6 +422,7 @@ void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
 
     if( deltaT_wfs_ns <= 0.0 )
     {
+        m_triggerInterval_ns = 0.0;
         return;
     }
 
@@ -427,6 +438,22 @@ void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
 
     const double t_trigger_ns = timespecToNs( atime ) + t_delay_ns;
     m_triggerTime             = nsToTimespec( t_trigger_ns );
+
+    if( m_firstTriggerTime )
+    {
+        m_triggerInterval_ns = 0.0;
+        m_firstTriggerTime   = false;
+    }
+    else
+    {
+        m_triggerInterval_ns = timespecToNs( m_triggerTime ) - timespecToNs( m_lastTriggerTime );
+        if( m_triggerInterval_ns < 0.0 )
+        {
+            m_triggerInterval_ns = 0.0;
+        }
+    }
+
+    m_lastTriggerTime = m_triggerTime;
 }
 
 void mcp3208Ctrl::setupConfig()
@@ -667,7 +694,7 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
                                 readLatencyError_ns,
                                 m_avgSemaphorePeriod_ns,
                                 m_wfs_fps,
-                                static_cast<double>( m_trigger ),
+                                m_triggerInterval_ns,
                                 triggerTime_ns,
                                 modeCode } );
 }
@@ -766,6 +793,11 @@ int mcp3208Ctrl::startAcquisition()
         m_atime                 = timespec{};
         m_triggerTime           = timespec{};
     }
+
+    m_triggerInterval_ns = 0.0;
+    m_lastTriggerTime    = timespec{};
+    m_firstTriggerTime   = true;
+    m_firstTimerTrigger  = true;
 
     m_time_start = std::chrono::high_resolution_clock::now();
 
@@ -911,6 +943,10 @@ void mcp3208Ctrl::closeSynchroStream()
     m_avgReadLatency_ns      = 0.0;
     m_firstReadLatency       = true;
     m_triggerTime            = timespec{};
+    m_triggerInterval_ns     = 0.0;
+    m_lastTriggerTime        = timespec{};
+    m_firstTriggerTime       = true;
+    m_firstTimerTrigger      = true;
 }
 
 int mcp3208Ctrl::acquireTimerAndCheckValid()
@@ -924,6 +960,16 @@ int mcp3208Ctrl::acquireTimerAndCheckValid()
         // Read every 500 microseconds
         if( elapsed.count() >= m_trigger )
         {
+            if( m_firstTimerTrigger )
+            {
+                m_triggerInterval_ns = 0.0;
+                m_firstTimerTrigger  = false;
+            }
+            else
+            {
+                m_triggerInterval_ns = static_cast<double>( elapsed.count() );
+            }
+
             m_time_start = now; // Reset start time
 
             for( int i = 0; i < m_numChannels; ++i )
