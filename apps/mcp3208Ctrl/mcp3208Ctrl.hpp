@@ -278,9 +278,9 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     void updateTriggerTiming( const timespec &atime /**< [in] the semaphore-arrival timestamp */ );
 
     /// Publish acquisition timing diagnostics to the INDI read-only property.
-    /** The exported `trigger_interval_ns` value reports measured current-to-previous trigger interval.
+    /** The exported `trigger_interval_us` value reports measured current-to-previous trigger interval.
      *
-     * The exported `trigger_time_ns` value is relative to the latest semaphore arrival (`m_atime`).
+     * The exported `trigger_time_us` value is relative to the latest semaphore arrival (`m_atime`).
      */
     void updateTimingDiagnosticsIndi();
 
@@ -792,26 +792,26 @@ int mcp3208Ctrl::appStartup()
     m_indiP_numChannels["target"].setValue( m_numChannels );
 
     CREATE_REG_INDI_RO_NUMBER( m_indiP_timingDiag, "timingDiag", "Timing Diagnostics", "Diagnostics" );
-    m_indiP_timingDiag.add( pcf::IndiElement( "avg_read_latency_ns" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_ns" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_target_ns" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "delay_applied_ns" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "delay_model_ns" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "delay_phase_error_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "avg_read_latency_us" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_us" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_target_us" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "delay_applied_us" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "delay_model_us" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "delay_phase_error_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "delay_lock" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "delay_budget_ns" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "non_delay_service_ns" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "avg_non_delay_service_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "delay_budget_us" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "non_delay_service_us" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "avg_non_delay_service_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "delay_capped" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "read_latency_error_ns" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "avg_semaphore_period_ns" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_measured_ns" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_inst_ns" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "read_latency_error_us" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "avg_semaphore_period_us" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_measured_us" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_inst_us" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps_producer" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_ns" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_us" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "mode_code" ) );
 
     if( m_fpsDevice != "" )
@@ -841,6 +841,7 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
 {
     constexpr double c_timerModeCode   = 0.0;
     constexpr double c_synchroModeCode = 1.0;
+    constexpr double c_nsToUs          = 1e-3;
 
     const bool   synchroMode          = !m_synchroShmimName.empty();
     const double readLatencyError_ns  = m_avgReadLatency_ns - static_cast<double>( m_synchroDelayTarget );
@@ -912,48 +913,65 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     m_delayPhaseError_ns = delayPhaseError_ns;
     m_delayLock          = delayLock;
 
+    const double avgReadLatency_us      = m_avgReadLatency_ns * c_nsToUs;
+    const double synchroDelay_us        = static_cast<double>( m_synchroDelay ) * c_nsToUs;
+    const double synchroDelayTarget_us  = static_cast<double>( m_synchroDelayTarget ) * c_nsToUs;
+    const double delayAppliedDiag_us    = delayAppliedDiag_ns * c_nsToUs;
+    const double delayModelDiag_us      = delayModelDiag_ns * c_nsToUs;
+    const double delayPhaseErrorDiag_us = m_delayPhaseError_ns * c_nsToUs;
+    const double delayBudgetDiag_us     = delayBudgetDiag_ns * c_nsToUs;
+    const double nonDelayService_us     = nonDelayService_ns * c_nsToUs;
+    const double avgNonDelayService_us  = avgNonDelayService_ns * c_nsToUs;
+    const double readLatencyError_us    = readLatencyError_ns * c_nsToUs;
+    const double avgSemaphorePeriod_us  = m_avgSemaphorePeriod_ns * c_nsToUs;
+    const double wfsPeriodMeasured_us   = wfsPeriodMeasured_ns * c_nsToUs;
+    const double producerPeriodInst_us  = producerPeriodInstDiag_ns * c_nsToUs;
+    const double producerPeriod_us      = producerPeriodDiag_ns * c_nsToUs;
+    const double triggerInterval_us     = m_triggerInterval_ns * c_nsToUs;
+    const double triggerTime_us         = triggerTime_ns * c_nsToUs;
+
     updatesIfChanged<double>( m_indiP_timingDiag,
-                              { "avg_read_latency_ns",
-                                "synchro_delay_ns",
-                                "synchro_delay_target_ns",
-                                "delay_applied_ns",
-                                "delay_model_ns",
-                                "delay_phase_error_ns",
+                              { "avg_read_latency_us",
+                                "synchro_delay_us",
+                                "synchro_delay_target_us",
+                                "delay_applied_us",
+                                "delay_model_us",
+                                "delay_phase_error_us",
                                 "delay_lock",
-                                "delay_budget_ns",
-                                "non_delay_service_ns",
-                                "avg_non_delay_service_ns",
+                                "delay_budget_us",
+                                "non_delay_service_us",
+                                "avg_non_delay_service_us",
                                 "delay_capped",
-                                "read_latency_error_ns",
-                                "avg_semaphore_period_ns",
-                                "wfs_period_measured_ns",
-                                "wfs_period_producer_inst_ns",
-                                "wfs_period_producer_ns",
+                                "read_latency_error_us",
+                                "avg_semaphore_period_us",
+                                "wfs_period_measured_us",
+                                "wfs_period_producer_inst_us",
+                                "wfs_period_producer_us",
                                 "wfs_fps_producer",
                                 "wfs_fps",
-                                "trigger_interval_ns",
-                                "trigger_time_ns",
+                                "trigger_interval_us",
+                                "trigger_time_us",
                                 "mode_code" },
-                              { m_avgReadLatency_ns,
-                                static_cast<double>( m_synchroDelay ),
-                                static_cast<double>( m_synchroDelayTarget ),
-                                delayAppliedDiag_ns,
-                                delayModelDiag_ns,
-                                m_delayPhaseError_ns,
+                              { avgReadLatency_us,
+                                synchroDelay_us,
+                                synchroDelayTarget_us,
+                                delayAppliedDiag_us,
+                                delayModelDiag_us,
+                                delayPhaseErrorDiag_us,
                                 m_delayLock,
-                                delayBudgetDiag_ns,
-                                nonDelayService_ns,
-                                avgNonDelayService_ns,
+                                delayBudgetDiag_us,
+                                nonDelayService_us,
+                                avgNonDelayService_us,
                                 delayCappedDiag,
-                                readLatencyError_ns,
-                                m_avgSemaphorePeriod_ns,
-                                wfsPeriodMeasured_ns,
-                                producerPeriodInstDiag_ns,
-                                producerPeriodDiag_ns,
+                                readLatencyError_us,
+                                avgSemaphorePeriod_us,
+                                wfsPeriodMeasured_us,
+                                producerPeriodInst_us,
+                                producerPeriod_us,
                                 producerFpsDiag,
                                 m_wfs_fps,
-                                m_triggerInterval_ns,
-                                triggerTime_ns,
+                                triggerInterval_us,
+                                triggerTime_us,
                                 modeCode } );
 }
 

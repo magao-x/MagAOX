@@ -181,26 +181,26 @@ class mcp3208Ctrl_test : public mcp3208Ctrl
     {
         m_indiP_timingDiag = pcf::IndiProperty( pcf::IndiProperty::Number );
         m_indiP_timingDiag.setName( "timingDiag" );
-        m_indiP_timingDiag.add( pcf::IndiElement( "avg_read_latency_ns" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_ns" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_target_ns" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "delay_applied_ns" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "delay_model_ns" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "delay_phase_error_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "avg_read_latency_us" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_us" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_target_us" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "delay_applied_us" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "delay_model_us" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "delay_phase_error_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "delay_lock" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "delay_budget_ns" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "non_delay_service_ns" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "avg_non_delay_service_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "delay_budget_us" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "non_delay_service_us" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "avg_non_delay_service_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "delay_capped" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "read_latency_error_ns" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "avg_semaphore_period_ns" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_measured_ns" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_inst_ns" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "read_latency_error_us" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "avg_semaphore_period_us" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_measured_us" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_inst_us" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps_producer" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_ns" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_us" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "mode_code" ) );
     }
 };
@@ -377,24 +377,24 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
 
     app.updateTimingDiagnosticsIndi();
 
-    REQUIRE( app.m_indiP_timingDiag["avg_read_latency_ns"].get<double>() == Approx( 125000.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["synchro_delay_ns"].get<double>() == Approx( 24000.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["synchro_delay_target_ns"].get<double>() == Approx( 17000.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["delay_applied_ns"].get<double>() == Approx( 24000.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["delay_model_ns"].get<double>() == Approx( 17000.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_ns"].get<double>() == Approx( 7000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["avg_read_latency_us"].get<double>() == Approx( 125.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["synchro_delay_us"].get<double>() == Approx( 24.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["synchro_delay_target_us"].get<double>() == Approx( 17.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_applied_us"].get<double>() == Approx( 24.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_model_us"].get<double>() == Approx( 17.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_us"].get<double>() == Approx( 7.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 1.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["read_latency_error_ns"].get<double>() == Approx( 108000.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["avg_semaphore_period_ns"].get<double>() == Approx( 500000.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["wfs_period_measured_ns"].get<double>() == Approx( 500000.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_inst_ns"].get<double>() == Approx( 510000.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_ns"].get<double>() == Approx( 500000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["read_latency_error_us"].get<double>() == Approx( 108.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["avg_semaphore_period_us"].get<double>() == Approx( 500.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["wfs_period_measured_us"].get<double>() == Approx( 500.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_inst_us"].get<double>() == Approx( 510.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_us"].get<double>() == Approx( 500.0 ) );
     REQUIRE( app.m_indiP_timingDiag["wfs_fps_producer"].get<double>() == Approx( 2000.0 ) );
     REQUIRE( app.m_indiP_timingDiag["wfs_fps"].get<double>() == Approx( 1500.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["trigger_interval_ns"].get<double>() == Approx( 600000.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["trigger_time_ns"].get<double>() ==
-             Approx( mcp3208Ctrl::timespecToNs( timespec{ 12, 3456789L } ) -
-                     mcp3208Ctrl::timespecToNs( timespec{ 12, 3000000L } ) ) );
+    REQUIRE( app.m_indiP_timingDiag["trigger_interval_us"].get<double>() == Approx( 600.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["trigger_time_us"].get<double>() ==
+             Approx( 1e-3 * ( mcp3208Ctrl::timespecToNs( timespec{ 12, 3456789L } ) -
+                              mcp3208Ctrl::timespecToNs( timespec{ 12, 3000000L } ) ) ) );
     REQUIRE( app.m_indiP_timingDiag["mode_code"].get<double>() == Approx( 1.0 ) );
 }
 
@@ -413,11 +413,11 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
     app.updateTimingDiagnosticsIndi();
 
     REQUIRE( app.m_indiP_timingDiag["mode_code"].get<double>() == Approx( 1.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["trigger_interval_ns"].get<double>() == Approx( 123456.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["trigger_time_ns"].get<double>() == Approx( 0.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_ns"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["trigger_interval_us"].get<double>() == Approx( 123.456 ) );
+    REQUIRE( app.m_indiP_timingDiag["trigger_time_us"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_us"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 0.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_ns"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_us"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["wfs_fps_producer"].get<double>() == Approx( 0.0 ) );
 
     app.m_synchroShmimName.clear();
@@ -425,11 +425,11 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
     app.updateTimingDiagnosticsIndi();
 
     REQUIRE( app.m_indiP_timingDiag["mode_code"].get<double>() == Approx( 0.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["trigger_interval_ns"].get<double>() == Approx( 456789.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["trigger_time_ns"].get<double>() == Approx( 0.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_ns"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["trigger_interval_us"].get<double>() == Approx( 456.789 ) );
+    REQUIRE( app.m_indiP_timingDiag["trigger_time_us"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_us"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 0.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_ns"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_us"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["wfs_fps_producer"].get<double>() == Approx( 0.0 ) );
 }
 
@@ -451,13 +451,13 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics compute wrapped phase error and lock 
 
     app.updateTimingDiagnosticsIndi();
 
-    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_ns"].get<double>() == Approx( 150.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_us"].get<double>() == Approx( 0.15 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 0.0 ) );
 
     app.m_delayLockFracThreshold = 0.2;
     app.updateTimingDiagnosticsIndi();
 
-    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_ns"].get<double>() == Approx( 150.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["delay_phase_error_us"].get<double>() == Approx( 0.15 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 1.0 ) );
 }
 
