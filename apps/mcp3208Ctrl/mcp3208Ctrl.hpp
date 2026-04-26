@@ -226,6 +226,8 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     void updateTriggerTiming( const timespec &atime /**< [in] the semaphore-arrival timestamp */ );
 
     /// Publish acquisition timing diagnostics to the INDI read-only property.
+    /** The exported `trigger_time_ns` value is relative to the latest semaphore arrival (`m_atime`).
+     */
     void updateTimingDiagnosticsIndi();
 
     ///@}
@@ -635,8 +637,18 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     constexpr double c_synchroModeCode = 1.0;
 
     const double readLatencyError_ns = m_avgReadLatency_ns - static_cast<double>( m_synchroDelayTarget );
-    const double triggerTime_ns      = timespecToNs( m_triggerTime );
     const double modeCode            = m_synchroShmimName.empty() ? c_timerModeCode : c_synchroModeCode;
+
+    double triggerTime_ns = 0.0;
+    if( ( m_atime.tv_sec != 0 || m_atime.tv_nsec != 0 ) &&
+        ( m_triggerTime.tv_sec != 0 || m_triggerTime.tv_nsec != 0 ) )
+    {
+        triggerTime_ns = timespecToNs( m_triggerTime ) - timespecToNs( m_atime );
+        if( triggerTime_ns < 0.0 )
+        {
+            triggerTime_ns = 0.0;
+        }
+    }
 
     updatesIfChanged<double>( m_indiP_timingDiag,
                               { "avg_read_latency_ns",

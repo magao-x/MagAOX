@@ -321,6 +321,7 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     app.m_avgSemaphorePeriod_ns = 500000.0;
     app.m_wfs_fps               = 1500.0;
     app.m_trigger               = 600000.0f;
+    app.m_atime                 = timespec{ 12, 3000000L };
     app.m_triggerTime           = timespec{ 12, 3456789L };
 
     app.updateTimingDiagnosticsIndi();
@@ -333,7 +334,8 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     REQUIRE( app.m_indiP_timingDiag["wfs_fps"].get<double>() == Approx( 1500.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_interval_ns"].get<double>() == Approx( 600000.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_time_ns"].get<double>() ==
-             Approx( mcp3208Ctrl::timespecToNs( timespec{ 12, 3456789L } ) ) );
+             Approx( mcp3208Ctrl::timespecToNs( timespec{ 12, 3456789L } ) -
+                     mcp3208Ctrl::timespecToNs( timespec{ 12, 3000000L } ) ) );
     REQUIRE( app.m_indiP_timingDiag["mode_code"].get<double>() == Approx( 1.0 ) );
 }
 
@@ -347,11 +349,13 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
 
     app.setupTimingDiagnosticsProperty();
     app.m_synchroShmimName = "camwfs_sync";
+    app.m_atime            = timespec{ 1, 2 };
     app.m_trigger          = 123456.0f;
     app.updateTimingDiagnosticsIndi();
 
     REQUIRE( app.m_indiP_timingDiag["mode_code"].get<double>() == Approx( 1.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_interval_ns"].get<double>() == Approx( 123456.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["trigger_time_ns"].get<double>() == Approx( 0.0 ) );
 
     app.m_synchroShmimName.clear();
     app.m_trigger = 456789.0f;
@@ -359,6 +363,7 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
 
     REQUIRE( app.m_indiP_timingDiag["mode_code"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_interval_ns"].get<double>() == Approx( 456789.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["trigger_time_ns"].get<double>() == Approx( 0.0 ) );
 }
 
 /// Verify nanosecond and timespec conversions preserve normalized values.
