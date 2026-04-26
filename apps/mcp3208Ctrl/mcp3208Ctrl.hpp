@@ -141,7 +141,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     bool m_firstReadLatency{ true }; ///< Tracks first-arrival initialization for semaphore-to-read latency estimation.
 
-    double m_wfs_fps{ 0.0 }; ///< Latest WFS frame rate estimate used to predict WFS integration cadence.
+    double m_wfs_fps{ 0.0 }; ///< WFS frame rate estimate used for timing prediction; initialized from configured fps before callbacks.
 
     timespec m_triggerTime{}; ///< Computed trigger timestamp aligned to the estimated WFS integration midpoint.
 
@@ -573,6 +573,7 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
 
     m_synchroDelayTarget = 1e3f * m_synchroPostDelay;
     m_synchroDelay       = m_synchroDelayTarget;
+    m_wfs_fps            = m_fps;
 
     return 0;
 }

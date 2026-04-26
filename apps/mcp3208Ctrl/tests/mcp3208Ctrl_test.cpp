@@ -245,6 +245,7 @@ TEST_CASE( "mcp3208Ctrl configuration defaults load synchronized settings", "[mc
     REQUIRE( app.m_synchroPostDelay == 0 );
     REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
+    REQUIRE( app.m_wfs_fps == Approx( static_cast<double>( app.m_fps ) ) );
 }
 
 /// Verify synchronized-acquisition overrides load from configuration.
@@ -269,6 +270,7 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
     REQUIRE( app.m_numChannels == 3 );
     REQUIRE( app.m_synchroDelayTarget == Approx( 17000.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 17000.0f ) );
+    REQUIRE( app.m_wfs_fps == Approx( static_cast<double>( app.m_fps ) ) );
 }
 
 /// Verify the user fps callback still updates cadence metadata.
