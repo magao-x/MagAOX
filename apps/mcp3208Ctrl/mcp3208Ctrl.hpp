@@ -112,7 +112,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     float m_gain{ .1 };                    ///< The simple integrator gain used for timer and synchro delay control.
     float nano_sec_target{ 1e9f / m_fps }; ///< The timer-mode target interval in nanoseconds.
     float m_synchroDelay{ 0 };             ///< The controlled pre-read delay in synchronized mode, in nanoseconds.
-    float m_synchroDelayTarget{ 0 };       ///< The target pre-read delay in synchronized mode, in nanoseconds.
+    float m_synchroDelayTarget{ 0 };       ///< The synchronized-mode delay target in nanoseconds; initialized from config and updated by trigger timing.
 
     /// Secondary MCP3208 handle retained with the legacy class state.
     MCP3208Lib::MCP3208 adc;
@@ -435,6 +435,8 @@ void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
     {
         t_delay_ns += deltaT_wfs_ns;
     }
+
+    m_synchroDelayTarget = static_cast<float>( t_delay_ns );
 
     const double t_trigger_ns = timespecToNs( atime ) + t_delay_ns;
     m_triggerTime             = nsToTimespec( t_trigger_ns );

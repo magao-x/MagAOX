@@ -418,6 +418,7 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming uses EMA and hybrid WFS period", "[m
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( expectedAvg_ns ) );
     REQUIRE( measuredTrigger_ns == Approx( expectedTrigger_ns ) );
     REQUIRE( app.m_triggerInterval_ns == Approx( expectedInterval_ns ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( static_cast<float>( expectedDelay_ns ) ) );
     REQUIRE( measuredDelay_ns >= 0.0 );
     REQUIRE( measuredDelay_ns < expectedDeltaT_ns );
 }
@@ -447,6 +448,7 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming falls back to EMA period when fps is
 
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( expectedAvg_ns ) );
     REQUIRE( measuredTrigger_ns == Approx( expectedTrigger_ns ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( static_cast<float>( expectedDelay_ns ) ) );
     REQUIRE( measuredDelay_ns >= 0.0 );
     REQUIRE( measuredDelay_ns < expectedAvg_ns );
 }
@@ -475,6 +477,7 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming wraps delay with modulo period", "[m
 
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( expectedAvg_ns ) );
     REQUIRE( rawDelay_ns < 0.0 );
+    REQUIRE( app.m_synchroDelayTarget == Approx( static_cast<float>( expectedDelay_ns ) ) );
     REQUIRE( measuredDelay_ns == Approx( expectedDelay_ns ) );
     REQUIRE( measuredDelay_ns >= 0.0 );
     REQUIRE( measuredDelay_ns < expectedDeltaT_ns );
@@ -490,6 +493,7 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming guards non-positive period", "[mcp32
 
     app.m_triggerTime       = timespec{ 7, 12345L };
     app.m_triggerInterval_ns = 42.0;
+    app.m_synchroDelayTarget = 12345.0f;
     app.m_firstSemaphore    = true;
     app.m_wfs_fps           = 0.0;
 
@@ -503,6 +507,7 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming guards non-positive period", "[mcp32
     REQUIRE( app.m_triggerTime.tv_sec == 7 );
     REQUIRE( app.m_triggerTime.tv_nsec == 12345L );
     REQUIRE( app.m_triggerInterval_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( 12345.0f ) );
 }
 
 /// Verify timer-driven acquisition configures the published frame geometry.
