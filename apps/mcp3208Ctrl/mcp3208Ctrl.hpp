@@ -442,7 +442,7 @@ void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
     {
         dt_ns = timespecToNs( atime ) - timespecToNs( m_lastAtime );
 
-        constexpr double alpha = 0.01;
+        constexpr double alpha = 0.001;
         m_avgSemaphorePeriod_ns = alpha * dt_ns + ( 1.0 - alpha ) * m_avgSemaphorePeriod_ns;
     }
     else
@@ -1373,7 +1373,7 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
                     const double producerPeriod_ns = producerDt_ns / static_cast<double>( producerFrameDelta );
                     m_producerPeriodInst_ns        = producerPeriod_ns;
 
-                    constexpr double alphaProducer = 0.01;
+                    constexpr double alphaProducer = 0.001;
                     if( m_avgProducerPeriod_ns > 0.0 )
                     {
                         m_avgProducerPeriod_ns =
@@ -1443,7 +1443,7 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
     }
 
     const double readLatency_ns = timespecToNs( m_currImageTimestamp ) - timespecToNs( m_atime );
-    constexpr double alpha = 0.01;
+    constexpr double alpha = 0.001;
 
     if( !m_firstReadLatency )
     {
@@ -1483,7 +1483,7 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
     }
 
     m_nonDelayService_ns = nonDelayService_ns;
-    constexpr double alphaService = 0.01;
+    constexpr double alphaService = 0.001;
     if( !m_firstNonDelayService )
     {
         m_avgNonDelayService_ns =
