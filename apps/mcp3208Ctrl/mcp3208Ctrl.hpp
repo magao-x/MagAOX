@@ -386,7 +386,7 @@ void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
     {
         dt_ns = timespecToNs( atime ) - timespecToNs( m_lastAtime );
 
-        constexpr double alpha = 0.1;
+        constexpr double alpha = 0.01;
         m_avgSemaphorePeriod_ns = alpha * dt_ns + ( 1.0 - alpha ) * m_avgSemaphorePeriod_ns;
     }
     else
@@ -990,7 +990,7 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
     }
 
     const double readLatency_ns = timespecToNs( m_currImageTimestamp ) - timespecToNs( m_atime );
-    constexpr double alpha = 0.1;
+    constexpr double alpha = 0.01;
 
     if( !m_firstReadLatency )
     {
