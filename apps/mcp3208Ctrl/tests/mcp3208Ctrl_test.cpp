@@ -188,9 +188,16 @@ class mcp3208Ctrl_test : public mcp3208Ctrl
         m_indiP_timingDiag.add( pcf::IndiElement( "delay_model_ns" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "delay_phase_error_ns" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "delay_lock" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "delay_budget_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "non_delay_service_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "avg_non_delay_service_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "delay_capped" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "read_latency_error_ns" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "avg_semaphore_period_ns" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_measured_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_inst_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_ns" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps_producer" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_ns" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_ns" ) );
@@ -254,6 +261,7 @@ TEST_CASE( "mcp3208Ctrl configuration defaults load synchronized settings", "[mc
     REQUIRE( app.m_synchroWfsRead_ns == Approx( 276100.0 ) );
     REQUIRE( app.m_delayLockAbsThreshold_ns == Approx( 50000.0 ) );
     REQUIRE( app.m_delayLockFracThreshold == Approx( 0.1 ) );
+    REQUIRE( app.m_cadenceGuard_ns == Approx( 20000.0 ) );
     REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
     REQUIRE( app.m_wfs_fps == Approx( static_cast<double>( app.m_fps ) ) );
@@ -278,6 +286,7 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
                                 "synchro",
                                 "synchro",
                                 "synchro",
+                                "synchro",
                                 "accel" },
                               { "shmimName",
                                 "postDelay",
@@ -287,8 +296,9 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
                                 "wfsRead_ns",
                                 "delayLockAbsThreshold_ns",
                                 "delayLockFracThreshold",
+                                "cadenceGuard_ns",
                                 "numChannels" },
-                              { "camwfs_sync", "17", "4000", "62000", "11000", "290000", "75000", "0.2", "3" } );
+                              { "camwfs_sync", "17", "4000", "62000", "11000", "290000", "75000", "0.2", "15000", "3" } );
     app.config.readConfig( "/tmp/mcp3208Ctrl_test_override.conf" );
 
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
@@ -300,6 +310,7 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
     REQUIRE( app.m_synchroWfsRead_ns == Approx( 290000.0 ) );
     REQUIRE( app.m_delayLockAbsThreshold_ns == Approx( 75000.0 ) );
     REQUIRE( app.m_delayLockFracThreshold == Approx( 0.2 ) );
+    REQUIRE( app.m_cadenceGuard_ns == Approx( 15000.0 ) );
     REQUIRE( app.m_numChannels == 3 );
     REQUIRE( app.m_synchroDelayTarget == Approx( 17000.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 17000.0f ) );
@@ -357,6 +368,8 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     app.m_delayModel_ns         = 17000.0;
     app.m_avgSemaphorePeriod_ns = 500000.0;
     app.m_wfsPeriodMeasured_ns  = 500000.0;
+    app.m_producerPeriodInst_ns = 510000.0;
+    app.m_avgProducerPeriod_ns  = 500000.0;
     app.m_wfs_fps               = 1500.0;
     app.m_triggerInterval_ns    = 600000.0;
     app.m_atime                 = timespec{ 12, 3000000L };
@@ -374,6 +387,9 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     REQUIRE( app.m_indiP_timingDiag["read_latency_error_ns"].get<double>() == Approx( 108000.0 ) );
     REQUIRE( app.m_indiP_timingDiag["avg_semaphore_period_ns"].get<double>() == Approx( 500000.0 ) );
     REQUIRE( app.m_indiP_timingDiag["wfs_period_measured_ns"].get<double>() == Approx( 500000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_inst_ns"].get<double>() == Approx( 510000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_ns"].get<double>() == Approx( 500000.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["wfs_fps_producer"].get<double>() == Approx( 2000.0 ) );
     REQUIRE( app.m_indiP_timingDiag["wfs_fps"].get<double>() == Approx( 1500.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_interval_ns"].get<double>() == Approx( 600000.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_time_ns"].get<double>() ==
@@ -401,6 +417,8 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
     REQUIRE( app.m_indiP_timingDiag["trigger_time_ns"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_phase_error_ns"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_ns"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["wfs_fps_producer"].get<double>() == Approx( 0.0 ) );
 
     app.m_synchroShmimName.clear();
     app.m_triggerInterval_ns = 456789.0;
@@ -411,6 +429,8 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
     REQUIRE( app.m_indiP_timingDiag["trigger_time_ns"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_phase_error_ns"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_ns"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["wfs_fps_producer"].get<double>() == Approx( 0.0 ) );
 }
 
 /// Verify timing diagnostics wrap phase error and require both lock thresholds.
@@ -764,6 +784,63 @@ TEST_CASE( "mcp3208Ctrl synchronized mode reads on semaphore wake", "[mcp3208Ctr
     REQUIRE( sem_destroy( &semaphore ) == 0 );
 }
 
+/// Verify synchronized mode derives producer cadence from stream metadata counters and timestamps.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+    sem_t            semaphore;
+    IMAGE_METADATA   metadata{};
+
+    resetStubState();
+    stubState().m_channelValues = { 44 };
+
+    REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
+
+    app.m_synchroShmimName = "camwfs_sync";
+    app.m_numChannels      = 1;
+    app.m_values.assign( 1, 0 );
+    app.m_synchroSemaphore = &semaphore;
+    app.m_synchroStream.md = &metadata;
+    app.m_synchroDelay     = 0.0f;
+    app.m_synchroDelayTarget = 0.0f;
+    app.m_gain             = 0.0f;
+    app.m_wfs_fps          = 2000.0;
+
+    metadata.cnt0  = 100;
+    metadata.atime = timespec{ 10, 0 };
+    REQUIRE( sem_post( &semaphore ) == 0 );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+
+    REQUIRE( app.m_firstProducerSample == false );
+    REQUIRE( app.m_producerPeriodInst_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_avgProducerPeriod_ns == Approx( 0.0 ) );
+
+    metadata.cnt0  = 102;
+    metadata.atime = timespec{ 10, 1000000L };
+    REQUIRE( sem_post( &semaphore ) == 0 );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+
+    REQUIRE( app.m_producerPeriodInst_ns == Approx( 500000.0 ) );
+    REQUIRE( app.m_avgProducerPeriod_ns == Approx( 500000.0 ) );
+    REQUIRE( app.m_lastProducerCnt0 == 102 );
+
+    const double periodBeforeNoAdvance_ns = app.m_producerPeriodInst_ns;
+    const double avgBeforeNoAdvance_ns    = app.m_avgProducerPeriod_ns;
+
+    metadata.cnt0  = 102;
+    metadata.atime = timespec{ 10, 2000000L };
+    REQUIRE( sem_post( &semaphore ) == 0 );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+
+    REQUIRE( app.m_producerPeriodInst_ns == Approx( periodBeforeNoAdvance_ns ) );
+    REQUIRE( app.m_avgProducerPeriod_ns == Approx( avgBeforeNoAdvance_ns ) );
+
+    REQUIRE( sem_destroy( &semaphore ) == 0 );
+}
+
 /// Verify synchronized read-latency EMA initializes from the first sample and smooths subsequent samples.
 /**
  * \ingroup mcp3208Ctrl_unit_test
@@ -938,13 +1015,23 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     app.m_lastAtime              = timespec{ 2, 2 };
     app.m_avgSemaphorePeriod_ns  = 42.0;
     app.m_wfsPeriodMeasured_ns   = 21.0;
+    app.m_lastProducerAtime      = timespec{ 3, 4 };
+    app.m_lastProducerCnt0       = 123;
+    app.m_producerPeriodInst_ns  = 500000.0;
+    app.m_avgProducerPeriod_ns   = 510000.0;
+    app.m_firstProducerSample    = false;
     app.m_firstSemaphore         = false;
     app.m_avgReadLatency_ns      = 84.0;
     app.m_firstReadLatency       = false;
     app.m_delayModel_ns          = 900.0;
     app.m_delayApplied_ns        = 875.0;
+    app.m_delayBudget_ns         = 450000.0;
+    app.m_nonDelayService_ns     = 170000.0;
+    app.m_avgNonDelayService_ns  = 160000.0;
+    app.m_firstNonDelayService   = false;
     app.m_delayPhaseError_ns     = -25.0;
     app.m_delayLock              = 1.0;
+    app.m_delayCapped            = 1.0;
     app.m_triggerTime            = timespec{ 3, 3 };
     app.m_triggerInterval_ns     = 21.0;
     app.m_lastTriggerTime        = timespec{ 4, 4 };
@@ -962,13 +1049,24 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     REQUIRE( app.m_lastAtime.tv_nsec == 0 );
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( 0.0 ) );
     REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_lastProducerAtime.tv_sec == 0 );
+    REQUIRE( app.m_lastProducerAtime.tv_nsec == 0 );
+    REQUIRE( app.m_lastProducerCnt0 == 0 );
+    REQUIRE( app.m_producerPeriodInst_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_avgProducerPeriod_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_firstProducerSample == true );
     REQUIRE( app.m_firstSemaphore == true );
     REQUIRE( app.m_avgReadLatency_ns == Approx( 0.0 ) );
     REQUIRE( app.m_firstReadLatency == true );
     REQUIRE( app.m_delayModel_ns == Approx( 0.0 ) );
     REQUIRE( app.m_delayApplied_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_delayBudget_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_nonDelayService_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_avgNonDelayService_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_firstNonDelayService == true );
     REQUIRE( app.m_delayPhaseError_ns == Approx( 0.0 ) );
     REQUIRE( app.m_delayLock == Approx( 0.0 ) );
+    REQUIRE( app.m_delayCapped == Approx( 0.0 ) );
     REQUIRE( app.m_triggerTime.tv_sec == 0 );
     REQUIRE( app.m_triggerTime.tv_nsec == 0 );
     REQUIRE( app.m_triggerInterval_ns == Approx( 0.0 ) );

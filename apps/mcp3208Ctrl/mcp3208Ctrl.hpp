@@ -87,6 +87,8 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     double m_delayLockFracThreshold{ 0.1 }; ///< Fractional period phase-error threshold for declaring delay lock.
 
+    double m_cadenceGuard_ns{ 20e3 }; ///< Reserved per-frame margin protecting synchronized cadence from overruns.
+
     ///@}
 
     /** \name Runtime State - Data
@@ -149,6 +151,16 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     double m_wfsPeriodMeasured_ns{ 0.0 }; ///< Measured semaphore period used as the synchronized delay-model WFS period.
 
+    timespec m_lastProducerAtime{}; ///< Previous producer atime from the synchronization stream metadata.
+
+    uint64_t m_lastProducerCnt0{ 0 }; ///< Previous producer frame counter from the synchronization stream metadata.
+
+    double m_producerPeriodInst_ns{ 0.0 }; ///< Instantaneous producer period estimate from metadata timestamps.
+
+    double m_avgProducerPeriod_ns{ 0.0 }; ///< Exponential moving-average producer period estimate from metadata.
+
+    bool m_firstProducerSample{ true }; ///< Tracks first-sample initialization for producer-period estimation.
+
     bool m_firstSemaphore{ true }; ///< Tracks first-arrival initialization for semaphore period estimation.
 
     double m_avgReadLatency_ns{ 0.0 }; ///< Exponential moving-average estimate of semaphore-to-read latency in nanoseconds.
@@ -161,9 +173,19 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     double m_delayApplied_ns{ 0.0 }; ///< Delay applied to the most recent synchronized ADC read.
 
+    double m_delayBudget_ns{ 0.0 }; ///< Maximum delay allowed this cycle after cadence budgeting.
+
+    double m_nonDelayService_ns{ 0.0 }; ///< Measured wake-to-return service time minus applied delay for the latest cycle.
+
+    double m_avgNonDelayService_ns{ 0.0 }; ///< Exponential moving-average of non-delay synchronized service time.
+
+    bool m_firstNonDelayService{ true }; ///< Tracks first-sample initialization for non-delay service-time averaging.
+
     double m_delayPhaseError_ns{ 0.0 }; ///< Wrapped phase error between applied and modeled synchronized delay.
 
     double m_delayLock{ 0.0 }; ///< Delay-lock state exported to diagnostics as 1.0 (locked) or 0.0 (unlocked).
+
+    double m_delayCapped{ 0.0 }; ///< Delay-cap state exported as 1.0 when cadence budgeting limits the applied delay.
 
     timespec m_triggerTime{}; ///< Computed trigger timestamp aligned to the estimated WFS integration midpoint.
 
@@ -598,6 +620,16 @@ void mcp3208Ctrl::setupConfig()
                 "double",
                 "Fractional synchronized phase-error threshold for delay-lock diagnostics. Default is 0.1." );
 
+    config.add( "synchro.cadenceGuard_ns",
+                "",
+                "synchro.cadenceGuard_ns",
+                argType::Required,
+                "synchro",
+                "cadenceGuard_ns",
+                false,
+                "double",
+                "Reserved nanoseconds in each synchronized cycle for non-delay work. Default is 20000." );
+
     config.add( "numChannels.device",
                 "",
                 "numChannels.device",
@@ -667,6 +699,7 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_synchroWfsRead_ns, "synchro.wfsRead_ns" );
     _config( m_delayLockAbsThreshold_ns, "synchro.delayLockAbsThreshold_ns" );
     _config( m_delayLockFracThreshold, "synchro.delayLockFracThreshold" );
+    _config( m_cadenceGuard_ns, "synchro.cadenceGuard_ns" );
 
     _config( m_numChannels, "accel.numChannels" ); // making number of mcp3208 channels we read out configurable
     _config( m_numChannelsDevice, "numChannels.device" );
@@ -711,13 +744,28 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
         m_delayLockFracThreshold = 0.0;
     }
 
+    if( m_cadenceGuard_ns < 0.0 )
+    {
+        m_cadenceGuard_ns = 0.0;
+    }
+
     m_synchroDelayTarget = 1e3f * m_synchroPostDelay;
     m_synchroDelay       = m_synchroDelayTarget;
     m_delayModel_ns      = static_cast<double>( m_synchroDelayTarget );
     m_delayApplied_ns    = static_cast<double>( m_synchroDelayTarget );
+    m_delayBudget_ns     = 0.0;
+    m_nonDelayService_ns = 0.0;
+    m_avgNonDelayService_ns = 0.0;
+    m_firstNonDelayService  = true;
     m_delayPhaseError_ns = 0.0;
     m_delayLock          = 0.0;
+    m_delayCapped        = 0.0;
     m_wfsPeriodMeasured_ns = 0.0;
+    m_lastProducerAtime    = timespec{};
+    m_lastProducerCnt0     = 0;
+    m_producerPeriodInst_ns = 0.0;
+    m_avgProducerPeriod_ns  = 0.0;
+    m_firstProducerSample   = true;
     m_wfs_fps            = m_fps;
 
     return 0;
@@ -751,9 +799,16 @@ int mcp3208Ctrl::appStartup()
     m_indiP_timingDiag.add( pcf::IndiElement( "delay_model_ns" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "delay_phase_error_ns" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "delay_lock" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "delay_budget_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "non_delay_service_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "avg_non_delay_service_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "delay_capped" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "read_latency_error_ns" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "avg_semaphore_period_ns" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_measured_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_inst_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_ns" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps_producer" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_ns" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_ns" ) );
@@ -792,7 +847,19 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     const double modeCode             = synchroMode ? c_synchroModeCode : c_timerModeCode;
     const double delayAppliedDiag_ns  = synchroMode ? m_delayApplied_ns : 0.0;
     const double delayModelDiag_ns    = synchroMode ? m_delayModel_ns : 0.0;
+    const double delayBudgetDiag_ns   = synchroMode ? m_delayBudget_ns : 0.0;
+    const double nonDelayService_ns   = synchroMode ? m_nonDelayService_ns : 0.0;
+    const double avgNonDelayService_ns = synchroMode ? m_avgNonDelayService_ns : 0.0;
+    const double delayCappedDiag      = synchroMode ? m_delayCapped : 0.0;
     const double wfsPeriodMeasured_ns = synchroMode ? m_wfsPeriodMeasured_ns : 0.0;
+    const double producerPeriodInstDiag_ns = synchroMode ? m_producerPeriodInst_ns : 0.0;
+    const double producerPeriodDiag_ns     = synchroMode ? m_avgProducerPeriod_ns : 0.0;
+
+    double producerFpsDiag = 0.0;
+    if( producerPeriodDiag_ns > 0.0 )
+    {
+        producerFpsDiag = 1e9 / producerPeriodDiag_ns;
+    }
 
     double triggerTime_ns = 0.0;
     if( ( m_atime.tv_sec != 0 || m_atime.tv_nsec != 0 ) &&
@@ -853,9 +920,16 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
                                 "delay_model_ns",
                                 "delay_phase_error_ns",
                                 "delay_lock",
+                                "delay_budget_ns",
+                                "non_delay_service_ns",
+                                "avg_non_delay_service_ns",
+                                "delay_capped",
                                 "read_latency_error_ns",
                                 "avg_semaphore_period_ns",
                                 "wfs_period_measured_ns",
+                                "wfs_period_producer_inst_ns",
+                                "wfs_period_producer_ns",
+                                "wfs_fps_producer",
                                 "wfs_fps",
                                 "trigger_interval_ns",
                                 "trigger_time_ns",
@@ -867,9 +941,16 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
                                 delayModelDiag_ns,
                                 m_delayPhaseError_ns,
                                 m_delayLock,
+                                delayBudgetDiag_ns,
+                                nonDelayService_ns,
+                                avgNonDelayService_ns,
+                                delayCappedDiag,
                                 readLatencyError_ns,
                                 m_avgSemaphorePeriod_ns,
                                 wfsPeriodMeasured_ns,
+                                producerPeriodInstDiag_ns,
+                                producerPeriodDiag_ns,
+                                producerFpsDiag,
                                 m_wfs_fps,
                                 m_triggerInterval_ns,
                                 triggerTime_ns,
@@ -970,10 +1051,20 @@ int mcp3208Ctrl::startAcquisition()
         m_atime                 = timespec{};
         m_triggerTime           = timespec{};
         m_wfsPeriodMeasured_ns  = 0.0;
+        m_lastProducerAtime     = timespec{};
+        m_lastProducerCnt0      = 0;
+        m_producerPeriodInst_ns = 0.0;
+        m_avgProducerPeriod_ns  = 0.0;
+        m_firstProducerSample   = true;
         m_delayModel_ns         = static_cast<double>( m_synchroDelayTarget );
         m_delayApplied_ns       = 0.0;
+        m_delayBudget_ns        = 0.0;
+        m_nonDelayService_ns    = 0.0;
+        m_avgNonDelayService_ns = 0.0;
+        m_firstNonDelayService  = true;
         m_delayPhaseError_ns    = 0.0;
         m_delayLock             = 0.0;
+        m_delayCapped           = 0.0;
     }
 
     m_triggerInterval_ns = 0.0;
@@ -981,8 +1072,11 @@ int mcp3208Ctrl::startAcquisition()
     m_firstTriggerTime   = true;
     m_firstTimerTrigger  = true;
     m_delayApplied_ns    = 0.0;
+    m_delayBudget_ns     = 0.0;
+    m_nonDelayService_ns = 0.0;
     m_delayPhaseError_ns = 0.0;
     m_delayLock          = 0.0;
+    m_delayCapped        = 0.0;
 
     m_time_start = std::chrono::high_resolution_clock::now();
 
@@ -1125,13 +1219,23 @@ void mcp3208Ctrl::closeSynchroStream()
     m_lastAtime              = timespec{};
     m_avgSemaphorePeriod_ns  = 0.0;
     m_wfsPeriodMeasured_ns   = 0.0;
+    m_lastProducerAtime      = timespec{};
+    m_lastProducerCnt0       = 0;
+    m_producerPeriodInst_ns  = 0.0;
+    m_avgProducerPeriod_ns   = 0.0;
+    m_firstProducerSample    = true;
     m_firstSemaphore         = true;
     m_avgReadLatency_ns      = 0.0;
     m_firstReadLatency       = true;
     m_delayModel_ns          = static_cast<double>( m_synchroDelayTarget );
     m_delayApplied_ns        = 0.0;
+    m_delayBudget_ns         = 0.0;
+    m_nonDelayService_ns     = 0.0;
+    m_avgNonDelayService_ns  = 0.0;
+    m_firstNonDelayService   = true;
     m_delayPhaseError_ns     = 0.0;
     m_delayLock              = 0.0;
+    m_delayCapped            = 0.0;
     m_triggerTime            = timespec{};
     m_triggerInterval_ns     = 0.0;
     m_lastTriggerTime        = timespec{};
@@ -1225,12 +1329,94 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
         return 1;
     }
 
+    if( m_synchroStream.md != nullptr )
+    {
+        const uint64_t producerCnt0 = m_synchroStream.md[0].cnt0;
+        const timespec producerAtime = m_synchroStream.md[0].atime;
+        const bool producerAtimeValid = ( producerAtime.tv_sec != 0 || producerAtime.tv_nsec != 0 );
+
+        if( producerAtimeValid )
+        {
+            if( m_firstProducerSample )
+            {
+                m_lastProducerCnt0      = producerCnt0;
+                m_lastProducerAtime     = producerAtime;
+                m_producerPeriodInst_ns = 0.0;
+                m_avgProducerPeriod_ns  = 0.0;
+                m_firstProducerSample   = false;
+            }
+            else if( producerCnt0 > m_lastProducerCnt0 )
+            {
+                const uint64_t producerFrameDelta = producerCnt0 - m_lastProducerCnt0;
+                const double   producerDt_ns      = timespecToNs( producerAtime ) - timespecToNs( m_lastProducerAtime );
+
+                if( producerDt_ns > 0.0 )
+                {
+                    const double producerPeriod_ns = producerDt_ns / static_cast<double>( producerFrameDelta );
+                    m_producerPeriodInst_ns        = producerPeriod_ns;
+
+                    constexpr double alphaProducer = 0.01;
+                    if( m_avgProducerPeriod_ns > 0.0 )
+                    {
+                        m_avgProducerPeriod_ns =
+                            alphaProducer * producerPeriod_ns + ( 1.0 - alphaProducer ) * m_avgProducerPeriod_ns;
+                    }
+                    else
+                    {
+                        m_avgProducerPeriod_ns = producerPeriod_ns;
+                    }
+                }
+
+                m_lastProducerCnt0  = producerCnt0;
+                m_lastProducerAtime = producerAtime;
+            }
+            else if( producerCnt0 < m_lastProducerCnt0 )
+            {
+                m_lastProducerCnt0      = producerCnt0;
+                m_lastProducerAtime     = producerAtime;
+                m_producerPeriodInst_ns = 0.0;
+                m_avgProducerPeriod_ns  = 0.0;
+            }
+        }
+    }
+
     if( getRealtime( m_atime ) < 0 )
     {
         return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
     }
 
     updateTriggerTiming( m_atime );
+
+    double desiredDelay_ns = static_cast<double>( m_synchroDelay );
+    if( desiredDelay_ns < 0.0 )
+    {
+        desiredDelay_ns = 0.0;
+    }
+
+    if( m_wfsPeriodMeasured_ns > 0.0 )
+    {
+        m_delayBudget_ns = m_wfsPeriodMeasured_ns - m_avgNonDelayService_ns - m_cadenceGuard_ns;
+        if( m_delayBudget_ns < 0.0 )
+        {
+            m_delayBudget_ns = 0.0;
+        }
+    }
+    else
+    {
+        m_delayBudget_ns = 0.0;
+    }
+
+    if( desiredDelay_ns > m_delayBudget_ns )
+    {
+        m_delayApplied_ns = m_delayBudget_ns;
+        m_delayCapped     = 1.0;
+    }
+    else
+    {
+        m_delayApplied_ns = desiredDelay_ns;
+        m_delayCapped     = 0.0;
+    }
+
     delayBeforeRead();
 
     if( getRealtime( m_currImageTimestamp ) < 0 )
@@ -1266,6 +1452,31 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
         }
     }
 
+    timespec cycleEnd;
+    if( getRealtime( cycleEnd ) < 0 )
+    {
+        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
+    }
+
+    double nonDelayService_ns = timespecToNs( cycleEnd ) - timespecToNs( m_atime ) - m_delayApplied_ns;
+    if( nonDelayService_ns < 0.0 )
+    {
+        nonDelayService_ns = 0.0;
+    }
+
+    m_nonDelayService_ns = nonDelayService_ns;
+    constexpr double alphaService = 0.01;
+    if( !m_firstNonDelayService )
+    {
+        m_avgNonDelayService_ns =
+            alphaService * nonDelayService_ns + ( 1.0 - alphaService ) * m_avgNonDelayService_ns;
+    }
+    else
+    {
+        m_avgNonDelayService_ns = nonDelayService_ns;
+        m_firstNonDelayService  = false;
+    }
+
     return 0;
 }
 
@@ -1287,14 +1498,11 @@ int mcp3208Ctrl::readChannelValue( int channel, uint16_t &value )
 
 void mcp3208Ctrl::delayBeforeRead()
 {
-    if( m_synchroDelay > 0 )
+    if( m_delayApplied_ns > 0.0 )
     {
-        m_delayApplied_ns = static_cast<double>( m_synchroDelay );
-        mx::sys::nanoSleep( static_cast<unsigned>( m_synchroDelay ) );
+        mx::sys::nanoSleep( static_cast<unsigned>( m_delayApplied_ns ) );
         return;
     }
-
-    m_delayApplied_ns = 0.0;
 }
 
 int mcp3208Ctrl::checkRecordTimes()
