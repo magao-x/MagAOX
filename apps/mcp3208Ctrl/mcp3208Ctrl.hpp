@@ -815,7 +815,7 @@ int mcp3208Ctrl::appStartup()
     m_indiP_fps["target"].setValue( m_fps );
 
     // INDI prop for user to set global timing EMA alpha
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_alpha, "alpha", 0.0, 1.0, 0.001, "%.3f", "", "" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_alpha, "alpha", 0.0, 1.0, 0.00001, "%.5f", "", "" );
     m_indiP_alpha["current"].setValue( m_alpha );
     m_indiP_alpha["target"].setValue( m_alpha );
 
