@@ -240,11 +240,6 @@ class mcp3208Ctrl_test : public mcp3208Ctrl
         m_indiP_timingDiag.add( pcf::IndiElement( "delay_capped" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "read_latency_error_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "avg_semaphore_period_us" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_measured_us" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_inst_us" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_us" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps_producer" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "channel_readout_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_us" ) );
@@ -492,7 +487,6 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     app.m_wfsPeriodMeasured_ns  = 500000.0;
     app.m_producerPeriodInst_ns = 510000.0;
     app.m_avgProducerPeriod_ns  = 500000.0;
-    app.m_wfs_fps               = 1500.0;
     app.m_channelReadoutTime_ns = 34000.0;
     app.m_triggerInterval_ns    = 600000.0;
     app.m_atime                 = timespec{ 12, 3000000L };
@@ -509,11 +503,6 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 1.0 ) );
     REQUIRE( app.m_indiP_timingDiag["read_latency_error_us"].get<double>() == Approx( 108.0 ) );
     REQUIRE( app.m_indiP_timingDiag["avg_semaphore_period_us"].get<double>() == Approx( 500.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["wfs_period_measured_us"].get<double>() == Approx( 500.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_inst_us"].get<double>() == Approx( 510.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_us"].get<double>() == Approx( 500.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["wfs_fps_producer"].get<double>() == Approx( 2000.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["wfs_fps"].get<double>() == Approx( 1500.0 ) );
     REQUIRE( app.m_indiP_timingDiag["channel_readout_us"].get<double>() == Approx( 34.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_interval_us"].get<double>() == Approx( 600.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_time_us"].get<double>() ==
@@ -541,8 +530,6 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
     REQUIRE( app.m_indiP_timingDiag["trigger_time_us"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_phase_error_us"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 0.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_us"].get<double>() == Approx( 0.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["wfs_fps_producer"].get<double>() == Approx( 0.0 ) );
 
     app.m_synchroShmimName.clear();
     app.m_triggerInterval_ns = 456789.0;
@@ -553,8 +540,6 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
     REQUIRE( app.m_indiP_timingDiag["trigger_time_us"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_phase_error_us"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 0.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_us"].get<double>() == Approx( 0.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["wfs_fps_producer"].get<double>() == Approx( 0.0 ) );
 }
 
 /// Verify timing diagnostics wrap phase error and require both lock thresholds.

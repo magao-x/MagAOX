@@ -857,11 +857,6 @@ int mcp3208Ctrl::appStartup()
     m_indiP_timingDiag.add( pcf::IndiElement( "delay_capped" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "read_latency_error_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "avg_semaphore_period_us" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_measured_us" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_inst_us" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_us" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps_producer" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "channel_readout_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_us" ) );
@@ -906,14 +901,6 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     const double avgNonDelayService_ns = synchroMode ? m_avgNonDelayService_ns : 0.0;
     const double delayCappedDiag      = synchroMode ? m_delayCapped : 0.0;
     const double wfsPeriodMeasured_ns = synchroMode ? m_wfsPeriodMeasured_ns : 0.0;
-    const double producerPeriodInstDiag_ns = synchroMode ? m_producerPeriodInst_ns : 0.0;
-    const double producerPeriodDiag_ns     = synchroMode ? m_avgProducerPeriod_ns : 0.0;
-
-    double producerFpsDiag = 0.0;
-    if( producerPeriodDiag_ns > 0.0 )
-    {
-        producerFpsDiag = 1e9 / producerPeriodDiag_ns;
-    }
 
     double triggerTime_ns = 0.0;
     if( ( m_atime.tv_sec != 0 || m_atime.tv_nsec != 0 ) &&
@@ -977,9 +964,6 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     const double avgNonDelayService_us  = avgNonDelayService_ns * c_nsToUs;
     const double readLatencyError_us    = readLatencyError_ns * c_nsToUs;
     const double avgSemaphorePeriod_us  = m_avgSemaphorePeriod_ns * c_nsToUs;
-    const double wfsPeriodMeasured_us   = wfsPeriodMeasured_ns * c_nsToUs;
-    const double producerPeriodInst_us  = producerPeriodInstDiag_ns * c_nsToUs;
-    const double producerPeriod_us      = producerPeriodDiag_ns * c_nsToUs;
     const double channelReadout_us      = m_channelReadoutTime_ns * c_nsToUs;
     const double triggerInterval_us     = m_triggerInterval_ns * c_nsToUs;
     const double triggerTime_us         = triggerTime_ns * c_nsToUs;
@@ -998,11 +982,6 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
                                 "delay_capped",
                                 "read_latency_error_us",
                                 "avg_semaphore_period_us",
-                                "wfs_period_measured_us",
-                                "wfs_period_producer_inst_us",
-                                "wfs_period_producer_us",
-                                "wfs_fps_producer",
-                                "wfs_fps",
                                 "channel_readout_us",
                                 "trigger_interval_us",
                                 "trigger_time_us",
@@ -1020,11 +999,6 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
                                 delayCappedDiag,
                                 readLatencyError_us,
                                 avgSemaphorePeriod_us,
-                                wfsPeriodMeasured_us,
-                                producerPeriodInst_us,
-                                producerPeriod_us,
-                                producerFpsDiag,
-                                m_wfs_fps,
                                 channelReadout_us,
                                 triggerInterval_us,
                                 triggerTime_us,
