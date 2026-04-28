@@ -793,6 +793,9 @@ class stdCamera
     bool checkFocusSwitchState();
 
     /// Format and send the configured goto-focus switch command.
+    /** \returns 0 on success.
+     *  \returns -1 if formatting fails or the command cannot be dispatched.
+     */
     int sendGotoFocusCommand();
 
     ///@}
@@ -2132,9 +2135,10 @@ int stdCamera<derivedT>::sendGotoFocusCommand()
     ipSend.setRule( pcf::IndiProperty::AtMostOne );
     ipSend.add( pcf::IndiElement( targetElement, pcf::IndiElement::On ) );
 
-    derived().sendNewProperty( ipSend );
+    derivedT::template log<text_log>( "goto-focus helper commanding " + m_focusGotoTargetProperty + "." +
+                                      targetElement );
 
-    return 0;
+    return derived().sendNewProperty( ipSend );
 }
 
 template <class derivedT>

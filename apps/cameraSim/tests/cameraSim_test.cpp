@@ -109,6 +109,12 @@ class focusHelper_test : public MagAOXApp<>, public dev::stdCamera<focusHelper_t
   public:
     static constexpr bool c_stdCamera_hasFocus = true;
 
+  protected:
+    pcf::IndiProperty m_lastSentProperty; ///< Captures the last INDI command sent through the goto-focus helper.
+
+    int m_sendNewPropertyResult{ 0 }; ///< Return value used by the test sendNewProperty override.
+
+  public:
     focusHelper_test() : MagAOXApp<>( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
     {
         m_configName = "camtest";
@@ -119,6 +125,37 @@ class focusHelper_test : public MagAOXApp<>, public dev::stdCamera<focusHelper_t
         m_indiP_focus.setName( "focus" );
         m_indiP_focus.setState( INDI_IDLE );
         m_indiP_focus.add( pcf::IndiElement( "state", pcf::IndiElement::Off ) );
+    }
+
+    ~focusHelper_test() noexcept override = default;
+
+    void configureGotoFocusHelper( const std::vector<std::string> &properties,
+                                   const std::string              &format,
+                                   const std::string              &targetProperty )
+    {
+        m_focusGotoHelperConfigured = true;
+        m_focusGotoSourceProperties = properties;
+        m_focusGotoFormat           = format;
+        m_focusGotoTargetProperty   = targetProperty;
+        m_focusGotoSourceIndices.clear();
+        m_focusMonitoredPropertyKeys.clear();
+        m_indiP_focusMonitoredProperties.clear();
+
+        REQUIRE( indi::parseIndiKey( m_focusGotoTargetDevice, m_focusGotoTargetName, m_focusGotoTargetProperty ) == 0 );
+
+        for( size_t n = 0; n < properties.size(); ++n )
+        {
+            std::string devName;
+            std::string propName;
+
+            REQUIRE( indi::parseIndiKey( devName, propName, properties[n] ) == 0 );
+
+            m_focusGotoSourceIndices.push_back( static_cast<int>( n ) );
+            m_focusMonitoredPropertyKeys.push_back( properties[n] );
+            m_indiP_focusMonitoredProperties.emplace_back();
+            m_indiP_focusMonitoredProperties[n].setDevice( devName );
+            m_indiP_focusMonitoredProperties[n].setName( propName );
+        }
     }
 
     void configureFocusHelper( const std::string &device,
@@ -152,6 +189,17 @@ class focusHelper_test : public MagAOXApp<>, public dev::stdCamera<focusHelper_t
         return 0;
     }
 
+    int sendNewProperty( const pcf::IndiProperty &ipSend )
+    {
+        m_lastSentProperty = ipSend;
+        return m_sendNewPropertyResult;
+    }
+
+    void setSendNewPropertyResult( int result )
+    {
+        m_sendNewPropertyResult = result;
+    }
+
     int appStartup() override
     {
         return 0;
@@ -170,6 +218,11 @@ class focusHelper_test : public MagAOXApp<>, public dev::stdCamera<focusHelper_t
     pcf::IndiElement::SwitchStateType publishedFocusState()
     {
         return m_indiP_focus["state"].getSwitchState();
+    }
+
+    const pcf::IndiProperty &lastSentProperty() const
+    {
+        return m_lastSentProperty;
     }
 };
 /// \endcond
@@ -255,6 +308,54 @@ TEST_CASE( "cameraSim stdCamera focus helper tracks monitored switch properties"
 
         REQUIRE( app.cacheFocusProperty( focusProp ) == 0 );
         REQUIRE( app.publishedFocusState() == pcf::IndiElement::Off );
+    }
+}
+
+/// Verify the stdCamera goto-focus helper formats and dispatches the expected preset command.
+/**
+ * \ingroup cameraSim_unit_test
+ */
+TEST_CASE( "cameraSim stdCamera goto-focus helper dispatches preset commands", "[cameraSim]" )
+{
+    focusHelper_test app;
+    app.configureGotoFocusHelper(
+        { "stagebs.presetName", "fwfpm.filterName", "stagescibs.presetName" }, "{}-{}-{}", "stagesci1.presetName" );
+
+    pcf::IndiProperty prop1( pcf::IndiProperty::Switch );
+    prop1.setDevice( "stagebs" );
+    prop1.setName( "presetName" );
+    prop1.add( pcf::IndiElement( "65-35", pcf::IndiElement::On ) );
+    prop1.add( pcf::IndiElement( "ha-ir", pcf::IndiElement::Off ) );
+
+    pcf::IndiProperty prop2( pcf::IndiProperty::Switch );
+    prop2.setDevice( "fwfpm" );
+    prop2.setName( "filterName" );
+    prop2.add( pcf::IndiElement( "open", pcf::IndiElement::On ) );
+    prop2.add( pcf::IndiElement( "lyotsm", pcf::IndiElement::Off ) );
+
+    pcf::IndiProperty prop3( pcf::IndiProperty::Switch );
+    prop3.setDevice( "stagescibs" );
+    prop3.setName( "presetName" );
+    prop3.add( pcf::IndiElement( "ri", pcf::IndiElement::On ) );
+    prop3.add( pcf::IndiElement( "out", pcf::IndiElement::Off ) );
+
+    REQUIRE( app.cacheFocusProperty( prop1 ) == 0 );
+    REQUIRE( app.cacheFocusProperty( prop2 ) == 0 );
+    REQUIRE( app.cacheFocusProperty( prop3 ) == 0 );
+
+    SECTION( "successful dispatch sends the formatted preset selection" )
+    {
+        REQUIRE( app.sendGotoFocusCommand() == 0 );
+        REQUIRE( app.lastSentProperty().getDevice() == "stagesci1" );
+        REQUIRE( app.lastSentProperty().getName() == "presetName" );
+        REQUIRE( app.lastSentProperty().find( "65-35-open-ri" ) );
+        REQUIRE( app.lastSentProperty()["65-35-open-ri"].getSwitchState() == pcf::IndiElement::On );
+    }
+
+    SECTION( "dispatch failures are propagated to the caller" )
+    {
+        app.setSendNewPropertyResult( -1 );
+        REQUIRE( app.sendGotoFocusCommand() == -1 );
     }
 }
 

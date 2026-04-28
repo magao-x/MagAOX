@@ -339,8 +339,12 @@ void camera::subscribe()
     if( !m_parent )
         return;
 
+    // The empty-name subscription requests the current device property list,
+    // but live updates still require exact property subscriptions.
     m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_camName, "" );
     m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_camName, "fsm" );
+    m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_camName, "focus" );
+    m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_camName, "goto_focus" );
     m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_darkName, "" );
     m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_darkName, "start" );
     m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_avgName, "" );
