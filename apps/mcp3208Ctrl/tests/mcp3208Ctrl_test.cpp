@@ -284,6 +284,7 @@ TEST_CASE( "mcp3208Ctrl Doxygen references are preserved", "[mcp3208Ctrl]" )
     XWCTEST_DOXYGEN_REF( app.updateTriggerTiming( timespec{} ) );
     XWCTEST_DOXYGEN_REF( app.updateTimingDiagnosticsIndi() );
     XWCTEST_DOXYGEN_REF( app.delayBeforeRead() );
+    XWCTEST_DOXYGEN_REF( app.updateSynchroDelayController( 0.0 ) );
     XWCTEST_DOXYGEN_REF( app.timespecToNs( timespec{} ) );
     XWCTEST_DOXYGEN_REF( app.nsToTimespec( 0.0 ) );
 
@@ -482,7 +483,7 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     app.setupTimingDiagnosticsProperty();
     app.m_synchroShmimName      = "camwfs_sync";
     app.m_avgReadLatency_ns     = 125000.0;
-    app.m_synchroDelay          = 24000.0f;
+    app.m_synchroDelay          = 31000.0f;
     app.m_synchroDelayTarget    = 17000.0f;
     app.m_delayApplied_ns       = 24000.0;
     app.m_delayModel_ns         = 17000.0;
@@ -1140,6 +1141,31 @@ TEST_CASE( "mcp3208Ctrl synchronized delay controller clamps to zero", "[mcp3208
     REQUIRE( app.m_values[0] == 11 );
 
     REQUIRE( sem_destroy( &semaphore ) == 0 );
+}
+
+/// Verify synchronized delay control blocks integrator windup while cadence capping is active.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl synchronized delay controller applies anti-windup at cap", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.m_gain               = 1.0f;
+    app.m_synchroDelayTarget = 300000.0f;
+    app.m_wfsPeriodMeasured_ns = 500000.0;
+    app.m_delayBudget_ns       = 100000.0;
+    app.m_delayApplied_ns      = 100000.0;
+
+    // While capped high, negative error would normally increase command; anti-windup should hold at the cap.
+    app.m_avgReadLatency_ns = 100000.0;
+    app.updateSynchroDelayController( 500000.0 );
+    REQUIRE( app.m_synchroDelay == Approx( 100000.0f ) );
+
+    // If the controller correction reduces delay, allow command to move down below the cap.
+    app.m_avgReadLatency_ns = 350000.0;
+    app.updateSynchroDelayController( 110000.0 );
+    REQUIRE( app.m_synchroDelay == Approx( 60000.0f ) );
 }
 
 /// Verify synchronized timeout requests reconfiguration when the trigger stream is stale.

@@ -290,6 +290,9 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     /// Apply the current controlled delay between semaphore wake and ADC read.
     void delayBeforeRead();
 
+    /// Update the synchronized delay command with anti-windup and physical bounds.
+    void updateSynchroDelayController( double desiredDelay_ns /**< [in] the unconstrained synchronized-delay command */ );
+
     /// Update synchronized trigger timing from the current semaphore arrival.
     void updateTriggerTiming( const timespec &atime /**< [in] the semaphore-arrival timestamp */ );
 
@@ -962,7 +965,7 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     m_delayLock          = delayLock;
 
     const double avgReadLatency_us      = m_avgReadLatency_ns * c_nsToUs;
-    const double synchroDelay_us        = static_cast<double>( m_synchroDelay ) * c_nsToUs;
+    const double synchroDelay_us        = delayAppliedDiag_ns * c_nsToUs;
     const double synchroDelayTarget_us  = static_cast<double>( m_synchroDelayTarget ) * c_nsToUs;
     const double delayAppliedDiag_us    = delayAppliedDiag_ns * c_nsToUs;
     const double delayModelDiag_us      = delayModelDiag_ns * c_nsToUs;
@@ -1517,11 +1520,7 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
         m_firstReadLatency  = false;
     }
 
-    m_synchroDelay = m_synchroDelay - m_gain * ( m_avgReadLatency_ns - m_synchroDelayTarget );
-    if( m_synchroDelay < 0 )
-    {
-        m_synchroDelay = 0;
-    }
+    updateSynchroDelayController( desiredDelay_ns );
 
     const auto readStart = std::chrono::high_resolution_clock::now();
     for( int i = 0; i < m_numChannels; ++i )
@@ -1587,6 +1586,36 @@ void mcp3208Ctrl::delayBeforeRead()
         mx::sys::nanoSleep( static_cast<unsigned>( m_delayApplied_ns ) );
         return;
     }
+}
+
+void mcp3208Ctrl::updateSynchroDelayController( double desiredDelay_ns )
+{
+    constexpr double c_satEpsilon_ns = 1e-6;
+
+    const double controlStep_ns =
+        static_cast<double>( m_gain ) * ( m_avgReadLatency_ns - static_cast<double>( m_synchroDelayTarget ) );
+    double updatedDelay_ns = desiredDelay_ns - controlStep_ns;
+
+    if( updatedDelay_ns < 0.0 )
+    {
+        updatedDelay_ns = 0.0;
+    }
+
+    const bool upperSaturated =
+        ( m_wfsPeriodMeasured_ns > 0.0 ) && ( m_delayApplied_ns + c_satEpsilon_ns < desiredDelay_ns );
+    const bool pushesFurtherIntoSaturation = ( updatedDelay_ns > desiredDelay_ns );
+
+    if( upperSaturated && pushesFurtherIntoSaturation )
+    {
+        updatedDelay_ns = m_delayApplied_ns;
+    }
+
+    if( m_wfsPeriodMeasured_ns > 0.0 && updatedDelay_ns > m_delayBudget_ns )
+    {
+        updatedDelay_ns = m_delayBudget_ns;
+    }
+
+    m_synchroDelay = static_cast<float>( updatedDelay_ns );
 }
 
 int mcp3208Ctrl::checkRecordTimes()
