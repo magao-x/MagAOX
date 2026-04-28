@@ -302,7 +302,7 @@ scripts_to_install = \
 	inventory_files \
 	list_xfiles_by_semester \
 	loop_instrument_backup_sync \
-	cyverse_replicate
+	cyverse_replicate 
 
 ifeq ($(MAGAOX_ROLE),RTC)
   scripts_to_install += cacao/RTC/cacao-startup
@@ -319,7 +319,7 @@ else ifeq ($(MAGAOX_ROLE),ICC)
   scripts_to_install += cacao/ICC/ncpc-rootdir-scripts/post-calib-apply
   scripts_to_install += cacao/hoblockleaks
   scripts_to_install += cacao/ICC/lowfs_switch
-
+  scripts_to_install += shift_ncpc
 else ifeq ($(MAGAOX_ROLE),TIC)
   scripts_to_install += cacao/TIC/cacao-startup
   scripts_to_install += cacao/TIC/cacao-shutdown

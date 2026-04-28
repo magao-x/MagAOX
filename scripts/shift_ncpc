@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-
+set -x
 #########################################################
 # switch NCPC calibration symlinks between warm and cold
 #
@@ -28,33 +28,49 @@ fi
 
 case "$1" in
     warm)
+
+	setINDI dmncpc.releaseDM.request=On
+        setINDI dmncpc.zeroAll.request=On
+
         xctrl shutdown dmncpc ncpcModes || exit 1
         did_shutdown=1
 
         cd /opt/MagAOX/calib/dm/bmc_1k || exit 1
 
         ln -sf basis_center/zern_basis_1k_50modes_ellipse_rolled.fits zbasis.fits
-        ln -sf flats_center flats
+        rm -f flats
+	ln -sf flats_center flats
+	rm -f tests
         ln -sf tests_center tests
 
         cd /opt/MagAOX/calib/fdpr2 || exit 1
 
+	rm -f dmncpc_camsci1_CH4
         ln -sf dmncpc_camsci1_CH4_center dmncpc_camsci1_CH4
+	rm -f dmncpc_camsci2_Ha
         ln -sf dmncpc_camsci2_Ha_center dmncpc_camsci2_Ha
         ;;
     cold)
+
+	setINDI dmncpc.releaseDM.request=On
+        setINDI dmncpc.zeroAll.request=On
+
         xctrl shutdown dmncpc ncpcModes || exit 1
         did_shutdown=1
 
         cd /opt/MagAOX/calib/dm/bmc_1k || exit 1
 
-        ln -sf basis_shift_down_1/basis_shift_down_1/zern_basis_1k_50modes_ellipse_rolled_shift_down_1.fits zbasis.fits
+        ln -sf basis_shift_down_1/zern_basis_1k_50modes_ellipse_rolled_shift_down_1.fits zbasis.fits
+	rm -f flats
         ln -sf flats_shift_down_1 flats
-        ln -sf tests_shift_down_1 tests
+        rm -f tests
+	ln -sf tests_shift_down_1 tests
 
         cd /opt/MagAOX/calib/fdpr2 || exit 1
 
+	rm -f dmncpc_camsci1_CH4
         ln -sf dmncpc_camsci1_CH4_shifted_down_1 dmncpc_camsci1_CH4
+	rm -f dmncpc_camsci2_Ha
         ln -sf dmncpc_camsci2_Ha_shifted_down_1 dmncpc_camsci2_Ha
         ;;
     *)
