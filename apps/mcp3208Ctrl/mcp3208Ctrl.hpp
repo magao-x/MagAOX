@@ -72,8 +72,8 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     float m_numChannelsTol{ 0 }; ///< The tolerance for detecting a change in numChannels.
 
-    std::string m_synchroShmimName;      ///< The synchronization ImageStreamIO stream name; empty selects timer mode.
-    int         m_synchroPostDelay{ 0 }; ///< Requested delay between semaphore wake and A/D read in microseconds.
+    std::string m_synchroShmimName; ///< The synchronization ImageStreamIO stream name; empty selects timer mode.
+    int m_synchroPostDelay{ 0 }; ///< Signed microsecond phase offset added to synchronized delay-model predictions.
 
     double m_synchroDtTransfer_ns{ 3e3 }; ///< Transfer-latency term in the synchronized delay model.
 
@@ -127,10 +127,10 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     /// Handle updates to the global EMA alpha property.
     INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_alpha );
 
-    /// INDI property exposing the synchronized-mode post delay in microseconds.
+    /// INDI property exposing the synchronized-mode signed phase offset in microseconds.
     pcf::IndiProperty m_indiP_synchroDelay;
 
-    /// Handle updates to the synchronized-mode post delay property.
+    /// Handle updates to the synchronized-mode signed phase offset property.
     INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_synchroDelay );
 
     /// INDI property exposing runtime timing diagnostics for acquisition health checks.
@@ -140,7 +140,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     float m_gain{ .1 };                    ///< The simple integrator gain used for timer and synchro delay control.
     float nano_sec_target{ 1e9f / m_fps }; ///< The timer-mode target interval in nanoseconds.
     float m_synchroDelay{ 0 };             ///< The controlled pre-read delay in synchronized mode, in nanoseconds.
-    float m_synchroDelayTarget{ 0 };       ///< The synchronized-mode delay target in nanoseconds; initialized from config and updated by trigger timing.
+    float m_synchroDelayTarget{ 0 };       ///< The synchronized-mode effective delay target in nanoseconds after applying signed offset and wrap.
 
     /// Secondary MCP3208 handle retained with the legacy class state.
     MCP3208Lib::MCP3208 adc;
@@ -484,14 +484,21 @@ void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
     const double raw_delay_ns =
         0.5 * deltaT_wfs_ns - ( m_synchroDtTransfer_ns + m_synchroWfsProcess_ns + m_synchroDtF_ns + m_synchroWfsRead_ns );
 
-    double t_delay_ns = std::fmod( raw_delay_ns, deltaT_wfs_ns );
+    double t_delay_model_ns = std::fmod( raw_delay_ns, deltaT_wfs_ns );
 
+    if( t_delay_model_ns < 0.0 )
+    {
+        t_delay_model_ns += deltaT_wfs_ns;
+    }
+
+    const double delayOffset_ns = 1e3 * static_cast<double>( m_synchroPostDelay );
+    double       t_delay_ns     = std::fmod( t_delay_model_ns + delayOffset_ns, deltaT_wfs_ns );
     if( t_delay_ns < 0.0 )
     {
         t_delay_ns += deltaT_wfs_ns;
     }
 
-    m_delayModel_ns      = t_delay_ns;
+    m_delayModel_ns      = t_delay_model_ns;
     m_synchroDelayTarget = static_cast<float>( t_delay_ns );
 
     const double t_trigger_ns = timespecToNs( atime ) + t_delay_ns;
@@ -577,7 +584,7 @@ void mcp3208Ctrl::setupConfig()
                 "postDelay",
                 false,
                 "int",
-                "Delay between a synchronization semaphore and the A/D read in microseconds. Default is 0." );
+                "Signed phase offset in microseconds added to synchronized delay-model predictions. Default is 0." );
 
     config.add( "synchro.dtTransfer_ns",
                 "",
@@ -739,11 +746,6 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
 
     _config(m_fgCpuset, "framegrabber.cpuset");
 
-    if( m_synchroPostDelay < 0 )
-    {
-        m_synchroPostDelay = 0;
-    }
-
     if( m_synchroDtTransfer_ns < 0.0 )
     {
         m_synchroDtTransfer_ns = 0.0;
@@ -790,7 +792,7 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
 
     m_synchroDelayTarget = 1e3f * m_synchroPostDelay;
     m_synchroDelay       = m_synchroDelayTarget;
-    m_delayModel_ns      = static_cast<double>( m_synchroDelayTarget );
+    m_delayModel_ns      = 0.0;
     m_delayApplied_ns    = static_cast<double>( m_synchroDelayTarget );
     m_delayBudget_ns     = 0.0;
     m_nonDelayService_ns = 0.0;
@@ -836,8 +838,8 @@ int mcp3208Ctrl::appStartup()
     m_indiP_numChannels["current"].setValue( m_numChannels );
     m_indiP_numChannels["target"].setValue( m_numChannels );
 
-    // INDI prop for user to set synchronized-mode post delay in microseconds
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_synchroDelay, "synchroDelay", 0, 1000000, 1, "%d", "us", "" );
+    // INDI prop for user to set synchronized-mode signed phase offset in microseconds
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_synchroDelay, "synchroDelay", -1000000, 1000000, 1, "%d", "us", "" );
     m_indiP_synchroDelay["current"].setValue( m_synchroPostDelay );
     m_indiP_synchroDelay["target"].setValue( m_synchroPostDelay );
 
@@ -1071,7 +1073,7 @@ int mcp3208Ctrl::configureAcquisition()
     if( !m_synchroShmimName.empty() )
     {
         log<text_log>( "Configuring semaphore-synchronized acquisition from " + m_synchroShmimName +
-                           " with target delay " + std::to_string( m_synchroPostDelay ) + " us.",
+                           " with phase offset " + std::to_string( m_synchroPostDelay ) + " us.",
                        logPrio::LOG_INFO );
 
         if( openSynchroStream() != 0 )
@@ -1133,7 +1135,7 @@ int mcp3208Ctrl::startAcquisition()
         m_producerPeriodInst_ns = 0.0;
         m_avgProducerPeriod_ns  = 0.0;
         m_firstProducerSample   = true;
-        m_delayModel_ns         = static_cast<double>( m_synchroDelayTarget );
+        m_delayModel_ns         = 0.0;
         m_delayApplied_ns       = 0.0;
         m_delayBudget_ns        = 0.0;
         m_nonDelayService_ns    = 0.0;
@@ -1305,7 +1307,7 @@ void mcp3208Ctrl::closeSynchroStream()
     m_firstSemaphore         = true;
     m_avgReadLatency_ns      = 0.0;
     m_firstReadLatency       = true;
-    m_delayModel_ns          = static_cast<double>( m_synchroDelayTarget );
+    m_delayModel_ns          = 0.0;
     m_delayApplied_ns        = 0.0;
     m_delayBudget_ns         = 0.0;
     m_nonDelayService_ns     = 0.0;
@@ -1685,7 +1687,7 @@ INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_alpha )( const pcf::IndiProperty &ip
     return 0;
 }
 
-// INDI callback handling for synchronized-mode post delay configuration.
+// INDI callback handling for synchronized-mode signed phase offset configuration.
 INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_synchroDelay )( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getName() != m_indiP_synchroDelay.getName() )
@@ -1701,17 +1703,24 @@ INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_synchroDelay )( const pcf::IndiPrope
         return -1;
     }
 
-    if( target < 0 )
-    {
-        target = 0;
-    }
-
     m_synchroPostDelay   = target;
-    m_synchroDelayTarget = 1e3f * static_cast<float>( m_synchroPostDelay );
-    m_synchroDelay       = m_synchroDelayTarget;
-    m_delayModel_ns      = static_cast<double>( m_synchroDelayTarget );
+    if( m_wfsPeriodMeasured_ns > 0.0 )
+    {
+        double t_delay_ns = std::fmod( m_delayModel_ns + 1e3 * static_cast<double>( m_synchroPostDelay ), m_wfsPeriodMeasured_ns );
+        if( t_delay_ns < 0.0 )
+        {
+            t_delay_ns += m_wfsPeriodMeasured_ns;
+        }
 
-    log<text_log>( "set synchroDelay = " + std::to_string( m_synchroPostDelay ) + " us" );
+        m_synchroDelayTarget = static_cast<float>( t_delay_ns );
+    }
+    else
+    {
+        m_synchroDelayTarget = 1e3f * static_cast<float>( m_synchroPostDelay );
+    }
+    m_synchroDelay = m_synchroDelayTarget;
+
+    log<text_log>( "set synchroDelay offset = " + std::to_string( m_synchroPostDelay ) + " us" );
     return 0;
 }
 

@@ -211,7 +211,7 @@ class mcp3208Ctrl_test : public mcp3208Ctrl
     }
 
     /// Build an INDI property update for the synchronized-delay callback.
-    pcf::IndiProperty makeSynchroDelayUpdate( const double target_us /**< [in] requested synchronized delay in microseconds */ )
+    pcf::IndiProperty makeSynchroDelayUpdate( const double target_us /**< [in] requested synchronized signed delay offset in microseconds */ )
     {
         pcf::IndiProperty ip( pcf::IndiProperty::Number );
         ip.setName( "synchroDelay" );
@@ -448,28 +448,29 @@ TEST_CASE( "mcp3208Ctrl alpha callback updates and clamps", "[mcp3208Ctrl]" )
     REQUIRE( app.m_alpha == Approx( 1.0f ) );
 }
 
-/// Verify synchronized-delay callback updates delay state and clamps at zero microseconds.
+/// Verify synchronized-delay callback updates delay state with signed offsets.
 /**
  * \ingroup mcp3208Ctrl_unit_test
  */
-TEST_CASE( "mcp3208Ctrl synchroDelay callback updates and clamps", "[mcp3208Ctrl]" )
+TEST_CASE( "mcp3208Ctrl synchroDelay callback updates signed offsets", "[mcp3208Ctrl]" )
 {
     mcp3208Ctrl_test app;
 
     app.setupSynchroDelayProperty();
-    app.m_delayModel_ns = 123.0;
+    app.m_wfsPeriodMeasured_ns = 1000000.0;
+    app.m_delayModel_ns        = 120000.0;
 
     REQUIRE( app.newCallBack_m_indiP_synchroDelay( app.makeSynchroDelayUpdate( 25.0 ) ) == 0 );
     REQUIRE( app.m_synchroPostDelay == 25 );
-    REQUIRE( app.m_synchroDelayTarget == Approx( 25000.0f ) );
-    REQUIRE( app.m_synchroDelay == Approx( 25000.0f ) );
-    REQUIRE( app.m_delayModel_ns == Approx( 25000.0 ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( 145000.0f ) );
+    REQUIRE( app.m_synchroDelay == Approx( 145000.0f ) );
+    REQUIRE( app.m_delayModel_ns == Approx( 120000.0 ) );
 
     REQUIRE( app.newCallBack_m_indiP_synchroDelay( app.makeSynchroDelayUpdate( -5.0 ) ) == 0 );
-    REQUIRE( app.m_synchroPostDelay == 0 );
-    REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
-    REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
-    REQUIRE( app.m_delayModel_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_synchroPostDelay == -5 );
+    REQUIRE( app.m_synchroDelayTarget == Approx( 115000.0f ) );
+    REQUIRE( app.m_synchroDelay == Approx( 115000.0f ) );
+    REQUIRE( app.m_delayModel_ns == Approx( 120000.0 ) );
 }
 
 /// Verify synchronized-mode timing diagnostics publish loop state and derived error.
@@ -610,7 +611,8 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming uses measured semaphore period for d
     app.m_firstSemaphore        = false;
     app.m_lastAtime             = timespec{ 10, 100000000L };
     app.m_avgSemaphorePeriod_ns = 500000.0;
-    app.m_wfs_fps = 1000.0;
+    app.m_wfs_fps             = 1000.0;
+    app.m_synchroPostDelay    = 0;
 
     const timespec secondArrival{ 10, 101000000L };
 
@@ -637,6 +639,66 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming uses measured semaphore period for d
     REQUIRE( expectedDelayMeasured_ns != Approx( expectedDelayBlended_ns ) );
     REQUIRE( measuredDelay_ns >= 0.0 );
     REQUIRE( measuredDelay_ns < expectedMeasuredDeltaT_ns );
+}
+
+/// Verify synchronized timing applies a positive user offset to the modeled delay target.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl updateTriggerTiming applies positive synchroDelay offset", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.m_alpha                 = 1.0f;
+    app.m_firstSemaphore        = false;
+    app.m_lastAtime             = timespec{ 0, 0 };
+    app.m_avgSemaphorePeriod_ns = 250000.0;
+    app.m_synchroPostDelay      = 100;
+
+    const timespec secondArrival{ 0, 1000000L };
+    app.updateTriggerTiming( secondArrival );
+
+    const double expectedPeriod_ns  = 1000000.0;
+    const double rawModelDelay_ns   = 0.5 * expectedPeriod_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
+    const double expectedModel_ns   = wrapDelay( rawModelDelay_ns, expectedPeriod_ns );
+    const double expectedTarget_ns  = wrapDelay( expectedModel_ns + 100000.0, expectedPeriod_ns );
+    const double measuredTrigger_ns = mcp3208Ctrl::timespecToNs( app.m_triggerTime );
+    const double measuredDelay_ns   = measuredTrigger_ns - mcp3208Ctrl::timespecToNs( secondArrival );
+
+    REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( expectedPeriod_ns ) );
+    REQUIRE( app.m_delayModel_ns == Approx( expectedModel_ns ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( static_cast<float>( expectedTarget_ns ) ) );
+    REQUIRE( measuredDelay_ns == Approx( expectedTarget_ns ) );
+}
+
+/// Verify synchronized timing applies a negative user offset with modulo wrap into the current period.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl updateTriggerTiming applies negative synchroDelay offset with wrap", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.m_alpha                 = 1.0f;
+    app.m_firstSemaphore        = false;
+    app.m_lastAtime             = timespec{ 0, 0 };
+    app.m_avgSemaphorePeriod_ns = 250000.0;
+    app.m_synchroPostDelay      = -300;
+
+    const timespec secondArrival{ 0, 1000000L };
+    app.updateTriggerTiming( secondArrival );
+
+    const double expectedPeriod_ns  = 1000000.0;
+    const double rawModelDelay_ns   = 0.5 * expectedPeriod_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
+    const double expectedModel_ns   = wrapDelay( rawModelDelay_ns, expectedPeriod_ns );
+    const double expectedTarget_ns  = wrapDelay( expectedModel_ns - 300000.0, expectedPeriod_ns );
+    const double measuredTrigger_ns = mcp3208Ctrl::timespecToNs( app.m_triggerTime );
+    const double measuredDelay_ns   = measuredTrigger_ns - mcp3208Ctrl::timespecToNs( secondArrival );
+
+    REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( expectedPeriod_ns ) );
+    REQUIRE( app.m_delayModel_ns == Approx( expectedModel_ns ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( static_cast<float>( expectedTarget_ns ) ) );
+    REQUIRE( measuredDelay_ns == Approx( expectedTarget_ns ) );
 }
 
 /// Verify synchronized timing falls back to EMA period when WFS fps is unavailable.
