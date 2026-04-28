@@ -70,6 +70,7 @@ class cameraSim_test : public cameraSim
         XWCTEST_SETUP_INDI_ARB_NEW_PROP( m_indiP_temp, goto_focus )
     }
 
+    /// Configure the stdCamera focus-state helper for a monitored switch element.
     void configureFocusHelper( const std::string &device,
                                const std::string &property,
                                const std::string &element,
@@ -107,7 +108,13 @@ class focusHelper_test : public MagAOXApp<>, public dev::stdCamera<focusHelper_t
     friend class dev::stdCamera<focusHelper_test>;
 
   public:
-    static constexpr bool c_stdCamera_hasFocus = true;
+    static constexpr bool c_stdCamera_hasFocus     = true;
+    static constexpr bool c_stdCamera_tempControl  = false;
+    static constexpr bool c_stdCamera_readoutSpeed = false;
+    static constexpr bool c_stdCamera_vShiftSpeed  = false;
+    static constexpr bool c_stdCamera_emGain       = false;
+    static constexpr bool c_stdCamera_usesModes    = false;
+    static constexpr bool c_stdCamera_usesROI      = false;
 
   protected:
     pcf::IndiProperty m_lastSentProperty; ///< Captures the last INDI command sent through the goto-focus helper.
@@ -174,27 +181,32 @@ class focusHelper_test : public MagAOXApp<>, public dev::stdCamera<focusHelper_t
         m_indiP_focusMonitoredProperties[0].setName( property );
     }
 
+    /// Cache a monitored INDI property through the stdCamera helper callback.
     int cacheFocusProperty( const pcf::IndiProperty &ipRecv )
     {
         return setCallBack_focusMonitored( ipRecv );
     }
 
+    /// Evaluate the cached focus-state helper result.
     bool checkFocus()
     {
         return checkFocusSwitchState();
     }
 
+    /// Satisfy the stdCamera derived-class interface for unit testing.
     int gotoFocus()
     {
         return 0;
     }
 
+    /// Capture the last helper-issued INDI command instead of sending it.
     int sendNewProperty( const pcf::IndiProperty &ipSend )
     {
         m_lastSentProperty = ipSend;
         return m_sendNewPropertyResult;
     }
 
+    /// Set the return code that the sendNewProperty test hook should report.
     void setSendNewPropertyResult( int result )
     {
         m_sendNewPropertyResult = result;
@@ -220,9 +232,28 @@ class focusHelper_test : public MagAOXApp<>, public dev::stdCamera<focusHelper_t
         return m_indiP_focus["state"].getSwitchState();
     }
 
+    /// Retrieve the last INDI property captured from sendGotoFocusCommand.
     const pcf::IndiProperty &lastSentProperty() const
     {
         return m_lastSentProperty;
+    }
+
+    /// Retrieve the configured goto-focus format string after config parsing.
+    const std::string &gotoFocusFormat() const
+    {
+        return m_focusGotoFormat;
+    }
+
+    /// Expose stdCamera configuration setup for the config-file unit test.
+    int setupConfig( mx::app::appConfigurator &config )
+    {
+        return dev::stdCamera<focusHelper_test>::setupConfig( config );
+    }
+
+    /// Expose stdCamera configuration loading for the config-file unit test.
+    int loadConfig( mx::app::appConfigurator &config )
+    {
+        return dev::stdCamera<focusHelper_test>::loadConfig( config );
     }
 };
 /// \endcond
@@ -357,6 +388,37 @@ TEST_CASE( "cameraSim stdCamera goto-focus helper dispatches preset commands", "
         app.setSendNewPropertyResult( -1 );
         REQUIRE( app.sendGotoFocusCommand() == -1 );
     }
+}
+
+/// Verify the stdCamera goto-focus helper strips wrapping quotes from configured format strings.
+/**
+ * \ingroup cameraSim_unit_test
+ */
+TEST_CASE( "cameraSim stdCamera goto-focus helper strips quoted format strings", "[cameraSim]" )
+{
+    mx::app::writeConfigFile( "/tmp/cameraSim_focusHelper.conf",
+                              { "focus.gotoFocus",
+                                "focus.gotoFocus",
+                                "focus.gotoFocus",
+                                "focus.gotoFocus",
+                                "focus.gotoFocus",
+                                "focus.gotoFocus" },
+                              { "numSwitches", "property1", "property2", "property3", "format", "targetProperty" },
+                              { "3",
+                                "stagebs.presetName",
+                                "fwfpm.filterName",
+                                "stagescibs.presetName",
+                                "\"{}-{}-{}\"",
+                                "stagesci1.presetName" } );
+
+    mx::app::appConfigurator config;
+    focusHelper_test         app;
+
+    REQUIRE( app.setupConfig( config ) == 0 );
+    config.readConfig( "/tmp/cameraSim_focusHelper.conf" );
+    REQUIRE( app.loadConfig( config ) == 0 );
+    REQUIRE( app.gotoFocusFormat() == "{}-{}-{}" );
+    REQUIRE_FALSE( app.gotoFocusFormat().find( '\"' ) != std::string::npos );
 }
 
 } // namespace cameraSimTest

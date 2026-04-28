@@ -498,6 +498,48 @@ int stdMotionStage<derivedT>::newCallBack_m_indiP_presetName( const pcf::IndiPro
 {
     INDI_VALIDATE_CALLBACK_PROPS_DERIVED( m_indiP_presetName, ipRecv );
 
+    std::vector<std::string> invalidSelections;
+    for( auto &&el : ipRecv.getElements() )
+    {
+        if( el.second.getSwitchState() != pcf::IndiElement::On )
+        {
+            continue;
+        }
+
+        bool knownPreset = false;
+        for( size_t i = 0; i < m_presetNames.size(); ++i )
+        {
+            if( el.first == m_presetNames[i] )
+            {
+                knownPreset = true;
+                break;
+            }
+        }
+
+        if( !knownPreset )
+        {
+            invalidSelections.push_back( el.first );
+        }
+    }
+
+    if( invalidSelections.size() > 0 )
+    {
+        std::string invalidNames;
+        for( size_t n = 0; n < invalidSelections.size(); ++n )
+        {
+            if( n > 0 )
+            {
+                invalidNames += ", ";
+            }
+
+            invalidNames += invalidSelections[n];
+        }
+
+        derivedT::template log<text_log>( "Unknown " + m_presetNotation + "Name selected: " + invalidNames,
+                                          logPrio::LOG_ERROR );
+        return -1;
+    }
+
     std::string newName = "";
     int         newn    = -1;
 

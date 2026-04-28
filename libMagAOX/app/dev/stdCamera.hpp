@@ -49,6 +49,30 @@ struct cameraConfig
 
 typedef std::unordered_map<std::string, cameraConfig> cameraConfigMap;
 
+/// Strip leading and trailing whitespace and one matching pair of wrapping double quotes.
+inline void stripQuotedWhitespace( std::string &value )
+{
+    if( value.size() == 0 )
+    {
+        return;
+    }
+
+    size_t first = value.find_first_not_of( " \t\r\n" );
+    if( first == std::string::npos )
+    {
+        value.clear();
+        return;
+    }
+
+    size_t last = value.find_last_not_of( " \t\r\n" );
+    value       = value.substr( first, last - first + 1 );
+
+    if( value.size() >= 2 && value.front() == '\"' && value.back() == '\"' )
+    {
+        value = value.substr( 1, value.size() - 2 );
+    }
+}
+
 /// Load the camera configurations contained in the app configuration into a map
 int loadCameraConfig( cameraConfigMap &ccmap, ///< [out] the map in which to place the configurations found in config
                       mx::app::appConfigurator &config ///< [in] the application configuration structure
@@ -1891,6 +1915,7 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
         int numFocusGotoSwitches = 0;
         config( numFocusGotoSwitches, "focus.gotoFocus.numSwitches" );
         config( m_focusGotoFormat, "focus.gotoFocus.format" );
+        stripQuotedWhitespace( m_focusGotoFormat );
         config( m_focusGotoTargetProperty, "focus.gotoFocus.targetProperty" );
 
         bool focusGotoConfigPresent =
