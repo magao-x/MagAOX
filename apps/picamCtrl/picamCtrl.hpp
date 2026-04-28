@@ -180,6 +180,9 @@ class picamCtrl : public MagAOXApp<>,
     static constexpr bool c_stdCamera_hasShutter =
         true; ///< app:dev config to tell stdCamera to expose shutter controls
 
+    static constexpr bool c_stdCamera_hasFocus =
+        true; ///< app:dev config to tell stdCamera to expose focus-state reporting and goto-focus control
+
     static constexpr bool c_stdCamera_usesStateString =
         false; ///< app::dev confg to tell stdCamera to expose the state string property
 
@@ -315,7 +318,21 @@ class picamCtrl : public MagAOXApp<>,
      */
     int checkNextROI();
 
+    /// Reports whether the camera is currently in focus. [stdCamera interface]
+    /**
+     * \returns `true` when the configured external focus switch indicates the camera is in focus.
+     * \returns `false` otherwise
+     */
+    bool checkFocus();
+
     int setNextROI();
+
+    /// Requests the configured focus preset. [stdCamera interface]
+    /**
+     * \returns 0 on success
+     * \returns -1 if the goto-focus helper is not fully configured
+     */
+    int gotoFocus();
 
     /// Sets the shutter state, via call to dssShutter::setShutterState(int) [stdCamera interface]
     /**
@@ -1556,6 +1573,16 @@ inline int picamCtrl::setNextROI()
     m_reconfig = true;
 
     return 0;
+}
+
+inline bool picamCtrl::checkFocus()
+{
+    return checkFocusSwitchState();
+}
+
+inline int picamCtrl::gotoFocus()
+{
+    return sendGotoFocusCommand();
 }
 
 inline int picamCtrl::setShutter( int sh )

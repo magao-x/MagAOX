@@ -34,6 +34,7 @@ class cameraSim_test : public cameraSim
     cameraSim_test( const std::string device )
     {
         m_configName = device;
+        m_hasFocus   = true;
 
         XWCTEST_SETUP_INDI_ARB_NEW_PROP( m_indiP_temp, reconfigure )
         XWCTEST_SETUP_INDI_ARB_NEW_PROP( m_indiP_temp, temp_ccd )
@@ -60,6 +61,7 @@ class cameraSim_test : public cameraSim
         XWCTEST_SETUP_INDI_ARB_NEW_PROP( m_indiP_temp, roi_set_last )
         XWCTEST_SETUP_INDI_ARB_NEW_PROP( m_indiP_temp, roi_set_default )
         XWCTEST_SETUP_INDI_ARB_NEW_PROP( m_indiP_temp, shutter )
+        XWCTEST_SETUP_INDI_ARB_NEW_PROP( m_indiP_temp, goto_focus )
     }
 };
 /// \endcond
@@ -100,6 +102,7 @@ TEST_CASE( "cameraSim INDI callbacks validate device and property names", "[came
     XWCTEST_INDI_ARBNEW_CALLBACK( cameraSim, newCallBack_stdCamera, roi_set_last );
     XWCTEST_INDI_ARBNEW_CALLBACK( cameraSim, newCallBack_stdCamera, roi_set_default );
     XWCTEST_INDI_ARBNEW_CALLBACK( cameraSim, newCallBack_stdCamera, shutter );
+    XWCTEST_INDI_ARBNEW_CALLBACK( cameraSim, newCallBack_stdCamera, goto_focus );
 }
 
 } // namespace cameraSimTest

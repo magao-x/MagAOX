@@ -9,3 +9,16 @@ Finally, in cameraGUI a focus button should appear if a camera exposes the goto_
 Review AGENTS.md.  Do not make changes to this prompt, but fill in the plan below in this document and commit it along with other work.
 
 Plan:
+- Add optional focus support to `dev::stdCamera` with a new `c_stdCamera_hasFocus` interface flag, runtime `m_hasFocus`
+  enable, read-only `focus.state`, and request switch `goto_focus.request`.
+- Provide `stdCamera` helper configuration and logic for the common focus integrations:
+  `checkFocusSwitchState()` for an external out-of-focus switch and `sendGotoFocusCommand()` for a
+  multi-switch-combo-derived goto-focus command target.
+- Implement focus support in `apps/picamCtrl/picamCtrl.hpp` by enabling `c_stdCamera_hasFocus` and delegating
+  `checkFocus()` / `gotoFocus()` to the new `stdCamera` helpers.
+- Exercise the new stdCamera focus request path in `apps/cameraSim/tests/cameraSim_test.cpp` so the generic
+  callback coverage includes `goto_focus`.
+- Update `gui/widgets/camera/camera.hpp` so cameraGUI adds a `goto focus` button when `goto_focus` is exposed,
+  disables it when `focus.state` is `On`, and shifts left-column controls down when focus support is present.
+- Run `clang-format` on touched files and perform targeted build/test verification before committing the plan
+  and code together.

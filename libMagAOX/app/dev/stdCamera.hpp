@@ -93,6 +93,19 @@ struct stdCameraHasAnalogGain<derivedT, std::void_t<decltype( derivedT::c_stdCam
 {
 };
 
+/// Detect whether a derived camera exposes stdCamera focus-state and goto-focus support.
+template <class derivedT, class = void>
+struct stdCameraHasFocus : std::false_type
+{
+};
+
+/// Specialization for cameras that define `c_stdCamera_hasFocus`.
+template <class derivedT>
+struct stdCameraHasFocus<derivedT, std::void_t<decltype( derivedT::c_stdCamera_hasFocus )>>
+    : std::bool_constant<derivedT::c_stdCamera_hasFocus>
+{
+};
+
 /// MagAO-X standard camera interface
 /** Implements the standard interface to a MagAO-X camera.  The derived class `derivedT` must
  * meet the following requirements:
@@ -358,6 +371,36 @@ struct stdCameraHasAnalogGain<derivedT, std::void_t<decltype( derivedT::c_stdCam
  *         \endcode
  *         which shuts the shutter if the argument is 0, opens it otherwise.
  *
+ *     - Focus State and Control:
+ *
+ *       - A static configuration variable may be defined in derivedT as
+ *         \code
+ *             static constexpr bool c_stdCamera_hasFocus = true; //or: false
+ *         \endcode
+ *         which determines whether or not focus-state reporting and goto-focus control are available. If omitted,
+ *         focus support defaults to off.
+ *
+ *       - If true then the derived class must implement
+ *         \code
+ *             bool checkFocus(); // return true when the current instrument state is in focus
+ *             int gotoFocus(); // command the focus stage to the current in-focus position
+ *         \endcode
+ *
+ *       - The focus controls are only published when \ref m_hasFocus is true at runtime. Derived classes may set
+ *         \ref m_hasFocus directly when they provide custom focus logic. When both stdCamera focus helpers are fully
+ *         configured, stdCamera enables \ref m_hasFocus automatically.
+ *
+ *       - When focus control is enabled, stdCamera publishes the read-only switch `focus.state`, which is `On` when
+ *         \ref checkFocus returns `true`, and the request switch `goto_focus.request`, which dispatches to
+ *         \ref gotoFocus when pressed.
+ *
+ *       - Derived classes can use \ref checkFocusSwitchState when an external switch property indicates an
+ *         out-of-focus condition by being `On`.
+ *
+ *       - Derived classes can use \ref sendGotoFocusCommand to derive and send a target preset name from the
+ *         configuration keys `focus.gotoFocus.numSwitches`, `focus.gotoFocus.property1...propertyN`,
+ *         `focus.gotoFocus.format`, and `focus.gotoFocus.targetProperty`.
+ *
  *     - State:
  *
  *       - A static configuration variable must be defined in derivedT as
@@ -393,6 +436,8 @@ class stdCamera
         stdCameraHasLED<derivedT>::value; ///< True when the derived camera exposes LED control.
     static constexpr bool c_hasAnalogGain =
         stdCameraHasAnalogGain<derivedT>::value; ///< True when the derived camera exposes analog-gain control.
+    static constexpr bool c_hasFocus = stdCameraHasFocus<derivedT>::value; ///< True when the derived camera exposes
+                                                                           ///< focus-state and goto-focus support.
 
     /** \name Configurable Parameters
      * @{
@@ -657,6 +702,54 @@ class stdCamera
 
     ///@}
 
+    /** \name Focus Control - Data
+     * Focus controls are exposed if the derived camera supports focus and m_hasFocus is true.
+     * @{
+     */
+    bool m_hasFocus{ false }; ///< Runtime flag enabling focus-state reporting and goto-focus control publication.
+
+    bool m_focusStateHelperConfigured{
+        false }; ///< True when stdCamera should evaluate focus state from an external out-of-focus switch.
+
+    std::string
+        m_focusStateSource; ///< INDI key (`device.property`) of the switch property used by checkFocusSwitchState.
+
+    std::string m_focusStateElement{
+        "toggle" }; ///< Element within m_focusStateSource interpreted as out of focus when it is `On`.
+
+    int m_focusStateSourceIndex{
+        -1 }; ///< Index of m_focusStateSource within m_indiP_focusMonitoredProperties, or `-1` when unused.
+
+    bool m_focusGotoHelperConfigured{
+        false }; ///< True when stdCamera should derive goto-focus commands from external switch properties.
+
+    std::vector<std::string> m_focusGotoSourceProperties; ///< INDI keys (`device.property`) of the switch properties
+                                                          ///< combined for gotoFocus().
+
+    std::vector<int>
+        m_focusGotoSourceIndices; ///< Indices of m_focusGotoSourceProperties within m_indiP_focusMonitoredProperties.
+
+    std::string m_focusGotoFormat; ///< Literal `{}` placeholder format used to build the goto-focus preset name.
+
+    std::string
+        m_focusGotoTargetProperty; ///< INDI key (`device.property`) of the switch property commanded by gotoFocus().
+
+    std::string m_focusGotoTargetDevice; ///< Device portion parsed from m_focusGotoTargetProperty.
+
+    std::string m_focusGotoTargetName; ///< Property-name portion parsed from m_focusGotoTargetProperty.
+
+    std::vector<std::string>
+        m_focusMonitoredPropertyKeys; ///< Unique INDI keys monitored for the focus-state and goto-focus helpers.
+
+    std::vector<pcf::IndiProperty>
+        m_indiP_focusMonitoredProperties; ///< Cached external switch properties monitored for the focus helpers.
+
+    pcf::IndiProperty m_indiP_focus; ///< Read-only switch property reporting whether the current state is in focus.
+
+    pcf::IndiProperty m_indiP_gotoFocus; ///< Request switch property used to command the current focus target.
+
+    ///@}
+
     /** \name State String
      * The State string is exposed if derivedT::c_stdCamera_usesStateString is true.
      * @{
@@ -687,6 +780,18 @@ class stdCamera
       * with appropriate error checking.
       */
     int loadConfig( mx::app::appConfigurator &config /**< [in] the derived classes configurator*/ );
+
+    /** \name Focus Control
+     * @{
+     */
+
+    /// Evaluate the configured out-of-focus switch helper as an in-focus boolean.
+    bool checkFocusSwitchState();
+
+    /// Format and send the configured goto-focus switch command.
+    int sendGotoFocusCommand();
+
+    ///@}
 
   protected:
     // workers to create indi variables if needed
@@ -1205,6 +1310,32 @@ class stdCamera
     int newCallBack_shutter(
         const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
 
+    /// Interface to checkFocus when the derivedT exposes focus support.
+    bool checkFocus( const mx::meta::trueFalseT<true> &t );
+
+    /// Interface to checkFocus when the derivedT does not expose focus support.
+    bool checkFocus( const mx::meta::trueFalseT<false> &f );
+
+    /// Interface to gotoFocus when the derivedT exposes focus support.
+    int gotoFocus( const mx::meta::trueFalseT<true> &t );
+
+    /// Interface to gotoFocus when the derivedT does not expose focus support.
+    int gotoFocus( const mx::meta::trueFalseT<false> &f );
+
+    /// Callback to process a NEW goto-focus request.
+    int newCallBack_gotoFocus(
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new property request.*/ );
+
+    /// The static callback function registered for external focus-helper switch properties.
+    static int st_setCallBack_focusMonitored(
+        void                    *app,   ///< [in] a pointer to this, which will be static_cast-ed to derivedT
+        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the set-property update
+    );
+
+    /// The callback which caches external focus-helper switch-property updates.
+    int setCallBack_focusMonitored(
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the set-property update.*/ );
+
     /// Interface to stateString when the derivedT provides it
     /** Tag-dispatch resolution of c_stdCamera_usesStateString==true will call this function.
      * Calls derivedT::stateString.
@@ -1450,6 +1581,63 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
                     "The default ROI y binning." );
     }
 
+    if( c_hasFocus )
+    {
+        config.add( "focus.stateProperty",
+                    "",
+                    "focus.stateProperty",
+                    argType::Optional,
+                    "focus",
+                    "stateProperty",
+                    false,
+                    "string",
+                    "The INDI key (device.property) of a switch property whose configured element is On when the "
+                    "camera is out of focus." );
+
+        config.add( "focus.stateElement",
+                    "",
+                    "focus.stateElement",
+                    argType::Optional,
+                    "focus",
+                    "stateElement",
+                    false,
+                    "string",
+                    "The element of focus.stateProperty interpreted as out of focus when it is On. Default is "
+                    "\"toggle\"." );
+
+        config.add( "focus.gotoFocus.numSwitches",
+                    "",
+                    "focus.gotoFocus.numSwitches",
+                    argType::Optional,
+                    "focus.gotoFocus",
+                    "numSwitches",
+                    false,
+                    "int",
+                    "The number of source switch properties combined to derive the goto-focus preset name. Also "
+                    "configure focus.gotoFocus.property1..propertyN, focus.gotoFocus.format, and "
+                    "focus.gotoFocus.targetProperty." );
+
+        config.add( "focus.gotoFocus.format",
+                    "",
+                    "focus.gotoFocus.format",
+                    argType::Optional,
+                    "focus.gotoFocus",
+                    "format",
+                    false,
+                    "string",
+                    "Literal {} placeholder format used to combine the configured goto-focus source switch names." );
+
+        config.add( "focus.gotoFocus.targetProperty",
+                    "",
+                    "focus.gotoFocus.targetProperty",
+                    argType::Optional,
+                    "focus.gotoFocus",
+                    "targetProperty",
+                    false,
+                    "string",
+                    "The INDI key (device.property) of the switch property commanded by gotoFocus()." );
+    }
+
     return 0;
 }
 
@@ -1622,6 +1810,275 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
         m_nextROI.bin_x = m_default_bin_x;
         m_nextROI.bin_y = m_default_bin_y;
     }
+
+    if( c_hasFocus )
+    {
+        config( m_focusStateSource, "focus.stateProperty" );
+        config( m_focusStateElement, "focus.stateElement" );
+        if( m_focusStateElement == "" )
+        {
+            m_focusStateElement = "toggle";
+        }
+
+        m_focusStateHelperConfigured = false;
+        m_focusStateSourceIndex      = -1;
+        m_focusGotoHelperConfigured  = false;
+        m_focusGotoSourceProperties.clear();
+        m_focusGotoSourceIndices.clear();
+        m_focusGotoFormat.clear();
+        m_focusGotoTargetProperty.clear();
+        m_focusGotoTargetDevice.clear();
+        m_focusGotoTargetName.clear();
+        m_focusMonitoredPropertyKeys.clear();
+        m_indiP_focusMonitoredProperties.clear();
+
+        auto addFocusMonitoredProperty = [&]( const std::string &propertyKey ) -> int
+        {
+            for( size_t n = 0; n < m_focusMonitoredPropertyKeys.size(); ++n )
+            {
+                if( m_focusMonitoredPropertyKeys[n] == propertyKey )
+                {
+                    return static_cast<int>( n );
+                }
+            }
+
+            std::string devName;
+            std::string propName;
+            if( indi::parseIndiKey( devName, propName, propertyKey ) < 0 )
+            {
+                return -1;
+            }
+
+            m_focusMonitoredPropertyKeys.push_back( propertyKey );
+            m_indiP_focusMonitoredProperties.emplace_back();
+            return static_cast<int>( m_focusMonitoredPropertyKeys.size() - 1 );
+        };
+
+        if( m_focusStateSource != "" )
+        {
+            m_focusStateSourceIndex = addFocusMonitoredProperty( m_focusStateSource );
+            if( m_focusStateSourceIndex < 0 )
+            {
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__, __LINE__, "invalid focus.stateProperty: " + m_focusStateSource } );
+            }
+
+            m_focusStateHelperConfigured = true;
+        }
+
+        int numFocusGotoSwitches = 0;
+        config( numFocusGotoSwitches, "focus.gotoFocus.numSwitches" );
+        config( m_focusGotoFormat, "focus.gotoFocus.format" );
+        config( m_focusGotoTargetProperty, "focus.gotoFocus.targetProperty" );
+
+        bool focusGotoConfigPresent =
+            numFocusGotoSwitches > 0 || m_focusGotoFormat != "" || m_focusGotoTargetProperty != "";
+
+        if( focusGotoConfigPresent )
+        {
+            if( numFocusGotoSwitches < 1 )
+            {
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__, __LINE__, "focus.gotoFocus.numSwitches must be greater than zero" } );
+            }
+
+            if( m_focusGotoFormat == "" )
+            {
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__, __LINE__, "focus.gotoFocus.format must be set when goto-focus helper is used" } );
+            }
+
+            if( m_focusGotoTargetProperty == "" )
+            {
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__,
+                      __LINE__,
+                      "focus.gotoFocus.targetProperty must be set when goto-focus helper is used" } );
+            }
+
+            bool   invalidBraces = false;
+            size_t placeholders  = 0;
+            for( size_t n = 0; n < m_focusGotoFormat.size(); ++n )
+            {
+                if( m_focusGotoFormat[n] == '{' )
+                {
+                    if( n + 1 < m_focusGotoFormat.size() && m_focusGotoFormat[n + 1] == '}' )
+                    {
+                        ++placeholders;
+                        ++n;
+                    }
+                    else
+                    {
+                        invalidBraces = true;
+                        break;
+                    }
+                }
+                else if( m_focusGotoFormat[n] == '}' )
+                {
+                    invalidBraces = true;
+                    break;
+                }
+            }
+
+            if( invalidBraces )
+            {
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__, __LINE__, "focus.gotoFocus.format only supports literal {} placeholders" } );
+            }
+
+            if( placeholders != static_cast<size_t>( numFocusGotoSwitches ) )
+            {
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__,
+                      __LINE__,
+                      "focus.gotoFocus.format placeholder count does not match focus.gotoFocus.numSwitches" } );
+            }
+
+            if( indi::parseIndiKey( m_focusGotoTargetDevice, m_focusGotoTargetName, m_focusGotoTargetProperty ) < 0 )
+            {
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__, __LINE__, "invalid focus.gotoFocus.targetProperty: " + m_focusGotoTargetProperty } );
+            }
+
+            for( int n = 0; n < numFocusGotoSwitches; ++n )
+            {
+                std::string propKey = std::string( "property" ) + std::to_string( n + 1 );
+                std::string property;
+                config.configUnused( property, mx::app::iniFile::makeKey( "focus.gotoFocus", propKey ) );
+
+                if( property == "" )
+                {
+                    return derivedT::template log<software_critical, -1>(
+                        { __FILE__, __LINE__, "focus.gotoFocus." + propKey + " must be set" } );
+                }
+
+                int propertyIndex = addFocusMonitoredProperty( property );
+                if( propertyIndex < 0 )
+                {
+                    return derivedT::template log<software_critical, -1>(
+                        { __FILE__, __LINE__, "invalid focus.gotoFocus." + propKey + ": " + property } );
+                }
+
+                m_focusGotoSourceProperties.push_back( property );
+                m_focusGotoSourceIndices.push_back( propertyIndex );
+            }
+
+            m_focusGotoHelperConfigured = true;
+        }
+
+        if( !m_hasFocus && m_focusStateHelperConfigured && m_focusGotoHelperConfigured )
+        {
+            m_hasFocus = true;
+        }
+    }
+
+    return 0;
+}
+
+template <class derivedT>
+bool stdCamera<derivedT>::checkFocusSwitchState()
+{
+    if( !m_focusStateHelperConfigured || m_focusStateSourceIndex < 0 ||
+        m_focusStateSourceIndex >= static_cast<int>( m_indiP_focusMonitoredProperties.size() ) )
+    {
+        return false;
+    }
+
+    const pcf::IndiProperty &focusProperty = m_indiP_focusMonitoredProperties[m_focusStateSourceIndex];
+    if( !focusProperty.find( m_focusStateElement ) )
+    {
+        return false;
+    }
+
+    return focusProperty[m_focusStateElement].getSwitchState() != pcf::IndiElement::On;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::sendGotoFocusCommand()
+{
+    if( !m_focusGotoHelperConfigured )
+    {
+        return derivedT::template log<software_error, -1>(
+            { __FILE__, __LINE__, "goto-focus helper is not configured" } );
+    }
+
+    std::vector<std::string> activeNames;
+    activeNames.reserve( m_focusGotoSourceIndices.size() );
+
+    for( size_t n = 0; n < m_focusGotoSourceIndices.size(); ++n )
+    {
+        int propertyIndex = m_focusGotoSourceIndices[n];
+        if( propertyIndex < 0 || propertyIndex >= static_cast<int>( m_indiP_focusMonitoredProperties.size() ) )
+        {
+            return derivedT::template log<software_error, -1>(
+                { __FILE__, __LINE__, "goto-focus helper property index is out of range" } );
+        }
+
+        const pcf::IndiProperty &sourceProperty = m_indiP_focusMonitoredProperties[propertyIndex];
+
+        size_t      onCount = 0;
+        std::string activeName;
+        for( auto &&el : sourceProperty.getElements() )
+        {
+            if( el.second.getSwitchState() == pcf::IndiElement::On )
+            {
+                if( onCount == 0 )
+                {
+                    activeName = el.first;
+                }
+
+                ++onCount;
+            }
+        }
+
+        if( onCount == 0 )
+        {
+            return derivedT::template log<software_error, -1>(
+                { __FILE__,
+                  __LINE__,
+                  "goto-focus helper found no active switch element in " + m_focusGotoSourceProperties[n] } );
+        }
+
+        if( onCount > 1 )
+        {
+            return derivedT::template log<software_error, -1>(
+                { __FILE__,
+                  __LINE__,
+                  "goto-focus helper found multiple active switch elements in " + m_focusGotoSourceProperties[n] } );
+        }
+
+        activeNames.push_back( activeName );
+    }
+
+    std::string targetElement;
+    size_t      valueIndex = 0;
+    for( size_t n = 0; n < m_focusGotoFormat.size(); ++n )
+    {
+        if( m_focusGotoFormat[n] == '{' && n + 1 < m_focusGotoFormat.size() && m_focusGotoFormat[n + 1] == '}' )
+        {
+            targetElement += activeNames[valueIndex];
+            ++valueIndex;
+            ++n;
+        }
+        else
+        {
+            targetElement += m_focusGotoFormat[n];
+        }
+    }
+
+    if( targetElement == "" )
+    {
+        return derivedT::template log<software_error, -1>(
+            { __FILE__, __LINE__, "goto-focus helper produced an empty target element name" } );
+    }
+
+    pcf::IndiProperty ipSend( pcf::IndiProperty::Switch );
+    ipSend.setDevice( m_focusGotoTargetDevice );
+    ipSend.setName( m_focusGotoTargetName );
+    ipSend.setRule( pcf::IndiProperty::AtMostOne );
+    ipSend.add( pcf::IndiElement( targetElement, pcf::IndiElement::On ) );
+
+    derived().sendNewProperty( ipSend );
 
     return 0;
 }
@@ -2134,6 +2591,61 @@ int stdCamera<derivedT>::appStartup()
         }
     }
 
+    if( c_hasFocus && m_hasFocus )
+    {
+        m_indiP_focus = pcf::IndiProperty( pcf::IndiProperty::Switch );
+        m_indiP_focus.setDevice( derived().configName() );
+        m_indiP_focus.setName( "focus" );
+        m_indiP_focus.setPerm( pcf::IndiProperty::ReadOnly );
+        m_indiP_focus.setState( pcf::IndiProperty::Idle );
+        m_indiP_focus.setRule( pcf::IndiProperty::AtMostOne );
+        m_indiP_focus.setLabel( "Focus" );
+        m_indiP_focus.setGroup( "Focus" );
+        m_indiP_focus.add( pcf::IndiElement( "state", pcf::IndiElement::Off ) );
+        if( derived().registerIndiPropertyReadOnly( m_indiP_focus ) < 0 )
+        {
+#ifndef STDCAMERA_TEST_NOLOG
+            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+#endif
+            return -1;
+        }
+
+        derived().createStandardIndiRequestSw( m_indiP_gotoFocus, "goto_focus", "Goto Focus", "Focus" );
+        if( derived().registerIndiPropertyNew( m_indiP_gotoFocus, st_newCallBack_stdCamera ) < 0 )
+        {
+#ifndef STDCAMERA_TEST_NOLOG
+            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+#endif
+            return -1;
+        }
+    }
+
+    if( c_hasFocus && !m_focusMonitoredPropertyKeys.empty() )
+    {
+        for( size_t n = 0; n < m_focusMonitoredPropertyKeys.size(); ++n )
+        {
+            std::string devName;
+            std::string propName;
+            if( indi::parseIndiKey( devName, propName, m_focusMonitoredPropertyKeys[n] ) < 0 )
+            {
+#ifndef STDCAMERA_TEST_NOLOG
+                derivedT::template log<software_error>(
+                    { __FILE__, __LINE__, "invalid monitored focus property: " + m_focusMonitoredPropertyKeys[n] } );
+#endif
+                return -1;
+            }
+
+            if( derived().registerIndiPropertySet(
+                    m_indiP_focusMonitoredProperties[n], devName, propName, st_setCallBack_focusMonitored ) < 0 )
+            {
+#ifndef STDCAMERA_TEST_NOLOG
+                derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+#endif
+                return -1;
+            }
+        }
+    }
+
     if( derivedT::c_stdCamera_usesStateString )
     {
         derived().createROIndiText( m_indiP_stateString, "state_string", "current", "State String", "State", "String" );
@@ -2240,6 +2752,21 @@ int stdCamera<derivedT>::appLogic()
                     {
                         derived().updateSwitchIfChanged( m_indiP_shutter, "toggle", pcf::IndiElement::Off, INDI_IDLE );
                     }
+                }
+
+                if( c_hasFocus && m_hasFocus )
+                {
+                    mx::meta::trueFalseT<c_hasFocus> tf;
+                    if( checkFocus( tf ) )
+                    {
+                        derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::On, INDI_OK );
+                    }
+                    else
+                    {
+                        derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::Off, INDI_IDLE );
+                    }
+
+                    derived().updateSwitchIfChanged( m_indiP_gotoFocus, "request", pcf::IndiElement::Off, INDI_IDLE );
                 }
 
                 return 0;
@@ -2385,6 +2912,21 @@ int stdCamera<derivedT>::onPowerOff()
         }
     }
 
+    if( c_hasFocus && m_hasFocus )
+    {
+        mx::meta::trueFalseT<c_hasFocus> tf;
+        if( checkFocus( tf ) )
+        {
+            derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::On, INDI_OK );
+        }
+        else
+        {
+            derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::Off, INDI_IDLE );
+        }
+
+        derived().updateSwitchIfChanged( m_indiP_gotoFocus, "request", pcf::IndiElement::Off, INDI_IDLE );
+    }
+
     if( c_hasFanSpeed && m_fanSpeedControlEnabled && m_fanSpeedValid )
     {
         indi::updateSelectionSwitchIfChanged( m_indiP_fanSpeed, m_fanSpeedName, derived().m_indiDriver, INDI_IDLE );
@@ -2437,6 +2979,21 @@ int stdCamera<derivedT>::whilePowerOff()
         {
             derived().updateSwitchIfChanged( m_indiP_shutter, "toggle", pcf::IndiElement::Off, INDI_IDLE );
         }
+    }
+
+    if( c_hasFocus && m_hasFocus )
+    {
+        mx::meta::trueFalseT<c_hasFocus> tf;
+        if( checkFocus( tf ) )
+        {
+            derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::On, INDI_OK );
+        }
+        else
+        {
+            derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::Off, INDI_IDLE );
+        }
+
+        derived().updateSwitchIfChanged( m_indiP_gotoFocus, "request", pcf::IndiElement::Off, INDI_IDLE );
     }
 
     if( c_hasFanSpeed && m_fanSpeedControlEnabled && m_fanSpeedValid )
@@ -2550,6 +3107,8 @@ int stdCamera<derivedT>::newCallBack_stdCamera( const pcf::IndiProperty &ipRecv 
         return newCallBack_roi_default( ipRecv );
     else if( derivedT::c_stdCamera_hasShutter && name == "shutter" )
         return newCallBack_shutter( ipRecv );
+    else if( c_hasFocus && m_hasFocus && name == "goto_focus" )
+        return newCallBack_gotoFocus( ipRecv );
 
 #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
     derivedT::template log<software_error>( { __FILE__, __LINE__, "unknown INDI property" } );
@@ -3707,6 +4266,85 @@ int stdCamera<derivedT>::newCallBack_shutter( const pcf::IndiProperty &ipRecv )
 }
 
 template <class derivedT>
+bool stdCamera<derivedT>::checkFocus( const mx::meta::trueFalseT<true> &t )
+{
+    static_cast<void>( t );
+    return derived().checkFocus();
+}
+
+template <class derivedT>
+bool stdCamera<derivedT>::checkFocus( const mx::meta::trueFalseT<false> &f )
+{
+    static_cast<void>( f );
+    return false;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::gotoFocus( const mx::meta::trueFalseT<true> &t )
+{
+    static_cast<void>( t );
+    return derived().gotoFocus();
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::gotoFocus( const mx::meta::trueFalseT<false> &f )
+{
+    static_cast<void>( f );
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::newCallBack_gotoFocus( const pcf::IndiProperty &ipRecv )
+{
+    if( c_hasFocus && m_hasFocus )
+    {
+#ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+        return 0;
+#endif
+
+        if( !ipRecv.find( "request" ) )
+        {
+            return 0;
+        }
+
+        if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+        {
+            std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+            indi::updateSwitchIfChanged(
+                m_indiP_gotoFocus, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE );
+
+            mx::meta::trueFalseT<c_hasFocus> tf;
+            return gotoFocus( tf );
+        }
+    }
+
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::st_setCallBack_focusMonitored( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<derivedT *>( app )->setCallBack_focusMonitored( ipRecv );
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setCallBack_focusMonitored( const pcf::IndiProperty &ipRecv )
+{
+    for( size_t n = 0; n < m_indiP_focusMonitoredProperties.size(); ++n )
+    {
+        if( ipRecv.getDevice() == m_indiP_focusMonitoredProperties[n].getDevice() &&
+            ipRecv.getName() == m_indiP_focusMonitoredProperties[n].getName() )
+        {
+            m_indiP_focusMonitoredProperties[n] = ipRecv;
+            return 0;
+        }
+    }
+
+    return 0;
+}
+
+template <class derivedT>
 std::string stdCamera<derivedT>::stateString( const mx::meta::trueFalseT<true> &t )
 {
     static_cast<void>( t );
@@ -3897,6 +4535,21 @@ int stdCamera<derivedT>::updateINDI()
             {
                 derived().updateSwitchIfChanged( m_indiP_shutter, "toggle", pcf::IndiElement::Off, INDI_IDLE );
             }
+        }
+
+        if( c_hasFocus && m_hasFocus )
+        {
+            mx::meta::trueFalseT<c_hasFocus> tf;
+            if( checkFocus( tf ) )
+            {
+                derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::On, INDI_OK );
+            }
+            else
+            {
+                derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::Off, INDI_IDLE );
+            }
+
+            derived().updateSwitchIfChanged( m_indiP_gotoFocus, "request", pcf::IndiElement::Off, INDI_IDLE );
         }
 
         if( derivedT::c_stdCamera_usesStateString )
