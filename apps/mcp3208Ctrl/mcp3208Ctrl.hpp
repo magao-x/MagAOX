@@ -127,6 +127,12 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     /// Handle updates to the global EMA alpha property.
     INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_alpha );
 
+    /// INDI property exposing the synchronized-mode post delay in microseconds.
+    pcf::IndiProperty m_indiP_synchroDelay;
+
+    /// Handle updates to the synchronized-mode post delay property.
+    INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_synchroDelay );
+
     /// INDI property exposing runtime timing diagnostics for acquisition health checks.
     pcf::IndiProperty m_indiP_timingDiag;
 
@@ -827,6 +833,11 @@ int mcp3208Ctrl::appStartup()
     m_indiP_numChannels["current"].setValue( m_numChannels );
     m_indiP_numChannels["target"].setValue( m_numChannels );
 
+    // INDI prop for user to set synchronized-mode post delay in microseconds
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_synchroDelay, "synchroDelay", 0, 1000000, 1, "%d", "us", "" );
+    m_indiP_synchroDelay["current"].setValue( m_synchroPostDelay );
+    m_indiP_synchroDelay["target"].setValue( m_synchroPostDelay );
+
     CREATE_REG_INDI_RO_NUMBER( m_indiP_timingDiag, "timingDiag", "Timing Diagnostics", "Diagnostics" );
     m_indiP_timingDiag.add( pcf::IndiElement( "avg_read_latency_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_us" ) );
@@ -1027,6 +1038,9 @@ int mcp3208Ctrl::appLogic()
     updatesIfChanged<float>( m_indiP_alpha, { "current", "target" }, { m_alpha, m_alpha } );
 
     updatesIfChanged<int>( m_indiP_numChannels, { "current", "target" }, { m_numChannels, m_numChannels } );
+
+    updatesIfChanged<int>(
+        m_indiP_synchroDelay, { "current", "target" }, { m_synchroPostDelay, m_synchroPostDelay } );
 
     updateTimingDiagnosticsIndi();
 
@@ -1639,6 +1653,36 @@ INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_alpha )( const pcf::IndiProperty &ip
     m_alpha = target;
 
     log<text_log>( "set alpha = " + std::to_string( m_alpha ) );
+    return 0;
+}
+
+// INDI callback handling for synchronized-mode post delay configuration.
+INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_synchroDelay )( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getName() != m_indiP_synchroDelay.getName() )
+    {
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
+        return -1;
+    }
+
+    int target;
+    if( indiTargetUpdate( m_indiP_synchroDelay, target, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    if( target < 0 )
+    {
+        target = 0;
+    }
+
+    m_synchroPostDelay   = target;
+    m_synchroDelayTarget = 1e3f * static_cast<float>( m_synchroPostDelay );
+    m_synchroDelay       = m_synchroDelayTarget;
+    m_delayModel_ns      = static_cast<double>( m_synchroDelayTarget );
+
+    log<text_log>( "set synchroDelay = " + std::to_string( m_synchroPostDelay ) + " us" );
     return 0;
 }
 

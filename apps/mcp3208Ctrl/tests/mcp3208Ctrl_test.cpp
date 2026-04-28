@@ -199,6 +199,29 @@ class mcp3208Ctrl_test : public mcp3208Ctrl
         return ip;
     }
 
+    /// Initialize the synchronized-delay INDI property used by callback tests.
+    void setupSynchroDelayProperty()
+    {
+        m_indiP_synchroDelay = pcf::IndiProperty( pcf::IndiProperty::Number );
+        m_indiP_synchroDelay.setName( "synchroDelay" );
+        m_indiP_synchroDelay.add( pcf::IndiElement( "current" ) );
+        m_indiP_synchroDelay["current"].setValue( m_synchroPostDelay );
+        m_indiP_synchroDelay.add( pcf::IndiElement( "target" ) );
+        m_indiP_synchroDelay["target"].setValue( m_synchroPostDelay );
+    }
+
+    /// Build an INDI property update for the synchronized-delay callback.
+    pcf::IndiProperty makeSynchroDelayUpdate( const double target_us /**< [in] requested synchronized delay in microseconds */ )
+    {
+        pcf::IndiProperty ip( pcf::IndiProperty::Number );
+        ip.setName( "synchroDelay" );
+        ip.add( pcf::IndiElement( "current" ) );
+        ip["current"].setValue( target_us );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"].setValue( target_us );
+        return ip;
+    }
+
     /// Initialize the timing-diagnostics INDI property used by diagnostics tests.
     void setupTimingDiagnosticsProperty()
     {
@@ -242,6 +265,7 @@ TEST_CASE( "mcp3208Ctrl Doxygen references are preserved", "[mcp3208Ctrl]" )
     app.setupFpsProperty();
     app.setupFpsSourceProperty();
     app.setupAlphaProperty();
+    app.setupSynchroDelayProperty();
 
     XWCTEST_DOXYGEN_REF( app.loadConfigImpl( app.config ) );
     XWCTEST_DOXYGEN_REF( app.configureAcquisition() );
@@ -256,6 +280,7 @@ TEST_CASE( "mcp3208Ctrl Doxygen references are preserved", "[mcp3208Ctrl]" )
     XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_fps( app.makeFpsUpdate( 1000.0 ) ) );
     XWCTEST_DOXYGEN_REF( app.setCallBack_m_indiP_fpsSource( app.makeFpsSourceUpdate( 1000.0 ) ) );
     XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_alpha( app.makeAlphaUpdate( 0.01 ) ) );
+    XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_synchroDelay( app.makeSynchroDelayUpdate( 1.0 ) ) );
     XWCTEST_DOXYGEN_REF( app.updateTriggerTiming( timespec{} ) );
     XWCTEST_DOXYGEN_REF( app.updateTimingDiagnosticsIndi() );
     XWCTEST_DOXYGEN_REF( app.delayBeforeRead() );
@@ -420,6 +445,30 @@ TEST_CASE( "mcp3208Ctrl alpha callback updates and clamps", "[mcp3208Ctrl]" )
 
     REQUIRE( app.newCallBack_m_indiP_alpha( app.makeAlphaUpdate( 2.0 ) ) == 0 );
     REQUIRE( app.m_alpha == Approx( 1.0f ) );
+}
+
+/// Verify synchronized-delay callback updates delay state and clamps at zero microseconds.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl synchroDelay callback updates and clamps", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.setupSynchroDelayProperty();
+    app.m_delayModel_ns = 123.0;
+
+    REQUIRE( app.newCallBack_m_indiP_synchroDelay( app.makeSynchroDelayUpdate( 25.0 ) ) == 0 );
+    REQUIRE( app.m_synchroPostDelay == 25 );
+    REQUIRE( app.m_synchroDelayTarget == Approx( 25000.0f ) );
+    REQUIRE( app.m_synchroDelay == Approx( 25000.0f ) );
+    REQUIRE( app.m_delayModel_ns == Approx( 25000.0 ) );
+
+    REQUIRE( app.newCallBack_m_indiP_synchroDelay( app.makeSynchroDelayUpdate( -5.0 ) ) == 0 );
+    REQUIRE( app.m_synchroPostDelay == 0 );
+    REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
+    REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
+    REQUIRE( app.m_delayModel_ns == Approx( 0.0 ) );
 }
 
 /// Verify synchronized-mode timing diagnostics publish loop state and derived error.
