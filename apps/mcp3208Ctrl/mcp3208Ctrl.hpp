@@ -199,6 +199,8 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     double m_triggerInterval_ns{ 0.0 }; ///< Measured interval between consecutive trigger events in nanoseconds.
 
+    double m_channelReadoutTime_ns{ 0.0 }; ///< Measured duration of reading all configured channels in nanoseconds.
+
     timespec m_lastTriggerTime{}; ///< Previous trigger timestamp used to compute the synchronized trigger interval.
 
     bool m_firstTriggerTime{ true }; ///< Tracks first-trigger initialization for synchronized trigger-interval measurement.
@@ -795,6 +797,7 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     m_avgProducerPeriod_ns  = 0.0;
     m_firstProducerSample   = true;
     m_wfs_fps            = m_fps;
+    m_channelReadoutTime_ns = 0.0;
 
     return 0;
 }
@@ -843,6 +846,7 @@ int mcp3208Ctrl::appStartup()
     m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps_producer" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "channel_readout_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "mode_code" ) );
@@ -960,6 +964,7 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     const double wfsPeriodMeasured_us   = wfsPeriodMeasured_ns * c_nsToUs;
     const double producerPeriodInst_us  = producerPeriodInstDiag_ns * c_nsToUs;
     const double producerPeriod_us      = producerPeriodDiag_ns * c_nsToUs;
+    const double channelReadout_us      = m_channelReadoutTime_ns * c_nsToUs;
     const double triggerInterval_us     = m_triggerInterval_ns * c_nsToUs;
     const double triggerTime_us         = triggerTime_ns * c_nsToUs;
 
@@ -982,6 +987,7 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
                                 "wfs_period_producer_us",
                                 "wfs_fps_producer",
                                 "wfs_fps",
+                                "channel_readout_us",
                                 "trigger_interval_us",
                                 "trigger_time_us",
                                 "mode_code" },
@@ -1003,6 +1009,7 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
                                 producerPeriod_us,
                                 producerFpsDiag,
                                 m_wfs_fps,
+                                channelReadout_us,
                                 triggerInterval_us,
                                 triggerTime_us,
                                 modeCode } );
@@ -1121,6 +1128,7 @@ int mcp3208Ctrl::startAcquisition()
     }
 
     m_triggerInterval_ns = 0.0;
+    m_channelReadoutTime_ns = 0.0;
     m_lastTriggerTime    = timespec{};
     m_firstTriggerTime   = true;
     m_firstTimerTrigger  = true;
@@ -1291,6 +1299,7 @@ void mcp3208Ctrl::closeSynchroStream()
     m_delayCapped            = 0.0;
     m_triggerTime            = timespec{};
     m_triggerInterval_ns     = 0.0;
+    m_channelReadoutTime_ns  = 0.0;
     m_lastTriggerTime        = timespec{};
     m_firstTriggerTime       = true;
     m_firstTimerTrigger      = true;
@@ -1319,6 +1328,7 @@ int mcp3208Ctrl::acquireTimerAndCheckValid()
 
             m_time_start = now; // Reset start time
 
+            const auto readStart = std::chrono::high_resolution_clock::now();
             for( int i = 0; i < m_numChannels; ++i )
             {
                 if( readChannelValue( i, m_values[i] ) < 0 )
@@ -1326,6 +1336,9 @@ int mcp3208Ctrl::acquireTimerAndCheckValid()
                     return 1;
                 }
             }
+            const auto readEnd = std::chrono::high_resolution_clock::now();
+            m_channelReadoutTime_ns = static_cast<double>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>( readEnd - readStart ).count() );
 
             m_trigger = m_trigger - m_gain * ( elapsed.count() - nano_sec_target );
 
@@ -1496,6 +1509,7 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
         m_synchroDelay = 0;
     }
 
+    const auto readStart = std::chrono::high_resolution_clock::now();
     for( int i = 0; i < m_numChannels; ++i )
     {
         if( readChannelValue( i, m_values[i] ) < 0 )
@@ -1504,6 +1518,9 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
             return 1;
         }
     }
+    const auto readEnd = std::chrono::high_resolution_clock::now();
+    m_channelReadoutTime_ns = static_cast<double>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>( readEnd - readStart ).count() );
 
     timespec cycleEnd;
     if( getRealtime( cycleEnd ) < 0 )

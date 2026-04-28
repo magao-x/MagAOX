@@ -222,6 +222,7 @@ class mcp3208Ctrl_test : public mcp3208Ctrl
         m_indiP_timingDiag.add( pcf::IndiElement( "wfs_period_producer_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps_producer" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "wfs_fps" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "channel_readout_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "mode_code" ) );
@@ -441,6 +442,7 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     app.m_producerPeriodInst_ns = 510000.0;
     app.m_avgProducerPeriod_ns  = 500000.0;
     app.m_wfs_fps               = 1500.0;
+    app.m_channelReadoutTime_ns = 34000.0;
     app.m_triggerInterval_ns    = 600000.0;
     app.m_atime                 = timespec{ 12, 3000000L };
     app.m_triggerTime           = timespec{ 12, 3456789L };
@@ -461,6 +463,7 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     REQUIRE( app.m_indiP_timingDiag["wfs_period_producer_us"].get<double>() == Approx( 500.0 ) );
     REQUIRE( app.m_indiP_timingDiag["wfs_fps_producer"].get<double>() == Approx( 2000.0 ) );
     REQUIRE( app.m_indiP_timingDiag["wfs_fps"].get<double>() == Approx( 1500.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["channel_readout_us"].get<double>() == Approx( 34.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_interval_us"].get<double>() == Approx( 600.0 ) );
     REQUIRE( app.m_indiP_timingDiag["trigger_time_us"].get<double>() ==
              Approx( 1e-3 * ( mcp3208Ctrl::timespecToNs( timespec{ 12, 3456789L } ) -
