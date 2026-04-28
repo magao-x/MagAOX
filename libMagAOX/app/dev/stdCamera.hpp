@@ -394,8 +394,9 @@ struct stdCameraHasFocus<derivedT, std::void_t<decltype( derivedT::c_stdCamera_h
  *         \ref checkFocus returns `true`, and the request switch `goto_focus.request`, which dispatches to
  *         \ref gotoFocus when pressed.
  *
- *       - Derived classes can use \ref checkFocusSwitchState when an external switch property indicates an
- *         out-of-focus condition by being `On`.
+ *       - Derived classes can use \ref checkFocusSwitchState when an external switch property indicates focus state
+ *         via a configured switch element. By default that element being `On` means "out of focus", and
+ *         `focus.stateElementOnMeansInFocus=true` flips the interpretation so `On` means "in focus".
  *
  *       - Derived classes can use \ref sendGotoFocusCommand to derive and send a target preset name from the
  *         configuration keys `focus.gotoFocus.numSwitches`, `focus.gotoFocus.property1...propertyN`,
@@ -709,13 +710,16 @@ class stdCamera
     bool m_hasFocus{ false }; ///< Runtime flag enabling focus-state reporting and goto-focus control publication.
 
     bool m_focusStateHelperConfigured{
-        false }; ///< True when stdCamera should evaluate focus state from an external out-of-focus switch.
+        false }; ///< True when stdCamera should evaluate focus state from an external switch property.
 
     std::string
         m_focusStateSource; ///< INDI key (`device.property`) of the switch property used by checkFocusSwitchState.
 
-    std::string m_focusStateElement{
-        "toggle" }; ///< Element within m_focusStateSource interpreted as out of focus when it is `On`.
+    std::string m_focusStateElement{ "toggle" }; ///< Element within m_focusStateSource whose `On` state is interpreted
+                                                 ///< according to m_focusStateOnMeansInFocus.
+
+    bool m_focusStateOnMeansInFocus{ false }; ///< True when m_focusStateElement being `On` means "in focus". Default
+                                              ///< false means `On` is interpreted as "out of focus".
 
     int m_focusStateSourceIndex{
         -1 }; ///< Index of m_focusStateSource within m_indiP_focusMonitoredProperties, or `-1` when unused.
@@ -785,7 +789,7 @@ class stdCamera
      * @{
      */
 
-    /// Evaluate the configured out-of-focus switch helper as an in-focus boolean.
+    /// Evaluate the configured focus-state switch helper as an in-focus boolean.
     bool checkFocusSwitchState();
 
     /// Format and send the configured goto-focus switch command.
@@ -806,6 +810,9 @@ class stdCamera
     int createFanSpeed( const mx::meta::trueFalseT<true> &t );
 
     int createFanSpeed( const mx::meta::trueFalseT<false> &f );
+
+    /// Refresh the published focus.state property from the current helper or derived focus implementation.
+    void updateFocusStateProperty();
 
   public:
     /// Startup function
@@ -1591,8 +1598,8 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
                     "stateProperty",
                     false,
                     "string",
-                    "The INDI key (device.property) of a switch property whose configured element is On when the "
-                    "camera is out of focus." );
+                    "The INDI key (device.property) of a switch property whose configured element is used to infer "
+                    "whether the camera is in focus." );
 
         config.add( "focus.stateElement",
                     "",
@@ -1602,8 +1609,19 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
                     "stateElement",
                     false,
                     "string",
-                    "The element of focus.stateProperty interpreted as out of focus when it is On. Default is "
+                    "The element of focus.stateProperty whose state is interpreted as focus state. Default is "
                     "\"toggle\"." );
+
+        config.add( "focus.stateElementOnMeansInFocus",
+                    "",
+                    "focus.stateElementOnMeansInFocus",
+                    argType::Optional,
+                    "focus",
+                    "stateElementOnMeansInFocus",
+                    false,
+                    "bool",
+                    "Set true when the configured focus.stateElement being On means the camera is in focus. The "
+                    "default false keeps the original behavior where On means out of focus." );
 
         config.add( "focus.gotoFocus.numSwitches",
                     "",
@@ -1815,6 +1833,7 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
     {
         config( m_focusStateSource, "focus.stateProperty" );
         config( m_focusStateElement, "focus.stateElement" );
+        config( m_focusStateOnMeansInFocus, "focus.stateElementOnMeansInFocus" );
         if( m_focusStateElement == "" )
         {
             m_focusStateElement = "toggle";
@@ -1990,7 +2009,42 @@ bool stdCamera<derivedT>::checkFocusSwitchState()
         return false;
     }
 
+    if( m_focusStateOnMeansInFocus )
+    {
+        return focusProperty[m_focusStateElement].getSwitchState() == pcf::IndiElement::On;
+    }
+
     return focusProperty[m_focusStateElement].getSwitchState() != pcf::IndiElement::On;
+}
+
+template <class derivedT>
+void stdCamera<derivedT>::updateFocusStateProperty()
+{
+    if( !( c_hasFocus && m_hasFocus ) || !m_indiP_focus.find( "state" ) )
+    {
+        return;
+    }
+
+    mx::meta::trueFalseT<c_hasFocus> tf;
+    bool                             inFocus = checkFocus( tf );
+
+    pcf::IndiElement::SwitchStateType    focusState = pcf::IndiElement::Off;
+    pcf::IndiProperty::PropertyStateType indiState  = INDI_IDLE;
+
+    if( inFocus )
+    {
+        focusState = pcf::IndiElement::On;
+        indiState  = INDI_OK;
+    }
+
+    if( derived().m_indiDriver )
+    {
+        derived().updateSwitchIfChanged( m_indiP_focus, "state", focusState, indiState );
+        return;
+    }
+
+    m_indiP_focus["state"].setSwitchState( focusState );
+    m_indiP_focus.setState( indiState );
 }
 
 template <class derivedT>
@@ -2756,16 +2810,7 @@ int stdCamera<derivedT>::appLogic()
 
                 if( c_hasFocus && m_hasFocus )
                 {
-                    mx::meta::trueFalseT<c_hasFocus> tf;
-                    if( checkFocus( tf ) )
-                    {
-                        derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::On, INDI_OK );
-                    }
-                    else
-                    {
-                        derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::Off, INDI_IDLE );
-                    }
-
+                    updateFocusStateProperty();
                     derived().updateSwitchIfChanged( m_indiP_gotoFocus, "request", pcf::IndiElement::Off, INDI_IDLE );
                 }
 
@@ -2914,16 +2959,7 @@ int stdCamera<derivedT>::onPowerOff()
 
     if( c_hasFocus && m_hasFocus )
     {
-        mx::meta::trueFalseT<c_hasFocus> tf;
-        if( checkFocus( tf ) )
-        {
-            derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::On, INDI_OK );
-        }
-        else
-        {
-            derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::Off, INDI_IDLE );
-        }
-
+        updateFocusStateProperty();
         derived().updateSwitchIfChanged( m_indiP_gotoFocus, "request", pcf::IndiElement::Off, INDI_IDLE );
     }
 
@@ -2983,16 +3019,7 @@ int stdCamera<derivedT>::whilePowerOff()
 
     if( c_hasFocus && m_hasFocus )
     {
-        mx::meta::trueFalseT<c_hasFocus> tf;
-        if( checkFocus( tf ) )
-        {
-            derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::On, INDI_OK );
-        }
-        else
-        {
-            derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::Off, INDI_IDLE );
-        }
-
+        updateFocusStateProperty();
         derived().updateSwitchIfChanged( m_indiP_gotoFocus, "request", pcf::IndiElement::Off, INDI_IDLE );
     }
 
@@ -4337,6 +4364,13 @@ int stdCamera<derivedT>::setCallBack_focusMonitored( const pcf::IndiProperty &ip
             ipRecv.getName() == m_indiP_focusMonitoredProperties[n].getName() )
         {
             m_indiP_focusMonitoredProperties[n] = ipRecv;
+
+            if( c_hasFocus && m_hasFocus && static_cast<int>( n ) == m_focusStateSourceIndex )
+            {
+                std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+                updateFocusStateProperty();
+            }
+
             return 0;
         }
     }
@@ -4539,16 +4573,7 @@ int stdCamera<derivedT>::updateINDI()
 
         if( c_hasFocus && m_hasFocus )
         {
-            mx::meta::trueFalseT<c_hasFocus> tf;
-            if( checkFocus( tf ) )
-            {
-                derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::On, INDI_OK );
-            }
-            else
-            {
-                derived().updateSwitchIfChanged( m_indiP_focus, "state", pcf::IndiElement::Off, INDI_IDLE );
-            }
-
+            updateFocusStateProperty();
             derived().updateSwitchIfChanged( m_indiP_gotoFocus, "request", pcf::IndiElement::Off, INDI_IDLE );
         }
 
