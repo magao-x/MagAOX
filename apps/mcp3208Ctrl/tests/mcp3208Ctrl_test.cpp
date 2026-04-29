@@ -235,7 +235,6 @@ class mcp3208Ctrl_test : public mcp3208Ctrl
         m_indiP_timingDiag.add( pcf::IndiElement( "delay_phase_error_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "delay_lock" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "delay_budget_us" ) );
-        m_indiP_timingDiag.add( pcf::IndiElement( "non_delay_service_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "avg_non_delay_service_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "delay_capped" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "read_latency_error_us" ) );

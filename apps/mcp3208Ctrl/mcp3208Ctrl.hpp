@@ -852,7 +852,6 @@ int mcp3208Ctrl::appStartup()
     m_indiP_timingDiag.add( pcf::IndiElement( "delay_phase_error_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "delay_lock" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "delay_budget_us" ) );
-    m_indiP_timingDiag.add( pcf::IndiElement( "non_delay_service_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "avg_non_delay_service_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "delay_capped" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "read_latency_error_us" ) );
@@ -897,7 +896,6 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     const double delayAppliedDiag_ns  = synchroMode ? m_delayApplied_ns : 0.0;
     const double delayModelDiag_ns    = synchroMode ? m_delayModel_ns : 0.0;
     const double delayBudgetDiag_ns   = synchroMode ? m_delayBudget_ns : 0.0;
-    const double nonDelayService_ns   = synchroMode ? m_nonDelayService_ns : 0.0;
     const double avgNonDelayService_ns = synchroMode ? m_avgNonDelayService_ns : 0.0;
     const double delayCappedDiag      = synchroMode ? m_delayCapped : 0.0;
     const double wfsPeriodMeasured_ns = synchroMode ? m_wfsPeriodMeasured_ns : 0.0;
@@ -960,7 +958,6 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     const double delayModelDiag_us      = delayModelDiag_ns * c_nsToUs;
     const double delayPhaseErrorDiag_us = m_delayPhaseError_ns * c_nsToUs;
     const double delayBudgetDiag_us     = delayBudgetDiag_ns * c_nsToUs;
-    const double nonDelayService_us     = nonDelayService_ns * c_nsToUs;
     const double avgNonDelayService_us  = avgNonDelayService_ns * c_nsToUs;
     const double readLatencyError_us    = readLatencyError_ns * c_nsToUs;
     const double avgSemaphorePeriod_us  = m_avgSemaphorePeriod_ns * c_nsToUs;
@@ -977,7 +974,6 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
                                 "delay_phase_error_us",
                                 "delay_lock",
                                 "delay_budget_us",
-                                "non_delay_service_us",
                                 "avg_non_delay_service_us",
                                 "delay_capped",
                                 "read_latency_error_us",
@@ -994,7 +990,6 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
                                 delayPhaseErrorDiag_us,
                                 m_delayLock,
                                 delayBudgetDiag_us,
-                                nonDelayService_us,
                                 avgNonDelayService_us,
                                 delayCappedDiag,
                                 readLatencyError_us,
