@@ -1,33 +1,42 @@
 /** \file ogTracker_test.cpp
  * \brief Catch2 tests for the ogTracker app.
+ *
+ * \ingroup ogTracker_unit_test
  */
 #include "../../../tests/catch2/catch.hpp"
+#include "../../../tests/testXWC.hpp"
 
 #include "../ogTracker.hpp"
 
-using namespace MagAOX::app;
+/** \defgroup ogTracker_unit_test ogTracker Unit Tests
+ * \brief Unit tests for the `ogTracker` application helper logic.
+ *
+ * \ingroup application_unit_test
+ */
 
-namespace ogTracker_test
+namespace libXWCTest
+{
+namespace ogTrackerTest
 {
 
-SCENARIO( "calibration folder naming is stable", "[ogTracker]" )
+/** \brief Verify sparkle parameters map to the expected calibration folder name. */
+TEST_CASE( "calibration folder naming is stable", "[ogTracker]" )
 {
-    GIVEN( "sparkle parameter values" )
-    {
-        const std::string folder = ogTracker::formatCalibFolder( 22.8f, 45.2f, 0.02f, 2000.0f );
-        REQUIRE( folder == "sep22_ang45_amp0.020_freq2000" );
-    }
+    const std::string folder = MagAOX::app::ogTracker::formatCalibFolder( 22.8f, 45.2f, 0.02f, 2000.0f );
+    REQUIRE( folder == "sep22_ang45_amp0.020_freq2000" );
 }
 
-SCENARIO( "circular window start index wraps correctly", "[ogTracker]" )
+/** \brief Verify circular-buffer window indexing wraps correctly at the beginning of the ring. */
+TEST_CASE( "circular window start index wraps correctly", "[ogTracker]" )
 {
-    REQUIRE( ogTracker::cbWindowStartIndex( 2, 3, 10 ) == 0 );
-    REQUIRE( ogTracker::cbWindowStartIndex( 0, 4, 10 ) == 7 );
+    REQUIRE( MagAOX::app::ogTracker::cbWindowStartIndex( 2, 3, 10 ) == 0 );
+    REQUIRE( MagAOX::app::ogTracker::cbWindowStartIndex( 0, 4, 10 ) == 7 );
 }
 
-SCENARIO( "pointer circular-buffer extraction follows temporal order", "[ogTracker]" )
+/** \brief Verify temporal ordering is preserved when reading from a wrapped pointer circular buffer. */
+TEST_CASE( "pointer circular-buffer extraction follows temporal order", "[ogTracker]" )
 {
-    using cbT = ogTracker::frameCircBuffT;
+    using cbT = MagAOX::app::ogTracker::frameCircBuffT;
 
     cbT cb;
     cb.maxEntries( 4 );
@@ -43,29 +52,30 @@ SCENARIO( "pointer circular-buffer extraction follows temporal order", "[ogTrack
     const int latest = static_cast<int>( cb.latest() );
     REQUIRE( count == 4 );
 
-    const int start = ogTracker::cbWindowStartIndex( latest, count, count );
-    REQUIRE( (*cb.at( static_cast<ogTracker::cbIndexT>( start ), 0 )) == Approx( 1.0f ) );
-    REQUIRE( (*cb.at( static_cast<ogTracker::cbIndexT>( start ), 1 )) == Approx( 2.0f ) );
-    REQUIRE( (*cb.at( static_cast<ogTracker::cbIndexT>( start ), 2 )) == Approx( 3.0f ) );
-    REQUIRE( (*cb.at( static_cast<ogTracker::cbIndexT>( start ), 3 )) == Approx( 4.0f ) );
+    const int start = MagAOX::app::ogTracker::cbWindowStartIndex( latest, count, count );
+    REQUIRE( ( *cb.at( static_cast<MagAOX::app::ogTracker::cbIndexT>( start ), 0 ) ) == Approx( 1.0f ) );
+    REQUIRE( ( *cb.at( static_cast<MagAOX::app::ogTracker::cbIndexT>( start ), 1 ) ) == Approx( 2.0f ) );
+    REQUIRE( ( *cb.at( static_cast<MagAOX::app::ogTracker::cbIndexT>( start ), 2 ) ) == Approx( 3.0f ) );
+    REQUIRE( ( *cb.at( static_cast<MagAOX::app::ogTracker::cbIndexT>( start ), 3 ) ) == Approx( 4.0f ) );
 }
 
-SCENARIO( "RMS normalization follows ref_rms scaling", "[ogTracker]" )
+/** \brief Verify per-mode RMS and normalization follow reference RMS scaling. */
+TEST_CASE( "RMS normalization follows ref_rms scaling", "[ogTracker]" )
 {
     Eigen::MatrixXf proj( 3, 2 );
     proj << 1.0f, 2.0f, -1.0f, -2.0f, 1.0f, 2.0f;
 
-    const Eigen::VectorXf rms = ogTracker::rmsPerMode( proj );
+    const Eigen::VectorXf rms = MagAOX::app::ogTracker::rmsPerMode( proj );
     REQUIRE( rms.size() == 2 );
     REQUIRE( rms[0] == Approx( 1.0f ) );
     REQUIRE( rms[1] == Approx( 2.0f ) );
 
     Eigen::VectorXf ref( 2 );
     ref << 0.5f, 4.0f;
-    const Eigen::VectorXf norm = ogTracker::normalizeByReference( rms, ref, 1e-8f );
+    const Eigen::VectorXf norm = MagAOX::app::ogTracker::normalizeByReference( rms, ref, 1e-8f );
     REQUIRE( norm[0] == Approx( 2.0f ) );
     REQUIRE( norm[1] == Approx( 0.5f ) );
 }
 
-} // namespace ogTracker_test
-
+} // namespace ogTrackerTest
+} // namespace libXWCTest

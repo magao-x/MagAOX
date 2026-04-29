@@ -44,10 +44,7 @@ namespace app
 /**
  * \ingroup ogTracker
  */
-class ogTracker :
-    public MagAOXApp<true>,
-    public dev::shmimMonitor<ogTracker>,
-    public dev::telemeter<ogTracker>
+class ogTracker : public MagAOXApp<true>, public dev::shmimMonitor<ogTracker>, public dev::telemeter<ogTracker>
 {
     typedef float realT;
 
@@ -56,71 +53,72 @@ class ogTracker :
     friend class dev::telemeter<ogTracker>;
 
   public:
-    typedef int32_t cbIndexT;
-    typedef dev::shmimMonitor<ogTracker> shmimMonitorT;
-    typedef dev::telemeter<ogTracker>    telemeterT;
+    typedef int32_t                                             cbIndexT;
+    typedef dev::shmimMonitor<ogTracker>                        shmimMonitorT;
+    typedef dev::telemeter<ogTracker>                           telemeterT;
     typedef mx::sigproc::circularBufferIndex<realT *, cbIndexT> frameCircBuffT;
 
   protected:
     /** \name Configuration - Data
      * @{
      */
-    std::string m_calibRoot{ calibDir() + "/sparkPCA" }; ///< Root directory holding sparkle PCA calibrations.
-    const std::string m_tweeterDevice{ "tweeterSpeck" }; ///< Fixed INDI device name for sparkle parameters.
-    int         m_bufferN{ 2000 }; ///< Rolling frame-buffer length used for PCA statistics.
-    int         m_minSamples{ 100 }; ///< Minimum buffered frames before statistics are considered valid.
-    int         m_klipMax{ 3 }; ///< Maximum number of PCA modes to load/publish.
-    int         m_ogAvgN{ 100 }; ///< Number of measurements used in the running average of `pca_og`.
+    std::string       m_calibRoot{ calibDir() + "/sparkPCA" }; ///< Root directory holding sparkle PCA calibrations.
+    const std::string m_tweeterDevice{ "tweeterSpeck" };       ///< Fixed INDI device name for sparkle parameters.
+    int               m_bufferN{ 2000 };                       ///< Rolling frame-buffer length used for PCA statistics.
+    int               m_minSamples{ 100 }; ///< Minimum buffered frames before statistics are considered valid.
+    int               m_klipMax{ 3 };      ///< Maximum number of PCA modes to load/publish.
+    int               m_ogAvgN{ 100 };     ///< Number of measurements used in the running average of `pca_og`.
     ///@}
 
     /** \name Sparkle Parameter State - Data
      * @{
      */
-    float m_sep{ 0.0f }; ///< Current sparkle separation from INDI.
-    float m_ang{ 0.0f }; ///< Current sparkle angle from INDI.
-    float m_amp{ 0.0f }; ///< Current sparkle amplitude from INDI.
-    float m_freq{ 0.0f }; ///< Current sparkle modulation frequency from INDI.
+    float m_sep{ 0.0f };         ///< Current sparkle separation from INDI.
+    float m_ang{ 0.0f };         ///< Current sparkle angle from INDI.
+    float m_amp{ 0.0f };         ///< Current sparkle amplitude from INDI.
+    float m_freq{ 0.0f };        ///< Current sparkle modulation frequency from INDI.
     bool  m_modulating{ false }; ///< True when tweeterSpeck modulation is enabled.
     ///@}
 
     /** \name Calibration State - Data
      * @{
      */
-    std::string m_calibFolder; ///< Exact-match calibration folder name derived from sparkle parameters.
-    std::string m_calibPath; ///< Full calibration folder path resolved from sparkle parameters.
-    std::string m_calibError; ///< Human-readable calibration state/error string published to INDI.
+    std::string m_calibFolder;          ///< Exact-match calibration folder name derived from sparkle parameters.
+    std::string m_calibPath;            ///< Full calibration folder path resolved from sparkle parameters.
+    std::string m_calibError;           ///< Human-readable calibration state/error string published to INDI.
     bool        m_calibLoaded{ false }; ///< True when reference PCA/RMS files are loaded and dimensionally valid.
-    bool        m_paramsDirty{ true }; ///< Set when sparkle parameters change and calibration must be re-resolved.
+    bool        m_paramsDirty{ true };  ///< Set when sparkle parameters change and calibration must be re-resolved.
     bool        m_waitForParamChange{ false }; ///< Hold retries after missing folder until a parameter changes.
     ///@}
 
     /** \name Frame Geometry and External Circular Buffer - Data
      * @{
      */
-    int m_frameWidth{ 0 }; ///< Width of input frames from the monitored stream.
+    int m_frameWidth{ 0 };  ///< Width of input frames from the monitored stream.
     int m_frameHeight{ 0 }; ///< Height of input frames from the monitored stream.
     int m_framePixels{ 0 }; ///< Cached flattened frame size (`width * height`).
 
-    frameCircBuffT m_frameCircBuff; ///< Pointer circular buffer storing incoming `curr_src` frame pointers.
+    frameCircBuffT m_frameCircBuff;       ///< Pointer circular buffer storing incoming `curr_src` frame pointers.
     int            m_bufferCapacity{ 0 }; ///< Effective capacity used by `m_frameCircBuff` after depth/config bounds.
     ///@}
 
     /** \name PCA Products and Outputs - Data
      * @{
      */
-    Eigen::Matrix<realT, -1, -1> m_refPca; ///< Reference PCA basis matrix with shape `[pixels, modes]`.
-    Eigen::Matrix<realT, -1, 1>  m_refRms; ///< Reference RMS vector with shape `[modes]`.
-    int                           m_activeModes{ 0 }; ///< Number of active PCA modes used after file loading/cropping.
+    Eigen::Matrix<realT, -1, -1> m_refPca;           ///< Reference PCA basis matrix with shape `[pixels, modes]`.
+    Eigen::Matrix<realT, -1, 1>  m_refRms;           ///< Reference RMS vector with shape `[modes]`.
+    int                          m_activeModes{ 0 }; ///< Number of active PCA modes used after file loading/cropping.
 
-    Eigen::Matrix<realT, -1, 1> m_latestRms; ///< Latest rolling RMS per PCA mode.
-    Eigen::Matrix<realT, -1, 1> m_latestNorm; ///< Latest rolling RMS normalized by reference RMS.
-    Eigen::Matrix<realT, -1, 1> m_latestOgAvg; ///< Running-average output values for `pca_og`.
-    realT                        m_latestOgSummary{ 0 }; ///< Mean of `pca_og_avg` modes using only finite values `<= 1`.
-    bool                         m_metricsValid{ false }; ///< True once at least one valid metrics computation completes.
-    Eigen::Matrix<realT, -1, -1> m_ogAvgHistory; ///< History matrix for running-average updates, shaped `[ogAvgN, modes]`.
-    Eigen::Matrix<realT, -1, 1>  m_ogAvgSum; ///< Running sum across `m_ogAvgHistory`.
-    int                           m_ogAvgWrite{ 0 }; ///< Next row index to overwrite in `m_ogAvgHistory`.
-    int                           m_ogAvgCount{ 0 }; ///< Number of valid rows currently accumulated in `m_ogAvgHistory`.
+    Eigen::Matrix<realT, -1, 1> m_latestRms;            ///< Latest rolling RMS per PCA mode.
+    Eigen::Matrix<realT, -1, 1> m_latestNorm;           ///< Latest rolling RMS normalized by reference RMS.
+    Eigen::Matrix<realT, -1, 1> m_latestOgAvg;          ///< Running-average output values for `pca_og`.
+    realT                       m_latestOgSummary{ 0 }; ///< Mean of `pca_og_avg` modes using only finite values `<= 1`.
+    bool m_metricsValid{ false };                       ///< True once at least one valid metrics computation completes.
+    Eigen::Matrix<realT, -1, -1>
+        m_ogAvgHistory;                     ///< History matrix for running-average updates, shaped `[ogAvgN, modes]`.
+    Eigen::Matrix<realT, -1, 1> m_ogAvgSum; ///< Running sum across `m_ogAvgHistory`.
+    int                         m_ogAvgWrite{ 0 }; ///< Next row index to overwrite in `m_ogAvgHistory`.
+    int                         m_ogAvgCount{ 0 }; ///< Number of valid rows currently accumulated in `m_ogAvgHistory`.
 
     std::vector<std::string> m_modeEls; ///< Cached INDI element names (`mode0`, `mode1`, ...).
     ///@}
@@ -128,33 +126,33 @@ class ogTracker :
     /** \name INDI Properties - Data
      * @{
      */
-    pcf::IndiProperty m_indiP_sep; ///< Subscription handle for sparkle separation.
-    pcf::IndiProperty m_indiP_ang; ///< Subscription handle for sparkle angle.
-    pcf::IndiProperty m_indiP_amp; ///< Subscription handle for sparkle amplitude.
-    pcf::IndiProperty m_indiP_freq; ///< Subscription handle for sparkle frequency.
+    pcf::IndiProperty m_indiP_sep;        ///< Subscription handle for sparkle separation.
+    pcf::IndiProperty m_indiP_ang;        ///< Subscription handle for sparkle angle.
+    pcf::IndiProperty m_indiP_amp;        ///< Subscription handle for sparkle amplitude.
+    pcf::IndiProperty m_indiP_freq;       ///< Subscription handle for sparkle frequency.
     pcf::IndiProperty m_indiP_modulating; ///< Subscription handle for sparkle modulation toggle.
 
-    pcf::IndiProperty m_indiP_calibFolder; ///< Published calibration-folder property.
-    pcf::IndiProperty m_indiP_calibError; ///< Published calibration-error property.
-    pcf::IndiProperty m_indiP_calibLoaded; ///< Published calibration-loaded numeric flag.
-    pcf::IndiProperty m_indiP_buffer; ///< Published ring-buffer occupancy/capacity property.
-    pcf::IndiProperty m_indiP_ogAvgN; ///< INDI control for `pca_og` running-average measurement count.
-    pcf::IndiProperty m_indiP_pcaOG; ///< Published instantaneous normalized rolling RMS values by PCA mode.
-    pcf::IndiProperty m_indiP_pcaOGAvg; ///< Published running-average normalized values by PCA mode.
+    pcf::IndiProperty m_indiP_calibFolder;  ///< Published calibration-folder property.
+    pcf::IndiProperty m_indiP_calibError;   ///< Published calibration-error property.
+    pcf::IndiProperty m_indiP_calibLoaded;  ///< Published calibration-loaded numeric flag.
+    pcf::IndiProperty m_indiP_buffer;       ///< Published ring-buffer occupancy/capacity property.
+    pcf::IndiProperty m_indiP_ogAvgN;       ///< INDI control for `pca_og` running-average measurement count.
+    pcf::IndiProperty m_indiP_pcaOG;        ///< Published instantaneous normalized rolling RMS values by PCA mode.
+    pcf::IndiProperty m_indiP_pcaOGAvg;     ///< Published running-average normalized values by PCA mode.
     pcf::IndiProperty m_indiP_pcaOGSummary; ///< Published scalar summary of `pca_og_avg` across modes.
     ///@}
 
     /** \name Concurrency and Background Compute - Data
      * @{
      */
-    std::mutex m_dataMutex; ///< Protects shared state used by callbacks, app logic, and compute thread.
+    std::mutex              m_dataMutex; ///< Protects shared state used by callbacks, app logic, and compute thread.
     std::condition_variable m_computeCv; ///< Wakes compute thread when new work is pending.
-    std::thread             m_computeThread; ///< Worker thread performing PCA statistics on snapshots.
-    bool                    m_computeRun{ false }; ///< Thread run flag, cleared during shutdown.
+    std::thread             m_computeThread;           ///< Worker thread performing PCA statistics on snapshots.
+    bool                    m_computeRun{ false };     ///< Thread run flag, cleared during shutdown.
     bool                    m_computePending{ false }; ///< Set when a new compute pass should run.
-    bool                    m_streamMissingLogged{ false }; ///< Debounce flag for missing/connected stream log transitions.
-    bool                    m_waitModulationLogged{ false }; ///< Debounce flag for waiting/resume modulation logs.
-    ///@}
+    bool m_streamMissingLogged{ false };               ///< Debounce flag for missing/connected stream log transitions.
+    bool m_waitModulationLogged{ false };              ///< Debounce flag for waiting/resume modulation logs.
+                                                       ///@}
 
   public:
     /// Default c'tor.
@@ -183,7 +181,8 @@ class ogTracker :
     virtual int appShutdown();
 
     /// => SHMIMMON INTERFACE <= ///
-    int allocate( const dev::shmimT & );
+    /// Initialize frame geometry and ring-buffer storage from the monitored shmim metadata.
+    int allocate( const dev::shmimT & /**< [in] shmimMonitor tag to disambiguate overloads */ );
     /// Consume one frame from the monitored stream and append its pointer to the external circular buffer.
     int processImage( void *curr_src /**< [in] pointer to current frame pixel data */,
                       const dev::shmimT & /**< [in] shmimMonitor tag to disambiguate overloads */ );
@@ -201,22 +200,22 @@ class ogTracker :
                                    int size /**< [in] circular-buffer size used for wrapping */ );
 
     /// Compute RMS of each PCA-mode column in a projection matrix.
-    static Eigen::Matrix<realT, -1, 1>
-    rmsPerMode( const Eigen::Matrix<realT, -1, -1> &projection /**< [in] projection matrix shaped `[frames, modes]` */ );
+    static Eigen::Matrix<realT, -1, 1> rmsPerMode(
+        const Eigen::Matrix<realT, -1, -1> &projection /**< [in] projection matrix shaped `[frames, modes]` */ );
 
     /// Normalize per-mode RMS values by reference RMS values.
     static Eigen::Matrix<realT, -1, 1>
     normalizeByReference( const Eigen::Matrix<realT, -1, 1> &rmsVals /**< [in] current rolling RMS values */,
                           const Eigen::Matrix<realT, -1, 1> &refVals /**< [in] reference RMS values from calibration */,
-                          realT eps /**< [in] minimum absolute divisor threshold */ );
+                          realT                              eps /**< [in] minimum absolute divisor threshold */ );
 
   protected:
     /// Update calibration status message and emit transition log while mutex is held.
     void setCalibErrorLocked( const std::string &msg /**< [in] new calibration-status string */,
-                              logPrioT            prio = logPrio::LOG_WARNING /**< [in] log priority for state change */ );
+                              logPrioT prio = logPrio::LOG_WARNING /**< [in] log priority for state change */ );
 
     /// Resolve sparkle parameters to a folder and attempt calibration-file load.
-    int  refreshCalibration();
+    int refreshCalibration();
 
     /// Load reference PCA and RMS files from a resolved calibration folder.
     int loadCalibrationFiles( const std::filesystem::path &folderPath /**< [in] fully-qualified calibration folder */ );
@@ -237,8 +236,8 @@ class ogTracker :
     int checkRecordTimes();
 
     /// Telemetry dispatch from telemeter.
-    int recordTelem( const telem_dmspeck * );
-    int recordTelem( const telem_dmmodes * );
+    int recordTelem( const telem_dmspeck * /**< [in] telemetry tag for sparkle-state records */ );
+    int recordTelem( const telem_dmmodes * /**< [in] telemetry tag for OG mode records */ );
 
     /// Emit sparkle/calibration-state telemetry.
     int recordDmSpeck( bool force = false );
@@ -247,7 +246,7 @@ class ogTracker :
     int recordOgModes( bool force = false );
 
   public:
-    /// INDI properties we're tracking  
+    /// INDI properties we're tracking
     INDI_SETCALLBACK_DECL( ogTracker, m_indiP_sep );
     INDI_SETCALLBACK_DECL( ogTracker, m_indiP_ang );
     INDI_SETCALLBACK_DECL( ogTracker, m_indiP_amp );
@@ -259,7 +258,7 @@ class ogTracker :
 inline ogTracker::ogTracker() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     shmimMonitorT::m_shmimName = "aol1_imWFS2_cbuff";
-    /// Make sure the image stream is running 
+    /// Make sure the image stream is running
     shmimMonitorT::m_getExistingFirst = true;
     /// TODO: make sure that sparkles are running?
 }
@@ -301,12 +300,10 @@ inline Eigen::Matrix<ogTracker::realT, -1, 1> ogTracker::rmsPerMode( const Eigen
     return rmsVals;
 }
 
-inline Eigen::Matrix<ogTracker::realT, -1, 1>
-ogTracker::normalizeByReference( const Eigen::Matrix<realT, -1, 1> &rmsVals,
-                                 const Eigen::Matrix<realT, -1, 1> &refVals,
-                                 realT                               eps )
+inline Eigen::Matrix<ogTracker::realT, -1, 1> ogTracker::normalizeByReference(
+    const Eigen::Matrix<realT, -1, 1> &rmsVals, const Eigen::Matrix<realT, -1, 1> &refVals, realT eps )
 {
-    const int nm = std::min( rmsVals.size(), refVals.size() );
+    const int                   nm = std::min( rmsVals.size(), refVals.size() );
     Eigen::Matrix<realT, -1, 1> normVals( nm );
     for( int mode = 0; mode < nm; ++mode )
     {
@@ -452,13 +449,13 @@ inline int ogTracker::appStartup()
         return -1;
     }
 
-    //CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaRms, "pca_rms", "Rolling PCA RMS", "PCA" );
+    // CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaRms, "pca_rms", "Rolling PCA RMS", "PCA" );
     CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOG, "pca_og", "Instantaneous PCA RMS / Ref RMS", "PCA" );
     CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOGAvg, "pca_og_avg", "Running-average PCA RMS / Ref RMS", "PCA" );
     CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOGSummary, "og_summary", "Mean of valid pca_og_avg across modes", "PCA" );
     for( const auto &el : m_modeEls )
     {
-        //m_indiP_pcaRms.add( pcf::IndiElement( el, 0 ) );
+        // m_indiP_pcaRms.add( pcf::IndiElement( el, 0 ) );
         m_indiP_pcaOG.add( pcf::IndiElement( el, 0 ) );
         m_indiP_pcaOGAvg.add( pcf::IndiElement( el, 0 ) );
     }
@@ -513,8 +510,8 @@ inline int ogTracker::setupOgAverageLocked( int modes )
     m_latestOgAvg.resize( modes );
     m_latestOgAvg.setZero();
     m_latestOgSummary = 0;
-    m_ogAvgWrite = 0;
-    m_ogAvgCount = 0;
+    m_ogAvgWrite      = 0;
+    m_ogAvgCount      = 0;
     return 0;
 }
 
@@ -623,9 +620,9 @@ inline int ogTracker::loadCalibrationFiles( const std::filesystem::path &folderP
     m_metricsValid = false;
 
     setCalibErrorLocked( "ok", logPrio::LOG_NOTICE );
-    m_calibLoaded = true;
+    m_calibLoaded        = true;
     m_waitForParamChange = false;
-    m_computePending = true;
+    m_computePending     = true;
     return 0;
 }
 
@@ -644,7 +641,7 @@ inline int ogTracker::refreshCalibration()
     m_calibFolder = formatCalibFolder( m_sep, m_ang, m_amp, m_freq );
 
     const std::filesystem::path folderPath = std::filesystem::path( m_calibRoot ) / m_calibFolder;
-    m_calibPath                         = folderPath.string();
+    m_calibPath                            = folderPath.string();
     log<text_log>( "ogTracker looking for calibration folder: " + folderPath.string(), logPrio::LOG_NOTICE );
     if( !std::filesystem::exists( folderPath ) )
     {
@@ -665,12 +662,12 @@ inline int ogTracker::refreshCalibration()
 inline void ogTracker::computeMetricsFromSnapshot()
 {
     Eigen::Matrix<realT, -1, -1, Eigen::RowMajor> frames;
-    Eigen::Matrix<realT, -1, -1>                   refPca;
-    Eigen::Matrix<realT, -1, 1>                    refRms;
+    Eigen::Matrix<realT, -1, -1>                  refPca;
+    Eigen::Matrix<realT, -1, 1>                   refRms;
 
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_dataMutex );
-        const int cbCount = static_cast<int>( m_frameCircBuff.size() );
+        const int                   cbCount = static_cast<int>( m_frameCircBuff.size() );
         if( !m_modulating || m_waitForParamChange || !m_calibLoaded || cbCount < m_minSamples || m_activeModes < 1 )
         {
             return;
@@ -688,8 +685,7 @@ inline void ogTracker::computeMetricsFromSnapshot()
         frames.resize( cbCount, m_framePixels );
         for( int n = 0; n < cbCount; ++n )
         {
-            realT *srcFrame =
-                m_frameCircBuff.at( static_cast<cbIndexT>( start ), static_cast<cbIndexT>( n ) );
+            realT *srcFrame = m_frameCircBuff.at( static_cast<cbIndexT>( start ), static_cast<cbIndexT>( n ) );
             if( srcFrame == nullptr )
             {
                 return;
@@ -706,12 +702,12 @@ inline void ogTracker::computeMetricsFromSnapshot()
     frames.rowwise() -= meanFrame;
 
     const Eigen::Matrix<realT, -1, -1> proj = frames * refPca; // [ringCount, modes]
-    const auto                          rms  = rmsPerMode( proj );
-    const auto                          norm = normalizeByReference( rms, refRms, static_cast<realT>( 1e-8 ) );
+    const auto                         rms  = rmsPerMode( proj );
+    const auto                         norm = normalizeByReference( rms, refRms, static_cast<realT>( 1e-8 ) );
 
     std::lock_guard<std::mutex> lock( m_dataMutex );
-    m_latestRms   = rms;
-    m_latestNorm  = norm;
+    m_latestRms  = rms;
+    m_latestNorm = norm;
     if( m_activeModes > 0 && m_ogAvgN > 0 )
     {
         if( m_ogAvgHistory.rows() != m_ogAvgN || m_ogAvgHistory.cols() != m_activeModes )
@@ -766,7 +762,7 @@ inline void ogTracker::computeThreadExec()
 {
     while( true )
     {
-        { //mutex scope
+        { // mutex scope
             std::unique_lock<std::mutex> lock( m_dataMutex );
             m_computeCv.wait( lock, [this]() { return !m_computeRun || m_computePending; } );
             if( !m_computeRun )
@@ -837,8 +833,7 @@ inline int ogTracker::appLogic()
     {
         if( !m_streamMissingLogged )
         {
-            log<text_log>( "ogTracker stream not found: " + shmimMonitorT::m_shmimName +
-                               " (polling until available)",
+            log<text_log>( "ogTracker stream not found: " + shmimMonitorT::m_shmimName + " (polling until available)",
                            logPrio::LOG_NOTICE );
             m_streamMissingLogged = true;
         }
@@ -851,7 +846,7 @@ inline int ogTracker::appLogic()
 
     bool paramsDirty = false;
     bool modulating  = false;
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_dataMutex );
         paramsDirty = m_paramsDirty;
         modulating  = m_modulating;
@@ -893,8 +888,8 @@ inline int ogTracker::appLogic()
         { "count", "capacity" },
         { static_cast<double>( m_frameCircBuff.size() ), static_cast<double>( m_bufferCapacity ) } );
 
-    std::vector<double> normInstantOut( static_cast<size_t>( m_klipMax ), 0.0 );
-    std::vector<double> normAvgOut( static_cast<size_t>( m_klipMax ), 0.0 );
+    std::vector<double>       normInstantOut( static_cast<size_t>( m_klipMax ), 0.0 );
+    std::vector<double>       normAvgOut( static_cast<size_t>( m_klipMax ), 0.0 );
     std::vector<const char *> modeElNames;
     modeElNames.reserve( m_modeEls.size() );
     for( const auto &el : m_modeEls )
@@ -910,7 +905,7 @@ inline int ogTracker::appLogic()
         }
     }
 
-    //updatesIfChanged<double>( m_indiP_pcaRms, modeElNames, rmsOut );
+    // updatesIfChanged<double>( m_indiP_pcaRms, modeElNames, rmsOut );
     updatesIfChanged<double>( m_indiP_pcaOG, modeElNames, normInstantOut );
     updatesIfChanged<double>( m_indiP_pcaOGAvg, modeElNames, normAvgOut );
     updateIfChanged( m_indiP_pcaOGSummary, "current", static_cast<double>( m_latestOgSummary ) );
@@ -922,7 +917,7 @@ inline int ogTracker::appLogic()
 
 inline int ogTracker::appShutdown()
 {
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_dataMutex );
         m_computeRun = false;
     }
@@ -966,11 +961,11 @@ inline int ogTracker::recordDmSpeck( bool force )
 
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_dataMutex );
-        modulating = m_modulating;
-        sep        = m_sep;
-        ang        = m_ang;
-        amp        = m_amp;
-        freq       = m_freq;
+        modulating  = m_modulating;
+        sep         = m_sep;
+        ang         = m_ang;
+        amp         = m_amp;
+        freq        = m_freq;
         calibFolder = m_calibFolder;
         calibPath   = m_calibPath;
         calibError  = m_calibError;
@@ -988,7 +983,8 @@ inline int ogTracker::recordDmSpeck( bool force )
     static bool        lastCalibLoaded = false;
     constexpr float    floatEps        = 1e-6f;
 
-    auto floatChanged = []( float oldV, float newV, float eps ) {
+    auto floatChanged = []( float oldV, float newV, float eps )
+    {
         if( std::isnan( oldV ) && std::isnan( newV ) )
         {
             return false;
@@ -1014,8 +1010,7 @@ inline int ogTracker::recordDmSpeck( bool force )
             return 0;
         }
 
-        telem<telem_dmspeck>(
-            { modulating, false, freq, { sep }, { ang }, { amp }, std::vector<bool>( { false } ) } );
+        telem<telem_dmspeck>( { modulating, false, freq, { sep }, { ang }, { amp }, std::vector<bool>( { false } ) } );
 
         if( ( lastCalibPath != calibPath ) || ( lastCalibError != calibError ) || ( lastCalibLoaded != calibLoaded ) )
         {
@@ -1025,11 +1020,11 @@ inline int ogTracker::recordDmSpeck( bool force )
                            logPrio::LOG_NOTICE );
         }
 
-        lastModulating = modulating;
-        lastSep        = sep;
-        lastAng        = ang;
-        lastAmp        = amp;
-        lastFreq       = freq;
+        lastModulating  = modulating;
+        lastSep         = sep;
+        lastAng         = ang;
+        lastAmp         = amp;
+        lastFreq        = freq;
         lastCalibFolder = calibFolder;
         lastCalibPath   = calibPath;
         lastCalibError  = calibError;
@@ -1137,11 +1132,11 @@ INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_sep )( const pcf::IndiProperty &ipRecv
     if( ipRecv.find( "current" ) )
     {
         std::lock_guard<std::mutex> lock( m_dataMutex );
-        const float nextSep = ipRecv["current"].get<float>();
+        const float                 nextSep = ipRecv["current"].get<float>();
         if( std::abs( nextSep - m_sep ) > 1e-6f )
         {
-            m_sep               = nextSep;
-            m_paramsDirty       = true;
+            m_sep                = nextSep;
+            m_paramsDirty        = true;
             m_waitForParamChange = false;
         }
     }
@@ -1154,8 +1149,8 @@ INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_ang )( const pcf::IndiProperty &ipRecv
     if( ipRecv.find( "current" ) )
     {
         std::lock_guard<std::mutex> lock( m_dataMutex );
-        const float nextAng = ipRecv["current"].get<float>();
-        float       nextAngMod = nextAng;
+        const float                 nextAng    = ipRecv["current"].get<float>();
+        float                       nextAngMod = nextAng;
         if( std::isfinite( nextAngMod ) )
         {
             nextAngMod = std::fmod( nextAngMod, 90.0f );
@@ -1167,8 +1162,8 @@ INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_ang )( const pcf::IndiProperty &ipRecv
 
         if( std::abs( nextAngMod - m_ang ) > 1e-6f )
         {
-            m_ang               = nextAngMod;
-            m_paramsDirty       = true;
+            m_ang                = nextAngMod;
+            m_paramsDirty        = true;
             m_waitForParamChange = false;
         }
     }
@@ -1181,11 +1176,11 @@ INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_amp )( const pcf::IndiProperty &ipRecv
     if( ipRecv.find( "current" ) )
     {
         std::lock_guard<std::mutex> lock( m_dataMutex );
-        const float nextAmp = ipRecv["current"].get<float>();
+        const float                 nextAmp = ipRecv["current"].get<float>();
         if( std::abs( nextAmp - m_amp ) > 1e-6f )
         {
-            m_amp               = nextAmp;
-            m_paramsDirty       = true;
+            m_amp                = nextAmp;
+            m_paramsDirty        = true;
             m_waitForParamChange = false;
         }
     }
@@ -1198,11 +1193,11 @@ INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_freq )( const pcf::IndiProperty &ipRec
     if( ipRecv.find( "current" ) )
     {
         std::lock_guard<std::mutex> lock( m_dataMutex );
-        const float nextFreq = ipRecv["current"].get<float>();
+        const float                 nextFreq = ipRecv["current"].get<float>();
         if( std::abs( nextFreq - m_freq ) > 1e-6f )
         {
-            m_freq              = nextFreq;
-            m_paramsDirty       = true;
+            m_freq               = nextFreq;
+            m_paramsDirty        = true;
             m_waitForParamChange = false;
         }
     }
@@ -1215,12 +1210,12 @@ INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_modulating )( const pcf::IndiProperty 
     if( ipRecv.find( "toggle" ) )
     {
         std::lock_guard<std::mutex> lock( m_dataMutex );
-        const bool nextModulating = ( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On );
+        const bool                  nextModulating = ( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On );
         if( nextModulating != m_modulating )
         {
             const bool wasModulating = m_modulating;
-            m_modulating  = nextModulating;
-            m_paramsDirty = true;
+            m_modulating             = nextModulating;
+            m_paramsDirty            = true;
             if( m_modulating )
             {
                 m_waitForParamChange = false;
