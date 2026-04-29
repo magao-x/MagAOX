@@ -455,7 +455,7 @@ inline int ogTracker::appStartup()
     //CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaRms, "pca_rms", "Rolling PCA RMS", "PCA" );
     CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOG, "pca_og", "Instantaneous PCA RMS / Ref RMS", "PCA" );
     CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOGAvg, "pca_og_avg", "Running-average PCA RMS / Ref RMS", "PCA" );
-    CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOGSummary, "og_summary", "Mean of valid pca_og_avg across modes, "PCA" );
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_pcaOGSummary, "og_summary", "Mean of valid pca_og_avg across modes", "PCA" );
     for( const auto &el : m_modeEls )
     {
         //m_indiP_pcaRms.add( pcf::IndiElement( el, 0 ) );
@@ -1155,9 +1155,19 @@ INDI_SETCALLBACK_DEFN( ogTracker, m_indiP_ang )( const pcf::IndiProperty &ipRecv
     {
         std::lock_guard<std::mutex> lock( m_dataMutex );
         const float nextAng = ipRecv["current"].get<float>();
-        if( std::abs( nextAng - m_ang ) > 1e-6f )
+        float       nextAngMod = nextAng;
+        if( std::isfinite( nextAngMod ) )
         {
-            m_ang               = nextAng;
+            nextAngMod = std::fmod( nextAngMod, 90.0f );
+            if( nextAngMod < 0.0f )
+            {
+                nextAngMod += 90.0f;
+            }
+        }
+
+        if( std::abs( nextAngMod - m_ang ) > 1e-6f )
+        {
+            m_ang               = nextAngMod;
             m_paramsDirty       = true;
             m_waitForParamChange = false;
         }
