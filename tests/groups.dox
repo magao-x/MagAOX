@@ -9,9 +9,9 @@ To build a single test, from inside the `tests` subfolder, run
 $ make -B -f Makefile.one t=../apps/zaberCtrl/tests/zaberCtrl_test.cpp
 $ ../apps/zaberCtrl/tests/zaberCtrl_test
 \endverbatim
-which shows how to build the test suited defined in \ref zaberCtrl_test.cpp.  Note that the `.cpp` is not required.  The `-B` switch
-for make is not always necessary, but is a good idea to make sure the right things get built.  If you have only edited the `*_test.cpp`
-file you can leave `-B` out.
+which shows how to build the test suited defined in \ref zaberCtrl_test.cpp.  Note that the `.cpp` is not required.  The
+`-B` switch for make is not always necessary, but is a good idea to make sure the right things get built.  If you have
+only edited the `*_test.cpp` file you can leave `-B` out.
 
 To build all the tests:
 \verbatim
@@ -27,14 +27,20 @@ $ bash ./testMagAOX.bash
 */
 
 /** \defgroup test_indi Tests of INDI Communications
-  * \ingroup testing
-  */
+ * \ingroup testing
+ */
 
 /** \defgroup unit_test Unit Testing
-  * \brief Unit tests in XWCTk.
-  * \ingroup testing
-  */
+ * \brief Unit tests in XWCTk.
+ * \ingroup testing
+ */
 
+/** \defgroup application_unit_test Application Unit Tests
+ * \brief Unit tests for end applications under `apps/`.
+ * \ingroup unit_test
+ */
 
-
-
+/** \defgroup app_unit_test libMagAOX app Namespace Unit Tests
+ * \brief Unit tests for classes in the `libMagAOX::app` namespace.
+ * \ingroup unit_test
+ */
