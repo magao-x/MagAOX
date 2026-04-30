@@ -1,6 +1,38 @@
-
+/** \file modbus.cpp
+ * \brief TCP transport implementation for the MagAO-X Modbus client.
+ *
+ * \author Jared R. Males (jaredmales@gmail.com)
+ */
 
 #include "modbus.hpp"
+
+#include <cerrno>
+#include <cstring>
+
+namespace
+{
+
+/// Close a failed modbus socket and throw a connection exception.
+[[noreturn]] void modbusConnectionError( modbus &mb, const char *operation )
+{
+    const int savedErrno = errno;
+
+    mb.modbus_close();
+
+    modbus_connect_exception exc;
+    exc.msg = std::string( operation ) + " failed: " + std::strerror( savedErrno );
+
+    throw exc;
+}
+
+/// The Linux-specific flag that prevents `send` from raising `SIGPIPE`.
+#ifdef MSG_NOSIGNAL
+constexpr int modbusNoSignalFlag = MSG_NOSIGNAL;
+#else
+constexpr int modbusNoSignalFlag = 0;
+#endif
+
+} // namespace
 
 modbus::modbus( const std::string &host, uint16_t port ) : PORT{ port }, HOST{ host }
 {
@@ -49,6 +81,8 @@ bool modbus::modbus_connect()
     if( connect( _socket, (struct sockaddr *)&_server, sizeof( _server ) ) < 0 )
     {
         // std::cout<< "Connection Error" << std::endl;
+        close( _socket );
+        _socket = -1;
         return false;
     }
 
@@ -59,8 +93,13 @@ bool modbus::modbus_connect()
 
 void modbus::modbus_close()
 {
-    close( _socket );
-    // std::cout <<"Socket Closed" <<std::endl;
+    if( _socket >= 0 )
+    {
+        close( _socket );
+    }
+
+    _socket    = -1;
+    _connected = false;
 }
 
 bool modbus::modbus_set_timeouts( int seconds, int microseconds )
@@ -387,12 +426,39 @@ void modbus::modbus_write_registers( int address, int amount, uint16_t *value )
 ssize_t modbus::modbus_send( uint8_t *to_send, int length )
 {
     _msg_id++;
-    return send( _socket, to_send, (size_t)length, 0 );
+    errno        = 0;
+    ssize_t sent = send( _socket, to_send, (size_t)length, modbusNoSignalFlag );
+
+    if( sent < 0 )
+    {
+        modbusConnectionError( *this, "send" );
+    }
+
+    if( sent != length )
+    {
+        errno = EIO;
+        modbusConnectionError( *this, "send" );
+    }
+
+    return sent;
 }
 
 ssize_t modbus::modbus_receive( uint8_t *buffer )
 {
-    return recv( _socket, (char *)buffer, MAX_MSG_LENGTH, 0 );
+    errno            = 0;
+    ssize_t received = recv( _socket, (char *)buffer, MAX_MSG_LENGTH, 0 );
+
+    if( received <= 0 )
+    {
+        if( received == 0 )
+        {
+            errno = ECONNRESET;
+        }
+
+        modbusConnectionError( *this, "recv" );
+    }
+
+    return received;
 }
 
 void modbus::modbus_error_handle( uint8_t *msg, int func )

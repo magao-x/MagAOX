@@ -90,6 +90,60 @@ class zaberLowLevelBinary_test : public zaberLowLevelBinary
         return ( m_indiDriver && m_indiDriver->good() ) ? 0 : -1;
     }
 
+    /// Configure a stage entry for discovery and recovery tests.
+    int addConfiguredStage( const std::string &stageName, const std::string &serial, int deviceAddress = -1 )
+    {
+        m_stages.emplace_back( this );
+        m_stages.back().name( stageName );
+        m_stages.back().serial( serial );
+        m_stages.back().deviceAddress( deviceAddress );
+
+        const size_t idx = m_stages.size() - 1;
+
+        m_stageName.insert( { stageName, idx } );
+        m_stageSerial.insert( { serial, idx } );
+
+        return 0;
+    }
+
+    /// Load a discovery snapshot through the production mapping code.
+    int loadDiscoverySnapshot( const std::vector<int> &addresses, const std::vector<std::string> &serials )
+    {
+        return loadStages( addresses, serials );
+    }
+
+    /// Set the cached device address for a configured stage.
+    int setDeviceAddressFor( size_t stageIndex, int deviceAddress )
+    {
+        m_stages.at( stageIndex ).deviceAddress( deviceAddress );
+        return 0;
+    }
+
+    /// Get the cached device address for a configured stage.
+    int deviceAddressFor( size_t stageIndex ) const
+    {
+        return m_stages.at( stageIndex ).deviceAddress();
+    }
+
+    /// Drive the recoverable error handler under test.
+    int recoverTransportError( bool devicePresent )
+    {
+        return recoverFromError( devicePresent );
+    }
+
+    /// Set the FSM state for recovery tests.
+    int setAppState( stateCodes::stateCodeT newState )
+    {
+        state( newState );
+        return 0;
+    }
+
+    /// Get the FSM state for recovery tests.
+    stateCodes::stateCodeT appState() const
+    {
+        return state();
+    }
+
     /// Read the value of a text, number, or switch element from a test property.
     std::string propertyValue( const pcf::IndiProperty &property, const std::string &element ) const
     {
@@ -247,6 +301,88 @@ SCENARIO( "Binary last-home timestamps refresh after homing completes", "[zaberL
 
         REQUIRE( stage.refreshLastHomed( false ) == 0 );
         REQUIRE( stage.lastHomedSec() == 77 );
+    }
+}
+
+/// Verify discovery clears stale addresses and reports missing configured stages safely.
+/**
+ * \ingroup zaberLowLevelBinary_unit_test
+ */
+SCENARIO( "Binary discovery resets stale device addresses", "[zaberLowLevelBinary]" )
+{
+    // clang-format off
+    #ifdef ZABERLOWLEVELBINARY_TEST_DOXYGEN_REF
+    zaberLowLevelBinary::loadStages( std::declval<const std::vector<int> &>(), std::declval<const std::vector<std::string> &>() );
+    #endif
+    // clang-format on
+
+    zaberLowLevelBinary_test zllbt( "zllbtest" );
+
+    REQUIRE( zllbt.addConfiguredStage( "stagebs", "64040", 1 ) == 0 );
+    REQUIRE( zllbt.addConfiguredStage( "stageirf", "122400", 2 ) == 0 );
+
+    REQUIRE( zllbt.loadDiscoverySnapshot( { 1 }, { "64040" } ) == ZBC_CONNECTED );
+    REQUIRE( zllbt.deviceAddressFor( 0 ) == 1 );
+    REQUIRE( zllbt.deviceAddressFor( 1 ) < 1 );
+}
+
+/// Verify a later discovery pass can find a stage that was missing initially.
+/**
+ * \ingroup zaberLowLevelBinary_unit_test
+ */
+SCENARIO( "Binary discovery can find devices that appear later", "[zaberLowLevelBinary]" )
+{
+    zaberLowLevelBinary_test zllbt( "zllbtest_rediscover" );
+
+    REQUIRE( zllbt.addConfiguredStage( "stagebs", "64040" ) == 0 );
+    REQUIRE( zllbt.addConfiguredStage( "stageirf", "122400" ) == 0 );
+
+    REQUIRE( zllbt.loadDiscoverySnapshot( { 1 }, { "64040" } ) == ZBC_CONNECTED );
+    REQUIRE( zllbt.deviceAddressFor( 0 ) == 1 );
+    REQUIRE( zllbt.deviceAddressFor( 1 ) < 1 );
+
+    REQUIRE( zllbt.loadDiscoverySnapshot( { 1, 2 }, { "64040", "122400" } ) == ZBC_CONNECTED );
+    REQUIRE( zllbt.deviceAddressFor( 0 ) == 1 );
+    REQUIRE( zllbt.deviceAddressFor( 1 ) == 2 );
+}
+
+/// Verify communication failures drop the binary app back into reconnectable states.
+/**
+ * \ingroup zaberLowLevelBinary_unit_test
+ */
+SCENARIO( "Recoverable binary transport errors transition to reconnect states", "[zaberLowLevelBinary]" )
+{
+    // clang-format off
+    #ifdef ZABERLOWLEVELBINARY_TEST_DOXYGEN_REF
+    zaberLowLevelBinary::resetConnection();
+    zaberLowLevelBinary::recoverFromError( true );
+    #endif
+    // clang-format on
+
+    SECTION( "A present tty returns the app to NOTCONNECTED" )
+    {
+        zaberLowLevelBinary_test zllbt( "zllbtest_present" );
+
+        REQUIRE( zllbt.setupPowerOffSnapshot( "stageA", 12345, true, 54321, 77 ) == 0 );
+        REQUIRE( zllbt.setDeviceAddressFor( 0, 1 ) == 0 );
+        REQUIRE( zllbt.setAppState( stateCodes::ERROR ) == 0 );
+
+        REQUIRE( zllbt.recoverTransportError( true ) == 0 );
+        REQUIRE( zllbt.appState() == stateCodes::NOTCONNECTED );
+        REQUIRE( zllbt.currStateValue( "stageA" ) == "NOTCONNECTED" );
+    }
+
+    SECTION( "A missing tty returns the app to NODEVICE" )
+    {
+        zaberLowLevelBinary_test zllbt( "zllbtest_missing" );
+
+        REQUIRE( zllbt.setupPowerOffSnapshot( "stageA", 12345, true, 54321, 77 ) == 0 );
+        REQUIRE( zllbt.setDeviceAddressFor( 0, 1 ) == 0 );
+        REQUIRE( zllbt.setAppState( stateCodes::ERROR ) == 0 );
+
+        REQUIRE( zllbt.recoverTransportError( false ) == 0 );
+        REQUIRE( zllbt.appState() == stateCodes::NODEVICE );
+        REQUIRE( zllbt.currStateValue( "stageA" ) == "NODEVICE" );
     }
 }
 

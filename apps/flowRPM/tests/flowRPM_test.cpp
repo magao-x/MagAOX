@@ -310,6 +310,15 @@ TEST_CASE( "flowRPM record-line parsing covers all parse branches", "[flowRPM]" 
         REQUIRE( flowRate == Approx( 1.9 ) );
     }
 
+    SECTION( "the zero-flow threshold status is accepted as a valid reading" )
+    {
+        REQUIRE(
+            app.parseRecordLine(
+                flowRate, "36 | CHA_FAN1 | Fan | 0.00 | RPM | 'At or Below (<=) Lower Non-Recoverable Threshold'" ) ==
+            flowRPM::parseStatus::success );
+        REQUIRE( flowRate == Approx( 0.0 ) );
+    }
+
     SECTION( "the wrong field count is rejected" )
     {
         REQUIRE( app.parseRecordLine( flowRate, "36 | CHA_FAN1 | Fan | 1900.00 | RPM" ) ==
@@ -376,6 +385,18 @@ TEST_CASE( "flowRPM file parsing", "[flowRPM]" )
         REQUIRE( app.parseFileContents( result, contents, now ) == 0 );
         REQUIRE( result.m_status == flowRPM::parseStatus::success );
         REQUIRE( result.m_flowRate == Approx( 1.9 ) );
+        REQUIRE( result.m_age == Approx( 3.0 ) );
+    }
+
+    SECTION( "zero-flow threshold status parses as a valid zero reading" )
+    {
+        const std::string contents = "1775430287 145131374\n"
+                                     "36 | CHA_FAN1         | Fan          | 0.00       | RPM   | "
+                                     "'At or Below (<=) Lower Non-Recoverable Threshold'\n";
+
+        REQUIRE( app.parseFileContents( result, contents, now ) == 0 );
+        REQUIRE( result.m_status == flowRPM::parseStatus::success );
+        REQUIRE( result.m_flowRate == Approx( 0.0 ) );
         REQUIRE( result.m_age == Approx( 3.0 ) );
     }
 
