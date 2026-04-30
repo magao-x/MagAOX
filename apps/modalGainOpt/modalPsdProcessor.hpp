@@ -87,6 +87,9 @@ class modalPsdProcessor
     /// The default LP-continuum smoothing width.
     static constexpr realT c_defaultLpContinuumWidthHz = static_cast<realT>( 25 );
 
+    /// The default disabled cutoff above which the extrapolation is pure power law only.
+    static constexpr realT c_defaultPowerLawOnlyAboveFreq = static_cast<realT>( 0 );
+
     /// Configuration of the disturbance-PSD extrapolation model.
     struct processModelConfig
     {
@@ -104,6 +107,9 @@ class modalPsdProcessor
 
         /// Whether to fit the power-law exponent from high-frequency bins.
         bool m_fitPowerLawIndex{ c_defaultFitPowerLawIndex };
+
+        /// Above this frequency, force the extrapolation to be power-law only.
+        realT m_powerLawOnlyAboveFreq{ c_defaultPowerLawOnlyAboveFreq };
 
         /// Whether the match point is included directly in the exponent fit.
         bool m_powerLawFitIncludesMatchPoint{ c_defaultPowerLawFitIncludesMatchPoint };
@@ -184,6 +190,9 @@ class modalPsdProcessor
 
         /// Whether the exponent was requested to be fit from the PSD.
         bool m_fitPowerLawIndex{ c_defaultFitPowerLawIndex };
+
+        /// Above this frequency, force the extrapolation to be power-law only.
+        realT m_powerLawOnlyAboveFreq{ c_defaultPowerLawOnlyAboveFreq };
 
         /// Whether the exponent fit succeeded and was applied.
         bool m_powerLawIndexFitSucceeded{ false };
@@ -513,6 +522,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
     result.m_powerLawNormFreq = resolvePowerLawNormFreq( freq, config.m_powerLawNormFreq );
     result.m_powerLawMatchFreq = config.m_powerLawMatchFreq;
     result.m_fitPowerLawIndex = config.m_fitPowerLawIndex;
+    result.m_powerLawOnlyAboveFreq = config.m_powerLawOnlyAboveFreq;
     result.m_powerLawIndexFitSucceeded = false;
     result.m_powerLawFitIncludesMatchPoint = config.m_powerLawFitIncludesMatchPoint;
     result.m_powerLawFitMinFreqHz = config.m_powerLawFitMinFreqHz;
@@ -534,6 +544,12 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
     {
         return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
                                                  "Dropout gap factor must be between 0 and 1" );
+    }
+
+    if( config.m_powerLawOnlyAboveFreq < static_cast<realT>( 0 ) )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                 "Power-law-only-above frequency must be non-negative" );
     }
 
     if( config.m_fitPowerLawIndex && ( config.m_powerLawFitMinFreqHz <= static_cast<realT>( 0 ) ||
@@ -1777,6 +1793,12 @@ mx::error_t modalPsdProcessor<realT>::buildMoffatProcessFromContinuum( std::vect
     std::vector<realT> highFreqModel( rawProcessPsd.size() );
     for( size_t n = 0; n < highFreqModel.size(); ++n )
     {
+        if( config.m_powerLawOnlyAboveFreq > static_cast<realT>( 0 ) && freq[n] >= config.m_powerLawOnlyAboveFreq )
+        {
+            highFreqModel[n] = std::max( continuumPsd[n], tiny );
+            continue;
+        }
+
         realT measuredExcess = std::max( rawProcessPsd[n] - continuumPsd[n], static_cast<realT>( 0 ) );
         highFreqModel[n] = std::max( continuumPsd[n] + std::min( peakModel[n], measuredExcess ), tiny );
     }
@@ -1811,8 +1833,25 @@ mx::error_t modalPsdProcessor<realT>::buildMoffatProcessFromContinuum( std::vect
         }
     }
 
+    if( config.m_powerLawOnlyAboveFreq > static_cast<realT>( 0 ) )
+    {
+        for( size_t n = 0; n < repairMask.size(); ++n )
+        {
+            if( freq[n] >= config.m_powerLawOnlyAboveFreq )
+            {
+                repairMask[n] = 0;
+            }
+        }
+    }
+
     for( size_t n = 0; n < processPsd.size(); ++n )
     {
+        if( config.m_powerLawOnlyAboveFreq > static_cast<realT>( 0 ) && freq[n] >= config.m_powerLawOnlyAboveFreq )
+        {
+            processPsd[n] = std::max( continuumPsd[n], tiny );
+            continue;
+        }
+
         if( rawProcessPsd[n] > noisePsd[n] )
         {
             processPsd[n] = std::max( rawProcessPsd[n], tiny );

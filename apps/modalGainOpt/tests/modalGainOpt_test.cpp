@@ -55,6 +55,11 @@ class modalGainOptHarness : public modalGainOpt
         return m_fitPowerLawIndex;
     }
 
+    float powerLawOnlyAboveFreq() const
+    {
+        return m_powerLawOnlyAboveFreq;
+    }
+
     bool autoUpdate() const
     {
         return m_autoUpdate;
@@ -307,9 +312,10 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                   "gainGain",
                                   "powerLawMatchFreq",
                                   "fitPowerLawIndex",
+                                  "powerLawOnlyAboveFreq",
                                   "psdDev",
                               },
-                              { "2", "aol2", "false", "0.35", "12.5", "true", "psdDevice" } );
+                              { "2", "aol2", "false", "0.35", "12.5", "true", "250", "psdDevice" } );
     app.readConfigFile( "/tmp/modalGainOpt_test.conf" );
 
     app.loadConfig();
@@ -325,6 +331,7 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
     REQUIRE( app.gainGain() == Approx( 0.35F ) );
     REQUIRE( app.powerLawMatchFreq() == Approx( 12.5F ) );
     REQUIRE( app.fitPowerLawIndex() == true );
+    REQUIRE( app.powerLawOnlyAboveFreq() == Approx( 250.0F ) );
 }
 
 /// Verify `modalGainOpt` publishes LP and max-gain arrays into separate buffers.
