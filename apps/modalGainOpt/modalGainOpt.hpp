@@ -394,6 +394,11 @@ class modalGainOpt : public MagAOXApp<true>,
     bool m_opticalGainUpdate{ false }; ///< Flag controlling whether optical gain is automatically updated;
 
     float m_gainGain{ 0.1 };           ///< The gain to use for closed-loop gain updates.  Default is 0.1.
+    float m_powerLawMatchFreq{ static_cast<float>(
+        processPsdProcessorT::c_defaultPowerLawMatchFreq ) }; ///< Frequency where the extrapolated power law is forced
+                                                              ///< to match the measured PSD.
+    bool m_fitPowerLawIndex{ processPsdProcessorT::c_defaultFitPowerLawIndex }; ///< Whether to fit the power-law index
+                                                                                ///< from the high-frequency PSD.
 
     uint32_t m_maxNCoeff{ 1000 };
 
@@ -814,6 +819,8 @@ class modalGainOpt : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_opticalGain;
 
     pcf::IndiProperty m_indiP_gainGain;
+    pcf::IndiProperty m_indiP_powerLawMatchFreq;
+    pcf::IndiProperty m_indiP_fitPowerLawIndex;
 
     pcf::IndiProperty m_indiP_emg;
     pcf::IndiProperty m_indiP_psdTime;
@@ -837,6 +844,8 @@ class modalGainOpt : public MagAOXApp<true>,
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_dump );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_opticalGain );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_gainGain );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_powerLawMatchFreq );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_fitPowerLawIndex );
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_emg );
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_psdTime );
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_psdAvgTime );
@@ -927,6 +936,26 @@ void modalGainOpt::setupConfig()
                 "float",
                 "The gain to use for closed-loop gain updates.  Default is 0.1" );
 
+    config.add( "loop.powerLawMatchFreq",
+                "",
+                "loop.powerLawMatchFreq",
+                argType::Required,
+                "loop",
+                "powerLawMatchFreq",
+                false,
+                "float",
+                "The frequency in Hz where the extrapolated power law is forced to match the measured PSD." );
+
+    config.add( "loop.fitPowerLawIndex",
+                "",
+                "loop.fitPowerLawIndex",
+                argType::Required,
+                "loop",
+                "fitPowerLawIndex",
+                false,
+                "bool",
+                "Whether to fit the power-law index from the high-frequency disturbance PSD bins." );
+
     SHMIMMONITORT_SETUP_CONFIG( psdShmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( freqShmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( gainFactShmimMonitorT, config );
@@ -950,6 +979,8 @@ int modalGainOpt::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_loopName, "loop.name" );
     _config( m_autoUpdate, "loop.autoUpdate" );
     _config( m_gainGain, "loop.gainGain" );
+    _config( m_powerLawMatchFreq, "loop.powerLawMatchFreq" );
+    _config( m_fitPowerLawIndex, "loop.fitPowerLawIndex" );
 
     char shmim[1024];
 
@@ -1087,6 +1118,15 @@ int modalGainOpt::appStartup()
                                  "Optical Gain",
                                  "Gain Opt." );
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_gainGain, "gainGain", 0, 1, 0.01, "%0.01f", "Gain Gain", "Gain Opt." );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_powerLawMatchFreq,
+                                 "powerLawMatchFreq",
+                                 0,
+                                 10000,
+                                 0.1,
+                                 "%0.2f",
+                                 "Power-Law Match Freq",
+                                 "Gain Opt." );
+    CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_fitPowerLawIndex, "fitPowerLawIndex" );
 
     REG_INDI_SETPROP( m_indiP_emg, m_wfsDevice, "emgain" );
     REG_INDI_SETPROP( m_indiP_psdTime, m_psdDevice, "psdTime" );
@@ -1182,6 +1222,8 @@ int modalGainOpt::appLogic()
     bool opticalGainUpdate = false;
     float opticalGain = 0;
     float gainGain = 0;
+    float powerLawMatchFreq = 0;
+    bool fitPowerLawIndex = false;
     int extrapOL = 0;
     int modesOn = 0;
     int modesOnSI = 0;
@@ -1196,6 +1238,8 @@ int modalGainOpt::appLogic()
         opticalGainUpdate = m_opticalGainUpdate;
         opticalGain = m_opticalGain;
         gainGain = m_gainGain;
+        powerLawMatchFreq = m_powerLawMatchFreq;
+        fitPowerLawIndex = m_fitPowerLawIndex;
         extrapOL = m_extrapOL;
         modesOn = m_modesOn;
         modesOnSI = m_modesOnSI;
@@ -1241,6 +1285,18 @@ int modalGainOpt::appLogic()
     updatesIfChanged<float>( m_indiP_opticalGain, { "current", "target" }, { opticalGain, opticalGain } );
 
     updatesIfChanged<float>( m_indiP_gainGain, { "current", "target" }, { gainGain, gainGain } );
+    updatesIfChanged<float>( m_indiP_powerLawMatchFreq,
+                             { "current", "target" },
+                             { powerLawMatchFreq, powerLawMatchFreq } );
+
+    if( fitPowerLawIndex )
+    {
+        updateSwitchIfChanged( m_indiP_fitPowerLawIndex, "toggle", pcf::IndiElement::On, INDI_OK );
+    }
+    else
+    {
+        updateSwitchIfChanged( m_indiP_fitPowerLawIndex, "toggle", pcf::IndiElement::Off, INDI_IDLE );
+    }
 
     updateSwitchIfChanged( m_indiP_extrapOL,
                            "none",
@@ -3129,6 +3185,8 @@ void modalGainOpt::goptThreadExec()
                 {
                     processPsdProcessorT::processModelConfig processConfig;
                     processConfig.m_method = olProcessMethodName( m_extrapOL );
+                    processConfig.m_powerLawMatchFreq = m_powerLawMatchFreq;
+                    processConfig.m_fitPowerLawIndex = m_fitPowerLawIndex;
 
                     processPsdProcessorT::processResults processResult;
                     mx::error_t errc =
@@ -3762,6 +3820,58 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_gainGain )( const pcf::IndiProperty
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_goptMutex );
         m_gainGain = target;
+    }
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_powerLawMatchFreq )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_powerLawMatchFreq, ipRecv );
+
+    float target;
+    if( indiTargetUpdate( m_indiP_powerLawMatchFreq, target, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    if( target != m_powerLawMatchFreq )
+    {
+        m_updating = true;
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+        m_updating = true;
+
+        m_powerLawMatchFreq = target;
+
+        m_sinceChange = -1;
+        m_updating = false;
+        std::cerr << "Got power-law match freq: " << m_powerLawMatchFreq << '\n';
+    }
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_fitPowerLawIndex )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_fitPowerLawIndex, ipRecv );
+
+    if( ipRecv.find( "toggle" ) )
+    {
+        bool fitPowerLawIndex = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+
+        if( fitPowerLawIndex != m_fitPowerLawIndex )
+        {
+            m_updating = true;
+            std::lock_guard<std::mutex> lock( m_goptMutex );
+            m_updating = true;
+
+            m_fitPowerLawIndex = fitPowerLawIndex;
+
+            m_sinceChange = -1;
+            m_updating = false;
+            std::cerr << "Got fit power-law index: " << std::boolalpha << m_fitPowerLawIndex << '\n';
+        }
     }
 
     return 0;

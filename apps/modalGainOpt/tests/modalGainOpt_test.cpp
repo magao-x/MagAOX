@@ -45,6 +45,16 @@ class modalGainOptHarness : public modalGainOpt
         return m_gainGain;
     }
 
+    float powerLawMatchFreq() const
+    {
+        return m_powerLawMatchFreq;
+    }
+
+    bool fitPowerLawIndex() const
+    {
+        return m_fitPowerLawIndex;
+    }
+
     bool autoUpdate() const
     {
         return m_autoUpdate;
@@ -282,16 +292,24 @@ TEST_CASE( "modalGainOpt placeholder harness instantiates the app", "[modalGainO
 /**
  * \ingroup modalGainOpt_unit_test
  */
-TEST_CASE( "modalGainOpt configuration loads gainGain without toggling autoUpdate", "[modalGainOpt]" )
+TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without toggling autoUpdate", "[modalGainOpt]" )
 {
     modalGainOptHarness app;
 
     app.setupConfig();
 
     mx::app::writeConfigFile( "/tmp/modalGainOpt_test.conf",
-                              { "loop", "loop", "loop", "loop", "loop" },
-                              { "number", "name", "autoUpdate", "gainGain", "psdDev" },
-                              { "2", "aol2", "false", "0.35", "psdDevice" } );
+                              { "loop", "loop", "loop", "loop", "loop", "loop", "loop" },
+                              {
+                                  "number",
+                                  "name",
+                                  "autoUpdate",
+                                  "gainGain",
+                                  "powerLawMatchFreq",
+                                  "fitPowerLawIndex",
+                                  "psdDev",
+                              },
+                              { "2", "aol2", "false", "0.35", "12.5", "true", "psdDevice" } );
     app.readConfigFile( "/tmp/modalGainOpt_test.conf" );
 
     app.loadConfig();
@@ -305,6 +323,8 @@ TEST_CASE( "modalGainOpt configuration loads gainGain without toggling autoUpdat
     REQUIRE( app.shutdownState() == 0 );
     REQUIRE( app.autoUpdate() == false );
     REQUIRE( app.gainGain() == Approx( 0.35F ) );
+    REQUIRE( app.powerLawMatchFreq() == Approx( 12.5F ) );
+    REQUIRE( app.fitPowerLawIndex() == true );
 }
 
 /// Verify `modalGainOpt` publishes LP and max-gain arrays into separate buffers.
