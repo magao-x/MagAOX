@@ -1813,7 +1813,7 @@ mx::error_t modalPsdProcessor<realT>::buildMoffatProcessFromContinuum( std::vect
 
     for( size_t n = 0; n < processPsd.size(); ++n )
     {
-        if( extrapolatedPsd[n] > noisePsd[n] )
+        if( rawProcessPsd[n] > noisePsd[n] )
         {
             processPsd[n] = std::max( rawProcessPsd[n], tiny );
         }
