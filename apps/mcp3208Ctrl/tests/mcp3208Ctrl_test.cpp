@@ -458,12 +458,14 @@ TEST_CASE( "mcp3208Ctrl synchroDelay callback updates signed offsets", "[mcp3208
     REQUIRE( app.m_synchroPostDelay == 25 );
     REQUIRE( app.m_synchroDelayTarget == Approx( 145000.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 145000.0f ) );
+    REQUIRE( app.m_delayApplied_ns == Approx( 145000.0 ) );
     REQUIRE( app.m_delayModel_ns == Approx( 120000.0 ) );
 
     REQUIRE( app.newCallBack_m_indiP_synchroDelay( app.makeSynchroDelayUpdate( -5.0 ) ) == 0 );
     REQUIRE( app.m_synchroPostDelay == -5 );
     REQUIRE( app.m_synchroDelayTarget == Approx( 115000.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 115000.0f ) );
+    REQUIRE( app.m_delayApplied_ns == Approx( 115000.0 ) );
     REQUIRE( app.m_delayModel_ns == Approx( 120000.0 ) );
 }
 
@@ -494,7 +496,7 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     app.updateTimingDiagnosticsIndi();
 
     REQUIRE( app.m_indiP_timingDiag["avg_read_latency_us"].get<double>() == Approx( 125.0 ) );
-    REQUIRE( app.m_indiP_timingDiag["synchro_delay_us"].get<double>() == Approx( 24.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["synchro_delay_us"].get<double>() == Approx( 31.0 ) );
     REQUIRE( app.m_indiP_timingDiag["synchro_delay_target_us"].get<double>() == Approx( 17.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_applied_us"].get<double>() == Approx( 24.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_model_us"].get<double>() == Approx( 17.0 ) );

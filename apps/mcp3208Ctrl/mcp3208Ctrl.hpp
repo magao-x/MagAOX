@@ -139,7 +139,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     float m_trigger{ 1e9f / m_fps };       ///< The timer-mode read interval in nanoseconds.
     float m_gain{ .1 };                    ///< The simple integrator gain used for timer and synchro delay control.
     float nano_sec_target{ 1e9f / m_fps }; ///< The timer-mode target interval in nanoseconds.
-    float m_synchroDelay{ 0 };             ///< The controlled pre-read delay in synchronized mode, in nanoseconds.
+    float m_synchroDelay{ 0 };             ///< The commanded pre-read delay in synchronized mode, in nanoseconds.
     float m_synchroDelayTarget{ 0 };       ///< The synchronized-mode effective delay target in nanoseconds after applying signed offset and wrap.
 
     /// Secondary MCP3208 handle retained with the legacy class state.
@@ -952,7 +952,7 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     m_delayLock          = delayLock;
 
     const double avgReadLatency_us      = m_avgReadLatency_ns * c_nsToUs;
-    const double synchroDelay_us        = delayAppliedDiag_ns * c_nsToUs;
+    const double synchroDelay_us        = ( synchroMode ? static_cast<double>( m_synchroDelay ) : 0.0 ) * c_nsToUs;
     const double synchroDelayTarget_us  = static_cast<double>( m_synchroDelayTarget ) * c_nsToUs;
     const double delayAppliedDiag_us    = delayAppliedDiag_ns * c_nsToUs;
     const double delayModelDiag_us      = delayModelDiag_ns * c_nsToUs;
@@ -1441,6 +1441,8 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
 
     updateTriggerTiming( m_atime );
 
+    m_synchroDelay = m_synchroDelayTarget;
+
     double desiredDelay_ns = static_cast<double>( m_synchroDelay );
     if( desiredDelay_ns < 0.0 )
     {
@@ -1688,6 +1690,7 @@ INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_synchroDelay )( const pcf::IndiPrope
         m_synchroDelayTarget = 1e3f * static_cast<float>( m_synchroPostDelay );
     }
     m_synchroDelay = m_synchroDelayTarget;
+    m_delayApplied_ns = static_cast<double>( m_synchroDelay );
 
     log<text_log>( "set synchroDelay offset = " + std::to_string( m_synchroPostDelay ) + " us" );
     return 0;
