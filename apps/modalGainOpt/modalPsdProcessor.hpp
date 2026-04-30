@@ -105,6 +105,9 @@ class modalPsdProcessor
         /// The frequency where the power law is forced to match the raw disturbance PSD.
         realT m_powerLawMatchFreq{ c_defaultPowerLawMatchFreq };
 
+        /// The half-width of the local fallback window used when the match point is in a trough.
+        realT m_powerLawMatchFallbackWindowHz{ c_defaultPowerLawMatchFallbackWindowHz };
+
         /// Whether to fit the power-law exponent from high-frequency bins.
         bool m_fitPowerLawIndex{ c_defaultFitPowerLawIndex };
 
@@ -122,6 +125,9 @@ class modalPsdProcessor
 
         /// The width of the exponent-fit median bins.
         realT m_powerLawFitBinWidthHz{ c_defaultPowerLawFitBinWidthHz };
+
+        /// The number of bins used to blend between the measured PSD and the extrapolated continuum.
+        int m_powerLawBlendBins{ c_defaultPowerLawBlendBins };
 
         /// The wide smoothing width used for peak detection.
         realT m_peakDetectWidthHz{ c_defaultPeakDetectWidthHz };
@@ -143,6 +149,9 @@ class modalPsdProcessor
 
         /// The threshold used to identify dropout bins.
         realT m_dropoutGapFactor{ c_defaultDropoutGapFactor };
+
+        /// The maximum dropout-run length repaired by the gap-filling logic.
+        size_t m_dropoutMaxBins{ c_defaultDropoutMaxBins };
     };
 
     /// Description of one detected spectral peak.
@@ -187,6 +196,9 @@ class modalPsdProcessor
 
         /// The frequency where the power law is forced to match the disturbance PSD.
         realT m_powerLawMatchFreq{ 0 };
+
+        /// The half-width of the local match-frequency fallback window.
+        realT m_powerLawMatchFallbackWindowHz{ c_defaultPowerLawMatchFallbackWindowHz };
 
         /// Whether the exponent was requested to be fit from the PSD.
         bool m_fitPowerLawIndex{ c_defaultFitPowerLawIndex };
@@ -241,6 +253,9 @@ class modalPsdProcessor
 
         /// The threshold used to identify dropout bins.
         realT m_dropoutGapFactor{ c_defaultDropoutGapFactor };
+
+        /// The maximum repaired dropout-run length in bins.
+        size_t m_dropoutMaxBins{ c_defaultDropoutMaxBins };
 
         /// The LP-only continuum cutoff frequency in Hz.
         realT m_lpContinuumFreq{ 0 };
@@ -317,7 +332,8 @@ class modalPsdProcessor
                          const std::vector<realT> &freq,          /**< [in] the one-sided frequency grid */
                          realT powerLawIndex,                     /**< [in] the power-law exponent */
                          realT powerLawNormFreq,                  /**< [in] the continuum normalization frequency */
-                         realT powerLawMatchFreq                  /**< [in] the desired match frequency */
+                         realT powerLawMatchFreq,                 /**< [in] the desired match frequency */
+                         realT powerLawMatchFallbackWindowHz      /**< [in] the local fallback half-width */
     );
 
     /// Invert the Moffat FWHM relation to recover the alpha parameter.
@@ -371,6 +387,7 @@ class modalPsdProcessor
         realT powerLawIndex,                                          /**< [in] the power-law exponent */
         realT powerLawNormFreq,                                       /**< [in] the normalization frequency */
         realT powerLawMatchFreq,                                      /**< [in] the optional match frequency */
+        realT powerLawMatchFallbackWindowHz,                          /**< [in] the match fallback half-width */
         bool fitPowerLawIndex = false,                                /**< [in] whether to fit the exponent */
         realT powerLawFitMinFreqHz = c_defaultPowerLawFitMinFreqHz,   /**< [in] fit low edge */
         realT powerLawFitMaxFreqHz = c_defaultPowerLawFitMaxFreqHz,   /**< [in] fit high edge */
@@ -457,6 +474,8 @@ class modalPsdProcessor
         realT powerLawIndex,                   /**< [in] the power-law exponent */
         realT powerLawNormFreq,                /**< [in] the normalization frequency */
         realT powerLawMatchFreq,               /**< [in] the optional match frequency */
+        realT powerLawMatchFallbackWindowHz,   /**< [in] the match fallback half-width */
+        int powerLawBlendBins,                 /**< [in] the handoff blend width in bins */
         bool fitPowerLawIndex = false,         /**< [in] whether to fit the exponent */
         realT powerLawFitMinFreqHz = c_defaultPowerLawFitMinFreqHz,                  /**< [in] fit low edge */
         realT powerLawFitMaxFreqHz = c_defaultPowerLawFitMaxFreqHz,                  /**< [in] fit high edge */
@@ -486,14 +505,16 @@ class modalPsdProcessor
                         const std::vector<realT> &noisePsd,    /**< [in] the flat noise PSD estimate */
                         const std::vector<realT> &freq,        /**< [in] the one-sided frequency grid */
                         realT powerLawNormFreq,                /**< [in] the power-law normalization frequency */
-                        realT powerLawMatchFreq                /**< [in] the optional power-law match frequency */
+                        realT powerLawMatchFreq,               /**< [in] the optional power-law match frequency */
+                        realT powerLawMatchFallbackWindowHz    /**< [in] the local match fallback half-width */
     );
 
     /// Fill isolated or short dropout runs in a disturbance PSD.
     static mx::error_t
     fillProcessPsdDropouts( std::vector<realT> &processPsd,               /**< [in.out] the disturbance PSD */
                             const std::vector<unsigned char> &repairMask, /**< [in] repair-eligible bins */
-                            realT gapFactor /**< [in] the threshold used to identify dropout bins */
+                            realT gapFactor,  /**< [in] the threshold used to identify dropout bins */
+                            size_t maxGapBins /**< [in] the maximum repaired gap length */
     );
 };
 
@@ -521,6 +542,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
     result.m_powerLawIndex = config.m_powerLawIndex;
     result.m_powerLawNormFreq = resolvePowerLawNormFreq( freq, config.m_powerLawNormFreq );
     result.m_powerLawMatchFreq = config.m_powerLawMatchFreq;
+    result.m_powerLawMatchFallbackWindowHz = config.m_powerLawMatchFallbackWindowHz;
     result.m_fitPowerLawIndex = config.m_fitPowerLawIndex;
     result.m_powerLawOnlyAboveFreq = config.m_powerLawOnlyAboveFreq;
     result.m_powerLawIndexFitSucceeded = false;
@@ -529,7 +551,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
     result.m_powerLawFitMaxFreqHz = config.m_powerLawFitMaxFreqHz;
     result.m_powerLawFitBinWidthHz = config.m_powerLawFitBinWidthHz;
     result.m_powerLawFitBinsUsed = 0;
-    result.m_powerLawBlendBins = c_defaultPowerLawBlendBins;
+    result.m_powerLawBlendBins = config.m_powerLawBlendBins;
     result.m_peakDetectWidthHz = config.m_peakDetectWidthHz;
     result.m_peakDetectFactor = config.m_peakDetectFactor;
     result.m_peakDetectBroadFactor = config.m_peakDetectBroadFactor;
@@ -537,6 +559,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
     result.m_peakDetectPasses = config.m_peakDetectPasses;
     result.m_peakMoffatBeta = config.m_peakMoffatBeta;
     result.m_dropoutGapFactor = config.m_dropoutGapFactor;
+    result.m_dropoutMaxBins = config.m_dropoutMaxBins;
     result.m_lpContinuumFreq = lpContinuumFreq;
     result.m_lpContinuumWidthHz = lpContinuumWidthHz;
 
@@ -550,6 +573,22 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
     {
         return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
                                                  "Power-law-only-above frequency must be non-negative" );
+    }
+
+    if( config.m_powerLawMatchFallbackWindowHz < static_cast<realT>( 0 ) )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                 "Power-law match fallback window must be non-negative" );
+    }
+
+    if( config.m_powerLawBlendBins < 0 )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg, "Power-law blend bins must be non-negative" );
+    }
+
+    if( config.m_dropoutMaxBins < 1 )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg, "Dropout max bins must be at least one" );
     }
 
     if( config.m_fitPowerLawIndex && ( config.m_powerLawFitMinFreqHz <= static_cast<realT>( 0 ) ||
@@ -580,7 +619,8 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                    result.m_noisePsd,
                                    freq,
                                    config.m_powerLawNormFreq,
-                                   config.m_powerLawMatchFreq );
+                                   config.m_powerLawMatchFreq,
+                                   config.m_powerLawMatchFallbackWindowHz );
         if( !!errc )
         {
             return errc;
@@ -599,6 +639,8 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                config.m_powerLawIndex,
                                                config.m_powerLawNormFreq,
                                                config.m_powerLawMatchFreq,
+                                               config.m_powerLawMatchFallbackWindowHz,
+                                               config.m_powerLawBlendBins,
                                                config.m_fitPowerLawIndex,
                                                config.m_powerLawFitMinFreqHz,
                                                config.m_powerLawFitMaxFreqHz,
@@ -652,6 +694,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                           config.m_powerLawIndex,
                                           config.m_powerLawNormFreq,
                                           config.m_powerLawMatchFreq,
+                                          config.m_powerLawMatchFallbackWindowHz,
                                           config.m_fitPowerLawIndex,
                                           config.m_powerLawFitMinFreqHz,
                                           config.m_powerLawFitMaxFreqHz,
@@ -679,7 +722,10 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
 
     if( config.m_method == "moffat-peaks" )
     {
-        errc = fillProcessPsdDropouts( result.m_processPsd, processRepairMask, config.m_dropoutGapFactor );
+        errc = fillProcessPsdDropouts( result.m_processPsd,
+                                       processRepairMask,
+                                       config.m_dropoutGapFactor,
+                                       config.m_dropoutMaxBins );
         if( !!errc )
         {
             return errc;
@@ -705,6 +751,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                               result.m_powerLawIndex,
                                               config.m_powerLawNormFreq,
                                               static_cast<realT>( 0 ),
+                                              config.m_powerLawMatchFallbackWindowHz,
                                               false );
             if( !!errc )
             {
@@ -716,7 +763,8 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                         freq,
                                         result.m_powerLawIndex,
                                         config.m_powerLawNormFreq,
-                                        config.m_powerLawMatchFreq );
+                                        config.m_powerLawMatchFreq,
+                                        config.m_powerLawMatchFallbackWindowHz );
             if( !!errc )
             {
                 return errc;
@@ -751,7 +799,10 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                 return errc;
             }
 
-            errc = fillProcessPsdDropouts( result.m_processPsd, processRepairMask, config.m_dropoutGapFactor );
+            errc = fillProcessPsdDropouts( result.m_processPsd,
+                                           processRepairMask,
+                                           config.m_dropoutGapFactor,
+                                           config.m_dropoutMaxBins );
             if( !!errc )
             {
                 return errc;
@@ -898,7 +949,8 @@ mx::error_t modalPsdProcessor<realT>::matchPowerLawAtFreq( realT &extrapolation,
                                                            const std::vector<realT> &freq,
                                                            realT powerLawIndex,
                                                            realT powerLawNormFreq,
-                                                           realT powerLawMatchFreq )
+                                                           realT powerLawMatchFreq,
+                                                           realT powerLawMatchFallbackWindowHz )
 {
     if( powerLawMatchFreq <= static_cast<realT>( 0 ) )
     {
@@ -933,9 +985,8 @@ mx::error_t modalPsdProcessor<realT>::matchPowerLawAtFreq( realT &extrapolation,
     }
 
     std::vector<realT> localPositivePsd;
-    const realT localMinFreq =
-        std::max( freq[firstPositive], powerLawMatchFreq - c_defaultPowerLawMatchFallbackWindowHz );
-    const realT localMaxFreq = std::min( freq.back(), powerLawMatchFreq + c_defaultPowerLawMatchFallbackWindowHz );
+    const realT localMinFreq = std::max( freq[firstPositive], powerLawMatchFreq - powerLawMatchFallbackWindowHz );
+    const realT localMaxFreq = std::min( freq.back(), powerLawMatchFreq + powerLawMatchFallbackWindowHz );
     size_t localStart = std::lower_bound( freq.begin(), freq.end(), localMinFreq ) - freq.begin();
     size_t localEnd = std::upper_bound( freq.begin(), freq.end(), localMaxFreq ) - freq.begin();
     for( size_t n = localStart; n < localEnd; ++n )
@@ -1193,6 +1244,7 @@ mx::error_t modalPsdProcessor<realT>::estimatePowerLawContinuum( std::vector<rea
                                                                  realT powerLawIndex,
                                                                  realT powerLawNormFreq,
                                                                  realT powerLawMatchFreq,
+                                                                 realT powerLawMatchFallbackWindowHz,
                                                                  bool fitPowerLawIndex,
                                                                  realT powerLawFitMinFreqHz,
                                                                  realT powerLawFitMaxFreqHz,
@@ -1274,8 +1326,13 @@ mx::error_t modalPsdProcessor<realT>::estimatePowerLawContinuum( std::vector<rea
                       tiny );
     }
 
-    mx::error_t errc =
-        matchPowerLawAtFreq( extrapolation, rawProcessPsd, freq, localPowerLawIndex, refFreq, powerLawMatchFreq );
+    mx::error_t errc = matchPowerLawAtFreq( extrapolation,
+                                            rawProcessPsd,
+                                            freq,
+                                            localPowerLawIndex,
+                                            refFreq,
+                                            powerLawMatchFreq,
+                                            powerLawMatchFallbackWindowHz );
     if( !!errc )
     {
         return errc;
@@ -1808,7 +1865,7 @@ mx::error_t modalPsdProcessor<realT>::buildMoffatProcessFromContinuum( std::vect
                                    rawProcessPsd,
                                    highFreqModel,
                                    anchorIndex,
-                                   c_defaultPowerLawBlendBins );
+                                   config.m_powerLawBlendBins );
     if( !!errc )
     {
         return errc;
@@ -1817,7 +1874,7 @@ mx::error_t modalPsdProcessor<realT>::buildMoffatProcessFromContinuum( std::vect
     processPsd.resize( rawProcessPsd.size() );
     repairMask.assign( rawProcessPsd.size(), 0 );
     size_t blendEnd =
-        std::min( anchorIndex + static_cast<size_t>( c_defaultPowerLawBlendBins ), rawProcessPsd.size() - 1 );
+        std::min( anchorIndex + static_cast<size_t>( config.m_powerLawBlendBins ), rawProcessPsd.size() - 1 );
     for( size_t n = 0; n <= blendEnd; ++n )
     {
         repairMask[n] = 1;
@@ -1875,6 +1932,8 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsdPowerLawOnly( std::vecto
                                                                       realT powerLawIndex,
                                                                       realT powerLawNormFreq,
                                                                       realT powerLawMatchFreq,
+                                                                      realT powerLawMatchFallbackWindowHz,
+                                                                      int powerLawBlendBins,
                                                                       bool fitPowerLawIndex,
                                                                       realT powerLawFitMinFreqHz,
                                                                       realT powerLawFitMaxFreqHz,
@@ -1907,6 +1966,7 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsdPowerLawOnly( std::vecto
                                                   powerLawIndex,
                                                   powerLawNormFreq,
                                                   powerLawMatchFreq,
+                                                  powerLawMatchFallbackWindowHz,
                                                   fitPowerLawIndex,
                                                   powerLawFitMinFreqHz,
                                                   powerLawFitMaxFreqHz,
@@ -1919,7 +1979,7 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsdPowerLawOnly( std::vecto
         return errc;
     }
 
-    return blendContinuumAtAnchor( processPsd, rawProcessPsd, continuumPsd, anchorIndex, c_defaultPowerLawBlendBins );
+    return blendContinuumAtAnchor( processPsd, rawProcessPsd, continuumPsd, anchorIndex, powerLawBlendBins );
 }
 
 template <typename realT>
@@ -1967,6 +2027,7 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsdMoffatPeaks( std::vector
                                                   config.m_powerLawIndex,
                                                   config.m_powerLawNormFreq,
                                                   config.m_powerLawMatchFreq,
+                                                  config.m_powerLawMatchFallbackWindowHz,
                                                   config.m_fitPowerLawIndex,
                                                   config.m_powerLawFitMinFreqHz,
                                                   config.m_powerLawFitMaxFreqHz,
@@ -1995,7 +2056,8 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsd( std::vector<realT> &pr
                                                           const std::vector<realT> &noisePsd,
                                                           const std::vector<realT> &freq,
                                                           realT powerLawNormFreq,
-                                                          realT powerLawMatchFreq )
+                                                          realT powerLawMatchFreq,
+                                                          realT powerLawMatchFallbackWindowHz )
 {
     if( measuredPsd.size() != noisePsd.size() || measuredPsd.size() != freq.size() )
     {
@@ -2050,8 +2112,13 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsd( std::vector<realT> &pr
                       tiny );
     }
 
-    mx::error_t errc =
-        matchPowerLawAtFreq( extrapolation, processPsd, freq, c_defaultPowerLawIndex, refFreq, powerLawMatchFreq );
+    mx::error_t errc = matchPowerLawAtFreq( extrapolation,
+                                            processPsd,
+                                            freq,
+                                            c_defaultPowerLawIndex,
+                                            refFreq,
+                                            powerLawMatchFreq,
+                                            powerLawMatchFallbackWindowHz );
     if( !!errc )
     {
         return errc;
@@ -2098,7 +2165,8 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsd( std::vector<realT> &pr
 template <typename realT>
 mx::error_t modalPsdProcessor<realT>::fillProcessPsdDropouts( std::vector<realT> &processPsd,
                                                               const std::vector<unsigned char> &repairMask,
-                                                              realT gapFactor )
+                                                              realT gapFactor,
+                                                              size_t maxGapBins )
 {
     if( processPsd.size() < 3 )
     {
@@ -2188,7 +2256,7 @@ mx::error_t modalPsdProcessor<realT>::fillProcessPsdDropouts( std::vector<realT>
                     break;
                 }
 
-                if( end - n + 1 > c_defaultDropoutMaxBins )
+                if( end - n + 1 > maxGapBins )
                 {
                     if( canExtend )
                     {

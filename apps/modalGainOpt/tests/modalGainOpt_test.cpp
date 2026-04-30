@@ -45,19 +45,14 @@ class modalGainOptHarness : public modalGainOpt
         return m_gainGain;
     }
 
-    float powerLawMatchFreq() const
+    int extrapMethod() const
     {
-        return m_powerLawMatchFreq;
+        return m_extrapOL;
     }
 
-    bool fitPowerLawIndex() const
+    const processPsdProcessorT::processModelConfig &extrapConfig() const
     {
-        return m_fitPowerLawIndex;
-    }
-
-    float powerLawOnlyAboveFreq() const
-    {
-        return m_powerLawOnlyAboveFreq;
+        return m_extrapConfig;
     }
 
     bool autoUpdate() const
@@ -290,6 +285,13 @@ TEST_CASE( "modalGainOpt placeholder harness instantiates the app", "[modalGainO
         REQUIRE( olProcessMethodFromElement( "legacy" ) == c_olProcessLegacy );
         REQUIRE( olProcessMethodFromElement( "power_law_only" ) == c_olProcessPowerLawOnly );
         REQUIRE( olProcessMethodFromElement( "moffat_peaks" ) == c_olProcessMoffatPeaks );
+
+        REQUIRE( olProcessMethodFromName( "none" ) == c_olProcessNone );
+        REQUIRE( olProcessMethodFromName( "legacy" ) == c_olProcessLegacy );
+        REQUIRE( olProcessMethodFromName( "power_law_only" ) == c_olProcessPowerLawOnly );
+        REQUIRE( olProcessMethodFromName( "power-law-only" ) == c_olProcessPowerLawOnly );
+        REQUIRE( olProcessMethodFromName( "moffat_peaks" ) == c_olProcessMoffatPeaks );
+        REQUIRE( olProcessMethodFromName( "moffat-peaks" ) == c_olProcessMoffatPeaks );
     }
 }
 
@@ -304,18 +306,41 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
     app.setupConfig();
 
     mx::app::writeConfigFile( "/tmp/modalGainOpt_test.conf",
-                              { "loop", "loop", "loop", "loop", "loop", "loop", "loop" },
+                              { "loop",          "loop",          "loop",          "loop",          "loop",
+                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation" },
                               {
                                   "number",
                                   "name",
                                   "autoUpdate",
                                   "gainGain",
+                                  "psdDev",
+                                  "method",
+                                  "powerLawIndex",
+                                  "powerLawNormFreq",
                                   "powerLawMatchFreq",
+                                  "powerLawMatchFallbackWindowHz",
                                   "fitPowerLawIndex",
                                   "powerLawOnlyAboveFreq",
-                                  "psdDev",
+                                  "powerLawFitIncludesMatchPoint",
+                                  "powerLawFitMinFreqHz",
+                                  "powerLawFitMaxFreqHz",
+                                  "powerLawFitBinWidthHz",
+                                  "powerLawBlendBins",
+                                  "peakDetectWidthHz",
+                                  "peakDetectFactor",
+                                  "peakDetectBroadFactor",
+                                  "peakDetectMinWidthLog",
+                                  "peakDetectPasses",
+                                  "peakMoffatBeta",
+                                  "dropoutGapFactor",
+                                  "dropoutMaxBins",
                               },
-                              { "2", "aol2", "false", "0.35", "12.5", "true", "250", "psdDevice" } );
+                              { "2",   "aol2", "false", "0.35",  "psdDevice", "moffat_peaks", "1.5", "15", "12.5",
+                                "7.5", "true", "250",   "false", "100",       "900",          "80",  "6",  "55",
+                                "4",   "2.5",  "0.03",  "3",     "8",         "0.12",         "6" } );
     app.readConfigFile( "/tmp/modalGainOpt_test.conf" );
 
     app.loadConfig();
@@ -329,9 +354,26 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
     REQUIRE( app.shutdownState() == 0 );
     REQUIRE( app.autoUpdate() == false );
     REQUIRE( app.gainGain() == Approx( 0.35F ) );
-    REQUIRE( app.powerLawMatchFreq() == Approx( 12.5F ) );
-    REQUIRE( app.fitPowerLawIndex() == true );
-    REQUIRE( app.powerLawOnlyAboveFreq() == Approx( 250.0F ) );
+    REQUIRE( app.extrapMethod() == c_olProcessMoffatPeaks );
+    REQUIRE( app.extrapConfig().m_powerLawIndex == Approx( 1.5F ) );
+    REQUIRE( app.extrapConfig().m_powerLawNormFreq == Approx( 15.0F ) );
+    REQUIRE( app.extrapConfig().m_powerLawMatchFreq == Approx( 12.5F ) );
+    REQUIRE( app.extrapConfig().m_powerLawMatchFallbackWindowHz == Approx( 7.5F ) );
+    REQUIRE( app.extrapConfig().m_fitPowerLawIndex == true );
+    REQUIRE( app.extrapConfig().m_powerLawOnlyAboveFreq == Approx( 250.0F ) );
+    REQUIRE( app.extrapConfig().m_powerLawFitIncludesMatchPoint == false );
+    REQUIRE( app.extrapConfig().m_powerLawFitMinFreqHz == Approx( 100.0F ) );
+    REQUIRE( app.extrapConfig().m_powerLawFitMaxFreqHz == Approx( 900.0F ) );
+    REQUIRE( app.extrapConfig().m_powerLawFitBinWidthHz == Approx( 80.0F ) );
+    REQUIRE( app.extrapConfig().m_powerLawBlendBins == 6 );
+    REQUIRE( app.extrapConfig().m_peakDetectWidthHz == Approx( 55.0F ) );
+    REQUIRE( app.extrapConfig().m_peakDetectFactor == Approx( 4.0F ) );
+    REQUIRE( app.extrapConfig().m_peakDetectBroadFactor == Approx( 2.5F ) );
+    REQUIRE( app.extrapConfig().m_peakDetectMinWidthLog == Approx( 0.03F ) );
+    REQUIRE( app.extrapConfig().m_peakDetectPasses == 3 );
+    REQUIRE( app.extrapConfig().m_peakMoffatBeta == Approx( 8.0F ) );
+    REQUIRE( app.extrapConfig().m_dropoutGapFactor == Approx( 0.12F ) );
+    REQUIRE( app.extrapConfig().m_dropoutMaxBins == 6 );
 }
 
 /// Verify `modalGainOpt` publishes LP and max-gain arrays into separate buffers.

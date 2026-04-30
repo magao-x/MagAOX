@@ -7,7 +7,9 @@
 #ifndef modalGainOpt_hpp
 #define modalGainOpt_hpp
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 
 #include <mx/mxException.hpp>
 #include <mx/ao/analysis/clGainOpt.hpp>
@@ -113,6 +115,66 @@ inline int olProcessMethodFromElement( const std::string &element )
     }
 
     return c_olProcessNone;
+}
+
+inline int olProcessMethodFromName( std::string method )
+{
+    std::transform( method.begin(),
+                    method.end(),
+                    method.begin(),
+                    []( unsigned char c )
+                    {
+                        if( c == '_' )
+                        {
+                            return static_cast<char>( '-' );
+                        }
+
+                        return static_cast<char>( std::tolower( c ) );
+                    } );
+
+    if( method == "legacy" )
+    {
+        return c_olProcessLegacy;
+    }
+
+    if( method == "power-law-only" )
+    {
+        return c_olProcessPowerLawOnly;
+    }
+
+    if( method == "moffat-peaks" )
+    {
+        return c_olProcessMoffatPeaks;
+    }
+
+    return c_olProcessNone;
+}
+
+inline std::string extrapBoolString( bool value )
+{
+    return value ? "true" : "false";
+}
+
+inline bool parseExtrapBool( bool &value, std::string text )
+{
+    std::transform( text.begin(),
+                    text.end(),
+                    text.begin(),
+                    []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+
+    if( text == "true" || text == "1" || text == "on" || text == "yes" )
+    {
+        value = true;
+        return true;
+    }
+
+    if( text == "false" || text == "0" || text == "off" || text == "no" )
+    {
+        value = false;
+        return true;
+    }
+
+    return false;
 }
 
 struct psdShmimT
@@ -394,13 +456,7 @@ class modalGainOpt : public MagAOXApp<true>,
     bool m_opticalGainUpdate{ false }; ///< Flag controlling whether optical gain is automatically updated;
 
     float m_gainGain{ 0.1 };           ///< The gain to use for closed-loop gain updates.  Default is 0.1.
-    float m_powerLawMatchFreq{ static_cast<float>(
-        processPsdProcessorT::c_defaultPowerLawMatchFreq ) }; ///< Frequency where the extrapolated power law is forced
-                                                              ///< to match the measured PSD.
-    bool m_fitPowerLawIndex{ processPsdProcessorT::c_defaultFitPowerLawIndex }; ///< Whether to fit the power-law index
-                                                                                ///< from the high-frequency PSD.
-    float m_powerLawOnlyAboveFreq{ static_cast<float>( processPsdProcessorT::c_defaultPowerLawOnlyAboveFreq ) };
-    ///< Above this frequency, force the extrapolation to use the power law only.
+    processPsdProcessorT::processModelConfig m_extrapConfig; ///< Configuration of the OL PSD extrapolation model.
 
     uint32_t m_maxNCoeff{ 1000 };
 
@@ -623,6 +679,22 @@ class modalGainOpt : public MagAOXApp<true>,
      */
     bool refreshGoptStructures();
 
+    /// Handle a standard target/current numeric extrapolation property update.
+    template <typename valueT>
+    int handleExtrapNumberProperty( pcf::IndiProperty &localProperty,
+                                    valueT &localTarget,
+                                    const pcf::IndiProperty &ipRecv,
+                                    const std::string &label );
+
+    /// Handle a standard target/current boolean extrapolation property update.
+    int handleExtrapBoolProperty( pcf::IndiProperty &localProperty,
+                                  bool &localTarget,
+                                  const pcf::IndiProperty &ipRecv,
+                                  const std::string &label );
+
+    /// Handle the standard target/current text property used for the extrapolation method.
+    int handleExtrapMethodProperty( const pcf::IndiProperty &ipRecv );
+
   public:
     /// Default c'tor.
     modalGainOpt();
@@ -821,9 +893,26 @@ class modalGainOpt : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_opticalGain;
 
     pcf::IndiProperty m_indiP_gainGain;
-    pcf::IndiProperty m_indiP_powerLawMatchFreq;
-    pcf::IndiProperty m_indiP_fitPowerLawIndex;
-    pcf::IndiProperty m_indiP_powerLawOnlyAboveFreq;
+    pcf::IndiProperty m_indiP_extrapMethod;
+    pcf::IndiProperty m_indiP_extrapPowerLawIndex;
+    pcf::IndiProperty m_indiP_extrapPowerLawNormFreq;
+    pcf::IndiProperty m_indiP_extrapPowerLawMatchFreq;
+    pcf::IndiProperty m_indiP_extrapPowerLawMatchFallbackWindowHz;
+    pcf::IndiProperty m_indiP_extrapFitPowerLawIndex;
+    pcf::IndiProperty m_indiP_extrapPowerLawOnlyAboveFreq;
+    pcf::IndiProperty m_indiP_extrapPowerLawFitIncludesMatchPoint;
+    pcf::IndiProperty m_indiP_extrapPowerLawFitMinFreqHz;
+    pcf::IndiProperty m_indiP_extrapPowerLawFitMaxFreqHz;
+    pcf::IndiProperty m_indiP_extrapPowerLawFitBinWidthHz;
+    pcf::IndiProperty m_indiP_extrapPowerLawBlendBins;
+    pcf::IndiProperty m_indiP_extrapPeakDetectWidthHz;
+    pcf::IndiProperty m_indiP_extrapPeakDetectFactor;
+    pcf::IndiProperty m_indiP_extrapPeakDetectBroadFactor;
+    pcf::IndiProperty m_indiP_extrapPeakDetectMinWidthLog;
+    pcf::IndiProperty m_indiP_extrapPeakDetectPasses;
+    pcf::IndiProperty m_indiP_extrapPeakMoffatBeta;
+    pcf::IndiProperty m_indiP_extrapDropoutGapFactor;
+    pcf::IndiProperty m_indiP_extrapDropoutMaxBins;
 
     pcf::IndiProperty m_indiP_emg;
     pcf::IndiProperty m_indiP_psdTime;
@@ -835,8 +924,6 @@ class modalGainOpt : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_pcMult;
     pcf::IndiProperty m_indiP_pcOn;
 
-    pcf::IndiProperty m_indiP_extrapOL;
-
     pcf::IndiProperty m_indiP_modesOn;
 
     pcf::IndiProperty m_indiP_opticalGainSource;
@@ -847,9 +934,26 @@ class modalGainOpt : public MagAOXApp<true>,
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_dump );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_opticalGain );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_gainGain );
-    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_powerLawMatchFreq );
-    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_fitPowerLawIndex );
-    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_powerLawOnlyAboveFreq );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapMethod );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawIndex );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawNormFreq );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawMatchFreq );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawMatchFallbackWindowHz );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapFitPowerLawIndex );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawOnlyAboveFreq );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawFitIncludesMatchPoint );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawFitMinFreqHz );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawFitMaxFreqHz );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawFitBinWidthHz );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawBlendBins );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPeakDetectWidthHz );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPeakDetectFactor );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPeakDetectBroadFactor );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPeakDetectMinWidthLog );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPeakDetectPasses );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPeakMoffatBeta );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapDropoutGapFactor );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapDropoutMaxBins );
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_emg );
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_psdTime );
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_psdAvgTime );
@@ -859,7 +963,6 @@ class modalGainOpt : public MagAOXApp<true>,
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_pcGain );
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_pcMult );
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_pcOn );
-    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapOL );
 
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_opticalGainSource );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_opticalGainUpdate );
@@ -940,35 +1043,205 @@ void modalGainOpt::setupConfig()
                 "float",
                 "The gain to use for closed-loop gain updates.  Default is 0.1" );
 
-    config.add( "loop.powerLawMatchFreq",
+    config.add( "extrapolation.method",
                 "",
-                "loop.powerLawMatchFreq",
+                "extrapolation.method",
                 argType::Required,
-                "loop",
+                "extrapolation",
+                "method",
+                false,
+                "string",
+                "The OL PSD extrapolation method: none, legacy, power_law_only, or moffat_peaks." );
+
+    config.add( "extrapolation.powerLawIndex",
+                "",
+                "extrapolation.powerLawIndex",
+                argType::Required,
+                "extrapolation",
+                "powerLawIndex",
+                false,
+                "float",
+                "The power-law exponent a in the 1/f^a continuum model." );
+
+    config.add( "extrapolation.powerLawNormFreq",
+                "",
+                "extrapolation.powerLawNormFreq",
+                argType::Required,
+                "extrapolation",
+                "powerLawNormFreq",
+                false,
+                "float",
+                "The power-law normalization frequency in Hz. Set to 0 to use the first positive bin." );
+
+    config.add( "extrapolation.powerLawMatchFreq",
+                "",
+                "extrapolation.powerLawMatchFreq",
+                argType::Required,
+                "extrapolation",
                 "powerLawMatchFreq",
                 false,
                 "float",
                 "The frequency in Hz where the extrapolated power law is forced to match the measured PSD." );
 
-    config.add( "loop.fitPowerLawIndex",
+    config.add( "extrapolation.powerLawMatchFallbackWindowHz",
                 "",
-                "loop.fitPowerLawIndex",
+                "extrapolation.powerLawMatchFallbackWindowHz",
                 argType::Required,
-                "loop",
+                "extrapolation",
+                "powerLawMatchFallbackWindowHz",
+                false,
+                "float",
+                "Half-width in Hz of the local fallback window used when the match bin falls in a trough." );
+
+    config.add( "extrapolation.fitPowerLawIndex",
+                "",
+                "extrapolation.fitPowerLawIndex",
+                argType::Required,
+                "extrapolation",
                 "fitPowerLawIndex",
                 false,
                 "bool",
                 "Whether to fit the power-law index from the high-frequency disturbance PSD bins." );
 
-    config.add( "loop.powerLawOnlyAboveFreq",
+    config.add( "extrapolation.powerLawOnlyAboveFreq",
                 "",
-                "loop.powerLawOnlyAboveFreq",
+                "extrapolation.powerLawOnlyAboveFreq",
                 argType::Required,
-                "loop",
+                "extrapolation",
                 "powerLawOnlyAboveFreq",
                 false,
                 "float",
                 "Above this frequency in Hz, force the extrapolation to be power-law only." );
+
+    config.add( "extrapolation.powerLawFitIncludesMatchPoint",
+                "",
+                "extrapolation.powerLawFitIncludesMatchPoint",
+                argType::Required,
+                "extrapolation",
+                "powerLawFitIncludesMatchPoint",
+                false,
+                "bool",
+                "Whether to include the explicit match point directly in the power-law exponent fit." );
+
+    config.add( "extrapolation.powerLawFitMinFreqHz",
+                "",
+                "extrapolation.powerLawFitMinFreqHz",
+                argType::Required,
+                "extrapolation",
+                "powerLawFitMinFreqHz",
+                false,
+                "float",
+                "The low edge in Hz of the power-law exponent fit range." );
+
+    config.add( "extrapolation.powerLawFitMaxFreqHz",
+                "",
+                "extrapolation.powerLawFitMaxFreqHz",
+                argType::Required,
+                "extrapolation",
+                "powerLawFitMaxFreqHz",
+                false,
+                "float",
+                "The high edge in Hz of the power-law exponent fit range." );
+
+    config.add( "extrapolation.powerLawFitBinWidthHz",
+                "",
+                "extrapolation.powerLawFitBinWidthHz",
+                argType::Required,
+                "extrapolation",
+                "powerLawFitBinWidthHz",
+                false,
+                "float",
+                "The width in Hz of the median bins used in the power-law exponent fit." );
+
+    config.add( "extrapolation.powerLawBlendBins",
+                "",
+                "extrapolation.powerLawBlendBins",
+                argType::Required,
+                "extrapolation",
+                "powerLawBlendBins",
+                false,
+                "int",
+                "The number of bins used to blend between the measured PSD and the extrapolated continuum." );
+
+    config.add( "extrapolation.peakDetectWidthHz",
+                "",
+                "extrapolation.peakDetectWidthHz",
+                argType::Required,
+                "extrapolation",
+                "peakDetectWidthHz",
+                false,
+                "float",
+                "The wide smoothing width in Hz used for peak detection." );
+
+    config.add( "extrapolation.peakDetectFactor",
+                "",
+                "extrapolation.peakDetectFactor",
+                argType::Required,
+                "extrapolation",
+                "peakDetectFactor",
+                false,
+                "float",
+                "The factor above the smoothed PSD required for a strong peak detection." );
+
+    config.add( "extrapolation.peakDetectBroadFactor",
+                "",
+                "extrapolation.peakDetectBroadFactor",
+                argType::Required,
+                "extrapolation",
+                "peakDetectBroadFactor",
+                false,
+                "float",
+                "The lower factor above the smoothed PSD used for broad-peak candidates." );
+
+    config.add( "extrapolation.peakDetectMinWidthLog",
+                "",
+                "extrapolation.peakDetectMinWidthLog",
+                argType::Required,
+                "extrapolation",
+                "peakDetectMinWidthLog",
+                false,
+                "float",
+                "The minimum accepted broad-peak width in log-frequency." );
+
+    config.add( "extrapolation.peakDetectPasses",
+                "",
+                "extrapolation.peakDetectPasses",
+                argType::Required,
+                "extrapolation",
+                "peakDetectPasses",
+                false,
+                "int",
+                "The number of iterative subtract-and-redetect peak-detection passes." );
+
+    config.add( "extrapolation.peakMoffatBeta",
+                "",
+                "extrapolation.peakMoffatBeta",
+                argType::Required,
+                "extrapolation",
+                "peakMoffatBeta",
+                false,
+                "float",
+                "The minimum Moffat beta used when synthesizing extrapolated peaks." );
+
+    config.add( "extrapolation.dropoutGapFactor",
+                "",
+                "extrapolation.dropoutGapFactor",
+                argType::Required,
+                "extrapolation",
+                "dropoutGapFactor",
+                false,
+                "float",
+                "The relative depth threshold used to identify PSD dropouts for repair." );
+
+    config.add( "extrapolation.dropoutMaxBins",
+                "",
+                "extrapolation.dropoutMaxBins",
+                argType::Required,
+                "extrapolation",
+                "dropoutMaxBins",
+                false,
+                "int",
+                "The maximum consecutive dropout-run length that will be repaired." );
 
     SHMIMMONITORT_SETUP_CONFIG( psdShmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( freqShmimMonitorT, config );
@@ -993,9 +1266,30 @@ int modalGainOpt::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_loopName, "loop.name" );
     _config( m_autoUpdate, "loop.autoUpdate" );
     _config( m_gainGain, "loop.gainGain" );
-    _config( m_powerLawMatchFreq, "loop.powerLawMatchFreq" );
-    _config( m_fitPowerLawIndex, "loop.fitPowerLawIndex" );
-    _config( m_powerLawOnlyAboveFreq, "loop.powerLawOnlyAboveFreq" );
+
+    std::string extrapMethod = olProcessMethodName( m_extrapOL );
+    _config( extrapMethod, "extrapolation.method" );
+    m_extrapOL = olProcessMethodFromName( extrapMethod );
+
+    _config( m_extrapConfig.m_powerLawIndex, "extrapolation.powerLawIndex" );
+    _config( m_extrapConfig.m_powerLawNormFreq, "extrapolation.powerLawNormFreq" );
+    _config( m_extrapConfig.m_powerLawMatchFreq, "extrapolation.powerLawMatchFreq" );
+    _config( m_extrapConfig.m_powerLawMatchFallbackWindowHz, "extrapolation.powerLawMatchFallbackWindowHz" );
+    _config( m_extrapConfig.m_fitPowerLawIndex, "extrapolation.fitPowerLawIndex" );
+    _config( m_extrapConfig.m_powerLawOnlyAboveFreq, "extrapolation.powerLawOnlyAboveFreq" );
+    _config( m_extrapConfig.m_powerLawFitIncludesMatchPoint, "extrapolation.powerLawFitIncludesMatchPoint" );
+    _config( m_extrapConfig.m_powerLawFitMinFreqHz, "extrapolation.powerLawFitMinFreqHz" );
+    _config( m_extrapConfig.m_powerLawFitMaxFreqHz, "extrapolation.powerLawFitMaxFreqHz" );
+    _config( m_extrapConfig.m_powerLawFitBinWidthHz, "extrapolation.powerLawFitBinWidthHz" );
+    _config( m_extrapConfig.m_powerLawBlendBins, "extrapolation.powerLawBlendBins" );
+    _config( m_extrapConfig.m_peakDetectWidthHz, "extrapolation.peakDetectWidthHz" );
+    _config( m_extrapConfig.m_peakDetectFactor, "extrapolation.peakDetectFactor" );
+    _config( m_extrapConfig.m_peakDetectBroadFactor, "extrapolation.peakDetectBroadFactor" );
+    _config( m_extrapConfig.m_peakDetectMinWidthLog, "extrapolation.peakDetectMinWidthLog" );
+    _config( m_extrapConfig.m_peakDetectPasses, "extrapolation.peakDetectPasses" );
+    _config( m_extrapConfig.m_peakMoffatBeta, "extrapolation.peakMoffatBeta" );
+    _config( m_extrapConfig.m_dropoutGapFactor, "extrapolation.dropoutGapFactor" );
+    _config( m_extrapConfig.m_dropoutMaxBins, "extrapolation.dropoutMaxBins" );
 
     char shmim[1024];
 
@@ -1133,23 +1427,151 @@ int modalGainOpt::appStartup()
                                  "Optical Gain",
                                  "Gain Opt." );
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_gainGain, "gainGain", 0, 1, 0.01, "%0.01f", "Gain Gain", "Gain Opt." );
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_powerLawMatchFreq,
-                                 "powerLawMatchFreq",
+    CREATE_REG_INDI_NEW_TEXT( m_indiP_extrapMethod, "extrap_method", "Extrapolation Method", "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawIndex,
+                                 "extrap_powerLawIndex",
+                                 0,
+                                 10,
+                                 0.01,
+                                 "%0.3f",
+                                 "Power-Law Index",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawNormFreq,
+                                 "extrap_powerLawNormFreq",
+                                 0,
+                                 10000,
+                                 0.1,
+                                 "%0.2f",
+                                 "Power-Law Norm Freq",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawMatchFreq,
+                                 "extrap_powerLawMatchFreq",
                                  0,
                                  10000,
                                  0.1,
                                  "%0.2f",
                                  "Power-Law Match Freq",
-                                 "Gain Opt." );
-    CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_fitPowerLawIndex, "fitPowerLawIndex" );
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_powerLawOnlyAboveFreq,
-                                 "powerLawOnlyAboveFreq",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawMatchFallbackWindowHz,
+                                 "extrap_powerLawMatchFallbackWindowHz",
+                                 0,
+                                 1000,
+                                 0.1,
+                                 "%0.2f",
+                                 "Power-Law Match Window",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_TEXT( m_indiP_extrapFitPowerLawIndex,
+                              "extrap_fitPowerLawIndex",
+                              "Fit Power-Law Index",
+                              "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawOnlyAboveFreq,
+                                 "extrap_powerLawOnlyAboveFreq",
                                  0,
                                  10000,
                                  0.1,
                                  "%0.2f",
                                  "Power-Law Only Above",
-                                 "Gain Opt." );
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_TEXT( m_indiP_extrapPowerLawFitIncludesMatchPoint,
+                              "extrap_powerLawFitIncludesMatchPoint",
+                              "Fit Includes Match Point",
+                              "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawFitMinFreqHz,
+                                 "extrap_powerLawFitMinFreqHz",
+                                 0,
+                                 10000,
+                                 0.1,
+                                 "%0.2f",
+                                 "Fit Min Freq",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawFitMaxFreqHz,
+                                 "extrap_powerLawFitMaxFreqHz",
+                                 0,
+                                 10000,
+                                 0.1,
+                                 "%0.2f",
+                                 "Fit Max Freq",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawFitBinWidthHz,
+                                 "extrap_powerLawFitBinWidthHz",
+                                 0,
+                                 10000,
+                                 0.1,
+                                 "%0.2f",
+                                 "Fit Bin Width",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERI( m_indiP_extrapPowerLawBlendBins,
+                                 "extrap_powerLawBlendBins",
+                                 0,
+                                 100,
+                                 1,
+                                 "%d",
+                                 "Blend Bins",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPeakDetectWidthHz,
+                                 "extrap_peakDetectWidthHz",
+                                 0,
+                                 10000,
+                                 0.1,
+                                 "%0.2f",
+                                 "Peak Detect Width",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPeakDetectFactor,
+                                 "extrap_peakDetectFactor",
+                                 0,
+                                 100,
+                                 0.1,
+                                 "%0.2f",
+                                 "Peak Detect Factor",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPeakDetectBroadFactor,
+                                 "extrap_peakDetectBroadFactor",
+                                 0,
+                                 100,
+                                 0.1,
+                                 "%0.2f",
+                                 "Peak Broad Factor",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPeakDetectMinWidthLog,
+                                 "extrap_peakDetectMinWidthLog",
+                                 0,
+                                 10,
+                                 0.001,
+                                 "%0.4f",
+                                 "Peak Min Width Log",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERI( m_indiP_extrapPeakDetectPasses,
+                                 "extrap_peakDetectPasses",
+                                 1,
+                                 100,
+                                 1,
+                                 "%d",
+                                 "Peak Detect Passes",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPeakMoffatBeta,
+                                 "extrap_peakMoffatBeta",
+                                 0,
+                                 100,
+                                 0.1,
+                                 "%0.2f",
+                                 "Peak Moffat Beta",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapDropoutGapFactor,
+                                 "extrap_dropoutGapFactor",
+                                 0,
+                                 1,
+                                 0.01,
+                                 "%0.3f",
+                                 "Dropout Gap Factor",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERI( m_indiP_extrapDropoutMaxBins,
+                                 "extrap_dropoutMaxBins",
+                                 1,
+                                 1000,
+                                 1,
+                                 "%d",
+                                 "Dropout Max Bins",
+                                 "Extrapolation" );
 
     REG_INDI_SETPROP( m_indiP_emg, m_wfsDevice, "emgain" );
     REG_INDI_SETPROP( m_indiP_psdTime, m_psdDevice, "psdTime" );
@@ -1160,20 +1582,6 @@ int modalGainOpt::appStartup()
     REG_INDI_SETPROP( m_indiP_pcGain, m_loopName, "loop_pcgain" );
     REG_INDI_SETPROP( m_indiP_pcMult, m_loopName, "loop_pcmultcoeff" );
     REG_INDI_SETPROP( m_indiP_pcOn, m_loopName, "loop_pcOn" );
-
-    if( createStandardIndiSelectionSw( m_indiP_extrapOL,
-                                       "extrapOL",
-                                       { "none", "legacy", "power_law_only", "moffat_peaks" },
-                                       { "None", "Legacy", "Power Law Only", "Moffat Peaks" },
-                                       "OL Extrapolation",
-                                       "Gain Opt." ) < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__, "Error creating extrapOL selection switch" } );
-    }
-    if( registerIndiPropertyNew( m_indiP_extrapOL, st_newCallBack_m_indiP_extrapOL ) < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__, "Error registering extrapOL selection switch" } );
-    }
 
     CREATE_REG_INDI_RO_NUMBER( m_indiP_modesOn, "num_modes", "number of modes", "Gain Opt." );
     indi::addNumberElement( m_indiP_modesOn, "current", 0, 2400, 1, "%d", "Applied Modes" );
@@ -1245,9 +1653,7 @@ int modalGainOpt::appLogic()
     bool opticalGainUpdate = false;
     float opticalGain = 0;
     float gainGain = 0;
-    float powerLawMatchFreq = 0;
-    bool fitPowerLawIndex = false;
-    float powerLawOnlyAboveFreq = 0;
+    processPsdProcessorT::processModelConfig extrapConfig;
     int extrapOL = 0;
     int modesOn = 0;
     int modesOnSI = 0;
@@ -1262,9 +1668,7 @@ int modalGainOpt::appLogic()
         opticalGainUpdate = m_opticalGainUpdate;
         opticalGain = m_opticalGain;
         gainGain = m_gainGain;
-        powerLawMatchFreq = m_powerLawMatchFreq;
-        fitPowerLawIndex = m_fitPowerLawIndex;
-        powerLawOnlyAboveFreq = m_powerLawOnlyAboveFreq;
+        extrapConfig = m_extrapConfig;
         extrapOL = m_extrapOL;
         modesOn = m_modesOn;
         modesOnSI = m_modesOnSI;
@@ -1310,34 +1714,70 @@ int modalGainOpt::appLogic()
     updatesIfChanged<float>( m_indiP_opticalGain, { "current", "target" }, { opticalGain, opticalGain } );
 
     updatesIfChanged<float>( m_indiP_gainGain, { "current", "target" }, { gainGain, gainGain } );
-    updatesIfChanged<float>( m_indiP_powerLawMatchFreq,
+    updatesIfChanged<std::string>( m_indiP_extrapMethod,
+                                   { "current", "target" },
+                                   { olProcessMethodName( extrapOL ), olProcessMethodName( extrapOL ) } );
+    updatesIfChanged<float>( m_indiP_extrapPowerLawIndex,
                              { "current", "target" },
-                             { powerLawMatchFreq, powerLawMatchFreq } );
-    updatesIfChanged<float>( m_indiP_powerLawOnlyAboveFreq,
+                             { extrapConfig.m_powerLawIndex, extrapConfig.m_powerLawIndex } );
+    updatesIfChanged<float>( m_indiP_extrapPowerLawNormFreq,
                              { "current", "target" },
-                             { powerLawOnlyAboveFreq, powerLawOnlyAboveFreq } );
-
-    if( fitPowerLawIndex )
-    {
-        updateSwitchIfChanged( m_indiP_fitPowerLawIndex, "toggle", pcf::IndiElement::On, INDI_OK );
-    }
-    else
-    {
-        updateSwitchIfChanged( m_indiP_fitPowerLawIndex, "toggle", pcf::IndiElement::Off, INDI_IDLE );
-    }
-
-    updateSwitchIfChanged( m_indiP_extrapOL,
-                           "none",
-                           extrapOL == c_olProcessNone ? pcf::IndiElement::On : pcf::IndiElement::Off );
-    updateSwitchIfChanged( m_indiP_extrapOL,
-                           "legacy",
-                           extrapOL == c_olProcessLegacy ? pcf::IndiElement::On : pcf::IndiElement::Off );
-    updateSwitchIfChanged( m_indiP_extrapOL,
-                           "power_law_only",
-                           extrapOL == c_olProcessPowerLawOnly ? pcf::IndiElement::On : pcf::IndiElement::Off );
-    updateSwitchIfChanged( m_indiP_extrapOL,
-                           "moffat_peaks",
-                           extrapOL == c_olProcessMoffatPeaks ? pcf::IndiElement::On : pcf::IndiElement::Off );
+                             { extrapConfig.m_powerLawNormFreq, extrapConfig.m_powerLawNormFreq } );
+    updatesIfChanged<float>( m_indiP_extrapPowerLawMatchFreq,
+                             { "current", "target" },
+                             { extrapConfig.m_powerLawMatchFreq, extrapConfig.m_powerLawMatchFreq } );
+    updatesIfChanged<float>(
+        m_indiP_extrapPowerLawMatchFallbackWindowHz,
+        { "current", "target" },
+        { extrapConfig.m_powerLawMatchFallbackWindowHz, extrapConfig.m_powerLawMatchFallbackWindowHz } );
+    updatesIfChanged<std::string>(
+        m_indiP_extrapFitPowerLawIndex,
+        { "current", "target" },
+        { extrapBoolString( extrapConfig.m_fitPowerLawIndex ), extrapBoolString( extrapConfig.m_fitPowerLawIndex ) } );
+    updatesIfChanged<float>( m_indiP_extrapPowerLawOnlyAboveFreq,
+                             { "current", "target" },
+                             { extrapConfig.m_powerLawOnlyAboveFreq, extrapConfig.m_powerLawOnlyAboveFreq } );
+    updatesIfChanged<std::string>( m_indiP_extrapPowerLawFitIncludesMatchPoint,
+                                   { "current", "target" },
+                                   { extrapBoolString( extrapConfig.m_powerLawFitIncludesMatchPoint ),
+                                     extrapBoolString( extrapConfig.m_powerLawFitIncludesMatchPoint ) } );
+    updatesIfChanged<float>( m_indiP_extrapPowerLawFitMinFreqHz,
+                             { "current", "target" },
+                             { extrapConfig.m_powerLawFitMinFreqHz, extrapConfig.m_powerLawFitMinFreqHz } );
+    updatesIfChanged<float>( m_indiP_extrapPowerLawFitMaxFreqHz,
+                             { "current", "target" },
+                             { extrapConfig.m_powerLawFitMaxFreqHz, extrapConfig.m_powerLawFitMaxFreqHz } );
+    updatesIfChanged<float>( m_indiP_extrapPowerLawFitBinWidthHz,
+                             { "current", "target" },
+                             { extrapConfig.m_powerLawFitBinWidthHz, extrapConfig.m_powerLawFitBinWidthHz } );
+    updatesIfChanged<int>( m_indiP_extrapPowerLawBlendBins,
+                           { "current", "target" },
+                           { extrapConfig.m_powerLawBlendBins, extrapConfig.m_powerLawBlendBins } );
+    updatesIfChanged<float>( m_indiP_extrapPeakDetectWidthHz,
+                             { "current", "target" },
+                             { extrapConfig.m_peakDetectWidthHz, extrapConfig.m_peakDetectWidthHz } );
+    updatesIfChanged<float>( m_indiP_extrapPeakDetectFactor,
+                             { "current", "target" },
+                             { extrapConfig.m_peakDetectFactor, extrapConfig.m_peakDetectFactor } );
+    updatesIfChanged<float>( m_indiP_extrapPeakDetectBroadFactor,
+                             { "current", "target" },
+                             { extrapConfig.m_peakDetectBroadFactor, extrapConfig.m_peakDetectBroadFactor } );
+    updatesIfChanged<float>( m_indiP_extrapPeakDetectMinWidthLog,
+                             { "current", "target" },
+                             { extrapConfig.m_peakDetectMinWidthLog, extrapConfig.m_peakDetectMinWidthLog } );
+    updatesIfChanged<int>( m_indiP_extrapPeakDetectPasses,
+                           { "current", "target" },
+                           { extrapConfig.m_peakDetectPasses, extrapConfig.m_peakDetectPasses } );
+    updatesIfChanged<float>( m_indiP_extrapPeakMoffatBeta,
+                             { "current", "target" },
+                             { extrapConfig.m_peakMoffatBeta, extrapConfig.m_peakMoffatBeta } );
+    updatesIfChanged<float>( m_indiP_extrapDropoutGapFactor,
+                             { "current", "target" },
+                             { extrapConfig.m_dropoutGapFactor, extrapConfig.m_dropoutGapFactor } );
+    updatesIfChanged<int>(
+        m_indiP_extrapDropoutMaxBins,
+        { "current", "target" },
+        { static_cast<int>( extrapConfig.m_dropoutMaxBins ), static_cast<int>( extrapConfig.m_dropoutMaxBins ) } );
 
     updatesIfChanged<int>( m_indiP_modesOn,
                            { "current", "integrator", "predictor" },
@@ -3211,11 +3651,8 @@ void modalGainOpt::goptThreadExec()
                 }
                 else
                 {
-                    processPsdProcessorT::processModelConfig processConfig;
+                    processPsdProcessorT::processModelConfig processConfig = m_extrapConfig;
                     processConfig.m_method = olProcessMethodName( m_extrapOL );
-                    processConfig.m_powerLawMatchFreq = m_powerLawMatchFreq;
-                    processConfig.m_fitPowerLawIndex = m_fitPowerLawIndex;
-                    processConfig.m_powerLawOnlyAboveFreq = m_powerLawOnlyAboveFreq;
 
                     processPsdProcessorT::processResults processResult;
                     mx::error_t errc =
@@ -3854,83 +4291,294 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_gainGain )( const pcf::IndiProperty
     return 0;
 }
 
-INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_powerLawMatchFreq )( const pcf::IndiProperty &ipRecv )
+template <typename valueT>
+int modalGainOpt::handleExtrapNumberProperty( pcf::IndiProperty &localProperty,
+                                              valueT &localTarget,
+                                              const pcf::IndiProperty &ipRecv,
+                                              const std::string &label )
 {
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_powerLawMatchFreq, ipRecv );
-
-    float target;
-    if( indiTargetUpdate( m_indiP_powerLawMatchFreq, target, ipRecv, true ) < 0 )
+    valueT target;
+    if( indiTargetUpdate( localProperty, target, ipRecv, true ) < 0 )
     {
         log<software_error>( { __FILE__, __LINE__ } );
         return -1;
     }
 
-    if( target != m_powerLawMatchFreq )
+    if( target != localTarget )
     {
         m_updating = true;
         std::lock_guard<std::mutex> lock( m_goptMutex );
         m_updating = true;
 
-        m_powerLawMatchFreq = target;
+        localTarget = target;
 
         m_sinceChange = -1;
         m_updating = false;
-        std::cerr << "Got power-law match freq: " << m_powerLawMatchFreq << '\n';
+        std::cerr << "Got " << label << ": " << localTarget << '\n';
     }
 
     return 0;
 }
 
-INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_fitPowerLawIndex )( const pcf::IndiProperty &ipRecv )
+int modalGainOpt::handleExtrapBoolProperty( pcf::IndiProperty &localProperty,
+                                            bool &localTarget,
+                                            const pcf::IndiProperty &ipRecv,
+                                            const std::string &label )
 {
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_fitPowerLawIndex, ipRecv );
-
-    if( ipRecv.find( "toggle" ) )
+    std::string targetText;
+    if( indiTargetUpdate( localProperty, targetText, ipRecv, true ) < 0 )
     {
-        bool fitPowerLawIndex = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
 
-        if( fitPowerLawIndex != m_fitPowerLawIndex )
+    bool target = false;
+    if( !parseExtrapBool( target, targetText ) )
+    {
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "Invalid boolean extrapolation setting for " + label + ": " + targetText } );
+    }
+
+    if( target != localTarget )
+    {
+        m_updating = true;
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+        m_updating = true;
+
+        localTarget = target;
+
+        m_sinceChange = -1;
+        m_updating = false;
+        std::cerr << "Got " << label << ": " << extrapBoolString( localTarget ) << '\n';
+    }
+
+    return 0;
+}
+
+int modalGainOpt::handleExtrapMethodProperty( const pcf::IndiProperty &ipRecv )
+{
+    std::string targetText;
+    if( indiTargetUpdate( m_indiP_extrapMethod, targetText, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    int target = olProcessMethodFromName( targetText );
+    if( target == c_olProcessNone && olProcessMethodName( target ) != targetText &&
+        olProcessMethodElement( target ) != targetText )
+    {
+        std::string norm = targetText;
+        std::transform( norm.begin(),
+                        norm.end(),
+                        norm.begin(),
+                        []( unsigned char c )
+                        {
+                            if( c == '_' )
+                            {
+                                return static_cast<char>( '-' );
+                            }
+
+                            return static_cast<char>( std::tolower( c ) );
+                        } );
+
+        if( norm != "none" )
         {
-            m_updating = true;
-            std::lock_guard<std::mutex> lock( m_goptMutex );
-            m_updating = true;
-
-            m_fitPowerLawIndex = fitPowerLawIndex;
-
-            m_sinceChange = -1;
-            m_updating = false;
-            std::cerr << "Got fit power-law index: " << std::boolalpha << m_fitPowerLawIndex << '\n';
+            return log<software_error, -1>( { __FILE__, __LINE__, "Invalid extrapolation method: " + targetText } );
         }
     }
 
-    return 0;
-}
-
-INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_powerLawOnlyAboveFreq )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_powerLawOnlyAboveFreq, ipRecv );
-
-    float target;
-    if( indiTargetUpdate( m_indiP_powerLawOnlyAboveFreq, target, ipRecv, true ) < 0 )
-    {
-        log<software_error>( { __FILE__, __LINE__ } );
-        return -1;
-    }
-
-    if( target != m_powerLawOnlyAboveFreq )
+    if( target != m_extrapOL )
     {
         m_updating = true;
         std::lock_guard<std::mutex> lock( m_goptMutex );
         m_updating = true;
 
-        m_powerLawOnlyAboveFreq = target;
+        m_extrapOL = target;
 
         m_sinceChange = -1;
         m_updating = false;
-        std::cerr << "Got power-law-only-above freq: " << m_powerLawOnlyAboveFreq << '\n';
+        std::cerr << "Got extrapolation method: " << olProcessMethodName( m_extrapOL ) << '\n';
     }
 
     return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapMethod )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapMethod, ipRecv );
+    return handleExtrapMethodProperty( ipRecv );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawIndex )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPowerLawIndex, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPowerLawIndex,
+                                       m_extrapConfig.m_powerLawIndex,
+                                       ipRecv,
+                                       "extrap power-law index" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawNormFreq )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPowerLawNormFreq, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPowerLawNormFreq,
+                                       m_extrapConfig.m_powerLawNormFreq,
+                                       ipRecv,
+                                       "extrap power-law norm freq" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawMatchFreq )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPowerLawMatchFreq, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPowerLawMatchFreq,
+                                       m_extrapConfig.m_powerLawMatchFreq,
+                                       ipRecv,
+                                       "extrap power-law match freq" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawMatchFallbackWindowHz )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPowerLawMatchFallbackWindowHz, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPowerLawMatchFallbackWindowHz,
+                                       m_extrapConfig.m_powerLawMatchFallbackWindowHz,
+                                       ipRecv,
+                                       "extrap power-law match fallback window" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapFitPowerLawIndex )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapFitPowerLawIndex, ipRecv );
+    return handleExtrapBoolProperty( m_indiP_extrapFitPowerLawIndex,
+                                     m_extrapConfig.m_fitPowerLawIndex,
+                                     ipRecv,
+                                     "extrap fit power-law index" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawOnlyAboveFreq )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPowerLawOnlyAboveFreq, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPowerLawOnlyAboveFreq,
+                                       m_extrapConfig.m_powerLawOnlyAboveFreq,
+                                       ipRecv,
+                                       "extrap power-law only above freq" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawFitIncludesMatchPoint )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPowerLawFitIncludesMatchPoint, ipRecv );
+    return handleExtrapBoolProperty( m_indiP_extrapPowerLawFitIncludesMatchPoint,
+                                     m_extrapConfig.m_powerLawFitIncludesMatchPoint,
+                                     ipRecv,
+                                     "extrap fit includes match point" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawFitMinFreqHz )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPowerLawFitMinFreqHz, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPowerLawFitMinFreqHz,
+                                       m_extrapConfig.m_powerLawFitMinFreqHz,
+                                       ipRecv,
+                                       "extrap fit min freq" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawFitMaxFreqHz )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPowerLawFitMaxFreqHz, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPowerLawFitMaxFreqHz,
+                                       m_extrapConfig.m_powerLawFitMaxFreqHz,
+                                       ipRecv,
+                                       "extrap fit max freq" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawFitBinWidthHz )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPowerLawFitBinWidthHz, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPowerLawFitBinWidthHz,
+                                       m_extrapConfig.m_powerLawFitBinWidthHz,
+                                       ipRecv,
+                                       "extrap fit bin width" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawBlendBins )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPowerLawBlendBins, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPowerLawBlendBins,
+                                       m_extrapConfig.m_powerLawBlendBins,
+                                       ipRecv,
+                                       "extrap power-law blend bins" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPeakDetectWidthHz )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPeakDetectWidthHz, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPeakDetectWidthHz,
+                                       m_extrapConfig.m_peakDetectWidthHz,
+                                       ipRecv,
+                                       "extrap peak detect width" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPeakDetectFactor )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPeakDetectFactor, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPeakDetectFactor,
+                                       m_extrapConfig.m_peakDetectFactor,
+                                       ipRecv,
+                                       "extrap peak detect factor" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPeakDetectBroadFactor )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPeakDetectBroadFactor, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPeakDetectBroadFactor,
+                                       m_extrapConfig.m_peakDetectBroadFactor,
+                                       ipRecv,
+                                       "extrap peak detect broad factor" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPeakDetectMinWidthLog )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPeakDetectMinWidthLog, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPeakDetectMinWidthLog,
+                                       m_extrapConfig.m_peakDetectMinWidthLog,
+                                       ipRecv,
+                                       "extrap peak detect min width log" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPeakDetectPasses )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPeakDetectPasses, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPeakDetectPasses,
+                                       m_extrapConfig.m_peakDetectPasses,
+                                       ipRecv,
+                                       "extrap peak detect passes" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPeakMoffatBeta )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPeakMoffatBeta, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPeakMoffatBeta,
+                                       m_extrapConfig.m_peakMoffatBeta,
+                                       ipRecv,
+                                       "extrap peak moffat beta" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapDropoutGapFactor )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapDropoutGapFactor, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapDropoutGapFactor,
+                                       m_extrapConfig.m_dropoutGapFactor,
+                                       ipRecv,
+                                       "extrap dropout gap factor" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapDropoutMaxBins )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapDropoutMaxBins, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapDropoutMaxBins,
+                                       m_extrapConfig.m_dropoutMaxBins,
+                                       ipRecv,
+                                       "extrap dropout max bins" );
 }
 
 INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_emg )( const pcf::IndiProperty &ipRecv )
@@ -4213,44 +4861,6 @@ INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_pcOn )( const pcf::IndiProperty &ip
     return 0;
 }
 
-INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapOL )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapOL, ipRecv );
-
-    int ext = m_extrapOL;
-
-    for( const std::string &element : { std::string( "none" ),
-                                        std::string( "legacy" ),
-                                        std::string( "power_law_only" ),
-                                        std::string( "moffat_peaks" ) } )
-    {
-        if( !ipRecv.find( element ) )
-        {
-            continue;
-        }
-
-        if( ipRecv[element].getSwitchState() == pcf::IndiElement::On )
-        {
-            ext = olProcessMethodFromElement( element );
-            break;
-        }
-    }
-
-    if( ext != m_extrapOL )
-    {
-        m_updating = true;
-        std::lock_guard<std::mutex> lock( m_goptMutex );
-        m_updating = true;
-
-        m_extrapOL = ext;
-
-        m_sinceChange = -1;
-        m_updating = false;
-        std::cerr << "Got extrap: " << olProcessMethodName( m_extrapOL ) << '\n';
-    }
-
-    return 0;
-}
 } // namespace app
 } // namespace MagAOX
 
