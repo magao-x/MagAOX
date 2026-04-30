@@ -7,7 +7,10 @@
 #ifndef wooferTweeterRecon_hpp
 #define wooferTweeterRecon_hpp
 
+#include <algorithm>
+#include <cmath>
 #include <limits>
+#include <mutex>
 
 #include <mx/improc/eigenCube.hpp>
 #include <mx/improc/eigenImage.hpp>
@@ -85,9 +88,9 @@ struct wfsModesShmimT
 class wooferTweeterRecon : public MagAOXApp<true>,
                            public dev::shmimMonitor<wooferTweeterRecon, wooferModesShmimT>,
                            public dev::shmimMonitor<wooferTweeterRecon, tweeterModesShmimT>,
-                           public dev::shmimMonitor<wooferTweeterRecon, wfsModesShmimT>//,
-                           //public dev::frameGrabber<wooferTweeterRecon>,
-                           //public dev::telemeter<wooferTweeterRecon>
+                           public dev::shmimMonitor<wooferTweeterRecon, wfsModesShmimT> //,
+// public dev::frameGrabber<wooferTweeterRecon>,
+// public dev::telemeter<wooferTweeterRecon>
 {
     // Give the test harness access.
     friend class wooferTweeterRecon_test;
@@ -113,58 +116,110 @@ class wooferTweeterRecon : public MagAOXApp<true>,
      *@{
      */
 
+    /// Device name providing the loop frame rate.
     std::string m_fpsSource{ "camwfs" };
 
+    /// Device name providing the telescope elevation.
     std::string m_elSource{ "tcsi" };
 
+    /// Number of samples retained in each mode-value circular buffer.
     uint32_t m_modevalCircBuffLen{ 5000 };
 
+    /// Time offset applied to woofer command timestamps.
     double m_wooferOffset{ 500e-6 };
 
+    /// Time offset applied to tweeter command timestamps.
     double m_tweeterOffset{ 50e-6 };
 
+    /// Time offset applied to WFS timestamps after the loop-latency correction.
     double m_wfsOffset{ -10e-6 };
 
     ///@}
 
+    /** \name Reconstruction State - Data
+     *
+     * @{
+     */
+    /// True once the woofer mode ring buffer is sized for the current stream.
     bool m_wooferModesReady{ false };
+
+    /// True once the tweeter mode ring buffer and seeing buffers are sized for the current stream.
     bool m_tweeterModesReady{ false };
+
+    /// True once the WFS mode ring buffer is sized for the current stream.
     bool m_wfsModesReady{ false };
 
+    /// Stores one timestamped modal sample from a monitored stream.
     struct modevals
     {
-        double             t{ 0 };
+        /// Absolute sample time used to align the stream with the other inputs.
+        double t{ 0 };
+
+        /// Modal amplitudes copied from the current frame.
         std::vector<float> vals;
-        bool               reconstructed{ false };
+
+        /// Tracks whether the aligned WFS sample has already been reconstructed.
+        bool reconstructed{ false };
     };
 
+    /// Guards stream buffers, readiness flags, timestamps, and seeing history.
+    mutable std::mutex m_reconMutex;
+
+    /// Circular buffer of woofer mode samples keyed by timestamp.
     std::vector<modevals> m_wooferVals;
-    size_t                m_lastWooferVal{ 0 };
 
+    /// Index of the most recently written woofer sample.
+    size_t m_lastWooferVal{ 0 };
+
+    /// Circular buffer of tweeter mode samples keyed by timestamp.
     std::vector<modevals> m_tweeterVals;
-    size_t                m_lastTweeterVal{ 0 };
 
+    /// Index of the most recently written tweeter sample.
+    size_t m_lastTweeterVal{ 0 };
+
+    /// Circular buffer of WFS mode samples keyed by timestamp.
     std::vector<modevals> m_wfsVals;
-    size_t                m_lastWfsVal{ 0 };
 
-    float m_fps{ 0 }; ///< Current FPS from the FPS source.
+    /// Index of the most recently written WFS sample.
+    size_t m_lastWfsVal{ 0 };
 
-    float m_invFps{ 0 }; ///< The inverse of FPS
+    /// Current FPS from the FPS source.
+    float m_fps{ 0 };
 
-    float m_el {90}; ///< The current elevation
+    /// Cached inverse FPS used to align the WFS timestamp with the command streams.
+    float m_invFps{ 0 };
 
+    /// Current telescope elevation in degrees.
+    float m_el{ 90 };
+
+    /// Optical gain used to convert residual WFS modes to physical modal amplitudes.
     float m_opticalGain{ 0.8 };
 
-    /// Mutex for locking shared memory access.
-    // std::mutex m_shmimMutex;
-
+    /// Reconstructed pseudo-open-loop modal vectors awaiting downstream consumption.
     mx::improc::eigenImage<float> m_outputVal;
-    int                           m_nvals{ 3600*2 }; //2 sec of data at max speed
-    int                           m_nloaded{ 0 };
 
+    /// Number of reconstructed modal vectors retained in the output image.
+    int m_nvals{ 3600 * 2 };
+
+    /// Number of reconstructed modal vectors currently loaded in the output image.
+    int m_nloaded{ 0 };
+
+    /// Number of seeing samples retained in the circular statistics buffers.
+    size_t m_seeingCircBuffLen{ 3600 * 30 };
+
+    /// Circular buffer of reconstructed r0 estimates.
     std::vector<float> m_r0;
+
+    /// Circular buffer of residual variances used for future seeing products.
     std::vector<float> m_sig;
-    size_t             m_lastr0{ 0 };
+
+    /// Index of the most recently stored seeing estimate.
+    size_t m_lastr0{ 0 };
+
+    /// Number of valid seeing samples currently stored in the circular buffers.
+    size_t m_r0Count{ 0 };
+
+    ///@}
 
   public:
     /// Default c'tor.
@@ -175,21 +230,20 @@ class wooferTweeterRecon : public MagAOXApp<true>,
     {
     }
 
+    /// Configure application and shmimMonitor parameters.
     virtual void setupConfig();
 
-    /// Implementation of loadConfig logic, separated for testing.
+    /// Load configuration values into the application state.
     /** This is called by loadConfig().
      */
     int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] an application configuration
                         from which to load values*/
     );
 
+    /// Load configuration values from the application configurator.
     virtual void loadConfig();
 
-    /// Startup function
-    /**
-     *
-     */
+    /// Register INDI properties and start the shmimMonitor threads.
     virtual int appStartup();
 
     /// Implementation of the FSM for wooferTweeterRecon.
@@ -199,77 +253,99 @@ class wooferTweeterRecon : public MagAOXApp<true>,
      */
     virtual int appLogic();
 
-    /// Shutdown the app.
-    /**
-     *
-     */
+    /// Shut down the shmimMonitor threads.
     virtual int appShutdown();
 
-    /// Allocate method for the woofer command shmimMonitor
+    /// Prepare storage for a newly connected woofer mode stream.
     /**
      * \returns 0 on success
      * \returns -1 on an error
      */
     int allocate( const wooferModesShmimT & /**< [in] tag to differentiate shmimMonitor parents.*/ );
 
-    /// Process images for the woofer command shmimMonitor
+    /// Copy one woofer mode frame into the circular buffer.
     /**
-     * \returns 0 on sucess
+     * \returns 0 on success
      * \returns -1 on an error
      */
-    int processImage( void *curr_src,           ///< [in] pointer to start of current frame.
-                      const wooferModesShmimT & ///< [in] tag to differentiate shmimMonitor parents.
+    int processImage( void *curr_src,           /**< [in] pointer to start of current frame. */
+                      const wooferModesShmimT & /**< [in] tag to differentiate shmimMonitor parents. */
     );
 
+    /// Reconstruct pseudo-open-loop modal vectors for newly aligned samples.
     int recon();
 
-    /// Allocate method for the tweeter command shmimMonitor
+    /// Prepare storage for a newly connected tweeter mode stream.
     /**
      * \returns 0 on success
      * \returns -1 on an error
      */
     int allocate( const tweeterModesShmimT & /**< [in] tag to differentiate shmimMonitor parents.*/ );
 
-    /// Process images for the tweeter command shmimMonitor
+    /// Copy one tweeter mode frame into the circular buffer.
     /**
-     * \returns 0 on sucess
+     * \returns 0 on success
      * \returns -1 on an error
      */
-    int processImage( void *curr_src,            ///< [in] pointer to start of current frame.
-                      const tweeterModesShmimT & ///< [in] tag to differentiate shmimMonitor parents.
+    int processImage( void *curr_src,            /**< [in] pointer to start of current frame. */
+                      const tweeterModesShmimT & /**< [in] tag to differentiate shmimMonitor parents. */
     );
 
-    /// Allocate method for the wfs modes shmimMonitor
+    /// Prepare storage for a newly connected WFS mode stream.
     /**
      * \returns 0 on success
      * \returns -1 on an error
      */
     int allocate( const wfsModesShmimT & /**< [in] tag to differentiate shmimMonitor parents.*/ );
 
-    /// Process images for the wfs modes shmimMonitor
+    /// Copy one WFS mode frame into the circular buffer.
     /**
-     * \returns 0 on sucess
+     * \returns 0 on success
      * \returns -1 on an error
      */
-    int processImage( void *curr_src,        ///< [in] pointer to start of current frame.
-                      const wfsModesShmimT & ///< [in] tag to differentiate shmimMonitor parents.
+    int processImage( void *curr_src,        /**< [in] pointer to start of current frame. */
+                      const wfsModesShmimT & /**< [in] tag to differentiate shmimMonitor parents. */
     );
 
+    /// Reserved for future mode-preparation helpers.
     int prepareModes();
+
+  private:
+    /// Reset one timestamped mode-value circular buffer to the current mode count.
+    void resetModevalBuffer( std::vector<modevals> &buffer /**< [in,out] buffer to resize and clear */,
+                             size_t &lastVal /**< [in,out] index of the most recent valid sample in the buffer */,
+                             size_t  modeCount /**< [in] number of modes to store in each entry */ );
+
+    /// Reset the circular seeing buffers after a tweeter-stream restart.
+    void resetSeeingState();
+
+    /// Copy the seeing samples needed for INDI updates into local buffers.
+    bool snapshotSeeing( std::vector<float> &oneSecond /**< [out] recent samples for the short averaging window */,
+                         std::vector<float> &tenSecond /**< [out] recent samples for the long averaging window */,
+                         float              &fps /**< [out] current loop rate in Hz */,
+                         float              &el /**< [out] current telescope elevation in degrees */ );
 
   protected:
     /** \name INDI Interface
      *
      * @{
      */
+    /// Subscription property used to receive loop-FPS updates.
     pcf::IndiProperty m_indiP_fpsSource;
+
+    /// Handle updates from the configured FPS source.
     INDI_SETCALLBACK_DECL( wooferTweeterRecon, m_indiP_fpsSource );
 
+    /// Published current loop FPS.
     pcf::IndiProperty m_indiP_fps;
 
+    /// Subscription property used to receive telescope elevation updates.
     pcf::IndiProperty m_indiP_elSource;
+
+    /// Handle updates from the configured elevation source.
     INDI_SETCALLBACK_DECL( wooferTweeterRecon, m_indiP_elSource );
 
+    /// Published seeing summary derived from reconstructed pseudo-open-loop modes.
     pcf::IndiProperty m_indiP_seeing;
 
     ///@}
@@ -278,15 +354,20 @@ class wooferTweeterRecon : public MagAOXApp<true>,
      *
      * @{
      */
+    /// Check whether loop-gain and offloading telemetry should be recorded.
     int checkRecordTimes();
 
-    int recordTelem( const telem_loopgain * );
+    /// Record loop-gain telemetry when the helper dispatches this telemetry type.
+    int recordTelem( const telem_loopgain * /**< [in] telemetry tag used by the telemeter helper */ );
 
-    int recordLoopGain( bool force = false );
+    /// Publish the current loop-gain telemetry packet when needed.
+    int recordLoopGain( bool force = false /**< [in] force emission even when the state is unchanged */ );
 
-    int recordTelem( const telem_offloading * );
+    /// Record offloading telemetry when the helper dispatches this telemetry type.
+    int recordTelem( const telem_offloading * /**< [in] telemetry tag used by the telemeter helper */ );
 
-    int recordOffloading( bool force = false );
+    /// Publish the current offloading telemetry packet when needed.
+    int recordOffloading( bool force = false /**< [in] force emission even when the state is unchanged */ );
 
     ///@}
 };
@@ -423,6 +504,68 @@ inline int wooferTweeterRecon::appStartup()
     return 0;
 }
 
+inline void wooferTweeterRecon::resetModevalBuffer( std::vector<modevals> &buffer, size_t &lastVal, size_t modeCount )
+{
+    lastVal = 0;
+    buffer.resize( m_modevalCircBuffLen );
+
+    for( auto &val : buffer )
+    {
+        val.t = 0;
+        val.vals.assign( modeCount, 0 );
+        val.reconstructed = false;
+    }
+}
+
+inline void wooferTweeterRecon::resetSeeingState()
+{
+    m_lastr0  = 0;
+    m_r0Count = 0;
+    m_r0.assign( m_seeingCircBuffLen, 0 );
+    m_sig.assign( m_seeingCircBuffLen, 0 );
+}
+
+inline bool wooferTweeterRecon::snapshotSeeing( std::vector<float> &oneSecond,
+                                                std::vector<float> &tenSecond,
+                                                float              &fps,
+                                                float              &el )
+{
+    std::lock_guard<std::mutex> guard( m_reconMutex );
+
+    fps = m_fps;
+    el  = m_el;
+
+    if( fps <= 0 || m_r0.empty() || m_r0Count == 0 )
+    {
+        return false;
+    }
+
+    size_t n1sec  = std::min( m_r0Count, std::max<size_t>( 1, static_cast<size_t>( std::ceil( fps ) ) ) );
+    size_t n10sec = std::min( m_r0Count, std::max<size_t>( 1, static_cast<size_t>( std::ceil( 10 * fps ) ) ) );
+
+    if( n1sec == 0 || n10sec == 0 )
+    {
+        return false;
+    }
+
+    oneSecond.resize( n1sec );
+    tenSecond.resize( n10sec );
+
+    for( size_t n = 0; n < n10sec; ++n )
+    {
+        size_t idx = ( m_lastr0 + m_r0.size() - n ) % m_r0.size();
+
+        tenSecond[n] = m_r0[idx];
+
+        if( n < n1sec )
+        {
+            oneSecond[n] = tenSecond[n];
+        }
+    }
+
+    return true;
+}
+
 int wooferTweeterRecon::appLogic()
 {
     SHMIMMONITORT_APP_LOGIC( wooferModesSMT );
@@ -431,73 +574,63 @@ int wooferTweeterRecon::appLogic()
 
     // TELEMETER_APP_LOGIC;
 
-    if( m_fps > 0 )
+    std::vector<float> r0_1sec;
+    std::vector<float> r0_10sec;
+    float              fps{ 0 };
+    float              el{ 90 };
+    bool               haveSeeing{ false };
+    float              r01{ 0 };
+    float              vr01{ 0 };
+    float              fwhm1{ 0 };
+    float              vfw1{ 0 };
+    float              fwhm1cz{ 0 };
+    float              r010{ 0 };
+    float              vr010{ 0 };
+    float              fwhm10{ 0 };
+    float              vfw10{ 0 };
+    float              fwhm10cz{ 0 };
+
+    if( snapshotSeeing( r0_1sec, r0_10sec, fps, el ) )
     {
-        float cz = pow( cos( 3.14159 / 180. * ( 90 - m_el ) ), 3 / 5. );
+        float cz = std::pow( std::cos( 3.14159 / 180. * ( 90 - el ) ), 3. / 5. );
 
-        size_t n1sec = m_fps;
+        r01  = mx::math::vectorMean( r0_1sec );
+        vr01 = std::sqrt( mx::math::vectorVariance( r0_1sec, r01 ) );
 
-        std::vector<float> cr0( n1sec );
+        r010  = mx::math::vectorMean( r0_10sec );
+        vr010 = std::sqrt( mx::math::vectorVariance( r0_10sec, r010 ) );
 
-        for( size_t n = 0; n < n1sec; ++n )
+        if( r01 > 0 && r010 > 0 )
         {
-            ssize_t m = m_lastr0 - n;
-            if( m < 0 )
-            {
-                m = m_r0.size() - 1;
-            }
-            cr0[n] = m_r0[m];
+            fwhm1   = 0.2063 * 0.5 / r01;
+            vfw1    = fwhm1 * ( vr01 / r01 );
+            fwhm1cz = fwhm1 * cz;
+
+            fwhm10   = 0.2063 * 0.5 / r010;
+            vfw10    = fwhm10 * ( vr010 / r010 );
+            fwhm10cz = fwhm10 * cz;
+
+            haveSeeing = true;
         }
-
-        float r01  = mx::math::vectorMean( cr0 );
-        float vr01 = sqrt( mx::math::vectorVariance( cr0, r01 ) );
-
-        float fwhm1   = 0.2063 * 0.5 / r01;
-        float vfw1    = fwhm1 * ( vr01 / r01 );
-        float fwhm1cz = fwhm1 * cz;
-
-        size_t n10sec = 10 * m_fps;
-
-        cr0.resize( n10sec );
-
-        for( size_t n = 0; n < n10sec; ++n )
-        {
-            ssize_t m = m_lastr0 - n;
-            if( m < 0 )
-            {
-                m = m_r0.size() - 1;
-            }
-            cr0[n] = m_r0[m];
-        }
-
-        float r010  = mx::math::vectorMean( cr0 );
-        float vr010 = sqrt( mx::math::vectorVariance( cr0, r010 ) );
-
-        float fwhm10   = 0.2063 * 0.5 / r010;
-        float vfw10    = fwhm10 * ( vr010 / r010 );
-        float fwhm10cz = fwhm10 * cz;
-
-        updatesIfChanged<float>( m_indiP_seeing,
-                          { "r0_1sec",
-                            "r0_1sec_std",
-                            "fwhm_1sec",
-                            "fwhm_1sec_std",
-                            "fwhm_1sec_zenith",
-                            "r0_10sec",
-                            "r0_10sec_std",
-                            "fwhm_10sec",
-                            "fwhm_10sec_std",
-                            "fwhm_10sec_zenith" },
-                          { r01, vr01, fwhm1, vfw1, fwhm1cz, r010, vr010, fwhm10, vfw10, fwhm10cz } );
-
-        // float s2 = mx::math::vectorMean(m_sig);
-        // float S = exp(-s2*pow(2*3.14159/0.9,2) - 0.28*pow(0.135/r0, 5./3.));
-
-        // std::cerr << std::format("r0 = {} +/- {} fwhm = {}\" +/- {}\" at zenith = {}\" SR = {}", r0, vr0, fwhm, vfw,
-        // fwhm*cz, S) << '\n';
     }
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
+
+    if( haveSeeing )
+    {
+        updatesIfChanged<float>( m_indiP_seeing,
+                                 { "r0_1sec",
+                                   "r0_1sec_std",
+                                   "fwhm_1sec",
+                                   "fwhm_1sec_std",
+                                   "fwhm_1sec_zenith",
+                                   "r0_10sec",
+                                   "r0_10sec_std",
+                                   "fwhm_10sec",
+                                   "fwhm_10sec_std",
+                                   "fwhm_10sec_zenith" },
+                                 { r01, vr01, fwhm1, vfw1, fwhm1cz, r010, vr010, fwhm10, vfw10, fwhm10cz } );
+    }
 
     SHMIMMONITORT_UPDATE_INDI( wooferModesSMT );
     SHMIMMONITORT_UPDATE_INDI( tweeterModesSMT );
@@ -519,101 +652,119 @@ inline int wooferTweeterRecon::appShutdown()
 
 int wooferTweeterRecon::allocate( const wooferModesShmimT & )
 {
-    m_wooferModesReady = false;
+    bool restartWfs{ false };
+    bool restartWoofer{ false };
 
-    std::cerr << "woofer modes not ready\n";
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_reconMutex );
 
-    if( !m_wfsModesReady || wooferModesSMT::m_width > wfsModesSMT::m_width )
-    {
-        if( m_wfsModesReady )
+        m_wooferModesReady = false;
+
+        std::cerr << "woofer modes not ready\n";
+
+        if( !m_wfsModesReady || wooferModesSMT::m_width > wfsModesSMT::m_width )
         {
-            wfsModesSMT::m_restart = true;
+            restartWfs    = m_wfsModesReady;
+            restartWoofer = true;
         }
+        else
+        {
+            resetModevalBuffer( m_wooferVals, m_lastWooferVal, wooferModesSMT::m_width );
+            m_nloaded          = 0;
+            m_wooferModesReady = true;
 
+            std::cerr << "woofer modes ready\n";
+        }
+    }
+
+    if( restartWfs )
+    {
+        wfsModesSMT::m_restart = true;
+    }
+
+    if( restartWoofer )
+    {
         wooferModesSMT::m_restart = true;
 
         mx::sys::milliSleep( 1000 );
-
-        return 0; // This won't log an error, but setting m_restart will cause it to loop again until sizes match
     }
-
-    m_wooferVals.resize( m_modevalCircBuffLen );
-
-    for( auto &val : m_wooferVals )
-    {
-        val.t = 0;
-        val.vals.resize( wooferModesSMT::m_width, 0 );
-        val.reconstructed = false;
-    }
-
-    m_wooferModesReady = true;
-
-    std::cerr << "woofer modes ready\n";
 
     return 0;
 }
 
 int wooferTweeterRecon::processImage( void *curr_src, const wooferModesShmimT & )
 {
-    size_t next = m_lastWooferVal + 1;
-    if( next >= m_wooferVals.size() )
-    {
-        next = 0;
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_reconMutex );
+
+        if( !m_wooferModesReady || m_wooferVals.empty() )
+        {
+            return 0;
+        }
+
+        size_t next = m_lastWooferVal + 1;
+        if( next >= m_wooferVals.size() )
+        {
+            next = 0;
+        }
+
+        for( size_t n = 0; n < m_wooferVals[next].vals.size(); ++n )
+        {
+            m_wooferVals[next].vals[n] = reinterpret_cast<float *>( curr_src )[n];
+        }
+
+        m_wooferVals[next].t = wooferModesSMT::m_imageStream.md->atime.tv_sec +
+                               wooferModesSMT::m_imageStream.md->atime.tv_nsec / 1e9 + m_wooferOffset;
+        m_wooferVals[next].reconstructed = false;
+
+        m_lastWooferVal = next;
     }
 
-    for( size_t n = 0; n < wooferModesSMT::m_width; ++n )
-    {
-        m_wooferVals[next].vals[n] = reinterpret_cast<float *>( curr_src )[n];
-    }
-
-    m_wooferVals[next].t = wooferModesSMT::m_imageStream.md->atime.tv_sec +
-                           wooferModesSMT::m_imageStream.md->atime.tv_nsec / 1e9 + m_wooferOffset;
-    m_wooferVals[next].reconstructed = false;
-
-    m_lastWooferVal = next;
-
-    recon();
-
-    return 0;
+    return recon();
 }
 
 int wooferTweeterRecon::allocate( const tweeterModesShmimT & )
 {
-    m_tweeterModesReady = false;
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_reconMutex );
+
+        m_tweeterModesReady = false;
+        m_wooferModesReady  = false;
+        m_wfsModesReady     = false;
+
+        std::cerr << "tweeter modes not ready\n";
+
+        resetModevalBuffer( m_tweeterVals, m_lastTweeterVal, tweeterModesSMT::m_width );
+        resetSeeingState();
+        m_outputVal.resize( tweeterModesSMT::m_width, m_nvals );
+        m_nloaded           = 0;
+        m_tweeterModesReady = true;
+
+        std::cerr << "tweeter modes ready\n";
+    }
 
     wfsModesSMT::m_restart    = true;
     wooferModesSMT::m_restart = true;
-
-    std::cerr << "tweeter modes not ready\n";
-
-    m_tweeterVals.resize( m_modevalCircBuffLen );
-
-    m_r0.resize( 3600*30, 0 );
-    m_sig.resize( 3600*30,0 );
-    for( auto &val : m_tweeterVals )
-    {
-        val.t = 0;
-        val.vals.resize( tweeterModesSMT::m_width, 0 );
-        val.reconstructed = false;
-    }
-
-    m_outputVal.resize( tweeterModesSMT::m_width, m_nvals );
-    m_tweeterModesReady = true;
-
-    std::cerr << "tweeter modes ready\n";
 
     return 0;
 }
 
 int wooferTweeterRecon::processImage( void *curr_src, const tweeterModesShmimT & )
 {
+    std::lock_guard<std::mutex> guard( m_reconMutex );
+
+    if( !m_tweeterModesReady || m_tweeterVals.empty() )
+    {
+        return 0;
+    }
+
     size_t next = m_lastTweeterVal + 1;
     if( next >= m_tweeterVals.size() )
     {
         next = 0;
     }
 
-    for( size_t n = 0; n < tweeterModesSMT::m_width; ++n )
+    for( size_t n = 0; n < m_tweeterVals[next].vals.size(); ++n )
     {
         m_tweeterVals[next].vals[n] = reinterpret_cast<float *>( curr_src )[n];
     }
@@ -629,48 +780,61 @@ int wooferTweeterRecon::processImage( void *curr_src, const tweeterModesShmimT &
 
 int wooferTweeterRecon::allocate( const wfsModesShmimT & )
 {
-    m_wfsModesReady = false;
+    bool restartTweeter{ false };
+    bool restartWfs{ false };
 
-    std::cerr << "wfs modes not ready\n";
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_reconMutex );
 
-    if( !m_tweeterModesReady || wfsModesSMT::m_width != tweeterModesSMT::m_width )
-    {
-        if( m_tweeterModesReady )
+        m_wfsModesReady = false;
+
+        std::cerr << "wfs modes not ready\n";
+
+        if( !m_tweeterModesReady || wfsModesSMT::m_width != tweeterModesSMT::m_width )
         {
-            tweeterModesSMT::m_restart = true;
+            restartTweeter = m_tweeterModesReady;
+            restartWfs     = true;
         }
+        else
+        {
+            resetModevalBuffer( m_wfsVals, m_lastWfsVal, wfsModesSMT::m_width );
+            m_nloaded       = 0;
+            m_wfsModesReady = true;
 
+            std::cerr << "wfs modes ready\n";
+        }
+    }
+
+    if( restartTweeter )
+    {
+        tweeterModesSMT::m_restart = true;
+    }
+
+    if( restartWfs )
+    {
         wfsModesSMT::m_restart = true;
         mx::sys::milliSleep( 1000 );
-
-        return 0; // This won't log an error, but setting m_restart will cause it to loop again until sizes match
     }
-
-    m_wfsVals.resize( m_modevalCircBuffLen );
-
-    for( auto &val : m_wfsVals )
-    {
-        val.t = 0;
-        val.vals.resize( wfsModesSMT::m_width, 0 );
-        val.reconstructed = false;
-    }
-
-    m_wfsModesReady = true;
-
-    std::cerr << "wfs modes ready\n";
 
     return 0;
 }
 
 int wooferTweeterRecon::processImage( void *curr_src, const wfsModesShmimT & )
 {
+    std::lock_guard<std::mutex> guard( m_reconMutex );
+
+    if( !m_wfsModesReady || m_wfsVals.empty() )
+    {
+        return 0;
+    }
+
     size_t next = m_lastWfsVal + 1;
     if( next >= m_wfsVals.size() )
     {
         next = 0;
     }
 
-    for( size_t n = 0; n < wfsModesSMT::m_width; ++n )
+    for( size_t n = 0; n < m_wfsVals[next].vals.size(); ++n )
     {
         m_wfsVals[next].vals[n] = reinterpret_cast<float *>( curr_src )[n];
     }
@@ -693,6 +857,15 @@ int wooferTweeterRecon::processImage( void *curr_src, const wfsModesShmimT & )
 
 int wooferTweeterRecon::recon()
 {
+    std::lock_guard<std::mutex> guard( m_reconMutex );
+
+    if( !m_wooferModesReady || !m_tweeterModesReady || !m_wfsModesReady || m_wooferVals.empty() ||
+        m_tweeterVals.empty() || m_wfsVals.empty() || m_r0.empty() || m_outputVal.rows() == 0 ||
+        m_outputVal.cols() == 0 )
+    {
+        return 0;
+    }
+
     if( m_nloaded != 0 )
     {
         std::cerr << "we're behind!\n";
@@ -815,10 +988,28 @@ int wooferTweeterRecon::recon()
         double wdt = ( m_wfsVals[st].t - m_wooferVals[wst].t ) / ( m_wooferVals[wnxt].t - m_wooferVals[wst].t );
         double tdt = ( m_wfsVals[st].t - m_tweeterVals[tst].t ) / ( m_tweeterVals[tnxt].t - m_tweeterVals[tst].t );
 
-        float s2 = 0;
-        for( size_t n = 0; n < m_wfsVals[st].vals.size(); ++n )
+        float  s2     = 0;
+        size_t nModes = std::min( { m_wfsVals[st].vals.size(),
+                                    m_tweeterVals[tst].vals.size(),
+                                    m_tweeterVals[tnxt].vals.size(),
+                                    static_cast<size_t>( m_outputVal.rows() ) } );
+
+        m_outputVal.col( m_nloaded ).setZero();
+
+        if( nModes == 0 )
         {
-            float wval = m_wooferVals[wst].vals[n] + ( m_wooferVals[wnxt].vals[n] - m_wooferVals[wst].vals[n] ) * wdt;
+            decst;
+            continue;
+        }
+
+        for( size_t n = 0; n < nModes; ++n )
+        {
+            float wval = 0;
+            if( n < m_wooferVals[wst].vals.size() && n < m_wooferVals[wnxt].vals.size() )
+            {
+                wval = m_wooferVals[wst].vals[n] + ( m_wooferVals[wnxt].vals[n] - m_wooferVals[wst].vals[n] ) * wdt;
+            }
+
             float tval =
                 m_tweeterVals[tst].vals[n] + ( m_tweeterVals[tnxt].vals[n] - m_tweeterVals[tst].vals[n] ) * tdt;
             float wfsval = m_wfsVals[st].vals[n] / m_opticalGain;
@@ -830,7 +1021,8 @@ int wooferTweeterRecon::recon()
 
         float var = m_outputVal.col( m_nloaded ).square().sum();
 
-        float r0 = pow( 1.0299 * pow( 6.5, 5. / 3. ) / ( 4 * var * pow( 2 * 3.14159 / 0.5, 2 ) ), 3. / 5. );
+        float r0 =
+            std::pow( 1.0299 * std::pow( 6.5, 5. / 3. ) / ( 4 * var * std::pow( 2 * 3.14159 / 0.5, 2 ) ), 3. / 5. );
 
         size_t nr0 = m_lastr0 + 1;
         if( nr0 >= m_r0.size() )
@@ -841,7 +1033,8 @@ int wooferTweeterRecon::recon()
         m_r0[nr0]  = r0;
         m_sig[nr0] = s2;
 
-        m_lastr0 = nr0;
+        m_lastr0  = nr0;
+        m_r0Count = std::min( m_r0Count + 1, m_r0.size() );
 
         m_wfsVals[st].reconstructed = true;
 
@@ -875,23 +1068,32 @@ INDI_SETCALLBACK_DEFN( wooferTweeterRecon, m_indiP_fpsSource )( const pcf::IndiP
         return 0;
     }
 
-    std::lock_guard<std::mutex> guard( m_indiMutex );
-
     realT fps = ipRecv["current"].get<float>();
+    bool  fpsChanged{ false };
 
-    if( fps != m_fps )
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_reconMutex );
+
+        if( fps != m_fps )
+        {
+            m_fps = fps;
+            if( m_fps <= 0 )
+            {
+                m_invFps = 0;
+            }
+            else
+            {
+                m_invFps = 1.0 / m_fps;
+            }
+
+            fpsChanged = true;
+        }
+    }
+
+    if( fpsChanged )
     {
-        m_fps = fps;
-        if( m_fps <= 0 )
-        {
-            m_invFps = 0;
-        }
-        else
-        {
-            m_invFps = 1.0 / m_fps;
-        }
-
-        updateIfChanged( m_indiP_fps, "current", m_fps );
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+        updateIfChanged( m_indiP_fps, "current", fps );
     }
 
     return 0;
@@ -910,7 +1112,7 @@ INDI_SETCALLBACK_DEFN( wooferTweeterRecon, m_indiP_elSource )( const pcf::IndiPr
         return 0;
     }
 
-    std::lock_guard<std::mutex> guard( m_indiMutex );
+    std::lock_guard<std::mutex> guard( m_reconMutex );
 
     m_el = ipRecv["el"].get<float>();
 
