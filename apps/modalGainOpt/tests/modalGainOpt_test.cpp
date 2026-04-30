@@ -139,18 +139,18 @@ class modalGainOptHarness : public modalGainOpt
                                       const std::vector<float> &modeVarOL,
                                       const std::vector<float> &modeVarSI,
                                       const std::vector<float> &modeVarLP,
-                                      float                     opticalGain )
+                                      float opticalGain )
     {
         m_gainCalFacts = gainCalFacts;
-        m_optGainSI    = gainSI;
-        m_gmaxSI       = gainMaxSI;
-        m_optGainLP    = gainLP;
-        m_gmaxLP       = gainMaxLP;
-        m_gainCals     = gainCals;
-        m_modeVarOL    = modeVarOL;
-        m_modeVarSI    = modeVarSI;
-        m_modeVarLP    = modeVarLP;
-        m_opticalGain  = opticalGain;
+        m_optGainSI = gainSI;
+        m_gmaxSI = gainMaxSI;
+        m_optGainLP = gainLP;
+        m_gmaxLP = gainMaxLP;
+        m_gainCals = gainCals;
+        m_modeVarOL = modeVarOL;
+        m_modeVarSI = modeVarSI;
+        m_modeVarLP = modeVarLP;
+        m_opticalGain = opticalGain;
     }
 
     void writePublishedGainArraysForTest(
@@ -159,23 +159,23 @@ class modalGainOptHarness : public modalGainOpt
         writePublishedGainArrays( currentData, siData, maxSiData, lpData, maxLpData, modeVarData );
     }
 
-    void configurePublishedPredictorState( const std::vector<float>              &gainCalFacts,
-                                           const std::vector<float>              &gainLP,
-                                           const std::vector<float>              &gainCals,
-                                           const std::vector<uint32_t>           &Na,
-                                           const std::vector<uint32_t>           &Nb,
+    void configurePublishedPredictorState( const std::vector<float> &gainCalFacts,
+                                           const std::vector<float> &gainLP,
+                                           const std::vector<float> &gainCals,
+                                           const std::vector<uint32_t> &Na,
+                                           const std::vector<uint32_t> &Nb,
                                            const std::vector<std::vector<float>> &aCoeff,
                                            const std::vector<std::vector<float>> &bCoeff,
-                                           float                                  opticalGain,
-                                           float                                  gainGain )
+                                           float opticalGain,
+                                           float gainGain )
     {
         m_gainCalFacts = gainCalFacts;
-        m_optGainLP    = gainLP;
-        m_gainCals     = gainCals;
-        m_Na           = Na;
-        m_Nb           = Nb;
-        m_opticalGain  = opticalGain;
-        m_gainGain     = gainGain;
+        m_optGainLP = gainLP;
+        m_gainCals = gainCals;
+        m_Na = Na;
+        m_Nb = Nb;
+        m_opticalGain = opticalGain;
+        m_gainGain = gainGain;
 
         m_goptLP.resize( aCoeff.size() );
         for( size_t n = 0; n < aCoeff.size(); ++n )
@@ -201,16 +201,16 @@ class modalGainOptHarness : public modalGainOpt
         updateAppliedModeCount( gainFacts, predictorPath );
     }
 
-    bool applyGainFactorUpdateForTest( std::vector<float>       &gainFacts,
+    bool applyGainFactorUpdateForTest( std::vector<float> &gainFacts,
                                        const std::vector<float> &incoming,
-                                       bool                      predictorPath )
+                                       bool predictorPath )
     {
         return applyGainFactorUpdate( gainFacts, incoming.data(), incoming.size(), predictorPath );
     }
 
-    bool applyMultiplierUpdateForTest( std::vector<float>       &multFacts,
+    bool applyMultiplierUpdateForTest( std::vector<float> &multFacts,
                                        const std::vector<float> &incoming,
-                                       bool                      predictorPath )
+                                       bool predictorPath )
     {
         return applyMultiplierUpdate( multFacts, incoming.data(), incoming.size(), predictorPath );
     }
@@ -226,9 +226,9 @@ class modalGainOptHarness : public modalGainOpt
                                               const std::vector<float> &freq )
     {
         m_gainFacts = gainFacts;
-        m_taus      = taus;
+        m_taus = taus;
         m_multFacts = multFacts;
-        m_freq      = freq;
+        m_freq = freq;
         m_gmaxSI.resize( gainFacts.size(), 0.0F );
     }
 
@@ -262,6 +262,19 @@ TEST_CASE( "modalGainOpt placeholder harness instantiates the app", "[modalGainO
         modalGainOpt app;
 
         REQUIRE( true );
+    }
+
+    SECTION( "OL process-method helpers map consistently" )
+    {
+        REQUIRE( olProcessMethodName( c_olProcessNone ) == "none" );
+        REQUIRE( olProcessMethodName( c_olProcessLegacy ) == "legacy" );
+        REQUIRE( olProcessMethodName( c_olProcessPowerLawOnly ) == "power-law-only" );
+        REQUIRE( olProcessMethodName( c_olProcessMoffatPeaks ) == "moffat-peaks" );
+
+        REQUIRE( olProcessMethodFromElement( "none" ) == c_olProcessNone );
+        REQUIRE( olProcessMethodFromElement( "legacy" ) == c_olProcessLegacy );
+        REQUIRE( olProcessMethodFromElement( "power_law_only" ) == c_olProcessPowerLawOnly );
+        REQUIRE( olProcessMethodFromElement( "moffat_peaks" ) == c_olProcessMoffatPeaks );
     }
 }
 
@@ -320,8 +333,12 @@ TEST_CASE( "modalGainOpt published gain arrays keep LP and max LP outputs distin
     std::vector<float> maxLpData( 2, -1.0F );
     std::vector<float> modeVarData( 6, -1.0F );
 
-    app.writePublishedGainArraysForTest(
-        currentData.data(), siData.data(), maxSiData.data(), lpData.data(), maxLpData.data(), modeVarData.data() );
+    app.writePublishedGainArraysForTest( currentData.data(),
+                                         siData.data(),
+                                         maxSiData.data(),
+                                         lpData.data(),
+                                         maxLpData.data(),
+                                         modeVarData.data() );
 
     mx::improc::eigenMap<float> modeVars( modeVarData.data(), 3, 2 );
 
@@ -369,8 +386,12 @@ TEST_CASE( "modalGainOpt published gain arrays apply calibration scaling", "[mod
     std::vector<float> maxLpData( 2, -1.0F );
     std::vector<float> modeVarData( 6, -1.0F );
 
-    app.writePublishedGainArraysForTest(
-        currentData.data(), siData.data(), maxSiData.data(), lpData.data(), maxLpData.data(), modeVarData.data() );
+    app.writePublishedGainArraysForTest( currentData.data(),
+                                         siData.data(),
+                                         maxSiData.data(),
+                                         lpData.data(),
+                                         maxLpData.data(),
+                                         modeVarData.data() );
 
     REQUIRE( currentData[0] == Approx( 2.0F ) );
     REQUIRE( currentData[1] == Approx( 1.5F ) );
@@ -705,8 +726,15 @@ TEST_CASE( "modalGainOpt predictor publication clears stale coefficient blocks f
 {
     modalGainOptHarness app;
 
-    app.configurePublishedPredictorState(
-        { 8.0F, 2.0F }, { 4.0F, 6.0F }, { 4.0F, 2.0F }, { 0U, 0U }, { 0U, 0U }, { {}, {} }, { {}, {} }, 2.0F, 0.5F );
+    app.configurePublishedPredictorState( { 8.0F, 2.0F },
+                                          { 4.0F, 6.0F },
+                                          { 4.0F, 2.0F },
+                                          { 0U, 0U },
+                                          { 0U, 0U },
+                                          { {}, {} },
+                                          { {}, {} },
+                                          2.0F,
+                                          0.5F );
 
     std::vector<float> pcGainData( { 9.0F, 10.0F } );
     std::vector<float> aCoeffData( { 7.0F, 1.0F, 2.0F, 3.0F, 6.0F, 4.0F, 5.0F, 6.0F } );
