@@ -877,8 +877,11 @@ int wooferTweeterRecon::recon()
 
     size_t tst = m_lastTweeterVal;
 
-    while( m_wfsVals[st].reconstructed == false && m_wfsVals[st].t > 0 )
+    size_t nChecked = 0;
+    while( nChecked < m_wfsVals.size() && m_wfsVals[st].reconstructed == false && m_wfsVals[st].t > 0 )
     {
+        ++nChecked;
+
         // Find starting woofer value
         if( m_wooferVals[wst].t < m_wfsVals[st].t )
         {
