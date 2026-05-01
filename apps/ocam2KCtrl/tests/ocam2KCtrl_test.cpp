@@ -62,6 +62,10 @@ struct edtStubState
         activeSerialTransaction = false;
         activeSerialWaitResult  = 0;
         activeSerialWaitServed  = false;
+        doneCount               = 0;
+        waitedCount             = 0;
+        ringBufferOverrun       = 0;
+        pdvOverrunBytes         = 0;
     }
 
     int                        startImagesCalls{ 0 };   ///< Number of `pdv_start_images` calls observed.
@@ -74,10 +78,14 @@ struct edtStubState
     std::deque<serialResponse> serialResponses;         ///< Scripted serial responses queued for future commands.
     std::vector<std::string>   serialCommands;          ///< Serial commands issued by the app under test.
     std::string                activeSerialResponse;    ///< Active serial response returned by the current command.
-    bool activeSerialReadPending{ false }; ///< Indicates that the next `pdv_serial_read` should return data.
-    bool activeSerialTransaction{ false }; ///< Indicates that a serial command is mid-transaction.
-    int  activeSerialWaitResult{ 0 };      ///< Return code for the first wait after a command.
-    bool activeSerialWaitServed{ false };  ///< Tracks whether the first serial wait has been consumed.
+    bool     activeSerialReadPending{ false }; ///< Indicates that the next `pdv_serial_read` should return data.
+    bool     activeSerialTransaction{ false }; ///< Indicates that a serial command is mid-transaction.
+    int      activeSerialWaitResult{ 0 };      ///< Return code for the first wait after a command.
+    bool     activeSerialWaitServed{ false };  ///< Tracks whether the first serial wait has been consumed.
+    uint32_t doneCount{ 0 };                   ///< Cumulative EDT completed-buffer count returned by the stub.
+    uint32_t waitedCount{ 0 };                 ///< Cumulative EDT waited-buffer count returned by the stub.
+    int      ringBufferOverrun{ 0 };           ///< EDT ring-buffer overrun flag returned by the stub.
+    int      pdvOverrunBytes{ 0 };             ///< PDV overrun count returned by the stub.
 };
 
 /// Shared OCAM SDK stub state used to drive descramble output in tests.
@@ -273,6 +281,30 @@ extern "C"
     {
         static_cast<void>( pdv_p );
         ++g_edtStubState.startImageCalls;
+    }
+
+    uint32_t edt_done_count( EdtDev *edt_p )
+    {
+        static_cast<void>( edt_p );
+        return g_edtStubState.doneCount;
+    }
+
+    uint32_t edt_dma_buffers_done_waiting( EdtDev *edt_p )
+    {
+        static_cast<void>( edt_p );
+        return g_edtStubState.waitedCount;
+    }
+
+    int edt_ring_buffer_overrun( EdtDev *edt_p )
+    {
+        static_cast<void>( edt_p );
+        return g_edtStubState.ringBufferOverrun;
+    }
+
+    int pdv_overrun( PdvDev *pdv_p )
+    {
+        static_cast<void>( pdv_p );
+        return g_edtStubState.pdvOverrunBytes;
     }
 
     int pdv_serial_read( PdvDev *pdv_p, char *buf, int size )
@@ -1390,13 +1422,25 @@ TEST_CASE( "ocam2KCtrl startAcquisition resets frame tracking and starts EDT buf
     #endif
     // clang-format on
 
-    app.m_numBuffs        = 6;
-    app.m_lastImageNumber = 99;
+    app.m_edtDoneCount         = 11;
+    app.m_edtWaitedCount       = 10;
+    app.m_edtBufferLag         = 1;
+    app.m_edtRingBufferOverrun = 1;
+    app.m_pdvOverrunBytes      = 2;
+    app.m_edtTelemetryPrimed   = true;
+    app.m_numBuffs             = 6;
+    app.m_lastImageNumber      = 99;
 
     REQUIRE( app.startAcquisition() == 0 );
     REQUIRE( app.m_lastImageNumber == -1 );
     REQUIRE( g_edtStubState.startImagesCalls == 1 );
     REQUIRE( g_edtStubState.lastStartNumBuffs == 6 );
+    REQUIRE( app.m_edtDoneCount == 0 );
+    REQUIRE( app.m_edtWaitedCount == 0 );
+    REQUIRE( app.m_edtBufferLag == 0 );
+    REQUIRE( app.m_edtRingBufferOverrun == 0 );
+    REQUIRE( app.m_pdvOverrunBytes == 0 );
+    REQUIRE( app.m_edtTelemetryPrimed == false );
 }
 
 /// Verify frame acquisition timestamps and frame-number handling across valid and invalid sequences.
@@ -1418,6 +1462,7 @@ TEST_CASE( "ocam2KCtrl acquireAndCheckValid handles valid, skipped, and corrupt 
     static_cast<MagAOXAppT &>( app ).m_powerState = 1;
     app.m_powerTargetState                        = 1;
     app.m_modeName                                = "science";
+    app.m_pdv                                     = pdv_open_channel( EDT_INTERFACE, 0, 0 );
 
     SECTION( "first valid frame initializes the previous-frame tracker" )
     {
@@ -1425,6 +1470,8 @@ TEST_CASE( "ocam2KCtrl acquireAndCheckValid handles valid, skipped, and corrupt 
 
         g_edtStubState.waitTimeSec  = 12;
         g_edtStubState.waitTimeNsec = 345;
+        g_edtStubState.doneCount    = 25;
+        g_edtStubState.waitedCount  = 25;
         setStubFrameNumber( 101 );
 
         app.m_lastImageNumber = -1;
@@ -1435,6 +1482,32 @@ TEST_CASE( "ocam2KCtrl acquireAndCheckValid handles valid, skipped, and corrupt 
         REQUIRE( app.m_currImageNumber == 101 );
         REQUIRE( app.m_lastImageNumber == 101 );
         REQUIRE( g_edtStubState.startImageCalls == 1 );
+        REQUIRE( app.m_edtDoneCount == 25 );
+        REQUIRE( app.m_edtWaitedCount == 25 );
+        REQUIRE( app.m_edtBufferLag == 0 );
+        REQUIRE( app.m_edtRingBufferOverrun == 0 );
+        REQUIRE( app.m_pdvOverrunBytes == 0 );
+        REQUIRE( app.m_edtTelemetryPrimed == true );
+    }
+
+    SECTION( "EDT telemetry captures standing backlog and overrun state" )
+    {
+        resetStubState();
+
+        g_edtStubState.doneCount         = 44;
+        g_edtStubState.waitedCount       = 42;
+        g_edtStubState.ringBufferOverrun = 1;
+        g_edtStubState.pdvOverrunBytes   = 7;
+        setStubFrameNumber( 200 );
+
+        app.m_lastImageNumber = 199;
+
+        REQUIRE( app.acquireAndCheckValid() == 0 );
+        REQUIRE( app.m_edtDoneCount == 44 );
+        REQUIRE( app.m_edtWaitedCount == 42 );
+        REQUIRE( app.m_edtBufferLag == 2 );
+        REQUIRE( app.m_edtRingBufferOverrun == 1 );
+        REQUIRE( app.m_pdvOverrunBytes == 7 );
     }
 
     SECTION( "small skipped-frame gaps request reconfiguration" )

@@ -6,6 +6,8 @@
 #ifndef tests_edtinc_h
 #define tests_edtinc_h
 
+#include <stdint.h>
+
 typedef unsigned int  uint;
 typedef unsigned char u_char;
 
@@ -15,11 +17,8 @@ struct EdtDev
     int unused;
 };
 
-/// Stub EDT camera handle type used by unit tests.
-struct PdvDev
-{
-    int unused;
-};
+/// Stub PDV camera handle type used by unit tests.
+typedef EdtDev PdvDev;
 
 /// Stub EDT dependent-configuration type used by unit tests.
 struct Dependent
@@ -100,6 +99,18 @@ extern "C"
 
     /// Start acquisition of the next stub PDV image.
     void pdv_start_image( PdvDev *pdv_p );
+
+    /// Return the stub EDT cumulative DMA completion count.
+    uint32_t edt_done_count( EdtDev *edt_p );
+
+    /// Return the stub EDT cumulative waited-buffer count.
+    uint32_t edt_dma_buffers_done_waiting( EdtDev *edt_p );
+
+    /// Return the stub EDT ring-buffer overrun flag.
+    int edt_ring_buffer_overrun( EdtDev *edt_p );
+
+    /// Return the stub PDV overrun count from the most recent acquisition.
+    int pdv_overrun( PdvDev *pdv_p );
 
     /// Read bytes from the stub PDV serial channel.
     int pdv_serial_read( PdvDev *pdv_p, char *buf, int size );
