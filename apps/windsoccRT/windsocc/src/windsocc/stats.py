@@ -169,7 +169,7 @@ def main() -> None:
     centroids = cluster_centroids_table(X, labels)
 
     out_dir = dirs_dict["wind_stats_dir"]
-    cluster_png = os.path.join(out_dir, "wind_track_clusters.png")
+    cluster_plot = os.path.join(out_dir, "wind_track_clusters")
     cluster_txt = os.path.join(out_dir, "wind_track_stats.txt")
 
     write_wind_cluster_stats_report(path=cluster_txt, rows=stats_rows, noise_count=noise_count)
@@ -178,7 +178,7 @@ def main() -> None:
         vv=X[:, 1],
         labels=labels,
         probabilities=probabilities,
-        output_png=cluster_png,
+        output_plot_fname=cluster_plot,
     )
 
     vu_all = wind_df["vu"].to_numpy()

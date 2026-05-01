@@ -259,9 +259,18 @@ def compute_quadrant_xcorr_from_series(
         )
 
         cc_cube = np.array(cc_maps)
-        cc_cube -= bias
+        # Subtracting the bias didn't seem to help much JKK 04/27/2026
+        # cc_cube -= bias
         static_pattern = np.median(cc_cube, axis=0)
+        # this replaces the bias subtraction
         cc_cube -= static_pattern
+        # #debug view the static pattern
+        # import matplotlib.pyplot as plt
+        # plt.imshow(static_pattern, cmap='gray')
+        # plt.colorbar()
+        # plt.show()
+        # import sys
+        # sys.exit()
 
         header = fits.Header()
         delays_str = ",".join(

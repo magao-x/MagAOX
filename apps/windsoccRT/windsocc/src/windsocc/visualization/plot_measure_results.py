@@ -174,7 +174,7 @@ def plot_wind_track_clusters(
     vv: np.ndarray,
     labels: np.ndarray,
     probabilities: np.ndarray,
-    output_png: str,
+    output_plot_fname: str,
     title: str | None = None,
 ) -> None:
     """Scatter vu vs vv with HDBSCAN clusters; noise drawn first in faint gray.
@@ -201,7 +201,7 @@ def plot_wind_track_clusters(
             vv[noise],
             vu[noise],
             c="lightgray",
-            s=22,
+            s=24,
             alpha=0.35,
             zorder=1,
             edgecolors="none",
@@ -222,7 +222,7 @@ def plot_wind_track_clusters(
             vv[mask],
             vu[mask],
             c=rgba,
-            s=28,
+            s=36,
             zorder=2,
             edgecolors="none",
         )
@@ -231,7 +231,7 @@ def plot_wind_track_clusters(
         ax.scatter(
             [centroid_u],
             [centroid_v],
-            s=190,
+            s=720,
             marker="o",
             facecolors=[(*rgb, 0.36)],
             edgecolors=[(*rgb, 1.0)],
@@ -245,14 +245,50 @@ def plot_wind_track_clusters(
             color="white",
             ha="center",
             va="center",
-            fontsize=8,
+            fontsize=24,
             fontweight="bold",
             zorder=5,
         )
 
-    ax.set_ylabel(r"$V$-component Speed (m/s)")
-    ax.set_xlabel(r"$U$-component Speed (m/s)")
+    ax.set_ylabel(r"$V$-component Speed (m/s)", fontsize=24)
+    ax.set_xlabel(r"$U$-component Speed (m/s)", fontsize=24)
     ax.grid(True, linestyle="--", alpha=0.3)
+    compass_origin = (0.88, 0.16)
+    compass_delta = 0.065
+    compass_style = {
+        "arrowstyle": "-|>",
+        "color": "0.2",
+        "linewidth": 1.2,
+        "shrinkA": 0.0,
+        "shrinkB": 0.0,
+    }
+    for label, offset, alignment in (
+        ("N", (0.0, compass_delta), ("center", "bottom")),
+        ("E", (compass_delta, 0.0), ("left", "center")),
+        ("W", (-compass_delta, 0.0), ("right", "center")),
+        ("S", (0.0, -compass_delta), ("center", "top")),
+    ):
+        ax.annotate(
+            "",
+            xy=(compass_origin[0] + offset[0], compass_origin[1] + offset[1]),
+            xytext=compass_origin,
+            xycoords=ax.transAxes,
+            textcoords=ax.transAxes,
+            arrowprops=compass_style,
+            zorder=6,
+        )
+        ax.text(
+            compass_origin[0] + 1.25 * offset[0],
+            compass_origin[1] + 1.25 * offset[1],
+            label,
+            transform=ax.transAxes,
+            color="0.2",
+            fontsize=16,
+            fontweight="bold",
+            ha=alignment[0],
+            va=alignment[1],
+            zorder=7,
+        )
     # if title:
     #     ax.set_title(title)
     # else:
@@ -268,19 +304,20 @@ def plot_wind_track_clusters(
                 color="w",
                 label="Noise",
                 markerfacecolor="lightgray",
-                markersize=8,
+                markersize=12,
                 alpha=0.5,
             )
         )
     if legend_elements:
-        ax.legend(handles=legend_elements, loc="best", fontsize=8)
+        ax.legend(handles=legend_elements, loc="best", fontsize=16)
 
     # ax.set_aspect("equal", adjustable="box")
     fig.tight_layout()
-    out_png_dir = os.path.dirname(os.path.abspath(output_png))
-    if out_png_dir:
-        os.makedirs(out_png_dir, exist_ok=True)
-    fig.savefig(output_png, dpi=150)
+    out_plot_dir = os.path.dirname(os.path.abspath(output_plot_fname))
+    if out_plot_dir:
+        os.makedirs(out_plot_dir, exist_ok=True)
+    fig.savefig(f"{output_plot_fname}.png", dpi=150)
+    fig.savefig(f"{output_plot_fname}.pdf")
     plt.close(fig)
 
 
