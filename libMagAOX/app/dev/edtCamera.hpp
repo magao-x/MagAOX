@@ -11,6 +11,8 @@
 
 #ifndef MAGAOX_NOEDT
 
+    #include <dlfcn.h>
+
     #include <edtinc.h>
 
     #include "../../common/paths.hpp"
@@ -92,6 +94,8 @@ class edtCamera : public ioDevice
     int m_edtRingBufferOverrun{ 0 }; ///< EDT ring-buffer overrun flag sampled on the most recent acquisition.
 
     int m_pdvOverrunBytes{ 0 }; ///< PDV overrun count reported for the most recent acquisition.
+
+    bool m_edtWaitedCountAvailable{ false }; ///< Indicates whether the installed EDT exports the waited-buffer counter.
 
     bool m_edtTelemetryPrimed{ false }; ///< Tracks whether the previous EDT telemetry sample is valid for delta logs.
 
@@ -608,13 +612,14 @@ int edtCamera<derivedT>::pdvReconfig()
 template <class derivedT>
 void edtCamera<derivedT>::resetEdtTelemetry()
 {
-    m_edtDoneCount         = 0;
-    m_edtWaitedCount       = 0;
-    m_edtBufferLag         = 0;
-    m_edtRingBufferOverrun = 0;
-    m_pdvOverrunBytes      = 0;
-    m_edtTelemetryPrimed   = false;
-    m_edtTelemetryLastLog  = { 0, 0 };
+    m_edtDoneCount            = 0;
+    m_edtWaitedCount          = 0;
+    m_edtBufferLag            = 0;
+    m_edtRingBufferOverrun    = 0;
+    m_pdvOverrunBytes         = 0;
+    m_edtWaitedCountAvailable = false;
+    m_edtTelemetryPrimed      = false;
+    m_edtTelemetryLastLog     = { 0, 0 };
 }
 
 template <class derivedT>
@@ -631,19 +636,32 @@ void edtCamera<derivedT>::recordEdtTelemetry( const timespec &currImageTimestamp
     int      prevRingBufferOverrun = m_edtRingBufferOverrun;
     int      prevPdvOverrunBytes   = m_pdvOverrunBytes;
     EdtDev  *edtP                  = reinterpret_cast<EdtDev *>( m_pdv );
+    typedef uint32_t ( *waitedCountFnT )( EdtDev * );
+    static waitedCountFnT waitedCountFn =
+        reinterpret_cast<waitedCountFnT>( dlsym( RTLD_DEFAULT, "edt_dma_buffers_done_waiting" ) );
 
-    m_edtDoneCount         = edt_done_count( edtP );
-    m_edtWaitedCount       = edt_dma_buffers_done_waiting( edtP );
-    m_edtRingBufferOverrun = edt_ring_buffer_overrun( edtP );
-    m_pdvOverrunBytes      = pdv_overrun( m_pdv );
+    m_edtDoneCount            = edt_done_count( edtP );
+    m_edtRingBufferOverrun    = edt_ring_buffer_overrun( edtP );
+    m_pdvOverrunBytes         = pdv_overrun( m_pdv );
+    m_edtWaitedCountAvailable = ( waitedCountFn != nullptr );
 
-    if( m_edtDoneCount >= m_edtWaitedCount )
+    if( m_edtWaitedCountAvailable )
     {
-        m_edtBufferLag = static_cast<int>( m_edtDoneCount - m_edtWaitedCount );
+        m_edtWaitedCount = waitedCountFn( edtP );
+
+        if( m_edtDoneCount >= m_edtWaitedCount )
+        {
+            m_edtBufferLag = static_cast<int>( m_edtDoneCount - m_edtWaitedCount );
+        }
+        else
+        {
+            m_edtBufferLag = -static_cast<int>( m_edtWaitedCount - m_edtDoneCount );
+        }
     }
     else
     {
-        m_edtBufferLag = -static_cast<int>( m_edtWaitedCount - m_edtDoneCount );
+        m_edtWaitedCount = 0;
+        m_edtBufferLag   = 0;
     }
 
     uint32_t doneDelta   = 0;
@@ -651,12 +669,15 @@ void edtCamera<derivedT>::recordEdtTelemetry( const timespec &currImageTimestamp
 
     if( m_edtTelemetryPrimed )
     {
-        doneDelta   = m_edtDoneCount - prevDoneCount;
-        waitedDelta = m_edtWaitedCount - prevWaitedCount;
+        doneDelta = m_edtDoneCount - prevDoneCount;
+        if( m_edtWaitedCountAvailable )
+        {
+            waitedDelta = m_edtWaitedCount - prevWaitedCount;
+        }
     }
 
-    bool anomalous = ( m_edtBufferLag > 0 ) || ( m_edtRingBufferOverrun > 0 ) || ( m_pdvOverrunBytes > 0 ) ||
-                     ( m_edtTelemetryPrimed && doneDelta > 1 );
+    bool anomalous = ( m_edtWaitedCountAvailable && m_edtBufferLag > 0 ) || ( m_edtRingBufferOverrun > 0 ) ||
+                     ( m_pdvOverrunBytes > 0 ) || ( m_edtTelemetryPrimed && doneDelta > 1 );
 
     bool recovered = m_edtTelemetryPrimed &&
                      ( prevBufferLag > 0 || prevRingBufferOverrun > 0 || prevPdvOverrunBytes > 0 ) && !anomalous;
@@ -692,10 +713,20 @@ void edtCamera<derivedT>::recordEdtTelemetry( const timespec &currImageTimestamp
         logMessage += " recovered";
     }
 
+    logMessage += ": done=" + std::to_string( m_edtDoneCount );
+
+    if( m_edtWaitedCountAvailable )
+    {
+        logMessage += " waited=" + std::to_string( m_edtWaitedCount ) +
+                      " waitedDelta=" + std::to_string( waitedDelta ) + " lag=" + std::to_string( m_edtBufferLag );
+    }
+    else
+    {
+        logMessage += " waited=unavailable";
+    }
+
     logMessage +=
-        ": done=" + std::to_string( m_edtDoneCount ) + " waited=" + std::to_string( m_edtWaitedCount ) +
-        " doneDelta=" + std::to_string( doneDelta ) + " waitedDelta=" + std::to_string( waitedDelta ) +
-        " lag=" + std::to_string( m_edtBufferLag ) + " ringOverrun=" + std::to_string( m_edtRingBufferOverrun ) +
+        " doneDelta=" + std::to_string( doneDelta ) + " ringOverrun=" + std::to_string( m_edtRingBufferOverrun ) +
         " pdvOverrun=" + std::to_string( m_pdvOverrunBytes ) + " dmaTs=" + std::to_string( currImageTimestamp.tv_sec ) +
         "." + std::to_string( currImageTimestamp.tv_nsec );
 
