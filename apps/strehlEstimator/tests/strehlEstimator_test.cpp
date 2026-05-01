@@ -225,7 +225,8 @@ class strehlEstimator_test : public strehlEstimator
     /// Evaluate the configured AO model at one FPS sample for test-side brute-force comparisons.
     float predictedStrehlAtFps( float fps, bool optimizeTau )
     {
-        configureAoSystem( m_aosysScan, fps, optimizeTau );
+        predictionInputs inputs = snapshotPredictionInputs();
+        configureAoSystem( m_aosysScan, inputs, fps, optimizeTau );
         return m_aosysScan.strehl();
     }
 };

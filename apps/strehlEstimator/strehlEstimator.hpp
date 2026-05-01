@@ -8,6 +8,7 @@
 #define strehlEstimator_hpp
 
 #include <cmath>
+#include <mutex>
 
 #include <mx/ao/analysis/aoSystem.hpp>
 using namespace mx::math;
@@ -207,6 +208,9 @@ class strehlEstimator : public MagAOXApp<true>,
     /// Seconds since midnight of the latest MAG2 measurement.
     int m_mag2_time{ 0 };
 
+    /// Protects the live telemetry and planning-input state while prediction snapshots are assembled.
+    mutable std::mutex m_stateMutex;
+
     ///@}
 
   public:
@@ -260,6 +264,61 @@ class strehlEstimator : public MagAOXApp<true>,
     /// Recalculate the live guide-star magnitude from the current WFS counts.
     void calcMag();
 
+    /// Snapshot of the scalar inputs used to update the AO prediction model.
+    struct predictionInputs
+    {
+        /// Live loop speed in Hz.
+        float m_fps{ 0.0f };
+
+        /// Live EM gain.
+        float m_emg{ 0.0f };
+
+        /// Active quantum efficiency.
+        float m_qe{ 0.0f };
+
+        /// Active zero-magnitude photon flux.
+        float m_F0{ 0.0f };
+
+        /// Active wavelength in microns.
+        float m_lam0{ 0.0f };
+
+        /// Telescope elevation in degrees.
+        float m_elevation{ 0.0f };
+
+        /// Current illuminated WFS-pixel count.
+        int m_npix{ 0 };
+
+        /// Live guide-star magnitude.
+        float m_mag{ 0.0f };
+
+        /// Operator-entered guide-star magnitude estimate.
+        float m_magEstimated{ 0.0f };
+
+        /// Selected guide-star magnitude used for prediction.
+        float m_selectedMag{ 0.0f };
+
+        /// Live seeing in arcseconds.
+        float m_seeing{ 0.0f };
+
+        /// Operator-entered seeing estimate in arcseconds.
+        float m_seeingEstimated{ 0.0f };
+
+        /// Selected seeing used for prediction.
+        float m_selectedSeeing{ 0.0f };
+
+        /// Operator-entered wind-speed estimate in m/s.
+        float m_windSpeedEstimated{ 0.0f };
+
+        /// Selected wind speed used for prediction.
+        float m_selectedWindSpeed{ 0.0f };
+
+        /// Whether estimated planning inputs are currently selected.
+        bool m_useEstimates{ false };
+    };
+
+    /// Snapshot the scalar state used by the planning properties and AO-model calculations.
+    predictionInputs snapshotPredictionInputs() const;
+
     /// Return the selected star magnitude for prediction calculations.
     float selectedStarMag() const;
 
@@ -278,8 +337,10 @@ class strehlEstimator : public MagAOXApp<true>,
     /// Return whether a value is finite and strictly positive.
     static bool finitePositiveValue( float value /**< [in] value to test */ );
 
-    /// Convert AO model phase variance into WFE in nm RMS at the active wavelength.
-    float wfeNm( float variance /**< [in] phase variance at the science wavelength */ ) const;
+    /// Convert AO model phase variance into WFE in nm RMS at the specified wavelength.
+    static float wfeNm( float variance, /**< [in] phase variance at the science wavelength */
+                        float lam0      /**< [in] active wavelength in microns */
+    );
 
     /// Create a writable number property with `current` and `estimated` elements.
     int createCurrentEstimatedProperty( pcf::IndiProperty &prop,  /**< [out] property to initialize */
@@ -292,16 +353,17 @@ class strehlEstimator : public MagAOXApp<true>,
     void updatePlanningProperties();
 
     /// Configure an AO model for the selected inputs and requested loop speed.
-    void configureAoSystem( aoSystemT &aosys,      /**< [in,out] AO model instance to configure */
-                            float      fps,        /**< [in] loop speed in Hz */
-                            bool       optimizeTau /**< [in] true to preserve the current optimal-tau behavior */
+    void configureAoSystem( aoSystemT              &aosys,  /**< [in,out] AO model instance to configure */
+                            const predictionInputs &inputs, /**< [in] scalar state snapshot to apply */
+                            float                   fps,    /**< [in] loop speed in Hz */
+                            bool optimizeTau /**< [in] true to preserve the current optimal-tau behavior */
     );
 
     /// Refresh the predicted Strehl, WFE, and optimum-loop-speed properties.
     void updatePredictionOutputs();
 
     /// Refresh the fixed-grid optimum-loop-speed summary property.
-    void updateOptimumLoopSpeed();
+    void updateOptimumLoopSpeed( const predictionInputs &inputs /**< [in] scalar state snapshot to evaluate */ );
 
     /** \name INDI - Data
      * @{
@@ -475,6 +537,8 @@ int strehlEstimator::createCurrentEstimatedProperty( pcf::IndiProperty &prop,
 
 float strehlEstimator::selectedStarMag() const
 {
+    std::lock_guard<std::mutex> lock( m_stateMutex );
+
     if( m_useEstimates )
     {
         return m_magEstimated;
@@ -485,6 +549,8 @@ float strehlEstimator::selectedStarMag() const
 
 float strehlEstimator::selectedSeeing() const
 {
+    std::lock_guard<std::mutex> lock( m_stateMutex );
+
     if( m_useEstimates )
     {
         return m_seeingEstimated;
@@ -495,7 +561,46 @@ float strehlEstimator::selectedSeeing() const
 
 float strehlEstimator::selectedWindSpeed() const
 {
+    std::lock_guard<std::mutex> lock( m_stateMutex );
     return m_windSpeedEstimated;
+}
+
+strehlEstimator::predictionInputs strehlEstimator::snapshotPredictionInputs() const
+{
+    predictionInputs inputs;
+
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_stateMutex );
+
+        inputs.m_fps                = m_fps;
+        inputs.m_emg                = m_emg;
+        inputs.m_qe                 = m_qe;
+        inputs.m_F0                 = m_F0;
+        inputs.m_lam0               = m_lam0;
+        inputs.m_elevation          = m_elevation;
+        inputs.m_npix               = m_npix;
+        inputs.m_mag                = m_mag;
+        inputs.m_magEstimated       = m_magEstimated;
+        inputs.m_seeing             = m_seeing;
+        inputs.m_seeingEstimated    = m_seeingEstimated;
+        inputs.m_windSpeedEstimated = m_windSpeedEstimated;
+        inputs.m_useEstimates       = m_useEstimates;
+    }
+
+    if( inputs.m_useEstimates )
+    {
+        inputs.m_selectedMag       = inputs.m_magEstimated;
+        inputs.m_selectedSeeing    = inputs.m_seeingEstimated;
+        inputs.m_selectedWindSpeed = inputs.m_windSpeedEstimated;
+    }
+    else
+    {
+        inputs.m_selectedMag       = inputs.m_mag;
+        inputs.m_selectedSeeing    = inputs.m_seeing;
+        inputs.m_selectedWindSpeed = inputs.m_windSpeedEstimated;
+    }
+
+    return inputs;
 }
 
 float strehlEstimator::seeingToR0( float seeing )
@@ -513,66 +618,72 @@ bool strehlEstimator::finitePositiveValue( float value )
     return finiteValue( value ) && value > 0.0f;
 }
 
-float strehlEstimator::wfeNm( float variance ) const
+float strehlEstimator::wfeNm( float variance, float lam0 )
 {
     if( variance <= 0.0f )
     {
         return 0.0f;
     }
 
-    return std::sqrt( variance ) * ( 1000.0f * m_lam0 / two_pi<float>() );
+    return std::sqrt( variance ) * ( 1000.0f * lam0 / two_pi<float>() );
 }
 
 void strehlEstimator::updatePlanningProperties()
 {
+    predictionInputs inputs = snapshotPredictionInputs();
+
     if( !m_indiDriver )
     {
-        m_indiP_mag["current"].set( m_mag );
-        m_indiP_mag["estimated"].set( m_magEstimated );
+        m_indiP_mag["current"].set( inputs.m_mag );
+        m_indiP_mag["estimated"].set( inputs.m_magEstimated );
         m_indiP_mag.setState( INDI_OK );
 
-        m_indiP_seeing_magaox["current"].set( m_seeing );
-        m_indiP_seeing_magaox["estimated"].set( m_seeingEstimated );
+        m_indiP_seeing_magaox["current"].set( inputs.m_seeing );
+        m_indiP_seeing_magaox["estimated"].set( inputs.m_seeingEstimated );
         m_indiP_seeing_magaox.setState( INDI_OK );
 
-        m_indiP_windSpeed["current"].set( m_windSpeedEstimated );
-        m_indiP_windSpeed["estimated"].set( m_windSpeedEstimated );
+        m_indiP_windSpeed["current"].set( inputs.m_windSpeedEstimated );
+        m_indiP_windSpeed["estimated"].set( inputs.m_windSpeedEstimated );
         m_indiP_windSpeed.setState( INDI_OK );
 
-        m_indiP_useEstimates["toggle"].setSwitchState( m_useEstimates ? pcf::IndiElement::On : pcf::IndiElement::Off );
-        m_indiP_useEstimates.setState( m_useEstimates ? INDI_OK : INDI_IDLE );
+        m_indiP_useEstimates["toggle"].setSwitchState( inputs.m_useEstimates ? pcf::IndiElement::On
+                                                                             : pcf::IndiElement::Off );
+        m_indiP_useEstimates.setState( inputs.m_useEstimates ? INDI_OK : INDI_IDLE );
 
         return;
     }
 
-    updatesIfChanged<float>( m_indiP_mag, { "current", "estimated" }, { m_mag, m_magEstimated } );
-    updatesIfChanged<float>( m_indiP_seeing_magaox, { "current", "estimated" }, { m_seeing, m_seeingEstimated } );
+    updatesIfChanged<float>( m_indiP_mag, { "current", "estimated" }, { inputs.m_mag, inputs.m_magEstimated } );
     updatesIfChanged<float>(
-        m_indiP_windSpeed, { "current", "estimated" }, { m_windSpeedEstimated, m_windSpeedEstimated } );
+        m_indiP_seeing_magaox, { "current", "estimated" }, { inputs.m_seeing, inputs.m_seeingEstimated } );
+    updatesIfChanged<float>(
+        m_indiP_windSpeed, { "current", "estimated" }, { inputs.m_windSpeedEstimated, inputs.m_windSpeedEstimated } );
     updateSwitchIfChanged( m_indiP_useEstimates,
                            "toggle",
-                           m_useEstimates ? pcf::IndiElement::On : pcf::IndiElement::Off,
-                           m_useEstimates ? INDI_OK : INDI_IDLE );
+                           inputs.m_useEstimates ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           inputs.m_useEstimates ? INDI_OK : INDI_IDLE );
 }
 
-void strehlEstimator::configureAoSystem( aoSystemT &aosys, float fps, bool optimizeTau )
+void strehlEstimator::configureAoSystem( aoSystemT &aosys, const predictionInputs &inputs, float fps, bool optimizeTau )
 {
     aosys.optTau( optimizeTau );
-    aosys.starMag( selectedStarMag() );
-    aosys.F0( m_qe * m_F0 );
-    aosys.lam_wfs( m_lam0 * 1.0e-6f );
-    aosys.lam_sci( m_lam0 * 1.0e-6f );
-    aosys.ron_wfs( std::vector<float>( { 245.0f / m_emg } ) );
-    aosys.npix_wfs( std::vector<float>( { static_cast<float>( m_npix ) } ) );
+    aosys.starMag( inputs.m_selectedMag );
+    aosys.F0( inputs.m_qe * inputs.m_F0 );
+    aosys.lam_wfs( inputs.m_lam0 * 1.0e-6f );
+    aosys.lam_sci( inputs.m_lam0 * 1.0e-6f );
+    aosys.ron_wfs( std::vector<float>( { 245.0f / inputs.m_emg } ) );
+    aosys.npix_wfs( std::vector<float>( { static_cast<float>( inputs.m_npix ) } ) );
     aosys.minTauWFS( std::vector<float>( { 1.0f / fps } ) );
     aosys.tauWFS( 1.0f / fps );
-    aosys.atm.r_0( seeingToR0( selectedSeeing() ), 0.5e-6f );
-    aosys.atm.v_wind( selectedWindSpeed() );
-    aosys.zeta( ( 90.0f - m_elevation ) * pi<float>() / 180.0f );
+    aosys.atm.r_0( seeingToR0( inputs.m_selectedSeeing ), 0.5e-6f );
+    aosys.atm.v_wind( inputs.m_selectedWindSpeed );
+    aosys.zeta( ( 90.0f - inputs.m_elevation ) * pi<float>() / 180.0f );
 }
 
-void strehlEstimator::updateOptimumLoopSpeed()
+void strehlEstimator::updateOptimumLoopSpeed( const predictionInputs &inputs )
 {
+    constexpr float strehlTieTolerance = 1.0e-4f;
+
     float bestFPS            = 0.0f;
     float bestStrehl         = -1.0f;
     float bestTotalWfe       = 0.0f;
@@ -582,7 +693,7 @@ void strehlEstimator::updateOptimumLoopSpeed()
 
     for( int fps = 100; fps <= 3000; fps += 100 )
     {
-        configureAoSystem( m_aosysScan, static_cast<float>( fps ), false );
+        configureAoSystem( m_aosysScan, inputs, static_cast<float>( fps ), false );
 
         float strehl = m_aosysScan.strehl();
         if( !finiteValue( strehl ) )
@@ -590,14 +701,14 @@ void strehlEstimator::updateOptimumLoopSpeed()
             continue;
         }
 
-        if( bestFPS == 0.0f || strehl > bestStrehl )
+        if( bestFPS == 0.0f || strehl > bestStrehl + strehlTieTolerance )
         {
             bestFPS            = static_cast<float>( fps );
             bestStrehl         = strehl;
-            bestTotalWfe       = wfeNm( m_aosysScan.wfeVar() );
-            bestMeasurementWfe = wfeNm( m_aosysScan.measurementErrorTotal() );
-            bestTimeDelayWfe   = wfeNm( m_aosysScan.timeDelayErrorTotal() );
-            bestFittingWfe     = wfeNm( m_aosysScan.fittingErrorTotal() );
+            bestTotalWfe       = wfeNm( m_aosysScan.wfeVar(), inputs.m_lam0 );
+            bestMeasurementWfe = wfeNm( m_aosysScan.measurementErrorTotal(), inputs.m_lam0 );
+            bestTimeDelayWfe   = wfeNm( m_aosysScan.timeDelayErrorTotal(), inputs.m_lam0 );
+            bestFittingWfe     = wfeNm( m_aosysScan.fittingErrorTotal(), inputs.m_lam0 );
         }
     }
 
@@ -621,24 +732,26 @@ void strehlEstimator::updateOptimumLoopSpeed()
 
 void strehlEstimator::updatePredictionOutputs()
 {
-    if( !finitePositiveValue( m_fps ) || !finitePositiveValue( m_emg ) || !finitePositiveValue( m_qe ) ||
-        !finitePositiveValue( m_F0 ) || !finitePositiveValue( selectedSeeing() ) ||
-        !finitePositiveValue( selectedWindSpeed() ) )
+    predictionInputs inputs = snapshotPredictionInputs();
+
+    if( !finitePositiveValue( inputs.m_fps ) || !finitePositiveValue( inputs.m_emg ) ||
+        !finitePositiveValue( inputs.m_qe ) || !finitePositiveValue( inputs.m_F0 ) ||
+        !finitePositiveValue( inputs.m_selectedSeeing ) || !finitePositiveValue( inputs.m_selectedWindSpeed ) )
     {
         return;
     }
 
-    configureAoSystem( m_aosys, m_fps, true );
+    configureAoSystem( m_aosys, inputs, inputs.m_fps, true );
 
     if( !m_indiDriver )
     {
         m_indiP_strehl["pyramid"].set( m_aosys.strehl() );
         m_indiP_strehl.setState( INDI_OK );
 
-        m_indiP_wfe["total"].set( wfeNm( m_aosys.wfeVar() ) );
-        m_indiP_wfe["measurement"].set( wfeNm( m_aosys.measurementErrorTotal() ) );
-        m_indiP_wfe["time_delay"].set( wfeNm( m_aosys.timeDelayErrorTotal() ) );
-        m_indiP_wfe["fitting"].set( wfeNm( m_aosys.fittingErrorTotal() ) );
+        m_indiP_wfe["total"].set( wfeNm( m_aosys.wfeVar(), inputs.m_lam0 ) );
+        m_indiP_wfe["measurement"].set( wfeNm( m_aosys.measurementErrorTotal(), inputs.m_lam0 ) );
+        m_indiP_wfe["time_delay"].set( wfeNm( m_aosys.timeDelayErrorTotal(), inputs.m_lam0 ) );
+        m_indiP_wfe["fitting"].set( wfeNm( m_aosys.fittingErrorTotal(), inputs.m_lam0 ) );
         m_indiP_wfe.setState( INDI_OK );
     }
     else
@@ -646,13 +759,13 @@ void strehlEstimator::updatePredictionOutputs()
         updateIfChanged( m_indiP_strehl, "pyramid", m_aosys.strehl() );
         updatesIfChanged<float>( m_indiP_wfe,
                                  { "total", "measurement", "time_delay", "fitting" },
-                                 { wfeNm( m_aosys.wfeVar() ),
-                                   wfeNm( m_aosys.measurementErrorTotal() ),
-                                   wfeNm( m_aosys.timeDelayErrorTotal() ),
-                                   wfeNm( m_aosys.fittingErrorTotal() ) } );
+                                 { wfeNm( m_aosys.wfeVar(), inputs.m_lam0 ),
+                                   wfeNm( m_aosys.measurementErrorTotal(), inputs.m_lam0 ),
+                                   wfeNm( m_aosys.timeDelayErrorTotal(), inputs.m_lam0 ),
+                                   wfeNm( m_aosys.fittingErrorTotal(), inputs.m_lam0 ) } );
     }
 
-    updateOptimumLoopSpeed();
+    updateOptimumLoopSpeed( inputs );
 }
 
 int strehlEstimator::appStartup()
@@ -761,14 +874,28 @@ int strehlEstimator::processImage( void *curr_src, const wfsavgShmimT &dummy )
 {
     static_cast<void>( dummy );
 
-    m_wfsavg = mx::improc::eigenMap<float>(
+    auto wfsavg = mx::improc::eigenMap<float>(
         reinterpret_cast<float *>( curr_src ), wfsavgShmimMonitorT::m_width, wfsavgShmimMonitorT::m_height );
 
-    if( m_wfsavg.rows() == m_wfsmask.rows() && m_wfsavg.cols() == m_wfsmask.cols() )
-    {
-        m_counts = ( m_wfsavg * m_wfsmask ).sum();
+    float counts     = 0.0f;
+    bool  haveCounts = false;
 
-        std::cerr << "counts: " << m_counts << '\n';
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_stateMutex );
+
+        m_wfsavg = wfsavg;
+
+        if( m_wfsavg.rows() == m_wfsmask.rows() && m_wfsavg.cols() == m_wfsmask.cols() )
+        {
+            m_counts   = ( m_wfsavg * m_wfsmask ).sum();
+            counts     = m_counts;
+            haveCounts = true;
+        }
+    }
+
+    if( haveCounts )
+    {
+        std::cerr << "counts: " << counts << '\n';
 
         calcMag();
     }
@@ -788,16 +915,27 @@ int strehlEstimator::processImage( void *curr_src, const wfsmaskShmimT &dummy )
 {
     static_cast<void>( dummy );
 
-    m_wfsmask = mx::improc::eigenMap<float>(
+    auto wfsmask = mx::improc::eigenMap<float>(
         reinterpret_cast<float *>( curr_src ), wfsmaskShmimMonitorT::m_width, wfsmaskShmimMonitorT::m_height );
 
-    m_npix = static_cast<int>( m_wfsmask.sum() );
+    bool haveCounts = false;
 
-    if( m_wfsavg.rows() == m_wfsmask.rows() && m_wfsavg.cols() == m_wfsmask.cols() )
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_stateMutex );
+
+        m_wfsmask = wfsmask;
+        m_npix    = static_cast<int>( std::lround( m_wfsmask.sum() ) );
+
+        if( m_wfsavg.rows() == m_wfsmask.rows() && m_wfsavg.cols() == m_wfsmask.cols() )
+        {
+            // update counts because we might have been waiting on this.
+            m_counts   = ( m_wfsavg * m_wfsmask ).sum();
+            haveCounts = true;
+        }
+    }
+
+    if( haveCounts )
     {
-        // update counts because we might have been waiting on this.
-        m_counts = ( m_wfsavg * m_wfsmask ).sum();
-
         calcMag();
     }
 
@@ -806,20 +944,42 @@ int strehlEstimator::processImage( void *curr_src, const wfsmaskShmimT &dummy )
 
 void strehlEstimator::calcMag()
 {
-    std::cerr << "calcMag: " << m_counts << ' ' << m_again << ' ' << ' ' << m_emg << ' ' << m_fps << ' ' << m_qe << ' '
-              << m_F0 << '\n';
+    float counts  = 0.0f;
+    float emg     = 0.0f;
+    float fps     = 0.0f;
+    float qe      = 0.0f;
+    float F0      = 0.0f;
+    bool  updated = false;
 
-    if( !finitePositiveValue( m_counts ) || !finitePositiveValue( m_again ) || !finitePositiveValue( m_emg ) ||
-        !finitePositiveValue( m_fps ) || !finitePositiveValue( m_qe ) || !finitePositiveValue( m_F0 ) )
-    {
-        return;
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_stateMutex );
+
+        counts = m_counts;
+        emg    = m_emg;
+        fps    = m_fps;
+        qe     = m_qe;
+        F0     = m_F0;
+
+        if( finitePositiveValue( m_counts ) && finitePositiveValue( m_again ) && finitePositiveValue( m_emg ) &&
+            finitePositiveValue( m_fps ) && finitePositiveValue( m_qe ) && finitePositiveValue( m_F0 ) )
+        {
+            m_mag = -2.5f * std::log10( m_counts * m_again / m_emg * m_fps / ( m_qe * m_F0 ) );
+
+            if( !m_useEstimates && !m_magEstimatedManual )
+            {
+                m_magEstimated = m_mag;
+            }
+
+            updated = true;
+        }
     }
 
-    m_mag = -2.5f * std::log10( m_counts * m_again / m_emg * m_fps / ( m_qe * m_F0 ) );
+    std::cerr << "calcMag: " << counts << ' ' << m_again << ' ' << ' ' << emg << ' ' << fps << ' ' << qe << ' ' << F0
+              << '\n';
 
-    if( !m_useEstimates && !m_magEstimatedManual )
+    if( !updated )
     {
-        m_magEstimated = m_mag;
+        return;
     }
 
     updatePlanningProperties();
@@ -834,10 +994,20 @@ INDI_SETCALLBACK_DEFN( strehlEstimator, m_indiP_fps )( const pcf::IndiProperty &
     {
         float fps = ipRecv["current"].get<float>();
 
-        if( finitePositiveValue( fps ) && fps != m_fps )
+        bool changed = false;
+
+        { // mutex scope
+            std::lock_guard<std::mutex> lock( m_stateMutex );
+            if( finitePositiveValue( fps ) && fps != m_fps )
+            {
+                m_fps   = fps;
+                changed = true;
+            }
+        }
+
+        if( changed )
         {
-            m_fps = fps;
-            std::cerr << "Got FPS: " << m_fps << '\n';
+            std::cerr << "Got FPS: " << fps << '\n';
 
             calcMag();
         }
@@ -853,10 +1023,20 @@ INDI_SETCALLBACK_DEFN( strehlEstimator, m_indiP_emg )( const pcf::IndiProperty &
     {
         float emg = ipRecv["current"].get<float>();
 
-        if( finitePositiveValue( emg ) && emg != m_emg )
+        bool changed = false;
+
+        { // mutex scope
+            std::lock_guard<std::mutex> lock( m_stateMutex );
+            if( finitePositiveValue( emg ) && emg != m_emg )
+            {
+                m_emg   = emg;
+                changed = true;
+            }
+        }
+
+        if( changed )
         {
-            m_emg = emg;
-            std::cerr << "Got EMG: " << m_emg << '\n';
+            std::cerr << "Got EMG: " << emg << '\n';
 
             calcMag();
         }
@@ -881,17 +1061,21 @@ INDI_SETCALLBACK_DEFN( strehlEstimator, m_indiP_stage )( const pcf::IndiProperty
 
     std::cerr << "Got stage bs: " << preset << '\n';
 
-    if( preset == "ha-ir" )
-    {
-        m_F0   = m_F0_HaIR;
-        m_lam0 = m_lam0_HaIR;
-        m_qe   = m_qe_HaIR;
-    }
-    else
-    {
-        m_F0   = m_F0_6535;
-        m_lam0 = m_lam0_6535;
-        m_qe   = m_qe_6535;
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_stateMutex );
+
+        if( preset == "ha-ir" )
+        {
+            m_F0   = m_F0_HaIR;
+            m_lam0 = m_lam0_HaIR;
+            m_qe   = m_qe_HaIR;
+        }
+        else
+        {
+            m_F0   = m_F0_6535;
+            m_lam0 = m_lam0_6535;
+            m_qe   = m_qe_6535;
+        }
     }
 
     calcMag();
@@ -907,18 +1091,29 @@ INDI_SETCALLBACK_DEFN( strehlEstimator, m_indiP_tcsi_seeing )( const pcf::IndiPr
     {
         float seeing = ipRecv["dimm_fwhm_corr"].get<float>();
 
-        if( finitePositiveValue( seeing ) && seeing != m_seeing )
-        {
-            m_seeing         = seeing;
-            m_r0             = seeingToR0( m_seeing );
-            m_dimm_fwhm_corr = seeing;
+        bool changed = false;
 
-            if( !m_useEstimates && !m_seeingEstimatedManual )
+        { // mutex scope
+            std::lock_guard<std::mutex> lock( m_stateMutex );
+
+            if( finitePositiveValue( seeing ) && seeing != m_seeing )
             {
-                m_seeingEstimated = m_seeing;
-            }
+                m_seeing         = seeing;
+                m_r0             = seeingToR0( m_seeing );
+                m_dimm_fwhm_corr = seeing;
 
-            std::cerr << "Got seeing: " << m_seeing << '\n';
+                if( !m_useEstimates && !m_seeingEstimatedManual )
+                {
+                    m_seeingEstimated = m_seeing;
+                }
+
+                changed = true;
+            }
+        }
+
+        if( changed )
+        {
+            std::cerr << "Got seeing: " << seeing << '\n';
 
             updatePlanningProperties();
             updatePredictionOutputs();
@@ -936,10 +1131,20 @@ INDI_SETCALLBACK_DEFN( strehlEstimator, m_indiP_tcsi_telpos )( const pcf::IndiPr
     {
         float elevation = ipRecv["el"].get<float>();
 
-        if( finiteValue( elevation ) && elevation != m_elevation )
+        bool changed = false;
+
+        { // mutex scope
+            std::lock_guard<std::mutex> lock( m_stateMutex );
+            if( finiteValue( elevation ) && elevation != m_elevation )
+            {
+                m_elevation = elevation;
+                changed     = true;
+            }
+        }
+
+        if( changed )
         {
-            m_elevation = elevation;
-            std::cerr << "Got elevation: " << m_elevation << '\n';
+            std::cerr << "Got elevation: " << elevation << '\n';
 
             updatePredictionOutputs();
         }
@@ -955,10 +1160,20 @@ INDI_NEWCALLBACK_DEFN( strehlEstimator, m_indiP_mag )( const pcf::IndiProperty &
     {
         float mag = ipRecv["estimated"].get<float>();
 
-        if( finiteValue( mag ) && mag != m_magEstimated )
+        bool changed = false;
+
+        { // mutex scope
+            std::lock_guard<std::mutex> lock( m_stateMutex );
+            if( finiteValue( mag ) && mag != m_magEstimated )
+            {
+                m_magEstimated       = mag;
+                m_magEstimatedManual = true;
+                changed              = true;
+            }
+        }
+
+        if( changed )
         {
-            m_magEstimated       = mag;
-            m_magEstimatedManual = true;
             updatePlanningProperties();
             updatePredictionOutputs();
         }
@@ -975,10 +1190,20 @@ INDI_NEWCALLBACK_DEFN( strehlEstimator, m_indiP_seeing_magaox )( const pcf::Indi
     {
         float seeing = ipRecv["estimated"].get<float>();
 
-        if( finitePositiveValue( seeing ) && seeing != m_seeingEstimated )
+        bool changed = false;
+
+        { // mutex scope
+            std::lock_guard<std::mutex> lock( m_stateMutex );
+            if( finitePositiveValue( seeing ) && seeing != m_seeingEstimated )
+            {
+                m_seeingEstimated       = seeing;
+                m_seeingEstimatedManual = true;
+                changed                 = true;
+            }
+        }
+
+        if( changed )
         {
-            m_seeingEstimated       = seeing;
-            m_seeingEstimatedManual = true;
             updatePlanningProperties();
             updatePredictionOutputs();
         }
@@ -995,9 +1220,19 @@ INDI_NEWCALLBACK_DEFN( strehlEstimator, m_indiP_windSpeed )( const pcf::IndiProp
     {
         float windSpeed = ipRecv["estimated"].get<float>();
 
-        if( finitePositiveValue( windSpeed ) && windSpeed != m_windSpeedEstimated )
+        bool changed = false;
+
+        { // mutex scope
+            std::lock_guard<std::mutex> lock( m_stateMutex );
+            if( finitePositiveValue( windSpeed ) && windSpeed != m_windSpeedEstimated )
+            {
+                m_windSpeedEstimated = windSpeed;
+                changed              = true;
+            }
+        }
+
+        if( changed )
         {
-            m_windSpeedEstimated = windSpeed;
             updatePlanningProperties();
             updatePredictionOutputs();
         }
@@ -1016,19 +1251,22 @@ INDI_NEWCALLBACK_DEFN( strehlEstimator, m_indiP_useEstimates )( const pcf::IndiP
     }
 
     bool useEstimates = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+    bool changed      = false;
 
-    if( useEstimates != m_useEstimates )
-    {
-        m_useEstimates = useEstimates;
-        updatePlanningProperties();
-        updatePredictionOutputs();
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_stateMutex );
+        if( useEstimates != m_useEstimates )
+        {
+            m_useEstimates = useEstimates;
+            changed        = true;
+        }
     }
-    else
+
+    updatePlanningProperties();
+
+    if( changed )
     {
-        updateSwitchIfChanged( m_indiP_useEstimates,
-                               "toggle",
-                               m_useEstimates ? pcf::IndiElement::On : pcf::IndiElement::Off,
-                               m_useEstimates ? INDI_OK : INDI_IDLE );
+        updatePredictionOutputs();
     }
 
     return 0;
