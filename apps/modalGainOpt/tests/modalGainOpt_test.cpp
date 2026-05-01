@@ -376,6 +376,31 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
     REQUIRE( app.extrapConfig().m_dropoutMaxBins == 6 );
 }
 
+TEST_CASE( "modalPsdProcessor falls back when the requested power-law fit has too little frequency span",
+           "[modalGainOpt]" )
+{
+    processPsdProcessorT::processModelConfig cfg;
+    cfg.m_method = "moffat-peaks";
+    cfg.m_powerLawIndex = 1.5F;
+    cfg.m_powerLawMatchFreq = 25.0F;
+    cfg.m_fitPowerLawIndex = true;
+    cfg.m_powerLawFitMinFreqHz = 25.0F;
+    cfg.m_powerLawFitMaxFreqHz = 1000.0F;
+    cfg.m_powerLawFitBinWidthHz = 100.0F;
+    cfg.m_powerLawBlendBins = 5;
+
+    std::vector<float> measuredPsd{ 1.0e-6F, 9.0e-7F, 8.0e-7F, 7.0e-7F, 6.0e-7F };
+    std::vector<float> freq{ 0.0F, 25.0F, 50.0F, 75.0F, 100.0F };
+
+    processPsdProcessorT::processResults result;
+    mx::error_t errc = processPsdProcessorT::analyzePsd( result, measuredPsd, freq, 10, cfg, 0.0F, 25.0F );
+
+    REQUIRE( !errc );
+    REQUIRE( result.m_powerLawIndex == Approx( cfg.m_powerLawIndex ) );
+    REQUIRE( result.m_powerLawIndexFitSucceeded == false );
+    REQUIRE( result.m_powerLawFitBinsUsed == 0 );
+}
+
 /// Verify `modalGainOpt` publishes LP and max-gain arrays into separate buffers.
 /**
  * \ingroup modalGainOpt_unit_test

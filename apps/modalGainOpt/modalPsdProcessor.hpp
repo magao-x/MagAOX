@@ -656,7 +656,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
         result.m_powerLawAnchorFreq =
             result.m_powerLawAnchorIndex < freq.size() ? freq[result.m_powerLawAnchorIndex] : static_cast<realT>( 0 );
         result.m_powerLawIndex = usedPowerLawIndex;
-        result.m_powerLawIndexFitSucceeded = config.m_fitPowerLawIndex;
+        result.m_powerLawIndexFitSucceeded = config.m_fitPowerLawIndex && fitBinsUsed > 0;
         result.m_powerLawFitBinsUsed = fitBinsUsed;
     }
     else if( config.m_method == "moffat-peaks" )
@@ -711,7 +711,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
         result.m_powerLawAnchorFreq =
             result.m_powerLawAnchorIndex < freq.size() ? freq[result.m_powerLawAnchorIndex] : static_cast<realT>( 0 );
         result.m_powerLawIndex = usedPowerLawIndex;
-        result.m_powerLawIndexFitSucceeded = config.m_fitPowerLawIndex;
+        result.m_powerLawIndexFitSucceeded = config.m_fitPowerLawIndex && fitBinsUsed > 0;
         result.m_powerLawFitBinsUsed = fitBinsUsed;
     }
     else
@@ -1111,6 +1111,8 @@ mx::error_t modalPsdProcessor<realT>::fitPowerLawIndexFromBinnedMedians( realT &
                                                                          realT fitBinWidthHz,
                                                                          realT includeMatchFreqHz )
 {
+    const realT originalPowerLawIndex = powerLawIndex;
+
     if( rawProcessPsd.size() != freq.size() )
     {
         return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr,
@@ -1126,8 +1128,9 @@ mx::error_t modalPsdProcessor<realT>::fitPowerLawIndexFromBinnedMedians( realT &
 
     if( fitMinFreqHz >= freq.back() )
     {
-        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
-                                                 "Power-law exponent fit range starts above the sampled frequencies" );
+        nBinsUsed = 0;
+        powerLawIndex = std::max( originalPowerLawIndex, static_cast<realT>( 0 ) );
+        return mx::error_t::noerror;
     }
 
     const realT tiny = std::numeric_limits<realT>::min();
@@ -1187,9 +1190,9 @@ mx::error_t modalPsdProcessor<realT>::fitPowerLawIndexFromBinnedMedians( realT &
     nBinsUsed = x.size();
     if( nBinsUsed < 2 )
     {
-        return mx::error_report<mx::verbose::d>(
-            mx::error_t::invalidarg,
-            "Need at least two populated median bins to fit the power-law exponent" );
+        nBinsUsed = 0;
+        powerLawIndex = std::max( originalPowerLawIndex, static_cast<realT>( 0 ) );
+        return mx::error_t::noerror;
     }
 
     realT meanX = 0;
@@ -1215,15 +1218,17 @@ mx::error_t modalPsdProcessor<realT>::fitPowerLawIndexFromBinnedMedians( realT &
 
     if( varX <= static_cast<realT>( 0 ) )
     {
-        return mx::error_report<mx::verbose::d>(
-            mx::error_t::invalidarg,
-            "Could not determine a valid log-frequency span for the exponent fit" );
+        nBinsUsed = 0;
+        powerLawIndex = std::max( originalPowerLawIndex, static_cast<realT>( 0 ) );
+        return mx::error_t::noerror;
     }
 
     powerLawIndex = -covXY / varX;
     if( !std::isfinite( powerLawIndex ) )
     {
-        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg, "Fitted power-law exponent is not finite" );
+        nBinsUsed = 0;
+        powerLawIndex = std::max( originalPowerLawIndex, static_cast<realT>( 0 ) );
+        return mx::error_t::noerror;
     }
 
     if( powerLawIndex < static_cast<realT>( 0 ) )
@@ -1286,7 +1291,8 @@ mx::error_t modalPsdProcessor<realT>::estimatePowerLawContinuum( std::vector<rea
                                                                                             : static_cast<realT>( 0 ) );
         if( !!errc )
         {
-            return errc;
+            localPowerLawIndex = std::max( powerLawIndex, static_cast<realT>( 0 ) );
+            localFitBinsUsed = 0;
         }
     }
 
