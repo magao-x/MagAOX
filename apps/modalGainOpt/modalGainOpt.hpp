@@ -3661,10 +3661,30 @@ void modalGainOpt::goptThreadExec()
                     {
 #pragma omp critical
                         {
-                            log<software_error>(
-                                { __FILE__,
-                                  __LINE__,
-                                  "error processing modal PSD with method " + olProcessMethodName( m_extrapOL ) } );
+                            log<software_error>( { __FILE__,
+                                                   __LINE__,
+                                                   "error processing modal PSD with method " +
+                                                       olProcessMethodName( m_extrapOL ) + ": [" +
+                                                       std::string( mx::errorName( errc ) ) + "] " +
+                                                       mx::errorMessage( errc ) } );
+                            log<text_log>(
+                                "extrapolation settings: match=" + std::to_string( processConfig.m_powerLawMatchFreq ) +
+                                    " matchWindow=" + std::to_string( processConfig.m_powerLawMatchFallbackWindowHz ) +
+                                    " fitIndex=" + std::string( processConfig.m_fitPowerLawIndex ? "true" : "false" ) +
+                                    " fitMin=" + std::to_string( processConfig.m_powerLawFitMinFreqHz ) +
+                                    " fitMax=" + std::to_string( processConfig.m_powerLawFitMaxFreqHz ) +
+                                    " fitBin=" + std::to_string( processConfig.m_powerLawFitBinWidthHz ) +
+                                    " blendBins=" + std::to_string( processConfig.m_powerLawBlendBins ) +
+                                    " peakWidth=" + std::to_string( processConfig.m_peakDetectWidthHz ) +
+                                    " peakFactor=" + std::to_string( processConfig.m_peakDetectFactor ) +
+                                    " peakBroadFactor=" + std::to_string( processConfig.m_peakDetectBroadFactor ) +
+                                    " peakMinWidthLog=" + std::to_string( processConfig.m_peakDetectMinWidthLog ) +
+                                    " peakPasses=" + std::to_string( processConfig.m_peakDetectPasses ) +
+                                    " peakBeta=" + std::to_string( processConfig.m_peakMoffatBeta ) +
+                                    " dropoutGap=" + std::to_string( processConfig.m_dropoutGapFactor ) +
+                                    " dropoutMaxBins=" + std::to_string( processConfig.m_dropoutMaxBins ) +
+                                    " powerLawOnlyAbove=" + std::to_string( processConfig.m_powerLawOnlyAboveFreq ),
+                                logPrio::LOG_NOTICE );
                         }
 
                         float noiseFloor = 0;
