@@ -817,7 +817,7 @@ void strehlEstimator::calcMag()
 
     m_mag = -2.5f * std::log10( m_counts * m_again / m_emg * m_fps / ( m_qe * m_F0 ) );
 
-    if( !m_magEstimatedManual )
+    if( !m_useEstimates && !m_magEstimatedManual )
     {
         m_magEstimated = m_mag;
     }
@@ -913,7 +913,7 @@ INDI_SETCALLBACK_DEFN( strehlEstimator, m_indiP_tcsi_seeing )( const pcf::IndiPr
             m_r0             = seeingToR0( m_seeing );
             m_dimm_fwhm_corr = seeing;
 
-            if( !m_seeingEstimatedManual )
+            if( !m_useEstimates && !m_seeingEstimatedManual )
             {
                 m_seeingEstimated = m_seeing;
             }

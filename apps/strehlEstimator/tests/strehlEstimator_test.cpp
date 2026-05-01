@@ -423,6 +423,56 @@ TEST_CASE( "strehlEstimator ignores writes to current and accepts writes to esti
 /**
  * \ingroup strehlEstimator_unit_test
  */
+TEST_CASE( "strehlEstimator freezes auto-tracked estimates while use_estimates is enabled", "[strehlEstimator]" )
+{
+    // clang-format off
+    #ifdef STREHLESTIMATOR_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF( strehlEstimator::calcMag() );
+    XWCTEST_DOXYGEN_REF( strehlEstimator::setCallBack_m_indiP_tcsi_seeing( std::declval<const pcf::IndiProperty &>() ) );
+    XWCTEST_DOXYGEN_REF( strehlEstimator::newCallBack_m_indiP_useEstimates( std::declval<const pcf::IndiProperty &>() ) );
+    #endif
+    // clang-format on
+
+    strehlEstimator_test app( "right" );
+
+    REQUIRE( app.initializePublishedProperties() == 0 );
+
+    app.setPhotometry( 30000.0f, 196 );
+
+    pcf::IndiProperty initialSeeing = makeRemoteNumberProperty( "tcsi", "seeing" );
+    initialSeeing.add( pcf::IndiElement( "dimm_fwhm_corr" ) );
+    initialSeeing["dimm_fwhm_corr"].set( 0.55f );
+    REQUIRE( app.setCallBack_m_indiP_tcsi_seeing( initialSeeing ) == 0 );
+
+    const float frozenMag    = app.estimatedMag();
+    const float frozenSeeing = app.estimatedSeeing();
+
+    pcf::IndiProperty useEstimates = makeLocalSwitchProperty( "right", "use_estimates" );
+    useEstimates.add( pcf::IndiElement( "toggle" ) );
+    useEstimates["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_useEstimates( useEstimates ) == 0 );
+
+    app.setPhotometry( 12000.0f, 196 );
+
+    pcf::IndiProperty updatedSeeing = makeRemoteNumberProperty( "tcsi", "seeing" );
+    updatedSeeing.add( pcf::IndiElement( "dimm_fwhm_corr" ) );
+    updatedSeeing["dimm_fwhm_corr"].set( 0.92f );
+    REQUIRE( app.setCallBack_m_indiP_tcsi_seeing( updatedSeeing ) == 0 );
+
+    REQUIRE( app.useEstimates() == true );
+    REQUIRE( app.estimatedMag() == Approx( frozenMag ) );
+    REQUIRE( app.estimatedSeeing() == Approx( frozenSeeing ) );
+    REQUIRE( app.selectedMagDirect() == Approx( frozenMag ) );
+    REQUIRE( app.selectedSeeingDirect() == Approx( frozenSeeing ) );
+    REQUIRE( app.liveMag() != Approx( frozenMag ) );
+    REQUIRE( app.liveSeeing() != Approx( frozenSeeing ) );
+}
+
+/// Verify estimate selection changes the published predictions and the optimum-loop-speed summary matches the fixed FPS
+/// grid.
+/**
+ * \ingroup strehlEstimator_unit_test
+ */
 TEST_CASE( "strehlEstimator uses estimates when requested and scans the fixed loop-speed grid", "[strehlEstimator]" )
 {
     // clang-format off
