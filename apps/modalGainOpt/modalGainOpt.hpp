@@ -155,28 +155,6 @@ inline std::string extrapBoolString( bool value )
     return value ? "true" : "false";
 }
 
-inline bool parseExtrapBool( bool &value, std::string text )
-{
-    std::transform( text.begin(),
-                    text.end(),
-                    text.begin(),
-                    []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
-
-    if( text == "true" || text == "1" || text == "on" || text == "yes" )
-    {
-        value = true;
-        return true;
-    }
-
-    if( text == "false" || text == "0" || text == "off" || text == "no" )
-    {
-        value = false;
-        return true;
-    }
-
-    return false;
-}
-
 struct psdShmimT
 {
     static std::string configSection()
@@ -686,13 +664,13 @@ class modalGainOpt : public MagAOXApp<true>,
                                     const pcf::IndiProperty &ipRecv,
                                     const std::string &label );
 
-    /// Handle a standard target/current boolean extrapolation property update.
-    int handleExtrapBoolProperty( pcf::IndiProperty &localProperty,
-                                  bool &localTarget,
-                                  const pcf::IndiProperty &ipRecv,
-                                  const std::string &label );
+    /// Handle a boolean extrapolation toggle property update.
+    int handleExtrapToggleProperty( pcf::IndiProperty &localProperty,
+                                    bool &localTarget,
+                                    const pcf::IndiProperty &ipRecv,
+                                    const std::string &label );
 
-    /// Handle the standard target/current text property used for the extrapolation method.
+    /// Handle the extrapolation-method selection switch property.
     int handleExtrapMethodProperty( const pcf::IndiProperty &ipRecv );
 
   public:
@@ -1427,7 +1405,27 @@ int modalGainOpt::appStartup()
                                  "Optical Gain",
                                  "Gain Opt." );
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_gainGain, "gainGain", 0, 1, 0.01, "%0.01f", "Gain Gain", "Gain Opt." );
-    CREATE_REG_INDI_NEW_TEXT( m_indiP_extrapMethod, "extrap_method", "Extrapolation Method", "Extrapolation" );
+    if( createStandardIndiSelectionSw( m_indiP_extrapMethod,
+                                       "extrap_method",
+                                       { olProcessMethodElement( c_olProcessNone ),
+                                         olProcessMethodElement( c_olProcessLegacy ),
+                                         olProcessMethodElement( c_olProcessPowerLawOnly ),
+                                         olProcessMethodElement( c_olProcessMoffatPeaks ) },
+                                       { olProcessMethodLabel( c_olProcessNone ),
+                                         olProcessMethodLabel( c_olProcessLegacy ),
+                                         olProcessMethodLabel( c_olProcessPowerLawOnly ),
+                                         olProcessMethodLabel( c_olProcessMoffatPeaks ) },
+                                       "Extrapolation Method",
+                                       "Extrapolation" ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "error from createStandardIndiSelectionSw" } );
+        return -1;
+    }
+    if( registerIndiPropertyNew( m_indiP_extrapMethod, INDI_NEWCALLBACK( m_indiP_extrapMethod ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
+        return -1;
+    }
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawIndex,
                                  "extrap_powerLawIndex",
                                  0,
@@ -1460,10 +1458,20 @@ int modalGainOpt::appStartup()
                                  "%0.2f",
                                  "Power-Law Match Window",
                                  "Extrapolation" );
-    CREATE_REG_INDI_NEW_TEXT( m_indiP_extrapFitPowerLawIndex,
-                              "extrap_fitPowerLawIndex",
-                              "Fit Power-Law Index",
-                              "Extrapolation" );
+    if( createStandardIndiToggleSw( m_indiP_extrapFitPowerLawIndex,
+                                    "extrap_fitPowerLawIndex",
+                                    "Fit Power-Law Index",
+                                    "Extrapolation" ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "error from createStandardIndiToggleSw" } );
+        return -1;
+    }
+    if( registerIndiPropertyNew( m_indiP_extrapFitPowerLawIndex, INDI_NEWCALLBACK( m_indiP_extrapFitPowerLawIndex ) ) <
+        0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
+        return -1;
+    }
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawOnlyAboveFreq,
                                  "extrap_powerLawOnlyAboveFreq",
                                  0,
@@ -1472,10 +1480,20 @@ int modalGainOpt::appStartup()
                                  "%0.2f",
                                  "Power-Law Only Above",
                                  "Extrapolation" );
-    CREATE_REG_INDI_NEW_TEXT( m_indiP_extrapPowerLawFitIncludesMatchPoint,
-                              "extrap_powerLawFitIncludesMatchPoint",
-                              "Fit Includes Match Point",
-                              "Extrapolation" );
+    if( createStandardIndiToggleSw( m_indiP_extrapPowerLawFitIncludesMatchPoint,
+                                    "extrap_powerLawFitIncludesMatchPoint",
+                                    "Fit Includes Match Point",
+                                    "Extrapolation" ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "error from createStandardIndiToggleSw" } );
+        return -1;
+    }
+    if( registerIndiPropertyNew( m_indiP_extrapPowerLawFitIncludesMatchPoint,
+                                 INDI_NEWCALLBACK( m_indiP_extrapPowerLawFitIncludesMatchPoint ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
+        return -1;
+    }
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawFitMinFreqHz,
                                  "extrap_powerLawFitMinFreqHz",
                                  0,
@@ -1714,9 +1732,10 @@ int modalGainOpt::appLogic()
     updatesIfChanged<float>( m_indiP_opticalGain, { "current", "target" }, { opticalGain, opticalGain } );
 
     updatesIfChanged<float>( m_indiP_gainGain, { "current", "target" }, { gainGain, gainGain } );
-    updatesIfChanged<std::string>( m_indiP_extrapMethod,
-                                   { "current", "target" },
-                                   { olProcessMethodName( extrapOL ), olProcessMethodName( extrapOL ) } );
+    indi::updateSelectionSwitchIfChanged( m_indiP_extrapMethod,
+                                          olProcessMethodElement( extrapOL ),
+                                          m_indiDriver,
+                                          INDI_OK );
     updatesIfChanged<float>( m_indiP_extrapPowerLawIndex,
                              { "current", "target" },
                              { extrapConfig.m_powerLawIndex, extrapConfig.m_powerLawIndex } );
@@ -1730,17 +1749,17 @@ int modalGainOpt::appLogic()
         m_indiP_extrapPowerLawMatchFallbackWindowHz,
         { "current", "target" },
         { extrapConfig.m_powerLawMatchFallbackWindowHz, extrapConfig.m_powerLawMatchFallbackWindowHz } );
-    updatesIfChanged<std::string>(
-        m_indiP_extrapFitPowerLawIndex,
-        { "current", "target" },
-        { extrapBoolString( extrapConfig.m_fitPowerLawIndex ), extrapBoolString( extrapConfig.m_fitPowerLawIndex ) } );
+    updateSwitchIfChanged( m_indiP_extrapFitPowerLawIndex,
+                           "toggle",
+                           extrapConfig.m_fitPowerLawIndex ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           INDI_OK );
     updatesIfChanged<float>( m_indiP_extrapPowerLawOnlyAboveFreq,
                              { "current", "target" },
                              { extrapConfig.m_powerLawOnlyAboveFreq, extrapConfig.m_powerLawOnlyAboveFreq } );
-    updatesIfChanged<std::string>( m_indiP_extrapPowerLawFitIncludesMatchPoint,
-                                   { "current", "target" },
-                                   { extrapBoolString( extrapConfig.m_powerLawFitIncludesMatchPoint ),
-                                     extrapBoolString( extrapConfig.m_powerLawFitIncludesMatchPoint ) } );
+    updateSwitchIfChanged( m_indiP_extrapPowerLawFitIncludesMatchPoint,
+                           "toggle",
+                           extrapConfig.m_powerLawFitIncludesMatchPoint ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           INDI_OK );
     updatesIfChanged<float>( m_indiP_extrapPowerLawFitMinFreqHz,
                              { "current", "target" },
                              { extrapConfig.m_powerLawFitMinFreqHz, extrapConfig.m_powerLawFitMinFreqHz } );
@@ -4340,24 +4359,19 @@ int modalGainOpt::handleExtrapNumberProperty( pcf::IndiProperty &localProperty,
     return 0;
 }
 
-int modalGainOpt::handleExtrapBoolProperty( pcf::IndiProperty &localProperty,
-                                            bool &localTarget,
-                                            const pcf::IndiProperty &ipRecv,
-                                            const std::string &label )
+int modalGainOpt::handleExtrapToggleProperty( pcf::IndiProperty &localProperty,
+                                              bool &localTarget,
+                                              const pcf::IndiProperty &ipRecv,
+                                              const std::string &label )
 {
-    std::string targetText;
-    if( indiTargetUpdate( localProperty, targetText, ipRecv, true ) < 0 )
+    static_cast<void>( localProperty );
+
+    if( !ipRecv.find( "toggle" ) )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
-        return -1;
+        return log<software_error, -1>( { __FILE__, __LINE__, "Missing toggle element for " + label } );
     }
 
-    bool target = false;
-    if( !parseExtrapBool( target, targetText ) )
-    {
-        return log<software_error, -1>(
-            { __FILE__, __LINE__, "Invalid boolean extrapolation setting for " + label + ": " + targetText } );
-    }
+    bool target = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
 
     if( target != localTarget )
     {
@@ -4377,35 +4391,34 @@ int modalGainOpt::handleExtrapBoolProperty( pcf::IndiProperty &localProperty,
 
 int modalGainOpt::handleExtrapMethodProperty( const pcf::IndiProperty &ipRecv )
 {
-    std::string targetText;
-    if( indiTargetUpdate( m_indiP_extrapMethod, targetText, ipRecv, true ) < 0 )
+    int target = c_olProcessNone;
+    bool found = false;
+    for( auto elit = ipRecv.getElements().begin(); elit != ipRecv.getElements().end(); ++elit )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
-        return -1;
+        if( elit->second.getSwitchState() != pcf::IndiElement::On )
+        {
+            continue;
+        }
+
+        if( found )
+        {
+            return log<software_error, -1>(
+                { __FILE__, __LINE__, "Multiple extrapolation methods selected in one update" } );
+        }
+
+        target = olProcessMethodFromElement( elit->first );
+        if( target == c_olProcessNone && elit->first != olProcessMethodElement( c_olProcessNone ) )
+        {
+            return log<software_error, -1>(
+                { __FILE__, __LINE__, "Invalid extrapolation method element: " + elit->first } );
+        }
+
+        found = true;
     }
 
-    int target = olProcessMethodFromName( targetText );
-    if( target == c_olProcessNone && olProcessMethodName( target ) != targetText &&
-        olProcessMethodElement( target ) != targetText )
+    if( !found )
     {
-        std::string norm = targetText;
-        std::transform( norm.begin(),
-                        norm.end(),
-                        norm.begin(),
-                        []( unsigned char c )
-                        {
-                            if( c == '_' )
-                            {
-                                return static_cast<char>( '-' );
-                            }
-
-                            return static_cast<char>( std::tolower( c ) );
-                        } );
-
-        if( norm != "none" )
-        {
-            return log<software_error, -1>( { __FILE__, __LINE__, "Invalid extrapolation method: " + targetText } );
-        }
+        return log<software_error, -1>( { __FILE__, __LINE__, "No extrapolation method selected" } );
     }
 
     if( target != m_extrapOL )
@@ -4469,10 +4482,10 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawMatchFallbackWindowHz
 INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapFitPowerLawIndex )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapFitPowerLawIndex, ipRecv );
-    return handleExtrapBoolProperty( m_indiP_extrapFitPowerLawIndex,
-                                     m_extrapConfig.m_fitPowerLawIndex,
-                                     ipRecv,
-                                     "extrap fit power-law index" );
+    return handleExtrapToggleProperty( m_indiP_extrapFitPowerLawIndex,
+                                       m_extrapConfig.m_fitPowerLawIndex,
+                                       ipRecv,
+                                       "extrap fit power-law index" );
 }
 
 INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawOnlyAboveFreq )( const pcf::IndiProperty &ipRecv )
@@ -4487,10 +4500,10 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawOnlyAboveFreq )( cons
 INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawFitIncludesMatchPoint )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPowerLawFitIncludesMatchPoint, ipRecv );
-    return handleExtrapBoolProperty( m_indiP_extrapPowerLawFitIncludesMatchPoint,
-                                     m_extrapConfig.m_powerLawFitIncludesMatchPoint,
-                                     ipRecv,
-                                     "extrap fit includes match point" );
+    return handleExtrapToggleProperty( m_indiP_extrapPowerLawFitIncludesMatchPoint,
+                                       m_extrapConfig.m_powerLawFitIncludesMatchPoint,
+                                       ipRecv,
+                                       "extrap fit includes match point" );
 }
 
 INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawFitMinFreqHz )( const pcf::IndiProperty &ipRecv )
