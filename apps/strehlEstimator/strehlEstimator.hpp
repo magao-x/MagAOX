@@ -344,6 +344,13 @@ class strehlEstimator : public MagAOXApp<true>,
     /// Return whether a value is finite and strictly positive.
     static bool finitePositiveValue( float value /**< [in] value to test */ );
 
+    /// Return whether two scalar AO-model inputs are effectively equal.
+    static bool nearlyEqual( float a,      /**< [in] first value */
+                             float b,      /**< [in] second value */
+                             float relTol, /**< [in] relative tolerance */
+                             float absTol  /**< [in] absolute tolerance */
+    );
+
     /// Convert AO model phase variance into WFE in nm RMS at the specified wavelength.
     static float wfeNm( float variance, /**< [in] phase variance at the science wavelength */
                         float lam0      /**< [in] active wavelength in microns */
@@ -625,6 +632,23 @@ bool strehlEstimator::finitePositiveValue( float value )
     return finiteValue( value ) && value > 0.0f;
 }
 
+bool strehlEstimator::nearlyEqual( float a, float b, float relTol, float absTol )
+{
+    float diff = std::fabs( a - b );
+    if( diff <= absTol )
+    {
+        return true;
+    }
+
+    float scale = std::fabs( a );
+    if( std::fabs( b ) > scale )
+    {
+        scale = std::fabs( b );
+    }
+
+    return diff <= relTol * scale;
+}
+
 float strehlEstimator::wfeNm( float variance, float lam0 )
 {
     if( variance <= 0.0f )
@@ -794,12 +818,41 @@ void strehlEstimator::updateOptimumLoopSpeed( const predictionInputs &inputs )
 void strehlEstimator::updatePredictionOutputs()
 {
     std::lock_guard<std::mutex> predictionLock( m_predictionMutex );
+    constexpr float             predictionRelTol = 1.0e-6f;
+    constexpr float             predictionAbsTol = 1.0e-7f;
 
     predictionInputs inputs = snapshotPredictionInputs();
 
     if( !finitePositiveValue( inputs.m_fps ) || !finitePositiveValue( inputs.m_emg ) ||
         !finitePositiveValue( inputs.m_qe ) || !finitePositiveValue( inputs.m_F0 ) ||
-        !finitePositiveValue( inputs.m_selectedSeeing ) || !finitePositiveValue( inputs.m_selectedWindSpeed ) )
+        !finitePositiveValue( inputs.m_selectedSeeing ) || !finitePositiveValue( inputs.m_selectedWindSpeed ) ||
+        inputs.m_npix <= 0 )
+    {
+        return;
+    }
+
+    const float configuredF0   = inputs.m_qe * inputs.m_F0;
+    const float configuredLam  = inputs.m_lam0 * 1.0e-6f;
+    const float configuredRon  = 245.0f / inputs.m_emg;
+    const float configuredNpix = static_cast<float>( inputs.m_npix );
+    const float configuredTau  = 1.0f / inputs.m_fps;
+    const float configuredZeta = ( 90.0f - inputs.m_elevation ) * pi<float>() / 180.0f;
+
+    bool sameConfiguredInputs =
+        m_aosys.optTau() == true && m_aosys.ron_wfs().size() > 0 && m_aosys.npix_wfs().size() > 0 &&
+        m_aosys.minTauWFS().size() > 0 &&
+        nearlyEqual( m_aosys.starMag(), inputs.m_selectedMag, predictionRelTol, predictionAbsTol ) &&
+        nearlyEqual( m_aosys.F0(), configuredF0, predictionRelTol, predictionAbsTol ) &&
+        nearlyEqual( m_aosys.lam_wfs(), configuredLam, predictionRelTol, predictionAbsTol ) &&
+        nearlyEqual( m_aosys.lam_sci(), configuredLam, predictionRelTol, predictionAbsTol ) &&
+        nearlyEqual( m_aosys.ron_wfs( 0 ), configuredRon, predictionRelTol, predictionAbsTol ) &&
+        nearlyEqual( m_aosys.npix_wfs( 0 ), configuredNpix, predictionRelTol, predictionAbsTol ) &&
+        nearlyEqual( m_aosys.minTauWFS( 0 ), configuredTau, predictionRelTol, predictionAbsTol ) &&
+        nearlyEqual( m_aosys.tauWFS(), configuredTau, predictionRelTol, predictionAbsTol ) &&
+        nearlyEqual( m_aosys.atm.v_wind(), inputs.m_selectedWindSpeed, predictionRelTol, predictionAbsTol ) &&
+        nearlyEqual( m_aosys.zeta(), configuredZeta, predictionRelTol, predictionAbsTol );
+
+    if( sameConfiguredInputs )
     {
         return;
     }

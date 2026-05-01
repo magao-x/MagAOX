@@ -453,6 +453,9 @@ TEST_CASE( "strehlEstimator freezes auto-tracked estimates while use_estimates i
     useEstimates["toggle"].setSwitchState( pcf::IndiElement::On );
     REQUIRE( app.newCallBack_m_indiP_useEstimates( useEstimates ) == 0 );
 
+    const float frozenPredictedStrehl = app.predictedStrehl();
+    const float frozenOptimumFPS      = app.optimumFPS();
+
     app.setPhotometry( 12000.0f, 196 );
 
     pcf::IndiProperty updatedSeeing = makeRemoteNumberProperty( "tcsi", "seeing" );
@@ -465,6 +468,8 @@ TEST_CASE( "strehlEstimator freezes auto-tracked estimates while use_estimates i
     REQUIRE( app.estimatedSeeing() == Approx( frozenSeeing ) );
     REQUIRE( app.selectedMagDirect() == Approx( frozenMag ) );
     REQUIRE( app.selectedSeeingDirect() == Approx( frozenSeeing ) );
+    REQUIRE( app.predictedStrehl() == Approx( frozenPredictedStrehl ) );
+    REQUIRE( app.optimumFPS() == Approx( frozenOptimumFPS ) );
     REQUIRE( app.liveMag() != Approx( frozenMag ) );
     REQUIRE( app.liveSeeing() != Approx( frozenSeeing ) );
 }
