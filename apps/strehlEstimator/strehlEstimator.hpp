@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <mutex>
+#include <sstream>
 
 #include <mx/ao/analysis/aoSystem.hpp>
 using namespace mx::math;
@@ -210,6 +211,12 @@ class strehlEstimator : public MagAOXApp<true>,
 
     /// Protects the live telemetry and planning-input state while prediction snapshots are assembled.
     mutable std::mutex m_stateMutex;
+
+    /// Serializes access to the shared AO-model instances and prediction-property updates.
+    mutable std::mutex m_predictionMutex;
+
+    /// Tracks the last suspicious optimum FPS reported in debug logging.
+    float m_lastLoggedSuspiciousOptimumFps{ -1.0f };
 
     ///@}
 
@@ -682,14 +689,28 @@ void strehlEstimator::configureAoSystem( aoSystemT &aosys, const predictionInput
 
 void strehlEstimator::updateOptimumLoopSpeed( const predictionInputs &inputs )
 {
+    struct scanPoint
+    {
+        int   fps{ 0 };
+        float strehl{ 0.0f };
+        float wfeMeasurement{ 0.0f };
+        float wfeTimeDelay{ 0.0f };
+        float wfeFitting{ 0.0f };
+        float wfeTotal{ 0.0f };
+        float dOpt{ 0.0f };
+        int   binOpt{ 0 };
+    };
+
     constexpr float strehlTieTolerance = 1.0e-4f;
 
-    float bestFPS            = 0.0f;
-    float bestStrehl         = -1.0f;
-    float bestTotalWfe       = 0.0f;
-    float bestMeasurementWfe = 0.0f;
-    float bestTimeDelayWfe   = 0.0f;
-    float bestFittingWfe     = 0.0f;
+    float                  bestFPS            = 0.0f;
+    float                  bestStrehl         = -1.0f;
+    float                  bestTotalWfe       = 0.0f;
+    float                  bestMeasurementWfe = 0.0f;
+    float                  bestTimeDelayWfe   = 0.0f;
+    float                  bestFittingWfe     = 0.0f;
+    std::vector<scanPoint> scanCurve;
+    scanCurve.reserve( 30 );
 
     for( int fps = 100; fps <= 3000; fps += 100 )
     {
@@ -701,15 +722,55 @@ void strehlEstimator::updateOptimumLoopSpeed( const predictionInputs &inputs )
             continue;
         }
 
+        scanPoint point;
+        point.fps            = fps;
+        point.strehl         = strehl;
+        point.wfeMeasurement = wfeNm( m_aosysScan.measurementErrorTotal(), inputs.m_lam0 );
+        point.wfeTimeDelay   = wfeNm( m_aosysScan.timeDelayErrorTotal(), inputs.m_lam0 );
+        point.wfeFitting     = wfeNm( m_aosysScan.fittingErrorTotal(), inputs.m_lam0 );
+        point.wfeTotal       = wfeNm( m_aosysScan.wfeVar(), inputs.m_lam0 );
+        point.dOpt           = m_aosysScan.d_opt();
+        point.binOpt         = m_aosysScan.bin_opt();
+        scanCurve.push_back( point );
+
         if( bestFPS == 0.0f || strehl > bestStrehl + strehlTieTolerance )
         {
             bestFPS            = static_cast<float>( fps );
             bestStrehl         = strehl;
-            bestTotalWfe       = wfeNm( m_aosysScan.wfeVar(), inputs.m_lam0 );
-            bestMeasurementWfe = wfeNm( m_aosysScan.measurementErrorTotal(), inputs.m_lam0 );
-            bestTimeDelayWfe   = wfeNm( m_aosysScan.timeDelayErrorTotal(), inputs.m_lam0 );
-            bestFittingWfe     = wfeNm( m_aosysScan.fittingErrorTotal(), inputs.m_lam0 );
+            bestTotalWfe       = point.wfeTotal;
+            bestMeasurementWfe = point.wfeMeasurement;
+            bestTimeDelayWfe   = point.wfeTimeDelay;
+            bestFittingWfe     = point.wfeFitting;
         }
+    }
+
+    bool suspiciousWinner = bestFPS > 0.0f && ( bestFPS <= 400.0f || bestStrehl >= 0.98f ||
+                                                bestMeasurementWfe == 0.0f || bestTimeDelayWfe == 0.0f );
+
+    if( suspiciousWinner && bestFPS != m_lastLoggedSuspiciousOptimumFps )
+    {
+        std::ostringstream oss;
+        oss << "strehlEstimator suspicious optimum scan" << " use_estimates=" << std::boolalpha << inputs.m_useEstimates
+            << " selected_mag=" << inputs.m_selectedMag << " selected_seeing=" << inputs.m_selectedSeeing
+            << " selected_wind=" << inputs.m_selectedWindSpeed << " fps_live=" << inputs.m_fps
+            << " emg=" << inputs.m_emg << " elevation=" << inputs.m_elevation << " npix=" << inputs.m_npix
+            << " winner_fps=" << bestFPS << " winner_strehl=" << bestStrehl << " winner_wfe_total=" << bestTotalWfe
+            << " winner_wfe_meas=" << bestMeasurementWfe << " winner_wfe_delay=" << bestTimeDelayWfe
+            << " winner_wfe_fit=" << bestFittingWfe << '\n';
+
+        for( const auto &point : scanCurve )
+        {
+            oss << "  fps=" << point.fps << " strehl=" << point.strehl << " wfe_total=" << point.wfeTotal
+                << " wfe_meas=" << point.wfeMeasurement << " wfe_delay=" << point.wfeTimeDelay
+                << " wfe_fit=" << point.wfeFitting << " d_opt=" << point.dOpt << " bin_opt=" << point.binOpt << '\n';
+        }
+
+        std::cerr << oss.str();
+        m_lastLoggedSuspiciousOptimumFps = bestFPS;
+    }
+    else if( !suspiciousWinner )
+    {
+        m_lastLoggedSuspiciousOptimumFps = -1.0f;
     }
 
     if( !m_indiDriver )
@@ -732,6 +793,8 @@ void strehlEstimator::updateOptimumLoopSpeed( const predictionInputs &inputs )
 
 void strehlEstimator::updatePredictionOutputs()
 {
+    std::lock_guard<std::mutex> predictionLock( m_predictionMutex );
+
     predictionInputs inputs = snapshotPredictionInputs();
 
     if( !finitePositiveValue( inputs.m_fps ) || !finitePositiveValue( inputs.m_emg ) ||
