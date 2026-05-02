@@ -32,31 +32,31 @@ _BATCH_UTC_COMPACT_RE = re.compile(r"(?<!\d)(\d{8})(\d{6})(\d*)(?!\d)")
 
 def resolve_parangs_lookup_path(config_params, directory):
     """
-    Resolve ``PARANGS_LOOKUP`` from config to an absolute path and verify the file exists.
+    Resolve ``PARANGS_LOOKUP`` from config to an absolute path if the file exists.
 
-    Raises:
-        FileNotFoundError: If the key is missing/empty or the path is not a file.
+    Returns ``None`` when no lookup file is configured or the configured path is
+    missing. Callers should skip derotation in that case.
     """
     raw = config_params.get("PARANGS_LOOKUP")
     if raw is None or (isinstance(raw, str) and not raw.strip()):
-        raise FileNotFoundError(
-            "Distill requires PARANGS_LOOKUP in ws_config.yaml (path to a tab-separated "
-            "parangs table, e.g. from tests_and_one_offs/extract_obs_parangs.py as parangs.txt "
-            "with columns PARANG, timestamp, elapsed_seconds). "
-            "Set PARANGS_LOOKUP to that file before running the distill stage."
+        logging.warning(
+            "PARANGS_LOOKUP is not set; skipping distill derotation."
         )
+        return None
     if not isinstance(raw, str):
-        raise FileNotFoundError(
-            f"PARANGS_LOOKUP must be a string path, got {type(raw).__name__!r}."
+        logging.warning(
+            "PARANGS_LOOKUP must be a string path, got %s; skipping distill derotation.",
+            type(raw).__name__,
         )
+        return None
     path = raw.strip()
     full = path if os.path.isabs(path) else os.path.join(directory, path)
     if not os.path.isfile(full):
-        raise FileNotFoundError(
-            f"PARANGS_LOOKUP file not found: {full!r}. "
-            "Check the path (relative paths are resolved against the run directory). "
-            "Generate the table from science FITS headers with extract_obs_parangs.py if needed."
+        logging.warning(
+            "PARANGS_LOOKUP file not found at %r; skipping distill derotation.",
+            full,
         )
+        return None
     return full
 
 
@@ -552,7 +552,7 @@ def run_distill_stage(directory, config_params=None, save_pngs=True):
         parangs_path = os.path.join(directory, "parangs.txt")
     else:
         parangs_path = resolve_parangs_lookup_path(config_params, directory)
-    xp, fp = load_parangs_lookup(parangs_path)
+    parangs_lookup = load_parangs_lookup(parangs_path) if parangs_path is not None else None
 
     failed_groups = []
     processed_groups = []
@@ -574,18 +574,22 @@ def run_distill_stage(directory, config_params=None, save_pngs=True):
             continue
 
         averaged_cube, header = load_and_average(file_list)
-        t_batch = parse_batch_utc_seconds_from_suffix(suffix)
-        if t_batch < float(xp[0]) or t_batch > float(xp[-1]):
-            logging.warning(
-                "Batch time for suffix %s is outside PARANGS_LOOKUP time span; "
-                "np.interp will clamp to endpoints.",
-                suffix,
-            )
-        parang = float(np.interp(t_batch, xp, fp))
-        averaged_cube = derotate_cc_cube(averaged_cube, parang)
         cc_hdr = header.copy()
-        cc_hdr["PARANG_I"] = (parang, "interpolated PA (deg)")
-        cc_hdr["DEROT_DEG"] = (-parang, "ndimage.rotate angle on CC cube (deg)")
+        if parangs_lookup is not None:
+            xp, fp = parangs_lookup
+            t_batch = parse_batch_utc_seconds_from_suffix(suffix)
+            if t_batch < float(xp[0]) or t_batch > float(xp[-1]):
+                logging.warning(
+                    "Batch time for suffix %s is outside PARANGS_LOOKUP time span; "
+                    "np.interp will clamp to endpoints.",
+                    suffix,
+                )
+            parang = float(np.interp(t_batch, xp, fp))
+            averaged_cube = derotate_cc_cube(averaged_cube, parang)
+            cc_hdr["PARANG_I"] = (parang, "interpolated PA (deg)")
+            cc_hdr["DEROT_DEG"] = (-parang, "ndimage.rotate angle on CC cube (deg)")
+        else:
+            cc_hdr["DEROTATE"] = (False, "PARANGS lookup unavailable; not derotated")
 
         bias_file_list = bias_groups[suffix]
         averaged_bias, bias_header = load_and_average(bias_file_list)
@@ -640,25 +644,29 @@ def run_distill_stage_in_memory(directory, xcorr_result, config_params=None, sav
         }
 
     parangs_path = resolve_parangs_lookup_path(config_params, directory)
-    xp, fp = load_parangs_lookup(parangs_path)
+    parangs_lookup = load_parangs_lookup(parangs_path) if parangs_path is not None else None
 
     cc_cubes = [quadrant_results[quadrant]["cc_cube"] for quadrant in ("ul", "ur", "ll", "lr")]
     biases = [quadrant_results[quadrant]["bias"] for quadrant in ("ul", "ur", "ll", "lr")]
     header = quadrant_results["ul"]["header"]
     averaged_cube = np.mean(np.stack(cc_cubes, axis=0), axis=0)
-    t_batch = parse_batch_utc_seconds_from_suffix(suffix)
-    if t_batch < float(xp[0]) or t_batch > float(xp[-1]):
-        logging.warning(
-            "Batch time for suffix %s is outside PARANGS_LOOKUP time span; "
-            "np.interp will clamp to endpoints.",
-            suffix,
-        )
-    parang = float(np.interp(t_batch, xp, fp))
-    # it's positive parang here
-    averaged_cube = derotate_cc_cube(averaged_cube, parang)
     cc_hdr = header.copy()
-    cc_hdr["PARANG_I"] = (parang, "interpolated PA (deg)")
-    cc_hdr["DEROT_DEG"] = (-parang, "ndimage.rotate angle on CC cube (deg)")
+    if parangs_lookup is not None:
+        xp, fp = parangs_lookup
+        t_batch = parse_batch_utc_seconds_from_suffix(suffix)
+        if t_batch < float(xp[0]) or t_batch > float(xp[-1]):
+            logging.warning(
+                "Batch time for suffix %s is outside PARANGS_LOOKUP time span; "
+                "np.interp will clamp to endpoints.",
+                suffix,
+            )
+        parang = float(np.interp(t_batch, xp, fp))
+        # it's positive parang here
+        averaged_cube = derotate_cc_cube(averaged_cube, parang)
+        cc_hdr["PARANG_I"] = (parang, "interpolated PA (deg)")
+        cc_hdr["DEROT_DEG"] = (-parang, "ndimage.rotate angle on CC cube (deg)")
+    else:
+        cc_hdr["DEROTATE"] = (False, "PARANGS lookup unavailable; not derotated")
 
     averaged_bias = np.mean(np.stack(biases, axis=0), axis=0)
     hp_filter_fwhm = config_params.get("HIGH_PASS_FWHM", None)
