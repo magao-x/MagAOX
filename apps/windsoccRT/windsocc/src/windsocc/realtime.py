@@ -30,7 +30,7 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from time import perf_counter
+from time import perf_counter, perf_counter_ns
 
 import numpy as np
 from astropy.io import fits
@@ -512,6 +512,83 @@ def _install_realtime_gc_tuning() -> None:
     _REALTIME_GC_TUNED = True
 
 
+def _report_iter_timing(
+    iter_pre_get_ns: np.ndarray,
+    iter_post_get_ns: np.ndarray,
+    cnt0_gap_events: list[tuple[int, int, int, int]],
+    *,
+    target_frames: int,
+    topk: int,
+) -> None:
+    """Log aggregate and top-K slow-iteration stats from hot-loop timestamps.
+
+    Timestamps are captured with ``time.perf_counter_ns`` immediately before
+    and after each ``image.get_data`` call for iterations 1..N-1. For each
+    iteration ``i >= 2`` we derive:
+
+    - ``get_data_ns[i]`` = ``post[i] - pre[i]`` (time spent inside the shmim
+      read and cnt0 increment / semaphore wait).
+    - ``between_ns[i]``  = ``pre[i] - post[i-1]`` (time from the previous
+      frame's ``get_data`` return to this iteration's ``get_data`` call,
+      i.e. the reader's per-iteration Python/bookkeeping cost).
+    - ``total_ns[i]``    = ``get_data_ns[i] + between_ns[i]`` (full cycle).
+
+    The top-K slowest iterations by total cycle time are printed with
+    their matching ``cnt0`` gap (if any) so "which frame caused the gap?"
+    is answerable at a glance.
+    """
+    if target_frames < 3 or topk <= 0:
+        return
+
+    # Iterations captured in the hot loop correspond to indices 1..target_frames-1.
+    pre = iter_pre_get_ns[1:]
+    post = iter_post_get_ns[1:]
+    get_data_ns = post - pre
+    between_ns = pre[1:] - post[:-1]
+    total_ns = between_ns + get_data_ns[1:]
+
+    def _fmt_stats(arr_ns: np.ndarray) -> str:
+        arr_us = arr_ns.astype(np.float64) / 1e3
+        return (
+            f"mean={arr_us.mean():.1f} p50={np.percentile(arr_us, 50):.1f} "
+            f"p90={np.percentile(arr_us, 90):.1f} p99={np.percentile(arr_us, 99):.1f} "
+            f"max={arr_us.max():.1f}"
+        )
+
+    logging.info("Per-iteration timing (microseconds):")
+    logging.info("  total_cycle %s", _fmt_stats(total_ns))
+    logging.info("  get_data    %s", _fmt_stats(get_data_ns[1:]))
+    logging.info("  between     %s", _fmt_stats(between_ns))
+
+    gap_by_frame = {fi: delta for fi, _, _, delta in cnt0_gap_events}
+
+    k = int(min(topk, total_ns.size))
+    if k <= 0:
+        return
+    worst_idx = np.argpartition(total_ns, -k)[-k:]
+    worst_idx = worst_idx[np.argsort(total_ns[worst_idx])[::-1]]
+
+    logging.info(
+        "Top %d slowest iterations (1-based frame_index, microseconds, cnt0 delta):",
+        k,
+    )
+    for j in worst_idx:
+        frame_index_1based = int(j) + 2  # j=0 corresponds to iteration 2
+        total_us = float(total_ns[j]) / 1e3
+        gd_us = float(get_data_ns[j + 1]) / 1e3
+        bet_us = float(between_ns[j]) / 1e3
+        delta = gap_by_frame.get(frame_index_1based - 1, 1)
+        logging.info(
+            "  frame %d/%d: total=%.1f get_data=%.1f between=%.1f cnt0_delta=%d",
+            frame_index_1based,
+            target_frames,
+            total_us,
+            gd_us,
+            bet_us,
+            delta,
+        )
+
+
 def collect_shmim_batch(
     stream_name: str,
     target_frames: int,
@@ -522,6 +599,8 @@ def collect_shmim_batch(
     timeout_seconds: float = 5.0,
     check_before_wait: bool = False,
     cnt0_diagnostics: bool = False,
+    profile_path: str | None = None,
+    iter_timing_topk: int = 0,
 ) -> FrameBatch:
     """Collect a contiguous batch from a live shmim stream into a float32 cube.
 
@@ -531,11 +610,21 @@ def collect_shmim_batch(
       stderr I/O cannot stall acquisition mid-batch.
     - The cyclic GC is disabled for the duration of the loop to eliminate
       multi-millisecond collection pauses at 2 kHz.
+    - The preallocated batch buffer is pre-touched (``fill(0.0)``) before the
+      hot loop so every page is faulted in up front; otherwise first writes
+      during the loop hit the kernel for anonymous-page backing and can stall
+      for tens of milliseconds (especially when transparent huge pages are
+      compacted), which presents as sporadic large ``cnt0`` gaps.
     - Frame shape/ndim is validated once on the first frame; steady-state
       iterations trust the preallocated batch shape and let NumPy raise on
       mismatch instead of re-checking per frame.
     - When neither ``wait_new_frame`` nor ``cnt0_diagnostics`` is set, the
       per-frame ``cnt0`` read is skipped entirely.
+    - ``profile_path`` enables narrow-scope ``cProfile`` around only the hot
+      loop (not the surrounding pipeline stages).
+    - ``iter_timing_topk`` enables low-overhead per-iteration timing capture
+      (two ``perf_counter_ns`` calls per frame, ~80 ns total) and logs the
+      slowest iterations with matching cnt0 gap info.
     """
     image = load_shmim_image(stream_name)
     batch_shape = (target_frames, frame_height, frame_width)
@@ -551,8 +640,29 @@ def collect_shmim_batch(
     )
 
     batch = np.empty(batch_shape, dtype=np.float32)
+    # Pre-touch every page of the 2.3 GiB-class buffer so the hot loop does
+    # not trigger first-write page faults. On Linux `np.empty` returns an
+    # mmap-backed region whose pages are all COW-mapped to the kernel's zero
+    # page; first writes fault in real pages and can stall for tens of ms if
+    # transparent huge pages are being compacted. One sequential fill up
+    # front amortizes those faults predictably.
+    t_pretouch = perf_counter()
+    batch.fill(0.0)
+    logging.info(
+        "Pre-faulted batch buffer (%.2f GiB) in %.1f ms.",
+        batch.nbytes / (1024**3),
+        (perf_counter() - t_pretouch) * 1e3,
+    )
+
     wait = wait_new_frame
     track_cnt0 = wait or cnt0_diagnostics
+
+    collect_timing = iter_timing_topk > 0
+    iter_pre_get_ns: np.ndarray | None = None
+    iter_post_get_ns: np.ndarray | None = None
+    if collect_timing:
+        iter_pre_get_ns = np.zeros(target_frames, dtype=np.int64)
+        iter_post_get_ns = np.zeros(target_frames, dtype=np.int64)
 
     prev_cnt0: int | None = None
     cnt0_first: int | None = None
@@ -607,6 +717,13 @@ def collect_shmim_batch(
     # Rebind hot attributes to locals (faster than attribute lookup per iter).
     get_data = image.get_data
     get_cnt0 = _shmim_cnt0
+    perf_ns = perf_counter_ns
+
+    profiler = None
+    if profile_path:
+        import cProfile
+
+        profiler = cProfile.Profile()
 
     # Quiesce the cyclic GC for the duration of the capture. At 2 kHz even a
     # minor collection (a few ms) produces the exact pathology the caller is
@@ -615,36 +732,80 @@ def collect_shmim_batch(
     gc_was_enabled = gc.isenabled()
     if gc_was_enabled:
         gc.disable()
+    if profiler is not None:
+        profiler.enable()
     try:
-        for frame_index in range(1, target_frames):
-            frame = get_data(
-                wait=wait,
-                timeout_sec=timeout_seconds,
-                check_before_wait=check_before_wait,
-            )
-            if track_cnt0 and not cnt0_unavailable:
-                cnt0_now = get_cnt0(image)
-                if cnt0_now is None:
-                    cnt0_unavailable = True
-                else:
-                    delta = cnt0_now - prev_cnt0  # type: ignore[operator]
-                    if delta > 1:
-                        skipped_writer_frames += delta - 1
-                        if delta > max_cnt0_gap:
-                            max_cnt0_gap = delta
-                        cnt0_gap_events.append(
-                            (frame_index, prev_cnt0, cnt0_now, delta)  # type: ignore[arg-type]
-                        )
-                    elif delta == 0 and not wait:
-                        duplicate_cnt0_reads += 1
-                    prev_cnt0 = cnt0_now
-                    cnt0_last = cnt0_now
+        if collect_timing:
+            for frame_index in range(1, target_frames):
+                iter_pre_get_ns[frame_index] = perf_ns()  # type: ignore[index]
+                frame = get_data(
+                    wait=wait,
+                    timeout_sec=timeout_seconds,
+                    check_before_wait=check_before_wait,
+                )
+                iter_post_get_ns[frame_index] = perf_ns()  # type: ignore[index]
+                if track_cnt0 and not cnt0_unavailable:
+                    cnt0_now = get_cnt0(image)
+                    if cnt0_now is None:
+                        cnt0_unavailable = True
+                    else:
+                        delta = cnt0_now - prev_cnt0  # type: ignore[operator]
+                        if delta > 1:
+                            skipped_writer_frames += delta - 1
+                            if delta > max_cnt0_gap:
+                                max_cnt0_gap = delta
+                            cnt0_gap_events.append(
+                                (frame_index, prev_cnt0, cnt0_now, delta)  # type: ignore[arg-type]
+                            )
+                        elif delta == 0 and not wait:
+                            duplicate_cnt0_reads += 1
+                        prev_cnt0 = cnt0_now
+                        cnt0_last = cnt0_now
 
-            batch[frame_index] = frame
+                batch[frame_index] = frame
+        else:
+            for frame_index in range(1, target_frames):
+                frame = get_data(
+                    wait=wait,
+                    timeout_sec=timeout_seconds,
+                    check_before_wait=check_before_wait,
+                )
+                if track_cnt0 and not cnt0_unavailable:
+                    cnt0_now = get_cnt0(image)
+                    if cnt0_now is None:
+                        cnt0_unavailable = True
+                    else:
+                        delta = cnt0_now - prev_cnt0  # type: ignore[operator]
+                        if delta > 1:
+                            skipped_writer_frames += delta - 1
+                            if delta > max_cnt0_gap:
+                                max_cnt0_gap = delta
+                            cnt0_gap_events.append(
+                                (frame_index, prev_cnt0, cnt0_now, delta)  # type: ignore[arg-type]
+                            )
+                        elif delta == 0 and not wait:
+                            duplicate_cnt0_reads += 1
+                        prev_cnt0 = cnt0_now
+                        cnt0_last = cnt0_now
+
+                batch[frame_index] = frame
     finally:
+        if profiler is not None:
+            profiler.disable()
         if gc_was_enabled:
             gc.enable()
             gc.collect()
+
+    if profiler is not None and profile_path is not None:
+        import pstats
+
+        profiler.dump_stats(profile_path)
+        logging.info(
+            "cProfile dump (collect_shmim_batch hot loop only) written to %s; "
+            "top 25 by cumulative time below.",
+            profile_path,
+        )
+        pstats.Stats(profiler).sort_stats("cumulative").print_stats(25)
 
     validate_frame_batch(batch, (frame_height, frame_width))
     logging.info("Collected live batch with shape=%s dtype=%s", batch.shape, batch.dtype)
@@ -703,6 +864,15 @@ def collect_shmim_batch(
                     duplicate_cnt0_reads,
                 )
 
+    if collect_timing and iter_pre_get_ns is not None and iter_post_get_ns is not None:
+        _report_iter_timing(
+            iter_pre_get_ns,
+            iter_post_get_ns,
+            cnt0_gap_events,
+            target_frames=target_frames,
+            topk=iter_timing_topk,
+        )
+
     return FrameBatch(frames=batch, first_timestamp=first_timestamp)
 
 
@@ -719,6 +889,8 @@ class ShmimFrameSource(FrameSource):
         timeout_seconds: float = 5.0,
         check_before_wait: bool = False,
         cnt0_diagnostics: bool = False,
+        profile_path: str | None = None,
+        iter_timing_topk: int = 0,
     ):
         self.stream_name = stream_name
         self.frame_height = frame_height
@@ -727,6 +899,8 @@ class ShmimFrameSource(FrameSource):
         self.timeout_seconds = timeout_seconds
         self.check_before_wait = check_before_wait
         self.cnt0_diagnostics = cnt0_diagnostics
+        self.profile_path = profile_path
+        self.iter_timing_topk = int(iter_timing_topk)
 
     def collect_frames(self, target_frames: int) -> FrameBatch:
         return collect_shmim_batch(
@@ -738,6 +912,8 @@ class ShmimFrameSource(FrameSource):
             timeout_seconds=self.timeout_seconds,
             check_before_wait=self.check_before_wait,
             cnt0_diagnostics=self.cnt0_diagnostics,
+            profile_path=self.profile_path,
+            iter_timing_topk=self.iter_timing_topk,
         )
 
 
@@ -874,10 +1050,33 @@ def parse_args():
         default=None,
         metavar="PATH",
         help=(
-            "If set, wrap run_single_batch() in cProfile and write the stats to "
-            "PATH (loadable by `python -m pstats PATH` or `snakeviz PATH`). "
-            "For lower-overhead sampling profiling of the 2 kHz hot loop prefer "
-            "`py-spy record --rate 1000 -o profile.svg -- python ... realtime.py ...`."
+            "If set, enable cProfile and write stats to PATH "
+            "(loadable by `python -m pstats PATH` or `snakeviz PATH`). "
+            "Scope is controlled by --profile-scope."
+        ),
+    )
+    parser.add_argument(
+        "--profile-scope",
+        choices=("collect", "full"),
+        default="collect",
+        help=(
+            "With --profile PATH: `collect` (default) profiles only the "
+            "collect_shmim_batch hot loop so results are not dominated by "
+            "reduce/xcorr/distill/measure; `full` profiles the entire "
+            "run_single_batch pipeline."
+        ),
+    )
+    parser.add_argument(
+        "--iter-timing-topk",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "If > 0, capture perf_counter_ns timestamps around every shmim "
+            "get_data call (~80 ns overhead per iteration) and, after the "
+            "batch, log per-iteration total/get_data/between stats plus the "
+            "N slowest iterations with their cnt0 gap. Use this first when "
+            "diagnosing sporadic large cnt0 gaps — it pinpoints the frames."
         ),
     )
     args = parser.parse_args()
@@ -912,6 +1111,13 @@ def build_frame_source(args) -> FrameSource:
             raise ValueError("--offline-source is required for --source-type offline-fits")
         return OfflineFitsFrameSource(args.offline_source)
     if args.source_type == "shmim":
+        # Narrow-scope profiling is applied inside collect_shmim_batch; the full
+        # pipeline scope is handled in main() by wrapping run_single_batch.
+        collect_profile = (
+            args.profile
+            if (args.profile and getattr(args, "profile_scope", "collect") == "collect")
+            else None
+        )
         return ShmimFrameSource(
             stream_name=args.stream_name,
             frame_height=args.frame_height,
@@ -920,6 +1126,8 @@ def build_frame_source(args) -> FrameSource:
             timeout_seconds=args.timeout_seconds,
             check_before_wait=args.check_before_wait,
             cnt0_diagnostics=args.cnt0_diagnostics,
+            profile_path=collect_profile,
+            iter_timing_topk=int(getattr(args, "iter_timing_topk", 0) or 0),
         )
     if args.reader_callable is None:
         raise ValueError(
@@ -1412,9 +1620,11 @@ def main():
             "Inferred --source-type shmim (RTC-style flags without --offline-source). "
             "Pass --source-type offline-fits explicitly to replay FITS."
         )
-    if args.profile:
+    if args.profile and args.profile_scope == "full":
         _run_with_cprofile(lambda: run_single_batch(args), args.profile)
     else:
+        # Narrow-scope profiling (collect-only) is handled inside
+        # ShmimFrameSource / collect_shmim_batch when --profile PATH is set.
         run_single_batch(args)
 
 
