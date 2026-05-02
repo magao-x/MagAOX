@@ -50,6 +50,11 @@ class modalGainOptHarness : public modalGainOpt
         return m_extrapOL;
     }
 
+    int extrapNoiseEstimateDomain() const
+    {
+        return m_extrapNoiseEstimateDomain;
+    }
+
     const processPsdProcessorT::processModelConfig &extrapConfig() const
     {
         return m_extrapConfig;
@@ -292,6 +297,20 @@ TEST_CASE( "modalGainOpt placeholder harness instantiates the app", "[modalGainO
         REQUIRE( olProcessMethodFromName( "power-law-only" ) == c_olProcessPowerLawOnly );
         REQUIRE( olProcessMethodFromName( "moffat_peaks" ) == c_olProcessMoffatPeaks );
         REQUIRE( olProcessMethodFromName( "moffat-peaks" ) == c_olProcessMoffatPeaks );
+
+        REQUIRE( extrapNoiseEstimateDomainName( c_extrapNoiseEstimateOpenLoop ) == "open-loop" );
+        REQUIRE( extrapNoiseEstimateDomainName( c_extrapNoiseEstimateClosedLoopPreXfer ) == "closed-loop-pre-xfer" );
+
+        REQUIRE( extrapNoiseEstimateDomainFromElement( "open_loop" ) == c_extrapNoiseEstimateOpenLoop );
+        REQUIRE( extrapNoiseEstimateDomainFromElement( "closed_loop_pre_xfer" ) ==
+                 c_extrapNoiseEstimateClosedLoopPreXfer );
+
+        REQUIRE( extrapNoiseEstimateDomainFromName( "open_loop" ) == c_extrapNoiseEstimateOpenLoop );
+        REQUIRE( extrapNoiseEstimateDomainFromName( "open-loop" ) == c_extrapNoiseEstimateOpenLoop );
+        REQUIRE( extrapNoiseEstimateDomainFromName( "closed_loop_pre_xfer" ) ==
+                 c_extrapNoiseEstimateClosedLoopPreXfer );
+        REQUIRE( extrapNoiseEstimateDomainFromName( "closed-loop-pre-xfer" ) ==
+                 c_extrapNoiseEstimateClosedLoopPreXfer );
     }
 }
 
@@ -310,7 +329,8 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation" },
+                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+                                "extrapolation" },
                               {
                                   "number",
                                   "name",
@@ -318,6 +338,7 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                   "gainGain",
                                   "psdDev",
                                   "method",
+                                  "noiseEstimateDomain",
                                   "powerLawIndex",
                                   "powerLawNormFreq",
                                   "powerLawMatchFreq",
@@ -338,9 +359,32 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                   "dropoutGapFactor",
                                   "dropoutMaxBins",
                               },
-                              { "2",   "aol2", "false", "0.35",  "psdDevice", "moffat_peaks", "1.5", "15", "12.5",
-                                "7.5", "true", "250",   "false", "100",       "900",          "80",  "6",  "55",
-                                "4",   "2.5",  "0.03",  "3",     "8",         "0.12",         "6" } );
+                              { "2",
+                                "aol2",
+                                "false",
+                                "0.35",
+                                "psdDevice",
+                                "moffat_peaks",
+                                "closed_loop_pre_xfer",
+                                "1.5",
+                                "15",
+                                "12.5",
+                                "7.5",
+                                "true",
+                                "250",
+                                "false",
+                                "100",
+                                "900",
+                                "80",
+                                "6",
+                                "55",
+                                "4",
+                                "2.5",
+                                "0.03",
+                                "3",
+                                "8",
+                                "0.12",
+                                "6" } );
     app.readConfigFile( "/tmp/modalGainOpt_test.conf" );
 
     app.loadConfig();
@@ -355,6 +399,8 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
     REQUIRE( app.autoUpdate() == false );
     REQUIRE( app.gainGain() == Approx( 0.35F ) );
     REQUIRE( app.extrapMethod() == c_olProcessMoffatPeaks );
+    REQUIRE( app.extrapNoiseEstimateDomain() == c_extrapNoiseEstimateClosedLoopPreXfer );
+    REQUIRE( app.extrapConfig().m_noiseEstimateDomain == "closed-loop-pre-xfer" );
     REQUIRE( app.extrapConfig().m_powerLawIndex == Approx( 1.5F ) );
     REQUIRE( app.extrapConfig().m_powerLawNormFreq == Approx( 15.0F ) );
     REQUIRE( app.extrapConfig().m_powerLawMatchFreq == Approx( 12.5F ) );
@@ -399,6 +445,28 @@ TEST_CASE( "modalPsdProcessor falls back when the requested power-law fit has to
     REQUIRE( result.m_powerLawIndex == Approx( cfg.m_powerLawIndex ) );
     REQUIRE( result.m_powerLawIndexFitSucceeded == false );
     REQUIRE( result.m_powerLawFitBinsUsed == 0 );
+}
+
+TEST_CASE( "modalPsdProcessor can estimate noise in closed-loop space before OL correction", "[modalGainOpt]" )
+{
+    processPsdProcessorT::processModelConfig cfg;
+    cfg.m_method = "legacy";
+    cfg.m_noiseEstimateDomain = "closed_loop_pre_xfer";
+
+    std::vector<float> measuredPsd{ 0.0F, 5.0F, 5.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F };
+    std::vector<float> freq{ 0.0F, 1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F };
+    std::vector<float> correctionPsd( measuredPsd.size(), 0.5F );
+    correctionPsd[0] = 1.0F;
+
+    processPsdProcessorT::processResults result;
+    mx::error_t errc =
+        processPsdProcessorT::analyzePsd( result, measuredPsd, freq, 10, cfg, 0.0F, 25.0F, &correctionPsd );
+
+    REQUIRE( !errc );
+    REQUIRE( result.m_noiseEstimateDomain == "closed-loop-pre-xfer" );
+    REQUIRE( result.m_noiseFloor == Approx( 1.0F ) );
+    REQUIRE( result.m_noisePsd[1] == Approx( 1.0F ) );
+    REQUIRE( result.m_processPsd[1] == Approx( 8.0F ) );
 }
 
 /// Verify `modalGainOpt` publishes LP and max-gain arrays into separate buffers.

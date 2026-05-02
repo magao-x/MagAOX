@@ -8,6 +8,7 @@
 #define modalPsdProcessor_hpp
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -38,6 +39,9 @@ class modalPsdProcessor
 
     /// The default disabled explicit power-law match frequency.
     static constexpr realT c_defaultPowerLawMatchFreq = static_cast<realT>( 0 );
+
+    /// The default domain used for noise-floor estimation.
+    static constexpr const char *c_defaultNoiseEstimateDomain = "open-loop";
 
     /// The default half-width of the local match-frequency fallback window.
     static constexpr realT c_defaultPowerLawMatchFallbackWindowHz = static_cast<realT>( 5 );
@@ -104,6 +108,9 @@ class modalPsdProcessor
 
         /// The frequency where the power law is forced to match the raw disturbance PSD.
         realT m_powerLawMatchFreq{ c_defaultPowerLawMatchFreq };
+
+        /// The domain used to estimate the flat noise floor.
+        std::string m_noiseEstimateDomain{ c_defaultNoiseEstimateDomain };
 
         /// The half-width of the local fallback window used when the match point is in a trough.
         realT m_powerLawMatchFallbackWindowHz{ c_defaultPowerLawMatchFallbackWindowHz };
@@ -197,6 +204,9 @@ class modalPsdProcessor
         /// The frequency where the power law is forced to match the disturbance PSD.
         realT m_powerLawMatchFreq{ 0 };
 
+        /// The domain used to estimate the flat noise floor.
+        std::string m_noiseEstimateDomain{ c_defaultNoiseEstimateDomain };
+
         /// The half-width of the local match-frequency fallback window.
         realT m_powerLawMatchFallbackWindowHz{ c_defaultPowerLawMatchFallbackWindowHz };
 
@@ -278,13 +288,14 @@ class modalPsdProcessor
 
     /// Build the noise PSD, disturbance PSD, and LP continuum PSD for one mode.
     static mx::error_t
-    analyzePsd( processResults &result,                                /**< [out] the populated process-model results */
-                const std::vector<realT> &measuredPsd,                 /**< [in] the measured one-sided PSD */
-                const std::vector<realT> &freq,                        /**< [in] the one-sided frequency grid */
-                size_t modeIndex,                                      /**< [in] the zero-based mode index */
-                const processModelConfig &config,                      /**< [in] the disturbance-PSD configuration */
-                realT lpContinuumFreq = static_cast<realT>( 0 ),       /**< [in] the LP continuum cutoff */
-                realT lpContinuumWidthHz = c_defaultLpContinuumWidthHz /**< [in] LP smoothing width */
+    analyzePsd( processResults &result,                          /**< [out] the populated process-model results */
+                const std::vector<realT> &measuredPsd,           /**< [in] the measured one-sided PSD */
+                const std::vector<realT> &freq,                  /**< [in] the one-sided frequency grid */
+                size_t modeIndex,                                /**< [in] the zero-based mode index */
+                const processModelConfig &config,                /**< [in] the disturbance-PSD configuration */
+                realT lpContinuumFreq = static_cast<realT>( 0 ), /**< [in] the LP continuum cutoff */
+                realT lpContinuumWidthHz = c_defaultLpContinuumWidthHz, /**< [in] LP smoothing width */
+                const std::vector<realT> *correctionPsd = nullptr       /**< [in] optional CL-to-OL correction */
     );
 
     /// Estimate the flat noise PSD using the modalGainOpt percentile rule.
@@ -305,6 +316,9 @@ class modalPsdProcessor
   protected:
     /// Return the index of the first strictly-positive frequency bin.
     static size_t firstPositiveFreqIndex( const std::vector<realT> &freq /**< [in] the one-sided frequency grid */ );
+
+    /// Normalize a noise-estimation-domain name to lowercase hyphenated form.
+    static std::string normalizeNoiseEstimateDomain( std::string domain /**< [in] the requested domain name */ );
 
     /// Resolve the power-law normalization frequency, defaulting to the first positive bin.
     static realT resolvePowerLawNormFreq( const std::vector<realT> &freq, /**< [in] the one-sided frequency grid */
@@ -525,7 +539,8 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                   size_t modeIndex,
                                                   const processModelConfig &config,
                                                   realT lpContinuumFreq,
-                                                  realT lpContinuumWidthHz )
+                                                  realT lpContinuumWidthHz,
+                                                  const std::vector<realT> *correctionPsd )
 {
     if( measuredPsd.size() != freq.size() )
     {
@@ -542,6 +557,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
     result.m_powerLawIndex = config.m_powerLawIndex;
     result.m_powerLawNormFreq = resolvePowerLawNormFreq( freq, config.m_powerLawNormFreq );
     result.m_powerLawMatchFreq = config.m_powerLawMatchFreq;
+    result.m_noiseEstimateDomain = normalizeNoiseEstimateDomain( config.m_noiseEstimateDomain );
     result.m_powerLawMatchFallbackWindowHz = config.m_powerLawMatchFallbackWindowHz;
     result.m_fitPowerLawIndex = config.m_fitPowerLawIndex;
     result.m_powerLawOnlyAboveFreq = config.m_powerLawOnlyAboveFreq;
@@ -605,6 +621,41 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
         return errc;
     }
 
+    if( result.m_noiseEstimateDomain != "open-loop" && result.m_noiseEstimateDomain != "closed-loop-pre-xfer" )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                 "Unknown noise-estimation domain: " + result.m_noiseEstimateDomain );
+    }
+
+    std::vector<realT> processMeasuredPsd = measuredPsd;
+    std::vector<realT> processNoisePsd = result.m_noisePsd;
+    if( result.m_noiseEstimateDomain == "closed-loop-pre-xfer" )
+    {
+        if( correctionPsd == nullptr )
+        {
+            return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                     "Closed-loop noise estimation requires a correction PSD" );
+        }
+
+        if( correctionPsd->size() != measuredPsd.size() )
+        {
+            return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr,
+                                                     "Correction PSD must match the measured PSD size" );
+        }
+
+        const realT tiny = std::numeric_limits<realT>::min();
+        for( size_t n = 0; n < measuredPsd.size(); ++n )
+        {
+            const realT useCorrection = std::max( ( *correctionPsd )[n], tiny );
+            const realT rawClosedLoop = std::max( measuredPsd[n] - result.m_noisePsd[n], tiny );
+            const realT openLoopNoise = std::max( result.m_noisePsd[n] / useCorrection, tiny );
+            const realT openLoopProcess = rawClosedLoop / useCorrection;
+
+            processNoisePsd[n] = openLoopNoise;
+            processMeasuredPsd[n] = openLoopProcess + openLoopNoise;
+        }
+    }
+
     result.m_peaks.clear();
     std::vector<unsigned char> processRepairMask;
 
@@ -615,8 +666,8 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
         result.m_powerLawAnchorFreq = 0;
         errc = estimateProcessPsd( result.m_processPsd,
                                    result.m_extrapolation,
-                                   measuredPsd,
-                                   result.m_noisePsd,
+                                   processMeasuredPsd,
+                                   processNoisePsd,
                                    freq,
                                    config.m_powerLawNormFreq,
                                    config.m_powerLawMatchFreq,
@@ -633,8 +684,8 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
         errc = estimateProcessPsdPowerLawOnly( result.m_processPsd,
                                                result.m_extrapolation,
                                                result.m_powerLawAnchorIndex,
-                                               measuredPsd,
-                                               result.m_noisePsd,
+                                               processMeasuredPsd,
+                                               processNoisePsd,
                                                freq,
                                                config.m_powerLawIndex,
                                                config.m_powerLawNormFreq,
@@ -666,8 +717,8 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                               result.m_extrapolation,
                                               result.m_peaks,
                                               processRepairMask,
-                                              measuredPsd,
-                                              result.m_noisePsd,
+                                              processMeasuredPsd,
+                                              processNoisePsd,
                                               freq,
                                               config );
         if( !!errc )
@@ -675,11 +726,11 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
             return errc;
         }
 
-        std::vector<realT> rawProcessPsd( measuredPsd.size() );
+        std::vector<realT> rawProcessPsd( processMeasuredPsd.size() );
         const realT tiny = std::numeric_limits<realT>::min();
-        for( size_t n = 0; n < measuredPsd.size(); ++n )
+        for( size_t n = 0; n < processMeasuredPsd.size(); ++n )
         {
-            rawProcessPsd[n] = std::max( measuredPsd[n] - result.m_noisePsd[n], tiny );
+            rawProcessPsd[n] = std::max( processMeasuredPsd[n] - processNoisePsd[n], tiny );
         }
 
         std::vector<realT> continuumPsd;
@@ -689,7 +740,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                           result.m_extrapolation,
                                           anchorIndex,
                                           rawProcessPsd,
-                                          result.m_noisePsd,
+                                          processNoisePsd,
                                           freq,
                                           config.m_powerLawIndex,
                                           config.m_powerLawNormFreq,
@@ -734,10 +785,10 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
         if( config.m_powerLawMatchFreq > static_cast<realT>( 0 ) )
         {
             const realT tiny = std::numeric_limits<realT>::min();
-            std::vector<realT> rawProcessPsd( measuredPsd.size() );
-            for( size_t n = 0; n < measuredPsd.size(); ++n )
+            std::vector<realT> rawProcessPsd( processMeasuredPsd.size() );
+            for( size_t n = 0; n < processMeasuredPsd.size(); ++n )
             {
-                rawProcessPsd[n] = std::max( measuredPsd[n] - result.m_noisePsd[n], tiny );
+                rawProcessPsd[n] = std::max( processMeasuredPsd[n] - processNoisePsd[n], tiny );
             }
 
             std::vector<realT> continuumPsd;
@@ -746,7 +797,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                               result.m_extrapolation,
                                               rematchAnchorIndex,
                                               rawProcessPsd,
-                                              result.m_noisePsd,
+                                              processNoisePsd,
                                               freq,
                                               result.m_powerLawIndex,
                                               config.m_powerLawNormFreq,
@@ -789,7 +840,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                     result.m_peaks,
                                                     processRepairMask,
                                                     rawProcessPsd,
-                                                    result.m_noisePsd,
+                                                    processNoisePsd,
                                                     continuumPsd,
                                                     freq,
                                                     result.m_powerLawAnchorIndex,
@@ -863,6 +914,25 @@ mx::error_t modalPsdProcessor<realT>::estimateNoisePsd( std::vector<realT> &nois
     noisePsd.assign( measuredPsd.size(), noiseFloor );
 
     return mx::error_t::noerror;
+}
+
+template <typename realT>
+std::string modalPsdProcessor<realT>::normalizeNoiseEstimateDomain( std::string domain )
+{
+    std::transform( domain.begin(),
+                    domain.end(),
+                    domain.begin(),
+                    []( unsigned char c )
+                    {
+                        if( c == '_' )
+                        {
+                            return static_cast<char>( '-' );
+                        }
+
+                        return static_cast<char>( std::tolower( c ) );
+                    } );
+
+    return domain;
 }
 
 template <typename realT>
