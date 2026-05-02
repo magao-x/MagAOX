@@ -46,6 +46,9 @@ class modalPsdProcessor
     /// The default end of the PSD used for noise-floor estimation.
     static constexpr const char *c_defaultNoiseEstimateRange = "high-freq";
 
+    /// The default disabled maximum frequency for low-frequency noise estimation.
+    static constexpr realT c_defaultNoiseEstimateLowFreqMaxHz = static_cast<realT>( 0 );
+
     /// The default closed-loop to open-loop PSD reconstruction method.
     static constexpr const char *c_defaultClosedLoopOlEstimateMethod = "etf-only";
 
@@ -120,6 +123,9 @@ class modalPsdProcessor
 
         /// Which end of the PSD is used to estimate the flat noise floor.
         std::string m_noiseEstimateRange{ c_defaultNoiseEstimateRange };
+
+        /// The maximum frequency in Hz used by the low-frequency noise estimate, or 0 to disable.
+        realT m_noiseEstimateLowFreqMaxHz{ c_defaultNoiseEstimateLowFreqMaxHz };
 
         /// How to reconstruct the OL PSD from a CL PSD when estimating noise in CL space.
         std::string m_closedLoopOlEstimateMethod{ c_defaultClosedLoopOlEstimateMethod };
@@ -222,6 +228,9 @@ class modalPsdProcessor
         /// Which end of the PSD was used to estimate the flat noise floor.
         std::string m_noiseEstimateRange{ c_defaultNoiseEstimateRange };
 
+        /// The maximum frequency in Hz used by the low-frequency noise estimate, or 0 if disabled.
+        realT m_noiseEstimateLowFreqMaxHz{ c_defaultNoiseEstimateLowFreqMaxHz };
+
         /// Which CL-to-OL reconstruction method was used.
         std::string m_closedLoopOlEstimateMethod{ c_defaultClosedLoopOlEstimateMethod };
 
@@ -322,8 +331,11 @@ class modalPsdProcessor
     estimateNoisePsd( std::vector<realT> &noisePsd,          /**< [out] the flat noise PSD estimate */
                       realT &noiseFloor,                     /**< [out] the fitted noise floor */
                       const std::vector<realT> &measuredPsd, /**< [in] the measured one-sided PSD */
+                      const std::vector<realT> &freq,        /**< [in] the one-sided frequency grid */
                       size_t modeIndex,                      /**< [in] the zero-based mode index */
-                      std::string noiseEstimateRange = c_defaultNoiseEstimateRange /**< [in] which PSD end to use */
+                      std::string noiseEstimateRange = c_defaultNoiseEstimateRange, /**< [in] which PSD end to use */
+                      realT noiseEstimateLowFreqMaxHz =
+                          c_defaultNoiseEstimateLowFreqMaxHz /**< [in] optional low-frequency upper limit */
     );
 
     /// Replace all LP content above a cutoff with a smoothed continuum.
@@ -588,6 +600,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
     result.m_powerLawMatchFreq = config.m_powerLawMatchFreq;
     result.m_noiseEstimateDomain = normalizeNoiseEstimateDomain( config.m_noiseEstimateDomain );
     result.m_noiseEstimateRange = normalizeNoiseEstimateRange( config.m_noiseEstimateRange );
+    result.m_noiseEstimateLowFreqMaxHz = config.m_noiseEstimateLowFreqMaxHz;
     result.m_closedLoopOlEstimateMethod = normalizeClosedLoopOlEstimateMethod( config.m_closedLoopOlEstimateMethod );
     result.m_powerLawMatchFallbackWindowHz = config.m_powerLawMatchFallbackWindowHz;
     result.m_fitPowerLawIndex = config.m_fitPowerLawIndex;
@@ -658,6 +671,12 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                  "Unknown noise-estimation range: " + result.m_noiseEstimateRange );
     }
 
+    if( result.m_noiseEstimateLowFreqMaxHz < static_cast<realT>( 0 ) )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                 "Low-frequency noise-estimate maximum must be non-negative" );
+    }
+
     if( result.m_closedLoopOlEstimateMethod != "etf-only" && result.m_closedLoopOlEstimateMethod != "ntf-aware" )
     {
         return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
@@ -689,8 +708,10 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
     mx::error_t errc = estimateNoisePsd( result.m_noisePsd,
                                          result.m_noiseFloor,
                                          noiseEstimatePsd,
+                                         freq,
                                          modeIndex,
-                                         result.m_noiseEstimateRange );
+                                         result.m_noiseEstimateRange,
+                                         result.m_noiseEstimateLowFreqMaxHz );
     if( !!errc )
     {
         return errc;
@@ -963,12 +984,15 @@ template <typename realT>
 mx::error_t modalPsdProcessor<realT>::estimateNoisePsd( std::vector<realT> &noisePsd,
                                                         realT &noiseFloor,
                                                         const std::vector<realT> &measuredPsd,
+                                                        const std::vector<realT> &freq,
                                                         size_t modeIndex,
-                                                        std::string noiseEstimateRange )
+                                                        std::string noiseEstimateRange,
+                                                        realT noiseEstimateLowFreqMaxHz )
 {
-    if( measuredPsd.size() < 2 )
+    if( measuredPsd.size() < 2 || measuredPsd.size() != freq.size() )
     {
-        return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr, "PSD must have at least two bins" );
+        return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr,
+                                                 "PSD and frequency grid must match and have at least two bins" );
     }
 
     noiseEstimateRange = normalizeNoiseEstimateRange( noiseEstimateRange );
@@ -978,6 +1002,16 @@ mx::error_t modalPsdProcessor<realT>::estimateNoisePsd( std::vector<realT> &nois
     {
         f0 = measuredPsd.size() > 1 ? 1 : 0;
         f1 = std::max( f0 + static_cast<size_t>( 1 ), measuredPsd.size() / 2 );
+        if( noiseEstimateLowFreqMaxHz > static_cast<realT>( 0 ) )
+        {
+            size_t cappedF1 = f0;
+            while( cappedF1 < measuredPsd.size() && freq[cappedF1] <= noiseEstimateLowFreqMaxHz )
+            {
+                ++cappedF1;
+            }
+
+            f1 = std::max( f0 + static_cast<size_t>( 1 ), std::min( f1, cappedF1 ) );
+        }
     }
     else if( noiseEstimateRange != "high-freq" )
     {

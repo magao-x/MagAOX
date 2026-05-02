@@ -466,7 +466,7 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-                                "extrapolation", "extrapolation", "extrapolation" },
+                                "extrapolation", "extrapolation", "extrapolation", "extrapolation" },
                               {
                                   "number",
                                   "name",
@@ -476,6 +476,7 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                   "method",
                                   "noiseEstimateDomain",
                                   "noiseEstimateRange",
+                                  "noiseEstimateLowFreqMaxHz",
                                   "closedLoopOlEstimateMethod",
                                   "powerLawIndex",
                                   "powerLawNormFreq",
@@ -505,6 +506,7 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                 "moffat_peaks",
                                 "closed_loop_pre_xfer",
                                 "low_freq",
+                                "123",
                                 "ntf_aware",
                                 "1.5",
                                 "15",
@@ -544,6 +546,7 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
     REQUIRE( app.extrapClosedLoopOlEstimateMethod() == c_extrapClosedLoopOlEstimateNtfAware );
     REQUIRE( app.extrapConfig().m_noiseEstimateDomain == "closed-loop-pre-xfer" );
     REQUIRE( app.extrapConfig().m_noiseEstimateRange == "low-freq" );
+    REQUIRE( app.extrapConfig().m_noiseEstimateLowFreqMaxHz == Approx( 123.0F ) );
     REQUIRE( app.extrapConfig().m_closedLoopOlEstimateMethod == "ntf-aware" );
     REQUIRE( app.extrapConfig().m_powerLawIndex == Approx( 1.5F ) );
     REQUIRE( app.extrapConfig().m_powerLawNormFreq == Approx( 15.0F ) );
@@ -698,14 +701,31 @@ TEST_CASE( "modalPsdProcessor can estimate noise in closed-loop space before OL 
 TEST_CASE( "modalPsdProcessor can estimate noise from the low-frequency end", "[modalGainOpt]" )
 {
     std::vector<float> measuredPsd{ 0.0F, 2.0F, 2.0F, 20.0F, 20.0F, 20.0F, 20.0F, 20.0F };
+    std::vector<float> freq{ 0.0F, 1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F };
     std::vector<float> noisePsd;
     float noiseFloor = 0.0F;
 
-    mx::error_t errc = processPsdProcessorT::estimateNoisePsd( noisePsd, noiseFloor, measuredPsd, 10, "low_freq" );
+    mx::error_t errc =
+        processPsdProcessorT::estimateNoisePsd( noisePsd, noiseFloor, measuredPsd, freq, 10, "low_freq" );
 
     REQUIRE( !errc );
     REQUIRE( noiseFloor == Approx( 2.0F ) );
     REQUIRE( noisePsd[1] == Approx( 2.0F ) );
+}
+
+TEST_CASE( "modalPsdProcessor can limit low-frequency noise estimation to a max frequency", "[modalGainOpt]" )
+{
+    std::vector<float> measuredPsd{ 0.0F, 20.0F, 20.0F, 2.0F, 2.0F, 20.0F, 20.0F, 20.0F, 20.0F, 20.0F };
+    std::vector<float> freq{ 0.0F, 1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F, 9.0F };
+    std::vector<float> noisePsd;
+    float noiseFloor = 0.0F;
+
+    mx::error_t errc =
+        processPsdProcessorT::estimateNoisePsd( noisePsd, noiseFloor, measuredPsd, freq, 10, "low_freq", 2.1F );
+
+    REQUIRE( !errc );
+    REQUIRE( noiseFloor == Approx( 20.0F ) );
+    REQUIRE( noisePsd[1] == Approx( 20.0F ) );
 }
 
 TEST_CASE( "modalPsdProcessor can reconstruct OL PSD with NTF-aware closed-loop noise subtraction", "[modalGainOpt]" )
