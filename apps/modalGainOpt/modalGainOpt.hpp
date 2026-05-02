@@ -4254,7 +4254,7 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGain )( const pcf::IndiPrope
 
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_goptMutex );
-        m_opticalGain = target;
+        m_opticalGain = sqrt(target);
     }
 
     return 0;
