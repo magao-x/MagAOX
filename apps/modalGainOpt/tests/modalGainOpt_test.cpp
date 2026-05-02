@@ -55,6 +55,17 @@ class modalGainOptHarness : public modalGainOpt
         return m_extrapNoiseEstimateDomain;
     }
 
+    void setExtrapMethodForTest( int method )
+    {
+        m_extrapOL = method;
+    }
+
+    void setExtrapNoiseEstimateDomainForTest( int domain )
+    {
+        m_extrapNoiseEstimateDomain = domain;
+        m_extrapConfig.m_noiseEstimateDomain = extrapNoiseEstimateDomainName( domain );
+    }
+
     const processPsdProcessorT::processModelConfig &extrapConfig() const
     {
         return m_extrapConfig;
@@ -257,6 +268,51 @@ class modalGainOptHarness : public modalGainOpt
         std::lock_guard<std::mutex> lock( m_goptMutex );
         return refreshGoptStructures();
     }
+
+    void initExtrapSelectionPropertiesForTest()
+    {
+        createStandardIndiSelectionSw( m_indiP_extrapMethod,
+                                       "extrap_method",
+                                       { olProcessMethodElement( c_olProcessNone ),
+                                         olProcessMethodElement( c_olProcessLegacy ),
+                                         olProcessMethodElement( c_olProcessPowerLawOnly ),
+                                         olProcessMethodElement( c_olProcessMoffatPeaks ) },
+                                       { olProcessMethodLabel( c_olProcessNone ),
+                                         olProcessMethodLabel( c_olProcessLegacy ),
+                                         olProcessMethodLabel( c_olProcessPowerLawOnly ),
+                                         olProcessMethodLabel( c_olProcessMoffatPeaks ) },
+                                       "Extrapolation Method",
+                                       "Extrapolation" );
+
+        createStandardIndiSelectionSw( m_indiP_extrapNoiseEstimateDomain,
+                                       "extrap_noiseEstimateDomain",
+                                       { extrapNoiseEstimateDomainElement( c_extrapNoiseEstimateOpenLoop ),
+                                         extrapNoiseEstimateDomainElement( c_extrapNoiseEstimateClosedLoopPreXfer ) },
+                                       { extrapNoiseEstimateDomainLabel( c_extrapNoiseEstimateOpenLoop ),
+                                         extrapNoiseEstimateDomainLabel( c_extrapNoiseEstimateClosedLoopPreXfer ) },
+                                       "Noise Estimate Domain",
+                                       "Extrapolation" );
+    }
+
+    int handleExtrapMethodPropertyForTest( const pcf::IndiProperty &ipRecv )
+    {
+        return handleExtrapMethodProperty( ipRecv );
+    }
+
+    int handleExtrapNoiseEstimateDomainPropertyForTest( const pcf::IndiProperty &ipRecv )
+    {
+        return handleExtrapNoiseEstimateDomainProperty( ipRecv );
+    }
+
+    pcf::IndiElement::SwitchStateType extrapMethodElementStateForTest( const std::string &element ) const
+    {
+        return m_indiP_extrapMethod[element].getSwitchState();
+    }
+
+    pcf::IndiElement::SwitchStateType extrapNoiseEstimateDomainElementStateForTest( const std::string &element ) const
+    {
+        return m_indiP_extrapNoiseEstimateDomain[element].getSwitchState();
+    }
 };
 /// \endcond
 
@@ -420,6 +476,50 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
     REQUIRE( app.extrapConfig().m_peakMoffatBeta == Approx( 8.0F ) );
     REQUIRE( app.extrapConfig().m_dropoutGapFactor == Approx( 0.12F ) );
     REQUIRE( app.extrapConfig().m_dropoutMaxBins == 6 );
+}
+
+TEST_CASE( "modalGainOpt restores current selection when extrapolation switches receive all-off updates",
+           "[modalGainOpt]" )
+{
+    modalGainOptHarness app;
+    app.initExtrapSelectionPropertiesForTest();
+
+    SECTION( "extrapolation method is restored" )
+    {
+        app.setExtrapMethodForTest( c_olProcessMoffatPeaks );
+
+        pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+        ip.add( pcf::IndiElement( olProcessMethodElement( c_olProcessNone ), pcf::IndiElement::Off ) );
+        ip.add( pcf::IndiElement( olProcessMethodElement( c_olProcessLegacy ), pcf::IndiElement::Off ) );
+        ip.add( pcf::IndiElement( olProcessMethodElement( c_olProcessPowerLawOnly ), pcf::IndiElement::Off ) );
+        ip.add( pcf::IndiElement( olProcessMethodElement( c_olProcessMoffatPeaks ), pcf::IndiElement::Off ) );
+
+        REQUIRE( app.handleExtrapMethodPropertyForTest( ip ) == 0 );
+        REQUIRE( app.extrapMethod() == c_olProcessMoffatPeaks );
+        REQUIRE( app.extrapMethodElementStateForTest( olProcessMethodElement( c_olProcessMoffatPeaks ) ) ==
+                 pcf::IndiElement::On );
+        REQUIRE( app.extrapMethodElementStateForTest( olProcessMethodElement( c_olProcessLegacy ) ) ==
+                 pcf::IndiElement::Off );
+    }
+
+    SECTION( "noise-estimate domain is restored" )
+    {
+        app.setExtrapNoiseEstimateDomainForTest( c_extrapNoiseEstimateClosedLoopPreXfer );
+
+        pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+        ip.add( pcf::IndiElement( extrapNoiseEstimateDomainElement( c_extrapNoiseEstimateOpenLoop ),
+                                  pcf::IndiElement::Off ) );
+        ip.add( pcf::IndiElement( extrapNoiseEstimateDomainElement( c_extrapNoiseEstimateClosedLoopPreXfer ),
+                                  pcf::IndiElement::Off ) );
+
+        REQUIRE( app.handleExtrapNoiseEstimateDomainPropertyForTest( ip ) == 0 );
+        REQUIRE( app.extrapNoiseEstimateDomain() == c_extrapNoiseEstimateClosedLoopPreXfer );
+        REQUIRE( app.extrapConfig().m_noiseEstimateDomain == "closed-loop-pre-xfer" );
+        REQUIRE( app.extrapNoiseEstimateDomainElementStateForTest( extrapNoiseEstimateDomainElement(
+                     c_extrapNoiseEstimateClosedLoopPreXfer ) ) == pcf::IndiElement::On );
+        REQUIRE( app.extrapNoiseEstimateDomainElementStateForTest(
+                     extrapNoiseEstimateDomainElement( c_extrapNoiseEstimateOpenLoop ) ) == pcf::IndiElement::Off );
+    }
 }
 
 TEST_CASE( "modalPsdProcessor falls back when the requested power-law fit has too little frequency span",
