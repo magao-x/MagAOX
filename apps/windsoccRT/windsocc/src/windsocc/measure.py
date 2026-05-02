@@ -696,7 +696,7 @@ def process_mf_response_cubes(
             inner_radius,
             outer_radius,
             time_per_frame,
-            min_track_matches=model_min_matches,
+            # min_track_matches=model_min_matches,
             tracker_prune_immunity_matches=tracker_prune_immunity_matches,
             tracker_prune_immunity_speed_mps=tracker_prune_immunity_speed_mps,
             tracker_max_track_radius_px=tracker_max_track_radius_px,
