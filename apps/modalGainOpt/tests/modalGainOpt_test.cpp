@@ -55,6 +55,16 @@ class modalGainOptHarness : public modalGainOpt
         return m_extrapNoiseEstimateDomain;
     }
 
+    int extrapNoiseEstimateRange() const
+    {
+        return m_extrapNoiseEstimateRange;
+    }
+
+    int extrapClosedLoopOlEstimateMethod() const
+    {
+        return m_extrapClosedLoopOlEstimateMethod;
+    }
+
     void setExtrapMethodForTest( int method )
     {
         m_extrapOL = method;
@@ -64,6 +74,18 @@ class modalGainOptHarness : public modalGainOpt
     {
         m_extrapNoiseEstimateDomain = domain;
         m_extrapConfig.m_noiseEstimateDomain = extrapNoiseEstimateDomainName( domain );
+    }
+
+    void setExtrapNoiseEstimateRangeForTest( int range )
+    {
+        m_extrapNoiseEstimateRange = range;
+        m_extrapConfig.m_noiseEstimateRange = extrapNoiseEstimateRangeName( range );
+    }
+
+    void setExtrapClosedLoopOlEstimateMethodForTest( int method )
+    {
+        m_extrapClosedLoopOlEstimateMethod = method;
+        m_extrapConfig.m_closedLoopOlEstimateMethod = extrapClosedLoopOlEstimateMethodName( method );
     }
 
     const processPsdProcessorT::processModelConfig &extrapConfig() const
@@ -292,6 +314,25 @@ class modalGainOptHarness : public modalGainOpt
                                          extrapNoiseEstimateDomainLabel( c_extrapNoiseEstimateClosedLoopPreXfer ) },
                                        "Noise Estimate Domain",
                                        "Extrapolation" );
+
+        createStandardIndiSelectionSw( m_indiP_extrapNoiseEstimateRange,
+                                       "extrap_noiseEstimateRange",
+                                       { extrapNoiseEstimateRangeElement( c_extrapNoiseEstimateHighFreq ),
+                                         extrapNoiseEstimateRangeElement( c_extrapNoiseEstimateLowFreq ) },
+                                       { extrapNoiseEstimateRangeLabel( c_extrapNoiseEstimateHighFreq ),
+                                         extrapNoiseEstimateRangeLabel( c_extrapNoiseEstimateLowFreq ) },
+                                       "Noise Estimate Range",
+                                       "Extrapolation" );
+
+        createStandardIndiSelectionSw(
+            m_indiP_extrapClosedLoopOlEstimateMethod,
+            "extrap_closedLoopOlEstimateMethod",
+            { extrapClosedLoopOlEstimateMethodElement( c_extrapClosedLoopOlEstimateEtfOnly ),
+              extrapClosedLoopOlEstimateMethodElement( c_extrapClosedLoopOlEstimateNtfAware ) },
+            { extrapClosedLoopOlEstimateMethodLabel( c_extrapClosedLoopOlEstimateEtfOnly ),
+              extrapClosedLoopOlEstimateMethodLabel( c_extrapClosedLoopOlEstimateNtfAware ) },
+            "Closed Loop OL Estimate Method",
+            "Extrapolation" );
     }
 
     int handleExtrapMethodPropertyForTest( const pcf::IndiProperty &ipRecv )
@@ -304,6 +345,16 @@ class modalGainOptHarness : public modalGainOpt
         return handleExtrapNoiseEstimateDomainProperty( ipRecv );
     }
 
+    int handleExtrapNoiseEstimateRangePropertyForTest( const pcf::IndiProperty &ipRecv )
+    {
+        return handleExtrapNoiseEstimateRangeProperty( ipRecv );
+    }
+
+    int handleExtrapClosedLoopOlEstimateMethodPropertyForTest( const pcf::IndiProperty &ipRecv )
+    {
+        return handleExtrapClosedLoopOlEstimateMethodProperty( ipRecv );
+    }
+
     pcf::IndiElement::SwitchStateType extrapMethodElementStateForTest( const std::string &element ) const
     {
         return m_indiP_extrapMethod[element].getSwitchState();
@@ -312,6 +363,17 @@ class modalGainOptHarness : public modalGainOpt
     pcf::IndiElement::SwitchStateType extrapNoiseEstimateDomainElementStateForTest( const std::string &element ) const
     {
         return m_indiP_extrapNoiseEstimateDomain[element].getSwitchState();
+    }
+
+    pcf::IndiElement::SwitchStateType extrapNoiseEstimateRangeElementStateForTest( const std::string &element ) const
+    {
+        return m_indiP_extrapNoiseEstimateRange[element].getSwitchState();
+    }
+
+    pcf::IndiElement::SwitchStateType
+    extrapClosedLoopOlEstimateMethodElementStateForTest( const std::string &element ) const
+    {
+        return m_indiP_extrapClosedLoopOlEstimateMethod[element].getSwitchState();
     }
 };
 /// \endcond
@@ -367,6 +429,24 @@ TEST_CASE( "modalGainOpt placeholder harness instantiates the app", "[modalGainO
                  c_extrapNoiseEstimateClosedLoopPreXfer );
         REQUIRE( extrapNoiseEstimateDomainFromName( "closed-loop-pre-xfer" ) ==
                  c_extrapNoiseEstimateClosedLoopPreXfer );
+
+        REQUIRE( extrapNoiseEstimateRangeName( c_extrapNoiseEstimateHighFreq ) == "high-freq" );
+        REQUIRE( extrapNoiseEstimateRangeName( c_extrapNoiseEstimateLowFreq ) == "low-freq" );
+        REQUIRE( extrapNoiseEstimateRangeFromElement( "high_freq" ) == c_extrapNoiseEstimateHighFreq );
+        REQUIRE( extrapNoiseEstimateRangeFromElement( "low_freq" ) == c_extrapNoiseEstimateLowFreq );
+        REQUIRE( extrapNoiseEstimateRangeFromName( "high_freq" ) == c_extrapNoiseEstimateHighFreq );
+        REQUIRE( extrapNoiseEstimateRangeFromName( "high-freq" ) == c_extrapNoiseEstimateHighFreq );
+        REQUIRE( extrapNoiseEstimateRangeFromName( "low_freq" ) == c_extrapNoiseEstimateLowFreq );
+        REQUIRE( extrapNoiseEstimateRangeFromName( "low-freq" ) == c_extrapNoiseEstimateLowFreq );
+
+        REQUIRE( extrapClosedLoopOlEstimateMethodName( c_extrapClosedLoopOlEstimateEtfOnly ) == "etf-only" );
+        REQUIRE( extrapClosedLoopOlEstimateMethodName( c_extrapClosedLoopOlEstimateNtfAware ) == "ntf-aware" );
+        REQUIRE( extrapClosedLoopOlEstimateMethodFromElement( "etf_only" ) == c_extrapClosedLoopOlEstimateEtfOnly );
+        REQUIRE( extrapClosedLoopOlEstimateMethodFromElement( "ntf_aware" ) == c_extrapClosedLoopOlEstimateNtfAware );
+        REQUIRE( extrapClosedLoopOlEstimateMethodFromName( "etf_only" ) == c_extrapClosedLoopOlEstimateEtfOnly );
+        REQUIRE( extrapClosedLoopOlEstimateMethodFromName( "etf-only" ) == c_extrapClosedLoopOlEstimateEtfOnly );
+        REQUIRE( extrapClosedLoopOlEstimateMethodFromName( "ntf_aware" ) == c_extrapClosedLoopOlEstimateNtfAware );
+        REQUIRE( extrapClosedLoopOlEstimateMethodFromName( "ntf-aware" ) == c_extrapClosedLoopOlEstimateNtfAware );
     }
 }
 
@@ -386,7 +466,7 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-                                "extrapolation" },
+                                "extrapolation", "extrapolation", "extrapolation" },
                               {
                                   "number",
                                   "name",
@@ -395,6 +475,8 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                   "psdDev",
                                   "method",
                                   "noiseEstimateDomain",
+                                  "noiseEstimateRange",
+                                  "closedLoopOlEstimateMethod",
                                   "powerLawIndex",
                                   "powerLawNormFreq",
                                   "powerLawMatchFreq",
@@ -422,6 +504,8 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                 "psdDevice",
                                 "moffat_peaks",
                                 "closed_loop_pre_xfer",
+                                "low_freq",
+                                "ntf_aware",
                                 "1.5",
                                 "15",
                                 "12.5",
@@ -456,7 +540,11 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
     REQUIRE( app.gainGain() == Approx( 0.35F ) );
     REQUIRE( app.extrapMethod() == c_olProcessMoffatPeaks );
     REQUIRE( app.extrapNoiseEstimateDomain() == c_extrapNoiseEstimateClosedLoopPreXfer );
+    REQUIRE( app.extrapNoiseEstimateRange() == c_extrapNoiseEstimateLowFreq );
+    REQUIRE( app.extrapClosedLoopOlEstimateMethod() == c_extrapClosedLoopOlEstimateNtfAware );
     REQUIRE( app.extrapConfig().m_noiseEstimateDomain == "closed-loop-pre-xfer" );
+    REQUIRE( app.extrapConfig().m_noiseEstimateRange == "low-freq" );
+    REQUIRE( app.extrapConfig().m_closedLoopOlEstimateMethod == "ntf-aware" );
     REQUIRE( app.extrapConfig().m_powerLawIndex == Approx( 1.5F ) );
     REQUIRE( app.extrapConfig().m_powerLawNormFreq == Approx( 15.0F ) );
     REQUIRE( app.extrapConfig().m_powerLawMatchFreq == Approx( 12.5F ) );
@@ -520,6 +608,44 @@ TEST_CASE( "modalGainOpt restores current selection when extrapolation switches 
         REQUIRE( app.extrapNoiseEstimateDomainElementStateForTest(
                      extrapNoiseEstimateDomainElement( c_extrapNoiseEstimateOpenLoop ) ) == pcf::IndiElement::Off );
     }
+
+    SECTION( "noise-estimate range is restored" )
+    {
+        app.setExtrapNoiseEstimateRangeForTest( c_extrapNoiseEstimateLowFreq );
+
+        pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+        ip.add( pcf::IndiElement( extrapNoiseEstimateRangeElement( c_extrapNoiseEstimateHighFreq ),
+                                  pcf::IndiElement::Off ) );
+        ip.add( pcf::IndiElement( extrapNoiseEstimateRangeElement( c_extrapNoiseEstimateLowFreq ),
+                                  pcf::IndiElement::Off ) );
+
+        REQUIRE( app.handleExtrapNoiseEstimateRangePropertyForTest( ip ) == 0 );
+        REQUIRE( app.extrapNoiseEstimateRange() == c_extrapNoiseEstimateLowFreq );
+        REQUIRE( app.extrapConfig().m_noiseEstimateRange == "low-freq" );
+        REQUIRE( app.extrapNoiseEstimateRangeElementStateForTest(
+                     extrapNoiseEstimateRangeElement( c_extrapNoiseEstimateLowFreq ) ) == pcf::IndiElement::On );
+        REQUIRE( app.extrapNoiseEstimateRangeElementStateForTest(
+                     extrapNoiseEstimateRangeElement( c_extrapNoiseEstimateHighFreq ) ) == pcf::IndiElement::Off );
+    }
+
+    SECTION( "closed-loop OL estimate method is restored" )
+    {
+        app.setExtrapClosedLoopOlEstimateMethodForTest( c_extrapClosedLoopOlEstimateNtfAware );
+
+        pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+        ip.add( pcf::IndiElement( extrapClosedLoopOlEstimateMethodElement( c_extrapClosedLoopOlEstimateEtfOnly ),
+                                  pcf::IndiElement::Off ) );
+        ip.add( pcf::IndiElement( extrapClosedLoopOlEstimateMethodElement( c_extrapClosedLoopOlEstimateNtfAware ),
+                                  pcf::IndiElement::Off ) );
+
+        REQUIRE( app.handleExtrapClosedLoopOlEstimateMethodPropertyForTest( ip ) == 0 );
+        REQUIRE( app.extrapClosedLoopOlEstimateMethod() == c_extrapClosedLoopOlEstimateNtfAware );
+        REQUIRE( app.extrapConfig().m_closedLoopOlEstimateMethod == "ntf-aware" );
+        REQUIRE( app.extrapClosedLoopOlEstimateMethodElementStateForTest( extrapClosedLoopOlEstimateMethodElement(
+                     c_extrapClosedLoopOlEstimateNtfAware ) ) == pcf::IndiElement::On );
+        REQUIRE( app.extrapClosedLoopOlEstimateMethodElementStateForTest( extrapClosedLoopOlEstimateMethodElement(
+                     c_extrapClosedLoopOlEstimateEtfOnly ) ) == pcf::IndiElement::Off );
+    }
 }
 
 TEST_CASE( "modalPsdProcessor falls back when the requested power-law fit has too little frequency span",
@@ -567,6 +693,45 @@ TEST_CASE( "modalPsdProcessor can estimate noise in closed-loop space before OL 
     REQUIRE( result.m_noiseFloor == Approx( 1.0F ) );
     REQUIRE( result.m_noisePsd[1] == Approx( 1.0F ) );
     REQUIRE( result.m_processPsd[1] == Approx( 8.0F ) );
+}
+
+TEST_CASE( "modalPsdProcessor can estimate noise from the low-frequency end", "[modalGainOpt]" )
+{
+    std::vector<float> measuredPsd{ 0.0F, 2.0F, 2.0F, 20.0F, 20.0F, 20.0F, 20.0F, 20.0F };
+    std::vector<float> noisePsd;
+    float noiseFloor = 0.0F;
+
+    mx::error_t errc = processPsdProcessorT::estimateNoisePsd( noisePsd, noiseFloor, measuredPsd, 10, "low_freq" );
+
+    REQUIRE( !errc );
+    REQUIRE( noiseFloor == Approx( 2.0F ) );
+    REQUIRE( noisePsd[1] == Approx( 2.0F ) );
+}
+
+TEST_CASE( "modalPsdProcessor can reconstruct OL PSD with NTF-aware closed-loop noise subtraction", "[modalGainOpt]" )
+{
+    processPsdProcessorT::processModelConfig cfg;
+    cfg.m_method = "legacy";
+    cfg.m_noiseEstimateDomain = "closed_loop_pre_xfer";
+    cfg.m_closedLoopOlEstimateMethod = "ntf_aware";
+
+    std::vector<float> measuredPsd{ 0.0F, 5.0F, 5.0F, 2.0F, 2.0F, 2.0F, 2.0F, 2.0F };
+    std::vector<float> freq{ 0.0F, 1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F };
+    std::vector<float> etfPsd( measuredPsd.size(), 0.5F );
+    std::vector<float> ntfPsd( measuredPsd.size(), 2.0F );
+    etfPsd[0] = 1.0F;
+    ntfPsd[0] = 1.0F;
+
+    processPsdProcessorT::processResults result;
+    mx::error_t errc =
+        processPsdProcessorT::analyzePsd( result, measuredPsd, freq, 10, cfg, 0.0F, 25.0F, &etfPsd, &ntfPsd );
+
+    REQUIRE( !errc );
+    REQUIRE( result.m_noiseEstimateDomain == "closed-loop-pre-xfer" );
+    REQUIRE( result.m_closedLoopOlEstimateMethod == "ntf-aware" );
+    REQUIRE( result.m_noiseFloor == Approx( 1.0F ) );
+    REQUIRE( result.m_noisePsd[1] == Approx( 1.0F ) );
+    REQUIRE( result.m_processPsd[1] == Approx( 6.0F ) );
 }
 
 /// Verify `modalGainOpt` publishes LP and max-gain arrays into separate buffers.

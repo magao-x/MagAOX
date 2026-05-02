@@ -43,6 +43,12 @@ class modalPsdProcessor
     /// The default domain used for noise-floor estimation.
     static constexpr const char *c_defaultNoiseEstimateDomain = "open-loop";
 
+    /// The default end of the PSD used for noise-floor estimation.
+    static constexpr const char *c_defaultNoiseEstimateRange = "high-freq";
+
+    /// The default closed-loop to open-loop PSD reconstruction method.
+    static constexpr const char *c_defaultClosedLoopOlEstimateMethod = "etf-only";
+
     /// The default half-width of the local match-frequency fallback window.
     static constexpr realT c_defaultPowerLawMatchFallbackWindowHz = static_cast<realT>( 5 );
 
@@ -111,6 +117,12 @@ class modalPsdProcessor
 
         /// The domain used to estimate the flat noise floor.
         std::string m_noiseEstimateDomain{ c_defaultNoiseEstimateDomain };
+
+        /// Which end of the PSD is used to estimate the flat noise floor.
+        std::string m_noiseEstimateRange{ c_defaultNoiseEstimateRange };
+
+        /// How to reconstruct the OL PSD from a CL PSD when estimating noise in CL space.
+        std::string m_closedLoopOlEstimateMethod{ c_defaultClosedLoopOlEstimateMethod };
 
         /// The half-width of the local fallback window used when the match point is in a trough.
         realT m_powerLawMatchFallbackWindowHz{ c_defaultPowerLawMatchFallbackWindowHz };
@@ -207,6 +219,12 @@ class modalPsdProcessor
         /// The domain used to estimate the flat noise floor.
         std::string m_noiseEstimateDomain{ c_defaultNoiseEstimateDomain };
 
+        /// Which end of the PSD was used to estimate the flat noise floor.
+        std::string m_noiseEstimateRange{ c_defaultNoiseEstimateRange };
+
+        /// Which CL-to-OL reconstruction method was used.
+        std::string m_closedLoopOlEstimateMethod{ c_defaultClosedLoopOlEstimateMethod };
+
         /// The half-width of the local match-frequency fallback window.
         realT m_powerLawMatchFallbackWindowHz{ c_defaultPowerLawMatchFallbackWindowHz };
 
@@ -295,14 +313,17 @@ class modalPsdProcessor
                 const processModelConfig &config,                /**< [in] the disturbance-PSD configuration */
                 realT lpContinuumFreq = static_cast<realT>( 0 ), /**< [in] the LP continuum cutoff */
                 realT lpContinuumWidthHz = c_defaultLpContinuumWidthHz, /**< [in] LP smoothing width */
-                const std::vector<realT> *correctionPsd = nullptr       /**< [in] optional CL-to-OL correction */
+                const std::vector<realT> *etfPsd = nullptr,             /**< [in] optional CL ETF^2 correction */
+                const std::vector<realT> *ntfPsd = nullptr              /**< [in] optional CL NTF^2 correction */
     );
 
     /// Estimate the flat noise PSD using the modalGainOpt percentile rule.
-    static mx::error_t estimateNoisePsd( std::vector<realT> &noisePsd, /**< [out] the flat noise PSD estimate */
-                                         realT &noiseFloor,            /**< [out] the fitted noise floor */
-                                         const std::vector<realT> &measuredPsd, /**< [in] the measured one-sided PSD */
-                                         size_t modeIndex                       /**< [in] the zero-based mode index */
+    static mx::error_t
+    estimateNoisePsd( std::vector<realT> &noisePsd,          /**< [out] the flat noise PSD estimate */
+                      realT &noiseFloor,                     /**< [out] the fitted noise floor */
+                      const std::vector<realT> &measuredPsd, /**< [in] the measured one-sided PSD */
+                      size_t modeIndex,                      /**< [in] the zero-based mode index */
+                      std::string noiseEstimateRange = c_defaultNoiseEstimateRange /**< [in] which PSD end to use */
     );
 
     /// Replace all LP content above a cutoff with a smoothed continuum.
@@ -319,6 +340,13 @@ class modalPsdProcessor
 
     /// Normalize a noise-estimation-domain name to lowercase hyphenated form.
     static std::string normalizeNoiseEstimateDomain( std::string domain /**< [in] the requested domain name */ );
+
+    /// Normalize a noise-estimation-range name to lowercase hyphenated form.
+    static std::string normalizeNoiseEstimateRange( std::string range /**< [in] the requested PSD-end selector */ );
+
+    /// Normalize a CL-to-OL PSD reconstruction method name to lowercase hyphenated form.
+    static std::string
+    normalizeClosedLoopOlEstimateMethod( std::string method /**< [in] the requested CL-to-OL method */ );
 
     /// Resolve the power-law normalization frequency, defaulting to the first positive bin.
     static realT resolvePowerLawNormFreq( const std::vector<realT> &freq, /**< [in] the one-sided frequency grid */
@@ -540,7 +568,8 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                   const processModelConfig &config,
                                                   realT lpContinuumFreq,
                                                   realT lpContinuumWidthHz,
-                                                  const std::vector<realT> *correctionPsd )
+                                                  const std::vector<realT> *etfPsd,
+                                                  const std::vector<realT> *ntfPsd )
 {
     if( measuredPsd.size() != freq.size() )
     {
@@ -558,6 +587,8 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
     result.m_powerLawNormFreq = resolvePowerLawNormFreq( freq, config.m_powerLawNormFreq );
     result.m_powerLawMatchFreq = config.m_powerLawMatchFreq;
     result.m_noiseEstimateDomain = normalizeNoiseEstimateDomain( config.m_noiseEstimateDomain );
+    result.m_noiseEstimateRange = normalizeNoiseEstimateRange( config.m_noiseEstimateRange );
+    result.m_closedLoopOlEstimateMethod = normalizeClosedLoopOlEstimateMethod( config.m_closedLoopOlEstimateMethod );
     result.m_powerLawMatchFallbackWindowHz = config.m_powerLawMatchFallbackWindowHz;
     result.m_fitPowerLawIndex = config.m_fitPowerLawIndex;
     result.m_powerLawOnlyAboveFreq = config.m_powerLawOnlyAboveFreq;
@@ -615,41 +646,99 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                  "Invalid power-law exponent fit range or bin width" );
     }
 
-    mx::error_t errc = estimateNoisePsd( result.m_noisePsd, result.m_noiseFloor, measuredPsd, modeIndex );
-    if( !!errc )
-    {
-        return errc;
-    }
-
     if( result.m_noiseEstimateDomain != "open-loop" && result.m_noiseEstimateDomain != "closed-loop-pre-xfer" )
     {
         return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
                                                  "Unknown noise-estimation domain: " + result.m_noiseEstimateDomain );
     }
 
-    std::vector<realT> processMeasuredPsd = measuredPsd;
-    std::vector<realT> processNoisePsd = result.m_noisePsd;
-    if( result.m_noiseEstimateDomain == "closed-loop-pre-xfer" )
+    if( result.m_noiseEstimateRange != "high-freq" && result.m_noiseEstimateRange != "low-freq" )
     {
-        if( correctionPsd == nullptr )
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                 "Unknown noise-estimation range: " + result.m_noiseEstimateRange );
+    }
+
+    if( result.m_closedLoopOlEstimateMethod != "etf-only" && result.m_closedLoopOlEstimateMethod != "ntf-aware" )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                 "Unknown closed-loop OL estimate method: " +
+                                                     result.m_closedLoopOlEstimateMethod );
+    }
+
+    std::vector<realT> noiseEstimatePsd = measuredPsd;
+    if( result.m_noiseEstimateDomain == "closed-loop-pre-xfer" && result.m_closedLoopOlEstimateMethod == "ntf-aware" )
+    {
+        if( ntfPsd == nullptr )
         {
             return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
-                                                     "Closed-loop noise estimation requires a correction PSD" );
+                                                     "NTF-aware closed-loop noise estimation requires an NTF PSD" );
         }
 
-        if( correctionPsd->size() != measuredPsd.size() )
+        if( ntfPsd->size() != measuredPsd.size() )
         {
-            return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr,
-                                                     "Correction PSD must match the measured PSD size" );
+            return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr, "NTF PSD must match the measured PSD size" );
         }
 
         const realT tiny = std::numeric_limits<realT>::min();
         for( size_t n = 0; n < measuredPsd.size(); ++n )
         {
-            const realT useCorrection = std::max( ( *correctionPsd )[n], tiny );
-            const realT rawClosedLoop = std::max( measuredPsd[n] - result.m_noisePsd[n], tiny );
-            const realT openLoopNoise = std::max( result.m_noisePsd[n] / useCorrection, tiny );
-            const realT openLoopProcess = rawClosedLoop / useCorrection;
+            noiseEstimatePsd[n] = measuredPsd[n] / std::max( ( *ntfPsd )[n], tiny );
+        }
+    }
+
+    mx::error_t errc = estimateNoisePsd( result.m_noisePsd,
+                                         result.m_noiseFloor,
+                                         noiseEstimatePsd,
+                                         modeIndex,
+                                         result.m_noiseEstimateRange );
+    if( !!errc )
+    {
+        return errc;
+    }
+
+    std::vector<realT> processMeasuredPsd = measuredPsd;
+    std::vector<realT> processNoisePsd = result.m_noisePsd;
+    if( result.m_noiseEstimateDomain == "closed-loop-pre-xfer" )
+    {
+        if( etfPsd == nullptr )
+        {
+            return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                     "Closed-loop noise estimation requires an ETF PSD" );
+        }
+
+        if( etfPsd->size() != measuredPsd.size() )
+        {
+            return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr, "ETF PSD must match the measured PSD size" );
+        }
+
+        if( result.m_closedLoopOlEstimateMethod == "ntf-aware" )
+        {
+            if( ntfPsd == nullptr )
+            {
+                return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                         "NTF-aware closed-loop noise estimation requires an NTF PSD" );
+            }
+
+            if( ntfPsd->size() != measuredPsd.size() )
+            {
+                return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr,
+                                                         "NTF PSD must match the measured PSD size" );
+            }
+        }
+
+        const realT tiny = std::numeric_limits<realT>::min();
+        for( size_t n = 0; n < measuredPsd.size(); ++n )
+        {
+            const realT useEtf = std::max( ( *etfPsd )[n], tiny );
+            realT closedLoopNoise = result.m_noisePsd[n];
+            if( result.m_closedLoopOlEstimateMethod == "ntf-aware" )
+            {
+                closedLoopNoise = result.m_noisePsd[n] * std::max( ( *ntfPsd )[n], tiny );
+            }
+
+            const realT rawClosedLoop = std::max( measuredPsd[n] - closedLoopNoise, tiny );
+            const realT openLoopNoise = std::max( closedLoopNoise / useEtf, tiny );
+            const realT openLoopProcess = rawClosedLoop / useEtf;
 
             processNoisePsd[n] = openLoopNoise;
             processMeasuredPsd[n] = openLoopProcess + openLoopNoise;
@@ -874,15 +963,28 @@ template <typename realT>
 mx::error_t modalPsdProcessor<realT>::estimateNoisePsd( std::vector<realT> &noisePsd,
                                                         realT &noiseFloor,
                                                         const std::vector<realT> &measuredPsd,
-                                                        size_t modeIndex )
+                                                        size_t modeIndex,
+                                                        std::string noiseEstimateRange )
 {
     if( measuredPsd.size() < 2 )
     {
         return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr, "PSD must have at least two bins" );
     }
 
-    const size_t f0 = measuredPsd.size() / 2;
-    const size_t f1 = measuredPsd.size();
+    noiseEstimateRange = normalizeNoiseEstimateRange( noiseEstimateRange );
+    size_t f0 = measuredPsd.size() / 2;
+    size_t f1 = measuredPsd.size();
+    if( noiseEstimateRange == "low-freq" )
+    {
+        f0 = measuredPsd.size() > 1 ? 1 : 0;
+        f1 = std::max( f0 + static_cast<size_t>( 1 ), measuredPsd.size() / 2 );
+    }
+    else if( noiseEstimateRange != "high-freq" )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                 "Unknown noise-estimation range: " + noiseEstimateRange );
+    }
+
     if( f1 <= f0 )
     {
         return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr, "PSD is too short for noise fitting" );
@@ -933,6 +1035,44 @@ std::string modalPsdProcessor<realT>::normalizeNoiseEstimateDomain( std::string 
                     } );
 
     return domain;
+}
+
+template <typename realT>
+std::string modalPsdProcessor<realT>::normalizeNoiseEstimateRange( std::string range )
+{
+    std::transform( range.begin(),
+                    range.end(),
+                    range.begin(),
+                    []( unsigned char c )
+                    {
+                        if( c == '_' )
+                        {
+                            return static_cast<char>( '-' );
+                        }
+
+                        return static_cast<char>( std::tolower( c ) );
+                    } );
+
+    return range;
+}
+
+template <typename realT>
+std::string modalPsdProcessor<realT>::normalizeClosedLoopOlEstimateMethod( std::string method )
+{
+    std::transform( method.begin(),
+                    method.end(),
+                    method.begin(),
+                    []( unsigned char c )
+                    {
+                        if( c == '_' )
+                        {
+                            return static_cast<char>( '-' );
+                        }
+
+                        return static_cast<char>( std::tolower( c ) );
+                    } );
+
+    return method;
 }
 
 template <typename realT>
