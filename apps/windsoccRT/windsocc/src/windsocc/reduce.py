@@ -380,8 +380,8 @@ def process_cube(
     reduced_pupil_cubes = {
         "ul": np.nan_to_num(np.asarray(ul_cropped_frames)),
         "ur": np.nan_to_num(np.asarray(ur_cropped_frames)),
-        "lr": np.nan_to_num(np.asarray(ll_cropped_frames)),
-        "ll": np.nan_to_num(np.asarray(lr_cropped_frames)),
+        "ll": np.nan_to_num(np.asarray(ll_cropped_frames)),
+        "lr": np.nan_to_num(np.asarray(lr_cropped_frames)),
     }
     return reduced_pupil_cubes
 
@@ -746,25 +746,26 @@ def process_batch_in_memory(
     if tukey_alpha > 0.0:
         apply_tukey_window = True
         logging.info(f"Applying Tukey window with alpha = {tukey_alpha}")
+    reduced_cube_dicts = [
+        process_cube(
+            cube,
+            reference,
+            noise,
+            QUADRANTS,
+            pupil_centers,
+            pupil_mask_radius,
+            start_frame,
+            step_frame,
+            group_size,
+            dark,
+            subtract_reference=subtract_reference,
+            apply_tukey_window=apply_tukey_window,
+            tukey_alpha=tukey_alpha,
+        )
+        for cube in raw_cubes
+    ]
     for quadrant in QUADRANTS:
-        reduced_cubes = [
-            process_cube(
-                cube,
-                reference,
-                noise,
-                quadrant,
-                pupil_centers,
-                pupil_mask_radius,
-                start_frame,
-                step_frame,
-                group_size,
-                dark,
-                subtract_reference=subtract_reference,
-                apply_tukey_window=apply_tukey_window,
-                tukey_alpha=tukey_alpha,
-            )
-            for cube in raw_cubes
-        ]
+        reduced_cubes = [cube_dict[quadrant] for cube_dict in reduced_cube_dicts]
         if reduced_frames_per_cube is None:
             reduced_frames_per_cube = reduced_cubes[0].shape[0]
         reduced_quadrants[quadrant] = np.concatenate(reduced_cubes, axis=0)
