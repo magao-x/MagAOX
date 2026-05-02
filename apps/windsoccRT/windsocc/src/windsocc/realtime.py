@@ -19,12 +19,14 @@ TODO refactoring:
 from __future__ import annotations
 
 import argparse
+import gc
 import importlib
 import inspect
 import json
 import logging
 import os
 import shutil
+import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -480,6 +482,36 @@ def load_shmim_image(stream_name: str):
     return Image(stream_name)
 
 
+_REALTIME_GC_TUNED = False
+
+
+def _install_realtime_gc_tuning() -> None:
+    """Apply process-wide GC/scheduling tweaks for the 2 kHz capture hot loop.
+
+    Idempotent: safe to call multiple times, only applies once per process.
+
+    - ``gc.freeze()`` moves every currently-tracked object into the permanent
+      generation so later minor collections scan far fewer objects, reducing
+      the worst-case pause that can steal writer cycles mid-batch.
+    - ``sys.setswitchinterval(0.005)`` pins the thread switch interval to
+      CPython's default explicitly so future reader-thread work has a known
+      starting point (raise this when a dedicated acquisition thread lands;
+      at 2 kHz a single preemption costs more than one writer period).
+    """
+    global _REALTIME_GC_TUNED
+    if _REALTIME_GC_TUNED:
+        return
+    try:
+        gc.freeze()
+    except Exception:  # pragma: no cover - defensive; older CPython lacks freeze()
+        pass
+    try:
+        sys.setswitchinterval(0.005)
+    except (AttributeError, ValueError):  # pragma: no cover - defensive
+        pass
+    _REALTIME_GC_TUNED = True
+
+
 def collect_shmim_batch(
     stream_name: str,
     target_frames: int,
@@ -491,7 +523,20 @@ def collect_shmim_batch(
     check_before_wait: bool = False,
     cnt0_diagnostics: bool = False,
 ) -> FrameBatch:
-    """Collect a contiguous batch from a live shmim stream into a float32 cube."""
+    """Collect a contiguous batch from a live shmim stream into a float32 cube.
+
+    Hot-loop notes:
+
+    - ``cnt0`` gap warnings are buffered and logged after the loop exits so
+      stderr I/O cannot stall acquisition mid-batch.
+    - The cyclic GC is disabled for the duration of the loop to eliminate
+      multi-millisecond collection pauses at 2 kHz.
+    - Frame shape/ndim is validated once on the first frame; steady-state
+      iterations trust the preallocated batch shape and let NumPy raise on
+      mismatch instead of re-checking per frame.
+    - When neither ``wait_new_frame`` nor ``cnt0_diagnostics`` is set, the
+      per-frame ``cnt0`` read is skipped entirely.
+    """
     image = load_shmim_image(stream_name)
     batch_shape = (target_frames, frame_height, frame_width)
     expected_frame_shape = (frame_height, frame_width)
@@ -506,8 +551,8 @@ def collect_shmim_batch(
     )
 
     batch = np.empty(batch_shape, dtype=np.float32)
-    first_timestamp = None
     wait = wait_new_frame
+    track_cnt0 = wait or cnt0_diagnostics
 
     prev_cnt0: int | None = None
     cnt0_first: int | None = None
@@ -516,98 +561,149 @@ def collect_shmim_batch(
     max_cnt0_gap = 0
     duplicate_cnt0_reads = 0
     cnt0_unavailable = False
+    # Buffered until after the hot loop; stderr I/O inside the loop is the
+    # main source of the ~50 ms stalls that show up as large cnt0 gaps at 2 kHz.
+    cnt0_gap_events: list[tuple[int, int, int, int]] = []
 
-    for frame_index in range(target_frames):
-        frame = image.get_data(
-            wait=wait,
-            timeout_sec=timeout_seconds,
-            check_before_wait=check_before_wait,
-        )
+    # First-frame setup: validate shape once, stamp timestamp, seed cnt0 tracking.
+    # Doing this outside the hot loop lets every subsequent iteration skip the
+    # per-frame shape/ndim check and the `is this the first frame?` branch.
+    first_frame = image.get_data(
+        wait=wait,
+        timeout_sec=timeout_seconds,
+        check_before_wait=check_before_wait,
+    )
+    if track_cnt0:
         cnt0_now = _shmim_cnt0(image)
         if cnt0_now is None:
             cnt0_unavailable = True
         else:
-            if cnt0_first is None:
-                cnt0_first = cnt0_now
-            if prev_cnt0 is not None:
-                delta = cnt0_now - prev_cnt0
-                if delta > 1:
-                    gap = delta - 1
-                    skipped_writer_frames += gap
-                    max_cnt0_gap = max(max_cnt0_gap, delta)
-                    msg = (
-                        "cnt0 advanced by %d from %d to %d at grab %d/%d — "
-                        "writer published %d frame(s) between consecutive grabs (possible miss)."
-                    ) % (delta, prev_cnt0, cnt0_now, frame_index + 1, target_frames, gap)
-                    if wait:
-                        logging.warning(msg)
-                    elif cnt0_diagnostics:
-                        logging.warning(msg)
-                elif delta == 0 and not wait:
-                    duplicate_cnt0_reads += 1
-                    if cnt0_diagnostics:
-                        logging.debug(
-                            "cnt0 unchanged at %d on grab %d/%d (same buffer sampled twice; expected without wait).",
-                            cnt0_now,
-                            frame_index + 1,
-                            target_frames,
-                        )
+            cnt0_first = cnt0_now
             prev_cnt0 = cnt0_now
             cnt0_last = cnt0_now
 
-        frame_array = np.asarray(frame, dtype=np.float32)
-        if frame_array.ndim != 2:
-            frame_array = np.squeeze(frame_array)
-        if frame_array.shape != expected_frame_shape:
-            raise ValueError(
-                f"Expected stream frames with shape {expected_frame_shape}, got {frame_array.shape} "
-                f"on frame {frame_index + 1}."
-            )
+    if first_frame.ndim != 2:
+        first_frame = np.squeeze(first_frame)
+    if first_frame.shape != expected_frame_shape:
+        raise ValueError(
+            f"Expected stream frames with shape {expected_frame_shape}, got {first_frame.shape} "
+            "on frame 1."
+        )
 
-        if first_timestamp is None:
-            first_timestamp = datetime.now(timezone.utc)
-            logging.info(
-                "First frame received from %s with dtype=%s shape=%s",
-                stream_name,
-                frame_array.dtype,
-                frame_array.shape,
-            )
+    first_timestamp = datetime.now(timezone.utc)
+    logging.info(
+        "First frame received from %s with dtype=%s shape=%s",
+        stream_name,
+        first_frame.dtype,
+        first_frame.shape,
+    )
+    # Single cast+copy from (potentially uint16) shmim buffer into the
+    # preallocated float32 batch. Direct assignment routes through
+    # PyArray_AssignArray in one C-level pass; avoid the prior
+    # `np.asarray(frame, dtype=np.float32)` round-trip that allocated a
+    # throwaway per-frame array.
+    batch[0] = first_frame
 
-        np.copyto(batch[frame_index], frame_array)
+    # Rebind hot attributes to locals (faster than attribute lookup per iter).
+    get_data = image.get_data
+    get_cnt0 = _shmim_cnt0
+
+    # Quiesce the cyclic GC for the duration of the capture. At 2 kHz even a
+    # minor collection (a few ms) produces the exact pathology the caller is
+    # seeing: writer publishes N frames while the reader is paused.
+    _install_realtime_gc_tuning()
+    gc_was_enabled = gc.isenabled()
+    if gc_was_enabled:
+        gc.disable()
+    try:
+        for frame_index in range(1, target_frames):
+            frame = get_data(
+                wait=wait,
+                timeout_sec=timeout_seconds,
+                check_before_wait=check_before_wait,
+            )
+            if track_cnt0 and not cnt0_unavailable:
+                cnt0_now = get_cnt0(image)
+                if cnt0_now is None:
+                    cnt0_unavailable = True
+                else:
+                    delta = cnt0_now - prev_cnt0  # type: ignore[operator]
+                    if delta > 1:
+                        skipped_writer_frames += delta - 1
+                        if delta > max_cnt0_gap:
+                            max_cnt0_gap = delta
+                        cnt0_gap_events.append(
+                            (frame_index, prev_cnt0, cnt0_now, delta)  # type: ignore[arg-type]
+                        )
+                    elif delta == 0 and not wait:
+                        duplicate_cnt0_reads += 1
+                    prev_cnt0 = cnt0_now
+                    cnt0_last = cnt0_now
+
+            batch[frame_index] = frame
+    finally:
+        if gc_was_enabled:
+            gc.enable()
+            gc.collect()
 
     validate_frame_batch(batch, (frame_height, frame_width))
     logging.info("Collected live batch with shape=%s dtype=%s", batch.shape, batch.dtype)
 
-    if cnt0_unavailable:
-        logging.info("shmim cnt0 not read (md.cnt0 missing); skip gap/duplicate counter diagnostics.")
-    elif cnt0_first is not None and cnt0_last is not None:
-        total_cnt0_span = cnt0_last - cnt0_first
-        expected_steps = target_frames - 1
-        logging.info(
-            "cnt0 summary: first=%d last=%d span=%d (expected ~%d steps for consecutive grabs with no writer skips)",
-            cnt0_first,
-            cnt0_last,
-            total_cnt0_span,
-            expected_steps,
-        )
-        if skipped_writer_frames:
+    # Drain deferred cnt0 gap warnings now that we are off the hot path. Same
+    # message format as before so log parsers keep working; only the timing
+    # shifts (batched after the loop instead of inline per gap).
+    if cnt0_gap_events and (wait or cnt0_diagnostics):
+        for frame_index, prev, curr, delta in cnt0_gap_events:
             logging.warning(
-                "cnt0: implied %d writer frame(s) skipped between grabs (max single gap=%d).",
-                skipped_writer_frames,
-                max_cnt0_gap,
+                "cnt0 advanced by %d from %d to %d at grab %d/%d — "
+                "writer published %d frame(s) between consecutive grabs (possible miss).",
+                delta,
+                prev,
+                curr,
+                frame_index + 1,
+                target_frames,
+                delta - 1,
             )
-        elif wait:
-            logging.info("cnt0: no gaps >1 between grabs — consistent with receiving each new frame once.")
-        if not wait and duplicate_cnt0_reads:
-            logging.info(
-                "cnt0: %d grab(s) saw the same cnt0 as the previous grab (non-blocking mode; not every writer frame).",
-                duplicate_cnt0_reads,
-            )
+    if duplicate_cnt0_reads and cnt0_diagnostics:
+        logging.debug(
+            "cnt0: %d grab(s) saw the same cnt0 as the previous grab "
+            "(same buffer sampled twice; expected without wait).",
+            duplicate_cnt0_reads,
+        )
 
-    return FrameBatch(
-        frames=batch,
-        first_timestamp=first_timestamp or datetime.now(timezone.utc),
-    )
+    if track_cnt0:
+        if cnt0_unavailable:
+            logging.info(
+                "shmim cnt0 not read (md.cnt0 missing); skip gap/duplicate counter diagnostics."
+            )
+        elif cnt0_first is not None and cnt0_last is not None:
+            total_cnt0_span = cnt0_last - cnt0_first
+            expected_steps = target_frames - 1
+            logging.info(
+                "cnt0 summary: first=%d last=%d span=%d (expected ~%d steps for consecutive grabs with no writer skips)",
+                cnt0_first,
+                cnt0_last,
+                total_cnt0_span,
+                expected_steps,
+            )
+            if skipped_writer_frames:
+                logging.warning(
+                    "cnt0: implied %d writer frame(s) skipped between grabs (max single gap=%d).",
+                    skipped_writer_frames,
+                    max_cnt0_gap,
+                )
+            elif wait:
+                logging.info(
+                    "cnt0: no gaps >1 between grabs — consistent with receiving each new frame once."
+                )
+            if not wait and duplicate_cnt0_reads:
+                logging.info(
+                    "cnt0: %d grab(s) saw the same cnt0 as the previous grab "
+                    "(non-blocking mode; not every writer frame).",
+                    duplicate_cnt0_reads,
+                )
+
+    return FrameBatch(frames=batch, first_timestamp=first_timestamp)
 
 
 class ShmimFrameSource(FrameSource):
@@ -771,6 +867,18 @@ def parse_args():
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         default="INFO",
         help="Logging level.",
+    )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "If set, wrap run_single_batch() in cProfile and write the stats to "
+            "PATH (loadable by `python -m pstats PATH` or `snakeviz PATH`). "
+            "For lower-overhead sampling profiling of the 2 kHz hot loop prefer "
+            "`py-spy record --rate 1000 -o profile.svg -- python ... realtime.py ...`."
+        ),
     )
     args = parser.parse_args()
     _resolve_implicit_source_type(args)
@@ -1269,6 +1377,30 @@ def run_single_batch(args) -> BatchRunSummary:
     )
 
 
+def _run_with_cprofile(fn, profile_path: str):
+    """Run ``fn()`` under ``cProfile`` and dump stats to ``profile_path``.
+
+    The top 25 entries by cumulative time are also echoed to stdout so the
+    common case ("is it still the shmim read? the casts? logging?") can be
+    answered without loading the stats file manually.
+    """
+    import cProfile
+    import pstats
+
+    profiler = cProfile.Profile()
+    profiler.enable()
+    try:
+        return fn()
+    finally:
+        profiler.disable()
+        profiler.dump_stats(profile_path)
+        logging.info(
+            "cProfile dump written to %s (top 25 by cumulative time below).",
+            profile_path,
+        )
+        pstats.Stats(profiler).sort_stats("cumulative").print_stats(25)
+
+
 def main():
     args = parse_args()
     logging.basicConfig(
@@ -1280,7 +1412,10 @@ def main():
             "Inferred --source-type shmim (RTC-style flags without --offline-source). "
             "Pass --source-type offline-fits explicitly to replay FITS."
         )
-    run_single_batch(args)
+    if args.profile:
+        _run_with_cprofile(lambda: run_single_batch(args), args.profile)
+    else:
+        run_single_batch(args)
 
 
 if __name__ == "__main__":
