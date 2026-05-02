@@ -3,8 +3,17 @@ import numpy as np
 import os
 import glob
 import logging
+import re
 from datetime import datetime
+
+_COMPACT_TIMESTAMP_RE = re.compile(r"(?<!\d)(\d{8}\d{6}\d{0,9})(?!\d)")
+_REALTIME_TIMESTAMP_RE = re.compile(r"(?<!\d)(\d{8}T\d{6}\d{0,6})(?!\d)")
+
+
 def convert_time_to_datetime(time):
+    if "T" in time:
+        date_part, rest = time.split("T", 1)
+        time = f"{date_part}{rest}"
     # Python datetime supports up to microseconds (6 digits); trim if needed.
     if len(time) > 20:
         time = time[:20]
@@ -16,6 +25,20 @@ def convert_time_to_datetime(time):
 def extract_time_from_fname(fname):
     if fname.endswith(".fits"):
         fname = fname.split(".")[0]
+    realtime_match = _REALTIME_TIMESTAMP_RE.search(fname)
+    if realtime_match:
+        return realtime_match.group(1)
+    compact_matches = _COMPACT_TIMESTAMP_RE.findall(fname)
+    if compact_matches:
+        timestamp = compact_matches[-1]
+        if len(timestamp) != 23:
+            logging.warning(
+                "Filename %s does not contain a legacy 23-digit timestamp; "
+                "using extracted timestamp %s.",
+                fname,
+                timestamp,
+            )
+        return timestamp
     fname_array = fname.split("_")
     if fname_array[1].isdigit():
         #ex. timestamp 20230313071832943473000
