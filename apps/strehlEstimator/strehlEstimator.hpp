@@ -173,8 +173,8 @@ class strehlEstimator : public MagAOXApp<true>,
     /// Tracks whether the estimated seeing has been explicitly set by an operator.
     bool m_seeingEstimatedManual{ false };
 
-    /// Operator-entered wind speed in m/s used for planning calculations.
-    float m_windSpeedEstimated{ 10.0f };
+    /// Operator-selected wind speed in m/s used for planning calculations.
+    float m_windSpeed{ 9.4f };
 
     /// Selects whether predicted outputs use the live or estimated planning inputs.
     bool m_useEstimates{ false };
@@ -313,8 +313,8 @@ class strehlEstimator : public MagAOXApp<true>,
         /// Selected seeing used for prediction.
         float m_selectedSeeing{ 0.0f };
 
-        /// Operator-entered wind-speed estimate in m/s.
-        float m_windSpeedEstimated{ 0.0f };
+        /// Operator-selected wind speed in m/s.
+        float m_windSpeed{ 0.0f };
 
         /// Selected wind speed used for prediction.
         float m_selectedWindSpeed{ 0.0f };
@@ -334,6 +334,18 @@ class strehlEstimator : public MagAOXApp<true>,
 
     /// Return the selected wind speed for prediction calculations.
     float selectedWindSpeed() const;
+
+    /// Return the supported wind-speed selection element names.
+    static const std::vector<std::string> &windSpeedSelectionElements();
+
+    /// Return the supported wind-speed selection labels.
+    static const std::vector<std::string> &windSpeedSelectionLabels();
+
+    /// Convert a wind-speed selection element name into its configured speed in m/s.
+    static float windSpeedSelectionValue( const std::string &selection /**< [in] selected wind-speed element name */ );
+
+    /// Return the nearest supported wind-speed selection element name for a speed in m/s.
+    static std::string windSpeedSelectionName( float windSpeed /**< [in] wind speed in m/s */ );
 
     /// Convert seeing in arcseconds to Fried parameter `r0` in meters.
     static float seeingToR0( float seeing /**< [in] seeing in arcseconds */ );
@@ -404,7 +416,7 @@ class strehlEstimator : public MagAOXApp<true>,
     /// Local writable star-magnitude property exposing `current` and `estimated`.
     pcf::IndiProperty m_indiP_mag;
 
-    /// Local writable wind-speed property exposing `current` and `estimated`.
+    /// Local writable wind-speed selection property exposing `slow`, `normal`, and `fast`.
     pcf::IndiProperty m_indiP_windSpeed;
 
     /// Local toggle selecting whether predicted outputs use estimated inputs.
@@ -440,7 +452,7 @@ class strehlEstimator : public MagAOXApp<true>,
     /// Callback for local seeing estimate writes.
     INDI_NEWCALLBACK_DECL( strehlEstimator, m_indiP_seeing_magaox );
 
-    /// Callback for local wind-speed estimate writes.
+    /// Callback for local wind-speed selection writes.
     INDI_NEWCALLBACK_DECL( strehlEstimator, m_indiP_windSpeed );
 
     /// Callback for the `use_estimates` toggle.
@@ -462,7 +474,7 @@ void strehlEstimator::setupConfig()
     m_aosys.loadMagAOX();
     m_aosysScan.loadMagAOX();
 
-    m_windSpeedEstimated = m_aosys.atm.v_wind();
+    m_windSpeed = windSpeedSelectionValue( windSpeedSelectionName( m_aosys.atm.v_wind() ) );
 
     config.add( "loop.number",
                 "",
@@ -576,7 +588,53 @@ float strehlEstimator::selectedSeeing() const
 float strehlEstimator::selectedWindSpeed() const
 {
     std::lock_guard<std::mutex> lock( m_stateMutex );
-    return m_windSpeedEstimated;
+    return m_windSpeed;
+}
+
+const std::vector<std::string> &strehlEstimator::windSpeedSelectionElements()
+{
+    static const std::vector<std::string> names{ "slow", "normal", "fast" };
+    return names;
+}
+
+const std::vector<std::string> &strehlEstimator::windSpeedSelectionLabels()
+{
+    static const std::vector<std::string> labels{ "Slow (9.4 m/s)", "Normal (18.7 m/s)", "Fast (23.4 m/s)" };
+    return labels;
+}
+
+float strehlEstimator::windSpeedSelectionValue( const std::string &selection )
+{
+    if( selection == "fast" )
+    {
+        return 23.4f;
+    }
+
+    if( selection == "normal" )
+    {
+        return 18.7f;
+    }
+
+    return 9.4f;
+}
+
+std::string strehlEstimator::windSpeedSelectionName( float windSpeed )
+{
+    float slowDiff   = std::fabs( windSpeed - 9.4f );
+    float normalDiff = std::fabs( windSpeed - 18.7f );
+    float fastDiff   = std::fabs( windSpeed - 23.4f );
+
+    if( normalDiff < slowDiff && normalDiff <= fastDiff )
+    {
+        return "normal";
+    }
+
+    if( fastDiff < slowDiff && fastDiff < normalDiff )
+    {
+        return "fast";
+    }
+
+    return "slow";
 }
 
 strehlEstimator::predictionInputs strehlEstimator::snapshotPredictionInputs() const
@@ -586,32 +644,32 @@ strehlEstimator::predictionInputs strehlEstimator::snapshotPredictionInputs() co
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_stateMutex );
 
-        inputs.m_fps                = m_fps;
-        inputs.m_emg                = m_emg;
-        inputs.m_qe                 = m_qe;
-        inputs.m_F0                 = m_F0;
-        inputs.m_lam0               = m_lam0;
-        inputs.m_elevation          = m_elevation;
-        inputs.m_npix               = m_npix;
-        inputs.m_mag                = m_mag;
-        inputs.m_magEstimated       = m_magEstimated;
-        inputs.m_seeing             = m_seeing;
-        inputs.m_seeingEstimated    = m_seeingEstimated;
-        inputs.m_windSpeedEstimated = m_windSpeedEstimated;
-        inputs.m_useEstimates       = m_useEstimates;
+        inputs.m_fps             = m_fps;
+        inputs.m_emg             = m_emg;
+        inputs.m_qe              = m_qe;
+        inputs.m_F0              = m_F0;
+        inputs.m_lam0            = m_lam0;
+        inputs.m_elevation       = m_elevation;
+        inputs.m_npix            = m_npix;
+        inputs.m_mag             = m_mag;
+        inputs.m_magEstimated    = m_magEstimated;
+        inputs.m_seeing          = m_seeing;
+        inputs.m_seeingEstimated = m_seeingEstimated;
+        inputs.m_windSpeed       = m_windSpeed;
+        inputs.m_useEstimates    = m_useEstimates;
     }
 
     if( inputs.m_useEstimates )
     {
         inputs.m_selectedMag       = inputs.m_magEstimated;
         inputs.m_selectedSeeing    = inputs.m_seeingEstimated;
-        inputs.m_selectedWindSpeed = inputs.m_windSpeedEstimated;
+        inputs.m_selectedWindSpeed = inputs.m_windSpeed;
     }
     else
     {
         inputs.m_selectedMag       = inputs.m_mag;
         inputs.m_selectedSeeing    = inputs.m_seeing;
-        inputs.m_selectedWindSpeed = inputs.m_windSpeedEstimated;
+        inputs.m_selectedWindSpeed = inputs.m_windSpeed;
     }
 
     return inputs;
@@ -661,7 +719,8 @@ float strehlEstimator::wfeNm( float variance, float lam0 )
 
 void strehlEstimator::updatePlanningProperties()
 {
-    predictionInputs inputs = snapshotPredictionInputs();
+    predictionInputs inputs        = snapshotPredictionInputs();
+    std::string      windSelection = windSpeedSelectionName( inputs.m_windSpeed );
 
     if( !m_indiDriver )
     {
@@ -673,8 +732,11 @@ void strehlEstimator::updatePlanningProperties()
         m_indiP_seeing_magaox["estimated"].set( inputs.m_seeingEstimated );
         m_indiP_seeing_magaox.setState( INDI_OK );
 
-        m_indiP_windSpeed["current"].set( inputs.m_windSpeedEstimated );
-        m_indiP_windSpeed["estimated"].set( inputs.m_windSpeedEstimated );
+        for( auto &&el : m_indiP_windSpeed.getElements() )
+        {
+            m_indiP_windSpeed[el.first].setSwitchState( el.first == windSelection ? pcf::IndiElement::On
+                                                                                  : pcf::IndiElement::Off );
+        }
         m_indiP_windSpeed.setState( INDI_OK );
 
         m_indiP_useEstimates["toggle"].setSwitchState( inputs.m_useEstimates ? pcf::IndiElement::On
@@ -687,8 +749,7 @@ void strehlEstimator::updatePlanningProperties()
     updatesIfChanged<float>( m_indiP_mag, { "current", "estimated" }, { inputs.m_mag, inputs.m_magEstimated } );
     updatesIfChanged<float>(
         m_indiP_seeing_magaox, { "current", "estimated" }, { inputs.m_seeing, inputs.m_seeingEstimated } );
-    updatesIfChanged<float>(
-        m_indiP_windSpeed, { "current", "estimated" }, { inputs.m_windSpeedEstimated, inputs.m_windSpeedEstimated } );
+    indi::updateSelectionSwitchIfChanged( m_indiP_windSpeed, windSelection, m_indiDriver, INDI_OK );
     updateSwitchIfChanged( m_indiP_useEstimates,
                            "toggle",
                            inputs.m_useEstimates ? pcf::IndiElement::On : pcf::IndiElement::Off,
@@ -913,9 +974,14 @@ int strehlEstimator::appStartup()
         return log<software_error, -1>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
     }
 
-    if( createCurrentEstimatedProperty( m_indiP_windSpeed, "wind_speed", "Wind Speed", "Error Budget" ) < 0 )
+    if( createStandardIndiSelectionSw( m_indiP_windSpeed,
+                                       "wind_speed",
+                                       windSpeedSelectionElements(),
+                                       windSpeedSelectionLabels(),
+                                       "Wind Speed",
+                                       "Error Budget" ) < 0 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "error from createCurrentEstimatedProperty" } );
+        return log<software_error, -1>( { __FILE__, __LINE__, "error from createStandardIndiSelectionSw" } );
     }
     if( registerIndiPropertyNew( m_indiP_windSpeed, INDI_NEWCALLBACK( m_indiP_windSpeed ) ) < 0 )
     {
@@ -1332,26 +1398,38 @@ INDI_NEWCALLBACK_DEFN( strehlEstimator, m_indiP_windSpeed )( const pcf::IndiProp
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_windSpeed, ipRecv );
 
-    if( ipRecv.find( "estimated" ) )
+    std::string selection;
+    for( auto &&el : ipRecv.getElements() )
     {
-        float windSpeed = ipRecv["estimated"].get<float>();
-
-        bool changed = false;
-
-        { // mutex scope
-            std::lock_guard<std::mutex> lock( m_stateMutex );
-            if( finitePositiveValue( windSpeed ) && windSpeed != m_windSpeedEstimated )
-            {
-                m_windSpeedEstimated = windSpeed;
-                changed              = true;
-            }
-        }
-
-        if( changed )
+        if( el.second.getSwitchState() == pcf::IndiElement::On )
         {
-            updatePlanningProperties();
-            updatePredictionOutputs();
+            selection = el.first;
+            break;
         }
+    }
+
+    if( selection == "" )
+    {
+        return 0;
+    }
+
+    float windSpeed = windSpeedSelectionValue( selection );
+    bool  changed   = false;
+
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_stateMutex );
+        if( finitePositiveValue( windSpeed ) && windSpeed != m_windSpeed )
+        {
+            m_windSpeed = windSpeed;
+            changed     = true;
+        }
+    }
+
+    updatePlanningProperties();
+
+    if( changed )
+    {
+        updatePredictionOutputs();
     }
 
     return 0;

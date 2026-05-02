@@ -69,7 +69,12 @@ class strehlEstimator_test : public strehlEstimator
             return -1;
         }
 
-        if( createCurrentEstimatedProperty( m_indiP_windSpeed, "wind_speed", "Wind Speed", "Error Budget" ) < 0 )
+        if( createStandardIndiSelectionSw( m_indiP_windSpeed,
+                                           "wind_speed",
+                                           windSpeedSelectionElements(),
+                                           windSpeedSelectionLabels(),
+                                           "Wind Speed",
+                                           "Error Budget" ) < 0 )
         {
             return -1;
         }
@@ -150,10 +155,16 @@ class strehlEstimator_test : public strehlEstimator
         return m_seeingEstimated;
     }
 
-    /// Return the estimated wind speed.
-    float estimatedWindSpeed() const
+    /// Return the selected wind speed value in m/s.
+    float windSpeed() const
     {
-        return m_windSpeedEstimated;
+        return m_windSpeed;
+    }
+
+    /// Return the selected wind-speed switch element name.
+    std::string windSpeedSelection() const
+    {
+        return windSpeedSelectionName( m_windSpeed );
     }
 
     /// Return whether estimate overrides are currently enabled.
@@ -310,9 +321,10 @@ TEST_CASE( "strehlEstimator startup publishes planning and optimum-speed propert
     REQUIRE( app.seeingProperty().find( "current" ) );
     REQUIRE( app.seeingProperty().find( "estimated" ) );
 
-    REQUIRE( app.windSpeedProperty().find( "current" ) );
-    REQUIRE( app.windSpeedProperty().find( "estimated" ) );
-    REQUIRE( app.windSpeedProperty()["current"].get<float>() == Approx( app.estimatedWindSpeed() ) );
+    REQUIRE( app.windSpeedProperty().find( "slow" ) );
+    REQUIRE( app.windSpeedProperty().find( "normal" ) );
+    REQUIRE( app.windSpeedProperty().find( "fast" ) );
+    REQUIRE( app.windSpeedProperty()[app.windSpeedSelection()].getSwitchState() == pcf::IndiElement::On );
 
     REQUIRE( app.useEstimatesProperty().find( "toggle" ) );
     REQUIRE( app.useEstimatesProperty()["toggle"].getSwitchState() == pcf::IndiElement::Off );
@@ -325,11 +337,12 @@ TEST_CASE( "strehlEstimator startup publishes planning and optimum-speed propert
     REQUIRE( app.optimumLoopSpeedProperty().find( "wfe_fitting" ) );
 }
 
-/// Verify local planning-input writes only honor `estimated`, while live updates continue to drive `current`.
+/// Verify local star-magnitude and seeing writes only honor `estimated`, while the wind-speed selector updates the
+/// planning wind state.
 /**
  * \ingroup strehlEstimator_unit_test
  */
-TEST_CASE( "strehlEstimator ignores writes to current and accepts writes to estimated", "[strehlEstimator]" )
+TEST_CASE( "strehlEstimator planning inputs honor estimated writes and wind-speed selections", "[strehlEstimator]" )
 {
     // clang-format off
     #ifdef STREHLESTIMATOR_TEST_DOXYGEN_REF
@@ -399,23 +412,21 @@ TEST_CASE( "strehlEstimator ignores writes to current and accepts writes to esti
         REQUIRE( app.estimatedSeeing() == Approx( 1.15f ) );
     }
 
-    SECTION( "wind current writes are ignored and estimated writes update both elements" )
+    SECTION( "wind-speed selection writes update the planning wind speed" )
     {
-        const float initialWind = app.windSpeedProperty()["current"].get<float>();
+        pcf::IndiProperty normal = makeLocalSwitchProperty( "right", "wind_speed" );
+        normal.add( pcf::IndiElement( "normal" ) );
+        normal["normal"].setSwitchState( pcf::IndiElement::On );
+        REQUIRE( app.newCallBack_m_indiP_windSpeed( normal ) == 0 );
+        REQUIRE( app.windSpeed() == Approx( 18.7f ) );
+        REQUIRE( app.windSpeedProperty()["normal"].getSwitchState() == pcf::IndiElement::On );
 
-        pcf::IndiProperty currentWrite = makeLocalNumberProperty( "right", "wind_speed" );
-        currentWrite.add( pcf::IndiElement( "current" ) );
-        currentWrite["current"].set( initialWind + 5.0f );
-        REQUIRE( app.newCallBack_m_indiP_windSpeed( currentWrite ) == 0 );
-        REQUIRE( app.estimatedWindSpeed() == Approx( initialWind ) );
-
-        pcf::IndiProperty estimatedWrite = makeLocalNumberProperty( "right", "wind_speed" );
-        estimatedWrite.add( pcf::IndiElement( "estimated" ) );
-        estimatedWrite["estimated"].set( initialWind + 7.0f );
-        REQUIRE( app.newCallBack_m_indiP_windSpeed( estimatedWrite ) == 0 );
-        REQUIRE( app.estimatedWindSpeed() == Approx( initialWind + 7.0f ) );
-        REQUIRE( app.windSpeedProperty()["current"].get<float>() == Approx( initialWind + 7.0f ) );
-        REQUIRE( app.windSpeedProperty()["estimated"].get<float>() == Approx( initialWind + 7.0f ) );
+        pcf::IndiProperty fast = makeLocalSwitchProperty( "right", "wind_speed" );
+        fast.add( pcf::IndiElement( "fast" ) );
+        fast["fast"].setSwitchState( pcf::IndiElement::On );
+        REQUIRE( app.newCallBack_m_indiP_windSpeed( fast ) == 0 );
+        REQUIRE( app.windSpeed() == Approx( 23.4f ) );
+        REQUIRE( app.windSpeedProperty()["fast"].getSwitchState() == pcf::IndiElement::On );
     }
 }
 
@@ -519,10 +530,10 @@ TEST_CASE( "strehlEstimator uses estimates when requested and scans the fixed lo
     seeingEstimate["estimated"].set( 1.10f );
     REQUIRE( app.newCallBack_m_indiP_seeing_magaox( seeingEstimate ) == 0 );
 
-    pcf::IndiProperty windEstimate = makeLocalNumberProperty( "right", "wind_speed" );
-    windEstimate.add( pcf::IndiElement( "estimated" ) );
-    windEstimate["estimated"].set( 18.0f );
-    REQUIRE( app.newCallBack_m_indiP_windSpeed( windEstimate ) == 0 );
+    pcf::IndiProperty windSelection = makeLocalSwitchProperty( "right", "wind_speed" );
+    windSelection.add( pcf::IndiElement( "normal" ) );
+    windSelection["normal"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_windSpeed( windSelection ) == 0 );
 
     pcf::IndiProperty useEstimates = makeLocalSwitchProperty( "right", "use_estimates" );
     useEstimates.add( pcf::IndiElement( "toggle" ) );

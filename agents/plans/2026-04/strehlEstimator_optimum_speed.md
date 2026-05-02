@@ -107,3 +107,6 @@ Assumptions captured in this plan:
 - `seeing.current` should continue to come from `tcsi.seeing.dimm_fwhm_corr` in this change.  The existing `mag1`/`mag2` seeing fields can remain unused until there is a separate request to choose among them.
 - `wind_speed.current` intentionally mirrors `wind_speed.estimated`; no new TCS or telemetry wind feed is planned here.
 - The first implementation should publish the best sampled operating point, not the entire 30-point curve, unless review says the extra surface is needed immediately.
+
+Implementation note:
+- The delivered follow-up UI changed `wind_speed` from a numeric `current`/`estimated` property to a one-of-many switch with `slow`, `normal`, and `fast` options mapped to `9.4`, `18.7`, and `23.4` m/s.
