@@ -60,6 +60,11 @@ class modalGainOptHarness : public modalGainOpt
         return m_extrapNoiseEstimateRange;
     }
 
+    int extrapNoiseEstimateStatistic() const
+    {
+        return m_extrapNoiseEstimateStatistic;
+    }
+
     int extrapClosedLoopOlEstimateMethod() const
     {
         return m_extrapClosedLoopOlEstimateMethod;
@@ -80,6 +85,12 @@ class modalGainOptHarness : public modalGainOpt
     {
         m_extrapNoiseEstimateRange = range;
         m_extrapConfig.m_noiseEstimateRange = extrapNoiseEstimateRangeName( range );
+    }
+
+    void setExtrapNoiseEstimateStatisticForTest( int statistic )
+    {
+        m_extrapNoiseEstimateStatistic = statistic;
+        m_extrapConfig.m_noiseEstimateStatistic = extrapNoiseEstimateStatisticName( statistic );
     }
 
     void setExtrapClosedLoopOlEstimateMethodForTest( int method )
@@ -324,6 +335,15 @@ class modalGainOptHarness : public modalGainOpt
                                        "Noise Estimate Range",
                                        "Extrapolation" );
 
+        createStandardIndiSelectionSw( m_indiP_extrapNoiseEstimateStatistic,
+                                       "extrap_noiseEstimateStatistic",
+                                       { extrapNoiseEstimateStatisticElement( c_extrapNoiseEstimatePercentile ),
+                                         extrapNoiseEstimateStatisticElement( c_extrapNoiseEstimateMinimum ) },
+                                       { extrapNoiseEstimateStatisticLabel( c_extrapNoiseEstimatePercentile ),
+                                         extrapNoiseEstimateStatisticLabel( c_extrapNoiseEstimateMinimum ) },
+                                       "Noise Estimate Statistic",
+                                       "Extrapolation" );
+
         createStandardIndiSelectionSw(
             m_indiP_extrapClosedLoopOlEstimateMethod,
             "extrap_closedLoopOlEstimateMethod",
@@ -350,6 +370,11 @@ class modalGainOptHarness : public modalGainOpt
         return handleExtrapNoiseEstimateRangeProperty( ipRecv );
     }
 
+    int handleExtrapNoiseEstimateStatisticPropertyForTest( const pcf::IndiProperty &ipRecv )
+    {
+        return handleExtrapNoiseEstimateStatisticProperty( ipRecv );
+    }
+
     int handleExtrapClosedLoopOlEstimateMethodPropertyForTest( const pcf::IndiProperty &ipRecv )
     {
         return handleExtrapClosedLoopOlEstimateMethodProperty( ipRecv );
@@ -368,6 +393,12 @@ class modalGainOptHarness : public modalGainOpt
     pcf::IndiElement::SwitchStateType extrapNoiseEstimateRangeElementStateForTest( const std::string &element ) const
     {
         return m_indiP_extrapNoiseEstimateRange[element].getSwitchState();
+    }
+
+    pcf::IndiElement::SwitchStateType
+    extrapNoiseEstimateStatisticElementStateForTest( const std::string &element ) const
+    {
+        return m_indiP_extrapNoiseEstimateStatistic[element].getSwitchState();
     }
 
     pcf::IndiElement::SwitchStateType
@@ -439,6 +470,13 @@ TEST_CASE( "modalGainOpt placeholder harness instantiates the app", "[modalGainO
         REQUIRE( extrapNoiseEstimateRangeFromName( "low_freq" ) == c_extrapNoiseEstimateLowFreq );
         REQUIRE( extrapNoiseEstimateRangeFromName( "low-freq" ) == c_extrapNoiseEstimateLowFreq );
 
+        REQUIRE( extrapNoiseEstimateStatisticName( c_extrapNoiseEstimatePercentile ) == "percentile" );
+        REQUIRE( extrapNoiseEstimateStatisticName( c_extrapNoiseEstimateMinimum ) == "minimum" );
+        REQUIRE( extrapNoiseEstimateStatisticFromElement( "percentile" ) == c_extrapNoiseEstimatePercentile );
+        REQUIRE( extrapNoiseEstimateStatisticFromElement( "minimum" ) == c_extrapNoiseEstimateMinimum );
+        REQUIRE( extrapNoiseEstimateStatisticFromName( "percentile" ) == c_extrapNoiseEstimatePercentile );
+        REQUIRE( extrapNoiseEstimateStatisticFromName( "minimum" ) == c_extrapNoiseEstimateMinimum );
+
         REQUIRE( extrapClosedLoopOlEstimateMethodName( c_extrapClosedLoopOlEstimateEtfOnly ) == "etf-only" );
         REQUIRE( extrapClosedLoopOlEstimateMethodName( c_extrapClosedLoopOlEstimateNtfAware ) == "ntf-aware" );
         REQUIRE( extrapClosedLoopOlEstimateMethodFromElement( "etf_only" ) == c_extrapClosedLoopOlEstimateEtfOnly );
@@ -466,7 +504,7 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-                                "extrapolation", "extrapolation", "extrapolation", "extrapolation" },
+                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation" },
                               {
                                   "number",
                                   "name",
@@ -476,6 +514,7 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                   "method",
                                   "noiseEstimateDomain",
                                   "noiseEstimateRange",
+                                  "noiseEstimateStatistic",
                                   "noiseEstimateLowFreqMaxHz",
                                   "closedLoopOlEstimateMethod",
                                   "powerLawIndex",
@@ -506,6 +545,7 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                 "moffat_peaks",
                                 "closed_loop_pre_xfer",
                                 "low_freq",
+                                "minimum",
                                 "123",
                                 "ntf_aware",
                                 "1.5",
@@ -543,9 +583,11 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
     REQUIRE( app.extrapMethod() == c_olProcessMoffatPeaks );
     REQUIRE( app.extrapNoiseEstimateDomain() == c_extrapNoiseEstimateClosedLoopPreXfer );
     REQUIRE( app.extrapNoiseEstimateRange() == c_extrapNoiseEstimateLowFreq );
+    REQUIRE( app.extrapNoiseEstimateStatistic() == c_extrapNoiseEstimateMinimum );
     REQUIRE( app.extrapClosedLoopOlEstimateMethod() == c_extrapClosedLoopOlEstimateNtfAware );
     REQUIRE( app.extrapConfig().m_noiseEstimateDomain == "closed-loop-pre-xfer" );
     REQUIRE( app.extrapConfig().m_noiseEstimateRange == "low-freq" );
+    REQUIRE( app.extrapConfig().m_noiseEstimateStatistic == "minimum" );
     REQUIRE( app.extrapConfig().m_noiseEstimateLowFreqMaxHz == Approx( 123.0F ) );
     REQUIRE( app.extrapConfig().m_closedLoopOlEstimateMethod == "ntf-aware" );
     REQUIRE( app.extrapConfig().m_powerLawIndex == Approx( 1.5F ) );
@@ -631,6 +673,25 @@ TEST_CASE( "modalGainOpt restores current selection when extrapolation switches 
                      extrapNoiseEstimateRangeElement( c_extrapNoiseEstimateHighFreq ) ) == pcf::IndiElement::Off );
     }
 
+    SECTION( "noise-estimate statistic is restored" )
+    {
+        app.setExtrapNoiseEstimateStatisticForTest( c_extrapNoiseEstimateMinimum );
+
+        pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+        ip.add( pcf::IndiElement( extrapNoiseEstimateStatisticElement( c_extrapNoiseEstimatePercentile ),
+                                  pcf::IndiElement::Off ) );
+        ip.add( pcf::IndiElement( extrapNoiseEstimateStatisticElement( c_extrapNoiseEstimateMinimum ),
+                                  pcf::IndiElement::Off ) );
+
+        REQUIRE( app.handleExtrapNoiseEstimateStatisticPropertyForTest( ip ) == 0 );
+        REQUIRE( app.extrapNoiseEstimateStatistic() == c_extrapNoiseEstimateMinimum );
+        REQUIRE( app.extrapConfig().m_noiseEstimateStatistic == "minimum" );
+        REQUIRE( app.extrapNoiseEstimateStatisticElementStateForTest(
+                     extrapNoiseEstimateStatisticElement( c_extrapNoiseEstimateMinimum ) ) == pcf::IndiElement::On );
+        REQUIRE( app.extrapNoiseEstimateStatisticElementStateForTest( extrapNoiseEstimateStatisticElement(
+                     c_extrapNoiseEstimatePercentile ) ) == pcf::IndiElement::Off );
+    }
+
     SECTION( "closed-loop OL estimate method is restored" )
     {
         app.setExtrapClosedLoopOlEstimateMethodForTest( c_extrapClosedLoopOlEstimateNtfAware );
@@ -713,6 +774,21 @@ TEST_CASE( "modalPsdProcessor can estimate noise from the low-frequency end", "[
     REQUIRE( noisePsd[1] == Approx( 2.0F ) );
 }
 
+TEST_CASE( "modalPsdProcessor can estimate noise using the minimum PSD in range", "[modalGainOpt]" )
+{
+    std::vector<float> measuredPsd{ 0.0F, 8.0F, 4.0F, 2.0F, 20.0F, 20.0F, 20.0F, 20.0F };
+    std::vector<float> freq{ 0.0F, 1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F };
+    std::vector<float> noisePsd;
+    float noiseFloor = 0.0F;
+
+    mx::error_t errc =
+        processPsdProcessorT::estimateNoisePsd( noisePsd, noiseFloor, measuredPsd, freq, 10, "low_freq", "minimum" );
+
+    REQUIRE( !errc );
+    REQUIRE( noiseFloor == Approx( 2.0F ) );
+    REQUIRE( noisePsd[1] == Approx( 2.0F ) );
+}
+
 TEST_CASE( "modalPsdProcessor can limit low-frequency noise estimation to a max frequency", "[modalGainOpt]" )
 {
     std::vector<float> measuredPsd{ 0.0F, 20.0F, 20.0F, 2.0F, 2.0F, 20.0F, 20.0F, 20.0F, 20.0F, 20.0F };
@@ -720,8 +796,14 @@ TEST_CASE( "modalPsdProcessor can limit low-frequency noise estimation to a max 
     std::vector<float> noisePsd;
     float noiseFloor = 0.0F;
 
-    mx::error_t errc =
-        processPsdProcessorT::estimateNoisePsd( noisePsd, noiseFloor, measuredPsd, freq, 10, "low_freq", 2.1F );
+    mx::error_t errc = processPsdProcessorT::estimateNoisePsd( noisePsd,
+                                                               noiseFloor,
+                                                               measuredPsd,
+                                                               freq,
+                                                               10,
+                                                               "low_freq",
+                                                               "percentile",
+                                                               2.1F );
 
     REQUIRE( !errc );
     REQUIRE( noiseFloor == Approx( 20.0F ) );

@@ -53,6 +53,8 @@ static constexpr int c_extrapNoiseEstimateOpenLoop = 0;
 static constexpr int c_extrapNoiseEstimateClosedLoopPreXfer = 1;
 static constexpr int c_extrapNoiseEstimateHighFreq = 0;
 static constexpr int c_extrapNoiseEstimateLowFreq = 1;
+static constexpr int c_extrapNoiseEstimatePercentile = 0;
+static constexpr int c_extrapNoiseEstimateMinimum = 1;
 static constexpr int c_extrapClosedLoopOlEstimateEtfOnly = 0;
 static constexpr int c_extrapClosedLoopOlEstimateNtfAware = 1;
 
@@ -298,6 +300,75 @@ inline int extrapNoiseEstimateRangeFromName( std::string range )
     }
 
     return c_extrapNoiseEstimateHighFreq;
+}
+
+inline std::string extrapNoiseEstimateStatisticElement( int statistic )
+{
+    switch( statistic )
+    {
+        case c_extrapNoiseEstimateMinimum:
+            return "minimum";
+        case c_extrapNoiseEstimatePercentile:
+        default:
+            return "percentile";
+    }
+}
+
+inline std::string extrapNoiseEstimateStatisticLabel( int statistic )
+{
+    switch( statistic )
+    {
+        case c_extrapNoiseEstimateMinimum:
+            return "Minimum";
+        case c_extrapNoiseEstimatePercentile:
+        default:
+            return "Percentile";
+    }
+}
+
+inline std::string extrapNoiseEstimateStatisticName( int statistic )
+{
+    switch( statistic )
+    {
+        case c_extrapNoiseEstimateMinimum:
+            return "minimum";
+        case c_extrapNoiseEstimatePercentile:
+        default:
+            return "percentile";
+    }
+}
+
+inline int extrapNoiseEstimateStatisticFromElement( const std::string &element )
+{
+    if( element == "minimum" )
+    {
+        return c_extrapNoiseEstimateMinimum;
+    }
+
+    return c_extrapNoiseEstimatePercentile;
+}
+
+inline int extrapNoiseEstimateStatisticFromName( std::string statistic )
+{
+    std::transform( statistic.begin(),
+                    statistic.end(),
+                    statistic.begin(),
+                    []( unsigned char c )
+                    {
+                        if( c == '_' )
+                        {
+                            return static_cast<char>( '-' );
+                        }
+
+                        return static_cast<char>( std::tolower( c ) );
+                    } );
+
+    if( statistic == "minimum" )
+    {
+        return c_extrapNoiseEstimateMinimum;
+    }
+
+    return c_extrapNoiseEstimatePercentile;
 }
 
 inline std::string extrapClosedLoopOlEstimateMethodElement( int method )
@@ -657,8 +728,10 @@ class modalGainOpt : public MagAOXApp<true>,
     int m_extrapOL{ c_olProcessNone }; ///< Which extrapolation method to use for the OL PSD.
     int m_extrapNoiseEstimateDomain{ c_extrapNoiseEstimateOpenLoop }; ///< Where to estimate the modal noise floor.
     int m_extrapNoiseEstimateRange{ c_extrapNoiseEstimateHighFreq };  ///< Which PSD end to use for the noise fit.
+    int m_extrapNoiseEstimateStatistic{
+        c_extrapNoiseEstimatePercentile };     ///< How the selected PSD bins are summarized into a noise floor.
     int m_extrapClosedLoopOlEstimateMethod{
-        c_extrapClosedLoopOlEstimateEtfOnly };                        ///< Which CL-to-OL reconstruction to use.
+        c_extrapClosedLoopOlEstimateEtfOnly }; ///< Which CL-to-OL reconstruction to use.
 
     ///@}
 
@@ -905,6 +978,9 @@ class modalGainOpt : public MagAOXApp<true>,
     /// Handle the noise-estimation-range selection switch property.
     int handleExtrapNoiseEstimateRangeProperty( const pcf::IndiProperty &ipRecv );
 
+    /// Handle the noise-estimation-statistic selection switch property.
+    int handleExtrapNoiseEstimateStatisticProperty( const pcf::IndiProperty &ipRecv );
+
     /// Handle the closed-loop OL-estimation-method selection switch property.
     int handleExtrapClosedLoopOlEstimateMethodProperty( const pcf::IndiProperty &ipRecv );
 
@@ -1109,6 +1185,7 @@ class modalGainOpt : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_extrapMethod;
     pcf::IndiProperty m_indiP_extrapNoiseEstimateDomain;
     pcf::IndiProperty m_indiP_extrapNoiseEstimateRange;
+    pcf::IndiProperty m_indiP_extrapNoiseEstimateStatistic;
     pcf::IndiProperty m_indiP_extrapNoiseEstimateLowFreqMaxHz;
     pcf::IndiProperty m_indiP_extrapClosedLoopOlEstimateMethod;
     pcf::IndiProperty m_indiP_extrapPowerLawIndex;
@@ -1154,6 +1231,7 @@ class modalGainOpt : public MagAOXApp<true>,
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapMethod );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapNoiseEstimateDomain );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapNoiseEstimateRange );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapNoiseEstimateStatistic );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapNoiseEstimateLowFreqMaxHz );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapClosedLoopOlEstimateMethod );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawIndex );
@@ -1293,6 +1371,16 @@ void modalGainOpt::setupConfig()
                 false,
                 "string",
                 "Which end of the PSD is used for noise estimation: high_freq or low_freq." );
+
+    config.add( "extrapolation.noiseEstimateStatistic",
+                "",
+                "extrapolation.noiseEstimateStatistic",
+                argType::Required,
+                "extrapolation",
+                "noiseEstimateStatistic",
+                false,
+                "string",
+                "How to summarize the selected noise-estimation bins: percentile or minimum." );
 
     config.add( "extrapolation.noiseEstimateLowFreqMaxHz",
                 "",
@@ -1539,6 +1627,10 @@ int modalGainOpt::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( noiseEstimateRange, "extrapolation.noiseEstimateRange" );
     m_extrapNoiseEstimateRange = extrapNoiseEstimateRangeFromName( noiseEstimateRange );
     m_extrapConfig.m_noiseEstimateRange = extrapNoiseEstimateRangeName( m_extrapNoiseEstimateRange );
+    std::string noiseEstimateStatistic = extrapNoiseEstimateStatisticName( m_extrapNoiseEstimateStatistic );
+    _config( noiseEstimateStatistic, "extrapolation.noiseEstimateStatistic" );
+    m_extrapNoiseEstimateStatistic = extrapNoiseEstimateStatisticFromName( noiseEstimateStatistic );
+    m_extrapConfig.m_noiseEstimateStatistic = extrapNoiseEstimateStatisticName( m_extrapNoiseEstimateStatistic );
     _config( m_extrapConfig.m_noiseEstimateLowFreqMaxHz, "extrapolation.noiseEstimateLowFreqMaxHz" );
     std::string closedLoopOlEstimateMethod = extrapClosedLoopOlEstimateMethodName( m_extrapClosedLoopOlEstimateMethod );
     _config( closedLoopOlEstimateMethod, "extrapolation.closedLoopOlEstimateMethod" );
@@ -1764,6 +1856,24 @@ int modalGainOpt::appStartup()
     }
     if( registerIndiPropertyNew( m_indiP_extrapNoiseEstimateRange,
                                  INDI_NEWCALLBACK( m_indiP_extrapNoiseEstimateRange ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
+        return -1;
+    }
+    if( createStandardIndiSelectionSw( m_indiP_extrapNoiseEstimateStatistic,
+                                       "extrap_noiseEstimateStatistic",
+                                       { extrapNoiseEstimateStatisticElement( c_extrapNoiseEstimatePercentile ),
+                                         extrapNoiseEstimateStatisticElement( c_extrapNoiseEstimateMinimum ) },
+                                       { extrapNoiseEstimateStatisticLabel( c_extrapNoiseEstimatePercentile ),
+                                         extrapNoiseEstimateStatisticLabel( c_extrapNoiseEstimateMinimum ) },
+                                       "Noise Estimate Statistic",
+                                       "Extrapolation" ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "error from createStandardIndiSelectionSw" } );
+        return -1;
+    }
+    if( registerIndiPropertyNew( m_indiP_extrapNoiseEstimateStatistic,
+                                 INDI_NEWCALLBACK( m_indiP_extrapNoiseEstimateStatistic ) ) < 0 )
     {
         log<software_error>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
         return -1;
@@ -2044,6 +2154,7 @@ int modalGainOpt::appLogic()
     int extrapOL = 0;
     int extrapNoiseEstimateDomain = 0;
     int extrapNoiseEstimateRange = 0;
+    int extrapNoiseEstimateStatistic = 0;
     int extrapClosedLoopOlEstimateMethod = 0;
     int modesOn = 0;
     int modesOnSI = 0;
@@ -2062,6 +2173,7 @@ int modalGainOpt::appLogic()
         extrapOL = m_extrapOL;
         extrapNoiseEstimateDomain = m_extrapNoiseEstimateDomain;
         extrapNoiseEstimateRange = m_extrapNoiseEstimateRange;
+        extrapNoiseEstimateStatistic = m_extrapNoiseEstimateStatistic;
         extrapClosedLoopOlEstimateMethod = m_extrapClosedLoopOlEstimateMethod;
         modesOn = m_modesOn;
         modesOnSI = m_modesOnSI;
@@ -2117,6 +2229,10 @@ int modalGainOpt::appLogic()
                                           INDI_OK );
     indi::updateSelectionSwitchIfChanged( m_indiP_extrapNoiseEstimateRange,
                                           extrapNoiseEstimateRangeElement( extrapNoiseEstimateRange ),
+                                          m_indiDriver,
+                                          INDI_OK );
+    indi::updateSelectionSwitchIfChanged( m_indiP_extrapNoiseEstimateStatistic,
+                                          extrapNoiseEstimateStatisticElement( extrapNoiseEstimateStatistic ),
                                           m_indiDriver,
                                           INDI_OK );
     updatesIfChanged<float>( m_indiP_extrapNoiseEstimateLowFreqMaxHz,
@@ -4155,6 +4271,7 @@ void modalGainOpt::goptThreadExec()
                                                                 m_freq,
                                                                 n,
                                                                 m_extrapConfig.m_noiseEstimateRange,
+                                                                m_extrapConfig.m_noiseEstimateStatistic,
                                                                 m_extrapConfig.m_noiseEstimateLowFreqMaxHz );
                     if( !!errc )
                     {
@@ -4192,6 +4309,8 @@ void modalGainOpt::goptThreadExec()
                         useClosedLoopNoiseEstimate ? c_extrapNoiseEstimateClosedLoopPreXfer
                                                    : c_extrapNoiseEstimateOpenLoop );
                     processConfig.m_noiseEstimateRange = extrapNoiseEstimateRangeName( m_extrapNoiseEstimateRange );
+                    processConfig.m_noiseEstimateStatistic =
+                        extrapNoiseEstimateStatisticName( m_extrapNoiseEstimateStatistic );
                     processConfig.m_noiseEstimateLowFreqMaxHz = m_extrapConfig.m_noiseEstimateLowFreqMaxHz;
                     processConfig.m_closedLoopOlEstimateMethod =
                         extrapClosedLoopOlEstimateMethodName( m_extrapClosedLoopOlEstimateMethod );
@@ -4224,6 +4343,7 @@ void modalGainOpt::goptThreadExec()
                             log<text_log>(
                                 "extrapolation settings: noiseDomain=" + processConfig.m_noiseEstimateDomain +
                                     " noiseRange=" + processConfig.m_noiseEstimateRange +
+                                    " noiseStatistic=" + processConfig.m_noiseEstimateStatistic +
                                     " noiseLowMax=" + std::to_string( processConfig.m_noiseEstimateLowFreqMaxHz ) +
                                     " olEstimateMethod=" + processConfig.m_closedLoopOlEstimateMethod +
                                     " match=" + std::to_string( processConfig.m_powerLawMatchFreq ) +
@@ -4253,6 +4373,7 @@ void modalGainOpt::goptThreadExec()
                                                                     m_freq,
                                                                     n,
                                                                     processConfig.m_noiseEstimateRange,
+                                                                    processConfig.m_noiseEstimateStatistic,
                                                                     processConfig.m_noiseEstimateLowFreqMaxHz );
                         if( !!noiseErr )
                         {
@@ -5182,6 +5303,79 @@ int modalGainOpt::handleExtrapNoiseEstimateRangeProperty( const pcf::IndiPropert
     return 0;
 }
 
+int modalGainOpt::handleExtrapNoiseEstimateStatisticProperty( const pcf::IndiProperty &ipRecv )
+{
+    int target = c_extrapNoiseEstimatePercentile;
+    bool found = false;
+    for( auto elit = ipRecv.getElements().begin(); elit != ipRecv.getElements().end(); ++elit )
+    {
+        if( elit->second.getSwitchState() != pcf::IndiElement::On )
+        {
+            continue;
+        }
+
+        if( found )
+        {
+            return log<software_error, -1>(
+                { __FILE__, __LINE__, "Multiple noise-estimate statistics selected in one update" } );
+        }
+
+        target = extrapNoiseEstimateStatisticFromElement( elit->first );
+        if( target == c_extrapNoiseEstimatePercentile &&
+            elit->first != extrapNoiseEstimateStatisticElement( c_extrapNoiseEstimatePercentile ) )
+        {
+            return log<software_error, -1>(
+                { __FILE__, __LINE__, "Invalid noise-estimate-statistic element: " + elit->first } );
+        }
+
+        found = true;
+    }
+
+    if( !found )
+    {
+        int current = c_extrapNoiseEstimatePercentile;
+        {
+            std::lock_guard<std::mutex> lock( m_goptMutex );
+            current = m_extrapNoiseEstimateStatistic;
+        }
+
+        const std::string currentElement = extrapNoiseEstimateStatisticElement( current );
+        if( m_indiP_extrapNoiseEstimateStatistic.find( currentElement ) )
+        {
+            for( auto elit = m_indiP_extrapNoiseEstimateStatistic.getElements().begin();
+                 elit != m_indiP_extrapNoiseEstimateStatistic.getElements().end();
+                 ++elit )
+            {
+                m_indiP_extrapNoiseEstimateStatistic[elit->first].setSwitchState(
+                    elit->first == currentElement ? pcf::IndiElement::On : pcf::IndiElement::Off );
+            }
+            m_indiP_extrapNoiseEstimateStatistic.setState( pcf::IndiProperty::Ok );
+        }
+
+        indi::updateSelectionSwitchIfChanged( m_indiP_extrapNoiseEstimateStatistic,
+                                              currentElement,
+                                              m_indiDriver,
+                                              INDI_OK );
+        return 0;
+    }
+
+    if( target != m_extrapNoiseEstimateStatistic )
+    {
+        m_updating = true;
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+        m_updating = true;
+
+        m_extrapNoiseEstimateStatistic = target;
+        m_extrapConfig.m_noiseEstimateStatistic = extrapNoiseEstimateStatisticName( target );
+
+        m_sinceChange = -1;
+        m_updating = false;
+        std::cerr << "Got noise-estimate statistic: " << extrapNoiseEstimateStatisticName( target ) << '\n';
+    }
+
+    return 0;
+}
+
 int modalGainOpt::handleExtrapClosedLoopOlEstimateMethodProperty( const pcf::IndiProperty &ipRecv )
 {
     int target = c_extrapClosedLoopOlEstimateEtfOnly;
@@ -5271,6 +5465,12 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapNoiseEstimateRange )( const p
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapNoiseEstimateRange, ipRecv );
     return handleExtrapNoiseEstimateRangeProperty( ipRecv );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapNoiseEstimateStatistic )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapNoiseEstimateStatistic, ipRecv );
+    return handleExtrapNoiseEstimateStatisticProperty( ipRecv );
 }
 
 INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapNoiseEstimateLowFreqMaxHz )( const pcf::IndiProperty &ipRecv )

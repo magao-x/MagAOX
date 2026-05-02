@@ -49,6 +49,9 @@ class modalPsdProcessor
     /// The default disabled maximum frequency for low-frequency noise estimation.
     static constexpr realT c_defaultNoiseEstimateLowFreqMaxHz = static_cast<realT>( 0 );
 
+    /// The default statistic used to estimate the flat noise floor.
+    static constexpr const char *c_defaultNoiseEstimateStatistic = "percentile";
+
     /// The default closed-loop to open-loop PSD reconstruction method.
     static constexpr const char *c_defaultClosedLoopOlEstimateMethod = "etf-only";
 
@@ -126,6 +129,9 @@ class modalPsdProcessor
 
         /// The maximum frequency in Hz used by the low-frequency noise estimate, or 0 to disable.
         realT m_noiseEstimateLowFreqMaxHz{ c_defaultNoiseEstimateLowFreqMaxHz };
+
+        /// Which statistic is used to estimate the flat noise floor from the selected bins.
+        std::string m_noiseEstimateStatistic{ c_defaultNoiseEstimateStatistic };
 
         /// How to reconstruct the OL PSD from a CL PSD when estimating noise in CL space.
         std::string m_closedLoopOlEstimateMethod{ c_defaultClosedLoopOlEstimateMethod };
@@ -231,6 +237,9 @@ class modalPsdProcessor
         /// The maximum frequency in Hz used by the low-frequency noise estimate, or 0 if disabled.
         realT m_noiseEstimateLowFreqMaxHz{ c_defaultNoiseEstimateLowFreqMaxHz };
 
+        /// Which statistic was used to estimate the flat noise floor from the selected bins.
+        std::string m_noiseEstimateStatistic{ c_defaultNoiseEstimateStatistic };
+
         /// Which CL-to-OL reconstruction method was used.
         std::string m_closedLoopOlEstimateMethod{ c_defaultClosedLoopOlEstimateMethod };
 
@@ -326,7 +335,7 @@ class modalPsdProcessor
                 const std::vector<realT> *ntfPsd = nullptr              /**< [in] optional CL NTF^2 correction */
     );
 
-    /// Estimate the flat noise PSD using the modalGainOpt percentile rule.
+    /// Estimate the flat noise PSD using the configured modalGainOpt statistic.
     static mx::error_t
     estimateNoisePsd( std::vector<realT> &noisePsd,          /**< [out] the flat noise PSD estimate */
                       realT &noiseFloor,                     /**< [out] the fitted noise floor */
@@ -334,6 +343,8 @@ class modalPsdProcessor
                       const std::vector<realT> &freq,        /**< [in] the one-sided frequency grid */
                       size_t modeIndex,                      /**< [in] the zero-based mode index */
                       std::string noiseEstimateRange = c_defaultNoiseEstimateRange, /**< [in] which PSD end to use */
+                      std::string noiseEstimateStatistic =
+                          c_defaultNoiseEstimateStatistic,   /**< [in] how to summarize the selected bins */
                       realT noiseEstimateLowFreqMaxHz =
                           c_defaultNoiseEstimateLowFreqMaxHz /**< [in] optional low-frequency upper limit */
     );
@@ -355,6 +366,10 @@ class modalPsdProcessor
 
     /// Normalize a noise-estimation-range name to lowercase hyphenated form.
     static std::string normalizeNoiseEstimateRange( std::string range /**< [in] the requested PSD-end selector */ );
+
+    /// Normalize a noise-estimation-statistic name to lowercase hyphenated form.
+    static std::string
+    normalizeNoiseEstimateStatistic( std::string statistic /**< [in] the requested noise-fit statistic */ );
 
     /// Normalize a CL-to-OL PSD reconstruction method name to lowercase hyphenated form.
     static std::string
@@ -601,6 +616,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
     result.m_noiseEstimateDomain = normalizeNoiseEstimateDomain( config.m_noiseEstimateDomain );
     result.m_noiseEstimateRange = normalizeNoiseEstimateRange( config.m_noiseEstimateRange );
     result.m_noiseEstimateLowFreqMaxHz = config.m_noiseEstimateLowFreqMaxHz;
+    result.m_noiseEstimateStatistic = normalizeNoiseEstimateStatistic( config.m_noiseEstimateStatistic );
     result.m_closedLoopOlEstimateMethod = normalizeClosedLoopOlEstimateMethod( config.m_closedLoopOlEstimateMethod );
     result.m_powerLawMatchFallbackWindowHz = config.m_powerLawMatchFallbackWindowHz;
     result.m_fitPowerLawIndex = config.m_fitPowerLawIndex;
@@ -671,6 +687,13 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                  "Unknown noise-estimation range: " + result.m_noiseEstimateRange );
     }
 
+    if( result.m_noiseEstimateStatistic != "percentile" && result.m_noiseEstimateStatistic != "minimum" )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                 "Unknown noise-estimation statistic: " +
+                                                     result.m_noiseEstimateStatistic );
+    }
+
     if( result.m_noiseEstimateLowFreqMaxHz < static_cast<realT>( 0 ) )
     {
         return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
@@ -711,6 +734,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                          freq,
                                          modeIndex,
                                          result.m_noiseEstimateRange,
+                                         result.m_noiseEstimateStatistic,
                                          result.m_noiseEstimateLowFreqMaxHz );
     if( !!errc )
     {
@@ -987,6 +1011,7 @@ mx::error_t modalPsdProcessor<realT>::estimateNoisePsd( std::vector<realT> &nois
                                                         const std::vector<realT> &freq,
                                                         size_t modeIndex,
                                                         std::string noiseEstimateRange,
+                                                        std::string noiseEstimateStatistic,
                                                         realT noiseEstimateLowFreqMaxHz )
 {
     if( measuredPsd.size() < 2 || measuredPsd.size() != freq.size() )
@@ -996,6 +1021,7 @@ mx::error_t modalPsdProcessor<realT>::estimateNoisePsd( std::vector<realT> &nois
     }
 
     noiseEstimateRange = normalizeNoiseEstimateRange( noiseEstimateRange );
+    noiseEstimateStatistic = normalizeNoiseEstimateStatistic( noiseEstimateStatistic );
     size_t f0 = measuredPsd.size() / 2;
     size_t f1 = measuredPsd.size();
     if( noiseEstimateRange == "low-freq" )
@@ -1029,6 +1055,20 @@ mx::error_t modalPsdProcessor<realT>::estimateNoisePsd( std::vector<realT> &nois
     for( size_t f = f0; f < f1; ++f )
     {
         npsd[f - f0] = log10( std::max( measuredPsd[f], tiny ) );
+    }
+
+    if( noiseEstimateStatistic == "minimum" )
+    {
+        auto minIt = std::min_element( npsd.begin(), npsd.end() );
+        noiseFloor = pow( static_cast<realT>( 10 ), *minIt );
+        noisePsd.assign( measuredPsd.size(), noiseFloor );
+        return mx::error_t::noerror;
+    }
+
+    if( noiseEstimateStatistic != "percentile" )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                 "Unknown noise-estimation statistic: " + noiseEstimateStatistic );
     }
 
     realT pct = static_cast<realT>( 0.25 );
@@ -1088,6 +1128,25 @@ std::string modalPsdProcessor<realT>::normalizeNoiseEstimateRange( std::string r
                     } );
 
     return range;
+}
+
+template <typename realT>
+std::string modalPsdProcessor<realT>::normalizeNoiseEstimateStatistic( std::string statistic )
+{
+    std::transform( statistic.begin(),
+                    statistic.end(),
+                    statistic.begin(),
+                    []( unsigned char c )
+                    {
+                        if( c == '_' )
+                        {
+                            return static_cast<char>( '-' );
+                        }
+
+                        return static_cast<char>( std::tolower( c ) );
+                    } );
+
+    return statistic;
 }
 
 template <typename realT>
