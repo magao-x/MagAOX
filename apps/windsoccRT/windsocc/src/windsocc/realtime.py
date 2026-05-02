@@ -569,18 +569,22 @@ def _report_iter_timing(
     worst_idx = worst_idx[np.argsort(total_ns[worst_idx])[::-1]]
 
     logging.info(
-        "Top %d slowest iterations (1-based frame_index, microseconds, cnt0 delta):",
+        "Top %d slowest iterations (1-based frame number, microseconds, cnt0 delta):",
         k,
     )
+    # total_ns[j] corresponds to hot-loop frame_index j+2 (i.e. internal
+    # batch index j+2 in [0, N-1]); user-facing 1-based frame number is j+3.
     for j in worst_idx:
-        frame_index_1based = int(j) + 2  # j=0 corresponds to iteration 2
-        total_us = float(total_ns[j]) / 1e3
-        gd_us = float(get_data_ns[j + 1]) / 1e3
-        bet_us = float(between_ns[j]) / 1e3
-        delta = gap_by_frame.get(frame_index_1based - 1, 1)
+        j_int = int(j)
+        hot_loop_frame_index = j_int + 2
+        user_frame = j_int + 3
+        total_us = float(total_ns[j_int]) / 1e3
+        gd_us = float(get_data_ns[j_int + 1]) / 1e3
+        bet_us = float(between_ns[j_int]) / 1e3
+        delta = gap_by_frame.get(hot_loop_frame_index, 1)
         logging.info(
             "  frame %d/%d: total=%.1f get_data=%.1f between=%.1f cnt0_delta=%d",
-            frame_index_1based,
+            user_frame,
             target_frames,
             total_us,
             gd_us,
@@ -625,6 +629,14 @@ def collect_shmim_batch(
     - ``iter_timing_topk`` enables low-overhead per-iteration timing capture
       (two ``perf_counter_ns`` calls per frame, ~80 ns total) and logs the
       slowest iterations with matching cnt0 gap info.
+    - The per-frame ``magaox.shmim.Image._check_inode`` call is monkey-patched
+      to a no-op for the duration of the loop (profiling showed it accounted
+      for ~80% of Python work in the hot loop: a fresh ``pathlib.Path`` build
+      + ``posix.stat`` syscall per frame). The original method is restored in
+      the ``finally`` block so nothing outside this function sees the change.
+      Shmim reopens between ``get_data`` calls are therefore not detected
+      inside a single batch; the writer is assumed stable for the batch's
+      duration (typical for MagAO-X RTC operation).
     """
     image = load_shmim_image(stream_name)
     batch_shape = (target_frames, frame_height, frame_width)
@@ -732,6 +744,55 @@ def collect_shmim_batch(
     gc_was_enabled = gc.isenabled()
     if gc_was_enabled:
         gc.disable()
+
+    # Re-sync the cnt0 seed to the writer's current value immediately before
+    # the hot loop runs. Without this, any writer frames produced between the
+    # first-frame acquisition and hot-loop entry (logging, pre-touch,
+    # gc.freeze(), ...) get absorbed by the first iteration's semflush and
+    # show up as a phantom writer "skip" in the batch statistics, even though
+    # nothing in the hot loop actually missed anything. The setup gap is
+    # surfaced as an INFO line so it is still observable.
+    if track_cnt0 and not cnt0_unavailable:
+        latest_cnt0 = get_cnt0(image)
+        if latest_cnt0 is not None and prev_cnt0 is not None:
+            setup_gap = latest_cnt0 - prev_cnt0
+            if setup_gap > 1:
+                logging.info(
+                    "cnt0 advanced by %d during first-frame setup "
+                    "(%d writer frame(s) produced before hot-loop entry; "
+                    "not counted in batch skip statistics).",
+                    setup_gap,
+                    setup_gap - 1,
+                )
+            prev_cnt0 = latest_cnt0
+            cnt0_first = latest_cnt0
+            cnt0_last = latest_cnt0
+
+    # Bypass the per-frame shmim inode check for the duration of the hot loop.
+    #
+    # `magaox.shmim.Image.copy()` calls `self._check_inode()` on every frame,
+    # which rebuilds a fresh `pathlib.Path` (via the `self.path` property) and
+    # issues a real `posix.stat` syscall on `/milk/shm/<name>.im.shm`. cProfile
+    # shows this single call path accounting for ~80% of all Python work in
+    # the hot loop (~30 microseconds per frame), which is what pushes the p99
+    # iteration time just above the 500 microsecond writer period and causes
+    # the small residual skip count.
+    #
+    # The check exists to detect shmim reopens between `get_data` calls. For a
+    # 20 s steady-state batch where the writer is not being restarted, this is
+    # effectively a no-op every iteration. We validated the inode once during
+    # the first-frame `get_data`, so we skip subsequent checks inside the hot
+    # loop and restore the original bound method afterwards so nothing outside
+    # this function sees the change.
+    _original_check_inode = getattr(image, "_check_inode", None)
+    inode_check_patched = False
+    if _original_check_inode is not None:
+        try:
+            image._check_inode = lambda: True  # type: ignore[method-assign]
+            inode_check_patched = True
+        except (AttributeError, TypeError):
+            inode_check_patched = False
+
     if profiler is not None:
         profiler.enable()
     try:
@@ -795,6 +856,16 @@ def collect_shmim_batch(
         if gc_was_enabled:
             gc.enable()
             gc.collect()
+        if inode_check_patched:
+            try:
+                # Clear the instance attribute so the class-level method is
+                # visible again; fall back to rebinding if deletion fails.
+                del image._check_inode  # type: ignore[attr-defined]
+            except AttributeError:
+                try:
+                    image._check_inode = _original_check_inode  # type: ignore[method-assign]
+                except (AttributeError, TypeError):
+                    pass
 
     if profiler is not None and profile_path is not None:
         import pstats
