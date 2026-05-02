@@ -180,7 +180,7 @@ def _keep_track_ids_by_model(
     inner_bound: int,
     meters_per_pixel: float,
     time_per_frame: float,
-    min_matches: int = 10,
+    # min_matches: int = 10,
     min_detections: int = 10,
     velocity_interest = 15.0, #m/s
     origin_tol_px: float = 10.0,
@@ -248,17 +248,17 @@ def _keep_track_ids_by_model(
         #     exit()
         if group.is_empty():
             continue
-        if float(group.get_column("matches_num").max()) < float(min_matches):
-            mean_velocity = np.mean(group.get_column("velocity_num").to_numpy())
-            if mean_velocity > velocity_interest:
-               if int(group.get_column("matches_num").max()) < int(min_matches // 2):
-                  reject_rows.append(_model_reject_row(track_id, "min_matches", group))
-                  continue
-               else:
-                  pass #keep the track
-            else:
-               reject_rows.append(_model_reject_row(track_id, "min_matches", group))
-               continue
+        # if float(group.get_column("matches_num").max()) < float(min_matches):
+        #     mean_velocity = np.mean(group.get_column("velocity_num").to_numpy())
+        #     if mean_velocity > velocity_interest:
+        #        if int(group.get_column("matches_num").max()) < int(min_matches // 2):
+        #           reject_rows.append(_model_reject_row(track_id, "min_matches", group))
+        #           continue
+        #        else:
+        #           pass #keep the track
+        #     else:
+        #        reject_rows.append(_model_reject_row(track_id, "min_matches", group))
+        #        continue
 
         # I don't think this check is necessary JKK 20260423
         # if group.height < max(2, min_detections):
@@ -475,7 +475,6 @@ def process_single_cc_cube(
     min_matches_for_dynamic_mask: int = 3,
     dynamic_window_radius: int = 10,
     tripwire_smoothing_sigma: float = 1.0,
-    min_track_matches: int = 10,
     min_track_detections: int = 10,
     track_direction_scatter_tol_deg: float = 20.0,
     track_velocity_scatter_tol_mps: float = 2.0,
@@ -568,7 +567,6 @@ def process_single_cc_cube(
         meters_per_pixel=meters_per_pixel,
         inner_bound=inner_bound,
         time_per_frame=time_per_frame,
-        min_matches=min_track_matches,
         min_detections=min_track_detections,
         origin_tol_px=10.0,
         rmse_tol_px=10.0,
