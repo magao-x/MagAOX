@@ -2579,6 +2579,56 @@ mx::error_t modalPsdProcessor<realT>::fillProcessPsdDropouts( std::vector<realT>
     std::vector<realT> updatedPsd = processPsd;
     bool changed = false;
 
+    if( repairMask.empty() || repairMask[0] != 0 )
+    {
+        realT runMax = sourcePsd[0];
+        for( size_t end = 0; end + 2 < sourcePsd.size(); ++end )
+        {
+            if( !repairMask.empty() && repairMask[end] == 0 )
+            {
+                break;
+            }
+
+            runMax = std::max( runMax, sourcePsd[end] );
+
+            realT right1 = std::max( sourcePsd[end + 1], tiny );
+            realT right2 = std::max( sourcePsd[end + 2], tiny );
+            realT flankMin = std::min( right1, right2 );
+            if( runMax >= gapFactor * flankMin )
+            {
+                continue;
+            }
+
+            realT xLeft = log10( std::max( freq[end + 1], refFreq ) );
+            realT xRight = log10( std::max( freq[end + 2], refFreq ) );
+            if( xRight <= xLeft )
+            {
+                xRight = xLeft + static_cast<realT>( 1 );
+            }
+
+            realT yLeft = log10( std::max( sourcePsd[end + 1], tiny ) );
+            realT yRight = log10( std::max( sourcePsd[end + 2], tiny ) );
+
+            for( size_t fill = 0; fill <= end; ++fill )
+            {
+                realT xFill = log10( std::max( freq[fill], refFreq ) );
+                realT alpha = ( xFill - xLeft ) / ( xRight - xLeft );
+                realT fillValue = pow( static_cast<realT>( 10 ), yLeft + alpha * ( yRight - yLeft ) );
+                changed = changed || fillValue != updatedPsd[fill];
+                updatedPsd[fill] = std::max( fillValue, tiny );
+            }
+
+            if( updatedPsd.size() > 1 )
+            {
+                changed = changed || updatedPsd[0] != updatedPsd[1];
+                updatedPsd[0] = updatedPsd[1];
+            }
+
+            sourcePsd = updatedPsd;
+            break;
+        }
+    }
+
     size_t n = 1;
     while( n + 1 < sourcePsd.size() )
     {
