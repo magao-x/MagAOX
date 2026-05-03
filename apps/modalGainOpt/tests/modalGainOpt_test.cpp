@@ -870,6 +870,30 @@ TEST_CASE( "modalPsdProcessor power-law-only matches moffat handoff when forced 
     }
 }
 
+TEST_CASE( "modalPsdProcessor power-law-only repairs deep dropouts below the pure-power-law cutoff", "[modalGainOpt]" )
+{
+    std::vector<float> measuredPsd{ 0.0F, 11.0F, 10.0F, 2.5F, 9.0F, 8.0F, 7.5F, 7.0F };
+    std::vector<float> freq{ 0.0F, 20.0F, 40.0F, 60.0F, 80.0F, 100.0F, 120.0F, 140.0F };
+
+    processPsdProcessorT::processModelConfig cfg;
+    cfg.m_method = "power-law-only";
+    cfg.m_noiseEstimateRange = "low_freq";
+    cfg.m_noiseEstimateStatistic = "minimum";
+    cfg.m_powerLawIndex = 1.0F;
+    cfg.m_powerLawMatchFreq = 20.0F;
+    cfg.m_powerLawOnlyAboveFreq = 100.0F;
+
+    processPsdProcessorT::processResults result;
+    mx::error_t errc = processPsdProcessorT::analyzePsd( result, measuredPsd, freq, 10, cfg );
+
+    REQUIRE( !errc );
+    REQUIRE( result.m_noiseFloor == Approx( 2.5F ) );
+    REQUIRE( result.m_processPsd[3] > 1.0F );
+    REQUIRE( result.m_processPsd[5] == Approx( result.m_extrapolation * pow( 20.0F / freq[5], 1.0F ) ) );
+    REQUIRE( result.m_processPsd[6] == Approx( result.m_extrapolation * pow( 20.0F / freq[6], 1.0F ) ) );
+    REQUIRE( result.m_processPsd[7] == Approx( result.m_extrapolation * pow( 20.0F / freq[7], 1.0F ) ) );
+}
+
 /// Verify `modalGainOpt` publishes LP and max-gain arrays into separate buffers.
 /**
  * \ingroup modalGainOpt_unit_test

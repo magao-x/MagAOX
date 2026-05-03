@@ -537,9 +537,10 @@ class modalPsdProcessor
     estimateProcessPsdPowerLawOnly( std::vector<realT> &processPsd, /**< [out] the disturbance PSD */
                                     realT &extrapolation,           /**< [out] the power-law continuum anchor */
                                     size_t &anchorIndex, /**< [out] the last frequency bin used to anchor the fit */
-                                    const std::vector<realT> &measuredPsd, /**< [in] the measured one-sided PSD */
-                                    const std::vector<realT> &noisePsd,    /**< [in] the flat noise PSD */
-                                    const std::vector<realT> &freq,        /**< [in] the one-sided frequency grid */
+                                    std::vector<unsigned char> &repairMask, /**< [out] bins eligible for repair */
+                                    const std::vector<realT> &measuredPsd,  /**< [in] the measured one-sided PSD */
+                                    const std::vector<realT> &noisePsd,     /**< [in] the flat noise PSD */
+                                    const std::vector<realT> &freq,         /**< [in] the one-sided frequency grid */
                                     const processModelConfig &config,   /**< [in] the disturbance-PSD configuration */
                                     realT *usedPowerLawIndex = nullptr, /**< [out] the exponent actually used */
                                     size_t *fitBinsUsed = nullptr       /**< [out] the number of populated fit bins */
@@ -809,6 +810,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
         errc = estimateProcessPsdPowerLawOnly( result.m_processPsd,
                                                result.m_extrapolation,
                                                result.m_powerLawAnchorIndex,
+                                               processRepairMask,
                                                processMeasuredPsd,
                                                processNoisePsd,
                                                freq,
@@ -887,7 +889,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                  "Unknown process method: " + config.m_method );
     }
 
-    if( config.m_method == "moffat-peaks" )
+    if( config.m_method == "power-law-only" || config.m_method == "moffat-peaks" )
     {
         errc = fillProcessPsdDropouts( result.m_processPsd,
                                        processRepairMask,
@@ -2217,6 +2219,7 @@ template <typename realT>
 mx::error_t modalPsdProcessor<realT>::estimateProcessPsdPowerLawOnly( std::vector<realT> &processPsd,
                                                                       realT &extrapolation,
                                                                       size_t &anchorIndex,
+                                                                      std::vector<unsigned char> &repairMask,
                                                                       const std::vector<realT> &measuredPsd,
                                                                       const std::vector<realT> &noisePsd,
                                                                       const std::vector<realT> &freq,
@@ -2270,11 +2273,13 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsdPowerLawOnly( std::vecto
     }
 
     processPsd.resize( rawProcessPsd.size() );
+    repairMask.assign( rawProcessPsd.size(), 1 );
     for( size_t n = 0; n < processPsd.size(); ++n )
     {
         if( config.m_powerLawOnlyAboveFreq > static_cast<realT>( 0 ) && freq[n] >= config.m_powerLawOnlyAboveFreq )
         {
             processPsd[n] = std::max( continuumPsd[n], tiny );
+            repairMask[n] = 0;
         }
         else if( rawProcessPsd[n] > noisePsd[n] )
         {
