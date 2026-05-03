@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xapp-windsoccRT"
+description = "MagAO-X Python INDI driver for WindsoCC realtime shmim batches."
+version = "2026.05.02"
+dependencies = [
+  "xconf",
+  "purepyindi2",
+]
+authors = [
+  { name = "Jay Kueny", email = "jkueny@arizona.edu" },
+]
+
+[project.scripts]
+windsoccRT = "xapp.windsoccRT:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["xapp*"]

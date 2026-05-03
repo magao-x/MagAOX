@@ -1323,10 +1323,16 @@ def resolve_safe_segment_cubes(
 
 
 def maybe_cleanup_intermediate(run_dir: str, config_params: dict):
-    """Remove distill products after the final outputs are written."""
-    distill_dir = os.path.join(run_dir, config_params.get("DISTILL_DIR", "distill_results"))
-    if os.path.exists(distill_dir):
-        shutil.rmtree(distill_dir)
+    """Remove heavy transient products after final measurement outputs are written."""
+    intermediate_dirs = (
+        config_params.get("REDUCE_DIR", "reduce_results"),
+        config_params.get("XCORR_DIR", "xcorr_results"),
+        config_params.get("DISTILL_DIR", "distill_results"),
+    )
+    for dirname in intermediate_dirs:
+        path = dirname if os.path.isabs(dirname) else os.path.join(run_dir, dirname)
+        if os.path.exists(path):
+            shutil.rmtree(path)
 
 
 def write_batch_summary(summary: BatchRunSummary):
@@ -1354,10 +1360,13 @@ def process_collected_batch(
     no_movie: bool = False,
     save_distill_pngs: bool = False,
     cleanup_intermediate: bool = False,
+    config_overrides: dict | None = None,
     initial_timings_s: dict[str, float] | None = None,
 ) -> BatchRunSummary:
     """Run the realtime pipeline for an already collected frame batch."""
     config_params = parse_config_file(config_path)
+    if config_overrides:
+        config_params.update(config_overrides)
     file_prefix = config_params.get("FILE_PREFIX", "camwfs_")
     validate_frame_batch(batch.frames)
 
@@ -1652,6 +1661,7 @@ def run_single_batch(args) -> BatchRunSummary:
         no_movie=args.no_movie,
         save_distill_pngs=args.save_distill_pngs,
         cleanup_intermediate=args.cleanup_intermediate,
+        config_overrides=getattr(args, "config_overrides", None),
         initial_timings_s={"frame_collection": collection_elapsed},
     )
 

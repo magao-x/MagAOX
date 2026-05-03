@@ -75,7 +75,8 @@ apps_rtc = \
 	modalFilter \
 	dmRecon
 pythonapps_rtc = \
-	efcControl
+	efcControl \
+	windsoccRT
 
 # Apps needed on ICC
 apps_icc = \
