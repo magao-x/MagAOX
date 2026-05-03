@@ -175,6 +175,24 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     bool m_firstProducerSample{ true }; ///< Tracks first-sample initialization for producer-period estimation.
 
+    uint64_t m_localFrameSeq{ 0 }; ///< Monotonic local acquisition sequence incremented on each published frame.
+
+    uint64_t m_syncFramesReceived{ 0 }; ///< Count of synchronized frames received from semaphore wakes.
+
+    uint64_t m_syncFramesWritten{ 0 }; ///< Count of synchronized frames published to the output stream.
+
+    uint64_t m_syncFramesDropped{ 0 }; ///< Count of missing producer frame IDs inferred from positive counter gaps.
+
+    uint64_t m_syncFrameIdGapCount{ 0 }; ///< Number of producer-frame gap events where ID delta exceeded one.
+
+    uint64_t m_syncProducerFrameId{ 0 }; ///< Latest producer frame ID (`cnt0`) observed on the synchronization stream.
+
+    uint64_t m_syncProducerFrameDelta{ 0 }; ///< Latest producer-frame ID delta between consecutive synchronized wakes.
+
+    uint64_t m_lastSyncProducerFrameId{ 0 }; ///< Previous producer frame ID used to detect synchronized frame-ID gaps.
+
+    bool m_syncProducerFrameValid{ false }; ///< Tracks whether producer frame-ID gap tracking has a valid prior sample.
+
     bool m_firstSemaphore{ true }; ///< Tracks first-arrival initialization for semaphore period estimation.
 
     double m_avgReadLatency_ns{ 0.0 }; ///< Exponential moving-average estimate of semaphore-to-read latency in nanoseconds.
@@ -807,6 +825,15 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     m_producerPeriodInst_ns = 0.0;
     m_avgProducerPeriod_ns  = 0.0;
     m_firstProducerSample   = true;
+    m_localFrameSeq         = 0;
+    m_syncFramesReceived    = 0;
+    m_syncFramesWritten     = 0;
+    m_syncFramesDropped     = 0;
+    m_syncFrameIdGapCount   = 0;
+    m_syncProducerFrameId   = 0;
+    m_syncProducerFrameDelta = 0;
+    m_lastSyncProducerFrameId = 0;
+    m_syncProducerFrameValid  = false;
     m_wfs_fps            = m_fps;
     m_channelReadoutTime_ns = 0.0;
 
@@ -859,6 +886,13 @@ int mcp3208Ctrl::appStartup()
     m_indiP_timingDiag.add( pcf::IndiElement( "channel_readout_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_us" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "local_frame_seq" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "sync_frames_received" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "sync_frames_written" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "sync_frames_dropped" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "sync_frame_id_gap_count" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "sync_producer_frame_id" ) );
+    m_indiP_timingDiag.add( pcf::IndiElement( "sync_producer_frame_delta" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "mode_code" ) );
 
     if( m_fpsDevice != "" )
@@ -964,6 +998,15 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     const double channelReadout_us      = m_channelReadoutTime_ns * c_nsToUs;
     const double triggerInterval_us     = m_triggerInterval_ns * c_nsToUs;
     const double triggerTime_us         = triggerTime_ns * c_nsToUs;
+    const double localFrameSeqDiag      = static_cast<double>( m_localFrameSeq );
+    const double syncFramesReceivedDiag = synchroMode ? static_cast<double>( m_syncFramesReceived ) : 0.0;
+    const double syncFramesWrittenDiag  = synchroMode ? static_cast<double>( m_syncFramesWritten ) : 0.0;
+    const double syncFramesDroppedDiag  = synchroMode ? static_cast<double>( m_syncFramesDropped ) : 0.0;
+    const double syncFrameIdGapCountDiag = synchroMode ? static_cast<double>( m_syncFrameIdGapCount ) : 0.0;
+    const double syncProducerFrameIdDiag =
+        ( synchroMode && m_syncProducerFrameValid ) ? static_cast<double>( m_syncProducerFrameId ) : 0.0;
+    const double syncProducerFrameDeltaDiag =
+        ( synchroMode && m_syncProducerFrameValid ) ? static_cast<double>( m_syncProducerFrameDelta ) : 0.0;
 
     updatesIfChanged<double>( m_indiP_timingDiag,
                               { "avg_read_latency_us",
@@ -981,6 +1024,13 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
                                 "channel_readout_us",
                                 "trigger_interval_us",
                                 "trigger_time_us",
+                                "local_frame_seq",
+                                "sync_frames_received",
+                                "sync_frames_written",
+                                "sync_frames_dropped",
+                                "sync_frame_id_gap_count",
+                                "sync_producer_frame_id",
+                                "sync_producer_frame_delta",
                                 "mode_code" },
                               { avgReadLatency_us,
                                 synchroDelay_us,
@@ -997,6 +1047,13 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
                                 channelReadout_us,
                                 triggerInterval_us,
                                 triggerTime_us,
+                                localFrameSeqDiag,
+                                syncFramesReceivedDiag,
+                                syncFramesWrittenDiag,
+                                syncFramesDroppedDiag,
+                                syncFrameIdGapCountDiag,
+                                syncProducerFrameIdDiag,
+                                syncProducerFrameDeltaDiag,
                                 modeCode } );
 }
 
@@ -1104,6 +1161,14 @@ int mcp3208Ctrl::startAcquisition()
         m_producerPeriodInst_ns = 0.0;
         m_avgProducerPeriod_ns  = 0.0;
         m_firstProducerSample   = true;
+        m_syncFramesReceived    = 0;
+        m_syncFramesWritten     = 0;
+        m_syncFramesDropped     = 0;
+        m_syncFrameIdGapCount   = 0;
+        m_syncProducerFrameId   = 0;
+        m_syncProducerFrameDelta = 0;
+        m_lastSyncProducerFrameId = 0;
+        m_syncProducerFrameValid  = false;
         m_delayModel_ns         = 0.0;
         m_delayApplied_ns       = 0.0;
         m_delayBudget_ns        = 0.0;
@@ -1120,6 +1185,7 @@ int mcp3208Ctrl::startAcquisition()
     m_lastTriggerTime    = timespec{};
     m_firstTriggerTime   = true;
     m_firstTimerTrigger  = true;
+    m_localFrameSeq      = 0;
     m_delayApplied_ns    = 0.0;
     m_delayBudget_ns     = 0.0;
     m_nonDelayService_ns = 0.0;
@@ -1145,6 +1211,11 @@ int mcp3208Ctrl::acquireAndCheckValid()
 int mcp3208Ctrl::loadImageIntoStream( void *dest )
 {
     memcpy( dest, m_values.data(), m_values.size() * sizeof( uint16_t ) );
+    ++m_localFrameSeq;
+    if( !m_synchroShmimName.empty() )
+    {
+        ++m_syncFramesWritten;
+    }
     return 0;
 }
 
@@ -1273,6 +1344,14 @@ void mcp3208Ctrl::closeSynchroStream()
     m_producerPeriodInst_ns  = 0.0;
     m_avgProducerPeriod_ns   = 0.0;
     m_firstProducerSample    = true;
+    m_syncFramesReceived     = 0;
+    m_syncFramesWritten      = 0;
+    m_syncFramesDropped      = 0;
+    m_syncFrameIdGapCount    = 0;
+    m_syncProducerFrameId    = 0;
+    m_syncProducerFrameDelta = 0;
+    m_lastSyncProducerFrameId = 0;
+    m_syncProducerFrameValid  = false;
     m_firstSemaphore         = true;
     m_avgReadLatency_ns      = 0.0;
     m_firstReadLatency       = true;
@@ -1288,6 +1367,7 @@ void mcp3208Ctrl::closeSynchroStream()
     m_triggerTime            = timespec{};
     m_triggerInterval_ns     = 0.0;
     m_channelReadoutTime_ns  = 0.0;
+    m_localFrameSeq          = 0;
     m_lastTriggerTime        = timespec{};
     m_firstTriggerTime       = true;
     m_firstTimerTrigger      = true;
@@ -1383,11 +1463,36 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
         return 1;
     }
 
+    ++m_syncFramesReceived;
+
     if( m_synchroStream.md != nullptr )
     {
         const uint64_t producerCnt0 = m_synchroStream.md[0].cnt0;
         const timespec producerAtime = m_synchroStream.md[0].atime;
         const bool producerAtimeValid = ( producerAtime.tv_sec != 0 || producerAtime.tv_nsec != 0 );
+
+        m_syncProducerFrameId = producerCnt0;
+        if( !m_syncProducerFrameValid )
+        {
+            m_syncProducerFrameDelta = 0;
+            m_syncProducerFrameValid = true;
+        }
+        else if( producerCnt0 >= m_lastSyncProducerFrameId )
+        {
+            const uint64_t producerFrameDelta = producerCnt0 - m_lastSyncProducerFrameId;
+            m_syncProducerFrameDelta          = producerFrameDelta;
+
+            if( producerFrameDelta > 1 )
+            {
+                ++m_syncFrameIdGapCount;
+                m_syncFramesDropped += ( producerFrameDelta - 1 );
+            }
+        }
+        else
+        {
+            m_syncProducerFrameDelta = 0;
+        }
+        m_lastSyncProducerFrameId = producerCnt0;
 
         if( producerAtimeValid )
         {

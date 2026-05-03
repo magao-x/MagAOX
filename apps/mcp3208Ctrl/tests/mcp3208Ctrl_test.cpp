@@ -242,6 +242,13 @@ class mcp3208Ctrl_test : public mcp3208Ctrl
         m_indiP_timingDiag.add( pcf::IndiElement( "channel_readout_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "trigger_interval_us" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "trigger_time_us" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "local_frame_seq" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "sync_frames_received" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "sync_frames_written" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "sync_frames_dropped" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "sync_frame_id_gap_count" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "sync_producer_frame_id" ) );
+        m_indiP_timingDiag.add( pcf::IndiElement( "sync_producer_frame_delta" ) );
         m_indiP_timingDiag.add( pcf::IndiElement( "mode_code" ) );
     }
 };
@@ -492,6 +499,14 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     app.m_triggerInterval_ns    = 600000.0;
     app.m_atime                 = timespec{ 12, 3000000L };
     app.m_triggerTime           = timespec{ 12, 3456789L };
+    app.m_localFrameSeq         = 44;
+    app.m_syncFramesReceived    = 41;
+    app.m_syncFramesWritten     = 40;
+    app.m_syncFramesDropped     = 2;
+    app.m_syncFrameIdGapCount   = 2;
+    app.m_syncProducerFrameId   = 123456;
+    app.m_syncProducerFrameDelta = 3;
+    app.m_syncProducerFrameValid = true;
 
     app.updateTimingDiagnosticsIndi();
 
@@ -509,6 +524,13 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     REQUIRE( app.m_indiP_timingDiag["trigger_time_us"].get<double>() ==
              Approx( 1e-3 * ( mcp3208Ctrl::timespecToNs( timespec{ 12, 3456789L } ) -
                               mcp3208Ctrl::timespecToNs( timespec{ 12, 3000000L } ) ) ) );
+    REQUIRE( app.m_indiP_timingDiag["local_frame_seq"].get<double>() == Approx( 44.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_frames_received"].get<double>() == Approx( 41.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_frames_written"].get<double>() == Approx( 40.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_frames_dropped"].get<double>() == Approx( 2.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_frame_id_gap_count"].get<double>() == Approx( 2.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_producer_frame_id"].get<double>() == Approx( 123456.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_producer_frame_delta"].get<double>() == Approx( 3.0 ) );
     REQUIRE( app.m_indiP_timingDiag["mode_code"].get<double>() == Approx( 1.0 ) );
 }
 
@@ -531,6 +553,12 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
     REQUIRE( app.m_indiP_timingDiag["trigger_time_us"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_phase_error_us"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_frames_received"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_frames_written"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_frames_dropped"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_frame_id_gap_count"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_producer_frame_id"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_producer_frame_delta"].get<double>() == Approx( 0.0 ) );
 
     app.m_synchroShmimName.clear();
     app.m_triggerInterval_ns = 456789.0;
@@ -541,6 +569,12 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
     REQUIRE( app.m_indiP_timingDiag["trigger_time_us"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_phase_error_us"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_frames_received"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_frames_written"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_frames_dropped"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_frame_id_gap_count"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_producer_frame_id"].get<double>() == Approx( 0.0 ) );
+    REQUIRE( app.m_indiP_timingDiag["sync_producer_frame_delta"].get<double>() == Approx( 0.0 ) );
 }
 
 /// Verify timing diagnostics wrap phase error and require both lock thresholds.
@@ -921,6 +955,27 @@ TEST_CASE( "mcp3208Ctrl loadImageIntoStream copies the current values", "[mcp320
     REQUIRE( dest == std::vector<uint16_t>( { 5, 6, 7 } ) );
 }
 
+/// Verify published-frame counters track local and synchronized stream writes.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl loadImageIntoStream updates frame mapping counters", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test      app;
+    std::vector<uint16_t> dest( 2, 0 );
+
+    app.m_values = { 9, 8 };
+
+    REQUIRE( app.loadImageIntoStream( dest.data() ) == 0 );
+    REQUIRE( app.m_localFrameSeq == 1 );
+    REQUIRE( app.m_syncFramesWritten == 0 );
+
+    app.m_synchroShmimName = "camwfs_sync";
+    REQUIRE( app.loadImageIntoStream( dest.data() ) == 0 );
+    REQUIRE( app.m_localFrameSeq == 2 );
+    REQUIRE( app.m_syncFramesWritten == 1 );
+}
+
 /// Verify synchronized acquisition performs one ADC sweep per semaphore wake.
 /**
  * \ingroup mcp3208Ctrl_unit_test
@@ -993,6 +1048,12 @@ TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata"
     REQUIRE( app.m_firstProducerSample == false );
     REQUIRE( app.m_producerPeriodInst_ns == Approx( 0.0 ) );
     REQUIRE( app.m_avgProducerPeriod_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_syncFramesReceived == 1 );
+    REQUIRE( app.m_syncFramesDropped == 0 );
+    REQUIRE( app.m_syncFrameIdGapCount == 0 );
+    REQUIRE( app.m_syncProducerFrameId == 100 );
+    REQUIRE( app.m_syncProducerFrameDelta == 0 );
+    REQUIRE( app.m_syncProducerFrameValid == true );
 
     metadata.cnt0  = 102;
     metadata.atime = timespec{ 10, 1000000L };
@@ -1002,6 +1063,11 @@ TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata"
     REQUIRE( app.m_producerPeriodInst_ns == Approx( 500000.0 ) );
     REQUIRE( app.m_avgProducerPeriod_ns == Approx( 500000.0 ) );
     REQUIRE( app.m_lastProducerCnt0 == 102 );
+    REQUIRE( app.m_syncFramesReceived == 2 );
+    REQUIRE( app.m_syncFramesDropped == 1 );
+    REQUIRE( app.m_syncFrameIdGapCount == 1 );
+    REQUIRE( app.m_syncProducerFrameId == 102 );
+    REQUIRE( app.m_syncProducerFrameDelta == 2 );
 
     metadata.cnt0  = 104;
     metadata.atime = timespec{ 10, 2100000L };
@@ -1013,6 +1079,11 @@ TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata"
         static_cast<double>( app.m_alpha ) * expectedPeriod2_ns + ( 1.0 - static_cast<double>( app.m_alpha ) ) * 500000.0;
     REQUIRE( app.m_producerPeriodInst_ns == Approx( expectedPeriod2_ns ) );
     REQUIRE( app.m_avgProducerPeriod_ns == Approx( expectedAvg2_ns ) );
+    REQUIRE( app.m_syncFramesReceived == 3 );
+    REQUIRE( app.m_syncFramesDropped == 2 );
+    REQUIRE( app.m_syncFrameIdGapCount == 2 );
+    REQUIRE( app.m_syncProducerFrameId == 104 );
+    REQUIRE( app.m_syncProducerFrameDelta == 2 );
 
     const double periodBeforeNoAdvance_ns = app.m_producerPeriodInst_ns;
     const double avgBeforeNoAdvance_ns    = app.m_avgProducerPeriod_ns;
@@ -1024,6 +1095,11 @@ TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata"
 
     REQUIRE( app.m_producerPeriodInst_ns == Approx( periodBeforeNoAdvance_ns ) );
     REQUIRE( app.m_avgProducerPeriod_ns == Approx( avgBeforeNoAdvance_ns ) );
+    REQUIRE( app.m_syncFramesReceived == 4 );
+    REQUIRE( app.m_syncFramesDropped == 2 );
+    REQUIRE( app.m_syncFrameIdGapCount == 2 );
+    REQUIRE( app.m_syncProducerFrameId == 104 );
+    REQUIRE( app.m_syncProducerFrameDelta == 0 );
 
     REQUIRE( sem_destroy( &semaphore ) == 0 );
 }
@@ -1280,6 +1356,15 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     app.m_producerPeriodInst_ns  = 500000.0;
     app.m_avgProducerPeriod_ns   = 510000.0;
     app.m_firstProducerSample    = false;
+    app.m_localFrameSeq          = 22;
+    app.m_syncFramesReceived     = 21;
+    app.m_syncFramesWritten      = 20;
+    app.m_syncFramesDropped      = 4;
+    app.m_syncFrameIdGapCount    = 3;
+    app.m_syncProducerFrameId    = 1234567;
+    app.m_syncProducerFrameDelta = 5;
+    app.m_lastSyncProducerFrameId = 1234562;
+    app.m_syncProducerFrameValid  = true;
     app.m_firstSemaphore         = false;
     app.m_avgReadLatency_ns      = 84.0;
     app.m_firstReadLatency       = false;
@@ -1315,6 +1400,15 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     REQUIRE( app.m_producerPeriodInst_ns == Approx( 0.0 ) );
     REQUIRE( app.m_avgProducerPeriod_ns == Approx( 0.0 ) );
     REQUIRE( app.m_firstProducerSample == true );
+    REQUIRE( app.m_localFrameSeq == 0 );
+    REQUIRE( app.m_syncFramesReceived == 0 );
+    REQUIRE( app.m_syncFramesWritten == 0 );
+    REQUIRE( app.m_syncFramesDropped == 0 );
+    REQUIRE( app.m_syncFrameIdGapCount == 0 );
+    REQUIRE( app.m_syncProducerFrameId == 0 );
+    REQUIRE( app.m_syncProducerFrameDelta == 0 );
+    REQUIRE( app.m_lastSyncProducerFrameId == 0 );
+    REQUIRE( app.m_syncProducerFrameValid == false );
     REQUIRE( app.m_firstSemaphore == true );
     REQUIRE( app.m_avgReadLatency_ns == Approx( 0.0 ) );
     REQUIRE( app.m_firstReadLatency == true );
