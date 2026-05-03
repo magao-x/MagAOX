@@ -109,4 +109,4 @@ Assumptions captured in this plan:
 - The first implementation should publish the best sampled operating point, not the entire 30-point curve, unless review says the extra surface is needed immediately.
 
 Implementation note:
-- The delivered follow-up UI changed `wind_speed` from a numeric `current`/`estimated` property to a one-of-many switch with `slow`, `normal`, and `fast` options mapped to `9.4`, `18.7`, and `23.4` m/s.
+- The delivered follow-up UI changed `wind_speed` from a numeric `current`/`estimated` property to a one-of-many switch with `slow`, `normal`, `fast`, and `very-fast` options mapped to `9.4`, `18.7`, `23.4`, and `30.0` m/s.
