@@ -836,6 +836,40 @@ TEST_CASE( "modalPsdProcessor can reconstruct OL PSD with NTF-aware closed-loop 
     REQUIRE( result.m_processPsd[1] == Approx( 6.0F ) );
 }
 
+TEST_CASE( "modalPsdProcessor power-law-only matches moffat handoff when forced to pure power law above a cutoff",
+           "[modalGainOpt]" )
+{
+    std::vector<float> measuredPsd{ 0.0F, 11.0F, 9.0F, 7.0F, 5.0F, 4.0F, 3.4F, 3.0F, 2.8F, 2.6F, 2.4F };
+    std::vector<float> freq{ 0.0F, 20.0F, 40.0F, 60.0F, 80.0F, 100.0F, 120.0F, 140.0F, 160.0F, 180.0F, 200.0F };
+
+    processPsdProcessorT::processModelConfig powerCfg;
+    powerCfg.m_method = "power-law-only";
+    powerCfg.m_powerLawIndex = 1.0F;
+    powerCfg.m_powerLawMatchFreq = 20.0F;
+    powerCfg.m_powerLawOnlyAboveFreq = 100.0F;
+    powerCfg.m_noiseEstimateStatistic = "minimum";
+
+    processPsdProcessorT::processModelConfig moffatCfg = powerCfg;
+    moffatCfg.m_method = "moffat-peaks";
+    moffatCfg.m_peakDetectFactor = 1.0e6F;
+    moffatCfg.m_peakDetectBroadFactor = 1.0e6F;
+
+    processPsdProcessorT::processResults powerResult;
+    processPsdProcessorT::processResults moffatResult;
+
+    mx::error_t errc = processPsdProcessorT::analyzePsd( powerResult, measuredPsd, freq, 10, powerCfg );
+    REQUIRE( !errc );
+
+    errc = processPsdProcessorT::analyzePsd( moffatResult, measuredPsd, freq, 10, moffatCfg );
+    REQUIRE( !errc );
+    REQUIRE( moffatResult.m_peaks.empty() );
+    REQUIRE( powerResult.m_processPsd.size() == moffatResult.m_processPsd.size() );
+    for( size_t n = 0; n < powerResult.m_processPsd.size(); ++n )
+    {
+        REQUIRE( powerResult.m_processPsd[n] == Approx( moffatResult.m_processPsd[n] ) );
+    }
+}
+
 /// Verify `modalGainOpt` publishes LP and max-gain arrays into separate buffers.
 /**
  * \ingroup modalGainOpt_unit_test
