@@ -817,7 +817,7 @@ TEST_CASE( "modalPsdProcessor can reconstruct OL PSD with NTF-aware closed-loop 
     cfg.m_noiseEstimateDomain = "closed_loop_pre_xfer";
     cfg.m_closedLoopOlEstimateMethod = "ntf_aware";
 
-    std::vector<float> measuredPsd{ 0.0F, 5.0F, 5.0F, 2.0F, 2.0F, 2.0F, 2.0F, 2.0F };
+    std::vector<float> measuredPsd{ 0.0F, 10.0F, 10.0F, 2.0F, 2.0F, 2.0F, 2.0F, 2.0F };
     std::vector<float> freq{ 0.0F, 1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F };
     std::vector<float> etfPsd( measuredPsd.size(), 0.5F );
     std::vector<float> ntfPsd( measuredPsd.size(), 2.0F );
@@ -831,9 +831,37 @@ TEST_CASE( "modalPsdProcessor can reconstruct OL PSD with NTF-aware closed-loop 
     REQUIRE( !errc );
     REQUIRE( result.m_noiseEstimateDomain == "closed-loop-pre-xfer" );
     REQUIRE( result.m_closedLoopOlEstimateMethod == "ntf-aware" );
-    REQUIRE( result.m_noiseFloor == Approx( 1.0F ) );
-    REQUIRE( result.m_noisePsd[1] == Approx( 1.0F ) );
-    REQUIRE( result.m_processPsd[1] == Approx( 6.0F ) );
+    REQUIRE( result.m_noiseFloor == Approx( 2.0F ) );
+    REQUIRE( result.m_noisePsd[1] == Approx( 2.0F ) );
+    REQUIRE( result.m_processPsd[1] == Approx( 12.0F ) );
+}
+
+TEST_CASE( "modalPsdProcessor fits closed-loop noise on raw CL PSD even when OL reconstruction is NTF-aware",
+           "[modalGainOpt]" )
+{
+    processPsdProcessorT::processModelConfig cfg;
+    cfg.m_method = "legacy";
+    cfg.m_noiseEstimateDomain = "closed_loop_pre_xfer";
+    cfg.m_noiseEstimateRange = "low_freq";
+    cfg.m_noiseEstimateStatistic = "minimum";
+    cfg.m_noiseEstimateLowFreqMaxHz = 3.1F;
+    cfg.m_closedLoopOlEstimateMethod = "ntf_aware";
+
+    std::vector<float> measuredPsd{ 0.0F, 20.0F, 18.0F, 2.0F, 2.0F, 2.0F, 2.0F, 2.0F };
+    std::vector<float> freq{ 0.0F, 1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F };
+    std::vector<float> etfPsd( measuredPsd.size(), 0.5F );
+    std::vector<float> ntfPsd( measuredPsd.size(), 4.0F );
+    etfPsd[0] = 1.0F;
+    ntfPsd[0] = 1.0F;
+
+    processPsdProcessorT::processResults result;
+    mx::error_t errc =
+        processPsdProcessorT::analyzePsd( result, measuredPsd, freq, 10, cfg, 0.0F, 25.0F, &etfPsd, &ntfPsd );
+
+    REQUIRE( !errc );
+    REQUIRE( result.m_noiseFloor == Approx( 2.0F ) );
+    REQUIRE( result.m_noisePsd[1] == Approx( 2.0F ) );
+    REQUIRE( result.m_processPsd[1] == Approx( 24.0F ) );
 }
 
 TEST_CASE( "modalPsdProcessor power-law-only matches moffat handoff when forced to pure power law above a cutoff",

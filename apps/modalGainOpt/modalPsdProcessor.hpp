@@ -712,26 +712,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                      result.m_closedLoopOlEstimateMethod );
     }
 
-    std::vector<realT> noiseEstimatePsd = measuredPsd;
-    if( result.m_noiseEstimateDomain == "closed-loop-pre-xfer" && result.m_closedLoopOlEstimateMethod == "ntf-aware" )
-    {
-        if( ntfPsd == nullptr )
-        {
-            return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
-                                                     "NTF-aware closed-loop noise estimation requires an NTF PSD" );
-        }
-
-        if( ntfPsd->size() != measuredPsd.size() )
-        {
-            return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr, "NTF PSD must match the measured PSD size" );
-        }
-
-        const realT tiny = std::numeric_limits<realT>::min();
-        for( size_t n = 0; n < measuredPsd.size(); ++n )
-        {
-            noiseEstimatePsd[n] = measuredPsd[n] / std::max( ( *ntfPsd )[n], tiny );
-        }
-    }
+    const std::vector<realT> &noiseEstimatePsd = measuredPsd;
 
     mx::error_t errc = estimateNoisePsd( result.m_noisePsd,
                                          result.m_noiseFloor,
