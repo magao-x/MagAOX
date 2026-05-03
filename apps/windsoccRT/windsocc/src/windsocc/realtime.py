@@ -341,6 +341,7 @@ class BatchRunSummary:
     movie_paths: list[str]
     hour_angle_deg: float | None = None
     parity_flip_needed: bool | None = None
+    wind_layers: list[dict[str, float]] | None = None
 
 
 class FrameSource(ABC):
@@ -1335,6 +1336,53 @@ def maybe_cleanup_intermediate(run_dir: str, config_params: dict):
             shutil.rmtree(path)
 
 
+def extract_wind_layer_values(measure_result: dict, max_layers: int) -> list[dict[str, float]]:
+    """Select the strongest measured wind layers for INDI/status publication."""
+    wind_summaries = measure_result.get("wind_summaries", [])
+    tracks = wind_summaries[0].get("tracks", []) if wind_summaries else []
+
+    def _flux_sort_key(t: dict) -> float:
+        f = float(t.get("flux", float("-inf")))
+        return f if np.isfinite(f) else float("-inf")
+
+    tracks_sorted = sorted(
+        tracks,
+        key=_flux_sort_key,
+        reverse=True,
+    )
+    selected = tracks_sorted[: int(max_layers)]
+
+    flux_vals: list[float] = []
+    for t in selected:
+        f = float(t.get("flux", 0.0))
+        if np.isfinite(f):
+            flux_vals.append(f)
+    max_flux = max(flux_vals) if flux_vals else 0.0
+
+    layer_values: list[dict[str, float]] = []
+    for t in selected:
+        flux = float(t.get("flux", 0.0))
+        if (not np.isfinite(flux)) or (max_flux == 0.0) or (not np.isfinite(max_flux)):
+            rel_strength = 0.0
+        else:
+            rel_strength = flux / max_flux
+
+        speed = float(t.get("velocity_m_per_s", 0.0))
+        dir_deg = float(t.get("direction", 0.0))
+        if not np.isfinite(speed):
+            speed = 0.0
+        if not np.isfinite(dir_deg):
+            dir_deg = 0.0
+        layer_values.append(
+            {
+                "speed": float(speed),
+                "dir": float(dir_deg),
+                "str": float(rel_strength),
+            }
+        )
+    return layer_values
+
+
 def write_batch_summary(summary: BatchRunSummary):
     summary_path = os.path.join(summary.run_dir, "realtime_batch_summary.json")
     payload = {
@@ -1348,6 +1396,8 @@ def write_batch_summary(summary: BatchRunSummary):
         payload["hour_angle_deg"] = summary.hour_angle_deg
     if summary.parity_flip_needed is not None:
         payload["parity_flip_needed"] = summary.parity_flip_needed
+    if summary.wind_layers is not None:
+        payload["wind_layers"] = summary.wind_layers
     with open(summary_path, "w", encoding="utf-8") as outfile:
         json.dump(payload, outfile, indent=2)
 
@@ -1470,53 +1520,10 @@ def process_collected_batch(
         raise RuntimeError("Measure stage produced no wind-summary JSON outputs.")
     timings_s["measure"] = perf_counter() - t0
 
+    max_layers = int(config_params.get("WINDSOC_MAX_LAYERS", 10))
+    layer_values = extract_wind_layer_values(measure_result, max_layers=max_layers)
+
     if config_params.get("PUBLISH_WINDSOC_INDI", False):
-        max_layers = int(config_params.get("WINDSOC_MAX_LAYERS", 10))
-
-        wind_summaries = measure_result.get("wind_summaries", [])
-        tracks = wind_summaries[0].get("tracks", []) if wind_summaries else []
-
-        # Select top tracks by `flux` and compute relative normalized strength.
-        def _flux_sort_key(t: dict) -> float:
-            f = float(t.get("flux", float("-inf")))
-            return f if np.isfinite(f) else float("-inf")
-
-        tracks_sorted = sorted(
-            tracks,
-            key=_flux_sort_key,
-            reverse=True,
-        )
-        selected = tracks_sorted[:max_layers]
-
-        flux_vals: list[float] = []
-        for t in selected:
-            f = float(t.get("flux", 0.0))
-            if np.isfinite(f):
-                flux_vals.append(f)
-        max_flux = max(flux_vals) if flux_vals else 0.0
-
-        layer_values: list[dict[str, float]] = []
-        for t in selected:
-            flux = float(t.get("flux", 0.0))
-            if (not np.isfinite(flux)) or (max_flux == 0.0) or (not np.isfinite(max_flux)):
-                rel_strength = 0.0
-            else:
-                rel_strength = flux / max_flux
-
-            speed = float(t.get("velocity_m_per_s", 0.0))
-            dir_deg = float(t.get("direction", 0.0))
-            if not np.isfinite(speed):
-                speed = 0.0
-            if not np.isfinite(dir_deg):
-                dir_deg = 0.0
-            layer_values.append(
-                {
-                    "speed": float(speed),
-                    "dir": float(dir_deg),
-                    "str": float(rel_strength),
-                }
-            )
-
         publisher = _maybe_get_windsoc_publisher(max_layers=max_layers)
         if publisher is not None:
             publisher.update_layers(layer_values)
@@ -1534,6 +1541,7 @@ def process_collected_batch(
         movie_paths=measure_result["movie_paths"],
         hour_angle_deg=hour_angle_deg,
         parity_flip_needed=parity_flip_needed,
+        wind_layers=layer_values,
     )
     write_batch_summary(summary)
 

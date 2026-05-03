@@ -7,6 +7,8 @@ import logging
 
 import xconf
 from magaox.indi.device import BaseConfig, XDevice
+from purepyindi2 import constants, properties
+from purepyindi2.messages import DefNumber
 
 from windsocc.realtime import run_single_batch
 
@@ -92,6 +94,67 @@ class windsoccRT(XDevice):
         logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
         self._pipeline_args = self._build_pipeline_namespace(self.config)
 
+    def setup(self) -> None:
+        """Define INDI properties owned by this windsocc device."""
+        max_layers = int(self.config.windsoc_max_layers)
+
+        nlayers_prop = properties.NumberVector(
+            name="nlayers",
+            perm=constants.PropertyPerm.READ_ONLY,
+        )
+        nlayers_prop.add_element(
+            DefNumber(
+                name="current",
+                label="Number of wind layers",
+                format="%i",
+                min=0,
+                max=max_layers,
+                step=1,
+                _value=0,
+            )
+        )
+        self.add_property(nlayers_prop)
+
+        for i in range(max_layers):
+            layer_prop = properties.NumberVector(
+                name=f"layer_{i:02d}",
+                perm=constants.PropertyPerm.READ_ONLY,
+            )
+            layer_prop.add_element(
+                DefNumber(
+                    name="speed",
+                    label=f"Layer {i:02d} speed (m/s)",
+                    format="%0.4f",
+                    min=-1e6,
+                    max=1e6,
+                    step=0.0001,
+                    _value=0.0,
+                )
+            )
+            layer_prop.add_element(
+                DefNumber(
+                    name="dir",
+                    label=f"Layer {i:02d} dir (deg)",
+                    format="%0.3f",
+                    min=0.0,
+                    max=360.0,
+                    step=0.001,
+                    _value=0.0,
+                )
+            )
+            layer_prop.add_element(
+                DefNumber(
+                    name="str",
+                    label=f"Layer {i:02d} rel strength",
+                    format="%0.4f",
+                    min=0.0,
+                    max=1.0,
+                    step=0.0001,
+                    _value=0.0,
+                )
+            )
+            self.add_property(layer_prop)
+
     @staticmethod
     def _build_pipeline_namespace(cfg: WindsoccRTConfig) -> argparse.Namespace:
         """Build an ``argparse.Namespace`` compatible with ``run_single_batch``."""
@@ -117,7 +180,7 @@ class windsoccRT(XDevice):
             cleanup_intermediate=bool(cfg.cleanup_intermediate),
             config_overrides={
                 "MAKE_MOVIE": False,
-                "PUBLISH_WINDSOC_INDI": bool(cfg.publish_windsoc_indi),
+                "PUBLISH_WINDSOC_INDI": False,
                 "WINDSOC_MAX_LAYERS": int(cfg.windsoc_max_layers),
             },
             profile=None,
@@ -125,10 +188,39 @@ class windsoccRT(XDevice):
             iter_timing_topk=0,
         )
 
+    def _update_wind_layer_properties(self, layers: list[dict[str, float]]) -> None:
+        """Update the read-only wind-layer INDI properties on this device."""
+        if not self.config.publish_windsoc_indi:
+            return
+
+        max_layers = int(self.config.windsoc_max_layers)
+        nlayers_current = min(len(layers), max_layers)
+
+        nlayers_prop = self.properties["nlayers"]
+        nlayers_prop["current"] = float(nlayers_current)
+        self.update_property(nlayers_prop)
+
+        for i in range(max_layers):
+            layer_name = f"layer_{i:02d}"
+            layer_prop = self.properties[layer_name]
+
+            if i < nlayers_current:
+                layer = layers[i]
+                layer_prop["speed"] = float(layer.get("speed", 0.0))
+                layer_prop["dir"] = float(layer.get("dir", 0.0))
+                layer_prop["str"] = float(layer.get("str", 0.0))
+            else:
+                layer_prop["speed"] = 0.0
+                layer_prop["dir"] = 0.0
+                layer_prop["str"] = 0.0
+
+            self.update_property(layer_prop)
+
     def loop(self) -> None:
         """Collect one shmim batch and run reduce / xcorr / distill / measure."""
         try:
             summary = run_single_batch(self._pipeline_args)
+            self._update_wind_layer_properties(summary.wind_layers or [])
             self.log.info(
                 "Realtime batch complete run_dir=%s json_paths=%d",
                 summary.run_dir,
