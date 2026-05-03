@@ -1816,12 +1816,12 @@ int modalGainOpt::appStartup()
                                        "Extrapolation Method",
                                        "Extrapolation" ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error from createStandardIndiSelectionSw" } );
+        log<software_error>( { "error from createStandardIndiSelectionSw" } );
         return -1;
     }
     if( registerIndiPropertyNew( m_indiP_extrapMethod, INDI_NEWCALLBACK( m_indiP_extrapMethod ) ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
+        log<software_error>( { "error from registerIndiPropertyNew" } );
         return -1;
     }
     if( createStandardIndiSelectionSw( m_indiP_extrapNoiseEstimateDomain,
@@ -1833,13 +1833,13 @@ int modalGainOpt::appStartup()
                                        "Noise Estimate Domain",
                                        "Extrapolation" ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error from createStandardIndiSelectionSw" } );
+        log<software_error>( { "error from createStandardIndiSelectionSw" } );
         return -1;
     }
     if( registerIndiPropertyNew( m_indiP_extrapNoiseEstimateDomain,
                                  INDI_NEWCALLBACK( m_indiP_extrapNoiseEstimateDomain ) ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
+        log<software_error>( { "error from registerIndiPropertyNew" } );
         return -1;
     }
     if( createStandardIndiSelectionSw( m_indiP_extrapNoiseEstimateRange,
@@ -1851,13 +1851,13 @@ int modalGainOpt::appStartup()
                                        "Noise Estimate Range",
                                        "Extrapolation" ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error from createStandardIndiSelectionSw" } );
+        log<software_error>( { "error from createStandardIndiSelectionSw" } );
         return -1;
     }
     if( registerIndiPropertyNew( m_indiP_extrapNoiseEstimateRange,
                                  INDI_NEWCALLBACK( m_indiP_extrapNoiseEstimateRange ) ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
+        log<software_error>( { "error from registerIndiPropertyNew" } );
         return -1;
     }
     if( createStandardIndiSelectionSw( m_indiP_extrapNoiseEstimateStatistic,
@@ -1869,13 +1869,13 @@ int modalGainOpt::appStartup()
                                        "Noise Estimate Statistic",
                                        "Extrapolation" ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error from createStandardIndiSelectionSw" } );
+        log<software_error>( { "error from createStandardIndiSelectionSw" } );
         return -1;
     }
     if( registerIndiPropertyNew( m_indiP_extrapNoiseEstimateStatistic,
                                  INDI_NEWCALLBACK( m_indiP_extrapNoiseEstimateStatistic ) ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
+        log<software_error>( { "error from registerIndiPropertyNew" } );
         return -1;
     }
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapNoiseEstimateLowFreqMaxHz,
@@ -1896,13 +1896,13 @@ int modalGainOpt::appStartup()
             "Closed Loop OL Estimate Method",
             "Extrapolation" ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error from createStandardIndiSelectionSw" } );
+        log<software_error>( { "error from createStandardIndiSelectionSw" } );
         return -1;
     }
     if( registerIndiPropertyNew( m_indiP_extrapClosedLoopOlEstimateMethod,
                                  INDI_NEWCALLBACK( m_indiP_extrapClosedLoopOlEstimateMethod ) ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
+        log<software_error>( { "error from registerIndiPropertyNew" } );
         return -1;
     }
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawIndex,
@@ -1942,13 +1942,13 @@ int modalGainOpt::appStartup()
                                     "Fit Power-Law Index",
                                     "Extrapolation" ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error from createStandardIndiToggleSw" } );
+        log<software_error>( { "error from createStandardIndiToggleSw" } );
         return -1;
     }
     if( registerIndiPropertyNew( m_indiP_extrapFitPowerLawIndex, INDI_NEWCALLBACK( m_indiP_extrapFitPowerLawIndex ) ) <
         0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
+        log<software_error>( { "error from registerIndiPropertyNew" } );
         return -1;
     }
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawOnlyAboveFreq,
@@ -1964,13 +1964,13 @@ int modalGainOpt::appStartup()
                                     "Fit Includes Match Point",
                                     "Extrapolation" ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error from createStandardIndiToggleSw" } );
+        log<software_error>( { "error from createStandardIndiToggleSw" } );
         return -1;
     }
     if( registerIndiPropertyNew( m_indiP_extrapPowerLawFitIncludesMatchPoint,
                                  INDI_NEWCALLBACK( m_indiP_extrapPowerLawFitIncludesMatchPoint ) ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
+        log<software_error>( { "error from registerIndiPropertyNew" } );
         return -1;
     }
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawFitMinFreqHz,
@@ -2091,7 +2091,7 @@ int modalGainOpt::appStartup()
 
     if( sem_init( &m_goptSemaphore, 0, 0 ) < 0 )
     {
-        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "Initializing gopt semaphore" } );
+        return log<software_critical, -1>( { errno, 0, "Initializing gopt semaphore" } );
     }
     m_goptSemaphoreInit = true;
 
@@ -2376,7 +2376,7 @@ int modalGainOpt::createImageStream(
     stream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
     if( stream == nullptr )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "error allocating stream for " + name } );
+        return log<software_error, -1>( { "error allocating stream for " + name } );
     }
 
     uint32_t imsize[3];
@@ -2398,13 +2398,13 @@ int modalGainOpt::createImageStream(
     {
         free( stream );
         stream = nullptr;
-        return log<software_error, -1>( { __FILE__, __LINE__, "error creating stream for " + name } );
+        return log<software_error, -1>( { "error creating stream for " + name } );
     }
 
     if( stream->md == nullptr )
     {
         destroyImageStream( stream );
-        return log<software_error, -1>( { __FILE__, __LINE__, "stream metadata not initialized for " + name } );
+        return log<software_error, -1>( { "stream metadata not initialized for " + name } );
     }
 
     stream->md->cnt0 = 0;
@@ -2715,7 +2715,7 @@ int modalGainOpt::allocatePCShmims()
 
         if( numpccoeffShmimMonitorT::create( m_nModes, 2, 1, _DATATYPE_UINT32, Npc.data() ) != 0 )
         {
-            return log<software_error, -1>( { __FILE__, __LINE__, "error creating numpccoeffShmim" } );
+            return log<software_error, -1>( { "error creating numpccoeffShmim" } );
         }
 
         MGO_BREADCRUMB;
@@ -2728,7 +2728,7 @@ int modalGainOpt::allocatePCShmims()
     {
         if( acoeffShmimMonitorT::create( m_maxNCoeff + 1, m_nModes, 1, _DATATYPE_FLOAT ) != 0 )
         {
-            return log<software_error, -1>( { __FILE__, __LINE__, "error creating acoeffShmim" } );
+            return log<software_error, -1>( { "error creating acoeffShmim" } );
         }
 
         std::cerr << "created acoeff shmim\n";
@@ -2739,7 +2739,7 @@ int modalGainOpt::allocatePCShmims()
     {
         if( bcoeffShmimMonitorT::create( m_maxNCoeff + 1, m_nModes, 1, _DATATYPE_FLOAT ) != 0 )
         {
-            return log<software_error, -1>( { __FILE__, __LINE__, "error creating bcoeffShmim" } );
+            return log<software_error, -1>( { "error creating bcoeffShmim" } );
         }
 
         std::cerr << "created bcoeff shmim\n";
@@ -2750,7 +2750,7 @@ int modalGainOpt::allocatePCShmims()
     {
         if( pcGainFactShmimMonitorT::create( m_nModes, 1, 1, _DATATYPE_FLOAT ) != 0 )
         {
-            return log<software_error, -1>( { __FILE__, __LINE__, "error creating pcGainFactShmim" } );
+            return log<software_error, -1>( { "error creating pcGainFactShmim" } );
         }
 
         std::cerr << "created pcGainFact shmim\n";
@@ -2761,7 +2761,7 @@ int modalGainOpt::allocatePCShmims()
     {
         if( pcMultFactShmimMonitorT::create( m_nModes, 1, 1, _DATATYPE_FLOAT ) != 0 )
         {
-            return log<software_error, -1>( { __FILE__, __LINE__, "error creating pcMultFactShmim" } );
+            return log<software_error, -1>( { "error creating pcMultFactShmim" } );
         }
 
         std::cerr << "created pcMultFact shmim\n";
@@ -2995,7 +2995,7 @@ int modalGainOpt::processImage( void *curr_src, const psdShmimT &dummy )
 
     if( sem_post( &m_goptSemaphore ) < 0 )
     {
-        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "Error posting to semaphore" } );
+        return log<software_critical, -1>( { errno, 0, "Error posting to semaphore" } );
     }
 
     return 0;
@@ -3014,7 +3014,7 @@ int modalGainOpt::processImage( void *curr_src, const freqShmimT &dummy )
 
     if( freqShmimMonitorT::m_width != 1 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got freq with width not 1" } );
+        return log<software_error, -1>( { "got freq with width not 1" } );
     }
 
     float *f = static_cast<float *>( curr_src );
@@ -3060,7 +3060,7 @@ int modalGainOpt::allocate( const gainFactShmimT &dummy )
 
     if( gainFactShmimMonitorT::m_height != 1 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got gains with height not 1" } );
+        return log<software_error, -1>( { "got gains with height not 1" } );
     }
 
     return 0;
@@ -3118,7 +3118,7 @@ int modalGainOpt::allocate( const multFactShmimT &dummy )
 
     if( multFactShmimMonitorT::m_height != 1 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got multcoeffs with height not 1" } );
+        return log<software_error, -1>( { "got multcoeffs with height not 1" } );
     }
 
     return 0;
@@ -3176,7 +3176,7 @@ int modalGainOpt::allocate( const pcGainFactShmimT &dummy )
 
     if( pcGainFactShmimMonitorT::m_height != 1 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got pc gains with height not 1" } );
+        return log<software_error, -1>( { "got pc gains with height not 1" } );
     }
 
     return 0;
@@ -3234,7 +3234,7 @@ int modalGainOpt::allocate( const pcMultFactShmimT &dummy )
 
     if( pcMultFactShmimMonitorT::m_height != 1 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got pcMultcoeffs with height not 1" } );
+        return log<software_error, -1>( { "got pcMultcoeffs with height not 1" } );
     }
 
     return 0;
@@ -3292,7 +3292,7 @@ int modalGainOpt::allocate( const numpccoeffShmimT &dummy )
 
     if( numpccoeffShmimMonitorT::m_height != 2 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got numpccoeff's with height not 2" } );
+        return log<software_error, -1>( { "got numpccoeff's with height not 2" } );
     }
 
     std::cerr << "numpccoeffShmimMonitorT::allocate\n";
@@ -3557,7 +3557,7 @@ int modalGainOpt::processImage( void *curr_src, const gainCalShmimT &dummy )
 
     if( gainCalShmimMonitorT::m_height != 1 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got gainCals with height not 1" } );
+        return log<software_error, -1>( { "got gainCals with height not 1" } );
     }
 
     bool change = false;
@@ -3620,7 +3620,7 @@ int modalGainOpt::processImage( void *curr_src, const gainCalFactShmimT &dummy )
 
     if( gainCalFactShmimMonitorT::m_height != 1 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got gainCalFacts with height not 1" } );
+        return log<software_error, -1>( { "got gainCalFacts with height not 1" } );
     }
 
     bool change = false;
@@ -3682,7 +3682,7 @@ int modalGainOpt::processImage( void *curr_src, const tauShmimT &dummy )
 
     if( tauShmimMonitorT::m_height != 1 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got tau with height not 1" } );
+        return log<software_error, -1>( { "got tau with height not 1" } );
     }
 
     bool change = false;
@@ -3744,7 +3744,7 @@ int modalGainOpt::processImage( void *curr_src, const noiseShmimT &dummy )
 
     if( noiseShmimMonitorT::m_width != 3 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got tau with width not 3" } );
+        return log<software_error, -1>( { "got tau with width not 3" } );
     }
 
     bool change = false;
@@ -3861,7 +3861,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "PSDs have not been updated" } );
+            log<software_error>( { "PSDs have not been updated" } );
         }
         logged[L] = true;
         return -1;
@@ -3872,7 +3872,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "PSDs and freq size mismatch" } );
+            log<software_error>( { "PSDs and freq size mismatch" } );
         }
         logged[L] = true;
         return -1;
@@ -3883,7 +3883,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "PSDs and gains number of modes mismatch" } );
+            log<software_error>( { "PSDs and gains number of modes mismatch" } );
         }
         logged[L] = true;
         return -1;
@@ -3894,7 +3894,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "PSDs and mult coeffs number of modes mismatch" } );
+            log<software_error>( { "PSDs and mult coeffs number of modes mismatch" } );
         }
         logged[L] = true;
         return -1;
@@ -3905,7 +3905,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "PSDs and gain cals number of modes mismatch" } );
+            log<software_error>( { "PSDs and gain cals number of modes mismatch" } );
         }
         logged[L] = true;
         return -1;
@@ -3916,7 +3916,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "PSDs and gain cal facts number of modes mismatch" } );
+            log<software_error>( { "PSDs and gain cal facts number of modes mismatch" } );
         }
         logged[L] = true;
         return -1;
@@ -3927,7 +3927,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "Loop taus have not been set" } );
+            log<software_error>( { "Loop taus have not been set" } );
         }
         logged[L] = true;
         return -1;
@@ -3938,7 +3938,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "noise params have not been set" } );
+            log<software_error>( { "noise params have not been set" } );
         }
         logged[L] = true;
         return -1;
@@ -3949,7 +3949,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "Loop fps has not been set" } );
+            log<software_error>( { "Loop fps has not been set" } );
         }
         logged[L] = true;
         return -1;
@@ -3960,7 +3960,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "m_olPSDStream is not allocated" } );
+            log<software_error>( { "m_olPSDStream is not allocated" } );
         }
         logged[L] = true;
         return -1;
@@ -3971,7 +3971,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "m_noisePSDStream is not allocated" } );
+            log<software_error>( { "m_noisePSDStream is not allocated" } );
         }
         logged[L] = true;
         return -1;
@@ -3982,7 +3982,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "m_clXferCurrentStream is not allocated" } );
+            log<software_error>( { "m_clXferCurrentStream is not allocated" } );
         }
         logged[L] = true;
         return -1;
@@ -3993,7 +3993,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "m_clNtfCurrentStream is not allocated" } );
+            log<software_error>( { "m_clNtfCurrentStream is not allocated" } );
         }
         logged[L] = true;
         return -1;
@@ -4004,7 +4004,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "m_clXferSIStream is not allocated" } );
+            log<software_error>( { "m_clXferSIStream is not allocated" } );
         }
         logged[L] = true;
         return -1;
@@ -4015,7 +4015,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "m_clNtfSIStream is not allocated" } );
+            log<software_error>( { "m_clNtfSIStream is not allocated" } );
         }
         logged[L] = true;
         return -1;
@@ -4026,7 +4026,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "optGainsStream is not allocated" } );
+            log<software_error>( { "optGainsStream is not allocated" } );
         }
         logged[L] = true;
         return -1;
@@ -4037,7 +4037,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "optGainsStream SI is not allocated" } );
+            log<software_error>( { "optGainsStream SI is not allocated" } );
         }
         logged[L] = true;
         return -1;
@@ -4052,7 +4052,7 @@ int modalGainOpt::checkSizes()
 
         if( allocatePCShmims() < 0 )
         {
-            log<software_error>( { __FILE__, __LINE__, "error allocating PC shmims" } );
+            log<software_error>( { "error allocating PC shmims" } );
         }
 
         if( m_Na.size() != m_nModes || m_NaCurrent.size() != m_nModes || (size_t)m_as.cols() != m_nModes ||
@@ -4062,7 +4062,7 @@ int modalGainOpt::checkSizes()
 
             if( !logged[L] )
             {
-                log<software_error>( { __FILE__, __LINE__, "PC shmims not allcoated" } );
+                log<software_error>( { "PC shmims not allcoated" } );
             }
             logged[L] = true;
             return -1;
@@ -4082,7 +4082,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "m_clXferLPStream is not allocated" } );
+            log<software_error>( { "m_clXferLPStream is not allocated" } );
         }
         logged[L] = true;
         return -1;
@@ -4093,7 +4093,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "m_clNtfLPStream is not allocated" } );
+            log<software_error>( { "m_clNtfLPStream is not allocated" } );
         }
         logged[L] = true;
         return -1;
@@ -4104,7 +4104,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "m_optGainLPStream is not allocated" } );
+            log<software_error>( { "m_optGainLPStream is not allocated" } );
         }
         logged[L] = true;
         return -1;
@@ -4115,7 +4115,7 @@ int modalGainOpt::checkSizes()
     {
         if( !logged[L] )
         {
-            log<software_error>( { __FILE__, __LINE__, "m_optGainLP is not allocated" } );
+            log<software_error>( { "m_optGainLP is not allocated" } );
         }
         logged[L] = true;
         return -1;
@@ -4277,7 +4277,7 @@ void modalGainOpt::goptThreadExec()
                     {
 #pragma omp critical
                         {
-                            log<software_error>( { __FILE__, __LINE__, "error estimating modal noise PSD" } );
+                            log<software_error>( { "error estimating modal noise PSD" } );
                         }
 
                         continue;
@@ -4380,7 +4380,7 @@ void modalGainOpt::goptThreadExec()
 #pragma omp critical
                             {
                                 log<software_error>(
-                                    { __FILE__, __LINE__, "error estimating fallback modal noise PSD" } );
+                                    { "error estimating fallback modal noise PSD" } );
                             }
 
                             continue;
@@ -4867,7 +4867,7 @@ void modalGainOpt::goptThreadExec()
             }
 
             /*Otherwise, report an error.*/
-            log<software_error>( { __FILE__, __LINE__, errno, "sem_timedwait" } );
+            log<software_error>( { errno, "sem_timedwait" } );
             break;
         }
     }
@@ -5071,7 +5071,7 @@ int modalGainOpt::handleExtrapToggleProperty( pcf::IndiProperty &localProperty,
 
     if( !ipRecv.find( "toggle" ) )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "Missing toggle element for " + label } );
+        return log<software_error, -1>( { "Missing toggle element for " + label } );
     }
 
     bool target = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
@@ -5106,14 +5106,14 @@ int modalGainOpt::handleExtrapMethodProperty( const pcf::IndiProperty &ipRecv )
         if( found )
         {
             return log<software_error, -1>(
-                { __FILE__, __LINE__, "Multiple extrapolation methods selected in one update" } );
+                { "Multiple extrapolation methods selected in one update" } );
         }
 
         target = olProcessMethodFromElement( elit->first );
         if( target == c_olProcessNone && elit->first != olProcessMethodElement( c_olProcessNone ) )
         {
             return log<software_error, -1>(
-                { __FILE__, __LINE__, "Invalid extrapolation method element: " + elit->first } );
+                { "Invalid extrapolation method element: " + elit->first } );
         }
 
         found = true;
@@ -5174,7 +5174,7 @@ int modalGainOpt::handleExtrapNoiseEstimateDomainProperty( const pcf::IndiProper
         if( found )
         {
             return log<software_error, -1>(
-                { __FILE__, __LINE__, "Multiple noise-estimate domains selected in one update" } );
+                { "Multiple noise-estimate domains selected in one update" } );
         }
 
         target = extrapNoiseEstimateDomainFromElement( elit->first );
@@ -5182,7 +5182,7 @@ int modalGainOpt::handleExtrapNoiseEstimateDomainProperty( const pcf::IndiProper
             elit->first != extrapNoiseEstimateDomainElement( c_extrapNoiseEstimateOpenLoop ) )
         {
             return log<software_error, -1>(
-                { __FILE__, __LINE__, "Invalid noise-estimate-domain element: " + elit->first } );
+                { "Invalid noise-estimate-domain element: " + elit->first } );
         }
 
         found = true;
@@ -5247,7 +5247,7 @@ int modalGainOpt::handleExtrapNoiseEstimateRangeProperty( const pcf::IndiPropert
         if( found )
         {
             return log<software_error, -1>(
-                { __FILE__, __LINE__, "Multiple noise-estimate ranges selected in one update" } );
+                { "Multiple noise-estimate ranges selected in one update" } );
         }
 
         target = extrapNoiseEstimateRangeFromElement( elit->first );
@@ -5255,7 +5255,7 @@ int modalGainOpt::handleExtrapNoiseEstimateRangeProperty( const pcf::IndiPropert
             elit->first != extrapNoiseEstimateRangeElement( c_extrapNoiseEstimateHighFreq ) )
         {
             return log<software_error, -1>(
-                { __FILE__, __LINE__, "Invalid noise-estimate-range element: " + elit->first } );
+                { "Invalid noise-estimate-range element: " + elit->first } );
         }
 
         found = true;
@@ -5317,7 +5317,7 @@ int modalGainOpt::handleExtrapNoiseEstimateStatisticProperty( const pcf::IndiPro
         if( found )
         {
             return log<software_error, -1>(
-                { __FILE__, __LINE__, "Multiple noise-estimate statistics selected in one update" } );
+                { "Multiple noise-estimate statistics selected in one update" } );
         }
 
         target = extrapNoiseEstimateStatisticFromElement( elit->first );
@@ -5325,7 +5325,7 @@ int modalGainOpt::handleExtrapNoiseEstimateStatisticProperty( const pcf::IndiPro
             elit->first != extrapNoiseEstimateStatisticElement( c_extrapNoiseEstimatePercentile ) )
         {
             return log<software_error, -1>(
-                { __FILE__, __LINE__, "Invalid noise-estimate-statistic element: " + elit->first } );
+                { "Invalid noise-estimate-statistic element: " + elit->first } );
         }
 
         found = true;
@@ -5390,7 +5390,7 @@ int modalGainOpt::handleExtrapClosedLoopOlEstimateMethodProperty( const pcf::Ind
         if( found )
         {
             return log<software_error, -1>(
-                { __FILE__, __LINE__, "Multiple closed-loop OL estimate methods selected in one update" } );
+                { "Multiple closed-loop OL estimate methods selected in one update" } );
         }
 
         target = extrapClosedLoopOlEstimateMethodFromElement( elit->first );
@@ -5398,7 +5398,7 @@ int modalGainOpt::handleExtrapClosedLoopOlEstimateMethodProperty( const pcf::Ind
             elit->first != extrapClosedLoopOlEstimateMethodElement( c_extrapClosedLoopOlEstimateEtfOnly ) )
         {
             return log<software_error, -1>(
-                { __FILE__, __LINE__, "Invalid closed-loop-OL-estimate-method element: " + elit->first } );
+                { "Invalid closed-loop-OL-estimate-method element: " + elit->first } );
         }
 
         found = true;
