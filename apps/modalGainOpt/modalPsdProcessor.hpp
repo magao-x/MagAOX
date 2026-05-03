@@ -532,6 +532,18 @@ class modalPsdProcessor
                                      const processModelConfig &config         /**< [in] the process configuration */
     );
 
+    /// Build the power-law-only disturbance model from a fixed continuum.
+    static mx::error_t
+    buildPowerLawOnlyProcessFromContinuum( std::vector<realT> &processPsd,          /**< [out] the disturbance PSD */
+                                           std::vector<unsigned char> &repairMask,  /**< [out] repair-eligible bins */
+                                           const std::vector<realT> &rawProcessPsd, /**< [in] raw disturbance PSD */
+                                           const std::vector<realT> &noisePsd,      /**< [in] the flat noise PSD */
+                                           const std::vector<realT> &continuumPsd,  /**< [in] the continuum PSD */
+                                           const std::vector<realT> &freq,  /**< [in] the one-sided frequency grid */
+                                           size_t anchorIndex,              /**< [in] the continuum handoff bin */
+                                           const processModelConfig &config /**< [in] the process configuration */
+    );
+
     /// Build a disturbance PSD from only the extrapolated `1/f^a` continuum.
     static mx::error_t
     estimateProcessPsdPowerLawOnly( std::vector<realT> &processPsd, /**< [out] the disturbance PSD */
@@ -573,6 +585,7 @@ class modalPsdProcessor
     /// Fill isolated or short dropout runs in a disturbance PSD.
     static mx::error_t
     fillProcessPsdDropouts( std::vector<realT> &processPsd,               /**< [in.out] the disturbance PSD */
+                            const std::vector<realT> &freq,               /**< [in] the one-sided frequency grid */
                             const std::vector<unsigned char> &repairMask, /**< [in] repair-eligible bins */
                             realT gapFactor,  /**< [in] the threshold used to identify dropout bins */
                             size_t maxGapBins /**< [in] the maximum repaired gap length */
@@ -892,6 +905,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
     if( config.m_method == "power-law-only" || config.m_method == "moffat-peaks" )
     {
         errc = fillProcessPsdDropouts( result.m_processPsd,
+                                       freq,
                                        processRepairMask,
                                        config.m_dropoutGapFactor,
                                        config.m_dropoutMaxBins );
@@ -954,21 +968,36 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                               ? freq[result.m_powerLawAnchorIndex]
                                               : static_cast<realT>( 0 );
 
-            errc = buildMoffatProcessFromContinuum( result.m_processPsd,
-                                                    result.m_peaks,
-                                                    processRepairMask,
-                                                    rawProcessPsd,
-                                                    processNoisePsd,
-                                                    continuumPsd,
-                                                    freq,
-                                                    result.m_powerLawAnchorIndex,
-                                                    config );
+            if( config.m_method == "power-law-only" )
+            {
+                errc = buildPowerLawOnlyProcessFromContinuum( result.m_processPsd,
+                                                              processRepairMask,
+                                                              rawProcessPsd,
+                                                              processNoisePsd,
+                                                              continuumPsd,
+                                                              freq,
+                                                              result.m_powerLawAnchorIndex,
+                                                              config );
+            }
+            else
+            {
+                errc = buildMoffatProcessFromContinuum( result.m_processPsd,
+                                                        result.m_peaks,
+                                                        processRepairMask,
+                                                        rawProcessPsd,
+                                                        processNoisePsd,
+                                                        continuumPsd,
+                                                        freq,
+                                                        result.m_powerLawAnchorIndex,
+                                                        config );
+            }
             if( !!errc )
             {
                 return errc;
             }
 
             errc = fillProcessPsdDropouts( result.m_processPsd,
+                                           freq,
                                            processRepairMask,
                                            config.m_dropoutGapFactor,
                                            config.m_dropoutMaxBins );
@@ -2216,6 +2245,55 @@ mx::error_t modalPsdProcessor<realT>::buildMoffatProcessFromContinuum( std::vect
 }
 
 template <typename realT>
+mx::error_t modalPsdProcessor<realT>::buildPowerLawOnlyProcessFromContinuum( std::vector<realT> &processPsd,
+                                                                             std::vector<unsigned char> &repairMask,
+                                                                             const std::vector<realT> &rawProcessPsd,
+                                                                             const std::vector<realT> &noisePsd,
+                                                                             const std::vector<realT> &continuumPsd,
+                                                                             const std::vector<realT> &freq,
+                                                                             size_t anchorIndex,
+                                                                             const processModelConfig &config )
+{
+    if( rawProcessPsd.size() != noisePsd.size() || rawProcessPsd.size() != continuumPsd.size() ||
+        rawProcessPsd.size() != freq.size() )
+    {
+        return mx::error_report<mx::verbose::d>(
+            mx::error_t::sizeerr,
+            "Raw disturbance PSD, noise PSD, continuum PSD, and frequency grid must have the same size" );
+    }
+
+    const realT tiny = std::numeric_limits<realT>::min();
+    std::vector<realT> extrapolatedPsd;
+    mx::error_t errc =
+        blendContinuumAtAnchor( extrapolatedPsd, rawProcessPsd, continuumPsd, anchorIndex, config.m_powerLawBlendBins );
+    if( !!errc )
+    {
+        return errc;
+    }
+
+    processPsd.resize( rawProcessPsd.size() );
+    repairMask.assign( rawProcessPsd.size(), 1 );
+    for( size_t n = 0; n < processPsd.size(); ++n )
+    {
+        if( config.m_powerLawOnlyAboveFreq > static_cast<realT>( 0 ) && freq[n] >= config.m_powerLawOnlyAboveFreq )
+        {
+            processPsd[n] = std::max( continuumPsd[n], tiny );
+            repairMask[n] = 0;
+        }
+        else if( rawProcessPsd[n] > noisePsd[n] )
+        {
+            processPsd[n] = std::max( rawProcessPsd[n], tiny );
+        }
+        else
+        {
+            processPsd[n] = std::max( extrapolatedPsd[n], tiny );
+        }
+    }
+
+    return mx::error_t::noerror;
+}
+
+template <typename realT>
 mx::error_t modalPsdProcessor<realT>::estimateProcessPsdPowerLawOnly( std::vector<realT> &processPsd,
                                                                       realT &extrapolation,
                                                                       size_t &anchorIndex,
@@ -2264,34 +2342,14 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsdPowerLawOnly( std::vecto
         return errc;
     }
 
-    std::vector<realT> extrapolatedPsd;
-    errc =
-        blendContinuumAtAnchor( extrapolatedPsd, rawProcessPsd, continuumPsd, anchorIndex, config.m_powerLawBlendBins );
-    if( !!errc )
-    {
-        return errc;
-    }
-
-    processPsd.resize( rawProcessPsd.size() );
-    repairMask.assign( rawProcessPsd.size(), 1 );
-    for( size_t n = 0; n < processPsd.size(); ++n )
-    {
-        if( config.m_powerLawOnlyAboveFreq > static_cast<realT>( 0 ) && freq[n] >= config.m_powerLawOnlyAboveFreq )
-        {
-            processPsd[n] = std::max( continuumPsd[n], tiny );
-            repairMask[n] = 0;
-        }
-        else if( rawProcessPsd[n] > noisePsd[n] )
-        {
-            processPsd[n] = std::max( rawProcessPsd[n], tiny );
-        }
-        else
-        {
-            processPsd[n] = std::max( extrapolatedPsd[n], tiny );
-        }
-    }
-
-    return mx::error_t::noerror;
+    return buildPowerLawOnlyProcessFromContinuum( processPsd,
+                                                  repairMask,
+                                                  rawProcessPsd,
+                                                  noisePsd,
+                                                  continuumPsd,
+                                                  freq,
+                                                  anchorIndex,
+                                                  config );
 }
 
 template <typename realT>
@@ -2476,6 +2534,7 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsd( std::vector<realT> &pr
 
 template <typename realT>
 mx::error_t modalPsdProcessor<realT>::fillProcessPsdDropouts( std::vector<realT> &processPsd,
+                                                              const std::vector<realT> &freq,
                                                               const std::vector<unsigned char> &repairMask,
                                                               realT gapFactor,
                                                               size_t maxGapBins )
@@ -2483,6 +2542,12 @@ mx::error_t modalPsdProcessor<realT>::fillProcessPsdDropouts( std::vector<realT>
     if( processPsd.size() < 3 )
     {
         return mx::error_t::noerror;
+    }
+
+    if( processPsd.size() != freq.size() )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr,
+                                                 "Dropout repair frequency grid must match the disturbance PSD size" );
     }
 
     if( !repairMask.empty() && repairMask.size() != processPsd.size() )
@@ -2498,137 +2563,118 @@ mx::error_t modalPsdProcessor<realT>::fillProcessPsdDropouts( std::vector<realT>
     }
 
     const realT tiny = std::numeric_limits<realT>::min();
+    (void)maxGapBins;
 
-    bool changed = true;
-    size_t passCount = 0;
-    while( changed )
+    realT refFreq = static_cast<realT>( 1 );
+    for( size_t n = 0; n < freq.size(); ++n )
     {
-        if( ++passCount > processPsd.size() )
+        if( freq[n] > static_cast<realT>( 0 ) )
         {
-            return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
-                                                     "Dropout repair exceeded the maximum number of passes" );
+            refFreq = freq[n];
+            break;
+        }
+    }
+
+    std::vector<realT> sourcePsd = processPsd;
+    std::vector<realT> updatedPsd = processPsd;
+    bool changed = false;
+
+    size_t n = 1;
+    while( n + 1 < sourcePsd.size() )
+    {
+        if( !repairMask.empty() && repairMask[n] == 0 )
+        {
+            ++n;
+            continue;
         }
 
-        changed = false;
-        const std::vector<realT> sourcePsd = processPsd;
-        std::vector<realT> updatedPsd = processPsd;
-
-        size_t n = 1;
-        while( n + 1 < sourcePsd.size() )
+        realT leftVal = std::max( sourcePsd[n - 1], tiny );
+        if( sourcePsd[n] >= gapFactor * leftVal )
         {
-            if( !repairMask.empty() && repairMask[n] == 0 )
+            ++n;
+            continue;
+        }
+
+        realT runMax = sourcePsd[n];
+        bool repaired = false;
+        for( size_t end = n; end + 1 < sourcePsd.size(); ++end )
+        {
+            if( !repairMask.empty() && repairMask[end] == 0 )
             {
-                ++n;
-                continue;
-            }
-
-            realT leftVal = std::max( sourcePsd[n - 1], tiny );
-            if( sourcePsd[n] >= gapFactor * leftVal )
-            {
-                ++n;
-                continue;
-            }
-
-            realT runMax = sourcePsd[n];
-            bool repaired = false;
-            for( size_t end = n; end + 1 < sourcePsd.size(); ++end )
-            {
-                if( !repairMask.empty() && repairMask[end] == 0 )
-                {
-                    break;
-                }
-
-                runMax = std::max( runMax, sourcePsd[end] );
-
-                realT rightVal = std::max( sourcePsd[end + 1], tiny );
-                bool canExtend = end + 1 < sourcePsd.size() - 1;
-                if( canExtend && !repairMask.empty() )
-                {
-                    canExtend = repairMask[end + 1] != 0;
-                }
-
-                if( sourcePsd[end] >= gapFactor * rightVal )
-                {
-                    if( canExtend )
-                    {
-                        continue;
-                    }
-
-                    break;
-                }
-
-                realT flankMin = std::min( leftVal, rightVal );
-                if( runMax >= gapFactor * flankMin )
-                {
-                    if( canExtend )
-                    {
-                        continue;
-                    }
-
-                    break;
-                }
-
-                if( end - n + 1 > maxGapBins )
-                {
-                    if( canExtend )
-                    {
-                        continue;
-                    }
-
-                    break;
-                }
-
-                if( n == end )
-                {
-                    const realT fillValue = static_cast<realT>( 0.5 ) * ( leftVal + rightVal );
-                    changed = changed || fillValue != updatedPsd[n];
-                    updatedPsd[n] = fillValue;
-                }
-                else
-                {
-                    size_t fillL = n;
-                    size_t fillR = end;
-                    while( fillL < fillR )
-                    {
-                        size_t left2Index = fillL >= 2 ? fillL - 2 : fillL - 1;
-                        size_t right2Index = fillR + 2 < updatedPsd.size() ? fillR + 2 : fillR + 1;
-
-                        realT left1 = std::max( updatedPsd[fillL - 1], tiny );
-                        realT left2 = std::max( updatedPsd[left2Index], tiny );
-                        realT right1 = std::max( updatedPsd[fillR + 1], tiny );
-                        realT right2 = std::max( updatedPsd[right2Index], tiny );
-
-                        const realT fillCeiling = std::max( left1, right1 );
-                        const realT fillValueL = std::min( std::max( left1 * left1 / left2, tiny ), fillCeiling );
-                        const realT fillValueR = std::min( std::max( right1 * right1 / right2, tiny ), fillCeiling );
-                        changed = changed || fillValueL != updatedPsd[fillL] || fillValueR != updatedPsd[fillR];
-                        updatedPsd[fillL] = fillValueL;
-                        updatedPsd[fillR] = fillValueR;
-
-                        ++fillL;
-                        --fillR;
-                    }
-
-                    if( fillL == fillR )
-                    {
-                        const realT fillValue = static_cast<realT>( 0.5 ) * ( std::max( updatedPsd[fillL - 1], tiny ) +
-                                                                              std::max( updatedPsd[fillL + 1], tiny ) );
-                        changed = changed || fillValue != updatedPsd[fillL];
-                        updatedPsd[fillL] = fillValue;
-                    }
-                }
-
-                repaired = true;
-                n = end + 1;
                 break;
             }
 
-            if( !repaired )
+            runMax = std::max( runMax, sourcePsd[end] );
+
+            realT rightVal = std::max( sourcePsd[end + 1], tiny );
+            bool canExtend = end + 1 < sourcePsd.size() - 1;
+            if( canExtend && !repairMask.empty() )
             {
-                ++n;
+                canExtend = repairMask[end + 1] != 0;
             }
+
+            if( sourcePsd[end] >= gapFactor * rightVal )
+            {
+                if( canExtend )
+                {
+                    continue;
+                }
+
+                break;
+            }
+
+            realT flankMin = std::min( leftVal, rightVal );
+            if( runMax >= gapFactor * flankMin )
+            {
+                if( canExtend )
+                {
+                    continue;
+                }
+
+                break;
+            }
+
+            realT xLeft = log10( std::max( freq[n - 1], refFreq ) );
+            realT xRight = log10( std::max( freq[end + 1], refFreq ) );
+            if( xRight <= xLeft )
+            {
+                xRight = xLeft + static_cast<realT>( 1 );
+            }
+
+            realT yLeft = log10( std::max( sourcePsd[n - 1], tiny ) );
+            realT yRight = log10( std::max( sourcePsd[end + 1], tiny ) );
+
+            for( size_t fill = n; fill <= end; ++fill )
+            {
+                realT xFill = log10( std::max( freq[fill], refFreq ) );
+                realT alpha = ( xFill - xLeft ) / ( xRight - xLeft );
+                if( alpha < static_cast<realT>( 0 ) )
+                {
+                    alpha = static_cast<realT>( 0 );
+                }
+                else if( alpha > static_cast<realT>( 1 ) )
+                {
+                    alpha = static_cast<realT>( 1 );
+                }
+
+                realT fillValue = pow( static_cast<realT>( 10 ), yLeft + alpha * ( yRight - yLeft ) );
+                changed = changed || fillValue != updatedPsd[fill];
+                updatedPsd[fill] = std::max( fillValue, tiny );
+            }
+
+            repaired = true;
+            n = end + 1;
+            break;
         }
 
+        if( !repaired )
+        {
+            ++n;
+        }
+    }
+
+    if( changed )
+    {
         processPsd.swap( updatedPsd );
     }
 
