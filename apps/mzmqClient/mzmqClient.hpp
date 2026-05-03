@@ -75,30 +75,6 @@ class mzmqClient : public MagAOXApp<>, public milkzmq::milkzmqClient
   protected:
     std::vector<std::string> m_shMemImNames;
 
-    /** \name SIGSEGV & SIGBUS signal handling
-     * These signals occur as a result of a ImageStreamIO source server resetting (e.g. changing frame sizes).
-     * When they occur a restart of the framegrabber and framewriter thread main loops is triggered.
-     *
-     * @{
-     */
-    bool m_restart{ false };
-
-    static mzmqClient *m_selfClient; ///< Static pointer to this (set in constructor).  Used for getting out of the
-                                     ///< static SIGSEGV handler.
-
-    /// Sets the handler for SIGSEGV and SIGBUS
-    /** These are caused by ImageStreamIO server resets.
-     */
-    int setSigSegvHandler();
-
-    /// The handler called when SIGSEGV or SIGBUS is received, which will be due to ImageStreamIO server resets.  Just a
-    /// wrapper for handlerSigSegv.
-    static void _handlerSigSegv( int signum, siginfo_t *siginf, void *ucont );
-
-    /// Handles SIGSEGV and SIGBUS.  Sets m_restart to true.
-    void handlerSigSegv( int signum, siginfo_t *siginf, void *ucont );
-    ///@}
-
     /** \name milkzmq Status and Error Handling
      * Implementation of status updates, warnings, and errors from milkzmq using logs.
      *
@@ -122,13 +98,9 @@ class mzmqClient : public MagAOXApp<>, public milkzmq::milkzmqClient
     ///@}
 };
 
-// Set self pointer to null so app starts up uninitialized.
-mzmqClient *mzmqClient::m_selfClient = nullptr;
-
 inline mzmqClient::mzmqClient() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     m_powerMgtEnabled = false;
-    m_selfClient      = this;
 
     return;
 }
@@ -182,16 +154,8 @@ inline void mzmqClient::loadConfig()
     std::cerr << "m_imagePort = " << m_imagePort << "\n";
 }
 
-#include <sys/syscall.h>
-
 inline int mzmqClient::appStartup()
 {
-    if( setSigSegvHandler() < 0 )
-    {
-        log<software_error>( { __FILE__, __LINE__ } );
-        return -1;
-    }
-
     for( size_t n = 0; n < m_shMemImNames.size(); ++n )
     {
         shMemImName( m_shMemImNames[n] );
@@ -245,59 +209,6 @@ inline int mzmqClient::appShutdown()
     }
 
     return 0;
-}
-
-inline int mzmqClient::setSigSegvHandler()
-{
-    struct sigaction act;
-    sigset_t         set;
-
-    act.sa_sigaction = &mzmqClient::_handlerSigSegv;
-    act.sa_flags     = SA_SIGINFO;
-    sigemptyset( &set );
-    act.sa_mask = set;
-
-    errno = 0;
-    if( sigaction( SIGSEGV, &act, 0 ) < 0 )
-    {
-        std::string logss = "Setting handler for SIGSEGV failed. Errno says: ";
-        logss += strerror( errno );
-
-        log<software_error>( { __FILE__, __LINE__, errno, 0, logss } );
-
-        return -1;
-    }
-
-    errno = 0;
-    if( sigaction( SIGBUS, &act, 0 ) < 0 )
-    {
-        std::string logss = "Setting handler for SIGBUS failed. Errno says: ";
-        logss += strerror( errno );
-
-        log<software_error>( { __FILE__, __LINE__, errno, 0, logss } );
-
-        return -1;
-    }
-
-    log<text_log>( "Installed SIGSEGV/SIGBUS signal handler.", logPrio::LOG_DEBUG );
-
-    return 0;
-}
-
-inline void mzmqClient::_handlerSigSegv( int signum, siginfo_t *siginf, void *ucont )
-{
-    m_selfClient->handlerSigSegv( signum, siginf, ucont );
-}
-
-inline void mzmqClient::handlerSigSegv( int signum, siginfo_t *siginf, void *ucont )
-{
-    static_cast<void>( signum );
-    static_cast<void>( siginf );
-    static_cast<void>( ucont );
-
-    m_restart = true;
-
-    return;
 }
 
 inline void mzmqClient::reportInfo( const std::string &msg )
