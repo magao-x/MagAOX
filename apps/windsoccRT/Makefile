@@ -1,11 +1,11 @@
 # WindsoCC realtime: handbook-style Python INDI app (``magaox.indi.device.XDevice``).
 # Installs the sibling ``windsocc`` package first, then this app and
 # ``/opt/MagAOX/bin/windsoccRT`` for ``xctrl`` / ``proclist_RTC``.
-SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
--include $(SELF_DIR)/../../Make/python.mk
+APP_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+-include $(APP_DIR)/../../Make/python.mk
 
 TARGET := windsoccRT
-WINDSOCC_PKG_DIR := $(SELF_DIR)/windsocc
+WINDSOCC_PKG_DIR := $(APP_DIR)/windsocc
 
 .PHONY: all clean check pipinstall normalize_permissions install install-windsocc-python
 
@@ -13,8 +13,8 @@ all:
 	@echo "*** $(TARGET): Python INDI app — use 'make install' ***"
 
 clean:
-	rm -rf $(SELF_DIR)/build
-	rm -rf $(SELF_DIR)/xapp_windsoccRT.egg-info
+	rm -rf $(APP_DIR)/build
+	rm -rf $(APP_DIR)/xapp_windsoccRT.egg-info
 
 check:
 	$(PYTHON) -c 'import purepyindi2' || (echo "Need purepyindi2 installed to $(PYTHON)" && exit 1)
@@ -22,7 +22,7 @@ check:
 
 pipinstall: check
 	sudo -H $(PYTHON) -m pip install "$(WINDSOCC_PKG_DIR)" || (echo "Unable to install windsocc from $(WINDSOCC_PKG_DIR)" && exit 1)
-	sudo -H $(PYTHON) -m pip install "$(SELF_DIR)" || (echo "Unable to install $(TARGET) with $(PYTHON)" && exit 1)
+	sudo -H $(PYTHON) -m pip install "$(APP_DIR)" || (echo "Unable to install $(TARGET) with $(PYTHON)" && exit 1)
 	sudo -H ln -sfv $(PYTHON_SCRIPTS_PREFIX)/$(TARGET) /opt/MagAOX/bin/$(TARGET) || (echo "Couldn't symlink /opt/MagAOX/bin/$(TARGET)" && exit 1)
 
 normalize_permissions: pipinstall
