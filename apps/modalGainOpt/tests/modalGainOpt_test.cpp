@@ -70,6 +70,11 @@ class modalGainOptHarness : public modalGainOpt
         return m_extrapClosedLoopOlEstimateMethod;
     }
 
+    int extrapPowerLawCrossoverMode() const
+    {
+        return m_extrapPowerLawCrossoverMode;
+    }
+
     void setExtrapMethodForTest( int method )
     {
         m_extrapOL = method;
@@ -97,6 +102,12 @@ class modalGainOptHarness : public modalGainOpt
     {
         m_extrapClosedLoopOlEstimateMethod = method;
         m_extrapConfig.m_closedLoopOlEstimateMethod = extrapClosedLoopOlEstimateMethodName( method );
+    }
+
+    void setExtrapPowerLawCrossoverModeForTest( int mode )
+    {
+        m_extrapPowerLawCrossoverMode = mode;
+        m_extrapConfig.m_powerLawCrossoverMode = extrapPowerLawCrossoverModeName( mode );
     }
 
     const processPsdProcessorT::processModelConfig &extrapConfig() const
@@ -353,6 +364,16 @@ class modalGainOptHarness : public modalGainOpt
               extrapClosedLoopOlEstimateMethodLabel( c_extrapClosedLoopOlEstimateNtfAware ) },
             "Closed Loop OL Estimate Method",
             "Extrapolation" );
+
+        createStandardIndiSelectionSw(
+            m_indiP_extrapPowerLawCrossoverMode,
+            "extrap_powerLawCrossoverMode",
+            { extrapPowerLawCrossoverModeElement( c_extrapPowerLawCrossoverManual ),
+              extrapPowerLawCrossoverModeElement( c_extrapPowerLawCrossoverAutoSmoothedCrossing ) },
+            { extrapPowerLawCrossoverModeLabel( c_extrapPowerLawCrossoverManual ),
+              extrapPowerLawCrossoverModeLabel( c_extrapPowerLawCrossoverAutoSmoothedCrossing ) },
+            "Power-Law Crossover Mode",
+            "Extrapolation" );
     }
 
     int handleExtrapMethodPropertyForTest( const pcf::IndiProperty &ipRecv )
@@ -380,6 +401,11 @@ class modalGainOptHarness : public modalGainOpt
         return handleExtrapClosedLoopOlEstimateMethodProperty( ipRecv );
     }
 
+    int handleExtrapPowerLawCrossoverModePropertyForTest( const pcf::IndiProperty &ipRecv )
+    {
+        return handleExtrapPowerLawCrossoverModeProperty( ipRecv );
+    }
+
     pcf::IndiElement::SwitchStateType extrapMethodElementStateForTest( const std::string &element ) const
     {
         return m_indiP_extrapMethod[element].getSwitchState();
@@ -405,6 +431,11 @@ class modalGainOptHarness : public modalGainOpt
     extrapClosedLoopOlEstimateMethodElementStateForTest( const std::string &element ) const
     {
         return m_indiP_extrapClosedLoopOlEstimateMethod[element].getSwitchState();
+    }
+
+    pcf::IndiElement::SwitchStateType extrapPowerLawCrossoverModeElementStateForTest( const std::string &element ) const
+    {
+        return m_indiP_extrapPowerLawCrossoverMode[element].getSwitchState();
     }
 };
 /// \endcond
@@ -504,7 +535,8 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation" },
+                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+                                "extrapolation", "extrapolation" },
                               {
                                   "number",
                                   "name",
@@ -521,6 +553,8 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                   "powerLawNormFreq",
                                   "powerLawMatchFreq",
                                   "powerLawMatchFallbackWindowHz",
+                                  "powerLawCrossoverMode",
+                                  "powerLawAutoSmoothWidthHz",
                                   "fitPowerLawIndex",
                                   "powerLawOnlyAboveFreq",
                                   "powerLawFitIncludesMatchPoint",
@@ -552,6 +586,8 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
                                 "15",
                                 "12.5",
                                 "7.5",
+                                "auto_smoothed_crossing",
+                                "37.5",
                                 "true",
                                 "250",
                                 "false",
@@ -594,6 +630,8 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without tog
     REQUIRE( app.extrapConfig().m_powerLawNormFreq == Approx( 15.0F ) );
     REQUIRE( app.extrapConfig().m_powerLawMatchFreq == Approx( 12.5F ) );
     REQUIRE( app.extrapConfig().m_powerLawMatchFallbackWindowHz == Approx( 7.5F ) );
+    REQUIRE( app.extrapConfig().m_powerLawCrossoverMode == "auto-smoothed-crossing" );
+    REQUIRE( app.extrapConfig().m_powerLawAutoSmoothWidthHz == Approx( 37.5F ) );
     REQUIRE( app.extrapConfig().m_fitPowerLawIndex == true );
     REQUIRE( app.extrapConfig().m_powerLawOnlyAboveFreq == Approx( 250.0F ) );
     REQUIRE( app.extrapConfig().m_powerLawFitIncludesMatchPoint == false );
@@ -709,6 +747,25 @@ TEST_CASE( "modalGainOpt restores current selection when extrapolation switches 
                      c_extrapClosedLoopOlEstimateNtfAware ) ) == pcf::IndiElement::On );
         REQUIRE( app.extrapClosedLoopOlEstimateMethodElementStateForTest( extrapClosedLoopOlEstimateMethodElement(
                      c_extrapClosedLoopOlEstimateEtfOnly ) ) == pcf::IndiElement::Off );
+    }
+
+    SECTION( "power-law crossover mode is restored" )
+    {
+        app.setExtrapPowerLawCrossoverModeForTest( c_extrapPowerLawCrossoverAutoSmoothedCrossing );
+
+        pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+        ip.add( pcf::IndiElement( extrapPowerLawCrossoverModeElement( c_extrapPowerLawCrossoverManual ),
+                                  pcf::IndiElement::Off ) );
+        ip.add( pcf::IndiElement( extrapPowerLawCrossoverModeElement( c_extrapPowerLawCrossoverAutoSmoothedCrossing ),
+                                  pcf::IndiElement::Off ) );
+
+        REQUIRE( app.handleExtrapPowerLawCrossoverModePropertyForTest( ip ) == 0 );
+        REQUIRE( app.extrapPowerLawCrossoverMode() == c_extrapPowerLawCrossoverAutoSmoothedCrossing );
+        REQUIRE( app.extrapConfig().m_powerLawCrossoverMode == "auto-smoothed-crossing" );
+        REQUIRE( app.extrapPowerLawCrossoverModeElementStateForTest( extrapPowerLawCrossoverModeElement(
+                     c_extrapPowerLawCrossoverAutoSmoothedCrossing ) ) == pcf::IndiElement::On );
+        REQUIRE( app.extrapPowerLawCrossoverModeElementStateForTest(
+                     extrapPowerLawCrossoverModeElement( c_extrapPowerLawCrossoverManual ) ) == pcf::IndiElement::Off );
     }
 }
 
@@ -920,6 +977,33 @@ TEST_CASE( "modalPsdProcessor power-law-only repairs deep dropouts below the pur
     REQUIRE( result.m_processPsd[5] == Approx( result.m_extrapolation * pow( 20.0F / freq[5], 1.0F ) ) );
     REQUIRE( result.m_processPsd[6] == Approx( result.m_extrapolation * pow( 20.0F / freq[6], 1.0F ) ) );
     REQUIRE( result.m_processPsd[7] == Approx( result.m_extrapolation * pow( 20.0F / freq[7], 1.0F ) ) );
+}
+
+TEST_CASE( "modalPsdProcessor can auto-select the power-law crossover from a smoothed noise crossing",
+           "[modalGainOpt]" )
+{
+    std::vector<float> measuredPsd{ 0.0F, 10.0F, 8.5F, 6.5F, 4.5F, 3.1F, 2.7F, 2.55F, 4.6F, 2.51F, 2.5F };
+    std::vector<float> freq{ 0.0F, 20.0F, 40.0F, 60.0F, 80.0F, 100.0F, 120.0F, 140.0F, 160.0F, 180.0F, 200.0F };
+
+    processPsdProcessorT::processModelConfig cfg;
+    cfg.m_method = "power-law-only";
+    cfg.m_noiseEstimateStatistic = "minimum";
+    cfg.m_powerLawIndex = 1.0F;
+    cfg.m_powerLawNormFreq = 20.0F;
+    cfg.m_powerLawMatchFreq = 0.0F;
+    cfg.m_powerLawOnlyAboveFreq = 0.0F;
+    cfg.m_powerLawCrossoverMode = "auto-smoothed-crossing";
+    cfg.m_powerLawAutoSmoothWidthHz = 100.0F;
+
+    processPsdProcessorT::processResults result;
+    mx::error_t errc = processPsdProcessorT::analyzePsd( result, measuredPsd, freq, 10, cfg );
+
+    REQUIRE( !errc );
+    REQUIRE( result.m_powerLawCrossoverMode == "auto-smoothed-crossing" );
+    REQUIRE( result.m_powerLawMatchFreq == Approx( result.m_powerLawOnlyAboveFreq ) );
+    REQUIRE( result.m_powerLawMatchFreq > 80.0F );
+    REQUIRE( result.m_powerLawMatchFreq < 150.0F );
+    REQUIRE( result.m_processPsd[8] < static_cast<float>( measuredPsd[8] - result.m_noiseFloor ) );
 }
 
 /// Verify `modalGainOpt` publishes LP and max-gain arrays into separate buffers.

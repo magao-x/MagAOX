@@ -58,6 +58,12 @@ class modalPsdProcessor
     /// The default half-width of the local match-frequency fallback window.
     static constexpr realT c_defaultPowerLawMatchFallbackWindowHz = static_cast<realT>( 5 );
 
+    /// The default crossover-selection mode for the power-law handoff.
+    static constexpr const char *c_defaultPowerLawCrossoverMode = "manual";
+
+    /// The default median-smoothing width used by the automatic crossover finder.
+    static constexpr realT c_defaultPowerLawAutoSmoothWidthHz = static_cast<realT>( 50 );
+
     /// The default choice to keep the power-law exponent fixed.
     static constexpr bool c_defaultFitPowerLawIndex = false;
 
@@ -138,6 +144,12 @@ class modalPsdProcessor
 
         /// The half-width of the local fallback window used when the match point is in a trough.
         realT m_powerLawMatchFallbackWindowHz{ c_defaultPowerLawMatchFallbackWindowHz };
+
+        /// How the power-law match/cutoff frequencies are chosen.
+        std::string m_powerLawCrossoverMode{ c_defaultPowerLawCrossoverMode };
+
+        /// The median-smoothing width used when automatically locating the crossover.
+        realT m_powerLawAutoSmoothWidthHz{ c_defaultPowerLawAutoSmoothWidthHz };
 
         /// Whether to fit the power-law exponent from high-frequency bins.
         bool m_fitPowerLawIndex{ c_defaultFitPowerLawIndex };
@@ -245,6 +257,12 @@ class modalPsdProcessor
 
         /// The half-width of the local match-frequency fallback window.
         realT m_powerLawMatchFallbackWindowHz{ c_defaultPowerLawMatchFallbackWindowHz };
+
+        /// How the power-law match/cutoff frequencies were chosen.
+        std::string m_powerLawCrossoverMode{ c_defaultPowerLawCrossoverMode };
+
+        /// The median-smoothing width used when automatically locating the crossover.
+        realT m_powerLawAutoSmoothWidthHz{ c_defaultPowerLawAutoSmoothWidthHz };
 
         /// Whether the exponent was requested to be fit from the PSD.
         bool m_fitPowerLawIndex{ c_defaultFitPowerLawIndex };
@@ -375,9 +393,32 @@ class modalPsdProcessor
     static std::string
     normalizeClosedLoopOlEstimateMethod( std::string method /**< [in] the requested CL-to-OL method */ );
 
+    /// Normalize a power-law crossover mode name to lowercase hyphenated form.
+    static std::string normalizePowerLawCrossoverMode( std::string mode /**< [in] the requested crossover mode */ );
+
     /// Resolve the power-law normalization frequency, defaulting to the first positive bin.
     static realT resolvePowerLawNormFreq( const std::vector<realT> &freq, /**< [in] the one-sided frequency grid */
                                           realT requestedNormFreq /**< [in] the requested normalization frequency */
+    );
+
+    /// Determine the automatic power-law crossover from a median-smoothed disturbance PSD.
+    static mx::error_t
+    findAutoPowerLawCrossoverFreq( realT &crossoverFreq, /**< [out] the resolved crossover frequency */
+                                   const std::vector<realT> &rawProcessPsd, /**< [in] the raw disturbance PSD */
+                                   const std::vector<realT> &noisePsd,      /**< [in] the flat noise PSD */
+                                   const std::vector<realT> &freq,          /**< [in] the one-sided frequency grid */
+                                   realT smoothWidthHz /**< [in] the median-smoothing width in Hz */
+    );
+
+    /// Resolve effective power-law match and cutoff frequencies for manual or automatic crossover modes.
+    static mx::error_t
+    resolvePowerLawCrossoverFrequencies( realT &powerLawMatchFreq,              /**< [in.out] match frequency */
+                                         realT &powerLawOnlyAboveFreq,          /**< [in.out] cutoff frequency */
+                                         const std::vector<realT> &measuredPsd, /**< [in] OL PSD */
+                                         const std::vector<realT> &noisePsd,    /**< [in] OL noise PSD */
+                                         const std::vector<realT> &freq,        /**< [in] frequency grid */
+                                         std::string powerLawCrossoverMode,     /**< [in] mode */
+                                         realT powerLawAutoSmoothWidthHz        /**< [in] smooth width */
     );
 
     /// Evaluate the extrapolated power-law continuum at one frequency bin.
@@ -624,6 +665,8 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
     result.m_noiseEstimateStatistic = normalizeNoiseEstimateStatistic( config.m_noiseEstimateStatistic );
     result.m_closedLoopOlEstimateMethod = normalizeClosedLoopOlEstimateMethod( config.m_closedLoopOlEstimateMethod );
     result.m_powerLawMatchFallbackWindowHz = config.m_powerLawMatchFallbackWindowHz;
+    result.m_powerLawCrossoverMode = normalizePowerLawCrossoverMode( config.m_powerLawCrossoverMode );
+    result.m_powerLawAutoSmoothWidthHz = config.m_powerLawAutoSmoothWidthHz;
     result.m_fitPowerLawIndex = config.m_fitPowerLawIndex;
     result.m_powerLawOnlyAboveFreq = config.m_powerLawOnlyAboveFreq;
     result.m_powerLawIndexFitSucceeded = false;
@@ -712,6 +755,20 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                      result.m_closedLoopOlEstimateMethod );
     }
 
+    if( result.m_powerLawCrossoverMode != "manual" && result.m_powerLawCrossoverMode != "auto-smoothed-crossing" )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                 "Unknown power-law crossover mode: " +
+                                                     result.m_powerLawCrossoverMode );
+    }
+
+    if( result.m_powerLawCrossoverMode == "auto-smoothed-crossing" &&
+        result.m_powerLawAutoSmoothWidthHz <= static_cast<realT>( 0 ) )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                 "Automatic power-law crossover smoothing width must be positive" );
+    }
+
     const std::vector<realT> &noiseEstimatePsd = measuredPsd;
 
     mx::error_t errc = estimateNoisePsd( result.m_noisePsd,
@@ -776,10 +833,34 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
         }
     }
 
+    processModelConfig effectiveConfig = config;
+    effectiveConfig.m_method = result.m_processMethod;
+    effectiveConfig.m_noiseEstimateDomain = result.m_noiseEstimateDomain;
+    effectiveConfig.m_noiseEstimateRange = result.m_noiseEstimateRange;
+    effectiveConfig.m_noiseEstimateStatistic = result.m_noiseEstimateStatistic;
+    effectiveConfig.m_closedLoopOlEstimateMethod = result.m_closedLoopOlEstimateMethod;
+    effectiveConfig.m_powerLawCrossoverMode = result.m_powerLawCrossoverMode;
+    effectiveConfig.m_powerLawAutoSmoothWidthHz = result.m_powerLawAutoSmoothWidthHz;
+
+    errc = resolvePowerLawCrossoverFrequencies( effectiveConfig.m_powerLawMatchFreq,
+                                                effectiveConfig.m_powerLawOnlyAboveFreq,
+                                                processMeasuredPsd,
+                                                processNoisePsd,
+                                                freq,
+                                                effectiveConfig.m_powerLawCrossoverMode,
+                                                effectiveConfig.m_powerLawAutoSmoothWidthHz );
+    if( !!errc )
+    {
+        return errc;
+    }
+
+    result.m_powerLawMatchFreq = effectiveConfig.m_powerLawMatchFreq;
+    result.m_powerLawOnlyAboveFreq = effectiveConfig.m_powerLawOnlyAboveFreq;
+
     result.m_peaks.clear();
     std::vector<unsigned char> processRepairMask;
 
-    if( config.m_method == "legacy" )
+    if( effectiveConfig.m_method == "legacy" )
     {
         result.m_powerLawIndex = c_defaultPowerLawIndex;
         result.m_powerLawAnchorIndex = 0;
@@ -789,17 +870,17 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                    processMeasuredPsd,
                                    processNoisePsd,
                                    freq,
-                                   config.m_powerLawNormFreq,
-                                   config.m_powerLawMatchFreq,
-                                   config.m_powerLawMatchFallbackWindowHz );
+                                   effectiveConfig.m_powerLawNormFreq,
+                                   effectiveConfig.m_powerLawMatchFreq,
+                                   effectiveConfig.m_powerLawMatchFallbackWindowHz );
         if( !!errc )
         {
             return errc;
         }
     }
-    else if( config.m_method == "power-law-only" )
+    else if( effectiveConfig.m_method == "power-law-only" )
     {
-        realT usedPowerLawIndex = config.m_powerLawIndex;
+        realT usedPowerLawIndex = effectiveConfig.m_powerLawIndex;
         size_t fitBinsUsed = 0;
         errc = estimateProcessPsdPowerLawOnly( result.m_processPsd,
                                                result.m_extrapolation,
@@ -808,7 +889,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                processMeasuredPsd,
                                                processNoisePsd,
                                                freq,
-                                               config,
+                                               effectiveConfig,
                                                &usedPowerLawIndex,
                                                &fitBinsUsed );
         if( !!errc )
@@ -819,10 +900,10 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
         result.m_powerLawAnchorFreq =
             result.m_powerLawAnchorIndex < freq.size() ? freq[result.m_powerLawAnchorIndex] : static_cast<realT>( 0 );
         result.m_powerLawIndex = usedPowerLawIndex;
-        result.m_powerLawIndexFitSucceeded = config.m_fitPowerLawIndex && fitBinsUsed > 0;
+        result.m_powerLawIndexFitSucceeded = effectiveConfig.m_fitPowerLawIndex && fitBinsUsed > 0;
         result.m_powerLawFitBinsUsed = fitBinsUsed;
     }
-    else if( config.m_method == "moffat-peaks" )
+    else if( effectiveConfig.m_method == "moffat-peaks" )
     {
         size_t anchorIndex = 0;
         errc = estimateProcessPsdMoffatPeaks( result.m_processPsd,
@@ -832,7 +913,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                               processMeasuredPsd,
                                               processNoisePsd,
                                               freq,
-                                              config );
+                                              effectiveConfig );
         if( !!errc )
         {
             return errc;
@@ -846,7 +927,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
         }
 
         std::vector<realT> continuumPsd;
-        realT usedPowerLawIndex = config.m_powerLawIndex;
+        realT usedPowerLawIndex = effectiveConfig.m_powerLawIndex;
         size_t fitBinsUsed = 0;
         errc = estimatePowerLawContinuum( continuumPsd,
                                           result.m_extrapolation,
@@ -854,15 +935,15 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                           rawProcessPsd,
                                           processNoisePsd,
                                           freq,
-                                          config.m_powerLawIndex,
-                                          config.m_powerLawNormFreq,
-                                          config.m_powerLawMatchFreq,
-                                          config.m_powerLawMatchFallbackWindowHz,
-                                          config.m_fitPowerLawIndex,
-                                          config.m_powerLawFitMinFreqHz,
-                                          config.m_powerLawFitMaxFreqHz,
-                                          config.m_powerLawFitBinWidthHz,
-                                          config.m_powerLawFitIncludesMatchPoint,
+                                          effectiveConfig.m_powerLawIndex,
+                                          effectiveConfig.m_powerLawNormFreq,
+                                          effectiveConfig.m_powerLawMatchFreq,
+                                          effectiveConfig.m_powerLawMatchFallbackWindowHz,
+                                          effectiveConfig.m_fitPowerLawIndex,
+                                          effectiveConfig.m_powerLawFitMinFreqHz,
+                                          effectiveConfig.m_powerLawFitMaxFreqHz,
+                                          effectiveConfig.m_powerLawFitBinWidthHz,
+                                          effectiveConfig.m_powerLawFitIncludesMatchPoint,
                                           &usedPowerLawIndex,
                                           &fitBinsUsed );
         if( !!errc )
@@ -874,28 +955,28 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
         result.m_powerLawAnchorFreq =
             result.m_powerLawAnchorIndex < freq.size() ? freq[result.m_powerLawAnchorIndex] : static_cast<realT>( 0 );
         result.m_powerLawIndex = usedPowerLawIndex;
-        result.m_powerLawIndexFitSucceeded = config.m_fitPowerLawIndex && fitBinsUsed > 0;
+        result.m_powerLawIndexFitSucceeded = effectiveConfig.m_fitPowerLawIndex && fitBinsUsed > 0;
         result.m_powerLawFitBinsUsed = fitBinsUsed;
     }
     else
     {
         return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
-                                                 "Unknown process method: " + config.m_method );
+                                                 "Unknown process method: " + effectiveConfig.m_method );
     }
 
-    if( config.m_method == "power-law-only" || config.m_method == "moffat-peaks" )
+    if( effectiveConfig.m_method == "power-law-only" || effectiveConfig.m_method == "moffat-peaks" )
     {
         errc = fillProcessPsdDropouts( result.m_processPsd,
                                        freq,
                                        processRepairMask,
-                                       config.m_dropoutGapFactor,
-                                       config.m_dropoutMaxBins );
+                                       effectiveConfig.m_dropoutGapFactor,
+                                       effectiveConfig.m_dropoutMaxBins );
         if( !!errc )
         {
             return errc;
         }
 
-        if( config.m_powerLawMatchFreq > static_cast<realT>( 0 ) )
+        if( effectiveConfig.m_powerLawMatchFreq > static_cast<realT>( 0 ) )
         {
             const realT tiny = std::numeric_limits<realT>::min();
             std::vector<realT> rawProcessPsd( processMeasuredPsd.size() );
@@ -913,9 +994,9 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                               processNoisePsd,
                                               freq,
                                               result.m_powerLawIndex,
-                                              config.m_powerLawNormFreq,
+                                              effectiveConfig.m_powerLawNormFreq,
                                               static_cast<realT>( 0 ),
-                                              config.m_powerLawMatchFallbackWindowHz,
+                                              effectiveConfig.m_powerLawMatchFallbackWindowHz,
                                               false );
             if( !!errc )
             {
@@ -926,9 +1007,9 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                         result.m_processPsd,
                                         freq,
                                         result.m_powerLawIndex,
-                                        config.m_powerLawNormFreq,
-                                        config.m_powerLawMatchFreq,
-                                        config.m_powerLawMatchFallbackWindowHz );
+                                        effectiveConfig.m_powerLawNormFreq,
+                                        effectiveConfig.m_powerLawMatchFreq,
+                                        effectiveConfig.m_powerLawMatchFallbackWindowHz );
             if( !!errc )
             {
                 return errc;
@@ -938,7 +1019,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                            result.m_extrapolation,
                                            freq,
                                            result.m_powerLawIndex,
-                                           config.m_powerLawNormFreq );
+                                           effectiveConfig.m_powerLawNormFreq );
             if( !!errc )
             {
                 return errc;
@@ -949,7 +1030,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                               ? freq[result.m_powerLawAnchorIndex]
                                               : static_cast<realT>( 0 );
 
-            if( config.m_method == "power-law-only" )
+            if( effectiveConfig.m_method == "power-law-only" )
             {
                 errc = buildPowerLawOnlyProcessFromContinuum( result.m_processPsd,
                                                               processRepairMask,
@@ -958,7 +1039,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                               continuumPsd,
                                                               freq,
                                                               result.m_powerLawAnchorIndex,
-                                                              config );
+                                                              effectiveConfig );
             }
             else
             {
@@ -970,7 +1051,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                         continuumPsd,
                                                         freq,
                                                         result.m_powerLawAnchorIndex,
-                                                        config );
+                                                        effectiveConfig );
             }
             if( !!errc )
             {
@@ -980,8 +1061,8 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
             errc = fillProcessPsdDropouts( result.m_processPsd,
                                            freq,
                                            processRepairMask,
-                                           config.m_dropoutGapFactor,
-                                           config.m_dropoutMaxBins );
+                                           effectiveConfig.m_dropoutGapFactor,
+                                           effectiveConfig.m_dropoutMaxBins );
             if( !!errc )
             {
                 return errc;
@@ -1163,6 +1244,30 @@ std::string modalPsdProcessor<realT>::normalizeClosedLoopOlEstimateMethod( std::
 }
 
 template <typename realT>
+std::string modalPsdProcessor<realT>::normalizePowerLawCrossoverMode( std::string mode )
+{
+    std::transform( mode.begin(),
+                    mode.end(),
+                    mode.begin(),
+                    []( unsigned char c )
+                    {
+                        if( c == '_' )
+                        {
+                            return static_cast<char>( '-' );
+                        }
+
+                        return static_cast<char>( std::tolower( c ) );
+                    } );
+
+    if( mode == "auto" || mode == "automatic" || mode == "auto-crossing" )
+    {
+        return "auto-smoothed-crossing";
+    }
+
+    return mode;
+}
+
+template <typename realT>
 size_t modalPsdProcessor<realT>::firstPositiveFreqIndex( const std::vector<realT> &freq )
 {
     for( size_t n = 0; n < freq.size(); ++n )
@@ -1174,6 +1279,155 @@ size_t modalPsdProcessor<realT>::firstPositiveFreqIndex( const std::vector<realT
     }
 
     return 0;
+}
+
+template <typename realT>
+mx::error_t modalPsdProcessor<realT>::findAutoPowerLawCrossoverFreq( realT &crossoverFreq,
+                                                                     const std::vector<realT> &rawProcessPsd,
+                                                                     const std::vector<realT> &noisePsd,
+                                                                     const std::vector<realT> &freq,
+                                                                     realT smoothWidthHz )
+{
+    if( rawProcessPsd.size() != noisePsd.size() || rawProcessPsd.size() != freq.size() )
+    {
+        return mx::error_report<mx::verbose::d>(
+            mx::error_t::sizeerr,
+            "Automatic power-law crossover inputs must have matching PSD and frequency sizes" );
+    }
+
+    if( rawProcessPsd.size() < 3 )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr,
+                                                 "Automatic power-law crossover requires at least three bins" );
+    }
+
+    if( smoothWidthHz <= static_cast<realT>( 0 ) )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                 "Automatic power-law crossover smoothing width must be positive" );
+    }
+
+    const size_t firstPositive = firstPositiveFreqIndex( freq );
+    if( firstPositive >= freq.size() || freq[firstPositive] <= static_cast<realT>( 0 ) )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                 "Automatic power-law crossover requires positive frequencies" );
+    }
+
+    if( firstPositive + 1 >= freq.size() )
+    {
+        crossoverFreq = freq[firstPositive];
+        return mx::error_t::noerror;
+    }
+
+    const realT df = freq[firstPositive + 1] - freq[firstPositive];
+    if( df <= static_cast<realT>( 0 ) )
+    {
+        return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
+                                                 "Automatic power-law crossover requires increasing frequency bins" );
+    }
+
+    int win = std::max( 3, static_cast<int>( std::lround( smoothWidthHz / df ) ) );
+    if( win % 2 == 0 )
+    {
+        ++win;
+    }
+
+    const realT tiny = std::numeric_limits<realT>::min();
+    std::vector<realT> logRaw( rawProcessPsd.size() );
+    for( size_t n = 0; n < rawProcessPsd.size(); ++n )
+    {
+        logRaw[n] = log10( std::max( rawProcessPsd[n], tiny ) );
+    }
+
+    std::vector<realT> logSmooth;
+    mx::math::vectorSmoothMedian( logSmooth, logRaw, win );
+
+    bool foundAbove = false;
+    size_t highestAboveIndex = firstPositive;
+    bool foundCrossing = false;
+    realT lastCrossingFreq = freq[firstPositive];
+
+    for( size_t n = firstPositive; n < rawProcessPsd.size(); ++n )
+    {
+        realT smoothPsd = pow( static_cast<realT>( 10 ), logSmooth[n] );
+        if( smoothPsd >= noisePsd[n] )
+        {
+            foundAbove = true;
+            highestAboveIndex = n;
+        }
+
+        if( n + 1 >= rawProcessPsd.size() )
+        {
+            continue;
+        }
+
+        realT nextSmoothPsd = pow( static_cast<realT>( 10 ), logSmooth[n + 1] );
+        realT d0 = smoothPsd - noisePsd[n];
+        realT d1 = nextSmoothPsd - noisePsd[n + 1];
+        if( d0 >= static_cast<realT>( 0 ) && d1 <= static_cast<realT>( 0 ) )
+        {
+            realT alpha = static_cast<realT>( 0 );
+            if( d0 != d1 )
+            {
+                alpha = d0 / ( d0 - d1 );
+            }
+
+            alpha = std::max( static_cast<realT>( 0 ), std::min( static_cast<realT>( 1 ), alpha ) );
+            lastCrossingFreq = freq[n] + alpha * ( freq[n + 1] - freq[n] );
+            foundCrossing = true;
+        }
+    }
+
+    if( foundCrossing )
+    {
+        crossoverFreq = lastCrossingFreq;
+        return mx::error_t::noerror;
+    }
+
+    if( foundAbove )
+    {
+        crossoverFreq = freq[highestAboveIndex];
+        return mx::error_t::noerror;
+    }
+
+    crossoverFreq = freq[firstPositive];
+    return mx::error_t::noerror;
+}
+
+template <typename realT>
+mx::error_t modalPsdProcessor<realT>::resolvePowerLawCrossoverFrequencies( realT &powerLawMatchFreq,
+                                                                           realT &powerLawOnlyAboveFreq,
+                                                                           const std::vector<realT> &measuredPsd,
+                                                                           const std::vector<realT> &noisePsd,
+                                                                           const std::vector<realT> &freq,
+                                                                           std::string powerLawCrossoverMode,
+                                                                           realT powerLawAutoSmoothWidthHz )
+{
+    powerLawCrossoverMode = normalizePowerLawCrossoverMode( powerLawCrossoverMode );
+    if( powerLawCrossoverMode != "auto-smoothed-crossing" )
+    {
+        return mx::error_t::noerror;
+    }
+
+    const realT tiny = std::numeric_limits<realT>::min();
+    std::vector<realT> rawProcessPsd( measuredPsd.size() );
+    for( size_t n = 0; n < measuredPsd.size(); ++n )
+    {
+        rawProcessPsd[n] = std::max( measuredPsd[n] - noisePsd[n], tiny );
+    }
+
+    realT crossoverFreq = static_cast<realT>( 0 );
+    mx::error_t errc =
+        findAutoPowerLawCrossoverFreq( crossoverFreq, rawProcessPsd, noisePsd, freq, powerLawAutoSmoothWidthHz );
+    if( !!errc )
+    {
+        return errc;
+    }
+
+    powerLawMatchFreq = crossoverFreq;
+    powerLawOnlyAboveFreq = crossoverFreq;
+    return mx::error_t::noerror;
 }
 
 template <typename realT>

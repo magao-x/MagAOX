@@ -57,6 +57,8 @@ static constexpr int c_extrapNoiseEstimatePercentile = 0;
 static constexpr int c_extrapNoiseEstimateMinimum = 1;
 static constexpr int c_extrapClosedLoopOlEstimateEtfOnly = 0;
 static constexpr int c_extrapClosedLoopOlEstimateNtfAware = 1;
+static constexpr int c_extrapPowerLawCrossoverManual = 0;
+static constexpr int c_extrapPowerLawCrossoverAutoSmoothedCrossing = 1;
 
 inline std::string olProcessMethodElement( int method )
 {
@@ -440,6 +442,75 @@ inline int extrapClosedLoopOlEstimateMethodFromName( std::string method )
     return c_extrapClosedLoopOlEstimateEtfOnly;
 }
 
+inline std::string extrapPowerLawCrossoverModeElement( int mode )
+{
+    switch( mode )
+    {
+        case c_extrapPowerLawCrossoverAutoSmoothedCrossing:
+            return "auto_smoothed_crossing";
+        case c_extrapPowerLawCrossoverManual:
+        default:
+            return "manual";
+    }
+}
+
+inline std::string extrapPowerLawCrossoverModeLabel( int mode )
+{
+    switch( mode )
+    {
+        case c_extrapPowerLawCrossoverAutoSmoothedCrossing:
+            return "Auto Smoothed Crossing";
+        case c_extrapPowerLawCrossoverManual:
+        default:
+            return "Manual";
+    }
+}
+
+inline std::string extrapPowerLawCrossoverModeName( int mode )
+{
+    switch( mode )
+    {
+        case c_extrapPowerLawCrossoverAutoSmoothedCrossing:
+            return "auto-smoothed-crossing";
+        case c_extrapPowerLawCrossoverManual:
+        default:
+            return "manual";
+    }
+}
+
+inline int extrapPowerLawCrossoverModeFromElement( const std::string &element )
+{
+    if( element == "auto_smoothed_crossing" )
+    {
+        return c_extrapPowerLawCrossoverAutoSmoothedCrossing;
+    }
+
+    return c_extrapPowerLawCrossoverManual;
+}
+
+inline int extrapPowerLawCrossoverModeFromName( std::string mode )
+{
+    std::transform( mode.begin(),
+                    mode.end(),
+                    mode.begin(),
+                    []( unsigned char c )
+                    {
+                        if( c == '_' )
+                        {
+                            return static_cast<char>( '-' );
+                        }
+
+                        return static_cast<char>( std::tolower( c ) );
+                    } );
+
+    if( mode == "auto" || mode == "automatic" || mode == "auto-crossing" || mode == "auto-smoothed-crossing" )
+    {
+        return c_extrapPowerLawCrossoverAutoSmoothedCrossing;
+    }
+
+    return c_extrapPowerLawCrossoverManual;
+}
+
 struct psdShmimT
 {
     static std::string configSection()
@@ -732,6 +803,8 @@ class modalGainOpt : public MagAOXApp<true>,
         c_extrapNoiseEstimatePercentile };     ///< How the selected PSD bins are summarized into a noise floor.
     int m_extrapClosedLoopOlEstimateMethod{
         c_extrapClosedLoopOlEstimateEtfOnly }; ///< Which CL-to-OL reconstruction to use.
+    int m_extrapPowerLawCrossoverMode{
+        c_extrapPowerLawCrossoverManual };     ///< How the power-law match/cutoff frequencies are chosen.
 
     ///@}
 
@@ -984,6 +1057,9 @@ class modalGainOpt : public MagAOXApp<true>,
     /// Handle the closed-loop OL-estimation-method selection switch property.
     int handleExtrapClosedLoopOlEstimateMethodProperty( const pcf::IndiProperty &ipRecv );
 
+    /// Handle the power-law crossover-mode selection switch property.
+    int handleExtrapPowerLawCrossoverModeProperty( const pcf::IndiProperty &ipRecv );
+
   public:
     /// Default c'tor.
     modalGainOpt();
@@ -1192,6 +1268,8 @@ class modalGainOpt : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_extrapPowerLawNormFreq;
     pcf::IndiProperty m_indiP_extrapPowerLawMatchFreq;
     pcf::IndiProperty m_indiP_extrapPowerLawMatchFallbackWindowHz;
+    pcf::IndiProperty m_indiP_extrapPowerLawCrossoverMode;
+    pcf::IndiProperty m_indiP_extrapPowerLawAutoSmoothWidthHz;
     pcf::IndiProperty m_indiP_extrapFitPowerLawIndex;
     pcf::IndiProperty m_indiP_extrapPowerLawOnlyAboveFreq;
     pcf::IndiProperty m_indiP_extrapPowerLawFitIncludesMatchPoint;
@@ -1238,6 +1316,8 @@ class modalGainOpt : public MagAOXApp<true>,
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawNormFreq );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawMatchFreq );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawMatchFallbackWindowHz );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawCrossoverMode );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawAutoSmoothWidthHz );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapFitPowerLawIndex );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawOnlyAboveFreq );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawFitIncludesMatchPoint );
@@ -1442,6 +1522,26 @@ void modalGainOpt::setupConfig()
                 "float",
                 "Half-width in Hz of the local fallback window used when the match bin falls in a trough." );
 
+    config.add( "extrapolation.powerLawCrossoverMode",
+                "",
+                "extrapolation.powerLawCrossoverMode",
+                argType::Required,
+                "extrapolation",
+                "powerLawCrossoverMode",
+                false,
+                "string",
+                "How the power-law match/cutoff frequencies are chosen: manual or auto_smoothed_crossing." );
+
+    config.add( "extrapolation.powerLawAutoSmoothWidthHz",
+                "",
+                "extrapolation.powerLawAutoSmoothWidthHz",
+                argType::Required,
+                "extrapolation",
+                "powerLawAutoSmoothWidthHz",
+                false,
+                "float",
+                "Median-smoothing width in Hz used when auto power-law crossover selection is enabled." );
+
     config.add( "extrapolation.fitPowerLawIndex",
                 "",
                 "extrapolation.fitPowerLawIndex",
@@ -1642,6 +1742,11 @@ int modalGainOpt::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_extrapConfig.m_powerLawNormFreq, "extrapolation.powerLawNormFreq" );
     _config( m_extrapConfig.m_powerLawMatchFreq, "extrapolation.powerLawMatchFreq" );
     _config( m_extrapConfig.m_powerLawMatchFallbackWindowHz, "extrapolation.powerLawMatchFallbackWindowHz" );
+    std::string powerLawCrossoverMode = extrapPowerLawCrossoverModeName( m_extrapPowerLawCrossoverMode );
+    _config( powerLawCrossoverMode, "extrapolation.powerLawCrossoverMode" );
+    m_extrapPowerLawCrossoverMode = extrapPowerLawCrossoverModeFromName( powerLawCrossoverMode );
+    m_extrapConfig.m_powerLawCrossoverMode = extrapPowerLawCrossoverModeName( m_extrapPowerLawCrossoverMode );
+    _config( m_extrapConfig.m_powerLawAutoSmoothWidthHz, "extrapolation.powerLawAutoSmoothWidthHz" );
     _config( m_extrapConfig.m_fitPowerLawIndex, "extrapolation.fitPowerLawIndex" );
     _config( m_extrapConfig.m_powerLawOnlyAboveFreq, "extrapolation.powerLawOnlyAboveFreq" );
     _config( m_extrapConfig.m_powerLawFitIncludesMatchPoint, "extrapolation.powerLawFitIncludesMatchPoint" );
@@ -1936,6 +2041,33 @@ int modalGainOpt::appStartup()
                                  0.1,
                                  "%0.2f",
                                  "Power-Law Match Window",
+                                 "Extrapolation" );
+    if( createStandardIndiSelectionSw(
+            m_indiP_extrapPowerLawCrossoverMode,
+            "extrap_powerLawCrossoverMode",
+            { extrapPowerLawCrossoverModeElement( c_extrapPowerLawCrossoverManual ),
+              extrapPowerLawCrossoverModeElement( c_extrapPowerLawCrossoverAutoSmoothedCrossing ) },
+            { extrapPowerLawCrossoverModeLabel( c_extrapPowerLawCrossoverManual ),
+              extrapPowerLawCrossoverModeLabel( c_extrapPowerLawCrossoverAutoSmoothedCrossing ) },
+            "Power-Law Crossover Mode",
+            "Extrapolation" ) < 0 )
+    {
+        log<software_error>( { "error from createStandardIndiSelectionSw" } );
+        return -1;
+    }
+    if( registerIndiPropertyNew( m_indiP_extrapPowerLawCrossoverMode,
+                                 INDI_NEWCALLBACK( m_indiP_extrapPowerLawCrossoverMode ) ) < 0 )
+    {
+        log<software_error>( { "error from registerIndiPropertyNew" } );
+        return -1;
+    }
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawAutoSmoothWidthHz,
+                                 "extrap_powerLawAutoSmoothWidthHz",
+                                 0,
+                                 10000,
+                                 0.1,
+                                 "%0.2f",
+                                 "Power-Law Auto Smooth Width",
                                  "Extrapolation" );
     if( createStandardIndiToggleSw( m_indiP_extrapFitPowerLawIndex,
                                     "extrap_fitPowerLawIndex",
@@ -2255,6 +2387,13 @@ int modalGainOpt::appLogic()
         m_indiP_extrapPowerLawMatchFallbackWindowHz,
         { "current", "target" },
         { extrapConfig.m_powerLawMatchFallbackWindowHz, extrapConfig.m_powerLawMatchFallbackWindowHz } );
+    indi::updateSelectionSwitchIfChanged( m_indiP_extrapPowerLawCrossoverMode,
+                                          extrapPowerLawCrossoverModeElement( m_extrapPowerLawCrossoverMode ),
+                                          m_indiDriver,
+                                          INDI_OK );
+    updatesIfChanged<float>( m_indiP_extrapPowerLawAutoSmoothWidthHz,
+                             { "current", "target" },
+                             { extrapConfig.m_powerLawAutoSmoothWidthHz, extrapConfig.m_powerLawAutoSmoothWidthHz } );
     updateSwitchIfChanged( m_indiP_extrapFitPowerLawIndex,
                            "toggle",
                            extrapConfig.m_fitPowerLawIndex ? pcf::IndiElement::On : pcf::IndiElement::Off,
@@ -4348,6 +4487,8 @@ void modalGainOpt::goptThreadExec()
                                     " olEstimateMethod=" + processConfig.m_closedLoopOlEstimateMethod +
                                     " match=" + std::to_string( processConfig.m_powerLawMatchFreq ) +
                                     " matchWindow=" + std::to_string( processConfig.m_powerLawMatchFallbackWindowHz ) +
+                                    " crossoverMode=" + processConfig.m_powerLawCrossoverMode +
+                                    " autoSmooth=" + std::to_string( processConfig.m_powerLawAutoSmoothWidthHz ) +
                                     " fitIndex=" + std::string( processConfig.m_fitPowerLawIndex ? "true" : "false" ) +
                                     " fitMin=" + std::to_string( processConfig.m_powerLawFitMinFreqHz ) +
                                     " fitMax=" + std::to_string( processConfig.m_powerLawFitMaxFreqHz ) +
@@ -4379,8 +4520,7 @@ void modalGainOpt::goptThreadExec()
                         {
 #pragma omp critical
                             {
-                                log<software_error>(
-                                    { "error estimating fallback modal noise PSD" } );
+                                log<software_error>( { "error estimating fallback modal noise PSD" } );
                             }
 
                             continue;
@@ -5105,15 +5245,13 @@ int modalGainOpt::handleExtrapMethodProperty( const pcf::IndiProperty &ipRecv )
 
         if( found )
         {
-            return log<software_error, -1>(
-                { "Multiple extrapolation methods selected in one update" } );
+            return log<software_error, -1>( { "Multiple extrapolation methods selected in one update" } );
         }
 
         target = olProcessMethodFromElement( elit->first );
         if( target == c_olProcessNone && elit->first != olProcessMethodElement( c_olProcessNone ) )
         {
-            return log<software_error, -1>(
-                { "Invalid extrapolation method element: " + elit->first } );
+            return log<software_error, -1>( { "Invalid extrapolation method element: " + elit->first } );
         }
 
         found = true;
@@ -5173,16 +5311,14 @@ int modalGainOpt::handleExtrapNoiseEstimateDomainProperty( const pcf::IndiProper
 
         if( found )
         {
-            return log<software_error, -1>(
-                { "Multiple noise-estimate domains selected in one update" } );
+            return log<software_error, -1>( { "Multiple noise-estimate domains selected in one update" } );
         }
 
         target = extrapNoiseEstimateDomainFromElement( elit->first );
         if( target == c_extrapNoiseEstimateOpenLoop &&
             elit->first != extrapNoiseEstimateDomainElement( c_extrapNoiseEstimateOpenLoop ) )
         {
-            return log<software_error, -1>(
-                { "Invalid noise-estimate-domain element: " + elit->first } );
+            return log<software_error, -1>( { "Invalid noise-estimate-domain element: " + elit->first } );
         }
 
         found = true;
@@ -5246,16 +5382,14 @@ int modalGainOpt::handleExtrapNoiseEstimateRangeProperty( const pcf::IndiPropert
 
         if( found )
         {
-            return log<software_error, -1>(
-                { "Multiple noise-estimate ranges selected in one update" } );
+            return log<software_error, -1>( { "Multiple noise-estimate ranges selected in one update" } );
         }
 
         target = extrapNoiseEstimateRangeFromElement( elit->first );
         if( target == c_extrapNoiseEstimateHighFreq &&
             elit->first != extrapNoiseEstimateRangeElement( c_extrapNoiseEstimateHighFreq ) )
         {
-            return log<software_error, -1>(
-                { "Invalid noise-estimate-range element: " + elit->first } );
+            return log<software_error, -1>( { "Invalid noise-estimate-range element: " + elit->first } );
         }
 
         found = true;
@@ -5316,16 +5450,14 @@ int modalGainOpt::handleExtrapNoiseEstimateStatisticProperty( const pcf::IndiPro
 
         if( found )
         {
-            return log<software_error, -1>(
-                { "Multiple noise-estimate statistics selected in one update" } );
+            return log<software_error, -1>( { "Multiple noise-estimate statistics selected in one update" } );
         }
 
         target = extrapNoiseEstimateStatisticFromElement( elit->first );
         if( target == c_extrapNoiseEstimatePercentile &&
             elit->first != extrapNoiseEstimateStatisticElement( c_extrapNoiseEstimatePercentile ) )
         {
-            return log<software_error, -1>(
-                { "Invalid noise-estimate-statistic element: " + elit->first } );
+            return log<software_error, -1>( { "Invalid noise-estimate-statistic element: " + elit->first } );
         }
 
         found = true;
@@ -5389,16 +5521,14 @@ int modalGainOpt::handleExtrapClosedLoopOlEstimateMethodProperty( const pcf::Ind
 
         if( found )
         {
-            return log<software_error, -1>(
-                { "Multiple closed-loop OL estimate methods selected in one update" } );
+            return log<software_error, -1>( { "Multiple closed-loop OL estimate methods selected in one update" } );
         }
 
         target = extrapClosedLoopOlEstimateMethodFromElement( elit->first );
         if( target == c_extrapClosedLoopOlEstimateEtfOnly &&
             elit->first != extrapClosedLoopOlEstimateMethodElement( c_extrapClosedLoopOlEstimateEtfOnly ) )
         {
-            return log<software_error, -1>(
-                { "Invalid closed-loop-OL-estimate-method element: " + elit->first } );
+            return log<software_error, -1>( { "Invalid closed-loop-OL-estimate-method element: " + elit->first } );
         }
 
         found = true;
@@ -5444,6 +5574,77 @@ int modalGainOpt::handleExtrapClosedLoopOlEstimateMethodProperty( const pcf::Ind
         m_sinceChange = -1;
         m_updating = false;
         std::cerr << "Got closed-loop OL estimate method: " << extrapClosedLoopOlEstimateMethodName( target ) << '\n';
+    }
+
+    return 0;
+}
+
+int modalGainOpt::handleExtrapPowerLawCrossoverModeProperty( const pcf::IndiProperty &ipRecv )
+{
+    int target = c_extrapPowerLawCrossoverManual;
+    bool found = false;
+    for( auto elit = ipRecv.getElements().begin(); elit != ipRecv.getElements().end(); ++elit )
+    {
+        if( elit->second.getSwitchState() != pcf::IndiElement::On )
+        {
+            continue;
+        }
+
+        if( found )
+        {
+            return log<software_error, -1>( { "Multiple power-law crossover modes selected in one update" } );
+        }
+
+        target = extrapPowerLawCrossoverModeFromElement( elit->first );
+        if( target == c_extrapPowerLawCrossoverManual &&
+            elit->first != extrapPowerLawCrossoverModeElement( c_extrapPowerLawCrossoverManual ) )
+        {
+            return log<software_error, -1>( { "Invalid power-law-crossover-mode element: " + elit->first } );
+        }
+
+        found = true;
+    }
+
+    if( !found )
+    {
+        int current = c_extrapPowerLawCrossoverManual;
+        {
+            std::lock_guard<std::mutex> lock( m_goptMutex );
+            current = m_extrapPowerLawCrossoverMode;
+        }
+
+        const std::string currentElement = extrapPowerLawCrossoverModeElement( current );
+        if( m_indiP_extrapPowerLawCrossoverMode.find( currentElement ) )
+        {
+            for( auto elit = m_indiP_extrapPowerLawCrossoverMode.getElements().begin();
+                 elit != m_indiP_extrapPowerLawCrossoverMode.getElements().end();
+                 ++elit )
+            {
+                m_indiP_extrapPowerLawCrossoverMode[elit->first].setSwitchState(
+                    elit->first == currentElement ? pcf::IndiElement::On : pcf::IndiElement::Off );
+            }
+            m_indiP_extrapPowerLawCrossoverMode.setState( pcf::IndiProperty::Ok );
+        }
+
+        indi::updateSelectionSwitchIfChanged( m_indiP_extrapPowerLawCrossoverMode,
+                                              currentElement,
+                                              m_indiDriver,
+                                              INDI_OK );
+        return 0;
+    }
+
+    if( target != m_extrapPowerLawCrossoverMode )
+    {
+        m_updating = true;
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+        m_updating = true;
+
+        m_extrapPowerLawCrossoverMode = target;
+        m_extrapConfig.m_powerLawCrossoverMode = extrapPowerLawCrossoverModeName( target );
+
+        m_sinceChange = -1;
+        m_updating = false;
+        std::cerr << "Got power-law crossover mode: " << extrapPowerLawCrossoverModeName( target ) << '\n';
     }
 
     return 0;
@@ -5522,6 +5723,21 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawMatchFallbackWindowHz
                                        m_extrapConfig.m_powerLawMatchFallbackWindowHz,
                                        ipRecv,
                                        "extrap power-law match fallback window" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawCrossoverMode )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPowerLawCrossoverMode, ipRecv );
+    return handleExtrapPowerLawCrossoverModeProperty( ipRecv );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawAutoSmoothWidthHz )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPowerLawAutoSmoothWidthHz, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPowerLawAutoSmoothWidthHz,
+                                       m_extrapConfig.m_powerLawAutoSmoothWidthHz,
+                                       ipRecv,
+                                       "extrap power-law auto smooth width" );
 }
 
 INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapFitPowerLawIndex )( const pcf::IndiProperty &ipRecv )
