@@ -962,6 +962,20 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd(
         std::max(processMeasuredPsd[n] - processNoisePsd[n], tiny);
   }
 
+  if (effectiveConfig.m_method == "power-law-only" ||
+      effectiveConfig.m_method == "moffat-peaks") {
+    errc = fillProcessPsdDropouts(result.m_rawProcessPsd, freq, {},
+                                  effectiveConfig.m_dropoutGapFactor,
+                                  effectiveConfig.m_dropoutMaxBins);
+    if (!!errc) {
+      return errc;
+    }
+
+    for (size_t n = 0; n < processMeasuredPsd.size(); ++n) {
+      processMeasuredPsd[n] = result.m_rawProcessPsd[n] + processNoisePsd[n];
+    }
+  }
+
   if (effectiveConfig.m_powerLawAutoSmoothWidthHz > static_cast<realT>(0)) {
     errc = buildSmoothedProcessPsd(result.m_smoothedProcessPsd,
                                    result.m_rawProcessPsd, freq,
