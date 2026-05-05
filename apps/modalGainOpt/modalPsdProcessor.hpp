@@ -2825,14 +2825,10 @@ mx::error_t modalPsdProcessor<realT>::fillProcessPsdDropouts(
         xRight = xLeft + static_cast<realT>(1);
       }
 
-      realT yLeft = log10(std::max(sourcePsd[start - 2], tiny));
       realT yRight = log10(std::max(sourcePsd[start - 1], tiny));
 
       for (size_t fill = start; fill < sourcePsd.size(); ++fill) {
-        realT xFill = log10(std::max(freq[fill], refFreq));
-        realT alpha = (xFill - xLeft) / (xRight - xLeft);
-        realT fillValue =
-            pow(static_cast<realT>(10), yLeft + alpha * (yRight - yLeft));
+        realT fillValue = pow(static_cast<realT>(10), yRight);
         changed = changed || fillValue != updatedPsd[fill];
         updatedPsd[fill] = std::max(fillValue, tiny);
       }

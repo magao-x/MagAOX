@@ -1069,8 +1069,24 @@ TEST_CASE("modalPsdProcessor repairs trailing high-frequency dropout runs",
   REQUIRE(processPsd[3] > 1.0F);
   REQUIRE(processPsd[4] > 1.0F);
   REQUIRE(processPsd[5] > 1.0F);
-  REQUIRE(processPsd[5] < processPsd[4]);
-  REQUIRE(processPsd[4] < processPsd[3]);
+  REQUIRE(processPsd[3] == Approx(8.0F));
+  REQUIRE(processPsd[4] == Approx(8.0F));
+  REQUIRE(processPsd[5] == Approx(8.0F));
+}
+
+TEST_CASE("modalPsdProcessor keeps trailing dropout repair bounded when the "
+          "last good bins rise",
+          "[modalGainOpt]") {
+  std::vector<float> processPsd{1.0F, 2.0F, 4.0F, 0.01F, 0.01F, 0.01F};
+  std::vector<float> freq{0.0F, 10.0F, 20.0F, 30.0F, 40.0F, 50.0F};
+
+  mx::error_t errc = processPsdProcessorHarness::fillProcessPsdDropouts(
+      processPsd, freq, {}, 0.2F, 4);
+
+  REQUIRE(!errc);
+  REQUIRE(processPsd[3] == Approx(4.0F));
+  REQUIRE(processPsd[4] == Approx(4.0F));
+  REQUIRE(processPsd[5] == Approx(4.0F));
 }
 
 /// Verify `modalGainOpt` publishes LP and max-gain arrays into separate
