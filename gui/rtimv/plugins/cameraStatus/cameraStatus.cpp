@@ -1,11 +1,36 @@
 
 /** \file cameraStatus.cpp
  * \brief Overlay status rendering for camera-associated devices.
+ *
+ * \author Jared R. Males (jaredmales@gmail.com)
  */
 
 #include "cameraStatus.hpp"
 
 #define errPrint( expl ) std::cerr << "cameraStatus: " << __FILE__ << " " << __LINE__ << " " << expl << std::endl;
+
+namespace
+{
+std::string preferredPresetProperty( const std::string &deviceName )
+{
+    if( deviceName.find( "fw" ) == 0 )
+    {
+        return "filterName";
+    }
+
+    return "presetName";
+}
+
+std::string alternatePresetProperty( const std::string &propertyName )
+{
+    if( propertyName == "filterName" )
+    {
+        return "presetName";
+    }
+
+    return "filterName";
+}
+} // namespace
 
 cameraStatus::cameraStatus() : rtimvOverlayInterface()
 {
@@ -61,20 +86,16 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurat
         ( *m_roa.m_dictionary )[m_deviceName + ".shutter_status.status"].setBlob( nullptr, 0 );
         ( *m_roa.m_dictionary )[m_deviceName + ".shutter.toggle"].setBlob( nullptr, 0 );
 
-        m_presetNames.resize( m_filterDeviceNames.size() );
+        m_primaryPresetProperties.resize( m_filterDeviceNames.size() );
 
         for( size_t f = 0; f < m_filterDeviceNames.size(); ++f )
         {
-            if( m_filterDeviceNames[f].find( "fw" ) == 0 )
-                m_presetNames[f] = ".filterName";
-            else if( m_filterDeviceNames[f].find( "flip" ) == 0 )
-                m_presetNames[f] = ".presetName";
-            else
-                m_presetNames[f] = ".presetName";
+            m_primaryPresetProperties[f] = preferredPresetProperty( m_filterDeviceNames[f] );
 
             ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".fsm.state"].setBlob( nullptr, 0 );
             ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".parked.current"].setBlob( nullptr, 0 );
-            ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + m_presetNames[f]].setBlob( nullptr, 0 );
+            ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".filterName.current"].setBlob( nullptr, 0 );
+            ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".presetName.current"].setBlob( nullptr, 0 );
             ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".position.current"].setBlob( nullptr, 0 );
             ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".filter.current"].setBlob( nullptr, 0 );
         }
@@ -143,6 +164,66 @@ bool cameraStatus::getBlobStr( const std::string &propel )
     return getBlobStr( m_deviceName, propel );
 }
 
+bool cameraStatus::findActivePropertySelection( const std::string &deviceName,
+                                                const std::string &propertyName,
+                                                std::string       &selection )
+{
+    if( m_roa.m_dictionary == nullptr )
+    {
+        return false;
+    }
+
+    std::string propertyPrefix = deviceName + "." + propertyName + ".";
+
+    dictionaryIteratorT it = m_roa.m_dictionary->lower_bound( propertyPrefix );
+
+    while( it != m_roa.m_dictionary->end() )
+    {
+        if( it->first.rfind( propertyPrefix, 0 ) != 0 )
+        {
+            break;
+        }
+
+        if( ( it->second.getBlobStr( m_blob, sizeof( m_blob ) ) ) == sizeof( m_blob ) )
+        {
+            errPrint( "bad string" );
+        }
+
+        if( m_blob[0] != '\0' && std::string( m_blob ) == "on" )
+        {
+            size_t elementPos = it->first.rfind( '.' );
+
+            if( elementPos != std::string::npos && elementPos < it->first.size() - 1 )
+            {
+                selection = it->first.substr( elementPos + 1 );
+                return true;
+            }
+        }
+
+        ++it;
+    }
+
+    return false;
+}
+
+bool cameraStatus::findActivePresetSelection( size_t deviceIndex, std::string &selection )
+{
+    if( deviceIndex >= m_filterDeviceNames.size() || deviceIndex >= m_primaryPresetProperties.size() )
+    {
+        return false;
+    }
+
+    if( findActivePropertySelection(
+            m_filterDeviceNames[deviceIndex], m_primaryPresetProperties[deviceIndex], selection ) )
+    {
+        return true;
+    }
+
+    return findActivePropertySelection( m_filterDeviceNames[deviceIndex],
+                                        alternatePresetProperty( m_primaryPresetProperties[deviceIndex] ),
+                                        selection );
+}
+
 template <>
 int cameraStatus::getBlobVal<int>( const std::string &propel, int defVal )
 {
@@ -184,15 +265,69 @@ int cameraStatus::updateOverlay()
     // char * str;
     char        tstr[128];
     std::string sstr;
+    bool        statusTextOverflowed{ false };
+
+    auto appendStatusText = [&]( const char *text )
+    {
+        size_t slotCount = m_roa.m_graphicsView->statusTextNo();
+
+        if( n < slotCount )
+        {
+            m_roa.m_graphicsView->statusTextText( n, text );
+            ++n;
+            return true;
+        }
+
+        statusTextOverflowed = true;
+
+        if( !m_statusTextOverflowWarned )
+        {
+            pluginLogError( std::format(
+                "status text overflow for {}: need slot {}, only {} configured", m_deviceName, n + 1, slotCount ) );
+            m_statusTextOverflowWarned = true;
+        }
+
+        return false;
+    };
+
+    if( getBlobStr( m_deviceName + "-sw", "fsm.state" ) )
+    {
+        std::string fsmstr = std::string( m_blob );
+
+        std::string swtstr = "off";
+
+        if( getBlobStr( m_deviceName + "-sw", "writing.toggle" ) )
+        {
+            swtstr = std::string( m_blob );
+        }
+
+        if( fsmstr == "OPERATING" )
+        {
+            if( swtstr == "on" )
+            {
+                emit savingState( rtimv::savingState::on );
+            }
+            else
+            {
+                emit savingState( rtimv::savingState::waiting );
+            }
+        }
+        else
+        {
+            emit savingState( rtimv::savingState::off );
+        }
+    }
+    else
+    {
+        emit savingState( rtimv::savingState::off );
+    }
 
     if( getBlobStr( "temp_ccd.current" ) )
     {
         snprintf( tstr, sizeof( tstr ), "%0.1f C", strtod( m_blob, 0 ) );
-        m_roa.m_graphicsView->statusTextText( n, tstr );
-        ++n;
+        if( !appendStatusText( tstr ) )
+            return 0;
     }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
-        return 0;
 
     // Get curr size
     m_width = -1;
@@ -224,8 +359,8 @@ int cameraStatus::updateOverlay()
             snprintf( tstr, sizeof( tstr ), "%dx%d [%dx%d]", w, h, ibx, iby );
 
             //****************
-            m_roa.m_graphicsView->statusTextText( n, tstr );
-            ++n;
+            if( !appendStatusText( tstr ) )
+                return 0;
 
             float bx = ibx;
             float by = iby;
@@ -287,9 +422,6 @@ int cameraStatus::updateOverlay()
     } // if(blobExists("roi_region_w.current") ...
 
     //***********************
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
-        return 0;
-
     float et = getBlobVal<float>( "exptime.current", -1 );
     if( et >= 0 )
     {
@@ -317,31 +449,25 @@ int cameraStatus::updateOverlay()
             }
         }
 
-        m_roa.m_graphicsView->statusTextText( n, tstr );
-        ++n;
+        if( !appendStatusText( tstr ) )
+            return 0;
     }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
-        return 0;
 
     float fps = getBlobVal<float>( "fps.current", -1 );
     if( fps >= 0 )
     {
         snprintf( tstr, sizeof( tstr ), "%0.1f FPS", fps );
-        m_roa.m_graphicsView->statusTextText( n, tstr );
-        ++n;
+        if( !appendStatusText( tstr ) )
+            return 0;
     }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
-        return 0;
 
     int emg = getBlobVal<int>( "emgain.current", -1 );
     if( emg >= 0 )
     {
         snprintf( tstr, sizeof( tstr ), "EMG: %d", emg );
-        m_roa.m_graphicsView->statusTextText( n, tstr );
-        ++n;
+        if( !appendStatusText( tstr ) )
+            return 0;
     }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
-        return 0;
 
     for( size_t f = 0; f < m_filterDeviceNames.size(); ++f )
     {
@@ -355,35 +481,17 @@ int cameraStatus::updateOverlay()
                 parked = ( atoi( m_blob ) != 0 );
             }
 
-            if( fwstate == "READY" || fwstate == "OPERATING" || ( fwstate == "POWEROFF" && parked ) )
+            if( fwstate == "READY" || fwstate == "OPERATING" ||
+                ( parked && ( fwstate == "UNINITIALIZED" || fwstate == "INITIALIZED" || fwstate == "NODEVICE" ||
+                              fwstate == "POWEROFF" || fwstate == "POWERON" || fwstate == "NOTCONNECTED" ||
+                              fwstate == "LOGGEDIN" || fwstate == "CONFIGURING" || fwstate == "CONNECTED" ||
+                              fwstate == "NOTHOMED" ) ) )
             {
-                dictionaryIteratorT start =
-                    m_roa.m_dictionary->lower_bound( m_filterDeviceNames[f] + m_presetNames[f] );
-                dictionaryIteratorT end =
-                    m_roa.m_dictionary->upper_bound( m_filterDeviceNames[f] + m_presetNames[f] + "Z" );
-
-                std::string fkey;
-                while( start != end )
-                {
-                    if( ( start->second.getBlobStr( m_blob, sizeof( m_blob ) ) ) == sizeof( m_blob ) )
-                        errPrint( "bad string" ); // Don't trust this as a string
-
-                    if( m_blob[0] != '\0' )
-                    {
-                        if( std::string( m_blob ) == "on" )
-                        {
-                            fkey = start->first;
-                            break;
-                        }
-                    }
-                    ++start;
-                }
-
-                size_t      pp = fkey.rfind( '.' );
                 std::string filn;
-                if( pp != std::string::npos && pp < fkey.size() - 1 ) // need to be able to add 1
+
+                if( findActivePresetSelection( f, filn ) && filn != "none" )
                 {
-                    filn = m_filterDeviceNames[f] + ": " + fkey.substr( pp + 1 ).c_str();
+                    filn = m_filterDeviceNames[f] + ": " + filn;
                 }
                 else
                 {
@@ -411,18 +519,16 @@ int cameraStatus::updateOverlay()
                         filn = m_filterDeviceNames[f] + ": unk";
                     }
                 }
-                m_roa.m_graphicsView->statusTextText( n, filn.c_str() );
-                ++n;
+                if( !appendStatusText( filn.c_str() ) )
+                    return 0;
             }
             else
             {
                 fwstate = m_filterDeviceNames[f] + ": " + fwstate;
-                m_roa.m_graphicsView->statusTextText( n, fwstate.c_str() );
-                ++n;
+                if( !appendStatusText( fwstate.c_str() ) )
+                    return 0;
             }
         }
-        if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
-            return 0;
     }
 
     if( getBlobStr( "shutter_status.status" ) )
@@ -438,47 +544,22 @@ int cameraStatus::updateOverlay()
                     sstr = "sh SHUT";
                 else
                     sstr = "sh OPEN";
-                m_roa.m_graphicsView->statusTextText( n, sstr.c_str() );
-                ++n;
+                if( !appendStatusText( sstr.c_str() ) )
+                    return 0;
             }
         }
         else
         {
 
             sstr = "sh " + sstr;
-            m_roa.m_graphicsView->statusTextText( n, sstr.c_str() );
-            ++n;
+            if( !appendStatusText( sstr.c_str() ) )
+                return 0;
         }
     }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
-        return 0;
 
-    if( getBlobStr( m_deviceName + "-sw", "fsm.state" ) )
+    if( !statusTextOverflowed )
     {
-        std::string fsmstr = std::string( m_blob );
-
-        std::string swtstr = "off";
-
-        if( getBlobStr( m_deviceName + "-sw", "writing.toggle" ) )
-        {
-            swtstr = std::string( m_blob );
-        }
-
-        if( fsmstr == "OPERATING" )
-        {
-            if( swtstr == "on" )
-            {
-                emit savingState( rtimv::savingState::on );
-            }
-            else
-            {
-                emit savingState( rtimv::savingState::waiting );
-            }
-        }
-        else
-        {
-            emit savingState( rtimv::savingState::off );
-        }
+        m_statusTextOverflowWarned = false;
     }
 
     return 0;

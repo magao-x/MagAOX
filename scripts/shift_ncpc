@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+#########################################################
+# switch NCPC calibration symlinks between warm and cold
+#
+# usage: shift_ncpc warm|cold
+#
+# This script is under version control in the MagAO-X source
+#########################################################
+
+cpath=$(pwd)
+did_shutdown=0
+
+cleanup() {
+    if [[ $did_shutdown -eq 1 ]]; then
+        xctrl restart dmncpc ncpcModes
+    fi
+
+    cd "$cpath"
+}
+
+trap cleanup EXIT
+
+safe_remove_link() {
+    if [[ -L "$1" ]]; then
+        rm "$1" || return 1
+    elif [[ -e "$1" ]]; then
+        echo "error: $1 exists and is not a symlink" >&2
+        return 1
+    fi
+}
+
+if [[ $# -ne 1 ]]; then
+    echo "usage: $0 warm|cold" >&2
+    exit 1
+fi
+
+case "$1" in
+    warm)
+        setINDI dmncpc.releaseDM.request=On
+        setINDI dmncpc.zeroAll.request=On
+
+        xctrl shutdown dmncpc ncpcModes || exit 1
+        did_shutdown=1
+
+        cd /opt/MagAOX/calib/dm/bmc_1k || exit 1
+
+        safe_remove_link zbasis.fits || exit 1
+        ln -s basis_center/zern_basis_1k_50modes_ellipse_rolled.fits zbasis.fits
+
+        safe_remove_link flats || exit 1
+        ln -s flats_center flats
+
+        safe_remove_link tests || exit 1
+        ln -s tests_center tests
+
+        cd /opt/MagAOX/calib/fdpr2 || exit 1
+
+        safe_remove_link dmncpc_camsci1_CH4 || exit 1
+        ln -s dmncpc_camsci1_CH4_center dmncpc_camsci1_CH4
+
+        safe_remove_link dmncpc_camsci2_Ha || exit 1
+        ln -s dmncpc_camsci2_Ha_center dmncpc_camsci2_Ha
+        ;;
+    cold)
+        setINDI dmncpc.releaseDM.request=On
+        setINDI dmncpc.zeroAll.request=On
+
+        xctrl shutdown dmncpc ncpcModes || exit 1
+        did_shutdown=1
+
+        cd /opt/MagAOX/calib/dm/bmc_1k || exit 1
+
+        safe_remove_link zbasis.fits || exit 1
+        ln -s basis_shift_down_1/zern_basis_1k_50modes_ellipse_rolled_shift_down_1.fits zbasis.fits
+
+        safe_remove_link flats || exit 1
+        ln -s flats_shift_down_1 flats
+
+        safe_remove_link tests || exit 1
+        ln -s tests_shift_down_1 tests
+
+        cd /opt/MagAOX/calib/fdpr2 || exit 1
+
+        safe_remove_link dmncpc_camsci1_CH4 || exit 1
+        ln -s dmncpc_camsci1_CH4_shifted_down_1 dmncpc_camsci1_CH4
+
+        safe_remove_link dmncpc_camsci2_Ha || exit 1
+        ln -s dmncpc_camsci2_Ha_shifted_down_1 dmncpc_camsci2_Ha
+        ;;
+    *)
+        echo "usage: $0 warm|cold" >&2
+        exit 1
+        ;;
+esac

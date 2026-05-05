@@ -53,6 +53,20 @@ TEST_CASE( "zaberLowLevel utility helpers parse system.serial responses", "[zabe
     REQUIRE( serial[2] == "49821" );
 }
 
+/// Verify `parseSystemSerial()` rejects malformed non-numeric serial tokens.
+/**
+ * \ingroup zaberLowLevel_unit_test
+ */
+TEST_CASE( "zaberLowLevel utility helpers reject malformed system.serial snapshots", "[zaberUtils]" )
+{
+    std::string              tstr = "@09 0 OK BUSY --\n";
+    std::vector<int>         address;
+    std::vector<std::string> serial;
+    int                      rv = parseSystemSerial( address, serial, tstr );
+
+    REQUIRE( rv == ZUTILS_E_BADSERIAL );
+}
+
 } // namespace zaberLowLevelTest
 
 } // namespace libXWCTest

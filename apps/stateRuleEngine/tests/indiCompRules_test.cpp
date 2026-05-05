@@ -31,6 +31,7 @@ SCENARIO( "basic INDI Property Element-value rules", "[stateRuleEngine::rules]" 
     txtValRule::value();
     numValRule::value();
     swValRule::value();
+    multiSwitchComboRule::value();
     #endif
     // clang-format on
 
@@ -314,6 +315,210 @@ SCENARIO( "basic INDI Property Element-value rules", "[stateRuleEngine::rules]" 
             rule1.comparison( ruleComparison::Gt );
             rule1.target( 3 );
             REQUIRE( rule1.value() == true );
+        }
+    }
+}
+
+SCENARIO( "multiSwitchCombo rule evaluation", "[stateRuleEngine::rules]" )
+{
+    auto setStates = []( pcf::IndiProperty                        &property,
+                         const std::initializer_list<std::string> &allNames,
+                         const std::initializer_list<std::string> &onNames )
+    {
+        for( const auto &name : allNames )
+        {
+            property[name].setSwitchState( pcf::IndiElement::Off );
+        }
+
+        for( const auto &name : onNames )
+        {
+            property[name].setSwitchState( pcf::IndiElement::On );
+        }
+    };
+
+    GIVEN( "a two-switch combo rule" )
+    {
+        pcf::IndiProperty source1( pcf::IndiProperty::Switch );
+        source1.setDevice( "dev" );
+        source1.setName( "source1" );
+        source1.setPerm( pcf::IndiProperty::ReadWrite );
+        source1.setState( pcf::IndiProperty::Idle );
+        source1.add( pcf::IndiElement( "alpha" ) );
+        source1.add( pcf::IndiElement( "alpha-beta" ) );
+
+        pcf::IndiProperty source2( pcf::IndiProperty::Switch );
+        source2.setDevice( "dev" );
+        source2.setName( "source2" );
+        source2.setPerm( pcf::IndiProperty::ReadWrite );
+        source2.setState( pcf::IndiProperty::Idle );
+        source2.add( pcf::IndiElement( "gamma" ) );
+        source2.add( pcf::IndiElement( "delta" ) );
+
+        pcf::IndiProperty target( pcf::IndiProperty::Switch );
+        target.setDevice( "dev" );
+        target.setName( "target" );
+        target.setPerm( pcf::IndiProperty::ReadWrite );
+        target.setState( pcf::IndiProperty::Idle );
+        target.add( pcf::IndiElement( "alpha-gamma" ) );
+        target.add( pcf::IndiElement( "alpha-beta-gamma" ) );
+        target.add( pcf::IndiElement( "-gamma" ) );
+
+        multiSwitchComboRule rule;
+        rule.ruleName( "comboRule" );
+        rule.property( &source1, "dev.source1" );
+        rule.property( &source2, "dev.source2" );
+        rule.format( "{}-{}" );
+        rule.targetProperty( &target );
+        rule.targetPropertyKey( "dev.target" );
+        rule.comparison( ruleComparison::Eq );
+
+        WHEN( "the combo matches with embedded hyphens" )
+        {
+            setStates( source1, { "alpha", "alpha-beta" }, { "alpha-beta" } );
+            setStates( source2, { "gamma", "delta" }, { "gamma" } );
+            setStates( target, { "alpha-gamma", "alpha-beta-gamma", "-gamma" }, { "alpha-beta-gamma" } );
+
+            REQUIRE( rule.value() == true );
+
+            std::string diagnostic;
+            REQUIRE( rule.popRuntimeDiagnostic( diagnostic ) == false );
+        }
+
+        WHEN( "the combo does not match" )
+        {
+            setStates( source1, { "alpha", "alpha-beta" }, { "alpha" } );
+            setStates( source2, { "gamma", "delta" }, { "gamma" } );
+            setStates( target, { "alpha-gamma", "alpha-beta-gamma", "-gamma" }, { "alpha-beta-gamma" } );
+
+            REQUIRE( rule.value() == false );
+        }
+
+        WHEN( "a source has zero active switches" )
+        {
+            setStates( source1, { "alpha", "alpha-beta" }, {} );
+            setStates( source2, { "gamma", "delta" }, { "gamma" } );
+            setStates( target, { "alpha-gamma", "alpha-beta-gamma", "-gamma" }, { "-gamma" } );
+
+            REQUIRE( rule.value() == true );
+
+            std::string diagnostic;
+            REQUIRE( rule.popRuntimeDiagnostic( diagnostic ) == false );
+        }
+
+        WHEN( "a source enters and leaves the multi-On state" )
+        {
+            setStates( source1, { "alpha", "alpha-beta" }, { "alpha", "alpha-beta" } );
+            setStates( source2, { "gamma", "delta" }, { "gamma" } );
+            setStates( target, { "alpha-gamma", "alpha-beta-gamma", "-gamma" }, { "-gamma" } );
+
+            REQUIRE( rule.value() == true );
+
+            std::string diagnostic;
+            REQUIRE( rule.popRuntimeDiagnostic( diagnostic ) == true );
+            REQUIRE( diagnostic.find( "comboRule" ) != std::string::npos );
+            REQUIRE( diagnostic.find( "dev.source1" ) != std::string::npos );
+            REQUIRE( rule.popRuntimeDiagnostic( diagnostic ) == false );
+
+            REQUIRE( rule.value() == true );
+            REQUIRE( rule.popRuntimeDiagnostic( diagnostic ) == false );
+
+            setStates( source1, { "alpha", "alpha-beta" }, { "alpha" } );
+            setStates( target, { "alpha-gamma", "alpha-beta-gamma", "-gamma" }, { "alpha-gamma" } );
+
+            REQUIRE( rule.value() == true );
+            REQUIRE( rule.popRuntimeDiagnostic( diagnostic ) == false );
+
+            setStates( source1, { "alpha", "alpha-beta" }, { "alpha", "alpha-beta" } );
+            setStates( target, { "alpha-gamma", "alpha-beta-gamma", "-gamma" }, { "-gamma" } );
+
+            REQUIRE( rule.value() == true );
+            REQUIRE( rule.popRuntimeDiagnostic( diagnostic ) == true );
+            REQUIRE( diagnostic.find( "dev.source1" ) != std::string::npos );
+        }
+
+        WHEN( "a compound rule drains child multiSwitchCombo diagnostics" )
+        {
+            setStates( source1, { "alpha", "alpha-beta" }, { "alpha", "alpha-beta" } );
+            setStates( source2, { "gamma", "delta" }, { "gamma" } );
+            setStates( target, { "alpha-gamma", "alpha-beta-gamma", "-gamma" }, { "-gamma" } );
+
+            pcf::IndiProperty txtProp( pcf::IndiProperty::Text );
+            txtProp.setDevice( "dev" );
+            txtProp.setName( "txt" );
+            txtProp.setPerm( pcf::IndiProperty::ReadWrite );
+            txtProp.setState( pcf::IndiProperty::Idle );
+            txtProp.add( pcf::IndiElement( "state" ) );
+            txtProp["state"] = "READY";
+
+            txtValRule txtRule;
+            txtRule.property( &txtProp );
+            txtRule.element( "state" );
+            txtRule.target( "READY" );
+            txtRule.comparison( ruleComparison::Eq );
+
+            ruleCompRule parent;
+            parent.rule1( &rule );
+            parent.rule2( &txtRule );
+            parent.comparison( ruleComparison::And );
+
+            REQUIRE( parent.value() == true );
+
+            std::string diagnostic;
+            REQUIRE( parent.popRuntimeDiagnostic( diagnostic ) == true );
+            REQUIRE( diagnostic.find( "dev.source1" ) != std::string::npos );
+            REQUIRE( parent.popRuntimeDiagnostic( diagnostic ) == false );
+        }
+    }
+
+    GIVEN( "a one-switch combo rule" )
+    {
+        pcf::IndiProperty source( pcf::IndiProperty::Switch );
+        source.setDevice( "dev" );
+        source.setName( "soloSource" );
+        source.setPerm( pcf::IndiProperty::ReadWrite );
+        source.setState( pcf::IndiProperty::Idle );
+        source.add( pcf::IndiElement( "solo" ) );
+        source.add( pcf::IndiElement( "other" ) );
+
+        pcf::IndiProperty target( pcf::IndiProperty::Switch );
+        target.setDevice( "dev" );
+        target.setName( "soloTarget" );
+        target.setPerm( pcf::IndiProperty::ReadWrite );
+        target.setState( pcf::IndiProperty::Idle );
+        target.add( pcf::IndiElement( "solo" ) );
+        target.add( pcf::IndiElement( "other" ) );
+
+        multiSwitchComboRule rule;
+        rule.ruleName( "singleRule" );
+        rule.property( &source, "dev.soloSource" );
+        rule.format( "{}" );
+        rule.targetProperty( &target );
+        rule.targetPropertyKey( "dev.soloTarget" );
+
+        WHEN( "the target has zero active switches" )
+        {
+            rule.comparison( ruleComparison::Neq );
+            setStates( source, { "solo", "other" }, { "solo" } );
+            setStates( target, { "solo", "other" }, {} );
+
+            REQUIRE( rule.value() == true );
+
+            std::string diagnostic;
+            REQUIRE( rule.popRuntimeDiagnostic( diagnostic ) == false );
+        }
+
+        WHEN( "the target has multiple active switches" )
+        {
+            rule.comparison( ruleComparison::Eq );
+            setStates( source, { "solo", "other" }, {} );
+            setStates( target, { "solo", "other" }, { "solo", "other" } );
+
+            REQUIRE( rule.value() == true );
+
+            std::string diagnostic;
+            REQUIRE( rule.popRuntimeDiagnostic( diagnostic ) == true );
+            REQUIRE( diagnostic.find( "dev.soloTarget" ) != std::string::npos );
+            REQUIRE( rule.popRuntimeDiagnostic( diagnostic ) == false );
         }
     }
 }

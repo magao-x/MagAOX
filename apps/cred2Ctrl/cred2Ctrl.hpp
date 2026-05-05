@@ -71,7 +71,7 @@ class cred2Ctrl : public MagAOXApp<>,
     static constexpr bool c_stdCamera_exptimeCtrl  = false; ///< Do not expose exposure-time controls.
     static constexpr bool c_stdCamera_fpsCtrl      = true;  ///< Expose FPS controls.
     static constexpr bool c_stdCamera_fps          = true;  ///< Expose FPS status.
-    static constexpr bool c_stdCamera_fan          = true;  ///< Expose fan-speed controls.
+    static constexpr bool c_stdCamera_fanSpeed     = true;  ///< Expose fan-speed controls.
     static constexpr bool c_stdCamera_analogGain   = true;  ///< Expose discrete analog-gain controls.
     static constexpr bool c_stdCamera_led          = true;  ///< Expose status LED controls.
     static constexpr bool c_stdCamera_synchro      = false; ///< Do not expose synchro controls in the first pass.
@@ -456,13 +456,15 @@ inline cred2Ctrl::cred2Ctrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODI
 
     m_fanSpeedNames      = { "off", "p25", "p50", "p75", "p100", "auto" };
     m_fanSpeedNameLabels = { "Off", "25", "50", "75", "100", "Auto" };
-    m_fanSpeedNameSet    = "auto";
+    m_defaultFanSpeed    = "auto";
+    m_fanSpeedNameSet    = m_defaultFanSpeed;
 
     m_analogGainNames      = { "low", "med", "high" };
     m_analogGainNameLabels = { "Low", "Med", "High" };
     m_analogGainNameSet    = "med";
 
-    m_ledStateSet = true;
+    m_defaultLEDState = true;
+    m_ledStateSet     = m_defaultLEDState;
 
     m_temps.setInvalid();
 }
@@ -660,6 +662,34 @@ inline int cred2Ctrl::appLogic()
         }
 
         state( stateCodes::READY );
+
+        m_fanSpeedNameSet = m_defaultFanSpeed;
+        if( m_fanSpeedName != m_fanSpeedNameSet )
+        {
+            if( setFanSpeed() < 0 )
+            {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                {
+                    return 0;
+                }
+
+                return log<software_error, 0>( { __FILE__, __LINE__ } );
+            }
+        }
+
+        m_ledStateSet = m_defaultLEDState;
+        if( m_ledState != m_ledStateSet )
+        {
+            if( setLED() < 0 )
+            {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                {
+                    return 0;
+                }
+
+                return log<software_error, 0>( { __FILE__, __LINE__ } );
+            }
+        }
 
         if( m_ccdTempSetpt > -999 )
         {
@@ -1340,9 +1370,9 @@ inline int cred2Ctrl::powerOnDefaults()
     m_fanSpeedValid     = false;
     m_analogGainValid   = false;
     m_ledStateValid     = false;
-    m_fanSpeedNameSet   = "auto";
+    m_fanSpeedNameSet   = m_defaultFanSpeed;
     m_analogGainNameSet = "med";
-    m_ledStateSet       = true;
+    m_ledStateSet       = m_defaultLEDState;
 
     m_nextROI = m_currentROI;
 
