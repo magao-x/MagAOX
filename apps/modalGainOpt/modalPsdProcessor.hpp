@@ -936,11 +936,10 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd(
 
       const realT rawClosedLoop =
           std::max(measuredPsd[n] - closedLoopNoise, tiny);
-      const realT openLoopNoise = std::max(closedLoopNoise / useEtf, tiny);
       const realT openLoopProcess = rawClosedLoop / useEtf;
 
-      processNoisePsd[n] = openLoopNoise;
-      processMeasuredPsd[n] = openLoopProcess + openLoopNoise;
+      processNoisePsd[n] = std::max(closedLoopNoise, tiny);
+      processMeasuredPsd[n] = openLoopProcess + processNoisePsd[n];
     }
   }
 
