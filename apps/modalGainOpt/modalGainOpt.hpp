@@ -1213,6 +1213,8 @@ public:
   pcf::IndiProperty m_indiP_extrapPeakMoffatBeta;
   pcf::IndiProperty m_indiP_extrapDropoutGapFactor;
   pcf::IndiProperty m_indiP_extrapDropoutMaxBins;
+  pcf::IndiProperty m_indiP_extrapClSignificanceThreshold;
+  pcf::IndiProperty m_indiP_extrapClMinSignificantFraction;
 
   pcf::IndiProperty m_indiP_emg;
   pcf::IndiProperty m_indiP_psdTime;
@@ -1263,6 +1265,8 @@ public:
   INDI_NEWCALLBACK_DECL(modalGainOpt, m_indiP_extrapPeakMoffatBeta);
   INDI_NEWCALLBACK_DECL(modalGainOpt, m_indiP_extrapDropoutGapFactor);
   INDI_NEWCALLBACK_DECL(modalGainOpt, m_indiP_extrapDropoutMaxBins);
+  INDI_NEWCALLBACK_DECL(modalGainOpt, m_indiP_extrapClSignificanceThreshold);
+  INDI_NEWCALLBACK_DECL(modalGainOpt, m_indiP_extrapClMinSignificantFraction);
   INDI_SETCALLBACK_DECL(modalGainOpt, m_indiP_emg);
   INDI_SETCALLBACK_DECL(modalGainOpt, m_indiP_psdTime);
   INDI_SETCALLBACK_DECL(modalGainOpt, m_indiP_psdAvgTime);
@@ -1473,6 +1477,18 @@ void modalGainOpt::setupConfig() {
       argType::Required, "extrapolation", "dropoutMaxBins", false, "int",
       "The maximum consecutive dropout-run length that will be repaired.");
 
+  config.add("extrapolation.clSignificanceThreshold", "",
+             "extrapolation.clSignificanceThreshold", argType::Required,
+             "extrapolation", "clSignificanceThreshold", false, "float",
+             "The multiplier above the fitted raw CL noise floor required "
+             "for a PSD bin to be considered significant.");
+
+  config.add("extrapolation.clMinSignificantFraction", "",
+             "extrapolation.clMinSignificantFraction", argType::Required,
+             "extrapolation", "clMinSignificantFraction", false, "float",
+             "The minimum fraction of raw CL PSD bins that must exceed the "
+             "significance threshold for a mode to remain active.");
+
   SHMIMMONITORT_SETUP_CONFIG(psdShmimMonitorT, config);
   SHMIMMONITORT_SETUP_CONFIG(freqShmimMonitorT, config);
   SHMIMMONITORT_SETUP_CONFIG(gainFactShmimMonitorT, config);
@@ -1570,6 +1586,10 @@ int modalGainOpt::loadConfigImpl(mx::app::appConfigurator &_config) {
   _config(m_extrapConfig.m_peakMoffatBeta, "extrapolation.peakMoffatBeta");
   _config(m_extrapConfig.m_dropoutGapFactor, "extrapolation.dropoutGapFactor");
   _config(m_extrapConfig.m_dropoutMaxBins, "extrapolation.dropoutMaxBins");
+  _config(m_extrapConfig.m_clSignificanceThreshold,
+          "extrapolation.clSignificanceThreshold");
+  _config(m_extrapConfig.m_clMinSignificantFraction,
+          "extrapolation.clMinSignificantFraction");
 
   char shmim[1024];
 
@@ -1906,6 +1926,12 @@ int modalGainOpt::appStartup() {
   CREATE_REG_INDI_NEW_NUMBERI(m_indiP_extrapDropoutMaxBins,
                               "extrap_dropoutMaxBins", 1, 1000, 1, "%d",
                               "Dropout Max Bins", "Extrapolation");
+  CREATE_REG_INDI_NEW_NUMBERF(
+      m_indiP_extrapClSignificanceThreshold, "extrap_clSignificanceThreshold",
+      0, 1000, 0.01, "%0.3f", "CL Significance Threshold", "Extrapolation");
+  CREATE_REG_INDI_NEW_NUMBERF(
+      m_indiP_extrapClMinSignificantFraction, "extrap_clMinSignificantFraction",
+      0, 1, 0.01, "%0.3f", "CL Min Significant Fraction", "Extrapolation");
 
   REG_INDI_SETPROP(m_indiP_emg, m_wfsDevice, "emgain");
   REG_INDI_SETPROP(m_indiP_psdTime, m_psdDevice, "psdTime");
@@ -2152,6 +2178,14 @@ int modalGainOpt::appLogic() {
   updatesIfChanged<int>(m_indiP_extrapDropoutMaxBins, {"current", "target"},
                         {static_cast<int>(extrapConfig.m_dropoutMaxBins),
                          static_cast<int>(extrapConfig.m_dropoutMaxBins)});
+  updatesIfChanged<float>(m_indiP_extrapClSignificanceThreshold,
+                          {"current", "target"},
+                          {extrapConfig.m_clSignificanceThreshold,
+                           extrapConfig.m_clSignificanceThreshold});
+  updatesIfChanged<float>(m_indiP_extrapClMinSignificantFraction,
+                          {"current", "target"},
+                          {extrapConfig.m_clMinSignificantFraction,
+                           extrapConfig.m_clMinSignificantFraction});
 
   updatesIfChanged<int>(m_indiP_modesOn, {"current", "integrator", "predictor"},
                         {modesOn, modesOnSI, modesOnLP});
@@ -3882,6 +3916,11 @@ void modalGainOpt::goptThreadExec() {
             m_extrapClosedLoopOlEstimateMethod ==
                 c_extrapClosedLoopOlEstimateNtfAware;
         std::vector<float> noiseEstimateWorkPsd;
+        std::vector<float> clSignificanceNoisePsd;
+        float clSignificanceNoiseFloor = 0;
+        bool doClSignificanceCheck =
+            m_extrapConfig.m_clSignificanceThreshold > 0 &&
+            m_extrapConfig.m_clMinSignificantFraction > 0;
         const std::vector<float> *noiseEstimateSourcePsd =
             useClosedLoopNoiseEstimate ? &clMeasuredPsd : &m_olPSDs[n];
         if (useNtfAwareClosedLoopEstimate) {
@@ -3893,6 +3932,24 @@ void modalGainOpt::goptThreadExec() {
           }
 
           noiseEstimateSourcePsd = &noiseEstimateWorkPsd;
+        }
+
+        if (doClSignificanceCheck) {
+          mx::error_t clSignificanceErr =
+              processPsdProcessorT::estimateNoisePsd(
+                  clSignificanceNoisePsd, clSignificanceNoiseFloor,
+                  clMeasuredPsd, m_freq, n, m_extrapConfig.m_noiseEstimateRange,
+                  m_extrapConfig.m_noiseEstimateStatistic,
+                  m_extrapConfig.m_noiseEstimateLowFreqMaxHz);
+          if (!!clSignificanceErr) {
+#pragma omp critical
+            {
+              log<software_error>(
+                  {"error estimating raw CL modal significance noise PSD"});
+            }
+
+            continue;
+          }
         }
 
         if (m_extrapOL == c_olProcessNone) {
@@ -4048,31 +4105,30 @@ void modalGainOpt::goptThreadExec() {
             m_rawOlPSDs[n] = m_olPSDs[n];
             m_smoothOlPSDs[n] = m_rawOlPSDs[n];
           } else {
-            size_t fMax = static_cast<size_t>(0.05 * m_freq.size());
-            if (fMax < 2) {
-              fMax = std::min<size_t>(m_freq.size(), 2);
-            }
-
-            int noff = 0;
-            const std::vector<float> &noffPsd = useClosedLoopNoiseEstimate
-                                                    ? *noiseEstimateSourcePsd
-                                                    : m_olPSDs[n];
-            for (size_t f = 1; f < fMax; ++f) {
-              if (noffPsd[f] - processResult.m_noisePsd[f] <=
-                  0.1f * processResult.m_noisePsd[f]) {
-                ++noff;
-              }
-            }
-
-            if (noff > 0.5f * (static_cast<float>(fMax) - 1.0f) && n > 1) {
-              flagOff = true;
-            }
-
             m_nPSDs[n] = processResult.m_noisePsd;
             m_olPSDs[n] = processResult.m_processPsd;
             m_rawOlPSDs[n] = processResult.m_rawProcessPsd;
             m_smoothOlPSDs[n] = processResult.m_smoothedProcessPsd;
             lpProcessPsd = processResult.m_lpProcessPsd;
+          }
+        }
+
+        if (!flagOff && doClSignificanceCheck && clMeasuredPsd.size() > 1) {
+          size_t significantCount = 0;
+          size_t totalCount = 0;
+          for (size_t f = 1; f < clMeasuredPsd.size(); ++f) {
+            ++totalCount;
+            if (clMeasuredPsd[f] > m_extrapConfig.m_clSignificanceThreshold *
+                                       clSignificanceNoisePsd[f]) {
+              ++significantCount;
+            }
+          }
+
+          if (totalCount == 0 ||
+              static_cast<float>(significantCount) /
+                      static_cast<float>(totalCount) <
+                  m_extrapConfig.m_clMinSignificantFraction) {
+            flagOff = true;
           }
         }
 
@@ -4084,7 +4140,7 @@ void modalGainOpt::goptThreadExec() {
           { ++off; }
 
           for (size_t f = 0; f < m_goptCurrent[n].f_size(); ++f) {
-            m_olPSDs[n][f] = m_nPSDs[n][f];
+            m_olPSDs[n][f] = 0;
           }
 
           m_modeVarOL[n] = mx::sigproc::psdVar(m_freq, m_olPSDs[n]);
@@ -5258,6 +5314,23 @@ INDI_NEWCALLBACK_DEFN(modalGainOpt, m_indiP_extrapDropoutMaxBins)
   return handleExtrapNumberProperty(m_indiP_extrapDropoutMaxBins,
                                     m_extrapConfig.m_dropoutMaxBins, ipRecv,
                                     "extrap dropout max bins");
+}
+
+INDI_NEWCALLBACK_DEFN(modalGainOpt, m_indiP_extrapClSignificanceThreshold)
+(const pcf::IndiProperty &ipRecv) {
+  INDI_VALIDATE_CALLBACK_PROPS(m_indiP_extrapClSignificanceThreshold, ipRecv);
+  return handleExtrapNumberProperty(m_indiP_extrapClSignificanceThreshold,
+                                    m_extrapConfig.m_clSignificanceThreshold,
+                                    ipRecv, "extrap CL significance threshold");
+}
+
+INDI_NEWCALLBACK_DEFN(modalGainOpt, m_indiP_extrapClMinSignificantFraction)
+(const pcf::IndiProperty &ipRecv) {
+  INDI_VALIDATE_CALLBACK_PROPS(m_indiP_extrapClMinSignificantFraction, ipRecv);
+  return handleExtrapNumberProperty(m_indiP_extrapClMinSignificantFraction,
+                                    m_extrapConfig.m_clMinSignificantFraction,
+                                    ipRecv,
+                                    "extrap CL minimum significant fraction");
 }
 
 INDI_SETCALLBACK_DEFN(modalGainOpt, m_indiP_emg)

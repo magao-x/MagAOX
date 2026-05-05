@@ -489,7 +489,8 @@ TEST_CASE("modalGainOpt configuration loads PSD-processing settings without "
        "extrapolation", "extrapolation", "extrapolation", "extrapolation",
        "extrapolation", "extrapolation", "extrapolation", "extrapolation",
        "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-       "extrapolation", "extrapolation", "extrapolation", "extrapolation"},
+       "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+       "extrapolation", "extrapolation"},
       {
           "number",
           "name",
@@ -523,6 +524,8 @@ TEST_CASE("modalGainOpt configuration loads PSD-processing settings without "
           "peakMoffatBeta",
           "dropoutGapFactor",
           "dropoutMaxBins",
+          "clSignificanceThreshold",
+          "clMinSignificantFraction",
       },
       {"2",
        "aol2",
@@ -555,7 +558,9 @@ TEST_CASE("modalGainOpt configuration loads PSD-processing settings without "
        "3",
        "8",
        "0.12",
-       "6"});
+       "6",
+       "1.25",
+       "0.07"});
   app.readConfigFile("/tmp/modalGainOpt_test.conf");
 
   app.loadConfig();
@@ -603,6 +608,8 @@ TEST_CASE("modalGainOpt configuration loads PSD-processing settings without "
   REQUIRE(app.extrapConfig().m_peakMoffatBeta == Approx(8.0F));
   REQUIRE(app.extrapConfig().m_dropoutGapFactor == Approx(0.12F));
   REQUIRE(app.extrapConfig().m_dropoutMaxBins == 6);
+  REQUIRE(app.extrapConfig().m_clSignificanceThreshold == Approx(1.25F));
+  REQUIRE(app.extrapConfig().m_clMinSignificantFraction == Approx(0.07F));
 }
 
 TEST_CASE("modalGainOpt restores current selection when extrapolation switches "

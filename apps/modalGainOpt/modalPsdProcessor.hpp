@@ -112,6 +112,15 @@ public:
   /// The default maximum repaired dropout-run length in bins.
   static constexpr size_t c_defaultDropoutMaxBins = 4;
 
+  /// The default raw-CL significance threshold multiplier.
+  static constexpr realT c_defaultClSignificanceThreshold =
+      static_cast<realT>(1.1);
+
+  /// The default minimum fraction of significant raw-CL bins required to keep
+  /// processing a mode.
+  static constexpr realT c_defaultClMinSignificantFraction =
+      static_cast<realT>(0.05);
+
   /// The default LP-continuum smoothing width.
   static constexpr realT c_defaultLpContinuumWidthHz = static_cast<realT>(25);
 
@@ -211,6 +220,14 @@ public:
 
     /// The maximum dropout-run length repaired by the gap-filling logic.
     size_t m_dropoutMaxBins{c_defaultDropoutMaxBins};
+
+    /// The multiplier above the fitted raw-CL noise floor required for a bin
+    /// to be considered significant.
+    realT m_clSignificanceThreshold{c_defaultClSignificanceThreshold};
+
+    /// The minimum fraction of raw-CL bins that must be significant for a
+    /// mode to remain active.
+    realT m_clMinSignificantFraction{c_defaultClMinSignificantFraction};
   };
 
   /// Description of one detected spectral peak.
