@@ -53,6 +53,11 @@ class modalGainOptHarness : public modalGainOpt
         return m_gainGain;
     }
 
+    float gainLeak() const
+    {
+        return m_gainLeak;
+    }
+
     int extrapMethod() const
     {
         return m_extrapOL;
@@ -209,6 +214,7 @@ class modalGainOptHarness : public modalGainOpt
     }
 
     void configurePublishedGainState( const std::vector<float> &gainCalFacts,
+                                      const std::vector<float> &gainSIRaw,
                                       const std::vector<float> &gainSI,
                                       const std::vector<float> &gainMaxSI,
                                       const std::vector<float> &gainLP,
@@ -220,6 +226,7 @@ class modalGainOptHarness : public modalGainOpt
                                       float opticalGain )
     {
         m_gainCalFacts = gainCalFacts;
+        m_optGainSIRaw = gainSIRaw;
         m_optGainSI = gainSI;
         m_gmaxSI = gainMaxSI;
         m_optGainLP = gainLP;
@@ -231,10 +238,41 @@ class modalGainOptHarness : public modalGainOpt
         m_opticalGain = opticalGain;
     }
 
-    void writePublishedGainArraysForTest(
-        float *currentData, float *siData, float *maxSiData, float *lpData, float *maxLpData, float *modeVarData )
+    void writePublishedGainArraysForTest( float *currentData,
+                                          float *siRawData,
+                                          float *siData,
+                                          float *maxSiData,
+                                          float *lpData,
+                                          float *maxLpData,
+                                          float *modeVarData )
     {
-        writePublishedGainArrays( currentData, siData, maxSiData, lpData, maxLpData, modeVarData );
+        writePublishedGainArrays( currentData, siRawData, siData, maxSiData, lpData, maxLpData, modeVarData );
+    }
+
+    const std::vector<float> &integratedSiGainsForTest() const
+    {
+        return m_optGainSI;
+    }
+
+    int requestZeroGainsForTest( bool on = true )
+    {
+        if( on )
+        {
+            std::fill( m_optGainSI.begin(), m_optGainSI.end(), 0.0F );
+            m_siGainStateNeedsSync = false;
+            m_zeroGains = true;
+        }
+        else
+        {
+            m_zeroGains = false;
+        }
+
+        return 0;
+    }
+
+    void initZeroGainsPropertyForTest()
+    {
+        createStandardIndiRequestSw( m_indiP_zeroGains, "zero_gains" );
     }
 
     void configurePublishedPredictorState( const std::vector<float> &gainCalFacts,
@@ -541,86 +579,88 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without "
 
     app.setupConfig();
 
-    mx::app::writeConfigFile( "/tmp/modalGainOpt_test.conf",
-                              { "loop",          "loop",          "loop",          "loop",          "loop",
-                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation" },
-                              {
-                                  "number",
-                                  "name",
-                                  "autoUpdate",
-                                  "gainGain",
-                                  "psdDev",
-                                  "method",
-                                  "noiseEstimateDomain",
-                                  "noiseEstimateRange",
-                                  "noiseEstimateStatistic",
-                                  "noiseEstimateLowFreqMaxHz",
-                                  "closedLoopOlEstimateMethod",
-                                  "powerLawIndex",
-                                  "powerLawNormFreq",
-                                  "powerLawMatchFreq",
-                                  "powerLawMatchFallbackWindowHz",
-                                  "powerLawCrossoverMode",
-                                  "powerLawAutoSmoothWidthHz",
-                                  "fitPowerLawIndex",
-                                  "powerLawOnlyAboveFreq",
-                                  "powerLawFitIncludesMatchPoint",
-                                  "powerLawFitMinFreqHz",
-                                  "powerLawFitMaxFreqHz",
-                                  "powerLawFitBinWidthHz",
-                                  "powerLawBlendBins",
-                                  "peakDetectWidthHz",
-                                  "peakDetectFactor",
-                                  "peakDetectBroadFactor",
-                                  "peakDetectMinWidthLog",
-                                  "peakDetectPasses",
-                                  "peakMoffatBeta",
-                                  "dropoutGapFactor",
-                                  "dropoutTinyFactor",
-                                  "dropoutMaxBins",
-                                  "clSignificanceThreshold",
-                                  "clMinSignificantFraction",
-                              },
-                              { "2",
-                                "aol2",
-                                "false",
-                                "0.35",
-                                "psdDevice",
-                                "moffat_peaks",
-                                "closed_loop_pre_xfer",
-                                "low_freq",
-                                "minimum",
-                                "123",
-                                "ntf_aware",
-                                "1.5",
-                                "15",
-                                "12.5",
-                                "7.5",
-                                "auto_smoothed_crossing",
-                                "37.5",
-                                "true",
-                                "250",
-                                "false",
-                                "100",
-                                "900",
-                                "80",
-                                "6",
-                                "55",
-                                "4",
-                                "2.5",
-                                "0.03",
-                                "3",
-                                "8",
-                                "0.12",
-                                "0.000001",
-                                "6",
-                                "1.25",
-                                "0.07" } );
+    mx::app::writeConfigFile(
+        "/tmp/modalGainOpt_test.conf",
+        { "loop",          "loop",          "loop",          "loop",          "loop",          "loop",
+          "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+          "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+          "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+          "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+          "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation" },
+        {
+            "number",
+            "name",
+            "autoUpdate",
+            "gainGain",
+            "gainLeak",
+            "psdDev",
+            "method",
+            "noiseEstimateDomain",
+            "noiseEstimateRange",
+            "noiseEstimateStatistic",
+            "noiseEstimateLowFreqMaxHz",
+            "closedLoopOlEstimateMethod",
+            "powerLawIndex",
+            "powerLawNormFreq",
+            "powerLawMatchFreq",
+            "powerLawMatchFallbackWindowHz",
+            "powerLawCrossoverMode",
+            "powerLawAutoSmoothWidthHz",
+            "fitPowerLawIndex",
+            "powerLawOnlyAboveFreq",
+            "powerLawFitIncludesMatchPoint",
+            "powerLawFitMinFreqHz",
+            "powerLawFitMaxFreqHz",
+            "powerLawFitBinWidthHz",
+            "powerLawBlendBins",
+            "peakDetectWidthHz",
+            "peakDetectFactor",
+            "peakDetectBroadFactor",
+            "peakDetectMinWidthLog",
+            "peakDetectPasses",
+            "peakMoffatBeta",
+            "dropoutGapFactor",
+            "dropoutTinyFactor",
+            "dropoutMaxBins",
+            "clSignificanceThreshold",
+            "clMinSignificantFraction",
+        },
+        { "2",
+          "aol2",
+          "false",
+          "0.35",
+          "0.65",
+          "psdDevice",
+          "moffat_peaks",
+          "closed_loop_pre_xfer",
+          "low_freq",
+          "minimum",
+          "123",
+          "ntf_aware",
+          "1.5",
+          "15",
+          "12.5",
+          "7.5",
+          "auto_smoothed_crossing",
+          "37.5",
+          "true",
+          "250",
+          "false",
+          "100",
+          "900",
+          "80",
+          "6",
+          "55",
+          "4",
+          "2.5",
+          "0.03",
+          "3",
+          "8",
+          "0.12",
+          "0.000001",
+          "6",
+          "1.25",
+          "0.07" } );
     app.readConfigFile( "/tmp/modalGainOpt_test.conf" );
 
     app.loadConfig();
@@ -634,6 +674,7 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without "
     REQUIRE( app.shutdownState() == 0 );
     REQUIRE( app.autoUpdate() == false );
     REQUIRE( app.gainGain() == Approx( 0.35F ) );
+    REQUIRE( app.gainLeak() == Approx( 0.65F ) );
     REQUIRE( app.extrapMethod() == c_olProcessMoffatPeaks );
     REQUIRE( app.extrapNoiseEstimateDomain() == c_extrapNoiseEstimateClosedLoopPreXfer );
     REQUIRE( app.extrapNoiseEstimateRange() == c_extrapNoiseEstimateLowFreq );
@@ -1135,6 +1176,7 @@ TEST_CASE( "modalGainOpt published gain arrays keep LP and max LP outputs distin
     modalGainOptHarness app;
 
     app.configurePublishedGainState( { 2.0F, 4.0F },
+                                     { 29.0F, 31.0F },
                                      { 3.0F, 5.0F },
                                      { 7.0F, 11.0F },
                                      { 13.0F, 17.0F },
@@ -1146,6 +1188,7 @@ TEST_CASE( "modalGainOpt published gain arrays keep LP and max LP outputs distin
                                      2.0F );
 
     std::vector<float> currentData( 2, -1.0F );
+    std::vector<float> siRawData( 2, -1.0F );
     std::vector<float> siData( 2, -1.0F );
     std::vector<float> maxSiData( 2, -1.0F );
     std::vector<float> lpData( 2, -1.0F );
@@ -1153,6 +1196,7 @@ TEST_CASE( "modalGainOpt published gain arrays keep LP and max LP outputs distin
     std::vector<float> modeVarData( 6, -1.0F );
 
     app.writePublishedGainArraysForTest( currentData.data(),
+                                         siRawData.data(),
                                          siData.data(),
                                          maxSiData.data(),
                                          lpData.data(),
@@ -1163,6 +1207,8 @@ TEST_CASE( "modalGainOpt published gain arrays keep LP and max LP outputs distin
 
     REQUIRE( currentData[0] == Approx( 3.0F ) );
     REQUIRE( currentData[1] == Approx( 5.0F ) );
+    REQUIRE( siRawData[0] == Approx( 29.0F ) );
+    REQUIRE( siRawData[1] == Approx( 31.0F ) );
     REQUIRE( siData[0] == Approx( 3.0F ) );
     REQUIRE( siData[1] == Approx( 5.0F ) );
     REQUIRE( maxSiData[0] == Approx( 7.0F ) );
@@ -1189,6 +1235,7 @@ TEST_CASE( "modalGainOpt published gain arrays apply calibration scaling", "[mod
     modalGainOptHarness app;
 
     app.configurePublishedGainState( { 6.0F, 3.0F },
+                                     { 2.0F, 10.0F },
                                      { 4.0F, 12.0F },
                                      { 8.0F, 18.0F },
                                      { 10.0F, 20.0F },
@@ -1200,6 +1247,7 @@ TEST_CASE( "modalGainOpt published gain arrays apply calibration scaling", "[mod
                                      4.0F );
 
     std::vector<float> currentData( 2, -1.0F );
+    std::vector<float> siRawData( 2, -1.0F );
     std::vector<float> siData( 2, -1.0F );
     std::vector<float> maxSiData( 2, -1.0F );
     std::vector<float> lpData( 2, -1.0F );
@@ -1207,6 +1255,7 @@ TEST_CASE( "modalGainOpt published gain arrays apply calibration scaling", "[mod
     std::vector<float> modeVarData( 6, -1.0F );
 
     app.writePublishedGainArraysForTest( currentData.data(),
+                                         siRawData.data(),
                                          siData.data(),
                                          maxSiData.data(),
                                          lpData.data(),
@@ -1215,6 +1264,8 @@ TEST_CASE( "modalGainOpt published gain arrays apply calibration scaling", "[mod
 
     REQUIRE( currentData[0] == Approx( 2.0F ) );
     REQUIRE( currentData[1] == Approx( 1.5F ) );
+    REQUIRE( siRawData[0] == Approx( 1.0F ) );
+    REQUIRE( siRawData[1] == Approx( 1.25F ) );
     REQUIRE( siData[0] == Approx( 2.0F ) );
     REQUIRE( siData[1] == Approx( 1.5F ) );
     REQUIRE( maxSiData[0] == Approx( 4.0F ) );
@@ -1223,6 +1274,31 @@ TEST_CASE( "modalGainOpt published gain arrays apply calibration scaling", "[mod
     REQUIRE( lpData[1] == Approx( 2.5F ) );
     REQUIRE( maxLpData[0] == Approx( 7.0F ) );
     REQUIRE( maxLpData[1] == Approx( 3.0F ) );
+}
+
+TEST_CASE( "modalGainOpt zero_gains request resets the integrated SI gains", "[modalGainOpt]" )
+{
+    modalGainOptHarness app;
+
+    app.configurePublishedGainState( { 2.0F, 4.0F },
+                                     { 29.0F, 31.0F },
+                                     { 3.0F, 5.0F },
+                                     { 7.0F, 11.0F },
+                                     { 13.0F, 17.0F },
+                                     { 19.0F, 23.0F },
+                                     { 1.0F, 2.0F },
+                                     { 0.1F, 0.2F },
+                                     { 1.1F, 1.2F },
+                                     { 2.1F, 2.2F },
+                                     2.0F );
+    app.initZeroGainsPropertyForTest();
+
+    REQUIRE( app.integratedSiGainsForTest()[0] == Approx( 3.0F ) );
+    REQUIRE( app.integratedSiGainsForTest()[1] == Approx( 5.0F ) );
+
+    REQUIRE( app.requestZeroGainsForTest() == 0 );
+    REQUIRE( app.integratedSiGainsForTest()[0] == Approx( 0.0F ) );
+    REQUIRE( app.integratedSiGainsForTest()[1] == Approx( 0.0F ) );
 }
 
 /// Verify `modalGainOpt` counts enabled modes from positive gain factors.
