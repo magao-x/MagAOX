@@ -792,7 +792,7 @@ class modalGainOpt : public MagAOXApp<true>,
     bool m_opticalGainUpdate{ false }; ///< Flag controlling whether optical gain is
                                        ///< automatically updated;
 
-    float m_gainGain{ 0.1 };           ///< The gain to use for the SI gain integrator input.  Default is 0.1.
+    float m_gainGain{ 0.1 };           ///< The gain to use for SI gain correction updates.  Default is 0.1.
     float m_gainLeak{ 0.9 };           ///< The leak factor used for SI gain integration. Default is 0.9.
     processPsdProcessorT::processModelConfig m_extrapConfig; ///< Configuration of the OL PSD extrapolation model.
 
@@ -1080,6 +1080,9 @@ class modalGainOpt : public MagAOXApp<true>,
 
     /// Synchronize the integrated SI gain state from the applied gain-factor stream.
     void syncSiGainStateFromAppliedGains();
+
+    /// Apply one SI leaky-integrator update from the raw optimal gain.
+    void updateIntegratedSiGain( size_t modeIndex );
 
     /// Handle a standard target/current numeric extrapolation property update.
     template <typename valueT>
@@ -3081,6 +3084,12 @@ void modalGainOpt::syncSiGainStateFromAppliedGains()
     m_siGainStateNeedsSync = false;
 }
 
+void modalGainOpt::updateIntegratedSiGain( size_t modeIndex )
+{
+    m_optGainSI[modeIndex] =
+        m_gainGain * ( m_optGainSIRaw[modeIndex] - m_optGainSI[modeIndex] ) + m_gainLeak * m_optGainSI[modeIndex];
+}
+
 int modalGainOpt::allocatePCShmims()
 {
     // mutex should be locked before calling this
@@ -5040,7 +5049,7 @@ void modalGainOpt::goptThreadExec()
                     }
                 }
 
-                m_optGainSI[n] = m_gainGain * m_optGainSIRaw[n] + m_gainLeak * m_optGainSI[n];
+                updateIntegratedSiGain( n );
 
                 if( m_doPCCalcs && !flagOff )
                 {

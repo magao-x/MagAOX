@@ -254,6 +254,22 @@ class modalGainOptHarness : public modalGainOpt
         return m_optGainSI;
     }
 
+    void configureSiIntegratorStateForTest( const std::vector<float> &gainSIRaw,
+                                            const std::vector<float> &gainSI,
+                                            float gainGain,
+                                            float gainLeak )
+    {
+        m_optGainSIRaw = gainSIRaw;
+        m_optGainSI = gainSI;
+        m_gainGain = gainGain;
+        m_gainLeak = gainLeak;
+    }
+
+    void updateIntegratedSiGainForTest( size_t modeIndex )
+    {
+        updateIntegratedSiGain( modeIndex );
+    }
+
     int requestZeroGainsForTest( bool on = true )
     {
         if( on )
@@ -1299,6 +1315,19 @@ TEST_CASE( "modalGainOpt zero_gains request resets the integrated SI gains", "[m
     REQUIRE( app.requestZeroGainsForTest() == 0 );
     REQUIRE( app.integratedSiGainsForTest()[0] == Approx( 0.0F ) );
     REQUIRE( app.integratedSiGainsForTest()[1] == Approx( 0.0F ) );
+}
+
+TEST_CASE( "modalGainOpt SI gain integrator updates toward the raw optimum by delta", "[modalGainOpt]" )
+{
+    modalGainOptHarness app;
+
+    app.configureSiIntegratorStateForTest( { 10.0F, 3.0F }, { 4.0F, 1.0F }, 0.2F, 0.9F );
+
+    app.updateIntegratedSiGainForTest( 0 );
+    app.updateIntegratedSiGainForTest( 1 );
+
+    REQUIRE( app.integratedSiGainsForTest()[0] == Approx( 4.8F ) );
+    REQUIRE( app.integratedSiGainsForTest()[1] == Approx( 1.3F ) );
 }
 
 /// Verify `modalGainOpt` counts enabled modes from positive gain factors.
