@@ -164,7 +164,14 @@ class psfAcq : public MagAOXApp<true>,
 
     float m_fps{ 0 };
 
-    void resetAcq(); // class member for resetAcq function
+    /// Last observed `flipacq.presetName.out` switch state.
+    bool m_flipAcqOutWasOn{ false };
+
+    /// True once `m_flipAcqOutWasOn` has been initialized from INDI.
+    bool m_flipAcqOutStateValid{ false };
+
+    /// Delete star INDI properties and reset tracked acquisition stars.
+    void resetAcq();
 
     // Working memory for poke fitting
     mx::math::fit::fitGaussian2Dsym<float> m_gfit;
@@ -229,6 +236,10 @@ class psfAcq : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_fpsSource;
     INDI_SETCALLBACK_DECL( psfAcq, m_indiP_fpsSource );
+
+    /// Subscription to `flipacq.presetName` switch updates.
+    pcf::IndiProperty m_indiP_flipAcqPresetName;
+    INDI_SETCALLBACK_DECL( psfAcq, m_indiP_flipAcqPresetName );
 
     // For user to select star
     pcf::IndiProperty m_indiP_acquire_star;
@@ -382,6 +393,8 @@ inline int psfAcq::appStartup()
     {
         REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsSource, std::string( "fps" ) );
     }
+
+    REG_INDI_SETPROP( m_indiP_flipAcqPresetName, "flipacq", "presetName" );
 
     // creating toggling to restart the acquisition
     createStandardIndiRequestSw( m_indiP_restartAcq, "restart_acq", "Restart Acquisition", "psfAcq");
@@ -833,18 +846,57 @@ inline int psfAcq::processImage( void *curr_src, const darkShmimT &dummy )
     return 0;
 }
 
-//delete m_detectedStars Properties
-void psfAcq::resetAcq(){
-    for(size_t n=0; n < m_detectedStars.size(); ++n)
+// Delete INDI properties for tracked stars and clear acquisition state.
+void psfAcq::resetAcq()
+{
+    for( size_t n = 0; n < m_detectedStars.size(); ++n )
     {
-        if(m_indiDriver) m_indiDriver->sendDelProperty(m_detectedStars[n].prop());
-        if(!m_indiNewCallBacks.erase(m_detectedStars[n].prop().createUniqueKey()))
+        if( m_indiDriver )
         {
-            log<software_error>({__FILE__, __LINE__, "failed to erase " + m_detectedStars[n].prop().createUniqueKey()});
+            m_indiDriver->sendDelProperty( m_detectedStars[n].prop() );
+        }
+
+        if( !m_indiNewCallBacks.erase( m_detectedStars[n].prop().createUniqueKey() ) )
+        {
+            log<software_error>( { __FILE__, __LINE__, "failed to erase " + m_detectedStars[n].prop().createUniqueKey() } );
         }
     }
+
     std::cout << "size=" << m_detectedStars.size() << std::endl;
     m_detectedStars.clear();
+}
+
+INDI_SETCALLBACK_DEFN( psfAcq, m_indiP_flipAcqPresetName )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_flipAcqPresetName, ipRecv );
+
+    // Auto-restart on an `out` On->Off transition.
+    // `flipacq.presetName` is a switch property with elements `in` and `out`.
+    if( ipRecv.find( "out" ) != true )
+    {
+        return 0;
+    }
+
+    std::unique_lock<std::mutex> lock( m_indiMutex );
+
+    auto outState = ipRecv["out"].getSwitchState();
+    bool outIsOn = ( outState == pcf::IndiElement::On );
+    bool outIsOff = ( outState == pcf::IndiElement::Off );
+
+    if( !outIsOn && !outIsOff )
+    {
+        return 0;
+    }
+
+    if( m_flipAcqOutStateValid && m_flipAcqOutWasOn && outIsOff )
+    {
+        resetAcq();
+    }
+
+    m_flipAcqOutWasOn = outIsOn;
+    m_flipAcqOutStateValid = true;
+
+    return 0;
 }
 
 //for toggling Restart Acquisition
