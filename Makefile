@@ -290,6 +290,7 @@ scripts_to_install = \
 	shmimTCPreceive \
 	shmimTCPtransmit \
 	shmimTCPbridge \
+	connectACC \
 	obs_to_movie \
 	instrument_backup_sync \
 	cacao_startup_if_present \
