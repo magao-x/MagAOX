@@ -275,7 +275,7 @@ class psfAcq : public MagAOXApp<true>,
     int checkRecordTimes();
 
     /// Record on-star seeing telemetry.
-    int recordTelem( const telem_position *telem /**< [in] telemetry tag used for overload resolution. */ );
+    int recordTelem( const telem_position *telemTag /**< [in] telemetry tag used for overload resolution. */ );
 
     ///@}
 };
@@ -897,9 +897,9 @@ inline int psfAcq::checkRecordTimes()
     return telemeterT::checkRecordTimes( telem_position() );
 }
 
-inline int psfAcq::recordTelem( const telem_position *telem )
+inline int psfAcq::recordTelem( const telem_position *telemTag )
 {
-    static_cast<void>( telem );
+    static_cast<void>( telemTag );
 
     if( m_num_stars <= 0 )
     {
