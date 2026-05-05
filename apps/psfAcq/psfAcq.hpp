@@ -134,7 +134,7 @@ class psfAcq : public MagAOXApp<true>,
     double m_acqQuitTime {0};
     double m_acqPauseTime{2};
 
-    int m_current_acq_star {-1};
+    int m_current_acq_star {-1}; // active star index used for seeing output
     int m_temp_acq_star {-1};
     bool m_updated{ false };
     float m_x{ 0 };
@@ -158,7 +158,7 @@ class psfAcq : public MagAOXApp<true>,
     int m_num_stars{ 0 };
     float m_seeing{ 0 };
     int m_acquire_star{ -1 }; // Testing for user to select star
-    int m_seeing_star { -1 }; // default star to calc seeing
+    int m_seeing_star { -1 }; // star index exposed for seeing source; auto-set to 0 when stars are present
     int m_x_center{};     // 'center' of image or hot spot
     int m_y_center{};
 
@@ -408,7 +408,7 @@ inline int psfAcq::appStartup()
 
     // create toggling for recording seeing
     createStandardIndiToggleSw( m_indiP_recordSeeing, "record_seeing", "Record Seeing");
-    m_indiP_recordSeeing["toggle"].set(pcf::IndiElement::Off);
+    m_indiP_recordSeeing["toggle"].set(pcf::IndiElement::On);
     if( registerIndiPropertyNew( m_indiP_recordSeeing, INDI_NEWCALLBACK(m_indiP_recordSeeing)) < 0)
     {
        log<software_error>({__FILE__,__LINE__});
@@ -455,6 +455,8 @@ inline int psfAcq::appLogic()
 
     updateIfChanged( m_indiP_num_stars, "current", m_num_stars );
     updateIfChanged( m_indiP_seeing, "current", m_seeing );
+    updateIfChanged( m_indiP_seeing_star, "current", m_seeing_star );
+    updateIfChanged( m_indiP_seeing_star, "target", m_seeing_star );
 
     for( size_t n = 0; n < m_detectedStars.size() ; ++n )
     {
@@ -769,11 +771,6 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
         m_acquire_star = -1;
     }
 
-    if ( m_seeing_star != -1 &&  (m_seeing_star > m_detectedStars.size() - 1 || m_seeing_star < 0 )){
-        std::cout << "Please enter a star number between 0 and " << m_detectedStars.size() - 1 << "." << std::endl;
-        m_seeing_star = -1;
-    }
-
     if( m_acquire_star >= 0 && m_acquire_star < m_detectedStars.size())
     {
         m_acqQuitTime = mx::sys::get_curr_time();
@@ -803,8 +800,16 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
         m_acquire_star = -1;
     }
 
-    if ( m_current_acq_star >= 0 && m_current_acq_star <= m_num_stars ){
-        m_seeing = m_detectedStars[m_current_acq_star].seeing;
+    if( m_num_stars > 0 )
+    {
+        m_seeing_star = 0;
+        m_current_acq_star = 0;
+        m_seeing = m_detectedStars[0].seeing;
+    }
+    else
+    {
+        m_seeing_star = -1;
+        m_current_acq_star = -1;
     }
 
     m_updated = true;
@@ -922,23 +927,21 @@ INDI_NEWCALLBACK_DEFN( psfAcq, m_indiP_restartAcq )(const pcf::IndiProperty &ipR
     return -1;
 }
 
-//for toggling Recording Seeing
+// For toggling Recording Seeing
 INDI_NEWCALLBACK_DEFN( psfAcq, m_indiP_recordSeeing )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_recordSeeing, ipRecv);
     if(!ipRecv.find("toggle")) return 0;
     std::unique_lock<std::mutex> lock(m_indiMutex);
 
+    // Seeing updates are automatic; this toggle is informational only.
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
     {
-        m_current_acq_star = m_temp_acq_star;
-        updateSwitchIfChanged(m_indiP_recordSeeing, "toggle", pcf::IndiElement::On, INDI_BUSY);
-        //m_seeing = m_detectedStars[m_current_acq_star].seeing;
+        updateSwitchIfChanged(m_indiP_recordSeeing, "toggle", pcf::IndiElement::On, INDI_OK);
         return 0;
     }
     else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
     {
-        m_current_acq_star = -1;
         updateSwitchIfChanged(m_indiP_recordSeeing, "toggle", pcf::IndiElement::Off, INDI_IDLE);
         return 0;
     }
@@ -988,7 +991,17 @@ INDI_NEWCALLBACK_DEFN( psfAcq, m_indiP_seeing_star )( const pcf::IndiProperty &i
         return -1;
     }
 
-    m_seeing_star = target;
+    static_cast<void>( target );
+
+    // Force automatic seeing source selection.
+    if( m_num_stars > 0 )
+    {
+        m_seeing_star = 0;
+    }
+    else
+    {
+        m_seeing_star = -1;
+    }
 
     log<text_log>( "set seeing_star = " + std::to_string( m_seeing_star ), logPrio::LOG_NOTICE );
     return 0;
