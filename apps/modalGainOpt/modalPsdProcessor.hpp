@@ -2785,6 +2785,46 @@ mx::error_t modalPsdProcessor<realT>::fillProcessPsdDropouts(
     }
   }
 
+  if (repairMask.empty() || repairMask.back() != 0) {
+    realT runMax = sourcePsd.back();
+    for (size_t offset = 0; offset + 2 < sourcePsd.size(); ++offset) {
+      size_t start = sourcePsd.size() - 1 - offset;
+      if (!repairMask.empty() && repairMask[start] == 0) {
+        break;
+      }
+
+      runMax = std::max(runMax, sourcePsd[start]);
+
+      realT left1 = std::max(sourcePsd[start - 1], tiny);
+      realT left2 = std::max(sourcePsd[start - 2], tiny);
+      realT flankMin = std::min(left1, left2);
+      if (runMax >= gapFactor * flankMin) {
+        continue;
+      }
+
+      realT xLeft = log10(std::max(freq[start - 2], refFreq));
+      realT xRight = log10(std::max(freq[start - 1], refFreq));
+      if (xRight <= xLeft) {
+        xRight = xLeft + static_cast<realT>(1);
+      }
+
+      realT yLeft = log10(std::max(sourcePsd[start - 2], tiny));
+      realT yRight = log10(std::max(sourcePsd[start - 1], tiny));
+
+      for (size_t fill = start; fill < sourcePsd.size(); ++fill) {
+        realT xFill = log10(std::max(freq[fill], refFreq));
+        realT alpha = (xFill - xLeft) / (xRight - xLeft);
+        realT fillValue =
+            pow(static_cast<realT>(10), yLeft + alpha * (yRight - yLeft));
+        changed = changed || fillValue != updatedPsd[fill];
+        updatedPsd[fill] = std::max(fillValue, tiny);
+      }
+
+      sourcePsd = updatedPsd;
+      break;
+    }
+  }
+
   if (changed) {
     processPsd.swap(updatedPsd);
   }

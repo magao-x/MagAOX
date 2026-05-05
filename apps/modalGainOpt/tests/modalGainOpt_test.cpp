@@ -27,6 +27,7 @@ namespace modalGainOptTest {
 class processPsdProcessorHarness : public processPsdProcessorT {
 public:
   using processPsdProcessorT::buildSmoothedProcessPsd;
+  using processPsdProcessorT::fillProcessPsdDropouts;
   using processPsdProcessorT::findAutoPowerLawCrossoverFreq;
 };
 
@@ -1047,6 +1048,22 @@ TEST_CASE("modalPsdProcessor repairs raw disturbance dropouts before "
   REQUIRE(!errc);
   REQUIRE(result.m_noiseFloor == Approx(1.0F));
   REQUIRE(result.m_rawProcessPsd[3] > 0.2F);
+}
+
+TEST_CASE("modalPsdProcessor repairs trailing high-frequency dropout runs",
+          "[modalGainOpt]") {
+  std::vector<float> processPsd{10.0F, 9.0F, 8.0F, 0.1F, 0.1F, 0.1F};
+  std::vector<float> freq{0.0F, 10.0F, 20.0F, 30.0F, 40.0F, 50.0F};
+
+  mx::error_t errc = processPsdProcessorHarness::fillProcessPsdDropouts(
+      processPsd, freq, {}, 0.2F, 4);
+
+  REQUIRE(!errc);
+  REQUIRE(processPsd[3] > 1.0F);
+  REQUIRE(processPsd[4] > 1.0F);
+  REQUIRE(processPsd[5] > 1.0F);
+  REQUIRE(processPsd[5] < processPsd[4]);
+  REQUIRE(processPsd[4] < processPsd[3]);
 }
 
 /// Verify `modalGainOpt` publishes LP and max-gain arrays into separate
