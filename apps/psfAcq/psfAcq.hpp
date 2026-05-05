@@ -91,19 +91,24 @@ public:
  */
 class psfAcq : public MagAOXApp<true>,
                public dev::shmimMonitor<psfAcq>,
-               public dev::shmimMonitor<psfAcq, darkShmimT>
+               public dev::shmimMonitor<psfAcq, darkShmimT>,
+               public dev::telemeter<psfAcq>
 {
     // Give the test harness access.
     friend class psfAcq_test;
 
     friend class dev::shmimMonitor<psfAcq>;
     friend class dev::shmimMonitor<psfAcq, darkShmimT>;
+    friend class dev::telemeter<psfAcq>;
 
   public:
     // The base shmimMonitor type
     typedef dev::shmimMonitor<psfAcq> shmimMonitorT;
 
     typedef dev::shmimMonitor<psfAcq, darkShmimT> darkShmimMonitorT;
+
+    // The base telemeter type
+    typedef dev::telemeter<psfAcq> telemeterT;
 
     /// Floating point type in which to do all calculations.
     typedef float realT;
@@ -266,9 +271,11 @@ class psfAcq : public MagAOXApp<true>,
      *
      * @{
      */
+    /// Check whether any telemetry streams should be recorded at the current time.
     int checkRecordTimes();
 
-    int recordTelem( const telem_fgtimings * );
+    /// Record on-star seeing telemetry.
+    int recordTelem( const telem_position *telem /**< [in] telemetry tag used for overload resolution. */ );
 
     ///@}
 };
@@ -291,6 +298,7 @@ inline void psfAcq::setupConfig()
 {
     shmimMonitorT::setupConfig( config );
     darkShmimMonitorT::setupConfig( config );
+    TELEMETER_SETUP_CONFIG( config );
 
     config.add(
         "fitter.fpsSource",
@@ -362,6 +370,7 @@ inline int psfAcq::loadConfigImpl( mx::app::appConfigurator &_config )
 {
     shmimMonitorT::loadConfig( _config );
     darkShmimMonitorT::loadConfig( _config );
+    TELEMETER_LOAD_CONFIG( _config );
 
     _config( m_fpsSource, "fitter.fpsSource" );
     _config( m_max_loops, "fitter.max_loops" ); // Max number of stars to detect in processImage
@@ -392,6 +401,8 @@ inline int psfAcq::appStartup()
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
+
+    TELEMETER_APP_STARTUP;
 
     if( m_fpsSource != "" )
     {
@@ -452,6 +463,8 @@ inline int psfAcq::appLogic()
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
+    TELEMETER_APP_LOGIC;
+
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
     shmimMonitorT::updateINDI();
@@ -477,6 +490,7 @@ inline int psfAcq::appShutdown()
 {
     shmimMonitorT::appShutdown();
     darkShmimMonitorT::appShutdown();
+    TELEMETER_APP_SHUTDOWN;
 
     return 0;
 }
@@ -876,6 +890,28 @@ inline int psfAcq::processImage( void *curr_src, const darkShmimT &dummy )
     log<text_log>( "dark updated", logPrio::LOG_INFO );
 
     return 0;
+}
+
+inline int psfAcq::checkRecordTimes()
+{
+    return telemeterT::checkRecordTimes( telem_position() );
+}
+
+inline int psfAcq::recordTelem( const telem_position *telem )
+{
+    static_cast<void>( telem );
+
+    if( m_num_stars <= 0 )
+    {
+        return 0;
+    }
+
+    if( m_current_acq_star < 0 || m_current_acq_star >= (int)m_detectedStars.size() )
+    {
+        return 0;
+    }
+
+    return telem<telem_position>( m_seeing );
 }
 
 void psfAcq::removeStar( size_t index )
