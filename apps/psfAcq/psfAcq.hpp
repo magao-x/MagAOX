@@ -52,6 +52,7 @@ public:
     float max;  // Star brightness
     float fwhm; // Star FWHM
     float seeing; // Star's seeing
+    int missedFrames{ 0 }; // Consecutive frames where this star was not updated.
 
 private:
 
@@ -169,6 +170,9 @@ class psfAcq : public MagAOXApp<true>,
 
     /// True once `m_flipAcqOutWasOn` has been initialized from INDI.
     bool m_flipAcqOutStateValid{ false };
+
+    /// Remove one tracked star and its INDI property/callback registration.
+    void removeStar( size_t index /**< [in] index of the tracked star to remove. */ );
 
     /// Delete star INDI properties and reset tracked acquisition stars.
     void resetAcq();
@@ -549,6 +553,7 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
     float stddev = std::sqrt( variance );                                          // Calculate the standard deviation
     float z_score = ( max - mean ) / stddev;                                       // how many std dev away from mean
     float fwhm = m_fwhm_threshold + 1; // getting intial fwhm before entering while loop
+    std::vector<bool> starUpdatedThisFrame( m_detectedStars.size(), false );
     std::size_t numStars = m_detectedStars.size();
     if( numStars == 0 )
     { // This runs when the vector of stars is empty (usually the first time)
@@ -615,6 +620,7 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
                 m_detectedStars.back().prop().add( pcf::IndiElement( "fwhm" ) );
                 m_detectedStars.back().prop()["fwhm"].set( m_detectedStars.back().fwhm );
                 registerIndiPropertyReadOnly( m_detectedStars.back().prop() );
+                starUpdatedThisFrame.push_back( true );
             }
             if( x_value < m_zero_area )
             {
@@ -715,8 +721,9 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
             int threshold_distance = 20; // distance between new stars should be a small positive number so this updates
             int tracker = 0; // tracks if the current star detected updated an already known star
             if (fwhm > m_fwhm_threshold && fwhm < m_max_fwhm ){
-                for( Star &star : m_detectedStars )
+                for( size_t starIndex = 0; starIndex < m_detectedStars.size(); ++starIndex )
                 {
+                    Star &star = m_detectedStars[starIndex];
                     float dist = calculateDistance( star.x, star.y, x_value, y_value );
                     // 4. if it is found, update that star's data in the vector
                     if( dist < threshold_distance )
@@ -726,6 +733,7 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
                         star.max = max;
                         star.fwhm = fwhm;
                         star.seeing = seeing;
+                        starUpdatedThisFrame[starIndex] = true;
                         tracker = 1;
                         continue;
                     }
@@ -752,10 +760,29 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
                     m_detectedStars.back().prop().add( pcf::IndiElement( "fwhm" ) );
                     m_detectedStars.back().prop()["fwhm"].set( m_detectedStars.back().fwhm );
                     registerIndiPropertyReadOnly( m_detectedStars.back().prop() );
+                    starUpdatedThisFrame.push_back( true );
                 }
             }
             max = m_image.maxCoeff( &x, &y );
             z_score = ( max - mean ) / stddev;
+        }
+    }
+
+    constexpr int maxMissedFrames = 3;
+    for( size_t n = m_detectedStars.size(); n > 0; --n )
+    {
+        size_t starIndex = n - 1;
+
+        if( starUpdatedThisFrame[starIndex] )
+        {
+            m_detectedStars[starIndex].missedFrames = 0;
+            continue;
+        }
+
+        ++m_detectedStars[starIndex].missedFrames;
+        if( m_detectedStars[starIndex].missedFrames >= maxMissedFrames )
+        {
+            removeStar( starIndex );
         }
     }
 
@@ -851,24 +878,36 @@ inline int psfAcq::processImage( void *curr_src, const darkShmimT &dummy )
     return 0;
 }
 
+void psfAcq::removeStar( size_t index )
+{
+    if( index >= m_detectedStars.size() )
+    {
+        return;
+    }
+
+    if( m_indiDriver )
+    {
+        m_indiDriver->sendDelProperty( m_detectedStars[index].prop() );
+    }
+
+    if( !m_indiNewCallBacks.erase( m_detectedStars[index].prop().createUniqueKey() ) )
+    {
+        log<software_error>( { __FILE__, __LINE__, "failed to erase " + m_detectedStars[index].prop().createUniqueKey() } );
+    }
+
+    m_detectedStars[index].deallocate();
+    m_detectedStars.erase( m_detectedStars.begin() + index );
+}
+
 // Delete INDI properties for tracked stars and clear acquisition state.
 void psfAcq::resetAcq()
 {
-    for( size_t n = 0; n < m_detectedStars.size(); ++n )
+    for( size_t n = m_detectedStars.size(); n > 0; --n )
     {
-        if( m_indiDriver )
-        {
-            m_indiDriver->sendDelProperty( m_detectedStars[n].prop() );
-        }
-
-        if( !m_indiNewCallBacks.erase( m_detectedStars[n].prop().createUniqueKey() ) )
-        {
-            log<software_error>( { __FILE__, __LINE__, "failed to erase " + m_detectedStars[n].prop().createUniqueKey() } );
-        }
+        removeStar( n - 1 );
     }
 
     std::cout << "size=" << m_detectedStars.size() << std::endl;
-    m_detectedStars.clear();
 }
 
 INDI_SETCALLBACK_DEFN( psfAcq, m_indiP_flipAcqPresetName )( const pcf::IndiProperty &ipRecv )
