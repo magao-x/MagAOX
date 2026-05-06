@@ -737,7 +737,12 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
             int starRow = std::clamp( static_cast<int>( m_x ), m_zero_area, imageRows - m_zero_area );
             int starCol = std::clamp( static_cast<int>( m_y ), m_zero_area, imageCols - m_zero_area );
 
-            if( fwhm > m_fwhm_threshold && fwhm < m_max_fwhm )
+            // Only detections that satisfy configured thresholds may update or create tracked stars.
+            const bool passesStarThresholds =
+                ( zScore > m_threshold ) && ( fwhm > m_fwhm_threshold ) && ( fwhm < m_max_fwhm ) &&
+                std::isfinite( maxValue );
+
+            if( passesStarThresholds )
             {
                 constexpr int thresholdDistance = 20;
                 bool matchedKnownStar = false;
@@ -783,7 +788,8 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
             }
         }
 
-        constexpr int maxMissedFrames = 3;
+        // Drop a tracked star as soon as it misses one full frame update.
+        constexpr int maxMissedFrames = 1;
         for( std::size_t n = m_detectedStars.size(); n > 0; --n )
         {
             std::size_t starIndex = n - 1;
