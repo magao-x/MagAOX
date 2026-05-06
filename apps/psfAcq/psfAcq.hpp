@@ -55,7 +55,7 @@ struct Star
 {
 public:
 
-    /// Monotonic identifier used to keep INDI property names unique.
+    /// Monotonic identifier used as a stable tie-breaker across equal-brightness stars.
     std::size_t id{ 0 };
 
     /// Star row coordinate in image pixel space.
@@ -202,7 +202,7 @@ class psfAcq : public MagAOXApp<true>,
     /// Tracked stars with associated INDI properties.
     std::vector<Star> m_detectedStars;
 
-    /// Monotonic id to guarantee unique star property names across add/remove cycles.
+    /// Monotonic id counter used to stamp new stars for stable ordering tie-breaks.
     std::size_t m_nextStarId{ 0 };
 
     float m_dx{ 0 };
@@ -234,6 +234,22 @@ class psfAcq : public MagAOXApp<true>,
     /** Caller must hold `m_indiMutex`.
      */
     void resetAcq();
+
+    /// Register one tracked star's read-only INDI property using a rank-based label.
+    /** Caller must hold `m_indiMutex`.
+     */
+    void registerStarProperty( Star &star,                  /**< [in,out] tracked star to register. */
+                               std::size_t rankIndex /**< [in] brightness rank label index, `star_<rankIndex>`. */ );
+
+    /// Remove one tracked star's INDI property without erasing the star state.
+    /** Caller must hold `m_indiMutex`.
+     */
+    void unregisterStarProperty( Star &star /**< [in,out] tracked star to unregister. */ );
+
+    /// Sort tracked stars by brightness and ensure labels are `star_0`, `star_1`, ...
+    /** Caller must hold `m_indiMutex`.
+     */
+    void relabelStarsByBrightness();
 
     // Working memory for poke fitting
     mx::math::fit::fitGaussian2Dsym<float> m_gfit;
@@ -677,25 +693,7 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
             newStar.max = peak;
             newStar.fwhm = starFwhm;
             newStar.seeing = starSeeing;
-            newStar.allocate();
-
             m_detectedStars.push_back( std::move( newStar ) );
-            Star &addedStar = m_detectedStars.back();
-            std::string starPrefix = "star_" + std::to_string( addedStar.id );
-            createROIndiNumber(
-                addedStar.prop(),
-                starPrefix,
-                "Star " + std::to_string( addedStar.id ) + " Properties",
-                "Star Acq" );
-            addedStar.prop().add( pcf::IndiElement( "x" ) );
-            addedStar.prop()["x"].set( addedStar.x );
-            addedStar.prop().add( pcf::IndiElement( "y" ) );
-            addedStar.prop()["y"].set( addedStar.y );
-            addedStar.prop().add( pcf::IndiElement( "peak" ) );
-            addedStar.prop()["peak"].set( addedStar.max );
-            addedStar.prop().add( pcf::IndiElement( "fwhm" ) );
-            addedStar.prop()["fwhm"].set( addedStar.fwhm );
-            registerIndiPropertyReadOnly( addedStar.prop() );
             starUpdatedThisFrame.push_back( true );
         };
 
@@ -806,6 +804,8 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
                 removeStar( starIndex );
             }
         }
+
+        relabelStarsByBrightness();
 
         const int starCount = static_cast<int>( m_detectedStars.size() );
         if( m_acquire_star >= starCount || m_acquire_star < -1 )
@@ -959,6 +959,111 @@ inline int psfAcq::recordTelem( const telem_position *telemTag )
     return 0;
 }
 
+void psfAcq::registerStarProperty( Star &star, std::size_t rankIndex )
+{
+    // Caller must hold m_indiMutex.
+    if( star.hasProp() )
+    {
+        unregisterStarProperty( star );
+    }
+
+    star.allocate();
+
+    std::string starPrefix = "star_" + std::to_string( rankIndex );
+    createROIndiNumber(
+        star.prop(),
+        starPrefix,
+        "Star " + std::to_string( rankIndex ) + " Properties",
+        "Star Acq" );
+    star.prop().add( pcf::IndiElement( "x" ) );
+    star.prop()["x"].set( star.x );
+    star.prop().add( pcf::IndiElement( "y" ) );
+    star.prop()["y"].set( star.y );
+    star.prop().add( pcf::IndiElement( "peak" ) );
+    star.prop()["peak"].set( star.max );
+    star.prop().add( pcf::IndiElement( "fwhm" ) );
+    star.prop()["fwhm"].set( star.fwhm );
+    registerIndiPropertyReadOnly( star.prop() );
+}
+
+void psfAcq::unregisterStarProperty( Star &star )
+{
+    // Caller must hold m_indiMutex.
+    if( !star.hasProp() )
+    {
+        return;
+    }
+
+    std::string uniqueKey = star.prop().createUniqueKey();
+    if( m_indiDriver )
+    {
+        m_indiDriver->sendDelProperty( star.prop() );
+    }
+
+    if( !uniqueKey.empty() && !m_indiNewCallBacks.erase( uniqueKey ) )
+    {
+        log<software_error>( { __FILE__, __LINE__, "failed to erase " + uniqueKey } );
+    }
+
+    star.deallocate();
+}
+
+void psfAcq::relabelStarsByBrightness()
+{
+    // Caller must hold m_indiMutex.
+    std::sort(
+        m_detectedStars.begin(),
+        m_detectedStars.end(),
+        []( const Star &lhs, const Star &rhs ) {
+            const bool lhsFinite = std::isfinite( lhs.max );
+            const bool rhsFinite = std::isfinite( rhs.max );
+
+            if( lhsFinite != rhsFinite )
+            {
+                return lhsFinite;
+            }
+
+            if( lhsFinite && rhsFinite && lhs.max != rhs.max )
+            {
+                return lhs.max > rhs.max;
+            }
+
+            return lhs.id < rhs.id;
+        } );
+
+    bool labelsAlreadyMatch = true;
+    for( std::size_t n = 0; n < m_detectedStars.size(); ++n )
+    {
+        if( !m_detectedStars[n].hasProp() )
+        {
+            labelsAlreadyMatch = false;
+            break;
+        }
+
+        std::string desiredName = "star_" + std::to_string( n );
+        if( m_detectedStars[n].prop().getName() != desiredName )
+        {
+            labelsAlreadyMatch = false;
+            break;
+        }
+    }
+
+    if( labelsAlreadyMatch )
+    {
+        return;
+    }
+
+    for( auto &star : m_detectedStars )
+    {
+        unregisterStarProperty( star );
+    }
+
+    for( std::size_t n = 0; n < m_detectedStars.size(); ++n )
+    {
+        registerStarProperty( m_detectedStars[n], n );
+    }
+}
+
 void psfAcq::removeStar( size_t index )
 {
     // Caller must hold m_indiMutex.
@@ -967,23 +1072,7 @@ void psfAcq::removeStar( size_t index )
         return;
     }
 
-    std::string uniqueKey;
-    if( m_detectedStars[index].hasProp() )
-    {
-        pcf::IndiProperty &starProp = m_detectedStars[index].prop();
-        uniqueKey = starProp.createUniqueKey();
-        if( m_indiDriver )
-        {
-            m_indiDriver->sendDelProperty( starProp );
-        }
-    }
-
-    if( !uniqueKey.empty() && !m_indiNewCallBacks.erase( uniqueKey ) )
-    {
-        log<software_error>( { __FILE__, __LINE__, "failed to erase " + uniqueKey } );
-    }
-
-    m_detectedStars[index].deallocate();
+    unregisterStarProperty( m_detectedStars[index] );
     m_detectedStars.erase( m_detectedStars.begin() + index );
 }
 
