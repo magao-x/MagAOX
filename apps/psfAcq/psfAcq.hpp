@@ -327,7 +327,7 @@ class psfAcq : public MagAOXApp<true>,
     /// Check whether any telemetry streams should be recorded at the current time.
     int checkRecordTimes();
 
-    /// Record on-star seeing telemetry.
+    /// Record telemetry for all properties of each detected star.
     int recordTelem( const telem_position *telemTag /**< [in] telemetry tag used for overload resolution. */ );
 
     ///@}
@@ -910,29 +910,47 @@ inline int psfAcq::recordTelem( const telem_position *telemTag )
 {
     static_cast<void>( telemTag );
 
-    float seeingToRecord = 0;
+    std::vector<float> starTelemetryValues;
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
-        if( m_num_stars <= 0 )
+        if( m_detectedStars.empty() )
         {
             return 0;
         }
 
-        if( m_current_acq_star < 0 || m_current_acq_star >= static_cast<int>( m_detectedStars.size() ) )
+        starTelemetryValues.reserve( m_detectedStars.size() * 5 );
+        for( const auto &star : m_detectedStars )
         {
-            return 0;
-        }
+            if( !std::isfinite( star.x ) || !std::isfinite( star.y ) || !std::isfinite( star.max ) ||
+                !std::isfinite( star.fwhm ) || !std::isfinite( star.seeing ) )
+            {
+                continue;
+            }
 
-        seeingToRecord = m_seeing;
+            // Telemetry packing order per star: x, y, peak, fwhm, seeing.
+            starTelemetryValues.push_back( star.x );
+            starTelemetryValues.push_back( star.y );
+            starTelemetryValues.push_back( star.max );
+            starTelemetryValues.push_back( star.fwhm );
+            starTelemetryValues.push_back( star.seeing );
+        }
     }
 
-    if( !std::isfinite( seeingToRecord ) )
+    if( starTelemetryValues.empty() )
     {
         return 0;
     }
 
-    return telem<telem_position>( seeingToRecord );
+    for( float value : starTelemetryValues )
+    {
+        if( telem<telem_position>( value ) < 0 )
+        {
+            return -1;
+        }
+    }
+
+    return 0;
 }
 
 void psfAcq::removeStar( size_t index )
