@@ -225,6 +225,9 @@ class psfAcq : public MagAOXApp<true>,
     /// True once `m_flipAcqOutWasOn` has been initialized from INDI.
     bool m_flipAcqOutStateValid{ false };
 
+    /// Last successful loop-exit telemetry dump time in seconds.
+    double m_lastLoopExitTelemTime{ 0 };
+
     /// Remove one tracked star and its INDI property/callback registration.
     /** Caller must hold `m_indiMutex`.
      */
@@ -340,7 +343,7 @@ class psfAcq : public MagAOXApp<true>,
      *
      * @{
      */
-    /// Check whether any telemetry streams should be recorded at the current time.
+    /// No-op scheduler hook; loop-exit logic emits telemetry directly.
     int checkRecordTimes();
 
     /// Record telemetry for all properties of each detected star.
@@ -532,8 +535,6 @@ inline int psfAcq::appLogic()
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
-    TELEMETER_APP_LOGIC;
-
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
     shmimMonitorT::updateINDI();
@@ -679,6 +680,7 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
     bool sendNudge = false;
     double nudgeXArcsec = 0;
     double nudgeYArcsec = 0;
+    bool shouldDumpLoopExitTelem = false;
     const int maxTrackedStars = std::max( m_max_loops, 0 );
 
     { //mutex scope
@@ -840,6 +842,14 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
             {
                 m_seeing = 0;
             }
+
+            shouldDumpLoopExitTelem = std::any_of(
+                m_detectedStars.begin(),
+                m_detectedStars.end(),
+                []( const Star &star ) {
+                    return std::isfinite( star.x ) && std::isfinite( star.y ) && std::isfinite( star.max ) &&
+                           std::isfinite( star.fwhm ) && std::isfinite( star.seeing );
+                } );
         }
         else
         {
@@ -849,6 +859,20 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
         }
 
         m_updated = true;
+    }
+
+    if( shouldDumpLoopExitTelem )
+    {
+        double now = mx::sys::get_curr_time();
+        if( now - m_lastLoopExitTelemTime >= 1.0 )
+        {
+            if( recordTelem( nullptr ) < 0 )
+            {
+                return -1;
+            }
+
+            m_lastLoopExitTelemTime = now;
+        }
     }
 
     if( sendNudge )
@@ -909,7 +933,7 @@ inline int psfAcq::processImage( void *curr_src, const darkShmimT &dummy )
 
 inline int psfAcq::checkRecordTimes()
 {
-    return telemeterT::checkRecordTimes( telem_psfacq() );
+    return 0;
 }
 
 inline int psfAcq::recordTelem( const telem_psfacq *telemTag )
