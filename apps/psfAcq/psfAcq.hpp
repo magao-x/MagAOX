@@ -344,7 +344,7 @@ class psfAcq : public MagAOXApp<true>,
     int checkRecordTimes();
 
     /// Record telemetry for all properties of each detected star.
-    int recordTelem( const telem_position *telemTag /**< [in] telemetry tag used for overload resolution. */ );
+    int recordTelem( const telem_psfacq *telemTag /**< [in] telemetry tag used for overload resolution. */ );
 
     ///@}
 };
@@ -909,14 +909,23 @@ inline int psfAcq::processImage( void *curr_src, const darkShmimT &dummy )
 
 inline int psfAcq::checkRecordTimes()
 {
-    return telemeterT::checkRecordTimes( telem_position() );
+    return telemeterT::checkRecordTimes( telem_psfacq() );
 }
 
-inline int psfAcq::recordTelem( const telem_position *telemTag )
+inline int psfAcq::recordTelem( const telem_psfacq *telemTag )
 {
     static_cast<void>( telemTag );
 
-    std::vector<float> starTelemetryValues;
+    struct starTelemSample
+    {
+        float x_pos;
+        float y_pos;
+        float m_pix;
+        float fwhm;
+        float seeing;
+    };
+
+    std::vector<starTelemSample> starTelemetryValues;
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
@@ -925,7 +934,7 @@ inline int psfAcq::recordTelem( const telem_position *telemTag )
             return 0;
         }
 
-        starTelemetryValues.reserve( m_detectedStars.size() * 5 );
+        starTelemetryValues.reserve( m_detectedStars.size() );
         for( const auto &star : m_detectedStars )
         {
             if( !std::isfinite( star.x ) || !std::isfinite( star.y ) || !std::isfinite( star.max ) ||
@@ -934,12 +943,7 @@ inline int psfAcq::recordTelem( const telem_position *telemTag )
                 continue;
             }
 
-            // Telemetry packing order per star: x, y, peak, fwhm, seeing.
-            starTelemetryValues.push_back( star.x );
-            starTelemetryValues.push_back( star.y );
-            starTelemetryValues.push_back( star.max );
-            starTelemetryValues.push_back( star.fwhm );
-            starTelemetryValues.push_back( star.seeing );
+            starTelemetryValues.push_back( { star.x, star.y, star.max, star.fwhm, star.seeing } );
         }
     }
 
@@ -948,9 +952,9 @@ inline int psfAcq::recordTelem( const telem_position *telemTag )
         return 0;
     }
 
-    for( float value : starTelemetryValues )
+    for( const auto &sample : starTelemetryValues )
     {
-        if( telem<telem_position>( value ) < 0 )
+        if( telem<telem_psfacq>( { sample.x_pos, sample.y_pos, sample.m_pix, sample.fwhm, sample.seeing } ) < 0 )
         {
             return -1;
         }
