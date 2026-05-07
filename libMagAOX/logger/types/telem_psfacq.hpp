@@ -32,13 +32,15 @@ struct telem_psfacq : public flatbuffer_log
    struct messageT : public fbMessage
    {
       /// Construct from components
-      messageT( const float &x_pos, /**< [in] x position in pixels. */
-                const float &y_pos, /**< [in] y position in pixels. */
-                const float &m_pix, /**< [in] peak pixel value. */
-                const float &fwhm,  /**< [in] full-width at half-maximum in pixels. */
-                const float &seeing /**< [in] seeing in arcseconds. */ )
+      messageT( const int &star_no,     /**< [in] one-based index of this star within the emitted set. */
+                const int &num_stars,   /**< [in] total stars emitted in this telemetry cycle. */
+                const float &x_pos,     /**< [in] x position in pixels. */
+                const float &y_pos,     /**< [in] y position in pixels. */
+                const float &m_pix,     /**< [in] peak pixel value. */
+                const float &fwhm,      /**< [in] full-width at half-maximum in pixels. */
+                const float &seeing     /**< [in] seeing in arcseconds. */ )
       {
-         auto fp = CreateTelem_psfacq_fb( builder, x_pos, y_pos, m_pix, fwhm, seeing );
+         auto fp = CreateTelem_psfacq_fb( builder, x_pos, y_pos, m_pix, fwhm, seeing, star_no, num_stars );
          builder.Finish( fp );
       }
    };
@@ -61,6 +63,7 @@ struct telem_psfacq : public flatbuffer_log
       auto fbs = GetTelem_psfacq_fb( msgBuffer );
 
       std::string msg = "[psfAcq] ";
+      msg += "star_no: " + std::to_string( fbs->star_no() ) + "/" + std::to_string( fbs->num_stars() ) + " ";
       msg += "x_pos: " + std::to_string( fbs->x_pos() ) + " ";
       msg += "y_pos: " + std::to_string( fbs->y_pos() ) + " ";
       msg += "m_pix: " + std::to_string( fbs->m_pix() ) + " ";
@@ -68,6 +71,20 @@ struct telem_psfacq : public flatbuffer_log
       msg += "seeing: " + std::to_string( fbs->seeing() ) + " ";
 
       return msg;
+   }
+
+   /// Get the one-based star index.
+   static int star_no( void *msgBuffer )
+   {
+      auto fbs = GetTelem_psfacq_fb( msgBuffer );
+      return fbs->star_no();
+   }
+
+   /// Get the total number of stars emitted this cycle.
+   static int num_stars( void *msgBuffer )
+   {
+      auto fbs = GetTelem_psfacq_fb( msgBuffer );
+      return fbs->num_stars();
    }
 
    static float x_pos( void *msgBuffer )
@@ -107,7 +124,15 @@ struct telem_psfacq : public flatbuffer_log
      */
    static logMetaDetail getAccessor( const std::string &member /**< [in] the name of the member */ )
    {
-      if( member == "x_pos" )
+      if( member == "star_no" )
+      {
+         return logMetaDetail( { "STAR NO", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void *>( &star_no ) } );
+      }
+      else if( member == "num_stars" )
+      {
+         return logMetaDetail( { "NUM STARS", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void *>( &num_stars ) } );
+      }
+      else if( member == "x_pos" )
       {
          return logMetaDetail( { "X POS", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void *>( &x_pos ) } );
       }

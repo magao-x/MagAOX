@@ -16,6 +16,12 @@ table Telem_psfacq_fb
 
    /// seeing in arcseconds
    seeing:float;
+
+   /// one-based index of this star within the emitted set
+   star_no:int;
+
+   /// total number of stars emitted in this telemetry cycle
+   num_stars:int;
 }
 
 root_type Telem_psfacq_fb;

@@ -952,9 +952,15 @@ inline int psfAcq::recordTelem( const telem_psfacq *telemTag )
         return 0;
     }
 
-    for( const auto &sample : starTelemetryValues )
+    int numStars = static_cast<int>( starTelemetryValues.size() );
+
+    for( std::size_t index = 0; index < starTelemetryValues.size(); ++index )
     {
-        if( telem<telem_psfacq>( { sample.x_pos, sample.y_pos, sample.m_pix, sample.fwhm, sample.seeing } ) < 0 )
+        const auto &sample = starTelemetryValues[index];
+        int starNo = static_cast<int>( index ) + 1;
+
+        if( telem<telem_psfacq>(
+                { starNo, numStars, sample.x_pos, sample.y_pos, sample.m_pix, sample.fwhm, sample.seeing } ) < 0 )
         {
             return -1;
         }
