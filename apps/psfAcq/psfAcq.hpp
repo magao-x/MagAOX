@@ -228,6 +228,28 @@ class psfAcq : public MagAOXApp<true>,
     /// Last successful loop-exit telemetry dump time in seconds.
     double m_lastLoopExitTelemTime{ 0 };
 
+    /// Snapshot of one star's telemetry fields for deferred emission.
+    struct starTelemSample
+    {
+        /// Star x position in pixels.
+        float x_pos;
+
+        /// Star y position in pixels.
+        float y_pos;
+
+        /// Peak pixel value.
+        float m_pix;
+
+        /// FWHM in pixels.
+        float fwhm;
+
+        /// Seeing estimate in arcseconds.
+        float seeing;
+    };
+
+    /// Emit one telemetry record per star sample.
+    int emitStarTelemetry( const std::vector<starTelemSample> &starTelemetryValues /**< [in] per-star telemetry samples to emit. */ );
+
     /// Remove one tracked star and its INDI property/callback registration.
     /** Caller must hold `m_indiMutex`.
      */
@@ -680,7 +702,7 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
     bool sendNudge = false;
     double nudgeXArcsec = 0;
     double nudgeYArcsec = 0;
-    bool shouldDumpLoopExitTelem = false;
+    std::vector<starTelemSample> loopExitTelemSamples;
     const int maxTrackedStars = std::max( m_max_loops, 0 );
 
     { //mutex scope
@@ -843,13 +865,17 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
                 m_seeing = 0;
             }
 
-            shouldDumpLoopExitTelem = std::any_of(
-                m_detectedStars.begin(),
-                m_detectedStars.end(),
-                []( const Star &star ) {
-                    return std::isfinite( star.x ) && std::isfinite( star.y ) && std::isfinite( star.max ) &&
-                           std::isfinite( star.fwhm ) && std::isfinite( star.seeing );
-                } );
+            loopExitTelemSamples.reserve( m_detectedStars.size() );
+            for( const auto &star : m_detectedStars )
+            {
+                if( !std::isfinite( star.x ) || !std::isfinite( star.y ) || !std::isfinite( star.max ) ||
+                    !std::isfinite( star.fwhm ) || !std::isfinite( star.seeing ) )
+                {
+                    continue;
+                }
+
+                loopExitTelemSamples.push_back( { star.x, star.y, star.max, star.fwhm, star.seeing } );
+            }
         }
         else
         {
@@ -861,12 +887,12 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
         m_updated = true;
     }
 
-    if( shouldDumpLoopExitTelem )
+    if( !loopExitTelemSamples.empty() )
     {
         double now = mx::sys::get_curr_time();
         if( now - m_lastLoopExitTelemTime >= 1.0 )
         {
-            if( recordTelem( nullptr ) < 0 )
+            if( emitStarTelemetry( loopExitTelemSamples ) < 0 )
             {
                 return -1;
             }
@@ -936,18 +962,32 @@ inline int psfAcq::checkRecordTimes()
     return 0;
 }
 
+inline int psfAcq::emitStarTelemetry( const std::vector<starTelemSample> &starTelemetryValues )
+{
+    if( starTelemetryValues.empty() )
+    {
+        return 0;
+    }
+
+    int numStars = static_cast<int>( starTelemetryValues.size() );
+    for( std::size_t index = 0; index < starTelemetryValues.size(); ++index )
+    {
+        const auto &sample = starTelemetryValues[index];
+        int starNo = static_cast<int>( index ) + 1;
+
+        if( telem<telem_psfacq>(
+                { starNo, numStars, sample.x_pos, sample.y_pos, sample.m_pix, sample.fwhm, sample.seeing } ) < 0 )
+        {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 inline int psfAcq::recordTelem( const telem_psfacq *telemTag )
 {
     static_cast<void>( telemTag );
-
-    struct starTelemSample
-    {
-        float x_pos;
-        float y_pos;
-        float m_pix;
-        float fwhm;
-        float seeing;
-    };
 
     std::vector<starTelemSample> starTelemetryValues;
     { //mutex scope
@@ -971,26 +1011,7 @@ inline int psfAcq::recordTelem( const telem_psfacq *telemTag )
         }
     }
 
-    if( starTelemetryValues.empty() )
-    {
-        return 0;
-    }
-
-    int numStars = static_cast<int>( starTelemetryValues.size() );
-
-    for( std::size_t index = 0; index < starTelemetryValues.size(); ++index )
-    {
-        const auto &sample = starTelemetryValues[index];
-        int starNo = static_cast<int>( index ) + 1;
-
-        if( telem<telem_psfacq>(
-                { starNo, numStars, sample.x_pos, sample.y_pos, sample.m_pix, sample.fwhm, sample.seeing } ) < 0 )
-        {
-            return -1;
-        }
-    }
-
-    return 0;
+    return emitStarTelemetry( starTelemetryValues );
 }
 
 void psfAcq::registerStarProperty( Star &star, std::size_t rankIndex )
