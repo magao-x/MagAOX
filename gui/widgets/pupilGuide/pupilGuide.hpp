@@ -2256,7 +2256,7 @@ void pupilGuide::on_button_tip_ul_pressed()
         ip.add( pcf::IndiElement( "y" ) );
         ip["y"] = m_stepSize * 5. / sqrt( 2. );
         ip.add( pcf::IndiElement( "x" ) );
-        ip["x"] = m_stepSize * 5. / sqrt( 2. );
+        ip["x"] = -m_stepSize * 5. / sqrt( 2. );
     }
 
     sendNewProperty( ip );
