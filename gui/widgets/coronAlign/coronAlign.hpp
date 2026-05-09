@@ -1,3 +1,6 @@
+/** \file coronAlign.hpp
+ * \brief Coronagraph alignment control widget for coordinated filter-wheel, pico, and PIAA positioning.
+ */
 #ifndef coronAlign_hpp
 #define coronAlign_hpp
 
@@ -5,10 +8,9 @@
 #include <cmath>
 #include <unistd.h>
 
-#include <QWidget>
 #include <QElapsedTimer>
-#include <QMutex>
 #include <QTimer>
+#include <QWidget>
 
 #include "ui_coronAlign.h"
 
@@ -17,6 +19,7 @@
 namespace xqt
 {
 
+/// Main coronagraph alignment control panel.
 class coronAlign : public xWidget
 {
     Q_OBJECT
@@ -29,9 +32,7 @@ class coronAlign : public xWidget
     };
 
   protected:
-    QMutex m_mutex;
-
-    int m_camera{ CAMSCIS };
+    int m_camera{ CAMSCIS }; ///< Active camera view that determines which motion axes map onto the GUI arrows.
 
     // Pico Motors
     std::string m_picoState;
@@ -151,13 +152,19 @@ class coronAlign : public xWidget
     double m_ipiaa1StepSize{ 20 };
 
   public:
+    /// Construct the coronagraph alignment control widget.
     coronAlign( QWidget *Parent = 0, Qt::WindowFlags f = Qt::WindowFlags() );
 
+    /// Destroy the coronagraph alignment control widget.
     ~coronAlign();
 
+    /// Register the widget and its direct child subscribers with the shared INDI manager.
     void subscribe();
 
+    /// Apply connected-state GUI initialization after the shared INDI layer reconnects.
     virtual void onConnect();
+
+    /// Apply disconnected-state GUI initialization and clear cached connection state.
     virtual void onDisconnect();
 
     void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
@@ -277,7 +284,7 @@ class coronAlign : public xWidget
     /// Clears cached connection-dependent state so timer-driven GUI logic stays disconnected-safe.
     void resetConnectionState();
 
-    Ui::coronAlign ui;
+    Ui::coronAlign ui; ///< Generated Qt UI facade for the coronagraph-alignment widget layout.
 };
 
 coronAlign::coronAlign( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, f )
