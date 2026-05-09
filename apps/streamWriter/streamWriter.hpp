@@ -81,7 +81,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     double m_maxChunkTime{ 10 }; ///< The maximum time before writing regardless of number of frames.
 
     double m_writeStopTimeout{
-        5.0 }; ///< Seconds to wait for the writer thread to finish a queued flush during restart cleanup.
+        1.0 }; ///< Seconds to wait after a stop-writing command before flushing the pending data without a new frame.
 
     std::string m_shmimName; ///< The name of the shared memory buffer.
 
@@ -138,6 +138,12 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
 
     std::atomic<bool> m_writePending{
         false }; ///< Whether the writer thread still owns a queued save window and may touch the circular buffers.
+
+    double m_stopWriteDeadline{ 0.0 }; ///< Absolute time after which a stop-writing request should flush without a
+                                       ///< new frame.
+
+    double m_writeCompletionTimeout{
+        5.0 }; ///< Seconds to wait for the writer thread to finish a queued flush during restart cleanup.
 
     uint64_t m_currChunkStart{ 0 }; ///< The circular buffer starting position of the current to-be-written chunk.
     uint64_t m_nextChunkStart{ 0 }; ///< The circular buffer starting position of the next to-be-written chunk.
@@ -428,8 +434,8 @@ void streamWriter::setupConfig()
                 "stopTimeout",
                 false,
                 "float",
-                "The max time in seconds to wait for the writer thread to finish a queued flush during restart "
-                "cleanup before treating it as hung." );
+                "The max time in seconds to wait after a stop-writing command for the next frame before flushing the "
+                "pending data and returning to the idle state." );
 
     config.add( "writer.threadPrio",
                 "",
@@ -552,6 +558,10 @@ void streamWriter::loadConfig()
     config( m_maxWriteChunkLength, "writer.maxWriteChunkLength" );
     config( m_maxChunkTime, "writer.maxChunkTime" );
     config( m_writeStopTimeout, "writer.stopTimeout" );
+    if( m_writeStopTimeout < 0 )
+    {
+        m_writeStopTimeout = 0;
+    }
     config( m_swThreadPrio, "writer.threadPrio" );
     config( m_swCpuset, "writer.cpuset" );
     config( m_compress, "writer.compress" );
@@ -851,8 +861,9 @@ int streamWriter::appLogic()
 
 int streamWriter::appShutdown()
 {
-    m_writing      = NOT_WRITING;
-    m_writePending = false;
+    m_writing           = NOT_WRITING;
+    m_writePending      = false;
+    m_stopWriteDeadline = 0;
     updateINDI();
 
     try
@@ -1211,7 +1222,7 @@ void streamWriter::release_circbufs()
 
 bool streamWriter::waitForWriteCompletion( uint64_t saveStopFrameNo )
 {
-    const auto timeout  = std::chrono::duration<double>( m_writeStopTimeout );
+    const auto timeout  = std::chrono::duration<double>( m_writeCompletionTimeout );
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     auto       nextLog  = std::chrono::steady_clock::now();
 
@@ -1223,7 +1234,7 @@ bool streamWriter::waitForWriteCompletion( uint64_t saveStopFrameNo )
         {
             log<software_critical>( { __FILE__,
                                       __LINE__,
-                                      "timed out waiting " + std::to_string( m_writeStopTimeout ) +
+                                      "timed out waiting " + std::to_string( m_writeCompletionTimeout ) +
                                           " sec for the writer thread to finish frame " +
                                           std::to_string( saveStopFrameNo ) } );
             return false;
@@ -1577,7 +1588,8 @@ void streamWriter::fgThreadExec()
 
                 if( m_shutdown && m_writing == WRITING )
                 {
-                    m_writing = STOP_WRITING;
+                    m_writing           = STOP_WRITING;
+                    m_stopWriteDeadline = 0;
                 }
 
                 switch( m_writing )
@@ -1675,7 +1687,8 @@ void streamWriter::fgThreadExec()
                     // clang-format on
 
                     // Now tell the writer to get going
-                    m_writePending = true;
+                    m_writePending      = true;
+                    m_stopWriteDeadline = 0;
                     if( sem_post( &m_swSemaphore ) < 0 )
                     {
                         m_writePending = false;
@@ -1732,24 +1745,29 @@ void streamWriter::fgThreadExec()
                     }
                     break;
                 case STOP_WRITING:
-                    // If we timed-out while STOP_WRITING is set, we trigger a write.
-                    m_currSaveStart       = m_currChunkStart;
-                    m_currSaveStop        = m_currImage;
-                    m_currSaveStopFrameNo = last_cnt0;
+                    if( mx::sys::get_curr_time() >= m_stopWriteDeadline )
+                    {
+                        // If the stop timer expires before the next frame arrives, flush the current chunk and
+                        // settle back to the idle state exactly as we would on the next frame.
+                        m_currSaveStart       = m_currChunkStart;
+                        m_currSaveStop        = m_currImage;
+                        m_currSaveStopFrameNo = last_cnt0;
 
 #ifdef SW_DEBUG
-                    std::cerr << __FILE__ << " " << __LINE__ << " TIMEOUT STOP_WRITING\n";
+                        std::cerr << __FILE__ << " " << __LINE__ << " TIMEOUT STOP_WRITING\n";
 #endif
 
-                    // Now tell the writer to get going
-                    m_writePending = true;
-                    if( sem_post( &m_swSemaphore ) < 0 )
-                    {
-                        m_writePending = false;
-                        log<software_critical>( { __FILE__, __LINE__, errno, 0, "Error posting to semaphore" } );
-                        return;
+                        // Now tell the writer to get going
+                        m_writePending      = true;
+                        m_stopWriteDeadline = 0;
+                        if( sem_post( &m_swSemaphore ) < 0 )
+                        {
+                            m_writePending = false;
+                            log<software_critical>( { __FILE__, __LINE__, errno, 0, "Error posting to semaphore" } );
+                            return;
+                        }
+                        restartWriting = false;
                     }
-                    restartWriting = false;
                     break;
                 default:
                     break;
@@ -1814,7 +1832,8 @@ void streamWriter::fgThreadExec()
                 m_currSaveStop        = m_currImage;
                 m_currSaveStopFrameNo = last_cnt0;
 
-                m_writing = STOP_WRITING;
+                m_writing           = STOP_WRITING;
+                m_stopWriteDeadline = 0;
 
                 std::cerr << __FILE__ << " " << __LINE__ << " WRITING ON RESTART " << last_cnt0 << "\n";
                 // Now tell the writer to get going
@@ -1979,7 +1998,8 @@ int streamWriter::doEncode()
 
         if( m_writing == STOP_WRITING )
         {
-            m_writing = NOT_WRITING;
+            m_writing           = NOT_WRITING;
+            m_stopWriteDeadline = 0;
             log<saving_stop>( { 0, saveStopFrameNo } );
         }
 
@@ -2158,7 +2178,8 @@ int streamWriter::doEncode()
 
     if( m_writing == STOP_WRITING )
     {
-        m_writing = NOT_WRITING;
+        m_writing           = NOT_WRITING;
+        m_stopWriteDeadline = 0;
         log<saving_stop>( { 0, saveStopFrameNo } );
     }
 
@@ -2182,12 +2203,14 @@ INDI_NEWCALLBACK_DEFN( streamWriter, m_indiP_writing )
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off &&
         ( m_writing == WRITING || m_writing == START_WRITING ) )
     {
-        m_writing = STOP_WRITING;
+        m_writing           = STOP_WRITING;
+        m_stopWriteDeadline = mx::sys::get_curr_time() + m_writeStopTimeout;
     }
 
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_writing == NOT_WRITING )
     {
-        m_writing = START_WRITING;
+        m_writing           = START_WRITING;
+        m_stopWriteDeadline = 0;
     }
 
     return 0;

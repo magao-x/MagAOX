@@ -73,7 +73,7 @@ struct streamWriterConfig
     double                     m_maxCircBuffSize{ 16.0 };                 ///< Configured circular-buffer size in MB.
     size_t                     m_maxWriteChunkLength{ 4 };                ///< Configured write-chunk length.
     double                     m_maxChunkTime{ 0.5 };                     ///< Configured max chunk time in seconds.
-    double                     m_writeStopTimeout{ 5.0 };                 ///< Configured restart-cleanup wait timeout.
+    double                     m_writeStopTimeout{ 1.0 };                 ///< Configured stop-writing flush timeout.
     int                        m_writerThreadPrio{ 0 };                   ///< Configured writer thread priority.
     std::string                m_writerCpuset;                            ///< Optional writer cpuset.
     bool                       m_compress{ true };                        ///< Whether XRIF compression is enabled.
@@ -592,7 +592,7 @@ TEST_CASE( "streamWriter configuration loads defaults and overrides", "[streamWr
         REQUIRE( app.m_maxCircBuffSize == Approx( 16.0 ) );
         REQUIRE( app.m_maxWriteChunkLength == 4 );
         REQUIRE( app.m_maxChunkTime == Approx( 0.5 ) );
-        REQUIRE( app.m_writeStopTimeout == Approx( 5.0 ) );
+        REQUIRE( app.m_writeStopTimeout == Approx( 1.0 ) );
         REQUIRE( app.m_shmimName == "streamWriter_test_stream" );
         REQUIRE( app.m_outName == app.m_shmimName );
         REQUIRE( app.m_rawimageDir == ( root / expectedRawRel ).string() );
@@ -895,6 +895,7 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         cfg.m_maxCircBuffLength   = 8;
         cfg.m_maxWriteChunkLength = 2;
         cfg.m_maxChunkTime        = 0.2;
+        cfg.m_writeStopTimeout    = 0.05;
         cfg.m_semWaitNSec         = 1000000;
         cfg.m_savePath =
             ( std::filesystem::path( "/tmp/streamWriter_lifecycle_test" ) / "fg_writing" / "raw" ).string();
@@ -931,7 +932,8 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         REQUIRE( waitFor( [&app]() { return app.m_currImage == 3; } ) );
         REQUIRE( app.m_writing == WRITING );
 
-        app.m_writing = STOP_WRITING;
+        app.m_writing           = STOP_WRITING;
+        app.m_stopWriteDeadline = mx::sys::get_curr_time() + cfg.m_writeStopTimeout;
         source.publishFrame( 3, 4, 40, offsetTimespec( stopAtime, 1000000 ), offsetTimespec( stopWtime, 1000000 ) );
         REQUIRE( waitFor( [&app]() { return app.writerSemaphoreValue() > 0; } ) );
         REQUIRE( app.m_currSaveStart == 2 );
@@ -946,7 +948,10 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         REQUIRE( waitFor( [&app]() { return app.m_currImage == 5; } ) );
         REQUIRE( app.m_writing == WRITING );
 
-        app.m_writing = STOP_WRITING;
+        app.m_writing           = STOP_WRITING;
+        app.m_stopWriteDeadline = mx::sys::get_curr_time() + cfg.m_writeStopTimeout;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+        REQUIRE( app.writerSemaphoreValue() == 0 );
         REQUIRE( waitFor( [&app]() { return app.writerSemaphoreValue() > 0; } ) );
         REQUIRE( app.m_currSaveStart == 4 );
         REQUIRE( app.m_currSaveStop == 5 );
@@ -1111,6 +1116,7 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         loadConfig( app, "fg_cube_restart_timeout", cfg );
         REQUIRE( app.initializeFgHarness() == 0 );
         fgScope.markActive( true );
+        app.m_writeCompletionTimeout = 0.1;
 
         app.startFgHarnessThread();
 
