@@ -1661,7 +1661,8 @@ void mcp3208Ctrl::delayBeforeRead()
 {
     if( m_delayApplied_ns > 0.0 )
     {
-        mx::sys::nanoSleep( static_cast<unsigned>( m_delayApplied_ns ) );
+        // Delay intentionally disabled to isolate skipped-frame and acc-local timestamp-drift behavior.
+        // mx::sys::nanoSleep( static_cast<unsigned>( m_delayApplied_ns ) );
         return;
     }
 }
