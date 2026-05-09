@@ -261,9 +261,9 @@ inline void multiIndiManager::connectClient()
             for( auto *sub : subs )
             {
                 _dispatchOnDisconnect( sub );
-                pub->unsubscribe( sub );
             }
 
+            pub->detachAllSubscribers();
             delete pub;
         }
 
@@ -337,9 +337,9 @@ inline void multiIndiManager::connectClient()
         for( auto *sub : subs )
         {
             _dispatchOnDisconnect( sub );
-            pub->unsubscribe( sub );
         }
 
+        pub->detachAllSubscribers();
         delete pub;
     }
 }

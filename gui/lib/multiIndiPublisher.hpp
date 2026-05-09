@@ -143,6 +143,9 @@ class multiIndiPublisher : public pcf::IndiClient, public multiIndiSubscriber
 
     /// Sends a getProperties request.
     virtual void sendGetProperties( const pcf::IndiProperty &ipSend /**< [in] Property query request. */ );
+
+    /// Detaches the full subscriber tree from this publisher during teardown.
+    void detachAllSubscribers();
 };
 
 inline multiIndiPublisher::multiIndiPublisher( const std::string &clientName,
@@ -160,8 +163,19 @@ inline multiIndiPublisher::~multiIndiPublisher() noexcept
 
 inline int multiIndiPublisher::addSubscriber( multiIndiSubscriber *sub )
 {
-    std::lock_guard<std::recursive_mutex> lock( m_subMutex );
-    return multiIndiSubscriber::addSubscriber( sub );
+    { // mutex scope
+        std::lock_guard<std::recursive_mutex> lock( m_subMutex );
+        registerSubscriber( sub );
+    }
+
+    if( auto *obj = dynamic_cast<QObject *>( sub ) )
+    {
+        QTimer::singleShot( 0, obj, [sub]() { sub->subscribe(); } );
+        return 0;
+    }
+
+    sub->subscribe();
+    return 0;
 }
 
 inline void multiIndiPublisher::unsubscribe( multiIndiSubscriber *sub )
@@ -295,6 +309,12 @@ inline void multiIndiPublisher::sendNewProperty( const pcf::IndiProperty &ipSend
 inline void multiIndiPublisher::sendGetProperties( const pcf::IndiProperty &ipSend )
 {
     pcf::IndiClient::sendGetProperties( ipSend );
+}
+
+inline void multiIndiPublisher::detachAllSubscribers()
+{
+    std::lock_guard<std::recursive_mutex> lock( m_subMutex );
+    detachSubscribersRecursive();
 }
 
 #endif // multiIndiPublisher_hpp

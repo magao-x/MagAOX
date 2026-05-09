@@ -8,6 +8,7 @@
 #include <iostream>
 #include <set>
 #include <unordered_map>
+#include <vector>
 
 #include "../../INDI/libcommon/IndiProperty.hpp"
 
@@ -38,6 +39,12 @@ class multiIndiSubscriber
     subSetT subscribers; ///< Child subscribers registered under this instance.
 
     std::atomic_bool m_disconnect{ false }; ///< One-shot disconnect flag consumed by disconnect().
+
+    /// Registers a child subscriber under this parent without invoking `subscribe()`.
+    void registerSubscriber( multiIndiSubscriber *sub /**< [in] Subscriber being attached to this parent. */ );
+
+    /// Clears parent pointers and subscription maps throughout this descendant tree.
+    void detachSubscribersRecursive();
 
   public:
     /// Constructs an unbound subscriber.
@@ -132,10 +139,15 @@ inline void multiIndiSubscriber::subscribe()
 {
 }
 
-inline int multiIndiSubscriber::addSubscriber( multiIndiSubscriber *sub )
+inline void multiIndiSubscriber::registerSubscriber( multiIndiSubscriber *sub )
 {
     subscribers.insert( sub );
     sub->m_parent = this;
+}
+
+inline int multiIndiSubscriber::addSubscriber( multiIndiSubscriber *sub )
+{
+    registerSubscriber( sub );
     sub->subscribe();
     return 0;
 }
@@ -144,8 +156,7 @@ inline int multiIndiSubscriber::addSubscriberProperty( multiIndiSubscriber *sub,
 {
     subscribedProperties.insert( std::pair<std::string, multiIndiSubscriber *>( ipSub.createUniqueKey(), sub ) );
 
-    subscribers.insert( sub );
-    sub->m_parent = this;
+    registerSubscriber( sub );
 
     return 0;
 }
@@ -241,6 +252,26 @@ inline void multiIndiSubscriber::onDisconnect()
 inline void multiIndiSubscriber::setDisconnect()
 {
     m_disconnect.store( true, std::memory_order_relaxed );
+}
+
+inline void multiIndiSubscriber::detachSubscribersRecursive()
+{
+    std::vector<multiIndiSubscriber *> childSubs;
+    childSubs.reserve( subscribers.size() );
+
+    for( auto it = subscribers.begin(); it != subscribers.end(); ++it )
+    {
+        childSubs.push_back( *it );
+    }
+
+    for( auto *sub : childSubs )
+    {
+        sub->detachSubscribersRecursive();
+        sub->m_parent = nullptr;
+    }
+
+    subscribedProperties.clear();
+    subscribers.clear();
 }
 
 inline bool multiIndiSubscriber::disconnect()
