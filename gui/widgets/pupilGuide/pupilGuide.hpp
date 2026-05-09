@@ -1,3 +1,6 @@
+/** \file pupilGuide.hpp
+ * \brief Alignment and pupil-guiding control widget for the MagAO-X GUI suite.
+ */
 #ifndef pupilGuide_hpp
 #define pupilGuide_hpp
 
@@ -5,13 +8,11 @@
 #include <cmath>
 #include <unistd.h>
 
-#include <QWidget>
-#include <QMutex>
 #include <QTimer>
+#include <QWidget>
 
 #include "ui_pupilGuide.h"
 
-#include "../xWidgets/xWidget.hpp"
 #include "../xWidgets/statusEntry.hpp"
 #include "../xWidgets/xWidget.hpp"
 
@@ -26,6 +27,7 @@
 namespace xqt
 {
 
+/// Convert requested x/y offsets into woofer tip/tilt coordinates.
 void wooferTipTilt( double &tip, double &tilt, double x, double y )
 {
     double rot   = ( 180. + 29.0 ) * 3.14159 / 180.;
@@ -35,6 +37,7 @@ void wooferTipTilt( double &tip, double &tilt, double x, double y )
     tilt = scale * ( x * sin( rot ) + y * cos( rot ) );
 }
 
+/// Main pupil-guiding and alignment control panel.
 class pupilGuide : public xWidget
 {
     Q_OBJECT
@@ -47,9 +50,7 @@ class pupilGuide : public xWidget
     };
 
   protected:
-    std::string m_appState;
-
-    QMutex m_mutex;
+    std::string m_appState; ///< Cached top-level application state text when provided by INDI.
 
     // --- modttm
     std::string m_modFsmState;
@@ -188,13 +189,19 @@ class pupilGuide : public xWidget
     bool        m_twAlignSensorState{ false };
 
   public:
+    /// Construct the pupil-guide control widget.
     pupilGuide( QWidget *Parent = 0, Qt::WindowFlags f = Qt::WindowFlags() );
 
+    /// Destroy the pupil-guide control widget.
     ~pupilGuide();
 
+    /// Register the widget and its child subscribers with the shared INDI manager.
     void subscribe();
 
+    /// Apply connected-state GUI initialization after the shared INDI layer reconnects.
     virtual void onConnect();
+
+    /// Apply disconnected-state GUI initialization and clear cached connection state.
     virtual void onDisconnect();
 
     void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
@@ -304,7 +311,7 @@ class pupilGuide : public xWidget
     /// Resets cached connection-dependent state so timer-driven GUI updates stay disconnected-safe.
     void resetConnectionState();
 
-    Ui::pupilGuide ui;
+    Ui::pupilGuide ui; ///< Generated Qt UI facade for the pupil-guide widget layout.
 };
 
 pupilGuide::pupilGuide( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, f )
