@@ -24,6 +24,8 @@
 #define MULTI_INDI_PROTO_VERSION "1.7"
 
 /// Dispatches a defProperty callback, queued through Qt for QObject subscribers.
+/** Copies the received property so queued delivery does not reference connection-thread storage.
+ */
 inline void _dispatchDefProperty( multiIndiSubscriber *sub, const pcf::IndiProperty &ipRecv )
 {
     if( auto *obj = dynamic_cast<QObject *>( sub ) )
@@ -37,6 +39,8 @@ inline void _dispatchDefProperty( multiIndiSubscriber *sub, const pcf::IndiPrope
 }
 
 /// Dispatches a delProperty callback, queued through Qt for QObject subscribers.
+/** Copies the received property so queued delivery does not reference connection-thread storage.
+ */
 inline void _dispatchDelProperty( multiIndiSubscriber *sub, const pcf::IndiProperty &ipRecv )
 {
     if( auto *obj = dynamic_cast<QObject *>( sub ) )
@@ -50,6 +54,8 @@ inline void _dispatchDelProperty( multiIndiSubscriber *sub, const pcf::IndiPrope
 }
 
 /// Dispatches a setProperty callback, queued through Qt for QObject subscribers.
+/** Copies the received property so queued delivery does not reference connection-thread storage.
+ */
 inline void _dispatchSetProperty( multiIndiSubscriber *sub, const pcf::IndiProperty &ipRecv )
 {
     if( auto *obj = dynamic_cast<QObject *>( sub ) )
@@ -97,6 +103,8 @@ class multiIndiPublisher : public pcf::IndiClient, public multiIndiSubscriber
     ~multiIndiPublisher() noexcept;
 
     /// Adds a subscriber to receive publisher events.
+    /** QObject subscribers queue `subscribe()` onto their own Qt thread.
+     */
     virtual int addSubscriber( multiIndiSubscriber *sub /**< [in] Subscriber to add. */ );
 
     /// Unsubscribes a subscriber from all events.
@@ -145,6 +153,8 @@ class multiIndiPublisher : public pcf::IndiClient, public multiIndiSubscriber
     virtual void sendGetProperties( const pcf::IndiProperty &ipSend /**< [in] Property query request. */ );
 
     /// Detaches the full subscriber tree from this publisher during teardown.
+    /** Clears descendant back-pointers before the publisher object is destroyed.
+     */
     void detachAllSubscribers();
 };
 

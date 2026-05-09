@@ -44,6 +44,8 @@ class multiIndiSubscriber
     void registerSubscriber( multiIndiSubscriber *sub /**< [in] Subscriber being attached to this parent. */ );
 
     /// Clears parent pointers and subscription maps throughout this descendant tree.
+    /** Used during publisher teardown to invalidate descendant back-pointers before the publisher is deleted.
+     */
     void detachSubscribersRecursive();
 
   public:
