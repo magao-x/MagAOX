@@ -83,6 +83,8 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     double m_writeStopTimeout{
         1.0 }; ///< Seconds to wait after a stop-writing command before flushing the pending data without a new frame.
 
+    bool m_startWriting{ false }; ///< Whether writing should be armed automatically at application startup.
+
     std::string m_shmimName; ///< The name of the shared memory buffer.
 
     std::string m_outName; ///< The name to use for outputting files,  Default is m_shmimName.
@@ -437,6 +439,16 @@ void streamWriter::setupConfig()
                 "The max time in seconds to wait after a stop-writing command for the next frame before flushing the "
                 "pending data and returning to the idle state." );
 
+    config.add( "writer.startWriting",
+                "",
+                "writer.startWriting",
+                argType::Required,
+                "writer",
+                "startWriting",
+                false,
+                "bool",
+                "Flag controlling whether writing is armed automatically at application startup. Default is false." );
+
     config.add( "writer.threadPrio",
                 "",
                 "writer.threadPrio",
@@ -562,6 +574,7 @@ void streamWriter::loadConfig()
     {
         m_writeStopTimeout = 0;
     }
+    config( m_startWriting, "writer.startWriting" );
     config( m_swThreadPrio, "writer.threadPrio" );
     config( m_swCpuset, "writer.cpuset" );
     config( m_compress, "writer.compress" );
@@ -716,6 +729,11 @@ int streamWriter::appStartup()
     if( initialize_xrif() < 0 )
     {
         log<software_critical, -1>( { __FILE__, __LINE__ } );
+    }
+
+    if( m_startWriting )
+    {
+        m_writing = START_WRITING;
     }
 
     if( threadStart( m_fgThread,
@@ -2219,9 +2237,9 @@ INDI_NEWCALLBACK_DEFN( streamWriter, m_indiP_writing )
 void streamWriter::updateINDI()
 {
     // Only update this if not changing
-    if( m_writing == NOT_WRITING || m_writing == WRITING )
+    if( m_writing == NOT_WRITING || m_writing == WRITING || m_writing == START_WRITING )
     {
-        if( m_xrif && m_writing == WRITING )
+        if( m_xrif && ( m_writing == WRITING || m_writing == START_WRITING ) )
         {
             indi::updateSwitchIfChanged( m_indiP_writing, "toggle", pcf::IndiElement::On, m_indiDriver, INDI_OK );
             indi::updateIfChanged( m_indiP_xrifStats, "ratio", m_xrif->compression_ratio, m_indiDriver, INDI_BUSY );

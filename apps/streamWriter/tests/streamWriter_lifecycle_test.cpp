@@ -69,17 +69,18 @@ std::string ensureMilkShmDir()
 /// Configuration values used to build a deterministic streamWriter test config.
 struct streamWriterConfig
 {
-    size_t                     m_maxCircBuffLength{ 8 };                  ///< Configured circular-buffer length.
-    double                     m_maxCircBuffSize{ 16.0 };                 ///< Configured circular-buffer size in MB.
-    size_t                     m_maxWriteChunkLength{ 4 };                ///< Configured write-chunk length.
-    double                     m_maxChunkTime{ 0.5 };                     ///< Configured max chunk time in seconds.
-    double                     m_writeStopTimeout{ 1.0 };                 ///< Configured stop-writing flush timeout.
-    int                        m_writerThreadPrio{ 0 };                   ///< Configured writer thread priority.
-    std::string                m_writerCpuset;                            ///< Optional writer cpuset.
-    bool                       m_compress{ true };                        ///< Whether XRIF compression is enabled.
-    int                        m_lz4accel{ XRIF_LZ4_ACCEL_MIN };          ///< Configured LZ4 acceleration.
-    std::optional<std::string> m_outName;                                 ///< Optional explicit output name.
-    std::optional<std::string> m_savePath;                                ///< Optional explicit save directory.
+    size_t                     m_maxCircBuffLength{ 8 };         ///< Configured circular-buffer length.
+    double                     m_maxCircBuffSize{ 16.0 };        ///< Configured circular-buffer size in MB.
+    size_t                     m_maxWriteChunkLength{ 4 };       ///< Configured write-chunk length.
+    double                     m_maxChunkTime{ 0.5 };            ///< Configured max chunk time in seconds.
+    double                     m_writeStopTimeout{ 1.0 };        ///< Configured stop-writing flush timeout.
+    bool                       m_startWriting{ false };          ///< Whether writing should start armed at startup.
+    int                        m_writerThreadPrio{ 0 };          ///< Configured writer thread priority.
+    std::string                m_writerCpuset;                   ///< Optional writer cpuset.
+    bool                       m_compress{ true };               ///< Whether XRIF compression is enabled.
+    int                        m_lz4accel{ XRIF_LZ4_ACCEL_MIN }; ///< Configured LZ4 acceleration.
+    std::optional<std::string> m_outName;                        ///< Optional explicit output name.
+    std::optional<std::string> m_savePath;                       ///< Optional explicit save directory.
     std::string                m_shmimName{ "streamWriter_test_stream" }; ///< Shared-memory stream name.
     int                        m_semaphoreNumber{ 5 };                    ///< Shared-memory semaphore index.
     unsigned                   m_semWaitNSec{ 1000000 };                  ///< Semaphore timeout in nanoseconds.
@@ -399,6 +400,7 @@ std::filesystem::path loadConfig( streamWriterLifecycleTest &app,
                                        "writer",
                                        "writer",
                                        "writer",
+                                       "writer",
                                        "framegrabber",
                                        "framegrabber",
                                        "framegrabber",
@@ -411,6 +413,7 @@ std::filesystem::path loadConfig( streamWriterLifecycleTest &app,
                                    "maxWriteChunkLength",
                                    "maxChunkTime",
                                    "stopTimeout",
+                                   "startWriting",
                                    "threadPrio",
                                    "compress",
                                    "lz4accel",
@@ -426,6 +429,7 @@ std::filesystem::path loadConfig( streamWriterLifecycleTest &app,
                                      std::to_string( cfg.m_maxWriteChunkLength ),
                                      std::to_string( cfg.m_maxChunkTime ),
                                      std::to_string( cfg.m_writeStopTimeout ),
+                                     cfg.m_startWriting ? "1" : "0",
                                      std::to_string( cfg.m_writerThreadPrio ),
                                      cfg.m_compress ? "1" : "0",
                                      std::to_string( cfg.m_lz4accel ),
@@ -593,6 +597,7 @@ TEST_CASE( "streamWriter configuration loads defaults and overrides", "[streamWr
         REQUIRE( app.m_maxWriteChunkLength == 4 );
         REQUIRE( app.m_maxChunkTime == Approx( 0.5 ) );
         REQUIRE( app.m_writeStopTimeout == Approx( 1.0 ) );
+        REQUIRE( app.m_startWriting == false );
         REQUIRE( app.m_shmimName == "streamWriter_test_stream" );
         REQUIRE( app.m_outName == app.m_shmimName );
         REQUIRE( app.m_rawimageDir == ( root / expectedRawRel ).string() );
@@ -614,6 +619,7 @@ TEST_CASE( "streamWriter configuration loads defaults and overrides", "[streamWr
         cfg.m_savePath = ( std::filesystem::path( "/tmp/streamWriter_lifecycle_test_override" ) / "science" ).string();
         cfg.m_compress = false;
         cfg.m_lz4accel = XRIF_LZ4_ACCEL_MAX + 17;
+        cfg.m_startWriting           = true;
         cfg.m_writeStopTimeout       = 0.25;
         cfg.m_writerThreadPrio       = 3;
         cfg.m_framegrabberThreadPrio = 2;
@@ -624,6 +630,7 @@ TEST_CASE( "streamWriter configuration loads defaults and overrides", "[streamWr
         REQUIRE( app.m_rawimageDir == *cfg.m_savePath );
         REQUIRE( app.m_compress == false );
         REQUIRE( app.m_lz4accel == XRIF_LZ4_ACCEL_MAX );
+        REQUIRE( app.m_startWriting == true );
         REQUIRE( app.m_writeStopTimeout == Approx( 0.25 ) );
         REQUIRE( app.m_swThreadPrio == 3 );
         REQUIRE( app.m_fgThreadPrio == 2 );
@@ -708,6 +715,28 @@ TEST_CASE( "streamWriter lifecycle handles startup validation and nominal shutdo
         REQUIRE( app.m_fgThread.joinable() == false );
         REQUIRE( app.m_swThread.joinable() == false );
         REQUIRE( app.m_writing == NOT_WRITING );
+    }
+
+    SECTION( "appStartup arms writing immediately when configured to start writing" )
+    {
+        streamWriterLifecycleTest app;
+        startupScope              startup( app );
+        streamWriterConfig        cfg;
+
+        cfg.m_startWriting = true;
+        cfg.m_savePath =
+            ( std::filesystem::path( "/tmp/streamWriter_lifecycle_test" ) / "startup_start_writing" / "raw" ).string();
+
+        loadConfig( app, "startup_start_writing", cfg );
+
+        const int startupRv = app.appStartup();
+        startup.markStarted( startupRv == 0 );
+
+        REQUIRE( startupRv == 0 );
+        REQUIRE( app.m_writing == START_WRITING );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::OPERATING );
     }
 }
 
