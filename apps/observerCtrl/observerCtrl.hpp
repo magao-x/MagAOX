@@ -48,14 +48,32 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
     typedef std::chrono::time_point<std::chrono::steady_clock> timePointT;
     typedef std::string                                        timeStampT;
     typedef std::chrono::duration<double>                      durationT;
-    std::string timeStampAsISO8601( const std::chrono::time_point<std::chrono::system_clock> &tp );
+
+    /// Format a system-clock time point as an ISO 8601 UTC timestamp.
+    std::string timeStampAsISO8601(
+        const std::chrono::time_point<std::chrono::system_clock> &tp /**< [in] the time point to format */ );
 
   protected:
     /** \name Configurable Parameters
      *@{
      */
 
-    std::vector<std::string> m_streamWriters; ///< The stream writers to stop and start
+    std::vector<std::string> m_streamWriters; ///< The configured stream writers available for observation control.
+
+    /// Tracks the remote `writing` properties for configured stream writers.
+    std::map<std::string, pcf::IndiProperty> m_indiP_streamWriterWriting;
+
+    /// Reverse lookup from remote stream writer device name to configured writer name.
+    std::map<std::string, std::string> m_streamWriterDevices;
+
+    /// Tracks the last known remote writing state for each configured stream writer.
+    std::map<std::string, bool> m_streamWriterWriting;
+
+    /// Tracks whether a remote writing state has been received for each configured stream writer.
+    std::map<std::string, bool> m_streamWriterWritingKnown;
+
+    /// Tracks whether observerCtrl started each stream writer for the current observation.
+    std::map<std::string, bool> m_streamWriterStartedByObserver;
 
     std::string m_tcsDev{ "tcsi" };
     std::string m_catalogProp{ "catalog" };
@@ -97,12 +115,12 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
 
     bool m_observing{ false }; ///< Flag indicating whether or not we are in an observation
 
-    std::string m_target;
+    std::string m_target; ///< The current target name shown to the observer.
 
-    std::string m_catObj;
+    std::string m_catObj; ///< The latest catalog object name reported by the TCS.
 
-    std::string m_catRA;
-    std::string m_catDec;
+    std::string m_catRA;  ///< The latest catalog right ascension reported by the TCS.
+    std::string m_catDec; ///< The latest catalog declination reported by the TCS.
 
     bool m_loop{ false }; ///< Flag tracking loop state.  true is loop closed.
 
@@ -132,8 +150,28 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
     /// The parallactic angle at the start of observing the current target
     double m_tgtStartParang{ 0 };
 
-    /// The current parallactic angle
-    double m_parang;
+    /// The current parallactic angle.
+    double m_parang{ 0 };
+
+    /// Return the INDI device name used for a configured stream writer.
+    std::string
+    streamWriterDeviceName( const std::string &writerName /**< [in] the configured stream writer name */ ) const;
+
+    /// Return whether a stream writer is selected for observation control.
+    bool streamWriterSelected( const std::string &writerName /**< [in] the configured stream writer name */ ) const;
+
+    /// Register one configured stream writer for remote writing-state tracking.
+    int registerStreamWriter( const std::string &writerName /**< [in] the configured stream writer name */ );
+
+    /// Determine whether observerCtrl should start a stream writer for a new observation.
+    bool beginObservationStreamWriter( const std::string &writerName /**< [in] the configured stream writer name */ );
+
+    /// Determine whether observerCtrl should stop a stream writer when an observation ends.
+    bool endObservationStreamWriter( const std::string &writerName /**< [in] the configured stream writer name */ );
+
+    /// Send a writing toggle command to a configured stream writer.
+    int commandStreamWriter( const std::string &writerName /**< [in] the configured stream writer name */,
+                             pcf::IndiElement::SwitchStateType state /**< [in] the requested writing switch state */ );
 
     /// The current target time.  Only updated while observing.
     durationT m_tgtTime;
@@ -150,6 +188,7 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
     {
     }
 
+    /// Set up the observerCtrl configuration parameters.
     virtual void setupConfig();
 
     /// Implementation of loadConfig logic, separated for testing.
@@ -159,6 +198,7 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
                                                                     from which to load values*/
     );
 
+    /// Load the observerCtrl configuration.
     virtual void loadConfig();
 
     /// Startup function
@@ -180,8 +220,10 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
      */
     virtual int appShutdown();
 
+    /// Start the current observation and any stream writers owned by observerCtrl.
     void startObserving();
 
+    /// Stop the current observation and any stream writers owned by observerCtrl.
     void stopObserving();
 
     ///\name INDI
@@ -247,6 +289,15 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
 
     INDI_SETCALLBACK_DECL( observerCtrl, m_indiP_loop );
 
+    /// Handle remote stream writer `writing` property updates.
+    int
+    setCallBack_streamWriterWriting( const pcf::IndiProperty &ipRecv /**< [in] the remote writing property update */ );
+
+    /// Static wrapper for remote stream writer `writing` property updates.
+    static int st_setCallBack_streamWriterWriting(
+        void                    *app /**< [in] the application instance */,
+        const pcf::IndiProperty &ipRecv /**< [in] the remote writing property update */ );
+
     ///@}
 
     /** \name Telemeter Interface
@@ -262,9 +313,83 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
     ///@}
 };
 
+inline int observerCtrl::st_setCallBack_streamWriterWriting( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<observerCtrl *>( app )->setCallBack_streamWriterWriting( ipRecv );
+}
+
 observerCtrl::observerCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     return;
+}
+
+inline std::string observerCtrl::streamWriterDeviceName( const std::string &writerName ) const
+{
+    return writerName + "-sw";
+}
+
+inline bool observerCtrl::streamWriterSelected( const std::string &writerName ) const
+{
+    return m_indiP_sws.find( writerName ) && m_indiP_sws[writerName].getSwitchState() == pcf::IndiElement::On;
+}
+
+inline int observerCtrl::registerStreamWriter( const std::string &writerName )
+{
+    const std::string deviceName = streamWriterDeviceName( writerName );
+
+    m_streamWriterDevices[deviceName]           = writerName;
+    m_streamWriterWriting[writerName]           = false;
+    m_streamWriterWritingKnown[writerName]      = false;
+    m_streamWriterStartedByObserver[writerName] = false;
+
+    if( registerIndiPropertySet(
+            m_indiP_streamWriterWriting[writerName], deviceName, "writing", st_setCallBack_streamWriterWriting ) < 0 )
+    {
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "failed to register stream writer property for " + writerName } );
+    }
+
+    return 0;
+}
+
+inline bool observerCtrl::beginObservationStreamWriter( const std::string &writerName )
+{
+    if( !streamWriterSelected( writerName ) )
+    {
+        m_streamWriterStartedByObserver[writerName] = false;
+        return false;
+    }
+
+    bool shouldStart = true;
+    if( m_streamWriterWritingKnown[writerName] && m_streamWriterWriting[writerName] )
+    {
+        shouldStart = false;
+    }
+
+    m_streamWriterStartedByObserver[writerName] =
+        shouldStart && m_streamWriterWritingKnown[writerName] && !m_streamWriterWriting[writerName];
+
+    return shouldStart;
+}
+
+inline bool observerCtrl::endObservationStreamWriter( const std::string &writerName )
+{
+    bool shouldStop                             = m_streamWriterStartedByObserver[writerName];
+    m_streamWriterStartedByObserver[writerName] = false;
+
+    return shouldStop;
+}
+
+inline int observerCtrl::commandStreamWriter( const std::string &writerName, pcf::IndiElement::SwitchStateType state )
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+
+    ip.setDevice( streamWriterDeviceName( writerName ) );
+    ip.setName( "writing" );
+    ip.add( pcf::IndiElement( "toggle" ) );
+    ip["toggle"].setSwitchState( state );
+
+    return sendNewProperty( ip );
 }
 
 void observerCtrl::setupConfig()
@@ -459,6 +584,11 @@ int observerCtrl::appStartup()
     for( size_t n = 0; n < m_streamWriters.size(); ++n )
     {
         m_indiP_sws.add( pcf::IndiElement( m_streamWriters[n], pcf::IndiElement::Off ) );
+
+        if( registerStreamWriter( m_streamWriters[n] ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
     }
 
     REG_INDI_NEWPROP_NOSETUP( m_indiP_sws );
@@ -596,16 +726,12 @@ void observerCtrl::startObserving()
 {
     for( size_t n = 0; n < m_streamWriters.size(); ++n )
     {
-        if( m_indiP_sws[m_streamWriters[n]].getSwitchState() == pcf::IndiElement::On )
+        if( beginObservationStreamWriter( m_streamWriters[n] ) )
         {
-            pcf::IndiProperty ip( pcf::IndiProperty::Switch );
-
-            ip.setDevice( m_streamWriters[n] + "-sw" );
-            ip.setName( "writing" );
-            ip.add( pcf::IndiElement( "toggle" ) );
-            ip["toggle"].setSwitchState( pcf::IndiElement::On );
-
-            sendNewProperty( ip );
+            if( commandStreamWriter( m_streamWriters[n], pcf::IndiElement::On ) < 0 )
+            {
+                log<software_error>( { __FILE__, __LINE__, "failed to start stream writer " + m_streamWriters[n] } );
+            }
         }
     }
 
@@ -635,18 +761,38 @@ void observerCtrl::stopObserving()
 
     for( size_t n = 0; n < m_streamWriters.size(); ++n )
     {
-        if( m_indiP_sws[m_streamWriters[n]].getSwitchState() == pcf::IndiElement::On )
+        if( endObservationStreamWriter( m_streamWriters[n] ) )
         {
-            pcf::IndiProperty ip( pcf::IndiProperty::Switch );
-
-            ip.setDevice( m_streamWriters[n] + "-sw" );
-            ip.setName( "writing" );
-            ip.add( pcf::IndiElement( "toggle" ) );
-            ip["toggle"].setSwitchState( pcf::IndiElement::Off );
-
-            sendNewProperty( ip );
+            if( commandStreamWriter( m_streamWriters[n], pcf::IndiElement::Off ) < 0 )
+            {
+                log<software_error>( { __FILE__, __LINE__, "failed to stop stream writer " + m_streamWriters[n] } );
+            }
         }
     }
+}
+
+int observerCtrl::setCallBack_streamWriterWriting( const pcf::IndiProperty &ipRecv )
+{
+    if( !ipRecv.hasValidDevice() || !ipRecv.find( "toggle" ) )
+    {
+        return 0;
+    }
+
+    auto streamWriterIt = m_streamWriterDevices.find( ipRecv.getDevice() );
+    if( streamWriterIt == m_streamWriterDevices.end() )
+    {
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "received writing update for unknown stream writer " + ipRecv.getDevice() } );
+    }
+
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_indiMutex );
+
+        m_streamWriterWriting[streamWriterIt->second]      = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+        m_streamWriterWritingKnown[streamWriterIt->second] = true;
+    } // mutex scope
+
+    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN( observerCtrl, m_indiP_observers )( const pcf::IndiProperty &ipRecv )
@@ -1017,15 +1163,15 @@ INDI_SETCALLBACK_DEFN( observerCtrl, m_indiP_catalog )( const pcf::IndiProperty 
 
     if( object != m_catObj )
     {
-        m_catObj    = object;
-        //m_target    = object;
-        //m_newTarget = true;
+        m_catObj = object;
+        // m_target    = object;
+        // m_newTarget = true;
 
         // Always log change in name (different from RA and DEC)
         log<text_log>( "TCS target updated to " + m_catObj, logPrio::LOG_NOTICE );
 
-        //std::unique_lock<std::mutex> lock( m_indiMutex );
-        //updatesIfChanged<std::string>( m_indiP_target, { "current", "target" }, { m_target, m_target } );
+        // std::unique_lock<std::mutex> lock( m_indiMutex );
+        // updatesIfChanged<std::string>( m_indiP_target, { "current", "target" }, { m_target, m_target } );
     }
 
     return 0;
@@ -1042,8 +1188,8 @@ INDI_SETCALLBACK_DEFN( observerCtrl, m_indiP_catdata )( const pcf::IndiProperty 
 
         if( ra != m_catRA )
         {
-            m_catRA  = ra;
-            //m_target = m_catObj;
+            m_catRA = ra;
+            // m_target = m_catObj;
 
             if( !m_newTarget ) // Only log if not already new
             {
@@ -1063,7 +1209,7 @@ INDI_SETCALLBACK_DEFN( observerCtrl, m_indiP_catdata )( const pcf::IndiProperty 
         if( dec != m_catDec )
         {
             m_catDec = dec;
-            //m_target = m_catObj;
+            // m_target = m_catObj;
 
             if( !m_newTarget ) // Only log if not already new
             {
@@ -1108,7 +1254,7 @@ INDI_SETCALLBACK_DEFN( observerCtrl, m_indiP_labMode )( const pcf::IndiProperty 
         }
         else
         {
-            m_labMode        = false;
+            m_labMode = false;
         }
     }
 
@@ -1124,8 +1270,8 @@ INDI_SETCALLBACK_DEFN( observerCtrl, m_indiP_loop )( const pcf::IndiProperty &ip
     {
         if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
         {
-            //Now that we're manually synch-ing the target name, we don't need loop closed logic
-            //i.e. the target block starts when the observation starts after setting the name.
+            // Now that we're manually synch-ing the target name, we don't need loop closed logic
+            // i.e. the target block starts when the observation starts after setting the name.
             /*if( m_newTarget == true && !m_loop )
             {
                 m_newTargetBlock = true;
