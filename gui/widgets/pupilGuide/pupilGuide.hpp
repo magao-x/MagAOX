@@ -735,8 +735,6 @@ void pupilGuide::onConnect()
     ui.label_modulation->setEnabled( true );
     ui.labelPupilFitting->setEnabled( true );
 
-    forEachChildSubscriber( []( multiIndiSubscriber *sub ) { sub->onConnect(); } );
-
     ui.label_tipAlignment->setEnabled( true );
     ui.button_ttmtel->setEnabled( true );
 
@@ -778,7 +776,6 @@ void pupilGuide::onDisconnect()
     resetConnectionState();
 
     ui.label_modulation->setEnabled( false );
-    forEachChildSubscriber( []( multiIndiSubscriber *sub ) { sub->onDisconnect(); } );
 
     ui.label_tipAlignment->setEnabled( false );
     ui.button_ttmtel->setEnabled( false );

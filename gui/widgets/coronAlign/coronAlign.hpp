@@ -545,15 +545,6 @@ void coronAlign::onConnect()
     ui.button_ipiaa1_d->setEnabled( true );
     ui.button_ipiaa1_scale->setEnabled( true );
 
-    forEachChildSubscriber(
-        []( multiIndiSubscriber *sub )
-        {
-            auto *obj = dynamic_cast<QWidget *>( sub );
-            if( obj )
-                obj->setEnabled( true );
-            sub->onConnect();
-        } );
-
     setWindowTitle( "Coronagraph Alignment" );
 }
 
@@ -620,15 +611,6 @@ void coronAlign::onDisconnect()
     ui.button_ipiaa1_u->setEnabled( false );
     ui.button_ipiaa1_d->setEnabled( false );
     ui.button_ipiaa1_scale->setEnabled( false );
-
-    forEachChildSubscriber(
-        []( multiIndiSubscriber *sub )
-        {
-            auto *obj = dynamic_cast<QWidget *>( sub );
-            if( obj )
-                obj->setEnabled( false );
-            sub->onDisconnect();
-        } );
 
     setWindowTitle( "Coronagraph Alignment (disconnected)" );
 }
