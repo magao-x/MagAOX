@@ -859,6 +859,9 @@ class modalGainOpt : public MagAOXApp<true>,
     std::vector<std::vector<float>> m_rawOlPSDs;
     std::vector<std::vector<float>> m_smoothOlPSDs;
     std::vector<std::vector<float>> m_nPSDs;
+    std::vector<float> m_extrapEffectiveCrossoverFreqs; ///< Effective power-law crossover frequency used per mode.
+    std::vector<std::string> m_extrapEffectiveCrossoverFreqEls; ///< INDI element names for the per-mode crossover
+                                                                ///< diagnostic.
 
     std::vector<float> m_modeVarCL;
     std::vector<float> m_modeVarOL;
@@ -1349,6 +1352,7 @@ class modalGainOpt : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_extrapDropoutMaxBins;
     pcf::IndiProperty m_indiP_extrapClSignificanceThreshold;
     pcf::IndiProperty m_indiP_extrapClMinSignificantFraction;
+    pcf::IndiProperty m_indiP_extrapEffectiveCrossoverFreq;
 
     pcf::IndiProperty m_indiP_emg;
     pcf::IndiProperty m_indiP_psdTime;
@@ -2462,6 +2466,8 @@ int modalGainOpt::appLogic()
     int modesOn = 0;
     int modesOnSI = 0;
     int modesOnLP = 0;
+    std::vector<float> extrapEffectiveCrossoverFreqs;
+    std::vector<const char *> extrapEffectiveCrossoverFreqElPtrs;
 
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_goptMutex );
@@ -2483,6 +2489,12 @@ int modalGainOpt::appLogic()
         modesOn = m_modesOn;
         modesOnSI = m_modesOnSI;
         modesOnLP = m_modesOnLP;
+        extrapEffectiveCrossoverFreqs = m_extrapEffectiveCrossoverFreqs;
+        extrapEffectiveCrossoverFreqElPtrs.reserve( m_extrapEffectiveCrossoverFreqEls.size() );
+        for( size_t n = 0; n < m_extrapEffectiveCrossoverFreqEls.size(); ++n )
+        {
+            extrapEffectiveCrossoverFreqElPtrs.push_back( m_extrapEffectiveCrossoverFreqEls[n].c_str() );
+        }
     }
 
     if( autoUpdate )
@@ -2634,6 +2646,13 @@ int modalGainOpt::appLogic()
     updatesIfChanged<float>( m_indiP_extrapClMinSignificantFraction,
                              { "current", "target" },
                              { extrapConfig.m_clMinSignificantFraction, extrapConfig.m_clMinSignificantFraction } );
+
+    if( !extrapEffectiveCrossoverFreqs.empty() &&
+        extrapEffectiveCrossoverFreqs.size() == m_indiP_extrapEffectiveCrossoverFreq.getElements().size() )
+    {
+        updatesIfChanged<float>(
+            m_indiP_extrapEffectiveCrossoverFreq, extrapEffectiveCrossoverFreqElPtrs, extrapEffectiveCrossoverFreqs );
+    }
 
     updatesIfChanged<int>( m_indiP_modesOn,
                            { "current", "integrator", "predictor" },
@@ -3182,6 +3201,7 @@ int modalGainOpt::allocate( const psdShmimT &dummy )
     m_rawOlPSDs.resize( m_nModes );
     m_smoothOlPSDs.resize( m_nModes );
     m_nPSDs.resize( m_nModes );
+    m_extrapEffectiveCrossoverFreqs.resize( m_nModes, 0 );
 
     for( size_t n = 0; n < m_olPSDs.size(); ++n )
     {
@@ -3203,6 +3223,35 @@ int modalGainOpt::allocate( const psdShmimT &dummy )
     m_modeVarLP.resize( m_nModes );
     m_timesOnLP.resize( m_nModes, 5 );
     m_siGainStateNeedsSync = true;
+
+    if( m_indiP_extrapEffectiveCrossoverFreq.getElements().empty() )
+    {
+        if( createROIndiNumber( m_indiP_extrapEffectiveCrossoverFreq,
+                                "extrap_effectiveCrossoverFreq",
+                                "Effective Crossover Freq",
+                                "Extrapolation" ) < 0 )
+        {
+            return log<software_error, -1>( { "error from createROIndiNumber" } );
+        }
+
+        m_extrapEffectiveCrossoverFreqEls.resize( m_nModes );
+        for( size_t n = 0; n < m_nModes; ++n )
+        {
+            m_extrapEffectiveCrossoverFreqEls[n] = "m" + std::to_string( n );
+            indi::addNumberElement( m_indiP_extrapEffectiveCrossoverFreq,
+                                    m_extrapEffectiveCrossoverFreqEls[n],
+                                    0.0F,
+                                    10000.0F,
+                                    0.1F,
+                                    "%0.2f",
+                                    "Mode " + std::to_string( n ) );
+        }
+
+        if( registerIndiPropertyReadOnly( m_indiP_extrapEffectiveCrossoverFreq ) < 0 )
+        {
+            return log<software_error, -1>( { "error from registerIndiPropertyReadOnly" } );
+        }
+    }
 
     if( m_olPSDStream != nullptr &&
         ( m_olPSDStream->md->size[0] != m_nFreq || m_olPSDStream->md->size[1] != m_nModes ) )
@@ -4781,6 +4830,7 @@ void modalGainOpt::goptThreadExec()
 
                 if( m_extrapOL == c_olProcessNone )
                 {
+                    m_extrapEffectiveCrossoverFreqs[n] = 0;
                     float noiseFloor = 0;
                     mx::error_t errc =
                         processPsdProcessorT::estimateNoisePsd( m_nPSDs[n],
@@ -4793,6 +4843,7 @@ void modalGainOpt::goptThreadExec()
                                                                 m_extrapConfig.m_noiseEstimateLowFreqMaxHz );
                     if( !!errc )
                     {
+                        m_extrapEffectiveCrossoverFreqs[n] = 0;
 #pragma omp critical
                         {
                             log<software_error>( { "error estimating modal noise PSD" } );
@@ -4936,6 +4987,7 @@ void modalGainOpt::goptThreadExec()
                         m_olPSDs[n] = processResult.m_processPsd;
                         m_rawOlPSDs[n] = processResult.m_rawProcessPsd;
                         m_smoothOlPSDs[n] = processResult.m_smoothedProcessPsd;
+                        m_extrapEffectiveCrossoverFreqs[n] = processResult.m_powerLawMatchFreq;
                         lpProcessPsd = processResult.m_lpProcessPsd;
                     }
                 }
