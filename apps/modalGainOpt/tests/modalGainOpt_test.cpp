@@ -1114,6 +1114,22 @@ TEST_CASE( "modalPsdProcessor falls back to the highest-frequency smoothed "
     REQUIRE( crossoverFreq == Approx( 100.0F ) );
 }
 
+TEST_CASE( "modalPsdProcessor treats a below-to-above sign change as a valid "
+           "smoothed noise crossing",
+           "[modalGainOpt]" )
+{
+    std::vector<float> smoothedProcessPsd{ 0.5F, 0.8F, 1.0F, 1.2F, 1.4F };
+    std::vector<float> noisePsd{ 1.0F, 1.0F, 1.0F, 1.0F, 1.0F };
+    std::vector<float> freq{ 0.0F, 25.0F, 50.0F, 75.0F, 100.0F };
+
+    float crossoverFreq = 0.0F;
+    mx::error_t errc =
+        processPsdProcessorHarness::findAutoPowerLawCrossoverFreq( crossoverFreq, smoothedProcessPsd, noisePsd, freq );
+
+    REQUIRE( !errc );
+    REQUIRE( crossoverFreq == Approx( 50.0F ) );
+}
+
 TEST_CASE( "modalPsdProcessor anchors the power-law match to the smoothed "
            "disturbance PSD",
            "[modalGainOpt]" )

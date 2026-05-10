@@ -1524,7 +1524,16 @@ mx::error_t modalPsdProcessor<realT>::findAutoPowerLawCrossoverFreq( realT &cros
     {
         realT d0 = smoothedProcessPsd[n] - noisePsd[n];
         realT d1 = smoothedProcessPsd[n + 1] - noisePsd[n + 1];
-        if( d0 >= static_cast<realT>( 0 ) && d1 <= static_cast<realT>( 0 ) )
+
+        if( d0 == static_cast<realT>( 0 ) && d1 == static_cast<realT>( 0 ) )
+        {
+            lastCrossingFreq = freq[n + 1];
+            foundCrossing = true;
+            continue;
+        }
+
+        if( ( d0 <= static_cast<realT>( 0 ) && d1 >= static_cast<realT>( 0 ) ) ||
+            ( d0 >= static_cast<realT>( 0 ) && d1 <= static_cast<realT>( 0 ) ) )
         {
             realT alpha = static_cast<realT>( 0 );
             if( d0 != d1 )
