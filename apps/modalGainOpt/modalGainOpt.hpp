@@ -1334,6 +1334,7 @@ class modalGainOpt : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_extrapPowerLawMatchFallbackWindowHz;
     pcf::IndiProperty m_indiP_extrapPowerLawCrossoverMode;
     pcf::IndiProperty m_indiP_extrapPowerLawAutoSmoothWidthHz;
+    pcf::IndiProperty m_indiP_extrapPowerLawAutoMaxFreqFraction;
     pcf::IndiProperty m_indiP_extrapFitPowerLawIndex;
     pcf::IndiProperty m_indiP_extrapPowerLawOnlyAboveFreq;
     pcf::IndiProperty m_indiP_extrapPowerLawFitIncludesMatchPoint;
@@ -1388,6 +1389,7 @@ class modalGainOpt : public MagAOXApp<true>,
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawMatchFallbackWindowHz );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawCrossoverMode );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawAutoSmoothWidthHz );
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawAutoMaxFreqFraction );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapFitPowerLawIndex );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawOnlyAboveFreq );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawFitIncludesMatchPoint );
@@ -1637,6 +1639,18 @@ void modalGainOpt::setupConfig()
                 "Median-smoothing width in Hz used when auto power-law crossover "
                 "selection is enabled." );
 
+    config.add( "extrapolation.powerLawAutoMaxFreqFraction",
+                "",
+                "extrapolation.powerLawAutoMaxFreqFraction",
+                argType::Required,
+                "extrapolation",
+                "powerLawAutoMaxFreqFraction",
+                false,
+                "float",
+                "Maximum searched frequency for auto power-law crossover as a "
+                "fraction of the sampled maximum frequency. Set to 0 to disable "
+                "the cap." );
+
     config.add( "extrapolation.fitPowerLawIndex",
                 "",
                 "extrapolation.fitPowerLawIndex",
@@ -1882,6 +1896,7 @@ int modalGainOpt::loadConfigImpl( mx::app::appConfigurator &_config )
     m_extrapPowerLawCrossoverMode = extrapPowerLawCrossoverModeFromName( powerLawCrossoverMode );
     m_extrapConfig.m_powerLawCrossoverMode = extrapPowerLawCrossoverModeName( m_extrapPowerLawCrossoverMode );
     _config( m_extrapConfig.m_powerLawAutoSmoothWidthHz, "extrapolation.powerLawAutoSmoothWidthHz" );
+    _config( m_extrapConfig.m_powerLawAutoMaxFreqFraction, "extrapolation.powerLawAutoMaxFreqFraction" );
     _config( m_extrapConfig.m_fitPowerLawIndex, "extrapolation.fitPowerLawIndex" );
     _config( m_extrapConfig.m_powerLawOnlyAboveFreq, "extrapolation.powerLawOnlyAboveFreq" );
     _config( m_extrapConfig.m_powerLawFitIncludesMatchPoint, "extrapolation.powerLawFitIncludesMatchPoint" );
@@ -2217,6 +2232,14 @@ int modalGainOpt::appStartup()
                                  0.1,
                                  "%0.2f",
                                  "Power-Law Auto Smooth Width",
+                                 "Extrapolation" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPowerLawAutoMaxFreqFraction,
+                                 "extrap_powerLawAutoMaxFreqFraction",
+                                 0,
+                                 1,
+                                 0.01,
+                                 "%0.3f",
+                                 "Power-Law Auto Max Freq Fraction",
                                  "Extrapolation" );
     if( createStandardIndiToggleSw( m_indiP_extrapFitPowerLawIndex,
                                     "extrap_fitPowerLawIndex",
@@ -2589,6 +2612,10 @@ int modalGainOpt::appLogic()
     updatesIfChanged<float>( m_indiP_extrapPowerLawAutoSmoothWidthHz,
                              { "current", "target" },
                              { extrapConfig.m_powerLawAutoSmoothWidthHz, extrapConfig.m_powerLawAutoSmoothWidthHz } );
+    updatesIfChanged<float>(
+        m_indiP_extrapPowerLawAutoMaxFreqFraction,
+        { "current", "target" },
+        { extrapConfig.m_powerLawAutoMaxFreqFraction, extrapConfig.m_powerLawAutoMaxFreqFraction } );
     updateSwitchIfChanged( m_indiP_extrapFitPowerLawIndex,
                            "toggle",
                            extrapConfig.m_fitPowerLawIndex ? pcf::IndiElement::On : pcf::IndiElement::Off,
@@ -2650,8 +2677,9 @@ int modalGainOpt::appLogic()
     if( !extrapEffectiveCrossoverFreqs.empty() &&
         extrapEffectiveCrossoverFreqs.size() == m_indiP_extrapEffectiveCrossoverFreq.getElements().size() )
     {
-        updatesIfChanged<float>(
-            m_indiP_extrapEffectiveCrossoverFreq, extrapEffectiveCrossoverFreqElPtrs, extrapEffectiveCrossoverFreqs );
+        updatesIfChanged<float>( m_indiP_extrapEffectiveCrossoverFreq,
+                                 extrapEffectiveCrossoverFreqElPtrs,
+                                 extrapEffectiveCrossoverFreqs );
     }
 
     updatesIfChanged<int>( m_indiP_modesOn,
@@ -4922,6 +4950,7 @@ void modalGainOpt::goptThreadExec()
                                     " matchWindow=" + std::to_string( processConfig.m_powerLawMatchFallbackWindowHz ) +
                                     " crossoverMode=" + processConfig.m_powerLawCrossoverMode +
                                     " autoSmooth=" + std::to_string( processConfig.m_powerLawAutoSmoothWidthHz ) +
+                                    " autoMaxFrac=" + std::to_string( processConfig.m_powerLawAutoMaxFreqFraction ) +
                                     " fitIndex=" + std::string( processConfig.m_fitPowerLawIndex ? "true" : "false" ) +
                                     " fitMin=" + std::to_string( processConfig.m_powerLawFitMinFreqHz ) +
                                     " fitMax=" + std::to_string( processConfig.m_powerLawFitMaxFreqHz ) +
@@ -6237,6 +6266,16 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawAutoSmoothWidthHz )
                                        m_extrapConfig.m_powerLawAutoSmoothWidthHz,
                                        ipRecv,
                                        "extrap power-law auto smooth width" );
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawAutoMaxFreqFraction )
+( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPowerLawAutoMaxFreqFraction, ipRecv );
+    return handleExtrapNumberProperty( m_indiP_extrapPowerLawAutoMaxFreqFraction,
+                                       m_extrapConfig.m_powerLawAutoMaxFreqFraction,
+                                       ipRecv,
+                                       "extrap power-law auto max freq fraction" );
 }
 
 INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapFitPowerLawIndex )

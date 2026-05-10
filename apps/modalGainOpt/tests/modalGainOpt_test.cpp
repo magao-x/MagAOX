@@ -596,88 +596,91 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without "
 
     app.setupConfig();
 
-    mx::app::writeConfigFile(
-        "/tmp/modalGainOpt_test.conf",
-        { "loop",          "loop",          "loop",          "loop",          "loop",          "loop",
-          "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-          "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-          "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-          "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-          "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation" },
-        {
-            "number",
-            "name",
-            "autoUpdate",
-            "gainGain",
-            "gainLeak",
-            "psdDev",
-            "method",
-            "noiseEstimateDomain",
-            "noiseEstimateRange",
-            "noiseEstimateStatistic",
-            "noiseEstimateLowFreqMaxHz",
-            "closedLoopOlEstimateMethod",
-            "powerLawIndex",
-            "powerLawNormFreq",
-            "powerLawMatchFreq",
-            "powerLawMatchFallbackWindowHz",
-            "powerLawCrossoverMode",
-            "powerLawAutoSmoothWidthHz",
-            "fitPowerLawIndex",
-            "powerLawOnlyAboveFreq",
-            "powerLawFitIncludesMatchPoint",
-            "powerLawFitMinFreqHz",
-            "powerLawFitMaxFreqHz",
-            "powerLawFitBinWidthHz",
-            "powerLawBlendBins",
-            "peakDetectWidthHz",
-            "peakDetectFactor",
-            "peakDetectBroadFactor",
-            "peakDetectMinWidthLog",
-            "peakDetectPasses",
-            "peakMoffatBeta",
-            "dropoutGapFactor",
-            "dropoutTinyFactor",
-            "dropoutMaxBins",
-            "clSignificanceThreshold",
-            "clMinSignificantFraction",
-        },
-        { "2",
-          "aol2",
-          "false",
-          "0.35",
-          "0.65",
-          "psdDevice",
-          "moffat_peaks",
-          "closed_loop_pre_xfer",
-          "low_freq",
-          "minimum",
-          "123",
-          "ntf_aware",
-          "1.5",
-          "15",
-          "12.5",
-          "7.5",
-          "auto_smoothed_crossing",
-          "37.5",
-          "true",
-          "250",
-          "false",
-          "100",
-          "900",
-          "80",
-          "6",
-          "55",
-          "4",
-          "2.5",
-          "0.03",
-          "3",
-          "8",
-          "0.12",
-          "0.000001",
-          "6",
-          "1.25",
-          "0.07" } );
+    mx::app::writeConfigFile( "/tmp/modalGainOpt_test.conf",
+                              { "loop",          "loop",          "loop",          "loop",          "loop",
+                                "loop",          "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+                                "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+                                "extrapolation", "extrapolation" },
+                              {
+                                  "number",
+                                  "name",
+                                  "autoUpdate",
+                                  "gainGain",
+                                  "gainLeak",
+                                  "psdDev",
+                                  "method",
+                                  "noiseEstimateDomain",
+                                  "noiseEstimateRange",
+                                  "noiseEstimateStatistic",
+                                  "noiseEstimateLowFreqMaxHz",
+                                  "closedLoopOlEstimateMethod",
+                                  "powerLawIndex",
+                                  "powerLawNormFreq",
+                                  "powerLawMatchFreq",
+                                  "powerLawMatchFallbackWindowHz",
+                                  "powerLawCrossoverMode",
+                                  "powerLawAutoSmoothWidthHz",
+                                  "powerLawAutoMaxFreqFraction",
+                                  "fitPowerLawIndex",
+                                  "powerLawOnlyAboveFreq",
+                                  "powerLawFitIncludesMatchPoint",
+                                  "powerLawFitMinFreqHz",
+                                  "powerLawFitMaxFreqHz",
+                                  "powerLawFitBinWidthHz",
+                                  "powerLawBlendBins",
+                                  "peakDetectWidthHz",
+                                  "peakDetectFactor",
+                                  "peakDetectBroadFactor",
+                                  "peakDetectMinWidthLog",
+                                  "peakDetectPasses",
+                                  "peakMoffatBeta",
+                                  "dropoutGapFactor",
+                                  "dropoutTinyFactor",
+                                  "dropoutMaxBins",
+                                  "clSignificanceThreshold",
+                                  "clMinSignificantFraction",
+                              },
+                              { "2",
+                                "aol2",
+                                "false",
+                                "0.35",
+                                "0.65",
+                                "psdDevice",
+                                "moffat_peaks",
+                                "closed_loop_pre_xfer",
+                                "low_freq",
+                                "minimum",
+                                "123",
+                                "ntf_aware",
+                                "1.5",
+                                "15",
+                                "12.5",
+                                "7.5",
+                                "auto_smoothed_crossing",
+                                "37.5",
+                                "0.4",
+                                "true",
+                                "250",
+                                "false",
+                                "100",
+                                "900",
+                                "80",
+                                "6",
+                                "55",
+                                "4",
+                                "2.5",
+                                "0.03",
+                                "3",
+                                "8",
+                                "0.12",
+                                "0.000001",
+                                "6",
+                                "1.25",
+                                "0.07" } );
     app.readConfigFile( "/tmp/modalGainOpt_test.conf" );
 
     app.loadConfig();
@@ -708,6 +711,7 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without "
     REQUIRE( app.extrapConfig().m_powerLawMatchFallbackWindowHz == Approx( 7.5F ) );
     REQUIRE( app.extrapConfig().m_powerLawCrossoverMode == "auto-smoothed-crossing" );
     REQUIRE( app.extrapConfig().m_powerLawAutoSmoothWidthHz == Approx( 37.5F ) );
+    REQUIRE( app.extrapConfig().m_powerLawAutoMaxFreqFraction == Approx( 0.4F ) );
     REQUIRE( app.extrapConfig().m_fitPowerLawIndex == true );
     REQUIRE( app.extrapConfig().m_powerLawOnlyAboveFreq == Approx( 250.0F ) );
     REQUIRE( app.extrapConfig().m_powerLawFitIncludesMatchPoint == false );
@@ -1086,6 +1090,7 @@ TEST_CASE( "modalPsdProcessor can auto-select the power-law crossover from a "
     cfg.m_powerLawOnlyAboveFreq = 0.0F;
     cfg.m_powerLawCrossoverMode = "auto-smoothed-crossing";
     cfg.m_powerLawAutoSmoothWidthHz = 100.0F;
+    cfg.m_powerLawAutoMaxFreqFraction = 0.0F;
 
     processPsdProcessorT::processResults result;
     mx::error_t errc = processPsdProcessorT::analyzePsd( result, measuredPsd, freq, 10, cfg );
@@ -1107,8 +1112,11 @@ TEST_CASE( "modalPsdProcessor falls back to the highest-frequency smoothed "
     std::vector<float> freq{ 0.0F, 25.0F, 50.0F, 75.0F, 100.0F };
 
     float crossoverFreq = 0.0F;
-    mx::error_t errc =
-        processPsdProcessorHarness::findAutoPowerLawCrossoverFreq( crossoverFreq, smoothedProcessPsd, noisePsd, freq );
+    mx::error_t errc = processPsdProcessorHarness::findAutoPowerLawCrossoverFreq( crossoverFreq,
+                                                                                  smoothedProcessPsd,
+                                                                                  noisePsd,
+                                                                                  freq,
+                                                                                  0.0F );
 
     REQUIRE( !errc );
     REQUIRE( crossoverFreq == Approx( 100.0F ) );
@@ -1123,11 +1131,33 @@ TEST_CASE( "modalPsdProcessor treats a below-to-above sign change as a valid "
     std::vector<float> freq{ 0.0F, 25.0F, 50.0F, 75.0F, 100.0F };
 
     float crossoverFreq = 0.0F;
-    mx::error_t errc =
-        processPsdProcessorHarness::findAutoPowerLawCrossoverFreq( crossoverFreq, smoothedProcessPsd, noisePsd, freq );
+    mx::error_t errc = processPsdProcessorHarness::findAutoPowerLawCrossoverFreq( crossoverFreq,
+                                                                                  smoothedProcessPsd,
+                                                                                  noisePsd,
+                                                                                  freq,
+                                                                                  0.0F );
 
     REQUIRE( !errc );
     REQUIRE( crossoverFreq == Approx( 50.0F ) );
+}
+
+TEST_CASE( "modalPsdProcessor auto crossover can cap the search to a fraction "
+           "of the sampled maximum frequency",
+           "[modalGainOpt]" )
+{
+    std::vector<float> smoothedProcessPsd{ 5.0F, 4.0F, 1.5F, 0.8F, 0.7F, 1.4F, 1.6F };
+    std::vector<float> noisePsd{ 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F };
+    std::vector<float> freq{ 0.0F, 100.0F, 200.0F, 300.0F, 400.0F, 900.0F, 1000.0F };
+
+    float crossoverFreq = 0.0F;
+    mx::error_t errc = processPsdProcessorHarness::findAutoPowerLawCrossoverFreq( crossoverFreq,
+                                                                                  smoothedProcessPsd,
+                                                                                  noisePsd,
+                                                                                  freq,
+                                                                                  0.4F );
+
+    REQUIRE( !errc );
+    REQUIRE( crossoverFreq == Approx( 271.42856F ) );
 }
 
 TEST_CASE( "modalPsdProcessor anchors the power-law match to the smoothed "
