@@ -217,6 +217,17 @@ bool IndiConnection::isActive() const
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+/// \brief IndiConnection::detachFds
+/// Detach the raw input/output file-descriptor aliases without closing them.
+
+void IndiConnection::detachFds()
+{
+    MutexLock::AutoLock autoOut( &m_mutOutput );
+    m_fdInput  = -1;
+    m_fdOutput = -1;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 /// \brief IndiConnection::processIndiRequests
 /// Called to ensure that incoming INDI messages are received and handled.
 /// It will not exit until we receive a signal. May create a new thread.

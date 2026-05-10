@@ -123,6 +123,9 @@ class IndiConnection : public pcf::Thread
 
     // Helper functions.
   protected:
+    /// Detach the raw input/output file-descriptor aliases without closing them.
+    void detachFds();
+
     /// 'pthread_create' needs a static function to get the thread going.
     /// Passing a pointer back to this class allows us to call the 'runLoop'
     /// function from within the new thread.
