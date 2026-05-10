@@ -859,10 +859,6 @@ class modalGainOpt : public MagAOXApp<true>,
     std::vector<std::vector<float>> m_rawOlPSDs;
     std::vector<std::vector<float>> m_smoothOlPSDs;
     std::vector<std::vector<float>> m_nPSDs;
-    std::vector<float> m_extrapEffectiveCrossoverFreqs; ///< Effective power-law crossover frequency used per mode.
-    std::vector<std::string> m_extrapEffectiveCrossoverFreqEls; ///< INDI element names for the per-mode crossover
-                                                                ///< diagnostic.
-
     std::vector<float> m_modeVarCL;
     std::vector<float> m_modeVarOL;
 
@@ -1342,18 +1338,11 @@ class modalGainOpt : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_extrapPowerLawFitMaxFreqHz;
     pcf::IndiProperty m_indiP_extrapPowerLawFitBinWidthHz;
     pcf::IndiProperty m_indiP_extrapPowerLawBlendBins;
-    pcf::IndiProperty m_indiP_extrapPeakDetectWidthHz;
-    pcf::IndiProperty m_indiP_extrapPeakDetectFactor;
-    pcf::IndiProperty m_indiP_extrapPeakDetectBroadFactor;
-    pcf::IndiProperty m_indiP_extrapPeakDetectMinWidthLog;
-    pcf::IndiProperty m_indiP_extrapPeakDetectPasses;
-    pcf::IndiProperty m_indiP_extrapPeakMoffatBeta;
     pcf::IndiProperty m_indiP_extrapDropoutGapFactor;
     pcf::IndiProperty m_indiP_extrapDropoutTinyFactor;
     pcf::IndiProperty m_indiP_extrapDropoutMaxBins;
     pcf::IndiProperty m_indiP_extrapClSignificanceThreshold;
     pcf::IndiProperty m_indiP_extrapClMinSignificantFraction;
-    pcf::IndiProperty m_indiP_extrapEffectiveCrossoverFreq;
 
     pcf::IndiProperty m_indiP_emg;
     pcf::IndiProperty m_indiP_psdTime;
@@ -1397,12 +1386,6 @@ class modalGainOpt : public MagAOXApp<true>,
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawFitMaxFreqHz );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawFitBinWidthHz );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPowerLawBlendBins );
-    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPeakDetectWidthHz );
-    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPeakDetectFactor );
-    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPeakDetectBroadFactor );
-    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPeakDetectMinWidthLog );
-    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPeakDetectPasses );
-    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapPeakMoffatBeta );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapDropoutGapFactor );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapDropoutTinyFactor );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_extrapDropoutMaxBins );
@@ -2309,54 +2292,6 @@ int modalGainOpt::appStartup()
                                  "%d",
                                  "Blend Bins",
                                  "Extrapolation" );
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPeakDetectWidthHz,
-                                 "extrap_peakDetectWidthHz",
-                                 0,
-                                 10000,
-                                 0.1,
-                                 "%0.2f",
-                                 "Peak Detect Width",
-                                 "Extrapolation" );
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPeakDetectFactor,
-                                 "extrap_peakDetectFactor",
-                                 0,
-                                 100,
-                                 0.1,
-                                 "%0.2f",
-                                 "Peak Detect Factor",
-                                 "Extrapolation" );
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPeakDetectBroadFactor,
-                                 "extrap_peakDetectBroadFactor",
-                                 0,
-                                 100,
-                                 0.1,
-                                 "%0.2f",
-                                 "Peak Broad Factor",
-                                 "Extrapolation" );
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPeakDetectMinWidthLog,
-                                 "extrap_peakDetectMinWidthLog",
-                                 0,
-                                 10,
-                                 0.001,
-                                 "%0.4f",
-                                 "Peak Min Width Log",
-                                 "Extrapolation" );
-    CREATE_REG_INDI_NEW_NUMBERI( m_indiP_extrapPeakDetectPasses,
-                                 "extrap_peakDetectPasses",
-                                 1,
-                                 100,
-                                 1,
-                                 "%d",
-                                 "Peak Detect Passes",
-                                 "Extrapolation" );
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapPeakMoffatBeta,
-                                 "extrap_peakMoffatBeta",
-                                 0,
-                                 100,
-                                 0.1,
-                                 "%0.2f",
-                                 "Peak Moffat Beta",
-                                 "Extrapolation" );
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_extrapDropoutGapFactor,
                                  "extrap_dropoutGapFactor",
                                  0,
@@ -2489,8 +2424,6 @@ int modalGainOpt::appLogic()
     int modesOn = 0;
     int modesOnSI = 0;
     int modesOnLP = 0;
-    std::vector<float> extrapEffectiveCrossoverFreqs;
-    std::vector<const char *> extrapEffectiveCrossoverFreqElPtrs;
 
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_goptMutex );
@@ -2512,12 +2445,6 @@ int modalGainOpt::appLogic()
         modesOn = m_modesOn;
         modesOnSI = m_modesOnSI;
         modesOnLP = m_modesOnLP;
-        extrapEffectiveCrossoverFreqs = m_extrapEffectiveCrossoverFreqs;
-        extrapEffectiveCrossoverFreqElPtrs.reserve( m_extrapEffectiveCrossoverFreqEls.size() );
-        for( size_t n = 0; n < m_extrapEffectiveCrossoverFreqEls.size(); ++n )
-        {
-            extrapEffectiveCrossoverFreqElPtrs.push_back( m_extrapEffectiveCrossoverFreqEls[n].c_str() );
-        }
     }
 
     if( autoUpdate )
@@ -2639,24 +2566,6 @@ int modalGainOpt::appLogic()
     updatesIfChanged<int>( m_indiP_extrapPowerLawBlendBins,
                            { "current", "target" },
                            { extrapConfig.m_powerLawBlendBins, extrapConfig.m_powerLawBlendBins } );
-    updatesIfChanged<float>( m_indiP_extrapPeakDetectWidthHz,
-                             { "current", "target" },
-                             { extrapConfig.m_peakDetectWidthHz, extrapConfig.m_peakDetectWidthHz } );
-    updatesIfChanged<float>( m_indiP_extrapPeakDetectFactor,
-                             { "current", "target" },
-                             { extrapConfig.m_peakDetectFactor, extrapConfig.m_peakDetectFactor } );
-    updatesIfChanged<float>( m_indiP_extrapPeakDetectBroadFactor,
-                             { "current", "target" },
-                             { extrapConfig.m_peakDetectBroadFactor, extrapConfig.m_peakDetectBroadFactor } );
-    updatesIfChanged<float>( m_indiP_extrapPeakDetectMinWidthLog,
-                             { "current", "target" },
-                             { extrapConfig.m_peakDetectMinWidthLog, extrapConfig.m_peakDetectMinWidthLog } );
-    updatesIfChanged<int>( m_indiP_extrapPeakDetectPasses,
-                           { "current", "target" },
-                           { extrapConfig.m_peakDetectPasses, extrapConfig.m_peakDetectPasses } );
-    updatesIfChanged<float>( m_indiP_extrapPeakMoffatBeta,
-                             { "current", "target" },
-                             { extrapConfig.m_peakMoffatBeta, extrapConfig.m_peakMoffatBeta } );
     updatesIfChanged<float>( m_indiP_extrapDropoutGapFactor,
                              { "current", "target" },
                              { extrapConfig.m_dropoutGapFactor, extrapConfig.m_dropoutGapFactor } );
@@ -2673,14 +2582,6 @@ int modalGainOpt::appLogic()
     updatesIfChanged<float>( m_indiP_extrapClMinSignificantFraction,
                              { "current", "target" },
                              { extrapConfig.m_clMinSignificantFraction, extrapConfig.m_clMinSignificantFraction } );
-
-    if( !extrapEffectiveCrossoverFreqs.empty() &&
-        extrapEffectiveCrossoverFreqs.size() == m_indiP_extrapEffectiveCrossoverFreq.getElements().size() )
-    {
-        updatesIfChanged<float>( m_indiP_extrapEffectiveCrossoverFreq,
-                                 extrapEffectiveCrossoverFreqElPtrs,
-                                 extrapEffectiveCrossoverFreqs );
-    }
 
     updatesIfChanged<int>( m_indiP_modesOn,
                            { "current", "integrator", "predictor" },
@@ -3229,8 +3130,6 @@ int modalGainOpt::allocate( const psdShmimT &dummy )
     m_rawOlPSDs.resize( m_nModes );
     m_smoothOlPSDs.resize( m_nModes );
     m_nPSDs.resize( m_nModes );
-    m_extrapEffectiveCrossoverFreqs.resize( m_nModes, 0 );
-
     for( size_t n = 0; n < m_olPSDs.size(); ++n )
     {
         m_olPSDs[n].resize( m_nFreq );
@@ -3251,35 +3150,6 @@ int modalGainOpt::allocate( const psdShmimT &dummy )
     m_modeVarLP.resize( m_nModes );
     m_timesOnLP.resize( m_nModes, 5 );
     m_siGainStateNeedsSync = true;
-
-    if( m_indiP_extrapEffectiveCrossoverFreq.getElements().empty() )
-    {
-        if( createROIndiNumber( m_indiP_extrapEffectiveCrossoverFreq,
-                                "extrap_effectiveCrossoverFreq",
-                                "Effective Crossover Freq",
-                                "Extrapolation" ) < 0 )
-        {
-            return log<software_error, -1>( { "error from createROIndiNumber" } );
-        }
-
-        m_extrapEffectiveCrossoverFreqEls.resize( m_nModes );
-        for( size_t n = 0; n < m_nModes; ++n )
-        {
-            m_extrapEffectiveCrossoverFreqEls[n] = "m" + std::to_string( n );
-            indi::addNumberElement( m_indiP_extrapEffectiveCrossoverFreq,
-                                    m_extrapEffectiveCrossoverFreqEls[n],
-                                    0.0F,
-                                    10000.0F,
-                                    0.1F,
-                                    "%0.2f",
-                                    "Mode " + std::to_string( n ) );
-        }
-
-        if( registerIndiPropertyReadOnly( m_indiP_extrapEffectiveCrossoverFreq ) < 0 )
-        {
-            return log<software_error, -1>( { "error from registerIndiPropertyReadOnly" } );
-        }
-    }
 
     if( m_olPSDStream != nullptr &&
         ( m_olPSDStream->md->size[0] != m_nFreq || m_olPSDStream->md->size[1] != m_nModes ) )
@@ -4858,7 +4728,6 @@ void modalGainOpt::goptThreadExec()
 
                 if( m_extrapOL == c_olProcessNone )
                 {
-                    m_extrapEffectiveCrossoverFreqs[n] = 0;
                     float noiseFloor = 0;
                     mx::error_t errc =
                         processPsdProcessorT::estimateNoisePsd( m_nPSDs[n],
@@ -4871,7 +4740,6 @@ void modalGainOpt::goptThreadExec()
                                                                 m_extrapConfig.m_noiseEstimateLowFreqMaxHz );
                     if( !!errc )
                     {
-                        m_extrapEffectiveCrossoverFreqs[n] = 0;
 #pragma omp critical
                         {
                             log<software_error>( { "error estimating modal noise PSD" } );
@@ -5016,7 +4884,6 @@ void modalGainOpt::goptThreadExec()
                         m_olPSDs[n] = processResult.m_processPsd;
                         m_rawOlPSDs[n] = processResult.m_rawProcessPsd;
                         m_smoothOlPSDs[n] = processResult.m_smoothedProcessPsd;
-                        m_extrapEffectiveCrossoverFreqs[n] = processResult.m_powerLawMatchFreq;
                         lpProcessPsd = processResult.m_lpProcessPsd;
                     }
                 }
@@ -6346,66 +6213,6 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPowerLawBlendBins )
                                        m_extrapConfig.m_powerLawBlendBins,
                                        ipRecv,
                                        "extrap power-law blend bins" );
-}
-
-INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPeakDetectWidthHz )
-( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPeakDetectWidthHz, ipRecv );
-    return handleExtrapNumberProperty( m_indiP_extrapPeakDetectWidthHz,
-                                       m_extrapConfig.m_peakDetectWidthHz,
-                                       ipRecv,
-                                       "extrap peak detect width" );
-}
-
-INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPeakDetectFactor )
-( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPeakDetectFactor, ipRecv );
-    return handleExtrapNumberProperty( m_indiP_extrapPeakDetectFactor,
-                                       m_extrapConfig.m_peakDetectFactor,
-                                       ipRecv,
-                                       "extrap peak detect factor" );
-}
-
-INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPeakDetectBroadFactor )
-( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPeakDetectBroadFactor, ipRecv );
-    return handleExtrapNumberProperty( m_indiP_extrapPeakDetectBroadFactor,
-                                       m_extrapConfig.m_peakDetectBroadFactor,
-                                       ipRecv,
-                                       "extrap peak detect broad factor" );
-}
-
-INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPeakDetectMinWidthLog )
-( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPeakDetectMinWidthLog, ipRecv );
-    return handleExtrapNumberProperty( m_indiP_extrapPeakDetectMinWidthLog,
-                                       m_extrapConfig.m_peakDetectMinWidthLog,
-                                       ipRecv,
-                                       "extrap peak detect min width log" );
-}
-
-INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPeakDetectPasses )
-( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPeakDetectPasses, ipRecv );
-    return handleExtrapNumberProperty( m_indiP_extrapPeakDetectPasses,
-                                       m_extrapConfig.m_peakDetectPasses,
-                                       ipRecv,
-                                       "extrap peak detect passes" );
-}
-
-INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapPeakMoffatBeta )
-( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_extrapPeakMoffatBeta, ipRecv );
-    return handleExtrapNumberProperty( m_indiP_extrapPeakMoffatBeta,
-                                       m_extrapConfig.m_peakMoffatBeta,
-                                       ipRecv,
-                                       "extrap peak moffat beta" );
 }
 
 INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapDropoutGapFactor )
