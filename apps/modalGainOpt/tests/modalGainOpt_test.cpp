@@ -30,6 +30,7 @@ class processPsdProcessorHarness : public processPsdProcessorT
 {
   public:
     using processPsdProcessorT::buildSmoothedProcessPsd;
+    using processPsdProcessorT::estimatePowerLawContinuum;
     using processPsdProcessorT::fillProcessPsdDropouts;
     using processPsdProcessorT::findAutoPowerLawCrossoverFreq;
 };
@@ -1111,6 +1112,35 @@ TEST_CASE( "modalPsdProcessor falls back to the highest-frequency smoothed "
 
     REQUIRE( !errc );
     REQUIRE( crossoverFreq == Approx( 100.0F ) );
+}
+
+TEST_CASE( "modalPsdProcessor anchors the power-law match to the smoothed "
+           "disturbance PSD",
+           "[modalGainOpt]" )
+{
+    std::vector<float> rawProcessPsd{ 1.0F, 1.0F, 100.0F, 0.5F, 0.25F };
+    std::vector<float> smoothedProcessPsd{ 1.0F, 1.0F, 10.0F, 0.5F, 0.25F };
+    std::vector<float> noisePsd{ 0.1F, 0.1F, 0.1F, 0.1F, 0.1F };
+    std::vector<float> freq{ 0.0F, 10.0F, 20.0F, 30.0F, 40.0F };
+
+    std::vector<float> continuumPsd;
+    float extrapolation = 0.0F;
+    size_t anchorIndex = 0;
+    mx::error_t errc = processPsdProcessorHarness::estimatePowerLawContinuum( continuumPsd,
+                                                                              extrapolation,
+                                                                              anchorIndex,
+                                                                              rawProcessPsd,
+                                                                              smoothedProcessPsd,
+                                                                              noisePsd,
+                                                                              freq,
+                                                                              1.0F,
+                                                                              10.0F,
+                                                                              20.0F,
+                                                                              0.0F );
+
+    REQUIRE( !errc );
+    REQUIRE( anchorIndex >= 1 );
+    REQUIRE( extrapolation == Approx( 20.0F ) );
 }
 
 TEST_CASE( "modalPsdProcessor repairs raw disturbance dropouts before "

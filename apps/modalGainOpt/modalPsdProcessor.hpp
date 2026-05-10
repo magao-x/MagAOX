@@ -498,14 +498,14 @@ class modalPsdProcessor
     /// Force the power-law normalization so the model matches the disturbance PSD
     /// at a chosen frequency.
     static mx::error_t
-    matchPowerLawAtFreq( realT &extrapolation,                    /**< [in.out] the continuum normalization */
-                         const std::vector<realT> &rawProcessPsd, /**< [in] the raw disturbance PSD */
-                         const std::vector<realT> &freq,          /**< [in] the one-sided frequency grid */
-                         realT powerLawIndex,                     /**< [in] the power-law exponent */
-                         realT powerLawNormFreq,                  /**< [in] the continuum normalization frequency */
-                         realT powerLawMatchFreq,                 /**< [in] the desired match frequency */
-                         realT powerLawMatchFallbackWindowHz      /**< [in] the local fallback
-                                                                     half-width */
+    matchPowerLawAtFreq( realT &extrapolation,                       /**< [in.out] the continuum normalization */
+                         const std::vector<realT> &anchorProcessPsd, /**< [in] the PSD used for continuum anchoring */
+                         const std::vector<realT> &freq,             /**< [in] the one-sided frequency grid */
+                         realT powerLawIndex,                        /**< [in] the power-law exponent */
+                         realT powerLawNormFreq,                     /**< [in] the continuum normalization frequency */
+                         realT powerLawMatchFreq,                    /**< [in] the desired match frequency */
+                         realT powerLawMatchFallbackWindowHz         /**< [in] the local fallback
+                                                                        half-width */
     );
 
     /// Invert the Moffat FWHM relation to recover the alpha parameter.
@@ -554,21 +554,22 @@ class modalPsdProcessor
     /// Estimate the `1/f^a` continuum used by the power-law and Moffat
     /// extrapolators.
     static mx::error_t estimatePowerLawContinuum(
-        std::vector<realT> &continuumPsd,                             /**< [out] the continuum PSD */
-        realT &extrapolation,                                         /**< [out] the continuum normalization */
-        size_t &anchorIndex,                                          /**< [out] the last bin used to anchor the fit */
-        const std::vector<realT> &rawProcessPsd,                      /**< [in] raw disturbance PSD */
-        const std::vector<realT> &noisePsd,                           /**< [in] the flat noise PSD */
-        const std::vector<realT> &freq,                               /**< [in] the one-sided frequency grid */
-        realT powerLawIndex,                                          /**< [in] the power-law exponent */
-        realT powerLawNormFreq,                                       /**< [in] the normalization frequency */
-        realT powerLawMatchFreq,                                      /**< [in] the optional match frequency */
-        realT powerLawMatchFallbackWindowHz,                          /**< [in] the match fallback
-                                                                         half-width */
-        bool fitPowerLawIndex = false,                                /**< [in] whether to fit the exponent */
-        realT powerLawFitMinFreqHz = c_defaultPowerLawFitMinFreqHz,   /**< [in] fit low edge */
-        realT powerLawFitMaxFreqHz = c_defaultPowerLawFitMaxFreqHz,   /**< [in] fit high edge */
-        realT powerLawFitBinWidthHz = c_defaultPowerLawFitBinWidthHz, /**< [in] fit bin width */
+        std::vector<realT> &continuumPsd,           /**< [out] the continuum PSD */
+        realT &extrapolation,                       /**< [out] the continuum normalization */
+        size_t &anchorIndex,                        /**< [out] the last bin used to anchor the fit */
+        const std::vector<realT> &rawProcessPsd,    /**< [in] raw disturbance PSD */
+        const std::vector<realT> &anchorProcessPsd, /**< [in] smoothed disturbance PSD used for anchoring */
+        const std::vector<realT> &noisePsd,         /**< [in] the flat noise PSD */
+        const std::vector<realT> &freq,             /**< [in] the one-sided frequency grid */
+        realT powerLawIndex,                        /**< [in] the power-law exponent */
+        realT powerLawNormFreq,                     /**< [in] the normalization frequency */
+        realT powerLawMatchFreq,                    /**< [in] the optional match frequency */
+        realT powerLawMatchFallbackWindowHz,        /**< [in] the match fallback
+                                                       half-width */
+        bool fitPowerLawIndex = false,              /**< [in] whether to fit the exponent */
+        realT powerLawFitMinFreqHz = c_defaultPowerLawFitMinFreqHz,                  /**< [in] fit low edge */
+        realT powerLawFitMaxFreqHz = c_defaultPowerLawFitMaxFreqHz,                  /**< [in] fit high edge */
+        realT powerLawFitBinWidthHz = c_defaultPowerLawFitBinWidthHz,                /**< [in] fit bin width */
         bool powerLawFitIncludesMatchPoint = c_defaultPowerLawFitIncludesMatchPoint, /**< [in] include match point
                                                                                       */
         realT *usedPowerLawIndex = nullptr, /**< [out] the exponent actually used */
@@ -665,10 +666,12 @@ class modalPsdProcessor
                                     realT &extrapolation,           /**< [out] the power-law continuum anchor */
                                     size_t &anchorIndex,            /**< [out] the last frequency bin used to anchor the
                                                                        fit */
-                                    std::vector<unsigned char> &repairMask, /**< [out] bins eligible for repair */
-                                    const std::vector<realT> &measuredPsd,  /**< [in] the measured one-sided PSD */
-                                    const std::vector<realT> &noisePsd,     /**< [in] the flat noise PSD */
-                                    const std::vector<realT> &freq,         /**< [in] the one-sided frequency grid */
+                                    std::vector<unsigned char> &repairMask,     /**< [out] bins eligible for repair */
+                                    const std::vector<realT> &measuredPsd,      /**< [in] the measured one-sided PSD */
+                                    const std::vector<realT> &anchorProcessPsd, /**< [in] the smoothed disturbance PSD
+                                                                                    used for anchoring */
+                                    const std::vector<realT> &noisePsd,         /**< [in] the flat noise PSD */
+                                    const std::vector<realT> &freq,     /**< [in] the one-sided frequency grid */
                                     const processModelConfig &config,   /**< [in] the disturbance-PSD configuration */
                                     realT *usedPowerLawIndex = nullptr, /**< [out] the exponent actually used */
                                     size_t *fitBinsUsed = nullptr       /**< [out] the number of populated fit bins */
@@ -682,9 +685,11 @@ class modalPsdProcessor
                                    std::vector<identifiedPeak1D> &peaks,   /**< [out] the detected peaks */
                                    std::vector<unsigned char> &repairMask, /**< [out] bins eligible for repair */
                                    const std::vector<realT> &measuredPsd,  /**< [in] the measured one-sided PSD */
-                                   const std::vector<realT> &noisePsd,     /**< [in] the flat noise PSD */
-                                   const std::vector<realT> &freq,         /**< [in] the one-sided frequency grid */
-                                   const processModelConfig &config        /**< [in] the extrapolation configuration */
+                                   const std::vector<realT> &anchorProcessPsd, /**< [in] the smoothed disturbance PSD
+                                                                                   used for anchoring */
+                                   const std::vector<realT> &noisePsd,         /**< [in] the flat noise PSD */
+                                   const std::vector<realT> &freq,             /**< [in] the one-sided frequency grid */
+                                   const processModelConfig &config /**< [in] the extrapolation configuration */
     );
 
     /// Build the disturbance PSD used for optimization from the measured PSD and
@@ -1018,6 +1023,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                result.m_powerLawAnchorIndex,
                                                processRepairMask,
                                                processMeasuredPsd,
+                                               result.m_smoothedProcessPsd,
                                                processNoisePsd,
                                                freq,
                                                effectiveConfig,
@@ -1042,6 +1048,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                               result.m_peaks,
                                               processRepairMask,
                                               processMeasuredPsd,
+                                              result.m_smoothedProcessPsd,
                                               processNoisePsd,
                                               freq,
                                               effectiveConfig );
@@ -1064,6 +1071,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                           result.m_extrapolation,
                                           anchorIndex,
                                           rawProcessPsd,
+                                          result.m_smoothedProcessPsd,
                                           processNoisePsd,
                                           freq,
                                           effectiveConfig.m_powerLawIndex,
@@ -1123,6 +1131,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                               result.m_extrapolation,
                                               rematchAnchorIndex,
                                               rawProcessPsd,
+                                              result.m_smoothedProcessPsd,
                                               processNoisePsd,
                                               freq,
                                               result.m_powerLawIndex,
@@ -1136,7 +1145,7 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
             }
 
             errc = matchPowerLawAtFreq( result.m_extrapolation,
-                                        result.m_processPsd,
+                                        result.m_smoothedProcessPsd,
                                         freq,
                                         result.m_powerLawIndex,
                                         effectiveConfig.m_powerLawNormFreq,
@@ -1645,7 +1654,7 @@ realT modalPsdProcessor<realT>::interpolatePsdAtFreq( const std::vector<realT> &
 
 template <typename realT>
 mx::error_t modalPsdProcessor<realT>::matchPowerLawAtFreq( realT &extrapolation,
-                                                           const std::vector<realT> &rawProcessPsd,
+                                                           const std::vector<realT> &anchorProcessPsd,
                                                            const std::vector<realT> &freq,
                                                            realT powerLawIndex,
                                                            realT powerLawNormFreq,
@@ -1657,10 +1666,10 @@ mx::error_t modalPsdProcessor<realT>::matchPowerLawAtFreq( realT &extrapolation,
         return mx::error_t::noerror;
     }
 
-    if( rawProcessPsd.size() != freq.size() || rawProcessPsd.empty() )
+    if( anchorProcessPsd.size() != freq.size() || anchorProcessPsd.empty() )
     {
         return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr,
-                                                 "Raw disturbance PSD and frequency grid must have the same size" );
+                                                 "Anchor disturbance PSD and frequency grid must have the same size" );
     }
 
     size_t firstPositive = firstPositiveFreqIndex( freq );
@@ -1677,7 +1686,7 @@ mx::error_t modalPsdProcessor<realT>::matchPowerLawAtFreq( realT &extrapolation,
 
     const realT tiny = std::numeric_limits<realT>::min();
     const realT refFreq = resolvePowerLawNormFreq( freq, powerLawNormFreq );
-    realT matchPsd = interpolatePsdAtFreq( rawProcessPsd, freq, powerLawMatchFreq );
+    realT matchPsd = interpolatePsdAtFreq( anchorProcessPsd, freq, powerLawMatchFreq );
     if( !std::isfinite( matchPsd ) )
     {
         return mx::error_report<mx::verbose::d>( mx::error_t::invalidarg,
@@ -1691,9 +1700,9 @@ mx::error_t modalPsdProcessor<realT>::matchPowerLawAtFreq( realT &extrapolation,
     size_t localEnd = std::upper_bound( freq.begin(), freq.end(), localMaxFreq ) - freq.begin();
     for( size_t n = localStart; n < localEnd; ++n )
     {
-        if( rawProcessPsd[n] > tiny )
+        if( anchorProcessPsd[n] > tiny )
         {
-            localPositivePsd.push_back( rawProcessPsd[n] );
+            localPositivePsd.push_back( anchorProcessPsd[n] );
         }
     }
 
@@ -1944,6 +1953,7 @@ mx::error_t modalPsdProcessor<realT>::estimatePowerLawContinuum( std::vector<rea
                                                                  realT &extrapolation,
                                                                  size_t &anchorIndex,
                                                                  const std::vector<realT> &rawProcessPsd,
+                                                                 const std::vector<realT> &anchorProcessPsd,
                                                                  const std::vector<realT> &noisePsd,
                                                                  const std::vector<realT> &freq,
                                                                  realT powerLawIndex,
@@ -1958,10 +1968,11 @@ mx::error_t modalPsdProcessor<realT>::estimatePowerLawContinuum( std::vector<rea
                                                                  realT *usedPowerLawIndex,
                                                                  size_t *fitBinsUsed )
 {
-    if( rawProcessPsd.size() != noisePsd.size() || rawProcessPsd.size() != freq.size() )
+    if( rawProcessPsd.size() != noisePsd.size() || rawProcessPsd.size() != freq.size() ||
+        anchorProcessPsd.size() != rawProcessPsd.size() )
     {
         return mx::error_report<mx::verbose::d>( mx::error_t::sizeerr,
-                                                 "Raw disturbance PSD, noise PSD, and frequency "
+                                                 "Raw PSD, anchor PSD, noise PSD, and frequency "
                                                  "grid must have the same size" );
     }
 
@@ -2010,12 +2021,12 @@ mx::error_t modalPsdProcessor<realT>::estimatePowerLawContinuum( std::vector<rea
 
     for( size_t f = 1; f < fMax; ++f )
     {
-        if( rawProcessPsd[f] <= static_cast<realT>( 0.1 ) * noisePsd[f] )
+        if( anchorProcessPsd[f] <= static_cast<realT>( 0.1 ) * noisePsd[f] )
         {
             continue;
         }
 
-        extrapolation += log10( rawProcessPsd[f] * pow( freq[f] / refFreq, localPowerLawIndex ) );
+        extrapolation += log10( anchorProcessPsd[f] * pow( freq[f] / refFreq, localPowerLawIndex ) );
         anchorIndex = f;
         ++nExtrap;
     }
@@ -2028,12 +2039,12 @@ mx::error_t modalPsdProcessor<realT>::estimatePowerLawContinuum( std::vector<rea
     {
         const realT useFreq = freq[refIndex] > static_cast<realT>( 0 ) ? freq[refIndex] : refFreq;
         extrapolation =
-            std::max( rawProcessPsd[refIndex] * static_cast<realT>( pow( useFreq / refFreq, localPowerLawIndex ) ),
+            std::max( anchorProcessPsd[refIndex] * static_cast<realT>( pow( useFreq / refFreq, localPowerLawIndex ) ),
                       tiny );
     }
 
     mx::error_t errc = matchPowerLawAtFreq( extrapolation,
-                                            rawProcessPsd,
+                                            anchorProcessPsd,
                                             freq,
                                             localPowerLawIndex,
                                             refFreq,
@@ -2683,6 +2694,7 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsdPowerLawOnly( std::vecto
                                                                       size_t &anchorIndex,
                                                                       std::vector<unsigned char> &repairMask,
                                                                       const std::vector<realT> &measuredPsd,
+                                                                      const std::vector<realT> &anchorProcessPsd,
                                                                       const std::vector<realT> &noisePsd,
                                                                       const std::vector<realT> &freq,
                                                                       const processModelConfig &config,
@@ -2708,6 +2720,7 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsdPowerLawOnly( std::vecto
                                                   extrapolation,
                                                   anchorIndex,
                                                   rawProcessPsd,
+                                                  anchorProcessPsd,
                                                   noisePsd,
                                                   freq,
                                                   config.m_powerLawIndex,
@@ -2742,6 +2755,7 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsdMoffatPeaks( std::vector
                                                                      std::vector<identifiedPeak1D> &peaks,
                                                                      std::vector<unsigned char> &repairMask,
                                                                      const std::vector<realT> &measuredPsd,
+                                                                     const std::vector<realT> &anchorProcessPsd,
                                                                      const std::vector<realT> &noisePsd,
                                                                      const std::vector<realT> &freq,
                                                                      const processModelConfig &config )
@@ -2776,6 +2790,7 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsdMoffatPeaks( std::vector
                                                   extrapolation,
                                                   anchorIndex,
                                                   rawProcessPsd,
+                                                  anchorProcessPsd,
                                                   noisePsd,
                                                   freq,
                                                   config.m_powerLawIndex,
