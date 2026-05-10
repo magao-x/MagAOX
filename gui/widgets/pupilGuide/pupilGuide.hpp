@@ -1631,12 +1631,6 @@ void pupilGuide::updateGUI()
         }
     }
 
-    ui.modwfs_fsm->updateGUI();
-    ui.modFreq_current->updateGUI();
-    ui.modRad_current->updateGUI();
-    ui.modCh1->updateGUI();
-    ui.modCh2->updateGUI();
-
     // ------picoscis
     if( m_picoState != "READY" )
     {
@@ -2012,14 +2006,6 @@ void pupilGuide::updateGUI()
         ui.camlensY_pos->onDisconnect();
     }
 
-    ui.camlensX_fsm->updateGUI();
-    ui.camlensY_fsm->updateGUI();
-    ui.camlensX_pos->updateGUI();
-    ui.camlensY_pos->updateGUI();
-
-    ui.fitThreshold->updateGUI();
-    ui.fitAvgTime->updateGUI();
-
     if( m_camwfs_align_fsmState != "READY" && m_camwfs_align_fsmState != "OPERATING" )
     {
         camwfs_align_setEnabled( false, false );
@@ -2028,11 +2014,6 @@ void pupilGuide::updateGUI()
     {
         camwfs_align_setEnabled( true, true );
     }
-
-    ui.pupTrackLoop_deltaX->updateGUI();
-    ui.pupTrackLoop_deltaY->updateGUI();
-    ui.pupTrackLoop_slider->updateGUI();
-    ui.pupTrackLoop_gain->updateGUI();
 
     if( m_twAlign_camwfs_ctrl_fsmState != "READY" && m_twAlign_camwfs_ctrl_fsmState != "OPERATING" )
     {
@@ -2043,11 +2024,6 @@ void pupilGuide::updateGUI()
         twAlign_camwfs_ctrl_setEnabled( true, true );
     }
 
-    ui.actAlignLoop_deltaX->updateGUI();
-    ui.actAlignLoop_deltaY->updateGUI();
-    ui.actAlignLoop_slider->updateGUI();
-    ui.actAlignLoop_gain->updateGUI();
-
     if( m_twAlign_camwfs_wfs_fsmState != "READY" && m_twAlign_camwfs_wfs_fsmState != "OPERATING" )
     {
         twAlign_camwfs_wfs_setEnabled( false, false );
@@ -2056,11 +2032,6 @@ void pupilGuide::updateGUI()
     {
         twAlign_camwfs_wfs_setEnabled( true, true );
     }
-
-    ui.actAlignSensor_slider->updateGUI();
-    ui.actAlignSensor_nAverage->updateGUI();
-    ui.actAlignSensor_nImages->updateGUI();
-    ui.actAlignSensor_pokeAmp->updateGUI();
 
 } // updateGUI()
 

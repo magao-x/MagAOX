@@ -1019,8 +1019,6 @@ void coronAlign::updateGUI()
         ui.checkCamsci12->setCheckState( Qt::Checked );
     }
 
-    ui.fwpupil->updateGUI();
-
 } // updateGUI()
 
 void coronAlign::enablePicoButtons()
