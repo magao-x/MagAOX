@@ -1250,17 +1250,16 @@ bool streamWriter::waitForWriteCompletion( uint64_t saveStopFrameNo )
 
         if( now >= deadline )
         {
-            log<software_critical>( { __FILE__,
-                                      __LINE__,
-                                      "timed out waiting " + std::to_string( m_writeCompletionTimeout ) +
-                                          " sec for the writer thread to finish frame " +
-                                          std::to_string( saveStopFrameNo ) } );
+            log<text_log>( "timed out waiting " + std::to_string( m_writeCompletionTimeout ) +
+                               " sec for the writer thread to finish frame " + std::to_string( saveStopFrameNo ),
+                           logPrio::LOG_NOTICE );
             return false;
         }
 
         if( now >= nextLog )
         {
-            std::cerr << __FILE__ << " " << __LINE__ << " WAITING TO FINISH WRITING " << saveStopFrameNo << "\n";
+            log<text_log>( "still waiting for the writer thread to finish frame " + std::to_string( saveStopFrameNo ),
+                           logPrio::LOG_DEBUG );
             nextLog = now + std::chrono::seconds( 1 );
         }
 
