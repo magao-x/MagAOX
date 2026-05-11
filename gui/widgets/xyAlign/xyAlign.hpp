@@ -55,6 +55,7 @@ public:
    virtual void onDisconnect();
 
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
    void enableButtons();
@@ -147,6 +148,8 @@ void xyAlign::onConnect()
 void xyAlign::onDisconnect()
 {
    m_fsmState = "";
+   m_axis1Pos = 0;
+   m_axis2Pos = 0;
 
    ui.fsmState->setEnabled(false);
 
@@ -175,6 +178,17 @@ void xyAlign::handleDefProperty( const pcf::IndiProperty & ipRecv)
    }
 
    return;
+}
+
+void xyAlign::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
+   std::string dev = ipRecv.getDevice();
+   if( dev != m_device ) return;
+
+   if( ipRecv.getName() == "fsm" || ipRecv.getName() == m_axis1Property || ipRecv.getName() == m_axis2Property )
+   {
+      onDisconnect();
+   }
 }
 
 void xyAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)

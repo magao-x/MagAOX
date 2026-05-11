@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -82,7 +83,9 @@ namespace XWCTEST_NAMESPACE
  * Through various optional CRTP base classes, many different standard functionalities can be included.
  * The following figure illustrates the facilities provided by a typical app.
  *
- * \image html xwcapp.png "Block diagram of a typical XWCApp. Note that ImageStreamIO (ISIO) is not included by default, but there are several ways to interface with 'image streams' provided in XWCTk.  Many different hardware device interfaces are similarly provided."
+ * \image html xwcapp.png "Block diagram of a typical XWCApp. Note that ImageStreamIO (ISIO) is not included by default,
+ * but there are several ways to interface with 'image streams' provided in XWCTk.  Many different hardware device
+ * interfaces are similarly provided."
  *
  * The following figure illustrates the logic of the XWCApp finite state machine (FSM).
  *
@@ -92,15 +95,16 @@ namespace XWCTEST_NAMESPACE
  * Many XWCApps can be connected across many computers.  Inter-process communication can be conducted with
  * INDI or ISIO.
  *
- * \image html xwcapps_connections.png "Connecting XWCApps across several machines, controlling various hardware" width=1200
+ * \image html xwcapps_connections.png "Connecting XWCApps across several machines, controlling various hardware"
+ * width=1200
  *
- * XWCApps are designed to be part of control loops. In the following diagram a camera at the focal plane of a coronagraph
- * is used as the wavefront sensor.  An XWCApp reads out the images and publishes them to shared memory with ISIO.
- * Loop process, which may themselves be XWCApps or, e.g., CACAO processes, perform loop calculations.
- * Finally, the deformable mirror controller sends the resultant command to the hardware device.
+ * XWCApps are designed to be part of control loops. In the following diagram a camera at the focal plane of a
+ * coronagraph is used as the wavefront sensor.  An XWCApp reads out the images and publishes them to shared memory with
+ * ISIO. Loop process, which may themselves be XWCApps or, e.g., CACAO processes, perform loop calculations. Finally,
+ * the deformable mirror controller sends the resultant command to the hardware device.
  *
  * \image html xwcapp_loops.png "XWCApps controlling hardware in a control loop." width=1200
-*/
+ */
 
 /// The base-class for XWCTk applications.
 /**
@@ -650,6 +654,13 @@ class MagAOXApp : public application
     /// Mutex for locking INDI communications.
     std::mutex m_indiMutex;
 
+    /// Mutex for locking INDI callback maps and per-entry callback state.
+    /** Lock ordering policy:
+      * 1) Prefer never holding both m_indiMutex and m_indiCallBackMutex at the same time.
+      * 2) If both are required in future code, always acquire m_indiMutex before m_indiCallBackMutex.
+      */
+    std::mutex m_indiCallBackMutex;
+
   protected:
     /// Structure to hold the call-back details for handling INDI communications.
     struct indiCallBack
@@ -660,6 +671,16 @@ class MagAOXApp : public application
 
         bool m_defReceived{ false }; /**< Flag indicating that a DefProperty has been received
                                           after a GetProperty.*/
+
+        uint32_t m_retryCount{ 0 }; ///< Number of GetProperties retries sent while waiting for a matching Def/Set.
+
+        std::chrono::steady_clock::duration m_retryDelay{
+            std::chrono::steady_clock::duration::zero() }; ///< Current retry delay for this unresolved subscription.
+
+        std::chrono::steady_clock::time_point m_nextRetry{
+            std::chrono::steady_clock::time_point::min() }; ///< Earliest instant when the next retry may be sent.
+
+        bool m_missingLogged{ false }; ///< Tracks whether a long-unresolved notice has already been logged.
     };
 
   public:
@@ -909,6 +930,21 @@ class MagAOXApp : public application
         int ( * )( void *, const pcf::IndiProperty & ) ///< [in] the callback for processing the property change
     );
 
+    /// Reset retry tracking for a monitored INDI Set-property subscription.
+    void resetIndiSetPropertyRetry( indiCallBack &callBack /**< [in/out] the subscription retry state to reset */ );
+
+    /// Determine whether an unresolved Set-property subscription should be requested now.
+    bool indiSetPropertyShouldRequest(
+        const indiCallBack &callBack, /**< [in] the subscription retry state to evaluate */
+        bool all, /**< [in] if true, force an immediate refresh regardless of retry timing */
+        const std::chrono::steady_clock::time_point &now /**< [in] the current monotonic time for scheduling */
+    ) const;
+
+    /// Update retry tracking after sending a GetProperties request for a monitored Set-property.
+    void noteIndiSetPropertyRequested( indiCallBack &callBack, /**< [in/out] the subscription retry state to update */
+                                       const std::chrono::steady_clock::time_point &now /**< [in] the current monotonic
+                                                                                             time for scheduling */ );
+
   protected:
     /// Create the INDI FIFOs
     /** Changes permissions to max available and creates the
@@ -1137,7 +1173,7 @@ class MagAOXApp : public application
     std::string m_powerElement{ "state" }; ///< The INDI element name to monitor for this device's power state.
     std::string m_powerTargetElement{ "target" }; ///< The INDI element name to monitor for this device's power state.
 
-    unsigned long m_powerOnWait{ 0 }; ///< Time in sec to wait for device to boot after power on.
+    unsigned long m_powerOnWait{ 55 }; ///< Default time in sec to wait for device to boot after power on.
 
     /* Power on waiting counter . . . */
     int m_powerOnCounter{ -1 }; ///< Counts numer of loops after power on, implements delay for device bootup.  If -1,
@@ -1587,9 +1623,9 @@ void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
                            "/" + m_powerTargetElement );
 
             if( registerIndiPropertySet(
-                    m_indiP_powerChannel, 
-                    m_powerDevice, 
-                    m_powerChannel, 
+                    m_indiP_powerChannel,
+                    m_powerDevice,
+                    m_powerChannel,
                     INDI_SETCALLBACK( m_indiP_powerChannel ) ) <
                 0 )
             {
@@ -2951,6 +2987,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertyReadOnly( pcf::IndiProperty &prop )
 
     try
     {
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
         callBackInsertResult result = m_indiNewCallBacks.insert( callBackValueType( prop.createUniqueKey(), { &prop, nullptr } ) );
 
         if( !result.second )
@@ -2992,6 +3029,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertyReadOnly( pcf::IndiProperty &prop,
         prop.setPerm( propPerm );
         prop.setState( propState );
 
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
         callBackInsertResult result = m_indiNewCallBacks.insert( callBackValueType( propName, { &prop, nullptr } ) );
 
         if( !result.second )
@@ -3022,6 +3060,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertyNew( pcf::IndiProperty &prop,
 
     try
     {
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
         callBackInsertResult result =
             m_indiNewCallBacks.insert( callBackValueType( prop.createUniqueKey(), { &prop, callBack } ) );
 
@@ -3102,6 +3141,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertySet( pcf::IndiProperty &prop,
         prop.setDevice( devName );
         prop.setName( propName );
 
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
         callBackInsertResult result = m_indiSetCallBacks.insert( callBackValueType( prop.createUniqueKey(), { &prop, callBack } ) );
 
         if( !result.second )
@@ -3120,6 +3160,62 @@ int MagAOXApp<_useINDI>::registerIndiPropertySet( pcf::IndiProperty &prop,
     }
 
     return 0;
+}
+
+template <bool _useINDI>
+inline void MagAOXApp<_useINDI>::resetIndiSetPropertyRetry( indiCallBack &callBack )
+{
+    callBack.m_retryCount   = 0;
+    callBack.m_retryDelay   = std::chrono::steady_clock::duration::zero();
+    callBack.m_nextRetry    = std::chrono::steady_clock::time_point::min();
+    callBack.m_missingLogged = false;
+}
+
+template <bool _useINDI>
+inline bool MagAOXApp<_useINDI>::indiSetPropertyShouldRequest( const indiCallBack &callBack,
+                                                               bool all,
+                                                               const std::chrono::steady_clock::time_point &now ) const
+{
+    if( all )
+    {
+        return true;
+    }
+
+    if( callBack.m_defReceived )
+    {
+        return false;
+    }
+
+    return callBack.m_nextRetry == std::chrono::steady_clock::time_point::min() || now >= callBack.m_nextRetry;
+}
+
+template <bool _useINDI>
+inline void MagAOXApp<_useINDI>::noteIndiSetPropertyRequested( indiCallBack &callBack,
+                                                               const std::chrono::steady_clock::time_point &now )
+{
+    using namespace std::chrono;
+    constexpr seconds retryInitialDelay{ 1 };
+    constexpr seconds retryMaxDelay{ 60 };
+
+    if( callBack.m_retryDelay <= steady_clock::duration::zero() )
+    {
+        callBack.m_retryDelay = retryInitialDelay;
+    }
+    else
+    {
+        callBack.m_retryDelay = std::min( callBack.m_retryDelay * 2, steady_clock::duration( retryMaxDelay ) );
+    }
+
+    ++callBack.m_retryCount;
+    callBack.m_nextRetry = now + callBack.m_retryDelay;
+
+    if( callBack.m_retryDelay >= steady_clock::duration( retryMaxDelay ) && !callBack.m_missingLogged &&
+        callBack.property != nullptr )
+    {
+        log<text_log>( "INDI property still unresolved after retry backoff: " + callBack.property->createUniqueKey(),
+                       logPrio::LOG_NOTICE );
+        callBack.m_missingLogged = true;
+    }
 }
 
 template <bool _useINDI>
@@ -3248,56 +3344,85 @@ int MagAOXApp<_useINDI>::startINDI()
 template <bool _useINDI>
 void MagAOXApp<_useINDI>::sendGetPropertySetList( bool all )
 {
-    // Unless forced by all, we only do anything if allDefs are not received yet
-    if( !all && m_allDefsReceived )
-    {
-        return;
-    }
+    std::vector<pcf::IndiProperty *> propsToGet;
 
-    callBackIterator it = m_indiSetCallBacks.begin();
+    auto now = std::chrono::steady_clock::now();
 
-    int nowFalse = 0;
-    while( it != m_indiSetCallBacks.end() )
-    {
-        if( all || it->second.m_defReceived == false )
+    int unresolvedCount = 0;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
+
+        // Unless forced by all, we only do anything if allDefs are not received yet
+        if( !all && m_allDefsReceived )
         {
-            if( it->second.property )
+            return;
+        }
+
+        callBackIterator it = m_indiSetCallBacks.begin();
+
+        while( it != m_indiSetCallBacks.end() )
+        {
+            if( all )
             {
-                if(it->first != it->second.property->createUniqueKey())
+                if( it->second.property )
                 {
-                     std::cerr << it->first << " bad device\n";
-                     it->second.m_defReceived = true;
-                     ++it;
-                    continue;
+                    if( it->first != it->second.property->createUniqueKey() )
+                    {
+                        it->second.m_defReceived = true;
+                        resetIndiSetPropertyRetry( it->second );
+                         ++it;
+                        continue;
+                    }
+
+                    propsToGet.push_back( it->second.property );
                 }
 
-                try
+                it->second.m_defReceived = false;
+                resetIndiSetPropertyRetry( it->second );
+                ++unresolvedCount;
+            }
+            else if( it->second.m_defReceived == false )
+            {
+                ++unresolvedCount;
+
+                if( it->second.property )
                 {
-                    m_indiDriver->sendGetProperties( *( it->second.property ) );
-                }
-                catch( const std::exception &e )
-                {
-                    log<software_error>( { __FILE__,
-                                           __LINE__,
-                                           "exception caught from sendGetProperties for " +
-                                               it->second.property->getName() + ": " + e.what() } );
+                    if( it->first != it->second.property->createUniqueKey() )
+                    {
+                        it->second.m_defReceived = true;
+                        resetIndiSetPropertyRetry( it->second );
+                        --unresolvedCount;
+                        ++it;
+                        continue;
+                    }
+
+                    if( indiSetPropertyShouldRequest( it->second, false, now ) )
+                    {
+                        propsToGet.push_back( it->second.property );
+                        noteIndiSetPropertyRequested( it->second, now );
+                    }
                 }
             }
 
-            it->second.m_defReceived = false;
-            ++nowFalse;
+            ++it;
         }
-        ++it;
-    }
 
-    if( nowFalse != 0 )
-    {
-        m_allDefsReceived = false;
-    }
+        m_allDefsReceived = ( unresolvedCount == 0 );
+    } //mutex scope
 
-    if( nowFalse == 0 )
+    for( auto * prop : propsToGet )
     {
-        m_allDefsReceived = true;
+        try
+        {
+            m_indiDriver->sendGetProperties( *prop );
+        }
+        catch( const std::exception &e )
+        {
+            log<software_error>( { __FILE__,
+                                   __LINE__,
+                                   "exception caught from sendGetProperties for " + prop->getName() + ": " + e.what() } );
+        }
     }
 }
 
@@ -3329,25 +3454,34 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
     // Send all properties if requested.
     if( !ipRecv.hasValidName() )
     {
-        callBackIterator it = m_indiNewCallBacks.begin();
+        std::vector<pcf::IndiProperty *> propsToSend;
 
-        while( it != m_indiNewCallBacks.end() )
-        {
-            if( it->second.property )
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
+            callBackIterator             it = m_indiNewCallBacks.begin();
+
+            while( it != m_indiNewCallBacks.end() )
             {
-                try
+                if( it->second.property )
                 {
-                    m_indiDriver->sendDefProperty( *( it->second.property ) );
+                    propsToSend.push_back( it->second.property );
                 }
-                catch( const std::exception &e )
-                {
-                    log<software_error>( { __FILE__,
-                                           __LINE__,
-                                           "exception caught from sendDefProperty for " +
-                                               it->second.property->getName() + ": " + e.what() } );
-                }
+                ++it;
             }
-            ++it;
+        } //mutex scope
+
+        for( auto * prop : propsToSend )
+        {
+            try
+            {
+                m_indiDriver->sendDefProperty( *prop );
+            }
+            catch( const std::exception &e )
+            {
+                log<software_error>( { __FILE__,
+                                       __LINE__,
+                                       "exception caught from sendDefProperty for " + prop->getName() + ": " + e.what() } );
+            }
         }
 
         // This is a possible INDI server restart, so we re-register for all notifications.
@@ -3356,26 +3490,30 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
         return;
     }
 
-    // Check if we actually have this.
-    if( m_indiNewCallBacks.count( ipRecv.createUniqueKey() ) == 0 )
+    pcf::IndiProperty * prop = nullptr;
     {
-        return;
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
+        auto                        it = m_indiNewCallBacks.find( ipRecv.createUniqueKey() );
+        if( it == m_indiNewCallBacks.end() )
+        {
+            return;
+        }
+
+        prop = it->second.property;
     }
 
     // Otherwise send just the requested property, if property is not null
-    if( m_indiNewCallBacks[ipRecv.createUniqueKey()].property )
+    if( prop )
     {
         try
         {
-            m_indiDriver->sendDefProperty( *( m_indiNewCallBacks[ipRecv.createUniqueKey()].property ) );
+            m_indiDriver->sendDefProperty( *prop );
         }
         catch( const std::exception &e )
         {
             log<software_error>( { __FILE__,
                                    __LINE__,
-                                   "exception caught from sendDefProperty for " +
-                                       m_indiNewCallBacks[ipRecv.createUniqueKey()].property->getName() + ": " +
-                                       e.what() } );
+                                   "exception caught from sendDefProperty for " + prop->getName() + ": " + e.what() } );
         }
     }
     return;
@@ -3389,17 +3527,24 @@ void MagAOXApp<_useINDI>::handleNewProperty( const pcf::IndiProperty &ipRecv )
     if( m_indiDriver == nullptr )
         return;
 
-    // Check if this is a valid name for us.
-    if( m_indiNewCallBacks.count( ipRecv.createUniqueKey() ) == 0 )
+    int ( *callBack )( void *, const pcf::IndiProperty & ) = nullptr;
     {
-        log<software_debug>( { __FILE__, __LINE__, "invalid NewProperty request for " + ipRecv.createUniqueKey() } );
-        return;
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
+        auto                        it = m_indiNewCallBacks.find( ipRecv.createUniqueKey() );
+        if( it == m_indiNewCallBacks.end() )
+        {
+            log<software_debug>( { __FILE__, __LINE__, "invalid NewProperty request for " + ipRecv.createUniqueKey() } );
+            return;
+        }
+
+        callBack = it->second.callBack;
     }
 
-    int ( *callBack )( void *, const pcf::IndiProperty & ) = m_indiNewCallBacks[ipRecv.createUniqueKey()].callBack;
-
     if( callBack )
+    {
         callBack( this, ipRecv );
+        return;
+    }
 
     log<software_debug>( { __FILE__, __LINE__, "NewProperty callback null for " + ipRecv.createUniqueKey() } );
 
@@ -3420,25 +3565,30 @@ void MagAOXApp<_useINDI>::handleSetProperty( const pcf::IndiProperty &ipRecv )
     }
 
     std::string key = ipRecv.createUniqueKey();
+    int ( *callBack )( void *, const pcf::IndiProperty & ) = nullptr;
 
-    // Check if this is valid
-    if( m_indiSetCallBacks.count( key ) > 0 )
-    {
-        m_indiSetCallBacks[key].m_defReceived = true; // record that we got this Def/Set
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
 
-        // And call the callback
-        int ( *callBack )( void *, const pcf::IndiProperty & ) = m_indiSetCallBacks[key].callBack;
-
-        if( callBack )
+        // Check if this is valid
+        auto it = m_indiSetCallBacks.find( key );
+        if( it != m_indiSetCallBacks.end() )
         {
-            callBack( this, ipRecv );
-        }
+            it->second.m_defReceived = true; // record that we got this Def/Set
+            resetIndiSetPropertyRetry( it->second );
+            callBack                 = it->second.callBack;
 
-        ///\todo log an error here because callBack should not be null
-    }
-    else
+            ///\todo log an error here because callBack should not be null
+        }
+        else
+        {
+            ///\todo log invalid SetProperty request.
+        }
+    } //mutex scope
+
+    if( callBack )
     {
-        ///\todo log invalid SetProperty request.
+        callBack( this, ipRecv );
     }
 
     return;

@@ -69,6 +69,8 @@ public:
 
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
+   void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
    void clear_focus();
@@ -170,6 +172,20 @@ void roi::onConnect()
 
 void roi::onDisconnect()
 {
+   m_appState.clear();
+   m_bin_x_curr = 0;
+   m_bin_x_tgt = 0;
+   m_bin_y_curr = 0;
+   m_bin_y_tgt = 0;
+   m_cen_x_curr = 0;
+   m_cen_x_tgt = 0;
+   m_cen_y_curr = 0;
+   m_cen_y_tgt = 0;
+   m_wid_curr = 0;
+   m_wid_tgt = 0;
+   m_hgt_curr = 0;
+   m_hgt_tgt = 0;
+
    setWindowTitle(QString(m_winTitle.c_str()) + QString(" (disconnected)"));
 
    ui.lab_bin_x_title->setEnabled(false);
@@ -235,6 +251,22 @@ void roi::onDisconnect()
 void roi::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {
    return handleSetProperty(ipRecv);
+}
+
+void roi::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
+   if(ipRecv.getDevice() != m_camName) return;
+
+   if(ipRecv.getName() == "fsm" ||
+      ipRecv.getName() == "roi_region_bin_x" ||
+      ipRecv.getName() == "roi_region_bin_y" ||
+      ipRecv.getName() == "roi_region_x" ||
+      ipRecv.getName() == "roi_region_y" ||
+      ipRecv.getName() == "roi_region_w" ||
+      ipRecv.getName() == "roi_region_h")
+   {
+      onDisconnect();
+   }
 }
 
 void roi::handleSetProperty( const pcf::IndiProperty & ipRecv)

@@ -44,6 +44,10 @@ public:
 
    virtual void subscribe();
 
+   void onDisconnect();
+
+   void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
    void updateGUI();
@@ -75,6 +79,39 @@ void roiStatus::subscribe()
    statusDisplay::subscribe();
 
    return;
+}
+
+void roiStatus::onDisconnect()
+{
+   m_bin_x_curr = 0;
+   m_bin_x_tgt = 0;
+   m_bin_y_curr = 0;
+   m_bin_y_tgt = 0;
+   m_cen_x_curr = 0;
+   m_cen_x_tgt = 0;
+   m_cen_y_curr = 0;
+   m_cen_y_tgt = 0;
+   m_wid_curr = 0;
+   m_wid_tgt = 0;
+   m_hgt_curr = 0;
+   m_hgt_tgt = 0;
+
+   statusDisplay::onDisconnect();
+}
+
+void roiStatus::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
+   if(ipRecv.getDevice() != m_device) return;
+
+   if(ipRecv.getName() == "roi_region_bin_x" ||
+      ipRecv.getName() == "roi_region_bin_y" ||
+      ipRecv.getName() == "roi_region_x" ||
+      ipRecv.getName() == "roi_region_y" ||
+      ipRecv.getName() == "roi_region_w" ||
+      ipRecv.getName() == "roi_region_h")
+   {
+      onDisconnect();
+   }
 }
 
 void roiStatus::handleSetProperty( const pcf::IndiProperty & ipRecv)

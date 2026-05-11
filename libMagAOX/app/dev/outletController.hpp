@@ -536,9 +536,10 @@ int outletController<derivedT>::channelState( const std::string & channel )
 template<class derivedT>
 int outletController<derivedT>::turnChannelOn( const std::string & channel )
 {
+   std::unique_lock<std::mutex> channelGuard;
    if(m_channels[channel].m_mutex != nullptr)
    {
-      std::lock_guard<std::mutex> guard(*m_channels[channel].m_mutex);
+      channelGuard = std::unique_lock<std::mutex>(*m_channels[channel].m_mutex);
    }
    else 
    {
@@ -557,7 +558,7 @@ int outletController<derivedT>::turnChannelOn( const std::string & channel )
 
    timespec now;
    clock_gettime(CLOCK_ISIO, &now);
-   if( m_stateDelay > 0 && ( (1.0*now.tv_sec + now.tv_nsec/1e9) - (1.0*m_channels[channel].m_stateTime.tv_sec + m_channels[channel].m_stateTime.tv_sec/1e9) < m_stateDelay))
+   if( m_stateDelay > 0 && ( (1.0*now.tv_sec + now.tv_nsec/1e9) - (1.0*m_channels[channel].m_stateTime.tv_sec + m_channels[channel].m_stateTime.tv_nsec/1e9) < m_stateDelay))
    {
       return 0;
    }
@@ -615,9 +616,10 @@ int outletController<derivedT>::turnChannelOn( const std::string & channel )
 template<class derivedT>
 int outletController<derivedT>::turnChannelOff( const std::string & channel )
 {
+   std::unique_lock<std::mutex> channelGuard;
    if(m_channels[channel].m_mutex != nullptr)
    {
-      std::lock_guard<std::mutex> guard(*m_channels[channel].m_mutex);
+      channelGuard = std::unique_lock<std::mutex>(*m_channels[channel].m_mutex);
    }
    else 
    {
@@ -636,7 +638,7 @@ int outletController<derivedT>::turnChannelOff( const std::string & channel )
 
    timespec now;
    clock_gettime(CLOCK_ISIO, &now);
-   if( m_stateDelay > 0 && ((1.0*now.tv_sec + now.tv_nsec/1e9) - (1.0*m_channels[channel].m_stateTime.tv_sec + m_channels[channel].m_stateTime.tv_sec/1e9) < m_stateDelay))
+   if( m_stateDelay > 0 && ((1.0*now.tv_sec + now.tv_nsec/1e9) - (1.0*m_channels[channel].m_stateTime.tv_sec + m_channels[channel].m_stateTime.tv_nsec/1e9) < m_stateDelay))
    {
       return 0;
    }

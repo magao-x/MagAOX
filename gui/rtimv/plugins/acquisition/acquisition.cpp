@@ -1,7 +1,54 @@
+/** \file acquisition.cpp
+ * \brief Implements the acquisition overlay for detected-star annotations.
+ */
 
 #include "acquisition.hpp"
 
+#include <algorithm>
+
 #define errPrint( expl ) std::cerr << "acquisition: " << __FILE__ << " " << __LINE__ << " " << expl << std::endl;
+
+namespace
+{
+constexpr size_t c_maxTrackedStars{ 128 };
+
+void hideStarOverlay( StretchCircle *sc, QTextEdit *te )
+{
+    if( sc != nullptr )
+    {
+        sc->setVisible( false );
+    }
+
+    if( te != nullptr )
+    {
+        te->setVisible( false );
+    }
+}
+
+void clearStarOverlays( std::vector<QPointer<StretchCircle>> &starCircles,
+                        std::vector<QPointer<QTextEdit>>     &starLabels )
+{
+    for( size_t s = 0; s < starCircles.size(); ++s )
+    {
+        if( starCircles[s] != nullptr )
+        {
+            starCircles[s]->remove();
+        }
+    }
+
+    for( size_t s = 0; s < starLabels.size(); ++s )
+    {
+        if( starLabels[s] != nullptr )
+        {
+            starLabels[s]->setVisible( false );
+            starLabels[s]->deleteLater();
+        }
+    }
+
+    starCircles.clear();
+    starLabels.clear();
+}
+} // namespace
 
 acquisition::acquisition() : rtimvOverlayInterface()
 {
@@ -9,6 +56,41 @@ acquisition::acquisition() : rtimvOverlayInterface()
 
 acquisition::~acquisition()
 {
+    std::lock_guard<std::mutex> guard( m_starCircleMutex );
+    clearStarOverlays( m_starCircles, m_starLabels );
+}
+
+void acquisition::ensureStarOverlay( size_t n )
+{
+    if( n >= m_starCircles.size() || n >= m_starLabels.size() )
+    {
+        return;
+    }
+
+    if( m_starCircles[n].isNull() )
+    {
+        StretchCircle *sc = new StretchCircle;
+        sc->setPenColor( m_color.c_str() );
+        sc->setPenWidth( 0 );
+        sc->setVisible( false );
+        sc->setStretchable( false );
+        sc->setRemovable( false );
+        connect( sc, SIGNAL( remove( StretchCircle * ) ), this, SLOT( stretchCircleRemove( StretchCircle * ) ) );
+        emit newStretchCircle( sc );
+        m_starCircles[n] = sc;
+    }
+
+    if( m_starLabels[n].isNull() )
+    {
+        QTextEdit *te = new QTextEdit( m_roa.m_graphicsView );
+        QFont      qf = te->currentFont();
+        qf.setPixelSize( m_fontSize );
+        te->setCurrentFont( qf );
+        te->setVisible( false );
+        te->setTextColor( m_color.c_str() );
+        m_roa.m_graphicsView->textEditSetup( te );
+        m_starLabels[n] = te;
+    }
 }
 
 int acquisition::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurator &config )
@@ -20,10 +102,14 @@ int acquisition::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurato
 
     if( m_deviceName == "" )
     {
+        pluginLogInfo( "not configured" );
+
         m_enableable = false;
         disableOverlay();
         return 1; // Tell rtimv to unload me since not configured.
     }
+
+    pluginLogInfo( std::format( "enabling for {}", m_deviceName ) );
 
     config.configUnused( m_cameraName, mx::app::iniFile::makeKey( "acquisition", "camera" ) );
     config.configUnused( m_circRad, mx::app::iniFile::makeKey( "acquisition", "radius" ) );
@@ -31,26 +117,45 @@ int acquisition::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurato
     config.configUnused( m_fontSize, mx::app::iniFile::makeKey( "acquisition", "fontSize" ) );
 
     m_enableable = true;
-    m_enabled = true;
+    m_enabled    = true;
 
     if( m_roa.m_dictionary != nullptr )
     {
-        // Register these
+        // Register the camera size and a bounded number of star properties up front
+        // so remote update jitter cannot force runtime growth of the shared dictionary.
         ( *m_roa.m_dictionary )[m_cameraName + ".fg_frameSize.width"].setBlob( nullptr, 0 );
         ( *m_roa.m_dictionary )[m_cameraName + ".fg_frameSize.height"].setBlob( nullptr, 0 );
         ( *m_roa.m_dictionary )[m_deviceName + ".num_stars.current"].setBlob( nullptr, 0 );
-        /*( *m_roa.m_dictionary )[m_deviceName + ".star_0.x"].setBlob( nullptr, 0 );
-        ( *m_roa.m_dictionary )[m_deviceName + ".star_0.y"].setBlob( nullptr, 0 );
-        ( *m_roa.m_dictionary )[m_deviceName + ".star_1.x"].setBlob( nullptr, 0 );
-        ( *m_roa.m_dictionary )[m_deviceName + ".star_1.y"].setBlob( nullptr, 0 );*/
 
-        //(*m_roa.m_dictionary)[m_deviceName + ""].setBlob(nullptr, 0);
+        for( size_t n = 0; n < c_maxTrackedStars; ++n )
+        {
+            std::string star = ".star_" + std::to_string( n );
+
+            ( *m_roa.m_dictionary )[m_deviceName + star + ".x"].setBlob( nullptr, 0 );
+            ( *m_roa.m_dictionary )[m_deviceName + star + ".y"].setBlob( nullptr, 0 );
+            ( *m_roa.m_dictionary )[m_deviceName + star + ".peak"].setBlob( nullptr, 0 );
+            ( *m_roa.m_dictionary )[m_deviceName + star + ".fwhm"].setBlob( nullptr, 0 );
+        }
     }
 
     connect( this,
              SIGNAL( newStretchCircle( StretchCircle * ) ),
              m_roa.m_mainWindowObject,
              SLOT( addStretchCircle( StretchCircle * ) ) );
+
+    {
+        std::lock_guard<std::mutex> guard( m_starCircleMutex );
+
+        m_starCircles.resize( c_maxTrackedStars, nullptr );
+        m_starLabels.resize( c_maxTrackedStars, nullptr );
+
+        for( size_t n = 0; n < c_maxTrackedStars; ++n )
+        {
+            // Pre-create the full bounded overlay set so delayed INDI updates only
+            // show and hide items instead of tearing down Qt objects mid-stream.
+            ensureStarOverlay( n );
+        }
+    }
 
     if( m_enabled )
         enableOverlay();
@@ -151,122 +256,90 @@ int acquisition::updateOverlay()
     if( m_roa.m_graphicsView == nullptr )
         return 0;
 
-    std::string sstr;
-
     // Get curr size
-    m_width = getBlobVal<int>( m_cameraName, "fg_frameSize.width", -1 );
+    m_width  = getBlobVal<int>( m_cameraName, "fg_frameSize.width", -1 );
     m_height = getBlobVal<int>( m_cameraName, "fg_frameSize.height", -1 );
 
-    size_t nstars = getBlobVal<int>("num_stars.current", 0);
-
-    if(m_nStars != nstars)
+    int rawStarCount = getBlobVal<int>( "num_stars.current", 0 );
+    if( rawStarCount < 0 )
     {
-        m_nStars = nstars;
-        for( size_t n = 0; n < m_nStars; ++n )
-        {
-            std::string star = ".star_" + std::to_string( n );
-
-            ( *m_roa.m_dictionary )[m_deviceName + star + ".x"].setBlob( nullptr, 0 );
-            ( *m_roa.m_dictionary )[m_deviceName + star + ".y"].setBlob( nullptr, 0 );
-            ( *m_roa.m_dictionary )[m_deviceName + star + ".peak"].setBlob( nullptr, 0 );
-            ( *m_roa.m_dictionary )[m_deviceName + star + ".fwhm"].setBlob( nullptr, 0 );
-        }
-
-        std::lock_guard<std::mutex> guard( m_starCircleMutex );
-
-        //deallocate circles
-        for( size_t s = 0; s < m_starCircles.size(); ++s )
-        {
-            if( m_starCircles[s] != nullptr )
-            {
-                m_starCircles[s]->remove();
-            }
-        }
-
-        //deallocate labels
-        for( size_t s = 0; s < m_starLabels.size(); ++s )
-        {
-            if( m_starLabels[s] != nullptr )
-            {
-                m_starLabels[s]->deleteLater();
-            }
-        }
-
-        m_starCircles.resize( m_nStars, nullptr );
-        m_starLabels.resize( m_nStars, nullptr );
-
-        for( size_t n = 0; n < m_nStars; ++n )
-        {
-            //create circle
-            m_starCircles[n] = new StretchCircle;
-            m_starCircles[n]->setPenColor( m_color.c_str() );
-            m_starCircles[n]->setPenWidth( 0 );
-            m_starCircles[n]->setVisible( false );
-            m_starCircles[n]->setStretchable( false );
-            m_starCircles[n]->setRemovable( false );
-            connect( m_starCircles[n],
-                     SIGNAL( remove( StretchCircle * ) ),
-                     this,
-                     SLOT( stretchCircleRemove( StretchCircle * ) ) );
-            emit newStretchCircle( m_starCircles[n] );
-
-            //create label
-            m_starLabels[n] = new QTextEdit( m_roa.m_graphicsView );
-            QFont qf;
-            qf = m_starLabels[n]->currentFont();
-            qf.setPixelSize( m_fontSize );
-            m_starLabels[n]->setCurrentFont( qf );
-            m_starLabels[n]->setVisible( false );
-            m_starLabels[n]->setTextColor( m_color.c_str() );
-            m_roa.m_graphicsView->textEditSetup(m_starLabels[n]);
-        }
+        rawStarCount = 0;
     }
 
-    std::vector<float> xs( m_nStars, -1 );
-    std::vector<float> ys( m_nStars, -1 );
+    size_t nstars = std::min( static_cast<size_t>( rawStarCount ), c_maxTrackedStars );
 
-    for( size_t n = 0; n < m_nStars; ++n )
+    m_nStars = nstars;
+
+    if( m_width <= 0 || m_height <= 0 )
     {
+        std::lock_guard<std::mutex> guard( m_starCircleMutex );
+
+        for( size_t n = 0; n < m_starCircles.size(); ++n )
+        {
+            hideStarOverlay( m_starCircles[n], m_starLabels[n] );
+        }
+
+        return 0;
+    }
+
+    for( size_t n = 0; n < m_starCircles.size(); ++n )
+    {
+        std::lock_guard<std::mutex> guard( m_starCircleMutex );
+
+        ensureStarOverlay( n );
+
+        StretchCircle *sc = m_starCircles[n];
+        QTextEdit     *te = m_starLabels[n];
+
+        if( sc == nullptr || te == nullptr )
+        {
+            continue;
+        }
+
+        if( n >= m_nStars )
+        {
+            hideStarOverlay( sc, te );
+            continue;
+        }
+
         std::string star = "star_" + std::to_string( n );
 
-        xs[n] = getBlobVal<float>( star + ".x", -1 );
-        ys[n] = getBlobVal<float>( star + ".y", -1 );
+        float x = getBlobVal<float>( star + ".x", -1 );
+        float y = getBlobVal<float>( star + ".y", -1 );
 
-        //Now for each valid star position, set up the overlay
-        if( xs[n] >= 0 && ys[n] >= 0)
+        if( x >= 0 && y >= 0 )
         {
-            std::lock_guard<std::mutex> guard( m_starCircleMutex );
-
-            StretchCircle *sc = m_starCircles[n]; //Just for convenience
-            QTextEdit * te = m_starLabels[n];
-
-            //Move the circle
-            float xc = xs[n] - 0.5 * ( m_circRad );
-            float yc = ( m_height - ys[n] ) - 0.5 * ( m_circRad );
+            // Move the circle
+            float xc = x - 0.5 * ( m_circRad );
+            float yc = ( m_height - y ) - 0.5 * ( m_circRad );
 
             sc->setRect( xc, yc, m_circRad, m_circRad );
             sc->setVisible( true );
 
-            //Format the number
+            // Format the number
             char tmp[32];
             snprintf( tmp, sizeof( tmp ), "%ld", n );
             te->setText( tmp );
 
-            //Set size based on the font size
-            QFontMetrics fm(te->currentFont());
-            QSize textSize = fm.size(0, tmp);
-            te->resize( textSize.width()+5,textSize.height()+5 );
+            // Set size based on the font size
+            QFontMetrics fm( te->currentFont() );
+            QSize        textSize = fm.size( 0, tmp );
+            te->resize( textSize.width() + 5, textSize.height() + 5 );
 
-            //Place the number
-            //Take scene coordinates to viewport coordinates.
-            QRectF sbr = sc->sceneBoundingRect();
-            float qpf_x = sbr.x() + sc->rect().width() * 0.5 - sc->radius();
-            float qpf_y = sbr.y() + sc->rect().height() * 0.5 - sc->radius();
-            QPoint qr = m_roa.m_graphicsView->mapFromScene(QPointF( qpf_x , qpf_y ));
+            // Place the number
+            // Take scene coordinates to viewport coordinates.
+            QRectF sbr   = sc->sceneBoundingRect();
+            float  qpf_x = sbr.x() + sc->rect().width() * 0.5 - sc->radius();
+            float  qpf_y = sbr.y() + sc->rect().height() * 0.5 - sc->radius();
+            QPoint qr    = m_roa.m_graphicsView->mapFromScene( QPointF( qpf_x, qpf_y ) );
 
             te->move( qr.x(), qr.y() );
 
             te->setVisible( true );
+        }
+        else
+        {
+            hideStarOverlay( sc, te );
         }
     }
 
@@ -275,6 +348,11 @@ int acquisition::updateOverlay()
 
 void acquisition::keyPressEvent( QKeyEvent *ke )
 {
+    if( ke == nullptr || ke->text().isEmpty() )
+    {
+        return;
+    }
+
     char key = ke->text()[0].toLatin1();
 
     if( key == 'A' )
@@ -303,17 +381,11 @@ void acquisition::enableOverlay()
 
 void acquisition::disableOverlay()
 {
+    std::lock_guard<std::mutex> guard( m_starCircleMutex );
+
     for( size_t n = 0; n < m_nStars; ++n )
     {
-        if(m_starCircles[n] != nullptr)
-        {
-            m_starCircles[n]->setVisible(false);
-        }
-        if(m_starLabels[n] != nullptr)
-        {
-            m_starLabels[n]->setVisible(false);
-        }
-
+        hideStarOverlay( m_starCircles[n], m_starLabels[n] );
     }
 
     m_enabled = false;
@@ -321,26 +393,16 @@ void acquisition::disableOverlay()
 
 void acquisition::stretchCircleRemove( StretchCircle *sb )
 {
-    static_cast<void>( sb );
-    /*
-    std::cerr << "acquisition::stretchBoxRemove 1\n";
-    std::lock_guard<std::mutex> guard(m_roiBoxMutex);
-    if(!m_roiBox)
+    std::lock_guard<std::mutex> guard( m_starCircleMutex );
+
+    for( size_t n = 0; n < m_starCircles.size(); ++n )
     {
-        return;
+        if( m_starCircles[n] == sb )
+        {
+            m_starCircles[n] = nullptr;
+            return;
+        }
     }
-
-    std::cerr << "acquisition::stretchBoxRemove 2\n";
-
-    if(sb != m_roiBox)
-    {
-        return;
-    }
-
-    std::cerr << "acquisition::stretchBoxRemove 3\n";
-
-    m_roiBox = nullptr;
-    */
 }
 
 std::vector<std::string> acquisition::info()

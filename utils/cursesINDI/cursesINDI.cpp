@@ -132,6 +132,11 @@ retry:
          if( ci->getQuitProcess() || ci->m_shutdown) break;
          else continue;
       }
+      else if(ch == 3)
+      {
+         ci->m_shutdown = true;
+         break;
+      }
 
       //Get hold downs
       int ch0 = ch;
@@ -184,6 +189,7 @@ retry:
          default:
             if(fpout) *fpout << "other: " << npress << std::endl;
             ci->keyPressed(ch0);
+            if(ci->m_shutdown) break;
             continue;
             break;
       }

@@ -45,14 +45,16 @@ realclean: clean
 #########################
 
 .PHONY: coverage
-coverage:
+coverage: coverage_clean
 	${MAKE} all COVERAGE=1
 
 coverage_clean:
 	find .. -path '*/tests/*.gcno' -delete
 	find .. -path '*/tests/*.gcda' -delete
 	find .. -path '*/tests/*.gcov' -delete
-	${MAKE} clean COVERAGE=1
+	@rm -f testMain.gcno
+	@rm -f testMain.gcda
+	${MAKE} realclean COVERAGE=1
 
 ##################################################################################
 ## Sanitizer build

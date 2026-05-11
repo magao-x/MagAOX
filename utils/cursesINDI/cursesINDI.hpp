@@ -806,16 +806,25 @@ void cursesINDI::deviceSearch( int ch )
    bool updated = false;
    if( m_deviceSearching == true )
    {
-      if( ch == KEY_BACKSPACE )
+
+      // CTRL+L clears search bar
+      if ( (ch == (0x1f & 'l')) && (m_deviceTarget.size() > 0) )
       {
-         if(m_deviceTarget.size() > 0)
-         {
-            std::lock_guard<std::mutex> lock(m_drawMutex);
-            m_deviceTarget.erase(m_deviceTarget.size()-1,1);
-            wprintw(w_interactWin, "\b \b");
-            wrefresh(w_interactWin);
-            return;
-         }
+         std::lock_guard<std::mutex> lock(m_drawMutex);
+         m_deviceTarget = "search: ";
+         wclear(w_interactWin);
+         wprintw(w_interactWin, "%s", m_deviceTarget.c_str());
+         wrefresh(w_interactWin);
+         m_deviceSearching = false;
+         return;
+      }
+      else if( (ch == KEY_BACKSPACE) && (m_deviceTarget.size() > 0) )
+      {
+         std::lock_guard<std::mutex> lock(m_drawMutex);
+         m_deviceTarget.erase(m_deviceTarget.size()-1,1);
+         wprintw(w_interactWin, "\b \b");
+         wrefresh(w_interactWin);
+         return;
       }
       else if (std::isprint(ch))
       {
@@ -920,6 +929,11 @@ void cursesINDI::keyPressed( int ch )
                }
                else continue;
             }
+            else if(nch == 3)
+            {
+               m_shutdown = true;
+               break;
+            }
 
             cursStat(1);
 
@@ -951,6 +965,7 @@ void cursesINDI::keyPressed( int ch )
             }
          }
          if(escape) break;
+         if(m_shutdown) break;
 
          //mutex scope
          {
@@ -963,6 +978,12 @@ void cursesINDI::keyPressed( int ch )
          nch = 0;
          while( (nch = wgetch(w_interactWin)) == ERR)
          {
+         }
+
+         if(nch == 3)
+         {
+            m_shutdown = true;
+            break;
          }
 
          if(nch == 'y')
@@ -1032,6 +1053,12 @@ void cursesINDI::keyPressed( int ch )
          {
          }
 
+         if(nch == 3)
+         {
+            m_shutdown = true;
+            break;
+         }
+
          if(nch == 'y')
          {
             pcf::IndiProperty ipSend(knownProps[it->second.propKey].getType());
@@ -1080,6 +1107,12 @@ void cursesINDI::keyPressed( int ch )
          int nch = 0;
          while( (nch = wgetch(w_interactWin)) == ERR)
          {
+         }
+
+         if(nch == 3)
+         {
+            m_shutdown = true;
+            break;
          }
 
          if(nch == 'y')

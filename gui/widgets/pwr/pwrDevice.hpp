@@ -219,6 +219,10 @@ struct pwrDevice : public QWidget
 
     QwtTextLabel *deviceNameLabel();
 
+    void onDisconnect();
+
+    void handleDelProperty( const pcf::IndiProperty &ipRecv );
+
     void handleSetProperty( const pcf::IndiProperty &ipRecv );
 
     double current();
@@ -338,6 +342,51 @@ pwrChannel *pwrDevice::channel( size_t channelNo )
 QwtTextLabel *pwrDevice::deviceNameLabel()
 {
     return m_deviceNameLabel;
+}
+
+void pwrDevice::onDisconnect()
+{
+    m_current.resize( 60 );
+    m_voltage.resize( 60 );
+    m_frequency.resize( 60 );
+
+    for( size_t i = 0; i < m_numChannels; ++i )
+    {
+        m_channels[i]->onDisconnect();
+    }
+}
+
+void pwrDevice::handleDelProperty( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getDevice() != deviceName() )
+        return;
+
+    if( ipRecv.getName() == "load" )
+    {
+        m_current.resize( 60 );
+        m_voltage.resize( 60 );
+        m_frequency.resize( 60 );
+        emit loadChanged();
+        return;
+    }
+
+    if( ipRecv.getName() == "channelOutlets" || ipRecv.getName() == "channelOnDelays" || ipRecv.getName() == "channelOffDelays" )
+    {
+        for( size_t i = 0; i < m_numChannels; ++i )
+        {
+            m_channels[i]->onDisconnect();
+        }
+        return;
+    }
+
+    for( size_t i = 0; i < m_numChannels; ++i )
+    {
+        if( ipRecv.getName() == m_channels[i]->channelName() )
+        {
+            m_channels[i]->onDisconnect();
+            return;
+        }
+    }
 }
 
 void pwrDevice::handleSetProperty( const pcf::IndiProperty &ipRecv )

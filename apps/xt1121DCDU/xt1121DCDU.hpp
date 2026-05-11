@@ -207,6 +207,10 @@ int xt1121DCDU::appLogic()
    if(state() == stateCodes::READY)
    {
       std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
+      if( !lock.owns_lock() )
+      {
+         return 0;
+      }
 
       int rv = updateOutletStates();
 
@@ -350,6 +354,7 @@ pcf::IndiProperty * xt1121DCDU::xtChannelProperty( int outletNum )
 
 INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch0)(const pcf::IndiProperty &ipRecv)
 {
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    ip_ch0 = ipRecv;
 
    return updateOutletState(0);
@@ -357,6 +362,7 @@ INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch0)(const pcf::IndiProperty &ipRecv)
 
 INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch1)(const pcf::IndiProperty &ipRecv)
 {
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    ip_ch1 = ipRecv;
 
    return updateOutletState(1);
@@ -364,6 +370,7 @@ INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch1)(const pcf::IndiProperty &ipRecv)
 
 INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch2)(const pcf::IndiProperty &ipRecv)
 {
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    ip_ch2 = ipRecv;
 
    return updateOutletState(2);
@@ -371,6 +378,7 @@ INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch2)(const pcf::IndiProperty &ipRecv)
 
 INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch3)(const pcf::IndiProperty &ipRecv)
 {
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    ip_ch3 = ipRecv;
 
    return updateOutletState(3);
@@ -378,6 +386,7 @@ INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch3)(const pcf::IndiProperty &ipRecv)
 
 INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch4)(const pcf::IndiProperty &ipRecv)
 {
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    ip_ch4 = ipRecv;
 
    return updateOutletState(4);
@@ -385,6 +394,7 @@ INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch4)(const pcf::IndiProperty &ipRecv)
 
 INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch5)(const pcf::IndiProperty &ipRecv)
 {
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    ip_ch5 = ipRecv;
 
    return updateOutletState(5);
@@ -392,6 +402,7 @@ INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch5)(const pcf::IndiProperty &ipRecv)
 
 INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch6)(const pcf::IndiProperty &ipRecv)
 {
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    ip_ch6 = ipRecv;
 
    return updateOutletState(6);
@@ -399,6 +410,7 @@ INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch6)(const pcf::IndiProperty &ipRecv)
 
 INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch7)(const pcf::IndiProperty &ipRecv)
 {
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    ip_ch7 = ipRecv;
 
    return updateOutletState(7);

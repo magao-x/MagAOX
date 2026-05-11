@@ -75,6 +75,13 @@ private:
    /// Flag to hold the status of this connection.
    bool m_good {true};
 
+   /// Mutex protecting the lifecycle and use of m_outGoing.
+   /** This is intentionally separate from MagAOXApp::m_indiMutex so callers can
+     * reach sendNewProperty() regardless of whether they already hold the app's
+     * INDI lock.
+     */
+   std::mutex m_outGoingMutex;
+
 public:
 
    /// Public c'tor
@@ -179,6 +186,7 @@ indiDriver<parentT>::indiDriver ( parentT * parent,
 template<class parentT>
 indiDriver<parentT>::~indiDriver()
 {
+   std::lock_guard<std::mutex> lock(m_outGoingMutex);
    if(m_outGoing) delete m_outGoing;
 
 }
@@ -221,6 +229,8 @@ void  indiDriver<parentT>::update()
 template<class parentT>
 int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
 {
+   std::lock_guard<std::mutex> lock(m_outGoingMutex);
+
    //If there is an existing client, check if it has exited.
    if( m_outGoing != nullptr)
    {

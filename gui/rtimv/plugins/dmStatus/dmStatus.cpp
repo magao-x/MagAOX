@@ -23,6 +23,7 @@ int dmStatus::attachOverlay( rtimvOverlayAccess & roa,
 
    if(m_deviceName == "")
    {
+      pluginLogInfo("not configured");
       m_enableable = false;
       disableOverlay();
       return 1; //Tell rtimv to unload me since not configured.
@@ -33,9 +34,10 @@ int dmStatus::attachOverlay( rtimvOverlayAccess & roa,
 
    config.configUnused(m_rhDeviceName, mx::app::iniFile::makeKey("dm", "rhDevice"));
 
-   if(m_enabled) enableOverlay();
-   else disableOverlay();
+   pluginLogInfo(std::format("enabling for {}/{}", m_deviceName, m_rhDeviceName));
 
+   enableOverlay();
+   
    if(m_roa.m_dictionary != nullptr)
    {
       //Register these

@@ -16,13 +16,17 @@ int pwfsAlignment::attachOverlay( rtimvOverlayAccess & roa,
                                 )
 {
 
-    config.configUnused(m_deviceName, mx::app::iniFile::makeKey("pwfsAlignment", "name"));
-
-    if(m_deviceName == "") return 1; //Tell rtimv we can't be used.
-
     m_roa = roa;
 
     m_enabled = false;
+
+    config.configUnused(m_deviceName, mx::app::iniFile::makeKey("pwfsAlignment", "name"));
+
+    if(m_deviceName == "") 
+    {
+      pluginLogInfo("not configured");
+      return 1; //Tell rtimv we can't be used.
+    }
 
 
     if(m_roa.m_dictionary != nullptr)
@@ -37,6 +41,8 @@ int pwfsAlignment::attachOverlay( rtimvOverlayAccess & roa,
         //(*m_roa.m_dictionary)[m_deviceName + "."].setBlob(nullptr, 0);
 
     }
+
+    pluginLogInfo(std::format("configured for {}", m_deviceName));
 
     if(m_enabled) enableOverlay();
     else disableOverlay();

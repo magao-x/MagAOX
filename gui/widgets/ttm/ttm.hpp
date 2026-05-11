@@ -53,6 +53,8 @@ public:
 
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
+   void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
    void sendNewPos1(double np);
@@ -183,6 +185,15 @@ void ttm::onConnect()
 
 void ttm::onDisconnect()
 {
+   m_appState.clear();
+   m_naxes = 2;
+   m_pos_1 = 0.0;
+   m_pos_2 = 0.0;
+   m_pos_3 = 0.0;
+   m_shmimName.clear();
+   m_flatSet = false;
+   m_testSet = false;
+
    ui.label_device_status->onDisconnect();
 
    ui.pos_1->onDisconnect();
@@ -193,6 +204,25 @@ void ttm::onDisconnect()
 void ttm::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {
    return handleSetProperty(ipRecv);
+}
+
+void ttm::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
+   if(ipRecv.getDevice() != m_procName) return;
+
+   if(ipRecv.getName() == "fsm" ||
+      ipRecv.getName() == "pos_1" ||
+      ipRecv.getName() == "pos_2" ||
+      ipRecv.getName() == "pos_3" ||
+      ipRecv.getName() == "sm_shmimName" ||
+      ipRecv.getName() == "flat_shmim" ||
+      ipRecv.getName() == "flat_set" ||
+      ipRecv.getName() == "test" ||
+      ipRecv.getName() == "test_shmim" ||
+      ipRecv.getName() == "test_set")
+   {
+      onDisconnect();
+   }
 }
 
 void ttm::handleSetProperty( const pcf::IndiProperty & ipRecv)

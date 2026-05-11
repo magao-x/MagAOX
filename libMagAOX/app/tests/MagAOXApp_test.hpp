@@ -26,9 +26,9 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
     {
     }
 
-    bool appStartupFail {false};
-    bool appLogicFail {false};
-    bool appShutdownFail {false};
+    bool appStartupFail{ false };
+    bool appLogicFail{ false };
+    bool appShutdownFail{ false };
 
     void addUnusedConfig()
     {
@@ -43,7 +43,7 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
 
     virtual int appStartup()
     {
-        if(appStartupFail)
+        if( appStartupFail )
         {
             return -1;
         }
@@ -52,7 +52,7 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
     }
     virtual int appLogic()
     {
-        if(appLogicFail)
+        if( appLogicFail )
         {
             return -1;
         }
@@ -61,7 +61,7 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
     }
     virtual int appShutdown()
     {
-        if(appShutdownFail)
+        if( appShutdownFail )
         {
             return -1;
         }
@@ -229,7 +229,7 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
     {
         m_euidReal = euidr;
 
-        if(set)
+        if( set )
         {
             return APP_XWCTEST_BASE::setEuidReal();
         }
@@ -256,6 +256,51 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
     int unlockPID()
     {
         return APP_XWCTEST_BASE::unlockPID();
+    }
+
+    std::string setPropertyKey( const pcf::IndiProperty &prop )
+    {
+        return prop.createUniqueKey();
+    }
+
+    void resetSetPropertyRetry( const std::string &key )
+    {
+        APP_XWCTEST_BASE::resetIndiSetPropertyRetry( m_indiSetCallBacks.at( key ) );
+    }
+
+    bool shouldRequestSetProperty( const std::string &key, bool all, const std::chrono::steady_clock::time_point &now )
+    {
+        return APP_XWCTEST_BASE::indiSetPropertyShouldRequest( m_indiSetCallBacks.at( key ), all, now );
+    }
+
+    void noteSetPropertyRequested( const std::string &key, const std::chrono::steady_clock::time_point &now )
+    {
+        APP_XWCTEST_BASE::noteIndiSetPropertyRequested( m_indiSetCallBacks.at( key ), now );
+    }
+
+    uint32_t setPropertyRetryCount( const std::string &key )
+    {
+        return m_indiSetCallBacks.at( key ).m_retryCount;
+    }
+
+    std::chrono::steady_clock::duration setPropertyRetryDelay( const std::string &key )
+    {
+        return m_indiSetCallBacks.at( key ).m_retryDelay;
+    }
+
+    std::chrono::steady_clock::time_point setPropertyNextRetry( const std::string &key )
+    {
+        return m_indiSetCallBacks.at( key ).m_nextRetry;
+    }
+
+    bool setPropertyMissingLogged( const std::string &key )
+    {
+        return m_indiSetCallBacks.at( key ).m_missingLogged;
+    }
+
+    void markSetPropertyReceived( const std::string &key, bool received )
+    {
+        m_indiSetCallBacks.at( key ).m_defReceived = received;
     }
 };
 

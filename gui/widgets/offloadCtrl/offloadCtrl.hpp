@@ -43,6 +43,8 @@ public:
 
     void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
+    void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
     void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
 public slots:
@@ -177,6 +179,11 @@ void offloadCtrl::onConnect()
 
 void offloadCtrl::onDisconnect()
 {
+    m_t2wFsmState.clear();
+    m_offlState = false;
+    m_tweeterAvgFsmState.clear();
+    m_tcsiFsmState.clear();
+
     setWindowTitle(QString("Offloading Ctrl (disconnected)"));
 
     xWidget::onDisconnect();
@@ -186,6 +193,31 @@ void offloadCtrl::onDisconnect()
 void offloadCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {
    return handleSetProperty(ipRecv);
+}
+
+void offloadCtrl::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
+    if(ipRecv.getDevice() == "t2wOffloader")
+    {
+        if(ipRecv.getName() == "fsm" || ipRecv.getName() == "offload")
+        {
+            onDisconnect();
+        }
+    }
+    else if(ipRecv.getDevice() == "dmtweeter-avg")
+    {
+        if(ipRecv.getName() == "fsm")
+        {
+            onDisconnect();
+        }
+    }
+    else if(ipRecv.getDevice() == "tcsi")
+    {
+        if(ipRecv.getName() == "fsm")
+        {
+            onDisconnect();
+        }
+    }
 }
 
 void offloadCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)

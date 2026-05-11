@@ -71,6 +71,18 @@
     <walk-up email="aweinberger@carnegiescience.edu">
       <file name="alycia.mp3" />
     </walk-up>
+    <walk-up email="taras@strw.leidenuniv.nl">
+      <file name="adam.mp3" />
+    </walk-up>
+    <walk-up email="viktoria.kutnohorsky@durham.ac.uk">
+      <file name="viktoria.mp3" />
+    </walk-up>
+    <walk-up email="robert.j.harris@durham.ac.uk">
+      <file name="robert.mp3" />
+    </walk-up>
+    <walk-up email="jkueny@arizona.edu">
+      <file name="jay_walkup.mp3" />
+    </walk-up>
   </walk-ups>
   <soundboard>
     <button name="NotJared">
@@ -334,6 +346,11 @@
     </transition>
     <transition value="Off">
       <speak>Free running</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="pdu3.blower.state">
+    <transition value="On">
+      <file name="noonoo.mp3" />
     </transition>
   </react-to>
 

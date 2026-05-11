@@ -39,6 +39,8 @@ public:
 
    virtual void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
+   virtual void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
    virtual void updateGUI();
@@ -81,12 +83,26 @@ void shutterStatus::onConnect()
 
 void shutterStatus::onDisconnect()
 {
+   m_status.clear();
+   m_state = 0;
+   m_tgt_state = -1;
    ui.label->setText("shutter (disconnected)");
+   ui.shutter->onDisconnect();
 }
 
 void shutterStatus::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {
    return handleSetProperty(ipRecv);
+}
+
+void shutterStatus::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
+   if(ipRecv.getDevice() != m_camName) return;
+
+   if(ipRecv.getName() == "shutter" || ipRecv.getName() == "shutter_status")
+   {
+      onDisconnect();
+   }
 }
 
 void shutterStatus::handleSetProperty( const pcf::IndiProperty & ipRecv)

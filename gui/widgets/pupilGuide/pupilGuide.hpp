@@ -200,6 +200,7 @@ class pupilGuide : public xWidget
     virtual void onDisconnect();
 
     void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/ );
     void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
 
     void modGUISetEnable( bool enableModGUI, bool enableModArrows );
@@ -871,6 +872,20 @@ void pupilGuide::onDisconnect()
 void pupilGuide::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
     return handleSetProperty( ipRecv );
+}
+
+void pupilGuide::handleDelProperty( const pcf::IndiProperty &ipRecv )
+{
+    const std::string dev = ipRecv.getDevice();
+
+    if( dev == "modwfs" || dev == "camwfs" || dev == "tcsi" || dev == "dmwoofer" || dev == "wooferModes" ||
+        dev == "picomotors" || dev == "camwfs-fit" || dev == "camwfs-avg" || dev == "ttmpupil" ||
+        dev == "ttmperi" || dev == "dmtweeter" || dev == "dmncpc" || dev == "camwfs-align" ||
+        dev == "twAlign-camwfs-ctrl" || dev == "twAlign-camwfs-wfs" || dev == "stagecamlensx" ||
+        dev == "stagecamlensy" )
+    {
+        onDisconnect();
+    }
 }
 
 void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )

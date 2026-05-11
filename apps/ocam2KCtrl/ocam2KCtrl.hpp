@@ -1,21 +1,20 @@
 /** \file ocam2KCtrl.hpp
-  * \brief The MagAO-X OCAM2K EMCCD camera controller.
-  *
-  * \ingroup ocam2KCtrl_files
-  */
+ * \brief The MagAO-X OCAM2K EMCCD camera controller.
+ *
+ * \ingroup ocam2KCtrl_files
+ */
 
 #ifndef ocam2KCtrl_hpp
 #define ocam2KCtrl_hpp
 
-
+#include <fcntl.h>
 #include <edtinc.h>
-
-
+#include <unistd.h>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
-typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; //This needs to be before pdvUtils.hpp for logging to work.
+typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; // This needs to be before pdvUtils.hpp for logging to work.
 
 #include "fli/ocam2_sdk.h"
 #include "ocamUtils.hpp"
@@ -26,25 +25,29 @@ namespace app
 {
 
 /** \defgroup ocam2KCtrl OCAM2K EMCCD Camera
-  * \brief Control of the OCAM2K EMCCD Camera.
-  *
-  * <a href="../handbook/operating/software/apps/ocam2KCtrl.html">Application Documentation</a>
-  *
-  * \ingroup apps
-  *
-  */
+ * \brief Control of the OCAM2K EMCCD Camera.
+ *
+ * <a href="../handbook/operating/software/apps/ocam2KCtrl.html">Application Documentation</a>
+ *
+ * \ingroup apps
+ *
+ */
 
 /** \defgroup ocam2KCtrl_files OCAM2K EMCCD Camera Files
-  * \ingroup ocam2KCtrl
-  */
+ * \ingroup ocam2KCtrl
+ */
 
 /** MagAO-X application to control the OCAM 2K EMCCD
-  *
-  * \ingroup ocam2KCtrl
-  *
-  */
-class ocam2KCtrl : public MagAOXApp<>, public dev::stdCamera<ocam2KCtrl>, public dev::edtCamera<ocam2KCtrl>, public dev::frameGrabber<ocam2KCtrl>,
-                                           public dev::dssShutter<ocam2KCtrl>, public dev::telemeter<ocam2KCtrl>
+ *
+ * \ingroup ocam2KCtrl
+ *
+ */
+class ocam2KCtrl : public MagAOXApp<>,
+                   public dev::stdCamera<ocam2KCtrl>,
+                   public dev::edtCamera<ocam2KCtrl>,
+                   public dev::frameGrabber<ocam2KCtrl>,
+                   public dev::dssShutter<ocam2KCtrl>,
+                   public dev::telemeter<ocam2KCtrl>
 {
     friend class dev::stdCamera<ocam2KCtrl>;
     friend class dev::edtCamera<ocam2KCtrl>;
@@ -54,878 +57,1064 @@ class ocam2KCtrl : public MagAOXApp<>, public dev::stdCamera<ocam2KCtrl>, public
 
     typedef MagAOXApp<> MagAOXAppT;
 
-public:
+  public:
     /** \name app::dev Configurations
-      *@{
-      */
-    static constexpr bool c_stdCamera_tempControl = true; ///< app::dev config to tell stdCamera to expose temperature controls
+     *@{
+     */
+    static constexpr bool c_stdCamera_tempControl =
+        true; ///< app::dev config to tell stdCamera to expose temperature controls
 
-    static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature (ignored since tempControl==true)
+    static constexpr bool c_stdCamera_temp =
+        true; ///< app::dev config to tell stdCamera to expose temperature (ignored since tempControl==true)
 
-    static constexpr bool c_stdCamera_readoutSpeed = false; ///< app::dev config to tell stdCamera not to expose readout speed controls
+    static constexpr bool c_stdCamera_readoutSpeed =
+        false; ///< app::dev config to tell stdCamera not to expose readout speed controls
 
-    static constexpr bool c_stdCamera_vShiftSpeed = false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
+    static constexpr bool c_stdCamera_vShiftSpeed =
+        false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
+    static constexpr bool c_stdCamera_fanSpeed =
+        false; ///< app::dev config to tell stdCamera not to expose fan-speed control
 
     static constexpr bool c_stdCamera_emGain = true; ///< app::dev config to tell stdCamera to expose EM gain controls
 
-    static constexpr bool c_stdCamera_exptimeCtrl = false; ///< app::dev config to tell stdCamera not to expose exposure time controls
+    static constexpr bool c_stdCamera_exptimeCtrl =
+        false; ///< app::dev config to tell stdCamera not to expose exposure time controls
 
     static constexpr bool c_stdCamera_fpsCtrl = true; ///< app::dev config to tell stdCamera to expose FPS controls
 
-    static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl==true)
+    static constexpr bool c_stdCamera_fps =
+        true; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl==true)
 
-    static constexpr bool c_stdCamera_synchro = true; ///< app::dev config to tell stdCamera to expose synchro mode controls
+    static constexpr bool c_stdCamera_synchro =
+        true; ///< app::dev config to tell stdCamera to expose synchro mode controls
 
-    static constexpr bool c_stdCamera_usesModes = true; ///< app:dev config to tell stdCamera not to expose mode controls
+    static constexpr bool c_stdCamera_usesModes =
+        true; ///< app:dev config to tell stdCamera not to expose mode controls
 
     static constexpr bool c_stdCamera_usesROI = false; ///< app:dev config to tell stdCamera to expose ROI controls
 
-    static constexpr bool c_stdCamera_cropMode = false; ///< app:dev config to tell stdCamera to expose Crop Mode controls
+    static constexpr bool c_stdCamera_cropMode =
+        false; ///< app:dev config to tell stdCamera to expose Crop Mode controls
 
-    static constexpr bool c_stdCamera_hasShutter = true; ///< app:dev config to tell stdCamera to expose shutter controls
+    static constexpr bool c_stdCamera_hasShutter =
+        true; ///< app:dev config to tell stdCamera to expose shutter controls
 
-    static constexpr bool c_stdCamera_usesStateString = true; ///< app::dev confg to tell stdCamera to expose the state string property
+    static constexpr bool c_stdCamera_usesStateString =
+        true; ///< app::dev confg to tell stdCamera to expose the state string property
 
-    static constexpr bool c_edtCamera_relativeConfigPath = true; ///< app::dev config to tell edtCamera to use relative path to camera config file
+    static constexpr bool c_edtCamera_relativeConfigPath =
+        true; ///< app::dev config to tell edtCamera to use relative path to camera config file
 
-    static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber these images can not be flipped
+    static constexpr bool c_frameGrabber_flippable =
+        false; ///< app:dev config to tell framegrabber these images can not be flipped
 
     ///@}
-protected:
-
+  protected:
     /** \name configurable parameters
-      *@{
-      */
+     *@{
+     */
 
-    //Camera:
+    std::string m_ocamDescrambleFile; ///< Path to the OCAM 2K pixel descrambling file, relative to the MagAO-X config
+                                      ///< directory.
 
-    std::string m_ocamDescrambleFile; ///< Path the OCAM 2K pixel descrambling file, relative to MagAO-X config directory.
-
-
+    std::string m_syncShmimName; ///< Name of the sync-only ImageStreamIO output. Defaults to `framegrabber.shmimName +
+                                 ///< "_sync"`.
 
     ///@}
 
-    ocam2_id m_ocam2_id {0}; ///< OCAM SDK id.
+    static constexpr uint32_t c_syncStreamWidth{ 1 };  ///< Width of the sync-only ImageStreamIO stream.
+    static constexpr uint32_t c_syncStreamHeight{ 1 }; ///< Height of the sync-only ImageStreamIO stream.
+    static constexpr uint32_t c_syncStreamDepth{ 1 };  ///< Depth of the sync-only ImageStreamIO stream.
+    static constexpr uint8_t  c_syncStreamDataType{ _DATATYPE_UINT8 }; ///< Data type of the sync-only stream.
 
-    long m_currImageNumber {-1}; ///< The current image number, retrieved from the image itself.
+    ocam2_id m_ocam2_id{ 0 }; ///< OCAM SDK id.
 
-    long m_lastImageNumber {-1};  ///< The last image number, saved from the last loop through.
+    long m_currImageNumber{ -1 }; ///< The current image number, retrieved from the raw image itself.
 
-    bool m_protectionReset {false}; ///< Flag indicating that protection has been reset at least once.
+    long m_lastImageNumber{ -1 }; ///< The last image number saved from the previous acquisition loop.
 
-    unsigned m_protectionResetConfirmed {0}; ///< Counter indicating the number of times that the protection reset has been requested within 10 seconds, for confirmation.
+    bool m_protectionReset{ false }; ///< Flag indicating that protection has been reset at least once.
 
-    double m_protectionResetReqTime {0}; ///< The time at which protection reset was requested.  You have 10 seconds to confirm.
+    unsigned m_protectionResetConfirmed{ 0 }; ///< Counter indicating the number of times that the protection reset has
+                                              ///< been requested within 10 seconds, for confirmation.
 
-    bool m_poweredOn {false};
+    double m_protectionResetReqTime{
+        0 }; ///< The time at which protection reset was requested.  You have 10 seconds to confirm.
+
+    bool m_poweredOn{
+        false }; ///< Tracks that power-on defaults still need to restore the configured temperature setpoint.
 
     ocamTemps m_temps; ///< Structure holding the last temperature measurement.
 
-    unsigned m_digitalBinX {1};
+    unsigned m_digitalBinX{ 1 }; ///< Digital x-binning factor applied after descrambling.
 
-    unsigned m_digitalBinY {1};
+    unsigned m_digitalBinY{ 1 }; ///< Digital y-binning factor applied after descrambling.
 
-    bool m_digitalBin {false};
+    bool m_digitalBin{ false }; ///< Indicates whether post-descramble digital binning is active for the current mode.
 
-    mx::improc::eigenImage<int16_t> m_digitalBinWork;
+    mx::improc::eigenImage<int16_t>
+        m_digitalBinWork; ///< Scratch image holding the full descrambled frame before digital binning.
 
-    std::string m_syncDevice {"fxngensync"};
-    std::string m_syncFreqProp {"C1freq"};
+    std::string m_syncDevice{
+        "fxngensync" }; ///< INDI device providing the external sync frequency when synchro mode is enabled.
+    std::string m_syncFreqProp{ "C1freq" }; ///< INDI property name reporting the external sync frequency.
 
-    float m_syncFreq {0};
+    float m_syncFreq{ 0 }; ///< Current externally supplied sync frequency in Hz.
 
-public:
+    IMAGE *m_syncImageStream{ nullptr }; ///< Secondary 1x1 uint8 ImageStreamIO stream used only for frame metadata
+                                         ///< and semaphores. Its lifetime is sequenced by the framegrabber thread and
+                                         ///< app shutdown so per-frame publication can remain lock-free.
 
-   ///Default c'tor
-   ocam2KCtrl();
+    std::recursive_mutex
+        m_cameraMutex; ///< Protects EDT PDV access and OCAM SDK lifetime across reconfigure, grab, and control paths.
 
-   ///Destructor
-   ~ocam2KCtrl() noexcept;
+  public:
+    /// Default c'tor
+    ocam2KCtrl();
 
-   /// Setup the configuration system (called by MagAOXApp::setup())
-   virtual void setupConfig();
+    /// Destructor
+    ~ocam2KCtrl() noexcept;
 
-   /// load the configuration system results (called by MagAOXApp::setup())
-   virtual void loadConfig();
+    /// Setup the configuration system (called by MagAOXApp::setup())
+    virtual void setupConfig();
 
-   /// Startup functions
-   /** Sets up the INDI vars, and the f.g. thread.
+    /// load the configuration system results (called by MagAOXApp::setup())
+    virtual void loadConfig();
+
+    /// Startup functions
+    /** Sets up the INDI vars, and the f.g. thread.
      *
      */
-   virtual int appStartup();
+    virtual int appStartup();
 
-   /// Implementation of the FSM for the OCAM 2K.
-   virtual int appLogic();
+    /// Implementation of the FSM for the OCAM 2K.
+    virtual int appLogic();
 
-   /// Implementation of the on-power-off FSM logic
-   virtual int onPowerOff();
+    /// Implementation of the on-power-off FSM logic
+    virtual int onPowerOff();
 
-   /// Implementation of the while-powered-off FSM
-   virtual int whilePowerOff();
+    /// Implementation of the while-powered-off FSM
+    virtual int whilePowerOff();
 
-   /// Do any needed shutdown tasks.
-   virtual int appShutdown();
+    /// Do any needed shutdown tasks.
+    virtual int appShutdown();
 
-   /// Get the current device temperatures
-   /**
+    /// Get the current device temperatures
+    /**
      * \returns 0 on success
      * \returns -1 on error
      */
-   int getTemps();
+    int getTemps();
 
-   /// Get the current frame rate.
-   /**
+    /// Get the current frame rate.
+    /**
      * \returns 0 on success
      * \returns -1 on error
      */
-   int getFPS();
+    int getFPS();
 
-   /** \name stdCamera Interface
-     *
-     * @{
-     */
-
-   /// Set defaults for a power on state.
-   /**
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int powerOnDefaults();
-
-   /// Turn temperature control on or off.
-   /** Sets temperature control on or off based on the current value of m_tempControlStatus
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int setTempControl();
-
-   /// Set the CCD temperature setpoint [stdCamera interface].
-   /** Sets the temperature to m_ccdTempSetpt.
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int setTempSetPt();
-
-   /// Set the frame rate. [stdCamera interface]
-   /** Sets the frame rate to m_fpsSet.
-     *
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int setFPS();
-
-   /// Set the synchro state. [stdCamera interface]
-   /** Sets the synchro state to m_synchroSet.
-     *
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int setSynchro();
-
-   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
-   /**
-     * \returns 0 always
-     */
-   int setExpTime();
-
-   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
-   /**
-     * \returns 0 always
-     */
-   int setNextROI();
-
-   /// Sets the shutter state, via call to dssShutter::setShutterState(int) [stdCamera interface]
-   /**
-     * \returns 0 always
-     */
-   int setShutter(int sh);
-
-   std::string stateString();
-
-   bool stateStringValid();
-
-   ///@}
-
-   /// Reset the EM Protection
-   /**
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int resetEMProtection();
-
-   /// Get the current EM Gain.
-   /**
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int getEMGain();
-
-   /// Set the EM gain.
-   /** Sets it to the value of stdCamera::m_emGainSet
-     *
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int setEMGain();
-
-   /// Implementation of the framegrabber configureAcquisition interface
-   /** Sends the mode command over serial, sets the FPS, and initializes the OCAM SDK.
-     *
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int configureAcquisition();
-
-   /// Implementation of the frameGrabber fps interface
-   /** Just returns the value of m_fps
-     */
-   float fps();
-
-   /// Implementation of the framegrabber startAcquisition interface
-   /** Initializes m_lastImageNumber, and calls edtCamera::pdvStartAcquisition
-     *
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int startAcquisition();
-
-   /// Implementation of the framegrabber acquireAndCheckValid interface
-   /** Calls edtCamera::pdvAcquire, then analyzes the OCAM generated framenumber for skips and corruption.
-     *
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int acquireAndCheckValid();
-
-   /// Implementation of the framegrabber loadImageIntoStream interface
-   /** Conducts the OCAM descramble.
-     *
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int loadImageIntoStream( void * dest  /**< [in] */);
-
-   /// Implementation of the framegrabber reconfig interface
-   /** Locks the INDI mutex and calls edtCamera::pdvReconfig.
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int reconfig();
-
-
-   //INDI:
-protected:
-   //declare our properties
-   pcf::IndiProperty m_indiP_temps;
-   pcf::IndiProperty m_indiP_emProt;
-   pcf::IndiProperty m_indiP_emProtReset;
-
-   pcf::IndiProperty m_indiP_syncFreq;
-
-public:
-   INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_emProtReset);
-
-   INDI_SETCALLBACK_DECL(ocam2KCtrl, m_indiP_syncFreq);
-
-   /** \name Telemeter Interface
+    /** \name stdCamera Interface
      *
      * @{
      */
-   int checkRecordTimes();
 
-   int recordTelem( const ocam_temps * );
+    /// Set defaults for a power on state.
+    /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int powerOnDefaults();
 
-   int recordTelem( const telem_stdcam * );
+    /// Turn temperature control on or off.
+    /** Sets temperature control on or off based on the current value of m_tempControlStatus
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int setTempControl();
 
-   int recordTelem( const telem_fgtimings * );
+    /// Set the CCD temperature setpoint [stdCamera interface].
+    /** Sets the temperature to m_ccdTempSetpt.
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int setTempSetPt();
 
-   int recordTemps(bool force = false);
+    /// Set the frame rate. [stdCamera interface]
+    /** Sets the frame rate to m_fpsSet.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int setFPS();
 
-   ///@}
+    /// Set the synchro state. [stdCamera interface]
+    /** Sets the synchro state to m_synchroSet.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int setSynchro();
+
+    /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
+    /**
+     * \returns 0 always
+     */
+    int setExpTime();
+
+    /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
+    /**
+     * \returns 0 always
+     */
+    int setNextROI();
+
+    /// Sets the shutter state, via call to dssShutter::setShutterState(int) [stdCamera interface]
+    /**
+     * \returns 0 always
+     */
+    int setShutter( int sh /**< [in] requested shutter state */ );
+
+    /// Return the current stdCamera state string.
+    std::string stateString();
+
+    /// Report whether the current stdCamera state string is valid for persistence and telemetry.
+    bool stateStringValid();
+
+    ///@}
+
+    /// Reset the EM Protection
+    /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int resetEMProtection();
+
+    /// Get the current EM Gain.
+    /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int getEMGain();
+
+    /// Set the EM gain.
+    /** Sets it to the value of stdCamera::m_emGainSet
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int setEMGain();
+
+    /// Implementation of the framegrabber configureAcquisition interface
+    /** Sends the mode command over serial, sets the FPS, and initializes the OCAM SDK.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int configureAcquisition();
+
+    /// Implementation of the frameGrabber fps interface
+    /** Just returns the value of m_fps
+     */
+    float fps();
+
+    /// Implementation of the framegrabber startAcquisition interface
+    /** Initializes m_lastImageNumber, and calls edtCamera::pdvStartAcquisition
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int startAcquisition();
+
+    /// Implementation of the framegrabber acquireAndCheckValid interface
+    /** Calls edtCamera::pdvAcquire, then analyzes the OCAM generated framenumber for skips and corruption.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int acquireAndCheckValid();
+
+    /// Implementation of the framegrabber loadImageIntoStream interface
+    /** Conducts the OCAM descramble.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int loadImageIntoStream( void *dest /**< [in] destination image buffer */ );
+
+    /// Implementation of the framegrabber reconfig interface
+    /** Locks the INDI mutex and calls edtCamera::pdvReconfig.
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int reconfig();
+
+    /// Publish the sync-only stream immediately after the main framegrabber publication.
+    /** This hot path relies on framegrabber sequencing: configureAcquisition() and this hook both run on the
+     * framegrabber thread, while appShutdown() destroys the sync stream only after frameGrabber::appShutdown()
+     * joins that thread.
+     */
+    int frameGrabberPostPublish( IMAGE *imageStream /**< [in] main framegrabber stream that was just posted */ );
+
+  protected:
+    /// Ensure the sync-only ImageStreamIO stream exists with the expected 1x1 uint8 layout.
+    int ensureSyncStream();
+
+    /// Destroy the sync-only ImageStreamIO stream owned by this app.
+    int destroySyncStream();
+
+    // INDI:
+  protected:
+    // declare our properties
+    pcf::IndiProperty m_indiP_temps;       ///< INDI property publishing the latest camera temperatures.
+    pcf::IndiProperty m_indiP_emProt;      ///< INDI property publishing the EM protection state.
+    pcf::IndiProperty m_indiP_emProtReset; ///< INDI property handling operator requests to reset EM protection.
+
+    pcf::IndiProperty m_indiP_syncFreq; ///< INDI subscription to the external sync-frequency source.
+
+  public:
+    INDI_NEWCALLBACK_DECL( ocam2KCtrl, m_indiP_emProtReset );
+
+    INDI_SETCALLBACK_DECL( ocam2KCtrl, m_indiP_syncFreq );
+
+    /** \name Telemeter Interface
+     *
+     * @{
+     */
+    int checkRecordTimes();
+
+    int recordTelem( const ocam_temps * );
+
+    int recordTelem( const telem_stdcam * );
+
+    int recordTelem( const telem_fgtimings * );
+
+    int
+    recordTemps( bool force = false /**< [in] whether to force a telemetry record even if values have not changed */ );
+
+    ///@}
 };
 
-inline
-ocam2KCtrl::ocam2KCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+inline ocam2KCtrl::ocam2KCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
-   //--- MagAOXApp Power Mgt. ---
-   m_powerMgtEnabled = true;
-   m_powerOnWait = 10;
+    //--- MagAOXApp Power Mgt. ---
+    m_powerMgtEnabled = true;
+    m_powerOnWait     = 10;
 
-   //--- stdCamera ---
-   m_startupTemp = 20;
+    //--- stdCamera ---
+    m_startupTemp = 20;
 
-   m_maxEMGain = 600;
+    m_maxEMGain = 600;
 
-   return;
+    return;
 }
 
-inline
-ocam2KCtrl::~ocam2KCtrl() noexcept
+inline ocam2KCtrl::~ocam2KCtrl() noexcept
 {
-   return;
+    return;
 }
 
-inline
-void ocam2KCtrl::setupConfig()
+inline void ocam2KCtrl::setupConfig()
 {
-   dev::stdCamera<ocam2KCtrl>::setupConfig(config);
+    dev::stdCamera<ocam2KCtrl>::setupConfig( config );
 
-   dev::edtCamera<ocam2KCtrl>::setupConfig(config);
+    dev::edtCamera<ocam2KCtrl>::setupConfig( config );
 
-   config.add("camera.ocamDescrambleFile", "", "camera.ocamDescrambleFile", argType::Required, "camera", "ocamDescrambleFile", false, "string", "The path of the OCAM descramble file, relative to MagAOX/config.");
+    config.add( "camera.ocamDescrambleFile",
+                "",
+                "camera.ocamDescrambleFile",
+                argType::Required,
+                "camera",
+                "ocamDescrambleFile",
+                false,
+                "string",
+                "The path of the OCAM descramble file, relative to MagAOX/config." );
 
-   dev::frameGrabber<ocam2KCtrl>::setupConfig(config);
+    dev::frameGrabber<ocam2KCtrl>::setupConfig( config );
 
-   dev::dssShutter<ocam2KCtrl>::setupConfig(config);
+    config.add( "framegrabber.syncShmimName",
+                "",
+                "framegrabber.syncShmimName",
+                argType::Required,
+                "framegrabber",
+                "syncShmimName",
+                false,
+                "string",
+                "The name of the 1x1 uint8 ImageStreamIO sync stream used only for frame metadata and semaphores. "
+                "Defaults to framegrabber.shmimName + \"_sync\"." );
 
-   dev::telemeter<ocam2KCtrl>::setupConfig(config);
+    dev::dssShutter<ocam2KCtrl>::setupConfig( config );
+
+    dev::telemeter<ocam2KCtrl>::setupConfig( config );
 }
 
-
-inline
-void ocam2KCtrl::loadConfig()
+inline void ocam2KCtrl::loadConfig()
 {
-   dev::stdCamera<ocam2KCtrl>::loadConfig(config);
-   dev::edtCamera<ocam2KCtrl>::loadConfig(config);
+    dev::stdCamera<ocam2KCtrl>::loadConfig( config );
+    dev::edtCamera<ocam2KCtrl>::loadConfig( config );
 
-   config(m_ocamDescrambleFile, "camera.ocamDescrambleFile");
+    config( m_ocamDescrambleFile, "camera.ocamDescrambleFile" );
 
-   if(m_maxEMGain < 1)
-   {
-      m_maxEMGain = 1;
-      log<text_log>("maxEMGain set to 1");
-   }
+    if( m_maxEMGain < 1 )
+    {
+        m_maxEMGain = 1;
+        log<text_log>( "maxEMGain set to 1" );
+    }
 
-   if(m_maxEMGain > 600)
-   {
-      m_maxEMGain = 600;
-      log<text_log>("maxEMGain set to 600");
-   }
+    if( m_maxEMGain > 600 )
+    {
+        m_maxEMGain = 600;
+        log<text_log>( "maxEMGain set to 600" );
+    }
 
-   dev::frameGrabber<ocam2KCtrl>::loadConfig(config);
-   dev::dssShutter<ocam2KCtrl>::loadConfig(config);
-   dev::telemeter<ocam2KCtrl>::loadConfig(config);
+    dev::frameGrabber<ocam2KCtrl>::loadConfig( config );
+    config( m_syncShmimName, "framegrabber.syncShmimName" );
+    if( m_syncShmimName == "" )
+    {
+        m_syncShmimName = m_shmimName + "_sync";
+    }
+    dev::dssShutter<ocam2KCtrl>::loadConfig( config );
+    dev::telemeter<ocam2KCtrl>::loadConfig( config );
 }
 
-inline
-int ocam2KCtrl::appStartup()
+inline int ocam2KCtrl::ensureSyncStream()
 {
-   REG_INDI_NEWPROP_NOCB(m_indiP_temps, "temps", pcf::IndiProperty::Number);
-   m_indiP_temps.add (pcf::IndiElement("cpu"));
-   m_indiP_temps["cpu"].set(0);
-   m_indiP_temps.add (pcf::IndiElement("power"));
-   m_indiP_temps["power"].set(0);
-   m_indiP_temps.add (pcf::IndiElement("bias"));
-   m_indiP_temps["bias"].set(0);
-   m_indiP_temps.add (pcf::IndiElement("water"));
-   m_indiP_temps["water"].set(0);
-   m_indiP_temps.add (pcf::IndiElement("left"));
-   m_indiP_temps["left"].set(0);
-   m_indiP_temps.add (pcf::IndiElement("right"));
-   m_indiP_temps["right"].set(0);
-   m_indiP_temps.add (pcf::IndiElement("cooling"));
-   m_indiP_temps["cooling"].set(0);
+    if( m_syncImageStream != nullptr )
+    {
+        uint32_t syncWidth  = m_syncImageStream->md[0].size[0];
+        uint32_t syncHeight = 1;
+        uint32_t syncDepth  = 1;
 
-   REG_INDI_NEWPROP_NOCB(m_indiP_emProt, "emProtection", pcf::IndiProperty::Text);
-   m_indiP_emProt.add(pcf::IndiElement("status"));
-   m_indiP_emProt["status"].set("UNKNOWN");
-   m_indiP_emProt.setState(INDI_IDLE);
+        if( m_syncImageStream->md[0].naxis > 1 )
+        {
+            syncHeight = m_syncImageStream->md[0].size[1];
+        }
 
-   createStandardIndiRequestSw( m_indiP_emProtReset, "emProtectionReset", "Reset", "EM Protection");
-   registerIndiPropertyNew( m_indiP_emProtReset, INDI_NEWCALLBACK(m_indiP_emProtReset));
+        if( m_syncImageStream->md[0].naxis > 2 )
+        {
+            syncDepth = m_syncImageStream->md[0].size[2];
+        }
 
-   REG_INDI_SETPROP(m_indiP_syncFreq, m_syncDevice, m_syncFreqProp);
+        if( m_syncImageStream->md[0].datatype == c_syncStreamDataType && syncWidth == c_syncStreamWidth &&
+            syncHeight == c_syncStreamHeight && syncDepth == c_syncStreamDepth )
+        {
+            return 0;
+        }
 
-   if(dev::stdCamera<ocam2KCtrl>::appStartup() < 0)
-   {
-      return log<software_critical,-1>({""});
-   }
+        ImageStreamIO_destroyIm( m_syncImageStream );
+        free( m_syncImageStream );
+        m_syncImageStream = nullptr;
+    }
 
-   if(dev::edtCamera<ocam2KCtrl>::appStartup() < 0)
-   {
-      return log<software_critical,-1>({""});
-   }
+    char syncFileName[1024];
+    ImageStreamIO_filename( syncFileName, sizeof( syncFileName ), m_syncShmimName.c_str() );
 
-   if(dev::frameGrabber<ocam2KCtrl>::appStartup() < 0)
-   {
-      return log<software_critical,-1>({""});
-   }
+    int syncFd = ::open( syncFileName, O_RDWR );
+    if( syncFd != -1 )
+    {
+        ::close( syncFd );
 
-   if(dev::dssShutter<ocam2KCtrl>::appStartup() < 0)
-   {
-      return log<software_critical,-1>({""});
-   }
+        IMAGE staleSyncStream;
+        if( ImageStreamIO_openIm( &staleSyncStream, m_syncShmimName.c_str() ) != IMAGESTREAMIO_SUCCESS )
+        {
+            return log<software_error, -1>(
+                { __FILE__, __LINE__, "error opening existing sync ImageStreamIO stream" } );
+        }
 
-   m_temps.setInvalid();
-   if(dev::telemeter<ocam2KCtrl>::appStartup() < 0)
-   {
-      return log<software_error,-1>({""});
-   }
+        if( ImageStreamIO_destroyIm( &staleSyncStream ) != IMAGESTREAMIO_SUCCESS )
+        {
+            return log<software_error, -1>(
+                { __FILE__, __LINE__, "error destroying existing sync ImageStreamIO stream" } );
+        }
+    }
 
-   return 0;
+    m_syncImageStream = reinterpret_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
+    if( m_syncImageStream == nullptr )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "error allocating sync ImageStreamIO stream" } );
+    }
 
+    uint32_t imsize[3] = { c_syncStreamWidth, c_syncStreamHeight, c_syncStreamDepth };
+
+    if( ImageStreamIO_createIm_gpu( m_syncImageStream,
+                                    m_syncShmimName.c_str(),
+                                    3,
+                                    imsize,
+                                    c_syncStreamDataType,
+                                    -1,
+                                    1,
+                                    IMAGE_NB_SEMAPHORE,
+                                    0,
+                                    CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
+                                    0 ) != IMAGESTREAMIO_SUCCESS )
+    {
+        free( m_syncImageStream );
+        m_syncImageStream = nullptr;
+        return log<software_error, -1>( { __FILE__, __LINE__, "error creating sync ImageStreamIO stream" } );
+    }
+
+    m_syncImageStream->array.UI8[0]      = 0;
+    m_syncImageStream->md[0].cnt0        = 0;
+    m_syncImageStream->md[0].cnt1        = 0;
+    m_syncImageStream->md[0].write       = 0;
+    m_syncImageStream->writetimearray[0] = m_syncImageStream->md[0].writetime;
+    m_syncImageStream->atimearray[0]     = m_syncImageStream->md[0].atime;
+    m_syncImageStream->cntarray[0]       = 0;
+
+    return 0;
 }
 
+inline int ocam2KCtrl::destroySyncStream()
+{
+    if( m_syncImageStream == nullptr )
+    {
+        return 0;
+    }
 
+    int rv = 0;
 
-inline
-int ocam2KCtrl::appLogic()
+    if( ImageStreamIO_destroyIm( m_syncImageStream ) != IMAGESTREAMIO_SUCCESS )
+    {
+        rv = log<software_error, -1>( { __FILE__, __LINE__, "error destroying sync ImageStreamIO stream" } );
+    }
+
+    free( m_syncImageStream );
+    m_syncImageStream = nullptr;
+
+    return rv;
+}
+
+inline int ocam2KCtrl::appStartup()
+{
+    REG_INDI_NEWPROP_NOCB( m_indiP_temps, "temps", pcf::IndiProperty::Number );
+    m_indiP_temps.add( pcf::IndiElement( "cpu" ) );
+    m_indiP_temps["cpu"].set( 0 );
+    m_indiP_temps.add( pcf::IndiElement( "power" ) );
+    m_indiP_temps["power"].set( 0 );
+    m_indiP_temps.add( pcf::IndiElement( "bias" ) );
+    m_indiP_temps["bias"].set( 0 );
+    m_indiP_temps.add( pcf::IndiElement( "water" ) );
+    m_indiP_temps["water"].set( 0 );
+    m_indiP_temps.add( pcf::IndiElement( "left" ) );
+    m_indiP_temps["left"].set( 0 );
+    m_indiP_temps.add( pcf::IndiElement( "right" ) );
+    m_indiP_temps["right"].set( 0 );
+    m_indiP_temps.add( pcf::IndiElement( "cooling" ) );
+    m_indiP_temps["cooling"].set( 0 );
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_emProt, "emProtection", pcf::IndiProperty::Text );
+    m_indiP_emProt.add( pcf::IndiElement( "status" ) );
+    m_indiP_emProt["status"].set( "UNKNOWN" );
+    m_indiP_emProt.setState( INDI_IDLE );
+
+    createStandardIndiRequestSw( m_indiP_emProtReset, "emProtectionReset", "Reset", "EM Protection" );
+    registerIndiPropertyNew( m_indiP_emProtReset, INDI_NEWCALLBACK( m_indiP_emProtReset ) );
+
+    REG_INDI_SETPROP( m_indiP_syncFreq, m_syncDevice, m_syncFreqProp );
+
+    if( dev::stdCamera<ocam2KCtrl>::appStartup() < 0 )
+    {
+        return log<software_critical, -1>( { "" } );
+    }
+
+    if( dev::edtCamera<ocam2KCtrl>::appStartup() < 0 )
+    {
+        return log<software_critical, -1>( { "" } );
+    }
+
+    if( dev::frameGrabber<ocam2KCtrl>::appStartup() < 0 )
+    {
+        return log<software_critical, -1>( { "" } );
+    }
+
+    if( dev::dssShutter<ocam2KCtrl>::appStartup() < 0 )
+    {
+        return log<software_critical, -1>( { "" } );
+    }
+
+    m_temps.setInvalid();
+    if( dev::telemeter<ocam2KCtrl>::appStartup() < 0 )
+    {
+        return log<software_error, -1>( { "" } );
+    }
+
+    return 0;
+}
+
+inline int ocam2KCtrl::appLogic()
 {
 
-   //and run stdCamera's appLogic
-   if(dev::stdCamera<ocam2KCtrl>::appLogic() < 0)
-   {
-      return log<software_error, -1>({""});
-   }
+    // and run stdCamera's appLogic
+    if( dev::stdCamera<ocam2KCtrl>::appLogic() < 0 )
+    {
+        return log<software_error, -1>( { "" } );
+    }
 
-   //and run edtCamera's appLogic
-   if(dev::edtCamera<ocam2KCtrl>::appLogic() < 0)
-   {
-      return log<software_error, -1>({""});
-   }
+    // and run edtCamera's appLogic
+    if( dev::edtCamera<ocam2KCtrl>::appLogic() < 0 )
+    {
+        return log<software_error, -1>( { "" } );
+    }
 
-   //first run frameGrabber's appLogic to see if the f.g. thread has exited.
-   if(dev::frameGrabber<ocam2KCtrl>::appLogic() < 0)
-   {
-      return log<software_error, -1>({""});
-   }
+    // first run frameGrabber's appLogic to see if the f.g. thread has exited.
+    if( dev::frameGrabber<ocam2KCtrl>::appLogic() < 0 )
+    {
+        return log<software_error, -1>( { "" } );
+    }
 
-   //and run dssShutter's appLogic
-   if(dev::dssShutter<ocam2KCtrl>::appLogic() < 0)
-   {
-      return log<software_error, -1>({""});
-   }
+    // and run dssShutter's appLogic
+    if( dev::dssShutter<ocam2KCtrl>::appLogic() < 0 )
+    {
+        return log<software_error, -1>( { "" } );
+    }
 
-   if( state() == stateCodes::POWERON) return 0;
+    if( state() == stateCodes::POWERON )
+        return 0;
 
-   if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR)
-   {
-      m_temps.setInvalid();
+    if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR )
+    {
+        m_temps.setInvalid();
 
-      std::string response;
+        std::string response;
 
-      //Might have gotten here because of a power off.
-      if(MagAOXAppT::m_powerState == 0) return 0;
+        // Might have gotten here because of a power off.
+        if( MagAOXAppT::m_powerState == 0 )
+            return 0;
 
-      int ret = pdvSerialWriteRead( response, "fps"); //m_pdv, "fps", m_readTimeout);
-      if( ret == 0)
-      {
-         state(stateCodes::CONNECTED);
-      }
-      else
-      {
-         sleep(1);
-         return 0;
-      }
-   }
+        int ret = 0;
+        { // mutex scope
+            std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+            ret = pdvSerialWriteRead( response, "fps" ); // m_pdv, "fps", m_readTimeout);
+        }
+        if( ret == 0 )
+        {
+            state( stateCodes::CONNECTED );
+        }
+        else
+        {
+            sleep( 1 );
+            return 0;
+        }
+    }
 
-   if( state() == stateCodes::CONNECTED )
-   {
-      //Get a lock
-      std::unique_lock<std::mutex> lock(m_indiMutex);
+    if( state() == stateCodes::CONNECTED )
+    {
+        // Get a lock
+        std::unique_lock<std::mutex> lock( m_indiMutex );
 
-      if( getFPS() == 0 )
-      {
-         if(m_fpsSet == 0) state(stateCodes::READY);
-         else state(stateCodes::OPERATING);
+        if( getFPS() == 0 )
+        {
+            if( m_fpsSet == 0 )
+                state( stateCodes::READY );
+            else
+                state( stateCodes::OPERATING );
 
-         if(m_poweredOn && m_ccdTempSetpt > -999)
-         {
-            m_poweredOn = false;
-            if(setTempSetPt() < 0)
+            if( m_poweredOn && m_ccdTempSetpt > -999 )
             {
-               if(powerState() != 1 || powerStateTarget() != 1) return 0;
-               return log<software_error,0>({""});
+                m_poweredOn = false;
+                if( setTempSetPt() < 0 )
+                {
+                    if( powerState() != 1 || powerStateTarget() != 1 )
+                    {
+                        return 0;
+                    }
+                    return log<software_error, 0>( { "" } );
+                }
             }
-         }
 
-         //We always have to set synchro on connecting, b/c otherwise we don't know the state.
-         m_synchroSet = false;
-         if( setSynchro() != 0 )
-         {
-            log<software_error>({"error from setSynchro on CONNECT"});
-         }
-      }
-      else
-      {
-         if(powerState() != 1 || powerStateTarget() != 1) return 0;
-         state(stateCodes::ERROR);
-         return log<software_error,0>({""});
-      }
-   }
+            // We always have to set synchro on connecting, b/c otherwise we don't know the state.
+            m_synchroSet = false;
+            if( setSynchro() != 0 )
+            {
+                log<software_error>( { "error from setSynchro on CONNECT" } );
+            }
+        }
+        else
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return 0;
+            state( stateCodes::ERROR );
+            return log<software_error, 0>( { "" } );
+        }
+    }
 
-   if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
-   {
-      //Get a lock if we can
-      std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
+    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
+    {
+        // Get a lock if we can
+        std::unique_lock<std::mutex> lock( m_indiMutex, std::try_to_lock );
 
-      //but don't wait for it, just go back around.
-      if(!lock.owns_lock()) return 0;
+        // but don't wait for it, just go back around.
+        if( !lock.owns_lock() )
+            return 0;
 
-      if(getTemps() < 0)
-      {
-         if(powerState() != 1 || powerStateTarget() != 1) return 0;
-         m_temps.setInvalid();
-         state(stateCodes::ERROR);
-         return 0;
-      }
+        if( getTemps() < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return 0;
+            m_temps.setInvalid();
+            state( stateCodes::ERROR );
+            return 0;
+        }
 
-      if(getFPS() < 0)
-      {
-         if(powerState() != 1 || powerStateTarget() != 1) return 0;
+        if( getFPS() < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return 0;
 
-         state(stateCodes::ERROR);
-         return 0;
-      }
+            state( stateCodes::ERROR );
+            return 0;
+        }
 
-      if(m_protectionResetConfirmed > 0 )
-      {
-         if( mx::sys::get_curr_time() - m_protectionResetReqTime > 10.0)
-         {
-            m_protectionResetConfirmed = 0;
-            updateIfChanged(m_indiP_emProt, "status", std::string("UNCONFIRMED"));
-            log<text_log>("protection reset request not confirmed", logPrio::LOG_NOTICE);
-         }
-      }
+        if( m_protectionResetConfirmed > 0 )
+        {
+            if( mx::sys::get_curr_time() - m_protectionResetReqTime > 10.0 )
+            {
+                m_protectionResetConfirmed = 0;
+                updateIfChanged( m_indiP_emProt, "status", std::string( "UNCONFIRMED" ) );
+                log<text_log>( "protection reset request not confirmed", logPrio::LOG_NOTICE );
+            }
+        }
 
-      if(getEMGain () < 0)
-      {
-         if(MagAOXAppT::m_powerState == 0) return 0;
+        if( getEMGain() < 0 )
+        {
+            if( MagAOXAppT::m_powerState == 0 )
+                return 0;
 
-         state(stateCodes::ERROR);
-         return 0;
-      }
+            state( stateCodes::ERROR );
+            return 0;
+        }
 
-      if(frameGrabber<ocam2KCtrl>::updateINDI() < 0)
-      {
-         log<software_error>({""});
-         state(stateCodes::ERROR);
-         return 0;
-      }
+        if( frameGrabber<ocam2KCtrl>::updateINDI() < 0 )
+        {
+            log<software_error>( { "" } );
+            state( stateCodes::ERROR );
+            return 0;
+        }
 
-      if(stdCamera<ocam2KCtrl>::updateINDI() < 0)
-      {
-         log<software_error>({""});
-         state(stateCodes::ERROR);
-         return 0;
-      }
+        if( stdCamera<ocam2KCtrl>::updateINDI() < 0 )
+        {
+            log<software_error>( { "" } );
+            state( stateCodes::ERROR );
+            return 0;
+        }
 
-      if(edtCamera<ocam2KCtrl>::updateINDI() < 0)
-      {
-         log<software_error>({""});
-         state(stateCodes::ERROR);
-         return 0;
-      }
+        if( edtCamera<ocam2KCtrl>::updateINDI() < 0 )
+        {
+            log<software_error>( { "" } );
+            state( stateCodes::ERROR );
+            return 0;
+        }
 
-      if(telemeter<ocam2KCtrl>::appLogic() < 0)
-      {
-         log<software_error>({""});
-         return 0;
-      }
+        if( telemeter<ocam2KCtrl>::appLogic() < 0 )
+        {
+            log<software_error>( { "" } );
+            return 0;
+        }
+    }
 
-   }
+    ///\todo Fall through check?
 
-   ///\todo Fall through check?
-
-   return 0;
-
+    return 0;
 }
 
-inline
-int ocam2KCtrl::onPowerOff()
+inline int ocam2KCtrl::onPowerOff()
 {
-   m_powerOnCounter = 0;
+    m_powerOnCounter = 0;
 
-   std::lock_guard<std::mutex> lock(m_indiMutex);
+    std::lock_guard<std::mutex> lock( m_indiMutex );
 
-   updateIfChanged(m_indiP_emProt, "status", std::string("UNKNOWN"), INDI_IDLE);
+    updateIfChanged( m_indiP_emProt, "status", std::string( "UNKNOWN" ), INDI_IDLE );
 
-   m_temps.setInvalid();
+    m_temps.setInvalid();
 
-   updateIfChanged(m_indiP_temps, "cpu", m_temps.CPU);
-   updateIfChanged(m_indiP_temps, "power", m_temps.POWER);
-   updateIfChanged(m_indiP_temps, "bias", m_temps.BIAS);
-   updateIfChanged(m_indiP_temps, "water", m_temps.WATER);
-   updateIfChanged(m_indiP_temps, "left", m_temps.LEFT);
-   updateIfChanged(m_indiP_temps, "right", m_temps.RIGHT);
-   updateIfChanged(m_indiP_temps, "cooling", m_temps.COOLING_POWER);
+    updateIfChanged( m_indiP_temps, "cpu", m_temps.CPU );
+    updateIfChanged( m_indiP_temps, "power", m_temps.POWER );
+    updateIfChanged( m_indiP_temps, "bias", m_temps.BIAS );
+    updateIfChanged( m_indiP_temps, "water", m_temps.WATER );
+    updateIfChanged( m_indiP_temps, "left", m_temps.LEFT );
+    updateIfChanged( m_indiP_temps, "right", m_temps.RIGHT );
+    updateIfChanged( m_indiP_temps, "cooling", m_temps.COOLING_POWER );
 
-   if(stdCamera<ocam2KCtrl>::onPowerOff() < 0)
-   {
-      log<software_error>({""});
-   }
+    if( stdCamera<ocam2KCtrl>::onPowerOff() < 0 )
+    {
+        log<software_error>( { "" } );
+    }
 
-   if(edtCamera<ocam2KCtrl>::onPowerOff() < 0)
-   {
-      log<software_error>({""});
-   }
+    if( edtCamera<ocam2KCtrl>::onPowerOff() < 0 )
+    {
+        log<software_error>( { "" } );
+    }
 
-   if(frameGrabber<ocam2KCtrl>::onPowerOff() < 0)
-   {
-      log<software_error>({""});
-   }
+    if( frameGrabber<ocam2KCtrl>::onPowerOff() < 0 )
+    {
+        log<software_error>( { "" } );
+    }
 
-   if(dssShutter<ocam2KCtrl>::onPowerOff() < 0)
-   {
-      log<software_error>({""});
-   }
+    if( dssShutter<ocam2KCtrl>::onPowerOff() < 0 )
+    {
+        log<software_error>( { "" } );
+    }
 
-   //Setting m_poweredOn
-   m_poweredOn = true;
+    // Setting m_poweredOn
+    m_poweredOn = true;
 
-
-   return 0;
+    return 0;
 }
 
-inline
-int ocam2KCtrl::whilePowerOff()
+inline int ocam2KCtrl::whilePowerOff()
 {
-   std::lock_guard<std::mutex> lock(m_indiMutex);
+    std::lock_guard<std::mutex> lock( m_indiMutex );
 
-   if(stdCamera<ocam2KCtrl>::whilePowerOff() < 0)
-   {
-      log<software_error>({""});
-   }
+    if( stdCamera<ocam2KCtrl>::whilePowerOff() < 0 )
+    {
+        log<software_error>( { "" } );
+    }
 
-   if(edtCamera<ocam2KCtrl>::whilePowerOff() < 0)
-   {
-      log<software_error>({""});
-   }
+    if( edtCamera<ocam2KCtrl>::whilePowerOff() < 0 )
+    {
+        log<software_error>( { "" } );
+    }
 
-   if(dssShutter<ocam2KCtrl>::whilePowerOff() < 0)
-   {
-      log<software_error>({""});
-   }
+    if( dssShutter<ocam2KCtrl>::whilePowerOff() < 0 )
+    {
+        log<software_error>( { "" } );
+    }
 
-   return 0;
+    return 0;
 }
 
-inline
-int ocam2KCtrl::appShutdown()
+inline int ocam2KCtrl::appShutdown()
 {
-   ///\todo error check these base class fxns.
+    ///\todo error check these base class fxns.
 
-   dev::stdCamera<ocam2KCtrl>::appShutdown();
+    dev::stdCamera<ocam2KCtrl>::appShutdown();
 
-   dev::edtCamera<ocam2KCtrl>::appShutdown();
+    dev::edtCamera<ocam2KCtrl>::appShutdown();
 
-   dev::frameGrabber<ocam2KCtrl>::appShutdown();
+    dev::frameGrabber<ocam2KCtrl>::appShutdown();
 
-   dev::dssShutter<ocam2KCtrl>::appShutdown();
+    destroySyncStream();
 
-   dev::telemeter<ocam2KCtrl>::appShutdown();
+    dev::dssShutter<ocam2KCtrl>::appShutdown();
 
-   return 0;
+    dev::telemeter<ocam2KCtrl>::appShutdown();
+
+    return 0;
 }
 
-
-inline
-int ocam2KCtrl::getTemps()
+inline int ocam2KCtrl::getTemps()
 {
-   std::string response;
+    std::string response;
 
-   if( pdvSerialWriteRead( response, "temp") == 0)
-   {
-      ocamTemps temps;
+    { // mutex scope
+        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+        if( pdvSerialWriteRead( response, "temp" ) != 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            return log<software_error, -1>( { "" } );
+        }
+    }
 
-      if(parseTemps( temps, response ) < 0)
-      {
-         if(powerState() != 1 || powerStateTarget() != 1) return -1;
+    {
+        ocamTemps temps;
 
-         m_temps.setInvalid();
-         m_ccdTemp = m_temps.CCD;
-         m_ccdTempSetpt = m_temps.SET;
-         m_tempControlStatus = false;
-         m_tempControlStatusStr = "UNKNOWN";
+        if( parseTemps( temps, response ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
 
-         recordTemps();
-         recordCamera();
+            m_temps.setInvalid();
+            m_ccdTemp              = m_temps.CCD;
+            m_ccdTempSetpt         = m_temps.SET;
+            m_tempControlStatus    = false;
+            m_tempControlStatusStr = "UNKNOWN";
 
-         std::cerr << "Temp. parse error. Response:\n" << response << std::endl;
+            recordTemps();
+            recordCamera();
 
-         //We don't trust the temps, but don't reconfig just for this.
-         return log<software_error, 0>({"Temp. parse error"});
-      }
+            std::cerr << "Temp. parse error. Response:\n" << response << std::endl;
 
-      m_temps = temps;
+            // We don't trust the temps, but don't reconfig just for this.
+            return log<software_error, 0>( { "Temp. parse error" } );
+        }
 
-      //stdCamera temp control:
-      m_ccdTemp = m_temps.CCD;
-      m_ccdTempSetpt = m_temps.SET;
+        m_temps = temps;
 
-      //Detect that temperature control is off
-      if(m_temps.COOLING_POWER < 5)
-      {
-         if( m_temps.CCD - m_temps.SET > 2.99 )
-         {
-            m_tempControlStatus = false;
-         }
-      }
-      else m_tempControlStatus = true;
+        // stdCamera temp control:
+        m_ccdTemp      = m_temps.CCD;
+        m_ccdTempSetpt = m_temps.SET;
 
-      if(m_tempControlStatus == true)
-      {
-         if(fabs(m_temps.CCD - m_temps.SET) < 1.0)
-         {
-            m_tempControlStatusStr = "ON TARGET";
-            m_tempControlOnTarget = true;
-         }
-         else
-         {
-            m_tempControlStatusStr = "OFF TARGET";
-            m_tempControlOnTarget = false;
-         }
-      }
-      else
-      {
-         m_tempControlStatusStr = "TEMP OFF";
-         m_tempControlOnTarget = false;
-      }
+        // Detect that temperature control is off
+        if( m_temps.COOLING_POWER < 5 )
+        {
+            if( m_temps.CCD - m_temps.SET > 2.99 )
+            {
+                m_tempControlStatus = false;
+            }
+        }
+        else
+            m_tempControlStatus = true;
 
+        if( m_tempControlStatus == true )
+        {
+            if( fabs( m_temps.CCD - m_temps.SET ) < 1.0 )
+            {
+                m_tempControlStatusStr = "ON TARGET";
+                m_tempControlOnTarget  = true;
+            }
+            else
+            {
+                m_tempControlStatusStr = "OFF TARGET";
+                m_tempControlOnTarget  = false;
+            }
+        }
+        else
+        {
+            m_tempControlStatusStr = "TEMP OFF";
+            m_tempControlOnTarget  = false;
+        }
 
-      //Telemeter:
-      recordTemps();
-      recordCamera();
+        // Telemeter:
+        recordTemps();
+        recordCamera();
 
-      updateIfChanged(m_indiP_temps, "cpu", m_temps.CPU);
-      updateIfChanged(m_indiP_temps, "power", m_temps.POWER);
-      updateIfChanged(m_indiP_temps, "bias", m_temps.BIAS);
-      updateIfChanged(m_indiP_temps, "water", m_temps.WATER);
-      updateIfChanged(m_indiP_temps, "left", m_temps.LEFT);
-      updateIfChanged(m_indiP_temps, "right", m_temps.RIGHT);
-      updateIfChanged(m_indiP_temps, "cooling", m_temps.COOLING_POWER);
-      return 0;
-
-   }
-   else
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({""});
-   }
+        updateIfChanged( m_indiP_temps, "cpu", m_temps.CPU );
+        updateIfChanged( m_indiP_temps, "power", m_temps.POWER );
+        updateIfChanged( m_indiP_temps, "bias", m_temps.BIAS );
+        updateIfChanged( m_indiP_temps, "water", m_temps.WATER );
+        updateIfChanged( m_indiP_temps, "left", m_temps.LEFT );
+        updateIfChanged( m_indiP_temps, "right", m_temps.RIGHT );
+        updateIfChanged( m_indiP_temps, "cooling", m_temps.COOLING_POWER );
+        return 0;
+    }
 }
 
-inline
-int ocam2KCtrl::powerOnDefaults()
+inline int ocam2KCtrl::powerOnDefaults()
 {
-   //Camera boots up with this true in most cases.
-   m_tempControlStatusSet = false;
-   m_tempControlStatus =false;
+    // Camera boots up with this true in most cases.
+    m_tempControlStatusSet = false;
+    m_tempControlStatus    = false;
 
-   return 0;
+    return 0;
 }
 
-inline
-int ocam2KCtrl::setTempControl()
+inline int ocam2KCtrl::setTempControl()
 {
-   std::string response;
+    std::string response;
 
-   std::string command;
+    std::string command;
 
-   std::string comStr = "temp ";
-   if(m_tempControlStatusSet)
-   {
-      command = "on";
-      m_tempControlStatusSet = true;
-      m_tempControlStatus = true;
-   }
-   else
-   {
-      if( m_ccdTemp > 19) //19 is 20 with a 1 C slop
-      {
-         command = "off";
-         m_tempControlStatusSet = false;
-         m_tempControlStatus = false;
-      }
-      else
-      {
-         return log<text_log,-1>("Can not turn temp control off when not at 20 C or higher", logPrio::LOG_ERROR);
-      }
-   }
+    std::string comStr = "temp ";
+    if( m_tempControlStatusSet )
+    {
+        command                = "on";
+        m_tempControlStatusSet = true;
+        m_tempControlStatus    = true;
+    }
+    else
+    {
+        if( m_ccdTemp > 19 ) // 19 is 20 with a 1 C slop
+        {
+            command                = "off";
+            m_tempControlStatusSet = false;
+            m_tempControlStatus    = false;
+        }
+        else
+        {
+            return log<text_log, -1>( "Can not turn temp control off when not at 20 C or higher", logPrio::LOG_ERROR );
+        }
+    }
 
-   comStr += command;
+    comStr += command;
 
-   if( pdvSerialWriteRead( response, comStr) == 0)
-   {
-      std::cerr << "response: " << response << "\n";
-      ///\todo check response
-      log<text_log,0>({"Set temperature control to " + command});
-   }
-   else
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({""});
-   }
+    { // mutex scope
+        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+        if( pdvSerialWriteRead( response, comStr ) != 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            return log<software_error, -1>( { "" } );
+        }
+    }
 
-   if( m_tempControlStatusSet && m_ccdTempSetpt > -999)
-   {
-      return setTempSetPt();
-   }
+    {
+        std::cerr << "response: " << response << "\n";
+        ///\todo check response
+        log<text_log, 0>( { "Set temperature control to " + command } );
+    }
 
-   recordCamera();
+    if( m_tempControlStatusSet && m_ccdTempSetpt > -999 )
+    {
+        return setTempSetPt();
+    }
 
-   return 0;
+    recordCamera();
+
+    return 0;
 }
 
-inline
-int ocam2KCtrl::setTempSetPt()
+inline int ocam2KCtrl::setTempSetPt()
 {
-   std::string response;
+    std::string response;
 
-   std::string tempStr = std::to_string( m_ccdTempSetpt );
+    std::string tempStr = std::to_string( m_ccdTempSetpt );
 
-   ///\todo make more configurable
-   if(m_ccdTempSetpt >= 30 || m_ccdTempSetpt < -50)
-   {
-      return log<text_log,-1>({"attempt to set temperature outside valid range: " + tempStr}, logPrio::LOG_ERROR);
-   }
+    ///\todo make more configurable
+    if( m_ccdTempSetpt >= 30 || m_ccdTempSetpt < -50 )
+    {
+        return log<text_log, -1>( { "attempt to set temperature outside valid range: " + tempStr },
+                                  logPrio::LOG_ERROR );
+    }
 
-   if( pdvSerialWriteRead( response, "temp " + tempStr) == 0)
-   {
-      std::cerr << "response: " << response << "\n";
+    { // mutex scope
+        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+        if( pdvSerialWriteRead( response, "temp " + tempStr ) != 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            return log<software_error, -1>( { "" } );
+        }
+    }
 
-      recordCamera();
+    {
+        std::cerr << "response: " << response << "\n";
 
-      ///\todo check response
-      std::cerr << "temp " <<  tempStr << " response: " << response << "\n";
+        recordCamera();
 
-      return log<text_log,0>({"set temperature: " + tempStr});
-   }
-   else
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({""});
-   }
+        ///\todo check response
+        std::cerr << "temp " << tempStr << " response: " << response << "\n";
 
+        return log<text_log, 0>( { "set temperature: " + tempStr } );
+    }
 }
 
-inline
-int ocam2KCtrl::getFPS()
+inline int ocam2KCtrl::getFPS()
 {
-    if(!m_synchro)
+    if( !m_synchro )
     {
         std::string response;
 
-        if( pdvSerialWriteRead( response, "fps") == 0) // m_pdv, "fps", m_readTimeout) == 0)
+        { // mutex scope
+            std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+            if( pdvSerialWriteRead( response, "fps" ) != 0 )
+                return log<software_error, -1>( { "" } ); // m_pdv, "fps", m_readTimeout) == 0)
+        }
+
         {
             float fps;
-            if(parseFPS( fps, response ) < 0)
+            if( parseFPS( fps, response ) < 0 )
             {
-                if(powerState() != 1 || powerStateTarget() != 1) return -1;
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                    return -1;
 
                 std::cerr << "fps parse error. Response:\n" << response << "\n";
 
-                return log<software_error, 0>({"fps parse error"});
+                return log<software_error, 0>( { "fps parse error" } );
             }
             m_fps = fps;
 
             recordCamera();
 
             return 0;
-
-        }
-        else
-        {
-            return log<software_error,-1>({""});
         }
     }
     else
@@ -937,281 +1126,292 @@ int ocam2KCtrl::getFPS()
     }
 }
 
-inline
-int ocam2KCtrl::setFPS()
+inline int ocam2KCtrl::setFPS()
 {
-    std::string fpsStr= std::to_string(m_fpsSet);
+    std::string fpsStr = std::to_string( m_fpsSet );
 
-    if(!m_synchro)
+    if( !m_synchro )
     {
         std::string response;
 
-        if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0)
+        { // mutex scope
+            std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+            if( pdvSerialWriteRead( response, "fps " + fpsStr ) != 0 )
+            {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                    return -1;
+                return log<software_error, -1>( { "" } );
+            }
+        }
+
         {
             ///\todo check response
             std::cerr << "fps " << fpsStr << " response: " << response << "\n";
-            log<text_log>({"set fps: " + fpsStr});
+            log<text_log>( { "set fps: " + fpsStr } );
 
-            //We always want to reset the latency circular buffers
+            // We always want to reset the latency circular buffers
             ///\todo verify that this works!!
             m_nextMode = m_modeName;
             m_reconfig = true;
-
-        }
-        else
-        {
-            if(powerState() != 1 || powerStateTarget() != 1) return -1;
-            return log<software_error,-1>({""});
         }
     }
     else
     {
         std::cerr << "setting: " << fpsStr << "\n";
 
-        pcf::IndiProperty ipFreq(pcf::IndiProperty::Number);
+        pcf::IndiProperty ipFreq( pcf::IndiProperty::Number );
 
-        ipFreq.setDevice(m_syncDevice);
-        ipFreq.setName(m_syncFreqProp);
-        ipFreq.add(pcf::IndiElement("target"));
+        ipFreq.setDevice( m_syncDevice );
+        ipFreq.setName( m_syncFreqProp );
+        ipFreq.add( pcf::IndiElement( "target" ) );
 
         ipFreq["target"] = fpsStr;
 
-        sendNewProperty(ipFreq);
+        sendNewProperty( ipFreq );
     }
-
-
 
     return 0;
 }
 
-inline
-int ocam2KCtrl::setSynchro()
+inline int ocam2KCtrl::setSynchro()
 {
     std::string response;
 
-    //First set the actual FPS to 0 to get to max
-    std::string fpsStr= std::to_string(0);
-    if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0)
-    {
-        ///\todo check response
-        std::cerr << "fps " << fpsStr << " response: " << response << "\n";
-        log<text_log>({"set fps: " + fpsStr});
-    }
-    else
-    {
-        if(powerState() != 1 || powerStateTarget() != 1) return -1;
-        return log<software_error,-1>({""});
-    }
+    { // mutex scope
+        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
 
-    //Now actually turn synchro on
-    std::string sStr;
-    if(m_synchroSet) sStr = "on";
-    else sStr = "off";
-    if( pdvSerialWriteRead( response, "synchro " + sStr ) == 0)
-    {
-        ///\todo check response
-        std::cerr << "synchro " << sStr << " resonse: " << response << "\n";
-        log<text_log>({"set synchro: " + sStr});
-
-        m_synchro = m_synchroSet;
-
-        if(m_synchro == false)
+        // First set the actual FPS to 0 to get to max
+        std::string fpsStr = std::to_string( 0 );
+        if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0 )
         {
-            updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+            ///\todo check response
+            std::cerr << "fps " << fpsStr << " response: " << response << "\n";
+            log<text_log>( { "set fps: " + fpsStr } );
         }
         else
         {
-            updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::On, INDI_OK);
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            return log<software_error, -1>( { "" } );
+        }
+
+        // Now actually turn synchro on
+        std::string sStr;
+        if( m_synchroSet )
+            sStr = "on";
+        else
+            sStr = "off";
+        if( pdvSerialWriteRead( response, "synchro " + sStr ) == 0 )
+        {
+            ///\todo check response
+            std::cerr << "synchro " << sStr << " resonse: " << response << "\n";
+            log<text_log>( { "set synchro: " + sStr } );
+
+            m_synchro = m_synchroSet;
+
+            if( m_synchro == false )
+            {
+                updateSwitchIfChanged( m_indiP_synchro, "toggle", pcf::IndiElement::Off, INDI_IDLE );
+            }
+            else
+            {
+                updateSwitchIfChanged( m_indiP_synchro, "toggle", pcf::IndiElement::On, INDI_OK );
+            }
+        }
+        else
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            return log<software_error, -1>( { "" } );
         }
     }
-    else
-    {
-        if(powerState() != 1 || powerStateTarget() != 1) return -1;
-        return log<software_error,-1>({""});
-    }
 
-    //Finally we set the FPS of the synchro device
+    // Finally we set the FPS of the synchro device
     return setFPS();
 }
 
-inline
-int ocam2KCtrl::setExpTime()
+inline int ocam2KCtrl::setExpTime()
 {
-   return 0;
+    return 0;
 }
 
-inline
-int ocam2KCtrl::setNextROI()
+inline int ocam2KCtrl::setNextROI()
 {
-   return 0;
+    return 0;
 }
 
-inline
-int ocam2KCtrl::setShutter(int sh)
+inline int ocam2KCtrl::setShutter( int sh )
 {
-   return dssShutter<ocam2KCtrl>::setShutterState(sh);
+    return dssShutter<ocam2KCtrl>::setShutterState( sh );
 }
 
-inline
-std::string ocam2KCtrl::stateString()
+inline std::string ocam2KCtrl::stateString()
 {
-   std::string ss;
+    std::string ss;
 
-   ss += m_modeName + "_";
-   ss += std::to_string(m_fps) + "_";
-   ss += std::to_string(m_emGain) + "_";
-   ss += std::to_string(m_ccdTempSetpt);
+    ss += m_modeName + "_";
+    ss += std::to_string( m_fps ) + "_";
+    ss += std::to_string( m_emGain ) + "_";
+    ss += std::to_string( m_ccdTempSetpt );
 
-   return ss;
+    return ss;
 }
 
-inline
-bool ocam2KCtrl::stateStringValid()
+inline bool ocam2KCtrl::stateStringValid()
 {
-   if(state() == stateCodes::OPERATING && m_tempControlOnTarget)
-   {
-      return true;
-   }
-   else return false;
-}
-
-inline
-int ocam2KCtrl::resetEMProtection()
-{
-   std::string response;
-
-   if( pdvSerialWriteRead( response, "protection reset") == 0)
-   {
-      std::cerr << "\n******************************************\n";
-      std::cerr << "protection reset:\n";
-      std::cerr << response << "\n";
-      std::cerr << "\n******************************************\n";
-      ///\todo check response.
-
-      updateIfChanged(m_indiP_emProt, "status", std::string("RESET"), INDI_OK);
-
-      log<text_log>("overillumination protection has been reset", logPrio::LOG_NOTICE);
-
-      m_protectionResetConfirmed = 0;
-
-      m_protectionReset = true;
-
-      return 0;
-
-   }
-   else
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({""});
-   }
-}
-
-inline
-int ocam2KCtrl::getEMGain()
-{
-   std::string response;
-
-   if( pdvSerialWriteRead( response, "gain") == 0)
-   {
-      unsigned emGain;
-      if(parseEMGain( emGain, response ) < 0)
-      {
-         if(powerState() != 1 || powerStateTarget() != 1) return -1;
-
-         if(response.find("HV") != std::string::npos)
-         {
-            m_emGain = 1;
-            updateIfChanged(m_indiP_emProt, "status", std::string("TRIPPED"), INDI_ALERT);
-            return log<software_warning, -1>({"EM Gain tripped!"});
-
-         }
-
-         std::cerr << "EM Gain parse error, response:\n" << response << "\n";
-
-         return log<software_error, -1>({"EM Gain parse error"});
-      }
-
-      m_emGain = emGain;
-
-      return 0;
-
-   }
-   else
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({""});
-   }
-}
-
-inline
-int ocam2KCtrl::setEMGain( )
-{
-   std::string response;
-
-   if(m_protectionReset == false)
-   {
-      log<text_log>("Attempt to set EM gain before protection reset", logPrio::LOG_NOTICE);
-
-      if(m_emGainSet > 1) //we allow setting to 1 for safety
-      {
-         return 0;
-      }
-   }
-
-   unsigned emg  = m_emGainSet; //a float
-
-   if(emg < 1 || emg > m_maxEMGain)
-   {
-      log<text_log>("Attempt to set EM gain to " + std::to_string(emg) + " outside limits refused", logPrio::LOG_WARNING);
-      return 0;
-   }
-
-   std::string emgStr= std::to_string(emg);
-   if( pdvSerialWriteRead( response, "gain " + emgStr ) == 0) //m_pdv, "gain " + emgStr, m_readTimeout) == 0)
-   {
-      ///\todo check response
-      std::cerr << "gain " << emgStr << " response: " << emgStr << "\n";
-
-      log<text_log>({"set EM Gain: " + emgStr});
-
-      return 0;
-   }
-   else
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({""});
-   }
-
-}
-
-inline
-int ocam2KCtrl::configureAcquisition()
-{
-    //lock mutex
-    std::unique_lock<std::mutex> lock(m_indiMutex);
-
-    //Send command to camera to place it in the correct mode
-    std::string response;
-    if( pdvSerialWriteRead( response, m_cameraModes[m_modeName].m_serialCommand) != 0) //m_pdv, m_cameraModes[m_modeName].m_serialCommand, m_readTimeout) != 0)
+    if( state() == stateCodes::OPERATING && m_tempControlOnTarget )
     {
-        if(powerState() != 1 || powerStateTarget() != 1) return -1;
+        return true;
+    }
+    else
+        return false;
+}
 
-        log<software_error>({"Error sending command to set mode"});
-        sleep(1);
+inline int ocam2KCtrl::resetEMProtection()
+{
+    std::string response;
+
+    { // mutex scope
+        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+        if( pdvSerialWriteRead( response, "protection reset" ) != 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            return log<software_error, -1>( { "" } );
+        }
+    }
+
+    {
+        std::cerr << "\n******************************************\n";
+        std::cerr << "protection reset:\n";
+        std::cerr << response << "\n";
+        std::cerr << "\n******************************************\n";
+        ///\todo check response.
+
+        updateIfChanged( m_indiP_emProt, "status", std::string( "RESET" ), INDI_OK );
+
+        log<text_log>( "overillumination protection has been reset", logPrio::LOG_NOTICE );
+
+        m_protectionResetConfirmed = 0;
+
+        m_protectionReset = true;
+
+        return 0;
+    }
+}
+
+inline int ocam2KCtrl::getEMGain()
+{
+    std::string response;
+
+    { // mutex scope
+        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+        if( pdvSerialWriteRead( response, "gain" ) != 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            return log<software_error, -1>( { "" } );
+        }
+    }
+
+    {
+        unsigned emGain;
+        if( parseEMGain( emGain, response ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+
+            if( response.find( "HV" ) != std::string::npos )
+            {
+                m_emGain = 1;
+                updateIfChanged( m_indiP_emProt, "status", std::string( "TRIPPED" ), INDI_ALERT );
+                return log<software_warning, -1>( { "EM Gain tripped!" } );
+            }
+
+            std::cerr << "EM Gain parse error, response:\n" << response << "\n";
+
+            return log<software_error, -1>( { "EM Gain parse error" } );
+        }
+
+        m_emGain = emGain;
+
+        return 0;
+    }
+}
+
+inline int ocam2KCtrl::setEMGain()
+{
+    std::string response;
+
+    if( m_protectionReset == false )
+    {
+        log<text_log>( "Attempt to set EM gain before protection reset", logPrio::LOG_NOTICE );
+
+        if( m_emGainSet > 1 ) // we allow setting to 1 for safety
+        {
+            return 0;
+        }
+    }
+
+    unsigned emg = m_emGainSet; // a float
+
+    if( emg < 1 || emg > m_maxEMGain )
+    {
+        log<text_log>( "Attempt to set EM gain to " + std::to_string( emg ) + " outside limits refused",
+                       logPrio::LOG_WARNING );
+        return 0;
+    }
+
+    std::string emgStr = std::to_string( emg );
+    { // mutex scope
+        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+        if( pdvSerialWriteRead( response, "gain " + emgStr ) != 0 ) // m_pdv, "gain " + emgStr, m_readTimeout) == 0)
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            return log<software_error, -1>( { "" } );
+        }
+    }
+
+    {
+        ///\todo check response
+        std::cerr << "gain " << emgStr << " response: " << emgStr << "\n";
+
+        log<text_log>( { "set EM Gain: " + emgStr } );
+
+        return 0;
+    }
+}
+
+inline int ocam2KCtrl::configureAcquisition()
+{
+    // lock mutex
+    std::unique_lock<std::mutex>          lock( m_indiMutex );
+    std::lock_guard<std::recursive_mutex> cameraGuard( m_cameraMutex );
+
+    // Send command to camera to place it in the correct mode
+    std::string response;
+    if( pdvSerialWriteRead( response, m_cameraModes[m_modeName].m_serialCommand ) != 0 )
+    {
+        if( powerState() != 1 || powerStateTarget() != 1 )
+            return -1;
+
+        log<software_error>( { "Error sending command to set mode" } );
+        sleep( 1 );
         return -1;
     }
 
-    m_currentROI.x = 119.5;
-    m_currentROI.y = 119.5;
-    m_currentROI.w = 240;
-    m_currentROI.h = 240;
+    m_currentROI.x     = 119.5;
+    m_currentROI.y     = 119.5;
+    m_currentROI.w     = 240;
+    m_currentROI.h     = 240;
     m_currentROI.bin_x = m_cameraModes[m_modeName].m_binningX;
     m_currentROI.bin_y = m_cameraModes[m_modeName].m_binningY;
 
     m_digitalBinX = m_cameraModes[m_modeName].m_digitalBinX;
     m_digitalBinY = m_cameraModes[m_modeName].m_digitalBinY;
 
-    if(m_digitalBinX > 1)
+    if( m_digitalBinX > 1 )
     {
         m_digitalBin = true;
         std::cerr << "digital binning!\n";
@@ -1223,58 +1423,62 @@ int ocam2KCtrl::configureAcquisition()
 
     recordCamera();
 
-     ///\todo check response of pdvSerialWriteRead
-    log<text_log>("camera configured with: " +m_cameraModes[m_modeName].m_serialCommand);
+    ///\todo check response of pdvSerialWriteRead
+    log<text_log>( "camera configured with: " + m_cameraModes[m_modeName].m_serialCommand );
 
-    if(m_fpsSet > 0) setFPS();
-
-    log<text_log>("Send command to set mode: " + m_cameraModes[m_modeName].m_serialCommand);
-    log<text_log>("Response was: " + response);
-
-    if(setSynchro() < 0)
+    if( m_fpsSet > 0 )
     {
-        log<software_error>({"Error setting synchro during configureAcquisition"});
+        setFPS();
+    }
+
+    log<text_log>( "Send command to set mode: " + m_cameraModes[m_modeName].m_serialCommand );
+    log<text_log>( "Response was: " + response );
+
+    if( setSynchro() < 0 )
+    {
+        log<software_error>( { "Error setting synchro during configureAcquisition" } );
     }
 
     /* Initialize the OCAM2 SDK
-        */
+     */
 
-    if(m_ocam2_id > 0)
+    if( m_ocam2_id > 0 )
     {
-        ocam2_exit(m_ocam2_id);
+        ocam2_exit( m_ocam2_id );
+        m_ocam2_id = 0;
     }
-    ocam2_rc rc;
+    ocam2_rc   rc;
     ocam2_mode mode;
 
     int OCAM_SZw;
     int OCAM_SZh;
-    if(m_raw_height == 121)
+    if( m_raw_height == 121 )
     {
-        mode = OCAM2_NORMAL;
+        mode     = OCAM2_NORMAL;
         OCAM_SZw = 240;
         OCAM_SZh = 240;
     }
-    else if (m_raw_height == 62)
+    else if( m_raw_height == 62 )
     {
-        mode = OCAM2_BINNING;
+        mode     = OCAM2_BINNING;
         OCAM_SZw = 120;
         OCAM_SZh = 120;
     }
-    else if (m_raw_height == 41)
+    else if( m_raw_height == 41 )
     {
-        mode = OCAM2_BINNING1x3;
+        mode     = OCAM2_BINNING1x3;
         OCAM_SZw = 240;
         OCAM_SZh = 80;
     }
-    else if (m_raw_height == 31)
+    else if( m_raw_height == 31 )
     {
-        mode = OCAM2_BINNING1x4;
+        mode     = OCAM2_BINNING1x4;
         OCAM_SZw = 240;
         OCAM_SZh = 60;
     }
     else
     {
-        log<text_log>("Unrecognized OCAM2 mode.", logPrio::LOG_ERROR);
+        log<text_log>( "Unrecognized OCAM2 mode.", logPrio::LOG_ERROR );
         return -1;
     }
 
@@ -1282,230 +1486,267 @@ int ocam2KCtrl::configureAcquisition()
 
     std::cerr << "ocamDescrambleFile: " << ocamDescrambleFile << std::endl;
 
-    rc=ocam2_init(mode, ocamDescrambleFile.c_str(), &m_ocam2_id);
+    ocam2_id nextOcam2Id = 0;
 
-    if (rc != OCAM2_OK)
+    rc = ocam2_init( mode, ocamDescrambleFile.c_str(), &nextOcam2Id );
+
+    if( rc != OCAM2_OK )
     {
-        if(powerState() != 1 || powerStateTarget() != 1) return -1;
-        log<text_log>("ocam2_init error. Failed to initialize OCAM SDK with descramble file: " + ocamDescrambleFile, logPrio::LOG_ERROR);
+        if( powerState() != 1 || powerStateTarget() != 1 )
+            return -1;
+        log<text_log>( "ocam2_init error. Failed to initialize OCAM SDK with descramble file: " + ocamDescrambleFile,
+                       logPrio::LOG_ERROR );
         return -1;
     }
 
+    m_ocam2_id = nextOcam2Id;
 
-    log<text_log>("OCAM2K initialized. id: " + std::to_string(m_ocam2_id));
+    log<text_log>( "OCAM2K initialized. id: " + std::to_string( m_ocam2_id ) );
 
-    log<text_log>(std::string("OCAM2K mode is:") + ocam2_modeStr(ocam2_getMode(m_ocam2_id)));
+    log<text_log>( std::string( "OCAM2K mode is:" ) + ocam2_modeStr( ocam2_getMode( m_ocam2_id ) ) );
 
-
-
-
-    if(m_digitalBin)
+    if( m_digitalBin )
     {
         std::cerr << "and digital binning!\n";
-        m_digitalBinWork.resize(OCAM_SZw, OCAM_SZh);
+        m_digitalBinWork.resize( OCAM_SZw, OCAM_SZh );
 
-        m_width = OCAM_SZw / m_digitalBinX;
+        m_width  = OCAM_SZw / m_digitalBinX;
         m_height = OCAM_SZh / m_digitalBinY;
     }
     else
     {
-        m_width = OCAM_SZw;
+        m_width  = OCAM_SZw;
         m_height = OCAM_SZh;
     }
 
     m_dataType = _DATATYPE_UINT16;
 
-    state(stateCodes::OPERATING);
+    if( ensureSyncStream() < 0 )
+    {
+        return log<software_error, -1>( { "Error preparing sync ImageStreamIO stream" } );
+    }
+
+    state( stateCodes::OPERATING );
 
     return 0;
 }
 
-inline
-float ocam2KCtrl::fps()
+inline float ocam2KCtrl::fps()
 {
-   return m_fps;
+    return m_fps;
 }
 
-inline
-int ocam2KCtrl::startAcquisition()
+inline int ocam2KCtrl::startAcquisition()
 {
-   m_lastImageNumber = -1;
-   return edtCamera<ocam2KCtrl>::pdvStartAcquisition();
-
+    m_lastImageNumber = -1;
+    return edtCamera<ocam2KCtrl>::pdvStartAcquisition();
 }
 
-inline
-int ocam2KCtrl::acquireAndCheckValid()
+inline int ocam2KCtrl::acquireAndCheckValid()
 {
-   edtCamera<ocam2KCtrl>::pdvAcquire( m_currImageTimestamp );
+    edtCamera<ocam2KCtrl>::pdvAcquire( m_currImageTimestamp );
 
-   /* Removed all pdv timeout and overrun checking, since we can rely on frame number from the camera
-      to detect missed and corrupted frames.
+    /* Removed all pdv timeout and overrun checking, since we can rely on frame number from the camera
+       to detect missed and corrupted frames.
 
-      See ef0dd24 for last version with full checks in it.
-   */
+       See ef0dd24 for last version with full checks in it.
+    */
 
-   //Get the image number to see if this is valid.
-   //This is how it is in the ocam2_sdk:
-   unsigned currImageNumber = (reinterpret_cast<int *>(m_image_p))[OCAM2_IMAGE_NB_OFFSET/4]; /* int offset */
-   m_currImageNumber = currImageNumber;
+    // Get the image number to see if this is valid.
+    // This is how it is in the ocam2_sdk:
+    unsigned currImageNumber = ( reinterpret_cast<int *>( m_image_p ) )[OCAM2_IMAGE_NB_OFFSET / 4]; /* int offset */
+    m_currImageNumber        = currImageNumber;
 
-   //For the first loop after a restart
-   if( m_lastImageNumber == -1 )
-   {
-      m_lastImageNumber = m_currImageNumber - 1;
-   }
+    // For the first loop after a restart
+    if( m_lastImageNumber == -1 )
+    {
+        m_lastImageNumber = m_currImageNumber - 1;
+    }
 
-   if(m_currImageNumber - m_lastImageNumber != 1)
-   {
-      //Detect exact condition of a wraparound on the unsigned int.
-      // Yes, this can only happen once every 13.72 days at 3622 fps
-      // But just in case . . .
-      if(m_lastImageNumber != std::numeric_limits<unsigned int>::max() && m_currImageNumber != 0)
-      {
-         //The far more likely case is a problem...
+    if( m_currImageNumber - m_lastImageNumber != 1 )
+    {
+        // Detect exact condition of a wraparound on the unsigned int.
+        //  Yes, this can only happen once every 13.72 days at 3622 fps
+        //  But just in case . . .
+        if( m_lastImageNumber != std::numeric_limits<unsigned int>::max() && m_currImageNumber != 0 )
+        {
+            // The far more likely case is a problem...
 
-         //If a reasonably small number of frames skipped, then we trust the image number
-         if(m_currImageNumber - m_lastImageNumber > 1 && m_currImageNumber - m_lastImageNumber < 100)
-         {
-            //This we handle as a non-timeout -- report how many frames were skipped
-            long framesSkipped = m_currImageNumber - m_lastImageNumber - 1;
+            // If a reasonably small number of frames skipped, then we trust the image number
+            if( m_currImageNumber - m_lastImageNumber > 1 && m_currImageNumber - m_lastImageNumber < 100 )
+            {
+                // This we handle as a non-timeout -- report how many frames were skipped
+                long framesSkipped = m_currImageNumber - m_lastImageNumber - 1;
 
-            log<text_log>("frames skipped: " + std::to_string(framesSkipped), logPrio::LOG_ERROR);
+                log<text_log>( "frames skipped: " + std::to_string( framesSkipped ), logPrio::LOG_ERROR );
 
-            m_lastImageNumber = -1;
-            m_nextMode = m_modeName;
-            m_reconfig = 1;
-            return 1;
+                m_lastImageNumber = -1;
+                m_nextMode        = m_modeName;
+                m_reconfig        = 1;
+                return 1;
+            }
+            else // but if it's any bigger or < 0, it's probably garbage
+            {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                    return -1;
 
-         }
-         else //but if it's any bigger or < 0, it's probably garbage
-         {
-            if(powerState() != 1 || powerStateTarget() != 1) return -1;
+                ///\todo need frame corrupt log type
+                log<text_log>( "frame number possibly corrupt: " + std::to_string( m_currImageNumber ) + " - " +
+                                   std::to_string( m_lastImageNumber ),
+                               logPrio::LOG_ERROR );
 
-            ///\todo need frame corrupt log type
-            log<text_log>("frame number possibly corrupt: " + std::to_string(m_currImageNumber) + " - " + std::to_string(m_lastImageNumber), logPrio::LOG_ERROR);
+                m_nextMode = m_modeName;
+                m_reconfig = 1;
 
-            m_nextMode = m_modeName;
-            m_reconfig = 1;
-
-            //Reset the counters.
-            m_lastImageNumber = -1;
-            return 1;
-
-         }
-      }
-   }
-   m_lastImageNumber = m_currImageNumber;
-   return 0;
+                // Reset the counters.
+                m_lastImageNumber = -1;
+                return 1;
+            }
+        }
+    }
+    m_lastImageNumber = m_currImageNumber;
+    return 0;
 }
 
-inline
-int ocam2KCtrl::loadImageIntoStream(void * dest)
+inline int ocam2KCtrl::loadImageIntoStream( void *dest )
 {
     unsigned currImageNumber = 0;
 
-    if(!m_digitalBin)
+    if( !m_digitalBin )
     {
-        ocam2_descramble(m_ocam2_id, &currImageNumber, reinterpret_cast<int16_t *>(dest), reinterpret_cast<int16_t *>(m_image_p));
-        //memcpy(dest, m_image_p, 120*120*2); //This is about 10 usec faster -- but we have to descramble.
+        ocam2_descramble( m_ocam2_id,
+                          &currImageNumber,
+                          reinterpret_cast<int16_t *>( dest ),
+                          reinterpret_cast<int16_t *>( m_image_p ) );
+        // memcpy(dest, m_image_p, 120*120*2); //This is about 10 usec faster -- but we have to descramble.
     }
     else
     {
-        ocam2_descramble(m_ocam2_id, &currImageNumber, m_digitalBinWork.data(), reinterpret_cast<int16_t *>(m_image_p));
+        ocam2_descramble(
+            m_ocam2_id, &currImageNumber, m_digitalBinWork.data(), reinterpret_cast<int16_t *>( m_image_p ) );
 
-        mx::improc::eigenMap<int16_t> destMap( reinterpret_cast<int16_t*>(dest), m_width, m_height);
+        mx::improc::eigenMap<int16_t> destMap( reinterpret_cast<int16_t *>( dest ), m_width, m_height );
 
-        if(m_digitalBinX > 1)
+        if( m_digitalBinX > 1 )
         {
-            for(int cc = 0; cc < destMap.cols(); ++cc)
+            for( int cc = 0; cc < destMap.cols(); ++cc )
             {
-                for(int rr = 0; rr < destMap.rows(); ++rr)
+                for( int rr = 0; rr < destMap.rows(); ++rr )
                 {
-                    destMap(rr,cc)  = m_digitalBinWork(rr*m_digitalBinX + 0, cc);
+                    destMap( rr, cc ) = m_digitalBinWork( rr * m_digitalBinX + 0, cc );
 
-                    for(unsigned b = 1; b < m_digitalBinX; ++b)
+                    for( unsigned b = 1; b < m_digitalBinX; ++b )
                     {
-                        destMap(rr,cc)  = m_digitalBinWork(rr*m_digitalBinX + b,cc);
+                        destMap( rr, cc ) = m_digitalBinWork( rr * m_digitalBinX + b, cc );
                     }
                 }
             }
         }
     }
 
-
-   return 0;
+    return 0;
 }
 
-inline
-int ocam2KCtrl::reconfig()
+inline int ocam2KCtrl::reconfig()
 {
-   //lock mutex
-   std::unique_lock<std::mutex> lock(m_indiMutex);
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
 
-   int rv = edtCamera<ocam2KCtrl>::pdvReconfig();
-   if(rv < 0) return rv;
-   state(stateCodes::READY);
-   return 0;
+    int rv = edtCamera<ocam2KCtrl>::pdvReconfig();
+
+    if( rv < 0 )
+    {
+        return rv;
+    }
+
+    state( stateCodes::READY );
+    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emProtReset)(const pcf::IndiProperty &ipRecv)
+inline int ocam2KCtrl::frameGrabberPostPublish( IMAGE *imageStream )
 {
-   if(MagAOXAppT::m_powerState == 0) return 0;
+    if( imageStream == nullptr )
+    {
+        return 0;
+    }
 
-   if (ipRecv.getName() != m_indiP_emProtReset.getName())
-   {
-      log<software_error>({"wrong INDI property received."});
-      return -1;
-   }
+    if( m_syncImageStream == nullptr )
+    {
+        return log<software_error, -1>( { "Sync ImageStreamIO stream unavailable during publication" } );
+    }
 
-   if(!ipRecv.find("request"))
-   {
-      return 0;
-   }
+    m_syncImageStream->md[0].write       = 1;
+    m_syncImageStream->array.UI8[0]      = 0;
+    m_syncImageStream->md[0].writetime   = imageStream->md[0].writetime;
+    m_syncImageStream->md[0].atime       = imageStream->md[0].atime;
+    m_syncImageStream->md[0].cnt0        = imageStream->md[0].cnt0;
+    m_syncImageStream->md[0].cnt1        = 0;
+    m_syncImageStream->writetimearray[0] = imageStream->md[0].writetime;
+    m_syncImageStream->atimearray[0]     = imageStream->md[0].atime;
+    m_syncImageStream->cntarray[0]       = imageStream->md[0].cnt0;
+    m_syncImageStream->md[0].write       = 0;
 
-   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::Off )
-   {
-      return 0;
-   }
+    ImageStreamIO_sempost( m_syncImageStream, -1 );
 
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-
-   if(m_protectionResetConfirmed == 0)
-   {
-      updateIfChanged(m_indiP_emProt, "status", std::string("CONFIRM"), INDI_BUSY);
-
-      m_protectionResetConfirmed = 1;
-
-      m_protectionResetReqTime = mx::sys::get_curr_time();
-
-      log<text_log>("protection reset requested", logPrio::LOG_NOTICE);
-
-      return 0;
-   }
-
-
-   //If here, this is a confirmation.
-   return resetEMProtection();
+    return 0;
 }
 
-INDI_SETCALLBACK_DEFN(ocam2KCtrl, m_indiP_syncFreq)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN( ocam2KCtrl, m_indiP_emProtReset )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(ipRecv, m_indiP_syncFreq)
+    if( MagAOXAppT::m_powerState == 0 )
+        return 0;
 
-    if(!ipRecv.find("current"))
+    if( ipRecv.getName() != m_indiP_emProtReset.getName() )
+    {
+        log<software_error>( { "wrong INDI property received." } );
+        return -1;
+    }
+
+    if( !ipRecv.find( "request" ) )
+    {
+        return 0;
+    }
+
+    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::Off )
+    {
+        return 0;
+    }
+
+    std::unique_lock<std::mutex> lock( m_indiMutex );
+
+    if( m_protectionResetConfirmed == 0 )
+    {
+        updateIfChanged( m_indiP_emProt, "status", std::string( "CONFIRM" ), INDI_BUSY );
+
+        m_protectionResetConfirmed = 1;
+
+        m_protectionResetReqTime = mx::sys::get_curr_time();
+
+        log<text_log>( "protection reset requested", logPrio::LOG_NOTICE );
+
+        return 0;
+    }
+
+    // If here, this is a confirmation.
+    return resetEMProtection();
+}
+
+INDI_SETCALLBACK_DEFN( ocam2KCtrl, m_indiP_syncFreq )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( ipRecv, m_indiP_syncFreq )
+
+    if( !ipRecv.find( "current" ) )
     {
         return -1;
     }
 
     m_syncFreq = ipRecv["current"].get<double>();
 
-    if(m_synchro && m_syncFreq != m_fps)
+    if( m_synchro && m_syncFreq != m_fps )
     {
-        recordCamera(true);
+        recordCamera( true );
         m_fps = m_syncFreq;
 
-        //We always want to reset the latency circular buffers
+        // We always want to reset the latency circular buffers
         m_nextMode = m_modeName;
         m_reconfig = true;
     }
@@ -1513,45 +1754,47 @@ INDI_SETCALLBACK_DEFN(ocam2KCtrl, m_indiP_syncFreq)(const pcf::IndiProperty &ipR
     return 0;
 }
 
-inline
-int ocam2KCtrl::checkRecordTimes()
+inline int ocam2KCtrl::checkRecordTimes()
 {
-   return telemeter<ocam2KCtrl>::checkRecordTimes(ocam_temps(), telem_stdcam(), telem_fgtimings());
+    return telemeter<ocam2KCtrl>::checkRecordTimes( ocam_temps(), telem_stdcam(), telem_fgtimings() );
 }
 
-inline
-int ocam2KCtrl::recordTelem( const ocam_temps * )
+inline int ocam2KCtrl::recordTelem( const ocam_temps * )
 {
-   return recordTemps(true);
+    return recordTemps( true );
 }
 
-inline
-int ocam2KCtrl::recordTelem( const telem_stdcam * )
+inline int ocam2KCtrl::recordTelem( const telem_stdcam * )
 {
-   return recordCamera(true);
+    return recordCamera( true );
 }
 
-inline
-int ocam2KCtrl::recordTelem( const telem_fgtimings * )
+inline int ocam2KCtrl::recordTelem( const telem_fgtimings * )
 {
-   return recordFGTimings(true);
+    return recordFGTimings( true );
 }
 
-inline
-int ocam2KCtrl::recordTemps( bool force )
+inline int ocam2KCtrl::recordTemps( bool force )
 {
-   static ocamTemps lastTemps;
+    static ocamTemps lastTemps;
 
-   if(!(lastTemps == m_temps) || force)
-   {
-      telem<ocam_temps>({m_temps.CCD, m_temps.CPU, m_temps.POWER, m_temps.BIAS, m_temps.WATER, m_temps.LEFT, m_temps.RIGHT, m_temps.COOLING_POWER});
-      lastTemps = m_temps;
-   }
+    if( !( lastTemps == m_temps ) || force )
+    {
+        telem<ocam_temps>( { m_temps.CCD,
+                             m_temps.CPU,
+                             m_temps.POWER,
+                             m_temps.BIAS,
+                             m_temps.WATER,
+                             m_temps.LEFT,
+                             m_temps.RIGHT,
+                             m_temps.COOLING_POWER } );
+        lastTemps = m_temps;
+    }
 
-   return 0;
+    return 0;
 }
 
-}//namespace app
-} //namespace MagAOX
+} // namespace app
+} // namespace MagAOX
 
 #endif

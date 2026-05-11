@@ -97,6 +97,8 @@ public:
 
    virtual void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
+   virtual void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
    //------------------------------------------------------
@@ -267,12 +269,26 @@ void toggleSlider::onConnect()
 
 void toggleSlider::onDisconnect()
 {
+   m_waiting = false;
+   m_status = 0;
+   m_statusChanged = false;
+   m_tgtTimer->stop();
    ui.slider->setSliderPosition(ui.slider->minimum());
 }
 
 void toggleSlider::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {
    return handleSetProperty(ipRecv);
+}
+
+void toggleSlider::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
+   if(ipRecv.getDevice() != m_device) return;
+
+   if(ipRecv.getName() == m_property)
+   {
+      onDisconnect();
+   }
 }
 
 void toggleSlider::handleSetProperty( const pcf::IndiProperty & ipRecv)

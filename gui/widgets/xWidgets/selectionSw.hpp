@@ -47,6 +47,8 @@ public:
 
     virtual void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
+    virtual void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
     virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
     virtual void showEvent(QShowEvent* event);
@@ -112,6 +114,9 @@ void selectionSw::onDisconnect()
 {
     setWindowTitle(QString(m_title.c_str()) + QString(" (disconnected)"));
 
+    m_value.clear();
+    m_valChanged = false;
+    ui.comboBox->clear();
     ui.current->setText("---");
 
     m_onDisconnected = true;
@@ -120,6 +125,16 @@ void selectionSw::onDisconnect()
 void selectionSw::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {
     return handleSetProperty(ipRecv);
+}
+
+void selectionSw::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
+    if(ipRecv.getDevice() != m_device) return;
+
+    if(ipRecv.getName() == m_property)
+    {
+        onDisconnect();
+    }
 }
 
 void selectionSw::handleSetProperty( const pcf::IndiProperty & ipRecv)

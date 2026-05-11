@@ -73,7 +73,22 @@ rule1=fwfpm-fpm-READY
 rule2=fwfpm-stagesci1-neq
 comp=And
 ```
-Now the user can be notified to take caution whenever this out-of-focus state occurs.  The value of the `message` keyword is used for notifications.
+Now the user can be notified to take caution whenever this out-of-focus state occurs.  The value of the `message` keyword is used for notifications.  When a published rule transitions from `On` to `Off`, `stateRuleEngine` also sends a one-time informational clear notification in the form `INFO: Cleared: <message>`, falling back to the rule name when `message` is not set.
+
+For combinations that depend on several active switch-vector elements, use `multiSwitchCombo` to derive a target preset name from the currently active element in each source switch property:
+```toml
+[stagesci1-focus-mismatch]
+ruleType=multiSwitchCombo
+priority=caution
+message=stagesci1 preset does not match the current science-camera combo
+numSwitches=3
+property1=stagebs.presetName
+property2=fwfpm.filterName
+property3=stagescibs.presetName
+format="{}-{}-{}"
+targetProperty=stagesci1.presetName
+```
+This rule reads the active element name from each source switch property, formats those names into one string, and compares that derived string to the active element name in `targetProperty`.  The default comparison for `multiSwitchCombo` is `Neq`, so the rule is true when the derived combo and target preset do not match.  A source or target switch property with no active element contributes an empty string.  If a source or target switch property has multiple active elements, `multiSwitchCombo` also uses an empty string, but logs one `software_error` when the property enters that multi-On state.
 
 ## Rule Configuration
 
@@ -85,13 +100,17 @@ specified by the keywords.  Which keywords are valid depends on the ruleType.  T
 | ruleType    | Y        |         |            | the type of rule |
 | priority    | N        | none    | all        | the reporting priority |
 | message     | N        |         | all        | descriptive message used for user feedback |
-| comp        | N        | Eq      | all        | the comparison to use |
+| comp        | N        | rule-dependent | all | the comparison to use |
 | property    | Y        |         | numVal, txtVal, swVal | the INDI property |
 | element     | Y        |         | numVal, txtVal, swVal | the element within property |
 | property1   | Y        |         | elCompNum, elCompTxt, elCompSw | the first INDI property |
 | element1    | Y        |         | elCompNum, elCompTxt, elCompSw | the element within property1 |
 | property2   | Y        |         | elCompNum, elCompTxt, elCompSw | the second INDI property |
 | element2    | Y        |         | elCompNum, elCompTxt, elCompSw | the element within property2 |
+| numSwitches | Y        |         | multiSwitchCombo | the number of source switch properties to combine |
+| property1...propertyN | Y |     | multiSwitchCombo | the source switch properties to combine, in format order |
+| format      | Y        |         | multiSwitchCombo | literal `{}` placeholder format used to combine active source-element names |
+| targetProperty | Y     |         | multiSwitchCombo | the target switch property whose active element name is compared |
 | rule1       | Y        |         | ruleComp   | the first rule |
 | rule2       | Y        |         | ruleComp   | the second rule |
 | tol         | N        | 1e-6    | numVal, elCompNum | the tolerance for equality of numbers |
@@ -113,7 +132,9 @@ timeDiff    | compare the difference between now and a time           | Eq, Neq,
 elCompNum   | compare the value of two number elements to each other    | Eq, Neq, Lt, LtEq, Gt, GtEq          | equality is tested with a tolerance|
 elCompTxt   | compare the value of two text elements to each other      | Eq, Neq                            ||
 elCompSw    | compare the value of two switch elements to each other    | Eq, Neq                            ||
+multiSwitchCombo | compare a formatted combination of active switch-element names to the active element name of a target switch property | Eq, Neq | defaults `comp` to `Neq`; supports literal `{}` placeholders only |
 ruleComp    | compare the value of two rules to each other                   | Eq/Xnor, Neq/Xor, And, Nand, Or, Nor, Imply, Nimply ||
+Default `comp` is `Eq` for all rule types except `ruleComp` and `multiSwitchCombo`, which default to `And` and `Neq` respectively.
 
 (Note: [Imply](https://en.wikipedia.org/wiki/IMPLY) and [Nimply](https://en.wikipedia.org/wiki/NIMPLY) are not commutative; the rule order matters)
 
@@ -133,4 +154,3 @@ For numerical comparisons, equality is tested with a tolerance, specified by the
 
 - [ ] compare attributes, e.g. timestamp
 - [ ] add support for lights for completeness
-- [ ] add a "which switch in a SwitchVector" is on rule

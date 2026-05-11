@@ -35,6 +35,7 @@ ttmmod_params            12110    ttmmod_params
 
 #this is a telemetry entry:
 ocam_temps               12120    ocam_temps
+cred2_temps              12121    cred2_temps
 
 saving_start             12500    saving_state_change
 saving_stop              12501    saving_state_change
@@ -47,6 +48,9 @@ telem_telvane            20002    telem_telvane
 telem_telenv             20003    telem_telenv
 telem_telcat             20004    telem_telcat
 telem_telsee             20005    telem_telsee
+telem_tcsi_tiptilt       20006    telem_tcsi_offload
+telem_tcsi_focus         20007    telem_tcsi_offload
+telem_tcsi_labmode       20008    telem_tcsi_labmode
 
 telem_stage              20050    telem_stage
 telem_zaber              20055    telem_zaber
@@ -79,11 +83,15 @@ telem_fgtimings          20905    telem_fgtimings
 telem_dmmodes            20910    telem_dmmodes
 
 telem_loopgain           20915    telem_loopgain
+telem_modalgainopt       20916    telem_modalgainopt
 telem_blockgains         20920    telem_blockgains
 telem_offloading         20923    telem_offloading
+telem_w2tcsoffloader     20924    telem_w2tcsoffloader
+telem_flowrpm            20925    telem_flowrpm
 
 telem_pi335              20930    telem_pi335
 
 telem_sparkleclock       20940    telem_sparkleclock
 
 telem_poltrack           20945    telem_poltrack
+telem_adctrack           20946    telem_adctrack

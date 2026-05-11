@@ -159,11 +159,6 @@ class IndiConnection : public pcf::Thread
     /// The file descriptor to write to.
     int m_fdOutput;
 
-    /// Stream for safer output
-    FILE * m_fstreamOutput {NULL};
-
-    FILE * m_fstreamSTDOUT {NULL};
-
     /// If the processing of INDI messages is put in a separate thread,
     /// this is the thread id of it.
     pthread_t m_idProcessThread;

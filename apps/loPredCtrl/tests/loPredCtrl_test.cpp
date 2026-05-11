@@ -1,30 +1,52 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
-#include "../../../tests/catch2/catch.hpp"
+/** \file loPredCtrl_test.cpp
+ * \brief Catch2 tests for the loPredCtrl app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup loPredCtrl_files
+ */
+
+#include "../../../tests/testXWC.hpp"
 
 #include "../loPredCtrl.hpp"
 #include "../testPredCtrl.hpp"
 
 using namespace MagAOX::app;
 
-namespace template_test
+namespace libXWCTest
 {
 
-SCENARIO( "xxxx", "[template]" )
+/** \defgroup loPredCtrl_unit_test loPredCtrl Unit Tests
+ * \brief Unit tests for the loPredCtrl application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `loPredCtrl` unit tests.
+/** \ingroup loPredCtrl_unit_test
+ */
+namespace loPredCtrlTest
 {
-   GIVEN("xxxxx")
-   {
-      int rv;
 
-      WHEN("xxxx")
-      {
-         rv = 0;
+/// Verify the placeholder loPredCtrl test harness instantiates the app cleanly.
+/**
+ * \ingroup loPredCtrl_unit_test
+ */
+TEST_CASE( "loPredCtrl placeholder harness instantiates the app", "[loPredCtrl]" )
+{
+    // clang-format off
+    #ifdef LOPREDCTRL_TEST_DOXYGEN_REF
+    loPredCtrl();
+    #endif
+    // clang-format on
 
-         REQUIRE(rv == 0);
-      }
-   }
+    SECTION( "default construction succeeds" )
+    {
+        loPredCtrl app;
+
+        REQUIRE( true );
+    }
 }
-} //namespace template_test
+
+} // namespace loPredCtrlTest
+
+} // namespace libXWCTest

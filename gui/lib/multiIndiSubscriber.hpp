@@ -1,308 +1,286 @@
+/** \file multiIndiSubscriber.hpp
+ * \brief Subscriber interface and routing for shared INDI publishers.
+ */
 #ifndef multiIndiSubscriber_hpp
 #define multiIndiSubscriber_hpp
 
+#include <atomic>
 #include <iostream>
-
-#include <unordered_map>
 #include <set>
+#include <unordered_map>
 
 #include "../../INDI/libcommon/IndiProperty.hpp"
 
 /// Class implementing the functions of a subscriber to a multiIndiPublisher.
-/** Derived classes will implement handleSetProperty, which is the callback
-  * for the publisher to use when a property changes.
-  */
+/** Derived classes implement property callbacks used by a publisher.
+ */
 class multiIndiSubscriber
 {
 
-public:
+  public:
+    /// Subscriber pointers are stored in a map keyed by `device.name` unique key.
+    typedef std::unordered_multimap<std::string, multiIndiSubscriber *> propMapT;
 
-   /// Subscriber pointers are stored in a map, keyed by the property `device.name` unique key.
-   typedef std::unordered_multimap< std::string, multiIndiSubscriber *> propMapT;
+    /// Forward iterator for the unordered_multimap of subscribers.
+    typedef propMapT::iterator propMapIteratorT;
 
-   /// The forward iterator for the unordered_multimap of subscribers
-   typedef propMapT::iterator propMapIteratorT;
+    /// Subscriber pointers are also stored in a set, to allow iteration.
+    typedef std::set<multiIndiSubscriber *> subSetT;
 
-   /// Subscriber pointers are also stored in a set, to allow iteration over them
-   typedef std::set<multiIndiSubscriber*> subSetT;
+    /// Iterator for the set of subscriber pointers.
+    typedef subSetT::iterator subSetIteratorT;
 
-   /// The iterator for the set of subscriber pointers
-   typedef subSetT::iterator subSetIteratorT;
+  protected:
+    multiIndiSubscriber *m_parent{ nullptr }; ///< Parent subscriber/publisher this instance is attached to.
 
-protected:
+    propMapT subscribedProperties; ///< Property-specific child subscriptions.
 
-   /// The parent subscriber to which the instance is subscribed.
-   multiIndiSubscriber * m_parent {nullptr};
+    subSetT subscribers; ///< Child subscribers registered under this instance.
 
-   /// Child subscribers for which this instance is the parent
-   propMapT subscribedProperties;
+    std::atomic_bool m_disconnect{ false }; ///< One-shot disconnect flag consumed by disconnect().
 
-   subSetT subscribers;
+  public:
+    /// Constructs an unbound subscriber.
+    multiIndiSubscriber();
 
-   bool m_disconnect {false};
-
-public:
-
-   multiIndiSubscriber();
-
-   /// Destructor
-   /** Unsubscribes from the publisher.
+    /// Destructor.
+    /** Unsubscribes from parent publisher if currently attached.
      */
-   virtual ~multiIndiSubscriber() noexcept;
+    virtual ~multiIndiSubscriber() noexcept;
 
-   virtual void subscribe() {}
+    /// Hook invoked when the subscriber is attached to a parent.
+    virtual void subscribe();
 
-   /// Subscribes the given instance of multiIndiSubscriber to this instance
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
+    /// Subscribes the given instance of multiIndiSubscriber to this instance.
+    /** \returns 0 on success, -1 on error.
      */
-   virtual int addSubscriber( multiIndiSubscriber * sub /**< [in] pointer to the subscriber */ );
+    virtual int addSubscriber( multiIndiSubscriber *sub /**< [in] Pointer to the subscriber. */ );
 
-   /// Subscribes the given instance of multiIndiSubscriber for notifications on the given property.
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
+    /// Subscribes a child to a specific property.
+    /** \returns 0 on success, -1 on error.
      */
-   virtual int addSubscriberProperty( multiIndiSubscriber * sub, ///< [in] pointer to the subscriber
-                                      pcf::IndiProperty & ipSub  ///< [in] the property being subscribed to.
-                                    );
+    virtual int addSubscriberProperty( multiIndiSubscriber *sub,  /**< [in] Pointer to the subscriber. */
+                                       pcf::IndiProperty   &ipSub /**< [in] Property being subscribed to. */
+    );
 
-   virtual int addSubscriberProperty( multiIndiSubscriber * sub,   ///< [in] pointer to the subscriber
-                                      const std::string & device,  ///< [in] name of the device being subscribed to.
-                                      const std::string & propName ///< [in] name of the property being subscribed to
-                                    );
-
-   /// Remove all subscriptions for this subscriber.
-   /** This is mainly called by the multiIndiSubscriber destructor.
+    /// Subscribes a child to a property by device and property name.
+    /** \returns 0 on success, -1 on error.
      */
-   virtual void unsubscribe( multiIndiSubscriber * sub /**< [in] the subscriber being un-subscribed*/);
+    virtual int addSubscriberProperty( multiIndiSubscriber *sub,     /**< [in] Pointer to the subscriber. */
+                                       const std::string   &device,  /**< [in] Device name being subscribed to. */
+                                       const std::string   &propName /**< [in] Property name being subscribed to. */
+    );
 
-   virtual void unsubscribe( multiIndiSubscriber * sub,   ///< [in] the subscriber being un-subscribed
-                             const std::string & device,  ///< [in] name of the device being un-subscribed from.
-                             const std::string & propName ///< [in] name of the property being un-subscribed from
-                           );
-
-   /// Called by the parent once the parent is connected.
-   /** If this is reimplemented, you should call multiIndiSubscriber::onConnect() to ensure children are notified.
-     *
+    /// Removes all subscriptions for a child subscriber.
+    /** Mainly called by the multiIndiSubscriber destructor.
      */
-   virtual void onConnect();
+    virtual void unsubscribe( multiIndiSubscriber *sub /**< [in] Subscriber being unsubscribed. */ );
 
-   /// Called by the parent once the parent is disconnected.
-   /** If this is reimplemented, you should call multiIndiSubscriber::onDisconnect() to ensure children are notified.
-     *
+    /// Removes a single property subscription for a child subscriber.
+    virtual void unsubscribe( multiIndiSubscriber *sub,     /**< [in] Subscriber being unsubscribed. */
+                              const std::string   &device,  /**< [in] Device name being unsubscribed from. */
+                              const std::string   &propName /**< [in] Property name being unsubscribed from. */
+    );
+
+    /// Called by the parent once connected.
+    /** If reimplemented, call `multiIndiSubscriber::onConnect()` to notify children.
      */
-   virtual void onDisconnect();
+    virtual void onConnect();
 
-   void setDisconnect()
-   {
-      m_disconnect = true;
-   }
-
-   bool disconnect()
-   {
-      bool disc = m_disconnect;
-      m_disconnect = false;
-      return disc;
-   }
-
-   /// Callback for a `defProperty` message notifying us that the propery has changed.
-   /** This is called by the publisher which is subscribed to.
-     *
-     * Derived classes shall implement this.
+    /// Called by the parent once disconnected.
+    /** If reimplemented, call `multiIndiSubscriber::onDisconnect()` to notify children.
      */
-   virtual void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been defined*/);
+    virtual void onDisconnect();
 
-   /// Callback for a `delProperty` message notifying us that the propery has changed.
-   /** This is called by the publisher which is subscribed to.
-     *
-     * Derived classes shall implement this.
+    /// Sets the disconnect flag consumed by `disconnect()`.
+    void setDisconnect();
+
+    /// Consumes and returns the current disconnect flag.
+    /** \returns True if a disconnect was requested since last call.
      */
-   virtual void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/);
+    bool disconnect();
 
-   /// Callback for a `setProperty` message notifying us that the propery has changed.
-   /** This is called by the publisher which is subscribed to.
-     *
-     * Derived classes shall implement this.
-     */
-   virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+    /// Callback for a `defProperty` message.
+    virtual void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Property that has been defined. */ );
 
-   /// Send an `newProperty` request to a remote device.
-   /** This is a request to update a property that the remote device owns.
-     */
-   virtual void sendNewProperty( const pcf::IndiProperty &ipSend /**< [in] the property to send a change request for*/);
+    /// Callback for a `delProperty` message.
+    virtual void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] Property that has been deleted. */ );
 
-   /// Send an `getProperties` request to a remote device.
-   /** This is a request to get the value of a property or all properties.
-    */
-   virtual void sendGetProperties(const pcf::IndiProperty &ipSend /**< [in] the property to send a change request for*/);
+    /// Callback for a `setProperty` message.
+    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Property that has changed. */ );
+
+    /// Sends a `newProperty` request to a remote device.
+    virtual void sendNewProperty( const pcf::IndiProperty &ipSend /**< [in] Property change request. */ );
+
+    /// Sends a `getProperties` request to a remote device.
+    virtual void sendGetProperties( const pcf::IndiProperty &ipSend /**< [in] Property query request. */ );
 };
 
-inline
-multiIndiSubscriber::multiIndiSubscriber()
+inline multiIndiSubscriber::multiIndiSubscriber()
 {
 }
 
-inline
-multiIndiSubscriber::~multiIndiSubscriber() noexcept
+inline multiIndiSubscriber::~multiIndiSubscriber() noexcept
 {
-   if(m_parent)
-   {
-      m_parent->unsubscribe(this);
-   }
+    if( m_parent )
+    {
+        m_parent->unsubscribe( this );
+    }
 }
 
-inline
-int multiIndiSubscriber::addSubscriber( multiIndiSubscriber * sub )
+inline void multiIndiSubscriber::subscribe()
 {
-   subscribers.insert(sub);
-   sub->m_parent = this;
-   sub->subscribe();
-   return 0;
 }
 
-inline
-int multiIndiSubscriber::addSubscriberProperty( multiIndiSubscriber * sub,
-                                                pcf::IndiProperty & ipSub
-                                              )
+inline int multiIndiSubscriber::addSubscriber( multiIndiSubscriber *sub )
 {
-   subscribedProperties.insert(std::pair<std::string,multiIndiSubscriber*>(ipSub.createUniqueKey(), sub));
-
-   subscribers.insert(sub);
-   sub->m_parent = this;
-
-   return 0;
+    subscribers.insert( sub );
+    sub->m_parent = this;
+    sub->subscribe();
+    return 0;
 }
 
-inline
-int multiIndiSubscriber::addSubscriberProperty( multiIndiSubscriber * sub,
-                                                const std::string & device,
-                                                const std::string & propName
-                                              )
+inline int multiIndiSubscriber::addSubscriberProperty( multiIndiSubscriber *sub, pcf::IndiProperty &ipSub )
 {
-   pcf::IndiProperty ipSub;
-   ipSub.setDevice(device);
-   ipSub.setName(propName);
+    subscribedProperties.insert( std::pair<std::string, multiIndiSubscriber *>( ipSub.createUniqueKey(), sub ) );
 
-   return addSubscriberProperty(sub, ipSub);
+    subscribers.insert( sub );
+    sub->m_parent = this;
+
+    return 0;
 }
 
-inline
-void multiIndiSubscriber::unsubscribe( multiIndiSubscriber * sub )
+inline int multiIndiSubscriber::addSubscriberProperty( multiIndiSubscriber *sub,
+                                                       const std::string   &device,
+                                                       const std::string   &propName )
 {
-   //Since this is a forward iterator, we can't just for-loop through this because the erase invalidates, and we can't decrement!
-   auto it = subscribedProperties.begin();
-   while(it != subscribedProperties.end() )
-   {
-      if(it->second == sub)
-      {
-         subscribedProperties.erase(it);
-         it=subscribedProperties.begin();
-      }
-      else  ++it;
-   }
+    pcf::IndiProperty ipSub;
+    ipSub.setDevice( device );
+    ipSub.setName( propName );
 
-   subscribers.erase(sub);
-   sub->m_parent = nullptr;
+    return addSubscriberProperty( sub, ipSub );
 }
 
-inline
-void multiIndiSubscriber::unsubscribe( multiIndiSubscriber * sub,
-                                       const std::string & device,
-                                       const std::string & propName
-                                     )
+inline void multiIndiSubscriber::unsubscribe( multiIndiSubscriber *sub )
 {
-   pcf::IndiProperty ipSub;
-   ipSub.setDevice(device);
-   ipSub.setName(propName);
+    // Since this is a forward iterator, erase invalidates and we cannot decrement.
+    auto it = subscribedProperties.begin();
+    while( it != subscribedProperties.end() )
+    {
+        if( it->second == sub )
+        {
+            subscribedProperties.erase( it );
+            it = subscribedProperties.begin();
+        }
+        else
+        {
+            ++it;
+        }
+    }
 
-   std::string key = ipSub.createUniqueKey();
-   //Since this is a forward iterator, we can't just for-loop through this because the erase invalidates, and we can't decrement!
-   auto it = subscribedProperties.begin();
-   while(it != subscribedProperties.end() )
-   {
-      if(it->first == key && it->second == sub)
-      {
-         subscribedProperties.erase(it);
-         it=subscribedProperties.begin();
-      }
-      else  ++it;
-   }
-
-   //Now check if we've unsubscribed from all properties
-   bool have = false;
-   for(auto it = subscribedProperties.begin(); it != subscribedProperties.end(); ++it)
-   {
-      if(it->second == sub)
-      {
-         have = true;
-         break;
-      }
-   }
-
-   if(!have)
-   {
-      subscribers.erase(sub);
-      sub->m_parent = nullptr;
-   }
+    subscribers.erase( sub );
+    sub->m_parent = nullptr;
 }
 
-inline
-void multiIndiSubscriber::onConnect()
+inline void
+multiIndiSubscriber::unsubscribe( multiIndiSubscriber *sub, const std::string &device, const std::string &propName )
 {
-   for(subSetIteratorT it = subscribers.begin(); it != subscribers.end(); ++it)
-   {
-      (*it)->onConnect();
-   }
+    pcf::IndiProperty ipSub;
+    ipSub.setDevice( device );
+    ipSub.setName( propName );
+
+    std::string key = ipSub.createUniqueKey();
+    // Since this is a forward iterator, erase invalidates and we cannot decrement.
+    auto it = subscribedProperties.begin();
+    while( it != subscribedProperties.end() )
+    {
+        if( it->first == key && it->second == sub )
+        {
+            subscribedProperties.erase( it );
+            it = subscribedProperties.begin();
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    bool have = false;
+    for( auto it2 = subscribedProperties.begin(); it2 != subscribedProperties.end(); ++it2 )
+    {
+        if( it2->second == sub )
+        {
+            have = true;
+            break;
+        }
+    }
+
+    if( !have )
+    {
+        subscribers.erase( sub );
+        sub->m_parent = nullptr;
+    }
 }
 
-inline
-void multiIndiSubscriber::onDisconnect()
+inline void multiIndiSubscriber::onConnect()
 {
-   for(subSetIteratorT it = subscribers.begin(); it != subscribers.end(); ++it)
-   {
-      (*it)->onDisconnect();
-   }
+    for( subSetIteratorT it = subscribers.begin(); it != subscribers.end(); ++it )
+    {
+        ( *it )->onConnect();
+    }
 }
 
-inline
-void multiIndiSubscriber::handleDefProperty( const pcf::IndiProperty & ipRecv)
+inline void multiIndiSubscriber::onDisconnect()
 {
-   static_cast<void>(ipRecv);
+    for( subSetIteratorT it = subscribers.begin(); it != subscribers.end(); ++it )
+    {
+        ( *it )->onDisconnect();
+    }
 }
 
-inline
-void multiIndiSubscriber::handleDelProperty( const pcf::IndiProperty & ipRecv)
+inline void multiIndiSubscriber::setDisconnect()
 {
-   static_cast<void>(ipRecv);
+    m_disconnect.store( true, std::memory_order_relaxed );
 }
 
-inline
-void multiIndiSubscriber::handleSetProperty( const pcf::IndiProperty & ipRecv)
+inline bool multiIndiSubscriber::disconnect()
 {
-   static_cast<void>(ipRecv);
+    return m_disconnect.exchange( false, std::memory_order_relaxed );
 }
 
-inline
-void multiIndiSubscriber::sendNewProperty( const pcf::IndiProperty &ipSend )
+inline void multiIndiSubscriber::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
-   if(m_parent == nullptr)
-   {
-      return;
-   }
-   m_parent->sendNewProperty(ipSend);
+    static_cast<void>( ipRecv );
 }
 
-inline
-void multiIndiSubscriber::sendGetProperties(const pcf::IndiProperty &ipSend)
+inline void multiIndiSubscriber::handleDelProperty( const pcf::IndiProperty &ipRecv )
 {
-    if (m_parent == nullptr)
+    static_cast<void>( ipRecv );
+}
+
+inline void multiIndiSubscriber::handleSetProperty( const pcf::IndiProperty &ipRecv )
+{
+    static_cast<void>( ipRecv );
+}
+
+inline void multiIndiSubscriber::sendNewProperty( const pcf::IndiProperty &ipSend )
+{
+    if( m_parent == nullptr )
     {
         return;
     }
 
-    m_parent->sendGetProperties(ipSend);
+    m_parent->sendNewProperty( ipSend );
 }
 
-#endif //multiIndiSubscriber_hpp
+inline void multiIndiSubscriber::sendGetProperties( const pcf::IndiProperty &ipSend )
+{
+    if( m_parent == nullptr )
+    {
+        return;
+    }
+
+    m_parent->sendGetProperties( ipSend );
+}
+
+#endif // multiIndiSubscriber_hpp

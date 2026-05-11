@@ -72,6 +72,8 @@ public:
 
    virtual void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
+   virtual void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
    virtual void updateGUI();
@@ -204,12 +206,27 @@ void gainCtrl::onConnect()
 
 void gainCtrl::onDisconnect()
 {
+   m_current = 0;
+   m_target = 0;
+   m_valChanged = false;
+   m_newSent = false;
+   ui.slider->setValue(0);
    ui.status->onDisconnect();
 }
 
 void gainCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {
    return handleSetProperty(ipRecv);
+}
+
+void gainCtrl::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
+   if(ipRecv.getDevice() != m_device) return;
+
+   if(ipRecv.getName() == m_property)
+   {
+      onDisconnect();
+   }
 }
 
 void gainCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)

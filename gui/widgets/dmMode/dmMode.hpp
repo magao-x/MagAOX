@@ -46,6 +46,8 @@ public:
 
    virtual void handleDefProperty( const pcf::IndiProperty &ipRecv );
 
+   virtual void handleDelProperty( const pcf::IndiProperty &ipRecv );
+
    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
    int updateGUI( QLabel * currLabel,
@@ -258,8 +260,45 @@ void dmMode::onConnect()
 
 void dmMode::onDisconnect()
 {
+   m_dmName.clear();
+   m_dmChannel.clear();
+   m_maxmode = -1;
+
    ui.title->setEnabled(false);
    ui.channel->setEnabled(false);
+
+   ui.title->setText("");
+   ui.channel->setText("");
+   ui.modeTarget_0->setText("");
+   ui.modeTarget_1->setText("");
+   ui.modeTarget_2->setText("");
+   ui.modeTarget_3->setText("");
+   ui.modeTarget_4->setText("");
+   ui.modeTarget_5->setText("");
+   ui.modeTarget_6->setText("");
+   ui.modeTarget_7->setText("");
+   ui.modeTarget_8->setText("");
+   ui.modeTarget_9->setText("");
+   ui.modeCurrent_0->setText("---");
+   ui.modeCurrent_1->setText("---");
+   ui.modeCurrent_2->setText("---");
+   ui.modeCurrent_3->setText("---");
+   ui.modeCurrent_4->setText("---");
+   ui.modeCurrent_5->setText("---");
+   ui.modeCurrent_6->setText("---");
+   ui.modeCurrent_7->setText("---");
+   ui.modeCurrent_8->setText("---");
+   ui.modeCurrent_9->setText("---");
+   ui.modeSlider_0->setValue(0);
+   ui.modeSlider_1->setValue(0);
+   ui.modeSlider_2->setValue(0);
+   ui.modeSlider_3->setValue(0);
+   ui.modeSlider_4->setValue(0);
+   ui.modeSlider_5->setValue(0);
+   ui.modeSlider_6->setValue(0);
+   ui.modeSlider_7->setValue(0);
+   ui.modeSlider_8->setValue(0);
+   ui.modeSlider_9->setValue(0);
 
    ui.modeName_0->setEnabled(false);
    ui.modeSlider_0->setEnabled(false);
@@ -337,6 +376,16 @@ void dmMode::handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the p
 
    return;
 
+}
+
+void dmMode::handleDelProperty( const pcf::IndiProperty & ipRecv )
+{
+   if(ipRecv.getDevice() != m_deviceName) return;
+
+   if(ipRecv.getName() == "current_amps" || ipRecv.getName() == "target_amps" || ipRecv.getName() == "dm")
+   {
+      onDisconnect();
+   }
 }
 
 void dmMode::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
@@ -750,4 +799,3 @@ void dmMode::on_modeZero_all_pressed()
 #include "moc_dmMode.cpp"
 
 #endif
-

@@ -5,22 +5,73 @@ set -eo pipefail
 # update the coverage report
 #
 # run in the top level MagAO-X source directory
+#
+# modes:
+#   default   zero counters, run the full test suite, then capture coverage
+#   --fast    capture coverage from the currently existing gcov counters only
 #######################################################
 
-cd tests
+usage()
+{
+    cat <<'EOF'
+Usage: tests/coverage/update_coverage [--fast]
 
-lcov --directory . --zerocounters
+  default   zero counters, run the full test suite, then refresh the HTML report
+  --fast    skip zeroing/rerunning tests and build the HTML report from existing .gcda files
 
-chmod +x testMagAOX.bash
+Typical fast-path workflow:
+  1. build one test with COVERAGE=1
+  2. run that test
+  3. run tests/coverage/update_coverage --fast
+EOF
+}
 
-bash -l testMagAOX.bash
+mode="full"
+repo_root=$(pwd)
 
-cd ..
+case "${1:-}" in
+    "")
+        ;;
+    --fast)
+        mode="fast"
+        ;;
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    *)
+        echo "Unknown option: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
+
+if [[ "$mode" == "full" ]]; then
+    cd tests
+
+    lcov --directory . --zerocounters
+
+    chmod +x testMagAOX.bash
+
+    bash -l testMagAOX.bash
+
+    cd ..
+else
+    gcda_count=$(find . -name '*.gcda' | wc -l)
+
+    if [[ "$gcda_count" -eq 0 ]]; then
+        echo "No .gcda files found. Build and run one or more tests with COVERAGE=1 first." >&2
+        exit 1
+    fi
+fi
 
 lcov --directory . --capture --output-file coverage.info
 
 lcov --remove coverage.info "*/tests/*" "/usr/*" "/sys/*" "/tty/*" \
-         --ignore-errors unused,unused --ignore-errors inconsistent,inconsistent --output-file coverage_filtered.info
+         --ignore-errors unused,unused \
+         --ignore-errors inconsistent,inconsistent \
+         --ignore-errors path \
+         --output-file coverage_filtered.info
 
 genhtml coverage_filtered.info --output-directory coverage_report \
                                --title "MagAOX" \
@@ -28,6 +79,6 @@ genhtml coverage_filtered.info --output-directory coverage_report \
                                --merge-aliases \
                                --suppress-aliases \
                                --filter function \
+                               --prefix "$repo_root" \
                                --demangle-cpp \
                                --css-file tests/coverage/gcov.css
-

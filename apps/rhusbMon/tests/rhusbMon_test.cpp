@@ -1,29 +1,51 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
-#include "../../../tests/catch2/catch.hpp"
+/** \file rhusbMon_test.cpp
+ * \brief Catch2 tests for the rhusbMon app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup rhusbMon_files
+ */
+
+#include "../../../tests/testXWC.hpp"
 
 #include "../rhusbMon.hpp"
 
 using namespace MagAOX::app;
 
-namespace template_test
+namespace libXWCTest
 {
 
-SCENARIO( "xxxx", "[template]" )
+/** \defgroup rhusbMon_unit_test rhusbMon Unit Tests
+ * \brief Unit tests for the rhusbMon application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `rhusbMon` unit tests.
+/** \ingroup rhusbMon_unit_test
+ */
+namespace rhusbMonTest
 {
-   GIVEN("xxxxx")
-   {
-      int rv;
 
-      WHEN("xxxx")
-      {
-         rv = 0;
+/// Verify the placeholder rhusbMon test harness instantiates the app cleanly.
+/**
+ * \ingroup rhusbMon_unit_test
+ */
+TEST_CASE( "rhusbMon placeholder harness instantiates the app", "[rhusbMon]" )
+{
+    // clang-format off
+    #ifdef RHUSBMON_TEST_DOXYGEN_REF
+    rhusbMon();
+    #endif
+    // clang-format on
 
-         REQUIRE(rv == 0);
-      }
-   }
+    SECTION( "default construction succeeds" )
+    {
+        rhusbMon app;
+
+        REQUIRE( true );
+    }
 }
-} //namespace template_test
+
+} // namespace rhusbMonTest
+
+} // namespace libXWCTest

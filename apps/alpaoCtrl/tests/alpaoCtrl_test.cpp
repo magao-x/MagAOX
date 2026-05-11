@@ -1,29 +1,51 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
-#include "../../../tests/catch2/catch.hpp"
+/** \file alpaoCtrl_test.cpp
+ * \brief Catch2 tests for the alpaoCtrl app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup alpaoCtrl_files
+ */
 
-#include "../template.hpp"
+#include "../../../tests/testXWC.hpp"
+
+#include "../alpaoCtrl.hpp"
 
 using namespace MagAOX::app;
 
-namespace template_test
+namespace libXWCTest
 {
 
-SCENARIO( "xxxx", "[template]" )
+/** \defgroup alpaoCtrl_unit_test alpaoCtrl Unit Tests
+ * \brief Unit tests for the alpaoCtrl application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `alpaoCtrl` unit tests.
+/** \ingroup alpaoCtrl_unit_test
+ */
+namespace alpaoCtrlTest
 {
-   GIVEN("xxxxx")
-   {
-      int rv;
 
-      WHEN("xxxx")
-      {
-         rv = 0;
+/// Verify the placeholder alpaoCtrl test harness instantiates the app cleanly.
+/**
+ * \ingroup alpaoCtrl_unit_test
+ */
+TEST_CASE( "alpaoCtrl placeholder harness instantiates the app", "[alpaoCtrl]" )
+{
+    // clang-format off
+    #ifdef ALPAOCTRL_TEST_DOXYGEN_REF
+    alpaoCtrl();
+    #endif
+    // clang-format on
 
-         REQUIRE(rv == 0);
-      }
-   }
+    SECTION( "default construction succeeds" )
+    {
+        alpaoCtrl app;
+
+        REQUIRE( true );
+    }
 }
-} //namespace template_test
+
+} // namespace alpaoCtrlTest
+
+} // namespace libXWCTest
