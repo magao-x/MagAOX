@@ -196,6 +196,151 @@ def _build_rule_from_fields(fields: dict[str, str], cell_id: str) -> Rule:
     return rule
 
 
+def _load_xml_source(source: Union[str, Path]) -> str:
+    """Return XML string from a file path or a raw XML string."""
+    source_str = str(source)
+    if source_str.lstrip().startswith("<"):
+        return source_str
+    path = Path(source_str)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+    return path.read_text(encoding="utf-8")
+
+
+def _find_root_element(tree: ET.Element) -> ET.Element:
+    """Locate the draw.io <root> element that contains mxCell children."""
+    root_elem = tree.find(".//root")
+    if root_elem is None:
+        root_elem = tree.find(".//mxGraphModel")
+    if root_elem is None:
+        root_elem = tree
+    return root_elem
+
+
+def _classify_cells(
+    cells: list[ET.Element],
+) -> tuple[dict[str, ET.Element], list[ET.Element]]:
+    """Separate mxCell elements into nodes (vertices) and edges.
+
+    Draw.io internal cells (id 0 and 1) are skipped.
+    """
+    nodes: dict[str, ET.Element] = {}
+    edges: list[ET.Element] = []
+    for cell in cells:
+        cell_id = cell.get("id", "")
+        if cell_id in ("0", "1"):
+            continue
+        is_edge = cell.get("edge") == "1"
+        source_id = cell.get("source", "")
+        target_id = cell.get("target", "")
+        if is_edge or (source_id and target_id):
+            edges.append(cell)
+        elif cell.get("vertex") == "1" or cell.get("value") is not None:
+            if cell_id:
+                nodes[cell_id] = cell
+    return nodes, edges
+
+
+def _collect_user_objects(
+    root_elem: ET.Element,
+    nodes: dict[str, ET.Element],
+    edges: list[ET.Element],
+) -> None:
+    """Add UserObject-wrapped cells into *nodes* or *edges* in-place."""
+    for obj in root_elem.findall(".//UserObject"):
+        obj_id = obj.get("id", "")
+        if not obj_id or obj_id in ("0", "1"):
+            continue
+        cell_child = obj.find("mxCell")
+        if cell_child is None:
+            continue
+        if cell_child.get("edge") == "1":
+            obj.set("source", cell_child.get("source", ""))
+            obj.set("target", cell_child.get("target", ""))
+            edges.append(obj)
+        else:
+            nodes[obj_id] = obj
+
+
+def _build_children_map(edges: list[ET.Element]) -> dict[str, list[str]]:
+    """Build a mapping from parent cell-id to list of child cell-ids."""
+    children_of: dict[str, list[str]] = {}
+    for edge in edges:
+        src = edge.get("source", "")
+        tgt = edge.get("target", "")
+        if src and tgt:
+            children_of.setdefault(tgt, []).append(src)
+    return children_of
+
+
+def _parse_nodes_to_rules(
+    nodes: dict[str, ET.Element],
+) -> tuple[dict[str, Rule], dict[str, str]]:
+    """Parse each diagram node into a Rule; detect duplicates."""
+    rule_map: dict[str, Rule] = {}
+    name_to_id: dict[str, str] = {}
+    for cell_id, cell_elem in nodes.items():
+        label = cell_elem.get("value", "") or cell_elem.get("label", "") or ""
+        if not label.strip():
+            continue
+        fields = _parse_label(label)
+        if not fields or "ruleType" not in fields:
+            continue
+        rule = _build_rule_from_fields(fields, cell_id)
+        if rule.name in name_to_id:
+            raise ValueError(
+                f"Duplicate rule name '{rule.name}' in cells "
+                f"'{name_to_id[rule.name]}' and '{cell_id}'"
+            )
+        rule_map[cell_id] = rule
+        name_to_id[rule.name] = cell_id
+    return rule_map, name_to_id
+
+
+def _resolve_rulecomp_children(
+    cell_id: str,
+    rule: Rule,
+    rule_map: dict[str, Rule],
+    children_of: dict[str, list[str]],
+    edges: list[ET.Element],
+) -> None:
+    """Resolve and assign rule1/rule2 for a single ruleComp rule."""
+    if rule.rule1 and rule.rule2:
+        return  # already set from label
+
+    child_ids = [cid for cid in children_of.get(cell_id, []) if cid in rule_map]
+
+    if len(child_ids) < 2:
+        reverse_children = [
+            edge.get("target", "")
+            for edge in edges
+            if edge.get("source") == cell_id and edge.get("target", "") in rule_map
+        ]
+        if len(reverse_children) >= 2:
+            child_ids = reverse_children
+
+    if len(child_ids) != 2:
+        raise ValueError(
+            f"Gate rule '{rule.name}' (cell {cell_id}) must have exactly "
+            f"2 child rules connected by edges, found {len(child_ids)}: "
+            f"{[rule_map[c].name for c in child_ids if c in rule_map]}"
+        )
+
+    rule.rule1 = rule_map[child_ids[0]].name
+    rule.rule2 = rule_map[child_ids[1]].name
+
+
+def _wire_rulecomp_rules(
+    rule_map: dict[str, Rule],
+    children_of: dict[str, list[str]],
+    edges: list[ET.Element],
+) -> None:
+    """Wire rule1/rule2 for all ruleComp gates from edge connections."""
+    for cell_id, rule in rule_map.items():
+        if rule.rule_type == RuleType.ruleComp:
+            _resolve_rulecomp_children(cell_id, rule, rule_map, children_of, edges)
+
+
 def parse_drawio(source: Union[str, Path]) -> StateRuleTree:
     """Parse a draw.io XML file into a StateRuleTree.
 
@@ -214,139 +359,20 @@ def parse_drawio(source: Union[str, Path]) -> StateRuleTree:
     ValueError
         On parse errors, missing fields, or invalid graph structure.
     """
-    source_str = str(source)
-
-    # Determine if source is a file path or raw XML
-    if source_str.lstrip().startswith("<"):
-        xml_str = source_str
-    else:
-        path = Path(source_str)
-        if not path.exists():
-            raise FileNotFoundError(f"File not found: {path}")
-        xml_str = path.read_text(encoding="utf-8")
-
+    xml_str = _load_xml_source(source)
     tree = ET.fromstring(xml_str)
-
-    # draw.io files have structure: <mxfile><diagram><mxGraphModel><root>...
-    # or just <mxGraphModel><root>...
-    # Find the root element containing mxCell elements
-    root_elem = tree.find(".//root")
-    if root_elem is None:
-        # Maybe the cells are directly under mxGraphModel
-        root_elem = tree.find(".//mxGraphModel")
-    if root_elem is None:
-        # Try the element itself
-        root_elem = tree
+    root_elem = _find_root_element(tree)
 
     cells = root_elem.findall(".//mxCell")
     if not cells:
         raise ValueError("No mxCell elements found in the diagram")
 
-    # Separate nodes (vertices) and edges
-    nodes: dict[str, ET.Element] = {}  # cell_id -> element
-    edges: list[ET.Element] = []
+    nodes, edges = _classify_cells(cells)
+    _collect_user_objects(root_elem, nodes, edges)
+    children_of = _build_children_map(edges)
+    rule_map, _ = _parse_nodes_to_rules(nodes)
+    _wire_rulecomp_rules(rule_map, children_of, edges)
 
-    for cell in cells:
-        cell_id = cell.get("id", "")
-        # Skip the root cells (id 0 and 1 are draw.io internal)
-        if cell_id in ("0", "1"):
-            continue
-
-        is_edge = cell.get("edge") == "1"
-        source_id = cell.get("source", "")
-        target_id = cell.get("target", "")
-
-        if is_edge or (source_id and target_id):
-            edges.append(cell)
-        elif cell.get("vertex") == "1" or cell.get("value") is not None:
-            # It's a node if it's marked as vertex or has a value attribute
-            if cell_id:
-                nodes[cell_id] = cell
-
-    # Also check for UserObject elements (draw.io sometimes wraps cells)
-    for obj in root_elem.findall(".//UserObject"):
-        obj_id = obj.get("id", "")
-        if obj_id and obj_id not in ("0", "1"):
-            cell_child = obj.find("mxCell")
-            if cell_child is not None:
-                is_edge = cell_child.get("edge") == "1"
-                if is_edge:
-                    # Copy source/target to obj for uniform processing
-                    obj.set("source", cell_child.get("source", ""))
-                    obj.set("target", cell_child.get("target", ""))
-                    edges.append(obj)
-                else:
-                    nodes[obj_id] = obj
-
-    # Build edge map: target_id -> [source_ids] (children flowing into parent)
-    children_of: dict[str, list[str]] = {}
-    for edge in edges:
-        src = edge.get("source", "")
-        tgt = edge.get("target", "")
-        if src and tgt:
-            children_of.setdefault(tgt, []).append(src)
-
-    # Parse each node into a Rule
-    rule_map: dict[str, Rule] = {}  # cell_id -> Rule
-    name_to_id: dict[str, str] = {}  # rule_name -> cell_id (for duplicate detection)
-
-    for cell_id, cell_elem in nodes.items():
-        label = cell_elem.get("value", "") or cell_elem.get("label", "") or ""
-
-        if not label.strip():
-            continue  # skip empty label nodes (decorative)
-
-        fields = _parse_label(label)
-        if not fields:
-            continue  # Decorative text node
-        if "ruleType" not in fields:
-            # Could be a comment — skip
-            continue
-        rule = _build_rule_from_fields(fields, cell_id)
-
-        if rule.name in name_to_id:
-            raise ValueError(
-                f"Duplicate rule name '{rule.name}' in cells "
-                f"'{name_to_id[rule.name]}' and '{cell_id}'"
-            )
-
-        rule_map[cell_id] = rule
-        name_to_id[rule.name] = cell_id
-
-    # Wire up ruleComp rules from edges
-    for cell_id, rule in rule_map.items():
-        if rule.rule_type == RuleType.ruleComp:
-            # If rule1/rule2 already set from label, keep them
-            if rule.rule1 and rule.rule2:
-                continue
-
-            child_ids = children_of.get(cell_id, [])
-            # Filter to only children that are actual rules
-            child_ids = [cid for cid in child_ids if cid in rule_map]
-
-            if len(child_ids) < 2:
-                # Maybe edges go the other direction? Check if this node is a source
-                # pointing to two targets
-                reverse_children = []
-                for edge in edges:
-                    if edge.get("source") == cell_id:
-                        tgt = edge.get("target", "")
-                        if tgt in rule_map:
-                            reverse_children.append(tgt)
-                if len(reverse_children) >= 2:
-                    child_ids = reverse_children
-
-            if len(child_ids) != 2:
-                raise ValueError(
-                    f"Gate rule '{rule.name}' (cell {cell_id}) must have exactly "
-                    f"2 child rules connected by edges, found {len(child_ids)}: "
-                    f"{[rule_map[c].name for c in child_ids if c in rule_map]}"
-                )
-
-            rule.rule1 = rule_map[child_ids[0]].name
-            rule.rule2 = rule_map[child_ids[1]].name
-
-    # Build the StateRuleTree
     state_rule_tree = StateRuleTree()
     for rule in rule_map.values():
         state_rule_tree.add_rule(rule)
