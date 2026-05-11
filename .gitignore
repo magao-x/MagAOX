@@ -13,14 +13,18 @@ local/
 **/.*~
 **/*.stash
 **/*-swp
+
+#Qt:
 **/res/
 ui*.h
-
 **/bin/
 **/moc/
 **/moc_*
 makefile.*GUI
 gui/**/makefile.*
+
+#Agents:
+.codex
 
 #Ignore any old folders
 **/old/

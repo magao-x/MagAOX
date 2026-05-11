@@ -324,6 +324,7 @@ TEST_CASE( "strehlEstimator startup publishes planning and optimum-speed propert
     REQUIRE( app.windSpeedProperty().find( "slow" ) );
     REQUIRE( app.windSpeedProperty().find( "normal" ) );
     REQUIRE( app.windSpeedProperty().find( "fast" ) );
+    REQUIRE( app.windSpeedProperty().find( "very-fast" ) );
     REQUIRE( app.windSpeedProperty()[app.windSpeedSelection()].getSwitchState() == pcf::IndiElement::On );
 
     REQUIRE( app.useEstimatesProperty().find( "toggle" ) );
@@ -427,6 +428,13 @@ TEST_CASE( "strehlEstimator planning inputs honor estimated writes and wind-spee
         REQUIRE( app.newCallBack_m_indiP_windSpeed( fast ) == 0 );
         REQUIRE( app.windSpeed() == Approx( 23.4f ) );
         REQUIRE( app.windSpeedProperty()["fast"].getSwitchState() == pcf::IndiElement::On );
+
+        pcf::IndiProperty veryFast = makeLocalSwitchProperty( "right", "wind_speed" );
+        veryFast.add( pcf::IndiElement( "very-fast" ) );
+        veryFast["very-fast"].setSwitchState( pcf::IndiElement::On );
+        REQUIRE( app.newCallBack_m_indiP_windSpeed( veryFast ) == 0 );
+        REQUIRE( app.windSpeed() == Approx( 30.0f ) );
+        REQUIRE( app.windSpeedProperty()["very-fast"].getSwitchState() == pcf::IndiElement::On );
     }
 }
 

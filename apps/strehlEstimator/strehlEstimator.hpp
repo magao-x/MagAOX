@@ -8,6 +8,7 @@
 #define strehlEstimator_hpp
 
 #include <cmath>
+#include <limits>
 #include <mutex>
 #include <sstream>
 
@@ -593,18 +594,24 @@ float strehlEstimator::selectedWindSpeed() const
 
 const std::vector<std::string> &strehlEstimator::windSpeedSelectionElements()
 {
-    static const std::vector<std::string> names{ "slow", "normal", "fast" };
+    static const std::vector<std::string> names{ "slow", "normal", "fast", "very-fast" };
     return names;
 }
 
 const std::vector<std::string> &strehlEstimator::windSpeedSelectionLabels()
 {
-    static const std::vector<std::string> labels{ "Slow (9.4 m/s)", "Normal (18.7 m/s)", "Fast (23.4 m/s)" };
+    static const std::vector<std::string> labels{
+        "Slow (9.4 m/s)", "Normal (18.7 m/s)", "Fast (23.4 m/s)", "Very Fast (30.0 m/s)" };
     return labels;
 }
 
 float strehlEstimator::windSpeedSelectionValue( const std::string &selection )
 {
+    if( selection == "very-fast" )
+    {
+        return 30.0f;
+    }
+
     if( selection == "fast" )
     {
         return 23.4f;
@@ -620,21 +627,20 @@ float strehlEstimator::windSpeedSelectionValue( const std::string &selection )
 
 std::string strehlEstimator::windSpeedSelectionName( float windSpeed )
 {
-    float slowDiff   = std::fabs( windSpeed - 9.4f );
-    float normalDiff = std::fabs( windSpeed - 18.7f );
-    float fastDiff   = std::fabs( windSpeed - 23.4f );
+    float       nearestDiff      = std::numeric_limits<float>::max();
+    std::string nearestSelection = "slow";
 
-    if( normalDiff < slowDiff && normalDiff <= fastDiff )
+    for( const auto &selection : windSpeedSelectionElements() )
     {
-        return "normal";
+        float selectionDiff = std::fabs( windSpeed - windSpeedSelectionValue( selection ) );
+        if( selectionDiff < nearestDiff )
+        {
+            nearestDiff      = selectionDiff;
+            nearestSelection = selection;
+        }
     }
 
-    if( fastDiff < slowDiff && fastDiff < normalDiff )
-    {
-        return "fast";
-    }
-
-    return "slow";
+    return nearestSelection;
 }
 
 strehlEstimator::predictionInputs strehlEstimator::snapshotPredictionInputs() const

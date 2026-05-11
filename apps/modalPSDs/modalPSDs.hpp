@@ -76,17 +76,27 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
     std::string m_fpsProperty{ "fps" };    ///< Property name for getting fps to set circular buffer length.
     std::string m_fpsElement{ "current" }; ///< Element name for getting fps to set circular buffer length.
 
+    std::string m_loopStateDevice;                   ///< Optional device name providing loop-state gating updates.
+    std::string m_loopStateProperty{ "loop_state" }; ///< Optional property name providing loop-state gating updates.
+    std::string m_loopStateElement{ "toggle" };      ///< Element name used to interpret closed-loop state.
+
+    bool m_useLoopState{ false }; ///< Whether PSD ingestion is gated by an external loop-state property.
+
+    std::atomic<bool> m_loopClosed{ true }; ///< Current closed-loop state used to gate PSD ingestion and processing.
+
     realT m_fpsTol{ 0 }; ///< The tolerance for detecting a change in FPS.
 
     std::atomic<realT> m_psdTime{ 1 };     ///< The length of time over which to calculate PSDs.  The default is 1 sec.
-    std::atomic<realT> m_psdAvgTime{ 10 }; ///< The time over which to average PSDs.  The default is 10 sec.
+    std::atomic<realT> m_psdAvgTime{ 10 }; ///< The time over which to average PSD estimates.  The default is 10 sec.
+    std::atomic<realT> m_meanTime{
+        10 }; ///< The time over which to calculate the mean for detrending.  The default is 10 sec.
 
     // realT m_overSize {10}; ///< Multiplicative factor by which to oversize the circular buffer, to give good mean
     // estimates and account for time-to-calculate.
 
     realT m_psdOverlapFraction{ 0.5 }; ///< The fraction of the sample time to overlap by.
 
-    int m_nPSDHistory{ 100 }; //
+    int m_nPSDHistory{ 100 }; ///< Minimum number of raw PSD estimates to retain in the history stream.
 
     ///@}
 
@@ -169,13 +179,81 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
                                              cbIndexT count                     ///< [in] the requested window length
     );
 
+    /// Compute the forward logical advance between two circular-buffer reference entries.
+    static cbIndexT circularEntryAdvance( cbIndexT from,      ///< [in] earlier logical entry
+                                          cbIndexT to,        ///< [in] later logical entry
+                                          cbIndexT maxEntries ///< [in] circular-buffer capacity
+    );
+
     /// Load the PSD and mean pointer windows from a single validated snapshot.
     bool loadPsdInputWindows( ampCircBuffT::snapshotT &sn ///< [out] the snapshot used for both windows
     );
 
+    /// Recompute the per-mode sums for the full mean window from the currently loaded pointers.
+    void recomputeMeanSums( std::vector<double> &meanSums /**< [out] per-mode sums over the full mean window */ ) const;
+
+    /// Update per-mode mean sums using the cached oldest slice and the newest loaded mean-window slice.
+    void
+    rollMeanSums( std::vector<double>      &meanSums,      /**< [in,out] per-mode sums to update */
+                  const std::vector<realT> &meanHeadCache, /**< [in] cached oldest slice from the prior mean window */
+                  cbIndexT                  advance /**< [in] number of samples by which the mean window advanced */
+    ) const;
+
+    /// Cache the oldest slice of the currently loaded mean window for the next rolling-mean update.
+    void cacheMeanHead( std::vector<realT> &meanHeadCache, /**< [out] storage for the cached oldest slice */
+                        cbIndexT            count          /**< [in] number of mean-window samples to cache */
+    ) const;
+
+    /// Count how many raw PSD planes are currently retained across the published and overflow histories.
+    uint64_t storedRawPSDCount() const;
+
+    /// Locate a retained raw PSD plane by age, where age 0 is the newest plane.
+    const realT *rawPSDPlaneByAge( uint64_t age,          /**< [in] age of the requested raw PSD plane */
+                                   size_t   planeElements /**< [in] number of elements per raw PSD plane */
+    ) const;
+
+    /// Recompute the averaged-PSD running sum from the newest `windowCount` retained raw PSD planes.
+    void recomputeAveragedPSDSum( std::vector<double> &avgPsdSum,    /**< [out] running sum over the averaging window */
+                                  uint64_t             windowCount,  /**< [in] number of raw PSD planes to sum */
+                                  size_t               planeElements /**< [in] number of elements per raw PSD plane */
+    ) const;
+
+    /// Add one raw PSD plane and optionally subtract one outgoing raw PSD plane from the running average sum.
+    static void updatePlaneSum( std::vector<double> &planeSum, /**< [in,out] running sum to update */
+                                const realT         *addPlane, /**< [in] newest raw PSD plane to add */
+                                const realT *removePlane,  /**< [in] outgoing raw PSD plane to subtract, or nullptr */
+                                size_t       planeElements /**< [in] number of elements per raw PSD plane */
+    );
+
+    /// Determine whether incoming frames should currently be accepted into the PSD history.
+    bool acceptLoopStateFrame() const;
+
+    /// Calculate how many raw PSD estimates are needed to cover the requested averaging time.
+    int desiredPSDAverageCount() const;
+
+    /// Calculate how many samples are needed for the mean-subtraction window at the current FPS.
+    cbIndexT desiredMeanSampleCount( realT fps /**< [in] frame rate used to convert mean time into samples */ ) const;
+
+    /// Calculate the total input-history depth needed to read both windows safely from the fixed-size circular buffer.
+    cbIndexT requiredInputHistoryDepth() const;
+
+    /// Calculate the additional PSD history depth needed beyond the published raw-PSD shmim.
+    uint32_t rawPSDHistoryDepth() const;
+
+    /// Calculate the published raw PSD history depth retained in shared memory.
+    uint32_t publishedRawPSDHistoryDepth() const;
+
     IMAGE *m_freqStream{ nullptr }; ///< The ImageStreamIO shared memory buffer to hold the frequency scale
 
     mx::improc::eigenImage<realT> m_psdBuffer;
+
+    std::vector<realT> m_rawPSDHistory; ///< Heap-backed overflow history for raw PSD estimates beyond the shmim depth.
+
+    uint32_t m_rawPSDHistoryDepth{ 0 }; ///< Number of overflow PSD estimates currently allocated in `m_rawPSDHistory`.
+
+    uint32_t m_rawPSDHistoryNext{ 0 }; ///< Next overflow slot to overwrite in `m_rawPSDHistory`.
+
+    uint64_t m_rawPSDHistoryCount{ 0 }; ///< Number of overflow PSD estimates stored since the last restart.
 
     IMAGE *m_rawpsdStream{ nullptr }; ///< The ImageStreamIO shared memory buffer to hold the raw psds
 
@@ -233,15 +311,19 @@ class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
   protected:
     pcf::IndiProperty m_indiP_psdTime;
     pcf::IndiProperty m_indiP_psdAvgTime;
+    pcf::IndiProperty m_indiP_meanTime;
     pcf::IndiProperty m_indiP_overSize;
     pcf::IndiProperty m_indiP_fpsSource;
+    pcf::IndiProperty m_indiP_loop;
     pcf::IndiProperty m_indiP_fps;
 
   public:
     INDI_NEWCALLBACK_DECL( modalPSDs, m_indiP_psdTime );
     INDI_NEWCALLBACK_DECL( modalPSDs, m_indiP_psdAvgTime );
+    INDI_NEWCALLBACK_DECL( modalPSDs, m_indiP_meanTime );
     INDI_NEWCALLBACK_DECL( modalPSDs, m_indiP_overSize );
     INDI_SETCALLBACK_DECL( modalPSDs, m_indiP_fpsSource );
+    INDI_SETCALLBACK_DECL( modalPSDs, m_indiP_loop );
 };
 
 modalPSDs::modalPSDs() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
@@ -334,6 +416,36 @@ void modalPSDs::setupConfig()
                 "realT",
                 "Default FPS at startup, will enable changing average length with psdTime before INDI available." );
 
+    config.add( "circBuff.loopStateDevice",
+                "",
+                "circBuff.loopStateDevice",
+                argType::Required,
+                "circBuff",
+                "loopStateDevice",
+                false,
+                "string",
+                "Optional device name providing loop-state gating. If unset, PSDs ignore loop state." );
+
+    config.add( "circBuff.loopStateProperty",
+                "",
+                "circBuff.loopStateProperty",
+                argType::Required,
+                "circBuff",
+                "loopStateProperty",
+                false,
+                "string",
+                "Optional property name providing loop-state gating. Default is 'loop_state'." );
+
+    config.add( "circBuff.loopStateElement",
+                "",
+                "circBuff.loopStateElement",
+                argType::Required,
+                "circBuff",
+                "loopStateElement",
+                false,
+                "string",
+                "Element name interpreted as the closed-loop state. Default is 'toggle'." );
+
     config.add( "circBuff.psdTime",
                 "",
                 "circBuff.psdTime",
@@ -343,6 +455,26 @@ void modalPSDs::setupConfig()
                 false,
                 "realT",
                 "The length of time over which to calculate PSDs.  The default is 1 sec." );
+
+    config.add( "circBuff.psdAvgTime",
+                "",
+                "circBuff.psdAvgTime",
+                argType::Required,
+                "circBuff",
+                "psdAvgTime",
+                false,
+                "realT",
+                "The length of time over which to average PSD estimates.  The default is 10 sec." );
+
+    config.add( "circBuff.meanTime",
+                "",
+                "circBuff.meanTime",
+                argType::Required,
+                "circBuff",
+                "meanTime",
+                false,
+                "realT",
+                "The length of time over which to calculate the detrending mean.  The default is 10 sec." );
 }
 
 int modalPSDs::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -360,10 +492,24 @@ int modalPSDs::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fpsProperty, "circBuff.fpsProperty" );
     _config( m_fpsElement, "circBuff.fpsElement" );
     _config( m_fpsTol, "circBuff.fpsTol" );
+    _config( m_loopStateDevice, "circBuff.loopStateDevice" );
+    _config( m_loopStateProperty, "circBuff.loopStateProperty" );
+    _config( m_loopStateElement, "circBuff.loopStateElement" );
+
+    m_useLoopState = !m_loopStateDevice.empty();
+    m_loopClosed.store( m_useLoopState == false, std::memory_order_release );
 
     realT psdTime = m_psdTime.load();
     _config( psdTime, "circBuff.psdTime" );
     m_psdTime.store( psdTime );
+
+    realT psdAvgTime = m_psdAvgTime.load();
+    _config( psdAvgTime, "circBuff.psdAvgTime" );
+    m_psdAvgTime.store( psdAvgTime );
+
+    realT meanTime = m_meanTime.load();
+    _config( meanTime, "circBuff.meanTime" );
+    m_meanTime.store( meanTime );
 
     return 0;
 }
@@ -383,6 +529,10 @@ int modalPSDs::appStartup()
     m_indiP_psdAvgTime["current"].set( m_psdAvgTime.load() );
     m_indiP_psdAvgTime["target"].set( m_psdAvgTime.load() );
 
+    CREATE_REG_INDI_NEW_NUMBERU( m_indiP_meanTime, "meanTime", 0, 600, 0.1, "%0.1f", "Mean Time", "PSD Setup" );
+    m_indiP_meanTime["current"].set( m_meanTime.load() );
+    m_indiP_meanTime["target"].set( m_meanTime.load() );
+
     if( m_fpsDevice == "" )
     {
         return log<software_critical, -1>(
@@ -390,6 +540,11 @@ int modalPSDs::appStartup()
     }
 
     REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsDevice, m_fpsProperty );
+
+    if( m_useLoopState == true )
+    {
+        REG_INDI_SETPROP( m_indiP_loop, m_loopStateDevice, m_loopStateProperty );
+    }
 
     CREATE_REG_INDI_RO_NUMBER( m_indiP_fps, "fps", "current", "Circular Buffer" );
     m_indiP_fps.add( pcf::IndiElement( "current" ) );
@@ -519,9 +674,8 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
 
     m_nModes = shmimMonitorT::m_width * shmimMonitorT::m_height;
 
-    realT fps        = m_fps.load( std::memory_order_acquire );
-    realT psdTime    = m_psdTime.load( std::memory_order_acquire );
-    realT psdAvgTime = m_psdAvgTime.load( std::memory_order_acquire );
+    realT fps     = m_fps.load( std::memory_order_acquire );
+    realT psdTime = m_psdTime.load( std::memory_order_acquire );
 
     m_tsSize = fps * psdTime;
 
@@ -540,24 +694,24 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
         return -1;
     }
 
-    m_meanSize = fps * psdAvgTime;
+    m_meanSize = desiredMeanSampleCount( fps );
 
-    if( static_cast<uint32_t>( m_meanSize ) > shmimMonitorT::m_depth )
+    if( static_cast<uint32_t>( m_tsSize + 2 ) >= shmimMonitorT::m_depth )
     {
-        log<software_error>( { __FILE__, __LINE__, "input circ buff is not long enough for psd avg. time" } );
-        m_meanSize = shmimMonitorT::m_depth;
+        log<software_error>( { __FILE__, __LINE__, "input circ buff is not long enough for psd and mean windows" } );
+        return -1;
     }
 
-    // Size the circ buff
-    // we really want 2*m_meanSize but might not be able to
-    if( 2 * static_cast<uint32_t>( m_meanSize ) > shmimMonitorT::m_depth )
+    cbIndexT maxMeanSize = shmimMonitorT::m_depth - m_tsSize - 2;
+    if( m_meanSize > maxMeanSize )
     {
-        m_ampCircBuff.maxEntries( shmimMonitorT::m_depth );
+        log<text_log>( "input circ buff is not long enough for meanTime, truncating to " +
+                           std::to_string( static_cast<double>( maxMeanSize ) / fps ) + " sec",
+                       logPrio::LOG_WARNING );
+        m_meanSize = maxMeanSize;
     }
-    else
-    {
-        m_ampCircBuff.maxEntries( 2 * m_meanSize );
-    }
+
+    m_ampCircBuff.maxEntries( requiredInputHistoryDepth() );
 
     m_tsPtrs.resize( m_tsSize );
     m_meanPtrs.resize( m_meanSize );
@@ -656,7 +810,7 @@ int modalPSDs::allocatePSDStreams()
     uint32_t imsize[3];
     imsize[0] = m_psd.size();
     imsize[1] = m_nModes;
-    imsize[2] = m_nPSDHistory;
+    imsize[2] = publishedRawPSDHistoryDepth();
 
     m_rawpsdStream = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
 
@@ -697,12 +851,23 @@ int modalPSDs::allocatePSDStreams()
 
     m_psdBuffer.resize( m_psd.size(), m_nModes );
 
+    size_t planeElements = m_psdBuffer.rows() * m_psdBuffer.cols();
+    m_rawPSDHistoryDepth = rawPSDHistoryDepth();
+    m_rawPSDHistory.assign( planeElements * static_cast<size_t>( m_rawPSDHistoryDepth ), 0 );
+    m_rawPSDHistoryNext  = 0;
+    m_rawPSDHistoryCount = 0;
+
     return 0;
 }
 
 int modalPSDs::processImage( void *curr_src, const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
+
+    if( acceptLoopStateFrame() == false )
+    {
+        return 0;
+    }
 
     float *f_src = static_cast<float *>( curr_src );
 
@@ -719,6 +884,14 @@ void modalPSDs::psdThreadStart( modalPSDs *p )
 void modalPSDs::psdThreadExec()
 {
     m_psdThreadID = syscall( SYS_gettid );
+
+    std::vector<double>     meanSums;
+    std::vector<realT>      meanHeadCache;
+    ampCircBuffT::snapshotT prevSnap;
+    cbIndexT                prevMeanRefEntry = 0;
+    bool                    haveMeanSums     = false;
+    std::vector<double>     avgPsdSum;
+    uint64_t                avgPsdWindowCount = 0;
 
     while( m_psdThreadInit == true && shutdown() == 0 )
     {
@@ -768,6 +941,14 @@ void modalPSDs::psdThreadExec()
 
         std::cerr << "all grown.  starting to calculate\n";
 
+        meanSums.assign( m_nModes, 0 );
+        meanHeadCache.clear();
+        prevSnap         = ampCircBuffT::snapshotT();
+        prevMeanRefEntry = 0;
+        haveMeanSums     = false;
+        avgPsdSum.clear();
+        avgPsdWindowCount = 0;
+
         while( m_psdRestarting.load( std::memory_order_acquire ) == false && !shutdown() )
         {
             // Used to check if we are getting too behind
@@ -779,15 +960,40 @@ void modalPSDs::psdThreadExec()
                 continue;
             }
 
+            cbIndexT tsRefEntry   = latestWindowRefEntry( tsSnap, m_tsSize );
+            cbIndexT meanRefEntry = precedingWindowRefEntry( tsSnap, tsRefEntry, m_meanSize );
+
+            cbIndexT meanCacheCount = std::min( m_meanSize, m_tsOverlapSize );
+            if( meanCacheCount <= 0 )
+            {
+                meanCacheCount = 1;
+            }
+
+            bool canRollMean = false;
+            if( haveMeanSums == true && prevSnap.maxEntries == tsSnap.maxEntries && meanHeadCache.size() > 0 )
+            {
+                cbIndexT advance = circularEntryAdvance( prevMeanRefEntry, meanRefEntry, tsSnap.maxEntries );
+                canRollMean      = ( advance == meanCacheCount );
+
+                if( canRollMean == true )
+                {
+                    rollMeanSums( meanSums, meanHeadCache, advance );
+                }
+            }
+
+            if( canRollMean == false )
+            {
+                recomputeMeanSums( meanSums );
+            }
+
+            cacheMeanHead( meanHeadCache, meanCacheCount );
+            prevSnap         = tsSnap;
+            prevMeanRefEntry = meanRefEntry;
+            haveMeanSums     = true;
+
             for( size_t m = 0; m < m_nModes; ++m ) // Loop over each mode
             {
-                // get mean going over avg time
-                realT mn = 0;
-                for( cbIndexT n = 0; n < m_meanSize; ++n )
-                {
-                    mn += m_meanPtrs[n][m];
-                }
-                mn /= m_meanSize;
+                realT mn = static_cast<realT>( meanSums[m] / m_meanSize );
 
                 double var = 0;
 
@@ -834,6 +1040,21 @@ void modalPSDs::psdThreadExec()
             // Move to next pointer
             float *F = m_rawpsdStream->array.F + m_psdBuffer.rows() * m_psdBuffer.cols() * cnt1;
 
+            if( m_rawPSDHistoryDepth > 0 && m_rawpsdStream->md->cnt0 >= m_rawpsdStream->md->size[2] )
+            {
+                size_t planeElements = m_psdBuffer.rows() * m_psdBuffer.cols();
+                realT *H             = m_rawPSDHistory.data() + planeElements * m_rawPSDHistoryNext;
+
+                memcpy( H, F, planeElements * sizeof( realT ) );
+
+                ++m_rawPSDHistoryCount;
+                ++m_rawPSDHistoryNext;
+                if( m_rawPSDHistoryNext >= m_rawPSDHistoryDepth )
+                {
+                    m_rawPSDHistoryNext = 0;
+                }
+            }
+
             memcpy( F, m_psdBuffer.data(), m_psdBuffer.rows() * m_psdBuffer.cols() * sizeof( float ) );
 
             // Update cnt1
@@ -847,38 +1068,50 @@ void modalPSDs::psdThreadExec()
 
             //-------------------------- now average the psds ----------------------------
 
-            int nPSDAverage =
-                ( m_psdAvgTime.load( std::memory_order_acquire ) / m_psdTime.load( std::memory_order_acquire ) ) /
-                m_psdOverlapFraction;
-
-            if( nPSDAverage <= 0 )
+            size_t planeElements = m_psdBuffer.rows() * m_psdBuffer.cols();
+            if( avgPsdSum.size() != planeElements )
             {
-                nPSDAverage = 1;
-            }
-            else if( static_cast<uint64_t>( nPSDAverage ) > m_rawpsdStream->md->size[2] )
-            {
-                nPSDAverage = m_rawpsdStream->md->size[2];
+                avgPsdSum.assign( planeElements, 0 );
+                avgPsdWindowCount = 0;
             }
 
-            memcpy( m_psdBuffer.data(), F, m_psdBuffer.rows() * m_psdBuffer.cols() * sizeof( float ) );
+            uint64_t desiredPsdWindow  = static_cast<uint64_t>( desiredPSDAverageCount() );
+            uint64_t storedRawPsdCount = storedRawPSDCount();
+            uint64_t nextWindowCount   = std::min<uint64_t>( desiredPsdWindow, storedRawPsdCount );
 
-            for( int n = 1; n < nPSDAverage; ++n )
+            const realT *latestPlane = rawPSDPlaneByAge( 0, planeElements );
+
+            bool recomputeAvgPsd = ( nextWindowCount == 0 || latestPlane == nullptr || avgPsdWindowCount == 0 ||
+                                     nextWindowCount < avgPsdWindowCount || nextWindowCount > avgPsdWindowCount + 1 );
+
+            if( recomputeAvgPsd == true )
             {
-                if( cnt1 == 0 )
+                recomputeAveragedPSDSum( avgPsdSum, nextWindowCount, planeElements );
+            }
+            else if( nextWindowCount == avgPsdWindowCount + 1 )
+            {
+                updatePlaneSum( avgPsdSum, latestPlane, nullptr, planeElements );
+            }
+            else
+            {
+                const realT *outgoingPlane = rawPSDPlaneByAge( nextWindowCount, planeElements );
+                if( outgoingPlane == nullptr )
                 {
-                    cnt1 = m_rawpsdStream->md->size[2] - 1;
+                    recomputeAveragedPSDSum( avgPsdSum, nextWindowCount, planeElements );
                 }
                 else
                 {
-                    --cnt1;
+                    updatePlaneSum( avgPsdSum, latestPlane, outgoingPlane, planeElements );
                 }
-
-                F = m_rawpsdStream->array.F + m_psdBuffer.rows() * m_psdBuffer.cols() * cnt1;
-
-                m_psdBuffer += Eigen::Map<Eigen::Array<float, -1, -1>>( F, m_psdBuffer.rows(), m_psdBuffer.cols() );
             }
 
-            m_psdBuffer /= nPSDAverage;
+            avgPsdWindowCount      = nextWindowCount;
+            uint64_t avgPsdDivisor = ( avgPsdWindowCount == 0 ) ? 1 : avgPsdWindowCount;
+
+            for( size_t n = 0; n < planeElements; ++n )
+            {
+                m_psdBuffer.data()[n] = static_cast<realT>( avgPsdSum[n] / avgPsdDivisor );
+            }
 
             m_avgpsdStream->md->write = 1;
 
@@ -946,6 +1179,21 @@ modalPSDs::precedingWindowRefEntry( const ampCircBuffT::snapshotT &sn, cbIndexT 
     return sn.maxEntries + refEntry - count;
 }
 
+modalPSDs::cbIndexT modalPSDs::circularEntryAdvance( cbIndexT from, cbIndexT to, cbIndexT maxEntries )
+{
+    if( maxEntries <= 0 )
+    {
+        return 0;
+    }
+
+    if( to >= from )
+    {
+        return to - from;
+    }
+
+    return maxEntries + to - from;
+}
+
 bool modalPSDs::loadPsdInputWindows( ampCircBuffT::snapshotT &sn )
 {
     for( int retry = 0; retry < 3; ++retry )
@@ -983,6 +1231,194 @@ bool modalPSDs::loadPsdInputWindows( ampCircBuffT::snapshotT &sn )
     }
 
     return false;
+}
+
+void modalPSDs::recomputeMeanSums( std::vector<double> &meanSums ) const
+{
+    meanSums.assign( m_nModes, 0 );
+
+    for( cbIndexT n = 0; n < m_meanSize; ++n )
+    {
+        const realT *sample = m_meanPtrs[n];
+        for( size_t m = 0; m < m_nModes; ++m )
+        {
+            meanSums[m] += sample[m];
+        }
+    }
+}
+
+void modalPSDs::rollMeanSums( std::vector<double>      &meanSums,
+                              const std::vector<realT> &meanHeadCache,
+                              cbIndexT                  advance ) const
+{
+    if( advance <= 0 )
+    {
+        return;
+    }
+
+    for( cbIndexT n = 0; n < advance; ++n )
+    {
+        const realT *oldSample = meanHeadCache.data() + static_cast<size_t>( n ) * m_nModes;
+        const realT *newSample = m_meanPtrs[m_meanSize - advance + n];
+
+        for( size_t m = 0; m < m_nModes; ++m )
+        {
+            meanSums[m] += newSample[m] - oldSample[m];
+        }
+    }
+}
+
+void modalPSDs::cacheMeanHead( std::vector<realT> &meanHeadCache, cbIndexT count ) const
+{
+    if( count <= 0 )
+    {
+        meanHeadCache.clear();
+        return;
+    }
+
+    meanHeadCache.resize( static_cast<size_t>( count ) * m_nModes );
+
+    for( cbIndexT n = 0; n < count; ++n )
+    {
+        memcpy( meanHeadCache.data() + static_cast<size_t>( n ) * m_nModes, m_meanPtrs[n], m_nModes * sizeof( realT ) );
+    }
+}
+
+bool modalPSDs::acceptLoopStateFrame() const
+{
+    return ( m_useLoopState == false ) || m_loopClosed.load( std::memory_order_acquire );
+}
+
+uint64_t modalPSDs::storedRawPSDCount() const
+{
+    return std::min<uint64_t>( m_rawpsdStream->md->cnt0, publishedRawPSDHistoryDepth() + m_rawPSDHistoryDepth );
+}
+
+const modalPSDs::realT *modalPSDs::rawPSDPlaneByAge( uint64_t age, size_t planeElements ) const
+{
+    const uint64_t publishedCount = std::min<uint64_t>( m_rawpsdStream->md->cnt0, publishedRawPSDHistoryDepth() );
+
+    if( age < publishedCount )
+    {
+        uint64_t publishedDepth = m_rawpsdStream->md->size[2];
+        uint64_t slot           = ( m_rawpsdStream->md->cnt1 + publishedDepth - age ) % publishedDepth;
+        return m_rawpsdStream->array.F + planeElements * slot;
+    }
+
+    uint64_t overflowAge   = age - publishedCount;
+    uint64_t overflowCount = std::min<uint64_t>( m_rawPSDHistoryCount, m_rawPSDHistoryDepth );
+    if( overflowAge >= overflowCount || m_rawPSDHistoryDepth == 0 )
+    {
+        return nullptr;
+    }
+
+    uint64_t slot = ( m_rawPSDHistoryNext + m_rawPSDHistoryDepth - 1 - overflowAge ) % m_rawPSDHistoryDepth;
+    return m_rawPSDHistory.data() + planeElements * slot;
+}
+
+void modalPSDs::recomputeAveragedPSDSum( std::vector<double> &avgPsdSum,
+                                         uint64_t             windowCount,
+                                         size_t               planeElements ) const
+{
+    avgPsdSum.assign( planeElements, 0 );
+
+    for( uint64_t age = 0; age < windowCount; ++age )
+    {
+        const realT *plane = rawPSDPlaneByAge( age, planeElements );
+        if( plane == nullptr )
+        {
+            break;
+        }
+
+        updatePlaneSum( avgPsdSum, plane, nullptr, planeElements );
+    }
+}
+
+void modalPSDs::updatePlaneSum( std::vector<double> &planeSum,
+                                const realT         *addPlane,
+                                const realT         *removePlane,
+                                size_t               planeElements )
+{
+    for( size_t n = 0; n < planeElements; ++n )
+    {
+        if( addPlane != nullptr )
+        {
+            planeSum[n] += addPlane[n];
+        }
+
+        if( removePlane != nullptr )
+        {
+            planeSum[n] -= removePlane[n];
+        }
+    }
+}
+
+int modalPSDs::desiredPSDAverageCount() const
+{
+    realT psdTime    = m_psdTime.load( std::memory_order_acquire );
+    realT psdAvgTime = m_psdAvgTime.load( std::memory_order_acquire );
+
+    if( psdTime <= 0 || m_psdOverlapFraction <= 0 )
+    {
+        return 1;
+    }
+
+    int nPSDAverage = static_cast<int>( std::ceil( psdAvgTime / ( psdTime * m_psdOverlapFraction ) ) );
+
+    if( nPSDAverage <= 0 )
+    {
+        return 1;
+    }
+
+    return nPSDAverage;
+}
+
+modalPSDs::cbIndexT modalPSDs::desiredMeanSampleCount( realT fps ) const
+{
+    realT meanTime = m_meanTime.load( std::memory_order_acquire );
+
+    if( fps <= 0 || meanTime <= 0 )
+    {
+        return 1;
+    }
+
+    cbIndexT meanSize = fps * meanTime;
+
+    if( meanSize <= 0 )
+    {
+        return 1;
+    }
+
+    return meanSize;
+}
+
+modalPSDs::cbIndexT modalPSDs::requiredInputHistoryDepth() const
+{
+    if( m_tsSize <= 0 || m_meanSize <= 0 )
+    {
+        return 0;
+    }
+
+    // Leave one slot for the excluded latest sample and one for the unreadable overwrite edge.
+    return m_tsSize + m_meanSize + 2;
+}
+
+uint32_t modalPSDs::rawPSDHistoryDepth() const
+{
+    const uint32_t desired   = static_cast<uint32_t>( desiredPSDAverageCount() );
+    const uint32_t published = publishedRawPSDHistoryDepth();
+
+    if( desired + 1 <= published )
+    {
+        return 0;
+    }
+
+    return desired + 1 - published;
+}
+
+uint32_t modalPSDs::publishedRawPSDHistoryDepth() const
+{
+    return std::max<uint32_t>( 1, static_cast<uint32_t>( m_nPSDHistory ) );
 }
 
 INDI_NEWCALLBACK_DEFN( modalPSDs, m_indiP_psdTime )( const pcf::IndiProperty &ipRecv )
@@ -1035,11 +1471,42 @@ INDI_NEWCALLBACK_DEFN( modalPSDs, m_indiP_psdAvgTime )( const pcf::IndiProperty 
         updateIfChanged( m_indiP_psdAvgTime, "current", m_psdAvgTime.load(), INDI_IDLE );
         updateIfChanged( m_indiP_psdAvgTime, "target", m_psdAvgTime.load(), INDI_IDLE );
 
+        shmimMonitorT::m_restart = true;
+
         log<text_log>( "set psdAvgTime to " + std::to_string( m_psdAvgTime.load() ), logPrio::LOG_NOTICE );
     }
 
     return 0;
 } // INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_psdAvgTime)
+
+INDI_NEWCALLBACK_DEFN( modalPSDs, m_indiP_meanTime )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_meanTime, ipRecv );
+
+    realT target;
+
+    if( indiTargetUpdate( m_indiP_meanTime, target, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    if( m_meanTime.load( std::memory_order_acquire ) != target )
+    {
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        m_meanTime.store( target, std::memory_order_release );
+
+        updateIfChanged( m_indiP_meanTime, "current", m_meanTime.load(), INDI_IDLE );
+        updateIfChanged( m_indiP_meanTime, "target", m_meanTime.load(), INDI_IDLE );
+
+        shmimMonitorT::m_restart = true;
+
+        log<text_log>( "set meanTime to " + std::to_string( m_meanTime.load() ), logPrio::LOG_NOTICE );
+    }
+
+    return 0;
+} // INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_meanTime)
 
 INDI_SETCALLBACK_DEFN( modalPSDs, m_indiP_fpsSource )( const pcf::IndiProperty &ipRecv )
 {
@@ -1067,6 +1534,32 @@ INDI_SETCALLBACK_DEFN( modalPSDs, m_indiP_fpsSource )( const pcf::IndiProperty &
     return 0;
 
 } // INDI_SETCALLBACK_DEFN(modalPSDs, m_indiP_fpsSource)
+
+INDI_SETCALLBACK_DEFN( modalPSDs, m_indiP_loop )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loop, ipRecv );
+
+    if( ipRecv.find( m_loopStateElement ) != true )
+    {
+        log<software_error>( { __FILE__, __LINE__, "No configured loop-state element in loop source." } );
+        return 0;
+    }
+
+    bool loopClosed = ( ipRecv[m_loopStateElement].getSwitchState() == pcf::IndiElement::On );
+
+    if( loopClosed != m_loopClosed.load( std::memory_order_acquire ) )
+    {
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        m_loopClosed.store( loopClosed, std::memory_order_release );
+        shmimMonitorT::m_restart = true;
+
+        log<text_log>( std::string( "loop state is now " ) + ( loopClosed ? "closed" : "open" ), logPrio::LOG_NOTICE );
+    }
+
+    return 0;
+
+} // INDI_SETCALLBACK_DEFN(modalPSDs, m_indiP_loop)
 
 } // namespace app
 } // namespace MagAOX

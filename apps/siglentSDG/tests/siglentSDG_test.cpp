@@ -180,6 +180,33 @@ SCENARIO( "Parsing the OUTP? response", "[siglentSDG]" )
     }
 }
 
+/// Verify automatic pulse width calculation across the requested frequency regimes.
+/**
+ * \ingroup siglentSDG_unit_test
+ */
+TEST_CASE( "auto pulse width from frequency", "[siglentSDG]" )
+{
+    SECTION( "below 2 kHz uses 250 us target" )
+    {
+        REQUIRE( autoPulseWidthFromFrequency( 1000.0 ) == Approx( 0.00075 ) );
+    }
+
+    SECTION( "at 2 kHz equals 250 us" )
+    {
+        REQUIRE( autoPulseWidthFromFrequency( 2000.0 ) == Approx( 0.00025 ) );
+    }
+
+    SECTION( "above 2 kHz uses 50 percent duty limit" )
+    {
+        REQUIRE( autoPulseWidthFromFrequency( 4000.0 ) == Approx( 0.000125 ) );
+    }
+
+    SECTION( "zero frequency yields zero width" )
+    {
+        REQUIRE( autoPulseWidthFromFrequency( 0.0 ) == Approx( 0.0 ) );
+    }
+}
+
 } // namespace siglentSDGTest
 
 } // namespace libXWCTest
