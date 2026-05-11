@@ -68,11 +68,14 @@ if [ "$MODE" = "pull" ]; then
     # Start transmitter on remote machine
     echo "Starting transmitter on ${REMOTE}"
 
-    ssh -t ${REMOTE} "tmux new -d -s ${TX_SESSION}" || true
-
-    # explicitly identify path
     ssh -t ${REMOTE} \
-    "tmux send -t ${TX_SESSION} C-c C-m 'export PATH=/usr/local/milk/bin:/usr/local/bin:\$PATH; shmimTCPtransmit ${STREAM} ${RECEIVER_IP} ${PORT}' C-m"
+    "bash -lc 'tmux new -d -s ${TX_SESSION}'" || true
+
+    ssh -t ${REMOTE} \
+    "bash -lc 'tmux send -t ${TX_SESSION} C-c C-m \"shmimTCPtransmit ${STREAM} ${RECEIVER_IP} ${PORT}\" C-m'"
+
+    #ssh -t ${REMOTE} \
+    #"bash -lc 'tmux send -t ${TX_SESSION} C-c C-m \"export PATH=/usr/local/milk/bin:/usr/local/bin:\$PATH; shmimTCPtransmit ${STREAM} ${RECEIVER_IP} ${PORT}\" C-m'" 
 
     echo ""
     echo "Bridge established:"
@@ -86,17 +89,25 @@ if [ "$MODE" = "push" ]; then
     # Start receiver on remote machine
     echo "Starting receiver on ${REMOTE} (port ${PORT})"
 
-    ssh -t ${REMOTE} "tmux new -d -s ${RX_SESSION}" || true
+    ssh -t ${REMOTE} \
+    "bash -lc 'tmux new -d -s ${RX_SESSION}'" || true
 
     ssh -t ${REMOTE} \
-    "tmux send -t ${RX_SESSION} C-c C-m 'export PATH=/usr/local/milk/bin:/usr/local/bin:\$PATH; shmimTCPreceive ${PORT}' C-m"
+    "bash -lc 'tmux send -t ${RX_SESSION} C-c C-m \"shmimTCPreceive ${PORT}\" C-m'"
+
+    #ssh -t ${REMOTE} \
+    #"bash -lc 'tmux send -t ${RX_SESSION} C-c C-m \"export PATH=/usr/local/milk/bin:/usr/local/bin:\$PATH; shmimTCPreceive ${PORT}\" C-m'"
 
     # Start transmitter locally
     echo "Starting transmitter on $(hostname)"
 
     tmux new -d -s ${TX_SESSION} || true
+
     tmux send -t ${TX_SESSION} C-c C-m \
-    "export PATH=/usr/local/milk/bin:/usr/local/bin:\$PATH; shmimTCPtransmit ${STREAM} ${RECEIVER_IP} ${PORT}" C-m
+    "shmimTCPtransmit ${STREAM} ${RECEIVER_IP} ${PORT}" C-m
+
+    #tmux send -t ${TX_SESSION} C-c C-m \
+    #"export PATH=/usr/local/milk/bin:/usr/local/bin:\$PATH; shmimTCPtransmit ${STREAM} ${RECEIVER_IP} ${PORT}" C-m
 
     echo ""
     echo "Bridge established:"
