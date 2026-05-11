@@ -945,10 +945,10 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
             const realT rawClosedLoop = std::max( measuredPsd[n] - closedLoopNoise, tiny );
             const realT openLoopProcess = rawClosedLoop / useEtf;
 
-            // Keep the published noise PSD in the fitted CL-noise domain, but use an
-            // OL-equivalent noise PSD internally anywhere we compare against the OL
-            // disturbance PSD.
-            processNoisePsd[n] = std::max( closedLoopNoise / useEtf, tiny );
+            // Keep the comparison noise PSD in the same CL-noise domain as the
+            // fitted/published noise floor. The OL disturbance estimate is still
+            // formed from (CL - noise) / ETF above.
+            processNoisePsd[n] = std::max( closedLoopNoise, tiny );
             processMeasuredPsd[n] = openLoopProcess + processNoisePsd[n];
         }
     }
