@@ -147,6 +147,9 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     double m_writeCompletionTimeout{
         5.0 }; ///< Seconds to wait for the writer thread to finish a queued flush during restart cleanup.
 
+    bool m_resumeAfterReconnect{
+        false }; ///< Tracks whether reconnect cleanup should resume writing immediately on the replacement stream.
+
     uint64_t m_currChunkStart{ 0 }; ///< The circular buffer starting position of the current to-be-written chunk.
     uint64_t m_nextChunkStart{ 0 }; ///< The circular buffer starting position of the next to-be-written chunk.
 
@@ -879,9 +882,10 @@ int streamWriter::appLogic()
 
 int streamWriter::appShutdown()
 {
-    m_writing           = NOT_WRITING;
-    m_writePending      = false;
-    m_stopWriteDeadline = 0;
+    m_writing              = NOT_WRITING;
+    m_writePending         = false;
+    m_resumeAfterReconnect = false;
+    m_stopWriteDeadline    = 0;
     updateINDI();
 
     try
@@ -1617,13 +1621,14 @@ void streamWriter::fgThreadExec()
                     m_nextChunkStart     = ( m_currImage / m_writeChunkLength ) * m_writeChunkLength;
                     m_currChunkStartTime = m_currImageTime;
 
-                    if( !restartWriting ) // We only log if this is really a start
+                    if( !restartWriting && !m_resumeAfterReconnect ) // We only log if this is really a start
                     {
                         log<saving_start>( { 1, new_cnt0 } );
                     }
-                    else // on a restart after a timeout we don't log
+                    else // on a restart after a timeout or reconnect we don't log
                     {
-                        restartWriting = false;
+                        restartWriting         = false;
+                        m_resumeAfterReconnect = false;
                     }
 
                     m_writing = WRITING;
@@ -1838,6 +1843,14 @@ void streamWriter::fgThreadExec()
             }
         }
 
+        const bool resumeAfterReconnect = ( m_writing == WRITING );
+
+        if( m_writePending && !waitForWriteCompletion( last_cnt0 ) )
+        {
+            m_shutdown = 1;
+            return;
+        }
+
         ///\todo might still be writing here, so must check
         // If semaphore times-out or errors, we first cleanup any writing that needs to be done
         if( m_writing == WRITING || m_writing == STOP_WRITING )
@@ -1849,8 +1862,9 @@ void streamWriter::fgThreadExec()
                 m_currSaveStop        = m_currImage;
                 m_currSaveStopFrameNo = last_cnt0;
 
-                m_writing           = STOP_WRITING;
-                m_stopWriteDeadline = 0;
+                m_writing              = STOP_WRITING;
+                m_stopWriteDeadline    = 0;
+                m_resumeAfterReconnect = resumeAfterReconnect;
 
                 std::cerr << __FILE__ << " " << __LINE__ << " WRITING ON RESTART " << last_cnt0 << "\n";
                 // Now tell the writer to get going
@@ -1862,9 +1876,16 @@ void streamWriter::fgThreadExec()
                     return;
                 }
             }
+            else if( resumeAfterReconnect )
+            {
+                m_writing              = START_WRITING;
+                m_stopWriteDeadline    = 0;
+                m_resumeAfterReconnect = true;
+            }
             else
             {
-                m_writing = NOT_WRITING;
+                m_writing              = NOT_WRITING;
+                m_resumeAfterReconnect = false;
             }
 
             if( !waitForWriteCompletion( last_cnt0 ) )
@@ -1872,12 +1893,6 @@ void streamWriter::fgThreadExec()
                 m_shutdown = 1;
                 return;
             }
-        }
-
-        if( m_writePending && !waitForWriteCompletion( last_cnt0 ) )
-        {
-            m_shutdown = 1;
-            return;
         }
 
         release_circbufs();
@@ -2015,9 +2030,16 @@ int streamWriter::doEncode()
 
         if( m_writing == STOP_WRITING )
         {
-            m_writing           = NOT_WRITING;
+            if( m_resumeAfterReconnect )
+            {
+                m_writing = START_WRITING;
+            }
+            else
+            {
+                m_writing = NOT_WRITING;
+                log<saving_stop>( { 0, saveStopFrameNo } );
+            }
             m_stopWriteDeadline = 0;
-            log<saving_stop>( { 0, saveStopFrameNo } );
         }
 
         recordSavingState( true );
@@ -2195,9 +2217,16 @@ int streamWriter::doEncode()
 
     if( m_writing == STOP_WRITING )
     {
-        m_writing           = NOT_WRITING;
+        if( m_resumeAfterReconnect )
+        {
+            m_writing = START_WRITING;
+        }
+        else
+        {
+            m_writing = NOT_WRITING;
+            log<saving_stop>( { 0, saveStopFrameNo } );
+        }
         m_stopWriteDeadline = 0;
-        log<saving_stop>( { 0, saveStopFrameNo } );
     }
 
     recordSavingState( true );
@@ -2220,14 +2249,16 @@ INDI_NEWCALLBACK_DEFN( streamWriter, m_indiP_writing )
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off &&
         ( m_writing == WRITING || m_writing == START_WRITING ) )
     {
-        m_writing           = STOP_WRITING;
-        m_stopWriteDeadline = mx::sys::get_curr_time() + m_writeStopTimeout;
+        m_writing              = STOP_WRITING;
+        m_resumeAfterReconnect = false;
+        m_stopWriteDeadline    = mx::sys::get_curr_time() + m_writeStopTimeout;
     }
 
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_writing == NOT_WRITING )
     {
-        m_writing           = START_WRITING;
-        m_stopWriteDeadline = 0;
+        m_writing              = START_WRITING;
+        m_resumeAfterReconnect = false;
+        m_stopWriteDeadline    = 0;
     }
 
     return 0;

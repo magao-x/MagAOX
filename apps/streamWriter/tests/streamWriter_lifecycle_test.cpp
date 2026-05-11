@@ -1037,7 +1037,7 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         fgScope.disarm();
     }
 
-    SECTION( "replaced shmims flush the pending chunk and reconnect in the idle state" )
+    SECTION( "replaced shmims flush the pending chunk and reconnect ready to keep writing" )
     {
         streamWriterLifecycleTest   app;
         fgHarnessScope              fgScope( app );
@@ -1101,11 +1101,12 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
                                                          static_cast<uint64_t>( nextWtime.tv_sec ),
                                                          static_cast<uint64_t>( nextWtime.tv_nsec ) } );
 
-        app.m_writing      = NOT_WRITING;
-        app.m_writePending = false;
+        app.m_writing              = START_WRITING;
+        app.m_resumeAfterReconnect = true;
+        app.m_writePending         = false;
         REQUIRE( app.drainWriterSemaphore() >= 1 );
 
-        REQUIRE( waitFor( [&app]() { return app.m_width == 3 && app.m_height == 1 && app.m_writing == NOT_WRITING; },
+        REQUIRE( waitFor( [&app]() { return app.m_width == 3 && app.m_height == 1 && app.m_writing == START_WRITING; },
                           3000 ) );
         REQUIRE( app.writerSemaphoreValue() == 0 );
 
@@ -1114,7 +1115,7 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         source->publishFrame( 0, 101, 500, reconnectedAtime, reconnectedWtime );
 
         REQUIRE( waitFor( [&app]() { return app.m_currImage == 1; } ) );
-        REQUIRE( app.m_writing == NOT_WRITING );
+        REQUIRE( app.m_writing == WRITING );
         REQUIRE( rawFrameWord( app, 0, 0 ) == 500 );
         REQUIRE( rawFrameWord( app, 0, 2 ) == 502 );
         REQUIRE( timingWord( app, 0, 0 ) == 101 );
