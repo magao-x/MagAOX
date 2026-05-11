@@ -974,6 +974,7 @@ TEST_CASE( "mcp3208Ctrl timer mode reads configured channels", "[mcp3208Ctrl]" )
     REQUIRE( app.acquireAndCheckValid() == 0 );
     REQUIRE( app.m_values == std::vector<uint16_t>( { 11, 22, 33 } ) );
     REQUIRE( stubState().m_readOrder == std::vector<int>( { 0, 1, 2 } ) );
+    REQUIRE( app.m_currImageTimestamp.tv_sec > 0 );
 }
 
 /// Verify timer mode dispatch remains in integrator timing even when synchro stream metadata is present.
@@ -1005,6 +1006,7 @@ TEST_CASE( "mcp3208Ctrl timingSource dispatch prefers integrator mode over synch
     REQUIRE( app.m_timingSource == mcp3208Ctrl::TimingSource::Integrator );
     REQUIRE( app.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Integrator );
     REQUIRE( app.m_firstSemaphore == true );
+    REQUIRE( app.m_currImageTimestamp.tv_sec > 0 );
     REQUIRE( app.m_values == std::vector<uint16_t>( { 31 } ) );
     REQUIRE( stubState().m_readOrder == std::vector<int>( { 0 } ) );
 
@@ -1018,6 +1020,7 @@ TEST_CASE( "mcp3208Ctrl timingSource dispatch prefers integrator mode over synch
 TEST_CASE( "mcp3208Ctrl timer mode trigger interval initializes then measures", "[mcp3208Ctrl]" )
 {
     mcp3208Ctrl_test app;
+    timespec         firstTimestamp{};
 
     resetStubState();
     stubState().m_channelValues = { 17 };
@@ -1030,10 +1033,12 @@ TEST_CASE( "mcp3208Ctrl timer mode trigger interval initializes then measures", 
     app.m_time_start = std::chrono::high_resolution_clock::now() - std::chrono::milliseconds( 2 );
     REQUIRE( app.acquireAndCheckValid() == 0 );
     REQUIRE( app.m_triggerInterval_ns == Approx( 0.0 ) );
+    firstTimestamp = app.m_currImageTimestamp;
 
     app.m_time_start = std::chrono::high_resolution_clock::now() - std::chrono::milliseconds( 4 );
     REQUIRE( app.acquireAndCheckValid() == 0 );
     REQUIRE( app.m_triggerInterval_ns > 1000000.0 );
+    REQUIRE( mcp3208Ctrl::timespecToNs( app.m_currImageTimestamp ) > mcp3208Ctrl::timespecToNs( firstTimestamp ) );
 }
 
 /// Verify the current MCP3208 values are copied into the output image buffer.

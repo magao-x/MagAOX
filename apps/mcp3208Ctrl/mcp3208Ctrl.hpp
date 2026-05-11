@@ -1530,6 +1530,12 @@ int mcp3208Ctrl::acquireTimerAndCheckValid()
 
             m_time_start = now; // Reset start time
 
+            // Framegrabber latency telemetry requires an acquisition timestamp for every valid frame.
+            if( getRealtime( m_currImageTimestamp ) < 0 )
+            {
+                return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
+            }
+
             const auto readStart = std::chrono::high_resolution_clock::now();
             for( int i = 0; i < m_numChannels; ++i )
             {
