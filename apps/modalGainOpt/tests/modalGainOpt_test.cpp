@@ -34,6 +34,7 @@ class processPsdProcessorHarness : public processPsdProcessorT
     using processPsdProcessorT::estimateProcessPsdPowerLawOnly;
     using processPsdProcessorT::fillProcessPsdDropouts;
     using processPsdProcessorT::findAutoPowerLawCrossoverFreq;
+    using processPsdProcessorT::resolvePowerLawCrossoverFrequencies;
 };
 
 /// \cond
@@ -1161,6 +1162,31 @@ TEST_CASE( "modalPsdProcessor auto crossover can cap the search to a fraction "
     REQUIRE( crossoverFreq == Approx( 271.42856F ) );
 }
 
+TEST_CASE( "modalPsdProcessor snaps the effective auto crossover to the next "
+           "sampled frequency bin",
+           "[modalGainOpt]" )
+{
+    std::vector<float> rawProcessPsd{ 5.0F, 4.0F, 2.0F, 0.8F, 0.7F };
+    std::vector<float> smoothedProcessPsd{ 5.0F, 4.0F, 2.0F, 0.8F, 0.7F };
+    std::vector<float> noisePsd{ 1.0F, 1.0F, 1.0F, 1.0F, 1.0F };
+    std::vector<float> freq{ 0.0F, 100.0F, 200.0F, 300.0F, 400.0F };
+
+    float matchFreq = 0.0F;
+    float onlyAboveFreq = 0.0F;
+    mx::error_t errc = processPsdProcessorHarness::resolvePowerLawCrossoverFrequencies( matchFreq,
+                                                                                        onlyAboveFreq,
+                                                                                        rawProcessPsd,
+                                                                                        smoothedProcessPsd,
+                                                                                        noisePsd,
+                                                                                        freq,
+                                                                                        "auto-smoothed-crossing",
+                                                                                        0.0F );
+
+    REQUIRE( !errc );
+    REQUIRE( matchFreq == Approx( 300.0F ) );
+    REQUIRE( onlyAboveFreq == Approx( 300.0F ) );
+}
+
 TEST_CASE( "modalPsdProcessor anchors the power-law match to the smoothed "
            "disturbance PSD",
            "[modalGainOpt]" )
@@ -1194,7 +1220,7 @@ TEST_CASE( "modalPsdProcessor power-law-only auto handoff matches the "
            "smoothed crossover exactly without a blend ramp",
            "[modalGainOpt]" )
 {
-    std::vector<float> measuredPsd{ 1.0F, 51.0F, 41.0F, 31.0F, 3.0F, 2.0F };
+    std::vector<float> measuredPsd{ 1.0F, 1.2F, 41.0F, 31.0F, 3.0F, 2.0F };
     std::vector<float> smoothedProcessPsd{ 1.0F, 45.0F, 35.0F, 25.0F, 2.0F, 1.5F };
     std::vector<float> noisePsd{ 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F };
     std::vector<float> freq{ 0.0F, 10.0F, 20.0F, 30.0F, 40.0F, 50.0F };
@@ -1230,6 +1256,7 @@ TEST_CASE( "modalPsdProcessor power-law-only auto handoff matches the "
 
     REQUIRE( !errc );
     REQUIRE( usedPowerLawIndex == Approx( 1.0F ) );
+    REQUIRE( processPsd[1] == Approx( measuredPsd[1] - noisePsd[1] ) );
     REQUIRE( processPsd[3] == Approx( measuredPsd[3] - noisePsd[3] ) );
     REQUIRE( processPsd[4] == Approx( smoothedProcessPsd[4] ) );
     REQUIRE( processPsd[5] == Approx( 1.6F ) );

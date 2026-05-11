@@ -1647,6 +1647,16 @@ mx::error_t modalPsdProcessor<realT>::resolvePowerLawCrossoverFrequencies( realT
         return errc;
     }
 
+    auto upper = std::lower_bound( freq.begin(), freq.end(), crossoverFreq );
+    if( upper == freq.end() )
+    {
+        crossoverFreq = freq.back();
+    }
+    else
+    {
+        crossoverFreq = *upper;
+    }
+
     powerLawMatchFreq = crossoverFreq;
     powerLawOnlyAboveFreq = crossoverFreq;
     return mx::error_t::noerror;
@@ -2751,6 +2761,10 @@ mx::error_t modalPsdProcessor<realT>::buildPowerLawOnlyProcessFromContinuum( std
         {
             processPsd[n] = std::max( continuumPsd[n], tiny );
             repairMask[n] = 0;
+        }
+        else if( hardAutoHandoff )
+        {
+            processPsd[n] = std::max( rawProcessPsd[n], tiny );
         }
         else if( rawProcessPsd[n] > noisePsd[n] )
         {
