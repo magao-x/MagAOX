@@ -73,6 +73,7 @@ INCLUDEDEPS= \
 	logger/types/telem_flowrpm.hpp \
 	logger/types/telem_fxngen.hpp \
 	logger/types/telem_loopgain.hpp \
+	logger/types/telem_modalgainopt.hpp \
 	logger/types/telem_observer.hpp \
 	logger/types/telem_offloading.hpp \
 	logger/types/telem_pi335.hpp \
