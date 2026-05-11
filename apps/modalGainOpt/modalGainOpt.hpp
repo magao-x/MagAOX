@@ -712,6 +712,7 @@ struct wfsmaskShmimT
  * \ingroup modalGainOpt
  */
 class modalGainOpt : public MagAOXApp<true>,
+                     public dev::telemeter<modalGainOpt>,
                      dev::shmimMonitor<modalGainOpt, psdShmimT>,
                      dev::shmimMonitor<modalGainOpt, freqShmimT>,
                      dev::shmimMonitor<modalGainOpt, gainFactShmimT>,
@@ -732,6 +733,9 @@ class modalGainOpt : public MagAOXApp<true>,
 
     // Give the test harness access.
     friend class modalGainOpt_test;
+    typedef dev::telemeter<modalGainOpt> telemeterT;
+
+    friend class dev::telemeter<modalGainOpt>;
 
     friend class dev::shmimMonitor<modalGainOpt, psdShmimT>;
     friend class dev::shmimMonitor<modalGainOpt, freqShmimT>;
@@ -1404,6 +1408,16 @@ class modalGainOpt : public MagAOXApp<true>,
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_opticalGainSource );
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_opticalGainUpdate );
 
+    /** \name Telemeter Interface
+     *
+     * @{
+     */
+    int checkRecordTimes();
+
+    int recordTelem( const telem_modalgainopt * );
+
+    ///@}
+
     ///@}
 };
 
@@ -1838,6 +1852,8 @@ void modalGainOpt::setupConfig()
     SHMIMMONITORT_SETUP_CONFIG( noiseShmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( wfsavgShmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( wfsmaskShmimMonitorT, config );
+
+    telemeterT::setupConfig( config );
 }
 
 int modalGainOpt::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -2014,6 +2030,12 @@ int modalGainOpt::loadConfigImpl( mx::app::appConfigurator &_config )
     snprintf( shmim, sizeof( shmim ), "aol%d_mmodevar", m_loopNum );
     m_modevarShmimName = shmim;
 
+    if( telemeterT::loadConfig( _config ) < 0 )
+    {
+        log<text_log>( "Error during telemeter config", logPrio::LOG_CRITICAL );
+        m_shutdown = true;
+    }
+
     return 0;
 }
 
@@ -2024,6 +2046,11 @@ void modalGainOpt::loadConfig()
 
 int modalGainOpt::appStartup()
 {
+    if( telemeterT::appStartup() < 0 )
+    {
+        return log<software_error, -1>( { "error from telemeter appStartup" } );
+    }
+
     SHMIMMONITORT_APP_STARTUP( psdShmimMonitorT );
     SHMIMMONITORT_APP_STARTUP( freqShmimMonitorT );
     SHMIMMONITORT_APP_STARTUP( gainFactShmimMonitorT );
@@ -2373,6 +2400,11 @@ int modalGainOpt::appStartup()
 
 int modalGainOpt::appLogic()
 {
+    if( telemeterT::appLogic() < 0 )
+    {
+        return log<software_error, -1>( { "error from telemeter appLogic" } );
+    }
+
     SHMIMMONITORT_APP_LOGIC( psdShmimMonitorT );
     SHMIMMONITORT_APP_LOGIC( freqShmimMonitorT );
     SHMIMMONITORT_APP_LOGIC( gainFactShmimMonitorT );
@@ -2634,6 +2666,35 @@ int modalGainOpt::appShutdown()
         sem_destroy( &m_goptSemaphore );
         m_goptSemaphoreInit = false;
     }
+
+    telemeterT::appShutdown();
+
+    return 0;
+}
+
+inline int modalGainOpt::checkRecordTimes()
+{
+    return telemeterT::checkRecordTimes( telem_modalgainopt() );
+}
+
+inline int modalGainOpt::recordTelem( const telem_modalgainopt * )
+{
+    bool autoUpdate = false;
+    bool opticalGainUpdate = false;
+    float opticalGain = 0;
+    float gainGain = 0;
+    float gainLeak = 0;
+
+    {
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+        autoUpdate = m_autoUpdate;
+        opticalGainUpdate = m_opticalGainUpdate;
+        opticalGain = m_opticalGain;
+        gainGain = m_gainGain;
+        gainLeak = m_gainLeak;
+    }
+
+    telem<telem_modalgainopt>( { autoUpdate, opticalGainUpdate, opticalGain, gainGain, gainLeak } );
 
     return 0;
 }

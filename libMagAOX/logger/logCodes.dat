@@ -83,6 +83,7 @@ telem_fgtimings          20905    telem_fgtimings
 telem_dmmodes            20910    telem_dmmodes
 
 telem_loopgain           20915    telem_loopgain
+telem_modalgainopt       20916    telem_modalgainopt
 telem_blockgains         20920    telem_blockgains
 telem_offloading         20923    telem_offloading
 telem_w2tcsoffloader     20924    telem_w2tcsoffloader
