@@ -41,9 +41,11 @@ class observerCtrl_test : public observerCtrl
         XWCTEST_SETUP_INDI_NEW_PROP( sws );
     }
 
-    void configureStreamWriters( const std::vector<std::string> &writers )
+    void configureStreamWriters( const std::vector<std::string> &writers,
+                                 const std::vector<std::string> &defWriters = std::vector<std::string>() )
     {
-        m_streamWriters = writers;
+        m_streamWriters    = writers;
+        m_defStreamWriters = defWriters;
 
         m_indiP_sws = pcf::IndiProperty( pcf::IndiProperty::Switch );
         m_indiP_sws.setDevice( m_configName );
@@ -53,6 +55,7 @@ class observerCtrl_test : public observerCtrl
         m_indiP_sws.setRule( pcf::IndiProperty::AnyOfMany );
 
         m_indiP_streamWriterWriting.clear();
+        m_streamWriterSelectable.clear();
         m_streamWriterDevices.clear();
         m_streamWriterWriting.clear();
         m_streamWriterWritingKnown.clear();
@@ -62,7 +65,12 @@ class observerCtrl_test : public observerCtrl
         for( const auto &writer : writers )
         {
             m_indiP_sws.add( pcf::IndiElement( writer, pcf::IndiElement::Off ) );
-            REQUIRE( registerStreamWriter( writer ) == 0 );
+            REQUIRE( registerStreamWriter( writer, true ) == 0 );
+        }
+
+        for( const auto &writer : defWriters )
+        {
+            REQUIRE( registerStreamWriter( writer, false ) == 0 );
         }
     }
 
@@ -101,6 +109,11 @@ class observerCtrl_test : public observerCtrl
     bool writerWriting( const std::string &writerName ) const
     {
         return m_streamWriterWriting.at( writerName );
+    }
+
+    bool writerExposed( const std::string &writerName ) const
+    {
+        return m_indiP_sws.find( writerName );
     }
 };
 /// \endcond
@@ -181,6 +194,23 @@ TEST_CASE( "observerCtrl only stops stream writers it started", "[observerCtrl]"
     REQUIRE_FALSE( app.endWriter( "camwfs" ) );
 }
 
+/// Verify observerCtrl always manages configured default writers without exposing them in INDI.
+/**
+ * \ingroup observerCtrl_unit_test
+ */
+TEST_CASE( "observerCtrl default stream writers are managed but not selectable", "[observerCtrl]" )
+{
+    observerCtrl_test app( "observerCtrl_test" );
+    app.configureStreamWriters( { "camsci1" }, { "camlowfs" } );
+
+    REQUIRE( app.writerExposed( "camsci1" ) );
+    REQUIRE_FALSE( app.writerExposed( "camlowfs" ) );
+
+    REQUIRE( app.setWriterWritingState( "camlowfs", pcf::IndiElement::Off ) == 0 );
+    REQUIRE( app.beginWriter( "camlowfs" ) );
+    REQUIRE( app.endWriter( "camlowfs" ) );
+}
+
 /// Verify observerCtrl does not claim ownership when a writer state has not been received yet.
 /**
  * \ingroup observerCtrl_unit_test
@@ -188,9 +218,7 @@ TEST_CASE( "observerCtrl only stops stream writers it started", "[observerCtrl]"
 TEST_CASE( "observerCtrl does not stop writers with unknown initial state", "[observerCtrl]" )
 {
     observerCtrl_test app( "observerCtrl_test" );
-    app.configureStreamWriters( { "camlowfs" } );
-
-    app.setWriterSelected( "camlowfs", pcf::IndiElement::On );
+    app.configureStreamWriters( {}, { "camlowfs" } );
 
     REQUIRE( app.beginWriter( "camlowfs" ) );
     REQUIRE_FALSE( app.endWriter( "camlowfs" ) );

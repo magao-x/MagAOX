@@ -58,10 +58,15 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
      *@{
      */
 
-    std::vector<std::string> m_streamWriters; ///< The configured stream writers available for observation control.
+    std::vector<std::string> m_streamWriters; ///< The configured stream writers available for user selection.
+
+    std::vector<std::string> m_defStreamWriters; ///< The configured stream writers always managed for observations.
 
     /// Tracks the remote `writing` properties for configured stream writers.
     std::map<std::string, pcf::IndiProperty> m_indiP_streamWriterWriting;
+
+    /// Tracks whether each configured stream writer is user-selectable in INDI.
+    std::map<std::string, bool> m_streamWriterSelectable;
 
     /// Reverse lookup from remote stream writer device name to configured writer name.
     std::map<std::string, std::string> m_streamWriterDevices;
@@ -157,11 +162,12 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
     std::string
     streamWriterDeviceName( const std::string &writerName /**< [in] the configured stream writer name */ ) const;
 
-    /// Return whether a stream writer is selected for observation control.
+    /// Return whether a stream writer is enabled for observation control.
     bool streamWriterSelected( const std::string &writerName /**< [in] the configured stream writer name */ ) const;
 
     /// Register one configured stream writer for remote writing-state tracking.
-    int registerStreamWriter( const std::string &writerName /**< [in] the configured stream writer name */ );
+    int registerStreamWriter( const std::string &writerName /**< [in] the configured stream writer name */,
+                              bool userSelectable /**< [in] true if the writer should appear in the INDI selector */ );
 
     /// Determine whether observerCtrl should start a stream writer for a new observation.
     bool beginObservationStreamWriter( const std::string &writerName /**< [in] the configured stream writer name */ );
@@ -243,7 +249,7 @@ class observerCtrl : public MagAOXApp<true>, public dev::telemeter<observerCtrl>
     pcf::IndiProperty m_indiP_obsStart;    ///< String timestamp indicating the start for target/observation
     pcf::IndiProperty m_indiP_obsTime;     ///< Number tracking the elapsed time
     pcf::IndiProperty m_indiP_obsAngle;    ///< Number tracking the change in angle
-    pcf::IndiProperty m_indiP_sws;         ///< Selection to switch which stream writers are enabled
+    pcf::IndiProperty m_indiP_sws;         ///< Selection to switch which user-managed stream writers are enabled
     pcf::IndiProperty m_indiP_userlog;     ///< Text to enter a user log
 
     pcf::IndiProperty m_indiP_resetTarget; ///< Reset the target statistics
@@ -330,13 +336,30 @@ inline std::string observerCtrl::streamWriterDeviceName( const std::string &writ
 
 inline bool observerCtrl::streamWriterSelected( const std::string &writerName ) const
 {
+    auto streamWriterIt = m_streamWriterSelectable.find( writerName );
+    if( streamWriterIt == m_streamWriterSelectable.end() )
+    {
+        return false;
+    }
+
+    if( !streamWriterIt->second )
+    {
+        return true;
+    }
+
     return m_indiP_sws.find( writerName ) && m_indiP_sws[writerName].getSwitchState() == pcf::IndiElement::On;
 }
 
-inline int observerCtrl::registerStreamWriter( const std::string &writerName )
+inline int observerCtrl::registerStreamWriter( const std::string &writerName, bool userSelectable )
 {
     const std::string deviceName = streamWriterDeviceName( writerName );
 
+    if( m_streamWriterSelectable.count( writerName ) > 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "duplicate configured stream writer " + writerName } );
+    }
+
+    m_streamWriterSelectable[writerName]        = userSelectable;
     m_streamWriterDevices[deviceName]           = writerName;
     m_streamWriterWriting[writerName]           = false;
     m_streamWriterWritingKnown[writerName]      = false;
@@ -397,12 +420,22 @@ void observerCtrl::setupConfig()
     config.add( "stream.writers",
                 "",
                 "stream.writers",
-                argType::Required,
+                argType::Optional,
                 "stream",
                 "writers",
                 false,
                 "string",
-                "The device names of the stream writers to control." );
+                "The device names of the stream writers available for user selection." );
+
+    config.add( "stream.defWriters",
+                "",
+                "stream.defWriters",
+                argType::Optional,
+                "stream",
+                "defWriters",
+                false,
+                "string",
+                "The device names of the stream writers always controlled for each observation." );
 
     dev::telemeter<observerCtrl>::setupConfig( config );
 }
@@ -410,6 +443,7 @@ void observerCtrl::setupConfig()
 int observerCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
 {
     _config( m_streamWriters, "stream.writers" );
+    _config( m_defStreamWriters, "stream.defWriters" );
 
     std::vector<std::string> sections;
 
@@ -585,7 +619,15 @@ int observerCtrl::appStartup()
     {
         m_indiP_sws.add( pcf::IndiElement( m_streamWriters[n], pcf::IndiElement::Off ) );
 
-        if( registerStreamWriter( m_streamWriters[n] ) < 0 )
+        if( registerStreamWriter( m_streamWriters[n], true ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__ } );
+        }
+    }
+
+    for( size_t n = 0; n < m_defStreamWriters.size(); ++n )
+    {
+        if( registerStreamWriter( m_defStreamWriters[n], false ) < 0 )
         {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
         }
@@ -735,6 +777,17 @@ void observerCtrl::startObserving()
         }
     }
 
+    for( size_t n = 0; n < m_defStreamWriters.size(); ++n )
+    {
+        if( beginObservationStreamWriter( m_defStreamWriters[n] ) )
+        {
+            if( commandStreamWriter( m_defStreamWriters[n], pcf::IndiElement::On ) < 0 )
+            {
+                log<software_error>( { __FILE__, __LINE__, "failed to start stream writer " + m_defStreamWriters[n] } );
+            }
+        }
+    }
+
     mx::sys::sleep( 1 );
 
     m_obsStartTime      = std::chrono::steady_clock::now();
@@ -766,6 +819,17 @@ void observerCtrl::stopObserving()
             if( commandStreamWriter( m_streamWriters[n], pcf::IndiElement::Off ) < 0 )
             {
                 log<software_error>( { __FILE__, __LINE__, "failed to stop stream writer " + m_streamWriters[n] } );
+            }
+        }
+    }
+
+    for( size_t n = 0; n < m_defStreamWriters.size(); ++n )
+    {
+        if( endObservationStreamWriter( m_defStreamWriters[n] ) )
+        {
+            if( commandStreamWriter( m_defStreamWriters[n], pcf::IndiElement::Off ) < 0 )
+            {
+                log<software_error>( { __FILE__, __LINE__, "failed to stop stream writer " + m_defStreamWriters[n] } );
             }
         }
     }
