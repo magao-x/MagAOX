@@ -1177,7 +1177,10 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                         result.m_powerLawIndex,
                                         effectiveConfig.m_powerLawNormFreq,
                                         effectiveConfig.m_powerLawMatchFreq,
-                                        effectiveConfig.m_powerLawMatchFallbackWindowHz );
+                                        normalizePowerLawCrossoverMode( effectiveConfig.m_powerLawCrossoverMode ) ==
+                                                "auto-smoothed-crossing"
+                                            ? static_cast<realT>( 0 )
+                                            : effectiveConfig.m_powerLawMatchFallbackWindowHz );
             if( !!errc )
             {
                 return errc;
@@ -2720,11 +2723,24 @@ mx::error_t modalPsdProcessor<realT>::buildPowerLawOnlyProcessFromContinuum( std
 
     const realT tiny = std::numeric_limits<realT>::min();
     std::vector<realT> extrapolatedPsd;
-    mx::error_t errc =
-        blendContinuumAtAnchor( extrapolatedPsd, rawProcessPsd, continuumPsd, anchorIndex, config.m_powerLawBlendBins );
-    if( !!errc )
+    bool hardAutoHandoff =
+        normalizePowerLawCrossoverMode( config.m_powerLawCrossoverMode ) == "auto-smoothed-crossing" &&
+        config.m_powerLawMatchFreq > static_cast<realT>( 0 );
+    if( hardAutoHandoff )
     {
-        return errc;
+        extrapolatedPsd = continuumPsd;
+    }
+    else
+    {
+        mx::error_t errc = blendContinuumAtAnchor( extrapolatedPsd,
+                                                   rawProcessPsd,
+                                                   continuumPsd,
+                                                   anchorIndex,
+                                                   config.m_powerLawBlendBins );
+        if( !!errc )
+        {
+            return errc;
+        }
     }
 
     processPsd.resize( rawProcessPsd.size() );
@@ -2798,6 +2814,35 @@ mx::error_t modalPsdProcessor<realT>::estimateProcessPsdPowerLawOnly( std::vecto
     if( !!errc )
     {
         return errc;
+    }
+
+    if( normalizePowerLawCrossoverMode( config.m_powerLawCrossoverMode ) == "auto-smoothed-crossing" &&
+        config.m_powerLawMatchFreq > static_cast<realT>( 0 ) )
+    {
+        realT exactPowerLawIndex = config.m_powerLawIndex;
+        if( usedPowerLawIndex != nullptr )
+        {
+            exactPowerLawIndex = *usedPowerLawIndex;
+        }
+
+        errc = matchPowerLawAtFreq( extrapolation,
+                                    anchorProcessPsd,
+                                    freq,
+                                    exactPowerLawIndex,
+                                    config.m_powerLawNormFreq,
+                                    config.m_powerLawMatchFreq,
+                                    static_cast<realT>( 0 ) );
+        if( !!errc )
+        {
+            return errc;
+        }
+
+        errc =
+            buildPowerLawContinuum( continuumPsd, extrapolation, freq, exactPowerLawIndex, config.m_powerLawNormFreq );
+        if( !!errc )
+        {
+            return errc;
+        }
     }
 
     return buildPowerLawOnlyProcessFromContinuum( processPsd,

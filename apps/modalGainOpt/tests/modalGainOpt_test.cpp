@@ -31,6 +31,7 @@ class processPsdProcessorHarness : public processPsdProcessorT
   public:
     using processPsdProcessorT::buildSmoothedProcessPsd;
     using processPsdProcessorT::estimatePowerLawContinuum;
+    using processPsdProcessorT::estimateProcessPsdPowerLawOnly;
     using processPsdProcessorT::fillProcessPsdDropouts;
     using processPsdProcessorT::findAutoPowerLawCrossoverFreq;
 };
@@ -1187,6 +1188,51 @@ TEST_CASE( "modalPsdProcessor anchors the power-law match to the smoothed "
     REQUIRE( !errc );
     REQUIRE( anchorIndex >= 1 );
     REQUIRE( extrapolation == Approx( 20.0F ) );
+}
+
+TEST_CASE( "modalPsdProcessor power-law-only auto handoff matches the "
+           "smoothed crossover exactly without a blend ramp",
+           "[modalGainOpt]" )
+{
+    std::vector<float> measuredPsd{ 1.0F, 51.0F, 41.0F, 31.0F, 3.0F, 2.0F };
+    std::vector<float> smoothedProcessPsd{ 1.0F, 45.0F, 35.0F, 25.0F, 2.0F, 1.5F };
+    std::vector<float> noisePsd{ 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F };
+    std::vector<float> freq{ 0.0F, 10.0F, 20.0F, 30.0F, 40.0F, 50.0F };
+
+    processPsdProcessorT::processModelConfig cfg;
+    cfg.m_method = "power-law-only";
+    cfg.m_powerLawIndex = 1.0F;
+    cfg.m_powerLawNormFreq = 10.0F;
+    cfg.m_powerLawMatchFreq = 40.0F;
+    cfg.m_powerLawOnlyAboveFreq = 40.0F;
+    cfg.m_powerLawCrossoverMode = "auto-smoothed-crossing";
+    cfg.m_powerLawMatchFallbackWindowHz = 5.0F;
+    cfg.m_powerLawBlendBins = 20;
+
+    std::vector<float> processPsd;
+    float extrapolation = 0.0F;
+    size_t anchorIndex = 0;
+    std::vector<unsigned char> repairMask;
+    float usedPowerLawIndex = 0.0F;
+    size_t fitBinsUsed = 0;
+
+    mx::error_t errc = processPsdProcessorHarness::estimateProcessPsdPowerLawOnly( processPsd,
+                                                                                   extrapolation,
+                                                                                   anchorIndex,
+                                                                                   repairMask,
+                                                                                   measuredPsd,
+                                                                                   smoothedProcessPsd,
+                                                                                   noisePsd,
+                                                                                   freq,
+                                                                                   cfg,
+                                                                                   &usedPowerLawIndex,
+                                                                                   &fitBinsUsed );
+
+    REQUIRE( !errc );
+    REQUIRE( usedPowerLawIndex == Approx( 1.0F ) );
+    REQUIRE( processPsd[3] == Approx( measuredPsd[3] - noisePsd[3] ) );
+    REQUIRE( processPsd[4] == Approx( smoothedProcessPsd[4] ) );
+    REQUIRE( processPsd[5] == Approx( 1.6F ) );
 }
 
 TEST_CASE( "modalPsdProcessor repairs raw disturbance dropouts before "
