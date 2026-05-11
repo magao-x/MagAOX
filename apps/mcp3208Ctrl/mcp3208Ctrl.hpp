@@ -54,6 +54,13 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
                                                                  flipped */
 
   protected:
+    /// Enumeration of runtime acquisition timing-source choices.
+    enum class TimingSource
+    {
+        Integrator = 0, ///< Use the internal timer/integrator cadence.
+        Semaphore  = 1  ///< Use synchronization-stream semaphore cadence.
+    };
+
     /** \name Configurable Parameters - Data
      * @{
      */
@@ -72,7 +79,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     float m_numChannelsTol{ 0 }; ///< The tolerance for detecting a change in numChannels.
 
-    std::string m_synchroShmimName; ///< The synchronization ImageStreamIO stream name; empty selects timer mode.
+    std::string m_synchroShmimName; ///< The synchronization ImageStreamIO stream name used when semaphore timing is selected.
     int m_synchroPostDelay{ 0 }; ///< Signed microsecond phase offset added to synchronized delay-model predictions.
 
     double m_synchroDtTransfer_ns{ 3e3 }; ///< Transfer-latency term in the synchronized delay model.
@@ -106,7 +113,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     pcf::IndiProperty m_indiP_numChannelsSource;
     INDI_SETCALLBACK_DECL( mcp3208Ctrl, m_indiP_numChannelsSource );
-    
+
     /// INDI property exposing the local fps target.
     pcf::IndiProperty m_indiP_fps;
 
@@ -133,6 +140,12 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     /// Handle updates to the synchronized-mode signed phase offset property.
     INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_synchroDelay );
 
+    /// INDI property selecting the runtime timing source.
+    pcf::IndiProperty m_indiP_timingSource;
+
+    /// Handle updates to the runtime timing-source selection property.
+    INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_timingSource );
+
     /// INDI property exposing runtime timing diagnostics for acquisition health checks.
     pcf::IndiProperty m_indiP_timingDiag;
 
@@ -141,6 +154,9 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     float nano_sec_target{ 1e9f / m_fps }; ///< The timer-mode target interval in nanoseconds.
     float m_synchroDelay{ 0 };             ///< The commanded pre-read delay in synchronized mode, in nanoseconds.
     float m_synchroDelayTarget{ 0 };       ///< The synchronized-mode effective delay target in nanoseconds after applying signed offset and wrap.
+    TimingSource m_timingSource{ TimingSource::Integrator }; ///< Operator-selected timing source requested through INDI.
+    TimingSource m_effectiveTimingSource{ TimingSource::Integrator }; ///< Currently active timing source after fallback handling.
+    bool m_semaphoreFallbackActive{ false }; ///< Tracks whether runtime has fallen back from requested semaphore timing to integrator timing.
 
     /// Secondary MCP3208 handle retained with the legacy class state.
     MCP3208Lib::MCP3208 adc;
@@ -261,6 +277,15 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     /// Release the synchronization semaphore claim and close the synchronization stream.
     void closeSynchroStream();
 
+    /// Reset timing counters and trigger diagnostics shared by both timing modes.
+    void resetAcquisitionTimingState();
+
+    /// Reset synchronized-acquisition state for a fresh semaphore timing session.
+    void resetSynchroAcquisitionState();
+
+    /// Attempt to activate requested timing and apply fallback when semaphore timing is unavailable.
+    void updateEffectiveTimingSource();
+
     /// Acquire one frame using the internal timer loop.
     /**
      * \returns 0 when a new sample is ready.
@@ -320,6 +345,9 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
      * The exported `trigger_time_us` value is relative to the latest semaphore arrival (`m_atime`).
      */
     void updateTimingDiagnosticsIndi();
+
+    /// Publish the runtime timing-source switch state to the INDI property.
+    void updateTimingSourceIndi();
 
     ///@}
 
@@ -836,6 +864,16 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     m_syncProducerFrameValid  = false;
     m_wfs_fps            = m_fps;
     m_channelReadoutTime_ns = 0.0;
+    if( m_synchroShmimName.empty() )
+    {
+        m_timingSource = TimingSource::Integrator;
+    }
+    else
+    {
+        m_timingSource = TimingSource::Semaphore;
+    }
+    m_effectiveTimingSource   = m_timingSource;
+    m_semaphoreFallbackActive = false;
 
     return 0;
 }
@@ -869,6 +907,21 @@ int mcp3208Ctrl::appStartup()
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_synchroDelay, "synchroDelay", -1000000, 1000000, 1, "%d", "us", "" );
     m_indiP_synchroDelay["current"].setValue( m_synchroPostDelay );
     m_indiP_synchroDelay["target"].setValue( m_synchroPostDelay );
+
+    if( createStandardIndiSelectionSw( m_indiP_timingSource,
+                                       "timingSource",
+                                       { "semaphore", "integrator" },
+                                       { "Semaphore", "Integrator" },
+                                       "Timing Source",
+                                       "Acquisition" ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "error from createStandardIndiSelectionSw" } );
+    }
+
+    if( registerIndiPropertyNew( m_indiP_timingSource, INDI_NEWCALLBACK( m_indiP_timingSource ) ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
+    }
 
     CREATE_REG_INDI_RO_NUMBER( m_indiP_timingDiag, "timingDiag", "Timing Diagnostics", "Diagnostics" );
     m_indiP_timingDiag.add( pcf::IndiElement( "avg_read_latency_us" ) );
@@ -912,10 +965,22 @@ int mcp3208Ctrl::appStartup()
         m_adc.connect();
     }
 
+    updateTimingSourceIndi();
     updateTimingDiagnosticsIndi();
 
     state( stateCodes::OPERATING );
     return 0;
+}
+
+void mcp3208Ctrl::updateTimingSourceIndi()
+{
+    updateSwitchIfChanged( m_indiP_timingSource,
+                           "semaphore",
+                           m_timingSource == TimingSource::Semaphore ? pcf::IndiElement::On : pcf::IndiElement::Off );
+
+    updateSwitchIfChanged( m_indiP_timingSource,
+                           "integrator",
+                           m_timingSource == TimingSource::Integrator ? pcf::IndiElement::On : pcf::IndiElement::Off );
 }
 
 void mcp3208Ctrl::updateTimingDiagnosticsIndi()
@@ -924,8 +989,9 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     constexpr double c_synchroModeCode = 1.0;
     constexpr double c_nsToUs          = 1e-3;
 
-    const bool   synchroMode          = !m_synchroShmimName.empty();
-    const double readLatencyError_ns  = m_avgReadLatency_ns - static_cast<double>( m_synchroDelayTarget );
+    const bool   synchroMode          = ( m_effectiveTimingSource == TimingSource::Semaphore );
+    const double readLatencyError_ns  =
+        synchroMode ? ( m_avgReadLatency_ns - static_cast<double>( m_synchroDelayTarget ) ) : 0.0;
     const double modeCode             = synchroMode ? c_synchroModeCode : c_timerModeCode;
     const double delayAppliedDiag_ns  = synchroMode ? m_delayApplied_ns : 0.0;
     const double delayModelDiag_ns    = synchroMode ? m_delayModel_ns : 0.0;
@@ -1073,6 +1139,8 @@ int mcp3208Ctrl::appLogic()
     updatesIfChanged<int>(
         m_indiP_synchroDelay, { "current", "target" }, { m_synchroPostDelay, m_synchroPostDelay } );
 
+    updateTimingSourceIndi();
+
     updateTimingDiagnosticsIndi();
 
     return 0;
@@ -1096,26 +1164,33 @@ int mcp3208Ctrl::configureAcquisition()
     m_height   = 1;
     m_dataType = _DATATYPE_UINT16;
 
-    if( !m_synchroShmimName.empty() )
+    if( m_timingSource == TimingSource::Semaphore )
     {
-        log<text_log>( "Configuring semaphore-synchronized acquisition from " + m_synchroShmimName +
-                           " with phase offset " + std::to_string( m_synchroPostDelay ) + " us.",
-                       logPrio::LOG_INFO );
-
-        if( openSynchroStream() != 0 )
+        if( !m_synchroShmimName.empty() )
         {
-            return 1;
+            log<text_log>( "Configuring semaphore-synchronized acquisition from " + m_synchroShmimName +
+                               " with phase offset " + std::to_string( m_synchroPostDelay ) + " us.",
+                           logPrio::LOG_INFO );
+        }
+        else
+        {
+            log<text_log>( "Semaphore timing requested without synchro.shmimName; falling back to timer timing.",
+                           logPrio::LOG_WARNING );
         }
 
-        if( claimSynchroSemaphore() != 0 )
+        updateEffectiveTimingSource();
+        if( m_effectiveTimingSource != TimingSource::Semaphore )
         {
-            closeSynchroStream();
-            return 1;
+            log<text_log>( "Proceeding with timer-driven fallback until semaphore timing is available.",
+                           logPrio::LOG_WARNING );
         }
     }
     else
     {
         log<text_log>( "Configuring timer-driven acquisition.", logPrio::LOG_INFO );
+        closeSynchroStream();
+        m_effectiveTimingSource   = TimingSource::Integrator;
+        m_semaphoreFallbackActive = false;
     }
 
     return 0;
@@ -1133,65 +1208,36 @@ float mcp3208Ctrl::fps()
 
 int mcp3208Ctrl::startAcquisition()
 {
-    if( !m_synchroShmimName.empty() )
+    updateEffectiveTimingSource();
+
+    if( m_effectiveTimingSource == TimingSource::Semaphore )
     {
         if( !m_synchroStreamOpen )
         {
-            return -1;
+            return 1;
         }
 
         if( m_synchroSemaphore == nullptr && claimSynchroSemaphore() != 0 )
         {
-            return -1;
+            updateEffectiveTimingSource();
+            if( m_effectiveTimingSource != TimingSource::Semaphore )
+            {
+                resetAcquisitionTimingState();
+                m_time_start = std::chrono::high_resolution_clock::now();
+                return 0;
+            }
+
+            return 1;
         }
 
         ImageStreamIO_semflush( &m_synchroStream, m_synchroSemaphoreNumber );
 
         m_synchroDelay = m_synchroDelayTarget;
-        m_firstSemaphore        = true;
-        m_avgSemaphorePeriod_ns = 0.0;
-        m_firstReadLatency      = true;
-        m_avgReadLatency_ns     = 0.0;
-        m_lastAtime             = timespec{};
-        m_atime                 = timespec{};
-        m_triggerTime           = timespec{};
-        m_wfsPeriodMeasured_ns  = 0.0;
-        m_lastProducerAtime     = timespec{};
-        m_lastProducerCnt0      = 0;
-        m_producerPeriodInst_ns = 0.0;
-        m_avgProducerPeriod_ns  = 0.0;
-        m_firstProducerSample   = true;
-        m_syncFramesReceived    = 0;
-        m_syncFramesWritten     = 0;
-        m_syncFramesDropped     = 0;
-        m_syncFrameIdGapCount   = 0;
-        m_syncProducerFrameId   = 0;
-        m_syncProducerFrameDelta = 0;
-        m_lastSyncProducerFrameId = 0;
-        m_syncProducerFrameValid  = false;
-        m_delayModel_ns         = 0.0;
-        m_delayApplied_ns       = 0.0;
-        m_delayBudget_ns        = 0.0;
-        m_nonDelayService_ns    = 0.0;
-        m_avgNonDelayService_ns = 0.0;
-        m_firstNonDelayService  = true;
-        m_delayPhaseError_ns    = 0.0;
-        m_delayLock             = 0.0;
-        m_delayCapped           = 0.0;
+
+        resetSynchroAcquisitionState();
     }
 
-    m_triggerInterval_ns = 0.0;
-    m_channelReadoutTime_ns = 0.0;
-    m_lastTriggerTime    = timespec{};
-    m_firstTriggerTime   = true;
-    m_firstTimerTrigger  = true;
-    m_localFrameSeq      = 0;
-    m_delayApplied_ns    = 0.0;
-    m_delayBudget_ns     = 0.0;
-    m_nonDelayService_ns = 0.0;
-    m_delayPhaseError_ns = 0.0;
-    m_delayLock          = 0.0;
-    m_delayCapped        = 0.0;
+    resetAcquisitionTimingState();
 
     m_time_start = std::chrono::high_resolution_clock::now();
 
@@ -1200,9 +1246,27 @@ int mcp3208Ctrl::startAcquisition()
 
 int mcp3208Ctrl::acquireAndCheckValid()
 {
-    if( !m_synchroShmimName.empty() )
+    if( m_timingSource == TimingSource::Semaphore )
     {
-        return acquireSynchroAndCheckValid();
+        updateEffectiveTimingSource();
+
+        if( m_effectiveTimingSource == TimingSource::Semaphore )
+        {
+            const int synchroRv = acquireSynchroAndCheckValid();
+            if( synchroRv == 0 || synchroRv < 0 )
+            {
+                return synchroRv;
+            }
+
+            m_effectiveTimingSource = TimingSource::Integrator;
+            if( !m_semaphoreFallbackActive )
+            {
+                log<text_log>(
+                    "Semaphore timing unavailable during acquisition; using timer-driven fallback.",
+                    logPrio::LOG_WARNING );
+                m_semaphoreFallbackActive = true;
+            }
+        }
     }
 
     return acquireTimerAndCheckValid();
@@ -1212,7 +1276,7 @@ int mcp3208Ctrl::loadImageIntoStream( void *dest )
 {
     memcpy( dest, m_values.data(), m_values.size() * sizeof( uint16_t ) );
     ++m_localFrameSeq;
-    if( !m_synchroShmimName.empty() )
+    if( m_effectiveTimingSource == TimingSource::Semaphore )
     {
         ++m_syncFramesWritten;
     }
@@ -1335,6 +1399,24 @@ void mcp3208Ctrl::closeSynchroStream()
     m_synchroSemaphoreNumber = 5;
     m_synchroStreamInode     = 0;
     m_synchroStreamOpen      = false;
+
+    resetSynchroAcquisitionState();
+    resetAcquisitionTimingState();
+}
+
+void mcp3208Ctrl::resetAcquisitionTimingState()
+{
+    m_triggerTime           = timespec{};
+    m_triggerInterval_ns    = 0.0;
+    m_channelReadoutTime_ns = 0.0;
+    m_localFrameSeq         = 0;
+    m_lastTriggerTime       = timespec{};
+    m_firstTriggerTime      = true;
+    m_firstTimerTrigger     = true;
+}
+
+void mcp3208Ctrl::resetSynchroAcquisitionState()
+{
     m_atime                  = timespec{};
     m_lastAtime              = timespec{};
     m_avgSemaphorePeriod_ns  = 0.0;
@@ -1364,13 +1446,65 @@ void mcp3208Ctrl::closeSynchroStream()
     m_delayPhaseError_ns     = 0.0;
     m_delayLock              = 0.0;
     m_delayCapped            = 0.0;
-    m_triggerTime            = timespec{};
-    m_triggerInterval_ns     = 0.0;
-    m_channelReadoutTime_ns  = 0.0;
-    m_localFrameSeq          = 0;
-    m_lastTriggerTime        = timespec{};
-    m_firstTriggerTime       = true;
-    m_firstTimerTrigger      = true;
+}
+
+void mcp3208Ctrl::updateEffectiveTimingSource()
+{
+    if( m_timingSource != TimingSource::Semaphore )
+    {
+        m_effectiveTimingSource   = TimingSource::Integrator;
+        m_semaphoreFallbackActive = false;
+        return;
+    }
+
+    if( m_synchroShmimName.empty() )
+    {
+        if( !m_semaphoreFallbackActive )
+        {
+            log<text_log>( "Semaphore timing requested but synchro.shmimName is empty; using timer-driven fallback.",
+                           logPrio::LOG_WARNING );
+            m_semaphoreFallbackActive = true;
+        }
+
+        m_effectiveTimingSource = TimingSource::Integrator;
+        return;
+    }
+
+    bool synchroReady = m_synchroStreamOpen;
+    if( !synchroReady && openSynchroStream() == 0 )
+    {
+        synchroReady = true;
+    }
+
+    if( synchroReady && m_synchroSemaphore == nullptr && claimSynchroSemaphore() != 0 )
+    {
+        synchroReady = false;
+    }
+    else if( synchroReady && m_synchroSemaphore == nullptr )
+    {
+        synchroReady = false;
+    }
+
+    if( !synchroReady )
+    {
+        m_effectiveTimingSource = TimingSource::Integrator;
+        if( !m_semaphoreFallbackActive )
+        {
+            log<text_log>(
+                "Semaphore timing unavailable; using timer-driven fallback until synchronization stream is ready.",
+                logPrio::LOG_WARNING );
+            m_semaphoreFallbackActive = true;
+        }
+
+        return;
+    }
+
+    m_effectiveTimingSource = TimingSource::Semaphore;
+    if( m_semaphoreFallbackActive )
+    {
+        log<text_log>( "Semaphore timing restored; leaving timer-driven fallback.", logPrio::LOG_NOTICE );
+    }
+    m_semaphoreFallbackActive = false;
 }
 
 int mcp3208Ctrl::acquireTimerAndCheckValid()
@@ -1799,6 +1933,51 @@ INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_synchroDelay )( const pcf::IndiPrope
     m_delayApplied_ns = static_cast<double>( m_synchroDelay );
 
     log<text_log>( "set synchroDelay offset = " + std::to_string( m_synchroPostDelay ) + " us" );
+    return 0;
+}
+
+// INDI callback handling for runtime timing-source selection.
+INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_timingSource )( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getName() != m_indiP_timingSource.getName() )
+    {
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
+        return -1;
+    }
+
+    bool requestSemaphore  = false;
+    bool requestIntegrator = false;
+
+    if( ipRecv.find( "semaphore" ) &&
+        ipRecv["semaphore"].getSwitchState() == pcf::IndiElement::On )
+    {
+        requestSemaphore = true;
+    }
+
+    if( ipRecv.find( "integrator" ) &&
+        ipRecv["integrator"].getSwitchState() == pcf::IndiElement::On )
+    {
+        requestIntegrator = true;
+    }
+
+    if( requestSemaphore == requestIntegrator )
+    {
+        log<software_error>( { __FILE__, __LINE__, "timingSource requires exactly one selected mode." } );
+        updateTimingSourceIndi();
+        return 0;
+    }
+
+    const TimingSource requestedSource = requestSemaphore ? TimingSource::Semaphore : TimingSource::Integrator;
+    if( requestedSource != m_timingSource )
+    {
+        m_timingSource = requestedSource;
+        updateEffectiveTimingSource();
+        m_reconfig = true;
+        log<text_log>(
+            "set timingSource = " + std::string( requestSemaphore ? "semaphore" : "integrator" ) );
+    }
+
+    updateTimingSourceIndi();
     return 0;
 }
 

@@ -222,6 +222,28 @@ class mcp3208Ctrl_test : public mcp3208Ctrl
         return ip;
     }
 
+    /// Initialize the timing-source INDI switch property used by callback tests.
+    void setupTimingSourceProperty()
+    {
+        m_indiP_timingSource = pcf::IndiProperty( pcf::IndiProperty::Switch );
+        m_indiP_timingSource.setName( "timingSource" );
+        m_indiP_timingSource.setRule( pcf::IndiProperty::OneOfMany );
+        m_indiP_timingSource.add( pcf::IndiElement( "semaphore", pcf::IndiElement::Off ) );
+        m_indiP_timingSource.add( pcf::IndiElement( "integrator", pcf::IndiElement::On ) );
+    }
+
+    /// Build an INDI property update for the timing-source callback.
+    pcf::IndiProperty makeTimingSourceUpdate( const bool useSemaphore /**< [in] true selects semaphore timing, false selects integrator timing */ )
+    {
+        pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+        ip.setName( "timingSource" );
+        ip.add( pcf::IndiElement( "semaphore" ) );
+        ip["semaphore"].setSwitchState( useSemaphore ? pcf::IndiElement::On : pcf::IndiElement::Off );
+        ip.add( pcf::IndiElement( "integrator" ) );
+        ip["integrator"].setSwitchState( useSemaphore ? pcf::IndiElement::Off : pcf::IndiElement::On );
+        return ip;
+    }
+
     /// Initialize the timing-diagnostics INDI property used by diagnostics tests.
     void setupTimingDiagnosticsProperty()
     {
@@ -267,6 +289,7 @@ TEST_CASE( "mcp3208Ctrl Doxygen references are preserved", "[mcp3208Ctrl]" )
     app.setupFpsSourceProperty();
     app.setupAlphaProperty();
     app.setupSynchroDelayProperty();
+    app.setupTimingSourceProperty();
 
     XWCTEST_DOXYGEN_REF( app.loadConfigImpl( app.config ) );
     XWCTEST_DOXYGEN_REF( app.configureAcquisition() );
@@ -282,8 +305,10 @@ TEST_CASE( "mcp3208Ctrl Doxygen references are preserved", "[mcp3208Ctrl]" )
     XWCTEST_DOXYGEN_REF( app.setCallBack_m_indiP_fpsSource( app.makeFpsSourceUpdate( 1000.0 ) ) );
     XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_alpha( app.makeAlphaUpdate( 0.01 ) ) );
     XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_synchroDelay( app.makeSynchroDelayUpdate( 1.0 ) ) );
+    XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_timingSource( app.makeTimingSourceUpdate( true ) ) );
     XWCTEST_DOXYGEN_REF( app.updateTriggerTiming( timespec{} ) );
     XWCTEST_DOXYGEN_REF( app.updateTimingDiagnosticsIndi() );
+    XWCTEST_DOXYGEN_REF( app.updateTimingSourceIndi() );
     XWCTEST_DOXYGEN_REF( app.delayBeforeRead() );
     XWCTEST_DOXYGEN_REF( app.updateSynchroDelayController( 0.0 ) );
     XWCTEST_DOXYGEN_REF( app.timespecToNs( timespec{} ) );
@@ -319,6 +344,9 @@ TEST_CASE( "mcp3208Ctrl configuration defaults load synchronized settings", "[mc
     REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
     REQUIRE( app.m_wfs_fps == Approx( static_cast<double>( app.m_fps ) ) );
+    REQUIRE( app.m_timingSource == mcp3208Ctrl::TimingSource::Integrator );
+    REQUIRE( app.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Integrator );
+    REQUIRE( app.m_semaphoreFallbackActive == false );
 }
 
 /// Verify synchronized-acquisition overrides load from configuration.
@@ -372,6 +400,9 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
     REQUIRE( app.m_synchroDelayTarget == Approx( 17000.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 17000.0f ) );
     REQUIRE( app.m_wfs_fps == Approx( static_cast<double>( app.m_fps ) ) );
+    REQUIRE( app.m_timingSource == mcp3208Ctrl::TimingSource::Semaphore );
+    REQUIRE( app.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Semaphore );
+    REQUIRE( app.m_semaphoreFallbackActive == false );
 }
 
 /// Verify the user fps callback still updates cadence metadata.
@@ -476,6 +507,32 @@ TEST_CASE( "mcp3208Ctrl synchroDelay callback updates signed offsets", "[mcp3208
     REQUIRE( app.m_delayModel_ns == Approx( 120000.0 ) );
 }
 
+/// Verify timing-source callback selects runtime mode and requests immediate reconfiguration.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl timingSource callback updates mode and reconfig state", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.setupTimingSourceProperty();
+    app.m_synchroShmimName = "";
+    app.m_reconfig         = false;
+
+    REQUIRE( app.newCallBack_m_indiP_timingSource( app.makeTimingSourceUpdate( true ) ) == 0 );
+    REQUIRE( app.m_timingSource == mcp3208Ctrl::TimingSource::Semaphore );
+    REQUIRE( app.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Integrator );
+    REQUIRE( app.m_semaphoreFallbackActive == true );
+    REQUIRE( app.m_reconfig == true );
+
+    app.m_reconfig = false;
+    REQUIRE( app.newCallBack_m_indiP_timingSource( app.makeTimingSourceUpdate( false ) ) == 0 );
+    REQUIRE( app.m_timingSource == mcp3208Ctrl::TimingSource::Integrator );
+    REQUIRE( app.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Integrator );
+    REQUIRE( app.m_semaphoreFallbackActive == false );
+    REQUIRE( app.m_reconfig == true );
+}
+
 /// Verify synchronized-mode timing diagnostics publish loop state and derived error.
 /**
  * \ingroup mcp3208Ctrl_unit_test
@@ -485,7 +542,8 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     mcp3208Ctrl_test app;
 
     app.setupTimingDiagnosticsProperty();
-    app.m_synchroShmimName      = "camwfs_sync";
+    app.m_timingSource          = mcp3208Ctrl::TimingSource::Semaphore;
+    app.m_effectiveTimingSource = mcp3208Ctrl::TimingSource::Semaphore;
     app.m_avgReadLatency_ns     = 125000.0;
     app.m_synchroDelay          = 31000.0f;
     app.m_synchroDelayTarget    = 17000.0f;
@@ -543,7 +601,8 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
     mcp3208Ctrl_test app;
 
     app.setupTimingDiagnosticsProperty();
-    app.m_synchroShmimName = "camwfs_sync";
+    app.m_timingSource        = mcp3208Ctrl::TimingSource::Semaphore;
+    app.m_effectiveTimingSource = mcp3208Ctrl::TimingSource::Semaphore;
     app.m_atime              = timespec{ 1, 2 };
     app.m_triggerInterval_ns = 123456.0;
     app.updateTimingDiagnosticsIndi();
@@ -560,7 +619,8 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics track mode transitions", "[mcp3208Ctr
     REQUIRE( app.m_indiP_timingDiag["sync_producer_frame_id"].get<double>() == Approx( 0.0 ) );
     REQUIRE( app.m_indiP_timingDiag["sync_producer_frame_delta"].get<double>() == Approx( 0.0 ) );
 
-    app.m_synchroShmimName.clear();
+    app.m_timingSource          = mcp3208Ctrl::TimingSource::Integrator;
+    app.m_effectiveTimingSource = mcp3208Ctrl::TimingSource::Integrator;
     app.m_triggerInterval_ns = 456789.0;
     app.updateTimingDiagnosticsIndi();
 
@@ -586,7 +646,8 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics compute wrapped phase error and lock 
     mcp3208Ctrl_test app;
 
     app.setupTimingDiagnosticsProperty();
-    app.m_synchroShmimName        = "camwfs_sync";
+    app.m_timingSource            = mcp3208Ctrl::TimingSource::Semaphore;
+    app.m_effectiveTimingSource   = mcp3208Ctrl::TimingSource::Semaphore;
     app.m_delayApplied_ns         = 50.0;
     app.m_delayModel_ns           = 900.0;
     app.m_wfsPeriodMeasured_ns    = 1000.0;
@@ -915,6 +976,41 @@ TEST_CASE( "mcp3208Ctrl timer mode reads configured channels", "[mcp3208Ctrl]" )
     REQUIRE( stubState().m_readOrder == std::vector<int>( { 0, 1, 2 } ) );
 }
 
+/// Verify timer mode dispatch remains in integrator timing even when synchro stream metadata is present.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl timingSource dispatch prefers integrator mode over synchro stream name", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+    sem_t            semaphore;
+
+    resetStubState();
+    stubState().m_channelValues = { 31 };
+
+    REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
+
+    app.m_synchroShmimName   = "camwfs_sync";
+    app.m_timingSource       = mcp3208Ctrl::TimingSource::Integrator;
+    app.m_effectiveTimingSource = mcp3208Ctrl::TimingSource::Semaphore;
+    app.m_numChannels        = 1;
+    app.m_values.assign( 1, 0 );
+    app.m_synchroSemaphore   = &semaphore;
+    app.m_synchroStreamOpen  = true;
+    app.m_trigger            = 0.0f;
+    app.m_gain               = 0.0f;
+    app.m_time_start         = std::chrono::high_resolution_clock::now();
+
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+    REQUIRE( app.m_timingSource == mcp3208Ctrl::TimingSource::Integrator );
+    REQUIRE( app.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Integrator );
+    REQUIRE( app.m_firstSemaphore == true );
+    REQUIRE( app.m_values == std::vector<uint16_t>( { 31 } ) );
+    REQUIRE( stubState().m_readOrder == std::vector<int>( { 0 } ) );
+
+    REQUIRE( sem_destroy( &semaphore ) == 0 );
+}
+
 /// Verify timer-mode trigger interval diagnostics initialize then report measured intervals.
 /**
  * \ingroup mcp3208Ctrl_unit_test
@@ -970,7 +1066,7 @@ TEST_CASE( "mcp3208Ctrl loadImageIntoStream updates frame mapping counters", "[m
     REQUIRE( app.m_localFrameSeq == 1 );
     REQUIRE( app.m_syncFramesWritten == 0 );
 
-    app.m_synchroShmimName = "camwfs_sync";
+    app.m_effectiveTimingSource = mcp3208Ctrl::TimingSource::Semaphore;
     REQUIRE( app.loadImageIntoStream( dest.data() ) == 0 );
     REQUIRE( app.m_localFrameSeq == 2 );
     REQUIRE( app.m_syncFramesWritten == 1 );
@@ -991,10 +1087,12 @@ TEST_CASE( "mcp3208Ctrl synchronized mode reads on semaphore wake", "[mcp3208Ctr
     REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
     REQUIRE( sem_post( &semaphore ) == 0 );
 
-    app.m_synchroShmimName = "camwfs_sync";
-    app.m_numChannels      = 3;
+    app.m_synchroShmimName   = "camwfs_sync";
+    app.m_timingSource       = mcp3208Ctrl::TimingSource::Semaphore;
+    app.m_numChannels        = 3;
     app.m_values.assign( 3, 0 );
     app.m_synchroSemaphore   = &semaphore;
+    app.m_synchroStreamOpen  = true;
     app.m_synchroDelay       = 0;
     app.m_synchroDelayTarget = 0;
     app.m_gain               = 0;
@@ -1029,10 +1127,12 @@ TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata"
 
     REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
 
-    app.m_synchroShmimName = "camwfs_sync";
-    app.m_numChannels      = 1;
+    app.m_synchroShmimName   = "camwfs_sync";
+    app.m_timingSource       = mcp3208Ctrl::TimingSource::Semaphore;
+    app.m_numChannels        = 1;
     app.m_values.assign( 1, 0 );
     app.m_synchroSemaphore = &semaphore;
+    app.m_synchroStreamOpen = true;
     app.m_synchroStream.md = &metadata;
     app.m_synchroDelay     = 0.0f;
     app.m_synchroDelayTarget = 0.0f;
@@ -1119,9 +1219,11 @@ TEST_CASE( "mcp3208Ctrl synchronized read latency EMA initializes and smooths", 
     REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
 
     app.m_synchroShmimName   = "camwfs_sync";
+    app.m_timingSource       = mcp3208Ctrl::TimingSource::Semaphore;
     app.m_numChannels        = 1;
     app.m_values.assign( 1, 0 );
     app.m_synchroSemaphore   = &semaphore;
+    app.m_synchroStreamOpen  = true;
     app.m_synchroDelayTarget = 0.0f;
     app.m_synchroDelay       = 0.0f;
     app.m_gain               = 0.0f;
@@ -1166,9 +1268,11 @@ TEST_CASE( "mcp3208Ctrl synchronized non-delay service EMA uses global alpha", "
     REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
 
     app.m_synchroShmimName      = "camwfs_sync";
+    app.m_timingSource          = mcp3208Ctrl::TimingSource::Semaphore;
     app.m_numChannels           = 1;
     app.m_values.assign( 1, 0 );
     app.m_synchroSemaphore      = &semaphore;
+    app.m_synchroStreamOpen     = true;
     app.m_synchroDelayTarget    = 0.0f;
     app.m_synchroDelay          = 0.0f;
     app.m_gain                  = 0.0f;
@@ -1211,9 +1315,11 @@ TEST_CASE( "mcp3208Ctrl synchronized delay controller uses read latency EMA", "[
     REQUIRE( sem_post( &semaphore ) == 0 );
 
     app.m_synchroShmimName   = "camwfs_sync";
+    app.m_timingSource       = mcp3208Ctrl::TimingSource::Semaphore;
     app.m_numChannels        = 1;
     app.m_values.assign( 1, 0 );
     app.m_synchroSemaphore   = &semaphore;
+    app.m_synchroStreamOpen  = true;
     app.m_synchroDelayTarget = 0.0f;
     app.m_synchroDelay       = 2000000.0f;
     app.m_gain               = 1.0f;
@@ -1253,9 +1359,11 @@ TEST_CASE( "mcp3208Ctrl synchronized delay controller clamps to zero", "[mcp3208
     REQUIRE( sem_post( &semaphore ) == 0 );
 
     app.m_synchroShmimName   = "camwfs_sync";
+    app.m_timingSource       = mcp3208Ctrl::TimingSource::Semaphore;
     app.m_numChannels        = 1;
     app.m_values.assign( 1, 0 );
     app.m_synchroSemaphore   = &semaphore;
+    app.m_synchroStreamOpen  = true;
     app.m_synchroDelayTarget = 0.0f;
     app.m_synchroDelay       = 1000.0f;
     app.m_gain               = 1.0f;
@@ -1292,30 +1400,33 @@ TEST_CASE( "mcp3208Ctrl synchronized delay controller applies anti-windup at cap
     REQUIRE( app.m_synchroDelay == Approx( 60000.0f ) );
 }
 
-/// Verify synchronized timeout requests reconfiguration when the trigger stream is stale.
+/// Verify unavailable semaphore timing falls back to internal timer acquisition.
 /**
  * \ingroup mcp3208Ctrl_unit_test
  */
-TEST_CASE( "mcp3208Ctrl synchronized timeout requests reconfig for a stale stream", "[mcp3208Ctrl]" )
+TEST_CASE( "mcp3208Ctrl semaphore mode falls back to timer when synchronization is unavailable", "[mcp3208Ctrl]" )
 {
     mcp3208Ctrl_test app;
-    sem_t            semaphore;
 
     resetStubState();
+    stubState().m_channelValues = { 7, 8 };
 
-    REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
+    app.m_synchroShmimName   = "camwfs_sync";
+    app.m_timingSource       = mcp3208Ctrl::TimingSource::Semaphore;
+    app.m_numChannels        = 2;
+    app.m_values.assign( 2, 0 );
+    app.m_synchroSemaphore   = nullptr;
+    app.m_synchroStreamOpen  = false;
+    app.m_trigger            = 0.0f;
+    app.m_gain               = 0.0f;
+    app.m_time_start         = std::chrono::high_resolution_clock::now();
 
-    app.m_synchroShmimName  = "camwfs_sync";
-    app.m_values            = { 7, 8 };
-    app.m_synchroSemaphore  = &semaphore;
-    app.m_synchroStreamOpen = false;
-
-    REQUIRE( app.acquireAndCheckValid() == 1 );
-    REQUIRE( app.m_reconfig == true );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+    REQUIRE( app.m_timingSource == mcp3208Ctrl::TimingSource::Semaphore );
+    REQUIRE( app.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Integrator );
+    REQUIRE( app.m_semaphoreFallbackActive == true );
     REQUIRE( app.m_values == std::vector<uint16_t>( { 7, 8 } ) );
-    REQUIRE( stubState().m_readOrder.empty() );
-
-    REQUIRE( sem_destroy( &semaphore ) == 0 );
+    REQUIRE( stubState().m_readOrder == std::vector<int>( { 0, 1 } ) );
 }
 
 /// Verify stale-stream detection notices a missing synchronization stream backing file.
