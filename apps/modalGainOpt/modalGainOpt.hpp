@@ -1416,6 +1416,8 @@ class modalGainOpt : public MagAOXApp<true>,
 
     int recordTelem( const telem_modalgainopt * );
 
+    int recordModalGainOpt( bool force = false );
+
     ///@}
 
     ///@}
@@ -2679,6 +2681,17 @@ inline int modalGainOpt::checkRecordTimes()
 
 inline int modalGainOpt::recordTelem( const telem_modalgainopt * )
 {
+    return recordModalGainOpt( true );
+}
+
+inline int modalGainOpt::recordModalGainOpt( bool force )
+{
+    static bool lastAutoUpdate{ false };
+    static bool lastOpticalGainUpdate{ false };
+    static float lastOpticalGain{ -1e6F };
+    static float lastGainGain{ -1e6F };
+    static float lastGainLeak{ -1e6F };
+
     bool autoUpdate = false;
     bool opticalGainUpdate = false;
     float opticalGain = 0;
@@ -2694,7 +2707,17 @@ inline int modalGainOpt::recordTelem( const telem_modalgainopt * )
         gainLeak = m_gainLeak;
     }
 
-    telem<telem_modalgainopt>( { autoUpdate, opticalGainUpdate, opticalGain, gainGain, gainLeak } );
+    if( force || autoUpdate != lastAutoUpdate || opticalGainUpdate != lastOpticalGainUpdate ||
+        opticalGain != lastOpticalGain || gainGain != lastGainGain || gainLeak != lastGainLeak )
+    {
+        lastAutoUpdate = autoUpdate;
+        lastOpticalGainUpdate = opticalGainUpdate;
+        lastOpticalGain = opticalGain;
+        lastGainGain = gainGain;
+        lastGainLeak = gainLeak;
+
+        telem<telem_modalgainopt>( { autoUpdate, opticalGainUpdate, opticalGain, gainGain, gainLeak } );
+    }
 
     return 0;
 }
@@ -5413,24 +5436,29 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_autoUpdate )
 
     if( ipRecv.find( "toggle" ) )
     {
-        std::lock_guard<std::mutex> lock( m_goptMutex );
+        recordModalGainOpt( false );
+        {
+            std::lock_guard<std::mutex> lock( m_goptMutex );
 
-        if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
-        {
-            if( !m_autoUpdate )
+            if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
             {
-                log<text_log>( "updating gains", logPrio::LOG_NOTICE );
+                if( !m_autoUpdate )
+                {
+                    log<text_log>( "updating gains", logPrio::LOG_NOTICE );
+                }
+                m_autoUpdate = true;
             }
-            m_autoUpdate = true;
-        }
-        else
-        {
-            if( m_autoUpdate )
+            else
             {
-                log<text_log>( "stopped updating gains", logPrio::LOG_NOTICE );
+                if( m_autoUpdate )
+                {
+                    log<text_log>( "stopped updating gains", logPrio::LOG_NOTICE );
+                }
+                m_autoUpdate = false;
             }
-            m_autoUpdate = false;
         }
+
+        recordModalGainOpt( false );
     }
 
     return 0;
@@ -5493,9 +5521,13 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGain )
     }
 
     { // mutex scope
+        recordModalGainOpt( false );
+
         std::lock_guard<std::mutex> lock( m_goptMutex );
         m_opticalGain = sqrt( target );
     }
+
+    recordModalGainOpt( false );
 
     return 0;
 }
@@ -5507,21 +5539,26 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGainUpdate )
 
     if( ipRecv.find( "toggle" ) )
     {
-        std::lock_guard<std::mutex> lock( m_goptMutex );
-
-        if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
+        recordModalGainOpt( false );
         {
-            m_opticalGainUpdate = false;
-        }
-        else
-        {
-            m_opticalGainUpdate = true;
+            std::lock_guard<std::mutex> lock( m_goptMutex );
 
-            if( m_opticalGainSource > 0 && m_opticalGainSource < 1 )
+            if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
             {
-                m_opticalGain = m_opticalGainSource;
+                m_opticalGainUpdate = false;
+            }
+            else
+            {
+                m_opticalGainUpdate = true;
+
+                if( m_opticalGainSource > 0 && m_opticalGainSource < 1 )
+                {
+                    m_opticalGain = m_opticalGainSource;
+                }
             }
         }
+
+        recordModalGainOpt( false );
     }
 
     return 0;
@@ -5534,21 +5571,26 @@ INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGainSource )
 
     if( ipRecv.find( m_opticalGainElement ) )
     {
-        std::lock_guard<std::mutex> lock( m_goptMutex );
-
-        float opticalg = ipRecv[m_opticalGainElement].get<float>();
-
-        opticalg = ( floor( opticalg * 100 + 0.5 ) ) / 100.;
-
-        if( opticalg > 0 && opticalg < 1 )
+        recordModalGainOpt( false );
         {
-            m_opticalGainSource = opticalg;
+            std::lock_guard<std::mutex> lock( m_goptMutex );
+
+            float opticalg = ipRecv[m_opticalGainElement].get<float>();
+
+            opticalg = ( floor( opticalg * 100 + 0.5 ) ) / 100.;
+
+            if( opticalg > 0 && opticalg < 1 )
+            {
+                m_opticalGainSource = opticalg;
+            }
+
+            if( m_opticalGainUpdate )
+            {
+                m_opticalGain = m_opticalGainSource;
+            }
         }
 
-        if( m_opticalGainUpdate )
-        {
-            m_opticalGain = m_opticalGainSource;
-        }
+        recordModalGainOpt( false );
     }
     return 0;
 }
@@ -5566,9 +5608,13 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_gainGain )
     }
 
     { // mutex scope
+        recordModalGainOpt( false );
+
         std::lock_guard<std::mutex> lock( m_goptMutex );
         m_gainGain = target;
     }
+
+    recordModalGainOpt( false );
 
     return 0;
 }
@@ -5586,9 +5632,13 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_gainLeak )
     }
 
     { // mutex scope
+        recordModalGainOpt( false );
+
         std::lock_guard<std::mutex> lock( m_goptMutex );
         m_gainLeak = target;
     }
+
+    recordModalGainOpt( false );
 
     return 0;
 }
@@ -6407,6 +6457,7 @@ INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_loop )
     if( ipRecv.find( "toggle" ) )
     {
         bool state;
+        bool changed{ false };
 
         if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
         {
@@ -6419,6 +6470,8 @@ INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_loop )
 
         if( state != m_loop )
         {
+            changed = true;
+            recordModalGainOpt( false );
             m_updating = true;
             std::lock_guard<std::mutex> lock( m_goptMutex );
             m_updating = true;
@@ -6434,6 +6487,11 @@ INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_loop )
             m_sinceChange = -1;
             m_updating = false;
             std::cerr << "Got loop: " << m_loop << '\n';
+        }
+
+        if( changed )
+        {
+            recordModalGainOpt( false );
         }
     }
 
