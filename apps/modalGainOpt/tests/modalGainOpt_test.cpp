@@ -1290,15 +1290,16 @@ TEST_CASE( "modalPsdProcessor repairs trailing high-frequency dropout runs", "[m
     std::vector<float> processPsd{ 10.0F, 9.0F, 8.0F, 1.0e-8F, 1.0e-8F, 1.0e-8F };
     std::vector<float> freq{ 0.0F, 10.0F, 20.0F, 30.0F, 40.0F, 50.0F };
 
-    mx::error_t errc = processPsdProcessorHarness::fillProcessPsdDropouts( processPsd, freq, {}, 0.2F, 1.0e-6F, 4 );
+    mx::error_t errc =
+        processPsdProcessorHarness::fillProcessPsdDropouts( processPsd, freq, {}, 0.2F, 1.0e-6F, 4, 1.0F );
 
     REQUIRE( !errc );
     REQUIRE( processPsd[3] > 1.0F );
     REQUIRE( processPsd[4] > 1.0F );
     REQUIRE( processPsd[5] > 1.0F );
-    REQUIRE( processPsd[3] == Approx( 8.0F ) );
-    REQUIRE( processPsd[4] == Approx( 8.0F ) );
-    REQUIRE( processPsd[5] == Approx( 8.0F ) );
+    REQUIRE( processPsd[3] == Approx( 16.0F / 3.0F ) );
+    REQUIRE( processPsd[4] == Approx( 4.0F ) );
+    REQUIRE( processPsd[5] == Approx( 3.2F ) );
 }
 
 TEST_CASE( "modalPsdProcessor keeps trailing dropout repair bounded when the "
@@ -1308,12 +1309,13 @@ TEST_CASE( "modalPsdProcessor keeps trailing dropout repair bounded when the "
     std::vector<float> processPsd{ 1.0F, 2.0F, 4.0F, 1.0e-8F, 1.0e-8F, 1.0e-8F };
     std::vector<float> freq{ 0.0F, 10.0F, 20.0F, 30.0F, 40.0F, 50.0F };
 
-    mx::error_t errc = processPsdProcessorHarness::fillProcessPsdDropouts( processPsd, freq, {}, 0.2F, 1.0e-6F, 4 );
+    mx::error_t errc =
+        processPsdProcessorHarness::fillProcessPsdDropouts( processPsd, freq, {}, 0.2F, 1.0e-6F, 4, 1.0F );
 
     REQUIRE( !errc );
-    REQUIRE( processPsd[3] == Approx( 4.0F ) );
-    REQUIRE( processPsd[4] == Approx( 4.0F ) );
-    REQUIRE( processPsd[5] == Approx( 4.0F ) );
+    REQUIRE( processPsd[3] == Approx( 8.0F / 3.0F ) );
+    REQUIRE( processPsd[4] == Approx( 2.0F ) );
+    REQUIRE( processPsd[5] == Approx( 1.6F ) );
 }
 
 TEST_CASE( "modalPsdProcessor does not treat a sharp post-peak decline as a "
@@ -1323,7 +1325,8 @@ TEST_CASE( "modalPsdProcessor does not treat a sharp post-peak decline as a "
     std::vector<float> processPsd{ 1.0e-4F, 1.0e-6F, 1.0e-8F, 1.0e-8F, 1.0e-8F };
     std::vector<float> freq{ 0.0F, 10.0F, 20.0F, 30.0F, 40.0F };
 
-    mx::error_t errc = processPsdProcessorHarness::fillProcessPsdDropouts( processPsd, freq, {}, 0.2F, 1.0e-6F, 4 );
+    mx::error_t errc =
+        processPsdProcessorHarness::fillProcessPsdDropouts( processPsd, freq, {}, 0.2F, 1.0e-6F, 4, 1.0F );
 
     REQUIRE( !errc );
     REQUIRE( processPsd[2] == Approx( 1.0e-8F ) );

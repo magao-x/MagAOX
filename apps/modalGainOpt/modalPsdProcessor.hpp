@@ -727,10 +727,11 @@ class modalPsdProcessor
     fillProcessPsdDropouts( std::vector<realT> &processPsd,               /**< [in.out] the disturbance PSD */
                             const std::vector<realT> &freq,               /**< [in] the one-sided frequency grid */
                             const std::vector<unsigned char> &repairMask, /**< [in] repair-eligible bins */
-                            realT gapFactor,  /**< [in] the threshold used to identify dropout bins */
-                            realT tinyFactor, /**< [in] the factor below the local good-bin scale
-                                                 required for a true dropout */
-                            size_t maxGapBins /**< [in] the maximum repaired gap length */
+                            realT gapFactor,    /**< [in] the threshold used to identify dropout bins */
+                            realT tinyFactor,   /**< [in] the factor below the local good-bin scale
+                                                   required for a true dropout */
+                            size_t maxGapBins,  /**< [in] the maximum repaired gap length */
+                            realT powerLawIndex /**< [in] the power-law exponent used to continue a trailing gap */
     );
 };
 
@@ -976,7 +977,8 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                        {},
                                        effectiveConfig.m_dropoutGapFactor,
                                        effectiveConfig.m_dropoutTinyFactor,
-                                       effectiveConfig.m_dropoutMaxBins );
+                                       effectiveConfig.m_dropoutMaxBins,
+                                       effectiveConfig.m_powerLawIndex );
         if( !!errc )
         {
             return errc;
@@ -1137,7 +1139,8 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                        processRepairMask,
                                        effectiveConfig.m_dropoutGapFactor,
                                        effectiveConfig.m_dropoutTinyFactor,
-                                       effectiveConfig.m_dropoutMaxBins );
+                                       effectiveConfig.m_dropoutMaxBins,
+                                       result.m_powerLawIndex );
         if( !!errc )
         {
             return errc;
@@ -1234,7 +1237,8 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                            processRepairMask,
                                            effectiveConfig.m_dropoutGapFactor,
                                            effectiveConfig.m_dropoutTinyFactor,
-                                           effectiveConfig.m_dropoutMaxBins );
+                                           effectiveConfig.m_dropoutMaxBins,
+                                           result.m_powerLawIndex );
             if( !!errc )
             {
                 return errc;
@@ -3057,7 +3061,8 @@ mx::error_t modalPsdProcessor<realT>::fillProcessPsdDropouts( std::vector<realT>
                                                               const std::vector<unsigned char> &repairMask,
                                                               realT gapFactor,
                                                               realT tinyFactor,
-                                                              size_t maxGapBins )
+                                                              size_t maxGapBins,
+                                                              realT powerLawIndex )
 {
     if( processPsd.size() < 3 )
     {
@@ -3293,18 +3298,14 @@ mx::error_t modalPsdProcessor<realT>::fillProcessPsdDropouts( std::vector<realT>
                 continue;
             }
 
-            realT xLeft = log10( std::max( freq[start - 2], refFreq ) );
-            realT xRight = log10( std::max( freq[start - 1], refFreq ) );
-            if( xRight <= xLeft )
-            {
-                xRight = xLeft + static_cast<realT>( 1 );
-            }
-
             realT yRight = log10( std::max( sourcePsd[start - 1], tiny ) );
 
             for( size_t fill = start; fill < sourcePsd.size(); ++fill )
             {
-                realT fillValue = pow( static_cast<realT>( 10 ), yRight );
+                realT useFreq = std::max( freq[fill], refFreq );
+                realT lastGoodFreq = std::max( freq[start - 1], refFreq );
+                realT fillValue =
+                    pow( static_cast<realT>( 10 ), yRight ) * pow( lastGoodFreq / useFreq, powerLawIndex );
                 changed = changed || fillValue != updatedPsd[fill];
                 updatedPsd[fill] = std::max( fillValue, tiny );
             }
