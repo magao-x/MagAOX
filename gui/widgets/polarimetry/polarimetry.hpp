@@ -499,15 +499,15 @@ void polarimetry::updateGUI()
 
    if (m_sequencing)
    {
-      ui.hwpPosIndex->setText(QString("%1 / 4").arg(m_hwpPosIndex + 1, 0, 'd'));
+      ui.hwpPosIndex->setText(QString("%1 / 4").arg(m_hwpPosIndex + 1));
 
       if (m_numCycles > 0)
       {
-         ui.cycleNumStatus->setText(QString("%1 / %2").arg(m_curCycle, 0, 'd').arg(m_numCycles, 0, 'd'));
+         ui.cycleNumStatus->setText(QString("%1 / %2").arg(m_curCycle).arg(m_numCycles));
       }
       else
       {
-         ui.cycleNumStatus->setText(QString("%1").arg(m_curCycle, 0, 'd'));
+         ui.cycleNumStatus->setText(QString("%1").arg(m_curCycle));
       }
    }
    else
