@@ -1828,16 +1828,12 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
         config( m_default_bin_y, "camera.default_bin_y" );
 
         // If default is not setup properly, it defaults to full
-        if( m_default_x == 0 || m_default_y == 0 || m_default_w == 0 || m_default_h == 0 || m_default_bin_x < 1 ||
-            m_default_bin_y < 1 )
-        {
-            m_default_x     = m_full_x;
-            m_default_y     = m_full_y;
-            m_default_w     = m_full_w;
-            m_default_h     = m_full_h;
-            m_default_bin_x = m_default_bin_x;
-            m_default_bin_y = m_default_bin_y;
-        }
+        if( m_default_x == 0 ) m_default_x = m_full_x;
+        if( m_default_y == 0 ) m_default_y = m_full_y;
+        if( m_default_w == 0 ) m_default_w = m_full_w;
+        if( m_default_h == 0 ) m_default_h = m_full_h;
+        if( m_default_bin_x < 1 ) m_default_bin_x = m_full_bin_x;
+        if( m_default_bin_y < 1 ) m_default_bin_y = m_full_bin_y;
 
         // now always start with current and next set to default
 
