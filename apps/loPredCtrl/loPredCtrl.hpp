@@ -101,6 +101,7 @@ using namespace mx::improc;
     bool is_std_learning {false};
     bool is_predictive_control {false};
     bool is_integrating {false};
+    bool own_shmim {true};
 
     double loop_time_elapsed {0.0};
 
@@ -297,15 +298,13 @@ using namespace mx::improc;
      config.add("parameters.future", "", "parameters.future", argType::Required, "parameters", "future", false, "int", "The number of future steps that are predicted.");
 
      config.add("parameters.qrd", "", "parameters.qrd", argType::Required, "parameters", "qrd", false, "bool", "The use QRD-RLS or Classic RLS.");
+     config.add("parameters.own_shmim", "", "parameters.own_shmim", argType::Required, "parameters", "own_shmim", false, "bool", "Does the predictive control own the output shmim or not.");
+     config.add("parameters.is_integrating", "", "parameters.is_integrating", argType::Required, "parameters", "is_integrating", false, "bool", "Whether the control signal is integrated or not.");
  }
 
  inline int loPredCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
  {
-     shmimMonitorT::loadConfig( config );
-
-    frameGrabberT::m_ownShmim = true;
-    FRAMEGRABBER_LOAD_CONFIG(_config);
-    TELEMETER_LOAD_CONFIG(_config);
+    shmimMonitorT::loadConfig( config );
 
     _config(m_fpsSource, "parameters.fpsSource");
 
@@ -318,6 +317,12 @@ using namespace mx::improc;
     _config(m_history, "parameters.history");
     _config(m_future, "parameters.future");
     _config(use_qrd, "parameters.qrd");
+    _config(own_shmim, "parameters.own_shmim");
+    _config(is_integrating, "parameters.is_integrating");
+
+    frameGrabberT::m_ownShmim = own_shmim;
+    FRAMEGRABBER_LOAD_CONFIG(_config);
+    TELEMETER_LOAD_CONFIG(_config);
 
 	std::cout << "Gain " << m_gainCtrl << std::endl;
     std::cout << "Regularization " << m_regularizationCtrl << std::endl;
