@@ -260,7 +260,7 @@ class TestTomlWriter:
         assert "comp=Or" in conf
 
     def test_topological_order(self):
-        """ruleComp rules should appear after their children."""
+        """Rulecomp rules should appear after their children."""
         tree = StateRuleTree(rules=[
             Rule(name="top", rule_type=RuleType.ruleComp, comparison=Comparison.And,
                  rule1="mid", rule2="leaf-c"),

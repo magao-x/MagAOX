@@ -1,5 +1,4 @@
-"""
-Parser for .drawio / .xml diagrams into StateRuleTree models.
+"""Parser for .drawio / .xml diagrams into StateRuleTree models.
 
 Draw.io Diagram Conventions
 ===========================
@@ -79,8 +78,9 @@ from __future__ import annotations
 
 import html
 import re
-import xml.etree.ElementTree as ET
 from pathlib import Path
+
+import defusedxml.ElementTree as ET
 from typing import Union
 
 from .models import (
@@ -358,6 +358,7 @@ def parse_drawio(source: Union[str, Path]) -> StateRuleTree:
     ------
     ValueError
         On parse errors, missing fields, or invalid graph structure.
+
     """
     xml_str = _load_xml_source(source)
     tree = ET.fromstring(xml_str)

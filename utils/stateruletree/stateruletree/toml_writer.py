@@ -1,6 +1,4 @@
-"""
-TOML writer for stateRuleEngine rules.
-"""
+"""TOML writer for stateRuleEngine rules."""
 
 from __future__ import annotations
 
@@ -97,6 +95,7 @@ def rules_to_conf_string(tree: StateRuleTree) -> str:
     -------
     str
         The .conf file content.
+
     """
     tree.validate()
 
@@ -122,6 +121,7 @@ def write_conf(tree: StateRuleTree, output: Union[str, Path]):
         The state rule tree to write.
     output : str or Path
         Output file path.
+
     """
     content = rules_to_conf_string(tree)
     Path(output).write_text(content, encoding="utf-8")

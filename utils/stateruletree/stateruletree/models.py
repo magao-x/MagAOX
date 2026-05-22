@@ -1,7 +1,6 @@
-"""
-Data models for stateRuleEngine rules.
+"""Data models for stateRuleEngine rules.
 
-These mirror the rule types in indiCompRules.hpp 
+These mirror the rule types in indiCompRules.hpp
 """
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ from typing import Optional
 
 class RuleType(Enum):
     """Rule types matching indiCompRules.hpp ruleType names."""
+
     numVal = "numVal"
     txtVal = "txtVal"
     swVal = "swVal"
@@ -25,6 +25,7 @@ class RuleType(Enum):
 
 class Comparison(Enum):
     """Comparison operators matching indiCompRules.hpp ruleComparison."""
+
     Eq = "Eq"
     Neq = "Neq"
     Lt = "Lt"
@@ -43,6 +44,7 @@ class Comparison(Enum):
 
 class Priority(Enum):
     """Reporting priorities matching indiCompRules.hpp rulePriority."""
+
     none = "none"
     info = "info"
     caution = "caution"
