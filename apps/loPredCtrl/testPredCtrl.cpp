@@ -81,13 +81,13 @@ int main(int argc, char **argv){
     }
 
     DDSPC::realT gain = -0.5;
-    DDSPC::realT gamma = 0.998;
+    DDSPC::realT gamma = 1.000;
     DDSPC::realT initial_regularization = 100.0;
-    DDSPC::realT initial_covariance = 1.0;
+    DDSPC::realT initial_covariance = 1e-5;
 
     int num_history = 25;
-    int num_future = 3;
-    int num_actuators = 3;
+    int num_future = 2;
+    int num_actuators = 1;
 
     DDSPC::Matrix measurement;
     measurement.resize(num_actuators,1);
@@ -147,10 +147,10 @@ int main(int argc, char **argv){
             signal[k][i+1] = signal[k][i] + gain * err[k][i] + exploration_noise(k, 0);
 
             err_pc[k][i] = x[i] + signal_pc[k][i];
-            measurement(k,0) = err_pc[k][i] + 0.0001 * distribution(generator);
+            measurement(k,0) = err_pc[k][i] + 0. * distribution(generator);
 
             err_pc_qrd[k][i] = x[i] + signal_pc_qrd[k][i];
-            measurement_qrd(k,0) = err_pc_qrd[k][i] + 0.0001 * distribution(generator);
+            measurement_qrd(k,0) = err_pc_qrd[k][i] + 0. * distribution(generator);
         }
        
         begin = std::chrono::steady_clock::now();
