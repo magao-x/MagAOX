@@ -34,14 +34,14 @@ int main(int argc, char **argv){
     DDSPC::RecursiveLeastSquares rls = DDSPC::RecursiveLeastSquares(n, m, forgetting_factor, delta);
     DDSPC::QRDRecursiveLeastSquares qrd_rls = DDSPC::QRDRecursiveLeastSquares(n, m, forgetting_factor, delta);
     
-    for(int j=0; j < 10000; j++){
+    for(int j=0; j < 200; j++){
         DDSPC::Matrix x = DDSPC::Matrix::Random(m, 1);
         DDSPC::Matrix y = W_true * x + 0.01 * DDSPC::Matrix::Random(n, 1); // Add some noise
   
         rls.update(&x, &y);
         qrd_rls.update(&x, &y);
 
-        if(j % 1000 == 0 & j > 0){
+        if(j % 20 == 0){
             std::cout << "RLS error norm: " << (rls.prediction_matrix - W_true).norm() << std::endl;
             std::cout << "QRD RLS error norm: " << (qrd_rls.prediction_matrix - W_true).norm() << std::endl;
         }
