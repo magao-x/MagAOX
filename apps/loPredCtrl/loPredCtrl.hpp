@@ -108,7 +108,7 @@ struct accelShmimT
     int m_history {5};
     int m_future {3};
     int m_accelChannels {0}; ///< Number of accelerometer telemetry channels consumed per frame.
-    int m_accelHistory {0}; ///< Number of accel lag steps included in the DDSPC regressor.
+    int m_accelHistory {20}; ///< Number of accel lag steps included in the DDSPC regressor (default: 20 samples).
     bool m_accelNormalize {true}; ///< Enables per-channel running z-score normalization for accel samples.
     realT m_accelStdFloor {1.0e-4f}; ///< Lower bound applied to per-channel accel standard deviation.
     realT m_accelClipSigma {0.0f}; ///< Optional post-normalization sigma clipping threshold (0 disables clipping).
