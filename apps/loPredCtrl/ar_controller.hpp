@@ -61,12 +61,13 @@ class PredictiveController
     PredictiveController( int   num_actuators,          /**< [in] number of controlled WFS/command modes */
                           int   num_history,            /**< [in] history length for WFS and command regressors */
                           int   num_future,             /**< [in] prediction horizon in frames */
-                          realT gain,                   /**< [in] integrator gain */
-                          realT gamma,                  /**< [in] RLS forgetting factor */
-                          realT initial_regularization, /**< [in] initial controller regularization value */
-                          realT initial_covariance,     /**< [in] initial inverse covariance diagonal value */
-                          int   num_accel_channels = 0, /**< [in] number of accelerometer channels */
-                          int   accel_history = 0       /**< [in] accelerometer history length */
+                          realT gain = 0.25,            /**< [in] integrator gain */
+                          realT gamma = 1.0,            /**< [in] RLS forgetting factor */
+                          realT initial_regularization =
+                              0.015,                    /**< [in] initial controller regularization value */
+                          realT initial_covariance = 1e5, /**< [in] initial inverse covariance diagonal value */
+                          int   num_accel_channels = 2,    /**< [in] number of accelerometer channels */
+                          int   accel_history = 20          /**< [in] accelerometer history length */
     );
 
     ~PredictiveController();
