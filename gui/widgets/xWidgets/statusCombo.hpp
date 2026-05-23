@@ -498,6 +498,8 @@ void statusCombo::on_status_activated( int index )
 
 void statusCombo::on_buttonGo_pressed()
 {
+    static size_t s_statusCommandSerial = 0;
+
     std::string selection = ui.status->currentText().toStdString();
 
     if( selection == "" )
@@ -519,19 +521,31 @@ void statusCombo::on_buttonGo_pressed()
         ipSend.setState( pcf::IndiProperty::Idle );
         ipSend.setRule( pcf::IndiProperty::OneOfMany );
 
+        std::string elementStates;
         for( int idx = 0; idx < ui.status->count(); ++idx )
         {
             std::string elName = ui.status->itemText( idx ).toStdString();
 
+            if( idx > 0 )
+            {
+                elementStates += ", ";
+            }
+
             if( elName == selection )
             {
                 ipSend.add( pcf::IndiElement( elName, pcf::IndiElement::On ) );
+                elementStates += elName + "=On";
             }
             else
             {
                 ipSend.add( pcf::IndiElement( elName, pcf::IndiElement::Off ) );
+                elementStates += elName + "=Off";
             }
         }
+
+        ++s_statusCommandSerial;
+        std::cerr << "statusCombo::on_buttonGo_pressed[" << s_statusCommandSerial << "] " << m_device << "."
+                  << m_property << " selection=" << selection << " elements={" << elementStates << "}\n";
 
         sendNewProperty( ipSend );
     }

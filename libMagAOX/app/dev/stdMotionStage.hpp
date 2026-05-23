@@ -498,13 +498,23 @@ int stdMotionStage<derivedT>::newCallBack_m_indiP_presetName( const pcf::IndiPro
 {
     INDI_VALIDATE_CALLBACK_PROPS_DERIVED( m_indiP_presetName, ipRecv );
 
+    static size_t s_presetNameCallbackSerial = 0;
+
     std::vector<std::string> invalidSelections;
+    std::string              onSelections;
     for( auto &&el : ipRecv.getElements() )
     {
         if( el.second.getSwitchState() != pcf::IndiElement::On )
         {
             continue;
         }
+
+        if( !onSelections.empty() )
+        {
+            onSelections += ", ";
+        }
+
+        onSelections += el.first;
 
         bool knownPreset = false;
         for( size_t i = 0; i < m_presetNames.size(); ++i )
@@ -573,6 +583,13 @@ int stdMotionStage<derivedT>::newCallBack_m_indiP_presetName( const pcf::IndiPro
     setPresetNameTracking( newn );
     m_preset_target = m_presetPositions[newn];
     derived().updateIfChanged( m_indiP_preset, "target", m_preset_target, INDI_BUSY );
+
+    ++s_presetNameCallbackSerial;
+    derivedT::template log<text_log>(
+        "stdMotionStage accepted " + m_presetNotation + "Name[" + std::to_string( s_presetNameCallbackSerial ) +
+            "] device=" + ipRecv.getDevice() + " property=" + ipRecv.getName() + " selection=" + newName + " on={" +
+            onSelections + "} target=" + std::to_string( m_preset_target ),
+        logPrio::LOG_NOTICE );
 
     m_movingState = 1; // This is a preset move
     return derived().moveTo( m_preset_target );
