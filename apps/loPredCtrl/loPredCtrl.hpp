@@ -107,6 +107,7 @@ struct accelShmimT
     int m_num_modes {1};
     int m_history {5};
     int m_future {3};
+    bool m_accelEnabled {false}; ///< Enables accelerometer integration; false forces legacy non-accelerometer behavior.
     int m_accelChannels {2}; ///< Number of accelerometer telemetry channels consumed per frame (default: 2 channels).
     int m_accelHistory {20}; ///< Number of accel lag steps included in the DDSPC regressor (default: 20 samples).
     bool m_accelNormalize {true}; ///< Enables per-channel running z-score normalization for accel samples.
@@ -123,6 +124,7 @@ struct accelShmimT
     DDSPC::Matrix m_accelMean; ///< Running per-channel accel mean for online normalization.
     DDSPC::Matrix m_accelM2; ///< Running per-channel second moment accumulator for online normalization.
     uint64_t m_accelNormCount {0}; ///< Number of accel samples incorporated into normalization statistics.
+    bool m_accelMonitorStarted {false}; ///< Tracks whether the accelerometer shmim monitor thread was started.
 
     DDSPC::Matrix new_command;
     DDSPC::Matrix new_measurement;
@@ -221,8 +223,13 @@ struct accelShmimT
      /// Reset accelerometer sample and normalization state.
      void resetAccelTelemetryState();
 
-     /// Apply per-channel online z-score normalization to one accelerometer sample.
-     void normalizeAccelSample( DDSPC::Matrix &sample /**< [in.out] raw sample replaced by normalized sample */ );
+    /// Apply per-channel online z-score normalization to one accelerometer sample.
+    void normalizeAccelSample( DDSPC::Matrix &sample /**< [in.out] raw sample replaced by normalized sample */ );
+
+    /// Disable accelerometer integration and force legacy controller dimensions.
+    void disableAccelIntegration( const std::string &reason, /**< [in] reason logged when forcing legacy fallback */
+                                  bool rebuildController = false /**< [in] true to rebuild controller in legacy dimensions */
+    );
 
      // TODO ::: ADD SAVE AND LOAD FUNCTIONALITY
      void save(std::string directory);
@@ -264,17 +271,24 @@ struct accelShmimT
      config.add("parameters.num_modes", "", "parameters.num_modes", argType::Required, "parameters", "num_modes", false, "int", "The number of modes that will be controlled through predictive control.");
      config.add("parameters.history", "", "parameters.history", argType::Required, "parameters", "history", false, "int", "The number of past measurements for the prediction.");
      config.add("parameters.future", "", "parameters.future", argType::Required, "parameters", "future", false, "int", "The number of future steps that are predicted.");
-     config.add("parameters.accel_channels", "", "parameters.accel_channels", argType::Required, "parameters", "accel_channels", false, "int", "Number of accelerometer telemetry channels to ingest.");
-     config.add("parameters.accel_history", "", "parameters.accel_history", argType::Required, "parameters", "accel_history", false, "int", "Number of lagged accelerometer samples to include in the predictor.");
-     config.add("parameters.accel_normalize", "", "parameters.accel_normalize", argType::Required, "parameters", "accel_normalize", false, "bool", "Enable online per-channel z-score normalization for accelerometer telemetry.");
-     config.add("parameters.accel_std_floor", "", "parameters.accel_std_floor", argType::Required, "parameters", "accel_std_floor", false, "float", "Standard-deviation floor used for accelerometer normalization.");
-     config.add("parameters.accel_clip_sigma", "", "parameters.accel_clip_sigma", argType::Required, "parameters", "accel_clip_sigma", false, "float", "Optional post-normalization clip limit in sigma units (0 disables clipping).");
+     config.add("parameters.accel_enabled", "", "parameters.accel_enabled", argType::Optional, "parameters", "accel_enabled", false, "bool", "Enable accelerometer integration. When false, legacy non-accelerometer control behavior is used.");
+     config.add("parameters.accel_channels", "", "parameters.accel_channels", argType::Optional, "parameters", "accel_channels", false, "int", "Number of accelerometer telemetry channels to ingest.");
+     config.add("parameters.accel_history", "", "parameters.accel_history", argType::Optional, "parameters", "accel_history", false, "int", "Number of lagged accelerometer samples to include in the predictor.");
+     config.add("parameters.accel_normalize", "", "parameters.accel_normalize", argType::Optional, "parameters", "accel_normalize", false, "bool", "Enable online per-channel z-score normalization for accelerometer telemetry.");
+     config.add("parameters.accel_std_floor", "", "parameters.accel_std_floor", argType::Optional, "parameters", "accel_std_floor", false, "float", "Standard-deviation floor used for accelerometer normalization.");
+     config.add("parameters.accel_clip_sigma", "", "parameters.accel_clip_sigma", argType::Optional, "parameters", "accel_clip_sigma", false, "float", "Optional post-normalization clip limit in sigma units (0 disables clipping).");
  }
 
  inline int loPredCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
  {
      shmimMonitorT::loadConfig( _config );
-     accelShmimMonitorT::loadConfig( _config );
+
+    _config(m_accelEnabled, "parameters.accel_enabled");
+    if(m_accelEnabled){
+        accelShmimMonitorT::loadConfig( _config );
+    }else{
+        accelShmimMonitorT::m_shmimName = "";
+    }
 
     _config(m_gainCtrl, "parameters.gain");
     _config(m_regularizationCtrl, "parameters.regularization");
@@ -294,6 +308,12 @@ struct accelShmimT
     m_accelHistory = std::max(0, m_accelHistory);
 
     if(m_accelChannels == 0 || m_accelHistory == 0){
+        m_accelEnabled = false;
+    }
+
+    if(!m_accelEnabled){
+        m_accelChannels = 0;
+        m_accelHistory = 0;
         accelShmimMonitorT::m_shmimName = "";
     }
 
@@ -306,8 +326,15 @@ struct accelShmimT
 
     std::cout << "History " << m_history << std::endl;
     std::cout << "Future " << m_future << std::endl;
+    std::cout << "Accel enabled " << m_accelEnabled << std::endl;
     std::cout << "Accel channels " << m_accelChannels << std::endl;
     std::cout << "Accel history " << m_accelHistory << std::endl;
+
+    if(m_accelEnabled){
+        log<text_log>("Accelerometer integration enabled: channels=" + std::to_string(m_accelChannels) + " history=" + std::to_string(m_accelHistory), logPrio::LOG_NOTICE);
+    }else{
+        log<text_log>("Accelerometer integration disabled (legacy mode).", logPrio::LOG_NOTICE);
+    }
 
     std::cout << "Done reading config Impl." << std::endl;
 
@@ -328,9 +355,16 @@ struct accelShmimT
          return log<software_error, -1>( { __FILE__, __LINE__ } );
      }
 
-     if( accelShmimMonitorT::appStartup() < 0 )
+     if( m_accelEnabled )
      {
-         return log<software_error, -1>( { __FILE__, __LINE__ } );
+         if( accelShmimMonitorT::appStartup() < 0 )
+         {
+             disableAccelIntegration( "Accelerometer monitor startup failed.", true );
+         }
+         else
+         {
+             m_accelMonitorStarted = true;
+         }
      }
 
      CREATE_REG_INDI_NEW_TEXT( m_indiP_exploration, "exploration_sequence", "", "");
@@ -356,9 +390,12 @@ struct accelShmimT
          return log<software_error, -1>( { __FILE__, __LINE__ } );
      }
 
-     if( accelShmimMonitorT::appLogic() < 0 )
+     if( m_accelEnabled )
      {
-         return log<software_error, -1>( { __FILE__, __LINE__ } );
+         if( accelShmimMonitorT::appLogic() < 0 )
+         {
+             disableAccelIntegration( "Accelerometer monitor thread exited; disabling accelerometer path." );
+         }
      }
 
      std::unique_lock<std::mutex> lock( m_indiMutex );
@@ -368,9 +405,12 @@ struct accelShmimT
          log<software_error>( { __FILE__, __LINE__ } );
      }
 
-     if( accelShmimMonitorT::updateINDI() < 0 )
+     if( m_accelEnabled )
      {
-         log<software_error>( { __FILE__, __LINE__ } );
+         if( accelShmimMonitorT::updateINDI() < 0 )
+         {
+             disableAccelIntegration( "Accelerometer INDI update failed; disabling accelerometer path." );
+         }
      }
 
      updatesIfChanged<std::string>( m_indiP_exploration, { "current", "target" }, { m_exploration_sequence, m_exploration_sequence } );
@@ -393,7 +433,12 @@ struct accelShmimT
  inline int loPredCtrl::appShutdown()
  {
      shmimMonitorT::appShutdown();
-     accelShmimMonitorT::appShutdown();
+
+     if( m_accelMonitorStarted )
+     {
+         accelShmimMonitorT::appShutdown();
+         m_accelMonitorStarted = false;
+     }
 
      if(controller)
         delete controller;
@@ -547,11 +592,45 @@ struct accelShmimT
     }
  }
 
+ inline void loPredCtrl::disableAccelIntegration( const std::string &reason, bool rebuildController )
+ {
+    if(!m_accelEnabled){
+        return;
+    }
+
+    log<text_log>(reason + " Falling back to legacy non-accelerometer behavior.", logPrio::LOG_WARNING);
+
+    m_accelEnabled = false;
+    m_accelChannels = 0;
+    m_accelHistory = 0;
+    accelShmimMonitorT::m_shmimName = "";
+
+    if(m_accelMonitorStarted){
+        accelShmimMonitorT::appShutdown();
+        m_accelMonitorStarted = false;
+    }
+
+    if(rebuildController && controller){
+        delete controller;
+        controller = new DDSPC::PredictiveController(m_num_modes,
+                                                     m_history,
+                                                     m_future,
+                                                     m_gainCtrl,
+                                                     m_gammaCtrl,
+                                                     m_regularizationCtrl,
+                                                     m_covarianceCtrl,
+                                                     0,
+                                                     0);
+    }
+
+    resetAccelTelemetryState();
+ }
+
  inline int loPredCtrl::processImage( void *curr_src, const accelShmimT &dummy )
  {
     static_cast<void>( dummy ); // be unused
 
-    if(m_accelChannels <= 0){
+    if(!m_accelEnabled || m_accelChannels <= 0){
         return 0;
     }
 
@@ -651,7 +730,7 @@ struct accelShmimT
         new_measurement(i, 0) = m_modeval(i,0);
     }
 
-    if(controller){
+    if(controller && m_accelEnabled){
         DDSPC::Matrix accelSample;
         accelSample.resize(m_accelChannels, 1);
         accelSample.setZero();
