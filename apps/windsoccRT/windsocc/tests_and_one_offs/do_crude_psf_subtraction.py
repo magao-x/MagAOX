@@ -10,7 +10,8 @@ from astropy.io import fits
 
 
 DEFAULT_INPUT_DIR = Path(
-    "/Users/jkueny/data/HR4796a_lco2023a_magao-x_20230309_10/raws_20230310T054736_s_lyot_stop/camsci1/lite_psflib/wdh_subtracted"
+    # "/Users/jkueny/data/HR4796a_lco2023a_magao-x_20230309_10/raws_20230310T054736_s_lyot_stop/camsci1/lite_psflib/wdh_subtracted"
+    "/Users/jkueny/data/HR4796_rg_smlyot_20230312_13/raws_rg_smlyot_20230313T043914/camsci1/lite_psflib/archive_224dim_60sbinning_rprofsub"
     # "/Users/jkueny/data/HR4796a_lco2023a_magao-x_20230309_10/raws_20230310T054736_s_lyot_stop/camsci1/lite_psflib"
     # "/Users/jkueny/data/HR4796_rg_smlyot_20230312_13/raws_rg_smlyot_20230313T043914/camsci1/lite_wdhlib"
     # "/Users/jkueny/data/HR4796a_lco2023a_magao-x_20230309_10/raws_20230310T054736_s_lyot_stop/camsci1/lite_wdhlib"

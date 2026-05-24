@@ -6,6 +6,7 @@ are showing inconsistencies.
 import sep
 import numpy as np
 import polars as pl
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 from matplotlib.artist import Artist
 from matplotlib.patches import Ellipse
@@ -182,6 +183,7 @@ def plot_wind_track_clusters(
     Cluster points use per-point alpha from ``probabilities`` (clipped to stay visible).
     """
     vu = np.asarray(vu, dtype=np.float64).ravel()
+    # convert to north-up, east-left
     vv = np.asarray(vv, dtype=np.float64).ravel()
     labels = np.asarray(labels, dtype=np.int64).ravel()
     probs = np.asarray(probabilities, dtype=np.float64).ravel()
@@ -200,7 +202,7 @@ def plot_wind_track_clusters(
         ax.scatter(
             vv[noise],
             vu[noise],
-            c="lightgray",
+            c="gray",
             s=24,
             alpha=0.35,
             zorder=1,
@@ -208,6 +210,7 @@ def plot_wind_track_clusters(
         )
 
     cmap = plt.get_cmap("tab10")
+    # cmap = plt.get_cmap("Set1")
     cluster_ids = sorted(x for x in np.unique(labels) if x >= 0)
     for idx, lab in enumerate(cluster_ids):
         mask = labels == lab
@@ -252,8 +255,11 @@ def plot_wind_track_clusters(
 
     ax.set_ylabel(r"$V$-component Speed (m/s)", fontsize=24)
     ax.set_xlabel(r"$U$-component Speed (m/s)", fontsize=24)
+    # can we flip the x axis?
+    ax.invert_xaxis()
+    ax.set_facecolor("whitesmoke") # Set background color
     ax.grid(True, linestyle="--", alpha=0.3)
-    compass_origin = (0.88, 0.16)
+    compass_origin = (0.16, 0.16)
     compass_delta = 0.065
     compass_style = {
         "arrowstyle": "-|>",
@@ -264,8 +270,8 @@ def plot_wind_track_clusters(
     }
     for label, offset, alignment in (
         ("N", (0.0, compass_delta), ("center", "bottom")),
-        ("E", (compass_delta, 0.0), ("left", "center")),
-        ("W", (-compass_delta, 0.0), ("right", "center")),
+        ("W", (compass_delta, 0.0), ("left", "center")),
+        ("E", (-compass_delta, 0.0), ("right", "center")),
         ("S", (0.0, -compass_delta), ("center", "top")),
     ):
         ax.annotate(
@@ -302,8 +308,8 @@ def plot_wind_track_clusters(
                 [0],
                 marker="o",
                 color="w",
-                label="Noise",
-                markerfacecolor="lightgray",
+                label="Ungrouped",
+                markerfacecolor="gray",
                 markersize=12,
                 alpha=0.5,
             )
@@ -400,12 +406,218 @@ def plot_wind_direction_vs_time_for_cluster(
     ax.grid(True, linestyle="--", alpha=0.35)
     cbar = fig.colorbar(scat, ax=ax, pad=0.02)
     cbar.set_label(r"$v / \langle v \rangle$")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
     fig.autofmt_xdate()
     fig.tight_layout()
     out_png_dir = os.path.dirname(os.path.abspath(output_png))
     if out_png_dir:
         os.makedirs(out_png_dir, exist_ok=True)
     fig.savefig(output_png, dpi=150)
+    plt.close(fig)
+
+
+def _wind_direction_deg_to_compass_theta(direction_deg: np.ndarray) -> np.ndarray:
+    """Map meteorological wind direction (deg clockwise from north) to polar theta.
+
+    Compass layout: north up, east left (west right), matching camwfs-style roses.
+    Matplotlib polar uses 0 rad at east with counterclockwise positive angles.
+    """
+    return np.pi / 2.0 + np.deg2rad(np.asarray(direction_deg, dtype=np.float64))
+
+
+def _time_values_to_radius(
+    time_values: np.ndarray,
+    *,
+    t_min: float,
+    t_max: float,
+    r_inner: float,
+    r_outer: float,
+) -> np.ndarray:
+    """Map matplotlib date numbers to radial distance (later time = larger radius)."""
+    t = np.asarray(time_values, dtype=np.float64)
+    if t_max <= t_min:
+        return np.full(t.shape, 0.5 * (r_inner + r_outer), dtype=np.float64)
+    return r_inner + (r_outer - r_inner) * (t - t_min) / (t_max - t_min)
+
+
+def plot_wind_direction_vs_time_for_clusters(
+    cluster_frames: list[tuple[int, pl.DataFrame, float]],
+    output_plot_fname: str,
+    *,
+    sigma: float,
+    date_obs: str,
+) -> None:
+    """Polar compass-rose scatter: direction vs time for all clusters in one plot.
+
+    Angular position encodes wind direction (deg, clockwise from north) on a rose with
+    north up and east left. Radial distance encodes observation time (later = farther out).
+    Each cluster uses the same tab10 color assignment as ``plot_wind_track_clusters``.
+    Point alpha scales with speed divided by cluster ``mean_scalar_speed``.
+    """
+    major_fonts = {
+        "family": "serif",
+        "weight": "bold",
+        "size": 24,
+    }
+    medium_fonts = {
+        "family": "serif",
+        "weight": "bold",
+        "size": 22,
+    }
+    minor_fonts = {
+        "family": "serif",
+        "weight": "normal",
+        "size": 20,
+    }
+    if not cluster_frames:
+        warnings.warn(
+            "plot_wind_direction_vs_time_for_clusters: no cluster frames; skipping.",
+            stacklevel=2,
+        )
+        return
+
+    valid_frames: list[tuple[int, pl.DataFrame, float]] = []
+    for cid, df, mean_scalar_speed_mps in cluster_frames:
+        if df.is_empty():
+            continue
+        valid_frames.append((int(cid), df, float(mean_scalar_speed_mps)))
+    if not valid_frames:
+        warnings.warn(
+            "plot_wind_direction_vs_time_for_clusters: all cluster frames empty; skipping.",
+            stacklevel=2,
+        )
+        return
+
+    r_inner = 0.08
+    r_outer = 1.0
+    all_time_num: list[float] = []
+    for _, df, _ in valid_frames:
+        times = df["time"].to_list()
+        directions = np.asarray(df["direction"].cast(pl.Float64).to_list(), dtype=np.float64)
+        velocities = np.asarray(df["velocity_m_per_s"].cast(pl.Float64).to_list(), dtype=np.float64)
+        finite = np.isfinite(directions) & np.isfinite(velocities)
+        if not np.any(finite):
+            continue
+        times = [times[i] for i in np.flatnonzero(finite)]
+        all_time_num.extend(mdates.date2num(times).ravel().tolist())
+    if not all_time_num:
+        warnings.warn(
+            "plot_wind_direction_vs_time_for_clusters: no finite time/direction rows; skipping.",
+            stacklevel=2,
+        )
+        return
+    t_min = float(np.min(all_time_num))
+    t_max = float(np.max(all_time_num))
+
+    fig, ax = plt.subplots(figsize=(10, 12), subplot_kw={"projection": "polar"})
+    cmap = plt.get_cmap("tab10")
+    # cmap = plt.get_cmap("Set2")
+    cluster_ids = sorted({cid for cid, _, _ in valid_frames})
+    cluster_color_map: dict[int, tuple[float, float, float]] = {
+        cid: cmap(idx % 10)[:3] for idx, cid in enumerate(cluster_ids)
+    }
+    for cid, df, mean_scalar_speed_mps in valid_frames:
+        times = df["time"].to_list()
+        directions = np.asarray(df["direction"].cast(pl.Float64).to_list(), dtype=np.float64)
+        velocities = np.asarray(df["velocity_m_per_s"].cast(pl.Float64).to_list(), dtype=np.float64)
+        finite = np.isfinite(directions) & np.isfinite(velocities)
+        if not np.any(finite):
+            continue
+        directions = directions[finite]
+        velocities = velocities[finite]
+        times = [times[i] for i in np.flatnonzero(finite)]
+        time_num = mdates.date2num(times)
+        theta = _wind_direction_deg_to_compass_theta(directions)
+        radius = _time_values_to_radius(
+            time_num,
+            t_min=t_min,
+            t_max=t_max,
+            r_inner=r_inner,
+            r_outer=r_outer,
+        )
+        denom = mean_scalar_speed_mps
+        if not np.isfinite(denom) or denom <= 0:
+            # denom = float(np.nanmean(velocities))
+            denom = float(np.nanmax(velocities))
+        if not np.isfinite(denom) or denom <= 0:
+            denom = 1.0
+        relative_speed = velocities / denom
+        alpha_vals = np.clip(relative_speed, 0.12, 1.0)
+        rgba = np.zeros((len(alpha_vals), 4), dtype=np.float64)
+        rgba[:, :3] = cluster_color_map[cid]
+        rgba[:, 3] = alpha_vals
+        ax.scatter(
+            theta,
+            radius,
+            s=32,
+            # c=velocities,
+            facecolors=rgba,
+            edgecolors="none",
+            linewidths=0,
+            label=f"Group {cid} " + r"($\bar{v}$" + f"={mean_scalar_speed_mps:.2f} m/s)",
+        )
+
+    compass_thetas = (np.pi / 2.0, np.pi, 3.0 * np.pi / 2.0, 0.0)
+    compass_labels = ("N", "E", "S", "W")
+    ax.set_thetagrids(
+        np.degrees(compass_thetas),
+        labels=compass_labels,
+        fontsize=major_fonts["size"],
+        fontweight=minor_fonts["weight"],
+        family=minor_fonts["family"],
+    )
+    n_radial_ticks = 5
+    radial_ticks = np.linspace(r_inner, r_outer, n_radial_ticks)
+    if t_max > t_min:
+        radial_time_labels = [
+            mdates.num2date(t_min + (rt - r_inner) / (r_outer - r_inner) * (t_max - t_min)).strftime(
+                "%H:%M"
+            )
+            for rt in radial_ticks
+        ]
+    else:
+        radial_time_labels = [
+            mdates.num2date(t_min).strftime("%H:%M") for _ in radial_ticks
+        ]
+    ax.set_rgrids(
+        radial_ticks,
+        labels=radial_time_labels,
+        angle=22.5,
+        fontsize=minor_fonts["size"],
+        family=minor_fonts["family"],
+    )
+    ax.set_ylim(0.0, r_outer * 1.05)
+    ax.tick_params(labelsize=major_fonts["size"])
+    ax.set_facecolor("whitesmoke")
+    # ax.set_title(
+    #     rf"Wind direction vs time (all clusters, $\sigma$={sigma:g} gate; "
+    #     r"opacity $\propto v/\langle v\rangle_{\mathrm{scalar}}$)"
+    # )
+    ax.grid(True, linestyle="--", alpha=0.35)
+    # Add date of observation as text in the top left corner
+    ax.text(
+        0.12,
+        0.77,
+        date_obs,
+        fontsize=major_fonts["size"],
+        fontweight=major_fonts["weight"],
+        family=major_fonts["family"],
+        transform=ax.transAxes,
+    )
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.12),
+        fontsize=medium_fonts["size"],
+        ncol=2,
+        markerscale=2.0,  # legend dot size vs plot scatter (see also markersize)
+    )
+    fig.tight_layout()
+    fig.subplots_adjust(bottom=0.22)
+    out_plot_dir = os.path.dirname(os.path.abspath(output_plot_fname))
+    if out_plot_dir:
+        os.makedirs(out_plot_dir, exist_ok=True)
+    fig.savefig(f"{output_plot_fname}.png", dpi=150)
+    fig.savefig(f"{output_plot_fname}.pdf")
     plt.close(fig)
 
 

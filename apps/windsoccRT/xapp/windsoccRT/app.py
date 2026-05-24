@@ -4,13 +4,28 @@ from __future__ import annotations
 
 import argparse
 import logging
+import time
 
 import xconf
 from magaox.indi.device import BaseConfig, XDevice
 from purepyindi2 import constants, properties
-from purepyindi2.messages import DefNumber
+from purepyindi2.messages import DefNumber, DefText
 
 from windsocc.realtime import run_single_batch
+
+from .readiness import (
+    BACKOFF_SECONDS,
+    backoff_seconds,
+    evaluate_readiness,
+    readiness_gate_devices,
+    shmim_exists,
+    shmim_path,
+)
+
+# Pipeline INDI state values exposed on ``pipeline.state``.
+PIPELINE_STATE_STANDBY = "standby"
+PIPELINE_STATE_ACTIVE = "active"
+PIPELINE_STATE_MISSING_STREAM = "missing_stream"
 
 
 @xconf.config
@@ -82,6 +97,53 @@ class WindsoccRTConfig(BaseConfig):
         help="Stdlib logging level for windsocc.realtime (DEBUG/INFO/WARNING/ERROR).",
     )
 
+    enable_readiness_gating: bool = xconf.field(
+        default=True,
+        help="If true, run INDI readiness checks before each batch.",
+    )
+    shm_missing_log_interval_sec: float = xconf.field(
+        default=60.0,
+        help="Minimum seconds between ERROR logs when the shmim file is missing.",
+    )
+
+    lab_mode_device: str = xconf.field(default="tcsi", help="INDI device for lab mode.")
+    lab_mode_property: str = xconf.field(default="labMode", help="Lab mode property name.")
+    lab_mode_element: str = xconf.field(default="toggle", help="Lab mode switch element.")
+
+    fwtelsim_device: str = xconf.field(
+        default="fwtelsim",
+        help="Telescope-simulator filter wheel INDI device.",
+    )
+    fwtelsim_filter_property: str = xconf.field(
+        default="filterName",
+        help="Filter wheel preset property on fwtelsim.",
+    )
+    fwtelsim_in_element: str = xconf.field(
+        default="in",
+        help="Filter element name that blocks pipeline when ON (sim in beam).",
+    )
+
+    camwfs_device: str = xconf.field(default="camwfs", help="WFS camera INDI device.")
+    shutter_property: str = xconf.field(default="shutter", help="Shutter property name.")
+    shutter_element: str = xconf.field(default="toggle", help="Shutter switch element.")
+    shutter_closed_is_toggle_on: bool = xconf.field(
+        default=True,
+        help="If true, shutter.toggle ON means closed (ocam2K convention).",
+    )
+
+    holoop_device: str = xconf.field(
+        default="holoop",
+        help="High-order loop INDI device.",
+    )
+    loop_state_property: str = xconf.field(
+        default="loop_state",
+        help="Loop state property on holoop.",
+    )
+    loop_state_element: str = xconf.field(
+        default="toggle",
+        help="Loop state switch; ON means closed loop.",
+    )
+
 
 class windsoccRT(XDevice):
     """FIFO-backed INDI device; each ``loop()`` iteration runs one full batch."""
@@ -93,10 +155,26 @@ class windsoccRT(XDevice):
         level = getattr(logging, self.config.pipeline_log_level.upper(), logging.INFO)
         logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
         self._pipeline_args = self._build_pipeline_namespace(self.config)
+        self._backoff_failure_index = 0
+        self._suppress_readiness_logs = False
+        self._last_shm_missing_log_monotonic = 0.0
 
     def setup(self) -> None:
         """Define INDI properties owned by this windsocc device."""
         max_layers = int(self.config.windsoc_max_layers)
+
+        pipeline_state_prop = properties.TextVector(
+            name="pipeline",
+            perm=constants.PropertyPerm.READ_ONLY,
+        )
+        pipeline_state_prop.add_element(
+            DefText(
+                name="state",
+                label="Pipeline state",
+                _value=PIPELINE_STATE_STANDBY,
+            )
+        )
+        self.add_property(pipeline_state_prop)
 
         nlayers_prop = properties.NumberVector(
             name="nlayers",
@@ -154,6 +232,26 @@ class windsoccRT(XDevice):
                 )
             )
             self.add_property(layer_prop)
+
+        if self.config.enable_readiness_gating:
+            devices = readiness_gate_devices(self.config)
+            try:
+                self.client.get_properties_and_wait(devices)
+            except TimeoutError as exc:
+                self.log.warning(
+                    "Timed out waiting for readiness INDI devices %s: %s",
+                    devices,
+                    exc,
+                )
+
+    def _set_pipeline_state(self, state: str) -> None:
+        """Update the read-only ``pipeline.state`` INDI property."""
+        if "pipeline" not in self.properties:
+            return
+        prop = self.properties["pipeline"]
+        if prop.get("state") != state:
+            prop["state"] = state
+            self.update_property(prop)
 
     @staticmethod
     def _build_pipeline_namespace(cfg: WindsoccRTConfig) -> argparse.Namespace:
@@ -216,8 +314,55 @@ class windsoccRT(XDevice):
 
             self.update_property(layer_prop)
 
+    def _check_shm_stream(self) -> bool:
+        """Return True if the configured shmim file exists."""
+        stream = self.config.stream_name
+        if shmim_exists(stream):
+            return True
+
+        path = shmim_path(stream)
+        now = time.monotonic()
+        interval = float(self.config.shm_missing_log_interval_sec)
+        if now - self._last_shm_missing_log_monotonic >= interval:
+            self.log.error("Image stream missing: %s", path)
+            self._last_shm_missing_log_monotonic = now
+
+        self._set_pipeline_state(PIPELINE_STATE_MISSING_STREAM)
+        return False
+
+    def _check_readiness(self) -> bool:
+        """Return True if readiness gating passes (or is disabled)."""
+        if not self.config.enable_readiness_gating:
+            return True
+
+        ready, reasons = evaluate_readiness(self.client, self.config)
+        if ready:
+            self._suppress_readiness_logs = False
+            self._backoff_failure_index = 0
+            return True
+
+        if not self._suppress_readiness_logs:
+            self.log.warning("Readiness check failed: %s", "; ".join(reasons))
+            self._suppress_readiness_logs = True
+
+        sleep_s = backoff_seconds(self._backoff_failure_index)
+        if self._backoff_failure_index < len(BACKOFF_SECONDS) - 1:
+            self._backoff_failure_index += 1
+
+        self._set_pipeline_state(PIPELINE_STATE_STANDBY)
+        time.sleep(sleep_s)
+        return False
+
     def loop(self) -> None:
         """Collect one shmim batch and run reduce / xcorr / distill / measure."""
+        if not self._check_shm_stream():
+            return
+
+        if not self._check_readiness():
+            return
+
+        self._set_pipeline_state(PIPELINE_STATE_ACTIVE)
+
         try:
             summary = run_single_batch(self._pipeline_args)
             self._update_wind_layer_properties(summary.wind_layers or [])

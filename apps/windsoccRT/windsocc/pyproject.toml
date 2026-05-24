@@ -33,6 +33,7 @@ dependencies = [
     "xarray>=2025.6.1",
     "netcdf4>=1.7.3",
     "scikit-learn>=1.7.2",
+    "pytest>=9.0.3",
 ]
 
 [project.scripts]

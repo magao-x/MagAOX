@@ -71,3 +71,36 @@ ws_realtime --source-type shmim --stream-name aol1_imWFS2 --frame-count 512 --co
 This uses `magaox.shmim.Image` directly, so the MagAO-X Python package and `ImageStreamIOWrap` must be importable in that environment. The batch is processed with the same in-memory pipeline as other `ws_realtime` modes (`process_collected_batch`).
 
 Historical MagAO-X C++ embedded-Python notes (`windsoccRT`, probe binaries) are preserved under [`../archive/README.md`](../archive/README.md).
+
+## windsoccRT standby and readiness (RTC)
+
+The `windsoccRT` INDI driver (`xapp/windsoccRT`) runs one WindsoCC batch per `loop()` only when:
+
+1. The configured shmim file exists (`/milk/shm/{stream_name}.im.shm`). If missing, it logs **ERROR** at most once per 60 seconds (configurable via `shm_missing_log_interval_sec`).
+2. Instrument readiness passes (when `enable_readiness_gating = true`). The pipeline is **blocked if any** of these is true:
+
+| Blocker | Default INDI key | Condition |
+|---------|------------------|-----------|
+| Lab mode | `tcsi.labMode.toggle` | ON |
+| Tel-sim in beam | `fwtelsim.filterName.in` | ON |
+| WFS shutter closed | `camwfs.shutter.toggle` | ON (`shutter_closed_is_toggle_on = true`) |
+| HO loop open | `holoop.loop_state.toggle` | OFF (ON = closed loop) |
+
+On the first readiness failure after a successful pass, the driver logs one **WARNING** listing reasons, then suppresses further readiness warnings until readiness passes again. Between failures it sleeps with backoff: 1, 5, 10, 30, 60, 120, then 300 seconds (max).
+
+The read-only INDI property `pipeline.state` reports `missing_stream`, `standby`, or `active`.
+
+Example `/opt/MagAOX/config/windsocc.conf` overrides:
+
+```toml
+sleep_interval_sec = 0.0
+enable_readiness_gating = true
+shm_missing_log_interval_sec = 60.0
+stream_name = "aol1_imWFS2"
+```
+
+Verify INDI state on the RTC:
+
+```bash
+indi_getprop tcsi.labMode fwtelsim.filterName camwfs.shutter holoop.loop_state windsocc.pipeline
+```

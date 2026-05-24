@@ -82,7 +82,10 @@ def cluster_centroids_table(
     Per-cluster mean/std in (vu, vv) feature space for labels >= 0.
 
     Rows are ordered by ``cluster_id``. ``X`` columns are ``[vu, vv]`` (same as
-    ``flatten_vetted_tracks_to_features``).
+    ``flatten_vetted_tracks_to_features``). Each row includes ``mean_speed`` as
+    ``hypot(mean_vu, mean_vv)`` (speed of the mean vector) and
+    ``mean_scalar_speed`` as the arithmetic mean of per-point speeds
+    ``hypot(vu, vv)``.
     """
     if X.size == 0 or labels.size == 0:
         return []
@@ -100,6 +103,7 @@ def cluster_centroids_table(
         std_vv = float(np.std(vv))
         speeds = np.hypot(vu, vv)
         mean_speed = float(np.hypot(mean_vu, mean_vv))
+        mean_scalar_speed = float(np.mean(speeds))
         std_speeds = float(np.std(speeds))
         mean_dir_deg = float((np.degrees(np.arctan2(mean_vv, mean_vu)) + 360.0) % 360.0)
         dir_deg_pts = (np.degrees(np.arctan2(vv, vu)) + 360.0) % 360.0
@@ -113,6 +117,7 @@ def cluster_centroids_table(
                 "mean_vv": mean_vv,
                 "std_vv": std_vv,
                 "mean_speed": mean_speed,
+                "mean_scalar_speed": mean_scalar_speed,
                 "std_speeds": std_speeds,
                 "mean_direction_deg": mean_dir_deg,
                 "std_direction_deg": std_directions,

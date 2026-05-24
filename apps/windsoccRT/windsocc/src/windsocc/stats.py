@@ -14,14 +14,13 @@ import polars as pl
 
 from windsocc.analysis.wind_stats import (
     cluster_centroids_table,
-    cluster_membership_sigma_mask,
     cluster_wind_tracks_hdbscan,
     per_cluster_vu_vv_stats,
 )
 from windsocc.io.config_handling import parse_config_file
 from windsocc.io.fits_handling import convert_time_to_datetime, extract_time_from_fname
 from windsocc.visualization.plot_measure_results import (
-    plot_wind_direction_vs_time_for_cluster,
+    plot_wind_direction_vs_time_for_clusters,
     plot_wind_track_clusters,
     write_wind_cluster_stats_report,
 )
@@ -117,12 +116,17 @@ def main() -> None:
     dirs_dict = _allocate_dirs(data_dir, output_dir)
     path_yaml = os.path.join(data_dir, "ws_config.yaml")
     config_params = parse_config_file(path_yaml)
+    date_obs = config_params.get("DATE_OBS", None)
+    if date_obs is None:
+        logging.warning("DATE_OBS not found in config file; using default value.")
+        date_obs = "Unknown"
 
     min_cluster_size = int(np.asarray(config_params.get("MIN_CLUSTER_SIZE", 5)).item())
     cluster_selection_epsilon = float(
         np.asarray(config_params.get("CLUSTER_SELECTION_EPSILON", 0.0)).item()
     )
-    layer_sigma = float(np.asarray(config_params.get("WIND_STATS_LAYER_SIGMA", 3.0)).item())
+
+    layer_sigma = float(np.asarray(config_params.get("WIND_CLUSTER_SIGMA", 3.0)).item())
 
     wind_df = _load_wind_attributes_dataframe(dirs_dict["wind_data_dir"])
     if wind_df.is_empty():
@@ -170,6 +174,7 @@ def main() -> None:
 
     out_dir = dirs_dict["wind_stats_dir"]
     cluster_plot = os.path.join(out_dir, "wind_track_clusters")
+    direction_plot = os.path.join(out_dir, "wind_direction_vs_time_clusters")
     cluster_txt = os.path.join(out_dir, "wind_track_stats.txt")
 
     write_wind_cluster_stats_report(path=cluster_txt, rows=stats_rows, noise_count=noise_count)
@@ -181,34 +186,32 @@ def main() -> None:
         output_plot_fname=cluster_plot,
     )
 
-    vu_all = wind_df["vu"].to_numpy()
-    vv_all = wind_df["vv"].to_numpy()
+    wind_feat_labeled = wind_feat.with_columns(
+        pl.Series(name="cluster_id", values=labels)
+    )
+    cluster_direction_frames: list[tuple[int, pl.DataFrame, float]] = []
     for c in centroids:
         cid = int(c["cluster_id"])
-        mask = cluster_membership_sigma_mask(vu_all, vv_all, c, layer_sigma)
-        sub = wind_df.filter(pl.Series(mask))
+        sub = wind_feat_labeled.filter(pl.col("cluster_id") == cid).drop("cluster_id")
         if sub.is_empty():
             logging.info(
-                "Cluster %d: no aggregate rows within sigma=%g gate; skipping direction plot.",
+                "Cluster %d: no points assigned by HDBSCAN; skipping direction plot.",
                 cid,
-                layer_sigma,
             )
             continue
-        dir_png = os.path.join(out_dir, f"wind_direction_vs_time_cluster_{cid}.png")
-        plot_wind_direction_vs_time_for_cluster(
-            sub,
-            dir_png,
-            cluster_id=cid,
-            sigma=layer_sigma,
-            mean_speed_mps=float(c["mean_speed"]),
-            mean_direction_deg=float(c["mean_direction_deg"]),
-        )
+        cluster_direction_frames.append((cid, sub, float(c["mean_scalar_speed"])))
         logging.info(
-            "Cluster %d: wrote %s (%d points after sigma gate on full aggregate).",
+            "Cluster %d: retained %d HDBSCAN-assigned points (no sigma clipping).",
             cid,
-            dir_png,
             sub.height,
         )
+    plot_wind_direction_vs_time_for_clusters(
+        cluster_direction_frames,
+        output_plot_fname=direction_plot,
+        sigma=layer_sigma,
+        date_obs=date_obs,
+    )
+    logging.info("Wrote consolidated direction plot: %s", direction_plot)
 
     logging.info("Wind stats written under %s", out_dir)
 
