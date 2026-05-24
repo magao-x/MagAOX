@@ -1,124 +1,92 @@
-/** \file ar_controller.hpp
- * \brief DDSPC predictive controller interface.
- *
- * \ingroup loPredCtrl_files
- */
-
 #ifndef PCARC_HPP
 #define PCARC_HPP
 
 #include <Eigen/Dense>
-#include <mx/improc/eigenCube.hpp>
-#include <mx/improc/eigenImage.hpp>
-using namespace mx::improc;
 
 #include "utils.hpp"
 #include "recursive_least_squares.hpp"
+#include "qrd_rls.hpp"
 
 namespace DDSPC
 {
 
-class PredictiveController
-{
+class PredictiveController{
 
-  private:
-    RecursiveLeastSquares *rls;
+	private:
+        RecursiveLeastSquares* rls;
+        QRDRecursiveLeastSquares* qrd_rls;
 
-    uint buffer_size;
-    uint measurement_head{ 0 };
-    uint command_head{ 0 };
-    Matrix measurement_buffer;
-    Matrix command_buffer;
-    Matrix accel_buffer;
-    uint   accel_head{ 0 };
+        uint buffer_size;
+        uint measurement_head {0};
+        uint command_head {0};
+        uint accel_head {0};
+        Matrix measurement_buffer;
+        Matrix command_buffer;
+        Matrix accel_buffer;
 
-    Matrix *regularization_matrix;
-    bool    use_regularization_matrix_01{ true };
-    bool    do_switch_regularization_matrix{ false };
-    Matrix  regularization_matrix_01;
-    Matrix  regularization_matrix_02;
+        Matrix* regularization_matrix;
+        bool use_regularization_matrix_01 {true};
+        bool do_switch_regularization_matrix {false};
+        Matrix regularization_matrix_01;
+        Matrix regularization_matrix_02;
 
-    Matrix controller;
-    Matrix integrator;
+        Matrix controller;
+        Matrix integrator;
 
-    int   _num_modes;
-    int   _num_future;
-    int   _num_history;
-    int   _num_accel_channels;
-    int   _num_accel_history;
-    realT _gain;
-    realT _delta_max;
-    realT _regularization;
+        int _num_modes;
+        int _num_future;
+        int _num_history;
+        int _num_accel_channels;
+        int _num_accel_history;
+        realT _gain;
+        realT _delta_max;
+        realT _regularization;
 
-    int num_predictors;
-    int num_features;
-    int num_state_features;
-    int num_accel_features;
-    int num_correlations;
+        int num_predictors;
+        int num_features;
+        int num_state_features;
+        int num_accel_features;
+        int num_correlations;
 
-  public:
-    /// Construct the predictive controller with optional accelerometer regressors.
-    PredictiveController( int   num_actuators,          /**< [in] number of controlled WFS/command modes */
-                          int   num_history,            /**< [in] history length for WFS and command regressors */
-                          int   num_future,             /**< [in] prediction horizon in frames */
-                          realT gain = 0.25,            /**< [in] integrator gain */
-                          realT gamma = 1.0,            /**< [in] RLS forgetting factor */
-                          realT initial_regularization =
-                              0.015,                    /**< [in] initial controller regularization value */
-                          realT initial_covariance = 1e5, /**< [in] initial inverse covariance diagonal value */
-                          int   num_accel_channels = 2,    /**< [in] number of accelerometer channels */
-                          int   accel_history = 20          /**< [in] accelerometer history length */
-    );
+	public:
+        bool use_qrd {false};
+        
+        PredictiveController(int num_actuators, int num_history, int num_future, realT gain=0.25, realT gamma=1.0, realT initial_regularization=0.015, realT initial_covariance=1e5, int num_accel_channels=2, int accel_history=20);
+		~PredictiveController();
 
-    ~PredictiveController();
+        void set_regularization(realT new_regularization);
+        inline Matrix get_prediction_matrix(){
+            if(use_qrd){
+                return qrd_rls->prediction_matrix;
+            }else{
+                return rls->prediction_matrix;
+            }
+        };
 
-    /// Update the regularization strength used in the controller solve.
-    void set_regularization( realT new_regularization /**< [in] new diagonal regularization value */ );
+        void reset();
+        void reset_buffers();
 
-    /// Return a copy of the learned RLS prediction matrix.
-    inline Matrix get_prediction_matrix()
-    {
-        return rls->prediction_matrix;
-    };
+        Matrix get_measurement_future();
+        Matrix get_measurement_past();
 
-    /// Reset the controller and learner state.
-    void reset();
+        Matrix get_command_future(int skip_cmds);
+        Matrix get_command_past();
 
-    /// Return stacked future WFS measurements.
-    Matrix get_measurement_future();
+        Matrix get_current_command_past(int num_steps);
+        Matrix get_current_measurement_past(int num_steps);
+        /// Return stacked accelerometer history vector a_p.
+        Matrix get_accelerometer_past();
+        /// Push one accelerometer sample into the synchronized history buffer.
+        void push_accelerometer_sample(const Matrix &new_acceleration);
 
-    /// Return stacked past WFS measurements.
-    Matrix get_measurement_past();
+        void get_current_past();
 
-    /// Return stacked future commands with optional leading skip.
-    Matrix get_command_future( int skip_cmds /**< [in] number of leading future command steps to skip */ );
+        Matrix calculate_command(Matrix new_measurement, Matrix exploration_noise);
+        void update_system();
+        void update_controller();
 
-    /// Return stacked past commands.
-    Matrix get_command_past();
-
-    /// Return recent command history relative to the current command head.
-    Matrix get_current_command_past( int num_steps /**< [in] number of historical command steps */ );
-
-    /// Return recent measurement history relative to the current measurement head.
-    Matrix get_current_measurement_past( int num_steps /**< [in] number of historical measurement steps */ );
-
-    /// Return stacked past accelerometer telemetry.
-    Matrix get_accelerometer_past();
-
-    /// Push one accelerometer sample into the synchronized telemetry ring.
-    void push_accelerometer_sample( const Matrix &new_acceleration /**< [in] column vector of current accelerometer channels */
-    );
-
-    /// Compute the next command increment from the latest measurement and exploration noise.
-    Matrix calculate_command( Matrix new_measurement,  /**< [in] current WFS residual vector */
-                              Matrix exploration_noise /**< [in] exploratory control perturbation */
-    );
-
-    /// Run one RLS update using the current regressor and target vectors.
-    void update_system();
-
-    /// Recompute the optimal predictive controller from the current RLS matrix.
-    void update_controller();
+        void save_state(const std::string &filename);
+        void load_state(const std::string &filename);
 };
 
 }
