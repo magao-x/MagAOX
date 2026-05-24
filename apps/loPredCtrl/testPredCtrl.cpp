@@ -1,12 +1,5 @@
-/** \file testPredCtrl.cpp
- * \brief Standalone DDSPC predictive controller test executable.
- *
- * \ingroup loPredCtrl_files
- */
-
 #define EIGEN_DONT_PARALLELIZE
 #include "testPredCtrl.hpp"
-#include "ar_controller.hpp"
 
 #include <random>
 #include <cmath>
@@ -80,102 +73,132 @@ int main(int argc, char **argv){
     std::default_random_engine generator;
     std::normal_distribution<DDSPC::realT> distribution(0, 1.0);
 
-    int num_steps = 10000;
+    int num_steps = 20000;
     DDSPC::realT x[num_steps] = {0.0};
-    DDSPC::realT err[num_steps] = {0.0};
-    DDSPC::realT signal[num_steps] = {0.0};
-
-    DDSPC::realT err_pc[num_steps] = {0.0};
-    DDSPC::realT signal_pc[num_steps] = {0.0};
 
     for(int i=0; i<num_steps; i++){
         x[i] = std::sin(2 * 3.14 * 20.0 * i / 1000.0);
     }
 
-    DDSPC::realT gain = 0.5;
-    DDSPC::realT gamma = 1.001;
+    DDSPC::realT gain = -0.5;
+    DDSPC::realT gamma = 1.000;
     DDSPC::realT initial_regularization = 100.0;
-    int num_history = 50;
-    int num_future = 10;
+    DDSPC::realT initial_covariance = 1e-5;
+
+    int num_history = 25;
+    int num_future = 2;
     int num_actuators = 1;
-    int num_accel_channels = 2;
-    int accel_history = 20;
 
     DDSPC::Matrix measurement;
     measurement.resize(num_actuators,1);
 
+    DDSPC::Matrix measurement_qrd;
+    measurement_qrd.resize(num_actuators,1);
+
     DDSPC::Matrix exploration_noise;
     exploration_noise.resize(num_actuators,1);
 
-    DDSPC::PredictiveController controller =
-        DDSPC::PredictiveController(num_actuators,
-                                    num_history,
-                                    num_future,
-                                    gain,
-                                    gamma,
-                                    initial_regularization,
-                                    1.0e5,
-                                    num_accel_channels,
-                                    accel_history);
+    DDSPC::PredictiveController controller = DDSPC::PredictiveController(num_actuators, num_history, num_future, gain, gamma, initial_regularization, initial_covariance);
+    controller.use_qrd = false;
+    DDSPC::PredictiveController qrd_controller = DDSPC::PredictiveController(num_actuators, num_history, num_future, gain, gamma, initial_regularization, initial_covariance);
+    qrd_controller.use_qrd = true;
+
+    std::vector<std::vector<DDSPC::realT>> signal(num_actuators, std::vector<DDSPC::realT>(num_steps, 0.0));
+    std::vector<std::vector<DDSPC::realT>> err(num_actuators, std::vector<DDSPC::realT>(num_steps, 0.0));
+
+    std::vector<std::vector<DDSPC::realT>> signal_pc(num_actuators, std::vector<DDSPC::realT>(num_steps, 0.0));
+    std::vector<std::vector<DDSPC::realT>> err_pc(num_actuators, std::vector<DDSPC::realT>(num_steps, 0.0));
+
+    std::vector<std::vector<DDSPC::realT>> signal_pc_qrd(num_actuators, std::vector<DDSPC::realT>(num_steps, 0.0));
+    std::vector<std::vector<DDSPC::realT>> err_pc_qrd(num_actuators, std::vector<DDSPC::realT>(num_steps, 0.0));
 
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 
     double command_calc = 0.0;
-    double update_system = 0.0;
     double update_controller = 0.0;
-    for(int i=0; i < (num_steps - 1); i++){
-        if(i == 250)
-            controller.set_regularization(1.0);
-        if(i == 500)
-            controller.set_regularization(0.1);
 
-        if(i < 500){
-            exploration_noise(0,0) = 0.1 * distribution(generator);
-        }else{
-            exploration_noise(0,0) = 0.0;
+    double command_calc_qrd = 0.0;
+    double update_controller_qrd = 0.0;
+    for(int i=0; i < (num_steps - 1); i++){
+        if(i == 250){
+            controller.set_regularization(10.0);
+            qrd_controller.set_regularization(10.0);
         }
 
-        err[i] = x[i] + signal[i];
-        signal[i+1] = signal[i] - gain * err[i] + exploration_noise(0, 0);
+        if(i == 500){
+            controller.set_regularization(0.1);
+            qrd_controller.set_regularization(0.1);
+        }
 
-        err_pc[i] = x[i] + signal_pc[i];
-        measurement(0,0) = err_pc[i];
-        DDSPC::Matrix accel_measurement(num_accel_channels, 1);
-        accel_measurement(0,0) = std::sin(2 * 3.14 * 5.0 * i / 1000.0);
-        accel_measurement(1,0) = std::cos(2 * 3.14 * 7.0 * i / 1000.0);
-        controller.push_accelerometer_sample(accel_measurement);
+        if(i == -1000){
+            controller.set_regularization(0.001);
+            qrd_controller.set_regularization(0.001);
+        }
 
+        for(int k=0; k<num_actuators; k++){
+            if(i < 500){
+                exploration_noise(k,0) = 0.1 * distribution(generator);
+            } else {
+                exploration_noise(k,0) = 0.0;
+            }
+
+            err[k][i] = x[i] + signal[k][i];
+            signal[k][i+1] = signal[k][i] + gain * err[k][i] + exploration_noise(k, 0);
+
+            err_pc[k][i] = x[i] + signal_pc[k][i];
+            measurement(k,0) = err_pc[k][i] + 0. * distribution(generator);
+
+            err_pc_qrd[k][i] = x[i] + signal_pc_qrd[k][i];
+            measurement_qrd(k,0) = err_pc_qrd[k][i] + 0. * distribution(generator);
+        }
+       
         begin = std::chrono::steady_clock::now();
         DDSPC::Matrix new_command = controller.calculate_command(measurement, exploration_noise);
         end = std::chrono::steady_clock::now();
         command_calc += std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
 
-        signal_pc[i + 1] = signal_pc[i] + new_command(0,0);
+        for(int k=0; k<num_actuators; k++){
+            signal_pc[k][i + 1] = signal_pc[k][i] + new_command(k,0);
+        }
+
+        begin = std::chrono::steady_clock::now();
+        DDSPC::Matrix new_command_qrd = qrd_controller.calculate_command(measurement_qrd, exploration_noise);
+        end = std::chrono::steady_clock::now();
+        command_calc_qrd += std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
+
+        for(int k=0; k<num_actuators; k++){
+            signal_pc_qrd[k][i + 1] = signal_pc_qrd[k][i] + new_command_qrd(k,0);
+        }
 
         if((i+1) > (num_future + num_history)){
             begin = std::chrono::steady_clock::now();
             controller.update_system();
-            end = std::chrono::steady_clock::now();
-            update_system += std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
-
-            begin = std::chrono::steady_clock::now();
             controller.update_controller();
             end = std::chrono::steady_clock::now();
             update_controller += std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
+
+            begin = std::chrono::steady_clock::now();
+            qrd_controller.update_system();
+            qrd_controller.update_controller();
+            end = std::chrono::steady_clock::now();
+            update_controller_qrd += std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
         }
     }
+    std::cout << "RLS Method: " << std::endl;
+    std::cout << command_calc / num_steps / 1000.0 << "   " << update_controller / num_steps / 1000.0 << std::endl;
+    std::cout << "QRD Method: " << std::endl;
+    std::cout << command_calc_qrd / num_steps / 1000.0 << "  " << update_controller_qrd / num_steps / 1000.0 << std::endl;
 
-    std::cout << command_calc / num_steps / 1000.0 << "  " << update_system / num_steps / 1000.0 << "  " << update_controller / num_steps / 1000.0 << std::endl;
+    std::cout<< standard_dev(x, num_steps, 1000) << std::endl;
+    std::cout<< standard_dev(err[0].data(), num_steps, 1000) << std::endl;
+    std::cout<< standard_dev(err_pc[0].data(), num_steps, 1000) << std::endl;
+    std::cout<< standard_dev(err_pc_qrd[0].data(), num_steps, 1000) << std::endl;
 
-    std::cout<< standard_dev(x, num_steps, 500) << std::endl;
-    std::cout<< standard_dev(err, num_steps, 500) << std::endl;
-    std::cout<< standard_dev(err_pc, num_steps, 500) << std::endl;
-
-    write_to_file("x.csv", x, num_steps);
-    write_to_file("err.csv", err, num_steps);
-    write_to_file("err_pc.csv", err_pc, num_steps);
+    write_to_file("./tests/x.csv", x, num_steps);
+    write_to_file("./tests/err.csv", err[0].data(), num_steps);
+    write_to_file("./tests/err_pc.csv", err_pc[0].data(), num_steps);
+    write_to_file("./tests/err_pc_qrd.csv", err_pc_qrd[0].data(), num_steps);
 
     return 0;
-
 }
