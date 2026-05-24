@@ -46,7 +46,8 @@ class RecursiveLeastSquares{
 
         //Matrix* predict(eigenImage<realT> *x);
 		void reset();
-		void save_state(std::string filaname);
+		void save_state(const std::string &filename);
+		void load_state(const std::string &filename);
 };
 
 }

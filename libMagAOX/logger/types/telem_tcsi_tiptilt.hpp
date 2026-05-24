@@ -26,14 +26,6 @@ struct telem_tcsi_tiptilt : public telem_tcsi_offload
     /// The default level
     static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
-    /// Format the message for human consumption.
-    static std::string msgString( void *msgBuffer,      /**< [in] Buffer containing the flatbuffer serialized message.*/
-                                  flatlogs::msgLenT len /**< [in] [unused] length of msgBuffer.*/
-    )
-    {
-        return formatMsgString( "tcsi_tiptilt", msgBuffer, len );
-    }
-
     static timespec lastRecord; ///< The time of the last time this log was recorded. Used by the telemetry system.
 };
 

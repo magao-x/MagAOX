@@ -22,6 +22,7 @@ echo "runstart DMch2disp-01" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
 ln -sf /milk/shm/camwfs_dark.im.shm /milk/shm/aol0_wfsdark.im.shm
 ln -sf /milk/shm/camwfs_dark.im.shm /milk/shm/aol1_wfsdark.im.shm
 ln -sf /milk/shm/aol1_wfsref.im.shm /milk/shm/camwfs_ref.im.shm
+ln -sf /milk/shm/aol1_modevalWFS.im.shm /milk/shm/aol1_mfiltINPUT.im.shm
 ln -sf /milk/shm/aol1_wfsrefc.im.shm /milk/shm/camwfs_refc.im.shm
 ln -sf /milk/shm/aol1_imWFS2.im.shm /milk/shm/camwfs_refsub.im.shm
 

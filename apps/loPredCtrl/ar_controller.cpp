@@ -1,4 +1,6 @@
 #include "ar_controller.hpp"
+#include <fstream>
+#include <stdexcept>
 
 namespace DDSPC
 {
@@ -30,6 +32,7 @@ PredictiveController::PredictiveController(int num_actuators, int num_history, i
 
     // The learner
     rls = new RecursiveLeastSquares(num_predictors, num_features, gamma, initial_covariance);
+    qrd_rls = new QRDRecursiveLeastSquares(num_predictors, num_features, gamma, initial_covariance);
 
     // Initializing the controller
     controller.resize(_num_modes, (2 * num_history - 1) * _num_modes);
@@ -40,7 +43,7 @@ PredictiveController::PredictiveController(int num_actuators, int num_history, i
 
     for(int i=0; i < _num_modes; i++){
         int index = (_num_history - 1) * _num_modes + i;
-        integrator(i, index) = -_gain;
+        integrator(i, index) = _gain;
     }
 
     // Set the regularization matrix
@@ -61,6 +64,7 @@ PredictiveController::PredictiveController(int num_actuators, int num_history, i
 
 PredictiveController::~PredictiveController(){
     delete rls;
+    delete qrd_rls;
 }
 
 void PredictiveController::reset(){
@@ -68,6 +72,21 @@ void PredictiveController::reset(){
     controller.setZero();
 
     rls->reset();
+    qrd_rls->reset();
+
+    reset_buffers();
+
+}
+
+void PredictiveController::reset_buffers(){
+    measurement_head = 0;
+    measurement_buffer.resize(buffer_size, _num_modes);
+    measurement_buffer.setZero();
+
+    command_head = 0;
+    command_buffer.resize(buffer_size, _num_modes);
+    command_buffer.setZero();
+
 }
 
 void PredictiveController::set_regularization(realT new_regularization){
@@ -92,7 +111,7 @@ Matrix PredictiveController::get_measurement_future(){
     for(int i=0; i<_num_future; i++){
         auto dat = measurement_buffer.row((measurement_head - i - 1) & (buffer_size - 1));
         for(int j=0; j < _num_modes; j++){
-            future_vec(i * _num_modes + j, 0) = dat(j, 0);
+            future_vec(i * _num_modes + j, 0) = dat(0, j);
         }
     }
 
@@ -108,7 +127,7 @@ Matrix PredictiveController::get_measurement_past(){
     for(int i=0; i<_num_history; i++){
         auto dat = measurement_buffer.row((measurement_head - i - _num_future - 1) & (buffer_size - 1));
         for(int j=0; j < _num_modes; j++){
-            past_vec(i * _num_modes + j, 0) = dat(j, 0);
+            past_vec(i * _num_modes + j, 0) = dat(0, j);
         }
     }
 
@@ -124,7 +143,7 @@ Matrix PredictiveController::get_command_future(int skip_cmds=0){
             int offset = skip_cmds * _num_modes;
             auto dat = command_buffer.row((command_head - i - 1 - offset) & (buffer_size - 1));
             for(int j=0; j < _num_modes; j++){
-                future_vec(i * _num_modes + j, 0) = dat(j, 0);
+                future_vec(i * _num_modes + j, 0) = dat(0, j);
             }
         }
     }else{
@@ -133,7 +152,7 @@ Matrix PredictiveController::get_command_future(int skip_cmds=0){
         for(int i=0; i<_num_future; i++){
             auto dat = command_buffer.row((command_head - i - 1) & (buffer_size - 1));
             for(int j=0; j < _num_modes; j++){
-                future_vec(i * _num_modes + j, 0) = dat(j, 0);
+                future_vec(i * _num_modes + j, 0) = dat(0, j);
             }
         }
     }
@@ -148,7 +167,7 @@ Matrix PredictiveController::get_command_past(){
     for(int i=0; i<_num_history; i++){
         auto dat = command_buffer.row((command_head - i - _num_future - 1) & (buffer_size - 1));
         for(int j=0; j < _num_modes; j++){
-            past_vec(i * _num_modes + j) = dat(j, 0);
+            past_vec(i * _num_modes + j) = dat(0, j);
         }
     }
 
@@ -162,7 +181,7 @@ Matrix PredictiveController::get_current_measurement_past(int num_steps){
     for(int i=0; i<num_steps; i++){
         auto dat = measurement_buffer.row((measurement_head - i - 1) & (buffer_size - 1));
         for(int j=0; j < _num_modes; j++){
-            past_vec(i * _num_modes + j) = dat(j, 0);
+            past_vec(i * _num_modes + j) = dat(0, j);
         }
     }
 
@@ -176,7 +195,7 @@ Matrix PredictiveController::get_current_command_past(int num_steps){
     for(int i=0; i<num_steps; i++){
         auto dat = command_buffer.row((command_head - i - 1) & (buffer_size - 1));
         for(int j=0; j < _num_modes; j++){
-            past_vec(i * _num_modes + j) = dat(j, 0);
+            past_vec(i * _num_modes + j) = dat(0, j);
         }
     }
 
@@ -193,11 +212,16 @@ void PredictiveController::update_system(){
     prediction_vector.resize(past_measurement.rows() + past_cmd.rows() + future_cmd.rows(), 1);
     prediction_vector << future_cmd, past_cmd, past_measurement;
 
-    rls->update(&prediction_vector, &future_measurement);
+    if(use_qrd){
+        qrd_rls->update(&prediction_vector, &future_measurement);
+    }else{
+        rls->update(&prediction_vector, &future_measurement);
+    }
+    
 }
 
 void PredictiveController::update_controller(){
-    Matrix H = rls->prediction_matrix.transpose() * rls->prediction_matrix;
+    Matrix H = get_prediction_matrix().transpose() * get_prediction_matrix();
     Matrix H11 = H.block(0, 0, num_correlations, num_correlations);
     Matrix H21 = H.block(0, num_correlations, num_correlations, H.cols() - num_correlations);
 
@@ -216,14 +240,16 @@ void PredictiveController::update_controller(){
 }
 
 Matrix PredictiveController::calculate_command(Matrix new_measurement, Matrix exploration_noise){
-    measurement_buffer.row(measurement_head & (buffer_size-1)) = new_measurement;
+    for(int j=0; j<_num_modes; j++){
+        measurement_buffer( (measurement_head & (buffer_size-1)), j ) = new_measurement(j,0);
+    }
     measurement_head++;
 
     Matrix past_command = get_current_command_past(_num_history - 1);
     Matrix past_measurement = get_current_measurement_past(_num_history);
 
     Matrix past_vec;
-    past_vec.resize(2 * _num_history - 1, 1);
+    past_vec.resize((2 * _num_history - 1) * _num_modes, 1);
     past_vec << past_command, past_measurement;
 
     Matrix new_delta = (controller + integrator) * past_vec + exploration_noise;
@@ -238,10 +264,62 @@ Matrix PredictiveController::calculate_command(Matrix new_measurement, Matrix ex
         }
     }
 
-    command_buffer.row(command_head & (buffer_size - 1)) = new_delta;
+    for(int j=0; j<_num_modes; j++){
+        command_buffer( (command_head & (buffer_size - 1)), j ) = new_delta(j,0);
+    }
     command_head++;
 
     return new_delta;
+}
+
+void PredictiveController::save_state(const std::string &filename) {
+    // Save metadata in a JSON sidecar file
+    std::string metadata_file = filename + ".meta";
+    std::ofstream ofs(metadata_file);
+    if (!ofs.is_open()) {
+        throw std::runtime_error("Could not open file for save_state metadata: " + metadata_file);
+    }
+
+    ofs << "{\n";
+    ofs << "  \"num_modes\": " << _num_modes << ",\n";
+    ofs << "  \"num_future\": " << _num_future << ",\n";
+    ofs << "  \"num_history\": " << _num_history << ",\n";
+    ofs << "  \"gain\": " << _gain << ",\n";
+    ofs << "  \"delta_max\": " << _delta_max << ",\n";
+    ofs << "  \"regularization\": " << _regularization << ",\n";
+    ofs << "}\n";
+    ofs.close();
+
+    // Save matrices using utils helpers
+    DDSPC::save_matrix(filename + ".controller", controller);
+    rls->save_state(filename + ".rls");
+    qrd_rls->save_state(filename + ".qrd_rls");
+}
+
+void PredictiveController::load_state(const std::string &filename) {
+    std::string metadata_file = filename + ".meta";
+    std::ifstream ifs(metadata_file);
+    if (!ifs.is_open()) {
+        throw std::runtime_error("Could not open file for load_state metadata: " + metadata_file);
+    }
+
+    std::string line;
+    std::getline(ifs, line); // {
+
+    std::getline(ifs, line); _num_modes = std::stoi(DDSPC::parse_json_value(line));
+    std::getline(ifs, line); _num_future = std::stoi(DDSPC::parse_json_value(line));
+    std::getline(ifs, line); _num_history = std::stoi(DDSPC::parse_json_value(line));
+    std::getline(ifs, line); _gain = static_cast<realT>(std::stod(DDSPC::parse_json_value(line)));
+    std::getline(ifs, line); _delta_max = static_cast<realT>(std::stod(DDSPC::parse_json_value(line)));
+    std::getline(ifs, line); _regularization = static_cast<realT>(std::stod(DDSPC::parse_json_value(line)));
+
+    ifs.close();
+
+    controller = DDSPC::load_matrix(filename + ".controller");
+    set_regularization(_regularization);
+    rls->load_state(filename + ".rls");
+    qrd_rls->load_state(filename + ".qrd_rls");
+    reset_buffers();
 }
 
 }
