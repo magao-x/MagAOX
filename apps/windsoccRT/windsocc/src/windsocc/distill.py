@@ -402,9 +402,9 @@ def normalize_kernel_peak(kernel_2d):
 def ensure_distill_output_dirs(distilled_dir):
     """Create the standard output directories for distill products."""
     os.makedirs(distilled_dir, exist_ok=True)
-    os.makedirs(os.path.join(distilled_dir, "biases"), exist_ok=True)
-    os.makedirs(os.path.join(distilled_dir, "sn_maps"), exist_ok=True)
-    os.makedirs(os.path.join(distilled_dir, "mf_templates"), exist_ok=True)
+    # os.makedirs(os.path.join(distilled_dir, "biases"), exist_ok=True)
+    # os.makedirs(os.path.join(distilled_dir, "sn_maps"), exist_ok=True)
+    # os.makedirs(os.path.join(distilled_dir, "mf_templates"), exist_ok=True)
     os.makedirs(os.path.join(distilled_dir, "mf_response_cubes"), exist_ok=True)
 
 
