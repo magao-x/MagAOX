@@ -39,7 +39,6 @@ namespace app
 
 /// MagAO-X application to control writing ImageStreamIO streams to a zeroMQ channel
 /** \todo document this better
- * \todo implement thread-kills for shutdown. Maybe switch to USR1, with library wide empty handler, so it isn't logged.
  * \ingroup mzmqServer
  *
  */
@@ -75,28 +74,6 @@ class mzmqServer : public MagAOXApp<>, public milkzmq::milkzmqServer
     bool                     m_compress{ false };
     std::vector<std::string> m_shMemImNames;
 
-    /** \name SIGSEGV & SIGBUS signal handling
-     * These signals occur as a result of a ImageStreamIO source server resetting (e.g. changing frame sizes).
-     * When they occur a restart of the framegrabber and framewriter thread main loops is triggered.
-     *
-     * @{
-     */
-    static mzmqServer *m_selfWriter; ///< Static pointer to this (set in constructor).  Used for getting out of the
-                                     ///< static SIGSEGV handler.
-
-    /// Sets the handler for SIGSEGV and SIGBUS
-    /** These are caused by ImageStreamIO server resets.
-     */
-    int setSigSegvHandler();
-
-    /// The handler called when SIGSEGV or SIGBUS is received, which will be due to ImageStreamIO server resets.  Just a
-    /// wrapper for handlerSigSegv.
-    static void _handlerSigSegv( int signum, siginfo_t *siginf, void *ucont );
-
-    /// Handles SIGSEGV and SIGBUS.  Sets m_restart to true.
-    void handlerSigSegv( int signum, siginfo_t *siginf, void *ucont );
-    ///@}
-
     /** \name milkzmq Status and Error Handling
      * Implementation of status updates, warnings, and errors from milkzmq using logs.
      *
@@ -120,13 +97,9 @@ class mzmqServer : public MagAOXApp<>, public milkzmq::milkzmqServer
     ///@}
 };
 
-// Set self pointer to null so app starts up uninitialized.
-mzmqServer *mzmqServer::m_selfWriter = nullptr;
-
 inline mzmqServer::mzmqServer() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     m_powerMgtEnabled = false;
-    m_selfWriter      = this;
 
     return;
 }
@@ -181,18 +154,6 @@ inline void mzmqServer::loadConfig()
 
 inline int mzmqServer::appStartup()
 {
-
-    // Now set up the framegrabber and writer threads.
-    //  - need SIGSEGV and SIGBUS handling for ImageStreamIO restarts
-    //  - initialize the semaphore
-    //  - start the threads
-
-    if( setSigSegvHandler() < 0 )
-    {
-        log<software_error>( { __FILE__, __LINE__ } );
-        return -1;
-    }
-
     if( m_compress )
         defaultCompression();
 
@@ -271,59 +232,6 @@ inline int mzmqServer::appShutdown()
     }
 
     return 0;
-}
-
-inline int mzmqServer::setSigSegvHandler()
-{
-    struct sigaction act;
-    sigset_t         set;
-
-    act.sa_sigaction = &mzmqServer::_handlerSigSegv;
-    act.sa_flags     = SA_SIGINFO;
-    sigemptyset( &set );
-    act.sa_mask = set;
-
-    errno = 0;
-    if( sigaction( SIGSEGV, &act, 0 ) < 0 )
-    {
-        std::string logss = "Setting handler for SIGSEGV failed. Errno says: ";
-        logss += strerror( errno );
-
-        log<software_error>( { __FILE__, __LINE__, errno, 0, logss } );
-
-        return -1;
-    }
-
-    errno = 0;
-    if( sigaction( SIGBUS, &act, 0 ) < 0 )
-    {
-        std::string logss = "Setting handler for SIGBUS failed. Errno says: ";
-        logss += strerror( errno );
-
-        log<software_error>( { __FILE__, __LINE__, errno, 0, logss } );
-
-        return -1;
-    }
-
-    log<text_log>( "Installed SIGSEGV/SIGBUS signal handler.", logPrio::LOG_DEBUG );
-
-    return 0;
-}
-
-inline void mzmqServer::_handlerSigSegv( int signum, siginfo_t *siginf, void *ucont )
-{
-    m_selfWriter->handlerSigSegv( signum, siginf, ucont );
-}
-
-inline void mzmqServer::handlerSigSegv( int signum, siginfo_t *siginf, void *ucont )
-{
-    static_cast<void>( signum );
-    static_cast<void>( siginf );
-    static_cast<void>( ucont );
-
-    milkzmqServer::requestRestart();
-
-    return;
 }
 
 inline void mzmqServer::reportInfo( const std::string &msg )

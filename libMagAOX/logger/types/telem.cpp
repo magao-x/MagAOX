@@ -35,6 +35,7 @@ timespec telem_w2tcsoffloader::lastRecord = { 0, 0 };
 timespec telem_pi335::lastRecord          = { 0, 0 };
 timespec telem_pico::lastRecord           = { 0, 0 };
 timespec telem_position::lastRecord       = { 0, 0 };
+timespec telem_psfacq::lastRecord         = { 0, 0 };
 timespec telem_pokecenter::lastRecord     = { 0, 0 };
 timespec telem_pokeloop::lastRecord       = { 0, 0 };
 timespec telem_poltrack::lastRecord       = { 0, 0 };

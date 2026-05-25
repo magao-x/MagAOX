@@ -1019,12 +1019,6 @@ inline float baslerCtrl::fps()
 
 int baslerCtrl::powerOnDefaults()
 {
-    /*m_nextROI.x     = m_default_x;
-    m_nextROI.y     = m_default_y;
-    m_nextROI.w     = m_default_w;
-    m_nextROI.h     = m_default_h;
-    m_nextROI.bin_x = m_default_bin_x;
-    m_nextROI.bin_y = m_default_bin_y;*/
 
     return 0;
 }

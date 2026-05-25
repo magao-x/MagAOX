@@ -82,6 +82,7 @@ INCLUDEDEPS= \
 	logger/types/telem_pokeloop.hpp \
 	logger/types/telem_poltrack.hpp \
 	logger/types/telem_position.hpp \
+	logger/types/telem_psfacq.hpp \
 	logger/types/telem_rhusb.hpp \
 	logger/types/telem_saving_state.hpp \
 	logger/types/telem_saving.hpp \

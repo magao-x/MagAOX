@@ -10,25 +10,24 @@
 #include <errno.h>
 #include <unistd.h>
 #include <stdexcept>
-#include <sys/types.h>  // provides 'umask'
-#include <sys/stat.h>  // provides 'umask'
-#include <sys/time.h>  // provides 'setrlimit'
-#include <sys/resource.h>  // provides 'setrlimit'
+#include <sys/types.h>    // provides 'umask'
+#include <sys/stat.h>     // provides 'umask'
+#include <sys/time.h>     // provides 'setrlimit'
+#include <sys/resource.h> // provides 'setrlimit'
 #include "IndiConnection.hpp"
 #include "TimeStamp.hpp"
 
+using pcf::IndiConnection;
+using pcf::IndiMessage;
+using pcf::IndiProperty;
+using pcf::IndiXmlParser;
+using pcf::TimeStamp;
+using std::endl;
 using std::exception;
 using std::runtime_error;
 using std::string;
-using std::vector;
 using std::stringstream;
-using std::endl;
-using pcf::TimeStamp;
-using pcf::IndiConnection;
-using pcf::IndiXmlParser;
-using pcf::IndiMessage;
-using pcf::IndiProperty;
-
+using std::vector;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// \brief IndiConnection::IndiConnection
@@ -36,7 +35,7 @@ using pcf::IndiProperty;
 
 IndiConnection::IndiConnection()
 {
-  construct( "generic_indi_process", "1", "1" );
+    construct( "generic_indi_process", "1", "1" );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -46,11 +45,9 @@ IndiConnection::IndiConnection()
 /// \param szVersion Version of this object.
 /// \param szProtocolVersion INDI protocol version.
 
-IndiConnection::IndiConnection( const string &szName,
-                                const string &szVersion,
-                                const string &szProtocolVersion )
+IndiConnection::IndiConnection( const string &szName, const string &szVersion, const string &szProtocolVersion )
 {
-  construct( szName, szVersion, szProtocolVersion );
+    construct( szName, szVersion, szProtocolVersion );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -60,8 +57,8 @@ IndiConnection::IndiConnection( const string &szName,
 
 IndiConnection::IndiConnection( const IndiConnection &idRhs ) : Thread()
 {
-  static_cast<void>(idRhs);
-  // Empty because this is private.
+    static_cast<void>( idRhs );
+    // Empty because this is private.
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -70,11 +67,11 @@ IndiConnection::IndiConnection( const IndiConnection &idRhs ) : Thread()
 /// \param idRhs The right-hand side of the operation.
 /// \return This object.
 
-const IndiConnection &IndiConnection::operator= ( const IndiConnection &idRhs )
+const IndiConnection &IndiConnection::operator=( const IndiConnection &idRhs )
 {
-  static_cast<void>(idRhs);
-  // Empty because this is private.
-  return *this;
+    static_cast<void>( idRhs );
+    // Empty because this is private.
+    return *this;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -87,18 +84,17 @@ IndiConnection::~IndiConnection()
     {
         deactivate();
     }
-    catch(...)
+    catch( ... )
     {
-        //do nothing
+        // do nothing
     }
 
     MutexLock::AutoLock autoOut( &m_mutOutput );
-    if(m_fdOutput >= 0 && m_fdOutput != STDOUT_FILENO)
+    if( m_fdOutput >= 0 && m_fdOutput != STDOUT_FILENO )
     {
-        ::close(m_fdOutput);
+        ::close( m_fdOutput );
     }
     m_fdOutput = -1;
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -108,46 +104,43 @@ IndiConnection::~IndiConnection()
 /// \param szVersion Version of the process.
 /// \param szProtocolVersion Version of the INDI protocol.
 
-void IndiConnection::construct( const string &szName,
-                                const string &szVersion,
-                                const string &szProtocolVersion )
+void IndiConnection::construct( const string &szName, const string &szVersion, const string &szProtocolVersion )
 {
-  // Make sure we are in a known state.
-  m_oQuitProcess = false;
+    // Make sure we are in a known state.
+    m_oQuitProcess.store( false );
 
-  // The process thread has not been set up yet.
-  m_idProcessThread = 0;
+    // The process thread has not been set up yet.
+    m_idProcessThread = 0;
 
-  // These are the two descriptors we will use to talk to the outside world.
-  m_fdInput = STDIN_FILENO;
+    // These are the two descriptors we will use to talk to the outside world.
+    m_fdInput = STDIN_FILENO;
 
-  // We start with STDOUT.
-  m_fdOutput = STDOUT_FILENO;
+    // We start with STDOUT.
+    m_fdOutput = STDOUT_FILENO;
 
-  // setup the signal handler.
-  //::signal( SIGHUP, IndiConnection::handleSignal );
-  //::signal( SIGINT, IndiConnection::handleSignal );
-  //::signal( SIGTERM, IndiConnection::handleSignal );
+    // setup the signal handler.
+    //::signal( SIGHUP, IndiConnection::handleSignal );
+    //::signal( SIGINT, IndiConnection::handleSignal );
+    //::signal( SIGTERM, IndiConnection::handleSignal );
 
-  // Set our information that sets us up as a unique INDI component.
-  setName( szName );
-  setVersion( szVersion );
-  setProtocolVersion( szProtocolVersion );
+    // Set our information that sets us up as a unique INDI component.
+    setName( szName );
+    setVersion( szVersion );
+    setProtocolVersion( szProtocolVersion );
 
-  m_oIsVerboseModeEnabled = false;
+    m_oIsVerboseModeEnabled = false;
 
-  // What is the interval at which our 'execute' function is called?
-  // This is the same if we are in simulation mode or not.
-  // The default is one second.
-  setInterval(1000);
+    // What is the interval at which our 'execute' function is called?
+    // This is the same if we are in simulation mode or not.
+    // The default is one second.
+    setInterval( 1000 );
 
-  // What is our CPU affinity? This is the CPU we will run on.
-  // A -1 indicates we don't care where it runs.
-  m_iCpuAffinity = -1;
+    // What is our CPU affinity? This is the CPU we will run on.
+    // A -1 indicates we don't care where it runs.
+    m_iCpuAffinity = -1;
 
-  // allocate a big buffer to hold the input data.
-  m_vecInputBuf = vector<unsigned char>( InputBufSize );
-
+    // allocate a big buffer to hold the input data.
+    m_vecInputBuf = vector<unsigned char>( InputBufSize );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -185,12 +178,12 @@ void IndiConnection::execute()
 
 void IndiConnection::activate()
 {
-  // is the thread already running?
-  if ( isRunning() == true )
-    throw runtime_error( string( "Tried to activate when already active." ) );
+    // is the thread already running?
+    if( isRunning() == true )
+        throw runtime_error( string( "Tried to activate when already active." ) );
 
-  // Start the 'execute' thread running to perform the component.
-  start( m_iCpuAffinity );
+    // Start the 'execute' thread running to perform the component.
+    start( m_iCpuAffinity );
 }
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -201,16 +194,16 @@ void IndiConnection::activate()
 
 void IndiConnection::deactivate()
 {
-  if ( isRunning() == true )
-  {
-    stop();
-    join();
-    if ( m_idProcessThread != 0 )
+    if( isRunning() == true )
     {
-      ::pthread_join( m_idProcessThread, NULL );
-      m_idProcessThread = 0;
+        stop();
+        join();
+        if( m_idProcessThread != 0 )
+        {
+            ::pthread_join( m_idProcessThread, NULL );
+            m_idProcessThread = 0;
+        }
     }
-  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -220,7 +213,18 @@ void IndiConnection::deactivate()
 
 bool IndiConnection::isActive() const
 {
-  return isRunning();
+    return isRunning();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// \brief IndiConnection::detachFds
+/// Detach the raw input/output file-descriptor aliases without closing them.
+
+void IndiConnection::detachFds()
+{
+    MutexLock::AutoLock autoOut( &m_mutOutput );
+    m_fdInput  = -1;
+    m_fdOutput = -1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -231,16 +235,15 @@ bool IndiConnection::isActive() const
 
 void IndiConnection::processIndiRequests( const bool &oUseThread )
 {
-  if ( oUseThread == false )
-  {
-    process();
-  }
-  else
-  {
-    m_idProcessThread = 0;
-    ::pthread_create( &m_idProcessThread, NULL,
-                      IndiConnection::pthreadProcess, this );
-  }
+    if( oUseThread == false )
+    {
+        process();
+    }
+    else
+    {
+        m_idProcessThread = 0;
+        ::pthread_create( &m_idProcessThread, NULL, IndiConnection::pthreadProcess, this );
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -253,25 +256,25 @@ void IndiConnection::processIndiRequests( const bool &oUseThread )
 
 void *IndiConnection::pthreadProcess( void *pUnknown )
 {
-  //  do a static cast to get the pointer back to a "Thread" object.
-  IndiConnection *pThis = static_cast<IndiConnection *>( pUnknown );
+    //  do a static cast to get the pointer back to a "Thread" object.
+    IndiConnection *pThis = static_cast<IndiConnection *>( pUnknown );
 
-  //  we are now within the new thread and up and running.
-  try
-  {
-    pThis->process();
-  }
-  catch ( const std::exception &excep )
-  {
-    std::cerr << "Process thread exited: " << excep.what() << std::endl;
-  }
-  catch ( ... )
-  {
-    std::cerr << "An exception was thrown, process thread exited." << std::endl;
-  }
+    //  we are now within the new thread and up and running.
+    try
+    {
+        pThis->process();
+    }
+    catch( const std::exception &excep )
+    {
+        std::cerr << "Process thread exited: " << excep.what() << std::endl;
+    }
+    catch( ... )
+    {
+        std::cerr << "An exception was thrown, process thread exited." << std::endl;
+    }
 
-  ///  no return is necessary, since it is not examined.
-  return NULL;
+    ///  no return is necessary, since it is not examined.
+    return NULL;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -281,96 +284,95 @@ void *IndiConnection::pthreadProcess( void *pUnknown )
 
 void IndiConnection::process()
 {
-  // Loop here until we are told to quit or we hit an error.
-  while ( m_oQuitProcess == false )
-  {
-    try
+    // Loop here until we are told to quit or we hit an error.
+    while( m_oQuitProcess.load() == false )
     {
-      // Call the 'update' function to do something each time we pass through
-      // this loop reading input.
-      update();
-
-      // The length of the command received.
-      int nInputBufLen = 0;
-      ::memset( &m_vecInputBuf[0], 0, InputBufSize );
-
-      // Create and clear out the FD set.
-      fd_set fdsRead;
-      FD_ZERO( &fdsRead );
-      // Watch input to see when we get some input.
-      FD_SET( m_fdInput, &fdsRead );
-
-      // The argument to 'select' must be +1 greater than the largest fd.
-      int nHighestNumberedFd = m_fdInput;
-
-      // Set the timeout on the select call.
-      timeval tv;
-      tv.tv_sec = 1; //0;
-      tv.tv_usec = 0; //10000;
-
-      // We need a timeout on the select to ensure that we loop around and
-      // call the 'update' function regularly.
-      int nRetval = ::select( nHighestNumberedFd + 1, &fdsRead, NULL, NULL, &tv );
-      //int nRetval = ::select( nHighestNumberedFd+1, &fdsRead, NULL, NULL, NULL );
-
-      if ( nRetval == -1 )
-      {
-        if ( m_oQuitProcess == false )
+        try
         {
-          Thread::sleep( 1 );
+            // Call the 'update' function to do something each time we pass through
+            // this loop reading input.
+            update();
+
+            // The length of the command received.
+            int nInputBufLen = 0;
+            ::memset( &m_vecInputBuf[0], 0, InputBufSize );
+
+            // Create and clear out the FD set.
+            fd_set fdsRead;
+            FD_ZERO( &fdsRead );
+            // Watch input to see when we get some input.
+            FD_SET( m_fdInput, &fdsRead );
+
+            // The argument to 'select' must be +1 greater than the largest fd.
+            int nHighestNumberedFd = m_fdInput;
+
+            // Set the timeout on the select call.
+            timeval tv;
+            tv.tv_sec  = 1; // 0;
+            tv.tv_usec = 0; // 10000;
+
+            // We need a timeout on the select to ensure that we loop around and
+            // call the 'update' function regularly.
+            int nRetval = ::select( nHighestNumberedFd + 1, &fdsRead, NULL, NULL, &tv );
+            // int nRetval = ::select( nHighestNumberedFd+1, &fdsRead, NULL, NULL, NULL );
+
+            if( nRetval == -1 )
+            {
+                if( m_oQuitProcess.load() == false )
+                {
+                    Thread::sleep( 1 );
+                }
+            }
+            else if( nRetval == 0 )
+            {
+                // Timed out - just loop back around.
+            }
+            // We must check the input file descriptor.
+            else if( FD_ISSET( m_fdInput, &fdsRead ) != 0 )
+            {
+                // Receive a command
+                nInputBufLen = ::read( m_fdInput, &m_vecInputBuf[0], InputBufSize );
+                if( nInputBufLen < 0 )
+                {
+                    m_oQuitProcess.store( true );
+                }
+                else if( nInputBufLen == 0 )
+                {
+                    // If we read an EOF, this is a signal that we should die.
+                    m_oQuitProcess.store( true );
+                }
+                else
+                {
+                    // A message for the error.
+                    std::string szErrorMsg;
+                    // Now, is this a command which fits our requirements?
+                    m_ixpIndi.parseXml( (char *)( &m_vecInputBuf[0] ), nInputBufLen, szErrorMsg );
+
+                    while( m_ixpIndi.getState() == IndiXmlParser::CompleteState )
+                    {
+                        // Create the message from the XML.
+                        IndiMessage         imRecv = m_ixpIndi.createIndiMessage();
+                        const IndiProperty &ipRecv = imRecv.getProperty();
+
+                        // Dispatch!
+                        dispatch( imRecv.getType(), ipRecv );
+
+                        // Get ready for some new XML.
+                        // m_ixpIndi.clear();
+
+                        // Test whether there is more unparsed data.
+                        m_ixpIndi.parseXml( "", szErrorMsg );
+                    }
+                }
+            }
         }
-      }
-      else if ( nRetval == 0 )
-      {
-        // Timed out - just loop back around.
-      }
-      // We must check the input file descriptor.
-      else if ( FD_ISSET( m_fdInput, &fdsRead ) != 0 )
-      {
-        // Receive a command
-        nInputBufLen = ::read( m_fdInput, &m_vecInputBuf[0], InputBufSize );
-        if ( nInputBufLen < 0 )
+        catch( const runtime_error &excep )
         {
-          m_oQuitProcess = true;
         }
-        else if ( nInputBufLen == 0 )
+        catch( const exception &excep )
         {
-          // If we read an EOF, this is a signal that we should die.
-          m_oQuitProcess = true;
         }
-        else
-        {
-          // A message for the error.
-          std::string szErrorMsg;
-          // Now, is this a command which fits our requirements?
-          m_ixpIndi.parseXml( ( char * )( &m_vecInputBuf[0] ), nInputBufLen, szErrorMsg );
-
-          while( m_ixpIndi.getState() == IndiXmlParser::CompleteState )
-          {
-            // Create the message from the XML.
-            IndiMessage imRecv = m_ixpIndi.createIndiMessage();
-            const IndiProperty &ipRecv = imRecv.getProperty();
-
-            // Dispatch!
-            dispatch( imRecv.getType(), ipRecv );
-
-            // Get ready for some new XML.
-            //m_ixpIndi.clear();
-
-            //Test whether there is more unparsed data.
-            m_ixpIndi.parseXml( "", szErrorMsg);
-          }
-        }
-      }
     }
-    catch ( const runtime_error &excep )
-    {
-    }
-    catch ( const exception &excep )
-    {
-    }
-  }
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -379,34 +381,33 @@ void IndiConnection::process()
 /// \param szXml The XML to send.
 void IndiConnection::sendXml( const string &szXml ) const
 {
-  MutexLock::AutoLock autoOut( &m_mutOutput );
+    MutexLock::AutoLock autoOut( &m_mutOutput );
 
-  if(m_fdOutput < 0)
-  {
-    return;
-  }
-
-  const char * buf = szXml.c_str();
-  size_t remaining = szXml.size();
-
-  while(remaining > 0)
-  {
-    ssize_t nwr = ::write(m_fdOutput, buf, remaining);
-    if(nwr > 0)
+    if( m_fdOutput < 0 )
     {
-      buf += nwr;
-      remaining -= static_cast<size_t>(nwr);
-      continue;
+        return;
     }
 
-    if(nwr < 0 && errno == EINTR)
+    const char *buf       = szXml.c_str();
+    size_t      remaining = szXml.size();
+
+    while( remaining > 0 )
     {
-      continue;
+        ssize_t nwr = ::write( m_fdOutput, buf, remaining );
+        if( nwr > 0 )
+        {
+            buf += nwr;
+            remaining -= static_cast<size_t>( nwr );
+            continue;
+        }
+
+        if( nwr < 0 && errno == EINTR )
+        {
+            continue;
+        }
+
+        break;
     }
-
-    break;
-  }
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -416,7 +417,7 @@ void IndiConnection::sendXml( const string &szXml ) const
 
 bool IndiConnection::isVerboseModeEnabled() const
 {
-  return m_oIsVerboseModeEnabled;
+    return m_oIsVerboseModeEnabled;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -426,7 +427,7 @@ bool IndiConnection::isVerboseModeEnabled() const
 
 void IndiConnection::enableVerboseMode( const bool &oEnable )
 {
-  m_oIsVerboseModeEnabled = oEnable;
+    m_oIsVerboseModeEnabled = oEnable;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -436,7 +437,7 @@ void IndiConnection::enableVerboseMode( const bool &oEnable )
 
 void IndiConnection::setInputFd( const int &iFd )
 {
-  m_fdInput = iFd;
+    m_fdInput = iFd;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -448,14 +449,14 @@ void IndiConnection::setOutputFd( const int &iFd )
 {
     MutexLock::AutoLock autoOut( &m_mutOutput );
 
-    if(iFd == m_fdOutput)
+    if( iFd == m_fdOutput )
     {
         return;
     }
 
-    if(m_fdOutput >= 0 && m_fdOutput != STDOUT_FILENO)
+    if( m_fdOutput >= 0 && m_fdOutput != STDOUT_FILENO )
     {
-        ::close(m_fdOutput);
+        ::close( m_fdOutput );
     }
 
     m_fdOutput = iFd;
@@ -468,7 +469,7 @@ void IndiConnection::setOutputFd( const int &iFd )
 
 void IndiConnection::setName( const string &szName )
 {
-  m_szName = szName;
+    m_szName = szName;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -478,7 +479,7 @@ void IndiConnection::setName( const string &szName )
 
 string IndiConnection::getName() const
 {
-  return m_szName;
+    return m_szName;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -488,7 +489,7 @@ string IndiConnection::getName() const
 
 void IndiConnection::setVersion( const string &szVersion )
 {
-  m_szVersion = szVersion;
+    m_szVersion = szVersion;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -498,7 +499,7 @@ void IndiConnection::setVersion( const string &szVersion )
 
 string IndiConnection::getVersion() const
 {
-  return m_szVersion;
+    return m_szVersion;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -508,7 +509,7 @@ string IndiConnection::getVersion() const
 
 void IndiConnection::setProtocolVersion( const string &ProtocolVersion )
 {
-  m_ixpIndi.setProtocolVersion( ProtocolVersion );
+    m_ixpIndi.setProtocolVersion( ProtocolVersion );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -518,7 +519,7 @@ void IndiConnection::setProtocolVersion( const string &ProtocolVersion )
 
 string IndiConnection::getProtocolVersion() const
 {
-  return m_ixpIndi.getProtocolVersion();
+    return m_ixpIndi.getProtocolVersion();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -527,7 +528,7 @@ string IndiConnection::getProtocolVersion() const
 
 void IndiConnection::quitProcess()
 {
-  m_oQuitProcess = true;
+    m_oQuitProcess.store( true );
 }
 
 ////////////////////////////////////////////////////////////////////////////////

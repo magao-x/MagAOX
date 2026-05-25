@@ -268,7 +268,6 @@ void statusCombo::subscribe()
 
     if( m_ctrlWidget )
     {
-        m_ctrlWidget->subscribe();
         m_parent->addSubscriber( m_ctrlWidget );
     }
 
@@ -279,10 +278,6 @@ void statusCombo::onConnect()
 {
     m_valChanged           = true;
     m_statusCommandPending = false;
-    if( m_ctrlWidget )
-    {
-        m_ctrlWidget->onConnect();
-    }
 }
 
 void statusCombo::onDisconnect()
@@ -303,11 +298,6 @@ void statusCombo::onDisconnect()
     ui.status->clear();
     ui.status->setPlaceholderText( "" );
     ui.status->setCurrentIndex( -1 );
-
-    if( m_ctrlWidget )
-    {
-        m_ctrlWidget->onDisconnect();
-    }
 }
 
 void statusCombo::handleDefProperty( const pcf::IndiProperty &ipRecv )
@@ -563,7 +553,6 @@ void statusCombo::on_buttonCtrl_pressed()
     if( m_ctrlWidget )
     {
         m_ctrlWidget->show();
-        m_ctrlWidget->onConnect();
     }
 }
 

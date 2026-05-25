@@ -1,0 +1,27 @@
+namespace MagAOX.logger;
+
+table Telem_psfacq_fb
+{
+   /// x position in pixels
+   x_pos:float;
+
+   /// y position in pixels
+   y_pos:float;
+
+   /// peak pixel value
+   m_pix:float;
+
+   /// fwhm in pixels
+   fwhm:float;
+
+   /// seeing in arcseconds
+   seeing:float;
+
+   /// one-based index of this star within the emitted set
+   star_no:int;
+
+   /// total number of stars emitted in this telemetry cycle
+   num_stars:int;
+}
+
+root_type Telem_psfacq_fb;

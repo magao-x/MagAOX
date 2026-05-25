@@ -69,16 +69,18 @@ std::string ensureMilkShmDir()
 /// Configuration values used to build a deterministic streamWriter test config.
 struct streamWriterConfig
 {
-    size_t                     m_maxCircBuffLength{ 8 };                  ///< Configured circular-buffer length.
-    double                     m_maxCircBuffSize{ 16.0 };                 ///< Configured circular-buffer size in MB.
-    size_t                     m_maxWriteChunkLength{ 4 };                ///< Configured write-chunk length.
-    double                     m_maxChunkTime{ 0.5 };                     ///< Configured max chunk time in seconds.
-    int                        m_writerThreadPrio{ 0 };                   ///< Configured writer thread priority.
-    std::string                m_writerCpuset;                            ///< Optional writer cpuset.
-    bool                       m_compress{ true };                        ///< Whether XRIF compression is enabled.
-    int                        m_lz4accel{ XRIF_LZ4_ACCEL_MIN };          ///< Configured LZ4 acceleration.
-    std::optional<std::string> m_outName;                                 ///< Optional explicit output name.
-    std::optional<std::string> m_savePath;                                ///< Optional explicit save directory.
+    size_t                     m_maxCircBuffLength{ 8 };         ///< Configured circular-buffer length.
+    double                     m_maxCircBuffSize{ 16.0 };        ///< Configured circular-buffer size in MB.
+    size_t                     m_maxWriteChunkLength{ 4 };       ///< Configured write-chunk length.
+    double                     m_maxChunkTime{ 0.5 };            ///< Configured max chunk time in seconds.
+    double                     m_writeStopTimeout{ 1.0 };        ///< Configured stop-writing flush timeout.
+    bool                       m_startWriting{ false };          ///< Whether writing should start armed at startup.
+    int                        m_writerThreadPrio{ 0 };          ///< Configured writer thread priority.
+    std::string                m_writerCpuset;                   ///< Optional writer cpuset.
+    bool                       m_compress{ true };               ///< Whether XRIF compression is enabled.
+    int                        m_lz4accel{ XRIF_LZ4_ACCEL_MIN }; ///< Configured LZ4 acceleration.
+    std::optional<std::string> m_outName;                        ///< Optional explicit output name.
+    std::optional<std::string> m_savePath;                       ///< Optional explicit save directory.
     std::string                m_shmimName{ "streamWriter_test_stream" }; ///< Shared-memory stream name.
     int                        m_semaphoreNumber{ 5 };                    ///< Shared-memory semaphore index.
     unsigned                   m_semWaitNSec{ 1000000 };                  ///< Semaphore timeout in nanoseconds.
@@ -248,14 +250,17 @@ class streamWriterLifecycleTest : public streamWriter
     /// Stop the direct `fgThreadExec()` harness and release any resources it owns.
     void stopFgHarness()
     {
-        m_writing  = NOT_WRITING;
-        m_restart  = false;
-        m_shutdown = 1;
+        m_writing      = NOT_WRITING;
+        m_writePending = false;
+        m_restart      = false;
+        m_shutdown     = 1;
 
         if( m_fgThread.joinable() )
         {
             m_fgThread.join();
         }
+
+        release_circbufs();
 
         if( m_swSemaphoreInitialized )
         {
@@ -394,6 +399,8 @@ std::filesystem::path loadConfig( streamWriterLifecycleTest &app,
                                        "writer",
                                        "writer",
                                        "writer",
+                                       "writer",
+                                       "writer",
                                        "framegrabber",
                                        "framegrabber",
                                        "framegrabber",
@@ -405,6 +412,8 @@ std::filesystem::path loadConfig( streamWriterLifecycleTest &app,
                                    "maxCircBuffSize",
                                    "maxWriteChunkLength",
                                    "maxChunkTime",
+                                   "stopTimeout",
+                                   "startWriting",
                                    "threadPrio",
                                    "compress",
                                    "lz4accel",
@@ -419,6 +428,8 @@ std::filesystem::path loadConfig( streamWriterLifecycleTest &app,
                                      std::to_string( cfg.m_maxCircBuffSize ),
                                      std::to_string( cfg.m_maxWriteChunkLength ),
                                      std::to_string( cfg.m_maxChunkTime ),
+                                     std::to_string( cfg.m_writeStopTimeout ),
+                                     cfg.m_startWriting ? "1" : "0",
                                      std::to_string( cfg.m_writerThreadPrio ),
                                      cfg.m_compress ? "1" : "0",
                                      std::to_string( cfg.m_lz4accel ),
@@ -585,6 +596,8 @@ TEST_CASE( "streamWriter configuration loads defaults and overrides", "[streamWr
         REQUIRE( app.m_maxCircBuffSize == Approx( 16.0 ) );
         REQUIRE( app.m_maxWriteChunkLength == 4 );
         REQUIRE( app.m_maxChunkTime == Approx( 0.5 ) );
+        REQUIRE( app.m_writeStopTimeout == Approx( 1.0 ) );
+        REQUIRE( app.m_startWriting == false );
         REQUIRE( app.m_shmimName == "streamWriter_test_stream" );
         REQUIRE( app.m_outName == app.m_shmimName );
         REQUIRE( app.m_rawimageDir == ( root / expectedRawRel ).string() );
@@ -606,6 +619,8 @@ TEST_CASE( "streamWriter configuration loads defaults and overrides", "[streamWr
         cfg.m_savePath = ( std::filesystem::path( "/tmp/streamWriter_lifecycle_test_override" ) / "science" ).string();
         cfg.m_compress = false;
         cfg.m_lz4accel = XRIF_LZ4_ACCEL_MAX + 17;
+        cfg.m_startWriting           = true;
+        cfg.m_writeStopTimeout       = 0.25;
         cfg.m_writerThreadPrio       = 3;
         cfg.m_framegrabberThreadPrio = 2;
 
@@ -615,6 +630,8 @@ TEST_CASE( "streamWriter configuration loads defaults and overrides", "[streamWr
         REQUIRE( app.m_rawimageDir == *cfg.m_savePath );
         REQUIRE( app.m_compress == false );
         REQUIRE( app.m_lz4accel == XRIF_LZ4_ACCEL_MAX );
+        REQUIRE( app.m_startWriting == true );
+        REQUIRE( app.m_writeStopTimeout == Approx( 0.25 ) );
         REQUIRE( app.m_swThreadPrio == 3 );
         REQUIRE( app.m_fgThreadPrio == 2 );
     }
@@ -698,6 +715,28 @@ TEST_CASE( "streamWriter lifecycle handles startup validation and nominal shutdo
         REQUIRE( app.m_fgThread.joinable() == false );
         REQUIRE( app.m_swThread.joinable() == false );
         REQUIRE( app.m_writing == NOT_WRITING );
+    }
+
+    SECTION( "appStartup arms writing immediately when configured to start writing" )
+    {
+        streamWriterLifecycleTest app;
+        startupScope              startup( app );
+        streamWriterConfig        cfg;
+
+        cfg.m_startWriting = true;
+        cfg.m_savePath =
+            ( std::filesystem::path( "/tmp/streamWriter_lifecycle_test" ) / "startup_start_writing" / "raw" ).string();
+
+        loadConfig( app, "startup_start_writing", cfg );
+
+        const int startupRv = app.appStartup();
+        startup.markStarted( startupRv == 0 );
+
+        REQUIRE( startupRv == 0 );
+        REQUIRE( app.m_writing == START_WRITING );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::OPERATING );
     }
 }
 
@@ -885,6 +924,7 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         cfg.m_maxCircBuffLength   = 8;
         cfg.m_maxWriteChunkLength = 2;
         cfg.m_maxChunkTime        = 0.2;
+        cfg.m_writeStopTimeout    = 0.05;
         cfg.m_semWaitNSec         = 1000000;
         cfg.m_savePath =
             ( std::filesystem::path( "/tmp/streamWriter_lifecycle_test" ) / "fg_writing" / "raw" ).string();
@@ -921,7 +961,8 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         REQUIRE( waitFor( [&app]() { return app.m_currImage == 3; } ) );
         REQUIRE( app.m_writing == WRITING );
 
-        app.m_writing = STOP_WRITING;
+        app.m_writing           = STOP_WRITING;
+        app.m_stopWriteDeadline = mx::sys::get_curr_time() + cfg.m_writeStopTimeout;
         source.publishFrame( 3, 4, 40, offsetTimespec( stopAtime, 1000000 ), offsetTimespec( stopWtime, 1000000 ) );
         REQUIRE( waitFor( [&app]() { return app.writerSemaphoreValue() > 0; } ) );
         REQUIRE( app.m_currSaveStart == 2 );
@@ -936,7 +977,10 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         REQUIRE( waitFor( [&app]() { return app.m_currImage == 5; } ) );
         REQUIRE( app.m_writing == WRITING );
 
-        app.m_writing = STOP_WRITING;
+        app.m_writing           = STOP_WRITING;
+        app.m_stopWriteDeadline = mx::sys::get_curr_time() + cfg.m_writeStopTimeout;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+        REQUIRE( app.writerSemaphoreValue() == 0 );
         REQUIRE( waitFor( [&app]() { return app.writerSemaphoreValue() > 0; } ) );
         REQUIRE( app.m_currSaveStart == 4 );
         REQUIRE( app.m_currSaveStop == 5 );
@@ -993,7 +1037,7 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         fgScope.disarm();
     }
 
-    SECTION( "replaced shmims flush the pending chunk and reconnect in the idle state" )
+    SECTION( "replaced shmims flush the pending chunk and reconnect ready to keep writing" )
     {
         streamWriterLifecycleTest   app;
         fgHarnessScope              fgScope( app );
@@ -1057,10 +1101,12 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
                                                          static_cast<uint64_t>( nextWtime.tv_sec ),
                                                          static_cast<uint64_t>( nextWtime.tv_nsec ) } );
 
-        app.m_writing = NOT_WRITING;
+        app.m_writing              = START_WRITING;
+        app.m_resumeAfterReconnect = true;
+        app.m_writePending         = false;
         REQUIRE( app.drainWriterSemaphore() >= 1 );
 
-        REQUIRE( waitFor( [&app]() { return app.m_width == 3 && app.m_height == 1 && app.m_writing == NOT_WRITING; },
+        REQUIRE( waitFor( [&app]() { return app.m_width == 3 && app.m_height == 1 && app.m_writing == START_WRITING; },
                           3000 ) );
         REQUIRE( app.writerSemaphoreValue() == 0 );
 
@@ -1069,11 +1115,62 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         source->publishFrame( 0, 101, 500, reconnectedAtime, reconnectedWtime );
 
         REQUIRE( waitFor( [&app]() { return app.m_currImage == 1; } ) );
-        REQUIRE( app.m_writing == NOT_WRITING );
+        REQUIRE( app.m_writing == WRITING );
         REQUIRE( rawFrameWord( app, 0, 0 ) == 500 );
         REQUIRE( rawFrameWord( app, 0, 2 ) == 502 );
         REQUIRE( timingWord( app, 0, 0 ) == 101 );
         REQUIRE( app.writerSemaphoreValue() == 0 );
+
+        app.stopFgHarness();
+        fgScope.disarm();
+    }
+
+    SECTION( "restart cleanup times out instead of hanging when no writer thread drains the queued flush" )
+    {
+        streamWriterLifecycleTest   app;
+        fgHarnessScope              fgScope( app );
+        streamWriterConfig          cfg;
+        std::unique_ptr<tempStream> source;
+
+        cfg.m_shmimName           = uniqueShmimName( "cube_restart_timeout" );
+        cfg.m_maxCircBuffLength   = 8;
+        cfg.m_maxWriteChunkLength = 4;
+        cfg.m_maxChunkTime        = 10.0;
+        cfg.m_writeStopTimeout    = 0.1;
+        cfg.m_semWaitNSec         = 1000000;
+        cfg.m_savePath =
+            ( std::filesystem::path( "/tmp/streamWriter_lifecycle_test" ) / "fg_restart_timeout" / "raw" ).string();
+
+        source = std::make_unique<tempStream>( cfg.m_shmimName, 2, 2, 8 );
+
+        loadConfig( app, "fg_cube_restart_timeout", cfg );
+        REQUIRE( app.initializeFgHarness() == 0 );
+        fgScope.markActive( true );
+        app.m_writeCompletionTimeout = 0.1;
+
+        app.startFgHarnessThread();
+
+        REQUIRE( waitFor( [&app]()
+                          { return app.m_rawImageCircBuff != nullptr && app.m_width == 2 && app.m_height == 2; } ) );
+
+        const timespec baseAtime = currentRealtime();
+        const timespec baseWtime = offsetTimespec( baseAtime, 1000 );
+
+        app.m_writing = START_WRITING;
+        source->publishFrame( 0, 1, 100, baseAtime, baseWtime );
+        REQUIRE( waitFor( [&app]() { return app.m_currImage == 1; } ) );
+        source->publishFrame( 1, 2, 200, offsetTimespec( baseAtime, 1000000 ), offsetTimespec( baseWtime, 1000000 ) );
+        REQUIRE( waitFor( [&app]() { return app.m_currImage == 2; } ) );
+        REQUIRE( app.m_writing == WRITING );
+        REQUIRE( app.writerSemaphoreValue() == 0 );
+
+        source.reset();
+        source = std::make_unique<tempStream>( cfg.m_shmimName, 3, 1, 8 );
+
+        REQUIRE( waitFor( [&app]() { return app.m_shutdown != 0; }, 3000 ) );
+        REQUIRE( app.m_writing == STOP_WRITING );
+        REQUIRE( app.m_writePending == true );
+        REQUIRE( app.writerSemaphoreValue() > 0 );
 
         app.stopFgHarness();
         fgScope.disarm();
