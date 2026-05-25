@@ -15,10 +15,6 @@
 #include <thread>
 #include <random>
 #include <semaphore.h>
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
-#include <mutex>
 
 #include <Eigen/Dense>
 #include <mx/improc/eigenCube.hpp>
@@ -37,30 +33,15 @@ using namespace mx::improc;
  namespace app
  {
 
- struct accelShmimT
- {
-     static std::string configSection()
-     {
-         return "accelShmim";
-     };
-
-     static std::string indiPrefix()
-     {
-         return "accel";
-     };
- };
-
- class loPredCtrl : public MagAOXApp<true>, public dev::shmimMonitor<loPredCtrl>, public dev::shmimMonitor<loPredCtrl, accelShmimT>, public dev::frameGrabber<loPredCtrl>, public dev::telemeter<loPredCtrl>
+ class loPredCtrl : public MagAOXApp<true>, public dev::shmimMonitor<loPredCtrl>, public dev::frameGrabber<loPredCtrl>, public dev::telemeter<loPredCtrl>
  {
      // Give the test harness access.
      friend class loPredCtrl_test;
 
      friend class dev::shmimMonitor<loPredCtrl>;
-     friend class dev::shmimMonitor<loPredCtrl, accelShmimT>;
 
      // The base shmimMonitor type
      typedef dev::shmimMonitor<loPredCtrl> shmimMonitorT;
-     typedef dev::shmimMonitor<loPredCtrl, accelShmimT> accelShmimMonitorT;
 
      friend class dev::frameGrabber<loPredCtrl>;
 
@@ -106,25 +87,6 @@ using namespace mx::improc;
     int m_num_modes {1};
     int m_history {5};
     int m_future {3};
-    bool m_accelEnabled {false}; ///< Enables accelerometer integration.
-    int m_accelChannels {2}; ///< Number of accelerometer channels in each sample.
-    int m_accelHistory {20}; ///< Number of past accelerometer samples in the regressor.
-    bool m_accelNormalize {true}; ///< Enables online per-channel z-score normalization.
-    realT m_accelStdFloor {1.0e-4f}; ///< Standard-deviation floor used by normalization.
-    realT m_accelClipSigma {0.0f}; ///< Optional post-normalization clip threshold in sigma units.
-
-    uint32_t m_accelWidth {0}; ///< Accelerometer shmim width.
-    uint32_t m_accelHeight {0}; ///< Accelerometer shmim height.
-    DDSPC::Matrix m_latestAccelSample; ///< Most recent normalized accelerometer sample.
-    bool m_haveAccelSample {false}; ///< True once at least one accel frame has been ingested.
-    int m_accelMissingFrameCount {0}; ///< Consecutive WFS frames without a received accelerometer frame.
-    int m_accelMissingFrameLimit {20}; ///< WFS-frame grace period before disabling accel integration.
-
-    std::mutex m_accelMutex; ///< Protects shared accelerometer sample/state access.
-    DDSPC::Matrix m_accelMean; ///< Running accelerometer mean for normalization.
-    DDSPC::Matrix m_accelM2; ///< Running second central moment for normalization.
-    uint64_t m_accelNormCount {0}; ///< Number of samples processed by normalization.
-    bool m_accelMonitorStarted {false}; ///< Tracks whether the accel shmim monitor was started.
 
     DDSPC::Matrix new_command;
     DDSPC::Matrix new_measurement;
@@ -295,24 +257,9 @@ using namespace mx::improc;
    protected:
      int allocate( const dev::shmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
 
-	     int processImage( void *curr_src,          ///< [in] pointer to start of current frame.
-	                       const dev::shmimT &dummy ///< [in] tag to differentiate shmimMonitor parents.
-	     );
-
-	     /// Allocate accelerometer stream dimensions/state.
-	     int allocate( const accelShmimT &dummy /**< [in] tag to differentiate accelerometer shmim monitor parent.*/ );
-
-	     /// Ingest one accelerometer frame.
-	     int processImage( void *curr_src, ///< [in] pointer to start of current accelerometer frame.
-	                       const accelShmimT &dummy /**< [in] tag to differentiate accelerometer shmim monitor parent.*/
-	     );
-
-	     /// Reset accelerometer sample and normalization buffers.
-	     void resetAccelTelemetryState();
-	     /// Apply optional online normalization to one accelerometer sample.
-	     void normalizeAccelSample( DDSPC::Matrix &sample );
-	     /// Disable accelerometer integration and optionally rebuild legacy controller dimensions.
-	     void disableAccelIntegration( const std::string &reason, bool rebuildController = false );
+     int processImage( void *curr_src,          ///< [in] pointer to start of current frame.
+                       const dev::shmimT &dummy ///< [in] tag to differentiate shmimMonitor parents.
+     );
 
      inline void save(std::string directory)
      {
@@ -330,14 +277,12 @@ using namespace mx::improc;
 
  inline loPredCtrl::loPredCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
  {
-     accelShmimMonitorT::m_getExistingFirst = true;
      return;
  }
 
  inline void loPredCtrl::setupConfig()
  {
      shmimMonitorT::setupConfig( config );
-     accelShmimMonitorT::setupConfig( config );
      FRAMEGRABBER_SETUP_CONFIG( config );
      TELEMETER_SETUP_CONFIG(config);
 
@@ -355,25 +300,11 @@ using namespace mx::improc;
      config.add("parameters.qrd", "", "parameters.qrd", argType::Required, "parameters", "qrd", false, "bool", "The use QRD-RLS or Classic RLS.");
      config.add("parameters.own_shmim", "", "parameters.own_shmim", argType::Required, "parameters", "own_shmim", false, "bool", "Does the predictive control own the output shmim or not.");
      config.add("parameters.is_integrating", "", "parameters.is_integrating", argType::Required, "parameters", "is_integrating", false, "bool", "Whether the control signal is integrated or not.");
-     config.add("parameters.accel_enabled", "", "parameters.accel_enabled", argType::Optional, "parameters", "accel_enabled", false, "bool", "Enable accelerometer integration.");
-     config.add("parameters.accel_channels", "", "parameters.accel_channels", argType::Optional, "parameters", "accel_channels", false, "int", "Number of accelerometer channels.");
-     config.add("parameters.accel_history", "", "parameters.accel_history", argType::Optional, "parameters", "accel_history", false, "int", "Number of accelerometer history samples.");
-     config.add("parameters.accel_normalize", "", "parameters.accel_normalize", argType::Optional, "parameters", "accel_normalize", false, "bool", "Enable online accelerometer normalization.");
-     config.add("parameters.accel_std_floor", "", "parameters.accel_std_floor", argType::Optional, "parameters", "accel_std_floor", false, "float", "Standard deviation floor for normalization.");
-     config.add("parameters.accel_clip_sigma", "", "parameters.accel_clip_sigma", argType::Optional, "parameters", "accel_clip_sigma", false, "float", "Optional sigma clipping after normalization.");
-     config.add("parameters.accel_missing_frame_limit", "", "parameters.accel_missing_frame_limit", argType::Optional, "parameters", "accel_missing_frame_limit", false, "int", "Number of WFS frames to wait for accel before falling back to legacy mode.");
  }
 
  inline int loPredCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
  {
-    shmimMonitorT::loadConfig( _config );
-
-    _config(m_accelEnabled, "parameters.accel_enabled");
-    if(m_accelEnabled){
-        accelShmimMonitorT::loadConfig( _config );
-    }else{
-        accelShmimMonitorT::m_shmimName = "";
-    }
+    shmimMonitorT::loadConfig( config );
 
     _config(m_fpsSource, "parameters.fpsSource");
 
@@ -388,28 +319,6 @@ using namespace mx::improc;
     _config(use_qrd, "parameters.qrd");
     _config(own_shmim, "parameters.own_shmim");
     _config(is_integrating, "parameters.is_integrating");
-    _config(m_accelChannels, "parameters.accel_channels");
-    _config(m_accelHistory, "parameters.accel_history");
-    _config(m_accelNormalize, "parameters.accel_normalize");
-    _config(m_accelStdFloor, "parameters.accel_std_floor");
-    _config(m_accelClipSigma, "parameters.accel_clip_sigma");
-    _config(m_accelMissingFrameLimit, "parameters.accel_missing_frame_limit");
-
-    m_accelChannels = std::max(0, m_accelChannels);
-    m_accelHistory = std::max(0, m_accelHistory);
-    if(m_accelMissingFrameLimit < 1){
-        m_accelMissingFrameLimit = 1;
-    }
-
-    if(m_accelChannels == 0 || m_accelHistory == 0){
-        m_accelEnabled = false;
-    }
-
-    if(!m_accelEnabled){
-        m_accelChannels = 0;
-        m_accelHistory = 0;
-        accelShmimMonitorT::m_shmimName = "";
-    }
 
     frameGrabberT::m_ownShmim = own_shmim;
     FRAMEGRABBER_LOAD_CONFIG(_config);
@@ -424,12 +333,8 @@ using namespace mx::improc;
     std::cout << "History " << m_history << std::endl;
     std::cout << "Future " << m_future << std::endl;
     std::cout << "Use QRD " << use_qrd << std::endl;
-    std::cout << "Accel enabled " << m_accelEnabled << std::endl;
-    std::cout << "Accel channels " << m_accelChannels << std::endl;
-    std::cout << "Accel history " << m_accelHistory << std::endl;
 
     std::cout << "Done reading config Impl." << std::endl;
-    resetAccelTelemetryState();
 
      return 0;
  }
@@ -444,18 +349,6 @@ using namespace mx::improc;
      if( shmimMonitorT::appStartup() < 0 )
      {
          return log<software_error, -1>( { __FILE__, __LINE__ } );
-     }
-
-     if( m_accelEnabled )
-     {
-         if( accelShmimMonitorT::appStartup() < 0 )
-         {
-             disableAccelIntegration( "Accelerometer monitor startup failed.", true );
-         }
-         else
-         {
-             m_accelMonitorStarted = true;
-         }
      }
 
      CREATE_REG_INDI_NEW_TEXT( m_indiP_exploration, "exploration_sequence", "", "");
@@ -513,14 +406,6 @@ using namespace mx::improc;
          return log<software_error, -1>( { __FILE__, __LINE__ } );
      }
 
-     if( m_accelEnabled )
-     {
-         if( accelShmimMonitorT::appLogic() < 0 )
-         {
-             disableAccelIntegration( "Accelerometer monitor thread exited; disabling accelerometer path." );
-         }
-     }
-
     FRAMEGRABBER_APP_LOGIC;
     TELEMETER_APP_LOGIC;
 
@@ -529,14 +414,6 @@ using namespace mx::improc;
      if( shmimMonitorT::updateINDI() < 0 )
      {
          log<software_error>( { __FILE__, __LINE__ } );
-     }
-
-     if( m_accelEnabled )
-     {
-         if( accelShmimMonitorT::updateINDI() < 0 )
-         {
-             disableAccelIntegration( "Accelerometer INDI update failed; disabling accelerometer path." );
-         }
      }
 
     FRAMEGRABBER_UPDATE_INDI;
@@ -575,11 +452,6 @@ using namespace mx::improc;
  inline int loPredCtrl::appShutdown()
  {
      shmimMonitorT::appShutdown();
-     if( m_accelMonitorStarted )
-     {
-         accelShmimMonitorT::appShutdown();
-         m_accelMonitorStarted = false;
-     }
 
     FRAMEGRABBER_APP_SHUTDOWN;
     TELEMETER_APP_SHUTDOWN;
@@ -618,148 +490,8 @@ using namespace mx::improc;
     generator = std::default_random_engine();
     distribution = std::normal_distribution<DDSPC::realT>(0.0, 1.0);
 
-    if(controller){
-        delete controller;
-        controller = nullptr;
-    }
-
-    controller = new DDSPC::PredictiveController(m_num_modes, m_history, m_future, m_gainCtrl, m_gammaCtrl, m_regularizationCtrl, m_covarianceCtrl, m_accelChannels, m_accelHistory);
+    controller = new DDSPC::PredictiveController(m_num_modes, m_history, m_future, m_gainCtrl, m_gammaCtrl, m_regularizationCtrl, m_covarianceCtrl);
     controller->use_qrd = use_qrd;
-
-    return 0;
- }
-
- inline int loPredCtrl::allocate( const accelShmimT &dummy )
- {
-    static_cast<void>( dummy ); // be unused
-
-    m_accelWidth = accelShmimMonitorT::m_width;
-    m_accelHeight = accelShmimMonitorT::m_height;
-
-    if(m_accelChannels > 0){
-        size_t totalAccelValues = static_cast<size_t>(m_accelWidth) * static_cast<size_t>(m_accelHeight);
-        if(static_cast<size_t>(m_accelChannels) > totalAccelValues){
-            return log<software_error, -1>({__FILE__, __LINE__, "Accelerometer channel count exceeds accel shmim size."});
-        }
-    }
-
-    resetAccelTelemetryState();
-    return 0;
- }
-
- inline void loPredCtrl::resetAccelTelemetryState()
- {
-    std::lock_guard<std::mutex> guard(m_accelMutex); //mutex scope
-    m_accelNormCount = 0;
-    m_haveAccelSample = false;
-    m_accelMissingFrameCount = 0;
-
-    if(m_accelChannels <= 0){
-        m_accelMean.resize(0, 1);
-        m_accelM2.resize(0, 1);
-        m_latestAccelSample.resize(0, 1);
-        return;
-    }
-
-    m_accelMean.resize(m_accelChannels, 1);
-    m_accelMean.setZero();
-    m_accelM2.resize(m_accelChannels, 1);
-    m_accelM2.setZero();
-    m_latestAccelSample.resize(m_accelChannels, 1);
-    m_latestAccelSample.setZero();
- }
-
- inline void loPredCtrl::normalizeAccelSample( DDSPC::Matrix &sample )
- {
-    if(!m_accelNormalize){
-        return;
-    }
-
-    if(m_accelChannels <= 0 || sample.rows() != m_accelChannels || sample.cols() != 1){
-        return;
-    }
-
-    m_accelNormCount++;
-    realT stdFloor = std::max(m_accelStdFloor, static_cast<realT>(1.0e-8));
-
-    for(int i = 0; i < m_accelChannels; ++i){
-        realT value = sample(i, 0);
-        realT delta = value - m_accelMean(i, 0);
-        m_accelMean(i, 0) += delta / static_cast<realT>(m_accelNormCount);
-        realT delta2 = value - m_accelMean(i, 0);
-        m_accelM2(i, 0) += delta * delta2;
-
-        if(m_accelNormCount < 2){
-            sample(i, 0) = 0.0;
-            continue;
-        }
-
-        realT variance = m_accelM2(i, 0) / static_cast<realT>(m_accelNormCount - 1);
-        realT sigma = std::sqrt(std::max(variance, stdFloor * stdFloor));
-        sample(i, 0) = (value - m_accelMean(i, 0)) / sigma;
-
-        if(m_accelClipSigma > 0.0f){
-            sample(i, 0) = std::max(-m_accelClipSigma, std::min(m_accelClipSigma, sample(i, 0)));
-        }
-    }
- }
-
- inline void loPredCtrl::disableAccelIntegration( const std::string &reason, bool rebuildController )
- {
-    if(!m_accelEnabled){
-        return;
-    }
-
-    log<text_log>(reason + " Falling back to legacy non-accelerometer behavior.", logPrio::LOG_WARNING);
-
-    m_accelEnabled = false;
-    m_accelChannels = 0;
-    m_accelHistory = 0;
-    accelShmimMonitorT::m_shmimName = "";
-
-    if(m_accelMonitorStarted){
-        accelShmimMonitorT::appShutdown();
-        m_accelMonitorStarted = false;
-    }
-
-    if(rebuildController && controller){
-        delete controller;
-        controller = new DDSPC::PredictiveController(m_num_modes, m_history, m_future, m_gainCtrl, m_gammaCtrl, m_regularizationCtrl, m_covarianceCtrl, 0, 0);
-        controller->use_qrd = use_qrd;
-    }
-
-    resetAccelTelemetryState();
- }
-
- inline int loPredCtrl::processImage( void *curr_src, const accelShmimT &dummy )
- {
-    static_cast<void>( dummy ); // be unused
-    if(!m_accelEnabled || m_accelChannels <= 0){
-        return 0;
-    }
-
-    Eigen::Map<eigenImage<realT>> accelFrame( static_cast<realT *>(curr_src), m_accelWidth, m_accelHeight );
-    DDSPC::Matrix accelSample;
-    accelSample.resize(m_accelChannels, 1);
-
-    size_t availableValues = static_cast<size_t>(m_accelWidth) * static_cast<size_t>(m_accelHeight);
-    for(int i = 0; i < m_accelChannels; ++i){
-        if(static_cast<size_t>(i) >= availableValues){
-            accelSample(i, 0) = 0.0;
-            continue;
-        }
-
-        uint32_t row = static_cast<uint32_t>(i) % m_accelWidth;
-        uint32_t col = static_cast<uint32_t>(i) / m_accelWidth;
-        accelSample(i, 0) = accelFrame(row, col);
-    }
-
-    normalizeAccelSample(accelSample);
-
-    std::lock_guard<std::mutex> guard(m_accelMutex); //mutex scope
-    m_latestAccelSample = accelSample;
-    m_haveAccelSample = true;
-    m_accelMissingFrameCount = 0;
 
     return 0;
  }
@@ -851,30 +583,6 @@ using namespace mx::improc;
 
     for(int i=0; i < m_num_modes; i++){
         new_measurement(i, 0) = m_modeval(i,0);
-    }
-
-    if(controller && m_accelEnabled){
-        DDSPC::Matrix accelSample;
-        accelSample.resize(m_accelChannels, 1);
-        accelSample.setZero();
-
-        bool haveAccel = false;
-        { //mutex scope
-            std::lock_guard<std::mutex> guard(m_accelMutex);
-            if(m_haveAccelSample && m_latestAccelSample.rows() == m_accelChannels && m_latestAccelSample.cols() == 1){
-                accelSample = m_latestAccelSample;
-                haveAccel = true;
-                m_accelMissingFrameCount = 0;
-            }else{
-                m_accelMissingFrameCount++;
-            }
-        }
-
-        if(!haveAccel && m_accelMissingFrameCount >= m_accelMissingFrameLimit){
-            disableAccelIntegration("No accelerometer frames received; disabling accelerometer path.", true);
-        }else if(m_accelEnabled){
-            controller->push_accelerometer_sample(accelSample);
-        }
     }
 
     if(is_predictive_control){
