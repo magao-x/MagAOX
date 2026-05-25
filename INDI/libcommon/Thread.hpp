@@ -41,6 +41,7 @@
 #ifndef PCF_THREAD_HPP
 #define PCF_THREAD_HPP
 
+#include <atomic>
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -48,7 +49,7 @@
 #include "MutexLock.hpp"
 #include "SystemSocket.hpp"
 #ifdef WIN32
-#include <windows.h>
+    #include <windows.h>
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -57,49 +58,49 @@ namespace pcf
 {
 class Thread
 {
-  // Constants.
+    // Constants.
   public:
     enum Error
     {
-      ErrNone =                     0, // This value must stay zero.
-      ErrThreadUnjoinable =        -ENODEV,
-      ErrBadThreadId =             -ESRCH,
-      ErrDeadlock =                -EDEADLK,
-      ErrCouldNotCreateThread =    -EAGAIN,
-      ErrInvalidParameter  =       -EINVAL,
-      ErrWrongPermission =         -EPERM,
-      ErrAlreadyRunning =          -EALREADY,
-      ErrInterrupted =             -EINTR,
-      ErrCopy =                    -EFAULT,
-      ErrTimedOut =                -ETIMEDOUT,
-      ErrNotRunning =              -EHOSTDOWN,
-      ErrCpuNumberOutOfRange =     -ENOENT,
-      ErrUnknown =                 -9999
+        ErrNone                 = 0, // This value must stay zero.
+        ErrThreadUnjoinable     = -ENODEV,
+        ErrBadThreadId          = -ESRCH,
+        ErrDeadlock             = -EDEADLK,
+        ErrCouldNotCreateThread = -EAGAIN,
+        ErrInvalidParameter     = -EINVAL,
+        ErrWrongPermission      = -EPERM,
+        ErrAlreadyRunning       = -EALREADY,
+        ErrInterrupted          = -EINTR,
+        ErrCopy                 = -EFAULT,
+        ErrTimedOut             = -ETIMEDOUT,
+        ErrNotRunning           = -EHOSTDOWN,
+        ErrCpuNumberOutOfRange  = -ENOENT,
+        ErrUnknown              = -9999
     };
 
     enum State
     {
-      Idle =          0,
-      BeforeExecute = 1,
-      Execute =       2,
-      AfterExecute =  3
+        Idle          = 0,
+        BeforeExecute = 1,
+        Execute       = 2,
+        AfterExecute  = 3
     };
 
     enum ScheduleType
     {
-      Inherit    = 0,
-      Normal     = 1,
-      Turbo      = 2,
+        Inherit = 0,
+        Normal  = 1,
+        Turbo   = 2,
     };
 
-  // Constructor/destructor/operators.
+    // Constructor/destructor/operators.
   public:
     Thread();
     virtual ~Thread();
     Thread( const Thread &copy );
-    const Thread &operator =( const Thread &copy );
+    const Thread &operator=( const Thread &copy );
 
-  // Methods.
+    // Methods.
   public:
     /// Return the message concerning the error.
     static std::string getErrorMsg( const int &nErr );
@@ -134,21 +135,19 @@ class Thread
     /// not call 'execute' until there is.
     void setTrigger( pcf::SystemSocket *psocTrigger );
     /// Starts the thread running.
-    int start( const int &iCpuAffinity = -1,
-               const ScheduleType &tSchedule = Inherit );
+    int start( const int &iCpuAffinity = -1, const ScheduleType &tSchedule = Inherit );
     /// Stops the 'execute' function from firing by stopping the thread.
     void stop();
     /// Waits for the 'ready' mutex to be unlocked. This indicates that the
     /// 'execute' function is about to be run.
     void waitForReady();
 
-   // Sleep and thread id functions.
+    // Sleep and thread id functions.
   public:
     /// Put the calling thread to sleep for uiMillis milliseconds.
     static int msleep( const unsigned int &uiMillis );
     /// Put the calling thread to sleep for a timespec amount of time.
-    static int nanosleep( const unsigned int &uiSeconds,
-                          const unsigned int &uiNanos );
+    static int nanosleep( const unsigned int &uiSeconds, const unsigned int &uiNanos );
     /// Put the calling thread to sleep for uiNanos nanoseconds.
     static int nsleep( const unsigned int &uiNanos );
     /// Put the calling thread to sleep for uiSeconds seconds.
@@ -158,13 +157,13 @@ class Thread
     /// This will handle the signal which forces any system calls to return.
     static void processSignalHandler( int nSignal );
 
-  // Overridable methods - these give the thread its personality.
+    // Overridable methods - these give the thread its personality.
   public:
     virtual void afterExecute();
     virtual void beforeExecute();
     virtual void execute();
 
-  // Helper functions.
+    // Helper functions.
   protected:
 #ifdef WIN32
     static DWORD WINAPI threadFuncWin( void *pUnknown );
@@ -175,7 +174,7 @@ class Thread
     // Create and open the pipe for the pause/resume functionality.
     void setupPipe();
 
-  // Variables.
+    // Variables.
   private:
     /// id or handle of the thread created.
 #ifdef WIN32
@@ -188,13 +187,13 @@ class Thread
     /// The state the thread is currently in.
     State m_tState;
     /// Should we stop the thread?.
-    bool m_oStop;
+    std::atomic_bool m_oStop;
     /// Are we only performing this task ('execute' function) once?
-    bool m_oOneShot;
+    std::atomic_bool m_oOneShot;
     /// Is the thread performing the 'execute' function?
-    bool m_oIsRunning;
+    std::atomic_bool m_oIsRunning;
     /// Are we pausing the thread for some amount of time?
-    bool m_oIsPaused;
+    std::atomic_bool m_oIsPaused;
     /// The signal to send to make sure the thread returns from system calls.
     static int sm_nStopSignal;
     /// A structure to hold information about the signal action.

@@ -62,12 +62,18 @@ class stage : public xWidget
 
     /// Tracks edit state for the preset combo box.
     int m_setPointEditing{ STOPPED };
+    /// Whether a requested preset/filter change is still awaiting live confirmation.
+    bool m_setPointCommandPending{ false };
+    /// Last preset/filter name sent from the combo box.
+    std::string m_setPointRequested;
     /// Timer that clears staged preset edits after inactivity.
     QTimer *m_setPointEditTimer{ nullptr };
 
   public:
     /// Construct a stage widget for one INDI stage device.
-    explicit stage( const std::string &stageName, QWidget *Parent = 0, Qt::WindowFlags f = Qt::WindowFlags() );
+    explicit stage( const std::string &stageName /**< [in] INDI device name for the controlled stage */,
+                    QWidget           *Parent /**< [in] owning Qt parent widget */   = 0,
+                    Qt::WindowFlags    f /**< [in] Qt window flags for the widget */ = Qt::WindowFlags() );
 
     /// Destroy the widget.
     ~stage();
@@ -97,13 +103,13 @@ class stage : public xWidget
     void updateGUI();
 
     /// Mark the set-point combo box as actively edited.
-    void on_setPoint_activated( int index );
+    void on_setPoint_activated( int index /**< [in] combo-box index selected by the user */ );
 
     /// Send the currently selected preset/filter target.
     void on_setPointGo_pressed();
 
     /// Preview the position corresponding to the slider drag.
-    void on_positionSlider_sliderMoved( double s );
+    void on_positionSlider_sliderMoved( double s /**< [in] slider percentage moved by the user */ );
 
     /// Send a move request from the released slider position.
     void on_positionSlider_sliderReleased();
@@ -133,12 +139,15 @@ class stage : public xWidget
     void setPointEditTimerOut();
 
   signals:
-    void setPointEditTimerStart( int );
+    /// Start or restart the set-point edit timeout.
+    void setPointEditTimerStart( int timeoutMs /**< [in] timeout duration in milliseconds */ );
 
+    /// Queue a GUI refresh onto the widget thread.
     void doUpdateGUI();
 
   protected:
-    virtual void paintEvent( QPaintEvent *e );
+    /// Update combo-box styling for staged edits.
+    virtual void paintEvent( QPaintEvent *e /**< [in] Qt paint event being processed */ );
 
   private:
     Ui::stage ui;
@@ -197,6 +206,8 @@ void stage::onConnect()
     setWindowTitle( QString( m_winTitle.c_str() ) );
 
     ui.stepSize->setText( QString::number( m_step ) );
+    m_setPointCommandPending = false;
+    m_setPointRequested.clear();
 
     clearFocus();
 }
@@ -208,11 +219,19 @@ void stage::onDisconnect()
     m_presetCurrent.clear();
     m_presetTarget.clear();
     m_setPoint.clear();
-    m_parked           = false;
-    m_filterWheel      = false;
-    m_maxPos           = 100;
-    m_position         = -1e30;
-    m_position_changed = false;
+    m_parked                 = false;
+    m_filterWheel            = false;
+    m_maxPos                 = 100;
+    m_position               = -1e30;
+    m_position_changed       = false;
+    m_setPointEditing        = STOPPED;
+    m_setPointCommandPending = false;
+    m_setPointRequested.clear();
+
+    if( m_setPointEditTimer )
+    {
+        m_setPointEditTimer->stop();
+    }
 
     setWindowTitle( QString( m_winTitle.c_str() ) + QString( " (disconnected)" ) );
 
@@ -336,9 +355,23 @@ void stage::handleSetProperty( const pcf::IndiProperty &ipRecv )
 
                 newName    = it->second.getName();
                 m_setPoint = newName;
-                ui.setPoint->setCurrentText( m_setPoint.c_str() );
-                // if(newName != m_value) m_valChanged = true;
-                // m_value = newName;
+
+                if( m_setPointCommandPending && newName == m_setPointRequested )
+                {
+                    if( m_setPointEditTimer )
+                    {
+                        m_setPointEditTimer->stop();
+                    }
+
+                    m_setPointEditing        = STOPPED;
+                    m_setPointCommandPending = false;
+                    m_setPointRequested.clear();
+                }
+
+                if( m_setPointEditing != STARTED && !m_setPointCommandPending )
+                {
+                    ui.setPoint->setCurrentText( m_setPoint.c_str() );
+                }
             }
         }
 
@@ -465,7 +498,9 @@ void stage::on_setPoint_activated( int index )
 {
     static_cast<void>( index );
 
-    m_setPointEditing = STARTED;
+    m_setPointEditing        = STARTED;
+    m_setPointCommandPending = false;
+    m_setPointRequested.clear();
     emit setPointEditTimerStart( 10000 );
     update();
 }
@@ -516,8 +551,10 @@ void stage::on_setPointGo_pressed()
         std::cerr << "exception thrown in stage::on_setPointGo_pressed\n";
     }
 
-    m_setPointEditing = STOPPED;
-    ui.setPoint->setCurrentText( m_setPoint.c_str() );
+    m_setPointEditing        = STARTED;
+    m_setPointCommandPending = true;
+    m_setPointRequested      = selection;
+    emit setPointEditTimerStart( 10000 );
     update();
 }
 
@@ -663,7 +700,9 @@ void stage::on_stop_pressed()
 
 void stage::setPointEditTimerOut()
 {
-    m_setPointEditing = STOPPED;
+    m_setPointEditing        = STOPPED;
+    m_setPointCommandPending = false;
+    m_setPointRequested.clear();
     ui.setPoint->setCurrentText( m_setPoint.c_str() );
     update();
 }

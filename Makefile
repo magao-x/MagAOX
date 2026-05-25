@@ -65,6 +65,7 @@ apps_rtc = \
 	alpaoCtrl \
 	ocam2KCtrl \
 	andorCtrl \
+	cred2Ctrl \
 	siglentSDG \
 	ttmModulator \
 	pi335Ctrl \
@@ -172,6 +173,14 @@ all_buildable_apps = \
 	xt1121DCDU \
 	zaberCtrl \
 	zaberLowLevel
+
+# EDT-backed camera controllers remain in the generic ALL_APPS coverage build
+# only when the SDK headers are present locally. Otherwise they are covered
+# through their unit-test harnesses instead of direct app-binary builds.
+ifneq ($(wildcard /opt/EDTpdv/edtinc.h),)
+all_buildable_apps += \
+	cred2Ctrl
+endif
 
 libs_to_build = libtelnet
 
@@ -293,7 +302,7 @@ scripts_to_install = \
 	inventory_files \
 	list_xfiles_by_semester \
 	loop_instrument_backup_sync \
-	cyverse_replicate
+	cyverse_replicate 
 
 ifeq ($(MAGAOX_ROLE),RTC)
   scripts_to_install += cacao/RTC/cacao-startup
@@ -310,7 +319,7 @@ else ifeq ($(MAGAOX_ROLE),ICC)
   scripts_to_install += cacao/ICC/ncpc-rootdir-scripts/post-calib-apply
   scripts_to_install += cacao/hoblockleaks
   scripts_to_install += cacao/ICC/lowfs_switch
-
+  scripts_to_install += shift_ncpc
 else ifeq ($(MAGAOX_ROLE),TIC)
   scripts_to_install += cacao/TIC/cacao-startup
   scripts_to_install += cacao/TIC/cacao-shutdown
@@ -540,7 +549,7 @@ print_role:
 	@echo "MAGAOX_ROLE=$(MAGAOX_ROLE)"
 
 .PHONY: coverage
-coverage:
+coverage: coverage_clean
 	${MAKE} all COVERAGE=1 ALL_APPS=1 NO_GUIS=1
 
 .PHONY: coverage_clean
@@ -549,6 +558,8 @@ coverage_clean:
 	find . -name '*.gcda' -delete
 	find . -name '*.gcov' -delete
 	${MAKE} all_clean COVERAGE=1 ALL_APPS=1
+	cd tests && ${MAKE} realclean COVERAGE=1 || exit 1;
+	cd libMagAOX/logger/tests && ${MAKE} really_clean COVERAGE=1 || exit 1;
 
 .PHONY: valgrind
 valgrind:

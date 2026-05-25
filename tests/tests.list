@@ -46,6 +46,11 @@
 ../apps/mzmqServer/tests/mzmqServer_test
 ../apps/observerCtrl/tests/observerCtrl_test
 ../apps/ocam2KCtrl/tests/ocamUtils_test
+../apps/ocam2KCtrl/tests/ocam2KCtrl_test
+../apps/ocam2KCtrl/tests/ocam2KCtrl_lifecycle_test
+../apps/cred2Ctrl/tests/cred2Ctrl_test
+../apps/cred2Ctrl/tests/cred2Ctrl_lifecycle_test
+../apps/cred2Ctrl/tests/cred2Utils_test
 ../apps/pi335Ctrl/tests/pi335Ctrl_test
 ../apps/picoMotorCtrl/tests/picoMotorCtrl_test
 ../apps/psfAcq/tests/psfAcq_test
@@ -68,6 +73,7 @@
 ../apps/streamCircBuff/tests/streamCircBuff_test
 ../apps/streamWriter/tests/streamWriter_test
 ../apps/streamWriter/tests/streamWriterSizing_test
+../apps/streamWriter/tests/streamWriter_lifecycle_test
 ../apps/strehlEstimator/tests/strehlEstimator_test
 ../apps/sysMonitor/tests/sysMonitor_test
 ../apps/t2wOffloader/tests/t2wOffloader_test

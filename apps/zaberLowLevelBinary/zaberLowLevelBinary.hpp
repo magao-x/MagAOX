@@ -90,6 +90,9 @@ class zaberLowLevelBinary : public MagAOXAppT, public tty::usbDevice
     /// Map from configured stage name to configured stage index.
     std::unordered_map<std::string, size_t> m_stageName;
 
+    /// Whether the active connection has completed an initial discovery pass.
+    bool m_stageDiscoveryInitialized{ false };
+
     ///@}
 
   public:
@@ -113,6 +116,14 @@ class zaberLowLevelBinary : public MagAOXAppT, public tty::usbDevice
     /// Discover configured stages on the binary bus.
     int loadStages();
 
+    /// Apply a discovered address-to-serial snapshot to the configured stages.
+    int loadStages( const std::vector<int>         &addresses, /**< [in] discovered device addresses */
+                    const std::vector<std::string> &serials    /**< [in] discovered device serial numbers */
+    );
+
+    /// Refresh discovery on an already-connected binary bus.
+    int refreshStageDiscovery();
+
     /// Query a device directly for discovery-time replies.
     int queryDevice( int32_t &response,      /**< [out] decoded reply data */
                      uint8_t  deviceAddress, /**< [in] device address */
@@ -127,19 +138,25 @@ class zaberLowLevelBinary : public MagAOXAppT, public tty::usbDevice
                             int32_t data           /**< [in] command data */
     );
 
-    /// Startup logic.
+    /// Reset the active binary connection bookkeeping.
+    int resetConnection();
+
+    /// Recover from a binary-transport error without terminating the app.
+    int recoverFromError( bool devicePresent /**< [in] true if the USB tty still exists in udev */ );
+
+    /// Set up the INDI properties and restore retained stage state.
     virtual int appStartup();
 
-    /// Main FSM implementation.
+    /// Execute the main FSM for `zaberLowLevelBinary`.
     virtual int appLogic();
 
-    /// Power-off transition handler.
+    /// Handle the transition into the powered-off state.
     virtual int onPowerOff();
 
-    /// Powered-off loop handler.
+    /// Execute the powered-off loop.
     virtual int whilePowerOff();
 
-    /// Shutdown handler.
+    /// Perform any shutdown tasks before exit.
     virtual int appShutdown();
 
   protected:
@@ -183,7 +200,7 @@ class zaberLowLevelBinary : public MagAOXAppT, public tty::usbDevice
     /// Per-stage emergency-halt requests.
     pcf::IndiProperty m_indiP_req_ehalt;
 
-    /// Enable or disable a stages potentiometer
+    /// Enable or disable a stage's potentiometer.
     pcf::IndiProperty m_indiP_knob_enable;
 
     ///@}
@@ -358,7 +375,7 @@ int zaberLowLevelBinary::sendCommandNoReply( uint8_t deviceAddress, uint8_t comm
     return 0;
 }
 
-int zaberLowLevelBinary::connect()
+int zaberLowLevelBinary::resetConnection()
 {
     if( m_port > 0 )
     {
@@ -367,8 +384,45 @@ int zaberLowLevelBinary::connect()
         {
             log<text_log>( "Error disconnecting from zaber binary system.", logPrio::LOG_ERROR );
         }
-        m_port = 0;
     }
+
+    m_port                      = 0;
+    m_stageDiscoveryInitialized = false;
+
+    return 0;
+}
+
+int zaberLowLevelBinary::recoverFromError( bool devicePresent )
+{
+    resetConnection();
+
+    if( devicePresent )
+    {
+        state( stateCodes::NOTCONNECTED );
+    }
+    else
+    {
+        state( stateCodes::NODEVICE );
+    }
+
+    for( size_t i = 0; i < m_stages.size(); ++i )
+    {
+        if( devicePresent && m_stages[i].deviceAddress() > 0 )
+        {
+            updateIfChanged( m_indiP_curr_state, m_stages[i].name(), std::string( "NOTCONNECTED" ) );
+        }
+        else
+        {
+            updateIfChanged( m_indiP_curr_state, m_stages[i].name(), std::string( "NODEVICE" ) );
+        }
+    }
+
+    return 0;
+}
+
+int zaberLowLevelBinary::connect()
+{
+    resetConnection();
 
     int zrv;
     { // mutex scope
@@ -378,11 +432,7 @@ int zaberLowLevelBinary::connect()
 
     if( zrv != Z_SUCCESS || m_port <= 0 )
     {
-        if( m_port > 0 )
-        {
-            zb_disconnect( m_port );
-            m_port = 0;
-        }
+        resetConnection();
 
         if( !stateLogged() )
         {
@@ -424,11 +474,14 @@ int zaberLowLevelBinary::connect()
 
 int zaberLowLevelBinary::loadStages()
 {
-    m_stageAddress.clear();
+    std::vector<int>         addresses;
+    std::vector<std::string> serials;
 
-    for( size_t n = 0; n < m_stages.size(); ++n )
+    if( zb_drain( m_port ) != Z_SUCCESS )
     {
-        m_stages[n].deviceAddress( -1 );
+        log<software_error>( { "error draining binary port" } );
+        state( stateCodes::ERROR );
+        return ZBC_ERROR;
     }
 
     for( int address = 1; address <= m_maxDiscoveryAddress; ++address )
@@ -443,14 +496,60 @@ int zaberLowLevelBinary::loadStages()
             continue;
         }
 
-        std::string serial = std::to_string( serialNumber );
+        addresses.push_back( address );
+        serials.push_back( std::to_string( serialNumber ) );
+    }
+
+    return loadStages( addresses, serials );
+}
+
+int zaberLowLevelBinary::loadStages( const std::vector<int> &addresses, const std::vector<std::string> &serials )
+{
+    std::vector<int> oldAddresses;
+    bool             firstDiscoveryPass = !m_stageDiscoveryInitialized;
+    size_t           oldPresentCount    = 0;
+
+    oldAddresses.reserve( m_stages.size() );
+    for( size_t n = 0; n < m_stages.size(); ++n )
+    {
+        oldAddresses.push_back( m_stages[n].deviceAddress() );
+        if( m_stages[n].deviceAddress() > 0 )
+        {
+            ++oldPresentCount;
+        }
+    }
+
+    if( addresses.size() != serials.size() )
+    {
+        return log<software_error, ZBC_ERROR>( { "discovery address/serial vector size mismatch" } );
+    }
+
+    if( firstDiscoveryPass || addresses.size() != oldPresentCount )
+    {
+        log<text_log>( "Found " + std::to_string( addresses.size() ) + " stages." );
+    }
+
+    m_stageAddress.clear();
+
+    for( size_t n = 0; n < m_stages.size(); ++n )
+    {
+        m_stages[n].deviceAddress( -1 );
+    }
+
+    for( size_t n = 0; n < addresses.size(); ++n )
+    {
+        const int         address = addresses[n];
+        const std::string serial  = serials[n];
         if( m_stageSerial.count( serial ) == 1 )
         {
             size_t idx = m_stageSerial[serial];
             m_stages[idx].deviceAddress( address );
             m_stageAddress.insert( { address, idx } );
-            log<text_log>( "stage @" + std::to_string( address ) + " with s/n " + serial + " corresponds to " +
-                           m_stages[idx].name() );
+            if( firstDiscoveryPass || idx >= oldAddresses.size() || oldAddresses[idx] != address )
+            {
+                log<text_log>( "stage @" + std::to_string( address ) + " with s/n " + serial + " corresponds to " +
+                               m_stages[idx].name() );
+            }
         }
         else
         {
@@ -463,14 +562,30 @@ int zaberLowLevelBinary::loadStages()
     {
         if( m_stages[n].deviceAddress() < 1 )
         {
-            log<text_log>(
-                std::format( "stage {} with s/n {} not found in system.", m_stages[n].name(), m_stages[n].serial() ),
-                logPrio::LOG_ERROR );
-            state( state(), true );
+            if( firstDiscoveryPass || n >= oldAddresses.size() || oldAddresses[n] > 0 )
+            {
+                log<text_log>( std::format( "stage {} with s/n {} not found in system.",
+                                            m_stages[n].name(),
+                                            m_stages[n].serial() ),
+                               logPrio::LOG_ERROR );
+                state( state(), true );
+            }
         }
     }
 
+    m_stageDiscoveryInitialized = true;
+
     return ZBC_CONNECTED;
+}
+
+int zaberLowLevelBinary::refreshStageDiscovery()
+{
+    if( m_port <= 0 )
+    {
+        return ZBC_NOT_CONNECTED;
+    }
+
+    return loadStages();
 }
 
 int zaberLowLevelBinary::appStartup()
@@ -600,12 +715,11 @@ int zaberLowLevelBinary::appLogic()
                 return 0;
             }
 
-            state( stateCodes::FAILURE );
             if( !stateLogged() )
             {
-                log<software_critical>( { rv, tty::ttyErrorString( rv ) } );
+                log<software_error>( { rv, tty::ttyErrorString( rv ) } );
             }
-            return -1;
+            return 0;
         }
 
         if( rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES )
@@ -730,10 +844,41 @@ int zaberLowLevelBinary::appLogic()
 
     if( state() == stateCodes::READY )
     {
+        { // mutex scope
+            std::lock_guard<std::mutex> guard( m_indiMutex );
+
+            bool canRefreshDiscovery = true;
+            for( size_t i = 0; i < m_stages.size(); ++i )
+            {
+                if( m_stages[i].deviceAddress() > 0 && m_stages[i].deviceStatus() == 'B' )
+                {
+                    canRefreshDiscovery = false;
+                    break;
+                }
+            }
+
+            int rv = ZBC_CONNECTED;
+            if( canRefreshDiscovery )
+            {
+                rv = refreshStageDiscovery();
+            }
+
+            if( rv == ZBC_ERROR )
+            {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                {
+                    return 0;
+                }
+
+                return 0;
+            }
+        }
+
         for( size_t i = 0; i < m_stages.size(); ++i )
         {
             if( m_stages[i].deviceAddress() < 1 )
             {
+                updateIfChanged( m_indiP_curr_state, m_stages[i].name(), std::string( "NODEVICE" ) );
                 continue;
             }
 
@@ -853,26 +998,21 @@ int zaberLowLevelBinary::appLogic()
                 return 0;
             }
 
-            state( stateCodes::FAILURE );
-            for( size_t i = 0; i < m_stages.size(); ++i )
-            {
-                updateIfChanged( m_indiP_curr_state, m_stages[i].name(), std::string( "FAILURE" ) );
-            }
             if( !stateLogged() )
             {
-                log<software_critical>( { rv, tty::ttyErrorString( rv ) } );
+                log<software_error>( { rv, tty::ttyErrorString( rv ) } );
             }
-            return rv;
+            return recoverFromError( false );
         }
 
         if( rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES )
         {
-            state( stateCodes::NODEVICE );
-            for( size_t i = 0; i < m_stages.size(); ++i )
+            if( !stateLogged() )
             {
-                updateIfChanged( m_indiP_curr_state, m_stages[i].name(), std::string( "NODEVICE" ) );
+                log<text_log>(
+                    std::format( "USB Device {}:{}:{} not found in udev", m_idVendor, m_idProduct, m_serial ) );
             }
-            return 0;
+            return recoverFromError( false );
         }
 
         if( powerState() != 1 || powerStateTarget() != 1 )
@@ -880,14 +1020,13 @@ int zaberLowLevelBinary::appLogic()
             return 0;
         }
 
-        state( stateCodes::FAILURE );
-        for( size_t i = 0; i < m_stages.size(); ++i )
+        if( !stateLogged() )
         {
-            updateIfChanged( m_indiP_curr_state, m_stages[i].name(), std::string( "FAILURE" ) );
+            log<text_log>( "Recovering from binary stage communication error by resetting the connection.",
+                           logPrio::LOG_INFO );
         }
 
-        log<software_critical>();
-        log<text_log>( "Binary-protocol error not due to loss of USB connection.", logPrio::LOG_CRITICAL );
+        return recoverFromError( true );
     }
 
     if( powerState() != 1 || powerStateTarget() != 1 )
@@ -905,16 +1044,7 @@ int zaberLowLevelBinary::appLogic()
 
 inline int zaberLowLevelBinary::onPowerOff()
 {
-    if( m_port > 0 )
-    {
-        int rv = zb_disconnect( m_port );
-        if( rv < 0 )
-        {
-            log<text_log>( "Error disconnecting from zaber binary system.", logPrio::LOG_ERROR );
-        }
-    }
-
-    m_port = 0;
+    resetConnection();
 
     std::lock_guard<std::mutex> lock( m_indiMutex );
     for( size_t i = 0; i < m_stages.size(); ++i )

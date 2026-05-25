@@ -13,14 +13,18 @@ local/
 **/.*~
 **/*.stash
 **/*-swp
+
+#Qt:
 **/res/
 ui*.h
-
 **/bin/
 **/moc/
 **/moc_*
 makefile.*GUI
 gui/**/makefile.*
+
+#Agents:
+.codex
 
 #Ignore any old folders
 **/old/
@@ -57,6 +61,7 @@ apps/bmcCtrl/bmcCtrl
 apps/cacaoInterface/cacaoInterface
 apps/cameraSim/cameraSim
 apps/closedLoopIndi/closedLoopIndi
+apps/cred2Ctrl/cred2Ctrl
 
 #d
 apps/dmMode/dmMode

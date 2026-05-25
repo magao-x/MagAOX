@@ -246,23 +246,35 @@ class pvcamCtrl : public MagAOXApp<true>,
      */
     virtual int appShutdown();
 
-    // stdCamera interface:
-
-    // This must set the power-on default values of
-    /* -- m_ccdTempSetpt
-     * -- m_currentROI
+    /** \name stdCamera Interface
+     * @{
      */
+
+    /// Set defaults for a power-on state.
     int powerOnDefaults();
 
+    /// PVCAM does not expose a separate temperature-control toggle.
     int setTempControl();
+
+    /// PVCAM does not expose a writable detector temperature setpoint in this app.
     int setTempSetPt();
+
+    /// Queue the requested readout-speed selection for the next acquisition setup.
     int setReadoutSpeed();
+
+    /// PVCAM does not expose vertical-shift control through this app.
     int setVShiftSpeed();
+
     /// Set the fan speed according to the configured stdCamera target.
     int setFanSpeed();
 
+    /// PVCAM does not expose EM gain through this app.
     int setEMGain();
+
+    /// Queue the requested exposure time for the next acquisition setup.
     int setExpTime();
+
+    /// PVCAM does not expose FPS as a direct settable control in this app.
     int setFPS();
 
     /// Check the next ROI
@@ -273,6 +285,7 @@ class pvcamCtrl : public MagAOXApp<true>,
      */
     int checkNextROI();
 
+    /// Queue the requested ROI for the next acquisition setup.
     int setNextROI();
 
     /// Sets the shutter state, via call to dssShutter::setShutterState(int) [stdCamera interface]
@@ -281,19 +294,43 @@ class pvcamCtrl : public MagAOXApp<true>,
      */
     int setShutter( int sh );
 
-    // Framegrabber interface:
-    int   configureAcquisition();
-    float fps();
-    int   startAcquisition();
-    int   acquireAndCheckValid();
-    int   loadImageIntoStream( void *dest );
-    int   reconfig();
+    ///@}
 
-    // pvcam specific:
+    /** \name Framegrabber Interface
+     * @{
+     */
+
+    /// Configure the PVCAM acquisition state for the pending settings.
+    int configureAcquisition();
+
+    /// Return the current measured frame rate.
+    float fps();
+
+    /// Start continuous PVCAM acquisition.
+    int startAcquisition();
+
+    /// Wait for the next frame-ready signal and validate the acquisition state.
+    int acquireAndCheckValid();
+
+    /// Copy the latest PVCAM frame into the destination image stream.
+    int loadImageIntoStream( void *dest );
+
+    /// Stop acquisition so the framegrabber can reconfigure.
+    int reconfig();
+
+    ///@}
+
+    /** \name PVCAM Interface
+     * @{
+     */
+
+    /// Find and open the configured PVCAM camera.
     int connect();
 
+    /// Enumerate the PVCAM readout-speed table for the connected camera.
     int fillSpeedTable();
 
+    /// Dump the values of a PVCAM enumerated parameter for debugging.
     void dumpEnum( uns32 paramID, const std::string &paramMnem );
 
     /// Get the current fan speed from the camera.
@@ -302,9 +339,13 @@ class pvcamCtrl : public MagAOXApp<true>,
     /// Get the current detector temperature and set point from the camera.
     int getTemp();
 
+    /// Static trampoline for the PVCAM end-of-frame callback.
     static void st_endOfFrameCallback( FRAME_INFO *finfo, void *pvcamCtrlInst );
 
+    /// Process a PVCAM end-of-frame callback.
     void endOfFrameCallback( FRAME_INFO *finfo );
+
+    ///@}
 
     /** \name Telemeter Interface
      *
@@ -589,6 +630,8 @@ int pvcamCtrl::powerOnDefaults()
         m_fanSpeedNameSet.clear();
     }
 
+    m_fanSpeedValid = false;
+
     return 0;
 }
 
@@ -647,7 +690,8 @@ int pvcamCtrl::setFanSpeed()
         return -1;
     }
 
-    m_fanSpeedName = m_fanSpeedNameSet;
+    m_fanSpeedName  = m_fanSpeedNameSet;
+    m_fanSpeedValid = true;
 
     if( m_fanSpeedName != priorFanSpeed )
     {
@@ -961,6 +1005,20 @@ int pvcamCtrl::configureAcquisition()
         return -1;
     }
 
+    if( m_fanSpeedControlEnabled )
+    {
+        if( getFanSpeed() < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "could not get fan speed after acquisition setup" } );
+        }
+
+        if( m_fanSpeedName != m_fanSpeedNameSet && setFanSpeed() < 0 )
+        {
+            return log<software_error, -1>(
+                { __FILE__, __LINE__, "could not restore configured fan speed after acquisition setup" } );
+        }
+    }
+
     recordCamera( true );
 
     return 0;
@@ -1204,6 +1262,11 @@ int pvcamCtrl::connect()
         if( m_fanSpeedControlEnabled && getFanSpeed() < 0 )
         {
             return log<software_error, -1>( { __FILE__, __LINE__, "could not get fan speed" } );
+        }
+
+        if( m_fanSpeedControlEnabled )
+        {
+            m_fanSpeedNameSet = m_defaultFanSpeed;
         }
 
         if( m_fanSpeedControlEnabled && setFanSpeed() < 0 )
@@ -1535,6 +1598,8 @@ int pvcamCtrl::getFanSpeed()
         return log<software_error, -1>(
             { __FILE__, __LINE__, "unknown PVCAM fan-speed value: " + std::to_string( fanSpeed ) } );
     }
+
+    m_fanSpeedValid = true;
 
     return 0;
 }

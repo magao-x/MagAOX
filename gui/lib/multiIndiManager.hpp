@@ -92,7 +92,8 @@ class multiIndiManager : public multiIndiSubscriber
     void hostPort( int hp /**< [in] New host port. */ );
 
     /// Add a subscriber.
-    /** If connected, this immediately calls the subscribers subscribe member function.
+    /** If connected, this forwards registration to the active publisher.
+     * QObject subscribers then queue `subscribe()` onto their own Qt thread.
      */
     virtual int addSubscriber( multiIndiSubscriber *sub /**< [in] Subscriber to add. */ );
 
@@ -140,6 +141,7 @@ inline multiIndiManager::~multiIndiManager()
     }
 }
 
+/// Starts the reconnect monitor thread body for a manager instance.
 inline void _connectStart( multiIndiManager *mim )
 {
     mim->connectClient();
@@ -261,9 +263,9 @@ inline void multiIndiManager::connectClient()
             for( auto *sub : subs )
             {
                 _dispatchOnDisconnect( sub );
-                pub->unsubscribe( sub );
             }
 
+            pub->detachAllSubscribers();
             delete pub;
         }
 
@@ -337,9 +339,9 @@ inline void multiIndiManager::connectClient()
         for( auto *sub : subs )
         {
             _dispatchOnDisconnect( sub );
-            pub->unsubscribe( sub );
         }
 
+        pub->detachAllSubscribers();
         delete pub;
     }
 }

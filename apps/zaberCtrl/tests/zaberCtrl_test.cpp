@@ -2,19 +2,32 @@
  * \brief Catch2 tests for the zaberCtrl app.
  * \author Jared R. Males (jaredmales@gmail.com)
  *
- * History:
+ * \ingroup zaberCtrl_files
  */
 
-#include "../../../tests/catch2/catch.hpp"
-#include "../../tests/testMacrosINDI.hpp"
+#include "../../../tests/testXWC.hpp"
+#include "../../../tests/testMacrosINDI.hpp"
 
 #include "../zaberCtrl.hpp"
 
 using namespace MagAOX::app;
 
-namespace ZCTRLTEST
+namespace libXWCTest
 {
 
+/** \defgroup zaberCtrl_unit_test zaberCtrl Unit Tests
+ * \brief Unit tests for the zaberCtrl application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `zaberCtrl` unit tests.
+/** \ingroup zaberCtrl_unit_test
+ */
+namespace zaberCtrlTest
+{
+
+/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 class zaberCtrl_test : public zaberCtrl
 {
 
@@ -166,9 +179,23 @@ class zaberCtrl_test : public zaberCtrl
         return m_preset_target;
     }
 };
+/// \endcond
 
+/// Verify zaberCtrl callback validation and preset-alias helpers behave as expected.
+/**
+ * \ingroup zaberCtrl_unit_test
+ */
 SCENARIO( "INDI Callbacks", "[zaberCtrl]" )
 {
+    // clang-format off
+    #ifdef ZABERCTRL_TEST_DOXYGEN_REF
+    zaberCtrl::newCallBack_m_indiP_pos( pcf::IndiProperty() );
+    zaberCtrl::newCallBack_m_indiP_rawPos( pcf::IndiProperty() );
+    zaberCtrl::setCallBack_m_indiP_stageState( pcf::IndiProperty() );
+    zaberCtrl::activePresetName( 0 );
+    #endif
+    // clang-format on
+
     XWCTEST_INDI_NEW_CALLBACK( zaberCtrl, pos );
     XWCTEST_INDI_NEW_CALLBACK( zaberCtrl, rawPos );
     XWCTEST_INDI_NEW_CALLBACK( zaberCtrl, preset );
@@ -291,4 +318,6 @@ SCENARIO( "Preset-name aliases follow the selected shared-position preset", "[za
     }
 }
 
-} // namespace ZCTRLTEST
+} // namespace zaberCtrlTest
+
+} // namespace libXWCTest

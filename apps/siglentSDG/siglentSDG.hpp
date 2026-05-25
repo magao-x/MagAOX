@@ -1097,6 +1097,33 @@ std::string makeCommand( int channel,
    return command;
 }
 
+/// Calculate the auto pulse width for a requested pulse frequency.
+/** Returns 0 for non-positive frequency, otherwise uses the larger of:
+  * - fixed 250 us pulse width target
+  * - 50% duty cycle limit
+  */
+inline
+double autoPulseWidthFromFrequency( const double freqHz /**< [in] requested pulse frequency [Hz] */ )
+{
+   if(freqHz <= 0)
+   {
+      return 0.0;
+   }
+
+   constexpr double targetPulseS = 0.000250;
+   constexpr double maxDutyCycle = 0.5;
+
+   const double wdth250 = 1.0 / freqHz - targetPulseS;
+   const double wdthLim = maxDutyCycle / freqHz;
+
+   if(wdthLim > wdth250)
+   {
+      return wdthLim;
+   }
+
+   return wdth250;
+}
+
 inline
 int siglentSDG::queryMDWV( std::string & state,
                            int channel
@@ -1854,21 +1881,24 @@ int siglentSDG::changeFreq( int channel,
       return -1;
    }
 
-   // we want to automatically set the pulse width when setting a new frequency
-   if(m_waveform == "PULSE"){
-      // we want to auto change the pulse duration, want either 0.000250 or 0.5%
-      double wdthLim = 0.5 / newFreq ;         // this is the limit if we don't have long enough frequencies
-      double wdth250 = 0.000250;  // this is the ideal length of low dip WHACK THINGS.. it's doubling, want to be 0.00025
-      double newWdth = wdthLim;
+   // automatically set the pulse width when setting a new frequency
+   if(m_waveform == "PULSE")
+   {
+      const double newWdth = autoPulseWidthFromFrequency(newFreq);
 
-      if(wdthLim > wdth250){
-         newWdth = wdth250;
+      if(newFreq <= 0)
+      {
+         log<text_log>("Ch. " + std::to_string(channel) + " WDTH defaulting to 0.0 for invalid freq: " + std::to_string(newWdth), logPrio::LOG_NOTICE);
+      }
+      else if(newFreq > 2000.0)
+      {
          log<text_log>("Ch. " + std::to_string(channel) + " WDTH auto-changing to duty cycle limit: " + std::to_string(newWdth), logPrio::LOG_NOTICE);
-      }else{
+      }
+      else
+      {
          log<text_log>("Ch. " + std::to_string(channel) + " WDTH auto-changing to 250us ideal case: " + std::to_string(newWdth), logPrio::LOG_NOTICE);
       }
 
-      //changing pulse width
       changeWdth(channel, newWdth);
    }
 
