@@ -1,11 +1,11 @@
-/** \file loPredCtrl.hpp
+/** \file loPredCtrlAcc.hpp
  * \brief The MagAO-X generic ImageStreamIO stream integrator
  *
  * \ingroup app_files
  */
 
-#ifndef loPredCtrl_hpp
-#define loPredCtrl_hpp
+#ifndef loPredCtrlAcc_hpp
+#define loPredCtrlAcc_hpp
 
 #include <iostream>
 #include <fstream>
@@ -50,25 +50,25 @@ using namespace mx::improc;
      };
  };
 
- class loPredCtrl : public MagAOXApp<true>, public dev::shmimMonitor<loPredCtrl>, public dev::shmimMonitor<loPredCtrl, accelShmimT>, public dev::frameGrabber<loPredCtrl>, public dev::telemeter<loPredCtrl>
+ class loPredCtrlAcc : public MagAOXApp<true>, public dev::shmimMonitor<loPredCtrlAcc>, public dev::shmimMonitor<loPredCtrlAcc, accelShmimT>, public dev::frameGrabber<loPredCtrlAcc>, public dev::telemeter<loPredCtrlAcc>
  {
      // Give the test harness access.
-     friend class loPredCtrl_test;
+     friend class loPredCtrlAcc_test;
 
-     friend class dev::shmimMonitor<loPredCtrl>;
-     friend class dev::shmimMonitor<loPredCtrl, accelShmimT>;
+     friend class dev::shmimMonitor<loPredCtrlAcc>;
+     friend class dev::shmimMonitor<loPredCtrlAcc, accelShmimT>;
 
      // The base shmimMonitor type
-     typedef dev::shmimMonitor<loPredCtrl> shmimMonitorT;
-     typedef dev::shmimMonitor<loPredCtrl, accelShmimT> accelShmimMonitorT;
+     typedef dev::shmimMonitor<loPredCtrlAcc> shmimMonitorT;
+     typedef dev::shmimMonitor<loPredCtrlAcc, accelShmimT> accelShmimMonitorT;
 
-     friend class dev::frameGrabber<loPredCtrl>;
+     friend class dev::frameGrabber<loPredCtrlAcc>;
 
-     typedef dev::frameGrabber<loPredCtrl> frameGrabberT;
+     typedef dev::frameGrabber<loPredCtrlAcc> frameGrabberT;
 
-     friend class dev::telemeter<loPredCtrl>;
+     friend class dev::telemeter<loPredCtrlAcc>;
 
-     typedef dev::telemeter<loPredCtrl> telemeterT;
+     typedef dev::telemeter<loPredCtrlAcc> telemeterT;
 
      /// Floating point type in which to do all calculations.
      typedef float realT;
@@ -197,24 +197,24 @@ using namespace mx::improc;
 
    public:
 
-    INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_exploration );
-    INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_filename );
-    INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_learningToggle );
-    INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_learningStdToggle );
-    INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_integratingToggle );
-    INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_predictingToggle );
-    INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_resetToggle );
+    INDI_NEWCALLBACK_DECL( loPredCtrlAcc, m_indiP_exploration );
+    INDI_NEWCALLBACK_DECL( loPredCtrlAcc, m_indiP_filename );
+    INDI_NEWCALLBACK_DECL( loPredCtrlAcc, m_indiP_learningToggle );
+    INDI_NEWCALLBACK_DECL( loPredCtrlAcc, m_indiP_learningStdToggle );
+    INDI_NEWCALLBACK_DECL( loPredCtrlAcc, m_indiP_integratingToggle );
+    INDI_NEWCALLBACK_DECL( loPredCtrlAcc, m_indiP_predictingToggle );
+    INDI_NEWCALLBACK_DECL( loPredCtrlAcc, m_indiP_resetToggle );
 
-    INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_saveToggle );
-    INDI_NEWCALLBACK_DECL( loPredCtrl, m_indiP_loadToggle );
+    INDI_NEWCALLBACK_DECL( loPredCtrlAcc, m_indiP_saveToggle );
+    INDI_NEWCALLBACK_DECL( loPredCtrlAcc, m_indiP_loadToggle );
 
-    INDI_SETCALLBACK_DECL( loPredCtrl, m_indiP_fpsSource );
+    INDI_SETCALLBACK_DECL( loPredCtrlAcc, m_indiP_fpsSource );
 
      /// Default c'tor.
-     loPredCtrl();
+     loPredCtrlAcc();
 
      /// D'tor, declared and defined for noexcept.
-     ~loPredCtrl() noexcept
+     ~loPredCtrlAcc() noexcept
      {
      }
 
@@ -234,7 +234,7 @@ using namespace mx::improc;
       */
      virtual int appStartup();
 
-     /// Implementation of the FSM for loPredCtrl.
+     /// Implementation of the FSM for loPredCtrlAcc.
      /**
       * \returns 0 on no critical error
       * \returns -1 on an error requiring shutdown
@@ -328,13 +328,13 @@ using namespace mx::improc;
  };
 
 
- inline loPredCtrl::loPredCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
+ inline loPredCtrlAcc::loPredCtrlAcc() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
  {
      accelShmimMonitorT::m_getExistingFirst = true;
      return;
  }
 
- inline void loPredCtrl::setupConfig()
+ inline void loPredCtrlAcc::setupConfig()
  {
      shmimMonitorT::setupConfig( config );
      accelShmimMonitorT::setupConfig( config );
@@ -364,7 +364,7 @@ using namespace mx::improc;
      config.add("parameters.accel_missing_frame_limit", "", "parameters.accel_missing_frame_limit", argType::Optional, "parameters", "accel_missing_frame_limit", false, "int", "Number of WFS frames to wait for accel before falling back to legacy mode.");
  }
 
- inline int loPredCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
+ inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
  {
     shmimMonitorT::loadConfig( _config );
 
@@ -434,12 +434,12 @@ using namespace mx::improc;
      return 0;
  }
 
- inline void loPredCtrl::loadConfig()
+ inline void loPredCtrlAcc::loadConfig()
  {
      loadConfigImpl( config );
  }
 
- inline int loPredCtrl::appStartup()
+ inline int loPredCtrlAcc::appStartup()
  {
      if( shmimMonitorT::appStartup() < 0 )
      {
@@ -506,7 +506,7 @@ using namespace mx::improc;
      return 0;
  }
 
- inline int loPredCtrl::appLogic()
+ inline int loPredCtrlAcc::appLogic()
  {
      if( shmimMonitorT::appLogic() < 0 )
      {
@@ -572,7 +572,7 @@ using namespace mx::improc;
      return 0;
  }
 
- inline int loPredCtrl::appShutdown()
+ inline int loPredCtrlAcc::appShutdown()
  {
      shmimMonitorT::appShutdown();
      if( m_accelMonitorStarted )
@@ -590,7 +590,7 @@ using namespace mx::improc;
      return 0;
  }
 
- inline int loPredCtrl::allocate( const dev::shmimT &dummy )
+ inline int loPredCtrlAcc::allocate( const dev::shmimT &dummy )
  {
     static_cast<void>( dummy ); // be unused
 
@@ -629,7 +629,7 @@ using namespace mx::improc;
     return 0;
  }
 
- inline int loPredCtrl::allocate( const accelShmimT &dummy )
+ inline int loPredCtrlAcc::allocate( const accelShmimT &dummy )
  {
     static_cast<void>( dummy ); // be unused
 
@@ -647,7 +647,7 @@ using namespace mx::improc;
     return 0;
  }
 
- inline void loPredCtrl::resetAccelTelemetryState()
+ inline void loPredCtrlAcc::resetAccelTelemetryState()
  {
     std::lock_guard<std::mutex> guard(m_accelMutex); //mutex scope
     m_accelNormCount = 0;
@@ -669,7 +669,7 @@ using namespace mx::improc;
     m_latestAccelSample.setZero();
  }
 
- inline void loPredCtrl::normalizeAccelSample( DDSPC::Matrix &sample )
+ inline void loPredCtrlAcc::normalizeAccelSample( DDSPC::Matrix &sample )
  {
     if(!m_accelNormalize){
         return;
@@ -704,7 +704,7 @@ using namespace mx::improc;
     }
  }
 
- inline void loPredCtrl::disableAccelIntegration( const std::string &reason, bool rebuildController )
+ inline void loPredCtrlAcc::disableAccelIntegration( const std::string &reason, bool rebuildController )
  {
     if(!m_accelEnabled){
         return;
@@ -731,7 +731,7 @@ using namespace mx::improc;
     resetAccelTelemetryState();
  }
 
- inline int loPredCtrl::processImage( void *curr_src, const accelShmimT &dummy )
+ inline int loPredCtrlAcc::processImage( void *curr_src, const accelShmimT &dummy )
  {
     static_cast<void>( dummy ); // be unused
     if(!m_accelEnabled || m_accelChannels <= 0){
@@ -764,7 +764,7 @@ using namespace mx::improc;
     return 0;
  }
 
- inline int loPredCtrl::processImage( void *curr_src, const dev::shmimT &dummy )
+ inline int loPredCtrlAcc::processImage( void *curr_src, const dev::shmimT &dummy )
  {
     static_cast<void>( dummy ); // be unused
     //record arrival time as the atime
@@ -789,12 +789,12 @@ using namespace mx::improc;
     }
 
     if(do_trigger_load){
-        load("/opt/MagAOX/calib/loPredCtrl/" + m_filename);
+        load("/opt/MagAOX/calib/loPredCtrlAcc/" + m_filename);
         do_trigger_load = false;
     }
 
     if(do_trigger_save){
-        save("/opt/MagAOX/calib/loPredCtrl/" + m_filename);
+        save("/opt/MagAOX/calib/loPredCtrlAcc/" + m_filename);
         do_trigger_save = false;
     }
 
@@ -930,7 +930,7 @@ using namespace mx::improc;
     return 0;
  }
 
-int loPredCtrl::configureAcquisition()
+int loPredCtrlAcc::configureAcquisition()
 {
     frameGrabberT::m_width = m_modevalWidth;
     frameGrabberT::m_height = 1;
@@ -939,17 +939,17 @@ int loPredCtrl::configureAcquisition()
     return 0;
 }
 
-float loPredCtrl::fps()
+float loPredCtrlAcc::fps()
 {
     return m_fps;
 }
 
-int loPredCtrl::startAcquisition()
+int loPredCtrlAcc::startAcquisition()
 {
     return 0;
 }
 
-int loPredCtrl::acquireAndCheckValid()
+int loPredCtrlAcc::acquireAndCheckValid()
 {
     timespec ts;
 
@@ -979,7 +979,7 @@ int loPredCtrl::acquireAndCheckValid()
     }
 }
 
-int loPredCtrl::loadImageIntoStream(void * dest)
+int loPredCtrlAcc::loadImageIntoStream(void * dest)
 {
     memcpy( dest, full_command.data(), full_command.rows() * frameGrabberT::m_typeSize );
 
@@ -988,22 +988,22 @@ int loPredCtrl::loadImageIntoStream(void * dest)
     return 0;
 }
 
-int loPredCtrl::reconfig()
+int loPredCtrlAcc::reconfig()
 {
     return 0;
 }
 
-int loPredCtrl::checkRecordTimes()
+int loPredCtrlAcc::checkRecordTimes()
 {
     return telemeterT::checkRecordTimes( telem_fgtimings() );
 }
 
-int loPredCtrl::recordTelem( const telem_fgtimings * )
+int loPredCtrlAcc::recordTelem( const telem_fgtimings * )
 {
     return recordFGTimings( true );
 }
 
- INDI_NEWCALLBACK_DEFN( loPredCtrl, m_indiP_exploration )( const pcf::IndiProperty &ipRecv )
+ INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_exploration )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_exploration, ipRecv );
     // Called in indi like: num_explore, std, regularization, num_explore, std, regularization, ....
@@ -1056,7 +1056,7 @@ int loPredCtrl::recordTelem( const telem_fgtimings * )
     return 0;
 }
 
-INDI_NEWCALLBACK_DEFN( loPredCtrl, m_indiP_filename )( const pcf::IndiProperty &ipRecv )
+INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_filename )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_filename, ipRecv );
 
@@ -1076,7 +1076,7 @@ INDI_NEWCALLBACK_DEFN( loPredCtrl, m_indiP_filename )( const pcf::IndiProperty &
     return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_learningToggle )(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(loPredCtrlAcc, m_indiP_learningToggle )(const pcf::IndiProperty &ipRecv)
 {
    if(ipRecv.getName() != m_indiP_learningToggle.getName())
    {
@@ -1112,7 +1112,7 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_learningToggle )(const pcf::IndiProper
    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_learningStdToggle )(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(loPredCtrlAcc, m_indiP_learningStdToggle )(const pcf::IndiProperty &ipRecv)
 {
    if(ipRecv.getName() != m_indiP_learningStdToggle.getName())
    {
@@ -1179,7 +1179,7 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_learningStdToggle )(const pcf::IndiPro
    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_integratingToggle )(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(loPredCtrlAcc, m_indiP_integratingToggle )(const pcf::IndiProperty &ipRecv)
 {
    if(ipRecv.getName() != m_indiP_integratingToggle.getName())
    {
@@ -1214,7 +1214,7 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_integratingToggle )(const pcf::IndiPro
    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_predictingToggle )(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(loPredCtrlAcc, m_indiP_predictingToggle )(const pcf::IndiProperty &ipRecv)
 {
    if(ipRecv.getName() != m_indiP_predictingToggle.getName())
    {
@@ -1251,7 +1251,7 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_predictingToggle )(const pcf::IndiProp
 }
 
 
-INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_resetToggle )(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(loPredCtrlAcc, m_indiP_resetToggle )(const pcf::IndiProperty &ipRecv)
 {
 	if(ipRecv.getName() != m_indiP_resetToggle.getName())
 	{
@@ -1274,7 +1274,7 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_resetToggle )(const pcf::IndiProperty 
    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_saveToggle )(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(loPredCtrlAcc, m_indiP_saveToggle )(const pcf::IndiProperty &ipRecv)
 {
 	if(ipRecv.getName() != m_indiP_saveToggle.getName())
 	{
@@ -1297,7 +1297,7 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_saveToggle )(const pcf::IndiProperty &
    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_loadToggle )(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(loPredCtrlAcc, m_indiP_loadToggle )(const pcf::IndiProperty &ipRecv)
 {
 	if(ipRecv.getName() != m_indiP_loadToggle.getName())
 	{
@@ -1320,7 +1320,7 @@ INDI_NEWCALLBACK_DEFN(loPredCtrl, m_indiP_loadToggle )(const pcf::IndiProperty &
    return 0;
 }
 
-INDI_SETCALLBACK_DEFN( loPredCtrl, m_indiP_fpsSource )( const pcf::IndiProperty &ipRecv )
+INDI_SETCALLBACK_DEFN( loPredCtrlAcc, m_indiP_fpsSource )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_fpsSource, ipRecv );
 
@@ -1345,4 +1345,4 @@ INDI_SETCALLBACK_DEFN( loPredCtrl, m_indiP_fpsSource )( const pcf::IndiProperty 
  } // namespace app
  } // namespace MagAOX
 
- #endif // loPredCtrl_hpp
+ #endif // loPredCtrlAcc_hpp
