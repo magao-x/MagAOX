@@ -110,17 +110,17 @@ class WindsoccRTConfig(BaseConfig):
     lab_mode_property: str = xconf.field(default="labMode", help="Lab mode property name.")
     lab_mode_element: str = xconf.field(default="toggle", help="Lab mode switch element.")
 
-    fwtelsim_device: str = xconf.field(
-        default="fwtelsim",
-        help="Telescope-simulator filter wheel INDI device.",
+    stagepickoff_device: str = xconf.field(
+        default="stagepickoff",
+        help="Stage pickoff INDI device (moves mirror in/out of telescope beam).",
     )
-    fwtelsim_filter_property: str = xconf.field(
-        default="filterName",
-        help="Filter wheel preset property on fwtelsim.",
+    stagepickoff_property: str = xconf.field(
+        default="presetName",
+        help="Pickoff preset selector property name.",
     )
-    fwtelsim_in_element: str = xconf.field(
-        default="in",
-        help="Filter element name that blocks pipeline when ON (sim in beam).",
+    stagepickoff_element: str = xconf.field(
+        default="tel",
+        help="Pickoff element indicating telescope beam is selected (readiness passes only when ON).",
     )
 
     camwfs_device: str = xconf.field(default="camwfs", help="WFS camera INDI device.")
@@ -158,6 +158,8 @@ class windsoccRT(XDevice):
         self._backoff_failure_index = 0
         self._suppress_readiness_logs = False
         self._last_shm_missing_log_monotonic = 0.0
+        self._indi_props_ready = False
+        self._indi_props_ready_err: str | None = None
 
     def setup(self) -> None:
         """Define INDI properties owned by this windsocc device."""
@@ -234,15 +236,7 @@ class windsoccRT(XDevice):
             self.add_property(layer_prop)
 
         if self.config.enable_readiness_gating:
-            devices = readiness_gate_devices(self.config)
-            try:
-                self.client.get_properties_and_wait(devices)
-            except TimeoutError as exc:
-                self.log.warning(
-                    "Timed out waiting for readiness INDI devices %s: %s",
-                    devices,
-                    exc,
-                )
+            self._ensure_readiness_props()
 
     def _set_pipeline_state(self, state: str) -> None:
         """Update the read-only ``pipeline.state`` INDI property."""
@@ -256,6 +250,42 @@ class windsoccRT(XDevice):
         if current != state:
             prop["state"] = state
             self.update_property(prop)
+
+    def _ensure_readiness_props(self) -> bool:
+        """Ensure readiness INDI device properties are available on the client."""
+        devices = readiness_gate_devices(self.config)
+
+        connection_status = getattr(self.client, "status", None)
+        connection_enum = getattr(constants, "ConnectionStatus", None)
+        if (
+            connection_enum is not None
+            and connection_status is not None
+            and connection_status is not connection_enum.CONNECTED
+        ):
+            self._indi_props_ready = False
+            self._indi_props_ready_err = (
+                f"INDI client not connected (status={connection_status})"
+            )
+            return False
+
+        try:
+            self.client.get_properties_and_wait(devices)
+        except TimeoutError as exc:
+            self._indi_props_ready = False
+            self._indi_props_ready_err = (
+                f"Timed out waiting for readiness INDI devices {devices}: {exc}"
+            )
+            return False
+        except Exception as exc:  # pragma: no cover - defensive
+            self._indi_props_ready = False
+            self._indi_props_ready_err = (
+                f"Failed to load readiness INDI properties {devices}: {exc}"
+            )
+            return False
+
+        self._indi_props_ready = True
+        self._indi_props_ready_err = None
+        return True
 
     @staticmethod
     def _build_pipeline_namespace(cfg: WindsoccRTConfig) -> argparse.Namespace:
@@ -339,7 +369,17 @@ class windsoccRT(XDevice):
         if not self.config.enable_readiness_gating:
             return True
 
-        ready, reasons = evaluate_readiness(self.client, self.config)
+        if not self._indi_props_ready:
+            self._ensure_readiness_props()
+
+        if not self._indi_props_ready:
+            ready = False
+            reasons = [
+                self._indi_props_ready_err
+                or "Readiness INDI properties unavailable"
+            ]
+        else:
+            ready, reasons = evaluate_readiness(self.client, self.config)
         if ready:
             self._suppress_readiness_logs = False
             self._backoff_failure_index = 0

@@ -20,9 +20,9 @@ class _Cfg:
     lab_mode_device: str = "tcsi"
     lab_mode_property: str = "labMode"
     lab_mode_element: str = "toggle"
-    fwtelsim_device: str = "fwtelsim"
-    fwtelsim_filter_property: str = "filterName"
-    fwtelsim_in_element: str = "in"
+    stagepickoff_device: str = "stagepickoff"
+    stagepickoff_property: str = "presetName"
+    stagepickoff_element: str = "tel"
     camwfs_device: str = "camwfs"
     shutter_property: str = "shutter"
     shutter_element: str = "toggle"
@@ -45,7 +45,7 @@ def _ready_client() -> _MockClient:
     return _MockClient(
         {
             "tcsi.labMode.toggle": constants.SwitchState.OFF,
-            "fwtelsim.filterName.in": constants.SwitchState.OFF,
+            "stagepickoff.presetName.tel": constants.SwitchState.ON,
             "camwfs.shutter.toggle": constants.SwitchState.OFF,
             "holoop.loop_state.toggle": constants.SwitchState.ON,
         }
@@ -89,12 +89,12 @@ def test_evaluate_readiness_lab_mode() -> None:
     assert "lab mode on" in reasons
 
 
-def test_evaluate_readiness_fwtelsim_in() -> None:
+def test_evaluate_readiness_stagepickoff_out() -> None:
     client = _ready_client()
-    client["fwtelsim.filterName.in"] = constants.SwitchState.ON
+    client["stagepickoff.presetName.tel"] = constants.SwitchState.OFF
     ready, reasons = evaluate_readiness(client, _Cfg())
     assert ready is False
-    assert "fwtelsim in beam" in reasons
+    assert "stagepickoff mirror out" in reasons
 
 
 def test_evaluate_readiness_shutter_closed() -> None:

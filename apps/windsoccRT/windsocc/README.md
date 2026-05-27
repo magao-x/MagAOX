@@ -82,7 +82,7 @@ The `windsoccRT` INDI driver (`xapp/windsoccRT`) runs one WindsoCC batch per `lo
 | Blocker | Default INDI key | Condition |
 |---------|------------------|-----------|
 | Lab mode | `tcsi.labMode.toggle` | ON |
-| Tel-sim in beam | `fwtelsim.filterName.in` | ON |
+| Pickoff mirror out (not on-sky) | `stagepickoff.presetName.tel` | OFF |
 | WFS shutter closed | `camwfs.shutter.toggle` | ON (`shutter_closed_is_toggle_on = true`) |
 | HO loop open | `holoop.loop_state.toggle` | OFF (ON = closed loop) |
 
@@ -102,5 +102,5 @@ stream_name = "aol1_imWFS2"
 Verify INDI state on the RTC:
 
 ```bash
-indi_getprop tcsi.labMode fwtelsim.filterName camwfs.shutter holoop.loop_state windsocc.pipeline
+indi_getprop tcsi.labMode stagepickoff.presetName camwfs.shutter holoop.loop_state windsocc.pipeline
 ```

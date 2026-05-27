@@ -19,9 +19,9 @@ class ReadinessConfig(Protocol):
     lab_mode_device: str
     lab_mode_property: str
     lab_mode_element: str
-    fwtelsim_device: str
-    fwtelsim_filter_property: str
-    fwtelsim_in_element: str
+    stagepickoff_device: str
+    stagepickoff_property: str
+    stagepickoff_element: str
     camwfs_device: str
     shutter_property: str
     shutter_element: str
@@ -85,16 +85,17 @@ def evaluate_readiness(
     elif lab_on:
         reasons.append("lab mode on")
 
-    fw_key = _indi_key(
-        cfg.fwtelsim_device,
-        cfg.fwtelsim_filter_property,
-        cfg.fwtelsim_in_element,
+    # Pickoff mirror must be set to the telescope beam to be considered "on-sky".
+    stagepickoff_key = _indi_key(
+        cfg.stagepickoff_device,
+        cfg.stagepickoff_property,
+        cfg.stagepickoff_element,
     )
-    fw_in = _read_switch(client, fw_key)
-    if fw_in is None:
-        reasons.append(f"{fw_key} unavailable")
-    elif fw_in:
-        reasons.append("fwtelsim in beam")
+    stagepickoff_tel_on = _read_switch(client, stagepickoff_key)
+    if stagepickoff_tel_on is None:
+        reasons.append(f"{stagepickoff_key} unavailable")
+    elif not stagepickoff_tel_on:
+        reasons.append("stagepickoff mirror out (tel not in beam)")
 
     shutter_key = _indi_key(
         cfg.camwfs_device,
@@ -129,7 +130,7 @@ def readiness_gate_devices(cfg: ReadinessConfig) -> list[str]:
     """INDI device names to subscribe to before evaluating readiness."""
     return [
         cfg.lab_mode_device,
-        cfg.fwtelsim_device,
+        cfg.stagepickoff_device,
         cfg.camwfs_device,
         cfg.holoop_device,
     ]
