@@ -19,8 +19,10 @@ class PredictiveController{
         uint buffer_size;
         uint measurement_head {0};
         uint command_head {0};
+        uint accel_head {0};
         Matrix measurement_buffer;
         Matrix command_buffer;
+        Matrix accel_buffer;
 
         Matrix* regularization_matrix;
         bool use_regularization_matrix_01 {true};
@@ -34,18 +36,22 @@ class PredictiveController{
         int _num_modes;
         int _num_future;
         int _num_history;
+        int _num_accel_channels;
+        int _num_accel_history;
         realT _gain;
         realT _delta_max;
         realT _regularization;
 
         int num_predictors;
         int num_features;
+        int num_state_features;
+        int num_accel_features;
         int num_correlations;
 
 	public:
         bool use_qrd {false};
         
-        PredictiveController(int num_actuators, int num_history, int num_future, realT gain, realT gamma, realT initial_regularization, realT initial_covariance);
+        PredictiveController(int num_actuators, int num_history, int num_future, realT gain=0.25, realT gamma=1.0, realT initial_regularization=0.015, realT initial_covariance=1e5, int num_accel_channels=0, int accel_history=0);
 		~PredictiveController();
 
         void set_regularization(realT new_regularization);
@@ -68,6 +74,8 @@ class PredictiveController{
 
         Matrix get_current_command_past(int num_steps);
         Matrix get_current_measurement_past(int num_steps);
+        Matrix get_accelerometer_past();
+        void push_accelerometer_sample(const Matrix &new_acceleration);
 
         void get_current_past();
 
