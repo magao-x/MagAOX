@@ -37,7 +37,7 @@ class RecursiveLeastSquares{
 
         Matrix prediction_output;
 
-		RecursiveLeastSquares(int num_predictors, int num_features, realT forgetting_factor, realT inverse_covariance);
+		RecursiveLeastSquares(int num_predictors, int num_features, realT forgetting_factor, realT initial_covariance);
 		~RecursiveLeastSquares();
 
         // This interface might need to change
