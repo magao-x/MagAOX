@@ -255,19 +255,6 @@ class windsoccRT(XDevice):
         """Ensure readiness INDI device properties are available on the client."""
         devices = readiness_gate_devices(self.config)
 
-        connection_status = getattr(self.client, "status", None)
-        connection_enum = getattr(constants, "ConnectionStatus", None)
-        if (
-            connection_enum is not None
-            and connection_status is not None
-            and connection_status is not connection_enum.CONNECTED
-        ):
-            self._indi_props_ready = False
-            self._indi_props_ready_err = (
-                f"INDI client not connected (status={connection_status})"
-            )
-            return False
-
         try:
             self.client.get_properties_and_wait(devices)
         except TimeoutError as exc:
