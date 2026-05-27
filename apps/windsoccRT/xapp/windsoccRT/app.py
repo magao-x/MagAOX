@@ -249,7 +249,11 @@ class windsoccRT(XDevice):
         if "pipeline" not in self.properties:
             return
         prop = self.properties["pipeline"]
-        if prop.get("state") != state:
+        try:
+            current = prop["state"]
+        except (KeyError, TypeError):
+            current = None
+        if current != state:
             prop["state"] = state
             self.update_property(prop)
 
