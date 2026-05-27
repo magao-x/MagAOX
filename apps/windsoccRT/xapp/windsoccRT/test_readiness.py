@@ -85,24 +85,27 @@ def test_evaluate_readiness_lab_mode() -> None:
     client = _ready_client()
     client["tcsi.labMode.toggle"] = constants.SwitchState.ON
     ready, reasons = evaluate_readiness(client, _Cfg())
-    assert ready is False
-    assert "lab mode on" in reasons
+    # Troubleshooting mode: only holoop gate is active.
+    assert ready is True
+    assert reasons == []
 
 
 def test_evaluate_readiness_stagepickoff_out() -> None:
     client = _ready_client()
     client["stagepickoff.presetName.tel"] = constants.SwitchState.OFF
     ready, reasons = evaluate_readiness(client, _Cfg())
-    assert ready is False
-    assert "stagepickoff mirror out" in reasons
+    # Troubleshooting mode: only holoop gate is active.
+    assert ready is True
+    assert reasons == []
 
 
 def test_evaluate_readiness_shutter_closed() -> None:
     client = _ready_client()
     client["camwfs.shutter.toggle"] = constants.SwitchState.ON
     ready, reasons = evaluate_readiness(client, _Cfg())
-    assert ready is False
-    assert "camwfs shutter closed" in reasons
+    # Troubleshooting mode: only holoop gate is active.
+    assert ready is True
+    assert reasons == []
 
 
 def test_evaluate_readiness_shutter_open_when_toggle_on_means_open() -> None:
@@ -126,7 +129,7 @@ def test_evaluate_readiness_missing_property() -> None:
     client = _MockClient({"tcsi.labMode.toggle": constants.SwitchState.OFF})
     ready, reasons = evaluate_readiness(client, _Cfg())
     assert ready is False
-    assert any("unavailable" in r for r in reasons)
+    assert "holoop.loop_state.toggle unavailable" in reasons
 
 
 def test_evaluate_readiness_multiple_blockers() -> None:
@@ -135,4 +138,4 @@ def test_evaluate_readiness_multiple_blockers() -> None:
     client["holoop.loop_state.toggle"] = constants.SwitchState.OFF
     ready, reasons = evaluate_readiness(client, _Cfg())
     assert ready is False
-    assert len(reasons) >= 2
+    assert reasons == ["holoop loop open"]

@@ -78,39 +78,42 @@ def evaluate_readiness(
     """
     reasons: list[str] = []
 
-    lab_key = _indi_key(cfg.lab_mode_device, cfg.lab_mode_property, cfg.lab_mode_element)
-    lab_on = _read_switch(client, lab_key)
-    if lab_on is None:
-        reasons.append(f"{lab_key} unavailable")
-    elif lab_on:
-        reasons.append("lab mode on")
-
-    # Pickoff mirror must be set to the telescope beam to be considered "on-sky".
-    stagepickoff_key = _indi_key(
-        cfg.stagepickoff_device,
-        cfg.stagepickoff_property,
-        cfg.stagepickoff_element,
-    )
-    stagepickoff_tel_on = _read_switch(client, stagepickoff_key)
-    if stagepickoff_tel_on is None:
-        reasons.append(f"{stagepickoff_key} unavailable")
-    elif not stagepickoff_tel_on:
-        reasons.append("stagepickoff mirror out (tel not in beam)")
-
-    shutter_key = _indi_key(
-        cfg.camwfs_device,
-        cfg.shutter_property,
-        cfg.shutter_element,
-    )
-    shutter_toggle = _read_switch(client, shutter_key)
-    if shutter_toggle is None:
-        reasons.append(f"{shutter_key} unavailable")
-    else:
-        shutter_closed = (
-            shutter_toggle if cfg.shutter_closed_is_toggle_on else not shutter_toggle
-        )
-        if shutter_closed:
-            reasons.append("camwfs shutter closed")
+    # Troubleshooting mode:
+    # For RTC-side INDI connectivity testing, temporarily gate on holoop only.
+    # Keep other checks commented so they can be re-enabled quickly.
+    #
+    # lab_key = _indi_key(cfg.lab_mode_device, cfg.lab_mode_property, cfg.lab_mode_element)
+    # lab_on = _read_switch(client, lab_key)
+    # if lab_on is None:
+    #     reasons.append(f"{lab_key} unavailable")
+    # elif lab_on:
+    #     reasons.append("lab mode on")
+    #
+    # stagepickoff_key = _indi_key(
+    #     cfg.stagepickoff_device,
+    #     cfg.stagepickoff_property,
+    #     cfg.stagepickoff_element,
+    # )
+    # stagepickoff_tel_on = _read_switch(client, stagepickoff_key)
+    # if stagepickoff_tel_on is None:
+    #     reasons.append(f"{stagepickoff_key} unavailable")
+    # elif not stagepickoff_tel_on:
+    #     reasons.append("stagepickoff mirror out (tel not in beam)")
+    #
+    # shutter_key = _indi_key(
+    #     cfg.camwfs_device,
+    #     cfg.shutter_property,
+    #     cfg.shutter_element,
+    # )
+    # shutter_toggle = _read_switch(client, shutter_key)
+    # if shutter_toggle is None:
+    #     reasons.append(f"{shutter_key} unavailable")
+    # else:
+    #     shutter_closed = (
+    #         shutter_toggle if cfg.shutter_closed_is_toggle_on else not shutter_toggle
+    #     )
+    #     if shutter_closed:
+    #         reasons.append("camwfs shutter closed")
 
     loop_key = _indi_key(
         cfg.holoop_device,
@@ -129,8 +132,9 @@ def evaluate_readiness(
 def readiness_gate_devices(cfg: ReadinessConfig) -> list[str]:
     """INDI device names to subscribe to before evaluating readiness."""
     return [
-        cfg.lab_mode_device,
-        cfg.stagepickoff_device,
-        cfg.camwfs_device,
+        # Troubleshooting mode: subscribe only to RTC-local holoop.
+        # cfg.lab_mode_device,
+        # cfg.stagepickoff_device,
+        # cfg.camwfs_device,
         cfg.holoop_device,
     ]
