@@ -99,6 +99,7 @@ using namespace mx::improc;
 
     // The predictive control parameters
     realT m_gainCtrl {0.0};
+    realT m_copygainCtrl {1.0};
     realT m_regularizationCtrl {100.0};
     realT m_gammaCtrl {1.00};
     realT m_covarianceCtrl {1.0};
@@ -157,9 +158,8 @@ using namespace mx::improc;
     bool do_reset_model {false};
     bool do_trigger_load {false};
     bool do_trigger_save {false};
-    bool use_qrd{true};
-
-    //
+    bool use_qrd{false};
+    
     std::default_random_engine generator;
     std::normal_distribution<DDSPC::realT> distribution;
 
@@ -344,6 +344,7 @@ using namespace mx::improc;
      config.add("parameters.fpsSource", "", "parameters.fpsSource", argType::Required, "parameters", "fpsSource", false, "string", "The device name for getting fps of the loop.");
 
      config.add("parameters.gain", "", "parameters.gain", argType::Required, "parameters", "gain", false, "float", "The initial feedback gain.");
+     config.add("parameters.copy_gain", "", "parameters.copy_gain", argType::Required, "parameters", "copy_gain", false, "float", "The initial feedback gain.");
      config.add("parameters.regularization", "", "parameters.regularization", argType::Required, "parameters", "regularization", false, "float", "The regularization parameter.");
      config.add("parameters.gamma", "", "parameters.gamma", argType::Required, "parameters", "gamma", false, "float", "The forgetting factor.");
      config.add("parameters.covariance", "", "parameters.covariance", argType::Required, "parameters", "covariance", false, "float", "The initial covariance.");
@@ -378,6 +379,7 @@ using namespace mx::improc;
     _config(m_fpsSource, "parameters.fpsSource");
 
     _config(m_gainCtrl, "parameters.gain");
+    _config(m_copygainCtrl, "parameters.gain");
     _config(m_regularizationCtrl, "parameters.regularization");
     _config(m_gammaCtrl, "parameters.gamma");
     _config(m_covarianceCtrl, "parameters.covariance");
@@ -416,9 +418,11 @@ using namespace mx::improc;
     TELEMETER_LOAD_CONFIG(_config);
 
 	std::cout << "Gain " << m_gainCtrl << std::endl;
+    std::cout << "Copy Gain " << m_copygainCtrl << std::endl;
     std::cout << "Regularization " << m_regularizationCtrl << std::endl;
     std::cout << "Covariance " << m_covarianceCtrl << std::endl;
     std::cout << "Gamma " << m_gammaCtrl << std::endl;
+    std::cout << "Own shmim " << own_shmim << std::endl;
 
     std::cout << "num modes " << m_num_modes << std::endl;
     std::cout << "History " << m_history << std::endl;
@@ -886,7 +890,7 @@ using namespace mx::improc;
         
     }else{
         for(int i=0; i < m_num_modes; i++){
-            new_command(i,0) = m_gainCtrl * new_measurement(i, 0);
+            new_command(i,0) = m_copygainCtrl * new_measurement(i, 0);
         }
     }
     
