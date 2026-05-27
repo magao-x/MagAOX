@@ -1,15 +1,15 @@
-/** \file loPredCtrl.cpp
+/** \file loPredCtrlAcc.cpp
   * \brief The MagAO-X low-order predictive controller main program source file.
   *
-  * \ingroup loPredCtrl_files
+  * \ingroup loPredCtrlAcc_files
   */
 
-#include "loPredCtrl.hpp"
+#include "loPredCtrlAcc.hpp"
 
 
 int main(int argc, char **argv)
 {
-   MagAOX::app::loPredCtrl xapp;
+   MagAOX::app::loPredCtrlAcc xapp;
 
    return xapp.main(argc, argv);
 
