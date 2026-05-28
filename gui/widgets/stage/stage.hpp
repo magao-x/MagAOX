@@ -572,6 +572,20 @@ void stage::on_setPointGo_pressed()
         return;
     }
 
+    if( selection == m_setPoint )
+    {
+        std::cerr << "stage::on_setPointGo_pressed suppressed already-active selection " << m_stageName
+                  << " selection=" << selection << "\n";
+        return;
+    }
+
+    if( m_setPointCommandPending && selection == m_setPointRequested )
+    {
+        std::cerr << "stage::on_setPointGo_pressed suppressed duplicate pending selection " << m_stageName
+                  << " selection=" << selection << "\n";
+        return;
+    }
+
     try
     {
         pcf::IndiProperty ipSend( pcf::IndiProperty::Switch );
