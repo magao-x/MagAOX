@@ -546,8 +546,6 @@ void stage::on_setPoint_activated( int index )
 
 void stage::on_setPointGo_pressed()
 {
-    static size_t s_stageCommandSerial = 0;
-
     std::string selection = ui.setPoint->currentText().toStdString();
 
     if( selection == "" )
@@ -567,22 +565,16 @@ void stage::on_setPointGo_pressed()
 
     if( !knownSelection )
     {
-        std::cerr << "unknown stage preset selection requested in stage::on_setPointGo_pressed: " << m_stageName << "."
-                  << selection << "\n";
         return;
     }
 
     if( selection == m_setPoint )
     {
-        std::cerr << "stage::on_setPointGo_pressed suppressed already-active selection " << m_stageName
-                  << " selection=" << selection << "\n";
         return;
     }
 
     if( m_setPointCommandPending && selection == m_setPointRequested )
     {
-        std::cerr << "stage::on_setPointGo_pressed suppressed duplicate pending selection " << m_stageName
-                  << " selection=" << selection << "\n";
         return;
     }
 
@@ -602,29 +594,17 @@ void stage::on_setPointGo_pressed()
         ipSend.setState( pcf::IndiProperty::Idle );
         ipSend.setRule( pcf::IndiProperty::OneOfMany );
 
-        std::string elementStates;
         for( const auto &preset : m_presets )
         {
-            if( !elementStates.empty() )
-            {
-                elementStates += ", ";
-            }
-
             if( preset == selection )
             {
                 ipSend.add( pcf::IndiElement( preset, pcf::IndiElement::On ) );
-                elementStates += preset + "=On";
             }
             else
             {
                 ipSend.add( pcf::IndiElement( preset, pcf::IndiElement::Off ) );
-                elementStates += preset + "=Off";
             }
         }
-
-        ++s_stageCommandSerial;
-        std::cerr << "stage::on_setPointGo_pressed[" << s_stageCommandSerial << "] " << m_stageName << "."
-                  << ipSend.getName() << " selection=" << selection << " elements={" << elementStates << "}\n";
 
         sendNewProperty( ipSend );
     }
