@@ -120,7 +120,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     /// Handle updates to the local fps target property.
     INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_fps );
 
-    float m_fps{ 2000 }; ///< The target acquisition rate in frames per second.
+    float m_fps{ 8000 }; ///< The target acquisition rate in frames per second.
 
     /// INDI property subscription used to follow an external fps source.
     pcf::IndiProperty m_indiP_fpsSource;
