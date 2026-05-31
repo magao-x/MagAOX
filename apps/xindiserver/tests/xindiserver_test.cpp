@@ -220,9 +220,6 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
     }
 }
 
-} // namespace xindiserverTest
-
-} // namespace libXWCTest
 
 SCENARIO( "xindiserver constructs local driver arguments", "[xindiserver]" )
 {
@@ -310,6 +307,16 @@ SCENARIO( "xindiserver constructs local driver arguments", "[xindiserver]" )
             std::vector<std::string> clargs;
             rv = xi.addLocalDrivers( clargs );
             REQUIRE( rv == XINDISERVER_E_DUPLICATEDRIVER );
+        }
+
+        WHEN( "Three local drivers, one empty (not an error)" )
+        {
+            std::vector<std::string> ml( { "driverX", "driverY", " " } );
+            xi_test.m_local( xi, ml );
+
+            std::vector<std::string> clargs;
+            rv = xi.addLocalDrivers( clargs );
+            REQUIRE( rv == 0 );
         }
     }
 }
@@ -507,6 +514,26 @@ SCENARIO( "xindiserver constructs remote driver arguments", "[xindiserver]" )
             rv = xi.addRemoteDrivers( clargs );
             REQUIRE( rv == XINDISERVER_E_DUPLICATEDRIVER );
         }
+
+        WHEN( "Three remote drivers, one empty (not an error)" )
+        {
+            std::vector<std::string> mr( { "driverX@host1", "driverY@host2", " " } );
+            xi_test.m_remote( xi, mr );
+
+            mx::app::writeConfigFile(
+                "/tmp/xindiserver_test.conf",
+                { "host1", "host1", "host1", "host2", "host2", "host2" },
+                { "remoteHost", "localPort", "remotePort", "remoteHost", "localPort", "remotePort" },
+                { "host1", "1000", "81", "host2", "1002", "86" } );
+
+             mx::app::appConfigurator config;
+            config.readConfig( "/tmp/xindiserver_test.conf" );
+            loadSSHTunnelConfigs( xi_test.tunnelMap( xi ), config );
+
+            std::vector<std::string> clargs;
+            rv = xi.addRemoteDrivers( clargs );
+            REQUIRE( rv == 0 );
+        }
     }
 }
 
@@ -577,3 +604,8 @@ SCENARIO( "xindiserver constructs both local and remote driver arguments", "[xin
         }
     }
 }
+
+} // namespace xindiserverTest
+
+} // namespace libXWCTest
+

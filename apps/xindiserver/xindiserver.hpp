@@ -33,6 +33,15 @@
   * \ingroup xindiserver
   */
 
+//Forward decl for test harness
+namespace libXWCTest
+{
+namespace xindiserverTest
+{
+    struct xindiserver_test;
+}
+}
+
 namespace MagAOX
 {
 namespace app
@@ -117,7 +126,7 @@ class xindiserver : public MagAOXApp<false>
 {
 
    //Give the test harness access.
-   friend class xindiserver_test;
+   friend class libXWCTest::xindiserverTest::xindiserver_test;
 
 protected:
 
