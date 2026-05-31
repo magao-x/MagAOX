@@ -358,6 +358,12 @@ int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
 
    for(size_t i=0; i< m_local.size(); ++i)
    {
+      if(m_local[i].size() == 0 || std::all_of(m_local[i].begin(),m_local[i].end(), isspace))
+      {
+          log<text_log>("empty local driver", logPrio::LOG_WARNING);
+          continue;
+      }
+
       size_t bad = m_local[i].find_first_of("@:/", 0);
 
       if(bad != std::string::npos)
@@ -396,6 +402,12 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
 {
    for(size_t i=0; i < m_remote.size(); ++i)
    {
+      if(m_remote[i].size() == 0 || std::all_of(m_remote[i].begin(),m_remote[i].end(), isspace))
+      {
+          log<text_log>("empty remote driver", logPrio::LOG_WARNING);
+          continue;
+      }
+
       std::string driver;
       std::string tunnel;
 
