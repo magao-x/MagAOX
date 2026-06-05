@@ -1,5 +1,9 @@
+/** \file
+ * \brief Defines Doxygen groups and pages for XWCTk testing.
+ */
 
-/// \defgroup testing Testing XWCTk
+/** \defgroup testing Testing XWCTk
+ */
 
 /** \defgroup test_build_run Building and Running Tests
   * \ingroup testing
@@ -9,9 +13,9 @@ To build a single test, from inside the `tests` subfolder, run
 $ make -B -f Makefile.one t=../apps/zaberCtrl/tests/zaberCtrl_test.cpp
 $ ../apps/zaberCtrl/tests/zaberCtrl_test
 \endverbatim
-which shows how to build the test suited defined in \ref zaberCtrl_test.cpp.  Note that the `.cpp` is not required.  The `-B` switch
-for make is not always necessary, but is a good idea to make sure the right things get built.  If you have only edited the `*_test.cpp`
-file you can leave `-B` out.
+which shows how to build the test suite defined in \ref zaberCtrl_test.cpp.  Note that the `.cpp` is not required.  The
+`-B` switch for make is not always necessary, but is a good idea to make sure the right things get built.  If you have
+only edited the `*_test.cpp` file you can leave `-B` out.
 
 To build all the tests:
 \verbatim
@@ -27,22 +31,31 @@ $ bash ./testMagAOX.bash
 */
 
 /** \defgroup test_indi Tests of INDI Communications
-  * \ingroup testing
-  */
+ * \ingroup testing
+ */
 
 /** \defgroup unit_test Unit Testing
-  * \brief Unit tests in XWCTk.
-  * \ingroup testing
-  */
+ * \brief Unit tests in XWCTk.
+ * \ingroup testing
+ */
 
 /** \defgroup app_unit_test libMagAOX::app Unit Tests
-  * \ingroup unit_test
-  */
-  
+ * \ingroup unit_test
+ */
+
 /** \defgroup application_unit_test Application Unit Tests
-  * \brief Unit tests for MagAO-X applications.
-  * \ingroup unit_test
-*/
+ * \brief Unit tests for MagAO-X applications.
+ * \ingroup unit_test
+ */
 
-
-
+/** \page page_test_coverage Test Coverage Report
+ * \ingroup testing
+ *
+ * \htmlonly
+ * <iframe
+ *   title="MagAO-X test coverage report"
+ *   src="../coverage/index.html"
+ *   style="width: 100%; height: 85vh; border: 0;">
+ * </iframe>
+ * \endhtmlonly
+ */

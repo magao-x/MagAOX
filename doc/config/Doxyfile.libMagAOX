@@ -867,7 +867,16 @@ RECURSIVE              = YES
 # run.
 
 EXCLUDE                = apps/template \
-                         tests/catch2
+                         tests/catch2 \
+                         apps/visxCtrl/README.md \
+                         apps/xInstGraph/DO_NOT_EDIT_README_FIRST.md \
+                         apps/xInstGraph/xigNodes/tests/making_tests.md \
+                         apps/xInstGraph/README.md \
+                         apps/xInstGraph/drawio_howto.md \
+                         libMagAOX/logger/tests/flatlogs.md \
+                         tests/valgrind/valgrind.md
+
+
 
 # The EXCLUDE_SYMLINKS tag can be used to select whether or not files or
 # directories that are symbolic links (a Unix file system feature) are excluded
