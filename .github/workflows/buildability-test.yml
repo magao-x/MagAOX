@@ -1,7 +1,7 @@
 name: Check buildability
 permissions:
   contents: read
-  packages: read
+  packages: write
 on:
   workflow_dispatch:
   schedule:
@@ -55,3 +55,8 @@ jobs:
           make libs_all
           make all
           make install
+  update-container:
+    needs:
+      - build-x86
+      - build-arm
+    uses: ./.github/workflows/container.yml
