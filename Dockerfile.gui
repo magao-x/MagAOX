@@ -6,4 +6,5 @@ ADD . /opt/MagAOX/source/MagAOX
 WORKDIR /opt/MagAOX/source/magao-x-setup
 USER root
 RUN bash -lx first_party/install_MagAOX.sh
+WORKDIR /home/xsup
 USER xsup
