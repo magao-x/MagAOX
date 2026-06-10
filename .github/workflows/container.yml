@@ -26,7 +26,7 @@ jobs:
           driver-opts: image=moby/buildkit:v0.30.0
 
       - name: Log in to the Container registry
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/dev'
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           registry: ${{ env.REGISTRY }}
@@ -49,7 +49,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
           sbom: false
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.ref == 'refs/heads/main' }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.ref == 'refs/heads/dev' }}
 
       - name: Build and push gui image by digest
         id: build-gui
@@ -61,10 +61,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
           sbom: false
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.ref == 'refs/heads/main' }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.ref == 'refs/heads/dev' }}
 
       - name: Export digests
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/dev'
         run: |
           mkdir -p /tmp/digests/build /tmp/digests/cli /tmp/digests/gui
           digest="${{ steps.build-build.outputs.digest }}"
@@ -75,7 +75,7 @@ jobs:
           touch "/tmp/digests/gui/${digest#sha256:}"
 
       - name: Upload digests
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/dev'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: digests-amd64
@@ -99,7 +99,7 @@ jobs:
           driver-opts: image=moby/buildkit:v0.30.0
 
       - name: Log in to the Container registry
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/dev'
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           registry: ${{ env.REGISTRY }}
@@ -122,7 +122,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
           sbom: false
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.ref == 'refs/heads/main' }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.ref == 'refs/heads/dev' }}
 
       - name: Build and push gui image by digest
         id: build-gui
@@ -134,10 +134,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
           sbom: false
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.ref == 'refs/heads/main' }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.ref == 'refs/heads/dev' }}
 
       - name: Export digests
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/dev'
         run: |
           mkdir -p /tmp/digests/build /tmp/digests/cli /tmp/digests/gui
           digest="${{ steps.build-build.outputs.digest }}"
@@ -148,7 +148,7 @@ jobs:
           touch "/tmp/digests/gui/${digest#sha256:}"
 
       - name: Upload digests
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/dev'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: digests-arm64
@@ -162,7 +162,7 @@ jobs:
     needs:
       - build-amd64
       - build-arm64
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/dev'
     permissions:
       contents: read
       packages: write
@@ -202,7 +202,7 @@ jobs:
     needs:
       - build-amd64
       - build-arm64
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/dev'
     permissions:
       contents: read
       packages: write
