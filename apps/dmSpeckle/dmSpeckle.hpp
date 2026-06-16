@@ -219,6 +219,7 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>
     pcf::IndiProperty m_indiP_mode;     ///< Selection switch toggling SPARKLE / ARBCUBE.
     pcf::IndiProperty m_indiP_file;     ///< Text property with current/target arbcube leaf filenames.
     pcf::IndiProperty m_indiP_loadFile; ///< Request switch that triggers an arbcube reload.
+    pcf::IndiProperty m_indiP_nFrames;  ///< Read-only count of frames currently in the buffer.
 
   public:
     INDI_NEWCALLBACK_DECL( dmSpeckle, m_indiP_trigger );
@@ -589,6 +590,10 @@ int dmSpeckle::appStartup()
         return -1;
     }
 
+    REG_INDI_NEWPROP_NOCB( m_indiP_nFrames, "n_frames", pcf::IndiProperty::Number );
+    m_indiP_nFrames.add( pcf::IndiElement( "current" ) );
+    m_indiP_nFrames["current"] = 0;
+
     if( threadStart( m_modThread,
                      m_modThreadInit,
                      m_modThreadID,
@@ -732,6 +737,10 @@ int dmSpeckle::loadArbcubeFile()
         m_shapes.image( p ) *= (float)m_amp;
     }
 
+    log<text_log>( "loaded arbcube FITS file: " + m_fileName + " (" + std::to_string( m_shapes.planes() ) +
+                       " planes)",
+                   logPrio::LOG_NOTICE );
+
     return 0;
 }
 
@@ -795,6 +804,7 @@ int dmSpeckle::generateSpeckles()
         updateIfChanged( m_indiP_separation, "current", m_separation );
         updateIfChanged( m_indiP_angle, "current", m_angle );
     }
+    updateIfChanged( m_indiP_nFrames, "current", (int)m_shapes.planes() );
     updateIfChanged( m_indiP_delay, "current", m_triggerDelay );
     updateIfChanged( m_indiP_amp, "current", m_amp );
     updateIfChanged( m_indiP_frequency, "current", m_frequency );
@@ -835,6 +845,10 @@ inline void dmSpeckle::modThreadExec()
                 m_indiP_file.setState( newState );
                 m_indiP_file.setTimeStamp( pcf::TimeStamp() );
                 m_indiDriver->sendSetProperty( m_indiP_file );
+            }
+            if( rv == 0 )
+            {
+                updateIfChanged( m_indiP_nFrames, "current", (int)m_shapes.planes() );
             }
         }
 
@@ -1396,19 +1410,24 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_mode )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_mode, ipRecv );
 
-    int newMode = m_opMode;
-    if( ipRecv.find( "sparkle" ) && ipRecv["sparkle"].getSwitchState() == pcf::IndiElement::On )
+    // Iterate received elements to find the one newly switched On.
+    // We skip elements already On in the device property because the pcf library merges
+    // current device state into ipRecv when the client sends only the changed element,
+    // which would otherwise cause the already-selected element to fire first.
+    int newMode = -1;
+    for( auto elit = ipRecv.getElements().begin(); elit != ipRecv.getElements().end(); ++elit )
     {
-        newMode = SPARKLE;
+        if( elit->second.getSwitchState() != pcf::IndiElement::On )
+            continue;
+        if( m_indiP_mode.find( elit->first ) && m_indiP_mode[elit->first].getSwitchState() == pcf::IndiElement::On )
+            continue;
+        if( elit->first == "sparkle" )
+            newMode = SPARKLE;
+        else if( elit->first == "arbcube" )
+            newMode = ARBCUBE;
     }
-    else if( ipRecv.find( "arbcube" ) && ipRecv["arbcube"].getSwitchState() == pcf::IndiElement::On )
-    {
-        newMode = ARBCUBE;
-    }
-    else
-    {
+    if( newMode == -1 )
         return 0;
-    }
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
