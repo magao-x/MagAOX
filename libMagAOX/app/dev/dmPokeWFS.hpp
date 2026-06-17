@@ -928,8 +928,11 @@ int dmPokeWFS<derivedT>::basicTimedPoke(float pokeSign)
         XWC_SEM_WAIT_TS_DERIVED(ts, m_imageSemWait_sec, m_imageSemWait_nsec);
         XWC_SEM_TIMEDWAIT_LOOP_DERIVED( m_imageSemaphore, ts )
 
-        //If here, we got an image.  m_rawImage will have been updated
-        m_pokeLocal +=  sign*m_rawImage();
+        // If here, we got an image.  m_rawImage will have been updated
+        { // mutex scope
+            std::unique_lock<std::mutex> lock( m_wfsImageMutex );
+            m_pokeLocal += sign * m_rawImage();
+        }
 
         ++n;
     }
