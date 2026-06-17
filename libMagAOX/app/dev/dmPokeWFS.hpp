@@ -182,6 +182,8 @@ protected:
 
     unsigned m_nPokeAverage {10}; ///< The number of poke sequences to average.  Default is 10.
 
+    unsigned m_nSettleImages{ 1 }; ///< The number of WFS images to discard after the DM trigger.  Default is 1.
+
     std::string m_dmChan;
 
     std::vector<int> m_poke_x;
@@ -415,6 +417,9 @@ protected:
     pcf::IndiProperty m_indiP_nPokeAverage;
     INDI_NEWCALLBACK_DECL(derivedT, m_indiP_nPokeAverage);
 
+    pcf::IndiProperty m_indiP_nSettleImages;
+    INDI_NEWCALLBACK_DECL( derivedT, m_indiP_nSettleImages );
+
     pcf::IndiProperty m_indiP_wfsFps; ///< Property to get the FPS from the WFS camera
     INDI_SETCALLBACK_DECL(derivedT, m_indiP_wfsFps);
 
@@ -475,6 +480,15 @@ int dmPokeWFS<derivedT>::setupConfig(mx::app::appConfigurator & config)
     config.add("pokecen.pokeY", "", "pokecen.pokeY", argType::Required, "pokecen", "pokeY", false, "vector<int>", "The y-coordinates of the actuators to poke. ");
     config.add("pokecen.pokeAmp", "", "pokecen.pokeAmp", argType::Required, "pokecen", "pokeAmp", false, "float", "The poke amplitude, in DM command units. Default is 0.");
     config.add("pokecen.dmSleep", "", "pokecen.dmSleep", argType::Required, "pokecen", "dmSleep", false, "float", "The time to sleep for the DM command to be applied, in microseconds. Default is 10000.");
+    config.add( "pokecen.nSettleImages",
+                "",
+                "pokecen.nSettleImages",
+                argType::Required,
+                "pokecen",
+                "nSettleImages",
+                false,
+                "int",
+                "The number of WFS images to discard after the DM trigger. Default 1." );
     config.add("pokecen.nPokeImages", "", "pokecen.nPokeImages", argType::Required, "pokecen", "nPokeImages", false, "int", "The number of poke images to average.  Default 5.");
     config.add("pokecen.nPokeAverage", "", "pokecen.nPokeAverage", argType::Required, "pokecen", "nPokeAverage", false, "int", "The number of poke sequences to average.  Default 10.");
 
@@ -534,6 +548,8 @@ int dmPokeWFS<derivedT>::loadConfig( mx::app::appConfigurator & config)
 
     config(m_dmSleep, "pokecen.dmSleep");
 
+    config( m_nSettleImages, "pokecen.nSettleImages" );
+
     config(m_nPokeImages, "pokecen.nPokeImages");
 
     config(m_nPokeAverage, "pokecen.nPokeAverage");
@@ -565,6 +581,10 @@ int dmPokeWFS<derivedT>::appStartup()
     CREATE_REG_INDI_NEW_NUMBERI_DERIVED(m_indiP_nPokeAverage, "nPokeAverage", 1, 1000, 1, "%d", "", "");
     m_indiP_nPokeAverage["current"].setValue(m_nPokeAverage);
     m_indiP_nPokeAverage["target"].setValue(m_nPokeAverage);
+
+    CREATE_REG_INDI_NEW_NUMBERI_DERIVED( m_indiP_nSettleImages, "nSettleImages", 0, 1000, 1, "%d", "", "" );
+    m_indiP_nSettleImages["current"].setValue( m_nSettleImages );
+    m_indiP_nSettleImages["target"].setValue( m_nSettleImages );
 
     REG_INDI_SETPROP_DERIVED(m_indiP_wfsFps, m_wfsCamDevName, std::string("fps"));
 
@@ -655,6 +675,7 @@ int dmPokeWFS<derivedT>::appLogic()
 
     derived().template updateIfChanged( m_indiP_nPokeImages, "current", m_nPokeImages);
     derived().template updateIfChanged( m_indiP_nPokeAverage, "current", m_nPokeAverage);
+    derived().template updateIfChanged( m_indiP_nSettleImages, "current", m_nSettleImages );
     derived().template updateIfChanged( m_indiP_poke_amp, "current", m_poke_amp);
 
     return 0;
@@ -1001,16 +1022,14 @@ int dmPokeWFS<derivedT>::basicTimedPoke(float pokeSign)
     //flush semaphore so we take the _next_ good image
     XWC_SEM_FLUSH_DERIVED(m_imageSemaphore);
 
-    //** And wait one image to be sure we are on a whole poke**//
-    XWC_SEM_WAIT_TS_DERIVED(ts, m_imageSemWait_sec, m_imageSemWait_nsec);
-    bool ready = false;
-    while(!ready && !(m_stopMeasurement || derived().m_shutdown))
+    //** And wait for settle images to be sure we are on a whole poke**//
+    uint32_t nSettle = 0;
+    while( nSettle < m_nSettleImages && !( m_stopMeasurement || derived().m_shutdown ) )
     {
+        XWC_SEM_WAIT_TS_DERIVED( ts, m_imageSemWait_sec, m_imageSemWait_nsec );
         XWC_SEM_TIMEDWAIT_LOOP_DERIVED( m_imageSemaphore, ts )
-        else
-        {
-            ready = true;
-        }
+
+        ++nSettle;
     }
 
     uint32_t n = 0;
@@ -1188,6 +1207,23 @@ INDI_NEWCALLBACK_DEFN( dmPokeWFS<derivedT>, m_indiP_nPokeAverage )(const pcf::In
     }
 
     m_nPokeAverage = target;
+
+    return 0;
+}
+
+template <class derivedT>
+INDI_NEWCALLBACK_DEFN( dmPokeWFS<derivedT>, m_indiP_nSettleImages )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS_DERIVED( m_indiP_nSettleImages, ipRecv )
+
+    float target;
+
+    if( derived().template indiTargetUpdate( m_indiP_nSettleImages, target, ipRecv, false ) < 0 )
+    {
+        return derivedT::template log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
+
+    m_nSettleImages = target;
 
     return 0;
 }
