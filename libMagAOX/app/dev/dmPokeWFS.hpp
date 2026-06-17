@@ -191,6 +191,8 @@ protected:
 
     float m_dmSleep {10000}; ///<The time to sleep for the DM command to be applied, in microseconds. Default is 10000.
 
+    std::string m_dmTriggerChan; ///< ImageStreamIO channel whose semaphore indicates the DM command has updated.
+
     ///@}
 
     std::mutex m_wfsImageMutex;
@@ -213,6 +215,14 @@ protected:
     mx::improc::milkImage<float> m_dmStream;
 
     mx::improc::eigenImage<float> m_dmImage;
+
+    IMAGE m_dmTriggerStream {};
+
+    int m_dmTriggerSemaphoreNumber {0}; ///< ImageStreamIO semaphore number claimed on m_dmTriggerChan.
+
+    sem_t *m_dmTriggerSemaphore {nullptr}; ///< Semaphore posted when m_dmTriggerChan updates.
+
+    bool m_dmTriggerStreamOpen {false}; ///< True when m_dmTriggerStream is connected.
 
     float m_deltaX {0};
     float m_deltaY {0};
@@ -379,6 +389,14 @@ protected:
       */
     int basicRunSensor();
 
+    /// Wait for the combined DM stream to update.
+    /**
+     * \returns +1 if exit is due to shutdown or stop request
+     * \returns 0 if the DM trigger stream updated
+     * \returns -1 if an error occurs
+     */
+    int waitForDmTrigger();
+
     int updateMeasurement( float deltaX,
                            float deltaY
                          );
@@ -452,6 +470,7 @@ int dmPokeWFS<derivedT>::setupConfig(mx::app::appConfigurator & config)
     }
 
     config.add("pokecen.dmChannel", "", "pokecen.dmChannel", argType::Required, "pokecen", "dmChannel", false, "string", "The dm channel to use for pokes, e.g. dm01disp06.");
+    config.add("pokecen.dmTriggerChannel", "", "pokecen.dmTriggerChannel", argType::Required, "pokecen", "dmTriggerChannel", false, "string", "The DM channel whose semaphore indicates that the combined DM command has updated. Defaults to dmChannel with a two digit channel suffix removed.");
     config.add("pokecen.pokeX", "", "pokecen.pokeX", argType::Required, "pokecen", "pokeX", false, "vector<int>", "The x-coordinates of the actuators to poke. ");
     config.add("pokecen.pokeY", "", "pokecen.pokeY", argType::Required, "pokecen", "pokeY", false, "vector<int>", "The y-coordinates of the actuators to poke. ");
     config.add("pokecen.pokeAmp", "", "pokecen.pokeAmp", argType::Required, "pokecen", "pokeAmp", false, "float", "The poke amplitude, in DM command units. Default is 0.");
@@ -492,6 +511,15 @@ int dmPokeWFS<derivedT>::loadConfig( mx::app::appConfigurator & config)
     }
 
     config(m_dmChan, "pokecen.dmChannel");
+
+    m_dmTriggerChan = m_dmChan;
+    if( m_dmTriggerChan.size() > 2 && m_dmTriggerChan[m_dmTriggerChan.size() - 1] >= '0' &&
+        m_dmTriggerChan[m_dmTriggerChan.size() - 1] <= '9' && m_dmTriggerChan[m_dmTriggerChan.size() - 2] >= '0' &&
+        m_dmTriggerChan[m_dmTriggerChan.size() - 2] <= '9' )
+    {
+        m_dmTriggerChan.resize( m_dmTriggerChan.size() - 2 );
+    }
+    config( m_dmTriggerChan, "pokecen.dmTriggerChannel" );
 
     config(m_poke_x, "pokecen.pokeX");
 
@@ -645,6 +673,18 @@ int dmPokeWFS<derivedT>::appShutdown()
         derivedT::template log<software_error>({__FILE__, __LINE__, "error from darkShmimMonitorT::appShutdown"});
     }
 
+    if( m_dmTriggerStreamOpen )
+    {
+        if( m_dmTriggerSemaphoreNumber >= 0 )
+        {
+            m_dmTriggerStream.semReadPID[m_dmTriggerSemaphoreNumber] = 0;
+        }
+        ImageStreamIO_closeIm( &m_dmTriggerStream );
+        m_dmTriggerStreamOpen      = false;
+        m_dmTriggerSemaphore       = nullptr;
+        m_dmTriggerSemaphoreNumber = 0;
+    }
+
     if (m_wfsThread.joinable())
     {
         pthread_kill(m_wfsThread.native_handle(), SIGUSR1);
@@ -683,6 +723,43 @@ int dmPokeWFS<derivedT>::allocate( const wfsShmimT & dummy)
     m_dmStream.passive(true);
 
     m_dmImage.resize(m_dmStream.rows(), m_dmStream.cols());
+
+    if( m_dmTriggerStreamOpen )
+    {
+        if( m_dmTriggerSemaphoreNumber >= 0 )
+        {
+            m_dmTriggerStream.semReadPID[m_dmTriggerSemaphoreNumber] = 0;
+        }
+        ImageStreamIO_closeIm( &m_dmTriggerStream );
+        m_dmTriggerStreamOpen      = false;
+        m_dmTriggerSemaphore       = nullptr;
+        m_dmTriggerSemaphoreNumber = 0;
+    }
+
+    if( ImageStreamIO_openIm( &m_dmTriggerStream, m_dmTriggerChan.c_str() ) != IMAGESTREAMIO_SUCCESS )
+    {
+        return derivedT::template log<software_error, -1>(
+            { __FILE__, __LINE__, "error opening DM trigger channel " + m_dmTriggerChan } );
+    }
+
+    if( m_dmTriggerStream.md[0].sem < SEMAPHORE_MAXVAL )
+    {
+        ImageStreamIO_closeIm( &m_dmTriggerStream );
+        return derivedT::template log<software_error, -1>(
+            { __FILE__, __LINE__, "DM trigger channel has no valid semaphore " + m_dmTriggerChan } );
+    }
+
+    m_dmTriggerSemaphoreNumber = ImageStreamIO_getsemwaitindex( &m_dmTriggerStream, m_dmTriggerSemaphoreNumber );
+    if( m_dmTriggerSemaphoreNumber < 0 )
+    {
+        ImageStreamIO_closeIm( &m_dmTriggerStream );
+        return derivedT::template log<software_error, -1>(
+            { __FILE__, __LINE__, "no valid semaphore found for DM trigger channel " + m_dmTriggerChan } );
+    }
+
+    ImageStreamIO_semflush( &m_dmTriggerStream, m_dmTriggerSemaphoreNumber );
+    m_dmTriggerSemaphore  = m_dmTriggerStream.semptr[m_dmTriggerSemaphoreNumber];
+    m_dmTriggerStreamOpen = true;
 
     if(derived().darkShmimMonitor().width() == derived().shmimMonitor().width() &&
          derived().darkShmimMonitor().height() == derived().shmimMonitor().height() )
@@ -902,7 +979,22 @@ int dmPokeWFS<derivedT>::basicTimedPoke(float pokeSign)
     }
 
     //This is where the pokes are applied to the DM
+    ImageStreamIO_semflush( &m_dmTriggerStream, m_dmTriggerSemaphoreNumber );
     m_dmStream = m_dmImage;
+
+    int rv = waitForDmTrigger();
+    if(rv < 0)
+    {
+        m_dmImage.setZero();
+        m_dmStream = m_dmImage;
+        return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "error waiting for DM trigger"});
+    }
+    else if(rv > 0)
+    {
+        m_dmImage.setZero();
+        m_dmStream = m_dmImage;
+        return rv;
+    }
 
     mx::sys::microSleep(m_dmSleep);
 
@@ -1014,6 +1106,41 @@ int dmPokeWFS<derivedT>::basicRunSensor()
 
     m_dmImage.setZero();
     m_dmStream = m_dmImage;
+
+    return 0;
+}
+
+template <class derivedT>
+int dmPokeWFS<derivedT>::waitForDmTrigger()
+{
+    if( !m_dmTriggerStreamOpen || m_dmTriggerSemaphore == nullptr )
+    {
+        return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, "DM trigger stream is not open" } );
+    }
+
+    bool ready = false;
+    while( !ready && !( m_stopMeasurement || derived().m_shutdown ) )
+    {
+        timespec ts;
+        XWC_SEM_WAIT_TS_DERIVED( ts, m_imageSemWait_sec, m_imageSemWait_nsec );
+
+        if( sem_timedwait( m_dmTriggerSemaphore, &ts ) != 0 )
+        {
+            if( errno == EINTR || errno == ETIMEDOUT )
+            {
+                continue;
+            }
+
+            return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, errno, "sem_timedwait" } );
+        }
+
+        ready = true;
+    }
+
+    if(m_stopMeasurement || derived().m_shutdown)
+    {
+        return 1;
+    }
 
     return 0;
 }
