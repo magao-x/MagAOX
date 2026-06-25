@@ -8,6 +8,125 @@ from typing import Any
 
 import numpy as np
 from sklearn.cluster import HDBSCAN
+import polars as pl
+
+# Schema for both dataframes
+schema = [
+    "Pressure (hPa)", 
+    "Alt (km)", 
+    "Speed (m/s)", 
+    "Direction (deg)", 
+    "Group"
+]
+
+# UT 2023 Mar 10 Data
+data_mar10 = [
+    # [900, 1.0, 0.6, 282.3, None],
+    # [875, 1.2, 0.5, 269.7, None],
+    # [850, 1.5, 0.4, 283.4, None],
+    # [825, 1.7, 0.4, 285.9, None],
+    # [775, 2.2, 0.3, 276.6, None],
+    # [750, 2.5, 0.2, 278.5, None],
+    # [700, 3.0, 0.3, 268.2, None],
+    # [650, 3.6, 0.5, 31.0, None],
+    # [600, 4.2, 0.0, 45.0, None],
+    [550, 4.9, 1.4, 217.0, 4],
+    [500, 5.6, 2.8, 206.7, 4],
+    [450, 6.3, 2.1, 196.9, 4],
+    [400, 7.2, 2.8, 165.6, 4],
+    [350, 8.1, 2.3, 134.3, 3],
+    [300, 9.2, 1.6, 23.9, None],
+    [250, 10.4, 2.2, 343.1, None],
+    [200, 11.8, 9.0, 102.9, 1],
+    [150, 13.6, 21.3, 93.3, 0],
+    [100, 16.2, 16.0, 94.2, 0],
+    [70, 18.4, 5.2, 82.0, None],
+    # [50, 20.6, 4.2, 285.5, None]
+]
+
+df_mar10 = pl.DataFrame(data_mar10, schema=schema, orient="row")
+
+# UT 2023 Mar 13 Data
+data_mar13 = [
+    # [900, 1.0, 0.6, 271.1, None],
+    # [875, 1.2, 0.7, 261.4, None],
+    # [850, 1.5, 0.7, 262.8, None],
+    # [825, 1.7, 0.6, 261.1, None],
+    # [775, 2.2, 0.8, 225.5, 4],
+    # [750, 2.5, 1.3, 207.0, 4],
+    [700, 3.0, 3.0, 191.3, 4],
+    [650, 3.6, 4.2, 182.9, 4],
+    [600, 4.2, 5.8, 151.8, 4],
+    [550, 4.9, 7.8, 134.9, 3],
+    [500, 5.6, 7.3, 132.2, 3],
+    [450, 6.3, 8.6, 136.9, 3],
+    [400, 7.2, 14.1, 136.7, 3],
+    [350, 8.1, 16.3, 132.7, None],
+    [300, 9.2, 22.1, 114.8, None],
+    [250, 10.4, 25.0, 114.6, 0],
+    [200, 11.8, 26.6, 104.4, 0],
+    [150, 13.6, 16.1, 118.6, 1],
+    [100, 16.2, 10.8, 122.4, 1],
+    [70, 18.4, 5.8, 119.6, None],
+    # [50, 20.6, 5.8, 260.1, None]
+]
+
+df_mar13 = pl.DataFrame(data_mar13, schema=schema, orient="row")
+
+
+def _reference_layers_df_from_date_obs(date_obs: str | None) -> pl.DataFrame:
+    """Return the manual reference layer table matching ``date_obs``."""
+    if not date_obs:
+        return pl.DataFrame(schema=schema)
+    date_obs_lower = str(date_obs).strip().lower()
+    date_obs_compact = "".join(ch for ch in date_obs_lower if ch.isalnum())
+    if (
+        "2023-03-10" in date_obs_lower
+        or "2023/03/10" in date_obs_lower
+        or "2023 mar 10" in date_obs_lower
+        or "mar 10 2023" in date_obs_lower
+        or "20230310" in date_obs_compact
+    ):
+        return df_mar10.clone()
+    if (
+        "2023-03-13" in date_obs_lower
+        or "2023/03/13" in date_obs_lower
+        or "2023 mar 13" in date_obs_lower
+        or "mar 13 2023" in date_obs_lower
+        or "20230313" in date_obs_compact
+    ):
+        return df_mar13.clone()
+    return pl.DataFrame(schema=schema)
+
+
+def layer_reference_points_from_date_obs(date_obs: str | None) -> list[dict[str, float | int]]:
+    """Reference layer points (vu, vv, altitude_km) selected from ``date_obs``."""
+    df_ref = _reference_layers_df_from_date_obs(date_obs)
+    if df_ref.is_empty():
+        return []
+    df_layers = df_ref.filter(
+        # pl.col("Group").is_not_null()
+        pl.col("Alt (km)").cast(pl.Float64, strict=False).is_finite()
+        & pl.col("Speed (m/s)").cast(pl.Float64, strict=False).is_finite()
+        & pl.col("Direction (deg)").cast(pl.Float64, strict=False).is_finite()
+    )
+    if df_layers.is_empty():
+        return []
+
+    out: list[dict[str, float | int]] = []
+    for row in df_layers.iter_rows(named=True):
+        speed = float(row["Speed (m/s)"])
+        direction_deg = float(row["Direction (deg)"])
+        theta_rad = np.deg2rad(direction_deg)
+        out.append(
+            {
+                # "layer_id": int(row["Group"]),
+                "altitude_km": float(row["Alt (km)"]),
+                "vu": float(speed * np.cos(theta_rad)),
+                "vv": float(speed * np.sin(theta_rad)),
+            }
+        )
+    return out
 
 
 def flatten_vetted_tracks_to_features(wind_summaries: list[dict[str, Any]]) -> np.ndarray:
