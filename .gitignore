@@ -162,6 +162,7 @@ apps/userGainCtrl/userGainCtrl
 apps/w2tcsOffloader/w2tcsOffloader
 apps/wooferTweeterRecon/wooferTweeterRecon
 apps/windsoccRT/exao2
+apps/windsoccRT/wsRT_config.yaml
 
 #x
 apps/xindiserver/tests/remoteDriver_test
