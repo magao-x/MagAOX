@@ -15,7 +15,7 @@ UR_CENTER: [90, 90]
 LL_CENTER: [30, 30]
 LR_CENTER: [90, 30]
 APPLY_TUKEY_WINDOW: true  # apply a Tukey window to cropped pupil thumbnails before cross-correlation
-TUKEY_ALPHA: 0.2          # Tukey window shape parameter in [0, 1]
+TUKEY_ALPHA: 0.0          # Tukey window shape parameter in [0, 1]
 
 # Step 2: XCORR
 START_FRAME: 0 # start the dataset on this frame; sparkle pattern zero point?
@@ -41,8 +41,8 @@ MEASURE_DIR: "measure_results" # directory to save the measure results to (defau
 TIME_TRANSIT: "2023-03-10T06:09:11.342216344Z"  # parity change in wind PA
 WRITE_CSV: results_iz.csv
 LIMIT_CUBES: 1 # limit the number of cubes to process (for debugging; default is None)
-INNER_RADIUS: 23 #pixels; tripwire region inner radius
-OUTER_RADIUS: 28 #pixels; tripwire region outer radius
+INNER_RADIUS: 12 #pixels; tripwire region inner radius
+OUTER_RADIUS: 24 #pixels; tripwire region outer radius
 IMAGE_CENTER: [65, 65]
 N_WEDGES: 72
 D_MIRROR: 6.5
