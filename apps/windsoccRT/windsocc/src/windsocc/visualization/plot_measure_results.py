@@ -8,6 +8,7 @@ import numpy as np
 import polars as pl
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as path_effects
 from matplotlib.artist import Artist
 from matplotlib.patches import Ellipse
 from matplotlib.animation import FuncAnimation
@@ -177,6 +178,10 @@ def plot_wind_track_clusters(
     probabilities: np.ndarray,
     output_plot_fname: str,
     title: str | None = None,
+    layer_reference_points: list[dict[str, float | int]] | None = None,
+    lco_surface_points: list[dict[str, object]] | None = None,
+    u_component_range: tuple[float, float] | None = None,
+    v_component_range: tuple[float, float] | None = None,
 ) -> None:
     """Scatter vu vs vv with HDBSCAN clusters; noise drawn first in faint gray.
 
@@ -212,6 +217,7 @@ def plot_wind_track_clusters(
     cmap = plt.get_cmap("tab10")
     # cmap = plt.get_cmap("Set1")
     cluster_ids = sorted(x for x in np.unique(labels) if x >= 0)
+    cluster_legend_elements: list[Line2D] = []
     for idx, lab in enumerate(cluster_ids):
         mask = labels == lab
         if not np.any(mask):
@@ -229,37 +235,105 @@ def plot_wind_track_clusters(
             zorder=2,
             edgecolors="none",
         )
-        centroid_u = float(np.mean(vv[mask]))
-        centroid_v = float(np.mean(vu[mask]))
-        ax.scatter(
-            [centroid_u],
-            [centroid_v],
-            s=720,
-            marker="o",
-            facecolors=[(*rgb, 0.36)],
-            edgecolors=[(*rgb, 1.0)],
-            linewidths=1.6,
-            zorder=4,
+        cluster_legend_elements.append(
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                label=f"Group {int(lab)}",
+                markerfacecolor=(*rgb, 0.9),
+                markeredgecolor=(*rgb, 1.0),
+                markeredgewidth=1.0,
+                markersize=6,
+            )
         )
-        ax.text(
-            centroid_u,
-            centroid_v,
-            f"{int(lab)}",
-            color="white",
-            ha="center",
-            va="center",
-            fontsize=24,
-            fontweight="bold",
-            zorder=5,
-        )
+
+    if layer_reference_points:
+        ref_vu: list[float] = []
+        ref_vv: list[float] = []
+        ref_altitudes: list[float] = []
+        for ref in layer_reference_points:
+            try:
+                vu_ref = float(ref["vu"])
+                vv_ref = float(ref["vv"])
+                altitude_km = float(ref["altitude_km"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not np.isfinite(vu_ref) or not np.isfinite(vv_ref) or not np.isfinite(altitude_km):
+                continue
+            ref_vu.append(vu_ref)
+            ref_vv.append(vv_ref)
+            ref_altitudes.append(altitude_km)
+        if ref_vu:
+            ax.scatter(
+                ref_vv,
+                ref_vu,
+                s=1080,
+                marker="s",
+                facecolors=[(0.0, 0.0, 0.0, 0.05)],
+                edgecolors=[(0.0, 0.0, 0.0, 0.20)],
+                linewidths=1.4,
+                zorder=6,
+            )
+            for x_ref, y_ref, alt_km in zip(ref_vv, ref_vu, ref_altitudes, strict=True):
+                ax.text(
+                    x_ref,
+                    y_ref,
+                    f"{alt_km:.1f}",
+                    color="white",
+                    ha="center",
+                    va="center",
+                    fontsize=12,
+                    fontweight="normal",
+                    path_effects=[
+                        path_effects.withStroke(linewidth=2.2, foreground="black"),
+                    ],
+                    zorder=7,
+                )
+
+    if lco_surface_points:
+        lco_vu: list[float] = []
+        lco_vv: list[float] = []
+        for ref in lco_surface_points:
+            try:
+                vu_ref = float(ref["vu"])
+                vv_ref = float(ref["vv"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not np.isfinite(vu_ref) or not np.isfinite(vv_ref):
+                continue
+            lco_vu.append(vu_ref)
+            lco_vv.append(vv_ref)
+        if lco_vu:
+            ax.scatter(
+                lco_vv,
+                lco_vu,
+                s=54,
+                marker="*",
+                facecolors=[(0.0, 0.0, 0.0, 0.33)],
+                edgecolors="none",
+                linewidths=0.0,
+                zorder=8,
+            )
 
     ax.set_ylabel(r"$V$-component Speed (m/s)", fontsize=24)
     ax.set_xlabel(r"$U$-component Speed (m/s)", fontsize=24)
-    # can we flip the x axis?
+    if u_component_range is not None:
+        u_left, u_right = u_component_range
+        # Config is [leftmost, rightmost] in displayed coordinates.
+        # Because this plot uses east-left x orientation, set limits reversed.
+        ax.set_xlim(float(u_right), float(u_left))
+    # else:
+    #     # Default orientation: east-left.
     ax.invert_xaxis()
+    if v_component_range is not None:
+        v_top, v_bottom = v_component_range
+        # Config is [topmost, bottommost] in displayed coordinates.
+        ax.set_ylim(float(v_bottom), float(v_top))
     ax.set_facecolor("whitesmoke") # Set background color
     ax.grid(True, linestyle="--", alpha=0.3)
-    compass_origin = (0.16, 0.16)
+    compass_origin = (0.14, 0.14)
     compass_delta = 0.065
     compass_style = {
         "arrowstyle": "-|>",
@@ -315,10 +389,22 @@ def plot_wind_track_clusters(
             )
         )
     if legend_elements:
-        ax.legend(handles=legend_elements, loc="best", fontsize=16)
+        legend_ungrouped = ax.legend(handles=legend_elements, loc="best", fontsize=16)
+        ax.add_artist(legend_ungrouped)
+    if cluster_legend_elements:
+        ax.legend(
+            handles=cluster_legend_elements,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.02),
+            fontsize=16,
+            ncol=3,
+            markerscale=1.0,
+            frameon=True,
+            borderaxespad=0.0,
+        )
 
     # ax.set_aspect("equal", adjustable="box")
-    fig.tight_layout()
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
     out_plot_dir = os.path.dirname(os.path.abspath(output_plot_fname))
     if out_plot_dir:
         os.makedirs(out_plot_dir, exist_ok=True)
@@ -446,6 +532,7 @@ def plot_wind_direction_vs_time_for_clusters(
     *,
     sigma: float,
     date_obs: str,
+    lco_surface_points: list[dict[str, object]] | None = None,
 ) -> None:
     """Polar compass-rose scatter: direction vs time for all clusters in one plot.
 
@@ -500,6 +587,15 @@ def plot_wind_direction_vs_time_for_clusters(
             continue
         times = [times[i] for i in np.flatnonzero(finite)]
         all_time_num.extend(mdates.date2num(times).ravel().tolist())
+    if lco_surface_points:
+        lco_times_all: list[object] = []
+        for row in lco_surface_points:
+            ts = row.get("time")
+            if ts is None:
+                continue
+            lco_times_all.append(ts)
+        if lco_times_all:
+            all_time_num.extend(mdates.date2num(lco_times_all).ravel().tolist())
     if not all_time_num:
         warnings.warn(
             "plot_wind_direction_vs_time_for_clusters: no finite time/direction rows; skipping.",
@@ -556,6 +652,40 @@ def plot_wind_direction_vs_time_for_clusters(
             linewidths=0,
             label=f"Group {cid} " + r"($\bar{v}$" + f"={mean_scalar_speed_mps:.2f} m/s)",
         )
+
+    if lco_surface_points:
+        lco_times: list[object] = []
+        lco_dirs: list[float] = []
+        for row in lco_surface_points:
+            try:
+                ts = row["time"]
+                direction_deg = float(row["direction_deg"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if ts is None or not np.isfinite(direction_deg):
+                continue
+            lco_times.append(ts)
+            lco_dirs.append(direction_deg)
+        if lco_times:
+            lco_time_num = mdates.date2num(lco_times)
+            lco_theta = _wind_direction_deg_to_compass_theta(np.asarray(lco_dirs, dtype=np.float64))
+            lco_radius = _time_values_to_radius(
+                lco_time_num,
+                t_min=t_min,
+                t_max=t_max,
+                r_inner=r_inner,
+                r_outer=r_outer,
+            )
+            ax.scatter(
+                lco_theta,
+                lco_radius,
+                s=54,
+                marker="*",
+                facecolors=[(0.0, 0.0, 0.0, 0.5)],
+                edgecolors="none",
+                linewidths=0.0,
+                zorder=4,
+            )
 
     compass_thetas = (np.pi / 2.0, np.pi, 3.0 * np.pi / 2.0, 0.0)
     compass_labels = ("N", "E", "S", "W")

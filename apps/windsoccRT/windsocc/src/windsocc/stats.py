@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import os
+from datetime import datetime
 
 import numpy as np
 import polars as pl
@@ -15,6 +16,7 @@ import polars as pl
 from windsocc.analysis.wind_stats import (
     cluster_centroids_table,
     cluster_wind_tracks_hdbscan,
+    layer_reference_points_from_date_obs,
     per_cluster_vu_vv_stats,
 )
 from windsocc.io.config_handling import parse_config_file
@@ -39,6 +41,122 @@ WIND_DATA_SCHEMA: dict[str, pl.DataType] = {
 }
 
 WIND_DATA_COLUMNS = list(WIND_DATA_SCHEMA.keys())
+
+
+def _parse_two_float_range(
+    raw_value: object,
+    config_key: str,
+) -> tuple[float, float] | None:
+    """Parse a two-value config entry into a float pair."""
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, np.ndarray):
+        values = raw_value.ravel().tolist()
+    elif isinstance(raw_value, (list, tuple)):
+        values = list(raw_value)
+    else:
+        logging.warning("%s must be a list/tuple with two float values.", config_key)
+        return None
+    if len(values) != 2:
+        logging.warning("%s must contain exactly two values; got %d.", config_key, len(values))
+        return None
+    try:
+        low = float(values[0])
+        high = float(values[1])
+    except (TypeError, ValueError):
+        logging.warning("%s values must be numeric: %r", config_key, values)
+        return None
+    if not np.isfinite(low) or not np.isfinite(high):
+        logging.warning("%s contains non-finite values: %r", config_key, values)
+        return None
+    return low, high
+
+
+def _load_lco_surface_wind_points(
+    csv_path: str,
+    time_min: datetime,
+    time_max: datetime,
+) -> list[dict[str, object]]:
+    """Load LCO wind rows in the observation window and map to ``(vu, vv)``."""
+    if not os.path.isfile(csv_path):
+        logging.warning("LCO wind CSV not found: %s", csv_path)
+        return []
+    try:
+        lco_df = pl.read_csv(csv_path)
+    except Exception as exc:
+        logging.warning("Could not read LCO wind CSV %s: %s", csv_path, exc)
+        return []
+    required_cols = {"ts", "wind_dir_avg", "wind_speed_avg"}
+    if not required_cols.issubset(set(lco_df.columns)):
+        logging.warning(
+            "LCO wind CSV %s missing required columns: %s",
+            csv_path,
+            sorted(required_cols),
+        )
+        return []
+
+    lco_df = lco_df.with_columns(
+        pl.col("ts").str.to_datetime(strict=False).alias("ts_dt"),
+        pl.col("wind_dir_avg").cast(pl.Float64, strict=False).alias("wind_dir_avg_f64"),
+        pl.col("wind_speed_avg").cast(pl.Float64, strict=False).alias("wind_speed_avg_f64"),
+    ).filter(
+        pl.col("ts_dt").is_not_null()
+        & pl.col("wind_dir_avg_f64").is_finite()
+        & pl.col("wind_speed_avg_f64").is_finite()
+        & (pl.col("ts_dt") >= pl.lit(time_min))
+        & (pl.col("ts_dt") <= pl.lit(time_max))
+    )
+    if lco_df.is_empty():
+        return []
+
+    # Clip obvious speed outliers before component conversion.
+    # A broad +/- 5 sigma gate preserves normal variability while removing spikes.
+    speed_sigma = 5.0
+    speed_vals = lco_df["wind_speed_avg_f64"].to_numpy()
+    speed_mean = float(np.mean(speed_vals))
+    speed_std = float(np.std(speed_vals))
+    if np.isfinite(speed_std) and speed_std > 0.0:
+        speed_min = speed_mean - speed_sigma * speed_std
+        speed_max = speed_mean + speed_sigma * speed_std
+        n_before = lco_df.height
+        lco_df = lco_df.filter(
+            (pl.col("wind_speed_avg_f64") >= speed_min)
+            & (pl.col("wind_speed_avg_f64") <= speed_max)
+        )
+        n_after = lco_df.height
+        if n_after < n_before:
+            logging.info(
+                "LCO CSV sigma clip removed %d/%d rows outside %.2f +/- %.1f sigma.",
+                n_before - n_after,
+                n_before,
+                speed_mean,
+                speed_sigma,
+            )
+    if lco_df.is_empty():
+        return []
+
+    lco_df = lco_df.with_columns(
+        # LCO CSV direction is already in the analysis convention.
+        wind_dir_corr_deg=pl.col("wind_dir_avg_f64"),
+    )
+
+    out: list[dict[str, object]] = []
+    for row in lco_df.select(
+        ["ts_dt", "wind_speed_avg_f64", "wind_dir_corr_deg"]
+    ).iter_rows(named=True):
+        speed = float(row["wind_speed_avg_f64"])
+        direction_deg = float(row["wind_dir_corr_deg"])
+        theta_rad = math.radians(direction_deg)
+        out.append(
+            {
+                "time": row["ts_dt"],
+                "speed_m_per_s": speed,
+                "direction_deg": direction_deg,
+                "vu": float(speed * math.cos(theta_rad)),
+                "vv": float(speed * math.sin(theta_rad)),
+            }
+        )
+    return out
 
 
 def parse_args() -> argparse.Namespace:
@@ -127,6 +245,14 @@ def main() -> None:
     )
 
     layer_sigma = float(np.asarray(config_params.get("WIND_CLUSTER_SIGMA", 3.0)).item())
+    u_component_range = _parse_two_float_range(
+        config_params.get("U_COMPONENT_RANGE"),
+        "U_COMPONENT_RANGE",
+    )
+    v_component_range = _parse_two_float_range(
+        config_params.get("V_COMPONENT_RANGE"),
+        "V_COMPONENT_RANGE",
+    )
 
     wind_df = _load_wind_attributes_dataframe(dirs_dict["wind_data_dir"])
     if wind_df.is_empty():
@@ -176,6 +302,20 @@ def main() -> None:
     cluster_plot = os.path.join(out_dir, "wind_track_clusters")
     direction_plot = os.path.join(out_dir, "wind_direction_vs_time_clusters")
     cluster_txt = os.path.join(out_dir, "wind_track_stats.txt")
+    layer_reference_points = layer_reference_points_from_date_obs(date_obs)
+    lco_surface_points: list[dict[str, object]] = []
+    lco_wind_csv = config_params.get("LCO_WIND_CSV")
+    if lco_wind_csv:
+        lco_wind_csv_path = str(lco_wind_csv)
+        time_min = wind_feat["time"].min()
+        time_max = wind_feat["time"].max()
+        if time_min is not None and time_max is not None:
+            lco_surface_points = _load_lco_surface_wind_points(
+                csv_path=lco_wind_csv_path,
+                time_min=time_min,
+                time_max=time_max,
+            )
+
 
     write_wind_cluster_stats_report(path=cluster_txt, rows=stats_rows, noise_count=noise_count)
     plot_wind_track_clusters(
@@ -184,6 +324,10 @@ def main() -> None:
         labels=labels,
         probabilities=probabilities,
         output_plot_fname=cluster_plot,
+        layer_reference_points=layer_reference_points,
+        lco_surface_points=lco_surface_points,
+        u_component_range=u_component_range,
+        v_component_range=v_component_range,
     )
 
     wind_feat_labeled = wind_feat.with_columns(
@@ -210,6 +354,7 @@ def main() -> None:
         output_plot_fname=direction_plot,
         sigma=layer_sigma,
         date_obs=date_obs,
+        lco_surface_points=lco_surface_points,
     )
     logging.info("Wrote consolidated direction plot: %s", direction_plot)
 
