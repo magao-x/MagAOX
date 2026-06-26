@@ -1,4 +1,11 @@
-## `xctrl` vs `resuctrl` — Comparison of Features & Behaviour
+\ingroup scripts
+
+xctrl vs resuctrl {#page_util_xctrl_vs_resuctrl}
+==========
+
+[TOC]
+
+------------------------------------------------------------------------
 
 ## Brief Description
 

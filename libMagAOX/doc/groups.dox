@@ -104,5 +104,11 @@
   * These programs assist with operating MagAO-X and analyzing its various outputs.
   */
 
+/** \defgroup scripts Scripts
+  * \brief MagAO-X scripts
+  *
+  * Scripts for managing and operating MagAO-X processes.
+  */
+
 
 
