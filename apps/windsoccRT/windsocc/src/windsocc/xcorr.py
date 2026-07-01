@@ -1,12 +1,8 @@
 '''
-From camwfs experiment:
-
-Sine pattern travelling E --> W (270 deg) on DM:
-camwfs: 297.5 deg propagation direction
-camsci1: 242.5 (SW) or 62.5 (NE) degree sparkle orientation
 
 TODO refactoring: 
-- move all but main function and logic to core/xcorr.py
+- move all but main function, argument checks, and functions called by
+ the realtime.py script to core/xcorr.py
 - rename this script to ws_xcorr.py
 '''
 
@@ -336,113 +332,14 @@ def resolve_xcorr_settings(config_params, overrides=None):
     }
 
 
-def get_realtime_quadrant_directories(run_dir):
-    """Return the four realtime reduced quadrant directories under one run root."""
-    reduced_path = os.path.join(run_dir, "reduced")
-    quadrant_dirs = []
-    run_name = os.path.basename(run_dir)
-    for quadrant in QUADRANTS:
-        quadrant_path = os.path.join(reduced_path, quadrant)
-        if not os.path.isdir(quadrant_path):
-            continue
-        fits_files = [
-            f
-            for f in os.listdir(quadrant_path)
-            if f.endswith(".fits") and os.path.isfile(os.path.join(quadrant_path, f))
-        ]
-        if fits_files:
-            quadrant_dirs.append((run_name, quadrant, quadrant_path))
-    return quadrant_dirs
-
-
-def run_xcorr_stage(run_dir, config_params=None, overrides=None):
-    """Run xcorr for a single realtime batch directory."""
-    if config_params is None:
-        config_path = os.path.join(run_dir, "ws_config.yaml")
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"No config file found at {config_path}.")
-        config_params = parse_config_file(config_path)
-
-    settings = resolve_xcorr_settings(config_params, overrides=overrides)
-    diam_pupils = config_params.get("DIAM_PUPILS")
-    output_dir_name = config_params.get("XCORR_DIR", "xcorr_results")
-    output_base_dir = (
-        output_dir_name
-        if os.path.isabs(output_dir_name)
-        else os.path.join(run_dir, output_dir_name)
-    )
-    os.makedirs(output_base_dir, exist_ok=True)
-
-    quadrant_dirs = get_realtime_quadrant_directories(run_dir)
-    if not quadrant_dirs:
-        raise FileNotFoundError(
-            f"No realtime quadrant directories found under {os.path.join(run_dir, 'reduced')}."
-        )
-
-    workers = settings["workers"]
-    if workers is None:
-        n_workers = min(cpu_count(), len(quadrant_dirs))
-    else:
-        n_workers = min(int(workers), len(quadrant_dirs))
-
-    results = []
-    if len(quadrant_dirs) == 1 or n_workers <= 1:
-        for subdir_name, quadrant, quadrant_dir_path in quadrant_dirs:
-            results.append(
-                (
-                    quadrant_dir_path,
-                    process_quadrant_directory(
-                        quadrant_dir_path,
-                        quadrant,
-                        subdir_name,
-                        settings["min_delay"],
-                        settings["max_delay"],
-                        settings["delay_step"],
-                        settings["segment_cubes"],
-                        settings["overlap"],
-                        output_base_dir,
-                        settings["fft_pad_shape"],
-                        diam_pupils,
-                        settings["raw_frames_per_cube"],
-                        settings["loop_speed_hz"],
-                    ),
-                )
-            )
-    else:
-        with ProcessPoolExecutor(max_workers=n_workers) as executor:
-            futures = {
-                executor.submit(
-                    process_quadrant_directory,
-                    quadrant_dir_path,
-                    quadrant,
-                    subdir_name,
-                    settings["min_delay"],
-                    settings["max_delay"],
-                    settings["delay_step"],
-                    settings["segment_cubes"],
-                    settings["overlap"],
-                    output_base_dir,
-                    settings["fft_pad_shape"],
-                    diam_pupils,
-                    settings["raw_frames_per_cube"],
-                    settings["loop_speed_hz"],
-                ): quadrant_dir_path
-                for subdir_name, quadrant, quadrant_dir_path in quadrant_dirs
-            }
-            for future in as_completed(futures):
-                quadrant_dir_path = futures[future]
-                results.append((quadrant_dir_path, future.result()))
-
-    return {
-        "output_base_dir": output_base_dir,
-        "quadrant_dirs": quadrant_dirs,
-        "results": results,
-        "settings": settings,
-    }
-
 
 def run_xcorr_stage_in_memory(run_dir, reduced_products, config_params=None, overrides=None):
-    """Run xcorr for one realtime batch using in-memory reduced quadrant cubes."""
+    """
+    Run xcorr for one realtime batch using in-memory reduced quadrant cubes.
+    
+    TODO for the refactoring, leave this function here for backwards compatibility
+    with the realtime caller. Will handle the realtime script refactoring separately later.
+    """
     if config_params is None:
         config_path = os.path.join(run_dir, "ws_config.yaml")
         if not os.path.exists(config_path):
@@ -487,8 +384,8 @@ def run_xcorr_stage_in_memory(run_dir, reduced_products, config_params=None, ove
 
 def main():
     parser = argparse.ArgumentParser(description="Compute cross-correlation maps for all pupil positions.")
-    # TODO make the data_dir the positional argument
-    parser.add_argument('-d', '--data-dir', type=str, default=".",
+
+    parser.add_argument("data_dir", type=str, default=".",
                         help="Top-level directory containing subdirectories with reduced FITS cubes")
     parser.add_argument('--min-delay', type=int, default=None,
                         help="Minimum delay (in frames) for cross-correlation. Can be set via config file.")

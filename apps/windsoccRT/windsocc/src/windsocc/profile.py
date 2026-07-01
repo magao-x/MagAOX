@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 """
-measure.py - Measure wind speed and direction using
+profile.py - Measure wind speed and direction using
 matched-filter response cubes from ws_distill.
 
 Usage (must be run from the root dir of the camwfs data):
-    uv run ws_measure
+    uv run ws_profile
 
 Wind-layer HDBSCAN clustering, text report, and direction-vs-time plots are produced
 by the separate stats stage: ``uv run ws_stats`` (see ``windsocc.stats``).
 
 Profiling (cProfile + Snakeviz):
 
-    uv run ws_measure --profile
+    uv run ws_profile --profile
     uv sync --extra profile   # optional: pip install snakeviz for the viewer CLI
-    snakeviz <output_dir>/ws_measure_profile.prof
+    snakeviz <output_dir>/ws_profile_profile.prof
 
 From camwfs experiment:
 
@@ -60,8 +60,9 @@ includes ``raw_direction`` (degrees in the camwfs cube frame) and ``corrected_di
 ``direction`` is set equal to ``corrected_direction`` for backward compatibility.
 
 TODO refactoring: 
-- move all but main function and logic to core/measure.py
-- rename this script to ws_measure.py
+- move all but main function and functions called by the realtime.py script
+to core/profile.py.
+- rename this script to ws_profile.py
 
 """
 
@@ -70,8 +71,6 @@ import os
 import sys
 import argparse
 import logging
-from datetime import datetime, timezone
-import csv
 import json
 import numpy as np
 from multiprocessing import cpu_count
@@ -91,6 +90,7 @@ from windsocc.io.fits_handling import load_mf_response_cubes, \
     load_collapsed_unsharp_response_maps, extract_time_from_fname
 from windsocc.core.track_wind import process_single_cc_cube
 from windsocc.visualization.plot_measure_results import make_source_detection_movie
+from windsocc.utils.timestamps import are_we_past_transit
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -111,14 +111,14 @@ def parse_args():
     parser.add_argument(
         "--profile",
         action="store_true",
-        help="Enable cProfile for the measure stage; write binary stats for use with snakeviz.",
+        help="Enable cProfile for the profile stage; write binary stats for use with snakeviz.",
     )
     parser.add_argument(
         "--profile-output",
         type=str,
         default=None,
         metavar="PATH",
-        help="Destination .prof file (default: <output_dir>/ws_measure_profile.prof).",
+        help="Destination .prof file (default: <output_dir>/ws_profile_profile.prof).",
     )
 
     args = parser.parse_args()
@@ -758,13 +758,13 @@ def process_mf_response_cubes(
     return wind_peaks_all, wind_summaries_all, wind_rejected_all, model_rejected_all
 
 
-def run_measure_stage(
+def run_profile_stage(
     basedir: str,
     config_params: dict | None = None,
     make_movie: bool | None = None,
     parity_flip_needed: bool | None = None,
 ) -> dict:
-    """Run the measure stage and return generated output paths."""
+    """Run the profile stage and return generated output paths."""
     if config_params is None:
         config_params = parse_config_file(os.path.join(basedir, "ws_config.yaml"))
 
@@ -803,7 +803,7 @@ def run_measure_stage(
         wind_summaries = []
         rejected_all = []
         model_rejected_all = []
-        logging.info("Parallelizing the measure process...")
+        logging.info("Parallelizing the profile process...")
         with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
             futures = {
                 executor.submit(
@@ -880,48 +880,6 @@ def run_measure_stage(
 
 
 
-def normalize_cube_timestamp_compact(current_time: str) -> str:
-    """Return ``YYYYMMDDHHMMSSffffff`` suitable for ``datetime.strptime`` ``%Y%m%d%H%M%S%f``.
-
-    Realtime cubes may use an ISO-like middle token ``20260411T020434811`` (``T`` between
-    date and time). Older distill outputs used a single digit run
-    ``20230310054802555791000``; the last three digits are stripped as nanoseconds so the
-    remainder parses as microseconds.
-    """
-    if "T" in current_time:
-        date_part, rest = current_time.split("T", 1)
-        if len(rest) < 6:
-            raise ValueError(
-                f"Invalid cube timestamp (expected HHMMSS after 'T'): {current_time!r}"
-            )
-        hhmmss = rest[:6]
-        frac = rest[6:]
-        if not frac:
-            micro = "000000"
-        elif len(frac) <= 6:
-            micro = (frac + "000000")[:6]
-        else:
-            micro = frac[:6]
-        return f"{date_part}{hhmmss}{micro}"
-    return current_time[:-3]
-
-
-def are_we_past_transit(current_time, transit_time):
-    # Transit from config, e.g. 2023-03-10T06:09:11.342216344Z
-    s_transit = pl.Series(name="transit_time", values=[transit_time])
-    dt_transit = s_transit.str.to_datetime(
-        "%Y-%m-%dT%H:%M:%S%.9fZ", time_zone="UTC"
-    )
-    compact = normalize_cube_timestamp_compact(current_time)
-    dt_current = datetime.strptime(compact, "%Y%m%d%H%M%S%f").replace(
-        tzinfo=timezone.utc
-    )
-    past_transit = dt_current > dt_transit.item()
-
-    return past_transit
-
-
-
 def main():
     logging.basicConfig(level=logging.INFO)
     args = parse_args()
@@ -948,7 +906,7 @@ def main():
         prof = cProfile.Profile()
         prof.enable()
         try:
-            run_measure_stage(
+            run_profile_stage(
                 basedir=basedir,
                 config_params=config_params,
                 make_movie=config_params.get("MAKE_MOVIE", False),
@@ -968,7 +926,7 @@ def main():
             "Install snakeviz if needed: pip install 'windsocc[profile]' or uv sync --extra profile"
         )
     else:
-        run_measure_stage(
+        run_profile_stage(
             basedir=basedir,
             config_params=config_params,
             make_movie=config_params.get("MAKE_MOVIE", False),

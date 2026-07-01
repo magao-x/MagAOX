@@ -9,6 +9,16 @@ from datetime import datetime
 _COMPACT_TIMESTAMP_RE = re.compile(r"(?<!\d)(\d{8}\d{6}\d{0,9})(?!\d)")
 _REALTIME_TIMESTAMP_RE = re.compile(r"(?<!\d)(\d{8}T\d{6}\d{0,6})(?!\d)")
 
+def read_fits_cube(filepath):
+    """Read a FITS cube using astropy.io.fits."""
+    with fits.open(filepath) as hdul:
+        data = hdul[0].data
+    return data
+
+def write_fits_cube(filepath, data):
+    """Write data to a FITS file."""
+    hdu = fits.PrimaryHDU(data)
+    hdu.writeto(filepath, overwrite=True)
 
 def convert_time_to_datetime(time):
     if "T" in time:
@@ -159,3 +169,36 @@ def load_collapsed_unsharp_response_maps(mf_response_cubes_loc: str) -> tuple[li
     )
     collapsed_names = [os.path.basename(path) for path in collapsed_paths]
     return collapsed_names, collapsed_paths
+
+def load_and_average(file_list):
+    """
+    Load a list of FITS cubes and average them.
+    
+    Parameters:
+    file_list (list): List of FITS file paths. They should all have the same dimensions.
+    
+    Returns:
+    tuple: (averaged_cube, header)
+    """
+    cubes = []
+    header = None
+    for file_path in file_list:
+        with fits.open(file_path) as hdul:
+            data = hdul[0].data  # assume the cube is in the primary HDU
+            cubes.append(data)
+            # Use header from the first file (adjust if needed)
+            if header is None:
+                header = hdul[0].header
+
+    # Convert the list of arrays to a single array and average across the new axis (i.e. from the set of 4 cubes)
+    cubes_array = np.array(cubes)  # shape should be (4, 251, 120, 120)
+    averaged_cube = np.mean(cubes_array, axis=0)  # resulting shape: (251, 120, 120)
+    
+    return averaged_cube, header
+
+def write_cube(output_path, cube, header):
+    """Write out a FITS cube with the provided header."""
+    output_dir = os.path.dirname(output_path)
+    os.makedirs(output_dir, exist_ok=True)
+    fits.writeto(output_path, cube, header=header, overwrite=True)
+    logging.info(f"Wrote file to: {output_path}")

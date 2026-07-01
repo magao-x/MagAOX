@@ -42,7 +42,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 TODO refactoring: 
-- move all but main function and logic to core/partition.py
+- move all but main function and generate_config_file function (with the example)
+to core/partition.py
 - rename this script to ws_partition.py
 
 '''

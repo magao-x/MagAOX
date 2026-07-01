@@ -36,14 +36,14 @@ import numpy as np
 from astropy.io import fits
 
 from windsocc.distill import run_distill_stage, run_distill_stage_in_memory
-from windsocc.measure import run_measure_stage
+from windsocc.profile import run_profile_stage
 from windsocc.reduce import (
     get_pupil_geometry,
     process_batch_in_memory,
     process_dataset,
     save_reduced_quadrant_cubes,
 )
-from windsocc.xcorr import run_xcorr_stage, run_xcorr_stage_in_memory
+from windsocc.xcorr import run_xcorr_stage_in_memory
 from windsocc.io.config_handling import parse_config_file
 
 
@@ -1134,7 +1134,7 @@ def parse_args():
         help=(
             "With --profile PATH: `collect` (default) profiles only the "
             "collect_shmim_batch hot loop so results are not dominated by "
-            "reduce/xcorr/distill/measure; `full` profiles the entire "
+            "reduce/xcorr/distill/profile; `full` profiles the entire "
             "run_single_batch pipeline."
         ),
     )
@@ -1510,7 +1510,7 @@ def process_collected_batch(
     timings_s["distill"] = perf_counter() - t0
 
     t0 = perf_counter()
-    measure_result = run_measure_stage(
+    measure_result = run_profile_stage(
         basedir=run_dir,
         config_params=config_params,
         make_movie=(not no_movie) and config_params.get("MAKE_MOVIE", False),

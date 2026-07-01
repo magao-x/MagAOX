@@ -21,7 +21,8 @@ camwfs: 297.5 deg propagation direction
 camsci1: 242.5 (SW) or 62.5 (NE) degree sparkle orientation
 
 TODO refactoring: 
-- move all but main function and logic to core/reduce.py
+- move all but main function, argument checks, and functions called by the realtime.py script
+to core/reduce.py
 - rename this script to ws_reduce.py
 
 """
@@ -38,6 +39,8 @@ from skimage.measure import block_reduce
 from windsocc.io.config_handling import parse_config_file
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
+from windsocc.io.fits_handling import read_fits_cube, write_fits_cube
+from windsocc.io.config_handling import resolve_config_path
 # Import helper functions from your modules (ensure these exist in src/)
 from windsocc.preprocessing.reference_camwfs import create_reference
 from windsocc.preprocessing.crop_pupil_camwfs import crop_quadrant
@@ -85,17 +88,6 @@ def _tukey_window_2d(shape, alpha):
     return np.outer(wy, wx).astype(np.float32)
 
 
-# --- I/O Helper Functions ---
-def read_fits_cube(filepath):
-    """Read a FITS cube using astropy.io.fits."""
-    with fits.open(filepath) as hdul:
-        data = hdul[0].data
-    return data
-
-def write_fits_cube(filepath, data):
-    """Write data to a FITS file."""
-    hdu = fits.PrimaryHDU(data)
-    hdu.writeto(filepath, overwrite=True)
 
 
 def save_reduced_quadrant_cubes(
@@ -163,21 +155,6 @@ def save_reduced_quadrant_cubes(
 
 
 # --- Processing Functions ---
-
-def resolve_config_path(path_arg, explicit_config=None):
-    """
-    Resolve the working directory and config file path.
-
-    The command accepts either a directory containing `ws_config.yaml`, or a
-    path to the YAML file itself.
-    """
-    config_candidate = explicit_config if explicit_config is not None else path_arg
-    resolved_path = os.path.abspath(config_candidate)
-
-    if os.path.isdir(resolved_path):
-        return resolved_path, os.path.join(resolved_path, "ws_config.yaml")
-
-    return os.path.dirname(resolved_path), resolved_path
 
 
 def normalize_center(center_value, key_name):
@@ -700,6 +677,9 @@ def process_batch_in_memory(
 
     When ``inspect_reduction`` is true, writes ``reference.fits`` and ``noise.fits`` under
     ``data_dir/references/`` (same layout as batch file reduction) for debugging.
+
+    TODO for the refactoring, leave this function here for backwards compatibility
+    with the realtime caller. Will handle the realtime script refactoring separately later.
     """
     if frames.ndim != 3:
         raise ValueError(f"Expected batch frames with shape (n_frames, y, x), got {frames.shape}")

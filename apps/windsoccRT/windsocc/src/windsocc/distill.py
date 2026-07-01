@@ -1,7 +1,8 @@
 """Distill stage for the WindsoCC pipeline.
 
 TODO refactoring: 
-- move all but main function and logic to core/distill.py
+- move all but main function and functions called by the realtime.py script
+ to core/distill.py
 - rename this script to ws_distill.py
 """
 
@@ -14,20 +15,16 @@ from windsocc.io.config_handling import parse_config_file
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from astropy.io import fits
 import numpy as np
 from scipy.ndimage import gaussian_filter, rotate
 from scipy.signal import fftconvolve
 import matplotlib.pyplot as plt
 from skimage.feature import match_template
+from windsocc.io.fits_handling import load_and_average, write_cube
+from windsocc.utils.timestamps import parse_batch_utc_seconds_from_suffix, _parse_iso_timestamp_to_utc_seconds
 
+# For the matched filter template building
 DEFAULT_TEMPLATE_SIZE = 65
-
-# Batch UTC time embedded in ``group_suffix`` / distill ``suffix`` (see ``realtime.format_batch_timestamp``).
-# Digit-delimited (not ``\\b``) so a trailing underscore after microseconds still matches.
-_BATCH_UTC_TOKEN_RE = re.compile(r"(?<!\d)(\d{8}T\d{6}\d{6})(?!\d)")
-# Compact variant without ``T`` (and optional ``_00000`` trailer), e.g. ``camwfs_20230313071857408144000``.
-_BATCH_UTC_COMPACT_RE = re.compile(r"(?<!\d)(\d{8})(\d{6})(\d*)(?!\d)")
 
 
 def resolve_parangs_lookup_path(config_params, directory):
@@ -59,45 +56,6 @@ def resolve_parangs_lookup_path(config_params, directory):
         return None
     return full
 
-
-def _parse_iso_timestamp_to_utc_seconds(ts_str):
-    """
-    Parse an ISO-like timestamp string to Unix seconds (UTC).
-
-    Supports nanosecond (or arbitrary-length) fractional seconds; ``datetime.fromisoformat``
-    only accepts up to 6 fractional digits, so sub-microsecond tails are parsed manually.
-    Naive times are treated as UTC. Optional trailing ``Z`` or ``±HH:MM`` offsets are honored.
-    """
-    text = str(ts_str).strip()
-    if not text:
-        raise ValueError("empty timestamp")
-    text = text.replace(" ", "T", 1)
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-
-    m_tz = re.search(r"([+-])(\d{2}):(\d{2})$", text)
-    if m_tz:
-        sign = 1 if m_tz.group(1) == "+" else -1
-        offset_sec = sign * (int(m_tz.group(2)) * 3600 + int(m_tz.group(3)) * 60)
-        core = text[: m_tz.start()]
-        tzinfo = timezone(timedelta(seconds=offset_sec))
-    else:
-        core = text
-        tzinfo = timezone.utc
-
-    if "." in core:
-        main, rest = core.split(".", 1)
-        digits = "".join(c for c in rest if c.isdigit())
-        if digits:
-            frac = Decimal(digits) / (Decimal(10) ** len(digits))
-        else:
-            frac = Decimal(0)
-    else:
-        main = core
-        frac = Decimal(0)
-
-    dt = datetime.strptime(main, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=tzinfo)
-    return dt.timestamp() + float(frac)
 
 
 def load_parangs_lookup(path):
@@ -152,41 +110,6 @@ def load_parangs_lookup(path):
         fp = np.asarray(uniq_fp, dtype=np.float64)
     return xp, fp
 
-
-def parse_batch_utc_seconds_from_suffix(suffix):
-    """
-    Parse the UTC batch instant embedded in ``suffix``.
-
-    Supports:
-
-    - ``YYYYMMDDTHHMMSSffffff`` as produced by ``realtime.format_batch_timestamp``.
-    - Compact ``YYYYMMDDHHMMSS`` + optional fractional digits (no ``T``), e.g.
-      ``camwfs_20230313071857408144000`` (fractional tail interpreted as
-      ``int(frac) / 10**len(frac)`` seconds).
-    """
-    m = _BATCH_UTC_TOKEN_RE.search(suffix)
-    if m:
-        token = m.group(1)
-        dt = datetime.strptime(token, "%Y%m%dT%H%M%S%f").replace(tzinfo=timezone.utc)
-        return dt.timestamp()
-
-    # Use the rightmost compact match when multiple digit runs appear in ``suffix``.
-    matches = list(_BATCH_UTC_COMPACT_RE.finditer(suffix))
-    if not matches:
-        raise ValueError(
-            "Could not find batch UTC time in distill suffix (expected "
-            "YYYYMMDDTHHMMSSffffff or YYYYMMDDHHMMSS plus optional fractional digits): "
-            f"{suffix!r}"
-        )
-    m2 = matches[-1]
-    ymd, hms, frac = m2.group(1), m2.group(2), m2.group(3)
-    if len(ymd) != 8 or len(hms) != 6:
-        raise ValueError(f"Invalid compact batch date/time in suffix: {suffix!r}")
-    base = datetime.strptime(ymd + hms, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
-    if not frac:
-        return base.timestamp()
-    subsec = int(frac, 10) / (10.0 ** len(frac))
-    return base.timestamp() + subsec
 
 
 def derotate_cc_cube(cube, angle_deg, order=3):
@@ -256,38 +179,6 @@ def group_files_by_suffix(directory):
                 break  # stop checking prefixes after the first match
     return cc_map_groups, bias_groups
 
-def load_and_average(file_list):
-    """
-    Load a list of FITS cubes and average them.
-    
-    Parameters:
-      file_list (list): List of FITS file paths. They should all have the same dimensions.
-    
-    Returns:
-      tuple: (averaged_cube, header)
-    """
-    cubes = []
-    header = None
-    for file_path in file_list:
-        with fits.open(file_path) as hdul:
-            data = hdul[0].data  # assume the cube is in the primary HDU
-            cubes.append(data)
-            # Use header from the first file (adjust if needed)
-            if header is None:
-                header = hdul[0].header
-
-    # Convert the list of arrays to a single array and average across the new axis (i.e. from the set of 4 cubes)
-    cubes_array = np.array(cubes)  # shape should be (4, 251, 120, 120)
-    averaged_cube = np.mean(cubes_array, axis=0)  # resulting shape: (251, 120, 120)
-    
-    return averaged_cube, header
-
-def write_cube(output_path, cube, header):
-    """Write out a FITS cube with the provided header."""
-    output_dir = os.path.dirname(output_path)
-    os.makedirs(output_dir, exist_ok=True)
-    fits.writeto(output_path, cube, header=header, overwrite=True)
-    logging.info(f"Wrote file to: {output_path}")
 
 
 def save_png(output_path, image, title=None, cmap="viridis"):
@@ -616,7 +507,11 @@ def run_distill_stage(directory, config_params=None, save_pngs=True):
 
 
 def run_distill_stage_in_memory(directory, xcorr_result, config_params=None, save_pngs=True):
-    """Run distill for one realtime batch from in-memory xcorr products."""
+    """Run distill for one realtime batch from in-memory xcorr products.
+    This function is called by the realtime.py script, leave it here for
+    backwards compatibility. Will handle the realtime script refactoring
+    separately later.
+    """
     if config_params is None:
         config_path = os.path.join(directory, "ws_config.yaml")
         if not os.path.exists(config_path):

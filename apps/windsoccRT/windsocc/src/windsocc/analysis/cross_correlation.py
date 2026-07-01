@@ -1,6 +1,5 @@
 '''
-TODO create a new function to remove the bias from the cross-correlation maps.
-The bias is the cross-correlation of the two circle apertures of the same size.
+
 '''
 
 import os
