@@ -35,15 +35,15 @@ from time import perf_counter, perf_counter_ns
 import numpy as np
 from astropy.io import fits
 
-from windsocc.distill import run_distill_stage, run_distill_stage_in_memory
-from windsocc.profile import run_profile_stage
-from windsocc.reduce import (
+from windsocc.ws_distill import run_distill_stage, run_distill_stage_in_memory
+from windsocc.ws_profile import run_profile_stage
+from windsocc.ws_reduce import (
     get_pupil_geometry,
     process_batch_in_memory,
     process_dataset,
     save_reduced_quadrant_cubes,
 )
-from windsocc.xcorr import run_xcorr_stage_in_memory
+from windsocc.ws_xcorr import run_xcorr_stage_in_memory
 from windsocc.io.config_handling import parse_config_file
 
 

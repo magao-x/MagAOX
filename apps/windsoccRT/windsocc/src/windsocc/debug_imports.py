@@ -19,10 +19,10 @@ STAGED_IMPORTS: List[Tuple[str, Tuple[str, ...]]] = [
     ("pandas", ("pandas",)),
     ("polars", ("polars",)),
     ("sep", ("sep",)),
-    ("windsocc.distill", ("windsocc.distill",)),
-    ("windsocc.measure", ("windsocc.measure",)),
-    ("windsocc.reduce", ("windsocc.reduce",)),
-    ("windsocc.xcorr", ("windsocc.xcorr",)),
+    ("windsocc.ws_distill", ("windsocc.ws_distill",)),
+    ("windsocc.ws_profile", ("windsocc.ws_profile",)),
+    ("windsocc.ws_reduce", ("windsocc.ws_reduce",)),
+    ("windsocc.ws_xcorr", ("windsocc.ws_xcorr",)),
     ("windsocc.realtime", ("windsocc.realtime",)),
 ]
 
@@ -59,7 +59,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--start-at",
         default="",
-        help="Start at the named stage label (for example: polars, sep, windsocc.measure).",
+        help="Start at the named stage label (for example: polars, sep, windsocc.ws_profile).",
     )
     parser.add_argument(
         "--stop-after",

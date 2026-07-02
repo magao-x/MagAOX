@@ -1,5 +1,5 @@
 """
-Profile ``process_single_cc_cube`` (see ``windsocc.measure``) with cProfile.
+Profile ``process_single_cc_cube`` (see ``windsocc.core.track_wind``) with cProfile.
 
 Write a ``.prof`` file for Snakeviz::
 
@@ -26,7 +26,7 @@ from astropy.io import fits
 from windsocc.core.track_wind import process_single_cc_cube
 from windsocc.io.dir_handling import allocate_measure_dirs
 from windsocc.io.fits_handling import load_mf_response_cubes
-from windsocc.measure import parse_config_file
+from windsocc.io.config_handling import parse_config_file
 
 
 def _params_for_process_single_cc(

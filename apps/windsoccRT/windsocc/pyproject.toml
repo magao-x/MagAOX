@@ -37,11 +37,11 @@ dependencies = [
 ]
 
 [project.scripts]
-ws_partition = "windsocc.partition:main"
-ws_reduce = "windsocc.reduce:main"
-ws_xcorr = "windsocc.xcorr:main"
-ws_distill = "windsocc.distill:main"
-ws_profile = "windsocc.profile:main"
+ws_partition = "windsocc.ws_partition:main"
+ws_reduce = "windsocc.ws_reduce:main"
+ws_xcorr = "windsocc.ws_xcorr:main"
+ws_distill = "windsocc.ws_distill:main"
+ws_profile = "windsocc.ws_profile:main"
 ws_visuals = "windsocc.visuals:main"
 ws_stats = "windsocc.stats:main"
 ws_show_wind_across_time = "windsocc.visualization.show_wind_across_time:main"

@@ -1,0 +1,636 @@
+"""Profile-stage helpers for wind measurement from matched-filter cubes."""
+from __future__ import annotations
+
+import os
+import logging
+import json
+import numpy as np
+
+from astropy.io import fits
+import pandas as pd
+import polars as pl
+
+from windsocc.io.fits_handling import extract_time_from_fname
+from windsocc.core.track_wind import process_single_cc_cube
+from windsocc.visualization.plot_measure_results import make_source_detection_movie
+from windsocc.utils.timestamps import are_we_past_transit
+
+def build_measure_runtime_params(config_params: dict, cube_data: np.ndarray) -> tuple:
+    """Resolve runtime parameters for ``process_single_cc_cube``.
+    TODO add SEP parameters to the config file (deblending)
+    """
+    sep_thresh = config_params.get("SEP_THRESH", None)
+    sep_minarea = config_params.get("SEP_MINAREA", None)
+    inner_radius = config_params.get("INNER_RADIUS", None)
+    outer_radius = config_params.get("OUTER_RADIUS", None)
+    frame_binning = config_params.get("GROUP_SIZE", None)
+    image_center = config_params.get("IMAGE_CENTER", None)
+    diam_pupils = config_params.get("DIAM_PRIMARY", config_params.get("DIAM_PUPILS"))
+    mirror_diam = config_params.get("D_MIRROR", None)
+    if mirror_diam is None or diam_pupils is None:
+        logging.warning(
+            "D_MIRROR and DIAM_PRIMARY/DIAM_PUPILS not set in the config file. \
+            Using default value of 6.5 and 60 respectively. \
+            Please set them in the config file for better results."
+        )
+        mirror_diam = 6.5
+        diam_pupils = 60
+    else:
+        logging.info(
+            "Using D_MIRROR: %s and pupil diameter: %s for pupil diameter.",
+            mirror_diam,
+            diam_pupils,
+        )
+    meters_per_pixel = mirror_diam / diam_pupils
+
+    if frame_binning is None:
+        logging.warning(
+            "GROUP_SIZE not set in the config file. \
+            Using default value of 8. \
+            Please set it in the config file for better results."
+        )
+        frame_binning = 8
+    else:
+        logging.info("Using GROUP_SIZE: %s for frame binning.", frame_binning)
+
+    loop_speed_hz = config_params.get("LOOP_SPEED", None)
+    if loop_speed_hz is not None:
+        time_per_frame = float(frame_binning) / float(loop_speed_hz)
+        logging.info(
+            "TIME_PER_FRAME = GROUP_SIZE / LOOP_SPEED = %s / %s = %s s",
+            frame_binning,
+            loop_speed_hz,
+            time_per_frame,
+        )
+    else:
+        time_per_frame = config_params.get("TIME_PER_FRAME", None)
+        if time_per_frame is not None:
+            time_per_frame = float(time_per_frame)
+            logging.info("Using TIME_PER_FRAME from config: %s s", time_per_frame)
+        else:
+            default_loop_speed_hz = 2000.0
+            time_per_frame = float(frame_binning) / default_loop_speed_hz
+            logging.warning(
+                "Neither LOOP_SPEED nor TIME_PER_FRAME is set. "
+                "Falling back to TIME_PER_FRAME = GROUP_SIZE / %s = %s s",
+                default_loop_speed_hz,
+                time_per_frame,
+            )
+
+    if sep_thresh is None or sep_minarea is None:
+        logging.warning(
+            "SEP_THRESH and SEP_MINAREA not set in the config file. \
+            Using default values of 3.0 and 5 respectively. \
+            Please set them in the config file for better results."
+        )
+        sep_thresh = 3.0
+        sep_minarea = 5
+    else:
+        logging.info(
+            "Using SEP_THRESH: %s and SEP_MINAREA: %s for source extraction.",
+            sep_thresh,
+            sep_minarea,
+        )
+    if inner_radius is None or outer_radius is None:
+        logging.warning(
+            "INNER_RADIUS and OUTER_RADIUS not set in the config file. \
+            Using default values of 18 and 30 respectively. \
+            Please set them in the config file for better results."
+        )
+        inner_radius = 18
+        outer_radius = 30
+    else:
+        logging.info(
+            "Using INNER_RADIUS: %s and OUTER_RADIUS: %s for source extraction.",
+            inner_radius,
+            outer_radius,
+        )
+    if image_center is None:
+        image_center = (
+            round(cube_data.shape[1] + 1) / 2,
+            round(cube_data.shape[2] + 1) / 2,
+        )
+        logging.info(
+            "IMAGE_CENTER not set in the config file. Using image center from cube data: %s",
+            image_center,
+        )
+
+    return (
+        image_center,
+        meters_per_pixel,
+        sep_thresh,
+        sep_minarea,
+        inner_radius,
+        outer_radius,
+        time_per_frame,
+    )
+
+def find_error_map_for_cube(cube_path: str, noise_maps_dir: str) -> str | None:
+    """Match a distill spatial-noise FITS map to a response cube.
+
+    This intentionally prefers the non-unsharp error-map flavor:
+    ``distill_results/noise_maps/camwfs_*_error_map.fits``.
+    """
+    cube_stem = os.path.splitext(os.path.basename(cube_path))[0]
+    base_stem = cube_stem
+    if base_stem.endswith("_mf_response_unsharp"):
+        base_stem = base_stem[: -len("_mf_response_unsharp")]
+    elif base_stem.endswith("_mf_response"):
+        base_stem = base_stem[: -len("_mf_response")]
+    elif base_stem.endswith("_response_unsharp"):
+        base_stem = base_stem[: -len("_response_unsharp")]
+    elif base_stem.endswith("_response"):
+        base_stem = base_stem[: -len("_response")]
+
+    candidates = (
+        f"{base_stem}_error_map",
+        f"{cube_stem}_error_map",
+    )
+    for candidate in candidates:
+        candidate_path = os.path.join(noise_maps_dir, f"{candidate}.fits")
+        if os.path.exists(candidate_path):
+            return candidate_path
+    return None
+
+def filter_sources_by_angle(
+    sources: np.ndarray,
+    center_x: float,
+    center_y: float,
+    min_sep_deg: float = 65.0,
+    max_sep_deg: float = 115.0,
+    circular_ratio: float = 0.6,
+) -> np.ndarray:
+    if sources.size == 0:
+        return sources
+    axis_ratio = np.zeros_like(sources["a"], dtype=float)
+    valid = sources["a"] > 0
+    axis_ratio[valid] = sources["b"][valid] / sources["a"][valid]
+    is_circular = axis_ratio >= circular_ratio
+    dx = sources["x"] - center_x
+    dy = sources["y"] - center_y
+    pos_angle = (np.degrees(np.arctan2(dy, dx)) + 360.0) % 360.0
+    theta_deg = (np.degrees(sources["theta"]) + 360.0) % 180.0
+    pos_mod = pos_angle % 180.0
+    delta = np.abs(theta_deg - pos_mod)
+    delta = np.minimum(delta, 180.0 - delta)
+    angle_ok = (delta >= min_sep_deg) & (delta <= max_sep_deg)
+    mask = is_circular | (~is_circular & angle_ok)
+    return sources[mask]
+
+def summarize_wind_tracks(cube_sources: object) -> dict:
+    if isinstance(cube_sources, pd.DataFrame):
+        cube_sources = pl.DataFrame(cube_sources.to_dict("records"))
+    if not isinstance(cube_sources, pl.DataFrame) or cube_sources.is_empty():
+        return {"tracks": []}
+
+    required_cols = {
+        "track_id",
+        "direction",
+        "velocity_m_per_s",
+        "matches",
+        "frames",
+        "flux",
+        "source_area",
+    }
+    if not required_cols.issubset(set(cube_sources.columns)):
+        return {"tracks": []}
+
+    tracked = cube_sources.with_columns(
+        [
+            pl.col("track_id").cast(pl.Int64, strict=False).alias("track_id"),
+            pl.col("direction").cast(pl.Float64, strict=False).alias("direction"),
+            pl.col("velocity_m_per_s").cast(pl.Float64, strict=False).alias("velocity_m_per_s"),
+            pl.col("matches").cast(pl.Float64, strict=False).alias("matches"),
+            pl.col("frames").cast(pl.Int64, strict=False).alias("frames"),
+            pl.col("flux").cast(pl.Float64, strict=False).alias("flux"),
+            pl.col("source_area").cast(pl.Float64, strict=False).alias("source_area"),
+        ]
+    ).drop_nulls(
+        subset=["track_id", "direction", "velocity_m_per_s", "matches", "frames"]
+    )
+    if tracked.is_empty():
+        return {"tracks": []}
+
+    summarized = (
+        tracked.sort(["track_id", "frames"])
+        .group_by("track_id")
+        .agg(
+            [
+                pl.col("direction").mean().alias("direction"),
+                pl.col("velocity_m_per_s").mean().alias("velocity_m_per_s"),
+                pl.col("matches").max().alias("matches"),
+                pl.col("flux").max().alias("flux"),
+                pl.col("source_area").mean().alias("source_area"),
+            ]
+        )
+        .sort("track_id")
+    )
+    tracks = [
+        {
+            "track_id": int(row["track_id"]),
+            "direction": float(row["direction"]),
+            "velocity_m_per_s": float(row["velocity_m_per_s"]),
+            "matches": int(row["matches"]),
+            "flux": float(row["flux"]),
+            "source_area": float(row["source_area"]),
+        }
+        for row in summarized.iter_rows(named=True)
+    ]
+    return {"tracks": tracks}
+
+def _slice_mf_response_cubes_dict(mf_response_cubes: dict, limit: int) -> dict:
+    """Return a copy of ``mf_response_cubes`` with each list value truncated to ``limit``."""
+    return {k: v[:limit] if isinstance(v, list) else v for k, v in mf_response_cubes.items()}
+
+def _apply_direction_corrections_to_rows(rows: list[dict], pa_offset_deg: float) -> None:
+    """Set ``raw_direction``, ``corrected_direction``, and ``direction`` on each row.
+
+    ``direction`` values coming from summarization are the mean angle in the camwfs
+    cube frame (deg, ``[0, 360)``). ``pa_offset_deg`` is the value from config after
+    parity bookkeeping (sign flip when a parity flip applies), matching the previous
+    single-field behavior for ``direction``.
+    """
+    if not rows:
+        return
+    for row in rows:
+        if row is None or "direction" not in row:
+            continue
+        try:
+            raw = float(row["direction"])
+        except (TypeError, ValueError):
+            continue
+        raw_wrapped = raw % 360.0
+        row["raw_direction"] = raw_wrapped
+        # the correction is just a North-South flip of the raw direction
+        row["corrected_direction"] = (540.0 - raw_wrapped) % 360.0
+        row["direction"] = row["corrected_direction"]
+
+def summarize_model_rejected_tracks(model_rejected: object) -> dict:
+    """Summarize whole-cube model rejections from ``_keep_track_ids_by_model()``."""
+    if isinstance(model_rejected, pd.DataFrame):
+        model_rejected = pl.DataFrame(model_rejected.to_dict("records"))
+    if not isinstance(model_rejected, pl.DataFrame) or model_rejected.is_empty():
+        return {"model_rejected": []}
+    required_cols = {
+        "track_id",
+        "reject_reason",
+        "frames",
+        "direction",
+        "velocity_m_per_s",
+        "matches",
+        "inferred_origin",
+    }
+    if not required_cols.issubset(set(model_rejected.columns)):
+        return {"model_rejected": []}
+    summarized = (
+        model_rejected.with_columns(
+            pl.col("track_id").cast(pl.Int64, strict=False).alias("track_id"),
+            pl.col("reject_reason").cast(pl.String, strict=False).alias("reject_reason"),
+            pl.col("frames").cast(pl.Int64, strict=False).alias("frames"),
+            pl.col("direction").cast(pl.Float64, strict=False).alias("direction"),
+            pl.col("velocity_m_per_s").cast(pl.Float64, strict=False).alias("velocity_m_per_s"),
+            pl.col("matches").cast(pl.Int64, strict=False).alias("matches"),
+            pl.col("inferred_origin").cast(pl.Float64, strict=False).alias("inferred_origin"),
+        )
+        .sort("matches", descending=True)
+    )
+    rows = [
+        {
+            "track_id": int(row["track_id"]),
+            "reject_reason": row["reject_reason"],
+            "frames": int(row["frames"]),
+            "direction": float(row["direction"]),
+            "velocity_m_per_s": float(row["velocity_m_per_s"]),
+            "matches": int(row["matches"]),
+            "inferred_origin": float(row["inferred_origin"]),
+        }
+        for row in summarized.iter_rows(named=True)
+    ]
+    return {"model_rejected": rows}
+
+def process_mf_response_cube_paths(mf_response_cube_paths: list) -> tuple[list, list]:
+    """Process the matched-filter response cube paths."""
+    fname_prefixes = [os.path.basename(path).split("_")[0] for path in mf_response_cube_paths]
+    times_from_fnames = [extract_time_from_fname(path) for path in mf_response_cube_paths]
+    return fname_prefixes, times_from_fnames
+
+def summarize_rejected_tracks(
+    rejected_sources: object,
+    *,
+    pa_offset_deg: float = 0.0,
+) -> dict:
+    """Aggregate per-track rejected rows for JSON (``*_rejected_sources.json``).
+
+    Applies the same ``raw_direction`` / ``corrected_direction`` / ``direction``
+    convention as accepted tracks (see ``_apply_direction_corrections_to_rows``).
+    """
+    if isinstance(rejected_sources, pd.DataFrame):
+        rejected_sources = pl.DataFrame(rejected_sources.to_dict("records"))
+    if not isinstance(rejected_sources, pl.DataFrame) or rejected_sources.is_empty():
+        return {"rejected": []}
+    required_cols = {
+        "track_id", "reject_reason",
+        "frames", "direction",
+        "velocity_m_per_s", "matches"}
+    if not required_cols.issubset(set(rejected_sources.columns)):
+        return {"rejected": []}
+    tracked = rejected_sources.with_columns(
+        pl.col("track_id").cast(pl.Int64, strict=False).alias("track_id"),
+        pl.col("reject_reason").cast(pl.String, strict=False).alias("reject_reason"),
+        pl.col("frames").cast(pl.Int64, strict=False).alias("frames"),
+        pl.col("direction").cast(pl.Float64, strict=False).alias("direction"),
+        pl.col("velocity_m_per_s").cast(pl.Float64, strict=False).alias("velocity_m_per_s"),
+    ).drop_nulls(subset=["track_id", "reject_reason", "frames", "direction", "velocity_m_per_s"])
+    if tracked.is_empty():
+        return {"rejected": []}
+    matches_sorted = tracked.with_columns(
+        pl.col("matches").cast(pl.Int64, strict=False).fill_null(0).alias("matches")
+    ).sort(["track_id", "frames", "matches"])
+    summarized = (
+        matches_sorted
+        .group_by("track_id")
+        .agg(
+            pl.col("reject_reason").last().alias("reject_reason"),
+            pl.col("frames").last().alias("frames"),
+            pl.col("direction").mean().alias("direction"),
+            pl.col("velocity_m_per_s").mean().alias("velocity_m_per_s"),
+            pl.col("matches").max().alias("matches"),
+        )
+        .sort("matches", descending=True)
+        )
+    rejected_tracks = [
+        {
+            "track_id": int(row["track_id"]),
+            "reject_reason": row["reject_reason"],
+            "frames": int(row["frames"]),
+            "direction": float(row["direction"]),
+            "velocity_m_per_s": float(row["velocity_m_per_s"]),
+            "matches": int(row["matches"]),
+        }
+        for row in summarized.iter_rows(named=True)
+    ]
+    _apply_direction_corrections_to_rows(rejected_tracks, pa_offset_deg)
+    return {"rejected": rejected_tracks}
+
+def process_mf_response_cubes(
+    mf_response_cubes: dict,
+    noise_maps_dir: str,
+    movie_output_dir: str,
+    config_params: dict,
+    roi_masks_dir: str,
+    wind_data_dir: str,
+    make_movie: bool = False,
+    png_only_movies: bool = False,
+    rejected_dir: str = None,
+    parity_flip_needed: bool | None = None,
+):
+    """Define the tripwire region then process the matched-filter response cubes.
+
+    Parameters:
+    -----------
+    mf_response_cubes : dict
+        Output of ``load_mf_response_cubes``: keys ``unsharped_mf_response_cube_paths``,
+        ``hp_cube_fnames``, ``og_mf_response_cube_paths``, ``og_cube_fnames``. Processing
+        uses the high-pass (unsharp) cubes; OG paths are passed through for downstream
+        plotting (e.g. ``make_source_detection_movie``).
+    config_params : dict
+        Dictionary of configuration parameters.
+
+    Returns:
+    --------
+    sources_all : list
+        List of vetted per-frame tracked detections for each cube.
+        Per-cube summary rows are written to JSON from the separate
+        summary table returned by ``process_single_cc_cube()``.
+    rejected_all : list
+        List of tracker-side rejected detections for each cube. These are
+        kept separate from the vetted movie table and summary table.
+    model_rejected_all : list
+        Per-cube tables of tracks rejected by whole-cube model filtering
+        (``_keep_track_ids_by_model``), with reasons.
+    --------
+    """
+    required_keys = (
+        "unsharped_mf_response_cube_paths",
+        "hp_cube_fnames",
+        "og_cc_cube_paths",
+        "og_cube_fnames",
+    )
+    for key in required_keys:
+        if key not in mf_response_cubes:
+            raise KeyError(
+                f"mf_response_cubes must contain key {key!r} (from load_mf_response_cubes)"
+            )
+    hp_mf_response_cube_paths = mf_response_cubes["unsharped_mf_response_cube_paths"]
+    hp_mf_response_cube_fnames = mf_response_cubes["hp_cube_fnames"]
+    og_mf_response_cube_paths = mf_response_cubes["og_cc_cube_paths"]
+    og_mf_response_cube_fnames = mf_response_cubes["og_cube_fnames"]
+    DIAM_PUPILS = config_params.get("DIAM_PUPILS", None)
+    if DIAM_PUPILS is None:
+        raise ValueError(
+            "DIAM_PUPILS not set in the config file and this info is needed for this stage."
+        )
+    else:
+        logging.info("Using DIAM_PUPILS from config: %s", DIAM_PUPILS)
+    n_hp = len(hp_mf_response_cube_paths)
+    if not (
+        n_hp == len(hp_mf_response_cube_fnames)
+        == len(og_mf_response_cube_paths)
+        == len(og_mf_response_cube_fnames)
+    ):
+        raise ValueError(
+            "mf_response_cubes list values must have equal length "
+            f"(hp paths {n_hp}, hp fnames {len(hp_mf_response_cube_fnames)}, "
+            f"og paths {len(og_mf_response_cube_paths)}, og fnames {len(og_mf_response_cube_fnames)})"
+        )
+
+    wind_peaks_all = []
+    wind_summaries_all = []
+    wind_rejected_all = []
+    model_rejected_all = []
+
+    movie_fps = float(
+        config_params.get("MOVIE_FPS", config_params.get("FPS", 30))
+    )
+    frame_binning = config_params.get("GROUP_SIZE", None)
+    loop_speed_hz = config_params.get("LOOP_SPEED", None)
+    if loop_speed_hz is None:
+        raise ValueError(
+            "LOOP_SPEED not set in the config file and this info is needed for this stage."
+        )
+    else:
+        logging.info("Using LOOP_SPEED from config: %s Hz", loop_speed_hz)
+    if frame_binning is None:
+        raise ValueError(
+            "GROUP_SIZE not set in the config file and this info is needed for this stage."
+        )
+    else:
+        logging.info("Using GROUP_SIZE from config: %s", frame_binning)
+    time_per_frame = float(frame_binning) / float(loop_speed_hz)
+    model_min_matches = int(config_params.get("MODEL_MIN_MATCHES", 10))
+    tracker_prune_immunity_matches = int(
+        config_params.get("PRUNE_IMMUNITY_MATCHES", 20)
+    )
+    tracker_prune_immunity_speed_mps = float(
+        config_params.get("PRUNE_IMMUNITY_SPEED_MPS", 15.0)
+    )
+    tracker_max_track_radius_px = float(DIAM_PUPILS)
+
+    # Feed the cubes into sep to collect the sources (high-pass / unsharp cubes for detection)
+    for cube_name, cube_path, og_path, og_fname in zip(
+        hp_mf_response_cube_fnames,
+        hp_mf_response_cube_paths,
+        og_mf_response_cube_paths,
+        og_mf_response_cube_fnames,
+    ):
+        logging.info("Processing cube: %s", cube_name)
+        if parity_flip_needed is None:
+            # Determine if a parity flip is needed
+            current_time = extract_time_from_fname(cube_name)
+            if are_we_past_transit(current_time, config_params.get("TIME_TRANSIT", None)):
+                parity_flip_needed = True
+                logging.info("Parity flip needed for cube: %s", cube_name)
+            else:
+                parity_flip_needed = False
+                logging.info("No parity flip needed for cube: %s", cube_name)
+        else:
+            if parity_flip_needed:
+                logging.info("Parity flip needed for cube: %s", cube_name)
+            else:
+                logging.info("No parity flip needed for cube: %s", cube_name)
+        cube_data = fits.getdata(cube_path)
+        # Use OG cube naming for error-map matching to avoid loading unsharp maps.
+        error_map_path = find_error_map_for_cube(og_path, noise_maps_dir)
+        if error_map_path is None:
+            logging.warning(
+                "No matching noise map found for cube %s in %s; SEP will run without per-pixel error map.",
+                cube_name,
+                noise_maps_dir,
+            )
+            error_map = None
+        else:
+            error_map = np.asarray(fits.getdata(error_map_path), dtype=np.float32)
+            if error_map.ndim != 2 or error_map.shape != cube_data[0].shape:
+                logging.warning(
+                    "Noise map shape mismatch for cube %s: expected %s got %s; ignoring noise map.",
+                    cube_name,
+                    cube_data[0].shape,
+                    error_map.shape,
+                )
+                error_map = None
+        (
+            image_center,
+            meters_per_pixel,
+            sep_thresh,
+            sep_minarea,
+            inner_radius,
+            outer_radius,
+            time_per_frame,
+        ) = build_measure_runtime_params(config_params, cube_data)
+        (
+            wind_vetted_cube,
+            wind_summary_cube,
+            mask_cube,
+            wind_rejected_cube,
+            wind_track_history,
+            wind_model_rejected_cube,
+        ) = process_single_cc_cube(
+            cube_data,
+            error_map,
+            image_center,
+            meters_per_pixel,
+            sep_thresh,
+            sep_minarea,
+            inner_radius,
+            outer_radius,
+            time_per_frame,
+            # min_track_matches=model_min_matches,
+            tracker_prune_immunity_matches=tracker_prune_immunity_matches,
+            tracker_prune_immunity_speed_mps=tracker_prune_immunity_speed_mps,
+            tracker_max_track_radius_px=tracker_max_track_radius_px,
+        )
+        cube_stem = os.path.splitext(os.path.basename(cube_path))[0]
+        mask_save_path = os.path.join(roi_masks_dir, f"{cube_stem}_masking.fits")
+        fits.writeto(mask_save_path, mask_cube.astype(np.float32), overwrite=True)
+
+        inferred_origin_means_vetted = mean_inferred_origin_by_track_id(wind_vetted_cube)
+        wind_summary = summarize_wind_tracks(wind_summary_cube)
+        for track in wind_summary.get("tracks", []):
+            track["inferred_origin"] = inferred_origin_means_vetted.get(track["track_id"])
+        pa_offset_deg = float(config_params.get("PA_OFFSET", 0) or 0)
+        # if parity_flip_needed:
+        #     pa_offset_deg = -pa_offset_deg
+        _apply_direction_corrections_to_rows(wind_summary.get("tracks", []), pa_offset_deg)
+        wind_summaries_all.append(wind_summary)
+        wind_save_path = os.path.join(wind_data_dir, f"{cube_stem}_wind_attributes.json")
+        with open(wind_save_path, "w", encoding="utf-8") as f:
+            json.dump(wind_summary, f, indent=2)
+
+        wind_peaks_all.append(wind_vetted_cube)
+        wind_rejected_all.append(wind_rejected_cube)
+        model_rejected_all.append(wind_model_rejected_cube)
+        rejected_summary = summarize_rejected_tracks(
+            wind_rejected_cube,
+            pa_offset_deg=pa_offset_deg,
+        )
+        rejected_track_ids = {int(t["track_id"]) for t in rejected_summary.get("rejected", []) if t.get("track_id") is not None}
+        inferred_origin_means_rejected = mean_inferred_origin_by_track_id(
+            wind_track_history,
+            track_ids=rejected_track_ids if rejected_track_ids else None,
+        )
+        for track in rejected_summary.get("rejected", []):
+            track["inferred_origin"] = inferred_origin_means_rejected.get(track["track_id"])
+        model_rejected_summary = summarize_model_rejected_tracks(wind_model_rejected_cube)
+        _apply_direction_corrections_to_rows(model_rejected_summary.get("model_rejected", []), pa_offset_deg)
+        # Save the rejected sources to a JSON file
+        rejected_save_path = os.path.join(rejected_dir, f"{cube_stem}_rejected_sources.json")
+        with open(rejected_save_path, "w", encoding="utf-8") as f:
+            json.dump(rejected_summary, f, indent=2)
+        model_rejected_save_path = os.path.join(rejected_dir, f"{cube_stem}_model_rejected.json")
+        with open(model_rejected_save_path, "w", encoding="utf-8") as f:
+            json.dump(model_rejected_summary, f, indent=2)
+        if make_movie:
+            make_source_detection_movie(
+                mf_response_cube_path=cube_path,
+                mf_response_cube_fname=cube_name,
+                og_cc_cube_path=og_path,
+                og_cc_cube_fname=og_fname,
+                spatial_noise_map=error_map,
+                sources_all=wind_peaks_all,
+                output_dir=movie_output_dir,
+                fps=movie_fps,
+                cmap="Blues_r",
+                png_only=png_only_movies,
+                diam_pupils=DIAM_PUPILS,
+            )
+    return wind_peaks_all, wind_summaries_all, wind_rejected_all, model_rejected_all
+
+def mean_inferred_origin_by_track_id(
+    cube_sources: object,
+    *,
+    track_ids: set[int] | None = None,
+) -> dict[int, float]:
+    """Compute per-track mean inferred origin (traceback distance)."""
+    if isinstance(cube_sources, pd.DataFrame):
+        cube_sources = pl.DataFrame(cube_sources.to_dict("records"))
+    if not isinstance(cube_sources, pl.DataFrame) or cube_sources.is_empty():
+        return {}
+    if "track_id" not in cube_sources.columns or "inferred_origin" not in cube_sources.columns:
+        return {}
+
+    working = cube_sources.with_columns(
+        track_id_num=pl.col("track_id").cast(pl.Int64, strict=False),
+        inferred_origin_num=pl.col("inferred_origin").cast(pl.Float64, strict=False),
+    ).drop_nulls(subset=["track_id_num", "inferred_origin_num"])
+
+    if track_ids is not None:
+        working = working.filter(pl.col("track_id_num").is_in(list(track_ids)))
+
+    if working.is_empty():
+        return {}
+
+    grouped = working.group_by("track_id_num").agg(
+        pl.col("inferred_origin_num").mean().alias("inferred_origin_mean")
+    )
+    return {int(r["track_id_num"]): float(r["inferred_origin_mean"]) for r in grouped.iter_rows(named=True)}
+
