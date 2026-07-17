@@ -60,6 +60,8 @@ class statusCombo : public xWidget
     int m_statusEditing{ STOPPED };
     /// Whether a sent selection is still waiting for the live state to confirm it.
     bool m_statusCommandPending{ false };
+    /// Last selection sent while waiting for the live property to confirm it.
+    std::string m_statusRequested;
     /// Timer that clears staged combo-box edits after inactivity.
     QTimer *m_statusEditTimer{ nullptr };
 
@@ -278,6 +280,7 @@ void statusCombo::onConnect()
 {
     m_valChanged           = true;
     m_statusCommandPending = false;
+    m_statusRequested.clear();
 }
 
 void statusCombo::onDisconnect()
@@ -289,6 +292,7 @@ void statusCombo::onDisconnect()
     m_valChanged           = false;
     m_statusEditing        = STOPPED;
     m_statusCommandPending = false;
+    m_statusRequested.clear();
 
     if( m_statusEditTimer )
     {
@@ -433,7 +437,8 @@ void statusCombo::handleSetProperty( const pcf::IndiProperty &ipRecv )
             {
                 m_statusEditing        = STOPPED;
                 m_statusCommandPending = false;
-                m_valChanged           = true;
+                m_statusRequested.clear();
+                m_valChanged = true;
             }
         }
     }
@@ -492,6 +497,7 @@ void statusCombo::on_status_activated( int index )
 
     m_statusEditing        = STARTED;
     m_statusCommandPending = false;
+    m_statusRequested.clear();
     emit statusEditTimerStart( 10000 );
     update();
 }
@@ -506,6 +512,16 @@ void statusCombo::on_buttonGo_pressed()
     }
 
     if( m_property == "" )
+    {
+        return;
+    }
+
+    if( selection == m_value )
+    {
+        return;
+    }
+
+    if( m_statusCommandPending && selection == m_statusRequested )
     {
         return;
     }
@@ -542,6 +558,7 @@ void statusCombo::on_buttonGo_pressed()
 
     m_statusEditing        = STARTED;
     m_statusCommandPending = true;
+    m_statusRequested      = selection;
     emit statusEditTimerStart( 10000 );
     ui.status->clearFocus();
     ui.buttonGo->clearFocus();
@@ -560,6 +577,7 @@ void statusCombo::statusEditTimerOut()
 {
     m_statusEditing        = STOPPED;
     m_statusCommandPending = false;
+    m_statusRequested.clear();
     ui.status->setCurrentIndex( -1 );
     ui.status->clearFocus();
     emit doUpdateGUI();

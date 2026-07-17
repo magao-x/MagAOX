@@ -12,20 +12,19 @@
 
 
 
-#############################
-# The qt5 qmake
-#
-# On a system where qt5 qmake is the one in the bath, then no
-# argument is needed.  If not, then invoke with, e.g., `make QMAKE=qmake-qt5`
+# Resolve a qmake binary. Rocky 9's qt5-devel ships only qmake-qt5, while
+# Ubuntu's qtchooser provides plain qmake.
 
-QMAKE?=qmake
-
-QMAKE_PATH := $(shell which qmake 2>/dev/null)
-
-$(info $(QMAKE_PATH))
+QMAKE ?= qmake
+QMAKE_PATH := $(shell which $(QMAKE) 2>/dev/null)
 
 ifeq "$(QMAKE_PATH)" ""
-  QMAKE=qmake-qt5
+  QMAKE := qmake-qt5
+  QMAKE_PATH := $(shell which $(QMAKE) 2>/dev/null)
+endif
+
+ifeq "$(QMAKE_PATH)" ""
+  $(error No qmake found on PATH (are the Qt development libraries installed?))
 endif
 
 QMAKE_PROJECT := $(TARGET).pro

@@ -13,7 +13,7 @@ jobs:
       - name: Install Packages
         run: dnf install -y valgrind make libusb-devel libusbx-devel
       - name: Check out repository code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Configure Git Safe Directory
         run: git config --global --add safe.directory "$(pwd)"
       - name: Run Valgrind
@@ -31,7 +31,7 @@ jobs:
       # Run regardless of previous step result
       - name: Upload Valgrind Logs as Artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: valgrind-logs
           path: tests/valgrind/logs

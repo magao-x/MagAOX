@@ -98,6 +98,10 @@ class stage : public xWidget
     /// Clear focus from the widget.
     void clear_focus();
 
+  protected:
+    /// Replace the combo-box entries with the currently exposed preset/filter elements.
+    void syncSetPointOptions( const pcf::IndiProperty &ipRecv /**< [in] live preset/filter property to mirror */ );
+
   public slots:
     /// Refresh the widget state from cached INDI values.
     void updateGUI();
@@ -335,15 +339,13 @@ void stage::handleSetProperty( const pcf::IndiProperty &ipRecv )
         if( ipRecv.getName() == "filterName" )
             m_filterWheel = true;
 
+        syncSetPointOptions( ipRecv );
+
         int         n = 0;
         std::string newName;
         for( auto it = ipRecv.getElements().begin(); it != ipRecv.getElements().end(); ++it )
         {
             ++n;
-            if( ui.setPoint->findText( QString( it->second.getName().c_str() ) ) == -1 )
-            {
-                ui.setPoint->addItem( QString( it->second.getName().c_str() ) );
-            }
 
             if( it->second.getSwitchState() == pcf::IndiElement::On )
             {
@@ -380,6 +382,43 @@ void stage::handleSetProperty( const pcf::IndiProperty &ipRecv )
     }
 
     emit doUpdateGUI();
+}
+
+void stage::syncSetPointOptions( const pcf::IndiProperty &ipRecv )
+{
+    std::vector<std::string> propertyPresets;
+    propertyPresets.reserve( ipRecv.getElements().size() );
+
+    for( auto it = ipRecv.getElements().begin(); it != ipRecv.getElements().end(); ++it )
+    {
+        propertyPresets.push_back( it->second.getName() );
+    }
+
+    if( propertyPresets == m_presets )
+    {
+        return;
+    }
+
+    QString currentText = ui.setPoint->currentText();
+
+    ui.setPoint->blockSignals( true );
+    ui.setPoint->clear();
+    for( const auto &preset : propertyPresets )
+    {
+        ui.setPoint->addItem( QString::fromStdString( preset ) );
+    }
+    ui.setPoint->blockSignals( false );
+
+    m_presets = propertyPresets;
+
+    if( !currentText.isEmpty() )
+    {
+        int currentIndex = ui.setPoint->findText( currentText );
+        if( currentIndex >= 0 )
+        {
+            ui.setPoint->setCurrentIndex( currentIndex );
+        }
+    }
 }
 
 void stage::updateGUI()
@@ -514,6 +553,31 @@ void stage::on_setPointGo_pressed()
         return;
     }
 
+    bool knownSelection = false;
+    for( const auto &preset : m_presets )
+    {
+        if( preset == selection )
+        {
+            knownSelection = true;
+            break;
+        }
+    }
+
+    if( !knownSelection )
+    {
+        return;
+    }
+
+    if( selection == m_setPoint )
+    {
+        return;
+    }
+
+    if( m_setPointCommandPending && selection == m_setPointRequested )
+    {
+        return;
+    }
+
     try
     {
         pcf::IndiProperty ipSend( pcf::IndiProperty::Switch );
@@ -530,17 +594,15 @@ void stage::on_setPointGo_pressed()
         ipSend.setState( pcf::IndiProperty::Idle );
         ipSend.setRule( pcf::IndiProperty::OneOfMany );
 
-        for( int idx = 0; idx < ui.setPoint->count(); ++idx )
+        for( const auto &preset : m_presets )
         {
-            std::string elName = ui.setPoint->itemText( idx ).toStdString();
-
-            if( elName == selection )
+            if( preset == selection )
             {
-                ipSend.add( pcf::IndiElement( elName, pcf::IndiElement::On ) );
+                ipSend.add( pcf::IndiElement( preset, pcf::IndiElement::On ) );
             }
             else
             {
-                ipSend.add( pcf::IndiElement( elName, pcf::IndiElement::Off ) );
+                ipSend.add( pcf::IndiElement( preset, pcf::IndiElement::Off ) );
             }
         }
 
