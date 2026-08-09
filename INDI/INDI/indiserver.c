@@ -136,6 +136,7 @@ typedef struct {
     LilXML *lp;				/* XML parsing context */
     Msg *mp;				/* new incoming message */
     FQ *msgq;				/* outbound Msg queue  -- guard with q_lock */
+    int msgq_bytes;			/* total bytes in msgq -- guard with q_lock */
     pthread_cond_t go_cond;		/* tell writer thread to send next msqq */
     pthread_mutex_t q_lock;		/* guard access to msqg and go_cond */
 } ClInfo;
@@ -166,6 +167,7 @@ typedef struct {
     LilXML *lp;				/* XML parsing context */
     Msg *mp;				/* new incoming message */
     FQ *msgq;				/* outbound Msg queue  -- guard with q_lock */
+    int msgq_bytes;			/* total bytes in msgq -- guard with q_lock */
     pthread_cond_t go_cond;		/* tell writer thread to send next msqq */
     pthread_mutex_t q_lock;		/* guard access to msqg and go_cond */
     pthread_rwlock_t restart_lock;	/* lock out this device while restarting */
@@ -218,7 +220,6 @@ static void *clientWriterThread (void *);
 static void onDriverError (DvrInfo *dp);
 static void onClientError (ClInfo *cp);
 static int pushMsg (DvrInfo *dp, ClInfo *cp, Msg *mp);
-static int msgQSize (FQ *q);
 static void decMsg (Msg *mp);
 static void minMsg (Msg *mp, int add);
 static Msg *splitMsg (Msg *mp, int keep);
@@ -512,6 +513,7 @@ startLocalDvr (DvrInfo *dp)
 	dp->lp = newLilXML();
 	dp->mp = newMsg();
 	dp->msgq = newFQ(1);
+	dp->msgq_bytes = 0;
 	pthread_mutex_init (&dp->q_lock, NULL);
 	pthread_cond_init (&dp->go_cond, NULL);
 	pthread_rwlock_init (&dp->sprops_rwlock, NULL);
@@ -595,6 +597,7 @@ startRemoteDvr (DvrInfo *dp)
 	dp->lp = newLilXML();
 	dp->mp = newMsg();
 	dp->msgq = newFQ(1);
+	dp->msgq_bytes = 0;
 	pthread_mutex_init (&dp->q_lock, NULL);
 	pthread_cond_init (&dp->go_cond, NULL);
 	pthread_rwlock_init (&dp->sprops_rwlock, NULL);
@@ -799,6 +802,7 @@ newClient()
 	cp->lp = newLilXML();
 	cp->mp = newMsg();
 	cp->msgq = newFQ(1);
+	cp->msgq_bytes = 0;
 	pthread_mutex_init (&cp->q_lock, NULL);
 	pthread_cond_init (&cp->go_cond, NULL);
 	pthread_rwlock_init (&cp->props_rwlock, NULL);
@@ -988,6 +992,9 @@ clientWriterThread (void *vp)
 		mp = (Msg *) popFQ (cp->msgq);
 		if (!mp)
 		    Bye ("Bug! Client %d message queue is empty!\n", cp->s);
+		cp->msgq_bytes -= mp->used;
+		if (cp->msgq_bytes < 0)
+		    cp->msgq_bytes = 0;
 		if (verbose > 1)
 		    logMsg ("send to", NULL, cp, mp);
 
@@ -1206,6 +1213,9 @@ driverWriterThread (void *vp)
 		mp = (Msg *) popFQ (dp->msgq);
 		if (!mp)
 		    Bye ("Bug! Driver %s message queue is empty!\n", dp->name);
+		dp->msgq_bytes -= mp->used;
+		if (dp->msgq_bytes < 0)
+		    dp->msgq_bytes = 0;
 		if (verbose > 1)
 		    logMsg ("send to", dp, NULL, mp);
 
@@ -1640,7 +1650,7 @@ q2Clients (ClInfo *notme, int isblob, char *dev, char *name, Msg *mp,
 
 
 /* increment mp count then push it onto dp or cp's queue for writing.
- * while we have the q locked find the total size of its messages.
+ * while we have the q locked update and return total queued bytes.
  */
 static int
 pushMsg (DvrInfo *dp, ClInfo *cp, Msg *mp)
@@ -1648,6 +1658,7 @@ pushMsg (DvrInfo *dp, ClInfo *cp, Msg *mp)
 	FQ *qp;
 	pthread_mutex_t *lp;
 	pthread_cond_t *vp;
+	int *bp;
 	int n;
 
 	/* get appropriate q and locks */
@@ -1655,10 +1666,12 @@ pushMsg (DvrInfo *dp, ClInfo *cp, Msg *mp)
 	    qp = dp->msgq;
 	    lp = &dp->q_lock;
 	    vp = &dp->go_cond;
+	    bp = &dp->msgq_bytes;
 	} else if (cp) {
 	    qp = cp->msgq;
 	    lp = &cp->q_lock;
 	    vp = &cp->go_cond;
+	    bp = &cp->msgq_bytes;
 	} else
 	    return (0);
 
@@ -1668,7 +1681,8 @@ pushMsg (DvrInfo *dp, ClInfo *cp, Msg *mp)
 	/* push onto this queue, handy time to get size too */
 	pthread_mutex_lock (lp);
 	pushFQ (qp, mp);
-	n = msgQSize (qp);
+	*bp += mp->used;
+	n = *bp;
 	pthread_cond_signal (vp);
 	pthread_mutex_unlock (lp);
 
@@ -1705,20 +1719,6 @@ logMsg (const char *label, DvrInfo *dp, ClInfo *cp, Msg *mp)
 			    roottag, dev[0] ? dev : "*", name[0] ? name : "*", pc);
 
 	delXMLEle (root);
-}
-
-/* return total size of all Msqs on the given q */
-static int
-msgQSize (FQ *q)
-{
-	int i, l = 0;
-
-	for (i = 0; i < nFQ(q); i++) {
-	    Msg *mp = (Msg *) peekiFQ(q,i);
-	    l += mp->used;
-	}
-
-	return (l);
 }
 
 /* return pointer to one new empty Msg,
@@ -1764,14 +1764,19 @@ incMsg (Msg *mp)
 static void
 decMsg (Msg *mp)
 {
+	int freeit = 0;
+
 	pthread_mutex_lock (&mp->count_lock);
-	if (--mp->count <= 0) {
+	if (--mp->count <= 0)
+	    freeit = 1;
+	pthread_mutex_unlock (&mp->count_lock);
+
+	if (freeit) {
 	    if (mp->cp != mp->buf)
 		free (mp->cp);
 	    pthread_mutex_destroy (&mp->count_lock);
 	    free (mp);
-	} else
-	    pthread_mutex_unlock (&mp->count_lock);
+	}
 }
 
 
