@@ -80,6 +80,12 @@ class fsmDisplay : public xWidget
     /// Overrides text shown for HOMING state.
     void HOMING( const std::string &s /**< [in] Replacement label text. */ );
 
+    void highlightChanges(bool);
+    
+    bool highlightChanges();
+
+public slots:
+
     /// Overrides text shown for READY state.
     void READY( const std::string &s /**< [in] Replacement label text. */ );
 
@@ -249,6 +255,18 @@ void fsmDisplay::READY( const std::string &s )
 void fsmDisplay::OPERATING( const std::string &s )
 {
     m_OPERATING = s;
+}
+
+
+void fsmDisplay::highlightChanges(bool hc)
+{
+   m_highlightChanges = hc;
+   ui.fsm->highlightChanges(hc);
+}
+
+bool fsmDisplay::highlightChanges()
+{
+   return ui.fsm->highlightChanges();
 }
 
 void fsmDisplay::updateGUI()
