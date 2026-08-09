@@ -1,0 +1,47 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.3.6 Chrome/140.0.7339.249 Electron/38.8.0 Safari/537.36" version="29.3.6">
+  <diagram name="fwfpm-stagesci1" id="example1">
+    <mxGraphModel dx="1018" dy="1547" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="fwfpm-fpm" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="name=fwfpm-fpm&#xa;ruleType=swVal&#xa;property=fwfpm.filterName&#xa;element=fpm&#xa;target=On" vertex="1">
+          <mxGeometry height="100" width="220" x="50" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="fwfpm-READY" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="name=fwfpm-READY&#xa;ruleType=txtVal&#xa;property=fwfpm.fsm_state&#xa;element=state&#xa;target=READY" vertex="1">
+          <mxGeometry height="100" width="220" x="320" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="fwfpm-fpm-READY" parent="1" style="rhombus;whiteSpace=wrap;html=0;fillColor=#fff2cc;strokeColor=#d6b656;" value="name=fwfpm-fpm-READY&#xa;ruleType=ruleComp&#xa;comp=And" vertex="1">
+          <mxGeometry height="160" width="180" x="180" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="fwfpm-fpm" style="edgeStyle=orthogonalEdgeStyle;" target="fwfpm-fpm-READY">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="fwfpm-READY" style="edgeStyle=orthogonalEdgeStyle;" target="fwfpm-fpm-READY">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fwfpm-stagesci1-neq" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="name=fwfpm-stagesci1-neq&#xa;ruleType=elCompSw&#xa;property1=fwfpm.filterName&#xa;element1=fpm&#xa;property2=stagesci1.presetName&#xa;element2=fpm&#xa;comp=Neq" vertex="1">
+          <mxGeometry height="120" width="260" x="590" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="fwfpm-fpm-stagesci-fpm" parent="1" style="rhombus;whiteSpace=wrap;html=0;fillColor=#fff2cc;strokeColor=#d6b656;" value="name=fwfpm-fpm-stagesci-fpm&#xa;ruleType=ruleComp&#xa;comp=And&#xa;priority=caution&#xa;message=fwfpm is in fpm but stagesci1 is not in focus position fpm" vertex="1">
+          <mxGeometry height="220" width="240" x="340" y="-20" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="fwfpm-fpm-READY" style="edgeStyle=orthogonalEdgeStyle;" target="fwfpm-fpm-stagesci-fpm">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="270" y="220" />
+              <mxPoint x="460" y="220" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="fwfpm-stagesci1-neq" style="edgeStyle=orthogonalEdgeStyle;" target="fwfpm-fpm-stagesci-fpm">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="720" y="220" />
+              <mxPoint x="460" y="220" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
