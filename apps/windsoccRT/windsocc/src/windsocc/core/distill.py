@@ -263,10 +263,10 @@ def build_template(
     start_x = max(start_x, 0)
     end_y = min(end_y, ny)
     template = frame[start_y:end_y, start_x:end_x].astype(float)
-    template -= np.nanmedian(template)
-    scale = np.nanstd(template)
-    if scale > 0:
-        template /= scale
+    # template -= np.nanmedian(template)
+    # scale = np.nanstd(template)
+    # if scale > 0:
+    #     template /= scale
     return template
 
 def load_parangs_lookup(path):
