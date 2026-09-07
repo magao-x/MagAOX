@@ -55,6 +55,11 @@ class logFileRawTest : public MagAOX::logger::logFileRaw<XWC_DEFAULT_VERBOSITY>
     {
         return createFile( ts );
     }
+
+    uint64_t test_currFileStartSec()
+    {
+        return m_currFileStartSec;
+    }
 };
 
 /// Construction of logFileRaw
@@ -71,6 +76,7 @@ TEST_CASE( "Construction of logFileRaw", "[libMagAOX::logger::logFileRaw]" )
         REQUIRE( lfr.logName() == "xlog" );
         REQUIRE( lfr.logExt() == MAGAOX_default_logExt );
         REQUIRE( lfr.maxLogSize() == MAGAOX_default_max_logSize );
+        REQUIRE( lfr.maxLogTime() == MAGAOX_default_maxLogTime );
 
         lfr.logPath( "/newp/test/x" );
         REQUIRE( lfr.logPath() == "/newp/test/x" );
@@ -83,6 +89,12 @@ TEST_CASE( "Construction of logFileRaw", "[libMagAOX::logger::logFileRaw]" )
 
         lfr.maxLogSize( 10 );
         REQUIRE( lfr.maxLogSize() == 10 );
+
+        lfr.maxLogTime( 15 );
+        REQUIRE( lfr.maxLogTime() == 15 );
+
+        lfr.maxLogTime( 0 );
+        REQUIRE( lfr.maxLogTime() == 0 );
     }
 }
 
@@ -440,6 +452,276 @@ TEST_CASE( "Writing to a log file", "[libMagAOX::logger::logFileRaw]" )
         fsz = std::filesystem::file_size( fullPath2 );
 
         REQUIRE( fsz == 1 * ( 256 + 14 ) );
+    }
+}
+
+
+/// Time-based rotation of a log file
+/**
+ * \ingroup logFileRaw_unit_test
+ */
+TEST_CASE( "Time based rotation of a log file", "[libMagAOX::logger::logFileRaw]" )
+{
+    // All timestamps below are chosen relative to a 10 minute (600 second) interval:
+    //   1732170780 = 2024-11-21 06:33:00 UTC, bin 2886951
+    //   1732171199 = 2024-11-21 06:39:59 UTC, bin 2886951 (same)
+    //   1732171200 = 2024-11-21 06:40:00 UTC, bin 2886952 (next)
+    //   1732171260 = 2024-11-21 06:41:00 UTC, bin 2886952 (same)
+
+    std::string msg( 256, 't' );
+
+    /// Write a log with the given timestamp, requiring success
+    auto writeAt = []( logFileRawTest &lfr, flatlogs::timespecX ts, const std::string &m )
+    {
+        flatlogs::bufferPtrT logbuff;
+        flatlogs::logHeader::createLog<dummyLog>( logbuff, ts, m, flatlogs::logPrio::LOG_NOTICE );
+        REQUIRE( lfr.writeLog( logbuff ) == mx::error_t::noerror );
+    };
+
+    /// Path of the file that an entry at this timestamp would create
+    auto pathFor = []( logFileRawTest &lfr, const std::string &stamp )
+    { return lfr.testPath + "/2024_11_21/" + lfr.logName() + "_" + stamp + "." + lfr.logExt(); };
+
+    /// Guard against deleting all of /tmp, and clear any previous run
+    auto resetPath = []( logFileRawTest &lfr )
+    {
+        if( lfr.testPath == "/tmp" )
+        {
+            std::cerr << "\nTESTING-ERROR: testPath is just /tmp, so logName is null.  Can't go on\n";
+            std::cerr << __FILE__ << ' ' << __LINE__ << "\n\n";
+            REQUIRE( false );
+            return false;
+        }
+        std::filesystem::remove_all( lfr.testPath );
+        return true;
+    };
+
+    SECTION( "two entries in the same interval share a file" )
+    {
+        logFileRawTest lfr;
+        lfr.maxLogTime( 10 );
+        if( !resetPath( lfr ) )
+        {
+            return;
+        }
+
+        writeAt( lfr, flatlogs::timespecX( 1732170780, 2 ), msg );
+        writeAt( lfr, flatlogs::timespecX( 1732171199, 3 ), msg );
+
+        REQUIRE( std::filesystem::exists( pathFor( lfr, "20241121063300000000002" ) ) );
+        REQUIRE( !std::filesystem::exists( pathFor( lfr, "20241121063959000000003" ) ) );
+
+        lfr.close();
+        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121063300000000002" ) ) == 2 * ( 256 + 14 ) );
+    }
+
+    SECTION( "an entry in the next interval starts a new file" )
+    {
+        logFileRawTest lfr;
+        lfr.maxLogTime( 10 );
+        if( !resetPath( lfr ) )
+        {
+            return;
+        }
+
+        writeAt( lfr, flatlogs::timespecX( 1732170780, 2 ), msg );
+        writeAt( lfr, flatlogs::timespecX( 1732171200, 4 ), msg );
+
+        REQUIRE( std::filesystem::exists( pathFor( lfr, "20241121063300000000002" ) ) );
+        REQUIRE( std::filesystem::exists( pathFor( lfr, "20241121064000000000004" ) ) );
+
+        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121063300000000002" ) ) == 1 * ( 256 + 14 ) );
+
+        // The new file, not the old one, is now the current file
+        REQUIRE( lfr.test_currFileStartSec() == 1732171200 );
+
+        lfr.close();
+        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121064000000000004" ) ) == 1 * ( 256 + 14 ) );
+    }
+
+    SECTION( "a size triggered split does not shift the interval boundary" )
+    {
+        logFileRawTest lfr;
+        lfr.maxLogTime( 10 );
+        lfr.maxLogSize( 256 ); // force every write after the first to split
+        if( !resetPath( lfr ) )
+        {
+            return;
+        }
+
+        // Two entries in the same interval, split by size rather than by time
+        writeAt( lfr, flatlogs::timespecX( 1732170780, 2 ), msg );
+        writeAt( lfr, flatlogs::timespecX( 1732171199, 3 ), msg );
+
+        REQUIRE( std::filesystem::exists( pathFor( lfr, "20241121063300000000002" ) ) );
+        REQUIRE( std::filesystem::exists( pathFor( lfr, "20241121063959000000003" ) ) );
+
+        // The mid-interval file inherits the later start time, but is still in interval 2886951 ...
+        REQUIRE( lfr.test_currFileStartSec() == 1732171199 );
+
+        // ... so an entry in the next interval must still start a new file at the boundary.
+        writeAt( lfr, flatlogs::timespecX( 1732171200, 4 ), msg );
+
+        REQUIRE( std::filesystem::exists( pathFor( lfr, "20241121064000000000004" ) ) );
+        REQUIRE( lfr.test_currFileStartSec() == 1732171200 );
+
+        lfr.close();
+    }
+
+    SECTION( "maxLogTime of 0 disables time based rotation" )
+    {
+        logFileRawTest lfr;
+        lfr.maxLogTime( 0 );
+        if( !resetPath( lfr ) )
+        {
+            return;
+        }
+
+        // These are in different 10 minute intervals, and even different days, but time rotation is off
+        writeAt( lfr, flatlogs::timespecX( 1732170780, 2 ), msg );
+        writeAt( lfr, flatlogs::timespecX( 1732171200, 4 ), msg );
+
+        REQUIRE( std::filesystem::exists( pathFor( lfr, "20241121063300000000002" ) ) );
+        REQUIRE( !std::filesystem::exists( pathFor( lfr, "20241121064000000000004" ) ) );
+
+        lfr.close();
+        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121063300000000002" ) ) == 2 * ( 256 + 14 ) );
+    }
+
+    SECTION( "a change to maxLogTime takes effect on the next entry" )
+    {
+        logFileRawTest lfr;
+        lfr.maxLogTime( 60 ); // both timestamps below are in the same 60 minute interval
+        if( !resetPath( lfr ) )
+        {
+            return;
+        }
+
+        writeAt( lfr, flatlogs::timespecX( 1732170780, 2 ), msg );
+
+        // Shortening the interval puts the open file's start time in a different interval than the
+        // next entry, so the next entry must rotate.
+        lfr.maxLogTime( 10 );
+
+        writeAt( lfr, flatlogs::timespecX( 1732171200, 4 ), msg );
+
+        REQUIRE( std::filesystem::exists( pathFor( lfr, "20241121064000000000004" ) ) );
+
+        lfr.close();
+    }
+}
+
+/// Rotation of a log file on request
+/**
+ * \ingroup logFileRaw_unit_test
+ */
+TEST_CASE( "Requested rotation of a log file", "[libMagAOX::logger::logFileRaw]" )
+{
+    std::string msg( 256, 't' );
+
+    auto writeAt = []( logFileRawTest &lfr, flatlogs::timespecX ts, const std::string &m )
+    {
+        flatlogs::bufferPtrT logbuff;
+        flatlogs::logHeader::createLog<dummyLog>( logbuff, ts, m, flatlogs::logPrio::LOG_NOTICE );
+        REQUIRE( lfr.writeLog( logbuff ) == mx::error_t::noerror );
+    };
+
+    auto pathFor = []( logFileRawTest &lfr, const std::string &stamp )
+    { return lfr.testPath + "/2024_11_21/" + lfr.logName() + "_" + stamp + "." + lfr.logExt(); };
+
+    auto resetPath = []( logFileRawTest &lfr )
+    {
+        if( lfr.testPath == "/tmp" )
+        {
+            std::cerr << "\nTESTING-ERROR: testPath is just /tmp, so logName is null.  Can't go on\n";
+            std::cerr << __FILE__ << ' ' << __LINE__ << "\n\n";
+            REQUIRE( false );
+            return false;
+        }
+        std::filesystem::remove_all( lfr.testPath );
+        return true;
+    };
+
+    SECTION( "a request forces a new file on the next entry" )
+    {
+        logFileRawTest lfr;
+        lfr.maxLogTime( 0 ); // isolate the request from time based rotation
+        if( !resetPath( lfr ) )
+        {
+            return;
+        }
+
+        writeAt( lfr, flatlogs::timespecX( 1732170780, 2 ), msg );
+
+        lfr.requestRotation();
+
+        writeAt( lfr, flatlogs::timespecX( 1732171199, 3 ), msg );
+
+        REQUIRE( std::filesystem::exists( pathFor( lfr, "20241121063300000000002" ) ) );
+        REQUIRE( std::filesystem::exists( pathFor( lfr, "20241121063959000000003" ) ) );
+
+        // The request must be consumed, so a further entry does not rotate again
+        writeAt( lfr, flatlogs::timespecX( 1732171200, 4 ), msg );
+
+        REQUIRE( !std::filesystem::exists( pathFor( lfr, "20241121064000000000004" ) ) );
+
+        lfr.close();
+        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121063959000000003" ) ) == 2 * ( 256 + 14 ) );
+    }
+
+    SECTION( "a request with no subsequent entry creates no file" )
+    {
+        logFileRawTest lfr;
+        lfr.maxLogTime( 0 );
+        if( !resetPath( lfr ) )
+        {
+            return;
+        }
+
+        writeAt( lfr, flatlogs::timespecX( 1732170780, 2 ), msg );
+
+        lfr.requestRotation();
+
+        lfr.close();
+
+        // Only the one file from the single write exists
+        int nfiles = 0;
+        for( const auto &e : std::filesystem::directory_iterator( lfr.testPath + "/2024_11_21/" ) )
+        {
+            (void)e;
+            ++nfiles;
+        }
+
+        REQUIRE( nfiles == 1 );
+        REQUIRE( std::filesystem::exists( pathFor( lfr, "20241121063300000000002" ) ) );
+    }
+
+    SECTION( "a request is consumed even when another condition also triggers" )
+    {
+        logFileRawTest lfr;
+        lfr.maxLogTime( 10 );
+        if( !resetPath( lfr ) )
+        {
+            return;
+        }
+
+        writeAt( lfr, flatlogs::timespecX( 1732170780, 2 ), msg );
+
+        lfr.requestRotation();
+
+        // This entry is in the next interval, so time rotation also fires.  The request must still be
+        // cleared, otherwise it would cause a spurious rotation on the entry after this one.
+        writeAt( lfr, flatlogs::timespecX( 1732171200, 4 ), msg );
+
+        REQUIRE( std::filesystem::exists( pathFor( lfr, "20241121064000000000004" ) ) );
+
+        // Same interval as the previous entry, and no pending request, so no new file
+        writeAt( lfr, flatlogs::timespecX( 1732171260, 5 ), msg );
+
+        REQUIRE( !std::filesystem::exists( pathFor( lfr, "20241121064100000000005" ) ) );
+
+        lfr.close();
+        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121064000000000004" ) ) == 2 * ( 256 + 14 ) );
     }
 }
 

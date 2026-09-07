@@ -365,6 +365,7 @@ int logManager<parentT, logFileT>::setupConfig( mx::app::appConfigurator & confi
    config.add(m_configSection+".logDir","L", "logDir",mx::app::argType::Required, m_configSection, "logDir", false, "string", "The directory for log files");
    config.add(m_configSection+".logExt","", "logExt",mx::app::argType::Required, m_configSection, "logExt", false, "string", "The extension for log files");
    config.add(m_configSection+".maxLogSize","", "maxLogSize",mx::app::argType::Required, m_configSection, "maxLogSize", false, "string", "The maximum size of log files");
+   config.add(m_configSection+".maxLogTime","", "maxLogTime",mx::app::argType::Required, m_configSection, "maxLogTime", false, "unsigned", "The maximum time span of log files in minutes. 0 disables time-based rotation.");
    config.add(m_configSection+".writePause","", "writePause",mx::app::argType::Required, m_configSection, "writePause", false, "unsigned long", "The log thread pause time in ns");
    config.add(m_configSection+".logThreadPrio", "", "logThreadPrio", mx::app::argType::Required, m_configSection, "logThreadPrio", false, "int", "The log thread priority");
    config.add(m_configSection+".logLevel","l", "logLevel",mx::app::argType::Required, m_configSection, "logLevel", false, "string", "The log level");
@@ -404,6 +405,11 @@ int logManager<parentT, logFileT>::loadConfig( mx::app::appConfigurator & config
 
    //maxLogSize
    config(this->m_maxLogSize, m_configSection+".maxLogSize");
+
+   //maxLogTime - read into a plain type, as the configurator cannot populate a std::atomic
+   unsigned mlt = this->maxLogTime();
+   config(mlt, m_configSection+".maxLogTime");
+   this->maxLogTime(mlt);
 
    //writePause
    config(m_writePause, m_configSection+".writePause");

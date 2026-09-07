@@ -82,7 +82,61 @@ struct telemeter
 
     double m_maxInterval{10.0}; ///< The maximum interval, in seconds, between telemetry records. Default is 10.0 seconds.
 
+    pcf::IndiProperty m_indiP_rotateTelem; ///< indi Property to request rotation of the telemetry file.
+
+    pcf::IndiProperty m_indiP_maxLogTime; ///< indi Property to report and set the telemetry file time interval, in minutes.
+
     telemeter();
+
+    /// Destructor
+    /** Explicitly noexcept. The INDI property members above have destructors which are not noexcept,
+      * which would otherwise make the implicit destructor of any class deriving from both this and
+      * MagAOXApp looser than MagAOXApp's virtual noexcept destructor. MagAOXApp declares its own
+      * destructor noexcept for the same reason.
+      */
+    ~telemeter() noexcept;
+
+    /// The static callback function to be registered for requesting telemetry file rotation
+    /** The `void *` is a pointer to the app, which is converted to this telemeter.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    static int st_newCallBack_rotateTelem(void *app,                     /**< [in] a pointer to the app, will be
+                                                                                   converted to telemeter. */
+                                          const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                                    the new property request. */
+    );
+
+    /// The callback called by the static version, to actually process the telemetry rotation request.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_rotateTelem(const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new
+                                                                          property request. */
+    );
+
+    /// The static callback function to be registered for setting the telemetry file time interval
+    /** The `void *` is a pointer to the app, which is converted to this telemeter.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    static int st_newCallBack_maxLogTime(void *app,                      /**< [in] a pointer to the app, will be
+                                                                                   converted to telemeter. */
+                                         const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                                   the new property request. */
+    );
+
+    /// The callback called by the static version, to actually process the telemetry interval change.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_maxLogTime(const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new
+                                                                         property request. */
+    );
 
     /// Make a telemetry recording
     /** Wrapper for logManager::log, which updates telT::lastRecord.
@@ -190,6 +244,11 @@ telemeter<derivedT>::telemeter()
 }
 
 template <class derivedT>
+telemeter<derivedT>::~telemeter() noexcept
+{
+}
+
+template <class derivedT>
 template <typename telT>
 int telemeter<derivedT>::telem(const typename telT::messageT &msg)
 {
@@ -256,6 +315,29 @@ template <class derivedT>
 int telemeter<derivedT>::appStartup()
 {
     //----------------------------------------//
+    //        Set up the INDI properties
+    //----------------------------------------//
+
+    // These are registered through the app, which this class is a friend of, so that apps without
+    // telemetry do not get telemetry properties.
+    derived().createStandardIndiRequestSw(m_indiP_rotateTelem, "telem_rotate", "New Telemetry File", "Logging");
+    if (derived().registerIndiPropertyNew(m_indiP_rotateTelem, st_newCallBack_rotateTelem) < 0)
+    {
+        derivedT::template log<software_error>({__FILE__, __LINE__, "failed to register new telem_rotate property"});
+    }
+
+    derived().template createStandardIndiNumber<unsigned>(
+        m_indiP_maxLogTime, "telem_maxtime", 0, 525600, 1, "", "Max Telemetry Interval [minutes]", "Logging");
+    if (derived().registerIndiPropertyNew(m_indiP_maxLogTime, st_newCallBack_maxLogTime) < 0)
+    {
+        derivedT::template log<software_error>({__FILE__, __LINE__, "failed to register new telem_maxtime property"});
+    }
+
+    // Set the INDI property to the configured interval.
+    m_indiP_maxLogTime["current"] = m_tel.maxLogTime();
+    m_indiP_maxLogTime["target"] = m_tel.maxLogTime();
+
+    //----------------------------------------//
     //        Begin the telemetry system
     //----------------------------------------//
 
@@ -301,6 +383,64 @@ int telemeter<derivedT>::appLogic()
     }
 
     return derived().checkRecordTimes();
+}
+
+template <class derivedT>
+int telemeter<derivedT>::st_newCallBack_rotateTelem(void *app, const pcf::IndiProperty &ipRecv)
+{
+    // MagAOXApp::handleNewProperty always passes its own `this`, so the argument is the app, not
+    // this telemeter.
+    telemeter<derivedT> *tel = static_cast<derivedT *>(app);
+    return tel->newCallBack_rotateTelem(ipRecv);
+}
+
+template <class derivedT>
+int telemeter<derivedT>::newCallBack_rotateTelem(const pcf::IndiProperty &ipRecv)
+{
+    if (ipRecv.createUniqueKey() != m_indiP_rotateTelem.createUniqueKey())
+    {
+        return derivedT::template log<software_error, -1>({__FILE__, __LINE__, "wrong indi property received"});
+    }
+
+    if (ipRecv.find("request"))
+    {
+        if (ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+        {
+            // This only sets a flag. The new file is created by the telemetry thread on the next record.
+            m_tel.requestRotation();
+            derived().updateSwitchIfChanged(m_indiP_rotateTelem, "request", pcf::IndiElement::Off, INDI_IDLE);
+        }
+    }
+
+    return 0;
+}
+
+template <class derivedT>
+int telemeter<derivedT>::st_newCallBack_maxLogTime(void *app, const pcf::IndiProperty &ipRecv)
+{
+    // MagAOXApp::handleNewProperty always passes its own `this`, so the argument is the app, not
+    // this telemeter.
+    telemeter<derivedT> *tel = static_cast<derivedT *>(app);
+    return tel->newCallBack_maxLogTime(ipRecv);
+}
+
+template <class derivedT>
+int telemeter<derivedT>::newCallBack_maxLogTime(const pcf::IndiProperty &ipRecv)
+{
+    unsigned target = 0;
+
+    if (derived().indiTargetUpdate(m_indiP_maxLogTime, target, ipRecv, false) < 0)
+    {
+        return derivedT::template log<software_error, -1>({__FILE__, __LINE__});
+    }
+
+    m_tel.maxLogTime(target);
+
+    derivedT::template log<software_info>({__FILE__, __LINE__, "Set telemetry file interval to " + std::to_string(target) + " minutes"});
+
+    derived().updateIfChanged(m_indiP_maxLogTime, "current", target, INDI_IDLE);
+
+    return 0;
 }
 
 template <class derivedT>
