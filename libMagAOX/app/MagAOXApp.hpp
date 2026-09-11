@@ -1148,6 +1148,50 @@ class MagAOXApp : public application
     int newCallBack_clearFSMAlert( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
                                                                              the new property request.*/ );
 
+    /// Indi property to request rotation of the process log file.
+    pcf::IndiProperty m_indiP_rotateLogs;
+
+    /// The static callback function to be registered for requesting log file rotation
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    static int st_newCallBack_rotateLogs( void *app,                      /**< [in] a pointer to this, will be
+                                                                                    static_cast-ed to MagAOXApp. */
+                                          const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                                    the new property request. */
+    );
+
+    /// The callback called by the static version, to actually process the log rotation request.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_rotateLogs( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                          the new property request.*/ );
+
+    /// indi Property to report and update the process log file time interval, in minutes.
+    pcf::IndiProperty m_indiP_maxLogTime;
+
+    /// The static callback function to be registered for setting the log file time interval
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    static int st_newCallBack_maxLogTime( void *app,                      /**< [in] a pointer to this, will be
+                                                                                    static_cast-ed to MagAOXApp. */
+                                          const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                                    the new property request. */
+    );
+
+    /// The callback called by the static version, to actually process the log interval change.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_maxLogTime( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                          the new property request.*/ );
+
     ///@} --INDI Interface
 
     /** \name Power Management
@@ -1481,7 +1525,20 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
     createStandardIndiRequestSw( m_indiP_clearFSMAlert, "fsm_clear_alert", "Clear FSM Alert", "FSM" );
     if( registerIndiPropertyNew( m_indiP_clearFSMAlert, st_newCallBack_clearFSMAlert ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "failed to register new fsm_alert property" } );
+        log<software_error>( { __FILE__, __LINE__, "Failed to register new fsm_alert property" } );
+    }
+
+    createStandardIndiRequestSw( m_indiP_rotateLogs, "logs_rotate", "New Log File", "Logging" );
+    if( registerIndiPropertyNew( m_indiP_rotateLogs, st_newCallBack_rotateLogs ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "Failed to register new logs_rotate property" } );
+    }
+
+    createStandardIndiNumber<unsigned>(
+        m_indiP_maxLogTime, "logs_maxtime", 0, 525600, 1, "", "Max Log Interval [minutes]", "Logging" );
+    if( registerIndiPropertyNew( m_indiP_maxLogTime, st_newCallBack_maxLogTime ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "Failed to register new logs_maxtime property" } );
     }
 
     return;
@@ -1605,6 +1662,15 @@ void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
     //---------- Setup the logger ----------//
     m_log.logName( m_configName );
     m_log.loadConfig( config );
+
+    // Set the INDI property to the configured interval.
+    // The elements are created by setDefaults, which is not called in all contexts (e.g. unit tests),
+    // so check before assigning.
+    if( m_indiP_maxLogTime.find( "current" ) && m_indiP_maxLogTime.find( "target" ) )
+    {
+        m_indiP_maxLogTime["current"] = m_log.maxLogTime();
+        m_indiP_maxLogTime["target"]  = m_log.maxLogTime();
+    }
 
     //--------- Loop Pause Time --------//
     config( m_loopPause, "loopPause" );
@@ -3865,6 +3931,58 @@ int MagAOXApp<_useINDI>::newCallBack_clearFSMAlert( const pcf::IndiProperty &ipR
         }
 
     }
+    return 0;
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::st_newCallBack_rotateLogs( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<MagAOXApp<_useINDI> *>( app )->newCallBack_rotateLogs( ipRecv );
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::newCallBack_rotateLogs( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.createUniqueKey() != m_indiP_rotateLogs.createUniqueKey() )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "wrong indi property received" } );
+    }
+
+    if( ipRecv.find( "request" ) )
+    {
+        if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+        {
+            // This only sets a flag. The new file is created by the log thread on the next entry.
+            m_log.requestRotation();
+            updateSwitchIfChanged( m_indiP_rotateLogs, "request", pcf::IndiElement::Off, INDI_IDLE );
+        }
+    }
+
+    return 0;
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::st_newCallBack_maxLogTime( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<MagAOXApp<_useINDI> *>( app )->newCallBack_maxLogTime( ipRecv );
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::newCallBack_maxLogTime( const pcf::IndiProperty &ipRecv )
+{
+    unsigned target = 0;
+
+    if( indiTargetUpdate( m_indiP_maxLogTime, target, ipRecv, false ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
+
+    m_log.maxLogTime( target );
+
+    log<text_log>( "set log file interval to " + std::to_string( target ) + " minutes" );
+
+    updateIfChanged( m_indiP_maxLogTime, "current", target, INDI_IDLE );
+
     return 0;
 }
 

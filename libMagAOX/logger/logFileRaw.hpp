@@ -6,6 +6,7 @@
 #ifndef logger_logFileRaw_hpp
 #define logger_logFileRaw_hpp
 
+#include <atomic>
 #include <iostream>
 
 #include <mx/ioutils/fileUtils.hpp>
@@ -23,8 +24,20 @@ namespace logger
 /// A class to manage raw binary log files
 /** Manages a binary file containing MagAO-X logs.
  *
- * The log entries are written as a binary stream of a configurable
- * maximum size.  If this size will be exceed by the next entry, then a new file is created.
+ * A new file is created when any of the following are true:
+ * - the next entry would cause the file to exceed a configurable maximum size, \ref m_maxLogSize
+ * - the next entry falls in a different wall-clock interval than the current file, \ref m_maxLogTime
+ * - a rotation has been requested with \ref requestRotation
+ *
+ * Time-based rotation is aligned to the wall clock: the timeline is divided into consecutive intervals of
+ * \ref m_maxLogTime minutes measured from the Unix epoch, and a new file begins when an entry falls in a
+ * different interval than the one the open file began in.
+ *
+ * Rotation is evaluated lazily when an entry is actually written, so an idle app never creates an
+ * empty file. A gap in the file timestamps therefore indicates a gap in the logged data.
+ *
+ * The size limit acts as a backstop and it can also trigger a new file for a verbose app, even if 
+ * the time limit has not been reached.
  *
  * Filenames have a standard form of: `[path]/[name]/[name]_YYYYMMDDHHMMSSNNNNNNNNN.[ext]` where fields in [] are
  * configurable.
@@ -45,6 +58,9 @@ class logFileRaw
     std::string m_logExt{ MAGAOX_default_logExt }; ///< The extension for the log files.
 
     size_t m_maxLogSize{ MAGAOX_default_max_logSize }; ///< The maximum file size in bytes. Default is 10 MB.
+
+    /// Atomic because it can be changed at runtime from an INDI callback, while the log thread is reading it.
+    std::atomic<unsigned> m_maxLogTime{ MAGAOX_default_maxLogTime }; ///< The maximum time span of a file in minutes. Default is 1440 (24 hours). 0 disables time-based rotation.
     ///@}
 
     /** \name Internal State
@@ -54,6 +70,11 @@ class logFileRaw
     FILE *m_fout{ 0 }; ///< The file pointer
 
     size_t m_currFileSize{ 0 }; ///< The current file size.
+
+    uint64_t m_currFileStartSec{ 0 }; ///< The timestamp in seconds of the first entry in the current file.
+
+    /// This is atomic because it is set from an INDI callback thread, while the log thread is reading it.
+    std::atomic<bool> m_rotateRequested{ false }; ///< Flag indicating that a new file has been requested at runtime.
 
     ///@}
 
@@ -71,8 +92,8 @@ class logFileRaw
     /// Set the path.
     /**
      *
-     * \returns 0 on success
-     * \returns -1 on error
+     * \returns mx::error_t::noerror on success
+     * \returns an error code on error
      */
     mx::error_t logPath( const std::string &newPath /**< [in] the new value of _path */ );
 
@@ -85,8 +106,8 @@ class logFileRaw
     /// Set the log name
     /**
      *
-     * \returns 0 on success
-     * \returns -1 on error
+     * \returns mx::error_t::noerror on success
+     * \returns an error code on error
      */
     mx::error_t logName( const std::string &newName /**< [in] the new value of m_logName */ );
 
@@ -99,8 +120,8 @@ class logFileRaw
     /// Set the log extension
     /**
      *
-     * \returns 0 on success
-     * \returns -1 on error
+     * \returns mx::error_t::noerror on success
+     * \returns an error code on error
      */
     mx::error_t logExt( const std::string &newExt /**< [in] the new value of m_logExt */ );
 
@@ -113,8 +134,8 @@ class logFileRaw
     /// Set the maximum file size
     /**
      *
-     * \returns 0 on success
-     * \returns -1 on error
+     * \returns mx::error_t::noerror on success
+     * \returns an error code on error
      */
     mx::error_t maxLogSize( size_t newMaxFileSize /**< [in] the new value of _maxLogSize */ );
 
@@ -124,28 +145,49 @@ class logFileRaw
      */
     size_t maxLogSize();
 
+    /// Set the maximum file time span
+    /** A value of 0 disables time-based rotation, leaving only the size limit.
+     *
+     * \returns mx::error_t::noerror
+     */
+    mx::error_t maxLogTime( unsigned newMaxLogTime /**< [in] the new value of m_maxLogTime, in minutes */ );
+
+    /// Get the maximum file time span
+    /**
+     * \returns the current value of m_maxLogTime, in minutes
+     */
+    unsigned maxLogTime();
+
+    /// Request that a new file be created on the next log entry
+    /** This only sets a flag, so is safe to call from any thread.
+      * The new file is created by the next call to \ref writeLog.  If no further entries are written,
+      * no new file is created.
+      */
+    void requestRotation();
+
     /// Write a log entry to the file
-    /** Checks if this write will exceed m_maxLogSize, and if so opens a new file.
+    /** Opens a new file if this write would exceed m_maxLogSize, if this entry falls in a different
+     * wall-clock interval than the current file, or if a rotation has been requested.
      * The new file will have the timestamp of this log entry.
      *
-     * \returns 0 on success
-     * \returns -1 on error
+     * \returns mx::error_t::noerror on success
+     * \returns an error code on error
      */
     mx::error_t writeLog( flatlogs::bufferPtrT &data /**< [in] the log entry to write to disk */ );
 
     /// Flush the stream
     /** Calls `fflush`. See issue #192
      *
-     * \returns 0 on success
-     * \returns -1 on error
+     * \returns mx::error_t::noerror on success
+     * \returns an error code on error
      */
     mx::error_t flush();
 
     /// Close the file pointer
     /** Sets \ref m_fout to nullptr after calling fclose regardless of error.
      *
-     * \returns 0 on success
-     * \returns -1 on error
+     * \returns mx::error_t::noerror on success
+     * \returns an error code on error
      */
     mx::error_t close();
 
@@ -155,8 +197,8 @@ class logFileRaw
      * [path]/[name]/YYYY_MM_DD/[name]_YYYYMMDDHHMMSSNNNNNNNNN.[ext]
      *
      *
-     * \returns 0 on success
-     * \returns -1 on error
+     * \returns mx::error_t::noerror on success
+     * \returns an error code on error
      */
     mx::error_t createFile( flatlogs::timespecX &ts /**< [in] A MagAOX timespec, used to set the timestamp */ );
 };
@@ -273,15 +315,44 @@ size_t logFileRaw<verboseT>::maxLogSize()
 }
 
 template <class verboseT>
+mx::error_t logFileRaw<verboseT>::maxLogTime( unsigned newMaxLogTime )
+{
+    m_maxLogTime = newMaxLogTime;
+
+    return mx::error_t::noerror;
+}
+
+template <class verboseT>
+unsigned logFileRaw<verboseT>::maxLogTime()
+{
+    return m_maxLogTime;
+}
+
+template <class verboseT>
+void logFileRaw<verboseT>::requestRotation()
+{
+    m_rotateRequested = true;
+}
+
+template <class verboseT>
 mx::error_t logFileRaw<verboseT>::writeLog( flatlogs::bufferPtrT &data )
 {
     size_t N = flatlogs::logHeader::totalSize( data );
 
-    // Check if we need a new file
-    if( m_currFileSize + N > m_maxLogSize || m_fout == 0 )
-    {
-        flatlogs::timespecX ts = flatlogs::logHeader::timespec( data );
+    flatlogs::timespecX ts = flatlogs::logHeader::timespec( data );
 
+    bool rotateNow = m_rotateRequested.exchange( false );
+
+    uint64_t period = m_maxLogTime;
+    period *= 60; // minutes to seconds
+
+    // Recompute wall-clock interval for both the new entry and the open file
+    bool newInterval =
+        ( period != 0 && static_cast<uint64_t>( ts.time_s ) / period != m_currFileStartSec / period );
+
+    // Check if we need a new file
+    if( m_fout == 0 || rotateNow || newInterval || m_currFileSize + N > m_maxLogSize )
+    {
         mx_error_check( createFile( ts ) );
     }
 
@@ -392,6 +463,7 @@ mx::error_t logFileRaw<verboseT>::createFile( flatlogs::timespecX &ts )
 
     // Reset counters.
     m_currFileSize = 0;
+    m_currFileStartSec = ts.time_s;
 
     return mx::error_t::noerror;
 }

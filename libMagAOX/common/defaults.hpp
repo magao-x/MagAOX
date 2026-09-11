@@ -40,6 +40,18 @@
    #define MAGAOX_default_max_logSize (10485760)
 #endif
 
+#ifndef MAGAOX_default_maxLogTime
+   /// The default maximum log file time
+   /** Defines the default maximum time span covered by a single log file.  Default: 1440 minutes (24 hours).
+     *
+     * File boundaries are aligned to the wall clock, not the app's start time.
+     * A value of 0 disables time-based rotation, leaving \ref MAGAOX_default_max_logSize as the only limit.
+     *
+     * Units: minutes
+     */
+   #define MAGAOX_default_maxLogTime (1440)
+#endif
+
 #ifndef MAGAOX_default_loopPause
    /// The default application loopPause
    /** Defines default value of how long the event loop in execute() pauses. Default is 1 sec.
