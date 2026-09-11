@@ -1,5 +1,6 @@
 
 ../libMagAOX/app/tests/indiUtils_test
+../libMagAOX/app/tests/indiDriver_test
 ../libMagAOX/app/tests/MagAOXApp_test
 ../libMagAOX/app/tests/MagAOXAppExecute_test
 ../libMagAOX/app/tests/stateCodes_test
@@ -7,7 +8,15 @@
 ../libMagAOX/app/dev/tests/outletController_test
 ../libMagAOX/app/dev/tests/telemeter_test
 ../libMagAOX/app/dev/tests/dm_test
+../libMagAOX/app/dev/tests/dmPokeWFS_test
 ../libMagAOX/app/dev/tests/dev_test
+../libMagAOX/app/dev/tests/ioDevice_test
+../libMagAOX/app/dev/tests/dssShutter_test
+../libMagAOX/app/dev/tests/shmimMonitor_test
+../libMagAOX/app/dev/tests/edtCamera_test
+../libMagAOX/app/dev/tests/frameGrabber_test
+../libMagAOX/app/dev/tests/stdMotionStage_test
+../libMagAOX/app/dev/tests/stdCamera_test
 
 ../libMagAOX/file/tests/fileTimes_test
 ../libMagAOX/file/tests/stdFileName_test
@@ -15,9 +24,11 @@
 
 ../libMagAOX/logger/tests/logFileRaw_test
 ../libMagAOX/logger/tests/logFileRaw_fileTime_error_test
+../libMagAOX/logger/tests/logManager_test
 ../libMagAOX/logger/tests/logMap_test
 ../libMagAOX/logger/tests/logMeta_test
 ../libMagAOX/logger/tests/logTypes_Accessor_test
+../libMagAOX/logger/tests/logTypes_test
 
 ../libMagAOX/sys/tests/thSetuid_test
 
@@ -106,15 +117,30 @@
 ../flatlogs/tests/flatlogcodes_test
 
 ../INDI/tests/INDI_test
+../INDI/tests/IndiElement_test
+../INDI/tests/IndiMessage_test
+../INDI/tests/IndiProperty_test
+../INDI/tests/TimeStamp_test
+../INDI/tests/Thread_test
+../INDI/tests/SystemSocket_test
+../INDI/tests/IndiXmlParser_test
+../INDI/tests/IndiConnection_test
+../INDI/tests/IndiDriverClient_test
 
 
 ../libMagAOX/common/tests/common_test
+../libMagAOX/common/tests/common_exceptions_test
+../libMagAOX/ImageStreamIO/tests/pixaccess_test
 ../libMagAOX/ImageStreamIO/tests/ImageStreamIO_test
 ../libMagAOX/modbus/tests/modbus_test
+../libMagAOX/modbus/tests/modbus_exception_test
 ../libMagAOX/sys/tests/runCommand_test
 ../libMagAOX/sys/tests/thSetuid_test
-../libMagAOX/tty/tests/tty_test
-../libMagAOX/tty/tests/ttyIOUtils_test
+../libMagAOX/tty/tests/ttyErrors_test
+../libMagAOX/tty/tests/usbDevice_test
+../libMagAOX/tty/tests/netSerial_test
+../libMagAOX/tty/tests/telnetConn_test
+../libMagAOX/tty/tests/ttyUSB_test
 
 ../utils/logsurgeon/tests/logsurgeon_config_test
 

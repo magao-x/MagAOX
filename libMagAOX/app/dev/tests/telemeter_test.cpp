@@ -34,7 +34,7 @@ TEST_CASE( "Test telemeter Configuration", "[dev::telemeter]" )
 
         mx::app::appConfigurator config;
 
-        telemeter_tests::telemeterTest pdt( "xx", false );
+        telemeter_tests::telemeterTest pdt;
 
         int rv;
         rv = pdt.setupConfig( config );
@@ -61,7 +61,7 @@ TEST_CASE( "Test telemeter Configuration", "[dev::telemeter]" )
 
         mx::app::appConfigurator config;
 
-        telemeter_tests::telemeterTest pdt( "xx", false );
+        telemeter_tests::telemeterTest pdt;
 
         int rv;
         rv = pdt.setupConfig( config );
@@ -96,7 +96,7 @@ TEST_CASE( "Test telemeter app logic", "[dev::telemeter]" )
 
         mx::app::appConfigurator config;
 
-        telemeter_tests::telemeterTest pdt( "xx", false );
+        telemeter_tests::telemeterTest pdt;
 
         int rv;
         rv = pdt.setupConfig( config );
@@ -126,7 +126,7 @@ TEST_CASE( "Test telemeter app logic", "[dev::telemeter]" )
 
         mx::app::appConfigurator config;
 
-        telemeter_tests::telemeterTest pdt( "xx", false );
+        telemeter_tests::telemeterTest pdt;
 
         int rv;
         rv = pdt.setupConfig( config );
@@ -175,7 +175,7 @@ TEST_CASE( "Test telemeter telem-logger fails to start", "[dev::telemeter]" )
 
     mx::app::appConfigurator config;
 
-    telemeter_tests::XWCTEST_TELEMETER_LOGSTART_ns::telemeterTest pdt( "xx", false );
+    telemeter_tests::XWCTEST_TELEMETER_LOGSTART_ns::telemeterTest pdt;
 
     int rv;
     rv = pdt.setupConfig( config );

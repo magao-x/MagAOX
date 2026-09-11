@@ -41,6 +41,10 @@
 #include "indiMacros.hpp"
 #include "indiUtils.hpp"
 
+// Test-only fault hooks. Every XWCTEST_IF_ macro expands to an empty statement unless
+// a test defines the matching XWCTEST_ name before including this header.
+#include "tests/testMacros.hpp"
+
 using namespace mx::app;
 
 using namespace MagAOX::logger;
@@ -1732,10 +1736,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
         return -1;
     }
 
-    // clang-format off
-    #ifdef XWCTEST_MAGAOXAPP_EXEC_WRONG_USER
-    logstat.st_uid = geteuid()+1; // LCOV_EXCL_LINE
-    #endif // clang-format on
+    // Test hook. Pretends the log directory is owned by another user.
+    XWCTEST_IF_MAGAOXAPP_EXEC_WRONG_USER( logstat.st_uid = geteuid()+1 );
 
     if( logstat.st_uid != geteuid() )
     {
@@ -1746,9 +1748,12 @@ int MagAOXApp<_useINDI>::execute() // virtual
 
 #endif // clang-format on
 
+    // Test hook. Counts passes through the main loop so the hook inside it can end the run.
+    // This is the one hook kept as a raw #ifdef. The XWCTEST_IF_ macro runs its statement
+    // in its own block, which would hide this declaration from the hooks inside the loop.
     // clang-format off
     #ifdef XWCTEST_MAGAOXAPP_EXEC_NORM
-    int testTimesThrough = 0; // LCOV_EXCL_LINE
+    int testTimesThrough = 0;
     #endif // clang-format on
 
     //----------------------------------------//
@@ -1770,10 +1775,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
     /* ***************************** */
     m_log.logThreadStart(); // no return type
 
-    // clang-format off
-    #ifdef XWCTEST_MAGAOXAPP_EXEC_LOG_START
-    m_log.logShutdown(true); // LCOV_EXCL_LINE
-    #endif // clang-format on
+    // Test hook. Stops the log thread right after it starts so the check below fails.
+    XWCTEST_IF_MAGAOXAPP_EXEC_LOG_START( m_log.logShutdown(true) );
 
     // Give up to 2 secs to make sure log thread has time to get started and try to open a file.
     int w = 0;
@@ -1800,6 +1803,15 @@ int MagAOXApp<_useINDI>::execute() // virtual
 
         return -1;
     }
+
+    // Test hook. Shuts the log thread down now and waits up to 2 s until it has really
+    // stopped, so the log thread check inside the main loop below fails for real.
+    XWCTEST_IF_MAGAOXAPP_EXEC_LOG_DEATH( m_log.logShutdown( true ); int wd = 0;
+                                         while( m_log.logThreadRunning() == true && wd < 20 )
+                                         {
+                                             std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+                                             ++wd;
+                                         } );
 
     /* ***************************** */
     /*       signal handling         */
@@ -1896,10 +1908,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
                 m_shutdown = 1;
             }
 
-            // clang-format off
-            #ifdef XWCTEST_MAGAOXAPP_EXEC_NORM
-            m_powerState = 0; // LCOV_EXCL_LINE
-            #endif // clang-format on
+            // Test hook. Sets the power state so the wait above ends.
+            XWCTEST_IF_MAGAOXAPP_EXEC_NORM( m_powerState = 0 );
         }
 
         if( m_powerState > 0 )
@@ -1929,13 +1939,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
      */
     while( m_shutdown == 0 )
     {
-        // clang-format off
-        #ifdef XWCTEST_MAGAOXAPP_EXEC_NORM
-             if(testTimesThrough > 1) // LCOV_EXCL_LINE
-             {                        // LCOV_EXCL_LINE
-                m_shutdown = 1;       // LCOV_EXCL_LINE
-             }                        // LCOV_EXCL_LINE
-        #endif // clang-format on
+        // Test hook. Ends the loop after three passes.
+        XWCTEST_IF_MAGAOXAPP_EXEC_NORM( if( testTimesThrough > 2 ) { m_shutdown = 1; } );
 
         // Step 0: check if log thread is still running
         if( m_log.logThreadRunning() == false )
@@ -1996,10 +2001,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
                 continue;
             }
 
-            // clang-format off
-            #ifdef XWCTEST_MAGAOXAPP_EXEC_NORM
-                m_powerState = 1; // LCOV_EXCL_LINE
-            #endif // clang-format on
+            // Test hook. Turns the power state on so the next pass runs appLogic().
+            XWCTEST_IF_MAGAOXAPP_EXEC_NORM( m_powerState = 1 );
         }
 
         /** \todo Need a heartbeat update here.
@@ -2024,10 +2027,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
             std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>( m_loopPause ) );
         }
 
-        // clang-format off
-        #ifdef XWCTEST_MAGAOXAPP_EXEC_NORM
-             ++testTimesThrough; // LCOV_EXCL_LINE
-        #endif // clang-format on
+        // Test hook. Counts loop passes for the hook at the top of the loop.
+        XWCTEST_IF_MAGAOXAPP_EXEC_NORM( ++testTimesThrough );
     }
 
     if( appShutdown() < 0 )
@@ -2140,11 +2141,10 @@ void MagAOXApp<_useINDI>::configLog( const std::string &name,
 template <bool _useINDI>
 int MagAOXApp<_useINDI>::setSigTermHandler()
 {
-    // clang-format off
-    #ifdef XWCTEST_MAGAOXAPP_SIGTERMH_ERR
-        return -1;
-    #endif
+    // Test hook. Pretends the handler could not be installed.
+    XWCTEST_IF_MAGAOXAPP_SIGTERMH_ERR( return -1 );
 
+    // clang-format off
     #ifdef XWCTEST_MAGAOXAPP_SIGTERMH_SIGTERM
         #undef SIGTERM
         #define SIGTERM SIGKILL
@@ -2381,12 +2381,8 @@ int MagAOXApp<_useINDI>::lockPID()
                 configPos = pidCmdLine.find( m_configName );
             }
 
-            // clang-format off
-            #ifdef XWCTEST_MAGAOXAPP_PID_LOCKED
-            invokedPos = 0; // LCOV_EXCL_LINE
-            configPos = 0; // LCOV_EXCL_LINE
-            #endif
-            // clang-format on
+            // Test hook. Pretends the pid file belongs to a running copy of this app.
+            XWCTEST_IF_MAGAOXAPP_PID_LOCKED( (invokedPos = 0, configPos = 0) );
 
             // Check if PID is already locked by this program+config combo:
             if( invokedPos != std::string::npos && configPos != std::string::npos )
@@ -2408,11 +2404,8 @@ int MagAOXApp<_useINDI>::lockPID()
     std::ofstream pidOut;
     pidOut.open( pidFileName );
 
-    // clang-format off
-    #ifdef XWCTEST_MAGAOXAPP_PID_WRITE_FAIL
-    pidOut.close(); // LCOV_EXCL_LINE
-    #endif
-    // clang-format on
+    // Test hook. Closes the pid file so the write below fails.
+    XWCTEST_IF_MAGAOXAPP_PID_WRITE_FAIL( pidOut.close() );
 
     if( !( pidOut << m_pid ) )
     {
@@ -2427,10 +2420,8 @@ int MagAOXApp<_useINDI>::lockPID()
 template <bool _useINDI>
 int MagAOXApp<_useINDI>::unlockPID()
 {
-    // clang-format off
-    #ifdef XWCTEST_MAGAOXAPP_PID_UNLOCK_ERR
-        return -1; // LCOV_EXCL_LINE
-    #endif //clang-format on
+    // Test hook. Pretends the pid file could not be removed.
+    XWCTEST_IF_MAGAOXAPP_PID_UNLOCK_ERR( return -1 );
 
     { // scope for elPriv
 
@@ -2512,12 +2503,16 @@ int MagAOXApp<_useINDI>::threadStart( std::thread &thrd,
             rv = pthread_setschedparam( thrd.native_handle(), SCHED_OTHER, &sp );
     }
 
-    if( rv < 0 )
+    // Bug fix. pthread_setschedparam() returns 0 on success or a positive errno value
+    // on failure. It never returns -1. A real EPERM failure returned 1, so the old check
+    // for rv < 0 could never fire and the failure was never logged. The log now reports
+    // rv, which holds the real error code.
+    if( rv != 0 )
     {
         log<software_error>(
             { __FILE__,
               __LINE__,
-              errno,
+              rv,
               "Setting " + thrdName + " thread scheduler priority to " + std::to_string( thrdPrio ) + " failed." } );
     }
     else

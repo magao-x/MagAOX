@@ -77,6 +77,9 @@ struct flatbuffer_log
       bool ok = parser.Deserialize(binarySchema, binarySchemaLength);
       if(!ok) {
          std::cerr << __FILE__ << ":" << __LINE__ << " Failed to deserialize binary schema\n";
+         // Calling GenText with a parser that failed to deserialize is undefined behavior and crashed.
+         // The function now returns an empty JSON object instead.
+         return "{}";
       }
       std::string output;
       flatbuffers::GenText(parser, msgBuffer, &output);

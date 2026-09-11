@@ -25,7 +25,9 @@ namespace logger
 struct telem_sparkleclock : public flatbuffer_log
 {
    ///The event code
-   static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_DMSPECK;
+   // This was TELEM_DMSPECK before. That copy and paste error tagged every sparkle clock log entry
+   // with the dmspeck event code. Logs recorded before this fix still carry the old code.
+   static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_SPARKLECLOCK;
 
    ///The default level
    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
@@ -94,10 +96,15 @@ struct telem_sparkleclock : public flatbuffer_log
       }
 
       msg += "seps: ";
-      for(flatbuffers::Vector<float>::const_iterator it = fbs->separations()->begin(); it != fbs->separations()->end(); ++it)
+      // separations is not a required field, so a message can be serialized without it.
+      // This null check prevents a crash from iterating a separations vector that is missing.
+      if(fbs->separations() != nullptr)
       {
-         msg+= std::to_string(*it);
-         msg+= " ";
+         for(flatbuffers::Vector<float>::const_iterator it = fbs->separations()->begin(); it != fbs->separations()->end(); ++it)
+         {
+            msg+= std::to_string(*it);
+            msg+= " ";
+         }
       }
       msg += "angle offset: ";
       msg += std::to_string(fbs->angleOffset());
@@ -132,9 +139,15 @@ struct telem_sparkleclock : public flatbuffer_log
 
       auto fbs = GetTelem_sparkleclock_fb(msgBuffer);
 
-      for(flatbuffers::Vector<float>::const_iterator it = fbs->separations()->begin(); it != fbs->separations()->end(); ++it)
+      // Bug fix. separations is not a required field, so a message can be serialized
+      // without it. The same null check as in formatMessage() above prevents a crash.
+      // An empty vector is returned when the field is missing.
+      if(fbs->separations() != nullptr)
       {
-         v.push_back(*it);
+         for(flatbuffers::Vector<float>::const_iterator it = fbs->separations()->begin(); it != fbs->separations()->end(); ++it)
+         {
+            v.push_back(*it);
+         }
       }
 
       return v;

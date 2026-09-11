@@ -1,8 +1,20 @@
 #!/bin/env python3
 
 '''
-Generate Catch2 tests from template.
-See README.md for more details.
+Generate one Catch2 test file per flatlog type from catch2TestTemplate.jinja2.
+
+Input:  every ../types/<log_type>.hpp and its schema ../types/schemas/<log_type>.fbs.
+Output: ./generated_tests/<log_type>_generated_tests.cpp, one per type. The folder is
+        emptied first and is ignored by git.
+Run:    python3 ./generateTemplatedCatch2Tests.py [-s <seed> | -i]   (Python 3.12 or newer)
+        or `make generated_tests` in this directory, which uses $(PYTHON) from Make/python.mk. The Makefile here also runs it on
+        demand when it builds catch2_tests, which #includes every generated file into one
+        binary. tests/testMagAOX.bash runs that binary after the tests in tests/tests.list.
+
+The reference for what gets generated, the options, and the caveats about how field names
+in the .hpp and .fbs must line up is flatlogs.md in this directory. The XWCTEST fault
+injection macros used by the hand written tests in this directory are a separate
+mechanism, documented in tests/genTestMacros.md.
 '''
 
 import os
@@ -15,6 +27,40 @@ import string
 import random
 import getopt
 
+
+# Maps each logMeta::valTypes enumerator name to the C++ type that logMeta.cpp casts
+# the accessor function pointer of a logMetaDetail to before calling it. The generated
+# tests use the same cast, so the two must agree.
+VALTYPE_TO_CPP = {
+    "String": "std::string",
+    "Bool": "bool",
+    "Char": "char",
+    "UChar": "unsigned char",
+    "Short": "short",
+    "UShort": "unsigned short",
+    "Int": "int",
+    "UInt": "unsigned int",
+    "Long": "long",
+    "ULong": "unsigned long",
+    "LongLong": "long long",
+    "ULongLong": "unsigned long long",
+    "Float": "float",
+    "Double": "double",
+    "Vector_String": "std::vector<std::string>",
+    "Vector_Bool": "std::vector<bool>",
+    "Vector_Char": "std::vector<char>",
+    "Vector_UChar": "std::vector<unsigned char>",
+    "Vector_Short": "std::vector<short>",
+    "Vector_UShort": "std::vector<unsigned short>",
+    "Vector_Int": "std::vector<int>",
+    "Vector_UInt": "std::vector<unsigned int>",
+    "Vector_Long": "std::vector<long>",
+    "Vector_ULong": "std::vector<unsigned long>",
+    "Vector_LongLong": "std::vector<long long>",
+    "Vector_ULongLong": "std::vector<unsigned long long>",
+    "Vector_Float": "std::vector<float>",
+    "Vector_Double": "std::vector<double>",
+}
 
 gNextVals = {
     "string" : 0,
@@ -178,6 +224,131 @@ def isValidLogType(lines : list) -> bool:
 
     return (hasEventCode and hasDefaultLevel)
 
+'''
+Parse the getAccessor(const std::string &member) implementation of a log type header.
+For each recognized member it recovers the member name, the C++ return type, and the
+accessor function name that getAccessor() registers. getAccessor() takes the address of
+every per-field accessor function regardless of which branch runs at runtime. So the type
+header itself is the source of truth for which accessors exist and how logMeta.cpp would
+cast and invoke each one. This avoids deriving a second type mapping from the field types
+directly, which could disagree with the first.
+'''
+def getAccessorFieldInfo(headerText : str) -> list:
+    results = []
+    branchPattern = re.compile(
+        r'member\s*==\s*"([A-Za-z0-9_]+)"\s*\)\s*\{?\s*return\s+logMetaDetail\(\s*\{(.*?)\}\s*\)\s*;',
+        re.DOTALL
+    )
+    for branchMatch in branchPattern.finditer(headerText):
+        member = branchMatch.group(1)
+        body = branchMatch.group(2)
+
+        valTypeMatch = re.search(r'logMeta::valTypes::(\w+)', body)
+        # The '&' before the function name is usually present. A bare function name
+        # already decays to its address, so it is sometimes omitted, for example in the
+        # "water" accessor of ocam_temps. Both forms are tolerated.
+        funcMatch = re.search(r'reinterpret_cast\s*<\s*void\s*\*\s*>\s*\(\s*&?\s*(\w+)\s*\)', body)
+        if valTypeMatch is None or funcMatch is None:
+            continue
+
+        cppType = VALTYPE_TO_CPP.get(valTypeMatch.group(1))
+        if cppType is None:
+            continue
+
+        results.append({"member": member, "cppType": cppType, "funcName": funcMatch.group(1)})
+
+    return results
+
+# Maps each fixed-width integer typedef to the plain C++ type it resolves to on this
+# platform. This lets a vector element type taken from a field declaration compare equal
+# to the element type in VALTYPE_TO_CPP.
+TYPEDEF_ALIASES = {
+    "uint8_t": "unsigned char",
+    "int8_t": "char",
+    "uint16_t": "unsigned short",
+    "int16_t": "short",
+    "uint32_t": "unsigned int",
+    "int32_t": "int",
+    "uint64_t": "unsigned long",
+    "int64_t": "long",
+}
+
+# Strips whitespace and replaces a fixed-width typedef with its plain type.
+def normalizeCppType(t : str) -> str:
+    t = t.strip()
+    return TYPEDEF_ALIASES.get(t, t)
+
+'''
+Some accessor functions pass through the raw flatbuffer value of a field. Those are safe
+to compare against the same raw value collected in the constructor. Others compute a
+derived or formatted value with a different C++ type. For example an integer state field
+may have a string formatting accessor, and a vector<uint8_t> field may have a vector<bool>
+accessor. Comparing those against the raw field value would not compile or would not be
+meaningful. This function decides, for one accessor and field pairing, whether an exact
+value REQUIRE is safe to emit. When it is not safe, the generated test still invokes the
+accessor to cover its body, without asserting a specific return value.
+'''
+def valuesComparable(accessorCppType : str, field : dict) -> bool:
+    fieldType = field["type"]
+
+    if accessorCppType == "std::string":
+        return "string" in fieldType
+
+    if accessorCppType.startswith("std::vector<"):
+        if "std::vector" not in fieldType:
+            return False
+        elemType = normalizeCppType(accessorCppType[len("std::vector<"):-1])
+        vecType = normalizeCppType(field.get("vectorType", ""))
+        return elemType == vecType
+
+    # A Bool-valued accessor wrapping a wider integral flag field is not necessarily a
+    # plain truthy pass-through. Some types instead check whether the field equals 1, as
+    # a tri-state convention where 0 and 1 are values and anything else means unset. Both
+    # patterns exist in this codebase. They cannot be told apart without executing the
+    # accessor. So equality is only asserted here when the field is itself already a real
+    # bool, which is an exact and unambiguous match. Otherwise the accessor is still
+    # invoked for coverage without asserting its value.
+    if accessorCppType == "bool":
+        return fieldType == "bool"
+
+    # This is a plain scalar such as char, int, or float. Implicit conversions make these
+    # safe to compare against any other scalar field, but not against string or vector
+    # fields.
+    if "string" in fieldType or "vector" in fieldType:
+        return False
+    return True
+
+'''
+For each generated messageT variant, which is each entry in messageTypes, build the list
+of accessor checks to emit. Every accessor that getAccessor() registers gets invoked, so
+its body is exercised for coverage regardless of naming. The exact value REQUIRE is only
+emitted when the accessor function name matches one of the constructor field names of
+this variant and the types are comparable. For example the "tempStatus" accessor of
+telem_stdcam has no "tempStatus" constructor field. The constructor names it "status"
+and routes it through a differently named meta keyword, so there is no raw value here to
+compare against. The "pokes" constructor variant of telem_pokecenter never sets poke_x or
+poke_y as named constructor fields either. In both cases the accessor is still called.
+'''
+def filterAccessorChecks(accessorFieldInfo : list, messageTypes : list) -> list:
+    result = []
+    for msgType in messageTypes:
+        fieldByName = { f["name"]: f for f in msgType }
+        seen = set()
+        checks = []
+        for accessor in accessorFieldInfo:
+            if accessor["funcName"] in seen:
+                continue
+            seen.add(accessor["funcName"])
+
+            accessor = dict(accessor)
+            field = fieldByName.get(accessor["funcName"])
+            accessor["compareValue"] = ( field is not None
+                                          and "char *" not in field["type"]
+                                          and valuesComparable(accessor["cppType"], field) )
+            checks.append(accessor)
+        result.append(checks)
+    return result
+
 def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
     returnInfo = dict()
     headerFile = open(hppFname,"r")
@@ -238,6 +409,11 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
                 returnInfo["schemaTableName"] = f"{line[startIndex:endIndex]}_fb"
 
     returnInfo["messageTypes"] = getMessageFieldInfo(messageStructIdxs, headerLines, schemaFieldInfo)
+
+    # Collect the accessors this type registers, then decide per messageT variant which
+    # of them can be checked against a raw field value in the generated test.
+    accessorFieldInfo = getAccessorFieldInfo("".join(headerLines))
+    returnInfo["accessorChecksPerMsgType"] = filterAccessorChecks(accessorFieldInfo, returnInfo["messageTypes"])
 
     return returnInfo
 
@@ -614,6 +790,18 @@ def makeInheritedTypeInfoDict(typesFolderPath : str, baseName : str, logName : s
     msgFieldInfo = getMessageFieldInfo(messageStructIdxs, baseHLines, schemaFieldInfo)
 
     returnInfo["messageTypes"] = [[]] if "empty_log" in baseName else msgFieldInfo
+
+    # getAccessor() is not picked up by the base messageT parsing above. If the own header
+    # of logName overrides getAccessor(), that is what MagAOX::logger::<logName>::getAccessor
+    # actually resolves to. Otherwise it resolves to the version in the base type.
+    ownFilePath = os.path.join(typesFolderPath, f"{logName}.hpp")
+    accessorFieldInfo = []
+    if os.path.isfile(ownFilePath):
+        with open(ownFilePath, "r") as ownFile:
+            accessorFieldInfo = getAccessorFieldInfo(ownFile.read())
+    if len(accessorFieldInfo) == 0:
+        accessorFieldInfo = getAccessorFieldInfo("".join(baseHLines))
+    returnInfo["accessorChecksPerMsgType"] = filterAccessorChecks(accessorFieldInfo, returnInfo["messageTypes"])
 
     return returnInfo
 

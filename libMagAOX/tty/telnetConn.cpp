@@ -398,8 +398,10 @@ void telnetConn::event_handler( telnet_t *telnet,
          //First we remove the various control chars from the front.
          if(ev->data.size == 0) break;
 
+         // Bug fix. The code used to write a terminator at buf[ev->data.size], one byte
+         // past the buffer that libtelnet owns. The string is now built from an explicit
+         // length below, so no terminator is needed.
          char * buf = const_cast<char *>(ev->data.buffer);
-         buf[ev->data.size] = 0;
 
          int nn = 0;
          for(size_t i=0; i<ev->data.size; ++i)
@@ -433,8 +435,10 @@ void telnetConn::event_handler( telnet_t *telnet,
          std::cerr << "dezeroed: " << mm << "\n";
          #endif
 
-         //Now make it a string so we can make use of it.
-         std::string sbuf(buf);
+         // Now make it a string so we can make use of it. The length skips the nn control
+         // characters removed from the front. Embedded zeros were replaced above, so the
+         // result matches what the old terminator based construction produced.
+         std::string sbuf(buf, ev->data.size - nn);
 
          if(sbuf.size() == 0) break;
 

@@ -14,11 +14,23 @@
 #include <flatlogs/flatlogs.hpp>
 
 #include "../file/fileTimes.hpp"
+// Test-only fault hooks. Every XWCTEST_IF_ macro expands to an empty statement unless
+// a test defines the matching XWCTEST_ name before including this header.
+#include "tests/testMacros.hpp"
 
 namespace MagAOX
 {
 namespace logger
 {
+
+// Test-only. A test can define XWCTEST_NAMESPACE and compile this file a second time
+// inside that namespace with one XWCTEST_ fault macro enabled. The faulted copy runs the
+// real error handling code, and its hits count toward these same source lines.
+// Production builds never define XWCTEST_NAMESPACE.
+#ifdef XWCTEST_NAMESPACE
+namespace XWCTEST_NAMESPACE
+{
+#endif
 
 /// A class to manage raw binary log files
 /** Manages a binary file containing MagAO-X logs.
@@ -177,6 +189,10 @@ mx::error_t logFileRaw<verboseT>::logPath( const std::string &newPath )
 {
     try
     {
+        // Test hooks. Each throw runs only when a test enables it, so the handlers below run for real.
+        XWCTEST_IF_LOGFILERAW_LOGPATH_BAD_ALLOC( throw std::bad_alloc() );
+        XWCTEST_IF_LOGFILERAW_LOGPATH_EXCEPTION( throw std::exception() );
+
         m_logPath = newPath;
     }
     catch( const std::bad_alloc &e )
@@ -202,6 +218,9 @@ mx::error_t logFileRaw<verboseT>::logName( const std::string &newName )
 {
     try
     {
+        XWCTEST_IF_LOGFILERAW_LOGNAME_BAD_ALLOC( throw std::bad_alloc() );
+        XWCTEST_IF_LOGFILERAW_LOGNAME_EXCEPTION( throw std::exception() );
+
         m_logName = newName;
     }
     catch( const std::bad_alloc &e )
@@ -227,6 +246,9 @@ mx::error_t logFileRaw<verboseT>::logExt( const std::string &newExt )
 {
     try
     {
+        XWCTEST_IF_LOGFILERAW_LOGEXT_BAD_ALLOC( throw std::bad_alloc() );
+        XWCTEST_IF_LOGFILERAW_LOGEXT_EXCEPTION( throw std::exception() );
+
         m_logExt = newExt;
     }
     catch( const std::bad_alloc &e )
@@ -287,6 +309,9 @@ mx::error_t logFileRaw<verboseT>::writeLog( flatlogs::bufferPtrT &data )
 
     size_t nwr = fwrite( data.get(), sizeof( char ), N, m_fout );
 
+    // Test hook. Pretends fwrite wrote nothing.
+    XWCTEST_IF_LOGFILERAW_WRITELOG_FWRITE_FAIL( nwr = 0 );
+
     if( nwr != N * sizeof( char ) )
     {
         return mx::error_report<verboseT>( mx::errno2error_t( errno ), "Error from fwrite" );
@@ -304,7 +329,13 @@ mx::error_t logFileRaw<verboseT>::flush()
 
     if( m_fout )
     {
-        if( fflush( m_fout ) != 0 )
+        // The return value is kept in a variable so the test hook below can override it.
+        int frv = fflush( m_fout );
+
+        // Test hook. Pretends fflush failed with an I/O error.
+        XWCTEST_IF_LOGFILERAW_FLUSH_FFLUSH_FAIL( ( errno = EIO, frv = -1 ) );
+
+        if( frv != 0 )
         {
             return mx::error_report<verboseT>( mx::errno2error_t( errno ), "Error from fflush" );
         }
@@ -319,7 +350,13 @@ mx::error_t logFileRaw<verboseT>::close()
     {
         errno = 0;
 
-        if( fclose( m_fout ) != 0 )
+        // The return value is kept in a variable so the test hook below can override it.
+        int crv = fclose( m_fout );
+
+        // Test hook. Pretends fclose failed with an I/O error.
+        XWCTEST_IF_LOGFILERAW_CLOSE_FCLOSE_FAIL( ( errno = EIO, crv = -1 ) );
+
+        if( crv != 0 )
         {
             m_fout = nullptr;
 
@@ -341,6 +378,9 @@ mx::error_t logFileRaw<verboseT>::createFile( flatlogs::timespecX &ts )
     try
     {
         mx::error_t errc = file::fileTimeRelPath( fileName, relPath, m_logName, m_logExt, ts.time_s, ts.time_ns );
+
+        // Test hook. Throws so the catch below wraps and rethrows it.
+        XWCTEST_IF_LOGFILERAW_CREATEFILE_EXCEPTION( throw std::bad_alloc() );
 
         if( !!errc )
         {
@@ -369,6 +409,9 @@ mx::error_t logFileRaw<verboseT>::createFile( flatlogs::timespecX &ts )
         return mx::error_report<verboseT>( mx::error_t::eexist, "file " + fullPath + " exists" );
     }
 
+    // Test hook. Pretends the exists check reported a permission error.
+    XWCTEST_IF_LOGFILERAW_CREATEFILE_EXISTS_ERRC( errc = mx::error_t::eacces );
+
     if( !!errc )
     {
         return mx::error_report<verboseT>( errc, "checking directory" );
@@ -385,6 +428,9 @@ mx::error_t logFileRaw<verboseT>::createFile( flatlogs::timespecX &ts )
 
     m_fout = fopen( fullPath.c_str(), "wb" );
 
+    // Test hook. Closes the file that fopen just opened and pretends fopen failed.
+    XWCTEST_IF_LOGFILERAW_CREATEFILE_FOPEN_FAIL( if( m_fout != 0 ) { fclose( m_fout ); } m_fout = 0; errno = EACCES; );
+
     if( m_fout == 0 )
     {
         return mx::error_report<verboseT>( mx::errno2error_t( errno ), "Error from fopen on " + fullPath );
@@ -395,6 +441,10 @@ mx::error_t logFileRaw<verboseT>::createFile( flatlogs::timespecX &ts )
 
     return mx::error_t::noerror;
 }
+
+#ifdef XWCTEST_NAMESPACE
+} // namespace XWCTEST_NAMESPACE
+#endif
 
 extern template class logFileRaw<XWC_DEFAULT_VERBOSITY>;
 

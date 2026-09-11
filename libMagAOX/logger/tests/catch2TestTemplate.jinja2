@@ -1,6 +1,13 @@
+{# Template for one generated_tests/<log_type>_generated_tests.cpp per flatlog type. Rendered by generateTemplatedCatch2Tests.py, which builds the variables from ../types/<log_type>.hpp and its .fbs schema. Text outside Jinja comment blocks goes straight into the generated C++ file. See flatlogs.md in this directory. #}
 #include <assert.h>
+#include <sstream>
 #include "../../../../tests/catch2/catch.hpp"
 #include "../generated/logCodes.hpp"
+{# The generated dispatcher headers below are needed by checkCentralDispatch() and checkAccessors(). #}
+#include "../generated/logVerify.hpp"
+#include "../generated/logCodeValid.hpp"
+#include "../generated/logStdFormat.hpp"
+#include "../generated/logMemberAccessor.hpp"
 #include "../types/{{name}}.hpp"
 {% if hasGeneratedHfile %}
 #include "../types/generated/{{name}}_generated.h"
@@ -15,6 +22,8 @@
 
 {% for msgType in messageTypes %}
 {% set outerLoopI = loop.index0 %}
+{# The accessor checks the generator computed for this messageT variant. See filterAccessorChecks in the generator. #}
+{% set accessorChecks = accessorChecksPerMsgType[outerLoopI] %}
 {% for field in msgType %}
 {% if 'defaultArg' not in field %}
 const {{field.type}} {{nameCamelCase}}{{UPPER_FIRST_CHAR(field.name)}}_{{outerLoopI}} = {{field.testVal}}; // dummy {{field.name}}
@@ -44,6 +53,21 @@ public:
 
   // Flatbuffers verifier success/failure
   bool m_verify{false};
+
+  // Whether the code-generated central dispatchers logVerify, logCodeValid, and
+  // logStdFormat agree with calling this log type directly. This is what exercises the
+  // case for this type in those dispatch switches, one real type at a time through this
+  // same generator.
+  bool m_centralDispatchOk{false};
+
+  // Whether every logMetaDetail accessor this type registers through getAccessor()
+  // reads back the same value obtained directly from the flatbuffer above. That accessor
+  // is the function pointer the telemetry and FITS header system uses to read a field
+  // indirectly. getAccessor() takes the address of each of these functions regardless of
+  // which branch runs at runtime. So calling them here, once per real field and
+  // generated instead of hand enumerated, is what exercises their bodies instead of just
+  // their addresses.
+  bool m_accessorsOk{false};
 
   // flatbuffer data length; used in ::verify
   int L;
@@ -113,6 +137,130 @@ public:
 
     // Run the {{name}} verifier
     m_verify = verify({{classVarName}});
+
+    // Cross-check the central code-generated dispatchers against calling this type
+    // directly, instead of hand enumerating the expected behavior of every event code
+    // here.
+    m_centralDispatchOk = checkCentralDispatch({{classVarName}});
+
+    // Exercise every getAccessor() function pointer this type registers.
+    m_accessorsOk = checkAccessors({{classVarName}});
+  }
+
+  // Invokes each accessor function pointer that getAccessor() registers for this type
+  // against a real serialized buffer. Confirms that each reads back the same value
+  // already retrieved directly from the flatbuffer above.
+  bool checkAccessors(const typename MagAOX::logger::{{name}}::messageT& msg) {
+{% if accessorChecks|length == 0 %}
+    static_cast<void>(msg);
+    return true;
+{% else %}
+    flatlogs::timespecX tsx{0,0};
+    flatlogs::logPrioT prio{flatlogs::logPrio::LOG_DEFAULT};
+
+    flatlogs::bufferPtrT logBuffer;
+    {% if 'software_log' in name %}
+    flatlogs::logHeader::createLog<MagAOX::logger::software_notice>(logBuffer
+                                                             , tsx, msg
+                                                             , prio);
+    {% else %}
+    flatlogs::logHeader::createLog<MagAOX::logger::{{name}}>(logBuffer
+                                                             , tsx, msg
+                                                             , prio);
+    {% endif %}
+    void* msgBuffer = flatlogs::logHeader::messageBuffer(logBuffer);
+
+    bool ok = true;
+    {% for accessor in accessorChecks %}
+    {
+        auto detail = MagAOX::logger::{{name}}::getAccessor("{{accessor.member}}");
+        if (detail.accessor == nullptr)
+        {
+            ok = false;
+        }
+        // Cross-check the central code-generated member accessor dispatcher against
+        // calling this type directly. That dispatcher is a switch over every real event
+        // code, generated into logger/generated/. This avoids hand enumerating every
+        // event code here too.
+        if (MagAOX::logger::logMemberAccessor(MagAOX::logger::{{name}}::eventCode, "{{accessor.member}}").accessor != detail.accessor)
+        {
+            ok = false;
+        }
+    {% if accessor.compareValue %}
+        // Cast the raw field value the same way the return statement of the accessor
+        // implicitly would. For example a narrower accessor truncates and a bool-typed
+        // accessor converts to true or false. So this compares like with like instead of
+        // assuming the raw field is preserved exactly.
+        else if (!(reinterpret_cast<{{accessor.cppType}}(*)(void*)>(detail.accessor)(msgBuffer) == static_cast<{{accessor.cppType}}>(m_{{accessor.funcName}})))
+        {
+            ok = false;
+        }
+    {% else %}
+        else
+        {
+            // The return type does not correspond one to one with the raw field. For
+            // example it may be a formatted string derived from a non-string field, or a
+            // differently typed vector. The accessor is still invoked to exercise its
+            // body, without asserting a specific value.
+            static_cast<void>(reinterpret_cast<{{accessor.cppType}}(*)(void*)>(detail.accessor)(msgBuffer));
+        }
+    {% endif %}
+    }
+    {% endfor %}
+    return ok;
+{% endif %}
+  }
+
+  // Cross-checks logVerify, logCodeValid, and logStdFormat against calling this type
+  // directly. Each is a switch over every real event code, generated into
+  // logger/generated/.
+  bool checkCentralDispatch(const typename MagAOX::logger::{{name}}::messageT& msg) {
+
+    flatlogs::timespecX tsx{0,0};
+    flatlogs::logPrioT prio{flatlogs::logPrio::LOG_DEFAULT};
+
+    flatlogs::bufferPtrT logBuffer;
+    {% if 'software_log' in name %}
+    flatlogs::logHeader::createLog<MagAOX::logger::software_notice>(logBuffer
+                                                             , tsx, msg
+                                                             , prio);
+    {% else %}
+    flatlogs::logHeader::createLog<MagAOX::logger::{{name}}>(logBuffer
+                                                             , tsx, msg
+                                                             , prio);
+    {% endif %}
+
+    bool verifyMatches = ( MagAOX::logger::logVerify(MagAOX::logger::{{name}}::eventCode, logBuffer, L)
+                           == MagAOX::logger::{{name}}::verify(logBuffer, L) );
+
+    bool codeIsValid = MagAOX::logger::logCodeValid(MagAOX::logger::{{name}}::eventCode);
+
+    std::ostringstream oss;
+    MagAOX::logger::logStdFormat(oss, logBuffer);
+
+    // The other three code-generated formatting dispatchers. Each is also a switch over
+    // every real event code. The short form is used by logdump. The min form is used by
+    // the INDI log forwarding in MagAOXApp. The json form is used by the json output of
+    // logdump, and it also initializes the per-type flatbuffer binary schemas from
+    // binarySchemata.inc at run time.
+    MagAOX::logger::logShortStdFormat(oss, "testapp", logBuffer);
+    MagAOX::logger::logMinStdFormat(oss, logBuffer);
+    MagAOX::logger::logJsonFormat(oss, logBuffer);
+
+    // Round-trip the event code of this type through the code to name and name to code
+    // lookup tables. This exercises the per-code branch in both, without hand
+    // enumerating the expected name string here.
+    bool codeNameRoundTrip = ( MagAOX::logger::eventCode(MagAOX::logger::eventCodeName(MagAOX::logger::{{name}}::eventCode))
+                                == MagAOX::logger::{{name}}::eventCode );
+
+    // Cross-check the switch case dispatch of logMemberAccessor for the event code of
+    // this type. This runs unconditionally, even for types with no fields registered
+    // through getAccessor() at all. The per-field checks in checkAccessors() only run
+    // when such fields exist.
+    bool memberAccessorDispatchOk = ( MagAOX::logger::logMemberAccessor(MagAOX::logger::{{name}}::eventCode, "").accessor
+                                       == MagAOX::logger::{{name}}::getAccessor("").accessor );
+
+    return verifyMatches && codeIsValid && !oss.str().empty() && codeNameRoundTrip && memberAccessorDispatchOk;
   }
 
   // Run the flatbuffer Verifier for this log type
@@ -183,6 +331,10 @@ SCENARIO( "Create {{name}} {{outerLoopI}}", "[a log item]")
             {% endif %}
             {% endfor %}
             REQUIRE({{classVarName}}.m_verify);
+            // These two flags are set by checkCentralDispatch() and checkAccessors() in
+            // the constructor above.
+            REQUIRE({{classVarName}}.m_centralDispatchOk);
+            REQUIRE({{classVarName}}.m_accessorsOk);
         }
     }
 }

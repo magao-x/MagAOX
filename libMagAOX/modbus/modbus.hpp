@@ -18,6 +18,13 @@
 
 #define MAX_MSG_LENGTH 260
 
+// These enums have their own include guard. The test build includes this file more than
+// once and undefines only MODBUSPP_MODBUS_H each time, so it can compile a separate modbus
+// class inside each XWCTEST_NAMESPACE. The enums are not inside a namespace, so they must
+// be declared only once.
+#ifndef MODBUSPP_MODBUS_CONSTANTS_H
+#define MODBUSPP_MODBUS_CONSTANTS_H
+
 /// Function Code
 enum
 {
@@ -43,6 +50,16 @@ enum
     EX_GATEWAY_PROBLEMP = 0x0A, // Gateway Path not Available
     EX_GATEWYA_PROBLEMF = 0x0B, // Target Device Failed to Response
 };
+
+#endif // MODBUSPP_MODBUS_CONSTANTS_H
+
+// Test-only. A test can define XWCTEST_NAMESPACE and compile this class a second time
+// inside that namespace with one XWCTEST_ fault macro enabled. Production builds never
+// define XWCTEST_NAMESPACE.
+#ifdef XWCTEST_NAMESPACE
+namespace XWCTEST_NAMESPACE
+{
+#endif
 
 /// Modbus Operator Class
 /**
@@ -91,6 +108,10 @@ class modbus
     void modbus_write_coils( int address, int amount, bool *value );
     void modbus_write_registers( int address, int amount, uint16_t *value );
 };
+
+#ifdef XWCTEST_NAMESPACE
+} // namespace XWCTEST_NAMESPACE
+#endif
 
 #if 0
 //-- leaving in for comments until can be normalized.

@@ -1,0 +1,32 @@
+# XWCTEST_* fault injection names used by the libMagAOX/app production headers.
+# tests/genTestMacros.py reads this file to generate testMacros.hpp.
+# One name per line. Lines starting with '#' and blank lines are ignored.
+# See tests/genTestMacros.md. Regenerate with, from the repo root:
+#   python3 tests/genTestMacros.py --names libMagAOX/app/tests/xwcTestNames.txt --out libMagAOX/app/tests/testMacros.hpp
+#
+# Two kinds of site in MagAOXApp.hpp stay raw #ifdef blocks instead of XWCTEST_IF_ calls.
+#   XWCTEST_MAGAOXAPP_SIGTERMH_SIGTERM, SIGQUIT, and SIGINT redefine standard signal macros,
+#     which a function-like macro cannot do. They are not listed here.
+#   The testTimesThrough declaration for XWCTEST_MAGAOXAPP_EXEC_NORM. The macro's block
+#     scope would hide the declaration from the hooks inside the loop. The name is listed
+#     because its other sites use the macro.
+
+# Used in MagAOXApp.hpp by execute().
+XWCTEST_MAGAOXAPP_EXEC_WRONG_USER
+XWCTEST_MAGAOXAPP_EXEC_LOG_START
+XWCTEST_MAGAOXAPP_EXEC_NORM
+XWCTEST_MAGAOXAPP_EXEC_LOG_DEATH
+
+# Used in MagAOXApp.hpp by setSigTermHandler().
+XWCTEST_MAGAOXAPP_SIGTERMH_ERR
+
+# Used in MagAOXApp.hpp by lockPID() and unlockPID().
+XWCTEST_MAGAOXAPP_PID_LOCKED
+XWCTEST_MAGAOXAPP_PID_WRITE_FAIL
+XWCTEST_MAGAOXAPP_PID_UNLOCK_ERR
+
+# Used in indiDriver.hpp by the constructor and sendNewProperty().
+XWCTEST_INDIDRIVER_CTRL_WRITE_FAIL
+XWCTEST_INDIDRIVER_OUTGOING_NULL
+XWCTEST_INDIDRIVER_SEND_NONSTD_THROW
+XWCTEST_INDIDRIVER_QUIT_AFTER_SEND

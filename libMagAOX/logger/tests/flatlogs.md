@@ -38,8 +38,10 @@ type will be created.
 ## How To Run
 
 ### Pre-requisites
- 1. Python must be installed with version >= 3.9. This is checked by the script.
-  (As of this writing, the generator has been tested with Python 3.12.)
+ 1. Python 3.12 or newer. The script's own check only asks for 3.9, but the script uses
+  nested quotes inside f-strings, which older Pythons reject with a SyntaxError before
+  the check runs. The Makefile takes the interpreter from `Make/python.mk`, so point
+  that at a 3.12 environment if the system `python3` is older.
 
  2. jinja2 must be installed. The script will check for jinja2 and automatically
  install it if not present. It can be installed manually with the following
@@ -191,4 +193,25 @@ well.
   the entropy test, you must specify the scenario:
 
   `./generated_entropy_test_e<E>_n<N> "Scenario: test_e<E>_n<N>"`
+
+---
+
+# How the generators fit into the MagAO-X test run
+
+- `tests/tests.list` and `tests/Makefile` build and run the hand written tests, including
+  the ones in this directory such as `logMap_test`. They do not build the generated tests.
+- `tests/testMagAOX.bash` runs every `tests.list` binary and then runs `make run COVERAGE=1`
+  in this directory. That target regenerates `generated_tests/` if it is missing, builds
+  `catch2_tests` from `catch2_tests.cpp` plus every generated file, runs it, then builds
+  and runs the entropy test with the defaults at the top of the Makefile.
+- `generated_tests/` and `gen_entropy_tests/` are ignored by git. Only the generators and
+  templates are committed.
+- The Makefile takes `$(PYTHON)` from `Make/python.mk`, so a conda environment set for the
+  instrument is used when one is configured. The generator needs Python 3.12 or newer,
+  see the pre-requisites above.
+- `catch2_tests` links `-lflatbuffers` because the generated tests exercise the JSON
+  formatter, and compiles `app/stateCodes.cpp` because state_change formatting calls it.
+- The hand written tests here also use the `XWCTEST_` fault injection macros in
+  `testMacros.hpp`, generated from `xwcTestNames.txt`. That is a separate mechanism from
+  the generators above. See `tests/genTestMacros.md`.
 

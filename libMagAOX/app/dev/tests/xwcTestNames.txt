@@ -1,0 +1,8 @@
+# XWCTEST_* fault injection names used by telemeter.hpp and stdCamera.hpp in libMagAOX/app/dev.
+# tests/genTestMacros.py reads this file to generate testMacros.hpp. One name per line.
+# Lines starting with '#' and blank lines are ignored. See tests/genTestMacros.md.
+# Regenerate with, from the repo root:
+#   python3 tests/genTestMacros.py --names libMagAOX/app/dev/tests/xwcTestNames.txt --out libMagAOX/app/dev/tests/testMacros.hpp
+
+XWCTEST_INDI_CALLBACK_VALIDATION
+XWCTEST_TELEMETER_LOGSTART

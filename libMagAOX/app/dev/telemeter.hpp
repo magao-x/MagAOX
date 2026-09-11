@@ -9,6 +9,10 @@
 #ifndef app_telemeter_hpp
 #define app_telemeter_hpp
 
+// Test-only fault hooks. Every XWCTEST_IF_ macro expands to an empty statement unless
+// a test defines the matching XWCTEST_ name before including this header.
+#include "tests/testMacros.hpp"
+
 namespace MagAOX
 {
 namespace app
@@ -261,11 +265,8 @@ int telemeter<derivedT>::appStartup()
 
     m_tel.logThreadStart();
 
-    // clang-format off
-    #ifdef XWCTEST_TELEMETER_LOGSTART
-    m_tel.logShutdown(true); // LCOV_EXCL_LINE
-    sleep(2); // LCOV_EXCL_LINE
-    #endif // clang-format on
+    // Test hook. Stops the log thread right after it starts so the startup check below fails.
+    XWCTEST_IF_TELEMETER_LOGSTART( (m_tel.logShutdown(true), sleep(2)) );
 
     // Give up to 2 secs to make sure log thread has time to get started and try to open a file.
     int w = 0;

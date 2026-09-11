@@ -1,0 +1,8 @@
+# XWCTEST_* fault injection names used by modbus.cpp in libMagAOX/modbus.
+# tests/genTestMacros.py reads this file to generate testMacros.hpp. One name per line.
+# Lines starting with '#' and blank lines are ignored. See tests/genTestMacros.md.
+# Regenerate with, from the repo root:
+#   python3 tests/genTestMacros.py --names libMagAOX/modbus/tests/xwcTestNames.txt --out libMagAOX/modbus/tests/testMacros.hpp
+
+XWCTEST_MODBUS_SET_TIMEOUTS_SNDTIMEO_FAIL
+XWCTEST_MODBUS_SEND_PARTIAL

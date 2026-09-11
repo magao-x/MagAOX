@@ -63,8 +63,10 @@ int runCommand( std::vector<std::string> & commandOutput, // [out] the output, l
          charCommandList[index]=commandList[index].c_str();
       }
       execvp( charCommandList[0], const_cast<char**>(charCommandList.data()));
-      commandOutput.push_back(std::string("execvp returned: ") + strerror(errno));
-      return -1;
+      // Bug fix. execvp() only returns when it fails. The child used to return -1 here,
+      // which made it keep running the caller's code as a second copy of the process.
+      // The child must exit instead. The parent sees the closed pipes and empty output.
+      _exit(127);
    }
    else
    {
@@ -76,7 +78,8 @@ int runCommand( std::vector<std::string> & commandOutput, // [out] the output, l
       close(errlink[1]);
 
       int rd;
-      if ( (rd = read(link[0], commandOutput_c, sizeof(commandOutput_c))) < 0)
+      // Bug fix. The read leaves one byte free for the terminator written below.
+      if ( (rd = read(link[0], commandOutput_c, sizeof(commandOutput_c) - 1)) < 0)
       {
          commandOutput.push_back(std::string("Read error: ") + strerror(errno));
          close(link[0]);
@@ -97,7 +100,8 @@ int runCommand( std::vector<std::string> & commandOutput, // [out] the output, l
       }
 
       //----stderr
-      if ( (rd = read(errlink[0], commandOutput_c, sizeof(commandOutput_c))) < 0)
+      // Bug fix. Same as the stdout read above. One byte is left free for the terminator.
+      if ( (rd = read(errlink[0], commandOutput_c, sizeof(commandOutput_c) - 1)) < 0)
       {
          commandStderr.push_back(std::string("Read error on stderr: ") + strerror(errno));
          close(errlink[0]);

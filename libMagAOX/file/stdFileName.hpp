@@ -20,6 +20,10 @@
 #include "stdSubDir.hpp"
 #include "fileTimes.hpp"
 
+// Test-only fault hooks. Every XWCTEST_IF_ macro expands to an empty statement unless
+// a test defines the matching XWCTEST_ name before including this header.
+#include "tests/testMacros.hpp"
+
 namespace MagAOX
 {
 namespace file
@@ -250,15 +254,9 @@ mx::error_t stdFileName<verboseT>::fullName( const std::string &fn )
 
     try
     {
-        // clang-format off
-        #ifdef XWCTEST_STDFILENAME_FULLNAME_BAD_ALLOC
-            throw std::bad_alloc(); // LCOV_EXCL_LINE
-        #endif
-
-        #ifdef XWCTEST_STDFILENAME_FULLNAME_EXCEPTION
-            throw std::exception(); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        // Test hooks. Each throw runs only when a test enables it, so the handlers below run for real.
+        XWCTEST_IF_STDFILENAME_FULLNAME_BAD_ALLOC( throw std::bad_alloc() );
+        XWCTEST_IF_STDFILENAME_FULLNAME_EXCEPTION( throw std::exception() );
 
         m_fullName = fn;
     }
@@ -273,19 +271,10 @@ mx::error_t stdFileName<verboseT>::fullName( const std::string &fn )
 
     try
     {
-        // clang-format off
-        #ifdef XWCTEST_STDFILENAME_FULLNAME_FS_BAD_ALLOC
-            throw std::bad_alloc(); // LCOV_EXCL_LINE
-        #endif
-
-        #ifdef XWCTEST_STDFILENAME_FULLNAME_FS_FILESYSTEM_ERROR
-            throw std::filesystem::filesystem_error("test", std::error_code(10, std::system_category())); // LCOV_EXCL_LINE
-        #endif
-
-        #ifdef XWCTEST_STDFILENAME_FULLNAME_FS_EXCEPTION
-            throw std::exception(); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        XWCTEST_IF_STDFILENAME_FULLNAME_FS_BAD_ALLOC( throw std::bad_alloc() );
+        XWCTEST_IF_STDFILENAME_FULLNAME_FS_FILESYSTEM_ERROR(
+            throw std::filesystem::filesystem_error( "test", std::error_code( 10, std::system_category() ) ) );
+        XWCTEST_IF_STDFILENAME_FULLNAME_FS_EXCEPTION( throw std::exception() );
 
         std::filesystem::path p( m_fullName );
 
@@ -318,7 +307,10 @@ mx::error_t stdFileName<verboseT>::fullName( const std::string &fn )
     {
         mx_error_check( parseFilePath( m_appName, YYYY, MM, DD, hh, mm, ss, nn, m_baseName ) );
     }
-    catch( const xwcException &e ) // a bad_alloc
+    // Bug fix. parseFilePath() throws mx::exception<verboseT> when it wraps a
+    // std::bad_alloc. The old handler caught xwcException, which is a different type,
+    // so it never ran and the nested xwcException below was never thrown.
+    catch( const mx::exception<verboseT> &e ) // a bad_alloc
     {
         std::throw_with_nested( xwcException( "parsing filename" ) );
     }
@@ -365,15 +357,9 @@ mx::error_t stdFileName<verboseT>::fullName( const std::string &fn )
     errno      = 0;
     time_t tgm = timegm( &tmst );
 
-    // clang-format off
-    #ifdef XWCTEST_STDFILENAME_FULLNAME_TIMEGM
-        tgm = static_cast<time_t>( -1 ); // LCOV_EXCL_LINE
-        errno = EOVERFLOW; // LCOV_EXCL_LINE
-    #endif
-    #ifdef XWCTEST_STDFILENAME_FULLNAME_TIMEGM_OTHER
-        tgm = static_cast<time_t>( -1 ); // LCOV_EXCL_LINE
-    #endif
-    // clang-format on
+    // Test hooks. Pretend timegm failed, once with errno set and once without.
+    XWCTEST_IF_STDFILENAME_FULLNAME_TIMEGM( ( tgm = static_cast<time_t>( -1 ), errno = EOVERFLOW ) );
+    XWCTEST_IF_STDFILENAME_FULLNAME_TIMEGM_OTHER( tgm = static_cast<time_t>( -1 ) );
 
     if( tgm == static_cast<time_t>( -1 ) )
     {

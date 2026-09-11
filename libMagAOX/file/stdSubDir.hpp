@@ -17,6 +17,11 @@
 
 #include "../common/defaults.hpp"
 
+// Test-only fault hooks. Every XWCTEST_IF_ macro expands to an empty statement unless
+// a test defines the matching XWCTEST_ name before including this header. Each hook
+// below throws inside a try block so the real handler after it runs.
+#include "tests/testMacros.hpp"
+
 namespace MagAOX
 {
 namespace file
@@ -193,15 +198,8 @@ stdSubDir<verboseT>::stdSubDir( const std::chrono::sys_days &sysday )
 {
     try
     {
-        // clang-format off
-        #ifdef XWCTEST_STDSUBDIR_CTORSYSDAYS_BAD_ALLOC
-            throw std::bad_alloc(); // LCOV_EXCL_LINE
-        #endif
-
-        #ifdef XWCTEST_STDSUBDIR_CTORSYSDAYS_EXCEPTION
-            throw std::exception(); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        XWCTEST_IF_STDSUBDIR_CTORSYSDAYS_BAD_ALLOC( throw std::bad_alloc() );
+        XWCTEST_IF_STDSUBDIR_CTORSYSDAYS_EXCEPTION( throw std::exception() );
 
         m_sysday = sysday;
         m_valid  = true;
@@ -237,15 +235,8 @@ mx::error_t stdSubDir<verboseT>::ymd( int year, unsigned month, unsigned day )
 
     try
     {
-        // clang-format off
-        #ifdef XWCTEST_STDSUBDIR_YMD_BAD_ALLOC
-            throw std::bad_alloc(); // LCOV_EXCL_LINE
-        #endif
-
-        #ifdef XWCTEST_STDSUBDIR_YMD_EXCEPTION
-            throw std::exception(); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        XWCTEST_IF_STDSUBDIR_YMD_BAD_ALLOC( throw std::bad_alloc() );
+        XWCTEST_IF_STDSUBDIR_YMD_EXCEPTION( throw std::exception() );
 
         std::chrono::year_month_day ymd{
             std::chrono::year( year ), std::chrono::month( month ), std::chrono::day( day ) };
@@ -302,19 +293,9 @@ mx::error_t stdSubDir<verboseT>::path( const std::string &subdir )
 
     try
     {
-        // clang-format off
-        #ifdef XWCTEST_STDSUBDIR_SETPATH_BAD_ALLOC
-            throw std::bad_alloc(); // LCOV_EXCL_LINE
-        #endif
-
-        #ifdef XWCTEST_STDSUBDIR_SETPATH_OUT_OF_RANGE
-            throw std::out_of_range("test"); // LCOV_EXCL_LINE
-        #endif
-
-        #ifdef XWCTEST_STDSUBDIR_SETPATH_EXCEPTION
-            throw std::exception(); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        XWCTEST_IF_STDSUBDIR_SETPATH_BAD_ALLOC( throw std::bad_alloc() );
+        XWCTEST_IF_STDSUBDIR_SETPATH_OUT_OF_RANGE( throw std::out_of_range( "test" ) );
+        XWCTEST_IF_STDSUBDIR_SETPATH_EXCEPTION( throw std::exception() );
 
         year = mx::ioutils::stoT<int>( subdir.substr( 0, 4 ), errc );
         mx_error_check_code( errc );
@@ -340,15 +321,8 @@ mx::error_t stdSubDir<verboseT>::path( const std::string &subdir )
 
     try
     {
-        // clang-format off
-        #ifdef XWCTEST_STDSUBDIR_SETPATH_BAD_ALLOC2
-            throw std::bad_alloc(); // LCOV_EXCL_LINE
-        #endif
-
-        #ifdef XWCTEST_STDSUBDIR_SETPATH_EXCEPTION2
-            throw std::exception(); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        XWCTEST_IF_STDSUBDIR_SETPATH_BAD_ALLOC2( throw std::bad_alloc() );
+        XWCTEST_IF_STDSUBDIR_SETPATH_EXCEPTION2( throw std::exception() );
 
         std::chrono::year_month_day ymd{
             std::chrono::year( year ), std::chrono::month( month ), std::chrono::day( day ) };
@@ -390,19 +364,9 @@ std::string stdSubDir<verboseT>::path( mx::error_t *errc ) const
     {
         try
         {
-            // clang-format off
-            #ifdef XWCTEST_STDSUBDIR_MAKEPATH_BAD_ALLOC
-                throw std::bad_alloc(); // LCOV_EXCL_LINE
-            #endif
-
-            #ifdef XWCTEST_STDSUBDIR_MAKEPATH_FORMAT_ERROR
-                throw std::format_error("test"); // LCOV_EXCL_LINE
-            #endif
-
-            #ifdef XWCTEST_STDSUBDIR_MAKEPATH_EXCEPTION
-                throw std::exception(); // LCOV_EXCL_LINE
-            #endif
-            // clang-format on
+            XWCTEST_IF_STDSUBDIR_MAKEPATH_BAD_ALLOC( throw std::bad_alloc() );
+            XWCTEST_IF_STDSUBDIR_MAKEPATH_FORMAT_ERROR( throw std::format_error( "test" ) );
+            XWCTEST_IF_STDSUBDIR_MAKEPATH_EXCEPTION( throw std::exception() );
 
             m_path = std::format( "{:%Y_%m_%d}", m_sysday );
 
@@ -454,15 +418,8 @@ int stdSubDir<verboseT>::year( mx::error_t *errc ) const
 
     try
     {
-        // clang-format off
-        #ifdef XWCTEST_STDSUBDIR_GYMD_BAD_ALLOC
-            throw std::bad_alloc(); // LCOV_EXCL_LINE
-        #endif
-
-        #ifdef XWCTEST_STDSUBDIR_GYMD_EXCEPTION
-            throw std::exception(); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        XWCTEST_IF_STDSUBDIR_GYMD_BAD_ALLOC( throw std::bad_alloc() );
+        XWCTEST_IF_STDSUBDIR_GYMD_EXCEPTION( throw std::exception() );
 
         std::chrono::year_month_day ymd{ m_sysday };
 
@@ -507,15 +464,8 @@ unsigned int stdSubDir<verboseT>::month( mx::error_t *errc ) const
 
     try
     {
-        // clang-format off
-        #ifdef XWCTEST_STDSUBDIR_GYMD_BAD_ALLOC
-            throw std::bad_alloc(); // LCOV_EXCL_LINE
-        #endif
-
-        #ifdef XWCTEST_STDSUBDIR_GYMD_EXCEPTION
-            throw std::exception(); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        XWCTEST_IF_STDSUBDIR_GYMD_BAD_ALLOC( throw std::bad_alloc() );
+        XWCTEST_IF_STDSUBDIR_GYMD_EXCEPTION( throw std::exception() );
 
         std::chrono::year_month_day ymd{ m_sysday };
 
@@ -559,15 +509,8 @@ unsigned int stdSubDir<verboseT>::day( mx::error_t *errc ) const
 
     try
     {
-        // clang-format off
-        #ifdef XWCTEST_STDSUBDIR_GYMD_BAD_ALLOC
-            throw std::bad_alloc(); // LCOV_EXCL_LINE
-        #endif
-
-        #ifdef XWCTEST_STDSUBDIR_GYMD_EXCEPTION
-            throw std::exception(); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        XWCTEST_IF_STDSUBDIR_GYMD_BAD_ALLOC( throw std::bad_alloc() );
+        XWCTEST_IF_STDSUBDIR_GYMD_EXCEPTION( throw std::exception() );
 
         std::chrono::year_month_day ymd{ m_sysday };
 
@@ -612,15 +555,8 @@ mx::error_t stdSubDir<verboseT>::addDay()
 
     try
     {
-        // clang-format off
-        #ifdef XWCTEST_STDSUBDIR_INC_BAD_ALLOC
-            throw std::bad_alloc(); // LCOV_EXCL_LINE
-        #endif
-
-        #ifdef XWCTEST_STDSUBDIR_INC_EXCEPTION
-            throw std::exception(); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        XWCTEST_IF_STDSUBDIR_INC_BAD_ALLOC( throw std::bad_alloc() );
+        XWCTEST_IF_STDSUBDIR_INC_EXCEPTION( throw std::exception() );
 
         m_pathMade = false;
         ++m_sysday;
@@ -650,15 +586,8 @@ mx::error_t stdSubDir<verboseT>::subDay()
 
     try
     {
-        // clang-format off
-        #ifdef XWCTEST_STDSUBDIR_INC_BAD_ALLOC
-            throw std::bad_alloc(); // LCOV_EXCL_LINE
-        #endif
-
-        #ifdef XWCTEST_STDSUBDIR_INC_EXCEPTION
-            throw std::exception(); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        XWCTEST_IF_STDSUBDIR_INC_BAD_ALLOC( throw std::bad_alloc() );
+        XWCTEST_IF_STDSUBDIR_INC_EXCEPTION( throw std::exception() );
 
         --m_sysday;
 
@@ -694,20 +623,12 @@ stdSubDir<verboseT> stdSubDir<verboseT>::previousSubdir( mx::error_t *errc )
 
     try
     {
-        // clang-format off
-        #ifdef XWCTEST_STDSUBDIR_PREVFOLL_BAD_ALLOC
-            throw std::bad_alloc(); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        XWCTEST_IF_STDSUBDIR_PREVFOLL_BAD_ALLOC( throw std::bad_alloc() );
 
         stdSubDir std = *this;
 
-        // clang-format off
-        #ifdef XWCTEST_STDSUBDIR_PREV_INVAL
-            // invalidate
-            std.path(""); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        // invalidate
+        XWCTEST_IF_STDSUBDIR_PREV_INVAL( std.path( "" ) );
 
         if( !std.valid() )
         {
@@ -766,20 +687,12 @@ stdSubDir<verboseT> stdSubDir<verboseT>::followingSubdir( mx::error_t *errc )
 
     try
     {
-        // clang-format off
-        #ifdef XWCTEST_STDSUBDIR_PREVFOLL_BAD_ALLOC
-            throw std::bad_alloc(); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        XWCTEST_IF_STDSUBDIR_PREVFOLL_BAD_ALLOC( throw std::bad_alloc() );
 
         stdSubDir std = *this;
 
-        // clang-format off
-        #ifdef XWCTEST_STDSUBDIR_PREV_INVAL
-            // invalidate
-            std.path(""); // LCOV_EXCL_LINE
-        #endif
-        // clang-format on
+        // invalidate
+        XWCTEST_IF_STDSUBDIR_PREV_INVAL( std.path( "" ) );
 
         if( !std.valid() )
         {

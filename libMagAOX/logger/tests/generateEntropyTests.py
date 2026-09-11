@@ -9,12 +9,18 @@ from generateTemplatedCatch2Tests import *
 import json
 
 '''
+Generate one Catch2 "entropy" test that creates many flatlogs of several random types
+with random values and verifies every field, from entropyTestTemplate.jinja2.
+
+It #includes the per type files made by generateTemplatedCatch2Tests.py, so that generator
+must run first. The Makefile target do_entropy_test does both. Output goes to
+./gen_entropy_tests/generated_test_e<E>_n<N>.cpp. See flatlogs.md in this directory.
+
 command line options:
     -n number of flatlog types to include
     -e entropy number. how many flatlogs will be created and checked
-Future add:
     -s random seed val
-    config for specifying log types to use
+    -f flatlog types to use
 '''
 # check jinja2 is installed. install it if not
 try:

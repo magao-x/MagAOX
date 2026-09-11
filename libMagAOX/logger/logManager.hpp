@@ -29,11 +29,23 @@ using namespace flatlogs;
 
 #include "generated/logTypes.hpp"
 #include "generated/logStdFormat.hpp"
+// Test-only fault hooks. Every XWCTEST_IF_ macro expands to an empty statement unless
+// a test defines the matching XWCTEST_ name before including this header.
+#include "tests/testMacros.hpp"
 
 namespace MagAOX
 {
 namespace logger
 {
+
+// Test-only. A test can define XWCTEST_NAMESPACE and compile this file a second time
+// inside that namespace with one XWCTEST_ fault macro enabled. The faulted copy runs the
+// real error handling code, and its hits count toward these same source lines.
+// Production builds never define XWCTEST_NAMESPACE.
+#ifdef XWCTEST_NAMESPACE
+namespace XWCTEST_NAMESPACE
+{
+#endif
 
 /// The standard MagAOX log manager, used for both process logs and telemetry streams.
 /** Manages the formatting and queueing of the log entries.
@@ -425,7 +437,18 @@ int logManager<parentT, logFileT>::logThreadStart()
 {
    try
    {
-      m_logThread = std::thread( _logThreadStart, this);
+      // Test hooks. Each throw runs only when a test enables it, so the handlers below run for real.
+      XWCTEST_IF_LOGMANAGER_LOGTHREADSTART_STD_EXCEPTION( throw std::runtime_error( "XWCTEST" ) );
+      XWCTEST_IF_LOGMANAGER_LOGTHREADSTART_UNKNOWN_EXCEPTION( throw 42 );
+
+      // Test hook. When a test defines XWCTEST_LOGMANAGER_LOGTHREADSTART_NOT_JOINABLE the
+      // thread is never constructed. A default constructed thread is not joinable, so the
+      // joinable() check below fails for real. This hook removes a statement instead of
+      // adding one, so it cannot use the XWCTEST_IF_ macro form. Production builds never
+      // define this name.
+      #ifndef XWCTEST_LOGMANAGER_LOGTHREADSTART_NOT_JOINABLE
+          m_logThread = std::thread( _logThreadStart, this);
+      #endif
    }
    catch( const std::exception & e )
    {
@@ -613,6 +636,10 @@ void logManager<parentT, logFileT>::log( timespecX & ts,
 //class logFileRaw;
 
 //extern template struct logManager<logFileRaw>;
+
+#ifdef XWCTEST_NAMESPACE
+} // namespace XWCTEST_NAMESPACE
+#endif
 
 } //namespace logger
 } //namespace MagAOX

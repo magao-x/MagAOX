@@ -464,7 +464,7 @@ TEST_CASE( "Setting fullName Errors", "[libMagAOX::file::stdFileName]" )
         {
             sfn.fullName( "/opt/MagAOX/stds/bamm/2024_11_21/bamm_20241121063321000000001.binlog" );
         }
-        catch( const mx::exception<XWC_DEFAULT_VERBOSITY> &e )
+        catch( const MagAOX::xwcException &e )
         {
             caught = true;
         }

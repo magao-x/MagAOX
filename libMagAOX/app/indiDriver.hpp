@@ -18,10 +18,19 @@
 
 #include "MagAOXApp.hpp"
 
+// Test-only fault hooks. Every XWCTEST_IF_ macro expands to an empty statement unless
+// a test defines the matching XWCTEST_ name before including this header.
+#include "tests/testMacros.hpp"
+
 namespace MagAOX
 {
 namespace app
 {
+
+#ifdef XWCTEST_NAMESPACE
+namespace XWCTEST_NAMESPACE
+{
+#endif
 
 ///Simple INDI Client class
 class indiClient : public pcf::IndiClient
@@ -173,6 +182,10 @@ indiDriver<parentT>::indiDriver ( parentT * parent,
    }
    char c = 0;
    int wrno = write(fd, &c, 1);
+
+   // Test hook. Pretends the write to the control FIFO failed.
+   XWCTEST_IF_INDIDRIVER_CTRL_WRITE_FAIL( wrno = -1 );
+
    if(wrno < 0)
    {
       parentT::template log<logger::software_error>({__FILE__, __LINE__, errno, "Error writing to control INDI FIFO."});
@@ -258,6 +271,9 @@ int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
          return -1;
       }
 
+      // Test hook. Drops the outgoing client so the null check below fails for real.
+      XWCTEST_IF_INDIDRIVER_OUTGOING_NULL( m_outGoing->deactivate(); delete m_outGoing; m_outGoing = nullptr );
+
       if(m_outGoing == nullptr)
       {
          parentT::template log<logger::software_error>({__FILE__, __LINE__, "Failed to allocate IndiClient connection"});
@@ -269,7 +285,14 @@ int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
 
    try
    {
+      // Test hook. Throws something that is not a std::exception inside the send.
+      XWCTEST_IF_INDIDRIVER_SEND_NONSTD_THROW( throw 42 );
+
       m_outGoing->sendNewProperty(ipRecv);
+
+      // Test hook. Marks the client as quit right after the send so the check below fires.
+      XWCTEST_IF_INDIDRIVER_QUIT_AFTER_SEND( m_outGoing->quitProcess() );
+
       if(m_outGoing->getQuitProcess())
       {
          parentT::template log<logger::software_error>({__FILE__, __LINE__, "INDI client appears to be disconnected -- NEW not sent."});
@@ -296,6 +319,10 @@ int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
    parentT::template log<logger::software_error>({__FILE__, __LINE__, "fall through in sendNewProperty"});
    return -1;
 }
+
+#ifdef XWCTEST_NAMESPACE
+} //namespace XWCTEST_NAMESPACE
+#endif
 
 } //namespace app
 } //namespace MagAOX

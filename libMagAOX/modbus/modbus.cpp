@@ -9,6 +9,19 @@
 #include <cerrno>
 #include <cstring>
 
+// Test-only fault hooks. Every XWCTEST_IF_ macro expands to an empty statement unless
+// a test defines the matching XWCTEST_ name before including this file.
+#include "tests/testMacros.hpp"
+
+// Test-only. A test can define XWCTEST_NAMESPACE and compile this file a second time
+// inside that namespace with one XWCTEST_ fault macro enabled. The faulted copy runs the
+// real error handling code, and its hits count toward these same source lines.
+// Production builds never define XWCTEST_NAMESPACE.
+#ifdef XWCTEST_NAMESPACE
+namespace XWCTEST_NAMESPACE
+{
+#endif
+
 namespace
 {
 
@@ -118,7 +131,13 @@ bool modbus::modbus_set_timeouts( int seconds, int microseconds )
         return false;
     }
 
-    if( setsockopt( _socket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof( timeout ) ) != 0 )
+    // The return value is kept in a variable so the test hook below can override it.
+    int sndRv = setsockopt( _socket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof( timeout ) );
+
+    // Test hook. Pretends setsockopt failed.
+    XWCTEST_IF_MODBUS_SET_TIMEOUTS_SNDTIMEO_FAIL( sndRv = -1 );
+
+    if( sndRv != 0 )
     {
         return false;
     }
@@ -128,7 +147,9 @@ bool modbus::modbus_set_timeouts( int seconds, int microseconds )
 
 void modbus::modbus_build_request( uint8_t *to_send, int address, int func )
 {
-    to_send[0] = (uint8_t)_msg_id >> 8;
+    // Bug fix. The cast used to happen before the shift, so the high byte was always 0.
+    // The shift now happens first, so transaction ids above 255 keep their high byte.
+    to_send[0] = (uint8_t)( _msg_id >> 8 );
     to_send[1] = (uint8_t)( _msg_id & 0x00FF );
     to_send[2] = 0;
     to_send[3] = 0;
@@ -353,7 +374,9 @@ void modbus::modbus_write_register( int address, uint16_t value )
         modbus_receive( to_rec );
         try
         {
-            modbus_error_handle( to_rec, WRITE_COIL );
+            // Bug fix. The reply used to be checked against WRITE_COIL, so an error reply
+            // to a register write was never recognized and was silently ignored.
+            modbus_error_handle( to_rec, WRITE_REG );
         }
         catch( std::exception &e )
         {
@@ -375,7 +398,9 @@ void modbus::modbus_write_coils( int address, int amount, bool *value )
             throw modbus_amount_exception();
         }
         uint16_t temp[amount];
-        for( int i = 0; i < 4; i++ )
+        // Bug fix. The loop used to copy exactly 4 values no matter what amount was.
+        // A smaller amount overflowed temp and a larger amount left values uncopied.
+        for( int i = 0; i < amount; i++ )
         {
             temp[i] = (uint16_t)value[i];
         }
@@ -434,6 +459,9 @@ ssize_t modbus::modbus_send( uint8_t *to_send, int length )
         modbusConnectionError( *this, "send" );
     }
 
+    // Test hook. Pretends the socket sent one byte less than requested. No real I/O changes.
+    XWCTEST_IF_MODBUS_SEND_PARTIAL( sent = length - 1 );
+
     if( sent != length )
     {
         errno = EIO;
@@ -487,3 +515,7 @@ void modbus::modbus_error_handle( uint8_t *msg, int func )
         }
     }
 }
+
+#ifdef XWCTEST_NAMESPACE
+} // namespace XWCTEST_NAMESPACE
+#endif

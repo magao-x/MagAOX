@@ -21,10 +21,32 @@
 #include "ttyErrors.hpp"
 
 
+// Test-only overrides. Only unit tests define these names. A test can point the sysfs
+// scan at a real tty entry that is not USB, such as tty0, to reach the branch for a
+// device with no USB parent. A test can also point it at a scratch directory to reach
+// the branch for a path that udev does not recognize. This uses real operating system
+// state instead of a mock, because no USB serial hardware exists on the build machine.
+// The defaults below are exactly the production values.
+#ifndef XWCTEST_TTYUSB_SYSFS_DIR
+#define XWCTEST_TTYUSB_SYSFS_DIR "/sys/class/tty/"
+#endif
+#ifndef XWCTEST_TTYUSB_SYSFS_PREFIX
+#define XWCTEST_TTYUSB_SYSFS_PREFIX "ttyUSB"
+#endif
+
 namespace MagAOX
 {
 namespace tty
 {
+
+// Test-only. A test can define XWCTEST_NAMESPACE and compile this file a second time
+// inside that namespace with the sysfs overrides above changed. The second copy runs the
+// real error handling code, and its hits count toward these same source lines.
+// Production builds never define XWCTEST_NAMESPACE.
+#ifdef XWCTEST_NAMESPACE
+namespace XWCTEST_NAMESPACE
+{
+#endif
 
 int ttyUSBDevName( std::string & devName,       // [out] the /dev/ttyUSBX device name.
                    const std::string & vendor,  // [in] the 4-digit vendor identifier.
@@ -37,7 +59,7 @@ int ttyUSBDevName( std::string & devName,       // [out] the /dev/ttyUSBX device
    std::vector<std::string> devNames;
 
    devName = "";
-   mx_error_check_rv(mx::ioutils::getFileNames(devNames, "/sys/class/tty/", "ttyUSB", "", ""),-1);
+   mx_error_check_rv(mx::ioutils::getFileNames(devNames, XWCTEST_TTYUSB_SYSFS_DIR, XWCTEST_TTYUSB_SYSFS_PREFIX, "", ""),-1);
 
    if(devNames.size() == 0) return TTY_E_NODEVNAMES;
 
@@ -145,7 +167,7 @@ int ttyUSBDevNames( std::vector<std::string> & devNames, // [out] the /dev/ttyUS
    devNames.clear();
 
    typedef mx::verbose::vvv verboseT;
-   mx_error_check_rv(mx::ioutils::getFileNames(pdevNames, "/sys/class/tty/", "ttyUSB", "", ""), -1);
+   mx_error_check_rv(mx::ioutils::getFileNames(pdevNames, XWCTEST_TTYUSB_SYSFS_DIR, XWCTEST_TTYUSB_SYSFS_PREFIX, "", ""), -1);
 
    if(pdevNames.size() == 0) return TTY_E_NODEVNAMES;
 
@@ -216,6 +238,11 @@ int ttyUSBDevNames( std::vector<std::string> & devNames, // [out] the /dev/ttyUS
    else return TTY_E_DEVNOTFOUND;
 
 }
+
+#ifdef XWCTEST_NAMESPACE
+} // namespace XWCTEST_NAMESPACE
+#endif
+
 } //namespace tty
 } //namespace MagAOX
 

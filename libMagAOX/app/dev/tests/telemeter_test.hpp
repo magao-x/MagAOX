@@ -1,6 +1,7 @@
 
 #include "../../MagAOXApp.hpp"
 #include "../telemeter.hpp"
+#include "testHarnessCommon.hpp"
 
 // LCOV_EXCL_START
 
@@ -23,17 +24,16 @@ namespace XWCTEST_NAMESPACE
 /**
  * \ingroup telemeter_tests
  */
-struct telemeterTest : public MagAOX::app::MagAOXApp<false>, public MAPPNS::telemeter<telemeterTest>
+struct telemeterTest : public MagAOX::app::dev::testHarness::appHarnessBase, public MAPPNS::telemeter<telemeterTest>
 {
 
     friend class MAPPNS::telemeter<telemeterTest>;
 
-    typedef MAPPNS::telemeter<telemeterTest> telemeterT;
+    typedef MagAOX::app::dev::testHarness::appHarnessBase baseT;
+    typedef MAPPNS::telemeter<telemeterTest>              telemeterT;
 
-    telemeterTest( const std::string &git_sha1, const bool git_modified )
-        : MagAOX::app::MagAOXApp<false>( git_sha1, git_modified )
+    telemeterTest() : baseT( "teltest" )
     {
-        m_configName = "teltest";
     }
 
     int setupConfig( mx::app::appConfigurator &config )

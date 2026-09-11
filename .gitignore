@@ -4,12 +4,12 @@
 *.a
 *.so
 *.log
+*.binlog
 doc/output
 local/
 !local/common.example.mk
 !local/config.example.mk
 **/a.out
-**/tests/*.binlog
 **/.*~
 **/*.stash
 **/*-swp
@@ -196,7 +196,7 @@ libMagAOX/logger/tests/generated_tests
 ##########################################
 #Executables and util specifics to ignore:
 
-
+utils/shmimDelta/shmimDelta
 utils/instGraph/instGraph
 utils/logdump/logdump
 utils/logsurgeon/logsurgeon

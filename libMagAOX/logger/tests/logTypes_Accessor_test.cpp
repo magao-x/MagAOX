@@ -781,6 +781,25 @@ TEST_CASE( "Call to accessor with invalid member", "[libMagAOX::logger::logTypes
     */
 }
 
+/// string_log has no eventCode or defaultLevel of its own. It is a base reused by the
+/// messageT of other log types, for example text_log. So it never gets its own generated
+/// per-type test, and nothing else exercises a real, recognized member name through its
+/// getAccessor(). This test calls it with the "message" member directly.
+/**
+ * \ingroup logTypes_unit_test
+ */
+TEST_CASE( "Call to accessor with a valid member", "[libMagAOX::logger::logTypes_Accessor]" )
+{
+    SECTION( "string_log" )
+    {
+        MagAOX::logger::logMetaDetail lmd = MagAOX::logger::string_log::getAccessor( "message" );
+
+        REQUIRE( lmd.keyword == "MESSAGE" );
+        REQUIRE( lmd.valType == MagAOX::logger::logMeta::valTypes::String );
+        REQUIRE( lmd.accessor != nullptr );
+    }
+}
+
 } // namespace logTypeAccessorTest
 } // namespace loggerTest
 } // namespace libXWCTest
