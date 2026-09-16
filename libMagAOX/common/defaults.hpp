@@ -52,6 +52,15 @@
    #define MAGAOX_default_maxLogTime (1440)
 #endif
 
+#ifndef MAGAOX_max_maxLogTime
+   /// The maximum allowed log file time
+   /** The largest maxLogTime accepted from config files and INDI.  525600 minutes (365 days).
+     *
+     * Units: minutes
+     */
+   #define MAGAOX_max_maxLogTime (525600)
+#endif
+
 #ifndef MAGAOX_default_loopPause
    /// The default application loopPause
    /** Defines default value of how long the event loop in execute() pauses. Default is 1 sec.

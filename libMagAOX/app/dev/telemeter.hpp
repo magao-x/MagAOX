@@ -82,9 +82,9 @@ struct telemeter
 
     double m_maxInterval{10.0}; ///< The maximum interval, in seconds, between telemetry records. Default is 10.0 seconds.
 
-    pcf::IndiProperty m_indiP_rotateTelem; ///< indi Property to request rotation of the telemetry file.
+    pcf::IndiProperty m_indiP_rotateTelem; ///< indi Property to request rotation of the telemetry file.  The new file is created with the next telemetry record.
 
-    pcf::IndiProperty m_indiP_maxLogTime; ///< indi Property to report and set the telemetry file time interval, in minutes.
+    pcf::IndiProperty m_indiP_maxTelemTime; ///< indi Property to report and set the telemetry file time interval, in minutes.
 
     telemeter();
 
@@ -123,7 +123,7 @@ struct telemeter
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    static int st_newCallBack_maxLogTime(void *app,                      /**< [in] a pointer to the app, will be
+    static int st_newCallBack_maxTelemTime(void *app,                      /**< [in] a pointer to the app, will be
                                                                                    converted to telemeter. */
                                          const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
                                                                                    the new property request. */
@@ -134,7 +134,7 @@ struct telemeter
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    int newCallBack_maxLogTime(const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new
+    int newCallBack_maxTelemTime(const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new
                                                                          property request. */
     );
 
@@ -304,7 +304,13 @@ int telemeter<derivedT>::loadConfig(mx::app::appConfigurator &config)
 
     m_tel.logName(derived().m_configName);
 
-    m_tel.loadConfig(config);
+    // An invalid setting is not applied and the default is used instead. It is logged to
+    // the process log, not the telemetry stream.
+    std::string telConfigErr;
+    if (m_tel.loadConfig(config, &telConfigErr) < 0)
+    {
+        derivedT::template log<software_error>({__FILE__, __LINE__, telConfigErr});
+    }
 
     config(m_maxInterval, "telemeter.maxInterval");
 
@@ -327,15 +333,15 @@ int telemeter<derivedT>::appStartup()
     }
 
     derived().template createStandardIndiNumber<unsigned>(
-        m_indiP_maxLogTime, "telem_maxtime", 0, 525600, 1, "", "Max Telemetry Interval [minutes]", "Logging");
-    if (derived().registerIndiPropertyNew(m_indiP_maxLogTime, st_newCallBack_maxLogTime) < 0)
+        m_indiP_maxTelemTime, "telem_maxtime", 0, MAGAOX_max_maxLogTime, 1, "", "Max Telemetry Interval [minutes]", "Logging");
+    if (derived().registerIndiPropertyNew(m_indiP_maxTelemTime, st_newCallBack_maxTelemTime) < 0)
     {
         derivedT::template log<software_error>({__FILE__, __LINE__, "failed to register new telem_maxtime property"});
     }
 
     // Set the INDI property to the configured interval.
-    m_indiP_maxLogTime["current"] = m_tel.maxLogTime();
-    m_indiP_maxLogTime["target"] = m_tel.maxLogTime();
+    m_indiP_maxTelemTime["current"] = m_tel.maxLogTime();
+    m_indiP_maxTelemTime["target"] = m_tel.maxLogTime();
 
     //----------------------------------------//
     //        Begin the telemetry system
@@ -416,29 +422,59 @@ int telemeter<derivedT>::newCallBack_rotateTelem(const pcf::IndiProperty &ipRecv
 }
 
 template <class derivedT>
-int telemeter<derivedT>::st_newCallBack_maxLogTime(void *app, const pcf::IndiProperty &ipRecv)
+int telemeter<derivedT>::st_newCallBack_maxTelemTime(void *app, const pcf::IndiProperty &ipRecv)
 {
     // MagAOXApp::handleNewProperty always passes its own `this`, so the argument is the app, not
     // this telemeter.
     telemeter<derivedT> *tel = static_cast<derivedT *>(app);
-    return tel->newCallBack_maxLogTime(ipRecv);
+    return tel->newCallBack_maxTelemTime(ipRecv);
 }
 
 template <class derivedT>
-int telemeter<derivedT>::newCallBack_maxLogTime(const pcf::IndiProperty &ipRecv)
+int telemeter<derivedT>::newCallBack_maxTelemTime(const pcf::IndiProperty &ipRecv)
 {
-    unsigned target = 0;
-
-    if (derived().indiTargetUpdate(m_indiP_maxLogTime, target, ipRecv, false) < 0)
+    if (ipRecv.createUniqueKey() != m_indiP_maxTelemTime.createUniqueKey())
     {
-        return derivedT::template log<software_error, -1>({__FILE__, __LINE__});
+        return derivedT::template log<software_error, -1>({__FILE__, __LINE__, "wrong indi property received"});
     }
 
-    m_tel.maxLogTime(target);
+    // Parse the raw string, as the typed element accessor cannot detect invalid input
+    std::string str;
+    if (ipRecv.find("target"))
+    {
+        str = ipRecv["target"].get();
+    }
+    else if (ipRecv.find("current"))
+    {
+        str = ipRecv["current"].get();
+    }
+    else
+    {
+        return derivedT::template log<software_error, -1>({__FILE__, __LINE__, "no target or current element in INDI property"});
+    }
+
+    unsigned target = 0;
+    if (m_tel.parseMaxLogTime(target, str) != mx::error_t::noerror)
+    {
+        derivedT::template log<software_error>({__FILE__, __LINE__,
+                                                "rejected telemetry file interval \"" + str + "\": must be a number from 0 to " +
+                                                    std::to_string(MAGAOX_max_maxLogTime)});
+
+        // Send back the unchanged value. The alert state ensures it is sent, as updateIfChanged only sends
+        // when the value or state changes.
+        derived().updateIfChanged(m_indiP_maxTelemTime, "target", m_tel.maxLogTime(), INDI_ALERT);
+
+        return -1;
+    }
+
+    m_tel.maxLogTime(target); // cannot fail, as the range was checked by parseMaxLogTime
 
     derivedT::template log<software_info>({__FILE__, __LINE__, "Set telemetry file interval to " + std::to_string(target) + " minutes"});
 
-    derived().updateIfChanged(m_indiP_maxLogTime, "current", target, INDI_IDLE);
+    derived().updateIfChanged(m_indiP_maxTelemTime,
+                              std::vector<std::string>{"current", "target"},
+                              std::vector<unsigned>{target, target},
+                              INDI_IDLE);
 
     return 0;
 }

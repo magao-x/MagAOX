@@ -1148,7 +1148,7 @@ class MagAOXApp : public application
     int newCallBack_clearFSMAlert( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
                                                                              the new property request.*/ );
 
-    /// Indi property to request rotation of the process log file.
+    /// Indi property to request rotation of the process log file. The new file is created with the next log entry.
     pcf::IndiProperty m_indiP_rotateLogs;
 
     /// The static callback function to be registered for requesting log file rotation
@@ -1535,7 +1535,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
     }
 
     createStandardIndiNumber<unsigned>(
-        m_indiP_maxLogTime, "logs_maxtime", 0, 525600, 1, "", "Max Log Interval [minutes]", "Logging" );
+        m_indiP_maxLogTime, "logs_maxtime", 0, MAGAOX_max_maxLogTime, 1, "", "Max Log Interval [minutes]", "Logging" );
     if( registerIndiPropertyNew( m_indiP_maxLogTime, st_newCallBack_maxLogTime ) < 0 )
     {
         log<software_error>( { __FILE__, __LINE__, "Failed to register new logs_maxtime property" } );
@@ -1661,7 +1661,12 @@ void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
 
     //---------- Setup the logger ----------//
     m_log.logName( m_configName );
-    m_log.loadConfig( config );
+    // An invalid setting is not applied and the default is used instead
+    std::string logConfigErr;
+    if( m_log.loadConfig( config, &logConfigErr ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, logConfigErr } );
+    }
 
     // Set the INDI property to the configured interval.
     // The elements are created by setDefaults, which is not called in all contexts (e.g. unit tests),
@@ -3970,18 +3975,49 @@ int MagAOXApp<_useINDI>::st_newCallBack_maxLogTime( void *app, const pcf::IndiPr
 template <bool _useINDI>
 int MagAOXApp<_useINDI>::newCallBack_maxLogTime( const pcf::IndiProperty &ipRecv )
 {
-    unsigned target = 0;
-
-    if( indiTargetUpdate( m_indiP_maxLogTime, target, ipRecv, false ) < 0 )
+    if( ipRecv.createUniqueKey() != m_indiP_maxLogTime.createUniqueKey() )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
+        return log<software_error, -1>( { __FILE__, __LINE__, "wrong indi property received" } );
     }
 
-    m_log.maxLogTime( target );
+    // Parse the raw string, as the typed element accessor cannot detect invalid input
+    std::string str;
+    if( ipRecv.find( "target" ) )
+    {
+        str = ipRecv["target"].get();
+    }
+    else if( ipRecv.find( "current" ) )
+    {
+        str = ipRecv["current"].get();
+    }
+    else
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "no target or current element in INDI property" } );
+    }
 
-    log<text_log>( "set log file interval to " + std::to_string( target ) + " minutes" );
+    unsigned target = 0;
+    if( m_log.parseMaxLogTime( target, str ) != mx::error_t::noerror )
+    {
+        log<software_error>( { __FILE__,
+                               __LINE__,
+                               "rejected log file interval \"" + str + "\": must be a number from 0 to " +
+                                   std::to_string( MAGAOX_max_maxLogTime ) } );
 
-    updateIfChanged( m_indiP_maxLogTime, "current", target, INDI_IDLE );
+        // Send back the unchanged value. The alert state ensures it is sent, as updateIfChanged only sends
+        // when the value or state changes.
+        updateIfChanged( m_indiP_maxLogTime, "target", m_log.maxLogTime(), INDI_ALERT );
+
+        return -1;
+    }
+
+    m_log.maxLogTime( target ); // cannot fail, as the range was checked by parseMaxLogTime
+
+    log<software_info>( { __FILE__, __LINE__, "Set log file interval to " + std::to_string( target ) + " minutes" } );
+
+    updateIfChanged( m_indiP_maxLogTime,
+                     std::vector<std::string>{ "current", "target" },
+                     std::vector<unsigned>{ target, target },
+                     INDI_IDLE );
 
     return 0;
 }
