@@ -185,9 +185,15 @@ public:
    int setupConfig( mx::app::appConfigurator & config /**< [in] an application configuration to setup */);
 
    ///Load the logger section from an application configurator
-   /**
+   /** An invalid maxLogTime is not applied: the current value, normally the default, is kept, the remaining settings
+     * are still loaded, and -1 is returned with a description of the problem in errMsg.  The caller should log it.
+     *
+     * \returns 0 on success
+     * \returns -1 if a setting was invalid
      */
-   int loadConfig( mx::app::appConfigurator & config /**< [in] an application configuration from which to load values */);
+   int loadConfig( mx::app::appConfigurator & config, ///< [in] an application configuration from which to load values
+                   std::string * errMsg = nullptr     ///< [out] [optional] set to a description of an invalid setting
+                 );
 
 
    ///Thread starter, called by logThreadStart on thread construction.  Calls logThreadExec.
@@ -365,6 +371,7 @@ int logManager<parentT, logFileT>::setupConfig( mx::app::appConfigurator & confi
    config.add(m_configSection+".logDir","L", "logDir",mx::app::argType::Required, m_configSection, "logDir", false, "string", "The directory for log files");
    config.add(m_configSection+".logExt","", "logExt",mx::app::argType::Required, m_configSection, "logExt", false, "string", "The extension for log files");
    config.add(m_configSection+".maxLogSize","", "maxLogSize",mx::app::argType::Required, m_configSection, "maxLogSize", false, "string", "The maximum size of log files");
+   config.add(m_configSection+".maxLogTime","", "maxLogTime",mx::app::argType::Required, m_configSection, "maxLogTime", false, "unsigned", "The maximum time span of log files in minutes. 0 disables time-based rotation.");
    config.add(m_configSection+".writePause","", "writePause",mx::app::argType::Required, m_configSection, "writePause", false, "unsigned long", "The log thread pause time in ns");
    config.add(m_configSection+".logThreadPrio", "", "logThreadPrio", mx::app::argType::Required, m_configSection, "logThreadPrio", false, "int", "The log thread priority");
    config.add(m_configSection+".logLevel","l", "logLevel",mx::app::argType::Required, m_configSection, "logLevel", false, "string", "The log level");
@@ -373,7 +380,8 @@ int logManager<parentT, logFileT>::setupConfig( mx::app::appConfigurator & confi
 }
 
 template<class parentT, class logFileT>
-int logManager<parentT, logFileT>::loadConfig( mx::app::appConfigurator & config )
+int logManager<parentT, logFileT>::loadConfig( mx::app::appConfigurator & config,
+                                               std::string * errMsg )
 {
    //-- logDir
    std::string tmp;
@@ -405,13 +413,39 @@ int logManager<parentT, logFileT>::loadConfig( mx::app::appConfigurator & config
    //maxLogSize
    config(this->m_maxLogSize, m_configSection+".maxLogSize");
 
+   //maxLogTime - read as a string and validated, since the configurator silently wraps or truncates invalid
+   //numbers. On an invalid value the current value is kept, the remaining settings are still loaded, and -1 is
+   //returned with a suitable errMsg. This does not log it: this logManager may be the telemetry stream, so
+   //the caller logs it to the process log.
+   int rv = 0;
+   std::string mltKey = m_configSection+".maxLogTime";
+   if(config.isSet(mltKey))
+   {
+      std::string mltStr;
+      config(mltStr, mltKey);
+
+      unsigned mlt = 0;
+      if(this->parseMaxLogTime(mlt, mltStr) != mx::error_t::noerror)
+      {
+         std::string msg = "Invalid " + mltKey + " \"" + mltStr + "\": must be a number from 0 to " +
+                           std::to_string(MAGAOX_max_maxLogTime) + ". Using " + std::to_string(this->maxLogTime()) + ".";
+         std::cerr << msg << "\n";
+         if(errMsg) *errMsg = msg;
+         rv = -1;
+      }
+      else
+      {
+         this->maxLogTime(mlt); //cannot fail, as the range was checked by parseMaxLogTime
+      }
+   }
+
    //writePause
    config(m_writePause, m_configSection+".writePause");
 
    //logThreadPrio
    config(m_logThreadPrio, m_configSection+".logThreadPrio");
 
-   return 0;
+   return rv;
 }
 
 template<class parentT, class logFileT>
@@ -517,6 +551,10 @@ void logManager<parentT, logFileT>::logThreadExec()
       //m_logFile.
       ///\todo must check this for errors, and investigate how `fsyncgate` impacts us
       this->flush();
+
+      //Close the file once the wall-clock interval it began in has ended, even if nothing is being logged.
+      //The next entry opens a new file.
+      this->closeIfIntervalElapsed();
 
       //We only pause if there's nothing to do.
       if(m_logQueue.empty() && !m_logShutdown) std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(m_writePause));
