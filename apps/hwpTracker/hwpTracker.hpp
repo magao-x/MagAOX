@@ -67,6 +67,8 @@ class hwpTracker : public MagAOXApp<true>, public dev::telemeter<hwpTracker>
 
     int m_sign{ -1 }; ///< The sign to apply to the calculated HWP angle.
 
+    int m_trackOffsetSign{ -1 }; ///< The sign to apply to the HWP tracking offset
+
     std::string m_devName{ "stagepolrot" }; ///< The device name of the HWP stage.  Default is 'stagehwprot'
 
     std::string m_tcsDevName{
@@ -228,6 +230,16 @@ void hwpTracker::setupConfig()
                 "float",
                 "The interval at which to update positions, in seconds.  Default is 1 sec." );
 
+    config.add( "tracking.sign",
+                "",
+                "tracking.sign",
+                argType::Required,
+                "tracking",
+                "sign",
+                false,
+                "int",
+                "The sign to apply to the HWP tracking offset. 1 for Ns-W, -1 for Ns-E.  Default is -1." );
+
 
     config.add( "tracking.pupilOffset",
                 "",
@@ -354,7 +366,8 @@ std::string hwpTracker::getHwpStatus()
 void hwpTracker::getHwpTrackingOffset()
 {
     // While on Nasmyth East, the sign is negative
-    m_hwpTrackingOffset = -0.5 * m_parang + m_altitude + m_pupilOffset;
+    // While on Nasmyth West, the sign is positive
+    m_hwpTrackingOffset = m_trackOffsetSign * 0.5 * m_parang + m_altitude + m_pupilOffset;
 }
 
 void hwpTracker::updateHwpPos()
