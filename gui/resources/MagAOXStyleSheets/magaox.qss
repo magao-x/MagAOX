@@ -51,7 +51,7 @@ QWidget
 {
     color: #eff0f1;
     background-color: #23262a;
-    selection-background-color:#3DA5FF;
+    selection-background-color: #3DA5FF;
     selection-color: #eff0f1;
     background-clip: border;
     border-image: none;
@@ -672,6 +672,13 @@ QPushButton:pressed
 QPushButton[isScaleButton="true"]
 {
    font-size: 15px;
+}
+
+QPushButton[isHighlightButton="true"]:checked
+{
+    background-color: #3DA5FF;
+    padding-top: -1.5ex;
+    padding-bottom: -1.7ex;
 }
 
 QComboBox

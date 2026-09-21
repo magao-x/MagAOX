@@ -223,7 +223,7 @@
            <item row="0" column="0">
             <widget class="QLabel" name="lab_bin_x_curr">
              <property name="text">
-              <string>Curent</string>
+              <string>Current</string>
              </property>
             </widget>
            </item>
@@ -302,7 +302,7 @@
            <item row="0" column="0">
             <widget class="QLabel" name="lab_bin_y_curr">
              <property name="text">
-              <string>Curent</string>
+              <string>Current</string>
              </property>
             </widget>
            </item>
@@ -392,7 +392,7 @@
            <item row="0" column="0">
             <widget class="QLabel" name="lab_center_x_curr">
              <property name="text">
-              <string>Curent</string>
+              <string>Current</string>
              </property>
             </widget>
            </item>
@@ -478,7 +478,7 @@
            <item row="0" column="0">
             <widget class="QLabel" name="lab_center_y_curr">
              <property name="text">
-              <string>Curent</string>
+              <string>Current</string>
              </property>
             </widget>
            </item>
@@ -568,7 +568,7 @@
            <item row="0" column="0">
             <widget class="QLabel" name="lab_width_curr">
              <property name="text">
-              <string>Curent</string>
+              <string>Current</string>
              </property>
             </widget>
            </item>
@@ -654,7 +654,7 @@
            <item row="0" column="0">
             <widget class="QLabel" name="lab_height_curr">
              <property name="text">
-              <string>Curent</string>
+              <string>Current</string>
              </property>
             </widget>
            </item>
