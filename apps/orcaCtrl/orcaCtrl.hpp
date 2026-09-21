@@ -167,6 +167,7 @@ class orcaCtrl : public MagAOXApp<>,
     // int  m_timeStampMask{ DCAM_TIMESTAMP }; // time stamp at end of exposure
     int32  m_tsRes; // time stamp resolution
     int32  m_frameSize;
+    int32  m_frameCount; // number of frames in the circular buffer
     double m_camera_timestamp{ 0.0 };
     float  m_FrameRateCalculation;
     float  m_ReadOutTimeCalculation;
@@ -380,15 +381,10 @@ inline orcaCtrl::~orcaCtrl() noexcept
 {
     // Clear the buffers if they were allocated.  This is done here because the destructor is called after the
     // framegrabber thread has exited, so we can safely free the buffers.
-    if( !failed( dcambuff_alloc( m_hdcam, frameCount ) ) )
-    {
-        m_dcamBuffersAllocated = true;
-    }
-
     if( m_dcamBuffersAllocated )
     {
-        dcamcap_stop( m_hdcam );
-        dcambuf_release( m_hdcam );
+        dcamcap_stop( m_cameraHandle );
+        dcambuf_release( m_cameraHandle );
         m_dcamBuffersAllocated = false;
     }
 }
@@ -665,50 +661,44 @@ inline int orcaCtrl::appShutdown()
     return 0;
 }
 
-inline int orcaCtrl::getorcaParameter( double &value, int32 parameter )
+inline int orcaCtrl::getorcaParameter( double &value, int32 property )
 {
-    DCAMERR error = dcamprop_getvalue( m_cameraHandle, parameter, &value );
+    const DCAMERR error = dcamprop_getvalue( m_cameraHandle, property, &value );
 
-    if( MagAOXAppT::m_powerState == 0 )
-        return -1; // Flag error but don't log
-
-    if( error != DCAMERR_NONE )
+    if( failed( error ) )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+        }
+        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         return -1;
     }
 
     return 0;
 }
 
-inline int orcaCtrl::getorcaParameter( double &value, int32 parameter )
+inline int orcaCtrl::getorcaParameter( int32 &value, int32 property )
 {
-    DCAMERR error = dcamprop_getvalue( m_cameraHandle, parameter, &value );
+    double rawValue = 0.0;
 
-    if( MagAOXAppT::m_powerState == 0 )
-        return -1; // Flag error but don't log
-
-    if( error != DCAMERR_NONE )
+    if( getorcaParameter( rawValue, property ) < 0 )
     {
-        if( powerState() != 1 || powerStateTarget() != 1 )
-            return -1;
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
         return -1;
     }
 
+    value = static_cast<int32>( rawValue );
     return 0;
 }
 
 inline int orcaCtrl::setorcaParameter( int32 parameter, double value, bool commit )
 {
-    DCAMERR error = dcamprop_setgetvalue( m_cameraHandle, parameter, value );
+    DCAMERR error = dcamprop_setgetvalue( m_cameraHandle, parameter, &value );
     if( error != DCAMERR_NONE )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         return -1;
     }
 
@@ -717,12 +707,12 @@ inline int orcaCtrl::setorcaParameter( int32 parameter, double value, bool commi
 
 inline int orcaCtrl::setorcaParameter( HDCAM handle, int32 parameter, double value, bool commit )
 {
-    DCAMERR error = dcamprop_setgetvalue( handle, parameter, value );
+    DCAMERR error = dcamprop_setgetvalue( handle, parameter, &value );
     if( error != DCAMERR_NONE )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         return -1;
     }
     return 0;
@@ -730,12 +720,12 @@ inline int orcaCtrl::setorcaParameter( HDCAM handle, int32 parameter, double val
 
 inline int orcaCtrl::setorcaParameter( HDCAM handle, int32 parameter, int32 value, bool commit )
 {
-    DCAMERR error = dcamprop_setgetvalue( handle, parameter, value );
+    DCAMERR error = dcamprop_setgetvalue( handle, parameter, &value );
     if( error != DCAMERR_NONE )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         return -1;
     }
 
@@ -754,12 +744,12 @@ inline int orcaCtrl::setorcaParameter( int32 parameter, int32 value, bool commit
 
 inline int orcaCtrl::setorcaParameterOnline( HDCAM handle, int32 parameter, double value )
 {
-    DCAMERR error = dcamprop_setvalue( handle, parameter, value );
+    DCAMERR error = dcamprop_setvalue( handle, parameter, &value );
     if( error != DCAMERR_NONE )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         return -1;
     }
 
@@ -778,7 +768,7 @@ inline int orcaCtrl::setorcaParameterOnline( HDCAM handle, int32 parameter, int3
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         return -1;
     }
 
@@ -793,28 +783,25 @@ inline int orcaCtrl::setorcaParameterOnline( int32 parameter, int32 value )
 inline int orcaCtrl::connect()
 {
     std::cerr << __LINE__ << '\n';
-    DCAMERR      error;
-    DCAMAPI_INIT apiInit();
+    DCAMAPI_INIT apiInit{};
     apiInit.size = sizeof( apiInit );
 
-    if( m_acqBuff.memory )
+    DCAMERR error = dcamapi_init( &apiInit );
+
+    if( !failed( dcambuf_alloc( m_cameraHandle, m_frameCount ) ) )
     {
-        free( m_acqBuff.memory );
-        m_acqBuff.memory      = NULL;
-        m_acqBuff.memory_size = 0;
+        m_dcamBuffersAllocated = true;
     }
 
     std::cerr << __LINE__ << '\n';
 
-    dcamdev_close()
+    dcamdev_close( m_cameraHandle );
 
-            std::cerr
-        << __LINE__ << '\n';
+    std::cerr << __LINE__ << '\n';
 
-    dcamapi_uninit()
+    dcamapi_uninit();
 
-            std::cerr
-        << __LINE__ << '\n';
+    std::cerr << __LINE__ << '\n';
 
     // Have to initialize the library every time.  Otherwise we won't catch a newly booted camera.
     dcamapi_init( &apiInit );
@@ -1025,7 +1012,7 @@ inline int orcaCtrl::getAcquisitionState()
 {
     int32 captureStatus = 0;
 
-    DCAMERR error = dcamcap_status( m_hdcam, &captureStatus );
+    DCAMERR error = dcamcap_status( m_cameraHandle, &captureStatus );
 
     const bool acquisitionRunning = !failed( error ) && captureStatus == DCAMCAP_STATUS_BUSY;
 
@@ -1036,7 +1023,7 @@ inline int orcaCtrl::getAcquisitionState()
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         state( stateCodes::ERROR );
         return -1;
     }
@@ -1719,8 +1706,8 @@ inline int orcaCtrl::configureAcquisition()
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
                 return -1;
-            std::cerr << dcamErrorString( m_hdcam, error ) << "\n";
-            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+            std::cerr << dcamErrorString( m_cameraHandle, error ) << "\n";
+            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
             state( stateCodes::ERROR );
             return -1;
         }
@@ -1779,7 +1766,7 @@ inline int orcaCtrl::configureAcquisition()
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         state( stateCodes::ERROR );
         return -1;
     }
@@ -1995,10 +1982,10 @@ inline int orcaCtrl::configureAcquisition()
         error = orcaAdvanced_SetAcquisitionBuffer( m_cameraHandle, &m_acqBuff );
         if( error != DCAMERR_NONE )
         {
-            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
             state( stateCodes::ERROR );
 
-            std::cerr << "-->" << dcamErrorString( m_hdcam, error ) << "\n";
+            std::cerr << "-->" << dcamErrorString( m_cameraHandle, error ) << "\n";
         }
     }
 
@@ -2034,7 +2021,7 @@ inline int orcaCtrl::configureAcquisition()
     error = orca_StartAcquisition( m_cameraHandle );
     if( error != DCAMERR_NONE )
     {
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         state( stateCodes::ERROR );
 
         return -1;
@@ -2075,7 +2062,7 @@ inline int orcaCtrl::acquireAndCheckValid()
 
     if( error != DCAMERR_NONE )
     {
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         state( stateCodes::ERROR );
 
         return -1;
@@ -2134,7 +2121,7 @@ inline int orcaCtrl::reconfig()
     DCAMERR error = orca_StopAcquisition( m_cameraHandle );
     if( error != DCAMERR_NONE )
     {
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         state( stateCodes::ERROR );
 
         return -1;
@@ -2152,7 +2139,7 @@ inline int orcaCtrl::reconfig()
 
         if( error != DCAMERR_NONE )
         {
-            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
             state( stateCodes::ERROR );
             return -1;
         }
@@ -2166,7 +2153,7 @@ inline int orcaCtrl::reconfig()
         error = orca_WaitForAcquisitionUpdate( m_cameraHandle, camTimeOut, &available, &status );
         if( error != DCAMERR_NONE )
         {
-            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
             state( stateCodes::ERROR );
             return -1;
         }
@@ -2193,7 +2180,7 @@ inline int orcaCtrl::reconfig()
         error = orca_IsAcquisitionRunning( m_cameraHandle, &running );
         if( error != DCAMERR_NONE )
         {
-            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
             state( stateCodes::ERROR );
             return -1;
         }
