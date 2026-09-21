@@ -25,7 +25,7 @@
     #define BREADCRUMB
 #endif
 
-// DCAM error string helper function
+// DCAM error string helper function (don't need to convert enum2string)
 inline std::string dcamErrorString( HDCAM hdcam, DCAMERR error )
 {
     char text[256]{};
@@ -39,6 +39,25 @@ inline std::string dcamErrorString( HDCAM hdcam, DCAMERR error )
     if( failed( dcamdev_getstring( hdcam, &info ) ) )
     {
         return "DCAM error " + std::to_string( static_cast<int32>( error ) );
+    }
+
+    return text;
+}
+
+// Helper function to get device ID string from DCAM
+inline std::string dcamDeviceString( HDCAM hdcam, DCAM_IDSTR stringID )
+{
+    char text[256]{};
+
+    DCAMDEV_STRING info{};
+    info.size      = sizeof( info );
+    info.iString   = static_cast<int32>( stringID );
+    info.text      = text;
+    info.textbytes = sizeof( text );
+
+    if( failed( dcamdev_getstring( hdcam, &info ) ) )
+    {
+        return {};
     }
 
     return text;
@@ -844,36 +863,66 @@ inline int orcaCtrl::connect()
             continue;
         }
         // Query camera id / model
-        int32 camNum = DCAM_IDSTR_CAMERAID;
-        if( dcamdev_getstring( deviceOpen.hdcam, camNum ) == m_serialNumber )
+
+        const std::string cameraID = dcamDeviceString( deviceOpen.hdcam, DCAM_IDSTR_CAMERAID );
+
+        if( cameraID == m_serialNumber )
         {
-            log<text_log>( "Camera was found.  Now connecting." );
+            log<text_log>( "Found camera with ID " + m_serialNumber );
+            m_cameraName  = dcamDeviceString( deviceOpen.hdcam, DCAM_IDSTR_VENDOR );
+            m_cameraModel = dcamDeviceString( deviceOpen.hdcam, DCAM_IDSTR_MODEL );
 
-            error = dcamdev_open( &deviceOpen );
-            if( error == DCAMERR_NONE )
+            m_fanControlSupported = false;
+            m_fanStatusSupported  = false;
+
+            // Check for camera cooling support
+            DCAMPROP_ATTR fanAttr{};
+            fanAttr.cbSize = sizeof( fanAttr );
+            fanAttr.iProp  = DCAMPROP_SENSORCOOLER__OFF;
+
+            if( m_fanSpeedControlEnabled )
             {
-                m_cameraName  = dcamdev_getstring( deviceOpen.hdcam, DCAM_IDSTR_VENDOR );
-                m_cameraModel = dcamErrorString( deviceOpen.hdcam, DCAM_IDSTR_MODEL );
 
-                error = dcamdev_getstring( deviceOpen.hdcam, DCAM_IDSTR_MODEL );
-                if( error != DCAMERR_NONE )
+                error                 = dcamprop_getattr( deviceOpen.hdcam, &fanAttr );
+                m_fanControlSupported = error == DCAMERR_NONE && ( fanAttr.attribute & DCAMPROP_ATTR_WRITABLE );
+
+                if( failed( error ) && error != DCAMERR_NOTSUPPORT )
                 {
-                    log<software_error>( { __FILE__, __LINE__, "failed to get camera model" } );
+                    if( powerState() != 1 || powerStateTarget() != 1 )
+                        return 0;
+
+                    state( stateCodes::ERROR );
+                    log<software_error>( { __FILE__, __LINE__, 0, error, "Error checking CoolingFan support." } );
+                    dcamdev_close( deviceOpen.hdcam );
+                    return -1;
                 }
 
-                m_fanControlSupported = false;
-                m_fanStatusSupported  = false;
+                // m_fanControlSupported = exists;
 
-                // Check for camera cooling support
-                DCAMPROP_ATTR fanAttr{};
-                fanAttr.cbSize = sizeof( fanAttr );
-                fanAttr.iProp  = DCAMPROP_SENSORCOOLER__OFF;
-
-                if( m_fanSpeedControlEnabled )
+                if( !m_fanControlSupported )
                 {
+                    if( powerState() != 1 || powerStateTarget() != 1 )
+                        return 0;
 
-                    error                 = dcamprop_getattr( deviceOpen.hdcam, &fanAttr );
-                    m_fanControlSupported = error == DCAMERR_NONE && ( fanAttr.attribute & DCAMPROP_ATTR_WRITABLE );
+                    state( stateCodes::ERROR );
+                    log<software_error>( {
+                        __FILE__, __LINE__,
+                            "Fan control enabled in config, but DisableCoolingFan is not supported
+                            " " by this camera." } );
+                            dcamdev_close( deviceOpen.hdcam );
+                        return -1;
+                }
+
+                    // Check that the cooling fan status exists
+                    // TODO: revisit this
+
+                    exists = false;
+                    DCAMPROP_ATTR coolerAttr{};
+                    coolerAttr.cbSize = sizeof( coolerAttr );
+                    coolerAttr.iProp  = DCAMPROP_SENSORCOOLERSTATUS;
+
+                    error  = dcamprop_getattr( deviceOpen.hdcam, &coolerAttr );
+                    exists = error == DCAMERR_NONE && ( fanAttr.attribute & DCAMPROP_ATTR_READABLE );
 
                     if( failed( error ) && error != DCAMERR_NOTSUPPORT )
                     {
@@ -881,1388 +930,1345 @@ inline int orcaCtrl::connect()
                             return 0;
 
                         state( stateCodes::ERROR );
-                        log<software_error>( { __FILE__, __LINE__, 0, error, "Error checking CoolingFan support." } );
+                        log<software_error>(
+                            { __FILE__, __LINE__, 0, error, "Error checking CoolingFanStatus support." } );
                         dcamdev_close( deviceOpen.hdcam );
                         return -1;
                     }
 
-                    // m_fanControlSupported = exists;
-
-                    if( !m_fanControlSupported )
+                    if( exists )
                     {
-                        if( powerState() != 1 || powerStateTarget() != 1 )
-                            return 0;
+                        int32      readableStatus = 0;
+                        const bool readable       = !failed( error ) && readableStatus == DCAMPROP_ATTR_READABLE;
 
-                        state( stateCodes::ERROR );
-                        log<software_error>( {
-                            __FILE__, __LINE__,
-                                "Fan control enabled in config, but DisableCoolingFan is not supported
-                                " " by this camera." } );
-                                dcamdev_close( deviceOpen.hdcam );
-                            return -1;
-                    }
-
-                        // Check that the cooling fan status exists
-                        // TODO: revisit this
-
-                        exists = false;
-                        DCAMPROP_ATTR coolerAttr{};
-                        coolerAttr.cbSize = sizeof( coolerAttr );
-                        coolerAttr.iProp  = DCAMPROP_SENSORCOOLERSTATUS;
-
-                        error  = dcamprop_getattr( deviceOpen.hdcam, &coolerAttr );
-                        exists = error == DCAMERR_NONE && ( fanAttr.attribute & DCAMPROP_ATTR_READABLE );
-
+                        error = dcamprop_getattr( deviceOpen.hdcam, &coolerAttr );
                         if( failed( error ) && error != DCAMERR_NOTSUPPORT )
                         {
                             if( powerState() != 1 || powerStateTarget() != 1 )
                                 return 0;
 
                             state( stateCodes::ERROR );
-                            log<software_error>(
-                                { __FILE__, __LINE__, 0, error, "Error checking CoolingFanStatus support." } );
-                            dcamdev_close( deviceOpen.hdcam );
-                            return -1;
+                                log<software_error>(
+                                    {
+                                __FILE__, __LINE__, 0, error,
+                                    "Error checking CoolingFanStatus
+                                    readability." } );
+                                    dcamdev_close( deviceOpen.hdcam );
+                                return -1;
+                            }
+
+                            m_fanStatusSupported = readable;
                         }
 
-                        if( exists )
+                        if( !m_fanStatusSupported )
                         {
-                            int32      readableStatus = 0;
-                            const bool readable       = !failed( error ) && readableStatus == DCAMPROP_ATTR_READABLE;
+                        log<text_log>(
+                            "cooling-fan status parameter unavailable; using commanded state without hardware
+                            readback", logPrio::LOG_NOTICE );
+                        }
+                }
 
-                            error = dcamprop_getattr( deviceOpen.hdcam, &coolerAttr );
-                            if( failed( error ) && error != DCAMERR_NOTSUPPORT )
-                            {
-                                if( powerState() != 1 || powerStateTarget() != 1 )
-                                    return 0;
+                state( stateCodes::CONNECTED );
+                log<text_log>( "Connected to " + m_cameraName + " [S/N " + m_serialNumber + "]" );
 
-                                state( stateCodes::ERROR );
-                                    log<software_error>(
-                                        {
-                                    __FILE__, __LINE__, 0, error,
-                                        "Error checking CoolingFanStatus
-                                        readability." } );
-                                        dcamdev_close( deviceOpen.hdcam );
-                                    return -1;
-                                }
+                dcamdev_close( deviceOpen.hdcam );
 
-                                m_fanStatusSupported = readable;
-                            }
+                m_readoutSpeedNameSet = m_defaultReadoutSpeed;
+                // m_vShiftSpeedNameSet  = m_defaultVShiftSpeed;
+                if( m_fanSpeedControlEnabled )
+                {
+                        m_fanSpeedNameSet    = m_defaultFanSpeed;
+                        m_fanSpeedLogPending = true;
+                }
 
-                            if( !m_fanStatusSupported )
-                            {
-                            log<text_log>(
-                                "cooling-fan status parameter unavailable; using commanded state without hardware
-                                readback", logPrio::LOG_NOTICE );
-                            }
+                return 0;
+                }
+                else
+                {
+                    if( powerState() != 1 || powerStateTarget() != 1 )
+                        return 0;
+
+                    state( stateCodes::ERROR );
+                    if( !stateLogged() )
+                    {
+                        log<software_error>( { __FILE__, __LINE__, 0, error, "Error connecting to camera." } );
                     }
-
-                    state( stateCodes::CONNECTED );
-                    log<text_log>( "Connected to " + m_cameraName + " [S/N " + m_serialNumber + "]" );
 
                     dcamdev_close( deviceOpen.hdcam );
 
-                    m_readoutSpeedNameSet = m_defaultReadoutSpeed;
-                    // m_vShiftSpeedNameSet  = m_defaultVShiftSpeed;
-                    if( m_fanSpeedControlEnabled )
-                    {
-                            m_fanSpeedNameSet    = m_defaultFanSpeed;
-                            m_fanSpeedLogPending = true;
-                    }
-
-                    return 0;
-                    }
-                    else
-                    {
-                        if( powerState() != 1 || powerStateTarget() != 1 )
-                            return 0;
-
-                        state( stateCodes::ERROR );
-                        if( !stateLogged() )
-                        {
-                            log<software_error>( { __FILE__, __LINE__, 0, error, "Error connecting to camera." } );
-                        }
-
-                        dcamdev_close( deviceOpen.hdcam );
-
-                        dcamapi_uninit();
-                        return -1;
-                    }
+                    dcamapi_uninit();
+                    return -1;
                 }
             }
-
-            state( stateCodes::NODEVICE );
-            if( !stateLogged() )
-            {
-                log<text_log>( "Camera not found in available ids." );
-            }
-
-            dcamdev_close( deviceOpen.hdcam );
-
-            dcamapi_uninit();
-
-            return 0;
         }
 
-        inline int orcaCtrl::getAcquisitionState()
+        state( stateCodes::NODEVICE );
+        if( !stateLogged() )
         {
-            int32 captureStatus = 0;
+            log<text_log>( "Camera not found in available ids." );
+        }
 
-            DCAMERR error = dcamcap_status( m_hdcam, &captureStatus );
+        dcamdev_close( deviceOpen.hdcam );
 
-            const bool acquisitionRunning = !failed( error ) && captureStatus == DCAMCAP_STATUS_BUSY;
+        dcamapi_uninit();
 
-            if( MagAOXAppT::m_powerState == 0 )
-                return 0;
+        return 0;
+    }
 
+    inline int orcaCtrl::getAcquisitionState()
+    {
+        int32 captureStatus = 0;
+
+        DCAMERR error = dcamcap_status( m_hdcam, &captureStatus );
+
+        const bool acquisitionRunning = !failed( error ) && captureStatus == DCAMCAP_STATUS_BUSY;
+
+        if( MagAOXAppT::m_powerState == 0 )
+            return 0;
+
+        if( error != DCAMERR_NONE )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+            state( stateCodes::ERROR );
+            return -1;
+        }
+
+        if( acquisitionRunning )
+            state( stateCodes::OPERATING );
+        else
+            state( stateCodes::READY );
+
+        if( !acquisitionRunning )
+        {
+            log<text_log>( "acqusition stopped. restarting", logPrio::LOG_ERROR );
+            m_reconfig = true;
+        }
+
+        return 0;
+    }
+
+    inline int orcaCtrl::getTemps()
+    {
+        double currTemperature;
+
+        if( getorcaParameter( currTemperature, DCAM_IDPROP_SENSORTEMPERATURE ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+
+            log<software_error>( { __FILE__, __LINE__ } );
+            state( stateCodes::ERROR );
+            return -1;
+        }
+
+        m_ccdTemp = currTemperature;
+
+        // orcaSensorTemperatureStatus
+        int32 status;
+
+        if( getorcaParameter( status, DCAM_IDPROP_SENSORCOOLERSTATUS ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+
+            log<software_error>( { __FILE__, __LINE__ } );
+            state( stateCodes::ERROR );
+            return -1;
+        }
+
+        if( status == DCAMPROP_SENSORCOOLERSTATUS__BUSY )
+        {
+            m_tempControlStatus    = true;
+            m_tempControlOnTarget  = false;
+            m_tempControlStatusStr = "UNLOCKED";
+        }
+        else if( status == DCAMPROP_SENSORCOOLERSTATUS__READY )
+        {
+            m_tempControlStatus    = true;
+            m_tempControlOnTarget  = true;
+            m_tempControlStatusStr = "LOCKED";
+        }
+        else if( status == DCAMPROP_SENSORCOOLERSTATUS__WARNING )
+        {
+            m_tempControlStatus    = false;
+            m_tempControlOnTarget  = false;
+            m_tempControlStatusStr = "FAULTED";
+            log<text_log>( "temperature control faulted", logPrio::LOG_ALERT );
+        }
+        else
+        {
+            m_tempControlStatus    = false;
+            m_tempControlOnTarget  = false;
+            m_tempControlStatusStr = "UNKNOWN";
+        }
+
+        recordCamera();
+
+        return 0;
+    }
+
+    inline int orcaCtrl::getFanSpeed()
+    {
+        if( !m_fanStatusSupported )
+            return 0;
+
+        int32 status;
+
+        if( getorcaParameter( status, DCAM_IDPROP_SENSORCOOLER ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+
+            log<software_error>( { __FILE__, __LINE__ } );
+            state( stateCodes::ERROR );
+            return -1;
+        }
+
+        // bool fanForcedOn = false;
+
+        if( status == DCAMPROP_SENSORCOOLER__OFF )
+        {
+            m_fanSpeedName = "off";
+        }
+        else if( status == DCAMPROP_SENSORCOOLER__ON )
+        {
+            m_fanSpeedName = "on";
+        }
+        // else if( status == orcaCoolingFanStatus_ForcedOn )
+        // {
+        //     m_fanSpeedName = "on";
+        //     fanForcedOn    = true;
+        // }
+        else
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "Unknown cooling-fan status returned by orca." } );
+        }
+
+        // if( fanForcedOn && !m_fanForcedOn )
+        // {
+        //     log<text_log>( "cooling fan forced on by camera", logPrio::LOG_NOTICE );
+        // }
+
+        // m_fanForcedOn   = fanForcedOn;
+        m_fanSpeedValid = true;
+        recordCamera();
+
+        return 0;
+    }
+
+    inline int orcaCtrl::setFPS()
+    {
+        return 0;
+    }
+
+    inline int orcaCtrl::powerOnDefaults()
+    {
+        m_ccdTempSetpt = -35; // This is the power on setpoint
+
+        /*m_currentROI.x = 511.5;
+        m_currentROI.y = 511.5;
+        m_currentROI.w = 1024;
+        m_currentROI.h = 1024;
+        m_currentROI.bin_x = 1;
+        m_currentROI.bin_y = 1;*/
+
+        m_readoutSpeedName = "Standard";
+        // m_vShiftSpeedName  = "1_2us";
+
+        if( m_fanSpeedControlEnabled )
+        {
+            m_fanSpeedName    = m_defaultFanSpeed;
+            m_fanSpeedNameSet = m_defaultFanSpeed;
+        }
+        else
+        {
+            m_fanSpeedName.clear();
+            m_fanSpeedNameSet.clear();
+        }
+
+        m_fanForcedOn         = false;
+        m_fanControlSupported = false;
+        m_fanStatusSupported  = false;
+        m_fanSpeedValid       = false;
+        m_fanSpeedLogPending  = m_fanSpeedControlEnabled;
+
+        return 0;
+    }
+
+    inline int orcaCtrl::setTempControl()
+    {
+        // Always on
+        m_tempControlStatus    = true;
+        m_tempControlStatusSet = true;
+        updateSwitchIfChanged( m_indiP_tempcont, "toggle", pcf::IndiElement::On, INDI_IDLE );
+        recordCamera( true );
+        return 0;
+    }
+
+    inline int orcaCtrl::setTempSetPt()
+    {
+        ///\todo bounds check here.
+        recordCamera( true );
+        m_reconfig = true;
+        return 0;
+    }
+
+    inline int orcaCtrl::setReadoutSpeed()
+    {
+        recordCamera( true );
+        m_reconfig = true;
+        return 0;
+    }
+
+    // inline int orcaCtrl::setVShiftSpeed()
+    // {
+    //     recordCamera( true );
+    //     m_reconfig = true;
+    //     return 0;
+    // }
+
+    inline int orcaCtrl::setFanSpeed()
+    {
+        m_fanSpeedLogPending = true;
+        recordCamera( true );
+        m_reconfig = true;
+        return 0;
+    }
+
+    // inline int orcaCtrl::setEMGain()
+    // {
+    //     int32  adcQual;
+    //     double adcSpeed;
+
+    //     if( readoutParams( adcQual, adcSpeed, m_readoutSpeedName ) < 0 )
+    //     {
+    //         log<software_error>( { __FILE__, __LINE__, "Invalid readout speed: " + m_readoutSpeedNameSet } );
+    //         state( stateCodes::ERROR );
+    //         return -1;
+    //     }
+
+    //     if( adcQual != orcaAdcQuality_ElectronMultiplied )
+    //     {
+    //         m_emGain   = 1;
+    //         m_adcSpeed = adcSpeed;
+    //         recordCamera( true );
+    //         log<text_log>( "Attempt to set EM gain while in conventional amplifier.", logPrio::LOG_NOTICE );
+    //         return 0;
+    //     }
+
+    //     int32 emg = m_emGainSet;
+    //     if( emg < 0 )
+    //     {
+    //         emg = 0;
+    //         log<text_log>( "EM gain limited to 0", logPrio::LOG_WARNING );
+    //     }
+
+    //     if( emg > m_maxEMGain )
+    //     {
+    //         emg = m_maxEMGain;
+    //         log<text_log>( "EM gain limited to maxEMGain = " + std::to_string( emg ), logPrio::LOG_WARNING );
+    //     }
+
+    //     recordCamera( true );
+    //     if( setorcaParameterOnline( m_modelHandle, orcaParameter_AdcEMGain, emg ) < 0 )
+    //     {
+    //         if( powerState() != 1 || powerStateTarget() != 1 )
+    //             return -1;
+    //         log<software_error>( { __FILE__, __LINE__, "Error setting EM gain" } );
+    //         return -1;
+    //     }
+
+    //     int32 AdcEMGain;
+    //     if( getorcaParameter( AdcEMGain, orcaParameter_AdcEMGain ) < 0 )
+    //     {
+    //         if( powerState() != 1 || powerStateTarget() != 1 )
+    //             return -1;
+    //         return log<software_error, -1>( { __FILE__, __LINE__, "could not get AdcEMGain" } );
+    //     }
+    //     m_emGain   = AdcEMGain;
+    //     m_adcSpeed = adcSpeed;
+    //     recordCamera( true );
+    //     return 0;
+    // }
+
+    // void orcaCtrl::updateFxnGenSync()
+    // {
+
+    //     std::cerr << "Setting fxngen frequency to " << std::to_string( m_fps ) << " Hz" << std::endl;
+    //     m_indiP_fxngensync_freq["target"] = m_fps;
+    //     sendNewProperty( m_indiP_fxngensync_freq );
+
+    //     // make sure fxngen is on!
+    //     m_indiP_fxngensync_output["value"] = "On";
+    //     sendNewProperty( m_indiP_fxngensync_output );
+    // }
+
+    inline int orcaCtrl::setExpTime()
+    {
+        long   intexptime = m_expTimeSet * 1000 * 10000 + 0.5;
+        double exptime    = ( (double)intexptime ) / 10000;
+        capExpTime( exptime );
+
+        int rv;
+
+        recordCamera( true );
+
+        if( state() == stateCodes::OPERATING )
+        {
+            rv = setorcaParameterOnline( m_modelHandle, DCAM_IDPROP_EXPOSURETIME, exptime );
+        }
+        else
+        {
+            rv = setorcaParameter( m_modelHandle, DCAM_IDPROP_EXPOSURETIME, exptime );
+        }
+
+        if( rv < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            log<software_error>( { __FILE__, __LINE__, "Error setting exposure time" } );
+            return -1;
+        }
+
+        m_expTime = exptime / 1000.0;
+
+        recordCamera( true );
+
+        updateIfChanged( m_indiP_exptime, "current", m_expTime, INDI_IDLE );
+
+        if( getorcaParameter( m_FrameRateCalculation, orcaParameter_FrameRateCalculation ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            log<software_error>( { __FILE__, __LINE__, "could not get FrameRateCalculation" } );
+        }
+        m_fps = m_FrameRateCalculation;
+
+        if( m_synchro && !m_otherCamName.empty() )
+        {
+            std::cerr << "Setting " << m_otherCamName << " exptime to " << std::to_string( m_expTime ) << std::endl;
+            m_indiP_otherCamExptime["target"] = m_expTime;
+            sendNewProperty( m_indiP_otherCamExptime );
+
+            updateFxnGenSync();
+        }
+
+        recordCamera( true );
+
+        return 0;
+    }
+
+    inline int orcaCtrl::capExpTime( double &exptime )
+    {
+        // cap at minimum possible value
+        if( exptime < m_ReadOutTimeCalculation )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            log<text_log>( "Got exposure time " + std::to_string( exptime ) + " ms but min value is " +
+                           std::to_string( m_ReadOutTimeCalculation ) + " ms" );
+            long intexptime = m_ReadOutTimeCalculation * 10000 + 0.5;
+            exptime         = ( (double)intexptime ) / 10000;
+        }
+
+        return 0;
+    }
+
+    inline int orcaCtrl::checkNextROI()
+    {
+        return 0;
+    }
+
+    // Set ROI property to busy if accepted, set toggle to Off and Idlw either way.
+    // Set ROI actual
+    // Update current values (including struct and indiP) and set to OK when done
+    inline int orcaCtrl::setNextROI()
+    {
+        updateSwitchIfChanged( m_indiP_roi_set, "request", pcf::IndiElement::Off, INDI_IDLE );
+        m_reconfig = true;
+
+        return 0;
+    }
+
+    inline bool orcaCtrl::checkFocus()
+    {
+        return checkFocusSwitchState();
+    }
+
+    inline int orcaCtrl::gotoFocus()
+    {
+        return sendGotoFocusCommand();
+    }
+
+    inline int orcaCtrl::setShutter( int sh )
+    {
+        return dssShutter<orcaCtrl>::setShutterState( sh );
+    }
+
+    inline int orcaCtrl::configureAcquisition()
+    {
+
+        int32 readoutStride;
+        int32 framesPerReadout;
+        int32 frameStride;
+        // int32 frameSize;
+        int32 pixelBitDepth;
+
+        m_camera_timestamp = 0; // reset tracked timestamp
+
+        std::unique_lock<std::mutex> lock( m_indiMutex );
+
+        // Time stamp handling
+        if( orca_SetParameterIntegerValue( m_modelHandle, orcaParameter_TimeStamps, m_timeStampMask ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            log<software_error>( { __FILE__, __LINE__, "Could not set time stamp mask" } );
+        }
+        if( orca_GetParameterLargeIntegerValue( m_modelHandle, orcaParameter_TimeStampResolution, &m_tsRes ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            log<software_error>( { __FILE__, __LINE__, "Could not get timestamp resolution" } );
+        }
+
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        // Check Frame Transfer
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+
+        int32 cmode;
+        if( getorcaParameter( cmode, orcaParameter_ReadoutControlMode ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            log<software_error>( { __FILE__, __LINE__, "could not get Readout Control Mode" } );
+            return -1;
+        }
+
+        if( cmode != orcaReadoutControlMode_FrameTransfer )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            log<software_error>( { __FILE__, __LINE__, "Readout Control Mode not configured for frame transfer" } );
+            return -1;
+        }
+
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        // Cooling Fan
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+
+        if( m_fanSpeedControlEnabled )
+        {
+            static constexpr int32 c_enableCoolingFan  = 0;
+            static constexpr int32 c_disableCoolingFan = 1;
+
+            std::string priorFanSpeed     = m_fanSpeedName;
+            int32       disableCoolingFan = c_enableCoolingFan;
+
+            if( m_fanSpeedNameSet == "on" )
+            {
+                disableCoolingFan = c_enableCoolingFan;
+            }
+            else if( m_fanSpeedNameSet == "off" )
+            {
+                disableCoolingFan = c_disableCoolingFan;
+            }
+            else
+            {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                    return -1;
+                log<software_error>( { __FILE__, __LINE__, "Invalid fan speed: " + m_fanSpeedNameSet } );
+                state( stateCodes::ERROR );
+                return -1;
+            }
+
+            if( setorcaParameter( m_modelHandle, orcaParameter_DisableCoolingFan, disableCoolingFan ) < 0 )
+            {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                    return -1;
+                log<software_error>( { __FILE__, __LINE__, "Error setting cooling-fan state" } );
+                state( stateCodes::ERROR );
+                return -1;
+            }
+
+            m_fanSpeedName  = m_fanSpeedNameSet;
+            m_fanSpeedValid = true;
+            m_fanForcedOn   = false;
+
+            if( m_fanSpeedName != priorFanSpeed )
+            {
+                log<text_log>( "fan speed changed from '" + priorFanSpeed + "' to '" + m_fanSpeedName + "'",
+                               logPrio::LOG_NOTICE );
+            }
+            else if( m_fanSpeedLogPending )
+            {
+                log<text_log>( "fan speed set to '" + m_fanSpeedName + "'", logPrio::LOG_NOTICE );
+            }
+
+            m_fanSpeedLogPending = false;
+        }
+
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        // Temperature
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+
+        if( setorcaParameter( orcaParameter_SensorTemperatureSetPoint, m_ccdTempSetpt ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            log<software_error>( { __FILE__, __LINE__, "Error setting temperature setpoint" } );
+            state( stateCodes::ERROR );
+            return -1;
+        }
+
+        // log<text_log>( "Set temperature set point: " + std::to_string(m_ccdTempSetpt) + " C");
+
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        // ADC Speed and Quality
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+
+        // int32  adcQual;
+        // double adcSpeed;
+
+        // if( readoutParams( adcQual, adcSpeed, m_readoutSpeedNameSet ) < 0 )
+        // {
+        //     if( powerState() != 1 || powerStateTarget() != 1 )
+        //         return -1;
+        //     log<software_error>( { __FILE__, __LINE__, "Invalid readout speed: " + m_readoutSpeedNameSet } );
+        //     state( stateCodes::ERROR );
+        //     return -1;
+        // }
+
+        // if( setorcaParameter( m_modelHandle, orcaParameter_AdcSpeed, adcSpeed, false ) <
+        //     0 ) // don't commit b/c it will error if quality mismatched
+        // {
+        //     if( powerState() != 1 || powerStateTarget() != 1 )
+        //         return -1;
+        //     log<software_error>( { __FILE__, __LINE__, "Error setting ADC Speed" } );
+        //     // state(stateCodes::ERROR);
+        //     // return -1;
+        // }
+
+        // if( setorcaParameter( m_modelHandle, orcaParameter_AdcQuality, adcQual ) < 0 )
+        // {
+        //     if( powerState() != 1 || powerStateTarget() != 1 )
+        //         return -1;
+        //     log<software_error>( { __FILE__, __LINE__, "Error setting ADC Quality" } );
+        //     state( stateCodes::ERROR );
+        //     return -1;
+        // }
+        // m_adcSpeed         = adcSpeed;
+        // m_readoutSpeedName = m_readoutSpeedNameSet;
+        // log<text_log>( "Readout speed set to: " + m_readoutSpeedNameSet );
+
+        // if( adcQual == orcaAdcQuality_LowNoise )
+        // {
+        //     m_emGain    = 1.0;
+        //     m_emGainSet = 1.0;
+        // }
+
+        // //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        // //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        // // Vertical Shift Rate
+        // //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        // //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+
+        // double vss;
+        // if( vshiftParams( vss, m_vShiftSpeedNameSet ) < 0 )
+        // {
+        //     if( powerState() != 1 || powerStateTarget() != 1 )
+        //         return -1;
+        //     log<software_error>( { __FILE__, __LINE__, "Invalid vertical shift speed: " + m_vShiftSpeedNameSet }
+        //     ); state( stateCodes::ERROR ); return -1;
+        // }
+
+        // if( setorcaParameter( m_modelHandle, orcaParameter_VerticalShiftRate, vss ) < 0 )
+        // {
+        //     if( powerState() != 1 || powerStateTarget() != 1 )
+        //         return -1;
+        //     log<software_error>( { __FILE__, __LINE__, "Error setting Vertical Shift Rate" } );
+        //     state( stateCodes::ERROR );
+        //     return -1;
+        // }
+
+        // m_vShiftSpeedName = m_vShiftSpeedNameSet;
+        // m_vshiftSpeed     = vss;
+        // log<text_log>( "Vertical Shift Rate set to: " + m_vShiftSpeedName );
+
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        // Dimensions
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+
+        orcaRois nextrois;
+        orcaRoi  nextroi;
+
+        nextrois.roi_array = &nextroi;
+        nextrois.roi_count = 1;
+
+        int roi_err = false;
+        if( m_defaultFlip == fgFlipLR || m_defaultFlip == fgFlipUDLR )
+        {
+            nextroi.x = ( ( 1023 - m_nextROI.x ) - 0.5 * ( (float)m_nextROI.w - 1.0 ) );
+        }
+        else
+        {
+            nextroi.x = ( m_nextROI.x - 0.5 * ( (float)m_nextROI.w - 1.0 ) );
+        }
+
+        if( nextroi.x < 0 )
+        {
+            log<software_error>( { __FILE__, __LINE__, "can't set ROI to x center < 0" } );
+            roi_err = true;
+        }
+
+        if( nextroi.x > 1023 )
+        {
+            log<software_error>( { __FILE__, __LINE__, "can't set ROI to x center > 1023" } );
+            roi_err = true;
+        }
+
+        if( m_defaultFlip == fgFlipUD || m_defaultFlip == fgFlipUDLR )
+        {
+            nextroi.y = ( ( 1023 - m_nextROI.y ) - 0.5 * ( (float)m_nextROI.h - 1.0 ) );
+        }
+        else
+        {
+            nextroi.y = ( m_nextROI.y - 0.5 * ( (float)m_nextROI.h - 1.0 ) );
+        }
+
+        if( nextroi.y < 0 )
+        {
+            log<software_error>( { __FILE__, __LINE__, "can't set ROI to y center < 0" } );
+            roi_err = true;
+        }
+
+        if( nextroi.y > 1023 )
+        {
+            log<software_error>( { __FILE__, __LINE__, "can't set ROI to y center > 1023" } );
+            roi_err = true;
+        }
+
+        nextroi.width = m_nextROI.w;
+
+        if( nextroi.width < 0 )
+        {
+            log<software_error>( { __FILE__, __LINE__, "can't set ROI to width to be < 0" } );
+            roi_err = true;
+        }
+
+        if( nextroi.x + nextroi.width > 1024 )
+        {
+            log<software_error>( { __FILE__, __LINE__, "can't set ROI to width such that edge is > 1023" } );
+            roi_err = true;
+        }
+
+        nextroi.height = m_nextROI.h;
+
+        if( nextroi.y + nextroi.height > 1024 )
+        {
+            log<software_error>( { __FILE__, __LINE__, "can't set ROI to height such that edge is > 1023" } );
+            roi_err = true;
+        }
+
+        if( nextroi.height < 0 )
+        {
+            log<software_error>( { __FILE__, __LINE__, "can't set ROI to height to be < 0" } );
+            roi_err = true;
+        }
+
+        nextroi.x_binning = m_nextROI.bin_x;
+
+        if( nextroi.x_binning < 0 )
+        {
+            log<software_error>( { __FILE__, __LINE__, "can't set ROI x binning < 0" } );
+            roi_err = true;
+        }
+
+        nextroi.y_binning = m_nextROI.bin_y;
+
+        if( nextroi.y_binning < 0 )
+        {
+            log<software_error>( { __FILE__, __LINE__, "can't set ROI y binning < 0" } );
+            roi_err = true;
+        }
+
+        DCAMERR error;
+
+        if( !roi_err )
+        {
+            error = orca_SetParameterRoisValue( m_cameraHandle, orcaParameter_Rois, &nextrois );
             if( error != DCAMERR_NONE )
             {
                 if( powerState() != 1 || powerStateTarget() != 1 )
                     return -1;
+                std::cerr << dcamErrorString( m_hdcam, error ) << "\n";
                 log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
                 state( stateCodes::ERROR );
                 return -1;
             }
-
-            if( acquisitionRunning )
-                state( stateCodes::OPERATING );
-            else
-                state( stateCodes::READY );
-
-            if( !acquisitionRunning )
-            {
-                log<text_log>( "acqusition stopped. restarting", logPrio::LOG_ERROR );
-                m_reconfig = true;
-            }
-
-            return 0;
         }
 
-        inline int orcaCtrl::getTemps()
+        if( getorcaParameter( readoutStride, orcaParameter_ReadoutStride ) < 0 )
         {
-            double currTemperature;
-
-            if( getorcaParameter( currTemperature, DCAM_IDPROP_SENSORTEMPERATURE ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-
-                log<software_error>( { __FILE__, __LINE__ } );
-                state( stateCodes::ERROR );
+            if( powerState() != 1 || powerStateTarget() != 1 )
                 return -1;
-            }
+            log<software_error>( { __FILE__, __LINE__, "Error getting readout stride" } );
+            state( stateCodes::ERROR );
+            return -1;
+        }
 
-            m_ccdTemp = currTemperature;
-
-            // orcaSensorTemperatureStatus
-            int32 status;
-
-            if( getorcaParameter( status, DCAM_IDPROP_SENSORCOOLERSTATUS ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-
-                log<software_error>( { __FILE__, __LINE__ } );
-                state( stateCodes::ERROR );
+        if( getorcaParameter( frameStride, orcaParameter_FrameStride ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
                 return -1;
-            }
+            log<software_error>( { __FILE__, __LINE__, "Error getting frame stride" } );
+            state( stateCodes::ERROR );
 
-            if( status == DCAMPROP_SENSORCOOLERSTATUS__BUSY )
-            {
-                m_tempControlStatus    = true;
-                m_tempControlOnTarget  = false;
-                m_tempControlStatusStr = "UNLOCKED";
-            }
-            else if( status == DCAMPROP_SENSORCOOLERSTATUS__READY )
-            {
-                m_tempControlStatus    = true;
-                m_tempControlOnTarget  = true;
-                m_tempControlStatusStr = "LOCKED";
-            }
-            else if( status == DCAMPROP_SENSORCOOLERSTATUS__WARNING )
-            {
-                m_tempControlStatus    = false;
-                m_tempControlOnTarget  = false;
-                m_tempControlStatusStr = "FAULTED";
-                log<text_log>( "temperature control faulted", logPrio::LOG_ALERT );
-            }
-            else
-            {
-                m_tempControlStatus    = false;
-                m_tempControlOnTarget  = false;
-                m_tempControlStatusStr = "UNKNOWN";
-            }
-
-            recordCamera();
-
-            return 0;
+            return -1;
         }
 
-        inline int orcaCtrl::getFanSpeed()
+        if( getorcaParameter( framesPerReadout, orcaParameter_FramesPerReadout ) < 0 )
         {
-            if( !m_fanStatusSupported )
-                return 0;
-
-            int32 status;
-
-            if( getorcaParameter( status, DCAM_IDPROP_SENSORCOOLER ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-
-                log<software_error>( { __FILE__, __LINE__ } );
-                state( stateCodes::ERROR );
+            if( powerState() != 1 || powerStateTarget() != 1 )
                 return -1;
-            }
-
-            // bool fanForcedOn = false;
-
-            if( status == DCAMPROP_SENSORCOOLER__OFF )
-            {
-                m_fanSpeedName = "off";
-            }
-            else if( status == DCAMPROP_SENSORCOOLER__ON )
-            {
-                m_fanSpeedName = "on";
-            }
-            // else if( status == orcaCoolingFanStatus_ForcedOn )
-            // {
-            //     m_fanSpeedName = "on";
-            //     fanForcedOn    = true;
-            // }
-            else
-            {
-                return log<software_error, -1>(
-                    { __FILE__, __LINE__, "Unknown cooling-fan status returned by orca." } );
-            }
-
-            // if( fanForcedOn && !m_fanForcedOn )
-            // {
-            //     log<text_log>( "cooling fan forced on by camera", logPrio::LOG_NOTICE );
-            // }
-
-            // m_fanForcedOn   = fanForcedOn;
-            m_fanSpeedValid = true;
-            recordCamera();
-
-            return 0;
+            log<software_error>( { __FILE__, __LINE__, "Error getting frames per readout" } );
+            state( stateCodes::ERROR );
+            return -1;
         }
 
-        inline int orcaCtrl::setFPS()
+        if( getorcaParameter( m_frameSize, orcaParameter_FrameSize ) < 0 )
         {
-            return 0;
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            log<software_error>( { __FILE__, __LINE__, "Error getting frame size" } );
+            state( stateCodes::ERROR );
+            return -1;
         }
 
-        inline int orcaCtrl::powerOnDefaults()
+        if( getorcaParameter( pixelBitDepth, orcaParameter_PixelBitDepth ) < 0 )
         {
-            m_ccdTempSetpt = -20; // This is the power on setpoint
-
-            /*m_currentROI.x = 511.5;
-            m_currentROI.y = 511.5;
-            m_currentROI.w = 1024;
-            m_currentROI.h = 1024;
-            m_currentROI.bin_x = 1;
-            m_currentROI.bin_y = 1;*/
-
-            m_readoutSpeedName = "Standard";
-            // m_vShiftSpeedName  = "1_2us";
-
-            if( m_fanSpeedControlEnabled )
-            {
-                m_fanSpeedName    = m_defaultFanSpeed;
-                m_fanSpeedNameSet = m_defaultFanSpeed;
-            }
-            else
-            {
-                m_fanSpeedName.clear();
-                m_fanSpeedNameSet.clear();
-            }
-
-            m_fanForcedOn         = false;
-            m_fanControlSupported = false;
-            m_fanStatusSupported  = false;
-            m_fanSpeedValid       = false;
-            m_fanSpeedLogPending  = m_fanSpeedControlEnabled;
-
-            return 0;
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            log<software_error>( { __FILE__, __LINE__, "Error getting pixel bit depth" } );
+            state( stateCodes::ERROR );
+            return -1;
         }
+        m_depth = pixelBitDepth;
 
-        inline int orcaCtrl::setTempControl()
+        const orcaRois *rois;
+        error = orca_GetParameterRoisValue( m_cameraHandle, orcaParameter_Rois, &rois );
+        if( error != DCAMERR_NONE )
         {
-            // Always on
-            m_tempControlStatus    = true;
-            m_tempControlStatusSet = true;
-            updateSwitchIfChanged( m_indiP_tempcont, "toggle", pcf::IndiElement::On, INDI_IDLE );
-            recordCamera( true );
-            return 0;
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+            state( stateCodes::ERROR );
+            return -1;
         }
+        m_xbinning         = rois->roi_array[0].x_binning;
+        m_currentROI.bin_x = m_xbinning;
+        m_ybinning         = rois->roi_array[0].y_binning;
+        m_currentROI.bin_y = m_ybinning;
 
-        inline int orcaCtrl::setTempSetPt()
+        std::cerr << rois->roi_array[0].x << "\n";
+        std::cerr << ( rois->roi_array[0].x - 1 ) << "\n";
+        std::cerr << rois->roi_array[0].width << "\n";
+        std::cerr << 0.5 * ( (float)( rois->roi_array[0].width - 1.0 ) ) << "\n";
+
+        if( m_defaultFlip == fgFlipLR || m_defaultFlip == fgFlipUDLR )
         {
-            ///\todo bounds check here.
-            recordCamera( true );
-            m_reconfig = true;
-            return 0;
+            m_currentROI.x = ( 1023.0 - rois->roi_array[0].x ) - 0.5 * ( (float)( rois->roi_array[0].width - 1.0 ) );
+            // nextroi.x = ((1023-m_nextROI.x) - 0.5*( (float) m_nextROI.w - 1.0));
         }
-
-        inline int orcaCtrl::setReadoutSpeed()
+        else
         {
-            recordCamera( true );
-            m_reconfig = true;
-            return 0;
+            m_currentROI.x = ( rois->roi_array[0].x ) + 0.5 * ( (float)( rois->roi_array[0].width - 1.0 ) );
         }
 
-        // inline int orcaCtrl::setVShiftSpeed()
-        // {
-        //     recordCamera( true );
-        //     m_reconfig = true;
-        //     return 0;
-        // }
-
-        inline int orcaCtrl::setFanSpeed()
+        if( m_defaultFlip == fgFlipUD || m_defaultFlip == fgFlipUDLR )
         {
-            m_fanSpeedLogPending = true;
-            recordCamera( true );
-            m_reconfig = true;
-            return 0;
+            m_currentROI.y = ( 1023.0 - rois->roi_array[0].y ) - 0.5 * ( (float)( rois->roi_array[0].height - 1.0 ) );
+            // nextroi.y = ((1023 - m_nextROI.y) - 0.5*( (float) m_nextROI.h - 1.0));
+        }
+        else
+        {
+            m_currentROI.y = ( rois->roi_array[0].y ) + 0.5 * ( (float)( rois->roi_array[0].height - 1.0 ) );
         }
 
-        // inline int orcaCtrl::setEMGain()
-        // {
-        //     int32  adcQual;
-        //     double adcSpeed;
+        m_currentROI.w = rois->roi_array[0].width;
+        m_currentROI.h = rois->roi_array[0].height;
 
-        //     if( readoutParams( adcQual, adcSpeed, m_readoutSpeedName ) < 0 )
-        //     {
-        //         log<software_error>( { __FILE__, __LINE__, "Invalid readout speed: " + m_readoutSpeedNameSet } );
-        //         state( stateCodes::ERROR );
-        //         return -1;
-        //     }
+        m_width  = rois->roi_array[0].width / rois->roi_array[0].x_binning;
+        m_height = rois->roi_array[0].height / rois->roi_array[0].y_binning;
+        orca_DestroyRois( rois );
 
-        //     if( adcQual != orcaAdcQuality_ElectronMultiplied )
-        //     {
-        //         m_emGain   = 1;
-        //         m_adcSpeed = adcSpeed;
-        //         recordCamera( true );
-        //         log<text_log>( "Attempt to set EM gain while in conventional amplifier.", logPrio::LOG_NOTICE );
-        //         return 0;
-        //     }
+        updateIfChanged( m_indiP_roi_x, "current", m_currentROI.x, INDI_OK );
+        updateIfChanged( m_indiP_roi_y, "current", m_currentROI.y, INDI_OK );
+        updateIfChanged( m_indiP_roi_w, "current", m_currentROI.w, INDI_OK );
+        updateIfChanged( m_indiP_roi_h, "current", m_currentROI.h, INDI_OK );
+        updateIfChanged( m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_OK );
+        updateIfChanged( m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_OK );
 
-        //     int32 emg = m_emGainSet;
-        //     if( emg < 0 )
-        //     {
-        //         emg = 0;
-        //         log<text_log>( "EM gain limited to 0", logPrio::LOG_WARNING );
-        //     }
+        // We also update target to the settable values
+        m_nextROI.x     = m_currentROI.x;
+        m_nextROI.y     = m_currentROI.y;
+        m_nextROI.w     = m_currentROI.w;
+        m_nextROI.h     = m_currentROI.h;
+        m_nextROI.bin_x = m_currentROI.bin_x;
+        m_nextROI.bin_y = m_currentROI.bin_y;
 
-        //     if( emg > m_maxEMGain )
-        //     {
-        //         emg = m_maxEMGain;
-        //         log<text_log>( "EM gain limited to maxEMGain = " + std::to_string( emg ), logPrio::LOG_WARNING );
-        //     }
+        updateIfChanged( m_indiP_roi_x, "target", m_currentROI.x, INDI_OK );
+        updateIfChanged( m_indiP_roi_y, "target", m_currentROI.y, INDI_OK );
+        updateIfChanged( m_indiP_roi_w, "target", m_currentROI.w, INDI_OK );
+        updateIfChanged( m_indiP_roi_h, "target", m_currentROI.h, INDI_OK );
+        updateIfChanged( m_indiP_roi_bin_x, "target", m_currentROI.bin_x, INDI_OK );
+        updateIfChanged( m_indiP_roi_bin_y, "target", m_currentROI.bin_y, INDI_OK );
 
-        //     recordCamera( true );
-        //     if( setorcaParameterOnline( m_modelHandle, orcaParameter_AdcEMGain, emg ) < 0 )
-        //     {
-        //         if( powerState() != 1 || powerStateTarget() != 1 )
-        //             return -1;
-        //         log<software_error>( { __FILE__, __LINE__, "Error setting EM gain" } );
-        //         return -1;
-        //     }
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        // Exposure Time and Frame Rate
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+        //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
 
-        //     int32 AdcEMGain;
-        //     if( getorcaParameter( AdcEMGain, orcaParameter_AdcEMGain ) < 0 )
-        //     {
-        //         if( powerState() != 1 || powerStateTarget() != 1 )
-        //             return -1;
-        //         return log<software_error, -1>( { __FILE__, __LINE__, "could not get AdcEMGain" } );
-        //     }
-        //     m_emGain   = AdcEMGain;
-        //     m_adcSpeed = adcSpeed;
-        //     recordCamera( true );
-        //     return 0;
-        // }
+        if( getorcaParameter( m_ReadOutTimeCalculation, orcaParameter_ReadoutTimeCalculation ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            return log<software_error, -1>( { __FILE__, __LINE__, "could not get ReadOutTimeCalculation" } );
+        }
+        std::cerr << "Readout time is: " << m_ReadOutTimeCalculation << "\n";
+        updateIfChanged(
+            m_indiP_readouttime, "value", m_ReadOutTimeCalculation / 1000.0, INDI_OK ); // convert from msec to sec
 
-        // void orcaCtrl::updateFxnGenSync()
-        // {
+        const orcaRangeConstraint *constraint_array;
+        int32                      constraint_count;
+        orcaAdvanced_GetParameterRangeConstraints(
+            m_modelHandle, orcaParameter_ExposureTime, &constraint_array, &constraint_count );
 
-        //     std::cerr << "Setting fxngen frequency to " << std::to_string( m_fps ) << " Hz" << std::endl;
-        //     m_indiP_fxngensync_freq["target"] = m_fps;
-        //     sendNewProperty( m_indiP_fxngensync_freq );
+        if( constraint_count != 1 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            log<text_log>( "Constraint count is not 1: " + std::to_string( constraint_count ) + " constraints",
+                           logPrio::LOG_ERROR );
+        }
+        else
+        {
+            m_minExpTime  = constraint_array[0].minimum;
+            m_maxExpTime  = constraint_array[0].maximum;
+            m_stepExpTime = constraint_array[0].increment;
 
-        //     // make sure fxngen is on!
-        //     m_indiP_fxngensync_output["value"] = "On";
-        //     sendNewProperty( m_indiP_fxngensync_output );
-        // }
+            m_indiP_exptime["current"].setMin( m_minExpTime );
+            m_indiP_exptime["current"].setMax( m_maxExpTime );
+            m_indiP_exptime["current"].setStep( m_stepExpTime );
 
-        inline int orcaCtrl::setExpTime()
+            m_indiP_exptime["target"].setMin( m_minExpTime );
+            m_indiP_exptime["target"].setMax( m_maxExpTime );
+            m_indiP_exptime["target"].setStep( m_stepExpTime );
+        }
+
+        if( m_expTimeSet > 0 )
         {
             long   intexptime = m_expTimeSet * 1000 * 10000 + 0.5;
             double exptime    = ( (double)intexptime ) / 10000;
             capExpTime( exptime );
-
-            int rv;
-
-            recordCamera( true );
-
-            if( state() == stateCodes::OPERATING )
-            {
-                rv = setorcaParameterOnline( m_modelHandle, DCAM_IDPROP_EXPOSURETIME, exptime );
-            }
-            else
-            {
-                rv = setorcaParameter( m_modelHandle, DCAM_IDPROP_EXPOSURETIME, exptime );
-            }
+            std::cerr << "Setting exposure time to " << m_expTimeSet << "\n";
+            int rv = setorcaParameter( m_modelHandle, orcaParameter_ExposureTime, exptime );
 
             if( rv < 0 )
             {
                 if( powerState() != 1 || powerStateTarget() != 1 )
                     return -1;
-                log<software_error>( { __FILE__, __LINE__, "Error setting exposure time" } );
-                return -1;
+                return log<software_error, -1>( { __FILE__, __LINE__, "Error setting exposure time" } );
             }
+        }
 
-            m_expTime = exptime / 1000.0;
-
-            recordCamera( true );
-
+        double exptime;
+        if( getorcaParameter( exptime, orcaParameter_ExposureTime ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            return log<software_error, -1>( { __FILE__, __LINE__, "Error getting exposure time" } );
+        }
+        else
+        {
+            capExpTime( exptime );
+            m_expTime    = exptime / 1000.0;
+            m_expTimeSet = m_expTime; // At this point it must be true.
             updateIfChanged( m_indiP_exptime, "current", m_expTime, INDI_IDLE );
+            updateIfChanged( m_indiP_exptime, "target", m_expTimeSet, INDI_IDLE );
+        }
 
-            if( getorcaParameter( m_FrameRateCalculation, orcaParameter_FrameRateCalculation ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                log<software_error>( { __FILE__, __LINE__, "could not get FrameRateCalculation" } );
-            }
+        if( getorcaParameter( m_FrameRateCalculation, orcaParameter_FrameRateCalculation ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            return log<software_error, -1>( { __FILE__, __LINE__, "Error getting frame rate" } );
+        }
+        else
+        {
             m_fps = m_FrameRateCalculation;
+            updateIfChanged( m_indiP_fps, "current", m_fps, INDI_IDLE );
+        }
+        std::cerr << "FrameRate is: " << m_FrameRateCalculation << "\n";
 
-            if( m_synchro && !m_otherCamName.empty() )
+        int32 AdcQuality;
+        if( getorcaParameter( AdcQuality, orcaParameter_AdcQuality ) < 0 )
+        {
+            std::cerr << "could not get AdcQuality\n";
+        }
+        std::string adcqStr = orcaEnum2String( orcaEnumeratedType_AdcQuality, AdcQuality );
+        std::cerr << "AdcQuality is: " << adcqStr << "\n";
+
+        double verticalShiftRate;
+        if( getorcaParameter( verticalShiftRate, orcaParameter_VerticalShiftRate ) < 0 )
+        {
+            std::cerr << "could not get VerticalShiftRate\n";
+        }
+        std::cerr << "VerticalShiftRate is: " << verticalShiftRate << "\n";
+
+        double AdcSpeed;
+        if( getorcaParameter( AdcSpeed, orcaParameter_AdcSpeed ) < 0 )
+        {
+            std::cerr << "could not get AdcSpeed\n";
+        }
+        std::cerr << "AdcSpeed is: " << AdcSpeed << "\n";
+
+        std::cerr << "************************************************************\n";
+
+        int32 AdcAnalogGain;
+        if( getorcaParameter( AdcAnalogGain, orcaParameter_AdcAnalogGain ) < 0 )
+        {
+            std::cerr << "could not get AdcAnalogGain\n";
+        }
+        std::string adcgStr = orcaEnum2String( orcaEnumeratedType_AdcAnalogGain, AdcAnalogGain );
+        std::cerr << "AdcAnalogGain is: " << adcgStr << "\n";
+
+        if( m_readoutSpeedName == "ccd_00_1MHz" || m_readoutSpeedName == "ccd_01MHz" )
+        {
+            m_emGain = 1;
+        }
+        else
+        {
+            int32 AdcEMGain;
+            if( getorcaParameter( AdcEMGain, orcaParameter_AdcEMGain ) < 0 )
             {
-                std::cerr << "Setting " << m_otherCamName << " exptime to " << std::to_string( m_expTime ) << std::endl;
-                m_indiP_otherCamExptime["target"] = m_expTime;
-                sendNewProperty( m_indiP_otherCamExptime );
-
-                updateFxnGenSync();
+                std::cerr << "could not get AdcEMGain\n";
             }
-
-            recordCamera( true );
-
-            return 0;
+            m_emGain = AdcEMGain;
         }
 
-        inline int orcaCtrl::capExpTime( double &exptime )
+        // If not previously allocated, allocate a nice big buffer to play with
+        double newbuffsz = framesPerReadout * readoutStride * 10; // Save room for 10 frames
+        if( newbuffsz > m_acqBuff.memory_size )
         {
-            // cap at minimum possible value
-            if( exptime < m_ReadOutTimeCalculation )
+            if( m_acqBuff.memory )
             {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                log<text_log>( "Got exposure time " + std::to_string( exptime ) + " ms but min value is " +
-                               std::to_string( m_ReadOutTimeCalculation ) + " ms" );
-                long intexptime = m_ReadOutTimeCalculation * 10000 + 0.5;
-                exptime         = ( (double)intexptime ) / 10000;
+                std::cerr << "Clearing\n";
+                free( m_acqBuff.memory );
+                m_acqBuff.memory = NULL;
+                orcaAdvanced_SetAcquisitionBuffer( m_cameraHandle, NULL );
             }
 
-            return 0;
-        }
-
-        inline int orcaCtrl::checkNextROI()
-        {
-            return 0;
-        }
-
-        // Set ROI property to busy if accepted, set toggle to Off and Idlw either way.
-        // Set ROI actual
-        // Update current values (including struct and indiP) and set to OK when done
-        inline int orcaCtrl::setNextROI()
-        {
-            updateSwitchIfChanged( m_indiP_roi_set, "request", pcf::IndiElement::Off, INDI_IDLE );
-            m_reconfig = true;
-
-            return 0;
-        }
-
-        inline bool orcaCtrl::checkFocus()
-        {
-            return checkFocusSwitchState();
-        }
-
-        inline int orcaCtrl::gotoFocus()
-        {
-            return sendGotoFocusCommand();
-        }
-
-        inline int orcaCtrl::setShutter( int sh )
-        {
-            return dssShutter<orcaCtrl>::setShutterState( sh );
-        }
-
-        inline int orcaCtrl::configureAcquisition()
-        {
-
-            int32 readoutStride;
-            int32 framesPerReadout;
-            int32 frameStride;
-            // int32 frameSize;
-            int32 pixelBitDepth;
-
-            m_camera_timestamp = 0; // reset tracked timestamp
-
-            std::unique_lock<std::mutex> lock( m_indiMutex );
-
-            // Time stamp handling
-            if( orca_SetParameterIntegerValue( m_modelHandle, orcaParameter_TimeStamps, m_timeStampMask ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                log<software_error>( { __FILE__, __LINE__, "Could not set time stamp mask" } );
-            }
-            if( orca_GetParameterLargeIntegerValue( m_modelHandle, orcaParameter_TimeStampResolution, &m_tsRes ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                log<software_error>( { __FILE__, __LINE__, "Could not get timestamp resolution" } );
-            }
-
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            // Check Frame Transfer
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-
-            int32 cmode;
-            if( getorcaParameter( cmode, orcaParameter_ReadoutControlMode ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                log<software_error>( { __FILE__, __LINE__, "could not get Readout Control Mode" } );
-                return -1;
-            }
-
-            if( cmode != orcaReadoutControlMode_FrameTransfer )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                log<software_error>( { __FILE__, __LINE__, "Readout Control Mode not configured for frame transfer" } );
-                return -1;
-            }
-
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            // Cooling Fan
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-
-            if( m_fanSpeedControlEnabled )
-            {
-                static constexpr int32 c_enableCoolingFan  = 0;
-                static constexpr int32 c_disableCoolingFan = 1;
-
-                std::string priorFanSpeed     = m_fanSpeedName;
-                int32       disableCoolingFan = c_enableCoolingFan;
-
-                if( m_fanSpeedNameSet == "on" )
-                {
-                    disableCoolingFan = c_enableCoolingFan;
-                }
-                else if( m_fanSpeedNameSet == "off" )
-                {
-                    disableCoolingFan = c_disableCoolingFan;
-                }
-                else
-                {
-                    if( powerState() != 1 || powerStateTarget() != 1 )
-                        return -1;
-                    log<software_error>( { __FILE__, __LINE__, "Invalid fan speed: " + m_fanSpeedNameSet } );
-                    state( stateCodes::ERROR );
-                    return -1;
-                }
-
-                if( setorcaParameter( m_modelHandle, orcaParameter_DisableCoolingFan, disableCoolingFan ) < 0 )
-                {
-                    if( powerState() != 1 || powerStateTarget() != 1 )
-                        return -1;
-                    log<software_error>( { __FILE__, __LINE__, "Error setting cooling-fan state" } );
-                    state( stateCodes::ERROR );
-                    return -1;
-                }
-
-                m_fanSpeedName  = m_fanSpeedNameSet;
-                m_fanSpeedValid = true;
-                m_fanForcedOn   = false;
-
-                if( m_fanSpeedName != priorFanSpeed )
-                {
-                    log<text_log>( "fan speed changed from '" + priorFanSpeed + "' to '" + m_fanSpeedName + "'",
-                                   logPrio::LOG_NOTICE );
-                }
-                else if( m_fanSpeedLogPending )
-                {
-                    log<text_log>( "fan speed set to '" + m_fanSpeedName + "'", logPrio::LOG_NOTICE );
-                }
-
-                m_fanSpeedLogPending = false;
-            }
-
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            // Temperature
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-
-            if( setorcaParameter( orcaParameter_SensorTemperatureSetPoint, m_ccdTempSetpt ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                log<software_error>( { __FILE__, __LINE__, "Error setting temperature setpoint" } );
-                state( stateCodes::ERROR );
-                return -1;
-            }
-
-            // log<text_log>( "Set temperature set point: " + std::to_string(m_ccdTempSetpt) + " C");
-
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            // ADC Speed and Quality
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-
-            // int32  adcQual;
-            // double adcSpeed;
-
-            // if( readoutParams( adcQual, adcSpeed, m_readoutSpeedNameSet ) < 0 )
-            // {
-            //     if( powerState() != 1 || powerStateTarget() != 1 )
-            //         return -1;
-            //     log<software_error>( { __FILE__, __LINE__, "Invalid readout speed: " + m_readoutSpeedNameSet } );
-            //     state( stateCodes::ERROR );
-            //     return -1;
-            // }
-
-            // if( setorcaParameter( m_modelHandle, orcaParameter_AdcSpeed, adcSpeed, false ) <
-            //     0 ) // don't commit b/c it will error if quality mismatched
-            // {
-            //     if( powerState() != 1 || powerStateTarget() != 1 )
-            //         return -1;
-            //     log<software_error>( { __FILE__, __LINE__, "Error setting ADC Speed" } );
-            //     // state(stateCodes::ERROR);
-            //     // return -1;
-            // }
-
-            // if( setorcaParameter( m_modelHandle, orcaParameter_AdcQuality, adcQual ) < 0 )
-            // {
-            //     if( powerState() != 1 || powerStateTarget() != 1 )
-            //         return -1;
-            //     log<software_error>( { __FILE__, __LINE__, "Error setting ADC Quality" } );
-            //     state( stateCodes::ERROR );
-            //     return -1;
-            // }
-            // m_adcSpeed         = adcSpeed;
-            // m_readoutSpeedName = m_readoutSpeedNameSet;
-            // log<text_log>( "Readout speed set to: " + m_readoutSpeedNameSet );
-
-            // if( adcQual == orcaAdcQuality_LowNoise )
-            // {
-            //     m_emGain    = 1.0;
-            //     m_emGainSet = 1.0;
-            // }
-
-            // //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            // //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            // // Vertical Shift Rate
-            // //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            // //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-
-            // double vss;
-            // if( vshiftParams( vss, m_vShiftSpeedNameSet ) < 0 )
-            // {
-            //     if( powerState() != 1 || powerStateTarget() != 1 )
-            //         return -1;
-            //     log<software_error>( { __FILE__, __LINE__, "Invalid vertical shift speed: " + m_vShiftSpeedNameSet }
-            //     ); state( stateCodes::ERROR ); return -1;
-            // }
-
-            // if( setorcaParameter( m_modelHandle, orcaParameter_VerticalShiftRate, vss ) < 0 )
-            // {
-            //     if( powerState() != 1 || powerStateTarget() != 1 )
-            //         return -1;
-            //     log<software_error>( { __FILE__, __LINE__, "Error setting Vertical Shift Rate" } );
-            //     state( stateCodes::ERROR );
-            //     return -1;
-            // }
-
-            // m_vShiftSpeedName = m_vShiftSpeedNameSet;
-            // m_vshiftSpeed     = vss;
-            // log<text_log>( "Vertical Shift Rate set to: " + m_vShiftSpeedName );
-
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            // Dimensions
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-
-            orcaRois nextrois;
-            orcaRoi  nextroi;
-
-            nextrois.roi_array = &nextroi;
-            nextrois.roi_count = 1;
-
-            int roi_err = false;
-            if( m_defaultFlip == fgFlipLR || m_defaultFlip == fgFlipUDLR )
-            {
-                nextroi.x = ( ( 1023 - m_nextROI.x ) - 0.5 * ( (float)m_nextROI.w - 1.0 ) );
-            }
-            else
-            {
-                nextroi.x = ( m_nextROI.x - 0.5 * ( (float)m_nextROI.w - 1.0 ) );
-            }
-
-            if( nextroi.x < 0 )
-            {
-                log<software_error>( { __FILE__, __LINE__, "can't set ROI to x center < 0" } );
-                roi_err = true;
-            }
-
-            if( nextroi.x > 1023 )
-            {
-                log<software_error>( { __FILE__, __LINE__, "can't set ROI to x center > 1023" } );
-                roi_err = true;
-            }
-
-            if( m_defaultFlip == fgFlipUD || m_defaultFlip == fgFlipUDLR )
-            {
-                nextroi.y = ( ( 1023 - m_nextROI.y ) - 0.5 * ( (float)m_nextROI.h - 1.0 ) );
-            }
-            else
-            {
-                nextroi.y = ( m_nextROI.y - 0.5 * ( (float)m_nextROI.h - 1.0 ) );
-            }
-
-            if( nextroi.y < 0 )
-            {
-                log<software_error>( { __FILE__, __LINE__, "can't set ROI to y center < 0" } );
-                roi_err = true;
-            }
-
-            if( nextroi.y > 1023 )
-            {
-                log<software_error>( { __FILE__, __LINE__, "can't set ROI to y center > 1023" } );
-                roi_err = true;
-            }
-
-            nextroi.width = m_nextROI.w;
-
-            if( nextroi.width < 0 )
-            {
-                log<software_error>( { __FILE__, __LINE__, "can't set ROI to width to be < 0" } );
-                roi_err = true;
-            }
-
-            if( nextroi.x + nextroi.width > 1024 )
-            {
-                log<software_error>( { __FILE__, __LINE__, "can't set ROI to width such that edge is > 1023" } );
-                roi_err = true;
-            }
-
-            nextroi.height = m_nextROI.h;
-
-            if( nextroi.y + nextroi.height > 1024 )
-            {
-                log<software_error>( { __FILE__, __LINE__, "can't set ROI to height such that edge is > 1023" } );
-                roi_err = true;
-            }
-
-            if( nextroi.height < 0 )
-            {
-                log<software_error>( { __FILE__, __LINE__, "can't set ROI to height to be < 0" } );
-                roi_err = true;
-            }
-
-            nextroi.x_binning = m_nextROI.bin_x;
-
-            if( nextroi.x_binning < 0 )
-            {
-                log<software_error>( { __FILE__, __LINE__, "can't set ROI x binning < 0" } );
-                roi_err = true;
-            }
-
-            nextroi.y_binning = m_nextROI.bin_y;
-
-            if( nextroi.y_binning < 0 )
-            {
-                log<software_error>( { __FILE__, __LINE__, "can't set ROI y binning < 0" } );
-                roi_err = true;
-            }
-
-            DCAMERR error;
-
-            if( !roi_err )
-            {
-                error = orca_SetParameterRoisValue( m_cameraHandle, orcaParameter_Rois, &nextrois );
-                if( error != DCAMERR_NONE )
-                {
-                    if( powerState() != 1 || powerStateTarget() != 1 )
-                        return -1;
-                    std::cerr << dcamErrorString( m_hdcam, error ) << "\n";
-                    log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
-                    state( stateCodes::ERROR );
-                    return -1;
-                }
-            }
-
-            if( getorcaParameter( readoutStride, orcaParameter_ReadoutStride ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                log<software_error>( { __FILE__, __LINE__, "Error getting readout stride" } );
-                state( stateCodes::ERROR );
-                return -1;
-            }
-
-            if( getorcaParameter( frameStride, orcaParameter_FrameStride ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                log<software_error>( { __FILE__, __LINE__, "Error getting frame stride" } );
-                state( stateCodes::ERROR );
-
-                return -1;
-            }
-
-            if( getorcaParameter( framesPerReadout, orcaParameter_FramesPerReadout ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                log<software_error>( { __FILE__, __LINE__, "Error getting frames per readout" } );
-                state( stateCodes::ERROR );
-                return -1;
-            }
-
-            if( getorcaParameter( m_frameSize, orcaParameter_FrameSize ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                log<software_error>( { __FILE__, __LINE__, "Error getting frame size" } );
-                state( stateCodes::ERROR );
-                return -1;
-            }
-
-            if( getorcaParameter( pixelBitDepth, orcaParameter_PixelBitDepth ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                log<software_error>( { __FILE__, __LINE__, "Error getting pixel bit depth" } );
-                state( stateCodes::ERROR );
-                return -1;
-            }
-            m_depth = pixelBitDepth;
-
-            const orcaRois *rois;
-            error = orca_GetParameterRoisValue( m_cameraHandle, orcaParameter_Rois, &rois );
-            if( error != DCAMERR_NONE )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
-                state( stateCodes::ERROR );
-                return -1;
-            }
-            m_xbinning         = rois->roi_array[0].x_binning;
-            m_currentROI.bin_x = m_xbinning;
-            m_ybinning         = rois->roi_array[0].y_binning;
-            m_currentROI.bin_y = m_ybinning;
-
-            std::cerr << rois->roi_array[0].x << "\n";
-            std::cerr << ( rois->roi_array[0].x - 1 ) << "\n";
-            std::cerr << rois->roi_array[0].width << "\n";
-            std::cerr << 0.5 * ( (float)( rois->roi_array[0].width - 1.0 ) ) << "\n";
-
-            if( m_defaultFlip == fgFlipLR || m_defaultFlip == fgFlipUDLR )
-            {
-                m_currentROI.x =
-                    ( 1023.0 - rois->roi_array[0].x ) - 0.5 * ( (float)( rois->roi_array[0].width - 1.0 ) );
-                // nextroi.x = ((1023-m_nextROI.x) - 0.5*( (float) m_nextROI.w - 1.0));
-            }
-            else
-            {
-                m_currentROI.x = ( rois->roi_array[0].x ) + 0.5 * ( (float)( rois->roi_array[0].width - 1.0 ) );
-            }
-
-            if( m_defaultFlip == fgFlipUD || m_defaultFlip == fgFlipUDLR )
-            {
-                m_currentROI.y =
-                    ( 1023.0 - rois->roi_array[0].y ) - 0.5 * ( (float)( rois->roi_array[0].height - 1.0 ) );
-                // nextroi.y = ((1023 - m_nextROI.y) - 0.5*( (float) m_nextROI.h - 1.0));
-            }
-            else
-            {
-                m_currentROI.y = ( rois->roi_array[0].y ) + 0.5 * ( (float)( rois->roi_array[0].height - 1.0 ) );
-            }
-
-            m_currentROI.w = rois->roi_array[0].width;
-            m_currentROI.h = rois->roi_array[0].height;
-
-            m_width  = rois->roi_array[0].width / rois->roi_array[0].x_binning;
-            m_height = rois->roi_array[0].height / rois->roi_array[0].y_binning;
-            orca_DestroyRois( rois );
-
-            updateIfChanged( m_indiP_roi_x, "current", m_currentROI.x, INDI_OK );
-            updateIfChanged( m_indiP_roi_y, "current", m_currentROI.y, INDI_OK );
-            updateIfChanged( m_indiP_roi_w, "current", m_currentROI.w, INDI_OK );
-            updateIfChanged( m_indiP_roi_h, "current", m_currentROI.h, INDI_OK );
-            updateIfChanged( m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_OK );
-            updateIfChanged( m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_OK );
-
-            // We also update target to the settable values
-            m_nextROI.x     = m_currentROI.x;
-            m_nextROI.y     = m_currentROI.y;
-            m_nextROI.w     = m_currentROI.w;
-            m_nextROI.h     = m_currentROI.h;
-            m_nextROI.bin_x = m_currentROI.bin_x;
-            m_nextROI.bin_y = m_currentROI.bin_y;
-
-            updateIfChanged( m_indiP_roi_x, "target", m_currentROI.x, INDI_OK );
-            updateIfChanged( m_indiP_roi_y, "target", m_currentROI.y, INDI_OK );
-            updateIfChanged( m_indiP_roi_w, "target", m_currentROI.w, INDI_OK );
-            updateIfChanged( m_indiP_roi_h, "target", m_currentROI.h, INDI_OK );
-            updateIfChanged( m_indiP_roi_bin_x, "target", m_currentROI.bin_x, INDI_OK );
-            updateIfChanged( m_indiP_roi_bin_y, "target", m_currentROI.bin_y, INDI_OK );
-
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            // Exposure Time and Frame Rate
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-            //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-
-            if( getorcaParameter( m_ReadOutTimeCalculation, orcaParameter_ReadoutTimeCalculation ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                return log<software_error, -1>( { __FILE__, __LINE__, "could not get ReadOutTimeCalculation" } );
-            }
-            std::cerr << "Readout time is: " << m_ReadOutTimeCalculation << "\n";
-            updateIfChanged(
-                m_indiP_readouttime, "value", m_ReadOutTimeCalculation / 1000.0, INDI_OK ); // convert from msec to sec
-
-            const orcaRangeConstraint *constraint_array;
-            int32                      constraint_count;
-            orcaAdvanced_GetParameterRangeConstraints(
-                m_modelHandle, orcaParameter_ExposureTime, &constraint_array, &constraint_count );
-
-            if( constraint_count != 1 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                log<text_log>( "Constraint count is not 1: " + std::to_string( constraint_count ) + " constraints",
-                               logPrio::LOG_ERROR );
-            }
-            else
-            {
-                m_minExpTime  = constraint_array[0].minimum;
-                m_maxExpTime  = constraint_array[0].maximum;
-                m_stepExpTime = constraint_array[0].increment;
-
-                m_indiP_exptime["current"].setMin( m_minExpTime );
-                m_indiP_exptime["current"].setMax( m_maxExpTime );
-                m_indiP_exptime["current"].setStep( m_stepExpTime );
-
-                m_indiP_exptime["target"].setMin( m_minExpTime );
-                m_indiP_exptime["target"].setMax( m_maxExpTime );
-                m_indiP_exptime["target"].setStep( m_stepExpTime );
-            }
-
-            if( m_expTimeSet > 0 )
-            {
-                long   intexptime = m_expTimeSet * 1000 * 10000 + 0.5;
-                double exptime    = ( (double)intexptime ) / 10000;
-                capExpTime( exptime );
-                std::cerr << "Setting exposure time to " << m_expTimeSet << "\n";
-                int rv = setorcaParameter( m_modelHandle, orcaParameter_ExposureTime, exptime );
-
-                if( rv < 0 )
-                {
-                    if( powerState() != 1 || powerStateTarget() != 1 )
-                        return -1;
-                    return log<software_error, -1>( { __FILE__, __LINE__, "Error setting exposure time" } );
-                }
-            }
-
-            double exptime;
-            if( getorcaParameter( exptime, orcaParameter_ExposureTime ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                return log<software_error, -1>( { __FILE__, __LINE__, "Error getting exposure time" } );
-            }
-            else
-            {
-                capExpTime( exptime );
-                m_expTime    = exptime / 1000.0;
-                m_expTimeSet = m_expTime; // At this point it must be true.
-                updateIfChanged( m_indiP_exptime, "current", m_expTime, INDI_IDLE );
-                updateIfChanged( m_indiP_exptime, "target", m_expTimeSet, INDI_IDLE );
-            }
-
-            if( getorcaParameter( m_FrameRateCalculation, orcaParameter_FrameRateCalculation ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                    return -1;
-                return log<software_error, -1>( { __FILE__, __LINE__, "Error getting frame rate" } );
-            }
-            else
-            {
-                m_fps = m_FrameRateCalculation;
-                updateIfChanged( m_indiP_fps, "current", m_fps, INDI_IDLE );
-            }
-            std::cerr << "FrameRate is: " << m_FrameRateCalculation << "\n";
-
-            int32 AdcQuality;
-            if( getorcaParameter( AdcQuality, orcaParameter_AdcQuality ) < 0 )
-            {
-                std::cerr << "could not get AdcQuality\n";
-            }
-            std::string adcqStr = orcaEnum2String( orcaEnumeratedType_AdcQuality, AdcQuality );
-            std::cerr << "AdcQuality is: " << adcqStr << "\n";
-
-            double verticalShiftRate;
-            if( getorcaParameter( verticalShiftRate, orcaParameter_VerticalShiftRate ) < 0 )
-            {
-                std::cerr << "could not get VerticalShiftRate\n";
-            }
-            std::cerr << "VerticalShiftRate is: " << verticalShiftRate << "\n";
-
-            double AdcSpeed;
-            if( getorcaParameter( AdcSpeed, orcaParameter_AdcSpeed ) < 0 )
-            {
-                std::cerr << "could not get AdcSpeed\n";
-            }
-            std::cerr << "AdcSpeed is: " << AdcSpeed << "\n";
-
-            std::cerr << "************************************************************\n";
-
-            int32 AdcAnalogGain;
-            if( getorcaParameter( AdcAnalogGain, orcaParameter_AdcAnalogGain ) < 0 )
-            {
-                std::cerr << "could not get AdcAnalogGain\n";
-            }
-            std::string adcgStr = orcaEnum2String( orcaEnumeratedType_AdcAnalogGain, AdcAnalogGain );
-            std::cerr << "AdcAnalogGain is: " << adcgStr << "\n";
-
-            if( m_readoutSpeedName == "ccd_00_1MHz" || m_readoutSpeedName == "ccd_01MHz" )
-            {
-                m_emGain = 1;
-            }
-            else
-            {
-                int32 AdcEMGain;
-                if( getorcaParameter( AdcEMGain, orcaParameter_AdcEMGain ) < 0 )
-                {
-                    std::cerr << "could not get AdcEMGain\n";
-                }
-                m_emGain = AdcEMGain;
-            }
-
-            // If not previously allocated, allocate a nice big buffer to play with
-            double newbuffsz = framesPerReadout * readoutStride * 10; // Save room for 10 frames
-            if( newbuffsz > m_acqBuff.memory_size )
-            {
-                if( m_acqBuff.memory )
-                {
-                    std::cerr << "Clearing\n";
-                    free( m_acqBuff.memory );
-                    m_acqBuff.memory = NULL;
-                    orcaAdvanced_SetAcquisitionBuffer( m_cameraHandle, NULL );
-                }
-
-                m_acqBuff.memory_size = newbuffsz;
-                std::cerr << "m_acqBuff.memory_size: " << m_acqBuff.memory_size << "\n";
-                m_acqBuff.memory = malloc( m_acqBuff.memory_size );
-
-                error = orcaAdvanced_SetAcquisitionBuffer( m_cameraHandle, &m_acqBuff );
-                if( error != DCAMERR_NONE )
-                {
-                    log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
-                    state( stateCodes::ERROR );
-
-                    std::cerr << "-->" << dcamErrorString( m_hdcam, error ) << "\n";
-                }
-            }
-
-            // Hardware trigger
-            if( m_synchroSet )
-            {
-                updateFxnGenSync();
-
-                std::cerr << "Turning synchro on" << std::endl;
-                setorcaParameter(
-                    m_cameraHandle, orcaParameter_TriggerDetermination, orcaTriggerDetermination_RisingEdge );
-                setorcaParameter(
-                    m_cameraHandle, orcaParameter_TriggerResponse, orcaTriggerResponse_ReadoutPerTrigger );
-                m_synchro = true;
-                updateSwitchIfChanged( m_indiP_synchro, "toggle", pcf::IndiElement::On, INDI_IDLE );
-            }
-            else
-            {
-                std::cerr << "Turning synchro off" << std::endl;
-                setorcaParameter( m_cameraHandle, orcaParameter_TriggerResponse, orcaTriggerResponse_NoResponse );
-                m_synchro = false;
-                updateSwitchIfChanged( m_indiP_synchro, "toggle", pcf::IndiElement::Off, INDI_IDLE );
-            }
-
-            // Start continuous acquisition
-            if( setorcaParameter( orcaParameter_ReadoutCount, (double)0 ) < 0 )
-            {
-                log<software_error>( { __FILE__, __LINE__, "Error setting readouts=0" } );
-                state( stateCodes::ERROR );
-                return -1;
-            }
-
-            recordCamera();
-
-            error = orca_StartAcquisition( m_cameraHandle );
+            m_acqBuff.memory_size = newbuffsz;
+            std::cerr << "m_acqBuff.memory_size: " << m_acqBuff.memory_size << "\n";
+            m_acqBuff.memory = malloc( m_acqBuff.memory_size );
+
+            error = orcaAdvanced_SetAcquisitionBuffer( m_cameraHandle, &m_acqBuff );
             if( error != DCAMERR_NONE )
             {
                 log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
                 state( stateCodes::ERROR );
 
+                std::cerr << "-->" << dcamErrorString( m_hdcam, error ) << "\n";
+            }
+        }
+
+        // Hardware trigger
+        if( m_synchroSet )
+        {
+            updateFxnGenSync();
+
+            std::cerr << "Turning synchro on" << std::endl;
+            setorcaParameter( m_cameraHandle, orcaParameter_TriggerDetermination, orcaTriggerDetermination_RisingEdge );
+            setorcaParameter( m_cameraHandle, orcaParameter_TriggerResponse, orcaTriggerResponse_ReadoutPerTrigger );
+            m_synchro = true;
+            updateSwitchIfChanged( m_indiP_synchro, "toggle", pcf::IndiElement::On, INDI_IDLE );
+        }
+        else
+        {
+            std::cerr << "Turning synchro off" << std::endl;
+            setorcaParameter( m_cameraHandle, orcaParameter_TriggerResponse, orcaTriggerResponse_NoResponse );
+            m_synchro = false;
+            updateSwitchIfChanged( m_indiP_synchro, "toggle", pcf::IndiElement::Off, INDI_IDLE );
+        }
+
+        // Start continuous acquisition
+        if( setorcaParameter( orcaParameter_ReadoutCount, (double)0 ) < 0 )
+        {
+            log<software_error>( { __FILE__, __LINE__, "Error setting readouts=0" } );
+            state( stateCodes::ERROR );
+            return -1;
+        }
+
+        recordCamera();
+
+        error = orca_StartAcquisition( m_cameraHandle );
+        if( error != DCAMERR_NONE )
+        {
+            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+            state( stateCodes::ERROR );
+
+            return -1;
+        }
+
+        m_dataType = _DATATYPE_UINT16; // Where does this go?
+
+        return 0;
+    }
+
+    inline float orcaCtrl::fps()
+    {
+        return m_fps;
+    }
+
+    inline int orcaCtrl::startAcquisition()
+    {
+        return 0;
+    }
+
+    inline int orcaCtrl::acquireAndCheckValid()
+    {
+        int32 camTimeOut = 1000; // 1 second keeps us responsive without busy-waiting too much
+
+        orcaAcquisitionStatus status;
+
+        orcaAvailableData available;
+
+        DCAMERR error;
+        error = orca_WaitForAcquisitionUpdate( m_cameraHandle, camTimeOut, &available, &status );
+
+        if( error == orcaError_TimeOutOccurred )
+        {
+            return 1; // This sends it back to framegrabber to check for reconfig, etc.
+        }
+
+        clock_gettime( CLOCK_REALTIME, &m_currImageTimestamp );
+
+        if( error != DCAMERR_NONE )
+        {
+            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+            state( stateCodes::ERROR );
+
+            return -1;
+        }
+
+        m_available.initial_readout = available.initial_readout;
+        m_available.readout_count   = available.readout_count;
+
+        if( m_available.initial_readout == 0 )
+        {
+            return 1;
+        }
+
+        // std::cerr << "readout: " << m_available.initial_readout << " " << m_available.readout_count << "\n";
+
+        // camera time stamp
+        pibyte *frame = NULL;
+        double  metadataOffset;
+
+        frame          = static_cast<pibyte *>( m_available.initial_readout );
+        metadataOffset = (double)frame + m_frameSize;
+
+        double *tmpPtr = reinterpret_cast<double *>( metadataOffset );
+
+        double cam_ts   = (double)*tmpPtr / (double)m_tsRes;
+        double delta_ts = cam_ts - m_camera_timestamp;
+
+        // check for a frame skip
+        if( delta_ts > 1.5 / m_FrameRateCalculation )
+        {
+            std::cerr << "Skipped frame(s)! (Expected a " << 1000. / m_FrameRateCalculation << " ms gap but got "
+                      << 1000 * delta_ts << " ms)\n";
+        }
+        // print
+
+        m_camera_timestamp = cam_ts; // update to latest
+
+        // fprintf(m_outfile, "%d %-15.8f\n", m_imageStream->md->cnt0+1, (double)*tmpPtr/(double)m_tsRes);
+
+        return 0;
+    }
+
+    inline int orcaCtrl::loadImageIntoStream( void *dest )
+    {
+        if( frameGrabber<orcaCtrl>::loadImageIntoStreamCopy(
+                dest, m_available.initial_readout, m_width, m_height, m_typeSize ) == nullptr )
+            return -1;
+
+        return 0;
+    }
+
+    inline int orcaCtrl::reconfig()
+    {
+        ///\todo clean this up.  Just need to wait on acquisition update the first time probably.
+
+        DCAMERR error = orca_StopAcquisition( m_cameraHandle );
+        if( error != DCAMERR_NONE )
+        {
+            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+            state( stateCodes::ERROR );
+
+            return -1;
+        }
+
+        error = orca_IsAcquisitionRunning( m_cameraHandle, &running );
+
+        while( running )
+        {
+            if( MagAOXAppT::m_powerState == 0 )
+                return 0;
+            sleep( 1 );
+
+            error = orca_StopAcquisition( m_cameraHandle );
+
+            if( error != DCAMERR_NONE )
+            {
+                log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+                state( stateCodes::ERROR );
                 return -1;
             }
 
-            m_dataType = _DATATYPE_UINT16; // Where does this go?
-
-            return 0;
-        }
-
-        inline float orcaCtrl::fps()
-        {
-            return m_fps;
-        }
-
-        inline int orcaCtrl::startAcquisition()
-        {
-            return 0;
-        }
-
-        inline int orcaCtrl::acquireAndCheckValid()
-        {
-            int32 camTimeOut = 1000; // 1 second keeps us responsive without busy-waiting too much
+            int32 camTimeOut = 1000;
 
             orcaAcquisitionStatus status;
 
             orcaAvailableData available;
 
-            DCAMERR error;
             error = orca_WaitForAcquisitionUpdate( m_cameraHandle, camTimeOut, &available, &status );
-
-            if( error == orcaError_TimeOutOccurred )
-            {
-                return 1; // This sends it back to framegrabber to check for reconfig, etc.
-            }
-
-            clock_gettime( CLOCK_REALTIME, &m_currImageTimestamp );
-
             if( error != DCAMERR_NONE )
             {
                 log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
                 state( stateCodes::ERROR );
-
                 return -1;
             }
 
-            m_available.initial_readout = available.initial_readout;
-            m_available.readout_count   = available.readout_count;
-
-            if( m_available.initial_readout == 0 )
-            {
-                return 1;
-            }
-
-            // std::cerr << "readout: " << m_available.initial_readout << " " << m_available.readout_count << "\n";
-
-            // camera time stamp
-            pibyte *frame = NULL;
-            double  metadataOffset;
-
-            frame          = static_cast<pibyte *>( m_available.initial_readout );
-            metadataOffset = (double)frame + m_frameSize;
-
-            double *tmpPtr = reinterpret_cast<double *>( metadataOffset );
-
-            double cam_ts   = (double)*tmpPtr / (double)m_tsRes;
-            double delta_ts = cam_ts - m_camera_timestamp;
-
-            // check for a frame skip
-            if( delta_ts > 1.5 / m_FrameRateCalculation )
-            {
-                std::cerr << "Skipped frame(s)! (Expected a " << 1000. / m_FrameRateCalculation << " ms gap but got "
-                          << 1000 * delta_ts << " ms)\n";
-            }
-            // print
-
-            m_camera_timestamp = cam_ts; // update to latest
-
-            // fprintf(m_outfile, "%d %-15.8f\n", m_imageStream->md->cnt0+1, (double)*tmpPtr/(double)m_tsRes);
-
-            return 0;
-        }
-
-        inline int orcaCtrl::loadImageIntoStream( void *dest )
-        {
-            if( frameGrabber<orcaCtrl>::loadImageIntoStreamCopy(
-                    dest, m_available.initial_readout, m_width, m_height, m_typeSize ) == nullptr )
-                return -1;
-
-            return 0;
-        }
-
-        inline int orcaCtrl::reconfig()
-        {
-            ///\todo clean this up.  Just need to wait on acquisition update the first time probably.
-
-            DCAMERR error = orca_StopAcquisition( m_cameraHandle );
-            if( error != DCAMERR_NONE )
-            {
-                log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
-                state( stateCodes::ERROR );
-
-                return -1;
-            }
+            //       if(! status.running )
+            //       {
+            //          std::cerr << "Not running \n";
+            //
+            //          std::cerr << "status.running: " << status.running << "\n";
+            //          std::cerr << "status.errors: " << status.errors << "\n";
+            //          std::cerr << "CameraFaulted: " << (int)(status.errors &
+            //          orcaAcquisitionErrorsMask_CameraFaulted)
+            //          <<
+            //          "\n"; std::cerr << "CannectionLost: " << (int)(status.errors &
+            //          orcaAcquisitionErrorsMask_ConnectionLost) << "\n"; std::cerr << "DataLost: " <<
+            //          (int)(status.errors & orcaAcquisitionErrorsMask_DataLost) << "\n"; std::cerr <<
+            //          "DataNotArriving: " << (int)(status.errors & orcaAcquisitionErrorsMask_DataNotArriving) <<
+            //          "\n"; std::cerr << "None: " << (int)(status.errors & orcaAcquisitionErrorsMask_None) <<
+            //          "\n"; std::cerr << "ShutterOverheated: "
+            //          << (int)(status.errors & orcaAcquisitionErrorsMask_ShutterOverheated) << "\n"; std::cerr <<
+            //          "status.readout_rate: " << status.readout_rate << "\n";
+            //       }
 
             error = orca_IsAcquisitionRunning( m_cameraHandle, &running );
-
-            while( running )
+            if( error != DCAMERR_NONE )
             {
-                if( MagAOXAppT::m_powerState == 0 )
-                    return 0;
-                sleep( 1 );
-
-                error = orca_StopAcquisition( m_cameraHandle );
-
-                if( error != DCAMERR_NONE )
-                {
-                    log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
-                    state( stateCodes::ERROR );
-                    return -1;
-                }
-
-                int32 camTimeOut = 1000;
-
-                orcaAcquisitionStatus status;
-
-                orcaAvailableData available;
-
-                error = orca_WaitForAcquisitionUpdate( m_cameraHandle, camTimeOut, &available, &status );
-                if( error != DCAMERR_NONE )
-                {
-                    log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
-                    state( stateCodes::ERROR );
-                    return -1;
-                }
-
-                //       if(! status.running )
-                //       {
-                //          std::cerr << "Not running \n";
-                //
-                //          std::cerr << "status.running: " << status.running << "\n";
-                //          std::cerr << "status.errors: " << status.errors << "\n";
-                //          std::cerr << "CameraFaulted: " << (int)(status.errors &
-                //          orcaAcquisitionErrorsMask_CameraFaulted)
-                //          <<
-                //          "\n"; std::cerr << "CannectionLost: " << (int)(status.errors &
-                //          orcaAcquisitionErrorsMask_ConnectionLost) << "\n"; std::cerr << "DataLost: " <<
-                //          (int)(status.errors & orcaAcquisitionErrorsMask_DataLost) << "\n"; std::cerr <<
-                //          "DataNotArriving: " << (int)(status.errors & orcaAcquisitionErrorsMask_DataNotArriving) <<
-                //          "\n"; std::cerr << "None: " << (int)(status.errors & orcaAcquisitionErrorsMask_None) <<
-                //          "\n"; std::cerr << "ShutterOverheated: "
-                //          << (int)(status.errors & orcaAcquisitionErrorsMask_ShutterOverheated) << "\n"; std::cerr <<
-                //          "status.readout_rate: " << status.readout_rate << "\n";
-                //       }
-
-                error = orca_IsAcquisitionRunning( m_cameraHandle, &running );
-                if( error != DCAMERR_NONE )
-                {
-                    log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
-                    state( stateCodes::ERROR );
-                    return -1;
-                }
-            }
-
-            return 0;
-        }
-
-        int orcaCtrl::checkRecordTimes()
-        {
-            return telemeter<orcaCtrl>::checkRecordTimes( telem_stdcam() );
-        }
-
-        int orcaCtrl::recordTelem( const telem_stdcam * )
-        {
-            return recordCamera( true );
-        }
-
-        INDI_NEWCALLBACK_DEFN( orcaCtrl, m_indiP_receiveSynchro )( const pcf::IndiProperty &ipRecv )
-        {
-
-            INDI_VALIDATE_CALLBACK_PROPS( m_indiP_receiveSynchro, ipRecv );
-
-            if( ipRecv.getName() != m_indiP_receiveSynchro.getName() )
-            {
-                log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
-
+                log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_hdcam, error ) } );
+                state( stateCodes::ERROR );
                 return -1;
             }
-
-            if( !ipRecv.find( "toggle" ) )
-            {
-                return 0;
-            }
-
-            if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
-            {
-                updateSwitchIfChanged( m_indiP_receiveSynchro, "toggle", pcf::IndiElement::On, INDI_IDLE );
-
-                m_synchroSet = true;
-            }
-            else
-            {
-                updateSwitchIfChanged( m_indiP_receiveSynchro, "toggle", pcf::IndiElement::Off, INDI_IDLE );
-
-                m_synchroSet = false;
-            }
-
-            m_reconfig = true;
-
-            return 0;
         }
 
-        INDI_NEWCALLBACK_DEFN( orcaCtrl, m_indiP_receiveExptime )( const pcf::IndiProperty &ipRecv )
+        return 0;
+    }
+
+    int orcaCtrl::checkRecordTimes()
+    {
+        return telemeter<orcaCtrl>::checkRecordTimes( telem_stdcam() );
+    }
+
+    int orcaCtrl::recordTelem( const telem_stdcam * )
+    {
+        return recordCamera( true );
+    }
+
+    INDI_NEWCALLBACK_DEFN( orcaCtrl, m_indiP_receiveSynchro )( const pcf::IndiProperty &ipRecv )
+    {
+
+        INDI_VALIDATE_CALLBACK_PROPS( m_indiP_receiveSynchro, ipRecv );
+
+        if( ipRecv.getName() != m_indiP_receiveSynchro.getName() )
         {
+            log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
 
-            INDI_VALIDATE_CALLBACK_PROPS( m_indiP_receiveExptime, ipRecv );
+            return -1;
+        }
 
-            if( ipRecv.getName() != m_indiP_receiveExptime.getName() )
-            {
-                log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
-
-                return -1;
-            }
-
-            if( !ipRecv.find( "target" ) )
-            {
-                return 0;
-            }
-
-            m_expTimeSet = ipRecv["target"].get<double>();
-
-            updatesIfChanged<double>( m_indiP_receiveExptime, { "current" }, { m_expTimeSet } );
-
-            // we don't need to strictly reconfig because setExpTime works online, but this
-            // eludes an infinite loop of triggering the 'otherCam' in setExptime
-            m_reconfig = 1;
-
+        if( !ipRecv.find( "toggle" ) )
+        {
             return 0;
         }
 
-    } // namespace app
+        if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
+        {
+            updateSwitchIfChanged( m_indiP_receiveSynchro, "toggle", pcf::IndiElement::On, INDI_IDLE );
+
+            m_synchroSet = true;
+        }
+        else
+        {
+            updateSwitchIfChanged( m_indiP_receiveSynchro, "toggle", pcf::IndiElement::Off, INDI_IDLE );
+
+            m_synchroSet = false;
+        }
+
+        m_reconfig = true;
+
+        return 0;
+    }
+
+    INDI_NEWCALLBACK_DEFN( orcaCtrl, m_indiP_receiveExptime )( const pcf::IndiProperty &ipRecv )
+    {
+
+        INDI_VALIDATE_CALLBACK_PROPS( m_indiP_receiveExptime, ipRecv );
+
+        if( ipRecv.getName() != m_indiP_receiveExptime.getName() )
+        {
+            log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
+
+            return -1;
+        }
+
+        if( !ipRecv.find( "target" ) )
+        {
+            return 0;
+        }
+
+        m_expTimeSet = ipRecv["target"].get<double>();
+
+        updatesIfChanged<double>( m_indiP_receiveExptime, { "current" }, { m_expTimeSet } );
+
+        // we don't need to strictly reconfig because setExpTime works online, but this
+        // eludes an infinite loop of triggering the 'otherCam' in setExptime
+        m_reconfig = 1;
+
+        return 0;
+    }
+
+} // namespace app
 } // namespace MagAOX
 #endif
