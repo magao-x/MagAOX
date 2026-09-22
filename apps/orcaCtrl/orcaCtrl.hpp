@@ -715,53 +715,11 @@ inline int orcaCtrl::setorcaParameter( HDCAM handle, int32 parameter, double val
         log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         return -1;
     }
-    return 0;
-}
-
-inline int orcaCtrl::setorcaParameter( HDCAM handle, int32 parameter, int32 value, bool commit )
-{
-    DCAMERR error = dcamprop_setgetvalue( handle, parameter, &value );
-    if( error != DCAMERR_NONE )
-    {
-        if( powerState() != 1 || powerStateTarget() != 1 )
-            return -1;
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
-        return -1;
-    }
 
     return 0;
-}
-
-inline int orcaCtrl::setorcaParameter( int32 parameter, double value, bool commit )
-{
-    return setorcaParameter( m_cameraHandle, parameter, value, commit );
-}
-
-inline int orcaCtrl::setorcaParameter( int32 parameter, int32 value, bool commit )
-{
-    return setorcaParameter( m_cameraHandle, parameter, value, commit );
 }
 
 inline int orcaCtrl::setorcaParameterOnline( HDCAM handle, int32 parameter, double value )
-{
-    DCAMERR error = dcamprop_setvalue( handle, parameter, &value );
-    if( error != DCAMERR_NONE )
-    {
-        if( powerState() != 1 || powerStateTarget() != 1 )
-            return -1;
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
-        return -1;
-    }
-
-    return 0;
-}
-
-inline int orcaCtrl::setorcaParameterOnline( int32 parameter, double value )
-{
-    return setorcaParameterOnline( m_cameraHandle, parameter, value );
-}
-
-inline int orcaCtrl::setorcaParameterOnline( HDCAM handle, int32 parameter, int32 value )
 {
     DCAMERR error = dcamprop_setvalue( handle, parameter, value );
     if( error != DCAMERR_NONE )
@@ -775,7 +733,7 @@ inline int orcaCtrl::setorcaParameterOnline( HDCAM handle, int32 parameter, int3
     return 0;
 }
 
-inline int orcaCtrl::setorcaParameterOnline( int32 parameter, int32 value )
+inline int orcaCtrl::setorcaParameterOnline( int32 parameter, double value )
 {
     return setorcaParameterOnline( m_cameraHandle, parameter, value );
 }
