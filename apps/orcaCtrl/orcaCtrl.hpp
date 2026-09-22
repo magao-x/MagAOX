@@ -13,6 +13,7 @@
 #include <ImageStreamIO/ImageStreamIO.h>
 
 #include <dcamapi4.h>
+#include <dcamprop.h>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -830,10 +831,10 @@ inline int orcaCtrl::connect()
             m_fanControlSupported = false;
             m_fanStatusSupported  = false;
 
-            // Check for camera cooling support
+            // Check for camera cooling fan support
             DCAMPROP_ATTR fanAttr{};
             fanAttr.cbSize = sizeof( fanAttr );
-            fanAttr.iProp  = DCAMPROP_SENSORCOOLER__OFF;
+            fanAttr.iProp  = DCAM_IDPROP_SENSORCOOLERFAN;
 
             if( m_fanSpeedControlEnabled )
             {
@@ -871,13 +872,12 @@ inline int orcaCtrl::connect()
                 // Check that the cooling fan status exists
                 // TODO: revisit this
 
-                exists = false;
                 DCAMPROP_ATTR coolerAttr{};
                 coolerAttr.cbSize = sizeof( coolerAttr );
-                coolerAttr.iProp  = DCAMPROP_SENSORCOOLERSTATUS;
+                coolerAttr.iProp  = DCAM_IDPROP_SENSORCOOLER;
 
-                error  = dcamprop_getattr( deviceOpen.hdcam, &coolerAttr );
-                exists = error == DCAMERR_NONE && ( fanAttr.attribute & DCAMPROP_ATTR_READABLE );
+                error                = dcamprop_getattr( deviceOpen.hdcam, &coolerAttr );
+                m_fanStatusSupported = error == DCAMERR_NONE && ( coolerAttr.attribute & DCAMPROP_ATTR_READABLE );
 
                 if( failed( error ) && error != DCAMERR_NOTSUPPORT )
                 {
@@ -890,7 +890,7 @@ inline int orcaCtrl::connect()
                     return -1;
                 }
 
-                if( exists )
+                if( m_fanStatusSupported )
                 {
                     int32      readableStatus = 0;
                     const bool readable       = !failed( error ) && readableStatus == DCAMPROP_ATTR_READABLE;
