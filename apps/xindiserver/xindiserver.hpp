@@ -213,7 +213,28 @@ public:
    void isLogThreadExec();
 
    /// Process a log entry from indiserver, putting it into MagAO-X standard form
-   int processISLog( std::string logs );
+   /** The entry is timestamped with the time the line is received. The timestamp created by
+     * indiserver is kept in the message.
+     * 
+     * \returns 0 on success
+     */
+   int processISLog( std::string logs /**< [in] log entry from indiserver */ );
+
+   /// Add data read from indiserver to the pending text, and move out every complete line
+   /** The data is appended by count, so a zero byte does not truncate it. Only an incomplete last line is kept in
+     * pending, to be completed by the next read.
+     */
+   static void extractISLines( std::string &pending,           /**< [in/out] text received but not yet processed */
+                               const char *data,               /**< [in] the data just read */
+                               size_t count,                   /**< [in] the number of bytes in data */
+                               std::vector<std::string> &lines /**< [out] complete lines appended */
+   );
+
+   /// Get the log priority for a line from indiserver
+   /** Fatal errors from xindidriver ("failed to lock") and indiserver ("bind: Address already in use") are
+     * critical, everything else is informational.
+     */
+   static logPrioT isLogPriority( const std::string &line /**< [in] the line from indiserver */ );
 
    /// Startup functions
    /**
@@ -657,7 +678,7 @@ void xindiserver::isLogThreadExec()
    std::string logs;
    while(m_shutdown == 0)
    {
-      ssize_t count = read(m_isSTDERR, buffer, sizeof(buffer)-1); //Make wure we always have room for \0
+      ssize_t count = read(m_isSTDERR, buffer, sizeof(buffer)-1);
       if (count <= 0 || m_shutdown == 1)
       {
          continue;
@@ -669,23 +690,14 @@ void xindiserver::isLogThreadExec()
       }
       else
       {
-         buffer[count] = '\0';
+         // Process every complete line as soon as it arrives, keeping only an incomplete tail for the next read,
+         // so that each line is timestamped and logged on the read which completes it.
+         std::vector<std::string> lines;
+         extractISLines(logs, buffer, count, lines);
 
-         logs += buffer;
-
-         //Keep reading until \n found, then process.
-         if(logs.back() == '\n')
+         for(const std::string &line : lines)
          {
-            size_t bol = 0;
-            while(bol < logs.size())
-            {
-               size_t eol = logs.find('\n', bol);
-               if(eol == std::string::npos) break;
-
-               processISLog(logs.substr(bol, eol-bol));
-               bol = eol + 1;
-            }
-            logs = "";
+            processISLog(line);
          }
       }
    }
@@ -693,68 +705,48 @@ void xindiserver::isLogThreadExec()
 }
 
 inline
-int xindiserver::processISLog( std::string logs )
+void xindiserver::extractISLines( std::string &pending, const char *data, size_t count, std::vector<std::string> &lines )
 {
-   size_t st = 0;
-   size_t ed;
+   pending.append(data, count);
 
-   ed = logs.find(':', st);
-   if(ed != std::string::npos) ed = logs.find(':', ed+1);
-   if(ed != std::string::npos) ed = logs.find(':', ed+1);
-
-   if(ed == std::string::npos)
+   size_t bol = 0;
+   size_t eol;
+   while( (eol = pending.find('\n', bol)) != std::string::npos )
    {
-      //log<software_error>({__FILE__, __LINE__, "Did not find timestamp : in log entry"});
-      log<text_log>(logs, logPrio::LOG_INFO);
-      return 0;
+      lines.push_back(pending.substr(bol, eol-bol));
+      bol = eol + 1;
    }
 
-   std::string ts = logs.substr(st, ed-st);
+   pending.erase(0, bol); //keep only the incomplete tail, if any
+}
 
-   double dsec;
-
-   tm bdt;
-   mx::sys::ISO8601dateBreakdown(bdt.tm_year, bdt.tm_mon, bdt.tm_mday, bdt.tm_hour, bdt.tm_min, dsec, ts);
-
-   bdt.tm_year -= 1900;
-   bdt.tm_mon -= 1;
-   bdt.tm_sec = (int) dsec;
-   bdt.tm_isdst = 0;
-   bdt.tm_gmtoff = 0;
-
-   timespecX tsp;
-
-   tsp.time_s = timegm(&bdt);
-   tsp.time_ns = (nanosecT) ((dsec-bdt.tm_sec)*1e9 + 0.5);
-
-   ++ed;
-   st = logs.find_first_not_of(" ", ed);
-
-   if(st == std::string::npos) st = ed;
-   if(st == logs.size())
+inline
+logPrioT xindiserver::isLogPriority( const std::string &line )
+{
+   if(line.find("xindidriver") != std::string::npos) //Errors from xindidriver
    {
-      log<software_error>({__FILE__, __LINE__, "Did not find log entry."});
-      return -1;
-   }
-
-   std::string logstr = logs.substr(st, logs.size()-st);
-
-   logPrioT prio = logPrio::LOG_INFO;
-
-   //Look for fatal errors
-   if(logstr.find("xindidriver") != std::string::npos) //Errors from xindidriver
-   {
-      if(logstr.find("failed to lock") != std::string::npos)
+      if(line.find("failed to lock") != std::string::npos)
       {
-         prio = logPrio::LOG_CRITICAL;
+         return logPrio::LOG_CRITICAL;
       }
    }
-   else if(logstr.find("bind: Address already in use") != std::string::npos) //Errors from indiserver
+   else if(line.find("bind: Address already in use") != std::string::npos) //Errors from indiserver
    {
-      prio = logPrio::LOG_CRITICAL;
+      return logPrio::LOG_CRITICAL;
    }
 
-   m_log.log<text_log>(tsp, "IS: " + logstr, prio);
+   return logPrio::LOG_INFO;
+}
+
+inline
+int xindiserver::processISLog( std::string logs )
+{
+   // Timestamped with the time the line is received. The time indiserver writes at the start of the line is kept
+   // in the text but not parsed: lines relayed from drivers can arrive without one, and parsing whatever text was
+   // there instead produced wrong times (year 0, stored as 2041).
+   logPrioT prio = isLogPriority(logs);
+
+   log<text_log>("IS: " + logs, prio);
 
    if(prio == logPrio::LOG_CRITICAL)
    {
