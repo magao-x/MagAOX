@@ -168,15 +168,16 @@ class orcaCtrl : public MagAOXApp<>,
     int32  m_frameCount; // number of frames in the circular buffer
     double m_camera_timestamp{ 0.0 };
     double m_FrameRateCalculation;
-    float  m_ReadOutTimeCalculation;
+    double m_ReadOutTimeCalculation;
 
     // std::string m_fxngenName{ "fxngensync" }; ///< Default fxngen device name
     // std::string m_fxngenCh{ "C2" };           ///< Default fxngen channel
 
     std::string m_otherCamName;
 
-    HDCAM m_cameraHandle{ 0 };
-    HDCAM m_modelHandle{ 0 };
+    HDCAM     m_cameraHandle{ nullptr };
+    HDCAM     m_modelHandle{ nullptr };
+    HDCAMWAIT m_waitHandle{ nullptr };
 
     // orcaAcquisitionBuffer m_acqBuff;
     // orcaAvailableData     m_available;
@@ -590,7 +591,7 @@ inline int orcaCtrl::onPowerOff()
     if( m_cameraHandle )
     {
         dcamdev_close( m_cameraHandle );
-        m_cameraHandle = 0;
+        m_cameraHandle = nullptr;
     }
 
     dcamapi_uninit();
@@ -629,8 +630,11 @@ inline int orcaCtrl::appShutdown()
 
     if( m_cameraHandle )
     {
+        dcamwait_close( m_waitHandle );
+        m_waitHandle = nullptr;
+
         dcamdev_close( m_cameraHandle );
-        m_cameraHandle = 0;
+        m_cameraHandle = nullptr;
     }
 
     dcamapi_uninit();
@@ -750,7 +754,7 @@ inline int orcaCtrl::connect()
     if( m_cameraHandle )
     {
         dcamdev_close( m_cameraHandle );
-        m_cameraHandle = 0;
+        m_cameraHandle = nullptr;
     }
 
     std::cerr << __LINE__ << '\n';
@@ -805,8 +809,26 @@ inline int orcaCtrl::connect()
         if( cameraID == m_serialNumber )
         {
             log<text_log>( "Found camera with ID " + m_serialNumber );
-            m_cameraName  = dcamDeviceString( deviceOpen.hdcam, DCAM_IDSTR_VENDOR );
-            m_cameraModel = dcamDeviceString( deviceOpen.hdcam, DCAM_IDSTR_MODEL );
+            m_cameraName   = dcamDeviceString( deviceOpen.hdcam, DCAM_IDSTR_VENDOR );
+            m_cameraModel  = dcamDeviceString( deviceOpen.hdcam, DCAM_IDSTR_MODEL );
+            m_cameraHandle = deviceOpen.hdcam;
+
+            // open a wait handle to the camera
+            DCAMWAIT_OPEN waitOpen{};
+            waitOpen.size  = sizeof( waitOpen );
+            waitOpen.hdcam = m_cameraHandle;
+
+            DCAMERR error = dcamwait_open( &waitOpen );
+
+            if( failed( error ) )
+            {
+                log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
+                dcamdev_close( m_cameraHandle );
+                m_cameraHandle = nullptr;
+                return -1;
+            }
+
+            m_waitHandle = waitOpen.hwait;
 
             m_fanControlSupported = false;
             m_fanStatusSupported  = false;
@@ -1491,14 +1513,12 @@ inline int orcaCtrl::configureAcquisition()
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
 
-    double readoutTimeCalc = 0.0;
-    if( getorcaParameter( readoutTimeCalc, DCAM_IDPROP_TIMING_READOUTTIME ) < 0 )
+    if( getorcaParameter( m_ReadOutTimeCalculation, DCAM_IDPROP_TIMING_READOUTTIME ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
         return log<software_error, -1>( { __FILE__, __LINE__, "could not get ReadOutTimeCalculation" } );
     }
-    m_ReadOutTimeCalculation = static_cast<float>( readoutTimeCalc );
 
     std::cerr << "Readout time is: " << m_ReadOutTimeCalculation << "\n";
 
@@ -1616,7 +1636,7 @@ inline int orcaCtrl::acquireAndCheckValid()
     waitStart.eventmask = DCAMWAIT_CAPEVENT_FRAMEREADY | DCAMWAIT_CAPEVENT_STOPPED;
     waitStart.timeout   = camTimeOut;
 
-    DCAMERR error = dcamwait_start( m_cameraHandle, &waitStart );
+    DCAMERR error = dcamwait_start( m_waitHandle, &waitStart );
 
     if( error == DCAMERR_TIMEOUT )
     {
@@ -1633,14 +1653,6 @@ inline int orcaCtrl::acquireAndCheckValid()
 
     // check if acq completed
     if( waitStart.eventhappened & DCAMWAIT_CAPEVENT_STOPPED )
-    {
-        return 1;
-    }
-
-    m_available.initial_readout = available.initial_readout;
-    m_available.readout_count   = available.readout_count;
-
-    if( m_available.initial_readout == 0 )
     {
         return 1;
     }
@@ -1677,7 +1689,7 @@ inline int orcaCtrl::acquireAndCheckValid()
         return -1;
     }
 
-    // std::cerr << "readout: " << m_available.initial_readout << " " << m_available.readout_count << "\n";
+    std::cerr << "readout: " << frame.buf << " " << transferInfo.nFrameCount << "\n";
 
     // camera time stamp
     const double cameraTimestamp =
@@ -1695,15 +1707,14 @@ inline int orcaCtrl::acquireAndCheckValid()
     }
     // print
 
-    m_camera_timestamp = cam_ts; // update to latest
+    m_camera_timestamp = cameraTimestamp; // update to latest
 
     return 0;
 }
 
 inline int orcaCtrl::loadImageIntoStream( void *dest )
 {
-    if( frameGrabber<orcaCtrl>::loadImageIntoStreamCopy(
-            dest, m_available.initial_readout, m_width, m_height, m_typeSize ) == nullptr )
+    if( frameGrabber<orcaCtrl>::loadImageIntoStreamCopy( dest, frame.buf, m_width, m_height, m_typeSize ) == nullptr )
         return -1;
 
     return 0;
