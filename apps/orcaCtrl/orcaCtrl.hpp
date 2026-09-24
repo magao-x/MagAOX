@@ -165,7 +165,7 @@ class orcaCtrl : public MagAOXApp<>,
     int m_depth{ 0 };
 
     int32  m_frameSize;
-    int32  m_frameCount; // number of frames in the circular buffer
+    int32  m_frameCount; ///< number of frames in the circular buffer
     double m_camera_timestamp{ 0.0 };
     double m_FrameRateCalculation;
     double m_ReadOutTimeCalculation;
@@ -175,12 +175,10 @@ class orcaCtrl : public MagAOXApp<>,
 
     std::string m_otherCamName;
 
-    HDCAM     m_cameraHandle{ nullptr };
-    HDCAM     m_modelHandle{ nullptr };
-    HDCAMWAIT m_waitHandle{ nullptr };
-
-    // orcaAcquisitionBuffer m_acqBuff;
-    // orcaAvailableData     m_available;
+    HDCAM         m_cameraHandle{ nullptr };
+    HDCAM         m_modelHandle{ nullptr };
+    HDCAMWAIT     m_waitHandle{ nullptr };
+    DCAMBUF_FRAME m_currentFrame{}; ///< most recently locked DCAM acq frame
 
     std::string m_cameraName;
     std::string m_cameraModel;
@@ -1689,7 +1687,16 @@ inline int orcaCtrl::acquireAndCheckValid()
         return -1;
     }
 
-    std::cerr << "readout: " << frame.buf << " " << transferInfo.nFrameCount << "\n";
+    m_currentFrame = frame;
+
+    clock_gettime( CLOCK_REALTIME, &m_currImageTimestamp );
+
+    if( m_currentFrame.buf == 0 )
+    {
+        return 1;
+    }
+
+    // std::cerr << "readout: " << frame.buf << " " << transferInfo.nFrameCount << "\n";
 
     // camera time stamp
     const double cameraTimestamp =
@@ -1714,7 +1721,8 @@ inline int orcaCtrl::acquireAndCheckValid()
 
 inline int orcaCtrl::loadImageIntoStream( void *dest )
 {
-    if( frameGrabber<orcaCtrl>::loadImageIntoStreamCopy( dest, frame.buf, m_width, m_height, m_typeSize ) == nullptr )
+    if( frameGrabber<orcaCtrl>::loadImageIntoStreamCopy( dest, m_currentFrame.buf, m_width, m_height, m_typeSize ) ==
+        nullptr )
         return -1;
 
     return 0;
@@ -1722,9 +1730,10 @@ inline int orcaCtrl::loadImageIntoStream( void *dest )
 
 inline int orcaCtrl::reconfig()
 {
-    ///\todo clean this up.  Just need to wait on acquisition update the first time probably.
 
-    DCAMERR error = orca_StopAcquisition( m_cameraHandle );
+    int32 captureStatus = 0;
+
+    DCAMERR error = dcamcap_stop( m_cameraHandle );
     if( error != DCAMERR_NONE )
     {
         log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
@@ -1733,15 +1742,16 @@ inline int orcaCtrl::reconfig()
         return -1;
     }
 
-    error = orca_IsAcquisitionRunning( m_cameraHandle, &running );
+    error                         = dcamcap_status( m_cameraHandle, &captureStatus );
+    const bool acquisitionRunning = !failed( error ) && captureStatus == DCAMCAP_STATUS_BUSY;
 
-    while( running )
+    while( acquisitionRunning )
     {
         if( MagAOXAppT::m_powerState == 0 )
             return 0;
         sleep( 1 );
 
-        error = orca_StopAcquisition( m_cameraHandle );
+        error = dcamcap_stop( m_cameraHandle );
 
         if( error != DCAMERR_NONE )
         {
@@ -1750,40 +1760,7 @@ inline int orcaCtrl::reconfig()
             return -1;
         }
 
-        int32 camTimeOut = 1000;
-
-        orcaAcquisitionStatus status;
-
-        orcaAvailableData available;
-
-        error = orca_WaitForAcquisitionUpdate( m_cameraHandle, camTimeOut, &available, &status );
-        if( error != DCAMERR_NONE )
-        {
-            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
-            state( stateCodes::ERROR );
-            return -1;
-        }
-
-        //       if(! status.running )
-        //       {
-        //          std::cerr << "Not running \n";
-        //
-        //          std::cerr << "status.running: " << status.running << "\n";
-        //          std::cerr << "status.errors: " << status.errors << "\n";
-        //          std::cerr << "CameraFaulted: " << (int)(status.errors &
-        //          orcaAcquisitionErrorsMask_CameraFaulted)
-        //          <<
-        //          "\n"; std::cerr << "CannectionLost: " << (int)(status.errors &
-        //          orcaAcquisitionErrorsMask_ConnectionLost) << "\n"; std::cerr << "DataLost: " <<
-        //          (int)(status.errors & orcaAcquisitionErrorsMask_DataLost) << "\n"; std::cerr <<
-        //          "DataNotArriving: " << (int)(status.errors & orcaAcquisitionErrorsMask_DataNotArriving) <<
-        //          "\n"; std::cerr << "None: " << (int)(status.errors & orcaAcquisitionErrorsMask_None) <<
-        //          "\n"; std::cerr << "ShutterOverheated: "
-        //          << (int)(status.errors & orcaAcquisitionErrorsMask_ShutterOverheated) << "\n"; std::cerr <<
-        //          "status.readout_rate: " << status.readout_rate << "\n";
-        //       }
-
-        error = orca_IsAcquisitionRunning( m_cameraHandle, &running );
+        error = dcamcap_status( m_cameraHandle, &captureStatus );
         if( error != DCAMERR_NONE )
         {
             log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
@@ -1803,34 +1780,6 @@ int orcaCtrl::checkRecordTimes()
 int orcaCtrl::recordTelem( const telem_stdcam * )
 {
     return recordCamera( true );
-}
-
-INDI_NEWCALLBACK_DEFN( orcaCtrl, m_indiP_receiveExptime )( const pcf::IndiProperty &ipRecv )
-{
-
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_receiveExptime, ipRecv );
-
-    if( ipRecv.getName() != m_indiP_receiveExptime.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
-
-        return -1;
-    }
-
-    if( !ipRecv.find( "target" ) )
-    {
-        return 0;
-    }
-
-    m_expTimeSet = ipRecv["target"].get<double>();
-
-    updatesIfChanged<double>( m_indiP_receiveExptime, { "current" }, { m_expTimeSet } );
-
-    // we don't need to strictly reconfig because setExpTime works online, but this
-    // eludes an infinite loop of triggering the 'otherCam' in setExptime
-    m_reconfig = 1;
-
-    return 0;
 }
 
 } // namespace app
