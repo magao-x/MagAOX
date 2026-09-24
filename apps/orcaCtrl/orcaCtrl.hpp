@@ -227,8 +227,6 @@ class orcaCtrl : public MagAOXApp<>,
 
     int getorcaParameter( double &value, int32 parameter );
 
-    // int setorcaParameter( int32 parameter, double value, bool commit = true );
-
     int setorcaParameter( int32 parameter, int32 value, bool commit = true );
 
     int setorcaParameter( HDCAM handle, int32 parameter, double value, bool commit = true );
@@ -700,6 +698,16 @@ inline int orcaCtrl::setorcaParameter( HDCAM handle, int32 parameter, double val
     }
 
     return 0;
+}
+
+inline int orcaCtrl::setorcaParameter( HDCAM handle, int32 parameter, int32 value, bool commit )
+{
+    return setorcaParameter( handle, parameter, static_cast<double>( value ), commit );
+}
+
+inline int orcaCtrl::setorcaParameter( int32 parameter, int32 value, bool commit )
+{
+    return setorcaParameter( m_cameraHandle, parameter, value, commit );
 }
 
 inline int orcaCtrl::setorcaParameterOnline( HDCAM handle, int32 parameter, double value )
