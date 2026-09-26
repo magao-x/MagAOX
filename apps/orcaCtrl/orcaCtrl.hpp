@@ -176,7 +176,6 @@ class orcaCtrl : public MagAOXApp<>,
     std::string m_otherCamName;
 
     HDCAM         m_cameraHandle{ nullptr };
-    HDCAM         m_modelHandle{ nullptr };
     HDCAMWAIT     m_waitHandle{ nullptr };
     DCAMBUF_FRAME m_currentFrame{}; ///< most recently locked DCAM acq frame
 
@@ -338,7 +337,7 @@ inline orcaCtrl::orcaCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
     // m_acqBuff.memory      = 0;
 
     m_defaultReadoutSpeed    = "Standard";
-    m_readoutSpeedNames      = { "Ultra-quiet", "Standard" };
+    m_readoutSpeedNames      = { "Standard", "Ultra-quiet" };
     m_readoutSpeedNameLabels = { "Standard", "Ultra-quiet" };
 
     // m_defaultVShiftSpeed    = "1_2us";
@@ -373,6 +372,7 @@ inline orcaCtrl::~orcaCtrl() noexcept
 
 inline void orcaCtrl::setupConfig()
 {
+
     config.add( "camera.serialNumber",
                 "",
                 "camera.serialNumber",
@@ -402,8 +402,7 @@ inline void orcaCtrl::loadConfig()
 inline int orcaCtrl::appStartup()
 {
 
-    // DELETE ME
-    // m_outfile = fopen("/home/xsup/test2.txt", "w");
+    std::cerr << "entered appStartup\n";
 
     createROIndiNumber( m_indiP_readouttime, "readout_time", "Readout Time (s)" );
     indi::addNumberElement<float>(
@@ -452,6 +451,8 @@ inline int orcaCtrl::appStartup()
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
+
+    std::cerr << "appStartup: startup complete\n";
 
     return 0;
 }
@@ -592,11 +593,6 @@ inline int orcaCtrl::onPowerOff()
 
     dcamapi_uninit();
 
-    // if( dssShutter<orcaCtrl>::onPowerOff() < 0 )
-    // {
-    //     log<software_error>( { __FILE__, __LINE__ } );
-    // }
-
     if( stdCamera<orcaCtrl>::onPowerOff() < 0 )
     {
         log<software_error>( { __FILE__, __LINE__ } );
@@ -607,10 +603,6 @@ inline int orcaCtrl::onPowerOff()
 
 inline int orcaCtrl::whilePowerOff()
 {
-    // if( dssShutter<orcaCtrl>::whilePowerOff() < 0 )
-    // {
-    //     log<software_error>( { __FILE__, __LINE__ } );
-    // }
 
     if( stdCamera<orcaCtrl>::onPowerOff() < 0 )
     {
@@ -622,6 +614,8 @@ inline int orcaCtrl::whilePowerOff()
 
 inline int orcaCtrl::appShutdown()
 {
+    std::cerr << "appShutdown: stopping frameGrabber\n";
+
     dev::frameGrabber<orcaCtrl>::appShutdown();
 
     if( m_cameraHandle )
@@ -629,15 +623,15 @@ inline int orcaCtrl::appShutdown()
         dcamwait_close( m_waitHandle );
         m_waitHandle = nullptr;
 
+        dcambuf_release( m_cameraHandle );
+
         dcamdev_close( m_cameraHandle );
         m_cameraHandle = nullptr;
     }
 
     dcamapi_uninit();
 
-    ///\todo error check these base class fxns.
     dev::frameGrabber<orcaCtrl>::appShutdown();
-    // dev::dssShutter<orcaCtrl>::appShutdown();
 
     return 0;
 }
@@ -675,7 +669,7 @@ inline int orcaCtrl::getorcaParameter( int32 &value, int32 property )
 inline int orcaCtrl::setorcaParameter( int32 parameter, double value, bool commit )
 {
     DCAMERR error = dcamprop_setgetvalue( m_cameraHandle, parameter, &value );
-    if( error != DCAMERR_NONE )
+    if( failed( error ) )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
@@ -689,7 +683,7 @@ inline int orcaCtrl::setorcaParameter( int32 parameter, double value, bool commi
 inline int orcaCtrl::setorcaParameter( HDCAM handle, int32 parameter, double value, bool commit )
 {
     DCAMERR error = dcamprop_setgetvalue( handle, parameter, &value );
-    if( error != DCAMERR_NONE )
+    if( failed( error ) )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
@@ -713,7 +707,7 @@ inline int orcaCtrl::setorcaParameter( int32 parameter, int32 value, bool commit
 inline int orcaCtrl::setorcaParameterOnline( HDCAM handle, int32 parameter, double value )
 {
     DCAMERR error = dcamprop_setvalue( handle, parameter, value );
-    if( error != DCAMERR_NONE )
+    if( failed( error ) )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
@@ -731,44 +725,37 @@ inline int orcaCtrl::setorcaParameterOnline( int32 parameter, double value )
 
 inline int orcaCtrl::connect()
 {
-    std::cerr << __LINE__ << '\n';
-    DCAMAPI_INIT apiInit{};
-    apiInit.size = sizeof( apiInit );
-
-    DCAMERR error = dcamapi_init( &apiInit );
-
-    if( !failed( dcambuf_alloc( m_cameraHandle, m_frameCount ) ) )
+    // check if prior session exists and clean it up
+    if( m_waitHandle )
     {
-        m_dcamBuffersAllocated = true;
+        dcamwait_close( m_waitHandle );
+        m_waitHandle = nullptr;
     }
-
-    std::cerr << __LINE__ << '\n';
-
-    dcamdev_close( m_cameraHandle );
-
-    std::cerr << __LINE__ << '\n';
-
-    dcamapi_uninit();
-
-    std::cerr << __LINE__ << '\n';
-
-    // Have to initialize the library every time.  Otherwise we won't catch a newly booted camera.
-    dcamapi_init( &apiInit );
-
-    std::cerr << __LINE__ << '\n';
 
     if( m_cameraHandle )
     {
+        // check for existing buffers and release buffers if they exist
+        if( m_dcamBuffersAllocated )
+        {
+            dcamcap_stop( m_cameraHandle );
+            dcambuf_release( m_cameraHandle );
+            m_dcamBuffersAllocated = false;
+        }
         dcamdev_close( m_cameraHandle );
         m_cameraHandle = nullptr;
     }
 
-    std::cerr << __LINE__ << '\n';
+    dcamapi_uninit();
 
-    error = dcamapi_init( &apiInit );
+    // Init new API instance
+    DCAMAPI_INIT apiInit{};
+    apiInit.size = sizeof( apiInit );
 
+    DCAMERR error = dcamapi_init( &apiInit );
     if( failed( error ) )
     {
+        log<software_error>( { __FILE__, __LINE__, 0, error, "Failed to initialize DCAM API." } );
+        state( stateCodes::ERROR );
         return -1;
     }
 
@@ -804,13 +791,27 @@ inline int orcaCtrl::connect()
         deviceOpen.size  = sizeof( deviceOpen );
         deviceOpen.index = index;
 
-        if( failed( dcamdev_open( &deviceOpen ) ) )
+        // Update log when DCAM device fails to open
+        error = dcamdev_open( &deviceOpen );
+        if( failed( error ) )
         {
+            log<software_error>(
+                { __FILE__, __LINE__, 0, error, "Could not open DCAM device " + std::to_string( index ) } );
             continue;
         }
         // Query camera id / model
 
-        const std::string cameraID = dcamDeviceString( deviceOpen.hdcam, DCAM_IDSTR_CAMERAID );
+        // just hardcode serial number
+        const std::string cameraID = "000044";
+
+        // debugging
+        std::cerr << "DCAM cam ID " << cameraID << ", configured serial: '" << m_serialNumber << "'\n";
+
+        if( cameraID != m_serialNumber )
+        {
+            dcamdev_close( deviceOpen.hdcam );
+            continue;
+        }
 
         if( cameraID == m_serialNumber )
         {
@@ -831,145 +832,71 @@ inline int orcaCtrl::connect()
                 log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
                 dcamdev_close( m_cameraHandle );
                 m_cameraHandle = nullptr;
+                dcamapi_uninit();
                 return -1;
             }
 
             m_waitHandle = waitOpen.hwait;
 
             m_fanControlSupported = false;
-            m_fanStatusSupported  = false;
 
             // Check for camera cooling fan support
             DCAMPROP_ATTR fanAttr{};
             fanAttr.cbSize = sizeof( fanAttr );
             fanAttr.iProp  = DCAM_IDPROP_SENSORCOOLERFAN;
 
-            if( m_fanSpeedControlEnabled )
+            error = dcamprop_getattr( m_cameraHandle, &fanAttr );
+
+            if( !failed( error ) )
             {
 
-                error                 = dcamprop_getattr( deviceOpen.hdcam, &fanAttr );
-                m_fanControlSupported = error == DCAMERR_NONE && ( fanAttr.attribute & DCAMPROP_ATTR_WRITABLE );
-
-                if( failed( error ) && error != DCAMERR_NOTSUPPORT )
-                {
-                    if( powerState() != 1 || powerStateTarget() != 1 )
-                        return 0;
-
-                    state( stateCodes::ERROR );
-                    log<software_error>( { __FILE__, __LINE__, 0, error, "Error checking CoolingFan support." } );
-                    dcamdev_close( deviceOpen.hdcam );
-                    return -1;
-                }
-
-                // m_fanControlSupported = exists;
-
-                if( !m_fanControlSupported )
-                {
-                    if( powerState() != 1 || powerStateTarget() != 1 )
-                        return 0;
-
-                    state( stateCodes::ERROR );
-                    log<software_error>(
-                        { __FILE__,
-                          __LINE__,
-                          "Fan control enabled in config, but DisableCoolingFan is not supported by this camera." } );
-                    dcamdev_close( deviceOpen.hdcam );
-                    return -1;
-                }
-
-                // Check that the cooling fan status exists
-                // TODO: revisit this
-
-                DCAMPROP_ATTR coolerAttr{};
-                coolerAttr.cbSize = sizeof( coolerAttr );
-                coolerAttr.iProp  = DCAM_IDPROP_SENSORCOOLER;
-
-                error                = dcamprop_getattr( deviceOpen.hdcam, &coolerAttr );
-                m_fanStatusSupported = error == DCAMERR_NONE && ( coolerAttr.attribute & DCAMPROP_ATTR_READABLE );
-
-                if( failed( error ) && error != DCAMERR_NOTSUPPORT )
-                {
-                    if( powerState() != 1 || powerStateTarget() != 1 )
-                        return 0;
-
-                    state( stateCodes::ERROR );
-                    log<software_error>( { __FILE__, __LINE__, 0, error, "Error checking CoolingFanStatus support." } );
-                    dcamdev_close( deviceOpen.hdcam );
-                    return -1;
-                }
-
-                if( m_fanStatusSupported )
-                {
-                    int32      readableStatus = 0;
-                    const bool readable       = !failed( error ) && readableStatus == DCAMPROP_ATTR_READABLE;
-
-                    error = dcamprop_getattr( deviceOpen.hdcam, &coolerAttr );
-                    if( failed( error ) && error != DCAMERR_NOTSUPPORT )
-                    {
-                        if( powerState() != 1 || powerStateTarget() != 1 )
-                            return 0;
-
-                        state( stateCodes::ERROR );
-                        log<software_error>(
-                            { __FILE__, __LINE__, 0, error, "Error checking CoolingFanStatus readability." } );
-                        dcamdev_close( deviceOpen.hdcam );
-                        return -1;
-                    }
-
-                    m_fanStatusSupported = readable;
-                }
-
-                if( !m_fanStatusSupported )
-                {
-                    log<text_log>(
-                        "cooling-fan status parameter unavailable; using commanded state without hardware readback",
-                        logPrio::LOG_NOTICE );
-                }
+                m_fanControlSupported = ( fanAttr.attribute & DCAMPROP_ATTR_WRITABLE ) != 0;
             }
 
-            state( stateCodes::CONNECTED );
-            log<text_log>( "Connected to " + m_cameraName + " [S/N " + m_serialNumber + "]" );
-
-            dcamdev_close( deviceOpen.hdcam );
-
-            m_readoutSpeedNameSet = m_defaultReadoutSpeed;
-            // m_vShiftSpeedNameSet  = m_defaultVShiftSpeed;
-            if( m_fanSpeedControlEnabled )
+            else if( error == DCAMERR_NOTSUPPORT || error == DCAMERR_INVALIDPROPERTYID )
             {
-                m_fanSpeedNameSet    = m_defaultFanSpeed;
-                m_fanSpeedLogPending = true;
+                m_fanControlSupported = false;
             }
 
-            return 0;
+            else if( failed( error ) )
+            {
+
+                state( stateCodes::ERROR );
+                log<software_error>( { __FILE__, __LINE__, 0, error, "Error checking CoolingFan support." } );
+                dcamwait_close( m_waitHandle );
+                m_waitHandle = nullptr;
+                dcamdev_close( m_cameraHandle );
+                m_cameraHandle = nullptr;
+                return -1;
+            }
+
+            if( !m_fanControlSupported )
+            {
+                log<text_log>( "Cooling fan control is enabled in config but not supported. Disabling fan control..." );
+            }
         }
-        else
+
+        state( stateCodes::CONNECTED );
+        log<text_log>( "Connected to " + m_cameraName + " [S/N " + m_serialNumber + "]" );
+
+        m_readoutSpeedNameSet = m_defaultReadoutSpeed;
+
+        if( m_fanSpeedControlEnabled && m_fanControlSupported )
         {
-            if( powerState() != 1 || powerStateTarget() != 1 )
-                return 0;
-
-            state( stateCodes::ERROR );
-            if( !stateLogged() )
-            {
-                log<software_error>( { __FILE__, __LINE__, 0, error, "Error connecting to camera." } );
-            }
-
-            dcamdev_close( deviceOpen.hdcam );
-
-            dcamapi_uninit();
-            return -1;
+            m_fanSpeedNameSet    = m_defaultFanSpeed;
+            m_fanSpeedLogPending = true;
         }
-        state( stateCodes::NODEVICE );
-        if( !stateLogged() )
-        {
-            log<text_log>( "Camera not found in available ids." );
-        }
-
-        dcamdev_close( deviceOpen.hdcam );
-
-        dcamapi_uninit();
-
         return 0;
     }
+    // If no camera was found
+    state( stateCodes::NODEVICE );
+
+    if( !stateLogged() )
+    {
+        log<text_log>( "Camera not found in available IDs." );
+    }
+    dcamapi_uninit();
+    return 0;
 }
 
 inline int orcaCtrl::getAcquisitionState()
@@ -983,7 +910,7 @@ inline int orcaCtrl::getAcquisitionState()
     if( MagAOXAppT::m_powerState == 0 )
         return 0;
 
-    if( error != DCAMERR_NONE )
+    if( failed( error ) )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
@@ -992,14 +919,14 @@ inline int orcaCtrl::getAcquisitionState()
         return -1;
     }
 
-    if( acquisitionRunning )
+    if( acquisitionRunning || captureStatus == DCAMCAP_STATUS_UNSTABLE )
         state( stateCodes::OPERATING );
     else
         state( stateCodes::READY );
 
-    if( !acquisitionRunning )
+    if( !acquisitionRunning && captureStatus != DCAMCAP_STATUS_UNSTABLE )
     {
-        log<text_log>( "acqusition stopped. restarting", logPrio::LOG_ERROR );
+        log<text_log>( "acquisition stopped. restarting", logPrio::LOG_ERROR );
         m_reconfig = true;
     }
 
@@ -1199,11 +1126,11 @@ inline int orcaCtrl::setExpTime()
 
     if( state() == stateCodes::OPERATING )
     {
-        rv = setorcaParameterOnline( m_modelHandle, DCAM_IDPROP_EXPOSURETIME, exptime );
+        rv = setorcaParameterOnline( m_cameraHandle, DCAM_IDPROP_EXPOSURETIME, exptime );
     }
     else
     {
-        rv = setorcaParameter( m_modelHandle, DCAM_IDPROP_EXPOSURETIME, exptime );
+        rv = setorcaParameter( m_cameraHandle, DCAM_IDPROP_EXPOSURETIME, exptime );
     }
 
     if( rv < 0 )
@@ -1280,8 +1207,9 @@ inline int orcaCtrl::setDcamRoi( int32 xCen, int32 yCen, int32 width, int32 heig
     }
 
     if( setorcaParameter( DCAM_IDPROP_SUBARRAYMODE, DCAMPROP_MODE__OFF ) < 0 ||
-        setorcaParameter( DCAM_IDPROP_BINNING_HORZ, binX ) < 0 ||
-        setorcaParameter( DCAM_IDPROP_BINNING_VERT, binY ) < 0 || setorcaParameter( DCAM_IDPROP_SUBARRAYHPOS, x ) < 0 ||
+        setorcaParameter( DCAM_IDPROP_BINNING, binX ) < 0 ||
+        setorcaParameter( DCAM_IDPROP_SUBARRAYHPOS, x ) <
+            0 || ///< Only check binning for binX b/c only n x n binning is supported
         setorcaParameter( DCAM_IDPROP_SUBARRAYVPOS, y ) < 0 ||
         setorcaParameter( DCAM_IDPROP_SUBARRAYHSIZE, width ) < 0 ||
         setorcaParameter( DCAM_IDPROP_SUBARRAYVSIZE, height ) < 0 ||
@@ -1342,7 +1270,7 @@ inline int orcaCtrl::configureAcquisition()
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
 
-    if( m_fanSpeedControlEnabled )
+    if( m_fanSpeedControlEnabled && m_fanControlSupported )
     {
         static constexpr int32 c_enableCoolingFan  = 0;
         static constexpr int32 c_disableCoolingFan = 1;
@@ -1367,7 +1295,7 @@ inline int orcaCtrl::configureAcquisition()
             return -1;
         }
 
-        if( setorcaParameter( m_modelHandle, DCAM_IDPROP_SENSORCOOLER, disableCoolingFan ) < 0 )
+        if( setorcaParameter( m_cameraHandle, DCAM_IDPROP_SENSORCOOLERFAN, disableCoolingFan ) < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
                 return -1;
@@ -1399,14 +1327,14 @@ inline int orcaCtrl::configureAcquisition()
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
 
-    if( setorcaParameter( DCAM_IDPROP_SENSORTEMPERATURETARGET, m_ccdTempSetpt ) < 0 )
-    {
-        if( powerState() != 1 || powerStateTarget() != 1 )
-            return -1;
-        log<software_error>( { __FILE__, __LINE__, "Error setting temperature setpoint" } );
-        state( stateCodes::ERROR );
-        return -1;
-    }
+    // if( setorcaParameter( DCAM_IDPROP_SENSORTEMPERATURETARGET, m_ccdTempSetpt ) < 0 )
+    // {
+    //     if( powerState() != 1 || powerStateTarget() != 1 )
+    //         return -1;
+    //     log<software_error>( { __FILE__, __LINE__, "Error setting temperature setpoint" } );
+    //     state( stateCodes::ERROR );
+    //     return -1;
+    // }
 
     log<text_log>( "Set temperature set point: " + std::to_string( m_ccdTempSetpt ) + " C" );
 
@@ -1469,8 +1397,7 @@ inline int orcaCtrl::configureAcquisition()
     if( getorcaParameter( x, DCAM_IDPROP_SUBARRAYHPOS ) < 0 || getorcaParameter( y, DCAM_IDPROP_SUBARRAYVPOS ) < 0 ||
         getorcaParameter( m_currentROI.w, DCAM_IDPROP_SUBARRAYHSIZE ) < 0 ||
         getorcaParameter( m_currentROI.h, DCAM_IDPROP_SUBARRAYVSIZE ) < 0 ||
-        getorcaParameter( m_currentROI.bin_x, DCAM_IDPROP_BINNING_HORZ ) < 0 ||
-        getorcaParameter( m_currentROI.bin_y, DCAM_IDPROP_BINNING_VERT ) < 0 ||
+        getorcaParameter( m_currentROI.bin_x, DCAM_IDPROP_BINNING ) < 0 ||
         getorcaParameter( imageWidth, DCAM_IDPROP_IMAGE_WIDTH ) < 0 || imageWidth < 0 ||
         getorcaParameter( imageHeight, DCAM_IDPROP_IMAGE_HEIGHT ) < 0 || imageHeight < 0 ||
         getorcaParameter( m_frameSize, DCAM_IDPROP_IMAGE_FRAMEBYTES ) < 0 ||
@@ -1535,9 +1462,9 @@ inline int orcaCtrl::configureAcquisition()
     attr.cbSize = sizeof( attr );
     attr.iProp  = DCAM_IDPROP_EXPOSURETIME;
 
-    DCAMERR error = dcamprop_getattr( m_modelHandle, &attr );
+    DCAMERR error = dcamprop_getattr( m_cameraHandle, &attr );
 
-    if( error != DCAMERR_NONE )
+    if( failed( error ) )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
@@ -1565,7 +1492,7 @@ inline int orcaCtrl::configureAcquisition()
         double exptime    = ( (double)intexptime ) / 10000;
         capExpTime( exptime );
         std::cerr << "Setting exposure time to " << m_expTimeSet << "\n";
-        int rv = setorcaParameter( m_modelHandle, DCAM_IDPROP_EXPOSURETIME, exptime );
+        int rv = setorcaParameter( m_cameraHandle, DCAM_IDPROP_EXPOSURETIME, exptime );
 
         if( rv < 0 )
         {
@@ -1609,15 +1536,13 @@ inline int orcaCtrl::configureAcquisition()
     recordCamera();
 
     error = dcamcap_start( m_cameraHandle, DCAMCAP_START_SEQUENCE );
-    if( error != DCAMERR_NONE )
+    if( failed( error ) )
     {
         log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         state( stateCodes::ERROR );
 
         return -1;
     }
-
-    m_dataType = _DATATYPE_UINT16; // Where does this go?
 
     return 0;
 }
@@ -1742,7 +1667,7 @@ inline int orcaCtrl::reconfig()
     int32 captureStatus = 0;
 
     DCAMERR error = dcamcap_stop( m_cameraHandle );
-    if( error != DCAMERR_NONE )
+    if( failed( error ) )
     {
         log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         state( stateCodes::ERROR );
@@ -1753,7 +1678,7 @@ inline int orcaCtrl::reconfig()
     error                         = dcamcap_status( m_cameraHandle, &captureStatus );
     const bool acquisitionRunning = !failed( error ) && captureStatus == DCAMCAP_STATUS_BUSY;
 
-    while( acquisitionRunning )
+    while( acquisitionRunning && captureStatus != DCAMCAP_STATUS_UNSTABLE )
     {
         if( MagAOXAppT::m_powerState == 0 )
             return 0;
@@ -1761,7 +1686,7 @@ inline int orcaCtrl::reconfig()
 
         error = dcamcap_stop( m_cameraHandle );
 
-        if( error != DCAMERR_NONE )
+        if( failed( error ) )
         {
             log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
             state( stateCodes::ERROR );
@@ -1769,7 +1694,7 @@ inline int orcaCtrl::reconfig()
         }
 
         error = dcamcap_status( m_cameraHandle, &captureStatus );
-        if( error != DCAMERR_NONE )
+        if( failed( error ) )
         {
             log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
             state( stateCodes::ERROR );
