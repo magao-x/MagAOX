@@ -402,8 +402,6 @@ inline void orcaCtrl::loadConfig()
 inline int orcaCtrl::appStartup()
 {
 
-    std::cerr << "entered appStartup\n";
-
     createROIndiNumber( m_indiP_readouttime, "readout_time", "Readout Time (s)" );
     indi::addNumberElement<float>(
         m_indiP_readouttime, "value", 0.0, std::numeric_limits<float>::max(), 0.0, "%0.1f", "readout time" );
@@ -451,8 +449,6 @@ inline int orcaCtrl::appStartup()
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
-
-    std::cerr << "appStartup: startup complete\n";
 
     return 0;
 }
@@ -1239,6 +1235,22 @@ inline int orcaCtrl::setNextROI()
 inline int orcaCtrl::configureAcquisition()
 {
 
+    // Wait until capture status reports 'READY' before acq config
+    int32   captureStatus = 0;
+    DCAMERR error         = dcamcap_status( m_cameraHandle, &captureStatus );
+
+    if( failed( error ) )
+    {
+        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
+        state( stateCodes::ERROR );
+        return -1;
+    }
+
+    if( captureStatus != DCAMCAP_STATUS_READY )
+    {
+        return -1;
+    }
+
     // int32 readoutStride;
     int32 framesPerReadout;
     int32 frameStride;
@@ -1462,7 +1474,7 @@ inline int orcaCtrl::configureAcquisition()
     attr.cbSize = sizeof( attr );
     attr.iProp  = DCAM_IDPROP_EXPOSURETIME;
 
-    DCAMERR error = dcamprop_getattr( m_cameraHandle, &attr );
+    error = dcamprop_getattr( m_cameraHandle, &attr );
 
     if( failed( error ) )
     {
@@ -1534,6 +1546,17 @@ inline int orcaCtrl::configureAcquisition()
     // Start continuous acquisition
 
     recordCamera();
+
+    // Allocate img buffers
+    error = dcambuf_alloc( m_cameraHandle, m_frameCount );
+    if( failed( error ) )
+    {
+        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
+        state( stateCodes::ERROR );
+
+        return -1;
+    }
+    m_dcamBuffersAllocated = True;
 
     error = dcamcap_start( m_cameraHandle, DCAMCAP_START_SEQUENCE );
     if( failed( error ) )
@@ -1692,6 +1715,10 @@ inline int orcaCtrl::reconfig()
             state( stateCodes::ERROR );
             return -1;
         }
+
+        // release buffer
+        dcambuf_release( m_cameraHandle );
+        m_dcamBuffersAllocated = False;
 
         error = dcamcap_status( m_cameraHandle, &captureStatus );
         if( failed( error ) )
