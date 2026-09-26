@@ -165,7 +165,7 @@ class orcaCtrl : public MagAOXApp<>,
     int m_depth{ 0 };
 
     int32  m_frameSize;
-    int32  m_frameCount; ///< number of frames in the circular buffer
+    int32  m_frameCount{ 10 }; ///< number of frames in the circular buffer
     double m_camera_timestamp{ 0.0 };
     double m_FrameRateCalculation;
     double m_ReadOutTimeCalculation;
@@ -1246,11 +1246,6 @@ inline int orcaCtrl::configureAcquisition()
         return -1;
     }
 
-    if( captureStatus != DCAMCAP_STATUS_READY )
-    {
-        return -1;
-    }
-
     // int32 readoutStride;
     int32 framesPerReadout;
     int32 frameStride;
@@ -1556,7 +1551,7 @@ inline int orcaCtrl::configureAcquisition()
 
         return -1;
     }
-    m_dcamBuffersAllocated = True;
+    m_dcamBuffersAllocated = true;
 
     error = dcamcap_start( m_cameraHandle, DCAMCAP_START_SEQUENCE );
     if( failed( error ) )
@@ -1566,6 +1561,8 @@ inline int orcaCtrl::configureAcquisition()
 
         return -1;
     }
+
+    m_dataType = _DATATYPE_UINT16;
 
     return 0;
 }
