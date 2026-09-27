@@ -13,6 +13,7 @@
 #include "logDefs.hpp"
 #include "logPriority.hpp"
 #include "timespecX.hpp"
+#include "logCRC.hpp"
 #include "logHeader.hpp"
 #include "logStdFormat.hpp"
 
