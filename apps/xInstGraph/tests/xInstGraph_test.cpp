@@ -1,5 +1,5 @@
 /** \file xInstGraph_test.cpp
- * \brief Catch2 tests for the xInstGraph app.
+ * \brief Catch2 tests for xInstGraph output publication and ownership.
  * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup xInstGraph_files
@@ -7,6 +7,15 @@
 
 #include "../../../tests/testXWC.hpp"
 #include "../../tests/testMacrosINDI.hpp"
+
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 #include "../xInstGraph.hpp"
 
@@ -21,7 +30,7 @@ namespace libXWCTest
  * \ingroup application_unit_test
  */
 
-/// Namespace for `xInstGraph` unit tests.
+/// Namespace for xInstGraph unit tests.
 /** \ingroup xInstGraph_unit_test
  */
 namespace xInstGraphTest
@@ -31,83 +40,118 @@ namespace xInstGraphTest
 class xInstGraph : public MagAOX::app::xInstGraph
 {
   public:
-    void configDir( const std::string &cp )
+    /// Set the application config directory for a test.
+    void configDir( const std::string &cp /**< [in] config directory */ )
     {
         m_configDir = cp;
     }
 
+    /// Access the app's configurator.
     mx::app::appConfigurator &config()
     {
         return MagAOX::app::xInstGraph::config;
     }
 };
+
+struct temporaryDirectory
+{
+    /// Isolated test root, removed on destruction.
+    std::filesystem::path root;
+
+    /// Create a unique temporary test directory.
+    temporaryDirectory()
+    {
+        char  name[] = "/tmp/xInstGraph_test_XXXXXX";
+        char *dir    = ::mkdtemp( name );
+        if( dir == nullptr )
+        {
+            throw std::runtime_error( "could not create xInstGraph test directory" );
+        }
+
+        root = dir;
+        std::filesystem::create_directories( root / "config" );
+    }
+
+    /// Remove this test's files.
+    ~temporaryDirectory()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all( root, ec );
+    }
+
+    temporaryDirectory( const temporaryDirectory & )            = delete;
+    temporaryDirectory &operator=( const temporaryDirectory & ) = delete;
+};
 /// \endcond
 
-/// Write a minimal draw.io graph containing one of each supported node type.
-void writeXML()
+/// Read all bytes from a test file.
+std::string readFile( const std::filesystem::path &path /**< [in] file to read */ )
 {
-    std::ofstream fout( "/tmp/xInstGraph_test/config/instgraph_test.drawio" );
-    fout << "<mxfile host=\"test\">\n";
-    fout << "    <diagram id=\"test\" name=\"test\">\n";
-    fout << "        <mxGraphModel>\n";
-    fout << "            <root>\n";
-    fout << "               <mxCell id=\"0\"/>\n";
-    fout << "               <mxCell id=\"1\" parent=\"0\"/>\n";
-    fout << "               <mxCell id=\"node:fsmNode\">\n";
-    fout << "</mxCell>\n";
-    fout << "               <mxCell id=\"node:indiPropNode\">\n";
-    fout << "</mxCell>\n";
-    fout << "               <mxCell id=\"node:pwrOnOffNode\">\n";
-    fout << "</mxCell>\n";
-    fout << "               <mxCell id=\"node:stdMotionNode\">\n";
-    fout << "</mxCell>\n";
-    fout << "               <mxCell id=\"node:staticNode\">\n";
-    fout << "</mxCell>\n";
-    fout << "            </root>\n";
-    fout << "       </mxGraphModel>\n";
-    fout << "   </diagram>\n";
-    fout << "</mxfile>\n";
-    fout.close();
+    std::ifstream in( path );
+    return { std::istreambuf_iterator<char>( in ), std::istreambuf_iterator<char>() };
 }
 
-/// Verify xInstGraph configures and runs when given a minimal graph with all supported node types.
-/**
- * \ingroup xInstGraph_unit_test
- */
-TEST_CASE( "Configuring xInstGraph with no errors", "[xInstGraph]" )
+/// Write either a minimal five-node graph or a static node with a put and internal link.
+void writeXML( const std::filesystem::path &path /**< [in] source graph path */,
+               bool                         connected /**< [in] include a static node with linked puts */ )
 {
-    // clang-format off
-    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
-    xInstGraph::setupConfig();
-    xInstGraph::loadConfig();
-    xInstGraph::appStartup();
-    xInstGraph::appLogic();
-    xInstGraph::appShutdown();
-    xInstGraph::st_igHandleSetProperty( nullptr, pcf::IndiProperty() );
-    #endif
-    // clang-format on
+    std::ofstream out( path );
+    out << "<mxfile host=\"test\"><diagram id=\"test\" name=\"test\"><mxGraphModel><root>\n";
+    out << "<mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>\n";
 
-    mx::ioutils::createDirectories( "/tmp/xInstGraph_test/config" );
-
-    writeXML();
-
-    SECTION( "A valid configuration with each node type" )
+    if( connected )
     {
-        std::vector<std::string> sections;
-        std::vector<std::string> keys;
-        std::vector<std::string> values;
+        out << "<mxCell id=\"node:staticNode\" style=\"rounded=0;strokeColor=#FF0000;\"/>\n";
+        out << "<mxCell id=\"input:staticNode:in\" style=\"rounded=0;strokeColor=#FF0000;\"/>\n";
+        out << "<mxCell id=\"output:staticNode:out\" style=\"rounded=0;strokeColor=#FF0000;\"/>\n";
+        out << "<mxCell id=\"link:staticNode:in2out\" style=\"strokeColor=#00FF00;\" "
+               "source=\"input:staticNode:in\" target=\"output:staticNode:out\"/>\n";
+    }
+    else
+    {
+        out << "<mxCell id=\"node:fsmNode\"/>\n";
+        out << "<mxCell id=\"node:indiPropNode\"/>\n";
+        out << "<mxCell id=\"node:pwrOnOffNode\"/>\n";
+        out << "<mxCell id=\"node:stdMotionNode\"/>\n";
+        out << "<mxCell id=\"node:staticNode\"/>\n";
+    }
 
-        sections.insert( sections.end(), { "graph", "graph" } );
-        keys.insert( keys.end(), { "file", "outputPath" } );
-        values.insert( values.end(), { "instgraph_test.drawio", "/tmp/xInstGraph_test/instgraph_test_out.drawio" } );
+    out << "</root></mxGraphModel></diagram></mxfile>\n";
+}
 
+/// Write an application config matching the selected graph fixture.
+void writeConfig( const std::filesystem::path &path,      /**< [in] config file path */
+                  const std::filesystem::path &output,    /**< [in] output graph path */
+                  bool                         connected, /**< [in] whether to configure linked puts */
+                  std::optional<bool>          clobber,   /**< [in] explicit clobber setting, if any */
+                  const std::string           &pwrKey = "testpwr.test" /**< [in] power property key */ )
+{
+    std::vector<std::string> sections{ "graph", "graph" };
+    std::vector<std::string> keys{ "file", "outputPath" };
+    std::vector<std::string> values{ "instgraph_test.drawio", output.string() };
+
+    if( clobber.has_value() )
+    {
+        sections.push_back( "graph" );
+        keys.push_back( "clobberOutput" );
+        values.push_back( *clobber ? "true" : "false" );
+    }
+
+    if( connected )
+    {
+        sections.insert( sections.end(), { "staticNode", "staticNode" } );
+        keys.insert( keys.end(), { "type", "inputsOn" } );
+        values.insert( values.end(), { "static", "in" } );
+    }
+    else
+    {
         sections.insert( sections.end(), { "indiPropNode", "indiPropNode", "indiPropNode", "indiPropNode" } );
         keys.insert( keys.end(), { "type", "propKey", "propEl", "propVal" } );
         values.insert( values.end(), { "indiProp", "test.test", "test", "test" } );
 
         sections.insert( sections.end(), { "pwrOnOffNode", "pwrOnOffNode" } );
         keys.insert( keys.end(), { "type", "pwrKey" } );
-        values.insert( values.end(), { "pwrOnOff", "testpwr.test" } );
+        values.insert( values.end(), { "pwrOnOff", pwrKey } );
 
         sections.insert( sections.end(), { "fsmNode" } );
         keys.insert( keys.end(), { "type" } );
@@ -120,42 +164,304 @@ TEST_CASE( "Configuring xInstGraph with no errors", "[xInstGraph]" )
         sections.insert( sections.end(), { "staticNode" } );
         keys.insert( keys.end(), { "type" } );
         values.insert( values.end(), { "static" } );
+    }
 
-        mx::app::writeConfigFile( "/tmp/xInstGraph_test/config/instgraph_test.conf", sections, keys, values );
+    mx::app::writeConfigFile( path.string(), sections, keys, values );
+}
 
-        xInstGraph xig;
-        xig.configDir( "/tmp/xInstGraph_test/config" );
+/// Load a fixture config into the app under test.
+void loadFixture( xInstGraph                  &app, /**< [in,out] app to configure */
+                  const std::filesystem::path &root /**< [in] temporary test root */ )
+{
+    app.configDir( ( root / "config" ).string() );
+    app.setupConfig();
+    app.config().readConfig( ( root / "config" / "instgraph_test.conf" ).string() );
+    app.loadConfig();
+}
 
-        REQUIRE( xig.shutdown() == 0 );
+/// Return the mxCell opening tag with the given ID.
+std::string cellTag( const std::string &xml, /**< [in] graph XML */
+                     const std::string &id /**< [in] cell ID */ )
+{
+    size_t start = xml.find( "id=\"" + id + "\"" );
+    if( start == std::string::npos )
+    {
+        return "";
+    }
 
-        xig.setupConfig();
+    size_t end = xml.find( '>', start );
+    if( end == std::string::npos )
+    {
+        return "";
+    }
 
-        REQUIRE( xig.shutdown() == 0 );
+    return xml.substr( start, end - start );
+}
 
-        xig.config().readConfig( "/tmp/xInstGraph_test/config/instgraph_test.conf" );
+/// Verify a graph is published before the first property update.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph publishes an initial graph", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::setupConfig();
+    MagAOX::app::xInstGraph::loadConfig();
+    MagAOX::app::xInstGraph::appStartup();
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    MagAOX::app::xInstGraph::appShutdown();
+    #endif
+    // clang-format on
 
-        xig.loadConfig();
-        REQUIRE( xig.shutdown() == 0 );
+    temporaryDirectory temp;
+    auto               input  = temp.root / "config" / "instgraph_test.drawio";
+    auto               output = temp.root / "output.drawio";
+    writeXML( input, false );
+    writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, std::nullopt );
+    const std::string source = readFile( input );
 
-        REQUIRE( xig.appStartup() == 0 );
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.shutdown() == 0 );
+    REQUIRE_FALSE( std::filesystem::exists( output ) );
 
-        pcf::IndiProperty ip;
-        ip.setDevice( "testpwr" );
-        ip.setName( "test" );
-        ip.add( pcf::IndiElement( "state" ) );
-        ip["state"] = "On";
+    REQUIRE( app.appStartup() == 0 );
+    REQUIRE( std::filesystem::exists( output ) );
 
-        MagAOX::app::xInstGraph::st_igHandleSetProperty( &xig, ip );
+    ingr::instGraphXML parsed;
+    std::string        emsg;
+    REQUIRE( parsed.loadXMLFile( emsg, output.string() ) == 0 );
 
-        bool ex = std::filesystem::exists( "/tmp/xInstGraph_test/instgraph_test_out.drawio" );
-        REQUIRE( ex == true );
+    pcf::IndiProperty property;
+    property.setDevice( "testpwr" );
+    property.setName( "test" );
+    property.add( pcf::IndiElement( "state" ) );
+    property["state"] = "On";
+    REQUIRE( MagAOX::app::xInstGraph::st_igHandleSetProperty( &app, property ) == 0 );
+    REQUIRE( app.appLogic() == 0 );
 
-        REQUIRE( xig.appLogic() == 0 );
+    REQUIRE( app.appShutdown() == 0 );
+    REQUIRE_FALSE( std::filesystem::exists( output ) );
+    REQUIRE( readFile( input ) == source );
+}
 
-        REQUIRE( xig.appShutdown() == 0 );
+/// Verify configuration-time writes do not publish stale link or put visibility.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph publishes hidden puts and links", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::loadConfigImpl( *(mx::app::appConfigurator *)nullptr );
+    MagAOX::app::xInstGraph::appStartup();
+    #endif
+    // clang-format on
 
-        ex = std::filesystem::exists( "/tmp/xInstGraph_test/instgraph_test_out.drawio" );
-        REQUIRE( ex == false );
+    temporaryDirectory temp;
+    auto               input  = temp.root / "config" / "instgraph_test.drawio";
+    auto               output = temp.root / "output.drawio";
+    writeXML( input, true );
+    writeConfig( temp.root / "config" / "instgraph_test.conf", output, true, std::nullopt );
+
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.shutdown() == 0 );
+    REQUIRE_FALSE( std::filesystem::exists( output ) );
+
+    REQUIRE( app.appStartup() == 0 );
+    ingr::instGraphXML parsed;
+    std::string        emsg;
+    REQUIRE( parsed.loadXMLFile( emsg, output.string() ) == 0 );
+
+    std::string xml = readFile( output );
+    REQUIRE( cellTag( xml, "link:staticNode:in2out" ).find( "opacity=0;" ) != std::string::npos );
+    for( const char *id : { "input:staticNode:in", "output:staticNode:out" } )
+    {
+        REQUIRE( cellTag( xml, id ).find( "opacity=0;" ) != std::string::npos );
+        REQUIRE( cellTag( xml, id ).find( "textOpacity=0;" ) != std::string::npos );
+    }
+
+    REQUIRE( app.appShutdown() == 0 );
+}
+
+/// Verify clobber requires an explicit option and only an owned output is removed.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph controls output replacement and cleanup", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::loadConfig();
+    MagAOX::app::xInstGraph::appStartup();
+    MagAOX::app::xInstGraph::appShutdown();
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    auto               input  = temp.root / "config" / "instgraph_test.drawio";
+    auto               output = temp.root / "output.drawio";
+    writeXML( input, false );
+    const std::string source = readFile( input );
+    {
+        std::ofstream old( output );
+        old << "previous output";
+    }
+
+    SECTION( "existing output is preserved by default" )
+    {
+        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, std::nullopt );
+        xInstGraph app;
+        loadFixture( app, temp.root );
+        REQUIRE( app.shutdown() != 0 );
+        REQUIRE( app.appShutdown() == 0 );
+        REQUIRE( readFile( output ) == "previous output" );
+    }
+
+    SECTION( "explicit false also preserves an existing output" )
+    {
+        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, false );
+        xInstGraph app;
+        loadFixture( app, temp.root );
+        REQUIRE( app.shutdown() != 0 );
+        REQUIRE( app.appShutdown() == 0 );
+        REQUIRE( readFile( output ) == "previous output" );
+    }
+
+    SECTION( "explicit true replaces an existing regular output" )
+    {
+        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, true );
+        xInstGraph app;
+        loadFixture( app, temp.root );
+        REQUIRE( app.shutdown() == 0 );
+        REQUIRE( readFile( output ) == "previous output" );
+        REQUIRE( app.appStartup() == 0 );
+        REQUIRE( readFile( output ).find( "<mxfile" ) != std::string::npos );
+        REQUIRE( readFile( input ) == source );
+        REQUIRE( app.appShutdown() == 0 );
+        REQUIRE_FALSE( std::filesystem::exists( output ) );
+    }
+
+    SECTION( "a later replacement is not removed at shutdown" )
+    {
+        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, true );
+        xInstGraph app;
+        loadFixture( app, temp.root );
+        REQUIRE( app.appStartup() == 0 );
+        std::filesystem::remove( output );
+        {
+            std::ofstream replacement( output );
+            replacement << "replacement";
+        }
+        REQUIRE( app.appShutdown() == 0 );
+        REQUIRE( readFile( output ) == "replacement" );
+    }
+}
+
+/// Verify an output path can never refer to the input graph.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph rejects input output aliases", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::loadConfig();
+    MagAOX::app::xInstGraph::appShutdown();
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    auto               input  = temp.root / "config" / "instgraph_test.drawio";
+    auto               output = temp.root / "alias.drawio";
+    writeXML( input, false );
+    const std::string   source  = readFile( input );
+    std::optional<bool> clobber = true;
+
+    SECTION( "exact input path with default policy" )
+    {
+        output  = input;
+        clobber = std::nullopt;
+    }
+
+    SECTION( "exact input path with clobber enabled" )
+    {
+        output = input;
+    }
+
+    SECTION( "relative spelling of the input path" )
+    {
+        output = temp.root / "config" / ".." / "config" / "instgraph_test.drawio";
+    }
+
+    SECTION( "symbolic link to input" )
+    {
+        std::filesystem::create_symlink( input, output );
+    }
+
+    SECTION( "hard link to input" )
+    {
+        std::filesystem::create_hard_link( input, output );
+    }
+
+    writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, clobber );
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.shutdown() != 0 );
+    REQUIRE( app.appShutdown() == 0 );
+    REQUIRE( readFile( input ) == source );
+}
+
+/// Verify clobber rejects a symlink and a failed startup preserves the prior output.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph preserves outputs before publication", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::appStartup();
+    MagAOX::app::xInstGraph::appShutdown();
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    auto               input  = temp.root / "config" / "instgraph_test.drawio";
+    auto               output = temp.root / "output.drawio";
+    writeXML( input, false );
+
+    SECTION( "symlink destination is rejected even with clobber" )
+    {
+        auto other = temp.root / "other.drawio";
+        {
+            std::ofstream old( other );
+            old << "other file";
+        }
+        std::filesystem::create_symlink( other, output );
+        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, true );
+        xInstGraph app;
+        loadFixture( app, temp.root );
+        REQUIRE( app.shutdown() != 0 );
+        REQUIRE( app.appShutdown() == 0 );
+        REQUIRE( std::filesystem::is_symlink( output ) );
+        REQUIRE( readFile( other ) == "other file" );
+    }
+
+    SECTION( "startup failure before publication keeps an existing output" )
+    {
+        {
+            std::ofstream old( output );
+            old << "previous output";
+        }
+        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, true, "invalid-key" );
+        xInstGraph app;
+        loadFixture( app, temp.root );
+        REQUIRE( app.shutdown() == 0 );
+        REQUIRE( app.appStartup() < 0 );
+        REQUIRE( readFile( output ) == "previous output" );
+
+        for( const auto &entry : std::filesystem::directory_iterator( temp.root ) )
+        {
+            REQUIRE( entry.path().filename().string().find( ".xInstGraph-" ) == std::string::npos );
+        }
+        REQUIRE( app.appShutdown() == 0 );
     }
 }
 

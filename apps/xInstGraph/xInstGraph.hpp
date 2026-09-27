@@ -7,6 +7,17 @@
 #ifndef xInstGraph_hpp
 #define xInstGraph_hpp
 
+#include <cerrno>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <map>
+#include <string>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <vector>
+
 #include <instGraph/instGraphXML.hpp>
 using namespace ingr;
 
@@ -20,22 +31,19 @@ using namespace ingr;
 #include "xigNodes/staticNode.hpp"
 
 /** \defgroup instGraph
- * \brief The XXXXXX application to do YYYYYYY
- *
- * <a href="../handbook/operating/software/apps/XXXXXX.html">Application Documentation</a>
+ * \brief The MagAO-X instrument graph publisher.
  *
  * \ingroup apps
- *
  */
 
 /** \defgroup instGraph_files
  * \ingroup instGraph
  */
 
-//forward for test harness
+// forward for test harness
 namespace xInstGraph_test
 {
-    class xInstGraph;
+class xInstGraph;
 }
 
 namespace MagAOX
@@ -43,7 +51,7 @@ namespace MagAOX
 namespace app
 {
 
-/// The MagAO-X xxxxxxxx
+/// The MagAO-X instrument graph application.
 /**
  * \ingroup instGraph
  */
@@ -53,44 +61,96 @@ class xInstGraph : public MagAOXApp<true>
     friend class xInstGraph_test::xInstGraph;
 
   protected:
-    /** \name Configurable Parameters
+    /** \name Output Configuration - Data
      *@{
      */
+    /// Input diagram path, resolved against the application's config directory.
+    std::filesystem::path m_inputPath;
 
-    // here add parameters which will be config-able at runtime
+    /// Requested output diagram path, resolved against the current directory.
+    std::filesystem::path m_outputPath;
+
+    /// Permit replacement of an existing regular output file at startup.
+    bool m_clobberOutput{ false };
 
     ///@}
 
+    /** \name Output Ownership - Data
+     *@{
+     */
+    /// Filesystem identity used to avoid removing a path replaced by another process.
+    struct fileIdentity
+    {
+        dev_t device{ 0 }; ///< Device containing the file.
+        ino_t inode{ 0 };  ///< Inode of the file.
+    };
+
+    /// Private staging path used while the graph is configured.
+    std::filesystem::path m_stagePath;
+
+    /// Identity of the staging file created by this run.
+    fileIdentity m_stageIdentity;
+
+    /// Open descriptor retaining the staging inode until publication or cleanup.
+    int m_stageFd{ -1 };
+
+    /// Identity of the output file published by this run.
+    fileIdentity m_outputIdentity;
+
+    /// Open descriptor retaining the published inode until shutdown.
+    int m_outputFd{ -1 };
+
+    /// True after this run successfully publishes its output.
+    bool m_outputPublished{ false };
+
+    ///@}
+
+    /// The in-memory graph and its draw.io XML representation.
     ingr::instGraphXML m_graph;
 
+    /// Node handlers allocated during configuration and retained for the app lifetime.
     std::map<std::string, xigNode *> m_nodes;
 
-    std::vector<pcf::IndiProperty *> m_nodeProps; ///< The node INDI properties to register for SetProperty
+    /// Node INDI properties owned by this app for SetProperty registration.
+    std::vector<pcf::IndiProperty *> m_nodeProps;
 
-    std::multimap<std::string, xigNode *> m_nodeHandleSets; /**< Map from propery keys to nodes which
-                                                                 have registered for them*/
+    /// Property keys mapped to each node that consumes their updates.
+    std::multimap<std::string, xigNode *> m_nodeHandleSets;
+
+    /// Validate that the output is distinct from the input and may be published.
+    int checkOutputPath( std::string &error /**< [out] reason for a rejected path */ ) const;
+
+    /// Create a private staging file in the output directory.
+    int createStage( std::string &error /**< [out] reason staging failed */ );
+
+    /// Publish the staged initial snapshot according to the clobber policy.
+    int publishOutput( std::string &error /**< [out] reason publication failed */ );
+
+    /// Remove only staging and output files still owned by this run.
+    void cleanupOwnedFiles() noexcept;
 
   public:
-    /// Default c'tor.
+    /// Construct the instrument graph app.
     xInstGraph();
 
-    /// D'tor
+    /// Release registered properties and any output owned by this run.
     ~xInstGraph() noexcept;
 
+    /// Register the graph input, output, and clobber settings.
     virtual void setupConfig();
 
-    /// Implementation of loadConfig logic, separated for testing.
+    /// Load graph configuration; exposed separately for the test harness.
     /** This is called by loadConfig().
      */
-    int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] an application configuration from
-                        which to load values*/
+    int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] application configuration to load */
     );
 
+    /// Load the graph, configure nodes, and prepare a private output.
     virtual void loadConfig();
 
-    /// Startup function
+    /// Register INDI callbacks and publish the initial graph snapshot.
     /**
-     *
+     * \returns 0 on success or -1 if startup cannot publish the output.
      */
     virtual int appStartup();
 
@@ -101,19 +161,18 @@ class xInstGraph : public MagAOXApp<true>
      */
     virtual int appLogic();
 
-    /// Shutdown the app.
-    /**
-     *
-     */
+    /// Remove output files created by this run.
     virtual int appShutdown();
 
-    static int st_igHandleSetProperty( void                    *igapp, /**< [in] this pointer */
+    /// Forward an INDI SetProperty callback to this app.
+    static int st_igHandleSetProperty( void                    *igapp, /**< [in] application instance */
                                        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
-                                                                       the the set property message.*/
+                                                                       the set property message */
     );
 
+    /// Dispatch a received INDI property to interested nodes.
     int igHandleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
-                                                                      the the set property message.*/
+                                                                      the set property message */
     );
 };
 
@@ -124,9 +183,203 @@ xInstGraph::xInstGraph() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED 
 
 xInstGraph::~xInstGraph()
 {
+    cleanupOwnedFiles();
+
     for( auto p : m_nodeProps )
     {
         delete p;
+    }
+}
+
+int xInstGraph::checkOutputPath( std::string &error ) const
+{
+    if( m_inputPath == m_outputPath )
+    {
+        error = "graph output path is the input graph path";
+        return -1;
+    }
+
+    struct stat inputInfo;
+    if( ::stat( m_inputPath.c_str(), &inputInfo ) < 0 )
+    {
+        error = "cannot stat input graph " + m_inputPath.string() + ": " + std::strerror( errno );
+        return -1;
+    }
+
+    struct stat outputInfo;
+    if( ::lstat( m_outputPath.c_str(), &outputInfo ) < 0 )
+    {
+        if( errno == ENOENT )
+        {
+            return 0;
+        }
+
+        error = "cannot inspect graph output " + m_outputPath.string() + ": " + std::strerror( errno );
+        return -1;
+    }
+
+    struct stat outputTarget;
+    if( ::stat( m_outputPath.c_str(), &outputTarget ) == 0 && inputInfo.st_dev == outputTarget.st_dev &&
+        inputInfo.st_ino == outputTarget.st_ino )
+    {
+        error = "graph output path refers to the input graph";
+        return -1;
+    }
+
+    if( !m_clobberOutput )
+    {
+        error = "graph output already exists (set graph.clobberOutput=true to replace it): " + m_outputPath.string();
+        return -1;
+    }
+
+    if( !S_ISREG( outputInfo.st_mode ) )
+    {
+        error = "graph output is not a regular file: " + m_outputPath.string();
+        return -1;
+    }
+
+    return 0;
+}
+
+int xInstGraph::createStage( std::string &error )
+{
+    std::string       stageTemplate = m_outputPath.string() + ".xInstGraph-XXXXXX";
+    std::vector<char> name( stageTemplate.begin(), stageTemplate.end() );
+    name.push_back( '\0' );
+
+    int fd = ::mkstemp( name.data() );
+    if( fd < 0 )
+    {
+        error = "cannot create graph staging file: " + std::string( std::strerror( errno ) );
+        return -1;
+    }
+
+    struct stat info;
+    if( ::fstat( fd, &info ) < 0 )
+    {
+        error = "cannot inspect graph staging file: " + std::string( std::strerror( errno ) );
+        ::close( fd );
+        ::unlink( name.data() );
+        return -1;
+    }
+
+    m_stagePath     = name.data();
+    m_stageIdentity = { info.st_dev, info.st_ino };
+    m_stageFd       = fd;
+    m_graph.outputPath( m_stagePath.string() );
+
+    return 0;
+}
+
+int xInstGraph::publishOutput( std::string &error )
+{
+    if( m_stagePath.empty() )
+    {
+        error = "graph staging file was not created";
+        return -1;
+    }
+
+    struct stat stageInfo;
+    if( ::lstat( m_stagePath.c_str(), &stageInfo ) < 0 || stageInfo.st_dev != m_stageIdentity.device ||
+        stageInfo.st_ino != m_stageIdentity.inode || !S_ISREG( stageInfo.st_mode ) || stageInfo.st_size == 0 )
+    {
+        error = "graph staging file is missing, empty, or was replaced";
+        return -1;
+    }
+
+    if( checkOutputPath( error ) < 0 )
+    {
+        return -1;
+    }
+
+    mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+    if( m_clobberOutput )
+    {
+        struct stat oldOutput;
+        if( ::lstat( m_outputPath.c_str(), &oldOutput ) == 0 )
+        {
+            mode = oldOutput.st_mode & 0777;
+        }
+    }
+
+    if( ::chmod( m_stagePath.c_str(), mode ) < 0 )
+    {
+        error = "cannot set graph output permissions: " + std::string( std::strerror( errno ) );
+        return -1;
+    }
+
+    if( m_clobberOutput )
+    {
+        if( ::rename( m_stagePath.c_str(), m_outputPath.c_str() ) < 0 )
+        {
+            error = "cannot publish graph output: " + std::string( std::strerror( errno ) );
+            return -1;
+        }
+        m_stagePath.clear();
+    }
+    else
+    {
+        if( ::link( m_stagePath.c_str(), m_outputPath.c_str() ) < 0 )
+        {
+            error = "cannot publish graph output without replacing an existing file: " +
+                    std::string( std::strerror( errno ) );
+            return -1;
+        }
+    }
+
+    m_outputIdentity  = m_stageIdentity;
+    m_outputFd        = m_stageFd;
+    m_stageFd         = -1;
+    m_outputPublished = true;
+
+    if( !m_stagePath.empty() )
+    {
+        if( ::unlink( m_stagePath.c_str() ) < 0 )
+        {
+            error = "cannot remove graph staging link: " + std::string( std::strerror( errno ) );
+            return -1;
+        }
+        m_stagePath.clear();
+    }
+
+    m_graph.outputPath( m_outputPath.string() );
+    return 0;
+}
+
+void xInstGraph::cleanupOwnedFiles() noexcept
+{
+    if( !m_stagePath.empty() )
+    {
+        struct stat info;
+        if( ::lstat( m_stagePath.c_str(), &info ) == 0 && info.st_dev == m_stageIdentity.device &&
+            info.st_ino == m_stageIdentity.inode )
+        {
+            ::unlink( m_stagePath.c_str() );
+        }
+        m_stagePath.clear();
+    }
+
+    if( m_stageFd >= 0 )
+    {
+        ::close( m_stageFd );
+        m_stageFd = -1;
+    }
+
+    if( m_outputPublished )
+    {
+        struct stat info;
+        if( ::lstat( m_outputPath.c_str(), &info ) == 0 && info.st_dev == m_outputIdentity.device &&
+            info.st_ino == m_outputIdentity.inode )
+        {
+            ::unlink( m_outputPath.c_str() );
+        }
+        m_outputPublished = false;
+    }
+
+    if( m_outputFd >= 0 )
+    {
+        ::close( m_outputFd );
+        m_outputFd = -1;
     }
 }
 
@@ -151,11 +404,20 @@ void xInstGraph::setupConfig()
                 false,
                 "string",
                 "path to the output graph .drawio file" );
+
+    config.add( "graph.clobberOutput",
+                "",
+                "graph.clobberOutput",
+                argType::Required,
+                "graph",
+                "clobberOutput",
+                false,
+                "bool",
+                "replace an existing regular output file at startup (default false)" );
 }
 
 int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-    ///\todo this should be relative to config path
     std::string file;
     _config( file, "graph.file" );
 
@@ -164,17 +426,27 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
         return log<software_error, -1>( { __FILE__, __LINE__, "no graph file in configuration (graph.file)" } );
     }
 
-    file = m_configDir + '/' + file;
+    m_inputPath = std::filesystem::absolute( m_configDir + '/' + file ).lexically_normal();
 
-
-    std::string outputPath = m_graph.outputPath();
+    std::string outputPath;
     _config( outputPath, "graph.outputPath" );
-    m_graph.outputPath( outputPath );
+    if( outputPath.empty() )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "no graph output path in configuration" } );
+    }
+
+    m_outputPath = std::filesystem::absolute( outputPath ).lexically_normal();
+    _config( m_clobberOutput, "graph.clobberOutput" );
 
     std::string emsg;
-    if( m_graph.loadXMLFile( emsg, file ) < 0 )
+    if( m_graph.loadXMLFile( emsg, m_inputPath.string() ) < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "error loading graph file: " + emsg } );
+    }
+
+    if( checkOutputPath( emsg ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, emsg } );
     }
 
     std::vector<std::string> sections;
@@ -184,6 +456,11 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
     if( sections.size() == 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "no nodes found in configuration" } );
+    }
+
+    if( createStage( emsg ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, emsg } );
     }
 
     for( size_t i = 0; i < sections.size(); ++i )
@@ -407,14 +684,25 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
 
 void xInstGraph::loadConfig()
 {
-    if( loadConfigImpl( config ) < 0 )
+    try
     {
-        log<software_error>( { __FILE__, __LINE__, "error loading configuration" } );
+        if( loadConfigImpl( config ) < 0 )
+        {
+            cleanupOwnedFiles();
+            log<software_error>( { __FILE__, __LINE__, "error loading configuration" } );
+            m_shutdown = true;
+        }
+    }
+    catch( const std::exception &e )
+    {
+        cleanupOwnedFiles();
+        log<software_error>( { __FILE__, __LINE__, std::string( "error loading configuration: " ) + e.what() } );
         m_shutdown = true;
     }
 }
 
-std::string deviceFromKey( const std::string &key )
+/// Return the device portion of a device.property INDI key.
+std::string deviceFromKey( const std::string &key /**< [in] INDI property key */ )
 {
     size_t dot = key.find( '.' );
 
@@ -426,7 +714,8 @@ std::string deviceFromKey( const std::string &key )
     return key.substr( 0, dot );
 }
 
-std::string nameFromKey( const std::string &key )
+/// Return the property portion of a device.property INDI key.
+std::string nameFromKey( const std::string &key /**< [in] INDI property key */ )
 {
     size_t dot = key.find( '.' );
     if( dot == std::string::npos )
@@ -450,12 +739,14 @@ int xInstGraph::appStartup()
 
                 if( devName == "" )
                 {
+                    cleanupOwnedFiles();
                     return log<software_error, -1>(
                         { __FILE__, __LINE__, "bad devName from key: " + it->second->name() } );
                 }
 
                 if( propName == "" )
                 {
+                    cleanupOwnedFiles();
                     return log<software_error, -1>(
                         { __FILE__, __LINE__, "bad propName from key: " + it->second->name() } );
                 }
@@ -476,6 +767,7 @@ int xInstGraph::appStartup()
 
                     if( !result.second )
                     {
+                        cleanupOwnedFiles();
                         return log<software_error, -1>(
                             { __FILE__, __LINE__, "failed to insert INDI property: " + p->createUniqueKey() } );
                     }
@@ -483,14 +775,38 @@ int xInstGraph::appStartup()
             }
             catch( std::exception &e )
             {
+                cleanupOwnedFiles();
                 return log<software_error, -1>(
                     { __FILE__, __LINE__, std::string( "Exception caught: " ) + e.what() } );
             }
             catch( ... )
             {
+                cleanupOwnedFiles();
                 return log<software_error, -1>( { __FILE__, __LINE__, "Unknown exception caught." } );
             }
         }
+    }
+
+    try
+    {
+        m_graph.stateChange();
+
+        std::string emsg;
+        if( publishOutput( emsg ) < 0 )
+        {
+            cleanupOwnedFiles();
+            return log<software_error, -1>( { __FILE__, __LINE__, emsg } );
+        }
+    }
+    catch( const std::exception &e )
+    {
+        cleanupOwnedFiles();
+        return log<software_error, -1>( { __FILE__, __LINE__, std::string( "error publishing graph: " ) + e.what() } );
+    }
+    catch( ... )
+    {
+        cleanupOwnedFiles();
+        return log<software_error, -1>( { __FILE__, __LINE__, "unknown error publishing graph" } );
     }
 
     state( stateCodes::READY );
@@ -505,9 +821,7 @@ int xInstGraph::appLogic()
 
 int xInstGraph::appShutdown()
 {
-    //remove the output file so that it is clear there is no valid graph
-    std::filesystem::remove(m_graph.outputPath());
-
+    cleanupOwnedFiles();
     return 0;
 }
 
