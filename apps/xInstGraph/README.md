@@ -1,41 +1,57 @@
+# xInstGraph
 
-## Node Configuration
+xInstGraph publishes a draw.io representation of the instrument graph and updates it from INDI properties.
 
-Each node has a section in the config file with the same name as the node.  This name must correspond to the name of the
-node in the `.drawio` XML file.  This looks like:
+## Graph input and output
 
-```
-[name]
-type=xxxx
-```
+Set the graph options in the application's config file:
 
-The *required* `type` keyword is used to specify the type of node.  The possible values are:
+    [graph]
+    file=magaox.drawio
+    outputPath=/path/to/published.drawio
+    clobberOutput=false
 
-- fsmNode
-- pwrOnOffNode
-- stdMotionNode
+The input file name is resolved in the application's config directory. The output path is required; a relative output path is resolved from the process's current directory. The output must never refer to the input file, including through a symbolic or hard link.
 
-Each of these has specific configuration options
+The app builds the graph in a private staging file and publishes the initial output before it starts receiving INDI updates. By default, startup fails if the output path already exists. Set clobberOutput=true to replace an existing regular output file at startup. Directories and symbolic links are not valid existing destinations. Once published, the app removes its output on shutdown only if the path still refers to the file it created. A file left by a previous run therefore needs either an explicit clobber setting or operator cleanup before startup.
 
-### pwrOnOffNode
+## Node configuration
 
-The power-on/off node shows the status of a power switched device.
+Each configured node has a section whose name matches a node in the draw.io XML file. The required type key accepts these values:
 
-| key            |  type            |  required    | default     |  Description |
-|----------------|------------------|--------------|-------------|--------------|
-| pwrKey         | string           | Y            |             | The INDI key (device.propery) of the power switch  |
+| type | Node handler |
+| --- | --- |
+| fsm | Finite state machine status |
+| indiProp | INDI property and element comparison |
+| pwrOnOff | Power switch status |
+| static | Fixed put states |
+| stdMotion | Standard motion stage |
 
-### stdMotionNode
+For example:
 
-The standard motion node shows the status of an standard motion stage, which includes focus stages, filter wheels, linear actuators, etc.
+    [stage]
+    type=stdMotion
+    device=stageDevice
 
-| key            |  type            |  required    | default     |  Description |
-|----------------|------------------|--------------|-------------|--------------|
-| device         | string           | N            | <node name> | The INDI device name, defaults to the node name specified in the `drawio` file  |
-| presetPrefix   | string           | N            | preset      | The prefix for preset, usually `preset` or `filter` |
-| presetDir      | string           | N            | output      | Allowed values are `input` or `output`. Specifies which put (in or out) corresponds to the preset. |
-| presetPutName  | vector\<string\> | N            | out         | Names for the put which correspond to the preset. If more than one, the preset controls which one is on. |
-| alwaysOn       | vector\<string\> | N            |             | Names of outputs which are always on if any input is. |
-| noAutoOn       | vector\<string\> | N            |             | Names of outputs which are not automatically turned on by an internal link to an input |
-| trackerKey     | string           | N            |             | If set, this is the INDI key of the tracking property |
-| trackerElement | string           | N            |             | If set, this is the element of the tracking property |
+### pwrOnOff
+
+| key | type | required | description |
+| --- | --- | --- | --- |
+| pwrKey | string | yes | INDI key (device.property) of the power switch |
+
+### stdMotion
+
+| key | type | required | default | description |
+| --- | --- | --- | --- | --- |
+| device | string | no | node name | INDI device name |
+| presetPrefix | string | no | preset | Preset property prefix, usually preset or filter |
+| presetDir | string | no | output | Side selected by the preset: input or output |
+| presetPutName | vector<string> | no | out | Put names selected by the preset |
+| alwaysOn | vector<string> | no | empty | Puts that are on when any put is on |
+| noAutoOn | vector<string> | no | empty | Outputs not automatically turned on by an internal input link |
+| trackingReqKey | string | no | empty | INDI key for the tracking request switch |
+| trackingReqElement | string | no | empty | Element of the tracking request property |
+| trackerKey | string | no | empty | INDI key for the tracking status switch |
+| trackerElement | string | no | empty | Element of the tracking status property |
+
+The tracking request and status key/element pairs must be supplied together.
