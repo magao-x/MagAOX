@@ -7,12 +7,14 @@
 #ifndef xInstGraph_hpp
 #define xInstGraph_hpp
 
+#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <map>
+#include <mutex>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -103,6 +105,12 @@ class xInstGraph : public MagAOXApp<true>
     /// True after this run successfully publishes its output.
     bool m_outputPublished{ false };
 
+    /// Serialize graph callbacks and shutdown against publication.
+    std::mutex m_updateMutex;
+
+    /// Latch a callback failure for the main application loop.
+    std::atomic<bool> m_updateFailed{ false };
+
     ///@}
 
     /// The in-memory graph and its draw.io XML representation.
@@ -123,8 +131,36 @@ class xInstGraph : public MagAOXApp<true>
     /// Create a private staging file in the output directory.
     int createStage( std::string &error /**< [out] reason staging failed */ );
 
+    /// Serialize the final graph state; overridable by failure-injection tests.
+    virtual int serializeGraph( std::string &xml, /**< [out] complete XML document */
+                                std::string &error /**< [out] serialization failure */ );
+
+    /// Write bytes to the staging descriptor; overridable by failure-injection tests.
+    virtual ssize_t writeStageBytes( int         fd,   /**< [in] staging descriptor */
+                                     const void *data, /**< [in] serialized bytes */
+                                     size_t      size /**< [in] byte count */ );
+
+    /// Sync the staging descriptor; overridable by failure-injection tests.
+    virtual int syncStage( int fd /**< [in] staging descriptor */ );
+
+    /// Rename a staged snapshot; overridable by failure-injection tests.
+    virtual int renameStage( const std::filesystem::path &from, /**< [in] owned staging path */
+                             const std::filesystem::path &to /**< [in] destination path */ );
+
+    /// Write and verify a complete graph snapshot through the staging descriptor.
+    int writeSnapshot( std::string &error /**< [out] write failure */ );
+
+    /// Confirm the published output is still owned and distinct from the input.
+    int checkOwnedOutput( std::string &error /**< [out] path validation failure */ ) const;
+
     /// Publish the staged initial snapshot according to the clobber policy.
     int publishOutput( std::string &error /**< [out] reason publication failed */ );
+
+    /// Atomically replace this run's published output with the staged update.
+    int publishUpdate( std::string &error /**< [out] reason publication failed */ );
+
+    /// Remove a staging file still owned by this run.
+    void cleanupStage() noexcept;
 
     /// Remove only staging and output files still owned by this run.
     void cleanupOwnedFiles() noexcept;
@@ -271,6 +307,142 @@ int xInstGraph::createStage( std::string &error )
     return 0;
 }
 
+int xInstGraph::serializeGraph( std::string &xml, std::string &error )
+{
+    m_graph.stateChange();
+    return m_graph.serializeXML( xml, error );
+}
+
+ssize_t xInstGraph::writeStageBytes( int fd, const void *data, size_t size )
+{
+    return ::write( fd, data, size );
+}
+
+int xInstGraph::syncStage( int fd )
+{
+    return ::fsync( fd );
+}
+
+int xInstGraph::renameStage( const std::filesystem::path &from, const std::filesystem::path &to )
+{
+    return ::rename( from.c_str(), to.c_str() );
+}
+
+int xInstGraph::writeSnapshot( std::string &error )
+{
+    if( m_stageFd < 0 || m_stagePath.empty() )
+    {
+        error = "graph staging file is not open";
+        return -1;
+    }
+
+    std::string xml;
+    if( serializeGraph( xml, error ) < 0 || xml.empty() )
+    {
+        if( error.empty() )
+        {
+            error = "graph serialization produced no XML";
+        }
+        return -1;
+    }
+
+    if( ::ftruncate( m_stageFd, 0 ) < 0 || ::lseek( m_stageFd, 0, SEEK_SET ) < 0 )
+    {
+        error = "cannot reset graph staging file: " + std::string( std::strerror( errno ) );
+        return -1;
+    }
+
+    size_t written = 0;
+    while( written < xml.size() )
+    {
+        ssize_t count = writeStageBytes( m_stageFd, xml.data() + written, xml.size() - written );
+        if( count < 0 && errno == EINTR )
+        {
+            continue;
+        }
+        if( count == 0 )
+        {
+            error = "cannot write graph staging file: zero-byte write";
+            return -1;
+        }
+        if( count < 0 )
+        {
+            error = "cannot write graph staging file: " + std::string( std::strerror( errno ) );
+            return -1;
+        }
+        written += static_cast<size_t>( count );
+    }
+
+    mode_t      mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+    struct stat prior;
+    if( m_outputPublished )
+    {
+        if( ::fstat( m_outputFd, &prior ) < 0 )
+        {
+            error = "cannot inspect owned graph output: " + std::string( std::strerror( errno ) );
+            return -1;
+        }
+        mode = prior.st_mode & 0777;
+    }
+    else if( m_clobberOutput && ::lstat( m_outputPath.c_str(), &prior ) == 0 && S_ISREG( prior.st_mode ) )
+    {
+        mode = prior.st_mode & 0777;
+    }
+
+    if( ::fchmod( m_stageFd, mode ) < 0 )
+    {
+        error = "cannot set graph staging permissions: " + std::string( std::strerror( errno ) );
+        return -1;
+    }
+
+    struct stat stage;
+    if( ::fstat( m_stageFd, &stage ) < 0 || !S_ISREG( stage.st_mode ) || stage.st_dev != m_stageIdentity.device ||
+        stage.st_ino != m_stageIdentity.inode || stage.st_size != static_cast<off_t>( xml.size() ) )
+    {
+        error = "graph staging file size or identity changed during serialization";
+        return -1;
+    }
+
+    if( syncStage( m_stageFd ) < 0 )
+    {
+        error = "cannot sync graph staging file: " + std::string( std::strerror( errno ) );
+        return -1;
+    }
+
+    return 0;
+}
+
+int xInstGraph::checkOwnedOutput( std::string &error ) const
+{
+    if( !m_outputPublished || m_outputFd < 0 )
+    {
+        error = "graph output has not been published";
+        return -1;
+    }
+
+    struct stat output;
+    if( ::lstat( m_outputPath.c_str(), &output ) < 0 || !S_ISREG( output.st_mode ) ||
+        output.st_dev != m_outputIdentity.device || output.st_ino != m_outputIdentity.inode )
+    {
+        error = "published graph output was removed or replaced";
+        return -1;
+    }
+
+    struct stat input;
+    if( ::stat( m_inputPath.c_str(), &input ) < 0 )
+    {
+        error = "cannot inspect graph input: " + std::string( std::strerror( errno ) );
+        return -1;
+    }
+    if( input.st_dev == output.st_dev && input.st_ino == output.st_ino )
+    {
+        error = "published graph output now aliases the input graph";
+        return -1;
+    }
+
+    return 0;
+}
+
 int xInstGraph::publishOutput( std::string &error )
 {
     if( m_stagePath.empty() )
@@ -289,22 +461,6 @@ int xInstGraph::publishOutput( std::string &error )
 
     if( checkOutputPath( error ) < 0 )
     {
-        return -1;
-    }
-
-    mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
-    if( m_clobberOutput )
-    {
-        struct stat oldOutput;
-        if( ::lstat( m_outputPath.c_str(), &oldOutput ) == 0 )
-        {
-            mode = oldOutput.st_mode & 0777;
-        }
-    }
-
-    if( ::chmod( m_stagePath.c_str(), mode ) < 0 )
-    {
-        error = "cannot set graph output permissions: " + std::string( std::strerror( errno ) );
         return -1;
     }
 
@@ -346,7 +502,37 @@ int xInstGraph::publishOutput( std::string &error )
     return 0;
 }
 
-void xInstGraph::cleanupOwnedFiles() noexcept
+int xInstGraph::publishUpdate( std::string &error )
+{
+    struct stat stage;
+    if( m_stagePath.empty() || ::lstat( m_stagePath.c_str(), &stage ) < 0 || !S_ISREG( stage.st_mode ) ||
+        stage.st_dev != m_stageIdentity.device || stage.st_ino != m_stageIdentity.inode || stage.st_size == 0 )
+    {
+        error = "graph staging file is missing, empty, or was replaced";
+        return -1;
+    }
+
+    if( checkOwnedOutput( error ) < 0 )
+    {
+        return -1;
+    }
+
+    if( renameStage( m_stagePath, m_outputPath ) < 0 )
+    {
+        error = "cannot replace owned graph output: " + std::string( std::strerror( errno ) );
+        return -1;
+    }
+
+    m_stagePath.clear();
+    ::close( m_outputFd );
+    m_outputFd       = m_stageFd;
+    m_outputIdentity = m_stageIdentity;
+    m_stageFd        = -1;
+    m_graph.outputPath( m_outputPath.string() );
+    return 0;
+}
+
+void xInstGraph::cleanupStage() noexcept
 {
     if( !m_stagePath.empty() )
     {
@@ -364,6 +550,11 @@ void xInstGraph::cleanupOwnedFiles() noexcept
         ::close( m_stageFd );
         m_stageFd = -1;
     }
+}
+
+void xInstGraph::cleanupOwnedFiles() noexcept
+{
+    cleanupStage();
 
     if( m_outputPublished )
     {
@@ -439,6 +630,7 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_clobberOutput, "graph.clobberOutput" );
 
     std::string emsg;
+    m_graph.autoSave( false );
     if( m_graph.loadXMLFile( emsg, m_inputPath.string() ) < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "error loading graph file: " + emsg } );
@@ -789,10 +981,8 @@ int xInstGraph::appStartup()
 
     try
     {
-        m_graph.stateChange();
-
         std::string emsg;
-        if( publishOutput( emsg ) < 0 )
+        if( writeSnapshot( emsg ) < 0 || publishOutput( emsg ) < 0 )
         {
             cleanupOwnedFiles();
             return log<software_error, -1>( { __FILE__, __LINE__, emsg } );
@@ -816,11 +1006,13 @@ int xInstGraph::appStartup()
 
 int xInstGraph::appLogic()
 {
-    return 0;
+    return m_updateFailed.load() ? -1 : 0;
 }
 
 int xInstGraph::appShutdown()
 {
+    std::lock_guard<std::mutex> lock( m_updateMutex );
+    m_updateFailed.store( true );
     cleanupOwnedFiles();
     return 0;
 }
@@ -837,32 +1029,51 @@ int xInstGraph::st_igHandleSetProperty( void *igapp, const pcf::IndiProperty &ip
 
 int xInstGraph::igHandleSetProperty( const pcf::IndiProperty &ipRecv )
 {
-    std::cerr << ipRecv.createUniqueKey() << '\n';
+    std::lock_guard<std::mutex> lock( m_updateMutex );
+    if( m_updateFailed.load() || !m_outputPublished )
+    {
+        return -1;
+    }
+
     try
     {
         auto range = m_nodeHandleSets.equal_range( ipRecv.createUniqueKey() );
+        if( range.first == range.second )
+        {
+            return 0;
+        }
 
         for( auto it = range.first; it != range.second; ++it )
         {
-            std::cerr << it->second->name() << '\n';
-
-            int rv = it->second->handleSetProperty( ipRecv );
-            if( rv != 0 )
+            if( it->second->handleSetProperty( ipRecv ) != 0 )
             {
+                m_updateFailed.store( true );
                 return log<software_error, -1>(
                     { __FILE__, __LINE__, "error from handleSetProperty for " + it->second->name() } );
             }
         }
 
+        std::string error;
+        if( createStage( error ) < 0 || writeSnapshot( error ) < 0 || publishUpdate( error ) < 0 )
+        {
+            cleanupStage();
+            m_updateFailed.store( true );
+            return log<software_error, -1>( { __FILE__, __LINE__, error } );
+        }
+
         return 0;
     }
-    catch( std::exception &e )
+    catch( const std::exception &e )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, std::string( "Exception caught: " ) + e.what() } );
+        cleanupStage();
+        m_updateFailed.store( true );
+        return log<software_error, -1>( { __FILE__, __LINE__, std::string( "graph update failed: " ) + e.what() } );
     }
     catch( ... )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "Unknown exception caught." } );
+        cleanupStage();
+        m_updateFailed.store( true );
+        return log<software_error, -1>( { __FILE__, __LINE__, "unknown graph update failure" } );
     }
 }
 

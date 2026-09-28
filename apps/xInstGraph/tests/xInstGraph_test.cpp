@@ -8,6 +8,8 @@
 #include "../../../tests/testXWC.hpp"
 #include "../../tests/testMacrosINDI.hpp"
 
+#include <algorithm>
+#include <cerrno>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -41,17 +43,118 @@ class xInstGraph : public MagAOX::app::xInstGraph
 {
   public:
     /// Set the application config directory for a test.
-    void configDir( const std::string &cp /**< [in] config directory */ )
-    {
-        m_configDir = cp;
-    }
+    void configDir( const std::string &cp /**< [in] config directory */ );
 
     /// Access the app's configurator.
-    mx::app::appConfigurator &config()
+    mx::app::appConfigurator &config();
+
+    /// Failure or short-write behavior injected at a publication step.
+    enum class failurePoint
     {
-        return MagAOX::app::xInstGraph::config;
-    }
+        none,
+        serialize,
+        write,
+        sync,
+        rename,
+        shortWrite,
+        interruptedWrite
+    };
+
+    /// Selected failure or write behavior for the next callback.
+    failurePoint failure{ failurePoint::none };
+
+    /// True after the selected short or interrupted write was injected.
+    bool injected{ false };
+
+    /// Capture the published bytes immediately before replacement.
+    bool observeRename{ false };
+
+    /// Published bytes observed by the rename hook.
+    std::string previousAtRename;
+
+  protected:
+    /// Optionally fail serialization for a test.
+    int serializeGraph( std::string &xml, /**< [out] serialized XML */
+                        std::string &error /**< [out] failure reason */ ) override;
+
+    /// Optionally fail, shorten, or interrupt a staging write.
+    ssize_t writeStageBytes( int         fd,   /**< [in] staging descriptor */
+                             const void *data, /**< [in] bytes to write */
+                             size_t      size /**< [in] byte count */ ) override;
+
+    /// Optionally fail staging synchronization.
+    int syncStage( int fd /**< [in] staging descriptor */ ) override;
+
+    /// Observe or fail an output replacement.
+    int renameStage( const std::filesystem::path &from, /**< [in] staging path */
+                     const std::filesystem::path &to /**< [in] published path */ ) override;
 };
+
+void xInstGraph::configDir( const std::string &cp )
+{
+    m_configDir = cp;
+}
+
+mx::app::appConfigurator &xInstGraph::config()
+{
+    return MagAOX::app::xInstGraph::config;
+}
+
+int xInstGraph::serializeGraph( std::string &xml, std::string &error )
+{
+    if( failure == failurePoint::serialize )
+    {
+        error = "injected serialization failure";
+        return -1;
+    }
+    return MagAOX::app::xInstGraph::serializeGraph( xml, error );
+}
+
+ssize_t xInstGraph::writeStageBytes( int fd, const void *data, size_t size )
+{
+    if( failure == failurePoint::write )
+    {
+        errno = EIO;
+        return -1;
+    }
+    if( !injected && failure == failurePoint::interruptedWrite )
+    {
+        injected = true;
+        errno    = EINTR;
+        return -1;
+    }
+    if( !injected && failure == failurePoint::shortWrite )
+    {
+        injected = true;
+        return MagAOX::app::xInstGraph::writeStageBytes( fd, data, std::min<size_t>( size, 7 ) );
+    }
+    return MagAOX::app::xInstGraph::writeStageBytes( fd, data, size );
+}
+
+int xInstGraph::syncStage( int fd )
+{
+    if( failure == failurePoint::sync )
+    {
+        errno = EIO;
+        return -1;
+    }
+    return MagAOX::app::xInstGraph::syncStage( fd );
+}
+
+int xInstGraph::renameStage( const std::filesystem::path &from, const std::filesystem::path &to )
+{
+    if( observeRename )
+    {
+        std::ifstream in( to );
+        previousAtRename = { std::istreambuf_iterator<char>( in ), std::istreambuf_iterator<char>() };
+    }
+    if( failure == failurePoint::rename )
+    {
+        errno = EIO;
+        return -1;
+    }
+    return MagAOX::app::xInstGraph::renameStage( from, to );
+}
 
 struct temporaryDirectory
 {
@@ -59,29 +162,36 @@ struct temporaryDirectory
     std::filesystem::path root;
 
     /// Create a unique temporary test directory.
-    temporaryDirectory()
-    {
-        char  name[] = "/tmp/xInstGraph_test_XXXXXX";
-        char *dir    = ::mkdtemp( name );
-        if( dir == nullptr )
-        {
-            throw std::runtime_error( "could not create xInstGraph test directory" );
-        }
-
-        root = dir;
-        std::filesystem::create_directories( root / "config" );
-    }
+    temporaryDirectory();
 
     /// Remove this test's files.
-    ~temporaryDirectory()
-    {
-        std::error_code ec;
-        std::filesystem::remove_all( root, ec );
-    }
+    ~temporaryDirectory();
 
-    temporaryDirectory( const temporaryDirectory & )            = delete;
+    /// Prevent accidental sharing of a test directory.
+    temporaryDirectory( const temporaryDirectory & ) = delete;
+
+    /// Prevent accidental sharing of a test directory.
     temporaryDirectory &operator=( const temporaryDirectory & ) = delete;
 };
+
+temporaryDirectory::temporaryDirectory()
+{
+    char  name[] = "/tmp/xInstGraph_test_XXXXXX";
+    char *dir    = ::mkdtemp( name );
+    if( dir == nullptr )
+    {
+        throw std::runtime_error( "could not create xInstGraph test directory" );
+    }
+
+    root = dir;
+    std::filesystem::create_directories( root / "config" );
+}
+
+temporaryDirectory::~temporaryDirectory()
+{
+    std::error_code ec;
+    std::filesystem::remove_all( root, ec );
+}
 /// \endcond
 
 /// Read all bytes from a test file.
@@ -117,6 +227,42 @@ void writeXML( const std::filesystem::path &path /**< [in] source graph path */,
     }
 
     out << "</root></mxGraphModel></diagram></mxfile>\n";
+}
+
+/// Write a power node with a put, internal link, and status label.
+void writePowerXML( const std::filesystem::path &path /**< [in] source graph path */ )
+{
+    std::ofstream out( path );
+    out << "<mxfile><diagram><mxGraphModel><root>\n";
+    out << "<mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>\n";
+    out << "<mxCell id=\"node:pwrOnOffNode\" value=\"power\" style=\"strokeColor=#FF0000;\"/>\n";
+    out << "<mxCell id=\"input:pwrOnOffNode:in\" value=\"in\" style=\"strokeColor=#FF0000;\"/>\n";
+    out << "<mxCell id=\"output:pwrOnOffNode:out\" value=\"out\" style=\"strokeColor=#FF0000;\"/>\n";
+    out << "<mxCell id=\"link:pwrOnOffNode:in2out\" style=\"strokeColor=#FF0000;\" "
+           "source=\"input:pwrOnOffNode:in\" target=\"output:pwrOnOffNode:out\"/>\n";
+    out << "<mxCell id=\"fsmstate:pwrOnOffNode:label\" value=\"before\"/>\n";
+    out << "</root></mxGraphModel></diagram></mxfile>\n";
+}
+
+/// Write a config that registers the power node's INDI property.
+void writePowerConfig( const std::filesystem::path &path, /**< [in] config file path */
+                       const std::filesystem::path &output /**< [in] output graph path */ )
+{
+    mx::app::writeConfigFile( path.string(),
+                              { "graph", "graph", "pwrOnOffNode", "pwrOnOffNode" },
+                              { "file", "outputPath", "type", "pwrKey" },
+                              { "instgraph_test.drawio", output.string(), "pwrOnOff", "testpwr.test" } );
+}
+
+/// Return a power INDI property for the requested state.
+pcf::IndiProperty powerProperty( const std::string &state /**< [in] power state */ )
+{
+    pcf::IndiProperty property;
+    property.setDevice( "testpwr" );
+    property.setName( "test" );
+    property.add( pcf::IndiElement( "state" ) );
+    property["state"] = state;
+    return property;
 }
 
 /// Write an application config matching the selected graph fixture.
@@ -462,6 +608,203 @@ TEST_CASE( "xInstGraph preserves outputs before publication", "[xInstGraph]" )
             REQUIRE( entry.path().filename().string().find( ".xInstGraph-" ) == std::string::npos );
         }
         REQUIRE( app.appShutdown() == 0 );
+    }
+}
+
+/// A callback publishes its final power graph as one complete snapshot.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph publishes one complete callback snapshot", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    MagAOX::app::xInstGraph::appLogic();
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    auto               input  = temp.root / "config" / "instgraph_test.drawio";
+    auto               output = temp.root / "output.drawio";
+    writePowerXML( input );
+    writePowerConfig( temp.root / "config" / "instgraph_test.conf", output );
+
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.shutdown() == 0 );
+    REQUIRE( app.appStartup() == 0 );
+    std::string before = readFile( output );
+    REQUIRE( before.find( "value=\"---\"" ) != std::string::npos );
+
+    pcf::IndiProperty unrelated = powerProperty( "On" );
+    unrelated.setDevice( "other" );
+    struct stat beforeInfo;
+    struct stat afterInfo;
+    REQUIRE( ::stat( output.c_str(), &beforeInfo ) == 0 );
+    REQUIRE( app.igHandleSetProperty( unrelated ) == 0 );
+    REQUIRE( ::stat( output.c_str(), &afterInfo ) == 0 );
+    REQUIRE( afterInfo.st_ino == beforeInfo.st_ino );
+    REQUIRE( readFile( output ) == before );
+
+    app.observeRename = true;
+    REQUIRE( app.igHandleSetProperty( powerProperty( "On" ) ) == 0 );
+    REQUIRE( app.previousAtRename == before );
+    REQUIRE( app.appLogic() == 0 );
+    std::string after = readFile( output );
+    REQUIRE( after != before );
+    REQUIRE( after.find( "value=\"ON\"" ) != std::string::npos );
+    REQUIRE( cellTag( after, "input:pwrOnOffNode:in" ).find( "strokeColor=#00FF00;" ) != std::string::npos );
+    REQUIRE( cellTag( after, "output:pwrOnOffNode:out" ).find( "strokeColor=#00FF00;" ) != std::string::npos );
+    ingr::instGraphXML parsed;
+    std::string        error;
+    REQUIRE( parsed.loadXMLFile( error, output.string() ) == 0 );
+
+    app.previousAtRename.clear();
+    REQUIRE( app.igHandleSetProperty( powerProperty( "Off" ) ) == 0 );
+    REQUIRE( app.previousAtRename == after );
+    REQUIRE( readFile( output ).find( "value=\"OFF\"" ) != std::string::npos );
+    REQUIRE( app.appShutdown() == 0 );
+    REQUIRE_FALSE( std::filesystem::exists( output ) );
+}
+
+/// Callback publication errors retain the previous snapshot and stop the app.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph reports callback publication failures", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    MagAOX::app::xInstGraph::appLogic();
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    auto               input  = temp.root / "config" / "instgraph_test.drawio";
+    auto               output = temp.root / "output.drawio";
+    writePowerXML( input );
+    writePowerConfig( temp.root / "config" / "instgraph_test.conf", output );
+
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.appStartup() == 0 );
+    std::string before = readFile( output );
+
+    SECTION( "serialization failure" )
+    {
+        app.failure = xInstGraph::failurePoint::serialize;
+    }
+    SECTION( "write failure" )
+    {
+        app.failure = xInstGraph::failurePoint::write;
+    }
+    SECTION( "sync failure" )
+    {
+        app.failure = xInstGraph::failurePoint::sync;
+    }
+    SECTION( "rename failure" )
+    {
+        app.failure = xInstGraph::failurePoint::rename;
+    }
+
+    REQUIRE( app.igHandleSetProperty( powerProperty( "On" ) ) < 0 );
+    REQUIRE( app.appLogic() < 0 );
+    REQUIRE( readFile( output ) == before );
+    REQUIRE( app.igHandleSetProperty( powerProperty( "Off" ) ) < 0 );
+    REQUIRE( readFile( output ) == before );
+    for( const auto &entry : std::filesystem::directory_iterator( temp.root ) )
+    {
+        REQUIRE( entry.path().filename().string().find( ".xInstGraph-" ) == std::string::npos );
+    }
+    REQUIRE( app.appShutdown() == 0 );
+}
+
+/// Short and interrupted writes still produce a complete snapshot.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph completes short and interrupted writes", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    auto               input  = temp.root / "config" / "instgraph_test.drawio";
+    auto               output = temp.root / "output.drawio";
+    writePowerXML( input );
+    writePowerConfig( temp.root / "config" / "instgraph_test.conf", output );
+
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.appStartup() == 0 );
+
+    SECTION( "short write" )
+    {
+        app.failure = xInstGraph::failurePoint::shortWrite;
+    }
+    SECTION( "interrupted write" )
+    {
+        app.failure = xInstGraph::failurePoint::interruptedWrite;
+    }
+
+    REQUIRE( app.igHandleSetProperty( powerProperty( "On" ) ) == 0 );
+    REQUIRE( app.injected );
+    REQUIRE( readFile( output ).find( "value=\"ON\"" ) != std::string::npos );
+    ingr::instGraphXML parsed;
+    std::string        error;
+    REQUIRE( parsed.loadXMLFile( error, output.string() ) == 0 );
+    REQUIRE( app.appShutdown() == 0 );
+}
+
+/// An externally replaced output is left untouched during updates and shutdown.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph rejects replaced callback destinations", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    MagAOX::app::xInstGraph::appShutdown();
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    auto               input  = temp.root / "config" / "instgraph_test.drawio";
+    auto               output = temp.root / "output.drawio";
+    writePowerXML( input );
+    writePowerConfig( temp.root / "config" / "instgraph_test.conf", output );
+    std::string source = readFile( input );
+
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.appStartup() == 0 );
+    std::filesystem::remove( output );
+
+    bool alias = false;
+    SECTION( "regular replacement" )
+    {
+        std::ofstream replacement( output );
+        replacement << "external replacement";
+    }
+    SECTION( "input alias" )
+    {
+        alias = true;
+        std::filesystem::create_symlink( input, output );
+    }
+
+    REQUIRE( app.igHandleSetProperty( powerProperty( "On" ) ) < 0 );
+    REQUIRE( app.appLogic() < 0 );
+    REQUIRE( app.appShutdown() == 0 );
+    REQUIRE( readFile( input ) == source );
+    if( alias )
+    {
+        REQUIRE( std::filesystem::is_symlink( output ) );
+    }
+    else
+    {
+        REQUIRE( readFile( output ) == "external replacement" );
     }
 }
 

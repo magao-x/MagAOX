@@ -49,3 +49,7 @@ The library still ignores save_file() failures and writes directly to its path o
 - The app records device and inode identities and retains an open descriptor for each owned file, then removes a stage or published output only when its path still names that inode. Failed configuration and startup clean their stages.
 - Added isolated unit fixtures covering initial publication, final hidden state, both clobber settings, input aliases, symlink destinations, failed startup, and shutdown after an external replacement. The targeted test run passed all 5 cases and 61 assertions; the app build also passed.
 - F02 remains: the instGraph library's later `save_file()` calls still write directly to the published path without checking write errors or replacing atomically.
+
+## F02 integration note (2026-09-28)
+
+The F02 implementation disables instGraph automatic saves in xInstGraph. Configuration now changes the in-memory graph without writing to the initial staging file; startup explicitly serializes the final state through that file's owned descriptor before applying this plan's initial publication policy.
