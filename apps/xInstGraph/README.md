@@ -19,7 +19,7 @@ For each matching INDI message, the app applies all node changes in memory, writ
 
 ## Node configuration
 
-Each configured node has a section whose name matches a node in the draw.io XML file. The required type key accepts these values:
+Every node in the draw.io XML file must have a matching configuration section with a `type` key. The type names are case sensitive and accept these values:
 
 | type | Node handler |
 | --- | --- |
@@ -28,6 +28,8 @@ Each configured node has a section whose name matches a node in the draw.io XML 
 | pwrOnOff | Power switch status |
 | static | Fixed put states |
 | stdMotion | Standard motion stage |
+
+Use `type=static` for a node whose state is fixed rather than driven by INDI. Startup rejects missing or unsupported types, graph nodes without handler sections, and typed sections that do not name a graph node. The error names the offending section or graph node. Unrelated application sections without `type` are allowed.
 
 For example:
 
