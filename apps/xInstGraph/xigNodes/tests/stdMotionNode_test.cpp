@@ -29,6 +29,7 @@ namespace libXWCTest
 namespace xInstGraphTest
 {
 
+/// Write the minimal motion-stage graph used by configuration tests.
 void writeXML()
 {
     std::ofstream fout( "/tmp/xigNode_test.xml" );
@@ -47,6 +48,9 @@ void writeXML()
     fout.close();
 }
 
+/// Verify default, explicit, and invalid motion-stage configuration.
+/** \ingroup xInstGraph_unit_test
+ */
 SCENARIO( "Creating and configuring a stdMotionNode", "[instGraph::stdMotionNode]" )
 {
     // clang-format off
@@ -950,17 +954,96 @@ SCENARIO( "Creating and configuring a stdMotionNode", "[instGraph::stdMotionNode
     }
 }
 
+/// Write a motion-stage graph with configurable input and output puts.
+void writeMotionXML( const std::string              &path,   /**< [in] graph path */
+                     const std::vector<std::string> &inputs, /**< [in] input put names */
+                     const std::vector<std::string> &outputs /**< [in] output put names */ )
+{
+    std::ofstream out( path );
+    out << "<mxfile><diagram><mxGraphModel><root>\n"
+           "<mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>\n"
+           "<mxCell id=\"node:fwtelsim\"/>\n";
+    for( const auto &name : inputs )
+    {
+        out << "<mxCell id=\"input:fwtelsim:" << name << "\" style=\"strokeColor=#FF0000;\"/>\n";
+    }
+    for( const auto &name : outputs )
+    {
+        out << "<mxCell id=\"output:fwtelsim:" << name << "\" style=\"strokeColor=#FF0000;\"/>\n";
+    }
+    out << "<mxCell id=\"state:fwtelsim\" value=\"state\"/>\n"
+           "<mxCell id=\"fsmstate:fwtelsim\" value=\"fsmstate\"/>\n"
+           "</root></mxGraphModel></diagram></mxfile>\n";
+}
+
+/// Turn off alwaysOn puts when a stage leaves READY.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode clears alwaysOn puts after leaving READY", "[instGraph::stdMotionNode]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::handleSetProperty( *(pcf::IndiProperty *)nullptr );
+    stdMotionNode::togglePutsOff();
+    #endif
+    // clang-format on
+
+    const std::string xmlPath    = "/tmp/stdMotionNode_F06_test.drawio";
+    const std::string configPath = "/tmp/stdMotionNode_F06_test.conf";
+    writeMotionXML( xmlPath, { "in" }, { "out", "ref" } );
+    mx::app::writeConfigFile( configPath,
+                              { "fwtelsim", "fwtelsim", "fwtelsim" },
+                              { "type", "presetPutName", "alwaysOn" },
+                              { "stdMotion", "out,ref", "ref" } );
+
+    ingr::instGraphXML graph;
+    graph.autoSave( false );
+    std::string error;
+    REQUIRE( graph.loadXMLFile( error, xmlPath ) == 0 );
+    mx::app::appConfigurator config;
+    REQUIRE( config.readConfig( configPath ) == 0 );
+    stdMotionNode node( "fwtelsim", &graph );
+    REQUIRE_NOTHROW( node.loadConfig( config ) );
+
+    pcf::IndiProperty fsm;
+    fsm.setDevice( "fwtelsim" );
+    fsm.setName( "fsm" );
+    fsm.add( pcf::IndiElement( "state" ) );
+    fsm["state"] = "READY";
+    REQUIRE( node.handleSetProperty( fsm ) == 0 );
+
+    pcf::IndiProperty preset( pcf::IndiProperty::Switch );
+    preset.setDevice( "fwtelsim" );
+    preset.setName( "presetName" );
+    preset.add( pcf::IndiElement( "out" ) );
+    preset["out"].setSwitchState( pcf::IndiElement::On );
+    preset.add( pcf::IndiElement( "ref" ) );
+    preset["ref"].setSwitchState( pcf::IndiElement::Off );
+    REQUIRE( node.handleSetProperty( preset ) == 0 );
+    REQUIRE( graph.node( "fwtelsim" )->output( "out" )->state() == ingr::putState::on );
+    REQUIRE( graph.node( "fwtelsim" )->output( "ref" )->state() == ingr::putState::on );
+
+    fsm["state"] = "OPERATING";
+    REQUIRE( node.handleSetProperty( fsm ) == 0 );
+    REQUIRE( graph.node( "fwtelsim" )->output( "out" )->state() == ingr::putState::off );
+    REQUIRE( graph.node( "fwtelsim" )->output( "ref" )->state() == ingr::putState::off );
+}
+
 } // namespace xInstGraphTest
 
 } // namespace libXWCTest
 
+/// Verify a motion stage handles preset and tracking property updates.
+/** \ingroup xInstGraph_unit_test
+ */
 SCENARIO( "Sending Properties to a stdMotionNode", "[instGraph::stdMotionNode]" )
 {
     GIVEN( "a configured stdMotionNode with tracking" )
     {
         // First configure the node
         ingr::instGraphXML parentGraph;
-        writeXML();
+        parentGraph.autoSave( false );
+        libXWCTest::xInstGraphTest::writeXML();
 
         std::string emsg;
         int         rv = parentGraph.loadXMLFile( emsg, "/tmp/xigNode_test.xml" );

@@ -37,6 +37,7 @@ class stdMotionNode : public fsmNode
     /// The current value of the put label.
     std::string m_curLabel;
 
+    /// Input or output put names selected by the preset switch.
     std::vector<std::string> m_presetPutName{ "out" };
 
     /// This sets whether the multi-put selector is on the input or the output (default)
@@ -75,15 +76,15 @@ class stdMotionNode : public fsmNode
                    ingr::instGraphXML *parentGraph /** [in] the graph which this node belongs to*/ );
 
     /// Set the device name.  This can only be done once.
-    /**
-     * \throws
-     */
-    virtual void device( const std::string &dev /**< [in] */ );
+    /** \throws std::runtime_error if a different or empty device is supplied. */
+    virtual void device( const std::string &dev /**< [in] INDI device name */ );
 
     using fsmNode::device;
 
-    virtual void presetPrefix( const std::string &pp /**< [in] */ );
+    /// Set the preset property prefix.
+    virtual void presetPrefix( const std::string &pp /**< [in] property prefix */ );
 
+    /// Get the preset property prefix.
     const std::string &presetPrefix();
 
     /// Get the current label text
@@ -92,37 +93,52 @@ class stdMotionNode : public fsmNode
      */
     const std::string &curLabel();
 
-    void presetPutName( const std::vector<std::string> &ppp /**< [in] */ );
+    /// Set the put names controlled by presets.
+    void presetPutName( const std::vector<std::string> &ppp /**< [in] put names */ );
 
+    /// Get the put names controlled by presets.
     const std::vector<std::string> &presetPutName();
 
-    void presetDir( const ingr::ioDir &dir /**< [in] */ );
+    /// Set which side of the node has the selected puts.
+    void presetDir( const ingr::ioDir &dir /**< [in] put direction */ );
 
+    /// Get which side of the node has the selected puts.
     const ingr::ioDir &presetDir();
 
-    void trackingReqKey( const std::string &tk /**< [in] */ );
+    /// Set the tracking request property key.
+    void trackingReqKey( const std::string &tk /**< [in] device.property key */ );
 
+    /// Get the tracking request property key.
     const std::string &trackingReqKey();
 
-    void trackingReqElement( const std::string &te /**< [in] */ );
+    /// Set the tracking request element name.
+    void trackingReqElement( const std::string &te /**< [in] element name */ );
 
+    /// Get the tracking request element name.
     const std::string &trackingReqElement();
 
-    void trackerKey( const std::string &tk /**< [in] */ );
+    /// Set the tracking status property key.
+    void trackerKey( const std::string &tk /**< [in] device.property key */ );
 
+    /// Get the tracking status property key.
     const std::string &trackerKey();
 
-    void trackerElement( const std::string &te /**< [in] */ );
+    /// Set the tracking status element name.
+    void trackerElement( const std::string &te /**< [in] element name */ );
 
+    /// Get the tracking status element name.
     const std::string &trackerElement();
 
     /// INDI SetProperty callback
     virtual int handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
+    /// Apply the selected preset or tracking state to the node puts.
     virtual void togglePutsOn();
 
+    /// Turn off all puts when the stage is inactive.
     virtual void togglePutsOff();
 
+    /// Load and validate this motion stage's configuration.
     void loadConfig(
         mx::app::appConfigurator &config /**< [in] the application configurator loaded with this node's options*/ );
 };
@@ -540,26 +556,14 @@ inline void stdMotionNode::togglePutsOff()
         m_parentGraph->valueExtra( m_node->name(), "state", "---" );
     }
 
-    // replace xigNode::togglePutsOff() so we can check for always-on
-
+    // An alwaysOn put is on only while the stage has an active path.
     for( auto &&iput : m_node->inputs() )
     {
-        if( m_alwaysOn.count( iput.second->name() ) > 0 )
-        {
-            continue;
-        }
-
-        // iput.second->enabled(false);
         iput.second->state( ingr::putState::off );
     }
 
     for( auto &&oput : m_node->outputs() )
     {
-        if( m_alwaysOn.count( oput.second->name() ) > 0 )
-        {
-            continue;
-        }
-        // oput.second->enabled(false);
         oput.second->state( ingr::putState::off );
 
         if( m_noAutoOn.count( oput.second->name() ) == 1 ) // if we turn it off, we disable it
