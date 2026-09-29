@@ -19,7 +19,7 @@ enum class fsmNodeActionT
 };
 
 /// Convert an FSM action to its configuration name.
-std::string fsmNodeActionT2String( fsmNodeActionT action /**< [in] action to convert */ )
+inline std::string fsmNodeActionT2String( fsmNodeActionT action /**< [in] action to convert */ )
 {
     if( action == fsmNodeActionT::passive )
     {
@@ -40,7 +40,7 @@ std::string fsmNodeActionT2String( fsmNodeActionT action /**< [in] action to con
 }
 
 /// Parse an FSM action from its configuration name.
-fsmNodeActionT fsmNodeActionTFromString( const std::string &action /**< [in] action name */ )
+inline fsmNodeActionT fsmNodeActionTFromString( const std::string &action /**< [in] action name */ )
 {
     if( action == "passive" )
     {
@@ -294,22 +294,22 @@ inline const std::string &fsmNode::fsmElName() const
     return m_fsmElName;
 }
 
-const std::string &fsmNode::fsmKey() const
+inline const std::string &fsmNode::fsmKey() const
 {
     return m_fsmKey;
 }
 
-fsmNodeActionT fsmNode::fsmAction() const
+inline fsmNodeActionT fsmNode::fsmAction() const
 {
     return m_fsmAction;
 }
 
-void fsmNode::fsmAction( fsmNodeActionT act )
+inline void fsmNode::fsmAction( fsmNodeActionT act )
 {
     m_fsmAction = act;
 }
 
-const std::vector<fsmNode::stateCodeT> &fsmNode::targetStates() const
+inline const std::vector<fsmNode::stateCodeT> &fsmNode::targetStates() const
 {
     return m_targetStates;
 }

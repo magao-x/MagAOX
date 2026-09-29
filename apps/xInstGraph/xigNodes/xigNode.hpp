@@ -11,7 +11,11 @@
 
 #include "../../INDI/libcommon/IndiProperty.hpp"
 
-std::string xign_exception( const std::string &src, const std::string &expl, const std::string &file, int line )
+/// Format a graph-node exception with its source location.
+inline std::string xign_exception( const std::string &src /**< [in] source component */,
+                                   const std::string &expl /**< [in] error explanation */,
+                                   const std::string &file /**< [in] source file */,
+                                   int                line /**< [in] source line */ )
 {
     std::string msg = src + ": " + expl;
     msg += " at ";

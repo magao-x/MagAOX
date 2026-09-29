@@ -228,12 +228,12 @@ class xInstGraph : public MagAOXApp<true>
     );
 };
 
-xInstGraph::xInstGraph() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
+inline xInstGraph::xInstGraph() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     return;
 }
 
-xInstGraph::~xInstGraph()
+inline xInstGraph::~xInstGraph()
 {
     cleanupOwnedFiles();
 
@@ -243,7 +243,7 @@ xInstGraph::~xInstGraph()
     }
 }
 
-int xInstGraph::checkOutputPath( std::string &error ) const
+inline int xInstGraph::checkOutputPath( std::string &error ) const
 {
     if( m_inputPath == m_outputPath )
     {
@@ -293,7 +293,7 @@ int xInstGraph::checkOutputPath( std::string &error ) const
     return 0;
 }
 
-int xInstGraph::createStage( std::string &error )
+inline int xInstGraph::createStage( std::string &error )
 {
     std::string       stageTemplate = m_outputPath.string() + ".xInstGraph-XXXXXX";
     std::vector<char> name( stageTemplate.begin(), stageTemplate.end() );
@@ -323,28 +323,28 @@ int xInstGraph::createStage( std::string &error )
     return 0;
 }
 
-int xInstGraph::serializeGraph( std::string &xml, std::string &error )
+inline int xInstGraph::serializeGraph( std::string &xml, std::string &error )
 {
     m_graph.stateChange();
     return m_graph.serializeXML( xml, error );
 }
 
-ssize_t xInstGraph::writeStageBytes( int fd, const void *data, size_t size )
+inline ssize_t xInstGraph::writeStageBytes( int fd, const void *data, size_t size )
 {
     return ::write( fd, data, size );
 }
 
-int xInstGraph::syncStage( int fd )
+inline int xInstGraph::syncStage( int fd )
 {
     return ::fsync( fd );
 }
 
-int xInstGraph::renameStage( const std::filesystem::path &from, const std::filesystem::path &to )
+inline int xInstGraph::renameStage( const std::filesystem::path &from, const std::filesystem::path &to )
 {
     return ::rename( from.c_str(), to.c_str() );
 }
 
-int xInstGraph::writeSnapshot( std::string &error )
+inline int xInstGraph::writeSnapshot( std::string &error )
 {
     if( m_stageFd < 0 || m_stagePath.empty() )
     {
@@ -428,7 +428,7 @@ int xInstGraph::writeSnapshot( std::string &error )
     return 0;
 }
 
-int xInstGraph::checkOwnedOutput( std::string &error ) const
+inline int xInstGraph::checkOwnedOutput( std::string &error ) const
 {
     if( !m_outputPublished || m_outputFd < 0 )
     {
@@ -459,7 +459,7 @@ int xInstGraph::checkOwnedOutput( std::string &error ) const
     return 0;
 }
 
-int xInstGraph::publishOutput( std::string &error )
+inline int xInstGraph::publishOutput( std::string &error )
 {
     if( m_stagePath.empty() )
     {
@@ -518,7 +518,7 @@ int xInstGraph::publishOutput( std::string &error )
     return 0;
 }
 
-int xInstGraph::publishUpdate( std::string &error )
+inline int xInstGraph::publishUpdate( std::string &error )
 {
     struct stat stage;
     if( m_stagePath.empty() || ::lstat( m_stagePath.c_str(), &stage ) < 0 || !S_ISREG( stage.st_mode ) ||
@@ -548,7 +548,7 @@ int xInstGraph::publishUpdate( std::string &error )
     return 0;
 }
 
-void xInstGraph::cleanupStage() noexcept
+inline void xInstGraph::cleanupStage() noexcept
 {
     if( !m_stagePath.empty() )
     {
@@ -568,7 +568,7 @@ void xInstGraph::cleanupStage() noexcept
     }
 }
 
-void xInstGraph::cleanupOwnedFiles() noexcept
+inline void xInstGraph::cleanupOwnedFiles() noexcept
 {
     cleanupStage();
 
@@ -590,7 +590,7 @@ void xInstGraph::cleanupOwnedFiles() noexcept
     }
 }
 
-void xInstGraph::setupConfig()
+inline void xInstGraph::setupConfig()
 {
     config.add( "graph.file",
                 "",
@@ -704,7 +704,7 @@ inline int xInstGraph::validateNodeConfig( mx::app::appConfigurator             
     return 0;
 }
 
-int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
+inline int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
 {
     std::string file;
     _config( file, "graph.file" );
@@ -800,7 +800,7 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
     return 0;
 }
 
-void xInstGraph::loadConfig()
+inline void xInstGraph::loadConfig()
 {
     m_configLoadFailed = false;
 
@@ -825,7 +825,7 @@ void xInstGraph::loadConfig()
     }
 }
 
-void xInstGraph::checkConfig()
+inline void xInstGraph::checkConfig()
 {
     if( m_configLoadFailed )
     {
@@ -840,7 +840,7 @@ void xInstGraph::checkConfig()
 }
 
 /// Return the device portion of a device.property INDI key.
-std::string deviceFromKey( const std::string &key /**< [in] INDI property key */ )
+inline std::string deviceFromKey( const std::string &key /**< [in] INDI property key */ )
 {
     size_t dot = key.find( '.' );
 
@@ -853,7 +853,7 @@ std::string deviceFromKey( const std::string &key /**< [in] INDI property key */
 }
 
 /// Return the property portion of a device.property INDI key.
-std::string nameFromKey( const std::string &key /**< [in] INDI property key */ )
+inline std::string nameFromKey( const std::string &key /**< [in] INDI property key */ )
 {
     size_t dot = key.find( '.' );
     if( dot == std::string::npos )
@@ -864,7 +864,7 @@ std::string nameFromKey( const std::string &key /**< [in] INDI property key */ )
     return key.substr( dot + 1 );
 }
 
-int xInstGraph::appStartup()
+inline int xInstGraph::appStartup()
 {
     for( auto it = m_nodes.begin(); it != m_nodes.end(); ++it )
     {
@@ -950,12 +950,12 @@ int xInstGraph::appStartup()
     return 0;
 }
 
-int xInstGraph::appLogic()
+inline int xInstGraph::appLogic()
 {
     return m_updateFailed.load() ? -1 : 0;
 }
 
-int xInstGraph::appShutdown()
+inline int xInstGraph::appShutdown()
 {
     std::lock_guard<std::mutex> lock( m_updateMutex );
     m_updateFailed.store( true );
@@ -963,7 +963,7 @@ int xInstGraph::appShutdown()
     return 0;
 }
 
-int xInstGraph::st_igHandleSetProperty( void *igapp, const pcf::IndiProperty &ipRecv )
+inline int xInstGraph::st_igHandleSetProperty( void *igapp, const pcf::IndiProperty &ipRecv )
 {
     if( igapp == nullptr )
     {
@@ -973,7 +973,7 @@ int xInstGraph::st_igHandleSetProperty( void *igapp, const pcf::IndiProperty &ip
     return reinterpret_cast<xInstGraph *>( igapp )->igHandleSetProperty( ipRecv );
 }
 
-int xInstGraph::igHandleSetProperty( const pcf::IndiProperty &ipRecv )
+inline int xInstGraph::igHandleSetProperty( const pcf::IndiProperty &ipRecv )
 {
     std::lock_guard<std::mutex> lock( m_updateMutex );
     if( m_updateFailed.load() || !m_outputPublished )

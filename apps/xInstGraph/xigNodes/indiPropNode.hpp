@@ -138,7 +138,8 @@ class indiPropNode : public fsmNode
     void loadConfig( mx::app::appConfigurator &config /**< [in] the loaded configuration */ );
 };
 
-indiPropNode::indiPropNode( const std::string &name, ingr::instGraphXML *parentGraph ) : fsmNode( name, parentGraph )
+inline indiPropNode::indiPropNode( const std::string &name, ingr::instGraphXML *parentGraph )
+    : fsmNode( name, parentGraph )
 {
     if( m_parentGraph )
     {
@@ -153,7 +154,7 @@ inline void indiPropNode::propKey( const std::string &pk )
     key( m_propKey );
 }
 
-const std::string &indiPropNode::propKey() const
+inline const std::string &indiPropNode::propKey() const
 {
     return m_propKey;
 }
@@ -163,7 +164,7 @@ inline void indiPropNode::propEl( const std::string &pe )
     m_propEl = pe;
 }
 
-const std::string &indiPropNode::propEl() const
+inline const std::string &indiPropNode::propEl() const
 {
     return m_propEl;
 }
@@ -173,32 +174,32 @@ inline void indiPropNode::propValStr( const std::string &pv )
     m_propValStr = pv;
 }
 
-const std::string &indiPropNode::propValStr() const
+inline const std::string &indiPropNode::propValStr() const
 {
     return m_propValStr;
 }
 
-const double &indiPropNode::propValNum() const
+inline const double &indiPropNode::propValNum() const
 {
     return m_propValNum;
 }
 
-const pcf::IndiElement::SwitchStateType &indiPropNode::propValSw()
+inline const pcf::IndiElement::SwitchStateType &indiPropNode::propValSw()
 {
     return m_propValSw;
 }
 
-const pcf::IndiProperty::Type &indiPropNode::type() const
+inline const pcf::IndiProperty::Type &indiPropNode::type() const
 {
     return m_type;
 }
 
-const double &indiPropNode::tol() const
+inline const double &indiPropNode::tol() const
 {
     return m_tol;
 }
 
-const bool &indiPropNode::state() const
+inline const bool &indiPropNode::state() const
 {
     return m_state;
 }
