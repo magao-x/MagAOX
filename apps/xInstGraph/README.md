@@ -31,6 +31,8 @@ Every node in the draw.io XML file must have a matching configuration section wi
 
 Use `type=static` for a node whose state is fixed rather than driven by INDI. Startup rejects missing or unsupported types, graph nodes without handler sections, and typed sections that do not name a graph node. The error names the offending section or graph node. Unrelated application sections without `type` are allowed.
 
+If loading stops before node handlers read their settings, xInstGraph reports the load error without labeling those unread settings as unrecognized. Run configuration validation again after fixing that error to check for any remaining unknown settings.
+
 For example:
 
     [stage]
