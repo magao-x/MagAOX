@@ -45,3 +45,9 @@ This makes incomplete operational configurations fail startup where they previou
 ## Installed-library verification (2026-09-28)
 
 After the instGraph checkout was rebuilt and installed under `/usr/local`, xInstGraph and its focused test rebuilt with the default include and link settings. The suite passed all 13 cases and 204 assertions against `/usr/local/lib/libinstGraph.so` with `LD_LIBRARY_PATH=/usr/local/lib`. Before `ldconfig`, the runtime loader did not resolve `libinstGraph.so` without that environment setting. After `ldconfig`, both the app and focused test resolve `/usr/local/lib/libinstGraph.so` with `LD_LIBRARY_PATH` unset; the suite again passed all 13 cases and 204 assertions.
+
+## First operational config test (2026-09-29)
+
+The installed `magaox.drawio` has 49 nodes, while `instgraph.conf` has typed sections for 46. `camllowfs`, `shllowfs`, and `stagellowfs` are missing; validation reports the first of these. Because preflight exits before handlers consume their keys, the inherited config checker also emitted many misleading `Unrecognized config setting` messages. xInstGraph now records load failure and suppresses unread-setting diagnostics when invoking the inherited checker. After the first error is fixed, a successful load still checks and reports genuinely unknown settings.
+
+The app built and its Catch2 suite passed 13 cases and 204 assertions. Running the rebuilt app with `--config.validate -L /tmp` against the installed config reported only the missing `camllowfs` section and the load failure. Temporary complete and deliberately invalid config files confirmed that a complete config validates and that a genuinely unknown key still produces a critical diagnostic. The operational config itself was not edited; the three missing sections remain deployment follow-up.

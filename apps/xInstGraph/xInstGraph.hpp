@@ -128,6 +128,9 @@ class xInstGraph : public MagAOXApp<true>
     /// Property keys mapped to each node that consumes their updates.
     std::multimap<std::string, xigNode *> m_nodeHandleSets;
 
+    /// True when configuration stops before all node settings can be consumed.
+    bool m_configLoadFailed{ false };
+
     /// Validate that the output is distinct from the input and may be published.
     int checkOutputPath( std::string &error /**< [out] reason for a rejected path */ ) const;
 
@@ -193,6 +196,9 @@ class xInstGraph : public MagAOXApp<true>
 
     /// Load the graph, configure nodes, and prepare a private output.
     virtual void loadConfig();
+
+    /// Check remaining settings without mislabeling unread node settings after a load failure.
+    virtual void checkConfig();
 
     /// Register INDI callbacks and publish the initial graph snapshot.
     /**
@@ -797,10 +803,13 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
 
 void xInstGraph::loadConfig()
 {
+    m_configLoadFailed = false;
+
     try
     {
         if( loadConfigImpl( config ) < 0 )
         {
+            m_configLoadFailed = true;
             cleanupOwnedFiles();
             log<software_error>( { __FILE__, __LINE__, "error loading configuration" } );
             m_shutdown = true;
@@ -808,10 +817,25 @@ void xInstGraph::loadConfig()
     }
     catch( const std::exception &e )
     {
+        m_configLoadFailed = true;
         cleanupOwnedFiles();
         log<software_error>( { __FILE__, __LINE__, std::string( "error loading configuration: " ) + e.what() } );
         m_shutdown = true;
     }
+}
+
+void xInstGraph::checkConfig()
+{
+    if( m_configLoadFailed )
+    {
+        // Node handlers did not consume their settings, so unused entries cannot be classified yet.
+        for( auto &entry : config.m_unusedConfigs )
+        {
+            entry.second.used = true;
+        }
+    }
+
+    MagAOXApp<true>::checkConfig();
 }
 
 /// Return the device portion of a device.property INDI key.
