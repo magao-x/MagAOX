@@ -976,6 +976,51 @@ TEST_CASE( "xInstGraph publishes one complete callback snapshot", "[xInstGraph]"
     REQUIRE_FALSE( std::filesystem::exists( output ) );
 }
 
+/// One INDI property update reaches every node subscribed to its key.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph dispatches a shared property to all handlers", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    const auto         input  = temp.root / "config" / "instgraph_test.drawio";
+    const auto         output = temp.root / "output.drawio";
+    {
+        std::ofstream out( input );
+        out << "<mxfile><diagram><mxGraphModel><root>"
+               "<mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>"
+               "<mxCell id=\"node:powerA\"/><mxCell id=\"output:powerA:out\" "
+               "style=\"strokeColor=#FF0000;\"/>"
+               "<mxCell id=\"node:powerB\"/><mxCell id=\"output:powerB:out\" "
+               "style=\"strokeColor=#FF0000;\"/>"
+               "</root></mxGraphModel></diagram></mxfile>";
+    }
+    writeNodeSections( temp.root / "config" / "instgraph_test.conf",
+                       output,
+                       "[powerA]\ntype=pwrOnOff\npwrKey=testpwr.test\n"
+                       "[powerB]\ntype=pwrOnOff\npwrKey=testpwr.test\n" );
+
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.shutdown() == 0 );
+    REQUIRE( app.handlerCount() == 2 );
+    REQUIRE( app.appStartup() == 0 );
+    REQUIRE( app.igHandleSetProperty( powerProperty( "On" ) ) == 0 );
+    const std::string published = readFile( output );
+    for( const char *node : { "powerA", "powerB" } )
+    {
+        CAPTURE( node );
+        REQUIRE( cellTag( published, std::string( "output:" ) + node + ":out" ).find( "strokeColor=#00FF00;" ) !=
+                 std::string::npos );
+    }
+    REQUIRE( app.appShutdown() == 0 );
+}
+
 /// Callback publication errors retain the previous snapshot and stop the app.
 /** \ingroup xInstGraph_unit_test
  */

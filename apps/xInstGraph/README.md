@@ -39,6 +39,69 @@ For example:
     type=stdMotion
     device=stageDevice
 
+A complete minimal graph can use these draw.io cell IDs. The `out` put on the
+motion node matches its default `presetPutName`; a multi-put motion node needs
+one put on the opposite side as well.
+
+```xml
+<mxfile><diagram><mxGraphModel><root>
+  <mxCell id="0"/><mxCell id="1" parent="0"/>
+  <mxCell id="node:camera"/><mxCell id="output:camera:out"/>
+  <mxCell id="node:shutter"/><mxCell id="output:shutter:out"/>
+  <mxCell id="node:power"/><mxCell id="output:power:out"/>
+  <mxCell id="node:stage"/><mxCell id="output:stage:out"/>
+  <mxCell id="node:source"/><mxCell id="input:source:in"/>
+</root></mxGraphModel></diagram></mxfile>
+```
+
+With that graph saved as `instrument.drawio` in the config directory, these
+sections configure every node. Replace the property keys and output path with
+those for the instrument:
+
+```ini
+[graph]
+file=instrument.drawio
+outputPath=/tmp/instgraph-published.drawio
+clobberOutput=false
+
+[camera]
+type=fsm
+device=camera
+fsmAction=active
+targetStates=READY
+
+[shutter]
+type=indiProp
+propKey=shutter.position
+propEl=state
+propVal=OPEN
+
+[power]
+type=pwrOnOff
+pwrKey=power.channel
+
+[stage]
+type=stdMotion
+device=stage
+presetPutName=out
+
+[source]
+type=static
+inputsOn=in
+```
+
+The `fsm` handler reads `<device>.fsm` element `state` by default. With
+`fsmAction=active`, only a listed `targetStates` value turns its puts on.
+`indiProp` compares one element of `propKey` to `propVal`; it can also use
+`fsmAction` and `targetStates` as a gate. `pwrOnOff` accepts exact `On` and
+`Off`; `Int` and unknown values leave its puts off and display `INT` or `UNK`.
+`stdMotion` follows `<device>.presetName` by default. The static handler sets
+listed `inputsOn`, `inputsOff`, `outputsOn`, and `outputsOff` puts at startup.
+
+The app test in `tests/xInstGraph_test.cpp` loads all five handler types,
+checks initial and updated XML, and checks delivery to two handlers sharing an
+INDI property.
+
 ### pwrOnOff
 
 | key | type | required | description |
