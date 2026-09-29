@@ -29,6 +29,7 @@ namespace libXWCTest
 namespace xInstGraphTest
 {
 
+/// Write the minimal power-node graph used by configuration tests.
 void writeXML()
 {
     std::ofstream fout( "/tmp/xigNode_test.xml" );
@@ -47,6 +48,9 @@ void writeXML()
     fout.close();
 }
 
+/// Verify the required power property key is loaded.
+/** \ingroup xInstGraph_unit_test
+ */
 TEST_CASE( "Creating and configuring an pwrOnOffNode", "[instGraph::pwrOnOffNode]" )
 {
     // clang-format off
@@ -154,6 +158,69 @@ TEST_CASE( "Creating and configuring an pwrOnOffNode", "[instGraph::pwrOnOffNode
         }
 
         REQUIRE( pass == false );
+    }
+}
+
+/// Show intermediate and unknown power states without reporting OFF.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "pwrOnOffNode distinguishes power states", "[instGraph::pwrOnOffNode]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    pwrOnOffNode::handleSetProperty( *(pcf::IndiProperty *)nullptr );
+    pwrOnOffNode::toggleUnknown( *(std::string *)nullptr );
+    #endif
+    // clang-format on
+
+    const std::string xmlPath = "/tmp/pwrOnOffNode_F09_test.drawio";
+    {
+        std::ofstream out( xmlPath );
+        out << "<mxfile><diagram><mxGraphModel><root>\n"
+               "<mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>\n"
+               "<mxCell id=\"node:ttmpupil\"/>\n"
+               "<mxCell id=\"output:ttmpupil:out\" style=\"strokeColor=#FF0000;\"/>\n"
+               "<mxCell id=\"fsmstate:ttmpupil\" value=\"---\"/>\n"
+               "<mxCell id=\"state:ttmpupil\" value=\"state\"/>\n"
+               "</root></mxGraphModel></diagram></mxfile>\n";
+    }
+    ingr::instGraphXML graph;
+    graph.autoSave( false );
+    std::string error;
+    REQUIRE( graph.loadXMLFile( error, xmlPath ) == 0 );
+
+    const std::string configPath = "/tmp/pwrOnOffNode_F09_test.conf";
+    mx::app::writeConfigFile(
+        configPath, { "ttmpupil", "ttmpupil" }, { "type", "pwrKey" }, { "pwrOnOff", "test.pwr" } );
+    mx::app::appConfigurator config;
+    REQUIRE( config.readConfig( configPath ) == 0 );
+    pwrOnOffNode node( "ttmpupil", &graph );
+    REQUIRE_NOTHROW( node.loadConfig( config ) );
+
+    pcf::IndiProperty property( pcf::IndiProperty::Text );
+    property.setDevice( "test" );
+    property.setName( "pwr" );
+    property.add( pcf::IndiElement( "state" ) );
+
+    for( const auto &entry : { std::pair{ "On", "ON" },
+                               std::pair{ "Int", "INT" },
+                               std::pair{ "On", "ON" },
+                               std::pair{ "Unk", "UNK" },
+                               std::pair{ "On", "ON" },
+                               std::pair{ "on", "UNK" },
+                               std::pair{ "Off", "OFF" } } )
+    {
+        CAPTURE( entry.first );
+        property["state"] = entry.first;
+        REQUIRE( node.handleSetProperty( property ) == 0 );
+        REQUIRE( graph.node( "ttmpupil" )->output( "out" )->state() ==
+                 ( std::string( entry.second ) == "ON" ? ingr::putState::on : ingr::putState::off ) );
+        std::string xml;
+        REQUIRE( graph.serializeXML( xml, error ) == 0 );
+        const auto start = xml.find( "id=\"fsmstate:ttmpupil\"" );
+        REQUIRE( start != std::string::npos );
+        REQUIRE( xml.substr( start, xml.find( '>', start ) - start )
+                     .find( std::string( "value=\"" ) + entry.second + "\"" ) != std::string::npos );
     }
 }
 
