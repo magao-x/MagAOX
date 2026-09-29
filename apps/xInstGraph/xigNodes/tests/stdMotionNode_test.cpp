@@ -39,8 +39,14 @@ void writeXML()
     fout << "            <root>\n";
     fout << "               <mxCell id=\"0\"/>\n";
     fout << "               <mxCell id=\"1\" parent=\"0\"/>\n";
-    fout << "               <mxCell id=\"node:fwtelsim\">\n";
-    fout << "</mxCell>\n";
+    fout << "               <mxCell id=\"node:fwtelsim\"/>\n";
+    for( const auto &put : { "in", "filt1", "filt2" } )
+    {
+        fout << "               <mxCell id=\"input:fwtelsim:" << put << "\" style=\"strokeColor=#FF0000;\"/>\n";
+    }
+    fout << "               <mxCell id=\"output:fwtelsim:out\" style=\"strokeColor=#FF0000;\"/>\n";
+    fout << "               <mxCell id=\"state:fwtelsim\" value=\"state\"/>\n";
+    fout << "               <mxCell id=\"fsmstate:fwtelsim\" value=\"fsmstate\"/>\n";
     fout << "            </root>\n";
     fout << "       </mxGraphModel>\n";
     fout << "   </diagram>\n";
@@ -1027,6 +1033,124 @@ TEST_CASE( "stdMotionNode clears alwaysOn puts after leaving READY", "[instGraph
     REQUIRE( node.handleSetProperty( fsm ) == 0 );
     REQUIRE( graph.node( "fwtelsim" )->output( "out" )->state() == ingr::putState::off );
     REQUIRE( graph.node( "fwtelsim" )->output( "ref" )->state() == ingr::putState::off );
+}
+
+/// Reject missing opposite-side puts and configured put names absent from the graph.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode validates configured put topology", "[instGraph::stdMotionNode]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::loadConfig( *(mx::app::appConfigurator *)nullptr );
+    #endif
+    // clang-format on
+
+    const std::string        xmlPath    = "/tmp/stdMotionNode_F07_test.drawio";
+    const std::string        configPath = "/tmp/stdMotionNode_F07_test.conf";
+    std::vector<std::string> inputs{ "in" };
+    std::vector<std::string> outputs{ "out", "ref" };
+    std::vector<std::string> keys{ "type", "presetPutName" };
+    std::vector<std::string> values{ "stdMotion", "out,ref" };
+    std::string              expected;
+
+    SECTION( "multi-output stage without an input" )
+    {
+        inputs.clear();
+        expected = "opposite-side put";
+    }
+    SECTION( "multi-input stage without an output" )
+    {
+        inputs = { "a", "b" };
+        outputs.clear();
+        keys.push_back( "presetDir" );
+        values   = { "stdMotion", "a,b", "input" };
+        expected = "opposite-side put";
+    }
+    SECTION( "missing selected put" )
+    {
+        values[1] = "out,missing";
+        expected  = "presetPutName 'missing'";
+    }
+    SECTION( "missing alwaysOn put" )
+    {
+        keys.push_back( "alwaysOn" );
+        values.push_back( "missing" );
+        expected = "alwaysOn put 'missing'";
+    }
+    SECTION( "missing noAutoOn output" )
+    {
+        keys.push_back( "noAutoOn" );
+        values.push_back( "missing" );
+        expected = "noAutoOn output 'missing'";
+    }
+
+    writeMotionXML( xmlPath, inputs, outputs );
+    mx::app::writeConfigFile( configPath, std::vector<std::string>( keys.size(), "fwtelsim" ), keys, values );
+    ingr::instGraphXML graph;
+    graph.autoSave( false );
+    std::string error;
+    REQUIRE( graph.loadXMLFile( error, xmlPath ) == 0 );
+    mx::app::appConfigurator config;
+    REQUIRE( config.readConfig( configPath ) == 0 );
+    stdMotionNode node( "fwtelsim", &graph );
+    REQUIRE_THROWS_WITH( node.loadConfig( config ), Catch::Matchers::Contains( expected ) );
+}
+
+/// Guard a multi-put runtime update even if configuration validation was bypassed.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode guards missing opposite-side puts at runtime", "[instGraph::stdMotionNode]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::togglePutsOn();
+    #endif
+    // clang-format on
+
+    const std::string        xmlPath = "/tmp/stdMotionNode_F07_runtime.drawio";
+    std::vector<std::string> inputs;
+    std::vector<std::string> outputs{ "out", "ref" };
+    std::vector<std::string> presetNames{ "out", "ref" };
+    ingr::ioDir              direction = ingr::ioDir::output;
+    std::string              expected  = "no input";
+
+    SECTION( "multi-input without output" )
+    {
+        inputs = { "a", "b" };
+        outputs.clear();
+        presetNames = { "a", "b" };
+        direction   = ingr::ioDir::input;
+        expected    = "no output";
+    }
+
+    writeMotionXML( xmlPath, inputs, outputs );
+    ingr::instGraphXML graph;
+    graph.autoSave( false );
+    std::string error;
+    REQUIRE( graph.loadXMLFile( error, xmlPath ) == 0 );
+    stdMotionNode node( "fwtelsim", &graph );
+    node.device( "fwtelsim" );
+    node.presetPrefix( "preset" );
+    node.presetDir( direction );
+    node.presetPutName( presetNames );
+
+    pcf::IndiProperty fsm;
+    fsm.setDevice( "fwtelsim" );
+    fsm.setName( "fsm" );
+    fsm.add( pcf::IndiElement( "state" ) );
+    fsm["state"] = "READY";
+    REQUIRE( node.handleSetProperty( fsm ) == 0 );
+
+    pcf::IndiProperty preset( pcf::IndiProperty::Switch );
+    preset.setDevice( "fwtelsim" );
+    preset.setName( "presetName" );
+    for( const auto &name : presetNames )
+    {
+        preset.add( pcf::IndiElement( name ) );
+        preset[name].setSwitchState( name == presetNames.front() ? pcf::IndiElement::On : pcf::IndiElement::Off );
+    }
+    REQUIRE_THROWS_WITH( node.handleSetProperty( preset ), Catch::Matchers::Contains( expected ) );
 }
 
 } // namespace xInstGraphTest

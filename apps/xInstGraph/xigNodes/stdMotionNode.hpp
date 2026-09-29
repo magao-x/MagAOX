@@ -420,18 +420,12 @@ inline void stdMotionNode::togglePutsOn()
         {
             if( m_presetDir == ingr::ioDir::output )
             {
-                ingr::instIOPut *pptr; // We get this pointer using the node accessors
-                                       // which throw if there's a nullptr
-
-                // first deal with the single input
-                try
+                if( m_node->inputs().empty() || m_node->inputs().begin()->second == nullptr )
                 {
-                    pptr = m_node->inputs().begin()->second;
+                    throw std::runtime_error( "stdMotionNode::togglePutsOn: no input for multi-output node [" + name() +
+                                              "]" );
                 }
-                catch( ... )
-                {
-                    return;
-                }
+                ingr::instIOPut *pptr = m_node->inputs().begin()->second;
 
                 // the single node is always on if any are on
                 pptr->enabled( true );
@@ -446,14 +440,7 @@ inline void stdMotionNode::togglePutsOn()
                 // Now deal with the many
                 for( auto s : m_presetPutName )
                 {
-                    try
-                    {
-                        pptr = m_node->output( s );
-                    }
-                    catch( ... )
-                    {
-                        return;
-                    }
+                    pptr = m_node->output( s );
 
                     if( s == m_curVal || m_alwaysOn.count( s ) == 1 )
                     {
@@ -473,18 +460,12 @@ inline void stdMotionNode::togglePutsOn()
             }
             else // m_presetDir == ingr::ioDir::input )
             {
-                ingr::instIOPut *pptr; // We get this pointer using the node accessors
-                                       // which throw if there's a nullptr
-
-                // first deal with the single input
-                try
+                if( m_node->outputs().empty() || m_node->outputs().begin()->second == nullptr )
                 {
-                    pptr = m_node->outputs().begin()->second;
+                    throw std::runtime_error( "stdMotionNode::togglePutsOn: no output for multi-input node [" + name() +
+                                              "]" );
                 }
-                catch( ... )
-                {
-                    return;
-                }
+                ingr::instIOPut *pptr = m_node->outputs().begin()->second;
 
                 // the single node is always on if any are on
                 pptr->enabled( true );
@@ -493,14 +474,7 @@ inline void stdMotionNode::togglePutsOn()
                 // Now deal with the many
                 for( auto s : m_presetPutName )
                 {
-                    try
-                    {
-                        pptr = m_node->input( s );
-                    }
-                    catch( ... )
-                    {
-                        return;
-                    }
+                    pptr = m_node->input( s );
 
                     if( s == m_curVal || m_alwaysOn.count( s ) == 1 )
                     {
@@ -689,6 +663,49 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
         std::string msg =
             XIGN_EXCEPTION( "stdMotionNode::loadConfig", "trackingReqKey and trackerKey must both be provided" );
         throw std::runtime_error( msg );
+    }
+
+    const auto &presetPuts = m_presetDir == ingr::ioDir::output ? m_node->outputs() : m_node->inputs();
+    std::set<std::string> seenPuts;
+    for( const auto &put : prePutName )
+    {
+        if( put.empty() || presetPuts.count( put ) == 0 )
+        {
+            throw std::runtime_error( "stdMotionNode::loadConfig: presetPutName '" + put +
+                                      "' is not a " + preDir + " put of [" + name() + "]" );
+        }
+        if( !seenPuts.insert( put ).second )
+        {
+            throw std::runtime_error( "stdMotionNode::loadConfig: duplicate presetPutName '" + put + "' in [" + name() +
+                                      "]" );
+        }
+    }
+
+    if( prePutName.size() > 1 )
+    {
+        const auto &oppositePuts = m_presetDir == ingr::ioDir::output ? m_node->inputs() : m_node->outputs();
+        if( oppositePuts.size() != 1 || oppositePuts.begin()->second == nullptr )
+        {
+            throw std::runtime_error( "stdMotionNode::loadConfig: multi-put node [" + name() +
+                                      "] requires exactly one opposite-side put" );
+        }
+    }
+
+    for( const auto &put : m_alwaysOn )
+    {
+        if( m_node->inputs().count( put ) == 0 && m_node->outputs().count( put ) == 0 )
+        {
+            throw std::runtime_error( "stdMotionNode::loadConfig: alwaysOn put '" + put + "' is absent from node [" +
+                                      name() + "]" );
+        }
+    }
+    for( const auto &put : m_noAutoOn )
+    {
+        if( m_node->outputs().count( put ) == 0 )
+        {
+            throw std::runtime_error( "stdMotionNode::loadConfig: noAutoOn output '" + put + "' is absent from node [" +
+                                      name() + "]" );
+        }
     }
 
     device( dev );

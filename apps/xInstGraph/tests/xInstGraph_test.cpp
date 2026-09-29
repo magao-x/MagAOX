@@ -250,6 +250,7 @@ void writeXML( const std::filesystem::path &path /**< [in] source graph path */,
         out << "<mxCell id=\"node:indiPropNode\"/>\n";
         out << "<mxCell id=\"node:pwrOnOffNode\"/>\n";
         out << "<mxCell id=\"node:stdMotionNode\"/>\n";
+        out << "<mxCell id=\"output:stdMotionNode:out\" style=\"strokeColor=#FF0000;\"/>\n";
         out << "<mxCell id=\"node:staticNode\"/>\n";
     }
 
