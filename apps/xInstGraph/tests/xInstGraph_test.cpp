@@ -400,6 +400,99 @@ std::string cellTag( const std::string &xml, /**< [in] graph XML */
     return xml.substr( start, end - start );
 }
 
+/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
+class destructionProbe : public xigNode
+{
+    bool &m_destroyed; ///< Receives the derived destructor notification.
+
+  public:
+    /// Construct a node that records destruction.
+    destructionProbe( ingr::instGraphXML *graph, /**< [in] parent graph */
+                      bool               &destroyed /**< [out] destruction flag */ );
+
+    /// Record destruction of the derived node.
+    ~destructionProbe() override;
+
+    /// Ignore property updates in this ownership probe.
+    int handleSetProperty( const pcf::IndiProperty &property /**< [in] ignored property */ ) override;
+};
+
+destructionProbe::destructionProbe( ingr::instGraphXML *graph, bool &destroyed )
+    : xigNode( "aGood", graph ), m_destroyed( destroyed )
+{
+}
+
+destructionProbe::~destructionProbe()
+{
+    m_destroyed = true;
+}
+
+int destructionProbe::handleSetProperty( const pcf::IndiProperty &property )
+{
+    static_cast<void>( property );
+    return 0;
+}
+/// \endcond
+
+/// Owned base pointers destroy the complete derived node.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph node ownership destroys derived handlers", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    xigNode::~xigNode();
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    const auto         input = temp.root / "config" / "instgraph_test.drawio";
+    std::ofstream( input ) << "<mxfile><diagram><mxGraphModel><root>"
+                              "<mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>"
+                              "<mxCell id=\"node:aGood\"/>"
+                              "</root></mxGraphModel></diagram></mxfile>";
+    ingr::instGraphXML graph;
+    std::string        error;
+    REQUIRE( graph.loadXMLFile( error, input.string() ) == 0 );
+    bool destroyed = false;
+    {
+        std::unique_ptr<xigNode> handler = std::make_unique<destructionProbe>( &graph, destroyed );
+        REQUIRE_FALSE( destroyed );
+    }
+    REQUIRE( destroyed );
+}
+
+/// Failed later node configuration releases earlier handlers and staging output.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph releases handlers after partial configuration failure", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::loadConfig();
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    const auto         input  = temp.root / "config" / "instgraph_test.drawio";
+    const auto         output = temp.root / "output.drawio";
+    std::ofstream( input ) << "<mxfile><diagram><mxGraphModel><root>"
+                              "<mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>"
+                              "<mxCell id=\"node:aGood\"/><mxCell id=\"node:zBad\"/>"
+                              "</root></mxGraphModel></diagram></mxfile>";
+    writeNodeSections( temp.root / "config" / "instgraph_test.conf",
+                       output,
+                       "[aGood]\ntype=static\n[zBad]\ntype=static\noutputsOn=missing\n" );
+
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.shutdown() != 0 );
+    REQUIRE( app.handlerCount() == 0 );
+    REQUIRE_FALSE( app.hasStage() );
+    REQUIRE_FALSE( hasStageFile( output ) );
+    REQUIRE_FALSE( std::filesystem::exists( output ) );
+}
+
 /// xInstGraph rejects unsupported node types.
 /** \ingroup xInstGraph_unit_test
  */

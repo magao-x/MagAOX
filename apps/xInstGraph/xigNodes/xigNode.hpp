@@ -48,6 +48,9 @@ class xigNode
     xigNode( const std::string  &name, /**< [in] the name of the node */
              ingr::instGraphXML *parentGraph /**< [in] the parent instGraph */ );
 
+    /// Destroy a graph node through its base interface.
+    virtual ~xigNode();
+
     /// Get the name of this node
     /**
      * \returns the nodes' name (the value of m_name).
@@ -61,7 +64,7 @@ class xigNode
     const std::set<std::string> &keys();
 
     /// Add a key to the set
-    void key( const std::string &nkey );
+    void key( const std::string &nkey /**< [in] INDI property key */ );
 
     /// Get the pointer to the underlying node.
     /**
@@ -84,10 +87,8 @@ class xigNode
 
 #ifdef XWC_XIGNODE_TEST
     // allow setting m_parentGraph to null for testing
-    void setParentGraphNull()
-    {
-        m_parentGraph = nullptr;
-    }
+    /// Disable graph updates in tests.
+    void setParentGraphNull();
 #endif
 };
 
@@ -102,6 +103,15 @@ inline xigNode::xigNode( const std::string &name, ingr::instGraphXML *parentGrap
     // This will throw if name is not in the parent's nodes
     m_node = m_parentGraph->node( name );
 }
+
+inline xigNode::~xigNode() = default;
+
+#ifdef XWC_XIGNODE_TEST
+inline void xigNode::setParentGraphNull()
+{
+    m_parentGraph = nullptr;
+}
+#endif
 
 inline std::string xigNode::name()
 {

@@ -119,8 +119,8 @@ class xInstGraph : public MagAOXApp<true>
     /// The in-memory graph and its draw.io XML representation.
     ingr::instGraphXML m_graph;
 
-    /// Node handlers allocated during configuration and retained for the app lifetime.
-    std::map<std::string, xigNode *> m_nodes;
+    /// Own configured node handlers for the app lifetime.
+    std::map<std::string, std::unique_ptr<xigNode>> m_nodes;
 
     /// Node INDI properties owned by this app for SetProperty registration.
     std::vector<pcf::IndiProperty *> m_nodeProps;
@@ -760,11 +760,10 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
             auto addNode = [this, &_config, &name]( auto node )
             {
                 node->loadConfig( _config );
-                if( !m_nodes.emplace( name, node.get() ).second )
+                if( !m_nodes.emplace( name, std::move( node ) ).second )
                 {
                     throw std::runtime_error( "duplicate graph node handler for section [" + name + "]" );
                 }
-                node.release();
             };
 
             if( type == "indiProp" )
@@ -811,6 +810,7 @@ void xInstGraph::loadConfig()
         {
             m_configLoadFailed = true;
             cleanupOwnedFiles();
+            m_nodes.clear();
             log<software_error>( { __FILE__, __LINE__, "error loading configuration" } );
             m_shutdown = true;
         }
@@ -819,6 +819,7 @@ void xInstGraph::loadConfig()
     {
         m_configLoadFailed = true;
         cleanupOwnedFiles();
+        m_nodes.clear();
         log<software_error>( { __FILE__, __LINE__, std::string( "error loading configuration: " ) + e.what() } );
         m_shutdown = true;
     }
@@ -888,7 +889,7 @@ int xInstGraph::appStartup()
                         { __FILE__, __LINE__, "bad propName from key: " + it->second->name() } );
                 }
 
-                m_nodeHandleSets.insert( { *kit, it->second } );
+                m_nodeHandleSets.insert( { *kit, it->second.get() } );
 
                 pcf::IndiProperty *p = new pcf::IndiProperty;
 
