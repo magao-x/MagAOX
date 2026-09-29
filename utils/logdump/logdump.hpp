@@ -449,7 +449,7 @@ int logdump::execute()
                 continue;
             }
 
-            if( !logVerify( ec, logBuff, len ) )
+            if( !logVerify( ec, logHeader::messageBuffer( logBuff ), len ) )
             {
                 std::cerr << "Log " << fname << " failed verification on code=" << ec
                           << " at byte=" << totNrd - len - hSz << ". File possibly corrupt.  Exiting." << std::endl;

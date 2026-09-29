@@ -65,203 +65,204 @@ bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
         return false;
     }
 
-    flatlogs::bufferPtrT logBuff( log, []( char * ) {} );
-    flatlogs::msgLenT    len = flatlogs::logHeader::msgLen( log );
-    bool                 verified{ false };
+    // Only pass the message for verification.
+    void             *msgBuffer = flatlogs::logHeader::messageBuffer( log );
+    flatlogs::msgLenT len       = flatlogs::logHeader::msgLen( log );
+    bool              verified{ false };
 
     switch( ev )
     {
     case eventCodes::GIT_STATE:
-        verified = git_state::verify( logBuff, len );
+        verified = git_state::verify( msgBuffer, len );
         break;
     case eventCodes::TEXT_LOG:
-        verified = text_log::verify( logBuff, len );
+        verified = text_log::verify( msgBuffer, len );
         break;
     case eventCodes::USER_LOG:
-        verified = user_log::verify( logBuff, len );
+        verified = user_log::verify( msgBuffer, len );
         break;
     case eventCodes::STATE_CHANGE:
-        verified = state_change::verify( logBuff, len );
+        verified = state_change::verify( msgBuffer, len );
         break;
     case eventCodes::SOFTWARE_LOG:
-        verified = software_log::verify( logBuff, len );
+        verified = software_log::verify( msgBuffer, len );
         break;
     case eventCodes::CONFIG_LOG:
-        verified = config_log::verify( logBuff, len );
+        verified = config_log::verify( msgBuffer, len );
         break;
     case eventCodes::INDIDRIVER_START:
-        verified = indidriver_start::verify( logBuff, len );
+        verified = indidriver_start::verify( msgBuffer, len );
         break;
     case eventCodes::INDIDRIVER_STOP:
-        verified = indidriver_stop::verify( logBuff, len );
+        verified = indidriver_stop::verify( msgBuffer, len );
         break;
     case eventCodes::LOOP_CLOSED:
-        verified = loop_closed::verify( logBuff, len );
+        verified = loop_closed::verify( msgBuffer, len );
         break;
     case eventCodes::LOOP_PAUSED:
-        verified = loop_paused::verify( logBuff, len );
+        verified = loop_paused::verify( msgBuffer, len );
         break;
     case eventCodes::LOOP_OPEN:
-        verified = loop_open::verify( logBuff, len );
+        verified = loop_open::verify( msgBuffer, len );
         break;
     case eventCodes::OBSERVER:
-        verified = observer::verify( logBuff, len );
+        verified = observer::verify( msgBuffer, len );
         break;
     case eventCodes::AO_OPERATOR:
-        verified = ao_operator::verify( logBuff, len );
+        verified = ao_operator::verify( msgBuffer, len );
         break;
     case eventCodes::PICO_CHANNEL:
-        verified = pico_channel::verify( logBuff, len );
+        verified = pico_channel::verify( msgBuffer, len );
         break;
     case eventCodes::OUTLET_STATE:
-        verified = outlet_state::verify( logBuff, len );
+        verified = outlet_state::verify( msgBuffer, len );
         break;
     case eventCodes::OUTLET_CHANNEL_STATE:
-        verified = outlet_channel_state::verify( logBuff, len );
+        verified = outlet_channel_state::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_SAVING_STATE:
-        verified = telem_saving_state::verify( logBuff, len );
+        verified = telem_saving_state::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_FXNGEN:
-        verified = telem_fxngen::verify( logBuff, len );
+        verified = telem_fxngen::verify( msgBuffer, len );
         break;
     case eventCodes::TTMMOD_PARAMS:
-        verified = ttmmod_params::verify( logBuff, len );
+        verified = ttmmod_params::verify( msgBuffer, len );
         break;
     case eventCodes::OCAM_TEMPS:
-        verified = ocam_temps::verify( logBuff, len );
+        verified = ocam_temps::verify( msgBuffer, len );
         break;
     case eventCodes::CRED2_TEMPS:
-        verified = cred2_temps::verify( logBuff, len );
+        verified = cred2_temps::verify( msgBuffer, len );
         break;
     case eventCodes::SAVING_START:
-        verified = saving_start::verify( logBuff, len );
+        verified = saving_start::verify( msgBuffer, len );
         break;
     case eventCodes::SAVING_STOP:
-        verified = saving_stop::verify( logBuff, len );
+        verified = saving_stop::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_SAVING:
-        verified = telem_saving::verify( logBuff, len );
+        verified = telem_saving::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_TELPOS:
-        verified = telem_telpos::verify( logBuff, len );
+        verified = telem_telpos::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_TELDATA:
-        verified = telem_teldata::verify( logBuff, len );
+        verified = telem_teldata::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_TELVANE:
-        verified = telem_telvane::verify( logBuff, len );
+        verified = telem_telvane::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_TELENV:
-        verified = telem_telenv::verify( logBuff, len );
+        verified = telem_telenv::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_TELCAT:
-        verified = telem_telcat::verify( logBuff, len );
+        verified = telem_telcat::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_TELSEE:
-        verified = telem_telsee::verify( logBuff, len );
+        verified = telem_telsee::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_TCSI_TIPTILT:
-        verified = telem_tcsi_tiptilt::verify( logBuff, len );
+        verified = telem_tcsi_tiptilt::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_TCSI_FOCUS:
-        verified = telem_tcsi_focus::verify( logBuff, len );
+        verified = telem_tcsi_focus::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_TCSI_LABMODE:
-        verified = telem_tcsi_labmode::verify( logBuff, len );
+        verified = telem_tcsi_labmode::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_STAGE:
-        verified = telem_stage::verify( logBuff, len );
+        verified = telem_stage::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_ZABER:
-        verified = telem_zaber::verify( logBuff, len );
+        verified = telem_zaber::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_PICO:
-        verified = telem_pico::verify( logBuff, len );
+        verified = telem_pico::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_POSITION:
-        verified = telem_position::verify( logBuff, len );
+        verified = telem_position::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_PSFACQ:
-        verified = telem_psfacq::verify( logBuff, len );
+        verified = telem_psfacq::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_POKECENTER:
-        verified = telem_pokecenter::verify( logBuff, len );
+        verified = telem_pokecenter::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_POKELOOP:
-        verified = telem_pokeloop::verify( logBuff, len );
+        verified = telem_pokeloop::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_OBSERVER:
-        verified = telem_observer::verify( logBuff, len );
+        verified = telem_observer::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_RHUSB:
-        verified = telem_rhusb::verify( logBuff, len );
+        verified = telem_rhusb::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_TEMPS:
-        verified = telem_temps::verify( logBuff, len );
+        verified = telem_temps::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_STDCAM:
-        verified = telem_stdcam::verify( logBuff, len );
+        verified = telem_stdcam::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_CORETEMPS:
-        verified = telem_coretemps::verify( logBuff, len );
+        verified = telem_coretemps::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_CORELOADS:
-        verified = telem_coreloads::verify( logBuff, len );
+        verified = telem_coreloads::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_DRIVETEMPS:
-        verified = telem_drivetemps::verify( logBuff, len );
+        verified = telem_drivetemps::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_USAGE:
-        verified = telem_usage::verify( logBuff, len );
+        verified = telem_usage::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_COOLER:
-        verified = telem_cooler::verify( logBuff, len );
+        verified = telem_cooler::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_CHRONY_STATUS:
-        verified = telem_chrony_status::verify( logBuff, len );
+        verified = telem_chrony_status::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_CHRONY_STATS:
-        verified = telem_chrony_stats::verify( logBuff, len );
+        verified = telem_chrony_stats::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_DMSPECK:
-        verified = telem_dmspeck::verify( logBuff, len );
+        verified = telem_dmspeck::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_FGTIMINGS:
-        verified = telem_fgtimings::verify( logBuff, len );
+        verified = telem_fgtimings::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_DMMODES:
-        verified = telem_dmmodes::verify( logBuff, len );
+        verified = telem_dmmodes::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_LOOPGAIN:
-        verified = telem_loopgain::verify( logBuff, len );
+        verified = telem_loopgain::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_MODALGAINOPT:
-        verified = telem_modalgainopt::verify( logBuff, len );
+        verified = telem_modalgainopt::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_BLOCKGAINS:
-        verified = telem_blockgains::verify( logBuff, len );
+        verified = telem_blockgains::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_OFFLOADING:
-        verified = telem_offloading::verify( logBuff, len );
+        verified = telem_offloading::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_W2TCSOFFLOADER:
-        verified = telem_w2tcsoffloader::verify( logBuff, len );
+        verified = telem_w2tcsoffloader::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_FLOWRPM:
-        verified = telem_flowrpm::verify( logBuff, len );
+        verified = telem_flowrpm::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_PI335:
-        verified = telem_pi335::verify( logBuff, len );
+        verified = telem_pi335::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_SPARKLECLOCK:
-        verified = telem_sparkleclock::verify( logBuff, len );
+        verified = telem_sparkleclock::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_POLTRACK:
-        verified = telem_poltrack::verify( logBuff, len );
+        verified = telem_poltrack::verify( msgBuffer, len );
         break;
     case eventCodes::TELEM_ADCTRACK:
-        verified = telem_adctrack::verify( logBuff, len );
+        verified = telem_adctrack::verify( msgBuffer, len );
         break;
     default:
         DEBUG_CRUMB( "verifyLogEntry unknown ev=" + std::to_string( ev ) +

@@ -482,8 +482,14 @@ int emitVerifyHeader( const std::string & fileName,
    fout << "{\n";
    fout << "namespace logger\n";
    fout << "{\n";
+   //Takes a pointer only to the message part of an entry, since the entry's header
+   //layout or version isn't needed by the log types.
+   fout << "/// Verify a log entry's message, dispatching on event code.\n";
+   fout << "/** \\p msgBuffer points at the start of the message, so this is\n";
+   fout << "  * independent of the flatlogs format version.\n";
+   fout << "  */\n";
    fout << "inline bool logVerify( flatlogs::eventCodeT ec,\n";
-   fout << "                       flatlogs::bufferPtrT & buffer,\n";
+   fout << "                       void *msgBuffer,\n";
    fout << "                       flatlogs::msgLenT len )\n";
    fout << "{\n";
    fout << "   switch(ec)\n";
@@ -491,7 +497,7 @@ int emitVerifyHeader( const std::string & fileName,
    for(; it!=logCodes.end(); ++it)
    {
       fout << "      case " << it->first << ":\n";
-      fout << "         return " << it->second.type << "::verify(buffer, len);\n";
+      fout << "         return " << it->second.type << "::verify(msgBuffer, len);\n";
    }
       fout << "      default:\n";
       fout << "         std::cerr << \"Unknown log type: \" << ec << \"\\n\";\n";

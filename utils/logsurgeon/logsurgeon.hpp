@@ -140,7 +140,7 @@ inline bool verifyCandidateEntry( const logsurgeonCandidate &candidate, /**< [in
     memcpy( nbuff, &buff[candidate.m_start], candidate.m_totalSize );
 
     bufferPtrT buffPtr = bufferPtrT( nbuff );
-    return logVerify( candidate.m_eventCode, buffPtr, candidate.m_messageLength );
+    return logVerify( candidate.m_eventCode, logHeader::messageBuffer( buffPtr ), candidate.m_messageLength );
 }
 
 /// Print details about a plausible-but-invalid log entry.
@@ -503,7 +503,7 @@ int logsurgeon::execute()
                     bufferPtrT buffPtr = bufferPtrT( nbuff );
 
                     // true means good
-                    if( logVerify( ec, buffPtr, len ) )
+                    if( logVerify( ec, logHeader::messageBuffer( buffPtr ), len ) )
                     {
                         // if we pass we check if we're currently in a bad section
                         if( inbad )

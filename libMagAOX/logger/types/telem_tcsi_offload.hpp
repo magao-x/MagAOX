@@ -69,11 +69,11 @@ struct telem_tcsi_offload : public flatbuffer_log
         }
     };
 
-    static bool verify( flatlogs::bufferPtrT &logBuff, ///< [in] Buffer containing the flatbuffer serialized message.
-                        flatlogs::msgLenT     len      ///< [in] length of msgBuffer.
+    static bool verify( void             *msgBuffer, ///< [in] Buffer containing the flatbuffer serialized message.
+                        flatlogs::msgLenT len        ///< [in] length of msgBuffer.
     )
     {
-        auto verifier = flatbuffers::Verifier( static_cast<uint8_t *>( flatlogs::logHeader::messageBuffer( logBuff ) ),
+        auto verifier = flatbuffers::Verifier( static_cast<uint8_t *>( msgBuffer ),
                                                static_cast<size_t>( len ) );
         return VerifyTelem_tcsi_offload_fbBuffer( verifier );
     }
