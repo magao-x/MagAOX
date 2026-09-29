@@ -2,21 +2,22 @@
 
 ## Scope and evidence
 
-Reviewed `apps/xInstGraph` in MagAOX (`6ff2b673`) and the local
-`/home/jrmales/Source/instGraph` checkout (`77c85b6`, `main`). The installed
-`instGraphXML.hpp` matches that checkout. This is a review only; no app or
-library implementation was changed.
+The original review examined `apps/xInstGraph` in MagAOX (`6ff2b673`) and
+`/home/jrmales/Source/instGraph` (`77c85b6`, then `main`). At that point the
+installed `instGraphXML.hpp` matched the library checkout. The findings below
+preserve the original evidence; the commit annotations record subsequent fixes.
 
-The existing `xInstGraph_test` builds. It cannot start without adding
-`/usr/local/lib` to `LD_LIBRARY_PATH`. With that path set, it fails at
-`apps/xInstGraph/tests/xInstGraph_test.cpp:151`: after a power update, the
-expected output file does not exist (4 assertions passed, 1 failed). The
-fixture has no puts or `fsmstate` extra, so the library's update methods never
-call `save_file`. The remaining findings are from code inspection unless noted.
+At review time, the existing `xInstGraph_test` failed after a power update
+because its graph fixture had no write-triggering puts or `fsmstate` extra.
+The original test also needed `/usr/local/lib` on `LD_LIBRARY_PATH` in that
+environment. The expanded app test suite and library tests now pass in the
+source checkouts; installation of the later fixes has not been verified here.
 
 ## Findings
 
 ### F01 — High: output publication depends on incidental graph changes
+
+**Fixed in:** MagAOX `d2903358` (initial snapshot); instGraph `59a8adc` (explicit serialization).
 
 `xInstGraph::loadConfigImpl()` calls `hideLinks()` and `hidePuts()` only after
 constructing/configuring nodes (`apps/xInstGraph/xInstGraph.hpp:189-405`). The
@@ -31,6 +32,8 @@ graphs.
 
 ### F02 — High: graph writes can fail silently and expose intermediate state
 
+**Fixed in:** MagAOX `7a8769f3`; instGraph `59a8adc`.
+
 `instGraphXML::stateChange()`, `valuePut()`, and `valueExtra()` save directly to
 the configured output file and ignore `pugi::xml_document::save_file()`'s
 result (`instGraph/src/instGraphXML.cpp:833-996`). Put propagation and node
@@ -41,6 +44,8 @@ app. Add a checked, explicit publication step after a complete update and
 replace the destination atomically.
 
 ### F03 — High: the output path is not protected from the input path
+
+**Fixed in:** MagAOX `d2903358`.
 
 The app prepends `m_configDir` to `graph.file`, accepts `graph.outputPath`
 without checking whether it names the same file, and unconditionally removes
@@ -53,6 +58,8 @@ output location, and remove only a file owned by this run.
 
 ### F04 — High: unknown node types silently leave graph nodes unmonitored
 
+**Fixed in:** MagAOX `bf716bbb`.
+
 The config loop handles five exact `type` strings but has no error branch for
 an unknown value (`apps/xInstGraph/xInstGraph.hpp:205-399`). `xn` stays null,
 the section is skipped, and `appStartup()` still enters `READY`
@@ -62,6 +69,8 @@ unknown types and report the section and value; also validate required graph
 nodes against configured handlers.
 
 ### F05 — High: invalid FSM target states can turn an unknown state on
+
+**Fixed in:** MagAOX `69655626`.
 
 `fsmNode::loadConfigDerived()` converts `targetStates` without checking the
 result (`apps/xInstGraph/xigNodes/fsmNode.hpp:361-367`). `str2Code()` returns
@@ -73,6 +82,8 @@ state names at config load and test unknown incoming states.
 
 ### F06 — High: `alwaysOn` puts can remain on when a motion stage turns off
 
+**Fixed in:** MagAOX `046c75ae`.
+
 `stdMotionNode::togglePutsOff()` skips every input/output named in `m_alwaysOn`
 (`apps/xInstGraph/xigNodes/stdMotionNode.hpp:543-569`). Those puts are enabled
 by the multi-put `togglePutsOn()` path (`:431-455`, `:477-503`). After the FSM
@@ -83,6 +94,8 @@ transition test from an active preset to a non-ready FSM state.
 
 ### F07 — High: multi-put nodes assume an opposite-side put exists
 
+**Fixed in:** MagAOX `546a5f19`.
+
 For multiple `presetPutName` values, `togglePutsOn()` dereferences
 `m_node->inputs().begin()->second` or `outputs().begin()->second` without an
 emptiness check (`apps/xInstGraph/xigNodes/stdMotionNode.hpp:405-421,458-475`).
@@ -91,6 +104,8 @@ Validate the graph topology during config load and guard the runtime path.
 Also validate configured put names before accepting the node.
 
 ### F08 — Medium: `indiProp` can stay off after an FSM threshold clears
+
+**Fixed in:** MagAOX `16cc099f`.
 
 `indiPropNode` runs the base FSM handler first and only changes its own puts
 when the tracked property's comparison changes
@@ -103,6 +118,8 @@ state whenever either changes.
 
 ### F09 — Medium: power states outside `On` are reported as `OFF`
 
+**Fixed in:** MagAOX `32a1b956`.
+
 `pwrOnOffNode::handleSetProperty()` treats every present `state` other than
 exactly `"On"` as off (`apps/xInstGraph/xigNodes/pwrOnOffNode.hpp:55-77`). An
 unknown/intermediate or differently cased value is therefore published as
@@ -112,6 +129,8 @@ power vocabulary, retain an unknown state when appropriate, and correct or
 remove the unused field.
 
 ### F10 — Medium: node ownership is leaked
+
+**Fixed in:** MagAOX `d6d37c98`.
 
 The app allocates each node with `new` and stores raw pointers in `m_nodes`
 (`apps/xInstGraph/xInstGraph.hpp:64-70,205-399`). Its destructor deletes only
@@ -123,6 +142,8 @@ exception-safe construction.
 
 ### F11 — Medium: typed put IDs are parsed with reversed `rfind` arguments
 
+**Fixed in:** instGraph `7c3d0a3`.
+
 In `instGraph/src/instGraphXML.cpp:79-87`, `value.rfind( fc, '.' )` calls the
 `rfind(char, position)` overload. It searches for the character represented
 by the colon index, rather than for `'.'` before that index. A typed ID such
@@ -132,6 +153,8 @@ and output IDs and fix the argument order. The provided demos use untyped IDs,
 so this was not exercised by the app test.
 
 ### F12 — Medium: current test and user documentation miss the runtime contract
+
+**Fixed in:** MagAOX `56f67b57` (examples and callback fan-out), `bf716bbb` (config tests), `7a8769f3` (publication tests).
 
 The sole app test expects an output for a graph without any write-triggering
 element and currently fails (`apps/xInstGraph/tests/xInstGraph_test.cpp:46-159`).
@@ -145,6 +168,8 @@ each supported node type.
 
 ### F13 — Low: header definitions are unsafe across multiple translation units
 
+**Fixed in:** MagAOX `f1b35b72`.
+
 The app intentionally follows the header-based application pattern, but
 `xInstGraph.hpp` defines all its methods without `inline`
 (`apps/xInstGraph/xInstGraph.hpp:120-553`). Several helper headers likewise
@@ -154,7 +179,23 @@ Including them from multiple translation units in one target can cause linker
 multiple-definition errors. Mark intentionally header-defined functions
 `inline` or move definitions to a source file while retaining test access.
 
-## Suggested upgrade order
+## Verification and deployment notes
+
+The MagAOX app test suite passed with 219 assertions in 16 cases after F12;
+F13 changed only header linkage, and the app build plus a two-translation-unit
+link check passed afterward. The instGraph Catch2 suite passed after F11.
+The user confirmed the earlier configuration-diagnostic fix with a bad config
+and then started the app with a corrected config. These later F05–F13 fixes
+have not yet been installed on the running system.
+
+F07 now validates motion-stage put topology at startup. Before installing,
+check each `stdMotion` section's `presetDir` and `presetPutName` against the
+actual input/output put names in its draw.io node. A local earlier
+`[fwfpm]` config used `presetDir=input` with the default `presetPutName=out`,
+while the corresponding local graph exposed input `in`; that combination
+will now fail validation and should be corrected if still deployed.
+
+## Original suggested upgrade order
 
 1. Define the output publication contract and fix F01-F03 in coordination
    with `instGraph`; add an initial snapshot and checked, atomic writes.
