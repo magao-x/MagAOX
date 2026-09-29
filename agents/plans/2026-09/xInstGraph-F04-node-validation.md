@@ -44,4 +44,4 @@ This makes incomplete operational configurations fail startup where they previou
 
 ## Installed-library verification (2026-09-28)
 
-After the instGraph checkout was rebuilt and installed under `/usr/local`, xInstGraph and its focused test rebuilt with the default include and link settings. The suite passed all 13 cases and 204 assertions against `/usr/local/lib/libinstGraph.so` with `LD_LIBRARY_PATH=/usr/local/lib`. Without that environment setting, the runtime loader did not resolve `libinstGraph.so`; its path is not in the current loader cache.
+After the instGraph checkout was rebuilt and installed under `/usr/local`, xInstGraph and its focused test rebuilt with the default include and link settings. The suite passed all 13 cases and 204 assertions against `/usr/local/lib/libinstGraph.so` with `LD_LIBRARY_PATH=/usr/local/lib`. Before `ldconfig`, the runtime loader did not resolve `libinstGraph.so` without that environment setting. After `ldconfig`, both the app and focused test resolve `/usr/local/lib/libinstGraph.so` with `LD_LIBRARY_PATH` unset; the suite again passed all 13 cases and 204 assertions.
