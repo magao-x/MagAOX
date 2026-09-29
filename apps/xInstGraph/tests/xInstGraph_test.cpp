@@ -48,6 +48,15 @@ class xInstGraph : public MagAOX::app::xInstGraph
     /// Access the app's configurator.
     mx::app::appConfigurator &config();
 
+    /// Return a diagnostic from the graph-node validation pass.
+    std::string nodeValidationError();
+
+    /// Check whether a staging path or descriptor remains open.
+    bool hasStage() const;
+
+    /// Return the number of configured graph-node handlers.
+    size_t handlerCount() const;
+
     /// Failure or short-write behavior injected at a publication step.
     enum class failurePoint
     {
@@ -98,6 +107,24 @@ void xInstGraph::configDir( const std::string &cp )
 mx::app::appConfigurator &xInstGraph::config()
 {
     return MagAOX::app::xInstGraph::config;
+}
+
+std::string xInstGraph::nodeValidationError()
+{
+    std::vector<std::pair<std::string, std::string>> nodeTypes;
+    std::string                                      error;
+    validateNodeConfig( config(), nodeTypes, error );
+    return error;
+}
+
+bool xInstGraph::hasStage() const
+{
+    return m_stageFd >= 0 || !m_stagePath.empty();
+}
+
+size_t xInstGraph::handlerCount() const
+{
+    return m_nodes.size();
 }
 
 int xInstGraph::serializeGraph( std::string &xml, std::string &error )
@@ -325,6 +352,34 @@ void loadFixture( xInstGraph                  &app, /**< [in,out] app to configu
     app.loadConfig();
 }
 
+/// Write graph options followed by node and unrelated configuration sections.
+void writeNodeSections( const std::filesystem::path &path,     /**< [in] config file path */
+                        const std::filesystem::path &output,   /**< [in] output graph path */
+                        const std::string           &sections, /**< [in] section text after graph options */
+                        bool                         clobber = false /**< [in] permit an existing output */ )
+{
+    std::ofstream out( path );
+    out << "[graph]\nfile=instgraph_test.drawio\noutputPath=" << output.string() << '\n';
+    if( clobber )
+    {
+        out << "clobberOutput=true\n";
+    }
+    out << sections;
+}
+
+/// Check whether a test output has a sibling staging file.
+bool hasStageFile( const std::filesystem::path &output /**< [in] graph output path */ )
+{
+    for( const auto &entry : std::filesystem::directory_iterator( output.parent_path() ) )
+    {
+        if( entry.path().filename().string().find( output.filename().string() + ".xInstGraph-" ) == 0 )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 /// Return the mxCell opening tag with the given ID.
 std::string cellTag( const std::string &xml, /**< [in] graph XML */
                      const std::string &id /**< [in] cell ID */ )
@@ -342,6 +397,164 @@ std::string cellTag( const std::string &xml, /**< [in] graph XML */
     }
 
     return xml.substr( start, end - start );
+}
+
+/// xInstGraph rejects unsupported node types.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph rejects unsupported node types", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::loadConfigImpl( *(mx::app::appConfigurator *)nullptr );
+    MagAOX::app::xInstGraph::validateNodeConfig( *(mx::app::appConfigurator *)nullptr,
+        *(std::vector<std::pair<std::string, std::string>> *)nullptr, *(std::string *)nullptr );
+    #endif
+    // clang-format on
+
+    for( const std::string type : { "statc", "Static", "" } )
+    {
+        CAPTURE( type );
+        temporaryDirectory temp;
+        auto               input  = temp.root / "config" / "instgraph_test.drawio";
+        auto               output = temp.root / "output.drawio";
+        writeXML( input, true );
+        const std::string source = readFile( input );
+        {
+            std::ofstream existing( output );
+            existing << "pre-existing output";
+        }
+        writeNodeSections(
+            temp.root / "config" / "instgraph_test.conf", output, "[staticNode]\ntype=" + type + "\n", true );
+
+        xInstGraph app;
+        loadFixture( app, temp.root );
+        REQUIRE( app.shutdown() != 0 );
+        REQUIRE( app.state() != stateCodes::READY );
+        REQUIRE( app.handlerCount() == 0 );
+        REQUIRE_FALSE( app.hasStage() );
+        REQUIRE_FALSE( hasStageFile( output ) );
+        REQUIRE( readFile( input ) == source );
+        REQUIRE( readFile( output ) == "pre-existing output" );
+
+        const std::string error = app.nodeValidationError();
+        REQUIRE( error.find( "[staticNode]" ) != std::string::npos );
+        if( type.empty() )
+        {
+            REQUIRE( error.find( "empty type" ) != std::string::npos );
+        }
+        else
+        {
+            REQUIRE( error.find( type ) != std::string::npos );
+        }
+    }
+}
+
+/// xInstGraph requires a handler for every graph node.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph requires a handler for every graph node", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::loadConfigImpl( *(mx::app::appConfigurator *)nullptr );
+    MagAOX::app::xInstGraph::validateNodeConfig( *(mx::app::appConfigurator *)nullptr,
+        *(std::vector<std::pair<std::string, std::string>> *)nullptr, *(std::string *)nullptr );
+    #endif
+    // clang-format on
+
+    for( const std::string sections : { "[metadata]\nowner=test\n", "[staticNode]\ninputsOn=in\n" } )
+    {
+        CAPTURE( sections );
+        temporaryDirectory temp;
+        auto               input  = temp.root / "config" / "instgraph_test.drawio";
+        auto               output = temp.root / "output.drawio";
+        writeXML( input, true );
+        const std::string source = readFile( input );
+        writeNodeSections( temp.root / "config" / "instgraph_test.conf", output, sections );
+
+        xInstGraph app;
+        loadFixture( app, temp.root );
+        REQUIRE( app.shutdown() != 0 );
+        REQUIRE( app.state() != stateCodes::READY );
+        REQUIRE( app.handlerCount() == 0 );
+        REQUIRE_FALSE( app.hasStage() );
+        REQUIRE_FALSE( hasStageFile( output ) );
+        REQUIRE_FALSE( std::filesystem::exists( output ) );
+        REQUIRE( readFile( input ) == source );
+        const std::string error = app.nodeValidationError();
+        REQUIRE( error.find( "staticNode" ) != std::string::npos );
+        REQUIRE( error.find( sections.find( "[staticNode]" ) == std::string::npos
+                                 ? "no configuration section"
+                                 : "without required type" ) != std::string::npos );
+    }
+}
+
+/// xInstGraph rejects typed sections outside the graph.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph rejects typed sections outside the graph", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::loadConfigImpl( *(mx::app::appConfigurator *)nullptr );
+    MagAOX::app::xInstGraph::validateNodeConfig( *(mx::app::appConfigurator *)nullptr,
+        *(std::vector<std::pair<std::string, std::string>> *)nullptr, *(std::string *)nullptr );
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    auto               input  = temp.root / "config" / "instgraph_test.drawio";
+    auto               output = temp.root / "output.drawio";
+    writeXML( input, true );
+    writeNodeSections( temp.root / "config" / "instgraph_test.conf",
+                       output,
+                       "[staticNode]\ntype=static\ninputsOn=in\n[typoNode]\ntype=static\n" );
+
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.shutdown() != 0 );
+    REQUIRE_FALSE( app.hasStage() );
+    REQUIRE_FALSE( hasStageFile( output ) );
+    REQUIRE_FALSE( std::filesystem::exists( output ) );
+    REQUIRE( app.handlerCount() == 0 );
+    const std::string error = app.nodeValidationError();
+    REQUIRE( error.find( "[typoNode]" ) != std::string::npos );
+    REQUIRE( error.find( "static" ) != std::string::npos );
+    REQUIRE( error.find( "no graph node" ) != std::string::npos );
+}
+
+/// xInstGraph accepts unrelated sections alongside complete graph handlers.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph accepts unrelated sections alongside complete graph handlers", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::loadConfigImpl( *(mx::app::appConfigurator *)nullptr );
+    MagAOX::app::xInstGraph::validateNodeConfig( *(mx::app::appConfigurator *)nullptr,
+        *(std::vector<std::pair<std::string, std::string>> *)nullptr, *(std::string *)nullptr );
+    MagAOX::app::xInstGraph::appStartup();
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    auto               input  = temp.root / "config" / "instgraph_test.drawio";
+    auto               output = temp.root / "output.drawio";
+    writeXML( input, true );
+    writeNodeSections( temp.root / "config" / "instgraph_test.conf",
+                       output,
+                       "[staticNode]\ntype=static\ninputsOn=in\n[metadata]\nowner=test\n" );
+
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.shutdown() == 0 );
+    REQUIRE( app.handlerCount() == 1 );
+    REQUIRE( app.nodeValidationError().empty() );
+    REQUIRE( app.appStartup() == 0 );
+    REQUIRE( app.state() == stateCodes::READY );
+    REQUIRE( std::filesystem::exists( output ) );
+    REQUIRE( app.appShutdown() == 0 );
 }
 
 /// Verify a graph is published before the first property update.
@@ -372,6 +585,8 @@ TEST_CASE( "xInstGraph publishes an initial graph", "[xInstGraph]" )
     REQUIRE_FALSE( std::filesystem::exists( output ) );
 
     REQUIRE( app.appStartup() == 0 );
+    REQUIRE( app.state() == stateCodes::READY );
+    REQUIRE( app.handlerCount() == 5 );
     REQUIRE( std::filesystem::exists( output ) );
 
     ingr::instGraphXML parsed;

@@ -14,10 +14,13 @@
 #include <cstring>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 #include <instGraph/instGraphXML.hpp>
@@ -32,13 +35,13 @@ using namespace ingr;
 #include "xigNodes/stdMotionNode.hpp"
 #include "xigNodes/staticNode.hpp"
 
-/** \defgroup instGraph
+/** \defgroup instGraph Instrument Graph App
  * \brief The MagAO-X instrument graph publisher.
  *
  * \ingroup apps
  */
 
-/** \defgroup instGraph_files
+/** \defgroup instGraph_files Instrument Graph Files
  * \ingroup instGraph
  */
 
@@ -152,6 +155,13 @@ class xInstGraph : public MagAOXApp<true>
 
     /// Confirm the published output is still owned and distinct from the input.
     int checkOwnedOutput( std::string &error /**< [out] path validation failure */ ) const;
+
+    /// Validate that each graph node has a supported configuration handler.
+    /** \returns 0 on success or -1 with a diagnostic in error. */
+    int validateNodeConfig(
+        mx::app::appConfigurator &_config, /**< [in,out] configuration containing node sections */
+        std::vector<std::pair<std::string, std::string>> &nodeTypes, /**< [out] validated section and type pairs */
+        std::string                                      &error /**< [out] reason validation failed */ );
 
     /// Publish the staged initial snapshot according to the clobber policy.
     int publishOutput( std::string &error /**< [out] reason publication failed */ );
@@ -607,6 +617,87 @@ void xInstGraph::setupConfig()
                 "replace an existing regular output file at startup (default false)" );
 }
 
+inline int xInstGraph::validateNodeConfig( mx::app::appConfigurator                         &_config,
+                                           std::vector<std::pair<std::string, std::string>> &nodeTypes,
+                                           std::string                                      &error )
+{
+    nodeTypes.clear();
+    error.clear();
+
+    std::vector<std::string> sections;
+    if( _config.unusedSections( sections ) < 0 )
+    {
+        error = "cannot enumerate graph node configuration sections";
+        return -1;
+    }
+
+    std::set<std::string> configuredNodes;
+    for( const auto &section : sections )
+    {
+        const std::string typeKey = mx::app::iniFile::makeKey( section, "type" );
+        if( !_config.isSetUnused( typeKey ) )
+        {
+            if( m_graph.nodeValid( section ) )
+            {
+                error = "graph node '" + section + "' has a configuration section without required type";
+                return -1;
+            }
+            continue;
+        }
+
+        std::string type;
+        try
+        {
+            if( _config.configUnused( type, typeKey ) < 0 )
+            {
+                error = "cannot read type for node section [" + section + "]";
+                return -1;
+            }
+        }
+        catch( const std::exception &e )
+        {
+            error = "cannot read type for node section [" + section + "]: " + e.what();
+            return -1;
+        }
+
+        if( type.empty() )
+        {
+            error = "node section [" + section + "] has an empty type";
+            return -1;
+        }
+        if( type != "indiProp" && type != "pwrOnOff" && type != "fsm" && type != "stdMotion" && type != "static" )
+        {
+            error = "node section [" + section + "] has unsupported type '" + type + "'";
+            return -1;
+        }
+        if( !m_graph.nodeValid( section ) )
+        {
+            error = "node section [" + section + "] with type '" + type + "' has no graph node";
+            return -1;
+        }
+
+        configuredNodes.insert( section );
+        nodeTypes.emplace_back( section, type );
+    }
+
+    if( m_graph.nodes().empty() )
+    {
+        error = "no nodes found in input graph";
+        return -1;
+    }
+
+    for( const auto &graphNode : m_graph.nodes() )
+    {
+        if( configuredNodes.count( graphNode.first ) == 0 )
+        {
+            error = "graph node '" + graphNode.first + "' has no configuration section with required type";
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
 {
     std::string file;
@@ -641,13 +732,10 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
         return log<software_error, -1>( { __FILE__, __LINE__, emsg } );
     }
 
-    std::vector<std::string> sections;
-
-    _config.unusedSections( sections );
-
-    if( sections.size() == 0 )
+    std::vector<std::pair<std::string, std::string>> nodeTypes;
+    if( validateNodeConfig( _config, nodeTypes, emsg ) < 0 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "no nodes found in configuration" } );
+        return log<software_error, -1>( { __FILE__, __LINE__, emsg } );
     }
 
     if( createStage( emsg ) < 0 )
@@ -655,216 +743,49 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
         return log<software_error, -1>( { __FILE__, __LINE__, emsg } );
     }
 
-    for( size_t i = 0; i < sections.size(); ++i )
+    for( const auto &nodeType : nodeTypes )
     {
-        bool isNode = config.isSetUnused( mx::app::iniFile::makeKey( sections[i], "type" ) );
+        const std::string &name = nodeType.first;
+        const std::string &type = nodeType.second;
 
-        if( !isNode )
+        try
         {
-            continue;
+            // Keep concrete ownership until configuration and insertion succeed.
+            auto addNode = [this, &_config, &name]( auto node )
+            {
+                node->loadConfig( _config );
+                if( !m_nodes.emplace( name, node.get() ).second )
+                {
+                    throw std::runtime_error( "duplicate graph node handler for section [" + name + "]" );
+                }
+                node.release();
+            };
+
+            if( type == "indiProp" )
+            {
+                addNode( std::make_unique<indiPropNode>( name, &m_graph ) );
+            }
+            else if( type == "pwrOnOff" )
+            {
+                addNode( std::make_unique<pwrOnOffNode>( name, &m_graph ) );
+            }
+            else if( type == "fsm" )
+            {
+                addNode( std::make_unique<fsmNode>( name, &m_graph ) );
+            }
+            else if( type == "stdMotion" )
+            {
+                addNode( std::make_unique<stdMotionNode>( name, &m_graph ) );
+            }
+            else if( type == "static" )
+            {
+                addNode( std::make_unique<staticNode>( name, &m_graph ) );
+            }
         }
-
-        std::string type;
-        _config.configUnused( type, mx::app::iniFile::makeKey( sections[i], "type" ) );
-
-        // std::cerr << "found node " << sections[i] << ": " << type << "\n";
-
-        xigNode *xn = nullptr;
-
-        if( type == "indiProp" )
+        catch( const std::exception &e )
         {
-            indiPropNode *ip = nullptr;
-            try
-            {
-                ip = new indiPropNode( sections[i], &m_graph );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            if( ip == nullptr )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "failed to allocate node" );
-                throw std::runtime_error( msg );
-            }
-
-            try
-            {
-                ip->loadConfig( _config );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            xn = ip;
-        }
-        else if( type == "pwrOnOff" )
-        {
-            pwrOnOffNode *nn = nullptr;
-
-            try
-            {
-                nn = new pwrOnOffNode( sections[i], &m_graph );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            if( nn == nullptr )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "failed to allocate node" );
-                throw std::runtime_error( msg );
-            }
-
-            try
-            {
-                nn->loadConfig( _config );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            xn = nn;
-        }
-        else if( type == "fsm" )
-        {
-            fsmNode *nn = nullptr;
-
-            try
-            {
-                nn = new fsmNode( sections[i], &m_graph );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            if( nn == nullptr )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "failed to allocate node" );
-                throw std::runtime_error( msg );
-            }
-
-            try
-            {
-                nn->loadConfig( _config );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            xn = nn;
-        }
-        else if( type == "stdMotion" )
-        {
-            stdMotionNode *nn = nullptr;
-
-            try
-            {
-                nn = new stdMotionNode( sections[i], &m_graph );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            if( nn == nullptr )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "failed to allocate node" );
-                throw std::runtime_error( msg );
-            }
-
-            try
-            {
-                nn->loadConfig( _config );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            xn = nn;
-        }
-        else if( type == "static" )
-        {
-            staticNode *nn = nullptr;
-
-            try
-            {
-                nn = new staticNode( sections[i], &m_graph );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            if( nn == nullptr )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "failed to allocate node" );
-                throw std::runtime_error( msg );
-            }
-
-            try
-            {
-                nn->loadConfig( _config );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            xn = nn;
-        }
-
-        if( xn != nullptr )
-        {
-            try
-            {
-                m_nodes.insert( { xn->node()->name(), xn } );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = e.what();
-                msg += "\ncaught at ";
-                msg += __FILE__;
-                msg += " " + std::to_string( __LINE__ );
-                throw std::runtime_error( msg );
-            }
+            throw std::runtime_error( XIGN_EXCEPTION( "xInstGraph::loadConfigImpl",
+                                                      "could not configure node [" + name + "]: " + e.what() ) );
         }
     }
 
