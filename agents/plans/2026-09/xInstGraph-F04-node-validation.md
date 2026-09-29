@@ -39,5 +39,9 @@ This makes incomplete operational configurations fail startup where they previou
 ## Execution notes (2026-09-28)
 
 - Added a preflight validation pass before staging. It rejects unsupported or empty types, typed sections absent from the graph, and graph nodes lacking a typed section. Unrelated untyped sections remain allowed. Handler construction uses concrete-type ownership until insertion succeeds.
-- Extended the app Catch2 suite for each rejection and a valid static node alongside an unrelated section. The focused suite passed 13 cases and 204 assertions against the matching instGraph library installed under `/tmp`. The app also built against that library; the system `/usr/local` instGraph install remains older and lacks the F02 API.
+- Extended the app Catch2 suite for each rejection and a valid static node alongside an unrelated section. The focused suite passed 13 cases and 204 assertions against the matching instGraph library installed under `/tmp`. The app also built against that library; at the time, the system `/usr/local` instGraph install lacked the F02 API.
 - HTML generated with the project Doxyfile and focused inputs contains all four new test cases and four `Referenced by` links from `validateNodeConfig()`. The project Doxyfile now defines the test-only `XINSTGRAPH_TEST_DOXYGEN_REF` macro.
+
+## Installed-library verification (2026-09-28)
+
+After the instGraph checkout was rebuilt and installed under `/usr/local`, xInstGraph and its focused test rebuilt with the default include and link settings. The suite passed all 13 cases and 204 assertions against `/usr/local/lib/libinstGraph.so` with `LD_LIBRARY_PATH=/usr/local/lib`. Without that environment setting, the runtime loader did not resolve `libinstGraph.so`; its path is not in the current loader cache.
