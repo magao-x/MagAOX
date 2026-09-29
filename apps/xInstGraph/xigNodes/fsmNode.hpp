@@ -9,6 +9,7 @@
 
 #include "xigNode.hpp"
 
+/// How an FSM state controls this node's puts.
 enum class fsmNodeActionT
 {
     passive,   /**< Only monitor and report FSM state, don't change puts*/
@@ -17,7 +18,8 @@ enum class fsmNodeActionT
     unknown    /**< Unknown action, generally an error. */
 };
 
-std::string fsmNodeActionT2String( fsmNodeActionT action )
+/// Convert an FSM action to its configuration name.
+std::string fsmNodeActionT2String( fsmNodeActionT action /**< [in] action to convert */ )
 {
     if( action == fsmNodeActionT::passive )
     {
@@ -37,7 +39,8 @@ std::string fsmNodeActionT2String( fsmNodeActionT action )
     }
 }
 
-fsmNodeActionT fsmNodeActionTFromString( const std::string &action )
+/// Parse an FSM action from its configuration name.
+fsmNodeActionT fsmNodeActionTFromString( const std::string &action /**< [in] action name */ )
 {
     if( action == "passive" )
     {
@@ -58,7 +61,7 @@ fsmNodeActionT fsmNodeActionTFromString( const std::string &action )
 }
 
 /// Implementation of an instGraph node interface for a MagAO-X Finite State Machine (FSM)
-/** This class is interraces to a standard FSM.  It tracks the FSM state INDI property
+/** This class interfaces to a standard FSM.  It tracks the FSM state INDI property
  * and keeps its internal state updated.
  *
  * Whether it impacts ioput status depends on the `action` specified.
@@ -68,6 +71,7 @@ fsmNodeActionT fsmNodeActionTFromString( const std::string &action )
 class fsmNode : public xigNode
 {
 
+    /// MagAO-X application FSM state code.
     typedef MagAOX::app::stateCodes::stateCodeT stateCodeT;
 
   protected:
@@ -77,8 +81,10 @@ class fsmNode : public xigNode
 
     std::string m_fsmKey; ///< The unique INDI key, `<device>.<fsmPropName>`, for the FSM state INDI property.
 
+    /// Configured rule for changing puts in response to FSM state.
     fsmNodeActionT m_fsmAction{ fsmNodeActionT::passive };
 
+    /// Valid FSM state codes that satisfy the configured action.
     std::vector<stateCodeT> m_targetStates;
 
     stateCodeT  m_state{ -999 }; ///< The numerical code of the current state.
@@ -152,7 +158,7 @@ class fsmNode : public xigNode
     fsmNodeActionT fsmAction() const;
 
     /// Set the action
-    void fsmAction( fsmNodeActionT act );
+    void fsmAction( fsmNodeActionT act /**< [in] action to apply */ );
 
     /// Get the target states
     /**
@@ -172,7 +178,7 @@ class fsmNode : public xigNode
   protected:
     /// Load this specific node's settings from an application configuration of a derived class
     /**
-     * Does not cerifies that the named node is an fsmNode.
+     * Does not verify that the named node is an fsmNode.
      *
      */
     void loadConfigDerived( mx::app::appConfigurator &config /**< [in] the application configurator
@@ -187,10 +193,11 @@ class fsmNode : public xigNode
      *  should return without further processing.
      *
      */
-    virtual int handleSetProperty( bool &actionTaken, /** < [out] indicates if action taken (true). */
+    virtual int handleSetProperty( bool                    &actionTaken, /**< [out] whether this handler changed puts */
                                    const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
   public:
+    /// Refresh the node GUI display after state changes.
     virtual void updateGUI();
 };
 
@@ -360,11 +367,19 @@ inline void fsmNode::loadConfigDerived( mx::app::appConfigurator &config )
 
     std::vector<std::string> targetStates;
     config.configUnused( targetStates, mx::app::iniFile::makeKey( name(), "targetStates" ) );
-    m_targetStates.resize( targetStates.size() );
-    for( size_t n = 0; n < targetStates.size(); ++n )
+    std::vector<stateCodeT> parsedStates;
+    parsedStates.reserve( targetStates.size() );
+    for( const auto &target : targetStates )
     {
-        m_targetStates[n] = MagAOX::app::stateCodes::str2Code( targetStates[n] );
+        stateCodeT code = MagAOX::app::stateCodes::str2Code( target );
+        if( code == -999 )
+        {
+            throw std::runtime_error( "fsmNode::loadConfig: invalid target state '" + target + "' in [" + name() +
+                                      "]" );
+        }
+        parsedStates.push_back( code );
     }
+    m_targetStates.swap( parsedStates );
 
     if( m_parentGraph && m_node )
     {
@@ -394,7 +409,7 @@ inline int fsmNode::handleSetProperty( bool &actionTaken, const pcf::IndiPropert
 
     m_stateStr = ipRecv[m_fsmElName].get<std::string>();
 
-    MagAOX::app::stateCodes::stateCodeT state = MagAOX::app::stateCodes::str2CodeFast( m_stateStr );
+    MagAOX::app::stateCodes::stateCodeT state = MagAOX::app::stateCodes::str2Code( m_stateStr );
 
     if( state != m_state )
     {
