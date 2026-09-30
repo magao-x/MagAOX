@@ -101,6 +101,15 @@ class orcaCtrl : public MagAOXApp<>,
     // friend class dev::dssShutter<orcaCtrl>;
     friend class dev::telemeter<orcaCtrl>;
 
+    /// The stdCamera base class, used by the STDCAMERA_* macros
+    typedef dev::stdCamera<orcaCtrl> stdCameraT;
+
+    /// The frameGrabber base class, used by the FRAMEGRABBER_* macros
+    typedef dev::frameGrabber<orcaCtrl> frameGrabberT;
+
+    /// The telemeter base class, used by the TELEMETER_* macros
+    typedef dev::telemeter<orcaCtrl> telemeterT;
+
     typedef MagAOXApp<> MagAOXAppT;
 
   public:
@@ -199,6 +208,15 @@ class orcaCtrl : public MagAOXApp<>,
 
     /// Setup the configuration system (called by MagAOXApp::setup())
     virtual void setupConfig();
+
+    /// Implementation of loadConfig logic, separated for testing.
+    /** This is called by loadConfig().
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int loadConfigImpl(
+        mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
 
     /// load the configuration system results (called by MagAOXApp::setup())
     virtual void loadConfig();
@@ -383,20 +401,37 @@ inline void orcaCtrl::setupConfig()
                 "int",
                 "The identifying serial number of the camera." );
 
-    dev::stdCamera<orcaCtrl>::setupConfig( config );
-    dev::frameGrabber<orcaCtrl>::setupConfig( config );
+    STDCAMERA_SETUP_CONFIG( config );
+
+    FRAMEGRABBER_SETUP_CONFIG( config );
+
     // dev::dssShutter<orcaCtrl>::setupConfig( config );
-    dev::telemeter<orcaCtrl>::setupConfig( config );
+
+    TELEMETER_SETUP_CONFIG( config );
+}
+
+inline int orcaCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
+{
+    _config( m_serialNumber, "camera.serialNumber" );
+
+    STDCAMERA_LOAD_CONFIG( _config );
+
+    FRAMEGRABBER_LOAD_CONFIG( _config );
+
+    // dev::dssShutter<orcaCtrl>::loadConfig( _config );
+
+    TELEMETER_LOAD_CONFIG( _config );
+
+    return 0;
 }
 
 inline void orcaCtrl::loadConfig()
 {
-
-    config( m_serialNumber, "camera.serialNumber" );
-    dev::stdCamera<orcaCtrl>::loadConfig( config );
-    dev::frameGrabber<orcaCtrl>::loadConfig( config );
-    // dev::dssShutter<orcaCtrl>::loadConfig( config );
-    dev::telemeter<orcaCtrl>::loadConfig( config );
+    if( loadConfigImpl( config ) != 0 )
+    {
+        log<text_log>( "error loading config", logPrio::LOG_CRITICAL );
+        m_shutdown = true;
+    }
 }
 
 inline int orcaCtrl::appStartup()
@@ -435,37 +470,22 @@ inline int orcaCtrl::appStartup()
     m_maxROIBinning_y  = 4;
     m_stepROIBinning_y = 1;
 
-    if( dev::stdCamera<orcaCtrl>::appStartup() < 0 )
-    {
-        return log<software_critical, -1>( { __FILE__, __LINE__ } );
-    }
+    STDCAMERA_APP_STARTUP;
 
-    if( dev::frameGrabber<orcaCtrl>::appStartup() < 0 )
-    {
-        return log<software_critical, -1>( { __FILE__, __LINE__ } );
-    }
+    FRAMEGRABBER_APP_STARTUP;
 
-    if( dev::telemeter<orcaCtrl>::appStartup() < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
-    }
+    TELEMETER_APP_STARTUP;
 
     return 0;
 }
 
 inline int orcaCtrl::appLogic()
 {
-    // and run stdCamera's appLogic
-    if( dev::stdCamera<orcaCtrl>::appLogic() < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
-    }
+    // run stdCamera's appLogic
+    STDCAMERA_APP_LOGIC;
 
-    // first run frameGrabber's appLogic to see if the f.g. thread has exited.
-    if( dev::frameGrabber<orcaCtrl>::appLogic() < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
-    }
+    // then run frameGrabber's appLogic to see if the f.g. thread has exited.
+    FRAMEGRABBER_APP_LOGIC;
 
     if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::NODEVICE || state() == stateCodes::ERROR )
     {
@@ -514,10 +534,7 @@ inline int orcaCtrl::appLogic()
             return log<software_error, 0>( { __FILE__, __LINE__ } );
         }
 
-        if( frameGrabber<orcaCtrl>::updateINDI() < 0 )
-        {
-            return log<software_error, 0>( { __FILE__, __LINE__ } );
-        }
+        FRAMEGRABBER_UPDATE_INDI;
     }
 
     if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
@@ -556,21 +573,11 @@ inline int orcaCtrl::appLogic()
             return 0;
         }
 
-        if( stdCamera<orcaCtrl>::updateINDI() < 0 )
-        {
-            return log<software_error, 0>( { __FILE__, __LINE__ } );
-        }
+        STDCAMERA_UPDATE_INDI;
 
-        if( frameGrabber<orcaCtrl>::updateINDI() < 0 )
-        {
-            return log<software_error, 0>( { __FILE__, __LINE__ } );
-        }
+        FRAMEGRABBER_UPDATE_INDI;
 
-        if( telemeter<orcaCtrl>::appLogic() < 0 )
-        {
-            log<software_error>( { __FILE__, __LINE__ } );
-            return 0;
-        }
+        TELEMETER_APP_LOGIC;
     }
 
     // Fall through check?
@@ -612,7 +619,8 @@ inline int orcaCtrl::appShutdown()
 {
     std::cerr << "appShutdown: stopping frameGrabber\n";
 
-    dev::frameGrabber<orcaCtrl>::appShutdown();
+    // Stop the framegrabber thread before releasing the DCAM handles it uses.
+    FRAMEGRABBER_APP_SHUTDOWN;
 
     if( m_cameraHandle )
     {
@@ -627,7 +635,9 @@ inline int orcaCtrl::appShutdown()
 
     dcamapi_uninit();
 
-    dev::frameGrabber<orcaCtrl>::appShutdown();
+    STDCAMERA_APP_SHUTDOWN;
+
+    TELEMETER_APP_SHUTDOWN;
 
     return 0;
 }
