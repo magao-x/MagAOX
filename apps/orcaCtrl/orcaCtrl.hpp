@@ -165,7 +165,7 @@ class orcaCtrl : public MagAOXApp<>,
     int m_depth{ 0 };
 
     int32  m_frameSize;
-    int32  m_frameCount{ 1000 }; ///< number of frames in the circular buffer
+    int32  m_frameCount{ 10 }; ///< number of frames in the circular buffer
     double m_camera_timestamp{ 0.0 };
     double m_FrameRateCalculation;
     double m_ReadOutTimeCalculation;
