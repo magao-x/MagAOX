@@ -165,7 +165,7 @@ class orcaCtrl : public MagAOXApp<>,
     int m_depth{ 0 };
 
     int32  m_frameSize;
-    int32  m_frameCount{ 10 }; ///< number of frames in the circular buffer
+    int32  m_frameCount{ 1000 }; ///< number of frames in the circular buffer
     double m_camera_timestamp{ 0.0 };
     double m_FrameRateCalculation;
     double m_ReadOutTimeCalculation;
@@ -1202,16 +1202,39 @@ inline int orcaCtrl::setDcamRoi( int32 xCen, int32 yCen, int32 width, int32 heig
         return log<software_error, -1>( { __FILE__, __LINE__, "ROI out of bounds." } );
     }
 
-    if( setorcaParameter( DCAM_IDPROP_SUBARRAYMODE, DCAMPROP_MODE__OFF ) < 0 ||
-        setorcaParameter( DCAM_IDPROP_BINNING, binX ) < 0 ||
-        setorcaParameter( DCAM_IDPROP_SUBARRAYHPOS, x ) <
-            0 || ///< Only check binning for binX b/c only n x n binning is supported
-        setorcaParameter( DCAM_IDPROP_SUBARRAYVPOS, y ) < 0 ||
-        setorcaParameter( DCAM_IDPROP_SUBARRAYHSIZE, width ) < 0 ||
-        setorcaParameter( DCAM_IDPROP_SUBARRAYVSIZE, height ) < 0 ||
-        setorcaParameter( DCAM_IDPROP_SUBARRAYMODE, DCAMPROP_MODE__ON ) < 0 )
+    if( setorcaParameter( DCAM_IDPROP_SUBARRAYMODE, DCAMPROP_MODE__OFF ) < 0 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "Error setting ROI parameters." } );
+        return log<software_error, -1>( { __FILE__, __LINE__, "Error setting subarray mode to off." } );
+    }
+
+    if( setorcaParameter( DCAM_IDPROP_BINNING, binX ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "Error setting bin params." } );
+    }
+
+    if( setorcaParameter( DCAM_IDPROP_SUBARRAYHPOS, x ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "Error setting xpos." } );
+    }
+
+    if( setorcaParameter( DCAM_IDPROP_SUBARRAYVPOS, y ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "Error setting ypos." } );
+    }
+
+    if( setorcaParameter( DCAM_IDPROP_SUBARRAYHSIZE, width ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "Error setting width." } );
+    }
+
+    if( setorcaParameter( DCAM_IDPROP_SUBARRAYVSIZE, height ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "Error setting height." } );
+    }
+
+    if( setorcaParameter( DCAM_IDPROP_SUBARRAYMODE, DCAMPROP_MODE__ON ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "Error setting subarray mode to 'on.'" } );
     }
     return 0;
 }
