@@ -1035,6 +1035,61 @@ TEST_CASE( "stdMotionNode clears alwaysOn puts after leaving READY", "[instGraph
     REQUIRE( graph.node( "fwtelsim" )->output( "ref" )->state() == ingr::putState::off );
 }
 
+/// Select a default put name from the configured preset direction.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode defaults the preset put by direction", "[instGraph::stdMotionNode]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::loadConfig( *(mx::app::appConfigurator *)nullptr );
+    stdMotionNode::presetDir();
+    stdMotionNode::presetPutName();
+    #endif
+    // clang-format on
+
+    const std::string xmlPath    = "/tmp/stdMotionNode_direction_default.drawio";
+    const std::string configPath = "/tmp/stdMotionNode_direction_default.conf";
+    writeMotionXML( xmlPath, { "in", "custom" }, { "out" } );
+
+    std::vector<std::string> keys{ "type" };
+    std::vector<std::string> values{ "stdMotion" };
+    ingr::ioDir              expectedDirection = ingr::ioDir::output;
+    std::string              expectedPut       = "out";
+
+    SECTION( "default output direction selects out" )
+    {
+        expectedDirection = ingr::ioDir::output;
+        expectedPut       = "out";
+    }
+    SECTION( "input direction selects in" )
+    {
+        keys.push_back( "presetDir" );
+        values.push_back( "input" );
+        expectedDirection = ingr::ioDir::input;
+        expectedPut       = "in";
+    }
+    SECTION( "explicit input put overrides the directional default" )
+    {
+        keys.insert( keys.end(), { "presetDir", "presetPutName" } );
+        values.insert( values.end(), { "input", "custom" } );
+        expectedDirection = ingr::ioDir::input;
+        expectedPut       = "custom";
+    }
+
+    mx::app::writeConfigFile( configPath, std::vector<std::string>( keys.size(), "fwtelsim" ), keys, values );
+    ingr::instGraphXML graph;
+    graph.autoSave( false );
+    std::string error;
+    REQUIRE( graph.loadXMLFile( error, xmlPath ) == 0 );
+    mx::app::appConfigurator config;
+    REQUIRE( config.readConfig( configPath ) == 0 );
+    stdMotionNode node( "fwtelsim", &graph );
+    REQUIRE_NOTHROW( node.loadConfig( config ) );
+    REQUIRE( node.presetDir() == expectedDirection );
+    REQUIRE( node.presetPutName() == std::vector<std::string>{ expectedPut } );
+}
+
 /// Reject missing opposite-side puts and configured put names absent from the graph.
 /** \ingroup xInstGraph_unit_test
  */

@@ -9,9 +9,8 @@
 
 #include "fsmNode.hpp"
 
-///
+/// Motion stage that maps preset and tracking state to graph puts.
 /**
- *
  * The key assumption of this node is that it should be in a valid, not-`none`, preset position
  * for its ioputs to be `on`.  It also supports triggering an alternate `on` state, which is used for
  * stages which have a continuous tracking mode (k-mirror and ADC).
@@ -25,7 +24,7 @@ class stdMotionNode : public fsmNode
 {
 
   protected:
-    /// The prefix for preset naes.  Usually either "preset" or "filter", to which "Name" is appended.
+    /// The prefix for preset names.  Usually either "preset" or "filter", to which "Name" is appended.
     std::string m_presetPrefix;
 
     /// The INDI key (device.property) for the presets.  This is, say, `fwpupil.filterName`.  It is set automatically.
@@ -37,10 +36,10 @@ class stdMotionNode : public fsmNode
     /// The current value of the put label.
     std::string m_curLabel;
 
-    /// Input or output put names selected by the preset switch.
+    /// Input or output put names selected by the preset switch; configuration defaults by direction.
     std::vector<std::string> m_presetPutName{ "out" };
 
-    /// This sets whether the multi-put selector is on the input or the output (default)
+    /// Side selected by the preset switch; output is the default.
     /** If this is a multi-put node (m_presetPutName.size() > 1) then the value of the preset switch
      * controls which input or output is on, with the others off.
      */
@@ -71,9 +70,9 @@ class stdMotionNode : public fsmNode
     bool m_tracking{ false };
 
   public:
-    /// Only c'tor.  Must be constructed with node name and a parent graph.
-    stdMotionNode( const std::string  &name, /** [in] the name of this node*/
-                   ingr::instGraphXML *parentGraph /** [in] the graph which this node belongs to*/ );
+    /// Construct a motion stage for an existing graph node.
+    stdMotionNode( const std::string  &name, /**< [in] graph node name */
+                   ingr::instGraphXML *parentGraph /**< [in] parent graph */ );
 
     /// Set the device name.  This can only be done once.
     /** \throws std::runtime_error if a different or empty device is supplied. */
@@ -587,7 +586,7 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
         throw std::runtime_error( msg );
     }
 
-    std::vector<std::string> prePutName( { "out" } );
+    std::vector<std::string> prePutName{ m_presetDir == ingr::ioDir::input ? "in" : "out" };
     config.configUnused( prePutName, mx::app::iniFile::makeKey( name(), "presetPutName" ) );
     if( prePutName.size() == 0 )
     {
