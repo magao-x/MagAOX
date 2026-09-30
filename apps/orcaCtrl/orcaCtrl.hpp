@@ -169,6 +169,13 @@ class orcaCtrl : public MagAOXApp<>,
      */
     std::string m_serialNumber; ///< The camera's identifying serial number
 
+    /// True when the camera is declared liquid cooled (`camera.liquidCooling`).
+    /** The cooling method itself is a persistent camera setting ("Cooler Type") changed with the
+     * `dcamcfgc` DCAM Configurator.  This flag only records the declared mode; the liquid-cooling
+     * control in agents/plans/2026-09/orcaCtrl-liquidCooling.md is not yet implemented.
+     */
+    bool m_liquidCooling{ false };
+
     ///@}
 
     int m_depth{ 0 };
@@ -401,6 +408,17 @@ inline void orcaCtrl::setupConfig()
                 "int",
                 "The identifying serial number of the camera." );
 
+    config.add( "camera.liquidCooling",
+                "",
+                "camera.liquidCooling",
+                argType::Required,
+                "camera",
+                "liquidCooling",
+                false,
+                "bool",
+                "Set true if the camera's Cooler Type is set to Water with dcamcfgc and a chiller is connected. "
+                "Currently only logged; liquid-cooling control is not yet implemented. Default is false." );
+
     STDCAMERA_SETUP_CONFIG( config );
 
     FRAMEGRABBER_SETUP_CONFIG( config );
@@ -413,6 +431,8 @@ inline void orcaCtrl::setupConfig()
 inline int orcaCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
 {
     _config( m_serialNumber, "camera.serialNumber" );
+
+    _config( m_liquidCooling, "camera.liquidCooling" );
 
     STDCAMERA_LOAD_CONFIG( _config );
 
@@ -884,6 +904,17 @@ inline int orcaCtrl::connect()
 
         state( stateCodes::CONNECTED );
         log<text_log>( "Connected to " + m_cameraName + " [S/N " + m_serialNumber + "]" );
+
+        if( m_liquidCooling )
+        {
+            log<text_log>( "cooling mode: liquid (declared by camera.liquidCooling). orcaCtrl does not yet apply "
+                           "liquid-cooling settings; set Cooler Type = Water with dcamcfgc and run the chiller.",
+                           logPrio::LOG_WARNING );
+        }
+        else
+        {
+            log<text_log>( "cooling mode: air" );
+        }
 
         m_readoutSpeedNameSet = m_defaultReadoutSpeed;
 

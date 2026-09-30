@@ -134,9 +134,9 @@ go in a new `chiller` config section, following the MagAO-X habit of one section
 2. `getFanSpeed()` (~line 1002) reads `DCAM_IDPROP_SENSORCOOLER` instead of `DCAM_IDPROP_SENSORCOOLERFAN`.
    Once the cooler is at `MAX` (4), it takes the "Unknown cooling-fan status" path, returns -1 on every
    `appLogic()` pass, and puts the app in `ERROR`.
-3. In the committed code, `m_fanStatusSupported` is never set to `true`. An uncommitted working-tree
-   change sets `m_fanControlSupported` and `m_fanStatusSupported` to `true` unconditionally in
-   `powerOnDefaults()`, which turns on `getFanSpeed()`. Item 2 therefore has to be fixed first, or in the
+3. `m_fanStatusSupported` is never set to `true`, so `getFanSpeed()` never runs. A temporary
+   working-tree change forced both fan flags to `true` in `powerOnDefaults()`. The user reverted it to
+   `false` on 2026-09-30. Any change that turns on `getFanSpeed()` needs item 2 fixed first, or in the
    same commit.
 4. `connect()` (~line 881) logs "Cooling fan control is enabled in config but not supported" even when
    `camera.fanSpeedControl` is false.
@@ -163,7 +163,7 @@ go in a new `chiller` config section, following the MagAO-X habit of one section
    - `getFanSpeed()` reads `DCAM_IDPROP_SENSORCOOLERFAN`.
    - `connect()` sets `m_fanControlSupported` and `m_fanStatusSupported` from the property's
      writable/readable attributes, and logs "unsupported" only when `m_fanSpeedControlEnabled` is true.
-     Replace the unconditional `true` in the uncommitted `powerOnDefaults()` change with this.
+     `powerOnDefaults()` keeps resetting both flags to `false`.
 
 3. **Write the temperature setpoint to `SENSORTEMPERATURETARGET`.** This is a functional commit, and it
    applies to both cooling modes.
@@ -328,6 +328,12 @@ go in a new `chiller` config section, following the MagAO-X habit of one section
 
 - Steps 2-7 are not implemented yet. Step 1 has been run in **air mode only** (results below). The
   water-mode re-probe is still to do.
+- **Deferred (2026-09-30):** the user won't be testing liquid cooling for now. orcaCtrl only gets the
+  optional `camera.liquidCooling` flag: a bool, default `false`, with a documented `m_liquidCooling`
+  member and config help text, read in `loadConfigImpl()`. It is logged in `connect()`: "cooling mode:
+  air", or a `LOG_WARNING` that liquid cooling is declared but its settings aren't applied yet. The flag
+  makes no DCAM writes and doesn't change fan, cooler or setpoint behavior. The rest of steps 1-7 stays
+  here for when liquid cooling is tested.
 - Found the DCAM fan property and confirmed that no liquid-cooling `dcamprop` property exists by
   searching `dcamprop.h` and `dcamapi4.h` in `/opt/hamamatsu_new/hamamatsu_sdk/dcamsdk4/inc/`.
 - Checked the stdCamera fan and temperature config (`camera.fanSpeedControl`, `camera.defaultFanSpeed`,
@@ -392,10 +398,10 @@ The only supported properties with COOL, TEMP, FAN or WATER in their names are t
 - In air mode the camera offers **no** fan, cooler-switch or temperature-target control through
   `dcamprop`. Cooling is fixed at -20 °C, as the manual specifies. `connect()`'s existing
   `SENSORCOOLERFAN` `getattr` check already returns "not supported" correctly in this mode.
-- **The uncommitted `powerOnDefaults()` change** (`m_fanControlSupported = true`,
-  `m_fanStatusSupported = true`) breaks air mode. `getFanSpeed()` would read the missing
-  `SENSORCOOLER` property, fail on every `appLogic()` pass, and put the app in `ERROR`. The fan
-  properties have to come from `getattr`, as step 2 says; they can't be forced to true.
+- Forcing `m_fanControlSupported` and `m_fanStatusSupported` to `true` in `powerOnDefaults()` breaks air
+  mode. `getFanSpeed()` would read the missing `SENSORCOOLER` property, fail on every `appLogic()` pass,
+  and put the app in `ERROR`. The fan flags have to come from `getattr`, as step 2 says. The temporary
+  change that forced them to `true` has been reverted to `false`.
 - Step 3 (the setpoint write) must check `getattr` first. In air mode `SENSORTEMPERATURETARGET` doesn't
   exist, so the setpoint is read-only at -20 °C, the INDI target should reflect that, and the
   hard-coded -35 °C default is wrong for air mode.
