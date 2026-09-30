@@ -74,15 +74,57 @@ namespace flatlogs
   */
 typedef std::shared_ptr<char> bufferPtrT;
 
+/// The outcome of parsing one log entry.
+/** Status mapping to readers' report:
+  * - checksumOk: Verified.
+  * - checksumMismatch: Failed (checksum).
+  * - noChecksum: passed on to the v1 plausibility checks in libMagAOX, then NotChecked or Failed.
+  * - overrun, markerMismatch: Failed (structure).
+  *
+  * \ingroup logbuff
+  */
+enum class entryStatus : uint8_t
+{
+   checksumOk,       ///< v2+: complete entry; the version marker and the checksum both match.
+   checksumMismatch, ///< v2+: complete entry, but the checksum doesn't match.
+   markerMismatch,   ///< v2+: the first byte is not expected v2 marker.
+   noChecksum,       ///< v1: complete entry.
+   overrun,          ///< The entry as described doesn't fit in the available bytes: the data is cut short, or its length is damaged.
+   unknownVersion    ///< Only from parseEntry(): no matching layout for version.
+};
+
+/// The decoded contents of one log entry (and their validity).
+/** Owns nothing: \ref msg points into the buffer that was parsed, and is only valid while that buffer is.
+  *
+  * Which fields are valid depends on \ref status:
+  * - checksumOk, noChecksum: all fields are valid.
+  * - checksumMismatch: all fields are decoded but untrusted, since any of them may be the damaged part.
+  * - overrun: \ref version is set; \ref headerSize and \ref msgLen are set if the full header fitted.
+  * Everything else is zero.
+  * - markerMismatch, unknownVersion: only \ref version is set. Everything else is zero.
+  *
+  * \ingroup logbuff
+  */
+struct parsedEntry
+{
+   entryStatus status{ entryStatus::overrun }; ///< What the checks found.
+   logVersionT version{ 0 };                   ///< The entry's version.
+   logPrioT prio{ 0 };                         ///< The entry's priority.
+   eventCodeT eventCode{ 0 };                  ///< The entry's event code.
+   timespecX ts;                               ///< The entry's timestamp.
+   msgLenT msgLen{ 0 };                        ///< The message length claimed by the header.
+   size_t headerSize{ 0 };                     ///< The size of the header, including the version byte for v2+.
+   size_t entrySize{ 0 };                      ///< The whole entry's size, including the checksum for v2+. 0 unless the whole entry fits.
+   const char* msg{ nullptr };                 ///< The start of the message, or nullptr unless the whole entry fits.
+};
+
 
 /// The log entry header
 /**
   * This class is designed to work with the log header only as a shared pointer to it,
-  * not directly on the members.  The actual header struct is private so we ensure that it is
-  * accessed properly. As such all of the member methods are static and take a shared_ptr as
-  * first argument.
+  * not directly on the members.
   *
-  * The class is templatized on the format \p version:
+  * The class is templatized on the header \p version:
   * - v1 is the original, unversioned format (no version byte, no checksum).
   * - v2 prepends a one-byte version field and appends a four-byte CRC-32C to each entry.
   *
@@ -505,11 +547,24 @@ public:
      */
    static int setCRC( char * logBuffer /**< [in,out] a pointer to a raw log entry buffer.*/);
 
+   ///Parse one log entry, reporting which check it failed and decoding its fields, without reading out of bounds.
+   /** \ref verify is a wrapper over this.
+     *
+     * If \p avail is smaller than the minimal header the result is overrun, never markerMismatch, because
+     * the marker byte may not even be there.
+     *
+     * See \ref parsedEntry for which fields are valid for each status.
+     *
+     * \returns the parsed entry.
+     *
+     * \ingroup logbuff
+     */
+   static parsedEntry parse( const char * logBuffer, ///< [in] a pointer to a raw log entry buffer.
+                             size_t avail            ///< [in] the number of readable bytes at logBuffer.
+                           );
+
    ///Verify that a buffer holds a well-formed, uncorrupted log entry, without reading out of bounds.
-   /** Checks successively that \p avail bytes are enough for the minimal header, then the full header,
-     * then the whole entry, guarding against a corrupt length field before using it.
-     * For v2+ it also checks the stored version byte and verifies the trailing CRC-32C.
-     * For v1 returning \c true means that the entry is well-formed and fits within \p avail bytes.
+   /** Implemented with \ref parse; true when parse returns checksumOk (v2+) or noChecksum (v1).
      *
      * On success \p entrySize is set to the total number of bytes the entry occupies, so the caller can
      * advance to the next entry.
@@ -901,51 +956,91 @@ int logHeaderT<version>::setCRC( char * logBuffer )
 }
 
 template<logVersionT version>
-bool logHeaderT<version>::verify( const char * logBuffer,
-                                  size_t avail,
-                                  size_t & entrySize
-                                )
+parsedEntry logHeaderT<version>::parse( const char * logBuffer,
+                                        size_t avail
+                                      )
 {
-   entrySize = 0;
+   parsedEntry pe;
+   pe.version = version;
+   pe.status = entryStatus::overrun;
 
-   // Are there enough bytes for the minimal header?
-   if( avail < static_cast<size_t>(minHeadSize) ) return false;
+   // No buffer means no bytes available.
+   if( logBuffer == nullptr ) return pe;
 
-   // Verify doesn't not modify the buffer, but the accessors take char* not const char*.
-   char * buf = const_cast<char *>(logBuffer);
+   // Check there are enough bytes for the minimal header.
+   if( avail < static_cast<size_t>(minHeadSize) ) return pe;
 
-   // For v+2, validate the leading marker byte.
+   // Parsing doesn't modify the buffer, but the accessors take char* not const char*.
+   char* buf = const_cast<char*>(logBuffer);
+
+   // For v2+ validate the leading marker byte.
    if constexpr( version >= logVersion2 )
    {
-      if( !isVersionMarker( reinterpret_cast<internal_logHeader *>(buf)->m_version, version ) ) return false;
+      if( !isVersionMarker( reinterpret_cast<internal_logHeader *>(buf)->m_version, version ) )
+      {
+         pe.status = entryStatus::markerMismatch;
+         return pe;
+      }
    }
 
-   // Need the full header before reading the (possibly extended) length
+   // Need the full header before reading the length
    size_t hSz = headerSize(buf);
-   if( avail < hSz ) return false;
+   if( avail < hSz ) return pe;
 
    msgLenT mLen = msgLen(buf);
 
-   // Check length is not corrupted
-   if( mLen > avail ) return false;
+   // Report what the header claims to check for overrun.
+   pe.headerSize = hSz;
+   pe.msgLen = mLen;
+
+   // Check length is not corrupted.
+   if( mLen > avail ) return pe;
 
    size_t tSz = hSz + mLen + crcSize;
-   if( tSz < hSz ) return false;
-   if( avail < tSz ) return false; //not enough bytes for the whole entry (including CRC)
+   if( tSz < hSz ) return pe;
+   if( avail < tSz ) return pe; //not enough bytes for the whole entry (including CRC)
+
+   // The whole entry fits, so its fields can be decoded. The status records whether they are valid.
+   pe.prio = logLevel(buf);
+   pe.eventCode = eventCode(buf);
+   pe.ts = timespec(buf);
+   pe.entrySize = tSz;
+   pe.msg = logBuffer + hSz;
 
    // For v2+, verify the checksum.
-   // crcOffset() should not be used here, since it re-reads the length field without validating it.
-   // hSz and mLen have already been checked against avail.
+   // hSz and mLen have already been checked against avail, so crcOffset() shouldn't be used here,
+   // since it re-reads the length field without validating it.
    if constexpr( version >= logVersion2 )
    {
       crcT stored;
       std::memcpy( &stored, buf + hSz + mLen, sizeof(crcT) );
       crcT computed = crc32c(buf, hSz + mLen);
-      if( stored != computed ) return false;
+      pe.status = ( stored == computed ) ? entryStatus::checksumOk : entryStatus::checksumMismatch;
+   }
+   else
+   {
+      pe.status = entryStatus::noChecksum;
    }
 
-   entrySize = tSz;
-   return true;
+   return pe;
+}
+
+template<logVersionT version>
+bool logHeaderT<version>::verify( const char * logBuffer,
+                                  size_t avail,
+                                  size_t & entrySize
+                                )
+{
+   parsedEntry pe = parse( logBuffer, avail );
+
+   if( pe.status == entryStatus::checksumOk || pe.status == entryStatus::noChecksum )
+   {
+      entrySize = pe.entrySize;
+      return true;
+   }
+
+   entrySize = 0;
+   return false;
 }
 
 template<logVersionT version>
@@ -965,7 +1060,7 @@ int logHeaderT<version>::createLog( bufferPtrT & logBuffer,
 
    //We first allocate the buffer.
    msgLenT len = logT::length(msg);
-   logBuffer = bufferPtrT( (char *) ::operator new(totalSize(len)*sizeof(char)) );
+   logBuffer = bufferPtrT( (char*) ::operator new(totalSize(len)*sizeof(char)) );
 
    //For v2+ set the version byte first
    setVersion(logBuffer);

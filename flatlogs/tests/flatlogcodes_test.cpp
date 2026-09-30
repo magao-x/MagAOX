@@ -588,4 +588,328 @@ SCENARIO( "version-2 verify rejects a shortened length that still fits", "[logHe
    }
 }
 
+/// Build a buffer of consecutive log entries of version \p v, one per message, recording where each starts.
+template<logVersionT v>
+std::vector<char> buildEntries( const std::vector<std::string> &msgs,   ///< [in] one message per entry
+                                std::vector<size_t>            &offsets ///< [out] the offset of each entry
+                              )
+{
+   std::vector<char> out;
+   offsets.clear();
+   for( size_t i = 0; i < msgs.size(); ++i )
+   {
+      bufferPtrT b;
+      timespecX  ts( 1000 + i, 500 + i );
+      logHeaderT<v>::template createLog<dummyLog>( b, ts, msgs[i], logPrio::LOG_DEFAULT );
+      offsets.push_back( out.size() );
+      size_t n = logHeaderT<v>::totalSize( b.get() );
+      out.insert( out.end(), b.get(), b.get() + n );
+   }
+   return out;
+}
+
+/// Check that a parsed entry which did not fit has nothing set beyond what the checks reached.
+void requireOverrunFieldsClear( const parsedEntry &pe /**< [in] a result whose status is overrun */ )
+{
+   REQUIRE( pe.status == entryStatus::overrun );
+   REQUIRE( pe.entrySize == 0 );
+   REQUIRE( pe.msg == nullptr );
+   REQUIRE( pe.prio == 0 );
+   REQUIRE( pe.eventCode == 0 );
+   REQUIRE( pe.ts.time_s == 0 );
+   REQUIRE( pe.ts.time_ns == 0 );
+}
+
+/** parse() decodes complete v1 and v2 entries at every length-field boundary: the fields, the sizes, the
+  * message location and the status.
+  */
+SCENARIO( "parse decodes v1 and v2 entries at every length boundary", "[logEntry]" )
+{
+   for( size_t L : { (size_t)0, (size_t)253, (size_t)254, (size_t)65534, (size_t)65535 } )
+   {
+      std::string msg( L, 'q' );
+      timespecX   ts( 1234567, 89 );
+
+      bufferPtrT b1;
+      logHeaderV1::createLog<dummyLog>( b1, ts, msg, logPrio::LOG_DEFAULT );
+      parsedEntry p1 = logHeaderV1::parse( b1.get(), logHeaderV1::totalSize( b1.get() ) );
+      REQUIRE( p1.status == entryStatus::noChecksum );
+      REQUIRE( p1.version == logVersion1 );
+      REQUIRE( p1.prio == logPrio::LOG_NOTICE );
+      REQUIRE( p1.eventCode == 7 );
+      REQUIRE( p1.ts.time_s == 1234567 );
+      REQUIRE( p1.ts.time_ns == 89 );
+      REQUIRE( p1.msgLen == L );
+      REQUIRE( p1.headerSize == logHeaderV1::headerSize( b1.get() ) );
+      REQUIRE( p1.entrySize == logHeaderV1::totalSize( b1.get() ) );
+      REQUIRE( p1.msg == b1.get() + p1.headerSize );
+      REQUIRE( memcmp( p1.msg, msg.data(), L ) == 0 );
+
+      bufferPtrT b2;
+      logHeaderV2::createLog<dummyLog>( b2, ts, msg, logPrio::LOG_DEFAULT );
+      parsedEntry p2 = logHeaderV2::parse( b2.get(), logHeaderV2::totalSize( b2.get() ) );
+      REQUIRE( p2.status == entryStatus::checksumOk );
+      REQUIRE( p2.version == logVersion2 );
+      REQUIRE( p2.prio == logPrio::LOG_NOTICE );
+      REQUIRE( p2.eventCode == 7 );
+      REQUIRE( p2.ts.time_s == 1234567 );
+      REQUIRE( p2.msgLen == L );
+      REQUIRE( p2.headerSize == p1.headerSize + 1 );
+      REQUIRE( p2.entrySize == p1.entrySize + 5 );
+      REQUIRE( p2.msg == b2.get() + p2.headerSize );
+      REQUIRE( memcmp( p2.msg, msg.data(), L ) == 0 );
+   }
+}
+
+/** Every truncated prefix of an entry gives overrun, never reading past the bytes given.  Each prefix is
+  * copied into a buffer of exactly that size, so under AddressSanitizer any over-read is caught.
+  */
+SCENARIO( "parse reports overrun for every truncated entry", "[logEntry]" )
+{
+   for( size_t L : { (size_t)20, (size_t)300 } ) // single-byte and two-byte length fields
+   {
+      std::string msg( L, 'z' );
+      timespecX   ts( 7, 8 );
+      bufferPtrT  b1, b2;
+      logHeaderV1::createLog<dummyLog>( b1, ts, msg, logPrio::LOG_DEFAULT );
+      logHeaderV2::createLog<dummyLog>( b2, ts, msg, logPrio::LOG_DEFAULT );
+      size_t t1 = logHeaderV1::totalSize( b1.get() ), h1 = logHeaderV1::headerSize( b1.get() );
+      size_t t2 = logHeaderV2::totalSize( b2.get() ), h2 = logHeaderV2::headerSize( b2.get() );
+
+      for( size_t avail = 0; avail < t1; ++avail )
+      {
+         std::vector<char> exact( b1.get(), b1.get() + avail );
+         parsedEntry       pe = logHeaderV1::parse( avail ? exact.data() : nullptr, avail );
+         requireOverrunFieldsClear( pe );
+         REQUIRE( pe.headerSize == ( avail >= h1 ? h1 : 0 ) ); // set only once the full header fits
+      }
+
+      for( size_t avail = 0; avail < t2; ++avail )
+      {
+         std::vector<char> exact( b2.get(), b2.get() + avail );
+         parsedEntry       pe = logHeaderV2::parse( avail ? exact.data() : nullptr, avail );
+         requireOverrunFieldsClear( pe );
+         REQUIRE( pe.headerSize == ( avail >= h2 ? h2 : 0 ) );
+         REQUIRE( pe.msgLen == ( avail >= h2 ? L : 0 ) );
+      }
+   }
+
+   GIVEN( "fewer bytes than the smallest header, starting with a byte that is not the v2 marker" )
+   {
+      std::vector<char> junk( logHeaderV2::minHeadSize - 1, 0 );
+      THEN( "the result is overrun, not markerMismatch, since the marker may not even be present" )
+      {
+         for( size_t avail = 0; avail < junk.size(); ++avail )
+         {
+            std::vector<char> exact( junk.begin(), junk.begin() + avail );
+            REQUIRE( logHeaderV2::parse( avail ? exact.data() : nullptr, avail ).status == entryStatus::overrun );
+         }
+      }
+   }
+}
+
+/** v1 bytes read with v2 rules give markerMismatch, with nothing else set.
+  */
+SCENARIO( "parse reports a marker mismatch for v1 data read as v2", "[logEntry]" )
+{
+   bufferPtrT  b;
+   std::string msg = "a v1 entry";
+   logHeaderV1::createLog<dummyLog>( b, timespecX( 3, 4 ), msg, logPrio::LOG_DEFAULT );
+   parsedEntry pe = logHeaderV2::parse( b.get(), logHeaderV1::totalSize( b.get() ) );
+
+   REQUIRE( pe.status == entryStatus::markerMismatch );
+   REQUIRE( pe.version == logVersion2 );
+   REQUIRE( pe.headerSize == 0 );
+   REQUIRE( pe.msgLen == 0 );
+   REQUIRE( pe.entrySize == 0 );
+   REQUIRE( pe.msg == nullptr );
+   REQUIRE( pe.eventCode == 0 );
+}
+
+/** No single-bit flip anywhere in a v2 entry parses as checksumOk.
+  */
+SCENARIO( "no single-bit flip in a v2 entry parses as checksumOk", "[logEntry][crc]" )
+{
+   bufferPtrT  b;
+   std::string msg = "flip every bit of this entry, one at a time";
+   logHeaderV2::createLog<dummyLog>( b, timespecX( 5, 6 ), msg, logPrio::LOG_DEFAULT );
+   size_t total = logHeaderV2::totalSize( b.get() );
+
+   size_t accepted = 0;
+   for( size_t i = 0; i < total; ++i )
+   {
+      for( int bit = 0; bit < 8; ++bit )
+      {
+         std::vector<char> copy( b.get(), b.get() + total );
+         copy[i] ^= static_cast<char>( 1 << bit );
+         if( logHeaderV2::parse( copy.data(), copy.size() ).status == entryStatus::checksumOk ) ++accepted;
+      }
+   }
+   REQUIRE( accepted == 0 );
+}
+
+/** parseEntry() dispatches on a version known only at runtime, and rejects versions with no layout.
+  */
+SCENARIO( "parseEntry dispatches on the runtime version", "[logEntry]" )
+{
+   std::string msg = "runtime version";
+   bufferPtrT  b1, b2;
+   logHeaderV1::createLog<dummyLog>( b1, timespecX( 1, 1 ), msg, logPrio::LOG_DEFAULT );
+   logHeaderV2::createLog<dummyLog>( b2, timespecX( 1, 1 ), msg, logPrio::LOG_DEFAULT );
+
+   REQUIRE( parseEntry( b1.get(), logHeaderV1::totalSize( b1.get() ), logVersion1 ).status == entryStatus::noChecksum );
+   REQUIRE( parseEntry( b2.get(), logHeaderV2::totalSize( b2.get() ), logVersion2 ).status == entryStatus::checksumOk );
+
+   for( logVersionT v : { (logVersionT)0, (logVersionT)3, (logVersionT)16 } )
+   {
+      parsedEntry pe = parseEntry( b2.get(), logHeaderV2::totalSize( b2.get() ), v );
+      REQUIRE( pe.status == entryStatus::unknownVersion );
+      REQUIRE( pe.version == v );
+      REQUIRE( pe.entrySize == 0 );
+   }
+}
+
+/** findNextEntryV2() finds the next good entry after each kind of damage, and never returns a position at
+  * or beyond the bytes it was given.
+  */
+SCENARIO( "findNextEntryV2 recovers from damage", "[logEntry]" )
+{
+   std::vector<std::string> msgs = { "first entry", "second entry, the one that gets damaged",
+                                     std::string( 40, 'c' ), std::string( 300, 'd' ), "last entry" };
+   std::vector<size_t>      off;
+   const std::vector<char>  good = buildEntries<logVersion2>( msgs, off );
+
+   // offset of entry 1's single-byte length field: version, priority, event code, seconds, nanoseconds
+   const size_t lenField = logHeaderV2::versionSize + sizeof( logPrioT ) + sizeof( eventCodeT ) + sizeof( secT ) +
+                           sizeof( nanosecT );
+
+   auto findAfter = [&]( const std::vector<char> &buf, size_t at )
+   {
+      parsedEntry failed = logHeaderV2::parse( buf.data() + at, buf.size() - at );
+      size_t      next   = findNextEntryV2( buf.data(), buf.size(), at, failed );
+      REQUIRE( ( next == entryNotFound || next < buf.size() ) );
+      return std::make_pair( failed.status, next );
+   };
+
+   GIVEN( "damage inside entry 1's message, with its length intact" )
+   {
+      std::vector<char> buf = good;
+      buf[off[1] + logHeaderV2::headerSize( buf.data() + off[1] ) + 5] ^= 0x40;
+      auto r = findAfter( buf, off[1] );
+      THEN( "entry 1 fails its checksum and entry 2 is found where entry 1's length points" )
+      {
+         REQUIRE( r.first == entryStatus::checksumMismatch );
+         REQUIRE( r.second == off[2] );
+      }
+   }
+
+   GIVEN( "entry 1's length damaged to a smaller value, so its claimed end lies inside itself" )
+   {
+      std::vector<char> buf = good;
+      buf[off[1] + lenField] = static_cast<char>( static_cast<unsigned char>( buf[off[1] + lenField] ) - 3 );
+      auto r = findAfter( buf, off[1] );
+      THEN( "the shortcut fails and scanning finds entry 2" )
+      {
+         REQUIRE( r.first == entryStatus::checksumMismatch );
+         REQUIRE( r.second == off[2] );
+      }
+   }
+
+   GIVEN( "entry 1's length damaged to a larger value, so its claimed end lies in the middle of entry 2" )
+   {
+      std::vector<char> buf = good;
+      buf[off[1] + lenField] = static_cast<char>( static_cast<unsigned char>( buf[off[1] + lenField] ) + 5 );
+      auto r = findAfter( buf, off[1] );
+      THEN( "the shortcut lands mid-entry and fails, and scanning still finds entry 2" )
+      {
+         REQUIRE( r.first == entryStatus::checksumMismatch );
+         REQUIRE( r.second == off[2] );
+      }
+   }
+
+   GIVEN( "runs of 0x00 and 0xFF, typical of damaged storage, between two entries" )
+   {
+      for( char fill : { (char)0x00, (char)0xFF } )
+      {
+         std::vector<char> buf( good.begin(), good.begin() + off[1] ); // entry 0
+         size_t            junkAt = buf.size();
+         buf.insert( buf.end(), 100, fill );
+         size_t nextAt = buf.size();
+         buf.insert( buf.end(), good.begin() + off[1], good.begin() + off[2] ); // entry 1
+         auto r = findAfter( buf, junkAt );
+         REQUIRE( r.first == entryStatus::markerMismatch );
+         REQUIRE( r.second == nextAt );
+      }
+   }
+
+   GIVEN( "damage in the last entry, with the data ending exactly at its claimed end" )
+   {
+      std::vector<char> buf = good;
+      buf[off[4] + logHeaderV2::headerSize( buf.data() + off[4] ) + 2] ^= 0x01;
+      auto r = findAfter( buf, off[4] );
+      THEN( "there is nothing after it to find" )
+      {
+         REQUIRE( r.first == entryStatus::checksumMismatch );
+         REQUIRE( r.second == entryNotFound );
+      }
+   }
+
+   GIVEN( "a starting position at or beyond the end, or no buffer" )
+   {
+      parsedEntry none;
+      THEN( "nothing is found, and nothing is read" )
+      {
+         REQUIRE( findNextEntryV2( good.data(), good.size(), good.size(), none ) == entryNotFound );
+         REQUIRE( findNextEntryV2( good.data(), good.size(), good.size() + 10, none ) == entryNotFound );
+         REQUIRE( findNextEntryV2( nullptr, 100, 0, none ) == entryNotFound );
+      }
+   }
+}
+
+/** The worst natural pattern for the search: a run of 0xD2 bytes, where every position passes the marker
+  * check and claims a message.  The real entry after the run is found exactly, and nothing inside the run
+  * is accepted.
+  */
+SCENARIO( "findNextEntryV2 finds a real entry after a run of marker bytes", "[logEntry]" )
+{
+   std::vector<char> buf( 4096, static_cast<char>( 0xD2 ) );
+   const size_t      runEnd = buf.size();
+
+   std::vector<size_t> off;
+   std::vector<char>   one = buildEntries<logVersion2>( { "after the run" }, off );
+   buf.insert( buf.end(), one.begin(), one.end() );
+
+   parsedEntry first = logHeaderV2::parse( buf.data(), buf.size() );
+   REQUIRE( first.status != entryStatus::checksumOk );
+   REQUIRE( findNextEntryV2( buf.data(), buf.size(), 0, first ) == runEnd );
+}
+
+/** Correctness over megabytes of random bytes with one real entry near the end: the search finds exactly
+  * that entry, and nothing after it.  No time limit is asserted, since the suite also runs under valgrind.
+  */
+SCENARIO( "findNextEntryV2 finds a real entry after megabytes of random bytes", "[logEntry]" )
+{
+   const size_t      N = 10 * 1024 * 1024;
+   std::vector<char> buf( N );
+   uint32_t          x = 12345u; // deterministic pseudo-random bytes
+   for( size_t i = 0; i < N; ++i )
+   {
+      x      = x * 1664525u + 1013904223u;
+      buf[i] = static_cast<char>( x >> 24 );
+   }
+
+   std::vector<size_t> off;
+   std::vector<char>   one     = buildEntries<logVersion2>( { "the only real entry" }, off );
+   const size_t        plantAt = N - 1000;
+   std::copy( one.begin(), one.end(), buf.begin() + plantAt );
+
+   parsedEntry first = logHeaderV2::parse( buf.data(), N );
+   REQUIRE( first.status != entryStatus::checksumOk );
+   REQUIRE( findNextEntryV2( buf.data(), N, 0, first ) == plantAt );
+
+   parsedEntry planted = logHeaderV2::parse( buf.data() + plantAt, N - plantAt );
+   REQUIRE( planted.status == entryStatus::checksumOk );
+   REQUIRE( findNextEntryV2( buf.data(), N, plantAt, planted ) == entryNotFound );
+}
+
 } //namespace flatlogs_unit_test
