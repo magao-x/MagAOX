@@ -4,9 +4,9 @@ Goal: We need to measure the temporal response of single actuator on the DM usin
 
 Currently between each reading of a WFS frame, a signal goes off that is an indicator for the DM to move. We record the response of the DM across time over the series of WFS frames.
 
-We want to incorporate a delay [ms] between the signal going off, and the DM actuator moving. Then we record the new response (function) of a single actuator with this delay incorporated.  
+We want to incorporate a delay [us] between the signal going off, and the DM actuator moving. Then we record the new response (function) of a single actuator with this delay incorporated.  
 
-We'll have a list of delays, each a different amount of [ms]. Each delay, we measure the corresponding response function.
+We'll have a list of delays, each a different amount of [us]. Each delay, we measure the corresponding response function.
 
 We need a metric for the actuator's response each iteration. All the different iterations will be compared at the end and averaged.
 
