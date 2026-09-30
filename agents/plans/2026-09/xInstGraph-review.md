@@ -184,16 +184,17 @@ multiple-definition errors. Mark intentionally header-defined functions
 The MagAOX app test suite passed with 219 assertions in 16 cases after F12;
 F13 changed only header linkage, and the app build plus a two-translation-unit
 link check passed afterward. The instGraph Catch2 suite passed after F11.
-The user confirmed the earlier configuration-diagnostic fix with a bad config
-and then started the app with a corrected config. These later F05–F13 fixes
-have not yet been installed on the running system.
+The user installed the fixes and confirmed the bad `[fwfpm]` configuration
+failed validation without crashing. The local `stdMotionNode` suite passed
+191 assertions in 6 cases after the directional-default follow-up.
 
-F07 now validates motion-stage put topology at startup. Before installing,
-check each `stdMotion` section's `presetDir` and `presetPutName` against the
-actual input/output put names in its draw.io node. A local earlier
-`[fwfpm]` config used `presetDir=input` with the default `presetPutName=out`,
-while the corresponding local graph exposed input `in`; that combination
-will now fail validation and should be corrected if still deployed.
+F07 validates motion-stage put topology at startup. The installed
+`[fwfpm]` config used `presetDir=input` without a `presetPutName`, while the
+graph exposed input `in`; the old fixed default was `out`. Follow-up MagAOX
+`11638e41` selects `in` when `presetDir=input` and keeps `out` when output is
+selected. Explicit names still take precedence and are validated against the
+graph. The local installed-style configuration passed `--config.validate`
+after this change; it has not yet been installed on exao1.
 
 ## Original suggested upgrade order
 

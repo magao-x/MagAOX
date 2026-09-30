@@ -83,7 +83,6 @@ pwrKey=power.channel
 [stage]
 type=stdMotion
 device=stage
-presetPutName=out
 
 [source]
 type=static
@@ -115,7 +114,7 @@ INDI property.
 | device | string | no | node name | INDI device name |
 | presetPrefix | string | no | preset | Preset property prefix, usually preset or filter |
 | presetDir | string | no | output | Side selected by the preset: input or output |
-| presetPutName | vector<string> | no | out | Put names selected by the preset |
+| presetPutName | vector<string> | no | `out` for output, `in` for input | Put names selected by the preset |
 | alwaysOn | vector<string> | no | empty | Puts that are on when any put is on |
 | noAutoOn | vector<string> | no | empty | Outputs not automatically turned on by an internal input link |
 | trackingReqKey | string | no | empty | INDI key for the tracking request switch |
@@ -123,4 +122,9 @@ INDI property.
 | trackerKey | string | no | empty | INDI key for the tracking status switch |
 | trackerElement | string | no | empty | Element of the tracking status property |
 
-The tracking request and status key/element pairs must be supplied together.
+When `presetPutName` is omitted, it defaults to `out` for
+`presetDir=output` and `in` for `presetDir=input`. Explicit put names always
+take precedence. The selected name must exist on that side of the graph node;
+for example, `[fwfpm]` with `presetDir=input` selects its input `in` without
+another setting. The tracking request and status key/element pairs must be
+supplied together.
