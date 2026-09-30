@@ -405,7 +405,7 @@ inline void orcaCtrl::setupConfig()
                 "camera",
                 "serialNumber",
                 false,
-                "int",
+                "string",
                 "The identifying serial number of the camera." );
 
     config.add( "camera.liquidCooling",
@@ -827,8 +827,7 @@ inline int orcaCtrl::connect()
         }
         // Query camera id / model
 
-        // just hardcode serial number
-        const std::string cameraID = "000044";
+        const std::string cameraID = dcamDeviceString( deviceOpen.hdcam, DCAM_IDSTR_CAMERAID );
 
         // debugging
         std::cerr << "DCAM cam ID " << cameraID << ", configured serial: '" << m_serialNumber << "'\n";
