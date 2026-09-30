@@ -2,7 +2,7 @@
 Review the guidelines in AGENTS.md before proceeding. The documents dmTemporalResponse.md and dm_response_app.md both contain prompts and plans to execute the same idea. Review both plans, and make a suggestion in the "plan" section below for how to implement the best parts of each approach into one cohesive software app.
 
 # Plan
-Status: **All decisions resolved (2026-09-30). Awaiting approval to execute. No code changes yet.**
+Status: **Implemented on `ktwitchell/dm-response` (2026-09-30). Build, unit tests, coverage, clang-format, and hardware acceptance are pending on the MagAO-X machine (see section 13).**
 
 App: `dmTemporalResponse`. Branch: `ktwitchell/dm-response` (AGENTS rules 12 and 17).
 
@@ -260,6 +260,41 @@ Minor items (confirmed in responses 7–10):
 10. `dm_response_app.md` and `agents/plans/2026-09/dmTemporalResponse.md` are marked as superseded by this plan (done; plan-document edits only).
 
 No open items remain. The plan is awaiting approval to execute.
+
+## 13. Implementation Notes (2026-09-30)
+
+Files:
+- `apps/dmTemporalResponse/dmTemporalResponse.hpp`: the app and the `dmTemporalResponseMath` helpers (header-only).
+- `apps/dmTemporalResponse/dmTemporalResponse.cpp`: `main` only.
+- `apps/dmTemporalResponse/Makefile`.
+- `apps/dmTemporalResponse/tests/dmTemporalResponse_test.cpp`.
+- `apps/dmTemporalResponse/doc/dmTemporalResponse.md`.
+- Build registration: top-level `Makefile` (`apps_rtc`, `all_buildable_apps`), `tests/tests.list`, `tests/Makefile.one` (`-lcfitsio`), `.gitignore`.
+
+Verification status: the code was written on a clone without mxlib, ImageStreamIO, or clang-format, so it has **not been compiled or run**. Before hardware use, on the MagAO-X machine:
+1. `make` in `apps/dmTemporalResponse`.
+2. From `tests/`: `make -B -f Makefile.one t=../apps/dmTemporalResponse/tests/dmTemporalResponse_test.cpp`, then run the test.
+3. `make coverage` for the 100% statement/function target (no `LCOV_EXCL` markers have been added yet; `appStartup`, `appLogic`, `appShutdown`, `allocate`, and `processImage` need the real shmim/INDI environment and are the likely candidates).
+4. `clang-format -i` on the touched files (formatting-only commit).
+5. Hardware acceptance (layer C).
+
+mxlib API assumptions to check at first build:
+- `fitsFile::write(name, arr, header)` works for `eigenCube` and `eigenImage`; the return value is checked generically by `writeOk()` (success must be the zero value of the return type).
+- The tests use `fitsFile::read(arr, header, name)` and `fitsHeader["KEY"].value<T>()` to check headers.
+- `milkImage::open()` throws on a missing stream; the code also rejects a DM with the wrong size.
+
+Deviations from the plan text, decided during implementation:
+1. **Summary output** is three primary-HDU files (`summary_curves.fits`, `summary_metrics.fits`, `summary_superres.fits`) instead of one multi-extension `summary.fits`, because `mx::fits::fitsFile` writes a single HDU. Column and plane meanings are recorded in the headers (`MCOLn`, `PLANEn`, `COLn`).
+2. **Late pokes** are kept as valid measurements (the achieved delay is recorded and the analysis uses the actual command time). When `lateFrac > maxLateFrac`, a warning with the minimum achievable delay is logged and the cube gets `LATEFLAG = 1`. They are not retried and do not abort the run, which follows [TR]'s "warning is logged". Delays shorter than the frame-receive latency are always late, so retrying them could never succeed.
+3. **Timeouts abort** the run (the camera is presumed stopped); only frame-counter gaps are retried.
+4. **INDI results** are read-only text elements (`t50`, `rise`, `jitter`) holding comma-separated per-delay values, rather than one number element per delay. This avoids redefining the property when K changes.
+5. `poke_x` / `poke_y` are single-value INDI numbers (single-actuator framework), so `parseIntList` was not needed.
+6. **Testability:** `createIndiProperties()` is split out of `appStartup()`, so tests never start the shmimMonitor (which would attach to the real `camwfs` on the RTC). Semaphores are initialized in the constructor. The test DM stream is injected with `m_dmStreamOverride`.
+7. **Baseline frame copy** happens after the DM write, to keep the copy off the timing-critical path.
+8. **App state** is `OPERATING` whenever the app is up, because the shmimMonitor only runs in its target state. Run status is reported in the `run_state` property.
+9. **Pattern SHA-256** is computed by a small in-header implementation (no new library dependency), tested against the standard vectors.
+10. **Fake camera** in the tests samples the model DM response at each frame's `atime` (point sampling) rather than integrating over the exposure. This makes the t50 = latency + τ ln 2 and rise = τ ln 9 checks analytic.
+11. **Commits:** phases 1–3 were implemented together in one header, so they are one functional commit rather than three.
 
 ## Decision Responses 
 1. App name should be dmTemporalResponse, should be hosted on ktwitchell/dm-response

@@ -49,6 +49,8 @@ else ifeq ($(notdir $(TESTNAME)),logsurgeon_test)
 	LDLIBS = -lmxlib -lflatbuffers
 else ifeq ($(notdir $(TESTNAME)),xrif2fits_test)
 	LDLIBS += -lcfitsio
+else ifeq ($(notdir $(TESTNAME)),dmTemporalResponse_test)
+	LDLIBS += -lcfitsio
 else ifeq ($(notdir $(TESTNAME)),xrif2shmim_test)
 	LDLIBS += -lcfitsio
 else ifeq ($(notdir $(TESTNAME)),mzmqClient_test)

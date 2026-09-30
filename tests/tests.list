@@ -31,6 +31,7 @@
 ../apps/dmPokeCenter/tests/dmPokeCenter_test
 ../apps/dmPokeXCorr/tests/dmPokeXCorr_test
 ../apps/dmSpeckle/tests/dmSpeckle_test
+../apps/dmTemporalResponse/tests/dmTemporalResponse_test
 ../apps/filterWheelCtrl/tests/filterWheelCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_test
 ../apps/flowRPM/tests/flowRPM_test

@@ -76,6 +76,7 @@ apps_rtc = \
 	pwfsSlopeCalc \
     kcubeCtrl \
 	dmPokeXCorr \
+	dmTemporalResponse \
 	psfAcq \
 	strehlEstimator \
 	modalFilter \
@@ -128,6 +129,7 @@ all_buildable_apps = \
 	dmPokeCenter \
 	dmPokeXCorr \
 	dmSpeckle \
+	dmTemporalResponse \
 	filterWheelCtrl \
 	flipperCtrl \
 	flowRPM \
