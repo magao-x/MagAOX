@@ -21,14 +21,16 @@ Review AGENTS.md then please analyze this problem, and then formulate a plan.  U
 # Plan
 
 
-Status: **Draft — awaiting approval. No code changes have been made.**
+Status: **Decisions resolved (2026-09-30). Awaiting go-ahead to implement. No code changes yet.**
+
+Branch: `tiffanytn/dmTemporalResponse`
 
 ## Problem Restatement
 
 Build a new MagAO-X app that measures the **temporal step response of a single DM actuator** as seen by the WFS:
 
 1. Each WFS frame arrival is the synchronization "signal".
-2. After the signal, wait a configurable delay `d` (ms), then poke the actuator.
+2. After the signal, wait a configurable delay `d` (µs), then poke the actuator.
 3. Record the next `N` WFS frames and turn each one into a scalar **response value** `r_k` (0 = unpoked, 1 = fully settled).
 4. Repeat for every delay in a list `{d_0, d_1, ...}`, averaging several repetitions per delay.
 5. At the end, compare the per-delay responses (summary metrics, best delay) and produce an overall average.
@@ -42,35 +44,37 @@ The hypothesis to test: picking the right delay lands the DM step at a consisten
 - `libMagAOX/app/dev/shmimMonitor.hpp`: `m_imageStream` is protected, so a derived class can read `md[0].cnt0` and `md[0].atime` for frame counting and timestamps.
 - `libMagAOX/app/dev/dm.hpp` and `utils/shmimDelta` (PR #400): existing DM timing and trigger-delta instrumentation. Useful to cross-check the latencies we measure.
 
-## Assumptions and Open Questions (please confirm)
+## Resolved Decisions
 
-1. **What is the "signal"?** I'm assuming it's the **software WFS-frame semaphore**: the app wakes on each new WFS frame (`m_imageSemaphore`), which is the "indicator for the DM to move". If you instead mean a **hardware trigger** (camera trigger output wired to the DM electronics), the delay would have to be set on the hardware (e.g. an external delay generator or `siglentSDG`), and the design would change significantly.
-2. **Time reference for the delay.** The delay is measured from the frame's acquisition timestamp (`md[0].atime`), not from when the thread wakes up. That removes copy and scheduling jitter from the reference point. The app sleeps with `clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, atime + d)`. If that deadline has already passed, the app pokes immediately and flags the sample as late.
-3. **Delay units and range.** Delays are configured in **ms** as a `vector<float>`, e.g. `0,0.1,0.2,...`. They may be longer than a frame period, since the result is then just shifted by whole frames. We validate `d >= 0`.
-4. **Single actuator.** The actuator is given as `(x, y)` via the existing `pokecen.pokeX/pokeY` keys. We require exactly one entry, even though the base class allows several.
-5. **App name.** I'm proposing `dmPokeTemporal`. Tell me if you'd prefer something else, e.g. `dmTemporalResponse`.
-6. **Branch name.** The current branch is `tiffanytn`. AGENTS.md rule 12 requires `<username>/<feature-name>`, e.g. `tiffanytn/dm-poke-temporal`. Should I create and switch to a correctly named branch before committing?
-7. **Telemetry.** `dmPokeWFS` requires `telem_pokeloop` (`measuring, deltaX, deltaY, counter`). Adding a new flatbuffer log type is the heavier option. I propose reusing `telem_pokeloop` with `deltaX` = current delay (ms) and `deltaY` = current latency metric `t50` (ms), documented in the app. Alternative: add `telem_pokeresponse` as a follow-up.
+1. **Signal:** the semaphore posted by the `camwfs` stream (the WFS `shmimMonitor`, surfaced as `m_imageSemaphore`). No hardware trigger is involved.
+2. **Delay reference:** the delay is measured from the frame's acquisition timestamp `md[0].atime`, not from when the thread wakes up. The app sleeps with `clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, atime + d)`. If that deadline has already passed, it pokes immediately and flags the sample as late.
+3. **Units:** everything is in **microseconds**: delays, time axes, and timing metrics. Delays are configured as `vector<float>` in µs (e.g. `0,100,200,...`), must be `>= 0`, and may be longer than a frame period.
+4. **Single actuator:** confirmed. The actuator is given as `(x, y)` via `pokecen.pokeX/pokeY`, and exactly one entry is required.
+5. **App name:** `temporalResponse`.
+6. **Branch:** `tiffanytn/dmTemporalResponse`. The old `tiffanytn` branch was renamed to this, and this plan file was renamed to `dmTemporalResponse.md` to match.
+7. **Telemetry:** no app-specific telemetry. **FITS cubes are the output product.** Caveat: `dmPokeWFS::wfsThreadExec()` calls `recordPokeLoop()`, which calls `telem<telem_pokeloop>()`. The app must therefore still derive from `dev::telemeter` with the minimal `checkRecordTimes()` so it compiles. Nothing beyond that base-required `telem_pokeloop` record is added, and `updateMeasurement()` is left at zero. The alternative, making telemetry optional in `dmPokeWFS`, would touch `dmPokeCenter`/`dmPokeXCorr` and is out of scope.
 
 ## Proposed App Shape
 
-`apps/dmPokeTemporal/` follows the header-only app pattern (AGENTS rule 22):
+`apps/temporalResponse/` follows the header-only app pattern (AGENTS rule 22):
 
 ```
-apps/dmPokeTemporal/
+apps/temporalResponse/
   Makefile
-  dmPokeTemporal.cpp        // main() only
-  dmPokeTemporal.hpp        // class decl + out-of-class inline defs
-  tests/dmPokeTemporal_test.cpp
+  temporalResponse.cpp        // main() only
+  temporalResponse.hpp        // class decl + out-of-class inline defs
+  tests/temporalResponse_test.cpp
 ```
 
 ```cpp
-class dmPokeTemporal : public MagAOXApp<true>,
-                       public dev::dmPokeWFS<dmPokeTemporal>,
-                       public dev::shmimMonitor<dmPokeTemporal, dev::dmPokeWFS<dmPokeTemporal>::wfsShmimT>,
-                       public dev::shmimMonitor<dmPokeTemporal, dev::dmPokeWFS<dmPokeTemporal>::darkShmimT>,
-                       public dev::telemeter<dmPokeTemporal>
+class temporalResponse : public MagAOXApp<true>,
+                       public dev::dmPokeWFS<temporalResponse>,
+                       public dev::shmimMonitor<temporalResponse, dev::dmPokeWFS<temporalResponse>::wfsShmimT>,
+                       public dev::shmimMonitor<temporalResponse, dev::dmPokeWFS<temporalResponse>::darkShmimT>,
+                       public dev::telemeter<temporalResponse>
 ```
+
+`dev::telemeter` is present only because `dmPokeWFS` requires it (Resolved Decision 7).
 
 We reuse from `dmPokeWFS`: shmim handling, dark subtraction, DM channel, WFS thread, the single/continuous/stop controls, and `basicRunSensor()` to build the steady-state reference pattern. The base class does not need to change.
 
@@ -95,7 +99,7 @@ To capture per-frame timing, the app overrides `processImage(void*, const wfsShm
 
 The time axis for each sample is stored two ways:
 - frame index `k` (relative to the trigger frame), and
-- `t_k - t_cmd` in ms (relative to the actual DM command), which lets curves from different delays be aligned.
+- `t_k - t_cmd` in µs (relative to the actual DM command), which lets curves from different delays be aligned.
 
 ### 3. Per-delay averaging (`analyzeSensor`)
 For each delay, across `2 * nRepeats` edges, compute the mean curve `r̄_d(k)` and the standard deviation `σ_d(k)`.
@@ -103,8 +107,8 @@ For each delay, across `2 * nRepeats` edges, compute the mean curve `r̄_d(k)` a
 ### 4. Response metrics per delay (pure functions, unit-testable)
 | Metric | Definition |
 |---|---|
-| `t50` | Time (ms, from `t_cmd`) where `r̄` crosses 0.5, linearly interpolated |
-| `rise` | 10–90 % rise time (ms) |
+| `t50` | Time (µs, from `t_cmd`) where `r̄` crosses 0.5, linearly interpolated |
+| `rise` | 10–90 % rise time (µs) |
 | `overshoot` | `max(r̄) - 1` |
 | `settleErr` | RMS of `r̄ - 1` over the last `nSettle` frames |
 | `jitter` | `σ_d` at the transition frame (the frame closest to `t50`). This is the **repeatability / accuracy** figure the delay is expected to improve |
@@ -114,20 +118,20 @@ For each delay, across `2 * nRepeats` edges, compute the mean curve `r̄_d(k)` a
 - Report a table of metrics vs delay and pick the **best delay** as the one with minimum `jitter`. The selection criterion is configurable: `jitter` | `rise` | `t50`.
 - **Overall average:** average all curves on the `t - t_cmd` axis, resampled onto a common grid of `dt = frame period / resampleFactor`. Because each delay samples the response at a different phase relative to the exposure, this combination gives an effectively **super-sampled** response function. It is the main scientific product.
 
-## Configuration (new `[pokeTemporal]` section, plus the existing `wfscam`/`wfsdark`/`pokecen` sections)
+## Configuration (new `[temporalResponse]` section, plus the existing `wfscam`/`wfsdark`/`pokecen` sections)
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `pokeTemporal.delays` | `vector<float>` | `0` | Delays in ms |
-| `pokeTemporal.nRepeats` | int | 10 | Repeats (edge pairs) per delay |
-| `pokeTemporal.nPre` | int | 5 | Baseline frames before each edge |
-| `pokeTemporal.nPost` | int | 20 | Frames recorded after each edge |
-| `pokeTemporal.nSettle` | int | 5 | Trailing frames used for `settleErr` |
-| `pokeTemporal.maskThresh` | float | 0.1 | Fraction of `max|P|` for the pixel mask |
-| `pokeTemporal.maxRetries` | int | 3 | Retries per repeat on dropped frames |
-| `pokeTemporal.resampleFactor` | int | 10 | Super-sampling factor for the overall average |
-| `pokeTemporal.bestMetric` | string | `jitter` | Criterion for choosing the best delay |
-| `pokeTemporal.outputDir` | string | `/opt/MagAOX/calib/dmPokeTemporal` (confirm) | Where result FITS files are written |
+| `temporalResponse.delays` | `vector<float>` | `0` | Delays in µs |
+| `temporalResponse.nRepeats` | int | 10 | Repeats (edge pairs) per delay |
+| `temporalResponse.nPre` | int | 5 | Baseline frames before each edge |
+| `temporalResponse.nPost` | int | 20 | Frames recorded after each edge |
+| `temporalResponse.nSettle` | int | 5 | Trailing frames used for `settleErr` |
+| `temporalResponse.maskThresh` | float | 0.1 | Fraction of `max|P|` for the pixel mask |
+| `temporalResponse.maxRetries` | int | 3 | Retries per repeat on dropped frames |
+| `temporalResponse.resampleFactor` | int | 10 | Super-sampling factor for the overall average |
+| `temporalResponse.bestMetric` | string | `jitter` | Criterion for choosing the best delay |
+| `temporalResponse.outputDir` | string | `/opt/MagAOX/calib/temporalResponse` (confirm) | Where result FITS files are written |
 
 Existing `pokecen.dmSleep` is still used by `basicRunSensor()` for the reference pattern only. `pokecen.nPokeImages/nPokeAverage` also still apply to the reference.
 
@@ -137,10 +141,10 @@ Inherited: `poke_amp`, `nPokeImages`, `nPokeAverage`, `single`, `continuous`, `s
 
 New:
 - `nRepeats`, `nPost` (NewNumber, current/target).
-- `delays` (NewText, comma-separated ms). Parsed and validated in the callback, and rejected while measuring.
-- `progress` (RO): `delay_index`, `delay_ms`, `repeat`, `n_delays`.
+- `delays` (NewText, comma-separated µs). Parsed and validated in the callback, and rejected while measuring.
+- `progress` (RO): `delay_index`, `delay_us`, `repeat`, `n_delays`.
 - `results` (RO, rebuilt when delays change): `t50_<i>`, `rise_<i>`, `jitter_<i>` per delay.
-- `best` (RO): `delay_ms`, `t50`, `rise`, `jitter`.
+- `best` (RO): `delay_us`, `t50`, `rise`, `jitter`.
 - `last_file` (RO text): path of the last FITS output.
 
 ## Outputs
@@ -150,13 +154,13 @@ New:
   - `<configName>_resp`: `nFrames x nDelays` mean curves
   - `<configName>_respstd`: matching standard deviations
   - `<configName>_respavg`: overall super-sampled average curve
-- **FITS file** per completed run: `dmPokeTemporal_<timestamp>.fits` with extensions for the mean curves, std, time axes, raw per-edge curves, and the overall average. Header records the delays, amplitude, actuator, fps, and nRepeats.
-- **Logs:** a `text_log` summary line per delay plus the best-delay result. `telem_pokeloop` as described in open question 7.
+- **FITS cubes (primary product)** per completed run: `temporalResponse_<timestamp>.fits` with extensions for the mean curves, std, time axes, raw per-edge curves, and the overall average. Header records the delays, amplitude, actuator, fps, and nRepeats.
+- **Logs:** a `text_log` summary line per delay plus the best-delay result. No app-specific telemetry (see Resolved Decision 7).
 
 ## Code Organization Within the Header
 
-- `dmPokeTemporal` class (declarations only; definitions out-of-class below, per AGENTS rule 13).
-- A small free-function/struct block in `namespace MagAOX::app::dmPokeTemporalMath` (in the same header):
+- `temporalResponse` class (declarations only; definitions out-of-class below, per AGENTS rule 13).
+- A small free-function/struct block in `namespace MagAOX::app::temporalResponseMath` (in the same header):
   - `double projectResponse(const eigenImage<float>& im, const eigenImage<float>& base, const eigenImage<float>& P, const eigenImage<float>& mask, double norm)`
   - `int crossingTime(const std::vector<double>& t, const std::vector<double>& r, double level, double& tcross)`
   - `struct responseMetrics { double t50, rise, overshoot, settleErr, jitter; }` and `computeMetrics(...)`
@@ -167,9 +171,9 @@ New:
 - Timing helper `sleepUntil(timespec)` wrapping `clock_nanosleep` with EINTR handling.
 - Full Doxygen per AGENTS rules 1, 3, 4, 9, 10: file blocks, `///` briefs, inline `/**< [in] */` parameter docs, and `... - Data` sections placed before accessor sections.
 
-## Unit Tests (`apps/dmPokeTemporal/tests/dmPokeTemporal_test.cpp`)
+## Unit Tests (`apps/temporalResponse/tests/temporalResponse_test.cpp`)
 
-Catch2, `namespace libXWCTest { namespace dmPokeTemporalTest {...} }`, a `\defgroup dmPokeTemporal_unit_test` in `\ingroup application_unit_test`, and a Doxygen block on every `TEST_CASE`. Uses the `DMPOKETEMPORAL_TEST_DOXYGEN_REF` pattern (rules 20–21).
+Catch2, `namespace libXWCTest { namespace temporalResponseTest {...} }`, a `\defgroup temporalResponse_unit_test` in `\ingroup application_unit_test`, and a Doxygen block on every `TEST_CASE`. Uses the `TEMPORALRESPONSE_TEST_DOXYGEN_REF` pattern (rules 20–21).
 
 - `loadConfigImpl`: defaults, valid delays, rejection of negative delays, rejection of more than one actuator, rejection of empty or mismatched poke lists.
 - `parseDelayList`: good, empty, garbage, and negative input.
@@ -182,17 +186,17 @@ Hardware-timed sequencing (`runSensor`) is only exercised on the bench/sim (see 
 
 ## Build and Integration
 
-- Add `dmPokeTemporal` to the app lists in the top-level `Makefile`, next to `dmPokeXCorr` (both lists at lines ~78 and ~129).
-- Add `../apps/dmPokeTemporal/tests/dmPokeTemporal_test` to `tests/tests.list`.
-- Add `apps/dmPokeTemporal/dmPokeTemporal` to `.gitignore`.
-- Add an example config `apps/dmPokeTemporal/doc/dmPokeTemporal.md` (usage, config, INDI, output format), following the `utils/shmimDelta/doc` style.
+- Add `temporalResponse` to the app lists in the top-level `Makefile`, next to `dmPokeXCorr` (both lists at lines ~78 and ~129).
+- Add `../apps/temporalResponse/tests/temporalResponse_test` to `tests/tests.list`.
+- Add `apps/temporalResponse/temporalResponse` to `.gitignore`.
+- Add an example config `apps/temporalResponse/doc/temporalResponse.md` (usage, config, INDI, output format), following the `utils/shmimDelta/doc` style.
 - Run `clang-format` on all touched files.
 
 ## Verification Plan
 
 1. Build and run unit tests (`tests/` harness).
 2. **Simulated bench:** run against `aoSim`/`cameraSim` with a DM sim channel, if available, to exercise the full single/continuous/stop flow, DM zeroing on stop, and FITS/shmim outputs.
-3. **On instrument (you/operator):** at a known WFS fps, run the delay list `0 : 0.1*T_frame : T_frame`. Check that `delayErr` is small, that `t50` shifts by about `d` (sanity check), and inspect `jitter` vs delay. Cross-check the latency against `shmimDelta` numbers.
+3. **On instrument (you/operator):** at a known WFS fps, run the delay list `0 : 0.1*T_frame : T_frame` (in µs). Check that `delayErr` is small, that `t50` shifts by about `d` (sanity check), and inspect `jitter` vs delay. Cross-check the latency against `shmimDelta` numbers.
 
 ## Implementation Steps and Commit Plan (AGENTS rule 19)
 
@@ -203,7 +207,7 @@ Hardware-timed sequencing (`runSensor`) is only exercised on the bench/sim (see 
 
 ## Edge Cases and Risks
 
-- **Scheduling jitter:** the WFS thread priority (`m_wfsThreadPrio`) and cpuset may need raising for sub-100 µs delay accuracy. `delayErr` makes this visible.
+- **Scheduling jitter:** the WFS thread priority (`m_wfsThreadPrio`) and cpuset may need raising for delay accuracy of a few µs to tens of µs. `delayErr` makes this visible.
 - **Late deadline:** if `atime + d` is already past when the thread wakes (small `d`, or copy latency), the sample is flagged. If the late fraction exceeds a threshold, a warning is logged and the effective minimum delay is reported.
 - **Clock domain:** this assumes `atime` is `CLOCK_REALTIME`, the ImageStreamIO default. It will be verified at startup by comparing it to `get_curr_time()`.
 - **DM process latency:** the measured response includes the dm app's channel-combine and driver latency. That is intended (it's the end-to-end response), and is noted in the docs.
