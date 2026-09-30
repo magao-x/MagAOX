@@ -20,6 +20,8 @@ Review AGENTS.md then please analyze this problem, and then formulate a plan.  U
 
 # Plan
 
+> **Superseded (2026-09-30):** this plan has been merged into `agents/plans/2026-09-30/dm_response_merged_plan.md` (app `dmTemporalResponse`, branch `ktwitchell/dm-response`). It is kept for the record only; do not implement from it.
+
 
 Status: **Decisions resolved (2026-09-30). Awaiting go-ahead to implement. No code changes yet.**
 

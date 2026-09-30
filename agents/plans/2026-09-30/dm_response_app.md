@@ -28,6 +28,8 @@ Propose a plan to create this app that will allow us to examine the dynamics of 
 
 # Plan
 
+> **Superseded (2026-09-30):** this plan has been merged into `agents/plans/2026-09-30/dm_response_merged_plan.md` (app `dmTemporalResponse`, branch `ktwitchell/dm-response`). It is kept for the record only; do not implement from it.
+
 Status: **revised after review (answers below). Not yet approved for execution.**
 
 Prompt (condensed): Create a C++ MagAO-X app to measure the dynamic response of the woofer DM at a temporal resolution finer than the camWFS frame period. For each delay value, trigger off the camWFS frame-ready semaphore, wait a short delay, poke the requested actuator(s), capture N camWFS frames, repeat M times, average the trials into one N-frame cube, and save one FITS cube per delay under `~xsup/dm_response/<date-time>/`. All tunables are INDI properties usable from cursesINDI.
