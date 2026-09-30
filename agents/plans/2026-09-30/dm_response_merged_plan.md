@@ -308,3 +308,41 @@ Deviations from the plan text, decided during implementation:
 9. max command should be 1. 
 10. Yes, the files should be updated as superceded.
 
+
+## 14. Implementation Summary (2026-09-30)
+
+I've implemented the merged plan as the `dmTemporalResponse` app and committed it to `ktwitchell/dm-response` in two commits (nothing pushed). **None of it has been compiled or run**, because this Mac has no mxlib, ImageStreamIO or clang-format and the Xcode compiler is locked by its licence prompt. The first build on the MagAO-X machine will probably turn up some compile errors to fix.
+
+**What the app does:**
+- **Trigger and poke:** a high-priority thread handles each camWFS frame. On a trigger frame it waits in a tight loop until the frame's `atime` plus the delay, writes the poke to the DM, records when the poke actually happened, then captures N frames. Delays longer than one frame period are held until the right frame. The baseline frame is copied after the poke so the copy doesn't delay it.
+- **Measurement run:** a separate thread runs the reference pass (`nRef` +/− pairs), then works through the K evenly spaced delays with M/2 + then M/2 − trials each. A trial with a skipped frame is retried up to `maxRetries`. A timeout, stop, shutdown, or change in fps or camera aborts the run, and the DM is always left at zero.
+- **Output:** everything goes in `/home/xsup/dm_response/<UTC>/`:
+  - one averaged cube per delay;
+  - `reference.fits`;
+  - three summary files holding the response curves, the per-delay metrics, and the combined finer-sampled curve;
+  - `pattern.fits` in pattern mode.
+- **Pattern mode:** the pattern file is re-read and validated at every start (2-D, same size as the DM, finite, not all zero, within `maxCommand` = 1). Its SHA-256 goes in each file header.
+- **Tests:** they cover the helpers, config, INDI callbacks, the per-frame logic with a fake clock, and full runs against a fake camera modelling a first-order DM with known τ. The full-run tests check that bias cancels, that t50 = latency + τ ln 2 and rise = τ ln 9, the combined curve, the +/− ordering, retries, aborts, stop/shutdown and pattern mode. They only use uniquely named test streams, never the real `camwfs` or DM channels.
+
+**Where I departed from the plan** (all recorded in section 13 of `dm_response_merged_plan.md`):
+- The summary is three single-image FITS files instead of one multi-extension `summary.fits`, because mxlib's FITS writer only writes one image per file.
+- Late pokes are kept as valid measurements. If too many are late at one delay, the app logs a warning and flags the cube (`LATEFLAG`) rather than retrying. Delays shorter than the time it takes to receive the frame can never be on time, so retrying them would never succeed.
+- Per-delay results are published over INDI as comma-separated text, so the property doesn't have to be rebuilt when K changes.
+- INDI property creation is split into `createIndiProperties()` so the tests never start the shmim monitor. On the RTC that monitor would attach to the real `camwfs`.
+- Phases 1–3 went into one functional commit because they ended up in one header.
+
+**Files:**
+- `apps/dmTemporalResponse/dmTemporalResponse.hpp`, `dmTemporalResponse.cpp` and `Makefile`
+- `apps/dmTemporalResponse/tests/dmTemporalResponse_test.cpp`
+- `apps/dmTemporalResponse/doc/dmTemporalResponse.md` (in the docs commit)
+- Top-level `Makefile`, `tests/tests.list`, `tests/Makefile.one` (links `-lcfitsio`) and `.gitignore`
+- `agents/plans/2026-09-30/dm_response_merged_plan.md`
+
+**To do on the MagAO-X machine:**
+1. Build the app, then build and run the test with `make -B -f Makefile.one t=../apps/dmTemporalResponse/tests/dmTemporalResponse_test.cpp` from `tests/`.
+2. These mxlib calls are guesses, so check them if the build fails:
+   - the return type of `fitsFile::write`;
+   - `read(arr, header, file)` and `header["KEY"].value<T>()`, which only the tests use.
+3. Run `make coverage`. The startup, shutdown and shmim functions will probably need `LCOV_EXCL` markers.
+4. Run `clang-format` and commit it separately as formatting-only.
+5. Do the hardware checks on the RTC with the loop open, starting with a small `poke_amp` on `dm00disp07`.
