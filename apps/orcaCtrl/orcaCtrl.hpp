@@ -350,8 +350,8 @@ inline orcaCtrl::orcaCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
     m_fanSpeedName       = m_defaultFanSpeed;
     m_fanSpeedNameSet    = m_defaultFanSpeed;
 
-    m_full_x = 512;
-    m_full_y = 512;
+    m_full_x = 511.5;
+    m_full_y = 511.5;
     m_full_w = 1024;
     m_full_h = 1024;
 
