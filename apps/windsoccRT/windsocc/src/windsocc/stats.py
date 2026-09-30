@@ -328,6 +328,7 @@ def main() -> None:
         lco_surface_points=lco_surface_points,
         u_component_range=u_component_range,
         v_component_range=v_component_range,
+        date_obs=date_obs,
     )
 
     wind_feat_labeled = wind_feat.with_columns(

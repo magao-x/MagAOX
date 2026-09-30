@@ -182,6 +182,7 @@ def plot_wind_track_clusters(
     lco_surface_points: list[dict[str, object]] | None = None,
     u_component_range: tuple[float, float] | None = None,
     v_component_range: tuple[float, float] | None = None,
+    date_obs: str | None = None,
 ) -> None:
     """Scatter vu vs vv with HDBSCAN clusters; noise drawn first in faint gray.
 
@@ -202,6 +203,9 @@ def plot_wind_track_clusters(
         raise ValueError("probabilities must match vu length.")
 
     fig, ax = plt.subplots(figsize=(7, 7))
+    # Zero-component guides sit under all scatter layers.
+    ax.axhline(0.0, color="lightblue", linestyle="-", linewidth=1.5, zorder=0)
+    ax.axvline(0.0, color="lightblue", linestyle="-", linewidth=1.5, zorder=0)
     noise = labels == -1
     if np.any(noise):
         ax.scatter(
@@ -241,7 +245,7 @@ def plot_wind_track_clusters(
                 [0],
                 marker="o",
                 color="w",
-                label=f"Group {int(lab)}",
+                label=f"Group {int(lab) + 1}",
                 markerfacecolor=(*rgb, 0.9),
                 markeredgecolor=(*rgb, 1.0),
                 markeredgewidth=1.0,
@@ -389,7 +393,7 @@ def plot_wind_track_clusters(
             )
         )
     if legend_elements:
-        legend_ungrouped = ax.legend(handles=legend_elements, loc="best", fontsize=16)
+        legend_ungrouped = ax.legend(handles=legend_elements, loc="upper left", fontsize=16)
         ax.add_artist(legend_ungrouped)
     if cluster_legend_elements:
         ax.legend(
@@ -401,6 +405,22 @@ def plot_wind_track_clusters(
             markerscale=1.0,
             frameon=True,
             borderaxespad=0.0,
+        )
+    if date_obs:
+        # Match the DATE_OBS label style from plot_wind_direction_vs_time_for_clusters,
+        # but use the ref-altitude annotation size and a plain black color.
+        ax.text(
+            0.92,
+            0.92,
+            date_obs,
+            color="black",
+            fontsize=16,
+            fontweight="bold",
+            family="serif",
+            ha="right",
+            va="top",
+            transform=ax.transAxes,
+            zorder=10,
         )
 
     # ax.set_aspect("equal", adjustable="box")
@@ -650,7 +670,7 @@ def plot_wind_direction_vs_time_for_clusters(
             facecolors=rgba,
             edgecolors="none",
             linewidths=0,
-            label=f"Group {cid} " + r"($\bar{v}$" + f"={mean_scalar_speed_mps:.2f} m/s)",
+            label=f"Group {cid + 1} " + r"($\bar{v}$" + f"={mean_scalar_speed_mps:.2f} m/s)",
         )
 
     if lco_surface_points:
