@@ -326,7 +326,8 @@ go in a new `chiller` config section, following the MagAO-X habit of one section
 
 ## Execution Notes
 
-- Plan only. Nothing is implemented yet, and step 1 (the hardware check) hasn't been run.
+- Steps 2-7 are not implemented yet. Step 1 has been run in **air mode only** (results below). The
+  water-mode re-probe is still to do.
 - Found the DCAM fan property and confirmed that no liquid-cooling `dcamprop` property exists by
   searching `dcamprop.h` and `dcamapi4.h` in `/opt/hamamatsu_new/hamamatsu_sdk/dcamsdk4/inc/`.
 - Checked the stdCamera fan and temperature config (`camera.fanSpeedControl`, `camera.defaultFanSpeed`,
@@ -349,3 +350,64 @@ go in a new `chiller` config section, following the MagAO-X habit of one section
 - Third follow-up: losing chiller flow now also stops acquisition through `m_chillerFault` and
   `m_reconfig`, and it restarts when flow returns. The chiller source is a koolanceCtrl-style INDI app.
   Moved both answered questions out of Open Questions and into the new Q and A section.
+
+### Step 1 results: air mode (2026-09-30)
+
+Setup: orcaCtrl was not running. Camera `HAMAMATSU C15550-22UP`, DCAM camera ID `PHX2`, firmware 3.00,
+driver 8.26.160.0000, on CoaXPress (the `aslcxp` driver is loaded).
+
+**`dcamcfgc` (ver 24.12.6898), read-only.** This model shows only five parameters:
+
+| # | Parameter | Current | Options |
+| --- | --- | --- | --- |
+| 1 | Cooler Type | **Air** | `Air`, `Water` |
+| 2 | Back Panel LED | ON | not opened |
+| 3 | Fusion(C14440) Emulation Mode | OFF | not opened |
+| 4 | Quest(C15550-20UP) Emulation Mode | OFF | not opened |
+| 5 | Raw data output mode (switch with PNR mode) | Disable | not opened |
+
+- The Quest2 has **no** `Water Cooling Target`, `Target Temperature`, `Sensor Cooler`, `Default Fan
+  Control` or `Cooler FAN` parameters. Those strings belong to other camera models, and so do the extra
+  `Air(Rapid)`/`Air(Off)`/`Air(Standard)` Cooler Type values.
+- Procedure note: with a single camera, `dcamcfgc` selects it automatically and never shows the "Select
+  Camera Index" prompt. The first input therefore goes to "Select Parameter Index". In the first run, a
+  leading `1` opened the Cooler Type value menu, and the next `0` exited it without a change ("Changed
+  value" was not printed). A second run with input `0` confirmed Cooler Type is still `Air`.
+
+**DCAM properties (read-only probe, `dcamCoolProbe.cpp`, kept in the session scratchpad and not
+committed).** The camera enumerated 76 supported properties in air mode.
+
+| Property | Result in air mode |
+| --- | --- |
+| `SENSORCOOLERFAN` (0x00200350) | `DCAMERR_INVALIDPROPERTYID` (0x80000825), not present |
+| `SENSORCOOLER` (0x00200320) | `DCAMERR_INVALIDPROPERTYID`, not present |
+| `SENSORTEMPERATURETARGET` (0x00200330) | `DCAMERR_INVALIDPROPERTYID`, not present |
+| `SENSORCOOLERSTATUS` (0x00200340) | Read-only mode. Values `1=OFF`, `2=READY`, `3=BUSY`. Current `READY`. |
+| `SENSORTEMPERATURE` (0x00200310) | Read-only, -50 to 100 °C, step 1. Current **-20 °C**. |
+
+The only supported properties with COOL, TEMP, FAN or WATER in their names are those last two.
+
+**What this means for the plan:**
+
+- In air mode the camera offers **no** fan, cooler-switch or temperature-target control through
+  `dcamprop`. Cooling is fixed at -20 °C, as the manual specifies. `connect()`'s existing
+  `SENSORCOOLERFAN` `getattr` check already returns "not supported" correctly in this mode.
+- **The uncommitted `powerOnDefaults()` change** (`m_fanControlSupported = true`,
+  `m_fanStatusSupported = true`) breaks air mode. `getFanSpeed()` would read the missing
+  `SENSORCOOLER` property, fail on every `appLogic()` pass, and put the app in `ERROR`. The fan
+  properties have to come from `getattr`, as step 2 says; they can't be forced to true.
+- Step 3 (the setpoint write) must check `getattr` first. In air mode `SENSORTEMPERATURETARGET` doesn't
+  exist, so the setpoint is read-only at -20 °C, the INDI target should reflect that, and the
+  hard-coded -35 °C default is wrong for air mode.
+- `SENSORCOOLERSTATUS` in air mode offers no `WARNING` value, so `getTemps()`'s `WARNING` branch can
+  only fire, if at all, in water mode.
+- Candidate water-mode signal for step 4: whether `SENSORCOOLER`, `SENSORCOOLERFAN` or
+  `SENSORTEMPERATURETARGET` exist at all. They are absent in air mode. The water-mode re-probe has to
+  confirm this.
+- The camera ID string is `PHX2`, but `connect()` compares against a hard-coded `"000044"`, so
+  `camera.serialNumber` never selects the camera. This is a separate follow-up.
+
+**Still to do in step 1 (the user will run this by hand):** with the chiller connected and circulating, set `Cooler Type = Water` with
+`dcamcfgc`, restart the camera, re-run the probe, and record which properties appear and their values
+(especially whether `SENSORCOOLER` offers `MAX`). Then either leave the camera in Water mode or set it
+back to Air.
