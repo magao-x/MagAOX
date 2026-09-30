@@ -1112,8 +1112,8 @@ inline int orcaCtrl::setFanSpeed()
 
 inline int orcaCtrl::setExpTime()
 {
-    long   intexptime = m_expTimeSet * 1000 * 10000 + 0.5;
-    double exptime    = ( (double)intexptime ) / 10000;
+    long   intexptime = m_expTimeSet + 0.5;
+    double exptime    = ( (double)intexptime );
     capExpTime( exptime );
 
     int rv;
@@ -1137,7 +1137,7 @@ inline int orcaCtrl::setExpTime()
         return -1;
     }
 
-    m_expTime = exptime / 1000.0;
+    m_expTime = exptime;
 
     recordCamera( true );
 
@@ -1165,8 +1165,8 @@ inline int orcaCtrl::capExpTime( double &exptime )
             return -1;
         log<text_log>( "Got exposure time " + std::to_string( exptime ) + " ms but min value is " +
                        std::to_string( m_ReadOutTimeCalculation ) + " ms" );
-        long intexptime = m_ReadOutTimeCalculation * 10000 + 0.5;
-        exptime         = ( (double)intexptime ) / 10000;
+        long intexptime = m_ReadOutTimeCalculation + 0.5;
+        exptime         = ( (double)intexptime );
     }
 
     return 0;
@@ -1518,8 +1518,8 @@ inline int orcaCtrl::configureAcquisition()
 
     if( m_expTimeSet > 0 )
     {
-        long   intexptime = m_expTimeSet * 1000 * 10000 + 0.5;
-        double exptime    = ( (double)intexptime ) / 10000;
+        long   intexptime = m_expTimeSet + 0.5;
+        double exptime    = ( (double)intexptime );
         capExpTime( exptime );
         std::cerr << "Setting exposure time to " << m_expTimeSet << "\n";
         int rv = setorcaParameter( m_cameraHandle, DCAM_IDPROP_EXPOSURETIME, exptime );
@@ -1542,7 +1542,7 @@ inline int orcaCtrl::configureAcquisition()
     else
     {
         capExpTime( exptime );
-        m_expTime    = exptime / 1000.0;
+        m_expTime    = exptime;
         m_expTimeSet = m_expTime; // At this point it must be true.
         updateIfChanged( m_indiP_exptime, "current", m_expTime, INDI_IDLE );
         updateIfChanged( m_indiP_exptime, "target", m_expTimeSet, INDI_IDLE );
