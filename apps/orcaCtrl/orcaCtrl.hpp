@@ -1648,9 +1648,9 @@ inline int orcaCtrl::acquireAndCheckValid()
 
     DCAMERR error = dcamwait_start( m_waitHandle, &waitStart );
 
-    if( error == DCAMERR_TIMEOUT )
+    if( error == DCAMERR_TIMEOUT || error == DCAMERR_ABORT )
     {
-        return 1; // This sends it back to framegrabber to check for reconfig, etc.
+        return 1; // This sends it back to framegrabber to check for reconfig, power-off, etc.
     }
 
     if( failed( error ) )
@@ -1743,6 +1743,10 @@ inline int orcaCtrl::loadImageIntoStream( void *dest )
 inline int orcaCtrl::reconfig()
 {
 
+    if( !m_cameraHandle )
+    {
+        return 0; // don't stop capture if camera is already off
+    }
     int32 captureStatus = 0;
 
     DCAMERR error = dcamcap_stop( m_cameraHandle );
