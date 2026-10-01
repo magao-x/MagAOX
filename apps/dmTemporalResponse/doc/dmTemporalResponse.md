@@ -156,7 +156,7 @@ Each run writes to `<output.baseDir>/<YYYY-MM-DDTHHMMSS>/` (UTC):
 |---|---|
 | `dmresp_delay_<DDDDD>us.fits` | one per delay: `[nx, ny, N]` averaged +/- half-difference cube |
 | `reference.fits` | `[nx, ny, 2]`: plane 0 `P`, plane 1 the mask |
-| `summary_curves.fits` | `[N, K, 3]`: mean response, trial std, and mean time from the command [us] |
+| `summary_curves.fits` | `[N+1, K, 3]`: mean response, trial std, and mean time from the command [us]; row 0 is the pre-poke baseline (r = 0) |
 | `summary_metrics.fits` | `[K, 9]`: delay, t50, rise, overshoot, settleErr, jitter, delayErrMean, delayErrStd, lateFrac (columns named by `MCOLn`) |
 | `summary_superres.fits` | `[nBins, 2]`: bin time [us] and binned response |
 | `pattern.fits` | pattern mode only: copy of the applied pattern |
@@ -164,8 +164,9 @@ Each run writes to `<output.baseDir>/<YYYY-MM-DDTHHMMSS>/` (UTC):
 Every file carries the run header: `DATE-OBS`, `DMSTREAM`, `WFSSHMIM`, `WFSFPS`, `POKEMODE`, `POKEX`/`POKEY` or
 `PATFILE`/`PATSHA`, `POKEAMP`, `NDELAYS`, `DLYSPAN`, `NFRAMES`, `NTRIALS`, `NREF`.  The cubes also have `DELAYUS`,
 `DLYIDX`, `DLYMEAN`, `DLYSTD`, `DLYMIN`, `DLYMAX`, `NINVALID`, `LATEFRAC`, `LATEFLAG`, `T50`, `RISE`, and `JITTER`.
+A header value that can not be computed (e.g. no 10%/90% crossing) is written as `-999`.
 
-Live shared memory, updated during a run: `<name>_ref` (P), `<name>_resp` (mean response curves, N x K), and
+Live shared memory, updated during a run: `<name>_ref` (P), `<name>_resp` (mean response curves, (N+1) x K), and
 `<name>_respavg` (super-sampled response).
 
 # SAFETY

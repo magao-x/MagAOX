@@ -474,6 +474,36 @@ TEST_CASE( "dmTemporalResponse time helpers", "[dmTemporalResponse][helpers]" )
     }
 }
 
+/// Verify the bit-level finite checks (robust to -ffast-math) and the FITS header sentinel.
+/**
+ * \ingroup dmTemporalResponse_unit_test
+ */
+TEST_CASE( "dmTemporalResponse finite checks and header sentinel", "[dmTemporalResponse][helpers]" )
+{
+    // clang-format off
+    #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
+    dmTemporalResponseMath::isFinite( 0.0 );
+    dmTemporalResponseMath::isFinite( 0.0f );
+    dmTemporalResponseMath::headerValue( 0.0 );
+    #endif
+    // clang-format on
+
+    REQUIRE( isFinite( 1.5 ) );
+    REQUIRE( isFinite( 0.0 ) );
+    REQUIRE( isFinite( -1e300 ) );
+    REQUIRE( !isFinite( std::numeric_limits<double>::quiet_NaN() ) );
+    REQUIRE( !isFinite( std::numeric_limits<double>::infinity() ) );
+    REQUIRE( !isFinite( -std::numeric_limits<double>::infinity() ) );
+
+    REQUIRE( isFinite( 1.5f ) );
+    REQUIRE( !isFinite( std::numeric_limits<float>::quiet_NaN() ) );
+    REQUIRE( !isFinite( std::numeric_limits<float>::infinity() ) );
+
+    REQUIRE( headerValue( 2.5 ) == 2.5 );
+    REQUIRE( headerValue( std::numeric_limits<double>::quiet_NaN() ) == headerSentinel );
+    REQUIRE( headerValue( std::numeric_limits<double>::infinity() ) == headerSentinel );
+}
+
 /// Verify `dmStreamName()` formatting and range checks.
 /**
  * \ingroup dmTemporalResponse_unit_test
@@ -893,8 +923,8 @@ TEST_CASE( "dmTemporalResponse response metrics", "[dmTemporalResponse][helpers]
             part.push_back( 0.6 * ( ti > lat ? 1 - exp( -( ti - lat ) / tau ) : 0 ) );
         }
         REQUIRE( computeMetrics( met, t, part, s, 5, {}, 0 ) == -1 );
-        REQUIRE( std::isfinite( met.m_t50 ) );
-        REQUIRE( !std::isfinite( met.m_rise ) );
+        REQUIRE( isFinite( met.m_t50 ) );
+        REQUIRE( !isFinite( met.m_rise ) );
     }
 
     SECTION( "inconsistent inputs" )
@@ -937,7 +967,7 @@ TEST_CASE( "dmTemporalResponse resampleAverage", "[dmTemporalResponse][helpers]"
 
     for( size_t b = 0; b < grid.size(); ++b )
     {
-        REQUIRE( std::isfinite( val[b] ) );
+        REQUIRE( isFinite( val[b] ) );
         REQUIRE( val[b] == Approx( 2 * ( grid[b] - 12.5 ) ) );
     }
 
@@ -950,7 +980,7 @@ TEST_CASE( "dmTemporalResponse resampleAverage", "[dmTemporalResponse][helpers]"
         REQUIRE( resampleAverage( grid, val, t1, c1, 25 ) == 0 );
         REQUIRE( grid.size() == 5 );
         REQUIRE( val[0] == Approx( 1 ) );
-        REQUIRE( std::isnan( val[1] ) );
+        REQUIRE( !isFinite( val[1] ) );
         REQUIRE( val[4] == Approx( 2 ) );
     }
 
@@ -1785,7 +1815,7 @@ TEST_CASE( "dmTemporalResponse full synthetic run", "[dmTemporalResponse][run]" 
     {
         double t = sr( i, 0 );
         double v = sr( i, 1 );
-        if( std::isfinite( v ) && t > app.m_latency + 200 )
+        if( isFinite( v ) && t > app.m_latency + 200 )
         {
             REQUIRE( v == Approx( 1 - exp( -( t - app.m_latency ) / app.m_tau ) ).margin( 0.05 ) );
             ++nChecked;
@@ -1850,9 +1880,10 @@ TEST_CASE( "dmTemporalResponse retry on frame gap", "[dmTemporalResponse][run]" 
             app.m_gapsToInject = 1;
         } );
 
-    REQUIRE( app.runMeasurement() == 0 );
+    int rv = app.runMeasurement();
     injector.join();
     app.stopCamera();
+    REQUIRE( rv == 0 );
 
     mx::fits::fitsFile<float, XWC_DEFAULT_VERBOSITY> ff;
     mx::improc::eigenCube<float>                     cube;
@@ -1882,9 +1913,10 @@ TEST_CASE( "dmTemporalResponse abort on retries exceeded", "[dmTemporalResponse]
             app.m_alwaysGap = true;
         } );
 
-    REQUIRE( app.runMeasurement() == -1 );
+    int rv = app.runMeasurement();
     injector.join();
     app.stopCamera();
+    REQUIRE( rv == -1 );
 
     REQUIRE( app.m_runStatus == "error" );
     REQUIRE( std::filesystem::exists( app.m_runDir + "/" + cubeFileName( app.m_delays[0] ) ) );
@@ -1958,9 +1990,10 @@ TEST_CASE( "dmTemporalResponse stop and shutdown mid-run", "[dmTemporalResponse]
                 app.m_fpsChanged = true;
             } );
 
-        REQUIRE( app.runMeasurement() == -1 );
+        int rv = app.runMeasurement();
         changer.join();
         app.stopCamera();
+        REQUIRE( rv == -1 );
 
         REQUIRE( app.m_runStatus == "error" );
     }
@@ -2049,7 +2082,7 @@ TEST_CASE( "dmTemporalResponse measurement thread", "[dmTemporalResponse][run]" 
     app.m_measThreadInit = false;
     std::thread th( dmTemporalResponse::measThreadStart, &app );
 
-    REQUIRE( app.requestStart() == 0 );
+    int startRv = app.requestStart();
 
     // Wait for the run to finish
     for( int i = 0; i < 2000 && ( app.m_running || app.status() != "done" ); ++i )
@@ -2057,13 +2090,18 @@ TEST_CASE( "dmTemporalResponse measurement thread", "[dmTemporalResponse][run]" 
         mx::sys::milliSleep( 5 );
     }
 
-    REQUIRE( app.m_runStatus == "done" );
-    REQUIRE( app.m_running == false );
+    std::string status  = app.status();
+    bool        running = app.m_running;
 
+    // Join before any REQUIRE so a failure can not destroy a joinable thread
     app.m_shutdown = 1;
     sem_post( &app.m_startSem );
     th.join();
     app.stopCamera();
+
+    REQUIRE( startRv == 0 );
+    REQUIRE( status == "done" );
+    REQUIRE( running == false );
 }
 
 } // namespace dmTemporalResponseTest

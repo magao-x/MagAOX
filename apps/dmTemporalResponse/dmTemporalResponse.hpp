@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -85,6 +86,43 @@ struct responseMetrics
 
     double m_lateFrac{ std::numeric_limits<double>::quiet_NaN() }; ///< Fraction of trials whose poke deadline had passed.
 };
+
+/// Check whether a double is finite by inspecting its bits.
+/** MagAO-X builds with `-ffast-math`, under which `std::isfinite` and `std::isnan` may always report finite.
+ * This checks the IEEE 754 exponent field directly, so it can not be optimized away.
+ *
+ * \returns true if \p x is neither NaN nor infinite
+ */
+inline bool isFinite( double x /**< [in] the value to check */ )
+{
+    uint64_t bits;
+    std::memcpy( &bits, &x, sizeof( bits ) );
+    return ( ( bits >> 52 ) & 0x7ff ) != 0x7ff;
+}
+
+/// Check whether a float is finite by inspecting its bits.
+/** See isFinite(double).
+ *
+ * \returns true if \p x is neither NaN nor infinite
+ */
+inline bool isFinite( float x /**< [in] the value to check */ )
+{
+    uint32_t bits;
+    std::memcpy( &bits, &x, sizeof( bits ) );
+    return ( ( bits >> 23 ) & 0xff ) != 0xff;
+}
+
+/// The value written to FITS header cards in place of NaN or infinity.
+constexpr double headerSentinel = -999;
+
+/// Map a value to something cfitsio can write in a header card.
+/**
+ * \returns \p x if finite, otherwise headerSentinel
+ */
+inline double headerValue( double x /**< [in] the value to write */ )
+{
+    return isFinite( x ) ? x : headerSentinel;
+}
 
 /// Get the current CLOCK_REALTIME time.
 /** This is the default clock used for the poke busy-wait and the command timestamp.
@@ -205,7 +243,7 @@ inline int validateCommand( float amp,       /**< [in] the poke amplitude */
                             float maxCommand /**< [in] the maximum absolute DM command allowed */
 )
 {
-    if( !std::isfinite( amp ) || amp == 0 || std::fabs( amp ) > maxCommand )
+    if( !isFinite( amp ) || amp == 0 || std::fabs( amp ) > maxCommand )
     {
         return -1;
     }
@@ -234,7 +272,7 @@ inline int validatePattern( const mx::improc::eigenImage<float> &pattern,   /**<
     {
         for( int rr = 0; rr < pattern.rows(); ++rr )
         {
-            if( !std::isfinite( pattern( rr, cc ) ) )
+            if( !isFinite( pattern( rr, cc ) ) )
             {
                 return -1;
             }
@@ -701,7 +739,7 @@ inline int resampleAverage( std::vector<double>                    &grid,   /**<
 
         for( size_t i = 0; i < times[c].size(); ++i )
         {
-            if( !std::isfinite( times[c][i] ) || !std::isfinite( curves[c][i] ) )
+            if( !isFinite( times[c][i] ) || !isFinite( curves[c][i] ) )
             {
                 continue;
             }
@@ -725,7 +763,7 @@ inline int resampleAverage( std::vector<double>                    &grid,   /**<
     {
         for( size_t i = 0; i < times[c].size(); ++i )
         {
-            if( !std::isfinite( times[c][i] ) || !std::isfinite( curves[c][i] ) )
+            if( !isFinite( times[c][i] ) || !isFinite( curves[c][i] ) )
             {
                 continue;
             }
@@ -789,7 +827,7 @@ inline int bestDelay( size_t                             &idx,      /**< [out] i
     {
         double v = metrics[i].*field;
 
-        if( !std::isfinite( v ) )
+        if( !isFinite( v ) )
         {
             continue;
         }
@@ -3026,18 +3064,23 @@ inline int dmTemporalResponse::runTrialSet( double                            de
 
             if( project )
             {
-                std::vector<double> r( N ), t( N );
+                // Point 0 is the pre-poke baseline (r = 0 by definition), so every curve starts from below the
+                // 10% level even when the first post-poke frame is already well into the rise.
+                std::vector<double> r( N + 1 ), t( N + 1 );
+
+                r[0] = 0;
+                t[0] = dmTemporalResponseMath::tsDiffUs( m_trialTimes[0], m_tCmd );
 
                 for( int k = 0; k < N; ++k )
                 {
-                    r[k] = sign * dmTemporalResponseMath::projectResponse( m_trialBuf.data() + nPix * ( k + 1 ),
+                    r[k + 1] = sign * dmTemporalResponseMath::projectResponse( m_trialBuf.data() + nPix * ( k + 1 ),
                                                                            m_trialBuf.data(),
                                                                            m_refP.data(),
                                                                            m_refMask.data(),
                                                                            nPix,
                                                                            m_refNorm );
 
-                    t[k] = dmTemporalResponseMath::tsDiffUs( m_trialTimes[k + 1], m_tCmd );
+                    t[k + 1] = dmTemporalResponseMath::tsDiffUs( m_trialTimes[k + 1], m_tCmd );
                 }
 
                 curves.push_back( r );
@@ -3173,29 +3216,30 @@ inline int dmTemporalResponse::runMeasurement()
             return log<software_error, -1>( { __FILE__, __LINE__, "error forming difference cube" } );
         }
 
-        // Curve statistics over the M trials
-        std::vector<double> rmean( N, 0.0 ), rstd( N, 0.0 ), tmean( N, 0.0 );
+        // Curve statistics over the M trials.  Curves have L = N + 1 points: the baseline, then the N frames.
+        const int           L = N + 1;
+        std::vector<double> rmean( L, 0.0 ), rstd( L, 0.0 ), tmean( L, 0.0 );
         for( size_t j = 0; j < curves.size(); ++j )
         {
-            for( int i = 0; i < N; ++i )
+            for( int i = 0; i < L; ++i )
             {
                 rmean[i] += curves[j][i];
                 tmean[i] += times[j][i];
             }
         }
-        for( int i = 0; i < N; ++i )
+        for( int i = 0; i < L; ++i )
         {
             rmean[i] /= curves.size();
             tmean[i] /= curves.size();
         }
         for( size_t j = 0; j < curves.size(); ++j )
         {
-            for( int i = 0; i < N; ++i )
+            for( int i = 0; i < L; ++i )
             {
                 rstd[i] += ( curves[j][i] - rmean[i] ) * ( curves[j][i] - rmean[i] );
             }
         }
-        for( int i = 0; i < N; ++i )
+        for( int i = 0; i < L; ++i )
         {
             rstd[i] = sqrt( rstd[i] / curves.size() );
         }
@@ -3233,22 +3277,22 @@ inline int dmTemporalResponse::runMeasurement()
                        " rise=" + std::to_string( met.m_rise ) + " jitter=" + std::to_string( met.m_jitter ) +
                        " delayErr=" + std::to_string( met.m_delayErrMean ) + "+/-" + std::to_string( met.m_delayErrStd ) );
 
-        // Live response curves, N x K (completed delays so far)
+        // Live response curves, (N+1) x K (completed delays so far)
         try
         {
-            mx::improc::eigenImage<float> resp( N, m_delays.size() );
+            mx::improc::eigenImage<float> resp( L, m_delays.size() );
             resp.setZero();
             for( size_t kk = 0; kk < m_respMean.size(); ++kk )
             {
-                for( int i = 0; i < N; ++i )
+                for( int i = 0; i < L; ++i )
                 {
                     resp( i, kk ) = m_respMean[kk][i];
                 }
             }
-            if( !m_respStream.valid() || m_respStream.rows() != static_cast<uint32_t>( N ) ||
+            if( !m_respStream.valid() || m_respStream.rows() != static_cast<uint32_t>( L ) ||
                 m_respStream.cols() != m_delays.size() )
             {
-                m_respStream.create( m_configName + "_resp", N, m_delays.size() );
+                m_respStream.create( m_configName + "_resp", L, m_delays.size() );
             }
             m_respStream = resp;
         }
@@ -3388,7 +3432,7 @@ inline void dmTemporalResponse::appendRunHeader( mx::fits::fitsHeader<XWC_DEFAUL
     fh.append( "INSTRUME", std::string( "MagAO-X " ) + m_configName );
     fh.append( "DMSTREAM", m_dmStreamName, "DM channel poked" );
     fh.append( "WFSSHMIM", shmimMonitorT::m_shmimName, "WFS camera stream" );
-    fh.append( "WFSFPS", m_run.m_fps, "WFS camera fps at run start" );
+    fh.append( "WFSFPS", dmTemporalResponseMath::headerValue( m_run.m_fps ), "WFS camera fps at run start" );
     fh.append( "POKEMODE",
                std::string( m_run.m_pokeMode == dmTemporalResponseMath::pokeMode::actuator ? "actuator" : "pattern" ),
                "poke mode" );
@@ -3406,7 +3450,7 @@ inline void dmTemporalResponse::appendRunHeader( mx::fits::fitsHeader<XWC_DEFAUL
 
     fh.append( "POKEAMP", m_run.m_pokeAmp, "poke amplitude [DM units]" );
     fh.append( "NDELAYS", m_run.m_nDelays, "K, number of delays" );
-    fh.append( "DLYSPAN", m_span, "delay grid span [us]" );
+    fh.append( "DLYSPAN", dmTemporalResponseMath::headerValue( m_span ), "delay grid span [us]" );
     fh.append( "NFRAMES", m_run.m_nFrames, "N, frames per trial" );
     fh.append( "NTRIALS", m_run.m_nTrials, "M, trials per delay (M/2 +, M/2 -)" );
     fh.append( "NREF", m_run.m_nRef, "reference-pass trial pairs" );
@@ -3430,18 +3474,18 @@ inline int dmTemporalResponse::writeCube( size_t                              id
         dmax = *std::max_element( delayErrs.begin(), delayErrs.end() ) + m_delays[idx];
     }
 
-    fh.append( "DELAYUS", m_delays[idx], "requested delay [us]" );
+    fh.append( "DELAYUS", dmTemporalResponseMath::headerValue( m_delays[idx] ), "requested delay [us]" );
     fh.append( "DLYIDX", static_cast<int>( idx ), "delay index" );
-    fh.append( "DLYMEAN", met.m_delayErrMean + m_delays[idx], "mean achieved delay [us]" );
-    fh.append( "DLYSTD", met.m_delayErrStd, "std of achieved delay [us]" );
-    fh.append( "DLYMIN", dmin, "min achieved delay [us]" );
-    fh.append( "DLYMAX", dmax, "max achieved delay [us]" );
+    fh.append( "DLYMEAN", dmTemporalResponseMath::headerValue( met.m_delayErrMean + m_delays[idx] ), "mean achieved delay [us]" );
+    fh.append( "DLYSTD", dmTemporalResponseMath::headerValue( met.m_delayErrStd ), "std of achieved delay [us]" );
+    fh.append( "DLYMIN", dmTemporalResponseMath::headerValue( dmin ), "min achieved delay [us]" );
+    fh.append( "DLYMAX", dmTemporalResponseMath::headerValue( dmax ), "max achieved delay [us]" );
     fh.append( "NINVALID", nInvalid, "invalid (retried) trials" );
-    fh.append( "LATEFRAC", met.m_lateFrac, "fraction of late pokes" );
+    fh.append( "LATEFRAC", dmTemporalResponseMath::headerValue( met.m_lateFrac ), "fraction of late pokes" );
     fh.append( "LATEFLAG", static_cast<int>( met.m_lateFrac > m_run.m_maxLateFrac ), "1 if LATEFRAC > maxLateFrac" );
-    fh.append( "T50", met.m_t50, "t50 [us] from command" );
-    fh.append( "RISE", met.m_rise, "10-90% rise [us]" );
-    fh.append( "JITTER", met.m_jitter, "std of r at t50 frame" );
+    fh.append( "T50", dmTemporalResponseMath::headerValue( met.m_t50 ), "t50 [us] from command, -999 if NA" );
+    fh.append( "RISE", dmTemporalResponseMath::headerValue( met.m_rise ), "10-90% rise [us], -999 if NA" );
+    fh.append( "JITTER", dmTemporalResponseMath::headerValue( met.m_jitter ), "std of r at t50 frame, -999 if NA" );
 
     std::string fname = m_runDir + "/" + dmTemporalResponseMath::cubeFileName( m_delays[idx] );
 
@@ -3496,15 +3540,15 @@ inline int dmTemporalResponse::writeReference()
 inline int dmTemporalResponse::writeSummary( const std::vector<double> &grid, const std::vector<double> &val )
 {
     size_t K = m_metrics.size();
-    int    N = m_run.m_nFrames;
+    int    L = m_run.m_nFrames + 1; // response curves include the pre-poke baseline point
 
     mx::fits::fitsFile<float, XWC_DEFAULT_VERBOSITY> ff;
 
-    // Curves: [N, K, 3] planes are mean response, std, and time [us]
-    mx::improc::eigenCube<float> curves( N, K, 3 );
+    // Curves: [N+1, K, 3] planes are mean response, std, and time [us]; row 0 is the pre-poke baseline
+    mx::improc::eigenCube<float> curves( L, K, 3 );
     for( size_t k = 0; k < K; ++k )
     {
-        for( int i = 0; i < N; ++i )
+        for( int i = 0; i < L; ++i )
         {
             curves.image( 0 )( i, k ) = m_respMean[k][i];
             curves.image( 1 )( i, k ) = m_respStd[k][i];
@@ -3544,7 +3588,7 @@ inline int dmTemporalResponse::writeSummary( const std::vector<double> &grid, co
     {
         mx::fits::fitsHeader<XWC_DEFAULT_VERBOSITY> fhc;
         appendRunHeader( fhc );
-        fhc.append( "PLANE0", std::string( "rmean" ), "mean response vs frame (rows) and delay (cols)" );
+        fhc.append( "PLANE0", std::string( "rmean" ), "mean response, row 0 = pre-poke baseline" );
         fhc.append( "PLANE1", std::string( "rstd" ), "trial std of the response" );
         fhc.append( "PLANE2", std::string( "time" ), "mean time from DM command [us]" );
         if( !dmTemporalResponseMath::writeOk( ff.write( m_runDir + "/summary_curves.fits", curves, fhc ) ) )

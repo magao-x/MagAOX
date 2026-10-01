@@ -368,3 +368,19 @@ First build and test on the MagAO-X computer (exao2), 2026-10-01.
 - **Status:** pending a re-run. The 9 passing cases don't account for all 13 harness-free cases, so some failures may have another cause. Needs the full `grep -B4 -A6 FAILED` output.
 
 The `ERR ... invalid poke.mode: both` log line during the test run is expected: it comes from the configuration test that checks a bad mode is rejected.
+
+### 3. NaN handling under `-ffast-math`, rise-time crossing, and test thread aborts
+- **Symptoms** (second test run, after fix 2): 25 test cases ran, 17 passed and 8 failed, and the run then aborted with `SIGABRT` ("terminate called without an active exception").
+  - These NaN checks failed: `validateCommand(NaN)`, `validatePattern` with a NaN pixel, `resampleAverage` empty-bin NaN, `bestDelay` with all-NaN metrics, and `!isfinite(m_rise)`.
+  - `resampleAverage` with NaN times threw "cannot create std::vector larger than max_size()".
+  - The full run, trial-ordering, and retry tests returned -1 from `runMeasurement()`, with `FITS: bad float to formatted string conversion (fits_bad_f2c)` while writing `dmresp_delay_00000us.fits`.
+- **Cause A, `-ffast-math`:** the MagAO-X build compiles with `-ffast-math`, which implies `-ffinite-math-only`. GCC may then fold `std::isfinite()`/`std::isnan()` to "finite", so every NaN check was dead code.
+  - **Fix:** added `dmTemporalResponseMath::isFinite(double/float)`, which checks the IEEE 754 exponent bits directly (it can't be optimized away), and replaced all `std::isfinite`/`std::isnan` uses in the app and tests.
+- **Cause B, NaN in FITS headers:** cfitsio can't format NaN in a header card (`fits_bad_f2c`), so any NaN metric made `writeCube()` fail and aborted the run.
+  - **Fix:** every floating-point header card goes through `headerValue()`, which writes `headerSentinel` (`-999`) for non-finite values; the T50/RISE/JITTER comments note this. NaN values in the image data are still written as NaN (cfitsio supports that).
+- **Cause C, the rise time could not be computed:** for small delays the first post-poke frame is already above 10% (with τ = 3 ms and 1 ms frames, r ≈ 0.27 at d = 0), so the curve never crossed 0.1 from below and `rise` was NaN. This would also happen on hardware.
+  - **Fix:** each per-trial response curve now starts with the pre-poke baseline point, r = 0 (the trigger frame relative to itself) at t = trigger `atime` − command time (≤ 0). Curves have N + 1 points: `summary_curves.fits` is `[N+1, K, 3]` and the live `_resp` shmim is (N+1) × K. Cubes still have N frames.
+- **Cause D, the SIGABRT:** in the retry test a `REQUIRE` failed while the injector `std::thread` was still joinable, so destroying it called `std::terminate`.
+  - **Fix:** the tests with helper threads (retry, abort on retries, fps change, measurement thread) now store results, join their threads, and only then `REQUIRE`.
+- Added the "finite checks and header sentinel" test case. Updated the doc page for the N+1 curves and the -999 sentinel.
+- Expected log noise during tests: `Cannot open shm file ..._nodm_...` (the missing-DM test), `FITS: error reading ... junk.fits` (the bad-file test), and `invalid poke.mode: both`.
