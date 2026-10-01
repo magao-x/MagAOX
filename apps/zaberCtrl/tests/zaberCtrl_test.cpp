@@ -8,6 +8,17 @@
 #include "../../../tests/testXWC.hpp"
 #include "../../../tests/testMacrosINDI.hpp"
 
+#include "../../../libMagAOX/libMagAOX.hpp"
+
+// Validation tests send empty properties; data-bearing fixtures must execute the real callback.
+#undef INDI_VALIDATE_CALLBACK_PROPS
+#define INDI_VALIDATE_CALLBACK_PROPS( prop1, prop2 ) \
+    INDI_VALIDATE_CALLBACK_PROPS_IMPL( prop1, prop2 ) \
+    if( ( prop2 ).getElements().empty() )             \
+    {                                                \
+        return 0;                                    \
+    }
+
 #include "../zaberCtrl.hpp"
 
 using namespace MagAOX::app;
@@ -304,7 +315,7 @@ SCENARIO( "Preset-name aliases follow the selected shared-position preset", "[za
         REQUIRE( zct.activeAliasName() == "science" );
     }
 
-    WHEN( "the alias tracking is cleared on power off" )
+    WHEN( "the alias at the retained position is preserved on power off" )
     {
         REQUIRE( zct.setPresetAliasIndex( 3 ) == 0 );
 
@@ -312,6 +323,74 @@ SCENARIO( "Preset-name aliases follow the selected shared-position preset", "[za
         REQUIRE( zct.movingState() == -2 );
         REQUIRE( zct.presetValue() == 3 );
         REQUIRE( zct.presetTargetValue() == 3 );
+        REQUIRE( zct.activeAliasIndex() == 3 );
+        REQUIRE( zct.activeAliasName() == "focus" );
+        REQUIRE( zct.telemetryAliasName() == "focus" );
+    }
+}
+
+/// Verify power-off resolves the retained position rather than an interrupted named target.
+/** \ingroup zaberCtrl_unit_test
+ */
+TEST_CASE( "Powered-off preset names follow the retained position", "[zaberCtrl][parked]" )
+{
+    // clang-format off
+    #ifdef ZABERCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::dev::stdMotionStage<zaberCtrl>::onPowerOff();
+    MagAOX::app::dev::stdMotionStage<zaberCtrl>::activePresetNameIndex( 0 );
+    MagAOX::app::dev::stdMotionStage<zaberCtrl>::telemetryPresetName();
+    zaberCtrl::syncPowerOffStageTelemetry();
+    #endif
+    // clang-format on
+
+    zaberCtrl_test zct( "stest" );
+    zct.setPresets( { -1, 10, 20, 20 }, { "none", "open", "science", "focus" } );
+    zct.setParked( true );
+    zct.setStagePosition( 10.0, 1000.0 );
+    zct.setStageTelemetry( 1, 1, 3 );
+    zct.setMovingState( 1 );
+    REQUIRE( zct.setPresetAliasIndex( 3 ) == 0 );
+
+    // A running named move still reports the requested alias.
+    REQUIRE( zct.activeAliasName() == "focus" );
+
+    SECTION( "Power-off interrupts motion at another preset" )
+    {
+        REQUIRE( zct.stageOnPowerOff() == 0 );
+        REQUIRE( zct.syncPoweredOffTelemetry() == 0 );
+        REQUIRE( zct.movingState() == -2 );
+        REQUIRE( zct.presetValue() == 1 );
+        REQUIRE( zct.presetTargetValue() == 1 );
+        REQUIRE( zct.activeAliasIndex() == 1 );
+        REQUIRE( zct.activeAliasName() == "open" );
+        REQUIRE( zct.telemetryAliasName() == "open" );
+    }
+
+    SECTION( "Power-off interrupts motion between presets" )
+    {
+        zct.setStagePosition( 15.0, 1000.0 );
+        REQUIRE( zct.stageOnPowerOff() == 0 );
+        REQUIRE( zct.syncPoweredOffTelemetry() == 0 );
+        REQUIRE( zct.presetValue() == 0 );
+        REQUIRE( zct.presetTargetValue() == 0 );
+        REQUIRE( zct.activeAliasIndex() == 0 );
+        REQUIRE( zct.activeAliasName() == "none" );
+        REQUIRE( zct.telemetryAliasName().empty() );
+    }
+
+    SECTION( "Not-homed sentinel also cannot report a different commanded position" )
+    {
+        zct.setStageTelemetry( -1, 1, 3 );
+        REQUIRE( zct.activeAliasName() == "open" );
+        REQUIRE( zct.telemetryAliasName() == "open" );
+    }
+
+    SECTION( "Power-off at the alias position preserves its name" )
+    {
+        zct.setStagePosition( 20.0, 1000.0 );
+        REQUIRE( zct.stageOnPowerOff() == 0 );
+        REQUIRE( zct.syncPoweredOffTelemetry() == 0 );
+        REQUIRE( zct.presetValue() == 2 );
         REQUIRE( zct.activeAliasIndex() == 3 );
         REQUIRE( zct.activeAliasName() == "focus" );
         REQUIRE( zct.telemetryAliasName() == "focus" );

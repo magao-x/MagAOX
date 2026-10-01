@@ -751,7 +751,8 @@ int stdMotionStage<derivedT>::activePresetNameIndex( int presetIndex ) const
 {
     if( m_presetNameIndex >= 0 && m_presetNameIndex < static_cast<int>( m_presetPositions.size() ) )
     {
-        if( m_moving != 0 && m_movingState == 1 )
+        // Negative motion sentinels must resolve names from the retained position.
+        if( m_moving > 0 && m_movingState == 1 )
         {
             return m_presetNameIndex;
         }
