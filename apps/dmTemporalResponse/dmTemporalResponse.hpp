@@ -2793,7 +2793,9 @@ inline int dmTemporalResponse::prepareRun( const timespec &runStart )
             { __FILE__, __LINE__, "exception opening DM " + m_dmStreamName + ": " + e.what() } );
     }
 
-    m_dmStream.passive( true );
+    // Must not be passive: a passive milkImage does not increment cnt0 on write, so dmcomb never applies the poke to the
+    // DM (and viewers such as rtimv never refresh).  Set explicitly since m_dmStream is reused across runs.
+    m_dmStream.passive( false );
 
     uint32_t dmRows = m_dmStream.rows();
     uint32_t dmCols = m_dmStream.cols();

@@ -1723,7 +1723,11 @@ TEST_CASE( "dmTemporalResponse start validation", "[dmTemporalResponse][run]" )
 
     SECTION( "valid actuator start" )
     {
+        app.m_dmStream.open( app.m_dmStreamOverride );
+        app.m_dmStream.passive( true ); // a passive stream would never trigger dmcomb
+
         REQUIRE( app.prepareRun( now ) == 0 );
+        REQUIRE( app.m_dmStream.passive() == false );
         REQUIRE( app.m_delays.size() == 4 );
         REQUIRE( app.m_span == Approx( 1000 ) );
         REQUIRE( app.m_delaysText != "" );
