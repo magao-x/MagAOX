@@ -1,12 +1,13 @@
 # xInstGraph: parked motion stages in POWEROFF
 
 - Date: 2026-10-01
-- Status: implemented and verified in software; hardware verification pending
+- Status: initial routing verified operationally; parkable opt-in follow-up verified in software
 - Source baseline: MagAOX `4b57330e` on `jrmales/instgraph-updates`
 
 ## Objective
 
-When a stage reports `fsm.state=POWEROFF` and `parked.current` is true,
+When configured with `parkable=true`, and a stage reports `fsm.state=POWEROFF`
+and `parked.current` is true,
 `xInstGraph` should apply its published position to the graph puts. The FSM
 and the graph's `fsmstate` extra must continue to say `POWEROFF`.
 
@@ -125,14 +126,15 @@ which adding a parked subscription alone will not solve.
 | --- | --- | --- |
 | `READY` | Any parking value | Preserve existing preset and tracking behavior. |
 | `OPERATING` | Any parking value | Preserve existing tracking behavior; do not add normal preset routing. |
-| `POWEROFF` | Parked, usable named preset | Apply normal preset routing and labels; keep `fsmstate=POWEROFF`. |
-| `POWEROFF` | Not parked, parking unknown, or no usable preset | All puts off, including `alwaysOn`. |
+| `POWEROFF` | `parkable=true`, parked, usable named preset | Apply normal preset routing and labels; keep `fsmstate=POWEROFF`. |
+| `POWEROFF` | Parking disabled, not parked, parking unknown, or no usable preset | All puts off, including `alwaysOn`. |
 | Any other FSM state | Even if parked | Preserve current inactive behavior. |
 
 For the powered-off parked case:
 
-- Require an affirmative `<device>.parked.current`; initialize parking false.
-  A device with no parked property retains its existing behavior.
+- Require `parkable=true` and an affirmative `<device>.parked.current`; initialize
+  the current parked state false. The capability option defaults false. Stages
+  without the parking interface do not subscribe and retain their usual behavior.
 - Use the controller-published named selection from the configured
   `presetPrefix`. Never use a target or infer a route from a numeric position.
 - Require one nonempty, non-`none` selected name. Ambiguous selections are not
@@ -171,11 +173,13 @@ needed.
 ### 2. Subscribe to parking in stdMotionNode
 
 Add documented `m_parked` state, initially false, and a `<device>.parked` key
-registered when `device()` is set. Consume the Number property's `current`
+registered when `device()` is set only if the configuration enables
+`parkable=true` (default false). Consume the Number property's `current`
 element, matching the GUI/controller contract. Changes to that flag must trigger
 recomputation. If a received parked property lacks a usable `current` value,
 clear the cached parked flag. Handle malformed data locally without throwing
-out of the callback. Keep this automatic and optional; no new config setting is needed.
+out of the callback. `parkable` denotes support for the interface, separate
+from the live parked flag. Disabled nodes ignore unsolicited parked messages.
 
 ### 3. Separate usable position from operational FSM and tracking
 
@@ -341,3 +345,46 @@ run for this planning task.
   still shown, including an xInstGraph restart while the stage is powered off.
 - Numeric-only positions without a named route and app-wide disconnect/deletion
   invalidation remain the explicit follow-up boundaries above.
+
+## Operational follow-up: explicit parking capability (2026-10-01)
+
+The user confirmed the installed parked-routing changes work, but reported
+`INDI property still unresolved after retry backoff: <stage>.parked` notices for
+stages without the interface. The original unconditional subscription entered
+MagAOXApp's normal retry/backoff path, whose missing-property diagnostic is
+expected for a configured subscription.
+
+- Add the per-node boolean `parkable`, default false. Read it before registering
+  device keys. Subscribe to `<device>.parked` and allow parked power-off routing
+  only when true; disabled stages ignore unsolicited parking updates.
+- Keep normal FSM, preset, and tracking subscriptions and behavior. A stage
+  configured true still receives the usual unresolved-property diagnostic if
+  its promised parking interface does not appear.
+- This supersedes the original automatic-subscription design. Deployments using
+  the preceding parked-routing version must add `parkable=true` to each existing
+  stdMotion section whose controller publishes `parked.current`. Omit it or use
+  false for stages without that capability. No controller or library changes
+  are needed for this follow-up.
+- Cover omitted, explicit false, and explicit true in node and app tests. Assert
+  subscription registration as well as READY routing and powered-off behavior,
+  including ignoring unsolicited parking for disabled stages. Existing parked
+  fixtures must explicitly opt in.
+
+### Capability implementation verification
+
+- Added `m_parkable`, default false, and consumed `parkable` before device key
+  registration. Both parked callbacks and powered-off routing require the option.
+- Existing parked fixtures explicitly enable the capability. New node and app
+  regressions cover omitted, false, and true, including subscription keys, READY
+  routing, POWEROFF routing, the retained FSM label, and unsolicited updates.
+- The complete stdMotionNode suite passed 1536 assertions in 10 cases; the
+  complete xInstGraph suite passed 411 assertions in 18 cases (1947 assertions
+  in 28 cases total).
+- The xInstGraph app built successfully with `make -C apps/xInstGraph -j1`.
+  `clang-format --dry-run --Werror` and `git diff --check` passed. Focused Doxygen
+  generated both new cases with links from the real configuration/subscription
+  and app dispatch methods.
+- Rebuild and install xInstGraph, then add `parkable=true` to supported stage
+  sections. The deployed config was not modified here. Confirm unsupported
+  stages no longer request parking and supported parked stages retain their
+  powered-off routes. No controller or instGraph library rebuild is required.

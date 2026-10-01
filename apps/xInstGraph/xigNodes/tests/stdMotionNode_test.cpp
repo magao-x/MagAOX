@@ -1227,16 +1227,18 @@ struct parkedMotionFixture
     std::unique_ptr<stdMotionNode> m_node;
 
     /// Configure a single-put or multi-put stage in either direction.
-    parkedMotionFixture( ingr::ioDir        dir,    /**< [in] selected put direction */
-                         bool               multi,  /**< [in] whether names select multiple puts */
-                         const std::string &prefix, /**< [in] preset or filter notation */
-                         bool               tracking = false /**< [in] configure tracking subscriptions */ );
+    parkedMotionFixture( ingr::ioDir        dir,              /**< [in] selected put direction */
+                         bool               multi,            /**< [in] whether names select multiple puts */
+                         const std::string &prefix,           /**< [in] preset or filter notation */
+                         bool               tracking = false, /**< [in] configure tracking subscriptions */
+                         const std::string &parkable = "true" /**< [in] parking option value; empty to omit */ );
 
     /// Remove the fixture's files.
     ~parkedMotionFixture();
 };
 
-parkedMotionFixture::parkedMotionFixture( ingr::ioDir dir, bool multi, const std::string &prefix, bool tracking )
+parkedMotionFixture::parkedMotionFixture(
+    ingr::ioDir dir, bool multi, const std::string &prefix, bool tracking, const std::string &parkable )
 {
     char        name[] = "/tmp/parkedMotionNode_XXXXXX";
     const char *root   = ::mkdtemp( name );
@@ -1256,6 +1258,11 @@ parkedMotionFixture::parkedMotionFixture( ingr::ioDir dir, bool multi, const std
                                      dir == ingr::ioDir::input ? "input" : "output",
                                      prefix,
                                      multi ? "routeA,routeB,ref" : selected.front() };
+    if( !parkable.empty() )
+    {
+        keys.push_back( "parkable" );
+        values.push_back( parkable );
+    }
     if( multi )
     {
         keys.insert( keys.end(), { "alwaysOn", "noAutoOn" } );
@@ -1423,6 +1430,49 @@ TEST_CASE( "stdMotionNode routes parked positions independently of message order
                     }
                 } while( std::next_permutation( order.begin(), order.end() ) );
             }
+}
+
+/// Parking is requested and used only when the configuration explicitly enables that capability.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode subscribes to parking only when parkable", "[instGraph::stdMotionNode][parked]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::loadConfig( *(mx::app::appConfigurator *)nullptr );
+    stdMotionNode::device( "fwtelsim" );
+    stdMotionNode::handleSetProperty( pcf::IndiProperty() );
+    #endif
+    // clang-format on
+
+    for( const std::string option : { "", "false", "true" } )
+    {
+        CAPTURE( option );
+        const bool          enabled = option == "true";
+        parkedMotionFixture fixture( ingr::ioDir::output, true, "preset", false, option );
+        auto               &node = *fixture.m_node;
+        REQUIRE( node.keys().count( "fwtelsim.parked" ) == ( enabled ? 1 : 0 ) );
+        REQUIRE( node.keys().count( "fwtelsim.fsm" ) == 1 );
+        REQUIRE( node.keys().count( "fwtelsim.presetName" ) == 1 );
+        REQUIRE( node.handleSetProperty( motionPreset( { "routeA" } ) ) == 0 );
+        REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
+        REQUIRE( node.curLabel() == "routeA" );
+        REQUIRE( node.node()->output( "routeA" )->state() == ingr::putState::on );
+        REQUIRE( node.handleSetProperty( motionParked( "1" ) ) == 0 );
+        REQUIRE( node.handleSetProperty( motionFSM( "POWEROFF" ) ) == 0 );
+        if( enabled )
+        {
+            REQUIRE( node.curLabel() == "routeA" );
+            REQUIRE( node.node()->output( "routeA" )->state() == ingr::putState::on );
+        }
+        else
+        {
+            requireMotionOff( node );
+            REQUIRE( node.curLabel() == "off" );
+            REQUIRE( node.handleSetProperty( motionParked( "1" ) ) == 0 );
+            requireMotionOff( node );
+        }
+    }
 }
 
 /// Powered-off routes require valid parking, one named selection, and the exact FSM state.

@@ -21,7 +21,8 @@
  * The preset is specified by an INDI property with signature `<device>.<presetPrefix>Name` where device
  * and presetPrefix are part of the configuration.  This INDI property is a switch vector.
  *
- * A Number property `<device>.parked` with a nonzero `current` element makes a published preset usable in `POWEROFF`.
+ * With `parkable=true`, a Number property `<device>.parked` with nonzero `current` makes a preset usable in `POWEROFF`.
+ * Parking support defaults false; only enabled stages subscribe to this property.
  * The true FSM is preserved. This retained-position path takes priority over tracking flags and requires one
  * selected name, matching a configured put when the node selects among multiple puts.
  *
@@ -42,6 +43,9 @@ class stdMotionNode : public fsmNode
 
     /// Whether the latest preset property is a Switch vector with exactly one selected name.
     bool m_presetSelectionValid{ false };
+
+    /// Configuration opt-in for subscribing to and using the stage's parked state.
+    bool m_parkable{ false };
 
     /// The INDI key for the optional device-local Number property parked.current.
     std::string m_parkedKey;
@@ -179,7 +183,10 @@ inline void stdMotionNode::device( const std::string &dev )
     fsmNode::device( dev );
 
     m_parkedKey = m_device + ".parked";
-    key( m_parkedKey );
+    if( m_parkable )
+    {
+        key( m_parkedKey );
+    }
 
     // If presetPrefix is set, then we can make the key
     if( m_presetPrefix != "" )
@@ -347,7 +354,7 @@ inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
             }
         }
     }
-    else if( ipRecv.createUniqueKey() == m_parkedKey )
+    else if( m_parkable && ipRecv.createUniqueKey() == m_parkedKey )
     {
         bool parked = false;
         if( ipRecv.getType() == pcf::IndiProperty::Number && ipRecv.find( "current" ) )
@@ -410,7 +417,7 @@ inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 
 inline bool stdMotionNode::parkedPowerOff() const
 {
-    return m_state == MagAOX::app::stateCodes::POWEROFF && m_parked;
+    return m_parkable && m_state == MagAOX::app::stateCodes::POWEROFF && m_parked;
 }
 
 inline bool stdMotionNode::parkedPresetValid() const
@@ -783,6 +790,8 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
                                       name() + "]" );
         }
     }
+
+    config.configUnused( m_parkable, mx::app::iniFile::makeKey( name(), "parkable" ) );
 
     device( dev );
     presetPrefix( prePrefix );

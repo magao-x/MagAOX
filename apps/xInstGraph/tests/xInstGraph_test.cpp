@@ -1217,9 +1217,10 @@ TEST_CASE( "xInstGraph publishes parked power-off positions", "[xInstGraph][park
                    "</root></mxGraphModel></diagram></mxfile>";
         }
         const std::string source = readFile( input );
-        writeNodeSections( temp.root / "config" / "instgraph_test.conf",
-                           output,
-                           "[motionStage]\ntype=stdMotion\ndevice=teststage\npresetPrefix=filter\npresetDir=input\n" );
+        writeNodeSections(
+            temp.root / "config" / "instgraph_test.conf",
+            output,
+            "[motionStage]\ntype=stdMotion\ndevice=teststage\npresetPrefix=filter\npresetDir=input\nparkable=true\n" );
         xInstGraph app;
         loadFixture( app, temp.root );
         REQUIRE( app.shutdown() == 0 );
@@ -1280,6 +1281,86 @@ TEST_CASE( "xInstGraph publishes parked power-off positions", "[xInstGraph][park
         REQUIRE( app.appShutdown() == 0 );
         REQUIRE_FALSE( std::filesystem::exists( output ) );
     } while( std::next_permutation( order.begin(), order.end() ) );
+}
+
+/// Disabled parking has no callback registration and cannot change a powered-off graph.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph registers parked callbacks only for parkable stages", "[xInstGraph][parked]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::appStartup();
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::loadConfig( *(mx::app::appConfigurator *)nullptr );
+    #endif
+    // clang-format on
+
+    for( const std::string option : { "", "false", "true" } )
+    {
+        CAPTURE( option );
+        const bool         enabled = option == "true";
+        temporaryDirectory temp;
+        const auto         input  = temp.root / "config" / "instgraph_test.drawio";
+        const auto         output = temp.root / "output.drawio";
+        {
+            std::ofstream xml( input );
+            xml << "<mxfile><diagram><mxGraphModel><root>"
+                   "<mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>"
+                   "<mxCell id=\"node:motionStage\"/>"
+                   "<mxCell id=\"output:motionStage:out\" value=\"out\" style=\"strokeColor=#FF0000;\"/>"
+                   "<mxCell id=\"state:motionStage\" value=\"before\"/>"
+                   "<mxCell id=\"fsmstate:motionStage\" value=\"before\"/>"
+                   "</root></mxGraphModel></diagram></mxfile>";
+        }
+        writeNodeSections( temp.root / "config" / "instgraph_test.conf",
+                           output,
+                           "[motionStage]\ntype=stdMotion\n" +
+                               ( option.empty() ? std::string{} : "parkable=" + option + "\n" ) );
+        xInstGraph app;
+        loadFixture( app, temp.root );
+        REQUIRE( app.shutdown() == 0 );
+        REQUIRE( app.appStartup() == 0 );
+        REQUIRE( app.enableIndiDispatch() );
+        REQUIRE( app.subscribed( "motionStage.parked" ) == enabled );
+        REQUIRE( app.subscribed( "motionStage.fsm" ) );
+        REQUIRE( app.subscribed( "motionStage.presetName" ) );
+        pcf::IndiProperty fsm( pcf::IndiProperty::Text );
+        fsm.setDevice( "motionStage" );
+        fsm.setName( "fsm" );
+        fsm.add( pcf::IndiElement( "state", "READY" ) );
+        pcf::IndiProperty preset( pcf::IndiProperty::Switch );
+        preset.setDevice( "motionStage" );
+        preset.setName( "presetName" );
+        preset.add( pcf::IndiElement( "open", pcf::IndiElement::On ) );
+        app.handleDefProperty( fsm );
+        app.handleDefProperty( preset );
+        REQUIRE( cellTag( readFile( output ), "output:motionStage:out" ).find( "strokeColor=#00FF00;" ) !=
+                 std::string::npos );
+        fsm["state"] = "POWEROFF";
+        app.handleSetProperty( fsm );
+        const auto beforeParked = readFile( output );
+        REQUIRE( cellTag( beforeParked, "output:motionStage:out" ).find( "strokeColor=#FF0000;" ) !=
+                 std::string::npos );
+        pcf::IndiProperty parked( pcf::IndiProperty::Number );
+        parked.setDevice( "motionStage" );
+        parked.setName( "parked" );
+        parked.add( pcf::IndiElement( "current", "1" ) );
+        app.handleDefProperty( parked );
+        REQUIRE( app.appLogic() == 0 );
+        const auto afterParked = readFile( output );
+        REQUIRE( cellTag( afterParked, "fsmstate:motionStage" ).find( "value=\"POWEROFF\"" ) != std::string::npos );
+        if( enabled )
+        {
+            REQUIRE( cellTag( afterParked, "output:motionStage:out" ).find( "strokeColor=#00FF00;" ) !=
+                     std::string::npos );
+        }
+        else
+        {
+            REQUIRE( afterParked == beforeParked );
+        }
+        REQUIRE( app.appShutdown() == 0 );
+    }
 }
 
 } // namespace xInstGraphTest
