@@ -402,3 +402,16 @@ The `ERR ... invalid poke.mode: both` log line during the test run is expected: 
      - Note: running clang-format with the three paths on one long pasted line produced `dmTemporalResponse_test.cpp: Permission denied`. The line had been broken, so bash tried to execute the test file. Running each file separately worked.
   3. `make coverage` in `tests/` for the 100% statement/function target. Add any `LCOV_EXCL` markers and list them here.
   4. Hardware acceptance (Test Plan layer C) on the RTC with the loop open, starting with a small `poke_amp` on `dm00disp07`.
+
+### 6. Hardware setup on exao2: device missing from cursesINDI (2026-10-01)
+- **Setup done:**
+  - `make install`;
+  - `/opt/MagAOX/config/dmTemporalResponse.conf`;
+  - `dmTemporalResponse dmTemporalResponse` added to `proclist_RTC.txt`;
+  - `dmTemporalResponse` added to `isRTC.conf` `local=`;
+  - `xctrl restart isRTC`, then `xctrl startup dmTemporalResponse`.
+- **Symptom:** after the isRTC restart the device did not appear in cursesINDI, even though the tmux session was active, the process was running, and the driver was in `isRTC.conf`. `getINDI -p 7624 "dmTemporalResponse.*.*"` on exao2 *did* return the properties, so the app and isRTC were working.
+- **Cause:** cursesINDI was running on a different machine. That machine's xindiserver builds its list of remote RTC drivers from its **own local copy** of `isRTC.conf`, read at startup (`remote.servers`, in `xindiserver::addRemoteServers()`, `m_configDir + "/" + server + ".conf"`). The new driver had only been added to exao2's copy, so restarting the other server re-read the old list.
+- **Workaround used:** run cursesINDI on exao2, which talks to isRTC directly. The properties appear.
+- **Permanent fix (to do):** propagate the `isRTC.conf` change to the other machines through the shared config repo, then restart their INDI servers so `dmTemporalResponse` is visible instrument-wide.
+- No app code changes.
