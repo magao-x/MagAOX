@@ -269,6 +269,9 @@ class orcaCtrl : public MagAOXApp<>,
 
     int connect();
 
+    // Stop capture and release all DCAM resources held by app
+    void closeCamera( bool uninitApi );
+
     int getAcquisitionState();
 
     /// Get the current cooling-fan state from the camera.
@@ -387,12 +390,7 @@ inline orcaCtrl::~orcaCtrl() noexcept
 {
     // Clear the buffers if they were allocated.  This is done here because the destructor is called after the
     // framegrabber thread has exited, so we can safely free the buffers.
-    if( m_dcamBuffersAllocated )
-    {
-        dcamcap_stop( m_cameraHandle );
-        dcambuf_release( m_cameraHandle );
-        m_dcamBuffersAllocated = false;
-    }
+    closeCamera( false );
 }
 
 inline void orcaCtrl::setupConfig()
@@ -608,15 +606,14 @@ inline int orcaCtrl::onPowerOff()
 {
     std::lock_guard<std::mutex> lock( m_indiMutex );
 
-    if( m_cameraHandle )
-    {
-        dcamdev_close( m_cameraHandle );
-        m_cameraHandle = nullptr;
-    }
-
-    dcamapi_uninit();
+    closeCamera( true );
 
     if( stdCamera<orcaCtrl>::onPowerOff() < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+    }
+
+    if( frameGrabber<orcaCtrl>::onPowerOff() < 0 )
     {
         log<software_error>( { __FILE__, __LINE__ } );
     }
@@ -626,6 +623,7 @@ inline int orcaCtrl::onPowerOff()
 
 inline int orcaCtrl::whilePowerOff()
 {
+    std::lock_guard<std::mutex> lock( m_indiMutex );
 
     if( stdCamera<orcaCtrl>::onPowerOff() < 0 )
     {
@@ -637,23 +635,10 @@ inline int orcaCtrl::whilePowerOff()
 
 inline int orcaCtrl::appShutdown()
 {
-    std::cerr << "appShutdown: stopping frameGrabber\n";
-
     // Stop the framegrabber thread before releasing the DCAM handles it uses.
     FRAMEGRABBER_APP_SHUTDOWN;
 
-    if( m_cameraHandle )
-    {
-        dcamwait_close( m_waitHandle );
-        m_waitHandle = nullptr;
-
-        dcambuf_release( m_cameraHandle );
-
-        dcamdev_close( m_cameraHandle );
-        m_cameraHandle = nullptr;
-    }
-
-    dcamapi_uninit();
+    closeCamera( true );
 
     STDCAMERA_APP_SHUTDOWN;
 
@@ -752,26 +737,7 @@ inline int orcaCtrl::setorcaParameterOnline( int32 parameter, double value )
 inline int orcaCtrl::connect()
 {
     // check if prior session exists and clean it up
-    if( m_waitHandle )
-    {
-        dcamwait_close( m_waitHandle );
-        m_waitHandle = nullptr;
-    }
-
-    if( m_cameraHandle )
-    {
-        // check for existing buffers and release buffers if they exist
-        if( m_dcamBuffersAllocated )
-        {
-            dcamcap_stop( m_cameraHandle );
-            dcambuf_release( m_cameraHandle );
-            m_dcamBuffersAllocated = false;
-        }
-        dcamdev_close( m_cameraHandle );
-        m_cameraHandle = nullptr;
-    }
-
-    dcamapi_uninit();
+    closeCamera( true );
 
     // Init new API instance
     DCAMAPI_INIT apiInit{};
@@ -933,6 +899,36 @@ inline int orcaCtrl::connect()
     }
     dcamapi_uninit();
     return 0;
+}
+
+inline void orcaCtrl::closeCamera( bool uninitAPI ) // if arg is true, also call dcamapi_uninit()
+{
+    if( m_waitHandle )
+    {
+        dcamwait_abort( m_waitHandle ); // wake framegrabber thread if it's waiting
+    }
+
+    if( m_cameraHandle )
+    {
+        dcamcap_stop( m_cameraHandle );
+
+        if( m_dcamBuffersAllocated )
+        {
+            dcambuf_release( m_cameraHandle ); // release alloc buffers on power off
+        }
+    }
+    m_dcamBuffersAllocated = false;
+
+    if( m_waitHandle )
+    {
+        dcamwait_close( m_waitHandle );
+        m_waitHandle = nullptr;
+    }
+
+    if( uninitApi )
+    {
+        dcamapi_uninit;
+    }
 }
 
 inline int orcaCtrl::getAcquisitionState()
