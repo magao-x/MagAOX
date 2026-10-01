@@ -11,21 +11,12 @@
 
 using namespace MagAOX::app;
 
-namespace libXWCTest
+namespace MagAOX
+{
+namespace app
 {
 
-/** \defgroup xindiserver_unit_test xindiserver Unit Tests
- * \brief Unit tests for the xindiserver application.
- *
- * \ingroup application_unit_test
- */
-
-/// Namespace for `xindiserver` unit tests.
-/** \ingroup xindiserver_unit_test
- */
-namespace xindiserverTest
-{
-
+// Defined in MagAOX::app so that xindiserver's `friend class xindiserver_test;` applies to it.
 /// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 struct xindiserver_test
 {
@@ -64,6 +55,24 @@ struct xindiserver_test
     }
 };
 /// \endcond
+
+} // namespace app
+} // namespace MagAOX
+
+namespace libXWCTest
+{
+
+/** \defgroup xindiserver_unit_test xindiserver Unit Tests
+ * \brief Unit tests for the xindiserver application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `xindiserver` unit tests.
+/** \ingroup xindiserver_unit_test
+ */
+namespace xindiserverTest
+{
 
 /// Verify xindiserver builds command lines and tunnel-derived driver lists consistently.
 /**
@@ -220,9 +229,6 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
     }
 }
 
-} // namespace xindiserverTest
-
-} // namespace libXWCTest
 
 SCENARIO( "xindiserver constructs local driver arguments", "[xindiserver]" )
 {
@@ -577,3 +583,100 @@ SCENARIO( "xindiserver constructs both local and remote driver arguments", "[xin
         }
     }
 }
+
+/// Verify xindiserver splits indiserver output into lines and prepares each for logging.
+/**
+ * \ingroup xindiserver_unit_test
+ */
+TEST_CASE( "xindiserver processes indiserver output lines", "[xindiserver]" )
+{
+    auto extract = []( std::string &pending, const std::string &data )
+    {
+        std::vector<std::string> lines;
+        xindiserver::extractISLines( pending, data.data(), data.size(), lines );
+        return lines;
+    };
+
+    SECTION( "a complete line is returned at once" )
+    {
+        std::string pending;
+        auto        lines = extract( pending, "one\n" );
+
+        REQUIRE( lines == std::vector<std::string>{ "one" } );
+        REQUIRE( pending.empty() );
+    }
+
+    SECTION( "several lines in one read are returned separately" )
+    {
+        std::string pending;
+        auto        lines = extract( pending, "one\ntwo\nthree\n" );
+
+        REQUIRE( lines == std::vector<std::string>{ "one", "two", "three" } );
+        REQUIRE( pending.empty() );
+    }
+
+    SECTION( "complete lines are returned while an incomplete tail is kept" )
+    {
+        std::string pending;
+        auto        lines = extract( pending, "one\ntwo\nthr" );
+
+        REQUIRE( lines == std::vector<std::string>{ "one", "two" } );
+        REQUIRE( pending == "thr" );
+    }
+
+    SECTION( "a line split across reads is joined" )
+    {
+        std::string pending;
+
+        REQUIRE( extract( pending, "2026-09-16T02:23:41.230: Dri" ).empty() );
+        REQUIRE( extract( pending, "ver tSS: flu" ).empty() );
+
+        auto lines = extract( pending, "shed 0 bytes\nnext" );
+
+        REQUIRE( lines == std::vector<std::string>{ "2026-09-16T02:23:41.230: Driver tSS: flushed 0 bytes" } );
+        REQUIRE( pending == "next" );
+    }
+
+    SECTION( "a read with no newline returns nothing" )
+    {
+        std::string pending;
+
+        REQUIRE( extract( pending, "no newline yet" ).empty() );
+        REQUIRE( pending == "no newline yet" );
+    }
+
+    SECTION( "empty lines are kept" )
+    {
+        std::string pending;
+
+        REQUIRE( extract( pending, "\n\none\n" ) == std::vector<std::string>{ "", "", "one" } );
+    }
+
+    SECTION( "a zero byte does not truncate the data" )
+    {
+        std::string pending;
+        std::string data( "ab\0cd\nef", 8 );
+
+        auto lines = extract( pending, data );
+
+        REQUIRE( lines.size() == 1 );
+        REQUIRE( lines[0] == std::string( "ab\0cd", 5 ) );
+        REQUIRE( pending == "ef" );
+    }
+
+    SECTION( "fatal errors are critical, everything else is informational" )
+    {
+        REQUIRE( xindiserver::isLogPriority( "Driver tSS:  (xindidriver): failed to lock /opt/x" ) ==
+                 logPrio::LOG_CRITICAL );
+        REQUIRE( xindiserver::isLogPriority( "bind: Address already in use" ) == logPrio::LOG_CRITICAL );
+
+        REQUIRE( xindiserver::isLogPriority( "failed to lock" ) == logPrio::LOG_INFO ); // only from xindidriver
+        REQUIRE( xindiserver::isLogPriority( "Driver tSS:  (xindidriver): starting with x" ) == logPrio::LOG_INFO );
+        REQUIRE( xindiserver::isLogPriority( "Driver tSS: flushed 0 bytes" ) == logPrio::LOG_INFO );
+        REQUIRE( xindiserver::isLogPriority( "" ) == logPrio::LOG_INFO );
+    }
+}
+
+} // namespace xindiserverTest
+
+} // namespace libXWCTest
