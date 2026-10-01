@@ -7,7 +7,12 @@
 
 #include "../../../../tests/testXWC.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <memory>
 
 #include "../../../../libMagAOX/libMagAOX.hpp"
 
@@ -1206,6 +1211,354 @@ TEST_CASE( "stdMotionNode guards missing opposite-side puts at runtime", "[instG
         preset[name].setSwitchState( name == presetNames.front() ? pcf::IndiElement::On : pcf::IndiElement::Off );
     }
     REQUIRE_THROWS_WITH( node.handleSetProperty( preset ), Catch::Matchers::Contains( expected ) );
+}
+
+/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
+/// Isolated graph and configuration for parked motion-node tests.
+struct parkedMotionFixture
+{
+    /// Directory owned by this fixture and removed at destruction.
+    std::filesystem::path m_root;
+
+    /// Parent graph, kept alive until the node is destroyed.
+    ingr::instGraphXML m_graph;
+
+    /// Configured handler owned by this fixture.
+    std::unique_ptr<stdMotionNode> m_node;
+
+    /// Configure a single-put or multi-put stage in either direction.
+    parkedMotionFixture( ingr::ioDir dir, /**< [in] selected put direction */
+                         bool multi, /**< [in] whether names select multiple puts */
+                         const std::string &prefix, /**< [in] preset or filter notation */
+                         bool tracking = false /**< [in] configure tracking subscriptions */ );
+
+    /// Remove the fixture's files.
+    ~parkedMotionFixture();
+};
+
+parkedMotionFixture::parkedMotionFixture( ingr::ioDir dir, bool multi, const std::string &prefix, bool tracking )
+{
+    char name[] = "/tmp/parkedMotionNode_XXXXXX";
+    const char *root = ::mkdtemp( name );
+    if( !root )
+    {
+        throw std::runtime_error( "could not create parked motion fixture" );
+    }
+    m_root = root;
+    const std::vector<std::string> selected = multi ? std::vector<std::string>{ "routeA", "routeB", "ref" }
+                                                   : std::vector<std::string>{ dir == ingr::ioDir::input ? "in" : "out" };
+    writeMotionXML( ( m_root / "graph.drawio" ).string(),
+                    dir == ingr::ioDir::input ? selected : std::vector<std::string>{ "in" },
+                    dir == ingr::ioDir::output ? selected : std::vector<std::string>{ "out" } );
+    std::vector<std::string> keys{ "type", "presetDir", "presetPrefix", "presetPutName" };
+    std::vector<std::string> values{ "stdMotion", dir == ingr::ioDir::input ? "input" : "output", prefix,
+                                    multi ? "routeA,routeB,ref" : selected.front() };
+    if( multi )
+    {
+        keys.insert( keys.end(), { "alwaysOn", "noAutoOn" } );
+        values.insert( values.end(), { "ref", dir == ingr::ioDir::output ? "routeB" : "out" } );
+    }
+    if( tracking )
+    {
+        keys.insert( keys.end(), { "trackingReqKey", "trackingReqElement", "trackerKey", "trackerElement" } );
+        values.insert( values.end(), { "labrules.info", "trackReq", "adctrack.tracking", "toggle" } );
+    }
+    mx::app::writeConfigFile( ( m_root / "config.conf" ).string(),
+                             std::vector<std::string>( keys.size(), "fwtelsim" ), keys, values );
+    m_graph.autoSave( false );
+    std::string error;
+    mx::app::appConfigurator config;
+    if( m_graph.loadXMLFile( error, ( m_root / "graph.drawio" ).string() ) != 0 ||
+        config.readConfig( ( m_root / "config.conf" ).string() ) != 0 )
+    {
+        throw std::runtime_error( "could not load parked motion fixture: " + error );
+    }
+    m_node = std::make_unique<stdMotionNode>( "fwtelsim", &m_graph );
+    m_node->loadConfig( config );
+}
+
+parkedMotionFixture::~parkedMotionFixture()
+{
+    std::error_code error;
+    std::filesystem::remove_all( m_root, error );
+}
+
+/// Build a stage FSM update.
+pcf::IndiProperty motionFSM( const std::string &state /**< [in] reported FSM state */ )
+{
+    pcf::IndiProperty property( pcf::IndiProperty::Text );
+    property.setDevice( "fwtelsim" );
+    property.setName( "fsm" );
+    property.add( pcf::IndiElement( "state", state ) );
+    return property;
+}
+
+/// Build a numeric parked update, including malformed numeric strings for rejection tests.
+pcf::IndiProperty motionParked( const std::string &current /**< [in] numeric parking value */ )
+{
+    pcf::IndiProperty property( pcf::IndiProperty::Number );
+    property.setDevice( "fwtelsim" );
+    property.setName( "parked" );
+    property.add( pcf::IndiElement( "current", current ) );
+    return property;
+}
+
+/// Build a named-position snapshot with the requested names selected.
+pcf::IndiProperty motionPreset( const std::vector<std::string> &selected, /**< [in] On element names */
+                                const std::string &prefix = "preset" /**< [in] preset property prefix */ )
+{
+    pcf::IndiProperty property( pcf::IndiProperty::Switch );
+    property.setDevice( "fwtelsim" );
+    property.setName( prefix + "Name" );
+    for( const char *name : { "routeA", "routeB", "ref", "none" } )
+    {
+        property.add( pcf::IndiElement( name, pcf::IndiElement::Off ) );
+    }
+    for( const auto &name : selected )
+    {
+        if( !property.find( name ) )
+        {
+            property.add( pcf::IndiElement( name ) );
+        }
+        property[name].setSwitchState( pcf::IndiElement::On );
+    }
+    return property;
+}
+
+/// Require all puts, including any alwaysOn put, to be inactive.
+void requireMotionOff( stdMotionNode &node /**< [in] stage handler */ )
+{
+    for( const auto &put : node.node()->inputs() )
+    {
+        REQUIRE( put.second->state() == ingr::putState::off );
+    }
+    for( const auto &put : node.node()->outputs() )
+    {
+        REQUIRE( put.second->state() == ingr::putState::off );
+    }
+}
+/// \endcond
+
+/// Parked power-off snapshots converge and route retained presets in both directions.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode routes parked positions independently of message order", "[instGraph::stdMotionNode][parked]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::device( "fwtelsim" );
+    stdMotionNode::handleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::togglePutsOn();
+    #endif
+    // clang-format on
+
+    for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
+    for( const bool multi : { false, true } )
+    for( const std::string prefix : { "preset", "filter" } )
+    {
+        std::array<int, 3> order{ 0, 1, 2 };
+        do
+        {
+            CAPTURE( dir, multi, prefix, order );
+            parkedMotionFixture fixture( dir, multi, prefix );
+            auto &node = *fixture.m_node;
+            REQUIRE( node.keys().count( "fwtelsim.parked" ) == 1 );
+            const std::array<pcf::IndiProperty, 3> snapshot{
+                motionFSM( "POWEROFF" ), motionParked( "1" ), motionPreset( { "routeA" }, prefix ) };
+            for( int index : order )
+            {
+                REQUIRE( node.handleSetProperty( snapshot[index] ) == 0 );
+            }
+            REQUIRE( node.curLabel() == "routeA" );
+            auto stage = fixture.m_graph.node( "fwtelsim" );
+            if( multi )
+            {
+                auto selected = dir == ingr::ioDir::input ? stage->input( "routeA" ) : stage->output( "routeA" );
+                auto other = dir == ingr::ioDir::input ? stage->input( "routeB" ) : stage->output( "routeB" );
+                auto ref = dir == ingr::ioDir::input ? stage->input( "ref" ) : stage->output( "ref" );
+                REQUIRE( selected->state() == ingr::putState::on );
+                REQUIRE( other->state() == ingr::putState::off );
+                REQUIRE( ref->state() == ingr::putState::on );
+                REQUIRE( node.handleSetProperty( motionPreset( { "routeB" }, prefix ) ) == 0 );
+                REQUIRE( node.curLabel() == "routeB" );
+                REQUIRE( selected->state() == ingr::putState::off );
+                REQUIRE( other->state() == ingr::putState::on );
+                REQUIRE( other->enabled() );
+            }
+            else
+            {
+                REQUIRE( stage->input( "in" )->state() == ingr::putState::on );
+                REQUIRE( stage->output( "out" )->state() == ingr::putState::on );
+            }
+            std::string xml, error;
+            REQUIRE( fixture.m_graph.serializeXML( xml, error ) == 0 );
+            REQUIRE( xml.find( "value=\"POWEROFF\"" ) != std::string::npos );
+            REQUIRE( node.handleSetProperty( motionParked( "0" ) ) == 0 );
+            requireMotionOff( node );
+            REQUIRE( node.curLabel() == "off" );
+            if( multi )
+            {
+                REQUIRE_FALSE( stage->output( dir == ingr::ioDir::output ? "routeB" : "out" )->enabled() );
+            }
+            REQUIRE( node.handleSetProperty( motionParked( "1.0" ) ) == 0 );
+            REQUIRE( node.curLabel() == ( multi ? "routeB" : "routeA" ) );
+            if( multi )
+            {
+                auto route = dir == ingr::ioDir::input ? stage->input( "routeB" ) : stage->output( "routeB" );
+                auto common = dir == ingr::ioDir::input ? stage->output( "out" ) : stage->input( "in" );
+                REQUIRE( route->state() == ingr::putState::on );
+                REQUIRE( route->enabled() );
+                REQUIRE( common->state() == ingr::putState::on );
+                REQUIRE( common->enabled() );
+            }
+            else
+            {
+                REQUIRE( stage->input( "in" )->state() == ingr::putState::on );
+                REQUIRE( stage->output( "out" )->state() == ingr::putState::on );
+            }
+        } while( std::next_permutation( order.begin(), order.end() ) );
+    }
+}
+
+/// Powered-off routes require valid parking, one named selection, and the exact FSM state.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode rejects unusable parked positions", "[instGraph::stdMotionNode][parked]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::handleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::togglePutsOff();
+    #endif
+    // clang-format on
+
+    parkedMotionFixture fixture( ingr::ioDir::output, true, "preset" );
+    auto &node = *fixture.m_node;
+    REQUIRE( node.handleSetProperty( motionPreset( { "routeA" } ) ) == 0 );
+    REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
+    REQUIRE( node.curLabel() == "routeA" );
+    REQUIRE( node.handleSetProperty( motionFSM( "POWEROFF" ) ) == 0 );
+    requireMotionOff( node ); // Parking has not been published.
+    REQUIRE( node.handleSetProperty( motionParked( "1" ) ) == 0 );
+    REQUIRE( node.curLabel() == "routeA" );
+
+    SECTION( "Malformed or unavailable numeric parking clears affirmative parking" )
+    {
+        for( const std::string value : { "", "bad", "1 garbage", "nan", "inf", "1e999", "0" } )
+        {
+            CAPTURE( value );
+            REQUIRE( node.handleSetProperty( motionParked( value ) ) == 0 );
+            requireMotionOff( node );
+            REQUIRE( node.handleSetProperty( motionParked( "1" ) ) == 0 );
+            REQUIRE( node.curLabel() == "routeA" );
+        }
+        auto missing = motionParked( "1" );
+        missing.remove( "current" );
+        REQUIRE( node.handleSetProperty( missing ) == 0 );
+        requireMotionOff( node );
+        REQUIRE( node.handleSetProperty( motionParked( "1" ) ) == 0 );
+        pcf::IndiProperty wrongType( pcf::IndiProperty::Text );
+        wrongType.setDevice( "fwtelsim" );
+        wrongType.setName( "parked" );
+        wrongType.add( pcf::IndiElement( "current", "1" ) );
+        REQUIRE( node.handleSetProperty( wrongType ) == 0 );
+        requireMotionOff( node );
+    }
+
+    SECTION( "Absent, none, ambiguous, or unmatched selections clear every route" )
+    {
+        for( const std::vector<std::string> &selected : { std::vector<std::string>{}, { "none" }, { "unknown" },
+                                                        { "routeA", "routeB" }, { "none", "routeA" } } )
+        {
+            CAPTURE( selected );
+            REQUIRE( node.handleSetProperty( motionPreset( selected ) ) == 0 );
+            requireMotionOff( node );
+            node.togglePutsOn(); // Direct toggles must enforce the same usability decision.
+            requireMotionOff( node );
+            REQUIRE( node.handleSetProperty( motionPreset( { "routeA" } ) ) == 0 );
+            REQUIRE( node.curLabel() == "routeA" );
+        }
+        pcf::IndiProperty wrongType( pcf::IndiProperty::Text );
+        wrongType.setDevice( "fwtelsim" );
+        wrongType.setName( "presetName" );
+        wrongType.add( pcf::IndiElement( "routeA", pcf::IndiElement::On ) );
+        REQUIRE( node.handleSetProperty( wrongType ) == 0 );
+        requireMotionOff( node );
+    }
+
+    SECTION( "Parking does not enable other unavailable states" )
+    {
+        for( const std::string state : { "HOMING", "NOTHOMED", "POWERON", "NOTCONNECTED", "ERROR", "invalid" } )
+        {
+            CAPTURE( state );
+            REQUIRE( node.handleSetProperty( motionFSM( state ) ) == 0 );
+            requireMotionOff( node );
+        }
+    }
+}
+
+/// Tracking flags cannot override a parked preset, but normal tracking resumes with power.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode gives parked positions priority over tracking", "[instGraph::stdMotionNode][parked]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::handleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::togglePutsOn();
+    stdMotionNode::togglePutsOff();
+    #endif
+    // clang-format on
+
+    parkedMotionFixture fixture( ingr::ioDir::output, false, "preset", true );
+    auto &node = *fixture.m_node;
+    pcf::IndiProperty requested( pcf::IndiProperty::Switch );
+    requested.setDevice( "labrules" );
+    requested.setName( "info" );
+    requested.add( pcf::IndiElement( "trackReq", pcf::IndiElement::On ) );
+    pcf::IndiProperty tracker( pcf::IndiProperty::Switch );
+    tracker.setDevice( "adctrack" );
+    tracker.setName( "tracking" );
+    tracker.add( pcf::IndiElement( "toggle", pcf::IndiElement::On ) );
+    REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
+    REQUIRE( node.handleSetProperty( requested ) == 0 );
+    REQUIRE( node.handleSetProperty( tracker ) == 0 );
+    REQUIRE( node.curLabel() == "tracking" );
+    REQUIRE( node.handleSetProperty( motionPreset( { "routeA" } ) ) == 0 );
+    REQUIRE( node.handleSetProperty( motionParked( "1" ) ) == 0 );
+    REQUIRE( node.handleSetProperty( motionFSM( "POWEROFF" ) ) == 0 );
+    REQUIRE( node.curLabel() == "routeA" );
+    REQUIRE( node.handleSetProperty( motionPreset( { "routeB" } ) ) == 0 );
+    REQUIRE( node.curLabel() == "routeB" );
+    tracker["toggle"].setSwitchState( pcf::IndiElement::Off );
+    REQUIRE( node.handleSetProperty( tracker ) == 0 );
+    REQUIRE( node.curLabel() == "routeB" );
+    requested["trackReq"].setSwitchState( pcf::IndiElement::Off );
+    REQUIRE( node.handleSetProperty( requested ) == 0 );
+    REQUIRE( node.curLabel() == "routeB" );
+    tracker["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( node.handleSetProperty( tracker ) == 0 );
+    REQUIRE( node.curLabel() == "routeB" );
+    REQUIRE( node.handleSetProperty( motionPreset( { "none" } ) ) == 0 );
+    REQUIRE( node.curLabel() == "off" );
+    requireMotionOff( node );
+    REQUIRE( node.handleSetProperty( motionPreset( { "routeA" } ) ) == 0 );
+    REQUIRE( node.handleSetProperty( motionParked( "0" ) ) == 0 );
+    REQUIRE( node.curLabel() == "off" );
+    requireMotionOff( node );
+    REQUIRE( node.handleSetProperty( motionParked( "1" ) ) == 0 );
+    requested["trackReq"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( node.handleSetProperty( requested ) == 0 );
+    REQUIRE( node.handleSetProperty( motionFSM( "OPERATING" ) ) == 0 );
+    REQUIRE( node.curLabel() == "tracking" );
+    tracker["toggle"].setSwitchState( pcf::IndiElement::Off );
+    REQUIRE( node.handleSetProperty( tracker ) == 0 );
+    REQUIRE( node.curLabel() == "not tracking" );
+    requireMotionOff( node );
+    REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
+    requested["trackReq"].setSwitchState( pcf::IndiElement::Off );
+    REQUIRE( node.handleSetProperty( requested ) == 0 );
+    REQUIRE( node.curLabel() == "routeA" );
 }
 
 } // namespace xInstGraphTest

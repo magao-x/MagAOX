@@ -9,6 +9,7 @@
 #include "../../tests/testMacrosINDI.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdlib>
 #include <filesystem>
@@ -56,6 +57,12 @@ class xInstGraph : public MagAOX::app::xInstGraph
 
     /// Return the number of configured graph-node handlers.
     size_t handlerCount() const;
+
+    /// Attach a driver backed by /dev/null so base Def/Set dispatch runs without an event thread.
+    bool enableIndiDispatch();
+
+    /// Check whether startup registered a callback for a device property.
+    bool subscribed( const std::string &key /**< [in] device.property key */ ) const;
 
     /// Failure or short-write behavior injected at a publication step.
     enum class failurePoint
@@ -125,6 +132,20 @@ bool xInstGraph::hasStage() const
 size_t xInstGraph::handlerCount() const
 {
     return m_nodes.size();
+}
+
+bool xInstGraph::enableIndiDispatch()
+{
+    m_driverInName = "/dev/null";
+    m_driverOutName = "/dev/null";
+    m_driverCtrlName = "/dev/null";
+    m_indiDriver = new indiDriver<MagAOXApp<true>>( this, "test", "0", "0" );
+    return m_indiDriver->good();
+}
+
+bool xInstGraph::subscribed( const std::string &key ) const
+{
+    return m_indiSetCallBacks.contains( key );
 }
 
 int xInstGraph::serializeGraph( std::string &xml, std::string &error )
@@ -1160,6 +1181,103 @@ TEST_CASE( "xInstGraph rejects replaced callback destinations", "[xInstGraph]" )
     {
         REQUIRE( readFile( output ) == "external replacement" );
     }
+}
+
+/// Published parked positions remain active while the FSM label continues to report POWEROFF.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph publishes parked power-off positions", "[xInstGraph][parked]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::appStartup();
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    MagAOX::app::MagAOXApp<true>::handleDefProperty( pcf::IndiProperty() );
+    stdMotionNode::handleSetProperty( pcf::IndiProperty() );
+    #endif
+    // clang-format on
+
+    std::array<int, 3> order{ 0, 1, 2 };
+    do
+    {
+        CAPTURE( order );
+        temporaryDirectory temp;
+        const auto input = temp.root / "config" / "instgraph_test.drawio";
+        const auto output = temp.root / "output.drawio";
+        {
+            std::ofstream xml( input );
+            xml << "<mxfile><diagram><mxGraphModel><root>"
+                   "<mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>"
+                   "<mxCell id=\"node:motionStage\"/>"
+                   "<mxCell id=\"input:motionStage:in\" value=\"in\" style=\"strokeColor=#FF0000;\"/>"
+                   "<mxCell id=\"output:motionStage:out\" value=\"out\" style=\"strokeColor=#FF0000;\"/>"
+                   "<mxCell id=\"state:motionStage\" value=\"before\"/>"
+                   "<mxCell id=\"fsmstate:motionStage\" value=\"before\"/>"
+                   "</root></mxGraphModel></diagram></mxfile>";
+        }
+        const std::string source = readFile( input );
+        writeNodeSections( temp.root / "config" / "instgraph_test.conf", output,
+                           "[motionStage]\ntype=stdMotion\ndevice=teststage\npresetPrefix=filter\npresetDir=input\n" );
+        xInstGraph app;
+        loadFixture( app, temp.root );
+        REQUIRE( app.shutdown() == 0 );
+        REQUIRE( app.appStartup() == 0 );
+        REQUIRE( app.enableIndiDispatch() );
+        for( const char *key : { "teststage.fsm", "teststage.parked", "teststage.filterName" } )
+        {
+            REQUIRE( app.subscribed( key ) );
+        }
+        pcf::IndiProperty fsm( pcf::IndiProperty::Text );
+        fsm.setDevice( "teststage" );
+        fsm.setName( "fsm" );
+        fsm.add( pcf::IndiElement( "state", "POWEROFF" ) );
+        pcf::IndiProperty parked( pcf::IndiProperty::Number );
+        parked.setDevice( "teststage" );
+        parked.setName( "parked" );
+        parked.add( pcf::IndiElement( "current", "1" ) );
+        pcf::IndiProperty preset( pcf::IndiProperty::Switch );
+        preset.setDevice( "teststage" );
+        preset.setName( "filterName" );
+        preset.add( pcf::IndiElement( "routeA", pcf::IndiElement::On ) );
+        preset.add( pcf::IndiElement( "routeB", pcf::IndiElement::Off ) );
+        const std::array<pcf::IndiProperty, 3> snapshot{ fsm, parked, preset };
+        for( int index : order )
+        {
+            app.handleDefProperty( snapshot[index] );
+            REQUIRE( app.appLogic() == 0 );
+        }
+        std::string published = readFile( output );
+        REQUIRE( cellTag( published, "fsmstate:motionStage" ).find( "value=\"POWEROFF\"" ) != std::string::npos );
+        REQUIRE( cellTag( published, "state:motionStage" ).find( "value=\"routeA\"" ) != std::string::npos );
+        REQUIRE( cellTag( published, "input:motionStage:in" ).find( "value=\"routeA\"" ) != std::string::npos );
+        for( const char *id : { "input:motionStage:in", "output:motionStage:out" } )
+        {
+            REQUIRE( cellTag( published, id ).find( "strokeColor=#00FF00;" ) != std::string::npos );
+        }
+        preset["routeA"].setSwitchState( pcf::IndiElement::Off );
+        preset["routeB"].setSwitchState( pcf::IndiElement::On );
+        app.handleSetProperty( preset );
+        REQUIRE( app.appLogic() == 0 );
+        published = readFile( output );
+        REQUIRE( cellTag( published, "input:motionStage:in" ).find( "value=\"routeB\"" ) != std::string::npos );
+        REQUIRE( cellTag( published, "fsmstate:motionStage" ).find( "value=\"POWEROFF\"" ) != std::string::npos );
+        parked["current"] = "0";
+        app.handleSetProperty( parked );
+        REQUIRE( app.appLogic() == 0 );
+        published = readFile( output );
+        for( const char *id : { "input:motionStage:in", "output:motionStage:out" } )
+        {
+            REQUIRE( cellTag( published, id ).find( "strokeColor=#FF0000;" ) != std::string::npos );
+        }
+        REQUIRE( cellTag( published, "fsmstate:motionStage" ).find( "value=\"POWEROFF\"" ) != std::string::npos );
+        ingr::instGraphXML parsed;
+        std::string error;
+        REQUIRE( parsed.loadXMLFile( error, output.string() ) == 0 );
+        REQUIRE( readFile( input ) == source );
+        REQUIRE_FALSE( app.hasStage() );
+        REQUIRE( app.appShutdown() == 0 );
+        REQUIRE_FALSE( std::filesystem::exists( output ) );
+    } while( std::next_permutation( order.begin(), order.end() ) );
 }
 
 } // namespace xInstGraphTest

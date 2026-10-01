@@ -7,6 +7,8 @@
 #ifndef stdMotionNode_hpp
 #define stdMotionNode_hpp
 
+#include <sstream>
+
 #include "fsmNode.hpp"
 
 /// Motion stage that maps preset and tracking state to graph puts.
@@ -32,6 +34,15 @@ class stdMotionNode : public fsmNode
 
     /// The current value of the preset property.  Corresponds to the element name of the selected preset.
     std::string m_curVal;
+
+    /// Whether the latest preset property is a Switch vector with exactly one selected name.
+    bool m_presetSelectionValid{ false };
+
+    /// The INDI key for the optional device-local Number property parked.current.
+    std::string m_parkedKey;
+
+    /// Affirmative parking reported by the stage; false until a valid value is received.
+    bool m_parked{ false };
 
     /// The current value of the put label.
     std::string m_curLabel;
@@ -140,6 +151,16 @@ class stdMotionNode : public fsmNode
     /// Load and validate this motion stage's configuration.
     void loadConfig(
         mx::app::appConfigurator &config /**< [in] the application configurator loaded with this node's options*/ );
+
+  protected:
+    /// Whether the retained stage position may be used while its motors are powered off.
+    bool parkedPowerOff() const;
+
+    /// Whether the latest named selection identifies a usable parked route.
+    bool parkedPresetValid() const;
+
+    /// Decide whether to apply preset routing or active tracking from the cached properties.
+    bool putsShouldBeOn() const;
 };
 
 inline stdMotionNode::stdMotionNode( const std::string &name, ingr::instGraphXML *parentGraph )
@@ -151,6 +172,9 @@ inline void stdMotionNode::device( const std::string &dev )
 {
     // This will enforce the one-time only rule
     fsmNode::device( dev );
+
+    m_parkedKey = m_device + ".parked";
+    key( m_parkedKey );
 
     // If presetPrefix is set, then we can make the key
     if( m_presetPrefix != "" )
@@ -318,66 +342,104 @@ inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
             }
         }
     }
+    else if( ipRecv.createUniqueKey() == m_parkedKey )
+    {
+        bool parked = false;
+        if( ipRecv.getType() == pcf::IndiProperty::Number && ipRecv.find( "current" ) )
+        {
+            // IndiElement::get<T>() does not check conversion success. Parse the entire numeric value.
+            std::istringstream current( ipRecv["current"].get() );
+            double value = 0;
+            if( current >> value )
+            {
+                parked = ( current >> std::ws ).eof() && value != 0;
+            }
+        }
+        if( m_parked != parked )
+        {
+            ++m_changes;
+            m_parked = parked;
+        }
+    }
     else if( ipRecv.createUniqueKey() == m_presetKey )
     {
         if( m_node != nullptr )
         {
-            bool nothingIsOn = true;
-            for( auto &&it : ipRecv.getElements() )
+            std::string currentValue;
+            size_t selected = 0;
+            for( const auto &element : ipRecv.getElements() )
             {
-                if( it.second.getSwitchState() == pcf::IndiElement::On )
+                if( element.second.getSwitchState() == pcf::IndiElement::On )
                 {
-                    if( m_curVal != it.second.getName() && !m_tracking ) // we only update if not tracking
-                    {
-                        ++m_changes;
-                    }
-
-                    m_curVal    = it.second.getName();
-                    nothingIsOn = false;
+                    currentValue = element.second.getName();
+                    ++selected;
                 }
             }
 
-            if( nothingIsOn )
+            bool selectionValid = ipRecv.getType() == pcf::IndiProperty::Switch && selected == 1;
+            if( ( m_curVal != currentValue || m_presetSelectionValid != selectionValid ) &&
+                ( !m_tracking || parkedPowerOff() ) )
             {
-                if( m_curVal != "" && !m_tracking ) // we only update if not tracking
-                {
-                    ++m_changes;
-                }
-                m_curVal = "";
+                ++m_changes;
             }
+            m_curVal = currentValue;
+            m_presetSelectionValid = selectionValid;
         }
     }
 
     if( m_changes > 0 )
     {
         m_changes = 0;
-
-        if( m_trackingReq )
+        if( putsShouldBeOn() )
         {
-            if( m_tracking &&
-                ( m_state == MagAOX::app::stateCodes::READY || m_state == MagAOX::app::stateCodes::OPERATING ) )
-            {
-                togglePutsOn();
-            }
-            else
-            { // Either we aren't tracking or we aren't READY || OPERATING
-                togglePutsOff();
-            }
+            togglePutsOn();
         }
         else
         {
-            if( m_state != MagAOX::app::stateCodes::READY || m_tracking || m_curVal == "none" || m_curVal == "" )
-            {
-                togglePutsOff();
-            }
-            else
-            {
-                togglePutsOn();
-            }
+            togglePutsOff();
         }
     }
 
     return 0;
+}
+
+inline bool stdMotionNode::parkedPowerOff() const
+{
+    return m_state == MagAOX::app::stateCodes::POWEROFF && m_parked;
+}
+
+inline bool stdMotionNode::parkedPresetValid() const
+{
+    if( !m_presetSelectionValid || m_curVal.empty() || m_curVal == "none" )
+    {
+        return false;
+    }
+    if( m_presetPutName.size() == 1 )
+    {
+        return true;
+    }
+    for( const auto &put : m_presetPutName )
+    {
+        if( put == m_curVal )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline bool stdMotionNode::putsShouldBeOn() const
+{
+    if( m_state == MagAOX::app::stateCodes::POWEROFF )
+    {
+        return parkedPowerOff() && parkedPresetValid();
+    }
+    if( m_trackingReq )
+    {
+        return m_tracking &&
+               ( m_state == MagAOX::app::stateCodes::READY || m_state == MagAOX::app::stateCodes::OPERATING );
+    }
+    return m_state == MagAOX::app::stateCodes::READY && !m_tracking && !m_curVal.empty() && m_curVal != "none";
 }
 
 inline void stdMotionNode::togglePutsOn()
@@ -387,7 +449,13 @@ inline void stdMotionNode::togglePutsOn()
         return;
     }
 
-    if( m_trackingReq )
+    if( !putsShouldBeOn() )
+    {
+        togglePutsOff();
+        return;
+    }
+
+    if( m_trackingReq && !parkedPowerOff() )
     {
         if( m_tracking )
         {
@@ -404,7 +472,7 @@ inline void stdMotionNode::togglePutsOn()
             m_parentGraph->stateChange();
         }
     }
-    else if( m_state == MagAOX::app::stateCodes::READY )
+    else if( m_state == MagAOX::app::stateCodes::READY || parkedPowerOff() )
     {
         m_curLabel = m_curVal;
 
@@ -505,13 +573,13 @@ inline void stdMotionNode::togglePutsOff()
         return;
     }
 
-    if( m_tracking ) // regardless of whether required, if tracking this is our state
+    if( m_tracking && m_state != MagAOX::app::stateCodes::POWEROFF ) // Tracking is unavailable with motors off.
     {
         m_curLabel = "tracking";
         m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "tracking" );
         m_parentGraph->valueExtra( m_node->name(), "state", "tracking" );
     }
-    else if( m_trackingReq ) // we can only be "not tracking" if tracking is required
+    else if( m_trackingReq && m_state != MagAOX::app::stateCodes::POWEROFF )
     {
         m_curLabel = "not tracking";
         m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "not tracking" );
@@ -525,7 +593,11 @@ inline void stdMotionNode::togglePutsOff()
     }
     else
     {
-        // We don't change labels if m_presetPutName.size() > 1
+        // Multi-put labels name their routes; only the position status changes.
+        if( m_state == MagAOX::app::stateCodes::POWEROFF )
+        {
+            m_curLabel = "off";
+        }
         m_parentGraph->valueExtra( m_node->name(), "state", "---" );
     }
 

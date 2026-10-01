@@ -288,3 +288,24 @@ run for this planning task.
   previously returned before processing any state transition.
 - The Zaber suite passed 101 assertions in 5 cases; the stdMotionStage helper
   suite passed 12 assertions in 1 case. Hardware checks remain pending.
+
+### Graph routing
+
+- Producer correction committed as `aef45e0b`.
+- Added the automatic optional device-local parked subscription, checked numeric
+  parsing, and a shared on/off decision. Parked powered-off nodes apply valid
+  named presets while retaining `fsmstate=POWEROFF`. Ambiguous selections and
+  unmatched multi-put names leave every put off.
+- Parked routing takes priority over retained tracking flags, including subsequent
+  preset updates; normal tracking rules resume in READY/OPERATING. Powered-off
+  inactive labels no longer claim tracking.
+- Added isolated node fixtures covering all six initial message orders, input
+  and output routing, single and multiple puts, preset/filter notation,
+  alwaysOn/noAutoOn transitions, malformed parking, invalid selections, other
+  FSM states, and tracking transitions. The node suite passed 1487 assertions
+  in 9 cases.
+- Added app publication coverage for all six initial DefProperty message orders
+  through the real base-class dispatch with a /dev/null-backed driver. It checks
+  subscriptions, graph colors and position labels, subsequent SetProperty
+  changes, and the unchanged POWEROFF label. The app suite passed 375 assertions
+  in 17 cases.
