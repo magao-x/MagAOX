@@ -415,3 +415,31 @@ The `ERR ... invalid poke.mode: both` log line during the test run is expected: 
 - **Workaround used:** run cursesINDI on exao2, which talks to isRTC directly. The properties appear.
 - **Permanent fix (to do):** propagate the `isRTC.conf` change to the other machines through the shared config repo, then restart their INDI servers so `dmTemporalResponse` is visible instrument-wide.
 - No app code changes.
+
+### 7. First hardware runs: no WFS response detected (2026-10-01)
+Analysis was done on a personal machine after copying the run directories with `scp`, using a standard-library-only FITS reader (no numpy or astropy).
+
+| Run | Actuator | amp | N | M | nRef | Result |
+|---|---|---|---|---|---|---|
+| `2026-10-01T225127` | (5, 5) | 0.05 | 5 | 2 | 2 | rmean ≈ 0 (−0.09…0.07); P = noise (mask 9317/14400 px); cube max ≈ 50, flat |
+| `2026-10-01T231246` | (5, 8) | 0.15 | 20 | 10 | 2 | rmean ≈ 0 (±0.1, rstd ≈ 0.2); P = noise (mask 9290/14400 px); cube max ≈ 25, flat |
+
+- **Pipeline and timing work.**
+  - Both runs completed and wrote every output file, with 0 invalid trials.
+  - camWFS runs at 2 kHz (500 µs frames).
+  - The poke is written **67.5 ± 2.2 µs** (run 1) and **68.7 ± 1.4 µs** (run 2) after `atime`, range about 65–70 µs. That is the minimum achievable delay, so delays below about 70 µs will always be late (`LATEFRAC = 1` at d = 0, as expected).
+  - Averaging behaves correctly: the cube noise fell by about 2× with 5× the trials.
+- **No DM signal reached the WFS.** No step appears in `rmean`, and P has no compact spot.
+  - Run 1 at (5, 5) was also very likely behind the Magellan central obscuration, which covers roughly the central 3 actuators of the 11-across woofer. An actuator should be picked in the clear annulus.
+  - Run 2 at (5, 8), in the clear pupil, at 3× the amplitude and 5× the trials, still shows nothing. That points to the command not reaching the mirror.
+- **Leading hypothesis:** the woofer `dm` app finds its dmcomb channels only once, at startup (`dev::dm::findDMChannels()`, which logs `Found N chanels for dm00disp`). If it found fewer than 8 channels, or `dm00disp07` was created after it started, channel 07 is never summed.
+  - **To check:**
+    - the woofer log line `Found N chanels` (needs N ≥ 8);
+    - the creation times of `/milk/shm/dm00disp*.im.shm` compared with the woofer start time;
+    - that the woofer is `OPERATING` and camWFS shows pupils;
+    - a visual check with `nFrames = 1000` (0.5 s holds), watching `dm00disp07`, `dm00disp`, and `camwfs` in rtimv.
+- **Other notes:**
+  - The binary in use was built from a tree with uncommitted changes (the log shows `GIT: f52dd19f… MODIFIED`). Rebuild and reinstall from the committed tree before keeping any data.
+  - `logdump -f` follows the log forever. Use `logdump -n 1 <app>` to dump the latest file.
+  - `nRef` stayed at 2 (config only, with no INDI property).
+- **Proposed app improvement:** fail the run with a clear error when the reference pattern has no real signal (e.g. the mask covers more than half the pixels, or the peak is not well above the noise), instead of completing with meaningless curves. Consider also exposing `nRef` over INDI.
