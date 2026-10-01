@@ -2908,6 +2908,12 @@ inline int dmTemporalResponse::prepareRun( const timespec &runStart )
 
 inline int dmTemporalResponse::runTrial( double delay, int sign )
 {
+    // Checked on every trial: with a short settle time and fast trials the waits below may never poll these flags.
+    if( m_stopRequested || m_shutdown || m_camChanged || m_fpsChanged )
+    {
+        return resultStopped;
+    }
+
     zeroDM();
 
     // Interruptible settle
@@ -2975,6 +2981,11 @@ inline int dmTemporalResponse::runTrial( double delay, int sign )
         else if( !m_trialValid )
         {
             rv = ( m_stopRequested || m_shutdown ) ? resultStopped : resultInvalid;
+        }
+        else if( m_camChanged || m_fpsChanged )
+        {
+            // The trial completed, but the camera changed underneath it: the delay grid is no longer valid.
+            rv = resultStopped;
         }
 
         m_trialState = trialState::idle;

@@ -384,3 +384,12 @@ The `ERR ... invalid poke.mode: both` log line during the test run is expected: 
   - **Fix:** the tests with helper threads (retry, abort on retries, fps change, measurement thread) now store results, join their threads, and only then `REQUIRE`.
 - Added the "finite checks and header sentinel" test case. Updated the doc page for the N+1 curves and the -999 sentinel.
 - Expected log noise during tests: `Cannot open shm file ..._nodm_...` (the missing-DM test), `FITS: error reading ... junk.fits` (the bad-file test), and `invalid poke.mode: both`.
+
+### 4. fps change not aborting the run; FITS string padding in tests
+- **Symptoms** (third test run): 32 test cases, 30 passed and 2 failed. This was the first complete run, with no aborts.
+  - Stop/shutdown, "fps change" section: `REQUIRE( rv == -1 )` got `0 == -1`, so the run finished normally after `m_fpsChanged` was set.
+  - Pattern-mode run: `fh["POKEMODE"]` read back as `"pattern "`, not `"pattern"`.
+- **Cause A (app bug):** `runTrial()` only checked `m_fpsChanged`/`m_camChanged` in the settle sleep and after a 100 ms semaphore-wait timeout. With a short settle time and trials that complete, neither path runs, so an fps change mid-run was never acted on. This would also happen on hardware with a small `poke.settle`.
+  - **Fix:** `runTrial()` checks the stop/shutdown/camera/fps flags before arming every trial, and returns `resultStopped` if the camera or fps changed while a trial completed.
+- **Cause B (test only):** FITS pads string values to at least 8 characters, so `"pattern"` is stored as `"pattern "` (`"actuator"` is exactly 8, which is why it passed).
+  - **Fix:** the test trims trailing blanks with `fitsStr()` on all four string-header reads.

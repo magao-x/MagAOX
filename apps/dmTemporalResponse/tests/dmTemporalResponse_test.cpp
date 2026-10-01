@@ -66,6 +66,13 @@ std::string uniqueName( const std::string &tag /**< [in] a tag to include in the
     return "dmresp_test_" + std::to_string( getpid() ) + "_" + tag + "_" + std::to_string( counter++ );
 }
 
+/// Trim the trailing blanks FITS adds when padding short string values to 8 characters.
+std::string fitsStr( const std::string &v /**< [in] the string read from a FITS header */ )
+{
+    size_t end = v.find_last_not_of( ' ' );
+    return ( end == std::string::npos ) ? std::string() : v.substr( 0, end + 1 );
+}
+
 /// Point ImageStreamIO shared-memory files at a writable test sandbox.
 /** As in the dm and streamWriter tests.  This also keeps test streams separate from the real system streams.
  *
@@ -1785,10 +1792,10 @@ TEST_CASE( "dmTemporalResponse full synthetic run", "[dmTemporalResponse][run]" 
     REQUIRE( fh["DELAYUS"].value<double>() == Approx( 250 ) );
     REQUIRE( fh["NTRIALS"].value<int>() == 4 );
     REQUIRE( fh["NINVALID"].value<int>() == 0 );
-    REQUIRE( fh["POKEMODE"].value<std::string>() == "actuator" );
+    REQUIRE( fitsStr( fh["POKEMODE"].value<std::string>() ) == "actuator" );
     REQUIRE( fh["POKEX"].value<int>() == 3 );
     REQUIRE( fh["POKEY"].value<int>() == 4 );
-    REQUIRE( fh["DMSTREAM"].value<std::string>() == app.m_dmStreamOverride );
+    REQUIRE( fitsStr( fh["DMSTREAM"].value<std::string>() ) == app.m_dmStreamOverride );
 
     // Metrics match the first-order model: t50 = latency + tau ln2, rise = tau ln9
     for( size_t k = 0; k < app.m_metrics.size(); ++k )
@@ -2031,8 +2038,8 @@ TEST_CASE( "dmTemporalResponse pattern-mode run", "[dmTemporalResponse][run]" )
     mx::fits::fitsHeader<XWC_DEFAULT_VERBOSITY>      fh;
     ff.read( cube, fh, app.m_runDir + "/" + cubeFileName( app.m_delays[0] ) );
 
-    REQUIRE( fh["POKEMODE"].value<std::string>() == "pattern" );
-    REQUIRE( fh["PATSHA"].value<std::string>() == sha );
+    REQUIRE( fitsStr( fh["POKEMODE"].value<std::string>() ) == "pattern" );
+    REQUIRE( fitsStr( fh["PATSHA"].value<std::string>() ) == sha );
     REQUIRE( cube.image( 19 )( 1, 1 ) == Approx( app.m_gain * app.m_pokeAmp * 1.0 ).epsilon( 0.01 ) );
     REQUIRE( cube.image( 19 )( 6, 2 ) == Approx( app.m_gain * app.m_pokeAmp * -0.5 ).epsilon( 0.01 ) );
     REQUIRE( cube.image( 19 )( 3, 4 ) == Approx( 0 ).margin( 1e-6 ) );
