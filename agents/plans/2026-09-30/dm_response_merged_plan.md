@@ -2,7 +2,7 @@
 Review the guidelines in AGENTS.md before proceeding. The documents dmTemporalResponse.md and dm_response_app.md both contain prompts and plans to execute the same idea. Review both plans, and make a suggestion in the "plan" section below for how to implement the best parts of each approach into one cohesive software app.
 
 # Plan
-Status: **Implemented on `ktwitchell/dm-response` (2026-09-30). Builds cleanly and all unit tests pass on exao2 (2026-10-01). Repeat-run stability, coverage, clang-format, and hardware acceptance are pending (see section 13 and Debugging).**
+Status: **Implemented on `ktwitchell/dm-response` (2026-09-30). Builds cleanly and all unit tests pass on exao2 (2026-10-01). Repeated test runs also pass. Coverage, clang-format, and hardware acceptance are pending (see section 13 and Debugging).**
 
 App: `dmTemporalResponse`. Branch: `ktwitchell/dm-response` (AGENTS rules 12 and 17).
 
@@ -397,7 +397,7 @@ The `ERR ... invalid poke.mode: both` log line during the test run is expected: 
 ### 5. All tests pass (2026-10-01)
 - **Result:** after the fixes in commit `6ece7483`, the app builds cleanly and the full `dmTemporalResponse_test` suite passes on exao2 ("All tests passed").
 - **Remaining before hardware use:**
-  1. Repeat the full test run several times to check for timing-dependent failures in the fake-camera tests.
+  1. ~~Repeat the full test run several times to check for timing-dependent failures in the fake-camera tests.~~ Done 2026-10-01: repeated runs all passed.
   2. `clang-format -i` on the `apps/dmTemporalResponse` files, as a separate formatting-only commit.
   3. `make coverage` in `tests/` for the 100% statement/function target. Add any `LCOV_EXCL` markers and list them here.
   4. Hardware acceptance (Test Plan layer C) on the RTC with the loop open, starting with a small `poke_amp` on `dm00disp07`.
