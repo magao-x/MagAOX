@@ -1,8 +1,8 @@
 /** \file xInstGraph_test.cpp
- * \brief Catch2 tests for xInstGraph output publication and ownership.
+ * \brief Catch2 tests for xInstGraph publication, ownership, and parked-stage routing.
  * \author Jared R. Males (jaredmales@gmail.com)
  *
- * \ingroup xInstGraph_files
+ * \ingroup instGraph_files
  */
 
 #include "../../../tests/testXWC.hpp"
@@ -216,10 +216,10 @@ struct temporaryDirectory
     ~temporaryDirectory();
 
     /// Prevent accidental sharing of a test directory.
-    temporaryDirectory( const temporaryDirectory & ) = delete;
+    temporaryDirectory( const temporaryDirectory &other /**< [in] source directory ownership */ ) = delete;
 
     /// Prevent accidental sharing of a test directory.
-    temporaryDirectory &operator=( const temporaryDirectory & ) = delete;
+    temporaryDirectory &operator=( const temporaryDirectory &other /**< [in] source directory ownership */ ) = delete;
 };
 
 temporaryDirectory::temporaryDirectory()
@@ -424,7 +424,8 @@ std::string cellTag( const std::string &xml, /**< [in] graph XML */
 /// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 class destructionProbe : public xigNode
 {
-    bool &m_destroyed; ///< Receives the derived destructor notification.
+    /// Receives the derived destructor notification; owned by the enclosing test.
+    bool &m_destroyed;
 
   public:
     /// Construct a node that records destruction.

@@ -1,7 +1,7 @@
 # xInstGraph: parked motion stages in POWEROFF
 
 - Date: 2026-10-01
-- Status: implementation in progress
+- Status: implemented and verified in software; hardware verification pending
 - Source baseline: MagAOX `4b57330e` on `jrmales/instgraph-updates`
 
 ## Objective
@@ -173,10 +173,9 @@ needed.
 Add documented `m_parked` state, initially false, and a `<device>.parked` key
 registered when `device()` is set. Consume the Number property's `current`
 element, matching the GUI/controller contract. Changes to that flag must trigger
-recomputation. If a received parked property lacks a usable `current` value, clear the
-cached parked flag. Handle malformed data locally without throwing out of the
-callback.
-Keep this automatic and optional; no new config setting is needed.
+recomputation. If a received parked property lacks a usable `current` value,
+clear the cached parked flag. Handle malformed data locally without throwing
+out of the callback. Keep this automatic and optional; no new config setting is needed.
 
 ### 3. Separate usable position from operational FSM and tracking
 
@@ -309,3 +308,36 @@ run for this planning task.
   subscriptions, graph colors and position labels, subsequent SetProperty
   changes, and the unchanged POWEROFF label. The app suite passed 375 assertions
   in 17 cases.
+
+### Documentation and build checks
+
+- Graph routing committed as `9a917e05`.
+- Documented the optional parking contract, invalid-position behavior, tracking
+  fallback, and existing cache freshness limitation in the app README.
+- Completed the changed-file documentation pass, moved test-harness method
+  bodies below their declarations, grouped the older tracking scenario under
+  the app test namespace, and enabled ZABERCTRL_TEST_DOXYGEN_REF in the project
+  Doxyfile so producer tests can link to the protected API under test.
+- Both final app builds succeeded with `make -j1`. The build system shares
+  generated version files and a precompiled header; overlapping builds caused
+  cleanup and compiler races, resolved by serializing both targets and their
+  build steps. No build-system changes were needed for this implementation.
+- Focused Doxygen HTML generated with the project configuration contains the
+  producer regression and all four new graph cases, with references from the
+  real methods under test.
+
+### Final verification
+
+- After the documentation and formatting pass, all four focused Catch2 suites
+  passed: zaberCtrl 101 assertions / 5 cases, stdMotionStage 12 / 1,
+  stdMotionNode 1487 / 9, and xInstGraph 375 / 17 (1975 assertions / 32 cases total).
+- Both xInstGraph and zaberCtrl built successfully from the final sources.
+- `clang-format --dry-run --Werror` and `git diff --check` passed for the touched
+  files. Final Doxygen HTML retained the real-API references for all five new
+  regression cases.
+- Rebuild and install xInstGraph and zaberCtrl for operational testing. No
+  instGraph library changes were made. Confirm a physically parked powered-off
+  stage has the same retained preset in stageGUI and the graph, with POWEROFF
+  still shown, including an xInstGraph restart while the stage is powered off.
+- Numeric-only positions without a named route and app-wide disconnect/deletion
+  invalidation remain the explicit follow-up boundaries above.

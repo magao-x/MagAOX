@@ -1,5 +1,6 @@
 /** \file stdMotionNode.hpp
- * \brief The MagAO-X Instrument Graph stdMotionNode header file
+ * \brief Motion-stage preset and tracking routing for the MagAO-X instrument graph.
+ * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup instGraph_files
  */
@@ -20,6 +21,10 @@
  * The preset is specified by an INDI property with signature `<device>.<presetPrefix>Name` where device
  * and presetPrefix are part of the configuration.  This INDI property is a switch vector.
  *
+ * A Number property `<device>.parked` with a nonzero `current` element makes a published preset usable in `POWEROFF`.
+ * The true FSM is preserved. This retained-position path takes priority over tracking flags and requires one
+ * selected name, matching a configured put when the node selects among multiple puts.
+ *
  * The device and prefix can only be set once.
  */
 class stdMotionNode : public fsmNode
@@ -32,7 +37,7 @@ class stdMotionNode : public fsmNode
     /// The INDI key (device.property) for the presets.  This is, say, `fwpupil.filterName`.  It is set automatically.
     std::string m_presetKey;
 
-    /// The current value of the preset property.  Corresponds to the element name of the selected preset.
+    /// Latest selected preset name, cached even while tracking; parked routing also checks selection validity.
     std::string m_curVal;
 
     /// Whether the latest preset property is a Switch vector with exactly one selected name.
@@ -44,7 +49,7 @@ class stdMotionNode : public fsmNode
     /// Affirmative parking reported by the stage; false until a valid value is received.
     bool m_parked{ false };
 
-    /// The current value of the put label.
+    /// Latest position or tracking label applied to the graph.
     std::string m_curLabel;
 
     /// Input or output put names selected by the preset switch; configuration defaults by direction.
@@ -56,7 +61,7 @@ class stdMotionNode : public fsmNode
      */
     ingr::ioDir m_presetDir{ ingr::ioDir::output };
 
-    /// Contains the names of any puts which are always on if any are on.
+    /// Puts kept on alongside a usable preset route and cleared when the route is inactive.
     std::set<std::string> m_alwaysOn;
 
     /// Contains the names of any puts which are not automatically turned on if they are off.
@@ -139,13 +144,13 @@ class stdMotionNode : public fsmNode
     /// Get the tracking status element name.
     const std::string &trackerElement();
 
-    /// INDI SetProperty callback
+    /// Cache FSM, parking, preset, or tracking updates and recompute the graph route.
     virtual int handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
     /// Apply the selected preset or tracking state to the node puts.
     virtual void togglePutsOn();
 
-    /// Turn off all puts when the stage is inactive.
+    /// Clear all puts and report an inactive position or tracking label.
     virtual void togglePutsOff();
 
     /// Load and validate this motion stage's configuration.

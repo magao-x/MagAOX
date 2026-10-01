@@ -2,7 +2,7 @@
  * \brief Catch2 tests for the xInstGraph `stdMotionNode` helper.
  * \author Jared R. Males (jaredmales@gmail.com)
  *
- * \ingroup xInstGraph_files
+ * \ingroup instGraph_files
  */
 
 #include "../../../../tests/testXWC.hpp"
@@ -1561,15 +1561,19 @@ TEST_CASE( "stdMotionNode gives parked positions priority over tracking", "[inst
     REQUIRE( node.curLabel() == "routeA" );
 }
 
-} // namespace xInstGraphTest
-
-} // namespace libXWCTest
-
 /// Verify a motion stage handles preset and tracking property updates.
 /** \ingroup xInstGraph_unit_test
  */
 SCENARIO( "Sending Properties to a stdMotionNode", "[instGraph::stdMotionNode]" )
 {
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::handleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::togglePutsOn();
+    stdMotionNode::togglePutsOff();
+    #endif
+    // clang-format on
+
     GIVEN( "a configured stdMotionNode with tracking" )
     {
         // First configure the node
@@ -1708,3 +1712,7 @@ SCENARIO( "Sending Properties to a stdMotionNode", "[instGraph::stdMotionNode]" 
         }
     }
 }
+
+} // namespace xInstGraphTest
+
+} // namespace libXWCTest

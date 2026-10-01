@@ -46,51 +46,63 @@ namespace dev
   * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`
   * `onPowerOff`, and `whilePowerOff`,  must be placed in the derived class's functions of the same name.
   *
+  * Power-off preserves controller-maintained position and alias state. The derived controller determines
+  * whether its retained position is meaningful (for example, by publishing a parked property).
+  * Negative motion states resolve the name from the current preset, retaining an alias only at a matching position.
+  *
   * \ingroup appdev
   */
 template <class derivedT>
 class stdMotionStage
 {
   protected:
-    /** \name Configurable Parameters
+    /** \name Configurable Parameters - Data
      * @{
      */
 
-    bool m_powerOnHome{ false }; ///< If true, then the motor is homed at startup (by this software or actual power on)
+    /// Whether the derived controller should home at startup or power-on.
+    bool m_powerOnHome{ false };
 
-    int m_homePreset{ -1 }; ///< If >=0, this preset position is moved to after homing
+    /// Preset to select after homing; a negative value disables the post-home move.
+    int m_homePreset{ -1 };
 
-    std::vector<std::string> m_presetNames; ///< The names of each position on the stage.
+    /// Configured names published in the preset-name switch vector.
+    std::vector<std::string> m_presetNames;
 
-    std::vector<float> m_presetPositions; ///< The positions, in arbitrary units, of each preset.  If 0, then the
-                                          ///< integer position number (starting from 1) is used to calculate.
+    /// Configured physical positions corresponding to each preset name.
+    std::vector<float> m_presetPositions;
+
+    /// Singular notation used in the INDI interface, such as preset or filter.
+    std::string m_presetNotation{ "preset" };
+
+    /// Whether numeric preset commands may include fractional values.
+    bool m_fractionalPresets{ true };
+
+    /// Whether loadConfig supplies index-based positions when explicit positions are omitted or zero.
+    bool m_defaultPositions{ true };
 
     ///@}
 
-    std::string m_presetNotation{
-        "preset" }; ///< Notation used to refer to a preset, should be singular, as in "preset" or "filter".
+    /// Motion state: -2 powered off, -1 not homed, 0 stopped, 1 moving, or 2 homing.
+    int8_t m_moving{ 0 };
 
-    bool m_fractionalPresets{
-        true }; ///< Flag to set in constructor determining if fractional presets are allowed.  Used for INDI/GUIs.
+    /// Command kind: 1 for a named-preset move, 0 for an arbitrary-position move.
+    int8_t m_movingState{ 0 };
 
-    bool m_defaultPositions{
-        true }; ///< Flag controlling whether the default preset positions (the vector index) are set in loadConfig.
+    /// Current numerical preset value maintained by the derived controller.
+    float m_preset{ 0 };
 
-    int8_t m_moving{ 0 }; ///< Whether or not the stage is moving.  -2 means powered off, -1 means not homed, 0 means
-                          ///< not moving, 1 means moving, 2 means homing.
-    int8_t m_movingState{ 0 }; ///< Used to track the type of command.  If 1 this is a command to move to a named
-                               ///< preset.  If 0 then it is a move to an arbitrary position.
+    /// Commanded numerical preset target, separate from the reported current position.
+    float m_preset_target{ 0 };
 
-    float m_preset{ 0 };        ///< The current numerical preset position [1.0 is index 0 in the preset name vector]
-    float m_preset_target{ 0 }; ///< The target numerical preset position [1.0 is index 0 in the preset name vector]
-    int   m_presetNameIndex{
-        -1 }; ///< The selected preset-name alias index when the active command identifies a specific preset name.
+    /// Requested preset-name alias, preserved while moving or when its position matches the current preset.
+    int m_presetNameIndex{ -1 };
 
   public:
-    /// Destructor
+    /// Destroy the motion-stage helper.
     ~stdMotionStage() noexcept;
 
-    /// Setup the configuration system
+    /// Register the motion-stage configuration options.
     /**
       * This should be called in `derivedT::setupConfig` as
       * \code
@@ -98,9 +110,9 @@ class stdMotionStage
         \endcode
       * with appropriate error checking.
       */
-    int setupConfig( mx::app::appConfigurator &config /**< [out] the derived classes configurator*/ );
+    int setupConfig( mx::app::appConfigurator &config /**< [out] the derived controller's configurator*/ );
 
-    /// load the configuration system results
+    /// Load the motion-stage configuration options.
     /**
       * This should be called in `derivedT::loadConfig` as
       * \code
@@ -108,9 +120,9 @@ class stdMotionStage
         \endcode
       * with appropriate error checking.
       */
-    int loadConfig( mx::app::appConfigurator &config /**< [in] the derived classes configurator*/ );
+    int loadConfig( mx::app::appConfigurator &config /**< [in] the derived controller's configurator*/ );
 
-    /// Startup function
+    /// Register the preset, preset-name, home, and stop INDI properties.
     /**
       * This should be called in `derivedT::appStartup` as
       * \code
@@ -123,8 +135,8 @@ class stdMotionStage
       */
     int appStartup();
 
-    /// Application logic
-    /** Checks the stdMotionStage thread
+    /// Run the optional motion-stage main-loop hook.
+    /** This hook currently performs no work.
       *
       * This should be called from the derived's appLogic() as in
       * \code
@@ -137,7 +149,7 @@ class stdMotionStage
       */
     int appLogic();
 
-    /// Actions on power off
+    /// Mark motion powered off while preserving controller-maintained position and alias state.
     /**
       * This should be called from the derived's onPowerOff() as in
       * \code
@@ -150,7 +162,7 @@ class stdMotionStage
       */
     int onPowerOff();
 
-    /// Actions while powered off
+    /// Run the optional powered-off hook.
     /**
       * This should be called from the derived's whilePowerOff() as in
       * \code
@@ -163,8 +175,8 @@ class stdMotionStage
       */
     int whilePowerOff();
 
-    /// Application the shutdown
-    /** Shuts down the stdMotionStage thread
+    /// Run the optional motion-stage shutdown hook.
+    /** This hook currently performs no work.
       *
       * \code
         stdMotionStage<derivedT>::appShutdown();
@@ -179,10 +191,8 @@ class stdMotionStage
   protected:
     /** \name INDI
      *
-     *@{
+     * @{
      */
-  protected:
-    // declare our properties
 
     /// The position of the stage in presets
     pcf::IndiProperty m_indiP_preset;
@@ -190,10 +200,10 @@ class stdMotionStage
     /// The name of the active preset selection
     pcf::IndiProperty m_indiP_presetName;
 
-    /// Command the stage to home. .
+    /// Request switch used to command homing.
     pcf::IndiProperty m_indiP_home;
 
-    /// Command the stage to halt.
+    /// Request switch used to halt motion.
     pcf::IndiProperty m_indiP_stop;
 
   public:
@@ -204,8 +214,8 @@ class stdMotionStage
      * \returns -1 on error.
      */
     static int st_newCallBack_stdMotionStage(
-        void                    *app,   ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+        void *app, /**< [in] derived controller instance */
+        const pcf::IndiProperty &ipRecv /**< [in] requested INDI property */
     );
 
     /// Callback to process a NEW preset position request
@@ -214,7 +224,7 @@ class stdMotionStage
      * \returns -1 on error.
      */
     int newCallBack_m_indiP_preset(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] the requested INDI property*/ );
 
     /// Callback to process a NEW preset name request
     /**
@@ -222,7 +232,7 @@ class stdMotionStage
      * \returns -1 on error.
      */
     int newCallBack_m_indiP_presetName(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] the requested INDI property*/ );
 
     /// Callback to process a NEW home request switch toggle
     /**
@@ -230,7 +240,7 @@ class stdMotionStage
      * \returns -1 on error.
      */
     int newCallBack_m_indiP_home(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] the requested INDI property*/ );
 
     /// Callback to process a NEW stop request switch toggle
     /**
@@ -238,7 +248,7 @@ class stdMotionStage
      * \returns -1 on error.
      */
     int newCallBack_m_indiP_stop(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] the requested INDI property*/ );
 
     /// Update the INDI properties for this device controller
     /** You should call this once per main loop.
@@ -268,7 +278,10 @@ class stdMotionStage
     int setPresetNameTracking(
         int presetNameIndex /**< [in] the preset-name index to associate with the current command */ );
 
-    /// Resolve the preset-name alias index that should be reported.
+    /// Resolve the reported name from active motion or the current preset position.
+    /** A named command may supply its target alias only during positive motion. In inactive states,
+     * a tracked alias is retained only when its configured position matches the current preset.
+     */
     int
     activePresetNameIndex( int presetIndex /**< [in] the current preset index reported by the derived stage */ ) const;
 
@@ -280,11 +293,13 @@ class stdMotionStage
     std::string telemetryPresetName();
 
   private:
+    /// Access the derived controller for CRTP dispatch.
     derivedT &derived()
     {
         return *static_cast<derivedT *>( this );
     }
 
+    /// Access the derived controller without changing its state.
     const derivedT &derived() const
     {
         return *static_cast<const derivedT *>( this );

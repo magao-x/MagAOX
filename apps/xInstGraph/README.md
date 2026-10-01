@@ -128,3 +128,30 @@ take precedence. The selected name must exist on that side of the graph node;
 for example, `[fwfpm]` with `presetDir=input` selects its input `in` without
 another setting. The tracking request and status key/element pairs must be
 supplied together.
+
+#### Parked stages while powered off
+
+`stdMotion` automatically subscribes to the optional Number property
+`<device>.parked`, element `current`. A nonzero numeric value allows preset
+routing while `fsm.state=POWEROFF`; the graph's FSM label still says `POWEROFF`.
+No parking configuration option is required. Controllers without this property
+retain the normal behavior.
+
+The parked route uses the published `presetName` or `filterName` selection,
+according to `presetPrefix`. It requires exactly one selected name other than
+`none`. For a multi-put node, that name must match a configured `presetPutName`.
+The normal input/output mapping, `alwaysOn`, and `noAutoOn` rules then apply.
+False or malformed parking, an absent or ambiguous selection, or an unmatched
+multi-put name leaves all puts off, including `alwaysOn`. An arbitrary numeric
+position with no named preset does not identify a graph route.
+
+While parked and powered off, the preset route takes priority over tracking
+request and status flags. Tracking resumes under the existing READY/OPERATING
+rules when the FSM changes. Parking does not enable routing in other unavailable
+states such as HOMING, NOTHOMED, NOTCONNECTED, or ERROR.
+
+FSM, parking, and preset messages arrive separately, so the graph recomputes
+from the latest received values after each update. Parking initially defaults
+to false. Property deletion and connection loss currently do not invalidate
+the graph handlers' cached values; parked routing shares that existing
+freshness limitation.
