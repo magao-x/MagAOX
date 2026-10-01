@@ -1005,10 +1005,10 @@ class dmTemporalResponse : public MagAOXApp<true>, public dev::shmimMonitor<dmTe
     /// Result codes of a single trial.
     enum trialResult
     {
-        trialStopped = -1, ///< Stop, shutdown, or a camera/fps change interrupted the trial.
-        trialValid   = 0,  ///< The trial completed with contiguous frames.
-        trialInvalid = 1,  ///< A frame counter gap invalidated the trial.
-        trialTimeout = 2   ///< No trial completion within the timeout.
+        resultStopped = -1, ///< Stop, shutdown, or a camera/fps change interrupted the trial.
+        resultValid   = 0,  ///< The trial completed with contiguous frames.
+        resultInvalid = 1,  ///< A frame counter gap invalidated the trial.
+        resultTimeout = 2   ///< No trial completion within the timeout.
     };
 
     /// Snapshot of the parameters used for one run, taken at start so INDI changes can not affect a run.
@@ -2878,7 +2878,7 @@ inline int dmTemporalResponse::runTrial( double delay, int sign )
     {
         if( m_stopRequested || m_shutdown || m_camChanged || m_fpsChanged )
         {
-            return trialStopped;
+            return resultStopped;
         }
 
         double dt = std::min( 0.01, m_run.m_settle - waited );
@@ -2925,18 +2925,18 @@ inline int dmTemporalResponse::runTrial( double delay, int sign )
         }
     }
 
-    int rv = trialValid;
+    int rv = resultValid;
 
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_trialMutex );
 
         if( !done )
         {
-            rv = ( m_stopRequested || m_shutdown || m_camChanged || m_fpsChanged ) ? trialStopped : trialTimeout;
+            rv = ( m_stopRequested || m_shutdown || m_camChanged || m_fpsChanged ) ? resultStopped : resultTimeout;
         }
         else if( !m_trialValid )
         {
-            rv = ( m_stopRequested || m_shutdown ) ? trialStopped : trialInvalid;
+            rv = ( m_stopRequested || m_shutdown ) ? resultStopped : resultInvalid;
         }
 
         m_trialState = trialState::idle;
@@ -2981,17 +2981,17 @@ inline int dmTemporalResponse::runTrialSet( double                            de
 
             int rv = runTrial( delay, sign );
 
-            if( rv == trialStopped )
+            if( rv == resultStopped )
             {
                 return -1;
             }
 
-            if( rv == trialTimeout )
+            if( rv == resultTimeout )
             {
                 return log<software_error, -1>( { __FILE__, __LINE__, "trial timed out: is camWFS running?" } );
             }
 
-            if( rv == trialInvalid )
+            if( rv == resultInvalid )
             {
                 ++m_progInvalid;
 
