@@ -346,3 +346,25 @@ I've implemented the merged plan as the `dmTemporalResponse` app and committed i
 3. Run `make coverage`. The startup, shutdown and shmim functions will probably need `LCOV_EXCL` markers.
 4. Run `clang-format` and commit it separately as formatting-only.
 5. Do the hardware checks on the RTC with the loop open, starting with a small `poke_amp` on `dm00disp07`.
+
+## Debugging
+
+First build and test on the MagAO-X computer (exao2), 2026-10-01.
+
+### Environment setup (no code changes)
+- **`Detected GCC 11; GCC >= 14 is required`**: `Make/common.mk` enforces GCC >= 14. The fix was to enable the gcc-toolset-14 compiler in the build shell.
+- **`No rule to make target '../flatlogs/bin/flatlogcodes'`**: the fresh checkout had never had its base pieces built. Running `make basic` from the repo root builds INDI, `flatlogcodes`, and `libMagAOX`. `libMagAOX/Makefile` has its own rule for `../../flatlogs/bin/flatlogcodes` but depends on `../flatlogs/bin/flatlogcodes` (an existing path mismatch), so building from an app directory alone can't create it.
+
+### 1. `trialResult` enumerator clashes with the `trialTimeout()` accessor (commit `0b2c06c3`)
+- **Error:** `dmTemporalResponse.hpp:1497: 'double ...::trialTimeout() const' conflicts with a previous declaration` (the enumerator at line 1011).
+- **Cause:** `trialResult` was an unscoped `enum`, so its enumerator `trialTimeout` was placed in class scope, where it collided with the `trialTimeout()` accessor for `poke.trialTimeout`.
+- **Fix:** renamed the enumerators to `resultStopped`, `resultValid`, `resultInvalid`, and `resultTimeout` (in `dmTemporalResponse.hpp`: the enum, `runTrial()`, and `runTrialSet()`). The accessor and config key are unchanged.
+- **Result:** the app compiles and links with no warnings under `-Wall -Wextra`. The test program also compiles and links, which confirms the mxlib FITS read/write and `fitsHeader` APIs assumed in section 13.
+
+### 2. Test stream creation fails: `ImageStreamIO_createIm_gpu returned an error` (commit `8546b12f`)
+- **Symptom:** 31 test cases, 9 passed and 22 failed. The failures were unexpected exceptions from `milkImage::create` (`milkImage.hpp:547`) in the test harness.
+- **Cause:** with `MILK_SHM_DIR` unset, ImageStreamIO creates streams in the system shm directory, which the `twitchell` account can't write. Every test that builds the harness failed.
+- **Fix:** the harness calls `ensureMilkShmDir()` before any ImageStreamIO call, setting `MILK_SHM_DIR=/tmp/dmTemporalResponse_test/shm` (the same pattern as `dm_test.cpp` and `streamWriter_lifecycle_test.cpp`). The destructor removes the test streams from that directory. This also keeps test streams separate from real system streams.
+- **Status:** pending a re-run. The 9 passing cases don't account for all 13 harness-free cases, so some failures may have another cause. Needs the full `grep -B4 -A6 FAILED` output.
+
+The `ERR ... invalid poke.mode: both` log line during the test run is expected: it comes from the configuration test that checks a bad mode is rejected.
