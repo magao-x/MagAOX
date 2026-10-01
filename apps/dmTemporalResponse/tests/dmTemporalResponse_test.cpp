@@ -124,8 +124,8 @@ pcf::IndiProperty switchProp( const std::string &device, /**< [in] the device na
 }
 
 /// Write a 2-D float FITS pattern.
-void writePattern( const std::string &path,               /**< [in] the output path */
-                   const mx::improc::eigenImage<float> &im /**< [in] the pattern */
+void writePattern( const std::string                   &path, /**< [in] the output path */
+                   const mx::improc::eigenImage<float> &im    /**< [in] the pattern */
 )
 {
     mx::fits::fitsFile<float, XWC_DEFAULT_VERBOSITY> ff;
@@ -141,7 +141,7 @@ class dmTemporalResponse_test : public dmTemporalResponse
     /// A recorded DM write.
     struct dmWrite
     {
-        int64_t                       m_ns; ///< Fake time of the write [ns].
+        int64_t                       m_ns;  ///< Fake time of the write [ns].
         mx::improc::eigenImage<float> m_cmd; ///< The command written.
     };
 
@@ -162,20 +162,20 @@ class dmTemporalResponse_test : public dmTemporalResponse
     std::thread::id m_camId; ///< The fake camera thread id.
 
     // Fake camera model
-    std::thread       m_camThread;             ///< The fake camera thread.
-    std::atomic<bool> m_camStop{ false };      ///< Stop the fake camera.
-    std::atomic<bool> m_camPause{ false };     ///< Pause frame production (for timeouts).
-    std::atomic<int>  m_gapsToInject{ 0 };     ///< Frame-counter gaps to inject during captures.
-    std::atomic<bool> m_alwaysGap{ false };    ///< Inject a gap in every capture.
-    std::atomic<int>  m_stopAfterFrames{ -1 }; ///< Request stop after this many frames.
+    std::thread       m_camThread;                 ///< The fake camera thread.
+    std::atomic<bool> m_camStop{ false };          ///< Stop the fake camera.
+    std::atomic<bool> m_camPause{ false };         ///< Pause frame production (for timeouts).
+    std::atomic<int>  m_gapsToInject{ 0 };         ///< Frame-counter gaps to inject during captures.
+    std::atomic<bool> m_alwaysGap{ false };        ///< Inject a gap in every capture.
+    std::atomic<int>  m_stopAfterFrames{ -1 };     ///< Request stop after this many frames.
     std::atomic<int>  m_shutdownAfterFrames{ -1 }; ///< Set m_shutdown after this many frames.
 
-    double m_T{ 1000 };      ///< Simulated frame period [us].
-    double m_tau{ 3000 };    ///< Simulated DM time constant [us].
-    double m_latency{ 50 };  ///< Simulated DM latency [us].
-    double m_wake{ 20 };     ///< Simulated wake latency after atime [us].
-    float  m_bias{ 100 };    ///< Camera bias.
-    float  m_gain{ 10 };     ///< Camera gain per DM unit.
+    double m_T{ 1000 };     ///< Simulated frame period [us].
+    double m_tau{ 3000 };   ///< Simulated DM time constant [us].
+    double m_latency{ 50 }; ///< Simulated DM latency [us].
+    double m_wake{ 20 };    ///< Simulated wake latency after atime [us].
+    float  m_bias{ 100 };   ///< Camera bias.
+    float  m_gain{ 10 };    ///< Camera gain per DM unit.
 
     /// Set up the harness with an nx x ny camera and DM.
     dmTemporalResponse_test( uint32_t nx = 8, /**< [in] camera and DM width */
@@ -225,10 +225,8 @@ class dmTemporalResponse_test : public dmTemporalResponse
         stopCamera();
         std::error_code ec;
         std::filesystem::remove_all( m_baseTmp, ec );
-        for( const std::string &n : { m_dmStreamOverride,
-                                      m_configName + "_ref",
-                                      m_configName + "_resp",
-                                      m_configName + "_respavg" } )
+        for( const std::string &n :
+             { m_dmStreamOverride, m_configName + "_ref", m_configName + "_resp", m_configName + "_respavg" } )
         {
             std::filesystem::remove( m_shmDir + "/" + n + ".im.shm", ec );
         }
@@ -305,7 +303,7 @@ class dmTemporalResponse_test : public dmTemporalResponse
     /// Run the fake camera: frames every T of fake time, paced ~100 us of real time.
     void startCamera()
     {
-        m_camStop = false;
+        m_camStop   = false;
         m_camThread = std::thread(
             [this]()
             {
@@ -450,7 +448,7 @@ class dmTemporalResponse_test : public dmTemporalResponse
  */
 TEST_CASE( "dmTemporalResponse time helpers", "[dmTemporalResponse][helpers]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponseMath::tsDiffUs( timespec(), timespec() );
     dmTemporalResponseMath::tsAddUs( timespec(), 0 );
@@ -487,7 +485,7 @@ TEST_CASE( "dmTemporalResponse time helpers", "[dmTemporalResponse][helpers]" )
  */
 TEST_CASE( "dmTemporalResponse finite checks and header sentinel", "[dmTemporalResponse][helpers]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponseMath::isFinite( 0.0 );
     dmTemporalResponseMath::isFinite( 0.0f );
@@ -517,7 +515,7 @@ TEST_CASE( "dmTemporalResponse finite checks and header sentinel", "[dmTemporalR
  */
 TEST_CASE( "dmTemporalResponse dmStreamName", "[dmTemporalResponse][helpers]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponseMath::dmStreamName( std::string(), 0, 7 );
     #endif
@@ -542,7 +540,7 @@ TEST_CASE( "dmTemporalResponse dmStreamName", "[dmTemporalResponse][helpers]" )
  */
 TEST_CASE( "dmTemporalResponse poke validation", "[dmTemporalResponse][helpers]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponseMath::parsePokeMode( pokeMode(), "" );
     dmTemporalResponseMath::validateActuator( {}, {}, 0, 0 );
@@ -586,7 +584,7 @@ TEST_CASE( "dmTemporalResponse poke validation", "[dmTemporalResponse][helpers]"
  */
 TEST_CASE( "dmTemporalResponse pattern loading and command building", "[dmTemporalResponse][helpers]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponseMath::validatePattern( mx::improc::eigenImage<float>(), 0, 0 );
     dmTemporalResponseMath::loadPattern( mx::improc::eigenImage<float>(), "", 0, 0 );
@@ -610,7 +608,7 @@ TEST_CASE( "dmTemporalResponse pattern loading and command building", "[dmTempor
         REQUIRE( validatePattern( zero, 1.0, 1.0 ) == -1 );
 
         mx::improc::eigenImage<float> bad = pat;
-        bad( 0, 0 ) = std::numeric_limits<float>::quiet_NaN();
+        bad( 0, 0 )                       = std::numeric_limits<float>::quiet_NaN();
         REQUIRE( validatePattern( bad, 1.0, 1.0 ) == -1 );
         bad( 0, 0 ) = std::numeric_limits<float>::infinity();
         REQUIRE( validatePattern( bad, 1.0, 1.0 ) == -1 );
@@ -686,7 +684,7 @@ TEST_CASE( "dmTemporalResponse pattern loading and command building", "[dmTempor
  */
 TEST_CASE( "dmTemporalResponse delay grid and trial count", "[dmTemporalResponse][helpers]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponseMath::resolveSpan( double(), 0, 0 );
     dmTemporalResponseMath::delayGrid( std::vector<double>(), 0, 0 );
@@ -736,7 +734,7 @@ TEST_CASE( "dmTemporalResponse delay grid and trial count", "[dmTemporalResponse
  */
 TEST_CASE( "dmTemporalResponse output names", "[dmTemporalResponse][helpers]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponseMath::runDirName( timespec() );
     dmTemporalResponseMath::isoDate( timespec() );
@@ -783,7 +781,7 @@ TEST_CASE( "dmTemporalResponse output names", "[dmTemporalResponse][helpers]" )
  */
 TEST_CASE( "dmTemporalResponse differenceCube", "[dmTemporalResponse][helpers]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponseMath::differenceCube( mx::improc::eigenCube<float>(), mx::improc::eigenCube<double>(), mx::improc::eigenCube<double>(), 0 );
     #endif
@@ -796,7 +794,7 @@ TEST_CASE( "dmTemporalResponse differenceCube", "[dmTemporalResponse][helpers]" 
 
         for( int i = 0; i < 3 * 2 * 2; ++i )
         {
-            double R        = 0.1 * i;
+            double R     = 0.1 * i;
             sp.data()[i] = ( M / 2 ) * ( bias + R );
             sn.data()[i] = ( M / 2 ) * ( bias - R );
         }
@@ -823,7 +821,7 @@ TEST_CASE( "dmTemporalResponse differenceCube", "[dmTemporalResponse][helpers]" 
  */
 TEST_CASE( "dmTemporalResponse mask and projection", "[dmTemporalResponse][helpers]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponseMath::buildMask( mx::improc::eigenImage<float>(), double(), mx::improc::eigenImage<float>(), 0 );
     dmTemporalResponseMath::projectResponse( nullptr, nullptr, nullptr, nullptr, 0, 0 );
@@ -863,7 +861,7 @@ TEST_CASE( "dmTemporalResponse mask and projection", "[dmTemporalResponse][helpe
  */
 TEST_CASE( "dmTemporalResponse response metrics", "[dmTemporalResponse][helpers]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponseMath::crossingTime( double(), {}, {}, 0 );
     dmTemporalResponseMath::computeMetrics( responseMetrics(), {}, {}, {}, 0, {}, 0 );
@@ -902,10 +900,11 @@ TEST_CASE( "dmTemporalResponse response metrics", "[dmTemporalResponse][helpers]
     {
         std::vector<double> ru;
         double              zeta = 0.3, wn = 0.05;
-        double              wd   = wn * sqrt( 1 - zeta * zeta );
+        double              wd = wn * sqrt( 1 - zeta * zeta );
         for( double ti : t )
         {
-            ru.push_back( 1 - exp( -zeta * wn * ti ) * ( cos( wd * ti ) + zeta / sqrt( 1 - zeta * zeta ) * sin( wd * ti ) ) );
+            ru.push_back( 1 - exp( -zeta * wn * ti ) *
+                                  ( cos( wd * ti ) + zeta / sqrt( 1 - zeta * zeta ) * sin( wd * ti ) ) );
         }
 
         responseMetrics met;
@@ -947,7 +946,7 @@ TEST_CASE( "dmTemporalResponse response metrics", "[dmTemporalResponse][helpers]
  */
 TEST_CASE( "dmTemporalResponse resampleAverage", "[dmTemporalResponse][helpers]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponseMath::resampleAverage( std::vector<double>(), std::vector<double>(), {}, {}, 0 );
     #endif
@@ -1015,7 +1014,7 @@ TEST_CASE( "dmTemporalResponse resampleAverage", "[dmTemporalResponse][helpers]"
  */
 TEST_CASE( "dmTemporalResponse bestDelay", "[dmTemporalResponse][helpers]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponseMath::bestDelay( size_t(), {}, "" );
     #endif
@@ -1051,7 +1050,7 @@ TEST_CASE( "dmTemporalResponse bestDelay", "[dmTemporalResponse][helpers]" )
  */
 TEST_CASE( "dmTemporalResponse sha256", "[dmTemporalResponse][helpers]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponseMath::sha256Hex( "" );
     dmTemporalResponseMath::sha256File( std::string(), "" );
@@ -1094,7 +1093,7 @@ TEST_CASE( "dmTemporalResponse configuration defaults", "[dmTemporalResponse][co
     app.config.readConfig( "/tmp/dmTemporalResponse_test.conf" );
 
     app.loadConfig();
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponse::setupConfig();
     dmTemporalResponse::loadConfig();
@@ -1145,14 +1144,16 @@ TEST_CASE( "dmTemporalResponse configuration overrides", "[dmTemporalResponse][c
 
         mx::app::writeConfigFile(
             "/tmp/dmTemporalResponse_test_override.conf",
-            { "wfscam", "wfscam", "dm", "dm", "poke", "poke", "poke", "poke", "poke", "poke", "poke", "poke", "poke",
-              "poke", "poke", "poke", "poke", "analysis", "analysis", "analysis", "analysis", "analysis", "analysis",
-              "output" },
-            { "shmimName", "camDevName", "index", "channel", "mode", "x", "y", "patternFile", "amp", "maxCommand",
-              "nDelays", "delaySpan", "nFrames", "nTrials", "settle", "trialTimeout", "maxRetries", "nRef", "nSettle",
-              "maskThresh", "resampleFactor", "bestMetric", "maxLateFrac", "baseDir" },
-            { "camtest", "camdev", "1", "3", "pattern", "5", "6", "/tmp/p.fits", "0.25", "0.5", "7", "1500", "12", "8",
-              "0.1", "3", "2", "4", "3", "0.2", "5", "rise", "0.3", "/tmp/out" } );
+            { "wfscam", "wfscam",   "dm",       "dm",       "poke",     "poke",     "poke",     "poke",
+              "poke",   "poke",     "poke",     "poke",     "poke",     "poke",     "poke",     "poke",
+              "poke",   "analysis", "analysis", "analysis", "analysis", "analysis", "analysis", "output" },
+            { "shmimName",   "camDevName",   "index",      "channel", "mode",      "x",          "y",
+              "patternFile", "amp",          "maxCommand", "nDelays", "delaySpan", "nFrames",    "nTrials",
+              "settle",      "trialTimeout", "maxRetries", "nRef",    "nSettle",   "maskThresh", "resampleFactor",
+              "bestMetric",  "maxLateFrac",  "baseDir" },
+            { "camtest", "camdev", "1", "3",    "pattern", "5",    "6",   "/tmp/p.fits",
+              "0.25",    "0.5",    "7", "1500", "12",      "8",    "0.1", "3",
+              "2",       "4",      "3", "0.2",  "5",       "rise", "0.3", "/tmp/out" } );
 
         app.config.readConfig( "/tmp/dmTemporalResponse_test_override.conf" );
         app.loadConfig();
@@ -1207,7 +1208,7 @@ TEST_CASE( "dmTemporalResponse INDI tunables", "[dmTemporalResponse][indi]" )
     dmTemporalResponse_test app;
     REQUIRE( app.createIndiProperties() == 0 );
 
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponse::createIndiProperties();
     dmTemporalResponse::newCallBack_m_indiP_dmIndex( pcf::IndiProperty() );
@@ -1239,7 +1240,8 @@ TEST_CASE( "dmTemporalResponse INDI tunables", "[dmTemporalResponse][indi]" )
     REQUIRE( app.m_pokeX == std::vector<int>( { 6 } ) );
     REQUIRE( app.newCallBack_m_indiP_pokeY( targetProp( dev, "poke_y", 2 ) ) == 0 );
     REQUIRE( app.m_pokeY == std::vector<int>( { 2 } ) );
-    REQUIRE( app.newCallBack_m_indiP_patternFile( targetProp( dev, "pattern_file", std::string( "/tmp/x.fits" ), true ) ) == 0 );
+    REQUIRE( app.newCallBack_m_indiP_patternFile(
+                 targetProp( dev, "pattern_file", std::string( "/tmp/x.fits" ), true ) ) == 0 );
     REQUIRE( app.m_patternFile == "/tmp/x.fits" );
     REQUIRE( app.newCallBack_m_indiP_pokeAmp( targetProp( dev, "poke_amp", 0.125 ) ) == 0 );
     REQUIRE( app.m_pokeAmp == Approx( 0.125 ) );
@@ -1284,7 +1286,8 @@ TEST_CASE( "dmTemporalResponse INDI tunables", "[dmTemporalResponse][indi]" )
         REQUIRE( app.newCallBack_m_indiP_pokeX( targetProp( dev, "poke_x", 1 ) ) == -1 );
         REQUIRE( app.m_pokeX == std::vector<int>( { 6 } ) );
         REQUIRE( app.newCallBack_m_indiP_pokeY( targetProp( dev, "poke_y", 1 ) ) == -1 );
-        REQUIRE( app.newCallBack_m_indiP_patternFile( targetProp( dev, "pattern_file", std::string( "/y" ), true ) ) == -1 );
+        REQUIRE( app.newCallBack_m_indiP_patternFile( targetProp( dev, "pattern_file", std::string( "/y" ), true ) ) ==
+                 -1 );
         REQUIRE( app.m_patternFile == "/tmp/x.fits" );
         REQUIRE( app.newCallBack_m_indiP_pokeMode( switchProp( dev, "poke_mode", "pattern" ) ) == -1 );
         REQUIRE( app.m_pokeModeName == "actuator" );
@@ -1317,7 +1320,7 @@ TEST_CASE( "dmTemporalResponse INDI controls and fps", "[dmTemporalResponse][ind
     dmTemporalResponse_test app;
     REQUIRE( app.createIndiProperties() == 0 );
 
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponse::newCallBack_m_indiP_start( pcf::IndiProperty() );
     dmTemporalResponse::newCallBack_m_indiP_stop( pcf::IndiProperty() );
@@ -1375,9 +1378,9 @@ TEST_CASE( "dmTemporalResponse INDI controls and fps", "[dmTemporalResponse][ind
         REQUIRE( app.m_wfsFps == Approx( 2000 ) );
 
         // A change during a run flags an abort
-        app.m_running    = true;
-        app.m_run.m_fps  = 2000;
-        ip["current"]    = 1000.0;
+        app.m_running   = true;
+        app.m_run.m_fps = 2000;
+        ip["current"]   = 1000.0;
         REQUIRE( app.setCallBack_m_indiP_wfsFps( ip ) == 0 );
         REQUIRE( app.m_fpsChanged == true );
         app.m_running = false;
@@ -1394,7 +1397,7 @@ TEST_CASE( "dmTemporalResponse INDI controls and fps", "[dmTemporalResponse][ind
  */
 TEST_CASE( "dmTemporalResponse state machine same-frame poke", "[dmTemporalResponse][statemachine]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponse::processFrame( nullptr, timespec(), 0 );
     dmTemporalResponse::writeDM( mx::improc::eigenImage<float>() );
@@ -1563,8 +1566,8 @@ TEST_CASE( "dmTemporalResponse state machine stop and write failure", "[dmTempor
 
     SECTION( "stop during busy-wait" )
     {
-        int64_t tTrig    = s_fakeNs.load() + 1000000;
-        s_fakeNs         = tTrig;
+        int64_t tTrig       = s_fakeNs.load() + 1000000;
+        s_fakeNs            = tTrig;
         app.m_stopRequested = true;
 
         app.arm( 900, +1 );
@@ -1598,7 +1601,7 @@ TEST_CASE( "dmTemporalResponse state machine stop and write failure", "[dmTempor
  */
 TEST_CASE( "dmTemporalResponse start validation", "[dmTemporalResponse][run]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponse::prepareRun( timespec() );
     dmTemporalResponse::snapshotParams( dmTemporalResponse::runParams() );
@@ -1738,7 +1741,7 @@ TEST_CASE( "dmTemporalResponse start validation", "[dmTemporalResponse][run]" )
  */
 TEST_CASE( "dmTemporalResponse full synthetic run", "[dmTemporalResponse][run]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponse::runMeasurement();
     dmTemporalResponse::runReference();
@@ -1837,7 +1840,7 @@ TEST_CASE( "dmTemporalResponse full synthetic run", "[dmTemporalResponse][run]" 
  */
 TEST_CASE( "dmTemporalResponse trial ordering", "[dmTemporalResponse][run]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponse::runTrialSet( 0, 0, false, mx::improc::eigenCube<double>(), mx::improc::eigenCube<double>(), std::vector<std::vector<double>>(), std::vector<std::vector<double>>(), std::vector<double>(), int() );
     #endif
@@ -2019,8 +2022,8 @@ TEST_CASE( "dmTemporalResponse pattern-mode run", "[dmTemporalResponse][run]" )
     std::filesystem::create_directories( app.m_baseTmp );
     mx::improc::eigenImage<float> pat( 8, 8 );
     pat.setZero();
-    pat( 1, 1 ) = 1.0;
-    pat( 6, 2 ) = -0.5;
+    pat( 1, 1 )       = 1.0;
+    pat( 6, 2 )       = -0.5;
     app.m_patternFile = app.m_baseTmp + "/pattern_in.fits";
     writePattern( app.m_patternFile, pat );
 
@@ -2073,7 +2076,7 @@ TEST_CASE( "dmTemporalResponse zero reference aborts", "[dmTemporalResponse][run
  */
 TEST_CASE( "dmTemporalResponse measurement thread", "[dmTemporalResponse][run]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
     dmTemporalResponse::measThreadStart( nullptr );
     dmTemporalResponse::measThreadExec();

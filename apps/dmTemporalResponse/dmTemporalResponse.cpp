@@ -9,7 +9,7 @@
 #include "dmTemporalResponse.hpp"
 
 /// The main program for the dmTemporalResponse application.
-int main( int argc,    /**< [in] the number of command line arguments */
+int main( int    argc, /**< [in] the number of command line arguments */
           char **argv  /**< [in] the command line arguments */
 )
 {

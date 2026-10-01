@@ -84,7 +84,8 @@ struct responseMetrics
 
     double m_delayErrStd{ std::numeric_limits<double>::quiet_NaN() }; ///< Std of achieved - requested delay [us].
 
-    double m_lateFrac{ std::numeric_limits<double>::quiet_NaN() }; ///< Fraction of trials whose poke deadline had passed.
+    double m_lateFrac{
+        std::numeric_limits<double>::quiet_NaN() }; ///< Fraction of trials whose poke deadline had passed.
 };
 
 /// Check whether a double is finite by inspecting its bits.
@@ -310,8 +311,8 @@ inline int loadPattern( mx::improc::eigenImage<float> &pattern, /**< [out] the l
         return -1;
     }
 
-    mx::improc::eigenCube<float>                          cube;
-    mx::fits::fitsFile<float, XWC_DEFAULT_VERBOSITY>      ff;
+    mx::improc::eigenCube<float>                     cube;
+    mx::fits::fitsFile<float, XWC_DEFAULT_VERBOSITY> ff;
 
     try
     {
@@ -671,8 +672,8 @@ inline int computeMetrics( responseMetrics           &met,       /**< [out] the 
 
     met.m_overshoot = *std::max_element( rmean.begin(), rmean.end() ) - 1.0;
 
-    int    ns   = std::max( 1, std::min( nSettle, static_cast<int>( rmean.size() ) ) );
-    double sse  = 0;
+    int    ns  = std::max( 1, std::min( nSettle, static_cast<int>( rmean.size() ) ) );
+    double sse = 0;
     for( size_t i = rmean.size() - ns; i < rmean.size(); ++i )
     {
         sse += ( rmean[i] - 1.0 ) * ( rmean[i] - 1.0 );
@@ -859,12 +860,11 @@ inline std::string sha256Hex( const std::string &data /**< [in] the bytes to has
         0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
         0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2 };
 
-    uint32_t h[8] = {
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 };
+    uint32_t h[8] = { 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 };
 
     auto rotr = []( uint32_t x, int n ) { return ( x >> n ) | ( x << ( 32 - n ) ); };
 
-    std::string msg = data;
+    std::string msg    = data;
     uint64_t    bitLen = static_cast<uint64_t>( data.size() ) * 8;
 
     msg.push_back( static_cast<char>( 0x80 ) );
@@ -1020,7 +1020,8 @@ struct dmTemporalResponseWfsShmimT
  *
  * \ingroup dmTemporalResponse
  */
-class dmTemporalResponse : public MagAOXApp<true>, public dev::shmimMonitor<dmTemporalResponse, dmTemporalResponseWfsShmimT>
+class dmTemporalResponse : public MagAOXApp<true>,
+                           public dev::shmimMonitor<dmTemporalResponse, dmTemporalResponseWfsShmimT>
 {
     // Give the test harness access.
     friend class dmTemporalResponse_test;
@@ -1034,10 +1035,10 @@ class dmTemporalResponse : public MagAOXApp<true>, public dev::shmimMonitor<dmTe
     /// The per-frame state machine states.
     enum class trialState : int
     {
-        idle,      ///< No trial in progress; frames are ignored.
-        armed,     ///< The next frame is the trigger frame.
-        waitPoke,  ///< The poke deadline falls after a later frame; waiting for it.
-        capturing  ///< The poke has been written; capturing N frames.
+        idle,     ///< No trial in progress; frames are ignored.
+        armed,    ///< The next frame is the trigger frame.
+        waitPoke, ///< The poke deadline falls after a later frame; waiting for it.
+        capturing ///< The poke has been written; capturing N frames.
     };
 
     /// Result codes of a single trial.
@@ -1639,15 +1640,15 @@ class dmTemporalResponse : public MagAOXApp<true>, public dev::shmimMonitor<dmTe
      * \returns 0 on success
      * \returns -1 on abort (retries exceeded, timeout, stop, or camera change)
      */
-    int runTrialSet( double                             delay,     /**< [in] the delay [us] */
-                     int                                nPerSign,  /**< [in] valid trials per sign */
-                     bool                               project,   /**< [in] compute response curves if true */
-                     mx::improc::eigenCube<double>     &sumPos,    /**< [out] sum of positive trials */
-                     mx::improc::eigenCube<double>     &sumNeg,    /**< [out] sum of negative trials */
-                     std::vector<std::vector<double>>  &curves,    /**< [out] per-trial response curves */
-                     std::vector<std::vector<double>>  &times,     /**< [out] per-trial time axes [us] */
-                     std::vector<double>               &delayErrs, /**< [out] per-trial delay errors [us] */
-                     int                               &nLate      /**< [out] the number of late trials */
+    int runTrialSet( double                            delay,     /**< [in] the delay [us] */
+                     int                               nPerSign,  /**< [in] valid trials per sign */
+                     bool                              project,   /**< [in] compute response curves if true */
+                     mx::improc::eigenCube<double>    &sumPos,    /**< [out] sum of positive trials */
+                     mx::improc::eigenCube<double>    &sumNeg,    /**< [out] sum of negative trials */
+                     std::vector<std::vector<double>> &curves,    /**< [out] per-trial response curves */
+                     std::vector<std::vector<double>> &times,     /**< [out] per-trial time axes [us] */
+                     std::vector<double>              &delayErrs, /**< [out] per-trial delay errors [us] */
+                     int                              &nLate      /**< [out] the number of late trials */
     );
 
     /// Run the reference pass and build P, the mask, and the normalization.
@@ -2304,7 +2305,7 @@ inline int dmTemporalResponse::appLogic()
 
     // Snapshot the tunables under the lock held by the INDI callbacks
     runParams cur;
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> plock( m_paramMutex );
         snapshotParams( cur );
     }
@@ -2332,7 +2333,7 @@ inline int dmTemporalResponse::appLogic()
     }
     updateIfChanged( m_indiP_dmStream, "name", sname );
 
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> rlock( m_resultsMutex );
 
         pcf::IndiProperty::PropertyStateType rs =
@@ -2346,19 +2347,19 @@ inline int dmTemporalResponse::appLogic()
         updateIfChanged( m_indiP_results, "t50", m_t50Text );
         updateIfChanged( m_indiP_results, "rise", m_riseText );
         updateIfChanged( m_indiP_results, "jitter", m_jitterText );
-        updateIfChanged( m_indiP_best,
-                         std::vector<std::string>( { "delay_us", "t50", "rise", "jitter" } ),
-                         m_bestValues );
+        updateIfChanged(
+            m_indiP_best, std::vector<std::string>( { "delay_us", "t50", "rise", "jitter" } ), m_bestValues );
     }
 
-    updateIfChanged( m_indiP_progress,
-                     std::vector<std::string>( { "delay_index", "delay_us", "sign", "trial", "n_invalid", "late_frac" } ),
-                     std::vector<double>( { static_cast<double>( m_progDelayIdx ),
-                                            static_cast<double>( m_progDelayUs ),
-                                            static_cast<double>( m_progSign ),
-                                            static_cast<double>( m_progTrial ),
-                                            static_cast<double>( m_progInvalid ),
-                                            static_cast<double>( m_progLateFrac ) } ) );
+    updateIfChanged(
+        m_indiP_progress,
+        std::vector<std::string>( { "delay_index", "delay_us", "sign", "trial", "n_invalid", "late_frac" } ),
+        std::vector<double>( { static_cast<double>( m_progDelayIdx ),
+                               static_cast<double>( m_progDelayUs ),
+                               static_cast<double>( m_progSign ),
+                               static_cast<double>( m_progTrial ),
+                               static_cast<double>( m_progInvalid ),
+                               static_cast<double>( m_progLateFrac ) } ) );
 
     if( m_running )
     {
@@ -2516,7 +2517,7 @@ inline int dmTemporalResponse::allocate( const dmTemporalResponseWfsShmimT &dumm
 {
     static_cast<void>( dummy ); // be unused
 
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_trialMutex );
 
         if( m_running )
@@ -2563,9 +2564,9 @@ inline int dmTemporalResponse::processFrame( void *src, const timespec &atime, u
 
     if( m_trialState == trialState::armed )
     {
-        m_trigATime = atime;
-        m_tPoke     = dmTemporalResponseMath::tsAddUs( atime, m_curDelay );
-        m_trialCnt0 = cnt0;
+        m_trigATime  = atime;
+        m_tPoke      = dmTemporalResponseMath::tsAddUs( atime, m_curDelay );
+        m_trialCnt0  = cnt0;
         m_trialState = trialState::waitPoke;
     }
     else if( m_trialState == trialState::waitPoke )
@@ -2718,7 +2719,7 @@ inline int dmTemporalResponse::prepareRun( const timespec &runStart )
 {
     using namespace dmTemporalResponseMath;
 
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_paramMutex );
         snapshotParams( m_run );
     }
@@ -2768,7 +2769,8 @@ inline int dmTemporalResponse::prepareRun( const timespec &runStart )
 
     if( validateCommand( m_run.m_pokeAmp, m_run.m_maxCommand ) < 0 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "poke amplitude must be non-zero and |amp| <= maxCommand" } );
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "poke amplitude must be non-zero and |amp| <= maxCommand" } );
     }
 
     // Open the DM channel (read-only access to its size; nothing is written until the first trial)
@@ -2882,7 +2884,7 @@ inline int dmTemporalResponse::prepareRun( const timespec &runStart )
     m_delays = delays;
     m_span   = span;
 
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_trialMutex );
 
         m_curNFrames    = m_run.m_nFrames;
@@ -2897,7 +2899,7 @@ inline int dmTemporalResponse::prepareRun( const timespec &runStart )
         dstr += ( k > 0 ? "," : "" ) + std::to_string( delays[k] );
     }
 
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultsMutex );
         m_runDir     = runDir;
         m_delaysText = dstr;
@@ -2935,17 +2937,17 @@ inline int dmTemporalResponse::runTrial( double delay, int sign )
     {
     }
 
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_trialMutex );
 
-        m_curDelay   = delay;
-        m_curSign    = sign;
+        m_curDelay    = delay;
+        m_curSign     = sign;
         m_progDelayUs = delay;
         m_progSign    = sign;
-        m_trialValid = true;
-        m_trialLate  = false;
-        m_nCaptured  = 0;
-        m_trialState = trialState::armed;
+        m_trialValid  = true;
+        m_trialLate   = false;
+        m_nCaptured   = 0;
+        m_trialState  = trialState::armed;
     }
 
     timespec start = dmTemporalResponseMath::realtimeNow();
@@ -2971,7 +2973,7 @@ inline int dmTemporalResponse::runTrial( double delay, int sign )
 
     int rv = resultValid;
 
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_trialMutex );
 
         if( !done )
@@ -3085,11 +3087,11 @@ inline int dmTemporalResponse::runTrialSet( double                            de
                 for( int k = 0; k < N; ++k )
                 {
                     r[k + 1] = sign * dmTemporalResponseMath::projectResponse( m_trialBuf.data() + nPix * ( k + 1 ),
-                                                                           m_trialBuf.data(),
-                                                                           m_refP.data(),
-                                                                           m_refMask.data(),
-                                                                           nPix,
-                                                                           m_refNorm );
+                                                                               m_trialBuf.data(),
+                                                                               m_refP.data(),
+                                                                               m_refMask.data(),
+                                                                               nPix,
+                                                                               m_refNorm );
 
                     t[k + 1] = dmTemporalResponseMath::tsDiffUs( m_trialTimes[k + 1], m_tCmd );
                 }
@@ -3286,7 +3288,8 @@ inline int dmTemporalResponse::runMeasurement()
 
         log<text_log>( "delay " + std::to_string( m_delays[k] ) + " us: t50=" + std::to_string( met.m_t50 ) +
                        " rise=" + std::to_string( met.m_rise ) + " jitter=" + std::to_string( met.m_jitter ) +
-                       " delayErr=" + std::to_string( met.m_delayErrMean ) + "+/-" + std::to_string( met.m_delayErrStd ) );
+                       " delayErr=" + std::to_string( met.m_delayErrMean ) + "+/-" +
+                       std::to_string( met.m_delayErrStd ) );
 
         // Live response curves, (N+1) x K (completed delays so far)
         try
@@ -3335,7 +3338,7 @@ inline int dmTemporalResponse::runMeasurement()
         jitters += ( k > 0 ? "," : "" ) + std::to_string( m_metrics[k].m_jitter );
     }
 
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultsMutex );
 
         m_t50Text    = t50s;
@@ -3395,7 +3398,7 @@ inline int dmTemporalResponse::runMeasurement()
 
 inline int dmTemporalResponse::requestStart()
 {
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_paramMutex );
 
         if( m_running )
@@ -3487,7 +3490,9 @@ inline int dmTemporalResponse::writeCube( size_t                              id
 
     fh.append( "DELAYUS", dmTemporalResponseMath::headerValue( m_delays[idx] ), "requested delay [us]" );
     fh.append( "DLYIDX", static_cast<int>( idx ), "delay index" );
-    fh.append( "DLYMEAN", dmTemporalResponseMath::headerValue( met.m_delayErrMean + m_delays[idx] ), "mean achieved delay [us]" );
+    fh.append( "DLYMEAN",
+               dmTemporalResponseMath::headerValue( met.m_delayErrMean + m_delays[idx] ),
+               "mean achieved delay [us]" );
     fh.append( "DLYSTD", dmTemporalResponseMath::headerValue( met.m_delayErrStd ), "std of achieved delay [us]" );
     fh.append( "DLYMIN", dmTemporalResponseMath::headerValue( dmin ), "min achieved delay [us]" );
     fh.append( "DLYMAX", dmTemporalResponseMath::headerValue( dmax ), "max achieved delay [us]" );
@@ -3575,15 +3580,15 @@ inline int dmTemporalResponse::writeSummary( const std::vector<double> &grid, co
     for( size_t k = 0; k < K; ++k )
     {
         const dmTemporalResponseMath::responseMetrics &m = m_metrics[k];
-        metrics( k, 0 ) = m_delays[k];
-        metrics( k, 1 ) = m.m_t50;
-        metrics( k, 2 ) = m.m_rise;
-        metrics( k, 3 ) = m.m_overshoot;
-        metrics( k, 4 ) = m.m_settleErr;
-        metrics( k, 5 ) = m.m_jitter;
-        metrics( k, 6 ) = m.m_delayErrMean;
-        metrics( k, 7 ) = m.m_delayErrStd;
-        metrics( k, 8 ) = m.m_lateFrac;
+        metrics( k, 0 )                                  = m_delays[k];
+        metrics( k, 1 )                                  = m.m_t50;
+        metrics( k, 2 )                                  = m.m_rise;
+        metrics( k, 3 )                                  = m.m_overshoot;
+        metrics( k, 4 )                                  = m.m_settleErr;
+        metrics( k, 5 )                                  = m.m_jitter;
+        metrics( k, 6 )                                  = m.m_delayErrMean;
+        metrics( k, 7 )                                  = m.m_delayErrStd;
+        metrics( k, 8 )                                  = m.m_lateFrac;
     }
 
     // Super-sampled response: [nGrid, 2] columns are time [us] and response
@@ -3633,7 +3638,8 @@ inline int dmTemporalResponse::writeSummary( const std::vector<double> &grid, co
     }
     catch( const std::exception &e )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, std::string( "exception writing summary: " ) + e.what() } );
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, std::string( "exception writing summary: " ) + e.what() } );
     }
 
     return 0;
