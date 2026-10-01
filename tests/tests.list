@@ -16,6 +16,7 @@
 ../libMagAOX/logger/tests/logFileRaw_test
 ../libMagAOX/logger/tests/logFileRaw_fileTime_error_test
 ../libMagAOX/logger/tests/logMap_test
+../libMagAOX/logger/tests/logMeta_test
 ../libMagAOX/logger/tests/logTypes_Accessor_test
 
 ../libMagAOX/sys/tests/thSetuid_test
@@ -119,6 +120,7 @@
 
 ../utils/tests/cursesINDI_test
 ../utils/tests/logdump_test
+../utils/tests/shmimDelta_test
 ../utils/tests/shmimInfo_test
 ../utils/tests/shmimLat_test
 ../utils/tests/shmimPlot_test

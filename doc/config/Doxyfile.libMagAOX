@@ -822,6 +822,8 @@ INPUT                  = libMagAOX \
                          flatlogs/include/flatlogs/ \
                          apps/ \
                          utils/logdump/ \
+                         utils/xrif2fits/ \
+                         utils/shmimDelta/ \
                          utils/xrif2shmim/ \
                          tests \
                          tests/groups.dox

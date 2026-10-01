@@ -1144,6 +1144,8 @@ driverStderrReaderThread (void *vp)
 {
 	DvrInfo *dp = (DvrInfo *)vp;
 	char buf[MAXRBUF];
+	size_t have = 0;	/* bytes of an incomplete line carried over from the last read */
+	char *line, *nl;
 	int oldstate;
 
 	/* make sure we are cancellable */
@@ -1151,24 +1153,42 @@ driverStderrReaderThread (void *vp)
 
 	/* log everthing until error */
 	while (1) {
-	    /* read next whole line */
-        ssize_t rv = read(dp->efd, buf, sizeof(buf)-1);
-        if(rv == 0)
-        {
-            logMessage ("from Driver %s: stderr EOF\n", dp->name);
-            return NULL;
-        }
-        else if(rv < 0)
-        {
-            logMessage ("from Driver %s: stderr %s\n", dp->name, strerror(errno));
-            return NULL;
-        }
-        buf[rv] = '\0';
+	    /* read whatever is available, after any incomplete line from last time */
+	    ssize_t rv = read(dp->efd, buf + have, sizeof(buf) - 1 - have);
+	    if (rv <= 0) {
+			/* log any incomplete last line before stopping */
+			if (have > 0) {
+				buf[have] = '\0';
+				logMessage ("Driver %s: %s\n", dp->name, buf);
+			}
+			if (rv == 0)
+				logMessage ("from Driver %s: stderr EOF\n", dp->name);
+			else
+				logMessage ("from Driver %s: stderr %s\n", dp->name, strerror(errno));
+			return (NULL);
+	    }
+	    have += rv;
+	    buf[have] = '\0';
 
-	    /* prefix each whole line to our stderr, save extra for next time */
-	    logMessage ("Driver %s: %s", dp->name, buf);	/* includes nl */
+	    /* read() does not return whole lines, so a read can hold several lines, or part of one; 
+		 * split and prefix each whole line to our stderr, save remainder for next time.
+	     */
+	    line = buf;
+	    while ((nl = strchr (line, '\n')) != NULL) {
+			*nl = '\0';
+			logMessage ("Driver %s: %s\n", dp->name, line);
+			line = nl + 1;
+	    }
+
+	    have = strlen (line);
+	    if (have == sizeof(buf) - 1) {
+			/* buffer full with no newline: log it as it is, as fgets would */
+			logMessage ("Driver %s: %s\n", dp->name, line);
+			have = 0;
+	    } else {
+			memmove (buf, line, have);
+		}
 	}
-
 
 	/* for lint */
 	return (NULL);
@@ -1364,11 +1384,11 @@ restartDvr (DvrInfo *dp)
 			(void) waitpid (dp->pid, &status, WNOHANG);
 	    }
 		//int thispid = (int)gettid();
-		logMessage ("Driver %s: closing dp->efd", dp->name);
+		logMessage ("Driver %s: closing dp->efd\n", dp->name);
 	    close (dp->efd);
-		logMessage ("Driver %s: closing dp->wfd", dp->name);
+		logMessage ("Driver %s: closing dp->wfd\n", dp->name);
 	    close (dp->wfd);
-		logMessage ("Driver %s: closing dp->rfd", dp->name);
+		logMessage ("Driver %s: closing dp->rfd\n", dp->name);
 	    close (dp->rfd);
 	}
 

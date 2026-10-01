@@ -9,7 +9,7 @@ jobs:
     steps:
       - run: sudo apt-get install -y doxygen graphviz ssh rsync
       - name: Check out repository code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - run: cd ${{ github.workspace }} && doxygen doc/config/Doxyfile.libMagAOX
       - name: Add SSH key
         env:
