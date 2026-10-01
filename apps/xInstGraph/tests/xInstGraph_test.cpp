@@ -136,10 +136,10 @@ size_t xInstGraph::handlerCount() const
 
 bool xInstGraph::enableIndiDispatch()
 {
-    m_driverInName = "/dev/null";
-    m_driverOutName = "/dev/null";
+    m_driverInName   = "/dev/null";
+    m_driverOutName  = "/dev/null";
     m_driverCtrlName = "/dev/null";
-    m_indiDriver = new indiDriver<MagAOXApp<true>>( this, "test", "0", "0" );
+    m_indiDriver     = new indiDriver<MagAOXApp<true>>( this, "test", "0", "0" );
     return m_indiDriver->good();
 }
 
@@ -1203,8 +1203,8 @@ TEST_CASE( "xInstGraph publishes parked power-off positions", "[xInstGraph][park
     {
         CAPTURE( order );
         temporaryDirectory temp;
-        const auto input = temp.root / "config" / "instgraph_test.drawio";
-        const auto output = temp.root / "output.drawio";
+        const auto         input  = temp.root / "config" / "instgraph_test.drawio";
+        const auto         output = temp.root / "output.drawio";
         {
             std::ofstream xml( input );
             xml << "<mxfile><diagram><mxGraphModel><root>"
@@ -1217,7 +1217,8 @@ TEST_CASE( "xInstGraph publishes parked power-off positions", "[xInstGraph][park
                    "</root></mxGraphModel></diagram></mxfile>";
         }
         const std::string source = readFile( input );
-        writeNodeSections( temp.root / "config" / "instgraph_test.conf", output,
+        writeNodeSections( temp.root / "config" / "instgraph_test.conf",
+                           output,
                            "[motionStage]\ntype=stdMotion\ndevice=teststage\npresetPrefix=filter\npresetDir=input\n" );
         xInstGraph app;
         loadFixture( app, temp.root );
@@ -1272,7 +1273,7 @@ TEST_CASE( "xInstGraph publishes parked power-off positions", "[xInstGraph][park
         }
         REQUIRE( cellTag( published, "fsmstate:motionStage" ).find( "value=\"POWEROFF\"" ) != std::string::npos );
         ingr::instGraphXML parsed;
-        std::string error;
+        std::string        error;
         REQUIRE( parsed.loadXMLFile( error, output.string() ) == 0 );
         REQUIRE( readFile( input ) == source );
         REQUIRE_FALSE( app.hasStage() );

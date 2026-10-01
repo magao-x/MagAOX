@@ -213,9 +213,8 @@ class stdMotionStage
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    static int st_newCallBack_stdMotionStage(
-        void *app, /**< [in] derived controller instance */
-        const pcf::IndiProperty &ipRecv /**< [in] requested INDI property */
+    static int st_newCallBack_stdMotionStage( void                    *app,   /**< [in] derived controller instance */
+                                              const pcf::IndiProperty &ipRecv /**< [in] requested INDI property */
     );
 
     /// Callback to process a NEW preset position request
@@ -223,32 +222,28 @@ class stdMotionStage
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    int newCallBack_m_indiP_preset(
-        const pcf::IndiProperty &ipRecv /**< [in] the requested INDI property*/ );
+    int newCallBack_m_indiP_preset( const pcf::IndiProperty &ipRecv /**< [in] the requested INDI property*/ );
 
     /// Callback to process a NEW preset name request
     /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    int newCallBack_m_indiP_presetName(
-        const pcf::IndiProperty &ipRecv /**< [in] the requested INDI property*/ );
+    int newCallBack_m_indiP_presetName( const pcf::IndiProperty &ipRecv /**< [in] the requested INDI property*/ );
 
     /// Callback to process a NEW home request switch toggle
     /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    int newCallBack_m_indiP_home(
-        const pcf::IndiProperty &ipRecv /**< [in] the requested INDI property*/ );
+    int newCallBack_m_indiP_home( const pcf::IndiProperty &ipRecv /**< [in] the requested INDI property*/ );
 
     /// Callback to process a NEW stop request switch toggle
     /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    int newCallBack_m_indiP_stop(
-        const pcf::IndiProperty &ipRecv /**< [in] the requested INDI property*/ );
+    int newCallBack_m_indiP_stop( const pcf::IndiProperty &ipRecv /**< [in] the requested INDI property*/ );
 
     /// Update the INDI properties for this device controller
     /** You should call this once per main loop.

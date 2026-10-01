@@ -12,11 +12,11 @@
 
 // Validation tests send empty properties; data-bearing fixtures must execute the real callback.
 #undef INDI_VALIDATE_CALLBACK_PROPS
-#define INDI_VALIDATE_CALLBACK_PROPS( prop1, prop2 ) \
-    INDI_VALIDATE_CALLBACK_PROPS_IMPL( prop1, prop2 ) \
-    if( ( prop2 ).getElements().empty() )             \
-    {                                                \
-        return 0;                                    \
+#define INDI_VALIDATE_CALLBACK_PROPS( prop1, prop2 )                                                                   \
+    INDI_VALIDATE_CALLBACK_PROPS_IMPL( prop1, prop2 )                                                                  \
+    if( ( prop2 ).getElements().empty() )                                                                              \
+    {                                                                                                                  \
+        return 0;                                                                                                      \
     }
 
 #include "../zaberCtrl.hpp"
@@ -51,7 +51,7 @@ class zaberCtrl_test : public zaberCtrl
                            double countsPerMillimeter /**< [in] device microsteps per millimeter */ );
 
     /// Set the configured preset positions and names for testing.
-    void setPresets( const std::vector<float> &positions, /**< [in] configured physical positions */
+    void setPresets( const std::vector<float>       &positions, /**< [in] configured physical positions */
                      const std::vector<std::string> &names /**< [in] corresponding preset names */ );
 
     /// Set the current parked state for testing.
@@ -59,8 +59,8 @@ class zaberCtrl_test : public zaberCtrl
 
     /// Set the current motion and preset telemetry values for testing.
     void setStageTelemetry( int8_t moving, /**< [in] motion or power state */
-                            float preset, /**< [in] current numerical preset */
-                            float presetTarget /**< [in] commanded preset target */ );
+                            float  preset, /**< [in] current numerical preset */
+                            float  presetTarget /**< [in] commanded preset target */ );
 
     /// Set the current motion-state classification for testing.
     void setMovingState( int8_t movingState /**< [in] named or arbitrary move classification */ );

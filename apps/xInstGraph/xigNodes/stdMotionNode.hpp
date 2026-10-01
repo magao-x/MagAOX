@@ -354,7 +354,7 @@ inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
         {
             // IndiElement::get<T>() does not check conversion success. Parse the entire numeric value.
             std::istringstream current( ipRecv["current"].get() );
-            double value = 0;
+            double             value = 0;
             if( current >> value )
             {
                 parked = ( current >> std::ws ).eof() && value != 0;
@@ -371,7 +371,7 @@ inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
         if( m_node != nullptr )
         {
             std::string currentValue;
-            size_t selected = 0;
+            size_t      selected = 0;
             for( const auto &element : ipRecv.getElements() )
             {
                 if( element.second.getSwitchState() == pcf::IndiElement::On )
@@ -387,7 +387,7 @@ inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
             {
                 ++m_changes;
             }
-            m_curVal = currentValue;
+            m_curVal               = currentValue;
             m_presetSelectionValid = selectionValid;
         }
     }
@@ -741,14 +741,14 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
         throw std::runtime_error( msg );
     }
 
-    const auto &presetPuts = m_presetDir == ingr::ioDir::output ? m_node->outputs() : m_node->inputs();
+    const auto           &presetPuts = m_presetDir == ingr::ioDir::output ? m_node->outputs() : m_node->inputs();
     std::set<std::string> seenPuts;
     for( const auto &put : prePutName )
     {
         if( put.empty() || presetPuts.count( put ) == 0 )
         {
-            throw std::runtime_error( "stdMotionNode::loadConfig: presetPutName '" + put +
-                                      "' is not a " + preDir + " put of [" + name() + "]" );
+            throw std::runtime_error( "stdMotionNode::loadConfig: presetPutName '" + put + "' is not a " + preDir +
+                                      " put of [" + name() + "]" );
         }
         if( !seenPuts.insert( put ).second )
         {
