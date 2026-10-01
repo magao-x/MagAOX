@@ -2,7 +2,7 @@
 Review the guidelines in AGENTS.md before proceeding. The documents dmTemporalResponse.md and dm_response_app.md both contain prompts and plans to execute the same idea. Review both plans, and make a suggestion in the "plan" section below for how to implement the best parts of each approach into one cohesive software app.
 
 # Plan
-Status: **Implemented on `ktwitchell/dm-response` (2026-09-30). Builds cleanly and all unit tests pass on exao2 (2026-10-01). Repeated test runs also pass. Coverage, clang-format, and hardware acceptance are pending (see section 13 and Debugging).**
+Status: **Implemented on `ktwitchell/dm-response` (2026-09-30). Builds cleanly and all unit tests pass on exao2 (2026-10-01). Repeated test runs also pass, and clang-format has been applied. Coverage and hardware acceptance are pending (see section 13 and Debugging).**
 
 App: `dmTemporalResponse`. Branch: `ktwitchell/dm-response` (AGENTS rules 12 and 17).
 
@@ -398,6 +398,7 @@ The `ERR ... invalid poke.mode: both` log line during the test run is expected: 
 - **Result:** after the fixes in commit `6ece7483`, the app builds cleanly and the full `dmTemporalResponse_test` suite passes on exao2 ("All tests passed").
 - **Remaining before hardware use:**
   1. ~~Repeat the full test run several times to check for timing-dependent failures in the fake-camera tests.~~ Done 2026-10-01: repeated runs all passed.
-  2. `clang-format -i` on the `apps/dmTemporalResponse` files, as a separate formatting-only commit.
+  2. ~~`clang-format -i` on the `apps/dmTemporalResponse` files, as a separate formatting-only commit.~~ Done 2026-10-01 in commit `63a62496` (3 files, whitespace and wrapping only, +142/−133). The app was rebuilt and all tests still pass after formatting.
+     - Note: running clang-format with the three paths on one long pasted line produced `dmTemporalResponse_test.cpp: Permission denied`. The line had been broken, so bash tried to execute the test file. Running each file separately worked.
   3. `make coverage` in `tests/` for the 100% statement/function target. Add any `LCOV_EXCL` markers and list them here.
   4. Hardware acceptance (Test Plan layer C) on the RTC with the loop open, starting with a small `poke_amp` on `dm00disp07`.
