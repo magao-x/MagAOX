@@ -397,7 +397,8 @@ inline int extrapNoiseEstimateStatisticFromName( std::string statistic /**< [in]
 }
 
 /// Get the INDI element name for the closed-loop to open-loop estimation method.
-inline std::string extrapClosedLoopOlEstimateMethodElement( int method /**< [in] closed-loop to open-loop estimation method to name */ )
+inline std::string
+extrapClosedLoopOlEstimateMethodElement( int method /**< [in] closed-loop to open-loop estimation method to name */ )
 {
     switch( method )
     {
@@ -410,7 +411,8 @@ inline std::string extrapClosedLoopOlEstimateMethodElement( int method /**< [in]
 }
 
 /// Get the display label for the closed-loop to open-loop estimation method.
-inline std::string extrapClosedLoopOlEstimateMethodLabel( int method /**< [in] closed-loop to open-loop estimation method to label */ )
+inline std::string
+extrapClosedLoopOlEstimateMethodLabel( int method /**< [in] closed-loop to open-loop estimation method to label */ )
 {
     switch( method )
     {
@@ -423,7 +425,8 @@ inline std::string extrapClosedLoopOlEstimateMethodLabel( int method /**< [in] c
 }
 
 /// Get the configuration name for the closed-loop to open-loop estimation method.
-inline std::string extrapClosedLoopOlEstimateMethodName( int method /**< [in] closed-loop to open-loop estimation method to name */ )
+inline std::string
+extrapClosedLoopOlEstimateMethodName( int method /**< [in] closed-loop to open-loop estimation method to name */ )
 {
     switch( method )
     {
@@ -436,7 +439,8 @@ inline std::string extrapClosedLoopOlEstimateMethodName( int method /**< [in] cl
 }
 
 /// Parse the closed-loop to open-loop estimation method from an INDI element name.
-inline int extrapClosedLoopOlEstimateMethodFromElement( const std::string &element /**< [in] INDI element name to parse */ )
+inline int
+extrapClosedLoopOlEstimateMethodFromElement( const std::string &element /**< [in] INDI element name to parse */ )
 {
     if( element == "ntf_aware" )
     {
@@ -865,9 +869,9 @@ class modalGainOpt : public MagAOXApp<true>,
     std::string m_psdDevice{ "hopsds" }; /**< The INDI device name of the PSD calculator.  Defaults to
                                    aolN_modevalPSDs where N is m_loopNum.*/
 
-    std::string m_opticalGainDevice{ "strehl" }; ///< INDI device supplying the optical gain estimate.
+    std::string m_opticalGainDevice{ "strehl" };           ///< INDI device supplying the optical gain estimate.
     std::string m_opticalGainProperty{ "strehl_optimal" }; ///< Name of the optical gain property to monitor.
-    std::string m_opticalGainElement{ "pyramid" }; ///< Element containing the optical gain estimate.
+    std::string m_opticalGainElement{ "pyramid" };         ///< Element containing the optical gain estimate.
 
     bool m_autoUpdate{ false };        ///< Flag controlling whether gains are automatically updated
     bool m_opticalGainUpdate{ false }; ///< Flag controlling whether optical gain is
@@ -895,7 +899,7 @@ class modalGainOpt : public MagAOXApp<true>,
 
     ///@}
 
-    uint32_t m_nFreq{ 0 }; ///< Number of frequency bins in each modal PSD.
+    uint32_t m_nFreq{ 0 };  ///< Number of frequency bins in each modal PSD.
     uint32_t m_nModes{ 0 }; ///< Number of modes in the monitored streams.
 
     bool m_updateOnce{ false }; ///< Flag to trigger a single update with gain.
@@ -907,9 +911,10 @@ class modalGainOpt : public MagAOXApp<true>,
 
     /// Each mode gets its own gain optimizer
     std::vector<mx::AO::analysis::clGainOpt<float>> m_goptCurrent; ///< Per-mode optimizers for the applied controller.
-    std::vector<mx::AO::analysis::clGainOpt<float>> m_goptSI; ///< Per-mode simple-integrator gain optimizers.
-    std::vector<mx::AO::analysis::clGainOpt<float>> m_goptLP; ///< Per-mode linear-predictor gain optimizers.
-    std::vector<mx::AO::analysis::clAOLinearPredictor<float>> m_linPred; ///< Per-mode linear-predictor coefficient calculators.
+    std::vector<mx::AO::analysis::clGainOpt<float>> m_goptSI;      ///< Per-mode simple-integrator gain optimizers.
+    std::vector<mx::AO::analysis::clGainOpt<float>> m_goptLP;      ///< Per-mode linear-predictor gain optimizers.
+    std::vector<mx::AO::analysis::clAOLinearPredictor<float>>
+        m_linPred; ///< Per-mode linear-predictor coefficient calculators.
 
     bool m_goptUpdated{ true };   ///< Tracks if a parameter has updated requiring
                                   ///< updates to the m_gopt entries.
@@ -918,13 +923,13 @@ class modalGainOpt : public MagAOXApp<true>,
 
     bool m_freqUpdated{ true };   /**< Tracks if the frequency scale has updated, which necessitates
                                      additional calcs. If true, implies m_goptUpdate == true.*/
-    float m_psdTime{ 1 }; ///< PSD accumulation time in seconds.
-    float m_psdAvgTime{ 10 }; ///< PSD averaging time in seconds.
+    float m_psdTime{ 1 };          ///< PSD accumulation time in seconds.
+    float m_psdAvgTime{ 10 };      ///< PSD averaging time in seconds.
     float m_psdOverlapFraction{ 0.5 }; ///< Fractional overlap between successive PSD windows.
 
     std::vector<float> m_freq; ///< Shared frequency grid for modal PSDs.
 
-    mx::improc::eigenImage<float> m_clPSDs; ///< Closed-loop PSDs for the monitored modes.
+    mx::improc::eigenImage<float> m_clPSDs;        ///< Closed-loop PSDs for the monitored modes.
     mx::improc::eigenImage<float> m_clXferCurrent; ///< Published current closed-loop error transfer
                                                    ///< function.
     mx::improc::eigenImage<float> m_clNtfCurrent;  ///< Published current closed-loop noise transfer
@@ -936,29 +941,29 @@ class modalGainOpt : public MagAOXApp<true>,
     mx::improc::eigenImage<float> m_clXferLP;      ///< Published predictive closed-loop error transfer function.
     mx::improc::eigenImage<float> m_clNtfLP;       ///< Published predictive closed-loop noise transfer function.
 
-    std::vector<std::vector<float>> m_olPSDs; ///< Processed open-loop disturbance PSDs by mode.
-    std::vector<std::vector<float>> m_rawOlPSDs; ///< Raw open-loop disturbance PSDs by mode.
+    std::vector<std::vector<float>> m_olPSDs;       ///< Processed open-loop disturbance PSDs by mode.
+    std::vector<std::vector<float>> m_rawOlPSDs;    ///< Raw open-loop disturbance PSDs by mode.
     std::vector<std::vector<float>> m_smoothOlPSDs; ///< Smoothed open-loop disturbance PSDs by mode.
-    std::vector<std::vector<float>> m_nPSDs; ///< Estimated measurement-noise PSDs by mode.
-    std::vector<float> m_modeVarCL; ///< Closed-loop residual variances by mode.
-    std::vector<float> m_modeVarOL; ///< Open-loop disturbance variances by mode.
+    std::vector<std::vector<float>> m_nPSDs;        ///< Estimated measurement-noise PSDs by mode.
+    std::vector<float>              m_modeVarCL;    ///< Closed-loop residual variances by mode.
+    std::vector<float>              m_modeVarOL;    ///< Open-loop disturbance variances by mode.
 
     int m_modesOn; ///< Number of currently enabled modes.
 
     std::vector<float> m_optGainSIRaw; ///< The raw SI optimal gains before leaky integration.
     std::vector<float> m_optGainSI;    ///< The leaky-integrated SI optimal gains.
     std::vector<float> m_gmaxSI;       ///< The previously calculated maximum gains for SI.
-    std::vector<float> m_modeVarSI; ///< Predicted residual variances for SI gains.
-    std::vector<int> m_timesOnSI; ///< Per-mode debounce counts for SI gain activation.
-    int m_modesOnSI; ///< Number of modes enabled by SI control.
+    std::vector<float> m_modeVarSI;    ///< Predicted residual variances for SI gains.
+    std::vector<int>   m_timesOnSI;    ///< Per-mode debounce counts for SI gain activation.
+    int                m_modesOnSI;    ///< Number of modes enabled by SI control.
     bool m_siGainStateNeedsSync{ true }; ///< Tracks whether the SI gain integrator state should be synced from the
                                          ///< applied gain factors.
 
     std::vector<float> m_optGainLP; ///< Optimized predictive-control gains by mode.
     std::vector<float> m_gmaxLP; ///< The previously calculated maximum gains for LP.
     std::vector<float> m_modeVarLP; ///< Predicted residual variances for LP gains.
-    std::vector<int> m_timesOnLP; ///< Per-mode debounce counts for LP gain activation.
-    int m_modesOnLP; ///< Number of modes enabled by predictive control.
+    std::vector<int>   m_timesOnLP; ///< Per-mode debounce counts for LP gain activation.
+    int                m_modesOnLP; ///< Number of modes enabled by predictive control.
 
     bool m_loop{ false }; ///< Whether closed-loop gain updates are enabled.
 
@@ -1016,29 +1021,29 @@ class modalGainOpt : public MagAOXApp<true>,
 
     eigenImage<float> m_noiseParams; ///< WFS noise model parameters by mode.
 
-    eigenImage<float> m_wfsavg; ///< Average WFS image used for photon-noise estimates.
-    eigenImage<float> m_wfsmask; ///< WFS mask selecting pixels for noise estimates.
-    float m_counts{ 0 }; ///< Masked WFS photon count.
-    float m_emg{ 1 }; ///< Electron multiplication gain for the WFS noise model.
-    int m_npix{ 0 }; ///< Number of active pixels in the WFS mask.
+    eigenImage<float> m_wfsavg;      ///< Average WFS image used for photon-noise estimates.
+    eigenImage<float> m_wfsmask;     ///< WFS mask selecting pixels for noise estimates.
+    float             m_counts{ 0 }; ///< Masked WFS photon count.
+    float             m_emg{ 1 };    ///< Electron multiplication gain for the WFS noise model.
+    int               m_npix{ 0 };   ///< Number of active pixels in the WFS mask.
 
     int m_sinceChange{ -1 }; ///< Optimization cycles since the latest controller change.
 
-    std::string m_olPSDShmimName; ///< Name of the olPSD output stream.
-    std::string m_rawOlPSDShmimName; ///< Name of the rawOlPSD output stream.
-    std::string m_smoothOlPSDShmimName; ///< Name of the smoothOlPSD output stream.
-    std::string m_noisePSDShmimName; ///< Name of the noisePSD output stream.
+    std::string m_olPSDShmimName;         ///< Name of the olPSD output stream.
+    std::string m_rawOlPSDShmimName;      ///< Name of the rawOlPSD output stream.
+    std::string m_smoothOlPSDShmimName;   ///< Name of the smoothOlPSD output stream.
+    std::string m_noisePSDShmimName;      ///< Name of the noisePSD output stream.
     std::string m_clXferCurrentShmimName; ///< Name of the clXferCurrent output stream.
-    std::string m_clNtfCurrentShmimName; ///< Name of the clNtfCurrent output stream.
-    std::string m_clXferSIShmimName; ///< Name of the clXferSI output stream.
-    std::string m_clNtfSIShmimName; ///< Name of the clNtfSI output stream.
-    std::string m_clXferLPShmimName; ///< Name of the clXferLP output stream.
-    std::string m_clNtfLPShmimName; ///< Name of the clNtfLP output stream.
+    std::string m_clNtfCurrentShmimName;  ///< Name of the clNtfCurrent output stream.
+    std::string m_clXferSIShmimName;      ///< Name of the clXferSI output stream.
+    std::string m_clNtfSIShmimName;       ///< Name of the clNtfSI output stream.
+    std::string m_clXferLPShmimName;      ///< Name of the clXferLP output stream.
+    std::string m_clNtfLPShmimName;       ///< Name of the clNtfLP output stream.
 
-    std::string m_optGainShmimName; ///< Name of the optGain output stream.
+    std::string m_optGainShmimName;      ///< Name of the optGain output stream.
     std::string m_optGainSIRawShmimName; ///< Name of the optGainSIRaw output stream.
-    std::string m_optGainSIShmimName; ///< Name of the optGainSI output stream.
-    std::string m_maxGainSIShmimName; ///< Name of the maxGainSI output stream.
+    std::string m_optGainSIShmimName;    ///< Name of the optGainSI output stream.
+    std::string m_maxGainSIShmimName;    ///< Name of the maxGainSI output stream.
 
     std::string m_optGainLPShmimName; ///< Name of the optGainLP output stream.
     std::string m_maxGainLPShmimName; ///< Name of the maxGainLP output stream.
@@ -1088,12 +1093,12 @@ class modalGainOpt : public MagAOXApp<true>,
     void destroyImageStream( IMAGE *&stream /**< [in,out] stream pointer to destroy and clear */ );
 
     /// Allocate and create an owned ImageStreamIO output stream.
-    int createImageStream( IMAGE *&stream,          /**< [in,out] stream pointer to allocate and create */
-                           const std::string &name, /**< [in] shmim name for the output stream */
-                           uint32_t size0,          /**< [in] first axis size */
-                           uint32_t size1,          /**< [in] second axis size */
-                           uint32_t size2,          /**< [in] third axis size */
-                           uint8_t dataType         /**< [in] ImageStreamIO datatype for the stream */
+    int createImageStream( IMAGE            *&stream,  /**< [in,out] stream pointer to allocate and create */
+                           const std::string &name,    /**< [in] shmim name for the output stream */
+                           uint32_t           size0,   /**< [in] first axis size */
+                           uint32_t           size1,   /**< [in] second axis size */
+                           uint32_t           size2,   /**< [in] third axis size */
+                           uint8_t            dataType /**< [in] ImageStreamIO datatype for the stream */
     );
 
     /// Populate the published gain and variance arrays from the current
@@ -1108,12 +1113,12 @@ class modalGainOpt : public MagAOXApp<true>,
     );
 
     /// Populate the published predictive-control gain and coefficient arrays.
-    void writePublishedPredictorArrays( float *pcGainData, /**< [in,out] PC gain-factor stream buffer */
-                                        float *aCoeffData, /**< [in,out] predictor a-coefficient stream buffer */
-                                        uint32_t aWidth,   /**< [in] entries stored per mode in aCoeffData */
-                                        float *bCoeffData, /**< [in,out] predictor b-coefficient stream buffer */
-                                        uint32_t bWidth,   /**< [in] entries stored per mode in bCoeffData */
-                                        bool blend         /**< [in] when true, blend against existing values */
+    void writePublishedPredictorArrays( float   *pcGainData, /**< [in,out] PC gain-factor stream buffer */
+                                        float   *aCoeffData, /**< [in,out] predictor a-coefficient stream buffer */
+                                        uint32_t aWidth,     /**< [in] entries stored per mode in aCoeffData */
+                                        float   *bCoeffData, /**< [in,out] predictor b-coefficient stream buffer */
+                                        uint32_t bWidth,     /**< [in] entries stored per mode in bCoeffData */
+                                        bool     blend       /**< [in] when true, blend against existing values */
     );
 
     /// Count how many modes are enabled by a gain-factor vector.
@@ -1128,10 +1133,10 @@ class modalGainOpt : public MagAOXApp<true>,
 
     /// Apply an incoming gain-factor frame to one of the stored gain vectors.
     bool applyGainFactorUpdate( std::vector<float> &gainFacts, /**< [in,out] stored gain factors to resize and update */
-                                const float *incoming,         /**< [in] incoming gain-factor frame */
-                                uint32_t width,                /**< [in] number of gain factors in `incoming` */
-                                bool predictorPath             /**< [in] true when the values came from the predictor
-                                                                  path */
+                                const float        *incoming,  /**< [in] incoming gain-factor frame */
+                                uint32_t            width,     /**< [in] number of gain factors in `incoming` */
+                                bool                predictorPath /**< [in] true when the values came from the predictor
+                                                                     path */
     );
 
     /// Apply an incoming multiplier frame to one of the stored multiplier
@@ -1139,8 +1144,8 @@ class modalGainOpt : public MagAOXApp<true>,
     bool applyMultiplierUpdate( std::vector<float> &multFacts, /**< [in,out] stored multiplier factors to
                                                                   resize and update */
                                 const float *incoming,         /**< [in] incoming multiplier frame */
-                                uint32_t width,                /**< [in] number of multiplier factors in `incoming` */
-                                bool predictorPath             /**< [in] true when the values came from the predictor
+                                uint32_t     width,            /**< [in] number of multiplier factors in `incoming` */
+                                bool         predictorPath     /**< [in] true when the values came from the predictor
                                                                   path */
     );
 
@@ -1166,34 +1171,40 @@ class modalGainOpt : public MagAOXApp<true>,
 
     /// Handle a standard target/current numeric extrapolation property update.
     template <typename valueT>
-    int handleExtrapNumberProperty( pcf::IndiProperty &localProperty, /**< [in,out] local INDI property */
-                                    valueT &localTarget, /**< [in,out] target setting to update */
-                                    const pcf::IndiProperty &ipRecv, /**< [in] received INDI property */
-                                    const std::string &label /**< [in] setting label for diagnostics */ );
+    int handleExtrapNumberProperty( pcf::IndiProperty       &localProperty, /**< [in,out] local INDI property */
+                                    valueT                  &localTarget,   /**< [in,out] target setting to update */
+                                    const pcf::IndiProperty &ipRecv,        /**< [in] received INDI property */
+                                    const std::string       &label /**< [in] setting label for diagnostics */ );
 
     /// Handle a boolean extrapolation toggle property update.
-    int handleExtrapToggleProperty( pcf::IndiProperty &localProperty, /**< [in,out] local INDI property */
-                                    bool &localTarget, /**< [in,out] target toggle to update */
-                                    const pcf::IndiProperty &ipRecv, /**< [in] received INDI property */
-                                    const std::string &label /**< [in] setting label for diagnostics */ );
+    int handleExtrapToggleProperty( pcf::IndiProperty       &localProperty, /**< [in,out] local INDI property */
+                                    bool                    &localTarget,   /**< [in,out] target toggle to update */
+                                    const pcf::IndiProperty &ipRecv,        /**< [in] received INDI property */
+                                    const std::string       &label /**< [in] setting label for diagnostics */ );
 
     /// Handle the extrapolation-method selection switch property.
-    int handleExtrapMethodProperty( const pcf::IndiProperty &ipRecv /**< [in] received PSD processing method property */ );
+    int
+    handleExtrapMethodProperty( const pcf::IndiProperty &ipRecv /**< [in] received PSD processing method property */ );
 
     /// Handle the noise-estimation-domain selection switch property.
-    int handleExtrapNoiseEstimateDomainProperty( const pcf::IndiProperty &ipRecv /**< [in] received noise-estimation domain property */ );
+    int handleExtrapNoiseEstimateDomainProperty(
+        const pcf::IndiProperty &ipRecv /**< [in] received noise-estimation domain property */ );
 
     /// Handle the noise-estimation-range selection switch property.
-    int handleExtrapNoiseEstimateRangeProperty( const pcf::IndiProperty &ipRecv /**< [in] received noise-estimation range property */ );
+    int handleExtrapNoiseEstimateRangeProperty(
+        const pcf::IndiProperty &ipRecv /**< [in] received noise-estimation range property */ );
 
     /// Handle the noise-estimation-statistic selection switch property.
-    int handleExtrapNoiseEstimateStatisticProperty( const pcf::IndiProperty &ipRecv /**< [in] received noise-estimation statistic property */ );
+    int handleExtrapNoiseEstimateStatisticProperty(
+        const pcf::IndiProperty &ipRecv /**< [in] received noise-estimation statistic property */ );
 
     /// Handle the closed-loop OL-estimation-method selection switch property.
-    int handleExtrapClosedLoopOlEstimateMethodProperty( const pcf::IndiProperty &ipRecv /**< [in] received closed-loop estimation method property */ );
+    int handleExtrapClosedLoopOlEstimateMethodProperty(
+        const pcf::IndiProperty &ipRecv /**< [in] received closed-loop estimation method property */ );
 
     /// Handle the power-law crossover-mode selection switch property.
-    int handleExtrapPowerLawCrossoverModeProperty( const pcf::IndiProperty &ipRecv /**< [in] received power-law crossover mode property */ );
+    int handleExtrapPowerLawCrossoverModeProperty(
+        const pcf::IndiProperty &ipRecv /**< [in] received power-law crossover mode property */ );
 
   public:
     /// Default c'tor.
@@ -1426,48 +1437,54 @@ class modalGainOpt : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_autoUpdate; ///< INDI property for auto update.
     pcf::IndiProperty m_indiP_updateOnce; ///< INDI property for update once.
-    pcf::IndiProperty m_indiP_dump; ///< INDI property for dump.
+    pcf::IndiProperty m_indiP_dump;       ///< INDI property for dump.
 
     pcf::IndiProperty m_indiP_opticalGain; ///< INDI property for optical gain.
 
-    pcf::IndiProperty m_indiP_gainGain; ///< INDI property for gain gain.
-    pcf::IndiProperty m_indiP_gainLeak; ///< INDI property for gain leak.
-    pcf::IndiProperty m_indiP_zeroGains; ///< INDI property for zero gains.
-    pcf::IndiProperty m_indiP_extrapMethod; ///< INDI property for extrap method.
-    pcf::IndiProperty m_indiP_extrapNoiseEstimateDomain; ///< INDI property for extrap noise estimate domain.
-    pcf::IndiProperty m_indiP_extrapNoiseEstimateRange; ///< INDI property for extrap noise estimate range.
+    pcf::IndiProperty m_indiP_gainGain;                     ///< INDI property for gain gain.
+    pcf::IndiProperty m_indiP_gainLeak;                     ///< INDI property for gain leak.
+    pcf::IndiProperty m_indiP_zeroGains;                    ///< INDI property for zero gains.
+    pcf::IndiProperty m_indiP_extrapMethod;                 ///< INDI property for extrap method.
+    pcf::IndiProperty m_indiP_extrapNoiseEstimateDomain;    ///< INDI property for extrap noise estimate domain.
+    pcf::IndiProperty m_indiP_extrapNoiseEstimateRange;     ///< INDI property for extrap noise estimate range.
     pcf::IndiProperty m_indiP_extrapNoiseEstimateStatistic; ///< INDI property for extrap noise estimate statistic.
-    pcf::IndiProperty m_indiP_extrapNoiseEstimateLowFreqMaxHz; ///< INDI property for extrap noise estimate low freq max hz.
-    pcf::IndiProperty m_indiP_extrapClosedLoopOlEstimateMethod; ///< INDI property for extrap closed loop ol estimate method.
-    pcf::IndiProperty m_indiP_extrapPowerLawIndex; ///< INDI property for extrap power law index.
-    pcf::IndiProperty m_indiP_extrapPowerLawNormFreq; ///< INDI property for extrap power law norm freq.
+    pcf::IndiProperty
+        m_indiP_extrapNoiseEstimateLowFreqMaxHz; ///< INDI property for extrap noise estimate low freq max hz.
+    pcf::IndiProperty
+        m_indiP_extrapClosedLoopOlEstimateMethod;      ///< INDI property for extrap closed loop ol estimate method.
+    pcf::IndiProperty m_indiP_extrapPowerLawIndex;     ///< INDI property for extrap power law index.
+    pcf::IndiProperty m_indiP_extrapPowerLawNormFreq;  ///< INDI property for extrap power law norm freq.
     pcf::IndiProperty m_indiP_extrapPowerLawMatchFreq; ///< INDI property for extrap power law match freq.
-    pcf::IndiProperty m_indiP_extrapPowerLawMatchFallbackWindowHz; ///< INDI property for extrap power law match fallback window hz.
+    pcf::IndiProperty
+        m_indiP_extrapPowerLawMatchFallbackWindowHz; ///< INDI property for extrap power law match fallback window hz.
     pcf::IndiProperty m_indiP_extrapPowerLawCrossoverMode; ///< INDI property for extrap power law crossover mode.
-    pcf::IndiProperty m_indiP_extrapPowerLawAutoSmoothWidthHz; ///< INDI property for extrap power law auto smooth width hz.
-    pcf::IndiProperty m_indiP_extrapPowerLawAutoMaxFreqFraction; ///< INDI property for extrap power law auto max freq fraction.
+    pcf::IndiProperty
+        m_indiP_extrapPowerLawAutoSmoothWidthHz; ///< INDI property for extrap power law auto smooth width hz.
+    pcf::IndiProperty
+        m_indiP_extrapPowerLawAutoMaxFreqFraction;    ///< INDI property for extrap power law auto max freq fraction.
     pcf::IndiProperty m_indiP_extrapFitPowerLawIndex; ///< INDI property for extrap fit power law index.
     pcf::IndiProperty m_indiP_extrapPowerLawOnlyAboveFreq; ///< INDI property for extrap power law only above freq.
-    pcf::IndiProperty m_indiP_extrapPowerLawFitIncludesMatchPoint; ///< INDI property for extrap power law fit includes match point.
-    pcf::IndiProperty m_indiP_extrapPowerLawFitMinFreqHz; ///< INDI property for extrap power law fit min freq hz.
-    pcf::IndiProperty m_indiP_extrapPowerLawFitMaxFreqHz; ///< INDI property for extrap power law fit max freq hz.
-    pcf::IndiProperty m_indiP_extrapPowerLawFitBinWidthHz; ///< INDI property for extrap power law fit bin width hz.
-    pcf::IndiProperty m_indiP_extrapPowerLawBlendBins; ///< INDI property for extrap power law blend bins.
-    pcf::IndiProperty m_indiP_extrapDropoutGapFactor; ///< INDI property for extrap dropout gap factor.
-    pcf::IndiProperty m_indiP_extrapDropoutTinyFactor; ///< INDI property for extrap dropout tiny factor.
-    pcf::IndiProperty m_indiP_extrapDropoutMaxBins; ///< INDI property for extrap dropout max bins.
-    pcf::IndiProperty m_indiP_extrapClSignificanceThreshold; ///< INDI property for extrap cl significance threshold.
+    pcf::IndiProperty
+        m_indiP_extrapPowerLawFitIncludesMatchPoint; ///< INDI property for extrap power law fit includes match point.
+    pcf::IndiProperty m_indiP_extrapPowerLawFitMinFreqHz;     ///< INDI property for extrap power law fit min freq hz.
+    pcf::IndiProperty m_indiP_extrapPowerLawFitMaxFreqHz;     ///< INDI property for extrap power law fit max freq hz.
+    pcf::IndiProperty m_indiP_extrapPowerLawFitBinWidthHz;    ///< INDI property for extrap power law fit bin width hz.
+    pcf::IndiProperty m_indiP_extrapPowerLawBlendBins;        ///< INDI property for extrap power law blend bins.
+    pcf::IndiProperty m_indiP_extrapDropoutGapFactor;         ///< INDI property for extrap dropout gap factor.
+    pcf::IndiProperty m_indiP_extrapDropoutTinyFactor;        ///< INDI property for extrap dropout tiny factor.
+    pcf::IndiProperty m_indiP_extrapDropoutMaxBins;           ///< INDI property for extrap dropout max bins.
+    pcf::IndiProperty m_indiP_extrapClSignificanceThreshold;  ///< INDI property for extrap cl significance threshold.
     pcf::IndiProperty m_indiP_extrapClMinSignificantFraction; ///< INDI property for extrap cl min significant fraction.
 
-    pcf::IndiProperty m_indiP_emg; ///< INDI property for emg.
-    pcf::IndiProperty m_indiP_psdTime; ///< INDI property for psd time.
+    pcf::IndiProperty m_indiP_emg;        ///< INDI property for emg.
+    pcf::IndiProperty m_indiP_psdTime;    ///< INDI property for psd time.
     pcf::IndiProperty m_indiP_psdAvgTime; ///< INDI property for psd avg time.
-    pcf::IndiProperty m_indiP_loop; ///< INDI property for loop.
-    pcf::IndiProperty m_indiP_siGain; ///< INDI property for si gain.
-    pcf::IndiProperty m_indiP_siMult; ///< INDI property for si mult.
-    pcf::IndiProperty m_indiP_pcGain; ///< INDI property for pc gain.
-    pcf::IndiProperty m_indiP_pcMult; ///< INDI property for pc mult.
-    pcf::IndiProperty m_indiP_pcOn; ///< INDI property for pc on.
+    pcf::IndiProperty m_indiP_loop;       ///< INDI property for loop.
+    pcf::IndiProperty m_indiP_siGain;     ///< INDI property for si gain.
+    pcf::IndiProperty m_indiP_siMult;     ///< INDI property for si mult.
+    pcf::IndiProperty m_indiP_pcGain;     ///< INDI property for pc gain.
+    pcf::IndiProperty m_indiP_pcMult;     ///< INDI property for pc mult.
+    pcf::IndiProperty m_indiP_pcOn;       ///< INDI property for pc on.
 
     pcf::IndiProperty m_indiP_modesOn; ///< INDI property for modes on.
 
