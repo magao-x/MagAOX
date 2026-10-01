@@ -474,3 +474,17 @@ Analysis was done on a personal machine after copying the run directories with `
   - `nSettle = 1` rejected at start;
   - a new run test with a noisy camera and no DM response (gain 0, noise σ = 2): it must fail with status `error`, a low but non-zero `REFSNR`, `reference.fits` present with matching `REFSNR`, no cubes, and the DM at zero. The fake camera gained an optional Gaussian noise term (`m_noise`).
 - The doc page is updated: the check, `minRefSNR`, the `nSettle >= 2` requirement, the reference header cards, and the non-passive DM note.
+
+### 10. First measured DM response (2026-10-01, run `2026-10-01T233546`)
+- **Setup:**
+  - build `43215e03` (passive fix and reference SNR check);
+  - actuator (5, 8), `poke_amp` 0.15;
+  - `nFrames` 1000 (0.5 s holds, for the visual check), `nTrials` 2, `nRef` 2, `nSettle` 2, `nDelays` 1.
+  - Only `reference.fits` and the `summary_*.fits` files were copied back; the ~60 MB cube was too large to transfer.
+- **Visual and stream checks:** `shmimInfo -n dm00disp07 -N 4 -t 2` saw updates (cnt0 now advances), and the poke flashed on `dm00disp07` in rtimv. It was not seen by eye on camWFS.
+- **Reference:** `REFSNR` 10.3 (passed `minRefSNR` 8), σ_P 5.7. P has real structure: the mask covers 4976 of 14400 pixels (35%, versus 65% for the pure-noise P in runs 1–2), and the peak is ±59.
+- **Response (delay 0):** r = 0.000 (baseline, t = −71 µs), 0.002 (429 µs), **0.243 (929 µs)**, then **≈ 0.39** flat to 500 ms. rstd ≈ 0.03, about 10× below the signal.
+  - Nothing appears in the frame ending 429 µs after the command, about 62% of the final level appears in the frame ending 929 µs, and the response is complete by about 1.4 ms (camWFS exposures are 500 µs).
+- **Plateau ≈ 0.39 instead of 1:** a normalization bias from a noisy P. With `nSettle` = 2 and `nRef` = 2, the noise energy in Σ_mask P² is comparable to the signal energy, so r ≈ S / (S + N) ≈ 0.39. It is a scale error, not a measurement failure.
+  - **Remedies:** a less noisy P (`nSettle` 10 and `nRef` 20 should cut σ_P by about 7×, so r → about 0.97). Or debias the normalization, `norm = Σ_mask P² − N_mask σ_P²`, using the σ_P that `referenceSNR()` already estimates (proposed, not yet implemented).
+- **Next run:** `nFrames` 20, `nSettle` 10, `nRef` 20 (config), `nTrials` 20, `nDelays` 10 (0–450 µs in 50 µs steps; delays below about 70 µs are flagged late), actuator (5, 8), amp 0.15.
