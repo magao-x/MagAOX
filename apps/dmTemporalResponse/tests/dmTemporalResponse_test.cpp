@@ -66,6 +66,26 @@ std::string uniqueName( const std::string &tag /**< [in] a tag to include in the
     return "dmresp_test_" + std::to_string( getpid() ) + "_" + tag + "_" + std::to_string( counter++ );
 }
 
+/// Point ImageStreamIO shared-memory files at a writable test sandbox.
+/** As in the dm and streamWriter tests.  This also keeps test streams separate from the real system streams.
+ *
+ * \returns the sandbox directory
+ */
+std::string ensureMilkShmDir()
+{
+    static const std::string shmDir = []()
+    {
+        const std::filesystem::path path = "/tmp/dmTemporalResponse_test/shm";
+
+        std::filesystem::create_directories( path );
+        return path.string();
+    }();
+
+    setenv( "MILK_SHM_DIR", shmDir.c_str(), 1 );
+
+    return shmDir;
+}
+
 /// Make a new-property request with a target element.
 template <typename T>
 pcf::IndiProperty targetProp( const std::string &device,      /**< [in] the device name */
@@ -122,6 +142,8 @@ class dmTemporalResponse_test : public dmTemporalResponse
 
     std::string m_baseTmp; ///< Temporary output root.
 
+    std::string m_shmDir; ///< The ImageStreamIO sandbox directory.
+
     std::mutex m_writeMutex; ///< Guards m_writes.
 
     std::vector<dmWrite> m_writes; ///< All DM writes.
@@ -153,6 +175,9 @@ class dmTemporalResponse_test : public dmTemporalResponse
                              uint32_t ny = 8  /**< [in] camera and DM height */
     )
     {
+        // Must precede any ImageStreamIO call
+        m_shmDir = ensureMilkShmDir();
+
         m_configName = uniqueName( "app" );
 
         m_nx     = nx;
@@ -198,8 +223,7 @@ class dmTemporalResponse_test : public dmTemporalResponse
                                       m_configName + "_resp",
                                       m_configName + "_respavg" } )
         {
-            std::filesystem::remove( "/tmp/" + n + ".im.shm", ec );
-            std::filesystem::remove( "/milk/shm/" + n + ".im.shm", ec );
+            std::filesystem::remove( m_shmDir + "/" + n + ".im.shm", ec );
         }
     }
 
