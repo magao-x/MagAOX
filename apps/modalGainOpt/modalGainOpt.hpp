@@ -3069,7 +3069,10 @@ bool modalGainOpt::refreshGoptStructures()
             m_goptLP[n].f( m_freq );
         }
 
-        m_gmaxSI[n] = m_goptSI[n].maxStableGain();
+        if( m_goptSI[n].maxStableGain( m_gmaxSI[n] ) != mx::error_t::noerror )
+        {
+            m_gmaxSI[n] = 0;
+        }
     }
 
     m_goptUpdated = false;
@@ -5027,10 +5030,11 @@ void modalGainOpt::goptThreadExec()
                     MGO_BREADCRUMB;
                     m_modeVarOL[n] = mx::sigproc::psdVar( m_freq, m_olPSDs[n] );
 
-                    m_optGainSIRaw[n] =
-                        m_goptSI[n].optGainOpenLoop( m_modeVarSI[n], m_olPSDs[n], m_nPSDs[n], m_gmaxSI[n], false );
+                    const mx::error_t siOptError = m_goptSI[n].optGainOpenLoop(
+                        m_optGainSIRaw[n], m_modeVarSI[n], m_olPSDs[n], m_nPSDs[n], m_gmaxSI[n], false );
 
-                    if( ( m_modeVarSI[n] - m_modeVarOL[n] ) / m_modeVarOL[n] > -0.001 )
+                    if( siOptError != mx::error_t::noerror ||
+                        ( m_modeVarSI[n] - m_modeVarOL[n] ) / m_modeVarOL[n] > -0.001 )
                     {
 #pragma omp critical
                         {
@@ -5099,41 +5103,44 @@ void modalGainOpt::goptThreadExec()
                                                                  m_goptLP[n],
                                                                  lpProcessPsd,
                                                                  m_nPSDs[n],
-                                                                 m_Na[n] ) < 0 )
+                                                                 m_Na[n] ) != mx::error_t::noerror )
                         {
                             MGO_BREADCRUMB;
 
                             m_optGainLP[n] = 0;
                             m_modeVarLP[n] = m_modeVarOL[n];
+                            m_regScale[n]  = -999;
+                            m_gmaxLP[n]    = 0;
 
                             ///\todo what to do about coeffs?
-                        }
-
-                        MGO_BREADCRUMB;
-
-                        if( m_regScale[n] == -999 )
-                        {
-                            MGO_BREADCRUMB;
-                            m_regCounter[n] = n % m_nRegCycles;
                         }
                         else
                         {
                             MGO_BREADCRUMB;
-                            m_regCounter[n] = 0;
-                        }
 
-                        m_regScale[n] = min_sc;
-                        m_gmaxLP[n] = gmax_lp;
+                            if( m_regScale[n] == -999 )
+                            {
+                                MGO_BREADCRUMB;
+                                m_regCounter[n] = n % m_nRegCycles;
+                            }
+                            else
+                            {
+                                MGO_BREADCRUMB;
+                                m_regCounter[n] = 0;
+                            }
+
+                            m_regScale[n] = min_sc;
+                            m_gmaxLP[n]   = gmax_lp;
+                        }
                     }
                     else
                     {
                         MGO_BREADCRUMB;
                         // use pre-regularized version
                         float psdReg = lpProcessPsd[0];
-                        if( m_linPred[n].calcCoefficients( lpProcessPsd,
-                                                           m_nPSDs[n],
-                                                           psdReg * pow( 10, -m_regScale[n] / 10 ),
-                                                           m_Na[n] ) < 0 )
+                        if( m_linPred[n].calcCoefficients(
+                                lpProcessPsd, m_nPSDs[n], psdReg * pow( 10, -m_regScale[n] / 10 ), m_Na[n] ) !=
+                            mx::error_t::noerror )
                         {
                             m_optGainLP[n] = 0;
                             m_modeVarLP[n] = m_modeVarOL[n];
@@ -5145,11 +5152,13 @@ void modalGainOpt::goptThreadExec()
                             m_goptLP[n].a( m_linPred[n].m_lp.m_c );
                             m_goptLP[n].b( m_linPred[n].m_lp.m_c );
 
-                            m_optGainLP[n] = m_goptLP[n].optGainOpenLoop( m_modeVarLP[n],
-                                                                          m_olPSDs[n],
-                                                                          m_nPSDs[n],
-                                                                          m_gmaxLP[n],
-                                                                          false );
+                            if( m_goptLP[n].optGainOpenLoop(
+                                    m_optGainLP[n], m_modeVarLP[n], m_olPSDs[n], m_nPSDs[n], m_gmaxLP[n], false ) !=
+                                mx::error_t::noerror )
+                            {
+                                m_optGainLP[n] = 0;
+                                m_modeVarLP[n] = m_modeVarOL[n];
+                            }
                         }
                         ++m_regCounter[n];
                     }
