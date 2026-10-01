@@ -960,6 +960,68 @@ inline int sha256File( std::string       &hex, /**< [out] the digest as hex */
     return 0;
 }
 
+/// Estimate the detection SNR of the reference pattern P.
+/** The per-frame noise is estimated from differences of consecutive frames in the settled window of the reference
+ * difference cube, where the (settled) signal cancels.  A median-based estimator is used so that pixels still settling
+ * do not bias it.  Since P averages \p nSettle frames, its per-pixel noise is that per-frame noise / sqrt(nSettle).
+ * The SNR is max|P| / sigmaP.  For pure noise this is about sqrt(2 ln Npix), e.g. ~4.4 for a 120x120 frame.
+ *
+ * If the estimated noise is exactly zero (noise-free data) and P is not all zero, the SNR is reported as 1e9.
+ *
+ * \returns 0 on success
+ * \returns -1 if nSettle < 2, nSettle > nFrames, or the cube is inconsistent with P
+ */
+inline int referenceSNR( double                              &snr,     /**< [out] max|P| / sigmaP */
+                         double                              &sigmaP,  /**< [out] estimated per-pixel noise of P */
+                         const mx::improc::eigenCube<float>  &diff,    /**< [in] the reference difference cube */
+                         int                                  nSettle, /**< [in] frames averaged to form P */
+                         const mx::improc::eigenImage<float> &P        /**< [in] the reference pattern */
+)
+{
+    int nFrames = diff.planes();
+
+    if( nSettle < 2 || nSettle > nFrames || diff.rows() != P.rows() || diff.cols() != P.cols() || P.size() == 0 )
+    {
+        return -1;
+    }
+
+    size_t nPix = static_cast<size_t>( P.rows() ) * P.cols();
+
+    std::vector<float> absd;
+    absd.reserve( nPix * ( nSettle - 1 ) );
+
+    for( int k = nFrames - nSettle + 1; k < nFrames; ++k )
+    {
+        const float *a = diff.data() + nPix * k;
+        const float *b = diff.data() + nPix * ( k - 1 );
+
+        for( size_t i = 0; i < nPix; ++i )
+        {
+            absd.push_back( std::fabs( a[i] - b[i] ) );
+        }
+    }
+
+    std::nth_element( absd.begin(), absd.begin() + absd.size() / 2, absd.end() );
+    double medAbs = absd[absd.size() / 2];
+
+    // For Gaussian noise, median|d| = 0.6745 * sigma_d, and sigma_d = sqrt(2) * sigma_frame.
+    double sigmaFrame = medAbs / 0.6745 / sqrt( 2.0 );
+    sigmaP            = sigmaFrame / sqrt( static_cast<double>( nSettle ) );
+
+    double peak = P.abs().maxCoeff();
+
+    if( sigmaP > 0 )
+    {
+        snr = peak / sigmaP;
+    }
+    else
+    {
+        snr = ( peak > 0 ) ? 1e9 : 0;
+    }
+
+    return 0;
+}
+
 /// Check the return value of an mxlib FITS write for success.
 /** Works whether the mxlib version returns `mx::error_t` (noerror == 0) or `int` (0 on success).
  *
@@ -1095,6 +1157,8 @@ class dmTemporalResponse : public MagAOXApp<true>,
 
         double m_maxLateFrac{ 0.1 }; ///< Late-fraction warning threshold.
 
+        double m_minRefSNR{ 8 }; ///< Minimum reference-pattern SNR to accept a run.
+
         std::string m_baseDir{ "/home/xsup/dm_response" }; ///< Output root.
 
         double m_fps{ -1 }; ///< camWFS fps at run start.
@@ -1171,6 +1235,10 @@ class dmTemporalResponse : public MagAOXApp<true>,
 
     /// If the fraction of late pokes at a delay exceeds this, a warning is logged and the cube is flagged.
     double m_maxLateFrac{ 0.1 };
+
+    /// Minimum peak SNR of the reference pattern.  Below this the poke produced no detectable WFS response and the run
+    /// fails.  Pure noise gives about sqrt(2 ln Npix), ~4.4 for a 120x120 frame.
+    double m_minRefSNR{ 8 };
 
     /// Root of the output tree.  Each run creates a UTC-stamped sub-directory.
     std::string m_baseDir{ "/home/xsup/dm_response" };
@@ -1384,6 +1452,12 @@ class dmTemporalResponse : public MagAOXApp<true>,
     /// The projection normalization, sum_mask P^2.
     double m_refNorm{ 0 };
 
+    /// The reference-pattern peak SNR of the current or last run.
+    double m_refSNR{ 0 };
+
+    /// The estimated per-pixel noise of the reference pattern.
+    double m_refSigma{ 0 };
+
     /// Index of the best delay, if found.
     size_t m_bestIdx{ 0 };
 
@@ -1555,6 +1629,9 @@ class dmTemporalResponse : public MagAOXApp<true>,
 
     /// Get the late-fraction warning threshold.
     double maxLateFrac() const;
+
+    /// Get the minimum reference-pattern SNR.
+    double minRefSNR() const;
 
     /// Get the output root directory.
     const std::string &baseDir() const;
@@ -2070,6 +2147,16 @@ inline void dmTemporalResponse::setupConfig()
                 "float",
                 "Late-poke fraction above which a warning is logged and the cube flagged.  Default 0.1." );
 
+    config.add( "analysis.minRefSNR",
+                "",
+                "analysis.minRefSNR",
+                argType::Required,
+                "analysis",
+                "minRefSNR",
+                false,
+                "float",
+                "Minimum reference-pattern peak SNR; below this the run fails with no WFS response.  Default 8." );
+
     config.add( "output.baseDir",
                 "",
                 "output.baseDir",
@@ -2109,6 +2196,7 @@ inline int dmTemporalResponse::loadConfigImpl( mx::app::appConfigurator &_config
     _config( m_resampleFactor, "analysis.resampleFactor" );
     _config( m_bestMetric, "analysis.bestMetric" );
     _config( m_maxLateFrac, "analysis.maxLateFrac" );
+    _config( m_minRefSNR, "analysis.minRefSNR" );
     _config( m_baseDir, "output.baseDir" );
 
     // Parameters are validated at run start so that INDI changes are validated the same way.
@@ -2508,6 +2596,11 @@ inline double dmTemporalResponse::maxLateFrac() const
     return m_maxLateFrac;
 }
 
+inline double dmTemporalResponse::minRefSNR() const
+{
+    return m_minRefSNR;
+}
+
 inline const std::string &dmTemporalResponse::baseDir() const
 {
     return m_baseDir;
@@ -2711,6 +2804,7 @@ inline void dmTemporalResponse::snapshotParams( runParams &params ) const
     params.m_resampleFactor = m_resampleFactor;
     params.m_bestMetric     = m_bestMetric;
     params.m_maxLateFrac    = m_maxLateFrac;
+    params.m_minRefSNR      = m_minRefSNR;
     params.m_baseDir        = m_baseDir;
     params.m_fps            = m_wfsFps;
 }
@@ -2741,11 +2835,11 @@ inline int dmTemporalResponse::prepareRun( const timespec &runStart )
         return log<software_error, -1>( { __FILE__, __LINE__, "nTrials must be even and >= 2" } );
     }
 
-    if( m_run.m_nFrames < 1 || m_run.m_nRef < 1 || m_run.m_nSettle < 1 || m_run.m_nSettle > m_run.m_nFrames ||
+    if( m_run.m_nFrames < 1 || m_run.m_nRef < 1 || m_run.m_nSettle < 2 || m_run.m_nSettle > m_run.m_nFrames ||
         m_run.m_resampleFactor < 1 )
     {
         return log<software_error, -1>(
-            { __FILE__, __LINE__, "nFrames, nRef, nSettle (<= nFrames), and resampleFactor must be >= 1" } );
+            { __FILE__, __LINE__, "nFrames, nRef, and resampleFactor must be >= 1, and 2 <= nSettle <= nFrames" } );
     }
 
     std::string bestMetric = m_run.m_bestMetric;
@@ -3143,10 +3237,28 @@ inline int dmTemporalResponse::runReference()
         return log<software_error, -1>( { __FILE__, __LINE__, "reference pattern is zero: no WFS response to poke" } );
     }
 
+    if( dmTemporalResponseMath::referenceSNR( m_refSNR, m_refSigma, diff, m_run.m_nSettle, m_refP ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "could not estimate reference-pattern SNR" } );
+    }
+
+    // Written before the SNR check so a failed run can still be examined.
     if( writeReference() < 0 )
     {
         return -1;
     }
+
+    if( m_refSNR < m_run.m_minRefSNR )
+    {
+        return log<software_error, -1>( { __FILE__,
+                                          __LINE__,
+                                          "no WFS response to poke: reference peak SNR " + std::to_string( m_refSNR ) +
+                                              " < minRefSNR " + std::to_string( m_run.m_minRefSNR ) +
+                                              " (check that the DM channel is applied and the actuator is in the pupil)" } );
+    }
+
+    log<text_log>( "reference pattern peak SNR " + std::to_string( m_refSNR ) + ", sigmaP " +
+                   std::to_string( m_refSigma ) );
 
     try
     {
@@ -3530,6 +3642,9 @@ inline int dmTemporalResponse::writeReference()
     appendRunHeader( fh );
     fh.append( "MASKTHR", m_run.m_maskThresh, "mask threshold, fraction of max|P|" );
     fh.append( "NSETTLE", m_run.m_nSettle, "trailing frames averaged for P" );
+    fh.append( "REFSNR", dmTemporalResponseMath::headerValue( m_refSNR ), "peak |P| / sigmaP" );
+    fh.append( "REFSIGMA", dmTemporalResponseMath::headerValue( m_refSigma ), "estimated per-pixel noise of P" );
+    fh.append( "MINRSNR", m_run.m_minRefSNR, "minimum REFSNR to accept the run" );
     fh.append( "PLANE0", std::string( "P" ), "reference pattern" );
     fh.append( "PLANE1", std::string( "mask" ), "pixel mask" );
 

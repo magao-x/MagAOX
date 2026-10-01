@@ -36,7 +36,9 @@ runs M/2 trials with a positive poke followed by M/2 trials with a negative poke
 difference `(mean(+) - mean(-)) / 2`.  The +/- difference removes the static WFS signal and the camera bias, so no
 dark is needed.
 
-A reference pass (`nRef` +/- pairs at `d = 0`) runs first.  Its steady-state difference image `P`, averaged over the
+A reference pass (`nRef` +/- pairs at `d = 0`) runs first.  If the reference pattern shows no real WFS response
+(peak SNR below `analysis.minRefSNR`, see below), the run fails with "no WFS response to poke" instead of producing
+meaningless curves; `reference.fits` is still written for diagnosis.  Its steady-state difference image `P`, averaged over the
 last `nSettle` frames, is used to reduce each frame to a scalar response `r` (0 unpoked, 1 fully settled).  From the
 per-trial curves the app computes, per delay:
 
@@ -73,6 +75,7 @@ In both modes the largest absolute command must not exceed `poke.maxCommand` (de
 - The measured response includes the full DM path (dmcomb channel sum, driver, and mechanics).
 - The app requires `atime` to be `CLOCK_REALTIME`, and refuses to start if the most recent frame's `atime` is more than
   1 s from the current time.
+- The DM channel is opened non-passive, so each poke increments the stream's frame counter and dmcomb applies it.
 - A run aborts if camWFS changes fps or is re-allocated, if a trial times out, or if frame-counter gaps exceed
   `maxRetries` at one delay.  The DM channel is always returned to zero.
 
@@ -99,11 +102,12 @@ In both modes the largest absolute command must not exceed `poke.maxCommand` (de
 | `poke.trialTimeout` | float | 2 | seconds to wait for one trial |
 | `poke.maxRetries` | int | 5 | invalid-trial retries per delay |
 | `analysis.nRef` | int | 10 | reference-pass +/- pairs |
-| `analysis.nSettle` | int | 5 | trailing frames for `P` and `settleErr` |
+| `analysis.nSettle` | int | 5 | trailing frames for `P` and `settleErr`; must be >= 2 (used to estimate the noise of `P`) |
 | `analysis.maskThresh` | float | 0.1 | pixel mask threshold, fraction of `max|P|` |
 | `analysis.resampleFactor` | int | 10 | super-sampling factor |
 | `analysis.bestMetric` | string | `jitter` | `jitter`, `rise`, or `t50` |
 | `analysis.maxLateFrac` | float | 0.1 | late-poke warning threshold |
+| `analysis.minRefSNR` | float | 8 | minimum reference peak SNR, max\|P\| / sigmaP; pure noise gives ~4.4 for 120x120 |
 | `output.baseDir` | string | `/home/xsup/dm_response` | root of the output tree |
 
 Example `dmTemporalResponse.conf`:
@@ -155,7 +159,7 @@ Each run writes to `<output.baseDir>/<YYYY-MM-DDTHHMMSS>/` (UTC):
 | File | Contents |
 |---|---|
 | `dmresp_delay_<DDDDD>us.fits` | one per delay: `[nx, ny, N]` averaged +/- half-difference cube |
-| `reference.fits` | `[nx, ny, 2]`: plane 0 `P`, plane 1 the mask |
+| `reference.fits` | `[nx, ny, 2]`: plane 0 `P`, plane 1 the mask; header `REFSNR`, `REFSIGMA`, `MINRSNR` |
 | `summary_curves.fits` | `[N+1, K, 3]`: mean response, trial std, and mean time from the command [us]; row 0 is the pre-poke baseline (r = 0) |
 | `summary_metrics.fits` | `[K, 9]`: delay, t50, rise, overshoot, settleErr, jitter, delayErrMean, delayErrStd, lateFrac (columns named by `MCOLn`) |
 | `summary_superres.fits` | `[nBins, 2]`: bin time [us] and binned response |

@@ -450,3 +450,27 @@ Analysis was done on a personal machine after copying the run directories with `
 - **Fix:** `prepareRun()` now calls `m_dmStream.passive( false )`, explicitly, since `m_dmStream` is reused across runs, with a comment explaining why. Added a regression check to the "valid actuator start" test: the stream is set passive beforehand, and the test requires `passive() == false` after `prepareRun()`.
 - **Also note:** `dmPokeWFS` (used by `dmPokeCenter`/`dmPokeXCorr`) uses `passive( true )`, presumably on purpose for its loop. It was not changed.
 - **Next:** rebuild and reinstall from the committed tree, then repeat the visual check (the poke should now blink on `dm00disp07` and `dm00disp`), then repeat run 2 at (5, 8).
+
+### 9. Reference-pattern SNR check (2026-10-01)
+- **Why:** hardware runs 1 and 2 (item 7) completed "successfully" even though there was no WFS response, so they produced flat, meaningless curves. The run should fail clearly instead.
+- **Why not simpler checks:** the run 1 and 2 data rule them out.
+  - The mask fraction was about 65% on pure noise, but a real extended pattern (pattern mode, all four pupils) can cover a similar fraction.
+  - "Peak / RMS of unmasked pixels" was about 18 on pure noise, because the unmasked pixels are small by construction.
+- **Design:** `dmTemporalResponseMath::referenceSNR()`:
+  - estimates the per-frame noise from differences of consecutive frames in the settled window of the reference difference cube, where the settled signal cancels;
+  - uses a median estimator, σ = median|Δ| / 0.6745 / √2, so a few pixels still settling don't bias it;
+  - scales by 1/√nSettle, because P averages nSettle frames;
+  - returns SNR = max|P| / σ_P.
+  - For pure noise, SNR ≈ √(2 ln Npix) ≈ 4.4 for 120×120. Run 2 is consistent with this: RMS(P) ≈ 3.8 and peak ≈ 16.8.
+  - Noise-free data (σ = 0 with P ≠ 0) reports 1e9. That keeps the noise-free fake-camera tests passing.
+- **Behavior:**
+  - New config `analysis.minRefSNR` (default 8).
+  - `runReference()` writes `reference.fits` (with `REFSNR`, `REFSIGMA`, `MINRSNR` header cards) **before** the check, so a failed run can still be examined.
+  - If `REFSNR < minRefSNR`, the run fails with "no WFS response to poke … (check that the DM channel is applied and the actuator is in the pupil)". Otherwise the SNR is logged.
+  - `nSettle` must now be >= 2, which is needed for the noise estimate.
+- **Tests:**
+  - a `referenceSNR` helper test: signal well above noise (σ_P and SNR checked against expected values), pure noise below 6, noise-free, and invalid inputs;
+  - config default and override for `minRefSNR`;
+  - `nSettle = 1` rejected at start;
+  - a new run test with a noisy camera and no DM response (gain 0, noise σ = 2): it must fail with status `error`, a low but non-zero `REFSNR`, `reference.fits` present with matching `REFSNR`, no cubes, and the DM at zero. The fake camera gained an optional Gaussian noise term (`m_noise`).
+- The doc page is updated: the check, `minRefSNR`, the `nSettle >= 2` requirement, the reference header cards, and the non-passive DM note.

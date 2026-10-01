@@ -9,6 +9,7 @@
 #include "../../../tests/testXWC.hpp"
 
 #include <filesystem>
+#include <random>
 #include <thread>
 
 #define protected public
@@ -176,6 +177,7 @@ class dmTemporalResponse_test : public dmTemporalResponse
     double m_wake{ 20 };    ///< Simulated wake latency after atime [us].
     float  m_bias{ 100 };   ///< Camera bias.
     float  m_gain{ 10 };    ///< Camera gain per DM unit.
+    float  m_noise{ 0 };   ///< Per-pixel Gaussian camera noise sigma (0 = noise-free).
 
     /// Set up the harness with an nx x ny camera and DM.
     dmTemporalResponse_test( uint32_t nx = 8, /**< [in] camera and DM width */
@@ -316,6 +318,11 @@ class dmTemporalResponse_test : public dmTemporalResponse
 
                 mx::improc::eigenImage<float> im( m_nx, m_ny );
 
+
+                std::mt19937                    gen( 12345 );
+
+                std::normal_distribution<float> nd( 0, 1 );
+
                 while( !m_camStop )
                 {
                     if( m_camPause )
@@ -332,6 +339,21 @@ class dmTemporalResponse_test : public dmTemporalResponse
                         fakeClockAtLeast( atimeNs + static_cast<int64_t>( m_wake * 1e3 ) );
 
                         im = m_bias + m_gain * dmState( atimeNs );
+
+
+                        if( m_noise > 0 )
+
+                        {
+
+                            for( int i = 0; i < im.size(); ++i )
+
+                            {
+
+                                im.data()[i] += m_noise * nd( gen );
+
+                            }
+
+                        }
 
                         ++cnt0;
                         if( m_trialState == trialState::capturing && ( m_alwaysGap || m_gapsToInject > 0 ) )
@@ -1008,6 +1030,102 @@ TEST_CASE( "dmTemporalResponse resampleAverage", "[dmTemporalResponse][helpers]"
     }
 }
 
+/// Verify `referenceSNR()` on synthetic noise with and without a settled signal.
+/**
+ * \ingroup dmTemporalResponse_unit_test
+ */
+TEST_CASE( "dmTemporalResponse referenceSNR", "[dmTemporalResponse][helpers]" )
+{
+    // clang-format off
+    #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
+    dmTemporalResponseMath::referenceSNR( double(), double(), mx::improc::eigenCube<float>(), 0, mx::improc::eigenImage<float>() );
+    #endif
+    // clang-format on
+
+    const int nx = 64, ny = 64, nFrames = 10, nSettle = 5;
+
+    auto makeDiff = []( float sigma, float A, int nx, int ny, int nFrames )
+    {
+        std::mt19937                    gen( 4242 );
+        std::normal_distribution<float> nd( 0, 1 );
+        mx::improc::eigenCube<float>    diff( nx, ny, nFrames );
+        for( int k = 0; k < nFrames; ++k )
+        {
+            for( int i = 0; i < nx * ny; ++i )
+            {
+                diff.data()[k * nx * ny + i] = sigma * nd( gen );
+            }
+            for( int x = 30; x < 33; ++x ) // settled 3x3 spot
+            {
+                for( int y = 30; y < 33; ++y )
+                {
+                    diff.data()[k * nx * ny + y * nx + x] += A;
+                }
+            }
+        }
+        return diff;
+    };
+
+    auto meanLast = []( mx::improc::eigenCube<float> &diff, int nSettle )
+    {
+        mx::improc::eigenImage<float> P( diff.rows(), diff.cols() );
+        P.setZero();
+        for( int k = diff.planes() - nSettle; k < diff.planes(); ++k )
+        {
+            P += diff.image( k );
+        }
+        P /= static_cast<float>( nSettle );
+        return P;
+    };
+
+    double snr = 0, sigmaP = 0;
+
+    SECTION( "signal well above noise" )
+    {
+        mx::improc::eigenCube<float>  diff = makeDiff( 1.0, 20.0, nx, ny, nFrames );
+        mx::improc::eigenImage<float> P    = meanLast( diff, nSettle );
+
+        REQUIRE( referenceSNR( snr, sigmaP, diff, nSettle, P ) == 0 );
+        REQUIRE( sigmaP == Approx( 1.0 / sqrt( nSettle ) ).epsilon( 0.1 ) );
+        REQUIRE( snr == Approx( 20.0 * sqrt( nSettle ) ).epsilon( 0.15 ) );
+        REQUIRE( snr > 8 );
+    }
+
+    SECTION( "pure noise is below the default threshold" )
+    {
+        mx::improc::eigenCube<float>  diff = makeDiff( 1.0, 0.0, nx, ny, nFrames );
+        mx::improc::eigenImage<float> P    = meanLast( diff, nSettle );
+
+        REQUIRE( referenceSNR( snr, sigmaP, diff, nSettle, P ) == 0 );
+        REQUIRE( snr > 2 );
+        REQUIRE( snr < 6 ); // ~sqrt(2 ln 4096) = 4.1
+    }
+
+    SECTION( "noise-free data" )
+    {
+        mx::improc::eigenCube<float>  diff = makeDiff( 0.0, 5.0, nx, ny, nFrames );
+        mx::improc::eigenImage<float> P    = meanLast( diff, nSettle );
+        REQUIRE( referenceSNR( snr, sigmaP, diff, nSettle, P ) == 0 );
+        REQUIRE( snr == 1e9 );
+
+        mx::improc::eigenCube<float>  zero = makeDiff( 0.0, 0.0, nx, ny, nFrames );
+        mx::improc::eigenImage<float> Pz   = meanLast( zero, nSettle );
+        REQUIRE( referenceSNR( snr, sigmaP, zero, nSettle, Pz ) == 0 );
+        REQUIRE( snr == 0 );
+    }
+
+    SECTION( "invalid inputs" )
+    {
+        mx::improc::eigenCube<float>  diff = makeDiff( 1.0, 0.0, nx, ny, nFrames );
+        mx::improc::eigenImage<float> P    = meanLast( diff, nSettle );
+        REQUIRE( referenceSNR( snr, sigmaP, diff, 1, P ) == -1 );
+        REQUIRE( referenceSNR( snr, sigmaP, diff, nFrames + 1, P ) == -1 );
+        mx::improc::eigenImage<float> wrong( nx, ny + 1 );
+        wrong.setZero();
+        REQUIRE( referenceSNR( snr, sigmaP, diff, nSettle, wrong ) == -1 );
+    }
+}
+
 /// Verify `bestDelay()` for each criterion and ties.
 /**
  * \ingroup dmTemporalResponse_unit_test
@@ -1125,6 +1243,7 @@ TEST_CASE( "dmTemporalResponse configuration defaults", "[dmTemporalResponse][co
     REQUIRE( app.resampleFactor() == 10 );
     REQUIRE( app.bestMetric() == "jitter" );
     REQUIRE( app.maxLateFrac() == Approx( 0.1 ) );
+    REQUIRE( app.minRefSNR() == Approx( 8 ) );
     REQUIRE( app.baseDir() == "/home/xsup/dm_response" );
 
     std::string sname;
@@ -1146,14 +1265,14 @@ TEST_CASE( "dmTemporalResponse configuration overrides", "[dmTemporalResponse][c
             "/tmp/dmTemporalResponse_test_override.conf",
             { "wfscam", "wfscam",   "dm",       "dm",       "poke",     "poke",     "poke",     "poke",
               "poke",   "poke",     "poke",     "poke",     "poke",     "poke",     "poke",     "poke",
-              "poke",   "analysis", "analysis", "analysis", "analysis", "analysis", "analysis", "output" },
+              "poke",   "analysis", "analysis", "analysis", "analysis", "analysis", "analysis", "analysis", "output" },
             { "shmimName",   "camDevName",   "index",      "channel", "mode",      "x",          "y",
               "patternFile", "amp",          "maxCommand", "nDelays", "delaySpan", "nFrames",    "nTrials",
               "settle",      "trialTimeout", "maxRetries", "nRef",    "nSettle",   "maskThresh", "resampleFactor",
-              "bestMetric",  "maxLateFrac",  "baseDir" },
+              "bestMetric",  "maxLateFrac",  "minRefSNR", "baseDir" },
             { "camtest", "camdev", "1", "3",    "pattern", "5",    "6",   "/tmp/p.fits",
               "0.25",    "0.5",    "7", "1500", "12",      "8",    "0.1", "3",
-              "2",       "4",      "3", "0.2",  "5",       "rise", "0.3", "/tmp/out" } );
+              "2",       "4",      "3", "0.2",  "5",       "rise", "0.3", "6", "/tmp/out" } );
 
         app.config.readConfig( "/tmp/dmTemporalResponse_test_override.conf" );
         app.loadConfig();
@@ -1182,6 +1301,7 @@ TEST_CASE( "dmTemporalResponse configuration overrides", "[dmTemporalResponse][c
         REQUIRE( app.resampleFactor() == 5 );
         REQUIRE( app.bestMetric() == "rise" );
         REQUIRE( app.maxLateFrac() == Approx( 0.3 ) );
+        REQUIRE( app.minRefSNR() == Approx( 6 ) );
         REQUIRE( app.baseDir() == "/tmp/out" );
 
         std::string sname;
@@ -1636,9 +1756,11 @@ TEST_CASE( "dmTemporalResponse start validation", "[dmTemporalResponse][run]" )
         REQUIRE( app.prepareRun( now ) == -1 );
     }
 
-    SECTION( "nSettle greater than nFrames" )
+    SECTION( "nSettle greater than nFrames, and nSettle < 2" )
     {
         app.m_nSettle = 30;
+        REQUIRE( app.prepareRun( now ) == -1 );
+        app.m_nSettle = 1;
         REQUIRE( app.prepareRun( now ) == -1 );
     }
 
@@ -2072,6 +2194,37 @@ TEST_CASE( "dmTemporalResponse zero reference aborts", "[dmTemporalResponse][run
 
     REQUIRE( app.m_runStatus == "error" );
     REQUIRE( !std::filesystem::exists( app.m_runDir + "/reference.fits" ) );
+}
+
+/// Verify a noisy camera with no DM response fails the run on the reference SNR check.
+/**
+ * \ingroup dmTemporalResponse_unit_test
+ */
+TEST_CASE( "dmTemporalResponse no WFS response fails on reference SNR", "[dmTemporalResponse][run]" )
+{
+    dmTemporalResponse_test app;
+    app.m_gain  = 0; // the DM has no effect on the WFS
+    app.m_noise = 2; // but the camera is noisy, so P is noise rather than zero
+    app.startCamera();
+
+    int rv = app.runMeasurement();
+    app.stopCamera();
+
+    REQUIRE( rv == -1 );
+    REQUIRE( app.m_runStatus == "error" );
+    REQUIRE( app.m_refSNR < app.m_minRefSNR );
+    REQUIRE( app.m_refSNR > 0 );
+
+    // reference.fits is kept for diagnosis; no cubes are written
+    REQUIRE( std::filesystem::exists( app.m_runDir + "/reference.fits" ) );
+    REQUIRE( !std::filesystem::exists( app.m_runDir + "/" + cubeFileName( app.m_delays[0] ) ) );
+    REQUIRE( app.m_dmTest().abs().maxCoeff() == 0 );
+
+    mx::fits::fitsFile<float, XWC_DEFAULT_VERBOSITY> ff;
+    mx::improc::eigenCube<float>                     ref;
+    mx::fits::fitsHeader<XWC_DEFAULT_VERBOSITY>      fh;
+    ff.read( ref, fh, app.m_runDir + "/reference.fits" );
+    REQUIRE( fh["REFSNR"].value<double>() == Approx( app.m_refSNR ).epsilon( 1e-4 ) );
 }
 
 /// Verify the measurement thread runs a requested start and clears the running flag.
