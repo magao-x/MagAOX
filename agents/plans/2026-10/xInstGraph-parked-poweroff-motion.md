@@ -388,3 +388,8 @@ expected for a configured subscription.
   sections. The deployed config was not modified here. Confirm unsupported
   stages no longer request parking and supported parked stages retain their
   powered-off routes. No controller or instGraph library rebuild is required.
+- Capability implementation and regressions committed as `4aa058b7`.
+- Updated the app README with the default, per-stage INI example, the distinction
+  between parking support and current parked state, and migration from automatic
+  subscriptions. Explicit true still permits the missing-property diagnostic
+  when a configured interface is absent.

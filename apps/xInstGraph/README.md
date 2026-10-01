@@ -112,6 +112,7 @@ INDI property.
 | key | type | required | default | description |
 | --- | --- | --- | --- | --- |
 | device | string | no | node name | INDI device name |
+| parkable | bool | no | false | Subscribe to parking state and allow parked power-off preset routing |
 | presetPrefix | string | no | preset | Preset property prefix, usually preset or filter |
 | presetDir | string | no | output | Side selected by the preset: input or output |
 | presetPutName | vector<string> | no | `out` for output, `in` for input | Put names selected by the preset |
@@ -131,11 +132,28 @@ supplied together.
 
 #### Parked stages while powered off
 
-`stdMotion` automatically subscribes to the optional Number property
-`<device>.parked`, element `current`. A nonzero numeric value allows preset
-routing while `fsm.state=POWEROFF`; the graph's FSM label still says `POWEROFF`.
-No parking configuration option is required. Controllers without this property
-retain the normal behavior.
+Set `parkable=true` in a stage's `stdMotion` section only when its controller
+publishes the Number property `<device>.parked`, element `current`:
+
+```ini
+[stageName]
+type=stdMotion
+parkable=true
+```
+
+The option declares parking support; the published `current` value reports
+whether the stage is parked now. A nonzero numeric value allows preset routing
+while `fsm.state=POWEROFF`; the graph's FSM label still says `POWEROFF`.
+
+`parkable` defaults to false. When omitted or false, the graph does not subscribe
+to parking, ignores unsolicited parking updates, and keeps puts off in
+`POWEROFF`. This avoids unresolved-property notices for controllers without the
+parking interface. With `parkable=true`, a missing parking property still receives
+the normal retry/backoff diagnostic.
+
+When upgrading from the version that subscribed to parking automatically, add
+`parkable=true` to the existing sections for stages that support parking to retain
+their powered-off preset routing.
 
 The parked route uses the published `presetName` or `filterName` selection,
 according to `presetPrefix`. It requires exactly one selected name other than
