@@ -1313,6 +1313,36 @@ pcf::IndiProperty motionParked( const std::string &current /**< [in] numeric par
     return property;
 }
 
+/// Build a current-position update, including malformed strings and alternate property types.
+pcf::IndiProperty
+motionPosition( const std::string      &current,                   /**< [in] numerical current position */
+                const std::string      &propertyName = "position", /**< [in] numeric property name */
+                pcf::IndiProperty::Type type         = pcf::IndiProperty::Number /**< [in] received property type */ )
+{
+    pcf::IndiProperty property( type );
+    property.setDevice( "fwtelsim" );
+    property.setName( propertyName );
+    property.add( pcf::IndiElement( "current", current ) );
+    return property;
+}
+
+/// Require identical effective states and enablement with and without numeric telemetry.
+void requireSameMotionPuts( stdMotionNode &actual, /**< [in] handler receiving numeric telemetry */
+                            stdMotionNode &expected /**< [in] handler receiving only original routing telemetry */ )
+{
+    for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
+    {
+        const auto &puts = dir == ingr::ioDir::input ? actual.node()->inputs() : actual.node()->outputs();
+        for( const auto &put : puts )
+        {
+            auto *reference =
+                dir == ingr::ioDir::input ? expected.node()->input( put.first ) : expected.node()->output( put.first );
+            REQUIRE( put.second->state() == reference->state() );
+            REQUIRE( put.second->enabled() == reference->enabled() );
+        }
+    }
+}
+
 /// Build a named-position snapshot with the requested names selected.
 pcf::IndiProperty motionPreset( const std::vector<std::string> &selected, /**< [in] On element names */
                                 const std::string              &prefix = "preset" /**< [in] preset property prefix */ )
@@ -2327,6 +2357,200 @@ TEST_CASE( "stdMotionNode rejects invalid defaultRoute configuration",
         REQUIRE_THROWS_WITH( missingCommon.load( "", "defaultRoute=wfs\n" ),
                              Catch::Matchers::Contains( "exactly one opposite-side put" ) );
     }
+}
+
+/// Numerical fallback tracks live current values and display availability without changing legacy routing.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode displays numerical position without changing legacy puts",
+           "[instGraph::stdMotionNode][position]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::device( "fwtelsim" );
+    stdMotionNode::presetPrefix( "preset" );
+    stdMotionNode::handleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::updatePositionLabel();
+    #endif
+    // clang-format on
+
+    for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
+        for( const bool multi : { false, true } )
+            for( const std::string prefix : { "preset", "filter" } )
+            {
+                CAPTURE( dir, multi, prefix );
+                parkedMotionFixture fixture( dir, multi, prefix );
+                parkedMotionFixture reference( dir, multi, prefix );
+                auto               &node     = *fixture.m_node;
+                auto               &baseline = *reference.m_node;
+                const std::string   property = prefix == "filter" ? "filter" : "position";
+                REQUIRE( node.keys().count( "fwtelsim." + property ) == 1 );
+                REQUIRE( node.keys().count( std::string( "fwtelsim." ) +
+                                            ( prefix == "filter" ? "position" : "filter" ) ) == 0 );
+                auto deliver = [&]( const pcf::IndiProperty &update )
+                {
+                    REQUIRE( node.handleSetProperty( update ) == 0 );
+                    REQUIRE( baseline.handleSetProperty( update ) == 0 );
+                    requireSameMotionPuts( node, baseline );
+                };
+                REQUIRE( node.handleSetProperty( motionPosition( "-12.34567", property ) ) == 0 );
+                requireSameMotionPuts( node, baseline );
+                deliver( motionFSM( "READY" ) );
+                REQUIRE( node.curLabel() == "-12.3457" );
+                deliver( motionPreset( { "none" }, prefix ) );
+                REQUIRE( node.curLabel() == "-12.3457" );
+                deliver( motionPreset( { "routeA" }, prefix ) );
+                REQUIRE( node.curLabel() == "routeA" );
+                REQUIRE( node.handleSetProperty( motionPosition( "9.5", property ) ) == 0 );
+                REQUIRE( node.curLabel() == "routeA" );
+                requireSameMotionPuts( node, baseline );
+                deliver( motionPreset( {}, prefix ) );
+                REQUIRE( node.curLabel() == "9.5000" );
+                auto target = motionPosition( "100", property );
+                target.remove( "current" );
+                target.add( pcf::IndiElement( "target", "100" ) );
+                REQUIRE( node.handleSetProperty( target ) == 0 );
+                REQUIRE( node.curLabel() == "9.5000" );
+                auto foreign = motionPosition( "100", property );
+                foreign.setDevice( "otherstage" );
+                REQUIRE( node.handleSetProperty( foreign ) == 0 );
+                REQUIRE( node.curLabel() == "9.5000" );
+                for( const std::string state : { "READY", "OPERATING", "HOMING", "CONFIGURING", "NOTHOMED" } )
+                {
+                    deliver( motionFSM( state ) );
+                    REQUIRE( node.curLabel() == "9.5000" );
+                }
+                for( const std::string state : { "POWEROFF", "NOTCONNECTED", "ERROR", "POWERON" } )
+                {
+                    deliver( motionFSM( state ) );
+                    REQUIRE( node.curLabel() == "off" );
+                }
+                deliver( motionFSM( "POWEROFF" ) );
+                deliver( motionParked( "1" ) );
+                REQUIRE( node.curLabel() == "9.5000" );
+                requireMotionOff( node );
+                deliver( motionPreset( { "routeA" }, prefix ) );
+                REQUIRE( node.curLabel() == "routeA" );
+                REQUIRE( node.handleSetProperty( motionPosition( "5.25", property ) ) == 0 );
+                requireSameMotionPuts( node, baseline );
+                deliver( motionPreset( { "none" }, prefix ) );
+                REQUIRE( node.curLabel() == "5.2500" );
+                deliver( motionParked( "0" ) );
+                REQUIRE( node.curLabel() == "off" );
+                deliver( motionFSM( "READY" ) );
+                for( const std::string value : { "", "garbage", "12junk", "nan", "inf", "1e309" } )
+                {
+                    REQUIRE( node.handleSetProperty( motionPosition( value, property ) ) == 0 );
+                    REQUIRE( node.curLabel() == "off" );
+                    requireSameMotionPuts( node, baseline );
+                    REQUIRE( node.handleSetProperty( motionPosition( " 2.5e1 ", property ) ) == 0 );
+                    REQUIRE( node.curLabel() == "25.0000" );
+                }
+                REQUIRE( node.handleSetProperty( motionPosition( "40", property, pcf::IndiProperty::Text ) ) == 0 );
+                REQUIRE( node.curLabel() == "off" );
+                REQUIRE( node.handleSetProperty( motionPosition( "0", property ) ) == 0 );
+                for( const auto &selection : { std::vector<std::string>{},
+                                               std::vector<std::string>{ "none" },
+                                               std::vector<std::string>{ "routeA", "routeB" } } )
+                {
+                    deliver( motionPreset( selection, prefix ) );
+                    REQUIRE( node.curLabel() == "0.0000" );
+                }
+                pcf::IndiProperty wrongType( pcf::IndiProperty::Text );
+                wrongType.setDevice( "fwtelsim" );
+                wrongType.setName( prefix + "Name" );
+                wrongType.add( pcf::IndiElement( "routeA", pcf::IndiElement::On ) );
+                deliver( wrongType );
+                REQUIRE( node.curLabel() == "0.0000" );
+            }
+}
+
+/// Mapped and tracking nodes retain their routing masks and priority labels when numeric telemetry arrives.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode numerical display preserves mapped and tracking behavior",
+           "[instGraph::stdMotionNode][position]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::handleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::updatePositionLabel();
+    stdMotionNode::putsShouldBeOn();
+    #endif
+    // clang-format on
+
+    for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
+        for( const bool fallback : { false, true } )
+        {
+            mappedMotionFixture fixture( dir, { "out", "refl" } );
+            mappedMotionFixture reference( dir, { "out", "refl" } );
+            for( auto *f : { &fixture, &reference } )
+            {
+                f->load( "presetRoute.alpha=refl\npresetRoute.closed=\n",
+                         "parkable=true\n" + std::string( fallback ? "defaultRoute=out\n" : "" ) );
+                f->sources( true );
+            }
+            auto &node     = *fixture.m_node;
+            auto &baseline = *reference.m_node;
+            for( const auto &selection : { std::vector<std::string>{ "alpha" },
+                                           std::vector<std::string>{ "closed" },
+                                           std::vector<std::string>{ "unmapped" },
+                                           std::vector<std::string>{ "none" },
+                                           std::vector<std::string>{ "alpha", "unmapped" },
+                                           std::vector<std::string>{} } )
+            {
+                for( auto *n : { &node, &baseline } )
+                {
+                    REQUIRE( n->handleSetProperty( motionFSM( "READY" ) ) == 0 );
+                    REQUIRE( n->handleSetProperty( motionPreset( selection ) ) == 0 );
+                }
+                const auto label = node.curLabel();
+                REQUIRE( node.handleSetProperty( motionPosition( "3.125" ) ) == 0 );
+                requireSameMotionPuts( node, baseline );
+                REQUIRE( node.curLabel() ==
+                         ( selection.size() != 1 || selection.front() == "none" ? "3.1250" : label ) );
+                fixture.sources( false );
+                reference.sources( false );
+                requireSameMotionPuts( node, baseline );
+                fixture.sources( true );
+                reference.sources( true );
+                requireSameMotionPuts( node, baseline );
+            }
+            requireMappedRoute( node, {} );
+            REQUIRE( node.handleSetProperty( motionParked( "1" ) ) == 0 );
+            REQUIRE( baseline.handleSetProperty( motionParked( "1" ) ) == 0 );
+            REQUIRE( node.handleSetProperty( motionFSM( "POWEROFF" ) ) == 0 );
+            REQUIRE( baseline.handleSetProperty( motionFSM( "POWEROFF" ) ) == 0 );
+            REQUIRE( node.curLabel() == "3.1250" );
+            requireSameMotionPuts( node, baseline );
+        }
+    parkedMotionFixture fixture( ingr::ioDir::output, false, "preset", true );
+    auto               &node = *fixture.m_node;
+    REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
+    auto requested = motionPreset( { "none" } );
+    requested.setDevice( "labrules" );
+    requested.setName( "info" );
+    requested.add( pcf::IndiElement( "trackReq", pcf::IndiElement::On ) );
+    auto tracker = motionPreset( { "none" } );
+    tracker.setDevice( "adctrack" );
+    tracker.setName( "tracking" );
+    tracker.add( pcf::IndiElement( "toggle", pcf::IndiElement::On ) );
+    REQUIRE( node.handleSetProperty( requested ) == 0 );
+    REQUIRE( node.curLabel() == "not tracking" );
+    REQUIRE( node.handleSetProperty( motionPosition( "12.5" ) ) == 0 );
+    REQUIRE( node.curLabel() == "not tracking" );
+    requireMotionOff( node );
+    REQUIRE( node.handleSetProperty( tracker ) == 0 );
+    REQUIRE( node.curLabel() == "tracking" );
+    const auto state = node.node()->output( "out" )->state();
+    REQUIRE( node.handleSetProperty( motionPosition( "13.5" ) ) == 0 );
+    REQUIRE( node.curLabel() == "tracking" );
+    REQUIRE( node.node()->output( "out" )->state() == state );
+    REQUIRE( node.handleSetProperty( motionPreset( { "none" } ) ) == 0 );
+    REQUIRE( node.handleSetProperty( motionParked( "1" ) ) == 0 );
+    REQUIRE( node.handleSetProperty( motionFSM( "POWEROFF" ) ) == 0 );
+    REQUIRE( node.curLabel() == "13.5000" );
+    requireMotionOff( node );
 }
 
 } // namespace xInstGraphTest

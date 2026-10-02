@@ -1735,6 +1735,137 @@ TEST_CASE( "xInstGraph publishes default routes with explicit overrides", "[xIns
     }
 }
 
+/// Numeric-only callbacks publish live positions while preserving put colors, preset labels, and the reported FSM.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph publishes numerical positions without changing put routing", "[xInstGraph][position]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::appStartup();
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::handleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::updatePositionLabel();
+    #endif
+    // clang-format on
+
+    for( const std::string prefix : { "preset", "filter" } )
+        for( const std::string state : { "READY", "OPERATING", "POWEROFF" } )
+        {
+            std::array<int, 3> order{ 0, 1, 2 };
+            do
+            {
+                CAPTURE( prefix, state, order );
+                temporaryDirectory temp;
+                const auto         output = temp.root / "output.drawio";
+                {
+                    std::ofstream xml( temp.root / "config" / "instgraph_test.drawio" );
+                    xml << "<mxfile><diagram><mxGraphModel><root>"
+                           "<mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>"
+                           "<mxCell id=\"node:motionStage\"/>"
+                           "<mxCell id=\"output:motionStage:out\" value=\"out\" style=\"strokeColor=#FF0000;\"/>"
+                           "<mxCell id=\"state:motionStage\" value=\"before\"/>"
+                           "<mxCell id=\"fsmstate:motionStage\" value=\"before\"/>"
+                           "</root></mxGraphModel></diagram></mxfile>";
+                }
+                writeNodeSections(
+                    temp.root / "config" / "instgraph_test.conf",
+                    output,
+                    "[motionStage]\ntype=stdMotion\ndevice=teststage\nparkable=true\npresetPrefix=" + prefix + "\n" );
+                xInstGraph app;
+                loadFixture( app, temp.root );
+                REQUIRE( app.shutdown() == 0 );
+                REQUIRE( app.appStartup() == 0 );
+                REQUIRE( app.enableIndiDispatch() );
+                const std::string property = prefix == "filter" ? "filter" : "position";
+                REQUIRE( app.subscribed( "teststage." + property ) );
+                REQUIRE_FALSE(
+                    app.subscribed( std::string( "teststage." ) + ( prefix == "filter" ? "position" : "filter" ) ) );
+                app.handleDefProperty(
+                    beamsplitterValue( "teststage", "parked", "current", "1", pcf::IndiProperty::Number ) );
+                pcf::IndiProperty preset( pcf::IndiProperty::Switch );
+                preset.setDevice( "teststage" );
+                preset.setName( prefix + "Name" );
+                preset.add( pcf::IndiElement( "none", pcf::IndiElement::On ) );
+                const std::array<pcf::IndiProperty, 3> properties{
+                    beamsplitterValue( "teststage", property, "current", "-12.34567", pcf::IndiProperty::Number ),
+                    beamsplitterValue( "teststage", "fsm", "state", state ),
+                    preset };
+                for( const auto index : order )
+                {
+                    app.handleDefProperty( properties[index] );
+                }
+                auto published = readFile( output );
+                REQUIRE( cellTag( published, "state:motionStage" ).find( "value=\"-12.3457\"" ) != std::string::npos );
+                REQUIRE( cellTag( published, "output:motionStage:out" ).find( "value=\"-12.3457\"" ) !=
+                         std::string::npos );
+                REQUIRE( cellTag( published, "output:motionStage:out" ).find( "strokeColor=#FF0000;" ) !=
+                         std::string::npos );
+                REQUIRE( cellTag( published, "fsmstate:motionStage" ).find( "value=\"" + state + "\"" ) !=
+                         std::string::npos );
+                app.handleSetProperty(
+                    beamsplitterValue( "teststage", property, "current", "8.5", pcf::IndiProperty::Number ) );
+                published = readFile( output );
+                REQUIRE( cellTag( published, "state:motionStage" ).find( "value=\"8.5000\"" ) != std::string::npos );
+                REQUIRE( cellTag( published, "output:motionStage:out" ).find( "strokeColor=#FF0000;" ) !=
+                         std::string::npos );
+                app.handleSetProperty(
+                    beamsplitterValue( "teststage", property, "target", "100", pcf::IndiProperty::Number ) );
+                REQUIRE( readFile( output ) == published );
+                preset["none"].setSwitchState( pcf::IndiElement::Off );
+                preset.add( pcf::IndiElement( "open", pcf::IndiElement::On ) );
+                app.handleSetProperty( preset );
+                const auto beforePosition = cellTag( readFile( output ), "output:motionStage:out" );
+                REQUIRE( beforePosition.find( state == "OPERATING" ? "strokeColor=#FF0000;"
+                                                                   : "strokeColor=#00FF00;" ) != std::string::npos );
+                app.handleSetProperty(
+                    beamsplitterValue( "teststage", property, "current", "11.125", pcf::IndiProperty::Number ) );
+                REQUIRE( cellTag( readFile( output ), "output:motionStage:out" ) == beforePosition );
+                preset["open"].setSwitchState( pcf::IndiElement::Off );
+                app.handleSetProperty( preset );
+                published = readFile( output );
+                REQUIRE( cellTag( published, "state:motionStage" ).find( "value=\"11.1250\"" ) != std::string::npos );
+                REQUIRE( cellTag( published, "output:motionStage:out" ).find( "strokeColor=#FF0000;" ) !=
+                         std::string::npos );
+                app.handleSetProperty(
+                    beamsplitterValue( "teststage", property, "current", "bad", pcf::IndiProperty::Number ) );
+                published = readFile( output );
+                REQUIRE( cellTag( published, "state:motionStage" ).find( "value=\"---\"" ) != std::string::npos );
+                REQUIRE( cellTag( published, "output:motionStage:out" ).find( "strokeColor=#FF0000;" ) !=
+                         std::string::npos );
+                REQUIRE( app.appLogic() == 0 );
+                REQUIRE( app.appShutdown() == 0 );
+            } while( std::next_permutation( order.begin(), order.end() ) );
+        }
+
+    temporaryDirectory temp;
+    const auto         output = temp.root / "output.drawio";
+    writeBeamsplitterXML( temp.root / "config" / "instgraph_test.drawio" );
+    writeNodeSections( temp.root / "config" / "instgraph_test.conf", output, beamsplitterSections( false ) );
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.shutdown() == 0 );
+    REQUIRE( app.appStartup() == 0 );
+    REQUIRE( app.enableIndiDispatch() );
+    app.handleDefProperty( beamsplitterValue( "lamp", "power", "state", "On" ) );
+    app.handleDefProperty( beamsplitterValue( "stagebs", "fsm", "state", "READY" ) );
+    app.handleDefProperty( beamsplitterPreset( "stagebs", { "out" } ) );
+    app.handleDefProperty( beamsplitterValue( "fwfpm", "fsm", "state", "READY" ) );
+    app.handleDefProperty( beamsplitterPreset( "fwfpm", { "none" } ) );
+    app.handleDefProperty( beamsplitterValue( "fwfpm", "filter", "current", "3.2", pcf::IndiProperty::Number ) );
+    requireBeamsplitterGraph( readFile( output ), "fwfpm", {} );
+    REQUIRE( cellTag( readFile( output ), "state:fwfpm" ).find( "value=\"3.2000\"" ) != std::string::npos );
+    app.handleSetProperty( beamsplitterPreset( "fwfpm", { "open" } ) );
+    requireBeamsplitterGraph( readFile( output ), "fwfpm", { "out" } );
+    const auto beforePosition = readFile( output );
+    app.handleSetProperty( beamsplitterValue( "fwfpm", "filter", "current", "7.4", pcf::IndiProperty::Number ) );
+    REQUIRE( readFile( output ) == beforePosition );
+    app.handleSetProperty( beamsplitterPreset( "fwfpm", {} ) );
+    requireBeamsplitterGraph( readFile( output ), "fwfpm", {} );
+    REQUIRE( cellTag( readFile( output ), "state:fwfpm" ).find( "value=\"7.4000\"" ) != std::string::npos );
+    REQUIRE( app.appShutdown() == 0 );
+}
+
 } // namespace xInstGraphTest
 
 } // namespace libXWCTest

@@ -8,6 +8,7 @@
 #ifndef stdMotionNode_hpp
 #define stdMotionNode_hpp
 
+#include <iomanip>
 #include <map>
 #include <optional>
 #include <sstream>
@@ -34,6 +35,11 @@
  * and disable excluded paths so upstream propagation cannot activate them. Empty rows block all paths.
  * Mapping cannot be combined with legacy put-selection or tracking options.
  *
+ * When no usable preset is selected, the display can show the numerical `current` position with four decimals.
+ * `presetPrefix=filter` uses `<device>.filter`; other prefixes use `<device>.position`.
+ * Position telemetry changes labels only, never put states or route enablement. Tracking labels retain priority.
+ * Numeric display follows stageGUI availability, including motion states and opted-in parked POWEROFF.
+ *
  * The device and prefix can only be set once.
  */
 class stdMotionNode : public fsmNode
@@ -51,6 +57,15 @@ class stdMotionNode : public fsmNode
 
     /// Whether the latest preset property is a Switch vector with exactly one selected name.
     bool m_presetSelectionValid{ false };
+
+    /// The device-local numeric property used for display, chosen from the configured preset prefix.
+    std::string m_positionKey;
+
+    /// Latest valid numerical current position, cached independently of preset selection and routing.
+    std::optional<double> m_position;
+
+    /// Whether the graph currently shows the numeric fallback, so invalid telemetry can clear it.
+    bool m_numericLabelDisplayed{ false };
 
     /// Configuration opt-in for subscribing to and using the stage's parked state.
     bool m_parkable{ false };
@@ -162,7 +177,7 @@ class stdMotionNode : public fsmNode
     /// Get the tracking status element name.
     const std::string &trackerElement();
 
-    /// Cache FSM, parking, preset, or tracking updates and recompute the graph route.
+    /// Cache stage telemetry, updating numeric labels independently of preset and tracking routing.
     virtual int handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
     /// Apply the selected preset or tracking state to the node puts.
@@ -176,6 +191,9 @@ class stdMotionNode : public fsmNode
         mx::app::appConfigurator &config /**< [in] the application configurator loaded with this node's options*/ );
 
   protected:
+    /// Refresh the numerical fallback without changing put states or enablement.
+    void updatePositionLabel();
+
     /// Whether the retained stage position may be used while its motors are powered off.
     bool parkedPowerOff() const;
 
@@ -219,6 +237,8 @@ inline void stdMotionNode::device( const std::string &dev )
     {
         m_presetKey = m_device + "." + m_presetPrefix + "Name";
         key( m_presetKey );
+        m_positionKey = m_device + "." + ( m_presetPrefix == "filter" ? "filter" : "position" );
+        key( m_positionKey );
     }
 }
 
@@ -242,6 +262,8 @@ inline void stdMotionNode::presetPrefix( const std::string &pp )
     {
         m_presetKey = m_device + "." + m_presetPrefix + "Name";
         key( m_presetKey );
+        m_positionKey = m_device + "." + ( m_presetPrefix == "filter" ? "filter" : "position" );
+        key( m_positionKey );
     }
 }
 
@@ -327,6 +349,27 @@ inline const std::string &stdMotionNode::trackerElement()
 
 inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
+    if( ipRecv.createUniqueKey() == m_positionKey )
+    {
+        // Target-only updates do not replace a measured current position.
+        if( !ipRecv.find( "current" ) )
+        {
+            return 0;
+        }
+        m_position.reset();
+        if( ipRecv.getType() == pcf::IndiProperty::Number )
+        {
+            std::istringstream current( ipRecv["current"].get() );
+            double             value = 0;
+            if( current >> value && ( current >> std::ws ).eof() )
+            {
+                m_position = value;
+            }
+        }
+        updatePositionLabel();
+        return 0;
+    }
+
     int rv = fsmNode::handleSetProperty( ipRecv );
 
     if( rv < 0 )
@@ -428,6 +471,11 @@ inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
     if( m_changes > 0 )
     {
         m_changes = 0;
+        if( m_numericLabelDisplayed )
+        {
+            m_curLabel              = "off";
+            m_numericLabelDisplayed = false;
+        }
         if( putsShouldBeOn() )
         {
             togglePutsOn();
@@ -438,7 +486,44 @@ inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
         }
     }
 
+    updatePositionLabel();
     return 0;
+}
+
+inline void stdMotionNode::updatePositionLabel()
+{
+    if( m_node == nullptr || !m_parentGraph || !m_node->auxDataValid() )
+    {
+        return;
+    }
+    const bool namedPreset   = m_presetSelectionValid && !m_curVal.empty() && m_curVal != "none";
+    const bool trackingLabel = !presetRoutingConfigured() && !parkedPowerOff() &&
+                               m_state != MagAOX::app::stateCodes::POWEROFF && ( m_tracking || m_trackingReq );
+    const bool available = m_state == MagAOX::app::stateCodes::READY || m_state == MagAOX::app::stateCodes::OPERATING ||
+                           m_state == MagAOX::app::stateCodes::HOMING ||
+                           m_state == MagAOX::app::stateCodes::CONFIGURING ||
+                           m_state == MagAOX::app::stateCodes::NOTHOMED || parkedPowerOff();
+    const bool showPosition = !namedPreset && !trackingLabel && available && m_position.has_value();
+    if( !showPosition && !m_numericLabelDisplayed )
+    {
+        return;
+    }
+
+    std::string label = "off";
+    if( showPosition )
+    {
+        std::ostringstream position;
+        position << std::fixed << std::setprecision( 4 ) << *m_position;
+        label = position.str();
+    }
+    m_numericLabelDisplayed = showPosition;
+    m_curLabel              = label;
+    m_parentGraph->valueExtra( name(), "state", showPosition ? label : "---" );
+    if( !presetRoutingConfigured() && m_presetPutName.size() == 1 )
+    {
+        m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, label );
+    }
+    m_parentGraph->stateChange();
 }
 
 inline bool stdMotionNode::parkedPowerOff() const
