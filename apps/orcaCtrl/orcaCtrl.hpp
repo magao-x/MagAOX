@@ -18,16 +18,28 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+/// Enables the BREADCRUMB debugging macro.
+/** \todo Remove before deployment; debugging output should go through log<>.
+ */
 #define DEBUG
 
 #ifdef DEBUG
+    /// Print the current file and line to std::cerr (debugging only).
     #define BREADCRUMB std::cerr << __FILE__ << " " << __LINE__ << "\n";
 #else
+    /// No-op when DEBUG is not defined.
     #define BREADCRUMB
 #endif
 
-// DCAM error string helper function (don't need to convert enum2string)
-inline std::string dcamErrorString( HDCAM hdcam, DCAMERR error )
+/// Get the DCAM text description of an error code.
+/** Uses dcamdev_getstring() so DCAMERR values don't need a local enum-to-string table.
+ *
+ * \returns the DCAM error text
+ * \returns "DCAM error <code>" if DCAM cannot describe the error
+ */
+inline std::string dcamErrorString( HDCAM   hdcam, /**< [in] camera handle used to look up the error text */
+                                    DCAMERR error  /**< [in] the DCAM error code to describe */
+)
 {
     char text[256]{};
 
@@ -45,8 +57,13 @@ inline std::string dcamErrorString( HDCAM hdcam, DCAMERR error )
     return text;
 }
 
-// Helper function to get device ID string from DCAM
-inline std::string dcamDeviceString( HDCAM hdcam, DCAM_IDSTR stringID )
+/// Get a DCAM device identification string, such as the vendor, model or camera ID.
+/** \returns the requested string
+ * \returns an empty string if DCAM cannot provide it
+ */
+inline std::string dcamDeviceString( HDCAM      hdcam,   /**< [in] camera handle, or a device index cast to HDCAM */
+                                     DCAM_IDSTR stringID /**< [in] which string to get, e.g. DCAM_IDSTR_CAMERAID */
+)
 {
     char text[256]{};
 
@@ -82,12 +99,25 @@ namespace app
  * \ingroup orcaCtrl
  */
 
-/** MagAO-X application to control a Hamamatsu Orca Quest 2
+/// MagAO-X application to control a Hamamatsu ORCA-Quest2 (C15550-22UP) qCMOS camera.
+/** Controls the camera through the Hamamatsu DCAM-API over CoaXPress, and publishes frames to an
+ * ImageStreamIO stream through dev::frameGrabber. Exposure time, ROI and binning, readout speed,
+ * temperature status and the cooling fan are exposed through dev::stdCamera. Camera state is
+ * recorded through dev::telemeter as telem_stdcam.
+ *
+ * Configuration specific to this app (in addition to the stdCamera, frameGrabber and telemeter keys):
+ * - `camera.serialNumber`: the camera ID reported by DCAM_IDSTR_CAMERAID (e.g. `PHX2`). Required.
+ * - `camera.liquidCooling`: declares a liquid-cooled camera. Optional, default `false`, currently only
+ *   logged (see agents/plans/2026-09/orcaCtrl-liquidCooling.md).
+ *
+ * The camera's cooling method (Air or Water, "Cooler Type") is a persistent camera setting. It is
+ * changed with the `dcamcfgc` DCAM Configurator, followed by a camera restart, not by this app.
  *
  * \ingroup orcaCtrl
  *
- * \todo Config item for ImageStreamIO name filename
- * \todo implement ImageStreamIO circular buffer, with config setting
+ * \todo Define or remove setorcaParameterOnline( HDCAM, int32, int32 ) and
+ *       setorcaParameterOnline( int32, int32 ), which are declared but not defined.
+ * \todo Add unit tests under apps/orcaCtrl/tests (AGENTS.md rule 20).
  */
 class orcaCtrl : public MagAOXApp<>,
                  public dev::stdCamera<orcaCtrl>,
@@ -110,64 +140,74 @@ class orcaCtrl : public MagAOXApp<>,
     /// The telemeter base class, used by the TELEMETER_* macros
     typedef dev::telemeter<orcaCtrl> telemeterT;
 
+    /// The MagAOXApp base class
     typedef MagAOXApp<> MagAOXAppT;
 
   public:
     /** \name app::dev Configurations
      *@{
      */
-    static constexpr bool c_stdCamera_tempControl =
-        true; ///< app::dev config to tell stdCamera to expose temperature controls
 
-    static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature
+    /// app::dev config to tell stdCamera to expose temperature controls
+    static constexpr bool c_stdCamera_tempControl = true;
 
-    static constexpr bool c_stdCamera_readoutSpeed =
-        true; ///< app::dev config to tell stdCamera to expose readout speed controls
+    /// app::dev config to tell stdCamera to expose temperature
+    static constexpr bool c_stdCamera_temp = true;
 
-    static constexpr bool c_stdCamera_vShiftSpeed =
-        false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
-    static constexpr bool c_stdCamera_fanSpeed =
-        true; ///< app::dev config to tell stdCamera to expose fan-speed control
+    /// app::dev config to tell stdCamera to expose readout speed controls
+    static constexpr bool c_stdCamera_readoutSpeed = true;
 
-    static constexpr bool c_stdCamera_emGain =
-        false; ///< app::dev config to tell stdCamera to not expose EM gain controls
+    /// app::dev config to tell stdCamera not to expose vertical shift speed control
+    static constexpr bool c_stdCamera_vShiftSpeed = false;
 
-    static constexpr bool c_stdCamera_exptimeCtrl =
-        true; ///< app::dev config to tell stdCamera to expose exposure time controls
+    /// app::dev config to tell stdCamera to expose fan-speed control
+    static constexpr bool c_stdCamera_fanSpeed = true;
 
-    static constexpr bool c_stdCamera_fpsCtrl = false; ///< app::dev config to tell stdCamera not to expose FPS controls
+    /// app::dev config to tell stdCamera not to expose EM gain controls
+    static constexpr bool c_stdCamera_emGain = false;
 
-    static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status
+    /// app::dev config to tell stdCamera to expose exposure time controls
+    static constexpr bool c_stdCamera_exptimeCtrl = true;
 
-    static constexpr bool c_stdCamera_synchro =
-        false; ///< app::dev config to tell stdCamera to not expose synchro mode controls
+    /// app::dev config to tell stdCamera not to expose FPS controls
+    static constexpr bool c_stdCamera_fpsCtrl = false;
 
-    static constexpr bool c_stdCamera_usesModes =
-        false; ///< app:dev config to tell stdCamera not to expose mode controls
+    /// app::dev config to tell stdCamera to expose FPS status
+    static constexpr bool c_stdCamera_fps = true;
 
-    static constexpr bool c_stdCamera_usesROI = true; ///< app:dev config to tell stdCamera to expose ROI controls
+    /// app::dev config to tell stdCamera not to expose synchro mode controls
+    static constexpr bool c_stdCamera_synchro = false;
 
-    static constexpr bool c_stdCamera_cropMode =
-        false; ///< app:dev config to tell stdCamera to not expose Crop Mode controls
+    /// app::dev config to tell stdCamera not to expose mode controls
+    static constexpr bool c_stdCamera_usesModes = false;
 
-    static constexpr bool c_stdCamera_hasShutter =
-        false; ///< app:dev config to tell stdCamera to not expose shutter controls
+    /// app::dev config to tell stdCamera to expose ROI controls
+    static constexpr bool c_stdCamera_usesROI = true;
 
-    static constexpr bool c_stdCamera_hasFocus =
-        false; ///< app:dev config to tell stdCamera to not expose focus-state reporting and goto-focus control
+    /// app::dev config to tell stdCamera not to expose crop mode controls
+    static constexpr bool c_stdCamera_cropMode = false;
 
-    static constexpr bool c_stdCamera_usesStateString =
-        false; ///< app::dev confg to tell stdCamera to expose the state string property
+    /// app::dev config to tell stdCamera not to expose shutter controls
+    static constexpr bool c_stdCamera_hasShutter = false;
 
-    static constexpr bool c_frameGrabber_flippable =
-        true; ///< app:dev config to tell framegrabber this camera can be flipped
-              ///@}
+    /// app::dev config to tell stdCamera not to expose focus-state reporting and goto-focus control
+    static constexpr bool c_stdCamera_hasFocus = false;
+
+    /// app::dev config to tell stdCamera not to expose the state string property
+    static constexpr bool c_stdCamera_usesStateString = false;
+
+    /// app::dev config to tell frameGrabber this camera can be flipped
+    static constexpr bool c_frameGrabber_flippable = true;
+
+    ///@}
 
   protected:
-    /** \name configurable parameters
+    /** \name Configurable Parameters
      *@{
      */
-    std::string m_serialNumber; ///< The camera's identifying serial number
+
+    /// The camera ID to connect to (`camera.serialNumber`), matched against DCAM_IDSTR_CAMERAID.
+    std::string m_serialNumber;
 
     /// True when the camera is declared liquid cooled (`camera.liquidCooling`).
     /** The cooling method itself is a persistent camera setting ("Cooler Type") changed with the
@@ -178,39 +218,86 @@ class orcaCtrl : public MagAOXApp<>,
 
     ///@}
 
+    /** \name Acquisition State
+     *@{
+     */
+
+    /// Pixel bit depth reported by DCAM_IDPROP_BITSPERCHANNEL for the current configuration.
     int m_depth{ 0 };
 
-    int32  m_frameSize;
-    int32  m_frameCount{ 10 }; ///< number of frames in the circular buffer
+    /// Size of one frame in bytes, from DCAM_IDPROP_IMAGE_FRAMEBYTES.
+    int32 m_frameSize;
+
+    /// Number of frames allocated in the DCAM capture buffer by dcambuf_alloc().
+    int32 m_frameCount{ 10 };
+
+    /// Camera timestamp of the previous frame [s], used to detect skipped frames. 0 after a reconfigure.
     double m_camera_timestamp{ 0.0 };
+
+    /// Frame rate the camera reports for the current settings, from DCAM_IDPROP_INTERNALFRAMERATE [Hz].
     double m_FrameRateCalculation;
+
+    /// Sensor readout time for the current settings, from DCAM_IDPROP_TIMING_READOUTTIME [s].
     double m_ReadOutTimeCalculation;
 
     // std::string m_fxngenName{ "fxngensync" }; ///< Default fxngen device name
     // std::string m_fxngenCh{ "C2" };           ///< Default fxngen channel
 
+    /// Unused; kept from the app this one was derived from.
     std::string m_otherCamName;
 
-    HDCAM         m_cameraHandle{ nullptr };
-    HDCAMWAIT     m_waitHandle{ nullptr };
-    DCAMBUF_FRAME m_currentFrame{}; ///< most recently locked DCAM acq frame
+    ///@}
 
+    /** \name DCAM State
+     *@{
+     */
+
+    /// Handle to the open DCAM device, or nullptr when no camera is open.
+    HDCAM m_cameraHandle{ nullptr };
+
+    /// DCAM wait handle used to wait for frame-ready and capture-stopped events, or nullptr when closed.
+    HDCAMWAIT m_waitHandle{ nullptr };
+
+    /// The most recently locked DCAM frame. Its buffer belongs to DCAM and is only valid until overwritten.
+    DCAMBUF_FRAME m_currentFrame{};
+
+    /// Camera vendor string (DCAM_IDSTR_VENDOR), set on connect.
     std::string m_cameraName;
+
+    /// Camera model string (DCAM_IDSTR_MODEL), set on connect.
     std::string m_cameraModel;
 
-    bool m_dcamBuffersAllocated{ false }; ///< True when the DCAM buffers have been allocated
+    /// True while DCAM capture buffers are allocated (by dcambuf_alloc()) and must be released.
+    bool m_dcamBuffersAllocated{ false };
 
-    bool m_fanControlSupported{ false }; ///< True when the camera exposes the DisableCoolingFan control parameter.
-    bool m_fanStatusSupported{ false };  ///< True when the camera exposes readable cooling-fan status.
-    bool m_fanForcedOn{ false };         ///< True while the camera reports the cooling fan is forced on for protection.
-    bool m_fanSpeedLogPending{
-        false }; ///< True when the next successful fan apply should emit a notice even without a state change.
+    /// True when the camera exposes a writable DCAM_IDPROP_SENSORCOOLERFAN property.
+    bool m_fanControlSupported{ false };
+
+    /// True when the camera exposes readable cooling-fan status.
+    bool m_fanStatusSupported{ false };
+
+    /// True while the camera reports the cooling fan is forced on for protection.
+    bool m_fanForcedOn{ false };
+
+    /// True when the next successful fan apply should emit a notice even without a state change.
+    bool m_fanSpeedLogPending{ false };
+
+    ///@}
 
   public:
-    /// Default c'tor
+    /** \name MagAOXApp Interface
+     *@{
+     */
+
+    /// Default c'tor.
+    /** Enables power management and sets the readout-speed and fan-speed options and the default
+     * full-frame ROI.
+     */
     orcaCtrl();
 
-    /// Destructor
+    /// D'tor, declared and defined for noexcept.
+    /** Releases any DCAM resources still held, via closeCamera().
+     */
     ~orcaCtrl() noexcept;
 
     /// Setup the configuration system (called by MagAOXApp::setup())
@@ -228,86 +315,258 @@ class orcaCtrl : public MagAOXApp<>,
     /// load the configuration system results (called by MagAOXApp::setup())
     virtual void loadConfig();
 
-    /// Startup functions
-    /** Sets up the INDI vars.
+    /// Startup function.
+    /** Creates the `readout_time` INDI property, sets the temperature and ROI limits, and starts the
+     * stdCamera, frameGrabber and telemeter interfaces.
      *
+     * \returns 0 on success
+     * \returns -1 on an error requiring shutdown
      */
     virtual int appStartup();
 
-    /// Implementation of the FSM for the Siglent SDG
+    /// Implementation of the FSM for orcaCtrl.
+    /** Connects to the camera when not connected, triggers the initial configuration, and while
+     * READY/OPERATING polls acquisition state, temperatures and fan state and updates INDI and telemetry.
+     *
+     * \returns 0 on no critical error
+     * \returns -1 on an error requiring shutdown
+     */
     virtual int appLogic();
 
-    /// Implementation of the on-power-off FSM logic
+    /// Implementation of the on-power-off FSM logic.
+    /** Releases the DCAM resources and resets the stdCamera and frameGrabber state.
+     *
+     * \returns 0 always
+     */
     virtual int onPowerOff();
 
-    /// Implementation of the while-powered-off FSM
+    /// Implementation of the while-powered-off FSM.
+    /**
+     * \returns 0 always
+     */
     virtual int whilePowerOff();
 
-    /// Do any needed shutdown tasks.  Currently nothing in this app.
+    /// Shutdown the app.
+    /** Stops the framegrabber thread, releases the DCAM resources, then shuts down the stdCamera and
+     * telemeter interfaces.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
     virtual int appShutdown();
 
+    ///@}
+
   protected:
-    int getorcaParameter( int32 &value, int32 parameter );
+    /** \name DCAM Interface
+     *@{
+     */
 
-    int getorcaParameter( double &value, int32 parameter );
+    /// Get an integer-valued DCAM property.
+    /**
+     * \returns 0 on success
+     * \returns -1 on error (logged unless the camera is powering off)
+     */
+    int getorcaParameter( int32 &value, /**< [out] the property value, truncated to an integer */
+                          int32  parameter /**< [in] the DCAM_IDPROP_* property to read */ );
 
-    int setorcaParameter( int32 parameter, int32 value, bool commit = true );
+    /// Get a DCAM property as a double.
+    /**
+     * \returns 0 on success
+     * \returns -1 on error (logged unless the camera is powering off)
+     */
+    int getorcaParameter( double &value, /**< [out] the property value */
+                          int32   parameter /**< [in] the DCAM_IDPROP_* property to read */ );
 
-    int setorcaParameter( HDCAM handle, int32 parameter, double value, bool commit = true );
+    /// Set an integer-valued DCAM property on the current camera, with dcamprop_setgetvalue().
+    /**
+     * \returns 0 on success
+     * \returns -1 on error (logged unless the camera is powering off)
+     */
+    int setorcaParameter( int32 parameter, /**< [in] the DCAM_IDPROP_* property to set */
+                          int32 value,     /**< [in] the value to set */
+                          bool  commit = true /**< [in] currently unused */ );
 
-    int setorcaParameter( HDCAM handle, int32 parameter, int32 value, bool commit = true );
+    /// Set a DCAM property on the given camera handle, with dcamprop_setgetvalue().
+    /** DCAM may round the value to the nearest valid one.
+     *
+     * \returns 0 on success
+     * \returns -1 on error (logged unless the camera is powering off)
+     */
+    int setorcaParameter( HDCAM  handle,    /**< [in] the camera handle */
+                          int32  parameter, /**< [in] the DCAM_IDPROP_* property to set */
+                          double value,     /**< [in] the value to set */
+                          bool   commit = true /**< [in] currently unused */ );
 
-    int setorcaParameter( int32 parameter, double value, bool commit = true );
+    /// Set an integer-valued DCAM property on the given camera handle.
+    /**
+     * \returns 0 on success
+     * \returns -1 on error (logged unless the camera is powering off)
+     */
+    int setorcaParameter( HDCAM handle,    /**< [in] the camera handle */
+                          int32 parameter, /**< [in] the DCAM_IDPROP_* property to set */
+                          int32 value,     /**< [in] the value to set */
+                          bool  commit = true /**< [in] currently unused */ );
 
-    int setorcaParameterOnline( HDCAM handle, int32 parameter, double value );
+    /// Set a DCAM property on the current camera, with dcamprop_setgetvalue().
+    /**
+     * \returns 0 on success
+     * \returns -1 on error (logged unless the camera is powering off)
+     */
+    int setorcaParameter( int32  parameter, /**< [in] the DCAM_IDPROP_* property to set */
+                          double value,     /**< [in] the value to set */
+                          bool   commit = true /**< [in] currently unused */ );
 
-    int setorcaParameterOnline( int32 parameter, double value );
+    /// Set a DCAM property on the given camera handle while capturing, with dcamprop_setvalue().
+    /** Use for properties DCAM allows to change while capture is running, e.g. exposure time.
+     *
+     * \returns 0 on success
+     * \returns -1 on error (logged unless the camera is powering off)
+     */
+    int setorcaParameterOnline( HDCAM  handle,    /**< [in] the camera handle */
+                                int32  parameter, /**< [in] the DCAM_IDPROP_* property to set */
+                                double value /**< [in] the value to set */ );
 
-    int setorcaParameterOnline( HDCAM handle, int32 parameter, int32 value );
+    /// Set a DCAM property on the current camera while capturing, with dcamprop_setvalue().
+    /**
+     * \returns 0 on success
+     * \returns -1 on error (logged unless the camera is powering off)
+     */
+    int setorcaParameterOnline( int32  parameter, /**< [in] the DCAM_IDPROP_* property to set */
+                                double value /**< [in] the value to set */ );
 
-    int setorcaParameterOnline( int32 parameter, int32 value );
+    /// Set an integer-valued DCAM property on the given camera handle while capturing.
+    /** \todo Declared but not defined.
+     */
+    int setorcaParameterOnline( HDCAM handle,    /**< [in] the camera handle */
+                                int32 parameter, /**< [in] the DCAM_IDPROP_* property to set */
+                                int32 value /**< [in] the value to set */ );
 
+    /// Set an integer-valued DCAM property on the current camera while capturing.
+    /** \todo Declared but not defined.
+     */
+    int setorcaParameterOnline( int32 parameter, /**< [in] the DCAM_IDPROP_* property to set */
+                                int32 value /**< [in] the value to set */ );
+
+    /// Find and open the camera whose DCAM_IDSTR_CAMERAID matches m_serialNumber.
+    /** Closes any previous session, initializes the DCAM-API, opens the matching device and a wait
+     * handle, and checks for cooling-fan control. Sets the state to CONNECTED, NODEVICE or ERROR.
+     *
+     * \returns 0 on success, including when no matching camera is found (state NODEVICE)
+     * \returns -1 on error
+     */
     int connect();
 
-    // Stop capture and release all DCAM resources held by app
-    void closeCamera( bool uninitApi );
+    /// Stop capture and release all DCAM resources held by the app.
+    /** Aborts any pending dcamwait so the framegrabber thread isn't left waiting, stops capture,
+     * releases the capture buffers and closes the wait handle. Safe to call when nothing is open.
+     */
+    void closeCamera( bool uninitAPI /**< [in] if true, also call dcamapi_uninit() */ );
 
+    /// Update the app state from the DCAM capture status.
+    /** Sets OPERATING while capture is running, otherwise READY, and requests a reconfigure to
+     * restart acquisition if capture has stopped.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
     int getAcquisitionState();
 
     /// Get the current cooling-fan state from the camera.
+    /**
+     * \returns 0 on success, or if fan status isn't supported
+     * \returns -1 on error
+     */
     int getFanSpeed();
 
+    /// Get the sensor temperature and cooler status from the camera.
+    /** Updates m_ccdTemp and the temperature-control status, and records telemetry.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
     int getTemps();
 
-    // stdCamera interface:
+    ///@}
 
-    // This must set the power-on default values of
-    /* -- m_ccdTempSetpt
-     * -- m_currentROI
+    /** \name stdCamera Interface
+     *@{
+     */
+
+    /// Set defaults for a power-on state. [stdCamera interface]
+    /** Sets m_ccdTempSetpt, the readout speed and the fan state to their power-on values.
+     *
+     * \returns 0 always
      */
     int powerOnDefaults();
 
+    /// Turn temperature control on. Temperature control is always on for this camera. [stdCamera interface]
+    /**
+     * \returns 0 always
+     */
     int setTempControl();
+
+    /// Request the temperature setpoint in m_ccdTempSetpt. [stdCamera interface]
+    /** Currently only records telemetry and requests a reconfigure; the setpoint isn't written to the
+     * camera.
+     *
+     * \returns 0 always
+     */
     int setTempSetPt();
+
+    /// Request a readout-speed change through the next reconfigure. [stdCamera interface]
+    /**
+     * \returns 0 always
+     */
     int setReadoutSpeed();
-    /// Request a cooling-fan state change through the next reconfiguration.
+
+    /// Request a cooling-fan state change through the next reconfiguration. [stdCamera interface]
+    /**
+     * \returns 0 always
+     */
     int setFanSpeed();
+
+    /// Set the exposure time from m_expTimeSet. [stdCamera interface]
+    /** Writes DCAM_IDPROP_EXPOSURETIME, while capturing if necessary, then updates m_expTime and the
+     * frame rate.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
     int setExpTime();
-    int capExpTime( double &exptime );
+
+    /// Limit an exposure time to no less than the current readout time.
+    /**
+     * \returns 0 on success
+     * \returns -1 if the camera is powering off
+     */
+    int capExpTime( double &exptime /**< [in,out] exposure time [s], raised to the readout time if needed */ );
+
+    /// FPS is not settable for this camera. [stdCamera interface]
+    /**
+     * \returns 0 always
+     */
     int setFPS();
 
-    // Apply MagAO-X ROI w/ center ref via DCAM subarray props
-    int setDcamRoi( int32 xCen /** pix units */,
-                    int32 yCen /** pix units */,
-                    int32 width /** pix units */,
-                    int32 height /** pix units */,
-                    int32 binX /** binning factor */,
-                    int32 binY /** binning factor */ );
-    /// Check the next ROI
-    /** Checks if the target values are valid and adjusts them to the closest valid values if needed.
+    /// Apply a MagAO-X center-referenced ROI with the DCAM subarray properties.
+    /** Converts the center to a corner, applies the configured flip, checks the sensor bounds, and
+     * writes the binning and subarray properties. Only n×n binning is supported, so binY is not used.
      *
-     * \returns 0 if successful
-     * \returns -1 otherwise
+     * \returns 0 on success
+     * \returns -1 on invalid parameters or a DCAM error
+     */
+    int setDcamRoi( int32 xCen,   /**< [in] ROI center x [pixels] */
+                    int32 yCen,   /**< [in] ROI center y [pixels] */
+                    int32 width,  /**< [in] ROI width [pixels] */
+                    int32 height, /**< [in] ROI height [pixels] */
+                    int32 binX,   /**< [in] binning factor, applied to both axes */
+                    int32 binY /**< [in] y binning factor (unused) */ );
+
+    /// Check the next ROI. [stdCamera interface]
+    /** Should check whether the target values are valid and adjust them to the closest valid values.
+     * Currently does nothing; DCAM rounds the subarray values when setDcamRoi() writes them.
+     *
+     * \returns 0 always
      */
     int checkNextROI();
 
@@ -318,6 +577,12 @@ class orcaCtrl : public MagAOXApp<>,
      */
     // bool checkFocus();
 
+    /// Request the ROI in m_nextROI through the next reconfigure. [stdCamera interface]
+    /** Resets the INDI `roi_set` request switch. configureAcquisition() applies the ROI and updates the
+     * current and target ROI values.
+     *
+     * \returns 0 always
+     */
     int setNextROI();
 
     /// Requests the configured focus preset. [stdCamera interface]
@@ -333,26 +598,86 @@ class orcaCtrl : public MagAOXApp<>,
      */
     // int setShutter( int sh );
 
-    // Framegrabber interface:
-    int   configureAcquisition();
-    float fps();
-    int   startAcquisition();
-    int   acquireAndCheckValid();
-    int   loadImageIntoStream( void *dest );
-    int   reconfig();
+    ///@}
 
-    // INDI:
-  protected:
+    /** \name Framegrabber Interface
+     *@{
+     */
+
+    /// Configure the camera for the pending settings and start continuous acquisition. [framegrabber interface]
+    /** Applies the fan state and the ROI and binning, reads back the frame geometry, readout time,
+     * exposure-time limits, exposure time and frame rate, then allocates the DCAM buffers and starts
+     * capture.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int configureAcquisition();
+
+    /// Get the frame rate the camera reports for the current settings. [framegrabber interface]
+    /**
+     * \returns the frame rate [Hz]
+     */
+    float fps();
+
+    /// Start acquisition. Capture is already started by configureAcquisition(). [framegrabber interface]
+    /**
+     * \returns 0 always
+     */
+    int startAcquisition();
+
+    /// Wait for the next frame and lock the newest one. [framegrabber interface]
+    /** Waits up to 1 s for a frame-ready event, then locks the most recently transferred frame into
+     * m_currentFrame and timestamps it. Logs skipped frames using the camera timestamps.
+     *
+     * \returns 0 when a frame is ready
+     * \returns 1 on timeout, abort or capture stopped, so the framegrabber can check for reconfigure or
+     *          power off
+     * \returns -1 on error
+     */
+    int acquireAndCheckValid();
+
+    /// Copy the locked frame into the image stream, applying any configured flip. [framegrabber interface]
+    /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int loadImageIntoStream( void *dest /**< [in] destination in the image stream */ );
+
+    /// Stop capture so the framegrabber can reconfigure. [framegrabber interface]
+    /**
+     * \returns 0 on success, or if no camera is open
+     * \returns -1 on error
+     */
+    int reconfig();
+
+    ///@}
+
+    /** \name INDI
+     *@{
+     */
+
+    /// Read-only INDI property `readout_time` publishing the sensor readout time.
     pcf::IndiProperty m_indiP_readouttime;
+
+    ///@}
 
   public:
     /** \name Telemeter Interface
-     *
-     * @{
+     *@{
+     */
+
+    /// Check whether telemetry needs to be recorded. [telemeter interface]
+    /**
+     * \returns the result of telemeter::checkRecordTimes() for telem_stdcam
      */
     int checkRecordTimes();
 
-    int recordTelem( const telem_stdcam * );
+    /// Record telem_stdcam telemetry. [telemeter interface]
+    /**
+     * \returns the result of recordCamera()
+     */
+    int recordTelem( const telem_stdcam * /**< [in] tag selecting the telem_stdcam record */ );
 
     ///@}
 };
@@ -388,8 +713,8 @@ inline orcaCtrl::orcaCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 
 inline orcaCtrl::~orcaCtrl() noexcept
 {
-    // Clear the buffers if they were allocated.  This is done here because the destructor is called after the
-    // framegrabber thread has exited, so we can safely free the buffers.
+    // Release anything still held. The framegrabber thread has exited by now, so this is safe.
+    // A no-op if appShutdown() has already closed everything.
     closeCamera( false );
 }
 
@@ -598,7 +923,7 @@ inline int orcaCtrl::appLogic()
         TELEMETER_APP_LOGIC;
     }
 
-    // Fall through check?
+    // Nothing to do in other states.
     return 0;
 }
 
@@ -624,6 +949,8 @@ inline int orcaCtrl::onPowerOff()
 inline int orcaCtrl::whilePowerOff()
 {
     std::lock_guard<std::mutex> lock( m_indiMutex );
+
+    ///\todo This should call stdCamera<orcaCtrl>::whilePowerOff(), not onPowerOff().
 
     if( stdCamera<orcaCtrl>::onPowerOff() < 0 )
     {
@@ -914,7 +1241,7 @@ inline void orcaCtrl::closeCamera( bool uninitAPI ) // if arg is true, also call
 
         if( m_dcamBuffersAllocated )
         {
-            dcambuf_release( m_cameraHandle ); // release alloc buffers on power off
+            dcambuf_release( m_cameraHandle ); // release allocated capture buffers
         }
     }
     m_dcamBuffersAllocated = false;
@@ -925,9 +1252,15 @@ inline void orcaCtrl::closeCamera( bool uninitAPI ) // if arg is true, also call
         m_waitHandle = nullptr;
     }
 
-    if( uninitApi )
+    if( m_cameraHandle )
     {
-        dcamapi_uninit;
+        dcamdev_close( m_cameraHandle );
+        m_cameraHandle = nullptr;
+    }
+
+    if( uninitAPI )
+    {
+        dcamapi_uninit();
     }
 }
 
@@ -1148,6 +1481,8 @@ inline int orcaCtrl::setFanSpeed()
 
 inline int orcaCtrl::setExpTime()
 {
+    ///\todo This rounds the exposure time to whole seconds. The DCAM exposure time is in seconds, so
+    ///      sub-second exposures are lost.
     long   intexptime = m_expTimeSet + 0.5;
     double exptime    = ( (double)intexptime );
     capExpTime( exptime );
@@ -1195,6 +1530,8 @@ inline int orcaCtrl::setExpTime()
 inline int orcaCtrl::capExpTime( double &exptime )
 {
     // cap at minimum possible value
+    ///\todo The log message below says "ms" but the values are in seconds, and the cap is rounded to
+    ///      whole seconds.
     if( exptime < m_ReadOutTimeCalculation )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
@@ -1208,7 +1545,6 @@ inline int orcaCtrl::capExpTime( double &exptime )
     return 0;
 }
 
-// helper func to set DCAM ROI
 inline int orcaCtrl::setDcamRoi( int32 xCen, int32 yCen, int32 width, int32 height, int32 binX, int32 binY )
 {
     // Define sensor dim constants
@@ -1280,9 +1616,6 @@ inline int orcaCtrl::checkNextROI()
     return 0;
 }
 
-// Set ROI property to busy if accepted, set toggle to Off and Idlw either way.
-// Set ROI actual
-// Update current values (including struct and indiP) and set to OK when done
 inline int orcaCtrl::setNextROI()
 {
     updateSwitchIfChanged( m_indiP_roi_set, "request", pcf::IndiElement::Off, INDI_IDLE );
@@ -1294,7 +1627,7 @@ inline int orcaCtrl::setNextROI()
 inline int orcaCtrl::configureAcquisition()
 {
 
-    // Wait until capture status reports 'READY' before acq config
+    // Make sure the camera responds before configuring it
     int32   captureStatus = 0;
     DCAMERR error         = dcamcap_status( m_cameraHandle, &captureStatus );
 
@@ -1317,10 +1650,11 @@ inline int orcaCtrl::configureAcquisition()
 
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-    // Check Frame Transfer
+    // Readout Speed
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
 
+    ///\todo The readout speed is read but never set from m_readoutSpeedNameSet.
     int32 cmode;
     if( getorcaParameter( cmode, DCAM_IDPROP_READOUTSPEED ) < 0 )
     {
@@ -1402,6 +1736,8 @@ inline int orcaCtrl::configureAcquisition()
     //     return -1;
     // }
 
+    ///\todo The setpoint is not written to the camera (the block above is disabled), so this log message
+    ///      is misleading. In air mode the camera has no SENSORTEMPERATURETARGET property.
     log<text_log>( "Set temperature set point: " + std::to_string( m_ccdTempSetpt ) + " C" );
 
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
@@ -1521,8 +1857,8 @@ inline int orcaCtrl::configureAcquisition()
 
     std::cerr << "Readout time is: " << m_ReadOutTimeCalculation << "\n";
 
-    updateIfChanged(
-        m_indiP_readouttime, "value", m_ReadOutTimeCalculation / 1000.0, INDI_OK ); // convert from msec to sec
+    ///\todo DCAM reports the readout time in seconds, so this /1000 makes the INDI value 1000x too small.
+    updateIfChanged( m_indiP_readouttime, "value", m_ReadOutTimeCalculation / 1000.0, INDI_OK );
 
     DCAMPROP_ATTR attr{};
     attr.cbSize = sizeof( attr );
@@ -1597,11 +1933,9 @@ inline int orcaCtrl::configureAcquisition()
     }
     std::cerr << "FrameRate is: " << m_FrameRateCalculation << "\n";
 
-    // Start continuous acquisition
-
     recordCamera();
 
-    // Allocate img buffers
+    // Allocate the capture buffers and start continuous acquisition
     error = dcambuf_alloc( m_cameraHandle, m_frameCount );
     if( failed( error ) )
     {
@@ -1724,7 +2058,6 @@ inline int orcaCtrl::acquireAndCheckValid()
                       << 1000 * delta_ts << " ms)\n";
         }
     }
-    // print
 
     m_camera_timestamp = cameraTimestamp; // update to latest
 
@@ -1792,6 +2125,8 @@ inline int orcaCtrl::reconfig()
     return 0;
 }
 
+///\todo checkRecordTimes() and recordTelem() are defined in the header without `inline`, which causes a
+///      multiple-definition link error if the header is included in more than one translation unit.
 int orcaCtrl::checkRecordTimes()
 {
     return telemeter<orcaCtrl>::checkRecordTimes( telem_stdcam() );
