@@ -377,8 +377,8 @@ then uses the existing route parser and propagation path. Node regressions cover
 both directions, explicit and empty overrides, fallback-only configurations,
 invalid selections, parked routing, upstream updates, and configuration errors.
 An app regression verifies the published graph through normal dispatch, including
-all six initial message orders in READY and parked POWEROFF. Documentation will
-show the shorter FPM config with `defaultRoute=out` and its four reflective rows.
+all six initial message orders in READY and parked POWEROFF. The README shows
+the shorter FPM config with `defaultRoute=out` and its four reflective rows.
 
 ### Default-route verification
 
@@ -393,3 +393,6 @@ show the shorter FPM config with `defaultRoute=out` and its four reflective rows
 - Rebuild and install xInstGraph before using `defaultRoute`. No instGraph
   library or controller changes are required. The deployed config was read as
   a reference and has not been modified by this follow-up.
+- Functional implementation, regressions, and engineering notes committed as
+  `5ce6e19b`. The documentation follow-up records fallback precedence, empty
+  routes, selection requirements, and the actual local FPM example.
