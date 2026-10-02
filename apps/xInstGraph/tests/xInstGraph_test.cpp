@@ -1638,6 +1638,103 @@ TEST_CASE( "xInstGraph rejects beamsplitters without internal links", "[xInstGra
     REQUIRE( app.appShutdown() == 0 );
 }
 
+/// Default FPM transmission applies to unlisted names while explicit reflected and blocked positions take precedence.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph publishes default routes with explicit overrides", "[xInstGraph][mapping][defaultRoute]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::appStartup();
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::loadPresetRoutes( *(mx::app::appConfigurator *)nullptr );
+    stdMotionNode::selectedPresetRoute();
+    #endif
+    // clang-format on
+
+    for( const bool powerOff : { false, true } )
+    {
+        std::array<int, 3> order{ 0, 1, 2 };
+        do
+        {
+            CAPTURE( powerOff, order );
+            temporaryDirectory temp;
+            const auto         output = temp.root / "output.drawio";
+            writeBeamsplitterXML( temp.root / "config" / "instgraph_test.drawio" );
+            writeNodeSections( temp.root / "config" / "instgraph_test.conf",
+                               output,
+                               "[lamp]\ntype=pwrOnOff\npwrKey=lamp.power\n"
+                               "[stagebs]\ntype=stdMotion\npresetRoute.out=sci\n"
+                               "[fwfpm]\ntype=stdMotion\npresetPrefix=filter\ndefaultRoute=out\n"
+                               "presetRoute.lyotlg=out,refl\npresetRoute.mirror=refl\npresetRoute.closed=\n" +
+                                   std::string( powerOff ? "parkable=true\n" : "" ) );
+            xInstGraph app;
+            loadFixture( app, temp.root );
+            REQUIRE( app.shutdown() == 0 );
+            REQUIRE( app.config().m_unusedConfigs.at( mx::app::iniFile::makeKey( "fwfpm", "defaultRoute" ) ).used );
+            REQUIRE( app.appStartup() == 0 );
+            REQUIRE( app.enableIndiDispatch() );
+            auto lamp = beamsplitterValue( "lamp", "power", "state", "On" );
+            app.handleDefProperty( lamp );
+            app.handleDefProperty( beamsplitterValue( "stagebs", "fsm", "state", "READY" ) );
+            app.handleDefProperty( beamsplitterPreset( "stagebs", { "out" } ) );
+            requireBeamsplitterGraph( readFile( output ), "fwfpm", {} );
+            const std::array<pcf::IndiProperty, 3> properties{
+                beamsplitterValue( "fwfpm", "fsm", "state", powerOff ? "POWEROFF" : "READY" ),
+                beamsplitterValue( "fwfpm", "parked", "current", "1", pcf::IndiProperty::Number ),
+                beamsplitterPreset( "fwfpm", { "cmc3" } ) };
+            for( const auto index : order )
+            {
+                app.handleDefProperty( properties[index] );
+            }
+            requireBeamsplitterGraph( readFile( output ), "fwfpm", { "out" } );
+            for( const std::string name : { "open", "cmc", "new-filter" } )
+            {
+                app.handleSetProperty( beamsplitterPreset( "fwfpm", { name } ) );
+                requireBeamsplitterGraph( readFile( output ), "fwfpm", { "out" } );
+                REQUIRE( cellTag( readFile( output ), "state:fwfpm" ).find( "value=\"" + name + "\"" ) !=
+                         std::string::npos );
+            }
+            app.handleSetProperty( beamsplitterPreset( "fwfpm", { "lyotlg" } ) );
+            requireBeamsplitterGraph( readFile( output ), "fwfpm", { "out", "refl" } );
+            app.handleSetProperty( beamsplitterPreset( "fwfpm", { "mirror" } ) );
+            requireBeamsplitterGraph( readFile( output ), "fwfpm", { "refl" } );
+            app.handleSetProperty( beamsplitterPreset( "fwfpm", { "closed" } ) );
+            requireBeamsplitterGraph( readFile( output ), "fwfpm", {} );
+            REQUIRE( cellTag( readFile( output ), "state:fwfpm" ).find( "value=\"closed\"" ) != std::string::npos );
+            app.handleSetProperty( beamsplitterPreset( "fwfpm", { "new-filter" } ) );
+            lamp["state"] = "Off";
+            app.handleSetProperty( lamp );
+            requireBeamsplitterGraph( readFile( output ), "fwfpm", { "out" }, "#FFFF00" );
+            lamp["state"] = "On";
+            app.handleSetProperty( lamp );
+            requireBeamsplitterGraph( readFile( output ), "fwfpm", { "out" } );
+            for( const auto &selection : { std::vector<std::string>{},
+                                           std::vector<std::string>{ "none" },
+                                           std::vector<std::string>{ "open", "lyotlg" } } )
+            {
+                app.handleSetProperty( beamsplitterPreset( "fwfpm", selection ) );
+                requireBeamsplitterGraph( readFile( output ), "fwfpm", {} );
+            }
+            app.handleSetProperty( beamsplitterPreset( "fwfpm", { "open" } ) );
+            if( powerOff )
+            {
+                app.handleSetProperty(
+                    beamsplitterValue( "fwfpm", "parked", "current", "0", pcf::IndiProperty::Number ) );
+            }
+            else
+            {
+                app.handleSetProperty( beamsplitterValue( "fwfpm", "fsm", "state", "POWEROFF" ) );
+            }
+            requireBeamsplitterGraph( readFile( output ), "fwfpm", {} );
+            REQUIRE( cellTag( readFile( output ), "fsmstate:fwfpm" ).find( "value=\"POWEROFF\"" ) !=
+                     std::string::npos );
+            REQUIRE( app.appLogic() == 0 );
+            REQUIRE( app.appShutdown() == 0 );
+        } while( std::next_permutation( order.begin(), order.end() ) );
+    }
+}
+
 } // namespace xInstGraphTest
 
 } // namespace libXWCTest

@@ -2169,6 +2169,166 @@ TEST_CASE( "stdMotionNode validates mapped names even for a single branch", "[in
     }
 }
 
+/// Explicit rows override fallback routing, which still requires one usable selection and an available FSM.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode uses defaultRoute for unmatched valid presets",
+           "[instGraph::stdMotionNode][mapping][defaultRoute]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::loadPresetRoutes( *(mx::app::appConfigurator *)nullptr );
+    stdMotionNode::selectedPresetRoute();
+    stdMotionNode::handleSetProperty( pcf::IndiProperty() );
+    #endif
+    // clang-format on
+
+    for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
+    {
+        mappedMotionFixture fixture( dir, { "out", "refl" } );
+        fixture.load( "presetRoute.mirror=refl\npresetRoute.closed=\n",
+                      "defaultRoute= out \nparkable=true\n[other]\ndefaultRoute=missing\n" );
+        auto &node = *fixture.m_node;
+        REQUIRE( fixture.m_config.m_unusedConfigs.at( mx::app::iniFile::makeKey( "fwtelsim", "defaultRoute" ) ).used );
+        REQUIRE_FALSE(
+            fixture.m_config.m_unusedConfigs.at( mx::app::iniFile::makeKey( "other", "defaultRoute" ) ).used );
+        fixture.sources( true );
+        REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
+        requireMappedRoute( node, {} );
+        for( const std::string preset : { "open", "cmc", "new-filter" } )
+        {
+            REQUIRE( node.handleSetProperty( motionPreset( { preset } ) ) == 0 );
+            requireMappedRoute( node, { "out" } );
+            REQUIRE( node.curLabel() == preset );
+        }
+        REQUIRE( node.handleSetProperty( motionPreset( { "mirror" } ) ) == 0 );
+        requireMappedRoute( node, { "refl" } );
+        REQUIRE( node.handleSetProperty( motionPreset( { "closed" } ) ) == 0 );
+        requireMappedRoute( node, {} );
+        REQUIRE( node.curLabel() == "closed" );
+        REQUIRE( node.handleSetProperty( motionPreset( { "open" } ) ) == 0 );
+        fixture.sources( false );
+        requireMappedRoute( node, { "out" }, ingr::putState::waiting );
+        fixture.sources( true );
+        requireMappedRoute( node, { "out" } );
+        REQUIRE( node.handleSetProperty( motionFSM( "POWEROFF" ) ) == 0 );
+        requireMappedRoute( node, {} );
+        REQUIRE( node.handleSetProperty( motionParked( "1" ) ) == 0 );
+        requireMappedRoute( node, { "out" } );
+        REQUIRE( node.handleSetProperty( motionPreset( { "mirror" } ) ) == 0 );
+        requireMappedRoute( node, { "refl" } );
+        REQUIRE( node.handleSetProperty( motionPreset( { "closed" } ) ) == 0 );
+        requireMappedRoute( node, {} );
+        REQUIRE( node.curLabel() == "closed" );
+        REQUIRE( node.handleSetProperty( motionPreset( { "new-filter" } ) ) == 0 );
+        requireMappedRoute( node, { "out" } );
+        REQUIRE( node.handleSetProperty( motionParked( "0" ) ) == 0 );
+        requireMappedRoute( node, {} );
+
+        pcf::IndiProperty wrongType( pcf::IndiProperty::Text );
+        wrongType.setDevice( "fwtelsim" );
+        wrongType.setName( "presetName" );
+        wrongType.add( pcf::IndiElement( "open", pcf::IndiElement::On ) );
+        for( const auto &invalid :
+             { motionPreset( {} ), motionPreset( { "none" } ), motionPreset( { "open", "mirror" } ), wrongType } )
+        {
+            REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
+            REQUIRE( node.handleSetProperty( motionPreset( { "open" } ) ) == 0 );
+            REQUIRE( node.handleSetProperty( invalid ) == 0 );
+            fixture.sources( false );
+            fixture.sources( true );
+            requireMappedRoute( node, {} );
+        }
+        for( const std::string state : { "OPERATING", "HOMING", "NOTHOMED", "NOTCONNECTED", "ERROR" } )
+        {
+            REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
+            REQUIRE( node.handleSetProperty( motionPreset( { "open" } ) ) == 0 );
+            REQUIRE( node.handleSetProperty( motionFSM( state ) ) == 0 );
+            fixture.sources( false );
+            fixture.sources( true );
+            requireMappedRoute( node, {} );
+        }
+    }
+}
+
+/// A configured fallback alone enables mapping, including an intentionally empty fallback.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode supports defaultRoute without explicit rows",
+           "[instGraph::stdMotionNode][mapping][defaultRoute]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::presetRoutingConfigured();
+    stdMotionNode::loadConfig( *(mx::app::appConfigurator *)nullptr );
+    stdMotionNode::selectedPresetRoute();
+    #endif
+    // clang-format on
+
+    for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
+        for( const bool empty : { false, true } )
+        {
+            mappedMotionFixture fixture( dir, { "out", "refl" } );
+            fixture.load( "", std::string( "defaultRoute=" ) + ( empty ? "" : "out" ) + "\nparkable=true\n" );
+            auto &node = *fixture.m_node;
+            fixture.sources( true );
+            requireMappedRoute( node, {} );
+            REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
+            REQUIRE( node.handleSetProperty( motionPreset( { "anything" } ) ) == 0 );
+            const auto selected = empty ? std::set<std::string>{} : std::set<std::string>{ "out" };
+            requireMappedRoute( node, selected );
+            REQUIRE( node.curLabel() == "anything" );
+            REQUIRE( node.handleSetProperty( motionParked( "1" ) ) == 0 );
+            REQUIRE( node.handleSetProperty( motionFSM( "POWEROFF" ) ) == 0 );
+            requireMappedRoute( node, selected );
+            REQUIRE( node.curLabel() == "anything" );
+            REQUIRE( node.handleSetProperty( motionPreset( { "none" } ) ) == 0 );
+            requireMappedRoute( node, {} );
+            REQUIRE( node.curLabel() == "off" );
+        }
+}
+
+/// Default routes use the same put, topology, and conflicting-option validation as explicit routes.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode rejects invalid defaultRoute configuration",
+           "[instGraph::stdMotionNode][mapping][defaultRoute]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::loadPresetRoutes( *(mx::app::appConfigurator *)nullptr );
+    #endif
+    // clang-format on
+
+    for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
+    {
+        for( const std::string value : { "missing", "wfs,,sci", "wfs,", "wfs,wfs" } )
+        {
+            mappedMotionFixture fixture( dir, { "wfs", "sci" } );
+            REQUIRE_THROWS_WITH( fixture.load( "", "defaultRoute=" + value + "\n" ),
+                                 Catch::Matchers::Contains( "row 'defaultRoute'" ) );
+        }
+        for( const std::string option : { "presetPutName",
+                                          "alwaysOn",
+                                          "noAutoOn",
+                                          "trackingReqKey",
+                                          "trackingReqElement",
+                                          "trackerKey",
+                                          "trackerElement" } )
+        {
+            mappedMotionFixture fixture( dir, { "wfs", "sci" } );
+            REQUIRE_THROWS_WITH( fixture.load( "", "defaultRoute=wfs\n" + option + "=\n" ),
+                                 Catch::Matchers::Contains( "cannot be combined with '" + option + "'" ) );
+        }
+        mappedMotionFixture missingLink( dir, { "wfs", "sci" }, false );
+        REQUIRE_THROWS_WITH( missingLink.load( "", "defaultRoute=wfs\n" ),
+                             Catch::Matchers::Contains( "requires internal link" ) );
+        mappedMotionFixture missingCommon( dir, { "wfs", "sci" }, true, 0 );
+        REQUIRE_THROWS_WITH( missingCommon.load( "", "defaultRoute=wfs\n" ),
+                             Catch::Matchers::Contains( "exactly one opposite-side put" ) );
+    }
+}
+
 } // namespace xInstGraphTest
 
 } // namespace libXWCTest

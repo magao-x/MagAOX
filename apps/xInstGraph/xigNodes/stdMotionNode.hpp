@@ -9,6 +9,7 @@
 #define stdMotionNode_hpp
 
 #include <map>
+#include <optional>
 #include <sstream>
 
 #include "fsmNode.hpp"
@@ -25,9 +26,10 @@
  * With `parkable=true`, a Number property `<device>.parked` with nonzero `current` makes a preset usable in `POWEROFF`.
  * Parking support defaults false; only enabled stages subscribe to this property.
  * The true FSM is preserved. This retained-position path takes priority over tracking flags and requires one
- * selected name, matching a route row in mapping mode or a configured put for legacy multi-put selection.
+ * selected name, with an explicit or default route in mapping mode, or a matching put for legacy multi-put selection.
  *
  * Optional `presetRoute.<name>` rows map a published preset to a set of puts on `presetDir`.
+ * `defaultRoute` supplies the fallback for valid names without a row; explicit rows, including empty ones, win.
  * Mapped nodes own all puts, require one common opposite-side put and internal links for every branch,
  * and disable excluded paths so upstream propagation cannot activate them. Empty rows block all paths.
  * Mapping cannot be combined with legacy put-selection or tracking options.
@@ -65,8 +67,11 @@ class stdMotionNode : public fsmNode
     /// Legacy selected put names, or every selected-side graph put in mapping mode.
     std::vector<std::string> m_presetPutName{ "out" };
 
-    /// Explicit preset-to-put sets; a nonempty table enables mapping, and an empty row blocks all paths.
+    /// Explicit preset-to-put sets; rows override the fallback, and an empty row blocks all paths.
     std::map<std::string, std::set<std::string>> m_presetRoutes;
+
+    /// Configured fallback for unmatched valid names; presence enables mapping even when the set is empty.
+    std::optional<std::set<std::string>> m_defaultRoute;
 
     /// Side selected by the preset switch; output is the default.
     /** Explicit route rows can permit multiple puts together. With legacy multi-put selection
@@ -177,13 +182,16 @@ class stdMotionNode : public fsmNode
     /// Whether the latest named selection identifies a usable parked route.
     bool parkedPresetValid() const;
 
-    /// Find a configured route for one valid selected preset; nullptr means the selection is unusable.
+    /// Whether explicit rows or a configured fallback enable mapping mode.
+    bool presetRoutingConfigured() const;
+
+    /// Find an explicit or default route for one valid selected preset; nullptr means no usable route.
     const std::set<std::string> *selectedPresetRoute() const;
 
     /// Apply a mapped enablement mask and recalculate linked states; an empty set blocks every put.
     void applyPresetRoute( const std::set<std::string> &puts /**< [in] selected-side puts permitted by this route */ );
 
-    /// Discover and validate explicit route rows, topology, and incompatible legacy options.
+    /// Discover and validate route rows, the optional fallback, topology, and incompatible legacy options.
     void loadPresetRoutes( mx::app::appConfigurator &config /**< [in] this node's loaded configuration */ );
 
     /// Decide whether to apply a known preset route or active tracking from the cached properties.
@@ -444,7 +452,7 @@ inline bool stdMotionNode::parkedPresetValid() const
     {
         return false;
     }
-    if( !m_presetRoutes.empty() )
+    if( presetRoutingConfigured() )
     {
         return selectedPresetRoute() != nullptr;
     }
@@ -462,6 +470,11 @@ inline bool stdMotionNode::parkedPresetValid() const
     return false;
 }
 
+inline bool stdMotionNode::presetRoutingConfigured() const
+{
+    return !m_presetRoutes.empty() || m_defaultRoute.has_value();
+}
+
 inline const std::set<std::string> *stdMotionNode::selectedPresetRoute() const
 {
     if( !m_presetSelectionValid || m_curVal.empty() || m_curVal == "none" )
@@ -469,7 +482,11 @@ inline const std::set<std::string> *stdMotionNode::selectedPresetRoute() const
         return nullptr;
     }
     const auto route = m_presetRoutes.find( m_curVal );
-    return route == m_presetRoutes.end() ? nullptr : &route->second;
+    if( route != m_presetRoutes.end() )
+    {
+        return &route->second;
+    }
+    return m_defaultRoute ? &*m_defaultRoute : nullptr;
 }
 
 inline void stdMotionNode::applyPresetRoute( const std::set<std::string> &puts )
@@ -516,7 +533,7 @@ inline void stdMotionNode::applyPresetRoute( const std::set<std::string> &puts )
 
 inline bool stdMotionNode::putsShouldBeOn() const
 {
-    if( !m_presetRoutes.empty() )
+    if( presetRoutingConfigured() )
     {
         return selectedPresetRoute() != nullptr && ( m_state == MagAOX::app::stateCodes::READY || parkedPowerOff() );
     }
@@ -545,7 +562,7 @@ inline void stdMotionNode::togglePutsOn()
         return;
     }
 
-    if( !m_presetRoutes.empty() )
+    if( presetRoutingConfigured() )
     {
         applyPresetRoute( *selectedPresetRoute() );
         m_curLabel = m_curVal;
@@ -672,7 +689,7 @@ inline void stdMotionNode::togglePutsOff()
         return;
     }
 
-    if( !m_presetRoutes.empty() )
+    if( presetRoutingConfigured() )
     {
         applyPresetRoute( {} );
         m_curLabel = "off";
@@ -732,8 +749,9 @@ inline void stdMotionNode::loadPresetRoutes( mx::app::appConfigurator &config )
     std::vector<std::string> rowKeys;
     for( const auto &entry : config.m_unusedConfigs )
     {
-        if( entry.second.section == name() && entry.second.keyword.compare( 0, prefix.size(), prefix ) == 0 &&
-            entry.second.set )
+        if( entry.second.section == name() && entry.second.set &&
+            ( entry.second.keyword == "defaultRoute" ||
+              entry.second.keyword.compare( 0, prefix.size(), prefix ) == 0 ) )
         {
             rowKeys.push_back( entry.second.keyword );
         }
@@ -743,7 +761,7 @@ inline void stdMotionNode::loadPresetRoutes( mx::app::appConfigurator &config )
         return;
     }
 
-    const std::string context = "stdMotionNode::loadConfig: presetRoute in [" + name() + "] ";
+    const std::string context = "stdMotionNode::loadConfig: preset routing in [" + name() + "] ";
     for( const auto &option : { "presetPutName",
                                 "alwaysOn",
                                 "noAutoOn",
@@ -782,11 +800,14 @@ inline void stdMotionNode::loadPresetRoutes( mx::app::appConfigurator &config )
     }
 
     std::map<std::string, std::set<std::string>> routes;
+    std::optional<std::set<std::string>>         defaultRoute;
     for( const auto &key : rowKeys )
     {
-        const std::string preset = key.substr( prefix.size() );
-        const std::string row    = context + "row '" + key + "' ";
-        if( preset.empty() || preset.find_first_not_of( " \t\r\n" ) == std::string::npos || preset == "none" )
+        const bool        isDefault = key == "defaultRoute";
+        const std::string preset    = isDefault ? std::string{} : key.substr( prefix.size() );
+        const std::string row       = context + "row '" + key + "' ";
+        if( !isDefault &&
+            ( preset.empty() || preset.find_first_not_of( " \t\r\n" ) == std::string::npos || preset == "none" ) )
         {
             throw std::runtime_error( row + "has an empty or reserved preset name" );
         }
@@ -795,7 +816,7 @@ inline void stdMotionNode::loadPresetRoutes( mx::app::appConfigurator &config )
         {
             throw std::runtime_error( row + "cannot be read" );
         }
-        auto &route = routes[preset];
+        auto &route = isDefault ? defaultRoute.emplace() : routes[preset];
         for( auto put : puts )
         {
             const auto first = put.find_first_not_of( " \t\r\n" );
@@ -815,6 +836,7 @@ inline void stdMotionNode::loadPresetRoutes( mx::app::appConfigurator &config )
         }
     }
     m_presetRoutes = std::move( routes );
+    m_defaultRoute = std::move( defaultRoute );
 }
 
 inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
@@ -859,7 +881,7 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
 
     loadPresetRoutes( config );
     std::vector<std::string> prePutName{ m_presetDir == ingr::ioDir::input ? "in" : "out" };
-    if( !m_presetRoutes.empty() )
+    if( presetRoutingConfigured() )
     {
         prePutName.clear();
         const auto &puts = m_presetDir == ingr::ioDir::input ? m_node->inputs() : m_node->outputs();
@@ -997,7 +1019,7 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
     trackingReqElement( trackReqEl );
     trackerKey( trackKey );
     trackerElement( trackEl );
-    if( !m_presetRoutes.empty() )
+    if( presetRoutingConfigured() )
     {
         togglePutsOff();
     }

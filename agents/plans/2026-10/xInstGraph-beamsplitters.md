@@ -33,8 +33,9 @@ Please consider this problem and propose possible solutions. Do not alter this p
   `stagebs.conf`, and `fwfpm.conf` as configuration examples. These are a local
   snapshot, not confirmation of the configuration installed on exao1.
 - The user approved the recommended configuration contract and implementation
-  plan on 2026-10-01. Implementation and software verification are complete;
-  deployed configuration/graph changes and hardware checks remain pending.
+  plan on 2026-10-01, then confirmed the installed mapped routing works after
+  updating configuration. The subsequent default-route extension and its
+  verification are documented below.
 
 ## Current behavior and limitations
 
@@ -345,3 +346,50 @@ and no app test suite or hardware check was run until implementation below.
   `a2130ef4`. The documentation follow-up describes the route schema, topology
   requirements, conflicting settings, parking interaction, and deployment
   examples in the app README.
+
+## Follow-up: default route (2026-10-01)
+
+The user confirmed mapped routing works after updating the deployed config,
+including changing stagebs from static to stdMotion. The local FPM configuration
+now sends `lyotlg`, `lyotsm`, `knifemask`, and `knifemaskZ` to `out,refl`, and
+other listed filters to `out`. These observed config choices supersede the
+initial prompt's illustrative FPM table for deployment examples; the prompt
+above remains unchanged.
+
+The user requested `defaultRoute` so only exceptions require explicit rows.
+This extends the initial strict unmatched-name behavior as follows:
+
+- `defaultRoute` accepts the same selected-side put vector and validation as an
+  explicit row. Its presence enables mapping even when empty or when no explicit
+  rows exist. It retains the same topology, internal-link, and conflicting-option
+  checks.
+- A matching `presetRoute.<name>` wins, including an empty row that blocks all
+  paths. Only a valid single selected nonempty Switch name other than `none`
+  can use the fallback. The published position label remains the actual name.
+- Missing, ambiguous, wrong-type, or `none` selections and unavailable FSM states
+  remain blocked. READY and opted-in, affirmative parked POWEROFF use the same
+  lookup, preserving the reported FSM and incoming-light propagation.
+- Without `defaultRoute`, a name with no row remains blocked. Nodes configured
+  with neither rows nor a fallback retain their legacy behavior.
+
+Implementation adds optional fallback state and a shared mapping-presence check,
+then uses the existing route parser and propagation path. Node regressions cover
+both directions, explicit and empty overrides, fallback-only configurations,
+invalid selections, parked routing, upstream updates, and configuration errors.
+An app regression verifies the published graph through normal dispatch, including
+all six initial message orders in READY and parked POWEROFF. Documentation will
+show the shorter FPM config with `defaultRoute=out` and its four reflective rows.
+
+### Default-route verification
+
+- Catch2 passed: stdMotionNode 6102 assertions / 18 cases, xInstGraph 2224 / 22,
+  totaling 8326 assertions / 40 cases. Existing legacy motion, tracking, parking,
+  and publication regressions remain passing.
+- `make -C apps/xInstGraph -j1` completed successfully. The changed-file
+  documentation pass, `clang-format --dry-run --Werror`, and `git diff --check`
+  passed.
+- Focused Doxygen generation emitted no warnings for changed C++ files. All four
+  new test cases have verified HTML links from the real routing and app APIs.
+- Rebuild and install xInstGraph before using `defaultRoute`. No instGraph
+  library or controller changes are required. The deployed config was read as
+  a reference and has not been modified by this follow-up.
