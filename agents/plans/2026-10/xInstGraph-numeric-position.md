@@ -83,3 +83,6 @@ following stageGUI and cameraStatus. Preserve the on/off logic for puts.
   property-handler, and app dispatch APIs.
 - Only xInstGraph requires rebuilding and installation. No controller, library,
   or deployed configuration changes were made for this upgrade.
+- Functional implementation, regressions, and engineering record committed as
+  `18ff352e`. The documentation follow-up describes numeric-source selection,
+  formatting, availability, caching, and its independence from routing.

@@ -132,6 +132,33 @@ graph node; for example, `[fwfpm]` with `presetDir=input` selects its input `in`
 another setting. The tracking request and status key/element pairs must be
 supplied together.
 
+#### Numerical position display
+
+When the preset property has no usable selection, stdMotion displays the latest
+numerical `current` value with four decimal places. A usable selection is exactly
+one selected, nonempty Switch element name other than `none`. Missing, `none`,
+wrong-type, or ambiguous selections can use the numerical fallback.
+
+With `presetPrefix=filter`, the handler subscribes to `<device>.filter.current`;
+other prefixes use `<device>.position.current`. No additional setting is needed.
+The value is cached even while a preset or tracking label is displayed, so the
+latest position is available immediately when the selection clears. Target-only
+updates do not change it. Malformed or wrong-type current values clear the numeric
+cache; no position is assumed before valid telemetry arrives.
+
+The fallback is displayed in READY, OPERATING, HOMING, CONFIGURING, NOTHOMED,
+and affirmative parked POWEROFF with `parkable=true`. Other states keep the
+existing unavailable display. Tracking and not-tracking labels retain priority;
+the FSM label always reports the controller's actual state.
+
+Numerical telemetry updates the node's position label and legacy single-put
+label only. Multi-put and mapped port labels keep their names. These updates
+never change put states, enablement, or preset routing, and never infer a preset
+from a number. The number uses the controller's published units, which can be a
+filter index. A valid selected name without a mapped route retains the existing
+blocked-route display. Property deletion and connection loss share the existing
+handler-cache freshness limitation.
+
 #### Mapped preset routes (beamsplitters)
 
 Add `presetRoute.<name>` rows to map each published preset to the set of puts
@@ -187,8 +214,10 @@ all puts stay off.
 Routing requires READY, or affirmative parking in POWEROFF with `parkable=true`.
 The fallback applies only to exactly one selected, nonempty Switch element
 name other than `none`. `none`, a missing or ambiguous selection, a wrong
-property type, or an unavailable FSM state still blocks all puts and shows
-`---` as the position status. A name without an explicit row also blocks all
+property type, or an unavailable FSM state still blocks all puts. With no
+usable selection, the position status can show the numerical fallback described
+above; otherwise an unavailable route shows `---`. A name without an explicit
+row also blocks all
 puts when `defaultRoute` is absent. The FSM label always preserves the
 reported state.
 
