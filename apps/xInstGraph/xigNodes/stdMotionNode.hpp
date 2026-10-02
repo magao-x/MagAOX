@@ -1,5 +1,6 @@
 /** \file stdMotionNode.hpp
- * \brief The MagAO-X Instrument Graph stdMotionNode header file
+ * \brief Motion-stage preset and tracking routing for the MagAO-X instrument graph.
+ * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup instGraph_files
  */
@@ -7,11 +8,15 @@
 #ifndef stdMotionNode_hpp
 #define stdMotionNode_hpp
 
+#include <iomanip>
+#include <map>
+#include <optional>
+#include <sstream>
+
 #include "fsmNode.hpp"
 
-///
+/// Motion stage that maps preset and tracking state to graph puts.
 /**
- *
  * The key assumption of this node is that it should be in a valid, not-`none`, preset position
  * for its ioputs to be `on`.  It also supports triggering an alternate `on` state, which is used for
  * stages which have a continuous tracking mode (k-mirror and ADC).
@@ -19,33 +24,78 @@
  * The preset is specified by an INDI property with signature `<device>.<presetPrefix>Name` where device
  * and presetPrefix are part of the configuration.  This INDI property is a switch vector.
  *
+ * With `parkable=true`, a Number property `<device>.parked` with nonzero `current` makes a preset usable in
+ * `POWEROFF`, `POWERON`, `NOTCONNECTED`, and `CONNECTED`, preserving routing through the power-on sequence.
+ * Parking support defaults false; only enabled stages subscribe to this property.
+ * The true FSM is preserved. This retained-position path takes priority over tracking flags and requires one
+ * selected name, with an explicit or default route in mapping mode, or a matching put for legacy multi-put selection.
+ *
+ * Optional `presetRoute.<name>` rows map a published preset to a set of puts on `presetDir`.
+ * `defaultRoute` supplies the fallback for valid names without a row; explicit rows, including empty ones, win.
+ * Mapped nodes own all puts, require one common opposite-side put and internal links for every branch,
+ * and disable excluded paths so upstream propagation cannot activate them. Empty rows block all paths.
+ * Mapping cannot be combined with legacy put-selection or tracking options.
+ *
+ * When no usable preset is selected, the display can show the numerical `current` position with four decimals.
+ * `presetPrefix=filter` uses `<device>.filter`; other prefixes use `<device>.position`.
+ * Position telemetry changes labels only, never put states or route enablement. Tracking labels retain priority.
+ * Numeric display includes motion states and the same opted-in parked startup states.
+ *
  * The device and prefix can only be set once.
  */
 class stdMotionNode : public fsmNode
 {
 
   protected:
-    /// The prefix for preset naes.  Usually either "preset" or "filter", to which "Name" is appended.
+    /// The prefix for preset names.  Usually either "preset" or "filter", to which "Name" is appended.
     std::string m_presetPrefix;
 
     /// The INDI key (device.property) for the presets.  This is, say, `fwpupil.filterName`.  It is set automatically.
     std::string m_presetKey;
 
-    /// The current value of the preset property.  Corresponds to the element name of the selected preset.
+    /// Latest selected preset name, cached even while tracking; parked routing also checks selection validity.
     std::string m_curVal;
 
-    /// The current value of the put label.
+    /// Whether the latest preset property is a Switch vector with exactly one selected name.
+    bool m_presetSelectionValid{ false };
+
+    /// The device-local numeric property used for display, chosen from the configured preset prefix.
+    std::string m_positionKey;
+
+    /// Latest valid numerical current position, cached independently of preset selection and routing.
+    std::optional<double> m_position;
+
+    /// Whether the graph currently shows the numeric fallback, so invalid telemetry can clear it.
+    bool m_numericLabelDisplayed{ false };
+
+    /// Configuration opt-in for subscribing to and using the stage's parked state.
+    bool m_parkable{ false };
+
+    /// The INDI key for the optional device-local Number property parked.current.
+    std::string m_parkedKey;
+
+    /// Affirmative parking reported by the stage; false until a valid value is received.
+    bool m_parked{ false };
+
+    /// Latest position or tracking label applied to the graph.
     std::string m_curLabel;
 
+    /// Legacy selected put names, or every selected-side graph put in mapping mode.
     std::vector<std::string> m_presetPutName{ "out" };
 
-    /// This sets whether the multi-put selector is on the input or the output (default)
-    /** If this is a multi-put node (m_presetPutName.size() > 1) then the value of the preset switch
-     * controls which input or output is on, with the others off.
+    /// Explicit preset-to-put sets; rows override the fallback, and an empty row blocks all paths.
+    std::map<std::string, std::set<std::string>> m_presetRoutes;
+
+    /// Configured fallback for unmatched valid names; presence enables mapping even when the set is empty.
+    std::optional<std::set<std::string>> m_defaultRoute;
+
+    /// Side selected by the preset switch; output is the default.
+    /** Explicit route rows can permit multiple puts together. With legacy multi-put selection
+     * (m_presetPutName.size() > 1), the preset name chooses one put, alongside any alwaysOn puts.
      */
     ingr::ioDir m_presetDir{ ingr::ioDir::output };
 
-    /// Contains the names of any puts which are always on if any are on.
+    /// Puts kept on alongside a usable preset route and cleared when the route is inactive.
     std::set<std::string> m_alwaysOn;
 
     /// Contains the names of any puts which are not automatically turned on if they are off.
@@ -70,20 +120,20 @@ class stdMotionNode : public fsmNode
     bool m_tracking{ false };
 
   public:
-    /// Only c'tor.  Must be constructed with node name and a parent graph.
-    stdMotionNode( const std::string  &name, /** [in] the name of this node*/
-                   ingr::instGraphXML *parentGraph /** [in] the graph which this node belongs to*/ );
+    /// Construct a motion stage for an existing graph node.
+    stdMotionNode( const std::string  &name, /**< [in] graph node name */
+                   ingr::instGraphXML *parentGraph /**< [in] parent graph */ );
 
     /// Set the device name.  This can only be done once.
-    /**
-     * \throws
-     */
-    virtual void device( const std::string &dev /**< [in] */ );
+    /** \throws std::runtime_error if a different or empty device is supplied. */
+    virtual void device( const std::string &dev /**< [in] INDI device name */ );
 
     using fsmNode::device;
 
-    virtual void presetPrefix( const std::string &pp /**< [in] */ );
+    /// Set the preset property prefix.
+    virtual void presetPrefix( const std::string &pp /**< [in] property prefix */ );
 
+    /// Get the preset property prefix.
     const std::string &presetPrefix();
 
     /// Get the current label text
@@ -92,39 +142,82 @@ class stdMotionNode : public fsmNode
      */
     const std::string &curLabel();
 
-    void presetPutName( const std::vector<std::string> &ppp /**< [in] */ );
+    /// Set the put names controlled by presets.
+    void presetPutName( const std::vector<std::string> &ppp /**< [in] put names */ );
 
+    /// Get the put names controlled by presets.
     const std::vector<std::string> &presetPutName();
 
-    void presetDir( const ingr::ioDir &dir /**< [in] */ );
+    /// Set which side of the node has the selected puts.
+    void presetDir( const ingr::ioDir &dir /**< [in] put direction */ );
 
+    /// Get which side of the node has the selected puts.
     const ingr::ioDir &presetDir();
 
-    void trackingReqKey( const std::string &tk /**< [in] */ );
+    /// Set the tracking request property key.
+    void trackingReqKey( const std::string &tk /**< [in] device.property key */ );
 
+    /// Get the tracking request property key.
     const std::string &trackingReqKey();
 
-    void trackingReqElement( const std::string &te /**< [in] */ );
+    /// Set the tracking request element name.
+    void trackingReqElement( const std::string &te /**< [in] element name */ );
 
+    /// Get the tracking request element name.
     const std::string &trackingReqElement();
 
-    void trackerKey( const std::string &tk /**< [in] */ );
+    /// Set the tracking status property key.
+    void trackerKey( const std::string &tk /**< [in] device.property key */ );
 
+    /// Get the tracking status property key.
     const std::string &trackerKey();
 
-    void trackerElement( const std::string &te /**< [in] */ );
+    /// Set the tracking status element name.
+    void trackerElement( const std::string &te /**< [in] element name */ );
 
+    /// Get the tracking status element name.
     const std::string &trackerElement();
 
-    /// INDI SetProperty callback
+    /// Cache stage telemetry, updating numeric labels independently of preset and tracking routing.
     virtual int handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
 
+    /// Apply the selected preset or tracking state to the node puts.
     virtual void togglePutsOn();
 
+    /// Clear all puts, disable mapped paths, and report an inactive position or tracking label.
     virtual void togglePutsOff();
 
+    /// Load and validate this motion stage's configuration.
     void loadConfig(
         mx::app::appConfigurator &config /**< [in] the application configurator loaded with this node's options*/ );
+
+  protected:
+    /// Refresh the numerical fallback without changing put states or enablement.
+    void updatePositionLabel();
+
+    /// Whether the FSM belongs to the four states that permit a confirmed parked position.
+    bool parkedFSMState() const;
+
+    /// Whether affirmative parking permits the retained position in a supported power/startup FSM state.
+    bool parkedState() const;
+
+    /// Whether the latest named selection identifies a usable parked route.
+    bool parkedPresetValid() const;
+
+    /// Whether explicit rows or a configured fallback enable mapping mode.
+    bool presetRoutingConfigured() const;
+
+    /// Find an explicit or default route for one valid selected preset; nullptr means no usable route.
+    const std::set<std::string> *selectedPresetRoute() const;
+
+    /// Apply a mapped enablement mask and recalculate linked states; an empty set blocks every put.
+    void applyPresetRoute( const std::set<std::string> &puts /**< [in] selected-side puts permitted by this route */ );
+
+    /// Discover and validate route rows, the optional fallback, topology, and incompatible legacy options.
+    void loadPresetRoutes( mx::app::appConfigurator &config /**< [in] this node's loaded configuration */ );
+
+    /// Decide whether to apply a known preset route or active tracking from the cached properties.
+    bool putsShouldBeOn() const;
 };
 
 inline stdMotionNode::stdMotionNode( const std::string &name, ingr::instGraphXML *parentGraph )
@@ -137,11 +230,19 @@ inline void stdMotionNode::device( const std::string &dev )
     // This will enforce the one-time only rule
     fsmNode::device( dev );
 
+    m_parkedKey = m_device + ".parked";
+    if( m_parkable )
+    {
+        key( m_parkedKey );
+    }
+
     // If presetPrefix is set, then we can make the key
     if( m_presetPrefix != "" )
     {
         m_presetKey = m_device + "." + m_presetPrefix + "Name";
         key( m_presetKey );
+        m_positionKey = m_device + "." + ( m_presetPrefix == "filter" ? "filter" : "position" );
+        key( m_positionKey );
     }
 }
 
@@ -165,6 +266,8 @@ inline void stdMotionNode::presetPrefix( const std::string &pp )
     {
         m_presetKey = m_device + "." + m_presetPrefix + "Name";
         key( m_presetKey );
+        m_positionKey = m_device + "." + ( m_presetPrefix == "filter" ? "filter" : "position" );
+        key( m_positionKey );
     }
 }
 
@@ -250,6 +353,27 @@ inline const std::string &stdMotionNode::trackerElement()
 
 inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
+    if( ipRecv.createUniqueKey() == m_positionKey )
+    {
+        // Target-only updates do not replace a measured current position.
+        if( !ipRecv.find( "current" ) )
+        {
+            return 0;
+        }
+        m_position.reset();
+        if( ipRecv.getType() == pcf::IndiProperty::Number )
+        {
+            std::istringstream current( ipRecv["current"].get() );
+            double             value = 0;
+            if( current >> value && ( current >> std::ws ).eof() )
+            {
+                m_position = value;
+            }
+        }
+        updatePositionLabel();
+        return 0;
+    }
+
     int rv = fsmNode::handleSetProperty( ipRecv );
 
     if( rv < 0 )
@@ -303,66 +427,221 @@ inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
             }
         }
     }
+    else if( m_parkable && ipRecv.createUniqueKey() == m_parkedKey )
+    {
+        bool parked = false;
+        if( ipRecv.getType() == pcf::IndiProperty::Number && ipRecv.find( "current" ) )
+        {
+            // IndiElement::get<T>() does not check conversion success. Parse the entire numeric value.
+            std::istringstream current( ipRecv["current"].get() );
+            double             value = 0;
+            if( current >> value )
+            {
+                parked = ( current >> std::ws ).eof() && value != 0;
+            }
+        }
+        if( m_parked != parked )
+        {
+            ++m_changes;
+            m_parked = parked;
+        }
+    }
     else if( ipRecv.createUniqueKey() == m_presetKey )
     {
         if( m_node != nullptr )
         {
-            bool nothingIsOn = true;
-            for( auto &&it : ipRecv.getElements() )
+            std::string currentValue;
+            size_t      selected = 0;
+            for( const auto &element : ipRecv.getElements() )
             {
-                if( it.second.getSwitchState() == pcf::IndiElement::On )
+                if( element.second.getSwitchState() == pcf::IndiElement::On )
                 {
-                    if( m_curVal != it.second.getName() && !m_tracking ) // we only update if not tracking
-                    {
-                        ++m_changes;
-                    }
-
-                    m_curVal    = it.second.getName();
-                    nothingIsOn = false;
+                    currentValue = element.second.getName();
+                    ++selected;
                 }
             }
 
-            if( nothingIsOn )
+            bool selectionValid = ipRecv.getType() == pcf::IndiProperty::Switch && selected == 1;
+            if( ( m_curVal != currentValue || m_presetSelectionValid != selectionValid ) &&
+                ( !m_tracking || parkedState() ) )
             {
-                if( m_curVal != "" && !m_tracking ) // we only update if not tracking
-                {
-                    ++m_changes;
-                }
-                m_curVal = "";
+                ++m_changes;
             }
+            m_curVal               = currentValue;
+            m_presetSelectionValid = selectionValid;
         }
     }
 
     if( m_changes > 0 )
     {
         m_changes = 0;
-
-        if( m_trackingReq )
+        if( m_numericLabelDisplayed )
         {
-            if( m_tracking &&
-                ( m_state == MagAOX::app::stateCodes::READY || m_state == MagAOX::app::stateCodes::OPERATING ) )
-            {
-                togglePutsOn();
-            }
-            else
-            { // Either we aren't tracking or we aren't READY || OPERATING
-                togglePutsOff();
-            }
+            m_curLabel              = "off";
+            m_numericLabelDisplayed = false;
+        }
+        if( putsShouldBeOn() )
+        {
+            togglePutsOn();
         }
         else
         {
-            if( m_state != MagAOX::app::stateCodes::READY || m_tracking || m_curVal == "none" || m_curVal == "" )
-            {
-                togglePutsOff();
-            }
-            else
-            {
-                togglePutsOn();
-            }
+            togglePutsOff();
         }
     }
 
+    updatePositionLabel();
     return 0;
+}
+
+inline void stdMotionNode::updatePositionLabel()
+{
+    if( m_node == nullptr || !m_parentGraph || !m_node->auxDataValid() )
+    {
+        return;
+    }
+    const bool namedPreset   = m_presetSelectionValid && !m_curVal.empty() && m_curVal != "none";
+    const bool trackingLabel = !presetRoutingConfigured() && !parkedState() &&
+                               m_state != MagAOX::app::stateCodes::POWEROFF && ( m_tracking || m_trackingReq );
+    const bool available = m_state == MagAOX::app::stateCodes::READY || m_state == MagAOX::app::stateCodes::OPERATING ||
+                           m_state == MagAOX::app::stateCodes::HOMING ||
+                           m_state == MagAOX::app::stateCodes::CONFIGURING ||
+                           m_state == MagAOX::app::stateCodes::NOTHOMED || parkedState();
+    const bool showPosition = !namedPreset && !trackingLabel && available && m_position.has_value();
+    if( !showPosition && !m_numericLabelDisplayed )
+    {
+        return;
+    }
+
+    std::string label = "off";
+    if( showPosition )
+    {
+        std::ostringstream position;
+        position << std::fixed << std::setprecision( 4 ) << *m_position;
+        label = position.str();
+    }
+    m_numericLabelDisplayed = showPosition;
+    m_curLabel              = label;
+    m_parentGraph->valueExtra( name(), "state", showPosition ? label : "---" );
+    if( !presetRoutingConfigured() && m_presetPutName.size() == 1 )
+    {
+        m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, label );
+    }
+    m_parentGraph->stateChange();
+}
+
+inline bool stdMotionNode::parkedFSMState() const
+{
+    return m_state == MagAOX::app::stateCodes::POWEROFF || m_state == MagAOX::app::stateCodes::POWERON ||
+           m_state == MagAOX::app::stateCodes::NOTCONNECTED || m_state == MagAOX::app::stateCodes::CONNECTED;
+}
+
+inline bool stdMotionNode::parkedState() const
+{
+    return m_parkable && m_parked && parkedFSMState();
+}
+
+inline bool stdMotionNode::parkedPresetValid() const
+{
+    if( !m_presetSelectionValid || m_curVal.empty() || m_curVal == "none" )
+    {
+        return false;
+    }
+    if( presetRoutingConfigured() )
+    {
+        return selectedPresetRoute() != nullptr;
+    }
+    if( m_presetPutName.size() == 1 )
+    {
+        return true;
+    }
+    for( const auto &put : m_presetPutName )
+    {
+        if( put == m_curVal )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline bool stdMotionNode::presetRoutingConfigured() const
+{
+    return !m_presetRoutes.empty() || m_defaultRoute.has_value();
+}
+
+inline const std::set<std::string> *stdMotionNode::selectedPresetRoute() const
+{
+    if( !m_presetSelectionValid || m_curVal.empty() || m_curVal == "none" )
+    {
+        return nullptr;
+    }
+    const auto route = m_presetRoutes.find( m_curVal );
+    if( route != m_presetRoutes.end() )
+    {
+        return &route->second;
+    }
+    return m_defaultRoute ? &*m_defaultRoute : nullptr;
+}
+
+inline void stdMotionNode::applyPresetRoute( const std::set<std::string> &puts )
+{
+    // Install every enablement flag before changing states that can propagate through links.
+    for( const auto &put : m_node->inputs() )
+    {
+        put.second->enabled( m_presetDir == ingr::ioDir::input ? puts.count( put.first ) != 0 : !puts.empty() );
+    }
+    for( const auto &put : m_node->outputs() )
+    {
+        put.second->enabled( m_presetDir == ingr::ioDir::output ? puts.count( put.first ) != 0 : !puts.empty() );
+    }
+    for( const auto &put : m_node->inputs() )
+    {
+        if( !put.second->enabled() )
+        {
+            put.second->state( ingr::putState::off );
+        }
+    }
+    for( const auto &put : m_node->outputs() )
+    {
+        if( !put.second->enabled() )
+        {
+            put.second->state( ingr::putState::off );
+        }
+    }
+    for( const auto &put : m_node->inputs() )
+    {
+        if( put.second->enabled() )
+        {
+            put.second->state( ingr::putState::on );
+        }
+    }
+    for( const auto &put : m_node->outputs() )
+    {
+        if( put.second->enabled() )
+        {
+            // Configuration guarantees an internal link, so this preserves the upstream waiting state.
+            put.second->state( ingr::putState::on );
+        }
+    }
+}
+
+inline bool stdMotionNode::putsShouldBeOn() const
+{
+    if( presetRoutingConfigured() )
+    {
+        return selectedPresetRoute() != nullptr && ( m_state == MagAOX::app::stateCodes::READY || parkedState() );
+    }
+    if( parkedFSMState() )
+    {
+        return parkedState() && parkedPresetValid();
+    }
+    if( m_trackingReq )
+    {
+        return m_tracking &&
+               ( m_state == MagAOX::app::stateCodes::READY || m_state == MagAOX::app::stateCodes::OPERATING );
+    }
+    return m_state == MagAOX::app::stateCodes::READY && !m_tracking && !m_curVal.empty() && m_curVal != "none";
 }
 
 inline void stdMotionNode::togglePutsOn()
@@ -372,7 +651,22 @@ inline void stdMotionNode::togglePutsOn()
         return;
     }
 
-    if( m_trackingReq )
+    if( !putsShouldBeOn() )
+    {
+        togglePutsOff();
+        return;
+    }
+
+    if( presetRoutingConfigured() )
+    {
+        applyPresetRoute( *selectedPresetRoute() );
+        m_curLabel = m_curVal;
+        m_parentGraph->valueExtra( name(), "state", m_curLabel );
+        m_parentGraph->stateChange();
+        return;
+    }
+
+    if( m_trackingReq && !parkedState() )
     {
         if( m_tracking )
         {
@@ -389,7 +683,7 @@ inline void stdMotionNode::togglePutsOn()
             m_parentGraph->stateChange();
         }
     }
-    else if( m_state == MagAOX::app::stateCodes::READY )
+    else if( m_state == MagAOX::app::stateCodes::READY || parkedState() )
     {
         m_curLabel = m_curVal;
 
@@ -404,18 +698,12 @@ inline void stdMotionNode::togglePutsOn()
         {
             if( m_presetDir == ingr::ioDir::output )
             {
-                ingr::instIOPut *pptr; // We get this pointer using the node accessors
-                                       // which throw if there's a nullptr
-
-                // first deal with the single input
-                try
+                if( m_node->inputs().empty() || m_node->inputs().begin()->second == nullptr )
                 {
-                    pptr = m_node->inputs().begin()->second;
+                    throw std::runtime_error( "stdMotionNode::togglePutsOn: no input for multi-output node [" + name() +
+                                              "]" );
                 }
-                catch( ... )
-                {
-                    return;
-                }
+                ingr::instIOPut *pptr = m_node->inputs().begin()->second;
 
                 // the single node is always on if any are on
                 pptr->enabled( true );
@@ -430,14 +718,7 @@ inline void stdMotionNode::togglePutsOn()
                 // Now deal with the many
                 for( auto s : m_presetPutName )
                 {
-                    try
-                    {
-                        pptr = m_node->output( s );
-                    }
-                    catch( ... )
-                    {
-                        return;
-                    }
+                    pptr = m_node->output( s );
 
                     if( s == m_curVal || m_alwaysOn.count( s ) == 1 )
                     {
@@ -457,18 +738,12 @@ inline void stdMotionNode::togglePutsOn()
             }
             else // m_presetDir == ingr::ioDir::input )
             {
-                ingr::instIOPut *pptr; // We get this pointer using the node accessors
-                                       // which throw if there's a nullptr
-
-                // first deal with the single input
-                try
+                if( m_node->outputs().empty() || m_node->outputs().begin()->second == nullptr )
                 {
-                    pptr = m_node->outputs().begin()->second;
+                    throw std::runtime_error( "stdMotionNode::togglePutsOn: no output for multi-input node [" + name() +
+                                              "]" );
                 }
-                catch( ... )
-                {
-                    return;
-                }
+                ingr::instIOPut *pptr = m_node->outputs().begin()->second;
 
                 // the single node is always on if any are on
                 pptr->enabled( true );
@@ -477,14 +752,7 @@ inline void stdMotionNode::togglePutsOn()
                 // Now deal with the many
                 for( auto s : m_presetPutName )
                 {
-                    try
-                    {
-                        pptr = m_node->input( s );
-                    }
-                    catch( ... )
-                    {
-                        return;
-                    }
+                    pptr = m_node->input( s );
 
                     if( s == m_curVal || m_alwaysOn.count( s ) == 1 )
                     {
@@ -516,13 +784,23 @@ inline void stdMotionNode::togglePutsOff()
         return;
     }
 
-    if( m_tracking ) // regardless of whether required, if tracking this is our state
+    if( presetRoutingConfigured() )
+    {
+        applyPresetRoute( {} );
+        m_curLabel = "off";
+        m_parentGraph->valueExtra( name(), "state", "---" );
+        m_parentGraph->stateChange();
+        return;
+    }
+
+    // Cached tracking flags cannot replace the position label while the stage remains parked.
+    if( m_tracking && !parkedState() && m_state != MagAOX::app::stateCodes::POWEROFF )
     {
         m_curLabel = "tracking";
         m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "tracking" );
         m_parentGraph->valueExtra( m_node->name(), "state", "tracking" );
     }
-    else if( m_trackingReq ) // we can only be "not tracking" if tracking is required
+    else if( m_trackingReq && !parkedState() && m_state != MagAOX::app::stateCodes::POWEROFF )
     {
         m_curLabel = "not tracking";
         m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "not tracking" );
@@ -536,30 +814,22 @@ inline void stdMotionNode::togglePutsOff()
     }
     else
     {
-        // We don't change labels if m_presetPutName.size() > 1
+        // Multi-put labels name their routes; only the position status changes.
+        if( parkedFSMState() )
+        {
+            m_curLabel = "off";
+        }
         m_parentGraph->valueExtra( m_node->name(), "state", "---" );
     }
 
-    // replace xigNode::togglePutsOff() so we can check for always-on
-
+    // An alwaysOn put is on only while the stage has an active path.
     for( auto &&iput : m_node->inputs() )
     {
-        if( m_alwaysOn.count( iput.second->name() ) > 0 )
-        {
-            continue;
-        }
-
-        // iput.second->enabled(false);
         iput.second->state( ingr::putState::off );
     }
 
     for( auto &&oput : m_node->outputs() )
     {
-        if( m_alwaysOn.count( oput.second->name() ) > 0 )
-        {
-            continue;
-        }
-        // oput.second->enabled(false);
         oput.second->state( ingr::putState::off );
 
         if( m_noAutoOn.count( oput.second->name() ) == 1 ) // if we turn it off, we disable it
@@ -567,6 +837,102 @@ inline void stdMotionNode::togglePutsOff()
             oput.second->enabled( false );
         }
     }
+}
+
+inline void stdMotionNode::loadPresetRoutes( mx::app::appConfigurator &config )
+{
+    const std::string        prefix = "presetRoute.";
+    std::vector<std::string> rowKeys;
+    for( const auto &entry : config.m_unusedConfigs )
+    {
+        if( entry.second.section == name() && entry.second.set &&
+            ( entry.second.keyword == "defaultRoute" ||
+              entry.second.keyword.compare( 0, prefix.size(), prefix ) == 0 ) )
+        {
+            rowKeys.push_back( entry.second.keyword );
+        }
+    }
+    if( rowKeys.empty() )
+    {
+        return;
+    }
+
+    const std::string context = "stdMotionNode::loadConfig: preset routing in [" + name() + "] ";
+    for( const auto &option : { "presetPutName",
+                                "alwaysOn",
+                                "noAutoOn",
+                                "trackingReqKey",
+                                "trackingReqElement",
+                                "trackerKey",
+                                "trackerElement" } )
+    {
+        if( config.isSetUnused( mx::app::iniFile::makeKey( name(), option ) ) )
+        {
+            throw std::runtime_error( context + "cannot be combined with '" + option + "'" );
+        }
+    }
+
+    const auto       &selected = m_presetDir == ingr::ioDir::output ? m_node->outputs() : m_node->inputs();
+    const auto       &common   = m_presetDir == ingr::ioDir::output ? m_node->inputs() : m_node->outputs();
+    const std::string side     = m_presetDir == ingr::ioDir::output ? "output" : "input";
+    if( selected.empty() || common.size() != 1 || common.begin()->second == nullptr )
+    {
+        throw std::runtime_error( context + "requires at least one " + side +
+                                  " put and exactly one opposite-side put" );
+    }
+    for( const auto &put : selected )
+    {
+        if( put.second == nullptr )
+        {
+            throw std::runtime_error( context + "has null " + side + " put '" + put.first + "'" );
+        }
+        const auto input  = m_presetDir == ingr::ioDir::output ? common.begin()->second : put.second;
+        const auto output = m_presetDir == ingr::ioDir::output ? put.second : common.begin()->second;
+        if( input->outputLinks().count( output->name() ) == 0 )
+        {
+            throw std::runtime_error( context + "requires internal link 'input:" + name() + ':' + input->name() +
+                                      "' -> 'output:" + name() + ':' + output->name() + "'" );
+        }
+    }
+
+    std::map<std::string, std::set<std::string>> routes;
+    std::optional<std::set<std::string>>         defaultRoute;
+    for( const auto &key : rowKeys )
+    {
+        const bool        isDefault = key == "defaultRoute";
+        const std::string preset    = isDefault ? std::string{} : key.substr( prefix.size() );
+        const std::string row       = context + "row '" + key + "' ";
+        if( !isDefault &&
+            ( preset.empty() || preset.find_first_not_of( " \t\r\n" ) == std::string::npos || preset == "none" ) )
+        {
+            throw std::runtime_error( row + "has an empty or reserved preset name" );
+        }
+        std::vector<std::string> puts;
+        if( config.configUnused( puts, mx::app::iniFile::makeKey( name(), key ) ) < 0 )
+        {
+            throw std::runtime_error( row + "cannot be read" );
+        }
+        auto &route = isDefault ? defaultRoute.emplace() : routes[preset];
+        for( auto put : puts )
+        {
+            const auto first = put.find_first_not_of( " \t\r\n" );
+            if( first == std::string::npos )
+            {
+                throw std::runtime_error( row + "contains an empty put name" );
+            }
+            put = put.substr( first, put.find_last_not_of( " \t\r\n" ) - first + 1 );
+            if( selected.count( put ) == 0 )
+            {
+                throw std::runtime_error( row + "put '" + put + "' is not a " + side + " put" );
+            }
+            if( !route.insert( put ).second )
+            {
+                throw std::runtime_error( row + "contains duplicate put '" + put + "'" );
+            }
+        }
+    }
+    m_presetRoutes = std::move( routes );
+    m_defaultRoute = std::move( defaultRoute );
 }
 
 inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
@@ -609,7 +975,17 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
         throw std::runtime_error( msg );
     }
 
-    std::vector<std::string> prePutName( { "out" } );
+    loadPresetRoutes( config );
+    std::vector<std::string> prePutName{ m_presetDir == ingr::ioDir::input ? "in" : "out" };
+    if( presetRoutingConfigured() )
+    {
+        prePutName.clear();
+        const auto &puts = m_presetDir == ingr::ioDir::input ? m_node->inputs() : m_node->outputs();
+        for( const auto &put : puts )
+        {
+            prePutName.push_back( put.first );
+        }
+    }
     config.configUnused( prePutName, mx::app::iniFile::makeKey( name(), "presetPutName" ) );
     if( prePutName.size() == 0 )
     {
@@ -687,6 +1063,51 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
         throw std::runtime_error( msg );
     }
 
+    const auto           &presetPuts = m_presetDir == ingr::ioDir::output ? m_node->outputs() : m_node->inputs();
+    std::set<std::string> seenPuts;
+    for( const auto &put : prePutName )
+    {
+        if( put.empty() || presetPuts.count( put ) == 0 )
+        {
+            throw std::runtime_error( "stdMotionNode::loadConfig: presetPutName '" + put + "' is not a " + preDir +
+                                      " put of [" + name() + "]" );
+        }
+        if( !seenPuts.insert( put ).second )
+        {
+            throw std::runtime_error( "stdMotionNode::loadConfig: duplicate presetPutName '" + put + "' in [" + name() +
+                                      "]" );
+        }
+    }
+
+    if( prePutName.size() > 1 )
+    {
+        const auto &oppositePuts = m_presetDir == ingr::ioDir::output ? m_node->inputs() : m_node->outputs();
+        if( oppositePuts.size() != 1 || oppositePuts.begin()->second == nullptr )
+        {
+            throw std::runtime_error( "stdMotionNode::loadConfig: multi-put node [" + name() +
+                                      "] requires exactly one opposite-side put" );
+        }
+    }
+
+    for( const auto &put : m_alwaysOn )
+    {
+        if( m_node->inputs().count( put ) == 0 && m_node->outputs().count( put ) == 0 )
+        {
+            throw std::runtime_error( "stdMotionNode::loadConfig: alwaysOn put '" + put + "' is absent from node [" +
+                                      name() + "]" );
+        }
+    }
+    for( const auto &put : m_noAutoOn )
+    {
+        if( m_node->outputs().count( put ) == 0 )
+        {
+            throw std::runtime_error( "stdMotionNode::loadConfig: noAutoOn output '" + put + "' is absent from node [" +
+                                      name() + "]" );
+        }
+    }
+
+    config.configUnused( m_parkable, mx::app::iniFile::makeKey( name(), "parkable" ) );
+
     device( dev );
     presetPrefix( prePrefix );
     presetPutName( prePutName );
@@ -694,6 +1115,10 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
     trackingReqElement( trackReqEl );
     trackerKey( trackKey );
     trackerElement( trackEl );
+    if( presetRoutingConfigured() )
+    {
+        togglePutsOff();
+    }
 }
 
 #endif // stdMotionNode_hpp
