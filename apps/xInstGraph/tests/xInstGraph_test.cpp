@@ -1,5 +1,5 @@
 /** \file xInstGraph_test.cpp
- * \brief Catch2 tests for xInstGraph publication, ownership, and parked-stage routing.
+ * \brief Catch2 tests for xInstGraph publication, ownership, and motion routing.
  * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup instGraph_files
@@ -1361,6 +1361,281 @@ TEST_CASE( "xInstGraph registers parked callbacks only for parkable stages", "[x
         }
         REQUIRE( app.appShutdown() == 0 );
     }
+}
+
+/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
+/// Write two beamsplitters in series with a controllable upstream source.
+void writeBeamsplitterXML( const std::filesystem::path &path, /**< [in] graph file */
+                           bool                         linked = true /**< [in] include the stage's internal links */ )
+{
+    std::ofstream xml( path );
+    xml << "<mxfile><diagram><mxGraphModel><root><mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>"
+           "<mxCell id=\"node:lamp\"/><mxCell id=\"output:lamp:out\" style=\"strokeColor=#FF0000;\"/>";
+    for( const std::string device : { "stagebs", "fwfpm" } )
+    {
+        xml << "<mxCell id=\"node:" << device << "\"/><mxCell id=\"input:" << device
+            << ":in\" value=\"in\" style=\"strokeColor=#FF0000;\"/>"
+            << "<mxCell id=\"state:" << device << "\" value=\"before\"/>"
+            << "<mxCell id=\"fsmstate:" << device << "\" value=\"before\"/>";
+        for( const auto &put : device == "stagebs" ? std::vector<std::string>{ "wfs", "sci" }
+                                                   : std::vector<std::string>{ "out", "refl" } )
+        {
+            xml << "<mxCell id=\"output:" << device << ':' << put << "\" value=\"" << put
+                << "\" style=\"strokeColor=#FF0000;\"/>";
+            if( linked )
+            {
+                xml << "<mxCell id=\"link:" << device << ":in2" << put << "\" source=\"input:" << device
+                    << ":in\" target=\"output:" << device << ':' << put << "\" style=\"strokeColor=#FF0000;\"/>";
+            }
+        }
+    }
+    xml << "<mxCell id=\"beam:lamp2stagebs\" source=\"output:lamp:out\" target=\"input:stagebs:in\" "
+           "style=\"strokeColor=#FF0000;\"/>"
+           "<mxCell id=\"beam:stagebs2fwfpm\" source=\"output:stagebs:sci\" target=\"input:fwfpm:in\" "
+           "style=\"strokeColor=#FF0000;\"/>"
+           "</root></mxGraphModel></diagram></mxfile>";
+}
+
+/// Return the routing sections for the two example stages and their upstream source.
+std::string beamsplitterSections( bool parkable /**< [in] enable parking on both simulated stages */ )
+{
+    const std::string parking = parkable ? "parkable=true\n" : "";
+    return "[lamp]\ntype=pwrOnOff\npwrKey=lamp.power\n"
+           "[stagebs]\ntype=stdMotion\npresetRoute.out=sci\npresetRoute.65-35=wfs,sci\n"
+           "presetRoute.ha-ir=wfs,sci\npresetRoute.closed=\n" +
+           parking +
+           "[fwfpm]\ntype=stdMotion\npresetPrefix=filter\npresetRoute.open=out\n"
+           "presetRoute.lyotlg=out\npresetRoute.mirror=refl\npresetRoute.closed=\n" +
+           parking;
+}
+
+/// Build a stage FSM or parking property with one named value.
+pcf::IndiProperty
+beamsplitterValue( const std::string      &device,   /**< [in] property publisher */
+                   const std::string      &property, /**< [in] property name */
+                   const std::string      &element,  /**< [in] element name */
+                   const std::string      &value,    /**< [in] reported value */
+                   pcf::IndiProperty::Type type = pcf::IndiProperty::Text /**< [in] INDI property type */ )
+{
+    pcf::IndiProperty result( type );
+    result.setDevice( device );
+    result.setName( property );
+    result.add( pcf::IndiElement( element, value ) );
+    return result;
+}
+
+/// Build a stage preset selection using the published preset or filter names.
+pcf::IndiProperty beamsplitterPreset( const std::string              &device, /**< [in] stage name */
+                                      const std::vector<std::string> &selected /**< [in] selected names */ )
+{
+    pcf::IndiProperty result( pcf::IndiProperty::Switch );
+    result.setDevice( device );
+    result.setName( device == "fwfpm" ? "filterName" : "presetName" );
+    for( const auto &name : selected )
+    {
+        result.add( pcf::IndiElement( name, pcf::IndiElement::On ) );
+    }
+    return result;
+}
+
+/// Require a complete published route and verify that put labels remain port names.
+void requireBeamsplitterGraph( const std::string           &xml,      /**< [in] published graph */
+                               const std::string           &device,   /**< [in] stage name */
+                               const std::set<std::string> &selected, /**< [in] active outputs */
+                               const std::string           &color = "#00FF00" /**< [in] effective active-path color */ )
+{
+    const auto puts =
+        device == "stagebs" ? std::vector<std::string>{ "wfs", "sci" } : std::vector<std::string>{ "out", "refl" };
+    for( const auto &put : puts )
+    {
+        const auto tag = cellTag( xml, "output:" + device + ':' + put );
+        REQUIRE( tag.find( "strokeColor=" + ( selected.count( put ) ? color : "#FF0000" ) + ';' ) !=
+                 std::string::npos );
+        REQUIRE( tag.find( "value=\"" + put + "\"" ) != std::string::npos );
+    }
+    REQUIRE( cellTag( xml, "input:" + device + ":in" )
+                 .find( "strokeColor=" + ( selected.empty() ? "#FF0000" : color ) + ';' ) != std::string::npos );
+}
+/// \endcond
+
+/// Published routes match both matrices and follow upstream changes without fresh stage telemetry.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph publishes beamsplitter routes and upstream changes", "[xInstGraph][mapping]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::appStartup();
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::applyPresetRoute( {} );
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    const auto         output = temp.root / "output.drawio";
+    writeBeamsplitterXML( temp.root / "config" / "instgraph_test.drawio" );
+    writeNodeSections( temp.root / "config" / "instgraph_test.conf", output, beamsplitterSections( false ) );
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.shutdown() == 0 );
+    REQUIRE( app.appStartup() == 0 );
+    REQUIRE( app.enableIndiDispatch() );
+    REQUIRE_FALSE( app.subscribed( "stagebs.parked" ) );
+    REQUIRE_FALSE( app.subscribed( "fwfpm.parked" ) );
+    auto lamp = beamsplitterValue( "lamp", "power", "state", "On" );
+    app.handleDefProperty( lamp );
+    requireBeamsplitterGraph( readFile( output ), "stagebs", {} );
+    requireBeamsplitterGraph( readFile( output ), "fwfpm", {} );
+    for( const std::string device : { "stagebs", "fwfpm" } )
+    {
+        app.handleDefProperty( beamsplitterValue( device, "fsm", "state", "READY" ) );
+    }
+    const std::vector<std::pair<std::string, std::set<std::string>>> stageRoutes{
+        { "out", { "sci" } }, { "65-35", { "wfs", "sci" } }, { "ha-ir", { "wfs", "sci" } } };
+    const std::vector<std::pair<std::string, std::set<std::string>>> fpmRoutes{
+        { "open", { "out" } }, { "lyotlg", { "out" } }, { "mirror", { "refl" } } };
+    for( const auto &stage : stageRoutes )
+        for( const auto &fpm : fpmRoutes )
+        {
+            CAPTURE( stage.first, fpm.first );
+            app.handleSetProperty( beamsplitterPreset( "stagebs", { stage.first } ) );
+            app.handleSetProperty( beamsplitterPreset( "fwfpm", { fpm.first } ) );
+            auto xml = readFile( output );
+            requireBeamsplitterGraph( xml, "stagebs", stage.second );
+            requireBeamsplitterGraph( xml, "fwfpm", fpm.second );
+            REQUIRE( cellTag( xml, "state:stagebs" ).find( "value=\"" + stage.first + "\"" ) != std::string::npos );
+            REQUIRE( cellTag( xml, "state:fwfpm" ).find( "value=\"" + fpm.first + "\"" ) != std::string::npos );
+            lamp["state"] = "Off";
+            app.handleSetProperty( lamp );
+            xml = readFile( output );
+            requireBeamsplitterGraph( xml, "stagebs", stage.second, "#FFFF00" );
+            requireBeamsplitterGraph( xml, "fwfpm", fpm.second, "#FFFF00" );
+            lamp["state"] = "On";
+            app.handleSetProperty( lamp );
+            xml = readFile( output );
+            requireBeamsplitterGraph( xml, "stagebs", stage.second );
+            requireBeamsplitterGraph( xml, "fwfpm", fpm.second );
+        }
+    app.handleSetProperty( beamsplitterPreset( "stagebs", { "65-35", "ha-ir" } ) );
+    requireBeamsplitterGraph( readFile( output ), "stagebs", {} );
+    requireBeamsplitterGraph( readFile( output ), "fwfpm", { "refl" }, "#FFFF00" );
+    app.handleSetProperty( beamsplitterPreset( "fwfpm", { "missing" } ) );
+    requireBeamsplitterGraph( readFile( output ), "fwfpm", {} );
+    app.handleSetProperty( beamsplitterPreset( "stagebs", { "closed" } ) );
+    REQUIRE( cellTag( readFile( output ), "state:stagebs" ).find( "value=\"closed\"" ) != std::string::npos );
+    for( const std::string device : { "stagebs", "fwfpm" } )
+    {
+        app.handleSetProperty( beamsplitterValue( device, "fsm", "state", "POWEROFF" ) );
+        app.handleDefProperty( beamsplitterValue( device, "parked", "current", "1", pcf::IndiProperty::Number ) );
+        requireBeamsplitterGraph( readFile( output ), device, {} );
+        REQUIRE( cellTag( readFile( output ), "fsmstate:" + device ).find( "value=\"POWEROFF\"" ) !=
+                 std::string::npos );
+    }
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.appShutdown() == 0 );
+}
+
+/// All initial DefProperty orders converge on mapped parked routes while preserving the real FSM.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph publishes mapped parked presets in any initial order", "[xInstGraph][mapping][parked]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::appStartup();
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::selectedPresetRoute();
+    #endif
+    // clang-format on
+
+    for( const bool parkable : { false, true } )
+    {
+        std::array<int, 3> order{ 0, 1, 2 };
+        do
+        {
+            CAPTURE( parkable, order );
+            temporaryDirectory temp;
+            const auto         output = temp.root / "output.drawio";
+            writeBeamsplitterXML( temp.root / "config" / "instgraph_test.drawio" );
+            writeNodeSections( temp.root / "config" / "instgraph_test.conf", output, beamsplitterSections( parkable ) );
+            xInstGraph app;
+            loadFixture( app, temp.root );
+            REQUIRE( app.shutdown() == 0 );
+            REQUIRE( app.appStartup() == 0 );
+            REQUIRE( app.enableIndiDispatch() );
+            app.handleDefProperty( beamsplitterValue( "lamp", "power", "state", "On" ) );
+            for( const std::string device : { "stagebs", "fwfpm" } )
+            {
+                REQUIRE( app.subscribed( device + ".parked" ) == parkable );
+                requireBeamsplitterGraph( readFile( output ), device, {} );
+            }
+            for( const int index : order )
+                for( const std::string device : { "stagebs", "fwfpm" } )
+                {
+                    const std::array<pcf::IndiProperty, 3> properties{
+                        beamsplitterValue( device, "fsm", "state", "POWEROFF" ),
+                        beamsplitterValue( device, "parked", "current", "1", pcf::IndiProperty::Number ),
+                        beamsplitterPreset( device, { device == "stagebs" ? "65-35" : "mirror" } ) };
+                    app.handleDefProperty( properties[index] );
+                }
+            auto xml = readFile( output );
+            requireBeamsplitterGraph(
+                xml, "stagebs", parkable ? std::set<std::string>{ "wfs", "sci" } : std::set<std::string>{} );
+            requireBeamsplitterGraph(
+                xml, "fwfpm", parkable ? std::set<std::string>{ "refl" } : std::set<std::string>{} );
+            for( const std::string device : { "stagebs", "fwfpm" } )
+            {
+                REQUIRE( cellTag( xml, "fsmstate:" + device ).find( "value=\"POWEROFF\"" ) != std::string::npos );
+            }
+            if( parkable )
+            {
+                app.handleSetProperty(
+                    beamsplitterValue( "stagebs", "parked", "current", "0", pcf::IndiProperty::Number ) );
+                requireBeamsplitterGraph( readFile( output ), "stagebs", {} );
+                requireBeamsplitterGraph( readFile( output ), "fwfpm", { "refl" }, "#FFFF00" );
+                app.handleSetProperty(
+                    beamsplitterValue( "stagebs", "parked", "current", "1", pcf::IndiProperty::Number ) );
+                app.handleSetProperty( beamsplitterPreset( "fwfpm", { "closed" } ) );
+                requireBeamsplitterGraph( readFile( output ), "fwfpm", {} );
+                REQUIRE( cellTag( readFile( output ), "state:fwfpm" ).find( "value=\"closed\"" ) != std::string::npos );
+            }
+            else
+            {
+                for( const std::string device : { "stagebs", "fwfpm" } )
+                {
+                    app.handleSetProperty( beamsplitterValue( device, "fsm", "state", "READY" ) );
+                }
+                requireBeamsplitterGraph( readFile( output ), "stagebs", { "wfs", "sci" } );
+                requireBeamsplitterGraph( readFile( output ), "fwfpm", { "refl" } );
+            }
+            REQUIRE( app.appLogic() == 0 );
+            REQUIRE( app.appShutdown() == 0 );
+        } while( std::next_permutation( order.begin(), order.end() ) );
+    }
+}
+
+/// Missing internal propagation links fail configuration before any graph output is published.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph rejects beamsplitters without internal links", "[xInstGraph][mapping]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::loadConfig();
+    stdMotionNode::loadPresetRoutes( *(mx::app::appConfigurator *)nullptr );
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    const auto         output = temp.root / "output.drawio";
+    writeBeamsplitterXML( temp.root / "config" / "instgraph_test.drawio", false );
+    writeNodeSections( temp.root / "config" / "instgraph_test.conf", output, beamsplitterSections( false ) );
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.shutdown() == 1 );
+    REQUIRE_FALSE( std::filesystem::exists( output ) );
+    REQUIRE_FALSE( app.hasStage() );
+    REQUIRE( app.appShutdown() == 0 );
 }
 
 } // namespace xInstGraphTest

@@ -1768,6 +1768,407 @@ SCENARIO( "Sending Properties to a stdMotionNode", "[instGraph::stdMotionNode]" 
     }
 }
 
+/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
+/// A mapped stage with real internal links and one independent upstream source per input.
+struct mappedMotionFixture
+{
+    /// Isolated files owned by the fixture.
+    std::filesystem::path m_root;
+
+    /// Parent graph retained until the handler is destroyed.
+    ingr::instGraphXML m_graph;
+
+    /// Configurator retained for assertions about consumed route keys.
+    mx::app::appConfigurator m_config;
+
+    /// Configured stage handler owned by the fixture.
+    std::unique_ptr<stdMotionNode> m_node;
+
+    /// Direction of the controlled branch puts.
+    ingr::ioDir m_dir;
+
+    /// Build a graph without configuring its stage, allowing configuration-failure checks.
+    mappedMotionFixture( ingr::ioDir                     dir,           /**< [in] selected branch direction */
+                         const std::vector<std::string> &puts,          /**< [in] selected-side graph puts */
+                         bool                            linked = true, /**< [in] include required internal links */
+                         size_t                          commonCount = 1 /**< [in] number of opposite-side puts */ );
+
+    /// Remove the fixture's files.
+    ~mappedMotionFixture();
+
+    /// Load route rows and optional extra node settings.
+    void load( const std::string &rows, /**< [in] route row text */
+               const std::string &extra = "" /**< [in] additional config text */ );
+
+    /// Change all upstream sources without delivering any stage telemetry.
+    void sources( bool on /**< [in] whether incoming light is available */ );
+};
+
+mappedMotionFixture::mappedMotionFixture( ingr::ioDir                     dir,
+                                          const std::vector<std::string> &puts,
+                                          bool                            linked,
+                                          size_t                          commonCount )
+    : m_dir( dir )
+{
+    char        name[] = "/tmp/mappedMotionNode_XXXXXX";
+    const char *root   = ::mkdtemp( name );
+    if( !root )
+    {
+        throw std::runtime_error( "could not create mapped motion fixture" );
+    }
+    m_root = root;
+    std::vector<std::string> common;
+    for( size_t i = 0; i < commonCount; ++i )
+    {
+        common.push_back( ( dir == ingr::ioDir::output ? "in" : "out" ) + ( i ? std::to_string( i ) : "" ) );
+    }
+    const auto &inputs  = dir == ingr::ioDir::input ? puts : common;
+    const auto &outputs = dir == ingr::ioDir::output ? puts : common;
+    {
+        std::ofstream xml( m_root / "graph.drawio" );
+        xml << "<mxfile><diagram><mxGraphModel><root><mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>"
+               "<mxCell id=\"node:fwtelsim\"/><mxCell id=\"state:fwtelsim\" value=\"before\"/>"
+               "<mxCell id=\"fsmstate:fwtelsim\" value=\"before\"/>";
+        for( const auto &put : inputs )
+        {
+            xml << "<mxCell id=\"input:fwtelsim:" << put << "\" value=\"" << put
+                << "\" style=\"strokeColor=#FF0000;\"/>"
+                << "<mxCell id=\"node:source_" << put << "\"/>"
+                << "<mxCell id=\"output:source_" << put << ":out\" style=\"strokeColor=#FF0000;\"/>"
+                << "<mxCell id=\"beam:source_" << put << "2stage\" source=\"output:source_" << put
+                << ":out\" target=\"input:fwtelsim:" << put << "\" style=\"strokeColor=#FF0000;\"/>";
+        }
+        for( const auto &put : outputs )
+        {
+            xml << "<mxCell id=\"output:fwtelsim:" << put << "\" value=\"" << put
+                << "\" style=\"strokeColor=#FF0000;\"/>";
+        }
+        if( linked )
+        {
+            for( const auto &input : inputs )
+                for( const auto &output : outputs )
+                {
+                    xml << "<mxCell id=\"link:fwtelsim:" << input << "2" << output
+                        << "\" source=\"input:fwtelsim:" << input << "\" target=\"output:fwtelsim:" << output
+                        << "\" style=\"strokeColor=#FF0000;\"/>";
+                }
+        }
+        xml << "</root></mxGraphModel></diagram></mxfile>";
+    }
+    m_graph.autoSave( false );
+    std::string error;
+    if( m_graph.loadXMLFile( error, ( m_root / "graph.drawio" ).string() ) != 0 )
+    {
+        throw std::runtime_error( "could not load mapped motion graph: " + error );
+    }
+}
+
+mappedMotionFixture::~mappedMotionFixture()
+{
+    std::error_code error;
+    std::filesystem::remove_all( m_root, error );
+}
+
+void mappedMotionFixture::load( const std::string &rows, const std::string &extra )
+{
+    {
+        std::ofstream config( m_root / "config.conf" );
+        config << "[fwtelsim]\ntype=stdMotion\npresetDir=" << ( m_dir == ingr::ioDir::input ? "input" : "output" )
+               << '\n'
+               << rows << extra;
+    }
+    REQUIRE( m_config.readConfig( ( m_root / "config.conf" ).string() ) == 0 );
+    m_node = std::make_unique<stdMotionNode>( "fwtelsim", &m_graph );
+    m_node->loadConfig( m_config );
+}
+
+void mappedMotionFixture::sources( bool on )
+{
+    for( const auto &input : m_graph.node( "fwtelsim" )->inputs() )
+    {
+        m_graph.node( "source_" + input.first )
+            ->output( "out" )
+            ->state( on ? ingr::putState::on : ingr::putState::off );
+    }
+}
+
+/// Check the complete route mask and its propagated effective states.
+void requireMappedRoute( stdMotionNode               &node,     /**< [in] configured stage */
+                         const std::set<std::string> &selected, /**< [in] expected active branch names */
+                         ingr::putState state = ingr::putState::on /**< [in] effective state of permitted puts */ )
+{
+    for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
+    {
+        const auto &puts = dir == ingr::ioDir::input ? node.node()->inputs() : node.node()->outputs();
+        for( const auto &put : puts )
+        {
+            const bool enabled = dir == node.presetDir() ? selected.count( put.first ) != 0 : !selected.empty();
+            REQUIRE( put.second->enabled() == enabled );
+            REQUIRE( put.second->state() == ( enabled ? state : ingr::putState::off ) );
+        }
+    }
+}
+/// \endcond
+
+/// The supplied beamsplitter matrices work in both directions and follow upstream light changes.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode maps beamsplitter presets and propagates incoming light",
+           "[instGraph::stdMotionNode][mapping]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::loadConfig( *(mx::app::appConfigurator *)nullptr );
+    stdMotionNode::loadPresetRoutes( *(mx::app::appConfigurator *)nullptr );
+    stdMotionNode::handleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::applyPresetRoute( {} );
+    #endif
+    // clang-format on
+
+    for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
+        for( const bool filter : { false, true } )
+        {
+            CAPTURE( dir, filter );
+            const std::string              prefix = filter ? "filter" : "preset";
+            const std::vector<std::string> puts   = filter ? std::vector<std::string>{ "out", "refl", "unused" }
+                                                           : std::vector<std::string>{ "wfs", "sci", "unused" };
+            const std::string              rows =
+                filter ? "presetRoute.open=out\npresetRoute.lyotlg=out\npresetRoute.mirror=refl\n"
+                                    : "presetRoute.out=sci\npresetRoute.65-35= wfs , sci\npresetRoute.ha-ir=wfs,sci\n";
+            const std::vector<std::pair<std::string, std::set<std::string>>> routes =
+                filter ? std::vector<std::pair<std::string, std::set<std::string>>>{ { "open", { "out" } },
+                                                                                     { "lyotlg", { "out" } },
+                                                                                     { "mirror", { "refl" } },
+                                                                                     { "closed", {} } }
+                       : std::vector<std::pair<std::string, std::set<std::string>>>{ { "out", { "sci" } },
+                                                                                     { "65-35", { "wfs", "sci" } },
+                                                                                     { "ha-ir", { "wfs", "sci" } },
+                                                                                     { "closed", {} } };
+            mappedMotionFixture fixture( dir, puts );
+            fixture.load( rows + "presetRoute.closed=\n",
+                          "presetPrefix=" + prefix + "\n[other]\npresetRoute.ignore=missing\n" );
+            auto &node = *fixture.m_node;
+            for( const auto &entry : fixture.m_config.m_unusedConfigs )
+            {
+                if( entry.second.keyword.find( "presetRoute." ) == 0 )
+                {
+                    REQUIRE( entry.second.used == ( entry.second.section == "fwtelsim" ) );
+                }
+            }
+            fixture.sources( true );
+            requireMappedRoute( node, {} );
+            REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
+            requireMappedRoute( node, {} );
+            for( const auto &before : routes )
+                for( const auto &after : routes )
+                {
+                    CAPTURE( before.first, after.first );
+                    REQUIRE( node.handleSetProperty( motionPreset( { before.first }, prefix ) ) == 0 );
+                    requireMappedRoute( node, before.second );
+                    REQUIRE( node.handleSetProperty( motionPreset( { after.first }, prefix ) ) == 0 );
+                    requireMappedRoute( node, after.second );
+                    REQUIRE( node.curLabel() == after.first );
+                    fixture.sources( false );
+                    requireMappedRoute( node, after.second, ingr::putState::waiting );
+                    REQUIRE( node.handleSetProperty( motionPreset( { before.first }, prefix ) ) == 0 );
+                    requireMappedRoute( node, before.second, ingr::putState::waiting );
+                    fixture.sources( true );
+                    requireMappedRoute( node, before.second );
+                }
+        }
+}
+
+/// Mapping never falls back to a legacy route for unavailable or malformed telemetry.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode blocks mapped routes for unusable telemetry", "[instGraph::stdMotionNode][mapping]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::selectedPresetRoute();
+    stdMotionNode::putsShouldBeOn();
+    stdMotionNode::togglePutsOff();
+    #endif
+    // clang-format on
+
+    for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
+    {
+        mappedMotionFixture fixture( dir, { "wfs", "sci" } );
+        fixture.load( "presetRoute.alpha=wfs\npresetRoute.beta=sci\n" );
+        auto &node = *fixture.m_node;
+        fixture.sources( true );
+        for( const std::string state :
+             { "POWEROFF", "OPERATING", "HOMING", "NOTHOMED", "POWERON", "NOTCONNECTED", "ERROR", "invalid" } )
+        {
+            CAPTURE( dir, state );
+            REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
+            REQUIRE( node.handleSetProperty( motionPreset( { "alpha" } ) ) == 0 );
+            requireMappedRoute( node, { "wfs" } );
+            REQUIRE( node.handleSetProperty( motionFSM( state ) ) == 0 );
+            fixture.sources( false );
+            fixture.sources( true );
+            requireMappedRoute( node, {} );
+            REQUIRE( node.curLabel() == "off" );
+        }
+        pcf::IndiProperty wrongType( pcf::IndiProperty::Text );
+        wrongType.setDevice( "fwtelsim" );
+        wrongType.setName( "presetName" );
+        wrongType.add( pcf::IndiElement( "alpha", pcf::IndiElement::On ) );
+        const std::vector<pcf::IndiProperty> invalid{ motionPreset( {} ),
+                                                      motionPreset( { "none" } ),
+                                                      motionPreset( { "missing" } ),
+                                                      motionPreset( { "alpha", "beta" } ),
+                                                      wrongType };
+        for( const auto &property : invalid )
+        {
+            REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
+            REQUIRE( node.handleSetProperty( motionPreset( { "alpha" } ) ) == 0 );
+            REQUIRE( node.handleSetProperty( property ) == 0 );
+            fixture.sources( false );
+            fixture.sources( true );
+            requireMappedRoute( node, {} );
+            REQUIRE( node.curLabel() == "off" );
+        }
+    }
+}
+
+/// Parking opt-in and all initial message orders preserve the same mapped position while powered off.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode maps parked presets independently of message order",
+           "[instGraph::stdMotionNode][mapping][parked]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::parkedPowerOff();
+    stdMotionNode::selectedPresetRoute();
+    stdMotionNode::handleSetProperty( pcf::IndiProperty() );
+    #endif
+    // clang-format on
+
+    for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
+        for( const bool parkable : { false, true } )
+        {
+            std::array<int, 3> order{ 0, 1, 2 };
+            do
+            {
+                CAPTURE( dir, parkable, order );
+                mappedMotionFixture fixture( dir, { "wfs", "sci" } );
+                fixture.load( "presetRoute.65-35=wfs,sci\npresetRoute.closed=\n", parkable ? "parkable=true\n" : "" );
+                auto &node = *fixture.m_node;
+                fixture.sources( true );
+                REQUIRE( node.keys().count( "fwtelsim.parked" ) == ( parkable ? 1 : 0 ) );
+                const std::array<pcf::IndiProperty, 3> snapshot{
+                    motionFSM( "POWEROFF" ), motionParked( "1" ), motionPreset( { "65-35" } ) };
+                for( const auto index : order )
+                {
+                    REQUIRE( node.handleSetProperty( snapshot[index] ) == 0 );
+                }
+                requireMappedRoute( node, parkable ? std::set<std::string>{ "wfs", "sci" } : std::set<std::string>{} );
+                if( parkable )
+                {
+                    REQUIRE( node.curLabel() == "65-35" );
+                    REQUIRE( node.handleSetProperty( motionPreset( { "closed" } ) ) == 0 );
+                    requireMappedRoute( node, {} );
+                    REQUIRE( node.curLabel() == "closed" );
+                    REQUIRE( node.handleSetProperty( motionPreset( { "65-35" } ) ) == 0 );
+                    REQUIRE( node.handleSetProperty( motionParked( "garbage" ) ) == 0 );
+                    requireMappedRoute( node, {} );
+                }
+                REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
+                requireMappedRoute( node, { "wfs", "sci" } );
+            } while( std::next_permutation( order.begin(), order.end() ) );
+        }
+}
+
+/// Bad route rows, conflicting settings, and incomplete graph topology fail during configuration.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode rejects invalid preset route configuration", "[instGraph::stdMotionNode][mapping]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::loadPresetRoutes( *(mx::app::appConfigurator *)nullptr );
+    #endif
+    // clang-format on
+
+    for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
+    {
+        const std::vector<std::pair<std::string, std::string>> invalid{
+            { "presetRoute.=wfs\n", "empty or reserved" },
+            { "presetRoute.none=wfs\n", "empty or reserved" },
+            { "presetRoute.alpha=missing\n", "put 'missing'" },
+            { "presetRoute.alpha=wfs,,sci\n", "empty put" },
+            { "presetRoute.alpha=wfs,\n", "empty put" },
+            { "presetRoute.alpha=wfs, wfs\n", "duplicate put 'wfs'" },
+            { "presetRoute.alpha=" + std::string( dir == ingr::ioDir::output ? "in" : "out" ) + "\n", "is not a" } };
+        for( const auto &row : invalid )
+        {
+            CAPTURE( dir, row.first );
+            mappedMotionFixture fixture( dir, { "wfs", "sci" } );
+            REQUIRE_THROWS_WITH( fixture.load( row.first ),
+                                 Catch::Matchers::Contains( "[fwtelsim]" ) && Catch::Matchers::Contains( row.second ) );
+        }
+        for( const std::string option : { "presetPutName",
+                                          "alwaysOn",
+                                          "noAutoOn",
+                                          "trackingReqKey",
+                                          "trackingReqElement",
+                                          "trackerKey",
+                                          "trackerElement" } )
+        {
+            CAPTURE( dir, option );
+            mappedMotionFixture fixture( dir, { "wfs", "sci" } );
+            REQUIRE_THROWS_WITH( fixture.load( "presetRoute.alpha=wfs\n", option + "=\n" ),
+                                 Catch::Matchers::Contains( "cannot be combined with '" + option + "'" ) );
+        }
+        for( const size_t commonCount : { 0, 2 } )
+        {
+            CAPTURE( dir, commonCount );
+            mappedMotionFixture fixture( dir, { "wfs", "sci" }, true, commonCount );
+            REQUIRE_THROWS_WITH( fixture.load( "presetRoute.alpha=wfs\n" ),
+                                 Catch::Matchers::Contains( "exactly one opposite-side put" ) );
+        }
+        mappedMotionFixture missingLink( dir, { "wfs", "sci" }, false );
+        REQUIRE_THROWS_WITH( missingLink.load( "presetRoute.alpha=wfs\n" ),
+                             Catch::Matchers::Contains( "requires internal link 'input:fwtelsim:" ) &&
+                                 Catch::Matchers::Contains( "' -> 'output:fwtelsim:" ) );
+        mappedMotionFixture noBranch( dir, {} );
+        REQUIRE_THROWS_WITH( noBranch.load( "presetRoute.closed=\n" ),
+                             Catch::Matchers::Contains( "requires at least one" ) );
+    }
+}
+
+/// One branch still requires an explicit mapped name rather than accepting every non-none preset.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode validates mapped names even for a single branch", "[instGraph::stdMotionNode][mapping]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::loadConfig( *(mx::app::appConfigurator *)nullptr );
+    stdMotionNode::selectedPresetRoute();
+    stdMotionNode::togglePutsOn();
+    #endif
+    // clang-format on
+
+    for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
+    {
+        mappedMotionFixture fixture( dir, { "branch" } );
+        fixture.load( "presetRoute.alpha=branch\npresetRoute.closed=\n" );
+        auto &node = *fixture.m_node;
+        fixture.sources( true );
+        REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
+        REQUIRE( node.handleSetProperty( motionPreset( { "alpha" } ) ) == 0 );
+        requireMappedRoute( node, { "branch" } );
+        REQUIRE( node.handleSetProperty( motionPreset( { "unknown" } ) ) == 0 );
+        requireMappedRoute( node, {} );
+        REQUIRE( node.handleSetProperty( motionPreset( { "closed" } ) ) == 0 );
+        requireMappedRoute( node, {} );
+        REQUIRE( node.curLabel() == "closed" );
+    }
+}
+
 } // namespace xInstGraphTest
 
 } // namespace libXWCTest
