@@ -91,33 +91,33 @@ Extend the existing test file with a harness using temporary app sys directories
 Run `clang-format` on the changed C++ files and build/run the targeted suite from the repository root:
 
 ```sh
-clang-format -i apps/flipperCtrl/flipperCtrl.hpp apps/flipperCtrl/tests/flipperCtrl_test.cpp
+clang-format -i apps/flipperCtrl/flipperCtrl.hpp apps/flipperCtrl/flipperCtrl.cpp apps/flipperCtrl/tests/flipperCtrl_test.cpp
 make -C tests -B -f Makefile.one t=../apps/flipperCtrl/tests/flipperCtrl_test.cpp
 apps/flipperCtrl/tests/flipperCtrl_test
 make -C apps/flipperCtrl
 git diff --check
 ```
 
-Also format `flipperCtrl.cpp` if its documentation is updated. Hardware validation should cover both endpoints, reversal, idle power-off plus app restart, interrupted motion plus restart, and subsequent power-on recovery. This planning pass does not change C++ or run implementation tests.
+Hardware validation should cover both endpoints, reversal, idle power-off plus app restart, interrupted motion plus restart, and subsequent power-on recovery. Completed software verification is recorded below.
 
 ## Affected files and documentation discipline
 
 - `apps/flipperCtrl/flipperCtrl.hpp`: functional state, persistence, device-result handling, power hooks, INDI publication, and telemetry. Preserve the app's header implementation pattern, with non-trivial definitions outside the class declaration; rule 22 supplies the app-specific guidance for rules 6 and 13.
 - `apps/flipperCtrl/tests/flipperCtrl_test.cpp`: behavioral tests and a Doxygen-hidden harness. Keep `application_unit_test` grouping, document every test case, and preserve explicit real-API references with `FLIPPERCTRL_TEST_DOXYGEN_REF` blocks where harness indirection prevents links.
-- `apps/flipperCtrl/flipperCtrl.cpp`: documentation-only cleanup of the placeholder main-program brief if included; retain its main-entrypoint-only structure.
+- `apps/flipperCtrl/flipperCtrl.cpp`: documentation-only cleanup of the placeholder main-program brief and entrypoint parameters; retain its main-entrypoint-only structure.
 - This plan: update implementation decisions and verification results as work progresses, preserving the prompt above `# plan`.
 
 Perform the required full-file documentation pass on each changed C++ file, replacing placeholder app/file descriptions and documenting all declarations, parameters, members, and return semantics. Keep include guards/order, `m_` naming, declaration grouping, and exact `{ //mutex scope` annotations for lock-lifetime-only blocks. No new test registration or shared Doxygen group is needed.
 
-Work is already on `jrmales/flipper-parking`. If commits are requested, keep functional changes and this engineering plan together, then documentation-only cleanup, then any formatting-only cleanup. Follow the required model/prompt attribution for any eventual PR description.
+Work is on `jrmales/flipper-parking`. Commits keep functional changes and this engineering plan together, followed by documentation-only cleanup and formatting-only cleanup. Follow the required model/prompt attribution for any eventual PR description.
 
-## Assumptions and limits to review
+## Assumptions and limits
 
 - A confirmed idle flipper stays physically at its endpoint without power. Disk recovery reports that retained observation; software cannot verify manual movement while the device or controller is off. Motion outside the app between polls is also not guaranteed to be observed before power loss, and external motion combined with storage failure can leave a stale record despite a diagnostic.
 - The app configuration name continues to identify the same physical device. A device replacement or reassignment requires clearing its stored `position` file; automatic identity binding can be added separately if that workflow is needed.
 - Power loss before a move is confirmed yields unknown, even if the mechanism actually reached an endpoint. Recovery requires a later live query; the target alone is insufficient evidence.
-- Verify the installed device's status framing and completion indication before implementing the decoder. No local documentation resolves those details yet.
-- The proposed policy rejects moves when the app cannot durably invalidate the backing record. Review this behavior alongside the unknown-state representation and new read-only parked property before implementation.
+- The decoder follows the standard APT status framing and flags checked against the vendor protocol below. Installed-hardware validation must still confirm the legacy channel-zero exchange and completion behavior.
+- The approved implementation rejects moves when the app cannot durably invalidate the backing record; this preserves conservative recovery for app-commanded motion.
 
 ## Implementation record
 
@@ -128,6 +128,8 @@ Work is already on `jrmales/flipper-parking`. If commits are requested, keep fun
 - Checked standard APT framing, full 32-bit status flags, motion masks, and unsolicited completion-message behavior against the [Thorlabs APT protocol, issue 15, pages 59 and 95–101](https://www.thorlabs.us/software/apt/APT_Communications_Protocol_Rev_15.pdf). Preserved the installed app's channel-zero requests and physical endpoint mapping; the decoder accepts channel zero or one. No endpoint switch active is treated conservatively as transit, and simultaneous endpoint switches are rejected. Installed-hardware validation remains outstanding.
 - Replaced the construction-only test with fault-injected app/telemetry bases and serial/filesystem wrappers that exercise production controller code. The harness captures real log formats and serialized telemetry, and one test uses the real tty utilities over a local socket. Restart tests destroy the first app before constructing the second because the framework permits only one app instance at a time.
 - Verified 13 test cases with 648 assertions. Coverage includes missing/corrupt state, both endpoints and reversal, app-name isolation, interrupted/completed moves, command guards, short/interrupted file writes, write/sync/close/rename failures, bounded retries, malformed/fragmented/coalesced status, live reconciliation warnings, OFF scheduling, and the real tty path.
+- Completed the full-file documentation pass, including file/class descriptions, all declarations and inline parameter descriptions, state ownership, persistence failure semantics, and Doxygen references to production APIs from the hidden harness. Headers and the main source use collective MagAO-X developer attribution where no individual author was previously named.
+- Final verification on 2026-10-02: forced rebuild of the targeted suite, all 648 assertions passing, successful `make -C apps/flipperCtrl`, clean `clang-format --dry-run --Werror` for all three C++ files, and clean whitespace checks for changed code and plan additions. The original prompt, including its pre-existing trailing spaces, is preserved byte-for-byte. The final formatting changes were verified to be exactly `clang-format` output of the documentation-only versions.
 - Commit messages use the requested final line `Co-authored by GPT-6.1 Sol Codex`. `AGENTS.md` is unchanged because that standing instruction already exists on a branch awaiting merge.
 
-Status: functional implementation and behavioral tests complete; final documentation, formatting, and build verification in progress. Hardware validation remains a follow-up.
+Status: implementation, documentation, formatting, and software verification complete. Hardware validation remains a follow-up.

@@ -1,5 +1,6 @@
 /** \file flipperCtrl.hpp
  * \brief Control a two-position MagAO-X flipper with software parking.
+ * \author MagAO-X developers
  * \ingroup flipperCtrl_files
  */
 #ifndef flipperCtrl_hpp
@@ -24,8 +25,16 @@ namespace app
 {
 /// Control a flipper and retain confirmed endpoints across power-off and software restarts.
 /** Parking records an idle endpoint without commanding hardware parking. The backing record is invalidated before
- * motion; an interrupted move therefore recovers as unknown. Callers must hold m_indiMutex for the position,
- * persistence, publication, and telemetry helpers unless a method explicitly acquires it.
+ * motion; an interrupted move therefore recovers as unknown. The app-specific sys directory contains a `position`
+ * file with two integers: the last confirmed physical endpoint (0, 1, or 2) and its parked flag (0 or 1).
+ * A parked record requires endpoint 1 or 2. Reversal changes logical names without changing stored endpoints.
+ *
+ * A fresh settled observation after power-on replaces the inference and warns once if the endpoints disagree.
+ * Retention assumes the idle mechanism stays at its endpoint without power and the configuration name continues
+ * to identify the same device. Manual movement while powered off cannot be verified by software.
+ *
+ * After startup, callers must hold m_indiMutex for the position, persistence, publication, and telemetry helpers
+ * unless a method explicitly acquires it. appStartup() initializes those helpers before normal execution begins.
  * \ingroup flipperCtrl
  */
 class flipperCtrl : public MagAOXApp<true>, public tty::usbDevice, public dev::ioDevice, public dev::telemeter<flipperCtrl>
@@ -97,12 +106,17 @@ class flipperCtrl : public MagAOXApp<true>, public tty::usbDevice, public dev::i
     int readStateFile();
 
     /// Atomically install and sync an endpoint/parked record.
-    /** \returns 0 on success, -1 on a logged filesystem failure. */
+    /** The temporary file is created beside the record, synced, closed, and renamed before the directory is synced.
+     * A failure after rename can leave the replacement installed, but still prevents a hardware command.
+     * \returns 0 on success, -1 on a logged filesystem failure.
+     */
     int writeStateFile(int pos /**< [in] last confirmed physical endpoint, or zero */,
                        bool parked /**< [in] whether that endpoint is certified settled */);
 
     /// Save changed state, with five-second retries after background failures.
     /** Forced saves bypass both the unchanged-record check and retry delay.
+     * An external endpoint change first invalidates any previously parked record. Storage failures are logged;
+     * live reporting continues, but recovery can remain stale if that invalidation cannot be written.
      * \returns 0 if saved or unchanged, -1 if failed or waiting to retry.
      */
     int saveState(bool force = false /**< [in] require a fresh durable write immediately */);
@@ -115,7 +129,10 @@ class flipperCtrl : public MagAOXApp<true>, public tty::usbDevice, public dev::i
     int reportedPosition();
 
     /// Decode a complete APT status reply without changing controller state.
-    /** \returns 0 on a recognized stationary or moving status, -1 for malformed or contradictory status. */
+    /** Accept channel zero or one and mask the full 32-bit status word. No active endpoint is treated as transit;
+     * simultaneous endpoint flags are rejected. Motion flags take precedence over a remaining endpoint flag.
+     * \returns 0 on a recognized stationary or moving status, -1 for malformed or contradictory status.
+     */
     static int decodePosition(const std::string &response /**< [in] complete 20-byte status reply */,
                               int &pos /**< [out] settled physical endpoint, or zero in transit */,
                               bool &moving /**< [out] whether the mechanism is moving */);
@@ -150,7 +167,9 @@ class flipperCtrl : public MagAOXApp<true>, public tty::usbDevice, public dev::i
     int appLogic() override;
 
     /// Close the connection and publish the retained or unknown OFF snapshot under the state mutex.
-    /** \returns 0 on success. */
+    /** The framework sets POWEROFF before calling this hook. No position query or backing-file write is performed.
+     * \returns 0 on success.
+     */
     int onPowerOff() override;
 
     /// Maintain OFF publication and telemetry scheduling without hardware or disk I/O.
@@ -162,7 +181,11 @@ class flipperCtrl : public MagAOXApp<true>, public tty::usbDevice, public dev::i
     int appShutdown() override;
 
     /// Query and apply a live status; the caller must hold m_indiMutex.
-    /** \returns 0 on a valid status, -1 on transport or decoding failure. */
+    /** Assemble complete status packets while skipping unsolicited completion notifications. A reply still at the
+     * previous endpoint cannot complete a pending move to the other endpoint. The first settled power-on reply
+     * consumes the retained comparison, with a WARNING if the live endpoint differs.
+     * \returns 0 on a valid status, -1 on transport or decoding failure.
+     */
     int getPos();
 
     /// Acquire the state mutex, durably invalidate parking, and command a physical endpoint.

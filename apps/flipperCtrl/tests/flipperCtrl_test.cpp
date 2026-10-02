@@ -21,6 +21,7 @@ struct LogEntry
 {
     /// Priority assigned by the real app call site.
     flatlogs::logPrioT m_priority;
+
     /// Message formatted by the real log type.
     std::string m_message;
 };
@@ -30,30 +31,43 @@ struct Faults
 {
     /// Commands written to the serial transport.
     std::vector<std::string> m_commands;
+
     /// Complete or partial receive chunks supplied by the transport.
     std::deque<std::string> m_replies;
+
     /// Hook observing the installed state before a serial write.
     std::function<void(const std::string &)> m_beforeWrite;
+
     /// Message ID whose serial write should fail; -1 allows every write.
     int m_failedCommand{-1};
+
     /// Number of serial read calls.
     unsigned m_reads{0};
+
     /// Number of file synchronization calls.
     unsigned m_syncs{0};
+
     /// Synchronization call to fail; zero disables the fault.
     unsigned m_failedSync{0};
+
     /// Whether atomic rename should fail.
     bool m_failedRename{false};
+
     /// Whether file writes should fail.
     bool m_failedFileWrite{false};
+
     /// Whether one interrupted file write should be injected.
     bool m_interruptWrite{false};
+
     /// Whether file writes should return one byte at a time.
     bool m_shortWrites{false};
+
     /// Whether serial I/O should use the real tty utilities over a local socket.
     bool m_nativeSerial{false};
+
     /// Number of file/directory close calls.
     unsigned m_closes{0};
+
     /// Close call whose result should report failure after releasing the descriptor.
     unsigned m_failedClose{0};
 };
@@ -227,14 +241,14 @@ namespace tty
 {
 /// Supply a controlled serial write result while observing the real command bytes.
 int flipperTestWrite(const std::string &command /**< [in] bytes sent by the controller */,
-                     int fd /**< [in] unused test descriptor */,
-                     int timeout /**< [in] unused write timeout */);
+                     int fd /**< [in] descriptor used only by the native transport test */,
+                     int timeout /**< [in] write timeout used only by the native transport test */);
 
 /// Supply complete or fragmented device replies to the production packet reader.
 int flipperTestRead(std::string &response /**< [out] injected receive chunk */,
                     int bytes /**< [in] requested receive length */,
-                    int fd /**< [in] unused descriptor */,
-                    int timeout /**< [in] unused read timeout */);
+                    int fd /**< [in] descriptor used only by the native transport test */,
+                    int timeout /**< [in] read timeout used only by the native transport test */);
 
 int flipperTestWrite(const std::string &command, int fd, int timeout)
 {
