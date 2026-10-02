@@ -488,3 +488,23 @@ Analysis was done on a personal machine after copying the run directories with `
 - **Plateau ≈ 0.39 instead of 1:** a normalization bias from a noisy P. With `nSettle` = 2 and `nRef` = 2, the noise energy in Σ_mask P² is comparable to the signal energy, so r ≈ S / (S + N) ≈ 0.39. It is a scale error, not a measurement failure.
   - **Remedies:** a less noisy P (`nSettle` 10 and `nRef` 20 should cut σ_P by about 7×, so r → about 0.97). Or debias the normalization, `norm = Σ_mask P² − N_mask σ_P²`, using the σ_P that `referenceSNR()` already estimates (proposed, not yet implemented).
 - **Next run:** `nFrames` 20, `nSettle` 10, `nRef` 20 (config), `nTrials` 20, `nDelays` 10 (0–450 µs in 50 µs steps; delays below about 70 µs are flagged late), actuator (5, 8), amp 0.15.
+
+### 11. First full delay sweep: woofer step response measured (2026-10-02, run `2026-10-02T000716`)
+- **Settings:** actuator (5, 8), amp 0.15, `nFrames` 20, `nSettle` 10, `nRef` 20, `nTrials` 20, `nDelays` 10 (0–450 µs, 50 µs steps), camWFS at 2 kHz. Only the reference and summary files were copied back.
+- **Reference:** `REFSNR` 65.8, σ_P 0.81, mask 892 of 14400 pixels (a compact 6%). `nRef` 20 and `nSettle` 10 cut σ_P by about 7× compared with item 10, as predicted.
+- **Normalization:** all delays settle at r ≈ 1.00 ± 0.02. The item-10 bias is gone, so the debias change is not needed.
+- **Repeatability:** rstd ≈ 0.04–0.07 at all delays, and no invalid trials.
+- **Delay accuracy:** for d = 100–450 µs, achieved = requested + 2.6–3.2 µs, std 0.57–0.95 µs. d = 0 and d = 50 both land at about 70 µs (`LATEFRAC` 1), which confirms a minimum achievable delay of about 70 µs.
+- **Super-sampled response** (t from the DM command, 50 µs bins): 0 for t ≤ 520 µs, 0.03 (570), 0.19 (720), 0.49 (870), 0.75 (1020), 0.92 (1220), ≈ 1.00 for t ≥ 1370 µs. Overshoot ≤ 3% (noise level).
+- **Per-delay metrics:** t50 = 870–960 µs, rise (10–90%) = 640–813 µs. Overshoot ≤ 0.03, settleErr ≤ 0.02, jitter 0.04–0.07.
+  - The smooth variation of t50 with delay (maximum near d = 250 µs) is a frame-sampling interpolation artifact. Samples are 500 µs apart, so the super-sampled curve is the reliable product.
+- **Interpretation (provisional):** the measured times include the 500 µs camWFS exposure.
+  - If `atime` marks the end of the exposure, an instant step would appear as a 500 µs linear ramp (10–90% ≈ 400 µs). The measured 10–90% ≈ 800 µs implies a DM-side rise of very roughly 0.6–0.7 ms, with its midpoint about 650 µs after the command (including the dmcomb and driver latency).
+  - If `atime` marks the start of the exposure, all times shift by 500 µs.
+  - **To confirm:** the camwfs `atime` convention.
+- **Best delay:** "jitter" chose d = 0. That is not meaningful: the jitter is noise-limited and flat across delays, and d = 0 is late. These data show no delay dependence of repeatability.
+- **Follow-ups:**
+  1. Exclude late (`LATEFLAG`) delays from the best-delay choice, and report when the differences are within the noise.
+  2. Fit a dead-time + first/second-order step model, convolved with the exposure, to the super-sampled curve, to get the physical latency and time constant.
+  3. Optionally use a finer grid (`nDelays` 20, `nTrials` 40).
+  4. Confirm the camwfs `atime` convention.
