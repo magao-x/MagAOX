@@ -341,3 +341,7 @@ and no app test suite or hardware check was run until implementation below.
   `make -C apps/xInstGraph -j1`. `clang-format --dry-run --Werror` and
   `git diff --check` passed. No instGraph library or controller changes were
   needed; rebuild and install only xInstGraph for this feature.
+- Functional implementation, regressions, and engineering record committed as
+  `a2130ef4`. The documentation follow-up describes the route schema, topology
+  requirements, conflicting settings, parking interaction, and deployment
+  examples in the app README.

@@ -115,7 +115,8 @@ INDI property.
 | parkable | bool | no | false | Subscribe to parking state and allow parked power-off preset routing |
 | presetPrefix | string | no | preset | Preset property prefix, usually preset or filter |
 | presetDir | string | no | output | Side selected by the preset: input or output |
-| presetPutName | vector<string> | no | `out` for output, `in` for input | Put names selected by the preset |
+| presetPutName | vector<string> | no | `out` for output, `in` for input | Legacy put names selected by the preset; incompatible with route rows |
+| presetRoute.&lt;name&gt; | vector<string> | no | no rows | Puts permitted for that exact published preset; empty value blocks all paths |
 | alwaysOn | vector<string> | no | empty | Puts that are on when any put is on |
 | noAutoOn | vector<string> | no | empty | Outputs not automatically turned on by an internal input link |
 | trackingReqKey | string | no | empty | INDI key for the tracking request switch |
@@ -123,12 +124,71 @@ INDI property.
 | trackerKey | string | no | empty | INDI key for the tracking status switch |
 | trackerElement | string | no | empty | Element of the tracking status property |
 
-When `presetPutName` is omitted, it defaults to `out` for
+Without explicit route rows, an omitted `presetPutName` defaults to `out` for
 `presetDir=output` and `in` for `presetDir=input`. Explicit put names always
 take precedence. The selected name must exist on that side of the graph node;
 for example, `[fwfpm]` with `presetDir=input` selects its input `in` without
 another setting. The tracking request and status key/element pairs must be
 supplied together.
+
+#### Explicit preset routes (beamsplitters)
+
+Add `presetRoute.<name>` rows to map each published preset to the set of puts
+that can propagate light in that position. One row may permit several puts,
+and several rows may share the same puts. For example:
+
+```ini
+[stagebs]
+type=stdMotion
+presetDir=output
+presetRoute.out=sci
+presetRoute.65-35=wfs,sci
+presetRoute.ha-ir=wfs,sci
+
+[fwfpm]
+type=stdMotion
+presetPrefix=filter
+presetDir=output
+presetRoute.open=out
+presetRoute.lyotlg=out
+presetRoute.mirror=refl
+```
+
+The suffix is the exact, case-sensitive Switch element name from `presetName`
+or `filterName`, according to `presetPrefix`. Hyphenated names need no quotes.
+Values are comma-separated put names on `presetDir`; surrounding whitespace
+is allowed. `presetRoute.closed=` defines a known position with no active path.
+Use one occurrence of each row key; the shared INI parser concatenates repeated
+keywords rather than diagnosing duplicate rows.
+
+With any route rows present, the handler controls every put on the selected
+side and requires exactly one common put on the opposite side. Every branch
+needs an internal draw.io link: from the common input to each output for
+`presetDir=output`, or from each input to the common output for
+`presetDir=input`. For example, the FPM reflected branch needs a connector with
+cell ID `link:fwfpm:in2refl`, source `input:fwfpm:in`, and target
+`output:fwfpm:refl`. Startup rejects missing links and names their endpoints.
+
+Mapped nodes disable excluded paths, so upstream updates cannot reactivate
+blocked puts. Selected paths follow the graph's incoming light, including its
+`waiting` state when light is unavailable. Put labels remain their port names;
+the node's position label shows the selected preset. A known empty row keeps
+that position label while all puts stay off.
+
+Routing requires READY, or affirmative parking in POWEROFF with `parkable=true`.
+An unknown name, `none`, a missing or ambiguous selection, a wrong property
+type, or an unavailable FSM state blocks all puts and shows `---` as the
+position status. The FSM label always preserves the reported state.
+
+Route rows cannot be combined with `presetPutName`, `alwaysOn`, `noAutoOn`, or
+any tracking key/element options, including explicitly empty values. The rows
+supply complete selection and enablement. Without route rows, existing motion
+and tracking configuration keeps its behavior.
+
+Before deployment, list every actual preset/filter name that should have a
+path, including aliases, and ensure its graph links exist. The names above
+illustrate the requested route tables; controller configurations may contain
+additional names. An omitted name intentionally has no active route.
 
 #### Parked stages while powered off
 
@@ -157,16 +217,20 @@ their powered-off preset routing.
 
 The parked route uses the published `presetName` or `filterName` selection,
 according to `presetPrefix`. It requires exactly one selected name other than
-`none`. For a multi-put node, that name must match a configured `presetPutName`.
-The normal input/output mapping, `alwaysOn`, and `noAutoOn` rules then apply.
+`none`. For legacy multi-put selection, that name must match a configured
+`presetPutName`; the normal input/output mapping, `alwaysOn`, and `noAutoOn`
+rules then apply. With explicit routes, the name must match a route row, and
+that row permits its listed puts or blocks all puts when empty.
 False or malformed parking, an absent or ambiguous selection, or an unmatched
-multi-put name leaves all puts off, including `alwaysOn`. An arbitrary numeric
-position with no named preset does not identify a graph route.
+legacy multi-put or mapped name leaves all puts off, including `alwaysOn` in
+legacy mode. An arbitrary numeric position with no named preset does not
+identify a graph route.
 
-While parked and powered off, the preset route takes priority over tracking
-request and status flags. Tracking resumes under the existing READY/OPERATING
-rules when the FSM changes. Parking does not enable routing in other unavailable
-states such as HOMING, NOTHOMED, NOTCONNECTED, or ERROR.
+For legacy motion nodes, while parked and powered off the preset route takes
+priority over tracking request and status flags. Tracking resumes under the
+existing READY/OPERATING rules when the FSM changes. Parking does not enable
+routing in other unavailable states such as HOMING, NOTHOMED, NOTCONNECTED,
+or ERROR.
 
 FSM, parking, and preset messages arrive separately, so the graph recomputes
 from the latest received values after each update. Parking initially defaults
