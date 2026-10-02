@@ -782,7 +782,7 @@ inline int orcaCtrl::appStartup()
 
     createROIndiNumber( m_indiP_readouttime, "readout_time", "Readout Time (s)" );
     indi::addNumberElement<float>(
-        m_indiP_readouttime, "value", 0.0, std::numeric_limits<float>::max(), 0.0, "%0.1f", "readout time" );
+        m_indiP_readouttime, "value", 0.0, std::numeric_limits<float>::max(), 0.0, "%0.6f", "readout time" );
     registerIndiPropertyReadOnly( m_indiP_readouttime );
 
     m_minTemp  = -35;
@@ -1483,8 +1483,7 @@ inline int orcaCtrl::setExpTime()
 {
     ///\todo This rounds the exposure time to whole seconds. The DCAM exposure time is in seconds, so
     ///      sub-second exposures are lost.
-    long   intexptime = m_expTimeSet + 0.5;
-    double exptime    = ( (double)intexptime );
+    double exptime = m_expTimeSet;
     capExpTime( exptime );
 
     int rv;
@@ -1529,17 +1528,14 @@ inline int orcaCtrl::setExpTime()
 
 inline int orcaCtrl::capExpTime( double &exptime )
 {
-    // cap at minimum possible value
-    ///\todo The log message below says "ms" but the values are in seconds, and the cap is rounded to
-    ///      whole seconds.
-    if( exptime < m_ReadOutTimeCalculation )
+    // cap at DCAM's minimum possible value
+    if( exptime < m_minExpTime )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
-        log<text_log>( "Got exposure time " + std::to_string( exptime ) + " ms but min value is " +
-                       std::to_string( m_ReadOutTimeCalculation ) + " ms" );
-        long intexptime = m_ReadOutTimeCalculation + 0.5;
-        exptime         = ( (double)intexptime );
+        log<text_log>( "Got exposure time " + std::to_string( exptime * 1000 ) + " ms but min value is " +
+                       std::to_string( m_minExpTime * 1000 ) + " ms" );
+        exptime = m_minExpTime;
     }
 
     return 0;
@@ -1857,8 +1853,7 @@ inline int orcaCtrl::configureAcquisition()
 
     std::cerr << "Readout time is: " << m_ReadOutTimeCalculation << "\n";
 
-    ///\todo DCAM reports the readout time in seconds, so this /1000 makes the INDI value 1000x too small.
-    updateIfChanged( m_indiP_readouttime, "value", m_ReadOutTimeCalculation / 1000.0, INDI_OK );
+    updateIfChanged( m_indiP_readouttime, "value", m_ReadOutTimeCalculation, INDI_OK );
 
     DCAMPROP_ATTR attr{};
     attr.cbSize = sizeof( attr );
@@ -1890,8 +1885,7 @@ inline int orcaCtrl::configureAcquisition()
 
     if( m_expTimeSet > 0 )
     {
-        long   intexptime = m_expTimeSet + 0.5;
-        double exptime    = ( (double)intexptime );
+        double exptime = m_expTimeSet;
         capExpTime( exptime );
         std::cerr << "Setting exposure time to " << m_expTimeSet << "\n";
         int rv = setorcaParameter( m_cameraHandle, DCAM_IDPROP_EXPOSURETIME, exptime );
