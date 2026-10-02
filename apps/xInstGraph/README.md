@@ -112,7 +112,7 @@ INDI property.
 | key | type | required | default | description |
 | --- | --- | --- | --- | --- |
 | device | string | no | node name | INDI device name |
-| parkable | bool | no | false | Subscribe to parking state and allow parked power-off preset routing |
+| parkable | bool | no | false | Subscribe to parking state and allow retained preset routing in supported power/startup states |
 | presetPrefix | string | no | preset | Preset property prefix, usually preset or filter |
 | presetDir | string | no | output | Side selected by the preset: input or output |
 | presetPutName | vector<string> | no | `out` for output, `in` for input | Legacy put names selected by the preset; incompatible with mapped routing |
@@ -147,8 +147,10 @@ updates do not change it. Malformed or wrong-type current values clear the numer
 cache; no position is assumed before valid telemetry arrives.
 
 The fallback is displayed in READY, OPERATING, HOMING, CONFIGURING, NOTHOMED,
-and affirmative parked POWEROFF with `parkable=true`. Other states keep the
-existing unavailable display. Tracking and not-tracking labels retain priority;
+and affirmative parked POWEROFF, POWERON, NOTCONNECTED, or CONNECTED with
+`parkable=true`. Other states keep the existing unavailable display. During
+normal operation, tracking and not-tracking labels retain priority. Parked
+startup states use the retained position instead of cached tracking flags;
 the FSM label always reports the controller's actual state.
 
 Numerical telemetry updates the node's position label and legacy single-put
@@ -211,7 +213,8 @@ the node's position label shows the selected preset, including when using the
 fallback. An empty explicit or default route keeps that position label while
 all puts stay off.
 
-Routing requires READY, or affirmative parking in POWEROFF with `parkable=true`.
+Routing requires READY, or affirmative parking in POWEROFF, POWERON,
+NOTCONNECTED, or CONNECTED with `parkable=true`.
 The fallback applies only to exactly one selected, nonempty Switch element
 name other than `none`. `none`, a missing or ambiguous selection, a wrong
 property type, or an unavailable FSM state still blocks all puts. With no
@@ -233,7 +236,7 @@ including newly added names and aliases, uses that fallback. List every exceptio
 including positions that should block all paths. Without `defaultRoute`, an
 omitted name intentionally has no active route.
 
-#### Parked stages while powered off
+#### Parked stages while powered off or starting up
 
 Set `parkable=true` in a stage's `stdMotion` section only when its controller
 publishes the Number property `<device>.parked`, element `current`:
@@ -245,13 +248,16 @@ parkable=true
 ```
 
 The option declares parking support; the published `current` value reports
-whether the stage is parked now. A nonzero numeric value allows preset routing
-while `fsm.state=POWEROFF`; the graph's FSM label still says `POWEROFF`.
+whether the stage is parked now. A nonzero numeric value allows retained preset
+routing while `fsm.state` is POWEROFF, POWERON, NOTCONNECTED, or CONNECTED.
+These states preserve the route and position label through the power-on sequence
+while the stage remains parked. The graph's FSM label still reports each actual
+state; it is never changed to READY by parking.
 
 `parkable` defaults to false. When omitted or false, the graph does not subscribe
-to parking, ignores unsolicited parking updates, and keeps puts off in
-`POWEROFF`. This avoids unresolved-property notices for controllers without the
-parking interface. With `parkable=true`, a missing parking property still receives
+to parking, ignores unsolicited parking updates, and keeps puts off in those
+four startup states. This avoids unresolved-property notices for controllers
+without the parking interface. With `parkable=true`, a missing parking property still receives
 the normal retry/backoff diagnostic.
 
 When upgrading from the version that subscribed to parking automatically, add
@@ -269,10 +275,10 @@ no applicable route leaves all puts off, including `alwaysOn` in legacy mode.
 An arbitrary numeric position with no named preset does not identify a
 graph route.
 
-For legacy motion nodes, while parked and powered off the preset route takes
-priority over tracking request and status flags. Tracking resumes under the
-existing READY/OPERATING rules when the FSM changes. Parking does not enable
-routing in other unavailable states such as HOMING, NOTHOMED, NOTCONNECTED,
+For legacy motion nodes, while parked in those startup states the preset route
+takes priority over tracking request and status flags. Tracking resumes under
+the existing READY/OPERATING rules when the FSM changes. Parking does not enable
+routing in other unavailable states such as HOMING, NOTHOMED, CONFIGURING,
 or ERROR.
 
 FSM, parking, and preset messages arrive separately, so the graph recomputes

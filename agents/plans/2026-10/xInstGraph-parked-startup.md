@@ -70,3 +70,6 @@ check now clears that cached label consistently in all four startup states.
   APIs to the relevant test cases were verified.
 - Rebuild and install xInstGraph to deploy. Existing `parkable=true` settings use
   the extended behavior; no new configuration setting or library change is needed.
+- Functional implementation, regressions, and engineering record committed as
+  `32a5008a`. The documentation follow-up updates the supported parked FSM set,
+  numeric-display availability, and tracking priority in the README.
