@@ -499,7 +499,8 @@ Analysis was done on a personal machine after copying the run directories with `
 - **Per-delay metrics:** t50 = 870–960 µs, rise (10–90%) = 640–813 µs. Overshoot ≤ 0.03, settleErr ≤ 0.02, jitter 0.04–0.07.
   - The smooth variation of t50 with delay (maximum near d = 250 µs) is a frame-sampling interpolation artifact. Samples are 500 µs apart, so the super-sampled curve is the reliable product.
 - **Interpretation (provisional):** the measured times include the 500 µs camWFS exposure.
-  - If `atime` marks the end of the exposure, an instant step would appear as a 500 µs linear ramp (10–90% ≈ 400 µs). The measured 10–90% ≈ 800 µs implies a DM-side rise of very roughly 0.6–0.7 ms, with its midpoint about 650 µs after the command (including the dmcomb and driver latency).
+  - If `atime` marks the end of the exposure, an instant step would appear as a 500 µs linear ramp (10–90% ≈ 400 µs).
+  - **Correction (made while producing the figure):** the super-sampled curve gives **t10 ≈ 682 µs, t50 ≈ 882 µs, t90 ≈ 1205 µs, so 10–90% ≈ 523 µs**. The ~800 µs quoted earlier came from the coarse per-delay metrics (500 µs sampling) and overstated the rise. With the exposure ramp removed, the DM-side 10–90% rise is very roughly √(523² − 400²) ≈ 340 µs, with its midpoint about 630 µs after the command (t50 − 250 µs, including the dmcomb and driver latency).
   - If `atime` marks the start of the exposure, all times shift by 500 µs.
   - **To confirm:** the camwfs `atime` convention.
 - **Best delay:** "jitter" chose d = 0. That is not meaningful: the jitter is noise-limited and flat across delays, and d = 0 is late. These data show no delay dependence of repeatability.
@@ -508,3 +509,5 @@ Analysis was done on a personal machine after copying the run directories with `
   2. Fit a dead-time + first/second-order step model, convolved with the exposure, to the super-sampled curve, to get the physical latency and time constant.
   3. Optionally use a finer grid (`nDelays` 20, `nTrials` 40).
   4. Confirm the camwfs `atime` convention.
+
+- **Figure:** `~/Documents/MagAO-X/dm_response_data/dmresp_response_2026-10-02T000716.svg`, with the plotted points in `dmresp_response_2026-10-02T000716.csv` (the table view). It shows the super-sampled response, the 10–90% span, t50, the 500 µs exposure scale, and the poke-timing accuracy. It was produced with a standard-library-only script (no numpy or matplotlib on this machine).
