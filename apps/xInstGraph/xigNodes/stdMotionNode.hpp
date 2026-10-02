@@ -24,7 +24,8 @@
  * The preset is specified by an INDI property with signature `<device>.<presetPrefix>Name` where device
  * and presetPrefix are part of the configuration.  This INDI property is a switch vector.
  *
- * With `parkable=true`, a Number property `<device>.parked` with nonzero `current` makes a preset usable in `POWEROFF`.
+ * With `parkable=true`, a Number property `<device>.parked` with nonzero `current` makes a preset usable in
+ * `POWEROFF`, `POWERON`, `NOTCONNECTED`, and `CONNECTED`, preserving routing through the power-on sequence.
  * Parking support defaults false; only enabled stages subscribe to this property.
  * The true FSM is preserved. This retained-position path takes priority over tracking flags and requires one
  * selected name, with an explicit or default route in mapping mode, or a matching put for legacy multi-put selection.
@@ -38,7 +39,7 @@
  * When no usable preset is selected, the display can show the numerical `current` position with four decimals.
  * `presetPrefix=filter` uses `<device>.filter`; other prefixes use `<device>.position`.
  * Position telemetry changes labels only, never put states or route enablement. Tracking labels retain priority.
- * Numeric display follows stageGUI availability, including motion states and opted-in parked POWEROFF.
+ * Numeric display includes motion states and the same opted-in parked startup states.
  *
  * The device and prefix can only be set once.
  */
@@ -194,8 +195,11 @@ class stdMotionNode : public fsmNode
     /// Refresh the numerical fallback without changing put states or enablement.
     void updatePositionLabel();
 
-    /// Whether the retained stage position may be used while its motors are powered off.
-    bool parkedPowerOff() const;
+    /// Whether the FSM belongs to the four states that permit a confirmed parked position.
+    bool parkedFSMState() const;
+
+    /// Whether affirmative parking permits the retained position in a supported power/startup FSM state.
+    bool parkedState() const;
 
     /// Whether the latest named selection identifies a usable parked route.
     bool parkedPresetValid() const;
@@ -459,7 +463,7 @@ inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 
             bool selectionValid = ipRecv.getType() == pcf::IndiProperty::Switch && selected == 1;
             if( ( m_curVal != currentValue || m_presetSelectionValid != selectionValid ) &&
-                ( !m_tracking || parkedPowerOff() ) )
+                ( !m_tracking || parkedState() ) )
             {
                 ++m_changes;
             }
@@ -497,12 +501,12 @@ inline void stdMotionNode::updatePositionLabel()
         return;
     }
     const bool namedPreset   = m_presetSelectionValid && !m_curVal.empty() && m_curVal != "none";
-    const bool trackingLabel = !presetRoutingConfigured() && !parkedPowerOff() &&
+    const bool trackingLabel = !presetRoutingConfigured() && !parkedState() &&
                                m_state != MagAOX::app::stateCodes::POWEROFF && ( m_tracking || m_trackingReq );
     const bool available = m_state == MagAOX::app::stateCodes::READY || m_state == MagAOX::app::stateCodes::OPERATING ||
                            m_state == MagAOX::app::stateCodes::HOMING ||
                            m_state == MagAOX::app::stateCodes::CONFIGURING ||
-                           m_state == MagAOX::app::stateCodes::NOTHOMED || parkedPowerOff();
+                           m_state == MagAOX::app::stateCodes::NOTHOMED || parkedState();
     const bool showPosition = !namedPreset && !trackingLabel && available && m_position.has_value();
     if( !showPosition && !m_numericLabelDisplayed )
     {
@@ -526,9 +530,15 @@ inline void stdMotionNode::updatePositionLabel()
     m_parentGraph->stateChange();
 }
 
-inline bool stdMotionNode::parkedPowerOff() const
+inline bool stdMotionNode::parkedFSMState() const
 {
-    return m_parkable && m_state == MagAOX::app::stateCodes::POWEROFF && m_parked;
+    return m_state == MagAOX::app::stateCodes::POWEROFF || m_state == MagAOX::app::stateCodes::POWERON ||
+           m_state == MagAOX::app::stateCodes::NOTCONNECTED || m_state == MagAOX::app::stateCodes::CONNECTED;
+}
+
+inline bool stdMotionNode::parkedState() const
+{
+    return m_parkable && m_parked && parkedFSMState();
 }
 
 inline bool stdMotionNode::parkedPresetValid() const
@@ -620,11 +630,11 @@ inline bool stdMotionNode::putsShouldBeOn() const
 {
     if( presetRoutingConfigured() )
     {
-        return selectedPresetRoute() != nullptr && ( m_state == MagAOX::app::stateCodes::READY || parkedPowerOff() );
+        return selectedPresetRoute() != nullptr && ( m_state == MagAOX::app::stateCodes::READY || parkedState() );
     }
-    if( m_state == MagAOX::app::stateCodes::POWEROFF )
+    if( parkedFSMState() )
     {
-        return parkedPowerOff() && parkedPresetValid();
+        return parkedState() && parkedPresetValid();
     }
     if( m_trackingReq )
     {
@@ -656,7 +666,7 @@ inline void stdMotionNode::togglePutsOn()
         return;
     }
 
-    if( m_trackingReq && !parkedPowerOff() )
+    if( m_trackingReq && !parkedState() )
     {
         if( m_tracking )
         {
@@ -673,7 +683,7 @@ inline void stdMotionNode::togglePutsOn()
             m_parentGraph->stateChange();
         }
     }
-    else if( m_state == MagAOX::app::stateCodes::READY || parkedPowerOff() )
+    else if( m_state == MagAOX::app::stateCodes::READY || parkedState() )
     {
         m_curLabel = m_curVal;
 
@@ -783,13 +793,14 @@ inline void stdMotionNode::togglePutsOff()
         return;
     }
 
-    if( m_tracking && m_state != MagAOX::app::stateCodes::POWEROFF ) // Tracking is unavailable with motors off.
+    // Cached tracking flags cannot replace the position label while the stage remains parked.
+    if( m_tracking && !parkedState() && m_state != MagAOX::app::stateCodes::POWEROFF )
     {
         m_curLabel = "tracking";
         m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "tracking" );
         m_parentGraph->valueExtra( m_node->name(), "state", "tracking" );
     }
-    else if( m_trackingReq && m_state != MagAOX::app::stateCodes::POWEROFF )
+    else if( m_trackingReq && !parkedState() && m_state != MagAOX::app::stateCodes::POWEROFF )
     {
         m_curLabel = "not tracking";
         m_parentGraph->valuePut( name(), m_presetPutName[0], m_presetDir, "not tracking" );
@@ -804,7 +815,7 @@ inline void stdMotionNode::togglePutsOff()
     else
     {
         // Multi-put labels name their routes; only the position status changes.
-        if( m_state == MagAOX::app::stateCodes::POWEROFF )
+        if( parkedFSMState() )
         {
             m_curLabel = "off";
         }

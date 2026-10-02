@@ -1866,6 +1866,94 @@ TEST_CASE( "xInstGraph publishes numerical positions without changing put routin
     REQUIRE( app.appShutdown() == 0 );
 }
 
+/// Parked mapped/default routes retain their colors and position labels while the real FSM advances through startup.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph preserves parked routes through startup", "[xInstGraph][parked][startup]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::parkedState();
+    stdMotionNode::putsShouldBeOn();
+    stdMotionNode::updatePositionLabel();
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    const auto         output = temp.root / "output.drawio";
+    writeBeamsplitterXML( temp.root / "config" / "instgraph_test.drawio" );
+    writeNodeSections( temp.root / "config" / "instgraph_test.conf",
+                       output,
+                       "[lamp]\ntype=pwrOnOff\npwrKey=lamp.power\n"
+                       "[stagebs]\ntype=stdMotion\nparkable=true\npresetRoute.65-35=wfs,sci\n"
+                       "[fwfpm]\ntype=stdMotion\nparkable=true\npresetPrefix=filter\ndefaultRoute=out\n"
+                       "presetRoute.closed=\n" );
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.shutdown() == 0 );
+    REQUIRE( app.appStartup() == 0 );
+    REQUIRE( app.enableIndiDispatch() );
+    auto lamp = beamsplitterValue( "lamp", "power", "state", "On" );
+    app.handleDefProperty( lamp );
+    for( const std::string device : { "stagebs", "fwfpm" } )
+    {
+        app.handleDefProperty( beamsplitterValue( device, "fsm", "state", "POWEROFF" ) );
+        app.handleDefProperty( beamsplitterValue( device, "parked", "current", "1", pcf::IndiProperty::Number ) );
+        app.handleDefProperty( beamsplitterPreset( device, { device == "stagebs" ? "65-35" : "open" } ) );
+    }
+    for( const std::string state : { "POWEROFF", "POWERON", "NOTCONNECTED", "CONNECTED" } )
+        for( const std::string device : { "stagebs", "fwfpm" } )
+        {
+            const auto before = readFile( output );
+            app.handleSetProperty( beamsplitterValue( device, "fsm", "state", state ) );
+            const auto published = readFile( output );
+            requireBeamsplitterGraph( published, "stagebs", { "wfs", "sci" } );
+            requireBeamsplitterGraph( published, "fwfpm", { "out" } );
+            REQUIRE( cellTag( published, "fsmstate:" + device ).find( "value=\"" + state + "\"" ) !=
+                     std::string::npos );
+            for( const char *cell : { "output:stagebs:wfs",
+                                      "output:stagebs:sci",
+                                      "output:fwfpm:out",
+                                      "output:fwfpm:refl",
+                                      "state:stagebs",
+                                      "state:fwfpm" } )
+            {
+                REQUIRE( cellTag( published, cell ) == cellTag( before, cell ) );
+            }
+        }
+    lamp["state"] = "Off";
+    app.handleSetProperty( lamp );
+    requireBeamsplitterGraph( readFile( output ), "stagebs", { "wfs", "sci" }, "#FFFF00" );
+    requireBeamsplitterGraph( readFile( output ), "fwfpm", { "out" }, "#FFFF00" );
+    lamp["state"] = "On";
+    app.handleSetProperty( lamp );
+    requireBeamsplitterGraph( readFile( output ), "fwfpm", { "out" } );
+    app.handleSetProperty( beamsplitterPreset( "fwfpm", { "closed" } ) );
+    for( const std::string state : { "POWEROFF", "POWERON", "NOTCONNECTED", "CONNECTED" } )
+    {
+        app.handleSetProperty( beamsplitterValue( "fwfpm", "fsm", "state", state ) );
+        requireBeamsplitterGraph( readFile( output ), "fwfpm", {} );
+        REQUIRE( cellTag( readFile( output ), "state:fwfpm" ).find( "value=\"closed\"" ) != std::string::npos );
+    }
+    app.handleDefProperty( beamsplitterValue( "fwfpm", "filter", "current", "4.25", pcf::IndiProperty::Number ) );
+    app.handleSetProperty( beamsplitterPreset( "fwfpm", { "none" } ) );
+    for( const std::string state : { "POWEROFF", "POWERON", "NOTCONNECTED", "CONNECTED" } )
+    {
+        app.handleSetProperty( beamsplitterValue( "fwfpm", "fsm", "state", state ) );
+        requireBeamsplitterGraph( readFile( output ), "fwfpm", {} );
+        REQUIRE( cellTag( readFile( output ), "state:fwfpm" ).find( "value=\"4.2500\"" ) != std::string::npos );
+        REQUIRE( cellTag( readFile( output ), "fsmstate:fwfpm" ).find( "value=\"" + state + "\"" ) !=
+                 std::string::npos );
+    }
+    app.handleSetProperty( beamsplitterPreset( "fwfpm", { "open" } ) );
+    requireBeamsplitterGraph( readFile( output ), "fwfpm", { "out" } );
+    app.handleSetProperty( beamsplitterValue( "fwfpm", "parked", "current", "0", pcf::IndiProperty::Number ) );
+    requireBeamsplitterGraph( readFile( output ), "fwfpm", {} );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.appShutdown() == 0 );
+}
+
 } // namespace xInstGraphTest
 
 } // namespace libXWCTest
