@@ -139,14 +139,16 @@ apps/flipperCtrl/tests/flipperCtrl_test
 apps/flipperCtrl/tests/flipperCtrl_entrypoint_test
 lcov --capture --initial --directory apps/flipperCtrl --output-file /tmp/flipperCtrl-initial.info
 lcov --capture --directory apps/flipperCtrl --output-file /tmp/flipperCtrl-executed.info
-lcov --add-tracefile /tmp/flipperCtrl-initial.info --add-tracefile /tmp/flipperCtrl-executed.info --output-file /tmp/flipperCtrl-combined.info
-lcov --extract /tmp/flipperCtrl-combined.info "$PWD/apps/flipperCtrl/flipperCtrl.hpp" "$PWD/apps/flipperCtrl/flipperCtrl.cpp" --output-file /tmp/flipperCtrl-app.info
+lcov --add-tracefile /tmp/flipperCtrl-initial.info --add-tracefile /tmp/flipperCtrl-executed.info --ignore-errors inconsistent --output-file /tmp/flipperCtrl-combined.info
+lcov --extract /tmp/flipperCtrl-combined.info "$PWD/apps/flipperCtrl/flipperCtrl.hpp" "$PWD/apps/flipperCtrl/flipperCtrl.cpp" --ignore-errors inconsistent --output-file /tmp/flipperCtrl-app.info
 lcov --summary /tmp/flipperCtrl-app.info
 tests/coverage/update_coverage --fast
 git diff --check
 ```
 
-Use a small trace check to require the two expected `SF` paths, positive `LF` values, equal `LH`/`LF`, and no zero-count `DA` entries. The summary alone can round a nearly complete result to 100%. Keep any app-specific permanent CI gate focused; the existing coverage workflow already builds/runs registered tests and produces the report, so no shared build/report overhaul is required.
+Inspect both traces for the two expected `SF` paths, positive `LF` values, equal `LH`/`LF`, and no zero-count `DA` entries. The summary alone can round a nearly complete result to 100%. Keep the exact-count audit local; the existing coverage workflow builds/runs registered tests and produces the project report.
+
+The merge/extract commands use LCOV's `--ignore-errors inconsistent` for the GCC 15 standard-library function/line inconsistency described above. It emits a warning without excluding app lines or changing their counts. Preserve the unfiltered captures and check the actual app records independently.
 
 Run `clang-format --dry-run --Werror` on changed C++ files and build the real app normally after coverage verification, forcing recompilation when switching modes. Rebuild the shared Catch2 main normally as well before reusing it with non-coverage test targets. If a production seam is needed, include that header in formatting and verify its default behavior with the existing tests and normal app build.
 
@@ -161,4 +163,25 @@ Run `clang-format --dry-run --Werror` on changed C++ files and build the real ap
 
 Continue on a namespaced feature branch. Keep any necessary functional testability change and its engineering notes first, test/documentation additions in clear commits, and formatting-only cleanup last when needed. Append `Co-authored by GPT-6.1 Sol Codex` to every commit message. Leave `AGENTS.md` unchanged, as requested for the parking work.
 
-Status: planning complete; coverage implementation has not started. The existing instrumented tests, app build, baseline capture, and manual entrypoint feasibility check passed. Hardware validation of parking remains a separate follow-up; line coverage cannot verify physical movement, filesystem crash durability on every storage device, or every real power-transition timing.
+## Implementation record — 2026-10-03
+
+The expanded harness executes the production controller unchanged. Test-local USB and I/O bases retain real configuration delegation; telemetry configuration also delegates to the real helper while runtime telemetry remains threadless. Fault queues and synchronous hooks cover configuration/startup failures, discovery/connect/reconnect states, filesystem failures and retries, framing limits, callback dispatch, and observed/target power changes at the post-I/O guards.
+
+The INDI case sends through a real, unactivated driver attached to private FIFOs and parses its XML messages. It verifies coherent unknown, settled, busy, completed, reversed, and OFF snapshots, timestamps, parked values, and suppression of duplicate publications. The harness initializes the framework FSM property as well. Because the shared connection exposes no input-descriptor getter and its destructor closes only output, the test driver identifies its unique input FIFO descriptor through `/proc/self/fd` and releases it explicitly before fixture cleanup.
+
+The separately registered entrypoint suite launches the real executable with `--help`, private working/base directories and relative runtime paths, captured output, a ten-second deadline, and RAII child cleanup. It checks exit status 1, the real flipper/timeout help options, and absence of a position file. The targeted Makefile dependency forces app recompilation in the selected coverage mode and clears inherited make flags so `-B` on a test build does not force all shared dependencies. Removing the executable before a dependency build successfully recreates it. The suite runs from both the repository root and `tests/`.
+
+A one-off local validator checked the two source records, positive denominators, LF/LH consistency with individual DA counts, and zero uncovered lines in both the focused trace and the existing project trace. Negative checks rejected missing records, inconsistent summaries, duplicate records, a synthetic 100.0%-rounded trace with one uncovered line, and the measured pre-implementation baseline. The validator remains a local audit artifact.
+
+Fresh counters and merged initial/executed captures give the following result, with the original production denominator preserved:
+
+| Production source | Lines hit / found | Uncovered lines |
+| --- | ---: | --- |
+| `apps/flipperCtrl/flipperCtrl.hpp` | **377 / 377 (100%)** | none |
+| `apps/flipperCtrl/flipperCtrl.cpp` | **4 / 4 (100%)** | none |
+
+The final formatted suites pass in both coverage and normal builds: **27 controller cases / 1,300 assertions**, plus **1 entrypoint case / 21 assertions**. `clang-format --dry-run --Werror`, `git diff --check`, the focused exact-count check, and the existing `tests/coverage/update_coverage --fast` report all pass. The project trace independently passes the same exact-count check. GCC/gcov 15.2.0, LCOV/genhtml 2.0, and clang-format 21.1.8 were used. The compiler-generated destructor alias leaves the focused raw function metric at 25/26; this does not affect the requested line metric. No production seams, source exclusions, or changes to `AGENTS.md` were required.
+
+Captures, the local validator, negative-check fixtures, build/test logs, and the focused HTML report are retained under `/tmp/flipperCtrl-coverage-20261003`; the project HTML report remains in `coverage_report/`. The shared library/PCH, app, Catch2 main, and both suites have been rebuilt in normal mode. Only this task's generated profile files were removed afterward.
+
+Status: implementation and verification complete. Hardware validation of parking remains a separate follow-up; line coverage cannot verify physical movement, filesystem crash durability on every storage device, or every real power-transition timing.

@@ -1,5 +1,5 @@
 /** \file flipperCtrl_test.cpp
- * \brief Behavioral tests for flipper parking, recovery, status decoding, and telemetry.
+ * \brief Behavioral and failure-contract tests for flipper configuration, parking, FSM, INDI, and telemetry.
  * \author Jared R. Males (jaredmales@gmail.com)
  * \ingroup flipperCtrl_files
  */
@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <poll.h>
 #include <sys/socket.h>
 
 /// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
@@ -29,6 +30,63 @@ struct LogEntry
 /// Deterministic transport and filesystem failures for the production controller.
 struct Faults
 {
+    /// Property operation whose startup result should fail.
+    enum class PropertyFailure
+    {
+        none,        ///< Allow all property operations.
+        selection,   ///< Fail selection creation.
+        newProperty, ///< Fail callback registration.
+        readOnly     ///< Fail parked-property registration.
+    };
+
+    /// Ordered dependency calls made by production configuration and lifecycle methods.
+    std::vector<std::string> m_calls;
+
+    /// Discovery results; an empty queue reports an absent device.
+    std::deque<int> m_discoveryResults;
+
+    /// Connection results; an empty queue succeeds with a harmless descriptor.
+    std::deque<int> m_connectResults;
+
+    /// Result returned after loading real USB configuration.
+    int m_usbLoadResult{ TTY_E_DEVNOTFOUND };
+
+    /// Result returned after loading real I/O configuration.
+    int m_ioLoadResult{ 0 };
+
+    /// Result returned by telemetry configuration setup.
+    int m_telemSetupResult{ 0 };
+
+    /// Result returned by telemetry configuration loading.
+    int m_telemLoadResult{ 0 };
+
+    /// Result returned by threadless telemetry startup.
+    int m_telemStartupResult{ 0 };
+
+    /// Result returned by telemetry scheduling before checking record times.
+    int m_telemLogicResult{ 0 };
+
+    /// Result returned by telemetry shutdown.
+    int m_telemShutdownResult{ 0 };
+
+    /// Selected fatal property operation.
+    PropertyFailure m_propertyFailure{ PropertyFailure::none };
+
+    /// Whether temporary-file creation should fail with ENOSPC.
+    bool m_failedTemporary{ false };
+
+    /// Whether setting the temporary file's mode should fail.
+    bool m_failedMode{ false };
+
+    /// Whether persistence writes should report zero bytes.
+    bool m_zeroWrite{ false };
+
+    /// Synchronous event injected after a descriptor has actually closed.
+    std::function<void( unsigned )> m_afterClose;
+
+    /// Synchronous power transition injected during a status read.
+    std::function<void()> m_beforeRead;
+
     /// Commands written to the serial transport.
     std::vector<std::string> m_commands;
 
@@ -93,6 +151,13 @@ std::string contents( const std::filesystem::path &path /**< [in] state file pat
 /// Count power-on mismatch warnings in the captured logs.
 size_t mismatchWarnings();
 
+/// Count a dependency operation in the captured call sequence.
+size_t calls( const std::string &name /**< [in] operation label */ );
+
+/// Count captured logs of a particular severity containing a diagnostic.
+size_t logs( flatlogs::logPrioT priority /**< [in] required severity */,
+             const std::string &message /**< [in] diagnostic substring */ );
+
 /// Own a unique temporary test directory.
 class Directory
 {
@@ -117,6 +182,16 @@ template <bool useINDI>
 class flipperTestApp : public MagAOXApp<useINDI>
 {
   public:
+    /// Let the real telemetry configuration helper read the test app's configuration name.
+    using MagAOXApp<useINDI>::m_configName;
+
+    /// Preserve the shared base's other registration overloads.
+    using MagAOXApp<useINDI>::registerIndiPropertyNew;
+    using MagAOXApp<useINDI>::registerIndiPropertyReadOnly;
+
+    /// INDI registration callback type, preserving the real driver interface.
+    using Callback = int ( * )( void *, const pcf::IndiProperty & );
+
     /// Construct the real app base after suppressing its process logger.
     flipperTestApp( const std::string &sha /**< [in] repository revision */,
                     bool               modified /**< [in] working-tree flag */ );
@@ -132,6 +207,18 @@ class flipperTestApp : public MagAOXApp<useINDI>
     /// Capture a default-constructed application log.
     template <typename logT, int retval = 0>
     static int log( logPrioT level = logPrio::LOG_DEFAULT /**< [in] requested severity */ );
+
+    /// Create a real selection unless its specific startup failure is requested.
+    int createStandardIndiSelectionSw( pcf::IndiProperty              &property /**< [out] selection to initialize */,
+                                       const std::string              &name /**< [in] property name */,
+                                       const std::vector<std::string> &elements /**< [in] selection names */ );
+
+    /// Register a real callback unless its specific startup failure is requested.
+    int registerIndiPropertyNew( pcf::IndiProperty &property /**< [in/out] initialized property */,
+                                 Callback           callback /**< [in] real production callback */ );
+
+    /// Register a real read-only property unless its startup failure is requested.
+    int registerIndiPropertyReadOnly( pcf::IndiProperty &property /**< [in/out] initialized parked property */ );
 };
 
 template <bool useINDI>
@@ -165,11 +252,40 @@ int flipperTestApp<useINDI>::log( logPrioT level )
     return log<logT, retval>( typename logT::messageT(), level );
 }
 
+template <bool useINDI>
+int flipperTestApp<useINDI>::createStandardIndiSelectionSw( pcf::IndiProperty              &property,
+                                                            const std::string              &name,
+                                                            const std::vector<std::string> &elements )
+{
+    flipperHarness::g_faults.m_calls.push_back( "selection" );
+    if( flipperHarness::g_faults.m_propertyFailure == flipperHarness::Faults::PropertyFailure::selection )
+        return -1;
+    return MagAOXApp<useINDI>::createStandardIndiSelectionSw( property, name, elements );
+}
+
+template <bool useINDI>
+int flipperTestApp<useINDI>::registerIndiPropertyNew( pcf::IndiProperty &property, Callback callback )
+{
+    flipperHarness::g_faults.m_calls.push_back( "register-new" );
+    if( flipperHarness::g_faults.m_propertyFailure == flipperHarness::Faults::PropertyFailure::newProperty )
+        return -1;
+    return MagAOXApp<useINDI>::registerIndiPropertyNew( property, callback );
+}
+
+template <bool useINDI>
+int flipperTestApp<useINDI>::registerIndiPropertyReadOnly( pcf::IndiProperty &property )
+{
+    flipperHarness::g_faults.m_calls.push_back( "register-read-only" );
+    if( flipperHarness::g_faults.m_propertyFailure == flipperHarness::Faults::PropertyFailure::readOnly )
+        return -1;
+    return MagAOXApp<useINDI>::registerIndiPropertyReadOnly( property );
+}
+
 namespace dev
 {
 /// Telemetry sink that records actual FlatBuffer payloads and supplies controllable scheduled deadlines.
 template <class derivedT>
-class flipperTestTelemeter
+class flipperTestTelemeter : public telemeter<derivedT>
 {
   public:
     /// Number of times the app invokes telemetry scheduling.
@@ -178,11 +294,11 @@ class flipperTestTelemeter
     /// Whether the next schedule check should force a telemetry record.
     bool m_due{ false };
 
-    /// Configure the test telemetry sink.
-    int setupConfig( mx::app::appConfigurator &config /**< [in] unused app configurator */ );
+    /// Delegate real telemetry configuration setup while allowing a selected failure.
+    int setupConfig( mx::app::appConfigurator &config /**< [in/out] app configurator */ );
 
-    /// Load test telemetry settings.
-    int loadConfig( mx::app::appConfigurator &config /**< [in] unused app configurator */ );
+    /// Delegate real telemetry configuration loading while allowing a selected failure.
+    int loadConfig( mx::app::appConfigurator &config /**< [in] app configurator */ );
 
     /// Start the test telemetry sink without a background thread.
     int appStartup();
@@ -202,33 +318,44 @@ class flipperTestTelemeter
 };
 
 template <class derivedT>
-int flipperTestTelemeter<derivedT>::setupConfig( mx::app::appConfigurator & )
+int flipperTestTelemeter<derivedT>::setupConfig( mx::app::appConfigurator &config )
 {
-    return 0;
+    flipperHarness::g_faults.m_calls.push_back( "telem-setup" );
+    if( flipperHarness::g_faults.m_telemSetupResult < 0 )
+        return flipperHarness::g_faults.m_telemSetupResult;
+    return telemeter<derivedT>::setupConfig( config );
 }
 
 template <class derivedT>
-int flipperTestTelemeter<derivedT>::loadConfig( mx::app::appConfigurator & )
+int flipperTestTelemeter<derivedT>::loadConfig( mx::app::appConfigurator &config )
 {
-    return 0;
+    flipperHarness::g_faults.m_calls.push_back( "telem-load" );
+    if( flipperHarness::g_faults.m_telemLoadResult < 0 )
+        return flipperHarness::g_faults.m_telemLoadResult;
+    return telemeter<derivedT>::loadConfig( config );
 }
 
 template <class derivedT>
 int flipperTestTelemeter<derivedT>::appStartup()
 {
-    return 0;
+    flipperHarness::g_faults.m_calls.push_back( "telem-startup" );
+    return flipperHarness::g_faults.m_telemStartupResult;
 }
 
 template <class derivedT>
 int flipperTestTelemeter<derivedT>::appShutdown()
 {
-    return 0;
+    flipperHarness::g_faults.m_calls.push_back( "telem-shutdown" );
+    return flipperHarness::g_faults.m_telemShutdownResult;
 }
 
 template <class derivedT>
 int flipperTestTelemeter<derivedT>::appLogic()
 {
     ++m_schedules;
+    flipperHarness::g_faults.m_calls.push_back( "telem-logic" );
+    if( flipperHarness::g_faults.m_telemLogicResult < 0 )
+        return flipperHarness::g_faults.m_telemLogicResult;
     return static_cast<derivedT *>( this )->checkRecordTimes();
 }
 
@@ -249,11 +376,84 @@ int flipperTestTelemeter<derivedT>::telem( const typename telT::messageT &msg )
     flipperHarness::g_telemetry.emplace_back( begin, begin + msg.builder.GetSize() );
     return 0;
 }
+
+/// I/O base retaining real configuration while injecting its error contract.
+class flipperTestIODevice : public ioDevice
+{
+  public:
+    /// Load real timeout values before applying a selected failure.
+    int loadConfig( mx::app::appConfigurator &config /**< [in] app configurator */ );
+};
+
+int flipperTestIODevice::loadConfig( mx::app::appConfigurator &config )
+{
+    flipperHarness::g_faults.m_calls.push_back( "io-load" );
+    int rv = ioDevice::loadConfig( config );
+    return rv < 0 ? rv : flipperHarness::g_faults.m_ioLoadResult;
+}
 } // namespace dev
 } // namespace app
 
 namespace tty
 {
+/// USB base retaining real configuration and supplying deterministic discovery/connection results.
+class flipperTestUSBDevice : public usbDevice
+{
+  public:
+    /// Load real USB fields before returning the selected discovery result.
+    int loadConfig( mx::app::appConfigurator &config /**< [in] app configurator */ );
+
+    /// Consume a discovery result without depending on attached hardware.
+    int getDeviceName();
+
+    /// Consume a connection result and own a harmless descriptor on success.
+    int connect();
+};
+
+int flipperTestUSBDevice::loadConfig( mx::app::appConfigurator &config )
+{
+    flipperHarness::g_faults.m_calls.push_back( "usb-load" );
+    usbDevice::loadConfig( config );
+    return flipperHarness::g_faults.m_usbLoadResult;
+}
+
+int flipperTestUSBDevice::getDeviceName()
+{
+    auto &faults = flipperHarness::g_faults;
+    faults.m_calls.push_back( "discover" );
+    int rv = TTY_E_DEVNOTFOUND;
+    if( !faults.m_discoveryResults.empty() )
+    {
+        rv = faults.m_discoveryResults.front();
+        faults.m_discoveryResults.pop_front();
+    }
+    if( rv == 0 )
+        m_deviceName = "/dev/flipper-test";
+    return rv;
+}
+
+int flipperTestUSBDevice::connect()
+{
+    auto &faults = flipperHarness::g_faults;
+    faults.m_calls.push_back( "connect" );
+    if( m_fileDescrip > 0 )
+        ::close( m_fileDescrip );
+    m_fileDescrip = 0;
+    int rv        = 0;
+    if( !faults.m_connectResults.empty() )
+    {
+        rv = faults.m_connectResults.front();
+        faults.m_connectResults.pop_front();
+    }
+    if( rv == 0 )
+    {
+        m_fileDescrip = ::open( "/dev/null", O_RDWR | O_CLOEXEC );
+        if( m_fileDescrip < 0 )
+            return TTY_E_ERRORONWRITE;
+    }
+    return rv;
+}
+
 /// Supply a controlled serial write result while observing the real command bytes.
 int flipperTestWrite( const std::string &command /**< [in] bytes sent by the controller */,
                       int                fd /**< [in] descriptor used only by the native transport test */,
@@ -281,6 +481,8 @@ int flipperTestRead( std::string &response, int bytes, int fd, int timeout )
 {
     auto &faults = flipperHarness::g_faults;
     ++faults.m_reads;
+    if( faults.m_beforeRead )
+        faults.m_beforeRead();
     if( faults.m_nativeSerial )
         return ttyRead( response, bytes, fd, timeout );
     if( bytes <= 0 || faults.m_replies.empty() )
@@ -307,6 +509,32 @@ ssize_t flipperTestFileWrite( int         fd /**< [in] file descriptor */,
 /// Release a descriptor while injecting a selected close error.
 int flipperTestClose( int fd /**< [in] descriptor to release */ );
 
+/// Fail temporary-file creation without leaking an opened descriptor.
+int flipperTestTemporary( char *path /**< [in/out] mkstemp template */ );
+
+/// Fail mode setting while leaving the temporary descriptor available for cleanup.
+int flipperTestMode( int fd /**< [in] temporary descriptor */, mode_t mode /**< [in] requested mode */ );
+
+int flipperTestTemporary( char *path )
+{
+    if( flipperHarness::g_faults.m_failedTemporary )
+    {
+        errno = ENOSPC;
+        return -1;
+    }
+    return ::mkstemp( path );
+}
+
+int flipperTestMode( int fd, mode_t mode )
+{
+    if( flipperHarness::g_faults.m_failedMode )
+    {
+        errno = EPERM;
+        return -1;
+    }
+    return ::fchmod( fd, mode );
+}
+
 int flipperTestClose( int fd )
 {
     int   result = ::close( fd );
@@ -316,6 +544,8 @@ int flipperTestClose( int fd )
         errno = EIO;
         return -1;
     }
+    if( faults.m_afterClose )
+        faults.m_afterClose( faults.m_closes );
     return result;
 }
 
@@ -343,6 +573,8 @@ int flipperTestRename( const char *oldPath, const char *newPath )
 ssize_t flipperTestFileWrite( int fd, const void *data, size_t size )
 {
     auto &faults = flipperHarness::g_faults;
+    if( faults.m_zeroWrite )
+        return 0;
     if( faults.m_failedFileWrite || faults.m_interruptWrite )
     {
         errno                   = faults.m_interruptWrite ? EINTR : EIO;
@@ -355,13 +587,19 @@ ssize_t flipperTestFileWrite( int fd, const void *data, size_t size )
 // Substitute only the application header, leaving the shared library's real declarations intact.
 #define MagAOXApp flipperTestApp
 #define telemeter flipperTestTelemeter
+#define usbDevice flipperTestUSBDevice
+#define ioDevice flipperTestIODevice
 #define ttyWrite flipperTestWrite
 #define ttyRead flipperTestRead
 #define fsync flipperTestSync
 #define rename flipperTestRename
 #define write flipperTestFileWrite
 #define close flipperTestClose
+#define mkstemp flipperTestTemporary
+#define fchmod flipperTestMode
 #include "../flipperCtrl.hpp"
+#undef fchmod
+#undef mkstemp
 #undef close
 #undef write
 #undef rename
@@ -369,6 +607,8 @@ ssize_t flipperTestFileWrite( int fd, const void *data, size_t size )
 #undef ttyRead
 #undef ttyWrite
 #undef telemeter
+#undef ioDevice
+#undef usbDevice
 #undef MagAOXApp
 
 namespace flipperHarness
@@ -407,6 +647,20 @@ size_t mismatchWarnings()
                           } );
 }
 
+size_t calls( const std::string &name )
+{
+    return std::count( g_faults.m_calls.begin(), g_faults.m_calls.end(), name );
+}
+
+size_t logs( flatlogs::logPrioT priority, const std::string &message )
+{
+    return std::count_if(
+        g_logs.begin(),
+        g_logs.end(),
+        [&]( const LogEntry &entry )
+        { return entry.m_priority == priority && entry.m_message.find( message ) != std::string::npos; } );
+}
+
 Directory::Directory()
 {
     std::string name = "/tmp/flipperCtrl-test-XXXXXX";
@@ -439,6 +693,48 @@ namespace libXWCTest
 namespace flipperCtrlTest
 {
 /// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
+/// Real driver whose unactivated input descriptor is released explicitly on destruction.
+class LocalDriver : public indiDriver<MagAOXApp<true>>
+{
+  public:
+    /// Open the controller's private FIFOs without activating a processing thread.
+    LocalDriver( MagAOXApp<true> *parent /**< [in] controller owning this driver */ );
+
+    /// Release the input descriptor; the shared destructor releases output.
+    ~LocalDriver();
+
+  private:
+    /// Input FIFO descriptor opened by the real driver, which has no descriptor getter.
+    int m_inputFd{ -1 };
+};
+
+LocalDriver::LocalDriver( MagAOXApp<true> *parent )
+    : indiDriver<MagAOXApp<true>>( parent, "flipper-local-test", "0", "1.7" )
+{
+    enableResponseMode( true );
+    struct stat input{};
+    REQUIRE( ::stat( parent->driverInName().c_str(), &input ) == 0 );
+    for( const auto &entry : std::filesystem::directory_iterator( "/proc/self/fd" ) )
+    {
+        int         descriptor = std::stoi( entry.path().filename() );
+        struct stat candidate{};
+        if( ::fstat( descriptor, &candidate ) == 0 && candidate.st_dev == input.st_dev &&
+            candidate.st_ino == input.st_ino )
+        {
+            REQUIRE( m_inputFd == -1 );
+            m_inputFd = descriptor;
+        }
+    }
+    REQUIRE( m_inputFd >= 0 );
+}
+
+LocalDriver::~LocalDriver()
+{
+    if( m_inputFd >= 0 )
+        ::close( m_inputFd );
+    setInputFd( -1 );
+}
+
 /// Expose protected app state while running the real app lifecycle and helper implementations.
 class Controller : public flipperCtrl
 {
@@ -451,10 +747,32 @@ class Controller : public flipperCtrl
     ~Controller();
 
     using flipperCtrl::decodePosition;
+    using flipperCtrl::publishPosition;
     using flipperCtrl::readStateFile;
     using flipperCtrl::reportedPosition;
     using flipperCtrl::saveState;
     using flipperCtrl::writeStateFile;
+
+    /// Read and load a temporary configuration through the real app methods.
+    int configure( const std::string &settings /**< [in] configuration text */ );
+
+    /// Return the registered configuration so tests can inspect real option definitions.
+    const mx::app::appConfigurator &configuration() const;
+
+    /// Return the configured physical endpoint for logical in.
+    int inPosition() const;
+
+    /// Return the configured telemetry maximum interval.
+    double telemetryInterval() const;
+
+    /// Return the current serial descriptor without transferring ownership.
+    int descriptor() const;
+
+    /// Install a real local INDI driver and its bounded output reader.
+    void localDriver();
+
+    /// Drain complete outgoing INDI XML messages after a synchronous publication.
+    std::vector<pcf::IndiProperty> messages();
 
     /// Attach a harmless real descriptor and select the connected FSM state.
     void connected();
@@ -485,6 +803,10 @@ class Controller : public flipperCtrl
 
     /// Send a real callback request for a selected logical endpoint.
     int request( bool in /**< [in] select in */, bool out /**< [in] select out */ );
+
+  private:
+    /// Descriptor reading this controller's private outgoing FIFO; -1 means unattached.
+    int m_outputReader{ -1 };
 };
 
 Controller::Controller( const std::filesystem::path &root, const std::string &name )
@@ -503,6 +825,97 @@ Controller::~Controller()
     if( m_fileDescrip > 0 )
         ::close( m_fileDescrip );
     m_fileDescrip = 0;
+    delete m_indiDriver;
+    m_indiDriver = nullptr;
+    if( m_outputReader >= 0 )
+        ::close( m_outputReader );
+}
+
+int Controller::configure( const std::string &settings )
+{
+    setupConfig();
+    const auto file = std::filesystem::path( m_basePath ) / "flipper-test.conf";
+    std::ofstream( file ) << settings;
+    config.readConfig( file.string() );
+    return loadConfigImpl( config );
+}
+
+const mx::app::appConfigurator &Controller::configuration() const
+{
+    return config;
+}
+
+int Controller::inPosition() const
+{
+    return m_inPos;
+}
+
+double Controller::telemetryInterval() const
+{
+    return m_maxInterval;
+}
+
+int Controller::descriptor() const
+{
+    return m_fileDescrip;
+}
+
+void Controller::localDriver()
+{
+    REQUIRE(
+        registerIndiPropertyNew(
+            m_indiP_state, "fsm", pcf::IndiProperty::Text, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle, 0 ) ==
+        0 );
+    m_indiP_state.add( pcf::IndiElement( "state" ) );
+    auto root = std::filesystem::path( m_basePath ) / "indi";
+    std::filesystem::create_directories( root );
+    m_driverInName   = ( root / "input" ).string();
+    m_driverOutName  = ( root / "output" ).string();
+    m_driverCtrlName = ( root / "control" ).string();
+    for( const auto &path : { m_driverInName, m_driverOutName, m_driverCtrlName } )
+    {
+        REQUIRE( ::mkfifo( path.c_str(), 0600 ) == 0 );
+    }
+    m_outputReader = ::open( m_driverOutName.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC );
+    REQUIRE( m_outputReader >= 0 );
+    m_indiDriver = new LocalDriver( this );
+    REQUIRE( m_indiDriver->good() );
+}
+
+std::vector<pcf::IndiProperty> Controller::messages()
+{
+    REQUIRE( m_outputReader >= 0 );
+    std::string xml;
+    char        buffer[4096];
+    pollfd      event{ m_outputReader, POLLIN, 0 };
+    while( ::poll( &event, 1, 0 ) > 0 && ( event.revents & POLLIN ) )
+    {
+        ssize_t size = ::read( m_outputReader, buffer, sizeof( buffer ) );
+        REQUIRE( size > 0 );
+        xml.append( buffer, static_cast<size_t>( size ) );
+        REQUIRE( xml.size() < 65536 );
+    }
+    std::vector<pcf::IndiProperty> properties;
+    pcf::IndiXmlParser             parser( "1.7" );
+    std::string                    error, tail;
+    for( char byte : xml )
+    {
+        tail += byte;
+        parser.parseXml( &byte, 1, error );
+        if( !error.empty() )
+            break;
+        if( parser.getState() == pcf::IndiXmlParser::CompleteState )
+        {
+            auto message = parser.createIndiMessage();
+            REQUIRE( message.getType() == pcf::IndiMessage::SetProperty );
+            properties.push_back( message.getProperty() );
+            parser.clear();
+            tail.clear();
+        }
+    }
+    REQUIRE( error.empty() );
+    REQUIRE( tail.find_first_not_of( " \r\n\t" ) == std::string::npos );
+    return properties;
 }
 
 void Controller::connected()
@@ -1142,6 +1555,675 @@ TEST_CASE( "flipper retained inference survives initial query failure", "[flippe
     REQUIRE( app.appLogic() == 0 );
     REQUIRE( mismatchWarnings() == 1 );
     REQUIRE( app.reportedPosition() == 2 );
+}
+
+/// Load real defaults and overrides, including USB, I/O, reversal, and telemetry configuration.
+/** \ingroup flipperCtrl_unit_test */
+TEST_CASE( "flipper configuration registers and loads real helper options", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl::setupConfig();
+    flipperCtrl::loadConfigImpl(mx::app::appConfigurator());
+    flipperCtrl::loadConfig();
+    #endif
+    // clang-format on
+    reset();
+    Directory   directory;
+    Controller  app( directory.m_path );
+    int         mode = GENERATE( 0, 1, 2 );
+    std::string settings;
+    if( mode )
+    {
+        settings = "[usb]\nidVendor=ffff\nidProduct=fffe\nserial=coverage-only\nbaud=9600\n"
+                   "[device]\nreadTimeout=41\nwriteTimeout=73\n[telemeter]\nmaxInterval=3.5\n"
+                   "[flipper]\nreverse=" +
+                   std::string( mode == 2 ? "true\n" : "false\n" );
+    }
+    REQUIRE( app.configure( settings ) == 0 );
+    for( const auto &name : { "usb.idVendor",
+                              "usb.idProduct",
+                              "usb.serial",
+                              "usb.baud",
+                              "device.readTimeout",
+                              "device.writeTimeout",
+                              "flipper.reverse",
+                              "telemeter.maxInterval" } )
+    {
+        REQUIRE( app.configuration().m_targets.count( name ) == 1 );
+    }
+    REQUIRE( app.inPosition() == ( mode == 2 ? 2 : 1 ) );
+    REQUIRE( app.m_baudRate == ( mode ? B9600 : B115200 ) );
+    REQUIRE( app.m_readTimeout == ( mode ? 41 : 1000 ) );
+    REQUIRE( app.m_writeTimeout == ( mode ? 73 : 1000 ) );
+    REQUIRE( app.telemetryInterval() == ( mode ? 3.5 : 10.0 ) );
+    REQUIRE( app.m_idVendor == ( mode ? "ffff" : "" ) );
+    REQUIRE( app.m_idProduct == ( mode ? "fffe" : "" ) );
+    REQUIRE( app.m_serial == ( mode ? "coverage-only" : "" ) );
+    app.loadConfig();
+    REQUIRE( app.shutdown() == 0 );
+    REQUIRE( calls( "usb-load" ) == 2 );
+    REQUIRE( calls( "io-load" ) == 2 );
+    REQUIRE( calls( "telem-load" ) == 2 );
+}
+
+/// Distinguish tolerated USB discovery results from logged errors and fatal configuration failures.
+/** \ingroup flipperCtrl_unit_test */
+TEST_CASE( "flipper configuration preserves helper failure contracts", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl::setupConfig();
+    flipperCtrl::loadConfigImpl(mx::app::appConfigurator());
+    flipperCtrl::loadConfig();
+    #endif
+    // clang-format on
+    reset();
+    Directory  directory;
+    Controller app( directory.m_path );
+    SECTION( "USB errors are recoverable" )
+    {
+        int rv                   = GENERATE( 0, TTY_E_DEVNOTFOUND, TTY_E_NODEVNAMES, TTY_E_BADBAUDRATE );
+        g_faults.m_usbLoadResult = rv;
+        REQUIRE( app.configure( "" ) == 0 );
+        REQUIRE( logs( software_error::defaultLevel, "" ) == ( rv == TTY_E_BADBAUDRATE ? 1 : 0 ) );
+        REQUIRE( calls( "io-load" ) == 1 );
+        REQUIRE( calls( "telem-load" ) == 1 );
+        REQUIRE( app.shutdown() == 0 );
+    }
+    SECTION( "I/O loading stops before telemetry and requests shutdown" )
+    {
+        g_faults.m_ioLoadResult = -1;
+        REQUIRE( app.configure( "" ) == -1 );
+        REQUIRE( calls( "telem-load" ) == 0 );
+        app.loadConfig();
+        REQUIRE( app.shutdown() == 1 );
+        REQUIRE( logs( software_critical::defaultLevel, "" ) == 1 );
+    }
+    SECTION( "telemetry loading errors propagate to shutdown" )
+    {
+        g_faults.m_telemLoadResult = -1;
+        REQUIRE( app.configure( "" ) == -1 );
+        app.loadConfig();
+        REQUIRE( app.shutdown() == 1 );
+        REQUIRE( logs( software_error::defaultLevel, "telemeterT::loadConfig" ) == 2 );
+        REQUIRE( logs( software_critical::defaultLevel, "" ) == 1 );
+    }
+    SECTION( "telemetry setup requests shutdown without loading configuration" )
+    {
+        g_faults.m_telemSetupResult = -1;
+        app.setupConfig();
+        REQUIRE( app.shutdown() == 1 );
+        REQUIRE( calls( "usb-load" ) == 0 );
+        REQUIRE( logs( software_error::defaultLevel, "telemeterT::setupConfig" ) == 1 );
+    }
+}
+
+/// Stop startup at its exact failed property or telemetry operation.
+/** \ingroup flipperCtrl_unit_test */
+TEST_CASE( "flipper startup rejects fatal registration and telemetry failures", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl::appStartup();
+    #endif
+    // clang-format on
+    reset();
+    Directory  directory;
+    Controller app( directory.m_path );
+    int        failure = GENERATE( 0, 1, 2, 3 );
+    if( failure < 3 )
+    {
+        g_faults.m_propertyFailure = static_cast<Faults::PropertyFailure>( failure + 1 );
+    }
+    else
+        g_faults.m_telemStartupResult = -1;
+    REQUIRE( app.appStartup() == -1 );
+    REQUIRE( calls( "selection" ) == 1 );
+    REQUIRE( calls( "register-new" ) == ( failure >= 1 ? 1 : 0 ) );
+    REQUIRE( calls( "register-read-only" ) == ( failure >= 2 ? 1 : 0 ) );
+    REQUIRE( calls( "telem-startup" ) == ( failure == 3 ? 1 : 0 ) );
+    REQUIRE( logs( software_error::defaultLevel, "" ) == 1 );
+    REQUIRE( g_faults.m_commands.empty() );
+    REQUIRE_FALSE( std::filesystem::exists( app.path() ) );
+}
+
+/// Exercise powered-on and OFF telemetry errors, including the non-propagating shutdown macro.
+/** \ingroup flipperCtrl_unit_test */
+TEST_CASE( "flipper lifecycle honors telemetry error returns", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl::appLogic();
+    flipperCtrl::whilePowerOff();
+    flipperCtrl::appShutdown();
+    #endif
+    // clang-format on
+    reset();
+    Directory  directory;
+    Controller app( directory.m_path );
+    REQUIRE( app.appStartup() == 0 );
+    SECTION( "powered-on scheduling fails after live publication" )
+    {
+        app.connected();
+        g_faults.m_replies.push_back( status( 1 ) );
+        g_faults.m_telemLogicResult = -1;
+        REQUIRE( app.appLogic() == -1 );
+        REQUIRE( app.reportedPosition() == 1 );
+        REQUIRE( app.state() == stateCodes::READY );
+    }
+    SECTION( "OFF scheduling fails without any hardware or disk I/O" )
+    {
+        g_faults.m_telemLogicResult = -1;
+        REQUIRE( app.whilePowerOff() == -1 );
+        REQUIRE( g_faults.m_commands.empty() );
+        REQUIRE( g_faults.m_syncs == 0 );
+        REQUIRE( app.state() == stateCodes::POWEROFF );
+    }
+    SECTION( "shutdown logs an error but returns success and releases serial ownership" )
+    {
+        app.connected();
+        int fd                         = app.descriptor();
+        g_faults.m_telemShutdownResult = -1;
+        REQUIRE( app.appShutdown() == 0 );
+        REQUIRE( app.descriptor() == 0 );
+        REQUIRE( ::fcntl( fd, F_GETFD ) == -1 );
+        REQUIRE( errno == EBADF );
+        REQUIRE( logs( software_error::defaultLevel, "telemeterT::appShutdown" ) == 1 );
+    }
+    REQUIRE( logs( software_error::defaultLevel, "" ) == 1 );
+}
+
+/// Guard every phase of discovery while observed or requested power is unavailable.
+/** \ingroup flipperCtrl_unit_test */
+TEST_CASE( "flipper FSM power guards avoid dependency side effects", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl::appLogic();
+    #endif
+    // clang-format on
+    reset();
+    Directory  directory;
+    Controller app( directory.m_path );
+    REQUIRE( app.appStartup() == 0 );
+    app.state( stateCodes::CONNECTED );
+    int mode = GENERATE( 0, 1, 2, 3 );
+    app.power( mode == 0 ? 0 : ( mode == 1 ? -1 : 1 ), mode < 2 ? 1 : ( mode == 2 ? 0 : -1 ) );
+    auto previous = app.state();
+    g_faults.m_calls.clear();
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.state() == previous );
+    REQUIRE( g_faults.m_calls.empty() );
+    REQUIRE( g_faults.m_commands.empty() );
+    REQUIRE( g_faults.m_reads == 0 );
+    REQUIRE( g_faults.m_syncs == 0 );
+}
+
+/// Discover, connect, and freshly confirm endpoints through the production POWERON FSM.
+/** \ingroup flipperCtrl_unit_test */
+TEST_CASE( "flipper discovers absent devices and recovers without false readiness", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl::appLogic();
+    #endif
+    // clang-format on
+    reset();
+    Directory  directory;
+    Controller app( directory.m_path );
+    REQUIRE( app.appStartup() == 0 );
+    app.power( 1, 1 );
+    app.state( stateCodes::POWERON );
+    int missing = GENERATE( TTY_E_DEVNOTFOUND, TTY_E_NODEVNAMES );
+    g_faults.m_calls.clear();
+    g_faults.m_discoveryResults = { missing, missing, 0 };
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.state() == stateCodes::NODEVICE );
+    REQUIRE( calls( "connect" ) == 0 );
+    REQUIRE( g_faults.m_commands.empty() );
+    REQUIRE( logs( text_log::defaultLevel, "not found in udev" ) == 1 );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( logs( text_log::defaultLevel, "not found in udev" ) == 1 );
+    bool moving = GENERATE( false, true );
+    g_faults.m_replies.push_back( status( moving ? 0 : 2 ) );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.state() == ( moving ? stateCodes::OPERATING : stateCodes::READY ) );
+    REQUIRE( app.reportedPosition() == ( moving ? 0 : 2 ) );
+    REQUIRE( app.descriptor() > 0 );
+    REQUIRE( calls( "discover" ) == 3 );
+    REQUIRE( calls( "connect" ) == 1 );
+    REQUIRE( g_faults.m_commands.size() == 1 );
+    REQUIRE( logs( text_log::defaultLevel, "found in udev as /dev/flipper-test" ) == 1 );
+}
+
+/// Distinguish disappearance, fatal rediscovery, and retryable connection failure.
+/** \ingroup flipperCtrl_unit_test */
+TEST_CASE( "flipper connection errors rediscover and preserve FSM contracts", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl::appLogic();
+    #endif
+    // clang-format on
+    reset();
+    Directory  directory;
+    Controller app( directory.m_path );
+    REQUIRE( app.appStartup() == 0 );
+    app.power( 1, 1 );
+    app.state( stateCodes::POWERON );
+    g_faults.m_calls.clear();
+    SECTION( "initial discovery fails critically" )
+    {
+        g_faults.m_discoveryResults = { TTY_E_BADBAUDRATE };
+        REQUIRE( app.appLogic() == -1 );
+        REQUIRE( app.state() == stateCodes::FAILURE );
+        REQUIRE( calls( "connect" ) == 0 );
+        REQUIRE( logs( software_critical::defaultLevel, "" ) == 1 );
+    }
+    SECTION( "failed connection triggers rediscovery before retry" )
+    {
+        int rv                      = GENERATE( 0, TTY_E_DEVNOTFOUND, TTY_E_NODEVNAMES, TTY_E_BADBAUDRATE );
+        g_faults.m_discoveryResults = { 0, rv };
+        g_faults.m_connectResults   = { TTY_E_ERRORONWRITE };
+        REQUIRE( app.appLogic() == ( rv == TTY_E_BADBAUDRATE ? -1 : 0 ) );
+        REQUIRE( g_faults.m_calls == std::vector<std::string>{ "discover", "connect", "discover" } );
+        REQUIRE( app.descriptor() == 0 );
+        REQUIRE( app.state() == ( rv == TTY_E_BADBAUDRATE
+                                      ? stateCodes::FAILURE
+                                      : ( rv == 0 ? stateCodes::NOTCONNECTED : stateCodes::NODEVICE ) ) );
+        REQUIRE( logs( software_critical::defaultLevel, "" ) == ( rv == TTY_E_BADBAUDRATE ? 1 : 0 ) );
+        if( rv != 0 && rv != TTY_E_BADBAUDRATE )
+        {
+            REQUIRE( logs( text_log::defaultLevel, "no longer found in udev" ) == 1 );
+        }
+        if( rv != TTY_E_BADBAUDRATE )
+        {
+            g_faults.m_discoveryResults = { 0 };
+            g_faults.m_replies.push_back( status( 1 ) );
+            REQUIRE( app.appLogic() == 0 );
+            REQUIRE( app.state() == stateCodes::READY );
+            REQUIRE( app.reportedPosition() == 1 );
+        }
+    }
+}
+
+/// Recover from a real FSM query error by reconnecting and replacing the lost descriptor.
+/** \ingroup flipperCtrl_unit_test */
+TEST_CASE( "flipper reconnects after a failed initial status query", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl::appLogic();
+    #endif
+    // clang-format on
+    reset();
+    Directory  directory;
+    Controller app( directory.m_path );
+    REQUIRE( app.appStartup() == 0 );
+    app.power( 1, 1 );
+    app.state( stateCodes::POWERON );
+    g_faults.m_discoveryResults = { 0 };
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.state() == stateCodes::NOTCONNECTED );
+    REQUIRE( app.reportedPosition() == 0 );
+    REQUIRE( app.parked() == 0 );
+    g_faults.m_replies.push_back( status( 2 ) );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.state() == stateCodes::READY );
+    REQUIRE( app.reportedPosition() == 2 );
+    REQUIRE( calls( "discover" ) == 1 );
+    REQUIRE( calls( "connect" ) == 2 );
+    REQUIRE( g_faults.m_commands.size() == 2 );
+    REQUIRE( contents( app.path() ) == "2\n1\n" );
+}
+
+/// Verify actual timestamped INDI messages for unknown, retained, moving, completed, and OFF states.
+/** \ingroup flipperCtrl_unit_test */
+TEST_CASE( "flipper publication sends coherent properties through real private FIFOs", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl::publishPosition();
+    flipperCtrl::appLogic();
+    flipperCtrl::onPowerOff();
+    #endif
+    // clang-format on
+    reset();
+    Directory  directory;
+    Controller app( directory.m_path );
+    bool       reversed = GENERATE( false, true );
+    if( reversed )
+        app.reverse();
+    app.localDriver();
+    REQUIRE( app.appStartup() == 0 );
+    auto initial = app.messages();
+    REQUIRE( initial.size() == 1 );
+    REQUIRE( initial[0].getName() == "presetName" );
+    REQUIRE( initial[0].getState() == INDI_ALERT );
+    REQUIRE( initial[0]["in"].getSwitchState() == pcf::IndiElement::Off );
+    REQUIRE( initial[0]["out"].getSwitchState() == pcf::IndiElement::Off );
+    app.connected();
+    auto connected = app.messages();
+    REQUIRE( connected.size() == 1 );
+    REQUIRE( connected[0].getName() == "fsm" );
+    REQUIRE( connected[0]["state"].get<std::string>() == "CONNECTED" );
+    g_faults.m_replies.push_back( status( 1 ) );
+    REQUIRE( app.appLogic() == 0 );
+    auto parked = app.messages();
+    REQUIRE( parked.size() == 2 );
+    REQUIRE( parked[0].getName() == "presetName" );
+    REQUIRE( parked[0].getState() == INDI_IDLE );
+    REQUIRE( parked[0]["in"].getSwitchState() == ( reversed ? pcf::IndiElement::Off : pcf::IndiElement::On ) );
+    REQUIRE( parked[0]["out"].getSwitchState() == ( reversed ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
+    REQUIRE( parked[1].getName() == "parked" );
+    REQUIRE( parked[1]["current"].get<int>() == 1 );
+    REQUIRE( parked[0].getTimeStamp().getTimeValSecs() > 0 );
+    REQUIRE( app.publishPosition() == 0 );
+    REQUIRE( app.messages().empty() );
+    REQUIRE( app.moveTo( 2 ) == 0 );
+    auto busy = app.messages();
+    REQUIRE( busy.size() == 2 );
+    REQUIRE( busy[0].getState() == INDI_BUSY );
+    REQUIRE( busy[0]["in"].getSwitchState() == parked[0]["in"].getSwitchState() );
+    REQUIRE( busy[0]["out"].getSwitchState() == parked[0]["out"].getSwitchState() );
+    REQUIRE( busy[1]["current"].get<int>() == 0 );
+    g_faults.m_replies.push_back( status( 2 ) );
+    REQUIRE( app.appLogic() == 0 );
+    auto settled = app.messages();
+    REQUIRE( settled.size() == 2 );
+    REQUIRE( settled[0].getState() == INDI_IDLE );
+    REQUIRE( settled[0]["in"].getSwitchState() == ( reversed ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
+    REQUIRE( settled[0]["out"].getSwitchState() == ( reversed ? pcf::IndiElement::Off : pcf::IndiElement::On ) );
+    REQUIRE( settled[1]["current"].get<int>() == 1 );
+    app.power( 0, 0 );
+    REQUIRE( app.onPowerOff() == 0 );
+    auto off = app.messages();
+    REQUIRE( off.size() == 1 );
+    REQUIRE( off[0].getName() == "fsm" );
+    REQUIRE( off[0]["state"].get<std::string>() == "POWEROFF" );
+    REQUIRE( std::none_of( off.begin(),
+                           off.end(),
+                           []( const pcf::IndiProperty &property )
+                           { return property.getName() == "presetName" || property.getName() == "parked"; } ) );
+    REQUIRE( app.reportedPosition() == 2 );
+    REQUIRE( app.publishPosition() == 0 );
+    REQUIRE( app.messages().empty() );
+}
+
+/// Handle directory, temporary-file, permissions, zero-write, and directory-close failures safely.
+/** \ingroup flipperCtrl_unit_test */
+TEST_CASE( "flipper persistence cleans up every remaining filesystem failure", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl::readStateFile();
+    flipperCtrl::writeStateFile(1, true);
+    flipperCtrl::moveTo(2);
+    #endif
+    // clang-format on
+    reset();
+    Directory  directory;
+    Controller app( directory.m_path );
+    SECTION( "non-missing open error is reported and remains unknown" )
+    {
+        std::filesystem::create_symlink( "position", app.path() );
+        REQUIRE( app.readStateFile() == -1 );
+        REQUIRE( app.reportedPosition() == 0 );
+        REQUIRE( logs( software_error::defaultLevel, "cannot read flipper state file" ) == 1 );
+    }
+    SECTION( "missing state directory rejects the durable write" )
+    {
+        std::filesystem::remove( app.path().parent_path() );
+        REQUIRE( app.writeStateFile( 1, true ) == -1 );
+        REQUIRE( g_faults.m_closes == 0 );
+        REQUIRE( logs( software_error::defaultLevel, "cannot open flipper state directory" ) == 1 );
+    }
+    SECTION( "failed temporary-file creation closes the directory" )
+    {
+        g_faults.m_failedTemporary = true;
+        REQUIRE( app.writeStateFile( 1, true ) == -1 );
+        REQUIRE( g_faults.m_closes == 1 );
+        REQUIRE( std::filesystem::is_empty( app.path().parent_path() ) );
+        REQUIRE( logs( software_error::defaultLevel, "cannot create flipper state file" ) == 1 );
+    }
+    SECTION( "mode-setting and zero-byte failures remove temporary files" )
+    {
+        bool mode             = GENERATE( false, true );
+        g_faults.m_failedMode = mode;
+        g_faults.m_zeroWrite  = !mode;
+        REQUIRE( app.writeStateFile( 1, true ) == -1 );
+        REQUIRE( g_faults.m_closes == 2 );
+        REQUIRE( std::filesystem::is_empty( app.path().parent_path() ) );
+        REQUIRE( logs( software_error::defaultLevel, "cannot durably store flipper position" ) == 1 );
+    }
+    SECTION( "failed directory close rejects movement even after replacement" )
+    {
+        REQUIRE( app.appStartup() == 0 );
+        app.connected();
+        g_faults.m_replies.push_back( status( 1 ) );
+        REQUIRE( app.appLogic() == 0 );
+        g_faults.m_commands.clear();
+        g_faults.m_failedClose = g_faults.m_closes + 2;
+        REQUIRE( app.moveTo( 2 ) == -1 );
+        REQUIRE( g_faults.m_commands.empty() );
+        REQUIRE( contents( app.path() ) == "1\n0\n" );
+        REQUIRE( app.target() == 1 );
+        REQUIRE_FALSE( app.pending() );
+    }
+}
+
+/// Reject failed external-change invalidation and exercise immediate forced retry semantics.
+/** \ingroup flipperCtrl_unit_test */
+TEST_CASE( "flipper external invalidation failure retries conservatively", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl::saveState(true);
+    flipperCtrl::appLogic();
+    #endif
+    // clang-format on
+    reset();
+    Directory  directory;
+    Controller app( directory.m_path );
+    REQUIRE( app.appStartup() == 0 );
+    app.connected();
+    g_faults.m_replies.push_back( status( 1 ) );
+    REQUIRE( app.appLogic() == 0 );
+    g_faults.m_failedRename = true;
+    g_faults.m_replies.push_back( status( 2 ) );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.reportedPosition() == 2 );
+    REQUIRE( contents( app.path() ) == "1\n1\n" );
+    REQUIRE( logs( software_error::defaultLevel, "cannot durably store flipper position" ) == 1 );
+    auto syncs = g_faults.m_syncs;
+    REQUIRE( app.saveState() == -1 );
+    REQUIRE( g_faults.m_syncs == syncs );
+    g_faults.m_failedRename = false;
+    REQUIRE( app.saveState( true ) == 0 );
+    REQUIRE( contents( app.path() ) == "2\n1\n" );
+    REQUIRE( g_faults.m_syncs == syncs + 4 );
+    syncs = g_faults.m_syncs;
+    REQUIRE( app.saveState( true ) == 0 );
+    REQUIRE( g_faults.m_syncs == syncs + 2 );
+    REQUIRE( app.saveState() == 0 );
+    REQUIRE( g_faults.m_syncs == syncs + 2 );
+    REQUIRE( mismatchWarnings() == 0 );
+}
+
+/// Bound memory and read attempts without accepting an incomplete position frame.
+/** \ingroup flipperCtrl_unit_test */
+TEST_CASE( "flipper query rejects missing descriptors and exhausted framing", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl::getPos();
+    #endif
+    // clang-format on
+    reset();
+    Directory  directory;
+    Controller app( directory.m_path );
+    REQUIRE( app.appStartup() == 0 );
+    app.connected();
+    SECTION( "descriptor is missing before request" )
+    {
+        app.attach( 0 );
+        REQUIRE( app.getPos() == -1 );
+        REQUIRE( g_faults.m_commands.empty() );
+        REQUIRE( logs( software_error::defaultLevel, "without a connection" ) == 1 );
+    }
+    SECTION( "oversized reply is rejected before decoding" )
+    {
+        g_faults.m_replies.push_back( std::string( 4097, 'x' ) );
+        REQUIRE( app.getPos() == -1 );
+        REQUIRE( logs( software_error::defaultLevel, "oversized flipper response" ) == 1 );
+    }
+    SECTION( "eight valid completion messages do not manufacture a status" )
+    {
+        auto completion = status( 1 );
+        completion[0]   = 0x66;
+        for( unsigned i = 0; i < 8; ++i )
+            g_faults.m_replies.push_back( completion );
+        REQUIRE( app.getPos() == -1 );
+        REQUIRE( g_faults.m_reads == 8 );
+        REQUIRE( logs( software_error::defaultLevel, "incomplete flipper position response" ) == 1 );
+    }
+    SECTION( "eight tiny fragments are still incomplete" )
+    {
+        for( char byte : status( 1 ) )
+            g_faults.m_replies.emplace_back( 1, byte );
+        REQUIRE( app.getPos() == -1 );
+        REQUIRE( g_faults.m_reads == 8 );
+        REQUIRE( logs( software_error::defaultLevel, "incomplete flipper position response" ) == 1 );
+    }
+    SECTION( "completion from the wrong source is rejected" )
+    {
+        auto completion = status( 1 );
+        completion[0]   = 0x64;
+        completion[5]   = 0x51;
+        g_faults.m_replies.push_back( completion );
+        REQUIRE( app.getPos() == -1 );
+        REQUIRE( logs( software_error::defaultLevel, "unexpected flipper response" ) == 1 );
+    }
+    SECTION( "deadline is already expired" )
+    {
+        app.m_readTimeout = 0;
+        REQUIRE( app.getPos() == -1 );
+        REQUIRE( g_faults.m_reads == 0 );
+    }
+    REQUIRE( app.reportedPosition() == 0 );
+    REQUIRE( contents( app.path() ) == "0\n0\n" );
+}
+
+/// Inject synchronous power events at the guarded query and pre-command persistence boundaries.
+/** \ingroup flipperCtrl_unit_test */
+TEST_CASE( "flipper power transitions cannot bypass post-I/O guards", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl::appLogic();
+    flipperCtrl::moveTo(2);
+    flipperCtrl::onPowerOff();
+    #endif
+    // clang-format on
+    reset();
+    Directory  directory;
+    Controller app( directory.m_path );
+    REQUIRE( app.appStartup() == 0 );
+    app.connected();
+    g_faults.m_replies.push_back( status( 1 ) );
+    REQUIRE( app.appLogic() == 0 );
+    g_faults.m_commands.clear();
+    SECTION( "power changes while the status reply is received" )
+    {
+        bool readFails        = GENERATE( false, true );
+        g_faults.m_beforeRead = [&] { app.power( 0, 0 ); };
+        if( !readFails )
+            g_faults.m_replies.push_back( status( 1 ) );
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::POWEROFF );
+        REQUIRE( contents( app.path() ) == "1\n1\n" );
+        REQUIRE( g_faults.m_commands.size() == 1 );
+        REQUIRE( app.reportedPosition() == 1 );
+    }
+    SECTION( "observed or requested power changes after durable invalidation" )
+    {
+        bool     requestedPowerChanges = GENERATE( false, true );
+        unsigned afterDirectoryClose   = g_faults.m_closes + 2;
+        g_faults.m_afterClose          = [&]( unsigned closed )
+        {
+            if( closed == afterDirectoryClose )
+                app.power( requestedPowerChanges ? 1 : 0, requestedPowerChanges ? 0 : 1 );
+        };
+        REQUIRE( app.moveTo( 2 ) == -1 );
+        REQUIRE( g_faults.m_commands.empty() );
+        REQUIRE( contents( app.path() ) == "1\n0\n" );
+        app.power( 0, 0 );
+        REQUIRE( app.onPowerOff() == 0 );
+        REQUIRE( app.reportedPosition() == 0 );
+        REQUIRE( app.target() == 0 );
+        REQUIRE_FALSE( app.pending() );
+    }
+    g_faults.m_beforeRead = {};
+    g_faults.m_afterClose = {};
+}
+
+/// Execute the real static callback dispatcher and both no-selection representations.
+/** \ingroup flipperCtrl_unit_test */
+TEST_CASE( "flipper callback dispatch handles complete and empty selections", "[flipperCtrl]" )
+{
+    // clang-format off
+    #ifdef FLIPPERCTRL_TEST_DOXYGEN_REF
+    flipperCtrl::st_newCallBack_m_indiP_position(nullptr, pcf::IndiProperty());
+    flipperCtrl::newCallBack_m_indiP_position(pcf::IndiProperty());
+    #endif
+    // clang-format on
+    reset();
+    Directory  directory;
+    Controller app( directory.m_path );
+    bool       reversed = GENERATE( false, true );
+    if( reversed )
+        app.reverse();
+    REQUIRE( app.appStartup() == 0 );
+    app.connected();
+    g_faults.m_replies.push_back( status( 1 ) );
+    REQUIRE( app.appLogic() == 0 );
+    g_faults.m_commands.clear();
+    pcf::IndiProperty request = app.m_indiP_position;
+    SECTION( "both switches are off" )
+    {
+        request["in"].setSwitchState( pcf::IndiElement::Off );
+        request["out"].setSwitchState( pcf::IndiElement::Off );
+        REQUIRE( flipperCtrl::st_newCallBack_m_indiP_position( &app, request ) == 0 );
+        REQUIRE( g_faults.m_commands.empty() );
+        REQUIRE( app.target() == 1 );
+    }
+    SECTION( "no selection elements are supplied" )
+    {
+        pcf::IndiProperty empty( pcf::IndiProperty::Switch );
+        empty.setDevice( request.getDevice() );
+        empty.setName( request.getName() );
+        REQUIRE( flipperCtrl::st_newCallBack_m_indiP_position( &app, empty ) == 0 );
+        REQUIRE( g_faults.m_commands.empty() );
+    }
+    SECTION( "valid selection dispatches the mapped raw endpoint" )
+    {
+        request["in"].setSwitchState( reversed ? pcf::IndiElement::On : pcf::IndiElement::Off );
+        request["out"].setSwitchState( reversed ? pcf::IndiElement::Off : pcf::IndiElement::On );
+        REQUIRE( flipperCtrl::st_newCallBack_m_indiP_position( &app, request ) == 0 );
+        REQUIRE( app.target() == 2 );
+        REQUIRE( g_faults.m_commands == std::vector<std::string>{ std::string( "\x6a\x04\x00\x02\x50\x01", 6 ) } );
+    }
+    SECTION( "wrong device or property name is rejected by the dispatcher" )
+    {
+        bool wrongName = GENERATE( false, true );
+        if( wrongName )
+            request.setName( "wrong" );
+        else
+            request.setDevice( "wrong" );
+        REQUIRE( flipperCtrl::st_newCallBack_m_indiP_position( &app, request ) == -1 );
+        REQUIRE( g_faults.m_commands.empty() );
+    }
 }
 
 } // namespace flipperCtrlTest
