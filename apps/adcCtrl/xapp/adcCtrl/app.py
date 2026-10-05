@@ -222,7 +222,7 @@ class States(Enum):
     IDLE = 0
     CLOSED_LOOP = 1
     ONESHOT = 2
-    CALIB = 3
+    MEASURE_ONLY = 3
 
 class adcCtrl(XDevice):
     config: AdcCtrlConfig
@@ -242,7 +242,7 @@ class adcCtrl(XDevice):
         sv.add_element(DefSwitch(name="idle", _value=constants.SwitchState.ON))
         sv.add_element(DefSwitch(name="adcLoop", _value=constants.SwitchState.OFF))
         sv.add_element(DefSwitch(name="oneshot", _value=constants.SwitchState.OFF))
-        sv.add_element(DefSwitch(name="calibrate", _value=constants.SwitchState.OFF))
+        sv.add_element(DefSwitch(name="measure-only", _value=constants.SwitchState.OFF))
         self.add_property(sv, callback=self.handle_state)
 
         nv = properties.NumberVector(name='n_avg')
@@ -380,7 +380,7 @@ class adcCtrl(XDevice):
         self.update_property(self.properties['fsm'])
 
     def handle_state(self, existing_property, new_message):
-        target_list = ['idle', 'adcLoop', 'oneshot','calibrate']
+        target_list = ['idle', 'adcLoop', 'oneshot','measure-only']
         for key in target_list:
             if existing_property[key] == constants.SwitchState.ON:
                 current_state = key
@@ -395,23 +395,19 @@ class adcCtrl(XDevice):
                     if key == 'idle':
                         self._state = States.IDLE
                         self.properties['fsm']['state'] = StateCodes.READY.name
-                        #self._command = 0
                         self.log.debug('State changed to idle')
                     elif key == 'adcLoop':
                         self._state = States.CLOSED_LOOP
-                        #self.update_wavelength()
                         self.properties['fsm']['state'] = StateCodes.OPERATING.name
                         self.log.debug('State changed to closed-loop')
                     elif key == 'oneshot':
                         self._state = States.ONESHOT
-                        #self.update_wavelength()
                         self.properties['fsm']['state'] = StateCodes.OPERATING.name
                         self.log.debug('State changed to oneshot')
-                    elif key == 'calibrate':
-                        self._state = States.CALIB
-                        #self.update_wavelength()
+                    elif key == 'measure-only':
+                        self._state = States.MEASURE_ONLY
                         self.properties['fsm']['state'] = StateCodes.OPERATING.name
-                        self.log.debug('State changed to calibration')
+                        self.log.debug('State changed to measure-only')
 
             self.update_property(existing_property)
             self.update_property(self.properties['fsm'])
@@ -535,7 +531,7 @@ class adcCtrl(XDevice):
         #self._command = 0
         self.properties['state']['oneshot'] = constants.SwitchState.OFF
         self.properties['state']['adcLoop'] = constants.SwitchState.OFF
-        self.properties['state']['calibrate'] = constants.SwitchState.OFF
+        self.properties['state']['measure-only'] = constants.SwitchState.OFF
         self.properties['state']['idle'] = constants.SwitchState.ON
         self.update_property(self.properties['state'])
         self._state = States.IDLE
@@ -648,99 +644,8 @@ class adcCtrl(XDevice):
             self._command = 0
             self.log.info('successfully transitioned to idle')
 
-        elif self._state == States.CALIB:
-            sweep_angles = np.linspace(-3,3,26)
-            diff_pointing_pairs = np.zeros((len(sweep_angles),2))
-
-            if self._knife_edge == False:
-                self.log.debug(f'calibrating in regular mode')
-                for i, orientation in enumerate(sweep_angles):
-                    self.log.debug(f'Step {i:d}')
-                    self.set_command(orientation, 0)
-                    self.send_command()
-
-                    img = self.camera.grab_stack(self._n_avg)
-                    transpose = img.shaped.T
-                    img = transpose.ravel()
-
-                    if self._lab == False:
-                        img = self.ADC.filter_image(img)
-
-                    img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
-                    self.ADC.set_psf(img)
-
-                    angles = self.ADC.find_speckle_angles2()
-                    pointing_pair = self.ADC.speckle_pairs(angles)
-                    diff_pointing_pairs[i,] = pointing_pair
-
-                # self.set_command(0,0)
-                # self.send_command()
-
-                # a1 = np.zeros(2)
-                # b1 = np.zeros(2)
-
-                # for j in range(2):
-                #     b1[j] , a1[j] = np.polyfit(sweep_angles,diff_pointing_pairs[:,j],deg=1)
-
-                # response = np.matrix([b1])
-                # self.log.debug(f'response matrix: {response}')
-
-                # if np.isnan(np.sum(response)):
-                #     self.log.info(f'calibration failed, measured response is NaN')
-                #     self.transition_to_idle()
-                # else:
-                #     new_control_mtx = np.linalg.pinv(response)
-
-                #     self._control_mtx = new_control_mtx.T
-
-            else:
-                self.log.debug(f'calibrating in knife-edge mode')
-                for i, orientation in enumerate(sweep_angles):
-                    self.log.debug(f'Step {i:d}')
-                    self.set_command(orientation, 0)
-                    self.send_command()
-
-                    img = self.camera.grab_stack(self._n_avg)
-                    transpose = img.shaped.T
-                    img = transpose.ravel()
-
-                    if self._lab == False:
-                        img = self.ADC.filter_image(img)
-
-                    img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
-                    self.ADC.set_psf(img)
-
-                    angles = self.ADC.find_speckle_angles2()
-                    bottom_speckle_angles = np.array([angles[1],angles[2]])
-                    diff_pointing_pairs[i,] = bottom_speckle_angles
-
-            self.set_command(0,0)
-            self.send_command()
-
-            a1 = np.zeros(2)
-            b1 = np.zeros(2)
-
-            for j in range(2):
-                b1[j] , a1[j] = np.polyfit(sweep_angles,diff_pointing_pairs[:,j],deg=1)
-
-            response = np.matrix([b1])
-            self.log.debug(f'response matrix: {response}')
-
-            if np.isnan(np.sum(response)):
-                self.log.info(f'calibration failed, measured response is NaN')
-                self.transition_to_idle()
-            else:
-                new_control_mtx = np.linalg.pinv(response)
-
-            self._control_mtx = new_control_mtx.T
-            self.ADC.set_control_mtx(self._control_mtx)
-            self.log.info(f'calibration updated control matrix to: {self._control_mtx}')
-
-            self.properties['ctrl_mtx']['m00'] = self._control_mtx[0,0]
-            self.properties['ctrl_mtx']['m01'] = self._control_mtx[0,1]
-            self.update_property(self.properties['ctrl_mtx'])
-
-            self.transition_to_idle()
+        elif self._state == States.MEASURE_ONLY:
+            pass
 
 # Used to make the pyproject.toml just a little simpler,
 # with fewer repetitions of the app name:
