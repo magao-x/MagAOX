@@ -38,6 +38,8 @@
  *
  * When no usable preset is selected, the display can show the numerical `current` position with four decimals.
  * `presetPrefix=filter` uses `<device>.filter`; other prefixes use `<device>.position`.
+ * `hasPosition` defaults true. Set it false for controllers without numeric position telemetry to disable
+ * the numeric subscription, ignore unsolicited numeric updates, and suppress the numeric fallback.
  * Position telemetry changes labels only, never put states or route enablement. Tracking labels retain priority.
  * Numeric display includes motion states and the same opted-in parked startup states.
  *
@@ -58,6 +60,9 @@ class stdMotionNode : public fsmNode
 
     /// Whether the latest preset property is a Switch vector with exactly one selected name.
     bool m_presetSelectionValid{ false };
+
+    /// Whether the controller publishes numeric position; false disables its subscription and display.
+    bool m_hasPosition{ true };
 
     /// The device-local numeric property used for display, chosen from the configured preset prefix.
     std::string m_positionKey;
@@ -242,7 +247,10 @@ inline void stdMotionNode::device( const std::string &dev )
         m_presetKey = m_device + "." + m_presetPrefix + "Name";
         key( m_presetKey );
         m_positionKey = m_device + "." + ( m_presetPrefix == "filter" ? "filter" : "position" );
-        key( m_positionKey );
+        if( m_hasPosition )
+        {
+            key( m_positionKey );
+        }
     }
 }
 
@@ -267,7 +275,10 @@ inline void stdMotionNode::presetPrefix( const std::string &pp )
         m_presetKey = m_device + "." + m_presetPrefix + "Name";
         key( m_presetKey );
         m_positionKey = m_device + "." + ( m_presetPrefix == "filter" ? "filter" : "position" );
-        key( m_positionKey );
+        if( m_hasPosition )
+        {
+            key( m_positionKey );
+        }
     }
 }
 
@@ -355,6 +366,10 @@ inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.createUniqueKey() == m_positionKey )
     {
+        if( !m_hasPosition )
+        {
+            return 0;
+        }
         // Target-only updates do not replace a measured current position.
         if( !ipRecv.find( "current" ) )
         {
@@ -496,7 +511,7 @@ inline int stdMotionNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 
 inline void stdMotionNode::updatePositionLabel()
 {
-    if( m_node == nullptr || !m_parentGraph || !m_node->auxDataValid() )
+    if( !m_hasPosition || m_node == nullptr || !m_parentGraph || !m_node->auxDataValid() )
     {
         return;
     }
@@ -1108,6 +1123,7 @@ inline void stdMotionNode::loadConfig( mx::app::appConfigurator &config )
     }
 
     config.configUnused( m_parkable, mx::app::iniFile::makeKey( name(), "parkable" ) );
+    config.configUnused( m_hasPosition, mx::app::iniFile::makeKey( name(), "hasPosition" ) );
 
     device( dev );
     presetPrefix( prePrefix );

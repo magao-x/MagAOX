@@ -2691,6 +2691,89 @@ TEST_CASE( "stdMotionNode retains parked routing through power-on sequences",
         }
 }
 
+/// Numeric capability controls subscriptions and fallback without changing named legacy or mapped routes.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "stdMotionNode makes numerical position support optional", "[instGraph::stdMotionNode][position]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    stdMotionNode::loadConfig( *(mx::app::appConfigurator *)nullptr );
+    stdMotionNode::device( "fwtelsim" );
+    stdMotionNode::presetPrefix( "preset" );
+    stdMotionNode::handleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::updatePositionLabel();
+    #endif
+    // clang-format on
+
+    for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
+        for( const std::string prefix : { "preset", "filter" } )
+            for( const std::string option : { "", "true", "false" } )
+                for( const bool mapped : { false, true } )
+                {
+                    CAPTURE( dir, prefix, option, mapped );
+                    const bool        enabled  = option != "false";
+                    const std::string property = prefix == "filter" ? "filter" : "position";
+                    const std::string rows     = mapped ? "presetRoute.out=out\npresetRoute.closed=\n" : "";
+                    const std::string extra    = "presetPrefix=" + prefix + "\nparkable=true\n" +
+                                              ( mapped ? "" : "presetPutName=out,refl\n" ) +
+                                              ( option.empty() ? "" : "hasPosition=" + option + "\n" );
+                    mappedMotionFixture fixture( dir, { "out", "refl" } );
+                    mappedMotionFixture reference( dir, { "out", "refl" } );
+                    fixture.load( rows, extra );
+                    reference.load( rows, extra );
+                    fixture.sources( true );
+                    reference.sources( true );
+                    auto &node     = *fixture.m_node;
+                    auto &baseline = *reference.m_node;
+                    REQUIRE( node.keys().count( "fwtelsim." + property ) == ( enabled ? 1 : 0 ) );
+                    REQUIRE( node.keys().count( "fwtelsim." + prefix + "Name" ) == 1 );
+                    REQUIRE( node.keys().count( "fwtelsim.parked" ) == 1 );
+                    if( !option.empty() )
+                    {
+                        REQUIRE( fixture.m_config.m_unusedConfigs
+                                     .at( mx::app::iniFile::makeKey( "fwtelsim", "hasPosition" ) )
+                                     .used );
+                    }
+                    for( auto *n : { &node, &baseline } )
+                    {
+                        REQUIRE( n->handleSetProperty( motionFSM( "READY" ) ) == 0 );
+                        REQUIRE( n->handleSetProperty( motionPreset( { "out" }, prefix ) ) == 0 );
+                    }
+                    REQUIRE( node.handleSetProperty( motionPosition( "23.75", property ) ) == 0 );
+                    REQUIRE( node.curLabel() == "out" );
+                    requireSameMotionPuts( node, baseline );
+                    for( auto *n : { &node, &baseline } )
+                    {
+                        REQUIRE( n->handleSetProperty( motionPreset( { "none" }, prefix ) ) == 0 );
+                    }
+                    REQUIRE( node.curLabel() == ( enabled ? "23.7500" : baseline.curLabel() ) );
+                    REQUIRE( node.handleSetProperty( motionPosition( "40.25", property ) ) == 0 );
+                    REQUIRE( node.curLabel() == ( enabled ? "40.2500" : baseline.curLabel() ) );
+                    requireSameMotionPuts( node, baseline );
+                    for( auto *n : { &node, &baseline } )
+                    {
+                        REQUIRE( n->handleSetProperty( motionParked( "1" ) ) == 0 );
+                    }
+                    for( const std::string state : { "POWEROFF", "POWERON", "NODEVICE", "NOTCONNECTED", "CONNECTED" } )
+                    {
+                        for( auto *n : { &node, &baseline } )
+                        {
+                            REQUIRE( n->handleSetProperty( motionFSM( state ) ) == 0 );
+                        }
+                        REQUIRE( node.curLabel() == ( enabled ? "40.2500" : baseline.curLabel() ) );
+                        requireSameMotionPuts( node, baseline );
+                        requireMotionOff( node );
+                    }
+                    for( auto *n : { &node, &baseline } )
+                    {
+                        REQUIRE( n->handleSetProperty( motionPreset( { "out" }, prefix ) ) == 0 );
+                    }
+                    REQUIRE( node.curLabel() == "out" );
+                    requireSameMotionPuts( node, baseline );
+                }
+}
+
 } // namespace xInstGraphTest
 
 } // namespace libXWCTest

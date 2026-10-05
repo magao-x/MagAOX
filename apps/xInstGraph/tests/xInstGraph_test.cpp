@@ -1954,6 +1954,106 @@ TEST_CASE( "xInstGraph preserves parked routes through startup", "[xInstGraph][p
     REQUIRE( app.appShutdown() == 0 );
 }
 
+/// Controllers without numeric telemetry retain preset and parking callbacks and ignore unsolicited position
+/// properties.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph registers numerical callbacks only when hasPosition", "[xInstGraph][position]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::appStartup();
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::loadConfig( *(mx::app::appConfigurator *)nullptr );
+    stdMotionNode::handleSetProperty( pcf::IndiProperty() );
+    stdMotionNode::updatePositionLabel();
+    #endif
+    // clang-format on
+
+    for( const std::string prefix : { "preset", "filter" } )
+        for( const std::string option : { "", "true", "false" } )
+        {
+            CAPTURE( prefix, option );
+            const bool         enabled = option != "false";
+            temporaryDirectory temp;
+            const auto         output = temp.root / "output.drawio";
+            {
+                std::ofstream xml( temp.root / "config" / "instgraph_test.drawio" );
+                xml << "<mxfile><diagram><mxGraphModel><root>"
+                       "<mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>"
+                       "<mxCell id=\"node:motionStage\"/>"
+                       "<mxCell id=\"output:motionStage:out\" value=\"out\" style=\"strokeColor=#FF0000;\"/>"
+                       "<mxCell id=\"state:motionStage\" value=\"before\"/>"
+                       "<mxCell id=\"fsmstate:motionStage\" value=\"before\"/>"
+                       "</root></mxGraphModel></diagram></mxfile>";
+            }
+            writeNodeSections( temp.root / "config" / "instgraph_test.conf",
+                               output,
+                               "[motionStage]\ntype=stdMotion\ndevice=teststage\nparkable=true\npresetPrefix=" +
+                                   prefix + "\n" + ( option.empty() ? "" : "hasPosition=" + option + "\n" ) );
+            xInstGraph app;
+            loadFixture( app, temp.root );
+            REQUIRE( app.shutdown() == 0 );
+            if( !option.empty() )
+            {
+                REQUIRE(
+                    app.config().m_unusedConfigs.at( mx::app::iniFile::makeKey( "motionStage", "hasPosition" ) ).used );
+            }
+            REQUIRE( app.appStartup() == 0 );
+            REQUIRE( app.enableIndiDispatch() );
+            const std::string property = prefix == "filter" ? "filter" : "position";
+            REQUIRE( app.subscribed( "teststage." + property ) == enabled );
+            REQUIRE( app.subscribed( "teststage.fsm" ) );
+            REQUIRE( app.subscribed( "teststage." + prefix + "Name" ) );
+            REQUIRE( app.subscribed( "teststage.parked" ) );
+            app.handleDefProperty( beamsplitterValue( "teststage", "fsm", "state", "READY" ) );
+            pcf::IndiProperty preset( pcf::IndiProperty::Switch );
+            preset.setDevice( "teststage" );
+            preset.setName( prefix + "Name" );
+            preset.add( pcf::IndiElement( "out", pcf::IndiElement::On ) );
+            app.handleDefProperty( preset );
+            REQUIRE( cellTag( readFile( output ), "state:motionStage" ).find( "value=\"out\"" ) != std::string::npos );
+            REQUIRE( cellTag( readFile( output ), "output:motionStage:out" ).find( "strokeColor=#00FF00;" ) !=
+                     std::string::npos );
+            app.handleDefProperty(
+                beamsplitterValue( "teststage", property, "current", "23.75", pcf::IndiProperty::Number ) );
+            preset["out"].setSwitchState( pcf::IndiElement::Off );
+            preset.add( pcf::IndiElement( "none", pcf::IndiElement::On ) );
+            app.handleSetProperty( preset );
+            const auto beforePosition = readFile( output );
+            REQUIRE( cellTag( beforePosition, "state:motionStage" )
+                         .find( enabled ? "value=\"23.7500\"" : "value=\"---\"" ) != std::string::npos );
+            app.handleSetProperty(
+                beamsplitterValue( "teststage", property, "current", "40.25", pcf::IndiProperty::Number ) );
+            if( enabled )
+            {
+                REQUIRE( cellTag( readFile( output ), "state:motionStage" ).find( "value=\"40.2500\"" ) !=
+                         std::string::npos );
+            }
+            else
+            {
+                REQUIRE( readFile( output ) == beforePosition );
+            }
+            REQUIRE( cellTag( readFile( output ), "output:motionStage:out" ).find( "strokeColor=#FF0000;" ) !=
+                     std::string::npos );
+            app.handleDefProperty(
+                beamsplitterValue( "teststage", "parked", "current", "1", pcf::IndiProperty::Number ) );
+            for( const std::string state : { "POWEROFF", "POWERON", "NODEVICE", "NOTCONNECTED", "CONNECTED" } )
+            {
+                app.handleSetProperty( beamsplitterValue( "teststage", "fsm", "state", state ) );
+                REQUIRE( cellTag( readFile( output ), "state:motionStage" )
+                             .find( enabled ? "value=\"40.2500\"" : "value=\"---\"" ) != std::string::npos );
+            }
+            preset["none"].setSwitchState( pcf::IndiElement::Off );
+            preset["out"].setSwitchState( pcf::IndiElement::On );
+            app.handleSetProperty( preset );
+            REQUIRE( cellTag( readFile( output ), "state:motionStage" ).find( "value=\"out\"" ) != std::string::npos );
+            REQUIRE( cellTag( readFile( output ), "output:motionStage:out" ).find( "strokeColor=#00FF00;" ) !=
+                     std::string::npos );
+            REQUIRE( app.appShutdown() == 0 );
+        }
+}
+
 } // namespace xInstGraphTest
 
 } // namespace libXWCTest

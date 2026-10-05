@@ -86,3 +86,41 @@ following stageGUI and cameraStatus. Preserve the on/off logic for puts.
 - Functional implementation, regressions, and engineering record committed as
   `18ff352e`. The documentation follow-up describes numeric-source selection,
   formatting, availability, caching, and its independence from routing.
+
+## Follow-up: optional numeric telemetry (2026-10-05)
+
+The user requested `hasPosition`, default true, because flipperCtrl publishes
+named endpoints and parking but no numeric current-position property. Add the
+bool to each stdMotion section and consume it before device/preset-prefix setup
+registers subscription keys. With false, omit both the selected position/filter
+key and numeric fallback, and ignore unsolicited numeric updates even when a
+handler is called directly. Named presets, parking, tracking, mapped/default
+routing, and put enablement keep their existing behavior.
+
+Add node tests for omitted/true/false values, both numeric prefixes and put
+selection directions, legacy/mapped routes, unsolicited updates, and parked
+startup. Add an app test that checks registered callback keys and real Def/Set
+publication for controllers such as flipperCtrl. Complete the changed-file
+Doxygen pass, clang-format, both affected suites, the app build, and Doxygen
+links; update the README and record the implementation commit.
+
+### Capability verification
+
+- Implemented the default-true flag, consuming it before numeric keys are added.
+  False prevents registration and numeric parsing/display; named routing and
+  parking remain active.
+- Node tests cover omitted/true/false configurations, both prefixes and directions,
+  legacy and mapped nodes, cached versus unsolicited telemetry, and all five
+  parked startup states. Put states and enablement match reference handlers
+  receiving no numeric updates.
+- App tests verify callback registration with a device override, consumption of
+  explicit config values, real Def/Set publication, suppressed numeric fallback,
+  unchanged output after ignored updates, and retained named/parked routes.
+- Catch2 passed: stdMotionNode 23034 assertions / 22 cases, xInstGraph 3355 / 25,
+  totaling 26389 assertions / 47 cases.
+- `make -C apps/xInstGraph -j1`, clang-format, the full changed-file documentation
+  pass, `clang-format --dry-run --Werror`, and `git diff --check` passed.
+- Focused Doxygen generation emitted no warnings for changed C++ files. Both new
+  test cases have verified HTML links from the real APIs under test.
+- Rebuild and install xInstGraph, then set `hasPosition=false` for flipperCtrl
+  nodes. The deployed config was not edited by this change.
