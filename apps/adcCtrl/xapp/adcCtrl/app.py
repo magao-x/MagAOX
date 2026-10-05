@@ -338,10 +338,12 @@ class adcCtrl(XDevice):
         self._lab = False
         self._no_measurements = 1
 
+        #set initial ADC offset to zero
         if self.client['adctrack.deltaADC1.current'] != 0:
             self.set_command(0,0)
             self.send_command()
 
+        #check wavelength
         if self.client['fwsci1.filterName.i'] == constants.SwitchState.ON:
             self._center_wavelength = 762E-9
         elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
@@ -351,13 +353,39 @@ class adcCtrl(XDevice):
         else:
             self._center_wavelength = 656E-9
 
-        self.ADC = AdcFitter(wavelength=self._center_wavelength)
-        self.log.debug(f'initial normalized wavelength value: {self.ADC.normalized_wavelength}')
-        #self.update_wavelength()
+        #check sparkle properties
+        self._sparkle_freq = float(self.client['tweeterSpeck.separation.current'])
+        self._sparkle_angle = float(self.client['tweeterSpeck.angle.current'])
+
+        #setup ADC class, set control matrix 
+        self.ADC = AdcFitter()
         self.ADC.set_control_mtx(self._control_mtx)
 
+        #app is ready!
         self.properties['fsm']['state'] = StateCodes.READY.name
         self.update_property(self.properties['fsm'])
+
+    def check_indi_props(self):
+        '''check important indi properties outside the app to see if anything relevant has changed'''
+        
+        #first, check and see if the wavelength has been updated
+        if self.client['fwsci1.filterName.i'] == constants.SwitchState.ON:
+            self._center_wavelength = 762E-9
+        elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
+            self._center_wavelength = 908E-9
+        elif self.client['fwsci1.filterName.r'] == constants.SwitchState.ON:
+            self._center_wavelength = 615E-9
+        else:
+            self._center_wavelength = 656E-9
+
+        #set the new normalized wavelength
+        self._normalized_wavelength = self._center_wavelength / 656E-9
+
+        #next, check the sparkle parameters
+        self._sparkle_freq = float(self.client['tweeterSpeck.separation.current'])
+        self._sparkle_angle = float(self.client['tweeterSpeck.angle.current'])
+
+        self.log.debug('State changed, outside indi properties updated')
 
     def handle_state(self, existing_property, new_message):
         target_list = ['idle', 'adcLoop', 'oneshot','measure-only']
@@ -380,14 +408,17 @@ class adcCtrl(XDevice):
                         self._state = States.CLOSED_LOOP
                         self.properties['fsm']['state'] = StateCodes.OPERATING.name
                         self.log.debug('State changed to closed-loop')
+                        self.check_indi_props()
                     elif key == 'oneshot':
                         self._state = States.ONESHOT
                         self.properties['fsm']['state'] = StateCodes.OPERATING.name
                         self.log.debug('State changed to oneshot')
+                        self.check_indi_props()
                     elif key == 'measure-only':
                         self._state = States.MEASURE_ONLY
                         self.properties['fsm']['state'] = StateCodes.OPERATING.name
                         self.log.debug('State changed to measure-only')
+                        self.check_indi_props()
 
             self.update_property(existing_property)
             self.update_property(self.properties['fsm'])
