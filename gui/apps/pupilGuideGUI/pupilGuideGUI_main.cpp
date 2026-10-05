@@ -9,7 +9,7 @@
 
 int main(int argc, char *argv[])
 {
-      
+
    //int data_type;
    QApplication app(argc, argv);
 
@@ -21,14 +21,14 @@ int main(int argc, char *argv[])
 
    multiIndiManager mgr("pupilGuide", "127.0.0.1", 7624);
    xqt::pupilGuide pg;
-   
+
    mgr.addSubscriber(&pg);
    mgr.activate();
 
    pg.show();
 
    int rv = app.exec();
-   
+
    return rv;
 }
-   
+

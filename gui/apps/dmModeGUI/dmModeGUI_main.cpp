@@ -14,9 +14,9 @@ int main(int argc, char *argv[])
       std::cerr << "Must provide exactly one argument containing the INDI device name.\n";
       return -1;
    }
-      
+
    std::string deviceName = argv[1];
-   
+
    QApplication app(argc, argv);
 
    // set stylesheet
@@ -24,17 +24,17 @@ int main(int argc, char *argv[])
    file.open(QFile::ReadOnly | QFile::Text);
    QTextStream stream(&file);
    app.setStyleSheet(stream.readAll());
-   
+
    multiIndiManager mgr(deviceName, "127.0.0.1", 7624);
-   
+
    xqt::dmMode dmm(deviceName);
-   mgr.addSubscriber(&dmm); 
+   mgr.addSubscriber(&dmm);
    mgr.activate();
-   
+
    dmm.show();
 
    int rv = app.exec();
-   
+
    return rv;
 }
-   
+

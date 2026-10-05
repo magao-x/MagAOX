@@ -40,7 +40,7 @@ class camtipFitter:
 
     def clear(self):
         self.data = None
- 
+
     def setup_lab(self, lab_dir, file):
         self.lab_dir = lab_dir
         self.lab_file = file
@@ -48,8 +48,8 @@ class camtipFitter:
         self.fit_lab(self.lab_data)
         self.gen_fit_img()
         self.set_lab_EE()
-        return 
-    
+        return
+
     def set_lab_data(self, lab_dir, file):
         #TODO: logic to choose the lab directory
         lab_file_path = lab_dir + file
@@ -62,29 +62,29 @@ class camtipFitter:
         theta_opt = lab_fit_params(lab_data, self.grid)
         self.set_lab(theta_opt['x'])
         return
-     
+
     def set_lab(self, lab_fit):
         '''Take a lab fit to compare for with SR'''
         self.lab_fit = lab_fit # ideally would have radius
-        self.lab_sig = lab_fit[0] 
+        self.lab_sig = lab_fit[0]
         self.lab_rad = lab_fit[1]
         self.lab_amp = lab_fit[2]
-        return 
-    
+        return
+
     def gen_fit_img(self):
         #create an image of the optimal fit, but centered
         ft = self.lab_fit
         opt_fit = [ft[0], ft[1], ft[2], 0, 0]
-        # this optimum lab image can be used 
+        # this optimum lab image can be used
         self.lab_fit_img = make_rad_gaus_model(opt_fit, self.grid)
         return
-    
+
     def set_lab_EE(self):
         x0, y0 = self.lab_fit[3], self.lab_fit[4]
-        data = self.lab_data 
+        data = self.lab_data
         self.lab_EE = calc_EE(data, x0, y0, self.grid, self.lab_rad, w_in=self.w_in, w_out = self.w_out)
         return
-    
+
     def fit_data(self):
         # partial fit
         data_fit = fit_img_gauss(self.data_bg_sub, self.lab_rad, self.grid)
@@ -99,19 +99,19 @@ class camtipFitter:
         sky_sigma = self.data_fit[0]
         self.SR = lab_sigma / sky_sigma
 
-        # check quality of this fit, if invalid, not going to list. 
+        # check quality of this fit, if invalid, not going to list.
         # if self.SR > 1 or self.SR < 0:
             # self.SR = 0
 
         return self.SR
-    
+
     def calc_SR_dumb(self, m=64):
         img = self.data_bg_sub
         avg_max = np.average([np.max(img[m,:m]), np.max(img[m,m:]), np.max(img[:m,m]), np.max(img[m:,m])])
         normed_peak = avg_max / np.sum(img)
         self.SR_dumb = normed_peak
         return normed_peak
-    
+
     def calc_SR_EE(self):
         img = self.data_bg_sub
         # use the lab image to determine shift
@@ -121,10 +121,10 @@ class camtipFitter:
         # send shift into the calc SR EE image
         self.sky_EE = calc_EE(img, x0, y0, self.grid, self.lab_rad, w_in=self.w_in, w_out=self.w_out)
         # divide by the saved lab EE value
-        self.SR_EE  = self.sky_EE / self.lab_EE 
-        
+        self.SR_EE  = self.sky_EE / self.lab_EE
+
         return self.SR_EE
-    
+
 ####### Helper funcitons ########
 
 def calc_idx_shift(data, kernel, width):
@@ -163,7 +163,7 @@ def make_R_filter(x0, y0, grid, rad, w=2):
 def sub_bg_img(img):
     bg_mask = np.zeros_like(img)
     bg_mask[:, 0:5] = 1
-    bg_mask[:,-5:] = 1    
+    bg_mask[:,-5:] = 1
     # average ans subtract out background
     bg_column = np.sum(img * bg_mask, axis=1, keepdims=True) / 10
     # subtract of the bg:
@@ -174,7 +174,7 @@ def sub_bg_img(img):
 def make_fit_func(img, grid):
     """
     Returns a fitting function
-    Based on the Gaussian rotation. 
+    Based on the Gaussian rotation.
     """
     def fitting_func(theta):
         # creating the model
@@ -190,9 +190,9 @@ def make_rad_gaus_model(theta, grid):
     amp = theta[2] #1
     x0 = theta[3] #0
     y0 = theta[4] #1
-    # Create the shifted grid 
+    # Create the shifted grid
     R = grid.shifted([-x0, -y0]).as_("polar").r
-    # creating the 
+    # creating the
     rad_gaus = hp.Field(amp*np.exp(-(R.ravel()-mod_rad)**2/sig**2), grid)
     return rad_gaus
 
@@ -227,9 +227,9 @@ def make_rad_gaus_model_sky(theta, mod_rad, grid):
     amp = theta[1]
     x0 = theta[2]
     y0 = theta[3]
-    # Create the shifted grid 
+    # Create the shifted grid
     R = grid.shifted([-x0, -y0]).as_("polar").r
-    # creating the 
+    # creating the
     rad_gaus = hp.Field(amp*np.exp(-(R.ravel()-mod_rad)**2/sig**2), grid)
     return rad_gaus
 
@@ -237,12 +237,12 @@ def fit_img_gauss(img, lab_R, grid):
     # sig, amp, x, y
     img_sub = sub_bg_img(img)
     # avoiding hotpixels
-    max_pix = np.quantile(img_sub, 0.98) 
+    max_pix = np.quantile(img_sub, 0.98)
     # INITIAL GUESS
     phi0 = [5, max_pix, 0, 0]
     # create the sky fitting function
-    rad_gaus_fn = make_fit_func_sky(img_sub, lab_R, grid) 
+    rad_gaus_fn = make_fit_func_sky(img_sub, lab_R, grid)
     # optimize parametets
     theta_opt = scipy.optimize.minimize(rad_gaus_fn, phi0)
-    # just taking parameters, could also take jacobian later 
+    # just taking parameters, could also take jacobian later
     return theta_opt['x']

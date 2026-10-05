@@ -458,7 +458,7 @@ def do_quicklooks_for_camera_all_roots(
             ))
     if not found_at_least_one:
         raise RuntimeError(f"Unknown device: {device} (checked {data_roots})")
-    
+
     return new_matching_files
 
 def do_quicklook_for_camera(

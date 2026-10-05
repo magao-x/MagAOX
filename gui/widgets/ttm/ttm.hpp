@@ -10,58 +10,60 @@
 // #include "../../lib/multiIndiSubscriber.hpp"
 // #include "../../lib/multiIndiPublisher.hpp"
 
-namespace xqt 
+namespace xqt
 {
-   
+
 class ttm : public xWidget
 {
    Q_OBJECT
-   
+
 protected:
-   
+
    std::string m_procName;
-   
+
    std::string m_appState;
-   
+
    int m_naxes {2};
-   
+
    double m_pos_1 {0.0};;
    double m_scale_1 {0.01};
-   
+
    double m_pos_2 {0.0};;
    double m_scale_2 {0.01};
-   
+
    double m_pos_3 {0.0};;
    double m_scale_3 {0.01};
-   
+
    std::string m_shmimName;
    bool m_flatSet;
    bool m_testSet;
-   
+
 public:
    explicit ttm( std::string & procName,
-                 QWidget * Parent = 0, 
+                 QWidget * Parent = 0,
                  Qt::WindowFlags f = Qt::WindowFlags()
                );
-   
+
    ~ttm();
-   
+
    void subscribe();
 
    virtual void onConnect();
    virtual void onDisconnect();
-                                   
+
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
+
+   void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
+
    void sendNewPos1(double np);
    void sendNewPos2(double np);
    void sendNewPos3(double np);
-   
+
 public slots:
    void updateGUI();
-   
+
    void on_button_home_pressed();
    void on_button_zero_pressed();
    void on_button_flat_pressed();
@@ -70,32 +72,32 @@ public slots:
    void on_button_scale_1_pressed();
    void on_button_up_1_pressed();
    void on_button_down_1_pressed();
-   
+
    void on_button_scale_2_pressed();
    void on_button_up_2_pressed();
    void on_button_down_2_pressed();
-   
+
    void on_button_scale_3_pressed();
    void on_button_up_3_pressed();
    void on_button_down_3_pressed();
-   
-   
+
+
 private:
-     
+
    Ui::ttm ui;
 };
-   
+
 ttm::ttm( std::string & procName,
-                    QWidget * Parent, 
+                    QWidget * Parent,
                     Qt::WindowFlags f) : xWidget(Parent, f), m_procName{procName}
 {
    ui.setupUi(this);
-   
+
    setWindowTitle(QString(m_procName.c_str()));
    ui.button_scale_1->setText(QString::number(m_scale_1));
-   
-   
-   
+
+
+
    ui.pos_1->setup(m_procName, "pos_1", statusEntry::FLOAT, "", "");
    ui.pos_1->setStretch(0,1,6);//removes spacer and maximizes text field
    ui.pos_1->format("%0.2f");
@@ -128,8 +130,8 @@ ttm::ttm( std::string & procName,
    setXwFont(ui.label_2);
    setXwFont(ui.label_3);
 
-   
-   
+
+
    ui.button_scale_1->setProperty("isScaleButton", true);
    ui.button_scale_2->setProperty("isScaleButton", true);
    ui.button_scale_3->setProperty("isScaleButton", true);
@@ -142,7 +144,7 @@ ttm::ttm( std::string & procName,
 
    onDisconnect();
 }
-   
+
 
 ttm::~ttm()
 {
@@ -151,12 +153,12 @@ ttm::~ttm()
 void ttm::subscribe()
 {
    if(!m_parent) return;
-   
+
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "fsm");
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "pos_1");
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "pos_2");
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "pos_3");
-   
+
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "sm_shmimName");
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "flat_shmim");
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "flat_set");
@@ -171,7 +173,7 @@ void ttm::subscribe()
 
    return;
 }
-   
+
 void ttm::onConnect()
 {
    ui.label_device_status->onConnect();
@@ -183,6 +185,15 @@ void ttm::onConnect()
 
 void ttm::onDisconnect()
 {
+   m_appState.clear();
+   m_naxes = 2;
+   m_pos_1 = 0.0;
+   m_pos_2 = 0.0;
+   m_pos_3 = 0.0;
+   m_shmimName.clear();
+   m_flatSet = false;
+   m_testSet = false;
+
    ui.label_device_status->onDisconnect();
 
    ui.pos_1->onDisconnect();
@@ -191,14 +202,33 @@ void ttm::onDisconnect()
 }
 
 void ttm::handleDefProperty( const pcf::IndiProperty & ipRecv)
-{  
+{
    return handleSetProperty(ipRecv);
 }
 
-void ttm::handleSetProperty( const pcf::IndiProperty & ipRecv)
-{  
+void ttm::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
    if(ipRecv.getDevice() != m_procName) return;
-   
+
+   if(ipRecv.getName() == "fsm" ||
+      ipRecv.getName() == "pos_1" ||
+      ipRecv.getName() == "pos_2" ||
+      ipRecv.getName() == "pos_3" ||
+      ipRecv.getName() == "sm_shmimName" ||
+      ipRecv.getName() == "flat_shmim" ||
+      ipRecv.getName() == "flat_set" ||
+      ipRecv.getName() == "test" ||
+      ipRecv.getName() == "test_shmim" ||
+      ipRecv.getName() == "test_set")
+   {
+      onDisconnect();
+   }
+}
+
+void ttm::handleSetProperty( const pcf::IndiProperty & ipRecv)
+{
+   if(ipRecv.getDevice() != m_procName) return;
+
    if(ipRecv.getName() == "fsm")
    {
       if(ipRecv.find("state"))
@@ -253,9 +283,9 @@ void ttm::handleSetProperty( const pcf::IndiProperty & ipRecv)
    }
 
    updateGUI();
-   
+
    return;
-   
+
 }
 
 void ttm::sendNewPos1(double np)
@@ -270,8 +300,8 @@ void ttm::sendNewPos1(double np)
       ipFreq.add(pcf::IndiElement("target"));
       ipFreq["current"] = np;
       ipFreq["target"] = np;
-   
-      sendNewProperty(ipFreq);   
+
+      sendNewProperty(ipFreq);
    }
    catch(...)
    {
@@ -291,8 +321,8 @@ void ttm::sendNewPos2(double np)
       ipFreq.add(pcf::IndiElement("target"));
       ipFreq["current"] = np;
       ipFreq["target"] = np;
-   
-      sendNewProperty(ipFreq);   
+
+      sendNewProperty(ipFreq);
    }
    catch(...)
    {
@@ -303,7 +333,7 @@ void ttm::sendNewPos2(double np)
 void ttm::sendNewPos3(double np)
 {
    if(m_naxes < 3) return;
-   
+
    try
    {
       pcf::IndiProperty ipFreq(pcf::IndiProperty::Number);
@@ -314,8 +344,8 @@ void ttm::sendNewPos3(double np)
       ipFreq.add(pcf::IndiElement("target"));
       ipFreq["current"] = np;
       ipFreq["target"] = np;
-   
-      sendNewProperty(ipFreq);   
+
+      sendNewProperty(ipFreq);
    }
    catch(...)
    {
@@ -325,85 +355,85 @@ void ttm::sendNewPos3(double np)
 
 void ttm::updateGUI()
 {
-   
-   
+
+
    if(m_naxes == 3)
    {
       ui.label_1->setText("Piston");
       ui.label_2->setText("Tip");
       ui.label_3->setText("Tilt");
    }
-      
-   if(m_appState == "NOTHOMED") 
+
+   if(m_appState == "NOTHOMED")
    {
       //ui.label_device_status->setText("RIP");
-      
+
       ui.label_1->setEnabled(false);
       ui.pos_1->setEnabled(false);
       ui.button_up_1->setEnabled(false);
       ui.button_scale_1->setEnabled(false);
       ui.button_down_1->setEnabled(false);
-         
+
       ui.label_2->setEnabled(false);
       ui.pos_2->setEnabled(false);
       ui.button_up_2->setEnabled(false);
       ui.button_scale_2->setEnabled(false);
       ui.button_down_2->setEnabled(false);
-      
+
       ui.label_3->setEnabled(false);
       ui.pos_3->setEnabled(false);
       ui.button_up_3->setEnabled(false);
       ui.button_scale_3->setEnabled(false);
       ui.button_down_3->setEnabled(false);
-      
+
       ui.button_home->setEnabled(true);
       ui.button_zero->setEnabled(false);
       ui.button_flat->setEnabled(false);
-      ui.button_release->setEnabled(false);  
+      ui.button_release->setEnabled(false);
    }
-   else if(m_appState == "HOMING") 
+   else if(m_appState == "HOMING")
    {
       //ui.label_device_status->setText("SETTING");
-      
+
       ui.label_1->setEnabled(false);
       ui.pos_1->setEnabled(false);
       ui.button_up_1->setEnabled(false);
       ui.button_scale_1->setEnabled(false);
       ui.button_down_1->setEnabled(false);
-         
+
       ui.label_2->setEnabled(false);
       ui.pos_2->setEnabled(false);
       ui.button_up_2->setEnabled(false);
       ui.button_scale_2->setEnabled(false);
       ui.button_down_2->setEnabled(false);
-      
+
       ui.label_3->setEnabled(false);
       ui.pos_3->setEnabled(false);
       ui.button_up_3->setEnabled(false);
       ui.button_scale_3->setEnabled(false);
       ui.button_down_3->setEnabled(false);
-      
+
       ui.button_home->setEnabled(false);
       ui.button_zero->setEnabled(false);
       ui.button_flat->setEnabled(false);
-      ui.button_release->setEnabled(false);  
+      ui.button_release->setEnabled(false);
    }
    else if(m_appState == "READY")
    {
       //ui.label_device_status->setText("SET");
-      
+
       ui.label_1->setEnabled(true);
       ui.pos_1->setEnabled(true);
       ui.button_up_1->setEnabled(true);
       ui.button_scale_1->setEnabled(true);
       ui.button_down_1->setEnabled(true);
-         
+
       ui.label_2->setEnabled(true);
       ui.pos_2->setEnabled(true);
       ui.button_up_2->setEnabled(true);
       ui.button_scale_2->setEnabled(true);
       ui.button_down_2->setEnabled(true);
-      
+
       if(m_naxes == 2)
       {
          ui.label_3->setEnabled(false);
@@ -420,7 +450,7 @@ void ttm::updateGUI()
          ui.button_scale_3->setEnabled(true);
          ui.button_down_3->setEnabled(true);
       }
-      
+
       ui.button_home->setEnabled(false);
       ui.button_zero->setEnabled(true);
       ui.button_flat->setEnabled(true);
@@ -429,19 +459,19 @@ void ttm::updateGUI()
    else if(m_appState == "OPERATING")
    {
       //ui.label_device_status->setText("OPERATING");
-      
+
       ui.label_1->setEnabled(true);
       ui.pos_1->setEnabled(true);
       ui.button_up_1->setEnabled(true);
       ui.button_scale_1->setEnabled(true);
       ui.button_down_1->setEnabled(true);
-         
+
       ui.label_2->setEnabled(true);
       ui.pos_2->setEnabled(true);
       ui.button_up_2->setEnabled(true);
       ui.button_scale_2->setEnabled(true);
       ui.button_down_2->setEnabled(true);
-      
+
       if(m_naxes == 2)
       {
          ui.label_3->setEnabled(false);
@@ -458,7 +488,7 @@ void ttm::updateGUI()
          ui.button_scale_3->setEnabled(true);
          ui.button_down_3->setEnabled(true);
       }
-      
+
       ui.button_home->setEnabled(false);
       ui.button_zero->setEnabled(true);
       ui.button_flat->setEnabled(true);
@@ -467,26 +497,26 @@ void ttm::updateGUI()
    else
    {
       //ui.label_device_status->setText(m_appState.c_str());
-      
+
       //Disable & zero all
       ui.label_1->setEnabled(false);
       ui.pos_1->setEnabled(false);
       ui.button_up_1->setEnabled(false);
       ui.button_scale_1->setEnabled(false);
       ui.button_down_1->setEnabled(false);
-         
+
       ui.label_2->setEnabled(false);
       ui.pos_2->setEnabled(false);
       ui.button_up_2->setEnabled(false);
       ui.button_scale_2->setEnabled(false);
       ui.button_down_2->setEnabled(false);
-      
+
       ui.label_3->setEnabled(false);
       ui.pos_3->setEnabled(false);
       ui.button_up_3->setEnabled(false);
       ui.button_scale_3->setEnabled(false);
       ui.button_down_3->setEnabled(false);
-      
+
       ui.button_home->setEnabled(false);
       ui.button_zero->setEnabled(false);
       ui.button_flat->setEnabled(false);
@@ -495,55 +525,55 @@ void ttm::updateGUI()
       return;
    }
 
-   
+
 } //updateGUI()
 
 void ttm::on_button_home_pressed()
 {
    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-   
+
    ipFreq.setDevice(m_procName);
    ipFreq.setName("initDM");
    ipFreq.add(pcf::IndiElement("request"));
    ipFreq["request"].setSwitchState(pcf::IndiElement::On);
-    
-   sendNewProperty(ipFreq);   
+
+   sendNewProperty(ipFreq);
 }
 
 void ttm::on_button_zero_pressed()
 {
    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-   
+
     ipFreq.setDevice(m_procName);
     ipFreq.setName("flat_set");
     ipFreq.add(pcf::IndiElement("toggle"));
     ipFreq["toggle"] = pcf::IndiElement::Off;
-    
+
     sendNewProperty(ipFreq);
 }
 
 void ttm::on_button_flat_pressed()
 {
     pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-   
+
     ipFreq.setDevice(m_procName);
     ipFreq.setName("flat_set");
     ipFreq.add(pcf::IndiElement("toggle"));
     ipFreq["toggle"] = pcf::IndiElement::On;
-    
+
     sendNewProperty(ipFreq);
 }
 
 void ttm::on_button_release_pressed()
 {
    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-   
+
    ipFreq.setDevice(m_procName);
    ipFreq.setName("releaseDM");
    ipFreq.add(pcf::IndiElement("request"));
    ipFreq["request"].setSwitchState(pcf::IndiElement::On);
-    
-   sendNewProperty(ipFreq);   
+
+   sendNewProperty(ipFreq);
 }
 
 void ttm::on_button_scale_1_pressed()
@@ -576,7 +606,7 @@ void ttm::on_button_scale_1_pressed()
    {
       m_scale_1 = 10.0;
    }
-   
+
    char ss[5];
    snprintf(ss, 5, "%0.2f", m_scale_1);
    ui.button_scale_1->setText(ss);
@@ -585,24 +615,24 @@ void ttm::on_button_scale_1_pressed()
 void ttm::on_button_up_1_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
+
    ip.setDevice(m_procName);
    ip.setName("pos_1");
    ip.add(pcf::IndiElement("target"));
    ip["target"] = m_pos_1 + m_scale_1;
-   
+
    sendNewProperty(ip);
 }
 
 void ttm::on_button_down_1_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
+
    ip.setDevice(m_procName);
    ip.setName("pos_1");
    ip.add(pcf::IndiElement("target"));
    ip["target"] = m_pos_1 - m_scale_1;
-   
+
    sendNewProperty(ip);
 }
 
@@ -636,7 +666,7 @@ void ttm::on_button_scale_2_pressed()
    {
       m_scale_2 = 10.0;
    }
-   
+
    char ss[5];
    snprintf(ss, 5, "%0.2f", m_scale_2);
    ui.button_scale_2->setText(ss);
@@ -645,24 +675,24 @@ void ttm::on_button_scale_2_pressed()
 void ttm::on_button_up_2_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
+
    ip.setDevice(m_procName);
    ip.setName("pos_2");
    ip.add(pcf::IndiElement("target"));
    ip["target"] = m_pos_2 + m_scale_2;
-   
+
    sendNewProperty(ip);
 }
 
 void ttm::on_button_down_2_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
+
    ip.setDevice(m_procName);
    ip.setName("pos_2");
    ip.add(pcf::IndiElement("target"));
    ip["target"] = m_pos_2 - m_scale_2;
-   
+
    sendNewProperty(ip);
 }
 
@@ -696,7 +726,7 @@ void ttm::on_button_scale_3_pressed()
    {
       m_scale_3 = 10.0;
    }
-   
+
    char ss[5];
    snprintf(ss, 5, "%0.2f", m_scale_3);
    ui.button_scale_3->setText(ss);
@@ -705,31 +735,31 @@ void ttm::on_button_scale_3_pressed()
 void ttm::on_button_up_3_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
+
    ip.setDevice(m_procName);
    ip.setName("pos_3");
    ip.add(pcf::IndiElement("target"));
    ip["target"] = m_pos_3 + m_scale_3;
-   
+
    sendNewProperty(ip);
 }
 
 void ttm::on_button_down_3_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
+
    ip.setDevice(m_procName);
    ip.setName("pos_3");
    ip.add(pcf::IndiElement("target"));
    ip["target"] = m_pos_3 - m_scale_3;
-   
+
    sendNewProperty(ip);
 }
 
 
 
 } //namespace xqt
-   
+
 #include "moc_ttm.cpp"
 
 #endif

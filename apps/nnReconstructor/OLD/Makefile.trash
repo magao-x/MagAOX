@@ -1,4 +1,4 @@
-allall: all 
+allall: all
 
 OTHER_HEADERS=
 NEED_CUDA = yes

@@ -293,42 +293,42 @@ class IndiProperty
 
     // Members.
   private:
-    
+
     std::string m_szDevice;
-    
+
     std::string m_szGroup;
-    
+
     std::string m_szLabel;
-    
+
     std::string m_szMessage;
-    
+
     std::string m_szName;
-    
+
     PropertyPermType m_tPerm {UnknownPropertyPerm};
 
     SwitchRuleType m_tRule {UnknownSwitchRule};
-    
+
     PropertyStateType m_tState {UnknownPropertyState};
-    
+
     double m_xTimeout {0.0f};
-    
+
     // This is a flag which can be used to show that this property
     // has been requested by a client. This is not managed automatically.
     bool m_oRequested {false};
-    
+
     pcf::TimeStamp m_tsTimeStamp;
-    
+
     std::string m_szVersion;
 
     /// This can also be the value.
     BLOBEnableType m_beValue {UnknownBLOBEnable};
-    
+
     /// A dictionary of elements, indexable by name.
     std::map<std::string, pcf::IndiElement> m_mapElements;
 
     /// The type of this object. It cannot be changed.
     pcf::IndiProperty::Type m_tType {Unknown};
-    
+
     // A read write lock to protect the internal data.
     mutable pcf::ReadWriteLock m_rwData;
 

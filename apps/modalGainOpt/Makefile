@@ -1,7 +1,7 @@
 
 allall: all
 
-OTHER_HEADERS=
+OTHER_HEADERS=modalPsdProcessor.hpp
 TARGET=modalGainOpt
 include ../../Make/magAOXApp.mk
 

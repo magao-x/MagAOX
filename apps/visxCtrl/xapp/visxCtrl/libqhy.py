@@ -77,8 +77,8 @@ class CONTROL_ID:
     hasHardwareFrameCounter = ctypes.c_short(60)
     CONTROL_MAX_ID = ctypes.c_short(71)
     CAM_HUMIDITY = ctypes.c_short(72)
-    #check if camera has	 humidity sensor 
-    
+    #check if camera has	 humidity sensor
+
 class ERR:
     QHYCCD_READ_DIRECTLY = 0x2001
     QHYCCD_DELAY_200MS   = 0x2000

@@ -22,6 +22,7 @@ __all__ = [
 
 SETUP_USERS_SQL_PATH = pathlib.Path(__file__).parent / 'sql' / 'setup_users.sql'
 
+
 @xconf.config
 class DbConfig:
     host : str = xconf.field(default='localhost', help='Hostname on which PostgreSQL is listening for connections')
@@ -29,6 +30,9 @@ class DbConfig:
     port : int = xconf.field(default=5432, help='TCP port to connect to PostgreSQL on')
     database : str = xconf.field(default='xtelem', help='Name of PostgreSQL database')
     password_file : str = xconf.field(default='/opt/MagAOX/secrets/xtelemdb_password', help="File containing the password for the given user (newlines are stripped). If $XTELEMDB_PASSWORD is set in the environment, it will take precedence.")
+    statement_timeout_sec : float = xconf.field(default=60.0, help="Server-side enforced statement timeout")
+    lock_timeout_sec : float = xconf.field(default=60.0, help="Server-side enforced lock acquisition timeout")
+    idle_in_transaction_timeout_sec : float = xconf.field(default=60.0, help="Server-side enforced idle (abandoned) transaction timeout")
 
     def connect(self) -> psycopg.Connection:
         password = os.environ.get('XTELEMDB_PASSWORD', None)
@@ -65,6 +69,8 @@ See /opt/MagAOX/source/MagAOX/setup/steps/configure_postgresql.sh for details.
     def cursor(self) -> psycopg.Cursor:
         return self.connect().cursor()
 
+
+
 @xconf.config
 class IgnorePatternsConfig:
     files : list[str] = xconf.field(default_factory=lambda: [r'.*\.DS_Store', r'.+\.swp', r'.+~'], help="Regular expression patterns to match against full file paths")
@@ -76,7 +82,7 @@ class BaseConfig:
     '''
     databases : dict[str,DbConfig] = xconf.field(default_factory=lambda: {'local': DbConfig()}, help="PostgreSQL database connections")
     hostname : str = xconf.field(default=socket.gethostname(), help="Hostname to identify this computer when running inventory or watch_files")
-    data_dirs : list[str] = xconf.field(default_factory=lambda: DEFAULT_DATA_DIRS.copy(), help="Inventoried/archived data directories")
+    data_dirs : list[pathlib.Path] = xconf.field(default_factory=lambda: DEFAULT_DATA_DIRS.copy(), help="Inventoried/archived data directories")
     ignore_patterns : IgnorePatternsConfig = xconf.field(default_factory=IgnorePatternsConfig, help="Patterns for files and directories to ignore in the inventory")
 
 @xconf.config

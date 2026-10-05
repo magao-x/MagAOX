@@ -19,12 +19,12 @@ namespace DDSPC
 
     static inline uint64_t find_next_power_of_2(int sample){
         uint64_t num_bits = 0;
-        
+
         do{
             sample >>= 1;
             ++num_bits;
         } while(sample);
-        
+
         return 1 << num_bits;
     };
 

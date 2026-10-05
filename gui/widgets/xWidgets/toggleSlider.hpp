@@ -6,16 +6,16 @@
 #include "xWidget.hpp"
 #include "../../lib/multiIndiSubscriber.hpp"
 
-namespace xqt 
+namespace xqt
 {
-   
+
 /// Implementation of a toggle (on/off) Qt Slider
 class toggleSlider : public xWidget
 {
    Q_OBJECT
-   
+
 protected:
-   
+
    //--------------- To move to derived class ----------------
    std::string m_device; ///< The name of the INDI device
    std::string m_property; ///< The name of the INDI property
@@ -31,7 +31,7 @@ protected:
    int m_timeout {5000}; ///< The stall timeout, default is 5 sec.
 
    bool m_waiting {false}; ///< Flag indicating that we are waiting for a status change.  Is set to true after a toggle for m_timeout
-   
+
    bool m_highlightChanges {true}; ///< Flag indicating that changes should be highlighted.  Default is true.
    bool m_statusChanged {false}; ///< Flag indicating that the status has changed.  Used to trigger a change highlight.
 
@@ -47,7 +47,7 @@ public:
    toggleSlider( const std::string & ndevice,
                  const std::string & nproperty,
                  const std::string & nlabel,
-                 QWidget * Parent = 0, 
+                 QWidget * Parent = 0,
                  Qt::WindowFlags f = Qt::WindowFlags()
                );
 
@@ -56,10 +56,10 @@ public:
                  const std::string & nproperty,
                  const std::string & nelement,
                  const std::string & nlabel,
-                 QWidget * Parent = 0, 
+                 QWidget * Parent = 0,
                  Qt::WindowFlags f = Qt::WindowFlags()
                );
-   
+
 private:
    void construct(); //common to all constructors
 
@@ -72,7 +72,7 @@ public:
    /// Get the label text
    std::string label();
 
-   
+
    /// Set the stretch of the horizontal layout
    void setStretch( int sSpacer,           ///< [in] Stretch of the spacer.  If 0, the spacer is removed.
                     int sLabel,            ///< [in] Stretch of the label
@@ -90,15 +90,17 @@ public:
              );
 
    virtual void subscribe();
-             
+
    virtual void onConnect();
 
    virtual void onDisconnect();
-   
+
    virtual void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
+
+   virtual void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
+
    //------------------------------------------------------
 
 public slots:
@@ -127,7 +129,7 @@ signals:
 
 
 protected:
-     
+
    Ui::toggleSlider ui;
 
 private:
@@ -135,8 +137,8 @@ private:
    bool m_labelRemoved {false};
 
 };
-   
-toggleSlider::toggleSlider( QWidget * Parent, 
+
+toggleSlider::toggleSlider( QWidget * Parent,
                             Qt::WindowFlags f) : xWidget(Parent, f)
 {
    construct();
@@ -145,7 +147,7 @@ toggleSlider::toggleSlider( QWidget * Parent,
 toggleSlider::toggleSlider( const std::string & ndevice,
                             const std::string & nproperty,
                             const std::string & nlabel,
-                            QWidget * Parent, 
+                            QWidget * Parent,
                             Qt::WindowFlags f) : xWidget(Parent, f), m_device{ndevice}, m_property{nproperty}
 {
    construct();
@@ -154,9 +156,9 @@ toggleSlider::toggleSlider( const std::string & ndevice,
 
 toggleSlider::toggleSlider( const std::string & ndevice,
                             const std::string & nproperty,
-                            const std::string & nelement, 
+                            const std::string & nelement,
                             const std::string & nlabel,
-                            QWidget * Parent, 
+                            QWidget * Parent,
                             Qt::WindowFlags f) : xWidget(Parent, f), m_device{ndevice}, m_property{nproperty}, m_element{nelement}
 {
    construct();
@@ -166,7 +168,7 @@ toggleSlider::toggleSlider( const std::string & ndevice,
 void toggleSlider::construct()
 {
    ui.setupUi(this);
-   
+
    QFont qf = ui.label->font();
    qf.setPixelSize(XW_FONT_SIZE);
    ui.label->setFont(qf);
@@ -198,8 +200,8 @@ std::string toggleSlider::label()
    return ui.label->text().toStdString();
 }
 
-void toggleSlider::setStretch( int sSpacer, 
-                               int sLabel, 
+void toggleSlider::setStretch( int sSpacer,
+                               int sLabel,
                                int sSlider,
                                bool removeSpacer,
                                bool removeLabel
@@ -240,7 +242,7 @@ void toggleSlider::setStretch( int sSpacer,
 
 void toggleSlider::setup( const std::string & ndevice,
                           const std::string & nproperty,
-                          const std::string & nelement, 
+                          const std::string & nelement,
                           const std::string & nlabel
                         )
 {
@@ -254,12 +256,12 @@ void toggleSlider::setup( const std::string & ndevice,
 void toggleSlider::subscribe()
 {
    if(!m_parent) return;
-   
+
    if(m_property != "") m_parent->addSubscriberProperty(this, m_device, m_property);
 
    return;
 }
-  
+
 void toggleSlider::onConnect()
 {
    m_statusChanged = true;
@@ -267,6 +269,10 @@ void toggleSlider::onConnect()
 
 void toggleSlider::onDisconnect()
 {
+   m_waiting = false;
+   m_status = 0;
+   m_statusChanged = false;
+   m_tgtTimer->stop();
    ui.slider->setSliderPosition(ui.slider->minimum());
 }
 
@@ -275,10 +281,20 @@ void toggleSlider::handleDefProperty( const pcf::IndiProperty & ipRecv)
    return handleSetProperty(ipRecv);
 }
 
-void toggleSlider::handleSetProperty( const pcf::IndiProperty & ipRecv)
-{  
+void toggleSlider::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
    if(ipRecv.getDevice() != m_device) return;
-   
+
+   if(ipRecv.getName() == m_property)
+   {
+      onDisconnect();
+   }
+}
+
+void toggleSlider::handleSetProperty( const pcf::IndiProperty & ipRecv)
+{
+   if(ipRecv.getDevice() != m_device) return;
+
    if(ipRecv.getName() == m_property)
    {
       if(ipRecv.find("toggle"))
@@ -288,7 +304,7 @@ void toggleSlider::handleSetProperty( const pcf::IndiProperty & ipRecv)
          else if(ipRecv["toggle"] == pcf::IndiElement::On) m_status = 2;
          else m_status = 0;
 
-         if(currStatus != m_status) 
+         if(currStatus != m_status)
          {
             m_waiting = false;
             m_statusChanged = true;
@@ -333,17 +349,17 @@ void toggleSlider::on_slider_sliderReleased()
 
    if( ui.slider->sliderPosition() > ui.slider->minimum()+0.9*(ui.slider->maximum()-ui.slider->minimum()))
    {
-      state = 2;   
+      state = 2;
    }
-   else if( ui.slider->sliderPosition() < ui.slider->minimum()+0.1*(ui.slider->maximum()-ui.slider->minimum())) 
+   else if( ui.slider->sliderPosition() < ui.slider->minimum()+0.1*(ui.slider->maximum()-ui.slider->minimum()))
    {
       state = 0;
    }
 
    if(state == 2)
    {
-      emit toggle(true); 
-      m_waiting = true; 
+      emit toggle(true);
+      m_waiting = true;
       emit startTgtTimer(m_timeout);
    }
    else if(state == 0)
@@ -363,7 +379,7 @@ void toggleSlider::on_slider_sliderReleased()
 void toggleSlider::doToggle(bool onoff)
 {
    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-   
+
    ipFreq.setDevice(m_device);
    ipFreq.setName(m_property);
    ipFreq.add(pcf::IndiElement("toggle"));
@@ -377,7 +393,7 @@ void toggleSlider::doToggle(bool onoff)
       ipFreq["toggle"].setSwitchState(pcf::IndiElement::On);
    }
 
-   sendNewProperty(ipFreq); 
+   sendNewProperty(ipFreq);
 }
 
 void toggleSlider::tgtTimerTimeout()
@@ -388,7 +404,7 @@ void toggleSlider::tgtTimerTimeout()
 }
 
 } //namespace xqt
-   
+
 #include "moc_toggleSlider.cpp"
 
 #endif

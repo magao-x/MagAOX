@@ -10,12 +10,13 @@
 #ifndef PCF_INDI_CONNECTION_HPP
 #define PCF_INDI_CONNECTION_HPP
 
+#include <atomic>
 #include <string>
 #include <vector>
 #include "Thread.hpp"
 #include "MutexLock.hpp"
 #include "TimeStamp.hpp"
-//#include "ConfigFile.hpp"
+// #include "ConfigFile.hpp"
 #include "IndiXmlParser.hpp"
 #include "IndiMessage.hpp"
 #include "IndiProperty.hpp"
@@ -29,36 +30,32 @@ class IndiConnection : public pcf::Thread
   private:
     enum Constants
     {
-      // This is the size of the input buffer to hold the incoming commands.
-      InputBufSize = 65536,
+        // This is the size of the input buffer to hold the incoming commands.
+        InputBufSize = 65536,
     };
 
-  // construction/destruction/assign/copy
+    // construction/destruction/assign/copy
   public:
     /// Standard constructor.
     IndiConnection();
     /// Constructor which sets the name, version, and INDI protocol version.
-    IndiConnection( const std::string &szName,
-                    const std::string &szVersion,
-                    const std::string &szProtocolVersion );
+    IndiConnection( const std::string &szName, const std::string &szVersion, const std::string &szProtocolVersion );
     /// Standard destructor.
     virtual ~IndiConnection();
 
-  // Prevent these from being invoked.
+    // Prevent these from being invoked.
   private:
     /// Copy constructor.
     IndiConnection( const IndiConnection &idRhs );
     /// Assignment operator.
-    const IndiConnection &operator= ( const IndiConnection &idRhs );
+    const IndiConnection &operator=( const IndiConnection &idRhs );
     /// Called from the constructor to initialize member variables.
-    void construct( const std::string &szName,
-                    const std::string &szVersion,
-                    const std::string &szProtocolVersion );
+    void construct( const std::string &szName, const std::string &szVersion, const std::string &szProtocolVersion );
     /// Listens on the file descriptor in a loop for incoming INDI messages.
     /// Exits when the 'Quit Process' flag becomes true.
     void process();
 
-  // Standard client interface methods.
+    // Standard client interface methods.
   public:
     /// Try to start the driver 'execute' thread. If it is already running, this
     /// will throw. When the thread starts, it calls 'beforeExecute' before
@@ -75,8 +72,7 @@ class IndiConnection : public pcf::Thread
     /// being called in a loop and call 'afterExecute' before stopping the thread.
     void deactivate();
     /// Chooses what to do with the received property.
-    virtual void dispatch( const IndiMessage::Type &tType,
-                           const IndiProperty &ipDispatch ) = 0;
+    virtual void dispatch( const IndiMessage::Type &tType, const IndiProperty &ipDispatch ) = 0;
     /// Turns the additional logging on or off.
     void enableVerboseMode( const bool &oEnable );
     /// Function which executes in a loop in a separate thread.
@@ -120,19 +116,22 @@ class IndiConnection : public pcf::Thread
     /// This will cause the process to quit, the same as if a ctrl-c was sent.
     void quitProcess();
 
-    bool getQuitProcess() 
+    bool getQuitProcess()
     {
-       return m_oQuitProcess;
+        return m_oQuitProcess.load();
     }
-    
-  // Helper functions.
+
+    // Helper functions.
   protected:
+    /// Detach the raw input/output file-descriptor aliases without closing them.
+    void detachFds();
+
     /// 'pthread_create' needs a static function to get the thread going.
     /// Passing a pointer back to this class allows us to call the 'runLoop'
     /// function from within the new thread.
     static void *pthreadProcess( void *pUnknown );
 
-  // Variables
+    // Variables
   private:
     /// The name of this client.
     std::string m_szName;
@@ -144,25 +143,20 @@ class IndiConnection : public pcf::Thread
     int m_iCpuAffinity;
     /// allocate a big buffer to hold the input data.
     std::vector<unsigned char> m_vecInputBuf;
-    
+
     /// The flag to tell this to quit.
-    //Changed from static to prevent app-wide INDI shutdown.
-    bool m_oQuitProcess {false};
-    
+    // Changed from static to prevent app-wide INDI shutdown.
+    std::atomic_bool m_oQuitProcess{ false };
+
     /// This is the object that conglomerates all the INDI XML
     pcf::IndiXmlParser m_ixpIndi;
     /// A mutex to protect output.
     mutable pcf::MutexLock m_mutOutput;
     /// The file descriptor to read from.
     int m_fdInput;
-    
+
     /// The file descriptor to write to.
     int m_fdOutput;
-
-    /// Stream for safer output
-    FILE * m_fstreamOutput {NULL};
-
-    FILE * m_fstreamSTDOUT {NULL};
 
     /// If the processing of INDI messages is put in a separate thread,
     /// this is the thread id of it.

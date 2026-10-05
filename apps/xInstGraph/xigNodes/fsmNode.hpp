@@ -133,7 +133,7 @@ class fsmNode : public xigNode
      */
     virtual void fsmElName( const std::string &en /**< [in] the new element name */ );
 
-    /// Get the fsm element name 
+    /// Get the fsm element name
     /**
      * \return the current value of m_fsmElName
      */

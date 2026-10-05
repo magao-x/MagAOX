@@ -42,7 +42,7 @@ echo "------------------------------------------------------------------------"
 
 printHELP1 ()
 {
-    printf "%20s       Send image stream to TCP port\n" "$0" 
+    printf "%20s       Send image stream to TCP port\n" "$0"
 }
 
 
@@ -94,8 +94,8 @@ for arg in "$@"; do
   shift
   case "$arg" in
     "--help") set -- "$@" "-h" ;;
-    "--help1") 
-set -- "$@" "-h" 
+    "--help1")
+set -- "$@" "-h"
 singlelinehelp=1;
 ;;
     *)        set -- "$@" "$arg"
@@ -122,7 +122,7 @@ while getopts :hckp: FLAG; do
     p)
     RTprio=$OPTARG
     ;;
-    c) 
+    c)
     echo "use counter for sync"
     SYNCMODE="1"
     ;;

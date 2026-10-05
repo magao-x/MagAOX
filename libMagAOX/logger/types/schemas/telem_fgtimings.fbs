@@ -7,7 +7,7 @@ table Telem_fgtimings_fb
 
    wtime:double;
    wtime_jitter:double;
-   
+
    wmatime:double;
    wmatime_jitter:double;
 }

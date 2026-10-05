@@ -1,0 +1,14 @@
+namespace MagAOX.logger;
+
+table Cred2_temps_fb
+{
+   motherboard:float;
+   frontend:float;
+   powerboard:float;
+   snake:float;
+   setpoint:float;
+   peltier:float;
+   heatsink:float;
+}
+
+root_type Cred2_temps_fb;

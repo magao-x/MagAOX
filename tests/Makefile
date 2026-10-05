@@ -1,6 +1,6 @@
 ############################################################
 #                makefile for MagAOX tests                 #
-#                                                          #  
+#                                                          #
 # Add tests to tests.list  and build with `make`           #
 #                                                          #
 #                                                          #
@@ -9,10 +9,10 @@
 #   -- if the test requires setuid, add a conditional to   #
 #      Makefile.one                                        #
 #                                                          #
-############################################################   
+############################################################
 
 TESTOBJS = `cat tests.list`
-        
+
 ##################################################
 ## Should not need to edit from here on:
 ##################################################
@@ -39,13 +39,15 @@ clean:
 realclean: clean
 	@rm -f testMain.o
 	@rm -f test_stderr.txt
-	
+
 .PHONY: coverage
-coverage:
+coverage: coverage_clean
 	${MAKE} all COVERAGE=1
 
 coverage_clean:
 	find .. -path '*/tests/*.gcno' -delete
 	find .. -path '*/tests/*.gcda' -delete
 	find .. -path '*/tests/*.gcov' -delete
-	${MAKE} clean COVERAGE=1
+	@rm -f testMain.gcno
+	@rm -f testMain.gcda
+	${MAKE} realclean COVERAGE=1

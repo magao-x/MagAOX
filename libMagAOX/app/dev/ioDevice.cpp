@@ -1,7 +1,7 @@
 /** \file ioDevice.cpp
  * \author Jared R. Males
  * \brief Configuration and control of an input and output device
- * 
+ *
  * \ingroup app_files
  *
  */
@@ -13,9 +13,9 @@ namespace MagAOX
 {
 namespace app
 {
-namespace dev 
+namespace dev
 {
-   
+
 
 int ioDevice::setupConfig( mx::app::appConfigurator & config )
 {
@@ -29,7 +29,7 @@ int ioDevice::loadConfig( mx::app::appConfigurator & config )
 {
    config(m_readTimeout, "device.readTimeout");
    config(m_writeTimeout, "device.writeTimeout");
-   
+
    return 0;
 }
 

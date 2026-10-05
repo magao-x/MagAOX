@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+#Script to shutdown the MagAO-X RTC cacao processes
+#
+# This script is under version control in the MagAO-X source
+
+cpath=$(pwd)
+
+cd /opt/MagAOX/cacao/woofer-vispyr/woofer-vispyr-rootdir
+cacao-setup -C woofer-vispyr
+
+cd ../../tweeter-vispyr/tweeter-vispyr-rootdir
+cacao-setup -C tweeter-vispyr
+
+cd $cpath
+
+

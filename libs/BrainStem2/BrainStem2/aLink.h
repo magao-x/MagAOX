@@ -70,7 +70,7 @@ extern "C" {
 
     /////////////////////////////////////////////////////////////////////
     /// Create a BrainStem link reference.
-    
+
     /**
      * Creates a reference to a BrainStem link. The linkStream is now
      * maintained by the BrainStem link.  If the link already exists, the
@@ -88,8 +88,8 @@ extern "C" {
 
     /**
      * Creates a reference to a BrainStem link. The linkStream is now
-     * maintained by the BrainStem link.  If the link already exists, the 
-     * use count for that link will be incremented and the linkRef for 
+     * maintained by the BrainStem link.  If the link already exists, the
+     * use count for that link will be incremented and the linkRef for
      * that entry will be returned.
      *
      * Links created with this procedure must use aLink_Destroy to properly
@@ -121,10 +121,10 @@ extern "C" {
      */
     aLIBEXPORT aLinkRef aLink_Create(aStreamRef linkStream);
 
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Create a BrainStem link reference.
-    
+
     /**
      * Destroys a Link reference. deallocating associated resources cleanly.
      *
@@ -137,11 +137,11 @@ extern "C" {
      *                       value has been left for backwards compatability.
      */
     aLIBEXPORT aErr aLink_Destroy(aLinkRef* linkRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Reset a connection to a BrainStem module.
-    
+
     /**
      * Stop the active connection to the BrainStem if the Link contains a valid
      * stream Reference, and clear out the communication buffers, and restart
@@ -155,11 +155,11 @@ extern "C" {
      * \retval aErrParam  No valid LinkRef provided.
      */
     aLIBEXPORT aErr aLink_Reset(const aLinkRef linkRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Return the current status of the BrainStem link.
-    
+
     /**
      * Return the current status of the BrainStem link.
      *
@@ -167,11 +167,11 @@ extern "C" {
      * \return linkStatus  See the possible linkStatus values.
      */
     aLIBEXPORT linkStatus aLink_GetStatus(const aLinkRef linkRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Return the first packet in the Link incomming FIFO.
-    
+
     /**
      * Return the first packet in the Link incomming FIFO. This call is non blocking,
      * and will return immediately.
@@ -180,11 +180,11 @@ extern "C" {
      * \return aPacket  Returns a BrainStem packet on success or NULL.
      */
     aLIBEXPORT aPacket* aLink_GetPacket(const aLinkRef linkRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Return the first packet in the Link incomming FIFO.
-    
+
     /**
      * Return the first packet in the Link incomming FIFO. This call blocks waiting
      * for msTimeout milliseconds.
@@ -195,11 +195,11 @@ extern "C" {
      */
     aLIBEXPORT aPacket* aLink_AwaitPacket(const aLinkRef linkRef,
                                           const unsigned long msTimeout);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Return the first packet matched by proc in the Link incomming FIFO.
-    
+
     /**
      * Return the first packet matched by proc in the Link incomming FIFO. This call
      * is non blocking and returns immediatly.
@@ -212,11 +212,11 @@ extern "C" {
     aLIBEXPORT aPacket* aLink_GetFirst(const aLinkRef linkRef,
                                        aPacketMatchPacketProc proc,
                                        const void* vpRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Return the first packet matched by proc in the Link incomming FIFO.
-    
+
     /**
      * Return the first packet matched by proc in the Link incomming FIFO. This call
      * blocks for up to msTimeout milliseconds waiting for a matching packet.
@@ -232,11 +232,11 @@ extern "C" {
                                          aPacketMatchPacketProc proc,
                                          const void* vpRef,
                                          const unsigned long msTimeout);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Drain all matching packets from the incomming FIFO.
-    
+
     /**
      * Drain all matching packets from the incomming FIFO. This call does not block.
      *
@@ -248,11 +248,11 @@ extern "C" {
     aLIBEXPORT size_t aLink_DrainPackets(const aLinkRef linkRef,
                                          aPacketMatchPacketProc proc,
                                          const void* vpRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Put a packet into the outgoing link FIFO.
-    
+
     /**
      * Put a packet into the outgoing link FIFO.
      *
@@ -264,8 +264,8 @@ extern "C" {
      * \retval aErrResource Unable to create memory for packet in FIFO.
      */
     aLIBEXPORT aErr aLink_PutPacket(const aLinkRef linkRef, const aPacket* packet);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////
 
@@ -277,14 +277,14 @@ extern "C" {
         PACKET_LOG_NOTE         = 0x03,
         PACKET_LOG_UNKNOWN_TYPE = 0x80, // unknown type of data
     } packetLogType;
-    
+
 
     /////////////////////////////////////////////////////////////////////
     /// Packet debug routines
 
     /////////////////////////////////////////////////////////////////////
     /// Enable logging of packets to/from the device.
-    
+
     /**
      * Enable logging of packets to/from the device.
      *
@@ -299,7 +299,7 @@ extern "C" {
 
     /////////////////////////////////////////////////////////////////////
     /// Enable logging of packets to/from the device.
-    
+
     /**
      * Enable logging of packets to/from the device.
      *
@@ -311,10 +311,10 @@ extern "C" {
      */
     aLIBEXPORT aErr aLink_PacketDebug_Enable(const aLinkRef linkRef);
 
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Disable logging of packets to/from the device.
-    
+
     /**
      * Disable logging of packets to/from the device.
      *
@@ -325,11 +325,11 @@ extern "C" {
      * \retval aErrNotReady Logging was never enabled.
      */
     aLIBEXPORT aErr aLink_PacketDebug_Disable(const aLinkRef linkRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Read next entry from the log.
-    
+
     /**
      * Read next entry from the log.
      *
@@ -346,7 +346,7 @@ extern "C" {
     aLIBEXPORT aErr aLink_PacketDebug_Read(const aLinkRef linkRef, packetLogType *type, uint32_t *data_size, uint8_t *data);
 
     aLIBEXPORT aErr aLink_PacketDebug_Write(const aLinkRef linkRef, packetLogType type, const uint32_t data_size, const uint8_t *data);
-    
+
 #ifdef __cplusplus
 }
 #endif

@@ -9,15 +9,15 @@
 
 #define GAIN (0)
 #define MULTCOEFF (1)
-namespace xqt 
+namespace xqt
 {
-   
+
 class gainCtrl : public xWidget
 {
    Q_OBJECT
-   
+
 protected:
-   
+
    std::string m_device;
    std::string m_property;
    std::string m_label;
@@ -38,7 +38,7 @@ protected:
    bool m_enforceMax {false};
 public:
 
-   gainCtrl( QWidget * Parent = 0, 
+   gainCtrl( QWidget * Parent = 0,
              Qt::WindowFlags f = Qt::WindowFlags()
            );
 
@@ -47,10 +47,10 @@ public:
              const std::string & label,
              int modes,
              int modesTotal,
-             QWidget * Parent = 0, 
+             QWidget * Parent = 0,
              Qt::WindowFlags f = Qt::WindowFlags()
            );
-   
+
    ~gainCtrl();
 
    void setup( const std::string & device,
@@ -65,15 +65,17 @@ public:
    void makeMultCoeffCtrl();
 
    virtual void subscribe();
-             
+
    virtual void onConnect();
 
    virtual void onDisconnect();
-   
+
    virtual void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
+
+   virtual void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+
    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
+
    virtual void updateGUI();
 
    void setGain( float g );
@@ -88,11 +90,11 @@ public slots:
    void on_slider_sliderReleased();
 
 protected:
-     
+
    Ui::gainCtrl ui;
 };
 
-gainCtrl::gainCtrl( QWidget * Parent, 
+gainCtrl::gainCtrl( QWidget * Parent,
                     Qt::WindowFlags f) : xWidget(Parent, f)
 {
    ui.setupUi(this);
@@ -103,14 +105,14 @@ gainCtrl::gainCtrl( const std::string & device,
                     const std::string & label,
                     int modes,
                     int modesTotal,
-                    QWidget * Parent, 
+                    QWidget * Parent,
                     Qt::WindowFlags f) : xWidget(Parent, f)
 {
    ui.setupUi(this);
-   
+
    setup(device, property, label, modes, modesTotal);
 }
-   
+
 gainCtrl::~gainCtrl()
 {
 }
@@ -130,14 +132,14 @@ void gainCtrl::setup( const std::string & device,
 
    ui.status->setup(m_device, m_property, statusEntry::FLOAT, "", "");
    ui.status->setStretch(0,0,1);
-   
+
 
    setXwFont(ui.button_plus);
    setXwFont(ui.button_scale);
    setXwFont(ui.button_minus);
    setXwFont(ui.button_zero);
    setXwFont(ui.label);
-   
+
    ui.label->setText(m_label.c_str());
 
    if(m_modes == -1 || m_modesTotal == -1) ui.label_nummodes->setText("");
@@ -150,7 +152,7 @@ void gainCtrl::setup( const std::string & device,
    }
 
    makeGainCtrl();
-   
+
    onDisconnect();
 }
 
@@ -185,8 +187,8 @@ void gainCtrl::makeMultCoeffCtrl()
 void gainCtrl::subscribe()
 {
     if(!m_parent) return;
-   
-    if(m_property != "") 
+
+    if(m_property != "")
     {
         m_parent->addSubscriberProperty(this, m_device, m_property);
 
@@ -196,7 +198,7 @@ void gainCtrl::subscribe()
 
    return;
 }
-  
+
 void gainCtrl::onConnect()
 {
    ui.status->onConnect();
@@ -204,6 +206,11 @@ void gainCtrl::onConnect()
 
 void gainCtrl::onDisconnect()
 {
+   m_current = 0;
+   m_target = 0;
+   m_valChanged = false;
+   m_newSent = false;
+   ui.slider->setValue(0);
    ui.status->onDisconnect();
 }
 
@@ -212,10 +219,20 @@ void gainCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
    return handleSetProperty(ipRecv);
 }
 
-void gainCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
-{  
+void gainCtrl::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{
    if(ipRecv.getDevice() != m_device) return;
-   
+
+   if(ipRecv.getName() == m_property)
+   {
+      onDisconnect();
+   }
+}
+
+void gainCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
+{
+   if(ipRecv.getDevice() != m_device) return;
+
    if(ipRecv.getName() == m_property)
    {
       if(m_newSent)
@@ -233,7 +250,7 @@ void gainCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
                m_current = current;
             }
          }
-   
+
          if(ipRecv.find("target"))
          {
             m_target = ipRecv["target"].get<float>();
@@ -289,12 +306,12 @@ void gainCtrl::setGain( float g )
    if(m_enforceMax && g > m_maxVal) g = m_maxVal;
 
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
+
    ip.setDevice(m_device);
    ip.setName(m_property);
    ip.add(pcf::IndiElement("target"));
    ip["target"] = g;
-   
+
    sendNewProperty(ip);
    m_newSent = true;
 
@@ -323,7 +340,7 @@ void gainCtrl::on_button_scale_pressed()
       {
          m_scale = 0.01;
       }
-      
+
       char sstr[16];
       snprintf(sstr, sizeof(sstr), "%0.2f", m_scale);
       ui.button_scale->setText(sstr);
@@ -342,7 +359,7 @@ void gainCtrl::on_button_scale_pressed()
       {
          m_scale = 0.001;
       }
-      
+
       char sstr[16];
       snprintf(sstr, sizeof(sstr), "%0.3f", m_scale);
       ui.button_scale->setText(sstr);
@@ -366,7 +383,7 @@ void gainCtrl::on_slider_sliderMoved(int s)
 {
    double epos = (1.0*s)/ui.slider->maximum() * m_maxVal;
 
-   ui.status->setEditText(QString::number(epos));  
+   ui.status->setEditText(QString::number(epos));
 }
 
 void gainCtrl::on_slider_sliderReleased()
@@ -378,7 +395,7 @@ void gainCtrl::on_slider_sliderReleased()
 }
 
 } //namespace xqt
-   
+
 #include "moc_gainCtrl.cpp"
 
 #endif

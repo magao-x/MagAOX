@@ -1,7 +1,7 @@
 
 ## Node Configuration
 
-Each node has a section in the config file with the same name as the node.  This name must correspond to the name of the 
+Each node has a section in the config file with the same name as the node.  This name must correspond to the name of the
 node in the `.drawio` XML file.  This looks like:
 
 ```
@@ -19,7 +19,7 @@ Each of these has specific configuration options
 
 ### pwrOnOffNode
 
-The power-on/off node shows the status of a power switched device. 
+The power-on/off node shows the status of a power switched device.
 
 | key            |  type            |  required    | default     |  Description |
 |----------------|------------------|--------------|-------------|--------------|
@@ -27,7 +27,7 @@ The power-on/off node shows the status of a power switched device.
 
 ### stdMotionNode
 
-The standard motion node shows the status of an standard motion stage, which includes focus stages, filter wheels, linear actuators, etc. 
+The standard motion node shows the status of an standard motion stage, which includes focus stages, filter wheels, linear actuators, etc.
 
 | key            |  type            |  required    | default     |  Description |
 |----------------|------------------|--------------|-------------|--------------|

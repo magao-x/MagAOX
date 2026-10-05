@@ -42,9 +42,9 @@ class hsfwCtrl : public MagAOXApp<>,  public dev::stdMotionStage<hsfwCtrl>, publ
 {
 
    friend class dev::stdMotionStage<hsfwCtrl>;
-   
+
    friend class dev::telemeter<hsfwCtrl>;
-   
+
 protected:
 
    /** \name Non-configurable parameters
@@ -57,7 +57,7 @@ protected:
    /** \name Configurable Parameters
      * @{
      */
-   
+
    std::wstring m_serialNumber;
 
    ///@}
@@ -67,9 +67,9 @@ protected:
      */
 
    hsfw_wheel* m_wheel {nullptr};
-   
+
    double m_pos {0};
-   
+
    ///@}
 
 
@@ -127,22 +127,22 @@ public:
 
 
 protected:
-  
-   
+
+
 
    /// Start a high-level homing sequence.
    /** For this device this includes the homing dither.
-     * 
+     *
      * \returns 0 on success.
      * \returns -1 on error.
      */
    int startHoming();
-   
+
    int presetNumber();
-   
+
    /// Start a low-level homing sequence.
    /** This initiates the device homing sequence.
-     * 
+     *
      * \returns 0 on success.
      * \returns -1 on error.
      */
@@ -163,24 +163,24 @@ protected:
    int moveTo( const double & filters /**< [in] The new position in absolute filter units*/ );
 
    /** \name Telemeter Interface
-     * 
+     *
      * @{
-     */ 
+     */
    int checkRecordTimes();
-   
+
    int recordTelem( const telem_stage * );
-   
+
    int recordStage( bool force = false );
-   
+
 };
 
 inline
 hsfwCtrl::hsfwCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    m_presetNotation = "filter"; //sets the name of the configs, etc.
-   
+
    m_powerMgtEnabled = true;
-   
+
    return;
 }
 
@@ -188,11 +188,11 @@ inline
 void hsfwCtrl::setupConfig()
 {
    config.add("stage.serialNumber", "", "stage.serialNumber", argType::Required, "stage", "serialNumber", false, "string", "The device serial number.");
-   
+
    dev::stdMotionStage<hsfwCtrl>::setupConfig(config);
-   
+
    dev::telemeter<hsfwCtrl>::setupConfig(config);
-   
+
 }
 
 inline
@@ -201,7 +201,7 @@ void hsfwCtrl::loadConfig()
    std::string serNum;
    config(serNum, "stage.serialNumber");
    m_serialNumber.assign(serNum.begin(), serNum.end());
-   
+
    dev::stdMotionStage<hsfwCtrl>::loadConfig(config);
 
    dev::telemeter<hsfwCtrl>::loadConfig(config);
@@ -216,12 +216,12 @@ int hsfwCtrl::appStartup()
       return -1;
    }
 
-   
+
    if( dev::stdMotionStage<hsfwCtrl>::appStartup() < 0)
    {
       return log<software_critical,-1>({__FILE__,__LINE__});
    }
-   
+
    if(dev::telemeter<hsfwCtrl>::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
@@ -242,7 +242,7 @@ int hsfwCtrl::appLogic()
    {
       state(stateCodes::NODEVICE);
    }
-   
+
    if( state() == stateCodes::NODEVICE )
    {
       hsfw_wheel_info *devs, *cur_dev;
@@ -251,29 +251,29 @@ int hsfwCtrl::appLogic()
       if( state() == stateCodes::POWEROFF ) return 0;
 
       devs = enumerate_wheels();
-      
+
       if(devs == NULL)
       {
          return 0;
       }
-      
+
       cur_dev = devs;
-      while (cur_dev) 
+      while (cur_dev)
       {
          if(m_serialNumber == cur_dev->serial_number)
          {
             char logs[1024];
-         
+
             snprintf(logs, sizeof(logs), "Device Found - type: %04hx %04hx serial_number: %ls",cur_dev->vendor_id, cur_dev->product_id, cur_dev->serial_number);
             log<text_log>(logs);
-         
+
             state(stateCodes::NOTCONNECTED);
             break;
          }
          cur_dev = cur_dev->next;
       }
       wheels_free_enumeration(devs);
-      
+
       if(state() != stateCodes::NOTCONNECTED)
       {
          if(!stateLogged())
@@ -291,7 +291,7 @@ int hsfwCtrl::appLogic()
 
       hsfw_wheel_info *devs, *cur_dev;
       devs = enumerate_wheels();
-      
+
       if(devs == NULL)
       {
          state(stateCodes::NODEVICE);
@@ -299,14 +299,14 @@ int hsfwCtrl::appLogic()
       }
 
       cur_dev = devs;
-      
-      while (cur_dev) 
-      {        
-         if(m_serialNumber == cur_dev->serial_number) 
+
+      while (cur_dev)
+      {
+         if(m_serialNumber == cur_dev->serial_number)
          {
             break;
          }
-         
+
          cur_dev = cur_dev->next;
       }
 
@@ -316,57 +316,57 @@ int hsfwCtrl::appLogic()
          state(stateCodes::NODEVICE);
          return 0;
       }
-     
+
       //Make sure we don't try anything while off.
       if(powerState() != 1 || powerStateTarget() != 1) return 0;
 
       if(m_wheel) close_hsfw(m_wheel);
-      
+
       {
          elevatedPrivileges elPriv(this);
          m_wheel = open_hsfw(cur_dev->vendor_id, cur_dev->product_id, cur_dev->serial_number);
       }
-   
+
       if(m_wheel == NULL)
       {
          state(stateCodes::NODEVICE);
          return 0;
       }
-           
-     
+
+
       state(stateCodes::CONNECTED);
       log<text_log>("Connected to HSFW " + std::string(m_serialNumber.begin(), m_serialNumber.end()));
    }
-   
-   
+
+
    //If here, we're connected.
-   
+
    std::lock_guard<std::mutex> guard(m_indiMutex);
-   
+
    //Make sure we don't try anything while off.
    if(powerState() != 1 || powerStateTarget() != 1) return 0;
-   
+
    wheel_status status;
-   if (get_hsfw_status(m_wheel, &status) < 0) 
+   if (get_hsfw_status(m_wheel, &status) < 0)
    {
       if(powerState() != 1 || powerStateTarget() != 1) return 0;
       log<software_error>({__FILE__, __LINE__, "error from get_hsfw_status"});
       return 0;
    }
-   
-   if (status.error_state != 0) 
+
+   if (status.error_state != 0)
    {
       clear_error_hsfw(m_wheel);
    }
-   
+
    m_pos = status.position;
-   
+
    if(!status.is_homed && !status.is_homing)
    {
       state(stateCodes::NOTHOMED);
       m_moving = -1;
-      
-      if(m_powerOnHome) 
+
+      if(m_powerOnHome)
       {
          startHoming();
       }
@@ -381,12 +381,12 @@ int hsfwCtrl::appLogic()
       m_moving = 1;
       state(stateCodes::OPERATING);
    }
-   else 
+   else
    {
       m_moving = 0;
       state(stateCodes::READY);
    }
-   
+
    int n = presetNumber();
    if(n == -1)
    {
@@ -401,18 +401,18 @@ int hsfwCtrl::appLogic()
 
    //record telem if there have been any changes
    recordStage();
-   
-   
+
+
    dev::stdMotionStage<hsfwCtrl>::updateINDI();
-   
+
    //record telem if it's been longer than 10 sec:
    if(telemeter<hsfwCtrl>::appLogic() < 0)
    {
       log<software_error>({__FILE__, __LINE__});
       return 0;
    }
-   
-   
+
+
    return 0;
 }
 
@@ -422,9 +422,9 @@ inline
 int hsfwCtrl::appShutdown()
 {
    if(m_wheel) close_hsfw(m_wheel);
-   
+
    exit_hsfw();
-            
+
    return 0;
 }
 
@@ -435,12 +435,12 @@ int hsfwCtrl::onPowerOff()
    {
       log<software_error>({__FILE__,__LINE__});
    }
-   
+
    recordStage();
 
    return 0;
 }
-   
+
 
 inline
 int hsfwCtrl::whilePowerOff()
@@ -449,33 +449,33 @@ int hsfwCtrl::whilePowerOff()
    {
       log<software_error>({__FILE__,__LINE__});
    }
-   
+
    //record telem if it's been longer than 10 sec:
    if(telemeter<hsfwCtrl>::appLogic() < 0)
    {
       log<software_error>({__FILE__, __LINE__});
    }
-   
+
    return 0;
 }
 
-   
+
 int hsfwCtrl::startHoming()
 {
    updateSwitchIfChanged(m_indiP_home, "request", pcf::IndiElement::Off, INDI_IDLE);
-   
+
    //Make sure we don't try anything while off.
    if( state() == stateCodes::POWEROFF ) return 0;
 
-   if(home_hsfw(m_wheel)) 
+   if(home_hsfw(m_wheel))
    {
       if(powerState() != 1 || powerStateTarget() != 1) return -1; //about to get POWEROFF
       log<software_error>({__FILE__,__LINE__, "libhswf error"});
       return -1;
    }
-   
+
    m_moving = 2;
-   
+
    return 0;
 }
 
@@ -495,6 +495,8 @@ int hsfwCtrl::stop()
 
 int hsfwCtrl::moveTo( const double & filters )
 {
+   static size_t s_hsfwMoveSerial = 0;
+
    //Make sure we don't try anything while off.
    if( state() == stateCodes::POWEROFF ) return 0;
 
@@ -508,15 +510,24 @@ int hsfwCtrl::moveTo( const double & filters )
       }
    }
 
-   m_moving = 1;   
+   unsigned short hwTarget = static_cast<unsigned short>(ffilters + 0.5);
+
+   ++s_hsfwMoveSerial;
+   log<text_log>("hsfwCtrl::moveTo[" + std::to_string(s_hsfwMoveSerial)
+                 + "] requested=" + std::to_string(filters)
+                 + " normalized=" + std::to_string(ffilters)
+                 + " hwTarget=" + std::to_string(hwTarget)
+                 + " currentPos=" + std::to_string(m_pos));
+
+   m_moving = 1;
    recordStage();
-   
-   if( move_hsfw(m_wheel, (unsigned short) (ffilters + 0.5)) < 0)
+
+   if( move_hsfw(m_wheel, hwTarget) < 0)
    {
       if(powerState() != 1 || powerStateTarget() != 1) return -1; //about to get POWEROFF
       return log<software_error,-1>({__FILE__,__LINE__, "libhsfw error"});
    }
-   
+
    return 0;
 }
 
@@ -524,7 +535,7 @@ int hsfwCtrl::checkRecordTimes()
 {
    return dev::telemeter<hsfwCtrl>::checkRecordTimes(telem_stage());
 }
-   
+
 int hsfwCtrl::recordTelem( const telem_stage * )
 {
    return recordStage(true);

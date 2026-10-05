@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -ex
+cd /
+# If not started as xbackup, sudo yourself
+if [[ "$EUID" != $(id -u xbackup) ]]; then
+    sudo -u xbackup bash -l $0 "$@"
+    exit $?
+fi
+if [[ -z $1 ]]; then
+    echo "Supply semester as an argument"
+    exit 1
+fi
+cyversePrefix=/srv/cyverse/archive/magao-x
+dest=$cyversePrefix/$1
+mkdir -pv $dest || exit 1
+export extraRsyncOptions="--inplace"
+instrument_backup_sync $dest

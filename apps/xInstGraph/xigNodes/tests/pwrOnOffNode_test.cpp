@@ -1,5 +1,11 @@
-// #define CATCH_CONFIG_MAIN
-#include "../../../../tests/catch2/catch.hpp"
+/** \file pwrOnOffNode_test.cpp
+ * \brief Catch2 tests for the xInstGraph `pwrOnOffNode` helper.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup xInstGraph_files
+ */
+
+#include "../../../../tests/testXWC.hpp"
 
 #include <fstream>
 
@@ -7,6 +13,21 @@
 
 #define XWC_XIGNODE_TEST
 #include "../pwrOnOffNode.hpp"
+
+namespace libXWCTest
+{
+
+/** \addtogroup xInstGraph_unit_test
+ * \brief Additional unit tests for the xInstGraph application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `xInstGraph` node unit tests.
+/** \ingroup xInstGraph_unit_test
+ */
+namespace xInstGraphTest
+{
 
 void writeXML()
 {
@@ -28,6 +49,13 @@ void writeXML()
 
 TEST_CASE( "Creating and configuring an pwrOnOffNode", "[instGraph::pwrOnOffNode]" )
 {
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    pwrOnOffNode::loadConfig( *(mx::app::appConfigurator *)nullptr );
+    pwrOnOffNode::pwrKey();
+    #endif
+    // clang-format on
+
     SECTION( "node is in file, setting pwr key" )
     {
         ingr::instGraphXML parentGraph;
@@ -85,10 +113,7 @@ TEST_CASE( "Creating and configuring an pwrOnOffNode", "[instGraph::pwrOnOffNode
     {
         ingr::instGraphXML parentGraph;
         writeXML();
-        mx::app::writeConfigFile( "/tmp/pwrOnOffNode_test.conf",
-                                  { "ttmpupil" },
-                                  { "type" },
-                                  { "pwrOnOff" } );
+        mx::app::writeConfigFile( "/tmp/pwrOnOffNode_test.conf", { "ttmpupil" }, { "type" }, { "pwrOnOff" } );
         mx::app::appConfigurator config;
         config.readConfig( "/tmp/pwrOnOffNode_test.conf" );
 
@@ -129,6 +154,9 @@ TEST_CASE( "Creating and configuring an pwrOnOffNode", "[instGraph::pwrOnOffNode
         }
 
         REQUIRE( pass == false );
-
     }
 }
+
+} // namespace xInstGraphTest
+
+} // namespace libXWCTest

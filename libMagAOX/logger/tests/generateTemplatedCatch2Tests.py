@@ -16,15 +16,15 @@ import random
 import getopt
 
 
-gNextVals = {    
+gNextVals = {
     "string" : 0,
-    "int64"  : 0, 
+    "int64"  : 0,
     "uint64" : 0,
-    "int32"  : 0, 
-    "uint32" : 0, 
-    "int16"  : 0, 
+    "int32"  : 0,
+    "uint32" : 0,
+    "int16"  : 0,
     "uint16" : 0,
-    "int8"   : 0, 
+    "int8"   : 0,
     "uint8"  : 0,
     "float"  : 0,
     "double" : 0
@@ -106,21 +106,24 @@ def getSchemaFieldInfo(fname : str) -> tuple[str, tuple] :
                 curSubTable = None
                 continue
 
+            if ("deprecated" in line):
+                continue
+
             if (line != ""):
-                lineParts = line.strip().rstrip(";").split(":")
-                name = lineParts[0]
-                type = lineParts[1].split()[0]
+                fieldParts = line.strip().rstrip(";").split(":")
+                name = fieldParts[0]
+                fieldType = fieldParts[1].split()[0]
 
                 if curSubTable is not None:
                     # add to subtable dict for now, will be added in later
-                    subTables[curSubTable].append((name, type))
+                    subTables[curSubTable].append((name, fieldType))
                 else:
-                    schemaFieldInfo.append((name, type))
+                    schemaFieldInfo.append((name, fieldType))
                 continue
 
     if len(subTables) == 0:
         return schemaTableName, tuple(schemaFieldInfo)
-    
+
 
     # go through sub tables and add them in
     newSchemaFieldInfo = []
@@ -135,7 +138,7 @@ def getSchemaFieldInfo(fname : str) -> tuple[str, tuple] :
 
 
 '''
-Quick check that the types in .fbs correspond, mainly strings match to strings, 
+Quick check that the types in .fbs correspond, mainly strings match to strings,
 and vectors to vectors.
 If they do not correspond, the behavior for comparing the fb values in the tests
 is undefined, and action beyond this generator will need to be taken.
@@ -146,9 +149,9 @@ def typesCorrespond(fbsType : str, cType : str) -> bool:
 
     if ("string" in fbsType) or ("string" in cType or "char *" in cType):
         return (("string" in fbsType) and ("string" in cType or "char *" in cType))
-    
+
     return True
-    
+
 
 '''
 Check it is not a base log type.
@@ -196,11 +199,12 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
     if not isValidLogType(headerLines):
         if returnInfo["name"] not in baseTypesDict:
             baseTypesDict[returnInfo["name"]] = set()
+
         return None # don't render anything from this file
 
     # iterate through all lines in header to:
     # 1. find where messageT structs are being made -> describes fields
-    # 2. check that is has its own <Get|Create|Verify><name>_fb methods 
+    # 2. check that is has its own <Get|Create|Verify><name>_fb methods
     fbMethodName = f"Create{returnInfo["name"][0].upper() + returnInfo["name"][1:]}_fb"
     hasFbMethods = False
     messageStructIdxs = []
@@ -221,6 +225,7 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
 
         # add inhertied type to dict where val is the base type it inherits from
         baseTypesDict[returnInfo["baseType"]].add(returnInfo["name"])
+
         return None # don't render me yet!
 
     # if it does not have its own fb method, find name of class its using
@@ -233,26 +238,26 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
                 returnInfo["schemaTableName"] = f"{line[startIndex:endIndex]}_fb"
 
     returnInfo["messageTypes"] = getMessageFieldInfo(messageStructIdxs, headerLines, schemaFieldInfo)
-    
+
     return returnInfo
 
 '''
 Parse out field type and name from string
 '''
-def getTypeAndName(lineParts : list) -> tuple[str, str]:
+def getTypeAndName(fieldParts : list) -> tuple[str, str]:
 
-    typeIdxStart = 1 if (lineParts[0] == "const") else 0
-    fieldType = lineParts[typeIdxStart]
+    typeIdxStart = 1 if (fieldParts[0] == "const") else 0
+    fieldType = fieldParts[typeIdxStart]
 
-    if lineParts[typeIdxStart + 1] == "&":
+    if fieldParts[typeIdxStart + 1] == "&":
         nameIdx = (typeIdxStart + 2)
-    elif lineParts[typeIdxStart + 1] == "*":
+    elif fieldParts[typeIdxStart + 1] == "*":
         nameIdx = (typeIdxStart + 2)
         fieldType += " *"
     else:
         nameIdx = (typeIdxStart + 1)
 
-    name = lineParts[nameIdx].rstrip(")").rstrip(",")
+    name = fieldParts[nameIdx].rstrip(")").rstrip(",")
 
     if name[0] == "*":
         fieldType += " *"
@@ -290,7 +295,7 @@ def getRandInt(type : str) -> int:
     unsigned = True if "uint" in type else False
 
     intSizeBits = getIntSize(type)
-    
+
     if not unsigned:
         intSizeBits -= 1
 
@@ -322,7 +327,7 @@ def getIncrementingInt(type : str) -> int:
     elif "uint32_t" in type:
         gNextVals["uint32"] = (gNextVals["uint32"] + 1) % max
         return gNextVals["uint32"]
-    elif  "int64_t" in type:   
+    elif  "int64_t" in type:
         gNextVals["int64"] =  (gNextVals["int64"]  + 1) % max
         return gNextVals["int64"]
     elif "uint64_t" in type:
@@ -346,7 +351,7 @@ def getTestValFromType(fieldType : str, schemaFieldType = None) -> str:
             return str(getIncrementingInt(fieldType))
         # need 'u' suffix for randomly generated uint64_t to avoid:
         # "warning: integer constant is so large that it is unsigned"
-        return f'{str(getRandInt(fieldType))}u' if "uint64_t" in fieldType else str(getRandInt(fieldType)) 
+        return f'{str(getRandInt(fieldType))}u' if "uint64_t" in fieldType else str(getRandInt(fieldType))
     elif "float" in fieldType:
         if gIncrementingVals:
             gNextVals["float"] += 1
@@ -373,9 +378,55 @@ def makeTestVal(fieldDict : dict) -> str:
 
     if "schemaType" in fieldDict:
         return getTestValFromType(fieldDict["type"], fieldDict["schemaType"])
-    
+
     return getTestValFromType(fieldDict["type"])
-    
+
+# returns tuple of schema field info, subtable name (none if no subtable)
+def findMatchingSchemaField(schemaFieldInfo, fieldName):
+    for schemaField in schemaFieldInfo:
+        if isinstance(schemaField, tuple) and schemaField[0] == fieldName:
+                return schemaField, None
+        if isinstance(schemaField, dict):
+            subTableName = next(iter(schemaField))
+            for subField in schemaField[subTableName]:
+                if len(subField) != 2:
+                    continue
+                if subField[0] == fieldName:
+                    return subField, subTableName
+    return None, None # no matching field in schema for given fieldName
+
+def setDefaultArgOfLastField(fieldsList, fieldParts):
+    # this is the default arg value for msgsFieldList[-1]
+    fieldsList[-1]["defaultArg"] = " ".join(fieldParts).strip("=").strip()
+
+    # std::source_location aliases separate fields file and line for software_log
+    if "std::source_location" in fieldsList[-1]["type"]:
+        if fieldsList[-1]["name"] == "loc":  # can remove this line if we don't want "loc" strictly associated with alias
+            fieldsList.pop()
+
+            # special case software log loc alias for file and line fields.
+            fieldsList.append(
+                {
+                    "type": "char *",
+                    "name": "file",
+                    "schemaName": "file",
+                    "schemaType": "string",
+                    "testVal": None,
+                    "defaultArg": True,
+                    "defaultTestVal": "__FILE__"
+                }
+            )
+            fieldsList.append(
+                {
+                    "type": "uint32_t",
+                    "name": "line",
+                    "schemaName": "line",
+                    "schemaType": "uint32",
+                    "testVal": None,
+                    "defaultArg": True
+                }
+            )
+
 
 
 '''
@@ -388,6 +439,8 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
     subTableDictIndex = 0
 
     # extract log field types and names
+    inMultilineComment = False
+    inDefaultArgDef = False
     for i in range(len(messageStructIdxs)):
         structIdx = messageStructIdxs[i]
         msgsFieldsList = []
@@ -400,31 +453,75 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
 
             # check if this is a closing line
             if ")" in line:
-                if "//" in line and line.find(")") > line.find("//"):
+                if ("//" in line and line.find(")") > line.find("//")):
                     # parenthesis is in comment
                     pass
                 elif line.strip().strip(")") == "":
-                    break
+                    break # field is done
                 else:
-                    closed = True # parse the field, don't leave loop yet
+                    openParenCount = line.count("(")
+                    closeParenCount = line.count(")")
+                    # check if truly closed or not
+                    if (closeParenCount > openParenCount) or \
+                       (closeParenCount == openParenCount and "messageT(" in line):
+                        closed = True # parse the field, don't leave loop yet
+                        line = line[:line.rfind(")")]
+
+            if inMultilineComment:
+                if "*/" in line:
+                    inMultilineComment = False
+                    structIdx += 1
+                continue
 
 
             # trim line to just get field info
             indexStart = (line.find("messageT(") + len("messageT(")) if "messageT(" in line else 0
-            indexEnd = line.find("//") if "//" in line else len(line)
+
+            indexEnd = len(line)
+            # adjust for comments. Note /* takes precedence over //
+            if "/*" in line and line.find("/*") < indexEnd:
+                indexEnd = line.find("/*")
+                # handle multiline comments
+                if "*/" not in line:
+                    inMultilineComment = True
+            elif "//" in line:
+                indexEnd = line.find("//")
+
+
             line = line[indexStart:indexEnd].strip()
 
-            lineParts =  [part.strip().split() for part in line.strip().rstrip(",").split(",")]
+            fieldParts =  [part.strip().split() for part in line.strip().rstrip(",").split(",")]
 
-            for field in lineParts:
+            for field in fieldParts:
                 fieldDict = {}
+
                 if len(field) > 0 and "//" in field[0]:
                     break
+                if len(field) == 0:
+                    break
+
+                # check if this is a default arg value
+                if inDefaultArgDef and len(msgsFieldsList) > 1:
+                    setDefaultArgOfLastField(msgsFieldsList, field)
+                    inDefaultArgDef = False
+                    field.pop(0)
+                    if len(field) == 0:
+                        break
+
+                # handle default arguments that expand across two lines
+                if field[0] == "=":
+                    setDefaultArgOfLastField(msgsFieldsList, field)
+                    continue
+                if field[-1] == '=':
+                    # set flag but still need to parse this fields info.
+                    # don't leave this loop iteration yet.
+                    inDefaultArgDef = True
+
 
                 # find type and name
-                type, name = getTypeAndName(field)
+                fieldType, name = getTypeAndName(field)
 
-                fieldDict["type"] = type
+                fieldDict["type"] = fieldType
                 fieldDict["name"] = name
                 # get vector type if necessary
                 if "std::vector" in fieldDict["type"]:
@@ -434,10 +531,19 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
                     fieldDict["vectorType"] = vectorType
 
                 if len(schemaFieldInfo) != 0:
+
                     if isinstance(schemaFieldInfo[fieldCount], tuple):
                         fieldDict["schemaName"] = schemaFieldInfo[fieldCount][0]
                         fieldDict["schemaType"] = schemaFieldInfo[fieldCount][1]
                         fieldCount += 1
+
+                        # check if matching name in schema file exists, let this overwrite
+                        matchingSchemaField, subTableName = findMatchingSchemaField(schemaFieldInfo, fieldDict["name"])
+                        if matchingSchemaField != None and len(matchingSchemaField) == 2:
+                            subTableStr = f"{subTableName}()->" if subTableName is not None else ""
+                            fieldDict["schemaName"] = f"{subTableStr}{matchingSchemaField[0]}"
+                            fieldDict["schemaType"] = matchingSchemaField[1]
+
                     else:
                         # go into dictionary..
                         subTableName = next(iter(schemaFieldInfo[fieldCount]))
@@ -450,18 +556,26 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
                             # reset dictionary index if we need to
                             subTableDictIndex = 0
                             fieldCount += 1
-                    
+
                     # check schemaType correlates to type in .hpp file
                     if not typesCorrespond(fieldDict["schemaType"], fieldDict["type"]):
                         # if types don't correspond, then use name in messageT and hope for best.
-                        # this is why if types are different, then names MUST correspond between 
+                        # this is why if types are different, then names MUST correspond between
                         # .fbs and .hpp file
                         del fieldDict["schemaName"]
-                
+                        del fieldDict["schemaType"]
+
                 fieldDict["testVal"] = makeTestVal(fieldDict)
 
                 # add field dict to list of fields
                 msgsFieldsList.append(fieldDict)
+
+                # note we do this after the fieldDict has been appended to msgsFieldList.
+                # This is because the function setDefaultArgOfLastField() does some
+                # special casing to replace std::current_location with field and line
+                # within the msgsFieldsList
+                if "=" in field:
+                    setDefaultArgOfLastField(msgsFieldsList, field)
 
             structIdx += 1
 
@@ -485,7 +599,6 @@ def makeInheritedTypeInfoDict(typesFolderPath : str, baseName : str, logName : s
     returnInfo["classVarName"] = "".join([word[0].lower() for word in returnInfo["name"].split("_")])
     returnInfo["baseType"] = baseName
     returnInfo["hasGeneratedHfile"] = hasGeneratedHFile(logName)
-
 
     baseHLines = baseHFile.readlines()
 
@@ -513,12 +626,12 @@ def main():
         print("Error: Python version must be >= 3.9")
         exit(0)
 
-    
+
     global gIncrementingVals
     gIncrementingVals = False
 
     # getopt for random seed or incrementing vals
-    try: 
+    try:
         opts, args = getopt.getopt(sys.argv[1:], "is:")
         if len(opts) > 1:
             print("Error: Only one option allowed. -s <seed> or -i for incrementing values.")
@@ -536,7 +649,7 @@ def main():
             random.seed(int(arg))
         if opt in ["-i"]:
             gIncrementingVals = True
-    
+
     # load template
     env = jinja2.Environment(
         loader = jinja2.FileSystemLoader(searchpath=os.path.dirname(__file__))
@@ -567,8 +680,10 @@ def main():
     types = os.listdir(typesFolderPath)
     types.sort()
     baseTypesDict = dict() # map baseTypes to the types that inherit from them
+    print("generating tests for...")
     for type in types:
 
+        print(type)
         # check valid type to generate tests for
         if ".hpp" not in type:
             continue

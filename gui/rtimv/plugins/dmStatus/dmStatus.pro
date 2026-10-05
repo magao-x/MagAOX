@@ -19,6 +19,8 @@ LIBS          += -lrtimv
 TARGET        = $$qtLibraryTarget(rtimv_dmStatusPlugin)
 DESTDIR       = ./
 
+CONFIG += link_pkgconfig
+PKGCONFIG += mxlib
 
 unix:target.path=/usr/local/bin/plugins
 INSTALLS+=target

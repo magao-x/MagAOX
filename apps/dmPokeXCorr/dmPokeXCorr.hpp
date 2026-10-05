@@ -375,11 +375,11 @@ int dmPokeXCorr::analyzeSensor()
         return log<software_error, -1>( { __FILE__, __LINE__, "reference is not valid" } );
     }
 
-    float xs, ys;
+    float xs, ys, pk;
 
     try
     {
-        m_xcorr( xs, ys, m_pokeImage() );
+        m_xcorr( xs, ys, pk, m_pokeImage() );
     }
     catch( const std::exception &e )
     {

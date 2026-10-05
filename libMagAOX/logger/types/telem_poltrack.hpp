@@ -41,7 +41,7 @@ struct telem_poltrack : public flatbuffer_log
         )
         {
             auto _pos_name = builder.CreateString(pos_name);
-         
+
             auto fp = CreateTelem_poltrack_fb( builder, set_angle, actual_angle, _pos_name, tracking);
             builder.Finish( fp );
         }
@@ -80,11 +80,11 @@ struct telem_poltrack : public flatbuffer_log
         }
 
         msg += "tracking: ";
-        if (fbs->tracking()) 
+        if (fbs->tracking())
         {
             msg += "SYNCHRO_ADI ";
-        } 
-        else 
+        }
+        else
         {
             msg += "NONE ";
         }
@@ -132,14 +132,14 @@ struct telem_poltrack : public flatbuffer_log
         {
             return logMetaDetail( { "SET ANGLE",
                                     logMeta::valTypes::Float,
-                                    logMeta::metaTypes::Continuous,
+                                    logMeta::metaTypes::State,
                                     reinterpret_cast<void *>( &set_angle ) } );
         }
         else if( member == "actual_angle" )
         {
             return logMetaDetail( { "ACTUAL ANGLE",
                                     logMeta::valTypes::Float,
-                                    logMeta::metaTypes::Continuous,
+                                    logMeta::metaTypes::State,
                                     reinterpret_cast<void *>( &actual_angle ) } );
         }
         else if( member == "pos_name" )

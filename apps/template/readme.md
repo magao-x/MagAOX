@@ -13,9 +13,9 @@ This document describes how to add an application to the MagAO-X source code.
 
 Start by copying the folder `template` to a new folder with the name of the app, e.g. `hardwareCtrl`.
 
-The three basic files for any application are the header, the main program file, and the Makefile.  In the new `hardwareCtrl` folder, rename `template.hpp` and `template.cpp` to `hardwareCtrl.hpp` and `hardwareCtrl.cpp` (substituting the appropriate name for the new application for `hardwareCtrl`).  
+The three basic files for any application are the header, the main program file, and the Makefile.  In the new `hardwareCtrl` folder, rename `template.hpp` and `template.cpp` to `hardwareCtrl.hpp` and `hardwareCtrl.cpp` (substituting the appropriate name for the new application for `hardwareCtrl`).
 
-Now in `Makefile`, `hardwareCtrl.hpp` and `hardwareCtrl.cpp`, change `template` to `hardwareCtrl` (you should be able to use find-all and replace).  
+Now in `Makefile`, `hardwareCtrl.hpp` and `hardwareCtrl.cpp`, change `template` to `hardwareCtrl` (you should be able to use find-all and replace).
 
 If all replacement is done correctly, the application will build with only warnings if you type `make` on the command line.
 

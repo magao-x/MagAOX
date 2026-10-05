@@ -16,6 +16,7 @@
 ../libMagAOX/logger/tests/logFileRaw_test
 ../libMagAOX/logger/tests/logFileRaw_fileTime_error_test
 ../libMagAOX/logger/tests/logMap_test
+../libMagAOX/logger/tests/logMeta_test
 ../libMagAOX/logger/tests/logTypes_Accessor_test
 
 ../libMagAOX/sys/tests/thSetuid_test
@@ -32,10 +33,13 @@
 ../apps/dmSpeckle/tests/dmSpeckle_test
 ../apps/filterWheelCtrl/tests/filterWheelCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_test
+../apps/flipperCtrl/tests/flipperCtrl_entrypoint_test
+../apps/flowRPM/tests/flowRPM_test
 ../apps/indiTSAccumulator/tests/indiTSAccumulator_test
 ../apps/koolanceCtrl/tests/koolanceCtrl_test
 ../apps/kTracker/tests/kTracker_test
 ../apps/loPredCtrl/tests/loPredCtrl_test
+../apps/mcp3208Ctrl/tests/mcp3208Ctrl_test
 ../apps/magAOXMaths/tests/magAOXMaths_test
 ../apps/modalFilter/tests/modalFilter_test
 ../apps/modalGainOpt/tests/modalGainOpt_test
@@ -44,6 +48,11 @@
 ../apps/mzmqServer/tests/mzmqServer_test
 ../apps/observerCtrl/tests/observerCtrl_test
 ../apps/ocam2KCtrl/tests/ocamUtils_test
+../apps/ocam2KCtrl/tests/ocam2KCtrl_test
+../apps/ocam2KCtrl/tests/ocam2KCtrl_lifecycle_test
+../apps/cred2Ctrl/tests/cred2Ctrl_test
+../apps/cred2Ctrl/tests/cred2Ctrl_lifecycle_test
+../apps/cred2Ctrl/tests/cred2Utils_test
 ../apps/pi335Ctrl/tests/pi335Ctrl_test
 ../apps/picoMotorCtrl/tests/picoMotorCtrl_test
 ../apps/psfAcq/tests/psfAcq_test
@@ -58,12 +67,15 @@
 ../apps/smc100ccCtrl/tests/smc100ccCtrl_test
 ../apps/sparkleClock/tests/sparkleClock_test
 ../apps/sshDigger/tests/sshDigger_test
+
 ../apps/stateRuleEngine/tests/indiCompRuleConfig_test
 ../apps/stateRuleEngine/tests/indiCompRules_test
 ../apps/stateRuleEngine/tests/stateRuleEngine_test
+
 ../apps/streamCircBuff/tests/streamCircBuff_test
 ../apps/streamWriter/tests/streamWriter_test
 ../apps/streamWriter/tests/streamWriterSizing_test
+../apps/streamWriter/tests/streamWriter_lifecycle_test
 ../apps/strehlEstimator/tests/strehlEstimator_test
 ../apps/sysMonitor/tests/sysMonitor_test
 ../apps/t2wOffloader/tests/t2wOffloader_test
@@ -105,9 +117,12 @@
 ../libMagAOX/tty/tests/tty_test
 ../libMagAOX/tty/tests/ttyIOUtils_test
 
+../utils/logsurgeon/tests/logsurgeon_config_test
+
 ../utils/tests/cursesINDI_test
 ../utils/tests/logdump_test
-../utils/tests/logsurgeon_test
+../utils/tests/shmimDelta_test
+../utils/tests/shmimInfo_test
 ../utils/tests/shmimLat_test
 ../utils/tests/shmimPlot_test
 ../utils/tests/xrif2fits_test

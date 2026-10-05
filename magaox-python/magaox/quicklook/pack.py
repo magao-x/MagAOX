@@ -369,7 +369,7 @@ def repack_xrif_channel(
             assert not np.any(times_contiguous[:, 1] == 0), f"{good_chunk_mask=} {times_contiguous=}"
             cam_times[start_idx : start_idx + real_frames] = times_contiguous
             start_idx += real_frames
-        
+
         # After all frames are copied, start_idx should be equal to the length.
         assert start_idx == total_frames, f"{start_idx=} {total_frames=}"
         dt = time.perf_counter() - start

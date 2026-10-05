@@ -136,7 +136,7 @@ inline void shmimLat::setupConfig()
                 "int",
                 "The length of the shared memory circular buffer. Default is 1." );
 
-    
+
 }
 
 inline void shmimLat::loadConfig()
@@ -360,7 +360,7 @@ inline void shmimLat::imageThreadExec( s_imageThread *mit )
 
 
 
-        
+
         // This is the main image grabbing loop.
         while( !g_timeToDie && !restart && n < m_atimes.size())
         {

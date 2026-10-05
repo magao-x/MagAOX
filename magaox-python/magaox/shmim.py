@@ -107,7 +107,7 @@ class Image(ImageStreamIOWrap.Image):
                         log.debug(f"Reopening {self.path} because we detected an inode change")
                         self._reopen(self.name)
                 else:
-                    print('not checking before waiting')
+                    log.debug('not checking before waiting')
                 ret = self.semtimedwait(self.semID, timeout_sec)
                 log.debug(f"{ret=} (first)")
                 if ret != 0:

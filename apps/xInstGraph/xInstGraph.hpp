@@ -33,7 +33,7 @@ using namespace ingr;
  */
 
 //forward for test harness
-namespace xInstGraph_test 
+namespace xInstGraph_test
 {
     class xInstGraph;
 }

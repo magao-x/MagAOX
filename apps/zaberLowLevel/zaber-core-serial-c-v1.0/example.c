@@ -21,7 +21,7 @@ void poll_until_idle(z_port port)
     char reply[256] = { 0 };
 	struct za_reply decoded_reply;
     const struct timespec ts = { 0, 100000000 }; /* 100mil nanosec = 100ms */
-    
+
 	/* We use za_decode() to decode this string into more manageable parts,
 	 * sorting them into the fields of a za_reply struct, then we test
 	 * the device_status field. Possible values for device_status are "IDLE"
@@ -36,7 +36,7 @@ void poll_until_idle(z_port port)
 		{
             nanosleep(&ts, NULL); /* If we're busy, wait then try again */
 		}
-        else 
+        else
 		{
 			break;
 		}
@@ -52,7 +52,7 @@ int main()
     z_port port;
 	char reply[256] = { 0 };
 	char *device_name = "/dev/ttyUSB0";
-	
+
 	if (za_connect(&port, device_name) != Z_SUCCESS)
 	{
 		printf("Could not connect to device %s.\n", device_name);
@@ -76,9 +76,9 @@ int main()
 	 * travel range, such as the A-LSQ450D. Adjust this number as necessary. */
     za_send(port, "/move abs 100000\n");
     za_receive(port, reply, sizeof(reply));
-    
+
     poll_until_idle(port);
-    
+
     za_disconnect(port);
 
     return 0;

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+#Script to shutdown the MagAO-X ICC cacao processes
+#
+# This script is under version control in the MagAO-X source
+
+cpath=$(pwd)
+
+cd /opt/MagAOX/cacao/ncpc/ncpc-rootdir
+cacao-setup -C ncpc
+
+cd $cpath

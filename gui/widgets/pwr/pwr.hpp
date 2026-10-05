@@ -49,6 +49,8 @@ class pwr : public xWidget
      */
     virtual void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been defined*/ );
 
+    virtual void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/ );
+
     /// Callback for a SET PROPERTY message notifying us that the propery has changed.
     /** This is called by the publisher which is subscribed to.
      *
@@ -118,10 +120,6 @@ void pwr::subscribe()
 {
     for( size_t n = 0; n < m_devices.size(); ++n )
     {
-        QObject::connect(
-            m_devices[n], SIGNAL( chChange( pcf::IndiProperty & ) ), this, SLOT( chChange( pcf::IndiProperty & ) ) );
-        QObject::connect( m_devices[n], SIGNAL( loadChanged() ), this, SLOT( updateGauges() ) );
-
         m_parent->addSubscriberProperty( this, m_devices[n]->deviceName(), "load" );
         m_parent->addSubscriberProperty( this, m_devices[n]->deviceName(), "channelOutlets" );
         m_parent->addSubscriberProperty( this, m_devices[n]->deviceName(), "channelOnDelays" );
@@ -136,12 +134,6 @@ void pwr::subscribe()
 
     for( size_t n = 0; n < m_adminDevices.size(); ++n )
     {
-        QObject::connect( m_adminDevices[n],
-                          SIGNAL( chChange( pcf::IndiProperty & ) ),
-                          this,
-                          SLOT( chChange( pcf::IndiProperty & ) ) );
-        QObject::connect( m_adminDevices[n], SIGNAL( loadChanged() ), this, SLOT( updateGauges() ) );
-
         m_parent->addSubscriberProperty( this, m_adminDevices[n]->deviceName(), "load" );
         m_parent->addSubscriberProperty( this, m_adminDevices[n]->deviceName(), "channelOutlets" );
         m_parent->addSubscriberProperty( this, m_adminDevices[n]->deviceName(), "channelOnDelays" );
@@ -165,6 +157,16 @@ void pwr::onConnect()
 
 void pwr::onDisconnect()
 {
+    for( size_t n = 0; n < m_devices.size(); ++n )
+    {
+        m_devices[n]->onDisconnect();
+    }
+
+    for( size_t n = 0; n < m_adminDevices.size(); ++n )
+    {
+        m_adminDevices[n]->onDisconnect();
+    }
+
     ui.tabWidget->setEnabled( false );
     ui.tabWidget->setVisible( false );
 
@@ -180,6 +182,27 @@ void pwr::onDisconnect()
 void pwr::handleDefProperty( const pcf::IndiProperty &ipRecv /* [in] the property which has changed*/ )
 {
     handleSetProperty( ipRecv );
+}
+
+void pwr::handleDelProperty( const pcf::IndiProperty &ipRecv /* [in] the property which has been deleted*/ )
+{
+    for( size_t n = 0; n < m_devices.size(); ++n )
+    {
+        if( ipRecv.getDevice() == m_devices[n]->deviceName() )
+        {
+            m_devices[n]->handleDelProperty( ipRecv );
+            break;
+        }
+    }
+
+    for( size_t n = 0; n < m_adminDevices.size(); ++n )
+    {
+        if( ipRecv.getDevice() == m_adminDevices[n]->deviceName() )
+        {
+            m_adminDevices[n]->handleDelProperty( ipRecv );
+            return;
+        }
+    }
 }
 
 void pwr::handleSetProperty( const pcf::IndiProperty &ipRecv /* [in] the property which has changed*/ )
@@ -276,6 +299,11 @@ void pwr::loadConfig( mx::app::appConfigurator &config )
             m_devices.push_back( new pwrDevice( this ) );
             m_devices.back()->deviceName( sections[i] );
             m_devices.back()->setChannels( user );
+            QObject::connect( m_devices.back(),
+                              SIGNAL( chChange( pcf::IndiProperty & ) ),
+                              this,
+                              SLOT( chChange( pcf::IndiProperty & ) ) );
+            QObject::connect( m_devices.back(), SIGNAL( loadChanged() ), this, SLOT( updateGauges() ) );
         }
 
         if( admin.size() > 0 )
@@ -283,6 +311,11 @@ void pwr::loadConfig( mx::app::appConfigurator &config )
             m_adminDevices.push_back( new pwrDevice( this ) );
             m_adminDevices.back()->deviceName( sections[i] );
             m_adminDevices.back()->setChannels( admin );
+            QObject::connect( m_adminDevices.back(),
+                              SIGNAL( chChange( pcf::IndiProperty & ) ),
+                              this,
+                              SLOT( chChange( pcf::IndiProperty & ) ) );
+            QObject::connect( m_adminDevices.back(), SIGNAL( loadChanged() ), this, SLOT( updateGauges() ) );
         }
     }
 

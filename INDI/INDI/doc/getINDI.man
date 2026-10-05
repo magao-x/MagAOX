@@ -20,7 +20,7 @@ The last component of the property specification is usually the element name,
 but may be a reserved name to indicate an attribute of the property as a whole.
 These reserved names are as follows:
 .TP 12
-_LABEL 
+_LABEL
 report the label attribute
 .TP
 _GROUP

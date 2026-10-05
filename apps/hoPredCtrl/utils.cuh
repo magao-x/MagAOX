@@ -38,7 +38,7 @@ cublasOperation_t transa,
                                   float                 *C, int ldc,
                                   long long int          strideC,
 								  int batchCount)
-								  
+
 */
 static inline cublasStatus_t cublasXgemmStridedBatched(cublasHandle_t handle,
 	cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k,
@@ -178,12 +178,12 @@ static inline cublasStatus_t cublasXcopy(cublasHandle_t handle, int n, double *x
 
 static inline uint64_t find_next_power_of_2(int sample){
     uint64_t num_bits = 0;
-    
+
     do{
         sample >>= 1;
         ++num_bits;
     } while(sample);
-    
+
     return num_bits;
 }
 

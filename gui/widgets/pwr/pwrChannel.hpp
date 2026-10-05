@@ -110,6 +110,8 @@ class pwrChannel : public QWidget
         return m_isToggle;
     }
 
+    void onDisconnect();
+
   public slots:
 
     void sliderReleased();
@@ -322,6 +324,23 @@ void pwrChannel::timeOut()
     m_changing = false;
     m_swTarget = m_setSwitchState;
     switchState( m_setSwitchState );
+}
+
+void pwrChannel::onDisconnect()
+{
+    m_timer->stop();
+    m_changing       = false;
+    m_swTarget      = pwrChState::Unk;
+    m_setSwitchState = pwrChState::Off;
+    m_isToggle       = false;
+    m_outlets.clear();
+    m_onDelay    = 1000;
+    m_onTimeout  = 6000;
+    m_offDelay   = 1000;
+    m_offTimeout = 6000;
+
+    m_channelSwitch->setEnabled( false );
+    m_channelSwitch->setSliderPosition( m_channelSwitch->minimum() );
 }
 
 } // namespace xqt

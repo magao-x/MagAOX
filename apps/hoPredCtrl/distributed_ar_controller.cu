@@ -11,10 +11,10 @@ DistributedAutoRegressiveController::DistributedAutoRegressiveController(cublasH
 	nhistory = num_history;
 	nfuture = num_future;
 	nmodes = num_modes;
-	
+
 	// Use all future DM commands except the most recent because that one will only have an effect in later measurements
 	nfeatures = nfuture - 1 + 2 * nhistory;
-	
+
 	std::cout << "Nhist :: " << nhistory << std::endl;
 	std::cout << "Nfut :: " << nfuture << std::endl;
 	std::cout << "Nmodes :: " << nmodes << std::endl;
@@ -36,7 +36,7 @@ DistributedAutoRegressiveController::DistributedAutoRegressiveController(cublasH
 	std::cout << "Measurement and command buffer" << std::endl;
 	measurement_buffer = new Matrix(0.0, num_modes, 1, buffer_size + 1);
 	command_buffer = new Matrix(0.0, num_modes, 1, buffer_size + 1);
-	
+
 	// The RLS learning vectors
 	std::cout << "Recursive least squares" << std::endl;
 	rls = new RecursiveLeastSquares(new_handle, nfeatures, nfuture, num_modes, gamma, P0);
@@ -44,7 +44,7 @@ DistributedAutoRegressiveController::DistributedAutoRegressiveController(cublasH
 	phi = new Matrix(0.0, nfeatures, 1, num_modes);
 	xf = new Matrix(0.0, nfuture, 1, num_modes);
 	wp = new Matrix(0.0, nfeatures - nfuture, 1, num_modes);
-	
+
 	// The output
 	std::cout << "Command and Delta Command" << std::endl;
 	// Let's check if this works!
@@ -53,25 +53,25 @@ DistributedAutoRegressiveController::DistributedAutoRegressiveController(cublasH
 
 	int ncontrol = 1;
 	delta_command = new Matrix(0.0, ncontrol, 1, num_modes);
-	
+
 	std::cout << "H, H11, H12, invH11" << std::endl;
 	H = new Matrix(0.0, nfeatures, nfeatures, nmodes);
 	H11 = new Matrix(0.0, nfuture, nfuture, nmodes);
 	H12 = new Matrix(0.0, nfuture, nfeatures - nfuture, nmodes);
 	invH11 = new Matrix(0.0, nfuture, nfuture, nmodes);
-	
-	// Setup the condition matrix	
+
+	// Setup the condition matrix
 	std::cout << "lambda" << std::endl;
 	lambda = new Matrix(0.0, 1, 1, num_modes);
 	cpu_full_copy(lambda, new_lambda);
-	
+
 	std::cout << "condition matrix" << std::endl;
 	condition_matrix = make_identity_matrix(0.0, nfuture, nmodes);
 
 	std::cout << "invH11, controller and full controller" << std::endl;
 	invH11sub = new Matrix(0.0, 1, 1, nmodes);
 	controller = new Matrix(0.0, 1, nfeatures - nfuture, nmodes);
-	
+
 	// Initialize controller with an integrator
 	for(int i=0; i <nmodes; i++)
 		controller->set(-0.15, 0, nhistory-1, i);
@@ -135,7 +135,7 @@ void DistributedAutoRegressiveController::set_handle(cublasHandle_t* new_handle)
 
 void DistributedAutoRegressiveController::reset_data_buffer(){
 	buffer_index = 0;
-	
+
 	measurement_buffer->set_to_zero();
 	command_buffer->set_to_zero();
 	command->set_to_zero();
@@ -151,7 +151,7 @@ void DistributedAutoRegressiveController::reset_controller(){
 	H11->set_to_zero();
 	H12->set_to_zero();
 	invH11->set_to_zero();
-	
+
 	invH11sub->set_to_zero();
 
 	controller->set_to_zero();
@@ -163,13 +163,13 @@ void DistributedAutoRegressiveController::reset_controller(){
 
 
 void DistributedAutoRegressiveController::add_measurement(Matrix* new_measurement){
-	
+
 	newest_measurement = new_measurement;
 
 	// Copy the new measurement into our data buffer
 	gpu_col_copy(measurement_buffer, 0, buffer_index & buffer_size, new_measurement);
 	// measurement_buffer->print(true);
-	
+
 	// Create the feature vector
 	// Copy the future and past commands
 	for(int i=0; i < (nfuture - 1 + nhistory); i++){
@@ -177,7 +177,7 @@ void DistributedAutoRegressiveController::add_measurement(Matrix* new_measuremen
 		cublasXcopy(*handle, nmodes,
 			command_buffer->gpu_data[(buffer_index-1-i) & buffer_size], 1,
 			&phi->gpu_data[0][i], nfeatures);
-		
+
 	}
 
 	// Start by copying the past measurements
@@ -187,7 +187,7 @@ void DistributedAutoRegressiveController::add_measurement(Matrix* new_measuremen
 		// Copies x into y
 		cublasXcopy(*handle, nmodes,
 			measurement_buffer->gpu_data[(buffer_index-data_offset-i) & buffer_size], 1,
-			&phi->gpu_data[0][i + phi_offset], nfeatures);	
+			&phi->gpu_data[0][i + phi_offset], nfeatures);
 	}
 
 	// Copy the future measurements
@@ -196,9 +196,9 @@ void DistributedAutoRegressiveController::add_measurement(Matrix* new_measuremen
 		cublasXcopy(*handle, nmodes,
 			measurement_buffer->gpu_data[(buffer_index-i) & buffer_size], 1,
 			&xf->gpu_data[0][i], nfuture);
-			
+
 	}
-	
+
 	// Create the past vector for the control command
 	for(int i=0; i < nhistory-1; i++){
 		// We take the N-1 past commands
@@ -233,7 +233,7 @@ void DistributedAutoRegressiveController::update_controller(){
 	// Calculate the controller (B.T.dot(A))
 	// Get the prediction matrix from the RLS
 	Matrix * A = rls->A;
-	
+
 	// A consists of two submatrices, As and Bs.
 	// As does the prediction and Bs the system dynamics
 	// Bs columns 0-(nfuture-1) and As columns (nfuture-1) to the end
@@ -245,50 +245,50 @@ void DistributedAutoRegressiveController::update_controller(){
 		CUBLAS_OP_T,
 		CUBLAS_OP_N,
 		H12->nrows_, H12->ncols_, A->nrows_,
-		&alpha, 
+		&alpha,
 		A->gpu_data[0], A->nrows_, A->size_,
 		A->gpu_data[0] + A->nrows_* nfuture, A->nrows_, A->size_,
 		&beta,
 		H12->gpu_data[0], H12->nrows_, H12->size_,
 		H12->batch_size_);
-	
+
 	// Calculate B.T.dot( B )
 	cublasXgemmStridedBatched(*handle,
 		CUBLAS_OP_T,
 		CUBLAS_OP_N,
 		H11->nrows_, H11->ncols_, A->nrows_,
-		&alpha, 
+		&alpha,
 		A->gpu_data[0], A->nrows_, A->size_,
 		A->gpu_data[0], A->nrows_, A->size_,
 		&beta,
 		H11->gpu_data[0], H11->nrows_, H11->size_,
 		H11->batch_size_);
 	// This can change to a single MVM and a two smart memcpy's
-		
+
 	// Invert B.T.dot(B) submatrix
 	H11->add(condition_matrix);
 	H11->inverse(invH11);
-		
+
 	alpha = -1.0;
 	cublasXgemmStridedBatched(*handle,
 		CUBLAS_OP_N,
 		CUBLAS_OP_N,
 		controller->nrows_, controller->ncols_, invH11->ncols_,
-		&alpha, 
+		&alpha,
 		invH11->gpu_data[0] + nfuture - 1, invH11->nrows_, invH11->size_,
 		H12->gpu_data[0], H12->nrows_, H12->size_,
 		&beta,
 		controller->gpu_data[0], controller->nrows_, controller->size_,
 		controller->batch_size_);
-		
+
 }
 
 
 void DistributedAutoRegressiveController::set_new_regularization(float* new_lambda){
-	// Setup the condition matrix	
+	// Setup the condition matrix
 	cpu_full_copy(lambda, new_lambda);
 	copy_to_identity_matrix(condition_matrix, lambda, nfuture, nmodes);
-	
+
 	// We used a new regularization parameter, so update the controller!
 	// This can then be used to adapt to noisy measurements.
 	update_controller();
@@ -311,14 +311,14 @@ __global__ void clip_array(float* x, float clip_value, int n){
 
 
 Matrix* DistributedAutoRegressiveController::get_new_control_command(float clip_val, Matrix* exploration_signal){
-	
+
 	// Switch between the predictor and integrator
 	if(use_predictor){
-		
+
 		controller->dot(wp, delta_command, 1.0, 0.0, CUBLAS_OP_N, CUBLAS_OP_N);
 		delta_command->add(exploration_signal);
 		clip_array <<<8*32, 64 >>>(delta_command->gpu_data[0], clip_val, delta_command->total_size_);
-		
+
 		// Copy the new measurement into our data buffer
 		gpu_col_copy(command_buffer, 0, buffer_index & buffer_size, delta_command);
 		command->add(delta_command);
@@ -334,7 +334,7 @@ Matrix* DistributedAutoRegressiveController::get_new_control_command(float clip_
 
 
 void DistributedAutoRegressiveController::save_controller_state(std::string filename){
-	
+
 }
 
 }

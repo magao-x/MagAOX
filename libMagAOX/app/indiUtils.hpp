@@ -96,7 +96,9 @@ void updateIfChanged( pcf::IndiProperty &p,      ///< [in/out] The property cont
                       pcf::IndiProperty::PropertyStateType newState = pcf::IndiProperty::Ok )
 {
     if( !indiDriver )
+    {
         return;
+    }
 
     try
     {

@@ -35,7 +35,7 @@ struct ocamTemps
      * \returns true if all members are equal
      * \returns false otherwise
      */
-    bool operator==( const ocamTemps &t /**< [in] the struct to compare to*/ )
+    bool operator==( const ocamTemps &t /**< [in] the struct to compare to*/ ) const
     {
         return ( CCD == t.CCD && POWER == t.POWER && BIAS == t.BIAS && WATER == t.WATER && LEFT == t.LEFT &&
                  RIGHT == t.RIGHT && SET == t.SET && COOLING_POWER == t.COOLING_POWER );
@@ -78,15 +78,15 @@ int parseTemps( ocamTemps         &temps, ///< [out] the struture of temperature
     if( v.size() < 18 )
         return -1;
 
-    temps.CCD           = mx::ioutils::convertFromString<float>( v[1] );
-    temps.CPU           = mx::ioutils::convertFromString<float>( v[3] );
-    temps.POWER         = mx::ioutils::convertFromString<float>( v[5] );
-    temps.BIAS          = mx::ioutils::convertFromString<float>( v[7] );
-    temps.WATER         = mx::ioutils::convertFromString<float>( v[9] );
-    temps.LEFT          = mx::ioutils::convertFromString<float>( v[11] );
-    temps.RIGHT         = mx::ioutils::convertFromString<float>( v[13] );
-    temps.SET           = mx::ioutils::convertFromString<float>( v[15] ) / 10.0;
-    temps.COOLING_POWER = mx::ioutils::convertFromString<float>( v[17] );
+    temps.CCD           = mx::ioutils::stoT<float>( v[1] );
+    temps.CPU           = mx::ioutils::stoT<float>( v[3] );
+    temps.POWER         = mx::ioutils::stoT<float>( v[5] );
+    temps.BIAS          = mx::ioutils::stoT<float>( v[7] );
+    temps.WATER         = mx::ioutils::stoT<float>( v[9] );
+    temps.LEFT          = mx::ioutils::stoT<float>( v[11] );
+    temps.RIGHT         = mx::ioutils::stoT<float>( v[13] );
+    temps.SET           = mx::ioutils::stoT<float>( v[15] ) / 10.0;
+    temps.COOLING_POWER = mx::ioutils::stoT<float>( v[17] );
 
     return 0;
 }
@@ -111,7 +111,7 @@ int parseFPS( float             &fps, ///< [out] the fps returned by the camera
     if( v.size() < 3 )
         return -1;
 
-    fps = mx::ioutils::convertFromString<float>( v[1] );
+    fps = mx::ioutils::stoT<float>( v[1] );
 
     return 0;
 }
@@ -141,7 +141,7 @@ int parseEMGain( unsigned          &emGain, ///< [out] the value of gain returne
         return -1;
     }
 
-    emGain = mx::ioutils::convertFromString<unsigned>( v[3] );
+    emGain = mx::ioutils::stoT<unsigned>( v[3] );
 
     if( emGain < 1 || emGain > 600 )
     {

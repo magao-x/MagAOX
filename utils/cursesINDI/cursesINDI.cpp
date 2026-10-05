@@ -10,20 +10,20 @@
 
 int main()
 {
-   
+
    cursesINDI * ci;
-   
+
    //This is for debugging
    std::ofstream *fpout {nullptr};
-   
+
    #ifdef DEBUG_TMPOUT
    std::string fname = "/tmp/cursesINDI_DEBUG.txt";
    fpout = new std::ofstream;
    fpout->open(fname);
    #endif
-   
-   
-   
+
+
+
 
    std::cout << " cursesINDI: Connecting to INDI server . . .                                            \r";
 
@@ -31,10 +31,15 @@ retry:
    bool notConnected = true;
 
    while(notConnected)
-   {   
+   {
       try
       {
          ci = new cursesINDI("cursesINDI", "1.7", "1.7");
+      }
+      catch(const std::filesystem::filesystem_error & e)
+      {
+         std::cerr << e.what() << '\n';
+         return -1;
       }
       catch(...)
       {
@@ -56,9 +61,9 @@ retry:
       #ifdef DEBUG_TMPOUT
       ci->fpout = fpout;
       #endif
-   
+
       ci->activate();
-   
+
       pcf::IndiProperty ipSend;
       ci->sendGetProperties( ipSend );
 
@@ -89,14 +94,14 @@ retry:
          notConnected = false;
       }
    }
-   
-   
+
+
    WINDOW * topWin;
 
    int ch;
 
    initscr();
-   
+
    raw();    /* Line buffering disabled*/
    halfdelay(10); //We use a 1 second timeout to check for connection loss.
    keypad(stdscr, TRUE); /* We get F1, 2 etc...*/
@@ -104,8 +109,8 @@ retry:
    noecho(); /* Don't echo() while we do getch */
 
    ci->startUp();
-   
-   
+
+
 
 
    topWin = newwin(1, COLS, 0, 0);
@@ -113,11 +118,11 @@ retry:
    keypad(topWin, TRUE);
    wrefresh(topWin);
 
-   
+
    ci->cursStat(0);
-   
+
     ci->moveCurrent(0, 1);
-    
+
    //Now main event loop
    while((ch = wgetch(ci->w_interactWin))) // != 'q')
    {
@@ -127,22 +132,27 @@ retry:
          if( ci->getQuitProcess() || ci->m_shutdown) break;
          else continue;
       }
-      
+      else if(ch == 3)
+      {
+         ci->m_shutdown = true;
+         break;
+      }
+
       //Get hold downs
       int ch0 = ch;
       int npress = 1;
-      
+
       nocbreak();
       wtimeout(ci->w_interactWin, 50);
       ch = wgetch(ci->w_interactWin);
-      while(ch == ch0) 
+      while(ch == ch0)
       {
          ch = wgetch(ci->w_interactWin);
-         ++npress; 
+         ++npress;
       }
       if(ch != ERR) ungetch(ch);
-      halfdelay(10);   
-      
+      halfdelay(10);
+
       int nextX = ci->m_currX;
       int nextY = ci->m_currY;
 
@@ -167,7 +177,7 @@ retry:
          case KEY_PPAGE:
             nextY -= ci->m_gridWin.size()-1;
             if(fpout) *fpout << "ppage: " << npress << std::endl;
-            break;   
+            break;
          case KEY_NPAGE:
             nextY += ci->m_gridWin.size()-1;
             if(fpout) *fpout << "npage: " << npress << std::endl;
@@ -179,6 +189,7 @@ retry:
          default:
             if(fpout) *fpout << "other: " << npress << std::endl;
             ci->keyPressed(ch0);
+            if(ci->m_shutdown) break;
             continue;
             break;
       }
@@ -190,7 +201,7 @@ retry:
       ci->moveCurrent(nextY, nextX);
 
       ci->cursStat(0);
-      
+
       if(ci->m_shutdown) break;
    }
 
@@ -218,7 +229,7 @@ retry:
 
       goto retry;
    }
-   
+
    std::cout << "\r cursesINDI: Disconnected from INDI server.                                                              \n";
    return 0;
 

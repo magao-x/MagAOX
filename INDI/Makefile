@@ -8,7 +8,7 @@ all:
 	 (cd $$dir; ${MAKE} all) || break; \
 	done
 
-install: 
+install:
 	for dir in ${toInstall}; do \
    	(cd $$dir; ${MAKE} install) || break; \
 	done

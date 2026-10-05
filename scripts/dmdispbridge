@@ -66,7 +66,7 @@ Nx=0
 Ny=0
 if [ "$role" = "ICC" ]
 then
-  
+
   ip="192.168.2.2"
 
   case $dmdisp in
@@ -561,7 +561,7 @@ then
   esac
 elif [ "$role" = "RTC" ]
 then
-  
+
   ip="192.168.2.3"
 
   case $dmdisp in
@@ -639,7 +639,7 @@ if [ $ip = "0" ]
 then
   echo ""
   echo "Did not find an ip. This can only be run on ICC or RTC."
-  echo "" 
+  echo ""
   printHELP
   exit
 fi
@@ -647,20 +647,20 @@ fi
 if [ $port = 0 ]
 then
   echo ""
-  echo "Did not find a port. Is dm channel valid?" 
+  echo "Did not find a port. Is dm channel valid?"
   echo ""
   printHELP
   exit
-fi 
+fi
 
 if [ $Nx = 0 or $Ny = 0 ]
 then
   echo ""
   echo "Did not find a DM size. Is dm channel valid?"
-  echo "" 
+  echo ""
   printHELP
   exit
-fi 
+fi
 
 #It seems to take two separate ssh sessions to do this successfully, but maybe not
 com1="tmux new -d -s sTCPrc-"$me"-"$dmdisp
@@ -677,14 +677,14 @@ ssh -t rtc $com2
 
 
 #create shmim locally
-   
+
 dmnamearg="s>tf32>"$dmdisp
 
 cacao << EOF
 mk2Dim "$dmnamearg" $Nx $Ny
 quit
 EOF
-  
+
 #start transmitting
 echo "starting shmimTCPtransmit: " $dmdisp $ip $port
 

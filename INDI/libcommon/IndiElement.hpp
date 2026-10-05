@@ -121,17 +121,17 @@ class IndiElement
 
     // All the different data this can store.
     const std::string &getFormat() const;
-    
+
     const std::string &getLabel() const;
-    
+
     const std::string &getMax() const;
-    
+
     const std::string &getMin() const;
-    
+
     const std::string &getName() const;
-    
+
     const std::string &getSize() const;
-    
+
     const std::string &getStep() const;
 
     /// Different ways of getting the data in this element.
@@ -203,31 +203,31 @@ class IndiElement
 
     /// A label, usually used in a GUI.
     std::string m_szLabel;
-    
+
     /// If this is a number, this is its maximum value.
     std::string m_szMax {"0"};
-    
+
     /// If this is a number, this is its minimum value.
     std::string m_szMin {"0"};
-    
+
     /// The name of this element.
     std::string m_szName;
-    
+
     /// If this is a BLOB, this is the number of bytes for it.
     std::string m_szSize {"0"};
-    
+
     /// If this is a number, this is increment for it.
     std::string m_szStep {"0"};
-    
+
     /// This is the value of the data.
     std::string m_szValue;
-    
+
     /// This can also be the value.
     LightStateType m_lsValue {UnknownLightState};
-    
+
     /// This can also be the value.
     SwitchStateType m_ssValue {UnknownSwitchState};
-    
+
     // A read write lock to protect the internal data.
     mutable pcf::ReadWriteLock m_rwData;
 

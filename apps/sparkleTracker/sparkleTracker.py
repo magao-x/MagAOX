@@ -4,7 +4,7 @@ from enum import Enum
 import time
 import numpy as np
 import datetime
-import os 
+import os
 import hcipy as hp
 
 import xconf
@@ -23,10 +23,10 @@ class XCorrShift():
     def __init__(self, reference_image, domain_pixels=480, domain_size=40, filter_size=None):
         self._reference_image = reference_image
         self._xgrid = hp.make_pupil_grid(domain_pixels, domain_size)
-        
+
         self._fft = hp.FastFourierTransform(self._reference_image.grid)
         self._mft = hp.MatrixFourierTransform(self._xgrid, self._fft.output_grid)
-        
+
         self._filter_size = filter_size
         if filter_size is not None:
             # Change this to a super gaussian filter to remove ringing.
@@ -39,8 +39,8 @@ class XCorrShift():
     def cross_correlate(self, image):
         xcorr = np.real(self._mft.backward(self._fft.forward(image + 0j) * self._spatial_filter * self._kernel))
         return xcorr
-        
-    def measure(self, image):           
+
+    def measure(self, image):
         # Do a cross-correlation and find the peak pixel
         # TODO: implement sub-pixel precision with polynomial fitting
         xcorr = self.cross_correlate(image)
@@ -77,7 +77,7 @@ class States(Enum):
 
 class sparkleTracker(XDevice):
     config : sparkleTrackerConfig
-    
+
     def setup(self):
         self.log.debug(f"I was configured! See? {self.config=}")
 
@@ -91,7 +91,7 @@ class sparkleTracker(XDevice):
         self._state_names = ['idle', 'track', 'measure']
         self._state_callbacks = [None, self.track, self.measure]
         self._state_machine = XStateMachine(self, self._state_names, States, self._state_callbacks)
-        
+
         self.log.info(f'sparkleTracker app is fully setup.')
 
     def calculate_shift(self):

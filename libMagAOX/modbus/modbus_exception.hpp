@@ -1,26 +1,14 @@
-// header only version of modbuspp
-// 
-//
-// Created by Fanzhe on 5/29/2017.
-//
-// MagAO-X:
-// Cloned from https://github.com/fanzhe98/modbuspp
-// On commit 73cabdc, Date:   Sat Nov 24 23:16:51 2018 -0500
-//
-// License: GPLv3
-//
-// Header only version created by Jared Males
-// -- removed "using namespace std".
-// 
-//
-// 
-//
+/** \file modbus_exception.hpp
+ * \brief Exception types for the MagAO-X Modbus client.
+ *
+ * \author Jared R. Males (jaredmales@gmail.com)
+ */
 
 #ifndef MODBUSPP_MODBUS_EXCEPTION_H
 #define MODBUSPP_MODBUS_EXCEPTION_H
 
 #include <exception>
-
+#include <string>
 
 /// Modbus Exception Class
 /**
@@ -28,15 +16,15 @@
  *
  * Throwed when a exception or errors happens in modbus protocol
  */
-class modbus_exception : public std::exception {
-public:
-    std::string msg;
-    virtual const char* what() const throw()
+class modbus_exception : public std::exception
+{
+  public:
+    std::string         msg;
+    virtual const char *what() const throw()
     {
         return "A Error In Modbus Happened!";
     }
 };
-
 
 /// Modbus Connect Exception
 /**
@@ -44,14 +32,19 @@ public:
  *
  * Throwed when a connection issues happens between modbus client and server
  */
-class modbus_connect_exception: public modbus_exception {
-public:
-    virtual const char* what() const throw()
+class modbus_connect_exception : public modbus_exception
+{
+  public:
+    virtual const char *what() const throw()
     {
+        if( !msg.empty() )
+        {
+            return msg.c_str();
+        }
+
         return "Having Modbus Connection Problem";
     }
 };
-
 
 /// Modbus Illgal Function Exception
 /**
@@ -59,14 +52,14 @@ public:
  *
  * Throwed when modbus server return error response function 0x01
  */
-class modbus_illegal_function_exception: public modbus_exception {
-public:
-    virtual const char* what() const throw()
+class modbus_illegal_function_exception : public modbus_exception
+{
+  public:
+    virtual const char *what() const throw()
     {
         return "Illegal Function";
     }
 };
-
 
 /// Modbus Illegal Address Exception
 /**
@@ -74,20 +67,19 @@ public:
  *
  * Throwed when modbus server return error response function 0x02
  */
-class modbus_illegal_address_exception: public modbus_exception {
-public:
-   
-   modbus_illegal_address_exception()
-   {
-      msg = "test";
-   }
-   
-    const char* what() const throw()
+class modbus_illegal_address_exception : public modbus_exception
+{
+  public:
+    modbus_illegal_address_exception()
+    {
+        msg = "test";
+    }
+
+    const char *what() const throw()
     {
         return "Illegal Address";
     }
 };
-
 
 /// Modbus Illegal Data Value Exception
 /**
@@ -95,14 +87,14 @@ public:
  *
  * Throwed when modbus server return error response function 0x03
  */
-class modbus_illegal_data_value_exception: public modbus_exception {
-public:
-    virtual const char* what() const throw()
+class modbus_illegal_data_value_exception : public modbus_exception
+{
+  public:
+    virtual const char *what() const throw()
     {
         return "Illegal Data Value";
     }
 };
-
 
 /// Modbus Server Failure Exception
 /**
@@ -110,14 +102,14 @@ public:
  *
  * Throwed when modbus server return error response function 0x04
  */
-class modbus_server_failure_exception: public modbus_exception {
-public:
-    virtual const char* what() const throw()
+class modbus_server_failure_exception : public modbus_exception
+{
+  public:
+    virtual const char *what() const throw()
     {
         return "Server Failure";
     }
 };
-
 
 /// Modbus Acknowledge Exception
 /**
@@ -125,14 +117,14 @@ public:
  *
  * Throwed when modbus server return error response function 0x05
  */
-class modbus_acknowledge_exception: public modbus_exception {
-public:
-    virtual const char* what() const throw()
+class modbus_acknowledge_exception : public modbus_exception
+{
+  public:
+    virtual const char *what() const throw()
     {
         return "Acknowledge";
     }
 };
-
 
 /// Modbus Server Busy Exception
 /**
@@ -140,9 +132,10 @@ public:
  *
  * Throwed when modbus server return error response function 0x06
  */
-class modbus_server_busy_exception: public modbus_exception {
-public:
-    virtual const char* what() const throw()
+class modbus_server_busy_exception : public modbus_exception
+{
+  public:
+    virtual const char *what() const throw()
     {
         return "Server Busy";
     }
@@ -154,9 +147,10 @@ public:
  *
  * Throwed when modbus server return error response function 0x0A and 0x0B
  */
-class modbus_gateway_exception: public modbus_exception {
-public:
-    virtual const char* what() const throw()
+class modbus_gateway_exception : public modbus_exception
+{
+  public:
+    virtual const char *what() const throw()
     {
         return "Gateway Problem";
     }
@@ -168,14 +162,14 @@ public:
  *
  * Throwed when buffer is too small for the data to be storaged.
  */
-class modbus_buffer_exception: public modbus_exception {
-public:
-    virtual const char* what() const throw()
+class modbus_buffer_exception : public modbus_exception
+{
+  public:
+    virtual const char *what() const throw()
     {
         return "Size of Buffer Is too Small!";
     }
 };
-
 
 /// Modbus Amount Exception
 /**
@@ -183,14 +177,13 @@ public:
  *
  * Throwed when the address or amount input is mismatching.
  */
-class modbus_amount_exception: public modbus_exception {
-public:
-    virtual const char* what() const throw()
+class modbus_amount_exception : public modbus_exception
+{
+  public:
+    virtual const char *what() const throw()
     {
         return "Too many Data!";
     }
 };
 
-
-
-#endif //MODBUSPP_MODBUS_EXCEPTION_H
+#endif // MODBUSPP_MODBUS_EXCEPTION_H

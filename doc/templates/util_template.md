@@ -5,17 +5,17 @@ util-name
 
 ------------------------------------------------------------------------
 
-# NAME 
+# NAME
 
 util-name − does something
 
-# SYNOPSIS 
+# SYNOPSIS
 
 ```
 commands [options] arg1 [more-args ...]
 ```
 
-# DESCRIPTION 
+# DESCRIPTION
 
 add . . .
 
@@ -36,4 +36,4 @@ add . . .
 # EXAMPLES
 
 
-# SEE ALSO 
+# SEE ALSO

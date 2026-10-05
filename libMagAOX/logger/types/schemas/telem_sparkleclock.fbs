@@ -10,7 +10,7 @@ table Telem_sparkleclock_fb
 
    /// frequency of modulation if not triggered
    frequency:float;
-   
+
    /// time for one complete cycle of the sparkle clock (e.g. exposure time of some camera)
    interval: float;
 

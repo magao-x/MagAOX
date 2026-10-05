@@ -12,6 +12,7 @@ matplotlib.use('Agg')
 from matplotlib.colors import LogNorm
 import matplotlib.pyplot as plt
 from astropy.io import fits
+from astropy.visualization import simple_norm
 import datetime
 import glob
 import tqdm
@@ -52,7 +53,7 @@ def frames_to_movie(
     frames_paths,
     movie_name,
     output_dir,
-    cmap,
+    colormap,
     sample_n_files,
     fps,
     bin,
@@ -63,7 +64,6 @@ def frames_to_movie(
     every_nth_frame,
     preview,
     constant_rate_factor,
-    accumulate,
     crop,
     keep_tmpdir
 ):
@@ -71,38 +71,32 @@ def frames_to_movie(
     vmin, vmax = sample_frames_to_limits(frames_paths, sample_n_files, pct_min, pct_max, bin)
     scale_kwargs = {'vmin': vmin, 'vmax': vmax}
 
+    cmap = getattr(plt.cm, colormap).copy()
+    cmap.set_bad("k")
+
     img = fits.getdata(frames_paths[0])
     temp_dir = tempfile.TemporaryDirectory()
     temp_dir_path = temp_dir.name
     assert os.path.isdir(temp_dir_path)
     try:
-        accumulator = None
+        norm = lambda x: x
         for idx, fn in enumerate(tqdm.tqdm(frames_paths)):
             with open(fn, 'rb') as fh:
                 img = fits.getdata(fh)
                 if crop > 0:
                     img = img[crop:-crop,crop:-crop]
-                if accumulate:
-                    if accumulator is None:
-                        accumulator = np.zeros(img.shape)
-                    accumulator += img
-                    img = accumulator / (idx + 1)
                 if bin > 1:
                     img = fast_integer_bin(img, bin)
                 if rough_bg_subtract:
-                    img = img - np.median(img, axis=1)[:, np.newaxis]
+                    img = img - np.nanmedian(img, axis=1)[:, np.newaxis]
                 if log_scale:
-                    min_offset = np.min(img)
-                    img = np.log10(img - min_offset + 1)
-                    scale_kwargs['vmin'] = max(np.log10(vmin - min_offset + 1), 0.1)
-                    scale_kwargs['vmax'] = max(np.log10(vmax - min_offset + 1), 0.1)
+                    norm = simple_norm(img, 'log')
                 if preview:
-                    plt.imsave(f"{output_dir}/{movie_name}_preview.png", img, cmap=cmap, **scale_kwargs)
+                    plt.imsave(f"{output_dir}/{movie_name}_preview.png", cmap(norm(img)), **scale_kwargs)
                     return
                 plt.imsave(
                     temp_dir_path + f'/frame_{idx:08}.png',
-                    img,
-                    cmap=cmap,
+                    cmap(norm(img)),
                     **scale_kwargs
                 )
 
@@ -136,7 +130,7 @@ def frames_to_movie(
 def main(args):
     now = datetime.datetime.utcnow()
     datestamp = ''.join(filter(str.isdigit, now.isoformat()))
-    
+
     frames = list(sorted(glob.glob(f"{args.CAMSCI_FITS_DIR}/*.fits")))
     log.info(f"Found {len(frames)} in directory {args.CAMSCI_FITS_DIR}")
     frames_to_movie(
@@ -154,7 +148,6 @@ def main(args):
         args.every_nth_frame,
         args.preview,
         args.crf,
-        args.accumulate,
         args.crop,
         args.keep_tmpdir
     )
@@ -177,7 +170,6 @@ if __name__ == "__main__":
     parser.add_argument('--keep-tmpdir', action='store_true', help="Whether to keep the intermediate temporary directory with all the individual frame images")
     parser.add_argument('--crop', type=int, default=0, help="Number of pixels to crop from all sides")
     parser.add_argument('--preview', action='store_true', help="Write preview frame with colormap and scaling and exit")
-    parser.add_argument('--accumulate', action='store_true', help="")
     parser.add_argument('--crf', type=int, default=24, help="H.264 constant rate factor for compression (higher is smaller with worse quality)")
     parser.add_argument('--fps', type=int, default=24, help="Frames per second")
     parser.add_argument('-c', '--cameras', help=f"Cameras to check, default: {SCIENCE_CAMERAS}", action='append', default=None)

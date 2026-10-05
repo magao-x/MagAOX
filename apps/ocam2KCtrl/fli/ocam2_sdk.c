@@ -2,8 +2,8 @@
   \file    ocam2_sdk.c
 
   \brief   Main library file
-  
-  \author FIRSTLIGHT    
+
+  \author FIRSTLIGHT
 */
 
 #include <stdlib.h>
@@ -88,7 +88,7 @@ const char *ocam2_modeStr(ocam2_mode mode)
      "Mode 8",
      "Binning 1x3 Mode(240x80@4944Hz)",
      "Binning 1x4 Mode(240x60@5962Hz)"};
-    
+
     switch(mode)
     {
         case OCAM2_UNKNOWN:
@@ -100,7 +100,7 @@ const char *ocam2_modeStr(ocam2_mode mode)
         case OCAM2_CROPPING240x128:
         case OCAM2_BINNING1x3:
         case OCAM2_BINNING1x4:
-        
+
         return ocam2_modeText[mode];
         default:
             return NULL;

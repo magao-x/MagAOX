@@ -23,7 +23,7 @@ struct trippLitePDU_simulator
     }
 
     int connect( const std::string & ipAddr,
-                 const std::string & port 
+                 const std::string & port
                )
     {
         static_cast<void>(ipAddr);
@@ -33,7 +33,7 @@ struct trippLitePDU_simulator
     }
 
     int login( const std::string & user,
-               const std::string & pass 
+               const std::string & pass
              )
     {
         static_cast<void>(user);
@@ -118,7 +118,7 @@ struct trippLitePDU_simulator
         }
 
         strRead += "\n";
-        
+
         return 0;
     }
 };

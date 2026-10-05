@@ -52,7 +52,7 @@ __global__ void divide_scalar_gpu(float* x, float* y, float* z, int element_size
 
 	for (int k = index; k < batch_size; k += stride) {
 		for(int i=0; i < element_size; i++){
-			z[BIDX2C(i, 0, k, element_size, 1)] = y[BIDX2C(i, 0, k, element_size, 1)] / x[k]; 
+			z[BIDX2C(i, 0, k, element_size, 1)] = y[BIDX2C(i, 0, k, element_size, 1)] / x[k];
 		}
 	}
 }
@@ -79,7 +79,7 @@ __global__ void gpu_print_buffer(float* data, int batch_count, int nrow, int nco
 			for (int j = 0; j < col_max; j++) {
 				int index = BIDX2C(i, j, k, nrow, ncol);
 				printf("%f", data[index]);
-				
+
 				// int index = IDX2C(i, j, nrow);
 				// printf("%f", data[k][index]);
 

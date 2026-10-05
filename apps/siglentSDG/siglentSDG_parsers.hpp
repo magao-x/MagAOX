@@ -30,7 +30,7 @@ int parseOUTP( int & channel, ///< [out] the channel indicated by this response.
    channel = -1;
    output = -1;
    if(v.size() < 2) return -1;
-   
+
    if(v[1] != "OUTP") return -2;
 
    if(v[0][0] != 'C') return -3;
@@ -38,7 +38,7 @@ int parseOUTP( int & channel, ///< [out] the channel indicated by this response.
    channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
 
    if(v.size() < 3) return -5;
-   
+
    if(v[2] == "OFF") output = 0;
    else if(v[2] == "ON") output = 1;
    else return -6;
@@ -53,7 +53,7 @@ int parseOUTP( int & channel, ///< [out] the channel indicated by this response.
   *
   * \todo document tests
   * \todo update tests for new wdth parameter in PULSE
-  * 
+  *
   * \returns 0 on success
   * \returns \<0 on error, with value indicating location of error.
   */
@@ -81,7 +81,7 @@ int parseBSWV( int & channel, ///< [out] the channel indicated by this response.
    llev = 0;
    phse = 0;
    wdth = 0;
-   
+
    std::vector<std::string> v;
 
    mx::ioutils::parseStringVector(v, strRead, ":, \n");
@@ -99,20 +99,20 @@ int parseBSWV( int & channel, ///< [out] the channel indicated by this response.
    wvtp = v[3];
 
    if(wvtp != "SINE" && wvtp != "PULSE" && wvtp != "DC") return SDG_PARSEERR_WVTP; //We don't actually know how to handle anything else.
-   
+
    if(wvtp == "DC")
    {
       if(v.size() < 6) return -7;
-      
+
       if(v[4] != "OFST") return -8;
-      
+
       ofst = mx::ioutils::convertFromString<double>(v[5]);
-      
+
       return 0;
    }
-   
+
    if(v.size() < 20) return -9;
-   
+
    if(v[4] != "FRQ") return -10;
    freq = mx::ioutils::convertFromString<double>(v[5]);
 
@@ -152,7 +152,7 @@ int parseBSWV( int & channel, ///< [out] the channel indicated by this response.
 /// Parse the SDG response to the MDWV query
 /** Currently we are only looking for STATE,ON or STATE,OFF.  If ON,
   * we ignore the rest of the values.
-  * 
+  *
   * Example: C1:MDWV STATE,OFF
   *
   * \returns 0 on success
@@ -179,14 +179,14 @@ int parseMDWV( int & channel, ///< [out] the channel indicated by this response.
 
    if(v[2] != "STATE") return -4;
    state = v[3];
-   
+
    return 0;
 }
 
 /// Parse the SDG response to the SWWV query
 /** Currently we are only looking for STATE,ON or STATE,OFF.  If ON,
   * we ignore the rest of the values.
-  * 
+  *
   * Example: C1:SWWV STATE,OFF
   *
   * \returns 0 on success
@@ -198,7 +198,7 @@ int parseSWWV( int & channel, ///< [out] the channel indicated by this response.
              )
 {
    channel = 0;
-   
+
    std::vector<std::string> v;
 
    mx::ioutils::parseStringVector(v, strRead, ":, \n");
@@ -213,14 +213,14 @@ int parseSWWV( int & channel, ///< [out] the channel indicated by this response.
 
    if(v[2] != "STATE") return -4;
    state = v[3];
-   
+
    return 0;
 }
 
 /// Parse the SDG response to the BTWV query
 /** Currently we are only looking for STATE,ON or STATE,OFF.  If ON,
   * we ignore the rest of the values.
-  * 
+  *
   * Example: C1:BTWV STATE,OFF
   *
   * \returns 0 on success
@@ -232,7 +232,7 @@ int parseBTWV( int & channel, ///< [out] the channel indicated by this response.
              )
 {
    channel = 0;
-   
+
    std::vector<std::string> v;
 
    mx::ioutils::parseStringVector(v, strRead, ":, \n");
@@ -247,13 +247,13 @@ int parseBTWV( int & channel, ///< [out] the channel indicated by this response.
 
    if(v[2] != "STATE") return -4;
    state = v[3];
-   
+
    return 0;
 }
 
 /// Parse the SDG response to the ARWV query
-/** Currently we are only looking for INDEX,0 
-  * 
+/** Currently we are only looking for INDEX,0
+  *
   * Example: C1:ARWV INDEX,0,NAME,
   *
   * \returns 0 on success
@@ -266,7 +266,7 @@ int parseARWV( int & channel, ///< [out] the channel indicated by this response.
 {
    channel = 0;
    index = -1;
-   
+
    std::vector<std::string> v;
 
    mx::ioutils::parseStringVector(v, strRead, ":, \n");
@@ -281,13 +281,13 @@ int parseARWV( int & channel, ///< [out] the channel indicated by this response.
 
    if(v[2] != "INDEX") return -4;
    index = mx::ioutils::convertFromString<int>(v[3]);
-   
+
    return 0;
 }
 
 /// Parse the SDG response to the SYNC query
-/** 
-  * 
+/**
+  *
   * Example: C1:SYNC ON
   *
   * \returns 0 on success
@@ -299,9 +299,9 @@ int parseSYNC( int & channel, ///< [out] the channel indicated by this response.
              )
 {
    channel = 0;
-   
+
    sync = false;
-   
+
    std::vector<std::string> v;
 
    mx::ioutils::parseStringVector(v, strRead, ":, \n");
@@ -317,7 +317,7 @@ int parseSYNC( int & channel, ///< [out] the channel indicated by this response.
    if(v[2] == "ON")
    {
       sync = true;
-      return 0;   
+      return 0;
    }
    else if(v[2] == "OFF")
    {
@@ -325,7 +325,7 @@ int parseSYNC( int & channel, ///< [out] the channel indicated by this response.
       return 0;
    }
    else return -4;
-   
+
    return 0;
 }
 

@@ -107,6 +107,9 @@ class pvcamCtrl : public MagAOXApp<true>,
     static constexpr bool c_stdCamera_vShiftSpeed =
         false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
 
+    static constexpr bool c_stdCamera_fanSpeed =
+        true; ///< app::dev config to tell stdCamera to expose fan-speed control
+
     static constexpr bool c_stdCamera_emGain =
         false; ///< app::dev config to tell stdCamera not to expose EM gain controls
 
@@ -243,20 +246,35 @@ class pvcamCtrl : public MagAOXApp<true>,
      */
     virtual int appShutdown();
 
-    // stdCamera interface:
-
-    // This must set the power-on default values of
-    /* -- m_ccdTempSetpt
-     * -- m_currentROI
+    /** \name stdCamera Interface
+     * @{
      */
+
+    /// Set defaults for a power-on state.
     int powerOnDefaults();
 
+    /// PVCAM does not expose a separate temperature-control toggle.
     int setTempControl();
+
+    /// PVCAM does not expose a writable detector temperature setpoint in this app.
     int setTempSetPt();
+
+    /// Queue the requested readout-speed selection for the next acquisition setup.
     int setReadoutSpeed();
+
+    /// PVCAM does not expose vertical-shift control through this app.
     int setVShiftSpeed();
+
+    /// Set the fan speed according to the configured stdCamera target.
+    int setFanSpeed();
+
+    /// PVCAM does not expose EM gain through this app.
     int setEMGain();
+
+    /// Queue the requested exposure time for the next acquisition setup.
     int setExpTime();
+
+    /// PVCAM does not expose FPS as a direct settable control in this app.
     int setFPS();
 
     /// Check the next ROI
@@ -267,6 +285,7 @@ class pvcamCtrl : public MagAOXApp<true>,
      */
     int checkNextROI();
 
+    /// Queue the requested ROI for the next acquisition setup.
     int setNextROI();
 
     /// Sets the shutter state, via call to dssShutter::setShutterState(int) [stdCamera interface]
@@ -275,26 +294,58 @@ class pvcamCtrl : public MagAOXApp<true>,
      */
     int setShutter( int sh );
 
-    // Framegrabber interface:
-    int   configureAcquisition();
-    float fps();
-    int   startAcquisition();
-    int   acquireAndCheckValid();
-    int   loadImageIntoStream( void *dest );
-    int   reconfig();
+    ///@}
 
-    // pvcam specific:
+    /** \name Framegrabber Interface
+     * @{
+     */
+
+    /// Configure the PVCAM acquisition state for the pending settings.
+    int configureAcquisition();
+
+    /// Return the current measured frame rate.
+    float fps();
+
+    /// Start continuous PVCAM acquisition.
+    int startAcquisition();
+
+    /// Wait for the next frame-ready signal and validate the acquisition state.
+    int acquireAndCheckValid();
+
+    /// Copy the latest PVCAM frame into the destination image stream.
+    int loadImageIntoStream( void *dest );
+
+    /// Stop acquisition so the framegrabber can reconfigure.
+    int reconfig();
+
+    ///@}
+
+    /** \name PVCAM Interface
+     * @{
+     */
+
+    /// Find and open the configured PVCAM camera.
     int connect();
 
+    /// Enumerate the PVCAM readout-speed table for the connected camera.
     int fillSpeedTable();
 
+    /// Dump the values of a PVCAM enumerated parameter for debugging.
     void dumpEnum( uns32 paramID, const std::string &paramMnem );
 
+    /// Get the current fan speed from the camera.
+    int getFanSpeed();
+
+    /// Get the current detector temperature and set point from the camera.
     int getTemp();
 
+    /// Static trampoline for the PVCAM end-of-frame callback.
     static void st_endOfFrameCallback( FRAME_INFO *finfo, void *pvcamCtrlInst );
 
+    /// Process a PVCAM end-of-frame callback.
     void endOfFrameCallback( FRAME_INFO *finfo );
+
+    ///@}
 
     /** \name Telemeter Interface
      *
@@ -319,7 +370,7 @@ pvcamCtrl::pvcamCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 
     m_default_x     = 1599.5;
     m_default_y     = 1599.5;
-    m_default_w     = 512; //we make this smaller by default
+    m_default_w     = 512; // we make this smaller by default
     m_default_h     = 512;
     m_default_bin_x = 1;
     m_default_bin_y = 1;
@@ -329,13 +380,18 @@ pvcamCtrl::pvcamCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
     m_full_w = 3200;
     m_full_h = 3200;
 
-
     m_defaultReadoutSpeed    = "dynamic_range";
     m_readoutSpeedNames      = { "sensitivity", "speed", "dynamic_range", "sub_electron" };
     m_readoutSpeedNameLabels = { "Sensitivity", "Speed", "Dynamic Range", "Sub-Electron" };
 
+    m_defaultFanSpeed    = "high";
+    m_fanSpeedNames      = { "high", "medium", "low", "off" };
+    m_fanSpeedNameLabels = { "High", "Medium", "Low", "Off" };
+
     m_readoutSpeedName    = m_defaultReadoutSpeed;
     m_readoutSpeedNameSet = m_defaultReadoutSpeed;
+    m_fanSpeedName        = m_defaultFanSpeed;
+    m_fanSpeedNameSet     = m_defaultFanSpeed;
 
     return;
 }
@@ -503,6 +559,14 @@ int pvcamCtrl::appLogic()
             return 0;
         }
 
+        if( m_fanSpeedControlEnabled && getFanSpeed() != 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return 0;
+            log<software_error>( { __FILE__, __LINE__ } );
+            return 0;
+        }
+
         STDCAMERA_UPDATE_INDI;
 
         FRAMEGRABBER_UPDATE_INDI;
@@ -555,6 +619,19 @@ int pvcamCtrl::powerOnDefaults()
     m_readoutSpeedName    = m_defaultReadoutSpeed;
     m_readoutSpeedNameSet = m_defaultReadoutSpeed;
 
+    if( m_fanSpeedControlEnabled )
+    {
+        m_fanSpeedName    = m_defaultFanSpeed;
+        m_fanSpeedNameSet = m_defaultFanSpeed;
+    }
+    else
+    {
+        m_fanSpeedName.clear();
+        m_fanSpeedNameSet.clear();
+    }
+
+    m_fanSpeedValid = false;
+
     return 0;
 }
 
@@ -577,6 +654,57 @@ int pvcamCtrl::setReadoutSpeed()
 
 int pvcamCtrl::setVShiftSpeed()
 {
+    return 0;
+}
+
+int pvcamCtrl::setFanSpeed()
+{
+    std::string priorFanSpeed = m_fanSpeedName;
+
+    int32 fanSpeed = FAN_SPEED_HIGH;
+
+    if( m_fanSpeedNameSet == "high" )
+    {
+        fanSpeed = FAN_SPEED_HIGH;
+    }
+    else if( m_fanSpeedNameSet == "medium" )
+    {
+        fanSpeed = FAN_SPEED_MEDIUM;
+    }
+    else if( m_fanSpeedNameSet == "low" )
+    {
+        fanSpeed = FAN_SPEED_LOW;
+    }
+    else if( m_fanSpeedNameSet == "off" )
+    {
+        fanSpeed = FAN_SPEED_OFF;
+    }
+    else
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "invalid fan-speed target: " + m_fanSpeedNameSet } );
+    }
+
+    if( pl_set_param( m_handle, PARAM_FAN_SPEED_SETPOINT, static_cast<void *>( &fanSpeed ) ) == false )
+    {
+        log_pvcam_software_error( "pl_set_param", "PARAM_FAN_SPEED_SETPOINT" );
+        return -1;
+    }
+
+    m_fanSpeedName  = m_fanSpeedNameSet;
+    m_fanSpeedValid = true;
+
+    if( m_fanSpeedName != priorFanSpeed )
+    {
+        log<text_log>( "fan speed changed from '" + priorFanSpeed + "' to '" + m_fanSpeedName + "'",
+                       logPrio::LOG_NOTICE );
+    }
+    else
+    {
+        log<text_log>( "fan speed set to '" + m_fanSpeedName + "'", logPrio::LOG_NOTICE );
+    }
+
+    recordCamera( true );
+
     return 0;
 }
 
@@ -877,6 +1005,20 @@ int pvcamCtrl::configureAcquisition()
         return -1;
     }
 
+    if( m_fanSpeedControlEnabled )
+    {
+        if( getFanSpeed() < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "could not get fan speed after acquisition setup" } );
+        }
+
+        if( m_fanSpeedName != m_fanSpeedNameSet && setFanSpeed() < 0 )
+        {
+            return log<software_error, -1>(
+                { __FILE__, __LINE__, "could not restore configured fan speed after acquisition setup" } );
+        }
+    }
+
     recordCamera( true );
 
     return 0;
@@ -1116,6 +1258,21 @@ int pvcamCtrl::connect()
         }
 
         fillSpeedTable();
+
+        if( m_fanSpeedControlEnabled && getFanSpeed() < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "could not get fan speed" } );
+        }
+
+        if( m_fanSpeedControlEnabled )
+        {
+            m_fanSpeedNameSet = m_defaultFanSpeed;
+        }
+
+        if( m_fanSpeedControlEnabled && setFanSpeed() < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "could not set fan speed" } );
+        }
     }
     else
     {
@@ -1383,6 +1540,66 @@ int pvcamCtrl::getTemp()
         m_tempControlOnTarget  = true;
         m_tempControlStatusStr = "LOCKED";
     }
+
+    return 0;
+}
+
+int pvcamCtrl::getFanSpeed()
+{
+    if( state() == stateCodes::OPERATING || !m_fanSpeedControlEnabled )
+    {
+        return 0;
+    }
+
+    rs_bool isAvailable;
+    if( !pl_get_param( m_handle, PARAM_FAN_SPEED_SETPOINT, ATTR_AVAIL, static_cast<void *>( &isAvailable ) ) )
+    {
+        if( powerState() != 1 || powerStateTarget() != 1 )
+            return 0;
+        log_pvcam_software_error( "pl_get_param", "PARAM_FAN_SPEED_SETPOINT ATTR_AVAIL" );
+        state( stateCodes::ERROR );
+        return -1;
+    }
+
+    if( !isAvailable )
+    {
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "PARAM_FAN_SPEED_SETPOINT not available while fan control is enabled" } );
+    }
+
+    int32 fanSpeed;
+    if( !pl_get_param( m_handle, PARAM_FAN_SPEED_SETPOINT, ATTR_CURRENT, static_cast<void *>( &fanSpeed ) ) )
+    {
+        if( powerState() != 1 || powerStateTarget() != 1 )
+            return 0;
+        log_pvcam_software_error( "pl_get_param", "PARAM_FAN_SPEED_SETPOINT ATTR_CURRENT" );
+        state( stateCodes::ERROR );
+        return -1;
+    }
+
+    if( fanSpeed == FAN_SPEED_HIGH )
+    {
+        m_fanSpeedName = "high";
+    }
+    else if( fanSpeed == FAN_SPEED_MEDIUM )
+    {
+        m_fanSpeedName = "medium";
+    }
+    else if( fanSpeed == FAN_SPEED_LOW )
+    {
+        m_fanSpeedName = "low";
+    }
+    else if( fanSpeed == FAN_SPEED_OFF )
+    {
+        m_fanSpeedName = "off";
+    }
+    else
+    {
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "unknown PVCAM fan-speed value: " + std::to_string( fanSpeed ) } );
+    }
+
+    m_fanSpeedValid = true;
 
     return 0;
 }

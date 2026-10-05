@@ -32,24 +32,24 @@ def wait_for_ready(client, device, timeout=0.1):
 def make_horizontal_probe(grid, direction='left'):
     probe = grid.zeros()
     probe = probe.shaped
-    
+
     width = 4
     height = 4
     x = (-1.0)**(np.arange(width) - width//2)
     y = (-1.0)**(np.arange(height) - height//2)
-    
+
     # 34 - 15 16 17 18 19 20
     probe[15:19, 6:10] = np.outer(x, y)
     probe[15:19, 6:10] = np.outer(y, x)
     if direction == 'right':
         probe = probe[:,::-1]
-    
+
     return probe.ravel()
 
 def make_vertical_probe(grid, direction='down'):
     probe = grid.zeros()
     probe = probe.shaped
-    
+
     width = 4
     height = 4
     x = (-1.0)**(np.arange(width) - width//2)
@@ -61,7 +61,7 @@ def make_vertical_probe(grid, direction='down'):
     probe = np.sign(probe)
     if direction == 'up':
         probe = probe[::-1,:]
-    
+
     return probe.ravel()
 
 def make_ncpc_alignment_poke_pattern():
@@ -83,7 +83,7 @@ def wait_for_state(client, indi_property, value, wait_time=1, tolerance=None):
 
 def calibrate_indi_device(client, device_name, device_property, delta_pertubation, camera, measurement_function, num_stack=50, do_wait=False):
     client.get_properties('{:s}'.format(device_name))
-    
+
     property_current = '{:s}.{:s}.current'.format(device_name, device_property)
     property_target = '{:s}.{:s}.target'.format(device_name, device_property)
     current_position = client[property_current]
@@ -99,7 +99,7 @@ def calibrate_indi_device(client, device_name, device_property, delta_pertubatio
         # Take measurement
         camera.grab_stack(3)
         im = camera.grab_stack(num_stack)
-       
+
         measurement = measurement_function(im)
         slope += s * measurement / (2 * delta_pertubation)
 
@@ -108,17 +108,17 @@ def calibrate_indi_device(client, device_name, device_property, delta_pertubatio
         wait_for_state(client, property_current, current_position, tolerance=0.1 * delta_pertubation)
     else:
         time.sleep(2)
-    
+
     return slope
 
 class XCorrShift():
-    def __init__(self, reference_image, domain_pixels=480, domain_size=40, filter_size=None):
+    def __init__(self, reference_image, domain_pixels=480, domain_size=40, filter_size=None, reference_point=np.array([0,0])):
         self._reference_image = reference_image
-        self._xgrid = hp.make_pupil_grid(domain_pixels, domain_size)
-        
+        self._xgrid = hp.make_pupil_grid(domain_pixels, domain_size).shifted(reference_point)
+
         self._fft = hp.FastFourierTransform(self._reference_image.grid)
         self._mft = hp.MatrixFourierTransform(self._xgrid, self._fft.output_grid)
-        
+
         self._filter_size = filter_size
         if filter_size is not None:
             # Change this to a super gaussian filter to remove ringing.
@@ -128,13 +128,71 @@ class XCorrShift():
 
         self._kernel = np.conj(self._fft.forward(self._reference_image + 0j))
 
-    def cross_correlate(self, image):
-        xcorr = np.real(self._mft.backward(self._fft.forward(image + 0j) * self._spatial_filter * self._kernel))
+    def cross_correlate(self, image, local_reference_point=np.array([0,0])):
+        tilt = np.exp(1j * local_reference_point @ self._fft.output_grid.points.T)
+        xcorr = np.real(self._mft.backward(self._fft.forward(image + 0j) * self._spatial_filter * self._kernel * tilt))
         return xcorr
-        
-    def measure(self, image):           
-        # Do a cross-correlation and find the peak pixel
-        # TODO: implement sub-pixel precision with polynomial fitting
-        xcorr = self.cross_correlate(image)
-        indx_max = np.argmax(xcorr)
-        return self._xgrid.points[indx_max]
+
+    def _subpixel_offset_from_quadratic(self, xcorr_2d, ix, iy):
+        ny, nx = xcorr_2d.shape
+        if ix < 1 or ix > nx - 2 or iy < 1 or iy > ny - 2:
+            return None
+
+        patch = xcorr_2d[iy-1:iy+2, ix-1:ix+2]
+        dx, dy = np.meshgrid(np.arange(-1, 2), np.arange(-1, 2))
+        A = np.vstack([
+            dx.ravel()**2,
+            dy.ravel()**2,
+            (dx * dy).ravel(),
+            dx.ravel(),
+            dy.ravel(),
+            np.ones(9)
+        ]).T
+        z = patch.ravel()
+
+        coeff, *_ = np.linalg.lstsq(A, z, rcond=None)
+        a, b, c, d, e, _ = coeff
+
+        denom = 4*a*b - c*c
+        if abs(denom) < 1e-12:
+            return None
+
+        x0 = (c*e - 2*b*d)/denom
+        y0 = (c*d - 2*a*e)/denom
+
+        if abs(x0) > 1.0 or abs(y0) > 1.0:
+            return None
+
+        return np.array([x0, y0])
+
+    def _subpixel_peak_position(self, xcorr):
+        xcorr_arr = np.asarray(xcorr)
+        grid_shape = tuple(self._xgrid.shape)
+        xcorr_2d = xcorr_arr.reshape(grid_shape)
+
+        idx_max = np.argmax(xcorr_2d)
+        iy, ix = np.unravel_index(idx_max, grid_shape)
+
+        offset = self._subpixel_offset_from_quadratic(xcorr_2d, ix, iy)
+        if offset is None:
+            return self._xgrid.points[idx_max]
+
+        dx, dy = offset
+        x_center = self._xgrid.x.reshape(grid_shape)[iy, ix]
+        y_center = self._xgrid.y.reshape(grid_shape)[iy, ix]
+
+        return np.array([
+            x_center + dx * self._xgrid.delta[0],
+            y_center + dy * self._xgrid.delta[1]
+        ])
+
+    def measure(self, image, local_reference_point=np.array([0,0]), subpixel=True):
+        xcorr = self.cross_correlate(image, local_reference_point)
+
+        if subpixel:
+            peak = self._subpixel_peak_position(xcorr)
+        else:
+            indx_max = np.argmax(np.asarray(xcorr))
+            peak = self._xgrid.points[indx_max]
+
+        return peak + local_reference_point

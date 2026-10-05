@@ -49,8 +49,8 @@ typedef struct ocam2_camInfo {
     unsigned short *biasFlatBufferTx;
 	ocam2_serialOut_func_t cbSerialOut;
 	void *p; /* User private data */
-	
-	
+
+
 } ocam2_camInfo;
 
 

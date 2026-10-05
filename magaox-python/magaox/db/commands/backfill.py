@@ -20,7 +20,7 @@ from tqdm import tqdm
 import xconf
 from ._base import BaseDbCommand
 
-from magaox.db.config import DEFAULT_DATA_DIRS
+from magaox.constants import DEFAULT_PREFIX, DEFAULT_DATA_DIRS
 from magaox.db import ingest
 from magaox.db.records import Telem, FileIngestTime
 from magaox.utils import parse_iso_datetime_as_utc, utcnow, xfilename_to_utc_timestamp
@@ -35,6 +35,8 @@ class Backfill(BaseDbCommand):
     """Process ``.bintel`` files found in data folders that don't already have ingest records
     and populate the ``telem`` table
     """
+
+    data_dirs : list[pathlib.Path] = xconf.field(default_factory=lambda: [DEFAULT_PREFIX / x for x in DEFAULT_DATA_DIRS])
 
     logdump_exe: str = xconf.field(
         default="/opt/MagAOX/bin/logdump",
@@ -94,30 +96,43 @@ class Backfill(BaseDbCommand):
         else:
             raise RuntimeError(f"Passed a path {path} that we don't know how to read")
         # pass to batch ingest
-        log.debug(f"Ingesting {len(records)} record{'s' if len(records) != 1 else ''} into the database")
+        n_records = len(records)
+        if n_records == 0:
+            return path
+        elif n_records == 1:
+            log.info(f"Ingesting one record into the database")
+        else:
+            log.info(f"Ingesting {len(records)} record{'s' if len(records) != 1 else ''} into the database")
         for conn_name in self.databases:
             conn = self.databases[conn_name].connect()
-            try:
-                with conn.transaction():
-                    cur = conn.cursor()
-                    ingest.batch_telem(cur, records)
-                    ingest.record_file_ingest_time(cur, FileIngestTime(
-                        ts=xfilename_to_utc_timestamp(fname),
-                        device=name,
-                        ingested_at=utcnow(),
-                        origin_host=self.hostname,
-                        origin_path=path,
-                    ))
-            finally:
-                conn.close()
+            log.info(f"Connected to {conn_name}")
+            with conn.transaction():
+                cur = conn.cursor()
+                # n.b. there's a nested transaction here
+                ingest.batch_telem(conn, records)
+                ingest.record_file_ingest_time(cur, FileIngestTime(
+                    ts=xfilename_to_utc_timestamp(fname),
+                    device=name,
+                    ingested_at=utcnow(),
+                    origin_host=self.hostname,
+                    origin_path=path,
+                ))
         return path
 
     def main(self):
         for conn_name in self.databases:
             conn = self.databases[conn_name].connect()
-            paths = ingest.identify_non_ingested_telem(
-                conn.cursor(), self.hostname
+            ingest.update_file_inventory(
+                conn,
+                self.hostname,
+                self.data_dirs,
+                self.ignore_patterns.files,
+                self.ignore_patterns.directories
             )
+            with conn.transaction():
+                paths = ingest.identify_non_ingested_telem(
+                    conn.cursor(), self.hostname
+                )
             with concurrent.futures.ThreadPoolExecutor(max_workers=self.parallel_jobs) as pool:
                 futures_to_paths = {}
                 log.info(f"Starting backfill tasks for {len(paths)} path{'s' if len(paths) != 1 else ''}")
@@ -135,9 +150,9 @@ class Backfill(BaseDbCommand):
                     try:
                         log.debug(f"Finished {ft.result()}")
                     except LogDumpError as e:
-                        log.error(f"logdump exited with exit code 255 on {futures_to_paths[ft]}")
+                        log.error(f"logdump exited with exit code 255 on {futures_to_paths[ft]} ({e})")
                     except Exception as e:
-                        log.exception(f"Failed to process telem file {futures_to_paths[ft]}")
+                        log.exception(f"Failed to process telem file {futures_to_paths[ft]} ({e})")
                     pbar.update()
                 pbar.close()
             log.debug(f"Finished {conn_name} ({self.databases[conn_name]})")

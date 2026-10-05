@@ -10,7 +10,7 @@ int main( int argc, char **argv )
 {
     try
     {
-        xrif2fits * xs;
+        xrif2fits *xs;
         try
         {
             xs = new xrif2fits;
@@ -23,9 +23,14 @@ int main( int argc, char **argv )
         try
         {
             int rv = xs->main( argc, argv );
-            if(rv != 0)
+            if( rv < 0 )
             {
-                std::cerr << "xrif2fits error. run with -h to seek help.\n";
+                rv = 2;
+            }
+
+            if( rv >= 2 )
+            {
+                std::cerr << "xrif2fits fatal error. run with -h to seek help.\n";
             }
 
             return rv;
@@ -47,8 +52,8 @@ int main( int argc, char **argv )
     catch( const std::exception &e )
     {
         std::vector<std::string> whats;
-        mx::unwind_exceptions(whats, e );
-        mx::print_exceptions(whats);
+        mx::unwind_exceptions( whats, e );
+        mx::print_exceptions( whats );
 
         return -1;
     }

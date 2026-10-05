@@ -13,14 +13,18 @@ local/
 **/.*~
 **/*.stash
 **/*-swp
+
+#Qt:
 **/res/
 ui*.h
-
 **/bin/
 **/moc/
 **/moc_*
 makefile.*GUI
 gui/**/makefile.*
+
+#Agents:
+.codex
 
 #Ignore any old folders
 **/old/
@@ -57,6 +61,7 @@ apps/bmcCtrl/bmcCtrl
 apps/cacaoInterface/cacaoInterface
 apps/cameraSim/cameraSim
 apps/closedLoopIndi/closedLoopIndi
+apps/cred2Ctrl/cred2Ctrl
 
 #d
 apps/dmMode/dmMode
@@ -71,6 +76,7 @@ apps/filterWheelCtrl/filterWheelCtrl
 apps/flipperCtrl/flipperCtrl
 
 apps/magAOXMaths/magAOXMaths
+apps/flowRPM/flowRPM
 
 #g/gui
 gui/rtimv/plugins/cameraStatus/makefile.cameraStatus
@@ -108,6 +114,9 @@ apps/modalPSDs/modalPSDs
 apps/mwfsMonitor/mwfsMonitor
 apps/mzmqServer/mzmqServer
 apps/mzmqClient/mzmqClient
+
+#n
+apps/nnReconstructor/nnReconstructor
 
 #o
 apps/observerCtrl/observerCtrl
@@ -157,6 +166,7 @@ apps/userGainCtrl/userGainCtrl
 
 #w
 apps/w2tcsOffloader/w2tcsOffloader
+apps/wooferTweeterRecon/wooferTweeterRecon
 
 #x
 apps/xindiserver/tests/remoteDriver_test
@@ -168,10 +178,20 @@ apps/xt1121Ctrl/xt1121Ctrl
 
 apps/xt1121DCDU/xt1121DCDU
 
+apps/xInstGraph/xInstGraph
+
 #z
 apps/zaberCtrl/zaberCtrl
 apps/zaberLowLevel/zaberLowLevel
+apps/zaberLowLevelBinary/zaberLowLevelBinary
 apps/zylaCtrl/zylaCtrl
+
+
+#libMagAOX/...
+libMagAOX/logger/tests/catch2_tests
+libMagAOX/logger/tests/gen_entropy_tests
+libMagAOX/logger/tests/generated_entropy_test_e1_n2
+libMagAOX/logger/tests/generated_tests
 
 ##########################################
 #Executables and util specifics to ignore:
@@ -219,14 +239,6 @@ vm/
 __pycache__
 installed_python_interface_timestamp.txt
 magaox-python/build
-
-libMagAOX/doc/diag/Makefile
-libMagAOX/doc/diag/xwcapp_fsm.drawio
-libMagAOX/doc/diag/xwcapp.drawio
-libMagAOX/doc/diag/xwcapps_connections.drawio
-libMagAOX/doc/diag/png/xwcapp_fsm.png
-libMagAOX/doc/diag/png/xwcapp.png
-libMagAOX/doc/diag/png/xwcapps_connections.png
 
 
 # Coverage files

@@ -5,7 +5,7 @@ The original author is Paul Grenz of the LBTI project.
 ## Changes
 
 At this point too many changes have been made list them all here.  Git will have to do it for us.
-  
+
 
 ## Version History
 

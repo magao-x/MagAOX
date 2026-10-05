@@ -11,7 +11,7 @@ PredictiveController::PredictiveController(int num_actuators, int num_history, i
     _gain = gain;
     _delta_max = 0.5;
     _regularization = initial_regularization;
-    
+
     // Derived properties
     num_predictors = _num_future * _num_modes;
     num_features = (_num_future - 1 + 2 * _num_history) * _num_modes;
@@ -19,7 +19,7 @@ PredictiveController::PredictiveController(int num_actuators, int num_history, i
 
     // Data buffers
     buffer_size = find_next_power_of_2(2 * (num_history + num_future));
-    
+
     measurement_head = 0;
     measurement_buffer.resize(buffer_size, _num_modes);
     measurement_buffer.setZero();
@@ -89,29 +89,29 @@ Matrix PredictiveController::get_measurement_future(){
     Matrix future_vec;
     future_vec.resize(_num_future * _num_modes, 1);
 
-    for(int i=0; i<_num_future; i++){    
+    for(int i=0; i<_num_future; i++){
         auto dat = measurement_buffer.row((measurement_head - i - 1) & (buffer_size - 1));
         for(int j=0; j < _num_modes; j++){
             future_vec(i * _num_modes + j, 0) = dat(j, 0);
         }
     }
-    
+
     return future_vec;
 }
 
 Matrix PredictiveController::get_measurement_past(){
     Matrix past_vec;
     past_vec.resize(_num_history * _num_modes, 1);
-    
+
     // This is a smarter way to ravel the data!
     // VectorXd B(Map<VectorXd>(A.data(), A.cols()*A.rows()));
-    for(int i=0; i<_num_history; i++){    
+    for(int i=0; i<_num_history; i++){
         auto dat = measurement_buffer.row((measurement_head - i - _num_future - 1) & (buffer_size - 1));
         for(int j=0; j < _num_modes; j++){
             past_vec(i * _num_modes + j, 0) = dat(j, 0);
         }
     }
-    
+
     return past_vec;
 }
 
@@ -120,7 +120,7 @@ Matrix PredictiveController::get_command_future(int skip_cmds=0){
     if(true){
         future_vec.resize((_num_future - skip_cmds) * _num_modes, 1);
 
-        for(int i=0; i < (_num_future - skip_cmds); i++){    
+        for(int i=0; i < (_num_future - skip_cmds); i++){
             int offset = skip_cmds * _num_modes;
             auto dat = command_buffer.row((command_head - i - 1 - offset) & (buffer_size - 1));
             for(int j=0; j < _num_modes; j++){
@@ -130,7 +130,7 @@ Matrix PredictiveController::get_command_future(int skip_cmds=0){
     }else{
         future_vec.resize(_num_future * _num_modes, 1);
 
-        for(int i=0; i<_num_future; i++){    
+        for(int i=0; i<_num_future; i++){
             auto dat = command_buffer.row((command_head - i - 1) & (buffer_size - 1));
             for(int j=0; j < _num_modes; j++){
                 future_vec(i * _num_modes + j, 0) = dat(j, 0);
@@ -145,13 +145,13 @@ Matrix PredictiveController::get_command_past(){
     Matrix past_vec;
     past_vec.resize(_num_history * _num_modes, 1);
 
-    for(int i=0; i<_num_history; i++){    
+    for(int i=0; i<_num_history; i++){
         auto dat = command_buffer.row((command_head - i - _num_future - 1) & (buffer_size - 1));
         for(int j=0; j < _num_modes; j++){
             past_vec(i * _num_modes + j) = dat(j, 0);
         }
     }
-    
+
     return past_vec;
 }
 
@@ -159,13 +159,13 @@ Matrix PredictiveController::get_current_measurement_past(int num_steps){
     Matrix past_vec;
     past_vec.resize(num_steps * _num_modes, 1);
 
-    for(int i=0; i<num_steps; i++){    
+    for(int i=0; i<num_steps; i++){
         auto dat = measurement_buffer.row((measurement_head - i - 1) & (buffer_size - 1));
         for(int j=0; j < _num_modes; j++){
             past_vec(i * _num_modes + j) = dat(j, 0);
         }
     }
-    
+
     return past_vec;
 }
 
@@ -173,13 +173,13 @@ Matrix PredictiveController::get_current_command_past(int num_steps){
     Matrix past_vec;
     past_vec.resize(num_steps * _num_modes, 1);
 
-    for(int i=0; i<num_steps; i++){    
+    for(int i=0; i<num_steps; i++){
         auto dat = command_buffer.row((command_head - i - 1) & (buffer_size - 1));
         for(int j=0; j < _num_modes; j++){
             past_vec(i * _num_modes + j) = dat(j, 0);
         }
     }
-    
+
     return past_vec;
 }
 
@@ -192,13 +192,13 @@ void PredictiveController::update_system(){
     Matrix prediction_vector;
     prediction_vector.resize(past_measurement.rows() + past_cmd.rows() + future_cmd.rows(), 1);
     prediction_vector << future_cmd, past_cmd, past_measurement;
-    
+
     rls->update(&prediction_vector, &future_measurement);
 }
 
 void PredictiveController::update_controller(){
     Matrix H = rls->prediction_matrix.transpose() * rls->prediction_matrix;
-    Matrix H11 = H.block(0, 0, num_correlations, num_correlations); 
+    Matrix H11 = H.block(0, 0, num_correlations, num_correlations);
     Matrix H21 = H.block(0, num_correlations, num_correlations, H.cols() - num_correlations);
 
     if (do_switch_regularization_matrix){
@@ -210,7 +210,7 @@ void PredictiveController::update_controller(){
 
         do_switch_regularization_matrix = false;
     }
-    
+
     Matrix full_controller = -1 * (H11 + H11.maxCoeff() * (*regularization_matrix)).inverse() * H21;
     controller = full_controller.block(full_controller.rows() - _num_modes, 0, _num_modes, full_controller.cols());
 }
@@ -218,7 +218,7 @@ void PredictiveController::update_controller(){
 Matrix PredictiveController::calculate_command(Matrix new_measurement, Matrix exploration_noise){
     measurement_buffer.row(measurement_head & (buffer_size-1)) = new_measurement;
     measurement_head++;
-  
+
     Matrix past_command = get_current_command_past(_num_history - 1);
     Matrix past_measurement = get_current_measurement_past(_num_history);
 
@@ -232,7 +232,7 @@ Matrix PredictiveController::calculate_command(Matrix new_measurement, Matrix ex
         for(int i=0; i<_num_modes; i++){
             if( new_delta(i,0) > _delta_max )
                 new_delta(i, 0) = _delta_max;
-            
+
             if( new_delta(i,0) < -_delta_max )
                 new_delta(i, 0) = -_delta_max;
         }

@@ -39,7 +39,7 @@ using pcf::SystemSocket;
 ////////////////////////////////////////////////////////////////////////////////
 /// Basic constructor.
 
-SystemSocket::SystemSocket() : m_tType(UnknownType), m_nLastError(0), m_nSocket(-1), 
+SystemSocket::SystemSocket() : m_tType(UnknownType), m_nLastError(0), m_nSocket(-1),
                                 m_nConnectTimeout(1000), m_nPort(-1), m_oIsNagleDisabled(false), m_oIsBound(false)
 {
 }
@@ -49,8 +49,8 @@ SystemSocket::SystemSocket() : m_tType(UnknownType), m_nLastError(0), m_nSocket(
 
 SystemSocket::SystemSocket( const Type &tType,
                             const int &nPort,
-                            const string &szHost ) : m_tType(tType), m_nLastError(0), m_nSocket(-1), 
-                                                      m_nConnectTimeout(1000), m_szHost(szHost), m_nPort(nPort), 
+                            const string &szHost ) : m_tType(tType), m_nLastError(0), m_nSocket(-1),
+                                                      m_nConnectTimeout(1000), m_szHost(szHost), m_nPort(nPort),
                                                        m_oIsNagleDisabled(false), m_oIsBound(false)
 {
 }
@@ -839,7 +839,7 @@ void SystemSocket::connect()
   {
     if ( isValid() == false )
       create();
-    
+
     //  we need the sockaddr struct to pass the port and host.
     sockaddr_in saAddr = createSockAddr( m_nPort, m_szHost );
 

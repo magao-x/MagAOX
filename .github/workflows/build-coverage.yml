@@ -14,7 +14,7 @@ jobs:
       - name: Install Packages
         run: dnf install -y lcov make libusb-devel libusbx-devel
       - name: Check out repository code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Configure Git Safe Directory
         run: git config --global --add safe.directory "$(pwd)"
       - name: Generate Coverage
@@ -33,7 +33,7 @@ jobs:
           lcov --remove coverage.info "*/tests/*" "/usr/*" "/sys/*" "/tty/*" --output-file coverage_filtered.info
           genhtml coverage_filtered.info --output-directory coverage_report --title "MagAOX" --hierarchical --merge-aliases --suppress-aliases --filter function --demangle-cpp --css-file tests/coverage/gcov.css
       - name: Upload Coverage Report as Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-report
           path: coverage_report/

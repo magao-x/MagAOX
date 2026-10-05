@@ -11,14 +11,14 @@ setINDI \- set one or more writable INDI property values
 .nh
 .PP
 setINDI connects to an indiserver and sends commands to set new values for
-specified properties. Each property is specified using three components 
+specified properties. Each property is specified using three components
 followed by the new value in the following form:
 .IP
 device.property.element=value
 .PP
 Since a property may be an array, the syntax allows for multiple elements
 to be specified simultaneously. Two different syntax forms are supported. One
-form lists each element name separated by semicolons, then an equal sign, 
+form lists each element name separated by semicolons, then an equal sign,
 then each corresponding value also separated by semicolons. The other form
 lists each element=value together, each pair separated by a semicolon.
 In either form, all elements are updated atomically. If the property
@@ -57,7 +57,7 @@ wait no longer than t seconds to accomplish setting the new values; the
 default is 2 seconds.
 .TP
 -v
-generate additional information on stderr. Additional v's report 
+generate additional information on stderr. Additional v's report
 successively more information.
 .TO
 -w

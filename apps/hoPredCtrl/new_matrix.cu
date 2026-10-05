@@ -19,10 +19,10 @@ Matrix::Matrix(float initialization_value, int num_rows, int num_columns, int nu
 	total_size_ = size_ * batch_size_;
 
 	element_size_ = sizeof(float);
-	
+
 	// Allocate the pointers
 	cpu_data = new float* [batch_size_];
-	
+
 	// Create a contiguous block of memory in the host
 	// With contigous memory we can easily switch between Batch and Strided cuBlas operations
 	float* contigous_memory = new float[size_ * batch_size_];
@@ -42,12 +42,12 @@ Matrix::Matrix(float initialization_value, int num_rows, int num_columns, int nu
 	// the contigeous memory.
 	cudaError_t err = cudaMalloc((void**)&gpu_data[0], element_size_ * size_ * batch_size_);
 	check_cuda_error(err);
-	
+
 	// Now set all subsequent pointers
 	for(int n = 0; n < batch_size_; n++){
 		gpu_data[n] = gpu_data[0] + size_ * n;
 	}
-	
+
 	// Allocate device side pointers
 	cudaError_t err1 = cudaMalloc((void**)&dev_gpu_data, batch_size_ * sizeof(*gpu_data));
 	check_cuda_error(err1);
@@ -69,7 +69,7 @@ Matrix::Matrix(float initialization_value, int num_rows, int num_columns, int nu
 }
 
 Matrix::~Matrix(){
-	
+
 	if(cpu_data != nullptr){
 		// Free host side data
 		if(cpu_data[0] != nullptr)
@@ -87,11 +87,11 @@ Matrix::~Matrix(){
 		// Free host side pointers to device data
 		delete gpu_data;
 	}
-	
+
 	// Free device side pointers to device data
 	if(dev_gpu_data != nullptr )
 		cudaFree(dev_gpu_data);
-	
+
 	// print(true);
 
 	if(info != nullptr)
@@ -118,7 +118,7 @@ void Matrix::print(bool print_gpu){
 	}else{
 		print_batch_buffer(cpu_data, batch_size_, nrows_, ncols_);
 	}
-}	
+}
 
 void Matrix::shift_columns_cpu(){
 	float reset_value = 0.0;
@@ -131,10 +131,10 @@ void Matrix::shift_columns_cpu(){
 				int previous_index = BIDX2C(i, j-1, k, nrows_, ncols_);
 				cpu_data[0][current_index] = cpu_data[0][previous_index];
 			}
-			
+
 			int current_index = BIDX2C(i, 0, k, nrows_, ncols_);
 			cpu_data[0][current_index] = reset_value;
-		}	
+		}
 	}
 }
 
@@ -145,7 +145,7 @@ void Matrix::divide_by_scalar(Matrix* other, Matrix* out){
 void Matrix::set_to_zero(){
 	// Set the cpu data to zero
 	memset(cpu_data[0], 0, size_ * batch_size_ * sizeof(float));
-	
+
 	// And copy the zero'd data to the GPU.
 	to_gpu();
 }
@@ -175,7 +175,7 @@ void Matrix::dot(Matrix* other, Matrix* output, float alpha, float beta, cublasO
 	// y=αop(A)x+βy
 	if( use_strided ){
 		cublasXgemmStridedBatched(*handle,
-			opA, 
+			opA,
 			opB,
 			nrows_A, ncols_B, ncols_A,
 			&alpha,
@@ -184,22 +184,22 @@ void Matrix::dot(Matrix* other, Matrix* output, float alpha, float beta, cublasO
 			other->gpu_data[0], other->nrows_,
 			other->size_,
 			&beta,
-			output->gpu_data[0], output->nrows_, 
-			output->size_, 
+			output->gpu_data[0], output->nrows_,
+			output->size_,
 			batch_size_);
 	}else{
 		cublasXgemmBatched(*handle,
 			opA,
 			opB,
 			nrows_A, ncols_B, ncols_A,
-			&alpha, 
+			&alpha,
 			dev_gpu_data, nrows_,
 			other->dev_gpu_data, other->nrows_,
 			&beta,
 			output->dev_gpu_data, output->nrows_,
 			batch_size_);
 	}
-	  
+
 }
 
 void Matrix::inverse(Matrix* other){
@@ -231,12 +231,12 @@ void Matrix::to_file(std::string filename){
 }
 
 void Matrix::from_file(std::string filename){
-	
+
 	std::string line;
   	std::ifstream myfile (filename);
-	
+
 	if (myfile.is_open())
-	{	
+	{
 		std::string shape("");
 		std::getline(myfile, shape); // Get the line with the shape
 
@@ -244,7 +244,7 @@ void Matrix::from_file(std::string filename){
 		std::getline(myfile, data);	// empty line
 
 		std::vector<std::string> split_result = split(data, ',');
-		
+
 		// Parse the data line.
 		for(int i=0; i < split_result.size(); i++){
 			cpu_data[0][i] = std::stof(split_result[i]);
@@ -257,34 +257,34 @@ void Matrix::from_file(std::string filename){
 }
 
 Matrix* make_identity_matrix(float value, int size, int batch_size){
-	
+
 	Matrix* new_matrix = new Matrix(0.0, size, size, batch_size);
-	
-	
+
+
 	for(int k=0; k<batch_size; k++){
 		for(int i=0; i<size; i++){
 			// set(T value, int row_index, int column_index, int batch_index=1
 			new_matrix->set(value, i, i, k);
 		}
 	}
-	
+
 	new_matrix->to_gpu();
 
 	return new_matrix;
 }
 
 Matrix* make_identity_matrix(float* value, int size, int batch_size){
-	
+
 	Matrix* new_matrix = new Matrix(0.0, size, size, batch_size);
-	
-	
+
+
 	for(int k=0; k<batch_size; k++){
 		for(int i=0; i<size; i++){
 			// set(T value, int row_index, int column_index, int batch_index=1
 			new_matrix->set(value[k], i, i, k);
 		}
 	}
-	
+
 	new_matrix->to_gpu();
 
 	return new_matrix;
@@ -297,15 +297,15 @@ Matrix* make_identity_matrix(Matrix* value, int size, int batch_size){
 	*/
 
 	Matrix* new_matrix = new Matrix(0.0, size, size, batch_size);
-	
-	
+
+
 	for(int k=0; k<batch_size; k++){
 		for(int i=0; i<size; i++){
 			// set(T value, int row_index, int column_index, int batch_index=1
 			new_matrix->set(value->cpu_data[0][k], i, i, k);
 		}
 	}
-	
+
 	new_matrix->to_gpu();
 
 	return new_matrix;
@@ -318,15 +318,15 @@ Matrix* make_identity_matrix_from_scalar(float value, int size, int batch_size){
 	*/
 
 	Matrix* new_matrix = new Matrix(0.0, size, size, batch_size);
-	
-	
+
+
 	for(int k=0; k<batch_size; k++){
 		for(int i=0; i<size; i++){
 			// set(T value, int row_index, int column_index, int batch_index=1
 			new_matrix->set(value, i, i, k);
 		}
 	}
-	
+
 	new_matrix->to_gpu();
 
 	return new_matrix;
@@ -378,20 +378,20 @@ void gpu_col_copy(Matrix* destination, int dcol_index, int dbatch_index, Matrix*
 }
 
 
-Matrix* make_col_vector(float value, int size, int batch_size){	
+Matrix* make_col_vector(float value, int size, int batch_size){
 	Matrix* new_matrix = new Matrix(value, 1, size, batch_size);
 	return new_matrix;
 }
 
 Matrix* make_col_vector(float* value, int size, int batch_size){
-	
+
 	Matrix* new_matrix = new Matrix(0.0, 1, size, batch_size);
-	
+
 	for(int k=0; k<batch_size; k++){
 		for(int i=0; i<size; i++){
 			new_matrix->set(value[i], 0, i, k);
 		}
-	}	
+	}
 	new_matrix->to_gpu();
 
 	return new_matrix;
@@ -403,19 +403,19 @@ Matrix* make_random_col_vector(float standard_deviation, int size, int batch_siz
 	std::normal_distribution<float> distribution(0.0, standard_deviation);
 
 	Matrix* new_matrix = new Matrix(0.0, 1, size, batch_size);
-	
+
 	for(int k=0; k<batch_size; k++){
 		for(int i=0; i<size; i++){
 			new_matrix->set(distribution(generator), 0, i, k);
 		}
-	}	
+	}
 	new_matrix->to_gpu();
 
 	return new_matrix;
 }
 
 Matrix* make_random_matrix(float standard_deviation, int nrows, int ncols, int batch_size){
-	
+
 	// Hmmm this should be defined somewhere else because it is initialized with the same seed.
 	std::default_random_engine generator{(unsigned int)rdtsc()};
 	std::normal_distribution<float> distribution(0.0, standard_deviation);
@@ -429,7 +429,7 @@ Matrix* make_random_matrix(float standard_deviation, int nrows, int ncols, int b
 			}
 		}
 	}
-	
+
 	new_matrix->to_gpu();
 
 	return new_matrix;
@@ -437,7 +437,7 @@ Matrix* make_random_matrix(float standard_deviation, int nrows, int ncols, int b
 
 
 Matrix* make_random_binary_matrix(float standard_deviation, int nrows, int ncols, int batch_size){
-	
+
 	// Hmmm this should be defined somewhere else because it is initialized with the same seed.
 	std::default_random_engine generator{(unsigned int) rdtsc()};
 	std::normal_distribution<float> distribution(0.0, standard_deviation);
@@ -453,11 +453,11 @@ Matrix* make_random_binary_matrix(float standard_deviation, int nrows, int ncols
 				}else{
 					new_matrix->set(-standard_deviation, i, j, k);
 				}
-			
+
 			}
 		}
 	}
-	
+
 	new_matrix->to_gpu();
 
 	return new_matrix;

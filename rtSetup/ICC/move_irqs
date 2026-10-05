@@ -19,42 +19,42 @@ done
 enxs=$(grep enx503eaa0ceeff /proc/interrupts | awk '{print $1}' | sed 's/.$//')
 cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/camsci1/cpuset.cpus)
 for enx in $enxs; do
-    echo "camsci1 enx: " $enx " to " $cpu 
+    echo "camsci1 enx: " $enx " to " $cpu
     echo $cpu > /proc/irq/$enx/smp_affinity_list
 done
 
 enxs=$(grep enx503eaa0cf4cd /proc/interrupts | awk '{print $1}' | sed 's/.$//')
 cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/camsci2/cpuset.cpus)
 for enx in $enxs; do
-    echo "camsci2 enx: " $enx " to " $cpu 
+    echo "camsci2 enx: " $enx " to " $cpu
     echo $cpu > /proc/irq/$enx/smp_affinity_list
 done
 
 enxs=$(grep enx98b78501ae64 /proc/interrupts | awk '{print $1}' | sed 's/.$//')
 cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/shmimTCP/cpuset.cpus)
 for enx in $enxs; do
-    echo "shmimTCP enx: " $enx " to " $cpu 
+    echo "shmimTCP enx: " $enx " to " $cpu
     echo $cpu > /proc/irq/$enx/smp_affinity_list
 done
 
 kitxs=$(grep pvcamPCIE_1 /proc/interrupts | awk '{print $1}' | sed 's/.$//')
 cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/camflowfs/cpuset.cpus)
 for kitx in $kitxs; do
-    echo "camflowfs pvcam: " $kitx " to " $cpu 
+    echo "camflowfs pvcam: " $kitx " to " $cpu
     echo $cpu > /proc/irq/$kitx/smp_affinity_list
 done
 
 kitxs=$(grep pvcamPCIE_0 /proc/interrupts | awk '{print $1}' | sed 's/.$//')
 cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/camllowfs/cpuset.cpus)
 for kitx in $kitxs; do
-    echo "camllowfs pvcam: " $kitx " to " $cpu 
+    echo "camllowfs pvcam: " $kitx " to " $cpu
     echo $cpu > /proc/irq/$kitx/smp_affinity_list
 done
 
 nvidias=$(grep nvidia /proc/interrupts | awk '{print $1}' | sed 's/.$//')
 cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/acqu_mvm/cpuset.cpus)
 for nvidia in $nvidias; do
-    echo "nvidia: " $nvidia " to " $cpu 
+    echo "nvidia: " $nvidia " to " $cpu
     echo $cpu > /proc/irq/$nvidia/smp_affinity_list
 done
 

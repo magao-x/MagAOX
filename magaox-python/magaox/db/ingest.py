@@ -20,49 +20,47 @@ from ..utils import creation_time_from_filename, parse_iso_datetime_as_utc
 log = logging.getLogger(__name__)
 
 INGEST_IDENTIFY_FILES_BATCH_SIZE = 500
+TELEM_BATCH_SIZE = 5_000
+FILE_ORIGINS_BATCH_SIZE = 5_000
 
-def batch_user_log(cur: psycopg.Cursor, records: list[UserLog]):
-    """This will be where the logs will insert into user_logs table"""
-    cur.execute('BEGIN')
-    try:
+def batch_user_log(conn: psycopg.Connection, records: list[UserLog]):
+    cur = conn.cursor()
+    with conn.transaction():
         cur.executemany('''
-        INSERT INTO user_log (ts, device, ec, msg)
-        VALUES (%s, %s, %s, %s::JSONB)
-        ON CONFLICT (ts, device) DO NOTHING;
-        ''', [(rec.ts, rec.device, rec.ec, orjson.dumps(rec.msg).decode('utf8')) for rec in records])
-    except Exception as e:
-        log.error(f"Error inserting user logs into the database: {e}")
-        cur.execute('ROLLBACK')
-    else:
-        cur.execute('COMMIT')
+            INSERT INTO user_log (ts, device, ec, msg)
+            VALUES (%s, %s, %s, %s::JSONB)
+            ON CONFLICT (ts, device) DO NOTHING;
+            ''', [(rec.ts, rec.device, rec.ec, orjson.dumps(rec.msg).decode('utf8')) for rec in records])
         log.debug(f"Inserted {len(records)} user_logs into database")
 
 
-def batch_telem(cur: psycopg.Cursor, records: list[Telem]):
-    cur.execute("BEGIN")
-    cur.executemany(f'''
-INSERT INTO telem (ts, device, msg, ec)
-VALUES (%s, %s, %s::JSONB, %s)
-ON CONFLICT (device, ts) DO NOTHING;
-''', [(rec.ts, rec.device, Jsonb(rec.msg, dumps=orjson.dumps), rec.ec) for rec in records])
-    cur.execute("COMMIT")
+def batch_telem(conn: psycopg.Connection, records: list[Telem]):
+    cur = conn.cursor()
+    for record_batch in itertools.batched(records, TELEM_BATCH_SIZE):
+        with conn.transaction():
+            cur.executemany(f'''
+                INSERT INTO telem (ts, device, msg, ec)
+                VALUES (%s, %s, %s::JSONB, %s)
+                ON CONFLICT (device, ts) DO NOTHING;
+                ''', [(rec.ts, rec.device, Jsonb(rec.msg, dumps=orjson.dumps), rec.ec) for rec in record_batch])
 
-def batch_file_origins(cur: psycopg.Cursor, records: list[FileOrigin]):
-    cur.execute("BEGIN")
-    cur.executemany(f'''
-INSERT INTO file_origins (origin_host, origin_path, creation_time, modification_time, size_bytes)
-VALUES (%s, %s, %s, %s, %s)
-ON CONFLICT (origin_host, origin_path)
-DO UPDATE SET modification_time = EXCLUDED.modification_time, size_bytes = EXCLUDED.size_bytes
-''', [(rec.origin_host, rec.origin_path, rec.creation_time, rec.modification_time, rec.size_bytes) for rec in records])
-    cur.execute("COMMIT")
+def batch_file_origins(conn: psycopg.Connection, records: list[FileOrigin]):
+    cur = conn.cursor()
+    for record_batch in itertools.batched(records, FILE_ORIGINS_BATCH_SIZE):
+        with conn.transaction():
+            cur.executemany(f'''
+                INSERT INTO file_origins (origin_host, origin_path, creation_time, modification_time, size_bytes)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (origin_host, origin_path)
+                DO UPDATE SET modification_time = EXCLUDED.modification_time, size_bytes = EXCLUDED.size_bytes
+                ''', [(rec.origin_host, rec.origin_path, rec.creation_time, rec.modification_time, rec.size_bytes) for rec in record_batch])
 
-def identify_new_files(cur: psycopg.Cursor, this_host: str, paths: Iterable[pathlib.Path]):
+def identify_new_files(conn: psycopg.Connection, this_host: str, paths: Iterable[pathlib.Path]):
     '''Returns the paths from ``paths`` that are not already part of the ``file_origins`` table'''
     if len(paths) == 0:
         return []
-    cur.execute("BEGIN")
-    try:
+    cur = conn.cursor()
+    with conn.transaction(force_rollback=True):
         # Create a temporary table with these paths to join against the db inventory
         cur.execute("CREATE TEMPORARY TABLE on_disk_files ( path VARCHAR(1024) )")
         query = f'''
@@ -90,8 +88,6 @@ def identify_new_files(cur: psycopg.Cursor, this_host: str, paths: Iterable[path
         new_files = []
         for row in cur:
             new_files.append(row['path'])
-    finally:
-        cur.execute("ROLLBACK")  # ensure temp table is deleted
     return new_files
 
 #add non-ingested-userlogs?
@@ -126,38 +122,47 @@ WHERE
         fns.append(row['origin_path'])
     return fns
 
-def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[pathlib.Path],
+def update_file_inventory(conn: psycopg.Connection, host: str, data_dirs: list[pathlib.Path],
                           ignored_file_patterns: list[str], ignored_directory_patterns: list[str]):
     """Update the file_origins table for a database pointed to by `cur` with untracked local files (if any)"""
-    cur.execute("BEGIN")
     file_pattern = re.compile('|'.join(ignored_file_patterns))
     dir_pattern = re.compile('|'.join(ignored_directory_patterns))
     for prefix in data_dirs:
         for fpaths in itertools.batched(filter(lambda x: x.is_file(), prefix.glob("**")), INGEST_IDENTIFY_FILES_BATCH_SIZE):
-            new_files = identify_new_files(cur, host, fpaths)
-            log.info(f"Inventorying {len(new_files)} new files")
-            log.debug("\n".join(new_files))
-            origin_records = []
-            for fn in tqdm(new_files):
-                if file_pattern.match(fn):
-                    log.debug(f"Skipping {fn} because it matches the ignored files pattern")
-                    continue
-                try:
-                    stat_result = os.stat(fn)
-                    origin_records.append(FileOrigin(
-                        origin_host=host,
-                        origin_path=fn,
-                        creation_time=creation_time_from_filename(fn, stat_result=stat_result),
-                        modification_time=datetime.datetime.fromtimestamp(stat_result.st_mtime, tz=timezone.utc),
-                        size_bytes=stat_result.st_size,
-                    ))
-                except FileNotFoundError:
-                    log.info(f"Skipped {fn} (broken link?)")
-                    continue
-                except OSError as e:
-                    log.info(f"Skipping {fn} because of error ({e})")
-            batch_file_origins(cur, origin_records)
-    cur.execute("COMMIT")
+            new_files = identify_new_files(conn, host, fpaths)
+            if len(new_files) == 0:
+                log.debug(f"Found zero new files from {fpaths}")
+                continue
+            with conn.transaction():
+                log.info(f"Inventorying {len(new_files)} new files")
+                log.debug("\n".join(new_files))
+                origin_records = []
+                for fn in tqdm(new_files):
+                    if file_pattern.match(fn):
+                        log.debug(f"Skipping {fn} because it matches the ignored files pattern")
+                        continue
+                    log.info(f"Inventorying {len(new_files)} new files")
+                    log.debug("\n".join(new_files))
+                    origin_records = []
+                    for fn in tqdm(new_files):
+                        if file_pattern.match(fn):
+                            log.debug(f"Skipping {fn} because it matches the ignored files pattern")
+                            continue
+                        try:
+                            stat_result = os.stat(fn)
+                            origin_records.append(FileOrigin(
+                                origin_host=host,
+                                origin_path=fn,
+                                creation_time=creation_time_from_filename(fn, stat_result=stat_result),
+                                modification_time=datetime.datetime.fromtimestamp(stat_result.st_mtime, tz=timezone.utc),
+                                size_bytes=stat_result.st_size,
+                            ))
+                        except FileNotFoundError:
+                            log.info(f"Skipped {fn} (broken link?)")
+                            continue
+                        except OSError as e:
+                            log.info(f"Skipping {fn} because of error ({e})")
+                    batch_file_origins(conn, origin_records)
 
 def record_file_ingest_time(cur: psycopg.Cursor, rec : FileIngestTime):
     cur.execute("BEGIN")

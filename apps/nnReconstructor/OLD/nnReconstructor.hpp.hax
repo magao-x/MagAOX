@@ -68,7 +68,7 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
     std::string engineName;   // Name of the engine
     std::string engineDirs;   // Name of the engine
     bool rebuildEngine;       // If true, it will rebuild the engine and save it at engineName
-    
+
     // Logger logger;			  // The tensorRT logger
     // std::vector<char> engineData; // for loading the engine file.
 
@@ -157,7 +157,7 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
 
     // Custom functions
     int send_to_shmim();
-    
+
     void load_engine(const std::string filename);
     void create_engine_context();
     void prepare_engine_memory();

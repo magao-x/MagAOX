@@ -29,6 +29,31 @@ from datetime import timezone
 from watchdog.observers import Observer, BaseObserverSubclassCallable
 from watchdog.events import FileSystemEventHandler
 
+log = logging.getLogger(__name__)
+
+class TimeoutError(Exception):
+    pass
+
+class QueryCancellationWatchdog(threading.Thread):
+    dt_sec : float = 0.1
+    def __init__(self, conn: psycopg.Connection, timeout_sec=30.0):
+        self.exit = False
+        self.conn = conn
+        self.timeout_sec = 30.0
+        super().__init__(target=self.run)
+    def complete(self):
+        self.exit = True
+    def run(self):
+        total_wait_sec = 0.0
+        while not self.exit and total_wait_sec < self.timeout_sec:
+            time.sleep(self.dt_sec)
+            total_wait_sec += self.dt_sec
+        if self.exit:
+            return
+        else:
+            self.conn.cancel_safe()
+            raise TimeoutError()
+
 class NewXFilesHandler(FileSystemEventHandler):
     def __init__(self, host, events_queue, log_name):
         self.host = host
@@ -95,6 +120,7 @@ def _run_logdump_thread(logger_name, logdump_dir, logdump_args, name, message_qu
 @xconf.config
 class dbIngestConfig(BaseDbDeviceConfig):
     proclist : str = xconf.field(default="/opt/MagAOX/config/proclist_%s.txt", help="Path to process list file, %s will be replaced with the value of $MAGAOX_ROLE (or an empty string if absent from the environment)")
+    query_timeout_sec : float = xconf.field(default=30.0, help="Number of seconds after which to (attempt to) cancel an insert query under the assumption the connection's gone bad")
     logdump_exe : str = xconf.field(default="/opt/MagAOX/bin/logdump", help="logdump (a.k.a. teldump) executable to use")
 
 class dbIngest(XDevice):
@@ -192,9 +218,6 @@ class dbIngest(XDevice):
 
         self.startup_ts_sec = time.time()
 
-        # rescan for inventory
-        self.rescan_files()
-
         self.fs_queue = queue.Queue()
         event_handler = NewXFilesHandler(self.config.hostname, self.fs_queue, self.log.name + '.fs_observer')
         self.fs_observer = Observer()
@@ -207,48 +230,30 @@ class dbIngest(XDevice):
             self.log.info(f"Watching {dirpath} for changes")
         self.fs_observer.start()
 
-
-    def rescan_files(self):
-        search_paths = [self.config.common_path_prefix / name for name in self.config.data_dirs]
-        for conn in self.config.databases:
-            try:
-                with self.config.databases[conn].cursor() as cur:
-                    # n.b. the state of the file inventory and which files
-                    # are 'new' can be different depending on which
-                    # database we're talking about, so we rescan once
-                    # per connection
-                    self.log.debug(f"Scanning for new files for database {conn}")
-                    ingest.update_file_inventory(
-                        cur,
-                        self.config.hostname,
-                        search_paths,
-                        self.config.ignore_patterns.files, self.config.ignore_patterns.directories
-                    )
-            except Exception:
-                self.log.exception(f"Failed to rescan/inventory files for database {conn}, attempting to reconnect")
-                self._connections_to_attempt.add(conn)
-        self.log.info(f"Completed startup rescan of file inventory for {self.config.hostname} from {search_paths}")
-
     def ingest_line(self, line):
         # avoid infinite loop of modifying log file and getting notified of the modification
         if self.log_file_name.encode('utf8') not in line:
             self.log.debug(line)
 
-    def loop(self):
-        connections_to_reattempt = set()
-        if len(self._connections_to_attempt):
-            for configkey in self._connections_to_attempt:
-                try:
-                    self._connections[configkey].close()
-                except Exception:
-                    pass
-                try:
-                    self._connections[configkey] = self.config.databases[configkey].connect()
-                    connections_to_reattempt.add(configkey)
-                except Exception:
-                    self.log.exception(f"Failed to connect to {configkey} ({self.config.databases[configkey]})")
-            self._connections_to_attempt = connections_to_reattempt
+    def _ensure_connected(self):
+        for configkey in self.config.databases.keys():
+            if configkey in self._connections_to_attempt or self._connections[configkey].closed:
+                connections_to_reattempt = set()
+                for configkey in self._connections_to_attempt:
+                    try:
+                        self._connections[configkey].close()
+                    except Exception:
+                        pass
+                    try:
+                        self._connections[configkey] = self.config.databases[configkey].connect()
+                        self.log.info(f"Connected to {configkey} db")
+                    except Exception:
+                        self.log.exception(f"Failed to connect to {configkey} ({self.config.databases[configkey]})")
+                        connections_to_reattempt.add(configkey)
+                self._connections_to_attempt = connections_to_reattempt
 
+    def loop(self):
+        self._ensure_connected()
         telems = []
         try:
             while rec := self.telem_queue.get(timeout=0.1):
@@ -265,7 +270,6 @@ class dbIngest(XDevice):
         except queue.Empty:
             pass
 
-        #update for userlog here too
         user_logs = []
         try:
             while rec := self.user_log_queue.get(timeout=0.1):
@@ -275,17 +279,43 @@ class dbIngest(XDevice):
             pass
 
         for connkey in self._connections:
+            conn = self._connections[connkey]
+            self.log.debug(f"Batching ingest for {connkey}")
+            query_timeout = QueryCancellationWatchdog(conn, timeout_sec=self.config.query_timeout_sec)
             try:
-                self.log.debug(f"Batching ingest for {connkey}")
-                conn = self._connections[connkey]
-                with conn.transaction():
-                    cur = conn.cursor()
-                    ingest.batch_telem(cur, telems)
-                    ingest.batch_file_origins(cur, fs_events)
-                    ingest.batch_user_log(cur, user_logs)
+                query_timeout.start()
+                ingest.batch_telem(conn, telems)
+                query_timeout.complete()
             except Exception as e:
-                self.log.exception(f"Caught exception in batch ingest, reconnecting {conn} on next loop()")
-                self._connections_to_attempt.add(conn)
+                self.log.exception(f"Caught exception {e} in batch telem ingest, reconnecting {connkey} on next loop()")
+                self._connections_to_attempt.add(connkey)
+                continue
+            finally:
+                query_timeout.join()
+
+            query_timeout = QueryCancellationWatchdog(conn, timeout_sec=self.config.query_timeout_sec)
+            try:
+                query_timeout.start()
+                ingest.batch_file_origins(conn, fs_events)
+                query_timeout.complete()
+            except Exception as e:
+                self.log.exception(f"Caught exception {e} in batch file origins ingest, reconnecting {connkey} on next loop()")
+                self._connections_to_attempt.add(connkey)
+                continue
+            finally:
+                query_timeout.join()
+
+            query_timeout = QueryCancellationWatchdog(conn, timeout_sec=self.config.query_timeout_sec)
+            try:
+                query_timeout.start()
+                ingest.batch_user_log(conn, user_logs)
+                query_timeout.complete()
+            except Exception as e:
+                self.log.exception(f"Caught exception {e} in batch user log ingest, reconnecting {connkey} on next loop()")
+                self._connections_to_attempt.add(connkey)
+                continue
+            finally:
+                query_timeout.join()
 
         this_ts_sec = time.time()
         self.last_update_ts_sec = this_ts_sec

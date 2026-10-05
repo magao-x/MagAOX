@@ -44,18 +44,18 @@ class CircularBuffer {
 
     public:
         CircularBuffer(size_t _num_rows, size_t _num_cols, size_t _historySize)
-            : num_rows(_num_rows), num_cols(_num_cols), 
-              historySize(_historySize), 
-              size(_num_rows * _num_cols), 
+            : num_rows(_num_rows), num_cols(_num_cols),
+              historySize(_historySize),
+              size(_num_rows * _num_cols),
               head(0), tail(0), is_full(false) {
-            
+
             buffer = new float[size * historySize];
         }
 
         ~CircularBuffer(){
             delete buffer;
         }
-    
+
         // Adds an image (array of floats) to the buffer (overwrites if full)
         void add(float* image) {
             //std::cout << "Adding image to buffer" << std::endl;
@@ -63,15 +63,15 @@ class CircularBuffer {
             //memcpy(buffer + (head % historySize) * size * sizeof(float), image, sizeof(float) * size);
             head = head + 1;
         }
- 
-       
+
+
 
         void add_eigenimage(Eigen::Map<eigenImage<float>> image) {
             memcpy(buffer + (head % historySize) * size, &image, sizeof(float) * size);
             //std::cout << "Buffer " << buffer[head] << std::endl;
             head = head + 1;
         }
-       
+
         //void get(float* dest, int index){
         //    if(index < num_elements()){
         //        int data_index = (head - 1 - index) % historySize;
@@ -96,20 +96,20 @@ class CircularBuffer {
         float* getBuffer() {
             return buffer;
         }
-    
+
 
 };
 /*
 class CircularBuffer2 {
     public:
         CircularBuffer2(size_t Rows, size_t Cols, size_t historySize)
-            : imageRows(Rows), imageCols(Cols), 
-              historySize(historySize), 
-              size(Rows * Cols), 
+            : imageRows(Rows), imageCols(Cols),
+              historySize(historySize),
+              size(Rows * Cols),
               head(0), tail(0), is_full(false) {
             buffer.resize(historySize, std::vector<float>(size));
         }
-    
+
         // Adds an image (array of floats) to the buffer (overwrites if full)
         void add(float* image) {
             std::cout << "Adding image" << head % historySize << std::endl;
@@ -133,8 +133,8 @@ class CircularBuffer2 {
         void reset_head(){
             head = 0;
         }
-    
-    
+
+
         // Returns the n-th image in the buffer in the order of addition
         std::vector<float> getItem(size_t n) const {
             if (n >= head) {
@@ -143,7 +143,7 @@ class CircularBuffer2 {
                 throw std::runtime_error("Index out of bounds!");
                 return {}; // Return empty vector as error
             }
-    
+
             // Calculate the actual index in the buffer
             //size_t index = (tail + n) % historySize;
             size_t index = head  - n - 1;
@@ -153,7 +153,7 @@ class CircularBuffer2 {
         const std::vector<float>* getBuffer() const {
             return buffer.data();
         }
-    
+
     private:
         size_t imageRows, imageCols;   // Dimensions of each image (rows x columns)
         size_t historySize;            // Total number of images the buffer can hold
@@ -201,7 +201,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     std::string dataDirs;     // Location where the data (onnx file, engine, WFS reference) is stored
     std::string engineName;   // Name of the engine
     std::string engineDirs;   // Name of the engine
-    
+
     Logger logger;			  // The tensorRT logger
     std::vector<char> engineData; // for loading the engine file.
 
@@ -311,7 +311,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     // Custom functions
     int send_to_shmim();
     int send_obs_to_shmim();
-    
+
     void load_engine(const std::string filename);
     void create_engine_context();
     void prepare_engine_memory();
@@ -331,14 +331,14 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
 };
 
 void po4ao::load_engine(const std::string filename) {
-    
+
     std::ifstream file(filename, std::ios::binary);
     if (!file) {
         std::cout << "Error opening " << filename << std::endl;
     }
 
     file.seekg(0, std::ios::end);
-    
+
     engineData = std::vector<char>(file.tellg());
     file.seekg(0, std::ios::beg);
     file.read(engineData.data(), engineData.size());
@@ -352,14 +352,14 @@ void po4ao::create_engine_context(){
     if (!runtime) {
         std::cout << "Failed to createInferRuntime\n";
     }
-    
+
     engine = runtime->deserializeCudaEngine(engineData.data(), engineData.size());
     if (!engine) {
         std::cout << "Failed to deserialize CUDA engine.\n";
     } else {
         std::cout << "Deserialized CUDA engine.\n";
     }
-    
+
     context = engine->createExecutionContext();
 
 
@@ -424,7 +424,7 @@ void po4ao::prepare_engine_memory(){
 void po4ao::cleanup_engine_memory(){
     if(d_input)
         cudaFree(d_input);
-    
+
     if(d_output)
         cudaFree(d_output);
 }
@@ -613,7 +613,7 @@ inline void po4ao::setupConfig()
                 false,
                 "string",
                 "Name of the model filtering matrix file." );
-                
+
     config.add( "parameters.reloadEngine",
                 "",
                 "parameters.reloadEngine",
@@ -670,8 +670,8 @@ inline int po4ao::appStartup()
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
     createStandardIndiToggleSw( m_indiP_reloadToggle, "reload_engine");
-	registerIndiPropertyNew( m_indiP_reloadToggle, INDI_NEWCALLBACK(m_indiP_reloadToggle) ); 
-  
+	registerIndiPropertyNew( m_indiP_reloadToggle, INDI_NEWCALLBACK(m_indiP_reloadToggle) );
+
     std::string full_filepath = engineDirs + "/" + engineName;
     std::cout << "file: " << full_filepath << std::endl;
 
@@ -874,7 +874,7 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
 
 
         cudaMemcpy(m_output, d_output, outputSize * sizeof(float), cudaMemcpyDeviceToHost);
-        
+
     }
     else {
         // Run with integrator
@@ -885,7 +885,7 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
         memcpy(m_output, integrator_commands, outputSize * sizeof(float));
     }
 
-   
+
     //reconstructed_buffer->add(m_output);
     if(frame_counter % iterations_per_ep == 0){
         std::cout << "Done with episode " << episode_counter << std::endl;
@@ -894,7 +894,7 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
     }
 
     if(engineReloaded){
-        switch_engine();  
+        switch_engine();
     }
     // Send control commands to the correct stream
     //send_to_shmim();
@@ -911,7 +911,7 @@ INDI_NEWCALLBACK_DEFN(po4ao, m_indiP_reloadToggle )(const pcf::IndiProperty &ipR
       log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
    }
-   
+
    //switch is toggled to on
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
@@ -920,7 +920,7 @@ INDI_NEWCALLBACK_DEFN(po4ao, m_indiP_reloadToggle )(const pcf::IndiProperty &ipR
         reload_engine();
         engineReloaded = true;
 	    updateSwitchIfChanged(m_indiP_reloadToggle, "toggle", pcf::IndiElement::Off, INDI_BUSY);
-        
+
         return 0;
    }
 
@@ -930,7 +930,7 @@ INDI_NEWCALLBACK_DEFN(po4ao, m_indiP_reloadToggle )(const pcf::IndiProperty &ipR
       std::cout << "No new model" << std::endl;
       return 0;
    }
-   
+
    return 0;
 }
 

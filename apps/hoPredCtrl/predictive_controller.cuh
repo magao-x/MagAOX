@@ -32,7 +32,7 @@ class PredictiveController{
 		 		// contains the new wfs measurement in modal space
 		Matrix* m_exploration_signal;
 		Matrix* m_command;
-		Matrix* m_voltages;	
+		Matrix* m_voltages;
 		Matrix* m_interaction_matrix;
 		Matrix* m_mode_mapping_matrix;
 
@@ -43,9 +43,9 @@ class PredictiveController{
 	public:
 
 		DistributedAutoRegressiveController* controller;
-		
+
 		Matrix* m_measurement;
-		
+
 		PredictiveController(int num_history, int num_future, int num_modes, int num_measurements, float gamma, float lambda, float P0, int num_actuators);
 		~PredictiveController();
 
@@ -54,10 +54,10 @@ class PredictiveController{
 		void reset_controller(){controller->reset_controller();};
 		void update_predictor(){controller->update_predictor();};
 		void update_controller(){controller->update_controller();};
-		
+
 		// This function should reset the buffers and set the current control command to zero.
 		void set_zero();
-		
+
 		// Training signal
 		void get_next_exploration_signal();
 		void create_exploration_buffer(float rms, int exploration_buffer_size);
@@ -65,7 +65,7 @@ class PredictiveController{
 		// New wrapper functions
 		void set_new_regularization(float new_lambda);
 		void set_new_gamma(float new_gamma);
-		
+
 		void set_interaction_matrix(float* interaction_matrix);
 		void set_mapping_matrix(float* mapping_matrix);
 		void add_measurement(float* new_wfs_measurement);
@@ -73,7 +73,7 @@ class PredictiveController{
 
 		void save_state(std::string path);
 		void load_state(std::string path, std::string timestamp);
-		
+
 };
 
 

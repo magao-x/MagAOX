@@ -24,13 +24,17 @@ apps_common = \
 
 apps_aoc = \
 	trippLitePDU \
+	xt1121Ctrl \
+	xt1121DCDU \
 	tcsInterface \
 	adcTracker \
 	hwpTracker \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
-	stateRuleEngine
+	stateRuleEngine \
+	xInstGraph
+
 pythonapps_aoc = \
 	audibleAlerts
 
@@ -41,6 +45,7 @@ apps_rtcicc = \
 	baslerCtrl \
     bmcCtrl \
 	flipperCtrl \
+	flowRPM \
     hsfwCtrl \
     rhusbMon \
 	cacaoInterface \
@@ -60,6 +65,7 @@ apps_rtc = \
 	alpaoCtrl \
 	ocam2KCtrl \
 	andorCtrl \
+	cred2Ctrl \
 	siglentSDG \
 	ttmModulator \
 	pi335Ctrl \
@@ -83,13 +89,14 @@ apps_icc = \
 	filterWheelCtrl \
 	smc100ccCtrl \
 	usbtempMon \
-	xt1121Ctrl \
-	xt1121DCDU \
+	flowRPM \
 	koolanceCtrl \
 	corAlign \
 	adcCtrl \
 	picamCtrl \
-	pvcamCtrl
+	pvcamCtrl \
+	zaberLowLevelBinary
+
 pythonapps_icc = \
 	adcCtrl \
 	visxCtrl
@@ -104,7 +111,9 @@ apps_tic = \
 	baslerCtrl \
 	bmcCtrl \
 	trippLitePDU \
-	rhusbMon
+	rhusbMon \
+	dmSpeckle
+
 
 # Apps with simulator mode
 apps_sim = \
@@ -121,6 +130,7 @@ all_buildable_apps = \
 	dmSpeckle \
 	filterWheelCtrl \
 	flipperCtrl \
+	flowRPM \
 	hwpTracker \
 	indiTSAccumulator \
 	koolanceCtrl \
@@ -164,11 +174,20 @@ all_buildable_apps = \
 	zaberCtrl \
 	zaberLowLevel
 
+# EDT-backed camera controllers remain in the generic ALL_APPS coverage build
+# only when the SDK headers are present locally. Otherwise they are covered
+# through their unit-test harnesses instead of direct app-binary builds.
+ifneq ($(wildcard /opt/EDTpdv/edtinc.h),)
+all_buildable_apps += \
+	cred2Ctrl
+endif
+
 libs_to_build = libtelnet
 
 apps_to_build = $(apps_basic)
 pythonapps_to_install = $(pythonapps_basic)
 
+has_cacao = 0
 ifeq ($(MAGAOX_ROLE),AOC)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_aoc)
@@ -178,17 +197,20 @@ else ifeq ($(MAGAOX_ROLE),ICC)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_icc)
   pythonapps_to_install += $(pythonapps_icc)
+  has_cacao = 1
 else ifeq ($(MAGAOX_ROLE),RTC)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_rtc)
   pythonapps_to_install += $(pythonapps_rtc)
+  has_cacao = 1
 else ifeq ($(findstring ACC,$(MAGAOX_ROLE)),ACC)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_acc)
 else ifeq ($(MAGAOX_ROLE),TIC)
   apps_to_build += $(apps_common)
   apps_to_build += $(apps_tic)
+  has_cacao = 1
 else ifeq ($(MAGAOX_ROLE),SS)
   apps_to_build += $(apps_sim)
 endif
@@ -224,7 +246,7 @@ else ifeq ($(findstring ACC,$(MAGAOX_ROLE)),ACC)
   guis_to_build =
 else ifeq ($(MAGAOX_ROLE),TIC)
   guis_to_build =
-else ifeq ($(MAGAOX_ROLE),container)
+else ifeq ($(MAGAOX_ROLE),headless)
   guis_to_build =
 else
   guis_to_build = $(all_guis)
@@ -246,7 +268,7 @@ else ifeq ($(findstring ACC,$(MAGAOX_ROLE)),ACC)
   rtimv_plugins_to_build =
 else ifeq ($(MAGAOX_ROLE),TIC)
   rtimv_plugins_to_build =
-else ifeq ($(MAGAOX_ROLE),container)
+else ifeq ($(MAGAOX_ROLE),headless)
   rtimv_plugins_to_build =
 else
   rtimv_plugins_to_build = $(all_rtimv_plugins)
@@ -256,6 +278,7 @@ utils_to_build = \
 	logdump \
 	logsurgeon \
 	cursesINDI \
+	shmimDelta \
 	xrif2fits \
 	xrif2shmim
 
@@ -273,25 +296,47 @@ scripts_to_install = \
 	git_check_all \
 	collect_camera_configs_for_darks \
 	shot_in_the_dark \
-	howfs_apply \
-	lowfs_switch \
 	write_magaox_pidfile \
 	mount_cgroups1_cpuset \
 	killIndiZombies \
 	xlog \
-	hoblockleaks \
 	inventory_files \
 	list_xfiles_by_semester \
-	loop_instrument_backup_sync
+	loop_instrument_backup_sync \
+	cyverse_replicate 
+
+ifeq ($(MAGAOX_ROLE),RTC)
+  scripts_to_install += cacao/RTC/cacao-startup
+  scripts_to_install += cacao/RTC/cacao-shutdown
+  scripts_to_install += cacao/RTC/tweeter-vispyr-rootdir-scripts/tweeter-pre-calib-apply
+  scripts_to_install += cacao/RTC/tweeter-vispyr-rootdir-scripts/tweeter-post-calib-apply
+  scripts_to_install += cacao/RTC/woofer-vispyr-rootdir-scripts/woofer-pre-calib-apply
+  scripts_to_install += cacao/RTC/woofer-vispyr-rootdir-scripts/woofer-post-calib-apply
+  scripts_to_install += cacao/hoblockleaks
+else ifeq ($(MAGAOX_ROLE),ICC)
+  scripts_to_install += cacao/ICC/cacao-startup
+  scripts_to_install += cacao/ICC/cacao-shutdown
+  scripts_to_install += cacao/ICC/ncpc-rootdir-scripts/pre-calib-apply
+  scripts_to_install += cacao/ICC/ncpc-rootdir-scripts/post-calib-apply
+  scripts_to_install += cacao/hoblockleaks
+  scripts_to_install += cacao/ICC/lowfs_switch
+  scripts_to_install += shift_ncpc
+else ifeq ($(MAGAOX_ROLE),TIC)
+  scripts_to_install += cacao/TIC/cacao-startup
+  scripts_to_install += cacao/TIC/cacao-shutdown
+  scripts_to_install += cacao/TIC/kilo-rootdir-scripts/pre-calib-apply
+  scripts_to_install += cacao/TIC/kilo-rootdir-scripts/post-calib-apply
+  scripts_to_install += cacao/hoblockleaks
+endif
 
 .PHONY: all
-all: indi_all libs_all flatlogs/bin/flatlogcodes apps_all guis_all utils_all
+all: indi_all libs_all flatlogs/bin/flatlogcodes apps_all guis_all rtimv_plugins_all utils_all
 
 .PHONY: basic
 basic: indi_all libs_all flatlogs/bin/flatlogcodes
 
 .PHONY: install
-install: indi_install libs_install pythonlibs_install apps_install pythonapps_install utils_install scripts_install rtscripts_install
+install: indi_install libs_install pythonlibs_install apps_install pythonapps_install guis_install rtimv_plugins_install utils_install scripts_install rtscripts_install
 
 #We clean just libMagAOX, and the apps, guis, and utils for normal devel work.
 .PHONY: clean
@@ -299,7 +344,7 @@ clean: libs_clean apps_clean pythonapps_clean guis_clean utils_clean tests_clean
 
 #Clean everything.
 .PHONY: all_clean
-all_clean: indi_clean libs_clean flatlogs_clean libs_clean apps_clean guis_clean utils_clean doc_clean tests_clean
+all_clean: indi_clean libs_clean flatlogs_clean libs_clean apps_clean guis_clean rtimv_plugins_clean utils_clean doc_clean tests_clean
 
 flatlogs/bin/flatlogcodes: flatlogs/src/flatlogcodes.cpp
 	cd flatlogs/src/ && ${MAKE} install
@@ -433,7 +478,9 @@ rtimv_plugins_clean:
 scripts_install:
 	for script in ${scripts_to_install}; do \
 		sudo -H install -d /opt/MagAOX/bin && \
-		sudo -H install scripts/$$script /opt/MagAOX/bin  && \
+		sudo -H install scripts/$$script /opt/MagAOX/bin ; \
+	done
+	for script in $(notdir ${scripts_to_install}); do \
 		sudo -H ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
 	done
 
@@ -476,6 +523,7 @@ test: tests_clean
 .PHONY: tests_clean
 tests_clean:
 	cd tests && ${MAKE} clean || exit 1;
+	cd libMagAOX/logger/tests && ${MAKE} clean || exit 1;
 
 .PHONY: doc
 doc:
@@ -502,7 +550,7 @@ print_role:
 	@echo "MAGAOX_ROLE=$(MAGAOX_ROLE)"
 
 .PHONY: coverage
-coverage:
+coverage: coverage_clean
 	${MAKE} all COVERAGE=1 ALL_APPS=1 NO_GUIS=1
 
 .PHONY: coverage_clean
@@ -511,6 +559,8 @@ coverage_clean:
 	find . -name '*.gcda' -delete
 	find . -name '*.gcov' -delete
 	${MAKE} all_clean COVERAGE=1 ALL_APPS=1
+	cd tests && ${MAKE} realclean COVERAGE=1 || exit 1;
+	cd libMagAOX/logger/tests && ${MAKE} really_clean COVERAGE=1 || exit 1;
 
 .PHONY: valgrind
 valgrind:

@@ -63,7 +63,7 @@ def collect_camera_settings(semester, night, camname, check_only_n=None, progres
                             value = 1
                     camera_settings.append((cleaned_key, value))
             camera_settings.sort()
-        
+
         camera_settings = tuple(camera_settings)
         if was_shut:
             shut_shutter_settings[camera_settings] += 1
@@ -120,7 +120,7 @@ def main(args):
     log.info(pformat(invalid_config))
     for config_kind, outfile_path in ((needed_darks, 'needed_darks.json'), (have_darks, 'have_darks.json')):
         with open(outfile_path, 'wb') as fh:
-            darks_dict = make_settings_jsonable(config_kind)    
+            darks_dict = make_settings_jsonable(config_kind)
             darks_out = orjson.dumps(darks_dict, option=orjson.OPT_INDENT_2)
             fh.write(darks_out)
         log.info(f"Wrote configurations to {outfile_path}")

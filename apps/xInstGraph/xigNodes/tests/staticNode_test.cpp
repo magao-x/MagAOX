@@ -1,5 +1,11 @@
-// #define CATCH_CONFIG_MAIN
-#include "../../../../tests/catch2/catch.hpp"
+/** \file staticNode_test.cpp
+ * \brief Catch2 tests for the xInstGraph `staticNode` helper.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup xInstGraph_files
+ */
+
+#include "../../../../tests/testXWC.hpp"
 
 #include <fstream>
 
@@ -7,6 +13,21 @@
 
 #define XWC_XIGNODE_TEST
 #include "../staticNode.hpp"
+
+namespace libXWCTest
+{
+
+/** \addtogroup xInstGraph_unit_test
+ * \brief Additional unit tests for the xInstGraph application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `xInstGraph` node unit tests.
+/** \ingroup xInstGraph_unit_test
+ */
+namespace xInstGraphTest
+{
 
 void writeXML()
 {
@@ -22,10 +43,14 @@ void writeXML()
     fout << "                   <mxCell id=\"input:ttmpupil:in2\" parent=\"node:ttmpupil\" style=\"fontSize=17;\" />\n";
     fout << "                   <mxCell id=\"input:ttmpupil:in3\" parent=\"node:ttmpupil\" style=\"fontSize=17;\" />\n";
     fout << "                   <mxCell id=\"input:ttmpupil:in4\" parent=\"node:ttmpupil\" style=\"fontSize=17;\" />\n";
-    fout << "                   <mxCell id=\"output:ttmpupil:out1\" parent=\"node:ttmpupil\" style=\"fontSize=17;\" />\n";
-    fout << "                   <mxCell id=\"output:ttmpupil:out2\" parent=\"node:ttmpupil\" style=\"fontSize=17;\" />\n";
-    fout << "                   <mxCell id=\"output:ttmpupil:out3\" parent=\"node:ttmpupil\" style=\"fontSize=17;\" />\n";
-    fout << "                   <mxCell id=\"output:ttmpupil:out4\" parent=\"node:ttmpupil\" style=\"fontSize=17;\" />\n";
+    fout << "                   <mxCell id=\"output:ttmpupil:out1\" parent=\"node:ttmpupil\" style=\"fontSize=17;\" "
+            "/>\n";
+    fout << "                   <mxCell id=\"output:ttmpupil:out2\" parent=\"node:ttmpupil\" style=\"fontSize=17;\" "
+            "/>\n";
+    fout << "                   <mxCell id=\"output:ttmpupil:out3\" parent=\"node:ttmpupil\" style=\"fontSize=17;\" "
+            "/>\n";
+    fout << "                   <mxCell id=\"output:ttmpupil:out4\" parent=\"node:ttmpupil\" style=\"fontSize=17;\" "
+            "/>\n";
     fout << "            </root>\n";
     fout << "       </mxGraphModel>\n";
     fout << "   </diagram>\n";
@@ -35,12 +60,19 @@ void writeXML()
 
 TEST_CASE( "Creating and configuring an staticNode", "[instGraph::staticNode]" )
 {
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    staticNode::loadConfig( *(mx::app::appConfigurator *)nullptr );
+    staticNode::inputsOn();
+    #endif
+    // clang-format on
+
     SECTION( "node is in file, setting pwr key" )
     {
         ingr::instGraphXML parentGraph;
         writeXML();
         mx::app::writeConfigFile( "/tmp/staticNode_test.conf",
-                                  { "ttmpupil", "ttmpupil","ttmpupil","ttmpupil","ttmpupil" },
+                                  { "ttmpupil", "ttmpupil", "ttmpupil", "ttmpupil", "ttmpupil" },
                                   { "type", "inputsOn", "inputsOff", "outputsOn", "outputsOff" },
                                   { "static", "in1,in2", "in3,in4", "out1,out2", "out3,out4" } );
         mx::app::appConfigurator config;
@@ -99,3 +131,7 @@ TEST_CASE( "Creating and configuring an staticNode", "[instGraph::staticNode]" )
         REQUIRE( tsn->outputsOff().count( "out4" ) == 1 );
     }
 }
+
+} // namespace xInstGraphTest
+
+} // namespace libXWCTest

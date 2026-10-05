@@ -55,14 +55,13 @@ class hwpTracker : public MagAOXApp<true>, public dev::telemeter<hwpTracker>
 
     float m_hwpTrackingOffset{ 0 }; ///< HWP tracking offset
 
-
     float m_hwpSetPos{ 0 };
 
-    std::string m_hwpPosName{ "" };
+    float m_hwpCurPos{ 0 };
 
     float m_hwpActualPos{ 0 };
 
-    float m_hwpStagePos{ 0 };
+    std::string m_hwpPosName{ "" };
 
     float m_zero{ 360 }; ///< The zero point of the HWP stage.
 
@@ -142,12 +141,20 @@ class hwpTracker : public MagAOXApp<true>, public dev::telemeter<hwpTracker>
 
     pcf::IndiProperty m_indiP_hwpStagePos;
 
+    pcf::IndiProperty m_indiP_stagePolRot;
+
+    pcf::IndiProperty m_indiP_stagePolRotFsm;
+
   public:
     INDI_NEWCALLBACK_DECL( hwpTracker, m_indiP_tracking );
 
     INDI_NEWCALLBACK_DECL( hwpTracker, m_indiP_hwpSetPos );
 
     INDI_SETCALLBACK_DECL( hwpTracker, m_indiP_teldata );
+
+    INDI_SETCALLBACK_DECL( hwpTracker, m_indiP_stagePolRot );
+
+    INDI_SETCALLBACK_DECL( hwpTracker, m_indiP_stagePolRotFsm );
 
     ///@}
 
@@ -263,6 +270,10 @@ int hwpTracker::appStartup()
 
     REG_INDI_SETPROP( m_indiP_teldata, m_tcsDevName, "teldata" );
 
+    REG_INDI_SETPROP( m_indiP_stagePolRot, m_devName, "position" );
+
+    REG_INDI_SETPROP( m_indiP_stagePolRotFsm, m_devName, "fsm" );
+
     createStandardIndiNumber<float>(
         m_indiP_hwpSetPos, "hwp_position", -360.0, 360.0, 1e-3, "%.03f", "HWP Set Position", "HWP Status" );
     registerIndiPropertyNew( m_indiP_hwpSetPos, INDI_NEWCALLBACK( m_indiP_hwpSetPos ) );
@@ -328,13 +339,13 @@ int hwpTracker::appShutdown()
 std::string hwpTracker::getHwpStatus()
 {
     float tol = 0.5; // degrees
-    if( fabs( m_hwpSetPos - 0 ) < tol )
+    if( fabs( m_hwpCurPos - 0 ) < tol )
         return "Qplus";
-    else if( fabs( m_hwpSetPos - 45 ) < tol )
+    else if( fabs( m_hwpCurPos - 45 ) < tol )
         return "Qminus";
-    else if( fabs( m_hwpSetPos - 22.5 ) < tol )
+    else if( fabs( m_hwpCurPos - 22.5 ) < tol )
         return "Uplus";
-    else if( fabs( m_hwpSetPos - 67.5 ) < tol )
+    else if( fabs( m_hwpCurPos - 67.5 ) < tol )
         return "Uminus";
     else
         return "Unknown";
@@ -348,21 +359,15 @@ void hwpTracker::getHwpTrackingOffset()
 
 void hwpTracker::updateHwpPos()
 {
-    m_hwpActualPos = m_hwpSetPos + m_hwpTrackingOffset;
+    float hwpActualPos = m_hwpSetPos + m_hwpTrackingOffset;
 
-    m_hwpStagePos = m_zero + m_sign * m_hwpActualPos;
+    float hwpStagePos = m_zero + m_sign * hwpActualPos;
 
-    std::cerr << "HWP set to: " << m_hwpActualPos << "\n";
-    std::cerr << "Sending HWP stage to: " << m_hwpStagePos << "\n";
-    log<text_log>( "HWP set to: " + std::to_string( m_hwpActualPos ) );
+    std::cerr << "HWP set to: " << hwpActualPos << "\n";
+    std::cerr << "Sending HWP stage to: " << hwpStagePos << "\n";
+    log<text_log>( "HWP set to: " + std::to_string( hwpActualPos ) );
 
-    updatesIfChanged<float>( m_indiP_hwpActualPos, { "value" }, { m_hwpActualPos } );
-
-    m_hwpPosName = getHwpStatus();
-
-    updatesIfChanged<std::string>( m_indiP_hwpPosName, { "value" }, { m_hwpPosName } );
-
-    m_indiP_hwpStagePos["target"] = m_hwpStagePos;
+    m_indiP_hwpStagePos["target"] = hwpStagePos;
     sendNewProperty( m_indiP_hwpStagePos );
 
     recordPolTrack();
@@ -384,7 +389,7 @@ INDI_NEWCALLBACK_DEFN( hwpTracker, m_indiP_hwpSetPos )( const pcf::IndiProperty 
 
     m_hwpSetPos = ipRecv["target"].get<float>();
 
-    updatesIfChanged<float>( m_indiP_hwpSetPos, { "current", "target" }, { m_hwpSetPos, m_hwpSetPos } );
+    updateIfChanged<float>(m_indiP_hwpSetPos, "target", m_hwpSetPos);
 
     updateHwpPos();
 
@@ -415,7 +420,7 @@ INDI_NEWCALLBACK_DEFN( hwpTracker, m_indiP_tracking )( const pcf::IndiProperty &
 
         getHwpTrackingOffset();
 
-        updatesIfChanged<float>( m_indiP_hwpTrackingOffset, { "value" }, { m_hwpTrackingOffset } );
+        updateIfChanged<float>( m_indiP_hwpTrackingOffset, "value", m_hwpTrackingOffset );
 
         updateHwpPos();
 
@@ -429,7 +434,7 @@ INDI_NEWCALLBACK_DEFN( hwpTracker, m_indiP_tracking )( const pcf::IndiProperty &
 
         m_hwpTrackingOffset = 0;
 
-        updatesIfChanged<float>( m_indiP_hwpTrackingOffset, { "value" }, { m_hwpTrackingOffset } );
+        updateIfChanged<float>( m_indiP_hwpTrackingOffset, "value", m_hwpTrackingOffset );
 
         updateHwpPos();
 
@@ -464,6 +469,64 @@ INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_teldata )( const pcf::IndiProperty &i
     return 0;
 }
 
+INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_stagePolRot )( const pcf::IndiProperty &ipRecv )
+{
+
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stagePolRot, ipRecv );
+
+    if( ipRecv.getName() != m_indiP_stagePolRot.getName() )
+    {
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
+
+        return -1;
+    }
+
+    if( !ipRecv.find( "current" ) )
+        return 0;
+
+    float hwpStagePos = ipRecv["current"].get<float>();
+
+    m_hwpActualPos = m_sign * (hwpStagePos - m_zero);
+    if (fabs(m_hwpActualPos) < 1e-2)
+        m_hwpActualPos = 0;
+    updateIfChanged<float>(m_indiP_hwpActualPos, "value", m_hwpActualPos);
+
+    m_hwpCurPos = m_hwpActualPos - m_hwpTrackingOffset;
+    // round to two decimal points
+    m_hwpCurPos = std::round(m_hwpCurPos * 100) / 100;
+    updateIfChanged<float>(m_indiP_hwpSetPos, "current", m_hwpCurPos);
+
+    m_hwpPosName = getHwpStatus();
+
+    updateIfChanged<std::string>( m_indiP_hwpPosName, "value", m_hwpPosName );
+
+    recordPolTrack();
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_stagePolRotFsm )( const pcf::IndiProperty &ipRecv )
+{
+
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stagePolRotFsm, ipRecv );
+
+    if( ipRecv.getName() != m_indiP_stagePolRotFsm.getName() )
+    {
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
+
+        return -1;
+    }
+
+    if( !ipRecv.find( "state" ) )
+        return 0;
+
+    std::string stagepolrot_state = ipRecv["state"].get<std::string>();
+
+    state(stateCodes::str2CodeFast(stagepolrot_state));
+
+    return 0;
+}
+
 int hwpTracker::checkRecordTimes()
 {
     return telemeterT::checkRecordTimes( telem_poltrack() );
@@ -484,11 +547,11 @@ int hwpTracker::recordPolTrack( bool force )
 
     static bool tracking = false;
 
-    if( m_hwpSetPos != hwpSetPos || m_hwpActualPos != hwpActualPos || hwpPosName != m_hwpPosName || tracking != m_tracking || force )
+    if( m_hwpCurPos != hwpSetPos || m_hwpActualPos != hwpActualPos || hwpPosName != m_hwpPosName || tracking != m_tracking || force )
     {
-        telem<telem_poltrack>( { m_hwpSetPos, m_hwpActualPos, m_hwpPosName, m_tracking} );
+        telem<telem_poltrack>( { m_hwpCurPos, m_hwpActualPos, m_hwpPosName, m_tracking} );
 
-        hwpSetPos    = m_hwpSetPos;
+        hwpSetPos    = m_hwpCurPos;
         hwpActualPos = m_hwpActualPos;
         hwpPosName   = m_hwpPosName;
         tracking     = m_tracking;

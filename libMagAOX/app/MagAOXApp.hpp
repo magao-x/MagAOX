@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -83,17 +84,27 @@ namespace XWCTEST_NAMESPACE
  * The following figure illustrates the facilities provided by a typical app.
  *
  * \image html xwcapp.png "Block diagram of a typical XWCApp. Note that ImageStreamIO (ISIO) is not included by default,
- but there are several ways to interface with 'image streams' provided in XWCTk.  Many different hardware device
- interfaces are similarly provided."
+ * but there are several ways to interface with 'image streams' provided in XWCTk.  Many different hardware device
+ * interfaces are similarly provided."
  *
  * The following figure illustrates the logic of the XWCApp finite state machine (FSM).
  *
  * \image html xwcapp_fsm.png "The XWCApp FSM. The blue sequence highlights the normal 'appLogic' loop."
-
  *
  *
+ * Many XWCApps can be connected across many computers.  Inter-process communication can be conducted with
+ * INDI or ISIO.
  *
-*/
+ * \image html xwcapps_connections.png "Connecting XWCApps across several machines, controlling various hardware"
+ * width=1200
+ *
+ * XWCApps are designed to be part of control loops. In the following diagram a camera at the focal plane of a
+ * coronagraph is used as the wavefront sensor.  An XWCApp reads out the images and publishes them to shared memory with
+ * ISIO. Loop process, which may themselves be XWCApps or, e.g., CACAO processes, perform loop calculations. Finally,
+ * the deformable mirror controller sends the resultant command to the hardware device.
+ *
+ * \image html xwcapp_loops.png "XWCApps controlling hardware in a control loop." width=1200
+ */
 
 /// The base-class for XWCTk applications.
 /**
@@ -426,7 +437,9 @@ class MagAOXApp : public application
         void elevate()
         {
             if( m_elevated )
+            {
                 return;
+            }
 
             m_app->setEuidCalled();
             m_elevated = true;
@@ -435,7 +448,9 @@ class MagAOXApp : public application
         void restore()
         {
             if( !m_elevated )
+            {
                 return;
+            }
 
             m_app->setEuidReal();
             m_elevated = false;
@@ -639,6 +654,13 @@ class MagAOXApp : public application
     /// Mutex for locking INDI communications.
     std::mutex m_indiMutex;
 
+    /// Mutex for locking INDI callback maps and per-entry callback state.
+    /** Lock ordering policy:
+      * 1) Prefer never holding both m_indiMutex and m_indiCallBackMutex at the same time.
+      * 2) If both are required in future code, always acquire m_indiMutex before m_indiCallBackMutex.
+      */
+    std::mutex m_indiCallBackMutex;
+
   protected:
     /// Structure to hold the call-back details for handling INDI communications.
     struct indiCallBack
@@ -649,6 +671,16 @@ class MagAOXApp : public application
 
         bool m_defReceived{ false }; /**< Flag indicating that a DefProperty has been received
                                           after a GetProperty.*/
+
+        uint32_t m_retryCount{ 0 }; ///< Number of GetProperties retries sent while waiting for a matching Def/Set.
+
+        std::chrono::steady_clock::duration m_retryDelay{
+            std::chrono::steady_clock::duration::zero() }; ///< Current retry delay for this unresolved subscription.
+
+        std::chrono::steady_clock::time_point m_nextRetry{
+            std::chrono::steady_clock::time_point::min() }; ///< Earliest instant when the next retry may be sent.
+
+        bool m_missingLogged{ false }; ///< Tracks whether a long-unresolved notice has already been logged.
     };
 
   public:
@@ -898,6 +930,21 @@ class MagAOXApp : public application
         int ( * )( void *, const pcf::IndiProperty & ) ///< [in] the callback for processing the property change
     );
 
+    /// Reset retry tracking for a monitored INDI Set-property subscription.
+    void resetIndiSetPropertyRetry( indiCallBack &callBack /**< [in/out] the subscription retry state to reset */ );
+
+    /// Determine whether an unresolved Set-property subscription should be requested now.
+    bool indiSetPropertyShouldRequest(
+        const indiCallBack &callBack, /**< [in] the subscription retry state to evaluate */
+        bool all, /**< [in] if true, force an immediate refresh regardless of retry timing */
+        const std::chrono::steady_clock::time_point &now /**< [in] the current monotonic time for scheduling */
+    ) const;
+
+    /// Update retry tracking after sending a GetProperties request for a monitored Set-property.
+    void noteIndiSetPropertyRequested( indiCallBack &callBack, /**< [in/out] the subscription retry state to update */
+                                       const std::chrono::steady_clock::time_point &now /**< [in] the current monotonic
+                                                                                             time for scheduling */ );
+
   protected:
     /// Create the INDI FIFOs
     /** Changes permissions to max available and creates the
@@ -1101,6 +1148,50 @@ class MagAOXApp : public application
     int newCallBack_clearFSMAlert( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
                                                                              the new property request.*/ );
 
+    /// Indi property to request rotation of the process log file. The new file is created with the next log entry.
+    pcf::IndiProperty m_indiP_rotateLogs;
+
+    /// The static callback function to be registered for requesting log file rotation
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    static int st_newCallBack_rotateLogs( void *app,                      /**< [in] a pointer to this, will be
+                                                                                    static_cast-ed to MagAOXApp. */
+                                          const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                                    the new property request. */
+    );
+
+    /// The callback called by the static version, to actually process the log rotation request.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_rotateLogs( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                          the new property request.*/ );
+
+    /// indi Property to report and update the process log file time interval, in minutes.
+    pcf::IndiProperty m_indiP_maxLogTime;
+
+    /// The static callback function to be registered for setting the log file time interval
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    static int st_newCallBack_maxLogTime( void *app,                      /**< [in] a pointer to this, will be
+                                                                                    static_cast-ed to MagAOXApp. */
+                                          const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                                    the new property request. */
+    );
+
+    /// The callback called by the static version, to actually process the log interval change.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_maxLogTime( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                          the new property request.*/ );
+
     ///@} --INDI Interface
 
     /** \name Power Management
@@ -1126,7 +1217,7 @@ class MagAOXApp : public application
     std::string m_powerElement{ "state" }; ///< The INDI element name to monitor for this device's power state.
     std::string m_powerTargetElement{ "target" }; ///< The INDI element name to monitor for this device's power state.
 
-    unsigned long m_powerOnWait{ 0 }; ///< Time in sec to wait for device to boot after power on.
+    unsigned long m_powerOnWait{ 55 }; ///< Default time in sec to wait for device to boot after power on.
 
     /* Power on waiting counter . . . */
     int m_powerOnCounter{ -1 }; ///< Counts numer of loops after power on, implements delay for device bootup.  If -1,
@@ -1434,7 +1525,20 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
     createStandardIndiRequestSw( m_indiP_clearFSMAlert, "fsm_clear_alert", "Clear FSM Alert", "FSM" );
     if( registerIndiPropertyNew( m_indiP_clearFSMAlert, st_newCallBack_clearFSMAlert ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "failed to register new fsm_alert property" } );
+        log<software_error>( { __FILE__, __LINE__, "Failed to register new fsm_alert property" } );
+    }
+
+    createStandardIndiRequestSw( m_indiP_rotateLogs, "logs_rotate", "New Log File", "Logging" );
+    if( registerIndiPropertyNew( m_indiP_rotateLogs, st_newCallBack_rotateLogs ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "Failed to register new logs_rotate property" } );
+    }
+
+    createStandardIndiNumber<unsigned>(
+        m_indiP_maxLogTime, "logs_maxtime", 0, MAGAOX_max_maxLogTime, 1, "", "Max Log Interval [minutes]", "Logging" );
+    if( registerIndiPropertyNew( m_indiP_maxLogTime, st_newCallBack_maxLogTime ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "Failed to register new logs_maxtime property" } );
     }
 
     return;
@@ -1452,7 +1556,9 @@ void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
                 "",
                 false,
                 "bool",
-                "Validate the configuration.  App will exit after loading the configuration, but before entering the event loop. Errors from configuratin processing will be shown. Always safe to run." );
+                "Validate the configuration.  App will exit after loading the configuration, but before "
+                "entering the event loop. Errors from configuration processing will be shown. "
+                "Always safe to run." );
 
     // App stuff
     config.add( "loopPause",
@@ -1555,7 +1661,21 @@ void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
 
     //---------- Setup the logger ----------//
     m_log.logName( m_configName );
-    m_log.loadConfig( config );
+    // An invalid setting is not applied and the default is used instead
+    std::string logConfigErr;
+    if( m_log.loadConfig( config, &logConfigErr ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, logConfigErr } );
+    }
+
+    // Set the INDI property to the configured interval.
+    // The elements are created by setDefaults, which is not called in all contexts (e.g. unit tests),
+    // so check before assigning.
+    if( m_indiP_maxLogTime.find( "current" ) && m_indiP_maxLogTime.find( "target" ) )
+    {
+        m_indiP_maxLogTime["current"] = m_log.maxLogTime();
+        m_indiP_maxLogTime["target"]  = m_log.maxLogTime();
+    }
 
     //--------- Loop Pause Time --------//
     config( m_loopPause, "loopPause" );
@@ -1572,8 +1692,12 @@ void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
         {
             log<text_log>( "enabling power management: " + m_powerDevice + "." + m_powerChannel + "." + m_powerElement +
                            "/" + m_powerTargetElement );
+
             if( registerIndiPropertySet(
-                    m_indiP_powerChannel, m_powerDevice, m_powerChannel, INDI_SETCALLBACK( m_indiP_powerChannel ) ) <
+                    m_indiP_powerChannel,
+                    m_powerDevice,
+                    m_powerChannel,
+                    INDI_SETCALLBACK( m_indiP_powerChannel ) ) <
                 0 )
             {
                 log<software_error>( { __FILE__, __LINE__, "failed to register set property" } );
@@ -2028,7 +2152,7 @@ template <bool _useINDI>
 template <typename logT, int retval>
 int MagAOXApp<_useINDI>::log( logPrioT level )
 {
-    m_log.template log<logT>( level );
+    m_log.template log<logT>( typename logT::messageT(), level );
     return retval;
 }
 
@@ -2038,7 +2162,7 @@ void MagAOXApp<_useINDI>::logMessage( bufferPtrT &b )
     if( logHeader::logLevel( b ) <= logPrio::LOG_NOTICE )
     {
         logStdFormat( std::cerr, b );
-        std::cerr << "\n";
+        std::cerr << '\n';
     }
 
     if( logHeader::logLevel( b ) < logPrio::LOG_ERROR )
@@ -2070,8 +2194,7 @@ void MagAOXApp<_useINDI>::logMessage( bufferPtrT &b )
         }
         catch( const std::exception &e )
         {
-            log<software_error>(
-                { __FILE__, __LINE__, std::string( "exception caught from sendMessage: " ) + e.what() } );
+            log<software_error>( { std::string( "exception caught from sendMessage: " ) + e.what() } );
         }
     }
 }
@@ -2202,10 +2325,7 @@ int MagAOXApp<_useINDI>::setEuidCalled()
     errno = 0;
     if( sys::th_seteuid( m_euidCalled ) < 0 )
     {
-        log<software_error>( { __FILE__,
-                               __LINE__,
-                               errno,
-                               0,
+        log<software_error>( { errno,
                                std::format( "Setting effective user id to "
                                             "euidCalled ({}) failed.  "
                                             "Errno says: {}",
@@ -2223,10 +2343,7 @@ int MagAOXApp<_useINDI>::setEuidReal()
     errno = 0;
     if( sys::th_seteuid( m_euidReal ) < 0 )
     {
-        log<software_error>( { __FILE__,
-                               __LINE__,
-                               errno,
-                               0,
+        log<software_error>( { errno,
                                std::format( "Setting effective user id to "
                                             "euidReal ({}) failed.  "
                                             "Errno says: {}",
@@ -2941,6 +3058,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertyReadOnly( pcf::IndiProperty &prop )
 
     try
     {
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
         callBackInsertResult result = m_indiNewCallBacks.insert( callBackValueType( prop.createUniqueKey(), { &prop, nullptr } ) );
 
         if( !result.second )
@@ -2982,6 +3100,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertyReadOnly( pcf::IndiProperty &prop,
         prop.setPerm( propPerm );
         prop.setState( propState );
 
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
         callBackInsertResult result = m_indiNewCallBacks.insert( callBackValueType( propName, { &prop, nullptr } ) );
 
         if( !result.second )
@@ -3012,6 +3131,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertyNew( pcf::IndiProperty &prop,
 
     try
     {
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
         callBackInsertResult result =
             m_indiNewCallBacks.insert( callBackValueType( prop.createUniqueKey(), { &prop, callBack } ) );
 
@@ -3092,6 +3212,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertySet( pcf::IndiProperty &prop,
         prop.setDevice( devName );
         prop.setName( propName );
 
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
         callBackInsertResult result = m_indiSetCallBacks.insert( callBackValueType( prop.createUniqueKey(), { &prop, callBack } ) );
 
         if( !result.second )
@@ -3110,6 +3231,62 @@ int MagAOXApp<_useINDI>::registerIndiPropertySet( pcf::IndiProperty &prop,
     }
 
     return 0;
+}
+
+template <bool _useINDI>
+inline void MagAOXApp<_useINDI>::resetIndiSetPropertyRetry( indiCallBack &callBack )
+{
+    callBack.m_retryCount   = 0;
+    callBack.m_retryDelay   = std::chrono::steady_clock::duration::zero();
+    callBack.m_nextRetry    = std::chrono::steady_clock::time_point::min();
+    callBack.m_missingLogged = false;
+}
+
+template <bool _useINDI>
+inline bool MagAOXApp<_useINDI>::indiSetPropertyShouldRequest( const indiCallBack &callBack,
+                                                               bool all,
+                                                               const std::chrono::steady_clock::time_point &now ) const
+{
+    if( all )
+    {
+        return true;
+    }
+
+    if( callBack.m_defReceived )
+    {
+        return false;
+    }
+
+    return callBack.m_nextRetry == std::chrono::steady_clock::time_point::min() || now >= callBack.m_nextRetry;
+}
+
+template <bool _useINDI>
+inline void MagAOXApp<_useINDI>::noteIndiSetPropertyRequested( indiCallBack &callBack,
+                                                               const std::chrono::steady_clock::time_point &now )
+{
+    using namespace std::chrono;
+    constexpr seconds retryInitialDelay{ 1 };
+    constexpr seconds retryMaxDelay{ 60 };
+
+    if( callBack.m_retryDelay <= steady_clock::duration::zero() )
+    {
+        callBack.m_retryDelay = retryInitialDelay;
+    }
+    else
+    {
+        callBack.m_retryDelay = std::min( callBack.m_retryDelay * 2, steady_clock::duration( retryMaxDelay ) );
+    }
+
+    ++callBack.m_retryCount;
+    callBack.m_nextRetry = now + callBack.m_retryDelay;
+
+    if( callBack.m_retryDelay >= steady_clock::duration( retryMaxDelay ) && !callBack.m_missingLogged &&
+        callBack.property != nullptr )
+    {
+        log<text_log>( "INDI property still unresolved after retry backoff: " + callBack.property->createUniqueKey(),
+                       logPrio::LOG_NOTICE );
+        callBack.m_missingLogged = true;
+    }
 }
 
 template <bool _useINDI>
@@ -3238,56 +3415,85 @@ int MagAOXApp<_useINDI>::startINDI()
 template <bool _useINDI>
 void MagAOXApp<_useINDI>::sendGetPropertySetList( bool all )
 {
-    // Unless forced by all, we only do anything if allDefs are not received yet
-    if( !all && m_allDefsReceived )
-    {
-        return;
-    }
+    std::vector<pcf::IndiProperty *> propsToGet;
 
-    callBackIterator it = m_indiSetCallBacks.begin();
+    auto now = std::chrono::steady_clock::now();
 
-    int nowFalse = 0;
-    while( it != m_indiSetCallBacks.end() )
-    {
-        if( all || it->second.m_defReceived == false )
+    int unresolvedCount = 0;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
+
+        // Unless forced by all, we only do anything if allDefs are not received yet
+        if( !all && m_allDefsReceived )
         {
-            if( it->second.property )
+            return;
+        }
+
+        callBackIterator it = m_indiSetCallBacks.begin();
+
+        while( it != m_indiSetCallBacks.end() )
+        {
+            if( all )
             {
-                if(it->first != it->second.property->createUniqueKey())
+                if( it->second.property )
                 {
-                     std::cerr << it->first << " bad device\n";
-                     it->second.m_defReceived = true;
-                     ++it;
-                    continue;
+                    if( it->first != it->second.property->createUniqueKey() )
+                    {
+                        it->second.m_defReceived = true;
+                        resetIndiSetPropertyRetry( it->second );
+                         ++it;
+                        continue;
+                    }
+
+                    propsToGet.push_back( it->second.property );
                 }
 
-                try
+                it->second.m_defReceived = false;
+                resetIndiSetPropertyRetry( it->second );
+                ++unresolvedCount;
+            }
+            else if( it->second.m_defReceived == false )
+            {
+                ++unresolvedCount;
+
+                if( it->second.property )
                 {
-                    m_indiDriver->sendGetProperties( *( it->second.property ) );
-                }
-                catch( const std::exception &e )
-                {
-                    log<software_error>( { __FILE__,
-                                           __LINE__,
-                                           "exception caught from sendGetProperties for " +
-                                               it->second.property->getName() + ": " + e.what() } );
+                    if( it->first != it->second.property->createUniqueKey() )
+                    {
+                        it->second.m_defReceived = true;
+                        resetIndiSetPropertyRetry( it->second );
+                        --unresolvedCount;
+                        ++it;
+                        continue;
+                    }
+
+                    if( indiSetPropertyShouldRequest( it->second, false, now ) )
+                    {
+                        propsToGet.push_back( it->second.property );
+                        noteIndiSetPropertyRequested( it->second, now );
+                    }
                 }
             }
 
-            it->second.m_defReceived = false;
-            ++nowFalse;
+            ++it;
         }
-        ++it;
-    }
 
-    if( nowFalse != 0 )
-    {
-        m_allDefsReceived = false;
-    }
+        m_allDefsReceived = ( unresolvedCount == 0 );
+    } //mutex scope
 
-    if( nowFalse == 0 )
+    for( auto * prop : propsToGet )
     {
-        m_allDefsReceived = true;
+        try
+        {
+            m_indiDriver->sendGetProperties( *prop );
+        }
+        catch( const std::exception &e )
+        {
+            log<software_error>( { __FILE__,
+                                   __LINE__,
+                                   "exception caught from sendGetProperties for " + prop->getName() + ": " + e.what() } );
+        }
     }
 }
 
@@ -3319,25 +3525,34 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
     // Send all properties if requested.
     if( !ipRecv.hasValidName() )
     {
-        callBackIterator it = m_indiNewCallBacks.begin();
+        std::vector<pcf::IndiProperty *> propsToSend;
 
-        while( it != m_indiNewCallBacks.end() )
-        {
-            if( it->second.property )
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
+            callBackIterator             it = m_indiNewCallBacks.begin();
+
+            while( it != m_indiNewCallBacks.end() )
             {
-                try
+                if( it->second.property )
                 {
-                    m_indiDriver->sendDefProperty( *( it->second.property ) );
+                    propsToSend.push_back( it->second.property );
                 }
-                catch( const std::exception &e )
-                {
-                    log<software_error>( { __FILE__,
-                                           __LINE__,
-                                           "exception caught from sendDefProperty for " +
-                                               it->second.property->getName() + ": " + e.what() } );
-                }
+                ++it;
             }
-            ++it;
+        } //mutex scope
+
+        for( auto * prop : propsToSend )
+        {
+            try
+            {
+                m_indiDriver->sendDefProperty( *prop );
+            }
+            catch( const std::exception &e )
+            {
+                log<software_error>( { __FILE__,
+                                       __LINE__,
+                                       "exception caught from sendDefProperty for " + prop->getName() + ": " + e.what() } );
+            }
         }
 
         // This is a possible INDI server restart, so we re-register for all notifications.
@@ -3346,26 +3561,30 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
         return;
     }
 
-    // Check if we actually have this.
-    if( m_indiNewCallBacks.count( ipRecv.createUniqueKey() ) == 0 )
+    pcf::IndiProperty * prop = nullptr;
     {
-        return;
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
+        auto                        it = m_indiNewCallBacks.find( ipRecv.createUniqueKey() );
+        if( it == m_indiNewCallBacks.end() )
+        {
+            return;
+        }
+
+        prop = it->second.property;
     }
 
     // Otherwise send just the requested property, if property is not null
-    if( m_indiNewCallBacks[ipRecv.createUniqueKey()].property )
+    if( prop )
     {
         try
         {
-            m_indiDriver->sendDefProperty( *( m_indiNewCallBacks[ipRecv.createUniqueKey()].property ) );
+            m_indiDriver->sendDefProperty( *prop );
         }
         catch( const std::exception &e )
         {
             log<software_error>( { __FILE__,
                                    __LINE__,
-                                   "exception caught from sendDefProperty for " +
-                                       m_indiNewCallBacks[ipRecv.createUniqueKey()].property->getName() + ": " +
-                                       e.what() } );
+                                   "exception caught from sendDefProperty for " + prop->getName() + ": " + e.what() } );
         }
     }
     return;
@@ -3379,17 +3598,24 @@ void MagAOXApp<_useINDI>::handleNewProperty( const pcf::IndiProperty &ipRecv )
     if( m_indiDriver == nullptr )
         return;
 
-    // Check if this is a valid name for us.
-    if( m_indiNewCallBacks.count( ipRecv.createUniqueKey() ) == 0 )
+    int ( *callBack )( void *, const pcf::IndiProperty & ) = nullptr;
     {
-        log<software_debug>( { __FILE__, __LINE__, "invalid NewProperty request for " + ipRecv.createUniqueKey() } );
-        return;
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
+        auto                        it = m_indiNewCallBacks.find( ipRecv.createUniqueKey() );
+        if( it == m_indiNewCallBacks.end() )
+        {
+            log<software_debug>( { __FILE__, __LINE__, "invalid NewProperty request for " + ipRecv.createUniqueKey() } );
+            return;
+        }
+
+        callBack = it->second.callBack;
     }
 
-    int ( *callBack )( void *, const pcf::IndiProperty & ) = m_indiNewCallBacks[ipRecv.createUniqueKey()].callBack;
-
     if( callBack )
+    {
         callBack( this, ipRecv );
+        return;
+    }
 
     log<software_debug>( { __FILE__, __LINE__, "NewProperty callback null for " + ipRecv.createUniqueKey() } );
 
@@ -3410,25 +3636,30 @@ void MagAOXApp<_useINDI>::handleSetProperty( const pcf::IndiProperty &ipRecv )
     }
 
     std::string key = ipRecv.createUniqueKey();
+    int ( *callBack )( void *, const pcf::IndiProperty & ) = nullptr;
 
-    // Check if this is valid
-    if( m_indiSetCallBacks.count( key ) > 0 )
-    {
-        m_indiSetCallBacks[key].m_defReceived = true; // record that we got this Def/Set
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
 
-        // And call the callback
-        int ( *callBack )( void *, const pcf::IndiProperty & ) = m_indiSetCallBacks[key].callBack;
-
-        if( callBack )
+        // Check if this is valid
+        auto it = m_indiSetCallBacks.find( key );
+        if( it != m_indiSetCallBacks.end() )
         {
-            callBack( this, ipRecv );
-        }
+            it->second.m_defReceived = true; // record that we got this Def/Set
+            resetIndiSetPropertyRetry( it->second );
+            callBack                 = it->second.callBack;
 
-        ///\todo log an error here because callBack should not be null
-    }
-    else
+            ///\todo log an error here because callBack should not be null
+        }
+        else
+        {
+            ///\todo log invalid SetProperty request.
+        }
+    } //mutex scope
+
+    if( callBack )
     {
-        ///\todo log invalid SetProperty request.
+        callBack( this, ipRecv );
     }
 
     return;
@@ -3709,6 +3940,89 @@ int MagAOXApp<_useINDI>::newCallBack_clearFSMAlert( const pcf::IndiProperty &ipR
 }
 
 template <bool _useINDI>
+int MagAOXApp<_useINDI>::st_newCallBack_rotateLogs( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<MagAOXApp<_useINDI> *>( app )->newCallBack_rotateLogs( ipRecv );
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::newCallBack_rotateLogs( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.createUniqueKey() != m_indiP_rotateLogs.createUniqueKey() )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "wrong indi property received" } );
+    }
+
+    if( ipRecv.find( "request" ) )
+    {
+        if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+        {
+            // This only sets a flag. The new file is created by the log thread on the next entry.
+            m_log.requestRotation();
+            updateSwitchIfChanged( m_indiP_rotateLogs, "request", pcf::IndiElement::Off, INDI_IDLE );
+        }
+    }
+
+    return 0;
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::st_newCallBack_maxLogTime( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<MagAOXApp<_useINDI> *>( app )->newCallBack_maxLogTime( ipRecv );
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::newCallBack_maxLogTime( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.createUniqueKey() != m_indiP_maxLogTime.createUniqueKey() )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "wrong indi property received" } );
+    }
+
+    // Parse the raw string, as the typed element accessor cannot detect invalid input
+    std::string str;
+    if( ipRecv.find( "target" ) )
+    {
+        str = ipRecv["target"].get();
+    }
+    else if( ipRecv.find( "current" ) )
+    {
+        str = ipRecv["current"].get();
+    }
+    else
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "no target or current element in INDI property" } );
+    }
+
+    unsigned target = 0;
+    if( m_log.parseMaxLogTime( target, str ) != mx::error_t::noerror )
+    {
+        log<software_error>( { __FILE__,
+                               __LINE__,
+                               "rejected log file interval \"" + str + "\": must be a number from 0 to " +
+                                   std::to_string( MAGAOX_max_maxLogTime ) } );
+
+        // Send back the unchanged value. The alert state ensures it is sent, as updateIfChanged only sends
+        // when the value or state changes.
+        updateIfChanged( m_indiP_maxLogTime, "target", m_log.maxLogTime(), INDI_ALERT );
+
+        return -1;
+    }
+
+    m_log.maxLogTime( target ); // cannot fail, as the range was checked by parseMaxLogTime
+
+    log<software_info>( { __FILE__, __LINE__, "Set log file interval to " + std::to_string( target ) + " minutes" } );
+
+    updateIfChanged( m_indiP_maxLogTime,
+                     std::vector<std::string>{ "current", "target" },
+                     std::vector<unsigned>{ target, target },
+                     INDI_IDLE );
+
+    return 0;
+}
+
+template <bool _useINDI>
 int MagAOXApp<_useINDI>::onPowerOff()
 {
     return 0;
@@ -3762,8 +4076,7 @@ int MagAOXApp<_useINDI>::powerStateTarget()
 }
 
 template <bool _useINDI>
-INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerChannel )
-( const pcf::IndiProperty &ipRecv )
+INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerChannel )( const pcf::IndiProperty &ipRecv )
 {
     std::string ps;
 

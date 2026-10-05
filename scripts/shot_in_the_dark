@@ -44,10 +44,10 @@ def take_darks(indi, camname, configuration, max_n_frames, max_dark_time_sec, dr
     # Make sure everything's off
     orig_exptime = indi[f"{camname}.exptime.current"]
     indi[f"{camname}.vshift_speed.1_2us"] = SwitchState.ON  # Default at startup, shouldn't be changed, but a possible TODO once it's available in headers
-    
+
     # Make sure it's dark
     indi[f"{camname}.shutter.toggle"] = SwitchState.ON
-    
+
     # ADC SPEED
     try:
         readout_speed_elem = ADCSPEEDS_TO_ELEMENTS[configuration['ADC SPEED']]
@@ -55,21 +55,21 @@ def take_darks(indi, camname, configuration, max_n_frames, max_dark_time_sec, dr
         log.error(f"No 'ADC SPEED' key in configuration, can't apply it")
         return
     readout_speed_indi = f"{camname}.readout_speed.{readout_speed_elem}"
-    
+
     log.debug(f"Requesting {readout_speed_indi}")
     indi.wait_for_state({
         readout_speed_indi: SwitchState.ON,
     }, timeout=MAX_COMMAND_TIMEOUT_SEC)
 
     # EMGAIN
-    emgain = configuration.get('EMGAIN', 1) 
+    emgain = configuration.get('EMGAIN', 1)
     indi[f"{camname}.emgain.target"] = emgain
     if indi[f"{camname}.emgain.target"] != emgain:
         indi[f"{camname}.emgain.target"] = emgain
         indi.wait_for_state({
             f"{camname}.emgain.target": {'value': emgain},
         }, timeout=MAX_COMMAND_TIMEOUT_SEC)
-    
+
     # ROI
     roi_state = {
         f"{camname}.roi_region_bin_x.target": max(configuration['ROI XBIN'], 1),
@@ -87,14 +87,14 @@ def take_darks(indi, camname, configuration, max_n_frames, max_dark_time_sec, dr
     indi[f"{camname}.roi_set.request"] = SwitchState.ON
     log.debug(f"Waiting up to {MAX_COMMAND_TIMEOUT_SEC} sec for camera to configure...")
     indi.wait_for_state(wait_state, timeout=MAX_COMMAND_TIMEOUT_SEC)
-    
+
     # EXPTIME
     exptime = configuration['EXPTIME']
     indi[f"{camname}.exptime.target"] = exptime
     overhead_wait_sec = orig_exptime
     darks_wait_sec = max_dark_time_sec if max_n_frames * exptime > max_dark_time_sec else max_n_frames * exptime
     wait_for_frames = overhead_wait_sec + darks_wait_sec
-    
+
     if not dry_run:
         log.debug(f"Waiting for the streamwriter {camname}-sw to be writing and exposure time to be {exptime} sec...")
         indi.wait_for_state({
@@ -142,7 +142,7 @@ def main(args):
     darks_to_take_path = args.DARKS_TO_TAKE_JSON
     c = INDIClient('localhost', 7624)
     c.start()
-    
+
     try:
         log.debug("Waiting for properties...")
         c.wait_for_properties(generate_needed_properties(cameras), timeout=MAX_COMMAND_TIMEOUT_SEC)
@@ -189,8 +189,8 @@ def main(args):
             for camname in cameras
         }, timeout=MAX_COMMAND_TIMEOUT_SEC)
         log.debug("Ensured relevant streamwriters are off")
-        
-    
+
+
 
 if __name__ == "__main__":
     this_year = datetime.datetime.now().year

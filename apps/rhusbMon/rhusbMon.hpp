@@ -33,9 +33,9 @@ namespace app
 
 /// The MagAO-X RH-USB monitoring class
 /** Interacts with the Omega RH-USB probe used for DM chamber humidity monitoring.
-  * 
+  *
   * \todo need a test mode (compile-time) which adds a way (INDI?) to initiate testing of parameter limits.
-  * 
+  *
   * \ingroup rhusbMon
   */
 class rhusbMon : public MagAOXApp<true>, public tty::usbDevice, public dev::ioDevice, public dev::telemeter<rhusbMon>
@@ -46,28 +46,28 @@ class rhusbMon : public MagAOXApp<true>, public tty::usbDevice, public dev::ioDe
 
    //Let telemeter work.
    friend class dev::telemeter<rhusbMon>;
-   
+
 protected:
 
    /** \name Configurable Parameters
      *@{
-     */   
+     */
    float m_warnTemp {30};  ///< This is abnormally high if the system is working, but still safe.
    float m_alertTemp {35}; ///< This is the actual limit, shut down should occur.
    float m_emergTemp {40}; ///< Must shutdown immediately.
-   
+
    float m_warnHumid {18};  ///< This is abnormally high if the system is working, but still safe.
    float m_alertHumid {20}; ///< This is the actual limit, shut down should occur.
    float m_emergHumid {22}; ///< Must shutdown immediately.
 
    ///@}
-   
+
    float m_temp {-999};
    float m_rh {-999};
-   
+
    pcf::IndiProperty m_indiP_temp;
    pcf::IndiProperty m_indiP_rh;
-   
+
 
 public:
    /// Default c'tor.
@@ -93,14 +93,14 @@ public:
    virtual int appStartup();
 
    /// Implementation of the FSM for rhusbMon.
-   /** 
+   /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
    virtual int appLogic();
 
    /// Shutdown the app.
-   /** 
+   /**
      *
      */
    virtual int appShutdown();
@@ -108,36 +108,36 @@ public:
    /// Connect to the probe
    /** Search for the USB device in udev and attempt ot open it.
      * The result is reported via the FSM state (NODEVICE, NOTCONNECTED, CONNECTED).
-     * 
-     * \returns -1 on an error attempting to read udev 
-     * \returns 0 if device not found, or connection does not work, or if connected. 
+     *
+     * \returns -1 on an error attempting to read udev
+     * \returns 0 if device not found, or connection does not work, or if connected.
      */
    int connect();
 
    /// Read current values from the RH-USB probe
    /** Issues the 'C' and 'H' commands to get temperature and humidity.
-     * 
+     *
      * \returns -1 on error writing or reading, or on a parsing error
-     * 
+     *
      * \see \parseC( float &, const std::string)
      * \see \parseH( float &, const std::string)
-     */ 
+     */
    int readProbe();
 
    /** \name Telemeter Interface
-     * 
+     *
      * @{
-     */ 
+     */
    int checkRecordTimes();
-   
+
    int recordTelem( const telem_rhusb * );
-   
+
 protected:
 
    int recordRH( bool force = false );
 
    ///@}
-   
+
 };
 
 rhusbMon::rhusbMon() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -153,11 +153,11 @@ void rhusbMon::setupConfig()
    config.add("temp.warning", "", "temp.warning", argType::Required, "temp", "warning", false, "float", "Temperature at which to issue a warning.  Default is 30.");
    config.add("temp.alert", "", "temp.alert", argType::Required, "temp", "alert", false, "float", "Temperature at which to issue an alert.  Default is 35.");
    config.add("temp.emergency", "", "temp.emergency", argType::Required, "temp", "emergency", false, "float", "Temperature at which to issue an emergency.  Default is 40.");
-   
+
    config.add("humid.warning", "", "humid.warning", argType::Required, "humid", "warning", false, "float", "Humidity at which to issue a warning.  Default is 18.");
    config.add("humid.alert", "", "humid.alert", argType::Required, "humid", "alert", false, "float", "Humidity at which to issue an alert.  Default is 20.");
    config.add("humid.emergency", "", "humid.emergency", argType::Required, "humid", "emergency", false, "float", "Humidity at which to issue an emergency.  Default is 22.");
-   
+
    tty::usbDevice::setupConfig(config);
    dev::ioDevice::setupConfig(config);
 
@@ -170,7 +170,7 @@ int rhusbMon::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_warnTemp, "temp.warning");
    _config(m_alertTemp, "temp.alert");
    _config(m_emergTemp, "temp.emergency");
-   
+
    _config(m_warnHumid, "humid.warning");
    _config(m_alertHumid, "humid.alert");
    _config(m_emergHumid, "humid.emergency");
@@ -179,7 +179,7 @@ int rhusbMon::loadConfigImpl( mx::app::appConfigurator & _config )
    dev::ioDevice::loadConfig(_config);
 
    dev::telemeter<rhusbMon>::loadConfig(_config);
-   
+
    return 0;
 }
 
@@ -194,18 +194,18 @@ int rhusbMon::appStartup()
    indi::addNumberElement<float>( m_indiP_temp, "current", -20., 120., 0, "%0.1f");
    m_indiP_temp["current"] = -999;
    registerIndiPropertyReadOnly(m_indiP_temp);
-   
+
    createROIndiNumber( m_indiP_rh, "humidity", "Relative Humidity [%]");
    indi::addNumberElement<float>( m_indiP_rh, "current", 0., 100., 0, "%0.1f");
    m_indiP_rh["current"] = -999;
    registerIndiPropertyReadOnly(m_indiP_rh);
 
-   
+
    if(dev::telemeter<rhusbMon>::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
    }
-   
+
    return connect();
 }
 
@@ -232,17 +232,17 @@ int rhusbMon::appLogic()
          return log<software_error,0>({__FILE__, __LINE__});
       }
    }
-   
+
    pcf::IndiProperty::PropertyStateType rhState = pcf::IndiProperty::Ok;
    //Check warning and alert values
    if(m_rh > m_emergHumid)
    {
-      log<text_log>("RH > " + std::to_string(m_emergHumid) + "% : " + std::to_string(m_rh) + "%!  Shutdown immediately!", logPrio::LOG_EMERGENCY); 
+      log<text_log>("RH > " + std::to_string(m_emergHumid) + "% : " + std::to_string(m_rh) + "%!  Shutdown immediately!", logPrio::LOG_EMERGENCY);
       rhState = pcf::IndiProperty::Alert;
    }
    else if(m_rh > m_alertHumid)
    {
-      log<text_log>("RH > " + std::to_string(m_alertHumid) + "% : " + std::to_string(m_rh) + "%.  Fix or shutdown.", logPrio::LOG_ALERT); 
+      log<text_log>("RH > " + std::to_string(m_alertHumid) + "% : " + std::to_string(m_rh) + "%.  Fix or shutdown.", logPrio::LOG_ALERT);
       rhState = pcf::IndiProperty::Alert;
    }
    else if(m_rh > m_warnHumid)
@@ -255,12 +255,12 @@ int rhusbMon::appLogic()
    //Check warning and alert values
    if(m_temp > m_emergTemp)
    {
-      log<text_log>("Temp > " + std::to_string(m_emergTemp) + "C : " + std::to_string(m_temp) + "C!  Shutdown immediately!", logPrio::LOG_EMERGENCY); 
+      log<text_log>("Temp > " + std::to_string(m_emergTemp) + "C : " + std::to_string(m_temp) + "C!  Shutdown immediately!", logPrio::LOG_EMERGENCY);
       tState = pcf::IndiProperty::Alert;
    }
    else if(m_temp > m_alertTemp)
    {
-      log<text_log>("Temp > " + std::to_string(m_alertTemp) + "C : " + std::to_string(m_temp) + "C.  Fix or shutdown.", logPrio::LOG_ALERT); 
+      log<text_log>("Temp > " + std::to_string(m_alertTemp) + "C : " + std::to_string(m_temp) + "C.  Fix or shutdown.", logPrio::LOG_ALERT);
       tState = pcf::IndiProperty::Alert;
    }
    else if(m_temp > m_warnTemp)
@@ -270,7 +270,7 @@ int rhusbMon::appLogic()
    }
 
    //Scope for mutex
-   { 
+   {
       std::unique_lock<std::mutex> lock(m_indiMutex);
       updateIfChanged(m_indiP_temp, "current", m_temp, tState);
 
@@ -282,7 +282,7 @@ int rhusbMon::appLogic()
    {
       return log<software_error,0>({__FILE__, __LINE__});
    }
-      
+
    return 0;
 }
 
@@ -419,18 +419,18 @@ int rhusbMon::checkRecordTimes()
 {
    return dev::telemeter<rhusbMon>::checkRecordTimes(telem_rhusb());
 }
-   
+
 int rhusbMon::recordTelem( const telem_rhusb * )
 {
    return recordRH(true);
 }
 
-inline 
+inline
 int rhusbMon::recordRH(bool force)
 {
    static float lastTemp = -99;
    static float lastRH = -99;
-   
+
    if(force || m_temp != lastTemp || m_rh != lastRH)
    {
       telem<telem_rhusb>({m_temp, m_rh});

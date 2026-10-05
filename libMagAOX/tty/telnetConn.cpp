@@ -37,9 +37,9 @@ int telnetConn::connect( const std::string & host,
    m_telnet = 0;
    if(m_sock) close(m_sock);
    m_sock = 0;
-  
+
    m_loggedin = 0;
- 
+
    struct sockaddr_in addr;
    struct addrinfo *ai;
    struct addrinfo hints;
@@ -108,7 +108,7 @@ int telnetConn::login( const std::string & username,
    int pollrv;
    while ( (pollrv = poll(pfd, 1, 30000)) > 0)
    {
-      #ifdef TELNET_DEBUG    
+      #ifdef TELNET_DEBUG
       std::cerr << "Polled\n";
       #endif
       /* read from client */
@@ -169,7 +169,7 @@ int telnetConn::login( const std::string & username,
       #endif
       return TELNET_E_LOGINTIMEOUT;
    }
-   
+
    return TTY_E_NOERROR;
 }
 
@@ -394,14 +394,14 @@ void telnetConn::event_handler( telnet_t *telnet,
          #ifdef TELNET_DEBUG
          std::cerr << "Got ev->data.size: " << ev->data.size << "\n";
          #endif
-         
+
          //First we remove the various control chars from the front.
          if(ev->data.size == 0) break;
 
          char * buf = const_cast<char *>(ev->data.buffer);
          buf[ev->data.size] = 0;
 
-         int nn = 0;         
+         int nn = 0;
          for(size_t i=0; i<ev->data.size; ++i)
          {
             if(ev->data.buffer[i] < 32)
@@ -412,11 +412,11 @@ void telnetConn::event_handler( telnet_t *telnet,
             }
             break;
          }
- 
+
          #ifdef TELNET_DEBUG
          std::cerr << "removed: " << nn << "\n";
          #endif
-         
+
          //Now we check for '\0' characters inside the data
          //this is maybe a bug workaround for tripp lite pdu LX card . . .
          int mm = 0;
@@ -432,7 +432,7 @@ void telnetConn::event_handler( telnet_t *telnet,
 	 #ifdef TELNET_DEBUG
          std::cerr << "dezeroed: " << mm << "\n";
          #endif
-         
+
          //Now make it a string so we can make use of it.
          std::string sbuf(buf);
 
@@ -441,7 +441,7 @@ void telnetConn::event_handler( telnet_t *telnet,
          #ifdef TELNET_DEBUG
          std::cerr  << "ev->data: " << sbuf << "\n";
          #endif
-         
+
          if(cs->m_loggedin < TELNET_LOGGED_IN) //we aren't logged in yet
          {
             if(cs->m_loggedin == TELNET_WAITING_USER)

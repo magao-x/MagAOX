@@ -19,7 +19,7 @@ class XDeformableMirror(DeformableMirror):
         mode_basis_generator : Field generator
             A function that calculates the modes for the DM. Default uses the full actuator basis.
         '''
-        
+
         if dm == 'dmwoofer':
             self.dmindex = 0
             self.num_across = 11
@@ -38,20 +38,20 @@ class XDeformableMirror(DeformableMirror):
 
         if mode_basis_generator is None:
             mode_basis_generator = lambda grid : ModeBasis(np.eye(grid.size), grid)
-        
+
         # DM write channel
         self.dmwrite = ImageStream('dm0{:d}disp0{:d}'.format(self.dmindex, channel))
-        
+
         # The DM modes
         self.grid = make_pupil_grid(self.num_across, self.size)
         modes = mode_basis_generator(self.grid)
         super().__init__(modes)
 
     def send(self, sleep=None):
-        self.dmwrite.write(self.surface.shaped.astype(np.float32))        
+        self.dmwrite.write(self.surface.shaped.astype(np.float32))
         if sleep is not None:
             time.sleep(sleep)
-    
+
     def reset(self):
         self.flatten()
         self.send()
@@ -126,7 +126,7 @@ class XHadamardMirror(XDeformableMirror):
         channel : int
             The dm channel that is being used.
         '''
-        
+
         from scipy.linalg import hadamard
         def make_hadamard_modes(grid):
             grid.shape

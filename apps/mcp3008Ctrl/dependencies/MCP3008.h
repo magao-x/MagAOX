@@ -54,7 +54,7 @@ public:
         const int channel = DEFAULT_SPI_CHANNEL,
         const int baud = DEFAULT_SPI_BAUD,
         const int flags  = DEFAULT_SPI_FLAGS) noexcept;
-    
+
     virtual ~MCP3008();
 
     void connect();

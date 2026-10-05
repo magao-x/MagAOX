@@ -18,8 +18,12 @@
 
 
 
-SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+TESTS_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+SELF_DIR := $(TESTS_DIR)
 include $(SELF_DIR)/../Make/common.mk
+
+# Shared test support headers, including EDT SDK stubs for SDK-less builds.
+CPPFLAGS += -I$(TESTS_DIR)
 
 # Single-file app name can be supplied as `TARGET=`,
 # or `t=` for short
@@ -30,6 +34,7 @@ BASENAME=$(basename $(TARGET))
 PATHNAME=$(dir $(TARGET))
 OBJNAME = $(PATHNAME)$(notdir $(BASENAME)).o
 TESTNAME = $(PATHNAME)$(notdir $(BASENAME))
+EDT_TESTS = ocam2KCtrl_test ocam2KCtrl_lifecycle_test cred2Ctrl_test cred2Ctrl_lifecycle_test
 
 # add extra libraries for special cases
 
@@ -64,6 +69,10 @@ else ifeq ($(notdir $(TESTNAME)),stdMotionNode_test)
     LDLIBS += -linstGraph
 else ifeq ($(notdir $(TESTNAME)),xigNode_test)
     LDLIBS += -linstGraph
+else ifneq ($(filter $(notdir $(TESTNAME)),$(EDT_TESTS)),)
+	CXXFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CXXFLAGS))
+	CFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CFLAGS))
+	CPPFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CPPFLAGS))
 endif
 
 LDLIBS+=$(TESTLIBS)
@@ -80,6 +89,16 @@ endif
 
 
 all: magaox_git_version.h $(TESTNAME) pcommand
+
+# The entrypoint suite launches the real app; always match its instrumentation
+# to this test build. Clear inherited make flags so a test's -B does not force
+# a rebuild of all shared dependencies; COVERAGE is passed explicitly.
+ifeq ($(notdir $(TESTNAME)),flipperCtrl_entrypoint_test)
+.PHONY: flipperCtrl_entrypoint_app
+$(TESTNAME): | flipperCtrl_entrypoint_app
+flipperCtrl_entrypoint_app:
+	MAKEFLAGS= $(MAKE) -C $(TESTS_DIR)/../apps/flipperCtrl -W flipperCtrl.cpp COVERAGE=$(COVERAGE)
+endif
 
 $(TESTNAME): $(OBJNAME) testMain.o
 	$(LINK.o) -o $(TESTNAME) testMain.o $(OBJNAME) $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.a) $(LDFLAGS) $(LDLIBS)

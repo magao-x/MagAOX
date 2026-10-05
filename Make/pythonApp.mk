@@ -20,10 +20,11 @@ check:
 pipinstall: check
 	sudo -H $(PYTHON) -m pip install . || (echo "Unable to install $(TARGET) with $(PYTHON)" && exit 1)
 	sudo -H ln -sfv $(PYTHON_SCRIPTS_PREFIX)/$(TARGET) /opt/MagAOX/bin/$(TARGET) || (echo "Couldn't symlink /opt/MagAOX/bin/$(TARGET) to $(PYTHON_SCRIPTS_PREFIX)/$(TARGET)" && exit 1)
+	cd && $(PYTHON) -c "import xapp.$(TARGET)" || (echo "Unable to import installed app" && exit 1)
 
 .PHONY: normalize_permissions
 normalize_permissions: pipinstall
-	sudo chmod -R o+rX $(shell cd && $(PYTHON) -c "import xapp.$(TARGET), os.path;print(os.path.dirname(xapp.$(TARGET).__file__))")
+	sudo chmod -R o+rX $$(cd && $(PYTHON) -c "import xapp.$(TARGET), os.path;print(os.path.dirname(xapp.$(TARGET).__file__))")
 
 .PHONY: install
 install: normalize_permissions

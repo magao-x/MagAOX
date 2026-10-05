@@ -1,0 +1,12 @@
+namespace MagAOX.logger;
+
+table Telem_modalgainopt_fb
+{
+   update_auto:bool;
+   optical_gain_tracking:bool;
+   optical_gain:float;
+   gain_gain:float;
+   gain_leak:float;
+}
+
+root_type Telem_modalgainopt_fb;

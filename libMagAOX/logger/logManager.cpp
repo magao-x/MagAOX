@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_files
-  * 
+  *
   */
 
 #include "logFileRaw.hpp"

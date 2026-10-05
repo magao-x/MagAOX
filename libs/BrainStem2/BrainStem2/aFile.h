@@ -29,8 +29,8 @@
 /// Platform Independent File Access Interface
 
 /** \defgroup aFile File Interface
- * \ref aFile "aFile.h" provides a platform independent interface for opening, reading, 
- * and writing files. 
+ * \ref aFile "aFile.h" provides a platform independent interface for opening, reading,
+ * and writing files.
  */
 
 /////////////////////////////////////////////////////////////////////
@@ -68,21 +68,21 @@ typedef enum aFileSeekMode {
 #ifdef __cplusplus
 extern "C" {
 #endif
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Does the File Exist.
-    
+
     /**
      * Checks for the existence of a file at filename.
      * \param pFilename path to file.
      * \returns bool True if file exists, false otherwise.
      */
     aLIBEXPORT bool aFile_Exists(const char* pFilename);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Open a File.
-    
+
     /**
      * Opens the file Given in pFilename with the given fileMode eMode.
      * \param pFilename path to file.
@@ -90,11 +90,11 @@ extern "C" {
      * \returns aFileRef on success or NULL on failure.
      */
     aLIBEXPORT aFileRef aFile_Open(const char* pFilename, const aFileMode eMode);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Close an open file.
-    
+
     /**
      * Close an open file. The fileRef is set to NULL on success.
      * \param fileRef Pointer to the handle to the open file.
@@ -103,11 +103,11 @@ extern "C" {
      * \retval aErrParam invalid file reference.
      */
     aLIBEXPORT aErr aFile_Close(aFileRef* fileRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Read from an open file.
-    
+
     /**
      * Read from an open file.
      *
@@ -126,10 +126,10 @@ extern "C" {
                                uint8_t* pBuffer,
                                const size_t nLength,
                                size_t* pActuallyRead);
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Write to an open file.
-    
+
     /**
      * Write to an open file.
      *
@@ -147,11 +147,11 @@ extern "C" {
                                 const uint8_t* pBuffer,
                                 const size_t nLength,
                                 size_t* pActuallyWritten);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Seek within an open file.
-    
+
     /**
      * Seek within an open file.
      *
@@ -168,11 +168,11 @@ extern "C" {
     aLIBEXPORT aErr aFile_Seek(aFileRef fileRef,
                                const long nOffset,
                                aFileSeekMode  seekFrom);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Get the size of an open file.
-    
+
     /**
      * Get the size of an open file.
      *
@@ -184,11 +184,11 @@ extern "C" {
      * \retval aErrIO an error occured calculating the size.
      */
     aLIBEXPORT aErr aFile_GetSize(aFileRef fileRef, size_t* pulSize);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Delete a File.
-    
+
     /**
      * Deletes the given file pFilename.
      * \param pFilename Path to file.
@@ -199,8 +199,8 @@ extern "C" {
      * \retval aErrNotFound if the file cannot be located.
      */
     aLIBEXPORT aErr aFile_Delete(const char *pFilename);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Read a line from an open file.
     /**
@@ -224,13 +224,13 @@ extern "C" {
                                    uint8_t* pBuffer,
                                    const size_t nLength,
                                    size_t* pActuallyRead);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Set the I/O for this file to be unbuffered.
     /**
      * Set the I/O for this file to be unbuffered. This function
-     * call must be performed before any other operations are made on 
+     * call must be performed before any other operations are made on
      * an open file.
      *
      * \param fileRef The handle to the open file.
@@ -239,8 +239,8 @@ extern "C" {
      * \retval aErrNone Success.
      */
     aLIBEXPORT aErr aFile_SetUnbuffered(aFileRef fileRef);
-    
-    
+
+
     /////////////////////////////////////////////////////////////////////
     /// Get the current position of this file.
     /**
@@ -253,7 +253,7 @@ extern "C" {
      * \retval aErrNone Success.
      */
     aLIBEXPORT aErr aFile_GetPosition(aFileRef fileRef, size_t* pPos);
-    
+
     /////////////////////////////////////////////////////////////////////
     /// Write formatted string to an open file.
     /**

@@ -9,9 +9,10 @@
 #ifndef app_outletController_hpp
 #define app_outletController_hpp
 
+#include <ImageStreamIO/ImageStreamIO.h>
+
 #include <mx/app/application.hpp>
 #include <mx/sys/timeUtils.hpp>
-
 
 #include "../../INDI/libcommon/IndiProperty.hpp"
 #include "../../libMagAOX/libMagAOX.hpp"
@@ -46,7 +47,7 @@ namespace dev
     int turnOutletOff( int outletNum );
 
     int updateOutletState( int outletNum );
-  * \endcode 
+  * \endcode
   * and optionally
   * \code
     int updateOutletStates();
@@ -54,22 +55,24 @@ namespace dev
   *
   * Other requirements:
   * - call `setNumberOfOutlets` in the derived class constructor
-  * 
-  * 
+  *
+  *
   * \tparam derivedT specifies a MagAOXApp parent base class which is accessed with a `static_cast` (downcast)
   *         to perform various methods.
   *
   * \ingroup appdev
   *
-  * \todo finalize 0-counting vs 1-counting rules --> do we subtract one from config-ed outlet indices if m_firstOne is true?
-  * 
+  *
   */
 template<class derivedT>
 struct outletController
 {
    bool m_firstOne {false}; ///< Flag is true if the first outlet is numbered 1, otherwise assumes starting at 0.
 
-   std::vector<int> m_outletStates; ///< The current states of each outlet.  These MUST be updated by derived classes in the overridden \ref updatedOutletState.
+   double m_stateDelay {0}; ///< Delay to wait after changing states before allowing a new command.
+
+   std::vector<int> m_outletStates; /**< The current states of each outlet.  These MUST be updated by derived 
+                                         classes in the overridden \ref updatedOutletState.*/
 
    pcf::IndiProperty m_indiP_outletStates; ///< Indi Property to show individual outlet states.
 
@@ -88,22 +91,33 @@ struct outletController
       std::vector<unsigned> m_onDelays; ///< [optional] The delays between outlets in a multi-oultet channel.  The first entry is always ignored.  The second entry is the dealy between the first and second outlet, etc.
       std::vector<unsigned> m_offDelays; ///< [optional] The delays between outlets in a multi-oultet channel.  The first entry is always ignored.  The second entry is the dealy between the first and second outlet, etc.
 
+      timespec m_stateTime {0,0}; ///< The time of the last state change
+
       pcf::IndiProperty m_indiP_prop;
+
+      std::mutex * m_mutex {nullptr};
+
    };
 
    /// The map of channel specifications, which can be accessed by their names.
    std::unordered_map<std::string, channelSpec> m_channels;
 
+   std::vector<std::mutex *> m_channelMutexes;
+
+   /// An INDI property which pulishes the times of the last state change for each channel 
+   pcf::IndiProperty m_indiP_stateTimes;
+
    /// An INDI property which publishes the outlets associated with each channel.  Useful for GUIs, etc.
    pcf::IndiProperty m_indiP_chOutlets;
-   
+
    /// An INDI property which publishes the total on delay for each channel.  Useful for GUIs, etc.
    pcf::IndiProperty m_indiP_chOnDelays;
-   
+
    /// An INDI property which publishes the total off delay for each channel.  Useful for GUIs, etc.
    pcf::IndiProperty m_indiP_chOffDelays;
-   
-   
+
+   ~outletController();
+
    ///Setup an application configurator for an outletController
    /** This is currently a no-op
      *
@@ -150,14 +164,6 @@ struct outletController
    /// Get the currently stored outlet state, without updating from device.
    int outletState( int outletNum );
 
-   /// Get the state of the outlet from the device.
-   /** This will be implemented in derived classes to update the outlet state.
-     * \todo this is declared pure virtual, but there is an implementation.
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   virtual int updateOutletState( int outletNum /**< [in] the outlet number to update */) = 0;
-
    /// Get the states of all outlets from the device.
    /** The default implementation for-loops through each outlet, calling \ref updateOutletState.
      * Can be re-implemented in derived classes to update the outlet states.
@@ -166,22 +172,6 @@ struct outletController
      * \returns -1 on error.
      */
    virtual int updateOutletStates();
-
-   /// Turn an outlet on.
-   /** This will be implemented in derived classes to turn an outlet on.
-     *
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   virtual int turnOutletOn( int outletNum /**< [in] the outlet number to turn on */) = 0;
-
-   /// Turn an outlet off.
-   /** This will be implemented in derived classes to turn an outlet off.
-     *
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   virtual int turnOutletOff( int outletNum /**< [in] the outlet number to turn off */) = 0;
 
    /// Get the number of channels
    /**
@@ -272,10 +262,21 @@ struct outletController
 
    /// Setup the INDI properties for this device controller
    /** This should be called in the `appStartup` function of the derived MagAOXApp.
-     * \todo change this to be appStartup like other devs.
+     * 
      * \returns 0 on success.
      * \returns -1 on error.
      */
+   int appStartup();
+
+   /// Setup the INDI properties for this device controller
+   /** This should be called in the `appStartup` function of the derived MagAOXApp.
+     *  
+     * \deprecated
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   [[deprecated("use appStartup() instead")]]
    int setupINDI();
 
    /// Update the INDI properties for this device controller
@@ -288,14 +289,32 @@ struct outletController
    int updateINDI();
 
    ///@}
-   
-   
+
+
 private:
    derivedT & derived()
    {
       return *static_cast<derivedT *>(this);
    }
 };
+
+template<class derivedT>
+outletController<derivedT>::~outletController()
+{
+   for(auto & it : m_channels)
+   {
+      it.second.m_mutex = nullptr;
+   }
+
+   for(size_t n = 0; n < m_channelMutexes.size(); ++n)
+   {
+      if(m_channelMutexes[n])
+      {
+         delete m_channelMutexes[n];
+      }
+   }
+}
+
 
 template<class derivedT>
 int outletController<derivedT>::setupConfig( mx::app::appConfigurator & config )
@@ -331,7 +350,7 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator & config )
 
    if( chSections.size() == 0 ) return OUTLET_E_NOVALIDCH;
 
-   //Now configure the chanels.
+   //Now configure the channels.
    for(size_t n = 0; n < chSections.size(); ++n)
    {
       m_channels.emplace( chSections[n] , channelSpec());
@@ -347,41 +366,37 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator & config )
          config.configUnused( outlets, mx::app::iniFile::makeKey(chSections[n], "outlets" ) );
       }
 
+      if(outlets.size() == 0)
+      {
+         return derivedT::template log<software_error,-1>( std::format("no outlets in Channel ""{} is not valid", chSections[n]));
+      }
+
       //Subtract one if the device numbers from 1.
       for(size_t k=0;k<outlets.size(); ++k)
       {
          ///\todo test this error
          if( (int) outlets[k] - m_firstOne < 0 || (int) outlets[k] - m_firstOne > (int) m_outletStates.size())
          {
-            #ifndef OUTLET_CTRL_TEST_NOLOG
-            return derivedT::template log<text_log,-1>("Outlet " + std::to_string(outlets[k]) + " in Channel " + chSections[n] + " is invalid", logPrio::LOG_ERROR);
-            #else
-            return -1;
-            #endif
+            return derivedT::template log<software_error,-1>( std::format("Outlet {} in Channel ""{} is not valid", outlets[k], chSections[n]), logPrio::LOG_ERROR);
+            
          }
 
          outlets[k] -= m_firstOne;
       }
 
       m_channels[chSections[n]].m_outlets = outlets;
-      ///\todo error checking on outlets
 
       //---- Set optional configs ----
       if( config.isSetUnused( mx::app::iniFile::makeKey(chSections[n], "onOrder" )))
       {
          std::vector<size_t> onOrder;
          config.configUnused( onOrder, mx::app::iniFile::makeKey(chSections[n], "onOrder" ) );
-         
-         ///\todo test this error
+
          if(onOrder.size() != m_channels[chSections[n]].m_outlets.size())
          {
-            #ifndef OUTLET_CTRL_TEST_NOLOG
-            return derivedT::template log<text_log,-1>("onOrder be same size as outlets.  In Channel " + chSections[n], logPrio::LOG_ERROR);
-            #else
-            return -1;
-            #endif
+            return derivedT::template log<software_error,-1>("onOrder must be same ""size as outlets.  In Channel " + chSections[n]);
          }
-            
+
          m_channels[chSections[n]].m_onOrder = onOrder;
       }
 
@@ -389,25 +404,52 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator & config )
       {
          std::vector<size_t> offOrder;
          config.configUnused( offOrder, mx::app::iniFile::makeKey(chSections[n], "offOrder" ) );
+
+         if(offOrder.size() != m_channels[chSections[n]].m_outlets.size())
+         {
+            return derivedT::template log<software_error,-1>("offOrder must be same ""size as outlets.  In Channel " + chSections[n]);
+         }
+
          m_channels[chSections[n]].m_offOrder = offOrder;
-         ///\todo error checking on offOrder, should complain if not same length
       }
 
       if( config.isSetUnused( mx::app::iniFile::makeKey(chSections[n], "onDelays" )))
       {
          std::vector<unsigned> onDelays;
          config.configUnused( onDelays, mx::app::iniFile::makeKey(chSections[n], "onDelays" ) );
+
+         if(onDelays.size() != m_channels[chSections[n]].m_outlets.size())
+         {
+            return derivedT::template log<software_error,-1>("onDelays must be same ""size as outlets.  In Channel " + chSections[n]);
+         }
+
          m_channels[chSections[n]].m_onDelays = onDelays;
-         ///\todo error checking on onDelays, should complain if not same length
       }
 
       if( config.isSetUnused( mx::app::iniFile::makeKey(chSections[n], "offDelays" )))
       {
          std::vector<unsigned> offDelays;
          config.configUnused( offDelays, mx::app::iniFile::makeKey(chSections[n], "offDelays" ) );
+
+         if(offDelays.size() != m_channels[chSections[n]].m_outlets.size())
+         {
+            return derivedT::template log<software_error,-1>("offDelays must be same ""size as outlets.  In Channel " + chSections[n]);
+         }
+
          m_channels[chSections[n]].m_offDelays = offDelays;
-         ///\todo error checking on offDelays, should complain if not same length
       }
+   }
+
+   m_channelMutexes.resize(m_channels.size(), nullptr);
+   size_t n = 0;
+   for(auto & it : m_channels)
+   {
+      m_channelMutexes[n] = new std::mutex;
+
+      it.second.m_mutex = m_channelMutexes[n];
+
+      ++n;
+
    }
 
    return 0;
@@ -431,8 +473,12 @@ int outletController<derivedT>::updateOutletStates()
 {
    for(size_t n=0; n<m_outletStates.size(); ++n)
    {
-      int rv = updateOutletState(n);
-      if(rv < 0) return rv;
+      int rv = derived().updateOutletState(n);
+      if(rv < 0) 
+      {
+         derivedT::template log<software_error>({0, rv, std::format("error updating outlet {}", n)});
+         return rv;
+      }
    }
 
    return 0;
@@ -490,36 +536,44 @@ int outletController<derivedT>::channelState( const std::string & channel )
 template<class derivedT>
 int outletController<derivedT>::turnChannelOn( const std::string & channel )
 {
-
-   #ifndef OUTLET_CTRL_TEST_NOLOG
-   derivedT::template log<software_debug>({__FILE__, __LINE__, "turning on channel " + channel});
-   #endif
+   std::unique_lock<std::mutex> channelGuard;
+   if(m_channels[channel].m_mutex != nullptr)
+   {
+      channelGuard = std::unique_lock<std::mutex>(*m_channels[channel].m_mutex);
+   }
+   else 
+   {
+      std::cerr << "mutex nullptr\n";
+   }
 
    #ifndef OUTLET_CTRL_TEST_NOINDI
-   //m_channels[channel].m_indiP_prop["target"].setValue("On");
    indi::updateIfChanged(m_channels[channel].m_indiP_prop, "target", std::string("On"), derived().m_indiDriver, INDI_BUSY );
    #endif
+
+   //Take no other action if already on
+   if(channelState(channel) == OUTLET_STATE_ON)
+   {
+      return 0;
+   }
+
+   timespec now;
+   clock_gettime(CLOCK_ISIO, &now);
+   if( m_stateDelay > 0 && ( (1.0*now.tv_sec + now.tv_nsec/1e9) - (1.0*m_channels[channel].m_stateTime.tv_sec + m_channels[channel].m_stateTime.tv_nsec/1e9) < m_stateDelay))
+   {
+      return 0;
+   }
 
    //If order is specified, get first outlet number
    size_t n = 0;
    if( m_channels[channel].m_onOrder.size() == m_channels[channel].m_outlets.size() ) n = m_channels[channel].m_onOrder[0];
 
    //turn on first outlet.
-   if( turnOutletOn(m_channels[channel].m_outlets[n]) < 0 )
+   if( derived().turnOutletOn(m_channels[channel].m_outlets[n]) < 0 )
    {
-
-      #ifndef OUTLET_CTRL_TEST_NOLOG
-         derivedT::template log<software_error>({__FILE__, __LINE__, "error turning on outlet " + std::to_string(n)});
-      #else
-         std::cerr << "Failed to turn on outlet " << n << "\n";
-      #endif
-
-      return -1;
+      return derivedT::template log<software_error, -1>(std::format("error turning on outlet {}",n));
    }
 
-   #ifndef OUTLET_CTRL_TEST_NOLOG
    derivedT::template log<outlet_state>({ (uint8_t) (n  + m_firstOne), 2});
-   #endif
 
    //Now do the rest
    for(size_t i = 1; i< m_channels[channel].m_outlets.size(); ++i)
@@ -536,25 +590,24 @@ int outletController<derivedT>::turnChannelOn( const std::string & channel )
 
       //turn on next outlet
 
-      if( turnOutletOn(m_channels[channel].m_outlets[n]) < 0 )
+      if( derived().turnOutletOn(m_channels[channel].m_outlets[n]) < 0 )
       {
-
-         #ifndef OUTLET_CTRL_TEST_NOLOG
-         derivedT::template log<software_error>({__FILE__, __LINE__, "error turning on outlet " + std::to_string(n)});
-         #else
-         std::cerr << "Failed to turn on outlet " << n << "\n";
-         #endif
-
-         return -1;
+         return derivedT::template log<software_error, -1>(std::format("error turning on outlet {}", n));
       }
 
-      #ifndef OUTLET_CTRL_TEST_NOLOG
       derivedT::template log<outlet_state>({ (uint8_t) (n  + m_firstOne ), 2});
-      #endif
+   
    }
 
-   #ifndef OUTLET_CTRL_TEST_NOLOG
    derivedT::template log<outlet_channel_state>({ channel, 2});
+   
+   if(clock_gettime(CLOCK_ISIO, &m_channels[channel].m_stateTime) < 0)
+   {
+      return derivedT::template log<software_error,-1>({errno, 0, "clock_gettime"});
+   }
+
+   #ifndef OUTLET_CTRL_TEST_NOINDI
+   indi::updateIfChanged(m_indiP_stateTimes, channel, m_channels[channel].m_stateTime.tv_sec, derived().m_indiDriver, INDI_IDLE );
    #endif
 
    return 0;
@@ -563,35 +616,44 @@ int outletController<derivedT>::turnChannelOn( const std::string & channel )
 template<class derivedT>
 int outletController<derivedT>::turnChannelOff( const std::string & channel )
 {
-
-   #ifndef OUTLET_CTRL_TEST_NOLOG
-   derivedT::template log<software_debug>({__FILE__, __LINE__, "turning off channel " + channel});
-   #endif
+   std::unique_lock<std::mutex> channelGuard;
+   if(m_channels[channel].m_mutex != nullptr)
+   {
+      channelGuard = std::unique_lock<std::mutex>(*m_channels[channel].m_mutex);
+   }
+   else 
+   {
+      std::cerr << "mutex nullptr\n";
+   }
 
    #ifndef OUTLET_CTRL_TEST_NOINDI
-   //m_channels[channel].m_indiP_prop["target"].setValue("Off");
    indi::updateIfChanged(m_channels[channel].m_indiP_prop, "target", std::string("Off"), derived().m_indiDriver, INDI_BUSY );
    #endif
+
+   //Take no other action if already off
+   if(channelState(channel) == OUTLET_STATE_OFF)
+   {
+      return 0;
+   }
+
+   timespec now;
+   clock_gettime(CLOCK_ISIO, &now);
+   if( m_stateDelay > 0 && ((1.0*now.tv_sec + now.tv_nsec/1e9) - (1.0*m_channels[channel].m_stateTime.tv_sec + m_channels[channel].m_stateTime.tv_nsec/1e9) < m_stateDelay))
+   {
+      return 0;
+   }
 
    //If order is specified, get first outlet number
    size_t n = 0;
    if( m_channels[channel].m_offOrder.size() == m_channels[channel].m_outlets.size() ) n = m_channels[channel].m_offOrder[0];
 
    //turn off first outlet.
-   if( turnOutletOff(m_channels[channel].m_outlets[n]) < 0 )
+   if( derived().turnOutletOff(m_channels[channel].m_outlets[n]) < 0 )
    {
-      #ifndef OUTLET_CTRL_TEST_NOLOG
-         derivedT::template log<software_error>({__FILE__, __LINE__, "error turning off outlet " + std::to_string(n)});
-      #else
-         std::cerr << "Failed to turn off outlet " << n << "\n";
-      #endif
-
-      return -1;
+      return derivedT::template log<software_error, -1>(std::format("error turning off outlet {}", n));
    }
 
-   #ifndef OUTLET_CTRL_TEST_NOLOG
    derivedT::template log<outlet_state>({ (uint8_t) (n  + m_firstOne), 0});
-   #endif
 
    //Now do the rest
    for(size_t i = 1; i< m_channels[channel].m_outlets.size(); ++i)
@@ -607,24 +669,23 @@ int outletController<derivedT>::turnChannelOff( const std::string & channel )
       }
 
       //turn off next outlet
-      if( turnOutletOff(m_channels[channel].m_outlets[n]) < 0 )
+      if( derived().turnOutletOff(m_channels[channel].m_outlets[n]) < 0 )
       {
-         #ifndef OUTLET_CTRL_TEST_NOLOG
-            derivedT::template log<software_error>({__FILE__, __LINE__, "error turning off outlet " + std::to_string(n)});
-         #else
-            std::cerr << "Failed to turn off outlet " << n << "\n";
-         #endif
-
-         return -1;
+         return derivedT::template log<software_error, -1>(std::format("error turning off outlet {}", n));
       }
 
-      #ifndef OUTLET_CTRL_TEST_NOLOG
       derivedT::template log<outlet_state>({ (uint8_t) (n + m_firstOne), 0});
-      #endif
    }
 
-   #ifndef OUTLET_CTRL_TEST_NOLOG
    derivedT::template log<outlet_channel_state>({ channel, 0});
+
+   if(clock_gettime(CLOCK_ISIO, &m_channels[channel].m_stateTime) < 0)
+   {
+      return derivedT::template log<software_error,-1>({errno, 0, "clock_gettime"});
+   }
+
+   #ifndef OUTLET_CTRL_TEST_NOINDI
+   indi::updateIfChanged(m_indiP_stateTimes, channel, m_channels[channel].m_stateTime.tv_sec, derived().m_indiDriver, INDI_IDLE );
    #endif
 
    return 0;
@@ -644,13 +705,9 @@ int outletController<derivedT>::newCallBack_channels( const pcf::IndiProperty &i
    //Check if we're in state READY before doing anything
    if(derived().state() != stateCodes::READY)
    {
-      #ifndef OUTLET_CTRL_TEST_NOLOG
-      derivedT::template log<text_log>("can't change outlet state when not READY", logPrio::LOG_ERROR);
-      #endif
-   
-      return -1;
+      return derivedT::template log<software_error, -1>("can't change outlet state when not READY");
    }
-   
+
    //Interogate ipRecv to figure out which channel it is.
    //And then call turn on or turn off based on requested state.
    std::string name = ipRecv.getName();
@@ -668,7 +725,9 @@ int outletController<derivedT>::newCallBack_channels( const pcf::IndiProperty &i
    }
 
    if( target == "" ) target = state;
+
    target = mx::ioutils::toUpper(target);
+
 
    if( target == "ON" )
    {
@@ -684,51 +743,53 @@ int outletController<derivedT>::newCallBack_channels( const pcf::IndiProperty &i
 }
 
 template<class derivedT>
-int outletController<derivedT>::setupINDI()
+int outletController<derivedT>::appStartup()
 {
+   m_indiP_stateTimes = pcf::IndiProperty(pcf::IndiProperty::Number);
+   m_indiP_stateTimes.setDevice(derived().configName()); 
+   m_indiP_stateTimes.setName("stateTimes");
+   m_indiP_stateTimes.setPerm(pcf::IndiProperty::ReadOnly);
+   m_indiP_stateTimes.setState(pcf::IndiProperty::Idle);
+
+   if(derived().registerIndiPropertyReadOnly(m_indiP_stateTimes) < 0)
+   {
+      return derivedT::template log<software_error, -1>();
+   }
+
    //Register the static INDI properties
    m_indiP_chOutlets = pcf::IndiProperty(pcf::IndiProperty::Text);
    m_indiP_chOutlets.setDevice(derived().configName());
    m_indiP_chOutlets.setName("channelOutlets");
    m_indiP_chOutlets.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_chOutlets.setState(pcf::IndiProperty::Idle);
-    
+
    if(derived().registerIndiPropertyReadOnly(m_indiP_chOutlets) < 0)
    {
-      #ifndef OUTLET_CTRL_TEST_NOLOG
-      derivedT::template log<software_error>({__FILE__,__LINE__});   
-      #endif
-      return -1;
-   }  
-   
+      return derivedT::template log<software_error, -1>();
+   }
+
    m_indiP_chOnDelays = pcf::IndiProperty (pcf::IndiProperty::Number);
    m_indiP_chOnDelays.setDevice(derived().configName());
    m_indiP_chOnDelays.setName("channelOnDelays");
    m_indiP_chOnDelays.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_chOnDelays.setState(pcf::IndiProperty::Idle);
-   
+
    if(derived().registerIndiPropertyReadOnly(m_indiP_chOnDelays) < 0)
    {
-      #ifndef OUTLET_CTRL_TEST_NOLOG
-      derivedT::template log<software_error>({__FILE__,__LINE__});
-      #endif
-      return -1;
+      return derivedT::template log<software_error, -1>();
    }
-      
+
    m_indiP_chOffDelays = pcf::IndiProperty (pcf::IndiProperty::Number);
    m_indiP_chOffDelays.setDevice(derived().configName());
    m_indiP_chOffDelays.setName("channelOffDelays");
    m_indiP_chOffDelays.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_chOffDelays.setState(pcf::IndiProperty::Idle);
-   
+
    if(derived().registerIndiPropertyReadOnly(m_indiP_chOffDelays) < 0)
    {
-      #ifndef OUTLET_CTRL_TEST_NOLOG
-      derivedT::template log<software_error>({__FILE__,__LINE__});
-      #endif
-      return -1;
+      return derivedT::template log<software_error, -1>();
    }
-   
+
    //Create channel properties and register callback.
    for(auto it = m_channels.begin(); it != m_channels.end(); ++it)
    {
@@ -744,30 +805,30 @@ int outletController<derivedT>::setupINDI()
 
       if( derived().registerIndiPropertyNew( it->second.m_indiP_prop, st_newCallBack_channels) < 0)
       {
-         #ifndef OUTLET_CTRL_TEST_NOLOG
-         derivedT::template log<software_error>({__FILE__,__LINE__});
-         #endif
-         return -1;
+         return derivedT::template log<software_error, -1>();
       }
-      
+
       //Load values into the static INDI properties
+      m_indiP_stateTimes.add(pcf::IndiElement(it->first));
+      m_indiP_stateTimes[it->first].set(0);
+
       m_indiP_chOutlets.add(pcf::IndiElement(it->first));
-      std::string os = std::to_string(it->second.m_outlets[0]);
-      for(size_t i=1;i< it->second.m_outlets.size();++i) os += "," + std::to_string(it->second.m_outlets[i]);
+      std::string os = std::format("{}", it->second.m_outlets[0]);
+      for(size_t i=1;i< it->second.m_outlets.size();++i) os += std::format(",{}",it->second.m_outlets[i]);
       m_indiP_chOutlets[it->first].set(os);
-      
+
       m_indiP_chOnDelays.add(pcf::IndiElement(it->first));
       double sum=0;
       for(size_t i=0;i< it->second.m_onDelays.size();++i) sum += it->second.m_onDelays[i];
       m_indiP_chOnDelays[it->first].set(sum);
-      
+
       m_indiP_chOffDelays.add(pcf::IndiElement(it->first));
       sum=0;
       for(size_t i=0;i< it->second.m_offDelays.size();++i) sum += it->second.m_offDelays[i];
       m_indiP_chOffDelays[it->first].set(sum);
-      
+
    }
-   
+
    //Register the outletStates INDI property, and add an element for each outlet.
    m_indiP_outletStates = pcf::IndiProperty (pcf::IndiProperty::Text);
    m_indiP_outletStates.setDevice(derived().configName());
@@ -777,18 +838,8 @@ int outletController<derivedT>::setupINDI()
 
    if( derived().registerIndiPropertyReadOnly(m_indiP_outletStates) < 0)
    {
-      #ifndef OUTLET_CTRL_TEST_NOLOG
-      derivedT::template log<software_error>({__FILE__,__LINE__});
-      #endif
-      return -1;
+      return derivedT::template log<software_error, -1>();
    }
-/*      
-   auto result =  derived().m_indiNewCallBacks.insert( { "outlet", {&m_indiP_outletStates, nullptr}});
-
-   if(!result.second)
-   {
-      return -1;
-   }*/
 
    for(size_t i=0; i< m_outletStates.size(); ++i)
    {
@@ -796,6 +847,12 @@ int outletController<derivedT>::setupINDI()
    }
 
    return 0;
+}
+
+template<class derivedT>
+int outletController<derivedT>::setupINDI()
+{
+   return appStartup();
 }
 
 std::string stateIntToString(int st);
@@ -819,8 +876,8 @@ int outletController<derivedT>::updateINDI()
       indi::updateIfChanged( it->second.m_indiP_prop, "state", state, derived().m_indiDriver );
    }
 
-   
-   
+
+
    return 0;
 }
 
