@@ -319,7 +319,7 @@ class adcCtrl(XDevice):
         self.camera = XCam(
             self.config.camera.shmim,
             pixel_size=6.0/21.0,
-            use_hcipy=True,
+            use_hcipy=False,
             indi_client=self.client
         )
 
@@ -511,79 +511,45 @@ class adcCtrl(XDevice):
 
     def loop(self):
         if self._state == States.CLOSED_LOOP:
+                pass 
+
+
+                # if np.abs(error*self._gain) < 0.7: #setting a threshold so the prisms don't do anything crazy     
+                #     self.add_command(error * self._gain,0)
+                #     self.send_command()
+                #     self.log.info(f'delta command: {error * self._gain}')
+                #     self.log.info(f'total command: {self.delta_1}')
+                # else: self.log.info(f'ADC command {error} exceeds acceptable threshold and was not sent')
+        
+        elif self._state == States.ONESHOT:
+            pass
+
+        elif self._state == States.MEASURE_ONLY:
             measurements = []
             error = 0
 
             for i in range(self._no_measurements):
-                img = self.camera.grab_stack(self._n_avg)
-                transpose = img.shaped.T
-                img = transpose.ravel()
+                    img = self.camera.grab_stack(self._n_avg)
+                    img = np.pad(img,pad_width=50, mode='constant', constant_values=0)
+                    dim = np.sqrt(img.size)
+                    extent = dim * 6/21
+                    pgrid = make_pupil_grid(dim,extent)
+                    img = Field(img.ravel(),pgrid)
+                    img -= np.median(img) 
+                    img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
+                    #img = self.ADC.filter_image(img)
+                    
+                    angles = self.ADC.all_speckle_angles(img,speckle_filter=True)
+                    pairs = self.ADC.speckle_pairs(angles)
+                    command = np.squeeze(self.ADC.calculate_command(pairs))
 
-                if self._lab == False:
-                    img = self.ADC.filter_image(img)
+                    self.log.debug(f'measured speckle angles: {angles}')
 
-                img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
-                self.ADC.set_psf(img)
-
-                angles = self.ADC.find_speckle_angles2()
-                pair_angles = self.ADC.speckle_pairs(angles)
-                self.log.debug(f'angle offsets: {angles}')
-                error = self.ADC.calculate_command(pair_angles)
-
-                self.log.debug(f'measured error: {error}')
-                measurements.append(error)
-            #self._command = np.squeeze(self._command + -self._gain * error)
-
-            error = np.mean(measurements)
-            self.log.debug(f'mean error: {error}')
-
-            if np.abs(error) < 2: #setting a threshold so the prisms don't do anything crazy
-                self.add_command(error * self._gain,0)
-                self.send_command()
-                self.log.debug(f'ADC command sent: {error * self._gain}')
-            else: self.log.info(f'ADC command {self._command} exceeds acceptable threshold and was not sent')
-
-        elif self._state == States.ONESHOT:
-            measurements = []
-            for i in range(self._no_measurements):
-                img = self.camera.grab_stack(self._n_avg)
-                transpose = img.shaped.T
-                img = transpose.ravel()
-
-                if self._lab == False:
-                    img = self.ADC.filter_image(img)
-
-                img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
-                self.ADC.set_psf(img)
-                #center_of_intensity = np.array([sum(img*img.grid.x)/sum(img),sum(img*img.grid.y)/sum(img)])
-                #self.log.info(f'center of intensity: {center_of_intensity}')
-
-
-                angles = self.ADC.find_speckle_angles2()
-                pair_angles = self.ADC.speckle_pairs(angles)
-                self.log.debug(f'angle offsets: {angles}')
-                self._command = np.squeeze(self.ADC.calculate_command(pair_angles))
-
-                measurements.append(self._command)
-                self.log.debug(f'single measurement command: {self._command}')
-
-            error = np.mean(measurements)
-            self.log.debug(f'average command: {error} (just calculated, not sent)')
-            #### deleting the send command part so you can use it without interfering with anyone else's stuff
-            # if np.abs(self._command) < 5: #setting a threshold so the prisms don't do anything crazy
-            #     self.add_command(self._command,0)
-            #     self.send_command()
-            #     self.log.debug(f'ADC command sent: {self._command}')
-            # else:
-            #     self.log.info(f'ADC command {self._command} exceeds acceptable threshold and was not sent')
-
-            self.log.info('transitioning to idle')
-            self.transition_to_idle()
-            self._command = 0
-            self.log.info('successfully transitioned to idle')
-
-        elif self._state == States.MEASURE_ONLY:
-            pass
+                    self.log.debug(f'single error command: {-command}')
+                    measurements.append(command)
+                
+                error = -np.nanmean(measurements)
+                self.log.debug(f'mean predicted command across {self._no_measurements} measurements: {-error} (measured, not sent)')
 
 # Used to make the pyproject.toml just a little simpler,
 # with fewer repetitions of the app name:
