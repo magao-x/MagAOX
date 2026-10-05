@@ -346,6 +346,8 @@ class adcCtrl(XDevice):
             self._center_wavelength = 762E-9
         elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
             self._center_wavelength = 908E-9
+        elif self.client['fwsci1.filterName.r'] == constants.SwitchState.ON:
+            self._center_wavelength = 615E-9
         else:
             self._center_wavelength = 656E-9
 
