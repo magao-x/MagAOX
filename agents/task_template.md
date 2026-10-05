@@ -7,7 +7,7 @@
      Fill out each subsection below as needed. Feel free to add additional
      subsections, etc.  
 
-     When complete, commit it on your feature branch and then  prompt the agent to review this file.
+     When complete, commit it on your feature branch and then prompt the agent to review this file.
 -->
 
 ## Problem Statement
@@ -28,6 +28,8 @@
 # Instructions to Agent
 <!-- Specific instructions for the agent.  Below is our standard, but you can modify it as needed. -->
 
+Analyze the above task and create a plan to implement a solution.  Document your findings below under "Agent Findings and Plan".  The comments under each heading provide guidance.
+
 Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" below.  Do not begin implementation until the user has reviewed the plan and answered any questions.
 
 # Agent Findings and Plan
@@ -40,15 +42,15 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 <!-- The agent should list any assumptions they have made -->
 
 ## Requirements
-<!-- The agent should list the requirements to which they are pllaning -->
+<!-- The agent should list the requirements to which they are planning -->
 
 ## Questions and Points of Clarification
-<!-- The agent should any open issues requiring user clarification -->
+<!-- The agent should list any open issues requiring user clarification -->
 
 ## Tests
-<!-- The agent should list and describe the test it plans to implement -->
+<!-- The agent should list and describe the test it plans to implement.  It should be specific about the purpose and goal of the test. -->
 
 ## Implementation Plan
-<!-- The agent should any open issues requiring user clarification -->
+<!-- Here the agent documents its plan for the implementation -->
 
 
