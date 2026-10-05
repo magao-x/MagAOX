@@ -73,3 +73,27 @@ check now clears that cached label consistently in all four startup states.
 - Functional implementation, regressions, and engineering record committed as
   `32a5008a`. The documentation follow-up updates the supported parked FSM set,
   numeric-display availability, and tracking priority in the README.
+
+## Follow-up: NODEVICE during startup (2026-10-05)
+
+The user identified NODEVICE as another stage startup state during which the
+stage can remain parked and stationary. Add NODEVICE to `parkedFSMState()`;
+all retained routing, cached-tracking priority, numeric display, and label
+cleanup already share this predicate. The supported set is now POWEROFF,
+POWERON, NODEVICE, NOTCONNECTED, and CONNECTED. Affirmative valid parking and
+`parkable=true` remain required, and the graph must report the actual NODEVICE
+FSM label.
+
+Extend existing initial-message-order and sequential startup regressions with
+NODEVICE for legacy, mapped, and default routes, numeric display, and published
+XML. Also check that NODEVICE stays blocked without affirmative parking or the
+parking opt-in. Verification completed:
+
+- stdMotionNode: 20642 assertions / 21 cases; xInstGraph: 3231 / 24,
+  totaling 23873 assertions / 45 cases, all passing.
+- `make -C apps/xInstGraph -j1` succeeded. The changed-file documentation pass,
+  clang-format, `clang-format --dry-run --Werror`, and `git diff --check` passed.
+- Focused Doxygen generation emitted no warnings for changed C++ files; real-API
+  HTML links were verified for all four extended startup test cases.
+- The README now lists NODEVICE for parked routing and numeric display. Rebuild
+  and install xInstGraph; existing `parkable=true` configuration applies.

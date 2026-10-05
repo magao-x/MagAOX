@@ -1393,7 +1393,7 @@ TEST_CASE( "stdMotionNode routes parked positions independently of message order
     #endif
     // clang-format on
 
-    for( const std::string state : { "POWEROFF", "POWERON", "NOTCONNECTED", "CONNECTED" } )
+    for( const std::string state : { "POWEROFF", "POWERON", "NODEVICE", "NOTCONNECTED", "CONNECTED" } )
         for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
             for( const bool multi : { false, true } )
                 for( const std::string prefix : { "preset", "filter" } )
@@ -2030,8 +2030,15 @@ TEST_CASE( "stdMotionNode blocks mapped routes for unusable telemetry", "[instGr
         fixture.load( "presetRoute.alpha=wfs\npresetRoute.beta=sci\n" );
         auto &node = *fixture.m_node;
         fixture.sources( true );
-        for( const std::string state :
-             { "POWEROFF", "OPERATING", "HOMING", "NOTHOMED", "POWERON", "NOTCONNECTED", "ERROR", "invalid" } )
+        for( const std::string state : { "POWEROFF",
+                                         "OPERATING",
+                                         "HOMING",
+                                         "NOTHOMED",
+                                         "POWERON",
+                                         "NODEVICE",
+                                         "NOTCONNECTED",
+                                         "ERROR",
+                                         "invalid" } )
         {
             CAPTURE( dir, state );
             REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
@@ -2079,7 +2086,7 @@ TEST_CASE( "stdMotionNode maps parked presets independently of message order",
     #endif
     // clang-format on
 
-    for( const std::string state : { "POWEROFF", "POWERON", "NOTCONNECTED", "CONNECTED" } )
+    for( const std::string state : { "POWEROFF", "POWERON", "NODEVICE", "NOTCONNECTED", "CONNECTED" } )
         for( const auto dir : { ingr::ioDir::input, ingr::ioDir::output } )
             for( const bool parkable : { false, true } )
             {
@@ -2275,7 +2282,7 @@ TEST_CASE( "stdMotionNode uses defaultRoute for unmatched valid presets",
             fixture.sources( true );
             requireMappedRoute( node, {} );
         }
-        for( const std::string state : { "OPERATING", "HOMING", "NOTHOMED", "NOTCONNECTED", "ERROR" } )
+        for( const std::string state : { "OPERATING", "HOMING", "NOTHOMED", "NODEVICE", "NOTCONNECTED", "ERROR" } )
         {
             REQUIRE( node.handleSetProperty( motionFSM( "READY" ) ) == 0 );
             REQUIRE( node.handleSetProperty( motionPreset( { "open" } ) ) == 0 );
@@ -2426,7 +2433,7 @@ TEST_CASE( "stdMotionNode displays numerical position without changing legacy pu
                     deliver( motionFSM( state ) );
                     REQUIRE( node.curLabel() == "9.5000" );
                 }
-                for( const std::string state : { "POWEROFF", "NOTCONNECTED", "ERROR", "POWERON" } )
+                for( const std::string state : { "POWEROFF", "NODEVICE", "NOTCONNECTED", "ERROR", "POWERON" } )
                 {
                     deliver( motionFSM( state ) );
                     REQUIRE( node.curLabel() == "off" );
@@ -2605,7 +2612,7 @@ TEST_CASE( "stdMotionNode retains parked routing through power-on sequences",
                     REQUIRE( n->handleSetProperty( motionParked( "1" ) ) == 0 );
                     REQUIRE( n->handleSetProperty( motionFSM( "POWEROFF" ) ) == 0 );
                 }
-                for( const std::string state : { "POWEROFF", "POWERON", "NOTCONNECTED", "CONNECTED" } )
+                for( const std::string state : { "POWEROFF", "POWERON", "NODEVICE", "NOTCONNECTED", "CONNECTED" } )
                 {
                     CAPTURE( dir, multi, tracking, state );
                     REQUIRE( node.handleSetProperty( motionFSM( state ) ) == 0 );
@@ -2631,7 +2638,7 @@ TEST_CASE( "stdMotionNode retains parked routing through power-on sequences",
                 }
                 REQUIRE( node.handleSetProperty( motionPosition( "2.5" ) ) == 0 );
                 REQUIRE( node.handleSetProperty( motionPreset( { "none" } ) ) == 0 );
-                for( const std::string state : { "POWEROFF", "POWERON", "NOTCONNECTED", "CONNECTED" } )
+                for( const std::string state : { "POWEROFF", "POWERON", "NODEVICE", "NOTCONNECTED", "CONNECTED" } )
                 {
                     REQUIRE( node.handleSetProperty( motionFSM( state ) ) == 0 );
                     REQUIRE( node.curLabel() == "2.5000" );
@@ -2665,7 +2672,7 @@ TEST_CASE( "stdMotionNode retains parked routing through power-on sequences",
                 const std::string           label    = preset == "none"                    ? "3.1250"
                                                        : preset == "unlisted" && !fallback ? "off"
                                                                                            : preset;
-                for( const std::string state : { "POWEROFF", "POWERON", "NOTCONNECTED", "CONNECTED" } )
+                for( const std::string state : { "POWEROFF", "POWERON", "NODEVICE", "NOTCONNECTED", "CONNECTED" } )
                 {
                     CAPTURE( dir, fallback, preset, state );
                     REQUIRE( node.handleSetProperty( motionFSM( state ) ) == 0 );

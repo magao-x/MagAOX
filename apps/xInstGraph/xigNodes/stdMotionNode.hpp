@@ -25,7 +25,7 @@
  * and presetPrefix are part of the configuration.  This INDI property is a switch vector.
  *
  * With `parkable=true`, a Number property `<device>.parked` with nonzero `current` makes a preset usable in
- * `POWEROFF`, `POWERON`, `NOTCONNECTED`, and `CONNECTED`, preserving routing through the power-on sequence.
+ * `POWEROFF`, `POWERON`, `NODEVICE`, `NOTCONNECTED`, and `CONNECTED`, preserving routing through the power-on sequence.
  * Parking support defaults false; only enabled stages subscribe to this property.
  * The true FSM is preserved. This retained-position path takes priority over tracking flags and requires one
  * selected name, with an explicit or default route in mapping mode, or a matching put for legacy multi-put selection.
@@ -195,7 +195,7 @@ class stdMotionNode : public fsmNode
     /// Refresh the numerical fallback without changing put states or enablement.
     void updatePositionLabel();
 
-    /// Whether the FSM belongs to the four states that permit a confirmed parked position.
+    /// Whether the FSM belongs to the startup states that permit a confirmed parked position.
     bool parkedFSMState() const;
 
     /// Whether affirmative parking permits the retained position in a supported power/startup FSM state.
@@ -533,7 +533,8 @@ inline void stdMotionNode::updatePositionLabel()
 inline bool stdMotionNode::parkedFSMState() const
 {
     return m_state == MagAOX::app::stateCodes::POWEROFF || m_state == MagAOX::app::stateCodes::POWERON ||
-           m_state == MagAOX::app::stateCodes::NOTCONNECTED || m_state == MagAOX::app::stateCodes::CONNECTED;
+           m_state == MagAOX::app::stateCodes::NODEVICE || m_state == MagAOX::app::stateCodes::NOTCONNECTED ||
+           m_state == MagAOX::app::stateCodes::CONNECTED;
 }
 
 inline bool stdMotionNode::parkedState() const

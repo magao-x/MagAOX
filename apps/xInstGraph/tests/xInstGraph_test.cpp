@@ -1902,7 +1902,7 @@ TEST_CASE( "xInstGraph preserves parked routes through startup", "[xInstGraph][p
         app.handleDefProperty( beamsplitterValue( device, "parked", "current", "1", pcf::IndiProperty::Number ) );
         app.handleDefProperty( beamsplitterPreset( device, { device == "stagebs" ? "65-35" : "open" } ) );
     }
-    for( const std::string state : { "POWEROFF", "POWERON", "NOTCONNECTED", "CONNECTED" } )
+    for( const std::string state : { "POWEROFF", "POWERON", "NODEVICE", "NOTCONNECTED", "CONNECTED" } )
         for( const std::string device : { "stagebs", "fwfpm" } )
         {
             const auto before = readFile( output );
@@ -1930,7 +1930,7 @@ TEST_CASE( "xInstGraph preserves parked routes through startup", "[xInstGraph][p
     app.handleSetProperty( lamp );
     requireBeamsplitterGraph( readFile( output ), "fwfpm", { "out" } );
     app.handleSetProperty( beamsplitterPreset( "fwfpm", { "closed" } ) );
-    for( const std::string state : { "POWEROFF", "POWERON", "NOTCONNECTED", "CONNECTED" } )
+    for( const std::string state : { "POWEROFF", "POWERON", "NODEVICE", "NOTCONNECTED", "CONNECTED" } )
     {
         app.handleSetProperty( beamsplitterValue( "fwfpm", "fsm", "state", state ) );
         requireBeamsplitterGraph( readFile( output ), "fwfpm", {} );
@@ -1938,7 +1938,7 @@ TEST_CASE( "xInstGraph preserves parked routes through startup", "[xInstGraph][p
     }
     app.handleDefProperty( beamsplitterValue( "fwfpm", "filter", "current", "4.25", pcf::IndiProperty::Number ) );
     app.handleSetProperty( beamsplitterPreset( "fwfpm", { "none" } ) );
-    for( const std::string state : { "POWEROFF", "POWERON", "NOTCONNECTED", "CONNECTED" } )
+    for( const std::string state : { "POWEROFF", "POWERON", "NODEVICE", "NOTCONNECTED", "CONNECTED" } )
     {
         app.handleSetProperty( beamsplitterValue( "fwfpm", "fsm", "state", state ) );
         requireBeamsplitterGraph( readFile( output ), "fwfpm", {} );
