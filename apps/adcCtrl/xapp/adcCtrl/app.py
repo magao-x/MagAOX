@@ -601,8 +601,16 @@ class adcCtrl(XDevice):
                     #mask the image
                     if self._use_sparkles:
                         dynamic_mask_diameter = self._sparkle_freq / (6/21) * 0.7 #convert l/d to pixel units
+                        f = self._sparkle_freq
+                        angle = self._sparkle_angle
+                        window_size = 20
+                        search_extent=20
                     else:
                         dynamic_mask_diameter = 47 * (6/21) * 0.7 #crop for passive DM satellite spots
+                        f = 47
+                        angle = 28
+                        window_size=50
+                        search_extent=30
                     
                     img = self.ADC.crop_image(img_subtracted,crop_extent-25,mask_diam=dynamic_mask_diameter) 
                     
@@ -614,7 +622,7 @@ class adcCtrl(XDevice):
                     #measure angles
                     angles = np.zeros(4)
                     for i in range(4):
-                        speckle_img = speckle_cutout(cropped,i,angle,f,window_size=20,search_extent=20)
+                        speckle_img = speckle_cutout(cropped,i,angle,f,window_size,search_extent)
                         angles[i] = np.abs(moment_angle(speckle_img))
 
                     self.log.debug(f'measured speckle angles: {angles}')
