@@ -305,6 +305,16 @@ class adcCtrl(XDevice):
         self.add_property(sv, callback=self.handle_labmode)
 
         sv = properties.SwitchVector(
+            name='satellite_spots',
+            rule=constants.SwitchRule.ONE_OF_MANY,
+            perm=constants.PropertyPerm.READ_WRITE,
+        )
+        sv.add_element(DefSwitch(name="sparkles", _value=constants.SwitchState.ON))
+        sv.add_element(DefSwitch(name="dm_spots", _value=constants.SwitchState.OFF))
+
+        self.add_property(sv, callback=self.handle_spots)
+
+        sv = properties.SwitchVector(
             name='reset_deltaADCs',
             rule=constants.SwitchRule.ONE_OF_MANY,
             perm=constants.PropertyPerm.READ_WRITE,
@@ -356,6 +366,7 @@ class adcCtrl(XDevice):
         #check sparkle properties
         self._sparkle_freq = float(self.client['tweeterSpeck.separation.current'])
         self._sparkle_angle = float(self.client['tweeterSpeck.angle.current'])
+        self._use_sparkles = True #default to using active sparkles 
 
         #setup ADC class, set control matrix 
         self.ADC = AdcFitter()
@@ -422,6 +433,31 @@ class adcCtrl(XDevice):
 
             self.update_property(existing_property)
             self.update_property(self.properties['fsm'])
+
+    def handle_spots(self, existing_property, new_message):
+        target_list = ['sparkles', 'dm_spots']
+
+        for key in target_list:
+            if existing_property[key] == constants.SwitchState.ON:
+                current_state = key
+
+        if current_state not in new_message:
+
+            for key in target_list:
+                existing_property[key] = constants.SwitchState.OFF
+                if key in new_message:
+                    existing_property[key] = new_message[key]
+
+                    if key == 'sparkles':
+                        self.log.debug('using active sparkles')
+                        self.check_indi_props()
+                        self._use_sparkles = True
+                    elif key == 'dm_spots':
+                        self.log.debug('using passive dm spots')
+                        self.check_indi_props()
+                        self._use_sparkles = False
+
+            self.update_property(existing_property)
 
     def handle_labmode(self,existing_property, new_message):
         if 'toggle' in new_message and new_message['toggle'] is constants.SwitchState.ON:
@@ -551,8 +587,10 @@ class adcCtrl(XDevice):
                     img = Field(img.ravel(),pgrid)
                     img -= np.median(img) 
 
+                    crop_extent = dim - 50
+
                     #crop so that PSF is in the center, do not mask
-                    img = self.ADC.crop_image(img, self._crop_extent, mask_diam=0)
+                    img = self.ADC.crop_image(img, crop_extent, mask_diam=0)
                     
                     #radial profile subtract 
                     binc, profile, std_profile, ncount = radial_profile(img,5) 
@@ -560,8 +598,13 @@ class adcCtrl(XDevice):
                     radial_map = np.interp(r_coordinates, binc, profile) 
                     img_subtracted = img - radial_map
 
-                    #TODO: make mask diameter dynamic based on sparkle separation
-                    img = self.ADC.crop_image(img_subtracted,extent=self._crop_extent,mask_diam=30) 
+                    #mask the image
+                    if self._use_sparkles:
+                        dynamic_mask_diameter = self._sparkle_freq / (6/21) * 0.7 #convert l/d to pixel units
+                    else:
+                        dynamic_mask_diameter = 47 * (6/21) * 0.7 #crop for passive DM satellite spots
+                    
+                    img = self.ADC.crop_image(img_subtracted,crop_extent-25,mask_diam=dynamic_mask_diameter) 
                     
                     #background subtraction and set negatives to zero
                     bg = np.median(img)
