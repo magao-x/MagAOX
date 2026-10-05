@@ -344,13 +344,10 @@ class adcCtrl(XDevice):
 
         if self.client['fwsci1.filterName.i'] == constants.SwitchState.ON:
             self._center_wavelength = 762E-9
-            self._extent = 400
         elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
             self._center_wavelength = 908E-9
-            self._extent = 480
         else:
             self._center_wavelength = 656E-9
-            self._extent = 400
 
         self.ADC = AdcFitter(wavelength=self._center_wavelength)
         self.log.debug(f'initial normalized wavelength value: {self.ADC.normalized_wavelength}')
@@ -460,21 +457,6 @@ class adcCtrl(XDevice):
         self.log.debug(f'control matrix changed to {self._control_mtx}')
         self.update_property(existing_property)
 
-    def update_wavelength(self):
-        if self.client['fwsci1.filterName.i'] == constants.SwitchState.ON:
-            self._center_wavelength = 762E-9
-            self._extent = 400
-        elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
-            self._center_wavelength = 908E-9
-            self._extent = 480
-        else:
-            self._center_wavelength = 656E-9
-            self._extent = 400
-
-        self.ADC.wavelength = self._center_wavelength
-        self.ADC.normalized_wavelength = self.ADC.wavelength / 6565E-9
-        self.log.debug(f'using center wavelength {self._center_wavelength*1E9} nm, ADC instance sees {self.ADC.wavelength} & {self.ADC.normalized_wavelength} normalized')
-
     def transition_to_idle(self):
         self.properties['state']['oneshot'] = constants.SwitchState.OFF
         self.properties['state']['adcLoop'] = constants.SwitchState.OFF
@@ -545,26 +527,20 @@ class adcCtrl(XDevice):
                     radial_map = np.interp(r_coordinates, binc, profile) 
                     img_subtracted = img - radial_map
 
-                    img = self.ADC.crop_image(img_subtracted,extent=220,mask_diam=30) #TODO: make mask diameter dynamic based on sparkle separation
+                    #TODO: make mask diameter dynamic based on sparkle separation
+                    img = self.ADC.crop_image(img_subtracted,extent=self._crop_extent,mask_diam=30) 
                     
                     #background subtraction and set negatives to zero
                     bg = np.median(img)
                     img -= bg
                     img[img <0] = 0
 
-                    #find speckle angles
-                    speckle0 = speckle_cutout(cropped,0,angle,f,window_size=20,search_extent=20)
-                    speckle1 = speckle_cutout(cropped,1,angle,f,window_size=20,search_extent=20)
-                    speckle2 = speckle_cutout(cropped,2,angle,f,window_size=20,search_extent=20)
-                    speckle3 = speckle_cutout(cropped,3,angle,f,window_size=20,search_extent=20)
+                    #measure angles
+                    angles = np.zeros(4)
+                    for i in range(4):
+                        speckle_img = speckle_cutout(cropped,i,angle,f,window_size=20,search_extent=20)
+                        angles[i] = np.abs(moment_angle(speckle_img))
 
-                    #image moment to find each speckle angle
-                    angle0 = np.abs(moment_angle(speckle0))
-                    angle1 = np.abs(moment_angle(speckle1))
-                    angle2 = np.abs(moment_angle(speckle2))
-                    angle3 = np.abs(moment_angle(speckle3))
-
-                    angles = [angle0,angle1,angle2,angle3]
                     self.log.debug(f'measured speckle angles: {angles}')
 
                     #calculate command
