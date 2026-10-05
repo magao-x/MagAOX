@@ -124,3 +124,6 @@ links; update the README and record the implementation commit.
   test cases have verified HTML links from the real APIs under test.
 - Rebuild and install xInstGraph, then set `hasPosition=false` for flipperCtrl
   nodes. The deployed config was not edited by this change.
+- Functional implementation, regressions, and verification committed as
+  `7a7747a2`; the documentation follow-up describes `hasPosition` and the
+  flipperCtrl configuration example.

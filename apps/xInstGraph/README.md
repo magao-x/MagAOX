@@ -113,6 +113,7 @@ INDI property.
 | --- | --- | --- | --- | --- |
 | device | string | no | node name | INDI device name |
 | parkable | bool | no | false | Subscribe to parking state and allow retained preset routing in supported power/startup states |
+| hasPosition | bool | no | true | Subscribe to numerical current position and display it when no usable preset is selected |
 | presetPrefix | string | no | preset | Preset property prefix, usually preset or filter |
 | presetDir | string | no | output | Side selected by the preset: input or output |
 | presetPutName | vector<string> | no | `out` for output, `in` for input | Legacy put names selected by the preset; incompatible with mapped routing |
@@ -139,10 +140,22 @@ numerical `current` value with four decimal places. A usable selection is exactl
 one selected, nonempty Switch element name other than `none`. Missing, `none`,
 wrong-type, or ambiguous selections can use the numerical fallback.
 
-With `presetPrefix=filter`, the handler subscribes to `<device>.filter.current`;
-other prefixes use `<device>.position.current`. No additional setting is needed.
-The value is cached even while a preset or tracking label is displayed, so the
-latest position is available immediately when the selection clears. Target-only
+`hasPosition` defaults to true. With `presetPrefix=filter`, the handler subscribes
+to `<device>.filter.current`; other prefixes use `<device>.position.current`.
+For controllers without numerical telemetry, such as flipperCtrl, set it false:
+
+```ini
+[flipacq]
+type=stdMotion
+hasPosition=false
+```
+
+With `hasPosition=false`, the handler does not register a numerical position or
+filter callback, ignores unsolicited numeric updates, and suppresses the numeric
+fallback. Named presets, parking, tracking, and put routing retain their normal
+behavior. For enabled nodes, the value is cached even while a preset or tracking
+label is displayed, so the latest position is available immediately when the
+selection clears. Target-only
 updates do not change it. Malformed or wrong-type current values clear the numeric
 cache; no position is assumed before valid telemetry arrives.
 
