@@ -330,7 +330,7 @@ class adcCtrl(XDevice):
         self._gain = 0.5
         self._command = 0
         self._control_mtx = np.array([0.21178766, 0.19275196])
-        self._extent = 400
+        self._crop_extent = 400
         self.delta_1 = 0
         self.delta_2 = 0
         self._offset = 0
@@ -467,7 +467,6 @@ class adcCtrl(XDevice):
         elif self.client['fwsci1.filterName.z'] == constants.SwitchState.ON:
             self._center_wavelength = 908E-9
             self._extent = 480
-            self.log.debug('filter in zprime')
         else:
             self._center_wavelength = 656E-9
             self._extent = 400
@@ -477,7 +476,6 @@ class adcCtrl(XDevice):
         self.log.debug(f'using center wavelength {self._center_wavelength*1E9} nm, ADC instance sees {self.ADC.wavelength} & {self.ADC.normalized_wavelength} normalized')
 
     def transition_to_idle(self):
-        #self._command = 0
         self.properties['state']['oneshot'] = constants.SwitchState.OFF
         self.properties['state']['adcLoop'] = constants.SwitchState.OFF
         self.properties['state']['measure-only'] = constants.SwitchState.OFF
@@ -512,8 +510,6 @@ class adcCtrl(XDevice):
     def loop(self):
         if self._state == States.CLOSED_LOOP:
                 pass 
-
-
                 # if np.abs(error*self._gain) < 0.7: #setting a threshold so the prisms don't do anything crazy     
                 #     self.add_command(error * self._gain,0)
                 #     self.send_command()
@@ -529,27 +525,57 @@ class adcCtrl(XDevice):
             error = 0
 
             for i in range(self._no_measurements):
+                    #grab images
                     img = self.camera.grab_stack(self._n_avg)
+
+                    #make into hcipy fields with correct l/D dimensions
                     img = np.pad(img,pad_width=50, mode='constant', constant_values=0)
                     dim = np.sqrt(img.size)
                     extent = dim * 6/21
                     pgrid = make_pupil_grid(dim,extent)
                     img = Field(img.ravel(),pgrid)
                     img -= np.median(img) 
-                    img = self.ADC.crop_image(img,extent=self._extent,mask_diam=self._mask_diam)
-                    #img = self.ADC.filter_image(img)
-                    
-                    angles = self.ADC.all_speckle_angles(img,speckle_filter=True)
-                    pairs = self.ADC.speckle_pairs(angles)
-                    command = np.squeeze(self.ADC.calculate_command(pairs))
 
+                    #crop so that PSF is in the center, do not mask
+                    img = self.ADC.crop_image(img, self._crop_extent, mask_diam=0)
+                    
+                    #radial profile subtract 
+                    binc, profile, std_profile, ncount = radial_profile(img,5) 
+                    r_coordinates = img.grid.as_('polar').r 
+                    radial_map = np.interp(r_coordinates, binc, profile) 
+                    img_subtracted = img - radial_map
+
+                    img = self.ADC.crop_image(img_subtracted,extent=220,mask_diam=30) #TODO: make mask diameter dynamic based on sparkle separation
+                    
+                    #background subtraction and set negatives to zero
+                    bg = np.median(img)
+                    img -= bg
+                    img[img <0] = 0
+
+                    #find speckle angles
+                    speckle0 = speckle_cutout(cropped,0,angle,f,window_size=20,search_extent=20)
+                    speckle1 = speckle_cutout(cropped,1,angle,f,window_size=20,search_extent=20)
+                    speckle2 = speckle_cutout(cropped,2,angle,f,window_size=20,search_extent=20)
+                    speckle3 = speckle_cutout(cropped,3,angle,f,window_size=20,search_extent=20)
+
+                    #image moment to find each speckle angle
+                    angle0 = np.abs(moment_angle(speckle0))
+                    angle1 = np.abs(moment_angle(speckle1))
+                    angle2 = np.abs(moment_angle(speckle2))
+                    angle3 = np.abs(moment_angle(speckle3))
+
+                    angles = [angle0,angle1,angle2,angle3]
                     self.log.debug(f'measured speckle angles: {angles}')
 
-                    self.log.debug(f'single error command: {-command}')
-                    measurements.append(command)
+                    #calculate command
+                    # command = np.squeeze(self.ADC.calculate_command(pairs))
+                    # self.log.debug(f'single error command: {-command}')
+                    # measurements.append(command)
                 
                 error = -np.nanmean(measurements)
                 self.log.debug(f'mean predicted command across {self._no_measurements} measurements: {-error} (measured, not sent)')
+
+
 
 # Used to make the pyproject.toml just a little simpler,
 # with fewer repetitions of the app name:
