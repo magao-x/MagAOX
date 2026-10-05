@@ -28,7 +28,7 @@
 # Instructions to Agent
 <!-- Specific instructions for the agent.  Below is our standard, but you can modify it as needed. -->
 
-Analyze the above task and create a plan to implement a solution.  Document your findings below under "Agent Findings and Plan".  The comments under each heading provide guidance.
+Analyze the above task and create a plan to implement a solution.  Document your findings below under "Agent Findings and Plan".  The comments under each heading provide guidance.  Keep this document up to date as you work.
 
 Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" below.  Do not begin implementation until the user has reviewed the plan and answered any questions.
 
@@ -53,4 +53,5 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 ## Implementation Plan
 <!-- Here the agent documents its plan for the implementation -->
 
-
+## Follow-up and Edge Cases
+<!-- The agent should list any planned follow up and any edge cases that are not addressed >
