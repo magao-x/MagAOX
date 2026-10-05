@@ -82,7 +82,61 @@ struct telemeter
 
     double m_maxInterval{10.0}; ///< The maximum interval, in seconds, between telemetry records. Default is 10.0 seconds.
 
+    pcf::IndiProperty m_indiP_rotateTelem; ///< indi Property to request rotation of the telemetry file.  The new file is created with the next telemetry record.
+
+    pcf::IndiProperty m_indiP_maxTelemTime; ///< indi Property to report and set the telemetry file time interval, in minutes.
+
     telemeter();
+
+    /// Destructor
+    /** Explicitly noexcept. The INDI property members above have destructors which are not noexcept,
+      * which would otherwise make the implicit destructor of any class deriving from both this and
+      * MagAOXApp looser than MagAOXApp's virtual noexcept destructor. MagAOXApp declares its own
+      * destructor noexcept for the same reason.
+      */
+    ~telemeter() noexcept;
+
+    /// The static callback function to be registered for requesting telemetry file rotation
+    /** The `void *` is a pointer to the app, which is converted to this telemeter.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    static int st_newCallBack_rotateTelem(void *app,                     /**< [in] a pointer to the app, will be
+                                                                                   converted to telemeter. */
+                                          const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                                    the new property request. */
+    );
+
+    /// The callback called by the static version, to actually process the telemetry rotation request.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_rotateTelem(const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new
+                                                                          property request. */
+    );
+
+    /// The static callback function to be registered for setting the telemetry file time interval
+    /** The `void *` is a pointer to the app, which is converted to this telemeter.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    static int st_newCallBack_maxTelemTime(void *app,                      /**< [in] a pointer to the app, will be
+                                                                                   converted to telemeter. */
+                                         const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                                   the new property request. */
+    );
+
+    /// The callback called by the static version, to actually process the telemetry interval change.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_maxTelemTime(const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new
+                                                                         property request. */
+    );
 
     /// Make a telemetry recording
     /** Wrapper for logManager::log, which updates telT::lastRecord.
@@ -190,6 +244,11 @@ telemeter<derivedT>::telemeter()
 }
 
 template <class derivedT>
+telemeter<derivedT>::~telemeter() noexcept
+{
+}
+
+template <class derivedT>
 template <typename telT>
 int telemeter<derivedT>::telem(const typename telT::messageT &msg)
 {
@@ -245,7 +304,13 @@ int telemeter<derivedT>::loadConfig(mx::app::appConfigurator &config)
 
     m_tel.logName(derived().m_configName);
 
-    m_tel.loadConfig(config);
+    // An invalid setting is not applied and the default is used instead. It is logged to
+    // the process log, not the telemetry stream.
+    std::string telConfigErr;
+    if (m_tel.loadConfig(config, &telConfigErr) < 0)
+    {
+        derivedT::template log<software_error>({__FILE__, __LINE__, telConfigErr});
+    }
 
     config(m_maxInterval, "telemeter.maxInterval");
 
@@ -255,6 +320,29 @@ int telemeter<derivedT>::loadConfig(mx::app::appConfigurator &config)
 template <class derivedT>
 int telemeter<derivedT>::appStartup()
 {
+    //----------------------------------------//
+    //        Set up the INDI properties
+    //----------------------------------------//
+
+    // These are registered through the app, which this class is a friend of, so that apps without
+    // telemetry do not get telemetry properties.
+    derived().createStandardIndiRequestSw(m_indiP_rotateTelem, "telem_rotate", "New Telemetry File", "Logging");
+    if (derived().registerIndiPropertyNew(m_indiP_rotateTelem, st_newCallBack_rotateTelem) < 0)
+    {
+        derivedT::template log<software_error>({__FILE__, __LINE__, "failed to register new telem_rotate property"});
+    }
+
+    derived().template createStandardIndiNumber<unsigned>(
+        m_indiP_maxTelemTime, "telem_maxtime", 0, MAGAOX_max_maxLogTime, 1, "", "Max Telemetry Interval [minutes]", "Logging");
+    if (derived().registerIndiPropertyNew(m_indiP_maxTelemTime, st_newCallBack_maxTelemTime) < 0)
+    {
+        derivedT::template log<software_error>({__FILE__, __LINE__, "failed to register new telem_maxtime property"});
+    }
+
+    // Set the INDI property to the configured interval.
+    m_indiP_maxTelemTime["current"] = m_tel.maxLogTime();
+    m_indiP_maxTelemTime["target"] = m_tel.maxLogTime();
+
     //----------------------------------------//
     //        Begin the telemetry system
     //----------------------------------------//
@@ -301,6 +389,94 @@ int telemeter<derivedT>::appLogic()
     }
 
     return derived().checkRecordTimes();
+}
+
+template <class derivedT>
+int telemeter<derivedT>::st_newCallBack_rotateTelem(void *app, const pcf::IndiProperty &ipRecv)
+{
+    // MagAOXApp::handleNewProperty always passes its own `this`, so the argument is the app, not
+    // this telemeter.
+    telemeter<derivedT> *tel = static_cast<derivedT *>(app);
+    return tel->newCallBack_rotateTelem(ipRecv);
+}
+
+template <class derivedT>
+int telemeter<derivedT>::newCallBack_rotateTelem(const pcf::IndiProperty &ipRecv)
+{
+    if (ipRecv.createUniqueKey() != m_indiP_rotateTelem.createUniqueKey())
+    {
+        return derivedT::template log<software_error, -1>({__FILE__, __LINE__, "wrong indi property received"});
+    }
+
+    if (ipRecv.find("request"))
+    {
+        if (ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+        {
+            // This only sets a flag. The new file is created by the telemetry thread on the next record.
+            m_tel.requestRotation();
+            derived().updateSwitchIfChanged(m_indiP_rotateTelem, "request", pcf::IndiElement::Off, INDI_IDLE);
+        }
+    }
+
+    return 0;
+}
+
+template <class derivedT>
+int telemeter<derivedT>::st_newCallBack_maxTelemTime(void *app, const pcf::IndiProperty &ipRecv)
+{
+    // MagAOXApp::handleNewProperty always passes its own `this`, so the argument is the app, not
+    // this telemeter.
+    telemeter<derivedT> *tel = static_cast<derivedT *>(app);
+    return tel->newCallBack_maxTelemTime(ipRecv);
+}
+
+template <class derivedT>
+int telemeter<derivedT>::newCallBack_maxTelemTime(const pcf::IndiProperty &ipRecv)
+{
+    if (ipRecv.createUniqueKey() != m_indiP_maxTelemTime.createUniqueKey())
+    {
+        return derivedT::template log<software_error, -1>({__FILE__, __LINE__, "wrong indi property received"});
+    }
+
+    // Parse the raw string, as the typed element accessor cannot detect invalid input
+    std::string str;
+    if (ipRecv.find("target"))
+    {
+        str = ipRecv["target"].get();
+    }
+    else if (ipRecv.find("current"))
+    {
+        str = ipRecv["current"].get();
+    }
+    else
+    {
+        return derivedT::template log<software_error, -1>({__FILE__, __LINE__, "no target or current element in INDI property"});
+    }
+
+    unsigned target = 0;
+    if (m_tel.parseMaxLogTime(target, str) != mx::error_t::noerror)
+    {
+        derivedT::template log<software_error>({__FILE__, __LINE__,
+                                                "rejected telemetry file interval \"" + str + "\": must be a number from 0 to " +
+                                                    std::to_string(MAGAOX_max_maxLogTime)});
+
+        // Send back the unchanged value. The alert state ensures it is sent, as updateIfChanged only sends
+        // when the value or state changes.
+        derived().updateIfChanged(m_indiP_maxTelemTime, "target", m_tel.maxLogTime(), INDI_ALERT);
+
+        return -1;
+    }
+
+    m_tel.maxLogTime(target); // cannot fail, as the range was checked by parseMaxLogTime
+
+    derivedT::template log<software_info>({__FILE__, __LINE__, "Set telemetry file interval to " + std::to_string(target) + " minutes"});
+
+    derived().updateIfChanged(m_indiP_maxTelemTime,
+                              std::vector<std::string>{"current", "target"},
+                              std::vector<unsigned>{target, target},
+                              INDI_IDLE);
+
+    return 0;
 }
 
 template <class derivedT>
