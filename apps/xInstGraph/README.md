@@ -147,8 +147,8 @@ updates do not change it. Malformed or wrong-type current values clear the numer
 cache; no position is assumed before valid telemetry arrives.
 
 The fallback is displayed in READY, OPERATING, HOMING, CONFIGURING, NOTHOMED,
-and affirmative parked POWEROFF, POWERON, NOTCONNECTED, or CONNECTED with
-`parkable=true`. Other states keep the existing unavailable display. During
+and affirmative parked POWEROFF, POWERON, NODEVICE, NOTCONNECTED, or CONNECTED
+with `parkable=true`. Other states keep the existing unavailable display. During
 normal operation, tracking and not-tracking labels retain priority. Parked
 startup states use the retained position instead of cached tracking flags;
 the FSM label always reports the controller's actual state.
@@ -213,7 +213,7 @@ the node's position label shows the selected preset, including when using the
 fallback. An empty explicit or default route keeps that position label while
 all puts stay off.
 
-Routing requires READY, or affirmative parking in POWEROFF, POWERON,
+Routing requires READY, or affirmative parking in POWEROFF, POWERON, NODEVICE,
 NOTCONNECTED, or CONNECTED with `parkable=true`.
 The fallback applies only to exactly one selected, nonempty Switch element
 name other than `none`. `none`, a missing or ambiguous selection, a wrong
@@ -249,14 +249,14 @@ parkable=true
 
 The option declares parking support; the published `current` value reports
 whether the stage is parked now. A nonzero numeric value allows retained preset
-routing while `fsm.state` is POWEROFF, POWERON, NOTCONNECTED, or CONNECTED.
-These states preserve the route and position label through the power-on sequence
+routing while `fsm.state` is POWEROFF, POWERON, NODEVICE, NOTCONNECTED, or
+CONNECTED. These states preserve the route and position label through the power-on sequence
 while the stage remains parked. The graph's FSM label still reports each actual
 state; it is never changed to READY by parking.
 
 `parkable` defaults to false. When omitted or false, the graph does not subscribe
 to parking, ignores unsolicited parking updates, and keeps puts off in those
-four startup states. This avoids unresolved-property notices for controllers
+five startup states. This avoids unresolved-property notices for controllers
 without the parking interface. With `parkable=true`, a missing parking property still receives
 the normal retry/backoff diagnostic.
 

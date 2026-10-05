@@ -97,3 +97,5 @@ parking opt-in. Verification completed:
   HTML links were verified for all four extended startup test cases.
 - The README now lists NODEVICE for parked routing and numeric display. Rebuild
   and install xInstGraph; existing `parkable=true` configuration applies.
+- Functional change, regressions, and verification record committed as
+  `55960d9e`; the documentation follow-up records the supported NODEVICE state.
