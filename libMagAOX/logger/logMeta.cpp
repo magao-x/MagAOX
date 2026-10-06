@@ -57,17 +57,17 @@ const std::string &logMeta::unavailableValue()
     return value;
 }
 
-bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
+bool verifyLogEntry( flatlogs::eventCodeT ev, logEntryRecord &log )
 {
-    if( log == nullptr )
+    if( log.empty() )
     {
         DEBUG_CRUMB( "verifyLogEntry null ev=" + std::to_string( ev ) + " " );
         return false;
     }
 
     // Only pass the message for verification.
-    void             *msgBuffer = flatlogs::logHeader::messageBuffer( log );
-    flatlogs::msgLenT len       = flatlogs::logHeader::msgLen( log );
+    void             *msgBuffer = log.message();
+    flatlogs::msgLenT len       = log.m_msgLen;
     bool              verified{ false };
 
     switch( ev )
@@ -266,18 +266,16 @@ bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
         break;
     default:
         DEBUG_CRUMB( "verifyLogEntry unknown ev=" + std::to_string( ev ) +
-                     " actualEv=" + std::to_string( flatlogs::logHeader::eventCode( log ) ) + " logTs=" +
-                     logMapDebugTime( flatlogs::logHeader::timespec( log ) ) + " msgLen=" + std::to_string( len ) +
-                     " totalSize=" + std::to_string( flatlogs::logHeader::totalSize( log ) ) + " " );
+                     " actualEv=" + std::to_string( log.m_eventCode ) + " logTs=" + logMapDebugTime( log.m_ts ) +
+                     " msgLen=" + std::to_string( len ) + " totalSize=" + std::to_string( log.m_entrySize ) + " " );
         return false;
     }
 
     if( !verified )
     {
         DEBUG_CRUMB( "verifyLogEntry failed ev=" + std::to_string( ev ) +
-                     " actualEv=" + std::to_string( flatlogs::logHeader::eventCode( log ) ) + " logTs=" +
-                     logMapDebugTime( flatlogs::logHeader::timespec( log ) ) + " msgLen=" + std::to_string( len ) +
-                     " totalSize=" + std::to_string( flatlogs::logHeader::totalSize( log ) ) + " " );
+                     " actualEv=" + std::to_string( log.m_eventCode ) + " logTs=" + logMapDebugTime( log.m_ts ) +
+                     " msgLen=" + std::to_string( len ) + " totalSize=" + std::to_string( log.m_entrySize ) + " " );
     }
 
     return verified;
@@ -440,7 +438,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<bool ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -457,7 +454,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<char ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
             {
@@ -476,7 +472,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<unsigned char ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -493,7 +488,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<short ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -510,7 +504,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<unsigned short ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -527,7 +520,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<int ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -544,7 +536,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<unsigned int ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -561,7 +552,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<long ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -578,7 +568,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<unsigned long ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -595,7 +584,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<long long ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -612,7 +600,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<unsigned long long ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -629,7 +616,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<float ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -646,7 +632,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<double ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -663,7 +648,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<std::vector<bool> ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -695,7 +679,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 stime,
                                 atime,
                                 reinterpret_cast<std::vector<float> ( * )( void * )>( m_detail.accessor ),
-                                &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -735,7 +718,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                stime,
                                atime,
                                reinterpret_cast<bool ( * )( void * )>( m_detail.accessor ),
-                               &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -752,7 +734,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                stime,
                                atime,
                                reinterpret_cast<char ( * )( void * )>( m_detail.accessor ),
-                               &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -769,7 +750,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                stime,
                                atime,
                                reinterpret_cast<unsigned char ( * )( void * )>( m_detail.accessor ),
-                               &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -786,7 +766,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                stime,
                                atime,
                                reinterpret_cast<short ( * )( void * )>( m_detail.accessor ),
-                               &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -803,7 +782,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                stime,
                                atime,
                                reinterpret_cast<unsigned short ( * )( void * )>( m_detail.accessor ),
-                               &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -820,7 +798,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                stime,
                                atime,
                                reinterpret_cast<int ( * )( void * )>( m_detail.accessor ),
-                               &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -837,7 +814,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                stime,
                                atime,
                                reinterpret_cast<unsigned int ( * )( void * )>( m_detail.accessor ),
-                               &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -854,7 +830,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                stime,
                                atime,
                                reinterpret_cast<long ( * )( void * )>( m_detail.accessor ),
-                               &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -871,7 +846,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                stime,
                                atime,
                                reinterpret_cast<unsigned long ( * )( void * )>( m_detail.accessor ),
-                               &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -888,7 +862,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                stime,
                                atime,
                                reinterpret_cast<long long ( * )( void * )>( m_detail.accessor ),
-                               &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -905,7 +878,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                stime,
                                atime,
                                reinterpret_cast<unsigned long long ( * )( void * )>( m_detail.accessor ),
-                               &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
                 return m_invalidValue;
@@ -922,7 +894,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                stime,
                                atime,
                                reinterpret_cast<float ( * )( void * )>( m_detail.accessor ),
-                               &m_hint,
                                maxGap,
                                &m_unavailableReason,
                                m_detail.metaType == metaTypes::Continuous_Angle ) != 0 )
@@ -940,7 +911,6 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                stime,
                                atime,
                                reinterpret_cast<double ( * )( void * )>( m_detail.accessor ),
-                               &m_hint,
                                maxGap,
                                &m_unavailableReason,
                                m_detail.metaType == metaTypes::Continuous_Angle ) != 0 )
@@ -971,7 +941,6 @@ std::string logMeta::valueString( logMap<verboseT>          &lm,
                             stime,
                             atime,
                             reinterpret_cast<std::string ( * )( void * )>( m_detail.accessor ),
-                            &m_hint,
                             maxGap,
                             &m_unavailableReason ) != 0 )
         {

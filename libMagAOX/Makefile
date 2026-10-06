@@ -35,6 +35,7 @@ INCLUDEDEPS= \
 	ImageStreamIO/ImageStruct.hpp \
 	ImageStreamIO/pixaccess.hpp \
 	logger/logFileRaw.hpp \
+	logger/logExtensions.hpp \
 	logger/logManager.hpp \
 	logger/logMap.hpp \
 	logger/logMeta.hpp \
@@ -158,8 +159,8 @@ logger/generated/logTypes.hpp: logger/logCodes.dat logger/types/schemas/*.fbs ..
 libMagAOX.a: libMagAOX.hpp.gch $(OBJS)
 	ar rvs libMagAOX.a $(OBJS)
 
-logger/logMeta.o: logger/logMap.hpp logger/logMap.cpp logger/logMeta.hpp logger/logMeta.cpp logger/generated/logTypes.hpp
-logger/logMap.o: logger/logMap.hpp logger/logMap.cpp
+logger/logMeta.o: logger/logExtensions.hpp logger/logMap.hpp logger/logMap.cpp logger/logMeta.hpp logger/logMeta.cpp logger/generated/logTypes.hpp
+logger/logMap.o: logger/logExtensions.hpp logger/logMap.hpp logger/logMap.cpp
 
 clean:
 	rm -f libMagAOX.hpp.gch

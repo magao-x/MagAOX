@@ -238,7 +238,7 @@ class xrif2fits : public mx::app::application
     /// Write FITS header and text metadata for one configured metadata item.
     bool appendMetadata( mx::fits::fitsHeader<verboseT> &fh,        /**< [in,out] FITS header being built */
                          std::ofstream                  &metaOut,   /**< [in,out] metadata text stream */
-                         logMeta                        &meta,      /**< [in,out] metadata item with lookup hints */
+                         logMeta                        &meta,      /**< [in,out] metadata item to look up */
                          bool                            writeMeta, /**< [in] true to write metadata text */
                          bool                       canLookup, /**< [in] true if interval metadata lookup is valid */
                          const flatlogs::timespecX &stime,     /**< [in] exposure start time */
@@ -723,9 +723,17 @@ inline mx::error_t xrif2fits::loadMetaFileMaps( logMap<verboseT>               &
 
     if( logMap.m_appToFileMap[app].size() == 0 )
     {
+        // Name every extension searched.
+        std::string searched;
+        for( const std::string &oneExt : logExtensionsFor( ext ) )
+        {
+            searched += ( searched.empty() ? "" : " and " ) + oneExt;
+        }
+
         recoverableError( source + ":" + app + ":no-files",
-                          "No " + source + " files found in the requested time range for " + app +
-                              "; metadata from this source will be marked " + logMeta::unavailableValue() + "." );
+                          "No " + source + " files found in the requested time range for " + app + " (searched " +
+                              searched + "); metadata from this source will be marked " + logMeta::unavailableValue() +
+                              "." );
     }
 
     return mx::error_t::noerror;
@@ -789,8 +797,8 @@ inline bool xrif2fits::exposureTime( timespec &stime, double &exptime, const std
         return false;
     }
 
-    char *prior = nullptr;
-    if( m_tels.getPriorLog( prior, app, eventCodes::TELEM_STDCAM, atime ) != 0 || prior == nullptr )
+    logEntryRecord prior;
+    if( m_tels.getPriorEntry( prior, app, eventCodes::TELEM_STDCAM, atime ) != 0 || prior.empty() )
     {
         recoverableError( "exptime:" + app + ":no-prior",
                           "No prior exposure-time telemetry is available for " + app +
@@ -798,8 +806,8 @@ inline bool xrif2fits::exposureTime( timespec &stime, double &exptime, const std
         return false;
     }
 
-    exptime = telem_stdcam::exptime( logHeader::messageBuffer( prior ) );
-    if( !logMetaGapValid( logHeader::timespec( prior ), atime, m_maxMetadataGap ) )
+    exptime = telem_stdcam::exptime( prior.message() );
+    if( !logMetaGapValid( prior.m_ts, atime, m_maxMetadataGap ) )
     {
         recoverableError( "exptime:" + app + ":prior-gap",
                           "Prior exposure-time telemetry for " + app +
@@ -814,10 +822,10 @@ inline bool xrif2fits::exposureTime( timespec &stime, double &exptime, const std
                            std::to_string( atime.tv_nsec ) + " exptime=" + std::to_string( exptime ) +
                            " stime=" + std::to_string( stime.tv_sec ) + "." + std::to_string( stime.tv_nsec ) );
 
-    char *priorprior = nullptr;
-    if( m_tels.getPriorLog( priorprior, app, eventCodes::TELEM_STDCAM, stime ) == 0 && priorprior != nullptr )
+    logEntryRecord priorprior;
+    if( m_tels.getPriorEntry( priorprior, app, eventCodes::TELEM_STDCAM, stime ) == 0 && !priorprior.empty() )
     {
-        if( !logMetaGapValid( logHeader::timespec( priorprior ), stime, m_maxMetadataGap ) )
+        if( !logMetaGapValid( priorprior.m_ts, stime, m_maxMetadataGap ) )
         {
             recoverableError( "exptime:" + app + ":start-prior-gap",
                               "Exposure-start telemetry for " + app +
@@ -827,7 +835,7 @@ inline bool xrif2fits::exposureTime( timespec &stime, double &exptime, const std
         }
 
         /// \todo this needs to check for any log entries between end and start
-        if( telem_stdcam::exptime( logHeader::messageBuffer( priorprior ) ) != exptime )
+        if( telem_stdcam::exptime( priorprior.message() ) != exptime )
         {
             std::cerr << invokedName << ": Change in exposure time mid-exposure\n";
         }
