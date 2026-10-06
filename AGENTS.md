@@ -1,11 +1,17 @@
 Follow these code style and documentation rules exactly.
 
+0) Agents/LLMs should never be installed or execute on the actual instrument hardware.
+  - users should run such tools on their local workstations/laptops
+  - This prohibition includes exao1(AOC), exao2(RTC), exao3(ICC) and exao5 (ROC) on MagAO-X.  It includes similar-function machines in other projects.
+  - This includes running commands such as getINDI and setINDI when an INDI tunnel is open to any instrument commputer
+  - Agents/LLMs should instead ask the user to run any such commands / hardware steps and report the results.
+
 1) Style, Reuse of Code, and Brevity 
-  - Follow the coding style of this repo.  Specific style points are list below but are not exhaustive.
+  - Follow the coding style of this repo.  Specific style points are listed below but are not exhaustive.
   - Favor brevity in code
   - Reuse code whenever possible.  
-  - Check for similar problems in MagAO-X.  Use existing base classes when possible.  
-  - Propose new base classes or common library utilities if similar problems exist in other contexts.
+  - Check for similar problems in this repo that have already been solved.  Use existing base classes when possible.  
+  - Propose new base classes or common library utilities if similar problems exist in other contexts but have not been generalized
   - Use solutions in dependencies, such as mxlib, gsl, blas/lapack, cuda, whenever possible.
 
 2) File-Level Documentation
