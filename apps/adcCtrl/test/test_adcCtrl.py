@@ -151,17 +151,17 @@ class FakeClient(dict):
         self.follow_adc = follow_adc
 
     def __setitem__(self, key, value):
-        if hasattr(self, 'writes'):
+        if hasattr(self, "writes"):
             self.writes.append((key, value))
         super().__setitem__(key, value)
-        if getattr(self, 'follow_adc', False) and key.endswith('.target') and '.deltaADC' in key:
-            super().__setitem__(key.replace('.target', '.current'), value)
+        if getattr(self, "follow_adc", False) and key.endswith(".target") and ".deltaADC" in key:
+            super().__setitem__(key.replace(".target", ".current"), value)
 
     def get_properties(self, device_name):
         pass
 
     def adc_writes(self):
-        return [w for w in self.writes if w[0].startswith('adctrack.')]
+        return [w for w in self.writes if w[0].startswith("adctrack.")]
 
 
 class FakeCamera:
@@ -174,21 +174,21 @@ class FakeCamera:
     def grab_stack(self, num_images, subtract_dark=True):
         self.calls.append((num_images, subtract_dark))
         if self.fail:
-            raise TimeoutError('no frames')
+            raise TimeoutError("no frames")
         return self.frame
 
 
 def adc_client(**kwargs):
     client = FakeClient(**kwargs)
     dict.update(client, {
-        'adctrack.deltaADC1.current': 0.0,
-        'adctrack.deltaADC2.current': 0.0,
-        'adctrack.tracking.toggle': ON,
-        'tweeterSpeck.separation.current': 15.0,
-        'tweeterSpeck.angle.current': 0.0,
-        'fwsci1.filterName.i': OFF,
-        'fwsci1.filterName.z': OFF,
-        'fwsci1.filterName.r': OFF,
+        "adctrack.deltaADC1.current": 0.0,
+        "adctrack.deltaADC2.current": 0.0,
+        "adctrack.tracking.toggle": ON,
+        "tweeterSpeck.separation.current": 15.0,
+        "tweeterSpeck.angle.current": 0.0,
+        "fwsci1.filterName.i": OFF,
+        "fwsci1.filterName.z": OFF,
+        "fwsci1.filterName.r": OFF,
     })
     return client
 
@@ -197,7 +197,7 @@ def make_device(client=None, camera=None, **config_overrides):
     """Build an adcCtrl without starting INDI, logging files or the camera."""
     dev = object.__new__(adcCtrl)
     dev.config = AdcCtrlConfig(**config_overrides)
-    dev.log = logging.getLogger('adcCtrl-test')
+    dev.log = logging.getLogger("adcCtrl-test")
     dev.client = client if client is not None else adc_client()
     dev.properties = {}
     dev.callbacks = {}
@@ -359,16 +359,16 @@ def test_state_transitions():
     """Each state switch sets the internal state, switch elements and fsm."""
     dev = make_device()
     for name, state, fsm in [
-        ('adcLoop', States.CLOSED_LOOP, 'OPERATING'),
-        ('measure-only', States.MEASURE_ONLY, 'OPERATING'),
-        ('oneshot', States.ONESHOT, 'OPERATING'),
-        ('idle', States.IDLE, 'READY'),
+        ("adcLoop", States.CLOSED_LOOP, "OPERATING"),
+        ("measure-only", States.MEASURE_ONLY, "OPERATING"),
+        ("oneshot", States.ONESHOT, "OPERATING"),
+        ("idle", States.IDLE, "READY"),
     ]:
-        send(dev, 'state', **{name: ON})
+        send(dev, "state", **{name: ON})
         assert dev._state == state
-        assert dev.properties['state'][name] == ON
-        assert dev.properties['fsm']['state'] == fsm
-    send(dev, 'state', idle=OFF)
+        assert dev.properties["state"][name] == ON
+        assert dev.properties["fsm"]["state"] == fsm
+    send(dev, "state", idle=OFF)
     assert dev._state == States.IDLE
 
 
@@ -376,10 +376,10 @@ def test_oneshot_sends_once_then_idles():
     """One-shot sends exactly one command and returns to idle."""
     camera = FakeCamera(make_frame(dispersion=(0.02, 0.0)))
     dev = make_device(camera=camera)
-    send(dev, 'state', oneshot=ON)
+    send(dev, "state", oneshot=ON)
     dev.loop()
     assert dev._state == States.IDLE
-    assert len([w for w in dev.client.adc_writes() if w[0].endswith('deltaADC1.target')]) == 1
+    assert len([w for w in dev.client.adc_writes() if w[0].endswith("deltaADC1.target")]) == 1
     dev.loop()
     assert len(camera.calls) == 1
 
@@ -388,12 +388,12 @@ def test_measure_only_never_writes_adc():
     """Measure-only publishes measurements but never writes to adctrack."""
     camera = FakeCamera(make_frame(dispersion=(0.02, 0.0)))
     dev = make_device(camera=camera)
-    send(dev, 'state', **{'measure-only': ON})
+    send(dev, "state", **{"measure-only": ON})
     for _ in range(3):
         dev.loop()
     assert dev.client.adc_writes() == []
-    assert dev.properties['measurement']['n_valid'] == 1
-    assert dev.properties['status']['last_command'] == 'measure-only'
+    assert dev.properties["measurement"]["n_valid"] == 1
+    assert dev.properties["status"]["last_command"] == "measure-only"
 
 
 def test_idle_does_nothing():
@@ -418,19 +418,19 @@ def test_send_command_times_out():
 def test_send_command_tracking_off_does_not_wait():
     """With tracking off the command is written without waiting for the stages."""
     client = adc_client(follow_adc=False)
-    dict.__setitem__(client, 'adctrack.tracking.toggle', OFF)
+    dict.__setitem__(client, "adctrack.tracking.toggle", OFF)
     dev = make_device(client=client, send_timeout_sec=5.0)
     dev.set_command(0.3, 0.0)
     start = time.monotonic()
     assert dev.send_command() is True
     assert time.monotonic() - start < 0.5
-    assert ('adctrack.deltaADC1.target', 0.3) in client.writes
+    assert ("adctrack.deltaADC1.target", 0.3) in client.writes
 
 
 def test_camera_failures_drop_closed_loop_to_idle():
     """Repeated camera failures in closed loop end in idle without raising."""
     dev = make_device(camera=FakeCamera(fail=True), max_consecutive_failures=3)
-    send(dev, 'state', adcLoop=ON)
+    send(dev, "state", adcLoop=ON)
     for _ in range(3):
         dev.loop()
     assert dev._state == States.IDLE
@@ -450,8 +450,8 @@ def test_missing_external_properties_use_defaults():
 def test_filter_sets_normalized_wavelength():
     """The selected filter on the active wheel sets the normalized wavelength."""
     client = adc_client()
-    dict.__setitem__(client, 'fwsci1.filterName.z', ON)
-    dict.__setitem__(client, 'fwsci2.filterName.i', ON)
+    dict.__setitem__(client, "fwsci1.filterName.z", ON)
+    dict.__setitem__(client, "fwsci2.filterName.i", ON)
     dev = make_device(client=client)
     dev.check_indi_props()
     assert abs(dev._normalized_wavelength - 908 / 656) < 1e-12
@@ -470,16 +470,16 @@ def test_dark_used_only_when_present():
 def test_camera_switch_only_when_idle():
     """The camera can be switched while idle, and the filter wheel follows it."""
     client = adc_client()
-    dict.__setitem__(client, 'fwsci2.filterName.i', ON)
+    dict.__setitem__(client, "fwsci2.filterName.i", ON)
     dev = make_device(client=client, camera=FakeCamera(make_frame()))
-    send(dev, 'state', adcLoop=ON)
-    send(dev, 'camera', camsci2=ON)
-    assert dev._camera_name == 'camsci1'
-    send(dev, 'state', idle=ON)
-    send(dev, 'camera', camsci2=ON)
-    assert dev._camera_name == 'camsci2'
+    send(dev, "state", adcLoop=ON)
+    send(dev, "camera", camsci2=ON)
+    assert dev._camera_name == "camsci1"
+    send(dev, "state", idle=ON)
+    send(dev, "camera", camsci2=ON)
+    assert dev._camera_name == "camsci2"
     assert dev.camera is None
-    assert dev.properties['camera']['camsci2'] == ON
+    assert dev.properties["camera"]["camsci2"] == ON
     dev.check_indi_props()
     assert abs(dev._normalized_wavelength - 762 / 656) < 1e-12
 
@@ -487,10 +487,10 @@ def test_camera_switch_only_when_idle():
 def test_ctrl_mtx_handler():
     """ctrl_mtx updates set the matching element as a float."""
     dev = make_device()
-    send(dev, 'ctrl_mtx', m00=1.5)
-    send(dev, 'ctrl_mtx', m01=-2.25)
+    send(dev, "ctrl_mtx", m00=1.5)
+    send(dev, "ctrl_mtx", m01=-2.25)
     np.testing.assert_allclose(dev._control_mtx, [1.5, -2.25])
-    assert dev.properties['ctrl_mtx']['m01'] == -2.25
+    assert dev.properties["ctrl_mtx"]["m01"] == -2.25
 
 
 def test_state_change_aborts_batch():
@@ -499,11 +499,11 @@ def test_state_change_aborts_batch():
 
     class SwitchingCamera(FakeCamera):
         def grab_stack(self, num_images, subtract_dark=True):
-            send(dev, 'state', idle=ON)
+            send(dev, "state", idle=ON)
             return super().grab_stack(num_images, subtract_dark)
 
     dev.camera = SwitchingCamera(make_frame())
-    send(dev, 'state', adcLoop=ON)
+    send(dev, "state", adcLoop=ON)
     dev._no_measurements = 5
     dev.loop()
     assert len(dev.camera.calls) == 1
@@ -515,12 +515,12 @@ def test_offset_and_reset_callbacks_do_not_block():
     client = adc_client(follow_adc=False)
     dev = make_device(client=client, send_timeout_sec=0.2)
     start = time.monotonic()
-    send(dev, 'offset', target=1.0)
-    send(dev, 'reset_deltaADCs', request=ON)
+    send(dev, "offset", target=1.0)
+    send(dev, "reset_deltaADCs", request=ON)
     assert time.monotonic() - start < 0.1
     assert client.adc_writes() == []
     dev.loop()
-    assert ('adctrack.deltaADC1.target', 1.0) in client.writes
+    assert ("adctrack.deltaADC1.target", 1.0) in client.writes
     assert dev.delta_1 == 0.0
 
 
@@ -528,10 +528,10 @@ def test_loop_sign_flips_command():
     """The loop_sign switch flips the sign of the commanded step."""
     frame = make_frame(dispersion=(0.02, 0.0))
     steps = []
-    for sign in ['positive', 'negative']:
+    for sign in ["positive", "negative"]:
         dev = make_device(camera=FakeCamera(frame))
-        send(dev, 'loop_sign', **{sign: ON})
-        send(dev, 'state', oneshot=ON)
+        send(dev, "loop_sign", **{sign: ON})
+        send(dev, "state", oneshot=ON)
         dev.loop()
         steps.append(dev.delta_1)
     assert steps[0] != 0.0

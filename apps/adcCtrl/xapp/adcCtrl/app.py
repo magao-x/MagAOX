@@ -166,7 +166,7 @@ def subtract_radial_profile(image, bin_size):
     good = np.isfinite(profile)
     if not np.any(good):
         return image
-    r_coordinates = image.grid.as_('polar').r
+    r_coordinates = image.grid.as_("polar").r
     radial_map = np.interp(r_coordinates, binc[good], profile[good])
     return image - radial_map
 
@@ -403,7 +403,7 @@ def measure_spot_angles(frame, geometry, pixel_scale, pad=50, mask_factor=0.7, r
     if frame.ndim != 2:
         raise ValueError(f"expected a 2D frame, got shape {frame.shape}")
 
-    img = np.pad(frame, pad_width=pad, mode='constant', constant_values=0)
+    img = np.pad(frame, pad_width=pad, mode="constant", constant_values=0)
     ny, nx = img.shape
     grid = hp.make_pupil_grid([nx, ny], [nx * pixel_scale, ny * pixel_scale])
     field = hp.Field(img.ravel(), grid)
@@ -461,14 +461,14 @@ class CameraConfig:
 def _default_cameras():
     """Default camera table: camsci1 with fwsci1, camsci2 with fwsci2."""
     return {
-        'camsci1': CameraConfig(shmim='camsci1', filter_wheel='fwsci1'),
-        'camsci2': CameraConfig(shmim='camsci2', filter_wheel='fwsci2'),
+        "camsci1": CameraConfig(shmim="camsci1", filter_wheel="fwsci1"),
+        "camsci2": CameraConfig(shmim="camsci2", filter_wheel="fwsci2"),
     }
 
 
 def _default_filter_wavelengths():
     """Default filter center wavelengths [m], keyed by filter wheel element name."""
-    return {'r': 615e-9, 'i': 762e-9, 'z': 908e-9}
+    return {"r": 615e-9, "i": 762e-9, "z": 908e-9}
 
 
 @xconf.config
@@ -480,9 +480,9 @@ class AdcCtrlConfig(BaseConfig):
     """
     sleep_interval_sec : float = xconf.field(default=0.25, help="Sleep interval between loop() calls")
     cameras : dict[str, CameraConfig] = xconf.field(default_factory=_default_cameras, help="Selectable science cameras, keyed by INDI element name")
-    default_camera : str = xconf.field(default='camsci1', help="Camera selected at startup (key of cameras)")
-    adc_device : str = xconf.field(default='adctrack', help="INDI device name of the ADC tracker")
-    speckle_device : str = xconf.field(default='tweeterSpeck', help="INDI device name of the active satellite spot (sparkle) generator")
+    default_camera : str = xconf.field(default="camsci1", help="Camera selected at startup (key of cameras)")
+    adc_device : str = xconf.field(default="adctrack", help="INDI device name of the ADC tracker")
+    speckle_device : str = xconf.field(default="tweeterSpeck", help="INDI device name of the active satellite spot (sparkle) generator")
     pixel_scale_lod : float = xconf.field(default=6.0 / 21.0, help="Pixel scale in lambda/D at the reference wavelength")
     reference_wavelength : float = xconf.field(default=656e-9, help="Reference wavelength [m] for the pixel scale, used when no listed filter is selected")
     filter_wavelengths : dict[str, float] = xconf.field(default_factory=_default_filter_wavelengths, help="Filter wheel element name to center wavelength [m]")
@@ -516,14 +516,14 @@ class States(Enum):
 
 # INDI `state` switch element name -> operating state
 STATE_ELEMENTS = {
-    'idle': States.IDLE,
-    'adcLoop': States.CLOSED_LOOP,
-    'oneshot': States.ONESHOT,
-    'measure-only': States.MEASURE_ONLY,
+    "idle": States.IDLE,
+    "adcLoop": States.CLOSED_LOOP,
+    "oneshot": States.ONESHOT,
+    "measure-only": States.MEASURE_ONLY,
 }
 
 # INDI `loop_sign` switch element name -> multiplier applied to each step
-LOOP_SIGNS = {'positive': 1.0, 'negative': -1.0}
+LOOP_SIGNS = {"positive": 1.0, "negative": -1.0}
 
 
 def requested_switch(new_message, names):
@@ -556,8 +556,8 @@ class adcCtrl(XDevice):
         # zero the ADC offsets once adctrack is reachable
         self._pending_reset = True
 
-        self.properties['fsm']['state'] = StateCodes.READY.name
-        self.update_property(self.properties['fsm'])
+        self.properties["fsm"]["state"] = StateCodes.READY.name
+        self.update_property(self.properties["fsm"])
 
     def init_state(self):
         """Initialize internal state from the configuration."""
@@ -604,12 +604,12 @@ class adcCtrl(XDevice):
 
     def create_properties(self):
         """Create all INDI properties."""
-        fsm = properties.TextVector(name='fsm')
-        fsm.add_element(DefText(name='state', _value=StateCodes.INITIALIZED.name))
+        fsm = properties.TextVector(name="fsm")
+        fsm.add_element(DefText(name="state", _value=StateCodes.INITIALIZED.name))
         self.add_property(fsm)
 
         sv = properties.SwitchVector(
-            name='state',
+            name="state",
             rule=constants.SwitchRule.ONE_OF_MANY,
             perm=constants.PropertyPerm.READ_WRITE,
         )
@@ -617,77 +617,77 @@ class adcCtrl(XDevice):
             sv.add_element(DefSwitch(name=name, _value=constants.SwitchState.ON if state == States.IDLE else constants.SwitchState.OFF))
         self.add_property(sv, callback=self.handle_state)
 
-        nv = properties.NumberVector(name='n_avg')
+        nv = properties.NumberVector(name="n_avg")
         nv.add_element(DefNumber(
-            name='current', label='Number of frames', format='%i',
+            name="current", label="Number of frames", format="%i",
             min=1, max=150, step=1, _value=self._n_avg
         ))
         nv.add_element(DefNumber(
-            name='target', label='Number of frames', format='%i',
+            name="target", label="Number of frames", format="%i",
             min=1, max=150, step=1, _value=self._n_avg
         ))
         self.add_property(nv, callback=self.handle_n_avg)
 
-        nv = properties.NumberVector(name='no_measurements')
+        nv = properties.NumberVector(name="no_measurements")
         nv.add_element(DefNumber(
-            name='number', label='number', format='%i',
+            name="number", label="number", format="%i",
             min=1, max=100.00, step=1, _value=self._no_measurements
         ))
         self.add_property(nv, callback=self.handle_no_measurements)
 
-        nv = properties.NumberVector(name='gain')
+        nv = properties.NumberVector(name="gain")
         nv.add_element(DefNumber(
-            name='current', label='ADC Loop Gain', format='%.2f',
+            name="current", label="ADC Loop Gain", format="%.2f",
             min=0.00, max=1.00, step=0.01, _value=self._gain
         ))
         nv.add_element(DefNumber(
-            name='target', label='ADC Loop Gain', format='%.2f',
+            name="target", label="ADC Loop Gain", format="%.2f",
             min=0.00, max=1.00, step=0.01, _value=self._gain
         ))
         self.add_property(nv, callback=self.handle_gain)
 
-        nv = properties.NumberVector(name='offset')
+        nv = properties.NumberVector(name="offset")
         nv.add_element(DefNumber(
-            name='current', label='offset', format='%.2f',
+            name="current", label="offset", format="%.2f",
             min=-45, max=45, step=0.01, _value=self._offset
         ))
         nv.add_element(DefNumber(
-            name='target', label='offset', format='%.2f',
+            name="target", label="offset", format="%.2f",
             min=-45, max=45, step=0.01, _value=self._offset
         ))
         self.add_property(nv, callback=self.handle_offset)
 
-        nv = properties.NumberVector(name='ctrl_mtx')
+        nv = properties.NumberVector(name="ctrl_mtx")
         nv.add_element(DefNumber(
-            name='m00', label='m00', format='%.4f',
+            name="m00", label="m00", format="%.4f",
             min=-10.00, max=10.00, step=0.0001, _value=float(self._control_mtx[0])
         ))
         nv.add_element(DefNumber(
-            name='m01', label='m01', format='%.4f',
+            name="m01", label="m01", format="%.4f",
             min=-10.00, max=10.00, step=0.0001, _value=float(self._control_mtx[1])
         ))
         self.add_property(nv, callback=self.handle_ctrl_mtx)
 
         sv = properties.SwitchVector(
-            name='loop_sign',
+            name="loop_sign",
             rule=constants.SwitchRule.ONE_OF_MANY,
             perm=constants.PropertyPerm.READ_WRITE,
         )
-        sv.add_element(DefSwitch(name='positive', _value=constants.SwitchState.ON))
-        sv.add_element(DefSwitch(name='negative', _value=constants.SwitchState.OFF))
+        sv.add_element(DefSwitch(name="positive", _value=constants.SwitchState.ON))
+        sv.add_element(DefSwitch(name="negative", _value=constants.SwitchState.OFF))
         self.add_property(sv, callback=self.handle_loop_sign)
 
         sv = properties.SwitchVector(
-            name='satellite_spots',
+            name="satellite_spots",
             rule=constants.SwitchRule.ONE_OF_MANY,
             perm=constants.PropertyPerm.READ_WRITE,
         )
-        sv.add_element(DefSwitch(name='sparkles', _value=constants.SwitchState.ON))
-        sv.add_element(DefSwitch(name='dm_spots', _value=constants.SwitchState.OFF))
+        sv.add_element(DefSwitch(name="sparkles", _value=constants.SwitchState.ON))
+        sv.add_element(DefSwitch(name="dm_spots", _value=constants.SwitchState.OFF))
         self.add_property(sv, callback=self.handle_spots)
 
         sv = properties.SwitchVector(
-            name='camera',
+            name="camera",
             rule=constants.SwitchRule.ONE_OF_MANY,
             perm=constants.PropertyPerm.READ_WRITE,
         )
@@ -696,28 +696,28 @@ class adcCtrl(XDevice):
         self.add_property(sv, callback=self.handle_camera)
 
         sv = properties.SwitchVector(
-            name='reset_deltaADCs',
+            name="reset_deltaADCs",
             rule=constants.SwitchRule.ONE_OF_MANY,
             perm=constants.PropertyPerm.READ_WRITE,
         )
-        sv.add_element(DefSwitch(name='request', _value=constants.SwitchState.OFF))
+        sv.add_element(DefSwitch(name="request", _value=constants.SwitchState.OFF))
         self.add_property(sv, callback=self.handle_reset)
 
-        nv = properties.NumberVector(name='measurement', perm=constants.PropertyPerm.READ_ONLY)
-        for name in ['angle0', 'angle1', 'angle2', 'angle3', 'dev0', 'dev1', 'dev2', 'dev3', 'pair02', 'pair13', 'error']:
-            nv.add_element(DefNumber(name=name, label=name, format='%.3f', min=-1e6, max=1e6, step=0, _value=0.0))
-        nv.add_element(DefNumber(name='n_valid', label='n_valid', format='%i', min=0, max=1000, step=1, _value=0))
-        nv.add_element(DefNumber(name='n_total', label='n_total', format='%i', min=0, max=1000, step=1, _value=0))
+        nv = properties.NumberVector(name="measurement", perm=constants.PropertyPerm.READ_ONLY)
+        for name in ["angle0", "angle1", "angle2", "angle3", "dev0", "dev1", "dev2", "dev3", "pair02", "pair13", "error"]:
+            nv.add_element(DefNumber(name=name, label=name, format="%.3f", min=-1e6, max=1e6, step=0, _value=0.0))
+        nv.add_element(DefNumber(name="n_valid", label="n_valid", format="%i", min=0, max=1000, step=1, _value=0))
+        nv.add_element(DefNumber(name="n_total", label="n_total", format="%i", min=0, max=1000, step=1, _value=0))
         self.add_property(nv)
 
-        nv = properties.NumberVector(name='command', perm=constants.PropertyPerm.READ_ONLY)
-        nv.add_element(DefNumber(name='step', label='last step', format='%.3f', min=-1e6, max=1e6, step=0, _value=0.0))
-        nv.add_element(DefNumber(name='delta1', label='total delta1', format='%.3f', min=-1e6, max=1e6, step=0, _value=0.0))
+        nv = properties.NumberVector(name="command", perm=constants.PropertyPerm.READ_ONLY)
+        nv.add_element(DefNumber(name="step", label="last step", format="%.3f", min=-1e6, max=1e6, step=0, _value=0.0))
+        nv.add_element(DefNumber(name="delta1", label="total delta1", format="%.3f", min=-1e6, max=1e6, step=0, _value=0.0))
         self.add_property(nv)
 
-        tv = properties.TextVector(name='status', perm=constants.PropertyPerm.READ_ONLY)
-        tv.add_element(DefText(name='last_command', _value='none'))
-        tv.add_element(DefText(name='last_error', _value=''))
+        tv = properties.TextVector(name="status", perm=constants.PropertyPerm.READ_ONLY)
+        tv.add_element(DefText(name="last_command", _value="none"))
+        tv.add_element(DefText(name="last_error", _value=""))
         self.add_property(tv)
 
     def ext(self, key, default=None):
@@ -729,7 +729,7 @@ class adcCtrl(XDevice):
         if value is None:
             if key not in self._warned_keys:
                 self._warned_keys.add(key)
-                self.log.warning(f'{key} is not available, using {default}')
+                self.log.warning(f"{key} is not available, using {default}")
             return default
         return value
 
@@ -746,10 +746,10 @@ class adcCtrl(XDevice):
             )
         except Exception as e:
             self.camera = None
-            self.set_error(f'could not open camera {cam_cfg.shmim}: {e}')
+            self.set_error(f"could not open camera {cam_cfg.shmim}: {e}")
             return False
         self._warned_no_dark = False
-        self.log.info(f'Using camera {cam_cfg.shmim}')
+        self.log.info(f"Using camera {cam_cfg.shmim}")
         return True
 
     def check_indi_props(self):
@@ -757,16 +757,16 @@ class adcCtrl(XDevice):
         wheel = self.config.cameras[self._camera_name].filter_wheel
         wavelength = self.config.reference_wavelength
         for name, filter_wavelength in self.config.filter_wavelengths.items():
-            if self.ext(f'{wheel}.filterName.{name}') == constants.SwitchState.ON:
+            if self.ext(f"{wheel}.filterName.{name}") == constants.SwitchState.ON:
                 wavelength = filter_wavelength
                 break
         self._normalized_wavelength = wavelength / self.config.reference_wavelength
 
         dev = self.config.speckle_device
-        self._sparkle_freq = float(self.ext(f'{dev}.separation.current', self._sparkle_freq))
-        self._sparkle_angle = float(self.ext(f'{dev}.angle.current', self._sparkle_angle))
+        self._sparkle_freq = float(self.ext(f"{dev}.separation.current", self._sparkle_freq))
+        self._sparkle_angle = float(self.ext(f"{dev}.angle.current", self._sparkle_angle))
 
-        self.log.debug(f'normalized wavelength {self._normalized_wavelength:.3f}, sparkles {self._sparkle_freq} l/D at {self._sparkle_angle} deg')
+        self.log.debug(f"normalized wavelength {self._normalized_wavelength:.3f}, sparkles {self._sparkle_freq} l/D at {self._sparkle_angle} deg")
 
     def spot_geometry(self):
         """Search geometry for the selected spot source at the current wavelength."""
@@ -787,10 +787,10 @@ class adcCtrl(XDevice):
     def set_status(self, last_command=None, last_error=None):
         """Update the read-only status property."""
         if last_command is not None:
-            self.properties['status']['last_command'] = last_command
+            self.properties["status"]["last_command"] = last_command
         if last_error is not None:
-            self.properties['status']['last_error'] = last_error
-        self.update_property(self.properties['status'])
+            self.properties["status"]["last_error"] = last_error
+        self.update_property(self.properties["status"])
 
     def set_error(self, message):
         """Log an error and show it in the status property."""
@@ -801,10 +801,10 @@ class adcCtrl(XDevice):
         """Switch operating state, updating the state switch and fsm."""
         self._state = state
         for name, s in STATE_ELEMENTS.items():
-            self.properties['state'][name] = constants.SwitchState.ON if s == state else constants.SwitchState.OFF
-        self.properties['fsm']['state'] = StateCodes.READY.name if state == States.IDLE else StateCodes.OPERATING.name
-        self.update_property(self.properties['state'])
-        self.update_property(self.properties['fsm'])
+            self.properties["state"][name] = constants.SwitchState.ON if s == state else constants.SwitchState.OFF
+        self.properties["fsm"]["state"] = StateCodes.READY.name if state == States.IDLE else StateCodes.OPERATING.name
+        self.update_property(self.properties["state"])
+        self.update_property(self.properties["fsm"])
 
     def transition_to_idle(self):
         """Return to the idle state."""
@@ -821,17 +821,17 @@ class adcCtrl(XDevice):
             self.check_indi_props()
             self._consecutive_failures = 0
         self.set_state(state)
-        self.log.debug(f'State changed to {target}')
+        self.log.debug(f"State changed to {target}")
 
     def handle_spots(self, existing_property, new_message):
         """INDI callback for `satellite_spots`: choose sparkles or DM spots."""
-        target = requested_switch(new_message, ['sparkles', 'dm_spots'])
+        target = requested_switch(new_message, ["sparkles", "dm_spots"])
         if target is not None:
-            for key in ['sparkles', 'dm_spots']:
+            for key in ["sparkles", "dm_spots"]:
                 existing_property[key] = constants.SwitchState.ON if key == target else constants.SwitchState.OFF
-            self._use_sparkles = (target == 'sparkles')
+            self._use_sparkles = (target == "sparkles")
             self.check_indi_props()
-            self.log.debug(f'using {target}')
+            self.log.debug(f"using {target}")
         self.update_property(existing_property)
 
     def handle_camera(self, existing_property, new_message):
@@ -839,14 +839,14 @@ class adcCtrl(XDevice):
         target = requested_switch(new_message, list(self.config.cameras))
         if target is not None and target != self._camera_name:
             if self._state != States.IDLE:
-                self.log.warning('Camera can only be changed while idle')
+                self.log.warning("Camera can only be changed while idle")
             else:
                 existing_property[self._camera_name] = constants.SwitchState.OFF
                 existing_property[target] = constants.SwitchState.ON
                 self._camera_name = target
                 self.camera = None
                 self._last_camera_attempt = None
-                self.log.info(f'camera changed to {target}')
+                self.log.info(f"camera changed to {target}")
         self.update_property(existing_property)
 
     def handle_loop_sign(self, existing_property, new_message):
@@ -856,60 +856,60 @@ class adcCtrl(XDevice):
             for key in LOOP_SIGNS:
                 existing_property[key] = constants.SwitchState.ON if key == target else constants.SwitchState.OFF
             self._loop_sign = LOOP_SIGNS[target]
-            self.log.info(f'loop sign set to {target}')
+            self.log.info(f"loop sign set to {target}")
         self.update_property(existing_property)
 
     def handle_reset(self, existing_property, new_message):
         """INDI callback for `reset_deltaADCs`: queue zeroing of the ADC offsets."""
-        if 'request' in new_message and new_message['request'] == constants.SwitchState.ON:
-            self.log.debug('resetting deltaADC properties')
+        if "request" in new_message and new_message["request"] == constants.SwitchState.ON:
+            self.log.debug("resetting deltaADC properties")
             self._pending_reset = True
-        existing_property['request'] = constants.SwitchState.OFF
+        existing_property["request"] = constants.SwitchState.OFF
         self.update_property(existing_property)
 
     def handle_n_avg(self, existing_property, new_message):
         """INDI callback for `n_avg`: frames averaged per image."""
-        if 'target' in new_message and new_message['target'] != existing_property['current']:
-            existing_property['current'] = new_message['target']
-            existing_property['target'] = new_message['target']
-            self._n_avg = int(new_message['target'])
-            self.log.debug(f'now averaging over {self._n_avg} frames')
+        if "target" in new_message and new_message["target"] != existing_property["current"]:
+            existing_property["current"] = new_message["target"]
+            existing_property["target"] = new_message["target"]
+            self._n_avg = int(new_message["target"])
+            self.log.debug(f"now averaging over {self._n_avg} frames")
         self.update_property(existing_property)
 
     def handle_no_measurements(self, existing_property, new_message):
         """INDI callback for `no_measurements`: images per command."""
-        if 'number' in new_message and new_message['number'] != existing_property['number']:
-            existing_property['number'] = new_message['number']
-            self._no_measurements = int(new_message['number'])
-            self.log.debug(f'now averaging {self._no_measurements} measurements before sending command')
+        if "number" in new_message and new_message["number"] != existing_property["number"]:
+            existing_property["number"] = new_message["number"]
+            self._no_measurements = int(new_message["number"])
+            self.log.debug(f"now averaging {self._no_measurements} measurements before sending command")
         self.update_property(existing_property)
 
     def handle_gain(self, existing_property, new_message):
         """INDI callback for `gain`."""
-        if 'target' in new_message and new_message['target'] != existing_property['current']:
-            existing_property['current'] = new_message['target']
-            existing_property['target'] = new_message['target']
-            self._gain = float(new_message['target'])
-            self.log.debug(f'loop gain changed to {self._gain}')
+        if "target" in new_message and new_message["target"] != existing_property["current"]:
+            existing_property["current"] = new_message["target"]
+            existing_property["target"] = new_message["target"]
+            self._gain = float(new_message["target"])
+            self.log.debug(f"loop gain changed to {self._gain}")
         self.update_property(existing_property)
 
     def handle_offset(self, existing_property, new_message):
         """INDI callback for `offset`; the new offset is sent by loop()."""
-        if 'target' in new_message and new_message['target'] != existing_property['current']:
-            existing_property['current'] = new_message['target']
-            existing_property['target'] = new_message['target']
-            self._offset = float(new_message['target'])
+        if "target" in new_message and new_message["target"] != existing_property["current"]:
+            existing_property["current"] = new_message["target"]
+            existing_property["target"] = new_message["target"]
+            self._offset = float(new_message["target"])
             self._pending_send = True
-            self.log.debug(f'offset changed to {self._offset}')
+            self.log.debug(f"offset changed to {self._offset}")
         self.update_property(existing_property)
 
     def handle_ctrl_mtx(self, existing_property, new_message):
         """INDI callback for `ctrl_mtx` (m00, m01)."""
-        for index, key in enumerate(['m00', 'm01']):
+        for index, key in enumerate(["m00", "m01"]):
             if key in new_message and new_message[key] != existing_property[key]:
                 self._control_mtx[index] = float(new_message[key])
                 existing_property[key] = self._control_mtx[index]
-        self.log.debug(f'control matrix changed to {self._control_mtx}')
+        self.log.debug(f"control matrix changed to {self._control_mtx}")
         self.update_property(existing_property)
 
     def set_command(self, d1, d2):
@@ -932,38 +932,38 @@ class adcCtrl(XDevice):
         target_1 = self.delta_1 + self.delta_2 + self._offset
         target_2 = self.delta_1 - self.delta_2 + self._offset
         try:
-            self.client[f'{dev}.deltaADC1.target'] = target_1
-            self.client[f'{dev}.deltaADC2.target'] = target_2
+            self.client[f"{dev}.deltaADC1.target"] = target_1
+            self.client[f"{dev}.deltaADC2.target"] = target_2
         except Exception as e:
-            self.set_error(f'could not write ADC offsets: {e}')
+            self.set_error(f"could not write ADC offsets: {e}")
             return False
 
-        self.properties['command']['delta1'] = self.delta_1
-        self.update_property(self.properties['command'])
+        self.properties["command"]["delta1"] = self.delta_1
+        self.update_property(self.properties["command"])
 
-        if self.ext(f'{dev}.tracking.toggle') != constants.SwitchState.ON:
-            self.log.debug(f'{dev} tracking is off: deltaADC1/2 written but the stages will not move')
+        if self.ext(f"{dev}.tracking.toggle") != constants.SwitchState.ON:
+            self.log.debug(f"{dev} tracking is off: deltaADC1/2 written but the stages will not move")
             return True
 
         tolerance = self.config.send_tolerance_deg
         deadline = time.monotonic() + self.config.send_timeout_sec
         while time.monotonic() < deadline:
-            current_1 = self.ext(f'{dev}.deltaADC1.current')
-            current_2 = self.ext(f'{dev}.deltaADC2.current')
+            current_1 = self.ext(f"{dev}.deltaADC1.current")
+            current_2 = self.ext(f"{dev}.deltaADC2.current")
             if (current_1 is not None and current_2 is not None
                     and abs(current_1 - target_1) < tolerance and abs(current_2 - target_2) < tolerance):
                 return True
             time.sleep(0.05)
 
-        self.set_error(f'ADC offsets not reached within {self.config.send_timeout_sec} s')
+        self.set_error(f"ADC offsets not reached within {self.config.send_timeout_sec} s")
         return False
 
     def adc_available(self):
         """True if the ADC tracker's offset properties are visible."""
         dev = self.config.adc_device
         try:
-            self.client[f'{dev}.deltaADC1.current']
-            self.client[f'{dev}.deltaADC2.current']
+            self.client[f"{dev}.deltaADC1.current"]
+            self.client[f"{dev}.deltaADC2.current"]
         except Exception:
             return False
         return True
@@ -982,14 +982,14 @@ class adcCtrl(XDevice):
 
     def grab_frame(self):
         """Grab and average `n_avg` frames, dark subtracted if a dark exists."""
-        subtract_dark = bool(getattr(self.camera, '_dark_exists', False))
+        subtract_dark = bool(getattr(self.camera, "_dark_exists", False))
         if not subtract_dark and not self._warned_no_dark:
             self._warned_no_dark = True
-            self.log.warning('No dark available, using median subtraction only')
+            self.log.warning("No dark available, using median subtraction only")
         frame = self.camera.grab_stack(self._n_avg, subtract_dark=subtract_dark)
         frame = np.asarray(frame, dtype=float)
         if frame.ndim != 2:
-            raise RuntimeError('no new frames received from camera')
+            raise RuntimeError("no new frames received from camera")
         return frame
 
     def measure_dispersion(self):
@@ -1005,7 +1005,7 @@ class adcCtrl(XDevice):
 
         for k in range(n_total):
             if self._state != start_state:
-                self.log.info('state changed, measurement batch aborted')
+                self.log.info("state changed, measurement batch aborted")
                 return None
             try:
                 frame = self.grab_frame()
@@ -1016,11 +1016,11 @@ class adcCtrl(XDevice):
                 pair = pair_offsets(dev)
                 error = float(self._control_mtx @ pair)
                 if not np.isfinite(error):
-                    raise ValueError('non-finite dispersion measurement')
+                    raise ValueError("non-finite dispersion measurement")
             except Exception as e:
-                self.log.warning(f'measurement {k + 1}/{n_total} failed: {e}')
+                self.log.warning(f"measurement {k + 1}/{n_total} failed: {e}")
                 continue
-            self.log.debug(f'measured speckle angles: {raw}, deviations: {dev}, error: {error}')
+            self.log.debug(f"measured speckle angles: {raw}, deviations: {dev}, error: {error}")
             raws.append(raw)
             devs.append(dev)
             pairs.append(pair)
@@ -1029,41 +1029,41 @@ class adcCtrl(XDevice):
         mask = inlier_mask(errors, self.config.outlier_k) if errors else np.zeros(0, dtype=bool)
         n_valid = int(np.sum(mask))
         if n_total == 0 or n_valid / n_total < self.config.min_valid_fraction:
-            self.log.warning(f'only {n_valid}/{n_total} valid measurements')
+            self.log.warning(f"only {n_valid}/{n_total} valid measurements")
             return None
 
         result = {
-            'raw': np.mean(np.array(raws)[mask], axis=0),
-            'dev': np.mean(np.array(devs)[mask], axis=0),
-            'pairs': np.mean(np.array(pairs)[mask], axis=0),
-            'error': float(np.mean(np.array(errors)[mask])),
-            'n_valid': n_valid,
-            'n_total': n_total,
+            "raw": np.mean(np.array(raws)[mask], axis=0),
+            "dev": np.mean(np.array(devs)[mask], axis=0),
+            "pairs": np.mean(np.array(pairs)[mask], axis=0),
+            "error": float(np.mean(np.array(errors)[mask])),
+            "n_valid": n_valid,
+            "n_total": n_total,
         }
         self.publish_measurement(result)
         return result
 
     def publish_measurement(self, result):
         """Show a measurement result in the measurement property and telemetry."""
-        prop = self.properties['measurement']
+        prop = self.properties["measurement"]
         for n in range(4):
-            prop[f'angle{n}'] = float(result['raw'][n])
-            prop[f'dev{n}'] = float(result['dev'][n])
-        prop['pair02'] = float(result['pairs'][0])
-        prop['pair13'] = float(result['pairs'][1])
-        prop['error'] = result['error']
-        prop['n_valid'] = result['n_valid']
-        prop['n_total'] = result['n_total']
+            prop[f"angle{n}"] = float(result["raw"][n])
+            prop[f"dev{n}"] = float(result["dev"][n])
+        prop["pair02"] = float(result["pairs"][0])
+        prop["pair13"] = float(result["pairs"][1])
+        prop["error"] = result["error"]
+        prop["n_valid"] = result["n_valid"]
+        prop["n_total"] = result["n_total"]
         self.update_property(prop)
 
     def cycle_failed(self, message):
         """Record a failed cycle; drop to idle after too many in closed loop."""
         self._consecutive_failures += 1
-        self.set_status(last_command='skipped', last_error=message)
-        self.log.warning(f'cycle failed ({self._consecutive_failures}): {message}')
+        self.set_status(last_command="skipped", last_error=message)
+        self.log.warning(f"cycle failed ({self._consecutive_failures}): {message}")
         if (self._state == States.CLOSED_LOOP
                 and self._consecutive_failures >= self.config.max_consecutive_failures):
-            self.log.error(f'{self._consecutive_failures} consecutive failed cycles, going idle')
+            self.log.error(f"{self._consecutive_failures} consecutive failed cycles, going idle")
             self.transition_to_idle()
 
     def run_cycle(self):
@@ -1074,40 +1074,40 @@ class adcCtrl(XDevice):
         if self._state != state:
             return
         if result is None:
-            self.cycle_failed('no valid measurement')
+            self.cycle_failed("no valid measurement")
             return
         self._consecutive_failures = 0
 
-        error = result['error']
+        error = result["error"]
         step, accepted = compute_step(error, self._gain, self._loop_sign, self.config.step_limit_deg)
-        self.properties['command']['step'] = step
-        self.update_property(self.properties['command'])
-        self.telem('adcctrl_cycle', {
-            'state': state.name,
-            'angles': result['raw'].tolist(),
-            'deviations': result['dev'].tolist(),
-            'pairs': result['pairs'].tolist(),
-            'error': error,
-            'step': step,
-            'accepted': accepted,
-            'n_valid': result['n_valid'],
-            'n_total': result['n_total'],
+        self.properties["command"]["step"] = step
+        self.update_property(self.properties["command"])
+        self.telem("adcctrl_cycle", {
+            "state": state.name,
+            "angles": result["raw"].tolist(),
+            "deviations": result["dev"].tolist(),
+            "pairs": result["pairs"].tolist(),
+            "error": error,
+            "step": step,
+            "accepted": accepted,
+            "n_valid": result["n_valid"],
+            "n_total": result["n_total"],
         })
 
         if state == States.MEASURE_ONLY:
-            self.log.info(f'measured error {error:.4f}, step {step:.4f} (measured, not sent)')
-            self.set_status(last_command='measure-only')
+            self.log.info(f"measured error {error:.4f}, step {step:.4f} (measured, not sent)")
+            self.set_status(last_command="measure-only")
             return
 
         if not accepted:
-            self.log.info(f'ADC step {step:.4f} exceeds acceptable threshold and was not sent')
-            self.set_status(last_command='rejected')
+            self.log.info(f"ADC step {step:.4f} exceeds acceptable threshold and was not sent")
+            self.set_status(last_command="rejected")
             return
 
         self.add_command(step, 0)
         sent = self.send_command()
-        self.log.info(f'delta command: {step:.4f}, total command: {self.delta_1:.4f}')
-        self.set_status(last_command='sent' if sent else 'send failed')
+        self.log.info(f"delta command: {step:.4f}, total command: {self.delta_1:.4f}")
+        self.set_status(last_command="sent" if sent else "send failed")
 
     def loop(self):
         """Main loop body: apply queued ADC writes, then run a cycle unless idle.
@@ -1125,15 +1125,15 @@ class adcCtrl(XDevice):
             state = self._state
             try:
                 if self.camera is None and not self.retry_camera():
-                    self.cycle_failed('camera unavailable')
+                    self.cycle_failed("camera unavailable")
                     return
                 self.run_cycle()
             finally:
                 if state == States.ONESHOT and self._state == States.ONESHOT:
                     self.transition_to_idle()
         except Exception as e:
-            self.log.exception('unexpected error in loop')
-            self.cycle_failed(f'unexpected error: {e}')
+            self.log.exception("unexpected error in loop")
+            self.cycle_failed(f"unexpected error: {e}")
 
     def retry_camera(self):
         """Re-open the camera if the retry interval has passed; returns True if open."""
