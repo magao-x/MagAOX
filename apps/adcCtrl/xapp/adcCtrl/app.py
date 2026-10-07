@@ -560,16 +560,148 @@ class adcCtrl(XDevice):
 
     def loop(self):
         if self._state == States.CLOSED_LOOP:
-                pass 
-                # if np.abs(error*self._gain) < 0.7: #setting a threshold so the prisms don't do anything crazy     
-                #     self.add_command(error * self._gain,0)
-                #     self.send_command()
-                #     self.log.info(f'delta command: {error * self._gain}')
-                #     self.log.info(f'total command: {self.delta_1}')
-                # else: self.log.info(f'ADC command {error} exceeds acceptable threshold and was not sent')
+            measurements = []
+            error = 0
+
+            for i in range(self._no_measurements):
+                    #grab images
+                    img = self.camera.grab_stack(self._n_avg)
+
+                    #make into hcipy fields with correct l/D dimensions
+                    img = np.pad(img,pad_width=50, mode='constant', constant_values=0)
+                    dim = np.sqrt(img.size)
+                    extent = dim * 6/21
+                    pgrid = make_pupil_grid(dim,extent)
+                    img = Field(img.ravel(),pgrid)
+                    img -= np.median(img) 
+
+                    crop_extent = dim - 50
+
+                    #crop so that PSF is in the center, do not mask
+                    img = self.ADC.crop_image(img, crop_extent, mask_diam=0)
+                    
+                    #radial profile subtract 
+                    binc, profile, std_profile, ncount = radial_profile(img,5) 
+                    r_coordinates = img.grid.as_('polar').r 
+                    radial_map = np.interp(r_coordinates, binc, profile) 
+                    img_subtracted = img - radial_map
+
+                    #mask the image
+                    if self._use_sparkles:
+                        dynamic_mask_diameter = self._sparkle_freq / (6/21) * 0.7 #convert l/d to pixel units
+                        f = self._sparkle_freq
+                        angle = self._sparkle_angle
+                        window_size = 20
+                        search_extent=20
+                    else:
+                        dynamic_mask_diameter = 47 * (6/21) * 0.7 #crop for passive DM satellite spots
+                        f = 47
+                        angle = 28
+                        window_size=50
+                        search_extent=30
+                    
+                    img = self.ADC.crop_image(img_subtracted,crop_extent-25,mask_diam=dynamic_mask_diameter) 
+                    
+                    #background subtraction and set negatives to zero
+                    bg = np.median(img)
+                    img -= bg
+                    img[img <0] = 0
+
+                    #measure angles
+                    angles = np.zeros(4)
+                    for i in range(4):
+                        speckle_img = speckle_cutout(cropped,i,angle,f,window_size,search_extent)
+                        angles[i] = np.abs(moment_angle(speckle_img))
+
+                    self.log.debug(f'measured speckle angles: {angles}')
+
+                    calculate command
+                    command = np.squeeze(self.ADC.calculate_command(pairs))
+                    self.log.debug(f'single error command: {-command}')
+                    measurements.append(command)
+                
+                error = -np.nanmean(measurements)
+                self.log.debug(f'mean predicted command across {self._no_measurements} measurements: {-error}')
+                
+                if np.abs(error*self._gain) < 0.7: #setting a threshold so the prisms don't do anything crazy     
+                    self.add_command(error * self._gain,0)
+                    self.send_command()
+                    self.log.info(f'delta command: {error * self._gain}')
+                    self.log.info(f'total command: {self.delta_1}')
+                else: self.log.info(f'ADC command {error} exceeds acceptable threshold and was not sent')
         
         elif self._state == States.ONESHOT:
-            pass
+            measurements = []
+            error = 0
+
+            for i in range(self._no_measurements):
+                    #grab images
+                    img = self.camera.grab_stack(self._n_avg)
+
+                    #make into hcipy fields with correct l/D dimensions
+                    img = np.pad(img,pad_width=50, mode='constant', constant_values=0)
+                    dim = np.sqrt(img.size)
+                    extent = dim * 6/21
+                    pgrid = make_pupil_grid(dim,extent)
+                    img = Field(img.ravel(),pgrid)
+                    img -= np.median(img) 
+
+                    crop_extent = dim - 50
+
+                    #crop so that PSF is in the center, do not mask
+                    img = self.ADC.crop_image(img, crop_extent, mask_diam=0)
+                    
+                    #radial profile subtract 
+                    binc, profile, std_profile, ncount = radial_profile(img,5) 
+                    r_coordinates = img.grid.as_('polar').r 
+                    radial_map = np.interp(r_coordinates, binc, profile) 
+                    img_subtracted = img - radial_map
+
+                    #mask the image
+                    if self._use_sparkles:
+                        dynamic_mask_diameter = self._sparkle_freq / (6/21) * 0.7 #convert l/d to pixel units
+                        f = self._sparkle_freq
+                        angle = self._sparkle_angle
+                        window_size = 20
+                        search_extent=20
+                    else:
+                        dynamic_mask_diameter = 47 * (6/21) * 0.7 #crop for passive DM satellite spots
+                        f = 47
+                        angle = 28
+                        window_size=50
+                        search_extent=30
+                    
+                    img = self.ADC.crop_image(img_subtracted,crop_extent-25,mask_diam=dynamic_mask_diameter) 
+                    
+                    #background subtraction and set negatives to zero
+                    bg = np.median(img)
+                    img -= bg
+                    img[img <0] = 0
+
+                    #measure angles
+                    angles = np.zeros(4)
+                    for i in range(4):
+                        speckle_img = speckle_cutout(cropped,i,angle,f,window_size,search_extent)
+                        angles[i] = np.abs(moment_angle(speckle_img))
+
+                    self.log.debug(f'measured speckle angles: {angles}')
+
+                    calculate command
+                    command = np.squeeze(self.ADC.calculate_command(pairs))
+                    self.log.debug(f'single error command: {-command}')
+                    measurements.append(command)
+                
+                error = -np.nanmean(measurements)
+                self.log.debug(f'mean predicted command across {self._no_measurements} measurements: {-error}')
+                
+                if np.abs(error*self._gain) < 0.7: #setting a threshold so the prisms don't do anything crazy     
+                    self.add_command(error * self._gain,0)
+                    self.send_command()
+                    self.log.info(f'delta command: {error * self._gain}')
+                    self.log.info(f'total command: {self.delta_1}')
+                else: self.log.info(f'ADC command {error} exceeds acceptable threshold and was not sent')
+
+                self.transition_to_idle() #only apply a one-shot command, do not loop
 
         elif self._state == States.MEASURE_ONLY:
             measurements = []
@@ -627,10 +759,10 @@ class adcCtrl(XDevice):
 
                     self.log.debug(f'measured speckle angles: {angles}')
 
-                    #calculate command
-                    # command = np.squeeze(self.ADC.calculate_command(pairs))
-                    # self.log.debug(f'single error command: {-command}')
-                    # measurements.append(command)
+                    calculate command
+                    command = np.squeeze(self.ADC.calculate_command(pairs))
+                    self.log.debug(f'single error command: {-command}')
+                    measurements.append(command)
                 
                 error = -np.nanmean(measurements)
                 self.log.debug(f'mean predicted command across {self._no_measurements} measurements: {-error} (measured, not sent)')
