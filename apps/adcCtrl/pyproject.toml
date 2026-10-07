@@ -5,10 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "xapp-adcCtrl"
 description = "closed-loop control for ADCs"
-version = "2025.11.30"
+version = "2026.10.07"
 dependencies = [
   "xconf",
   "purepyindi2",
+  "numpy",
+  "scipy",
+  "hcipy",
 ]
 authors = [
   {name = "Katie Twitchell", email = "twitchell@arizona.edu"},

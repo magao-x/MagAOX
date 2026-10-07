@@ -55,7 +55,7 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 # Agent Findings and Plan
 <!-- This section will be filled out by the agent -->
 
-_Plan by Claude Opus 5.5 on branch `ktwitchell/adcCtrl-v2` (base `dev`). Rev 1: 2026-10-07, initial draft. Rev 2: 2026-10-07, updated for the user's "Answers to Agent Questions". Rev 3: 2026-10-07, N1/N2 accepted. Status: **plan approved, all questions resolved. Implementation not yet started.**_
+_Plan by Claude Opus 5.5 on branch `ktwitchell/adcCtrl-v2` (base `dev`). Rev 1: 2026-10-07, initial draft. Rev 2: 2026-10-07, updated for the user's "Answers to Agent Questions". Rev 3: 2026-10-07, N1/N2 accepted. Rev 4: 2026-10-07, functional implementation done (see Implementation Log). Status: **functional changes committed. Build-machine verification pending.**_
 
 ## Task Summary
 <!-- The agent should summarize the task as it understands it -->
@@ -240,7 +240,7 @@ pytest in `apps/adcCtrl/test/test_adcCtrl.py`, following the `apps/aoSim/test/te
 
 All code changes are in `apps/adcCtrl/xapp/adcCtrl/app.py` unless noted. Commit order per AGENTS.md #19.
 
-**Step 0: Golden capture.** Run `moment_angle` from `adc_sims/algo_26B/adc_ctrl.py` on fixed-seed synthetic crops and save the outputs to `apps/adcCtrl/test/data/golden_moment_angle.npz` (input for T3).
+**Step 0: Golden capture.** Run `moment_angle` from `adc_sims/algo_26B/adc_ctrl.py` on deterministic synthetic crops and embed the outputs in the test file as `GOLDEN_MOMENT_ANGLES` (input for T3). *(Done. The values are inline rather than in an `.npz`, so no binary file is needed.)*
 
 **Step 1: Analysis helpers (top of `app.py`).** Replace the broken `AdcFitter` with module-level functions:
 - `window_field` and `crop_image`: the notebook's hardened versions.
@@ -289,8 +289,33 @@ All with explicit `hp.`/`ndimage` imports.
 - `apps/adcCtrl/xapp/adcCtrl/app.py`
 - `apps/adcCtrl/pyproject.toml`
 - `apps/adcCtrl/test/test_adcCtrl.py` (new)
-- `apps/adcCtrl/test/data/golden_moment_angle.npz` (new)
 - this plan file
+
+### Implementation Log (Rev 4)
+
+**Done (functional commit):** `app.py` rewritten per Steps 1–3, `pyproject.toml` updated (Step 4), and `test/test_adcCtrl.py` added (Step 5).
+
+**Decisions made during implementation:**
+- **Core mask diameter** is now `mask_factor × separation` in λ/D for both spot sources. The old code computed the sparkle mask as `separation / (6/21) × 0.7` (a pixel conversion applied to a λ/D grid). For sparkles at 15 λ/D that gives a 36.75 λ/D diameter mask, whose radius (18.4 λ/D) is larger than the spot separation, so it would have masked the sparkles themselves. The DM-spot mask was `47 × (6/21) × 0.7 ≈ 9.4` λ/D. Both now follow the user's stated "0.7 × separation" rule.
+- **Radial-profile bin size** is `radial_bin = 5 × 6/21 ≈ 1.43` λ/D, which equals the 5-pixel bin validated in the on-sky notebook. The old app passed `5` on a λ/D grid, which is 17.5 pixels.
+- **DM spot separation** (47) is interpreted as λ/D at the observing wavelength and scaled by `normalized_wavelength`, as for sparkles (this was the old `utils.py` `find_speckle` behavior).
+- **Expected spot axes** for the wrap fix: spots 0 and 2 at `90° − angle`, spots 1 and 3 at `−angle`. This matches the notebook's on-sky result of 54–74° for the DM spots at 28°. The synthetic tests show the old `abs()` failure directly: with sparkles at angle 0, spots 0 and 2 read +89.5° and −89.5°, so |θ0| − |θ2| = 0, while the new signed deviations correctly give −0.5° and +0.5°.
+- **Gain default** is 0.5 (config `gain`). The old INDI `gain` property displayed 0.10 while the code actually used `_gain = 0.5`. The property now shows the value in use.
+- **Startup zeroing** of `deltaADC1/2` is queued and applied by `loop()` once `adctrack` is visible. It now always writes 0, where before it only wrote if `deltaADC1.current != 0`. Writing 0 when it is already 0 is harmless.
+- **No δ1 resync from `adctrack`.** `current` only updates after the stages move, so resyncing from it would discard commands while tracking is off. The app keeps its own integrator, as before.
+- **Repeated failures:** after `max_consecutive_failures` failed closed-loop cycles the app goes idle, and `fsm` returns to READY. The reason is shown in `status.last_error` and the log.
+- **Config schema change:** `camera.shmim` / `camera.dark_shmim` are replaced by a `cameras` table (`shmim`, `filter_wheel` per entry; defaults camsci1/fwsci1 and camsci2/fwsci2). Darks come from XCam's automatic `<shmim>_dark` detection. **Any deployed `/opt/MagAOX/config/adcCtrl.conf` with a `[camera]` section must be updated.**
+- The INDI property `labmode` is now `loop_sign` (`positive`/`negative`). New read-only properties: `measurement`, `command`, `status`. New switch: `camera`.
+
+**Test coverage vs. plan:** T1–T23 are implemented as 27 test functions in `apps/adcCtrl/test/test_adcCtrl.py`, plus a `loop_sign` test. T7 uses a numpy broadband model (core and spots scaled with λ, core shifted linearly across the band) rather than a full hcipy optical propagation.
+
+### Verification
+
+- **Local (this Mac):** all 27 tests pass using real numpy 2.4.3, scipy 1.17.1 and hcipy 0.7.0, with *stub* `xconf`, `purepyindi2` and `magaox` modules (pip could not reach PyPI from the sandbox). This validates the algorithm and control logic and the device logic against a minimal property model. It does **not** validate the real purepyindi2 property, message or `Device` APIs.
+- **Golden test:** `moment_angle` in `app.py` reproduces `adc_sims/algo_26B/adc_ctrl.py` to 1e-10 on 8 inputs.
+- **Pipeline linearity (sparkles, synthetic):** about 25° of `pair02` per λ/D of band-integrated dispersion, with R² > 0.99.
+- **Timing:** about 0.09 s per 512×512 frame for both spot sources (local Mac), well within the ~10 s loop budget.
+- **Pending on the build machine:** `cd apps/adcCtrl && python -m pytest test -v` against the real purepyindi2, xconf and magaox. Then `make install`, start the app with the updated config, and run measure-only on the bench.
 
 ## Follow-up and Edge Cases
 <!-- The agent should list any planned follow up and any edge cases that are not addressed -->
@@ -301,7 +326,9 @@ All with explicit `hp.`/`ndimage` imports.
 - **Saturated spot cores** bias the second moments. There is no saturation detection.
 - **Spots off-frame** (small ROI, or DM spots in z-band at 47 × 1.38 λ/D): handled as failed measurements via the padded `window_field`, with no ROI adaptation.
 - **Sparkles selected but `tweeterSpeck` not modulating:** this gives noise-dominated measurements. A `tweeterSpeck.modulating` check would be a cheap addition.
-- **Concurrent writers to `deltaADC1/2`:** the app re-reads `current` at the start of each cycle to resync δ1. A full ownership convention is out of scope.
+- **Abort mid-batch (R16)** only takes effect if purepyindi2 delivers INDI callbacks on a different thread from `loop()`. If both share a thread, a state change is seen at the next cycle instead. To verify on the build machine.
+- **Deployed config file** must be migrated from `[camera]` to `[cameras.*]` (see Implementation Log).
+- **Concurrent writers to `deltaADC1/2`:** the app does not resync δ1 from `adctrack` (see Implementation Log), so external edits to `deltaADC1/2` are overwritten on the next command. A full ownership convention is out of scope.
 - **Loop period:** with large `n_avg × no_measurements`, plus up to `send_timeout_sec` waiting for stages, a cycle can exceed `sleep_interval_sec`. That interval is a minimum, not a period.
 - **purepyindi2 behavior when `loop()` raises:** unverified, because no local purepyindi2 source was found (the search timed out). The plan catches everything inside `loop()` regardless.
 - **Paper reading:** only web-extracted text of §1–3 was available, because the PDF could not be parsed locally.
