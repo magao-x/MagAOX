@@ -7,6 +7,22 @@
 #ifndef xInstGraph_hpp
 #define xInstGraph_hpp
 
+#include <atomic>
+#include <cerrno>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <set>
+#include <string>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <utility>
+#include <vector>
+
 #include <instGraph/instGraphXML.hpp>
 using namespace ingr;
 
@@ -19,23 +35,20 @@ using namespace ingr;
 #include "xigNodes/stdMotionNode.hpp"
 #include "xigNodes/staticNode.hpp"
 
-/** \defgroup instGraph
- * \brief The XXXXXX application to do YYYYYYY
- *
- * <a href="../handbook/operating/software/apps/XXXXXX.html">Application Documentation</a>
+/** \defgroup instGraph Instrument Graph App
+ * \brief The MagAO-X instrument graph publisher.
  *
  * \ingroup apps
- *
  */
 
-/** \defgroup instGraph_files
+/** \defgroup instGraph_files Instrument Graph Files
  * \ingroup instGraph
  */
 
-//forward for test harness
+// forward for test harness
 namespace xInstGraph_test
 {
-    class xInstGraph;
+class xInstGraph;
 }
 
 namespace MagAOX
@@ -43,7 +56,7 @@ namespace MagAOX
 namespace app
 {
 
-/// The MagAO-X xxxxxxxx
+/// The MagAO-X instrument graph application.
 /**
  * \ingroup instGraph
  */
@@ -53,44 +66,143 @@ class xInstGraph : public MagAOXApp<true>
     friend class xInstGraph_test::xInstGraph;
 
   protected:
-    /** \name Configurable Parameters
+    /** \name Output Configuration - Data
      *@{
      */
+    /// Input diagram path, resolved against the application's config directory.
+    std::filesystem::path m_inputPath;
 
-    // here add parameters which will be config-able at runtime
+    /// Requested output diagram path, resolved against the current directory.
+    std::filesystem::path m_outputPath;
+
+    /// Permit replacement of an existing regular output file at startup.
+    bool m_clobberOutput{ false };
 
     ///@}
 
+    /** \name Output Ownership - Data
+     *@{
+     */
+    /// Filesystem identity used to avoid removing a path replaced by another process.
+    struct fileIdentity
+    {
+        dev_t device{ 0 }; ///< Device containing the file.
+        ino_t inode{ 0 };  ///< Inode of the file.
+    };
+
+    /// Private staging path used while the graph is configured.
+    std::filesystem::path m_stagePath;
+
+    /// Identity of the staging file created by this run.
+    fileIdentity m_stageIdentity;
+
+    /// Open descriptor retaining the staging inode until publication or cleanup.
+    int m_stageFd{ -1 };
+
+    /// Identity of the output file published by this run.
+    fileIdentity m_outputIdentity;
+
+    /// Open descriptor retaining the published inode until shutdown.
+    int m_outputFd{ -1 };
+
+    /// True after this run successfully publishes its output.
+    bool m_outputPublished{ false };
+
+    /// Serialize graph callbacks and shutdown against publication.
+    std::mutex m_updateMutex;
+
+    /// Latch a callback failure for the main application loop.
+    std::atomic<bool> m_updateFailed{ false };
+
+    ///@}
+
+    /// The in-memory graph and its draw.io XML representation.
     ingr::instGraphXML m_graph;
 
-    std::map<std::string, xigNode *> m_nodes;
+    /// Own configured node handlers for the app lifetime.
+    std::map<std::string, std::unique_ptr<xigNode>> m_nodes;
 
-    std::vector<pcf::IndiProperty *> m_nodeProps; ///< The node INDI properties to register for SetProperty
+    /// Node INDI properties owned by this app for SetProperty registration.
+    std::vector<pcf::IndiProperty *> m_nodeProps;
 
-    std::multimap<std::string, xigNode *> m_nodeHandleSets; /**< Map from propery keys to nodes which
-                                                                 have registered for them*/
+    /// Property keys mapped to each node that consumes their updates.
+    std::multimap<std::string, xigNode *> m_nodeHandleSets;
+
+    /// True when configuration stops before all node settings can be consumed.
+    bool m_configLoadFailed{ false };
+
+    /// Validate that the output is distinct from the input and may be published.
+    int checkOutputPath( std::string &error /**< [out] reason for a rejected path */ ) const;
+
+    /// Create a private staging file in the output directory.
+    int createStage( std::string &error /**< [out] reason staging failed */ );
+
+    /// Serialize the final graph state; overridable by failure-injection tests.
+    virtual int serializeGraph( std::string &xml, /**< [out] complete XML document */
+                                std::string &error /**< [out] serialization failure */ );
+
+    /// Write bytes to the staging descriptor; overridable by failure-injection tests.
+    virtual ssize_t writeStageBytes( int         fd,   /**< [in] staging descriptor */
+                                     const void *data, /**< [in] serialized bytes */
+                                     size_t      size /**< [in] byte count */ );
+
+    /// Sync the staging descriptor; overridable by failure-injection tests.
+    virtual int syncStage( int fd /**< [in] staging descriptor */ );
+
+    /// Rename a staged snapshot; overridable by failure-injection tests.
+    virtual int renameStage( const std::filesystem::path &from, /**< [in] owned staging path */
+                             const std::filesystem::path &to /**< [in] destination path */ );
+
+    /// Write and verify a complete graph snapshot through the staging descriptor.
+    int writeSnapshot( std::string &error /**< [out] write failure */ );
+
+    /// Confirm the published output is still owned and distinct from the input.
+    int checkOwnedOutput( std::string &error /**< [out] path validation failure */ ) const;
+
+    /// Validate that each graph node has a supported configuration handler.
+    /** \returns 0 on success or -1 with a diagnostic in error. */
+    int validateNodeConfig(
+        mx::app::appConfigurator &_config, /**< [in,out] configuration containing node sections */
+        std::vector<std::pair<std::string, std::string>> &nodeTypes, /**< [out] validated section and type pairs */
+        std::string                                      &error /**< [out] reason validation failed */ );
+
+    /// Publish the staged initial snapshot according to the clobber policy.
+    int publishOutput( std::string &error /**< [out] reason publication failed */ );
+
+    /// Atomically replace this run's published output with the staged update.
+    int publishUpdate( std::string &error /**< [out] reason publication failed */ );
+
+    /// Remove a staging file still owned by this run.
+    void cleanupStage() noexcept;
+
+    /// Remove only staging and output files still owned by this run.
+    void cleanupOwnedFiles() noexcept;
 
   public:
-    /// Default c'tor.
+    /// Construct the instrument graph app.
     xInstGraph();
 
-    /// D'tor
+    /// Release registered properties and any output owned by this run.
     ~xInstGraph() noexcept;
 
+    /// Register the graph input, output, and clobber settings.
     virtual void setupConfig();
 
-    /// Implementation of loadConfig logic, separated for testing.
+    /// Load graph configuration; exposed separately for the test harness.
     /** This is called by loadConfig().
      */
-    int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] an application configuration from
-                        which to load values*/
+    int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] application configuration to load */
     );
 
+    /// Load the graph, configure nodes, and prepare a private output.
     virtual void loadConfig();
 
-    /// Startup function
+    /// Check remaining settings without mislabeling unread node settings after a load failure.
+    virtual void checkConfig();
+
+    /// Register INDI callbacks and publish the initial graph snapshot.
     /**
-     *
+     * \returns 0 on success or -1 if startup cannot publish the output.
      */
     virtual int appStartup();
 
@@ -101,36 +213,384 @@ class xInstGraph : public MagAOXApp<true>
      */
     virtual int appLogic();
 
-    /// Shutdown the app.
-    /**
-     *
-     */
+    /// Remove output files created by this run.
     virtual int appShutdown();
 
-    static int st_igHandleSetProperty( void                    *igapp, /**< [in] this pointer */
+    /// Forward an INDI SetProperty callback to this app.
+    static int st_igHandleSetProperty( void                    *igapp, /**< [in] application instance */
                                        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
-                                                                       the the set property message.*/
+                                                                       the set property message */
     );
 
+    /// Dispatch a received INDI property to interested nodes.
     int igHandleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
-                                                                      the the set property message.*/
+                                                                      the set property message */
     );
 };
 
-xInstGraph::xInstGraph() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
+inline xInstGraph::xInstGraph() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     return;
 }
 
-xInstGraph::~xInstGraph()
+inline xInstGraph::~xInstGraph()
 {
+    cleanupOwnedFiles();
+
     for( auto p : m_nodeProps )
     {
         delete p;
     }
 }
 
-void xInstGraph::setupConfig()
+inline int xInstGraph::checkOutputPath( std::string &error ) const
+{
+    if( m_inputPath == m_outputPath )
+    {
+        error = "graph output path is the input graph path";
+        return -1;
+    }
+
+    struct stat inputInfo;
+    if( ::stat( m_inputPath.c_str(), &inputInfo ) < 0 )
+    {
+        error = "cannot stat input graph " + m_inputPath.string() + ": " + std::strerror( errno );
+        return -1;
+    }
+
+    struct stat outputInfo;
+    if( ::lstat( m_outputPath.c_str(), &outputInfo ) < 0 )
+    {
+        if( errno == ENOENT )
+        {
+            return 0;
+        }
+
+        error = "cannot inspect graph output " + m_outputPath.string() + ": " + std::strerror( errno );
+        return -1;
+    }
+
+    struct stat outputTarget;
+    if( ::stat( m_outputPath.c_str(), &outputTarget ) == 0 && inputInfo.st_dev == outputTarget.st_dev &&
+        inputInfo.st_ino == outputTarget.st_ino )
+    {
+        error = "graph output path refers to the input graph";
+        return -1;
+    }
+
+    if( !m_clobberOutput )
+    {
+        error = "graph output already exists (set graph.clobberOutput=true to replace it): " + m_outputPath.string();
+        return -1;
+    }
+
+    if( !S_ISREG( outputInfo.st_mode ) )
+    {
+        error = "graph output is not a regular file: " + m_outputPath.string();
+        return -1;
+    }
+
+    return 0;
+}
+
+inline int xInstGraph::createStage( std::string &error )
+{
+    std::string       stageTemplate = m_outputPath.string() + ".xInstGraph-XXXXXX";
+    std::vector<char> name( stageTemplate.begin(), stageTemplate.end() );
+    name.push_back( '\0' );
+
+    int fd = ::mkstemp( name.data() );
+    if( fd < 0 )
+    {
+        error = "cannot create graph staging file: " + std::string( std::strerror( errno ) );
+        return -1;
+    }
+
+    struct stat info;
+    if( ::fstat( fd, &info ) < 0 )
+    {
+        error = "cannot inspect graph staging file: " + std::string( std::strerror( errno ) );
+        ::close( fd );
+        ::unlink( name.data() );
+        return -1;
+    }
+
+    m_stagePath     = name.data();
+    m_stageIdentity = { info.st_dev, info.st_ino };
+    m_stageFd       = fd;
+    m_graph.outputPath( m_stagePath.string() );
+
+    return 0;
+}
+
+inline int xInstGraph::serializeGraph( std::string &xml, std::string &error )
+{
+    m_graph.stateChange();
+    return m_graph.serializeXML( xml, error );
+}
+
+inline ssize_t xInstGraph::writeStageBytes( int fd, const void *data, size_t size )
+{
+    return ::write( fd, data, size );
+}
+
+inline int xInstGraph::syncStage( int fd )
+{
+    return ::fsync( fd );
+}
+
+inline int xInstGraph::renameStage( const std::filesystem::path &from, const std::filesystem::path &to )
+{
+    return ::rename( from.c_str(), to.c_str() );
+}
+
+inline int xInstGraph::writeSnapshot( std::string &error )
+{
+    if( m_stageFd < 0 || m_stagePath.empty() )
+    {
+        error = "graph staging file is not open";
+        return -1;
+    }
+
+    std::string xml;
+    if( serializeGraph( xml, error ) < 0 || xml.empty() )
+    {
+        if( error.empty() )
+        {
+            error = "graph serialization produced no XML";
+        }
+        return -1;
+    }
+
+    if( ::ftruncate( m_stageFd, 0 ) < 0 || ::lseek( m_stageFd, 0, SEEK_SET ) < 0 )
+    {
+        error = "cannot reset graph staging file: " + std::string( std::strerror( errno ) );
+        return -1;
+    }
+
+    size_t written = 0;
+    while( written < xml.size() )
+    {
+        ssize_t count = writeStageBytes( m_stageFd, xml.data() + written, xml.size() - written );
+        if( count < 0 && errno == EINTR )
+        {
+            continue;
+        }
+        if( count == 0 )
+        {
+            error = "cannot write graph staging file: zero-byte write";
+            return -1;
+        }
+        if( count < 0 )
+        {
+            error = "cannot write graph staging file: " + std::string( std::strerror( errno ) );
+            return -1;
+        }
+        written += static_cast<size_t>( count );
+    }
+
+    mode_t      mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+    struct stat prior;
+    if( m_outputPublished )
+    {
+        if( ::fstat( m_outputFd, &prior ) < 0 )
+        {
+            error = "cannot inspect owned graph output: " + std::string( std::strerror( errno ) );
+            return -1;
+        }
+        mode = prior.st_mode & 0777;
+    }
+    else if( m_clobberOutput && ::lstat( m_outputPath.c_str(), &prior ) == 0 && S_ISREG( prior.st_mode ) )
+    {
+        mode = prior.st_mode & 0777;
+    }
+
+    if( ::fchmod( m_stageFd, mode ) < 0 )
+    {
+        error = "cannot set graph staging permissions: " + std::string( std::strerror( errno ) );
+        return -1;
+    }
+
+    struct stat stage;
+    if( ::fstat( m_stageFd, &stage ) < 0 || !S_ISREG( stage.st_mode ) || stage.st_dev != m_stageIdentity.device ||
+        stage.st_ino != m_stageIdentity.inode || stage.st_size != static_cast<off_t>( xml.size() ) )
+    {
+        error = "graph staging file size or identity changed during serialization";
+        return -1;
+    }
+
+    if( syncStage( m_stageFd ) < 0 )
+    {
+        error = "cannot sync graph staging file: " + std::string( std::strerror( errno ) );
+        return -1;
+    }
+
+    return 0;
+}
+
+inline int xInstGraph::checkOwnedOutput( std::string &error ) const
+{
+    if( !m_outputPublished || m_outputFd < 0 )
+    {
+        error = "graph output has not been published";
+        return -1;
+    }
+
+    struct stat output;
+    if( ::lstat( m_outputPath.c_str(), &output ) < 0 || !S_ISREG( output.st_mode ) ||
+        output.st_dev != m_outputIdentity.device || output.st_ino != m_outputIdentity.inode )
+    {
+        error = "published graph output was removed or replaced";
+        return -1;
+    }
+
+    struct stat input;
+    if( ::stat( m_inputPath.c_str(), &input ) < 0 )
+    {
+        error = "cannot inspect graph input: " + std::string( std::strerror( errno ) );
+        return -1;
+    }
+    if( input.st_dev == output.st_dev && input.st_ino == output.st_ino )
+    {
+        error = "published graph output now aliases the input graph";
+        return -1;
+    }
+
+    return 0;
+}
+
+inline int xInstGraph::publishOutput( std::string &error )
+{
+    if( m_stagePath.empty() )
+    {
+        error = "graph staging file was not created";
+        return -1;
+    }
+
+    struct stat stageInfo;
+    if( ::lstat( m_stagePath.c_str(), &stageInfo ) < 0 || stageInfo.st_dev != m_stageIdentity.device ||
+        stageInfo.st_ino != m_stageIdentity.inode || !S_ISREG( stageInfo.st_mode ) || stageInfo.st_size == 0 )
+    {
+        error = "graph staging file is missing, empty, or was replaced";
+        return -1;
+    }
+
+    if( checkOutputPath( error ) < 0 )
+    {
+        return -1;
+    }
+
+    if( m_clobberOutput )
+    {
+        if( ::rename( m_stagePath.c_str(), m_outputPath.c_str() ) < 0 )
+        {
+            error = "cannot publish graph output: " + std::string( std::strerror( errno ) );
+            return -1;
+        }
+        m_stagePath.clear();
+    }
+    else
+    {
+        if( ::link( m_stagePath.c_str(), m_outputPath.c_str() ) < 0 )
+        {
+            error = "cannot publish graph output without replacing an existing file: " +
+                    std::string( std::strerror( errno ) );
+            return -1;
+        }
+    }
+
+    m_outputIdentity  = m_stageIdentity;
+    m_outputFd        = m_stageFd;
+    m_stageFd         = -1;
+    m_outputPublished = true;
+
+    if( !m_stagePath.empty() )
+    {
+        if( ::unlink( m_stagePath.c_str() ) < 0 )
+        {
+            error = "cannot remove graph staging link: " + std::string( std::strerror( errno ) );
+            return -1;
+        }
+        m_stagePath.clear();
+    }
+
+    m_graph.outputPath( m_outputPath.string() );
+    return 0;
+}
+
+inline int xInstGraph::publishUpdate( std::string &error )
+{
+    struct stat stage;
+    if( m_stagePath.empty() || ::lstat( m_stagePath.c_str(), &stage ) < 0 || !S_ISREG( stage.st_mode ) ||
+        stage.st_dev != m_stageIdentity.device || stage.st_ino != m_stageIdentity.inode || stage.st_size == 0 )
+    {
+        error = "graph staging file is missing, empty, or was replaced";
+        return -1;
+    }
+
+    if( checkOwnedOutput( error ) < 0 )
+    {
+        return -1;
+    }
+
+    if( renameStage( m_stagePath, m_outputPath ) < 0 )
+    {
+        error = "cannot replace owned graph output: " + std::string( std::strerror( errno ) );
+        return -1;
+    }
+
+    m_stagePath.clear();
+    ::close( m_outputFd );
+    m_outputFd       = m_stageFd;
+    m_outputIdentity = m_stageIdentity;
+    m_stageFd        = -1;
+    m_graph.outputPath( m_outputPath.string() );
+    return 0;
+}
+
+inline void xInstGraph::cleanupStage() noexcept
+{
+    if( !m_stagePath.empty() )
+    {
+        struct stat info;
+        if( ::lstat( m_stagePath.c_str(), &info ) == 0 && info.st_dev == m_stageIdentity.device &&
+            info.st_ino == m_stageIdentity.inode )
+        {
+            ::unlink( m_stagePath.c_str() );
+        }
+        m_stagePath.clear();
+    }
+
+    if( m_stageFd >= 0 )
+    {
+        ::close( m_stageFd );
+        m_stageFd = -1;
+    }
+}
+
+inline void xInstGraph::cleanupOwnedFiles() noexcept
+{
+    cleanupStage();
+
+    if( m_outputPublished )
+    {
+        struct stat info;
+        if( ::lstat( m_outputPath.c_str(), &info ) == 0 && info.st_dev == m_outputIdentity.device &&
+            info.st_ino == m_outputIdentity.inode )
+        {
+            ::unlink( m_outputPath.c_str() );
+        }
+        m_outputPublished = false;
+    }
+
+    if( m_outputFd >= 0 )
+    {
+        ::close( m_outputFd );
+        m_outputFd = -1;
+    }
+}
+
+inline void xInstGraph::setupConfig()
 {
     config.add( "graph.file",
                 "",
@@ -151,11 +611,101 @@ void xInstGraph::setupConfig()
                 false,
                 "string",
                 "path to the output graph .drawio file" );
+
+    config.add( "graph.clobberOutput",
+                "",
+                "graph.clobberOutput",
+                argType::Required,
+                "graph",
+                "clobberOutput",
+                false,
+                "bool",
+                "replace an existing regular output file at startup (default false)" );
 }
 
-int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
+inline int xInstGraph::validateNodeConfig( mx::app::appConfigurator                         &_config,
+                                           std::vector<std::pair<std::string, std::string>> &nodeTypes,
+                                           std::string                                      &error )
 {
-    ///\todo this should be relative to config path
+    nodeTypes.clear();
+    error.clear();
+
+    std::vector<std::string> sections;
+    if( _config.unusedSections( sections ) < 0 )
+    {
+        error = "cannot enumerate graph node configuration sections";
+        return -1;
+    }
+
+    std::set<std::string> configuredNodes;
+    for( const auto &section : sections )
+    {
+        const std::string typeKey = mx::app::iniFile::makeKey( section, "type" );
+        if( !_config.isSetUnused( typeKey ) )
+        {
+            if( m_graph.nodeValid( section ) )
+            {
+                error = "graph node '" + section + "' has a configuration section without required type";
+                return -1;
+            }
+            continue;
+        }
+
+        std::string type;
+        try
+        {
+            if( _config.configUnused( type, typeKey ) < 0 )
+            {
+                error = "cannot read type for node section [" + section + "]";
+                return -1;
+            }
+        }
+        catch( const std::exception &e )
+        {
+            error = "cannot read type for node section [" + section + "]: " + e.what();
+            return -1;
+        }
+
+        if( type.empty() )
+        {
+            error = "node section [" + section + "] has an empty type";
+            return -1;
+        }
+        if( type != "indiProp" && type != "pwrOnOff" && type != "fsm" && type != "stdMotion" && type != "static" )
+        {
+            error = "node section [" + section + "] has unsupported type '" + type + "'";
+            return -1;
+        }
+        if( !m_graph.nodeValid( section ) )
+        {
+            error = "node section [" + section + "] with type '" + type + "' has no graph node";
+            return -1;
+        }
+
+        configuredNodes.insert( section );
+        nodeTypes.emplace_back( section, type );
+    }
+
+    if( m_graph.nodes().empty() )
+    {
+        error = "no nodes found in input graph";
+        return -1;
+    }
+
+    for( const auto &graphNode : m_graph.nodes() )
+    {
+        if( configuredNodes.count( graphNode.first ) == 0 )
+        {
+            error = "graph node '" + graphNode.first + "' has no configuration section with required type";
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+inline int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
+{
     std::string file;
     _config( file, "graph.file" );
 
@@ -164,238 +714,83 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
         return log<software_error, -1>( { __FILE__, __LINE__, "no graph file in configuration (graph.file)" } );
     }
 
-    file = m_configDir + '/' + file;
+    m_inputPath = std::filesystem::absolute( m_configDir + '/' + file ).lexically_normal();
 
-
-    std::string outputPath = m_graph.outputPath();
+    std::string outputPath;
     _config( outputPath, "graph.outputPath" );
-    m_graph.outputPath( outputPath );
+    if( outputPath.empty() )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "no graph output path in configuration" } );
+    }
+
+    m_outputPath = std::filesystem::absolute( outputPath ).lexically_normal();
+    _config( m_clobberOutput, "graph.clobberOutput" );
 
     std::string emsg;
-    if( m_graph.loadXMLFile( emsg, file ) < 0 )
+    m_graph.autoSave( false );
+    if( m_graph.loadXMLFile( emsg, m_inputPath.string() ) < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "error loading graph file: " + emsg } );
     }
 
-    std::vector<std::string> sections;
-
-    _config.unusedSections( sections );
-
-    if( sections.size() == 0 )
+    if( checkOutputPath( emsg ) < 0 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "no nodes found in configuration" } );
+        return log<software_error, -1>( { __FILE__, __LINE__, emsg } );
     }
 
-    for( size_t i = 0; i < sections.size(); ++i )
+    std::vector<std::pair<std::string, std::string>> nodeTypes;
+    if( validateNodeConfig( _config, nodeTypes, emsg ) < 0 )
     {
-        bool isNode = config.isSetUnused( mx::app::iniFile::makeKey( sections[i], "type" ) );
+        return log<software_error, -1>( { __FILE__, __LINE__, emsg } );
+    }
 
-        if( !isNode )
+    if( createStage( emsg ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, emsg } );
+    }
+
+    for( const auto &nodeType : nodeTypes )
+    {
+        const std::string &name = nodeType.first;
+        const std::string &type = nodeType.second;
+
+        try
         {
-            continue;
+            // Keep concrete ownership until configuration and insertion succeed.
+            auto addNode = [this, &_config, &name]( auto node )
+            {
+                node->loadConfig( _config );
+                if( !m_nodes.emplace( name, std::move( node ) ).second )
+                {
+                    throw std::runtime_error( "duplicate graph node handler for section [" + name + "]" );
+                }
+            };
+
+            if( type == "indiProp" )
+            {
+                addNode( std::make_unique<indiPropNode>( name, &m_graph ) );
+            }
+            else if( type == "pwrOnOff" )
+            {
+                addNode( std::make_unique<pwrOnOffNode>( name, &m_graph ) );
+            }
+            else if( type == "fsm" )
+            {
+                addNode( std::make_unique<fsmNode>( name, &m_graph ) );
+            }
+            else if( type == "stdMotion" )
+            {
+                addNode( std::make_unique<stdMotionNode>( name, &m_graph ) );
+            }
+            else if( type == "static" )
+            {
+                addNode( std::make_unique<staticNode>( name, &m_graph ) );
+            }
         }
-
-        std::string type;
-        _config.configUnused( type, mx::app::iniFile::makeKey( sections[i], "type" ) );
-
-        // std::cerr << "found node " << sections[i] << ": " << type << "\n";
-
-        xigNode *xn = nullptr;
-
-        if( type == "indiProp" )
+        catch( const std::exception &e )
         {
-            indiPropNode *ip = nullptr;
-            try
-            {
-                ip = new indiPropNode( sections[i], &m_graph );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            if( ip == nullptr )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "failed to allocate node" );
-                throw std::runtime_error( msg );
-            }
-
-            try
-            {
-                ip->loadConfig( _config );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            xn = ip;
-        }
-        else if( type == "pwrOnOff" )
-        {
-            pwrOnOffNode *nn = nullptr;
-
-            try
-            {
-                nn = new pwrOnOffNode( sections[i], &m_graph );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            if( nn == nullptr )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "failed to allocate node" );
-                throw std::runtime_error( msg );
-            }
-
-            try
-            {
-                nn->loadConfig( _config );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            xn = nn;
-        }
-        else if( type == "fsm" )
-        {
-            fsmNode *nn = nullptr;
-
-            try
-            {
-                nn = new fsmNode( sections[i], &m_graph );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            if( nn == nullptr )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "failed to allocate node" );
-                throw std::runtime_error( msg );
-            }
-
-            try
-            {
-                nn->loadConfig( _config );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            xn = nn;
-        }
-        else if( type == "stdMotion" )
-        {
-            stdMotionNode *nn = nullptr;
-
-            try
-            {
-                nn = new stdMotionNode( sections[i], &m_graph );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            if( nn == nullptr )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "failed to allocate node" );
-                throw std::runtime_error( msg );
-            }
-
-            try
-            {
-                nn->loadConfig( _config );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            xn = nn;
-        }
-        else if( type == "static" )
-        {
-            staticNode *nn = nullptr;
-
-            try
-            {
-                nn = new staticNode( sections[i], &m_graph );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            if( nn == nullptr )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "failed to allocate node" );
-                throw std::runtime_error( msg );
-            }
-
-            try
-            {
-                nn->loadConfig( _config );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = XIGN_EXCEPTION( "indiGraph::loadConfigImpl", "exception caught" );
-                msg += ": ";
-                msg += e.what();
-                throw std::runtime_error( msg );
-            }
-
-            xn = nn;
-        }
-
-        if( xn != nullptr )
-        {
-            try
-            {
-                m_nodes.insert( { xn->node()->name(), xn } );
-            }
-            catch( const std::exception &e )
-            {
-                std::string msg = e.what();
-                msg += "\ncaught at ";
-                msg += __FILE__;
-                msg += " " + std::to_string( __LINE__ );
-                throw std::runtime_error( msg );
-            }
+            throw std::runtime_error( XIGN_EXCEPTION( "xInstGraph::loadConfigImpl",
+                                                      "could not configure node [" + name + "]: " + e.what() ) );
         }
     }
 
@@ -405,16 +800,47 @@ int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
     return 0;
 }
 
-void xInstGraph::loadConfig()
+inline void xInstGraph::loadConfig()
 {
-    if( loadConfigImpl( config ) < 0 )
+    m_configLoadFailed = false;
+
+    try
     {
-        log<software_error>( { __FILE__, __LINE__, "error loading configuration" } );
+        if( loadConfigImpl( config ) < 0 )
+        {
+            m_configLoadFailed = true;
+            cleanupOwnedFiles();
+            m_nodes.clear();
+            log<software_error>( { __FILE__, __LINE__, "error loading configuration" } );
+            m_shutdown = true;
+        }
+    }
+    catch( const std::exception &e )
+    {
+        m_configLoadFailed = true;
+        cleanupOwnedFiles();
+        m_nodes.clear();
+        log<software_error>( { __FILE__, __LINE__, std::string( "error loading configuration: " ) + e.what() } );
         m_shutdown = true;
     }
 }
 
-std::string deviceFromKey( const std::string &key )
+inline void xInstGraph::checkConfig()
+{
+    if( m_configLoadFailed )
+    {
+        // Node handlers did not consume their settings, so unused entries cannot be classified yet.
+        for( auto &entry : config.m_unusedConfigs )
+        {
+            entry.second.used = true;
+        }
+    }
+
+    MagAOXApp<true>::checkConfig();
+}
+
+/// Return the device portion of a device.property INDI key.
+inline std::string deviceFromKey( const std::string &key /**< [in] INDI property key */ )
 {
     size_t dot = key.find( '.' );
 
@@ -426,7 +852,8 @@ std::string deviceFromKey( const std::string &key )
     return key.substr( 0, dot );
 }
 
-std::string nameFromKey( const std::string &key )
+/// Return the property portion of a device.property INDI key.
+inline std::string nameFromKey( const std::string &key /**< [in] INDI property key */ )
 {
     size_t dot = key.find( '.' );
     if( dot == std::string::npos )
@@ -437,7 +864,7 @@ std::string nameFromKey( const std::string &key )
     return key.substr( dot + 1 );
 }
 
-int xInstGraph::appStartup()
+inline int xInstGraph::appStartup()
 {
     for( auto it = m_nodes.begin(); it != m_nodes.end(); ++it )
     {
@@ -450,17 +877,19 @@ int xInstGraph::appStartup()
 
                 if( devName == "" )
                 {
+                    cleanupOwnedFiles();
                     return log<software_error, -1>(
                         { __FILE__, __LINE__, "bad devName from key: " + it->second->name() } );
                 }
 
                 if( propName == "" )
                 {
+                    cleanupOwnedFiles();
                     return log<software_error, -1>(
                         { __FILE__, __LINE__, "bad propName from key: " + it->second->name() } );
                 }
 
-                m_nodeHandleSets.insert( { *kit, it->second } );
+                m_nodeHandleSets.insert( { *kit, it->second.get() } );
 
                 pcf::IndiProperty *p = new pcf::IndiProperty;
 
@@ -476,6 +905,7 @@ int xInstGraph::appStartup()
 
                     if( !result.second )
                     {
+                        cleanupOwnedFiles();
                         return log<software_error, -1>(
                             { __FILE__, __LINE__, "failed to insert INDI property: " + p->createUniqueKey() } );
                     }
@@ -483,14 +913,36 @@ int xInstGraph::appStartup()
             }
             catch( std::exception &e )
             {
+                cleanupOwnedFiles();
                 return log<software_error, -1>(
                     { __FILE__, __LINE__, std::string( "Exception caught: " ) + e.what() } );
             }
             catch( ... )
             {
+                cleanupOwnedFiles();
                 return log<software_error, -1>( { __FILE__, __LINE__, "Unknown exception caught." } );
             }
         }
+    }
+
+    try
+    {
+        std::string emsg;
+        if( writeSnapshot( emsg ) < 0 || publishOutput( emsg ) < 0 )
+        {
+            cleanupOwnedFiles();
+            return log<software_error, -1>( { __FILE__, __LINE__, emsg } );
+        }
+    }
+    catch( const std::exception &e )
+    {
+        cleanupOwnedFiles();
+        return log<software_error, -1>( { __FILE__, __LINE__, std::string( "error publishing graph: " ) + e.what() } );
+    }
+    catch( ... )
+    {
+        cleanupOwnedFiles();
+        return log<software_error, -1>( { __FILE__, __LINE__, "unknown error publishing graph" } );
     }
 
     state( stateCodes::READY );
@@ -498,20 +950,20 @@ int xInstGraph::appStartup()
     return 0;
 }
 
-int xInstGraph::appLogic()
+inline int xInstGraph::appLogic()
 {
+    return m_updateFailed.load() ? -1 : 0;
+}
+
+inline int xInstGraph::appShutdown()
+{
+    std::lock_guard<std::mutex> lock( m_updateMutex );
+    m_updateFailed.store( true );
+    cleanupOwnedFiles();
     return 0;
 }
 
-int xInstGraph::appShutdown()
-{
-    //remove the output file so that it is clear there is no valid graph
-    std::filesystem::remove(m_graph.outputPath());
-
-    return 0;
-}
-
-int xInstGraph::st_igHandleSetProperty( void *igapp, const pcf::IndiProperty &ipRecv )
+inline int xInstGraph::st_igHandleSetProperty( void *igapp, const pcf::IndiProperty &ipRecv )
 {
     if( igapp == nullptr )
     {
@@ -521,34 +973,53 @@ int xInstGraph::st_igHandleSetProperty( void *igapp, const pcf::IndiProperty &ip
     return reinterpret_cast<xInstGraph *>( igapp )->igHandleSetProperty( ipRecv );
 }
 
-int xInstGraph::igHandleSetProperty( const pcf::IndiProperty &ipRecv )
+inline int xInstGraph::igHandleSetProperty( const pcf::IndiProperty &ipRecv )
 {
-    std::cerr << ipRecv.createUniqueKey() << '\n';
+    std::lock_guard<std::mutex> lock( m_updateMutex );
+    if( m_updateFailed.load() || !m_outputPublished )
+    {
+        return -1;
+    }
+
     try
     {
         auto range = m_nodeHandleSets.equal_range( ipRecv.createUniqueKey() );
+        if( range.first == range.second )
+        {
+            return 0;
+        }
 
         for( auto it = range.first; it != range.second; ++it )
         {
-            std::cerr << it->second->name() << '\n';
-
-            int rv = it->second->handleSetProperty( ipRecv );
-            if( rv != 0 )
+            if( it->second->handleSetProperty( ipRecv ) != 0 )
             {
+                m_updateFailed.store( true );
                 return log<software_error, -1>(
                     { __FILE__, __LINE__, "error from handleSetProperty for " + it->second->name() } );
             }
         }
 
+        std::string error;
+        if( createStage( error ) < 0 || writeSnapshot( error ) < 0 || publishUpdate( error ) < 0 )
+        {
+            cleanupStage();
+            m_updateFailed.store( true );
+            return log<software_error, -1>( { __FILE__, __LINE__, error } );
+        }
+
         return 0;
     }
-    catch( std::exception &e )
+    catch( const std::exception &e )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, std::string( "Exception caught: " ) + e.what() } );
+        cleanupStage();
+        m_updateFailed.store( true );
+        return log<software_error, -1>( { __FILE__, __LINE__, std::string( "graph update failed: " ) + e.what() } );
     }
     catch( ... )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "Unknown exception caught." } );
+        cleanupStage();
+        m_updateFailed.store( true );
+        return log<software_error, -1>( { __FILE__, __LINE__, "unknown graph update failure" } );
     }
 }
 

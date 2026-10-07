@@ -29,6 +29,7 @@ namespace libXWCTest
 namespace xInstGraphTest
 {
 
+/// Write the minimal FSM graph used by the existing configuration tests.
 void writeXML()
 {
     std::ofstream fout( "/tmp/xigNode_test.xml" );
@@ -47,6 +48,9 @@ void writeXML()
     fout.close();
 }
 
+/// Verify default and explicit FSM node configuration.
+/** \ingroup xInstGraph_unit_test
+ */
 SCENARIO( "Creating and configuring an fsmNode", "[instGraph::fsmNode]" )
 {
     // clang-format off
@@ -223,6 +227,77 @@ SCENARIO( "Creating and configuring an fsmNode", "[instGraph::fsmNode]" )
             REQUIRE( tsn->targetStates().size() == 1 );
             REQUIRE( tsn->targetStates()[0] == MagAOX::app::stateCodes::OPERATING );
         }
+    }
+}
+
+/// Reject invalid target names and keep unknown received FSM states off.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "fsmNode validates target and received states", "[instGraph::fsmNode]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    fsmNode::loadConfig( *(mx::app::appConfigurator *)nullptr );
+    fsmNode::handleSetProperty( *(bool *)nullptr, *(pcf::IndiProperty *)nullptr );
+    #endif
+    // clang-format on
+
+    const std::string xmlPath = "/tmp/fsmNode_F05_test.drawio";
+    {
+        std::ofstream out( xmlPath );
+        out << "<mxfile><diagram><mxGraphModel><root>\n"
+               "<mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>\n"
+               "<mxCell id=\"node:ttmpupil\"/>\n"
+               "<mxCell id=\"output:ttmpupil:out\" value=\"out\" style=\"strokeColor=#FF0000;\"/>\n"
+               "<mxCell id=\"fsmstate:ttmpupil\" value=\"fsmstate\"/>\n"
+               "</root></mxGraphModel></diagram></mxfile>\n";
+    }
+
+    ingr::instGraphXML graph;
+    graph.autoSave( false );
+    std::string error;
+    REQUIRE( graph.loadXMLFile( error, xmlPath ) == 0 );
+
+    SECTION( "invalid configured target" )
+    {
+        const std::string configPath = "/tmp/fsmNode_F05_invalid.conf";
+        mx::app::writeConfigFile( configPath,
+                                  { "ttmpupil", "ttmpupil", "ttmpupil" },
+                                  { "type", "fsmAction", "targetStates" },
+                                  { "fsm", "active", "READYY" } );
+        mx::app::appConfigurator config;
+        REQUIRE( config.readConfig( configPath ) == 0 );
+        fsmNode node( "ttmpupil", &graph );
+        REQUIRE_THROWS_WITH( node.loadConfig( config ), Catch::Matchers::Contains( "READYY" ) );
+    }
+
+    SECTION( "unknown received state" )
+    {
+        const std::string configPath = "/tmp/fsmNode_F05_valid.conf";
+        mx::app::writeConfigFile( configPath,
+                                  { "ttmpupil", "ttmpupil", "ttmpupil" },
+                                  { "type", "fsmAction", "targetStates" },
+                                  { "fsm", "active", "READY" } );
+        mx::app::appConfigurator config;
+        REQUIRE( config.readConfig( configPath ) == 0 );
+        fsmNode node( "ttmpupil", &graph );
+        REQUIRE_NOTHROW( node.loadConfig( config ) );
+
+        pcf::IndiProperty property;
+        property.setDevice( "ttmpupil" );
+        property.setName( "fsm" );
+        property.add( pcf::IndiElement( "state" ) );
+        property["state"] = "READY";
+        REQUIRE( node.handleSetProperty( property ) == 0 );
+        REQUIRE( graph.node( "ttmpupil" )->output( "out" )->state() == ingr::putState::on );
+
+        property["state"] = "READY-ish";
+        REQUIRE( node.handleSetProperty( property ) == 0 );
+        REQUIRE( graph.node( "ttmpupil" )->output( "out" )->state() == ingr::putState::off );
+
+        property["state"] = "";
+        REQUIRE( node.handleSetProperty( property ) == 0 );
+        REQUIRE( graph.node( "ttmpupil" )->output( "out" )->state() == ingr::putState::off );
     }
 }
 
