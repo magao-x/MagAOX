@@ -55,7 +55,7 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 # Agent Findings and Plan
 <!-- This section will be filled out by the agent -->
 
-_Plan by Claude Opus 5.5 on branch `ktwitchell/adcCtrl-v2` (base `dev`). Rev 1: 2026-10-07, initial draft. Rev 2: 2026-10-07, updated for the user's "Answers to Agent Questions". Rev 3: 2026-10-07, N1/N2 accepted. Rev 4: 2026-10-07, functional implementation done (see Implementation Log). Status: **functional changes committed. Build-machine verification pending.**_
+_Plan by Claude Opus 5.5 on branch `ktwitchell/adcCtrl-v2` (base `dev`). Rev 1: 2026-10-07, initial draft. Rev 2: 2026-10-07, updated for the user's "Answers to Agent Questions". Rev 3: 2026-10-07, N1/N2 accepted. Rev 4: 2026-10-07, functional implementation done (see Implementation Log). Status: **functional, documentation and formatting commits done. Build-machine verification pending.**_
 
 ## Task Summary
 <!-- The agent should summarize the task as it understands it -->
@@ -294,6 +294,10 @@ All with explicit `hp.`/`ndimage` imports.
 ### Implementation Log (Rev 4)
 
 **Done (functional commit):** `app.py` rewritten per Steps 1–3, `pyproject.toml` updated (Step 4), and `test/test_adcCtrl.py` added (Step 5).
+
+**Done (documentation commit, Step 6):** the module docstring now covers the method, states, INDI property table and operator procedure. Every function and class has a docstring, members are commented in `init_state()`, and the test module docstring explains how to run the suite. A check confirmed this commit changes no code: the AST is identical with docstrings removed.
+
+**Done (formatting commit, Step 7):** string quotes converted to double quotes per `.editorconfig` (`quote_type = double` for `*.py`). The repo has no Python formatter config (black/ruff), so no formatter was run.
 
 **Decisions made during implementation:**
 - **Core mask diameter** is now `mask_factor × separation` in λ/D for both spot sources. The old code computed the sparkle mask as `separation / (6/21) × 0.7` (a pixel conversion applied to a λ/D grid). For sparkles at 15 λ/D that gives a 36.75 λ/D diameter mask, whose radius (18.4 λ/D) is larger than the spot separation, so it would have masked the sparkles themselves. The DM-spot mask was `47 × (6/21) × 0.7 ≈ 9.4` λ/D. Both now follow the user's stated "0.7 × separation" rule.

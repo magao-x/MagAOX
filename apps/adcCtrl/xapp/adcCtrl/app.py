@@ -1,4 +1,70 @@
-"""Closed-loop ADC control from satellite spot pointing angles."""
+"""Closed-loop ADC control from satellite spot pointing angles.
+
+adcCtrl measures residual atmospheric dispersion in science camera images and
+corrects it by sending counter-rotation offsets to the ADC tracker
+(``adctrack.deltaADC1/2``), on top of adcTracker's model-based tracking.
+
+Author: Katie Twitchell (twitchell@arizona.edu)
+
+Method
+------
+Four satellite spots (active "sparkles" from tweeterSpeck, or passive DM
+print-through spots) are elongated radially by the filter bandwidth. Residual
+dispersion rotates opposite spots in opposite directions, so the difference of
+their pointing angles (the pair offset) is proportional to the dispersion
+(arXiv:2608.10307). For each frame the app:
+
+1. pads the frame, places it on a lambda/D grid and median subtracts it,
+2. centers the PSF, subtracts the radial profile and masks the core,
+3. cuts out each spot at its expected position, scaled to the filter wavelength,
+4. measures each spot's elongation axis with ``moment_angle`` (method of
+   moments, verified in simulation; do not modify),
+5. wraps each angle relative to the spot's nominal radial axis, so the result
+   is signed and continuous across the +-90 degree seam,
+6. forms pair offsets ``[d0 - d2, d1 - d3]`` and the dispersion error
+   ``ctrl_mtx . pairs``.
+
+A command averages ``n_avg`` frames per image and ``no_measurements`` images,
+rejecting failed measurements and outliers. The step ``loop_sign * gain *
+error`` is added to the integrator ``delta_1`` unless it exceeds
+``step_limit_deg``, in which case it is rejected. Offsets are sent as
+``deltaADC1 = delta_1 + delta_2 + offset`` and
+``deltaADC2 = delta_1 - delta_2 + offset``; ``delta_2`` stays 0.
+
+States
+------
+idle          no camera reads, no commands
+adcLoop       measure and command every cycle (closed loop)
+oneshot       one measure-and-command cycle, then back to idle
+measure-only  measure and publish the would-be command, never send it
+
+INDI properties
+---------------
+state            switch    idle / adcLoop / oneshot / measure-only
+fsm              text      READY when idle, OPERATING otherwise
+n_avg            number    frames averaged per image
+no_measurements  number    images per command
+gain             number    loop gain
+offset           number    common offset added to both ADCs [deg]
+ctrl_mtx         number    m00, m01: pair offsets -> dispersion error
+loop_sign        switch    positive / negative feedback polarity (platform dependent)
+satellite_spots  switch    sparkles / dm_spots
+camera           switch    science camera (and its filter wheel); idle only
+reset_deltaADCs  switch    request: zero the ADC offsets
+measurement      number    (read-only) angles, deviations, pair offsets, error, n_valid, n_total
+command          number    (read-only) last step, total delta1
+status           text      (read-only) last command outcome and last error
+
+Operator procedure
+------------------
+1. Select the camera and spot source, then run measure-only and check that
+   the measurement property is stable.
+2. Calibrate ctrl_mtx by hand: counter-rotate the ADCs by known offsets, fit
+   the pair offset slopes, and enter their inverse as m00/m01.
+3. Run oneshot to confirm the correction reduces the error. If it grows,
+   flip loop_sign.
+4. Run adcLoop.
+"""
 
 import time
 from enum import Enum
@@ -17,7 +83,8 @@ from magaox.constants import StateCodes
 from purepyindi2 import properties, constants
 from purepyindi2.messages import DefNumber, DefSwitch, DefText
 
-# Extra pixels removed from the second (masked) crop relative to the first
+# Extra pixels removed from the second (masked) crop relative to the first,
+# so the radial-profile edge region is excluded
 SECOND_CROP_MARGIN = 25
 
 
@@ -139,6 +206,28 @@ def moment_angle(
     max_iter: int = 5,
     tol_deg: float = 0.05,
 ) -> float:
+    """Elongation axis of a single satellite spot by iterative weighted moments.
+
+    This is the simulation-verified estimator from adc_sims/algo_26B/adc_ctrl.py
+    and must not be changed.
+
+    Parameters
+    ----------
+    crop : ndarray
+        2D cutout containing one spot.
+    fwhm_px : float
+        Expected spot FWHM in pixels; sets the smoothing and window sizes.
+    max_iter : int
+        Maximum number of moment iterations.
+    tol_deg : float
+        Convergence tolerance on the angle, in degrees.
+
+    Returns
+    -------
+    float
+        Axis angle in degrees in (-90, 90], measured from the array x axis
+        (columns) toward the y axis (rows). 0.0 if the crop has no signal.
+    """
 
     # 0. Physical Positivity Enforcer (Fix for pre-subtracted negative pixels)
     # Floor raw input to zero immediately so negative background noise cannot act as "negative mass"
@@ -370,6 +459,7 @@ class CameraConfig:
 
 
 def _default_cameras():
+    """Default camera table: camsci1 with fwsci1, camsci2 with fwsci2."""
     return {
         'camsci1': CameraConfig(shmim='camsci1', filter_wheel='fwsci1'),
         'camsci2': CameraConfig(shmim='camsci2', filter_wheel='fwsci2'),
@@ -377,12 +467,16 @@ def _default_cameras():
 
 
 def _default_filter_wavelengths():
+    """Default filter center wavelengths [m], keyed by filter wheel element name."""
     return {'r': 615e-9, 'i': 762e-9, 'z': 908e-9}
 
 
 @xconf.config
 class AdcCtrlConfig(BaseConfig):
     """Active ADC control
+
+    Closed-loop correction of residual atmospheric dispersion from satellite
+    spot pointing angles. Defaults reproduce the previous hard-coded values.
     """
     sleep_interval_sec : float = xconf.field(default=0.25, help="Sleep interval between loop() calls")
     cameras : dict[str, CameraConfig] = xconf.field(default_factory=_default_cameras, help="Selectable science cameras, keyed by INDI element name")
@@ -413,12 +507,14 @@ class AdcCtrlConfig(BaseConfig):
 
 
 class States(Enum):
+    """Operating states of the app."""
     IDLE = 0
     CLOSED_LOOP = 1
     ONESHOT = 2
     MEASURE_ONLY = 3
 
 
+# INDI `state` switch element name -> operating state
 STATE_ELEMENTS = {
     'idle': States.IDLE,
     'adcLoop': States.CLOSED_LOOP,
@@ -426,6 +522,7 @@ STATE_ELEMENTS = {
     'measure-only': States.MEASURE_ONLY,
 }
 
+# INDI `loop_sign` switch element name -> multiplier applied to each step
 LOOP_SIGNS = {'positive': 1.0, 'negative': -1.0}
 
 
@@ -438,9 +535,16 @@ def requested_switch(new_message, names):
 
 
 class adcCtrl(XDevice):
+    """INDI device that measures residual dispersion and commands adctrack offsets."""
+
     config: AdcCtrlConfig
 
     def setup(self):
+        """Create properties, subscribe to other devices and open the camera.
+
+        Nothing here blocks on, or fails because of, a missing external device:
+        the camera is retried from loop() and the initial ADC zeroing is queued.
+        """
         self.init_state()
         self.create_properties()
 
@@ -457,25 +561,39 @@ class adcCtrl(XDevice):
 
     def init_state(self):
         """Initialize internal state from the configuration."""
+        # Operating state, changed through the `state` switch
         self._state = States.IDLE
+        # Frames averaged per image and images per command
         self._n_avg = 1
         self._no_measurements = 1
+        # Loop gain and feedback polarity (+1/-1, from `loop_sign`)
         self._gain = float(self.config.gain)
         self._loop_sign = 1.0
+        # Common offset added to both ADCs [deg]
         self._offset = 0.0
+        # 1x2 control matrix mapping pair offsets to the dispersion error
         self._control_mtx = np.array(self.config.ctrl_mtx, dtype=float)
+        # True for active sparkles, False for passive DM spots
         self._use_sparkles = True
+        # Selected camera (key of config.cameras) and its XCam, None until opened
         self._camera_name = self.config.default_camera
         self.camera = None
+        # monotonic time of the last camera open attempt, for retry pacing
         self._last_camera_attempt = None
+        # One-time warning bookkeeping
         self._warned_no_dark = False
         self._warned_keys = set()
+        # Failed cycles in a row; closed loop drops to idle at the configured limit
         self._consecutive_failures = 0
+        # ADC writes requested by callbacks or setup, performed by loop()
         self._pending_reset = False
         self._pending_send = False
+        # Integrated ADC offsets [deg]; delta_2 is currently always 0
         self.delta_1 = 0.0
         self.delta_2 = 0.0
+        # Filter center wavelength / reference wavelength
         self._normalized_wavelength = 1.0
+        # Sparkle separation [lambda/D] and pattern angle [deg] from tweeterSpeck
         self._sparkle_freq = 15.0
         self._sparkle_angle = 0.0
 
@@ -689,9 +807,11 @@ class adcCtrl(XDevice):
         self.update_property(self.properties['fsm'])
 
     def transition_to_idle(self):
+        """Return to the idle state."""
         self.set_state(States.IDLE)
 
     def handle_state(self, existing_property, new_message):
+        """INDI callback for `state`; refreshes external context when leaving idle."""
         target = requested_switch(new_message, STATE_ELEMENTS)
         if target is None:
             self.update_property(existing_property)
@@ -704,6 +824,7 @@ class adcCtrl(XDevice):
         self.log.debug(f'State changed to {target}')
 
     def handle_spots(self, existing_property, new_message):
+        """INDI callback for `satellite_spots`: choose sparkles or DM spots."""
         target = requested_switch(new_message, ['sparkles', 'dm_spots'])
         if target is not None:
             for key in ['sparkles', 'dm_spots']:
@@ -714,6 +835,7 @@ class adcCtrl(XDevice):
         self.update_property(existing_property)
 
     def handle_camera(self, existing_property, new_message):
+        """INDI callback for `camera`; allowed only while idle. The camera opens in loop()."""
         target = requested_switch(new_message, list(self.config.cameras))
         if target is not None and target != self._camera_name:
             if self._state != States.IDLE:
@@ -728,6 +850,7 @@ class adcCtrl(XDevice):
         self.update_property(existing_property)
 
     def handle_loop_sign(self, existing_property, new_message):
+        """INDI callback for `loop_sign`: set the feedback polarity."""
         target = requested_switch(new_message, LOOP_SIGNS)
         if target is not None:
             for key in LOOP_SIGNS:
@@ -737,6 +860,7 @@ class adcCtrl(XDevice):
         self.update_property(existing_property)
 
     def handle_reset(self, existing_property, new_message):
+        """INDI callback for `reset_deltaADCs`: queue zeroing of the ADC offsets."""
         if 'request' in new_message and new_message['request'] == constants.SwitchState.ON:
             self.log.debug('resetting deltaADC properties')
             self._pending_reset = True
@@ -744,6 +868,7 @@ class adcCtrl(XDevice):
         self.update_property(existing_property)
 
     def handle_n_avg(self, existing_property, new_message):
+        """INDI callback for `n_avg`: frames averaged per image."""
         if 'target' in new_message and new_message['target'] != existing_property['current']:
             existing_property['current'] = new_message['target']
             existing_property['target'] = new_message['target']
@@ -752,6 +877,7 @@ class adcCtrl(XDevice):
         self.update_property(existing_property)
 
     def handle_no_measurements(self, existing_property, new_message):
+        """INDI callback for `no_measurements`: images per command."""
         if 'number' in new_message and new_message['number'] != existing_property['number']:
             existing_property['number'] = new_message['number']
             self._no_measurements = int(new_message['number'])
@@ -759,6 +885,7 @@ class adcCtrl(XDevice):
         self.update_property(existing_property)
 
     def handle_gain(self, existing_property, new_message):
+        """INDI callback for `gain`."""
         if 'target' in new_message and new_message['target'] != existing_property['current']:
             existing_property['current'] = new_message['target']
             existing_property['target'] = new_message['target']
@@ -767,6 +894,7 @@ class adcCtrl(XDevice):
         self.update_property(existing_property)
 
     def handle_offset(self, existing_property, new_message):
+        """INDI callback for `offset`; the new offset is sent by loop()."""
         if 'target' in new_message and new_message['target'] != existing_property['current']:
             existing_property['current'] = new_message['target']
             existing_property['target'] = new_message['target']
@@ -776,6 +904,7 @@ class adcCtrl(XDevice):
         self.update_property(existing_property)
 
     def handle_ctrl_mtx(self, existing_property, new_message):
+        """INDI callback for `ctrl_mtx` (m00, m01)."""
         for index, key in enumerate(['m00', 'm01']):
             if key in new_message and new_message[key] != existing_property[key]:
                 self._control_mtx[index] = float(new_message[key])
@@ -784,10 +913,12 @@ class adcCtrl(XDevice):
         self.update_property(existing_property)
 
     def set_command(self, d1, d2):
+        """Set the integrated offsets (not sent until send_command)."""
         self.delta_1 = d1
         self.delta_2 = d2
 
     def add_command(self, d1, d2):
+        """Add to the integrated offsets (not sent until send_command)."""
         self.delta_1 += d1
         self.delta_2 += d2
 
@@ -979,6 +1110,11 @@ class adcCtrl(XDevice):
         self.set_status(last_command='sent' if sent else 'send failed')
 
     def loop(self):
+        """Main loop body: apply queued ADC writes, then run a cycle unless idle.
+
+        Never raises; errors are logged and counted as failed cycles. A one-shot
+        always ends in idle, whether or not its cycle succeeded.
+        """
         try:
             self.apply_pending()
             if self._state == States.IDLE:

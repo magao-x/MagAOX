@@ -1,4 +1,16 @@
-"""Unit tests for the adcCtrl application."""
+"""Unit tests for the adcCtrl application.
+
+Run from the repository root with the MagAO-X Python environment
+(purepyindi2, xconf, magaox, hcipy):
+
+    python -m pytest apps/adcCtrl/test -v
+
+Device tests build adcCtrl with object.__new__ and inject a fake INDI client
+and camera, so no INDI server, shmim or log/telemetry directories are needed.
+Synthetic frames come from make_frame(), a broadband model in which the core
+and spot positions scale with wavelength and the core shifts linearly across
+the band to emulate residual dispersion.
+"""
 
 import logging
 import sys
