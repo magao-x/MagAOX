@@ -358,8 +358,9 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 - Added diagnostics for poll/stale interval constraints, invalid or missing mapping sections, missing device/channel fields, self-reference, reserved source/property names, malformed/empty numeric values, outlet bounds, delay overflow, and invalid order permutations. The public loader preserves the specific diagnostic rather than appending its former generic failure banner.
 - The shared outlet helper now logs its previously silent no-outlets/no-channel error codes, retaining those return codes. Its bounds messages show the configured range, and all four order/delay length checks show actual and expected entry counts. Existing numeric/base bounds validation continues to protect virtual channel assignment; the later ownership scan tracks channel names to explain conflicts.
 - Extended the malformed-configuration table to 41 cases that assert the actual emitted diagnostic, and added a public-loader regression for two copied `outlets=1,2` channels. All 10 virtual-PDU cases pass (13,977 assertions). The existing DCDU (17,467), USB hub (166), Tripp Lite production (291)/simulator (16), and outlet-helper (591) assertions pass.
-- Pre-format controller line coverage remains 100%: virtualPDU 277/277, DCDU 215/215, USB hub 128/128, Tripp Lite production/simulator union 494/494. Final formatting and standalone build results will be recorded after verification.
-- Parallel standalone app builds collided while each invoked the shared generated `magaox_git_version.h` writer. Regenerated the ignored header and switched to sequential app builds for validation; this diagnostics change does not alter the build scripts.
+- Final controller line coverage after formatting remains 100%: virtualPDU 278/278, DCDU 215/215, USB hub 128/128, Tripp Lite production/simulator union 494/494. The virtual suite still passes 13,977 assertions in 10 cases. Full-file documentation checks, `clang-format --dry-run --Werror`, `git diff --check`, and preservation of the original task text pass.
+- All four standalone applications rebuild successfully after the final formatting pass using sequential `-j1` builds. Functionality, documentation, and formatting are kept in separate feature-branch commits.
+- The existing standalone Makefiles allow both cross-app version-header writer collisions and object compilation to race `magaox_git_version.h` generation under `-j4`. Regenerated the ignored header and used sequential, single-job (`-j1`) app builds for final validation. This diagnostics change does not alter the build scripts.
 - No shared-endpoint support or configuration acceptance rules are added. Workstation-only fixtures continue to use private local transports and hardware substitutes.
 
 ## Affected Files
@@ -401,13 +402,13 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 
 ## Final Verification
 
-- Ran repository `clang-format` on all 17 changed C++ files; dry-run formatting, top file/brief/no-author checks, and `git diff --check` pass. The original task text above Agent Findings and Plan remains byte-for-byte unchanged.
-- Formatting split the empty-numeric-token guard onto its own executable line, exposing a missing error case. Added malformed order/delay arrays with empty CSV tokens and reran the virtual suite: 9 cases/13,774 assertions pass. This validates rejection of a real malformed configuration rather than relying on multiple branches sharing one coverage line.
+- Ran repository `clang-format` on all 20 changed C++ files, including the subsequent GUI correction; dry-run formatting, top file/brief/no-author checks, and `git diff --check` pass. The original task text above Agent Findings and Plan remains byte-for-byte unchanged.
+- Initial formatting split the empty-numeric-token guard onto its own executable line, exposing a missing error case. Added malformed order/delay arrays with empty CSV tokens and reran the virtual suite: 9 cases/13,774 assertions pass. This validates rejection of a real malformed configuration rather than relying on multiple branches sharing one coverage line.
 - Final standard `COVERAGE=1`/`-O0` controller line coverage, merged by source line across production/simulator and compiler aliases:
 
 | Controller | Executable lines hit/total | Line coverage |
 | --- | --- | --- |
-| virtualPDU | 242/242 | 100% |
+| virtualPDU | 278/278 | 100% |
 | xt1121DCDU | 215/215 | 100% |
 | acronameUsbHub | 128/128 | 100% |
 | trippLitePDU | 494/494 | 100% |

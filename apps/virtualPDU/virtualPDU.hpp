@@ -113,7 +113,7 @@ class virtualPDU : public MagAOXApp<>, public dev::outletController<virtualPDU>,
     /// Register source refresh and helper configuration options.
     void setupConfig() override;
 
-    /// Load configuration and request shutdown on invalid configuration.
+    /// Load configuration and request shutdown after logging the specific reason for a rejection.
     void loadConfig() override;
 
     /// Parse and validate remote mappings and ordinary channel sections, logging the reason for each rejection.

@@ -54,6 +54,19 @@
  * failure stops later sends without rollback or automatic replay of already sent commands.
  * The refresh interval bounds detection delay; a distributed power operation is not atomic.
  *
+ * \section virtualPDU_errors Configuration diagnostics
+ * Startup rejects invalid configuration with a diagnostic identifying the failed condition
+ * and its section, keyword, value, or required range. If two channels use the same virtual
+ * outlet, the message names both channels and the one-based outlet number. A repeated outlet
+ * within one channel is reported separately. Duplicate endpoint mappings identify both
+ * `[outletN]` sections and the remote device/channel.
+ *
+ * Other diagnostics cover missing/gapped mappings, missing device/channel fields, invalid
+ * refresh/expiry intervals, self-reference, reserved names, malformed numeric values,
+ * outlet bounds, delay limits, order permutations, and mismatched order/delay entry counts.
+ * Each order/delay array must have the same number of entries as that channel's outlet list.
+ * These errors request shutdown; sharing outlets remains unsupported.
+ *
  * \section virtualPDU_indi INDI properties
  * Each virtual channel is a read/write Text property with `state` and `target` elements.
  * Targets are On/Off; observed states are On, Off, Int, or Unk. All outlets must report

@@ -180,8 +180,14 @@ struct outletController
       offDelays=0,345 #a 345 msec delay between outlet turn off
       \endverbatim
       *
+      * Configuration rejections log the missing requirement or offending channel, with bounds or entry counts
+      * where relevant. The special missing-configuration return codes are preserved.
+      *
       * \returns 0 on success
-      * \returns -1 on failure
+      * \returns OUTLET_E_NOOUTLETS if the number of outlets has not been set
+      * \returns OUTLET_E_NOCHANNELS if there are no unused configuration sections
+      * \returns OUTLET_E_NOVALIDCH if no section defines outlet= or outlets=
+      * \returns -1 if a channel's outlets, order, or delay fields are invalid
       */
     int
     loadConfig( mx::app::appConfigurator &config /**< [in] an application configuration from which to load values */ );
