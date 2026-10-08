@@ -349,24 +349,35 @@ int emitStdFormatHeader( const std::string & fileName,
    fout << "namespace logger\n";
    fout << "{\n";
 
+   // Each dispatcher has two entry points. The core one takes an entry already decoded by the reader using the
+   // version of the file it was read from. The raw entry one decodes with the default version
+   // and is used for entries just written by this build.
+
    fout << "template<class iosT>\n";
    fout << "iosT & logStdFormat( iosT & ios,\n";
-   fout << "                     flatlogs::bufferPtrT & buffer )\n";
+   fout << "                     const flatlogs::parsedEntry & entry )\n";
    fout << "{\n";
    fout << "   flatlogs::eventCodeT ec;\n";
-   fout << "   ec = flatlogs::logHeader::eventCode(buffer);\n";
+   fout << "   ec = entry.eventCode;\n";
 
    fout << "   switch(ec)\n";
    fout << "   {\n";
    for(; it!=logCodes.end(); ++it)
    {
       fout << "      case " << it->first << ":\n";
-      fout << "         return flatlogs::stdFormat<" << it->second.type << ">(ios, buffer);\n";
+      fout << "         return flatlogs::stdFormat<" << it->second.type << ">(ios, entry);\n";
    }
       fout << "      default:\n";
       fout << "         ios << \"Unknown log type: \" << ec << \"\\n\";\n";
       fout << "         return ios;\n";
    fout << "   }\n";
+   fout << "}\n";
+
+   fout << "template<class iosT>\n";
+   fout << "iosT & logStdFormat( iosT & ios,\n";
+   fout << "                     flatlogs::bufferPtrT & buffer )\n";
+   fout << "{\n";
+   fout << "   return logStdFormat( ios, flatlogs::decodeWithDefaultVersion( buffer ) );\n";
    fout << "}\n";
 
 
@@ -375,22 +386,30 @@ int emitStdFormatHeader( const std::string & fileName,
    fout << "template<class iosT>\n";
    fout << "iosT & logShortStdFormat( iosT & ios,\n";
    fout << "                          const std::string & appName,\n";
-   fout << "                          flatlogs::bufferPtrT & buffer )\n";
+   fout << "                          const flatlogs::parsedEntry & entry )\n";
    fout << "{\n";
    fout << "   flatlogs::eventCodeT ec;\n";
-   fout << "   ec = flatlogs::logHeader::eventCode(buffer);\n";
+   fout << "   ec = entry.eventCode;\n";
 
    fout << "   switch(ec)\n";
    fout << "   {\n";
    for(; it!=logCodes.end(); ++it)
    {
       fout << "      case " << it->first << ":\n";
-      fout << "         return flatlogs::stdShortFormat<" << it->second.type << ">(ios, appName, buffer);\n";
+      fout << "         return flatlogs::stdShortFormat<" << it->second.type << ">(ios, appName, entry);\n";
    }
       fout << "      default:\n";
       fout << "         ios << \"Unknown log type: \" << ec << \"\\n\";\n";
       fout << "         return ios;\n";
    fout << "   }\n";
+   fout << "}\n";
+
+   fout << "template<class iosT>\n";
+   fout << "iosT & logShortStdFormat( iosT & ios,\n";
+   fout << "                          const std::string & appName,\n";
+   fout << "                          flatlogs::bufferPtrT & buffer )\n";
+   fout << "{\n";
+   fout << "   return logShortStdFormat( ios, appName, flatlogs::decodeWithDefaultVersion( buffer ) );\n";
    fout << "}\n";
 
 
@@ -399,17 +418,17 @@ int emitStdFormatHeader( const std::string & fileName,
 
    fout << "template<class iosT>\n";
    fout << "iosT & logMinStdFormat( iosT & ios,\n";
-   fout << "                        flatlogs::bufferPtrT & buffer )\n";
+   fout << "                        const flatlogs::parsedEntry & entry )\n";
    fout << "{\n";
    fout << "   flatlogs::eventCodeT ec;\n";
-   fout << "   ec = flatlogs::logHeader::eventCode(buffer);\n";
+   fout << "   ec = entry.eventCode;\n";
 
    fout << "   switch(ec)\n";
    fout << "   {\n";
    for(; it!=logCodes.end(); ++it)
    {
       fout << "      case " << it->first << ":\n";
-      fout << "         return flatlogs::minFormat<" << it->second.type << ">(ios, buffer);\n";
+      fout << "         return flatlogs::minFormat<" << it->second.type << ">(ios, entry);\n";
    }
       fout << "      default:\n";
       fout << "         ios << \"Unknown log type: \" << ec << \"\\n\";\n";
@@ -417,17 +436,24 @@ int emitStdFormatHeader( const std::string & fileName,
    fout << "   }\n";
    fout << "}\n";
 
+   fout << "template<class iosT>\n";
+   fout << "iosT & logMinStdFormat( iosT & ios,\n";
+   fout << "                        flatlogs::bufferPtrT & buffer )\n";
+   fout << "{\n";
+   fout << "   return logMinStdFormat( ios, flatlogs::decodeWithDefaultVersion( buffer ) );\n";
+   fout << "}\n";
+
    it = logCodes.begin();
 
    fout << "template<class iosT>\n";
    fout << "iosT & logJsonFormat( iosT & ios,\n";
-   fout << "                        flatlogs::bufferPtrT & buffer )\n";
+   fout << "                        const flatlogs::parsedEntry & entry )\n";
    fout << "{\n";
 
    fout << "#include \"binarySchemata.inc\"\n";
 
    fout << "   flatlogs::eventCodeT ec;\n";
-   fout << "   ec = flatlogs::logHeader::eventCode(buffer);\n";
+   fout << "   ec = entry.eventCode;\n";
 
    fout << "   switch(ec)\n";
    fout << "   {\n";
@@ -436,15 +462,22 @@ int emitStdFormatHeader( const std::string & fileName,
       fout << "      case " << it->first << ":\n";
       if (it->second.schema == "empty_log") {
          // special case for empty_log which has no corresponding flatbuffers schema
-         fout << "         return flatlogs::jsonFormat<" << it->second.type << ">(ios, buffer, \"" << it->second.type << "\", nullptr, 0);\n";
+         fout << "         return flatlogs::jsonFormat<" << it->second.type << ">(ios, entry, \"" << it->second.type << "\", nullptr, 0);\n";
       } else {
-         fout << "         return flatlogs::jsonFormat<" << it->second.type << ">(ios, buffer, \"" << it->second.type << "\", reinterpret_cast<const uint8_t *>(" << it->second.schema << "_bfbs), " << it->second.schema << "_bfbs_len);\n";
+         fout << "         return flatlogs::jsonFormat<" << it->second.type << ">(ios, entry, \"" << it->second.type << "\", reinterpret_cast<const uint8_t *>(" << it->second.schema << "_bfbs), " << it->second.schema << "_bfbs_len);\n";
       }
    }
       fout << "      default:\n";
       fout << "         ios << \"Unknown log type: \" << ec << \"\\n\";\n";
       fout << "         return ios;\n";
    fout << "   }\n";
+   fout << "}\n";
+
+   fout << "template<class iosT>\n";
+   fout << "iosT & logJsonFormat( iosT & ios,\n";
+   fout << "                        flatlogs::bufferPtrT & buffer )\n";
+   fout << "{\n";
+   fout << "   return logJsonFormat( ios, flatlogs::decodeWithDefaultVersion( buffer ) );\n";
    fout << "}\n";
 
    fout << "}\n"; //namespace logger

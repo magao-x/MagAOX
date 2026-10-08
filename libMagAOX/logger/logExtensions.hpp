@@ -7,10 +7,16 @@
 #ifndef logger_logExtensions_hpp
 #define logger_logExtensions_hpp
 
+#include <algorithm>
+#include <filesystem>
 #include <string>
 #include <vector>
 
+#include <mx/ioutils/fileUtils.hpp>
+
 #include <flatlogs/flatlogs.hpp>
+
+#include "../common/defaults.hpp"
 
 namespace MagAOX
 {
@@ -50,6 +56,43 @@ inline flatlogs::logVersionT logVersionForExtension( const std::string &ext /**<
     }
 
     return flatlogs::logVersion1;
+}
+
+/// Get a log file's version from its path.
+/** Wrapper for logVersionForExtension
+ * 
+ * \returns flatlogs::logVersion2 if the file's extension ends in "2", flatlogs::logVersion1 otherwise.
+ */
+inline flatlogs::logVersionT logVersionForFile( const std::string &path /**< [in] the file's path or name */ )
+{
+    return logVersionForExtension( std::filesystem::path( path ).extension().string() );
+}
+
+/// List an app's log files from one directory, for every extension implied by a base extension.
+/** The files are listed, merged, and sorted by name (i.e. in time order).
+ *
+ * \returns mx::error_t::noerror on success
+ * \returns errors from mx::ioutils::getFileNames
+ */
+template <class verboseT = XWC_DEFAULT_VERBOSITY>
+mx::error_t listLogFiles( std::vector<std::string> &flist,  /**< [out] the sorted list of file paths */
+                          const std::string        &dir,    /**< [in] the directory to list */
+                          const std::string        &prefix, /**< [in] the device name, a prefix of the file names */
+                          const std::string        &baseExt /**< [in] the base extension */
+)
+{
+    flist.clear();
+
+    for( const std::string &ext : logExtensionsFor( baseExt ) )
+    {
+        std::vector<std::string> extList;
+        mx_error_check( mx::ioutils::getFileNames( extList, dir, prefix, "", ext ) );
+        flist.insert( flist.end(), extList.begin(), extList.end() );
+    }
+
+    std::sort( flist.begin(), flist.end() );
+
+    return mx::error_t::noerror;
 }
 
 } // namespace logger

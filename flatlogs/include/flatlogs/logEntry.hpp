@@ -48,6 +48,79 @@ inline parsedEntry parseEntry( const char *bytes,  ///< [in] a pointer to a raw 
    }
 }
 
+/// Get the smallest header size for version known only at runtime.
+/** Minimum number of bytes a reader must have before it can work out the full header size of an entry.
+  *
+  * \returns the minimal header size, or 0 if \p version has no defined layout.
+  *
+  * \ingroup logbuff
+  */
+inline size_t entryMinHeadSize( logVersionT version /**< [in] the format version */ )
+{
+   switch( version )
+   {
+   case logVersion1:
+      return logHeaderV1::minHeadSize;
+   case logVersion2:
+      return logHeaderV2::minHeadSize;
+   default:
+      return 0;
+   }
+}
+
+/// Get entry's header size, with version known only at runtime.
+/** \p bytes must hold at least \ref entryMinHeadSize.
+  *
+  * \returns the header size, or 0 if \p version has no defined layout.
+  *
+  * \ingroup logbuff
+  */
+inline size_t entryHeaderSize( const char *bytes,  ///< [in] the start of a log entry.
+                               logVersionT version ///< [in] the format version.
+                             )
+{
+   // Not modified, but the size accessors take char*
+   char *buf = const_cast<char *>( bytes );
+
+   switch( version )
+   {
+   case logVersion1:
+      return logHeaderV1::headerSize( buf );
+   case logVersion2:
+      return logHeaderV2::headerSize( buf );
+   default:
+      return 0;
+   }
+}
+
+/// Get an entry's claimed size, with version known only at runtime.
+/** \p bytes must hold \ref entryHeaderSize.
+  * For v2, includes the checksum.
+  * The result comes from the entry's length field, which may be damaged: a huge length can
+  * wrap the result, so a value smaller than the header size means the length is impossible.
+  *
+  * \returns the claimed entry size, or 0 if \p version has no defined layout.
+  *
+  * \ingroup logbuff
+  */
+inline size_t entryTotalSize( const char *bytes,  ///< [in] the start of a log entry.
+                              logVersionT version ///< [in] the format version.
+                            )
+{
+   // Not modified, but the size accessors take char*
+   char *buf = const_cast<char *>( bytes );
+
+   switch( version )
+   {
+   case logVersion1:
+      return logHeaderV1::totalSize( buf );
+   case logVersion2:
+      return logHeaderV2::totalSize( buf );
+   default:
+      return 0;
+   }
+}
+
 /// Find the next entry that passes its checksum, after a damaged v2 entry.
 /** Used by readers to carry on past damage. Starting from the damaged entry at \p failedAt:
   * - If \p failed is a checksum mismatch, first try where the damaged entry's own length says the next

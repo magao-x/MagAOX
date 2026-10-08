@@ -580,6 +580,13 @@ TEST_CASE( "Log file extensions and versions", "[libMagAOX::logger::logMap]" )
     REQUIRE( logVersionForExtension( ".foo" ) == flatlogs::logVersion1 );
     REQUIRE( logVersionForExtension( ".foo2" ) == flatlogs::logVersion2 );
     REQUIRE( logVersionForExtension( "" ) == flatlogs::logVersion1 );
+
+    REQUIRE( logVersionForFile( "/data/dev1/2024_11_19/dev1_20241119000000000000000.binlog" ) ==
+             flatlogs::logVersion1 );
+    REQUIRE( logVersionForFile( "/data/dev1/2024_11_19/dev1_20241119000000000000000.bintel2" ) ==
+             flatlogs::logVersion2 );
+    REQUIRE( logVersionForFile( "dev1_20241119000000000000000.binlog2" ) == flatlogs::logVersion2 );
+    REQUIRE( logVersionForFile( "noextension" ) == flatlogs::logVersion1 );
 }
 
 /// Finding and reading files of both versions.

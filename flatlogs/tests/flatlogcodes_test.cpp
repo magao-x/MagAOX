@@ -13,6 +13,7 @@
 
 
 #include <cstring>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,26 @@ struct dummyLog
    {
       memcpy( msgBuffer, msg.data(), msg.size() );
       return 0;
+   }
+
+   /// Get the message as text, for the formatters.
+   static std::string msgString( void *msgBuffer, /**< [in] the message */
+                                 msgLenT len      /**< [in] the message length */
+                               )
+   {
+      return std::string( static_cast<char *>( msgBuffer ), len );
+   }
+
+   /// Get the message as a JSON string, for the JSON formatter.
+   static std::string msgJSON( void *msgBuffer,                      /**< [in] the message */
+                               msgLenT len,                          /**< [in] the message length */
+                               const uint8_t *binarySchema,          /**< [in] unused */
+                               const unsigned int binarySchemaLength /**< [in] unused */
+                             )
+   {
+      static_cast<void>( binarySchema );
+      static_cast<void>( binarySchemaLength );
+      return "\"" + std::string( static_cast<char *>( msgBuffer ), len ) + "\"";
    }
 };
 
@@ -661,6 +682,33 @@ SCENARIO( "parse decodes v1 and v2 entries at every length boundary", "[logEntry
    }
 }
 
+/** The runtime-version size helpers agree with the fixed-version functions at every length boundary.
+  */
+SCENARIO( "runtime-version size helpers match each version's sizes", "[logEntry]" )
+{
+   REQUIRE( entryMinHeadSize( logVersion1 ) == static_cast<size_t>( logHeaderV1::minHeadSize ) );
+   REQUIRE( entryMinHeadSize( logVersion2 ) == static_cast<size_t>( logHeaderV2::minHeadSize ) );
+   REQUIRE( entryMinHeadSize( 9 ) == 0 );
+
+   for( size_t L : { (size_t)0, (size_t)253, (size_t)254, (size_t)65534, (size_t)65535 } )
+   {
+      std::string msg( L, 'q' );
+      timespecX   ts( 1234567, 89 );
+
+      bufferPtrT b1;
+      bufferPtrT b2;
+      logHeaderV1::createLog<dummyLog>( b1, ts, msg, logPrio::LOG_DEFAULT );
+      logHeaderV2::createLog<dummyLog>( b2, ts, msg, logPrio::LOG_DEFAULT );
+
+      REQUIRE( entryHeaderSize( b1.get(), logVersion1 ) == logHeaderV1::headerSize( b1.get() ) );
+      REQUIRE( entryTotalSize( b1.get(), logVersion1 ) == logHeaderV1::totalSize( b1.get() ) );
+      REQUIRE( entryHeaderSize( b2.get(), logVersion2 ) == logHeaderV2::headerSize( b2.get() ) );
+      REQUIRE( entryTotalSize( b2.get(), logVersion2 ) == logHeaderV2::totalSize( b2.get() ) );
+      REQUIRE( entryHeaderSize( b1.get(), 9 ) == 0 );
+      REQUIRE( entryTotalSize( b1.get(), 9 ) == 0 );
+   }
+}
+
 /** Every truncated prefix of an entry gives overrun, never reading past the bytes given.  Each prefix is
   * copied into a buffer of exactly that size, so under AddressSanitizer any over-read is caught.
   */
@@ -910,6 +958,74 @@ SCENARIO( "findNextEntryV2 finds a real entry after megabytes of random bytes", 
    parsedEntry planted = logHeaderV2::parse( buf.data() + plantAt, N - plantAt );
    REQUIRE( planted.status == entryStatus::checksumOk );
    REQUIRE( findNextEntryV2( buf.data(), N, plantAt, planted ) == entryNotFound );
+}
+
+/** Printing a decoded entry gives the same text for v1 and v2, and the same as the raw-entry formatters, which
+  * decode with the default version.
+  */
+SCENARIO( "formatting decoded v1 and v2 entries", "[logStdFormat]" )
+{
+   GIVEN( "the same entry written as v1 and as v2" )
+   {
+      timespecX ts( 1234567, 89 );
+      std::string msg = "formatted the same";
+
+      bufferPtrT b1;
+      bufferPtrT b2;
+      logHeaderV1::createLog<dummyLog>( b1, ts, msg, logPrio::LOG_DEFAULT );
+      logHeaderV2::createLog<dummyLog>( b2, ts, msg, logPrio::LOG_DEFAULT );
+
+      parsedEntry e1 = logHeaderV1::parse( b1.get(), logHeaderV1::totalSize( b1.get() ) );
+      parsedEntry e2 = logHeaderV2::parse( b2.get(), logHeaderV2::totalSize( b2.get() ) );
+      REQUIRE( e1.status == entryStatus::noChecksum );
+      REQUIRE( e2.status == entryStatus::checksumOk );
+
+      THEN( "each formatter gives the same text for v1, v2 and the raw-entry version" )
+      {
+         std::ostringstream s1, s2, sw;
+         stdFormat<dummyLog>( s1, e1 );
+         stdFormat<dummyLog>( s2, e2 );
+         stdFormat<dummyLog>( sw, b1 );
+         REQUIRE( s1.str() == s2.str() );
+         REQUIRE( s1.str() == sw.str() );
+         REQUIRE( s1.str().find( "formatted the same" ) != std::string::npos );
+
+         std::ostringstream m1, m2, mw;
+         minFormat<dummyLog>( m1, e1 );
+         minFormat<dummyLog>( m2, e2 );
+         minFormat<dummyLog>( mw, b1 );
+         REQUIRE( m1.str() == m2.str() );
+         REQUIRE( m1.str() == mw.str() );
+
+         std::ostringstream h1, h2, hw;
+         stdShortFormat<dummyLog>( h1, "someApp", e1 );
+         stdShortFormat<dummyLog>( h2, "someApp", e2 );
+         stdShortFormat<dummyLog>( hw, "someApp", b1 );
+         REQUIRE( h1.str() == h2.str() );
+         REQUIRE( h1.str() == hw.str() );
+
+         std::ostringstream j1, j2, jw;
+         jsonFormat<dummyLog>( j1, e1, "dummyLog", nullptr, 0 );
+         jsonFormat<dummyLog>( j2, e2, "dummyLog", nullptr, 0 );
+         jsonFormat<dummyLog>( jw, b1, "dummyLog", nullptr, 0 );
+         REQUIRE( j1.str() == j2.str() );
+         REQUIRE( j1.str() == jw.str() );
+         REQUIRE( j1.str().find( "\"msg\": \"formatted the same\"" ) != std::string::npos );
+      }
+
+      THEN( "an entry whose message couldn't be decoded prints a placeholder instead of reading it" )
+      {
+         parsedEntry bad = logHeaderV2::parse( b1.get(), logHeaderV1::totalSize( b1.get() ) );
+         REQUIRE( bad.status == entryStatus::markerMismatch );
+         REQUIRE( bad.msg == nullptr );
+
+         std::ostringstream s, j;
+         stdFormat<dummyLog>( s, bad );
+         jsonFormat<dummyLog>( j, bad, "dummyLog", nullptr, 0 );
+         REQUIRE( s.str().find( "<undecodable entry>" ) != std::string::npos );
+         REQUIRE( j.str().find( "\"msg\": null" ) != std::string::npos );
+      }
+   }
 }
 
 } //namespace flatlogs_unit_test

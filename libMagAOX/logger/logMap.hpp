@@ -16,7 +16,6 @@ using namespace mx::sys::tscomp;
 
 #include <mx/ioutils/fileUtils.hpp>
 
-#include <algorithm>
 #include <limits>
 #include <vector>
 #include <map>
@@ -581,18 +580,6 @@ struct logMap
                                                                                        file list to add, e.g. flist.size()*/
     );
 
-    /// List an app's log files from one directory, for every extension implied by a base extension.
-    /** The files are listed, merged, and sorted by name (i.e. in time order).
-     *
-     * \returns mx::error_t::noerror on success
-     * \returns errors from mx::ioutils::getFileNames
-     */
-    mx::error_t listLogFiles( std::vector<std::string> &flist, /**< [out] the sorted list of file paths */
-                              const std::string &dir,          /**< [in] the directory to list */
-                              const std::string &dev,          /**< [in] the device name, a prefix of the file names */
-                              const std::string &ext           /**< [in] the base extension */
-    );
-
     /// Get log file names in a directory and distribute them into the map by app-name
     /** Finding no logs is not reported as an error (no exception is thrown).  You must check
      *  the size of m_appToFileMap to check if any files were found.  Reporting that is left to the caller.
@@ -719,26 +706,6 @@ mx::error_t logMap<verboseT>::addFileListToFileMap( const std::string           
 }
 
 template <class verboseT>
-mx::error_t logMap<verboseT>::listLogFiles( std::vector<std::string> &flist,
-                                            const std::string        &dir,
-                                            const std::string        &dev,
-                                            const std::string        &ext )
-{
-    flist.clear();
-
-    for( const std::string &oneExt : logExtensionsFor( ext ) )
-    {
-        std::vector<std::string> extList;
-        mx_error_check( mx::ioutils::getFileNames( extList, dir, dev, "", oneExt ) );
-        flist.insert( flist.end(), extList.begin(), extList.end() );
-    }
-
-    std::sort( flist.begin(), flist.end() );
-
-    return mx::error_t::noerror;
-}
-
-template <class verboseT>
 mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string                 &dir,
                                                 const std::string                 &dev,
                                                 const std::string                 &ext,
@@ -804,7 +771,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
             continue;
         }
 
-        mx_error_check( listLogFiles( tmp_flist, basedir + subdir.path(), dev, ext ) );
+        mx_error_check( listLogFiles<verboseT>( tmp_flist, basedir + subdir.path(), dev, ext ) );
 
         if( tmp_flist.size() == 0 ) // this subdir has no files in it so go around
         {
@@ -892,7 +859,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
                 continue;
             }
 
-            mx_error_check( listLogFiles( tmp_flist, basedir + subdir.path(), dev, ext ) );
+            mx_error_check( listLogFiles<verboseT>( tmp_flist, basedir + subdir.path(), dev, ext ) );
 
             if( tmp_flist.size() == 0 ) // this subdir has no files so go ahead
             {
@@ -980,7 +947,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
 
             std::vector<std::string> tmp_flist;
 
-            mx_error_check( listLogFiles( tmp_flist, basedir + subdir.path(), dev, ext ) );
+            mx_error_check( listLogFiles<verboseT>( tmp_flist, basedir + subdir.path(), dev, ext ) );
 
             if( follLogFile_n == static_cast<size_t>( -1 ) )
             {
@@ -1021,7 +988,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
 
             std::vector<std::string> tmp_flist;
 
-            mx_error_check( listLogFiles( tmp_flist, basedir + subdir.path(), dev, ext ) );
+            mx_error_check( listLogFiles<verboseT>( tmp_flist, basedir + subdir.path(), dev, ext ) );
 
             mx_error_check( addFileListToFileMap( dev, tmp_flist, prevLogFile_n, tmp_flist.size() ) );
         }
@@ -1054,7 +1021,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
 
                 std::vector<std::string> tmp_flist;
 
-                mx_error_check( listLogFiles( tmp_flist, basedir + subdir.path(), dev, ext ) );
+                mx_error_check( listLogFiles<verboseT>( tmp_flist, basedir + subdir.path(), dev, ext ) );
 
                 mx_error_check( addFileListToFileMap( dev, tmp_flist, 0, tmp_flist.size() ) );
 
@@ -1086,7 +1053,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
                 return mx::error_report<verboseT>(errc);
             }*/
 
-            mx_error_check( listLogFiles( tmp_flist, basedir + subdir.path(), dev, ext ) );
+            mx_error_check( listLogFiles<verboseT>( tmp_flist, basedir + subdir.path(), dev, ext ) );
 
             if( errc == mx::error_t::noerror )
             {
