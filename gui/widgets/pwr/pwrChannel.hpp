@@ -34,7 +34,7 @@ class pwrChannel : public QWidget
 
     pwrChState m_swTarget{ pwrChState::Unk };
 
-    pwrChState m_setSwitchState{ pwrChState::Off }; ///< The last state set by the user.
+    pwrChState m_setSwitchState{ pwrChState::Unk }; ///< The last state set by the user.
 
     bool m_changing {false}; ///< Flag tracking if this channel is changing
 
@@ -81,10 +81,7 @@ class pwrChannel : public QWidget
 
     void switchState( pwrChState swstate );
 
-    bool changing()
-    {
-        return m_changing;
-    }
+    bool changing();
 
     QwtTextLabel *channelNameLabel();
 
@@ -100,15 +97,9 @@ class pwrChannel : public QWidget
 
     void calcOffTimeout();
 
-    void isToggle(bool it)
-    {
-        m_isToggle = it;
-    }
+    void isToggle(bool it);
 
-    bool isToggle()
-    {
-        return m_isToggle;
-    }
+    bool isToggle();
 
     void onDisconnect();
 
@@ -140,6 +131,7 @@ pwrChannel::pwrChannel( QWidget *parent, Qt::WindowFlags flags ) : QWidget( pare
     m_channelSwitch->setMaximum( 10 );
     m_channelSwitch->setSingleStep( 1 );
     m_channelSwitch->setPageStep( 1 );
+    m_channelSwitch->setEnabled( false );
 
     QPalette p = m_channelSwitch->palette();
     p.setColor( QPalette::Active, QPalette::Highlight, QColor( 22, 111, 117, 255 ) );   // Scale text and line
@@ -185,6 +177,14 @@ void pwrChannel::switchTarget( pwrChState swstate )
 
 void pwrChannel::switchState( pwrChState swstate )
 {
+    if( swstate != pwrChState::On && swstate != pwrChState::Off && swstate != pwrChState::Int )
+    {
+        noTimeOut();
+        m_setSwitchState = pwrChState::Unk;
+        m_channelSwitch->setEnabled( false );
+        return;
+    }
+
     if( m_swTarget == pwrChState::Unk )
     {
         m_swTarget = swstate;
@@ -215,14 +215,20 @@ void pwrChannel::switchState( pwrChState swstate )
         m_channelSwitch->setSliderPosition( m_channelSwitch->minimum() +
                                             0.5 * ( m_channelSwitch->maximum() - m_channelSwitch->minimum() ) );
         m_setSwitchState = pwrChState::Int;
+        m_channelSwitch->setEnabled( true );
     }
-    else
+    else if( swstate == pwrChState::Off )
     {
         m_channelSwitch->setSliderPosition( m_channelSwitch->minimum() );
         m_setSwitchState = pwrChState::Off;
         m_channelSwitch->setEnabled( true );
         emit switchTargetReached();
     }
+}
+
+inline bool pwrChannel::changing()
+{
+    return m_changing;
 }
 
 QwtTextLabel *pwrChannel::channelNameLabel()
@@ -279,8 +285,23 @@ void pwrChannel::calcOffTimeout()
     }
 }
 
+inline void pwrChannel::isToggle(bool it)
+{
+    m_isToggle = it;
+}
+
+inline bool pwrChannel::isToggle()
+{
+    return m_isToggle;
+}
+
 void pwrChannel::sliderReleased()
 {
+    if( !m_channelSwitch->isEnabled() )
+    {
+        return;
+    }
+
     if( m_setSwitchState != pwrChState::On )
     {
         if( m_channelSwitch->sliderPosition() >
@@ -331,7 +352,7 @@ void pwrChannel::onDisconnect()
     m_timer->stop();
     m_changing       = false;
     m_swTarget      = pwrChState::Unk;
-    m_setSwitchState = pwrChState::Off;
+    m_setSwitchState = pwrChState::Unk;
     m_isToggle       = false;
     m_outlets.clear();
     m_onDelay    = 1000;

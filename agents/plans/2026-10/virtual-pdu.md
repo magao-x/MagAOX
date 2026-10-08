@@ -83,7 +83,7 @@ Add a common outlet-state telemetry record, integrate it into every existing out
 | Channel configuration | `libMagAOX/app/dev/outletController.hpp` parses unused channel sections containing numeric `outlet`/`outlets`, with zero-based indices in `onOrder`/`offOrder` and millisecond delays. | Map numeric virtual outlets to remote channels, then reuse the base parser and sequence implementation. |
 | State representation | The base uses `Unknown=-1`, `Off=0`, `Intermediate=1`, `On=2`; INDI exposes `Unk`, `Off`, `Int`, `On`. Mixed outlet states aggregate to `Int`. | Preserve these values and the existing aggregate-state semantics. Telemetry needs a signed byte to retain `-1`. |
 | INDI interface | The base publishes each channel as Text `state`/`target`, plus `outlet`, `stateTimes`, `channelOutlets`, `channelOnDelays`, and `channelOffDelays`. `setupINDI()` is deprecated in favor of `appStartup()`. | Reuse that interface and migrate the two deprecated startup calls in touched apps. |
-| Power FSM and GUI | `MagAOXApp` monitors Text `state`/`target`; `On` and `Off` are recognized, other values are unknown. `gui/widgets/pwr/pwrDevice.hpp` consumes the standard properties and numeric outlet lists. | No production power-FSM or GUI code change is expected. Configuration must select the virtual device/channel and hide duplicate physical entries as desired. |
+| Power FSM and GUI | `MagAOXApp` monitors Text `state`/`target`; `On` and `Off` are recognized, other values are unknown. `gui/widgets/pwr/pwrDevice.hpp` consumes the standard properties and numeric outlet lists. | No production power-FSM code change is needed. The user approved a GUI follow-up on 2026-10-08 to disable sliders for Unk or unrecognized states. Configuration must select the virtual device/channel and hide duplicate physical entries as desired. |
 | INDI subscriptions | `registerIndiPropertySet()` registers stable property pointers keyed by device/property; Def and Set messages share the same callback path. Duplicate registrations fail. Existing subscription retries cover initial missing definitions. | Register each remote channel and each remote device's `fsm` once, keep storage stable, and reuse discovery/retry behavior. |
 | Sequence completion | Base ordering/delays operate on successful calls to `turnOutletOn/Off`; sending an INDI command does not confirm the remote switch changed. New-property callbacks execute synchronously in the driver's dispatch path. | Define dispatch versus confirmed-state sequencing explicitly. Waiting for incoming confirmation inside the same callback would block its delivery. |
 | Source disappearance | The MagAOX driver wrapper does not forward `delProperty` to apps; a received subscription definition does not establish ongoing liveness. | Do not use an unchanged channel value's age alone to infer disconnects. Periodic explicit refreshes can establish bounded freshness without changing the shared driver. |
@@ -290,7 +290,7 @@ Keep functional changes and their updated engineering notes in clean commits, fo
 - The three existing controller headers; their tests, plus a new `apps/acronameUsbHub/tests/acronameUsbHub_test.cpp`. Touched entrypoints or simulator files receive the same complete documentation pass.
 - New `libMagAOX/logger/types/{telem_outlet.hpp,telem_pdu.hpp}` and matching `types/schemas/*.fbs`; `logger/logCodes.dat`, `logger/types/telem.cpp`, `logger/logMeta.cpp`, `libMagAOX/Makefile`, and focused logger tests.
 - Root `Makefile`, `.gitignore`, `tests/tests.list`, and `tests/Makefile.one` as required for new build/test dependencies. `tests/groups.dox` only if an additional group declaration is needed; `application_unit_test` already exists.
-- This plan. No GUI production source change is expected, and no actual instrument configuration is present or edited by this plan.
+- This plan, plus `gui/widgets/pwr/{pwrChannel.hpp,pwrDevice.hpp}` and offline GUI tests for the subsequently approved unknown-state correction. No actual instrument configuration is present or edited by this plan.
 
 ## Follow-up and Edge Cases
 
@@ -304,7 +304,7 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 - Def/Set updates normally suppress unchanged values. Explicit refreshes, rather than age of unsolicited changes, establish freshness; malformed or target-only updates do not restore observed-state validity.
 - Direct self-reference is rejected. Cross-instance cycles, chains of virtual PDUs, shared physical channels configured in separate instances, and external clients issuing conflicting commands require deployment review; initial configuration limits do not provide global exclusivity.
 - Current mixed-known/unknown aggregation is preserved (`Int`), which the power FSM treats as unknown. Existing consumer behavior during unknown power remains unchanged and is verified through its tests rather than redesigned here.
-- Removing duplicate buttons and changing consumers to virtual `[power]` channels are configuration rollout tasks. GUI source changes are unnecessary for the standard interface; GUI metadata still cannot show complete remote timing.
+- Removing duplicate buttons and changing consumers to virtual `[power]` channels are configuration rollout tasks. The user-approved GUI correction disables unknown-state sliders; GUI metadata still cannot show complete remote timing.
 - Tripp Lite authentication cleanup, new USB-hub sensors, global integer-vector FITS support, outlet-base 100% coverage, and changes to warning thresholds are separate work unless specifically requested.
 - FITS vectors use the existing string-card convention. Test large values and long-card handling; practical record/file limits still apply despite avoiding a fixed outlet count in the schema.
 - The exact 100% coverage denominator and uncovered-line inventory will be recorded as the offline suites build. No instrument operations are performed by the agent.
@@ -331,7 +331,7 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 
 - Current focused coverage: virtual PDU 199/199, DCDU 188/188, USB hub 119/119, Tripp Lite 359/359 executable lines (100% each). Focused app/simulator/logger suites pass, including immediate publication and callback recording. The existing outlet-controller regression suite passes (591 assertions).
 - Broader regression finding: the unchanged `libMagAOX/app/tests/MagAOXApp_test.cpp:716` expects `powerOnWait()==0` after missing required power configuration; unchanged `MagAOXApp.hpp` requests shutdown but retains the default 55. The full suite reports 11/12 cases passed. `git diff --exit-code` confirms both files are untouched. This existing library test/implementation mismatch is outside this feature and can be reconciled with the library coverage work.
-- GUI follow-up: the existing pwr GUI ignores Text Unk state updates, and its slider treats unrecognized enum states as Off. GUI source is left unchanged as planned. The virtual INDI state and consumer FSM correctly report unknown; a GUI correction for wholly unknown channels should be handled separately.
+- GUI finding and resolution: the pwr GUI ignored Text Unk state updates, and its slider treated unrecognized enum states as Off. On 2026-10-08 the user requested that both cases disable the slider. This correction is implemented and verified below; the virtual INDI state and consumer FSM continue to report unknown correctly.
 
 - The existing `MagAOXAppExecute_test.cpp:464` also fails an injected appLogic-failure expectation (`-1` expected, `0` returned). Its source, harness, and MagAOXApp header are unchanged. This second library regression mismatch is recorded rather than folded into the outlet feature.
 - Completed the full changed-file documentation pass, including source-state ownership, telemetry roles, inline parameter docs, and removal of author tags. DCDU macro-generated callback declarations/wrappers are expanded with identical names and behavior to document every parameter at the declaration site; registration macros remain in use. Added the app's Doxygen page and example configuration.
@@ -339,6 +339,16 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 - All standalone controller builds succeeded: `make -C apps/virtualPDU`, `apps/trippLitePDU`, `apps/xt1121DCDU`, and `apps/acronameUsbHub`. `utils/logdump` and `utils/xrif2fits` also build with the new generated telemetry types. No installation or device execution was performed.
 - Entrypoint smoke: `MAGAOX_PATH=/tmp/virtual-pdu-smoke apps/virtualPDU/virtualPDU -n virtual-pdu-smoke --help` prints the new refresh/expiry and telemetry options with isolated writable paths. This framework uses a nonzero help exit; the help output was checked directly.
 - Logger accessor regression: 392 assertions passed. Logger metadata regression: 22 assertions passed. Focused suites after the documentation pass: virtual PDU 9 cases/13,768 assertions; DCDU 7/17,467; USB hub 5/166; Tripp Lite production 8/291; simulator 1/16; new logger/FITS 3/77. Coverage remains 100%: virtual PDU 199/199, DCDU 196/196, USB hub 119/119, Tripp Lite 359/359.
+
+## GUI Unknown-State Correction (2026-10-08)
+
+- User direction: "Ok I think in both cases (Unk and unrecognized) the GUI should just disable that slider."
+- `pwrDevice` maps Text Unk and every unrecognized state string to `pwrChState::Unk`. `pwrChannel` disables its slider for Unk or any unrecognized enum value without moving it to Off or emitting target completion. The last displayed position is retained while disabled.
+- Unknown observations cancel pending command timeouts and replace the saved state with Unk, so timeout callbacks cannot re-enable a channel from its previous known value. Disabled slider releases cannot send a command. Initial and disconnected channels wait for a recognized observation too.
+- On, Off, and Int observations restore control subject to the existing pending-command/target wait. Unaffected channels remain usable, and target-only updates cannot restore an unknown channel.
+- Added a separate Qt/Qwt Catch test project in `gui/widgets/pwr/tests` because the core test runner does not initialize QApplication. The tests use real widgets, timers, INDI properties, and Qt signals without opening an INDI connection. Before the fix, all four initial cases failed (58 failing assertions); after the fix, all five cases pass (146 assertions), including ordinary command completion.
+- Local test build: from `gui/widgets/pwr/tests`, run `qmake pwr_test.pro`, `make -f makefile.pwr_test -j4`, then `QT_QPA_PLATFORM=offscreen ./pwr_test`. The production `pwrGUI` also builds successfully. This workstation's Qwt is built in `/home/jrmales/Source/libs/qwt-6.3.0`; qmake was supplied that tree's `src` include directory, `lib` library directory, `-lqwt`, and `QMAKE_RPATHDIR` rather than installing anything.
+- Existing header-only widget layout is preserved. Non-trivial circular-buffer definitions are moved below their declarations without changing their bodies, as required by AGENTS.md. Full-file API documentation and formatting follow in separate commits.
 
 ## Affected Files
 
@@ -358,6 +368,10 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 - `apps/virtualPDU/virtualPDU.hpp`
 - `apps/xt1121DCDU/tests/xt1121DCDU_test.cpp`
 - `apps/xt1121DCDU/xt1121DCDU.hpp`
+- `gui/widgets/pwr/pwrChannel.hpp`
+- `gui/widgets/pwr/pwrDevice.hpp`
+- `gui/widgets/pwr/tests/pwr_test.cpp`
+- `gui/widgets/pwr/tests/pwr_test.pro`
 - `libMagAOX/Makefile`
 - `libMagAOX/app/dev/outletController.hpp`
 - `libMagAOX/logger/logCodes.dat`
@@ -387,5 +401,5 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 | trippLitePDU | 494/494 | 100% |
 
 - Final focused app/simulator/FITS suites all pass. The outlet-controller regression (591 assertions), logger accessor regression (392), and logger metadata regression (22) pass. All four apps and logdump/xrif2fits rebuild after formatting. The isolated entrypoint help check prints every new option without filesystem errors.
-- Two unchanged library regressions remain documented above: the missing-power-config wait expectation and injected appLogic-failure return expectation. Shared endpoints and the existing GUI Unk display issue remain follow-up items; GUI and actual installation configuration were not changed.
+- Two unchanged library regressions remain documented above: the missing-power-config wait expectation and injected appLogic-failure return expectation. Shared endpoints remain a follow-up item. The GUI Unk display issue is resolved by the user-approved correction below; actual installation configuration was not changed.
 - Local feature-branch commits separate functionality, documentation, the final coverage case/engineering record, and formatting. No network server, device, instrument command, installation, or deployment was used for validation.

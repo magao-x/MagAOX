@@ -32,23 +32,11 @@ class circularTimeSeries
     size_t m_currPos{ 0 };  ///< Current position in the circular buffer.
 
   public:
-    circularTimeSeries()
-    {
-    }
+    circularTimeSeries();
 
-    explicit circularTimeSeries( size_t size )
-    {
-        resize( size );
-    }
+    explicit circularTimeSeries( size_t size );
 
-    void resize( size_t size )
-    {
-        m_data.resize( size, T( 0 ) );
-        m_timeStamps.resize( size, { 0, 0 } );
-
-        m_currSize = 0;
-        m_currPos  = 0;
-    }
+    void resize( size_t size );
 
     /// Get the current size of the time-series.
     /** This is not necessarily m_data.size(), if the
@@ -59,10 +47,7 @@ class circularTimeSeries
      *
      * \returns the value of m_currSize, the number of points currently stored in the time-series.
      */
-    size_t size()
-    {
-        return m_currSize;
-    }
+    size_t size();
 
     /// Get the allocated size of the circular buffer.
     /** This is not necessarily the number of points added,
@@ -71,116 +56,164 @@ class circularTimeSeries
      * \returns m_data.size()
      *
      */
-    size_t capacity()
-    {
-        return m_data.size();
-    }
+    size_t capacity();
 
-    void add( const T &val, const timespec &ts )
-    {
-        if( m_data.size() == 0 )
-        {
-            resize( 1 );
-        }
-
-        m_data[m_currPos]       = val;
-        m_timeStamps[m_currPos] = ts;
-
-        ++m_currPos;
-
-        // Increase m_currSize up until we reach the full size
-        if( m_currSize < m_data.size() )
-            ++m_currSize;
-
-        // Wrap
-        if( m_currPos >= m_data.size() )
-            m_currPos = 0;
-    }
+    void add( const T &val, const timespec &ts );
 
     /// Get the n-th value in the time series
     /** value(0) will return the earliest point currently in the time series.
      * value(currSize()-1) will return the most recently added point.
      */
-    T value( size_t n )
-    {
-        n += m_currPos;
-
-        if( n >= m_currSize )
-            n = 0;
-
-        return m_data[n];
-    }
+    T value( size_t n );
 
     /// Get the n-th timestamp in the time series
     /** timeStamp(0) will return the earliest point currently in the time series.
      * timeStamp(currSize()-1) will return the most recently added point.
      */
-    timespec timeStamp( size_t n )
-    {
-        n += m_currPos;
-
-        if( n >= m_data.size() )
-            n = 0;
-
-        return m_timeStamps[n];
-    }
+    timespec timeStamp( size_t n );
 
     /// Return the value of the most recent entry in the time series.
-    T lastVal()
-    {
-        size_t n;
-        // handle unsigned-ness
-        if( m_currSize == 0 )
-            return 0;
-        n = m_currSize - 1;
-
-        return value( n );
-    }
+    T lastVal();
 
     /// Return the timestamp of the most recent entry in the time series.
-    T lastTimeStamp()
+    T lastTimeStamp();
+
+    T averageLast( double avgTime );
+};
+
+template <typename _T>
+inline circularTimeSeries<_T>::circularTimeSeries()
+{
+}
+
+template <typename _T>
+inline circularTimeSeries<_T>::circularTimeSeries( size_t size )
+{
+    resize( size );
+}
+
+template <typename _T>
+inline void circularTimeSeries<_T>::resize( size_t size )
+{
+    m_data.resize( size, T( 0 ) );
+    m_timeStamps.resize( size, { 0, 0 } );
+
+    m_currSize = 0;
+    m_currPos  = 0;
+}
+
+template <typename _T>
+inline size_t circularTimeSeries<_T>::size()
+{
+    return m_currSize;
+}
+
+template <typename _T>
+inline size_t circularTimeSeries<_T>::capacity()
+{
+    return m_data.size();
+}
+
+template <typename _T>
+inline void circularTimeSeries<_T>::add( const T &val, const timespec &ts )
+{
+    if( m_data.size() == 0 )
     {
-        size_t n;
-        // handle unsigned ness
-        if( m_currPos == 0 )
-            n = m_currSize - 1;
-        else
-            n = m_currPos - 1;
-        return timeStamp( n );
+        resize( 1 );
     }
 
-    T averageLast( double avgTime )
-    {
-        size_t i = m_currSize - 1;
+    m_data[m_currPos]       = val;
+    m_timeStamps[m_currPos] = ts;
 
-        double   avg = value( i );
-        timespec ts0 = timeStamp( i );
-        size_t   n   = 1;
+    ++m_currPos;
+
+    // Increase m_currSize up until we reach the full size
+    if( m_currSize < m_data.size() )
+        ++m_currSize;
+
+    // Wrap
+    if( m_currPos >= m_data.size() )
+        m_currPos = 0;
+}
+
+template <typename _T>
+inline _T circularTimeSeries<_T>::value( size_t n )
+{
+    n += m_currPos;
+
+    if( n >= m_currSize )
+        n = 0;
+
+    return m_data[n];
+}
+
+template <typename _T>
+inline timespec circularTimeSeries<_T>::timeStamp( size_t n )
+{
+    n += m_currPos;
+
+    if( n >= m_data.size() )
+        n = 0;
+
+    return m_timeStamps[n];
+}
+
+template <typename _T>
+inline _T circularTimeSeries<_T>::lastVal()
+{
+    size_t n;
+    // handle unsigned-ness
+    if( m_currSize == 0 )
+        return 0;
+    n = m_currSize - 1;
+
+    return value( n );
+}
+
+template <typename _T>
+inline _T circularTimeSeries<_T>::lastTimeStamp()
+{
+    size_t n;
+    // handle unsigned ness
+    if( m_currPos == 0 )
+        n = m_currSize - 1;
+    else
+        n = m_currPos - 1;
+    return timeStamp( n );
+}
+
+template <typename _T>
+inline _T circularTimeSeries<_T>::averageLast( double avgTime )
+{
+    size_t i = m_currSize - 1;
+
+    double   avg = value( i );
+    timespec ts0 = timeStamp( i );
+    size_t   n   = 1;
+
+    if( i == 0 )
+    {
+        return avg;
+    }
+
+    --i;
+    double dt = 0;
+    while( dt <= avgTime )
+    {
+        dt = tsDiff( ts0, timeStamp( i ) );
+        if( dt < 0 )
+            break;
+
+        avg += value( i );
+        ++n;
 
         if( i == 0 )
-        {
-            return avg;
-        }
-
+            break;
         --i;
-        double dt = 0;
-        while( dt <= avgTime )
-        {
-            dt = tsDiff( ts0, timeStamp( i ) );
-            if( dt < 0 )
-                break;
-
-            avg += value( i );
-            ++n;
-
-            if( i == 0 )
-                break;
-            --i;
-        }
-
-        return avg / n;
     }
-};
+
+    return avg / n;
+}
 
 namespace xqt
 {
@@ -500,6 +533,10 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty &ipRecv )
                     else if( state == "Off" )
                     {
                         m_channels[i]->switchState( pwrChState::Off );
+                    }
+                    else
+                    {
+                        m_channels[i]->switchState( pwrChState::Unk );
                     }
                 }
             }
