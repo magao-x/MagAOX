@@ -299,6 +299,7 @@ TEST_CASE( "Binary Zaber waits for power-off without starting communication", "[
 {
     // clang-format off
     #ifdef ZABERLOWLEVELBINARY_TEST_DOXYGEN_REF
+    zaberLowLevelBinary::powerOffRequested(); zaberLowLevelBinary::powerOnExpected();
     zaberLowLevelBinary::appLogic(); zaberLowLevelBinary::connect(); zaberLowLevelBinary::loadStages();
     zaberLowLevelBinary::refreshStageDiscovery(); zaberLowLevelBinary::queryDevice();
     zaberLowLevelBinary::sendCommandNoReply();
@@ -398,6 +399,7 @@ TEST_CASE( "Binary Zaber stage commands preserve power-loss suppression", "[zabe
 {
     // clang-format off
     #ifdef ZABERLOWLEVELBINARY_TEST_DOXYGEN_REF
+    zaberBinaryStage<zaberLowLevelBinary>::powerOffRequested(); zaberBinaryStage<zaberLowLevelBinary>::powerOnExpected();
     zaberBinaryStage<zaberLowLevelBinary>::queryCommand(); zaberBinaryStage<zaberLowLevelBinary>::sendCommandNoReply();
     #endif
     // clang-format on

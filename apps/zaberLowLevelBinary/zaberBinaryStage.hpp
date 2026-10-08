@@ -1,6 +1,5 @@
 /** \file zaberBinaryStage.hpp
  * \brief A class with details of a single binary-protocol Zaber stage.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup zaberLowLevelBinary_files
  */
@@ -24,6 +23,9 @@ namespace app
 
 /// A class to manage the details of one binary-protocol stage in a Zaber system.
 /**
+ * Known power-off defers new commands. Failures are reported only when the
+ * parent application expects both observed and requested power to be On.
+ *
  * \ingroup zaberLowLevelBinary
  */
 template <class parentT>
@@ -71,7 +73,7 @@ class zaberBinaryStage
     /// Check whether both observed and requested power are On, so a failure is unexpected.
     bool powerOnExpected();
 
-    /// Parent application used for logging and power-state checks.
+    /// Non-owning parent application used for logging and power-state checks.
     parentT *m_parent{ nullptr };
 
     /// Configured stage name used in INDI properties.
@@ -131,50 +133,80 @@ class zaberBinaryStage
     /// Last reported stage temperature. Firmware 5.35 does not expose this directly.
     float m_temp{ -999.0 };
 
-    /// whether potentiometer knob is enabled
+    /// Whether the potentiometer knob is enabled.
     bool m_knobEnabled{ false };
 
     /// Whether any warning-equivalent condition is active.
     bool m_warn{ false };
 
-    /// Driver disabled warning flag.
+    /// Driver-disabled warning derived from the binary device mode.
     bool m_warnFD{ false };
 
-    /// Device-specific warning flag placeholders retained for API compatibility.
+
+    /// FQ warning flag retained for ASCII-controller API compatibility.
     bool m_warnFQ{ false };
+
+    /// FS warning flag retained for ASCII-controller API compatibility.
     bool m_warnFS{ false };
+
+    /// FT warning flag retained for ASCII-controller API compatibility.
     bool m_warnFT{ false };
+
+    /// FB warning flag retained for ASCII-controller API compatibility.
     bool m_warnFB{ false };
+
+    /// FP warning flag retained for ASCII-controller API compatibility.
     bool m_warnFP{ false };
+
+    /// FE warning flag retained for ASCII-controller API compatibility.
     bool m_warnFE{ false };
+
+    /// WH warning flag retained for ASCII-controller API compatibility.
     bool m_warnWH{ false };
+
+    /// WL warning flag retained for ASCII-controller API compatibility.
     bool m_warnWL{ false };
+
+    /// WP warning flag retained for ASCII-controller API compatibility.
     bool m_warnWP{ false };
+
+    /// WV warning flag retained for ASCII-controller API compatibility.
     bool m_warnWV{ false };
+
+    /// WT warning flag retained for ASCII-controller API compatibility.
     bool m_warnWT{ false };
+
+    /// WM warning flag retained for ASCII-controller API compatibility.
     bool m_warnWM{ false };
+
+    /// Stage requires homing, derived from the binary home-status mode bit.
     bool m_warnWR{ false };
+
+    /// NC warning flag retained for ASCII-controller API compatibility.
     bool m_warnNC{ false };
+
+    /// NI warning flag retained for ASCII-controller API compatibility.
     bool m_warnNI{ false };
+
+    /// ND warning flag retained for ASCII-controller API compatibility.
     bool m_warnND{ false };
+
+    /// NU warning flag retained for ASCII-controller API compatibility.
     bool m_warnNU{ false };
+
+    /// NJ warning flag retained for ASCII-controller API compatibility.
     bool m_warnNJ{ false };
+
+    /// UNK warning flag retained for ASCII-controller API compatibility.
     bool m_warnUNK{ false };
+
 
   public:
     /// Default constructor deleted because stages require a parent app.
     zaberBinaryStage() = delete;
 
     /// Construct the stage helper.
-    zaberBinaryStage( parentT *parent /**< [in] the parent application */ )
-    {
-        if( parent == nullptr )
-        {
-            throw mx::exception( mx::error_t::invalidarg, "parent was null on construction of zaberBinaryStage" );
-        }
-
-        m_parent = parent;
-    }
+    zaberBinaryStage( parentT *parent /**< [in] Non-owning parent application; must not be null. */ );
 
     /// Get the stage name.
     std::string name();
@@ -244,42 +276,61 @@ class zaberBinaryStage
 
     /// Get the driver-disabled warning flag.
     bool warnFD();
+
     /// Get the FQ warning flag.
     bool warnFQ();
+
     /// Get the FS warning flag.
     bool warnFS();
+
     /// Get the FT warning flag.
     bool warnFT();
+
     /// Get the FB warning flag.
     bool warnFB();
+
     /// Get the FP warning flag.
     bool warnFP();
+
     /// Get the FE warning flag.
     bool warnFE();
+
     /// Get the WH warning flag.
     bool warnWH();
+
     /// Get the WL warning flag.
     bool warnWL();
+
     /// Get the WP warning flag.
     bool warnWP();
+
     /// Get the WV warning flag.
     bool warnWV();
+
     /// Get the WT warning flag.
     bool warnWT();
+
     /// Get the WM warning flag.
     bool warnWM();
+
     /// Get the WR warning flag.
     bool warnWR();
+
     /// Get the NC warning flag.
     bool warnNC();
+
     /// Get the NI warning flag.
     bool warnNI();
+
     /// Get the ND warning flag.
     bool warnND();
+
     /// Get the NU warning flag.
     bool warnNU();
+
     /// Get the NJ warning flag.
     bool warnNJ();
+
     /// Get the unknown-warning flag.
     bool warnUNK();
 
@@ -309,7 +360,7 @@ class zaberBinaryStage
     /// Get the parked state for MagAO-X compatibility.
     int getParked( z_port port /**< [in] the port with which to communicate */ );
 
-    /// Get the knob enabled status
+    /// Get the knob enabled status.
     int getKnob( z_port port /**< [in] the port with which to communicate */ );
 
     /// Update the current position and derived motion state.
@@ -319,7 +370,8 @@ class zaberBinaryStage
     int updateTemp( z_port port /**< [in] the port with which to communicate */ );
 
     /// Disable the manual knob and asynchronous command replies.
-    int enableKnob( z_port port, bool enable /**< [in] the port with which to communicate */ );
+    int enableKnob( z_port port, /**< [in] Port with which to communicate. */
+                    bool enable /**< [in] Whether to enable the manual knob. */ );
 
     /// Set the target speed used for absolute and relative moves.
     int setTargetSpeed( z_port  port, /**< [in] the port with which to communicate */
@@ -374,6 +426,17 @@ class zaberBinaryStage
     /// Read the state file used by the low-level app.
     int readStateFile( std::ifstream &fin /**< [in] an open input stream */ );
 };
+
+template <class parentT>
+zaberBinaryStage<parentT>::zaberBinaryStage( parentT *parent )
+{
+    if( parent == nullptr )
+    {
+        throw mx::exception( mx::error_t::invalidarg, "parent was null on construction of zaberBinaryStage" );
+    }
+
+    m_parent = parent;
+}
 
 template <class parentT>
 bool zaberBinaryStage<parentT>::powerOffRequested()

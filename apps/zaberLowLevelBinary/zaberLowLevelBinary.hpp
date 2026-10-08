@@ -1,6 +1,5 @@
 /** \file zaberLowLevelBinary.hpp
  * \brief The MagAO-X low-level binary-protocol Zaber controller.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup zaberLowLevelBinary_files
  */
@@ -41,7 +40,8 @@ namespace app
 /// The low-level binary-protocol Zaber controller.
 /**
  * This app mirrors `zaberLowLevel` as closely as possible while speaking the
- * firmware 5.xx T-series binary protocol.
+ * firmware 5.xx T-series binary protocol. An explicit Off target pauses serial
+ * work before observed power changes; observed Off triggers retained-snapshot cleanup.
  *
  * \ingroup zaberLowLevelBinary
  */
@@ -56,7 +56,7 @@ class zaberLowLevelBinary : public MagAOXAppT, public tty::usbDevice
     /// Connected binary protocol port.
     z_port m_port{ 0 };
 
-    /** \name Configurable Parameters
+    /** \name Configurable Parameters - Data
      *
      * @{
      */
@@ -100,9 +100,7 @@ class zaberLowLevelBinary : public MagAOXAppT, public tty::usbDevice
     zaberLowLevelBinary();
 
     /// Destructor.
-    ~zaberLowLevelBinary() noexcept
-    {
-    }
+    ~zaberLowLevelBinary() noexcept;
 
     /// Set up application configuration.
     virtual void setupConfig();
@@ -111,9 +109,12 @@ class zaberLowLevelBinary : public MagAOXAppT, public tty::usbDevice
     virtual void loadConfig();
 
     /// Connect to the binary-protocol stage chain and discover configured devices.
+    /** Known power-off returns ZBC_NOT_CONNECTED without starting communication. In-flight failures retain their
+     * return codes without logging or entering ERROR when power is no longer expected On.
+     */
     int connect();
 
-    /// Discover configured stages on the binary bus.
+    /// Discover configured stages, preserving the last mapping if power-off cancels the scan.
     int loadStages();
 
     /// Apply a discovered address-to-serial snapshot to the configured stages.
@@ -147,7 +148,7 @@ class zaberLowLevelBinary : public MagAOXAppT, public tty::usbDevice
     /// Set up the INDI properties and restore retained stage state.
     virtual int appStartup();
 
-    /// Execute the main FSM for `zaberLowLevelBinary`.
+    /// Execute the main FSM, deferring serial work while observed or target power is explicitly Off.
     virtual int appLogic();
 
     /// Handle the transition into the powered-off state.
@@ -216,18 +217,88 @@ class zaberLowLevelBinary : public MagAOXAppT, public tty::usbDevice
      *
      * @{
      */
-    INDI_NEWCALLBACK_DECL( zaberLowLevelBinary, m_indiP_tgt_pos );
-    INDI_NEWCALLBACK_DECL( zaberLowLevelBinary, m_indiP_req_home );
-    INDI_NEWCALLBACK_DECL( zaberLowLevelBinary, m_indiP_req_home_all );
-    INDI_NEWCALLBACK_DECL( zaberLowLevelBinary, m_indiP_req_halt );
-    INDI_NEWCALLBACK_DECL( zaberLowLevelBinary, m_indiP_req_ehalt );
-    INDI_NEWCALLBACK_DECL( zaberLowLevelBinary, m_indiP_knob_enable );
+    /// Handle an absolute stage position.
+    int newCallBack_m_indiP_tgt_pos( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Route the registered static callback to its application instance.
+    static int st_newCallBack_m_indiP_tgt_pos( void *app, /**< [in] Application instance. */
+                                      const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Handle homing of one stage.
+    int newCallBack_m_indiP_req_home( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Route the registered static callback to its application instance.
+    static int st_newCallBack_m_indiP_req_home( void *app, /**< [in] Application instance. */
+                                      const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Handle homing of all configured stages.
+    int newCallBack_m_indiP_req_home_all( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Route the registered static callback to its application instance.
+    static int st_newCallBack_m_indiP_req_home_all( void *app, /**< [in] Application instance. */
+                                      const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Handle a normal halt of one stage.
+    int newCallBack_m_indiP_req_halt( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Route the registered static callback to its application instance.
+    static int st_newCallBack_m_indiP_req_halt( void *app, /**< [in] Application instance. */
+                                      const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Handle emergency halts without stopping for an individual stage failure.
+    int newCallBack_m_indiP_req_ehalt( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Route the registered static callback to its application instance.
+    static int st_newCallBack_m_indiP_req_ehalt( void *app, /**< [in] Application instance. */
+                                      const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Handle a stage potentiometer setting.
+    int newCallBack_m_indiP_knob_enable( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Route the registered static callback to its application instance.
+    static int st_newCallBack_m_indiP_knob_enable( void *app, /**< [in] Application instance. */
+                                      const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
     ///@}
 };
 
 zaberLowLevelBinary::zaberLowLevelBinary() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     m_powerMgtEnabled = true;
+}
+
+inline zaberLowLevelBinary::~zaberLowLevelBinary() noexcept
+{
+}
+
+inline int zaberLowLevelBinary::st_newCallBack_m_indiP_tgt_pos( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<zaberLowLevelBinary *>( app )->newCallBack_m_indiP_tgt_pos( ipRecv );
+}
+
+inline int zaberLowLevelBinary::st_newCallBack_m_indiP_req_home( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<zaberLowLevelBinary *>( app )->newCallBack_m_indiP_req_home( ipRecv );
+}
+
+inline int zaberLowLevelBinary::st_newCallBack_m_indiP_req_home_all( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<zaberLowLevelBinary *>( app )->newCallBack_m_indiP_req_home_all( ipRecv );
+}
+
+inline int zaberLowLevelBinary::st_newCallBack_m_indiP_req_halt( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<zaberLowLevelBinary *>( app )->newCallBack_m_indiP_req_halt( ipRecv );
+}
+
+inline int zaberLowLevelBinary::st_newCallBack_m_indiP_req_ehalt( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<zaberLowLevelBinary *>( app )->newCallBack_m_indiP_req_ehalt( ipRecv );
+}
+
+inline int zaberLowLevelBinary::st_newCallBack_m_indiP_knob_enable( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<zaberLowLevelBinary *>( app )->newCallBack_m_indiP_knob_enable( ipRecv );
 }
 
 inline bool zaberLowLevelBinary::powerOffRequested()

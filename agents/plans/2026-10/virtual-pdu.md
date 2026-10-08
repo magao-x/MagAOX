@@ -384,7 +384,8 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 - The duplicated small predicates now occur in both Zaber controllers and the binary stage helper. A shared MagAOXApp utility is a sensible follow-up alongside the already-recorded shared power-field synchronization audit; changing that large base's API and synchronization is outside this app-scoped correction.
 - The initial eight-case offline suite fails seven cases/115 assertions against the pre-fix headers. After correcting an assertion to distinguish pre-shutdown discovery information from errors and adding resume/On-On polling controls, the fixed suite passes all 1,537 assertions in nine cases. Every successful CONNECTED/READY serial phase is rerun with a one-shot target-only Off injected at its send or receive failure; no later call is issued and the FSM does not enter ERROR.
 - Registered both binary suites in `tests/tests.list`. The existing binary suite passes all 56 assertions in six cases after repairing its non-const accessor wrappers, startup FSM initialization, missing FSM property, and Switch-state assertion, matching the ASCII harness corrections. The standalone binary app builds successfully with sequential `-j1`; its C SDK compilation emits the existing common Makefile's C++ standard-option warning. All validation remains workstation-only.
-- Full changed-file documentation and final formatting verification are in progress.
+- Completed the full changed-file documentation pass: removed author tags, documented all parameters and warning members, kept binary-stage/test-harness constructors and callback forwarding definitions outside class declarations, and preserved explicit real-symbol Doxygen references in every test case. The virtual-PDU app page now describes both Zaber consumers.
+- Final verification after formatting: the new suite passes 1,537 assertions in nine cases, the existing suite passes 56 assertions in six cases, and the standalone binary app rebuild succeeds. Formatting dry runs, documentation checks, `git diff --check`, and preservation of the original task text pass. Formatting changes preserve all code tokens, including constructor/test-helper bodies moved during documentation. Feature-branch commits separate functionality, documentation, and formatting; no installation or instrument operation was performed.
 
 ## Affected Files
 
@@ -432,7 +433,7 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 
 ## Final Verification
 
-- Ran repository `clang-format` on all 23 changed C++ files, including the subsequent GUI and Zaber corrections; dry-run formatting, top file/brief/no-author checks, and `git diff --check` pass. The original task text above Agent Findings and Plan remains byte-for-byte unchanged.
+- Ran repository `clang-format` on all 27 changed C++ files, including the subsequent GUI and both Zaber corrections; dry-run formatting, top file/brief/no-author checks, and `git diff --check` pass. The original task text above Agent Findings and Plan remains byte-for-byte unchanged.
 - Initial formatting split the empty-numeric-token guard onto its own executable line, exposing a missing error case. Added malformed order/delay arrays with empty CSV tokens and reran the virtual suite: 9 cases/13,774 assertions pass. This validates rejection of a real malformed configuration rather than relying on multiple branches sharing one coverage line.
 - Final standard `COVERAGE=1`/`-O0` controller line coverage, merged by source line across production/simulator and compiler aliases:
 
