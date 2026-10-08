@@ -351,6 +351,17 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 - Existing header-only widget layout is preserved. Non-trivial circular-buffer definitions are moved below their declarations without changing their bodies, as required by AGENTS.md. The full-file documentation pass covers declarations, parameters, state/ownership, slots, and signals. The app's Doxygen page now describes GUI unknown-state behavior too. Documentation and final formatting are separated from the functional commit.
 - Final GUI verification after formatting: 146 assertions in five cases pass; the production GUI rebuild succeeds. `clang-format --dry-run --Werror`, full-file documentation checks, preservation of the original task text, and `git diff --check` pass. The GUI build reports an existing ignored-QFile-open-result warning in untouched `gui/widgets/xWidgets/app.hpp:120`; no GUI connection or instrument operation was performed.
 
+## Configuration Diagnostics Correction (2026-10-08)
+
+- User reported that copied channel sections both containing `outlets=1,2` failed configuration without explaining the cause. Every virtual-PDU validation rejection now reports its failed condition and the relevant section, keyword, value, or valid range.
+- Shared-outlet messages name both channels and the one-based virtual outlet, with channel names sorted so diagnostics do not depend on unordered-map iteration. Repeated outlets within one channel have a distinct explanation. Endpoint aliases name both `[outletN]` sections and the duplicated remote device/channel.
+- Added diagnostics for poll/stale interval constraints, invalid or missing mapping sections, missing device/channel fields, self-reference, reserved source/property names, malformed/empty numeric values, outlet bounds, delay overflow, and invalid order permutations. The public loader preserves the specific diagnostic rather than appending its former generic failure banner.
+- The shared outlet helper now logs its previously silent no-outlets/no-channel error codes, retaining those return codes. Its bounds messages show the configured range, and all four order/delay length checks show actual and expected entry counts. Existing numeric/base bounds validation continues to protect virtual channel assignment; the later ownership scan tracks channel names to explain conflicts.
+- Extended the malformed-configuration table to 41 cases that assert the actual emitted diagnostic, and added a public-loader regression for two copied `outlets=1,2` channels. All 10 virtual-PDU cases pass (13,977 assertions). The existing DCDU (17,467), USB hub (166), Tripp Lite production (291)/simulator (16), and outlet-helper (591) assertions pass.
+- Pre-format controller line coverage remains 100%: virtualPDU 277/277, DCDU 215/215, USB hub 128/128, Tripp Lite production/simulator union 494/494. Final formatting and standalone build results will be recorded after verification.
+- Parallel standalone app builds collided while each invoked the shared generated `magaox_git_version.h` writer. Regenerated the ignored header and switched to sequential app builds for validation; this diagnostics change does not alter the build scripts.
+- No shared-endpoint support or configuration acceptance rules are added. Workstation-only fixtures continue to use private local transports and hardware substitutes.
+
 ## Affected Files
 
 - `.gitignore`

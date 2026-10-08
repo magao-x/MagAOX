@@ -105,52 +105,90 @@ TEST_CASE( "virtual PDU rejects invalid mappings and channel sequences", "[virtu
     #endif
     // clang-format on
     const std::string endpoint = "[outlet1]\ndevice=ac\nchannel=power\n";
-    for( const auto &text :
-         std::vector<std::string>{ "",
-                                   "[device]\npollInterval=0\n",
-                                   "[device]\nstaleTimeout=3\n",
-                                   "[outlet0]\ndevice=ac\nchannel=x\n",
-                                   "[outletx]\ndevice=ac\nchannel=x\n",
-                                   "[outlet01]\ndevice=ac\nchannel=x\n",
-                                   "[outlet2]\ndevice=ac\nchannel=x\n",
-                                   "[outlet1]\nchannel=x\n",
-                                   "[outlet1]\ndevice=ac\n",
-                                   "[outlet1]\ndevice=test-pdu\nchannel=x\n",
-                                   "[outlet1]\ndevice=ac\nchannel=fsm\n",
-                                   endpoint + "[outlet2]\ndevice=ac\nchannel=power\n[x]\noutlets=1,2\n",
-                                   endpoint + "[x]\noutlet=1\n[y]\noutlet=1\n",
-                                   endpoint + "[fsm]\noutlet=1\n",
-                                   endpoint + "[x]\noutlets=0\n",
-                                   endpoint + "[x]\noutlets=2\n",
-                                   endpoint + "[x]\noutlets=1,1\n",
-                                   endpoint + "[x]\noutlet=1\nonOrder=1\n",
-                                   endpoint + "[x]\noutlet=1\noffOrder=1\n",
-                                   endpoint + "[x]\noutlet=1\nonDelays=0,2\n",
-                                   endpoint + "[x]\noutlet=1\noffDelays=0,2\n",
-                                   endpoint + "[x]\noutlet=1\nonOrder=0,0\n",
-                                   endpoint + "[x]\noutlet=1\noffOrder=0,0\n",
-                                   endpoint + "[x]\noutlet=1\nonOrder=bad\n",
-                                   endpoint + "[x]\noutlet=1\nonDelays=-2\n",
-                                   endpoint + "[x]\noutlet=1\nonOrder= \n",
-                                   endpoint + "[x]\noutlet=1\nonOrder=0,,1\n",
-                                   endpoint + "[x]\noutlet=1\nonDelays=0, ,1\n",
-                                   endpoint + "[telem_rotate]\noutlet=1\n",
-                                   endpoint + "[x]\noutlet=2147483648\n",
-                                   endpoint + "[x]\noutlet=1\nonDelays=4294967296\n",
-                                   endpoint + "[outlet2]\ndevice=ac\nchannel=aux\n[x]\noutlets=1,2\nonOrder=0,0\n" } )
+    const std::string two = endpoint + "[outlet2]\ndevice=usb\nchannel=power\n";
+    for( const auto &[text, details] :
+         std::vector<std::pair<std::string, std::vector<std::string>>>{
+             { "", { "No [outletN]", "[outlet1]", "required" } },
+             { "[device]\npollInterval=0\n", { "[device]", "pollInterval=0", "greater than 0" } },
+             { "[device]\npollInterval=-1\n", { "pollInterval=-1", "greater than 0" } },
+             { "[device]\nstaleTimeout=3\n", { "staleTimeout=3", "exceed pollInterval=5" } },
+             { "[device]\nstaleTimeout=5\n", { "staleTimeout=5", "exceed pollInterval=5" } },
+             { "[outlet0]\ndevice=ac\nchannel=x\n", { "[outlet0]", "positive integer" } },
+             { "[outletx]\ndevice=ac\nchannel=x\n", { "[outletx]", "positive integer" } },
+             { "[outlet01]\ndevice=ac\nchannel=x\n", { "[outlet01]", "leading zeros" } },
+             { "[outlet2]\ndevice=ac\nchannel=x\n", { "[outlet1]", "missing", "consecutive" } },
+             { endpoint + "[outlet3]\ndevice=usb\nchannel=x\n", { "[outlet2]", "missing", "consecutive" } },
+             { "[outlet1]\nchannel=x\n", { "[outlet1]", "device", "required" } },
+             { "[outlet1]\ndevice=ac\n", { "[outlet1]", "channel", "required" } },
+             { "[outlet1]\ndevice=test-pdu\nchannel=x\n", { "[outlet1]", "test-pdu", "this virtual PDU" } },
+             { "[outlet1]\ndevice=ac\nchannel=fsm\n", { "[outlet1]", "fsm", "reserved" } },
+             { endpoint + "[outlet2]\ndevice=ac\nchannel=power\n[x]\noutlets=1,2\n",
+               { "[outlet2]", "[outlet1]", "ac.power", "duplicates" } },
+             { endpoint + "[x]\noutlet=1\n[y]\noutlet=1\n", { "[x]", "[y]", "outlet 1", "shared" } },
+             { two + "[camera]\noutlets=1,2\n[lamp]\noutlets=1,2\n",
+               { "[camera]", "[lamp]", "outlet 1", "shared" } },
+             { endpoint + "[fsm]\noutlet=1\n", { "[fsm]", "reserved INDI property" } },
+             { endpoint + "[x]\noutlets=0\n", { "[x]", "outlets", "outlet 0", "range 1..1" } },
+             { endpoint + "[x]\noutlets=2\n", { "[x]", "outlets", "outlet 2", "range 1..1" } },
+             { endpoint + "[x]\noutlets=1,1\n", { "[x]", "outlet 1", "repeated" } },
+             { endpoint + "[x]\noutlet=1\nonOrder=1\n", { "[x]", "onOrder", "permutation", "0..0" } },
+             { endpoint + "[x]\noutlet=1\noffOrder=1\n", { "[x]", "offOrder", "permutation", "0..0" } },
+             { endpoint + "[x]\noutlet=1\nonDelays=0,2\n", { "[x]", "onDelays", "2 entries", "expected 1" } },
+             { endpoint + "[x]\noutlet=1\noffDelays=0,2\n", { "[x]", "offDelays", "2 entries", "expected 1" } },
+             { endpoint + "[x]\noutlet=1\nonOrder=0,0\n", { "[x]", "onOrder", "2 entries", "expected 1" } },
+             { endpoint + "[x]\noutlet=1\noffOrder=0,0\n", { "[x]", "offOrder", "2 entries", "expected 1" } },
+             { endpoint + "[x]\noutlet=1\nonOrder=bad\n", { "[x]", "onOrder", "'bad'", "nonnegative" } },
+             { endpoint + "[x]\noutlet=1\nonDelays=-2\n", { "[x]", "onDelays", "'-2'", "nonnegative" } },
+             { endpoint + "[x]\noutlet=1\nonOrder= \n", { "[x]", "onOrder" } },
+             { endpoint + "[x]\noutlet=1\nonOrder=0,,1\n", { "[x]", "onOrder", "empty value" } },
+             { endpoint + "[x]\noutlet=1\nonDelays=0, ,1\n", { "[x]", "onDelays", "empty value" } },
+             { endpoint + "[telem_rotate]\noutlet=1\n", { "[telem_rotate]", "reserved INDI property" } },
+             { endpoint + "[x]\noutlet=2147483648\n", { "[x]", "outlet 2147483648", "range 1..1" } },
+             { endpoint + "[x]\noutlet=1\nonDelays=4294967296\n",
+               { "[x]", "onDelays", "4294967296", "maximum 4294967295", "milliseconds" } },
+             { endpoint + "[x]\noutlet=1\noffDelays=4294967296\n",
+               { "[x]", "offDelays", "4294967296", "maximum 4294967295", "milliseconds" } },
+             { two + "[x]\noutlets=1,2\nonOrder=0,0\n", { "[x]", "onOrder", "permutation", "0..1" } },
+             { two + "[x]\noutlets=1,2\noffOrder=0,0\n", { "[x]", "offOrder", "permutation", "0..1" } },
+             { endpoint, { "outlet channel", "outlet=", "outlets=" } },
+             { endpoint + "[unused]\nvalue=1\n", { "outlet channel", "outlet=", "outlets=" } },
+             { endpoint + "[x]\noutlets=\n", { "[x]", "no outlets", "at least one" } } } )
     {
         g_faults = {};
         Fixture app;
         app.configText( text );
         INFO( text );
         REQUIRE( app.loadConfigImpl( app.config ) < 0 );
+        REQUIRE( !g_faults.m_logs.empty() );
+        std::string diagnostic;
+        for( const auto &entry : g_faults.m_logs )
+            diagnostic += entry.m_message + '\n';
+        INFO( diagnostic );
+        for( const auto &detail : details )
+            CHECK( diagnostic.find( detail ) != std::string::npos );
     }
+}
+
+/// Report the copied channel names and the one-based outlet causing startup rejection.
+/** \ingroup virtualPDU_unit_test */
+TEST_CASE( "virtual PDU explains shared outlet failures during configuration loading", "[virtualPDU]" )
+{
+    // clang-format off
+    #ifdef VIRTUALPDU_TEST_DOXYGEN_REF
+    virtualPDU::loadConfig(); virtualPDU::loadConfigImpl(); virtualPDU::configError();
+    #endif
+    // clang-format on
     g_faults = {};
-    Fixture invalid;
-    invalid.configText( endpoint );
-    invalid.loadConfig();
-    REQUIRE( invalid.m_shutdown );
-    REQUIRE( !g_faults.m_logs.empty() );
+    Fixture app;
+    app.configText( "[outlet1]\ndevice=ac\nchannel=power\n[outlet2]\ndevice=usb\nchannel=power\n"
+                    "[camera]\noutlets=1,2\n[lamp]\noutlets=1,2\n" );
+    app.loadConfig();
+    REQUIRE( app.m_shutdown );
+    REQUIRE( g_faults.m_logs.size() == 1 );
+    CHECK( g_faults.m_logs[0].m_priority == flatlogs::logPrio::LOG_CRITICAL );
+    CHECK( g_faults.m_logs[0].m_message ==
+           "Invalid virtual PDU configuration: Virtual outlet 1 is shared by channels [camera] and [lamp]; "
+           "sharing outlets is not supported" );
 }
 
 /// Exercise registration and telemetry configuration/startup/shutdown failures.

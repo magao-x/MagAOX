@@ -116,7 +116,7 @@ class virtualPDU : public MagAOXApp<>, public dev::outletController<virtualPDU>,
     /// Load configuration and request shutdown on invalid configuration.
     void loadConfig() override;
 
-    /// Parse and validate remote mappings and ordinary channel sections.
+    /// Parse and validate remote mappings and ordinary channel sections, logging the reason for each rejection.
     int loadConfigImpl( mx::app::appConfigurator &config /**< [in] app configuration */ );
 
     /// Register standard outlet properties and stable remote subscriptions.
@@ -161,6 +161,9 @@ class virtualPDU : public MagAOXApp<>, public dev::outletController<virtualPDU>,
     /// Send a minimal Text target command to an available endpoint.
     int sendOutlet( int                outletNum /**< [in] zero-based endpoint index */,
                     const std::string &target /**< [in] On or Off */ );
+
+    /// Log a specific configuration rejection at critical priority and return -1.
+    int configError( const std::string &message /**< [in] Failed condition and relevant configuration context. */ );
 };
 
 inline virtualPDU::virtualPDU() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
@@ -201,21 +204,29 @@ inline void virtualPDU::loadConfig()
 {
     if( loadConfigImpl( config ) < 0 )
     {
-        log<text_log>( "Invalid virtual PDU configuration", logPrio::LOG_CRITICAL );
         m_shutdown = true;
     }
+}
+
+inline int virtualPDU::configError( const std::string &message )
+{
+    return log<text_log, -1>( "Invalid virtual PDU configuration: " + message, logPrio::LOG_CRITICAL );
 }
 
 inline int virtualPDU::loadConfigImpl( mx::app::appConfigurator &config )
 {
     config( m_pollInterval, "device.pollInterval" );
     config( m_staleTimeout, "device.staleTimeout" );
-    if( !( m_pollInterval > 0 && m_staleTimeout > m_pollInterval ) )
-        return -1;
+    if( !( m_pollInterval > 0 ) )
+        return configError( std::format( "[device] pollInterval={} must be greater than 0 seconds", m_pollInterval ) );
+    if( !( m_staleTimeout > m_pollInterval ) )
+        return configError( std::format( "[device] staleTimeout={} must exceed pollInterval={} seconds",
+                                         m_staleTimeout,
+                                         m_pollInterval ) );
     std::vector<std::string> sections;
     config.unusedSections( sections );
-    std::map<size_t, endpoint>                    mappings;
-    std::set<std::pair<std::string, std::string>> identities;
+    std::map<size_t, endpoint>                                 mappings;
+    std::map<std::pair<std::string, std::string>, std::string> identities;
     for( const auto &section : sections )
     {
         if( !section.starts_with( "outlet" ) )
@@ -225,17 +236,35 @@ inline int virtualPDU::loadConfigImpl( mx::app::appConfigurator &config )
         auto   parsed = std::from_chars( suffix.data(), suffix.data() + suffix.size(), number );
         if( parsed.ec != std::errc() || parsed.ptr != suffix.data() + suffix.size() || number == 0 ||
             section != "outlet" + std::to_string( number ) )
-            return -1;
+            return configError( "Invalid mapping section [" + section +
+                                "]; expected [outletN] with a positive integer N and no leading zeros" );
         endpoint mapping;
         config.configUnused( mapping.m_device, section, "device" );
         config.configUnused( mapping.m_channel, section, "channel" );
-        if( mapping.m_device.empty() || mapping.m_channel.empty() || mapping.m_device == configName() ||
-            mapping.m_channel == "fsm" || !identities.emplace( mapping.m_device, mapping.m_channel ).second )
-            return -1;
+        if( mapping.m_device.empty() )
+            return configError( "[" + section + "] device is required and must not be empty" );
+        if( mapping.m_channel.empty() )
+            return configError( "[" + section + "] channel is required and must not be empty" );
+        if( mapping.m_device == configName() )
+            return configError( "[" + section + "] device='" + mapping.m_device + "' refers to this virtual PDU" );
+        if( mapping.m_channel == "fsm" )
+            return configError( "[" + section + "] channel='fsm' is reserved for source readiness" );
+        auto [identity, inserted] = identities.emplace( std::make_pair( mapping.m_device, mapping.m_channel ), section );
+        if( !inserted )
+            return configError( "[" + section + "] duplicates [" + identity->second + "] mapping to '" +
+                                mapping.m_device + "." + mapping.m_channel + "'; endpoint aliases are not supported" );
         mappings.emplace( number, mapping );
     }
-    if( mappings.empty() || mappings.rbegin()->first != mappings.size() )
-        return -1;
+    if( mappings.empty() )
+        return configError( "No [outletN] mappings configured; at least [outlet1] with device and channel is required" );
+    if( mappings.rbegin()->first != mappings.size() )
+    {
+        size_t missing = 1;
+        while( mappings.count( missing ) )
+            ++missing;
+        return configError( std::format( "[outlet{}] is missing; outlet sections must be consecutive starting at 1",
+                                         missing ) );
+    }
     for( const auto &[number, mapping] : mappings )
     {
         static_cast<void>( number );
@@ -255,24 +284,37 @@ inline int virtualPDU::loadConfigImpl( mx::app::appConfigurator &config )
                 size_t first = value.find_first_not_of( " \t" );
                 size_t last  = value.find_last_not_of( " \t" );
                 if( first == std::string::npos )
-                    return -1;
+                    return configError( std::format( "[{}] {} contains an empty value; expected a nonnegative integer",
+                                                     section,
+                                                     keyword ) );
                 value = value.substr( first, last - first + 1 );
                 size_t number;
                 auto   result = std::from_chars( value.data(), value.data() + value.size(), number );
                 if( result.ec != std::errc() || result.ptr != value.data() + value.size() )
-                    return -1;
+                    return configError( std::format( "[{}] {} value '{}' is not a nonnegative decimal integer",
+                                                     section,
+                                                     keyword,
+                                                     value ) );
                 std::string_view name = keyword;
                 if( ( name == "outlet" || name == "outlets" ) && ( number == 0 || number > m_endpoints.size() ) )
-                    return -1;
+                    return configError( std::format( "[{}] {} outlet {} is outside the configured range 1..{}",
+                                                     section,
+                                                     keyword,
+                                                     number,
+                                                     m_endpoints.size() ) );
                 if( ( name == "onDelays" || name == "offDelays" ) && number > std::numeric_limits<unsigned>::max() )
-                    return -1;
+                    return configError( std::format( "[{}] {} delay {} exceeds the maximum {} milliseconds",
+                                                     section,
+                                                     keyword,
+                                                     number,
+                                                     std::numeric_limits<unsigned>::max() ) );
             }
         }
     }
     setNumberOfOutlets( m_endpoints.size() );
     if( outletControllerT::loadConfig( config ) < 0 )
         return -1;
-    std::set<size_t>            assigned;
+    std::map<size_t, std::string> assigned;
     const std::set<std::string> reserved{ "outlet",
                                           "stateTimes",
                                           "channelOutlets",
@@ -287,19 +329,36 @@ inline int virtualPDU::loadConfigImpl( mx::app::appConfigurator &config )
     for( const auto &[name, channel] : m_channels )
     {
         if( reserved.count( name ) )
-            return -1;
+            return configError( "Channel [" + name + "] conflicts with a reserved INDI property name" );
         for( auto number : channel.m_outlets )
         {
-            if( number >= m_endpoints.size() || !assigned.insert( number ).second )
-                return -1;
+            auto [owner, inserted] = assigned.emplace( number, name );
+            if( !inserted )
+            {
+                if( owner->second == name )
+                    return configError( std::format( "Channel [{}] has repeated outlet {}; each outlet may appear only once",
+                                                     name,
+                                                     number + 1 ) );
+                return configError( std::format( "Virtual outlet {} is shared by channels [{}] and [{}]; "
+                                                 "sharing outlets is not supported",
+                                                 number + 1,
+                                                 std::min( name, owner->second ),
+                                                 std::max( name, owner->second ) ) );
+            }
         }
-        for( const auto &order : { channel.m_onOrder, channel.m_offOrder } )
+        for( const auto &keyword : { "onOrder", "offOrder" } )
         {
+            const auto &order = std::string_view( keyword ) == "onOrder" ? channel.m_onOrder : channel.m_offOrder;
             if( order.empty() )
                 continue;
             std::set<size_t> indices( order.begin(), order.end() );
             if( indices.size() != channel.m_outlets.size() || *indices.rbegin() >= channel.m_outlets.size() )
-                return -1;
+                return configError( std::format( "Channel [{}] {} must be a permutation of the {} outlet positions "
+                                                 "0..{} (no repeated or out-of-range indices)",
+                                                 name,
+                                                 keyword,
+                                                 channel.m_outlets.size(),
+                                                 channel.m_outlets.size() - 1 ) );
         }
     }
     TELEMETER_LOAD_CONFIG( config );

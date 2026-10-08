@@ -383,7 +383,8 @@ template <class derivedT>
 int outletController<derivedT>::loadConfig( mx::app::appConfigurator &config )
 {
     if( m_outletStates.size() == 0 )
-        return OUTLET_E_NOOUTLETS;
+        return derivedT::template log<software_error, OUTLET_E_NOOUTLETS>(
+            "Cannot configure outlet channels: the number of outlets has not been set" );
 
     // Get the "unused" sections.
     std::vector<std::string> sections;
@@ -391,7 +392,8 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator &config )
     config.unusedSections( sections );
 
     if( sections.size() == 0 )
-        return OUTLET_E_NOCHANNELS;
+        return derivedT::template log<software_error, OUTLET_E_NOCHANNELS>(
+            "No outlet channel sections configured; add a section with outlet= or outlets=" );
 
     // Now see if any are channels, which means they have an outlet= or outlets= entry
     std::vector<std::string> chSections;
@@ -406,7 +408,8 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator &config )
     }
 
     if( chSections.size() == 0 )
-        return OUTLET_E_NOVALIDCH;
+        return derivedT::template log<software_error, OUTLET_E_NOVALIDCH>(
+            "No outlet channels configured: no section defines outlet= or outlets=" );
 
     // Now configure the channels.
     for( size_t n = 0; n < chSections.size(); ++n )
@@ -426,8 +429,8 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator &config )
 
         if( outlets.size() == 0 )
         {
-            return derivedT::template log<software_error, -1>( std::format( "no outlets in Channel "
-                                                                            "{} is not valid",
+            return derivedT::template log<software_error, -1>( std::format( "Channel [{}] has no outlets; specify at "
+                                                                            "least one outlet with outlet= or outlets=",
                                                                             chSections[n] ) );
         }
 
@@ -436,10 +439,12 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator &config )
         {
             if( outlets[k] < static_cast<size_t>( m_firstOne ) || outlets[k] - m_firstOne >= m_outletStates.size() )
             {
-                return derivedT::template log<software_error, -1>( std::format( "Outlet {} in Channel "
-                                                                                "{} is not valid",
+                return derivedT::template log<software_error, -1>( std::format( "Channel [{}] outlet {} is outside "
+                                                                                "the configured range {}..{}",
+                                                                                chSections[n],
                                                                                 outlets[k],
-                                                                                chSections[n] ),
+                                                                                static_cast<size_t>( m_firstOne ),
+                                                                                m_outletStates.size() - 1 + m_firstOne ),
                                                                    logPrio::LOG_ERROR );
             }
 
@@ -456,9 +461,11 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator &config )
 
             if( onOrder.size() != m_channels[chSections[n]].m_outlets.size() )
             {
-                return derivedT::template log<software_error, -1>( "onOrder must be same "
-                                                                   "size as outlets.  In Channel " +
-                                                                   chSections[n] );
+                return derivedT::template log<software_error, -1>(
+                    std::format( "Channel [{}] onOrder has {} entries; expected {} to match outlets",
+                                 chSections[n],
+                                 onOrder.size(),
+                                 m_channels[chSections[n]].m_outlets.size() ) );
             }
 
             m_channels[chSections[n]].m_onOrder = onOrder;
@@ -471,9 +478,11 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator &config )
 
             if( offOrder.size() != m_channels[chSections[n]].m_outlets.size() )
             {
-                return derivedT::template log<software_error, -1>( "offOrder must be same "
-                                                                   "size as outlets.  In Channel " +
-                                                                   chSections[n] );
+                return derivedT::template log<software_error, -1>(
+                    std::format( "Channel [{}] offOrder has {} entries; expected {} to match outlets",
+                                 chSections[n],
+                                 offOrder.size(),
+                                 m_channels[chSections[n]].m_outlets.size() ) );
             }
 
             m_channels[chSections[n]].m_offOrder = offOrder;
@@ -486,9 +495,11 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator &config )
 
             if( onDelays.size() != m_channels[chSections[n]].m_outlets.size() )
             {
-                return derivedT::template log<software_error, -1>( "onDelays must be same "
-                                                                   "size as outlets.  In Channel " +
-                                                                   chSections[n] );
+                return derivedT::template log<software_error, -1>(
+                    std::format( "Channel [{}] onDelays has {} entries; expected {} to match outlets",
+                                 chSections[n],
+                                 onDelays.size(),
+                                 m_channels[chSections[n]].m_outlets.size() ) );
             }
 
             m_channels[chSections[n]].m_onDelays = onDelays;
@@ -501,9 +512,11 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator &config )
 
             if( offDelays.size() != m_channels[chSections[n]].m_outlets.size() )
             {
-                return derivedT::template log<software_error, -1>( "offDelays must be same "
-                                                                   "size as outlets.  In Channel " +
-                                                                   chSections[n] );
+                return derivedT::template log<software_error, -1>(
+                    std::format( "Channel [{}] offDelays has {} entries; expected {} to match outlets",
+                                 chSections[n],
+                                 offDelays.size(),
+                                 m_channels[chSections[n]].m_outlets.size() ) );
             }
 
             m_channels[chSections[n]].m_offDelays = offDelays;
