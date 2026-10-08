@@ -1,6 +1,5 @@
 /** \file logMeta.cpp
  * \brief Declares and defines the logMeta class and related classes.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup logger_files
  *
@@ -259,6 +258,12 @@ bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
         break;
     case eventCodes::TELEM_POLTRACK:
         verified = telem_poltrack::verify( logBuff, len );
+        break;
+    case eventCodes::TELEM_OUTLET:
+        verified = telem_outlet::verify( logBuff, len );
+        break;
+    case eventCodes::TELEM_PDU:
+        verified = telem_pdu::verify( logBuff, len );
         break;
     case eventCodes::TELEM_ADCTRACK:
         verified = telem_adctrack::verify( logBuff, len );

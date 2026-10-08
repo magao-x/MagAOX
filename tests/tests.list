@@ -16,6 +16,7 @@
 ../libMagAOX/logger/tests/logFileRaw_test
 ../libMagAOX/logger/tests/logFileRaw_fileTime_error_test
 ../libMagAOX/logger/tests/logMap_test
+../libMagAOX/logger/tests/pduTelemetry_test
 ../libMagAOX/logger/tests/logMeta_test
 ../libMagAOX/logger/tests/logTypes_Accessor_test
 
@@ -23,6 +24,8 @@
 
 ../libMagAOX/tty/tests/ttyIOUtils_test
 
+../apps/virtualPDU/tests/virtualPDU_test
+../apps/acronameUsbHub/tests/acronameUsbHub_test
 ../apps/adcTracker/tests/adcTracker_test
 ../apps/alignLoop/tests/alignLoop_test
 ../apps/cacaoInterface/tests/cacaoInterface_test
@@ -81,6 +84,7 @@
 ../apps/t2wOffloader/tests/t2wOffloader_test
 ../apps/tcsInterface/tests/tcsInterface_test
 ../apps/timeSeriesSimulator/tests/timeSeriesSimulator_test
+../apps/trippLitePDU/tests/trippLitePDU_sim_test
 ../apps/trippLitePDU/tests/trippLitePDU_test
 ../apps/ttmModulator/tests/ttmModulator_test
 ../apps/usbtempMon/tests/usbtempMon_test
@@ -101,8 +105,11 @@
 ../apps/xt1121DCDU/tests/xt1121DCDU_test
 ../apps/zaberCtrl/tests/zaberCtrl_test
 ../apps/zaberLowLevel/tests/zaberLowLevel_test
+../apps/zaberLowLevel/tests/zaberLowLevel_power_test
 ../apps/zaberLowLevel/tests/zaberStage_test
 ../apps/zaberLowLevel/tests/zaberUtils_test
+../apps/zaberLowLevelBinary/tests/zaberLowLevelBinary_test
+../apps/zaberLowLevelBinary/tests/zaberLowLevelBinary_power_test
 
 ../flatlogs/tests/flatlogcodes_test
 

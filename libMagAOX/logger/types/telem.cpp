@@ -1,6 +1,5 @@
 /** \file telem.cpp
- * \brief The MagAO-X logger telemetery library
- * \author Jared R. Males (jaredmales@gmail.com)
+ * \brief The MagAO-X logger telemetry library
  *
  * \ingroup logger_types_files
  *
@@ -13,6 +12,8 @@ namespace MagAOX
 namespace logger
 {
 
+timespec telem_outlet::lastRecord         = { 0, 0 };
+timespec telem_pdu::lastRecord            = { 0, 0 };
 timespec cred2_temps::lastRecord          = { 0, 0 };
 timespec ocam_temps::lastRecord           = { 0, 0 };
 timespec telem_blockgains::lastRecord     = { 0, 0 };

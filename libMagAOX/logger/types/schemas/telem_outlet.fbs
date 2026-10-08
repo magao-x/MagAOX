@@ -1,0 +1,9 @@
+/// \file telem_outlet.fbs
+/// \brief Observed outlet states in controller numbering order.
+namespace MagAOX.logger;
+table Telem_outlet_fb
+{
+    first_outlet:uint8;
+    states:[int8];
+}
+root_type Telem_outlet_fb;
