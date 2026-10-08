@@ -160,6 +160,12 @@ class zaberLowLevelBinary : public MagAOXAppT, public tty::usbDevice
     virtual int appShutdown();
 
   protected:
+    /// Check whether observed or requested power is explicitly Off, so new communication should wait.
+    bool powerOffRequested();
+
+    /// Check whether both observed and requested power are On, so a communication failure is unexpected.
+    bool powerOnExpected();
+
     /** \name INDI Stage State - Data
      *
      * @{
@@ -222,6 +228,16 @@ class zaberLowLevelBinary : public MagAOXAppT, public tty::usbDevice
 zaberLowLevelBinary::zaberLowLevelBinary() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     m_powerMgtEnabled = true;
+}
+
+inline bool zaberLowLevelBinary::powerOffRequested()
+{
+    return powerState() == 0 || powerStateTarget() == 0;
+}
+
+inline bool zaberLowLevelBinary::powerOnExpected()
+{
+    return powerState() == 1 && powerStateTarget() == 1;
 }
 
 void zaberLowLevelBinary::setupConfig()
@@ -318,6 +334,9 @@ void zaberLowLevelBinary::loadConfig()
 int zaberLowLevelBinary::queryDevice(
     int32_t &response, uint8_t deviceAddress, uint8_t commandNumber, int32_t data, uint8_t expectedReply )
 {
+    if( powerOffRequested() )
+        return -1;
+
     uint8_t command[6];
     if( zb_encode( command, deviceAddress, commandNumber, data ) != Z_SUCCESS )
     {
@@ -326,6 +345,8 @@ int zaberLowLevelBinary::queryDevice(
 
     if( zb_send( m_port, command ) != 6 )
     {
+        if( !powerOnExpected() )
+            return -1;
         return log<software_error, -1>( "zb_send failed" );
     }
 
@@ -335,6 +356,9 @@ int zaberLowLevelBinary::queryDevice(
     {
         return -1;
     }
+
+    if( powerOffRequested() )
+        return -1;
 
     if( reply[0] != deviceAddress )
     {
@@ -361,6 +385,9 @@ int zaberLowLevelBinary::queryDevice(
 
 int zaberLowLevelBinary::sendCommandNoReply( uint8_t deviceAddress, uint8_t commandNumber, int32_t data )
 {
+    if( powerOffRequested() )
+        return -1;
+
     uint8_t command[6];
     if( zb_encode( command, deviceAddress, commandNumber, data ) != Z_SUCCESS )
     {
@@ -369,6 +396,8 @@ int zaberLowLevelBinary::sendCommandNoReply( uint8_t deviceAddress, uint8_t comm
 
     if( zb_send( m_port, command ) != 6 )
     {
+        if( !powerOnExpected() )
+            return -1;
         return log<software_error, -1>( "zb_send failed" );
     }
 
@@ -380,7 +409,7 @@ int zaberLowLevelBinary::resetConnection()
     if( m_port > 0 )
     {
         int rv = zb_disconnect( m_port );
-        if( rv < 0 )
+        if( rv < 0 && powerOnExpected() )
         {
             log<text_log>( "Error disconnecting from zaber binary system.", logPrio::LOG_ERROR );
         }
@@ -422,7 +451,12 @@ int zaberLowLevelBinary::recoverFromError( bool devicePresent )
 
 int zaberLowLevelBinary::connect()
 {
+    if( powerOffRequested() )
+        return ZBC_NOT_CONNECTED;
+
     resetConnection();
+    if( powerOffRequested() )
+        return ZBC_NOT_CONNECTED;
 
     int zrv;
     { // mutex scope
@@ -434,7 +468,7 @@ int zaberLowLevelBinary::connect()
     {
         resetConnection();
 
-        if( !stateLogged() )
+        if( !stateLogged() && powerOnExpected() )
         {
             log<software_error>( { "can not connect to zaber binary stage(s)" } );
         }
@@ -442,8 +476,13 @@ int zaberLowLevelBinary::connect()
         return ZBC_NOT_CONNECTED;
     }
 
+    if( powerOffRequested() )
+        return ZBC_ERROR;
+
     if( zb_set_timeout( m_port, m_commandTimeout ) < 0 )
     {
+        if( !powerOnExpected() )
+            return ZBC_ERROR;
         log<software_error>( { "error setting binary command timeout" } );
         state( stateCodes::ERROR );
         return ZBC_ERROR;
@@ -451,6 +490,8 @@ int zaberLowLevelBinary::connect()
 
     if( zb_drain( m_port ) != Z_SUCCESS )
     {
+        if( !powerOnExpected() )
+            return ZBC_ERROR;
         log<software_error>( { "error draining binary port" } );
         state( stateCodes::ERROR );
         return ZBC_ERROR;
@@ -460,6 +501,8 @@ int zaberLowLevelBinary::connect()
     {
         if( sendCommandNoReply( 0, zaberBinaryStage<zaberLowLevelBinary>::cmdRenumber, 0 ) < 0 )
         {
+            if( !powerOnExpected() )
+                return ZBC_ERROR;
             log<text_log>( "Error sending renumber query to stages", logPrio::LOG_ERROR );
             state( stateCodes::ERROR );
             return ZBC_ERROR;
@@ -474,11 +517,16 @@ int zaberLowLevelBinary::connect()
 
 int zaberLowLevelBinary::loadStages()
 {
+    if( powerOffRequested() )
+        return ZBC_ERROR;
+
     std::vector<int>         addresses;
     std::vector<std::string> serials;
 
     if( zb_drain( m_port ) != Z_SUCCESS )
     {
+        if( !powerOnExpected() )
+            return ZBC_ERROR;
         log<software_error>( { "error draining binary port" } );
         state( stateCodes::ERROR );
         return ZBC_ERROR;
@@ -493,6 +541,8 @@ int zaberLowLevelBinary::loadStages()
                          0,
                          zaberBinaryStage<zaberLowLevelBinary>::cmdReturnSerialNumber ) < 0 )
         {
+            if( powerOffRequested() )
+                return ZBC_ERROR;
             continue;
         }
 
@@ -505,6 +555,9 @@ int zaberLowLevelBinary::loadStages()
 
 int zaberLowLevelBinary::loadStages( const std::vector<int> &addresses, const std::vector<std::string> &serials )
 {
+    if( powerOffRequested() )
+        return ZBC_ERROR;
+
     std::vector<int> oldAddresses;
     bool             firstDiscoveryPass = !m_stageDiscoveryInitialized;
     size_t           oldPresentCount    = 0;
@@ -562,7 +615,7 @@ int zaberLowLevelBinary::loadStages( const std::vector<int> &addresses, const st
     {
         if( m_stages[n].deviceAddress() < 1 )
         {
-            if( firstDiscoveryPass || n >= oldAddresses.size() || oldAddresses[n] > 0 )
+            if( powerOnExpected() && ( firstDiscoveryPass || n >= oldAddresses.size() || oldAddresses[n] > 0 ) )
             {
                 log<text_log>( std::format( "stage {} with s/n {} not found in system.",
                                             m_stages[n].name(),
@@ -580,6 +633,9 @@ int zaberLowLevelBinary::loadStages( const std::vector<int> &addresses, const st
 
 int zaberLowLevelBinary::refreshStageDiscovery()
 {
+    if( powerOffRequested() )
+        return ZBC_ERROR;
+
     if( m_port <= 0 )
     {
         return ZBC_NOT_CONNECTED;
@@ -689,6 +745,9 @@ int zaberLowLevelBinary::appLogic()
         return -1;
     }
 
+    if( powerOffRequested() )
+        return 0;
+
     if( state() == stateCodes::POWERON )
     {
         for( size_t i = 0; i < m_stages.size(); ++i )
@@ -710,7 +769,7 @@ int zaberLowLevelBinary::appLogic()
         int rv = tty::usbDevice::getDeviceName();
         if( rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES )
         {
-            if( powerState() != 1 || powerStateTarget() != 1 )
+            if( !powerOnExpected() )
             {
                 return 0;
             }
@@ -753,6 +812,8 @@ int zaberLowLevelBinary::appLogic()
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
         int rv = connect();
+        if( powerOffRequested() )
+            return 0;
         if( rv == ZBC_CONNECTED )
         {
             state( stateCodes::CONNECTED );
@@ -791,6 +852,8 @@ int zaberLowLevelBinary::appLogic()
 
             if( m_stages[i].enableKnob( m_port, false ) < 0 )
             {
+                if( !powerOnExpected() )
+                    return 0;
                 log<software_error>();
                 state( stateCodes::ERROR );
                 return 0;
@@ -798,6 +861,8 @@ int zaberLowLevelBinary::appLogic()
 
             if( m_stages[i].getMaxPos( m_port ) < 0 )
             {
+                if( !powerOnExpected() )
+                    return 0;
                 log<software_error>();
                 state( stateCodes::ERROR );
                 return 0;
@@ -805,6 +870,8 @@ int zaberLowLevelBinary::appLogic()
 
             if( m_stages[i].setTargetSpeed( m_port, m_stages[i].targetSpeed() ) < 0 )
             {
+                if( !powerOnExpected() )
+                    return 0;
                 log<software_error>();
                 state( stateCodes::ERROR );
                 return 0;
@@ -814,6 +881,8 @@ int zaberLowLevelBinary::appLogic()
 
             if( m_stages[i].updatePos( m_port ) < 0 )
             {
+                if( !powerOnExpected() )
+                    return 0;
                 log<software_error>();
                 state( stateCodes::ERROR );
                 return 0;
@@ -821,10 +890,14 @@ int zaberLowLevelBinary::appLogic()
 
             if( m_stages[i].recallParkPosition( m_port ) < 0 )
             {
+                if( !powerOnExpected() )
+                    return 0;
                 log<text_log>( "No stored parked position found for " + m_stages[i].name(), logPrio::LOG_INFO );
             }
             else if( m_stages[i].restoreParkedState( m_port ) < 0 )
             {
+                if( !powerOnExpected() )
+                    return 0;
                 log<software_error>();
                 state( stateCodes::ERROR );
                 return 0;
@@ -832,6 +905,8 @@ int zaberLowLevelBinary::appLogic()
 
             if( m_stages[i].getWarnings( m_port ) < 0 )
             {
+                if( !powerOnExpected() )
+                    return 0;
                 log<software_error>();
                 state( stateCodes::ERROR );
                 return 0;
@@ -865,7 +940,7 @@ int zaberLowLevelBinary::appLogic()
 
             if( rv == ZBC_ERROR )
             {
-                if( powerState() != 1 || powerStateTarget() != 1 )
+                if( !powerOnExpected() )
                 {
                     return 0;
                 }
@@ -886,6 +961,8 @@ int zaberLowLevelBinary::appLogic()
 
             if( m_stages[i].updatePos( m_port ) < 0 )
             {
+                if( !powerOnExpected() )
+                    return 0;
                 log<software_error>();
                 state( stateCodes::ERROR );
                 return 0;
@@ -893,6 +970,8 @@ int zaberLowLevelBinary::appLogic()
 
             if( m_stages[i].getParked( m_port ) < 0 )
             {
+                if( !powerOnExpected() )
+                    return 0;
                 log<software_error>();
                 state( stateCodes::ERROR );
                 return 0;
@@ -900,6 +979,8 @@ int zaberLowLevelBinary::appLogic()
 
             if( m_stages[i].getKnob( m_port ) < 0 )
             {
+                if( !powerOnExpected() )
+                    return 0;
                 log<software_error>();
                 state( stateCodes::ERROR );
                 return 0;
@@ -943,6 +1024,8 @@ int zaberLowLevelBinary::appLogic()
                     {
                         if( m_stages[i].park( m_port ) < 0 )
                         {
+                            if( !powerOnExpected() )
+                                return 0;
                             log<software_error>();
                             state( stateCodes::ERROR );
                             return 0;
@@ -993,7 +1076,7 @@ int zaberLowLevelBinary::appLogic()
         int rv = tty::usbDevice::getDeviceName();
         if( rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES )
         {
-            if( powerState() != 1 || powerStateTarget() != 1 )
+            if( !powerOnExpected() )
             {
                 return 0;
             }
@@ -1015,7 +1098,7 @@ int zaberLowLevelBinary::appLogic()
             return recoverFromError( false );
         }
 
-        if( powerState() != 1 || powerStateTarget() != 1 )
+        if( !powerOnExpected() )
         {
             return 0;
         }
@@ -1029,7 +1112,7 @@ int zaberLowLevelBinary::appLogic()
         return recoverFromError( true );
     }
 
-    if( powerState() != 1 || powerStateTarget() != 1 )
+    if( !powerOnExpected() )
     {
         return 0;
     }
@@ -1093,6 +1176,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_tgt_pos )( const pcf::IndiPr
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_tgt_pos, ipRecv );
 
+    if( powerOffRequested() )
+        return -1;
+
     for( size_t n = 0; n < m_stages.size(); ++n )
     {
         if( ipRecv.find( m_stages[n].name() ) )
@@ -1109,6 +1195,8 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_tgt_pos )( const pcf::IndiPr
                 std::lock_guard<std::mutex> guard( m_indiMutex );
                 if( m_stages[n].moveAbs( m_port, tgt ) < 0 )
                 {
+                    if( !powerOnExpected() )
+                        return -1;
                     return log<software_error, -1>( { "error from moveAbs for " + m_stages[n].name() } );
                 }
 
@@ -1125,6 +1213,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_tgt_pos )( const pcf::IndiPr
 INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_req_home )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_req_home, ipRecv );
+
+    if( powerOffRequested() )
+        return -1;
 
     size_t stageno = std::numeric_limits<size_t>::max();
     bool   found   = false;
@@ -1169,6 +1260,8 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_req_home )( const pcf::IndiP
 
     if( m_stages[stageno].home( m_port ) < 0 )
     {
+        if( !powerOnExpected() )
+            return -1;
         return log<software_error, -1>( std::format( "error from home for {}", m_stages[stageno].name() ) );
     }
 
@@ -1182,6 +1275,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_req_home )( const pcf::IndiP
 INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_req_home_all )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_req_home_all, ipRecv );
+
+    if( powerOffRequested() )
+        return -1;
 
     if( !ipRecv.find( "request" ) )
     {
@@ -1205,6 +1301,8 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_req_home_all )( const pcf::I
 
             if( m_stages[n].home( m_port ) < 0 )
             {
+                if( !powerOnExpected() )
+                    return -1;
                 return log<software_error, -1>( { "error from home for " + m_stages[n].name() } );
             }
 
@@ -1220,6 +1318,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_req_home_all )( const pcf::I
 INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_req_halt )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_req_halt, ipRecv );
+
+    if( powerOffRequested() )
+        return -1;
 
     size_t stageno = std::numeric_limits<size_t>::max();
     bool   found   = false;
@@ -1258,6 +1359,8 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_req_halt )( const pcf::IndiP
     std::lock_guard<std::mutex> guard( m_indiMutex );
     if( m_stages[stageno].stop( m_port ) < 0 )
     {
+        if( !powerOnExpected() )
+            return -1;
         return log<software_error, -1>( std::format( "error from stop for {}", m_stages[stageno].name() ) );
     }
 
@@ -1267,6 +1370,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_req_halt )( const pcf::IndiP
 INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_req_ehalt )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_req_ehalt, ipRecv );
+
+    if( powerOffRequested() )
+        return -1;
 
     for( size_t n = 0; n < m_stages.size(); ++n )
     {
@@ -1280,7 +1386,7 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_req_ehalt )( const pcf::Indi
             }
 
             std::lock_guard<std::mutex> guard( m_indiMutex );
-            if( m_stages[n].estop( m_port ) < 0 )
+            if( m_stages[n].estop( m_port ) < 0 && powerOnExpected() )
             {
                 log<software_error>( { "error from estop for " + m_stages[n].name() } );
             }
@@ -1293,6 +1399,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_req_ehalt )( const pcf::Indi
 INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_knob_enable )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_knob_enable, ipRecv );
+
+    if( powerOffRequested() )
+        return -1;
 
     // Make sure only one request is sent to avoid racing
     size_t stageno = std::numeric_limits<size_t>::max();
@@ -1332,6 +1441,8 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevelBinary, m_indiP_knob_enable )( const pcf::In
 
     if( m_stages[stageno].enableKnob( m_port, enable_knob ) < 0 )
     {
+        if( !powerOnExpected() )
+            return -1;
         return log<software_error, -1>( std::format( "error from enable knob for {}", m_stages[stageno].name() ) );
     }
 

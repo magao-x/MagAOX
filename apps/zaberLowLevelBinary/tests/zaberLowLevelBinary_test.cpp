@@ -75,6 +75,7 @@ class zaberLowLevelBinary_test : public zaberLowLevelBinary
             stateOut << rawPos << '\n' << parked << '\n' << maxPos << '\n' << lastHomed << '\n';
         }
 
+        state( stateCodes::INITIALIZED );
         if( appStartup() < 0 )
         {
             return -1;
@@ -84,6 +85,12 @@ class zaberLowLevelBinary_test : public zaberLowLevelBinary
         {
             return -1;
         }
+
+        m_indiP_state = pcf::IndiProperty( pcf::IndiProperty::Text );
+        m_indiP_state.setDevice( m_configName );
+        m_indiP_state.setName( "fsm" );
+        m_indiP_state.setPerm( pcf::IndiProperty::ReadOnly );
+        m_indiP_state.add( pcf::IndiElement( "state" ) );
 
         m_indiDriver = new indiDriver<MagAOXAppT>( this, m_configName, "0", "0" );
 
@@ -120,7 +127,7 @@ class zaberLowLevelBinary_test : public zaberLowLevelBinary
     }
 
     /// Get the cached device address for a configured stage.
-    int deviceAddressFor( size_t stageIndex ) const
+    int deviceAddressFor( size_t stageIndex )
     {
         return m_stages.at( stageIndex ).deviceAddress();
     }
@@ -139,7 +146,7 @@ class zaberLowLevelBinary_test : public zaberLowLevelBinary
     }
 
     /// Get the FSM state for recovery tests.
-    stateCodes::stateCodeT appState() const
+    stateCodes::stateCodeT appState()
     {
         return state();
     }
@@ -187,9 +194,9 @@ class zaberLowLevelBinary_test : public zaberLowLevelBinary
     }
 
     /// Get the warning-switch property value for a stage.
-    std::string warnValue( const std::string &stageName ) const
+    pcf::IndiElement::SwitchStateType warnValue( const std::string &stageName ) const
     {
-        return propertyValue( m_indiP_warn, stageName );
+        return m_indiP_warn[stageName].getSwitchState();
     }
 
     /// Invoke the power-off handling under test.
@@ -279,7 +286,7 @@ SCENARIO( "Power-off INDI snapshot retains stage state", "[zaberLowLevelBinary]"
     REQUIRE( zllbt.lastHomedValue( "stageA" ) == "77" );
     REQUIRE( zllbt.maxPosValue( "stageA" ) == "54321" );
     REQUIRE( zllbt.currStateValue( "stageA" ) == "POWEROFF" );
-    REQUIRE( zllbt.warnValue( "stageA" ) == "Off" );
+    REQUIRE( zllbt.warnValue( "stageA" ) == pcf::IndiElement::Off );
 }
 
 SCENARIO( "Binary last-home timestamps refresh after homing completes", "[zaberLowLevelBinary]" )

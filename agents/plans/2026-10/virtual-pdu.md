@@ -376,6 +376,16 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 - Final verification after formatting: all 522 assertions in 15 Zaber cases pass, and the standalone zaberLowLevel rebuild succeeds. The virtual-PDU power callback regression passes all 42 assertions; coverage for all four outlet-controller apps remains 100%, with the same line totals reported below. Formatting dry runs, full-file documentation checks, preservation of the original task text, and `git diff --check` pass. No installation or instrument operation was performed.
 - This correction is scoped to ASCII Zaber reporting and command gating. The broader review's MagAOXApp power-field synchronization issue and reversed siglentSDG conditions are separate follow-ups. Installation configuration is not changed. Applications following a virtual power channel receive its early target when the request is sent to that virtual channel; changing an underlying physical channel directly does not change the virtual target.
 
+## Binary Zaber Power-Target Error Suppression (2026-10-08)
+
+- User approved extending the power-off correction to `zaberLowLevelBinary`. Review found the same connection/discovery/parent-callback reporting gap, plus unconditional binary-stage send errors and CONNECTED/READY polling failures that enter ERROR before checking power.
+- Apply the ASCII controller's two-predicate policy: explicit observed/target Off pauses new serial work; only On/On treats a communication failure as unexpected. Keep initial unknown-target startup, observed-Off snapshot cleanup, binary return codes, and normal On/On diagnostics. Cancel a discovery scan during shutdown before an incomplete snapshot replaces the last known stage mapping.
+- Reuse the existing captured-log/isolated-directory harness and actual INDI power/callback paths. Substitute all binary connect/disconnect/timeout/drain/send/receive functions; fake port markers never open or close real descriptors. Exercise setup, discovery, both stage transport paths, all six command callbacks, CONNECTED/READY serial phases, cleanup, and unknown-target startup.
+- The duplicated small predicates now occur in both Zaber controllers and the binary stage helper. A shared MagAOXApp utility is a sensible follow-up alongside the already-recorded shared power-field synchronization audit; changing that large base's API and synchronization is outside this app-scoped correction.
+- The initial eight-case offline suite fails seven cases/115 assertions against the pre-fix headers. After correcting an assertion to distinguish pre-shutdown discovery information from errors and adding resume/On-On polling controls, the fixed suite passes all 1,537 assertions in nine cases. Every successful CONNECTED/READY serial phase is rerun with a one-shot target-only Off injected at its send or receive failure; no later call is issued and the FSM does not enter ERROR.
+- Registered both binary suites in `tests/tests.list`. The existing binary suite passes all 56 assertions in six cases after repairing its non-const accessor wrappers, startup FSM initialization, missing FSM property, and Switch-state assertion, matching the ASCII harness corrections. The standalone binary app builds successfully with sequential `-j1`; its C SDK compilation emits the existing common Makefile's C++ standard-option warning. All validation remains workstation-only.
+- Full changed-file documentation and final formatting verification are in progress.
+
 ## Affected Files
 
 - `.gitignore`
@@ -397,6 +407,10 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 - `apps/zaberLowLevel/zaberLowLevel.hpp`
 - `apps/zaberLowLevel/tests/zaberLowLevel_power_test.cpp`
 - `apps/zaberLowLevel/tests/zaberLowLevel_test.cpp`
+- `apps/zaberLowLevelBinary/zaberLowLevelBinary.hpp`
+- `apps/zaberLowLevelBinary/zaberBinaryStage.hpp`
+- `apps/zaberLowLevelBinary/tests/zaberLowLevelBinary_power_test.cpp`
+- `apps/zaberLowLevelBinary/tests/zaberLowLevelBinary_test.cpp`
 - `gui/widgets/pwr/pwrChannel.hpp`
 - `gui/widgets/pwr/pwrDevice.hpp`
 - `gui/widgets/pwr/tests/pwr_test.cpp`

@@ -65,6 +65,12 @@ class zaberBinaryStage
     static constexpr int32_t parkPositionRegister = 0;
 
   protected:
+    /// Check whether observed or requested power is explicitly Off, so serial work should wait.
+    bool powerOffRequested();
+
+    /// Check whether both observed and requested power are On, so a failure is unexpected.
+    bool powerOnExpected();
+
     /// Parent application used for logging and power-state checks.
     parentT *m_parent{ nullptr };
 
@@ -370,6 +376,18 @@ class zaberBinaryStage
 };
 
 template <class parentT>
+bool zaberBinaryStage<parentT>::powerOffRequested()
+{
+    return m_parent->powerState() == 0 || m_parent->powerStateTarget() == 0;
+}
+
+template <class parentT>
+bool zaberBinaryStage<parentT>::powerOnExpected()
+{
+    return m_parent->powerState() == 1 && m_parent->powerStateTarget() == 1;
+}
+
+template <class parentT>
 std::string zaberBinaryStage<parentT>::name()
 {
     return m_name;
@@ -630,6 +648,9 @@ template <class parentT>
 int zaberBinaryStage<parentT>::queryCommand(
     int32_t &response, z_port port, uint8_t commandNumber, int32_t data, uint8_t expectedReply )
 {
+    if( powerOffRequested() )
+        return -1;
+
     if( m_deviceAddress < 1 )
     {
         return MagAOXAppT::log<software_error, -1>(
@@ -638,7 +659,7 @@ int zaberBinaryStage<parentT>::queryCommand(
 
     if( port <= 0 )
     {
-        if( m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1 )
+        if( !powerOnExpected() )
         {
             return -1;
         }
@@ -654,6 +675,8 @@ int zaberBinaryStage<parentT>::queryCommand(
 
     if( zb_send( port, command ) != 6 )
     {
+        if( !powerOnExpected() )
+            return -1;
         return MagAOXAppT::log<software_error, -1>( "zb_send failed" );
     }
 
@@ -661,7 +684,7 @@ int zaberBinaryStage<parentT>::queryCommand(
     int     rv = zb_receive( port, reply );
     if( rv != 6 )
     {
-        if( m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1 )
+        if( !powerOnExpected() )
         {
             return -1;
         }
@@ -669,14 +692,21 @@ int zaberBinaryStage<parentT>::queryCommand(
         return MagAOXAppT::log<software_error, -1>( "zb_receive failed" );
     }
 
+    if( powerOffRequested() )
+        return -1;
+
     if( reply[0] != static_cast<uint8_t>( m_deviceAddress ) )
     {
+        if( !powerOnExpected() )
+            return -1;
         return MagAOXAppT::log<software_error, -1>(
             std::format( "unexpected reply from device {} while querying {}", reply[0], m_name ) );
     }
 
     if( reply[1] == 255 )
     {
+        if( !powerOnExpected() )
+            return -1;
         int32_t errorCode;
         zb_decode( &errorCode, reply );
         return MagAOXAppT::log<software_error, -1>(
@@ -685,12 +715,16 @@ int zaberBinaryStage<parentT>::queryCommand(
 
     if( reply[1] != expectedReply )
     {
+        if( !powerOnExpected() )
+            return -1;
         return MagAOXAppT::log<software_error, -1>(
             std::format( "device {} returned reply {} while expecting {}", m_name, reply[1], expectedReply ) );
     }
 
     if( zb_decode( &response, reply ) != Z_SUCCESS )
     {
+        if( !powerOnExpected() )
+            return -1;
         return MagAOXAppT::log<software_error, -1>( "zb_decode failed" );
     }
 
@@ -701,6 +735,9 @@ int zaberBinaryStage<parentT>::queryCommand(
 template <class parentT>
 int zaberBinaryStage<parentT>::sendCommandNoReply( z_port port, uint8_t commandNumber, int32_t data )
 {
+    if( powerOffRequested() )
+        return -1;
+
     if( m_deviceAddress < 1 )
     {
         return MagAOXAppT::log<software_error, -1>(
@@ -709,7 +746,7 @@ int zaberBinaryStage<parentT>::sendCommandNoReply( z_port port, uint8_t commandN
 
     if( port <= 0 )
     {
-        if( m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1 )
+        if( !powerOnExpected() )
         {
             return -1;
         }
@@ -725,6 +762,8 @@ int zaberBinaryStage<parentT>::sendCommandNoReply( z_port port, uint8_t commandN
 
     if( zb_send( port, command ) != 6 )
     {
+        if( !powerOnExpected() )
+            return -1;
         return MagAOXAppT::log<software_error, -1>( "zb_send failed" );
     }
 
@@ -863,6 +902,8 @@ int zaberBinaryStage<parentT>::enableKnob( z_port port, bool enable )
 
     if( !knobOk || !( appliedMode & modeDisableAutoReply ) )
     {
+        if( !powerOnExpected() )
+            return -1;
         return MagAOXAppT::log<software_error, -1>(
             std::format( "device {} did not apply requested device mode {}, got {}", m_name, mode, appliedMode ) );
     }
@@ -888,6 +929,8 @@ int zaberBinaryStage<parentT>::setTargetSpeed( z_port port, int32_t speed )
 
     if( appliedSpeed != speed )
     {
+        if( !powerOnExpected() )
+            return -1;
         return MagAOXAppT::log<software_error, -1>(
             std::format( "device {} reported target speed {} after requesting {}", m_name, appliedSpeed, speed ) );
     }
@@ -913,6 +956,8 @@ int zaberBinaryStage<parentT>::setHoldCurrent( z_port port, int32_t value )
 
     if( appliedValue != value )
     {
+        if( !powerOnExpected() )
+            return -1;
         return MagAOXAppT::log<software_error, -1>(
             std::format( "device {} reported hold current {} after requesting {}", m_name, appliedValue, value ) );
     }
@@ -1039,6 +1084,8 @@ int zaberBinaryStage<parentT>::restoreParkedState( z_port port )
 
     if( restoredPos != m_stateFileRawPos )
     {
+        if( !powerOnExpected() )
+            return -1;
         return MagAOXAppT::log<software_error, -1>(
             std::format( "device {} restored position {} but expected {}", m_name, restoredPos, m_stateFileRawPos ) );
     }
