@@ -1,7 +1,6 @@
 /** \file xt1121DCDU.hpp
   * \brief The MagAO-X xt1121-based D.C. Distribution Unit controller.
   *
-  * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup xt1121DCDU_files
   */
@@ -42,20 +41,33 @@ class xt1121DCDU : public MagAOXApp<>, public dev::outletController<xt1121DCDU>,
 
 protected:
 
+   /** \name Configurable Parameters - Data
+     * @{ */
+
    std::string m_deviceName; ///< The device address
 
    std::vector<int> m_channelNumbers; ///< Vector of outlet numbers, used to construct the channel names to monitor as outlets 0-7.
 
-   int m_outletStateDelay {5000}; ///< The maximum time to wait for an outlet to change state [msec].
+   int m_outletStateDelay {5000}; ///< Reserved transition timeout [msec]; current dispatch does not wait for a state change.
 
 
+   ///@}
+
+   /// Stable subscription storage for source channel 0.
    pcf::IndiProperty m_indiP_ch0;
+   /// Stable subscription storage for source channel 1.
    pcf::IndiProperty m_indiP_ch1;
+   /// Stable subscription storage for source channel 2.
    pcf::IndiProperty m_indiP_ch2;
+   /// Stable subscription storage for source channel 3.
    pcf::IndiProperty m_indiP_ch3;
+   /// Stable subscription storage for source channel 4.
    pcf::IndiProperty m_indiP_ch4;
+   /// Stable subscription storage for source channel 5.
    pcf::IndiProperty m_indiP_ch5;
+   /// Stable subscription storage for source channel 6.
    pcf::IndiProperty m_indiP_ch6;
+   /// Stable subscription storage for source channel 7.
    pcf::IndiProperty m_indiP_ch7;
 
 
@@ -90,16 +102,13 @@ public:
    /// Force an observed outlet-state snapshot for the telemetry scheduler.
    int recordTelem( const telem_outlet *type /**< [in] unused type selector */ );
 
-   /// Startup functions
-   /** Setsup the INDI vars.
-     * Checks if the device was found during loadConfig.
-     */
+   /// Register the eight source subscriptions and outlet interface, then start telemetry.
    virtual int appStartup();
 
    /// Implementation of the FSM for the xt1121 DCDU.
    virtual int appLogic();
 
-   /// Do any needed shutdown tasks.  Currently nothing in this app.
+   /// Shut down application telemetry.
    virtual int appShutdown();
 
    /// Invalidate observed outlets when this app loses its configured power source.
@@ -137,7 +146,7 @@ protected:
      * \returns chXX where XX is 00 to 15, set by chno.
      * \returns empty string if chno is not valid.
      */
-   std::string xtChannelName( int chno);
+   std::string xtChannelName( int chno /**< [in] source channel number, zero through sixteen */ );
 
    ///Helper function to get a pointer to the right INDI property for an outlet number.
    /**
@@ -151,14 +160,62 @@ protected:
                             const pcf::IndiProperty &ipRecv /**< [in] incoming source observation */,
                             int outletNum /**< [in] zero-based outlet index */ );
 
-   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch0);
-   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch1);
-   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch2);
-   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch3);
-   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch4);
-   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch5);
-   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch6);
-   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch7);
+   /// Observe current state for source channel 0.
+   int setCallBack_m_indiP_ch0( const pcf::IndiProperty &ipRecv /**< [in] source property observation */ );
+
+   /// Forward source channel 0's observation through the registered app pointer.
+   static int st_setCallBack_m_indiP_ch0( void *app /**< [in] owning application instance */,
+                                    const pcf::IndiProperty &ipRecv /**< [in] source observation */ );
+
+   /// Observe current state for source channel 1.
+   int setCallBack_m_indiP_ch1( const pcf::IndiProperty &ipRecv /**< [in] source property observation */ );
+
+   /// Forward source channel 1's observation through the registered app pointer.
+   static int st_setCallBack_m_indiP_ch1( void *app /**< [in] owning application instance */,
+                                    const pcf::IndiProperty &ipRecv /**< [in] source observation */ );
+
+   /// Observe current state for source channel 2.
+   int setCallBack_m_indiP_ch2( const pcf::IndiProperty &ipRecv /**< [in] source property observation */ );
+
+   /// Forward source channel 2's observation through the registered app pointer.
+   static int st_setCallBack_m_indiP_ch2( void *app /**< [in] owning application instance */,
+                                    const pcf::IndiProperty &ipRecv /**< [in] source observation */ );
+
+   /// Observe current state for source channel 3.
+   int setCallBack_m_indiP_ch3( const pcf::IndiProperty &ipRecv /**< [in] source property observation */ );
+
+   /// Forward source channel 3's observation through the registered app pointer.
+   static int st_setCallBack_m_indiP_ch3( void *app /**< [in] owning application instance */,
+                                    const pcf::IndiProperty &ipRecv /**< [in] source observation */ );
+
+   /// Observe current state for source channel 4.
+   int setCallBack_m_indiP_ch4( const pcf::IndiProperty &ipRecv /**< [in] source property observation */ );
+
+   /// Forward source channel 4's observation through the registered app pointer.
+   static int st_setCallBack_m_indiP_ch4( void *app /**< [in] owning application instance */,
+                                    const pcf::IndiProperty &ipRecv /**< [in] source observation */ );
+
+   /// Observe current state for source channel 5.
+   int setCallBack_m_indiP_ch5( const pcf::IndiProperty &ipRecv /**< [in] source property observation */ );
+
+   /// Forward source channel 5's observation through the registered app pointer.
+   static int st_setCallBack_m_indiP_ch5( void *app /**< [in] owning application instance */,
+                                    const pcf::IndiProperty &ipRecv /**< [in] source observation */ );
+
+   /// Observe current state for source channel 6.
+   int setCallBack_m_indiP_ch6( const pcf::IndiProperty &ipRecv /**< [in] source property observation */ );
+
+   /// Forward source channel 6's observation through the registered app pointer.
+   static int st_setCallBack_m_indiP_ch6( void *app /**< [in] owning application instance */,
+                                    const pcf::IndiProperty &ipRecv /**< [in] source observation */ );
+
+   /// Observe current state for source channel 7.
+   int setCallBack_m_indiP_ch7( const pcf::IndiProperty &ipRecv /**< [in] source property observation */ );
+
+   /// Forward source channel 7's observation through the registered app pointer.
+   static int st_setCallBack_m_indiP_ch7( void *app /**< [in] owning application instance */,
+                                    const pcf::IndiProperty &ipRecv /**< [in] source observation */ );
+
 };
 
 xt1121DCDU::xt1121DCDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -417,6 +474,46 @@ inline int xt1121DCDU::processSourceUpdate( pcf::IndiProperty &property, const p
    if( rv < 0 ) return rv;
    dev::outletController<xt1121DCDU>::updateINDI();
    return recordOutletStates();
+}
+
+inline int xt1121DCDU::st_setCallBack_m_indiP_ch0( void *app, const pcf::IndiProperty &ipRecv )
+{
+   return static_cast<xt1121DCDU *>(app)->setCallBack_m_indiP_ch0( ipRecv );
+}
+
+inline int xt1121DCDU::st_setCallBack_m_indiP_ch1( void *app, const pcf::IndiProperty &ipRecv )
+{
+   return static_cast<xt1121DCDU *>(app)->setCallBack_m_indiP_ch1( ipRecv );
+}
+
+inline int xt1121DCDU::st_setCallBack_m_indiP_ch2( void *app, const pcf::IndiProperty &ipRecv )
+{
+   return static_cast<xt1121DCDU *>(app)->setCallBack_m_indiP_ch2( ipRecv );
+}
+
+inline int xt1121DCDU::st_setCallBack_m_indiP_ch3( void *app, const pcf::IndiProperty &ipRecv )
+{
+   return static_cast<xt1121DCDU *>(app)->setCallBack_m_indiP_ch3( ipRecv );
+}
+
+inline int xt1121DCDU::st_setCallBack_m_indiP_ch4( void *app, const pcf::IndiProperty &ipRecv )
+{
+   return static_cast<xt1121DCDU *>(app)->setCallBack_m_indiP_ch4( ipRecv );
+}
+
+inline int xt1121DCDU::st_setCallBack_m_indiP_ch5( void *app, const pcf::IndiProperty &ipRecv )
+{
+   return static_cast<xt1121DCDU *>(app)->setCallBack_m_indiP_ch5( ipRecv );
+}
+
+inline int xt1121DCDU::st_setCallBack_m_indiP_ch6( void *app, const pcf::IndiProperty &ipRecv )
+{
+   return static_cast<xt1121DCDU *>(app)->setCallBack_m_indiP_ch6( ipRecv );
+}
+
+inline int xt1121DCDU::st_setCallBack_m_indiP_ch7( void *app, const pcf::IndiProperty &ipRecv )
+{
+   return static_cast<xt1121DCDU *>(app)->setCallBack_m_indiP_ch7( ipRecv );
 }
 
 INDI_SETCALLBACK_DEFN(xt1121DCDU, m_indiP_ch0)(const pcf::IndiProperty &ipRecv)

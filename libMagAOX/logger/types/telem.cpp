@@ -1,6 +1,5 @@
 /** \file telem.cpp
- * \brief The MagAO-X logger telemetery library
- * \author Jared R. Males (jaredmales@gmail.com)
+ * \brief The MagAO-X logger telemetry library
  *
  * \ingroup logger_types_files
  *

@@ -1,0 +1,84 @@
+/** \file virtualPDU.dox
+ * \brief Virtual PDU configuration, INDI protocol, and telemetry documentation.
+ * \ingroup virtualPDU_files
+ */
+/** \page page_module_virtualPDU virtualPDU
+ * \ingroup virtualPDU
+ *
+ * \section virtualPDU_description Description
+ * A virtual outlet maps to one named channel on another outlet-controller application.
+ * Standard channel sections combine these outlets into one power control for a device.
+ * The virtual PDU sends commands in configured order with fixed delays; it does not wait
+ * for remote switches to change state. Its observed state comes only from incoming
+ * channel state elements, never from targets or successful sends.
+ *
+ * \section virtualPDU_config Configuration
+ * Start a configured instance with `virtualPDU -n vpdu0`. Use contiguous sections
+ * `[outlet1]` through `[outletN]`, each containing `device` and `channel`. Numbers in
+ * `outlet`/`outlets` are one-based; indices in `onOrder`/`offOrder` are zero-based.
+ * Every order must be a permutation of the positions in that channel's outlet list.
+ * `onDelays` and `offDelays` are milliseconds between commands; their first entry is
+ * ignored. Omitted orders/delays retain the standard outlet-controller defaults.
+ *
+ * \include apps/virtualPDU/config/example.conf
+ *
+ * The normal `[power]` configuration of a consumer becomes:
+ * \code{.ini}
+ * [power]
+ * device=vpdu0
+ * channel=fwtelsim
+ * \endcode
+ * Use the virtual device/channel in the power GUI configuration to consolidate controls.
+ * Physical controller channel configuration is unchanged. Deployment configuration and
+ * actual instrument validation are performed by the user.
+ *
+ * Self-reference, duplicate endpoint aliases, and endpoints shared by virtual channels
+ * are rejected. Shared endpoints are a known future use-case. Reject dependency cycles
+ * and conflicting control across separate instances when designing deployment configs.
+ * Configuration is loaded at startup; live reconfiguration is not supported.
+ *
+ * `[device] pollInterval` sets explicit source refresh spacing in seconds (default 5).
+ * `staleTimeout` sets the maximum age of valid channel/FSM observations (default 15),
+ * and must exceed pollInterval. A source must report Text `fsm.state=READY` and a valid
+ * Text channel state before commands are accepted. A fresh Unk state is valid and permits
+ * dispatch while keeping observed power unknown, matching the standard outlet interface. Target-only messages do not refresh
+ * observed-state validity. Because dispatch uses the existing synchronous delay logic,
+ * choose a stale limit longer than the longest sequence plus refresh/transport latency.
+ *
+ * Unavailable dependencies block only virtual channels that use them. The service itself
+ * stays READY. Source loss/expiry makes affected virtual outlets unknown. A mid-sequence
+ * failure stops later sends without rollback or automatic replay of already sent commands.
+ * The refresh interval bounds detection delay; a distributed power operation is not atomic.
+ *
+ * \section virtualPDU_indi INDI properties
+ * Each virtual channel is a read/write Text property with `state` and `target` elements.
+ * Targets are On/Off; observed states are On, Off, Int, or Unk. All outlets must report
+ * On for the aggregate to be On, and Off for it to be Off; differing states produce Int,
+ * matching the standard outlet-controller aggregation and power-FSM interface.
+ *
+ * The standard `outlet`, `stateTimes`, `channelOutlets`, `channelOnDelays`, and
+ * `channelOffDelays` properties are also exposed. channelOutlets retains the base's
+ * internal zero-based numeric metadata. Delay metadata describes virtual dispatch delays,
+ * not remote channel transition, nested sequence, or device boot times.
+ *
+ * \section virtualPDU_telemetry Telemetry
+ * All four outlet-controller apps record telem_outlet snapshots on initial acquisition,
+ * observed changes/invalidation, and periodic forcing. The variable-length signed-byte
+ * vector uses -1 unknown, 0 off, 1 intermediate, and 2 on. first_outlet preserves physical
+ * numbering (zero for the USB hub, one for the PDU/DCDU/virtual PDU).
+ *
+ * FITS accessors `states` and `first_outlet` use HIERARCH OUTLET STATES and OUTLET FIRST.
+ * States are a comma-separated numeric string, including negative unknown values; the
+ * binary payload retains compact signed bytes. Use the logged/controller configuration
+ * to interpret outlet-to-channel identity.
+ *
+ * Tripp Lite additionally records telem_pdu frequency [Hz], voltage [V], current [A],
+ * and valid. Only a complete successful electrical parse produces a valid sample.
+ * Failed reads, deferred responses, and incomplete/malformed parses invalidate the
+ * sample. Retained numbers in an invalid record must not be used as measurements.
+ * Electrical FITS fields use state/sample selection and PDU FREQUENCY, PDU VOLTAGE,
+ * PDU CURRENT, and PDU VALID; include valid alongside the values in header configuration.
+ *
+ * Standard `[telemeter]` options, including maxInterval, control recording intervals.
+ * The legacy per-command outlet_state/outlet_channel_state event logs are preserved.
+ */

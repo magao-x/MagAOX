@@ -1,6 +1,5 @@
 /** \file logMeta.cpp
  * \brief Declares and defines the logMeta class and related classes.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup logger_files
  *

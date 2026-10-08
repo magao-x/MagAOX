@@ -2,6 +2,7 @@
  * \brief Offline execution of the actual Tripp Lite simulator branches.
  * \ingroup trippLitePDU_files
  */
+#include "../../../tests/testXWC.hpp"
 #include "../../../tests/outletAppTest.hpp"
 #ifndef XWC_SIM_MODE
 #define XWC_SIM_MODE

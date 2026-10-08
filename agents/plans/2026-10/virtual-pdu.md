@@ -327,8 +327,47 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 
 - Virtual and DCDU callbacks now record observed changes immediately, so transitions between main-loop samples are not lost. Malformed channel/FSM definitions invalidate their corresponding availability immediately; valid partial target-only channel updates preserve the last observation.
 
-- Source callbacks also publish observed INDI state changes immediately. This preserves fast power transitions for the consumer FSM instead of adding another main-loop sampling delay. Test command traffic still traverses real private FIFOs; non-command publications are captured in a bounded-transport substitute and parsed by the same production XML parser.
+- Source callbacks also publish observed INDI state changes immediately. This preserves fast power transitions for the consumer FSM instead of adding another main-loop sampling delay. Test command traffic still traverses real private FIFOs; non-command publications are captured in a transport substitute and parsed by the same production XML parser.
 
 - Current focused coverage: virtual PDU 199/199, DCDU 188/188, USB hub 119/119, Tripp Lite 359/359 executable lines (100% each). Focused app/simulator/logger suites pass, including immediate publication and callback recording. The existing outlet-controller regression suite passes (591 assertions).
 - Broader regression finding: the unchanged `libMagAOX/app/tests/MagAOXApp_test.cpp:716` expects `powerOnWait()==0` after missing required power configuration; unchanged `MagAOXApp.hpp` requests shutdown but retains the default 55. The full suite reports 11/12 cases passed. `git diff --exit-code` confirms both files are untouched. This existing library test/implementation mismatch is outside this feature and can be reconciled with the library coverage work.
 - GUI follow-up: the existing pwr GUI ignores Text Unk state updates, and its slider treats unrecognized enum states as Off. GUI source is left unchanged as planned. The virtual INDI state and consumer FSM correctly report unknown; a GUI correction for wholly unknown channels should be handled separately.
+
+- The existing `MagAOXAppExecute_test.cpp:464` also fails an injected appLogic-failure expectation (`-1` expected, `0` returned). Its source, harness, and MagAOXApp header are unchanged. This second library regression mismatch is recorded rather than folded into the outlet feature.
+- Completed the full changed-file documentation pass, including source-state ownership, telemetry roles, inline parameter docs, and removal of author tags. DCDU macro-generated callback declarations/wrappers are expanded with identical names and behavior to document every parameter at the declaration site; registration macros remain in use. Added the app's Doxygen page and example configuration.
+
+- All standalone controller builds succeeded: `make -C apps/virtualPDU`, `apps/trippLitePDU`, `apps/xt1121DCDU`, and `apps/acronameUsbHub`. `utils/logdump` and `utils/xrif2fits` also build with the new generated telemetry types. No installation or device execution was performed.
+- Entrypoint smoke: `MAGAOX_PATH=/tmp/virtual-pdu-smoke apps/virtualPDU/virtualPDU -n virtual-pdu-smoke --help` prints the new refresh/expiry and telemetry options with isolated writable paths. This framework uses a nonzero help exit; the help output was checked directly.
+- Logger accessor regression: 392 assertions passed. Logger metadata regression: 22 assertions passed. Focused suites after the documentation pass: virtual PDU 9 cases/13,768 assertions; DCDU 7/17,467; USB hub 5/166; Tripp Lite production 8/291; simulator 1/16; new logger/FITS 3/77. Coverage remains 100%: virtual PDU 199/199, DCDU 196/196, USB hub 119/119, Tripp Lite 359/359.
+
+## Affected Files
+
+- `.gitignore`
+- `Makefile`
+- `agents/plans/2026-10/virtual-pdu.md`
+- `apps/acronameUsbHub/acronameUsbHub.hpp`
+- `apps/acronameUsbHub/tests/acronameUsbHub_test.cpp`
+- `apps/trippLitePDU/tests/trippLitePDU_sim_test.cpp`
+- `apps/trippLitePDU/tests/trippLitePDU_test.cpp`
+- `apps/trippLitePDU/trippLitePDU.hpp`
+- `apps/virtualPDU/Makefile`
+- `apps/virtualPDU/config/example.conf`
+- `apps/virtualPDU/doc/virtualPDU.dox`
+- `apps/virtualPDU/tests/virtualPDU_test.cpp`
+- `apps/virtualPDU/virtualPDU.cpp`
+- `apps/virtualPDU/virtualPDU.hpp`
+- `apps/xt1121DCDU/tests/xt1121DCDU_test.cpp`
+- `apps/xt1121DCDU/xt1121DCDU.hpp`
+- `libMagAOX/Makefile`
+- `libMagAOX/app/dev/outletController.hpp`
+- `libMagAOX/logger/logCodes.dat`
+- `libMagAOX/logger/logMeta.cpp`
+- `libMagAOX/logger/tests/pduTelemetry_test.cpp`
+- `libMagAOX/logger/types/schemas/telem_outlet.fbs`
+- `libMagAOX/logger/types/schemas/telem_pdu.fbs`
+- `libMagAOX/logger/types/telem.cpp`
+- `libMagAOX/logger/types/telem_outlet.hpp`
+- `libMagAOX/logger/types/telem_pdu.hpp`
+- `tests/Makefile.one`
+- `tests/outletAppTest.hpp`
+- `tests/tests.list`

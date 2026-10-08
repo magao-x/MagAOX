@@ -2,6 +2,7 @@
  * \brief Offline USB-hub configuration, FSM, BrainStem failure, and telemetry tests.
  * \ingroup acronameUsbHub_files
  */
+#include "../../../tests/testXWC.hpp"
 #include "../../../tests/outletAppTest.hpp"
 #include "../../../libs/BrainStem2/BrainStem2/BrainStem-all.h"
 

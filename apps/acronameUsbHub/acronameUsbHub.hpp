@@ -1,7 +1,6 @@
 /** \file acronameUsbHub.hpp
   * \brief The MagAO-X Acroname USB Hub controller.
   *
-  * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup acronameUsbHub_files
   */
@@ -37,7 +36,6 @@ namespace app
 /** MagAO-X application to control an Acroname USB 3.0 8-port hub
   *
   * \todo add current, temperature, etc. monitoring
-  * \todo telemetry
   *
   * \ingroup acronameUsbHub
   *
@@ -47,7 +45,7 @@ class acronameUsbHub : public MagAOXApp<>, public dev::outletController<acroname
 
 protected:
 
-   /** \name configurable parameters
+   /** \name Configurable Parameters - Data
      *@{
      */
 
@@ -95,7 +93,7 @@ public:
      */
    virtual int appStartup();
 
-   /// Implementation of the FSM for the Siglent SDG
+   /// Connect to the hub, acquire port state, and run telemetry scheduling
    virtual int appLogic();
 
    /// Implementation of the on-power-off FSM logic
@@ -104,7 +102,7 @@ public:
    /// Implementation of the while-powered-off FSM
    virtual int whilePowerOff();
 
-   /// Do any needed shutdown tasks.  Currently nothing in this app.
+   /// Shut down application telemetry.
    virtual int appShutdown();
 
    /// Get the state of the outlet from the device.
@@ -164,7 +162,6 @@ void acronameUsbHub::setupConfig()
 }
 
 
-///\todo mxlib loadConfig needs to return int to propagate errors!
 
 inline
 void acronameUsbHub::loadConfig()

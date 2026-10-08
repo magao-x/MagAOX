@@ -2,6 +2,7 @@
  * \brief Offline configuration, FSM, numeric INDI traffic, and telemetry tests for the DCDU.
  * \ingroup xt1121DCDU_files
  */
+#include "../../../tests/testXWC.hpp"
 #include "../../../tests/outletAppTest.hpp"
 #define MagAOXApp outletTestApp
 #define telemeter outletTestTelemeter

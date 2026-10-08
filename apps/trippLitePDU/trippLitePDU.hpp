@@ -1,7 +1,6 @@
 /** \file trippLitePDU.hpp
   * \brief The MagAO-X Tripp Lite Power Distribution Unit controller.
   *
-  * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup trippLitePDU_files
   */
@@ -44,10 +43,7 @@ namespace app
   *
   * \todo need username and secure password handling
   * \todo need to recognize signals in tty polls and not return errors, etc.
-  * \todo begin logging freq/volt/amps telemetry
   * \todo research load warnings
-  * \todo tests for parser
-  * \todo test for load warnings
   * \todo load warnings/crit values can be logged on parse errors -- make this an issue
   * \todo segfaults if device can not be reached on network -- make this an issue
   *
@@ -58,10 +54,13 @@ class trippLitePDU : public MagAOXApp<>, public dev::outletController<trippLiteP
 
 protected:
 
+   /** \name Configurable Parameters - Data
+     * @{ */
+
    std::string m_deviceAddr; ///< The device address
    std::string m_devicePort; ///< The device port
    std::string m_deviceUsername; ///< The login username for this device
-   std::string m_devicePassFile; ///< The login password for this device
+   std::string m_devicePassFile; ///< Password-file path relative to the secrets directory
    int m_deviceVersion {0}; ///< Version 0 = the old PDUs, version 1 = new PDUMH15NET2LX, which is a new login procedure to get to the CLI.
 
    float m_freqLowWarn {59};    ///< The low-frequency warning threshold
@@ -85,6 +84,8 @@ protected:
    float m_currWarn {15};  ///< The high-current warning threshold
    float m_currAlert {16}; ///< The high-current alert threshold
    float m_currEmerg {20}; ///< The high-current emergency threshold
+
+   ///@}
 
    #ifndef XWC_SIM_MODE
    tty::telnetConn m_telnetConn; ///< The telnet connection manager
@@ -160,7 +161,7 @@ public:
     /// Implementation of the FSM for the tripp lite PDU.
     virtual int appLogic();
 
-    /// Do any needed shutdown tasks.  Currently nothing in this app.
+    /// Shut down application telemetry.
     virtual int appShutdown();
 
     ///@}
@@ -208,23 +209,28 @@ public:
       *
       * @{
       */
+    /// Connect to the configured PDU or its simulator.
     int devConnect();
 
+    /// Log in using the selected PowerAlert prompt protocol.
     int devLogin();
 
+    /// Enter the CLI when the selected PowerAlert version requires it.
     void devPostLogin();
 
-    int devStatus(std::string & strRead);
+    /// Get a status response, returning one for a deferred successful re-read.
+    int devStatus(std::string & strRead /**< [out] raw device status response */ );
 
     /// Parse the PDU devstatus response.
     /**
       * \returns 0 on success
       * \returns \<0 on error, with value indicating location of error.
       */
-    int parsePDUStatus( std::string & strRead );
+    int parsePDUStatus( std::string & strRead /**< [in] raw response to parse */ );
 
     ///@}
 
+    /// Log configured voltage/frequency/current threshold violations.
     void updateAlarmsAndWarnings();
 
 protected:
@@ -238,6 +244,7 @@ protected:
 
 public:
 
+    /// Simulator used only in builds explicitly selecting XWC_SIM_MODE.
     trippLitePDU_simulator m_simulator;
 
 #endif

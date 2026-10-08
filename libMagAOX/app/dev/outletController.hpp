@@ -1,8 +1,7 @@
 /** \file outletController.hpp
- * \author Jared R. Males
  * \brief Declares and defines a power control device framework in the MagAOXApp context
  *
- * \ingroup
+ * \ingroup app_files
  *
  */
 
@@ -54,7 +53,10 @@ namespace dev
     \endcode
   *
   * Other requirements:
-  * - call `setNumberOfOutlets` in the derived class constructor
+  * - call `setNumberOfOutlets` before loading channel configuration
+  * - use synchronized setters to update observed states after device acquisition
+  * - apps recording outlet telemetry inherit one `telemeter<derivedT>` and call
+  *   `recordOutletStates()` on observed changes and with force=true for interval records
   *
   *
   * \tparam derivedT specifies a MagAOXApp parent base class which is accessed with a `static_cast` (downcast)
@@ -67,12 +69,15 @@ namespace dev
 template<class derivedT>
 struct outletController
 {
+   /** \name Outlet Configuration - Data
+    * @{ */
+
    bool m_firstOne {false}; ///< Flag is true if the first outlet is numbered 1, otherwise assumes starting at 0.
 
    double m_stateDelay {0}; ///< Delay to wait after changing states before allowing a new command.
 
-   std::vector<int> m_outletStates; /**< The current states of each outlet.  These MUST be updated by derived 
-                                         classes in the overridden \ref updatedOutletState.*/
+   /// Observed outlet states; derived controllers update them with the synchronized state setters.
+   std::vector<int> m_outletStates;
 
    /// Protect observed state and the telemetry change-suppression snapshot.
    mutable std::mutex m_outletStateMutex;
@@ -91,13 +96,15 @@ struct outletController
       std::vector<size_t> m_onOrder; ///< [optional] The order in which outlets are turned on.  This contains the indices of m_outlets, not the outlet numbers of the device.
       std::vector<size_t> m_offOrder; ///< [optional] The order in which outlets are turned off.  This contains the indices of m_outlets, not the outlet numbers of the device.
 
-      std::vector<unsigned> m_onDelays; ///< [optional] The delays between outlets in a multi-oultet channel.  The first entry is always ignored.  The second entry is the dealy between the first and second outlet, etc.
-      std::vector<unsigned> m_offDelays; ///< [optional] The delays between outlets in a multi-oultet channel.  The first entry is always ignored.  The second entry is the dealy between the first and second outlet, etc.
+      std::vector<unsigned> m_onDelays; ///< [optional] The delays between outlets in a multi-outlet channel.  The first entry is always ignored.  The second entry is the delay between the first and second outlet, etc.
+      std::vector<unsigned> m_offDelays; ///< [optional] The delays between outlets in a multi-outlet channel.  The first entry is always ignored.  The second entry is the delay between the first and second outlet, etc.
 
       timespec m_stateTime {0,0}; ///< The time of the last state change
 
+      /// Published state/target property for this logical channel.
       pcf::IndiProperty m_indiP_prop;
 
+      /// Borrowed sequence mutex owned by the controller's m_channelMutexes vector.
       std::mutex * m_mutex {nullptr};
 
    };
@@ -105,9 +112,10 @@ struct outletController
    /// The map of channel specifications, which can be accessed by their names.
    std::unordered_map<std::string, channelSpec> m_channels;
 
+   /// Owned sequence mutexes, released by this controller's destructor.
    std::vector<std::mutex *> m_channelMutexes;
 
-   /// An INDI property which pulishes the times of the last state change for each channel 
+   /// An INDI property which publishes the times of the last state change for each channel
    pcf::IndiProperty m_indiP_stateTimes;
 
    /// An INDI property which publishes the outlets associated with each channel.  Useful for GUIs, etc.
@@ -125,11 +133,16 @@ struct outletController
    /// Whether at least one outlet telemetry record has been emitted.
    bool m_outletTelemRecorded {false};
 
+   ///@}
+
    /// Record observed outlet states, independently of INDI publication.
    int recordOutletStates( bool force /**< [in] record even if states are unchanged */ = false );
 
    /// Release the channel mutexes owned by this helper.
    ~outletController();
+
+   /** \name Outlet Configuration
+    * @{ */
 
    ///Setup an application configurator for an outletController
    /** This is currently a no-op
@@ -166,6 +179,8 @@ struct outletController
      * \returns -1 on failure
      */
    int loadConfig( mx::app::appConfigurator & config /**< [in] an application configuration from which to load values */);
+
+   ///@}
 
    /// Sets the number of outlets.  This should be called by the derived class constructor.
    /**
@@ -269,8 +284,8 @@ struct outletController
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   static int st_newCallBack_channels( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                       const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+   static int st_newCallBack_channels( void * app /**< [in] application instance, cast to derivedT */,
+                                       const pcf::IndiProperty &ipRecv /**< [in] received channel request */
                                      );
 
    /// The callback called by the static version, to actually process the new request.
@@ -312,6 +327,7 @@ struct outletController
 
 
 private:
+   /// Access the application owning this helper.
    derivedT & derived()
    {
       return *static_cast<derivedT *>(this);
@@ -407,7 +423,6 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator & config )
       //Subtract one if the device numbers from 1.
       for(size_t k=0;k<outlets.size(); ++k)
       {
-         ///\todo test this error
          if( outlets[k] < static_cast<size_t>( m_firstOne ) || outlets[k] - m_firstOne >= m_outletStates.size() )
          {
             return derivedT::template log<software_error,-1>( std::format("Outlet {} in Channel ""{} is not valid", outlets[k], chSections[n]), logPrio::LOG_ERROR);
@@ -904,7 +919,8 @@ int outletController<derivedT>::setupINDI()
    return appStartup();
 }
 
-std::string stateIntToString(int st);
+/// Convert an OUTLET_STATE code to its standard INDI text value.
+std::string stateIntToString(int st /**< [in] observed outlet state code */ );
 
 template<class derivedT>
 int outletController<derivedT>::updateINDI()

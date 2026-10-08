@@ -2,6 +2,7 @@
  * \brief Production-path offline PDU parsing, transport, FSM, alarm, and telemetry tests.
  * \ingroup trippLitePDU_files
  */
+#include "../../../tests/testXWC.hpp"
 #include "../../../tests/outletAppTest.hpp"
 #ifdef XWC_SIM_MODE
 #undef XWC_SIM_MODE

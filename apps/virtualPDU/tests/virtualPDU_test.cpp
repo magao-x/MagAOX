@@ -2,6 +2,7 @@
  * \brief Offline behavioral, traffic, and failure-contract tests for virtual PDU control.
  * \ingroup virtualPDU_files
  */
+#include "../../../tests/testXWC.hpp"
 #include "../../../tests/outletAppTest.hpp"
 
 #define MagAOXApp outletTestApp
