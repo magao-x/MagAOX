@@ -105,9 +105,8 @@ TEST_CASE( "virtual PDU rejects invalid mappings and channel sequences", "[virtu
     #endif
     // clang-format on
     const std::string endpoint = "[outlet1]\ndevice=ac\nchannel=power\n";
-    const std::string two = endpoint + "[outlet2]\ndevice=usb\nchannel=power\n";
-    for( const auto &[text, details] :
-         std::vector<std::pair<std::string, std::vector<std::string>>>{
+    const std::string two      = endpoint + "[outlet2]\ndevice=usb\nchannel=power\n";
+    for( const auto &[text, details] : std::vector<std::pair<std::string, std::vector<std::string>>>{
              { "", { "No [outletN]", "[outlet1]", "required" } },
              { "[device]\npollInterval=0\n", { "[device]", "pollInterval=0", "greater than 0" } },
              { "[device]\npollInterval=-1\n", { "pollInterval=-1", "greater than 0" } },
@@ -125,8 +124,7 @@ TEST_CASE( "virtual PDU rejects invalid mappings and channel sequences", "[virtu
              { endpoint + "[outlet2]\ndevice=ac\nchannel=power\n[x]\noutlets=1,2\n",
                { "[outlet2]", "[outlet1]", "ac.power", "duplicates" } },
              { endpoint + "[x]\noutlet=1\n[y]\noutlet=1\n", { "[x]", "[y]", "outlet 1", "shared" } },
-             { two + "[camera]\noutlets=1,2\n[lamp]\noutlets=1,2\n",
-               { "[camera]", "[lamp]", "outlet 1", "shared" } },
+             { two + "[camera]\noutlets=1,2\n[lamp]\noutlets=1,2\n", { "[camera]", "[lamp]", "outlet 1", "shared" } },
              { endpoint + "[fsm]\noutlet=1\n", { "[fsm]", "reserved INDI property" } },
              { endpoint + "[x]\noutlets=0\n", { "[x]", "outlets", "outlet 0", "range 1..1" } },
              { endpoint + "[x]\noutlets=2\n", { "[x]", "outlets", "outlet 2", "range 1..1" } },

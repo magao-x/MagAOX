@@ -445,13 +445,14 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator &config )
         {
             if( outlets[k] < static_cast<size_t>( m_firstOne ) || outlets[k] - m_firstOne >= m_outletStates.size() )
             {
-                return derivedT::template log<software_error, -1>( std::format( "Channel [{}] outlet {} is outside "
-                                                                                "the configured range {}..{}",
-                                                                                chSections[n],
-                                                                                outlets[k],
-                                                                                static_cast<size_t>( m_firstOne ),
-                                                                                m_outletStates.size() - 1 + m_firstOne ),
-                                                                   logPrio::LOG_ERROR );
+                return derivedT::template log<software_error, -1>(
+                    std::format( "Channel [{}] outlet {} is outside "
+                                 "the configured range {}..{}",
+                                 chSections[n],
+                                 outlets[k],
+                                 static_cast<size_t>( m_firstOne ),
+                                 m_outletStates.size() - 1 + m_firstOne ),
+                    logPrio::LOG_ERROR );
             }
 
             outlets[k] -= m_firstOne;
