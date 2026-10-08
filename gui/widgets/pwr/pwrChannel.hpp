@@ -16,7 +16,13 @@ namespace xqt
 {
 
 /// Reported channel states; Unk and unrecognized values disable user control.
-enum class pwrChState{ Unk, Off, Int, On};
+enum class pwrChState
+{
+    Unk,
+    Off,
+    Int,
+    On
+};
 
 /// A single power channel control widget
 /** Contains the text label and the slider bar control for a single power channel.
@@ -26,7 +32,6 @@ enum class pwrChState{ Unk, Off, Int, On};
 class pwrChannel : public QWidget
 {
     Q_OBJECT
-
 
   protected:
     std::string m_channelName; ///< The name of this channel
@@ -39,7 +44,7 @@ class pwrChannel : public QWidget
 
     pwrChState m_setSwitchState{ pwrChState::Unk }; ///< Last displayed observation, or Unk while unavailable.
 
-    bool m_changing {false}; ///< Whether a local command is waiting for its target or timeout.
+    bool m_changing{ false }; ///< Whether a local command is waiting for its target or timeout.
 
     std::vector<int> m_outlets; ///< The outlets controlled by this channel.
 
@@ -51,7 +56,7 @@ class pwrChannel : public QWidget
 
     double m_offTimeout{ 6000 }; ///< Milliseconds to wait for the turn-off target before restoring the observed state.
 
-    bool m_isToggle {false}; ///< Whether this is a toggle switch (true) or a text switch (false).
+    bool m_isToggle{ false }; ///< Whether this is a toggle switch (true) or a text switch (false).
 
     QTimer *m_timer{ nullptr }; ///< Timer for tracking timeouts on channel state changes
 
@@ -59,8 +64,8 @@ class pwrChannel : public QWidget
     /// Construct a channel whose slider is disabled until a recognized state arrives.
     /** Creates the label, slider, and timeout timer as children and connects their signals.
      */
-    pwrChannel( QWidget *parent = nullptr, /**< [in] Parent owning this channel widget. */
-                Qt::WindowFlags flags = Qt::WindowFlags() /**< [in] Window flags passed to QWidget. */ );
+    pwrChannel( QWidget        *parent = nullptr, /**< [in] Parent owning this channel widget. */
+                Qt::WindowFlags flags  = Qt::WindowFlags() /**< [in] Window flags passed to QWidget. */ );
 
     /// Destructor
     virtual ~pwrChannel();
@@ -113,7 +118,7 @@ class pwrChannel : public QWidget
     void calcOffTimeout();
 
     /// Select the outgoing command protocol for this channel.
-    void isToggle(bool it /**< [in] True for a Switch toggle property, false for Text targets. */);
+    void isToggle( bool it /**< [in] True for a Switch toggle property, false for Text targets. */ );
 
     /// Check whether the channel uses a Switch toggle property.
     bool isToggle();
@@ -214,7 +219,7 @@ void pwrChannel::switchState( pwrChState swstate )
         m_swTarget = swstate;
     }
 
-    if( swstate != m_swTarget && m_changing)
+    if( swstate != m_swTarget && m_changing )
     {
         m_channelSwitch->setEnabled( false );
         if( swstate == pwrChState::Int )
@@ -287,7 +292,7 @@ void pwrChannel::offDelay( double offD )
 
 void pwrChannel::calcOnTimeout()
 {
-    if(m_outlets.size() > 1)
+    if( m_outlets.size() > 1 )
     {
         m_onTimeout = m_outlets.size() * 5000 + m_onDelay;
     }
@@ -299,7 +304,7 @@ void pwrChannel::calcOnTimeout()
 
 void pwrChannel::calcOffTimeout()
 {
-    if(m_outlets.size() > 1)
+    if( m_outlets.size() > 1 )
     {
         m_offTimeout = m_outlets.size() * 5000 + m_offDelay;
     }
@@ -309,7 +314,7 @@ void pwrChannel::calcOffTimeout()
     }
 }
 
-inline void pwrChannel::isToggle(bool it)
+inline void pwrChannel::isToggle( bool it )
 {
     m_isToggle = it;
 }
@@ -375,7 +380,7 @@ void pwrChannel::onDisconnect()
 {
     m_timer->stop();
     m_changing       = false;
-    m_swTarget      = pwrChState::Unk;
+    m_swTarget       = pwrChState::Unk;
     m_setSwitchState = pwrChState::Unk;
     m_isToggle       = false;
     m_outlets.clear();

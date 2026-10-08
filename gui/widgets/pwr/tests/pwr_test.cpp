@@ -33,8 +33,8 @@ TEST_CASE( "Power GUI decodes unknown channel states", "[pwrGUI]" )
     REQUIRE( device.channel( 1 )->channelSwitch()->isEnabled() );
 
     update.setName( "camera" );
-    auto *slider = device.channel( 0 )->channelSwitch();
-    int commands = 0;
+    auto *slider   = device.channel( 0 )->channelSwitch();
+    int   commands = 0;
     QObject::connect( &device, &xqt::pwrDevice::chChange, [&commands]( pcf::IndiProperty & ) { ++commands; } );
 
     for( const auto &state : { "Unk", "unexpected", "", "ON" } )
@@ -69,8 +69,9 @@ TEST_CASE( "Power GUI decodes unknown channel states", "[pwrGUI]" )
             update["state"] = known;
             device.handleSetProperty( update );
             REQUIRE( slider->isEnabled() );
-            CHECK( slider->sliderPosition() == ( std::string( known ) == "On" ? 10 :
-                                                std::string( known ) == "Int" ? 5 : 0 ) );
+            CHECK( slider->sliderPosition() == ( std::string( known ) == "On"    ? 10
+                                                 : std::string( known ) == "Int" ? 5
+                                                                                 : 0 ) );
         }
     }
 }
@@ -81,11 +82,12 @@ TEST_CASE( "Power GUI decodes unknown channel states", "[pwrGUI]" )
 TEST_CASE( "Power sliders reject unknown enum states", "[pwrGUI]" )
 {
     xqt::pwrChannel channel;
-    auto *slider = channel.channelSwitch();
-    int reached = 0;
+    auto           *slider  = channel.channelSwitch();
+    int             reached = 0;
     QObject::connect( &channel, &xqt::pwrChannel::switchTargetReached, [&reached]() { ++reached; } );
 
-    for( auto invalid : { xqt::pwrChState::Unk, static_cast<xqt::pwrChState>( -1 ), static_cast<xqt::pwrChState>( 99 ) } )
+    for( auto invalid :
+         { xqt::pwrChState::Unk, static_cast<xqt::pwrChState>( -1 ), static_cast<xqt::pwrChState>( 99 ) } )
     {
         for( auto known : { xqt::pwrChState::Off, xqt::pwrChState::On, xqt::pwrChState::Int } )
         {
@@ -110,8 +112,8 @@ TEST_CASE( "Power sliders reject unknown enum states", "[pwrGUI]" )
 TEST_CASE( "Power sliders remain disabled after losing state during a command", "[pwrGUI]" )
 {
     xqt::pwrChannel channel;
-    auto *slider = channel.channelSwitch();
-    int commands = 0;
+    auto           *slider   = channel.channelSwitch();
+    int             commands = 0;
     QObject::connect( &channel, &xqt::pwrChannel::switchOn, [&commands]( const std::string & ) { ++commands; } );
     channel.switchState( xqt::pwrChState::Off );
     channel.switchTarget( xqt::pwrChState::On );
@@ -151,9 +153,9 @@ TEST_CASE( "Power sliders remain disabled after losing state during a command", 
 TEST_CASE( "Power sliders retain normal command completion", "[pwrGUI]" )
 {
     xqt::pwrChannel channel;
-    auto *slider = channel.channelSwitch();
-    int onCommands = 0;
-    int offCommands = 0;
+    auto           *slider      = channel.channelSwitch();
+    int             onCommands  = 0;
+    int             offCommands = 0;
     QObject::connect( &channel, &xqt::pwrChannel::switchOn, [&onCommands]( const std::string & ) { ++onCommands; } );
     QObject::connect( &channel, &xqt::pwrChannel::switchOff, [&offCommands]( const std::string & ) { ++offCommands; } );
     channel.switchState( xqt::pwrChState::Off );
@@ -182,7 +184,7 @@ TEST_CASE( "Power sliders retain normal command completion", "[pwrGUI]" )
 TEST_CASE( "Power sliders wait for observed state on startup and reconnect", "[pwrGUI]" )
 {
     xqt::pwrChannel channel;
-    auto *slider = channel.channelSwitch();
+    auto           *slider = channel.channelSwitch();
     CHECK_FALSE( slider->isEnabled() );
     channel.timeOut();
     CHECK_FALSE( slider->isEnabled() );
@@ -200,7 +202,7 @@ TEST_CASE( "Power sliders wait for observed state on startup and reconnect", "[p
 } // namespace libXWCTest
 
 /// Run widget tests with a local Qt event loop and no INDI connection.
-int main( int argc,    /**< [in] Number of command-line arguments. */
+int main( int    argc, /**< [in] Number of command-line arguments. */
           char **argv /**< [in] Qt and Catch test arguments. */ )
 {
     QApplication app( argc, argv );

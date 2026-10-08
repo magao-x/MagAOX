@@ -69,7 +69,7 @@ class circularTimeSeries
     size_t capacity();
 
     /// Append a sample and its timestamp, replacing the oldest slot when full.
-    void add( const T &val,     /**< [in] Value to store. */
+    void add( const T        &val, /**< [in] Value to store. */
               const timespec &ts /**< [in] Time at which the value was sampled. */ );
 
     /// Read a stored value using the existing circular-buffer indexing.
@@ -239,7 +239,8 @@ struct pwrDevice : public QWidget
 
     size_t m_numChannels{ 0 }; ///< Number of configured channel widgets.
 
-    pwrChannel **m_channels{ nullptr }; ///< Owned pointer array; channel widgets are deleted when replaced or destroyed.
+    pwrChannel **m_channels{
+        nullptr }; ///< Owned pointer array; channel widgets are deleted when replaced or destroyed.
 
     circularTimeSeries<double> m_current; ///< Current samples for the device load gauge.
 
@@ -249,8 +250,8 @@ struct pwrDevice : public QWidget
 
   public:
     /// Construct a device label and empty electrical sample histories.
-    pwrDevice( QWidget *parent = nullptr, /**< [in] Parent owning this device widget. */
-               Qt::WindowFlags flags = Qt::WindowFlags() /**< [in] Window flags passed to QWidget. */ );
+    pwrDevice( QWidget        *parent = nullptr, /**< [in] Parent owning this device widget. */
+               Qt::WindowFlags flags  = Qt::WindowFlags() /**< [in] Window flags passed to QWidget. */ );
 
     /// Release channel storage and schedule its widgets for deletion.
     virtual ~pwrDevice();
@@ -311,7 +312,7 @@ struct pwrDevice : public QWidget
 
 /// Order power devices by their INDI names.
 inline bool compPwrDevice( const pwrDevice *one, /**< [in] First device to compare. */
-                          const pwrDevice *two /**< [in] Second device to compare. */ )
+                           const pwrDevice *two /**< [in] Second device to compare. */ )
 {
     return ( one->deviceName() < two->deviceName() );
 }
@@ -440,7 +441,8 @@ void pwrDevice::handleDelProperty( const pcf::IndiProperty &ipRecv )
         return;
     }
 
-    if( ipRecv.getName() == "channelOutlets" || ipRecv.getName() == "channelOnDelays" || ipRecv.getName() == "channelOffDelays" )
+    if( ipRecv.getName() == "channelOutlets" || ipRecv.getName() == "channelOnDelays" ||
+        ipRecv.getName() == "channelOffDelays" )
     {
         for( size_t i = 0; i < m_numChannels; ++i )
         {
@@ -537,7 +539,7 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty &ipRecv )
             }
             else
             {
-                if( ipRecv.find( "target" ))
+                if( ipRecv.find( "target" ) )
                 {
                     std::string target = ipRecv["target"].get();
 
@@ -555,7 +557,7 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty &ipRecv )
                     }
                 }
 
-                if( ipRecv.find( "state" ))
+                if( ipRecv.find( "state" ) )
                 {
                     std::string state = ipRecv["state"].get();
 
