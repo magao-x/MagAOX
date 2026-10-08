@@ -1,4 +1,6 @@
-
+/** \file pwrChannel.hpp
+ * \brief Power-channel slider state, availability, and command timeout handling.
+ */
 #ifndef xqt_pwrChannel_hpp
 #define xqt_pwrChannel_hpp
 
@@ -13,6 +15,7 @@
 namespace xqt
 {
 
+/// Reported channel states; Unk and unrecognized values disable user control.
 enum class pwrChState{ Unk, Off, Int, On};
 
 /// A single power channel control widget
@@ -32,34 +35,32 @@ class pwrChannel : public QWidget
 
     QSlider *m_channelSwitch{ nullptr }; ///< The widget providing user control
 
-    pwrChState m_swTarget{ pwrChState::Unk };
+    pwrChState m_swTarget{ pwrChState::Unk }; ///< Requested target used to complete a pending command.
 
-    pwrChState m_setSwitchState{ pwrChState::Unk }; ///< The last state set by the user.
+    pwrChState m_setSwitchState{ pwrChState::Unk }; ///< Last displayed observation, or Unk while unavailable.
 
-    bool m_changing {false}; ///< Flag tracking if this channel is changing
+    bool m_changing {false}; ///< Whether a local command is waiting for its target or timeout.
 
     std::vector<int> m_outlets; ///< The outlets controlled by this channel.
 
     double m_onDelay{ 1000 }; ///< The total turn-on delay for this channel (between outlets)
 
-    double m_onTimeout{ 6000 }; /**< The turn-ontimeout for this channel, the time to wait for device to update the
-                                      status before re-enabling the switch.*/
+    double m_onTimeout{ 6000 }; ///< Milliseconds to wait for the turn-on target before restoring the observed state.
 
-    double m_offDelay{ 1000 }; ///> The turn-off delay for this channel (between outlets)
+    double m_offDelay{ 1000 }; ///< The total turn-off delay for this channel (between outlets).
 
-    double m_offTimeout{ 6000 }; /**< The turn-off timeout for this channel, the time to wait for device to update the
-                                      status before re-enabling the switch.*/
+    double m_offTimeout{ 6000 }; ///< Milliseconds to wait for the turn-off target before restoring the observed state.
 
     bool m_isToggle {false}; ///< Whether this is a toggle switch (true) or a text switch (false).
 
     QTimer *m_timer{ nullptr }; ///< Timer for tracking timeouts on channel state changes
 
   public:
-    /// Constructor
-    /** Constructs the m_channelNameLabel and m_channelSwitch widgets, sets the palette of m_channelSwitch, an connects
-     * the m_channelSwitch sliderReleased signal to the sliderRelased slot.
+    /// Construct a channel whose slider is disabled until a recognized state arrives.
+    /** Creates the label, slider, and timeout timer as children and connects their signals.
      */
-    pwrChannel( QWidget *parent = nullptr, Qt::WindowFlags flags = Qt::WindowFlags() );
+    pwrChannel( QWidget *parent = nullptr, /**< [in] Parent owning this channel widget. */
+                Qt::WindowFlags flags = Qt::WindowFlags() /**< [in] Window flags passed to QWidget. */ );
 
     /// Destructor
     virtual ~pwrChannel();
@@ -75,48 +76,71 @@ class pwrChannel : public QWidget
      */
     void channelName( const std::string &nname /**< [in] the new channel name*/ );
 
+    /// Get the slider position as Off (0) or On (2), using the existing threshold.
     int switchState();
 
-    void switchTarget( pwrChState swstate );
+    /// Store the target used to complete a pending local command.
+    void switchTarget( pwrChState swstate /**< [in] Received target state. */ );
 
-    void switchState( pwrChState swstate );
+    /// Display a recognized observation or disable the slider for an unknown state.
+    /** Unknown observations cancel command waits without moving the slider or confirming the target.
+     * Recognized observations restore control subject to the existing pending-command wait.
+     */
+    void switchState( pwrChState swstate /**< [in] Received observed state. */ );
 
+    /// Check whether a local command is waiting for its target or timeout.
     bool changing();
 
+    /// Get the child label placed in the containing power widget's layout.
     QwtTextLabel *channelNameLabel();
 
+    /// Get the child slider placed in the containing power widget's layout.
     QSlider *channelSwitch();
 
-    void outlets( const std::vector<int> &outs );
+    /// Store the channel's outlet list and recalculate both command timeouts.
+    void outlets( const std::vector<int> &outs /**< [in] Controlled outlet numbers. */ );
 
-    void onDelay( double onD );
+    /// Store the total turn-on delay and recalculate its timeout.
+    void onDelay( double onD /**< [in] Total delay between outlet turn-on commands in milliseconds. */ );
 
-    void offDelay( double offD );
+    /// Store the total turn-off delay and recalculate its timeout.
+    void offDelay( double offD /**< [in] Total delay between outlet turn-off commands in milliseconds. */ );
 
+    /// Calculate the turn-on timeout from outlet count and total delay.
     void calcOnTimeout();
 
+    /// Calculate the turn-off timeout from outlet count and total delay.
     void calcOffTimeout();
 
-    void isToggle(bool it);
+    /// Select the outgoing command protocol for this channel.
+    void isToggle(bool it /**< [in] True for a Switch toggle property, false for Text targets. */);
 
+    /// Check whether the channel uses a Switch toggle property.
     bool isToggle();
 
+    /// Clear connection metadata and disable the slider until a recognized observation arrives.
     void onDisconnect();
 
   public slots:
 
+    /// Dispatch a user-requested state change only while the slider is enabled.
     void sliderReleased();
 
+    /// Stop the command timeout and clear the local waiting flag.
     void noTimeOut();
 
+    /// End a command wait and restore the last displayed observation, keeping unknown states disabled.
     void timeOut();
 
   signals:
 
-    void switchOn( const std::string &channelName );
+    /// Request that the containing device turn this channel on.
+    void switchOn( const std::string &channelName /**< [in] Name of the channel to command. */ );
 
-    void switchOff( const std::string &channelName );
+    /// Request that the containing device turn this channel off.
+    void switchOff( const std::string &channelName /**< [in] Name of the channel to command. */ );
 
+    /// Notify that a recognized On/Off observation ends the local command wait.
     void switchTargetReached();
 };
 

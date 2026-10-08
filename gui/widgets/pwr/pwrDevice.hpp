@@ -1,3 +1,6 @@
+/** \file pwrDevice.hpp
+ * \brief INDI power-device channel controls and electrical sample history.
+ */
 #ifndef xqt_pwrDevice_hpp
 #define xqt_pwrDevice_hpp
 
@@ -10,7 +13,9 @@
 
 #include "pwrChannel.hpp"
 
-inline double tsDiff( const timespec &ts2, const timespec &ts1 )
+/// Return the elapsed seconds between two timestamps.
+inline double tsDiff( const timespec &ts2, /**< [in] Later timestamp. */
+                      const timespec &ts1 /**< [in] Earlier timestamp. */ )
 {
     double tsd1 = ( (double)ts1.tv_nsec ) / 1e9;
     double tsd2 = ( (double)( ts2.tv_sec - ts1.tv_sec ) ) + ( (double)ts2.tv_nsec ) / 1e9;
@@ -18,25 +23,30 @@ inline double tsDiff( const timespec &ts2, const timespec &ts1 )
     return tsd2 - tsd1;
 }
 
+/// Circular sample storage used by the power GUI's electrical gauges.
 template <typename _T>
 class circularTimeSeries
 {
   public:
+    /// Type of each stored sample.
     typedef _T T;
 
   protected:
     std::vector<T>        m_data;       ///< Holds the time series data
-    std::vector<timespec> m_timeStamps; ///< Holds the timer series timestamps.
+    std::vector<timespec> m_timeStamps; ///< Timestamps corresponding to the stored samples.
 
     size_t m_currSize{ 0 }; ///< This is the current size of the time series, always <= m_data.size().
-    size_t m_currPos{ 0 };  ///< Current position in the circular buffer.
+    size_t m_currPos{ 0 };  ///< Position where the next sample will be written.
 
   public:
+    /// Construct an empty sample buffer.
     circularTimeSeries();
 
-    explicit circularTimeSeries( size_t size );
+    /// Construct a buffer with the requested capacity.
+    explicit circularTimeSeries( size_t size /**< [in] Number of sample slots to allocate. */ );
 
-    void resize( size_t size );
+    /// Resize sample storage and reset the sample count and write position.
+    void resize( size_t size /**< [in] Number of sample slots to allocate. */ );
 
     /// Get the current size of the time-series.
     /** This is not necessarily m_data.size(), if the
@@ -58,19 +68,15 @@ class circularTimeSeries
      */
     size_t capacity();
 
-    void add( const T &val, const timespec &ts );
+    /// Append a sample and its timestamp, replacing the oldest slot when full.
+    void add( const T &val,     /**< [in] Value to store. */
+              const timespec &ts /**< [in] Time at which the value was sampled. */ );
 
-    /// Get the n-th value in the time series
-    /** value(0) will return the earliest point currently in the time series.
-     * value(currSize()-1) will return the most recently added point.
-     */
-    T value( size_t n );
+    /// Read a stored value using the existing circular-buffer indexing.
+    T value( size_t n /**< [in] Position relative to the circular-buffer cursor. */ );
 
-    /// Get the n-th timestamp in the time series
-    /** timeStamp(0) will return the earliest point currently in the time series.
-     * timeStamp(currSize()-1) will return the most recently added point.
-     */
-    timespec timeStamp( size_t n );
+    /// Read a stored timestamp using the existing circular-buffer indexing.
+    timespec timeStamp( size_t n /**< [in] Position relative to the circular-buffer cursor. */ );
 
     /// Return the value of the most recent entry in the time series.
     T lastVal();
@@ -78,7 +84,10 @@ class circularTimeSeries
     /// Return the timestamp of the most recent entry in the time series.
     T lastTimeStamp();
 
-    T averageLast( double avgTime );
+    /// Average the recent sample window using the existing buffer indexing.
+    /** Requires at least one stored sample.
+     */
+    T averageLast( double avgTime /**< [in] Width of the averaging window in seconds. */ );
 };
 
 template <typename _T>
@@ -218,63 +227,91 @@ inline _T circularTimeSeries<_T>::averageLast( double avgTime )
 namespace xqt
 {
 
+/// Power device whose channels and electrical measurements are updated from INDI properties.
 struct pwrDevice : public QWidget
 {
     Q_OBJECT
 
   protected:
-    std::string m_deviceName;
+    std::string m_deviceName; ///< INDI device whose properties update this control group.
 
-    QwtTextLabel *m_deviceNameLabel{ nullptr };
+    QwtTextLabel *m_deviceNameLabel{ nullptr }; ///< Label placed in the containing power widget's layout.
 
-    size_t m_numChannels{ 0 };
+    size_t m_numChannels{ 0 }; ///< Number of configured channel widgets.
 
-    pwrChannel **m_channels{ nullptr };
+    pwrChannel **m_channels{ nullptr }; ///< Owned pointer array; channel widgets are deleted when replaced or destroyed.
 
-    circularTimeSeries<double> m_current;
-    circularTimeSeries<double> m_voltage;
-    circularTimeSeries<double> m_frequency;
+    circularTimeSeries<double> m_current; ///< Current samples for the device load gauge.
+
+    circularTimeSeries<double> m_voltage; ///< Voltage samples averaged for the device load gauge.
+
+    circularTimeSeries<double> m_frequency; ///< Frequency samples averaged for the device load gauge.
 
   public:
-    pwrDevice( QWidget *parent = nullptr, Qt::WindowFlags flags = Qt::WindowFlags() );
+    /// Construct a device label and empty electrical sample histories.
+    pwrDevice( QWidget *parent = nullptr, /**< [in] Parent owning this device widget. */
+               Qt::WindowFlags flags = Qt::WindowFlags() /**< [in] Window flags passed to QWidget. */ );
 
+    /// Release channel storage and schedule its widgets for deletion.
     virtual ~pwrDevice();
 
+    /// Get the subscribed INDI device name.
     std::string deviceName() const;
 
-    void deviceName( const std::string &dname );
+    /// Set the subscribed INDI device name and its displayed label.
+    void deviceName( const std::string &dname /**< [in] INDI device name. */ );
 
-    void setChannels( const std::vector<std::string> &channelNames );
+    /// Replace the channel widgets and connect their command signals.
+    void setChannels( const std::vector<std::string> &channelNames /**< [in] Channel property names to display. */ );
 
+    /// Get the number of configured channels.
     size_t numChannels();
 
-    pwrChannel *channel( size_t channelNo );
+    /// Get a channel widget, or nullptr if the index is outside the configured range.
+    pwrChannel *channel( size_t channelNo /**< [in] Zero-based channel index. */ );
 
+    /// Get the device label placed in the containing power widget's layout.
     QwtTextLabel *deviceNameLabel();
 
+    /// Clear electrical histories and disable every channel on disconnection.
     void onDisconnect();
 
-    void handleDelProperty( const pcf::IndiProperty &ipRecv );
+    /// Clear measurements or disable channels whose properties have been deleted.
+    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] Deleted INDI property. */ );
 
-    void handleSetProperty( const pcf::IndiProperty &ipRecv );
+    /// Apply channel metadata, observed states, targets, or electrical measurements.
+    /** Unk and unrecognized channel state strings disable their slider; target-only updates preserve availability.
+     */
+    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Received INDI property update. */ );
 
+    /// Get the current sample, or -1 if no measurement is available.
     double current();
 
+    /// Get the ten-second voltage average, or -1 if no measurement is available.
     double voltage();
 
+    /// Get the ten-second frequency average, or -1 if no measurement is available.
     double frequency();
 
   public slots:
 
-    void switchOn( const std::string &channelName );
-    void switchOff( const std::string &channelName );
+    /// Emit an On command using the selected channel's Text or Switch protocol.
+    void switchOn( const std::string &channelName /**< [in] Channel property to command. */ );
+
+    /// Emit an Off command using the selected channel's Text or Switch protocol.
+    void switchOff( const std::string &channelName /**< [in] Channel property to command. */ );
 
   signals:
-    void chChange( pcf::IndiProperty &ip );
+    /// Pass a constructed channel command to the containing power widget.
+    void chChange( pcf::IndiProperty &ip /**< [in] Outgoing INDI property. */ );
+
+    /// Notify that displayed electrical measurements changed.
     void loadChanged();
 };
 
-inline bool compPwrDevice( const pwrDevice *one, const pwrDevice *two )
+/// Order power devices by their INDI names.
+inline bool compPwrDevice( const pwrDevice *one, /**< [in] First device to compare. */
+                          const pwrDevice *two /**< [in] Second device to compare. */ )
 {
     return ( one->deviceName() < two->deviceName() );
 }

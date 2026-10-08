@@ -29,6 +29,10 @@
  * channel=fwtelsim
  * \endcode
  * Use the virtual device/channel in the power GUI configuration to consolidate controls.
+ * The GUI disables a channel's slider for Unk or any unrecognized observed state,
+ * retaining its last displayed position. A recognized On, Off, or Int observation
+ * restores control subject to the normal pending-command wait; targets and timeouts
+ * cannot restore control while the observed state is unknown.
  * Physical controller channel configuration is unchanged. Deployment configuration and
  * actual instrument validation are performed by the user.
  *
