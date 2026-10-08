@@ -66,7 +66,7 @@ inline Script g_script;
 bool fail( Operation operation /**< [in] Transport phase being attempted. */ );
 
 /// Return a scripted marker without opening a serial port.
-int connect( z_port *port, /**< [out] Scripted port marker. */
+int connect( z_port     *port, /**< [out] Scripted port marker. */
              const char *name /**< [in] Ignored device path. */ );
 
 /// Simulate closing the marker without closing a real descriptor.
@@ -74,17 +74,17 @@ int disconnect( z_port port /**< [in] Ignored port marker. */ );
 
 /// Simulate configuring a timeout without accessing a descriptor.
 int timeout( z_port port, /**< [in] Ignored port marker. */
-             int milliseconds /**< [in] Ignored timeout. */ );
+             int    milliseconds /**< [in] Ignored timeout. */ );
 
 /// Simulate draining the marker without accessing a descriptor.
 int drain( z_port port /**< [in] Ignored port marker. */ );
 
 /// Record a real six-byte command and simulate acceptance or failure.
-int send( z_port port, /**< [in] Ignored port marker. */
+int send( z_port         port, /**< [in] Ignored port marker. */
           const uint8_t *command /**< [in] Six-byte binary command. */ );
 
 /// Encode a valid reply or return a scripted failure without reading a device.
-int receive( z_port port, /**< [in] Ignored port marker. */
+int receive( z_port   port, /**< [in] Ignored port marker. */
              uint8_t *reply /**< [out] Six-byte reply. */ );
 
 bool fail( Operation operation )
@@ -145,11 +145,11 @@ int receive( z_port, uint8_t *reply )
     if( failure && !g_script.m_corruptReply )
         return Z_ERROR_SYSTEM_ERROR;
     REQUIRE( !g_script.m_commands.empty() );
-    auto command = g_script.m_commands.back();
+    auto    command = g_script.m_commands.back();
     int32_t data;
     REQUIRE( zb_decode( &data, command.data() ) == Z_SUCCESS );
     uint8_t replyCommand = command[1];
-    int32_t response = 0;
+    int32_t response     = 0;
     if( command[1] == 63 )
         response = 49820;
     else if( command[1] == 60 || command[1] == 17 )
@@ -243,7 +243,7 @@ PowerFixture::PowerFixture()
     saved << "12345\n1\n54321\n77\n";
     saved.close();
     m_maxDiscoveryAddress = 1;
-    m_renumberPauseMs = 0;
+    m_renumberPauseMs     = 0;
     state( stateCodes::INITIALIZED );
     REQUIRE( appStartup() == 0 );
     state( stateCodes::READY );
@@ -268,9 +268,13 @@ void PowerFixture::targetOff()
 
 int PowerFixture::command( unsigned operation )
 {
-    const std::array<pcf::IndiProperty *, 6> properties{ &m_indiP_tgt_pos, &m_indiP_req_home,
-        &m_indiP_req_home_all, &m_indiP_req_halt, &m_indiP_req_ehalt, &m_indiP_knob_enable };
-    auto request = *properties.at( operation );
+    const std::array<pcf::IndiProperty *, 6> properties{ &m_indiP_tgt_pos,
+                                                         &m_indiP_req_home,
+                                                         &m_indiP_req_home_all,
+                                                         &m_indiP_req_halt,
+                                                         &m_indiP_req_ehalt,
+                                                         &m_indiP_knob_enable };
+    auto                                     request = *properties.at( operation );
     if( operation == 0 )
         request["stageA"].set( 200 );
     else
@@ -307,11 +311,15 @@ TEST_CASE( "Binary Zaber waits for power-off without starting communication", "[
     #endif
     // clang-format on
     outletHarness::g_faults = {};
-    g_script = {};
+    g_script                = {};
     PowerFixture app;
     app.targetOff();
-    for( auto code : { stateCodes::POWERON, stateCodes::NODEVICE, stateCodes::NOTCONNECTED,
-                      stateCodes::CONNECTED, stateCodes::READY, stateCodes::ERROR } )
+    for( auto code : { stateCodes::POWERON,
+                       stateCodes::NODEVICE,
+                       stateCodes::NOTCONNECTED,
+                       stateCodes::CONNECTED,
+                       stateCodes::READY,
+                       stateCodes::ERROR } )
     {
         app.state( code );
         CHECK( app.appLogic() == 0 );
@@ -347,22 +355,26 @@ TEST_CASE( "Binary Zaber connection suppresses expected power-loss failures", "[
     zaberLowLevelBinary::connect(); zaberLowLevelBinary::loadStages();
     #endif
     // clang-format on
-    for( auto [failure, call] : { std::pair{ Operation::Connect, 1u }, { Operation::Timeout, 1u },
-                                 { Operation::Drain, 1u }, { Operation::Drain, 3u }, { Operation::Send, 1u } } )
+    for( auto [failure, call] : { std::pair{ Operation::Connect, 1u },
+                                  { Operation::Timeout, 1u },
+                                  { Operation::Drain, 1u },
+                                  { Operation::Drain, 3u },
+                                  { Operation::Send, 1u } } )
     {
         for( bool turningOff : { false, true } )
         {
             outletHarness::g_faults = {};
-            g_script = {};
+            g_script                = {};
             PowerFixture app;
             app.state( stateCodes::NOTCONNECTED );
-            app.m_port = 0;
-            g_script.m_failure = failure;
+            app.m_port             = 0;
+            g_script.m_failure     = failure;
             g_script.m_failureCall = call;
             if( turningOff )
                 g_script.m_beforeFailure = [&] { app.targetOff(); };
             CHECK( app.connect() == ( failure == Operation::Connect ? ZBC_NOT_CONNECTED : ZBC_ERROR ) );
-            CHECK( app.state() == ( turningOff || failure == Operation::Connect ? stateCodes::NOTCONNECTED : stateCodes::ERROR ) );
+            CHECK( app.state() ==
+                   ( turningOff || failure == Operation::Connect ? stateCodes::NOTCONNECTED : stateCodes::ERROR ) );
             CHECK( outletHarness::g_faults.m_logs.empty() == turningOff );
         }
     }
@@ -380,11 +392,11 @@ TEST_CASE( "Binary Zaber discovery stops during a power-target change", "[zaberL
     for( auto failure : { Operation::Drain, Operation::Send, Operation::Receive } )
     {
         outletHarness::g_faults = {};
-        g_script = {};
+        g_script                = {};
         PowerFixture app;
         app.m_maxDiscoveryAddress = 4;
-        g_script.m_failure = failure;
-        g_script.m_beforeFailure = [&] { app.targetOff(); };
+        g_script.m_failure        = failure;
+        g_script.m_beforeFailure  = [&] { app.targetOff(); };
         CHECK( app.appLogic() == 0 );
         CHECK( app.state() == stateCodes::READY );
         CHECK( app.stageAddress() == 1 );
@@ -404,15 +416,16 @@ TEST_CASE( "Binary Zaber stage commands preserve power-loss suppression", "[zabe
     #endif
     // clang-format on
     for( auto [query, failure, corrupt] : { std::tuple{ false, Operation::Send, false },
-                                           { true, Operation::Send, false }, { true, Operation::Receive, false },
-                                           { true, Operation::Receive, true } } )
+                                            { true, Operation::Send, false },
+                                            { true, Operation::Receive, false },
+                                            { true, Operation::Receive, true } } )
     {
         for( bool turningOff : { false, true } )
         {
             outletHarness::g_faults = {};
-            g_script = {};
+            g_script                = {};
             PowerFixture app;
-            g_script.m_failure = failure;
+            g_script.m_failure      = failure;
             g_script.m_corruptReply = corrupt;
             if( turningOff )
                 g_script.m_beforeFailure = [&] { app.targetOff(); };
@@ -441,7 +454,7 @@ TEST_CASE( "Binary Zaber registered callbacks suppress shutdown errors", "[zaber
         for( bool turningOff : { false, true } )
         {
             outletHarness::g_faults = {};
-            g_script = {};
+            g_script                = {};
             PowerFixture app;
             g_script.m_failure = Operation::Send;
             if( turningOff )
@@ -471,7 +484,7 @@ TEST_CASE( "Binary Zaber polling suppresses failures at every serial phase", "[z
         std::array<unsigned, 7> counts;
         {
             outletHarness::g_faults = {};
-            g_script = {};
+            g_script                = {};
             PowerFixture app;
             app.state( code );
             REQUIRE( app.appLogic() == 0 );
@@ -483,16 +496,17 @@ TEST_CASE( "Binary Zaber polling suppresses failures at every serial phase", "[z
             for( unsigned call = 1; call <= counts[static_cast<size_t>( failure )]; ++call )
             {
                 outletHarness::g_faults = {};
-                g_script = {};
+                g_script                = {};
                 PowerFixture app;
                 app.state( code );
-                g_script.m_failure = failure;
-                g_script.m_failureCall = call;
+                g_script.m_failure       = failure;
+                g_script.m_failureCall   = call;
                 g_script.m_beforeFailure = [&] { app.targetOff(); };
                 CHECK( app.appLogic() == 0 );
                 CHECK( app.state() == code );
-                CHECK( std::none_of( outletHarness::g_faults.m_logs.begin(), outletHarness::g_faults.m_logs.end(),
-                                    []( const Log &entry ) { return entry.m_priority <= logPrio::LOG_ERROR; } ) );
+                CHECK( std::none_of( outletHarness::g_faults.m_logs.begin(),
+                                     outletHarness::g_faults.m_logs.end(),
+                                     []( const Log &entry ) { return entry.m_priority <= logPrio::LOG_ERROR; } ) );
                 CHECK( g_script.m_calls[static_cast<size_t>( failure )] == call );
             }
         }
@@ -513,20 +527,22 @@ TEST_CASE( "Binary Zaber reports unexpected powered-on polling failures", "[zabe
         for( auto failure : { Operation::Send, Operation::Receive } )
         {
             outletHarness::g_faults = {};
-            g_script = {};
+            g_script                = {};
             PowerFixture app;
             app.state( code );
-            g_script.m_failure = failure;
+            g_script.m_failure     = failure;
             g_script.m_failureCall = code == stateCodes::READY ? 2 : 1;
             CHECK( app.appLogic() == 0 );
             CHECK( app.state() == stateCodes::ERROR );
-            CHECK( std::any_of( outletHarness::g_faults.m_logs.begin(), outletHarness::g_faults.m_logs.end(),
-                               []( const Log &entry ) { return entry.m_priority <= logPrio::LOG_ERROR; } ) );
+            CHECK( std::any_of( outletHarness::g_faults.m_logs.begin(),
+                                outletHarness::g_faults.m_logs.end(),
+                                []( const Log &entry ) { return entry.m_priority <= logPrio::LOG_ERROR; } ) );
         }
     }
 }
 
-/// Observed-off cleanup closes bookkeeping and publishes the retained snapshot; On/On disconnect failures remain visible.
+/// Observed-off cleanup closes bookkeeping and publishes the retained snapshot; On/On disconnect failures remain
+/// visible.
 /** \ingroup zaberLowLevelBinary_unit_test */
 TEST_CASE( "Binary Zaber power-off cleanup retains the snapshot", "[zaberLowLevelBinary][power]" )
 {
@@ -539,7 +555,7 @@ TEST_CASE( "Binary Zaber power-off cleanup retains the snapshot", "[zaberLowLeve
     for( bool turningOff : { false, true } )
     {
         outletHarness::g_faults = {};
-        g_script = {};
+        g_script                = {};
         PowerFixture app;
         g_script.m_failure = Operation::Disconnect;
         if( turningOff )
@@ -547,7 +563,7 @@ TEST_CASE( "Binary Zaber power-off cleanup retains the snapshot", "[zaberLowLeve
             app.power( "Off", "Off" );
             REQUIRE( app.onPowerOff() == 0 );
             auto snapshot = app.m_indiNewCallBacks.at( "test-pdu.curr_pos" ).property;
-            CHECK( (*snapshot)["stageA"].get<long>() == 12345 );
+            CHECK( ( *snapshot )["stageA"].get<long>() == 12345 );
         }
         else
             REQUIRE( app.resetConnection() == 0 );
@@ -566,7 +582,7 @@ TEST_CASE( "Binary Zaber permits startup with an unknown target", "[zaberLowLeve
     #endif
     // clang-format on
     outletHarness::g_faults = {};
-    g_script = {};
+    g_script                = {};
     PowerFixture app;
     app.power( "On", "Unk" );
     app.m_port = 0;

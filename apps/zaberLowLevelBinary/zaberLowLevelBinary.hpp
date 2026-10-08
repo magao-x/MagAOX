@@ -221,43 +221,49 @@ class zaberLowLevelBinary : public MagAOXAppT, public tty::usbDevice
     int newCallBack_m_indiP_tgt_pos( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Route the registered static callback to its application instance.
-    static int st_newCallBack_m_indiP_tgt_pos( void *app, /**< [in] Application instance. */
-                                      const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+    static int
+    st_newCallBack_m_indiP_tgt_pos( void                    *app, /**< [in] Application instance. */
+                                    const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Handle homing of one stage.
     int newCallBack_m_indiP_req_home( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Route the registered static callback to its application instance.
-    static int st_newCallBack_m_indiP_req_home( void *app, /**< [in] Application instance. */
-                                      const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+    static int
+    st_newCallBack_m_indiP_req_home( void                    *app, /**< [in] Application instance. */
+                                     const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Handle homing of all configured stages.
     int newCallBack_m_indiP_req_home_all( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Route the registered static callback to its application instance.
-    static int st_newCallBack_m_indiP_req_home_all( void *app, /**< [in] Application instance. */
-                                      const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+    static int
+    st_newCallBack_m_indiP_req_home_all( void                    *app, /**< [in] Application instance. */
+                                         const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Handle a normal halt of one stage.
     int newCallBack_m_indiP_req_halt( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Route the registered static callback to its application instance.
-    static int st_newCallBack_m_indiP_req_halt( void *app, /**< [in] Application instance. */
-                                      const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+    static int
+    st_newCallBack_m_indiP_req_halt( void                    *app, /**< [in] Application instance. */
+                                     const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Handle emergency halts without stopping for an individual stage failure.
     int newCallBack_m_indiP_req_ehalt( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Route the registered static callback to its application instance.
-    static int st_newCallBack_m_indiP_req_ehalt( void *app, /**< [in] Application instance. */
+    static int
+    st_newCallBack_m_indiP_req_ehalt( void                    *app, /**< [in] Application instance. */
                                       const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Handle a stage potentiometer setting.
     int newCallBack_m_indiP_knob_enable( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Route the registered static callback to its application instance.
-    static int st_newCallBack_m_indiP_knob_enable( void *app, /**< [in] Application instance. */
-                                      const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+    static int
+    st_newCallBack_m_indiP_knob_enable( void                    *app, /**< [in] Application instance. */
+                                        const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     ///@}
 };

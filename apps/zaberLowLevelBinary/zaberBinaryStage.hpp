@@ -142,7 +142,6 @@ class zaberBinaryStage
     /// Driver-disabled warning derived from the binary device mode.
     bool m_warnFD{ false };
 
-
     /// FQ warning flag retained for ASCII-controller API compatibility.
     bool m_warnFQ{ false };
 
@@ -199,7 +198,6 @@ class zaberBinaryStage
 
     /// UNK warning flag retained for ASCII-controller API compatibility.
     bool m_warnUNK{ false };
-
 
   public:
     /// Default constructor deleted because stages require a parent app.
@@ -371,7 +369,7 @@ class zaberBinaryStage
 
     /// Disable the manual knob and asynchronous command replies.
     int enableKnob( z_port port, /**< [in] Port with which to communicate. */
-                    bool enable /**< [in] Whether to enable the manual knob. */ );
+                    bool   enable /**< [in] Whether to enable the manual knob. */ );
 
     /// Set the target speed used for absolute and relative moves.
     int setTargetSpeed( z_port  port, /**< [in] the port with which to communicate */
