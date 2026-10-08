@@ -118,7 +118,8 @@ TEST_CASE( "virtual PDU rejects invalid mappings and channel sequences", "[virtu
         endpoint + "[x]\noutlet=1\nonDelays=0,2\n", endpoint + "[x]\noutlet=1\noffDelays=0,2\n",
         endpoint + "[x]\noutlet=1\nonOrder=0,0\n", endpoint + "[x]\noutlet=1\noffOrder=0,0\n",
         endpoint + "[x]\noutlet=1\nonOrder=bad\n", endpoint + "[x]\noutlet=1\nonDelays=-2\n",
-        endpoint + "[x]\noutlet=1\nonOrder= \n", endpoint + "[telem_rotate]\noutlet=1\n",
+        endpoint + "[x]\noutlet=1\nonOrder= \n",
+        endpoint + "[x]\noutlet=1\nonOrder=0,,1\n", endpoint + "[x]\noutlet=1\nonDelays=0, ,1\n", endpoint + "[telem_rotate]\noutlet=1\n",
         endpoint + "[x]\noutlet=2147483648\n", endpoint + "[x]\noutlet=1\nonDelays=4294967296\n",
         endpoint + "[outlet2]\ndevice=ac\nchannel=aux\n[x]\noutlets=1,2\nonOrder=0,0\n" } )
     {

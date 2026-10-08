@@ -371,3 +371,21 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 - `tests/Makefile.one`
 - `tests/outletAppTest.hpp`
 - `tests/tests.list`
+
+
+## Final Verification
+
+- Ran repository `clang-format` on all 17 changed C++ files; dry-run formatting, top file/brief/no-author checks, and `git diff --check` pass. The original task text above Agent Findings and Plan remains byte-for-byte unchanged.
+- Formatting split the empty-numeric-token guard onto its own executable line, exposing a missing error case. Added malformed order/delay arrays with empty CSV tokens and reran the virtual suite: 9 cases/13,774 assertions pass. This validates rejection of a real malformed configuration rather than relying on multiple branches sharing one coverage line.
+- Final standard `COVERAGE=1`/`-O0` controller line coverage, merged by source line across production/simulator and compiler aliases:
+
+| Controller | Executable lines hit/total | Line coverage |
+| --- | --- | --- |
+| virtualPDU | 242/242 | 100% |
+| xt1121DCDU | 215/215 | 100% |
+| acronameUsbHub | 128/128 | 100% |
+| trippLitePDU | 494/494 | 100% |
+
+- Final focused app/simulator/FITS suites all pass. The outlet-controller regression (591 assertions), logger accessor regression (392), and logger metadata regression (22) pass. All four apps and logdump/xrif2fits rebuild after formatting. The isolated entrypoint help check prints every new option without filesystem errors.
+- Two unchanged library regressions remain documented above: the missing-power-config wait expectation and injected appLogic-failure return expectation. Shared endpoints and the existing GUI Unk display issue remain follow-up items; GUI and actual installation configuration were not changed.
+- Local feature-branch commits separate functionality, documentation, the final coverage case/engineering record, and formatting. No network server, device, instrument command, installation, or deployment was used for validation.
