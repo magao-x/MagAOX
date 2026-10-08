@@ -302,20 +302,20 @@ All with explicit `hp.`/`ndimage` imports.
 **Decisions made during implementation:**
 - **Core mask diameter** is now `mask_factor × separation` in λ/D for both spot sources. The old code computed the sparkle mask as `separation / (6/21) × 0.7` (a pixel conversion applied to a λ/D grid). For sparkles at 15 λ/D that gives a 36.75 λ/D diameter mask, whose radius (18.4 λ/D) is larger than the spot separation, so it would have masked the sparkles themselves. The DM-spot mask was `47 × (6/21) × 0.7 ≈ 9.4` λ/D. Both now follow the user's stated "0.7 × separation" rule.
 - **Radial-profile bin size** is `radial_bin = 5 × 6/21 ≈ 1.43` λ/D, which equals the 5-pixel bin validated in the on-sky notebook. The old app passed `5` on a λ/D grid, which is 17.5 pixels.
-- **DM spot separation** (47) is interpreted as λ/D at the observing wavelength and scaled by `normalized_wavelength`, as for sparkles (this was the old `utils.py` `find_speckle` behavior).
+- **DM spot separation** (47) is interpreted as λ/D at the observing wavelength and scaled by `normalized_wavelength`, as for sparkles (this was the old `utils.py` `find_speckle` behavior). *Confirmed by the user, 2026-10-07.*
 - **Expected spot axes** for the wrap fix: spots 0 and 2 at `90° − angle`, spots 1 and 3 at `−angle`. This matches the notebook's on-sky result of 54–74° for the DM spots at 28°. The synthetic tests show the old `abs()` failure directly: with sparkles at angle 0, spots 0 and 2 read +89.5° and −89.5°, so |θ0| − |θ2| = 0, while the new signed deviations correctly give −0.5° and +0.5°.
-- **Gain default** is 0.5 (config `gain`). The old INDI `gain` property displayed 0.10 while the code actually used `_gain = 0.5`. The property now shows the value in use.
+- **Gain default** is 0.1 (config `gain`), per the user (2026-10-07). The old INDI `gain` property displayed 0.10 while the code actually used `_gain = 0.5`. Now the property and the gain in use agree at 0.1. This was briefly 0.5 in commit c188bbe9 and corrected in a follow-up commit.
 - **Startup zeroing** of `deltaADC1/2` is queued and applied by `loop()` once `adctrack` is visible. It now always writes 0, where before it only wrote if `deltaADC1.current != 0`. Writing 0 when it is already 0 is harmless.
 - **No δ1 resync from `adctrack`.** `current` only updates after the stages move, so resyncing from it would discard commands while tracking is off. The app keeps its own integrator, as before.
 - **Repeated failures:** after `max_consecutive_failures` failed closed-loop cycles the app goes idle, and `fsm` returns to READY. The reason is shown in `status.last_error` and the log.
 - **Config schema change:** `camera.shmim` / `camera.dark_shmim` are replaced by a `cameras` table (`shmim`, `filter_wheel` per entry; defaults camsci1/fwsci1 and camsci2/fwsci2). Darks come from XCam's automatic `<shmim>_dark` detection. **Any deployed `/opt/MagAOX/config/adcCtrl.conf` with a `[camera]` section must be updated.**
 - The INDI property `labmode` is now `loop_sign` (`positive`/`negative`). New read-only properties: `measurement`, `command`, `status`. New switch: `camera`.
 
-**Test coverage vs. plan:** T1–T23 are implemented as 27 test functions in `apps/adcCtrl/test/test_adcCtrl.py`, plus a `loop_sign` test. T7 uses a numpy broadband model (core and spots scaled with λ, core shifted linearly across the band) rather than a full hcipy optical propagation.
+**Test coverage vs. plan:** T1–T23 are implemented as 28 test functions in `apps/adcCtrl/test/test_adcCtrl.py`, including `loop_sign` and default-gain tests. T7 uses a numpy broadband model (core and spots scaled with λ, core shifted linearly across the band) rather than a full hcipy optical propagation.
 
 ### Verification
 
-- **Local (this Mac):** all 27 tests pass using real numpy 2.4.3, scipy 1.17.1 and hcipy 0.7.0, with *stub* `xconf`, `purepyindi2` and `magaox` modules (pip could not reach PyPI from the sandbox). This validates the algorithm and control logic and the device logic against a minimal property model. It does **not** validate the real purepyindi2 property, message or `Device` APIs.
+- **Local (this Mac):** all 28 tests pass using real numpy 2.4.3, scipy 1.17.1 and hcipy 0.7.0, with *stub* `xconf`, `purepyindi2` and `magaox` modules (pip could not reach PyPI from the sandbox). This validates the algorithm and control logic and the device logic against a minimal property model. It does **not** validate the real purepyindi2 property, message or `Device` APIs.
 - **Golden test:** `moment_angle` in `app.py` reproduces `adc_sims/algo_26B/adc_ctrl.py` to 1e-10 on 8 inputs.
 - **Pipeline linearity (sparkles, synthetic):** about 25° of `pair02` per λ/D of band-integrated dispersion, with R² > 0.99.
 - **Timing:** about 0.09 s per 512×512 frame for both spot sources (local Mac), well within the ~10 s loop budget.

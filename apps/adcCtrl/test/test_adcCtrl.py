@@ -484,6 +484,14 @@ def test_camera_switch_only_when_idle():
     assert abs(dev._normalized_wavelength - 762 / 656) < 1e-12
 
 
+def test_default_gain():
+    """The loop gain defaults to 0.1, and the gain property shows the value in use."""
+    dev = make_device()
+    assert dev._gain == 0.1
+    assert dev.properties["gain"]["current"] == 0.1
+    assert dev.properties["gain"]["target"] == 0.1
+
+
 def test_ctrl_mtx_handler():
     """ctrl_mtx updates set the matching element as a float."""
     dev = make_device()

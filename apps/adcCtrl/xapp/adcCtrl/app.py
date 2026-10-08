@@ -495,7 +495,7 @@ class AdcCtrlConfig(BaseConfig):
     mask_factor : float = xconf.field(default=0.7, help="Core mask diameter as a fraction of the spot separation")
     pad : int = xconf.field(default=50, help="Zero padding added around each frame [pixels]")
     radial_bin : float = xconf.field(default=5 * 6.0 / 21.0, help="Radial profile bin size [lambda/D]")
-    gain : float = xconf.field(default=0.5, help="Initial loop gain")
+    gain : float = xconf.field(default=0.1, help="Initial loop gain")
     ctrl_mtx : list[float] = xconf.field(default_factory=lambda: [0.21178766, 0.19275196], help="Initial control matrix [m00, m01]")
     step_limit_deg : float = xconf.field(default=0.7, help="Steps with |step| at or above this [deg] are rejected")
     send_timeout_sec : float = xconf.field(default=30.0, help="Time to wait for the ADC stages to reach a commanded offset")
