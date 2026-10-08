@@ -53,6 +53,11 @@
  * stays READY. Source loss/expiry makes affected virtual outlets unknown. A mid-sequence
  * failure stops later sends without rollback or automatic replay of already sent commands.
  * The refresh interval bounds detection delay; a distributed power operation is not atomic.
+ * The virtual target is announced before its command sequence starts. The ASCII
+ * zaberLowLevel consumer pauses communication for an Off target and suppresses expected
+ * transport failures while its observed state is still On; its power-off cleanup waits
+ * for observed Off. Send shutdown requests to the consumer's configured virtual channel:
+ * changing a physical source channel directly does not change the virtual target.
  *
  * \section virtualPDU_errors Configuration diagnostics
  * Startup rejects invalid configuration with a diagnostic identifying the failed condition

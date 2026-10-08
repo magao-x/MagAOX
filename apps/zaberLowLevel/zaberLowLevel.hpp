@@ -1,6 +1,5 @@
 /** \file zaberLowLevel.hpp
  * \brief The MagAO-X Low-Level Zaber Controller
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup zaberLowLevel_files
  */
@@ -13,7 +12,8 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
-typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; // This needs to be before zaberStage.hpp for logging to work.
+/// Application base used by the stage helper for diagnostic logging.
+typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; // Must precede zaberStage.hpp.
 
 #include "zaberUtils.hpp"
 #include "zaberStage.hpp"
@@ -45,13 +45,16 @@ namespace app
 /**
  * This app manages a daisy-chained ASCII Zaber bus and keeps its discovery,
  * recovery, and INDI reporting behavior aligned with the binary-protocol app.
+ * A known Off target pauses new communication while observed power may still be On.
+ * Transport failures are reported only when both observed and target power are On;
+ * cleanup and the shared power FSM still follow the observed state.
  *
  * \ingroup zaberLowLevel
  */
 class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
 {
 
-    // Give the test harness access.
+    /// Allow the existing controller test harness to inspect retained stage state.
     friend class zaberLowLevel_test;
 
   protected:
@@ -62,7 +65,7 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
     /// Number of configured stages.
     int m_numStages{ 0 };
 
-    /// Connected ASCII protocol port.
+    /// Owned ASCII port, reset on observed power-off or connection recovery.
     z_port m_port{ 0 };
 
     /// Stage helpers in configuration order.
@@ -82,10 +85,10 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
     ///@}
 
   public:
-    /// Default constructor.
+    /// Construct an ASCII controller with power management enabled.
     zaberLowLevel();
 
-    /// Destructor, declared and defined for noexcept.
+    /// Destroy controller state after application shutdown.
     ~zaberLowLevel() noexcept;
 
     /// Set up application configuration.
@@ -95,12 +98,17 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
     virtual void loadConfig();
 
     /// Connect to the ASCII-protocol stage chain and discover configured devices.
+    /** Known power-off returns ZC_NOT_CONNECTED without starting communication. In-flight failures retain their
+     * return codes without logging or entering ERROR when power is no longer expected On.
+     */
     int connect();
 
     /// Apply a parsed `system.serial` snapshot to the configured stages.
     int loadStages( std::string &serialRes /**< [in] the raw response to `/ get system.serial` */ );
 
     /// Refresh discovery on an already-connected ASCII bus.
+    /** Returns ZC_ERROR during known power-off without changing the FSM to ERROR.
+     */
     int refreshStageDiscovery();
 
     /// Reset the active ASCII connection bookkeeping.
@@ -112,7 +120,7 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
     /// Set up the INDI properties and restore retained stage state.
     virtual int appStartup();
 
-    /// Execute the main FSM for `zaberLowLevel`.
+    /// Execute the main FSM, deferring communication while observed or target power is explicitly Off.
     virtual int appLogic();
 
     /// Handle the transition into the powered-off state.
@@ -183,43 +191,43 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
      *
      * @{
      */
-    /// Request an absolute stage position.
+    /// Handle an absolute stage position.
     int newCallBack_m_indiP_tgt_pos( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Route the registered static callback to its application instance.
     static int st_newCallBack_m_indiP_tgt_pos( void *app, /**< [in] Application instance. */
                                    const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
-    /// Request homing of one stage.
+    /// Handle homing of one stage.
     int newCallBack_m_indiP_req_home( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Route the registered static callback to its application instance.
     static int st_newCallBack_m_indiP_req_home( void *app, /**< [in] Application instance. */
                                    const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
-    /// Request homing of all configured stages.
+    /// Handle homing of all configured stages.
     int newCallBack_m_indiP_req_home_all( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Route the registered static callback to its application instance.
     static int st_newCallBack_m_indiP_req_home_all( void *app, /**< [in] Application instance. */
                                    const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
-    /// Request a normal halt of one stage.
+    /// Handle a normal halt of one stage.
     int newCallBack_m_indiP_req_halt( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Route the registered static callback to its application instance.
     static int st_newCallBack_m_indiP_req_halt( void *app, /**< [in] Application instance. */
                                    const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
-    /// Request emergency halts without stopping for an individual stage failure.
+    /// Handle emergency halts without stopping for an individual stage failure.
     int newCallBack_m_indiP_req_ehalt( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Route the registered static callback to its application instance.
     static int st_newCallBack_m_indiP_req_ehalt( void *app, /**< [in] Application instance. */
                                    const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
-    /// Request a stage potentiometer setting.
+    /// Handle a stage potentiometer setting.
     int newCallBack_m_indiP_knob_enable( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Route the registered static callback to its application instance.
     static int st_newCallBack_m_indiP_knob_enable( void *app, /**< [in] Application instance. */
                                    const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
-    /// Request a stage LED setting.
+    /// Handle a stage LED setting.
     int newCallBack_m_indiP_led_enable( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
 
     /// Route the registered static callback to its application instance.

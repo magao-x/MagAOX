@@ -1,6 +1,5 @@
 /** \file zaberLowLevel_test.cpp
  * \brief Catch2 tests for the zaberLowLevel app.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup zaberLowLevel_files
  */
@@ -41,59 +40,68 @@ class zaberLowLevel_test : public zaberLowLevel
 {
   public:
     /// Construct a testable low-level controller instance.
-    zaberLowLevel_test( const std::string &device );
+    zaberLowLevel_test( const std::string &device /**< [in] Isolated test device name. */ );
 
     /// Set up a single staged snapshot and INDI transport for power-off tests.
-    int setupPowerOffSnapshot( const std::string &stageName, long rawPos, bool parked, long maxPos, time_t lastHomed );
+    int setupPowerOffSnapshot( const std::string &stageName, /**< [in] Retained stage name. */
+                               long rawPos, /**< [in] Retained raw position. */
+                               bool parked, /**< [in] Retained parked state. */
+                               long maxPos, /**< [in] Retained position limit. */
+                               time_t lastHomed /**< [in] Retained last-home time. */ );
 
     /// Configure a stage entry for discovery tests.
-    int addConfiguredStage( const std::string &stageName, const std::string &serial, int deviceAddress = -1 );
+    int addConfiguredStage( const std::string &stageName, /**< [in] Configured stage name. */
+                            const std::string &serial, /**< [in] Configured serial number. */
+                            int deviceAddress = -1 /**< [in] Cached address, or -1 if not discovered. */ );
 
     /// Load the parsed system-serial snapshot through the production discovery code.
-    int loadParsedStages( std::string serialResponse );
+    int loadParsedStages( std::string serialResponse /**< [in] Scripted system.serial reply. */ );
 
     /// Set the cached device address for a configured stage.
-    int setDeviceAddressFor( size_t stageIndex, int deviceAddress );
+    int setDeviceAddressFor( size_t stageIndex, /**< [in] Configured stage index. */
+                             int deviceAddress /**< [in] New cached address. */ );
 
     /// Get the cached device address for a configured stage.
-    int deviceAddressFor( size_t stageIndex );
+    int deviceAddressFor( size_t stageIndex /**< [in] Configured stage index. */ );
 
     /// Drive the recoverable error handler under test.
-    int recoverTransportError( bool devicePresent );
+    int recoverTransportError( bool devicePresent /**< [in] Whether the simulated USB tty is present. */ );
 
     /// Set the FSM state for recovery tests.
-    int setAppState( stateCodes::stateCodeT newState );
+    int setAppState( stateCodes::stateCodeT newState /**< [in] Test FSM state. */ );
 
     /// Get the FSM state for recovery tests.
     stateCodes::stateCodeT appState();
 
     /// Read the value of a text or number element from a test property.
-    std::string propertyValue( const pcf::IndiProperty &property, const std::string &element ) const;
+    std::string propertyValue( const pcf::IndiProperty &property, /**< [in] Test property to inspect. */
+                               const std::string &element /**< [in] Element whose stored value is requested. */ ) const;
 
     /// Get the current-position property value for a stage.
-    std::string currPosValue( const std::string &stageName ) const;
+    std::string currPosValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
     /// Get the target-position property value for a stage.
-    std::string tgtPosValue( const std::string &stageName ) const;
+    std::string tgtPosValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
     /// Get the parked-state property value for a stage.
-    std::string parkedValue( const std::string &stageName ) const;
+    std::string parkedValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
     /// Get the last-homed property value for a stage.
-    std::string lastHomedValue( const std::string &stageName ) const;
+    std::string lastHomedValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
     /// Get the max-position property value for a stage.
-    std::string maxPosValue( const std::string &stageName ) const;
+    std::string maxPosValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
     /// Get the current-state property value for a stage.
-    std::string currStateValue( const std::string &stageName ) const;
+    std::string currStateValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
-    /// Get the warning-switch property value for a stage.
-    pcf::IndiElement::SwitchStateType warnValue( const std::string &stageName ) const;
+    /// Get the typed warning-switch state for a stage.
+    pcf::IndiElement::SwitchStateType warnValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
     /// Invoke the power-off handling under test.
     int doOnPowerOff();
 
+    /// Delete the private FIFO driver and only this fixture's temporary files.
     ~zaberLowLevel_test() noexcept;
 
   private:
@@ -279,8 +287,15 @@ SCENARIO( "INDI Callbacks", "[zaberLowLevel]" )
     XWCTEST_INDI_NEW_CALLBACK( zaberLowLevel, led_enable );
 }
 
+/// Verify observed power-off preserves retained position/parked metadata while clearing warnings.
+/** \ingroup zaberLowLevel_unit_test */
 SCENARIO( "Power-off INDI snapshot retains stage state", "[zaberLowLevel]" )
 {
+    // clang-format off
+    #ifdef ZABERLOWLEVEL_TEST_DOXYGEN_REF
+    zaberLowLevel::appStartup(); zaberLowLevel::onPowerOff();
+    #endif
+    // clang-format on
     zaberLowLevel_test zllt( "zlltest" );
 
     REQUIRE( zllt.setupPowerOffSnapshot( "stageA", 12345, true, 54321, 77 ) == 0 );
@@ -326,6 +341,11 @@ SCENARIO( "Stage discovery resets stale device addresses", "[zaberLowLevel]" )
  */
 SCENARIO( "Stage discovery can find devices that appear later", "[zaberLowLevel]" )
 {
+    // clang-format off
+    #ifdef ZABERLOWLEVEL_TEST_DOXYGEN_REF
+    zaberLowLevel::loadStages();
+    #endif
+    // clang-format on
     zaberLowLevel_test zllt( "zlltest_rediscover" );
 
     REQUIRE( zllt.addConfiguredStage( "stagebs", "49820" ) == 0 );

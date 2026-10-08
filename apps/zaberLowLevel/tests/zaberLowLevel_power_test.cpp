@@ -62,9 +62,9 @@ int send( z_port port, /**< [in] Ignored scripted port marker. */
           const char *command, /**< [in] Actual ASCII command. */
           size_t length /**< [in] Command byte count. */ );
 
-/// Return a scripted error or timeout without reading a device.
+/// Return a queued reply, scripted error, or timeout without reading a device.
 int receive( z_port port, /**< [in] Ignored scripted port marker. */
-             char *buffer, /**< [out] Unused response buffer. */
+             char *buffer, /**< [out] Buffer receiving the queued reply. */
              int length /**< [in] Response buffer capacity. */ );
 
 bool fail( Operation operation )
@@ -159,7 +159,7 @@ struct PowerFixture : Controller<zaberLowLevel>
     /// Deliver a target-only Off update without changing the observed On state.
     void targetOff();
 
-    /// Invoke one of the seven real stage command callbacks.
+    /// Dispatch one of the seven commands through its actual registered callback.
     int command( unsigned operation /**< [in] Move, home, home-all, halt, emergency halt, knob, or LED index. */ );
 };
 
@@ -224,6 +224,7 @@ TEST_CASE( "Zaber waits for power-off without starting more communication", "[za
     #ifdef ZABERLOWLEVEL_TEST_DOXYGEN_REF
     zaberLowLevel::powerOffRequested(); zaberLowLevel::appLogic(); zaberLowLevel::connect();
     zaberLowLevel::refreshStageDiscovery(); zaberLowLevel::loadStages();
+    MagAOX::app::MagAOXApp<true>::setCallBack_m_indiP_powerChannel();
     #endif
     // clang-format on
     outletHarness::g_faults = {};
@@ -315,6 +316,10 @@ TEST_CASE( "Zaber parent commands preserve stage power-loss suppression", "[zabe
     zaberLowLevel::newCallBack_m_indiP_req_home_all(); zaberLowLevel::newCallBack_m_indiP_req_halt();
     zaberLowLevel::newCallBack_m_indiP_req_ehalt(); zaberLowLevel::newCallBack_m_indiP_knob_enable();
     zaberLowLevel::newCallBack_m_indiP_led_enable();
+    zaberLowLevel::st_newCallBack_m_indiP_tgt_pos(); zaberLowLevel::st_newCallBack_m_indiP_req_home();
+    zaberLowLevel::st_newCallBack_m_indiP_req_home_all(); zaberLowLevel::st_newCallBack_m_indiP_req_halt();
+    zaberLowLevel::st_newCallBack_m_indiP_req_ehalt(); zaberLowLevel::st_newCallBack_m_indiP_knob_enable();
+    zaberLowLevel::st_newCallBack_m_indiP_led_enable(); zaberStage<zaberLowLevel>::sendCommand();
     #endif
     // clang-format on
     for( unsigned operation = 0; operation < 7; ++operation )
