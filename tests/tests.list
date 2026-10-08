@@ -105,6 +105,7 @@
 ../apps/xt1121DCDU/tests/xt1121DCDU_test
 ../apps/zaberCtrl/tests/zaberCtrl_test
 ../apps/zaberLowLevel/tests/zaberLowLevel_test
+../apps/zaberLowLevel/tests/zaberLowLevel_power_test
 ../apps/zaberLowLevel/tests/zaberStage_test
 ../apps/zaberLowLevel/tests/zaberUtils_test
 

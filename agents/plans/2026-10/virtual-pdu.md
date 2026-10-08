@@ -363,6 +363,17 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 - The existing standalone Makefiles allow both cross-app version-header writer collisions and object compilation to race `magaox_git_version.h` generation under `-j4`. Regenerated the ignored header and used sequential, single-job (`-j1`) app builds for final validation. This diagnostics change does not alter the build scripts.
 - No shared-endpoint support or configuration acceptance rules are added. Workstation-only fixtures continue to use private local transports and hardware substitutes.
 
+## Zaber Power-Target Error Suppression (2026-10-08)
+
+- User approved adding the ASCII `zaberLowLevel` correction to this feature because combined virtual-PDU actions increase the interval between an Off target and observed Off state. Turning off the monitored `pdu2.stagezaber` first still produced communication errors, so the subscription mismatch does not explain this case.
+- Offline review reproduced a drain failure reporting an error and setting ERROR even with observed On and target Off already received. Discovery logged before its caller's power check; connection paths and parent command callbacks also reported expected failures, including failures whose stage helper had deliberately suppressed its own log.
+- Added two local predicates: explicit observed/target Off pauses new communication, while only a fully On observed/target pair treats a transport failure as unexpected. Existing conservative unknown-state error handling is retained, but an unknown initial target does not block initial connection. The shared MagAOXApp observed state, target, power FSM, and boot-delay semantics remain separate.
+- Connection, discovery, and polling stop starting work for an Off target. Failing drain/send/read/connect phases recheck power before logging or entering ERROR. Disconnect cleanup and missing-stage discovery diagnostics use the same expected-power policy. All seven stage command callbacks reject new requests during known power-off and avoid reporting a stage failure again when power is no longer expected On. Unexpected On/On failures retain their diagnostics, return codes, and recovery behavior.
+- Added `zaberLowLevel_power_test.cpp`, registered in `tests/tests.list`. It uses the existing captured-log/isolated-directory harness, real power callbacks and stage command methods, and scripted connect/disconnect/drain/send/receive functions. No fake can open or close a real serial descriptor. One-shot target-only Off callbacks are injected immediately before failures return, preserving observed On.
+- The new suite has six cases and 315 assertions, including dispatch through the actual registered callbacks, covering already-received Off, each connection/discovery transport failure phase, all seven parent command callbacks, cleanup, On/On controls, and initial unknown-target connection. The same suite against the pre-fix header fails five cases/33 assertions; the corrected suite passes all assertions. The existing Zaber controller (55 assertions/5 cases), stage helper (144/2), and parser (8/2) regressions pass, as does the virtual-PDU power callback regression (42/1). The standalone zaberLowLevel app builds with `-j1`. Final documentation/format results will be recorded below.
+- Existing Zaber controller regressions could not compile because two const harness methods called non-const production accessors. Corrected those harness qualifiers without changing production APIs. Its power-off snapshot fixture also called appStartup while still UNINITIALIZED; the fixture now initializes the FSM as the real framework does before startup. The snapshot assertion now uses the Switch-state accessor instead of comparing its stored numeric enum to Text Off, and the fixture creates its FSM property before attaching a driver. Existing harness definitions are moved below their declarations for the required full-file documentation pass. Shared version-header generation also requires sequential test builds, as with app builds.
+- This correction is scoped to ASCII Zaber reporting and command gating. The broader review's MagAOXApp power-field synchronization issue and reversed siglentSDG conditions are separate follow-ups. Installation configuration is not changed. Applications following a virtual power channel receive its early target when the request is sent to that virtual channel; changing an underlying physical channel directly does not change the virtual target.
+
 ## Affected Files
 
 - `.gitignore`
@@ -381,6 +392,9 @@ Comment: a vPDU powering another PDU is tricky, but is not envisioned.
 - `apps/virtualPDU/virtualPDU.hpp`
 - `apps/xt1121DCDU/tests/xt1121DCDU_test.cpp`
 - `apps/xt1121DCDU/xt1121DCDU.hpp`
+- `apps/zaberLowLevel/zaberLowLevel.hpp`
+- `apps/zaberLowLevel/tests/zaberLowLevel_power_test.cpp`
+- `apps/zaberLowLevel/tests/zaberLowLevel_test.cpp`
 - `gui/widgets/pwr/pwrChannel.hpp`
 - `gui/widgets/pwr/pwrDevice.hpp`
 - `gui/widgets/pwr/tests/pwr_test.cpp`

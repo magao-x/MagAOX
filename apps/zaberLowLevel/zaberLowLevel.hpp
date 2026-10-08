@@ -86,9 +86,7 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
     zaberLowLevel();
 
     /// Destructor, declared and defined for noexcept.
-    ~zaberLowLevel() noexcept
-    {
-    }
+    ~zaberLowLevel() noexcept;
 
     /// Set up application configuration.
     virtual void setupConfig();
@@ -127,6 +125,12 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
     virtual int appShutdown();
 
   protected:
+    /// Check whether observed or requested power is explicitly Off, so new communication should wait.
+    bool powerOffRequested();
+
+    /// Check whether both observed and requested power are On, so a communication failure is unexpected.
+    bool powerOnExpected();
+
     /** \name INDI Stage State - Data
      *
      * @{
@@ -179,13 +183,48 @@ class zaberLowLevel : public MagAOXAppT, public tty::usbDevice
      *
      * @{
      */
-    INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_tgt_pos );
-    INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_req_home );
-    INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_req_home_all );
-    INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_req_halt );
-    INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_req_ehalt );
-    INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_knob_enable );
-    INDI_NEWCALLBACK_DECL( zaberLowLevel, m_indiP_led_enable );
+    /// Request an absolute stage position.
+    int newCallBack_m_indiP_tgt_pos( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Route the registered static callback to its application instance.
+    static int st_newCallBack_m_indiP_tgt_pos( void *app, /**< [in] Application instance. */
+                                   const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+    /// Request homing of one stage.
+    int newCallBack_m_indiP_req_home( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Route the registered static callback to its application instance.
+    static int st_newCallBack_m_indiP_req_home( void *app, /**< [in] Application instance. */
+                                   const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+    /// Request homing of all configured stages.
+    int newCallBack_m_indiP_req_home_all( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Route the registered static callback to its application instance.
+    static int st_newCallBack_m_indiP_req_home_all( void *app, /**< [in] Application instance. */
+                                   const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+    /// Request a normal halt of one stage.
+    int newCallBack_m_indiP_req_halt( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Route the registered static callback to its application instance.
+    static int st_newCallBack_m_indiP_req_halt( void *app, /**< [in] Application instance. */
+                                   const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+    /// Request emergency halts without stopping for an individual stage failure.
+    int newCallBack_m_indiP_req_ehalt( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Route the registered static callback to its application instance.
+    static int st_newCallBack_m_indiP_req_ehalt( void *app, /**< [in] Application instance. */
+                                   const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+    /// Request a stage potentiometer setting.
+    int newCallBack_m_indiP_knob_enable( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Route the registered static callback to its application instance.
+    static int st_newCallBack_m_indiP_knob_enable( void *app, /**< [in] Application instance. */
+                                   const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+    /// Request a stage LED setting.
+    int newCallBack_m_indiP_led_enable( const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
+
+    /// Route the registered static callback to its application instance.
+    static int st_newCallBack_m_indiP_led_enable( void *app, /**< [in] Application instance. */
+                                   const pcf::IndiProperty &ipRecv /**< [in] Received command property. */ );
     ///@}
 };
 
@@ -194,6 +233,55 @@ zaberLowLevel::zaberLowLevel() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MOD
     m_powerMgtEnabled = true;
 
     return;
+}
+
+inline zaberLowLevel::~zaberLowLevel() noexcept
+{
+}
+
+inline int zaberLowLevel::st_newCallBack_m_indiP_tgt_pos( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<zaberLowLevel *>( app )->newCallBack_m_indiP_tgt_pos( ipRecv );
+}
+
+inline int zaberLowLevel::st_newCallBack_m_indiP_req_home( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<zaberLowLevel *>( app )->newCallBack_m_indiP_req_home( ipRecv );
+}
+
+inline int zaberLowLevel::st_newCallBack_m_indiP_req_home_all( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<zaberLowLevel *>( app )->newCallBack_m_indiP_req_home_all( ipRecv );
+}
+
+inline int zaberLowLevel::st_newCallBack_m_indiP_req_halt( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<zaberLowLevel *>( app )->newCallBack_m_indiP_req_halt( ipRecv );
+}
+
+inline int zaberLowLevel::st_newCallBack_m_indiP_req_ehalt( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<zaberLowLevel *>( app )->newCallBack_m_indiP_req_ehalt( ipRecv );
+}
+
+inline int zaberLowLevel::st_newCallBack_m_indiP_knob_enable( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<zaberLowLevel *>( app )->newCallBack_m_indiP_knob_enable( ipRecv );
+}
+
+inline int zaberLowLevel::st_newCallBack_m_indiP_led_enable( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<zaberLowLevel *>( app )->newCallBack_m_indiP_led_enable( ipRecv );
+}
+
+inline bool zaberLowLevel::powerOffRequested()
+{
+    return powerState() == 0 || powerStateTarget() == 0;
+}
+
+inline bool zaberLowLevel::powerOnExpected()
+{
+    return powerState() == 1 && powerStateTarget() == 1;
 }
 
 void zaberLowLevel::setupConfig()
@@ -246,10 +334,13 @@ void zaberLowLevel::loadConfig()
 
 int zaberLowLevel::connect()
 {
+    if( powerOffRequested() )
+        return ZC_NOT_CONNECTED;
+
     if( m_port > 0 )
     {
         int rv = za_disconnect( m_port );
-        if( rv < 0 )
+        if( rv < 0 && powerOnExpected() )
         {
             log<text_log>( "Error disconnecting from zaber system.", logPrio::LOG_ERROR );
         }
@@ -274,7 +365,7 @@ int zaberLowLevel::connect()
                 m_port = 0;
             }
 
-            if( !stateLogged() )
+            if( !stateLogged() && powerOnExpected() )
             {
                 log<software_error>( { "can not connect to zaber stage(s)" } );
             }
@@ -286,7 +377,8 @@ int zaberLowLevel::connect()
     if( m_port <= 0 )
     {
         // state(stateCodes::ERROR); //Should not get this here.  Probably means no device.
-        log<text_log>( "can not connect to zaber stage(s): no port", logPrio::LOG_WARNING );
+        if( powerOnExpected() )
+            log<text_log>( "can not connect to zaber stage(s): no port", logPrio::LOG_WARNING );
         return ZC_NOT_CONNECTED; // We aren't connected.
     }
 
@@ -294,6 +386,8 @@ int zaberLowLevel::connect()
 
     if( rv != Z_SUCCESS )
     {
+        if( !powerOnExpected() )
+            return ZC_ERROR;
         log<software_error>( { rv, "error from za_drain" } );
         state( stateCodes::ERROR );
         return ZC_ERROR;
@@ -307,6 +401,8 @@ int zaberLowLevel::connect()
 
     if( nwr == Z_ERROR_SYSTEM_ERROR )
     {
+        if( !powerOnExpected() )
+            return ZC_ERROR;
         log<text_log>( "Error sending renumber query to stages", logPrio::LOG_ERROR );
         state( stateCodes::ERROR );
         return ZC_ERROR;
@@ -317,6 +413,8 @@ int zaberLowLevel::connect()
 
     if( rv != Z_SUCCESS )
     {
+        if( !powerOnExpected() )
+            return ZC_ERROR;
         log<software_error>( { rv, "error from za_drain" } );
         state( stateCodes::ERROR );
         return ZC_ERROR;
@@ -328,6 +426,8 @@ int zaberLowLevel::connect()
 
     if( nwr == Z_ERROR_SYSTEM_ERROR )
     {
+        if( !powerOnExpected() )
+            return ZC_ERROR;
         log<text_log>( "Error sending system.serial query to stages", logPrio::LOG_ERROR );
         state( stateCodes::ERROR );
         return ZC_ERROR;
@@ -345,6 +445,8 @@ int zaberLowLevel::connect()
         }
         else if( nrd != Z_ERROR_TIMEOUT )
         {
+            if( !powerOnExpected() )
+                return ZC_ERROR;
             log<text_log>( "Error receiving from stages", logPrio::LOG_ERROR );
             state( stateCodes::ERROR );
             return ZC_ERROR;
@@ -373,6 +475,9 @@ int zaberLowLevel::connect()
 
 int zaberLowLevel::loadStages( std::string &serialRes )
 {
+    if( powerOffRequested() )
+        return ZC_ERROR;
+
     std::vector<int>         addresses;
     std::vector<std::string> serials;
     std::vector<int>         oldAddresses;
@@ -393,6 +498,8 @@ int zaberLowLevel::loadStages( std::string &serialRes )
 
     if( rv < 0 )
     {
+        if( !powerOnExpected() )
+            return ZC_ERROR;
         log<software_error>( { errno, rv, "error in parseSystemSerial" } );
         state( stateCodes::ERROR );
         return ZC_ERROR;
@@ -438,7 +545,7 @@ int zaberLowLevel::loadStages( std::string &serialRes )
         {
             if( m_stages[n].deviceAddress() < 1 )
             {
-                if( firstDiscoveryPass || n >= oldAddresses.size() || oldAddresses[n] > 0 )
+                if( powerOnExpected() && ( firstDiscoveryPass || n >= oldAddresses.size() || oldAddresses[n] > 0 ) )
                 {
                     log<text_log>( std::format( "stage {} with s/n {} not found in system.",
                                                 m_stages[n].name(),
@@ -457,6 +564,9 @@ int zaberLowLevel::loadStages( std::string &serialRes )
 
 int zaberLowLevel::refreshStageDiscovery()
 {
+    if( powerOffRequested() )
+        return ZC_ERROR;
+
     if( m_port <= 0 )
     {
         return ZC_NOT_CONNECTED;
@@ -466,6 +576,8 @@ int zaberLowLevel::refreshStageDiscovery()
 
     if( rv != Z_SUCCESS )
     {
+        if( !powerOnExpected() )
+            return ZC_ERROR;
         log<software_error>( { rv, "error from za_drain" } );
         state( stateCodes::ERROR );
         return ZC_ERROR;
@@ -477,6 +589,8 @@ int zaberLowLevel::refreshStageDiscovery()
 
     if( nwr == Z_ERROR_SYSTEM_ERROR )
     {
+        if( !powerOnExpected() )
+            return ZC_ERROR;
         log<text_log>( "Error sending system.serial query to stages", logPrio::LOG_ERROR );
         state( stateCodes::ERROR );
         return ZC_ERROR;
@@ -494,6 +608,8 @@ int zaberLowLevel::refreshStageDiscovery()
         }
         else if( nrd != Z_ERROR_TIMEOUT )
         {
+            if( !powerOnExpected() )
+                return ZC_ERROR;
             log<text_log>( "Error receiving from stages", logPrio::LOG_ERROR );
             state( stateCodes::ERROR );
             return ZC_ERROR;
@@ -513,7 +629,7 @@ int zaberLowLevel::resetConnection()
     if( m_port > 0 )
     {
         int rv = za_disconnect( m_port );
-        if( rv < 0 )
+        if( rv < 0 && powerOnExpected() )
         {
             log<text_log>( "Error disconnecting from zaber system.", logPrio::LOG_ERROR );
         }
@@ -676,6 +792,9 @@ int zaberLowLevel::appLogic()
         return -1;
     }
 
+    if( powerOffRequested() )
+        return 0;
+
     if( state() == stateCodes::POWERON )
     {
         for( size_t i = 0; i < m_stages.size(); ++i )
@@ -699,7 +818,7 @@ int zaberLowLevel::appLogic()
 
         if( rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES )
         {
-            if( powerState() != 1 || powerStateTarget() != 1 )
+            if( !powerOnExpected() )
             {
                 return 0; // means we're powering off
             }
@@ -799,7 +918,7 @@ int zaberLowLevel::appLogic()
             // First unpark if possible
             if( m_stages[i].unpark( m_port ) < 0 )
             {
-                if( powerState() != 1 || powerStateTarget() != 1 )
+                if( !powerOnExpected() )
                 {
                     return 0; // means we're powering off
                 }
@@ -812,7 +931,7 @@ int zaberLowLevel::appLogic()
             // Get warnings so first pass through has correct state for home/not-homed
             if( m_stages[i].getWarnings( m_port ) < 0 )
             {
-                if( powerState() != 1 || powerStateTarget() != 1 )
+                if( !powerOnExpected() )
                 {
                     return 0; // means we're powering off
                 }
@@ -851,7 +970,7 @@ int zaberLowLevel::appLogic()
 
             if( rv == ZC_ERROR )
             {
-                if( powerState() != 1 || powerStateTarget() != 1 )
+                if( !powerOnExpected() )
                 {
                     return 0; // means we're powering off
                 }
@@ -872,7 +991,7 @@ int zaberLowLevel::appLogic()
 
             if( m_stages[i].getKnob( m_port ) < 0 )
             {
-                if( powerState() != 1 || powerStateTarget() != 1 )
+                if( !powerOnExpected() )
                 {
                     return 0; // means we're powering off
                 }
@@ -887,7 +1006,7 @@ int zaberLowLevel::appLogic()
 
             if( m_stages[i].getLED( m_port ) < 0 )
             {
-                if( powerState() != 1 || powerStateTarget() != 1 )
+                if( !powerOnExpected() )
                 {
                     return 0; // means we're powering off
                 }
@@ -902,7 +1021,7 @@ int zaberLowLevel::appLogic()
 
             if( m_stages[i].getParked( m_port ) < 0 )
             {
-                if( powerState() != 1 || powerStateTarget() != 1 )
+                if( !powerOnExpected() )
                 {
                     return 0; // means we're powering off
                 }
@@ -917,7 +1036,7 @@ int zaberLowLevel::appLogic()
 
             if( m_stages[i].updatePos( m_port ) < 0 )
             {
-                if( powerState() != 1 || powerStateTarget() != 1 )
+                if( !powerOnExpected() )
                 {
                     return 0; // means we're powering off
                 }
@@ -961,7 +1080,7 @@ int zaberLowLevel::appLogic()
                     {
                         if( m_stages[i].park( m_port ) < 0 )
                         {
-                            if( powerState() != 1 || powerStateTarget() != 1 )
+                            if( !powerOnExpected() )
                             {
                                 return 0; // means we're powering off
                             }
@@ -1008,7 +1127,7 @@ int zaberLowLevel::appLogic()
 
             if( m_stages[i].updateTemp( m_port ) < 0 )
             {
-                if( powerState() != 1 || powerStateTarget() != 1 )
+                if( !powerOnExpected() )
                 {
                     return 0; // means we're powering off
                 }
@@ -1021,7 +1140,7 @@ int zaberLowLevel::appLogic()
 
             if( m_stages[i].getWarnings( m_port ) < 0 )
             {
-                if( powerState() != 1 || powerStateTarget() != 1 )
+                if( !powerOnExpected() )
                 {
                     return 0; // means we're powering off
                 }
@@ -1037,7 +1156,7 @@ int zaberLowLevel::appLogic()
         int rv = tty::usbDevice::getDeviceName();
         if( rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES )
         {
-            if( powerState() != 1 || powerStateTarget() != 1 )
+            if( !powerOnExpected() )
             {
                 return 0; // means we're powering off
             }
@@ -1052,7 +1171,7 @@ int zaberLowLevel::appLogic()
 
         if( rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES )
         {
-            if( powerState() != 1 || powerStateTarget() != 1 )
+            if( !powerOnExpected() )
             {
                 return 0; // means we're powering off
             }
@@ -1066,7 +1185,7 @@ int zaberLowLevel::appLogic()
             return recoverFromError( false );
         }
 
-        if( powerState() != 1 || powerStateTarget() != 1 )
+        if( !powerOnExpected() )
         {
             return 0; // means we're powering off
         }
@@ -1080,7 +1199,7 @@ int zaberLowLevel::appLogic()
         return recoverFromError( true );
     }
 
-    if( powerState() != 1 || powerStateTarget() != 1 )
+    if( !powerOnExpected() )
     {
         return 0; // means we're powering off
     }
@@ -1148,6 +1267,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_tgt_pos )( const pcf::IndiProperty
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_tgt_pos, ipRecv );
 
+    if( powerOffRequested() )
+        return -1;
+
     for( size_t n = 0; n < m_stages.size(); ++n )
     {
         if( ipRecv.find( m_stages[n].name() ) )
@@ -1165,6 +1287,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_tgt_pos )( const pcf::IndiProperty
 
                 if( m_stages[n].moveAbs( m_port, tgt ) < 0 )
                 {
+                    if( !powerOnExpected() )
+                        return -1;
+
                     return log<software_error, -1>( { "error from moveAbs for " + m_stages[n].name() } );
                 }
 
@@ -1181,6 +1306,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_tgt_pos )( const pcf::IndiProperty
 INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_home )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_req_home, ipRecv );
+
+    if( powerOffRequested() )
+        return -1;
 
     // Make sure only one request is sent to avoid racing
     size_t stageno = std::numeric_limits<size_t>::max();
@@ -1234,6 +1362,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_home )( const pcf::IndiPropert
 
     if( m_stages[stageno].home( m_port ) < 0 )
     {
+        if( !powerOnExpected() )
+            return -1;
+
         return log<software_error, -1>( std::format( "error from home for {}", m_stages[stageno].name() ) );
     }
 
@@ -1247,6 +1378,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_home )( const pcf::IndiPropert
 INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_home_all )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_req_home_all, ipRecv );
+
+    if( powerOffRequested() )
+        return -1;
 
     if( !ipRecv.find( "request" ) )
     {
@@ -1270,6 +1404,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_home_all )( const pcf::IndiPro
 
             if( m_stages[n].home( m_port ) < 0 )
             {
+                if( !powerOnExpected() )
+                    return -1;
+
                 return log<software_error, -1>( { "error from home for " + m_stages[n].name() } );
             }
 
@@ -1285,6 +1422,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_home_all )( const pcf::IndiPro
 INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_halt )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_req_halt, ipRecv );
+
+    if( powerOffRequested() )
+        return -1;
 
     // Make sure only one request is sent to avoid racing
     size_t stageno = std::numeric_limits<size_t>::max();
@@ -1329,6 +1469,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_halt )( const pcf::IndiPropert
 
     if( m_stages[stageno].stop( m_port ) < 0 )
     {
+        if( !powerOnExpected() )
+            return -1;
+
         return log<software_error, -1>( std::format( "error from stop for {}", m_stages[stageno].name() ) );
     }
 
@@ -1338,6 +1481,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_halt )( const pcf::IndiPropert
 INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_ehalt )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_req_ehalt, ipRecv );
+
+    if( powerOffRequested() )
+        return -1;
 
     // Here we accept multiple ehalts all at once just in case.  It's an emergency~
     // and we don't stop for errors
@@ -1358,7 +1504,7 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_ehalt )( const pcf::IndiProper
 
                 std::lock_guard<std::mutex> guard( m_indiMutex );
 
-                if( m_stages[n].estop( m_port ) < 0 )
+                if( m_stages[n].estop( m_port ) < 0 && powerOnExpected() )
                 {
                     log<software_error>( { "error from estop for " + m_stages[n].name() } );
                 }
@@ -1372,6 +1518,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_req_ehalt )( const pcf::IndiProper
 INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_knob_enable )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_knob_enable, ipRecv );
+
+    if( powerOffRequested() )
+        return -1;
 
     // Make sure only one request is sent to avoid racing
     size_t stageno = std::numeric_limits<size_t>::max();
@@ -1411,6 +1560,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_knob_enable )( const pcf::IndiProp
 
     if( m_stages[stageno].enableKnob( m_port, enable_knob ) < 0 )
     {
+        if( !powerOnExpected() )
+            return -1;
+
         return log<software_error, -1>( std::format( "error from enable knob for {}", m_stages[stageno].name() ) );
     }
 
@@ -1420,6 +1572,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_knob_enable )( const pcf::IndiProp
 INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_led_enable )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_led_enable, ipRecv );
+
+    if( powerOffRequested() )
+        return -1;
 
     // Make sure only one request is sent to avoid racing
     size_t stageno = std::numeric_limits<size_t>::max();
@@ -1459,6 +1614,9 @@ INDI_NEWCALLBACK_DEFN( zaberLowLevel, m_indiP_led_enable )( const pcf::IndiPrope
 
     if( m_stages[stageno].enableLED( m_port, enable_led ) < 0 )
     {
+        if( !powerOnExpected() )
+            return -1;
+
         return log<software_error, -1>( std::format( "error from enable led for {}", m_stages[stageno].name() ) );
     }
 
