@@ -32,15 +32,15 @@ struct telem_pdu : public flatbuffer_log
         messageT( float frequency /**< [in] line frequency in Hz */,
                   float voltage /**< [in] line voltage in V */,
                   float current /**< [in] total current in A */,
-                  bool valid /**< [in] whether this is a complete successful measurement */ );
+                  bool  valid /**< [in] whether this is a complete successful measurement */ );
     };
 
     /// Verify a serialized log payload.
     static bool verify( flatlogs::bufferPtrT &logBuff /**< [in] complete log buffer */,
-                        flatlogs::msgLenT len /**< [in] payload length */ );
+                        flatlogs::msgLenT     len /**< [in] payload length */ );
 
     /// Format a sample with units and validity for human-readable logs.
-    static std::string msgString( void *msgBuffer /**< [in] serialized payload */,
+    static std::string msgString( void             *msgBuffer /**< [in] serialized payload */,
                                   flatlogs::msgLenT len /**< [in] unused payload length */ );
 
     /// Get line frequency [Hz].
@@ -100,17 +100,33 @@ inline bool telem_pdu::valid( void *msgBuffer )
 inline logMetaDetail telem_pdu::getAccessor( const std::string &member )
 {
     if( member == "frequency" )
-        return { "PDU FREQUENCY", "line frequency [Hz]", logMeta::valTypes::Float,
-                 logMeta::metaTypes::State, reinterpret_cast<void *>( &frequency ), true };
+        return { "PDU FREQUENCY",
+                 "line frequency [Hz]",
+                 logMeta::valTypes::Float,
+                 logMeta::metaTypes::State,
+                 reinterpret_cast<void *>( &frequency ),
+                 true };
     if( member == "voltage" )
-        return { "PDU VOLTAGE", "line voltage [V]", logMeta::valTypes::Float,
-                 logMeta::metaTypes::State, reinterpret_cast<void *>( &voltage ), true };
+        return { "PDU VOLTAGE",
+                 "line voltage [V]",
+                 logMeta::valTypes::Float,
+                 logMeta::metaTypes::State,
+                 reinterpret_cast<void *>( &voltage ),
+                 true };
     if( member == "current" )
-        return { "PDU CURRENT", "total current [A]", logMeta::valTypes::Float,
-                 logMeta::metaTypes::State, reinterpret_cast<void *>( &current ), true };
+        return { "PDU CURRENT",
+                 "total current [A]",
+                 logMeta::valTypes::Float,
+                 logMeta::metaTypes::State,
+                 reinterpret_cast<void *>( &current ),
+                 true };
     if( member == "valid" )
-        return { "PDU VALID", "whether the complete electrical sample is valid", logMeta::valTypes::Bool,
-                 logMeta::metaTypes::State, reinterpret_cast<void *>( &valid ), true };
+        return { "PDU VALID",
+                 "whether the complete electrical sample is valid",
+                 logMeta::valTypes::Bool,
+                 logMeta::metaTypes::State,
+                 reinterpret_cast<void *>( &valid ),
+                 true };
     return {};
 }
 } // namespace logger

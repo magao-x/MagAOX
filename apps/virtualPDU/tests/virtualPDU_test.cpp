@@ -36,7 +36,7 @@ struct Fixture : Controller<virtualPDU>
     /// Expose stale limit configuration.
     using virtualPDU::m_staleTimeout;
     /// Fail the inherited all-outlet update only when selected.
-    bool m_failUpdate {false};
+    bool m_failUpdate{ false };
     /// Exercise normal updates unless their return needs fault injection.
     int updateOutletStates() override;
     /// Load the normal three-endpoint/two-channel example.
@@ -46,7 +46,8 @@ struct Fixture : Controller<virtualPDU>
 };
 int Fixture::updateOutletStates()
 {
-    if( m_failUpdate ) return -1;
+    if( m_failUpdate )
+        return -1;
     return dev::outletController<virtualPDU>::updateOutletStates();
 }
 void Fixture::configure()
@@ -60,11 +61,11 @@ void Fixture::configure()
 }
 void Fixture::observed()
 {
-    REQUIRE( setCallBack_source( property("ac","fsm","state","READY") ) == 0 );
-    REQUIRE( setCallBack_source( property("usb","fsm","state","READY") ) == 0 );
-    REQUIRE( setCallBack_source( property("ac","power","state","Off") ) == 0 );
-    REQUIRE( setCallBack_source( property("usb","power","state","Off") ) == 0 );
-    REQUIRE( setCallBack_source( property("ac","aux","state","Off") ) == 0 );
+    REQUIRE( setCallBack_source( property( "ac", "fsm", "state", "READY" ) ) == 0 );
+    REQUIRE( setCallBack_source( property( "usb", "fsm", "state", "READY" ) ) == 0 );
+    REQUIRE( setCallBack_source( property( "ac", "power", "state", "Off" ) ) == 0 );
+    REQUIRE( setCallBack_source( property( "usb", "power", "state", "Off" ) ) == 0 );
+    REQUIRE( setCallBack_source( property( "ac", "aux", "state", "Off" ) ) == 0 );
 }
 /// \endcond
 
@@ -84,8 +85,8 @@ TEST_CASE( "virtual PDU maps remote channels and publishes the standard interfac
     REQUIRE( app.state() == stateCodes::READY );
     REQUIRE( app.m_endpoints.size() == 3 );
     REQUIRE( app.m_sources.size() == 2 );
-    REQUIRE( app.channelOutlets("combined") == std::vector<size_t>{0,1} );
-    REQUIRE( app.channelOffOrder("combined") == std::vector<size_t>{1,0} );
+    REQUIRE( app.channelOutlets( "combined" ) == std::vector<size_t>{ 0, 1 } );
+    REQUIRE( app.channelOffOrder( "combined" ) == std::vector<size_t>{ 1, 0 } );
     REQUIRE( app.m_indiNewCallBacks.size() == 7 );
     REQUIRE( app.m_indiSetCallBacks.size() == 5 );
     REQUIRE( app.m_indiP_chOnDelays["combined"].get<int>() == 3 );
@@ -104,30 +105,45 @@ TEST_CASE( "virtual PDU rejects invalid mappings and channel sequences", "[virtu
     #endif
     // clang-format on
     const std::string endpoint = "[outlet1]\ndevice=ac\nchannel=power\n";
-    for( const auto &text : std::vector<std::string>{
-        "", "[device]\npollInterval=0\n", "[device]\nstaleTimeout=3\n",
-        "[outlet0]\ndevice=ac\nchannel=x\n", "[outletx]\ndevice=ac\nchannel=x\n",
-        "[outlet01]\ndevice=ac\nchannel=x\n", "[outlet2]\ndevice=ac\nchannel=x\n",
-        "[outlet1]\nchannel=x\n", "[outlet1]\ndevice=ac\n",
-        "[outlet1]\ndevice=test-pdu\nchannel=x\n", "[outlet1]\ndevice=ac\nchannel=fsm\n",
-        endpoint + "[outlet2]\ndevice=ac\nchannel=power\n[x]\noutlets=1,2\n",
-        endpoint + "[x]\noutlet=1\n[y]\noutlet=1\n",
-        endpoint + "[fsm]\noutlet=1\n", endpoint + "[x]\noutlets=0\n",
-        endpoint + "[x]\noutlets=2\n", endpoint + "[x]\noutlets=1,1\n",
-        endpoint + "[x]\noutlet=1\nonOrder=1\n", endpoint + "[x]\noutlet=1\noffOrder=1\n",
-        endpoint + "[x]\noutlet=1\nonDelays=0,2\n", endpoint + "[x]\noutlet=1\noffDelays=0,2\n",
-        endpoint + "[x]\noutlet=1\nonOrder=0,0\n", endpoint + "[x]\noutlet=1\noffOrder=0,0\n",
-        endpoint + "[x]\noutlet=1\nonOrder=bad\n", endpoint + "[x]\noutlet=1\nonDelays=-2\n",
-        endpoint + "[x]\noutlet=1\nonOrder= \n",
-        endpoint + "[x]\noutlet=1\nonOrder=0,,1\n", endpoint + "[x]\noutlet=1\nonDelays=0, ,1\n", endpoint + "[telem_rotate]\noutlet=1\n",
-        endpoint + "[x]\noutlet=2147483648\n", endpoint + "[x]\noutlet=1\nonDelays=4294967296\n",
-        endpoint + "[outlet2]\ndevice=ac\nchannel=aux\n[x]\noutlets=1,2\nonOrder=0,0\n" } )
+    for( const auto &text :
+         std::vector<std::string>{ "",
+                                   "[device]\npollInterval=0\n",
+                                   "[device]\nstaleTimeout=3\n",
+                                   "[outlet0]\ndevice=ac\nchannel=x\n",
+                                   "[outletx]\ndevice=ac\nchannel=x\n",
+                                   "[outlet01]\ndevice=ac\nchannel=x\n",
+                                   "[outlet2]\ndevice=ac\nchannel=x\n",
+                                   "[outlet1]\nchannel=x\n",
+                                   "[outlet1]\ndevice=ac\n",
+                                   "[outlet1]\ndevice=test-pdu\nchannel=x\n",
+                                   "[outlet1]\ndevice=ac\nchannel=fsm\n",
+                                   endpoint + "[outlet2]\ndevice=ac\nchannel=power\n[x]\noutlets=1,2\n",
+                                   endpoint + "[x]\noutlet=1\n[y]\noutlet=1\n",
+                                   endpoint + "[fsm]\noutlet=1\n",
+                                   endpoint + "[x]\noutlets=0\n",
+                                   endpoint + "[x]\noutlets=2\n",
+                                   endpoint + "[x]\noutlets=1,1\n",
+                                   endpoint + "[x]\noutlet=1\nonOrder=1\n",
+                                   endpoint + "[x]\noutlet=1\noffOrder=1\n",
+                                   endpoint + "[x]\noutlet=1\nonDelays=0,2\n",
+                                   endpoint + "[x]\noutlet=1\noffDelays=0,2\n",
+                                   endpoint + "[x]\noutlet=1\nonOrder=0,0\n",
+                                   endpoint + "[x]\noutlet=1\noffOrder=0,0\n",
+                                   endpoint + "[x]\noutlet=1\nonOrder=bad\n",
+                                   endpoint + "[x]\noutlet=1\nonDelays=-2\n",
+                                   endpoint + "[x]\noutlet=1\nonOrder= \n",
+                                   endpoint + "[x]\noutlet=1\nonOrder=0,,1\n",
+                                   endpoint + "[x]\noutlet=1\nonDelays=0, ,1\n",
+                                   endpoint + "[telem_rotate]\noutlet=1\n",
+                                   endpoint + "[x]\noutlet=2147483648\n",
+                                   endpoint + "[x]\noutlet=1\nonDelays=4294967296\n",
+                                   endpoint + "[outlet2]\ndevice=ac\nchannel=aux\n[x]\noutlets=1,2\nonOrder=0,0\n" } )
     {
         g_faults = {};
         Fixture app;
-        app.configText(text);
-        INFO(text);
-        REQUIRE( app.loadConfigImpl(app.config) < 0 );
+        app.configText( text );
+        INFO( text );
+        REQUIRE( app.loadConfigImpl( app.config ) < 0 );
     }
     g_faults = {};
     Fixture invalid;
@@ -146,38 +162,42 @@ TEST_CASE( "virtual PDU propagates lifecycle failures", "[virtualPDU]" )
     virtualPDU::setupConfig(); virtualPDU::loadConfigImpl(); virtualPDU::appStartup(); virtualPDU::appShutdown();
     #endif
     // clang-format on
-    g_faults={};
+    g_faults = {};
     {
         Fixture app;
-        app.configText("[outlet1]\ndevice=ac\nchannel=power\n[x]\noutlet=1\n");
-        REQUIRE(app.loadConfigImpl(app.config)==0);
-        REQUIRE(app.updateOutletState(0)==0);
-        REQUIRE(app.outletState(0)==OUTLET_STATE_UNKNOWN);
-        REQUIRE(app.turnOutletOn(0)<0);
-        REQUIRE(app.newCallBack_channels(property("test-pdu","x","target","On"))<0);
+        app.configText( "[outlet1]\ndevice=ac\nchannel=power\n[x]\noutlet=1\n" );
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        REQUIRE( app.updateOutletState( 0 ) == 0 );
+        REQUIRE( app.outletState( 0 ) == OUTLET_STATE_UNKNOWN );
+        REQUIRE( app.turnOutletOn( 0 ) < 0 );
+        REQUIRE( app.newCallBack_channels( property( "test-pdu", "x", "target", "On" ) ) < 0 );
     }
-    for( unsigned failure=1; failure<=8; ++failure )
+    for( unsigned failure = 1; failure <= 8; ++failure )
     {
         g_faults = {};
         Fixture app;
-        app.configText("[outlet1]\ndevice=ac\nchannel=power\n[x]\noutlet=1\n");
-        REQUIRE( app.loadConfigImpl(app.config) == 0 );
+        app.configText( "[outlet1]\ndevice=ac\nchannel=power\n[x]\noutlet=1\n" );
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
         g_faults.m_failRegistration = failure;
         REQUIRE( app.appStartup() < 0 );
     }
-    for( size_t call : {0,1,2,4} )
+    for( size_t call : { 0, 1, 2, 4 } )
     {
         g_faults = {};
         Fixture app;
         g_faults.m_telemResults[call] = -1;
-        app.configText("[outlet1]\ndevice=ac\nchannel=power\n[x]\noutlet=1\n");
-        if( call==0 ) REQUIRE(app.m_shutdown);
-        else if( call==1 ) REQUIRE(app.loadConfigImpl(app.config)<0);
+        app.configText( "[outlet1]\ndevice=ac\nchannel=power\n[x]\noutlet=1\n" );
+        if( call == 0 )
+            REQUIRE( app.m_shutdown );
+        else if( call == 1 )
+            REQUIRE( app.loadConfigImpl( app.config ) < 0 );
         else
         {
-            REQUIRE(app.loadConfigImpl(app.config)==0);
-            if(call==2) REQUIRE(app.appStartup()<0);
-            else REQUIRE(app.appShutdown()==0);
+            REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+            if( call == 2 )
+                REQUIRE( app.appStartup() < 0 );
+            else
+                REQUIRE( app.appShutdown() == 0 );
         }
     }
 }
@@ -196,42 +216,44 @@ TEST_CASE( "virtual PDU dispatches correct ordered INDI targets", "[virtualPDU]"
     app.configure();
     app.driver();
     app.observed();
-    auto started=std::chrono::steady_clock::now();
-    REQUIRE( app.newCallBack_channels(property("test-pdu","combined","target","on")) == 0 );
-    REQUIRE( std::chrono::steady_clock::now()-started >= std::chrono::milliseconds(3) );
+    auto started = std::chrono::steady_clock::now();
+    REQUIRE( app.newCallBack_channels( property( "test-pdu", "combined", "target", "on" ) ) == 0 );
+    REQUIRE( std::chrono::steady_clock::now() - started >= std::chrono::milliseconds( 3 ) );
     std::vector<pcf::IndiProperty> commands;
     for( auto &message : app.messages() )
-        if( message.getType()==pcf::IndiMessage::NewProperty ) commands.push_back(message.getProperty());
+        if( message.getType() == pcf::IndiMessage::NewProperty )
+            commands.push_back( message.getProperty() );
     REQUIRE( commands.size() == 2 );
     REQUIRE( commands[0].getDevice() == "ac" );
     REQUIRE( commands[1].getDevice() == "usb" );
     for( auto &command : commands )
     {
-        REQUIRE(command.getName()=="power");
-        REQUIRE(command.getType()==pcf::IndiProperty::Text);
-        REQUIRE(command.getNumElements()==1);
-        REQUIRE(command["target"].get<std::string>()=="On");
+        REQUIRE( command.getName() == "power" );
+        REQUIRE( command.getType() == pcf::IndiProperty::Text );
+        REQUIRE( command.getNumElements() == 1 );
+        REQUIRE( command["target"].get<std::string>() == "On" );
     }
-    REQUIRE( app.channelState("combined") == OUTLET_STATE_OFF );
-    REQUIRE( app.setCallBack_source(property("ac","power","state","On"))==0 );
-    REQUIRE( app.channelState("combined")==OUTLET_STATE_INTERMEDIATE );
-    REQUIRE( app.setCallBack_source(property("usb","power","state","On"))==0 );
-    REQUIRE( app.channelState("combined")==OUTLET_STATE_ON );
-    REQUIRE( app.newCallBack_channels(property("test-pdu","combined","state","off"))==0 );
+    REQUIRE( app.channelState( "combined" ) == OUTLET_STATE_OFF );
+    REQUIRE( app.setCallBack_source( property( "ac", "power", "state", "On" ) ) == 0 );
+    REQUIRE( app.channelState( "combined" ) == OUTLET_STATE_INTERMEDIATE );
+    REQUIRE( app.setCallBack_source( property( "usb", "power", "state", "On" ) ) == 0 );
+    REQUIRE( app.channelState( "combined" ) == OUTLET_STATE_ON );
+    REQUIRE( app.newCallBack_channels( property( "test-pdu", "combined", "state", "off" ) ) == 0 );
     commands.clear();
     for( auto &message : app.messages() )
-        if(message.getType()==pcf::IndiMessage::NewProperty) commands.push_back(message.getProperty());
-    REQUIRE(commands.size()==2);
-    REQUIRE(commands[0].getDevice()=="usb");
-    REQUIRE(commands[1].getDevice()=="ac");
-    REQUIRE(commands[0]["target"].get<std::string>()=="Off");
-    REQUIRE(app.channelState("combined")==OUTLET_STATE_ON);
-    REQUIRE(app.newCallBack_channels(property("test-pdu","combined","target","On"))==0);
-    REQUIRE(g_faults.m_sends==4); // Already observed On: no further dispatch.
-    REQUIRE(app.newCallBack_channels(property("other","combined","target","Off"))<0);
-    REQUIRE(app.newCallBack_channels(property("test-pdu","absent","target","Off"))<0);
-    app.state(stateCodes::NOTCONNECTED);
-    REQUIRE(app.newCallBack_channels(property("test-pdu","combined","target","Off"))<0);
+        if( message.getType() == pcf::IndiMessage::NewProperty )
+            commands.push_back( message.getProperty() );
+    REQUIRE( commands.size() == 2 );
+    REQUIRE( commands[0].getDevice() == "usb" );
+    REQUIRE( commands[1].getDevice() == "ac" );
+    REQUIRE( commands[0]["target"].get<std::string>() == "Off" );
+    REQUIRE( app.channelState( "combined" ) == OUTLET_STATE_ON );
+    REQUIRE( app.newCallBack_channels( property( "test-pdu", "combined", "target", "On" ) ) == 0 );
+    REQUIRE( g_faults.m_sends == 4 ); // Already observed On: no further dispatch.
+    REQUIRE( app.newCallBack_channels( property( "other", "combined", "target", "Off" ) ) < 0 );
+    REQUIRE( app.newCallBack_channels( property( "test-pdu", "absent", "target", "Off" ) ) < 0 );
+    app.state( stateCodes::NOTCONNECTED );
+    REQUIRE( app.newCallBack_channels( property( "test-pdu", "combined", "target", "Off" ) ) < 0 );
 }
 
 /// Stop dispatch on send errors without rollback, and block only unavailable channels.
@@ -243,31 +265,35 @@ TEST_CASE( "virtual PDU handles partial dispatch and per-channel source loss", "
     virtualPDU::available(); virtualPDU::sendOutlet(); virtualPDU::newCallBack_channels(); virtualPDU::updateOutletState();
     #endif
     // clang-format on
-    for(unsigned failure : {1,2})
+    for( unsigned failure : { 1, 2 } )
     {
-        g_faults={};
+        g_faults = {};
         Fixture app;
-        app.configure(); app.driver(); app.observed();
-        g_faults.m_failSend=failure;
-        REQUIRE(app.newCallBack_channels(property("test-pdu","combined","target","On"))<0);
-        REQUIRE(g_faults.m_sends==failure);
-        REQUIRE(app.channelState("combined")==OUTLET_STATE_OFF);
+        app.configure();
+        app.driver();
+        app.observed();
+        g_faults.m_failSend = failure;
+        REQUIRE( app.newCallBack_channels( property( "test-pdu", "combined", "target", "On" ) ) < 0 );
+        REQUIRE( g_faults.m_sends == failure );
+        REQUIRE( app.channelState( "combined" ) == OUTLET_STATE_OFF );
     }
-    g_faults={};
+    g_faults = {};
     Fixture app;
-    app.configure(); app.driver(); app.observed();
-    REQUIRE(app.setCallBack_source(property("usb","fsm","state","NOTCONNECTED"))==0);
-    REQUIRE(app.channelState("combined")==OUTLET_STATE_INTERMEDIATE);
-    REQUIRE(app.newCallBack_channels(property("test-pdu","combined","target","On"))<0);
-    REQUIRE(g_faults.m_sends==0);
-    REQUIRE(app.newCallBack_channels(property("test-pdu","independent","target","On"))==0);
-    REQUIRE(g_faults.m_sends==1);
-    REQUIRE(app.state()==stateCodes::READY);
-    REQUIRE(app.turnOutletOn(-1)<0);
-    REQUIRE(app.turnOutletOff(3)<0);
-    REQUIRE(app.updateOutletState(-1)<0);
-    REQUIRE(app.updateOutletState(3)<0);
-    REQUIRE(app.turnOutletOn(1)<0);
+    app.configure();
+    app.driver();
+    app.observed();
+    REQUIRE( app.setCallBack_source( property( "usb", "fsm", "state", "NOTCONNECTED" ) ) == 0 );
+    REQUIRE( app.channelState( "combined" ) == OUTLET_STATE_INTERMEDIATE );
+    REQUIRE( app.newCallBack_channels( property( "test-pdu", "combined", "target", "On" ) ) < 0 );
+    REQUIRE( g_faults.m_sends == 0 );
+    REQUIRE( app.newCallBack_channels( property( "test-pdu", "independent", "target", "On" ) ) == 0 );
+    REQUIRE( g_faults.m_sends == 1 );
+    REQUIRE( app.state() == stateCodes::READY );
+    REQUIRE( app.turnOutletOn( -1 ) < 0 );
+    REQUIRE( app.turnOutletOff( 3 ) < 0 );
+    REQUIRE( app.updateOutletState( -1 ) < 0 );
+    REQUIRE( app.updateOutletState( 3 ) < 0 );
+    REQUIRE( app.turnOutletOn( 1 ) < 0 );
 }
 
 /// Merge only valid observed state elements and recover after fresh FSM/channel reports.
@@ -279,53 +305,58 @@ TEST_CASE( "virtual PDU distinguishes observed state from targets and stale repo
     virtualPDU::st_setCallBack_source(); virtualPDU::setCallBack_source(); virtualPDU::appLogic();
     #endif
     // clang-format on
-    g_faults={};
+    g_faults = {};
     Fixture app;
-    app.configure(); app.driver(); app.observed();
-    REQUIRE(virtualPDU::st_setCallBack_source(&app, property("ac","power","target","On"))==0);
-    REQUIRE(app.outletState(0)==OUTLET_STATE_OFF);
-    REQUIRE(app.setCallBack_source(property("other","power","state","On"))<0);
-    REQUIRE(app.setCallBack_source(property("other","fsm","state","READY"))<0);
-    REQUIRE(app.setCallBack_source(property("ac","fsm","target","READY"))<0);
-    pcf::IndiProperty wrong(pcf::IndiProperty::Number,"ac","fsm"); wrong.add(pcf::IndiElement("state","READY"));
-    REQUIRE(app.setCallBack_source(wrong)<0);
+    app.configure();
+    app.driver();
     app.observed();
-    for(auto value : {"Int","Unk","garbage"})
+    REQUIRE( virtualPDU::st_setCallBack_source( &app, property( "ac", "power", "target", "On" ) ) == 0 );
+    REQUIRE( app.outletState( 0 ) == OUTLET_STATE_OFF );
+    REQUIRE( app.setCallBack_source( property( "other", "power", "state", "On" ) ) < 0 );
+    REQUIRE( app.setCallBack_source( property( "other", "fsm", "state", "READY" ) ) < 0 );
+    REQUIRE( app.setCallBack_source( property( "ac", "fsm", "target", "READY" ) ) < 0 );
+    pcf::IndiProperty wrong( pcf::IndiProperty::Number, "ac", "fsm" );
+    wrong.add( pcf::IndiElement( "state", "READY" ) );
+    REQUIRE( app.setCallBack_source( wrong ) < 0 );
+    app.observed();
+    for( auto value : { "Int", "Unk", "garbage" } )
     {
-        REQUIRE(app.setCallBack_source(property("ac","power","state",value))==0);
-        REQUIRE(app.outletState(0)==(std::string(value)=="Int" ? OUTLET_STATE_INTERMEDIATE : OUTLET_STATE_UNKNOWN));
+        REQUIRE( app.setCallBack_source( property( "ac", "power", "state", value ) ) == 0 );
+        REQUIRE( app.outletState( 0 ) ==
+                 ( std::string( value ) == "Int" ? OUTLET_STATE_INTERMEDIATE : OUTLET_STATE_UNKNOWN ) );
     }
-    REQUIRE(app.setCallBack_source(property("ac","power","state","Unk"))==0);
-    REQUIRE(app.turnOutletOn(0)==0);
-    REQUIRE(app.outletState(0)==OUTLET_STATE_UNKNOWN);
-    REQUIRE(app.setCallBack_source(property("ac","power","state","garbage"))==0);
-    REQUIRE(app.turnOutletOn(0)<0);
-    wrong=pcf::IndiProperty(pcf::IndiProperty::Number,"ac","power"); wrong.add(pcf::IndiElement("state","On"));
-    REQUIRE(app.setCallBack_source(wrong)==0);
-    REQUIRE(app.outletState(0)==OUTLET_STATE_UNKNOWN);
-    wrong=pcf::IndiProperty(pcf::IndiProperty::Number,"ac","power");
-    wrong.add(pcf::IndiElement("target",1));
-    REQUIRE(app.setCallBack_source(wrong)==0);
-    REQUIRE(app.outletState(0)==OUTLET_STATE_UNKNOWN);
+    REQUIRE( app.setCallBack_source( property( "ac", "power", "state", "Unk" ) ) == 0 );
+    REQUIRE( app.turnOutletOn( 0 ) == 0 );
+    REQUIRE( app.outletState( 0 ) == OUTLET_STATE_UNKNOWN );
+    REQUIRE( app.setCallBack_source( property( "ac", "power", "state", "garbage" ) ) == 0 );
+    REQUIRE( app.turnOutletOn( 0 ) < 0 );
+    wrong = pcf::IndiProperty( pcf::IndiProperty::Number, "ac", "power" );
+    wrong.add( pcf::IndiElement( "state", "On" ) );
+    REQUIRE( app.setCallBack_source( wrong ) == 0 );
+    REQUIRE( app.outletState( 0 ) == OUTLET_STATE_UNKNOWN );
+    wrong = pcf::IndiProperty( pcf::IndiProperty::Number, "ac", "power" );
+    wrong.add( pcf::IndiElement( "target", 1 ) );
+    REQUIRE( app.setCallBack_source( wrong ) == 0 );
+    REQUIRE( app.outletState( 0 ) == OUTLET_STATE_UNKNOWN );
     app.observed();
-    app.m_endpoints[0].m_received -= std::chrono::seconds(20);
-    REQUIRE(app.appLogic()==0);
-    REQUIRE(app.outletState(0)==OUTLET_STATE_UNKNOWN);
-    REQUIRE(app.outletState(1)==OUTLET_STATE_OFF);
-    REQUIRE(app.setCallBack_source(property("ac","power","target","Off"))==0);
-    REQUIRE(app.outletState(0)==OUTLET_STATE_UNKNOWN);
-    REQUIRE(app.setCallBack_source(property("ac","power","state","Off"))==0);
-    REQUIRE(app.outletState(0)==OUTLET_STATE_OFF);
-    app.m_sources[0].m_received -= std::chrono::seconds(20);
-    REQUIRE(app.appLogic()==0);
-    REQUIRE(app.outletState(0)==OUTLET_STATE_UNKNOWN);
-    REQUIRE(app.outletState(2)==OUTLET_STATE_UNKNOWN);
-    REQUIRE(app.setCallBack_source(property("ac","fsm","state","READY"))==0);
-    REQUIRE(app.appLogic()==0);
-    REQUIRE(app.outletState(0)==OUTLET_STATE_OFF);
-    app.m_lastPoll-=std::chrono::seconds(10);
-    REQUIRE(app.appLogic()==0);
-    REQUIRE(!app.messages().empty());
+    app.m_endpoints[0].m_received -= std::chrono::seconds( 20 );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.outletState( 0 ) == OUTLET_STATE_UNKNOWN );
+    REQUIRE( app.outletState( 1 ) == OUTLET_STATE_OFF );
+    REQUIRE( app.setCallBack_source( property( "ac", "power", "target", "Off" ) ) == 0 );
+    REQUIRE( app.outletState( 0 ) == OUTLET_STATE_UNKNOWN );
+    REQUIRE( app.setCallBack_source( property( "ac", "power", "state", "Off" ) ) == 0 );
+    REQUIRE( app.outletState( 0 ) == OUTLET_STATE_OFF );
+    app.m_sources[0].m_received -= std::chrono::seconds( 20 );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.outletState( 0 ) == OUTLET_STATE_UNKNOWN );
+    REQUIRE( app.outletState( 2 ) == OUTLET_STATE_UNKNOWN );
+    REQUIRE( app.setCallBack_source( property( "ac", "fsm", "state", "READY" ) ) == 0 );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.outletState( 0 ) == OUTLET_STATE_OFF );
+    app.m_lastPoll -= std::chrono::seconds( 10 );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( !app.messages().empty() );
 }
 
 /// Record initial/change/forced observations and propagate scheduling/update failures.
@@ -337,75 +368,89 @@ TEST_CASE( "virtual PDU telemetry tracks observations independently of commands"
     virtualPDU::appLogic(); virtualPDU::checkRecordTimes(); virtualPDU::recordTelem(); virtualPDU::loadConfig();
     #endif
     // clang-format on
-    g_faults={};
+    g_faults = {};
     Fixture app;
     app.configure();
-    REQUIRE(!app.m_shutdown);
-    REQUIRE(app.appLogic()==0);
-    REQUIRE(g_faults.m_records.size()==1);
-    REQUIRE(app.appLogic()==0);
-    REQUIRE(g_faults.m_records.size()==1);
-    g_faults.m_due=true;
-    REQUIRE(app.appLogic()==0);
-    REQUIRE(g_faults.m_records.size()==2);
-    g_faults.m_due=false;
+    REQUIRE( !app.m_shutdown );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( g_faults.m_records.size() == 1 );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( g_faults.m_records.size() == 1 );
+    g_faults.m_due = true;
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( g_faults.m_records.size() == 2 );
+    g_faults.m_due = false;
     app.observed();
-    REQUIRE(app.appLogic()==0);
-    auto &record=g_faults.m_records.back();
-    REQUIRE(record.m_code==MagAOX::logger::telem_outlet::eventCode);
-    REQUIRE(MagAOX::logger::telem_outlet::states(record.m_payload.data())==std::vector<int8_t>{0,0,0});
-    g_faults.m_recordResult=-1;
-    REQUIRE(app.setCallBack_source(property("ac","power","state","On"))<0);
-    REQUIRE(app.recordTelem(static_cast<const MagAOX::logger::telem_outlet *>(nullptr))<0);
-    app.m_outletTelemRecorded=false;
-    REQUIRE(app.appLogic()<0);
-    g_faults.m_recordResult=0;
-    g_faults.m_telemResults[3]=-1;
-    REQUIRE(app.appLogic()<0);
-    g_faults.m_telemResults[3]=0;
-    app.m_failUpdate=true;
-    REQUIRE(app.appLogic()<0);
-    app.m_failUpdate=false;
-    contended(app.m_indiMutex,[&] {REQUIRE(app.appLogic()==0);});
-    REQUIRE(app.appShutdown()==0);
+    REQUIRE( app.appLogic() == 0 );
+    auto &record = g_faults.m_records.back();
+    REQUIRE( record.m_code == MagAOX::logger::telem_outlet::eventCode );
+    REQUIRE( MagAOX::logger::telem_outlet::states( record.m_payload.data() ) == std::vector<int8_t>{ 0, 0, 0 } );
+    g_faults.m_recordResult = -1;
+    REQUIRE( app.setCallBack_source( property( "ac", "power", "state", "On" ) ) < 0 );
+    REQUIRE( app.recordTelem( static_cast<const MagAOX::logger::telem_outlet *>( nullptr ) ) < 0 );
+    app.m_outletTelemRecorded = false;
+    REQUIRE( app.appLogic() < 0 );
+    g_faults.m_recordResult    = 0;
+    g_faults.m_telemResults[3] = -1;
+    REQUIRE( app.appLogic() < 0 );
+    g_faults.m_telemResults[3] = 0;
+    app.m_failUpdate           = true;
+    REQUIRE( app.appLogic() < 0 );
+    app.m_failUpdate = false;
+    contended( app.m_indiMutex, [&] { REQUIRE( app.appLogic() == 0 ); } );
+    REQUIRE( app.appShutdown() == 0 );
 }
 /// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 struct PowerConsumer : outletTestApp<false>
+{
+    /// Enable the real power-monitoring callback on a sequential offline consumer.
+    PowerConsumer();
+    /// No process setup is needed for an isolated callback consumer.
+    void setupConfig() override
     {
-        /// Enable the real power-monitoring callback on a sequential offline consumer.
-        PowerConsumer();
-        /// No process setup is needed for an isolated callback consumer.
-        void setupConfig() override {}
-        /// No configuration is loaded for an isolated callback consumer.
-        void loadConfig() override {}
-        /// Keep the fixture lifecycle offline.
-        int appStartup() override { return 0; }
-        /// Keep the fixture lifecycle offline.
-        int appLogic() override { return 0; }
-        /// Keep the fixture lifecycle offline.
-        int appShutdown() override { return 0; }
-    };
+    }
+    /// No configuration is loaded for an isolated callback consumer.
+    void loadConfig() override
+    {
+    }
+    /// Keep the fixture lifecycle offline.
+    int appStartup() override
+    {
+        return 0;
+    }
+    /// Keep the fixture lifecycle offline.
+    int appLogic() override
+    {
+        return 0;
+    }
+    /// Keep the fixture lifecycle offline.
+    int appShutdown() override
+    {
+        return 0;
+    }
+};
 PowerConsumer::PowerConsumer() : outletTestApp( "test", false )
 {
-    m_powerMgtEnabled=true;
+    m_powerMgtEnabled = true;
 }
 /// \endcond
 
 /// Verify that a fresh app records its initial snapshot even if a previous instance recorded identical states.
 /** \ingroup virtualPDU_unit_test */
-TEST_CASE("Virtual PDU telemetry suppression belongs to each app instance", "[virtualPDU]")
+TEST_CASE( "Virtual PDU telemetry suppression belongs to each app instance", "[virtualPDU]" )
 {
     // clang-format off
     #ifdef VIRTUALPDU_TEST_DOXYGEN_REF
     virtualPDU::appLogic(); virtualPDU::recordTelem();
     #endif
     // clang-format on
-    g_faults={};
-    for(int instance=0;instance<2;++instance)
+    g_faults = {};
+    for( int instance = 0; instance < 2; ++instance )
     {
-        Fixture app; app.configure();
-        REQUIRE(app.appLogic()==0);
-        REQUIRE(g_faults.m_records.size()==static_cast<size_t>(instance+1));
+        Fixture app;
+        app.configure();
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( g_faults.m_records.size() == static_cast<size_t>( instance + 1 ) );
     }
 }
 
@@ -419,26 +464,29 @@ TEST_CASE( "Virtual PDU properties drive the real MagAOXApp power callback", "[v
     MagAOX::app::MagAOXApp<false>::setCallBack_m_indiP_powerChannel();
     #endif
     // clang-format on
-    g_faults={};
+    g_faults = {};
     std::vector<pcf::IndiProperty> snapshots;
     {
-        Fixture app; app.configure(); app.driver(); app.observed();
+        Fixture app;
+        app.configure();
+        app.driver();
+        app.observed();
         for( auto value : { "On", "Off", "Int", "Unk" } )
         {
-            REQUIRE( app.setCallBack_source(property("ac","power","state",value))==0 );
-            REQUIRE( app.setCallBack_source(property("usb","power","state",value))==0 );
-            if( std::string(value)=="On" || std::string(value)=="Off" )
-                REQUIRE( app.newCallBack_channels(property("test-pdu","combined","target",value))==0 );
-            REQUIRE( app.updateINDI()==0 );
+            REQUIRE( app.setCallBack_source( property( "ac", "power", "state", value ) ) == 0 );
+            REQUIRE( app.setCallBack_source( property( "usb", "power", "state", value ) ) == 0 );
+            if( std::string( value ) == "On" || std::string( value ) == "Off" )
+                REQUIRE( app.newCallBack_channels( property( "test-pdu", "combined", "target", value ) ) == 0 );
+            REQUIRE( app.updateINDI() == 0 );
             snapshots.push_back( app.m_channels["combined"].m_indiP_prop );
         }
     }
     PowerConsumer consumer;
-    for( size_t index=0; index<snapshots.size(); ++index )
+    for( size_t index = 0; index < snapshots.size(); ++index )
     {
-        REQUIRE( consumer.setCallBack_m_indiP_powerChannel(snapshots[index])==0 );
-        REQUIRE( consumer.powerState()==(index==0 ? 1 : index==1 ? 0 : -1) );
-        REQUIRE( consumer.powerStateTarget()==(index==0 ? 1 : 0) );
+        REQUIRE( consumer.setCallBack_m_indiP_powerChannel( snapshots[index] ) == 0 );
+        REQUIRE( consumer.powerState() == ( index == 0 ? 1 : index == 1 ? 0 : -1 ) );
+        REQUIRE( consumer.powerStateTarget() == ( index == 0 ? 1 : 0 ) );
     }
 }
 } // namespace virtualPDUTest

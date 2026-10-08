@@ -34,7 +34,7 @@ namespace app
  */
 class virtualPDU : public MagAOXApp<>, public dev::outletController<virtualPDU>, public dev::telemeter<virtualPDU>
 {
-protected:
+  protected:
     /// Give the single telemetry helper access to application state.
     friend class dev::telemeter<virtualPDU>;
 
@@ -50,10 +50,10 @@ protected:
     /** \name Configurable Parameters - Data
      * @{ */
     /// Seconds between explicit source channel/FSM refreshes.
-    double m_pollInterval {5};
+    double m_pollInterval{ 5 };
 
     /// Maximum seconds without a valid source observation.
-    double m_staleTimeout {15};
+    double m_staleTimeout{ 15 };
     ///@}
 
     /// One observed remote channel backing a virtual outlet.
@@ -69,16 +69,16 @@ protected:
         pcf::IndiProperty m_property;
 
         /// Index of the unique source-device FSM subscription.
-        size_t m_source {0};
+        size_t m_source{ 0 };
 
         /// Last received observed state, never inferred from a command or target.
-        int m_state {OUTLET_STATE_UNKNOWN};
+        int m_state{ OUTLET_STATE_UNKNOWN };
 
         /// Whether an actual state element has been received since invalidation.
-        bool m_haveState {false};
+        bool m_haveState{ false };
 
         /// Monotonic receipt time of the last valid state element.
-        clockT::time_point m_received {};
+        clockT::time_point m_received{};
     };
 
     /// Readiness observation shared by all endpoints on one remote device.
@@ -88,10 +88,10 @@ protected:
         pcf::IndiProperty m_property;
 
         /// Whether the last received FSM state was READY.
-        bool m_ready {false};
+        bool m_ready{ false };
 
         /// Monotonic receipt time of the last valid FSM state.
-        clockT::time_point m_received {};
+        clockT::time_point m_received{};
     };
 
     /// One endpoint per contiguous one-based configuration outlet, immutable after startup.
@@ -101,9 +101,9 @@ protected:
     std::vector<source> m_sources;
 
     /// Last explicit subscription refresh time.
-    clockT::time_point m_lastPoll {};
+    clockT::time_point m_lastPoll{};
 
-public:
+  public:
     /// Construct a service whose own power management is disabled.
     virtualPDU();
 
@@ -141,7 +141,7 @@ public:
     int newCallBack_channels( const pcf::IndiProperty &ipRecv /**< [in] virtual channel command */ );
 
     /// Route a received source Def/Set through the application instance.
-    static int st_setCallBack_source( void *app /**< [in] application instance */,
+    static int st_setCallBack_source( void                    *app /**< [in] application instance */,
                                       const pcf::IndiProperty &ipRecv /**< [in] source property */ );
 
     /// Merge source observations; partial/target-only updates do not invent observed state.
@@ -153,19 +153,19 @@ public:
     /// Force an observed outlet telemetry record.
     int recordTelem( const telem_outlet *type /**< [in] unused type selector */ );
 
-protected:
+  protected:
     /// Test endpoint availability from valid state/FSM observations and their receipt times.
-    bool available( size_t index /**< [in] zero-based endpoint index */,
+    bool available( size_t             index /**< [in] zero-based endpoint index */,
                     clockT::time_point now /**< [in] current monotonic time */ ) const;
 
     /// Send a minimal Text target command to an available endpoint.
-    int sendOutlet( int outletNum /**< [in] zero-based endpoint index */,
+    int sendOutlet( int                outletNum /**< [in] zero-based endpoint index */,
                     const std::string &target /**< [in] On or Off */ );
 };
 
 inline virtualPDU::virtualPDU() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
-    m_firstOne = true;
+    m_firstOne        = true;
     m_powerMgtEnabled = false;
 }
 
@@ -175,10 +175,24 @@ inline virtualPDU::~virtualPDU() noexcept
 
 inline void virtualPDU::setupConfig()
 {
-    config.add( "device.pollInterval", "", "device.pollInterval", argType::Required, "device", "pollInterval", false,
-                "double", "Seconds between source refreshes (default 5)." );
-    config.add( "device.staleTimeout", "", "device.staleTimeout", argType::Required, "device", "staleTimeout", false,
-                "double", "Seconds without a valid source observation before invalidation (default 15)." );
+    config.add( "device.pollInterval",
+                "",
+                "device.pollInterval",
+                argType::Required,
+                "device",
+                "pollInterval",
+                false,
+                "double",
+                "Seconds between source refreshes (default 5)." );
+    config.add( "device.staleTimeout",
+                "",
+                "device.staleTimeout",
+                argType::Required,
+                "device",
+                "staleTimeout",
+                false,
+                "double",
+                "Seconds without a valid source observation before invalidation (default 15)." );
     outletControllerT::setupConfig( config );
     TELEMETER_SETUP_CONFIG( config );
 }
@@ -196,28 +210,32 @@ inline int virtualPDU::loadConfigImpl( mx::app::appConfigurator &config )
 {
     config( m_pollInterval, "device.pollInterval" );
     config( m_staleTimeout, "device.staleTimeout" );
-    if( !(m_pollInterval > 0 && m_staleTimeout > m_pollInterval) ) return -1;
+    if( !( m_pollInterval > 0 && m_staleTimeout > m_pollInterval ) )
+        return -1;
     std::vector<std::string> sections;
     config.unusedSections( sections );
-    std::map<size_t, endpoint> mappings;
+    std::map<size_t, endpoint>                    mappings;
     std::set<std::pair<std::string, std::string>> identities;
     for( const auto &section : sections )
     {
-        if( !section.starts_with( "outlet" ) ) continue;
+        if( !section.starts_with( "outlet" ) )
+            continue;
         size_t number = 0;
-        auto suffix = section.substr( 6 );
-        auto parsed = std::from_chars( suffix.data(), suffix.data() + suffix.size(), number );
+        auto   suffix = section.substr( 6 );
+        auto   parsed = std::from_chars( suffix.data(), suffix.data() + suffix.size(), number );
         if( parsed.ec != std::errc() || parsed.ptr != suffix.data() + suffix.size() || number == 0 ||
-            section != "outlet" + std::to_string( number ) ) return -1;
+            section != "outlet" + std::to_string( number ) )
+            return -1;
         endpoint mapping;
         config.configUnused( mapping.m_device, section, "device" );
         config.configUnused( mapping.m_channel, section, "channel" );
         if( mapping.m_device.empty() || mapping.m_channel.empty() || mapping.m_device == configName() ||
-            mapping.m_channel == "fsm" ||
-            !identities.emplace( mapping.m_device, mapping.m_channel ).second ) return -1;
+            mapping.m_channel == "fsm" || !identities.emplace( mapping.m_device, mapping.m_channel ).second )
+            return -1;
         mappings.emplace( number, mapping );
     }
-    if( mappings.empty() || mappings.rbegin()->first != mappings.size() ) return -1;
+    if( mappings.empty() || mappings.rbegin()->first != mappings.size() )
+        return -1;
     for( const auto &[number, mapping] : mappings )
     {
         static_cast<void>( number );
@@ -228,41 +246,60 @@ inline int virtualPDU::loadConfigImpl( mx::app::appConfigurator &config )
     {
         for( const auto &keyword : { "outlet", "outlets", "onOrder", "offOrder", "onDelays", "offDelays" } )
         {
-            if( !config.isSetUnused( mx::app::iniFile::makeKey( section, keyword ) ) ) continue;
+            if( !config.isSetUnused( mx::app::iniFile::makeKey( section, keyword ) ) )
+                continue;
             std::vector<std::string> values;
             config.configUnused( values, section, keyword );
             for( auto value : values )
             {
                 size_t first = value.find_first_not_of( " \t" );
-                size_t last = value.find_last_not_of( " \t" );
-                if( first == std::string::npos ) return -1;
-                value = value.substr( first, last-first+1 );
+                size_t last  = value.find_last_not_of( " \t" );
+                if( first == std::string::npos )
+                    return -1;
+                value = value.substr( first, last - first + 1 );
                 size_t number;
-                auto result = std::from_chars( value.data(), value.data()+value.size(), number );
-                if( result.ec != std::errc() || result.ptr != value.data()+value.size() ) return -1;
+                auto   result = std::from_chars( value.data(), value.data() + value.size(), number );
+                if( result.ec != std::errc() || result.ptr != value.data() + value.size() )
+                    return -1;
                 std::string_view name = keyword;
-                if( (name == "outlet" || name == "outlets") && (number == 0 || number > m_endpoints.size()) ) return -1;
-                if( (name == "onDelays" || name == "offDelays") && number > std::numeric_limits<unsigned>::max() ) return -1;
+                if( ( name == "outlet" || name == "outlets" ) && ( number == 0 || number > m_endpoints.size() ) )
+                    return -1;
+                if( ( name == "onDelays" || name == "offDelays" ) && number > std::numeric_limits<unsigned>::max() )
+                    return -1;
             }
         }
     }
     setNumberOfOutlets( m_endpoints.size() );
-    if( outletControllerT::loadConfig( config ) < 0 ) return -1;
-    std::set<size_t> assigned;
-    const std::set<std::string> reserved { "outlet", "stateTimes", "channelOutlets", "channelOnDelays",
-                                         "channelOffDelays", "fsm", "telem_rotate", "telem_maxtime", "fsm_clear_alert", "logs_rotate", "logs_maxtime" };
+    if( outletControllerT::loadConfig( config ) < 0 )
+        return -1;
+    std::set<size_t>            assigned;
+    const std::set<std::string> reserved{ "outlet",
+                                          "stateTimes",
+                                          "channelOutlets",
+                                          "channelOnDelays",
+                                          "channelOffDelays",
+                                          "fsm",
+                                          "telem_rotate",
+                                          "telem_maxtime",
+                                          "fsm_clear_alert",
+                                          "logs_rotate",
+                                          "logs_maxtime" };
     for( const auto &[name, channel] : m_channels )
     {
-        if( reserved.count( name ) ) return -1;
+        if( reserved.count( name ) )
+            return -1;
         for( auto number : channel.m_outlets )
         {
-            if( number >= m_endpoints.size() || !assigned.insert( number ).second ) return -1;
+            if( number >= m_endpoints.size() || !assigned.insert( number ).second )
+                return -1;
         }
         for( const auto &order : { channel.m_onOrder, channel.m_offOrder } )
         {
-            if( order.empty() ) continue;
+            if( order.empty() )
+                continue;
             std::set<size_t> indices( order.begin(), order.end() );
-            if( indices.size() != channel.m_outlets.size() || *indices.rbegin() >= channel.m_outlets.size() ) return -1;
+            if( indices.size() != channel.m_outlets.size() || *indices.rbegin() >= channel.m_outlets.size() )
+                return -1;
         }
     }
     TELEMETER_LOAD_CONFIG( config );
@@ -271,13 +308,14 @@ inline int virtualPDU::loadConfigImpl( mx::app::appConfigurator &config )
 
 inline int virtualPDU::appStartup()
 {
-    if( outletControllerT::appStartup() < 0 ) return -1;
+    if( outletControllerT::appStartup() < 0 )
+        return -1;
     // Allocate every subscription before registering pointers to its backing storage.
     std::map<std::string, size_t> sources;
     for( auto &mapping : m_endpoints )
     {
         auto [it, inserted] = sources.emplace( mapping.m_device, sources.size() );
-        mapping.m_source = it->second;
+        mapping.m_source    = it->second;
         if( inserted )
         {
             source device;
@@ -294,7 +332,8 @@ inline int virtualPDU::appStartup()
     }
     for( auto &mapping : m_endpoints )
     {
-        if( registerIndiPropertySet( mapping.m_property, mapping.m_device, mapping.m_channel, st_setCallBack_source ) < 0 )
+        if( registerIndiPropertySet( mapping.m_property, mapping.m_device, mapping.m_channel, st_setCallBack_source ) <
+            0 )
             return -1;
     }
     TELEMETER_APP_STARTUP;
@@ -305,7 +344,8 @@ inline int virtualPDU::appStartup()
 inline bool virtualPDU::available( size_t index, clockT::time_point now ) const
 {
     const auto &mapping = m_endpoints[index];
-    if( mapping.m_source >= m_sources.size() ) return false;
+    if( mapping.m_source >= m_sources.size() )
+        return false;
     const auto &device = m_sources[mapping.m_source];
     return mapping.m_haveState && device.m_ready &&
            std::chrono::duration<double>( now - mapping.m_received ).count() < m_staleTimeout &&
@@ -315,16 +355,19 @@ inline bool virtualPDU::available( size_t index, clockT::time_point now ) const
 inline int virtualPDU::appLogic()
 {
     std::unique_lock<std::mutex> lock( m_indiMutex, std::try_to_lock );
-    if( !lock.owns_lock() ) return 0;
+    if( !lock.owns_lock() )
+        return 0;
     auto now = clockT::now();
     if( m_indiDriver && std::chrono::duration<double>( now - m_lastPoll ).count() >= m_pollInterval )
     {
         sendGetPropertySetList( true );
         m_lastPoll = now;
     }
-    if( updateOutletStates() < 0 ) return -1;
+    if( updateOutletStates() < 0 )
+        return -1;
     outletControllerT::updateINDI();
-    if( recordOutletStates() < 0 ) return -1;
+    if( recordOutletStates() < 0 )
+        return -1;
     TELEMETER_APP_LOGIC;
     return 0;
 }
@@ -337,7 +380,8 @@ inline int virtualPDU::appShutdown()
 
 inline int virtualPDU::updateOutletState( int outletNum )
 {
-    if( outletNum < 0 || static_cast<size_t>( outletNum ) >= m_endpoints.size() ) return -1;
+    if( outletNum < 0 || static_cast<size_t>( outletNum ) >= m_endpoints.size() )
+        return -1;
     const auto &mapping = m_endpoints[outletNum];
     setOutletState( outletNum, available( outletNum, clockT::now() ) ? mapping.m_state : OUTLET_STATE_UNKNOWN );
     return 0;
@@ -349,7 +393,7 @@ inline int virtualPDU::sendOutlet( int outletNum, const std::string &target )
     if( state() != stateCodes::READY || outletNum < 0 || static_cast<size_t>( outletNum ) >= m_endpoints.size() ||
         !available( outletNum, clockT::now() ) )
         return log<software_error, -1>( "Virtual outlet source unavailable" );
-    const auto &mapping = m_endpoints[outletNum];
+    const auto       &mapping = m_endpoints[outletNum];
     pcf::IndiProperty command( pcf::IndiProperty::Text, mapping.m_device, mapping.m_channel );
     command.add( pcf::IndiElement( "target", target ) );
     return sendNewProperty( command );
@@ -367,15 +411,18 @@ inline int virtualPDU::turnOutletOff( int outletNum )
 
 inline int virtualPDU::newCallBack_channels( const pcf::IndiProperty &ipRecv )
 {
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_indiMutex );
-        if( state() != stateCodes::READY ) return -1;
+        if( state() != stateCodes::READY )
+            return -1;
         auto channel = m_channels.find( ipRecv.getName() );
-        if( ipRecv.getDevice() != configName() || ipRecv.getType() != pcf::IndiProperty::Text || channel == m_channels.end() )
+        if( ipRecv.getDevice() != configName() || ipRecv.getType() != pcf::IndiProperty::Text ||
+            channel == m_channels.end() )
             return -1;
         for( auto index : channel->second.m_outlets )
         {
-            if( !available( index, clockT::now() ) ) return log<software_error, -1>( "Virtual channel source unavailable" );
+            if( !available( index, clockT::now() ) )
+                return log<software_error, -1>( "Virtual channel source unavailable" );
         }
     }
     return outletControllerT::newCallBack_channels( ipRecv );
@@ -389,21 +436,26 @@ inline int virtualPDU::st_setCallBack_source( void *app, const pcf::IndiProperty
 inline int virtualPDU::setCallBack_source( const pcf::IndiProperty &ipRecv )
 {
     std::lock_guard<std::mutex> lock( m_indiMutex );
-    auto now = clockT::now();
+    auto                        now = clockT::now();
     if( ipRecv.getName() == "fsm" )
     {
         for( size_t index = 0; index < m_sources.size(); ++index )
         {
             auto &device = m_sources[index];
-            if( device.m_property.getDevice() != ipRecv.getDevice() ) continue;
+            if( device.m_property.getDevice() != ipRecv.getDevice() )
+                continue;
             bool malformed = ipRecv.getType() != pcf::IndiProperty::Text;
-            if( !malformed && !ipRecv.find( "state" ) ) return -1;
+            if( !malformed && !ipRecv.find( "state" ) )
+                return -1;
             device.m_ready = !malformed && ipRecv["state"].get<std::string>() == "READY";
-            if( !malformed ) device.m_received = now;
+            if( !malformed )
+                device.m_received = now;
             for( size_t n = 0; n < m_endpoints.size(); ++n )
             {
-                if( m_endpoints[n].m_source != index ) continue;
-                if( !device.m_ready ) m_endpoints[n].m_haveState = false;
+                if( m_endpoints[n].m_source != index )
+                    continue;
+                if( !device.m_ready )
+                    m_endpoints[n].m_haveState = false;
                 updateOutletState( n );
             }
             outletControllerT::updateINDI();
@@ -415,19 +467,24 @@ inline int virtualPDU::setCallBack_source( const pcf::IndiProperty &ipRecv )
     for( size_t index = 0; index < m_endpoints.size(); ++index )
     {
         auto &mapping = m_endpoints[index];
-        if( mapping.m_device != ipRecv.getDevice() || mapping.m_channel != ipRecv.getName() ) continue;
+        if( mapping.m_device != ipRecv.getDevice() || mapping.m_channel != ipRecv.getName() )
+            continue;
         bool text = ipRecv.getType() == pcf::IndiProperty::Text;
-        if( text && !ipRecv.find( "state" ) ) return 0;
+        if( text && !ipRecv.find( "state" ) )
+            return 0;
         std::string value = text ? ipRecv["state"].get<std::string>() : "";
-        mapping.m_state = OUTLET_STATE_UNKNOWN;
+        mapping.m_state   = OUTLET_STATE_UNKNOWN;
         if( ipRecv.getType() == pcf::IndiProperty::Text )
         {
-            if( value == "On" ) mapping.m_state = OUTLET_STATE_ON;
-            else if( value == "Off" ) mapping.m_state = OUTLET_STATE_OFF;
-            else if( value == "Int" ) mapping.m_state = OUTLET_STATE_INTERMEDIATE;
+            if( value == "On" )
+                mapping.m_state = OUTLET_STATE_ON;
+            else if( value == "Off" )
+                mapping.m_state = OUTLET_STATE_OFF;
+            else if( value == "Int" )
+                mapping.m_state = OUTLET_STATE_INTERMEDIATE;
         }
         mapping.m_haveState = ipRecv.getType() == pcf::IndiProperty::Text &&
-                              (mapping.m_state != OUTLET_STATE_UNKNOWN || value == "Unk");
+                              ( mapping.m_state != OUTLET_STATE_UNKNOWN || value == "Unk" );
         mapping.m_received = now;
         updateOutletState( index );
         outletControllerT::updateINDI();

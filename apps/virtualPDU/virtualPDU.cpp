@@ -5,8 +5,7 @@
 #include "virtualPDU.hpp"
 
 /// Run the configured virtual power distribution unit.
-int main( int argc /**< [in] command-line argument count */,
-          char **argv /**< [in] command-line arguments */ )
+int main( int argc /**< [in] command-line argument count */, char **argv /**< [in] command-line arguments */ )
 {
     MagAOX::app::virtualPDU app;
     return app.main( argc, argv );

@@ -29,16 +29,16 @@ struct telem_outlet : public flatbuffer_log
     struct messageT : public fbMessage
     {
         /// Construct an observed-state snapshot.
-        messageT( uint8_t first /**< [in] first displayed outlet number, zero or one */,
+        messageT( uint8_t                    first /**< [in] first displayed outlet number, zero or one */,
                   const std::vector<int8_t> &states /**< [in] observed states in internal outlet order */ );
     };
 
     /// Verify a serialized log payload.
     static bool verify( flatlogs::bufferPtrT &logBuff /**< [in] complete log buffer */,
-                        flatlogs::msgLenT len /**< [in] payload length */ );
+                        flatlogs::msgLenT     len /**< [in] payload length */ );
 
     /// Format a snapshot for human-readable logs.
-    static std::string msgString( void *msgBuffer /**< [in] serialized payload */,
+    static std::string msgString( void             *msgBuffer /**< [in] serialized payload */,
                                   flatlogs::msgLenT len /**< [in] unused payload length */ );
 
     /// Get the first displayed outlet number.
@@ -80,7 +80,8 @@ inline unsigned char telem_outlet::first_outlet( void *msgBuffer )
 inline std::vector<int8_t> telem_outlet::states( void *msgBuffer )
 {
     auto values = GetTelem_outlet_fb( msgBuffer )->states();
-    if( !values ) return {};
+    if( !values )
+        return {};
     return { values->begin(), values->end() };
 }
 
@@ -89,7 +90,8 @@ inline std::string telem_outlet::stateString( void *msgBuffer )
     std::string value;
     for( auto state : states( msgBuffer ) )
     {
-        if( !value.empty() ) value += ',';
+        if( !value.empty() )
+            value += ',';
         value += std::to_string( static_cast<int>( state ) );
     }
     return value;
@@ -98,11 +100,19 @@ inline std::string telem_outlet::stateString( void *msgBuffer )
 inline logMetaDetail telem_outlet::getAccessor( const std::string &member )
 {
     if( member == "first_outlet" )
-        return { "OUTLET FIRST", "first displayed outlet number", logMeta::valTypes::UChar,
-                 logMeta::metaTypes::State, reinterpret_cast<void *>( &first_outlet ), true };
+        return { "OUTLET FIRST",
+                 "first displayed outlet number",
+                 logMeta::valTypes::UChar,
+                 logMeta::metaTypes::State,
+                 reinterpret_cast<void *>( &first_outlet ),
+                 true };
     if( member == "states" )
-        return { "OUTLET STATES", "-1 unknown,0 off,1 intermediate,2 on", logMeta::valTypes::String,
-                 logMeta::metaTypes::State, reinterpret_cast<void *>( &stateString ), true };
+        return { "OUTLET STATES",
+                 "-1 unknown,0 off,1 intermediate,2 on",
+                 logMeta::valTypes::String,
+                 logMeta::metaTypes::State,
+                 reinterpret_cast<void *>( &stateString ),
+                 true };
     return {};
 }
 } // namespace logger
