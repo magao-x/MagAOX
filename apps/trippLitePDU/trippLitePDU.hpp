@@ -53,7 +53,7 @@ namespace app
   *
   * \ingroup trippLitePDU
   */
-class trippLitePDU : public MagAOXApp<>, public dev::outletController<trippLitePDU>, public dev::ioDevice
+class trippLitePDU : public MagAOXApp<>, public dev::outletController<trippLitePDU>, public dev::telemeter<trippLitePDU>, public dev::ioDevice
 {
 
 protected:
@@ -95,6 +95,27 @@ protected:
    float m_voltage {0}; ///< The line voltage reported by the device.
    float m_current {0}; ///< The current being reported by the device.
 
+   /// Last complete electrical measurement, ordered frequency/voltage/current.
+   std::vector<float> m_pduSample {0,0,0};
+
+   /// Whether the most recent status acquisition supplied a complete electrical sample.
+   bool m_pduValid {false};
+
+   /// Last recorded electrical sample for per-instance change suppression.
+   std::vector<float> m_lastPDUSample;
+
+   /// Validity included in the most recent electrical telemetry record.
+   bool m_lastPDUValid {false};
+
+   /// Whether an initial electrical telemetry snapshot has been recorded.
+   bool m_pduTelemRecorded {false};
+
+   /// Allow the telemetry helper to dispatch this application's records.
+   friend class dev::telemeter<trippLitePDU>;
+
+   /// The single telemetry helper owned by this application.
+   typedef dev::telemeter<trippLitePDU> telemeterT;
+
 public:
 
     /// Default c'tor.
@@ -115,7 +136,22 @@ public:
     /// load the configuration system results (called by MagAOXApp::setup())
     virtual void loadConfig();
 
-    /// Startup functions
+   /// Load app and helper configuration, propagating invalid configuration.
+   int loadConfigImpl( mx::app::appConfigurator &config /**< [in] app configuration */ );
+
+    /// Check periodic deadlines for each telemetry type recorded by this app.
+   int checkRecordTimes();
+
+   /// Force an electrical snapshot for the telemetry scheduler.
+   int recordTelem( const telem_pdu *type /**< [in] unused type selector */ );
+
+   /// Record a complete electrical snapshot or invalidation when changed or forced.
+   int recordPDU( bool force /**< [in] force a record even if unchanged */ = false );
+
+   /// Force an observed outlet-state snapshot for the telemetry scheduler.
+   int recordTelem( const telem_outlet *type /**< [in] unused type selector */ );
+
+   /// Startup functions
     /** Setsup the INDI vars.
       * Checks if the device was found during loadConfig.
       */
@@ -216,7 +252,7 @@ trippLitePDU::trippLitePDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
    setNumberOfOutlets(8);
    m_loopPause=2000000000;//Default to 2 sec loop pause to lessen the load on the PDUs.
 
-   return;
+
 }
 
 void trippLitePDU::setupConfig()
@@ -248,11 +284,22 @@ void trippLitePDU::setupConfig()
    config.add("limits.currEmerg", "", "limits.currEmerg", argType::Required, "limits", "currEmerg", false, "int", "The high-current emergency threshold");
 
    dev::outletController<trippLitePDU>::setupConfig(config);
+   TELEMETER_SETUP_CONFIG( config );
 
 }
 
 
 void trippLitePDU::loadConfig()
+{
+   if( loadConfigImpl( config ) < 0 )
+   {
+      log<text_log>( "Invalid outlet-controller configuration", logPrio::LOG_CRITICAL );
+      m_shutdown = true;
+   }
+}
+
+inline
+int trippLitePDU::loadConfigImpl( mx::app::appConfigurator &config )
 {
    config(m_deviceAddr, "device.address");
    config(m_devicePort, "device.port");
@@ -260,7 +307,7 @@ void trippLitePDU::loadConfig()
    config(m_devicePassFile, "device.passfile");
    config(m_deviceVersion, "device.powerAlertVersion");
 
-   dev::ioDevice::loadConfig(config);
+   if( dev::ioDevice::loadConfig(config) < 0 ) return -1;
 
    config(m_freqLowWarn, "limits.freqLowWarn");
    config(m_freqHighWarn, "limits.freqHighWarn");
@@ -280,7 +327,9 @@ void trippLitePDU::loadConfig()
    config(m_currAlert, "limits.currAlert");
    config(m_currEmerg, "limits.currEmerg");
 
-   dev::outletController<trippLitePDU>::loadConfig(config);
+   if( dev::outletController<trippLitePDU>::loadConfig( config ) < 0 ) return -1;
+   TELEMETER_LOAD_CONFIG( config );
+   return 0;
 
 
 }
@@ -305,13 +354,15 @@ int trippLitePDU::appStartup()
         return log<text_log,-1>("Error setting up INDI for outlet control.", logPrio::LOG_CRITICAL);
     }
 
-    state(stateCodes::NOTCONNECTED);
+    TELEMETER_APP_STARTUP;
+   state(stateCodes::NOTCONNECTED);
 
     return 0;
 }
 
 int trippLitePDU::appLogic()
 {
+   TELEMETER_APP_LOGIC;
     if( state() == stateCodes::NOTCONNECTED )
     {
         static int lastrv = 0; //Used to handle a change in error within the same state.  Make general?
@@ -395,6 +446,8 @@ int trippLitePDU::appLogic()
        if(rv < 0) return log<software_error,-1>();
 
        updateAlarmsAndWarnings();
+       if( recordOutletStates() < 0 || recordPDU() < 0 ) return -1;
+
 
        return 0;
     }
@@ -408,6 +461,7 @@ int trippLitePDU::appLogic()
 int trippLitePDU::appShutdown()
 {
    //don't bother
+   TELEMETER_APP_SHUTDOWN;
    return 0;
 }
 
@@ -430,12 +484,16 @@ int trippLitePDU::updateOutletStates()
     {
         log<software_error>("error getting device status");
         state(stateCodes::NOTCONNECTED);
-        return 0;
+        m_pduValid = false;
+        setAllOutletStates( OUTLET_STATE_UNKNOWN );
+        if( recordOutletStates() < 0 ) return -1;
+        return recordPDU();
     }
 
     if(rv > 0)
     {
-        return 0; //this means the re-read was successful, but we don't want to parse this time.
+        m_pduValid = false;
+        return recordPDU(); // The deferred response is not a new parsed measurement.
     }
 
     rv = parsePDUStatus( strRead);
@@ -594,6 +652,8 @@ int trippLitePDU::devStatus(std::string & strRead)
 
 int trippLitePDU::parsePDUStatus( std::string & strRead )
 {
+    m_pduValid = false;
+    bool haveVoltage = false, haveFrequency = false, haveCurrent = false;
     size_t curpos = 0;
 
     curpos = strRead.find_first_of("\r\n", curpos);
@@ -619,6 +679,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
 
         if(sstr[0] == 'I')
         {
+            if( sstr.size() <= 6 ) return -14;
             if(sstr[6] == 'V')
             {
                 size_t begin = sstr.find(' ',6);
@@ -639,9 +700,13 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
                     return -3;
                 }
 
-                float V = mx::ioutils::stoT<float>( sstr.substr(begin, end-begin) );
-
+                std::istringstream value( sstr.substr( begin, end-begin ) );
+                float V;
+                if( !(value >> V) ) return -16;
+                value >> std::ws;
+                if( !value.eof() ) return -16;
                 m_voltage = V;
+                haveVoltage = true;
             }
 
             else if(sstr[6] == 'F')
@@ -664,14 +729,19 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
                     return -6;
                 }
 
-                float F = mx::ioutils::stoT<float>( sstr.substr(begin, end-begin) );
-
+                std::istringstream value( sstr.substr( begin, end-begin ) );
+                float F;
+                if( !(value >> F) ) return -17;
+                value >> std::ws;
+                if( !value.eof() ) return -17;
                 m_frequency = F;
+                haveFrequency = true;
             }
             else return -1;
         }
         else if(sstr[0] == 'O')
         {
+            if( sstr.size() <= 8 ) return -15;
             if(sstr[7] == 'C')
             {
                 size_t begin = sstr.find(' ',7);
@@ -692,9 +762,13 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
                     return -9;
                 }
 
-                float C = mx::ioutils::stoT<float>( sstr.substr(begin, end-begin) );
-
+                std::istringstream value( sstr.substr( begin, end-begin ) );
+                float C;
+                if( !(value >> C) ) return -18;
+                value >> std::ws;
+                if( !value.eof() ) return -18;
                 m_current = C;
+                haveCurrent = true;
             }
             else if(sstr[8] == 'O')
             {
@@ -732,7 +806,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
 
                 for(size_t i=0;i<m_outletStates.size();++i)
                 {
-                    m_outletStates[i]=outletStates[i];
+                    setOutletState( i, outletStates[i] );
                 }
             }
             else if( sstr[7] == 'V' || sstr[7] == 'F')
@@ -750,6 +824,11 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
         }
     }
 
+    if( haveVoltage && haveFrequency && haveCurrent )
+    {
+        m_pduSample = { m_frequency, m_voltage, m_current };
+        m_pduValid = true;
+    }
     return 0;
 }
 
@@ -832,6 +911,33 @@ void trippLitePDU::updateAlarmsAndWarnings()
         log<text_log>("Current is " + std::to_string(m_current) + " A, above " +
                                                             std::to_string(m_currWarn) + " A.",  logPrio::LOG_WARNING);
     }
+}
+
+
+inline int trippLitePDU::recordTelem( const telem_pdu * )
+{
+   return recordPDU( true );
+}
+
+inline int trippLitePDU::recordPDU( bool force )
+{
+   if( !force && m_pduTelemRecorded && m_lastPDUValid == m_pduValid && m_lastPDUSample == m_pduSample ) return 0;
+   int rv = telem<telem_pdu>( { m_pduSample[0], m_pduSample[1], m_pduSample[2], m_pduValid } );
+   if( rv < 0 ) return rv;
+   m_lastPDUSample = m_pduSample;
+   m_lastPDUValid = m_pduValid;
+   m_pduTelemRecorded = true;
+   return 0;
+}
+
+inline int trippLitePDU::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes( telem_outlet(), telem_pdu() );
+}
+
+inline int trippLitePDU::recordTelem( const telem_outlet * )
+{
+   return recordOutletStates( true );
 }
 
 } //namespace app

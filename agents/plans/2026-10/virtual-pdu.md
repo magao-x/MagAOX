@@ -66,25 +66,269 @@ Analyze the above task and create a plan to implement a solution.  Document your
 Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" below.  Do not begin implementation until the user has reviewed the plan and answered any questions.
 
 # Agent Findings and Plan
-<!-- This section will be filled out by the agent -->
+
+Execution status: the user reviewed this plan and answered all questions on 2026-10-07. GPT-6 (Codex) is proceeding with the decisions recorded below. Only the Agent Findings and Plan section is edited.
 
 ## Task Summary
-<!-- The agent should summarize the task as they understand it -->
+
+Add a `virtualPDU` application that presents the normal `dev::outletController` interface while treating named channels on other outlet controllers as its individual outlets. A virtual channel such as `fwtelsim` can then operate both an AC/DC power channel and a USB-hub channel using the existing ordering and delay rules. Device applications can monitor that one virtual channel through their existing `[power]` configuration.
+
+Add a common outlet-state telemetry record, integrate it into every existing outlet-controller application and the new application, and add Tripp Lite electrical telemetry. Replace the existing placeholder tests and add the missing USB-hub suite, targeting 100% executable line coverage of the four controller classes. Testing and execution will use workstation-only substitutes and private local transports.
+
+### Repository findings
+
+| Area | Current implementation | Consequence for this work |
+| --- | --- | --- |
+| Outlet-controller applications | `apps/trippLitePDU/trippLitePDU.hpp`, `apps/xt1121DCDU/xt1121DCDU.hpp`, and `apps/acronameUsbHub/acronameUsbHub.hpp` are the three existing derived apps. None inherits `dev::telemeter`. | All three need telemetry lifecycle integration; the new app is the fourth coverage target. |
+| Channel configuration | `libMagAOX/app/dev/outletController.hpp` parses unused channel sections containing numeric `outlet`/`outlets`, with zero-based indices in `onOrder`/`offOrder` and millisecond delays. | Map numeric virtual outlets to remote channels, then reuse the base parser and sequence implementation. |
+| State representation | The base uses `Unknown=-1`, `Off=0`, `Intermediate=1`, `On=2`; INDI exposes `Unk`, `Off`, `Int`, `On`. Mixed outlet states aggregate to `Int`. | Preserve these values and the existing aggregate-state semantics. Telemetry needs a signed byte to retain `-1`. |
+| INDI interface | The base publishes each channel as Text `state`/`target`, plus `outlet`, `stateTimes`, `channelOutlets`, `channelOnDelays`, and `channelOffDelays`. `setupINDI()` is deprecated in favor of `appStartup()`. | Reuse that interface and migrate the two deprecated startup calls in touched apps. |
+| Power FSM and GUI | `MagAOXApp` monitors Text `state`/`target`; `On` and `Off` are recognized, other values are unknown. `gui/widgets/pwr/pwrDevice.hpp` consumes the standard properties and numeric outlet lists. | No production power-FSM or GUI code change is expected. Configuration must select the virtual device/channel and hide duplicate physical entries as desired. |
+| INDI subscriptions | `registerIndiPropertySet()` registers stable property pointers keyed by device/property; Def and Set messages share the same callback path. Duplicate registrations fail. Existing subscription retries cover initial missing definitions. | Register each remote channel and each remote device's `fsm` once, keep storage stable, and reuse discovery/retry behavior. |
+| Sequence completion | Base ordering/delays operate on successful calls to `turnOutletOn/Off`; sending an INDI command does not confirm the remote switch changed. New-property callbacks execute synchronously in the driver's dispatch path. | Define dispatch versus confirmed-state sequencing explicitly. Waiting for incoming confirmation inside the same callback would block its delivery. |
+| Source disappearance | The MagAOX driver wrapper does not forward `delProperty` to apps; a received subscription definition does not establish ongoing liveness. | Do not use an unchanged channel value's age alone to infer disconnects. Periodic explicit refreshes can establish bounded freshness without changing the shared driver. |
+| Telemetry reuse | Helpers such as `stdMotionStage` and `frameGrabber` record through the derived app's `telem()`; the app owns `dev::telemeter`, scheduling, and lifecycle calls. | Follow this pattern: the outlet helper supplies generic recording, while each app owns exactly one telemeter. |
+| Logger/FITS integration | Schemas and log types are generated from `logger/logCodes.dat`; `telem.cpp` defines `lastRecord`. `logger/logMeta.cpp::verifyLogEntry()` has a separate explicit event-code switch. Integer/string vector metadata enums exist, but formatting currently implements only boolean and float vectors. | Update the verifier as well as registry/build dependencies. Use a String metadata accessor for comma-separated byte states instead of broadening vector support for this task. |
+| Tests and coverage | Tripp Lite and DCDU have construction-only tests. USB hub has no registered test suite. `tests/Makefile.one`, `COVERAGE=1`, and `tests/coverage/update_coverage` provide the build/report path. | Coverage work includes lifecycle, configuration, transport failures, parsers, callbacks, and telemetry, rather than just the new virtual app. No baseline percentage has been measured in this planning pass. |
+| Local dependencies | The BrainStem headers and static archive are present; `clang-format`, `gcov`, and `lcov` are available. Existing flipper tests demonstrate private FIFO drivers and dependency fault injection. | Prefer those established harness patterns. Availability does not yet establish that all required library/toolchain dependencies build successfully. |
+
+The current outlet base's configuration checks do not fully validate outlet bounds or order permutations, and overlapping channels have independent channel mutexes. The virtual app must validate its configuration before invoking the base. Changes to the outlet helper are authorized here; PR #401 remains responsible for its coverage. Preserve existing aggregation and synchronization behavior unless a scoped correction is needed.
 
 ## Key Assumptions
-<!-- The agent should list any assumptions they have made -->
+
+- Proposed executable/class name: `virtualPDU`; INDI instance names remain configurable through the normal `-n` mechanism. One instance may expose multiple combined device channels.
+- A virtual outlet references a remote **named channel**, not a raw physical outlet. This preserves the remote controller's own ordering, delays, and channel semantics. The initial protocol supports the standard Text `state`/`target` interface only.
+- Virtual configuration uses contiguous one-based outlet numbers. The base still stores zero-based indices internally, and sequence order arrays remain zero-based. Physical PDU and USB-hub numbering conventions remain unchanged.
+- Generic outlet telemetry describes observed states, not command acceptance. It records the first snapshot, changes, and forced interval snapshots, with caches owned by each app/helper instance rather than function-static caches.
+- The outlet helper provides telemetry recording functions, while each app directly inherits `dev::telemeter<app>`, as established by other device helpers. This avoids introducing a second telemeter through helper inheritance.
+- The derived-specific telemetry scope is Tripp Lite frequency, voltage, and total current. USB-hub temperature/current monitoring and DCDU electrical measurements would require additional acquisition work and are not assumed from the unfinished discussion sentence above.
+- Real installation, instrument commands, production configuration migration, and hardware validation are user-run steps. This agent will not execute on instrument computers or use an INDI tunnel to them.
+- The current feature branch is already `jrmales/virtual-pdu`, and the worktree was clean at the start of review.
 
 ## Requirements
-<!-- The agent should list the requirements to which they are planning -->
+
+1. Define and document the virtual outlet mapping language, with complete examples and strict local validation of mappings and sequence arrays.
+2. Expose the existing outlet-controller INDI properties, and generate correct outgoing Text commands to the mapped device/channel with `target=On` or `target=Off`.
+3. Derive observed virtual outlet states from incoming channel `state` values; never substitute the requested target for observed power. Preserve the normal MagAOXApp power-FSM interface.
+4. Define handling for unavailable sources, partial updates, source restarts, send failures, sequence overlap, and shutdown. Never automatically roll back already issued power commands after a later failure.
+5. Define a variable-length outlet-state telemetry schema with small integer states, complete message creation/verification/formatting, typed accessors, metadata/FITS accessors, event registration, and interval support.
+6. Integrate common telemetry into Tripp Lite, DCDU, USB hub, and virtual PDU. Add Tripp Lite electrical telemetry with explicit sample validity.
+7. Achieve 100% executable line coverage for each of the four controller classes, including new telemetry and error paths. Retain and run the outlet-base regression suite, without taking on its separate coverage effort.
+8. Follow `AGENTS.md`: header-only app implementations with definitions outside classes, complete changed-file Doxygen passes, helper macros where available, application test groups and explicit real-symbol links, repository formatting, and separate functional/documentation/formatting commits when applicable.
 
 ## Questions and Points of Clarification
-<!-- The agent should list any open issues requiring user clarification -->
+
+All questions below have been answered. Agreed decisions: work against this checkout without merging PR #401; retain command-dispatch ordering; base observed states only on received INDI state values; use per-channel availability and one-based mappings; add only the existing Tripp Lite sensor measurements. Shared endpoints are deferred as a known use-case.
+
+1. **Pending outlet-controller work:** What branch/commit or PR contains that effort, and should it be integrated before this implementation? Recommendation: settle the base interface first; do not duplicate its fixes or tests. If implementation should proceed against this checkout instead, explicitly record that decision and reconcile when the other work lands.
+
+Answer: This is under https://github.com/magao-x/MagAOX/pull/401.  That is confined exclusively to libMagAOX, and is focused only on test coverage.  It nominally brings libMagAOX up to 100% with fairly automated test generation.  So we do not need to put work into dev::outletController coverage, but it is fine to change dev::outletController here and we will update from that end to preserve coverage.
+
+2. **Sequence semantics:** Should delays separate outgoing commands, or should each remote channel reach its requested state before proceeding? Recommendation for the initial version: command dispatch ordering with existing fixed delays, preserving the base's semantics. Confirmed-state sequencing would require asynchronous execution, per-step timeouts, and cancellation rules; it cannot block the INDI receive callback waiting for its own updates.
+
+Answer: Delays separate outgoing commands, and we do not wait for outlets to change state.  As you note, this is how the outletController was designed to perform so it is consistent. I think it is captured, but to be explicit: while the commands do not wait for the state to change on each outlet before going on to the next command, the reported state must be based only on states received from INDI.
+
+
+3. **Unavailable dependencies:** Is per-channel availability acceptable, so a missing source blocks only virtual channels that use it? Recommendation: keep the virtual app service ready, reject commands for unavailable channels before issuing any traffic, and publish affected observed states as unknown. Use source `fsm=READY` plus channel definitions and periodic refreshes, initially proposing a 5-second refresh and 15-second stale limit, both configurable. The alternative is to take the whole virtual PDU out of READY whenever any dependency is unavailable.
+
+Answer: Yes per-channel.
+
+4. **Telemetry scope and configuration:** Does the proposed one-based mapping syntax and outlet-state plus Tripp Lite electrical telemetry scope meet the intent? In particular, is any additional USB-hub/DCDU sensor telemetry intended by the incomplete sentence “also add telemetry to”? Recommendation: keep additional sensor acquisition outside this task.
+
+Answer: Yes to one-based mapping. I did mean to add any sensor telemetry that is already in those other apps, though I don't know of any off the top of my head. xt1121DCDU is itself virtual so there shouldn't be anything. acronanmUsbHub also doesn't show anything.  So it's only trippLitePDU.
+
+Other proposed limits for review: reject direct self-reference, duplicate endpoint aliases, and endpoints shared between virtual channels in the first version. Cross-instance dependency cycles cannot be detected from one config file and must be excluded in deployment configuration. These limits avoid adding a new shared sequencing framework while the outlet base is being revised.
+
+Answer: Agree with recommendation.  But shared-endpoints is a already known use-case so keep it in to-do for later.
 
 ## Tests
-<!-- The agent should list and describe the test it plans to implement.  It should be specific about the purpose and goal of the test. -->
+
+### Harness and acceptance metric
+
+- Use Catch2, `tests/testXWC.hpp`, and `libXWCTest::<appName>Test` namespaces; place each app group under `application_unit_test`. Document every test and preserve real-API Doxygen links with the app-specific `*_TEST_DOXYGEN_REF` blocks. Hide harness-only declarations from Doxygen.
+- Reuse existing dependency substitution and fault-injection patterns. Execute real controller methods and real configuration parsing; substitute only hardware/transport/log-thread boundaries. Prefer test-local seams to new production abstractions.
+- For virtual and DCDU outgoing traffic, capture a real INDI message through private FIFOs or a loopback-only test server, then parse/assert device, property, type, element, and value. A `MagAOXApp<false>` no-op send is not evidence of correct outgoing traffic. No connection to a production INDI server is permitted.
+- Use deterministic fake time where freshness/sequence timing requires it, short bounded timing checks where exercising the existing base delays, RAII cleanup, and temporary directories. Construct MagAOXApp instances sequentially because it permits only one instance per process.
+- Force recompilation after header, harness, or coverage flag changes: the single-test makefile does not track every header dependency. Use `COVERAGE=1` with the repository's normal `-O0` setting and reset only counters needed for the focused run.
+- Merge initial `.gcno` coverage with executed `.gcda` coverage and extract the actual controller implementation paths. Report per-file executable lines hit/total and uncovered lines. Measure production and simulator conditionals separately and combine coverage of the same production source as appropriate; do not drop production branches or use exclusions/optimization to manufacture 100%.
+- Acceptance is 100% executable line coverage of each derived controller's implementation, not inherited library code. Entrypoint smoke tests should verify the new app and any touched entrypoint locally; standalone simulator helper coverage is reported separately. Generated/vendor code is not a target.
+
+### Virtual PDU
+
+1. Configuration defaults and explicit mappings; one and many outlets/channels; zero-based sequence orders with one-based outlet numbers; malformed/empty mappings, gaps, invalid endpoint keys, reserved property names, self-reference, duplicate aliases, shared endpoints, invalid bounds, non-permutation orders, and mismatched delay lengths.
+2. Startup creates every standard read-only metadata property and read/write channel property. Dynamic registrations have stable backing storage and unique device/property keys. Inject each relevant registration and telemetry lifecycle failure.
+3. Correct routing for On/Off commands, `state` fallback, case normalization, no-op requests already at the desired observed state, invalid channel/target, and not-ready/unavailable rejection. Test both direct outlet methods and the real channel callback/delegation path.
+4. Multi-source command order and delays, reversal for off, failure on the first or later send, no remaining sends after failure, and no rollback. Test the selected command-dispatch or confirmation contract explicitly.
+5. Incoming Def/Set messages route by full device/property identity, including two devices with the same channel name. Handle unknown/intermediate states, target-only updates, irrelevant messages, missing elements, and wrong property types without manufacturing an observed state.
+6. Partial refreshes merge without erasing previously valid elements; source FSM departure from READY invalidates its outlets. Exercise startup absence, refresh timeout, reconnection, repeated source definitions, recovery, and unaffected-channel operation under the approved readiness policy.
+7. Aggregate state and target updates are accepted by the real MagAOXApp power callback: On maps to powered, Off to unpowered, and Int/Unk to unknown. Test the callback in a separate sequential consumer fixture and run the existing power-FSM regression tests.
+8. Initial/change/forced telemetry, independent caches across sequential instances, lock contention, concurrent requests, and shutdown cleanup. A fake receiver may inject source reports; testing the actual slaved devices' behavior is not required.
+
+### Tripp Lite PDU
+
+- Real configuration registration/loading, all limits and protocol-version settings, startup registration failures, telemetry lifecycle, and shutdown.
+- FSM paths for connection success/failure, login success/timeout/fatal failure, both PowerAlert versions, post-login behavior, status retries, lock contention, unexpected states, and recovery.
+- Replace telnet I/O with a scripted local transport for the production path; additionally exercise the existing simulator. Assert one-based `loadctl` wire commands and error propagation.
+- `devstatus` fixtures for voltage/frequency/current/outlet parsing, all-off and mixed outlets, whitespace and final-line cases, ignored lines, every parser error return, malformed short lines, invalid numeric data, and telemetry sample validity after a failed/partial response.
+- Every warning/alert/emergency threshold, both low/high frequency and voltage, normal readings, and current thresholds, including boundary equality. Check actual emitted priorities/messages.
+
+### xt1121DCDU
+
+- Configuration defaults/overrides, exactly eight backing channels, invalid channel count, startup registration failures, deprecated-call migration, and telemetry lifecycle.
+- POWERON/READY/unexpected-state logic, lock contention, update errors, and shutdown.
+- All outlet/property and xt-channel-name mappings, including currently supported channel number 16, invalid indices, missing/invalid `current`, and all eight callbacks.
+- Numeric INDI `target=1/0` traffic, failures, observed-state updates, and generic telemetry. Preserve existing mapping/protocol behavior unless a separately documented defect requires correction.
+
+### Acroname USB hub
+
+- Add a test-only BrainStem substitute matching the API used by the app; it must never enumerate or connect to USB hardware. Exercise the controller code rather than just the substitute.
+- Configuration and serial number, startup failure injection, POWERON/disconnected/connected/READY transitions, connection failure/retry, dropped connection, model/version/serial reporting, and destructor disconnect.
+- Every port-state read and enable/disable path, timeout and connection errors, other current error handling, power-off state/target resets, repeated powered-off hooks, shutdown, lock behavior, and generic telemetry.
+- Keep the real app build using its existing BrainStem library. Add test-specific include/link rules only where necessary; add the app to `all_buildable_apps` so standard offline coverage workflows include its production source.
+
+### Telemetry/logging/FITS
+
+- Outlet messages with empty, one-element, mixed-state, and large vectors (including more than 255 outlets); retain `-1/0/1/2` exactly. Check numbering, typed accessors, numeric message strings, empty/unknown accessor results, and buffer verification failures.
+- Electrical records with finite readings, sample-invalid records, units, accessor types, and all fields. Never present unmeasured startup zeroes or a failed partial parse as a valid electrical sample.
+- Test event dispatch through the generated accessor registry and the real `verifyLogEntry()` path, then construct actual FITS header cards using `logMeta` with synthetic log timestamps. Verify outlet lists serialize as decimal numbers and use state selection rather than interpolation; electrical values follow their documented sample/validity policy.
+- Test common telemetry initialization, change suppression, forced interval records, acquisition failure/invalidation, power-off hooks, and lifecycle error behavior. Run the existing logger accessor/metadata and outlet-controller regression suites after integration.
 
 ## Implementation Plan
-<!-- Here the agent documents its plan for the implementation -->
+
+### 1. Resolve approval and the shared-base dependency
+
+The user identified https://github.com/magao-x/MagAOX/pull/401 as separate library coverage work and authorized changes to the outlet helper here. Continue against this checkout without merging that PR; its coverage will be reconciled from that effort. The remaining decisions are recorded above. Establish a local baseline for the focused suites and keep the work on the namespaced feature branch.
+
+### 2. Define the virtual configuration and INDI contract
+
+Proposed configuration, using illustrative device names:
+
+```ini
+[device]
+pollInterval=5        # seconds between explicit source refreshes
+staleTimeout=15       # seconds without a valid refresh before invalidation
+
+[outlet1]
+device=pdu0
+channel=fwtelsim
+
+[outlet2]
+device=usbhub0
+channel=fwtelsim
+
+[fwtelsim]
+outlets=1,2
+onOrder=0,1           # command AC/DC power before the USB channel
+offOrder=1,0          # command the USB channel off first
+onDelays=0,500        # milliseconds; the first entry is ignored
+offDelays=0,500
+```
+
+The app first consumes and validates `[device]` and `[outletN]` sections, allocates the contiguous outlet vector, sets `m_firstOne=true`, then delegates remaining channel sections to `outletController::loadConfig()`. Both `outlet` and `outlets` retain their existing base meaning. Validate references, order permutations, and delay vector lengths before the base can index them. Reject collisions with standard published property names. The physical controller configurations need no syntax changes.
+
+A consumer app changes only its normal power configuration:
+
+```ini
+[power]
+device=vpdu0
+channel=fwtelsim
+```
+
+Document source-channel delays separately from virtual delays: virtual totals in the existing GUI metadata cannot include the remote devices' complete transition/boot time. Keep numeric `channelOutlets` for GUI compatibility; the mapping is documented in the virtual app configuration.
+
+### 3. Add telemetry schemas and complete logger support
+
+Proposed generic type `telem_outlet`:
+
+- `first_outlet:uint8`: 0 or 1, matching the controller's numbering convention; it is not an outlet count.
+- `states:[int8]`: arbitrary-length observed state vector in internal outlet order, values `-1`, `0`, `1`, `2`.
+
+Provide a typed state-vector accessor for software use, a comma-separated decimal String metadata accessor for FITS, and an unsigned numbering accessor. Suggested HIERARCH keywords are `OUTLET STATES` and `OUTLET FIRST`; both use state metadata semantics. Outlet identity is `vector index + first_outlet`, and channel mappings are defined by the logged/documented controller configuration. Channel targets and names are not required in this generic snapshot.
+
+Proposed derived type `telem_pdu` contains `frequency`, `voltage`, `current` floats in Hz/V/A and a `valid` boolean. Build a complete telemetry snapshot only after all required electrical fields of a status response have been parsed successfully, invalidate it on acquisition failure/disconnect, and distinguish unavailable startup data. Keep valid sample values independent of partially updated parser members. Use the existing per-field state metadata selection for FITS; values and validity are serialized together in each binary record. The existing FITS interval selector can choose each field's first changed value, so it does not imply a simultaneous grouped measurement. Do not interpolate across invalid samples, and include the validity field alongside electrical values.
+
+Add the schema/type headers, unique event codes, `lastRecord` definitions, `libMagAOX/Makefile` dependencies, and explicit `verifyLogEntry()` cases. Regenerate through the existing build rather than editing generated files, which are ignored by git. Build the affected logger consumers (`logdump` and `xrif2fits`) locally and verify actual FITS cards in tests; new types need no hardcoded instrument header configuration in `xrif2fits`.
+
+### 4. Integrate common recording and app lifecycle
+
+Add generic recording to the outlet helper following the existing helper-to-derived `telem()` pattern. Store the previous snapshot and initial-record flag per instance. Keep recording independent of whether an INDI driver is attached; placing telemetry behind `updateINDI()`'s no-driver early return would suppress it in otherwise valid contexts.
+
+Each of the four apps owns a single `dev::telemeter<app>` with the normal friend/type declarations, `checkRecordTimes()`, and `recordTelem(const telem_outlet *)`. Tripp Lite also schedules `telem_pdu`. Prefer `TELEMETER_*` lifecycle macros, and expose generic recording to derived apps without copying state serialization.
+
+Wire recording after observed state updates and invalidation/power-off changes, plus forced periodic records. Ensure early-return FSM paths and `whilePowerOff()` do not inadvertently skip required snapshots. Snapshot state under the existing synchronization policy, release any lifetime-only lock scope before operations needing the same lock, and avoid holding the INDI mutex while waiting for external events. Keep legacy command/event logs and existing healthy-device behavior intact.
+
+Replace `setupINDI()` in DCDU/USB hub with `outletController::appStartup()` and propagate configuration failures instead of ignoring them. Resolve helper/app overloads explicitly when adding the common telemetry hooks.
+
+### 5. Implement the virtual app
+
+Create the standard header-only app and entrypoint. Use a stable vector/map of remote endpoint properties and one dispatcher for dynamic source callbacks; register one `fsm` property per remote device. Reuse `MagAOXApp` for subscriptions, property publication, discovery retries, and sending commands rather than creating another INDI client framework.
+
+Under the proposed dispatch policy, `turnOutletOn/Off()` builds a minimal Text property with the configured device/channel and a single `target` element. A successful return means the command was sent. Source callbacks alone update observed states; remote targets do not. Merge partial Def/Set values by element and validate types and state strings.
+
+Under the proposed availability policy, a validated app is READY as a service, and its channel callback preflights all required endpoint availability before delegating sequencing to the base. Keep independent channels usable. Subscribe to source FSM changes, periodically request fresh channel/FSM definitions, and invalidate snapshots when refreshes fail or expire; use a monotonic clock and existing INDI get-property facilities. Check availability again immediately before each send, so a detected mid-sequence failure stops later traffic. Report the failure and retain the partial observed state without rollback or automatic replay.
+
+Use the selected base's sequencing lock contract, reject conflicting endpoint sharing for this initial version, and publish normal aggregate states through `updateINDI()`. Do not mark a switch On/Off simply because outgoing traffic succeeded. Confirmed-state sequencing is outside the approved scope.
+
+Register the app in the appropriate root build lists (proposed `apps_aoc`, `apps_sim`, and `all_buildable_apps`) and ignore its executable. Add local example configuration and application documentation. Deployment placement and actual remote device names remain installation choices for the user.
+
+### 6. Complete controller tests and focused verification
+
+Build the behavioral suites listed above, inventory uncovered lines by real function, and add meaningful failure cases until all four controller classes meet the metric. Exercise Tripp Lite production transport code as well as simulation; isolate BrainStem USB access completely. Keep any necessary production testing seams narrow and defaulting to the existing implementation.
+
+Document discovered defects separately. For example, Tripp Lite's parser indexes fixed character positions without first checking short-line length; length checks/error handling may be needed for deterministic malformed-input tests. Preserve valid-device behavior, avoid unrelated parser/authentication/threshold changes, and coordinate generic outlet fixes with the other effort.
+
+Run app builds, focused app suites, existing outlet/power/logger regression suites, and focused coverage. Run `clang-format` on all touched C++ files with the repository configuration, check the full changed-file documentation, and review `git diff --check`. Update this plan with actual commands, results, coverage totals, and remaining concerns.
+
+### 7. Commit and hand off
+
+Keep functional changes and their updated engineering notes in clean commits, follow with documentation-only changes, and use a separate final formatting-only commit if cleanup remains. Use brief messages with the required `Co-authored by  GPT-6` attribution. Provide the required copyable PR title and attributed Markdown description, summarize affected files and validation, and list user-run configuration/hardware follow-up. Do not deploy or operate instrument hardware.
+
+### Expected implementation files
+
+- New `apps/virtualPDU/{virtualPDU.hpp,virtualPDU.cpp,Makefile}`, example configuration, application documentation, and controller tests.
+- `libMagAOX/app/dev/outletController.hpp` for common recording, documentation, and the approved derived contract; `outletController.cpp` only if related support genuinely requires it.
+- The three existing controller headers; their tests, plus a new `apps/acronameUsbHub/tests/acronameUsbHub_test.cpp`. Touched entrypoints or simulator files receive the same complete documentation pass.
+- New `libMagAOX/logger/types/{telem_outlet.hpp,telem_pdu.hpp}` and matching `types/schemas/*.fbs`; `logger/logCodes.dat`, `logger/types/telem.cpp`, `logger/logMeta.cpp`, `libMagAOX/Makefile`, and focused logger tests.
+- Root `Makefile`, `.gitignore`, `tests/tests.list`, and `tests/Makefile.one` as required for new build/test dependencies. `tests/groups.dox` only if an additional group declaration is needed; `application_unit_test` already exists.
+- This plan. No GUI production source change is expected, and no actual instrument configuration is present or edited by this plan.
 
 ## Follow-up and Edge Cases
-<!-- The agent should list any planned follow up and any edge cases that are not addressed >
+
+- Coordinate new outlet-helper lines with the coverage effort in PR #401; merging that PR is not a prerequisite.
+- TODO: support shared endpoints between virtual channels, an explicitly identified future use-case. Initial configuration rejects sharing to avoid ambiguous concurrent sequencing.
+- Fixed delays specify outgoing command spacing. A remote channel may itself contain multiple outlets and delays, so dispatch success and virtual delay metadata cannot guarantee completion. A sequence that powers the controller responsible for its next step needs confirmation/wait semantics or a deployment design that keeps that controller available.
+
+Comment: a vPDU powering another PDU is tricky, but is not envisioned.
+
+- A source can disappear after preflight or during a delay. Refresh-based availability has a bounded detection interval and cannot make a distributed power operation atomic. Previously sent commands remain in effect; operators see actual reported partial/unknown states.
+- Def/Set updates normally suppress unchanged values. Explicit refreshes, rather than age of unsolicited changes, establish freshness; malformed or target-only updates do not restore observed-state validity.
+- Direct self-reference is rejected. Cross-instance cycles, chains of virtual PDUs, shared physical channels configured in separate instances, and external clients issuing conflicting commands require deployment review; initial configuration limits do not provide global exclusivity.
+- Current mixed-known/unknown aggregation is preserved (`Int`), which the power FSM treats as unknown. Existing consumer behavior during unknown power remains unchanged and is verified through its tests rather than redesigned here.
+- Removing duplicate buttons and changing consumers to virtual `[power]` channels are configuration rollout tasks. GUI source changes are unnecessary for the standard interface; GUI metadata still cannot show complete remote timing.
+- Tripp Lite authentication cleanup, new USB-hub sensors, global integer-vector FITS support, outlet-base 100% coverage, and changes to warning thresholds are separate work unless specifically requested.
+- FITS vectors use the existing string-card convention. Test large values and long-card handling; practical record/file limits still apply despite avoiding a fixed outlet count in the schema.
+- The exact 100% coverage denominator and uncovered-line inventory will be recorded as the offline suites build. No instrument operations are performed by the agent.
+
+
+## Execution Notes
+
+- Implemented `virtualPDU` with the approved one-based mappings, dispatch-only ordering, per-channel readiness, and source refresh/expiry. Added the real power-consumer callback test and a known shared-endpoint TODO.
+- Added signed-byte `telem_outlet` and complete-sample/validity `telem_pdu` schemas, accessors, message/verification support, FITS cards, event registration, and scheduling. Source state writes and aggregate reads now use a common outlet-state mutex.
+- All three existing controllers own one telemeter, use its interface macros, and propagate app configuration failures. DCDU now invalidates observations and maintains periodic telemetry through its power-off hooks; USB-hub hooks retain their existing power-off semantics.
+- Tripp Lite electrical telemetry retains only complete successful samples and invalidates failed/deferred/partial measurements. The parser now checks short lines and rejects malformed numeric values; valid protocol responses and warning thresholds are preserved.
+- Renamed DCDU source-property members to `m_indiP_chN`, updating every callback and reference. The external numeric channel protocol is unchanged.
+- Added shared, threadless test boundaries, private-FIFO INDI serialization/capture, scripted production telnet I/O, a BrainStem substitute that cannot enumerate USB, and production simulator coverage. No test uses an external server or hardware.
+- The initial local build exposed missing unbuilt dependencies and a generated-schema/object race. Built the local flatlogs/INDI/telnet dependencies and added the library object dependency on completed generated schemas, so parallel compilation waits for generation.
+- Focused suites passed before the final documentation/formatting pass: virtual PDU 8 cases, DCDU 4 cases, USB hub 4 cases, Tripp Lite production 6 cases, simulator 1 case, logger/FITS 3 cases. Pre-final coverage was 100% of virtual PDU 188/188, DCDU 195/195, USB hub 119/119, and Tripp Lite 359/359 executable lines, merging production/simulator paths and constructor/destructor aliases by source line. Final totals and regression/build results will be recorded after the power-off addition and formatting.
+
+- Availability uses a READY source with a fresh valid state element, including the standard Unk value. Unk therefore permits command dispatch while preserving unknown observed power; missing, malformed, stale, and non-READY observations remain unavailable. This follows the base controller's existing ability to command unknown states. Added pre-startup/failed-startup bounds and FSM guards so no request indexes uninitialized source storage.
+
+- Corrected the outlet helper's one-past-end bounds check and removed its signed-conversion overflow path. The derived config wrappers now reject those invalid physical configurations; added app-level rejection tests. The library coverage follow-up remains with PR #401.
+
+- Virtual and DCDU callbacks now record observed changes immediately, so transitions between main-loop samples are not lost. Malformed channel/FSM definitions invalidate their corresponding availability immediately; valid partial target-only channel updates preserve the last observation.
+
+- Source callbacks also publish observed INDI state changes immediately. This preserves fast power transitions for the consumer FSM instead of adding another main-loop sampling delay. Test command traffic still traverses real private FIFOs; non-command publications are captured in a bounded-transport substitute and parsed by the same production XML parser.
+
+- Current focused coverage: virtual PDU 199/199, DCDU 188/188, USB hub 119/119, Tripp Lite 359/359 executable lines (100% each). Focused app/simulator/logger suites pass, including immediate publication and callback recording. The existing outlet-controller regression suite passes (591 assertions).
+- Broader regression finding: the unchanged `libMagAOX/app/tests/MagAOXApp_test.cpp:716` expects `powerOnWait()==0` after missing required power configuration; unchanged `MagAOXApp.hpp` requests shutdown but retains the default 55. The full suite reports 11/12 cases passed. `git diff --exit-code` confirms both files are untouched. This existing library test/implementation mismatch is outside this feature and can be reconciled with the library coverage work.
+- GUI follow-up: the existing pwr GUI ignores Text Unk state updates, and its slider treats unrecognized enum states as Off. GUI source is left unchanged as planned. The virtual INDI state and consumer FSM correctly report unknown; a GUI correction for wholly unknown channels should be handled separately.

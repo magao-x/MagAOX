@@ -37,7 +37,7 @@ namespace app
   *
   * \ingroup xt1121DCDU
   */
-class xt1121DCDU : public MagAOXApp<>, public dev::outletController<xt1121DCDU>
+class xt1121DCDU : public MagAOXApp<>, public dev::outletController<xt1121DCDU>, public dev::telemeter<xt1121DCDU>
 {
 
 protected:
@@ -49,16 +49,22 @@ protected:
    int m_outletStateDelay {5000}; ///< The maximum time to wait for an outlet to change state [msec].
 
 
-   pcf::IndiProperty ip_ch0;
-   pcf::IndiProperty ip_ch1;
-   pcf::IndiProperty ip_ch2;
-   pcf::IndiProperty ip_ch3;
-   pcf::IndiProperty ip_ch4;
-   pcf::IndiProperty ip_ch5;
-   pcf::IndiProperty ip_ch6;
-   pcf::IndiProperty ip_ch7;
+   pcf::IndiProperty m_indiP_ch0;
+   pcf::IndiProperty m_indiP_ch1;
+   pcf::IndiProperty m_indiP_ch2;
+   pcf::IndiProperty m_indiP_ch3;
+   pcf::IndiProperty m_indiP_ch4;
+   pcf::IndiProperty m_indiP_ch5;
+   pcf::IndiProperty m_indiP_ch6;
+   pcf::IndiProperty m_indiP_ch7;
 
 
+
+   /// Allow the telemetry helper to dispatch this application's records.
+   friend class dev::telemeter<xt1121DCDU>;
+
+   /// The single telemetry helper owned by this application.
+   typedef dev::telemeter<xt1121DCDU> telemeterT;
 
 public:
 
@@ -75,6 +81,15 @@ public:
    /// load the configuration system results (called by MagAOXApp::setup())
    virtual void loadConfig();
 
+   /// Load app and helper configuration, propagating invalid configuration.
+   int loadConfigImpl( mx::app::appConfigurator &config /**< [in] app configuration */ );
+
+   /// Check periodic deadlines for each telemetry type recorded by this app.
+   int checkRecordTimes();
+
+   /// Force an observed outlet-state snapshot for the telemetry scheduler.
+   int recordTelem( const telem_outlet *type /**< [in] unused type selector */ );
+
    /// Startup functions
    /** Setsup the INDI vars.
      * Checks if the device was found during loadConfig.
@@ -86,6 +101,12 @@ public:
 
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
+
+   /// Invalidate observed outlets when this app loses its configured power source.
+   int onPowerOff() override;
+
+   /// Keep periodic outlet telemetry active while power is off.
+   int whilePowerOff() override;
 
    /// Update a single outlet state
    /**
@@ -125,14 +146,19 @@ protected:
      */
    pcf::IndiProperty * xtChannelProperty( int outletNum /**< [in] the outlet number */);
 
-   INDI_SETCALLBACK_DECL(xt1121DCDU, ip_ch0);
-   INDI_SETCALLBACK_DECL(xt1121DCDU, ip_ch1);
-   INDI_SETCALLBACK_DECL(xt1121DCDU, ip_ch2);
-   INDI_SETCALLBACK_DECL(xt1121DCDU, ip_ch3);
-   INDI_SETCALLBACK_DECL(xt1121DCDU, ip_ch4);
-   INDI_SETCALLBACK_DECL(xt1121DCDU, ip_ch5);
-   INDI_SETCALLBACK_DECL(xt1121DCDU, ip_ch6);
-   INDI_SETCALLBACK_DECL(xt1121DCDU, ip_ch7);
+   /// Store a received source property and record the resulting observed outlet snapshot.
+   int processSourceUpdate( pcf::IndiProperty &property /**< [in/out] stable source subscription */,
+                            const pcf::IndiProperty &ipRecv /**< [in] incoming source observation */,
+                            int outletNum /**< [in] zero-based outlet index */ );
+
+   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch0);
+   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch1);
+   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch2);
+   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch3);
+   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch4);
+   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch5);
+   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch6);
+   INDI_SETCALLBACK_DECL(xt1121DCDU, m_indiP_ch7);
 };
 
 xt1121DCDU::xt1121DCDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -142,7 +168,7 @@ xt1121DCDU::xt1121DCDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 
    setNumberOfOutlets(8);
 
-   return;
+
 }
 
 void xt1121DCDU::setupConfig()
@@ -153,18 +179,31 @@ void xt1121DCDU::setupConfig()
 
 
    dev::outletController<xt1121DCDU>::setupConfig(config);
+   TELEMETER_SETUP_CONFIG( config );
 
 }
 
 
 void xt1121DCDU::loadConfig()
 {
+   if( loadConfigImpl( config ) < 0 )
+   {
+      log<text_log>( "Invalid outlet-controller configuration", logPrio::LOG_CRITICAL );
+      m_shutdown = true;
+   }
+}
+
+inline
+int xt1121DCDU::loadConfigImpl( mx::app::appConfigurator &config )
+{
    config(m_deviceName, "device.name");
 
    m_channelNumbers = {0,1,2,3,4,5,6,7};
    config(m_channelNumbers, "device.channelNumbers");
 
-   dev::outletController<xt1121DCDU>::loadConfig(config);
+   if( dev::outletController<xt1121DCDU>::loadConfig( config ) < 0 ) return -1;
+   TELEMETER_LOAD_CONFIG( config );
+   return 0;
 
 }
 
@@ -177,20 +216,21 @@ int xt1121DCDU::appStartup()
       return log<text_log,-1>("Something other than 8 channel numbers specified.", logPrio::LOG_CRITICAL);
    }
 
-   REG_INDI_SETPROP(ip_ch0, m_deviceName, xtChannelName(m_channelNumbers[0]));
-   REG_INDI_SETPROP(ip_ch1, m_deviceName, xtChannelName(m_channelNumbers[1]));
-   REG_INDI_SETPROP(ip_ch2, m_deviceName, xtChannelName(m_channelNumbers[2]));
-   REG_INDI_SETPROP(ip_ch3, m_deviceName, xtChannelName(m_channelNumbers[3]));
-   REG_INDI_SETPROP(ip_ch4, m_deviceName, xtChannelName(m_channelNumbers[4]));
-   REG_INDI_SETPROP(ip_ch5, m_deviceName, xtChannelName(m_channelNumbers[5]));
-   REG_INDI_SETPROP(ip_ch6, m_deviceName, xtChannelName(m_channelNumbers[6]));
-   REG_INDI_SETPROP(ip_ch7, m_deviceName, xtChannelName(m_channelNumbers[7]));
+   REG_INDI_SETPROP(m_indiP_ch0, m_deviceName, xtChannelName(m_channelNumbers[0]));
+   REG_INDI_SETPROP(m_indiP_ch1, m_deviceName, xtChannelName(m_channelNumbers[1]));
+   REG_INDI_SETPROP(m_indiP_ch2, m_deviceName, xtChannelName(m_channelNumbers[2]));
+   REG_INDI_SETPROP(m_indiP_ch3, m_deviceName, xtChannelName(m_channelNumbers[3]));
+   REG_INDI_SETPROP(m_indiP_ch4, m_deviceName, xtChannelName(m_channelNumbers[4]));
+   REG_INDI_SETPROP(m_indiP_ch5, m_deviceName, xtChannelName(m_channelNumbers[5]));
+   REG_INDI_SETPROP(m_indiP_ch6, m_deviceName, xtChannelName(m_channelNumbers[6]));
+   REG_INDI_SETPROP(m_indiP_ch7, m_deviceName, xtChannelName(m_channelNumbers[7]));
 
-   if(dev::outletController<xt1121DCDU>::setupINDI() < 0)
+   if(dev::outletController<xt1121DCDU>::appStartup() < 0)
    {
       return log<text_log,-1>("Error setting up INDI for outlet control.", logPrio::LOG_CRITICAL);
    }
 
+   TELEMETER_APP_STARTUP;
    state(stateCodes::NOTCONNECTED);
 
    return 0;
@@ -217,6 +257,8 @@ int xt1121DCDU::appLogic()
       if(rv < 0) return log<software_error,-1>({__FILE__, __LINE__});
 
       dev::outletController<xt1121DCDU>::updateINDI();
+      if( recordOutletStates() < 0 ) return -1;
+      TELEMETER_APP_LOGIC;
 
       return 0;
    }
@@ -230,6 +272,21 @@ int xt1121DCDU::appLogic()
 int xt1121DCDU::appShutdown()
 {
    //don't bother
+   TELEMETER_APP_SHUTDOWN;
+   return 0;
+}
+
+inline int xt1121DCDU::onPowerOff()
+{
+   setAllOutletStates( OUTLET_STATE_UNKNOWN );
+   std::lock_guard<std::mutex> lock( m_indiMutex );
+   dev::outletController<xt1121DCDU>::updateINDI();
+   return recordOutletStates();
+}
+
+inline int xt1121DCDU::whilePowerOff()
+{
+   TELEMETER_APP_LOGIC;
    return 0;
 }
 
@@ -249,7 +306,7 @@ int xt1121DCDU::updateOutletState( int outletNum )
       else if((*ip)["current"].get<int>() == 1) os = OUTLET_STATE_ON;
    }
 
-   m_outletStates[outletNum] = os;
+   setOutletState( outletNum, os );
 
    return 0;
 
@@ -332,88 +389,85 @@ pcf::IndiProperty * xt1121DCDU::xtChannelProperty( int outletNum )
    switch(outletNum)
    {
       case 0:
-         return &ip_ch0;
+         return &m_indiP_ch0;
       case 1:
-         return &ip_ch1;
+         return &m_indiP_ch1;
       case 2:
-         return &ip_ch2;
+         return &m_indiP_ch2;
       case 3:
-         return &ip_ch3;
+         return &m_indiP_ch3;
       case 4:
-         return &ip_ch4;
+         return &m_indiP_ch4;
       case 5:
-         return &ip_ch5;
+         return &m_indiP_ch5;
       case 6:
-         return &ip_ch6;
+         return &m_indiP_ch6;
       case 7:
-         return &ip_ch7;
+         return &m_indiP_ch7;
       default:
          return nullptr;
    }
 }
 
-INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch0)(const pcf::IndiProperty &ipRecv)
+inline int xt1121DCDU::processSourceUpdate( pcf::IndiProperty &property, const pcf::IndiProperty &ipRecv, int outletNum )
 {
-   std::lock_guard<std::mutex> guard(m_indiMutex);
-   ip_ch0 = ipRecv;
-
-   return updateOutletState(0);
+   std::lock_guard<std::mutex> lock( m_indiMutex );
+   property = ipRecv;
+   int rv = updateOutletState( outletNum );
+   if( rv < 0 ) return rv;
+   dev::outletController<xt1121DCDU>::updateINDI();
+   return recordOutletStates();
 }
 
-INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch1)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN(xt1121DCDU, m_indiP_ch0)(const pcf::IndiProperty &ipRecv)
 {
-   std::lock_guard<std::mutex> guard(m_indiMutex);
-   ip_ch1 = ipRecv;
-
-   return updateOutletState(1);
+   return processSourceUpdate( m_indiP_ch0, ipRecv, 0 );
 }
 
-INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch2)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN(xt1121DCDU, m_indiP_ch1)(const pcf::IndiProperty &ipRecv)
 {
-   std::lock_guard<std::mutex> guard(m_indiMutex);
-   ip_ch2 = ipRecv;
-
-   return updateOutletState(2);
+   return processSourceUpdate( m_indiP_ch1, ipRecv, 1 );
 }
 
-INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch3)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN(xt1121DCDU, m_indiP_ch2)(const pcf::IndiProperty &ipRecv)
 {
-   std::lock_guard<std::mutex> guard(m_indiMutex);
-   ip_ch3 = ipRecv;
-
-   return updateOutletState(3);
+   return processSourceUpdate( m_indiP_ch2, ipRecv, 2 );
 }
 
-INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch4)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN(xt1121DCDU, m_indiP_ch3)(const pcf::IndiProperty &ipRecv)
 {
-   std::lock_guard<std::mutex> guard(m_indiMutex);
-   ip_ch4 = ipRecv;
-
-   return updateOutletState(4);
+   return processSourceUpdate( m_indiP_ch3, ipRecv, 3 );
 }
 
-INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch5)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN(xt1121DCDU, m_indiP_ch4)(const pcf::IndiProperty &ipRecv)
 {
-   std::lock_guard<std::mutex> guard(m_indiMutex);
-   ip_ch5 = ipRecv;
-
-   return updateOutletState(5);
+   return processSourceUpdate( m_indiP_ch4, ipRecv, 4 );
 }
 
-INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch6)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN(xt1121DCDU, m_indiP_ch5)(const pcf::IndiProperty &ipRecv)
 {
-   std::lock_guard<std::mutex> guard(m_indiMutex);
-   ip_ch6 = ipRecv;
-
-   return updateOutletState(6);
+   return processSourceUpdate( m_indiP_ch5, ipRecv, 5 );
 }
 
-INDI_SETCALLBACK_DEFN(xt1121DCDU, ip_ch7)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN(xt1121DCDU, m_indiP_ch6)(const pcf::IndiProperty &ipRecv)
 {
-   std::lock_guard<std::mutex> guard(m_indiMutex);
-   ip_ch7 = ipRecv;
+   return processSourceUpdate( m_indiP_ch6, ipRecv, 6 );
+}
 
-   return updateOutletState(7);
+INDI_SETCALLBACK_DEFN(xt1121DCDU, m_indiP_ch7)(const pcf::IndiProperty &ipRecv)
+{
+   return processSourceUpdate( m_indiP_ch7, ipRecv, 7 );
+}
+
+
+inline int xt1121DCDU::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes( telem_outlet() );
+}
+
+inline int xt1121DCDU::recordTelem( const telem_outlet * )
+{
+   return recordOutletStates( true );
 }
 
 } //namespace app

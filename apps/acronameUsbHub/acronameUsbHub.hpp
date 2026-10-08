@@ -42,7 +42,7 @@ namespace app
   * \ingroup acronameUsbHub
   *
   */
-class acronameUsbHub : public MagAOXApp<>, public dev::outletController<acronameUsbHub>
+class acronameUsbHub : public MagAOXApp<>, public dev::outletController<acronameUsbHub>, public dev::telemeter<acronameUsbHub>
 {
 
 protected:
@@ -60,6 +60,12 @@ protected:
 
    bool m_connected {false}; ///< Whether or not the hub is currently connected
 
+   /// Allow the telemetry helper to dispatch this application's records.
+   friend class dev::telemeter<acronameUsbHub>;
+
+   /// The single telemetry helper owned by this application.
+   typedef dev::telemeter<acronameUsbHub> telemeterT;
+
 public:
 
    ///Default c'tor
@@ -73,6 +79,15 @@ public:
 
    /// load the configuration system results (called by MagAOXApp::setup())
    virtual void loadConfig();
+
+   /// Load app and helper configuration, propagating invalid configuration.
+   int loadConfigImpl( mx::app::appConfigurator &config /**< [in] app configuration */ );
+
+   /// Check periodic deadlines for each telemetry type recorded by this app.
+   int checkRecordTimes();
+
+   /// Force an observed outlet-state snapshot for the telemetry scheduler.
+   int recordTelem( const telem_outlet *type /**< [in] unused type selector */ );
 
    /// Startup functions
    /** Sets up the INDI vars.
@@ -126,7 +141,7 @@ acronameUsbHub::acronameUsbHub() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MO
 
    setNumberOfOutlets(8);
 
-   return;
+
 }
 
 inline
@@ -145,6 +160,7 @@ void acronameUsbHub::setupConfig()
    config.add("device.serialNumber", "", "device.serialNumber", argType::Required, "device", "serialNumber", false, "uint32", "The identifying serial number of the hub.");
 
    dev::outletController<acronameUsbHub>::setupConfig(config);
+   TELEMETER_SETUP_CONFIG( config );
 }
 
 
@@ -153,8 +169,20 @@ void acronameUsbHub::setupConfig()
 inline
 void acronameUsbHub::loadConfig()
 {
+   if( loadConfigImpl( config ) < 0 )
+   {
+      log<text_log>( "Invalid outlet-controller configuration", logPrio::LOG_CRITICAL );
+      m_shutdown = true;
+   }
+}
+
+inline
+int acronameUsbHub::loadConfigImpl( mx::app::appConfigurator &config )
+{
    config(m_serialNumber, "device.serialNumber");
-   dev::outletController<acronameUsbHub>::loadConfig(config);
+   if( dev::outletController<acronameUsbHub>::loadConfig( config ) < 0 ) return -1;
+   TELEMETER_LOAD_CONFIG( config );
+   return 0;
 }
 
 
@@ -163,11 +191,12 @@ inline
 int acronameUsbHub::appStartup()
 {
 
-   if(dev::outletController<acronameUsbHub>::setupINDI() < 0)
+   if(dev::outletController<acronameUsbHub>::appStartup() < 0)
    {
       return log<text_log,-1>("Error setting up INDI for outlet control.", logPrio::LOG_CRITICAL);
    }
 
+   TELEMETER_APP_STARTUP;
    state(stateCodes::NOTCONNECTED);
 
    return 0;
@@ -177,6 +206,7 @@ int acronameUsbHub::appStartup()
 inline
 int acronameUsbHub::appLogic()
 {
+   TELEMETER_APP_LOGIC;
    if( state() == stateCodes::POWERON)
    {
       state(stateCodes::NOTCONNECTED);
@@ -240,8 +270,9 @@ int acronameUsbHub::appLogic()
       {
          m_hub.disconnect();
          m_connected = false;
+         setAllOutletStates( OUTLET_STATE_UNKNOWN );
          state(stateCodes::NOTCONNECTED);
-         return 0;
+         return recordOutletStates();
       }
 
 
@@ -249,6 +280,8 @@ int acronameUsbHub::appLogic()
 
       std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing INDI
       dev::outletController<acronameUsbHub>::updateINDI();
+      if( recordOutletStates() < 0 ) return -1;
+
    }
 
    return 0;
@@ -264,10 +297,7 @@ int acronameUsbHub::onPowerOff()
       m_connected = false;
    }
 
-   for(size_t n=0;n<m_outletStates.size();++n)
-   {
-      m_outletStates[n] = OUTLET_STATE_OFF;
-   }
+   setAllOutletStates( OUTLET_STATE_OFF );
 
    std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing INDI
    dev::outletController<acronameUsbHub>::updateINDI(); //Update the outlets and channel states
@@ -280,18 +310,20 @@ int acronameUsbHub::onPowerOff()
 
 
 
-   return 0;
+   return recordOutletStates();
 }
 
 inline
 int acronameUsbHub::whilePowerOff()
 {
+   TELEMETER_APP_LOGIC;
    return 0;
 }
 
 inline
 int acronameUsbHub::appShutdown()
 {
+   TELEMETER_APP_SHUTDOWN;
    return 0;
 }
 
@@ -316,11 +348,11 @@ int acronameUsbHub::updateOutletState( int outletNum )
 
    if(state & 1)
    {
-      m_outletStates[outletNum] = OUTLET_STATE_ON;
+      setOutletState( outletNum, OUTLET_STATE_ON );
    }
    else
    {
-      m_outletStates[outletNum] = OUTLET_STATE_OFF;
+      setOutletState( outletNum, OUTLET_STATE_OFF );
    }
 
    return 0;
@@ -367,6 +399,17 @@ int acronameUsbHub::turnOutletOff( int outletNum )
 
 
 
+
+
+inline int acronameUsbHub::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes( telem_outlet() );
+}
+
+inline int acronameUsbHub::recordTelem( const telem_outlet * )
+{
+   return recordOutletStates( true );
+}
 
 }//namespace app
 } //namespace MagAOX

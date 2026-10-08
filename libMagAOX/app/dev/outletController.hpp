@@ -74,6 +74,9 @@ struct outletController
    std::vector<int> m_outletStates; /**< The current states of each outlet.  These MUST be updated by derived 
                                          classes in the overridden \ref updatedOutletState.*/
 
+   /// Protect observed state and the telemetry change-suppression snapshot.
+   mutable std::mutex m_outletStateMutex;
+
    pcf::IndiProperty m_indiP_outletStates; ///< Indi Property to show individual outlet states.
 
    /// Structure containing the specification of one channel.
@@ -116,6 +119,16 @@ struct outletController
    /// An INDI property which publishes the total off delay for each channel.  Useful for GUIs, etc.
    pcf::IndiProperty m_indiP_chOffDelays;
 
+   /// Previous observed state snapshot used for change suppression.
+   std::vector<int> m_lastOutletStates;
+
+   /// Whether at least one outlet telemetry record has been emitted.
+   bool m_outletTelemRecorded {false};
+
+   /// Record observed outlet states, independently of INDI publication.
+   int recordOutletStates( bool force /**< [in] record even if states are unchanged */ = false );
+
+   /// Release the channel mutexes owned by this helper.
    ~outletController();
 
    ///Setup an application configurator for an outletController
@@ -162,7 +175,14 @@ struct outletController
    int setNumberOfOutlets( int numOuts /**< [in] the number of outlets to allocate */);
 
    /// Get the currently stored outlet state, without updating from device.
-   int outletState( int outletNum );
+   int outletState( int outletNum /**< [in] zero-based outlet index */ );
+
+   /// Store one observed outlet state under the state mutex.
+   void setOutletState( int outletNum /**< [in] zero-based outlet index */,
+                        int state /**< [in] observed OUTLET_STATE value */ );
+
+   /// Replace every outlet state, for power-off or observation invalidation.
+   void setAllOutletStates( int state /**< [in] observed OUTLET_STATE value */ );
 
    /// Get the states of all outlets from the device.
    /** The default implementation for-loops through each outlet, calling \ref updateOutletState.
@@ -299,6 +319,19 @@ private:
 };
 
 template<class derivedT>
+int outletController<derivedT>::recordOutletStates( bool force )
+{
+   std::lock_guard<std::mutex> lock( m_outletStateMutex );
+   if( !force && m_outletTelemRecorded && m_lastOutletStates == m_outletStates ) return 0;
+   std::vector<int8_t> states( m_outletStates.begin(), m_outletStates.end() );
+   int rv = derived().template telem<telem_outlet>( { static_cast<uint8_t>( m_firstOne ), states } );
+   if( rv < 0 ) return rv;
+   m_lastOutletStates = m_outletStates;
+   m_outletTelemRecorded = true;
+   return 0;
+}
+
+template<class derivedT>
 outletController<derivedT>::~outletController()
 {
    for(auto & it : m_channels)
@@ -375,7 +408,7 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator & config )
       for(size_t k=0;k<outlets.size(); ++k)
       {
          ///\todo test this error
-         if( (int) outlets[k] - m_firstOne < 0 || (int) outlets[k] - m_firstOne > (int) m_outletStates.size())
+         if( outlets[k] < static_cast<size_t>( m_firstOne ) || outlets[k] - m_firstOne >= m_outletStates.size() )
          {
             return derivedT::template log<software_error,-1>( std::format("Outlet {} in Channel ""{} is not valid", outlets[k], chSections[n]), logPrio::LOG_ERROR);
             
@@ -465,7 +498,22 @@ int outletController<derivedT>::setNumberOfOutlets( int numOuts )
 template<class derivedT>
 int outletController<derivedT>::outletState( int outletNum )
 {
+   std::lock_guard<std::mutex> lock( m_outletStateMutex );
    return m_outletStates[outletNum];
+}
+
+template<class derivedT>
+void outletController<derivedT>::setOutletState( int outletNum, int state )
+{
+   std::lock_guard<std::mutex> lock( m_outletStateMutex );
+   m_outletStates[outletNum] = state;
+}
+
+template<class derivedT>
+void outletController<derivedT>::setAllOutletStates( int state )
+{
+   std::lock_guard<std::mutex> lock( m_outletStateMutex );
+   std::fill( m_outletStates.begin(), m_outletStates.end(), state );
 }
 
 template<class derivedT>
@@ -523,11 +571,12 @@ std::vector<unsigned> outletController<derivedT>::channelOffDelays( const std::s
 template<class derivedT>
 int outletController<derivedT>::channelState( const std::string & channel )
 {
-   int st = outletState(m_channels[channel].m_outlets[0]);
-
-   for( size_t n = 1; n < m_channels[channel].m_outlets.size(); ++n )
+   std::lock_guard<std::mutex> lock( m_outletStateMutex );
+   const auto &outlets = m_channels[channel].m_outlets;
+   int st = m_outletStates[outlets[0]];
+   for( size_t n = 1; n < outlets.size(); ++n )
    {
-      if( st != outletState(m_channels[channel].m_outlets[n]) ) st = 1;
+      if( st != m_outletStates[outlets[n]] ) st = OUTLET_STATE_INTERMEDIATE;
    }
 
    return st;
@@ -862,10 +911,15 @@ int outletController<derivedT>::updateINDI()
 {
    if( !derived().m_indiDriver ) return 0;
 
+   std::vector<int> states;
+   { //mutex scope
+      std::lock_guard<std::mutex> lock( m_outletStateMutex );
+      states = m_outletStates;
+   }
    //Publish outlet states (only bother if they've changed)
-   for(size_t i=0; i< m_outletStates.size(); ++i)
+   for(size_t i=0; i< states.size(); ++i)
    {
-      indi::updateIfChanged(m_indiP_outletStates, std::to_string(i+m_firstOne), stateIntToString(m_outletStates[i]), derived().m_indiDriver);
+      indi::updateIfChanged(m_indiP_outletStates, std::to_string(i+m_firstOne), stateIntToString(states[i]), derived().m_indiDriver);
    }
 
    //Publish channel states (only bother if they've changed)
