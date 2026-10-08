@@ -44,14 +44,14 @@ class zaberLowLevel_test : public zaberLowLevel
 
     /// Set up a single staged snapshot and INDI transport for power-off tests.
     int setupPowerOffSnapshot( const std::string &stageName, /**< [in] Retained stage name. */
-                               long rawPos, /**< [in] Retained raw position. */
-                               bool parked, /**< [in] Retained parked state. */
-                               long maxPos, /**< [in] Retained position limit. */
-                               time_t lastHomed /**< [in] Retained last-home time. */ );
+                               long               rawPos,    /**< [in] Retained raw position. */
+                               bool               parked,    /**< [in] Retained parked state. */
+                               long               maxPos,    /**< [in] Retained position limit. */
+                               time_t             lastHomed /**< [in] Retained last-home time. */ );
 
     /// Configure a stage entry for discovery tests.
     int addConfiguredStage( const std::string &stageName, /**< [in] Configured stage name. */
-                            const std::string &serial, /**< [in] Configured serial number. */
+                            const std::string &serial,    /**< [in] Configured serial number. */
                             int deviceAddress = -1 /**< [in] Cached address, or -1 if not discovered. */ );
 
     /// Load the parsed system-serial snapshot through the production discovery code.
@@ -59,7 +59,7 @@ class zaberLowLevel_test : public zaberLowLevel
 
     /// Set the cached device address for a configured stage.
     int setDeviceAddressFor( size_t stageIndex, /**< [in] Configured stage index. */
-                             int deviceAddress /**< [in] New cached address. */ );
+                             int    deviceAddress /**< [in] New cached address. */ );
 
     /// Get the cached device address for a configured stage.
     int deviceAddressFor( size_t stageIndex /**< [in] Configured stage index. */ );
@@ -96,7 +96,8 @@ class zaberLowLevel_test : public zaberLowLevel
     std::string currStateValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
     /// Get the typed warning-switch state for a stage.
-    pcf::IndiElement::SwitchStateType warnValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
+    pcf::IndiElement::SwitchStateType
+    warnValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
     /// Invoke the power-off handling under test.
     int doOnPowerOff();
@@ -121,7 +122,8 @@ inline zaberLowLevel_test::zaberLowLevel_test( const std::string &device )
     XWCTEST_SETUP_INDI_NEW_PROP( led_enable );
 }
 
-inline int zaberLowLevel_test::setupPowerOffSnapshot( const std::string &stageName, long rawPos, bool parked, long maxPos, time_t lastHomed )
+inline int zaberLowLevel_test::setupPowerOffSnapshot(
+    const std::string &stageName, long rawPos, bool parked, long maxPos, time_t lastHomed )
 {
     std::error_code ec;
 
@@ -162,7 +164,8 @@ inline int zaberLowLevel_test::setupPowerOffSnapshot( const std::string &stageNa
     return ( m_indiDriver && m_indiDriver->good() ) ? 0 : -1;
 }
 
-inline int zaberLowLevel_test::addConfiguredStage( const std::string &stageName, const std::string &serial, int deviceAddress )
+inline int
+zaberLowLevel_test::addConfiguredStage( const std::string &stageName, const std::string &serial, int deviceAddress )
 {
     m_stages.emplace_back( this );
     m_stages.back().name( stageName );
@@ -209,7 +212,8 @@ inline stateCodes::stateCodeT zaberLowLevel_test::appState()
     return state();
 }
 
-inline std::string zaberLowLevel_test::propertyValue( const pcf::IndiProperty &property, const std::string &element ) const
+inline std::string zaberLowLevel_test::propertyValue( const pcf::IndiProperty &property,
+                                                      const std::string       &element ) const
 {
     return property[element].getValue();
 }

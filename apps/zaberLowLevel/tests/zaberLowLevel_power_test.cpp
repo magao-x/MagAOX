@@ -14,7 +14,15 @@ extern "C"
 namespace zaberPowerHarness
 {
 /// Scripted transport operation selected to fail.
-enum class Operation { None, Connect, Disconnect, Drain, Send, Receive };
+enum class Operation
+{
+    None,
+    Connect,
+    Disconnect,
+    Drain,
+    Send,
+    Receive
+};
 
 /// Hardware-free transport state and one-shot power-target injection.
 struct Script
@@ -48,7 +56,7 @@ inline Script g_script;
 bool fail( Operation operation /**< [in] Operation being attempted. */ );
 
 /// Simulate opening an ASCII port without opening a file or changing hardware.
-int connect( z_port *port, /**< [out] Scripted port marker. */
+int connect( z_port     *port, /**< [out] Scripted port marker. */
              const char *name /**< [in] Ignored device path. */ );
 
 /// Simulate closing a port without closing a real descriptor.
@@ -58,14 +66,14 @@ int disconnect( z_port port /**< [in] Ignored scripted port marker. */ );
 int drain( z_port port /**< [in] Ignored scripted port marker. */ );
 
 /// Record a command and return its byte count or a scripted error.
-int send( z_port port, /**< [in] Ignored scripted port marker. */
+int send( z_port      port,    /**< [in] Ignored scripted port marker. */
           const char *command, /**< [in] Actual ASCII command. */
-          size_t length /**< [in] Command byte count. */ );
+          size_t      length /**< [in] Command byte count. */ );
 
 /// Return a queued reply, scripted error, or timeout without reading a device.
-int receive( z_port port, /**< [in] Ignored scripted port marker. */
-             char *buffer, /**< [out] Buffer receiving the queued reply. */
-             int length /**< [in] Response buffer capacity. */ );
+int receive( z_port port,   /**< [in] Ignored scripted port marker. */
+             char  *buffer, /**< [out] Buffer receiving the queued reply. */
+             int    length /**< [in] Response buffer capacity. */ );
 
 bool fail( Operation operation )
 {
@@ -199,13 +207,13 @@ void PowerFixture::targetOff()
 int PowerFixture::command( unsigned operation )
 {
     const std::array<pcf::IndiProperty *, 7> properties{ &m_indiP_tgt_pos,
-                                                       &m_indiP_req_home,
-                                                       &m_indiP_req_home_all,
-                                                       &m_indiP_req_halt,
-                                                       &m_indiP_req_ehalt,
-                                                       &m_indiP_knob_enable,
-                                                       &m_indiP_led_enable };
-    auto request = *properties.at( operation );
+                                                         &m_indiP_req_home,
+                                                         &m_indiP_req_home_all,
+                                                         &m_indiP_req_halt,
+                                                         &m_indiP_req_ehalt,
+                                                         &m_indiP_knob_enable,
+                                                         &m_indiP_led_enable };
+    auto                                     request = *properties.at( operation );
     if( operation == 0 )
         request["stageA"].set( 200 );
     else
@@ -228,7 +236,7 @@ TEST_CASE( "Zaber waits for power-off without starting more communication", "[za
     #endif
     // clang-format on
     outletHarness::g_faults = {};
-    g_script = {};
+    g_script                = {};
     PowerFixture app;
     app.targetOff();
     for( auto stateCode : { stateCodes::READY, stateCodes::NOTCONNECTED, stateCodes::CONNECTED, stateCodes::ERROR } )
@@ -261,7 +269,7 @@ TEST_CASE( "Zaber discovery checks power after transport failures", "[zaberLowLe
         for( bool turningOff : { false, true } )
         {
             outletHarness::g_faults = {};
-            g_script = {};
+            g_script                = {};
             PowerFixture app;
             g_script.m_failure = failure;
             if( turningOff )
@@ -283,25 +291,28 @@ TEST_CASE( "Zaber connection checks power after each failing transport phase", "
     zaberLowLevel::connect();
     #endif
     // clang-format on
-    for( auto [failure, call] : { std::pair{ Operation::Connect, 1u }, { Operation::Drain, 1u },
-                                 { Operation::Drain, 2u }, { Operation::Send, 1u }, { Operation::Send, 2u },
-                                 { Operation::Receive, 1u } } )
+    for( auto [failure, call] : { std::pair{ Operation::Connect, 1u },
+                                  { Operation::Drain, 1u },
+                                  { Operation::Drain, 2u },
+                                  { Operation::Send, 1u },
+                                  { Operation::Send, 2u },
+                                  { Operation::Receive, 1u } } )
     {
         for( bool turningOff : { false, true } )
         {
             outletHarness::g_faults = {};
-            g_script = {};
+            g_script                = {};
             PowerFixture app;
             app.state( stateCodes::NOTCONNECTED );
-            app.m_port = 0;
-            g_script.m_failure = failure;
+            app.m_port             = 0;
+            g_script.m_failure     = failure;
             g_script.m_failureCall = call;
             if( turningOff )
                 g_script.m_beforeFailure = [&] { app.targetOff(); };
             CHECK( app.connect() == ( failure == Operation::Connect ? ZC_NOT_CONNECTED : ZC_ERROR ) );
             CHECK( outletHarness::g_faults.m_logs.empty() == turningOff );
-            CHECK( app.state() == ( turningOff || failure == Operation::Connect ? stateCodes::NOTCONNECTED :
-                                   stateCodes::ERROR ) );
+            CHECK( app.state() ==
+                   ( turningOff || failure == Operation::Connect ? stateCodes::NOTCONNECTED : stateCodes::ERROR ) );
         }
     }
 }
@@ -327,7 +338,7 @@ TEST_CASE( "Zaber parent commands preserve stage power-loss suppression", "[zabe
         for( bool turningOff : { false, true } )
         {
             outletHarness::g_faults = {};
-            g_script = {};
+            g_script                = {};
             PowerFixture app;
             g_script.m_failure = Operation::Send;
             if( turningOff )
@@ -351,7 +362,7 @@ TEST_CASE( "Zaber cleanup suppresses expected disconnect errors", "[zaberLowLeve
     for( bool turningOff : { false, true } )
     {
         outletHarness::g_faults = {};
-        g_script = {};
+        g_script                = {};
         PowerFixture app;
         g_script.m_failure = Operation::Disconnect;
         if( turningOff )
@@ -372,7 +383,7 @@ TEST_CASE( "Zaber permits initial communication with an unknown target", "[zaber
     #endif
     // clang-format on
     outletHarness::g_faults = {};
-    g_script = {};
+    g_script                = {};
     PowerFixture app;
     app.power( "On", "Unk" );
     app.m_port = 0;
