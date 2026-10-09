@@ -464,5 +464,63 @@ TEST_CASE( "logdump follow mode and damaged lengths", "[logdump]" )
     REQUIRE( countOf( *err, "at byte=" + std::to_string( damagedAt ) + " (reason: structure)" ) == 1 );
 }
 
+/// In follow mode, a new file of the v2 extension in the same folder is picked up and read as v2: the cutover moment.
+/**
+ * \ingroup logdump_unit_test
+ */
+TEST_CASE( "logdump follow mode moves on to a newer v2 file", "[logdump]" )
+{
+    // clang-format off
+    #ifdef LOGDUMP_TEST_DOXYGEN_REF
+    logdump::execute();
+    listLogFiles();
+    #endif
+    // clang-format on
+
+    const time_t t0 = 1732000000;
+
+    tempDir td( "logdump_follow_cutover" );
+
+    std::vector<size_t> offs;
+    writeLogFile(
+        td.m_path, "dev1", "bintel", t0, 0, fileBytes( offs, flatlogs::logVersion1, { { t0, 0, "last v1 entry" } } ) );
+
+    // Runs in a detached thread, so a failure can't hang the test; the harness is deliberately not freed.
+    logdumpHarness *ld      = new logdumpHarness;
+    ld->m_dir               = td.m_path;
+    ld->m_prefixes          = { "dev1" };
+    ld->m_ext               = ".bintel";
+    ld->m_follow            = true;
+    ld->m_pauseTime         = 10;
+    ld->m_fileCheckInterval = 2;
+
+    std::promise<int> done;
+    std::future<int>  result = done.get_future();
+    std::string      *out    = new std::string;
+    std::string      *err    = new std::string;
+    std::thread( [ld, out, err, &done]() { done.set_value( ld->run( *out, *err ) ); } ).detach();
+
+    std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+
+    // The cutover: the writer starts a .bintel2 file in the same folder.
+    std::vector<char> v2 = fileBytes(
+        offs,
+        flatlogs::logVersion2,
+        { { t0 + 10, 0, "first v2 entry" }, { t0 + 11, 0, "second v2 entry" }, { t0 + 12, 0, "damaged v2 entry" } } );
+
+    // The last entry fails its checksum, which only a file read as v2 can detect; it ends the run with 255.
+    v2[offs[2] + flatlogs::logHeaderV2::headerSize( v2.data() + offs[2] ) + 4] ^= 0x01;
+
+    auto f2 = writeLogFile( td.m_path, "dev1", "bintel2", t0 + 10, 0, v2 );
+
+    REQUIRE( result.wait_for( std::chrono::seconds( 10 ) ) == std::future_status::ready );
+    REQUIRE( result.get() == -1 );
+    REQUIRE( out->find( "first v2 entry" ) != std::string::npos );
+    REQUIRE( out->find( "second v2 entry" ) != std::string::npos );
+    REQUIRE( countOf( *err,
+                      f2.fullName() + " failed verification on code=10 at byte=" + std::to_string( offs[2] ) +
+                          " (reason: checksum)" ) == 1 );
+}
+
 } // namespace logdumpTest
 } // namespace libXWCTest

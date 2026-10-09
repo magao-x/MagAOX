@@ -29,6 +29,9 @@ namespace logger
  * correspond to v2 entries, both are searched.
  * If \c X already ends in "2", only \c X is searched and the found entries are assumed to be v2.
  * An empty base matches files of any extension.
+ * 
+ * The Python tools use the same rule in log_extensions_for (magaox-python/magaox/utils.py).
+
  *
  * \returns the extensions to search for, matching form of \p baseExt (with or without the leading '.').
  */
@@ -60,7 +63,7 @@ inline flatlogs::logVersionT logVersionForExtension( const std::string &ext /**<
 
 /// Get a log file's version from its path.
 /** Wrapper for logVersionForExtension
- * 
+ *
  * \returns flatlogs::logVersion2 if the file's extension ends in "2", flatlogs::logVersion1 otherwise.
  */
 inline flatlogs::logVersionT logVersionForFile( const std::string &path /**< [in] the file's path or name */ )
