@@ -37,7 +37,8 @@
  *
  * Removing a camera that is open crashes the kernel.  pvcamCtrl closes its camera and uninitializes PVCAM before
  * a hotplug, and all pvcamCtrl instances share the lock file `<sysPath>/pvcamCtrl_pcie.lock`, which serializes
- * camera enumeration (which opens every camera) in one instance with hotplug in another.
+ * camera enumeration (which opens every camera) in one instance with hotplug in another.  Like the PID file, the
+ * lock file is created with the app's setuid-root privileges.
  *
  * Cameras must be powered when the host boots.  A camera that was unpowered at boot cannot be recovered by hotplug;
  * pvcamCtrl reports this once and waits in NODEVICE, retrying, until the host is rebooted with the camera powered.
