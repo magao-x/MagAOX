@@ -32,7 +32,9 @@ struct CameraFixture : Fixture
     }
 
     /// Fail a pl_get_param call.
-    static void failGet( uns32 param /**< [in] parameter */, int16 attr /**< [in] attribute */, unsigned n = 0 /**< [in] call, or 0 for every call */ )
+    static void failGet( uns32    param /**< [in] parameter */,
+                         int16    attr /**< [in] attribute */,
+                         unsigned n = 0 /**< [in] call, or 0 for every call */ )
     {
         if( n == 0 )
             g_fake.m_failAlways.insert( getKey( param, attr ) );
@@ -47,7 +49,8 @@ struct CameraFixture : Fixture
     }
 
     /// Fail a named PVCAM function.
-    static void fail( const std::string &fn /**< [in] function */, unsigned n = 0 /**< [in] call, or 0 for every call */ )
+    static void fail( const std::string &fn /**< [in] function */,
+                      unsigned           n = 0 /**< [in] call, or 0 for every call */ )
     {
         if( n == 0 )
             g_fake.m_failAlways.insert( fn );
@@ -67,7 +70,8 @@ struct CameraFixture : Fixture
     }
 
     /// Set a fake parameter value.
-    static void value( uns32 param /**< [in] parameter */, int16 attr /**< [in] attribute */, long long v /**< [in] value */ )
+    static void
+    value( uns32 param /**< [in] parameter */, int16 attr /**< [in] attribute */, long long v /**< [in] value */ )
     {
         g_fake.m_values[{ param, attr }] = v;
     }
@@ -192,8 +196,10 @@ TEST_CASE( "pvcamCtrl stdCamera setters", "[pvcamCtrl]" )
     REQUIRE( f.setShutter( 1 ) == 0 );
     REQUIRE( g_fake.m_shutterStates == std::vector<int>{ 1 } );
 
-    std::vector<std::pair<std::string, int>> fans{
-        { "medium", FAN_SPEED_MEDIUM }, { "low", FAN_SPEED_LOW }, { "off", FAN_SPEED_OFF }, { "high", FAN_SPEED_HIGH } };
+    std::vector<std::pair<std::string, int>> fans{ { "medium", FAN_SPEED_MEDIUM },
+                                                   { "low", FAN_SPEED_LOW },
+                                                   { "off", FAN_SPEED_OFF },
+                                                   { "high", FAN_SPEED_HIGH } };
     for( auto &[name, code] : fans )
     {
         f.m_fanSpeedNameSet = name;
@@ -274,10 +280,10 @@ TEST_CASE( "pvcamCtrl configures acquisition", "[pvcamCtrl]" )
     CameraFixture::value( PARAM_POST_TRIGGER_DELAY, ATTR_CURRENT, 1000 );
 
     std::vector<std::tuple<std::string, int, bool>> speeds{ { "sensitivity", 0, false },
-                                                             { "speed", 1, true },
-                                                             { "sub_electron", 3, false },
-                                                             { "dynamic_range", 2, false },
-                                                             { "bogus", 2, false } };
+                                                            { "speed", 1, true },
+                                                            { "sub_electron", 3, false },
+                                                            { "dynamic_range", 2, false },
+                                                            { "bogus", 2, false } };
     for( auto &[name, port, eightBit] : speeds )
     {
         f.m_readoutSpeedNameSet = name;
@@ -300,7 +306,8 @@ TEST_CASE( "pvcamCtrl configures acquisition", "[pvcamCtrl]" )
     REQUIRE( f.fps() == Approx( 1.0 / ( 0.01 + 1e-6 ) ) );
 
     // FPS requested: readout limited, not limited, and limited after the post-trigger correction.
-    for( auto [exposure, fps] : std::vector<std::pair<long long, float>>{ { 5000, 50 }, { 20000, 40 }, { 20000, 101 } } )
+    for( auto [exposure, fps] :
+         std::vector<std::pair<long long, float>>{ { 5000, 50 }, { 20000, 40 }, { 20000, 101 } } )
     {
         CameraFixture::value( PARAM_EXPOSURE_TIME, ATTR_CURRENT, exposure );
         f.m_fpsSetted = true;
@@ -311,7 +318,11 @@ TEST_CASE( "pvcamCtrl configures acquisition", "[pvcamCtrl]" )
 
     // Logged and continued: deregistration and parameter reads.
     CameraFixture::fail( "pl_cam_deregister_callback" );
-    for( uns32 p : { PARAM_EXPOSURE_TIME, PARAM_READOUT_TIME, PARAM_PRE_TRIGGER_DELAY, PARAM_CLEARING_TIME, PARAM_POST_TRIGGER_DELAY } )
+    for( uns32 p : { PARAM_EXPOSURE_TIME,
+                     PARAM_READOUT_TIME,
+                     PARAM_PRE_TRIGGER_DELAY,
+                     PARAM_CLEARING_TIME,
+                     PARAM_POST_TRIGGER_DELAY } )
         CameraFixture::failGet( p, ATTR_CURRENT );
     f.m_fpsSetted = true;
     REQUIRE( f.configureAcquisition() == 0 );
@@ -454,7 +465,8 @@ TEST_CASE( "pvcamCtrl connects to its camera by serial number", "[pvcamCtrl]" )
     #endif
     // clang-format on
     CameraFixture f;
-    g_fake.m_cameras = { { "pvcamPCIE_0", "A22J723004" }, { "pvcamPCIE_1", "", false }, { "pvcamPCIE_2", "A22J723005" } };
+    g_fake.m_cameras = {
+        { "pvcamPCIE_0", "A22J723004" }, { "pvcamPCIE_1", "", false }, { "pvcamPCIE_2", "A22J723005" } };
 
     auto again = [&]( int expected, stateCodes::stateCodeT state )
     {
@@ -557,19 +569,19 @@ TEST_CASE( "pvcamCtrl enumerates readout speeds", "[pvcamCtrl]" )
     REQUIRE( f.m_ports[1].speeds[1].maxG == 2 );
     REQUIRE( f.m_ports[1].speeds[1].gains.size() == 2 );
 
-    for( auto fail : std::vector<std::function<void()>>{
-             [] { CameraFixture::failGet( PARAM_READOUT_PORT, ATTR_COUNT ); },
-             [] { CameraFixture::fail( "pl_enum_str_length" ); },
-             [] { CameraFixture::fail( "pl_get_enum_param" ); },
-             [] { CameraFixture::failSet( PARAM_READOUT_PORT ); },
-             [] { CameraFixture::failGet( PARAM_SPDTAB_INDEX, ATTR_COUNT ); },
-             [] { CameraFixture::failSet( PARAM_SPDTAB_INDEX ); },
-             [] { CameraFixture::failGet( PARAM_PIX_TIME, ATTR_CURRENT ); },
-             [] { CameraFixture::failGet( PARAM_GAIN_INDEX, ATTR_COUNT ); },
-             [] { CameraFixture::failGet( PARAM_GAIN_INDEX, ATTR_MIN ); },
-             [] { CameraFixture::failGet( PARAM_GAIN_INDEX, ATTR_MAX ); },
-             [] { CameraFixture::failSet( PARAM_GAIN_INDEX ); },
-             [] { CameraFixture::failGet( PARAM_BIT_DEPTH, ATTR_CURRENT ); } } )
+    for( auto fail :
+         std::vector<std::function<void()>>{ [] { CameraFixture::failGet( PARAM_READOUT_PORT, ATTR_COUNT ); },
+                                             [] { CameraFixture::fail( "pl_enum_str_length" ); },
+                                             [] { CameraFixture::fail( "pl_get_enum_param" ); },
+                                             [] { CameraFixture::failSet( PARAM_READOUT_PORT ); },
+                                             [] { CameraFixture::failGet( PARAM_SPDTAB_INDEX, ATTR_COUNT ); },
+                                             [] { CameraFixture::failSet( PARAM_SPDTAB_INDEX ); },
+                                             [] { CameraFixture::failGet( PARAM_PIX_TIME, ATTR_CURRENT ); },
+                                             [] { CameraFixture::failGet( PARAM_GAIN_INDEX, ATTR_COUNT ); },
+                                             [] { CameraFixture::failGet( PARAM_GAIN_INDEX, ATTR_MIN ); },
+                                             [] { CameraFixture::failGet( PARAM_GAIN_INDEX, ATTR_MAX ); },
+                                             [] { CameraFixture::failSet( PARAM_GAIN_INDEX ); },
+                                             [] { CameraFixture::failGet( PARAM_BIT_DEPTH, ATTR_CURRENT ); } } )
     {
         fail();
         REQUIRE( f.fillSpeedTable() == -1 );
@@ -635,8 +647,10 @@ TEST_CASE( "pvcamCtrl reads temperature and fan speed", "[pvcamCtrl]" )
     CameraFixture::value( PARAM_TEMP, ATTR_AVAIL, 0 );
     REQUIRE( f.getTemp() == 0 );
 
-    for( auto [code, name] : std::vector<std::pair<int, std::string>>{
-             { FAN_SPEED_HIGH, "high" }, { FAN_SPEED_MEDIUM, "medium" }, { FAN_SPEED_LOW, "low" }, { FAN_SPEED_OFF, "off" } } )
+    for( auto [code, name] : std::vector<std::pair<int, std::string>>{ { FAN_SPEED_HIGH, "high" },
+                                                                       { FAN_SPEED_MEDIUM, "medium" },
+                                                                       { FAN_SPEED_LOW, "low" },
+                                                                       { FAN_SPEED_OFF, "off" } } )
     {
         CameraFixture::value( PARAM_FAN_SPEED_SETPOINT, ATTR_CURRENT, code );
         REQUIRE( f.getFanSpeed() == 0 );

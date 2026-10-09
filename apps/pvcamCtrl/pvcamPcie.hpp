@@ -305,7 +305,7 @@ inline bool pvcamPcie::validBdf( const std::string &bdf )
     for( size_t n = 0; n < bdf.size(); ++n )
     {
         char c  = bdf[n];
-        bool ok = pattern[n] == 'h' ? ( isdigit( c ) || ( c >= 'a' && c <= 'f' ) )
+        bool ok = pattern[n] == 'h'   ? ( isdigit( c ) || ( c >= 'a' && c <= 'f' ) )
                   : pattern[n] == 'd' ? ( c >= '0' && c <= '7' )
                                       : c == pattern[n];
         if( !ok )

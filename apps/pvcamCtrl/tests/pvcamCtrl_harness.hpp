@@ -202,8 +202,10 @@ inline void attribute( const std::string &path /**< [in] file */, const std::str
 typedef std::array<uint8_t, 256> Config;
 
 /// Store a little-endian value in a config image.
-inline void put( Config &c /**< [in/out] image */, size_t off /**< [in] offset */, uint32_t v /**< [in] value */,
-                 size_t n /**< [in] bytes */ )
+inline void put( Config  &c /**< [in/out] image */,
+                 size_t   off /**< [in] offset */,
+                 uint32_t v /**< [in] value */,
+                 size_t   n /**< [in] bytes */ )
 {
     for( size_t i = 0; i < n; ++i )
         c[off + i] = ( v >> ( 8 * i ) ) & 0xFF;
@@ -374,7 +376,7 @@ extern "C"
         {
             if( f.m_cameras[n].m_name == camera_name )
             {
-                *hcam         = 100 + n;
+                *hcam           = 100 + n;
                 f.m_open[*hcam] = n;
                 return PV_OK;
             }
@@ -560,7 +562,7 @@ class pvcamTestPcie : public pvcamPcie
     {
         if( record( "write " + rel( path ) ) )
             return fail( "injected" );
-        int rv = pvcamPcie::writeAttribute( path, value );
+        int                   rv = pvcamPcie::writeAttribute( path, value );
         std::filesystem::path p( path );
         if( p.filename() == "remove" )
         {
@@ -569,8 +571,7 @@ class pvcamTestPcie : public pvcamPcie
             std::filesystem::remove_all( p.parent_path() );
         }
         else if( p.filename() == "rescan" && !m_rescanCreates.empty() )
-            pvcamHarness::Sysfs( std::filesystem::path( m_sysfsPath ).parent_path() )
-                .camera( m_port, m_rescanCreates );
+            pvcamHarness::Sysfs( std::filesystem::path( m_sysfsPath ).parent_path() ).camera( m_port, m_rescanCreates );
         return rv;
     }
 
@@ -726,14 +727,14 @@ struct Fixture : outletHarness::Controller<MagAOX::app::pvcamCtrl>
     /// Configure power management, paths, and one camera, and reset the fakes.
     Fixture()
     {
-        g_fake                  = {};
-        outletHarness::g_faults = {};
-        g_fake.m_cameras        = { { "pvcamPCIE_0", "A22J723005" } };
+        g_fake                                                    = {};
+        outletHarness::g_faults                                   = {};
+        g_fake.m_cameras                                          = { { "pvcamPCIE_0", "A22J723005" } };
         g_fake.m_values[{ PARAM_FAN_SPEED_SETPOINT, ATTR_AVAIL }] = 1;
-        m_sysPath               = m_directory.m_path;
-        m_serialNumber          = "A22J723005";
-        m_powerOnWait           = 0;
-        m_pcieLockPath          = m_sysPath + "/pvcamCtrl_pcie.lock";
+        m_sysPath                                                 = m_directory.m_path;
+        m_serialNumber                                            = "A22J723005";
+        m_powerOnWait                                             = 0;
+        m_pcieLockPath                                            = m_sysPath + "/pvcamCtrl_pcie.lock";
         m_pcie.sysfsPath( m_sysfs.m_root );
     }
 

@@ -444,7 +444,7 @@ class pvcamCtrl : public MagAOXApp<true>,
     int fillSpeedTable();
 
     /// Dump the values of a PVCAM enumerated parameter for debugging.
-    void dumpEnum( uns32              paramID,  /**< [in] the PVCAM parameter */
+    void dumpEnum( uns32              paramID, /**< [in] the PVCAM parameter */
                    const std::string &paramMnem /**< [in] the parameter name to print */ );
 
     /// Get the current fan speed from the camera.
@@ -462,7 +462,7 @@ class pvcamCtrl : public MagAOXApp<true>,
     int getTemp();
 
     /// Static trampoline for the PVCAM end-of-frame callback.
-    static void st_endOfFrameCallback( FRAME_INFO *finfo,        /**< [in] the frame information */
+    static void st_endOfFrameCallback( FRAME_INFO *finfo, /**< [in] the frame information */
                                        void       *pvcamCtrlInst /**< [in] the pvcamCtrl instance */ );
 
     /// Process a PVCAM end-of-frame callback.

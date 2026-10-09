@@ -64,7 +64,8 @@ TEST_CASE( "pvcamPcie validates PCI addresses and ports", "[pvcamCtrl][pcie]" )
     // clang-format on
     for( auto bdf : { "0000:42:09.0", "0000:ab:1f.7" } )
         REQUIRE( pvcamPcie::validBdf( bdf ) );
-    for( auto bdf : { "", "0000:42:09", "0000:42:09.8", "0000:42:0g.0", "0000-42:09.0", "0000:42:09.00", "000A:42:09.0" } )
+    for( auto bdf :
+         { "", "0000:42:09", "0000:42:09.8", "0000:42:0g.0", "0000-42:09.0", "0000:42:09.00", "000A:42:09.0" } )
         REQUIRE_FALSE( pvcamPcie::validBdf( bdf ) );
 
     PcieFixture f;
@@ -262,8 +263,8 @@ TEST_CASE( "pvcamPcie hotplug resets, removes, and rescans only its own port", "
     f.m_pcie.m_failOp.clear();
 
     // The port cannot be listed after a successful reset.
-    std::filesystem::permissions( f.m_sysfs.m_root + "/0000:42:09.0", std::filesystem::perms::owner_write |
-                                                                          std::filesystem::perms::owner_exec );
+    std::filesystem::permissions( f.m_sysfs.m_root + "/0000:42:09.0",
+                                  std::filesystem::perms::owner_write | std::filesystem::perms::owner_exec );
     REQUIRE( f.m_pcie.hotplug() == -1 );
     REQUIRE( f.m_pcie.error().starts_with( "listing PCIe port" ) );
     std::filesystem::permissions( f.m_sysfs.m_root + "/0000:42:09.0", std::filesystem::perms::owner_all );

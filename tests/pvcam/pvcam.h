@@ -12,8 +12,8 @@
 
 #include "master.h"
 
-#define CAM_NAME_LEN          32
-#define ERROR_MSG_LEN         255
+#define CAM_NAME_LEN 32
+#define ERROR_MSG_LEN 255
 #define MAX_ALPHA_SER_NUM_LEN 32
 
 /// Frame information delivered with end-of-frame callbacks.
@@ -94,33 +94,33 @@ typedef struct rgn_type
     uns16 pbin; ///< Parallel binning.
 } rgn_type;
 
-#define TYPE_INT16    1
-#define TYPE_FLT64    4
-#define TYPE_UNS16    6
-#define TYPE_UNS64    8
-#define TYPE_ENUM     9
+#define TYPE_INT16 1
+#define TYPE_FLT64 4
+#define TYPE_UNS16 6
+#define TYPE_UNS64 8
+#define TYPE_ENUM 9
 #define TYPE_CHAR_PTR 13
-#define TYPE_INT64    16
+#define TYPE_INT64 16
 
 #define CLASS2 2
 #define CLASS3 3
 
-#define PARAM_READOUT_TIME       ( ( CLASS2 << 16 ) + ( TYPE_FLT64 << 24 ) + 179 )
-#define PARAM_CLEARING_TIME      ( ( CLASS2 << 16 ) + ( TYPE_INT64 << 24 ) + 180 )
+#define PARAM_READOUT_TIME ( ( CLASS2 << 16 ) + ( TYPE_FLT64 << 24 ) + 179 )
+#define PARAM_CLEARING_TIME ( ( CLASS2 << 16 ) + ( TYPE_INT64 << 24 ) + 180 )
 #define PARAM_POST_TRIGGER_DELAY ( ( CLASS2 << 16 ) + ( TYPE_INT64 << 24 ) + 181 )
-#define PARAM_PRE_TRIGGER_DELAY  ( ( CLASS2 << 16 ) + ( TYPE_INT64 << 24 ) + 182 )
-#define PARAM_TEMP               ( ( CLASS2 << 16 ) + ( TYPE_INT16 << 24 ) + 525 )
-#define PARAM_TEMP_SETPOINT      ( ( CLASS2 << 16 ) + ( TYPE_INT16 << 24 ) + 526 )
+#define PARAM_PRE_TRIGGER_DELAY ( ( CLASS2 << 16 ) + ( TYPE_INT64 << 24 ) + 182 )
+#define PARAM_TEMP ( ( CLASS2 << 16 ) + ( TYPE_INT16 << 24 ) + 525 )
+#define PARAM_TEMP_SETPOINT ( ( CLASS2 << 16 ) + ( TYPE_INT16 << 24 ) + 526 )
 #define PARAM_HEAD_SER_NUM_ALPHA ( ( CLASS2 << 16 ) + ( TYPE_CHAR_PTR << 24 ) + 533 )
 #define PARAM_FAN_SPEED_SETPOINT ( ( CLASS2 << 16 ) + ( TYPE_ENUM << 24 ) + 710 )
-#define PARAM_BIT_DEPTH          ( ( CLASS2 << 16 ) + ( TYPE_INT16 << 24 ) + 511 )
-#define PARAM_GAIN_INDEX         ( ( CLASS2 << 16 ) + ( TYPE_INT16 << 24 ) + 512 )
-#define PARAM_SPDTAB_INDEX       ( ( CLASS2 << 16 ) + ( TYPE_INT16 << 24 ) + 513 )
-#define PARAM_READOUT_PORT       ( ( CLASS2 << 16 ) + ( TYPE_ENUM << 24 ) + 247 )
-#define PARAM_PIX_TIME           ( ( CLASS2 << 16 ) + ( TYPE_UNS16 << 24 ) + 516 )
-#define PARAM_EXP_RES            ( ( CLASS3 << 16 ) + ( TYPE_ENUM << 24 ) + 2 )
-#define PARAM_EXP_RES_INDEX      ( ( CLASS3 << 16 ) + ( TYPE_UNS16 << 24 ) + 4 )
-#define PARAM_EXPOSURE_TIME      ( ( CLASS3 << 16 ) + ( TYPE_UNS64 << 24 ) + 8 )
+#define PARAM_BIT_DEPTH ( ( CLASS2 << 16 ) + ( TYPE_INT16 << 24 ) + 511 )
+#define PARAM_GAIN_INDEX ( ( CLASS2 << 16 ) + ( TYPE_INT16 << 24 ) + 512 )
+#define PARAM_SPDTAB_INDEX ( ( CLASS2 << 16 ) + ( TYPE_INT16 << 24 ) + 513 )
+#define PARAM_READOUT_PORT ( ( CLASS2 << 16 ) + ( TYPE_ENUM << 24 ) + 247 )
+#define PARAM_PIX_TIME ( ( CLASS2 << 16 ) + ( TYPE_UNS16 << 24 ) + 516 )
+#define PARAM_EXP_RES ( ( CLASS3 << 16 ) + ( TYPE_ENUM << 24 ) + 2 )
+#define PARAM_EXP_RES_INDEX ( ( CLASS3 << 16 ) + ( TYPE_UNS16 << 24 ) + 4 )
+#define PARAM_EXPOSURE_TIME ( ( CLASS3 << 16 ) + ( TYPE_UNS64 << 24 ) + 8 )
 
 #ifdef __cplusplus
 extern "C"
@@ -144,7 +144,7 @@ extern "C"
     /// Deregister an event callback.
     rs_bool PV_DECL pl_cam_deregister_callback( int16 hcam, int32 callback_event );
     /// Get the most recent error code.
-    int16 PV_DECL   pl_error_code( void );
+    int16 PV_DECL pl_error_code( void );
     /// Get the message for an error code.
     rs_bool PV_DECL pl_error_message( int16 err_code, char *msg );
     /// Get an attribute of a parameter.
@@ -152,7 +152,8 @@ extern "C"
     /// Set a parameter.
     rs_bool PV_DECL pl_set_param( int16 hcam, uns32 param_id, void *param_value );
     /// Get an enumerated parameter's value and description.
-    rs_bool PV_DECL pl_get_enum_param( int16 hcam, uns32 param_id, uns32 index, int32 *value, char *desc, uns32 length );
+    rs_bool PV_DECL
+    pl_get_enum_param( int16 hcam, uns32 param_id, uns32 index, int32 *value, char *desc, uns32 length );
     /// Get the description length of an enumerated parameter value.
     rs_bool PV_DECL pl_enum_str_length( int16 hcam, uns32 param_id, uns32 index, uns32 *length );
     /// Set up continuous acquisition.
