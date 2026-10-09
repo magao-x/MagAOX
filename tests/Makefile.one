@@ -71,6 +71,8 @@ else ifeq ($(notdir $(TESTNAME)),stdMotionNode_test)
     LDLIBS += -linstGraph
 else ifeq ($(notdir $(TESTNAME)),xigNode_test)
     LDLIBS += -linstGraph
+else ifneq ($(filter pvcam%_test,$(notdir $(TESTNAME))),)
+	CPPFLAGS += -I$(TESTS_DIR)/pvcam
 else ifneq ($(filter $(notdir $(TESTNAME)),$(EDT_TESTS)),)
 	CXXFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CXXFLAGS))
 	CFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CFLAGS))
