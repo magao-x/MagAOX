@@ -1345,8 +1345,12 @@ int pvcamCtrl::reconfig()
 
 int pvcamCtrl::connect()
 {
-    // Enumeration opens every camera, so it must not overlap another instance's PCIe hotplug.
-    pvcamPcieLock pcieLock( m_pcieLockPath );
+    // Enumeration opens every camera, so it must not overlap another instance's PCIe hotplug.  The lock file is in the
+    // sys directory, which the real user may not be able to write, so open it with elevated privileges as lockPID()
+    // does; holding the lock does not need them.
+    elevatedPrivileges elPriv( this );
+    pvcamPcieLock      pcieLock( m_pcieLockPath );
+    elPriv.restore();
     if( pcieLock.busy() )
     {
         return 0;
@@ -1964,7 +1968,9 @@ int pvcamCtrl::pcieLogic()
 
 int pvcamCtrl::hotplugCamera()
 {
-    pvcamPcieLock pcieLock( m_pcieLockPath );
+    elevatedPrivileges elPriv( this );
+    pvcamPcieLock      pcieLock( m_pcieLockPath ); // Elevated as in connect()
+    elPriv.restore();
     if( pcieLock.busy() )
     {
         return 2;
@@ -1980,8 +1986,8 @@ int pvcamCtrl::hotplugCamera()
 
     log<text_log>( "re-enumerating camera on PCIe port " + m_pcie.port(), logPrio::LOG_NOTICE );
 
-    elevatedPrivileges elPriv( this );
-    int                rv = m_pcie.hotplug();
+    elPriv.elevate();
+    int rv = m_pcie.hotplug();
     elPriv.restore();
 
     if( rv < 0 )

@@ -196,7 +196,12 @@ Remark: see the parking system in flipperCtrl, it's a conceptual idea for how th
 Agent note:
 - **Validation wording.** Agreed; I meant "start the app with both cameras powered off", not a host boot. The revised validation sequence is:
   - (a) start both apps with both cameras powered off (cameras enumerated at boot);
+
+    - Done.  Verfified both apps at git has 85c7fe, and pcie section read in config, and hotplug enabled
+
   - (b) power on lowfs only, then flowfs while lowfs is OPERATING;
+
+
   - (c) power-cycle lowfs while flowfs streams, and confirm flowfs frames are uninterrupted;
   - (d) power-cycle a camera while its app is shut down, then start the app with power on. This exercises stale detection;
   - (e) restart an app with its camera on and healthy. There should be no hotplug;
@@ -388,6 +393,11 @@ Branch: `jrmales/kinetix-hotplug` (current).
   - **The serial-not-found fallback was dropped** (Requirement 4, test 13), because it would reset a healthy device on an unverified port.
 - **Lock file errors:** if the lock file cannot be opened, hotplug is refused (logged once), but `connect()` proceeds unlocked so camera operation is preserved. Both instances share the path, so neither can hotplug in that state.
 - **Hotplug retries:** `m_hotplugPending` stays set until a camera is found. Every attempt, including the first after power-on (`m_lastHotplug` is reset in `onPowerOff()`), is rate limited by `retryInterval`.
+
+**Hardware validation fix (2026-10-09, step b):** on the instrument, `connect()`/`hotplugCamera()` logged `locking /opt/MagAOX/sys/pvcamCtrl_pcie.lock: Permission denied`. The sys directory is not writable by the apps' real user. MagAOXApp creates its PID file there with `elevatedPrivileges` (`lockPID()`), but the lock file was opened unprivileged. Hotplug was therefore refused and the camera stayed in NODEVICE.
+- Fix: open the lock file inside an `elevatedPrivileges` scope, restored immediately after, in both places. `flock()` and holding the lock need no privileges, so PVCAM enumeration still runs unprivileged.
+- The resulting lock file is root-owned with mode 0664 (subject to umask). Both instances open it elevated.
+- The offline tests cannot distinguish privilege levels (setuid is not in effect), so this was found only on hardware. Re-run validation from step (a).
 
 **Test harness** (`apps/pvcamCtrl/tests/pvcamCtrl_harness.hpp`):
 - SDK stubs in `tests/pvcam/{master.h,pvcam.h}` are added to the include path only for `pvcam*_test` (`tests/Makefile.one`).
