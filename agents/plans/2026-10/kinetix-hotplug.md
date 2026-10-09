@@ -199,14 +199,57 @@ Agent note:
 
     - Done.  Verfified both apps at git has 85c7fe, and pcie section read in config, and hotplug enabled
 
+    - Second try: verified 9896dc on both and pcie setup.
+
   - (b) power on lowfs only, then flowfs while lowfs is OPERATING;
 
+    - success in that we ended with both cameras streaming.  camflowfs (second one started) logged an error attempting to connect to pvcamPCIE_0:
+    ```
+    2026-10-09T21:54:18.585102589 NOTE re-enumerating camera on PCIe port 0000:42:09.0
+    2026-10-09T21:54:20.146805456 INFO camera found on PCIe port 0000:42:09.0
+    2026-10-09T21:54:20.175911723 INFO Found 2 pvcam cameras.
+    2026-10-09T21:54:20.176656704 ERR  SW FILE: pvcamCtrl.hpp LINE: 1429  CODE:     195 [pl_cam_open failed: Driver device failed to open     (PL_ERR_DDI_DEVICE_OPEN_FAILED). Failed to open camera device     'pvcamPCIE_0', Error 16 (Device or resource busy)]
+    2026-10-09T21:54:20.243488880 INFO Opened camera A22J723004 at pvcamPCIE_1
+    2026-10-09T21:54:20.243489732 INFO State changed from NOTCONNECTED to     CONNECTED
+    2026-10-09T21:54:20.511966511 NOTE fan speed changed from 'high' to 'off'
+    2026-10-09T21:54:20.511979535 INFO State changed from CONNECTED to READY
+    2026-10-09T21:54:20.512014130 INFO State changed from READY to OPERATING
+    2026-10-09T21:54:21.238023388 INFO continuous acquisition started
+    ```
 
   - (c) power-cycle lowfs while flowfs streams, and confirm flowfs frames are uninterrupted;
+
+    - power down was uneventful
+    - power up worked, came back to both streaming. no errors in camllowfs.
+    - did the reverse, cycling camflowfs: got the same pvcamPCIE_0 error
+
   - (d) power-cycle a camera while its app is shut down, then start the app with power on. This exercises stale detection;
+
+    - shutdown camflowfs while OPERATING
+    - cycled power for camflowfs
+    - restart camflowfs. Same error but ultimate success. Both streaming.
+
   - (e) restart an app with its camera on and healthy. There should be no hotplug;
+   
+    - issued `xctrl restart camllowfs`
+    - yes this imply opened the camera and went to OPERATING
+    - repeated for camflowfs. same error as above but then no hotplug, went to OPERATING.
+
   - (f) optional, if convenient: reboot the host with one camera unpowered, then power it on. This confirms graceful NODEVICE and the diagnostic;
+
+    - will have to wait on this.
+
   - (g) confirm the port mapping: power off one camera, and its app must not report an interlock failure.
+  
+    - worked for both, with same error for camflowfs on pvcamPCIE_0
+
+  Agent note on the repeated `pl_cam_open ... pvcamPCIE_0 ... Error 16 (Device or resource busy)`:
+  - This is pre-existing, not caused by hotplug. `connect()` opens every enumerated camera with `OPEN_EXCLUSIVE` to read its serial number.
+  - camllowfs's camera enumerates first (`pvcamPCIE_0`) and is held open by camllowfs, so camflowfs's open of it fails with EBUSY before camflowfs finds its own camera at `pvcamPCIE_1`. camllowfs finds its camera first and stops, so it never sees the error.
+  - The existing comment at that log line anticipated this ("with 2 apps running we prob want to ignore").
+  - The shared PCIe lock already prevents the harmful overlap (enumeration during another instance's removal). What remains is the expected collision with the other app's open camera.
+  - Proposed follow-up, pending user approval: log a failed `pl_cam_open` during enumeration at INFO, as a camera probably in use by another application, rather than as a software error.
+
 - **Persistence.** It would help with exactly one thing: knowing whether the device was power-cycled since the kernel enumerated it, for example across an app restart. Reading the camera's PCI config space answers that directly and more reliably, including for power changes the app never observed. So I do not plan a state file. If Q10 shows config-space reads are not informative, a flipperCtrl-style file in `<m_sysPath>/<configName>/` would be the fallback, holding the boot ID and a "power-off seen since last enumeration" flag.
 
 9. **PVCAM SDK headers on workstation.** Could `/opt/pvcam/sdk/include` be installed locally (not committed)? Then the stub declarations' signatures could be checked against the real ones before the first instrument build. Otherwise the stubs are written from the documented API, and mismatches would only show up when the user builds on the instrument.
