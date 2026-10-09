@@ -17,7 +17,7 @@ using namespace MagAOX::app;
 using namespace pvcamHarness;
 
 /// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
-/// The camllowfs app on the Dolphin card's 0000:42:09.0 port, with camflowfs healthy on 0000:42:08.0.
+/// This app's camera on the Dolphin card's 0000:42:09.0 port, with the other camera healthy on 0000:42:08.0.
 struct HotplugFixture : Fixture
 {
     /// Create both ports and enable hotplug on this camera's port.

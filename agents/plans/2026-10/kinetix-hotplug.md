@@ -81,9 +81,11 @@ When its power channel turns on, `pvcamCtrl` should re-enumerate the PCIe camera
 - Each Kinetix sits behind its own switch **downstream port**, so a secondary bus reset of that one port affects only that camera. Confirmed by the Q1 output: on the Dolphin PXH832, `0000:42:08.0` and `0000:42:09.0` each lead to exactly one camera.
 - The downstream port stays enumerated when the camera is unpowered, as the script's comment tree shows ("camera (turned off)" under a present downstream port). A reboot without camera power therefore leaves a port with no camera child.
 - Per the user (Q8), if the host booted with a camera unpowered, hotplug is not expected to recover it. A host reboot with the camera powered is required. The app's job in that case is only graceful `NODEVICE` with a clear, once-logged diagnostic. Retries continue at `retryInterval`; an SBR plus `rescan` of our own empty port is harmless.
-- The serial ↔ port mapping from the Q2 answer comes from the vendor script's "probably" guess, which is based on unstable `pvcamPCIE_N` order. It is a starting configuration, to be confirmed by the interlock and the first hardware validation:
-  - camflowfs `A22J723004` on `0000:42:08.0` (camera `0000:43:00.0`);
-  - camllowfs `A22J723005` on `0000:42:09.0` (camera `0000:44:00.0`).
+- **Serial ↔ port mapping, confirmed 2026-10-09 (Q10)** by powering off camllowfs and observing `0000:42:08.0` go down. The vendor script's "probably" guess quoted in the Q2 answer was backwards:
+  - camllowfs `A22J723005` on `0000:42:08.0` (camera `0000:43:00.0`);
+  - camflowfs `A22J723004` on `0000:42:09.0` (camera `0000:44:00.0`).
+
+  The Q5 `lsof` output is consistent with this: running camflowfs held `/dev/pvcamPCIE_1`, which the script had guessed was `0000:43:00.0`. This confirms that `pvcamPCIE_N` names cannot be used to find ports. A configuration built from the script's guess would have been caught by the port interlock (CRITICAL log, hotplug disabled).
 - The 15 s `m_powerOnWait` already in pvcamCtrl is long enough for the Kinetix PCIe link to come up before the rescan (Q3).
 - Hotplug is opt-in per instance: if no downstream port is configured, behavior is unchanged. This preserves non-PCIe PVCAM use (e.g. USB cameras).
 - Coverage target: all executable lines in `apps/pvcamCtrl/*.hpp`. The two-line `main()` in `pvcamCtrl.cpp` is not compiled into tests, consistent with other apps. libMagAOX includes are excluded per the task.
@@ -222,7 +224,7 @@ Results (2026-10-09, `kinetix-hotplug-files/both_on`, `kinetix-hotplug-files/one
 - **Capability layout:** the PCI Express capability is at `0x68`, reached through PM (`0x40`) and MSI (`0x48`). The fake sysfs now models this chain, so the capability walk is tested against the real layout.
 - **AER on link loss:** the powered-off port also logs AER `UESta: SDES+` (Surprise Down) and `DevSta: FatalErr+`. The kernel's `pcieport` AER service may log or attempt recovery on a camera power-off. This does not affect the design, but check `dmesg` during hardware validation.
 - **Still open:**
-  - (a) Which camera was powered off for `one_off`? If it was camflowfs, the guessed mapping is confirmed: camflowfs on `0000:42:08.0`, camllowfs on `0000:42:09.0`.
+  - (a) *Answered:* camllowfs was the camera powered off for `one_off`, so camllowfs is on `0000:42:08.0` and camflowfs on `0000:42:09.0`, the reverse of the vendor script's guess. `apps/pvcamCtrl/config/example.conf` was corrected.
   - (b) The `setpci` reads of condition (iii), a camera re-powered but not rescanned, have not been captured, so the stale-detection signals (Memory Space Enable, BAR0 vs. `resource`) remain unconfirmed and both stay active. A false "stale" would only cause an unneeded hotplug of this app's own camera at startup. A missed stale camera would let PVCAM open a stale device. Validation case (d) exercises this.
   - The optional `dmesg`/`uevent` mapping checks were not needed.
 

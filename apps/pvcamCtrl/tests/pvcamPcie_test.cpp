@@ -17,7 +17,7 @@ using namespace MagAOX::app;
 using namespace pvcamHarness;
 
 /// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
-/// A recording helper on a fake tree with the camflowfs and camllowfs ports of the Dolphin card.
+/// A recording helper on a fake tree with both downstream ports of the Dolphin card; 0000:42:09.0 is this camera's.
 struct PcieFixture
 {
     /// Private directory.
