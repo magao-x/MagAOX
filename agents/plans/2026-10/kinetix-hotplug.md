@@ -382,6 +382,12 @@ Branch: `jrmales/kinetix-hotplug` (current).
 - A fake sysfs tree with config-space images.
 - The circular-buffer allocation failure is exercised with `RLIMIT_AS`, with no production seam.
 
+**Documentation (step 5):**
+- Doxygen pass on `pvcamCtrl.hpp`: briefs, inline parameter and return docs, member docs, and group titles. The `setFPS()` and `checkNextROI()` briefs were corrected.
+- Briefs added to the stub SDK declarations.
+- New `apps/pvcamCtrl/doc/pvcamCtrl.dox` and `apps/pvcamCtrl/config/example.conf`.
+- `PVCAMCTRL_TEST_DOXYGEN_REF` added to `PREDEFINED` in `doc/config/Doxyfile.libMagAOX`, so the test reference blocks link to the real methods (verified with a restricted Doxygen run).
+
 **Suites**
 - `pvcamPcie_test`: 6 cases;
 - `pvcamCtrl_hotplug_test`: 9 cases, covering the key power-off/power-on scenarios with and without cameras;

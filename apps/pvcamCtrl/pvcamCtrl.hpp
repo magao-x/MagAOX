@@ -18,7 +18,7 @@
 
 #include "pvcamPcie.hpp"
 
-/** \defgroup pvcamCtrl
+/** \defgroup pvcamCtrl PVCAM Camera Controller
  * \brief The pvcam controller application for teledyne cameras
  *
  * <a href="../handbook/operating/software/apps/pvcamCtrl.html">Application Documentation</a>
@@ -33,11 +33,11 @@
 
 /// Format an error message using pvcam facilities
 /**
- * \returns a string of format "<func> failed: <pl_error_message>. <more>"
+ * \returns a string of format "<func> failed: <pl_error_message> <more>", omitting " <more>" if more is empty
  */
-std::string pvcamErrMessage( const std::string &func, ///< [in] the pvcam function which failed
-                             int                pec,  ///< [in] the code from pl_error_code
-                             const std::string &more  ///< [in] extra information to include
+std::string pvcamErrMessage( const std::string &func, /**< [in] the pvcam function which failed */
+                             int                pec,  /**< [in] the code from pl_error_code */
+                             const std::string &more  /**< [in] extra information to include */
 )
 {
     char pvmsg[ERROR_MSG_LEN];
@@ -55,7 +55,7 @@ std::string pvcamErrMessage( const std::string &func, ///< [in] the pvcam functi
         log<software_error>( { __FILE__, __LINE__, 0, pec, pvcamErrMessage( func, pec, more ) } );                     \
     }
 
-/** \defgroup pvcamCtrl_files
+/** \defgroup pvcamCtrl_files pvcamCtrl Files
  * \ingroup pvcamCtrl
  */
 
@@ -65,7 +65,10 @@ namespace app
 {
 
 /// The MagAO-X pvcam controller
-/**
+/** Controls a Teledyne Photometrics camera through PVCAM, found by serial number.  For PCIe cameras such as the
+ * Kinetix, optionally re-enumerates the camera on the PCIe bus after power-on, touching only this camera's switch
+ * downstream port.  See \ref page_module_pvcamCtrl.
+ *
  * \ingroup pvcamCtrl
  */
 class pvcamCtrl : public MagAOXApp<true>,
@@ -183,48 +186,61 @@ class pvcamCtrl : public MagAOXApp<true>,
 
     std::string m_camName; ///< Camera name, filled in as part of opening the camera.
 
+    /// A gain setting of a readout speed.
     struct gain
     {
-        int         index;
-        std::string name;
+        int index; ///< The PVCAM gain index.
 
-        int bitDepth;
+        std::string name; ///< The gain name.
+
+        int bitDepth; ///< The pixel bit depth at this gain.
     };
 
+    /// A readout speed of a readout port.
     struct speed
     {
-        int               index;
-        int               pixTime;
-        int               minG;
-        int               maxG;
-        std::vector<gain> gains;
+        int index; ///< The PVCAM speed-table index.
+
+        int pixTime; ///< The pixel time, in ns.
+
+        int minG; ///< The minimum gain index.
+
+        int maxG; ///< The maximum gain index.
+
+        std::vector<gain> gains; ///< The available gains.
     };
 
+    /// A PVCAM readout port.
     struct port
     {
-        int         index;
-        int         value;
-        std::string name;
+        int index; ///< The enumeration index of the port.
 
-        std::vector<speed> speeds;
+        int value; ///< The PVCAM value of the port.
+
+        std::string name; ///< The port name.
+
+        std::vector<speed> speeds; ///< The port's readout speeds.
     };
 
-    std::vector<port> m_ports;
+    std::vector<port> m_ports; ///< The readout-speed table, filled by fillSpeedTable() on connection.
 
-    bool m_8bit{ false };
+    bool m_8bit{ false }; ///< Whether the current readout port produces 8-bit pixels, which are widened on copy.
 
     bool m_fpsSetted{ false }; ///< Flag indicating that FPS was set, not exposure time.
 
-    uns32 m_circBuffBytes{ 0 };
-    uns8 *m_circBuff{ nullptr };
+    uns32 m_circBuffBytes{ 0 }; ///< Size of the acquisition circular buffer, a whole number of frames.
 
-    FRAME_INFO m_frameInfo;
+    uns8 *m_circBuff{ nullptr }; ///< The acquisition circular buffer owned by this app and filled by PVCAM.
 
-    sem_t m_frSemaphore;     ///< Semaphore used to signal that a frame is ready.
+    FRAME_INFO m_frameInfo; ///< Information about the most recent frame, from the end-of-frame callback.
+
+    sem_t m_frSemaphore; ///< Semaphore used to signal that a frame is ready.
+
     sem_t m_frDoneSemaphore; ///< Semaphore used to signal that a frame has been processed
 
-    uint64_t m_callbacks{ 0 };
-    uint64_t m_lastCallbacks{ 0 };
+    uint64_t m_callbacks{ 0 }; ///< Count of end-of-frame callbacks (currently unused).
+
+    uint64_t m_lastCallbacks{ 0 }; ///< Callback count at the last check (currently unused).
 
   public:
     /// Default c'tor.
@@ -237,6 +253,7 @@ class pvcamCtrl : public MagAOXApp<true>,
 
     // MagAOXApp:
 
+    /// Setup the configuration system.
     virtual void setupConfig();
 
     /// Implementation of loadConfig logic, separated for testing.
@@ -245,11 +262,14 @@ class pvcamCtrl : public MagAOXApp<true>,
     int loadConfigImpl(
         mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
 
+    /// Load the configuration, shutting down on error.
     virtual void loadConfig();
 
     /// Startup function
-    /**
+    /** Validates the PCIe port, if configured, and starts the dev helpers.
      *
+     * \returns 0 on success
+     * \returns -1 on an error requiring shutdown
      */
     virtual int appStartup();
 
@@ -262,7 +282,7 @@ class pvcamCtrl : public MagAOXApp<true>,
 
     /// Shutdown the app.
     /**
-     *
+     * \returns 0 always
      */
     virtual int appShutdown();
 
@@ -283,48 +303,79 @@ class pvcamCtrl : public MagAOXApp<true>,
      */
 
     /// Set defaults for a power-on state.
+    /**
+     * \returns 0 always
+     */
     int powerOnDefaults();
 
     /// PVCAM does not expose a separate temperature-control toggle.
+    /**
+     * \returns 0 always
+     */
     int setTempControl();
 
     /// PVCAM does not expose a writable detector temperature setpoint in this app.
+    /**
+     * \returns 0 always
+     */
     int setTempSetPt();
 
     /// Queue the requested readout-speed selection for the next acquisition setup.
+    /**
+     * \returns 0 always
+     */
     int setReadoutSpeed();
 
     /// PVCAM does not expose vertical-shift control through this app.
+    /**
+     * \returns 0 always
+     */
     int setVShiftSpeed();
 
     /// Set the fan speed according to the configured stdCamera target.
+    /**
+     * \returns 0 on success
+     * \returns -1 on an invalid target or a PVCAM error
+     */
     int setFanSpeed();
 
     /// PVCAM does not expose EM gain through this app.
+    /**
+     * \returns 0 always
+     */
     int setEMGain();
 
-    /// Queue the requested exposure time for the next acquisition setup.
+    /// Clamp the requested exposure time to the camera's limits and queue it for the next acquisition setup.
+    /**
+     * \returns 0 on success
+     * \returns -1 if the limits cannot be read
+     */
     int setExpTime();
 
-    /// PVCAM does not expose FPS as a direct settable control in this app.
+    /// Request a frame rate by converting it to an exposure time, refined during acquisition setup.
+    /**
+     * \returns the result of setExpTime()
+     */
     int setFPS();
 
     /// Check the next ROI
-    /** Checks if the target values are valid and adjusts them to the closest valid values if needed.
+    /** Adjusts the target values to the closest valid values if needed.
      *
-     * \returns 0 if successful
-     * \returns -1 otherwise
+     * \returns 0 always
      */
     int checkNextROI();
 
     /// Queue the requested ROI for the next acquisition setup.
+    /**
+     * \returns 0 always
+     */
     int setNextROI();
 
     /// Sets the shutter state, via call to dssShutter::setShutterState(int) [stdCamera interface]
     /**
-     * \returns 0 always
+     * \returns the result of dssShutter::setShutterState
      */
-    int setShutter( int sh );
+    int setShutter( int sh /**< [in] the requested shutter state, 1 for open and 0 for shut */ );
 
     ///@}
 
@@ -333,21 +384,41 @@ class pvcamCtrl : public MagAOXApp<true>,
      */
 
     /// Configure the PVCAM acquisition state for the pending settings.
+    /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
     int configureAcquisition();
 
-    /// Return the current measured frame rate.
+    /// Return the current frame rate.
     float fps();
 
     /// Start continuous PVCAM acquisition.
+    /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
     int startAcquisition();
 
-    /// Wait for the next frame-ready signal and validate the acquisition state.
+    /// Check for the next frame-ready signal, pausing if none is ready.
+    /**
+     * \returns 0 if a frame is ready
+     * \returns 1 if no frame is ready
+     * \returns -1 on error
+     */
     int acquireAndCheckValid();
 
     /// Copy the latest PVCAM frame into the destination image stream.
-    int loadImageIntoStream( void *dest );
+    /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int loadImageIntoStream( void *dest /**< [out] the image stream buffer, of m_width x m_height uint16 pixels */ );
 
     /// Stop acquisition so the framegrabber can reconfigure.
+    /**
+     * \returns 0 always
+     */
     int reconfig();
 
     ///@}
@@ -357,25 +428,47 @@ class pvcamCtrl : public MagAOXApp<true>,
      */
 
     /// Find and open the configured PVCAM camera.
+    /** Holds the shared PCIe lock while enumerating, since enumeration opens every camera.  Sets CONNECTED if the
+     * camera is found, NODEVICE if not, and leaves the state unchanged if another instance holds the lock.
+     *
+     * \returns 0 on success, including when the camera is not found
+     * \returns -1 on error
+     */
     int connect();
 
     /// Enumerate the PVCAM readout-speed table for the connected camera.
+    /**
+     * \returns 0 on success
+     * \returns -1 if not connected or on error
+     */
     int fillSpeedTable();
 
     /// Dump the values of a PVCAM enumerated parameter for debugging.
-    void dumpEnum( uns32 paramID, const std::string &paramMnem );
+    void dumpEnum( uns32              paramID,  /**< [in] the PVCAM parameter */
+                   const std::string &paramMnem /**< [in] the parameter name to print */ );
 
     /// Get the current fan speed from the camera.
+    /**
+     * \returns 0 on success, or if read errors are expected because power is going off
+     * \returns -1 on error
+     */
     int getFanSpeed();
 
     /// Get the current detector temperature and set point from the camera.
+    /**
+     * \returns 0 on success, or if read errors are expected because power is going off
+     * \returns -1 on error
+     */
     int getTemp();
 
     /// Static trampoline for the PVCAM end-of-frame callback.
-    static void st_endOfFrameCallback( FRAME_INFO *finfo, void *pvcamCtrlInst );
+    static void st_endOfFrameCallback( FRAME_INFO *finfo,        /**< [in] the frame information */
+                                       void       *pvcamCtrlInst /**< [in] the pvcamCtrl instance */ );
 
     /// Process a PVCAM end-of-frame callback.
-    void endOfFrameCallback( FRAME_INFO *finfo );
+    /** Signals the framegrabber that a frame is ready, then waits up to 1 s for it to be copied.
+     */
+    void endOfFrameCallback( FRAME_INFO *finfo /**< [in] the frame information */ );
 
     /// Close the camera and uninitialize PVCAM, logging errors and continuing.
     void releaseCamera();
@@ -420,11 +513,24 @@ class pvcamCtrl : public MagAOXApp<true>,
      *
      * @{
      */
+
+    /// Check whether telemetry records are due.
+    /**
+     * \returns the result of telemeter::checkRecordTimes
+     */
     int checkRecordTimes();
 
-    int recordTelem( const telem_stdcam * );
+    /// Record camera telemetry.
+    /**
+     * \returns the result of recordCamera
+     */
+    int recordTelem( const telem_stdcam * /**< [in] type selector */ );
 
-    int recordTelem( const telem_fgtimings * );
+    /// Record framegrabber timing telemetry.
+    /**
+     * \returns the result of recordFGTimings
+     */
+    int recordTelem( const telem_fgtimings * /**< [in] type selector */ );
 
     ///@}
 };

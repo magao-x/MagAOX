@@ -1,0 +1,47 @@
+/** \file pvcamCtrl.dox
+ * \brief pvcamCtrl PCIe hotplug configuration and behavior documentation.
+ * \ingroup pvcamCtrl_files
+ */
+/** \page page_module_pvcamCtrl pvcamCtrl
+ * \ingroup pvcamCtrl
+ *
+ * \section pvcamCtrl_description Description
+ * pvcamCtrl controls a Teledyne Photometrics camera through PVCAM, finding it by serial number.  PCIe cameras such
+ * as the Kinetix are devices on the host's PCIe bus, behind a switch card (OSS, IOI, or Dolphin).  After the camera
+ * is power cycled, the kernel's device must be re-enumerated ("hotplugged") before PVCAM can use it again.
+ *
+ * \section pvcamCtrl_hotplug PCIe Hotplug
+ * When `[pcie] downstreamPort` is set, pvcamCtrl re-enumerates its camera after power-on.  It performs the steps of
+ * the vendor script `/opt/pvcam/drivers/in-kernel/pcie/hotplug_pcie.sh` for that one switch downstream port only:
+ * a secondary bus reset of the port, removal of the camera function below it, and a rescan of the port.  The vendor
+ * script resets every port and removes every camera, which would disrupt the other camera on a shared card, and it
+ * refuses to run while any camera is open.
+ *
+ * \include apps/pvcamCtrl/config/example.conf
+ *
+ * Find the port with `lspci -tv` or by running the vendor script as a normal user, which prints the tree and exits
+ * before resetting anything.  Each camera (`1b6b:0001`) appears below one downstream port; configure that port, not
+ * the card's upstream port.  The script's camera names (`pvcamPCIE_N`) are only guesses and are not stable across
+ * boots, so confirm the mapping by powering one camera off.
+ *
+ * A hotplug happens:
+ * - after power-on, once the power-on wait has elapsed;
+ * - when the camera below the port is missing, unresponsive, or stale (its kernel-assigned configuration was lost to
+ *   a power cycle the app did not see, e.g. while it was not running).  This check runs before PVCAM opens the
+ *   camera;
+ * - again every `retryInterval` seconds while no camera appears.
+ *
+ * A camera that looks healthy is never reset unless its port was seen down during the preceding power-off.  If the
+ * configured port stays up, or comes back up, while this camera's power is off, the port belongs to another camera:
+ * pvcamCtrl logs a CRITICAL message and disables hotplug until restarted, then connects normally.
+ *
+ * Removing a camera that is open crashes the kernel.  pvcamCtrl closes its camera and uninitializes PVCAM before
+ * a hotplug, and all pvcamCtrl instances share the lock file `<sysPath>/pvcamCtrl_pcie.lock`, which serializes
+ * camera enumeration (which opens every camera) in one instance with hotplug in another.
+ *
+ * Cameras must be powered when the host boots.  A camera that was unpowered at boot cannot be recovered by hotplug;
+ * pvcamCtrl reports this once and waits in NODEVICE, retrying, until the host is rebooted with the camera powered.
+ *
+ * Hotplug writes to sysfs and PCI config space with the app's setuid-root privileges.  Without a configured port,
+ * pvcamCtrl never touches sysfs.
+ */

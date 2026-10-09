@@ -127,20 +127,35 @@ extern "C"
 {
 #endif
 
+    /// Initialize the library.
     rs_bool PV_DECL pl_pvcam_init( void );
+    /// Uninitialize the library, closing all cameras.
     rs_bool PV_DECL pl_pvcam_uninit( void );
+    /// Close a camera.
     rs_bool PV_DECL pl_cam_close( int16 hcam );
+    /// Get the name of an enumerated camera.
     rs_bool PV_DECL pl_cam_get_name( int16 cam_num, char *camera_name );
+    /// Get the number of cameras.
     rs_bool PV_DECL pl_cam_get_total( int16 *totl_cams );
+    /// Open a camera by name.
     rs_bool PV_DECL pl_cam_open( char *camera_name, int16 *hcam, int16 o_mode );
+    /// Register an event callback with a context.
     rs_bool PV_DECL pl_cam_register_callback_ex3( int16 hcam, int32 callback_event, void *callback, void *context );
+    /// Deregister an event callback.
     rs_bool PV_DECL pl_cam_deregister_callback( int16 hcam, int32 callback_event );
+    /// Get the most recent error code.
     int16 PV_DECL   pl_error_code( void );
+    /// Get the message for an error code.
     rs_bool PV_DECL pl_error_message( int16 err_code, char *msg );
+    /// Get an attribute of a parameter.
     rs_bool PV_DECL pl_get_param( int16 hcam, uns32 param_id, int16 param_attribute, void *param_value );
+    /// Set a parameter.
     rs_bool PV_DECL pl_set_param( int16 hcam, uns32 param_id, void *param_value );
+    /// Get an enumerated parameter's value and description.
     rs_bool PV_DECL pl_get_enum_param( int16 hcam, uns32 param_id, uns32 index, int32 *value, char *desc, uns32 length );
+    /// Get the description length of an enumerated parameter value.
     rs_bool PV_DECL pl_enum_str_length( int16 hcam, uns32 param_id, uns32 index, uns32 *length );
+    /// Set up continuous acquisition.
     rs_bool PV_DECL pl_exp_setup_cont( int16           hcam,
                                        uns16           rgn_total,
                                        const rgn_type *rgn_array,
@@ -148,8 +163,11 @@ extern "C"
                                        uns32           exposure_time,
                                        uns32          *exp_bytes,
                                        int16           buffer_mode );
+    /// Start continuous acquisition.
     rs_bool PV_DECL pl_exp_start_cont( int16 hcam, void *pixel_stream, uns32 size );
+    /// Get the most recent frame.
     rs_bool PV_DECL pl_exp_get_latest_frame( int16 hcam, void **frame );
+    /// Stop continuous acquisition.
     rs_bool PV_DECL pl_exp_stop_cont( int16 hcam, int16 cam_state );
 
 #ifdef __cplusplus
