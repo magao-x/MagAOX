@@ -249,6 +249,9 @@ Agent note:
   - The existing comment at that log line anticipated this ("with 2 apps running we prob want to ignore").
   - The shared PCIe lock already prevents the harmful overlap (enumeration during another instance's removal). What remains is the expected collision with the other app's open camera.
   - Proposed follow-up, pending user approval: log a failed `pl_cam_open` during enumeration at INFO, as a camera probably in use by another application, rather than as a software error.
+  - *Approved and implemented (2026-10-09):* `connect()` now logs `could not open <name>, probably in use by another application: <PVCAM message>` at INFO, and continues scanning as before.
+    - It follows the existing "Found 0 pvcam cameras" / "camera not found" convention of logging only on the first attempt in each state, so an instance waiting in NODEVICE beside a running instance does not log it every loop.
+    - `stateLogged()` advances a counter on each call, so it is now called lazily, only when one of these diagnostics is due, and cached for the rest of the call. This keeps the existing messages' behavior unchanged.
 
 - **Persistence.** It would help with exactly one thing: knowing whether the device was power-cycled since the kernel enumerated it, for example across an app restart. Reading the camera's PCI config space answers that directly and more reliably, including for power changes the app never observed. So I do not plan a state file. If Q10 shows config-space reads are not informative, a flipperCtrl-style file in `<m_sysPath>/<configName>/` would be the fallback, holding the boot ID and a "power-off seen since last enumeration" flag.
 

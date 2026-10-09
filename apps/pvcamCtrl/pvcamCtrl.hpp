@@ -1398,9 +1398,21 @@ int pvcamCtrl::connect()
         return -1;
     }
 
+    // Enumeration diagnostics are logged only on the first attempt in each state.  stateLogged() is checked only
+    // when a diagnostic is due, then cached so all diagnostics of this attempt agree.
+    int  logged       = -1;
+    auto firstAttempt = [&]()
+    {
+        if( logged < 0 )
+        {
+            logged = stateLogged();
+        }
+        return logged == 0;
+    };
+
     if( nrOfCameras == 0 )
     {
-        if( !stateLogged() )
+        if( firstAttempt() )
         {
             log<text_log>( "Found 0 pvcam cameras.", logPrio::LOG_INFO );
         }
@@ -1423,11 +1435,16 @@ int pvcamCtrl::connect()
 
         int16_t handle = -1;
 
-        // Open to check its serial number
+        // Open to check its serial number.  Failure is expected when another pvcamCtrl instance has this camera open.
         if( !pl_cam_open( camName, &handle, OPEN_EXCLUSIVE ) )
         {
-            log_pvcam_software_error( "pl_cam_open",
-                                      "" ); // We log this for now, but with 2 apps running we prob want to ignore
+            if( firstAttempt() )
+            {
+                log<text_log>( std::string( "could not open " ) + camName +
+                                   ", probably in use by another application: " +
+                                   pvcamErrMessage( "pl_cam_open", pl_error_code(), "" ),
+                               logPrio::LOG_INFO );
+            }
             continue;
         }
 
@@ -1524,7 +1541,7 @@ int pvcamCtrl::connect()
     }
     else
     {
-        if( !stateLogged() )
+        if( firstAttempt() )
         {
             log<text_log>( "camera not found", logPrio::LOG_INFO );
         }

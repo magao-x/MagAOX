@@ -497,10 +497,23 @@ TEST_CASE( "pvcamCtrl connects to its camera by serial number", "[pvcamCtrl]" )
     CameraFixture::clear();
     f.m_handle = -1;
 
-    // A camera that cannot be opened is skipped.
+    // A camera that cannot be opened, e.g. because another instance has it open, is skipped and noted at INFO once
+    // per state, without hiding the camera-not-found note.
     CameraFixture::fail( "pl_cam_open", 3 );
-    again( 0, stateCodes::NODEVICE );
-    REQUIRE( Fixture::logged( "camera not found" ) == false );
+    f.state( stateCodes::NOTCONNECTED );
+    REQUIRE( f.connect() == 0 );
+    REQUIRE( f.state() == stateCodes::NODEVICE );
+    REQUIRE( Fixture::count( "could not open pvcamPCIE_2, probably in use by another application: "
+                             "pl_cam_open failed: fake error 1" ) == 1 );
+    REQUIRE( Fixture::count( "camera not found" ) == 1 );
+    REQUIRE( Fixture::errors() == 0 );
+    CameraFixture::clear();
+    CameraFixture::fail( "pl_cam_open" );
+    REQUIRE( f.connect() == 0 );
+    REQUIRE( f.connect() == 0 );
+    REQUIRE( Fixture::count( "could not open pvcamPCIE_0" ) == 1 );
+    REQUIRE( Fixture::count( "camera not found" ) == 1 );
+    CameraFixture::clear();
 
     for( int16 attr : { ATTR_AVAIL, ATTR_CURRENT } )
     {
