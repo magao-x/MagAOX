@@ -16,6 +16,8 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+#include "pvcamPcie.hpp"
+
 /** \defgroup pvcamCtrl
  * \brief The pvcam controller application for teledyne cameras
  *
@@ -41,11 +43,7 @@ std::string pvcamErrMessage( const std::string &func, ///< [in] the pvcam functi
     char pvmsg[ERROR_MSG_LEN];
     pl_error_message( pec, pvmsg );
 
-    std::string msg = func + " failed: " + pvmsg;
-    if( more != "" )
-        msg += " " + more;
-
-    return msg;
+    return func + " failed: " + pvmsg + ( more.empty() ? "" : " " + more );
 }
 
 /// Helper for logging an error from pvcam
@@ -157,6 +155,28 @@ class pvcamCtrl : public MagAOXApp<true>,
 
     uint32_t m_acqSleep{ 5000 }; ///< The acquisition pause time, in ns, when no frame is ready.Default is 5000.
 
+    double m_pcieRetryInterval{ 30 }; ///< Minimum time in seconds between PCIe hotplug attempts.  Default is 30.
+
+    ///@}
+
+    /** \name PCIe Hotplug - Data
+     *@{
+     */
+
+    pvcamPcie m_pcie; ///< Re-enumerates this camera's PCIe switch downstream port.  Disabled if no port is configured.
+
+    std::string m_pcieLockPath; ///< Lock file shared by all pvcamCtrl instances, serializing enumeration and hotplug.
+
+    bool m_pcieDisabled{ false }; ///< Set when port validation or the port interlock fails; disables hotplug.
+
+    bool m_hotplugPending{ false }; ///< Set on power-off, since the camera must be re-enumerated after power returns.
+
+    bool m_portSeenDown{ false }; ///< Whether the port was most recently observed down during this power-off.
+
+    double m_lastHotplug{ 0 }; ///< Time of the last hotplug attempt, for rate limiting retries.
+
+    std::string m_pcieLastLog; ///< The most recent PCIe diagnostic, used to suppress repeats.
+
     ///@}
 
     int16 m_handle{ -1 }; ///< Camera handle, set when camera is opened
@@ -245,6 +265,18 @@ class pvcamCtrl : public MagAOXApp<true>,
      *
      */
     virtual int appShutdown();
+
+    /// Clean up after power off and require a PCIe hotplug when power returns.
+    /**
+     * \returns 0 always
+     */
+    virtual int onPowerOff();
+
+    /// Maintain status and verify the PCIe port while power is off.
+    /**
+     * \returns 0 always
+     */
+    virtual int whilePowerOff();
 
     /** \name stdCamera Interface
      * @{
@@ -345,6 +377,43 @@ class pvcamCtrl : public MagAOXApp<true>,
     /// Process a PVCAM end-of-frame callback.
     void endOfFrameCallback( FRAME_INFO *finfo );
 
+    /// Close the camera and uninitialize PVCAM, logging errors and continuing.
+    void releaseCamera();
+
+    ///@}
+
+    /** \name PCIe Hotplug
+     * @{
+     */
+
+    /// Re-enumerate the camera on the PCIe bus, if needed, before connecting.
+    /** Hotplugs after a power-off, or when the camera below the port is missing, unresponsive, or stale.  A camera
+     * that looks healthy after a power-off is only hotplugged if its port was seen down while power was off, which
+     * guards against a misconfigured port belonging to another camera.  Retries are rate limited by
+     * m_pcieRetryInterval.
+     *
+     * \returns 0 if connect() should proceed
+     * \returns 1 if connect() should wait for a later loop
+     */
+    int pcieLogic();
+
+    /// Re-enumerate the camera on the PCIe bus.
+    /** Takes the shared lock, releases the camera, and hotplugs the port with elevated privileges.
+     *
+     * \returns 0 if a camera is found below the port
+     * \returns 1 if no camera is found below the port
+     * \returns 2 if another instance holds the lock
+     * \returns -1 on error, which is logged
+     */
+    int hotplugCamera();
+
+    /// Check the PCIe port while power is off, disabling hotplug if it is not this camera's port.
+    void checkPortDown();
+
+    /// Log a PCIe diagnostic unless it repeats the previous one.
+    void pcieLog( const std::string &msg, /**< [in] the diagnostic */
+                  logPrioT           prio /**< [in] the log priority */ );
+
     ///@}
 
     /** \name Telemeter Interface
@@ -392,8 +461,6 @@ pvcamCtrl::pvcamCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
     m_readoutSpeedNameSet = m_defaultReadoutSpeed;
     m_fanSpeedName        = m_defaultFanSpeed;
     m_fanSpeedNameSet     = m_defaultFanSpeed;
-
-    return;
 }
 
 void pvcamCtrl::setupConfig()
@@ -435,6 +502,27 @@ void pvcamCtrl::setupConfig()
 
     shutterT::setupConfig( config );
 
+    config.add( "pcie.downstreamPort",
+                "",
+                "pcie.downstreamPort",
+                argType::Required,
+                "pcie",
+                "downstreamPort",
+                false,
+                "string",
+                "PCI address of the switch downstream port above this camera, e.g. 0000:42:09.0.  Enables PCIe "
+                "hotplug after power-on.  Default is empty, which disables hotplug." );
+
+    config.add( "pcie.retryInterval",
+                "",
+                "pcie.retryInterval",
+                argType::Required,
+                "pcie",
+                "retryInterval",
+                false,
+                "real",
+                "Minimum time in seconds between PCIe hotplug attempts while the camera is missing.  Default is 30." );
+
     TELEMETER_SETUP_CONFIG( config );
 }
 
@@ -456,6 +544,16 @@ int pvcamCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_acqSleep, "framegrabber.acqSleep" );
     shutterT::loadConfig( _config );
 
+    std::string downstreamPort;
+    _config( downstreamPort, "pcie.downstreamPort" );
+    if( m_pcie.port( downstreamPort ) < 0 )
+    {
+        log<text_log>( "pcie.downstreamPort: " + m_pcie.error(), logPrio::LOG_CRITICAL );
+        return -1;
+    }
+
+    _config( m_pcieRetryInterval, "pcie.retryInterval" );
+
     TELEMETER_LOAD_CONFIG( _config );
 
     return 0;
@@ -472,6 +570,20 @@ void pvcamCtrl::loadConfig()
 
 int pvcamCtrl::appStartup()
 {
+    m_pcieLockPath = m_sysPath + "/pvcamCtrl_pcie.lock";
+
+    if( m_pcie.enabled() )
+    {
+        if( m_pcie.validatePort() < 0 )
+        {
+            m_pcieDisabled = true;
+            log<text_log>( m_pcie.error() + ".  PCIe hotplug disabled.", logPrio::LOG_ERROR );
+        }
+        else
+        {
+            log<text_log>( "PCIe hotplug enabled for port " + m_pcie.port(), logPrio::LOG_INFO );
+        }
+    }
 
     STDCAMERA_APP_STARTUP;
 
@@ -499,19 +611,13 @@ int pvcamCtrl::appStartup()
 
 int pvcamCtrl::appLogic()
 {
-    ///\todo why do we run dev appLogics first?
+    // stdCamera waits out the power-on delay, then sets NOTCONNECTED and applies the power-on defaults.
+    STDCAMERA_APP_LOGIC;
 
     if( state() == stateCodes::POWERON )
     {
-        if( !powerOnWaitElapsed() )
-        {
-            return 0;
-        }
-
-        state( stateCodes::NOTCONNECTED );
+        return 0;
     }
-
-    STDCAMERA_APP_LOGIC;
 
     FRAMEGRABBER_APP_LOGIC;
 
@@ -532,6 +638,12 @@ int pvcamCtrl::appLogic()
         }
 
         std::unique_lock<std::mutex> lock( m_indiMutex );
+
+        if( pcieLogic() != 0 )
+        {
+            return 0;
+        }
+
         if( connect() < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
@@ -580,22 +692,7 @@ int pvcamCtrl::appLogic()
 
 int pvcamCtrl::appShutdown()
 {
-    if( m_handle != -1 )
-    {
-        if( !pl_cam_close( m_handle ) )
-        {
-            log_pvcam_software_error( "pl_cam_close", "continuing" );
-        }
-        m_handle = -1;
-    }
-
-    if( !pl_pvcam_uninit() )
-    {
-        if( pl_error_code() != PL_ERR_LIBRARY_NOT_INITIALIZED ) /// \todo this error code is manually defined
-        {
-            log_pvcam_software_error( "pl_pvcam_uninit", "continuing" );
-        }
-    }
+    releaseCamera();
 
     STDCAMERA_APP_SHUTDOWN;
 
@@ -607,6 +704,36 @@ int pvcamCtrl::appShutdown()
     }
 
     TELEMETER_APP_SHUTDOWN;
+
+    return 0;
+}
+
+int pvcamCtrl::onPowerOff()
+{
+    m_hotplugPending = true;
+    m_portSeenDown   = false;
+    m_lastHotplug    = 0;
+
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+
+    if( std::min( { stdCameraT::onPowerOff(), frameGrabberT::onPowerOff(), shutterT::onPowerOff() } ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "error from a dev onPowerOff()" } );
+    }
+
+    return 0;
+}
+
+int pvcamCtrl::whilePowerOff()
+{
+    checkPortDown();
+
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+
+    if( std::min( stdCameraT::whilePowerOff(), shutterT::whilePowerOff() ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "error from a dev whilePowerOff()" } );
+    }
 
     return 0;
 }
@@ -890,7 +1017,7 @@ int pvcamCtrl::configureAcquisition()
     //-- 3: Setup continuous acquisition
     uns32 fsize;
 
-    uns32 exptime = m_expTimeSet * 1e6;
+    ulong64 exptime = m_expTimeSet * 1e6; // PARAM_EXPOSURE_TIME is ulong64
     if( pl_exp_setup_cont( m_handle, 1, &pvROI, TIMED_MODE, exptime, &fsize, CIRC_OVERWRITE ) == false )
     {
         log_pvcam_software_error( "pl_exp_setup_cont", "" );
@@ -1074,6 +1201,7 @@ int pvcamCtrl::loadImageIntoStream( void *dest )
     if( pl_exp_get_latest_frame( m_handle, reinterpret_cast<void **>( &frame ) ) == false )
     {
         log_pvcam_software_error( "pl_exp_get_latest_frame", "" );
+        return -1;
     }
 
     if( m_8bit )
@@ -1111,6 +1239,16 @@ int pvcamCtrl::reconfig()
 
 int pvcamCtrl::connect()
 {
+    // Enumeration opens every camera, so it must not overlap another instance's PCIe hotplug.
+    pvcamPcieLock pcieLock( m_pcieLockPath );
+    if( pcieLock.busy() )
+    {
+        return 0;
+    }
+    else if( !pcieLock.locked() )
+    {
+        pcieLog( "locking " + m_pcieLockPath + ": " + strerror( pcieLock.error() ), logPrio::LOG_ERROR );
+    }
 
     // In picam, we had to initialize every time.  We'll do that here too.
 
@@ -1314,29 +1452,20 @@ int pvcamCtrl::fillSpeedTable()
             return -1;
         }
 
-        char *text = new( std::nothrow ) char[strLength];
-        if( !text )
-        {
-            ///\todo log this properly
-            std::cerr << "failed to allocate string\n";
-            return -1;
-        }
+        std::vector<char> text( strLength + 1, '\0' );
 
         int32 value;
-        if( pl_get_enum_param( m_handle, PARAM_READOUT_PORT, p, &value, text, strLength ) == false )
+        if( pl_get_enum_param( m_handle, PARAM_READOUT_PORT, p, &value, text.data(), strLength ) == false )
         {
             log_pvcam_software_error( "pl_get_enum_param", "PARAM_READOUT_PORT" );
-            delete[] text;
-            return false;
+            return -1;
         }
 
         m_ports[p].index = p;
         m_ports[p].value = value;
-        m_ports[p].name  = text;
+        m_ports[p].name  = text.data();
 
-        std::cerr << "Port: " << p << " name: " << text << " value: " << value << "\n";
-
-        delete[] text;
+        std::cerr << "Port: " << p << " name: " << text.data() << " value: " << value << "\n";
 
         if( pl_set_param( m_handle, PARAM_READOUT_PORT, static_cast<void *>( &value ) ) == false )
         {
@@ -1386,7 +1515,7 @@ int pvcamCtrl::fillSpeedTable()
             }
 
             int16 maxg;
-            if( pl_get_param( m_handle, PARAM_GAIN_INDEX, ATTR_MIN, static_cast<void *>( &maxg ) ) == false )
+            if( pl_get_param( m_handle, PARAM_GAIN_INDEX, ATTR_MAX, static_cast<void *>( &maxg ) ) == false )
             {
                 log_pvcam_software_error( "pl_get_param", "PARAM_GAIN_INDEX ATTR_MAX" );
                 return -1;
@@ -1451,23 +1580,16 @@ void pvcamCtrl::dumpEnum( uns32 paramID, const std::string &paramMnem )
                 // TODO: Handle error
                 break;
             }
-            char *text = new( std::nothrow ) char[strLength];
-            if( !text )
-            {
-                // TODO: Handle error
-                break;
-            }
-            int32 value;
-            if( PV_OK != pl_get_enum_param( m_handle, paramID, n, &value, text, strLength ) )
+            std::vector<char> text( strLength + 1, '\0' );
+            int32             value;
+            if( PV_OK != pl_get_enum_param( m_handle, paramID, n, &value, text.data(), strLength ) )
             {
                 log_pvcam_software_error( "pl_get_enum_param", paramMnem );
                 // TODO: Handle error
-                delete[] text;
                 break;
             }
             std::cerr << paramMnem;
-            fprintf( stderr, " item at index %u, value: %d, text: '%s'\n", n, value, text );
-            delete[] text;
+            fprintf( stderr, " item at index %u, value: %d, text: '%s'\n", n, value, text.data() );
         }
     }
     else
@@ -1490,6 +1612,7 @@ int pvcamCtrl::getTemp()
             return 0;
         log_pvcam_software_error( "pl_get_param", "PARAM_TEMP ATTR_AVAIL" );
         state( stateCodes::ERROR );
+        return -1;
     }
 
     int16 stemp;
@@ -1501,6 +1624,7 @@ int pvcamCtrl::getTemp()
                 return 0;
             log_pvcam_software_error( "pl_get_param", "PARAM_TEMP ATTR_AVAIL" );
             state( stateCodes::ERROR );
+            return -1;
         }
 
         m_ccdTempSetpt = stemp / 100.0;
@@ -1512,6 +1636,7 @@ int pvcamCtrl::getTemp()
             return 0;
         log_pvcam_software_error( "pl_get_param", "PARAM_TEMP ATTR_AVAIL" );
         state( stateCodes::ERROR );
+        return -1;
     }
 
     int16 ctemp;
@@ -1523,6 +1648,7 @@ int pvcamCtrl::getTemp()
                 return 0;
             log_pvcam_software_error( "pl_get_param", "PARAM_TEMP ATTR_AVAIL" );
             state( stateCodes::ERROR );
+            return -1;
         }
 
         m_ccdTemp = ctemp / 100.0;
@@ -1640,6 +1766,166 @@ void pvcamCtrl::endOfFrameCallback( FRAME_INFO *finfo )
     mx::sys::timespecAddNsec( ts, 1e9 ); // We wait for up to one second for the frame done processing signal
 
     sem_timedwait( &m_frDoneSemaphore, &ts );
+}
+
+void pvcamCtrl::releaseCamera()
+{
+    if( m_handle != -1 )
+    {
+        if( !pl_cam_close( m_handle ) )
+        {
+            log_pvcam_software_error( "pl_cam_close", "continuing" );
+        }
+        m_handle = -1;
+    }
+
+    /// \todo PL_ERR_LIBRARY_NOT_INITIALIZED is manually defined
+    if( !pl_pvcam_uninit() && pl_error_code() != PL_ERR_LIBRARY_NOT_INITIALIZED )
+    {
+        log_pvcam_software_error( "pl_pvcam_uninit", "continuing" );
+    }
+}
+
+int pvcamCtrl::pcieLogic()
+{
+    if( !m_pcie.enabled() || m_pcieDisabled )
+    {
+        return 0;
+    }
+
+    pcieCamera camera;
+    {
+        elevatedPrivileges elPriv( this );
+        camera = m_pcie.cameraState();
+    }
+
+    if( camera == pcieCamera::error )
+    {
+        pcieLog( "checking PCIe camera: " + m_pcie.error(), logPrio::LOG_ERROR );
+        return 0;
+    }
+
+    if( camera == pcieCamera::healthy )
+    {
+        if( !m_hotplugPending )
+        {
+            return 0;
+        }
+
+        if( !m_portSeenDown )
+        {
+            m_pcieDisabled = true;
+            log<text_log>( "PCIe port " + m_pcie.port() +
+                               " stayed up while camera power was off, so it is not this camera's port.  "
+                               "PCIe hotplug disabled.",
+                           logPrio::LOG_CRITICAL );
+            return 0;
+        }
+    }
+
+    if( mx::sys::get_curr_time() - m_lastHotplug < m_pcieRetryInterval )
+    {
+        return 1;
+    }
+
+    int rv = hotplugCamera();
+    if( rv == 2 )
+    {
+        return 1;
+    }
+
+    m_lastHotplug = mx::sys::get_curr_time();
+
+    if( rv == 0 )
+    {
+        m_hotplugPending = false;
+        m_pcieLastLog.clear();
+        log<text_log>( "camera found on PCIe port " + m_pcie.port(), logPrio::LOG_INFO );
+        return 0;
+    }
+
+    if( rv == 1 )
+    {
+        pcieLog( "no camera found on PCIe port " + m_pcie.port() +
+                     " after hotplug.  If the host booted with the camera unpowered, reboot with camera power on.",
+                 logPrio::LOG_WARNING );
+    }
+
+    state( stateCodes::NODEVICE );
+
+    return 1;
+}
+
+int pvcamCtrl::hotplugCamera()
+{
+    pvcamPcieLock pcieLock( m_pcieLockPath );
+    if( pcieLock.busy() )
+    {
+        return 2;
+    }
+    else if( !pcieLock.locked() )
+    {
+        pcieLog( "locking " + m_pcieLockPath + ": " + strerror( pcieLock.error() ), logPrio::LOG_ERROR );
+        return -1;
+    }
+
+    // Removing an open camera crashes the kernel.
+    releaseCamera();
+
+    log<text_log>( "re-enumerating camera on PCIe port " + m_pcie.port(), logPrio::LOG_NOTICE );
+
+    elevatedPrivileges elPriv( this );
+    int                rv = m_pcie.hotplug();
+    elPriv.restore();
+
+    if( rv < 0 )
+    {
+        pcieLog( "PCIe hotplug failed: " + m_pcie.error(), logPrio::LOG_ERROR );
+    }
+
+    return rv;
+}
+
+void pvcamCtrl::checkPortDown()
+{
+    if( !m_pcie.enabled() || m_pcieDisabled )
+    {
+        return;
+    }
+
+    int down;
+    {
+        elevatedPrivileges elPriv( this );
+        down = m_pcie.portDown();
+    }
+
+    if( down < 0 )
+    {
+        pcieLog( "checking PCIe port: " + m_pcie.error(), logPrio::LOG_ERROR );
+    }
+    else if( down == 1 )
+    {
+        m_portSeenDown = true;
+    }
+    else if( m_portSeenDown )
+    {
+        m_pcieDisabled = true;
+        log<text_log>( "PCIe port " + m_pcie.port() +
+                           " came up while camera power was off, so it is not this camera's port.  "
+                           "PCIe hotplug disabled.",
+                       logPrio::LOG_CRITICAL );
+    }
+}
+
+void pvcamCtrl::pcieLog( const std::string &msg, logPrioT prio )
+{
+    if( msg == m_pcieLastLog )
+    {
+        return;
+    }
+
+    m_pcieLastLog = msg;
+    log<text_log>( msg, prio );
 }
 
 int pvcamCtrl::checkRecordTimes()
