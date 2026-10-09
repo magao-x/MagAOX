@@ -135,23 +135,30 @@ TEST_CASE( "pvcamPcie classifies the camera below its port", "[pvcamCtrl][pcie]"
     attribute( f.m_sysfs.m_root + "/0000:42:09.0/0000:44:00.0/resource", "0x00000002fc000000" );
     REQUIRE( f.m_pcie.cameraState() == pcieCamera::stale );
 
-    // A 32-bit BAR0 ignores BAR1.
+    // Memory decoding disabled, with BAR0 still matching.
+    f.m_sysfs.camera( "0000:42:09.0", "0000:44:00.0" );
     Config c = readConfig( f.m_sysfs.m_root + "/0000:42:09.0/0000:44:00.0" );
-    put( c, 0x10, 0xfc000000, 4 );
+    put( c, 0x04, 0x0404, 2 );
     writeConfig( f.m_sysfs.m_root + "/0000:42:09.0/0000:44:00.0", c );
-    attribute( f.m_sysfs.m_root + "/0000:42:09.0/0000:44:00.0/resource", "0x00000000fc000000" );
+    REQUIRE( f.m_pcie.cameraState() == pcieCamera::stale );
+
+    // A 64-bit BAR0 continues in BAR1.
+    put( c, 0x04, 0x0406, 2 );
+    put( c, 0x10, 0xfc00000c, 4 );
+    put( c, 0x14, 0x1, 4 );
+    writeConfig( f.m_sysfs.m_root + "/0000:42:09.0/0000:44:00.0", c );
+    attribute( f.m_sysfs.m_root + "/0000:42:09.0/0000:44:00.0/resource", "0x00000001fc000000" );
     REQUIRE( f.m_pcie.cameraState() == pcieCamera::healthy );
 
-    std::filesystem::remove( f.m_sysfs.m_root + "/0000:42:09.0/0000:44:00.0/resource" );
-    REQUIRE( f.m_pcie.cameraState() == pcieCamera::error );
-
-    f.m_sysfs.camera( "0000:42:09.0", "0000:44:00.0" );
     for( auto op : { "read 0", "read 4", "read 16", "read 20" } )
     {
         f.m_pcie.m_failOp = op;
         REQUIRE( f.m_pcie.cameraState() == pcieCamera::error );
     }
     f.m_pcie.m_failOp.clear();
+
+    std::filesystem::remove( f.m_sysfs.m_root + "/0000:42:09.0/0000:44:00.0/resource" );
+    REQUIRE( f.m_pcie.cameraState() == pcieCamera::error );
 
     REQUIRE( f.m_pcie.port( "0000:42:0a.0" ) == 0 );
     REQUIRE( f.m_pcie.cameraDevice( camera ) == -1 );

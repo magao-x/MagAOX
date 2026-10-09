@@ -289,7 +289,7 @@ struct Sysfs
         attribute( dir + "/vendor", "0x1b6b" );
         attribute( dir + "/device", "0x0001" );
         attribute( dir + "/remove", "" );
-        attribute( dir + "/resource", "0x00000001fc000000 0x00000001fcffffff 0x0000000000140204" );
+        attribute( dir + "/resource", "0x00000000f7000000 0x00000000f7007fff 0x0000000000040200" );
         Config c{};
         c.fill( state == Cam::Unresponsive ? 0xFF : 0 );
         if( state != Cam::Unresponsive )
@@ -298,9 +298,9 @@ struct Sysfs
             put( c, 0x02, 0x0001, 2 );
             if( state == Cam::Healthy )
             {
-                put( c, 0x04, 0x0006, 2 );
-                put( c, 0x10, 0xfc00000c, 4 );
-                put( c, 0x14, 0x1, 4 );
+                // As read from a working Kinetix: memory decoding on, 32-bit BAR0 at its assigned address.
+                put( c, 0x04, 0x0406, 2 );
+                put( c, 0x10, 0xf7000000, 4 );
             }
         }
         writeConfig( dir, c );
