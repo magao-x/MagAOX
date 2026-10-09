@@ -260,9 +260,14 @@ struct Sysfs
         put( c, 0x06, 0x10, 2 );
         put( c, 0x34, 0x40, 1 );
         put( c, 0x3E, 0x0003, 2 );
-        put( c, 0x40, 0x10, 1 );
-        put( c, 0x4C, capable ? ( 1u << 20 ) : 0, 4 );
-        put( c, 0x52, up ? 0x2000 : 0, 2 );
+        // Capability chain of the Dolphin PXH832 downstream ports: PM (0x40), MSI (0x48), Express (0x68),
+        // Subsystem ID (0xa4).
+        put( c, 0x40, 0x4801, 2 );
+        put( c, 0x48, 0x6805, 2 );
+        put( c, 0x68, 0xa410, 2 );
+        put( c, 0xa4, 0x000d, 2 );
+        put( c, 0x74, capable ? ( 1u << 20 ) : 0, 4 );
+        put( c, 0x7A, up ? 0x2000 : 0, 2 );
         writeConfig( dir, c );
     }
 
@@ -270,7 +275,7 @@ struct Sysfs
     void link( const std::string &bdf /**< [in] port */, bool up /**< [in] link active */ )
     {
         Config c = readConfig( m_root + "/" + bdf );
-        put( c, 0x52, up ? 0x2000 : 0, 2 );
+        put( c, 0x7A, up ? 0x2000 : 0, 2 );
         writeConfig( m_root + "/" + bdf, c );
     }
 

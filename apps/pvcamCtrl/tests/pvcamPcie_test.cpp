@@ -197,12 +197,21 @@ TEST_CASE( "pvcamPcie reads link activity and port-down evidence", "[pvcamCtrl][
     REQUIRE( f.m_pcie.linkActive() == -1 );
     REQUIRE( f.m_pcie.error() == "PCIe port 0000:42:09.0 has no PCI Express capability" );
     put( c, 0x06, 0x10, 2 );
-    put( c, 0x40, 0x0001, 2 );
+    put( c, 0x68, 0x0d, 1 );
     writeConfig( port, c );
     REQUIRE( f.m_pcie.linkActive() == -1 );
 
     f.m_sysfs.port( "0000:42:09.0" );
-    for( auto op : { "read 6", "read 52", "read 64", "read 65", "read 76", "read 82" } )
+    for( auto op : { "read 6",
+                     "read 52",
+                     "read 64",
+                     "read 65",
+                     "read 72",
+                     "read 73",
+                     "read 104",
+                     "read 105",
+                     "read 116",
+                     "read 122" } )
     {
         f.m_pcie.m_failOp = op;
         REQUIRE( f.m_pcie.linkActive() == -1 );

@@ -217,6 +217,15 @@ Answer: done
 
       Expected: (ii) reads `ffff`; (iii) reads the real vendor ID but with COMMAND bit 1 (memory) clear and/or BAR0 different from `resource`. `setpci` without `=` only reads.
 
+Results (2026-10-09, `kinetix-hotplug-files/both_on`, `kinetix-hotplug-files/one_off`):
+- **Link status works and is the primary port-down signal.** Both downstream ports report `LnkCap: LLActRep+`. With both cameras on, both show `LnkSta: DLActive+`. With one camera off, `0000:42:08.0` shows `DLActive-` (`Speed 2.5GT/s (downgraded), Width x0`) while `0000:42:09.0` stays `DLActive+`. `current_link_speed` also changes (8.0 → 2.5 GT/s), but `DLActive` is the defined signal and is what `pvcamPcie::linkActive()` reads. Because link status is supported, `portDown()` never falls back to the camera's vendor ID on this hardware.
+- **Capability layout:** the PCI Express capability is at `0x68`, reached through PM (`0x40`) and MSI (`0x48`). The fake sysfs now models this chain, so the capability walk is tested against the real layout.
+- **AER on link loss:** the powered-off port also logs AER `UESta: SDES+` (Surprise Down) and `DevSta: FatalErr+`. The kernel's `pcieport` AER service may log or attempt recovery on a camera power-off. This does not affect the design, but check `dmesg` during hardware validation.
+- **Still open:**
+  - (a) Which camera was powered off for `one_off`? If it was camflowfs, the guessed mapping is confirmed: camflowfs on `0000:42:08.0`, camllowfs on `0000:42:09.0`.
+  - (b) The `setpci` reads of condition (iii), a camera re-powered but not rescanned, have not been captured, so the stale-detection signals (Memory Space Enable, BAR0 vs. `resource`) remain unconfirmed and both stay active. A false "stale" would only cause an unneeded hotplug of this app's own camera at startup. A missed stale camera would let PVCAM open a stale device. Validation case (d) exercises this.
+  - The optional `dmesg`/`uevent` mapping checks were not needed.
+
 11. **Start before Q10?** May I begin implementation now (steps 1–4)? The plan would be to implement both interlock signals (link status and vendor ID `0xffff`) and the stale check behind one helper, then keep, drop, or tune them once Q10 results arrive. Recommendation: yes. Q10 affects only which config-space bits are trusted, not the structure.
 
 Answer (2026-10-09): yes, start. Q10 to follow when the instrument is free.
@@ -337,7 +346,7 @@ Branch: `jrmales/kinetix-hotplug` (current).
 
 ### Implementation Notes (as built, 2026-10-09)
 
-**Status:** steps 1–4 are implemented. All three suites pass. lcov line coverage: `apps/pvcamCtrl/pvcamCtrl.hpp` 734/734 and `apps/pvcamCtrl/pvcamPcie.hpp` 201/201. `pvcamCtrl.cpp` compiles against both the stubs and the real SDK headers in `/opt/pvcam/sdk/include` with `-Wall -Wextra`, with zero warnings. Q10 is still pending, so both port-down signals (link status and an all-ones vendor ID) and both stale signals (Memory Space Enable and the BAR0 mismatch) are active.
+**Status:** steps 1–6 are implemented and committed. Q10 link-status results are incorporated; the condition (iii) reads and the user-run hardware validation remain. All three suites pass. lcov line coverage: `apps/pvcamCtrl/pvcamCtrl.hpp` 734/734 and `apps/pvcamCtrl/pvcamPcie.hpp` 201/201. `pvcamCtrl.cpp` compiles against both the stubs and the real SDK headers in `/opt/pvcam/sdk/include` with `-Wall -Wextra`, with zero warnings. Q10 confirmed link status as the port-down signal. Both stale signals (Memory Space Enable and the BAR0 mismatch) stay active until the condition (iii) reads are available.
 
 **Production changes**
 - **`apps/pvcamCtrl/pvcamPcie.hpp`** (new):
