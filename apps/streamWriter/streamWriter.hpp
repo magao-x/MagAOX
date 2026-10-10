@@ -185,6 +185,10 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     /// load the configuration system results (called by MagAOXApp::setup())
     virtual void loadConfig();
 
+    /// Load configuration while reporting helper failures.
+    /** \returns 0 on success, or -1 if telemetry configuration fails. */
+    int loadConfigImpl( mx::app::appConfigurator &config /**< [in/out] application configuration */ );
+
     /// Startup functions
     /** Sets up the INDI vars.
      *
@@ -562,10 +566,10 @@ void streamWriter::setupConfig()
                 "string",
                 "The cpuset for the framegrabber thread." );
 
-    telemeterT::setupConfig( config );
+    TELEMETER_SETUP_CONFIG( config );
 }
 
-void streamWriter::loadConfig()
+int streamWriter::loadConfigImpl( mx::app::appConfigurator &config )
 {
 
     config( m_maxCircBuffLength, "writer.maxCircBuffLength" );
@@ -614,9 +618,15 @@ void streamWriter::loadConfig()
 
     config( m_rawimageDir, "writer.savePath" );
 
-    if( telemeterT::loadConfig( config ) < 0 )
+    TELEMETER_LOAD_CONFIG( config );
+
+    return 0;
+}
+
+void streamWriter::loadConfig()
+{
+    if( loadConfigImpl( config ) < 0 )
     {
-        log<text_log>( "Error during telemeter config", logPrio::LOG_CRITICAL );
         m_shutdown = true;
     }
 }
@@ -765,10 +775,7 @@ int streamWriter::appStartup()
         log<software_critical, -1>( { __FILE__, __LINE__ } );
     }
 
-    if( telemeterT::appStartup() < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
-    }
+    TELEMETER_APP_STARTUP;
 
     return 0;
 }
@@ -866,14 +873,7 @@ int streamWriter::appLogic()
         state( stateCodes::OPERATING );
     }
 
-    if( state() == stateCodes::OPERATING )
-    {
-        if( telemeterT::appLogic() < 0 )
-        {
-            log<software_error>( { __FILE__, __LINE__ } );
-            return 0;
-        }
-    }
+    TELEMETER_APP_LOGIC;
 
     updateINDI();
 
@@ -924,7 +924,7 @@ int streamWriter::appShutdown()
         m_xrif_timing = nullptr;
     }
 
-    telemeterT::appShutdown();
+    TELEMETER_APP_SHUTDOWN;
 
     return 0;
 }
@@ -1833,7 +1833,7 @@ void streamWriter::fgThreadExec()
                     m_restart = true;
                 }
 
-                if( buffer.st_ino != inode )
+                else if( buffer.st_ino != inode )
                 {
 #ifdef SW_DEBUG
                     std::cerr << "Restarting due to inode . . . \n";
@@ -1921,17 +1921,6 @@ void streamWriter::fgThreadExec()
     {
         free( m_timingCircBuff );
         m_timingCircBuff = 0;
-    }
-
-    if( opened )
-    {
-        if( m_semaphoreNumber >= 0 )
-        {
-            ///\todo is this release necessary with closeIM?
-            image.semReadPID[m_semaphoreNumber] = 0; // release semaphore.
-        }
-
-        ImageStreamIO_closeIm( &image );
     }
 }
 

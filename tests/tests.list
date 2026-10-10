@@ -82,6 +82,8 @@
 ../apps/streamWriter/tests/streamWriter_test
 ../apps/streamWriter/tests/streamWriterSizing_test
 ../apps/streamWriter/tests/streamWriter_lifecycle_test
+../apps/streamWriter/tests/streamWriter_fault_test
+../apps/streamWriter/tests/streamWriter_entrypoint_test
 ../apps/strehlEstimator/tests/strehlEstimator_test
 ../apps/sysMonitor/tests/sysMonitor_test
 ../apps/t2wOffloader/tests/t2wOffloader_test
