@@ -265,9 +265,8 @@ void hwpTracker::loadConfig()
 int hwpTracker::appStartup()
 {
 
-    createStandardIndiToggleSw( m_indiP_tracking, "tracking" );
-    registerIndiPropertyNew( m_indiP_tracking, INDI_NEWCALLBACK( m_indiP_tracking ) );
-
+    CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_tracking, "tracking" );
+    
     REG_INDI_SETPROP( m_indiP_teldata, m_tcsDevName, "teldata" );
 
     REG_INDI_SETPROP( m_indiP_stagePolRot, m_devName, "position" );
@@ -276,7 +275,6 @@ int hwpTracker::appStartup()
 
     createStandardIndiNumber<float>(
         m_indiP_hwpSetPos, "hwp_position", -360.0, 360.0, 1e-3, "%.03f", "HWP Set Position", "HWP Status" );
-    registerIndiPropertyNew( m_indiP_hwpSetPos, INDI_NEWCALLBACK( m_indiP_hwpSetPos ) );
 
     REG_INDI_NEWPROP_NOCB( m_indiP_hwpTrackingOffset, "hwp_tracking_offset", pcf::IndiProperty::Number );
     m_indiP_hwpTrackingOffset.add( pcf::IndiElement( "value" ) );
@@ -290,10 +288,12 @@ int hwpTracker::appStartup()
     m_indiP_hwpActualPos.add( pcf::IndiElement( "value" ) );
     m_indiP_hwpActualPos["value"].set( 0 );
 
-    m_indiP_hwpStagePos = pcf::IndiProperty( pcf::IndiProperty::Number );
-    m_indiP_hwpStagePos.setDevice( m_devName );
-    m_indiP_hwpStagePos.setName( "position" );
-    m_indiP_hwpStagePos.add( pcf::IndiElement( "target" ) );
+    m_indiP_hwpStagePos_target = pcf::IndiProperty( pcf::IndiProperty::Number );
+    m_indiP_hwpStagePos_target.setDevice( m_devName );
+    m_indiP_hwpStagePos_target.setName( "position" );
+    m_indiP_hwpStagePos_target.add( pcf::IndiElement( "target" ) );
+
+    REG_INDI_SETPROP(m_indiP_hwpStagePos_current, m_devName, "position");
 
     TELEMETER_APP_STARTUP;
 
@@ -318,10 +318,9 @@ int hwpTracker::appLogic()
 
         lastupdate = mx::sys::get_curr_time();
     }
-    else
+    else if( !m_tracking )
     {
-        if( !m_tracking )
-            lastupdate = 0;
+        lastupdate = 0;
     }
 
     TELEMETER_APP_LOGIC;
