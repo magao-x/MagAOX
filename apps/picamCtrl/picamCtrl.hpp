@@ -140,12 +140,17 @@ class picamCtrl : public MagAOXApp<>,
 
     typedef MagAOXApp<> MagAOXAppT;
 
+    typedef dev::stdCamera<picamCtrl> stdCameraT;
+
   public:
     /** \name app::dev Configurations
      *@{
      */
     static constexpr bool c_stdCamera_tempControl =
         true; ///< app::dev config to tell stdCamera to expose temperature controls
+
+    static constexpr bool c_stdCamera_tempLimits =
+        true; ///< app::dev config to enable configurable temperature limits and request validation
 
     static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature
 
@@ -239,6 +244,9 @@ class picamCtrl : public MagAOXApp<>,
     /// load the configuration system results (called by MagAOXApp::setup())
     virtual void loadConfig();
 
+    /// Load and validate configuration, returning -1 on failure.
+    int loadConfigImpl();
+
     /// Startup functions
     /** Sets up the INDI vars.
      *
@@ -288,6 +296,12 @@ class picamCtrl : public MagAOXApp<>,
     int getFanSpeed();
 
     int getTemps();
+
+    /// Intersect the configured temperature limits with the camera's required range.
+    int getTempRange();
+
+    /// Validate a temperature target against the effective limits and PICam constraints.
+    int validateTempSetPt( float target /**< [in] Requested temperature setpoint, in C. */ );
 
     // stdCamera interface:
 
@@ -407,6 +421,9 @@ inline picamCtrl::picamCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODI
 
     m_maxEMGain = 1000;
 
+    m_startupTemp = -55;
+    setTempLimits( m_minTempCamera, m_maxTempCamera );
+
     return;
 }
 
@@ -492,7 +509,7 @@ inline void picamCtrl::setupConfig()
                 "string",
                 "The other camera (used for coupling exposure time while synchro'd)" );
 
-    dev::stdCamera<picamCtrl>::setupConfig( config );
+    STDCAMERA_SETUP_CONFIG( config );
     dev::frameGrabber<picamCtrl>::setupConfig( config );
     dev::dssShutter<picamCtrl>::setupConfig( config );
     dev::telemeter<picamCtrl>::setupConfig( config );
@@ -500,16 +517,28 @@ inline void picamCtrl::setupConfig()
 
 inline void picamCtrl::loadConfig()
 {
+    if( loadConfigImpl() < 0 )
+    {
+        log<software_critical>( { __FILE__, __LINE__, "Error loading configuration" } );
+        m_shutdown = true;
+    }
+}
 
+inline int picamCtrl::loadConfigImpl()
+{
     config( m_serialNumber, "camera.serialNumber" );
     config( m_fxngenName, "synchro.deviceName" );
     config( m_fxngenCh, "synchro.channel" );
     config( m_otherCamName, "synchro.otherCamName" );
 
-    dev::stdCamera<picamCtrl>::loadConfig( config );
+    STDCAMERA_LOAD_CONFIG( config );
+    // PICam always applies a temperature target, so its startup override cannot be disabled.
+    if( stdCameraT::validateTempSetPt( m_startupTemp ) < 0 )
+        return -1;
     dev::frameGrabber<picamCtrl>::loadConfig( config );
     dev::dssShutter<picamCtrl>::loadConfig( config );
     dev::telemeter<picamCtrl>::loadConfig( config );
+    return 0;
 }
 
 inline int picamCtrl::appStartup()
@@ -523,8 +552,6 @@ inline int picamCtrl::appStartup()
         m_indiP_readouttime, "value", 0.0, std::numeric_limits<float>::max(), 0.0, "%0.1f", "readout time" );
     registerIndiPropertyReadOnly( m_indiP_readouttime );
 
-    m_minTemp  = -55;
-    m_maxTemp  = 25;
     m_stepTemp = 0;
 
     m_minROIx  = 0;
@@ -1153,6 +1180,17 @@ inline int picamCtrl::connect()
                     }
                 }
 
+                if( getTempRange() < 0 || validateTempSetPt( m_ccdTempSetpt ) < 0 )
+                {
+                    Picam_DestroyCameraIDs( id_array );
+                    if( powerState() != 1 || powerStateTarget() != 1 )
+                        return 0;
+                    log<text_log>( "Temperature configuration is incompatible with the connected camera",
+                                   logPrio::LOG_ERROR );
+                    state( stateCodes::ERROR );
+                    return -1;
+                }
+
                 state( stateCodes::CONNECTED );
                 log<text_log>( "Connected to " + m_cameraName + " [S/N " + m_serialNumber + "]" );
 
@@ -1292,6 +1330,50 @@ inline int picamCtrl::getTemps()
     return 0;
 }
 
+inline int picamCtrl::getTempRange()
+{
+    const PicamRangeConstraint *constraint = nullptr;
+    PicamError                  error      = Picam_GetParameterRangeConstraint(
+        m_cameraHandle, PicamParameter_SensorTemperatureSetPoint, PicamConstraintCategory_Required, &constraint );
+    if( error != PicamError_None )
+    {
+        if( powerState() != 1 || powerStateTarget() != 1 )
+            return -1;
+        return log<software_error, -1>( { __FILE__, __LINE__, 0, error, "Error getting temperature setpoint range" } );
+    }
+
+    int rv = -1;
+    if( constraint && !constraint->empty_set )
+        rv = setTempLimits( constraint->minimum, constraint->maximum );
+    else
+        log<text_log>( "Camera reports no valid temperature setpoints", logPrio::LOG_ERROR );
+    Picam_DestroyRangeConstraints( constraint );
+    return rv;
+}
+
+inline int picamCtrl::validateTempSetPt( float target )
+{
+    if( stdCameraT::validateTempSetPt( target ) < 0 )
+        return -1;
+
+    if( m_cameraHandle )
+    {
+        pibln      settable = false;
+        PicamError error    = Picam_CanSetParameterFloatingPointValue(
+            m_cameraHandle, PicamParameter_SensorTemperatureSetPoint, target, &settable );
+        if( error != PicamError_None )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            return log<software_error, -1>( { __FILE__, __LINE__, 0, error, "Error validating temperature setpoint" } );
+        }
+        if( !settable )
+            return log<text_log, -1>( "Temperature setpoint " + std::to_string( target ) + " rejected by PICam",
+                                      logPrio::LOG_ERROR );
+    }
+    return 0;
+}
+
 inline int picamCtrl::getFanSpeed()
 {
     if( !m_fanStatusSupported )
@@ -1348,8 +1430,6 @@ inline int picamCtrl::setFPS()
 
 inline int picamCtrl::powerOnDefaults()
 {
-    m_ccdTempSetpt = -55; // This is the power on setpoint
-
     /*m_currentROI.x = 511.5;
     m_currentROI.y = 511.5;
     m_currentROI.w = 1024;
@@ -1392,7 +1472,8 @@ inline int picamCtrl::setTempControl()
 
 inline int picamCtrl::setTempSetPt()
 {
-    ///\todo bounds check here.
+    if( validateTempSetPt( m_ccdTempSetpt ) < 0 )
+        return -1;
     recordCamera( true );
     m_reconfig = true;
     return 0;
@@ -1599,9 +1680,12 @@ inline int picamCtrl::configureAcquisition()
     // piint frameSize;
     piint pixelBitDepth;
 
-    m_camera_timestamp = 0; // reset tracked timestamp
-
     std::unique_lock<std::mutex> lock( m_indiMutex );
+
+    if( validateTempSetPt( m_ccdTempSetpt ) < 0 )
+        return -1;
+
+    m_camera_timestamp = 0; // reset tracked timestamp
 
     // Time stamp handling
     if( Picam_SetParameterIntegerValue( m_modelHandle, PicamParameter_TimeStamps, m_timeStampMask ) < 0 )

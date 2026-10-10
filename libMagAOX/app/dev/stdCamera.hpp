@@ -9,12 +9,17 @@
 #ifndef stdCamera_hpp
 #define stdCamera_hpp
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <sstream>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
 
 #include <mx/app/application.hpp>
+#include <mx/math/floatUtils.hpp>
 
 #include "../MagAOXApp.hpp"
 
@@ -77,6 +82,19 @@ inline void stripQuotedWhitespace( std::string &value )
 int loadCameraConfig( cameraConfigMap &ccmap, ///< [out] the map in which to place the configurations found in config
                       mx::app::appConfigurator &config ///< [in] the application configuration structure
 );
+
+/// Detect whether a derived camera enables configurable temperature limits.
+template <class derivedT, class = void>
+struct stdCameraHasTempLimits : std::false_type
+{
+};
+
+/// Specialization for cameras that define `c_stdCamera_tempLimits`.
+template <class derivedT>
+struct stdCameraHasTempLimits<derivedT, std::void_t<decltype( derivedT::c_stdCamera_tempLimits )>>
+    : std::bool_constant<derivedT::c_stdCamera_tempLimits>
+{
+};
 
 /// Detect whether a derived camera exposes stdCamera fan-speed control support.
 template <class derivedT, class = void>
@@ -455,6 +473,10 @@ template <class derivedT>
 class stdCamera
 {
   protected:
+    static constexpr bool c_hasTempLimits =
+        stdCameraHasTempLimits<derivedT>::value; ///< True when the derived camera enables configurable temperature
+                                                 ///< limits.
+
     static constexpr bool c_hasFanSpeed =
         stdCameraHasFanSpeed<derivedT>::value; ///< True when the derived camera exposes fan-speed control.
     static constexpr bool c_hasLED =
@@ -474,6 +496,10 @@ class stdCamera
 
     float m_startupTemp{ -999 }; ///< The temperature to set after a power-on.  Set to <= -999 to not use [default].
 
+    float m_configMinTemp{ -55 }; ///< User-configured inclusive minimum temperature setpoint, in C.
+
+    float m_configMaxTemp{ 20 }; ///< User-configured inclusive maximum temperature setpoint, in C.
+
     std::string m_defaultReadoutSpeed;            ///< The default readout speed of the camera.
     std::string m_defaultVShiftSpeed;             ///< The default readout speed of the camera.
     bool        m_fanSpeedControlEnabled{ true }; ///< Whether or not fan-speed control is published through INDI.
@@ -489,6 +515,10 @@ class stdCamera
     float m_minTemp{ -60 };
     float m_maxTemp{ 30 };
     float m_stepTemp{ 0 };
+
+    double m_minTempCamera{ std::numeric_limits<float>::lowest() }; ///< Minimum permitted by the camera, in C.
+
+    double m_maxTempCamera{ std::numeric_limits<float>::max() }; ///< Maximum permitted by the camera, in C.
 
     float m_ccdTemp{ -999 }; ///< The current temperature, in C
 
@@ -808,6 +838,27 @@ class stdCamera
       * with appropriate error checking.
       */
     int loadConfig( mx::app::appConfigurator &config /**< [in] the derived classes configurator*/ );
+
+    /** \name Temperature Control Interface
+     * @{
+     */
+
+    /// Intersect camera capabilities with the configured inclusive limits and publish the effective range.
+    /** \returns 0 on success, or -1 when the ranges are invalid or do not overlap. */
+    int setTempLimits( double minimum /**< [in] Camera's inclusive minimum temperature, in C. */,
+                       double maximum /**< [in] Camera's inclusive maximum temperature, in C. */ );
+
+    /// Validate a finite temperature target against the effective inclusive limits.
+    /** \returns 0 for a valid target, or -1 on rejection. */
+    int validateTempSetPt( float target /**< [in] Requested temperature setpoint, in C. */ );
+
+    /// Initialize the target from camera.startupTemp after power on.
+    /** Values <= -999 retain the derived app's target. The shared power-on path calls this after powerOnDefaults().
+     * \returns 0 on success, or -1 when an enabled temperature limit rejects the configured target.
+     */
+    int powerOnTemp();
+
+    ///@}
 
     /** \name Focus Control
      * @{
@@ -1439,7 +1490,33 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
                     "startupTemp",
                     false,
                     "float",
-                    "The temperature setpoint to set after a power-on [C].  Default is 20 C." );
+                    "The temperature setpoint after power-on [C]. Default: " +
+                        ( m_startupTemp > -999 ? std::to_string( m_startupTemp ) + " C." : "disabled." ) +
+                        " Where supported, values <= -999 disable the startup override." );
+
+        if( c_hasTempLimits )
+        {
+            config.add(
+                "camera.minTemp",
+                "",
+                "camera.minTemp",
+                argType::Required,
+                "camera",
+                "minTemp",
+                false,
+                "float",
+                "Inclusive minimum temperature setpoint [C], default -55. Camera limits may narrow this range." );
+            config.add(
+                "camera.maxTemp",
+                "",
+                "camera.maxTemp",
+                argType::Required,
+                "camera",
+                "maxTemp",
+                false,
+                "float",
+                "Inclusive maximum temperature setpoint [C], default 20. Camera limits may narrow this range." );
+        }
     }
 
     if( derivedT::c_stdCamera_readoutSpeed )
@@ -1692,6 +1769,20 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
     if( derivedT::c_stdCamera_tempControl )
     {
         config( m_startupTemp, "camera.startupTemp" );
+
+        if( c_hasTempLimits )
+        {
+            config( m_configMinTemp, "camera.minTemp" );
+            config( m_configMaxTemp, "camera.maxTemp" );
+            if( setTempLimits( m_minTempCamera, m_maxTempCamera ) < 0 )
+                return -1;
+            if( !mx::math::isFinite( m_startupTemp ) ||
+                ( m_startupTemp > -999 && validateTempSetPt( m_startupTemp ) < 0 ) )
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__,
+                      __LINE__,
+                      "camera.startupTemp must be finite and within the effective temperature range" } );
+        }
     }
 
     if( derivedT::c_stdCamera_readoutSpeed )
@@ -2773,10 +2864,8 @@ int stdCamera<derivedT>::appLogic()
 
                 if( derivedT::c_stdCamera_tempControl )
                 {
-                    // then set startupTemp if configured
-                    if( m_startupTemp > -999 )
-                        m_ccdTempSetpt = m_startupTemp;
-                    derived().updateIfChanged( m_indiP_temp, "target", m_ccdTempSetpt, INDI_IDLE );
+                    if( powerOnTemp() < 0 )
+                        return -1;
                 }
 
                 if( derivedT::c_stdCamera_usesROI )
@@ -3170,6 +3259,74 @@ int stdCamera<derivedT>::newCallBack_stdCamera( const pcf::IndiProperty &ipRecv 
 }
 
 template <class derivedT>
+int stdCamera<derivedT>::setTempLimits( double minimum, double maximum )
+{
+    if( !mx::math::isFinite( m_configMinTemp ) || !mx::math::isFinite( m_configMaxTemp ) ||
+        m_configMinTemp > m_configMaxTemp )
+        return derivedT::template log<software_critical, -1>(
+            { __FILE__, __LINE__, "camera.minTemp and camera.maxTemp must be finite and ordered" } );
+
+    if( !mx::math::isFinite( minimum ) || !mx::math::isFinite( maximum ) || minimum > maximum )
+        return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, "Invalid camera temperature range" } );
+
+    double lower   = std::max<double>( m_configMinTemp, minimum );
+    double upper   = std::min<double>( m_configMaxTemp, maximum );
+    float  minTemp = lower;
+    float  maxTemp = upper;
+    // Round inward when converting camera doubles to the stdCamera float limits.
+    if( minTemp < lower )
+        minTemp = std::nextafter( minTemp, std::numeric_limits<float>::infinity() );
+    if( maxTemp > upper )
+        maxTemp = std::nextafter( maxTemp, -std::numeric_limits<float>::infinity() );
+    if( lower > upper || minTemp > maxTemp )
+        return derivedT::template log<software_error, -1>(
+            { __FILE__, __LINE__, "Configured temperature range has no overlap with the camera's valid range" } );
+
+    m_minTempCamera = minimum;
+    m_maxTempCamera = maximum;
+    m_minTemp       = minTemp;
+    m_maxTemp       = maxTemp;
+    if( m_indiP_temp.find( "target" ) )
+    {
+        for( const char *element : { "current", "target" } )
+        {
+            m_indiP_temp[element].setMin( m_minTemp );
+            m_indiP_temp[element].setMax( m_maxTemp );
+        }
+        if( derived().m_indiDriver )
+            derived().m_indiDriver->sendDefProperty( m_indiP_temp );
+    }
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::validateTempSetPt( float target )
+{
+    if( !mx::math::isFinite( target ) || target < m_minTemp || target > m_maxTemp )
+        return derivedT::template log<text_log, -1>( "Temperature setpoint " + std::to_string( target ) +
+                                                         " outside inclusive range [" + std::to_string( m_minTemp ) +
+                                                         ", " + std::to_string( m_maxTemp ) + "] C",
+                                                     logPrio::LOG_ERROR );
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::powerOnTemp()
+{
+    if( c_hasTempLimits && !mx::math::isFinite( m_startupTemp ) )
+        return validateTempSetPt( m_startupTemp );
+    if( m_startupTemp > -999 )
+    {
+        if( c_hasTempLimits && validateTempSetPt( m_startupTemp ) < 0 )
+            return -1;
+        m_ccdTempSetpt = m_startupTemp;
+    }
+    if( m_indiP_temp.find( "target" ) )
+        derived().updateIfChanged( m_indiP_temp, "target", m_ccdTempSetpt, INDI_IDLE );
+    return 0;
+}
+
+template <class derivedT>
 int stdCamera<derivedT>::setTempSetPt( const mx::meta::trueFalseT<true> &t )
 {
     static_cast<void>( t );
@@ -3196,6 +3353,27 @@ int stdCamera<derivedT>::newCallBack_temp( const pcf::IndiProperty &ipRecv )
 
         std::unique_lock<std::mutex> lock( derived().m_indiMutex );
 
+        float previous = m_ccdTempSetpt;
+        if( c_hasTempLimits && ipRecv.createUniqueKey() == m_indiP_temp.createUniqueKey() &&
+            ( ipRecv.find( "target" ) || ipRecv.find( "current" ) ) )
+        {
+            const auto        &element = ipRecv[ipRecv.find( "target" ) ? "target" : "current"];
+            std::istringstream value( element.getValue() );
+            bool               parsed = static_cast<bool>( value >> target );
+            if( parsed )
+                value >> std::ws;
+            if( !parsed || !value.eof() )
+            {
+                derived().updateIfChanged( m_indiP_temp, "target", previous, INDI_ALERT );
+                return derivedT::template log<text_log, -1>( "Invalid temperature target: " + element.getValue(),
+                                                             logPrio::LOG_ERROR );
+            }
+            if( derived().validateTempSetPt( target ) < 0 )
+            {
+                derived().updateIfChanged( m_indiP_temp, "target", previous, INDI_ALERT );
+                return -1;
+            }
+        }
         if( derived().indiTargetUpdate( m_indiP_temp, target, ipRecv, true ) < 0 )
         {
             derivedT::template log<software_error>( { __FILE__, __LINE__ } );
@@ -3205,7 +3383,13 @@ int stdCamera<derivedT>::newCallBack_temp( const pcf::IndiProperty &ipRecv )
         m_ccdTempSetpt = target;
 
         mx::meta::trueFalseT<derivedT::c_stdCamera_tempControl> tf;
-        return setTempSetPt( tf );
+        int                                                     rv = setTempSetPt( tf );
+        if( rv < 0 && c_hasTempLimits )
+        {
+            m_ccdTempSetpt = previous;
+            derived().updateIfChanged( m_indiP_temp, "target", previous, INDI_ALERT );
+        }
+        return rv;
     }
     else
     {

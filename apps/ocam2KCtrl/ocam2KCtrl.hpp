@@ -57,12 +57,17 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     typedef MagAOXApp<> MagAOXAppT;
 
+    typedef dev::stdCamera<ocam2KCtrl> stdCameraT;
+
   public:
     /** \name app::dev Configurations
      *@{
      */
     static constexpr bool c_stdCamera_tempControl =
         true; ///< app::dev config to tell stdCamera to expose temperature controls
+
+    static constexpr bool c_stdCamera_tempLimits =
+        true; ///< app::dev config to enable configurable temperature limits and request validation
 
     static constexpr bool c_stdCamera_temp =
         true; ///< app::dev config to tell stdCamera to expose temperature (ignored since tempControl==true)
@@ -180,6 +185,9 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     /// load the configuration system results (called by MagAOXApp::setup())
     virtual void loadConfig();
+
+    /// Load and validate configuration, returning -1 on failure.
+    int loadConfigImpl();
 
     /// Startup functions
     /** Sets up the INDI vars, and the f.g. thread.
@@ -400,7 +408,9 @@ inline ocam2KCtrl::ocam2KCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MO
     m_powerOnWait     = 10;
 
     //--- stdCamera ---
-    m_startupTemp = 20;
+    m_startupTemp = -45;
+    // Preserve OCAM's inclusive lower limit and exclusive 30 C upper limit.
+    setTempLimits( -50, std::nextafter( 30.0f, -std::numeric_limits<float>::infinity() ) );
 
     m_maxEMGain = 600;
 
@@ -414,7 +424,7 @@ inline ocam2KCtrl::~ocam2KCtrl() noexcept
 
 inline void ocam2KCtrl::setupConfig()
 {
-    dev::stdCamera<ocam2KCtrl>::setupConfig( config );
+    STDCAMERA_SETUP_CONFIG( config );
 
     dev::edtCamera<ocam2KCtrl>::setupConfig( config );
 
@@ -448,7 +458,16 @@ inline void ocam2KCtrl::setupConfig()
 
 inline void ocam2KCtrl::loadConfig()
 {
-    dev::stdCamera<ocam2KCtrl>::loadConfig( config );
+    if( loadConfigImpl() < 0 )
+    {
+        log<software_critical>( { __FILE__, __LINE__, "Error loading configuration" } );
+        m_shutdown = true;
+    }
+}
+
+inline int ocam2KCtrl::loadConfigImpl()
+{
+    STDCAMERA_LOAD_CONFIG( config );
     dev::edtCamera<ocam2KCtrl>::loadConfig( config );
 
     config( m_ocamDescrambleFile, "camera.ocamDescrambleFile" );
@@ -473,6 +492,7 @@ inline void ocam2KCtrl::loadConfig()
     }
     dev::dssShutter<ocam2KCtrl>::loadConfig( config );
     dev::telemeter<ocam2KCtrl>::loadConfig( config );
+    return 0;
 }
 
 inline int ocam2KCtrl::ensureSyncStream()
@@ -1058,12 +1078,8 @@ inline int ocam2KCtrl::setTempSetPt()
 
     std::string tempStr = std::to_string( m_ccdTempSetpt );
 
-    ///\todo make more configurable
-    if( m_ccdTempSetpt >= 30 || m_ccdTempSetpt < -50 )
-    {
-        return log<text_log, -1>( { "attempt to set temperature outside valid range: " + tempStr },
-                                  logPrio::LOG_ERROR );
-    }
+    if( stdCameraT::validateTempSetPt( m_ccdTempSetpt ) < 0 )
+        return -1;
 
     { // mutex scope
         std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
