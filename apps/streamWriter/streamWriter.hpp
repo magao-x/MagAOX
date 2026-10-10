@@ -1,8 +1,6 @@
 /** \file streamWriter.hpp
  * \brief The MagAO-X Image Stream Writer
  *
- * \author Jared R. Males (jaredmales@gmail.com)
- *
  * \ingroup streamWriter_files
  */
 
@@ -65,7 +63,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     friend class streamWriter_data_test;
 
   protected:
-    /** \name configurable parameters
+    /** \name Configurable Parameters - Data
      *@{
      */
 
@@ -92,7 +90,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     int m_semaphoreNumber{ 7 }; ///< The image structure semaphore index.
 
     unsigned m_semWaitSec{ 0 }; /**< The time in whole sec to wait on the semaphore,
-                                     to which m_semWaitNSec is added.  Default is 0 nsec.*/
+                                     to which m_semWaitNSec is added.  Default is 0 sec.*/
 
     unsigned m_semWaitNSec{ 500000000 }; /**< The time in nsec to wait on the semaphore, added to m_semWaitSec.
                                               Max is 999999999. Default is 5e8 nsec. */
@@ -100,9 +98,9 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     bool m_warnMissedData{
         true }; ///< Whether missed-data backlog summaries should be emitted as warnings instead of informational logs.
 
-    int m_lz4accel{ 1 };
+    int m_lz4accel{ 1 }; ///< LZ4 acceleration used for each image archive.
 
-    bool m_compress{ true };
+    bool m_compress{ true }; ///< Whether image archives use XRIF compression.
 
     ///@}
 
@@ -115,10 +113,10 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     uint8_t m_dataType{ 0 }; ///< The ImageStreamIO type code.
     int     m_typeSize{ 0 }; ///< The pixel byte depth
 
-    char     *m_rawImageCircBuff{ nullptr };
-    uint64_t *m_timingCircBuff{ nullptr };
+    char     *m_rawImageCircBuff{ nullptr }; ///< Owned pixel storage for the ingest circular buffer.
+    uint64_t *m_timingCircBuff{ nullptr };   ///< Owned five-word timing records for each buffered frame.
 
-    size_t m_currImage{ 0 };
+    size_t m_currImage{ 0 }; ///< Next destination frame in the circular buffer.
 
     uint64_t m_currImageTime{ 0 }; ///< The write-time of the current image in nanoseconds.
 
@@ -164,25 +162,25 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     /// Storage for the xrif image data file header
     char *m_xrif_header{ nullptr };
 
-    /// The xrif compression handle for image data
+    /// The owned uncompressed XRIF encoder for frame timing records.
     xrif_t m_xrif_timing{ nullptr };
 
-    /// Storage for the xrif image data file header
+    /// Owned archive header for the timing encoder.
     char *m_xrif_timing_header{ nullptr };
 
     std::string m_outFilePath; ///< The full path for the latest output file
 
   public:
-    /// Default c'tor
+    /// Construct an idle writer with power management disabled.
     streamWriter();
 
-    /// Destructor
+    /// Release owned circular buffers, encoders, and archive headers.
     ~streamWriter() noexcept;
 
     /// Setup the configuration system (called by MagAOXApp::setup())
     virtual void setupConfig();
 
-    /// load the configuration system results (called by MagAOXApp::setup())
+    /// Load configuration and request shutdown if a helper fails.
     virtual void loadConfig();
 
     /// Load configuration while reporting helper failures.
@@ -195,10 +193,10 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
      */
     virtual int appStartup();
 
-    /// Implementation of the FSM for the Siglent SDG
+    /// Monitor workers, publish writing state, and schedule telemetry in every state.
     virtual int appLogic();
 
-    /// Do any needed shutdown tasks.  Currently nothing in this app.
+    /// Join worker threads, release buffers and encoders, and stop telemetry.
     virtual int appShutdown();
 
   protected:
@@ -208,7 +206,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
      *
      * @{
      */
-    bool m_restart{ false };
+    bool m_restart{ false }; ///< Requests reopening the source stream after replacement or a signal.
 
     static streamWriter *m_selfWriter; ///< Static pointer to this (set in constructor).  Used for getting out of the
                                        ///< static SIGSEGV handler.
@@ -228,10 +226,14 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
 
     /// The handler called when SIGSEGV or SIGBUS is received, which will be due to ImageStreamIO server resets.  Just a
     /// wrapper for handlerSigSegv.
-    static void _handlerSigSegv( int signum, siginfo_t *siginf, void *ucont );
+    static void _handlerSigSegv( int        signum /**< [in] received signal */,
+                                 siginfo_t *siginf /**< [in] signal details */,
+                                 void      *ucont /**< [in] signal context */ );
 
     /// Handles SIGSEGV and SIGBUS.  Sets m_restart to true.
-    void handlerSigSegv( int signum, siginfo_t *siginf, void *ucont );
+    void handlerSigSegv( int        signum /**< [in] received signal */,
+                         siginfo_t *siginf /**< [in] signal details */,
+                         void      *ucont /**< [in] signal context */ );
     ///@}
 
     /** \name Framegrabber Thread
@@ -239,7 +241,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
      *
      * @{
      */
-    int m_fgThreadPrio{ 1 }; ///< Priority of the framegrabber thread, should normally be > 00.
+    int m_fgThreadPrio{ 1 }; ///< Priority of the framegrabber thread, should normally be > 0.
 
     std::string m_fgCpuset; ///< The cpuset for the framegrabber thread.  Ignored if empty (the default).
 
@@ -252,21 +254,22 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     pcf::IndiProperty m_fgThreadProp; ///< The property to hold the f.g. thread details.
 
   public:
-    static void getCircBuffLengths( size_t  &circBuffLength,
-                                    double  &circBuffSize,
-                                    size_t  &writeChunkLength,
-                                    size_t   maxCircBuffLength,
-                                    double   maxCircBuffSize,
-                                    size_t   maxWriteChunkLength,
-                                    uint32_t width,
-                                    uint32_t height,
-                                    size_t   typeSize );
+    /// Select circular-buffer and chunk sizes within the configured frame and memory limits.
+    static void getCircBuffLengths( size_t  &circBuffLength /**< [out] selected buffer length in frames */,
+                                    double  &circBuffSize /**< [out] selected buffer size in MiB */,
+                                    size_t  &writeChunkLength /**< [out] selected write chunk length */,
+                                    size_t   maxCircBuffLength /**< [in] maximum buffer length */,
+                                    double   maxCircBuffSize /**< [in] maximum buffer size in MiB */,
+                                    size_t   maxWriteChunkLength /**< [in] maximum write chunk length */,
+                                    uint32_t width /**< [in] frame width in pixels */,
+                                    uint32_t height /**< [in] frame height in pixels */,
+                                    size_t   typeSize /**< [in] pixel size in bytes */ );
 
   protected:
     /// Worker function to allocate the circular buffers.
     /** This takes place in the fg thread after connecting to the stream.
      *
-     * \returns 0 on sucess.
+     * \returns 0 on success.
      * \returns -1 on error.
      */
     int allocate_circbufs();
@@ -274,7 +277,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     /// Worker function to configure and allocate the xrif handles.
     /** This takes place in the fg thread after connecting to the stream.
      *
-     * \returns 0 on sucess.
+     * \returns 0 on success.
      * \returns -1 on error.
      */
     int allocate_xrif();
@@ -301,7 +304,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
      */
     int m_swThreadPrio{ 1 }; ///< Priority of the stream writer thread, should normally be > 0, and <= m_fgThreadPrio.
 
-    std::string m_swCpuset; ///< The cpuset for the framegrabber thread.  Ignored if empty (the default).
+    std::string m_swCpuset; ///< The cpuset for the stream writer thread.  Ignored if empty (the default).
 
     sem_t m_swSemaphore; ///< Semaphore used to synchronize the fg thread and the sw thread.
 
@@ -326,25 +329,32 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     // INDI:
   protected:
     // declare our properties
-    pcf::IndiProperty m_indiP_writing;
+    pcf::IndiProperty m_indiP_writing; ///< Writing request and current toggle state.
 
-    pcf::IndiProperty m_indiP_xrifStats;
+    pcf::IndiProperty m_indiP_xrifStats; ///< Published image compression ratio and rates.
 
   public:
+    /// Validate and apply a writing toggle request.
     INDI_NEWCALLBACK_DECL( streamWriter, m_indiP_writing );
 
+    /// Publish the writing toggle and current encoder performance.
     void updateINDI();
 
     /** \name Telemeter Interface
      *
      * @{
      */
+    /// Check whether the saving-state telemetry record is due.
     int checkRecordTimes();
 
-    int recordTelem( const telem_saving_state * );
+    /// Force a scheduled saving-state telemetry record.
+    int recordTelem( const telem_saving_state *record /**< [in] telemetry type selector */ );
 
-    int recordSavingState( bool force = false );
-    int recordSavingStats( bool force = false );
+    /// Record changes in the saving state and current save window.
+    int recordSavingState( bool force = false /**< [in] emit even without a state change */ );
+
+    /// Record changes in encoder sizes and rates.
+    int recordSavingStats( bool force = false /**< [in] emit even without a statistics change */ );
 
     ///@}
 };
@@ -433,7 +443,7 @@ void streamWriter::setupConfig()
                 "maxChunkTime",
                 false,
                 "float",
-                "The max length in seconds of the chunks to write to disk. Default is 60 sec." );
+                "The max length in seconds of the chunks to write to disk. Default is 10 sec." );
 
     config.add( "writer.stopTimeout",
                 "",
