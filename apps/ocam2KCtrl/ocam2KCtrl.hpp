@@ -346,7 +346,7 @@ class ocam2KCtrl : public MagAOXApp<>,
      * \returns 0 on success
      * \returns -1 on error
      */
-    int loadImageIntoStream( void *dest /**< [in] destination image buffer */ );
+    int loadImageIntoStream( void *dest /**< [out] Destination image buffer. */ );
 
     /// Implementation of the framegrabber reconfig interface
     /** Locks the INDI mutex and calls edtCamera::pdvReconfig.
@@ -379,22 +379,29 @@ class ocam2KCtrl : public MagAOXApp<>,
     pcf::IndiProperty m_indiP_syncFreq; ///< INDI subscription to the external sync-frequency source.
 
   public:
+    /// Receive an EM-protection reset request.
     INDI_NEWCALLBACK_DECL( ocam2KCtrl, m_indiP_emProtReset );
 
+    /// Receive the external synchronization frequency.
     INDI_SETCALLBACK_DECL( ocam2KCtrl, m_indiP_syncFreq );
 
     /** \name Telemeter Interface
      *
      * @{
      */
+    /// Check the OCAM, camera, and framegrabber telemetry recording deadlines.
     int checkRecordTimes();
 
-    int recordTelem( const ocam_temps * );
+    /// Record OCAM temperature telemetry.
+    int recordTelem( const ocam_temps *telem /**< [in] Telemetry type selector. */ );
 
-    int recordTelem( const telem_stdcam * );
+    /// Record standard camera telemetry.
+    int recordTelem( const telem_stdcam *telem /**< [in] Telemetry type selector. */ );
 
-    int recordTelem( const telem_fgtimings * );
+    /// Record framegrabber timing telemetry.
+    int recordTelem( const telem_fgtimings *telem /**< [in] Telemetry type selector. */ );
 
+    /// Record the latest OCAM temperatures when they change or when forced.
     int
     recordTemps( bool force = false /**< [in] whether to force a telemetry record even if values have not changed */ );
 

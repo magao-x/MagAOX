@@ -1,3 +1,6 @@
+/** \file groups.dox
+ * \brief Doxygen groups and build instructions for MagAO-X tests.
+ */
 
 /// \defgroup testing Testing XWCTk
 
@@ -44,5 +47,17 @@ $ bash ./testMagAOX.bash
   * \ingroup unit_test
 */
 
+/** \defgroup picamCtrl_unit_test picamCtrl Unit Tests
+ * \brief Offline temperature configuration and validation tests for picamCtrl.
+ * \ingroup application_unit_test
+ */
 
+/** \defgroup ocam2KCtrl_temperature_unit_test OCAM Temperature Unit Tests
+ * \brief Shared OCAM temperature configuration and request-validation tests.
+ * \ingroup application_unit_test
+ */
 
+/** \defgroup stdCamera_unit_test stdCamera Unit Tests
+ * \brief Shared camera temperature configuration and callback tests.
+ * \ingroup app_unit_test
+ */
