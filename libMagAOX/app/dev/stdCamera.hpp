@@ -35,7 +35,8 @@ namespace dev
  */
 struct cameraConfig
 {
-    std::string m_configFile;    ///< The file to use for this mode, e.g. an EDT configuration file.
+    std::string m_configFile; ///< The file to use for this mode, e.g. an EDT configuration file.
+
     std::string m_serialCommand; ///< The command to send to the camera to place it in this mode.
 
     unsigned m_centerX{ 0 }; ///< Mode ROI center column.
@@ -493,10 +494,13 @@ class stdCamera
 
     static constexpr bool c_hasFanSpeed =
         stdCameraHasFanSpeed<derivedT>::value; ///< True when the derived camera exposes fan-speed control.
+
     static constexpr bool c_hasLED =
         stdCameraHasLED<derivedT>::value; ///< True when the derived camera exposes LED control.
+
     static constexpr bool c_hasAnalogGain =
         stdCameraHasAnalogGain<derivedT>::value; ///< True when the derived camera exposes analog-gain control.
+
     static constexpr bool c_hasFocus = stdCameraHasFocus<derivedT>::value; ///< True when the derived camera exposes
                                                                            ///< focus-state and goto-focus support.
 
@@ -514,11 +518,15 @@ class stdCamera
 
     float m_configMaxTemp{ 20 }; ///< User-configured inclusive maximum temperature setpoint, in C.
 
-    std::string m_defaultReadoutSpeed;            ///< The default readout speed of the camera.
-    std::string m_defaultVShiftSpeed;             ///< The default readout speed of the camera.
-    bool        m_fanSpeedControlEnabled{ true }; ///< Whether or not fan-speed control is published through INDI.
-    std::string m_defaultFanSpeed;                ///< The default fan speed to apply after power on.
-    bool        m_defaultLEDState{ true };        ///< The default LED state to apply after power on.
+    std::string m_defaultReadoutSpeed; ///< The default readout speed of the camera.
+
+    std::string m_defaultVShiftSpeed; ///< The default readout speed of the camera.
+
+    bool m_fanSpeedControlEnabled{ true }; ///< Whether or not fan-speed control is published through INDI.
+
+    std::string m_defaultFanSpeed; ///< The default fan speed to apply after power on.
+
+    bool m_defaultLEDState{ true }; ///< The default LED state to apply after power on.
 
     ///@}
 
@@ -540,7 +548,8 @@ class stdCamera
 
     float m_ccdTempSetpt{ -999 }; ///< The desired temperature, in C
 
-    bool m_tempControlStatus{ false };    ///< Whether or not temperature control is active
+    bool m_tempControlStatus{ false }; ///< Whether or not temperature control is active
+
     bool m_tempControlStatusSet{ false }; ///< Desired state of temperature control
 
     bool m_tempControlOnTarget{ false }; ///< Whether or not the temperature control system is on its target temperature
@@ -582,6 +591,7 @@ class stdCamera
     float m_emGain{ 1 }; ///< The camera's current EM gain (if available).
 
     float m_emGainSet{ 1 }; ///< The camera's EM gain, as set by the user.
+
     float m_maxEMGain{ 1 }; ///< The configurable maximum EM gain.  To be enforced in derivedT.
 
     pcf::IndiProperty m_indiP_readoutSpeed; ///< INDI readout-speed selection.
@@ -595,14 +605,18 @@ class stdCamera
     /** \name Exposure Control
      * @{
      */
-    float m_minExpTime{ 0 };                                 ///< The minimum exposure time, used for INDI attributes
+    float m_minExpTime{ 0 }; ///< The minimum exposure time, used for INDI attributes
+
     float m_maxExpTime{ std::numeric_limits<float>::max() }; ///< The maximum exposure time, used for INDI attributes
+
     float m_stepExpTime{ 0 }; ///< The maximum exposure time stepsize, used for INDI attributes
 
-    float m_expTime{ 0 };    ///< The current exposure time, in seconds.
+    float m_expTime{ 0 }; ///< The current exposure time, in seconds.
+
     float m_expTimeSet{ 0 }; ///< The exposure time, in seconds, as set by user.
 
-    float m_minFPS{ 0 };                                 ///< The minimum FPS, used for INDI attributes
+    float m_minFPS{ 0 }; ///< The minimum FPS, used for INDI attributes
+
     float m_maxFPS{ std::numeric_limits<float>::max() }; ///< The maximum FPS, used for INDI attributes
 
     float m_stepFPS{ 0 }; ///< The FPS step size, used for INDI attributes
@@ -620,11 +634,15 @@ class stdCamera
     /** \name Fan Control
      * @{
      */
-    std::vector<std::string> m_fanSpeedNames;         ///< Valid fan-control option names for the INDI selection switch.
-    std::vector<std::string> m_fanSpeedNameLabels;    ///< Optional GUI labels for the fan-control options.
-    std::string              m_fanSpeedName{ "" };    ///< Current fan-control option name.
-    std::string              m_fanSpeedNameSet{ "" }; ///< Requested fan-control option name.
-    bool                     m_fanSpeedValid{ false }; ///< True once the current fan-control state is known.
+    std::vector<std::string> m_fanSpeedNames; ///< Valid fan-control option names for the INDI selection switch.
+
+    std::vector<std::string> m_fanSpeedNameLabels; ///< Optional GUI labels for the fan-control options.
+
+    std::string m_fanSpeedName{ "" }; ///< Current fan-control option name.
+
+    std::string m_fanSpeedNameSet{ "" }; ///< Requested fan-control option name.
+
+    bool m_fanSpeedValid{ false }; ///< True once the current fan-control state is known.
 
     pcf::IndiProperty m_indiP_fanSpeed; ///< Property used to select the fan-speed mode.
 
@@ -633,11 +651,15 @@ class stdCamera
     /** \name Analog Gain
      * @{
      */
-    std::vector<std::string> m_analogGainNames;      ///< Valid analog-gain option names for the INDI selection switch.
+    std::vector<std::string> m_analogGainNames; ///< Valid analog-gain option names for the INDI selection switch.
+
     std::vector<std::string> m_analogGainNameLabels; ///< Optional GUI labels for the analog-gain options.
-    std::string              m_analogGainName{ "" }; ///< Current analog-gain option name.
-    std::string              m_analogGainNameSet{ "" };  ///< Requested analog-gain option name.
-    bool                     m_analogGainValid{ false }; ///< True once the current analog-gain state is known.
+
+    std::string m_analogGainName{ "" }; ///< Current analog-gain option name.
+
+    std::string m_analogGainNameSet{ "" }; ///< Requested analog-gain option name.
+
+    bool m_analogGainValid{ false }; ///< True once the current analog-gain state is known.
 
     pcf::IndiProperty m_indiP_analogGain; ///< Property used to select the analog-gain mode.
 
@@ -646,8 +668,10 @@ class stdCamera
     /** \name LED Control
      * @{
      */
-    bool m_ledState{ false };      ///< Current status LED state.
-    bool m_ledStateSet{ false };   ///< Requested status LED state.
+    bool m_ledState{ false }; ///< Current status LED state.
+
+    bool m_ledStateSet{ false }; ///< Requested status LED state.
+
     bool m_ledStateValid{ false }; ///< True once the current LED state is known.
 
     pcf::IndiProperty m_indiP_led; ///< Property used to control the status LED state.
@@ -687,11 +711,16 @@ class stdCamera
     struct roi
     {
         float x{ 0 };
+
         float y{ 0 };
-        int   w{ 0 };
-        int   h{ 0 };
-        int   bin_x{ 0 };
-        int   bin_y{ 0 };
+
+        int w{ 0 };
+
+        int h{ 0 };
+
+        int bin_x{ 0 };
+
+        int bin_y{ 0 };
     };
 
     roi m_currentROI; ///< Currently applied camera ROI.
@@ -761,6 +790,7 @@ class stdCamera
     int m_full_bin_y{ 1 }; ///< The y-binning in the full ROI.
 
     float m_full_currbin_x{ 0 }; ///< The current-binning full ROI center x coordinate.
+
     float m_full_currbin_y{ 0 }; ///< The current-binning full ROI center y coordinate.
 
     int m_full_currbin_w{ 0 }; ///< The current-binning full ROI width.
@@ -776,6 +806,7 @@ class stdCamera
     pcf::IndiProperty m_indiP_roi_h; ///< Property used to set the ROI height
 
     pcf::IndiProperty m_indiP_roi_bin_x; ///< Property used to set the ROI x binning
+
     pcf::IndiProperty m_indiP_roi_bin_y; ///< Property used to set the ROI y binning
 
     pcf::IndiProperty m_indiP_fullROI; ///< Property used to preset the full ROI dimensions.
@@ -784,11 +815,15 @@ class stdCamera
 
     pcf::IndiProperty m_indiP_roi_set; ///< Property used to trigger setting the ROI
 
-    pcf::IndiProperty m_indiP_roi_full;     ///< Property used to trigger setting the full ROI.
-    pcf::IndiProperty m_indiP_roi_fullbin;  ///< Property used to trigger setting the full in current binning ROI.
+    pcf::IndiProperty m_indiP_roi_full; ///< Property used to trigger setting the full ROI.
+
+    pcf::IndiProperty m_indiP_roi_fullbin; ///< Property used to trigger setting the full in current binning ROI.
+
     pcf::IndiProperty m_indiP_roi_loadlast; ///< Property used to trigger loading the last ROI as the target.
-    pcf::IndiProperty m_indiP_roi_last;     ///< Property used to trigger setting the last ROI.
-    pcf::IndiProperty m_indiP_roi_default;  ///< Property used to trigger setting the default and startup ROI.
+
+    pcf::IndiProperty m_indiP_roi_last; ///< Property used to trigger setting the last ROI.
+
+    pcf::IndiProperty m_indiP_roi_default; ///< Property used to trigger setting the default and startup ROI.
 
     ///@}
 
@@ -796,10 +831,12 @@ class stdCamera
      * Crop mode controls are exposed if derivedT::c_stdCamera_cropMode==true
      * @{
      */
-    bool m_cropMode{ false };    ///< Status of crop mode ROIs, if enabled for this camera.
+    bool m_cropMode{ false }; ///< Status of crop mode ROIs, if enabled for this camera.
+
     bool m_cropModeSet{ false }; ///< Desired status of crop mode ROIs, if enabled for this camera.
 
     pcf::IndiProperty m_indiP_cropMode; ///< Property used to toggle crop mode on and off.
+
     ///@}
 
     /** \name Shutter Control
@@ -811,7 +848,8 @@ class stdCamera
     int m_shutterState{ -1 }; ///< State of the shutter.  0 = shut, 1 = open, -1 = unknown.
 
     pcf::IndiProperty m_indiP_shutterStatus; ///< Property to report shutter status
-    pcf::IndiProperty m_indiP_shutter;       ///< Property used to control the shutter, a switch.
+
+    pcf::IndiProperty m_indiP_shutter; ///< Property used to control the shutter, a switch.
 
     ///@}
 
@@ -883,6 +921,7 @@ class stdCamera
       * This should be called in `derivedT::setupConfig` as
       * \code
         stdCamera<derivedT>::setupConfig(config);
+
         \endcode
       * with appropriate error checking.
       */
@@ -893,6 +932,7 @@ class stdCamera
       * This should be called in `derivedT::loadConfig` as
       * \code
         stdCamera<derivedT>::loadConfig(config);
+
         \endcode
       * with appropriate error checking.
       */
@@ -963,6 +1003,7 @@ class stdCamera
       * This should be called in `derivedT::appStartup` as
       * \code
         stdCamera<derivedT>::appStartup();
+
         \endcode
       * with appropriate error checking.
       *
@@ -981,6 +1022,7 @@ class stdCamera
       * This should be called from the derived's appLogic() as in
       * \code
         stdCamera<derivedT>::appLogic();
+
         \endcode
       * with appropriate error checking.
       *
@@ -994,6 +1036,7 @@ class stdCamera
       * This should be called from the derived's onPowerOff() as in
       * \code
         stdCamera<derivedT>::onPowerOff();
+
         \endcode
       * with appropriate error checking.
       *
@@ -1009,6 +1052,7 @@ class stdCamera
       * This should be called from the derived's whilePowerOff() as in
       * \code
         stdCamera<derivedT>::whilePowerOff();
+
         \endcode
       * with appropriate error checking.
       *
@@ -1022,6 +1066,7 @@ class stdCamera
       *
       * \code
         stdCamera<derivedT>::appShutdown();
+
         \endcode
       * with appropriate error checking.
       *
@@ -1988,12 +2033,18 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
         config( m_default_bin_y, "camera.default_bin_y" );
 
         // If default is not setup properly, it defaults to full
-        if( m_default_x == 0 ) m_default_x = m_full_x;
-        if( m_default_y == 0 ) m_default_y = m_full_y;
-        if( m_default_w == 0 ) m_default_w = m_full_w;
-        if( m_default_h == 0 ) m_default_h = m_full_h;
-        if( m_default_bin_x < 1 ) m_default_bin_x = m_full_bin_x;
-        if( m_default_bin_y < 1 ) m_default_bin_y = m_full_bin_y;
+        if( m_default_x == 0 )
+            m_default_x = m_full_x;
+        if( m_default_y == 0 )
+            m_default_y = m_full_y;
+        if( m_default_w == 0 )
+            m_default_w = m_full_w;
+        if( m_default_h == 0 )
+            m_default_h = m_full_h;
+        if( m_default_bin_x < 1 )
+            m_default_bin_x = m_full_bin_x;
+        if( m_default_bin_y < 1 )
+            m_default_bin_y = m_full_bin_y;
 
         // now always start with current and next set to default
 
@@ -3450,7 +3501,6 @@ int stdCamera<derivedT>::newCallBack_temp( const pcf::IndiProperty &ipRecv )
         }
 
         m_ccdTempSetpt = target;
-
         mx::meta::trueFalseT<derivedT::c_stdCamera_tempControl> tf;
         int                                                     rv = setTempSetPt( tf );
         if( rv < 0 && c_hasTempLimits )

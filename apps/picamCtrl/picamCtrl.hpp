@@ -358,6 +358,7 @@ class picamCtrl : public MagAOXApp<>,
 
     /// Queue reconfiguration to apply the requested vertical-shift speed.
     int setVShiftSpeed();
+
     /// Request a cooling-fan state change through the next reconfiguration.
     int setFanSpeed();
     /// Apply and record the requested electron-multiplication gain.
