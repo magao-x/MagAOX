@@ -8,6 +8,7 @@
 ../libMagAOX/app/dev/tests/telemeter_test
 ../libMagAOX/app/dev/tests/dm_test
 ../libMagAOX/app/dev/tests/dev_test
+../libMagAOX/app/dev/tests/stdCamera_test
 
 ../libMagAOX/file/tests/fileTimes_test
 ../libMagAOX/file/tests/stdFileName_test
@@ -53,11 +54,13 @@
 ../apps/ocam2KCtrl/tests/ocamUtils_test
 ../apps/ocam2KCtrl/tests/ocam2KCtrl_test
 ../apps/ocam2KCtrl/tests/ocam2KCtrl_lifecycle_test
+../apps/ocam2KCtrl/tests/ocam2KCtrl_temperature_test
 ../apps/cred2Ctrl/tests/cred2Ctrl_test
 ../apps/cred2Ctrl/tests/cred2Ctrl_lifecycle_test
 ../apps/cred2Ctrl/tests/cred2Utils_test
 ../apps/pi335Ctrl/tests/pi335Ctrl_test
 ../apps/picoMotorCtrl/tests/picoMotorCtrl_test
+../apps/picamCtrl/tests/picamCtrl_test
 ../apps/psfAcq/tests/psfAcq_test
 ../apps/psfFit/tests/psfFit_test
 ../apps/pupilFit/tests/pupilFit_test

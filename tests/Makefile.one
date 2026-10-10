@@ -34,7 +34,7 @@ BASENAME=$(basename $(TARGET))
 PATHNAME=$(dir $(TARGET))
 OBJNAME = $(PATHNAME)$(notdir $(BASENAME)).o
 TESTNAME = $(PATHNAME)$(notdir $(BASENAME))
-EDT_TESTS = ocam2KCtrl_test ocam2KCtrl_lifecycle_test cred2Ctrl_test cred2Ctrl_lifecycle_test
+EDT_TESTS = ocam2KCtrl_test ocam2KCtrl_lifecycle_test ocam2KCtrl_temperature_test cred2Ctrl_test cred2Ctrl_lifecycle_test
 
 # add extra libraries for special cases
 
@@ -74,6 +74,9 @@ else ifeq ($(notdir $(TESTNAME)),xigNode_test)
 else ifneq ($(filter pvcam%_test,$(notdir $(TESTNAME))),)
 	# PVCAM SDK stubs; the tests define the library functions.
 	CPPFLAGS += -I$(TESTS_DIR)/pvcam
+else ifeq ($(notdir $(TESTNAME)),picamCtrl_test)
+	# PICam SDK stubs; the tests define the library functions.
+	CPPFLAGS += -I$(TESTS_DIR)/picam
 else ifneq ($(filter $(notdir $(TESTNAME)),$(EDT_TESTS)),)
 	CXXFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CXXFLAGS))
 	CFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CFLAGS))
