@@ -23,8 +23,10 @@ ifeq "$(QMAKE_PATH)" ""
   QMAKE_PATH := $(shell which $(QMAKE) 2>/dev/null)
 endif
 
+ifneq ($(MAKECMDGOALS),clean)
 ifeq "$(QMAKE_PATH)" ""
   $(error No qmake found on PATH (are the Qt development libraries installed?))
+endif
 endif
 
 QMAKE_PROJECT := $(TARGET).pro
@@ -52,9 +54,11 @@ install: $(TARGET)
 	sudo install bin/$(TARGET) /usr/local/bin
 
 clean:
+ifneq (,$(QMAKE_PATH))
 ifneq (,$(wildcard ./$(QMAKE_MAKEFILE)))  #Test if the generated makefile exists to avoid errors on 2nd make clean
 	$(MAKE) -f $(QMAKE_MAKEFILE) distclean
 endif
-	rm -f *~
+endif
+	rm -f *~ $(QMAKE_MAKEFILE) .qmake.stash
 	rm -f bin/$(TARGET)
 	rm -rf bin moc obj res ui
