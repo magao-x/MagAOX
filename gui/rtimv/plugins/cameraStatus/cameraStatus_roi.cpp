@@ -221,7 +221,8 @@ bool cameraStatus::updateROI()
             {
                 m_roiPhase = roiPhase::applying;
                 m_roiWait.start();
-                sendROI( { requestROI( m_deviceName, "roi_set" ) } );
+                if( sendROI( { requestROI( m_deviceName, "roi_set" ) } ) )
+                    emit roiMessage( "applying ROI" );
             }
         }
         else if( m_roiWait.hasExpired( m_roiTimeout ) )

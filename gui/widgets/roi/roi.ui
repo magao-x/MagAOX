@@ -498,7 +498,7 @@
      <item>
       <widget class="QCheckBox" name="check_relative">
        <property name="text">
-        <string>Relative to current image</string>
+        <string>Relative to current ROI</string>
        </property>
        <property name="focusPolicy">
         <enum>Qt::NoFocus</enum>

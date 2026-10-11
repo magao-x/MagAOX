@@ -662,7 +662,7 @@ void roi::updateGUI()
         QSignalBlocker blocker( ui.check_relative );
         ui.check_relative->setEnabled( available );
         ui.check_relative->setChecked( active );
-        ui.check_relative->setToolTip( available ? "Target centers in current image pixels"
+        ui.check_relative->setToolTip( available ? "Target centers in current ROI pixels"
                                                  : "Relative coordinates unavailable; showing absolute centers" );
     }
 
