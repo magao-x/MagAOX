@@ -1,5 +1,5 @@
 /** \file roi.hpp
- * \brief Camera ROI editor with explicit absolute and current-image center modes.
+ * \brief Camera ROI editor with absolute centers and centers relative to the current ROI.
  */
 #ifndef roi_hpp
 #define roi_hpp
@@ -120,7 +120,7 @@ class roi : public xWidget
     /// A changed reference or capability discards unsent center text on the GUI thread.
     bool m_discardCenters{ true };
 
-    /// Backend-reported target centers in current image pixels.
+    /// Backend-reported target centers in current ROI pixels.
     double m_relativeX{ 0 }, m_relativeY{ 0 };
 
     /// Last coherent applied reference, used only to invalidate edits.
