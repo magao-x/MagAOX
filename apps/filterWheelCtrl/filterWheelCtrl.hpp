@@ -10,6 +10,9 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+#include <atomic>
+#include <cstdint>
+
 /** \defgroup filterWheelCtrl Filter Wheel Control
  * \brief Control of MagAO-X MCBL-based f/w.
  *
@@ -94,11 +97,32 @@ class filterWheelCtrl : public MagAOXApp<>,
     /// Last successfully read wheel position in motor counts.
     long m_rawPos{ 0 };
 
+    /// Last successfully read motor speed, used to require exact zero speed for READY recovery.
+    long m_rawSpeed{ 0 };
+
     /// Progress through the multi-step homing sequence; zero means no sequence is active.
     int m_homingState{ 0 };
 
     /// Permit automatic homing on the first connection after startup or observed power-on.
     bool m_powerOnHomePending{ false };
+
+    /// Raw counts from the last fully validated stationary READY poll.
+    long m_readyRawPos{ 0 };
+
+    /// Whether the current READY state has a confirmed stationary position.
+    bool m_readyPositionValid{ false };
+
+    /// Preserve a validated READY position across communication recovery attempts.
+    bool m_restoreReadyPending{ false };
+
+    /// Generation of the power and command history associated with m_readyRawPos.
+    uint64_t m_readyGeneration{ 0 };
+
+    /// Invalidation generation shared with asynchronous power callbacks and immediate stop requests.
+    std::atomic<uint64_t> m_readyInvalidation{ 0 };
+
+    /// Latched power interruption prevents READY snapshots until a new homing sequence is started.
+    std::atomic<bool> m_readyPowerInterrupted{ false };
 
     ///@}
 
@@ -166,6 +190,14 @@ class filterWheelCtrl : public MagAOXApp<>,
     /// Dispatch a raw-count request to its owning application.
     static int st_newCallBack_m_indiP_counts( void                    *app /**< [in] Owning application. */,
                                               const pcf::IndiProperty &ipRecv /**< [in] Requested INDI property. */ );
+
+    /// Invalidate READY recovery on a power interruption and run the base power callback.
+    int setCallBack_m_indiP_powerChannel( const pcf::IndiProperty &ipRecv /**< [in] Power channel update. */ );
+
+    /// Dispatch a power update to its owning filter wheel controller.
+    static int
+    st_setCallBack_m_indiP_powerChannel( void                    *app /**< [in] Owning application. */,
+                                         const pcf::IndiProperty &ipRecv /**< [in] Power channel update. */ );
 
   protected:
     /// Check whether power, FSM state, and the serial descriptor permit communication.
@@ -399,6 +431,16 @@ inline int filterWheelCtrl::appStartup()
         return -1;
     }
 
+    // Reuse the base subscription before the INDI receive thread starts.
+    if( m_powerMgtEnabled )
+    {
+        std::lock_guard<std::mutex> guard( m_indiCallBackMutex );
+        auto                        callback = m_indiSetCallBacks.find( m_indiP_powerChannel.createUniqueKey() );
+        if( callback == m_indiSetCallBacks.end() )
+            return log<software_error, -1>( { __FILE__, __LINE__, "Power channel callback is not registered." } );
+        callback->second.callBack = st_setCallBack_m_indiP_powerChannel;
+    }
+
     // set up the  INDI properties
     createStandardIndiNumber<long>(
         m_indiP_counts, "counts", std::numeric_limits<long>::lowest(), std::numeric_limits<long>::max(), 0.0, "%ld" );
@@ -420,6 +462,7 @@ inline int filterWheelCtrl::appLogic()
     if( powerState() != 1 || powerStateTarget() != 1 || state() == stateCodes::POWEROFF )
     {
         m_powerOnHomePending = false;
+        m_readyPositionValid = m_restoreReadyPending = false;
         return 0;
     }
 
@@ -513,19 +556,34 @@ inline int filterWheelCtrl::appLogic()
         }
         else
         {
-            state( stateCodes::NOTHOMED );
+            if( !m_restoreReadyPending )
+                state( stateCodes::NOTHOMED );
             m_moving = -1;
         }
     }
 
-    if( state() == stateCodes::NOTHOMED || state() == stateCodes::READY || state() == stateCodes::OPERATING ||
-        state() == stateCodes::HOMING )
+    if( state() == stateCodes::CONNECTED || state() == stateCodes::NOTHOMED || state() == stateCodes::READY ||
+        state() == stateCodes::OPERATING || state() == stateCodes::HOMING )
     {
+        uint64_t generation = m_readyInvalidation.load();
         if( getSwitch() != 0 || getMoving() != 0 || getPos() != 0 )
             return 0;
         if( !deviceAvailable() )
             return 0;
         recordPosition();
+
+        if( state() == stateCodes::CONNECTED )
+        {
+            if( m_restoreReadyPending && m_readyGeneration == generation && generation == m_readyInvalidation.load() &&
+                !m_readyPowerInterrupted.load() && m_rawSpeed == 0 && m_rawPos == m_readyRawPos )
+            {
+                state( stateCodes::READY );
+                log<text_log>( "Recovered READY with unchanged stationary position." );
+            }
+            else
+                state( stateCodes::NOTHOMED );
+            m_restoreReadyPending = false;
+        }
 
         if( m_moving > 0 )
         {
@@ -592,7 +650,15 @@ inline int filterWheelCtrl::appLogic()
         }
 
         updateIfChanged( m_indiP_counts, "current", m_rawPos, m_moving > 0 ? INDI_BUSY : INDI_IDLE );
-        m_preset = ( (double)m_rawPos - m_homeOffset ) / m_circleSteps * m_presetNames.size() + 1.0;
+        m_preset             = ( (double)m_rawPos - m_homeOffset ) / m_circleSteps * m_presetNames.size() + 1.0;
+        m_readyPositionValid = state() == stateCodes::READY && m_rawSpeed == 0 && m_moving == 0 && m_homingState == 0 &&
+                               m_movingState == 0 && generation == m_readyInvalidation.load() &&
+                               !m_readyPowerInterrupted.load();
+        if( m_readyPositionValid )
+        {
+            m_readyRawPos     = m_rawPos;
+            m_readyGeneration = generation;
+        }
         stdMotionStage<filterWheelCtrl>::updateINDI();
         recordStage();
 
@@ -616,6 +682,7 @@ inline int filterWheelCtrl::appShutdown()
 inline int filterWheelCtrl::onPowerOff()
 {
     std::lock_guard<std::mutex> guard( m_indiMutex );
+    m_readyPowerInterrupted = true;
     resetConnection();
     if( stdMotionStage<filterWheelCtrl>::onPowerOff() < 0 )
         log<software_error>( { __FILE__, __LINE__ } );
@@ -658,6 +725,7 @@ inline int filterWheelCtrl::newCallBack_m_indiP_counts( const pcf::IndiProperty 
         target_abs = counts;
 
     std::lock_guard<std::mutex> guard( m_indiMutex );
+    ++m_readyInvalidation;
     if( !deviceAvailable() )
         return -1;
     clearPresetNameTracking();
@@ -669,6 +737,23 @@ inline int filterWheelCtrl::newCallBack_m_indiP_counts( const pcf::IndiProperty 
 inline int filterWheelCtrl::st_newCallBack_m_indiP_counts( void *app, const pcf::IndiProperty &ipRecv )
 {
     return static_cast<filterWheelCtrl *>( app )->newCallBack_m_indiP_counts( ipRecv );
+}
+
+inline int filterWheelCtrl::setCallBack_m_indiP_powerChannel( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_powerChannel, ipRecv );
+    int rv = MagAOXApp<>::setCallBack_m_indiP_powerChannel( ipRecv );
+    if( powerState() != 1 || powerStateTarget() != 1 )
+    {
+        ++m_readyInvalidation;
+        m_readyPowerInterrupted = true;
+    }
+    return rv;
+}
+
+inline int filterWheelCtrl::st_setCallBack_m_indiP_powerChannel( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<filterWheelCtrl *>( app )->setCallBack_m_indiP_powerChannel( ipRecv );
 }
 
 inline bool filterWheelCtrl::deviceAvailable()
@@ -688,12 +773,19 @@ inline void filterWheelCtrl::resetConnection()
     m_moving                      = -1;
     m_switch                      = false;
     m_powerOnHomePending          = false;
+    m_readyPositionValid = m_restoreReadyPending = false;
     clearPresetNameTracking();
 }
 
 inline int filterWheelCtrl::recoverFromError()
 {
+    bool restoreReady = ( m_restoreReadyPending || ( state() == stateCodes::READY && m_readyPositionValid ) ) &&
+                        m_readyGeneration == m_readyInvalidation.load() && m_rawSpeed == 0 && m_moving <= 0 &&
+                        m_homingState == 0 && m_movingState == 0 && state() != stateCodes::OPERATING &&
+                        state() != stateCodes::HOMING && powerState() == 1 && powerStateTarget() == 1 &&
+                        !m_readyPowerInterrupted.load();
     resetConnection();
+    m_restoreReadyPending = restoreReady;
     if( state() != stateCodes::POWEROFF )
         state( stateCodes::NODEVICE );
     updateIfChanged( m_indiP_counts, "current", m_rawPos, INDI_ALERT );
@@ -801,6 +893,9 @@ inline int filterWheelCtrl::getMoving()
     long speed;
     if( readInteger( speed, "GN\r" ) < 0 )
         return -1;
+    m_rawSpeed = speed;
+    if( speed != 0 )
+        m_readyPositionValid = m_restoreReadyPending = false;
     if( std::fabs( static_cast<double>( speed ) ) > 0.1 * m_motorSpeed )
         m_moving = m_homingState ? 2 : 1;
     else
@@ -810,13 +905,22 @@ inline int filterWheelCtrl::getMoving()
 
 inline int filterWheelCtrl::getPos()
 {
-    return readInteger( m_rawPos, "POS\r" );
+    int rv = readInteger( m_rawPos, "POS\r" );
+    if( rv == 0 && m_restoreReadyPending && m_rawPos != m_readyRawPos )
+        m_restoreReadyPending = false;
+    return rv;
 }
 
 inline int filterWheelCtrl::startHoming()
 {
+    ++m_readyInvalidation;
+    bool powerInterrupted = m_readyPowerInterrupted.exchange( false );
     if( !deviceAvailable() )
+    {
+        if( powerInterrupted )
+            m_readyPowerInterrupted = true;
         return -1;
+    }
     m_homingState = 1;
     m_moving      = 2;
     recordStage( true );
@@ -863,6 +967,7 @@ inline int filterWheelCtrl::home()
 
 inline int filterWheelCtrl::stop()
 {
+    ++m_readyInvalidation;
     // First try without locking, so a stop can interrupt a pending status read.
     if( deviceAvailable() )
         tty::ttyWrite( "DI\r", m_fileDescrip, m_writeTimeOut );
@@ -878,6 +983,7 @@ inline int filterWheelCtrl::stop()
 
 inline int filterWheelCtrl::moveToRaw( const long &counts )
 {
+    ++m_readyInvalidation;
     if( !deviceAvailable() )
         return -1;
     m_moving = 1;
@@ -892,6 +998,7 @@ inline int filterWheelCtrl::moveToRaw( const long &counts )
 
 inline int filterWheelCtrl::moveToRawRelative( const long &counts_relative )
 {
+    ++m_readyInvalidation;
     if( !deviceAvailable() )
         return -1;
     m_moving = 1;

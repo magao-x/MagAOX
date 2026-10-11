@@ -228,9 +228,15 @@ struct Fixture : outletHarness::Controller<filterWheelCtrl>
     /// Release the harmless serial descriptor before shared fixture destruction.
     ~Fixture();
 
-    /// Deliver observed and requested power through the real subscription callback.
-    void power( const std::string &observed /**< [in] Observed power state. */,
-                const std::string &target /**< [in] Requested power state. */ );
+    /// Deliver power updates through the registered subscription callback.
+    void power( const std::string &observed /**< [in] Observed power state; empty omits this element. */,
+                const std::string &target /**< [in] Requested power state; empty omits this element. */ );
+
+    /// Confirm a stationary READY position through the production polling path.
+    void ready();
+
+    /// Fail one production poll, then clear the fault and captured traffic.
+    void disconnect( const std::string &query = "GAST\r" /**< [in] Poll query to fail. */ );
 
     /// Dispatch raw, numeric preset, named preset, home, or stop through registered callbacks.
     int command( unsigned operation /**< [in] Command selector from zero through four. */ );
@@ -248,6 +254,10 @@ Fixture::Fixture()
     m_presetPositions       = { 1, 2, 3, 4, 5, 6 };
     m_powerDevice           = "test-pdu";
     m_powerChannel          = "wheel";
+    REQUIRE( registerIndiPropertySet( m_indiP_powerChannel,
+                                      m_powerDevice,
+                                      m_powerChannel,
+                                      MagAOXApp<>::st_setCallBack_m_indiP_powerChannel ) == 0 );
     power( "On", "On" );
     driver();
     state( stateCodes::INITIALIZED );
@@ -267,9 +277,30 @@ Fixture::~Fixture()
 void Fixture::power( const std::string &observed, const std::string &target )
 {
     pcf::IndiProperty received( pcf::IndiProperty::Text, m_powerDevice, m_powerChannel );
-    received.add( pcf::IndiElement( "state", observed ) );
-    received.add( pcf::IndiElement( "target", target ) );
-    REQUIRE( setCallBack_m_indiP_powerChannel( received ) == 0 );
+    if( !observed.empty() )
+        received.add( pcf::IndiElement( "state", observed ) );
+    if( !target.empty() )
+        received.add( pcf::IndiElement( "target", target ) );
+    auto callback = m_indiSetCallBacks.at( received.createUniqueKey() ).callBack;
+    REQUIRE( callback != nullptr );
+    REQUIRE( callback( this, received ) == 0 );
+}
+
+void Fixture::ready()
+{
+    REQUIRE( appLogic() == 0 );
+    REQUIRE( state() == stateCodes::READY );
+    REQUIRE( m_moving == 0 );
+    g_script.m_commands.clear();
+}
+
+void Fixture::disconnect( const std::string &query )
+{
+    g_script.m_failedQuery = query;
+    REQUIRE( appLogic() == 0 );
+    REQUIRE( state() == stateCodes::NODEVICE );
+    g_script.m_failedQuery.clear();
+    g_script.m_commands.clear();
 }
 
 int Fixture::command( unsigned operation )
@@ -303,7 +334,7 @@ namespace filterWheelCtrlTest
 using namespace filterWheelHarness;
 using namespace MagAOX::app;
 
-/// Poll errors release the port and recover to NOTHOMED without a motion command.
+/// Poll errors without a confirmed READY position recover to NOTHOMED without a motion command.
 /** \ingroup filterWheelCtrl_unit_test */
 TEST_CASE( "filterWheelCtrl recovers polling failures without homing", "[filterWheelCtrl]" )
 {
@@ -691,5 +722,340 @@ TEST_CASE( "filterWheelCtrl retains manual movement in NOTHOMED", "[filterWheelC
     REQUIRE( f.m_moving == 1 );
     REQUIRE( f.state() == stateCodes::NOTHOMED );
 }
+/// A confirmed stationary READY position is restored after each polling error only with fresh matching counts.
+/** \ingroup filterWheelCtrl_unit_test */
+TEST_CASE( "filterWheelCtrl restores confirmed stationary READY after reconnect", "[filterWheelCtrl]" )
+{
+    // clang-format off
+    #ifdef FILTERWHEELCTRL_TEST_DOXYGEN_REF
+    filterWheelCtrl::appLogic(); filterWheelCtrl::recoverFromError(); filterWheelCtrl::getPos();
+    filterWheelCtrl::getMoving(); filterWheelCtrl::resetConnection();
+    #endif
+    // clang-format on
+    const std::string query    = GENERATE( "GAST\r", "GN\r", "POS\r" );
+    long              position = GENERATE( -12345L, 0L, 12345L );
+    Fixture           f;
+    f.m_powerOnHome     = true;
+    g_script.m_position = std::to_string( position ) + "\r\n";
+    f.ready();
+    for( unsigned recovery = 0; recovery < 2; ++recovery )
+    {
+        f.disconnect( query );
+        g_script.m_beforeIo = [&]( const std::string &command )
+        {
+            if( command == "GN\r" )
+                REQUIRE( f.state() == stateCodes::CONNECTED );
+        };
+        REQUIRE( f.appLogic() == 0 );
+        REQUIRE( f.state() == stateCodes::READY );
+        REQUIRE( f.m_rawPos == position );
+        REQUIRE( f.m_moving == 0 );
+        REQUIRE( f.m_homingState == 0 );
+        REQUIRE( f.m_movingState == 0 );
+        REQUIRE( f.m_indiP_counts.getState() == INDI_IDLE );
+        REQUIRE( f.m_indiP_preset.getState() == INDI_IDLE );
+        REQUIRE_FALSE( commandedMotion() );
+        g_script.m_beforeIo = nullptr;
+    }
+}
+
+/// Changed counts or any nonzero motor speed invalidate READY recovery permanently for that interruption.
+/** \ingroup filterWheelCtrl_unit_test */
+TEST_CASE( "filterWheelCtrl rejects changed or moving READY recovery", "[filterWheelCtrl]" )
+{
+    // clang-format off
+    #ifdef FILTERWHEELCTRL_TEST_DOXYGEN_REF
+    filterWheelCtrl::appLogic(); filterWheelCtrl::getMoving(); filterWheelCtrl::getPos();
+    #endif
+    // clang-format on
+    Fixture f;
+    f.ready();
+    SECTION( "changed raw counts during reconnect" )
+    {
+        long position = GENERATE( 12344L, 12346L, 372345L );
+        f.disconnect();
+        g_script.m_position = std::to_string( position ) + "\r\n";
+    }
+    SECTION( "moving during reconnect, including speeds below the normal motion threshold" )
+    {
+        long speed = GENERATE( -3000L, -1L, 1L, 300L, 3000L );
+        f.disconnect();
+        g_script.m_speed = std::to_string( speed ) + "\r\n";
+    }
+    SECTION( "motion observed before the position query fails" )
+    {
+        g_script.m_speed = "1\r\n";
+        f.disconnect( "POS\r" );
+    }
+    REQUIRE( f.appLogic() == 0 );
+    REQUIRE( f.state() == stateCodes::NOTHOMED );
+    REQUIRE_FALSE( commandedMotion() );
+    g_script.m_position = "12345\r\n";
+    g_script.m_speed    = "0\r\n";
+    REQUIRE( f.appLogic() == 0 );
+    REQUIRE( f.state() == stateCodes::NOTHOMED );
+    REQUIRE_FALSE( commandedMotion() );
+}
+
+/// Repeated transport, setup, parsing, and discovery failures retain the original READY snapshot until validation.
+/** \ingroup filterWheelCtrl_unit_test */
+TEST_CASE( "filterWheelCtrl retains READY recovery across failed retries", "[filterWheelCtrl]" )
+{
+    // clang-format off
+    #ifdef FILTERWHEELCTRL_TEST_DOXYGEN_REF
+    filterWheelCtrl::appLogic(); filterWheelCtrl::readInteger(); filterWheelCtrl::onPowerOnConnect();
+    filterWheelCtrl::recoverFromError();
+    #endif
+    // clang-format on
+    unsigned failure = GENERATE( 0u, 1u, 2u, 3u, 4u, 5u );
+    Fixture  f;
+    f.ready();
+    f.disconnect();
+    for( unsigned retry = 0; retry < 3; ++retry )
+    {
+        if( failure == 0 )
+            g_script.m_discoveryResult = TTY_E_DEVNOTFOUND;
+        else if( failure == 1 )
+            g_script.m_connectResult = TTY_E_TCGETATTR;
+        else if( failure == 2 )
+        {
+            g_script.m_failedWrite    = "ANSW0\r";
+            g_script.m_matchingWrites = 0;
+        }
+        else if( failure == 3 )
+            g_script.m_failedQuery = "GN\r";
+        else if( failure == 4 )
+            g_script.m_position = "invalid\r\n";
+        else
+            g_script.m_drainResult = TTY_E_ERRORONREAD;
+        REQUIRE( f.appLogic() == 0 );
+        REQUIRE( f.state() == stateCodes::NODEVICE );
+        REQUIRE_FALSE( commandedMotion() );
+    }
+    g_script.m_discoveryResult = g_script.m_connectResult = 0;
+    g_script.m_failedWrite.clear();
+    g_script.m_failedQuery.clear();
+    g_script.m_position    = "12345\r\n";
+    g_script.m_drainResult = TTY_E_TIMEOUTONREAD;
+    REQUIRE( f.appLogic() == 0 );
+    REQUIRE( f.state() == stateCodes::READY );
+    REQUIRE( f.m_rawPos == 12345 );
+    REQUIRE_FALSE( commandedMotion() );
+}
+
+/// Accepted commands before failure and rejected requests during recovery both invalidate the READY snapshot.
+/** \ingroup filterWheelCtrl_unit_test */
+TEST_CASE( "filterWheelCtrl invalidates READY recovery on motion requests", "[filterWheelCtrl]" )
+{
+    // clang-format off
+    #ifdef FILTERWHEELCTRL_TEST_DOXYGEN_REF
+    filterWheelCtrl::newCallBack_m_indiP_counts(); filterWheelCtrl::moveToRaw(); filterWheelCtrl::moveTo();
+    filterWheelCtrl::startHoming(); filterWheelCtrl::stop(); filterWheelCtrl::appLogic();
+    #endif
+    // clang-format on
+    unsigned operation   = GENERATE( 0u, 1u, 2u, 3u, 4u );
+    bool     beforeError = GENERATE( false, true );
+    Fixture  f;
+    f.ready();
+    if( beforeError )
+    {
+        REQUIRE( f.command( operation ) == 0 );
+        f.disconnect();
+    }
+    else
+    {
+        f.disconnect();
+        REQUIRE( f.command( operation ) == -1 );
+        REQUIRE( g_script.m_commands.empty() );
+    }
+    REQUIRE( f.appLogic() == 0 );
+    REQUIRE( f.state() == stateCodes::NOTHOMED );
+    REQUIRE_FALSE( commandedMotion() );
+}
+
+/// Every observed or requested interruption invalidates READY even when power returns before the next FSM loop.
+/** \ingroup filterWheelCtrl_unit_test */
+TEST_CASE( "filterWheelCtrl remembers power interruptions during READY recovery", "[filterWheelCtrl]" )
+{
+    // clang-format off
+    #ifdef FILTERWHEELCTRL_TEST_DOXYGEN_REF
+    filterWheelCtrl::setCallBack_m_indiP_powerChannel(); filterWheelCtrl::st_setCallBack_m_indiP_powerChannel();
+    filterWheelCtrl::appStartup(); filterWheelCtrl::appLogic();
+    #endif
+    // clang-format on
+    unsigned update      = GENERATE( 0u, 1u, 2u, 3u, 4u, 5u );
+    bool     beforeError = GENERATE( false, true );
+    Fixture  f;
+    f.ready();
+    if( !beforeError )
+        f.disconnect();
+    if( update == 0 )
+        f.power( "Off", "Off" );
+    else if( update == 1 )
+        f.power( "On", "Off" );
+    else if( update == 2 )
+        f.power( "Unknown", "On" );
+    else if( update == 3 )
+        f.power( "On", "Unknown" );
+    else if( update == 4 )
+        f.power( "", "Off" );
+    else
+        f.power( "Off", "" );
+    f.power( "On", "On" );
+    if( beforeError )
+        f.disconnect();
+    REQUIRE( f.appLogic() == 0 );
+    REQUIRE( f.state() == stateCodes::NOTHOMED );
+    REQUIRE_FALSE( commandedMotion() );
+}
+
+/// Power interruptions during snapshot capture or final verification cannot be hidden by a subsequent On update.
+/** \ingroup filterWheelCtrl_unit_test */
+TEST_CASE( "filterWheelCtrl validates power history across READY polling", "[filterWheelCtrl]" )
+{
+    // clang-format off
+    #ifdef FILTERWHEELCTRL_TEST_DOXYGEN_REF
+    filterWheelCtrl::setCallBack_m_indiP_powerChannel(); filterWheelCtrl::appLogic();
+    #endif
+    // clang-format on
+    Fixture f;
+    SECTION( "repeated On updates retain eligibility" )
+    {
+        f.ready();
+        f.disconnect();
+        f.power( "On", "On" );
+        f.power( "", "On" );
+        f.power( "On", "" );
+        REQUIRE( f.appLogic() == 0 );
+        REQUIRE( f.state() == stateCodes::READY );
+    }
+    SECTION( "power interruption during reconnect verification" )
+    {
+        f.ready();
+        f.disconnect();
+        g_script.m_beforeIo = [&]( const std::string &command )
+        {
+            if( command == "GAST\r" )
+            {
+                f.power( "Off", "Off" );
+                f.power( "On", "On" );
+            }
+        };
+        REQUIRE( f.appLogic() == 0 );
+        REQUIRE( f.state() == stateCodes::NOTHOMED );
+    }
+    SECTION( "power interruption during the initial READY observation" )
+    {
+        g_script.m_beforeIo = [&]( const std::string &command )
+        {
+            if( command == "GAST\r" )
+            {
+                f.power( "Off", "Off" );
+                f.power( "On", "On" );
+            }
+        };
+        f.ready();
+        g_script.m_beforeIo = nullptr;
+        f.disconnect();
+        REQUIRE( f.appLogic() == 0 );
+        REQUIRE( f.state() == stateCodes::NOTHOMED );
+    }
+    SECTION( "ordinary READY polling cannot erase a power interruption" )
+    {
+        f.ready();
+        f.power( "Off", "Off" );
+        f.power( "On", "On" );
+        f.ready();
+        f.disconnect();
+        REQUIRE( f.appLogic() == 0 );
+        REQUIRE( f.state() == stateCodes::NOTHOMED );
+    }
+    SECTION( "a rejected home request cannot erase a power interruption" )
+    {
+        f.ready();
+        f.power( "On", "Off" );
+        REQUIRE( f.command( 3 ) == -1 );
+        f.power( "On", "On" );
+        f.ready();
+        f.disconnect();
+        REQUIRE( f.appLogic() == 0 );
+        REQUIRE( f.state() == stateCodes::NOTHOMED );
+    }
+    REQUIRE_FALSE( commandedMotion() );
+}
+
+/// Completed manual homing establishes a fresh READY reference after a power interruption.
+/** \ingroup filterWheelCtrl_unit_test */
+TEST_CASE( "filterWheelCtrl renews READY recovery after manual homing", "[filterWheelCtrl]" )
+{
+    // clang-format off
+    #ifdef FILTERWHEELCTRL_TEST_DOXYGEN_REF
+    filterWheelCtrl::startHoming(); filterWheelCtrl::appLogic(); filterWheelCtrl::setCallBack_m_indiP_powerChannel();
+    #endif
+    // clang-format on
+    Fixture f;
+    f.ready();
+    f.disconnect();
+    f.power( "Off", "Off" );
+    f.power( "On", "On" );
+    REQUIRE( f.appLogic() == 0 );
+    REQUIRE( f.state() == stateCodes::NOTHOMED );
+    REQUIRE( f.command( 3 ) == 0 );
+    for( unsigned step = 0; step < 5; ++step )
+        REQUIRE( f.appLogic() == 0 );
+    REQUIRE( f.state() == stateCodes::READY );
+    f.disconnect();
+    REQUIRE( f.appLogic() == 0 );
+    REQUIRE( f.state() == stateCodes::READY );
+    REQUIRE_FALSE( commandedMotion() );
+}
+
+/// READY recovery requires a completed stationary READY poll and an error originating from that state.
+/** \ingroup filterWheelCtrl_unit_test */
+TEST_CASE( "filterWheelCtrl requires confirmed READY before recovery", "[filterWheelCtrl]" )
+{
+    // clang-format off
+    #ifdef FILTERWHEELCTRL_TEST_DOXYGEN_REF
+    filterWheelCtrl::appLogic(); filterWheelCtrl::onPowerOff(); filterWheelCtrl::resetConnection();
+    #endif
+    // clang-format on
+    Fixture f;
+    SECTION( "READY has not yet been polled" )
+    {
+        f.disconnect();
+    }
+    SECTION( "a prior READY snapshot cannot promote a different state" )
+    {
+        auto state = GENERATE( stateCodes::OPERATING, stateCodes::HOMING, stateCodes::NOTHOMED );
+        f.ready();
+        f.state( state );
+        f.disconnect();
+    }
+    SECTION( "power-on with automatic homing disabled clears the previous snapshot" )
+    {
+        f.ready();
+        f.m_powerOnHome = false;
+        f.state( stateCodes::POWERON );
+        REQUIRE( f.appLogic() == 0 );
+        REQUIRE( f.state() == stateCodes::NOTHOMED );
+        f.disconnect();
+    }
+    SECTION( "an observed power-off hook clears the previous snapshot" )
+    {
+        f.ready();
+        f.power( "Off", "Off" );
+        f.state( stateCodes::POWEROFF );
+        REQUIRE( f.onPowerOff() == 0 );
+        f.power( "On", "On" );
+        f.state( stateCodes::POWERON );
+        f.m_powerOnHome = false;
+        REQUIRE( f.appLogic() == 0 );
+        f.disconnect();
+    }
+    REQUIRE( f.appLogic() == 0 );
+    REQUIRE( f.state() == stateCodes::NOTHOMED );
+    REQUIRE_FALSE( commandedMotion() );
+}
+
 } // namespace filterWheelCtrlTest
 } // namespace libXWCTest
