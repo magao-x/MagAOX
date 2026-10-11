@@ -52,7 +52,7 @@ class cameraStatus : public rtimvOverlayInterface
     /// Cached graphics scene used for ROI-box lifetime management.
     QGraphicsScene *m_qgs{ nullptr };
 
-    /// Pending ROI box used to preview target subframes.
+    /// Scene-owned target preview, interactive when the camera and host support ROI commands.
     QPointer<StretchBox> m_roiBox;
 
     /// Native camera geometry used for coherent edit/Check/Set transitions.
@@ -91,7 +91,7 @@ class cameraStatus : public rtimvOverlayInterface
     roiT m_currentROI, m_targetROI;
     /// Reference and target captured for a pending Check or Set.
     roiT m_checkCurrent, m_requestedROI;
-    /// Expected final target and its pre-edit value while awaiting multiple echoes.
+    /// Expected final target after an edit or reset, and the pre-edit value for ordered echoes.
     roiT m_desiredROI, m_echoBase;
     /// Backend target and scene rectangle at the start of a mouse edit.
     roiT m_dragROI;
@@ -103,7 +103,7 @@ class cameraStatus : public rtimvOverlayInterface
     quint64 m_cancelRevision{ 0 };
     /// A pending Check may finish without changing an already-current target.
     bool m_cancelCheckPending{ false };
-    /// Bounds acknowledgement waits without blocking the GUI.
+    /// Measures acknowledgement waits without blocking the GUI.
     QElapsedTimer m_roiWait;
     /// Local timeout in milliseconds; a timeout never causes replay.
     int m_roiTimeout{ 5000 };

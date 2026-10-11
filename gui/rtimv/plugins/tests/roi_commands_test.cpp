@@ -148,14 +148,30 @@ Overlay::Overlay( Host &host )
 /// Camera property fixture; no sockets, FIFOs, or INDI threads are created.
 struct Fixture
 {
+    /// Owns the offline scene and command router.
     Host     m_host;
+
+    /// Parses real properties and captures writes without opening a transport.
     Provider m_provider;
+
+    /// Overlay under test, using the offline host.
     Overlay  m_overlay{ m_host };
+
+    /// Applied geometry published by the simulated camera.
     Region   m_current{ 511.5, 511.5, 64, 64, 1, 1 };
+
+    /// Pending geometry published by the simulated camera.
     Region   m_target{ m_current };
+
+    /// Native coordinate policy advertised in coherent snapshots.
     int      m_units{ 0 };
+
+    /// Monotonic completion sequence of the simulated Check handler.
     int      m_sequence{ 0 };
+
+    /// Classifies the applied geometry as full/default for Shift+R placement.
     bool     m_preset{ false };
+
     /// Publish command definitions and an initial coherent camera state.
     Fixture();
     /// Publish all six current and target values together.
@@ -752,6 +768,11 @@ TEST_CASE( "ROI Delete cancellation waits for the reset and never submits Set", 
  */
 TEST_CASE( "ROI rectangle mapping respects camera units and image identity", "[rtimvROI]" )
 {
+    // clang-format off
+#ifdef RTIMV_ROI_TEST_DOXYGEN_REF
+    cameraStatus::updateROI; cameraStatus::roiRect;
+#endif
+    // clang-format on
     Fixture f;
     for( int units : { 0, 1 } )
         for( int bx : { 1, 2, 3 } )
