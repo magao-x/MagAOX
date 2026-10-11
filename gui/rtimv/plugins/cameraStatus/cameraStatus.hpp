@@ -85,6 +85,7 @@ class cameraStatus : public rtimvOverlayInterface
     roiT m_desiredROI, m_echoBase;
     /// Backend target and scene rectangle at the start of a mouse edit.
     roiT m_dragROI;
+    /// Scene rectangle captured before movement or resize.
     QRectF m_dragRect;
     /// Connection generation and latest Check sequence captured for an action.
     quint64 m_roiGeneration{0}, m_checkSequence{0};
@@ -112,7 +113,7 @@ class cameraStatus : public rtimvOverlayInterface
     void beginROI();
 
     /// Convert a scene edit to native coordinates and send only changed fields.
-    bool stageROI( const QRectF &rect /**< [in] Initial rectangle in scene coordinates. */ , /**< [in] Pixel-edge rectangle after editing. */
+    bool stageROI( const QRectF &rect , /**< [in] Pixel-edge rectangle after editing. */
                   const roiT &before, /**< [in] Captured native target before editing. */
                   bool resized /**< [in] True only for intentional size changes. */);
 
