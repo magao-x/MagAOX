@@ -21,13 +21,13 @@ class Host : public QObject
 {
     Q_OBJECT
   public:
-    QGraphicsScene     m_scene;          ///< Owns graphics items in the test.
-    QSize              m_size{ 64, 64 }; ///< Currently displayed image size.
-    QString            m_message;        ///< Last normal status-box message.
-    QRectF             m_readoutRect;    ///< Geometry delivered to the host's selected-box readout.
-    int                m_selections{ 0 }; ///< Number of readout refresh notifications.
+    QGraphicsScene     m_scene;             ///< Owns graphics items in the test.
+    QSize              m_size{ 64, 64 };    ///< Currently displayed image size.
+    QString            m_message;           ///< Last normal status-box message.
+    QRectF             m_readoutRect;       ///< Geometry delivered to the host's selected-box readout.
+    int                m_selections{ 0 };   ///< Number of readout refresh notifications.
     int                m_deselections{ 0 }; ///< Number of readout hide notifications.
-    rtimvCommandRouter m_router{ this }; ///< Same router used by the production main window.
+    rtimvCommandRouter m_router{ this };    ///< Same router used by the production main window.
   public slots:
     /// Return the displayed dimensions.
     QSize overlayImageSize() const;
@@ -49,11 +49,14 @@ QRectF Host::newUserBoxRect() const
 void Host::addInteractiveBox( StretchBox *box )
 {
     m_scene.addItem( box );
-    connect( box, &StretchBox::selected, this, [this]( StretchBox *selected )
-    {
-        m_readoutRect = selected->mapRectToScene( selected->rect() );
-        ++m_selections;
-    } );
+    connect( box,
+             &StretchBox::selected,
+             this,
+             [this]( StretchBox *selected )
+             {
+                 m_readoutRect = selected->mapRectToScene( selected->rect() );
+                 ++m_selections;
+             } );
     connect( box, &StretchBox::deSelected, this, [this]( StretchBox * ) { ++m_deselections; } );
 }
 void Host::showStatusMessage( const QString &message )
@@ -149,28 +152,28 @@ Overlay::Overlay( Host &host )
 struct Fixture
 {
     /// Owns the offline scene and command router.
-    Host     m_host;
+    Host m_host;
 
     /// Parses real properties and captures writes without opening a transport.
     Provider m_provider;
 
     /// Overlay under test, using the offline host.
-    Overlay  m_overlay{ m_host };
+    Overlay m_overlay{ m_host };
 
     /// Applied geometry published by the simulated camera.
-    Region   m_current{ 511.5, 511.5, 64, 64, 1, 1 };
+    Region m_current{ 511.5, 511.5, 64, 64, 1, 1 };
 
     /// Pending geometry published by the simulated camera.
-    Region   m_target{ m_current };
+    Region m_target{ m_current };
 
     /// Native coordinate policy advertised in coherent snapshots.
-    int      m_units{ 0 };
+    int m_units{ 0 };
 
     /// Monotonic completion sequence of the simulated Check handler.
-    int      m_sequence{ 0 };
+    int m_sequence{ 0 };
 
     /// Classifies the applied geometry as full/default for Shift+R placement.
-    bool     m_preset{ false };
+    bool m_preset{ false };
 
     /// Publish command definitions and an initial coherent camera state.
     Fixture();
@@ -179,9 +182,9 @@ struct Fixture
     /// Apply captured target commands and deliver coherent target echoes.
     void echo();
     /// Complete one validator invocation, optionally adjusting dimensions or binning.
-    void checked( int  width = 0, /**< [in] Optional validator-adjusted width. */
-                  int  bin   = 0, /**< [in] Optional validator-adjusted horizontal binning. */
-                  bool fail  = false, /**< [in] Return an Alert completion. */
+    void checked( int  width        = 0,     /**< [in] Optional validator-adjusted width. */
+                  int  bin          = 0,     /**< [in] Optional validator-adjusted horizontal binning. */
+                  bool fail         = false, /**< [in] Return an Alert completion. */
                   bool publishState = true /**< [in] Publish state even when the geometry did not change. */ );
     /// Count request vectors captured by the provider.
     int count( const std::string &property /**< [in] Property name. */ ) const;
@@ -578,7 +581,7 @@ TEST_CASE( "External ROI targets support the same readout and keyboard editing",
     // clang-format on
     Fixture f;
     f.m_target.x += 3;
-    f.m_target.w = 32;
+    f.m_target.w     = 32;
     f.m_target.bin_x = 2;
     f.state();
     f.m_overlay.updateROI();
@@ -657,7 +660,7 @@ TEST_CASE( "ROI Delete cancellation waits for the reset and never submits Set", 
     cameraStatus::cancelROI; cameraStatus::updateROI; cameraStatus::keyPressEvent;
 #endif
     // clang-format on
-    Fixture f;
+    Fixture   f;
     QKeyEvent del( QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier );
     SECTION( "earlier target echoes cannot resurrect a cancelled box" )
     {
