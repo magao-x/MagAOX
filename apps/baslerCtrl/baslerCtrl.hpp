@@ -283,10 +283,10 @@ class baslerCtrl : public MagAOXApp<>,
      */
 
     /// Check whether camera telemetry is due for publication.
-   int checkRecordTimes();
+    int checkRecordTimes();
 
     /// Record a standard camera telemetry sample.
-    int recordTelem( const telem_stdcam * tag /**< [in] Telemetry type selector; its value is unused. */ );
+    int recordTelem( const telem_stdcam *tag /**< [in] Telemetry type selector; its value is unused. */ );
 
     ///@}
 };

@@ -2782,8 +2782,9 @@ int stdCamera<derivedT>::appStartup()
         }
 
         const std::vector<std::pair<pcf::IndiProperty *, const char *>> relativeProperties{
-            {&m_indiP_roi_x_relative, "roi_region_x_relative"}, {&m_indiP_roi_y_relative, "roi_region_y_relative"}};
-        for(const auto &entry : relativeProperties)
+            { &m_indiP_roi_x_relative, "roi_region_x_relative" },
+            { &m_indiP_roi_y_relative, "roi_region_y_relative" } };
+        for( const auto &entry : relativeProperties )
         {
             derived().createROIndiNumber( *entry.first, entry.second );
             entry.first->setPerm( pcf::IndiProperty::ReadWrite );

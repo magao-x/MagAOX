@@ -213,11 +213,11 @@ TEST_CASE( "ROI coordinates round-trip across binning and parity", "[stdCamera][
                     double at = absolute( ( size - 1 ) / 2. - 1, targetBin, center, extent, bin, u );
                     CHECK( physical( at, targetBin, u ) == Approx( physical( center, bin, u ) - bin ) );
                 }
-    region invalid{0, 0, 1, 1, 1, 1};
+    region invalid{ 0, 0, 1, 1, 1, 1 };
     invalid.x = std::numeric_limits<float>::quiet_NaN();
-    CHECK_FALSE(valid(invalid));
+    CHECK_FALSE( valid( invalid ) );
     invalid.x = std::numeric_limits<float>::infinity();
-    CHECK_FALSE(valid(invalid));
+    CHECK_FALSE( valid( invalid ) );
     roiHarness::Fixture cam;
     cam.m_currentROI = { 0, 40, 65, 63, 1, 1 };
     cam.m_nextROI    = cam.m_currentROI;

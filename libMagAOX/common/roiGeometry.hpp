@@ -76,12 +76,12 @@ inline std::vector<std::string> names( const std::string &prefix = "" /**< [in] 
 inline bool valid( const region &r )
 {
     // Camera applications use -ffast-math; inspect IEEE exponent bits instead of an optimized-away isfinite.
-    static_assert(sizeof(float) == sizeof(uint32_t) && std::numeric_limits<float>::is_iec559);
+    static_assert( sizeof( float ) == sizeof( uint32_t ) && std::numeric_limits<float>::is_iec559 );
     uint32_t x, y;
-    std::memcpy(&x, &r.x, sizeof(x));
-    std::memcpy(&y, &r.y, sizeof(y));
-    return (x & 0x7f800000u) != 0x7f800000u && (y & 0x7f800000u) != 0x7f800000u &&
-           r.w > 0 && r.h > 0 && r.bin_x > 0 && r.bin_y > 0;
+    std::memcpy( &x, &r.x, sizeof( x ) );
+    std::memcpy( &y, &r.y, sizeof( y ) );
+    return ( x & 0x7f800000u ) != 0x7f800000u && ( y & 0x7f800000u ) != 0x7f800000u && r.w > 0 && r.h > 0 &&
+           r.bin_x > 0 && r.bin_y > 0;
 }
 
 inline bool same( const region &a, const region &b )

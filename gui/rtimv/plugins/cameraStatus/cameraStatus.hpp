@@ -59,24 +59,33 @@ class cameraStatus : public rtimvOverlayInterface
     using roiT = MagAOX::roi::region;
 
     /// ROI interaction; only an explicit fresh key can leave adjusted for checking.
-    enum class roiPhase { idle, editing, dragging, awaitingTarget, checking, adjusted, applying };
+    enum class roiPhase
+    {
+        idle,
+        editing,
+        dragging,
+        awaitingTarget,
+        checking,
+        adjusted,
+        applying
+    };
 
     /// Current interaction phase, owned by the GUI thread.
-    roiPhase m_roiPhase{roiPhase::idle};
+    roiPhase m_roiPhase{ roiPhase::idle };
     /// Pins the editable preview even when its target equals current.
-    bool m_explicitROI{false};
+    bool m_explicitROI{ false };
     /// True only while all required property definitions and current geometry are valid.
-    bool m_roiReady{false};
+    bool m_roiReady{ false };
     /// Prevents stale legacy fallback after a new camera loses its capability.
-    bool m_commandSeen{false};
+    bool m_commandSeen{ false };
     /// Continue one apply request after its staged target has been echoed.
-    bool m_applyAfterEcho{false};
+    bool m_applyAfterEcho{ false };
     /// Applied reference is positively classified as full frame or default.
-    bool m_newBoxPreset{false};
+    bool m_newBoxPreset{ false };
     /// The router is owned by the main window and discovered lazily.
     QPointer<rtimvCommandRouter> m_commands;
     /// Native coordinate convention for this connection.
-    MagAOX::roi::units m_roiUnits{MagAOX::roi::units::unsupported};
+    MagAOX::roi::units m_roiUnits{ MagAOX::roi::units::unsupported };
     /// Latest coherent current and staged target geometry.
     roiT m_currentROI, m_targetROI;
     /// Reference and target captured for a pending Check or Set.
@@ -88,14 +97,14 @@ class cameraStatus : public rtimvOverlayInterface
     /// Scene rectangle captured before movement or resize.
     QRectF m_dragRect;
     /// Connection generation and latest Check sequence captured for an action.
-    quint64 m_roiGeneration{0}, m_checkSequence{0};
+    quint64 m_roiGeneration{ 0 }, m_checkSequence{ 0 };
     /// Bounds acknowledgement waits without blocking the GUI.
     QElapsedTimer m_roiWait;
     /// Local timeout in milliseconds; a timeout never causes replay.
-    int m_roiTimeout{5000};
+    int m_roiTimeout{ 5000 };
 
     /// Copy one typed camera property from the optional provider.
-    rtimvPropertySnapshot roiProperty(const QString &name /**< [in] Camera property name. */);
+    rtimvPropertySnapshot roiProperty( const QString &name /**< [in] Camera property name. */ );
 
     /// Refresh coherent ROI state; return true when it supersedes the legacy preview.
     bool updateROI();
@@ -113,18 +122,18 @@ class cameraStatus : public rtimvOverlayInterface
     void beginROI();
 
     /// Convert a scene edit to native coordinates and send only changed fields.
-    bool stageROI( const QRectF &rect , /**< [in] Pixel-edge rectangle after editing. */
-                  const roiT &before, /**< [in] Captured native target before editing. */
-                  bool resized /**< [in] True only for intentional size changes. */);
+    bool stageROI( const QRectF &rect,   /**< [in] Pixel-edge rectangle after editing. */
+                   const roiT   &before, /**< [in] Captured native target before editing. */
+                   bool          resized /**< [in] True only for intentional size changes. */ );
 
     /// Request one fresh Check or remember one action while waiting for its target echo.
     void applyROI();
 
     /// Submit typed commands once, reporting a local failure through the status box.
-    bool sendROI(const QVector<rtimvCommand> &commands /**< [in] Ordered property vectors. */);
+    bool sendROI( const QVector<rtimvCommand> &commands /**< [in] Ordered property vectors. */ );
 
     /// Revoke pending authorization and restore the backend target for review.
-    void failROI(const QString &message /**< [in] Reason displayed in the normal status box. */);
+    void failROI( const QString &message /**< [in] Reason displayed in the normal status box. */ );
 
     /// Cancel unsent edits and confirmation; an already submitted Set remains tracked.
     void escapeROI();
@@ -190,20 +199,20 @@ class cameraStatus : public rtimvOverlayInterface
     void newStretchBox( StretchBox *sb /**< [in] ROI preview box to add to the view */ );
 
     /// Insert a box sharing the normal user-box interaction and readout.
-    void newInteractiveBox(StretchBox *box /**< [in] Overlay-owned ROI box. */);
+    void newInteractiveBox( StretchBox *box /**< [in] Overlay-owned ROI box. */ );
 
     /// Display a transient message in rtimv's normal status box.
-    void roiMessage(const QString &message /**< [in] Short interaction result. */);
+    void roiMessage( const QString &message /**< [in] Short interaction result. */ );
 
     /// Report the current save-state indicator for the camera stream.
     void savingState( rtimv::savingState state /**< [in] current save-state display mode */ );
 
   public slots:
     /// Capture a user mouse edit without writing any camera properties.
-    void roiEditStarted(StretchBox *box /**< [in] Edited ROI box. */);
+    void roiEditStarted( StretchBox *box /**< [in] Edited ROI box. */ );
 
     /// Stage changed coordinates once after the user releases the mouse.
-    void roiEditFinished(StretchBox *box /**< [in] Edited ROI box. */);
+    void roiEditFinished( StretchBox *box /**< [in] Edited ROI box. */ );
 
     /// Clear the cached ROI preview pointer when the view removes it.
     void stretchBoxRemove( StretchBox *sb /**< [in] ROI box being removed from the scene */ );
