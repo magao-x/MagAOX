@@ -8,6 +8,7 @@
 ../libMagAOX/app/dev/tests/telemeter_test
 ../libMagAOX/app/dev/tests/dm_test
 ../libMagAOX/app/dev/tests/dev_test
+../libMagAOX/app/dev/tests/stdCamera_test
 
 ../libMagAOX/file/tests/fileTimes_test
 ../libMagAOX/file/tests/stdFileName_test
@@ -16,6 +17,7 @@
 ../libMagAOX/logger/tests/logFileRaw_test
 ../libMagAOX/logger/tests/logFileRaw_fileTime_error_test
 ../libMagAOX/logger/tests/logMap_test
+../libMagAOX/logger/tests/pduTelemetry_test
 ../libMagAOX/logger/tests/logMeta_test
 ../libMagAOX/logger/tests/logTypes_Accessor_test
 
@@ -23,6 +25,8 @@
 
 ../libMagAOX/tty/tests/ttyIOUtils_test
 
+../apps/virtualPDU/tests/virtualPDU_test
+../apps/acronameUsbHub/tests/acronameUsbHub_test
 ../apps/adcTracker/tests/adcTracker_test
 ../apps/alignLoop/tests/alignLoop_test
 ../apps/cacaoInterface/tests/cacaoInterface_test
@@ -50,15 +54,20 @@
 ../apps/ocam2KCtrl/tests/ocamUtils_test
 ../apps/ocam2KCtrl/tests/ocam2KCtrl_test
 ../apps/ocam2KCtrl/tests/ocam2KCtrl_lifecycle_test
+../apps/ocam2KCtrl/tests/ocam2KCtrl_temperature_test
 ../apps/cred2Ctrl/tests/cred2Ctrl_test
 ../apps/cred2Ctrl/tests/cred2Ctrl_lifecycle_test
 ../apps/cred2Ctrl/tests/cred2Utils_test
 ../apps/orcaCtrl/tests/orcaUtils_test
 ../apps/pi335Ctrl/tests/pi335Ctrl_test
 ../apps/picoMotorCtrl/tests/picoMotorCtrl_test
+../apps/picamCtrl/tests/picamCtrl_test
 ../apps/psfAcq/tests/psfAcq_test
 ../apps/psfFit/tests/psfFit_test
 ../apps/pupilFit/tests/pupilFit_test
+../apps/pvcamCtrl/tests/pvcamPcie_test
+../apps/pvcamCtrl/tests/pvcamCtrl_test
+../apps/pvcamCtrl/tests/pvcamCtrl_hotplug_test
 ../apps/pwfsSlopeCalc/tests/pwfsSlopeCalc_test
 ../apps/refRMS/tests/refRMS_test
 ../apps/rhusbMon/tests/rhusbMon_test
@@ -82,6 +91,7 @@
 ../apps/t2wOffloader/tests/t2wOffloader_test
 ../apps/tcsInterface/tests/tcsInterface_test
 ../apps/timeSeriesSimulator/tests/timeSeriesSimulator_test
+../apps/trippLitePDU/tests/trippLitePDU_sim_test
 ../apps/trippLitePDU/tests/trippLitePDU_test
 ../apps/ttmModulator/tests/ttmModulator_test
 ../apps/usbtempMon/tests/usbtempMon_test
@@ -102,8 +112,11 @@
 ../apps/xt1121DCDU/tests/xt1121DCDU_test
 ../apps/zaberCtrl/tests/zaberCtrl_test
 ../apps/zaberLowLevel/tests/zaberLowLevel_test
+../apps/zaberLowLevel/tests/zaberLowLevel_power_test
 ../apps/zaberLowLevel/tests/zaberStage_test
 ../apps/zaberLowLevel/tests/zaberUtils_test
+../apps/zaberLowLevelBinary/tests/zaberLowLevelBinary_test
+../apps/zaberLowLevelBinary/tests/zaberLowLevelBinary_power_test
 
 ../flatlogs/tests/flatlogcodes_test
 

@@ -34,11 +34,13 @@ BASENAME=$(basename $(TARGET))
 PATHNAME=$(dir $(TARGET))
 OBJNAME = $(PATHNAME)$(notdir $(BASENAME)).o
 TESTNAME = $(PATHNAME)$(notdir $(BASENAME))
-EDT_TESTS = ocam2KCtrl_test ocam2KCtrl_lifecycle_test cred2Ctrl_test cred2Ctrl_lifecycle_test
+EDT_TESTS = ocam2KCtrl_test ocam2KCtrl_lifecycle_test ocam2KCtrl_temperature_test cred2Ctrl_test cred2Ctrl_lifecycle_test
 
 # add extra libraries for special cases
 
-ifeq ($(notdir $(TESTNAME)),cursesINDI_test)
+ifeq ($(notdir $(TESTNAME)),acronameUsbHub_test)
+	CPPFLAGS += -I$(TESTS_DIR)/../libs/BrainStem2
+else ifeq ($(notdir $(TESTNAME)),cursesINDI_test)
 	OTHER_HEADERS += cursesTableGrid.hpp
 	LDLIBS += -lncurses
 else ifeq ($(notdir $(TESTNAME)),logdump_test)
@@ -69,6 +71,12 @@ else ifeq ($(notdir $(TESTNAME)),stdMotionNode_test)
     LDLIBS += -linstGraph
 else ifeq ($(notdir $(TESTNAME)),xigNode_test)
     LDLIBS += -linstGraph
+else ifneq ($(filter pvcam%_test,$(notdir $(TESTNAME))),)
+	# PVCAM SDK stubs; the tests define the library functions.
+	CPPFLAGS += -I$(TESTS_DIR)/pvcam
+else ifeq ($(notdir $(TESTNAME)),picamCtrl_test)
+	# PICam SDK stubs; the tests define the library functions.
+	CPPFLAGS += -I$(TESTS_DIR)/picam
 else ifneq ($(filter $(notdir $(TESTNAME)),$(EDT_TESTS)),)
 	CXXFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CXXFLAGS))
 	CFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CFLAGS))

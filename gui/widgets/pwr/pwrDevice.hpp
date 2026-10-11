@@ -1,3 +1,6 @@
+/** \file pwrDevice.hpp
+ * \brief INDI power-device channel controls and electrical sample history.
+ */
 #ifndef xqt_pwrDevice_hpp
 #define xqt_pwrDevice_hpp
 
@@ -10,7 +13,9 @@
 
 #include "pwrChannel.hpp"
 
-inline double tsDiff( const timespec &ts2, const timespec &ts1 )
+/// Return the elapsed seconds between two timestamps.
+inline double tsDiff( const timespec &ts2, /**< [in] Later timestamp. */
+                      const timespec &ts1 /**< [in] Earlier timestamp. */ )
 {
     double tsd1 = ( (double)ts1.tv_nsec ) / 1e9;
     double tsd2 = ( (double)( ts2.tv_sec - ts1.tv_sec ) ) + ( (double)ts2.tv_nsec ) / 1e9;
@@ -18,37 +23,30 @@ inline double tsDiff( const timespec &ts2, const timespec &ts1 )
     return tsd2 - tsd1;
 }
 
+/// Circular sample storage used by the power GUI's electrical gauges.
 template <typename _T>
 class circularTimeSeries
 {
   public:
+    /// Type of each stored sample.
     typedef _T T;
 
   protected:
     std::vector<T>        m_data;       ///< Holds the time series data
-    std::vector<timespec> m_timeStamps; ///< Holds the timer series timestamps.
+    std::vector<timespec> m_timeStamps; ///< Timestamps corresponding to the stored samples.
 
     size_t m_currSize{ 0 }; ///< This is the current size of the time series, always <= m_data.size().
-    size_t m_currPos{ 0 };  ///< Current position in the circular buffer.
+    size_t m_currPos{ 0 };  ///< Position where the next sample will be written.
 
   public:
-    circularTimeSeries()
-    {
-    }
+    /// Construct an empty sample buffer.
+    circularTimeSeries();
 
-    explicit circularTimeSeries( size_t size )
-    {
-        resize( size );
-    }
+    /// Construct a buffer with the requested capacity.
+    explicit circularTimeSeries( size_t size /**< [in] Number of sample slots to allocate. */ );
 
-    void resize( size_t size )
-    {
-        m_data.resize( size, T( 0 ) );
-        m_timeStamps.resize( size, { 0, 0 } );
-
-        m_currSize = 0;
-        m_currPos  = 0;
-    }
+    /// Resize sample storage and reset the sample count and write position.
+    void resize( size_t size /**< [in] Number of sample slots to allocate. */ );
 
     /// Get the current size of the time-series.
     /** This is not necessarily m_data.size(), if the
@@ -59,10 +57,7 @@ class circularTimeSeries
      *
      * \returns the value of m_currSize, the number of points currently stored in the time-series.
      */
-    size_t size()
-    {
-        return m_currSize;
-    }
+    size_t size();
 
     /// Get the allocated size of the circular buffer.
     /** This is not necessarily the number of points added,
@@ -71,177 +66,253 @@ class circularTimeSeries
      * \returns m_data.size()
      *
      */
-    size_t capacity()
-    {
-        return m_data.size();
-    }
+    size_t capacity();
 
-    void add( const T &val, const timespec &ts )
-    {
-        if( m_data.size() == 0 )
-        {
-            resize( 1 );
-        }
+    /// Append a sample and its timestamp, replacing the oldest slot when full.
+    void add( const T        &val, /**< [in] Value to store. */
+              const timespec &ts /**< [in] Time at which the value was sampled. */ );
 
-        m_data[m_currPos]       = val;
-        m_timeStamps[m_currPos] = ts;
+    /// Read a stored value using the existing circular-buffer indexing.
+    T value( size_t n /**< [in] Position relative to the circular-buffer cursor. */ );
 
-        ++m_currPos;
-
-        // Increase m_currSize up until we reach the full size
-        if( m_currSize < m_data.size() )
-            ++m_currSize;
-
-        // Wrap
-        if( m_currPos >= m_data.size() )
-            m_currPos = 0;
-    }
-
-    /// Get the n-th value in the time series
-    /** value(0) will return the earliest point currently in the time series.
-     * value(currSize()-1) will return the most recently added point.
-     */
-    T value( size_t n )
-    {
-        n += m_currPos;
-
-        if( n >= m_currSize )
-            n = 0;
-
-        return m_data[n];
-    }
-
-    /// Get the n-th timestamp in the time series
-    /** timeStamp(0) will return the earliest point currently in the time series.
-     * timeStamp(currSize()-1) will return the most recently added point.
-     */
-    timespec timeStamp( size_t n )
-    {
-        n += m_currPos;
-
-        if( n >= m_data.size() )
-            n = 0;
-
-        return m_timeStamps[n];
-    }
+    /// Read a stored timestamp using the existing circular-buffer indexing.
+    timespec timeStamp( size_t n /**< [in] Position relative to the circular-buffer cursor. */ );
 
     /// Return the value of the most recent entry in the time series.
-    T lastVal()
-    {
-        size_t n;
-        // handle unsigned-ness
-        if( m_currSize == 0 )
-            return 0;
-        n = m_currSize - 1;
-
-        return value( n );
-    }
+    T lastVal();
 
     /// Return the timestamp of the most recent entry in the time series.
-    T lastTimeStamp()
+    T lastTimeStamp();
+
+    /// Average the recent sample window using the existing buffer indexing.
+    /** Requires at least one stored sample.
+     */
+    T averageLast( double avgTime /**< [in] Width of the averaging window in seconds. */ );
+};
+
+template <typename _T>
+inline circularTimeSeries<_T>::circularTimeSeries()
+{
+}
+
+template <typename _T>
+inline circularTimeSeries<_T>::circularTimeSeries( size_t size )
+{
+    resize( size );
+}
+
+template <typename _T>
+inline void circularTimeSeries<_T>::resize( size_t size )
+{
+    m_data.resize( size, T( 0 ) );
+    m_timeStamps.resize( size, { 0, 0 } );
+
+    m_currSize = 0;
+    m_currPos  = 0;
+}
+
+template <typename _T>
+inline size_t circularTimeSeries<_T>::size()
+{
+    return m_currSize;
+}
+
+template <typename _T>
+inline size_t circularTimeSeries<_T>::capacity()
+{
+    return m_data.size();
+}
+
+template <typename _T>
+inline void circularTimeSeries<_T>::add( const T &val, const timespec &ts )
+{
+    if( m_data.size() == 0 )
     {
-        size_t n;
-        // handle unsigned ness
-        if( m_currPos == 0 )
-            n = m_currSize - 1;
-        else
-            n = m_currPos - 1;
-        return timeStamp( n );
+        resize( 1 );
     }
 
-    T averageLast( double avgTime )
-    {
-        size_t i = m_currSize - 1;
+    m_data[m_currPos]       = val;
+    m_timeStamps[m_currPos] = ts;
 
-        double   avg = value( i );
-        timespec ts0 = timeStamp( i );
-        size_t   n   = 1;
+    ++m_currPos;
+
+    // Increase m_currSize up until we reach the full size
+    if( m_currSize < m_data.size() )
+        ++m_currSize;
+
+    // Wrap
+    if( m_currPos >= m_data.size() )
+        m_currPos = 0;
+}
+
+template <typename _T>
+inline _T circularTimeSeries<_T>::value( size_t n )
+{
+    n += m_currPos;
+
+    if( n >= m_currSize )
+        n = 0;
+
+    return m_data[n];
+}
+
+template <typename _T>
+inline timespec circularTimeSeries<_T>::timeStamp( size_t n )
+{
+    n += m_currPos;
+
+    if( n >= m_data.size() )
+        n = 0;
+
+    return m_timeStamps[n];
+}
+
+template <typename _T>
+inline _T circularTimeSeries<_T>::lastVal()
+{
+    size_t n;
+    // handle unsigned-ness
+    if( m_currSize == 0 )
+        return 0;
+    n = m_currSize - 1;
+
+    return value( n );
+}
+
+template <typename _T>
+inline _T circularTimeSeries<_T>::lastTimeStamp()
+{
+    size_t n;
+    // handle unsigned ness
+    if( m_currPos == 0 )
+        n = m_currSize - 1;
+    else
+        n = m_currPos - 1;
+    return timeStamp( n );
+}
+
+template <typename _T>
+inline _T circularTimeSeries<_T>::averageLast( double avgTime )
+{
+    size_t i = m_currSize - 1;
+
+    double   avg = value( i );
+    timespec ts0 = timeStamp( i );
+    size_t   n   = 1;
+
+    if( i == 0 )
+    {
+        return avg;
+    }
+
+    --i;
+    double dt = 0;
+    while( dt <= avgTime )
+    {
+        dt = tsDiff( ts0, timeStamp( i ) );
+        if( dt < 0 )
+            break;
+
+        avg += value( i );
+        ++n;
 
         if( i == 0 )
-        {
-            return avg;
-        }
-
+            break;
         --i;
-        double dt = 0;
-        while( dt <= avgTime )
-        {
-            dt = tsDiff( ts0, timeStamp( i ) );
-            if( dt < 0 )
-                break;
-
-            avg += value( i );
-            ++n;
-
-            if( i == 0 )
-                break;
-            --i;
-        }
-
-        return avg / n;
     }
-};
+
+    return avg / n;
+}
 
 namespace xqt
 {
 
+/// Power device whose channels and electrical measurements are updated from INDI properties.
 struct pwrDevice : public QWidget
 {
     Q_OBJECT
 
   protected:
-    std::string m_deviceName;
+    std::string m_deviceName; ///< INDI device whose properties update this control group.
 
-    QwtTextLabel *m_deviceNameLabel{ nullptr };
+    QwtTextLabel *m_deviceNameLabel{ nullptr }; ///< Label placed in the containing power widget's layout.
 
-    size_t m_numChannels{ 0 };
+    size_t m_numChannels{ 0 }; ///< Number of configured channel widgets.
 
-    pwrChannel **m_channels{ nullptr };
+    pwrChannel **m_channels{
+        nullptr }; ///< Owned pointer array; channel widgets are deleted when replaced or destroyed.
 
-    circularTimeSeries<double> m_current;
-    circularTimeSeries<double> m_voltage;
-    circularTimeSeries<double> m_frequency;
+    circularTimeSeries<double> m_current; ///< Current samples for the device load gauge.
+
+    circularTimeSeries<double> m_voltage; ///< Voltage samples averaged for the device load gauge.
+
+    circularTimeSeries<double> m_frequency; ///< Frequency samples averaged for the device load gauge.
 
   public:
-    pwrDevice( QWidget *parent = nullptr, Qt::WindowFlags flags = Qt::WindowFlags() );
+    /// Construct a device label and empty electrical sample histories.
+    pwrDevice( QWidget        *parent = nullptr, /**< [in] Parent owning this device widget. */
+               Qt::WindowFlags flags  = Qt::WindowFlags() /**< [in] Window flags passed to QWidget. */ );
 
+    /// Release channel storage and schedule its widgets for deletion.
     virtual ~pwrDevice();
 
+    /// Get the subscribed INDI device name.
     std::string deviceName() const;
 
-    void deviceName( const std::string &dname );
+    /// Set the subscribed INDI device name and its displayed label.
+    void deviceName( const std::string &dname /**< [in] INDI device name. */ );
 
-    void setChannels( const std::vector<std::string> &channelNames );
+    /// Replace the channel widgets and connect their command signals.
+    void setChannels( const std::vector<std::string> &channelNames /**< [in] Channel property names to display. */ );
 
+    /// Get the number of configured channels.
     size_t numChannels();
 
-    pwrChannel *channel( size_t channelNo );
+    /// Get a channel widget, or nullptr if the index is outside the configured range.
+    pwrChannel *channel( size_t channelNo /**< [in] Zero-based channel index. */ );
 
+    /// Get the device label placed in the containing power widget's layout.
     QwtTextLabel *deviceNameLabel();
 
+    /// Clear electrical histories and disable every channel on disconnection.
     void onDisconnect();
 
-    void handleDelProperty( const pcf::IndiProperty &ipRecv );
+    /// Clear measurements or disable channels whose properties have been deleted.
+    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] Deleted INDI property. */ );
 
-    void handleSetProperty( const pcf::IndiProperty &ipRecv );
+    /// Apply channel metadata, observed states, targets, or electrical measurements.
+    /** Unk and unrecognized channel state strings disable their slider; target-only updates preserve availability.
+     */
+    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Received INDI property update. */ );
 
+    /// Get the current sample, or -1 if no measurement is available.
     double current();
 
+    /// Get the ten-second voltage average, or -1 if no measurement is available.
     double voltage();
 
+    /// Get the ten-second frequency average, or -1 if no measurement is available.
     double frequency();
 
   public slots:
 
-    void switchOn( const std::string &channelName );
-    void switchOff( const std::string &channelName );
+    /// Emit an On command using the selected channel's Text or Switch protocol.
+    void switchOn( const std::string &channelName /**< [in] Channel property to command. */ );
+
+    /// Emit an Off command using the selected channel's Text or Switch protocol.
+    void switchOff( const std::string &channelName /**< [in] Channel property to command. */ );
 
   signals:
-    void chChange( pcf::IndiProperty &ip );
+    /// Pass a constructed channel command to the containing power widget.
+    void chChange( pcf::IndiProperty &ip /**< [in] Outgoing INDI property. */ );
+
+    /// Notify that displayed electrical measurements changed.
     void loadChanged();
 };
 
-inline bool compPwrDevice( const pwrDevice *one, const pwrDevice *two )
+/// Order power devices by their INDI names.
+inline bool compPwrDevice( const pwrDevice *one, /**< [in] First device to compare. */
+                           const pwrDevice *two /**< [in] Second device to compare. */ )
 {
     return ( one->deviceName() < two->deviceName() );
 }
@@ -370,7 +441,8 @@ void pwrDevice::handleDelProperty( const pcf::IndiProperty &ipRecv )
         return;
     }
 
-    if( ipRecv.getName() == "channelOutlets" || ipRecv.getName() == "channelOnDelays" || ipRecv.getName() == "channelOffDelays" )
+    if( ipRecv.getName() == "channelOutlets" || ipRecv.getName() == "channelOnDelays" ||
+        ipRecv.getName() == "channelOffDelays" )
     {
         for( size_t i = 0; i < m_numChannels; ++i )
         {
@@ -467,7 +539,7 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty &ipRecv )
             }
             else
             {
-                if( ipRecv.find( "target" ))
+                if( ipRecv.find( "target" ) )
                 {
                     std::string target = ipRecv["target"].get();
 
@@ -485,7 +557,7 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty &ipRecv )
                     }
                 }
 
-                if( ipRecv.find( "state" ))
+                if( ipRecv.find( "state" ) )
                 {
                     std::string state = ipRecv["state"].get();
 
@@ -500,6 +572,10 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty &ipRecv )
                     else if( state == "Off" )
                     {
                         m_channels[i]->switchState( pwrChState::Off );
+                    }
+                    else
+                    {
+                        m_channels[i]->switchState( pwrChState::Unk );
                     }
                 }
             }

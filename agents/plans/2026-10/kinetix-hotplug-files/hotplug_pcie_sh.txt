@@ -1,0 +1,10 @@
+Detected 1 supported card(s)
+  0000:41:00.0 - upstream port (Dolphin PXH832 card [10b5:8733])
+    0000:42:09.0 - downstream port
+      0000:44:00.0 - camera rev. 8 (probably pvcamPCIE_0)
+    0000:42:08.0 - downstream port
+      0000:43:00.0 - camera rev. 8 (probably pvcamPCIE_1)
+
+Found 2 active camera(s)
+
+Please run as root to proceed with PCI bus rescan
