@@ -423,3 +423,8 @@ Current/reference values and target centers are stored at the camera's existing 
 - The user requested `applying ROI` as soon as application begins. cameraStatus emits that notice immediately after successfully submitting Set; failed submission retains its error message, and confirmed completion still reports `ROI applied`.
 - roiGUI now labels the checkbox `Relative to current ROI`; its tooltip uses the same terminology. Coordinate behavior is unchanged.
 - cameraStatus and roiGUI build locally. The existing offline plugin suite passes 218 assertions in 7 cases and the widget suite passes 30 assertions in 2 cases. Deploy the updated cameraStatus plugin and roiGUI; no companion rtimv or camera application changes are needed for this refinement. No installation or instrument operations were performed by the agent.
+
+### Hardware validation reported by the user (2026-10-11)
+
+- After the interaction, status-text, and terminology refinements, the user tested with both `baslerCtrl` and `picamCtrl` on actual hardware and reported that the workflow is working.
+- This user-performed hardware validation supplements the offline tests and local builds recorded above. No further issues were reported.
