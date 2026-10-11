@@ -18,13 +18,6 @@
     <normaloff>:/icons/crop.png</normaloff>:/icons/crop.png</iconset>
   </property>
   <layout class="QGridLayout" name="gridLayout">
-   <item row="1" column="0" colspan="3">
-    <widget class="QCheckBox" name="check_relative">
-     <property name="text"><string>Relative to current image</string></property>
-     <property name="focusPolicy"><enum>Qt::NoFocus</enum></property>
-     <property name="checked"><bool>true</bool></property>
-    </widget>
-   </item>
    <item row="0" column="2">
     <layout class="QVBoxLayout" name="vl_buttons">
      <item>
@@ -501,6 +494,19 @@
         </layout>
        </item>
       </layout>
+     </item>
+     <item>
+      <widget class="QCheckBox" name="check_relative">
+       <property name="text">
+        <string>Relative to current image</string>
+       </property>
+       <property name="focusPolicy">
+        <enum>Qt::NoFocus</enum>
+       </property>
+       <property name="checked">
+        <bool>true</bool>
+       </property>
+      </widget>
      </item>
      <item>
       <spacer name="verticalSpacer_5">

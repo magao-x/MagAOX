@@ -595,8 +595,8 @@ void cameraStatus::keyPressEvent( QKeyEvent *ke )
         beginROI();
     else if( ke->key() == Qt::Key_R && ke->modifiers() == Qt::AltModifier )
         applyROI();
-    else if( ke->key() == Qt::Key_Escape && ke->modifiers() == Qt::NoModifier && m_explicitROI )
-        escapeROI();
+    else if( ke->key() == Qt::Key_Delete && ke->modifiers() == Qt::NoModifier && m_explicitROI )
+        cancelROI();
 }
 
 bool cameraStatus::overlayEnabled()
@@ -619,7 +619,7 @@ void cameraStatus::disableOverlay()
         m_roa.m_graphicsView->statusTextText( n, "" );
     }
 
-    escapeROI();
+    leaveROI();
     if( m_roiBox )
         m_roiBox->setVisible( false );
     m_enabled = false;
@@ -638,8 +638,8 @@ std::vector<std::string> cameraStatus::info()
     std::vector<std::string> vinfo;
     vinfo.push_back( "Camera Status overlay: " + m_deviceName );
 
-    vinfo.push_back( "Shift+R: edit ROI (full/default starts a new box; custom preserves size)" );
-    vinfo.push_back( "Alt+R: check/apply; adjusted ROI needs another Alt+R" );
-    vinfo.push_back( "Escape: leave ROI edit; staged targets are retained" );
+    vinfo.push_back( "   Shift+R: edit ROI" );
+    vinfo.push_back( "   Alt+R: check & apply ROI" );
+    vinfo.push_back( "   del: cancel ROI" );
     return vinfo;
 }

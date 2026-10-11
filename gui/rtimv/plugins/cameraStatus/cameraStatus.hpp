@@ -67,6 +67,7 @@ class cameraStatus : public rtimvOverlayInterface
         awaitingTarget,
         checking,
         adjusted,
+        cancelling,
         applying
     };
 
@@ -98,6 +99,10 @@ class cameraStatus : public rtimvOverlayInterface
     QRectF m_dragRect;
     /// Connection generation and latest Check sequence captured for an action.
     quint64 m_roiGeneration{ 0 }, m_checkSequence{ 0 };
+    /// State revision before reset; an older snapshot cannot acknowledge cancellation.
+    quint64 m_cancelRevision{ 0 };
+    /// A pending Check may finish without changing an already-current target.
+    bool m_cancelCheckPending{ false };
     /// Bounds acknowledgement waits without blocking the GUI.
     QElapsedTimer m_roiWait;
     /// Local timeout in milliseconds; a timeout never causes replay.
@@ -118,6 +123,9 @@ class cameraStatus : public rtimvOverlayInterface
     /// Redraw backend geometry without generating an outgoing command.
     void drawROI();
 
+    /// Select the ROI and display its center cross and geometry readout.
+    void selectROI();
+
     /// Reveal an existing edit, preserve a custom ROI, or stage a new preset subframe.
     void beginROI();
 
@@ -135,8 +143,11 @@ class cameraStatus : public rtimvOverlayInterface
     /// Revoke pending authorization and restore the backend target for review.
     void failROI( const QString &message /**< [in] Reason displayed in the normal status box. */ );
 
-    /// Cancel unsent edits and confirmation; an already submitted Set remains tracked.
-    void escapeROI();
+    /// Hide the edit and revoke unsent authorization without changing camera targets.
+    void leaveROI();
+
+    /// Hide the ROI and reset all six targets to current; an already submitted Set remains tracked.
+    void cancelROI();
 
     /// Scratch buffer used when copying dictionary blobs as strings.
     char m_blob[512];

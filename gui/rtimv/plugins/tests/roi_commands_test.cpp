@@ -24,6 +24,9 @@ class Host : public QObject
     QGraphicsScene     m_scene;          ///< Owns graphics items in the test.
     QSize              m_size{ 64, 64 }; ///< Currently displayed image size.
     QString            m_message;        ///< Last normal status-box message.
+    QRectF             m_readoutRect;    ///< Geometry delivered to the host's selected-box readout.
+    int                m_selections{ 0 }; ///< Number of readout refresh notifications.
+    int                m_deselections{ 0 }; ///< Number of readout hide notifications.
     rtimvCommandRouter m_router{ this }; ///< Same router used by the production main window.
   public slots:
     /// Return the displayed dimensions.
@@ -46,6 +49,12 @@ QRectF Host::newUserBoxRect() const
 void Host::addInteractiveBox( StretchBox *box )
 {
     m_scene.addItem( box );
+    connect( box, &StretchBox::selected, this, [this]( StretchBox *selected )
+    {
+        m_readoutRect = selected->mapRectToScene( selected->rect() );
+        ++m_selections;
+    } );
+    connect( box, &StretchBox::deSelected, this, [this]( StretchBox * ) { ++m_deselections; } );
 }
 void Host::showStatusMessage( const QString &message )
 {
@@ -115,7 +124,7 @@ class Overlay : public cameraStatus
     explicit Overlay( Host &host /**< [in] Offline GUI host. */ );
     using cameraStatus::applyROI;
     using cameraStatus::beginROI;
-    using cameraStatus::escapeROI;
+    using cameraStatus::cancelROI;
     using cameraStatus::m_explicitROI;
     using cameraStatus::m_roiBox;
     using cameraStatus::m_roiPhase;
@@ -156,7 +165,8 @@ struct Fixture
     /// Complete one validator invocation, optionally adjusting dimensions or binning.
     void checked( int  width = 0, /**< [in] Optional validator-adjusted width. */
                   int  bin   = 0, /**< [in] Optional validator-adjusted horizontal binning. */
-                  bool fail  = false /**< [in] Return an Alert completion. */ );
+                  bool fail  = false, /**< [in] Return an Alert completion. */
+                  bool publishState = true /**< [in] Publish state even when the geometry did not change. */ );
     /// Count request vectors captured by the provider.
     int count( const std::string &property /**< [in] Property name. */ ) const;
 };
@@ -202,18 +212,23 @@ void Fixture::echo()
             m_target.w = v;
         if( p.getName() == "roi_region_h" )
             m_target.h = v;
+        if( p.getName() == "roi_region_bin_x" )
+            m_target.bin_x = v;
+        if( p.getName() == "roi_region_bin_y" )
+            m_target.bin_y = v;
     }
     state();
     m_overlay.updateROI();
 }
-void Fixture::checked( int width, int bin, bool fail )
+void Fixture::checked( int width, int bin, bool fail, bool publishState )
 {
     auto requested = m_target;
     if( width )
         m_target.w = width;
     if( bin )
         m_target.bin_x = bin;
-    state();
+    if( publishState )
+        state();
     std::vector<std::string> names;
     std::vector<double>      values;
     for( const auto &[prefix, roi] : { std::make_pair( "requested_", requested ),
@@ -339,10 +354,13 @@ TEST_CASE( "ROI edit entry preserves custom regions and stages preset boxes", "[
     f.echo();
     CHECK( f.m_target.x == 513.5 );
     CHECK( f.m_target.y == 514.5 );
-    f.m_overlay.escapeROI();
-    CHECK( f.m_overlay.m_roiBox->isVisible() ); // already staged target retained
+    f.m_overlay.cancelROI();
+    CHECK_FALSE( f.m_overlay.m_roiBox->isVisible() );
+    f.echo();
+    CHECK( MagAOX::roi::same( f.m_target, f.m_current ) );
+    CHECK_FALSE( f.m_overlay.m_roiBox->isVisible() );
     f.m_overlay.beginROI();
-    CHECK( f.m_provider.m_sent.size() == 2 );
+    CHECK( f.m_provider.m_sent.size() == 8 );
 
     Fixture preset;
     preset.m_preset = true;
@@ -397,7 +415,7 @@ TEST_CASE( "ROI apply reviews each adjustment and performs one Set", "[rtimvROI]
     REQUIRE( f.count( "roi_set" ) == 1 );
     f.m_overlay.applyROI();
     CHECK( f.count( "roi_set" ) == 1 );
-    f.m_overlay.escapeROI();
+    f.m_overlay.cancelROI();
     CHECK( f.m_host.m_message == "ROI Set already submitted" );
     f.m_current     = f.m_target;
     f.m_host.m_size = QSize( 24, 64 );
@@ -408,14 +426,14 @@ TEST_CASE( "ROI apply reviews each adjustment and performs one Set", "[rtimvROI]
     CHECK_FALSE( f.m_overlay.m_roiBox->isVisible() );
 }
 
-/** \brief Echoes, failures, changed references, and Escape cannot authorize stale or implicit binning changes.
+/** \brief Echoes, failures, changed references, and Delete cannot authorize stale or implicit binning changes.
  * \ingroup rtimvROI_unit_test
  */
 TEST_CASE( "ROI cancellation and stale validation do not apply", "[rtimvROI]" )
 {
     // clang-format off
 #ifdef RTIMV_ROI_TEST_DOXYGEN_REF
-    cameraStatus::escapeROI; cameraStatus::failROI; cameraStatus::updateROI;
+    cameraStatus::cancelROI; cameraStatus::failROI; cameraStatus::updateROI;
 #endif
     // clang-format on
     SECTION( "already applied is a no-op" )
@@ -438,7 +456,7 @@ TEST_CASE( "ROI cancellation and stale validation do not apply", "[rtimvROI]" )
         CHECK( f.count( "roi_region_check" ) == 0 );
         f.echo();
         CHECK( f.count( "roi_region_check" ) == 1 );
-        f.m_overlay.escapeROI();
+        f.m_overlay.cancelROI();
         f.checked();
         f.m_overlay.updateROI();
         CHECK( f.count( "roi_set" ) == 0 );
@@ -518,17 +536,215 @@ TEST_CASE( "ROI cancellation and stale validation do not apply", "[rtimvROI]" )
         CHECK( f.count( "roi_set" ) == 0 );
         CHECK_FALSE( f.m_overlay.m_roiReady );
     }
-    SECTION( "Escape discards a local drag" )
+    SECTION( "Delete discards a local drag" )
     {
         Fixture f;
         f.m_overlay.beginROI();
         f.m_overlay.roiEditStarted( f.m_overlay.m_roiBox );
         f.m_overlay.m_roiBox->setPos( 10, 10 );
-        f.m_overlay.escapeROI();
+        f.m_overlay.cancelROI();
         f.m_overlay.roiEditFinished( f.m_overlay.m_roiBox );
         CHECK( f.m_provider.m_sent.empty() );
         CHECK_FALSE( f.m_overlay.m_roiBox->isVisible() );
     }
+}
+
+/** \brief Targets staged by roiGUI enter the same selected, editable state without another Shift+R.
+ * \ingroup rtimvROI_unit_test
+ */
+TEST_CASE( "External ROI targets support the same readout and keyboard editing", "[rtimvROI]" )
+{
+    // clang-format off
+#ifdef RTIMV_ROI_TEST_DOXYGEN_REF
+    cameraStatus::updateROI; cameraStatus::drawROI; cameraStatus::selectROI;
+    cameraStatus::keyPressEvent; cameraStatus::cancelROI;
+#endif
+    // clang-format on
+    Fixture f;
+    f.m_target.x += 3;
+    f.m_target.w = 32;
+    f.m_target.bin_x = 2;
+    f.state();
+    f.m_overlay.updateROI();
+    REQUIRE( f.m_overlay.m_roiBox );
+    auto *box = f.m_overlay.m_roiBox.data();
+    CHECK( box->isVisible() );
+    CHECK( box->isSelected() );
+    CHECK( box->stretchable() );
+    CHECK( box->penColor() == QColor( Qt::magenta ) );
+    CHECK( f.m_overlay.m_explicitROI );
+    CHECK( f.m_host.m_selections == 1 );
+    CHECK( f.m_host.m_readoutRect == box->mapRectToScene( box->rect() ) );
+    CHECK( f.m_provider.m_sent.empty() );
+    f.m_overlay.updateROI();
+    CHECK( f.m_host.m_selections == 1 );
+
+    SECTION( "further GUI edits refresh the same box and its details" )
+    {
+        f.m_target.y -= 2;
+        f.m_target.h = 24;
+        f.state();
+        f.m_overlay.updateROI();
+        CHECK( f.m_overlay.m_roiBox == box );
+        CHECK( box->stretchable() );
+        CHECK( f.m_host.m_selections == 2 );
+        CHECK( f.m_host.m_readoutRect == box->mapRectToScene( box->rect() ) );
+        CHECK( f.m_provider.m_sent.empty() );
+        f.m_target = f.m_current; // roiGUI Reset removes the preview as before.
+        f.state();
+        f.m_overlay.updateROI();
+        CHECK_FALSE( box->isVisible() );
+        auto hidden = f.m_host.m_deselections;
+        f.m_overlay.updateROI();
+        CHECK( f.m_host.m_deselections == hidden ); // Do not clear another user shape's readout.
+    }
+    SECTION( "mouse edits stage centers and Delete resets all six fields" )
+    {
+        f.m_overlay.roiEditStarted( box );
+        box->setPos( 2, -3 );
+        f.m_overlay.roiEditFinished( box );
+        REQUIRE( f.m_provider.m_sent.size() == 2 );
+        f.echo();
+        QKeyEvent del( QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier );
+        f.m_overlay.keyPressEvent( &del );
+        REQUIRE( f.m_provider.m_sent.size() == 8 );
+        CHECK_FALSE( box->isVisible() );
+        CHECK_FALSE( box->isSelected() );
+        CHECK_FALSE( box->stretchable() );
+        CHECK( f.count( "roi_region_bin_x" ) == 1 );
+        CHECK( f.count( "roi_region_bin_y" ) == 1 );
+        CHECK( f.count( "roi_set" ) == 0 );
+        f.echo();
+        CHECK( MagAOX::roi::same( f.m_target, f.m_current ) );
+        CHECK_FALSE( box->isVisible() );
+        CHECK( f.m_host.m_message == "ROI cancelled" );
+    }
+    SECTION( "Alt+R checks and applies without explicit edit entry" )
+    {
+        QKeyEvent apply( QEvent::KeyPress, Qt::Key_R, Qt::AltModifier, "r" );
+        f.m_overlay.keyPressEvent( &apply );
+        CHECK( f.count( "roi_region_check" ) == 1 );
+        CHECK( f.count( "roi_set" ) == 0 );
+        f.checked();
+        f.m_overlay.updateROI();
+        CHECK( f.count( "roi_set" ) == 1 );
+    }
+}
+
+/** \brief Delete revokes pending checks and resets targets without reviving intermediate echoes or replaying writes.
+ * \ingroup rtimvROI_unit_test
+ */
+TEST_CASE( "ROI Delete cancellation waits for the reset and never submits Set", "[rtimvROI]" )
+{
+    // clang-format off
+#ifdef RTIMV_ROI_TEST_DOXYGEN_REF
+    cameraStatus::cancelROI; cameraStatus::updateROI; cameraStatus::keyPressEvent;
+#endif
+    // clang-format on
+    Fixture f;
+    QKeyEvent del( QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier );
+    SECTION( "earlier target echoes cannot resurrect a cancelled box" )
+    {
+        f.m_preset = true;
+        f.state();
+        f.m_overlay.beginROI();
+        f.m_overlay.applyROI(); // Queued only until the target echo.
+        f.m_overlay.keyPressEvent( &del );
+        CHECK( f.m_overlay.m_roiPhase == Overlay::roiPhase::cancelling );
+        f.m_overlay.updateROI(); // The pre-command snapshot already matched current.
+        CHECK( f.m_overlay.m_roiPhase == Overlay::roiPhase::cancelling );
+        CHECK_FALSE( f.m_overlay.m_roiBox->isVisible() );
+        f.m_target.w = 16; // Partial echo of the earlier preset box.
+        f.state();
+        f.m_overlay.updateROI();
+        CHECK_FALSE( f.m_overlay.m_roiBox->isVisible() );
+        f.m_overlay.applyROI();
+        CHECK( f.count( "roi_region_check" ) == 0 );
+        f.echo();
+        CHECK( MagAOX::roi::same( f.m_target, f.m_current ) );
+        CHECK_FALSE( f.m_overlay.m_roiBox->isVisible() );
+        CHECK( f.m_overlay.m_roiPhase == Overlay::roiPhase::idle );
+        f.m_target.w = 20; // A subsequent real GUI edit still opens normally.
+        f.state();
+        f.m_overlay.updateROI();
+        CHECK( f.m_overlay.m_roiBox->stretchable() );
+    }
+    SECTION( "an already received Check completion cannot race Delete into Set" )
+    {
+        f.m_target.w = 32;
+        f.state();
+        f.m_overlay.updateROI();
+        f.m_overlay.applyROI();
+        f.checked(); // Queued completion has not been consumed by updateROI.
+        f.m_overlay.keyPressEvent( &del );
+        CHECK( f.count( "roi_set" ) == 0 );
+        f.echo();
+        CHECK_FALSE( f.m_overlay.m_roiBox->isVisible() );
+    }
+    SECTION( "unchanged Check completion acknowledges a reset without a geometry echo" )
+    {
+        f.m_overlay.beginROI();
+        f.m_overlay.applyROI();
+        f.m_overlay.keyPressEvent( &del );
+        f.m_overlay.updateROI();
+        CHECK( f.m_overlay.m_roiPhase == Overlay::roiPhase::cancelling );
+        f.checked( 0, 0, false, false );
+        f.m_overlay.updateROI();
+        CHECK( f.m_overlay.m_roiPhase == Overlay::roiPhase::idle );
+        CHECK_FALSE( f.m_overlay.m_roiBox->isVisible() );
+    }
+    SECTION( "a rejected reset restores the backend target for review without replay" )
+    {
+        f.m_target.w = 32;
+        f.state();
+        f.m_overlay.updateROI();
+        f.m_provider.receive( numbers( "roi_region_bin_x", { "current", "target" }, { 1, 1 }, false ) );
+        f.m_overlay.keyPressEvent( &del );
+        CHECK( f.m_provider.m_sent.empty() );
+        f.m_overlay.updateROI();
+        CHECK( f.m_overlay.m_roiBox->isVisible() );
+        CHECK( f.m_overlay.m_roiBox->rect().width() == 32 );
+        CHECK( f.m_provider.m_sent.empty() );
+    }
+    SECTION( "transport failure invalidates the box without replay" )
+    {
+        f.m_target.w = 32;
+        f.state();
+        f.m_overlay.updateROI();
+        f.m_provider.m_throwAt = 0;
+        f.m_overlay.keyPressEvent( &del );
+        f.m_overlay.updateROI();
+        CHECK( f.m_provider.m_sent.empty() );
+        CHECK_FALSE( f.m_overlay.m_roiReady );
+        CHECK_FALSE( f.m_overlay.m_roiBox->isVisible() );
+    }
+    SECTION( "missing reset echoes time out without resending commands" )
+    {
+        f.m_target.w = 32;
+        f.state();
+        f.m_overlay.updateROI();
+        f.m_overlay.keyPressEvent( &del );
+        REQUIRE( f.m_provider.m_sent.size() == 6 );
+        f.m_overlay.m_roiTimeout = 0;
+        QThread::msleep( 2 );
+        f.m_overlay.updateROI();
+        CHECK( f.m_host.m_message == "ROI reset timed out; review target" );
+        CHECK( f.m_provider.m_sent.size() == 6 );
+        CHECK( f.m_overlay.m_roiBox->isVisible() );
+    }
+    SECTION( "Escape no longer cancels and held Delete does not reset" )
+    {
+        f.m_target.w = 32;
+        f.state();
+        f.m_overlay.updateROI();
+        QKeyEvent escape( QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier );
+        f.m_overlay.keyPressEvent( &escape );
+        QKeyEvent repeat( QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier, "", true );
+        f.m_overlay.keyPressEvent( &repeat );
+        CHECK( f.m_overlay.m_roiBox->isVisible() );
+        CHECK( f.m_provider.m_sent.empty() );
+    }
+    CHECK( f.count( "roi_set" ) == 0 );
 }
 
 /** \brief Native binning policies map to image pixel edges, including center zero and unequal pending bins.

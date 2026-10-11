@@ -137,8 +137,9 @@ bool cameraStatus::updateROI()
     const bool newTarget = !sameROI( m_targetROI, target );
     if( newReference && m_roiPhase != roiPhase::idle )
         failROI( "ROI reference changed" );
-    else if( newTarget && ( m_roiPhase == roiPhase::editing || m_roiPhase == roiPhase::dragging ||
-                            m_roiPhase == roiPhase::adjusted ) )
+    else if( newTarget && m_roiPhase == roiPhase::editing )
+        leaveROI(); // Ordinary roiGUI edits replace the preview without an error notice.
+    else if( newTarget && ( m_roiPhase == roiPhase::dragging || m_roiPhase == roiPhase::adjusted ) )
         failROI( "ROI target changed externally" );
     m_roiGeneration = state.m_generation;
     m_roiUnits      = policy;
@@ -147,6 +148,21 @@ bool cameraStatus::updateROI()
     m_newBoxPreset =
         state.m_elements.value( "preset_known" ).toBool() &&
         ( state.m_elements.value( "is_full" ).toBool() || state.m_elements.value( "is_default" ).toBool() );
+
+    if( m_roiPhase == roiPhase::cancelling )
+    {
+        const bool checkFinished = m_cancelCheckPending && completed.m_complete &&
+                                   completed.m_elements.value( "sequence" ).toULongLong() > m_checkSequence;
+        if( ( state.m_revision > m_cancelRevision || checkFinished ) && sameROI( target, m_desiredROI ) )
+        {
+            m_roiPhase = roiPhase::idle;
+            emit roiMessage( "ROI cancelled" );
+        }
+        else if( m_roiWait.hasExpired( m_roiTimeout ) )
+            failROI( "ROI reset timed out; review target" );
+        else
+            return true; // Hide intermediate echoes, including edits sent before Delete.
+    }
 
     if( m_roiPhase == roiPhase::awaitingTarget )
     {
@@ -211,8 +227,16 @@ bool cameraStatus::updateROI()
         else if( m_roiWait.hasExpired( m_roiTimeout ) )
             failROI( "ROI Check timed out" );
     }
+    const bool enter = m_roiPhase == roiPhase::idle && !sameROI( current, target );
+    if( enter )
+    {
+        m_roiPhase = roiPhase::editing;
+        m_explicitROI = true;
+    }
     if( m_roiPhase != roiPhase::dragging )
         drawROI();
+    if( enter )
+        selectROI();
     return true;
 }
 
@@ -251,16 +275,33 @@ QRectF cameraStatus::roiRect() const
 void cameraStatus::drawROI()
 {
     makeROIBox();
+    const QRectF rect = roiRect();
+    const bool changed = m_roiBox->pos() != QPointF( 0, 0 ) || m_roiBox->rect() != rect;
+    const bool wasVisible = m_roiBox->isVisible();
     QSignalBlocker blocker( m_roiBox );
     m_roiBox->setPos( 0, 0 );
-    m_roiBox->setRect( roiRect() );
-    m_roiBox->setVisible( m_explicitROI || !sameROI( m_currentROI, m_targetROI ) );
+    m_roiBox->setRect( rect );
+    m_roiBox->setVisible( m_roiPhase != roiPhase::cancelling &&
+                         ( m_explicitROI || !sameROI( m_currentROI, m_targetROI ) ) );
     m_roiBox->setStretchable( m_roiReady && ( m_roiPhase == roiPhase::editing || m_roiPhase == roiPhase::adjusted ) );
-    if( !m_roiBox->isVisible() )
+    blocker.unblock();
+    if( !m_roiBox->isVisible() && wasVisible )
     {
-        blocker.unblock();
+        m_roiBox->setSelected( false );
         m_roiBox->emitDeSelected();
     }
+    else if( m_roiBox->isVisible() && changed && m_roiBox->isSelected() )
+        m_roiBox->emitSelected();
+}
+
+void cameraStatus::selectROI()
+{
+    if( !m_roiBox )
+        return;
+    m_roiBox->setVisible( true );
+    m_roiBox->setSelected( true );
+    m_roiBox->setFocus();
+    m_roiBox->emitSelected();
 }
 
 void cameraStatus::beginROI()
@@ -273,11 +314,7 @@ void cameraStatus::beginROI()
     }
     if( m_explicitROI )
     {
-        if( m_roiBox )
-        {
-            m_roiBox->setVisible( true );
-            m_roiBox->emitSelected();
-        }
+        selectROI();
         return;
     }
     if( m_roiPhase != roiPhase::idle )
@@ -297,10 +334,7 @@ void cameraStatus::beginROI()
         }
         stageROI( rect, m_targetROI, true );
     }
-    m_roiBox->setVisible( true );
-    m_roiBox->setSelected( true );
-    m_roiBox->setFocus();
-    m_roiBox->emitSelected();
+    selectROI();
 }
 
 void cameraStatus::roiEditStarted( StretchBox *box )
@@ -385,7 +419,7 @@ bool cameraStatus::stageROI( const QRectF &rect, const roiT &before, bool resize
 void cameraStatus::applyROI()
 {
     // Do not poll Check completion here: a key arriving before adjusted geometry is drawn cannot confirm it.
-    if( m_roiPhase == roiPhase::checking || m_roiPhase == roiPhase::applying )
+    if( m_roiPhase == roiPhase::checking || m_roiPhase == roiPhase::applying || m_roiPhase == roiPhase::cancelling )
         return;
     if( m_roiPhase == roiPhase::awaitingTarget )
     {
@@ -441,6 +475,7 @@ void cameraStatus::failROI( const QString &message )
     if( m_roiBox )
     {
         m_roiBox->cancelEdit();
+        m_roiBox->setSelected( false );
         m_roiBox->emitDeSelected();
         m_roiBox->setStretchable( false );
     }
@@ -450,14 +485,15 @@ void cameraStatus::failROI( const QString &message )
     emit roiMessage( message );
 }
 
-void cameraStatus::escapeROI()
+void cameraStatus::leaveROI()
 {
-    if( !m_explicitROI )
-        return;
     if( m_roiBox )
     {
         m_roiBox->cancelEdit();
+        m_roiBox->setSelected( false );
         m_roiBox->emitDeSelected();
+        m_roiBox->setStretchable( false );
+        m_roiBox->setVisible( false );
     }
     m_explicitROI    = false;
     m_applyAfterEcho = false;
@@ -467,6 +503,48 @@ void cameraStatus::escapeROI()
         return;
     }
     m_roiPhase = roiPhase::idle;
-    if( m_roiReady )
-        drawROI();
+}
+
+void cameraStatus::cancelROI()
+{
+    if( !m_explicitROI )
+        return;
+    if( m_roiPhase == roiPhase::applying )
+    {
+        leaveROI();
+        return;
+    }
+    const bool pending = m_roiPhase == roiPhase::awaitingTarget || m_roiPhase == roiPhase::checking;
+    m_cancelCheckPending = m_roiPhase == roiPhase::checking;
+    // Revoke authorization before refreshing state: a queued Check completion must never submit Set here.
+    m_roiPhase = roiPhase::idle;
+    m_applyAfterEcho = false;
+    if( m_roiBox )
+        m_roiBox->cancelEdit();
+    updateROI();
+    leaveROI();
+    if( !m_roiReady )
+    {
+        emit roiMessage( "ROI reset unavailable; review target" );
+        return;
+    }
+    if( !pending && sameROI( m_currentROI, m_targetROI ) )
+    {
+        emit roiMessage( "ROI cancelled" );
+        return;
+    }
+    m_desiredROI = m_currentROI;
+    m_cancelRevision = roiProperty( "roi_region_state" ).m_revision;
+    m_roiPhase = roiPhase::cancelling;
+    m_roiWait.start();
+    QVector<rtimvCommand> commands;
+    auto names = MagAOX::roi::names();
+    auto values = MagAOX::roi::values( m_currentROI );
+    // Match roiGUI Reset, including binning, and supersede any earlier target writes awaiting echoes.
+    for( size_t n : { 4, 5, 0, 1, 2, 3 } )
+        commands.push_back( { QString::fromStdString( m_deviceName ),
+                             QString::fromStdString( "roi_region_" + names[n] ),
+                             rtimvPropertyType::number,
+                             { { "target", values[n] } } } );
+    sendROI( commands );
 }
