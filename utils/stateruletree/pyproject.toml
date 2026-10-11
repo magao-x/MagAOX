@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stateruletree"
+description = "Convert draw.io fault-tree / state-tree diagrams to MagAO-X stateRuleEngine .conf files"
+version = "2025.11.30"
+authors = []
+dependencies = ["defusedxml"]
+
+[project.scripts]
+stateruletree = "stateruletree.__main__:main"
+
+[tool.pydocstyle]
+# (Tehcnically for Codacy, but it doesn't seem to pick it up - patterns need to be disabled strains in Coday UI)
+# D203 (blank line before class docstring) and D211 (no blank line before class docstring) are mutually
+# exclusive. Selecting the numpy convention enforces D211 and ignores D203.
+# D212 (summary on first line) and D213 (summary on second line) are mutually
+# exclusive. Selecting the numpy convention enforces D212 and ignores D213.
+convention = "numpy"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["stateruletree*"]
+
+[tool.setuptools.package-data]
+"stateruletree" = ["examples/*.drawio"]
