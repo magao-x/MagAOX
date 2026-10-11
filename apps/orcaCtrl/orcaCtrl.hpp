@@ -18,6 +18,8 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+#include "orcaUtils.hpp"
+
 /// Enables the BREADCRUMB debugging macro.
 /** \todo Remove before deployment; debugging output should go through log<>.
  */
@@ -202,6 +204,21 @@ class orcaCtrl : public MagAOXApp<>,
     ///@}
 
   protected:
+    /** \name Sensor Geometry
+     *@{
+     */
+
+    /// ORCA-Quest2 sensor width [pixels].
+    static constexpr int32 c_sensorWidth = 4096;
+
+    /// ORCA-Quest2 sensor height [pixels].
+    static constexpr int32 c_sensorHeight = 2304;
+
+    /// Subarray size and position step in area readout mode [pixels] (manual section 11-1-2).
+    static constexpr int32 c_roiStep = 4;
+
+    ///@}
+
     /** \name Configurable Parameters
      *@{
      */
@@ -216,6 +233,9 @@ class orcaCtrl : public MagAOXApp<>,
      */
     bool m_liquidCooling{ false };
 
+    /// Maximum memory for the DCAM capture ring buffer [bytes] (`camera.circBuffMaxBytes`). Default 0.5 GB.
+    uint32_t m_circBuffMaxBytes{ 536870912 };
+
     ///@}
 
     /** \name Acquisition State
@@ -228,11 +248,49 @@ class orcaCtrl : public MagAOXApp<>,
     /// Size of one frame in bytes, from DCAM_IDPROP_IMAGE_FRAMEBYTES.
     int32 m_frameSize;
 
-    /// Number of frames allocated in the DCAM capture buffer by dcambuf_alloc().
+    /// Number of frames allocated in the DCAM capture ring buffer by dcambuf_alloc().
+    /** Set in configureAcquisition() from the frame rate, frame size and m_circBuffMaxBytes.
+     */
     int32 m_frameCount{ 10 };
 
-    /// Camera timestamp of the previous frame [s], used to detect skipped frames. 0 after a reconfigure.
-    double m_camera_timestamp{ 0.0 };
+    /// Next frame number to publish, counted from the start of capture. Reset by configureAcquisition().
+    int64_t m_nextFrame{ 0 };
+
+    /// Total frames DCAM had transferred at the last dcamcap_transferinfo() call.
+    int64_t m_framesTransferred{ 0 };
+
+    /// Ring-buffer index of the newest transferred frame at the last dcamcap_transferinfo() call.
+    int32 m_newestIndex{ -1 };
+
+    /// Number of dcamwait_start() calls that returned a frame-ready event since the last reconfigure.
+    std::atomic<uint64_t> m_statWaits{ 0 };
+
+    /// Number of frames published since the last reconfigure.
+    std::atomic<uint64_t> m_statFrames{ 0 };
+
+    /// Number of frames lost to DCAM ring-buffer overruns since the last reconfigure.
+    std::atomic<uint64_t> m_statDropped{ 0 };
+
+    /// Number of published frames whose framestamp didn't match the expected frame number.
+    std::atomic<uint64_t> m_statStampErrors{ 0 };
+
+    /// Dropped-frame count already reported in the log, so appLogic() only logs new drops.
+    uint64_t m_statDroppedLogged{ 0 };
+
+    /// Framestamp-error count already reported in the log, so appLogic() only logs new errors.
+    uint64_t m_statStampErrorsLogged{ 0 };
+
+    /// Time of the last dropped-frame or framestamp warning [s, CLOCK_MONOTONIC], to rate-limit them.
+    double m_lastStatWarningTime{ 0 };
+
+    /// Frame number at which to next verify the cached frame pointer and framestamp with dcambuf_lockframe().
+    int64_t m_nextVerifyFrame{ 0 };
+
+    /// Frame number of the last frame locked with dcambuf_lockframe(), or -1 if none since the last reconfigure.
+    int64_t m_lastVerifyFrame{ -1 };
+
+    /// Framestamp of the last frame locked with dcambuf_lockframe().
+    int32 m_lastVerifyStamp{ 0 };
 
     /// Frame rate the camera reports for the current settings, from DCAM_IDPROP_INTERNALFRAMERATE [Hz].
     double m_FrameRateCalculation;
@@ -267,8 +325,15 @@ class orcaCtrl : public MagAOXApp<>,
     /// Camera model string (DCAM_IDSTR_MODEL), set on connect.
     std::string m_cameraModel;
 
-    /// True while DCAM capture buffers are allocated (by dcambuf_alloc()) and must be released.
+    /// True while DCAM capture buffers are allocated and must be released.
     bool m_dcamBuffersAllocated{ false };
+
+    /// Cached address of each DCAM ring-buffer frame, indexed by ring index; nullptr until first locked.
+    /** A ring slot's address in DCAM's buffer is fixed from dcambuf_alloc() until dcambuf_release(), so
+     * each slot is locked with dcambuf_lockframe() once, and later frames in that slot are read through
+     * the cached pointer without a DCAM call. Cleared by allocateBuffers().
+     */
+    std::vector<void *> m_framePtrs;
 
     /// True when the camera exposes a writable DCAM_IDPROP_SENSORCOOLERFAN property.
     bool m_fanControlSupported{ false };
@@ -479,6 +544,23 @@ class orcaCtrl : public MagAOXApp<>,
      */
     int getFanSpeed();
 
+    /// Allocate the DCAM capture ring buffer for the current frame size and rate.
+    /** Sizes the ring with orcaBufferFrames(), allocates it with dcambuf_alloc(), and clears the
+     * m_framePtrs cache. App-owned buffers (dcambuf_attach()) aren't used: DCAM 4.0.6898 segfaulted in
+     * dcambuf_release() of attached buffers (agents/plans/2026-10/orcaCtrl-latency-new.md).
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int allocateBuffers();
+
+    /// Read DCAM's transfer counters into m_framesTransferred and m_newestIndex.
+    /**
+     * \returns 0 on success
+     * \returns -1 on error (logged, state set to ERROR)
+     */
+    int updateTransferInfo();
+
     /// Get the sensor temperature and cooler status from the camera.
     /** Updates m_ccdTemp and the temperature-control status, and records telemetry.
      *
@@ -562,9 +644,10 @@ class orcaCtrl : public MagAOXApp<>,
                     int32 binX,   /**< [in] binning factor, applied to both axes */
                     int32 binY /**< [in] y binning factor (unused) */ );
 
-    /// Check the next ROI. [stdCamera interface]
-    /** Should check whether the target values are valid and adjust them to the closest valid values.
-     * Currently does nothing; DCAM rounds the subarray values when setDcamRoi() writes them.
+    /// Check the next ROI and adjust it to the closest valid ROI. [stdCamera interface]
+    /** Rounds m_nextROI to the 4-pixel size and position steps and clamps it onto the sensor with
+     * orcaClampROI(), then updates the INDI ROI targets. Also called by setNextROI(), so an out-of-range
+     * request becomes the nearest valid ROI instead of a configuration error.
      *
      * \returns 0 always
      */
@@ -578,8 +661,8 @@ class orcaCtrl : public MagAOXApp<>,
     // bool checkFocus();
 
     /// Request the ROI in m_nextROI through the next reconfigure. [stdCamera interface]
-    /** Resets the INDI `roi_set` request switch. configureAcquisition() applies the ROI and updates the
-     * current and target ROI values.
+    /** Makes m_nextROI valid with checkNextROI() and resets the INDI `roi_set` request switch.
+     * configureAcquisition() applies the ROI and updates the current and target ROI values.
      *
      * \returns 0 always
      */
@@ -626,9 +709,14 @@ class orcaCtrl : public MagAOXApp<>,
      */
     int startAcquisition();
 
-    /// Wait for the next frame and lock the newest one. [framegrabber interface]
-    /** Waits up to 1 s for a frame-ready event, then locks the most recently transferred frame into
-     * m_currentFrame and timestamps it. Logs skipped frames using the camera timestamps.
+    /// Lock the next unpublished frame, in order, waiting for one if necessary. [framegrabber interface]
+    /** Every frame DCAM transfers is published in order. If frames are already waiting in the DCAM ring
+     * buffer, the next one is locked without waiting; otherwise this waits up to 1 s for a frame-ready
+     * event. If the backlog grows beyond the ring buffer, the overwritten frames are skipped and counted
+     * in m_statDropped. Each ring slot is locked with dcambuf_lockframe() (about 1 ms) only the first time
+     * it is used; after that its cached address in m_framePtrs is read without a DCAM call. About once a
+     * second a frame is locked again to verify the cached address and the framestamp; mismatches are
+     * counted in m_statStampErrors. Acquisition times come from the host clock.
      *
      * \returns 0 when a frame is ready
      * \returns 1 on timeout, abort or capture stopped, so the framegrabber can check for reconfigure or
@@ -659,6 +747,13 @@ class orcaCtrl : public MagAOXApp<>,
 
     /// Read-only INDI property `readout_time` publishing the sensor readout time.
     pcf::IndiProperty m_indiP_readouttime;
+
+    /// Read-only INDI property `acq_stats` publishing acquisition statistics since the last reconfigure.
+    /** Elements: `frames` (published), `frames_per_wait` (frames published per frame-ready wait),
+     * `dropped` (lost to ring-buffer overrun), `stamp_errors` (framestamp mismatches; only checked with
+     * DCAM-owned buffers) and `buffer_frames` (DCAM ring-buffer size).
+     */
+    pcf::IndiProperty m_indiP_acqStats;
 
     ///@}
 
@@ -742,6 +837,16 @@ inline void orcaCtrl::setupConfig()
                 "Set true if the camera's Cooler Type is set to Water with dcamcfgc and a chiller is connected. "
                 "Currently only logged; liquid-cooling control is not yet implemented. Default is false." );
 
+    config.add( "camera.circBuffMaxBytes",
+                "",
+                "camera.circBuffMaxBytes",
+                argType::Required,
+                "camera",
+                "circBuffMaxBytes",
+                false,
+                "int",
+                "Maximum size in bytes of the DCAM capture ring buffer to allocate.  Default is 0.5 GB." );
+
     STDCAMERA_SETUP_CONFIG( config );
 
     FRAMEGRABBER_SETUP_CONFIG( config );
@@ -756,6 +861,8 @@ inline int orcaCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_serialNumber, "camera.serialNumber" );
 
     _config( m_liquidCooling, "camera.liquidCooling" );
+
+    _config( m_circBuffMaxBytes, "camera.circBuffMaxBytes" );
 
     STDCAMERA_LOAD_CONFIG( _config );
 
@@ -784,6 +891,29 @@ inline int orcaCtrl::appStartup()
     indi::addNumberElement<float>(
         m_indiP_readouttime, "value", 0.0, std::numeric_limits<float>::max(), 0.0, "%0.6f", "readout time" );
     registerIndiPropertyReadOnly( m_indiP_readouttime );
+
+    createROIndiNumber( m_indiP_acqStats, "acq_stats", "Acquisition Statistics" );
+    indi::addNumberElement<double>(
+        m_indiP_acqStats, "frames", 0.0, std::numeric_limits<double>::max(), 1.0, "%0.0f", "frames published" );
+    indi::addNumberElement<double>( m_indiP_acqStats,
+                                    "frames_per_wait",
+                                    0.0,
+                                    std::numeric_limits<double>::max(),
+                                    0.0,
+                                    "%0.3f",
+                                    "frames per frame-ready wait" );
+    indi::addNumberElement<double>(
+        m_indiP_acqStats, "dropped", 0.0, std::numeric_limits<double>::max(), 1.0, "%0.0f", "frames dropped" );
+    indi::addNumberElement<double>(
+        m_indiP_acqStats, "stamp_errors", 0.0, std::numeric_limits<double>::max(), 1.0, "%0.0f", "framestamp errors" );
+    indi::addNumberElement<double>( m_indiP_acqStats,
+                                    "buffer_frames",
+                                    0.0,
+                                    std::numeric_limits<double>::max(),
+                                    1.0,
+                                    "%0.0f",
+                                    "DCAM buffer frames" );
+    registerIndiPropertyReadOnly( m_indiP_acqStats );
 
     m_minTemp  = -35;
     m_maxTemp  = 25;
@@ -915,6 +1045,48 @@ inline int orcaCtrl::appLogic()
             state( stateCodes::ERROR );
             return 0;
         }
+
+        // Publish acquisition statistics, and log any new dropped frames or framestamp errors.
+        const uint64_t waits       = m_statWaits;
+        const uint64_t frames      = m_statFrames;
+        const uint64_t dropped     = m_statDropped;
+        const uint64_t stampErrors = m_statStampErrors;
+
+        if( dropped < m_statDroppedLogged ) // counters were reset by a reconfigure
+        {
+            m_statDroppedLogged = 0;
+        }
+
+        if( stampErrors < m_statStampErrorsLogged )
+        {
+            m_statStampErrorsLogged = 0;
+        }
+
+        timespec monoNow;
+        clock_gettime( CLOCK_MONOTONIC, &monoNow );
+        const double tNow = monoNow.tv_sec + 1.0e-9 * monoNow.tv_nsec;
+
+        // At most one warning every 10 s
+        if( ( dropped > m_statDroppedLogged || stampErrors > m_statStampErrorsLogged ) &&
+            tNow - m_lastStatWarningTime >= 10.0 )
+        {
+            log<text_log>( std::to_string( dropped - m_statDroppedLogged ) +
+                               " frames dropped (DCAM ring buffer overrun) and " +
+                               std::to_string( stampErrors - m_statStampErrorsLogged ) +
+                               " frame-mapping errors since the last warning (totals since reconfigure: " +
+                               std::to_string( dropped ) + " dropped, " + std::to_string( stampErrors ) + " errors)",
+                           logPrio::LOG_WARNING );
+
+            m_statDroppedLogged     = dropped;
+            m_statStampErrorsLogged = stampErrors;
+            m_lastStatWarningTime   = tNow;
+        }
+
+        updateIfChanged( m_indiP_acqStats, "frames", static_cast<double>( frames ) );
+        updateIfChanged( m_indiP_acqStats, "frames_per_wait", waits > 0 ? static_cast<double>( frames ) / waits : 0.0 );
+        updateIfChanged( m_indiP_acqStats, "dropped", static_cast<double>( dropped ) );
+        updateIfChanged( m_indiP_acqStats, "stamp_errors", static_cast<double>( stampErrors ) );
+        updateIfChanged( m_indiP_acqStats, "buffer_frames", static_cast<double>( m_frameCount ) );
 
         STDCAMERA_UPDATE_INDI;
 
@@ -1543,9 +1715,8 @@ inline int orcaCtrl::capExpTime( double &exptime )
 
 inline int orcaCtrl::setDcamRoi( int32 xCen, int32 yCen, int32 width, int32 height, int32 binX, int32 binY )
 {
-    // Define sensor dim constants
-    constexpr int32 sensorW = 4096;
-    constexpr int32 sensorH = 2304;
+    constexpr int32 sensorW = c_sensorWidth;
+    constexpr int32 sensorH = c_sensorHeight;
 
     if( width <= 0 || height <= 0 || binX <= 0 || binY <= 0 )
     {
@@ -1609,11 +1780,26 @@ inline int orcaCtrl::setDcamRoi( int32 xCen, int32 yCen, int32 width, int32 heig
 
 inline int orcaCtrl::checkNextROI()
 {
+    if( orcaClampROI( m_nextROI.x, m_nextROI.y, m_nextROI.w, m_nextROI.h, c_sensorWidth, c_sensorHeight, c_roiStep ) )
+    {
+        log<text_log>( "ROI adjusted to the nearest valid ROI: " + std::to_string( m_nextROI.w ) + "x" +
+                           std::to_string( m_nextROI.h ) + " centered at (" + std::to_string( m_nextROI.x ) + ", " +
+                           std::to_string( m_nextROI.y ) + ")",
+                       logPrio::LOG_NOTICE );
+    }
+
+    updateIfChanged( m_indiP_roi_x, "target", m_nextROI.x, INDI_OK );
+    updateIfChanged( m_indiP_roi_y, "target", m_nextROI.y, INDI_OK );
+    updateIfChanged( m_indiP_roi_w, "target", m_nextROI.w, INDI_OK );
+    updateIfChanged( m_indiP_roi_h, "target", m_nextROI.h, INDI_OK );
+
     return 0;
 }
 
 inline int orcaCtrl::setNextROI()
 {
+    checkNextROI();
+
     updateSwitchIfChanged( m_indiP_roi_set, "request", pcf::IndiElement::Off, INDI_IDLE );
     m_reconfig = true;
 
@@ -1640,7 +1826,13 @@ inline int orcaCtrl::configureAcquisition()
     // int32 frameSize;
     int32 pixelBitDepth;
 
-    m_camera_timestamp = 0; // reset tracked timestamp
+    // Release the buffers from the previous configuration.  Capture has already been stopped by
+    // reconfig(), and the new buffer size depends on the ROI and frame rate set below.
+    if( m_dcamBuffersAllocated )
+    {
+        dcambuf_release( m_cameraHandle );
+        m_dcamBuffersAllocated = false;
+    }
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
@@ -1742,6 +1934,9 @@ inline int orcaCtrl::configureAcquisition()
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
 
+    // Make sure the requested ROI fits the sensor (startup and default ROIs don't go through setNextROI())
+    orcaClampROI( m_nextROI.x, m_nextROI.y, m_nextROI.w, m_nextROI.h, c_sensorWidth, c_sensorHeight, c_roiStep );
+
     if( setDcamRoi( m_nextROI.x, m_nextROI.y, m_nextROI.w, m_nextROI.h, m_nextROI.bin_x, m_nextROI.bin_y ) < 0 )
     {
         state( stateCodes::ERROR );
@@ -1812,6 +2007,18 @@ inline int orcaCtrl::configureAcquisition()
     // update current ROI values
     m_xbinning = m_currentROI.bin_x;
     m_ybinning = m_currentROI.bin_y;
+
+    // Undo the flip applied by setDcamRoi() so the reported center is in the same (flipped image)
+    // coordinates as the requested one.  Otherwise the center moves on every reconfigure.
+    if( m_defaultFlip == fgFlipLR || m_defaultFlip == fgFlipUDLR )
+    {
+        x = c_sensorWidth - x - m_currentROI.w;
+    }
+
+    if( m_defaultFlip == fgFlipUD || m_defaultFlip == fgFlipUDLR )
+    {
+        y = c_sensorHeight - y - m_currentROI.h;
+    }
 
     m_currentROI.x = x + ( m_currentROI.w - 1 ) / 2;
     m_currentROI.y = y + ( m_currentROI.h - 1 ) / 2;
@@ -1929,16 +2136,22 @@ inline int orcaCtrl::configureAcquisition()
 
     recordCamera();
 
-    // Allocate the capture buffers and start continuous acquisition
-    error = dcambuf_alloc( m_cameraHandle, m_frameCount );
-    if( failed( error ) )
+    if( allocateBuffers() < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         state( stateCodes::ERROR );
-
         return -1;
     }
-    m_dcamBuffersAllocated = true;
+
+    // Reset the frame bookkeeping and statistics for the new capture
+    m_nextFrame         = 0;
+    m_framesTransferred = 0;
+    m_newestIndex       = -1;
+    m_nextVerifyFrame   = 0;
+    m_lastVerifyFrame   = -1;
+    m_statWaits         = 0;
+    m_statFrames        = 0;
+    m_statDropped       = 0;
+    m_statStampErrors   = 0;
 
     error = dcamcap_start( m_cameraHandle, DCAMCAP_START_SEQUENCE );
     if( failed( error ) )
@@ -1964,96 +2177,183 @@ inline int orcaCtrl::startAcquisition()
     return 0;
 }
 
-inline int orcaCtrl::acquireAndCheckValid()
+inline int orcaCtrl::allocateBuffers()
 {
-    int32 camTimeOut = 1000; // 1 second keeps us responsive without busy-waiting too much
+    // At least 0.1 s of frames (and 10 frames), limited by camera.circBuffMaxBytes, so short host stalls
+    // don't overwrite unpublished frames.
+    m_frameCount = orcaBufferFrames( m_frameSize, m_FrameRateCalculation, 0.1, m_circBuffMaxBytes, 10, 10000 );
 
-    // Create DCAMWait struct for acquisition updates
-    DCAMWAIT_START waitStart{};
-    waitStart.size      = sizeof( waitStart );
-    waitStart.eventmask = DCAMWAIT_CAPEVENT_FRAMEREADY | DCAMWAIT_CAPEVENT_STOPPED;
-    waitStart.timeout   = camTimeOut;
-
-    DCAMERR error = dcamwait_start( m_waitHandle, &waitStart );
-
-    if( error == DCAMERR_TIMEOUT || error == DCAMERR_ABORT )
-    {
-        return 1; // This sends it back to framegrabber to check for reconfig, power-off, etc.
-    }
-
+    DCAMERR error = dcambuf_alloc( m_cameraHandle, m_frameCount );
     if( failed( error ) )
     {
         log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
-        state( stateCodes::ERROR );
-
         return -1;
     }
+    m_dcamBuffersAllocated = true;
 
-    // check if acq completed
-    if( waitStart.eventhappened & DCAMWAIT_CAPEVENT_STOPPED )
-    {
-        return 1;
-    }
+    // Frame addresses are cached as each ring slot is first locked
+    m_framePtrs.assign( m_frameCount, nullptr );
 
-    // check if frames transferred to computer
+    log<text_log>( "allocated " + std::to_string( m_frameCount ) + " DCAM buffer frames of " +
+                       std::to_string( m_frameSize ) + " bytes",
+                   logPrio::LOG_INFO );
 
-    // define transfer info struct for dcamcap_transferinfo
+    return 0;
+}
+
+inline int orcaCtrl::updateTransferInfo()
+{
     DCAMCAP_TRANSFERINFO transferInfo{};
     transferInfo.size  = sizeof( transferInfo );
     transferInfo.iKind = DCAMCAP_TRANSFERKIND_FRAME;
 
-    error = dcamcap_transferinfo( m_cameraHandle, &transferInfo );
+    DCAMERR error = dcamcap_transferinfo( m_cameraHandle, &transferInfo );
 
     if( failed( error ) )
     {
+        if( powerState() != 1 || powerStateTarget() != 1 )
+            return -1;
+
         log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         state( stateCodes::ERROR );
 
         return -1;
     }
 
-    // lock the retrieved data for reading
-    DCAMBUF_FRAME frame{};
-    frame.size   = sizeof( frame );
-    frame.iFrame = transferInfo.nNewestFrameIndex; // get idx of most recently transferred frame
+    m_framesTransferred = transferInfo.nFrameCount;
+    m_newestIndex       = transferInfo.nNewestFrameIndex;
 
-    error = dcambuf_lockframe( m_cameraHandle, &frame );
+    return 0;
+}
 
-    if( failed( error ) )
+inline int orcaCtrl::acquireAndCheckValid()
+{
+    // Ring-buffer slots treated as unsafe to read because DCAM may be writing them
+    static constexpr int32 c_ringMargin = 2;
+
+    // Only check for, and if necessary wait for, new frames once all known frames are published
+    if( m_nextFrame >= m_framesTransferred )
     {
-        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
-        state( stateCodes::ERROR );
-
-        return -1;
-    }
-
-    m_currentFrame = frame;
-
-    clock_gettime( CLOCK_REALTIME, &m_currImageTimestamp );
-
-    if( m_currentFrame.buf == 0 )
-    {
-        return 1;
-    }
-
-    // std::cerr << "readout: " << frame.buf << " " << transferInfo.nFrameCount << "\n";
-
-    // camera time stamp
-    const double cameraTimestamp =
-        static_cast<double>( frame.timestamp.sec ) + 1.0e-6 * static_cast<double>( frame.timestamp.microsec );
-
-    if( m_camera_timestamp > 0.0 )
-    {
-        const double delta_ts = cameraTimestamp - m_camera_timestamp;
-        // check for a frame skip
-        if( delta_ts > 1.5 / m_FrameRateCalculation )
+        if( updateTransferInfo() < 0 )
         {
-            std::cerr << "Skipped frame(s)! (Expected a " << 1000. / m_FrameRateCalculation << " ms gap but got "
-                      << 1000 * delta_ts << " ms)\n";
+            return -1;
+        }
+
+        if( m_nextFrame >= m_framesTransferred )
+        {
+            DCAMWAIT_START waitStart{};
+            waitStart.size      = sizeof( waitStart );
+            waitStart.eventmask = DCAMWAIT_CAPEVENT_FRAMEREADY | DCAMWAIT_CAPEVENT_STOPPED;
+            waitStart.timeout   = 1000; // [ms]; 1 s keeps us responsive without busy-waiting
+
+            DCAMERR error = dcamwait_start( m_waitHandle, &waitStart );
+
+            if( error == DCAMERR_TIMEOUT || error == DCAMERR_ABORT )
+            {
+                return 1; // This sends it back to framegrabber to check for reconfig, power-off, etc.
+            }
+
+            if( failed( error ) )
+            {
+                log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
+                state( stateCodes::ERROR );
+
+                return -1;
+            }
+
+            if( waitStart.eventhappened & DCAMWAIT_CAPEVENT_STOPPED )
+            {
+                return 1;
+            }
+
+            ++m_statWaits;
+
+            if( updateTransferInfo() < 0 )
+            {
+                return -1;
+            }
+
+            if( m_nextFrame >= m_framesTransferred )
+            {
+                return 1; // event without a new frame; go around again
+            }
         }
     }
 
-    m_camera_timestamp = cameraTimestamp; // update to latest
+    // Choose the next frame to publish, skipping any that the ring buffer has already overwritten
+    orcaFrameSelection sel;
+    if( orcaSelectFrame( sel, m_nextFrame, m_framesTransferred, m_newestIndex, m_frameCount, c_ringMargin ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "invalid DCAM transfer info" } );
+        state( stateCodes::ERROR );
+        return -1;
+    }
+
+    m_statDropped += sel.dropped;
+    m_nextFrame = sel.frame + 1;
+
+    void *cached = m_framePtrs[sel.ringIndex];
+
+    // dcambuf_lockframe() costs about 1 ms, so it is only called the first time a ring slot is used (to
+    // cache its address) and about once a second to verify the cached address and the framestamp.
+    if( cached == nullptr || sel.frame >= m_nextVerifyFrame )
+    {
+        DCAMBUF_FRAME frame{};
+        frame.size   = sizeof( frame );
+        frame.iFrame = sel.ringIndex;
+
+        DCAMERR error = dcambuf_lockframe( m_cameraHandle, &frame );
+
+        if( failed( error ) )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return 1; // camera is being powered off; let the framegrabber exit
+
+            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
+            state( stateCodes::ERROR );
+
+            return -1;
+        }
+
+        if( frame.buf == nullptr )
+        {
+            return 1;
+        }
+
+        // The framestamp must advance by exactly the number of frames since the last one locked, and a
+        // cached slot address must not have moved.
+        if( m_lastVerifyFrame >= 0 &&
+            !orcaFramestampAdvanceOk( m_lastVerifyStamp, frame.framestamp, sel.frame - m_lastVerifyFrame ) )
+        {
+            ++m_statStampErrors;
+        }
+
+        if( cached != nullptr && cached != frame.buf )
+        {
+            ++m_statStampErrors;
+        }
+
+        m_framePtrs[sel.ringIndex] = frame.buf;
+
+        m_lastVerifyFrame = sel.frame;
+        m_lastVerifyStamp = frame.framestamp;
+
+        if( cached != nullptr ) // a verification, not a first lock of this slot
+        {
+            m_nextVerifyFrame = sel.frame + std::max<int64_t>( 1, static_cast<int64_t>( m_FrameRateCalculation ) );
+        }
+
+        m_currentFrame = frame;
+    }
+    else
+    {
+        m_currentFrame.buf = cached;
+    }
+
+    // DCAM frame timestamps are not on the CLOCK_REALTIME timescale for this camera, so use the host clock
+    clock_gettime( CLOCK_REALTIME, &m_currImageTimestamp );
+
+    ++m_statFrames;
 
     return 0;
 }
@@ -2085,10 +2385,10 @@ inline int orcaCtrl::reconfig()
         return -1;
     }
 
-    error                         = dcamcap_status( m_cameraHandle, &captureStatus );
-    const bool acquisitionRunning = !failed( error ) && captureStatus == DCAMCAP_STATUS_BUSY;
+    error = dcamcap_status( m_cameraHandle, &captureStatus );
 
-    while( acquisitionRunning && captureStatus != DCAMCAP_STATUS_UNSTABLE )
+    // Retry the stop while capture is still running.  The buffers are released by configureAcquisition().
+    while( !failed( error ) && captureStatus == DCAMCAP_STATUS_BUSY )
     {
         if( MagAOXAppT::m_powerState == 0 )
             return 0;
@@ -2102,10 +2402,6 @@ inline int orcaCtrl::reconfig()
             state( stateCodes::ERROR );
             return -1;
         }
-
-        // release buffer
-        dcambuf_release( m_cameraHandle );
-        m_dcamBuffersAllocated = False;
 
         error = dcamcap_status( m_cameraHandle, &captureStatus );
         if( failed( error ) )

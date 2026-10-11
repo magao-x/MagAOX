@@ -1,7 +1,7 @@
 
 allall: all
 
-OTHER_HEADERS=
+OTHER_HEADERS=orcaUtils.hpp
 OTHER_OBJS=
 TARGET=orcaCtrl
 
