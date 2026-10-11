@@ -1,7 +1,6 @@
 /** \file cameraStatus.hpp
  * \brief Declares the camera-status rtimv overlay plugin.
  *
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  */
 
@@ -113,7 +112,7 @@ class cameraStatus : public rtimvOverlayInterface
     void beginROI();
 
     /// Convert a scene edit to native coordinates and send only changed fields.
-    bool stageROI(const QRectF &rect, /**< [in] Pixel-edge rectangle after editing. */
+    bool stageROI( const QRectF &rect /**< [in] Initial rectangle in scene coordinates. */ , /**< [in] Pixel-edge rectangle after editing. */
                   const roiT &before, /**< [in] Captured native target before editing. */
                   bool resized /**< [in] True only for intentional size changes. */);
 

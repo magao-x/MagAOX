@@ -326,7 +326,7 @@ Run the focused tests/builds described above and inspect formatting/documentatio
 - **Full/default recognition:** an offset ROI with the same size as default is custom. Missing or unverified preset classification uses the size-preserving path. Do not query or mutate hardware to classify presets. A known but hardware-normalized default needs a deterministic driver mapping or recorded effective default before it can take the new-box path reliably.
 - **Hardware acceptance:** after offline verification, the user should validate signs/flips, binning policies, and hardware snapping on representative cameras. The agent must not run on instrument computers or send commands through instrument tunnels.
 
-Planning verification (2026-10-11 revision): source inspection only; no application tests/builds or hardware operations have been run because the user requested another review of the revised interaction. Verified that the original task text and all four user answers are unchanged, all requested planning sections and local links remain valid, and `git diff --check` passes. Only this Markdown file is modified; the rtimv checkout remains clean. `clang-format` does not apply to this Markdown-only change.
+Historical planning verification (before implementation approval, 2026-10-11 revision): source inspection only; no application tests/builds or hardware operations have been run because the user requested another review of the revised interaction. Verified that the original task text and all four user answers are unchanged, all requested planning sections and local links remain valid, and `git diff --check` passes. Only this Markdown file is modified; the rtimv checkout remains clean. `clang-format` does not apply to this Markdown-only change.
 
 ### Implementation record
 
@@ -339,4 +339,53 @@ Planning verification (2026-10-11 revision): source inspection only; no applicat
 - roiGUI queues incoming updates onto its GUI thread, defaults to relative entry when writable definitions and a valid reference are present, and cancels unsubmitted center text on mode/reference changes. The preference survives temporary capability loss. Legacy cameras retain absolute mode.
 - rtimv supplies shared new-box placement, optional interactive-box integration, mouse edit start/release hooks, and a normal status-message slot. Long messages fit inside the existing transient status box; short zoom messages restore the configured font. The magenta box remains visible through adjusted-target review independently of the status timeout.
 - Initial offline verification: stdCamera ROI 529 assertions/3 cases, existing stdCamera 117 assertions/4 cases, roiGUI 30 assertions/2 cases, plugin integration 131 assertions/5 cases; all passed. rtimv builds both local and gRPC clients/server and passes all three CTest targets, including real mouse hooks, router lifetime, message fit, existing MTF, and asynchronous client tests. No instrument commands, network connections, installation, or deployment were used.
-- Build environment: GCC 15, Qt 6.10.2, mxlib 0.2. Existing instrumented libMagAOX objects require `TESTLIBS=-lgcov` for unit tests and `EXTRA_LDLIBS=-lgcov` for cameraSim linkage. Basler/Andor SDK headers are absent on this workstation; policy assignments are covered by shared geometry tests, but those SDK applications need their normal build environment.
+- Build environment: GCC 15, Qt 6.10.2, mxlib 0.2. Existing instrumented libMagAOX objects require `TESTLIBS=-lgcov` for unit tests and `EXTRA_LDFLAGS=--coverage` for cameraSim linkage. Basler/Andor SDK headers are absent on this workstation; policy assignments are covered by shared geometry tests, but those SDK applications need their normal build environment.
+
+
+### Build and rollout notes
+
+1. Build the companion rtimv branch first, then rebuild both MagAO-X plugins against its matching headers and shared library. The implemented clone is `local/rtimv-roi`; the original sibling checkout remains unchanged. No remote branch was pushed.
+2. Build/deploy updated camera applications and roiGUI through the normal user-managed workflow. The new properties are additive. Older cameras retain absolute roiGUI entry and a passive overlay. Zyla advertises unsupported geometry; no legacy SDK offset corrections are included.
+3. Use the configured camera's own image. Sensor and binned unit conversion is explicit; camera-native flip handling remains in the existing drivers, with graphics-scene Y inversion applied separately. Dimensions cannot identify a rotated or derived stream. No calibration is inferred from image appearance.
+4. Full/default recognition compares all six native values against existing metadata. Unknown classification or a default adjusted by an unverified hardware normalization preserves the custom ROI geometry on Shift+R. This conservative fallback avoids calling a mutating validator for classification.
+5. CameraSim compiles successfully on this workstation. Representative real-camera signs/flips, SDK snapping, and Check-versus-Set normalization still require user-run acceptance testing. Agents must not perform those hardware steps.
+
+Focused offline commands, from the indicated directories:
+
+```sh
+# MagAOX/tests (existing archive in this workspace contains coverage-instrumented objects)
+make -f Makefile.one t=../libMagAOX/app/dev/tests/stdCamera_roi_test TESTLIBS=-lgcov
+../libMagAOX/app/dev/tests/stdCamera_roi_test
+make -f Makefile.one t=../libMagAOX/app/dev/tests/stdCamera_test TESTLIBS=-lgcov
+../libMagAOX/app/dev/tests/stdCamera_test
+
+# MagAOX/gui/widgets/roi/tests
+qmake roi_test.pro
+make -f makefile.roi_test
+QT_QPA_PLATFORM=offscreen ./roi_test
+
+# MagAOX/gui/rtimv/plugins/tests, with matching installed rtimv headers/library
+qmake roi_commands_test.pro
+make -f makefile.roi_commands_test
+QT_QPA_PLATFORM=offscreen ./roi_commands_test
+
+# Companion rtimv checkout
+cmake -S . -B build -DRTIMV_INSTALL_SYSTEMD_UNIT=OFF
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+The plugin and plugin-test qmake targets also accept `RTIMV_INCLUDEPATH` (directory containing `rtimv/` headers) and `RTIMV_LIBDIR` for an uninstalled workspace build. The Qt suites use their own `.pro` targets, matching existing GUI test practice; they are not added to the non-Qt `Makefile.one` test runner.
+
+### Additive property contract
+
+| Property | Elements and meaning |
+| --- | --- |
+| `roi_region_x_relative`, `roi_region_y_relative` | Writable `target` only, in zero-based currently acquired image pixels. Availability requires Ready/Operating, verified units, and valid applied/target geometry. |
+| `roi_coordinate_system` | Read-only `units`: 0=sensor pixels, 1=binned full-image pixels, 2=unsupported. Existing absolute values keep their native units. |
+| `roi_region_state` | Read-only `x,y,w,h,bin_x,bin_y`, corresponding `target_` fields, `units`, `is_full`, `is_default`, `preset_known`. One complete property carries the applied reference and staged target. Idle means unavailable for commands. |
+| `roi_check_result` | Read-only `requested_`, `checked_`, and `current_` versions of all six fields plus monotonic `sequence`. Ok/Alert is published after validation returns, including no-op validation. Idle invalidates a previous completion. The old request-switch reset is not an acknowledgement. |
+
+Current/reference values and target centers are stored at the camera's existing float precision. Snapshots are parsed at that same precision and all dimensions/binning are compared exactly; formatted labels do not participate in confirmation. Local command errors and later camera failures are separate outcomes. The legacy protocol still cannot atomically compare-and-apply across multiple clients, or strictly bind a relative GUI write to a remote reference generation.
+
+- Documentation pass completed for touched declarations and member state. Existing main-window inline accessors were moved to the source file as required by the companion repository. Documentation and formatting are committed separately from behavior.

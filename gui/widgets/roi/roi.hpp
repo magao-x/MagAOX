@@ -1,4 +1,6 @@
-
+/** \file roi.hpp
+ * \brief Camera ROI editor with explicit absolute and current-image center modes.
+ */
 #ifndef roi_hpp
 #define roi_hpp
 
@@ -13,61 +15,115 @@
 namespace xqt
 {
 
+/// Display current camera geometry and stage independent ROI targets.
 class roi : public xWidget
 {
    Q_OBJECT
 
 protected:
 
+   /// Last reported camera FSM state; controls command availability.
    std::string m_appState;
 
+   /// Camera device whose properties this widget subscribes to.
    std::string m_camName;
+
+   /// Connected window title derived from the camera name.
    std::string m_winTitle;
 
+   /// Highlight the refreshed applied horizontal binning value.
    bool m_bin_x_curr_changed {false};
+
+   /// Applied horizontal binning from the camera.
    int m_bin_x_curr {0};
+
+   /// Highlight the refreshed staged horizontal binning value.
    bool m_bin_x_tgt_changed {false};
+
+   /// Staged horizontal binning from the camera.
    int m_bin_x_tgt {0};
 
+   /// Highlight the refreshed applied vertical binning value.
    bool m_bin_y_curr_changed {false};
+
+   /// Applied vertical binning from the camera.
    int m_bin_y_curr {0};
+
+   /// Highlight the refreshed staged vertical binning value.
    bool m_bin_y_tgt_changed {false};
+
+   /// Staged vertical binning from the camera.
    int m_bin_y_tgt {0};
 
+   /// Highlight the refreshed applied absolute horizontal center value.
    bool m_cen_x_curr_changed {false};
+
+   /// Applied absolute horizontal center from the camera.
    float m_cen_x_curr {0};
+
+   /// Highlight the refreshed staged absolute horizontal center value.
    bool m_cen_x_tgt_changed {false};
+
+   /// Staged absolute horizontal center from the camera.
    float m_cen_x_tgt {0};
 
+   /// Highlight the refreshed applied absolute vertical center value.
    bool m_cen_y_curr_changed {false};
+
+   /// Applied absolute vertical center from the camera.
    float m_cen_y_curr {0};
+
+   /// Highlight the refreshed staged absolute vertical center value.
    bool m_cen_y_tgt_changed {false};
+
+   /// Staged absolute vertical center from the camera.
    float m_cen_y_tgt {0};
 
+   /// Highlight the refreshed applied native width value.
    bool m_wid_curr_changed {false};
+
+   /// Applied native width from the camera.
    int m_wid_curr {0};
+
+   /// Highlight the refreshed staged native width value.
    bool m_wid_tgt_changed {false};
+
+   /// Staged native width from the camera.
    int m_wid_tgt {0};
 
+   /// Highlight the refreshed applied native height value.
    bool m_hgt_curr_changed {false};
+
+   /// Applied native height from the camera.
    int m_hgt_curr {0};
+
+   /// Highlight the refreshed staged native height value.
    bool m_hgt_tgt_changed {false};
+
+   /// Staged native height from the camera.
    int m_hgt_tgt {0};
 
    /// Preferred center display mode, retained while relative coordinates are unavailable.
    bool m_relativePreferred{true};
+
    /// Mode used for the currently displayed center editors.
    bool m_relativeActive{false};
+
    /// Writable Number definitions are required before accepting relative updates.
    bool m_relativeXDefined{false}, m_relativeYDefined{false};
+
    /// Availability of the two backend relative target properties.
    bool m_relativeXValid{false}, m_relativeYValid{false};
+
    /// Availability of a coherent applied reference.
    bool m_referenceValid{false};
+
    /// A changed reference or capability discards unsent center text on the GUI thread.
    bool m_discardCenters{true};
+
    /// Backend-reported target centers in current image pixels.
    double m_relativeX{0}, m_relativeY{0};
+
    /// Last coherent applied reference, used only to invalidate edits.
    MagAOX::roi::region m_reference;
 
@@ -77,59 +133,94 @@ protected:
    /// Send a valid center to the property matching its displayed coordinate mode.
    void sendCenter(bool horizontal /**< [in] Select the horizontal center. */);
 
+   /// True until the publisher reports a new connection.
    bool m_onDisconnected {false};
 
+    /// Qt-owned timer that refreshes cached values and control availability.
     QTimer * m_updateTimer {nullptr};
 
 public:
-   explicit roi( std::string & camName,
-                 QWidget * Parent = 0,
-                 Qt::WindowFlags f = Qt::WindowFlags()
-               );
+   /// Construct the camera ROI editor.
+   explicit roi( std::string & camName /**< [in] Camera device name. */ , QWidget * Parent = 0 /**< [in] Optional owning Qt widget. */ , Qt::WindowFlags f = Qt::WindowFlags() /**< [in] Qt window flags. */ );
 
+   /// Destroy the ROI editor and its Qt-owned timer.
    ~roi();
 
+   /// Subscribe to camera state, absolute targets, and relative-coordinate capability.
    void subscribe();
 
+   /// Restore editing after the camera connection is established.
    virtual void onConnect();
+
+   /// Clear cached state and disable commands until fresh properties arrive.
    virtual void onDisconnect();
 
+   /// Record property capability and its initial values on the GUI thread.
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
+   /// Invalidate the deleted camera capability and any dependent center edit.
    void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
 
+   /// Cache incoming camera values on the GUI thread.
    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
+   /// Finish active field entry before a button command.
    void clear_focus();
 
 public slots:
+   /// Refresh current values, target coordinates, and control availability.
    void updateGUI();
 
    /// Change center display mode, discarding any unsubmitted center text.
    void on_check_relative_toggled(bool checked /**< [in] Requested relative display mode. */);
 
+   /// Submit the edited bin x target.
    void on_le_bin_x_editingFinished();
+
+   /// Submit the edited bin y target.
    void on_le_bin_y_editingFinished();
 
+   /// Submit the edited center x target.
    void on_le_center_x_editingFinished();
+
+   /// Submit the edited center y target.
    void on_le_center_y_editingFinished();
 
+   /// Submit the edited width target.
    void on_le_width_editingFinished();
+
+   /// Submit the edited height target.
    void on_le_height_editingFinished();
 
+   /// Load the last applied ROI into the target fields.
    void on_button_loadlast_pressed();
+
+   /// Reset all absolute target fields to the current ROI.
    void on_button_reset_pressed();
+
+   /// Request camera validation of the staged ROI.
    void on_button_check_pressed();
+
+   /// Apply the staged camera ROI.
    void on_button_set_pressed();
+
+   /// Apply the previous camera ROI.
    void on_button_last_pressed();
+
+   /// Apply the full frame while preserving current binning.
    void on_button_fullbin_pressed();
+
+   /// Apply the full frame at its configured binning.
    void on_button_full_pressed();
+
+   /// Apply the configured default camera ROI.
    void on_button_default_pressed();
 
 
 
 private:
 
+   /// Qt-generated controls owned by this widget.
    Ui::roi ui;
 };
 

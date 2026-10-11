@@ -1,7 +1,6 @@
 /** \file indiDictionary.cpp
  * \brief Implements the rtimv INDI-backed dictionary plugin.
  *
- * \author Jared Males
  */
 
 #include <cmath>
@@ -13,7 +12,10 @@
 
 namespace
 {
-bool dictionaryElementKeyToPropertyKey( const std::string &elKey, std::string &device, std::string &property )
+/// Split a subscribed dictionary element into its INDI device and property names.
+bool dictionaryElementKeyToPropertyKey( const std::string &elKey, /**< [in] Device.property.element key. */
+                                        std::string &device, /**< [out] Device name. */
+                                        std::string &property /**< [out] Property name. */ )
 {
     size_t np = elKey.find( '.', 0 );
     if( np == std::string::npos )
@@ -181,7 +183,7 @@ void indiDictionary::checkConnection()
 
     std::set<std::pair<std::string, std::string>> propertyKeys;
 
-    {
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_dictMutex );
 
         if( m_dict == nullptr )
@@ -207,7 +209,7 @@ void indiDictionary::checkConnection()
     for( const auto &propertyKey : propertyKeys )
     {
         bool shouldSnoop = false;
-        {
+        { //mutex scope
             std::lock_guard<std::mutex> guard( m_client->m_subscribedMutex );
             auto res    = m_client->m_subscribed.insert( propertyKey.first + "." + propertyKey.second );
             shouldSnoop = res.second;

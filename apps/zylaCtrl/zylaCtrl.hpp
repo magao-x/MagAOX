@@ -1,7 +1,6 @@
 /** \file zylaCtrl.hpp
   * \brief The MagAO-X Andor sCMOS camera controller.
   *
-  * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup zylaCtrl_files
   */
@@ -105,17 +104,25 @@ protected:
 
    AT_H m_handle {AT_HANDLE_UNINITIALISED}; ///< The Andor API handle to the camera
 
+   /// SDK input buffers queued for asynchronous frame acquisition.
    std::vector<unsigned char*> m_inputBuffers;
+
+   /// Index of the input buffer to requeue after transfer.
    size_t m_nextBuffer {0};
 
+   /// Allocated size of each SDK input buffer in bytes.
    int m_inputBufferSize {0};
 
+   /// Owned decoded image buffer copied into the shared stream.
    unsigned char* m_outputBuffer {nullptr};
 
+   /// Allocated decoded buffer size in bytes.
    int m_outputBufferSize {0};
 
+   /// SDK pixel encoding used to decode received frames.
    wchar_t m_pixelEncoding[256];
 
+   /// SDK row stride in bytes.
    int m_stride;
 
 public:
@@ -138,7 +145,7 @@ public:
      */
    virtual int appStartup();
 
-   /// Implementation of the FSM for the Siglent SDG
+   /// Advance the camera acquisition and connection state machine.
    virtual int appLogic();
 
    /// Implementation of the on-power-off FSM logic
@@ -155,10 +162,13 @@ public:
    int cameraSelect();
 
 
+   /// Read the current detector temperature.
    int getTemp();
 
+   /// Read the current exposure time.
    int getExpTime();
 
+   /// Read the current camera frame rate.
    int getFPS();
 
 
@@ -220,7 +230,7 @@ public:
    /**
      * \returns 0 always
      */
-   int setShutter(int sh);
+   int setShutter( int sh /**< [in] Requested shutter state; unsupported by this camera. */ );
 
    ///@}
 
@@ -231,15 +241,25 @@ public:
      * @{
      */
 
+   /// Configure the camera and buffers for the staged ROI.
    int configureAcquisition();
+
+   /// Return the measured frame rate used by the frame grabber.
    float fps()
    {
       return m_fps;
    }
 
+   /// Start acquiring frames with the configured geometry.
    int startAcquisition();
+
+   /// Wait for the next frame and validate its acquisition status.
    int acquireAndCheckValid();
-   int loadImageIntoStream(void * dest);
+
+   /// Copy the acquired frame into the shared image stream.
+   int loadImageIntoStream( void * dest /**< [out] Destination image buffer owned by the frame grabber. */ );
+
+   /// Stop acquisition and prepare the staged camera configuration.
    int reconfig();
 
    ///@}
@@ -248,9 +268,11 @@ public:
      *
      * @{
      */
+   /// Check whether camera telemetry is due for publication.
    int checkRecordTimes();
 
-   int recordTelem( const telem_stdcam * );
+   /// Record a standard camera telemetry sample.
+   int recordTelem( const telem_stdcam * tag /**< [in] Telemetry type selector; its value is unused. */ );
 
 
    ///@}

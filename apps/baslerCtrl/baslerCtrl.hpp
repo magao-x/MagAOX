@@ -1,7 +1,6 @@
 /** \file baslerCtrl.hpp
  * \brief The MagAO-X basler camera controller.
  *
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup baslerCtrl_files
  */
@@ -149,6 +148,7 @@ class baslerCtrl : public MagAOXApp<>,
     CBaslerUsbInstantCamera *m_camera{ nullptr }; ///< The library camera handle
     CGrabResultPtr           ptrGrabResult;       ///< The result of an attempt to grab an image
 
+    /// Recent detector temperatures used to smooth readback.
     mx::sigproc::circularBufferIndex<float, int32_t> m_tempHist;
 
   public:
@@ -177,18 +177,28 @@ class baslerCtrl : public MagAOXApp<>,
      */
     virtual int appStartup();
 
-    /// Implementation of the FSM for the Siglent SDG
+    /// Advance the camera acquisition and connection state machine.
     virtual int appLogic();
 
     /// Do any needed shutdown tasks.  Currently nothing in this app.
     virtual int appShutdown();
 
+    /// Select and connect the configured camera.
     int connect();
 
+    /// Configure the camera and buffers for the staged ROI.
     int configureAcquisition();
+
+    /// Start acquiring frames with the configured geometry.
     int startAcquisition();
+
+    /// Wait for the next frame and validate its acquisition status.
     int acquireAndCheckValid();
-    int loadImageIntoStream( void *dest );
+
+    /// Copy the acquired frame into the shared image stream.
+    int loadImageIntoStream( void *dest /**< [out] Destination image buffer owned by the frame grabber. */ );
+
+    /// Stop acquisition and prepare the staged camera configuration.
     int reconfig();
 
   protected:
@@ -213,6 +223,7 @@ class baslerCtrl : public MagAOXApp<>,
      */
     int getFPS();
 
+    /// Return the measured frame rate used by the frame grabber.
     float fps();
 
     /** \name stdCamera Interface
@@ -258,8 +269,10 @@ class baslerCtrl : public MagAOXApp<>,
      */
     int setNextROI();
 
+    /// Describe the current camera configuration for stream metadata.
     std::string stateString();
 
+    /// Report whether the camera state string is currently meaningful.
     bool stateStringValid();
 
     ///@}
@@ -269,9 +282,11 @@ class baslerCtrl : public MagAOXApp<>,
      * @{
      */
 
-    int checkRecordTimes();
+    /// Check whether camera telemetry is due for publication.
+   int checkRecordTimes();
 
-    int recordTelem( const telem_stdcam * );
+    /// Record a standard camera telemetry sample.
+    int recordTelem( const telem_stdcam * tag /**< [in] Telemetry type selector; its value is unused. */ );
 
     ///@}
 };

@@ -26,7 +26,7 @@ class Camera : public MagAOX::app::outletTestApp<>, public MagAOX::app::dev::std
     static constexpr bool c_stdCamera_fps             = false; ///< Disable frame-rate reporting.
     static constexpr bool c_stdCamera_synchro         = false; ///< Disable synchronization control.
     static constexpr bool c_stdCamera_usesModes       = false; ///< Disable camera modes.
-    static constexpr bool c_stdCamera_usesROI         = true;  ///< Disable ROI control.
+    static constexpr bool c_stdCamera_usesROI         = true;  ///< Enable ROI control.
     static constexpr bool c_stdCamera_cropMode        = false; ///< Disable crop mode.
     static constexpr bool c_stdCamera_hasShutter      = false; ///< Disable shutter control.
     static constexpr bool c_stdCamera_usesStateString = false; ///< Disable persistent state descriptions.
@@ -47,20 +47,28 @@ class Camera : public MagAOX::app::outletTestApp<>, public MagAOX::app::dev::std
     bool m_snap{ false };     ///< Inject a camera width/center adjustment.
     int  m_checkResult{ 0 };  ///< Inject a failed validator.
     int  m_sets{ 0 };         ///< Actual derived apply calls.
+
     /// Initialize a noncentral camera ROI.
     Camera();
+
     /// Register the real camera properties.
     int appStartup() override;
+
     /// Exercise the shared periodic state publication.
     int appLogic() override;
+
     /// Provide the shared shutdown interface.
     int appShutdown() override;
+
     /// Leave the shared power defaults unchanged.
     int powerOnDefaults();
+
     /// Simulate camera validation without hardware.
     int checkNextROI();
+
     /// Record an actual apply request.
     int setNextROI();
+
     /// Discard telemetry without starting a logger.
     template <class T>
     int telem( const typename T::messageT &message /**< [in] Telemetry payload. */ );
@@ -116,10 +124,12 @@ class Fixture : public outletHarness::Controller<Camera>
   public:
     /// Initialize real INDI properties and mark the camera ready.
     Fixture();
+
     /// Dispatch a numeric request through the actual shared dispatcher.
     int number( const std::string &name,  /**< [in] Property name. */
                 const std::string &value, /**< [in] Raw element value. */
                 const std::string &element = "target" /**< [in] Element name. */ );
+
     /// Dispatch a standard request switch.
     int request( const std::string &name /**< [in] Request property name. */ );
 };

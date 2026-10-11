@@ -705,7 +705,7 @@ class stdCamera
 
     ///@}
 
-    /** \name ROIs
+    /** \name ROIs - Data
      * ROI controls are exposed if derivedT::c_stdCamera_usesROI==true
      * @{
      */

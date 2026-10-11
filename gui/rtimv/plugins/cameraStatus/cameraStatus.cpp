@@ -2,7 +2,6 @@
 /** \file cameraStatus.cpp
  * \brief Overlay status rendering for camera-associated devices.
  *
- * \author Jared R. Males (jaredmales@gmail.com)
  */
 
 #include "cameraStatus.hpp"
@@ -11,7 +10,8 @@
 
 namespace
 {
-std::string preferredPresetProperty( const std::string &deviceName )
+/// Choose the preferred selection property for the associated device.
+std::string preferredPresetProperty( const std::string &deviceName /**< [in] Associated filter or stage. */ )
 {
     if( deviceName.find( "fw" ) == 0 )
     {
@@ -21,7 +21,8 @@ std::string preferredPresetProperty( const std::string &deviceName )
     return "presetName";
 }
 
-std::string alternatePresetProperty( const std::string &propertyName )
+/// Return the other supported selection-property convention.
+std::string alternatePresetProperty( const std::string &propertyName /**< [in] Preferred property. */ )
 {
     if( propertyName == "filterName" )
     {

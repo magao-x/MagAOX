@@ -1,7 +1,6 @@
 /** \file indiDictionary.hpp
  * \brief Declares the rtimv INDI-backed dictionary plugin.
  *
- * \author Jared Males
  */
 
 #ifndef indiDictionary_hpp
@@ -74,8 +73,8 @@ class indiDictionary : public rtimvDictionaryInterface, public rtimvCommandInter
 
     /// Attach this plugin to rtimv.
     virtual int
-    attachDictionary( dictionaryT              *dict,  ///< [in] pointer to the rtimv dictionary, a std::map
-                      mx::app::appConfigurator &config ///< [in] app configurator from which to config the connection
+    attachDictionary( dictionaryT              *dict,  /**< [in] pointer to the rtimv dictionary, a std::map */
+                      mx::app::appConfigurator &config /**< [in] app configurator from which to config the connection */
     );
 
     /// Identify the protocol supplied by this optional provider.
