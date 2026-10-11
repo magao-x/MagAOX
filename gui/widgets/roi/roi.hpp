@@ -3,6 +3,10 @@
 #define roi_hpp
 
 #include "ui_roi.h"
+#include <QSignalBlocker>
+#include <QThread>
+#include <cmath>
+#include "../../../libMagAOX/common/roiGeometry.hpp"
 
 #include "../xWidgets/xWidget.hpp"
 
@@ -50,6 +54,29 @@ protected:
    bool m_hgt_tgt_changed {false};
    int m_hgt_tgt {0};
 
+   /// Preferred center display mode, retained while relative coordinates are unavailable.
+   bool m_relativePreferred{true};
+   /// Mode used for the currently displayed center editors.
+   bool m_relativeActive{false};
+   /// Writable Number definitions are required before accepting relative updates.
+   bool m_relativeXDefined{false}, m_relativeYDefined{false};
+   /// Availability of the two backend relative target properties.
+   bool m_relativeXValid{false}, m_relativeYValid{false};
+   /// Availability of a coherent applied reference.
+   bool m_referenceValid{false};
+   /// A changed reference or capability discards unsent center text on the GUI thread.
+   bool m_discardCenters{true};
+   /// Backend-reported target centers in current image pixels.
+   double m_relativeX{0}, m_relativeY{0};
+   /// Last coherent applied reference, used only to invalidate edits.
+   MagAOX::roi::region m_reference;
+
+   /// Cancel center text without triggering a command in either coordinate mode.
+   void discardCenterEdits();
+
+   /// Send a valid center to the property matching its displayed coordinate mode.
+   void sendCenter(bool horizontal /**< [in] Select the horizontal center. */);
+
    bool m_onDisconnected {false};
 
     QTimer * m_updateTimer {nullptr};
@@ -77,6 +104,9 @@ public:
 
 public slots:
    void updateGUI();
+
+   /// Change center display mode, discarding any unsubmitted center text.
+   void on_check_relative_toggled(bool checked /**< [in] Requested relative display mode. */);
 
    void on_le_bin_x_editingFinished();
    void on_le_bin_y_editingFinished();
@@ -144,11 +174,19 @@ void roi::subscribe()
    m_parent->addSubscriberProperty(this, m_camName, "roi_region_w");
    m_parent->addSubscriberProperty(this, m_camName, "roi_region_h");
 
+   m_parent->addSubscriberProperty(this, m_camName, "roi_region_x_relative");
+   m_parent->addSubscriberProperty(this, m_camName, "roi_region_y_relative");
+   m_parent->addSubscriberProperty(this, m_camName, "roi_region_state");
    return;
 }
 
 void roi::onConnect()
 {
+   if(QThread::currentThread() != thread())
+   {
+      QMetaObject::invokeMethod(this, [this]{ onConnect(); }, Qt::QueuedConnection);
+      return;
+   }
    setWindowTitle(QString(m_winTitle.c_str()));
 
    //Reset the changed flags
@@ -172,6 +210,21 @@ void roi::onConnect()
 
 void roi::onDisconnect()
 {
+   if(QThread::currentThread() != thread())
+   {
+      QMetaObject::invokeMethod(this, [this]{ onDisconnect(); }, Qt::QueuedConnection);
+      return;
+   }
+   m_relativeXDefined = m_relativeYDefined = false;
+   m_relativeXValid = m_relativeYValid = m_referenceValid = false;
+   m_discardCenters = true;
+   m_relativeActive = false;
+   discardCenterEdits();
+   { // Block a mode change from being interpreted as user input.
+      QSignalBlocker blocker(ui.check_relative);
+      ui.check_relative->setChecked(false);
+      ui.check_relative->setEnabled(false);
+   }
    m_appState.clear();
    m_bin_x_curr = 0;
    m_bin_x_tgt = 0;
@@ -250,14 +303,37 @@ void roi::onDisconnect()
 
 void roi::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {
+   if(QThread::currentThread() != thread())
+   {
+      QMetaObject::invokeMethod(this, [this, ipRecv]{ handleDefProperty(ipRecv); }, Qt::QueuedConnection);
+      return;
+   }
+   if(ipRecv.getDevice() == m_camName)
+   {
+      bool writable = ipRecv.getType() == pcf::IndiProperty::Number && ipRecv.getPerm() == pcf::IndiProperty::ReadWrite;
+      if(ipRecv.getName() == "roi_region_x_relative") m_relativeXDefined = writable;
+      if(ipRecv.getName() == "roi_region_y_relative") m_relativeYDefined = writable;
+   }
    return handleSetProperty(ipRecv);
 }
 
 void roi::handleDelProperty( const pcf::IndiProperty & ipRecv)
 {
+   if(QThread::currentThread() != thread())
+   {
+      QMetaObject::invokeMethod(this, [this, ipRecv]{ handleDelProperty(ipRecv); }, Qt::QueuedConnection);
+      return;
+   }
    if(ipRecv.getDevice() != m_camName) return;
 
-   if(ipRecv.getName() == "fsm" ||
+   if(ipRecv.getName().empty() || ipRecv.getName() == "roi_region_state" ||
+      ipRecv.getName() == "roi_region_x_relative" || ipRecv.getName() == "roi_region_y_relative")
+   {
+      m_relativeXDefined = m_relativeYDefined = false;
+   m_relativeXValid = m_relativeYValid = m_referenceValid = false;
+      m_discardCenters = true;
+   }
+   if(ipRecv.getName().empty() || ipRecv.getName() == "fsm" ||
       ipRecv.getName() == "roi_region_bin_x" ||
       ipRecv.getName() == "roi_region_bin_y" ||
       ipRecv.getName() == "roi_region_x" ||
@@ -271,8 +347,50 @@ void roi::handleDelProperty( const pcf::IndiProperty & ipRecv)
 
 void roi::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
+   if(QThread::currentThread() != thread())
+   {
+      QMetaObject::invokeMethod(this, [this, ipRecv]{ handleSetProperty(ipRecv); }, Qt::QueuedConnection);
+      return;
+   }
    if(ipRecv.getDevice() != m_camName) return;
 
+   const auto &name = ipRecv.getName();
+   if(name == "roi_region_x_relative" || name == "roi_region_y_relative")
+   {
+      bool horizontal = name == "roi_region_x_relative";
+      bool valid = (horizontal ? m_relativeXDefined : m_relativeYDefined) &&
+                   ipRecv.getState() == pcf::IndiProperty::Ok && ipRecv.find("target");
+      double value = 0;
+      try { if(valid) value = ipRecv["target"].get<double>(); }
+      catch(...) { valid = false; }
+      valid = valid && std::isfinite(value);
+      if(horizontal) { m_relativeXValid = valid; m_relativeX = value; m_cen_x_tgt_changed = true; }
+      else { m_relativeYValid = valid; m_relativeY = value; m_cen_y_tgt_changed = true; }
+      if(!valid) m_discardCenters = true;
+      return;
+   }
+   if(name == "roi_region_state")
+   {
+      MagAOX::roi::region reference;
+      bool valid = ipRecv.getState() == pcf::IndiProperty::Ok;
+      for(const auto &element : MagAOX::roi::names()) valid = valid && ipRecv.find(element);
+      valid = valid && ipRecv.find("units");
+      try
+      {
+         if(valid)
+         {
+            reference = {ipRecv["x"].get<float>(), ipRecv["y"].get<float>(), ipRecv["w"].get<int>(),
+                         ipRecv["h"].get<int>(), ipRecv["bin_x"].get<int>(), ipRecv["bin_y"].get<int>()};
+            const int units = ipRecv["units"].get<int>();
+            valid = MagAOX::roi::valid(reference) && (units == 0 || units == 1);
+         }
+      }
+      catch(...) { valid = false; }
+      if(!valid || !m_referenceValid || !MagAOX::roi::same(reference, m_reference)) m_discardCenters = true;
+      m_reference = reference;
+      m_referenceValid = valid;
+      return;
+   }
    if(ipRecv.getName() == "fsm")
    {
       if(ipRecv.find("state"))
@@ -402,6 +520,20 @@ void roi::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
 void roi::updateGUI()
 {
+   const bool available = m_referenceValid && m_relativeXValid && m_relativeYValid &&
+                          (m_appState == "READY" || m_appState == "OPERATING");
+   const bool active = available && m_relativePreferred;
+   if(active != m_relativeActive || m_discardCenters) discardCenterEdits();
+   m_relativeActive = active;
+   m_discardCenters = false;
+   {
+      QSignalBlocker blocker(ui.check_relative);
+      ui.check_relative->setEnabled(available);
+      ui.check_relative->setChecked(active);
+      ui.check_relative->setToolTip(available ? "Target centers in current image pixels" :
+                                   "Relative coordinates unavailable; showing absolute centers");
+   }
+
    if( m_appState != "READY" && m_appState != "OPERATING" && m_appState != "CONFIGURING" )
    {
       //Disable & zero all
@@ -556,12 +688,12 @@ void roi::updateGUI()
 
       if(m_cen_x_tgt_changed)
       {
-         ui.le_center_x->setTextChanged(QString::number(m_cen_x_tgt));
+         ui.le_center_x->setTextChanged(QString::number(m_relativeActive ? m_relativeX : m_cen_x_tgt));
          m_cen_x_tgt_changed = false;
       }
       else
       {
-         ui.le_center_x->setText(QString::number(m_cen_x_tgt));
+         ui.le_center_x->setText(QString::number(m_relativeActive ? m_relativeX : m_cen_x_tgt));
       }
 
       if(m_cen_y_curr_changed)
@@ -576,12 +708,12 @@ void roi::updateGUI()
 
       if(m_cen_y_tgt_changed)
       {
-         ui.le_center_y->setTextChanged(QString::number(m_cen_y_tgt));
+         ui.le_center_y->setTextChanged(QString::number(m_relativeActive ? m_relativeY : m_cen_y_tgt));
          m_cen_y_tgt_changed = false;
       }
       else
       {
-         ui.le_center_y->setText(QString::number(m_cen_y_tgt));
+         ui.le_center_y->setText(QString::number(m_relativeActive ? m_relativeY : m_cen_y_tgt));
       }
 
       if(m_wid_curr_changed)
@@ -688,28 +820,47 @@ void roi::on_le_bin_y_editingFinished()
    sendNewProperty(ip);
 }
 
+void roi::discardCenterEdits()
+{
+   QSignalBlocker xBlocker(ui.le_center_x), yBlocker(ui.le_center_y);
+   ui.le_center_x->stopEditing();
+   ui.le_center_y->stopEditing();
+   m_cen_x_tgt_changed = m_cen_y_tgt_changed = true;
+}
+
+void roi::on_check_relative_toggled(bool checked)
+{
+   discardCenterEdits();
+   m_relativePreferred = checked;
+   updateGUI();
+}
+
+void roi::sendCenter(bool horizontal)
+{
+   // Reject the edit if its applied reference changed before the GUI timer refreshed it.
+   if(m_discardCenters || m_onDisconnected) { updateGUI(); return; }
+   if(m_relativeActive && (!m_referenceValid || !m_relativeXValid || !m_relativeYValid ||
+                          (m_appState != "READY" && m_appState != "OPERATING")))
+   { updateGUI(); return; }
+   bool ok;
+   double value = (horizontal ? ui.le_center_x : ui.le_center_y)->editText().toDouble(&ok);
+   if(!ok || !std::isfinite(value)) return;
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   ip.setDevice(m_camName);
+   ip.setName(std::string(horizontal ? "roi_region_x" : "roi_region_y") + (m_relativeActive ? "_relative" : ""));
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = value;
+   sendNewProperty(ip);
+}
+
 void roi::on_le_center_x_editingFinished()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-
-   ip.setDevice(m_camName);
-   ip.setName("roi_region_x");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = ui.le_center_x->editText().toDouble();
-
-   sendNewProperty(ip);
+   sendCenter(true);
 }
 
 void roi::on_le_center_y_editingFinished()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-
-   ip.setDevice(m_camName);
-   ip.setName("roi_region_y");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = ui.le_center_y->editText().toDouble();
-
-   sendNewProperty(ip);
+   sendCenter(false);
 }
 
 void roi::on_le_width_editingFinished()

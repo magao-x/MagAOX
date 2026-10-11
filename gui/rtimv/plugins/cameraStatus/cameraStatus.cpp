@@ -38,6 +38,7 @@ cameraStatus::cameraStatus() : rtimvOverlayInterface()
 
 cameraStatus::~cameraStatus()
 {
+    if(m_roiBox) { m_roiBox->emitDeSelected(); delete m_roiBox; }
 }
 
 int cameraStatus::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurator &config )
@@ -64,6 +65,9 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurat
 
     if( m_roa.m_dictionary != nullptr )
     {
+        // The dictionary keys request definitions through the existing INDI connection.
+        for(const auto &key : {"roi_region_state.x", "roi_check_result.sequence", "roi_region_check.request", "roi_set.request"})
+            (*m_roa.m_dictionary)[m_deviceName + "." + key].setBlob(nullptr, 0);
         // Register these
         ( *m_roa.m_dictionary )[m_deviceName + ".temp_ccd.current"].setBlob( nullptr, 0 );
         ( *m_roa.m_dictionary )[m_deviceName + ".fg_frameSize.width"].setBlob( nullptr, 0 );
@@ -114,6 +118,9 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurat
              SIGNAL( savingState( rtimv::savingState ) ),
              m_roa.m_mainWindowObject,
              SLOT( savingState( rtimv::savingState ) ) );
+
+    connect(this, SIGNAL(newInteractiveBox(StretchBox *)), m_roa.m_mainWindowObject, SLOT(addInteractiveBox(StretchBox *)));
+    connect(this, SIGNAL(roiMessage(const QString &)), m_roa.m_mainWindowObject, SLOT(showStatusMessage(const QString &)));
 
     if( m_enabled )
         enableOverlay();
@@ -253,13 +260,19 @@ float cameraStatus::getBlobVal<float>( const std::string &propel, float defVal )
 int cameraStatus::updateOverlay()
 {
     if( !m_enabled )
+    {
+        if(m_roiPhase == roiPhase::applying) updateROI();
+        if(m_roiBox) m_roiBox->setVisible(false);
         return 0;
+    }
 
     if( m_roa.m_dictionary == nullptr )
         return 0;
 
     if( m_roa.m_graphicsView == nullptr )
         return 0;
+
+    const bool coherentROI = updateROI();
 
     size_t n = 0;
     // char * str;
@@ -354,7 +367,7 @@ int cameraStatus::updateOverlay()
         float y   = getBlobVal<float>( "roi_region_y.current", -1 );
 
         // Only go on if we got good values
-        if( w > 0 && h > 0 && x > 0 && y > 0 && ibx > 0 && iby > 0 )
+        if( w > 0 && h > 0 && std::isfinite(x) && std::isfinite(y) && ibx > 0 && iby > 0 )
         {
             snprintf( tstr, sizeof( tstr ), "%dx%d [%dx%d]", w, h, ibx, iby );
 
@@ -365,12 +378,11 @@ int cameraStatus::updateOverlay()
             float bx = ibx;
             float by = iby;
 
-            if( blobExists( "roi_region_w.target" ) && blobExists( "roi_region_h.target" ) &&
+            if( !coherentROI && blobExists( "roi_region_w.target" ) && blobExists( "roi_region_h.target" ) &&
                 blobExists( "roi_region_x.target" ) && blobExists( "roi_region_y.target" ) &&
                 blobExists( "roi_region_bin_x.target" ) && blobExists( "roi_region_bin_y.target" ) )
             {
 
-                std::lock_guard<std::mutex> guard( m_roiBoxMutex );
 
                 int   wt  = getBlobVal<int>( "roi_region_w.target", -1 );
                 int   ht  = getBlobVal<int>( "roi_region_h.target", -1 );
@@ -379,24 +391,11 @@ int cameraStatus::updateOverlay()
                 float xt  = getBlobVal<float>( "roi_region_x.target", -1 );
                 float yt  = getBlobVal<float>( "roi_region_y.target", -1 );
 
-                if( ( wt > 0 && ht > 0 && xt > 0 && yt > 0 && bxt >= 1 && byt >= 1 ) &&
+                if( ( wt > 0 && ht > 0 && std::isfinite(xt) && std::isfinite(yt) && bxt >= 1 && byt >= 1 ) &&
                     ( wt != w || ht != h || xt != x || yt != y ) )
                 {
-                    if( !m_roiBox )
-                    {
-                        m_roiBox = new StretchBox( xt - 0.5 * ( wt - 1 ), yt - 0.5 * ( ht - 1 ), wt, ht );
-                        m_roiBox->setPenColor( Qt::magenta );
-                        m_roiBox->setPenWidth( 1 );
-                        m_roiBox->setVisible( true );
-                        m_roiBox->setStretchable( false );
-                        m_roiBox->setRemovable( false );
-                        std::cerr << "Connecting\n";
-                        connect( m_roiBox,
-                                 SIGNAL( remove( StretchBox * ) ),
-                                 this,
-                                 SLOT( stretchBoxRemove( StretchBox * ) ) );
-                        emit newStretchBox( m_roiBox );
-                    }
+                    makeROIBox();
+                    m_roiBox->setStretchable(false);
                     // note: can only be here if bx > 0
                     float xc = ( xt * bxt - x * bx + 0.5 * ( (float)m_width * bx - 1 ) ) / bx;
                     float yc = ( m_height * by - ( yt * byt - y * by + 0.5 * ( (float)m_height * by - 1 ) ) ) / by;
@@ -417,7 +416,7 @@ int cameraStatus::updateOverlay()
 
             } // if(blobExists("roi_region_w.target")
 
-        } // if(w > 0 && h > 0 && x > 0 && y > 0 && ibx > 0 && iby > 0)
+        } // if(w > 0 && h > 0 && std::isfinite(x) && std::isfinite(y) && ibx > 0 && iby > 0)
 
     } // if(blobExists("roi_region_w.current") ...
 
@@ -565,21 +564,18 @@ int cameraStatus::updateOverlay()
     return 0;
 }
 
-void cameraStatus::keyPressEvent( QKeyEvent *ke )
+void cameraStatus::keyPressEvent(QKeyEvent *ke)
 {
-    char key = ke->text()[0].toLatin1();
-
-    if( key == 'C' )
+    if(ke->isAutoRepeat()) return;
+    if(ke->key() == Qt::Key_C && ke->modifiers() == Qt::ShiftModifier)
     {
-        if( m_enabled )
-            disableOverlay();
-        else
-            enableOverlay();
+        if(m_enabled) disableOverlay(); else enableOverlay();
+        return;
     }
-    else if( key == 'R' )
-    {
-        std::cerr << "ROI\n";
-    }
+    if(!m_enabled) return;
+    if(ke->key() == Qt::Key_R && ke->modifiers() == Qt::ShiftModifier) beginROI();
+    else if(ke->key() == Qt::Key_R && ke->modifiers() == Qt::AltModifier) applyROI();
+    else if(ke->key() == Qt::Key_Escape && ke->modifiers() == Qt::NoModifier && m_explicitROI) escapeROI();
 }
 
 bool cameraStatus::overlayEnabled()
@@ -602,28 +598,16 @@ void cameraStatus::disableOverlay()
         m_roa.m_graphicsView->statusTextText( n, "" );
     }
 
+    escapeROI();
+    if(m_roiBox) m_roiBox->setVisible(false);
     m_enabled = false;
 }
 
-void cameraStatus::stretchBoxRemove( StretchBox *sb )
+void cameraStatus::stretchBoxRemove(StretchBox *sb)
 {
-    std::cerr << "cameraStatus::stretchBoxRemove 1\n";
-    std::lock_guard<std::mutex> guard( m_roiBoxMutex );
-    if( !m_roiBox )
-    {
-        return;
-    }
-
-    std::cerr << "cameraStatus::stretchBoxRemove 2\n";
-
-    if( sb != m_roiBox )
-    {
-        return;
-    }
-
-    std::cerr << "cameraStatus::stretchBoxRemove 3\n";
-
+    if(sb != m_roiBox) return;
     m_roiBox = nullptr;
+    failROI("ROI box removed");
 }
 
 std::vector<std::string> cameraStatus::info()
@@ -631,5 +615,8 @@ std::vector<std::string> cameraStatus::info()
     std::vector<std::string> vinfo;
     vinfo.push_back( "Camera Status overlay: " + m_deviceName );
 
+    vinfo.push_back("Shift+R: edit ROI (full/default starts a new box; custom preserves size)");
+    vinfo.push_back("Alt+R: check/apply; adjusted ROI needs another Alt+R");
+    vinfo.push_back("Escape: leave ROI edit; staged targets are retained");
     return vinfo;
 }

@@ -260,6 +260,8 @@ public:
 inline
 zylaCtrl::zylaCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+    m_roiUnits = MagAOX::roi::units::unsupported;
+
    m_powerMgtEnabled = true;
    m_powerOnWait = 10;
 

@@ -278,6 +278,8 @@ class baslerCtrl : public MagAOXApp<>,
 
 inline baslerCtrl::baslerCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
+    m_roiUnits = MagAOX::roi::units::binned;
+
     m_powerMgtEnabled = false;
 
     m_full_x = 335.5;
