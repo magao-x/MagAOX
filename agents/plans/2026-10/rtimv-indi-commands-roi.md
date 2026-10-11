@@ -344,7 +344,7 @@ Historical planning verification (before implementation approval, 2026-10-11 rev
 
 ### Build and rollout notes
 
-1. Build the companion rtimv branch first, then rebuild both MagAO-X plugins against its matching headers and shared library. The implemented clone is `local/rtimv-roi`; the original sibling checkout remains unchanged. No remote branch was pushed.
+1. Build the companion rtimv branch first, then rebuild both MagAO-X plugins against its matching headers and shared library. The implemented clone is `local/rtimv-roi`. The initial implementation left the original sibling checkout unchanged; its `dev` branch was subsequently fast-forwarded as recorded below. No remote branch was pushed by the agent.
 2. Build/deploy updated camera applications and roiGUI through the normal user-managed workflow. The new properties are additive. Older cameras retain absolute roiGUI entry and a passive overlay. Zyla advertises unsupported geometry; no legacy SDK offset corrections are included.
 3. Use the configured camera's own image. Sensor and binned unit conversion is explicit; camera-native flip handling remains in the existing drivers, with graphics-scene Y inversion applied separately. Dimensions cannot identify a rotated or derived stream. No calibration is inferred from image appearance.
 4. Full/default recognition compares all six native values against existing metadata. Unknown classification or a default adjusted by an unverified hardware normalization preserves the custom ROI geometry on Shift+R. This conservative fallback avoids calling a mutating validator for classification.
@@ -391,3 +391,12 @@ Current/reference values and target centers are stored at the camera's existing 
 - Documentation pass completed for touched declarations and member state. Existing main-window inline accessors were moved to the source file as required by the companion repository. Documentation and formatting are committed separately from behavior.
 
 - Final offline verification after documentation and clang-format: all four MagAOX focused suites pass (529 + 117 + 30 + 131 assertions), and all three companion rtimv CTest targets pass. Both GUI client variants/server, cameraSim, roiGUI, and the loadable plugins are built locally without installation. The new rtimv test exercises the real mouse press/move/release handlers and verifies that the full adjustment message fits the existing status box. The original task text and all four user answers remain unchanged.
+
+### Synchronization with rtimv main and dev (2026-10-11)
+
+- The user identified work merged into rtimv `main` instead of `dev`. Fetched `jaredmales/rtimv` into the companion clone's `upstream` remote: `main` was `372fe1b` (PR #72, separate client image-age and source-info polling), and `dev` was `12c47f6`.
+- Created merge commit `04af7c1` on `jrmales/merge-main-into-dev`, with `12c47f6` and `372fe1b` as parents. The merge was clean. After building and testing it, fast-forwarded `dev` in both `local/rtimv-roi` and `/home/jrmales/Source/rtimv`; no merge commit was created directly on a shared branch.
+- Merged the updated `dev` into `jrmales/rtimv-indi-commands-roi` as `9ad7cff`, preserving the existing feature commits. This merge was also clean. The complete feature diff against the updated base has the same stable Git patch ID as the original `54981bb..bf4ba3d` diff; no feature behavior or manual conflict resolutions were added.
+- Verification: `cmake --build build -j4` built the local GUI, gRPC GUI, and server for both merges. `ctest --test-dir build --output-on-failure` passed 2/2 tests for merged `dev` and 3/3 for the updated feature. The merged main-window sources pass `clang-format --dry-run --Werror`, and the feature diff against `dev` passes `git diff --check`.
+- Rebuilt both MagAO-X plugins using the companion clone's `RTIMV_INCLUDEPATH` and `RTIMV_LIBDIR`. Rebuilt and ran `gui/rtimv/plugins/tests/roi_commands_test` offscreen: 131 assertions in 5 cases passed. Both real plugins loaded, exposed their expected interfaces, and unloaded without attaching to a camera or INDI connection.
+- These synchronization commits remain local. No GitHub push, installation, or instrument operation was performed during this update.
