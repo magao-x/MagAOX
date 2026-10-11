@@ -47,6 +47,11 @@ $ bash ./testMagAOX.bash
  * \ingroup unit_test
  */
 
+/** \defgroup filterWheelCtrl_unit_test Filter Wheel Controller Unit Tests
+ * \brief Offline communication recovery, homing, and power-transition tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup picamCtrl_unit_test picamCtrl Unit Tests
  * \brief Offline temperature configuration and validation tests for picamCtrl.
  * \ingroup application_unit_test
