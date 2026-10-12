@@ -358,6 +358,15 @@ All with explicit `hp.`/`ndimage` imports.
 > - Control on the noise-weighted combination of both pairs. Report the co-rotation component, but do not correct it.
 > - Single-pair fallback is allowed everywhere except during the calibration sweep.
 > - Store each calibration as one FITS file in `/home/xsup/adc_calibs/`.
+>
+> **Decisions from round 3 (user, 2026-10-12):**
+> - Each sweep position uses the usual `no_measurements` batch. Leave at least 3 s between the stages stopping and the next move, for stage safety.
+> - The FITS file holds per-position mean images plus a per-batch table, with the naming as proposed.
+> - There is one active calibration file at a time. A mismatch with the current setup is logged at INFO only.
+> - The `ctrl_mtx` INDI property stays writable. With no calibration file, the app falls back to the config `ctrl_mtx`.
+> - Use a simple straight-line fit that warns and never rejects.
+> - The zero-point understanding (R6) is confirmed.
+> - Implement as a `calibrate` element of the `state` switch, in `app.py`.
 
 ### What is being calibrated
 
@@ -371,7 +380,7 @@ p(δ1) ≈ c + s · δ1          s = [s02, s13]  (deg of pair offset per deg of 
 
 Calibration measures the sensitivity vector `s`, and from it builds `ctrl_mtx` in units of δ1 degrees (accepted by the user).
 
-**Control target.** The loop drives the pair offsets to zero, on sky exactly as on the internal source. AO limitations mean zero is never reached exactly, but the target is the same. What does *not* carry over between the internal source and sky is the δ1 at which the offsets cross zero, because the atmospheric dispersion is different. That is why the null δ1 is a diagnostic only and is never used as a setpoint. *(Agent's understanding of round 2, Q6; see round 3, R6.)*
+**Control target.** The loop drives the pair offsets to zero, on sky exactly as on the internal source. AO limitations mean zero is never reached exactly, but the target is the same. What does *not* carry over between the internal source and sky is the δ1 at which the offsets cross zero, because the atmospheric dispersion is different. That is why the null δ1 is a diagnostic only and is never used as a setpoint. *(Confirmed by the user, round 3 R6.)*
 
 ### Sequence
 
@@ -391,19 +400,19 @@ Calibration measures the sensitivity vector `s`, and from it builds `ctrl_mtx` i
 
    - The first move goes straight to −A: no overshoot, and backlash is ignored.
    - Each move goes through `send_command()`, which waits for the stages to report arrival. Settling is taken to be zero once they have arrived.
-   - At each position, measure for at least `calib_dwell_sec` = 3 s. *(How batches fill the dwell is round 3, R1.)*
+   - At each position, take one `measure_dispersion` batch (`n_avg × no_measurements`, as in normal operation).
+   - **Stage safety:** the next move is not sent until at least `calib_dwell_sec` = 3 s after the stages reported arrival. If the batch takes longer than that, the move waits for the batch.
    - Frames with invalid spots are recorded as failed points, not as a failed calibration. Single-pair fallback is **off** during the sweep, so every slope comes from one known pair.
-3. **Fit.** For each pair element, fit `p_j(t) = c_j + s_j·δ1(t) + r_j·t` over all positions of both legs. The triangle makes δ1 symmetric in time about the midpoint, so a linear drift `r_j·t` is separable from the slope.
+3. **Fit (kept simple).** For each pair element, fit one straight line `p_j = c_j + s_j·δ1` over all positions of both legs. The triangle is symmetric in time about its midpoint, so a linear drift during the sweep does not bias the slope, and no drift term is needed.
 
-   **Noise.** The per-pair noise `σ02`, `σ13` comes from the scatter of batches at each position, so no separate baseline is needed.
+   **Noise.** The per-pair noise `σ02`, `σ13` comes from the scatter of the measurements within each position's batch.
 
    **Reported:**
    - `s_j` with its uncertainty, and the intercept `c_j`;
    - the null `δ1*_j = −c_j / s_j` (diagnostic only);
-   - R² and the residual RMS;
-   - the drift `r_j`.
+   - R² and the residual RMS.
 
-   *(How much linear-range fitting and automatic rejection to keep is round 3, R5.)*
+   **No automatic rejection.** If R² is below `calib_min_r2`, the app logs a warning. The file is still written, and the operator decides whether to use it.
 4. **Build `ctrl_mtx`.** Use the noise-weighted pseudo-inverse of `s`, negated:
 
    ```
@@ -412,11 +421,14 @@ Calibration measures the sensitivity vector `s`, and from it builds `ctrl_mtx` i
    ```
 
    Then `e = ctrl_mtx · p` is the δ1 correction in degrees, and the noisier pair is downweighted. The single-pair fallback coefficients `−1/s_j` come from the same fit.
-5. **Restore and save.** Return δ1 to its recorded value, whether the sweep succeeded or not; an abort, state change or failure also restores and goes idle. Then:
+5. **Restore and save.** Return δ1 to its recorded value, whether the sweep succeeded or not; an abort, state change or failure also restores. The state then returns to idle. Then:
    - Create `/home/xsup/adc_calibs/` if it does not exist.
-   - Write one FITS file per calibration. It holds the sweep images, with the calibration results and the parameters they were measured under in the header (see "Spot source selection" for the list). *(Exact contents and naming are round 3, R2.)*
-   - Log a summary to telemetry and at INFO level.
-   - The result is **not** applied automatically. To change the calibration in use, the operator edits the config file so it points at a different FITS file in `/home/xsup/adc_calibs/`. *(Scope of the pointer and its relation to `ctrl_mtx` are round 3, R3–R4.)*
+   - Write one FITS file, `adccal_<camera>_<filter>_<source>_<UTC YYYYmmddTHHMMSS>.fits`, containing:
+     - **primary HDU:** a cube with one mean image per sweep position (41 × H × W);
+     - **primary header:** the results and the parameters they were measured under (see "Spot source selection");
+     - **binary-table extension:** one row per measurement (commanded and reported δ1, time, spot angles, deviations, pair offsets, valid flags).
+   - Log the file path and a summary (slopes, R², proposed `ctrl_mtx`) at INFO level, and add a telemetry record.
+   - The result is **not** applied automatically. To use it, the operator points the new config field `calibration_file` at it and restarts or reloads the app.
 6. **Validation (optional, recommended).** After pointing the config at the new file, offset δ1 by a known amount `b` (within the step limit), switch to measure-only, and check that the measured error is about −b. Then close the loop and confirm that the pair offsets are driven back toward zero.
 
 ### Alternative: push-pull sequence (kept for the record, not expected to be implemented)
@@ -496,8 +508,45 @@ Here δ1* is wherever the pair offsets are zero under the current conditions. Th
   - for DM spots, the configured separation (47 λ/D) and angle (28°);
   - the sweep settings (range, steps, dwell, `n_avg`, `no_measurements`);
   - the fit results (`s_j` and their uncertainties, `c_j`, the nulls, R², residual RMS, drift, `σ_j`), `ctrl_mtx`, the fallback coefficients, and the UTC timestamp.
-- **Using a calibration.** The config points at a FITS file, and the app reads `ctrl_mtx`, the fallback coefficients and the parameters above from its header. For sparkles, the current `tweeterSpeck` separation and angle are compared with the header values: the angle rotates the pair axes and the separation changes the spot length, so a mismatch invalidates the slope. *(What happens on a mismatch is round 3, R3.)*
+- **Using a calibration.** There is one active file at a time, set by the config field `calibration_file`. The operator re-points it after changing camera, filter, spot source or sparkle geometry.
+  - **At startup** the app reads `ctrl_mtx`, the fallback coefficients and the slope direction (for the co-rotation diagnostic) from the header. The values read from the file initialize the INDI `ctrl_mtx` property.
+  - **With no file configured,** the app uses the config `ctrl_mtx`, as it does now.
+  - **The `ctrl_mtx` INDI property stays writable**, so the operator can change it on the fly.
+  - **Mismatches:** before each cycle, the header's camera, filter, spot source and (for sparkles) `tweeterSpeck` separation and angle are compared with the current setup. On a mismatch, the app logs at **INFO** level and carries on: it neither refuses closed loop nor changes anything. A mismatch with the file does not necessarily mean the active `ctrl_mtx` is wrong, because the operator may have set `ctrl_mtx` by hand. The message is logged once per change of setup, not every cycle.
 - **Helping the operator choose (suggestion, optional).** Measure-only could publish a spot SNR for the selected source.
+
+### Implementation outline (deferred until the current app is verified on the MagAO-X machine)
+
+All of this goes in `app.py` (R7a).
+
+- **States.** Add `calibrate` to `STATE_ELEMENTS` and the `state` switch. The sweep runs inside `loop()`, one position per call, so a state change aborts it between positions, as with `measure_dispersion`. On completion or abort, δ1 is restored and the state returns to `idle`.
+- **New config fields:**
+  - `calibration_file` (path, default empty);
+  - `calib_range_deg` = 3;
+  - `calib_n_steps` = 21;
+  - `calib_dwell_sec` = 3;
+  - `calib_max_deg` = 5;
+  - `calib_min_r2`;
+  - `calib_dir` = `/home/xsup/adc_calibs`.
+- **New pure functions** (unit-testable like the rest):
+  - `sweep_positions(range, n_steps)`;
+  - `fit_sweep(delta, pairs)`, which returns slopes, intercepts, uncertainties, nulls and R²;
+  - `build_ctrl_mtx(s, sigma)`;
+  - `write_calibration(path, ...)` and `read_calibration(path)`.
+- **Measurement changes:**
+  - per-spot validity flags in `measure_spot_angles`;
+  - single-pair fallback in `measure_dispersion` (off in `calibrate`), logged at INFO;
+  - the co-rotation component in the `measurement` property and telemetry.
+- **Dependency:** `astropy` (FITS I/O) added to `pyproject.toml`.
+- **Tests:**
+  - sweep positions and the ±5° bound;
+  - fit recovery of a known slope on synthetic pair data, including a linear drift on a triangle;
+  - `ctrl_mtx` weighting;
+  - a FITS round trip;
+  - a mismatch logs at INFO and does not block;
+  - δ1 is restored on abort;
+  - at least 3 s between arrival and the next move;
+  - fallback is disabled during `calibrate`.
 
 ### Open points for the user to verify
 
@@ -606,3 +655,14 @@ Here δ1* is wherever the pair offsets are zero under the current conditions. Th
   - (b) a separate module in the same package (e.g. `xapp/adcCtrl/calibration.py`), triggered from the app;
   - (c) a standalone script, run separately, that imports the measurement functions from `app.py` and writes the FITS file, leaving the app itself almost unchanged?
   - Answer: (a)
+
+#### Remaining Questions (Round 4)
+*Raised by the round 3 answers.*
+
+- **S1. Fallback and the co-rotation diagnostic without a matching calibration.** Single-pair fallback needs each pair's own slope (`−1/s_j`), and the co-rotation diagnostic needs the direction of `s`. Neither can be derived from `ctrl_mtx` alone. The proposal:
+  - Both come only from the active calibration file. With no file configured, fallback is disabled (a frame with an invalid spot is discarded, as today) and the co-rotation component is not reported. Each of these is logged once at INFO.
+  - If the operator changes `ctrl_mtx` by hand, fallback and the diagnostic keep using the file's values.
+
+  Is that acceptable?
+  - Answer:
+    first bullet is acceptable. second bullet iss not: if `ctrl_mtx` is changed by hand, fallback should also be disabled. 
