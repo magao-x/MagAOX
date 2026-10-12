@@ -21,6 +21,8 @@ instrument configuration live in separate repositories.
   replay at the next input frame. Only a reload from the new reset generation
   may activate afterward; model destruction stays on the background thread.
 - `recollect_warmup` invalidates replay snapshots and restarts warm-up/history.
+- Repeated semaphore notifications for the same source counter are ignored,
+  without republishing output or changing history/replay state.
 - Source-counter gaps reset history and the partial replay episode. The gap
   frame uses pass-through with control On, or proportional fallback with it Off.
 - Normal controlled outputs reject non-finite values and use the configured
@@ -97,9 +99,10 @@ make
 sudo make install
 ```
 
-The registered Catch2 suite tests CPU handoff ownership/generation, feature
-ordering, CPU linear inference, controlled-prefix pass-through, command limiting,
-and replay reset behavior. Its helpers do not require camera or DM access.
+The registered Catch2 suite tests CPU handoff ownership/generation, source-counter
+continuity and duplicates, feature ordering, CPU linear inference, controlled-prefix
+pass-through, command limiting, and replay reset behavior. Its helpers do not
+require camera or DM access.
 On a configured MagAO-X development environment:
 
 ```sh
@@ -111,6 +114,3 @@ make -f Makefile.one t=../apps/po4ao/tests/po4ao_test.cpp
 The suite does not substitute for compiling the full app against CUDA/TensorRT
 and running the operator's fake-stream/lab acceptance test. Publication to GitHub
 does not install a binary, replace the live config, or restart the application.
-
-Historical experiment records are retained in `PO4AO_IMPLEMENTATION_NOTES.md`
-and `PO4AO_HANDOFF.md`. Current PR status is in `PR_PREPARATION.md`.
