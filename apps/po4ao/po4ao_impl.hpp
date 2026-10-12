@@ -1412,13 +1412,20 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
     if( curr_src == nullptr || !m_inputState || !m_output || !m_outputOpened )
         return -1;
 
+    const uint64_t sourceCounter = shmimMonitorT::m_imageStream.md[0].cnt0;
+    // Queued notifications can refer to the same latest image after a processing stall.
+    if( sourceCounterIsDuplicate( sourceCounter, m_lastInputCounter, m_haveInputCounter ) )
+    {
+        recordLatency();
+        return 0;
+    }
+
     activatePendingEngine();
     const uint64_t resetGeneration = m_modelResetRequest.exchange( 0, std::memory_order_acq_rel );
     if( resetGeneration != 0 )
         resetActiveModel( resetGeneration );
-    const auto    *observation   = static_cast<const float *>( curr_src );
-    const uint64_t sourceCounter = shmimMonitorT::m_imageStream.md[0].cnt0;
-    const bool     consecutive   = sourceCounterIsConsecutive( sourceCounter, m_lastInputCounter, m_haveInputCounter );
+    const auto *observation = static_cast<const float *>( curr_src );
+    const bool  consecutive = sourceCounterIsConsecutive( sourceCounter, m_lastInputCounter, m_haveInputCounter );
     if( m_haveInputCounter && sourceCounter > m_lastInputCounter )
     {
         const uint64_t sourceAdvance = sourceCounter - m_lastInputCounter;

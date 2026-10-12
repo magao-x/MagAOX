@@ -38,6 +38,14 @@ takePendingModel( std::atomic<Model *> &pending /**< [in,out] Candidate awaiting
     return candidate;
 }
 
+/// Identify a queued semaphore notification for an already processed source frame.
+inline bool sourceCounterIsDuplicate( uint64_t current /**< [in] Current source publication counter. */,
+                                      uint64_t previous /**< [in] Previously processed source counter. */,
+                                      bool     havePrevious /**< [in] Whether the previous counter is valid. */ )
+{
+    return havePrevious && current == previous;
+}
+
 /// Report whether the current source counter directly follows the previous one.
 inline bool sourceCounterIsConsecutive( uint64_t current /**< [in] Current source publication counter. */,
                                         uint64_t previous /**< [in] Previously processed source counter. */,

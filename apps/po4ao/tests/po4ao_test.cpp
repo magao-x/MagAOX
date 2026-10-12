@@ -105,6 +105,26 @@ TEST_CASE( "PO4AO classifies source counter continuity", "[po4ao]" )
     REQUIRE_FALSE( sourceCounterIsConsecutive( 0, 100, true ) );
 }
 
+/// Verify only repeat counters with an established previous frame are ignored.
+/** \ingroup po4ao_unit_test
+ */
+TEST_CASE( "PO4AO identifies duplicate source notifications", "[po4ao]" )
+{
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    sourceCounterIsDuplicate( 0, 0, false );
+#endif
+    // clang-format on
+
+    REQUIRE_FALSE( sourceCounterIsDuplicate( 0, 0, false ) );
+    REQUIRE_FALSE( sourceCounterIsDuplicate( 100, 100, false ) );
+    REQUIRE( sourceCounterIsDuplicate( 0, 0, true ) );
+    REQUIRE( sourceCounterIsDuplicate( 100, 100, true ) );
+    REQUIRE_FALSE( sourceCounterIsDuplicate( 101, 100, true ) );
+    REQUIRE_FALSE( sourceCounterIsDuplicate( 104, 100, true ) );
+    REQUIRE_FALSE( sourceCounterIsDuplicate( 0, 100, true ) );
+}
+
 /// Verify CPU linear inference applies independent temporal weights per mode.
 /** \ingroup po4ao_unit_test
  */
