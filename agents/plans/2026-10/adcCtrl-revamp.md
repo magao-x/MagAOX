@@ -333,7 +333,9 @@ All with explicit `hp.`/`ndimage` imports.
   - **Measure-only, sparkles** (15 λ/D, angle 0, i-band): angle0 read −88° (about 2° from radial) but angle2 stayed at about 47° (about 43° from radial). DM spots were correct in the same setup. **Cause:** the 20 λ/D sparkle search box reached to 7.4 λ/D, only about 1.3 λ/D outside the 6.1 λ/D core-mask radius, so spot 2's brightest-pixel search locked onto a lopsided core residual. Setting `sparkle_search_extent = 10` in the config gave angles −88°, 11°, −81° and −7° (all near radial; pair02 ≈ −7°, pair13 ≈ +18°). Code fix: see the Implementation Log.
   - **After the search fix:** pytest gave 29 passed with no warnings. Measure-only works for both sparkles and DM spots.
   - **Startup log noise:** restarting adcCtrl restarts isICC, whose INDI server takes about 15–20 s to come up. Until then, each camera-open attempt logged an ERROR (at startup and on every 10 s retry), and each missing external key logged a WARNING. A key missed during startup was also never warned about again. Fix: see "Startup grace period" in the Implementation Log.
-  - **Still to do:** rerun pytest with the startup-grace change (expect 30 passed), closed-loop checks (`oneshot`, `adcLoop`, `loop_sign`), recalibrating `ctrl_mtx` by hand, and the mid-batch abort/threading check.
+  - **After the startup-grace change:** pytest gave 30 passed. The startup log is quiet.
+  - **Mid-batch abort (R16):** changing `state` to idle during a measurement batch stops the batch immediately. This confirms that purepyindi2 delivers INDI callbacks on a different thread from `loop()`.
+  - **Still to do:** the closed-loop checks (`oneshot`, `adcLoop`, `loop_sign`) and recalibrating `ctrl_mtx` by hand.
 
 ## Follow-up and Edge Cases
 <!-- The agent should list any planned follow up and any edge cases that are not addressed -->
@@ -344,7 +346,7 @@ All with explicit `hp.`/`ndimage` imports.
 - **Saturated spot cores** bias the second moments. There is no saturation detection.
 - **Spots off-frame** (small ROI, or DM spots in z-band at 47 × 1.38 λ/D): handled as failed measurements via the padded `window_field`, with no ROI adaptation.
 - **Sparkles selected but `tweeterSpeck` not modulating:** this gives noise-dominated measurements. A `tweeterSpeck.modulating` check would be a cheap addition.
-- **Abort mid-batch (R16)** only takes effect if purepyindi2 delivers INDI callbacks on a different thread from `loop()`. If both share a thread, a state change is seen at the next cycle instead. To verify on the build machine.
+- ~~**Abort mid-batch (R16)** depends on the callback thread.~~ **Verified on the instrument (2026-10-12):** a state change stops a running batch immediately.
 - **Deployed config file** must be migrated from `[camera]` to `[cameras.*]` (see Implementation Log).
 - **Concurrent writers to `deltaADC1/2`:** the app does not resync δ1 from `adctrack` (see Implementation Log), so external edits to `deltaADC1/2` are overwritten on the next command. A full ownership convention is out of scope.
 - **Loop period:** with large `n_avg × no_measurements`, plus up to `send_timeout_sec` waiting for stages, a cycle can exceed `sleep_interval_sec`. That interval is a minimum, not a period.
