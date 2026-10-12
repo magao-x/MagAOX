@@ -61,6 +61,7 @@
 ../apps/pi335Ctrl/tests/pi335Ctrl_test
 ../apps/picoMotorCtrl/tests/picoMotorCtrl_test
 ../apps/picamCtrl/tests/picamCtrl_test
+../apps/po4ao/tests/po4ao_test
 ../apps/psfAcq/tests/psfAcq_test
 ../apps/psfFit/tests/psfFit_test
 ../apps/pupilFit/tests/pupilFit_test
