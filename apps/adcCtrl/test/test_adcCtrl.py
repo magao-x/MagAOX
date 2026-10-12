@@ -24,6 +24,7 @@ import numpy as np
 app_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(app_root))
 
+import xapp.adcCtrl.app as app_module
 from xapp.adcCtrl.app import (
     AdcCtrlConfig,
     SpotGeometry,
@@ -474,6 +475,62 @@ def test_missing_external_properties_use_defaults():
     assert dev._sparkle_freq == 15.0
     dev.apply_pending()  # adctrack missing: nothing written, no exception
     assert dev.client.writes == []
+
+
+class RecordingHandler(logging.Handler):
+    """Collects (level, message) pairs from a logger."""
+
+    def __init__(self):
+        super().__init__(level=logging.DEBUG)
+        self.records = []
+
+    def emit(self, record):
+        self.records.append((record.levelno, record.getMessage()))
+
+    def count(self, level):
+        return sum(1 for lvl, _ in self.records if lvl == level)
+
+
+def test_startup_grace_and_camera_outage_logging():
+    """Missing INDI devices are quiet during startup, then reported once per outage."""
+    dev = make_device(client=FakeClient())
+    dev.log = logging.getLogger("adcCtrl-test-grace")
+    dev.log.setLevel(logging.DEBUG)
+    handler = RecordingHandler()
+    dev.log.addHandler(handler)
+
+    def no_camera(*args, **kwargs):
+        raise TimeoutError("INDI not up")
+
+    original_xcam = app_module.XCam
+    app_module.XCam = no_camera
+    try:
+        # during the startup grace period: nothing above DEBUG
+        assert dev.in_startup_grace()
+        dev.check_indi_props()
+        assert not dev.open_camera()
+        assert dev.properties["status"]["last_error"].startswith("could not open camera")
+        assert handler.count(logging.WARNING) == 0
+        assert handler.count(logging.ERROR) == 0
+
+        # after the grace period: each missing key warns once, the outage errors once
+        dev._start_time -= dev.config.startup_grace_sec + 1
+        dev.check_indi_props()
+        dev.check_indi_props()
+        assert handler.count(logging.WARNING) == len(set(dev._warned_keys)) > 0
+        assert not dev.open_camera()
+        assert not dev.open_camera()
+        assert handler.count(logging.ERROR) == 1
+
+        # recovery is logged, and a later outage is reported again
+        app_module.XCam = lambda *args, **kwargs: FakeCamera()
+        assert dev.open_camera()
+        app_module.XCam = no_camera
+        assert not dev.open_camera()
+        assert handler.count(logging.ERROR) == 2
+    finally:
+        app_module.XCam = original_xcam
+        dev.log.removeHandler(handler)
 
 
 def test_filter_sets_normalized_wavelength():

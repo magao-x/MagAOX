@@ -514,6 +514,7 @@ class AdcCtrlConfig(BaseConfig):
     outlier_k : float = xconf.field(default=3.0, help="Outlier rejection threshold in robust sigma")
     min_valid_fraction : float = xconf.field(default=0.5, help="Minimum fraction of valid measurements needed to act on a batch")
     camera_retry_sec : float = xconf.field(default=10.0, help="Interval between attempts to open the camera")
+    startup_grace_sec : float = xconf.field(default=60.0, help="After startup, missing INDI devices and camera are logged at DEBUG only, while the INDI server comes up")
 
 
 class States(Enum):
@@ -590,9 +591,13 @@ class adcCtrl(XDevice):
         self.camera = None
         # monotonic time of the last camera open attempt, for retry pacing
         self._last_camera_attempt = None
+        # monotonic startup time, for the startup grace period
+        self._start_time = time.monotonic()
         # One-time warning bookkeeping
         self._warned_no_dark = False
         self._warned_keys = set()
+        # True once a camera outage has been reported, so retries do not repeat it
+        self._camera_error_reported = False
         # Failed cycles in a row; closed loop drops to idle at the configured limit
         self._consecutive_failures = 0
         # ADC writes requested by callbacks or setup, performed by loop()
@@ -730,14 +735,24 @@ class adcCtrl(XDevice):
         tv.add_element(DefText(name="last_error", _value=""))
         self.add_property(tv)
 
+    def in_startup_grace(self):
+        """True while the INDI server may still be starting (see `startup_grace_sec`)."""
+        return time.monotonic() - self._start_time < self.config.startup_grace_sec
+
     def ext(self, key, default=None):
-        """Read an external INDI value, returning `default` (and warning once) if unavailable."""
+        """Read an external INDI value, returning `default` if unavailable.
+
+        A missing key is warned about once, but only after the startup grace
+        period; during it the message is logged at DEBUG.
+        """
         try:
             value = self.client[key]
         except Exception:
             value = None
         if value is None:
-            if key not in self._warned_keys:
+            if self.in_startup_grace():
+                self.log.debug(f"{key} is not available yet, using {default}")
+            elif key not in self._warned_keys:
                 self._warned_keys.add(key)
                 self.log.warning(f"{key} is not available, using {default}")
             return default
@@ -756,9 +771,17 @@ class adcCtrl(XDevice):
             )
         except Exception as e:
             self.camera = None
-            self.set_error(f"could not open camera {cam_cfg.shmim}: {e}")
+            message = f"could not open camera {cam_cfg.shmim}: {e}"
+            if self.in_startup_grace() or self._camera_error_reported:
+                # INDI may still be starting, or this outage was already reported
+                self.log.debug(message)
+                self.set_status(last_error=message)
+            else:
+                self._camera_error_reported = True
+                self.set_error(message)
             return False
         self._warned_no_dark = False
+        self._camera_error_reported = False
         self.log.info(f"Using camera {cam_cfg.shmim}")
         return True
 
@@ -858,6 +881,7 @@ class adcCtrl(XDevice):
                 self._camera_name = target
                 self.camera = None
                 self._last_camera_attempt = None
+                self._camera_error_reported = False
                 self.log.info(f"camera changed to {target}")
         self.update_property(existing_property)
 

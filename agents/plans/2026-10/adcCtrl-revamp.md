@@ -313,7 +313,13 @@ All with explicit `hp.`/`ndimage` imports.
 
 - **Sparkle search band (fix from on-instrument verification, 2026-10-12).** `speckle_cutout` takes an optional `search_halfwidth`: the brightest-pixel search is limited to radii within that distance of the expected separation, so residual core light just outside the mask can never be picked. New config fields: `sparkle_search_halfwidth = 5` and `dm_search_halfwidth = 15`. The DM value equals half the DM box, so DM-spot behaviour is unchanged. The default `sparkle_search_extent` changed from 20 to 10, the value verified on the instrument. `moment_angle` is unchanged. The regression test `test_sparkle_search_ignores_lopsided_core_residual` adds a bright off-axis blob at 9.5 λ/D below the core in i-band. With the old 20 λ/D box, spot 2 reads about 42° off radial, which reproduces the hardware failure; with the new defaults, all four spots read within 1° of radial.
 
-**Test coverage vs. plan:** T1–T23 are implemented as 29 test functions (28 originally, plus the sparkle-search regression test added during on-instrument verification) in `apps/adcCtrl/test/test_adcCtrl.py`, including `loop_sign` and default-gain tests. T7 uses a numpy broadband model (core and spots scaled with λ, core shifted linearly across the band) rather than a full hcipy optical propagation.
+- **Startup grace period (fix from on-instrument verification, 2026-10-12).** New config `startup_grace_sec = 60`, chosen to cover the 15–20 s INDI startup with margin.
+  - **During the grace period:** a failed camera open and a missing external INDI key are logged at DEBUG only. A failed open still sets `status.last_error`.
+  - **After it:** a camera outage is logged at ERROR once, not on every retry. Successful reconnection is logged at INFO, which resets the flag so the next outage is reported again; changing camera also resets it. Missing keys still warn once each.
+  - **Missing keys seen during grace** are not marked as warned, so a key that is still missing after the grace period is reported.
+  - **Test:** `test_startup_grace_and_camera_outage_logging`.
+
+**Test coverage vs. plan:** T1–T23 are implemented as 30 test functions (28 originally, plus the sparkle-search regression test and the startup-grace logging test added during on-instrument verification) in `apps/adcCtrl/test/test_adcCtrl.py`, including `loop_sign` and default-gain tests. T7 uses a numpy broadband model (core and spots scaled with λ, core shifted linearly across the band) rather than a full hcipy optical propagation.
 
 ### Verification
 
@@ -325,7 +331,9 @@ All with explicit `hp.`/`ndimage` imports.
   - **pytest:** 28 passed against the real purepyindi2, xconf and magaox. One warning, `'adcCtrl' object has no attribute '_telem_file'`, was a test-harness artifact: test devices skip `XDevice.__init__`, so `XDevice.__del__` had no telemetry file to close. Fixed by giving test devices an in-memory telemetry file; the rerun passed with no warnings.
   - **Config:** the deployed `adcCtrl.conf` contained unresolved git stash conflict markers. It was replaced with a `default_camera` entry and `[cameras.camsci1]` / `[cameras.camsci2]` tables.
   - **Measure-only, sparkles** (15 λ/D, angle 0, i-band): angle0 read −88° (about 2° from radial) but angle2 stayed at about 47° (about 43° from radial). DM spots were correct in the same setup. **Cause:** the 20 λ/D sparkle search box reached to 7.4 λ/D, only about 1.3 λ/D outside the 6.1 λ/D core-mask radius, so spot 2's brightest-pixel search locked onto a lopsided core residual. Setting `sparkle_search_extent = 10` in the config gave angles −88°, 11°, −81° and −7° (all near radial; pair02 ≈ −7°, pair13 ≈ +18°). Code fix: see the Implementation Log.
-  - **Still to do:** rerun pytest with the search fix, closed-loop checks (`oneshot`, `adcLoop`, `loop_sign`), recalibrating `ctrl_mtx` by hand, and the mid-batch abort/threading check.
+  - **After the search fix:** pytest gave 29 passed with no warnings. Measure-only works for both sparkles and DM spots.
+  - **Startup log noise:** restarting adcCtrl restarts isICC, whose INDI server takes about 15–20 s to come up. Until then, each camera-open attempt logged an ERROR (at startup and on every 10 s retry), and each missing external key logged a WARNING. A key missed during startup was also never warned about again. Fix: see "Startup grace period" in the Implementation Log.
+  - **Still to do:** rerun pytest with the startup-grace change (expect 30 passed), closed-loop checks (`oneshot`, `adcLoop`, `loop_sign`), recalibrating `ctrl_mtx` by hand, and the mid-batch abort/threading check.
 
 ## Follow-up and Edge Cases
 <!-- The agent should list any planned follow up and any edge cases that are not addressed -->
