@@ -574,6 +574,7 @@ Here δ1* is wherever the pair offsets are zero under the current conditions. Th
 
 - **R1. Filling the 3 s dwell.** The proposal: after the stages report arrival, run `measure_dispersion` batches back to back until at least 3 s have passed, always completing at least one batch, and use every batch from that position. The alternative is to run exactly one batch and then wait out the rest of the 3 s. Which do you want? Or should the dwell instead set how many frames are taken, ignoring `no_measurements`?
   - Answer:
+    The number of measurements should always follow `no_measurements`. The dwell here is not very important, 3s was just an arbitrary number I picked. There should just be at least 3s between when the ADC stops moving and when it is next told to move, to ensure the safety of the stage.
 
 - **R2. FITS contents and naming.** Proposal:
   - primary HDU: a cube with one mean image per sweep position (41 positions × H × W), not every frame (every frame could reach GB);
@@ -583,21 +584,25 @@ Here δ1* is wherever the pair offsets are zero under the current conditions. Th
 
   Do you want every raw frame instead of (or as well as) per-position means? Is a different naming scheme preferred?
   - Answer:
+    per-position means are preferred. the rest of this proposal is acceptable.
 
 - **R3. Scope of the config pointer.** Is there **one** active calibration file at a time (the operator re-points it after changing camera, filter or spot source), or one pointer per camera, filter and spot source? If the active file's header does not match the current camera, filter, source or sparkle geometry, should the app refuse closed loop (measure-only still allowed), or only warn at INFO or WARNING level?
   - Answer:
+    There is only one active calibration file at a time. the operator will re-point after changing anything. the app should send a warning at the INFO level, but note that the operator can manually change the ctrl_matrix, so a mismatch between the calibration pointer and the current state does not necessarily imply that the ctrl_matrix is mismatched with the current state.
 
 - **R4. Relationship to the existing `ctrl_mtx`.** When a calibration file is configured, should it **replace** the `ctrl_mtx` config field and INDI property (the property becomes read-only, showing the file's values)? Or should the INDI property stay writable as a temporary override? With no calibration file configured, should the app fall back to the config `ctrl_mtx` as it does now?
   - Answer:
+  the INDI property should stay writable for sure. There are many reasons why ctrl_mtx might need to be changed on the fly. It should fall back to the config ctrl_mtx like it does now if there is no calibration file configured. 
 
 - **R5. How much fitting logic.** To keep the calibration simple: fit one straight line over the full ±3° sweep, report R² and the residuals, and only **warn** (no automatic rejection) when R² is below a threshold. The operator decides whether to use the file anyway, since nothing is applied automatically. Is that enough, or do you want the linear-range search and automatic rejection described earlier?
-  - Answer:
+  - Answer: yes, that is enough. keep the procedure simple.
 
 - **R6. Confirming the zero point.** The agent's understanding of Q6: the loop always drives the pair offsets to zero, on sky as on the internal source. The δ1 *value* at which that happens differs between the two (because the atmospheric dispersion differs), so the internal-source null is diagnostic only and no reference offset `p_ref` is subtracted. Is that correct?
   - Answer:
+    yes, this understanding is correct.
 
 - **R7. Where the calibration code lives.** Earlier, all code was to go in `app.py`. Given the concern about verbosity, should the calibration be:
   - (a) a new `calibrate` element in the existing `state` switch, in `app.py`;
   - (b) a separate module in the same package (e.g. `xapp/adcCtrl/calibration.py`), triggered from the app;
   - (c) a standalone script, run separately, that imports the measurement functions from `app.py` and writes the FITS file, leaving the app itself almost unchanged?
-  - Answer:
+  - Answer: (a)
