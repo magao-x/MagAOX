@@ -311,7 +311,9 @@ All with explicit `hp.`/`ndimage` imports.
 - **Config schema change:** `camera.shmim` / `camera.dark_shmim` are replaced by a `cameras` table (`shmim`, `filter_wheel` per entry; defaults camsci1/fwsci1 and camsci2/fwsci2). Darks come from XCam's automatic `<shmim>_dark` detection. **Any deployed `/opt/MagAOX/config/adcCtrl.conf` with a `[camera]` section must be updated.**
 - The INDI property `labmode` is now `loop_sign` (`positive`/`negative`). New read-only properties: `measurement`, `command`, `status`. New switch: `camera`.
 
-**Test coverage vs. plan:** T1–T23 are implemented as 28 test functions in `apps/adcCtrl/test/test_adcCtrl.py`, including `loop_sign` and default-gain tests. T7 uses a numpy broadband model (core and spots scaled with λ, core shifted linearly across the band) rather than a full hcipy optical propagation.
+- **Sparkle search band (fix from on-instrument verification, 2026-10-12).** `speckle_cutout` takes an optional `search_halfwidth`: the brightest-pixel search is limited to radii within that distance of the expected separation, so residual core light just outside the mask can never be picked. New config fields: `sparkle_search_halfwidth = 5` and `dm_search_halfwidth = 15`. The DM value equals half the DM box, so DM-spot behaviour is unchanged. The default `sparkle_search_extent` changed from 20 to 10, the value verified on the instrument. `moment_angle` is unchanged. The regression test `test_sparkle_search_ignores_lopsided_core_residual` adds a bright off-axis blob at 9.5 λ/D below the core in i-band. With the old 20 λ/D box, spot 2 reads about 42° off radial, which reproduces the hardware failure; with the new defaults, all four spots read within 1° of radial.
+
+**Test coverage vs. plan:** T1–T23 are implemented as 29 test functions (28 originally, plus the sparkle-search regression test added during on-instrument verification) in `apps/adcCtrl/test/test_adcCtrl.py`, including `loop_sign` and default-gain tests. T7 uses a numpy broadband model (core and spots scaled with λ, core shifted linearly across the band) rather than a full hcipy optical propagation.
 
 ### Verification
 
@@ -319,7 +321,11 @@ All with explicit `hp.`/`ndimage` imports.
 - **Golden test:** `moment_angle` in `app.py` reproduces `adc_sims/algo_26B/adc_ctrl.py` to 1e-10 on 8 inputs.
 - **Pipeline linearity (sparkles, synthetic):** about 25° of `pair02` per λ/D of band-integrated dispersion, with R² > 0.99.
 - **Timing:** about 0.09 s per 512×512 frame for both spot sources (local Mac), well within the ~10 s loop budget.
-- **Pending on the build machine:** `cd apps/adcCtrl && python -m pytest test -v` against the real purepyindi2, xconf and magaox. Then `make install`, start the app with the updated config, and run measure-only on the bench.
+- **On the MagAO-X machine (2026-10-12):**
+  - **pytest:** 28 passed against the real purepyindi2, xconf and magaox. One warning, `'adcCtrl' object has no attribute '_telem_file'`, was a test-harness artifact: test devices skip `XDevice.__init__`, so `XDevice.__del__` had no telemetry file to close. Fixed by giving test devices an in-memory telemetry file; the rerun passed with no warnings.
+  - **Config:** the deployed `adcCtrl.conf` contained unresolved git stash conflict markers. It was replaced with a `default_camera` entry and `[cameras.camsci1]` / `[cameras.camsci2]` tables.
+  - **Measure-only, sparkles** (15 λ/D, angle 0, i-band): angle0 read −88° (about 2° from radial) but angle2 stayed at about 47° (about 43° from radial). DM spots were correct in the same setup. **Cause:** the 20 λ/D sparkle search box reached to 7.4 λ/D, only about 1.3 λ/D outside the 6.1 λ/D core-mask radius, so spot 2's brightest-pixel search locked onto a lopsided core residual. Setting `sparkle_search_extent = 10` in the config gave angles −88°, 11°, −81° and −7° (all near radial; pair02 ≈ −7°, pair13 ≈ +18°). Code fix: see the Implementation Log.
+  - **Still to do:** rerun pytest with the search fix, closed-loop checks (`oneshot`, `adcLoop`, `loop_sign`), recalibrating `ctrl_mtx` by hand, and the mid-batch abort/threading check.
 
 ## Follow-up and Edge Cases
 <!-- The agent should list any planned follow up and any edge cases that are not addressed -->
@@ -488,7 +494,7 @@ Here δ1* is wherever the pair offsets are zero under the current conditions. Th
 
 **Decided approach (user, 2026-10-12):**
 - Control on the noise-weighted combination of both pairs (step 4).
-- **Single-pair fallback** when a spot is invalid, using `−1/s_j` for the surviving pair. It is allowed in every state **except the calibration sweep**. Each fallback is logged at **INFO** level so the operator is told. This needs per-spot validity flags in `measure_spot_angles` instead of failing the whole frame. The published measurement records which pairs were used.
+- **Single-pair fallback** when a spot is invalid, using `−1/s_j` for the surviving pair. It is allowed in every state **except the calibration sweep**, and only while the `ctrl_mtx` in use is the one from the active calibration file (see "Using a calibration"). Each fallback is logged at **INFO** level so the operator is told. This needs per-spot validity flags in `measure_spot_angles` instead of failing the whole frame. The published measurement records which pairs were used.
 - **Report** the co-rotation (orthogonal) component, but do not correct it.
 
 ### Spot source selection
@@ -512,6 +518,10 @@ Here δ1* is wherever the pair offsets are zero under the current conditions. Th
   - **At startup** the app reads `ctrl_mtx`, the fallback coefficients and the slope direction (for the co-rotation diagnostic) from the header. The values read from the file initialize the INDI `ctrl_mtx` property.
   - **With no file configured,** the app uses the config `ctrl_mtx`, as it does now.
   - **The `ctrl_mtx` INDI property stays writable**, so the operator can change it on the fly.
+  - **Fallback and the co-rotation diagnostic (user, round 4 S1):**
+    - Both take their values only from the active calibration file. With no file configured, fallback is disabled: a frame with an invalid spot is discarded, as today. The co-rotation component is not reported either. Each is logged once at INFO.
+    - **If `ctrl_mtx` is changed by hand, fallback is disabled** (logged once at INFO), because the file's per-pair slopes no longer match the matrix in use. It is re-enabled only when `ctrl_mtx` again equals the file's values, or when the app restarts with a calibration file.
+    - *Agent assumption:* the co-rotation diagnostic keeps using the file's slope direction after a manual `ctrl_mtx` change, since that direction is a property of the optics, not of the matrix. S1 only addressed fallback.
   - **Mismatches:** before each cycle, the header's camera, filter, spot source and (for sparkles) `tweeterSpeck` separation and angle are compared with the current setup. On a mismatch, the app logs at **INFO** level and carries on: it neither refuses closed loop nor changes anything. A mismatch with the file does not necessarily mean the active `ctrl_mtx` is wrong, because the operator may have set `ctrl_mtx` by hand. The message is logged once per change of setup, not every cycle.
 - **Helping the operator choose (suggestion, optional).** Measure-only could publish a spot SNR for the selected source.
 
@@ -546,7 +556,7 @@ All of this goes in `app.py` (R7a).
   - a mismatch logs at INFO and does not block;
   - δ1 is restored on abort;
   - at least 3 s between arrival and the next move;
-  - fallback is disabled during `calibrate`.
+  - fallback is disabled during `calibrate`, with no calibration file, and after a manual `ctrl_mtx` change; it is re-enabled when `ctrl_mtx` matches the file again.
 
 ### Open points for the user to verify
 

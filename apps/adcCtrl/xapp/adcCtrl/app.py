@@ -171,13 +171,16 @@ def subtract_radial_profile(image, bin_size):
     return image - radial_map
 
 
-def speckle_cutout(img, speckle_number, angle, f=10, window_size=30, search_extent=20):
+def speckle_cutout(img, speckle_number, angle, f=10, window_size=30, search_extent=20, search_halfwidth=None):
     """Cut out satellite spot `speckle_number` (0-3, counter-clockwise from top).
 
     The spot is searched for in a square box of side `search_extent` (grid
     units) centered `f` grid units from the image center, with the spot
-    pattern rotated clockwise by `angle` degrees. Returns a `window_size`
-    square array centered on the brightest pixel in that box.
+    pattern rotated clockwise by `angle` degrees. If `search_halfwidth` is
+    given, the search is further limited to radii within `search_halfwidth`
+    of `f`, so residual light near the masked core can never be picked
+    instead of the spot. Returns a `window_size` square array centered on the
+    brightest pixel in the search region.
     """
     extent = search_extent
     separation = f
@@ -194,6 +197,9 @@ def speckle_cutout(img, speckle_number, angle, f=10, window_size=30, search_exte
         np.deg2rad(-angle),
     )(img.grid)
     speckle_img = rect * img.copy()
+    if search_halfwidth is not None:
+        radius = np.hypot(img.grid.x, img.grid.y)
+        speckle_img = speckle_img * (np.abs(radius - separation) <= search_halfwidth)
 
     max_pixel = speckle_img.grid[np.argmax(speckle_img)]
     new_img = window_field(img, [max_pixel[0], max_pixel[1]], window_size, window_size)
@@ -391,6 +397,7 @@ class SpotGeometry(NamedTuple):
     angle: float  # clockwise rotation of the spot pattern, degrees
     window_size: int  # side of the cutout handed to moment_angle, pixels
     search_extent: float  # side of the spot search box, grid units
+    search_halfwidth: Optional[float] = None  # radial half-width of the search band around separation, grid units
 
 
 def measure_spot_angles(frame, geometry, pixel_scale, pad=50, mask_factor=0.7, radial_bin=5 * 6.0 / 21.0):
@@ -420,7 +427,8 @@ def measure_spot_angles(frame, geometry, pixel_scale, pad=50, mask_factor=0.7, r
     raw = np.zeros(4)
     for n in range(4):
         cutout = speckle_cutout(
-            field, n, geometry.angle, geometry.separation, geometry.window_size, geometry.search_extent
+            field, n, geometry.angle, geometry.separation, geometry.window_size, geometry.search_extent,
+            geometry.search_halfwidth,
         )
         raw[n] = moment_angle(cutout)
 
@@ -490,8 +498,10 @@ class AdcCtrlConfig(BaseConfig):
     dm_spot_angle : float = xconf.field(default=28.0, help="Passive DM spot pattern rotation [deg]")
     dm_window_size : int = xconf.field(default=50, help="Passive DM spot cutout size [pixels]")
     dm_search_extent : float = xconf.field(default=30.0, help="Passive DM spot search box size [lambda/D]")
+    dm_search_halfwidth : float = xconf.field(default=15.0, help="Passive DM spot search band half-width around the separation [lambda/D]")
     sparkle_window_size : int = xconf.field(default=20, help="Sparkle cutout size [pixels]")
-    sparkle_search_extent : float = xconf.field(default=20.0, help="Sparkle search box size [lambda/D]")
+    sparkle_search_extent : float = xconf.field(default=10.0, help="Sparkle search box size [lambda/D]")
+    sparkle_search_halfwidth : float = xconf.field(default=5.0, help="Sparkle search band half-width around the separation [lambda/D]; keeps the search clear of the core residual")
     mask_factor : float = xconf.field(default=0.7, help="Core mask diameter as a fraction of the spot separation")
     pad : int = xconf.field(default=50, help="Zero padding added around each frame [pixels]")
     radial_bin : float = xconf.field(default=5 * 6.0 / 21.0, help="Radial profile bin size [lambda/D]")
@@ -776,12 +786,14 @@ class adcCtrl(XDevice):
                 angle=self._sparkle_angle,
                 window_size=self.config.sparkle_window_size,
                 search_extent=self.config.sparkle_search_extent,
+                search_halfwidth=self.config.sparkle_search_halfwidth,
             )
         return SpotGeometry(
             separation=self.config.dm_spot_separation * self._normalized_wavelength,
             angle=self.config.dm_spot_angle,
             window_size=self.config.dm_window_size,
             search_extent=self.config.dm_search_extent,
+            search_halfwidth=self.config.dm_search_halfwidth,
         )
 
     def set_status(self, last_command=None, last_error=None):

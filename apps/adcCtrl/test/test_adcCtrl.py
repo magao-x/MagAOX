@@ -311,6 +311,32 @@ def test_missing_wavelength_scaling_misses_spots():
     assert np.max(np.abs(dev_bad)) > np.max(np.abs(dev_good))
 
 
+def test_sparkle_search_ignores_lopsided_core_residual():
+    """A bright residual just outside the core mask must not be picked as a sparkle.
+
+    Reproduces the first on-instrument run (i-band, sparkles at 15 l/D, angle 0):
+    with the old 20 l/D search box, spot 2's search reached ~1 l/D outside the
+    core mask and locked onto the core residual instead of the sparkle.
+    """
+    wavelength = 762e-9
+    separation = 15.0 * wavelength / 656e-9
+    frame = make_frame(separation=15.0, wavelength=wavelength)
+    x = (np.arange(frame.shape[1]) - (frame.shape[1] - 1) / 2) * PIXEL_SCALE
+    xx, yy = np.meshgrid(x, x)
+    frame += 80.0 * np.exp(-((xx - 0.5) ** 2 + (yy + 9.5) ** 2) / (2 * 0.8**2))
+
+    config = AdcCtrlConfig()
+    old = SpotGeometry(separation, 0.0, 20, 20.0)
+    new = SpotGeometry(
+        separation, 0.0, config.sparkle_window_size,
+        config.sparkle_search_extent, config.sparkle_search_halfwidth,
+    )
+    _, dev_old = measure_spot_angles(frame, old, PIXEL_SCALE)
+    _, dev_new = measure_spot_angles(frame, new, PIXEL_SCALE)
+    assert abs(dev_old[2]) > 10.0
+    assert np.all(np.abs(dev_new) < 1.0), dev_new
+
+
 def test_pair_offsets_linear_in_dispersion():
     """Pair offsets respond linearly and antisymmetrically to dispersion."""
     angle = 0.0
