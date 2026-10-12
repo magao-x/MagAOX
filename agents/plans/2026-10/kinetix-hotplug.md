@@ -445,6 +445,16 @@ Branch: `jrmales/kinetix-hotplug` (current).
 - The resulting lock file is root-owned with mode 0664 (subject to umask). Both instances open it elevated.
 - The offline tests cannot distinguish privilege levels (setuid is not in effect), so this was found only on hardware. Re-run validation from step (a).
 
+**Field fix (2026-10-12): false port-interlock trip at power-on.** camflowfs logged `CRIT PCIe port 0000:42:09.0 came up while camera power was off ... PCIe hotplug disabled` one second before `POWEROFF to POWERON`, then failed every `connect()`. Its stale device timed out (`PL_ERR_DDI_DEVICE_WRITE_FAILED ... Error 62 (Timer expired)`, about 5 s per attempt).
+- Cause: the PDU switches power, and the link trains, before the PDU's INDI power state reaches the app, so `whilePowerOff()` saw the port return. This is a general race at any power-on, not specific to powering both cameras together.
+- Fix, relying on the stale signals confirmed in Q10:
+  - The "came up while power off" interlock is removed. `checkPortDown()` stops checking once the port has been seen down.
+  - A healthy camera is never hotplugged, even after a power-off, because a real power cycle always leaves it stale, missing, or unresponsive. This also covers the case the removed check guarded: another camera coming up on a misconfigured port.
+  - The "stayed up" interlock now applies to any camera state when a power-off was observed but the port never went down. That protects a stale camera on a misconfigured port, which its own app may still hold open.
+- The busy-camera INFO message now reads "in use by another application or not responding", since an open can also fail on a stale camera.
+- New regression test `pvcamCtrl hotplugs when the camera powers up before power-on is reported`, plus misconfiguration sections for a stale camera and for another camera coming up healthy.
+- Recovery on the instrument: restart camflowfs. At startup it sees its stale camera and hotplugs it.
+
 **Test harness** (`apps/pvcamCtrl/tests/pvcamCtrl_harness.hpp`):
 - SDK stubs in `tests/pvcam/{master.h,pvcam.h}` are added to the include path only for `pvcam*_test` (`tests/Makefile.one`).
 - A scripted fake PVCAM library with per-call fault injection.
@@ -465,7 +475,7 @@ Branch: `jrmales/kinetix-hotplug` (current).
 
 **Suites**
 - `pvcamPcie_test`: 6 cases;
-- `pvcamCtrl_hotplug_test`: 9 cases, covering the key power-off/power-on scenarios with and without cameras;
+- `pvcamCtrl_hotplug_test`: 10 cases, covering the key power-off/power-on scenarios with and without cameras;
 - `pvcamCtrl_test`: 10 cases.
 
 ## Follow-up and Edge Cases
