@@ -337,3 +337,216 @@ All with explicit `hp.`/`ndimage` imports.
 - **purepyindi2 behavior when `loop()` raises:** unverified, because no local purepyindi2 source was found (the search timed out). The plan catches everything inside `loop()` regardless.
 - **Paper reading:** only web-extracted text of §1–3 was available, because the PDF could not be parsed locally.
 - **Plan template fix (Rev 1):** the guidance comment under this heading was missing its closing `-->`. I closed it in place. This was the only edit outside agent-filled content.
+
+## DRAFT: Proposed Calibration Sequence (not adopted, pending user verification)
+
+> **Status:** this section describes how the agent *would* write a calibration sequence. It is **not** part of the plan or the implementation and does not change Q7 (calibration stays manual for now). Nothing here should be implemented until the user has checked it against the calibration procedure known to be correct for the instrument. Parameter values are placeholders, not instrument numbers.
+>
+> **User direction (2026-10-12):** a monotonic sweep of δ1 is the primary calibration approach. The push-pull sequence is kept below as an alternative for the record, but is not expected to be implemented. Testing has shown that the response differs insignificantly between on-sky and the internal calibration source.
+
+### What is being calibrated
+
+The app controls one degree of freedom, the counter-rotation δ1 (`deltaADC1 = δ1 + offset`, `deltaADC2 = δ1 + offset`, with δ2 = 0). Each cycle measures two pair offsets `p = [pair02, pair13]` (degrees) and reduces them to a scalar error `e = ctrl_mtx · p`. Near the correct counter-rotation δ1*, the response is assumed linear:
+
+```
+p(δ1) ≈ p* + s · (δ1 − δ1*)          s = [s02, s13]  (deg of pair offset per deg of δ1)
+```
+
+Ideally p* = 0. In practice it holds static spot asymmetries and any non-chromatic shear. Calibration measures the sensitivity vector `s`, and from it builds `ctrl_mtx`.
+
+### Sequence
+
+1. **Preconditions.** Check the following, and refuse to start (status message, back to idle) if any fails:
+   - `adctrack.tracking` is on, so δ1 changes move the stages (adcTracker only moves the stages while tracking).
+   - The light source is recorded (internal source or on-sky). The internal source is the expected default, because its response matches on-sky closely enough.
+   - The camera, filter and spot source match the configuration the matrix is for.
+   - Sparkles are modulating (if used).
+   - The spots are unsaturated.
+
+   Record the starting δ1 so it can be restored.
+2. **Baseline and noise.** At the starting δ1, take `N_base` measurements, each one a full `measure_dispersion` batch keeping the per-batch pair vector. Their scatter gives the per-pair noise `σ02`, `σ13`, which is used for weighting and for choosing the sweep step.
+3. **Sweep.** Step δ1 monotonically across a range centered on the start value, then optionally back down (a triangle):
+
+   ```
+   one-way:  start − A, start − A + h, …, start + A
+   triangle: start − A → start + A → start − A          (A = calib_range_deg, h = 2A / calib_n_steps)
+   ```
+
+   - **Approach direction:** the first move overshoots slightly below `start − A`, then steps up, so every point on the up leg is reached from the same direction. This takes out any backlash the stages' reported `current` does not show.
+   - Each move goes through `send_command()`, which waits for the stages to reach the target. The first batch after a move is discarded as settling, then `N_step` batches are kept.
+   - `A` should reach past the linear region on both sides so the fit can find its edges, but stay inside the spot search windows. Frames where spots leave the windows at the ends are recorded as failed points, not as calibration failures. The step limit does not apply to calibration moves; `calib_max_deg` bounds them instead.
+   - The steps after the first move are small and equal, so settling is quick.
+4. **Fit.** Fit the full response curve, not just one slope, for each pair element:
+   - **Drift:** a one-way sweep makes δ1 increase with time, so a drift term `r_j·t` cannot be separated from the slope. On the internal source, drift should be small: there is no zenith-angle change, but tracking is still on, so this should be confirmed from the baseline. Two options:
+     - **Triangle (default):** δ1 is symmetric in time about the midpoint, so linear drift is uncorrelated with δ1. Fit `p_j(t) = c_j + s_j·δ1(t) + r_j·t`.
+     - **One-way plus brackets:** repeat the step-2 baseline after the sweep, and remove the linear drift between the start and end baselines.
+   - **Linear range:** fit progressively narrower ranges centered on the null until the residuals match the baseline noise. The resulting range `[δ1_lo, δ1_hi]` is the calibrated linear range.
+   - **Slope:** `s_j` with its uncertainty, from points inside the linear range only.
+   - **Null:** `δ1*_j = −c_j / s_j`, where each pair crosses zero. If only δ1 is in error, the two pairs agree. If they disagree, there is a co-rotation (δ2) error or a static bias p* ≠ 0.
+   - **Hysteresis (triangle only):** the gap between the up and down legs.
+   - Report R² and the residual RMS as well.
+
+   The fit is rejected if R² is below a threshold, if the slope is below a few σ, if the linear range is narrower than a configured minimum, or if hysteresis is above tolerance.
+5. **Build `ctrl_mtx`.** Use the noise-weighted pseudo-inverse of `s`, negated so that the error is the δ1 correction:
+
+   ```
+   W = diag(1/σ02², 1/σ13²)
+   ctrl_mtx = −(sᵀ W s)⁻¹ sᵀ W          (1×2, so m00, m01)
+   ```
+
+   With this, `e = ctrl_mtx · p ≈ −(δ1 − δ1*)` in degrees of δ1. The error is then "how far to move δ1". Weighting downweights the noisier pair: on the sparkle synthetic data the two pairs are similar, but with DM spots one pair can be much noisier.
+6. **Restore and report.** Return δ1 to its starting value, whether the sequence succeeded or not; an abort, state change or failure also restores and goes idle. Then:
+   - Publish the proposed `ctrl_mtx`, `s`, the linear range, the per-pair nulls, the hysteresis, the fit statistics and `σ_e` (the error noise predicted by propagating σ through `ctrl_mtx`) in a read-only `calibration` property.
+   - Log the full sequence to telemetry.
+   - The matrix is **not** applied automatically. The operator accepts it with a request switch, which writes it to `ctrl_mtx`, and copies it into the config file to make it persist.
+7. **Validation (optional, recommended).** After accepting, offset δ1 by a known amount `b` (within the step limit), switch to measure-only, and check that the measured error is about −b. Then close the loop and confirm that δ1 returns.
+
+### Alternative: push-pull sequence (kept for the record, not expected to be implemented)
+
+Steps 3–4 would be replaced by the following; steps 1, 2 and 5–7 are unchanged.
+
+- **Pokes:** `0, +a, 0, −a, 0, +2a, 0, −2a, 0` around the start value. The returns to 0 track drift, and the two amplitudes test linearity. `a` is chosen so that `|s|·a` is several times the pair noise, while staying linear and inside the search windows.
+- **Fit:** `p_j(t) = c_j + s_j·δ1(t) + r_j·t`; the zero-returns make the drift separable. Linearity check: the ±a vs ±2a slope ratio should be about 1.
+
+| | Monotonic / triangle sweep (primary) | Push-pull with zero-returns |
+|---|---|---|
+| **Main output** | Full response curve: slope, linear range, null, hysteresis | Slope near the operating point |
+| **Drift** | One-way: drift is confused with slope. Triangle or brackets: separable | Rejected by design |
+| **Backlash / hysteresis** | One-way: same approach direction every time. Triangle: hysteresis measured | Every move reverses direction, so backlash goes into the result and can't be measured |
+| **Nonlinearity** | Mapped; the fit is limited to the measured linear range | Only checked with two amplitudes |
+| **Finds δ1\* (null)** | Directly, from the zero crossing | Only by extrapolating from the intercept |
+| **Time near the operating point** | Much of the time at large offsets | Half the time at 0 |
+| **Move sizes** | Small equal steps after the first move | Up to 2a per move |
+| **Positions carrying information** | All | About 4 of 9 |
+| **Risk at the ends** | Spots can leave the windows at ±A, so failed points must be handled | Bounded by 2a |
+
+Push-pull's main advantages are drift rejection and staying near the operating point. Both matter mostly for on-sky calibration during science. Since the internal-source response matches on-sky, calibration can be done on the internal source, where drift is small and science time is not affected. The sweep's extra outputs (linear range, null, hysteresis) are then the deciding factor.
+
+### How the calibration drives the ADC response
+
+With `ctrl_mtx` calibrated as above, the error is an estimate of the δ1 correction in degrees. The existing control law then becomes a plain integrator with a dimensionless gain:
+
+```
+δ1[k+1] = δ1[k] + loop_sign · gain · e[k]  ≈  δ1[k] − gain · (δ1[k] − δ1*)      (loop_sign = positive)
+```
+
+The residual decays by `(1 − gain)` per cycle. Consequences for the current design:
+
+- **Gain meaning.** With gain = 0.1 the loop removes 10% of the residual per cycle. Reaching 90% of a step correction takes about 22 cycles; reaching 50% takes about 7. The gain becomes independent of filter, spot source and camera, because those differences are absorbed into `s`. With the old uncalibrated `ctrl_mtx`, the gain had no fixed meaning.
+- **`loop_sign`.** The measured `s` already carries the platform's sign, so a calibration done on the same platform it runs on needs `loop_sign = positive`. `loop_sign` would then only matter for an uncalibrated or inherited matrix. *To be checked against the user's understanding of why the sign is platform dependent.*
+- **Step limit.** `step_limit_deg` (0.7°) rejects rather than clips. With gain 0.1, any residual above about 7° is never corrected; the loop just keeps rejecting. With a calibrated `e`, the limit can come from the sweep's linear range `[δ1_lo, δ1_hi]` instead: reject (or clip to the range edge) when `|e|` exceeds the calibrated linear half-width. That is a physical bound, rather than a bound on the step.
+- **Zero point.** The loop converges to where `ctrl_mtx · p = 0`, not necessarily to zero dispersion. If static spot asymmetries make p* ≠ 0, the loop settles off-target by `ctrl_mtx · p*`. A reference pair offset `p_ref`, measured where the dispersion is known to be zero, could be subtracted, giving `e = ctrl_mtx · (p − p_ref)`. On sky, the intercept mixes p* with the true dispersion at the start. On the internal source there is no atmospheric dispersion, so a sweep there gives the instrument's own null directly, and any disagreement between the two pairs' nulls is p*. *Whether the internal-source null carries over to on-sky the way the slope does is to be checked.*
+- **Noise floor.** At steady state, the δ1 jitter is about `σ_e · sqrt(gain / (2 − gain))`, where `σ_e` comes from step 5. This gives a principled way to trade gain against `n_avg × no_measurements`.
+- **Per-configuration matrices.** `s` depends on the filter (bandwidth and wavelength), the spot source (sparkles vs DM spots, which have different radii and lengths) and the camera. A single `ctrl_mtx` in the config would be stale after a filter change. The natural extension is a table of `ctrl_mtx` keyed by `(camera, filter, spot source)`, chosen at each cycle. If an entry is missing, measure-only would still work, but closed loop would be refused.
+- **Two degrees of freedom (future).** The same sequence, with δ2 pokes added, gives a 2×2 sensitivity matrix `S` (pairs × [δ1, δ2]). Then `−S⁻¹` drives both counter-rotation and co-rotation. This is only useful if co-rotation errors (dispersion direction misalignment) turn out to be significant; it is listed as out of scope in Follow-up.
+
+### Using both pair offsets vs. a single pair
+
+**What each pair measures.** Dispersion smears each spot along the dispersion direction, which tilts the radial streak. Opposite spots tilt in opposite senses, so a pair offset responds only to the dispersion component **perpendicular to that pair's axis**. Dispersion parallel to the axis only lengthens or shortens the spots. The 0/2 and 1/3 axes are orthogonal (`expected_axes`: `90° − θ` and `−θ`), so `[pair02, pair13]` measures the dispersion as a 2D vector (magnitude and direction). A single pair measures one projection of it.
+
+**Strengths of using both pairs:**
+1. **Sensitivity independent of orientation.** A single pair's slope scales with sin(angle between the dispersion and the pair axis). It goes to zero when the dispersion is parallel to the pair axis, and changes sign beyond that. The dispersion direction relative to the spots can change with parallactic angle, derotator mode or the sparkle `angle`, and DM spots are fixed at 28°. With two orthogonal pairs, at least one always has good sensitivity.
+2. **Separates δ1 from δ2 (co-rotation) errors.** A single pair cannot tell them apart, so a co-rotation error leaks into the δ1 error and biases the loop. With two pairs, the 1×2 `ctrl_mtx` can be chosen to ignore the δ2 response direction. *Caveat:* the pseudo-inverse in step 5 does not do this; it needs δ2 pokes as well (see "Two degrees of freedom").
+3. **Free diagnostic.** The pair-space component that `ctrl_mtx` ignores could be published to show co-rotation error or a misaligned ADC.
+4. **Lower noise.** For equal sensitivity and uncorrelated noise, combining the pairs gives up to a √2 improvement (less in practice; see weakness 3).
+5. Rigid rotation of the spot pattern cancels within each pair regardless, so it does not favor either option.
+
+**Weaknesses of using both pairs:**
+1. **More ways to fail.** All four spots must be valid. As currently implemented, any one spot failing makes the error non-finite and the whole frame is discarded (`measure_dispersion` in `app.py`). Spots can fail when they are clipped by a small ROI, sit on a static speckle or bad pixel, or when one sparkle is weak. (The user confirms that DM spots are visible with the internal source at every wavelength.) A single pair needs only two good spots.
+2. **A poorly weighted combination can be worse than one pair.** If one pair has little sensitivity in the current geometry, it mostly adds noise. Equal weights (like the near-equal default `[0.21, 0.19]`) are then noisier than the good pair alone. Step 5's sensitivity/σ² weighting fixes this, but only with a valid calibration for the current configuration.
+3. **The two pairs share error sources.** They are measured from the same frames, so they share PSF centering, residuals from the radial-profile subtraction, and any uneven halo (wind-driven halo, low-wind effect). These errors do not average down. An uneven halo can bias one pair more than the other, and that bias enters the error.
+4. **More to calibrate and debug.** There are two coefficients (a 2×2 matrix with δ2), conditioning matters for 2-DOF control, and the error is harder to interpret by eye.
+
+**Where a single pair is reasonable:**
+- **Sparkles with an adjustable `angle`:** the pattern can be oriented so one pair is perpendicular to the expected dispersion. That pair then carries nearly all the signal. (Speculative: a single sinusoid, i.e. two spots, might allow brighter spots or less coronagraph disruption for the same probe amplitude.)
+- **As a fallback** when a spot fails, rather than dropping the frame.
+
+**Proposed approach (draft):**
+- Keep both pairs, weighted by calibrated sensitivity and noise (step 5).
+- Fall back to a single pair when one spot is invalid, using that pair's own calibrated slope (`ctrl_mtx_j = −1/s_j`, available from the per-pair fit in step 4). This needs per-spot validity flags in `measure_spot_angles` instead of failing the whole frame. The published measurement should record which pairs were used.
+- Publish the component orthogonal to `ctrl_mtx` as a co-rotation/misalignment diagnostic.
+
+### Spot source selection
+
+**User direction (2026-10-12):**
+- The spot source is chosen by the operator.
+- The main factor is the SNR of the spots. Some observations do not allow sparkles, which is also a factor.
+- The DM spots are visible with the internal source at every wavelength.
+- Sparkles do not bias the DM-spot measurement.
+- Calibrating both sources from one sweep is **not** wanted.
+
+**How the calibration handles it:**
+- **No automatic choice.** Calibration runs on whichever source is selected in the `satellite_spots` switch at the start. Changing `satellite_spots` during a sweep aborts it, the same as any other state change, and δ1 is restored.
+- **One source per sweep.** Only the selected source's geometry is measured. Calibrating the other source needs a separate sweep, run after the operator switches sources.
+- **Saved parameters.** Every result is saved with the parameters it was measured under:
+  - camera, filter (and its `normalized_wavelength`), spot source;
+  - for sparkles, the `tweeterSpeck` separation and angle;
+  - for DM spots, the configured separation (47 λ/D) and angle (28°);
+  - the sweep settings (range, steps, batches per step, `n_avg`, `no_measurements`);
+  - the fit results (slope, linear range, nulls, hysteresis, noise), the proposed `ctrl_mtx`, and a timestamp.
+
+  These are published in the `calibration` property, logged to telemetry, and written to the saved calibration record (location and format to be decided), so that an accepted matrix can be traced back to its sweep.
+- **Using a saved calibration.** The matrix is looked up by `(camera, filter, spot source)`. For sparkles, the app also compares the current `tweeterSpeck` separation and angle to the saved ones. A mismatch means the slope no longer applies, because the angle rotates the pair axes and the separation changes the spot length. On a mismatch, closed loop is refused (measure-only is still allowed) and the reason goes in `status.last_error`.
+- **Helping the operator choose (suggestion).** Measure-only could publish a spot SNR for the selected source (peak spot signal over the background RMS in the search windows). That would make the SNR comparison the operator already makes visible in the app. It is not required for calibration.
+
+### Open points for the user to verify
+
+- Is δ1 (counter-rotation) the right axis to poke, or should calibration step the individual ADCs (`deltaADC1` and `deltaADC2` separately)?
+- ~~Push-pull vs. monotonic sweep?~~ **Resolved (2026-10-12):** monotonic sweep is primary; push-pull is kept as a non-implemented alternative.
+- Triangle (up and down) or one-way with baseline brackets? What range `A`, step count and dwell per step does the known sweep use?
+- What sweep range is safe for each spot source and filter (spots inside the search windows, and stage limits)?
+- ~~On-sky or bench?~~ **Resolved (2026-10-12):** the response differs insignificantly between on-sky and the internal source, so the internal source is acceptable. Still open: does the null (zero point) also carry over, or only the slope?
+- Should `ctrl_mtx` map to δ1 degrees (as proposed) or keep the original paper's units?
+- Is one pair ever preferred in practice (e.g. sparkles oriented to the dispersion direction), and should single-pair fallback on spot failure be allowed in closed loop or only in measure-only?
+- Is the dispersion direction on the detector fixed relative to the spot pattern in normal operation (it depends on where the ADC and spots sit relative to the derotator)? This sets how much the orientation argument for two pairs matters.
+- ~~How is the spot source chosen?~~ **Resolved (2026-10-12):** the operator chooses, mainly by spot SNR, with some observations not allowing sparkles. One source per sweep; the parameters are saved with the result. DM spots are visible with the internal source at every wavelength, and sparkles do not bias them.
+- Where should saved calibration records live (config file, a calibration directory, or similar), and in what format? *(See round 2, Q7.)*
+
+#### Responses to Open Points
+- yes, the counter-rotation axis is the only one that should be poked.
+- Triangle is the approach we will take. Range should default to (-3,3), default step count is 21 and step dwell is 3 seconds.
+- sweep range is safe as long as it is within (-5,5) for any of the filters or sparkle positions.
+- the null point does *not* carry over.
+- the proposed units are acceptable. 
+- one pair is preferred in practice, as will be explained in the next bullet. Single-pair fallback should be allowed in on-sky and measure-only, but a log entry with INFO priority should appear to notify the user that this has happened.
+- When the ADCs are counter-rotated, the dispersion direction is always along the vertical axis on the science camera. Only by co-rotating the ADCs does the dispersion direction change, because the ADC is downstream of the pupil de-rotator.
+
+#### Remaining Questions (Round 2)
+*Questions raised from the responses above. Write answers under each one.*
+
+**Sweep definition**
+
+- **Q1. What the range is relative to.** Are the default sweep (−3, 3) and the safety limit (−5, 5) offsets from the starting δ1, or absolute values of δ1 (`deltaADC1/2`)? If they are relative, a start of +3 would put the top of the sweep at +6, outside the safe range. Should the app refuse to run, or clip the sweep to ±5?
+  - Answer:
+
+- **Q2. What counts as the 3 s dwell.** Does the 3 s include the settling time after the stages report they have arrived? Should a step's measurement be all frames taken during the dwell, or the usual `n_avg × no_measurements` batch with 3 s as a minimum?
+  - Answer:
+
+- **Q3. Down leg and backlash.** Should the down leg of the triangle use the same 21 positions in reverse? Is a small overshoot below −3 acceptable before the up leg starts (it stays inside ±5), or do the stages have no backlash worth handling?
+  - Answer:
+
+**Choosing the pair**
+
+- **Q4. Single best pair or weighted combination.** Counter-rotation always disperses vertically on the science camera, so the most sensitive pair is the one whose axis is closest to horizontal. With sparkles at angle 0, only pair13 responds (pair02 lies along the vertical). With DM spots at 28°, pair13 should have about twice pair02's slope. Should the app control on the single most sensitive pair, with the other pair used only as the fallback? Or should it keep the noise-weighted combination of both pairs, which also favors the stronger pair? If a single pair is used, should the preferred pair be fixed in config or chosen from the calibrated slopes?
+  - Answer:
+
+- **Q5. Where fallback applies.** Does "on-sky" mean the closed-loop states (`adcLoop` and `oneshot`)? Should fallback be **forbidden during the calibration sweep itself** (recommended, so that each slope comes from a single, known pair)?
+  - Answer:
+
+**Zero point**
+
+- **Q6. On-sky zero point.** The null does not carry over from the internal source. Where should the on-sky loop's zero point come from?
+  - (a) Assume the pair offset is zero on sky, and drive it to zero (what the loop does now).
+  - (b) Measure an on-sky reference `p_ref` with a separate procedure, for example a short sweep on sky to find the null.
+  - (c) Another procedure already in use.
+
+  Also, should the internal-source nulls be saved purely as diagnostics?
+  - Answer:
+
+**Records and status**
+
+- **Q7. Calibration records.** Where should saved calibration records live: the config file (`ctrl_mtx` entries per camera, filter and spot source), a separate calibration directory with one file per sweep, or both? Is there a preferred format (TOML like xconf, JSON or FITS)?
+  - Answer:
+
+- **Q8. Status of this draft.** Once these are answered, should this section be promoted from DRAFT into the plan (requirements, implementation steps and tests) for implementation next, or kept as a draft for now?
+  - Answer:
