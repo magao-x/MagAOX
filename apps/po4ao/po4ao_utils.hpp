@@ -1,7 +1,7 @@
 /** \file po4ao_utils.hpp
  * \brief Allocation-free history and command-safety utilities for PO4AO.
  *
- * \ingroup app_files
+ * \ingroup po4ao_files
  */
 
 #ifndef po4ao_utils_hpp

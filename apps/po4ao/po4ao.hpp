@@ -1,7 +1,7 @@
 /** \file po4ao.hpp
  * \brief Real-time modal PO4AO inference and replay publication for MagAO-X.
  *
- * \ingroup app_files
+ * \ingroup po4ao_files
  */
 
 #ifndef po4ao_hpp
@@ -30,6 +30,15 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 #include "po4ao_utils.hpp"
+
+/** \defgroup po4ao PO4AO
+ * \brief Real-time modal policy control with asynchronous model loading and replay publication.
+ * \ingroup apps
+ */
+
+/** \defgroup po4ao_files PO4AO Files
+ * \ingroup po4ao
+ */
 
 /// TensorRT logger which suppresses informational messages in the real-time app.
 class Logger : public nvinfer1::ILogger
@@ -71,7 +80,7 @@ struct EngineBundle
 {
     nvinfer1::IRuntime          *runtime{ nullptr }; ///< Runtime which deserialized the engine.
     nvinfer1::ICudaEngine       *engine{ nullptr };  ///< Immutable TensorRT engine.
-    nvinfer1::IExecutionContext *context{ nullptr }; ///< Execution context used only by the real-time thread.
+    nvinfer1::IExecutionContext *context{ nullptr }; ///< Loader warms this context before exclusive real-time use.
     cudaGraphExec_t              graphExec{ nullptr }; ///< Executable graph launched by the real-time thread.
     std::string                  inputName;          ///< Input tensor name.
     std::string                  outputName;         ///< Output tensor name.
@@ -99,14 +108,14 @@ inline EngineBundle::~EngineBundle()
     delete runtime;
 }
 
-// #define MAGAOX_CURRENT_SHA1 0
-// #define MAGAOX_REPO_MODIFIED 0
-
 namespace MagAOX
 {
 namespace app
 {
 
+/// Apply a modal policy upstream of mfilt while publishing complete replay snapshots.
+/** \ingroup po4ao
+ */
 class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
 {
     // Give the test harness access.
@@ -114,7 +123,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
 
     friend class dev::shmimMonitor<po4ao>;
 
-    // The base shmimMonitor type
+    /// The monitored modal-input base type.
     typedef dev::shmimMonitor<po4ao> shmimMonitorT;
 
     /// Floating-point type used by the controller.
@@ -141,7 +150,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     int         m_replayBufferSize{ 0 };         ///< Samples retained in the rolling replay buffer.
     uint32_t    m_iterationsPerEpisode{ 0 };     ///< Frames in one publication episode.
     uint32_t    m_warmupEpisodes{ 0 };           ///< Episodes which use exploratory integrator commands.
-    float       m_integratorGain{ 0.F };         ///< Proportional warm-up command gain.
+    float       m_integratorGain{ 0.F };         ///< Proportional fallback gain; mfilt owns downstream integration.
     float       m_policyBlend{ 1.F };            ///< Learned-policy fraction relative to fallback control.
     float       m_explorationSigmaStart{ 0.F };  ///< Exploration-noise scale at warm-up start.
     float       m_explorationSigmaEnd{ 0.F };    ///< Exploration-noise scale at warm-up end.
@@ -186,7 +195,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     size_t                          m_explorationNoiseCols{ 0 }; ///< Exploration-noise column count.
     std::atomic<bool>               m_controlEnabled{ false };   ///< Whether the learned policy may replace fallback.
     std::atomic<bool>               m_useNeuralNetwork{ false }; ///< Whether the policy may replace warm-up control.
-    uint64_t                        m_frameCounter{ 0 };         ///< Frames processed since allocation.
+    uint64_t                        m_frameCounter{ 0 };         ///< Frames processed since allocation or warm-up reset.
     std::atomic<uint64_t>           m_episodeCounter{ 0 };       ///< Completed episode count.
     ///@}
 
@@ -240,21 +249,17 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     std::atomic<uint64_t>                 m_deadlineMisses{ 0 };    ///< Callbacks exceeding the configured deadline.
     std::atomic<uint64_t>                 m_inferenceFailures{ 0 }; ///< Inference or result-validation failures.
     std::atomic<uint64_t>                 m_replayDrops{ 0 };       ///< Episodes dropped because the publisher lagged.
-    std::atomic<uint64_t>                 m_activeModelId{ 0 };     ///< Hash of the active serialized engine.
+    std::atomic<uint64_t>                 m_activeModelId{ 0 };     ///< Selected policy hash; zero reports fallback.
     std::atomic<bool>                     m_activeCpuInference{ false }; ///< Whether the active policy runs on CPU.
     uint64_t                              m_lastInputCounter{ 0 };  ///< Previous source cnt0 used for gap detection.
     bool                                  m_haveInputCounter{ false }; ///< Whether the previous source counter is valid.
     std::chrono::steady_clock::time_point m_lastStatsUpdate;        ///< Previous telemetry publication time.
     pcf::IndiProperty                     m_indiP_reloadToggle;     ///< Asynchronous model-reload request.
     pcf::IndiProperty                     m_indiP_resetModel;       ///< Active-model reset request.
-    pcf::IndiProperty                     m_indiP_controlToggle;    ///< Command-output enable switch.
+    pcf::IndiProperty                     m_indiP_controlToggle;    ///< Select learned control or proportional fallback.
     pcf::IndiProperty                     m_indiP_recollectWarmup;  ///< Fresh warm-up collection request.
     pcf::IndiProperty                     m_indiP_runtimeStats;     ///< Latency and failure counters.
     pcf::IndiProperty                     m_indiP_modelStatus;      ///< Active model ID and reload state.
-    INDI_NEWCALLBACK_DECL( po4ao, m_indiP_reloadToggle );
-    INDI_NEWCALLBACK_DECL( po4ao, m_indiP_resetModel );
-    INDI_NEWCALLBACK_DECL( po4ao, m_indiP_controlToggle );
-    INDI_NEWCALLBACK_DECL( po4ao, m_indiP_recollectWarmup );
     ///@}
 
   public:
@@ -270,38 +275,34 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     /// Register application configuration keys.
     virtual void setupConfig();
 
-    /// Implementation of loadConfig logic, separated for testing.
-    /** This is called by loadConfig().
-     */
+    /// Load monitor and PO4AO settings, propagating monitor configuration errors.
     int loadConfigImpl(
-        mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
+        mx::app::appConfigurator &_config /**< [in] Application configuration containing runtime values. */ );
 
-    /// Load application configuration.
+    /// Load application configuration and request shutdown if loading fails.
     virtual void loadConfig();
     ///@}
 
-    /// Startup function
-    /**
-     *
+    /// Validate settings, register INDI properties, and start the monitor and workers.
+    /** \returns 0 on success, or -1 after startup failure and worker rollback.
      */
     virtual int appStartup();
 
-    /// Implementation of the FSM for po4ao.
+    /// Check monitor health and publish control, model, and runtime statistics.
     /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
     virtual int appLogic();
-    /// Shutdown the app.
-    /**
-     *
+    /// Stop the monitor and workers, publish zero output, and release owned resources.
+    /** \returns 0 on success, or -1 if monitor shutdown failed after cleanup.
      */
     virtual int appShutdown();
 
     /// Publish the current differential modal command.
     int sendOutput();
 
-    /// Load and validate one serialized TensorRT engine.
+    /// Load a serialized model and validate its CPU sidecar or TensorRT tensor contract.
     std::unique_ptr<EngineBundle> createEngineBundle( const std::string &filename /**< [in] Engine pathname. */,
                                                       std::string       &error /**< [out] Failure detail. */ );
 
@@ -333,7 +334,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     /// Background model-loader loop.
     void modelLoaderLoop();
 
-    /// Activate a ready engine at a frame boundary without blocking.
+    /// Activate a ready model from the current reset generation at a frame boundary.
     void activatePendingEngine();
 
     /// Select fallback control and clear histories at a frame boundary.
@@ -361,7 +362,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     /// Restart warm-up collection at a real-time frame boundary.
     void beginWarmupCollection( uint64_t generation /**< [in] New collection generation. */ );
 
-    /// Run policy inference using the dedicated CUDA stream.
+    /// Assemble modal history and run CPU-linear or dedicated-stream TensorRT inference.
     bool runInference( const float *observation /**< [in] Current full-sized modal observation. */ );
 
     /// Fill the proportional fallback command, optionally with exploration noise.
@@ -378,12 +379,28 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     void closeOutputStreams();
 
   protected:
+    /** \name INDI Callbacks
+     *@{
+     */
+    /// Queue an explicit model reload on the background loader.
+    INDI_NEWCALLBACK_DECL( po4ao, m_indiP_reloadToggle );
+
+    /// Request fallback control and invalidate reloads from older generations.
+    INDI_NEWCALLBACK_DECL( po4ao, m_indiP_resetModel );
+
+    /// Select learned-policy control or the proportional fallback.
+    INDI_NEWCALLBACK_DECL( po4ao, m_indiP_controlToggle );
+
+    /// Invalidate replay snapshots and request a fresh exploratory warm-up.
+    INDI_NEWCALLBACK_DECL( po4ao, m_indiP_recollectWarmup );
+    ///@}
+
     /// Allocate fixed-size controller state after the monitored stream opens.
-    int allocate( const dev::shmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
+    int allocate( const dev::shmimT &dummy /**< [in] Tag identifying the monitored input. */ );
 
     /// Process one modal observation and publish one differential command.
-    int processImage( void              *curr_src, ///< [in] pointer to start of current frame.
-                      const dev::shmimT &dummy     ///< [in] tag to differentiate shmimMonitor parents.
+    int processImage( void              *curr_src /**< [in] Pointer to the current full-sized modal frame. */,
+                      const dev::shmimT &dummy /**< [in] Tag identifying the monitored input. */
     );
 };
 

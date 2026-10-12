@@ -30,7 +30,11 @@ The upstream `picamCtrl` test registration is retained alongside PO4AO's entry.
   after reset, and preservation of a busy retirement slot.
 - Moving all helper definitions below their class declarations preserved the
   same 72 passing assertions in 13 cases.
-- Final formatter checks: pending.
+- Final source: the same 72 assertions in 13 cases passed with AddressSanitizer
+  and UndefinedBehaviorSanitizer enabled.
+- Local clang-format 16.0.6 applied to all touched C++ files and tests/groups.dox;
+  the canonical dry-run check and whitespace checks pass. Unindented directives
+  inside Doxygen-only blocks avoid the formatter's indentation oscillation.
 - Full CUDA/TensorRT app build and physical test run: pending operator testing.
 
 ## Current repository instructions
@@ -40,3 +44,28 @@ tunnels. All implementation, formatting, and CPU tests are performed locally.
 File headers omit `\author`, as required by current upstream instructions.
 New commits use the namespaced feature branch and identify GPT-6 as co-author.
 No PR is opened before the operator's next test run.
+
+Startup/shutdown keep explicit monitor calls because the standard macros return
+before worker cleanup on failure. Mutex annotations use the formatter's canonical
+`// mutex scope` spacing, preserving the required scope marker.
+
+## Operator test checkout
+
+After the branch is published, update the existing checkout and build/install
+only the PO4AO app with the relevant loop open:
+
+```sh
+cd /home/rlandman/MagAOX
+git fetch origin
+git switch rlandman/po4ao-pr
+make -C apps/po4ao
+sudo make -C apps/po4ao install
+```
+
+Restart PO4AO through the normal operator workflow and reuse the current config
+and trainer. Verify startup fallback, first model activation, control Off/On,
+and `reset_model` during repeated reloads; a reset must not be followed by an
+old-generation activation. Record callback tails, source gaps, and model IDs.
+The branch updates the development base but the PR diff is limited to PO4AO and
+its test registration/documentation. Installed non-PO4AO applications are not
+part of this preparation.

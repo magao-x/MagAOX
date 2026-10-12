@@ -1,8 +1,12 @@
 /** \file po4ao_impl.hpp
  * \brief Header-only implementation of the PO4AO real-time application.
  *
- * \ingroup app_files
+ * This file is included by po4ao.hpp inside MagAOX::app.
+ * \ingroup po4ao_files
  */
+
+#ifndef po4ao_impl_hpp
+#define po4ao_impl_hpp
 
 inline po4ao::po4ao() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
@@ -666,7 +670,7 @@ inline void po4ao::modelLoaderLoop()
 {
     while( !m_loaderShutdown.load( std::memory_order_acquire ) )
     {
-        { // mutex scope
+        { //mutex scope
             std::unique_lock<std::mutex> lock( m_loaderMutex );
             m_loaderCondition.wait( lock,
                                     [this]()
@@ -698,7 +702,7 @@ inline void po4ao::modelLoaderLoop()
             candidate.reset();
         if( candidate == nullptr )
         {
-            { // mutex scope
+            { //mutex scope
                 std::lock_guard<std::mutex> lock( m_reloadErrorMutex );
                 m_reloadError = error;
             }
@@ -1534,7 +1538,7 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_recollectWarmup )( const pcf::IndiProperty
 
     const uint64_t generation = m_collectionGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1;
     m_warmupRecollectRequest.store( generation, std::memory_order_release );
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> publicationLock( m_publicationMutex );
         invalidateReplay( m_replayStream, m_replayOpened, m_replayMetadataStream, m_replayMetadataOpened );
         invalidateReplay( m_warmupStream, m_warmupOpened, m_warmupMetadataStream, m_warmupMetadataOpened );
@@ -1543,3 +1547,5 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_recollectWarmup )( const pcf::IndiProperty
     log<text_log>( "PO4AO warm-up recollection requested", logPrio::LOG_INFO );
     return 0;
 }
+
+#endif // po4ao_impl_hpp

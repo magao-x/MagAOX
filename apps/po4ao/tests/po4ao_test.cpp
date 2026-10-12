@@ -1,13 +1,7 @@
 /** \file po4ao_test.cpp
- * \brief Catch2 tests for PO4AO history ordering and command safety.
+ * \brief Catch2 tests for PO4AO model handoff, modal history, and command safety.
  *
  * \ingroup po4ao_files
- */
-
-/** \defgroup po4ao_unit_test PO4AO Unit Tests
- * \brief Unit tests for the PO4AO application.
- *
- * \ingroup application_unit_test
  */
 
 #include "../../../tests/testXWC.hpp"
@@ -19,6 +13,9 @@
 
 namespace libXWCTest
 {
+/// CPU-only regression tests for the PO4AO application helpers.
+/** \ingroup po4ao_unit_test
+ */
 namespace po4aoTest
 {
 
