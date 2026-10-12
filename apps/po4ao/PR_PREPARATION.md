@@ -28,6 +28,8 @@ The upstream `picamCtrl` test registration is retained alongside PO4AO's entry.
 - Runtime changes: 72 assertions in 13 Catch2 cases passed locally with the
   same release-style flags, including stale-candidate rejection, acceptance
   after reset, and preservation of a busy retirement slot.
+- Moving all helper definitions below their class declarations preserved the
+  same 72 passing assertions in 13 cases.
 - Final formatter checks: pending.
 - Full CUDA/TensorRT app build and physical test run: pending operator testing.
 

@@ -36,14 +36,16 @@ class Logger : public nvinfer1::ILogger
 {
     /// Forward TensorRT warnings and errors to standard output during model loading.
     void log( Severity    severity /**< [in] TensorRT message severity. */,
-              const char *msg /**< [in] TensorRT message text. */ ) noexcept override
-    {
-        if( severity <= Severity::kWARNING )
-        {
-            std::cout << msg << std::endl;
-        }
-    }
+              const char *msg /**< [in] TensorRT message text. */ ) noexcept override;
 };
+
+inline void Logger::log( Severity severity, const char *msg ) noexcept
+{
+    if( severity <= Severity::kWARNING )
+    {
+        std::cout << msg << std::endl;
+    }
+}
 
 /// Release either ordinary or CUDA-pinned host memory.
 struct HostBufferDeleter
@@ -85,15 +87,17 @@ struct EngineBundle
     std::vector<float>           linearWeights;     ///< Optional feature-major CPU linear-policy weights.
 
     /// Destroy TensorRT objects outside the real-time thread.
-    ~EngineBundle()
-    {
-        if( graphExec != nullptr )
-            cudaGraphExecDestroy( graphExec );
-        delete context;
-        delete engine;
-        delete runtime;
-    }
+    ~EngineBundle();
 };
+
+inline EngineBundle::~EngineBundle()
+{
+    if( graphExec != nullptr )
+        cudaGraphExecDestroy( graphExec );
+    delete context;
+    delete engine;
+    delete runtime;
+}
 
 // #define MAGAOX_CURRENT_SHA1 0
 // #define MAGAOX_REPO_MODIFIED 0

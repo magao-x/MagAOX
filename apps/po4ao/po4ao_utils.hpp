@@ -82,62 +82,74 @@ class CircularBuffer
   public:
     /// Construct a circular buffer with fixed sample size and capacity.
     CircularBuffer( size_t sampleSize /**< [in] Number of floats in one sample. */,
-                    size_t historySize /**< [in] Number of samples retained. */ )
-        : m_sampleSize( sampleSize ), m_historySize( historySize ),
-          m_buffer( std::make_unique<float[]>( m_sampleSize * m_historySize ) )
-    {
-    }
+                    size_t historySize /**< [in] Number of samples retained. */ );
 
     /// Exercise wraparound and indexing behavior without external dependencies.
-    static bool selfTest()
-    {
-        CircularBuffer buf( 4, 3 );
-        float          f1[4] = { 1.F, 2.F, 3.F, 4.F };
-        float          f2[4] = { 10.F, 11.F, 12.F, 13.F };
-        float          f3[4] = { 20.F, 21.F, 22.F, 23.F };
-        float          f4[4] = { 30.F, 31.F, 32.F, 33.F };
-
-        buf.add( f1 );
-        if( buf.size() != 1 || buf.getItem( 0 )[0] != 1.F )
-            return false;
-        buf.add( f2 );
-        buf.add( f3 );
-        if( buf.size() != 3 || buf.getItem( 0 )[0] != 20.F || buf.getItem( 2 )[0] != 1.F )
-            return false;
-        buf.add( f4 );
-        return buf.size() == 3 && buf.getItem( 2 )[0] == 10.F && buf.getItem( 3 ) == nullptr;
-    }
+    static bool selfTest();
 
     /// Add one sample, overwriting the oldest sample after the buffer fills.
-    void add( const float *sample /**< [in] Contiguous sample data. */ )
-    {
-        if( m_historySize == 0 )
-            return;
-        memcpy( &m_buffer[( m_head % m_historySize ) * m_sampleSize], sample, sizeof( float ) * m_sampleSize );
-        ++m_head;
-    }
+    void add( const float *sample /**< [in] Contiguous sample data. */ );
 
     /// Reset the logical contents without reallocating storage.
-    void reset()
-    {
-        m_head = 0;
-    }
+    void reset();
 
     /// Return the number of valid samples currently retained.
-    size_t size() const
-    {
-        return std::min( m_head, m_historySize );
-    }
+    size_t size() const;
 
     /// Return a sample by age, where zero is the newest sample.
-    const float *getItem( size_t age /**< [in] Sample age relative to the newest sample. */ ) const
-    {
-        if( m_historySize == 0 || age >= size() )
-            return nullptr;
-        const size_t index = ( m_head + m_historySize - 1 - age ) % m_historySize;
-        return m_buffer.get() + index * m_sampleSize;
-    }
+    const float *getItem( size_t age /**< [in] Sample age relative to the newest sample. */ ) const;
 };
+
+inline CircularBuffer::CircularBuffer( size_t sampleSize, size_t historySize )
+    : m_sampleSize( sampleSize ), m_historySize( historySize ),
+      m_buffer( std::make_unique<float[]>( m_sampleSize * m_historySize ) )
+{
+}
+
+inline bool CircularBuffer::selfTest()
+{
+    CircularBuffer buf( 4, 3 );
+    float f1[4] = { 1.F, 2.F, 3.F, 4.F };
+    float f2[4] = { 10.F, 11.F, 12.F, 13.F };
+    float f3[4] = { 20.F, 21.F, 22.F, 23.F };
+    float f4[4] = { 30.F, 31.F, 32.F, 33.F };
+
+    buf.add( f1 );
+    if( buf.size() != 1 || buf.getItem( 0 )[0] != 1.F )
+        return false;
+    buf.add( f2 );
+    buf.add( f3 );
+    if( buf.size() != 3 || buf.getItem( 0 )[0] != 20.F || buf.getItem( 2 )[0] != 1.F )
+        return false;
+    buf.add( f4 );
+    return buf.size() == 3 && buf.getItem( 2 )[0] == 10.F && buf.getItem( 3 ) == nullptr;
+}
+
+inline void CircularBuffer::add( const float *sample )
+{
+    if( m_historySize == 0 )
+        return;
+    memcpy( &m_buffer[( m_head % m_historySize ) * m_sampleSize], sample, sizeof( float ) * m_sampleSize );
+    ++m_head;
+}
+
+inline void CircularBuffer::reset()
+{
+    m_head = 0;
+}
+
+inline size_t CircularBuffer::size() const
+{
+    return std::min( m_head, m_historySize );
+}
+
+inline const float *CircularBuffer::getItem( size_t age ) const
+{
+    if( m_historySize == 0 || age >= size() )
+        return nullptr;
+    const size_t index = ( m_head + m_historySize - 1 - age ) % m_historySize;
+    return m_buffer.get() + index * m_sampleSize;
+}
 
 /// One preallocated episode passed from the real-time thread to the publisher thread.
 struct EpisodeBuffer
@@ -152,35 +164,41 @@ struct EpisodeBuffer
 
     /// Allocate storage once before real-time processing starts.
     void configure( size_t frameCapacity /**< [in] Frames per episode. */,
-                    size_t modeCount /**< [in] Modal values per frame. */ )
-    {
-        capacity = frameCapacity;
-        modes    = modeCount;
-        observations.resize( capacity * modes );
-        commands.resize( capacity * modes );
-        reset();
-    }
+                    size_t modeCount /**< [in] Modal values per frame. */ );
 
     /// Clear logical contents without releasing storage.
-    void reset()
-    {
-        count      = 0;
-        episode    = 0;
-        generation = 0;
-    }
+    void reset();
 
     /// Append one observation-command pair.
     bool add( const float *observation /**< [in] Modal observation. */,
-              const float *command /**< [in] Modal differential command. */ )
-    {
-        if( count >= capacity )
-            return false;
-        memcpy( observations.data() + count * modes, observation, modes * sizeof( float ) );
-        memcpy( commands.data() + count * modes, command, modes * sizeof( float ) );
-        ++count;
-        return true;
-    }
+              const float *command /**< [in] Modal differential command. */ );
 };
+
+inline void EpisodeBuffer::configure( size_t frameCapacity, size_t modeCount )
+{
+    capacity = frameCapacity;
+    modes = modeCount;
+    observations.resize( capacity * modes );
+    commands.resize( capacity * modes );
+    reset();
+}
+
+inline void EpisodeBuffer::reset()
+{
+    count = 0;
+    episode = 0;
+    generation = 0;
+}
+
+inline bool EpisodeBuffer::add( const float *observation, const float *command )
+{
+    if( count >= capacity )
+        return false;
+    memcpy( observations.data() + count * modes, observation, modes * sizeof( float ) );
+    memcpy( commands.data() + count * modes, command, modes * sizeof( float ) );
+    ++count;
+    return true;
+}
 
 /// Assemble the exported modal-policy tensor in its documented feature order.
 inline bool assemblePolicyInput( float                *destination /**< [out] Contiguous policy input. */,
