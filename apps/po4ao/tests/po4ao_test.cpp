@@ -22,6 +22,80 @@ namespace libXWCTest
 namespace po4aoTest
 {
 
+/** \cond PO4AO_TEST_SUPPORT */
+/// CPU-only stand-in for the ownership and generation fields used during model handoff.
+struct HandoffModel
+{
+    uint64_t generation{ 0 }; ///< Reload request generation represented by this candidate.
+};
+/** \endcond */
+
+/// Verify a candidate published after its reset cannot activate in the new generation.
+/** \ingroup po4ao_unit_test
+ */
+TEST_CASE( "PO4AO rejects a stale model published after reset", "[po4ao]" )
+{
+    HandoffModel candidate{ 1 };
+    std::atomic<HandoffModel *> pending{ nullptr };
+    std::atomic<HandoffModel *> retired{ nullptr };
+    std::atomic<int> status{ 1 };
+    std::atomic<uint64_t> generation{ 1 };
+    const uint64_t checkedGeneration = generation.load();
+
+    // The loader checked generation 1; reset completed before its publication.
+    generation.fetch_add( 1 );
+    status.store( 2 );
+    pending.store( &candidate );
+    REQUIRE( candidate.generation == checkedGeneration );
+
+    // clang-format off
+    #ifdef PO4AO_TEST_DOXYGEN_REF
+    ::takePendingModel( pending, retired, status, generation.load() );
+    #endif
+    // clang-format on
+
+    REQUIRE( takePendingModel( pending, retired, status, generation.load() ) == nullptr );
+    REQUIRE( pending.load() == nullptr );
+    REQUIRE( retired.load() == &candidate );
+    REQUIRE( status.load() == 0 );
+    // Background ownership remains explicit; handoff neither deletes nor modifies the model.
+    REQUIRE( retired.exchange( nullptr ) == &candidate );
+    REQUIRE( candidate.generation == 1 );
+}
+
+/// Verify a post-reset candidate can be activated exactly once.
+/** \ingroup po4ao_unit_test
+ */
+TEST_CASE( "PO4AO takes a current generation model once", "[po4ao]" )
+{
+    HandoffModel candidate{ 2 };
+    std::atomic<HandoffModel *> pending{ &candidate };
+    std::atomic<HandoffModel *> retired{ nullptr };
+    std::atomic<int> status{ 2 };
+    REQUIRE( takePendingModel( pending, retired, status, 2 ) == &candidate );
+    REQUIRE( takePendingModel( pending, retired, status, 2 ) == nullptr );
+    REQUIRE( pending.load() == nullptr );
+    REQUIRE( retired.load() == nullptr );
+}
+
+/// Verify handoff waits for background retirement instead of losing an owned model.
+/** \ingroup po4ao_unit_test
+ */
+TEST_CASE( "PO4AO preserves a busy model retirement slot", "[po4ao]" )
+{
+    HandoffModel previous{ 1 };
+    HandoffModel candidate{ 2 };
+    std::atomic<HandoffModel *> pending{ &candidate };
+    std::atomic<HandoffModel *> retired{ &previous };
+    std::atomic<int> status{ 2 };
+    REQUIRE( takePendingModel( pending, retired, status, 2 ) == nullptr );
+    REQUIRE( pending.load() == &candidate );
+    REQUIRE( retired.load() == &previous );
+    REQUIRE( status.load() == 2 );
+    REQUIRE( retired.exchange( nullptr ) == &previous );
+    REQUIRE( takePendingModel( pending, retired, status, 2 ) == &candidate );
+}
+
 /// Verify source counter jumps, repeats, and resets are discontinuities.
 /** \ingroup po4ao_unit_test
  */

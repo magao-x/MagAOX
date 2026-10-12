@@ -14,7 +14,7 @@ inline po4ao::~po4ao() noexcept
 
 inline void po4ao::setupConfig()
 {
-    shmimMonitorT::setupConfig( config );
+    SHMIMMONITOR_SETUP_CONFIG( config );
 
     config.add( "parameters.dataDirs",
                 "",
@@ -254,7 +254,7 @@ inline void po4ao::setupConfig()
 
 inline int po4ao::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-    shmimMonitorT::loadConfig( _config );
+    SHMIMMONITOR_LOAD_CONFIG( _config );
     _config( m_dataDirs, "parameters.dataDirs" );
     _config( m_engineDirs, "parameters.engineDirs" );
     _config( m_engineName, "parameters.engineName" );
@@ -286,7 +286,11 @@ inline int po4ao::loadConfigImpl( mx::app::appConfigurator &_config )
 
 inline void po4ao::loadConfig()
 {
-    loadConfigImpl( config );
+    if( loadConfigImpl( config ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "PO4AO configuration load failed" } );
+        m_shutdown = true;
+    }
 }
 
 inline std::unique_ptr<EngineBundle> po4ao::createEngineBundle( const std::string &filename, std::string &error )
@@ -714,17 +718,27 @@ inline void po4ao::modelLoaderLoop()
             m_reloadStatus.store( 3, std::memory_order_release );
             continue;
         }
-        m_pendingEngine.store( candidate.release(), std::memory_order_release );
+        // Publish ready before the pointer so activation cannot be followed by a stale ready status.
         m_reloadStatus.store( 2, std::memory_order_release );
+        m_pendingEngine.store( candidate.release(), std::memory_order_release );
     }
     delete m_retiredEngine.exchange( nullptr, std::memory_order_acq_rel );
 }
 
 inline void po4ao::activatePendingEngine()
 {
-    EngineBundle *candidate = m_pendingEngine.exchange( nullptr, std::memory_order_acq_rel );
-    if( candidate == nullptr )
+    if( m_pendingEngine.load( std::memory_order_acquire ) == nullptr )
         return;
+    EngineBundle *candidate = takePendingModel( m_pendingEngine,
+                                                m_retiredEngine,
+                                                m_reloadStatus,
+                                                m_modelGeneration.load( std::memory_order_acquire ) );
+    if( candidate == nullptr )
+    {
+        if( m_retiredEngine.load( std::memory_order_acquire ) != nullptr )
+            m_loaderCondition.notify_one();
+        return;
+    }
 
     EngineBundle *old = m_activeEngine;
     m_activeEngine    = candidate;
@@ -1158,6 +1172,7 @@ inline int po4ao::appStartup()
 
     m_loaderThread = std::thread( [this]() { modelLoaderLoop(); } );
     m_replayThread = std::thread( [this]() { replayPublisherLoop(); } );
+    // The standard early-return macro would skip rollback of the two worker threads.
     if( shmimMonitorT::appStartup() < 0 )
     {
         m_loaderShutdown.store( true, std::memory_order_release );
@@ -1240,11 +1255,9 @@ inline void po4ao::updateRuntimeStatistics()
 
 inline int po4ao::appLogic()
 {
-    if( shmimMonitorT::appLogic() < 0 )
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    SHMIMMONITOR_APP_LOGIC;
     std::unique_lock<std::mutex> lock( m_indiMutex );
-    if( shmimMonitorT::updateINDI() < 0 )
-        log<software_error>( { __FILE__, __LINE__ } );
+    SHMIMMONITOR_UPDATE_INDI;
     updateSwitchIfChanged( m_indiP_controlToggle,
                            "toggle",
                            m_controlEnabled.load( std::memory_order_acquire ) ? pcf::IndiElement::On
@@ -1274,7 +1287,8 @@ inline int po4ao::appLogic()
 
 inline int po4ao::appShutdown()
 {
-    shmimMonitorT::appShutdown();
+    // Always release worker/model resources, even when the monitor reports a shutdown error.
+    const int monitorStatus = shmimMonitorT::appShutdown();
     m_controlEnabled.store( false, std::memory_order_release );
     if( m_outputOpened && m_output )
     {
@@ -1297,6 +1311,8 @@ inline int po4ao::appShutdown()
     delete m_activeEngine;
     m_activeEngine = nullptr;
     cleanupEngineMemory();
+    if( monitorStatus < 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__, "Error from shmimMonitorT::appShutdown" } );
     return 0;
 }
 

@@ -8,11 +8,34 @@
 #define po4ao_utils_hpp
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <vector>
+
+/// Take a current-generation model, retiring stale candidates outside the real-time thread.
+/** Model must expose the reload request's `generation` member. A busy retirement
+ * slot leaves the candidate pending rather than overwriting an owned pointer.
+ */
+template <typename Model>
+inline Model *takePendingModel( std::atomic<Model *> &pending /**< [in,out] Candidate awaiting activation. */,
+                               std::atomic<Model *> &retired /**< [in,out] Model awaiting background destruction. */,
+                               std::atomic<int> &reloadStatus /**< [in,out] Reload state; stale candidates return to idle. */,
+                               uint64_t generation /**< [in] Currently accepted reload generation. */ )
+{
+    if( retired.load( std::memory_order_acquire ) != nullptr )
+        return nullptr;
+    Model *candidate = pending.exchange( nullptr, std::memory_order_acq_rel );
+    if( candidate != nullptr && candidate->generation != generation )
+    {
+        retired.store( candidate, std::memory_order_release );
+        reloadStatus.store( 0, std::memory_order_release );
+        return nullptr;
+    }
+    return candidate;
+}
 
 /// Report whether the current source counter directly follows the previous one.
 inline bool sourceCounterIsConsecutive( uint64_t current /**< [in] Current source publication counter. */,
