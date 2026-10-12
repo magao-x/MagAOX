@@ -592,11 +592,12 @@ inline bool po4ao::captureEngineGraph( EngineBundle &bundle, std::string &error 
     const size_t inputBytes  = static_cast<size_t>( bundle.inputSize ) * sizeof( float );
     const size_t outputBytes = static_cast<size_t>( bundle.outputSize ) * sizeof( float );
     const bool   captured =
-        cudaMemcpyAsync( m_deviceInput, m_inputState.get(), inputBytes, cudaMemcpyHostToDevice,
-                         m_engineWarmupStream ) == cudaSuccess &&
+        cudaMemcpyAsync(
+            m_deviceInput, m_inputState.get(), inputBytes, cudaMemcpyHostToDevice, m_engineWarmupStream ) ==
+            cudaSuccess &&
         bundle.context->enqueueV3( m_engineWarmupStream ) &&
-        cudaMemcpyAsync( m_output.get(), m_deviceOutput, outputBytes, cudaMemcpyDeviceToHost,
-                         m_engineWarmupStream ) == cudaSuccess;
+        cudaMemcpyAsync( m_output.get(), m_deviceOutput, outputBytes, cudaMemcpyDeviceToHost, m_engineWarmupStream ) ==
+            cudaSuccess;
     const cudaError_t captureStatus = cudaStreamEndCapture( m_engineWarmupStream, &graph );
     if( !captured || captureStatus != cudaSuccess || graph == nullptr )
     {
@@ -670,7 +671,7 @@ inline void po4ao::modelLoaderLoop()
 {
     while( !m_loaderShutdown.load( std::memory_order_acquire ) )
     {
-        { //mutex scope
+        { // mutex scope
             std::unique_lock<std::mutex> lock( m_loaderMutex );
             m_loaderCondition.wait( lock,
                                     [this]()
@@ -702,7 +703,7 @@ inline void po4ao::modelLoaderLoop()
             candidate.reset();
         if( candidate == nullptr )
         {
-            { //mutex scope
+            { // mutex scope
                 std::lock_guard<std::mutex> lock( m_reloadErrorMutex );
                 m_reloadError = error;
             }
@@ -733,10 +734,8 @@ inline void po4ao::activatePendingEngine()
 {
     if( m_pendingEngine.load( std::memory_order_acquire ) == nullptr )
         return;
-    EngineBundle *candidate = takePendingModel( m_pendingEngine,
-                                                m_retiredEngine,
-                                                m_reloadStatus,
-                                                m_modelGeneration.load( std::memory_order_acquire ) );
+    EngineBundle *candidate = takePendingModel(
+        m_pendingEngine, m_retiredEngine, m_reloadStatus, m_modelGeneration.load( std::memory_order_acquire ) );
     if( candidate == nullptr )
     {
         if( m_retiredEngine.load( std::memory_order_acquire ) != nullptr )
@@ -796,11 +795,8 @@ inline bool po4ao::runInference( const float *observation )
     {
         return false;
     }
-    if( !blendPolicyCommand( m_output.get(),
-                             observation,
-                             static_cast<size_t>( m_nModesControlled ),
-                             m_integratorGain,
-                             m_policyBlend ) )
+    if( !blendPolicyCommand(
+            m_output.get(), observation, static_cast<size_t>( m_nModesControlled ), m_integratorGain, m_policyBlend ) )
         return false;
     return finalizeControlledCommand( m_output.get(),
                                       observation,
@@ -1125,8 +1121,8 @@ inline int po4ao::appStartup()
     if( m_configVersion != 2 ||
         ( m_linearInferenceBackend != "auto" && m_linearInferenceBackend != "cpu" &&
           m_linearInferenceBackend != "tensorrt" ) ||
-        m_nModes <= 0 || m_nModesControlled <= 0 || m_nModesControlled > m_nModes ||
-        m_historyCapacity <= 0 || m_iterationsPerEpisode == 0 || m_replayBufferSize <= 0 || m_warmupEpisodes == 0 ||
+        m_nModes <= 0 || m_nModesControlled <= 0 || m_nModesControlled > m_nModes || m_historyCapacity <= 0 ||
+        m_iterationsPerEpisode == 0 || m_replayBufferSize <= 0 || m_warmupEpisodes == 0 ||
         static_cast<uint64_t>( m_warmupEpisodes ) * m_iterationsPerEpisode >
             static_cast<uint64_t>( m_replayBufferSize ) ||
         m_explorationSigmaEnd < 0.F || m_explorationSigmaStart < m_explorationSigmaEnd ||
@@ -1237,7 +1233,7 @@ inline void po4ao::updateRuntimeStatistics()
     updateIfChanged(
         m_indiP_runtimeStats, "replay_drops", static_cast<double>( m_replayDrops.load( std::memory_order_relaxed ) ) );
 
-    const uint64_t activeModelId = m_activeModelId.load( std::memory_order_acquire );
+    const uint64_t     activeModelId = m_activeModelId.load( std::memory_order_acquire );
     std::ostringstream modelId;
     modelId << std::hex << std::setw( 16 ) << std::setfill( '0' ) << activeModelId;
     static const std::array<std::string, 4> reloadNames  = { "idle", "loading", "ready", "failed" };
@@ -1354,11 +1350,11 @@ inline int po4ao::allocate( const dev::shmimT &dummy )
         else
         {
             m_inputState = std::unique_ptr<float[], HostBufferDeleter>( new float[inputCapacity], HostBufferDeleter{} );
-            m_output = std::unique_ptr<float[], HostBufferDeleter>( new float[static_cast<size_t>( m_nModes )],
+            m_output     = std::unique_ptr<float[], HostBufferDeleter>( new float[static_cast<size_t>( m_nModes )],
                                                                     HostBufferDeleter{} );
         }
     }
-    m_integratorCommands       = std::make_unique<float[]>( static_cast<size_t>( m_nModes ) );
+    m_integratorCommands = std::make_unique<float[]>( static_cast<size_t>( m_nModes ) );
     memset( m_inputState.get(), 0, inputCapacity * sizeof( float ) );
     memset( m_output.get(), 0, static_cast<size_t>( m_nModes ) * sizeof( float ) );
     memset( m_integratorCommands.get(), 0, static_cast<size_t>( m_nModes ) * sizeof( float ) );
@@ -1538,7 +1534,7 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_recollectWarmup )( const pcf::IndiProperty
 
     const uint64_t generation = m_collectionGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1;
     m_warmupRecollectRequest.store( generation, std::memory_order_release );
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> publicationLock( m_publicationMutex );
         invalidateReplay( m_replayStream, m_replayOpened, m_replayMetadataStream, m_replayMetadataOpened );
         invalidateReplay( m_warmupStream, m_warmupOpened, m_warmupMetadataStream, m_warmupMetadataOpened );

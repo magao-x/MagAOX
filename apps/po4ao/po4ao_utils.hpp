@@ -20,10 +20,11 @@
  * slot leaves the candidate pending rather than overwriting an owned pointer.
  */
 template <typename Model>
-inline Model *takePendingModel( std::atomic<Model *> &pending /**< [in,out] Candidate awaiting activation. */,
-                               std::atomic<Model *> &retired /**< [in,out] Model awaiting background destruction. */,
-                               std::atomic<int> &reloadStatus /**< [in,out] Reload state; stale candidates return to idle. */,
-                               uint64_t generation /**< [in] Currently accepted reload generation. */ )
+inline Model *
+takePendingModel( std::atomic<Model *> &pending /**< [in,out] Candidate awaiting activation. */,
+                  std::atomic<Model *> &retired /**< [in,out] Model awaiting background destruction. */,
+                  std::atomic<int>     &reloadStatus /**< [in,out] Reload state; stale candidates return to idle. */,
+                  uint64_t              generation /**< [in] Currently accepted reload generation. */ )
 {
     if( retired.load( std::memory_order_acquire ) != nullptr )
         return nullptr;
@@ -109,10 +110,10 @@ inline CircularBuffer::CircularBuffer( size_t sampleSize, size_t historySize )
 inline bool CircularBuffer::selfTest()
 {
     CircularBuffer buf( 4, 3 );
-    float f1[4] = { 1.F, 2.F, 3.F, 4.F };
-    float f2[4] = { 10.F, 11.F, 12.F, 13.F };
-    float f3[4] = { 20.F, 21.F, 22.F, 23.F };
-    float f4[4] = { 30.F, 31.F, 32.F, 33.F };
+    float          f1[4] = { 1.F, 2.F, 3.F, 4.F };
+    float          f2[4] = { 10.F, 11.F, 12.F, 13.F };
+    float          f3[4] = { 20.F, 21.F, 22.F, 23.F };
+    float          f4[4] = { 30.F, 31.F, 32.F, 33.F };
 
     buf.add( f1 );
     if( buf.size() != 1 || buf.getItem( 0 )[0] != 1.F )
@@ -177,7 +178,7 @@ struct EpisodeBuffer
 inline void EpisodeBuffer::configure( size_t frameCapacity, size_t modeCount )
 {
     capacity = frameCapacity;
-    modes = modeCount;
+    modes    = modeCount;
     observations.resize( capacity * modes );
     commands.resize( capacity * modes );
     reset();
@@ -185,8 +186,8 @@ inline void EpisodeBuffer::configure( size_t frameCapacity, size_t modeCount )
 
 inline void EpisodeBuffer::reset()
 {
-    count = 0;
-    episode = 0;
+    count      = 0;
+    episode    = 0;
     generation = 0;
 }
 

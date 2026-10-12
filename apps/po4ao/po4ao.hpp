@@ -78,22 +78,22 @@ inline void HostBufferDeleter::operator()( float *pointer ) const
 /// Validated CPU-linear or TensorRT policy and its tensor contract.
 struct EngineBundle
 {
-    nvinfer1::IRuntime          *runtime{ nullptr }; ///< Runtime which deserialized the engine.
-    nvinfer1::ICudaEngine       *engine{ nullptr };  ///< Immutable TensorRT engine.
-    nvinfer1::IExecutionContext *context{ nullptr }; ///< Loader warms this context before exclusive real-time use.
+    nvinfer1::IRuntime          *runtime{ nullptr };   ///< Runtime which deserialized the engine.
+    nvinfer1::ICudaEngine       *engine{ nullptr };    ///< Immutable TensorRT engine.
+    nvinfer1::IExecutionContext *context{ nullptr };   ///< Loader warms this context before exclusive real-time use.
     cudaGraphExec_t              graphExec{ nullptr }; ///< Executable graph launched by the real-time thread.
-    std::string                  inputName;          ///< Input tensor name.
-    std::string                  outputName;         ///< Output tensor name.
-    int                          inputChannels{ 0 }; ///< Policy input feature planes.
-    int                          inputHeight{ 0 };   ///< Policy input height.
-    int                          inputWidth{ 0 };    ///< Policy input width.
-    int                          inputSize{ 0 };     ///< Total policy input floats.
-    int                          outputSize{ 0 };    ///< Total policy output floats.
-    int                          trainedModes{ 0 };  ///< Modal prefix represented by this engine.
-    int                          historyLength{ 0 }; ///< Observation history inferred from the model.
-    uint64_t                     modelId{ 0 };       ///< Stable FNV-1a hash of serialized engine bytes.
-    uint64_t                     generation{ 0 };    ///< Reset generation in which this model was requested.
-    std::vector<float>           linearWeights;     ///< Optional feature-major CPU linear-policy weights.
+    std::string                  inputName;            ///< Input tensor name.
+    std::string                  outputName;           ///< Output tensor name.
+    int                          inputChannels{ 0 };   ///< Policy input feature planes.
+    int                          inputHeight{ 0 };     ///< Policy input height.
+    int                          inputWidth{ 0 };      ///< Policy input width.
+    int                          inputSize{ 0 };       ///< Total policy input floats.
+    int                          outputSize{ 0 };      ///< Total policy output floats.
+    int                          trainedModes{ 0 };    ///< Modal prefix represented by this engine.
+    int                          historyLength{ 0 };   ///< Observation history inferred from the model.
+    uint64_t                     modelId{ 0 };         ///< Stable FNV-1a hash of serialized engine bytes.
+    uint64_t                     generation{ 0 };      ///< Reset generation in which this model was requested.
+    std::vector<float>           linearWeights;        ///< Optional feature-major CPU linear-policy weights.
 
     /// Destroy TensorRT objects outside the real-time thread.
     ~EngineBundle();
@@ -164,39 +164,39 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     /** \name Inference and History - Data
      *@{
      */
-    Logger                          m_logger;                    ///< TensorRT deserialization logger.
-    EngineBundle                   *m_activeEngine{ nullptr };   ///< Model used only by the real-time callback.
-    std::atomic<EngineBundle *>     m_pendingEngine{ nullptr };  ///< Fully validated model awaiting activation.
-    std::atomic<EngineBundle *>     m_retiredEngine{ nullptr };  ///< Old model awaiting background destruction.
-    std::atomic<bool>               m_reloadRequested{ false };  ///< Background-load request flag.
-    std::atomic<bool>               m_loaderShutdown{ false };   ///< Model-loader thread shutdown flag.
-    std::atomic<int>                m_reloadStatus{ 0 };         ///< Reload state: idle, loading, ready, or failed.
-    std::atomic<uint64_t>           m_modelGeneration{ 1 };      ///< Generation accepted for future model loads.
-    std::atomic<uint64_t>           m_reloadGeneration{ 1 };     ///< Generation attached to the queued reload.
-    std::atomic<uint64_t>           m_modelResetRequest{ 0 };    ///< Generation awaiting fallback activation.
-    std::thread                     m_loaderThread;              ///< Non-real-time TensorRT loader.
-    std::mutex                      m_loaderMutex;               ///< Protects loader sleep and wake-up.
-    std::condition_variable         m_loaderCondition;           ///< Wakes the model-loader thread.
-    std::mutex                      m_reloadErrorMutex;          ///< Protects the reload-status detail string.
-    std::string                     m_reloadError;               ///< Most recent model-load failure.
-    cudaStream_t                    m_cudaStream{ nullptr };     ///< Dedicated inference stream.
-    cudaStream_t                    m_engineWarmupStream{ nullptr }; ///< Low-priority candidate-engine warm-up stream.
-    float                          *m_deviceInput{ nullptr };    ///< Device policy-input storage.
-    float                          *m_deviceOutput{ nullptr };   ///< Device policy-output storage.
-    float                          *m_deviceWarmupInput{ nullptr };  ///< Loader-owned candidate input storage.
-    float                          *m_deviceWarmupOutput{ nullptr }; ///< Loader-owned candidate output storage.
+    Logger                      m_logger;                        ///< TensorRT deserialization logger.
+    EngineBundle               *m_activeEngine{ nullptr };       ///< Model used only by the real-time callback.
+    std::atomic<EngineBundle *> m_pendingEngine{ nullptr };      ///< Fully validated model awaiting activation.
+    std::atomic<EngineBundle *> m_retiredEngine{ nullptr };      ///< Old model awaiting background destruction.
+    std::atomic<bool>           m_reloadRequested{ false };      ///< Background-load request flag.
+    std::atomic<bool>           m_loaderShutdown{ false };       ///< Model-loader thread shutdown flag.
+    std::atomic<int>            m_reloadStatus{ 0 };             ///< Reload state: idle, loading, ready, or failed.
+    std::atomic<uint64_t>       m_modelGeneration{ 1 };          ///< Generation accepted for future model loads.
+    std::atomic<uint64_t>       m_reloadGeneration{ 1 };         ///< Generation attached to the queued reload.
+    std::atomic<uint64_t>       m_modelResetRequest{ 0 };        ///< Generation awaiting fallback activation.
+    std::thread                 m_loaderThread;                  ///< Non-real-time TensorRT loader.
+    std::mutex                  m_loaderMutex;                   ///< Protects loader sleep and wake-up.
+    std::condition_variable     m_loaderCondition;               ///< Wakes the model-loader thread.
+    std::mutex                  m_reloadErrorMutex;              ///< Protects the reload-status detail string.
+    std::string                 m_reloadError;                   ///< Most recent model-load failure.
+    cudaStream_t                m_cudaStream{ nullptr };         ///< Dedicated inference stream.
+    cudaStream_t                m_engineWarmupStream{ nullptr }; ///< Low-priority candidate-engine warm-up stream.
+    float                      *m_deviceInput{ nullptr };        ///< Device policy-input storage.
+    float                      *m_deviceOutput{ nullptr };       ///< Device policy-output storage.
+    float                      *m_deviceWarmupInput{ nullptr };  ///< Loader-owned candidate input storage.
+    float                      *m_deviceWarmupOutput{ nullptr }; ///< Loader-owned candidate output storage.
     std::unique_ptr<float[], HostBufferDeleter> m_inputState{ nullptr, HostBufferDeleter{} }; ///< Host policy input.
     std::unique_ptr<float[], HostBufferDeleter> m_output{ nullptr, HostBufferDeleter{} };     ///< Host policy output.
-    std::unique_ptr<float[]>        m_integratorCommands;        ///< Safe proportional fallback command.
-    std::unique_ptr<CircularBuffer> m_commandHistory;            ///< Commands used for policy history.
-    std::unique_ptr<CircularBuffer> m_observationHistory;        ///< Observations used for policy history.
-    std::vector<float>              m_explorationNoise;          ///< Flattened exploration-noise table.
-    size_t                          m_explorationNoiseRows{ 0 }; ///< Exploration-noise row count.
-    size_t                          m_explorationNoiseCols{ 0 }; ///< Exploration-noise column count.
-    std::atomic<bool>               m_controlEnabled{ false };   ///< Whether the learned policy may replace fallback.
-    std::atomic<bool>               m_useNeuralNetwork{ false }; ///< Whether the policy may replace warm-up control.
-    uint64_t                        m_frameCounter{ 0 };         ///< Frames processed since allocation or warm-up reset.
-    std::atomic<uint64_t>           m_episodeCounter{ 0 };       ///< Completed episode count.
+    std::unique_ptr<float[]>                    m_integratorCommands;        ///< Safe proportional fallback command.
+    std::unique_ptr<CircularBuffer>             m_commandHistory;            ///< Commands used for policy history.
+    std::unique_ptr<CircularBuffer>             m_observationHistory;        ///< Observations used for policy history.
+    std::vector<float>                          m_explorationNoise;          ///< Flattened exploration-noise table.
+    size_t                                      m_explorationNoiseRows{ 0 }; ///< Exploration-noise row count.
+    size_t                                      m_explorationNoiseCols{ 0 }; ///< Exploration-noise column count.
+    std::atomic<bool>     m_controlEnabled{ false };   ///< Whether the learned policy may replace fallback.
+    std::atomic<bool>     m_useNeuralNetwork{ false }; ///< Whether the policy may replace warm-up control.
+    uint64_t              m_frameCounter{ 0 };         ///< Frames processed since allocation or warm-up reset.
+    std::atomic<uint64_t> m_episodeCounter{ 0 };       ///< Completed episode count.
     ///@}
 
     /** \name Replay Publication - Data
@@ -206,22 +206,22 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     std::array<EpisodeBuffer, c_episodeSlots>    m_episodeBuffers;   ///< Real-time handoff storage.
     std::array<std::atomic<int>, c_episodeSlots> m_episodeStates;    ///< 0 free, 1 active, 2 ready, 3 publishing.
     std::array<int, c_episodeSlots>              m_readyQueue{}; ///< Fixed-size single-producer/single-consumer queue.
-    std::atomic<uint64_t>                        m_readyWrite{ 0 };         ///< Queue producer position.
-    std::atomic<uint64_t>                        m_readyRead{ 0 };          ///< Queue consumer position.
-    int                                          m_activeEpisodeSlot{ 0 };  ///< Slot written by the real-time callback.
+    std::atomic<uint64_t>                        m_readyWrite{ 0 };        ///< Queue producer position.
+    std::atomic<uint64_t>                        m_readyRead{ 0 };         ///< Queue consumer position.
+    int                                          m_activeEpisodeSlot{ 0 }; ///< Slot written by the real-time callback.
 
-    std::atomic<uint64_t> m_collectionGeneration{ 1 }; ///< Latest requested warm-up collection generation.
-    uint64_t m_activeCollectionGeneration{ 1 }; ///< Generation stamped by the real-time producer.
-    uint64_t m_publicationGeneration{ 1 }; ///< Generation currently accumulated by the publisher.
-    std::atomic<uint64_t> m_warmupRecollectRequest{ 0 }; ///< Generation awaiting a real-time collection reset.
+    std::atomic<uint64_t> m_collectionGeneration{ 1 };       ///< Latest requested warm-up collection generation.
+    uint64_t              m_activeCollectionGeneration{ 1 }; ///< Generation stamped by the real-time producer.
+    uint64_t              m_publicationGeneration{ 1 };      ///< Generation currently accumulated by the publisher.
+    std::atomic<uint64_t> m_warmupRecollectRequest{ 0 };     ///< Generation awaiting a real-time collection reset.
 
-    std::thread                                  m_replayThread;            ///< Non-real-time replay publisher.
-    std::atomic<bool>                            m_replayShutdown{ false }; ///< Replay-publisher shutdown flag.
-    std::mutex                                   m_replayMutex;             ///< Protects publisher sleep and wake-up.
-    std::condition_variable                      m_replayCondition;         ///< Wakes the replay-publisher thread.
-    std::mutex                      m_publicationMutex;    ///< Serializes stream reconfiguration and publication.
-    std::unique_ptr<CircularBuffer> m_publishCommands;     ///< Publisher-owned rolling commands.
-    std::unique_ptr<CircularBuffer> m_publishObservations; ///< Publisher-owned rolling observations.
+    std::thread                     m_replayThread;            ///< Non-real-time replay publisher.
+    std::atomic<bool>               m_replayShutdown{ false }; ///< Replay-publisher shutdown flag.
+    std::mutex                      m_replayMutex;             ///< Protects publisher sleep and wake-up.
+    std::condition_variable         m_replayCondition;         ///< Wakes the replay-publisher thread.
+    std::mutex                      m_publicationMutex;        ///< Serializes stream reconfiguration and publication.
+    std::unique_ptr<CircularBuffer> m_publishCommands;         ///< Publisher-owned rolling commands.
+    std::unique_ptr<CircularBuffer> m_publishObservations;     ///< Publisher-owned rolling observations.
     ///@}
 
     /** \name Shared-memory Streams - Data
@@ -246,21 +246,21 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     std::array<std::atomic<uint32_t>, c_latencySamples> m_latencySamples;        ///< Recent callback durations.
     std::atomic<uint64_t>                               m_latencyCount{ 0 }; ///< Number of recorded callback durations.
     std::atomic<uint64_t>                               m_missedFrames{ 0 }; ///< Source counter discontinuities.
-    std::atomic<uint64_t>                 m_deadlineMisses{ 0 };    ///< Callbacks exceeding the configured deadline.
-    std::atomic<uint64_t>                 m_inferenceFailures{ 0 }; ///< Inference or result-validation failures.
-    std::atomic<uint64_t>                 m_replayDrops{ 0 };       ///< Episodes dropped because the publisher lagged.
-    std::atomic<uint64_t>                 m_activeModelId{ 0 };     ///< Selected policy hash; zero reports fallback.
-    std::atomic<bool>                     m_activeCpuInference{ false }; ///< Whether the active policy runs on CPU.
-    uint64_t                              m_lastInputCounter{ 0 };  ///< Previous source cnt0 used for gap detection.
-    bool                                  m_haveInputCounter{ false }; ///< Whether the previous source counter is valid.
-    std::chrono::steady_clock::time_point m_lastStatsUpdate;        ///< Previous telemetry publication time.
-    pcf::IndiProperty                     m_indiP_reloadToggle;     ///< Asynchronous model-reload request.
-    pcf::IndiProperty                     m_indiP_resetModel;       ///< Active-model reset request.
-    pcf::IndiProperty                     m_indiP_controlToggle;    ///< Select learned control or proportional fallback.
-    pcf::IndiProperty                     m_indiP_recollectWarmup;  ///< Fresh warm-up collection request.
-    pcf::IndiProperty                     m_indiP_runtimeStats;     ///< Latency and failure counters.
-    pcf::IndiProperty                     m_indiP_modelStatus;      ///< Active model ID and reload state.
-    ///@}
+    std::atomic<uint64_t> m_deadlineMisses{ 0 };                   ///< Callbacks exceeding the configured deadline.
+    std::atomic<uint64_t> m_inferenceFailures{ 0 };                ///< Inference or result-validation failures.
+    std::atomic<uint64_t> m_replayDrops{ 0 };                      ///< Episodes dropped because the publisher lagged.
+    std::atomic<uint64_t> m_activeModelId{ 0 };                    ///< Selected policy hash; zero reports fallback.
+    std::atomic<bool>     m_activeCpuInference{ false };           ///< Whether the active policy runs on CPU.
+    uint64_t              m_lastInputCounter{ 0 };                 ///< Previous source cnt0 used for gap detection.
+    bool                  m_haveInputCounter{ false };             ///< Whether the previous source counter is valid.
+    std::chrono::steady_clock::time_point m_lastStatsUpdate;       ///< Previous telemetry publication time.
+    pcf::IndiProperty                     m_indiP_reloadToggle;    ///< Asynchronous model-reload request.
+    pcf::IndiProperty                     m_indiP_resetModel;      ///< Active-model reset request.
+    pcf::IndiProperty                     m_indiP_controlToggle;   ///< Select learned control or proportional fallback.
+    pcf::IndiProperty                     m_indiP_recollectWarmup; ///< Fresh warm-up collection request.
+    pcf::IndiProperty                     m_indiP_runtimeStats;    ///< Latency and failure counters.
+    pcf::IndiProperty                     m_indiP_modelStatus;     ///< Active model ID and reload state.
+                                                                   ///@}
 
   public:
     /** \name Configuration

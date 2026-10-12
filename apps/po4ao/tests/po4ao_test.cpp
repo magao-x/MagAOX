@@ -32,12 +32,12 @@ struct HandoffModel
  */
 TEST_CASE( "PO4AO rejects a stale model published after reset", "[po4ao]" )
 {
-    HandoffModel candidate{ 1 };
+    HandoffModel                candidate{ 1 };
     std::atomic<HandoffModel *> pending{ nullptr };
     std::atomic<HandoffModel *> retired{ nullptr };
-    std::atomic<int> status{ 1 };
-    std::atomic<uint64_t> generation{ 1 };
-    const uint64_t checkedGeneration = generation.load();
+    std::atomic<int>            status{ 1 };
+    std::atomic<uint64_t>       generation{ 1 };
+    const uint64_t              checkedGeneration = generation.load();
 
     // The loader checked generation 1; reset completed before its publication.
     generation.fetch_add( 1 );
@@ -46,9 +46,9 @@ TEST_CASE( "PO4AO rejects a stale model published after reset", "[po4ao]" )
     REQUIRE( candidate.generation == checkedGeneration );
 
     // clang-format off
-    #ifdef PO4AO_TEST_DOXYGEN_REF
+#ifdef PO4AO_TEST_DOXYGEN_REF
     ::takePendingModel( pending, retired, status, generation.load() );
-    #endif
+#endif
     // clang-format on
 
     REQUIRE( takePendingModel( pending, retired, status, generation.load() ) == nullptr );
@@ -65,10 +65,10 @@ TEST_CASE( "PO4AO rejects a stale model published after reset", "[po4ao]" )
  */
 TEST_CASE( "PO4AO takes a current generation model once", "[po4ao]" )
 {
-    HandoffModel candidate{ 2 };
+    HandoffModel                candidate{ 2 };
     std::atomic<HandoffModel *> pending{ &candidate };
     std::atomic<HandoffModel *> retired{ nullptr };
-    std::atomic<int> status{ 2 };
+    std::atomic<int>            status{ 2 };
     REQUIRE( takePendingModel( pending, retired, status, 2 ) == &candidate );
     REQUIRE( takePendingModel( pending, retired, status, 2 ) == nullptr );
     REQUIRE( pending.load() == nullptr );
@@ -80,11 +80,11 @@ TEST_CASE( "PO4AO takes a current generation model once", "[po4ao]" )
  */
 TEST_CASE( "PO4AO preserves a busy model retirement slot", "[po4ao]" )
 {
-    HandoffModel previous{ 1 };
-    HandoffModel candidate{ 2 };
+    HandoffModel                previous{ 1 };
+    HandoffModel                candidate{ 2 };
     std::atomic<HandoffModel *> pending{ &candidate };
     std::atomic<HandoffModel *> retired{ &previous };
-    std::atomic<int> status{ 2 };
+    std::atomic<int>            status{ 2 };
     REQUIRE( takePendingModel( pending, retired, status, 2 ) == nullptr );
     REQUIRE( pending.load() == &candidate );
     REQUIRE( retired.load() == &previous );
@@ -130,7 +130,7 @@ TEST_CASE( "PO4AO blends policy and fallback commands", "[po4ao]" )
     REQUIRE( fallback[0] == Approx( 1.F ) );
     REQUIRE( fallback[1] == Approx( -2.F ) );
 
-    float       command[]     = { 10.F, 6.F };
+    float command[] = { 10.F, 6.F };
 
     REQUIRE( blendPolicyCommand( command, observation, 2, 0.5F, 0.25F ) );
     REQUIRE( command[0] == Approx( 3.25F ) );
@@ -147,10 +147,10 @@ TEST_CASE( "PO4AO blends policy and fallback commands", "[po4ao]" )
  */
 TEST_CASE( "PO4AO assembles modal policy history", "[po4ao]" )
 {
-// clang-format off
-    #ifdef PO4AO_TEST_DOXYGEN_REF
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
     assemblePolicyInput( nullptr, 0, 0, *(CircularBuffer *)nullptr, *(CircularBuffer *)nullptr );
-    #endif
+#endif
     // clang-format on
 
     CircularBuffer observations( 2, 3 );
@@ -232,10 +232,10 @@ TEST_CASE( "PO4AO rejects incomplete policy history", "[po4ao]" )
  */
 TEST_CASE( "PO4AO limits differential modal commands", "[po4ao]" )
 {
-// clang-format off
-    #ifdef PO4AO_TEST_DOXYGEN_REF
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
     limitCommand( nullptr, 0, 0 );
-    #endif
+#endif
     // clang-format on
 
     float command[] = { 2.F, -0.5F };
@@ -258,9 +258,9 @@ TEST_CASE( "PO4AO limits differential modal commands", "[po4ao]" )
 TEST_CASE( "PO4AO passes uncontrolled modes through", "[po4ao]" )
 {
     // clang-format off
-    #ifdef PO4AO_TEST_DOXYGEN_REF
+#ifdef PO4AO_TEST_DOXYGEN_REF
     finalizeControlledCommand( nullptr, nullptr, 0, 0, 0 );
-    #endif
+#endif
     // clang-format on
 
     float       command[]     = { 2.F, -0.5F, 99.F, 99.F };
