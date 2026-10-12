@@ -12,6 +12,7 @@ and spot positions scale with wavelength and the core shifts linearly across
 the band to emulate residual dispersion.
 """
 
+import io
 import logging
 import sys
 import time
@@ -210,6 +211,8 @@ def make_device(client=None, camera=None, **config_overrides):
     dev.update_property = lambda prop: None
     dev.telem_records = []
     dev.telem = lambda event, message: dev.telem_records.append((event, message))
+    # XDevice.__del__ closes the telemetry file that __init__ would have opened
+    dev._telem_file = io.StringIO()
     dev.init_state()
     dev.create_properties()
     dev.camera = camera
