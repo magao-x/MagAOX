@@ -9,6 +9,7 @@
 ../libMagAOX/app/dev/tests/dm_test
 ../libMagAOX/app/dev/tests/dev_test
 ../libMagAOX/app/dev/tests/stdCamera_test
+../libMagAOX/app/dev/tests/stdCamera_roi_test
 
 ../libMagAOX/file/tests/fileTimes_test
 ../libMagAOX/file/tests/stdFileName_test
