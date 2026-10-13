@@ -510,4 +510,4 @@ Analysis was done on a personal machine after copying the run directories with `
   3. Optionally use a finer grid (`nDelays` 20, `nTrials` 40).
   4. Confirm the camwfs `atime` convention.
 
-- **Figure:** `~/Documents/MagAO-X/dm_response_data/dmresp_response_2026-10-02T000716.svg`, with the plotted points in `dmresp_response_2026-10-02T000716.csv` (the table view). It shows the super-sampled response, the 10–90% span, t50, the 500 µs exposure scale, and the poke-timing accuracy. It was produced with a standard-library-only script (no numpy or matplotlib on this machine).
+- **Figure:** `~/Documents/MagAO-X/dm_response_data/figures/dmresp_response_2026-10-02T000716.svg`, with the plotted points in `dmresp_response_2026-10-02T000716.csv` (the table view). It shows the super-sampled response, the 10–90% span, t50, the 500 µs exposure scale, and the poke-timing accuracy. It was produced with a standard-library-only script (no numpy or matplotlib on this machine).
