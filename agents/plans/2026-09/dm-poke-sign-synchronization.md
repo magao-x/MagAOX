@@ -37,6 +37,24 @@ The source also permits two `dm01disp` publications for one update when astrogri
 4. **Vary one timing parameter at a time.** Repeat single measurements with `nSettleImages` of 1, 2, and 3, retaining `nPokeImages=5` and a positive amplitude. If needed, test a longer `dmSleep` separately. Record the signed response per poke group, missed/duplicate WFS counters, and inversion frequency, rather than judging only the final cross-correlation. Include a stop/restart and stream-recreation trial after the basic path is characterized.
 5. **Turn a confirmed mechanism into a focused change.** Candidate changes include verifying the combined output's poke pixels and counter advance before accepting it; carrying WFS frame data plus counter/timestamp as one queued sample; and joining or stopping the worker before closing the trigger stream. Choose only after the trace identifies the failing boundary. Add a hardware-free test for the selected invariant, then rerun the app build and the relevant live sequence.
 
+## 2026-10-13 observations and operator safeguard
+
+Instrument observations reported by the operator:
+
+- The state is bistable and stable: a run is either inverted or not. When inverted, `m_pokeImage` is the exact negative of `refIm`, not a distorted image.
+- Restarting `twAlign-camwfs-wfs`, opening and closing the loop with it running, and resetting, initializing, and power cycling the DM did not change the state.
+- In the non-inverted state, `poke_amp` up to 0.8 changed the poke image but never flipped its sign, so pyramid phase wrapping is ruled out.
+- Inversions also occur when the loop controls too few modes to correct single-actuator pokes, so closed-loop overshoot alone cannot explain them.
+
+Implications: random races and frame reuse should degrade the response rather than produce a stable exact negative, so the synchronization changes above are unlikely to be the fix. The flip is held in state that survives the tested actions; candidates include the `aol1_zrespM` reference (unchanged by any tested action) and processes that were not restarted (`dmcomb`, the DM driver, `camwfs`). Next checks: save `_poke` and `_refIm` in both states to see which one changed sign; while inverted, set `dmSleep=100000` and `nSettleImages=50` to exclude timing; correlate flips with calibration loads, camera mode changes, and process restarts.
+
+Safeguard added on this branch:
+
+- `pokecen.maxDelta` (default 10 pixels; `<= 0` disables) rejects a measurement when either delta component exceeds it. An inverted response correlates to a distant sidelobe because the cross-correlation peak search is global, so it is caught.
+- A rejected measurement is not published. `dmPokeXCorr` logs `LOG_ERROR` suggesting a change of `poke_amp` sign, reports the normalized zero-lag correlation with the reference (near -1 when inverted), and stops measuring so the alignment loop receives no bad delta.
+- Diagnostics go to `pokecen.diagnosticsDir` (default `<basePath>/rawimages/<configName>/YYYY_MM_DD/`): FITS images `_poke`, `_raw`, `_dark`, `_dmchan`, `_dmcomb`, and `_refIm`. Each header records the deltas, cross-correlation peak and zero-lag value, poke configuration, WFS fps, stream names, `cnt0` of the WFS, poke-channel, and trigger streams, combined-DM updates and WFS frames received during the measurement, and the measurement start and end times. Those times can be matched against `camwfs` stream-writer archives.
+- `dmPokeXCorr_test` covers the range check. `writeDiagnostics()` needs live shared-memory streams and is not unit tested.
+
 ## Current verification and exit criteria
 
 - On this workstation, `make -C apps/dmPokeXCorr -j2` succeeded on this branch and left the tracked working tree clean. `git diff --check` for the three branch commits passed. These checks do not validate hardware timing.

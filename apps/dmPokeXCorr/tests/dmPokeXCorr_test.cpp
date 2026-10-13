@@ -1,6 +1,5 @@
 /** \file dmPokeXCorr_test.cpp
  * \brief Catch2 tests for the dmPokeXCorr app.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup dmPokeXCorr_files
  */
@@ -10,6 +9,33 @@
 #include "../dmPokeXCorr.hpp"
 
 using namespace MagAOX::app;
+
+/// \cond
+namespace MagAOX
+{
+namespace app
+{
+
+// Test harness with access to protected dmPokeXCorr members.
+class dmPokeXCorr_test
+{
+  public:
+    dmPokeXCorr m_app;
+
+    void maxDelta( float md )
+    {
+        m_app.m_maxDelta = md;
+    }
+
+    bool measurementInRange( float deltaX, float deltaY )
+    {
+        return m_app.measurementInRange( deltaX, deltaY );
+    }
+};
+
+} // namespace app
+} // namespace MagAOX
+/// \endcond
 
 namespace libXWCTest
 {
@@ -43,6 +69,42 @@ TEST_CASE( "dmPokeXCorr placeholder harness instantiates the app", "[dmPokeXCorr
         dmPokeXCorr app;
 
         REQUIRE( true );
+    }
+}
+
+/// Verify that out-of-range delta measurements are detected.
+/**
+ * \ingroup dmPokeXCorr_unit_test
+ */
+TEST_CASE( "dmPokeXCorr rejects deltas larger than maxDelta", "[dmPokeXCorr]" )
+{
+    // clang-format off
+    #ifdef DMPOKEXCORR_TEST_DOXYGEN_REF
+    dev::dmPokeWFS<dmPokeXCorr>::measurementInRange( 0, 0 );
+    #endif
+    // clang-format on
+
+    dmPokeXCorr_test harness;
+
+    SECTION( "default maxDelta is 10 pixels" )
+    {
+        REQUIRE( harness.measurementInRange( 0, 0 ) );
+        REQUIRE( harness.measurementInRange( 10, -10 ) );
+        REQUIRE_FALSE( harness.measurementInRange( 10.5, 0 ) );
+        REQUIRE_FALSE( harness.measurementInRange( 0, -10.5 ) );
+    }
+
+    SECTION( "maxDelta is configurable" )
+    {
+        harness.maxDelta( 2 );
+        REQUIRE( harness.measurementInRange( 1.5, -2 ) );
+        REQUIRE_FALSE( harness.measurementInRange( 2.5, 0 ) );
+    }
+
+    SECTION( "maxDelta <= 0 disables the check" )
+    {
+        harness.maxDelta( 0 );
+        REQUIRE( harness.measurementInRange( 1000, -1000 ) );
     }
 }
 

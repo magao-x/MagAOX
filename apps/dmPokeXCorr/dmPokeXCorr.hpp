@@ -183,6 +183,17 @@ class dmPokeXCorr : public MagAOXApp<true>,
      */
     int analyzeSensor();
 
+    /// Reject an out-of-range measurement
+    /** Writes diagnostics, including the cross-correlation reference, and logs an error with a hint to the operator.
+     * The measurement is not published.
+     *
+     * \returns -1 so that the caller can stop measuring
+     */
+    int rejectMeasurement( float deltaX, /**< [in] the measured x delta, in pixels */
+                           float deltaY, /**< [in] the measured y delta, in pixels */
+                           float peak    /**< [in] the cross-correlation peak */
+    );
+
     ///@}
 
     /** \name INDI Interface
@@ -389,12 +400,56 @@ int dmPokeXCorr::analyzeSensor()
     std::cerr.precision( 5 );
     std::cerr << "dmPokeXCorr::analyzeSensor: " << xs << " " << ys << "\n";
 
+    if( !measurementInRange( xs, ys ) )
+    {
+        return rejectMeasurement( xs, ys, pk );
+    }
+
     if( updateMeasurement( xs, ys ) < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "error from dmPokeWFS::updateMeasurement" } );
     }
 
     return 0;
+}
+
+int dmPokeXCorr::rejectMeasurement( float deltaX, float deltaY, float peak )
+{
+    // Normalized zero-lag correlation with the reference.  Near -1 means the poke image is the negative of the
+    // reference
+    const eigenImage<float> &ref  = m_xcorr.refIm();
+    float                    norm = sqrt( ( m_pokeImage().square().sum() ) * ( ref.square().sum() ) );
+    float                    xc0  = ( norm > 0 ) ? ( m_pokeImage() * ref ).sum() / norm : 0;
+
+    mx::fits::fitsHeader<> head;
+    head.append( "DELTAX", deltaX, "measured x delta [pix]" );
+    head.append( "DELTAY", deltaY, "measured y delta [pix]" );
+    head.append( "XCPEAK", peak, "cross-correlation peak" );
+    head.append( "XCZERO", xc0, "normalized zero-lag correlation with reference" );
+    uint64_t wfsCnt0 = ( shmimMonitorT::m_imageStream.md != nullptr ) ? shmimMonitorT::m_imageStream.md->cnt0 : 0;
+    head.append( "WFSCNT0", wfsCnt0, "WFS stream cnt0 at write" );
+
+    std::string prefix;
+    std::string where = "diagnostics could not be written";
+    if( writeDiagnostics( prefix, head ) == 0 )
+    {
+        mx::fits::fitsFile<float> ff;
+        eigenImage<float>         refCopy = ref;
+        if( !!ff.write( prefix + "_refIm.fits", refCopy, head ) )
+        {
+            log<software_error>( { __FILE__, __LINE__, "error writing " + prefix + "_refIm.fits" } );
+        }
+        where = "diagnostics written to " + prefix + "_*.fits";
+    }
+
+    std::ostringstream msg;
+    msg << "measurement rejected: delta (" << deltaX << ", " << deltaY << ") exceeds maxDelta " << m_maxDelta
+        << " pix, zero-lag correlation with reference " << xc0
+        << ". The poke response may be inverted; try changing the sign of poke_amp. Measurement stopped; " << where;
+
+    log<text_log>( msg.str(), logPrio::LOG_ERROR );
+
+    return -1;
 }
 
 int dmPokeXCorr::checkRecordTimes()
