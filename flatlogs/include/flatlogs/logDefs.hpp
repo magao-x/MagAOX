@@ -147,11 +147,13 @@ constexpr bool isVersionMarker( logVersionT storedByte, /**< [in] the byte read 
 }
 
 /// The default format version.
-/** For now default to \ref logVersion1.
+/** The version this build writes: \ref logVersion2.
+  * Readers must take log file's version from its extension and be able to 
+  * read both versions.
   *
   * \ingroup logDefs
   */
-constexpr logVersionT logVersionDefault = logVersion1;
+constexpr logVersionT logVersionDefault = logVersion2;
 
 }//namespace flatlogs
 

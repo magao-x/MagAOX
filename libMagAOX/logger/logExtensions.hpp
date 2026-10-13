@@ -46,6 +46,24 @@ logExtensionsFor( const std::string &baseExt /**< [in] the base extension */ )
     return { baseExt, baseExt + "2" };
 }
 
+/// Given a base extension and a version, build the file extension.
+/** v1 files are named with \p baseExt, and v2 files with \p baseExt + "2".
+ * A base that already ends in "2" is returned unchanged.
+ *
+ * \returns the extension to use for new files, in the same form as \p baseExt (with or without the leading '.').
+ */
+inline std::string logExtensionForVersion( const std::string    &baseExt, /**< [in] the base extension */
+                                           flatlogs::logVersionT version  /**< [in] the version of the entries */
+)
+{
+    if( version >= flatlogs::logVersion2 && !baseExt.empty() && baseExt.back() != '2' )
+    {
+        return baseExt + "2";
+    }
+
+    return baseExt;
+}
+
 /// Get the version of a log file from its extension.
 /** Same assumption as \ref logExtensionsFor: an extension ending in "2" means v2, any other means v1.
  *

@@ -102,10 +102,10 @@ SCENARIO( "version-1 size arithmetic is unchanged", "[logHeader][v1]" )
          REQUIRE( logHeaderV1::maxHeadSize == 20 );
       }
 
-      THEN( "the default logHeader alias is version 1" )
+      THEN( "the default logHeader alias is the default version" )
       {
-         REQUIRE( logHeader::minHeadSize == logHeaderV1::minHeadSize );
-         REQUIRE( logHeader::formatVersion() == logVersion1 );
+         REQUIRE( logHeader::formatVersion() == logVersionDefault );
+         REQUIRE( logHeader::minHeadSize == logHeaderT<logVersionDefault>::minHeadSize );
       }
 
       THEN( "the length-field form changes at the boundaries the format block documents" )
@@ -972,8 +972,10 @@ SCENARIO( "formatting decoded v1 and v2 entries", "[logStdFormat]" )
 
       bufferPtrT b1;
       bufferPtrT b2;
+      bufferPtrT bd; // written with the default version, as the writer does, for the raw-entry formatters
       logHeaderV1::createLog<dummyLog>( b1, ts, msg, logPrio::LOG_DEFAULT );
       logHeaderV2::createLog<dummyLog>( b2, ts, msg, logPrio::LOG_DEFAULT );
+      logHeader::createLog<dummyLog>( bd, ts, msg, logPrio::LOG_DEFAULT );
 
       parsedEntry e1 = logHeaderV1::parse( b1.get(), logHeaderV1::totalSize( b1.get() ) );
       parsedEntry e2 = logHeaderV2::parse( b2.get(), logHeaderV2::totalSize( b2.get() ) );
@@ -985,7 +987,7 @@ SCENARIO( "formatting decoded v1 and v2 entries", "[logStdFormat]" )
          std::ostringstream s1, s2, sw;
          stdFormat<dummyLog>( s1, e1 );
          stdFormat<dummyLog>( s2, e2 );
-         stdFormat<dummyLog>( sw, b1 );
+         stdFormat<dummyLog>( sw, bd );
          REQUIRE( s1.str() == s2.str() );
          REQUIRE( s1.str() == sw.str() );
          REQUIRE( s1.str().find( "formatted the same" ) != std::string::npos );
@@ -993,21 +995,21 @@ SCENARIO( "formatting decoded v1 and v2 entries", "[logStdFormat]" )
          std::ostringstream m1, m2, mw;
          minFormat<dummyLog>( m1, e1 );
          minFormat<dummyLog>( m2, e2 );
-         minFormat<dummyLog>( mw, b1 );
+         minFormat<dummyLog>( mw, bd );
          REQUIRE( m1.str() == m2.str() );
          REQUIRE( m1.str() == mw.str() );
 
          std::ostringstream h1, h2, hw;
          stdShortFormat<dummyLog>( h1, "someApp", e1 );
          stdShortFormat<dummyLog>( h2, "someApp", e2 );
-         stdShortFormat<dummyLog>( hw, "someApp", b1 );
+         stdShortFormat<dummyLog>( hw, "someApp", bd );
          REQUIRE( h1.str() == h2.str() );
          REQUIRE( h1.str() == hw.str() );
 
          std::ostringstream j1, j2, jw;
          jsonFormat<dummyLog>( j1, e1, "dummyLog", nullptr, 0 );
          jsonFormat<dummyLog>( j2, e2, "dummyLog", nullptr, 0 );
-         jsonFormat<dummyLog>( jw, b1, "dummyLog", nullptr, 0 );
+         jsonFormat<dummyLog>( jw, bd, "dummyLog", nullptr, 0 );
          REQUIRE( j1.str() == j2.str() );
          REQUIRE( j1.str() == jw.str() );
          REQUIRE( j1.str().find( "\"msg\": \"formatted the same\"" ) != std::string::npos );

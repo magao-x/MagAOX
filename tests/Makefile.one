@@ -118,7 +118,7 @@ clean:
 	@echo cleaning $(TESTNAME)
 	@rm -f $(OBJNAME)
 	@rm -f $(TESTNAME)
-	@rm -f *.binlog
+	@rm -f *.binlog *.binlog2
 
 
 .PHONY: realclean

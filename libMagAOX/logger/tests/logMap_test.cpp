@@ -5,6 +5,7 @@
 
 #include "../../../tests/testXWC.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -587,6 +588,24 @@ TEST_CASE( "Log file extensions and versions", "[libMagAOX::logger::logMap]" )
              flatlogs::logVersion2 );
     REQUIRE( logVersionForFile( "dev1_20241119000000000000000.binlog2" ) == flatlogs::logVersion2 );
     REQUIRE( logVersionForFile( "noextension" ) == flatlogs::logVersion1 );
+
+    // The writer's side of the rule.
+    REQUIRE( logExtensionForVersion( "binlog", flatlogs::logVersion1 ) == "binlog" );
+    REQUIRE( logExtensionForVersion( "binlog", flatlogs::logVersion2 ) == "binlog2" );
+    REQUIRE( logExtensionForVersion( ".bintel", flatlogs::logVersion2 ) == ".bintel2" );
+    REQUIRE( logExtensionForVersion( "binlog2", flatlogs::logVersion2 ) == "binlog2" );
+    REQUIRE( logExtensionForVersion( "", flatlogs::logVersion2 ) == "" );
+    for( const std::string &base : { std::string( "binlog" ), std::string( ".bintel" ) } )
+    {
+        // What the writer names a file is what the readers search for, and read as the version it was written with.
+        for( flatlogs::logVersionT v : { flatlogs::logVersion1, flatlogs::logVersion2 } )
+        {
+            std::string ext      = logExtensionForVersion( base, v );
+            auto        searched = logExtensionsFor( base );
+            REQUIRE( std::find( searched.begin(), searched.end(), ext ) != searched.end() );
+            REQUIRE( logVersionForExtension( ext ) == v );
+        }
+    }
 }
 
 /// Finding and reading files of both versions.
