@@ -84,7 +84,8 @@ In both modes the largest absolute command must not exceed `poke.maxCommand` (de
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `wfscam.shmimName` | string | `camwfs` | camWFS stream |
-| `wfscam.camDevName` | string | = shmimName | INDI device used to read `fps` |
+| `wfscam.camDevName` | string | = shmimName | INDI device used to read `fps` and `emgain` |
+| `holoop.devName` | string | `holoop` | INDI device whose `loop_state` is recorded in the headers |
 | `wfscam.threadPrio` | int | 2 | real-time priority of the trigger/poke thread |
 | `wfscam.cpuset` | string | | cpuset of the trigger/poke thread |
 | `dm.index` | int | 0 | DM number `NN` in `dm<NN>disp<MM>`: 0 woofer, 1 tweeter, 2 NCPC |
@@ -166,7 +167,17 @@ Each run writes to `<output.baseDir>/<YYYY-MM-DDTHHMMSS>/` (UTC):
 | `pattern.fits` | pattern mode only: copy of the applied pattern |
 
 Every file carries the run header: `DATE-OBS`, `DMSTREAM`, `WFSSHMIM`, `WFSFPS`, `POKEMODE`, `POKEX`/`POKEY` or
-`PATFILE`/`PATSHA`, `POKEAMP`, `NDELAYS`, `DLYSPAN`, `NFRAMES`, `NTRIALS`, `NREF`.  The cubes also have `DELAYUS`,
+`PATFILE`/`PATSHA`, `POKEAMP`, `NDELAYS`, `DLYSPAN`, `NFRAMES`, `NTRIALS`, `NREF`, and the provenance cards:
+
+| Card | Value |
+|---|---|
+| `EMGAIN` | camWFS `emgain` at run start, `-999` if never received |
+| `LOOPST` | `holoop` `loop_state` at run start: `ON`, `OFF`, or `UNKNOWN` if never received |
+| `LOOPCHG` | 1 if `loop_state` changed during the run, as of when the file was written; the run is not aborted |
+| `GITSHA1` | git SHA-1 of the MagAOX build |
+| `GITMOD` | 1 if the build tree had uncommitted changes |
+
+The cubes also have `DELAYUS`,
 `DLYIDX`, `DLYMEAN`, `DLYSTD`, `DLYMIN`, `DLYMAX`, `NINVALID`, `LATEFRAC`, `LATEFLAG`, `T50`, `RISE`, and `JITTER`.
 A header value that can not be computed (e.g. no 10%/90% crossing) is written as `-999`.
 
