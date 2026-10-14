@@ -347,6 +347,32 @@ I've implemented the merged plan as the `dmTemporalResponse` app and committed i
 4. Run `clang-format` and commit it separately as formatting-only.
 5. Do the hardware checks on the RTC with the loop open, starting with a small `poke_amp` on `dm00disp07`.
 
+## 15. Run Provenance Header Cards (2026-10-14)
+
+**Why:** the 2026-10-13 amplitude sweep measured a response about 1 ms (two camWFS frames) later than the 2026-10-02 baseline (Debugging item 12). The headers could not show what changed between the runs: no build version, no camera gain, no loop state.
+
+**Scope (user decision):** record only the git version, the camWFS EM gain and the high-order loop state. The camWFS speed is already recorded as `WFSFPS` (fps at run start, and a run aborts if it changes), so nothing new is needed for it. A broader snapshot of camWFS/woofer INDI properties was considered and dropped.
+
+**New cards** in `appendRunHeader()`, so in every output file:
+
+| Card | Source | Value |
+|---|---|---|
+| `GITSHA1` | `MAGAOX_CURRENT_SHA1` | git SHA-1 of the MagAOX build |
+| `GITMOD` | `MAGAOX_REPO_MODIFIED` | 1 if the build tree had uncommitted changes |
+| `EMGAIN` | `<wfscam.camDevName>.emgain.current` at run start | `-999` if never received |
+| `LOOPST` | `<holoop.devName>.loop_state.toggle` at run start | `ON`, `OFF` or `UNKNOWN` |
+| `LOOPCHG` | set by the loop_state callback while running | 1 if the loop state changed during the run, as of when the file was written |
+
+**Design:**
+- Two new INDI set-properties, following the existing `fps` one: `emgain` on the camera device, and `loop_state` on a new config key `holoop.devName` (default `holoop`, the `cacaoInterface` instance; same property `tcsInterface` reads).
+- The values are snapshotted into `runParams` at run start (`snapshotParams()`), like `m_fps`.
+- Neither change aborts a run: a loop-state change sets `LOOPCHG` and logs a warning; an EM gain change during a run logs a warning only (the response is normalized, so the gain scales the signal but not the timing).
+- `GITMOD` is written as an int so it reads the same in Python as other flags (`LATEFLAG`).
+
+**Tests:** config default/override of `holoop.devName`; the `emgain` and `loop_state` set-callbacks (value stored, missing element ignored, loop change while running sets the flag); the full synthetic run checks `GITSHA1`, `GITMOD`, `EMGAIN`, `LOOPST`, `LOOPCHG` in a cube header.
+
+**Data tooling** (outside the repo, `dm_response_data/tools/index_runs.py`): add `GITSHA1`, `EMGAIN`, `LOOPST`, `LOOPCHG` columns to `runs.csv`.
+
 ## Debugging
 
 First build and test on the MagAO-X computer (exao2), 2026-10-01.
@@ -511,3 +537,15 @@ Analysis was done on a personal machine after copying the run directories with `
   4. Confirm the camwfs `atime` convention.
 
 - **Figure:** `~/Documents/MagAO-X/dm_response_data/figures/dmresp_response_2026-10-02T000716.svg`, with the plotted points in `dmresp_response_2026-10-02T000716.csv` (the table view). It shows the super-sampled response, the 10–90% span, t50, the 500 µs exposure scale, and the poke-timing accuracy. It was produced with a standard-library-only script (no numpy or matplotlib on this machine).
+
+### 12. Amplitude sweep: response two frames later than the baseline (2026-10-13)
+- **Runs:** `2026-10-13T221705` to `T222133`, actuator (5, 8), amp 0.05, 0.10, 0.15 (repeat of the baseline), 0.20, 0.25, 0.30; all other settings as item 11.
+- **Result:** at every amplitude t50 ≈ 1925–1965 µs, against 882 µs on 2026-10-02. The 10–90% rise is similar (399–601 µs, faster at higher amplitude), so the shape is unchanged and the curve is shifted by about 1050 µs.
+- **What the data rules out:**
+  - **the app:** no commits to `apps/dmTemporalResponse` after 2026-10-01;
+  - **poke timing:** +2.5 to +4.7 µs after the requested delay, NINVALID 0, no dropped frames;
+  - **a clock or `atime` change:** the frame times relative to the command are identical (−203, 297, 797 … µs), but the response appears two frames later. A clock offset would move the time axis instead;
+  - **frame-quantized DM updates:** t50 versus delay has the same shape as on 2026-10-02 (peak near 200–250 µs), offset by +1000 to +1070 µs, and the rise is not wider.
+- **Candidates:** (1) two more frames of camera or frame-grabber pipeline latency (`atime` is stamped on arrival, not exposure); (2) a slower DM command path (dmcomb, woofer driver); (3) other bench changes, such as the AO loop running or CPU load or affinity changes.
+- **Next:** time `dm00disp07` against `dm00disp` updates to separate (1) from (2), and check the camwfs and woofer logs for changes since 2026-10-02. Section 15 adds header cards so future runs record the build version, EM gain and loop state.
+- **Figures:** `~/Documents/MagAO-X/dm_response_data/figures/dmresp_response_amp-sweep_2026-10-13.svg` (with the baseline and ALPAO) and `dmresp_response_2026-10-13_runs.svg` (today only).

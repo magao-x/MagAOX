@@ -125,6 +125,25 @@ inline double headerValue( double x /**< [in] the value to write */ )
     return isFinite( x ) ? x : headerSentinel;
 }
 
+/// Get the header string for a loop state.
+/**
+ * \returns "ON" for 1, "OFF" for 0, and "UNKNOWN" otherwise
+ */
+inline std::string loopStateName( int state /**< [in] the loop state: 1 on, 0 off, -1 unknown */ )
+{
+    if( state == 1 )
+    {
+        return "ON";
+    }
+
+    if( state == 0 )
+    {
+        return "OFF";
+    }
+
+    return "UNKNOWN";
+}
+
 /// Get the current CLOCK_REALTIME time.
 /** This is the default clock used for the poke busy-wait and the command timestamp.
  *
@@ -1162,6 +1181,10 @@ class dmTemporalResponse : public MagAOXApp<true>,
         std::string m_baseDir{ "/home/xsup/dm_response" }; ///< Output root.
 
         double m_fps{ -1 }; ///< camWFS fps at run start.
+
+        double m_emGain{ std::numeric_limits<double>::quiet_NaN() }; ///< camWFS EM gain at run start, NaN if unknown.
+
+        int m_loopState{ -1 }; ///< holoop loop_state at run start: 1 on, 0 off, -1 unknown.
     };
 
   protected:
@@ -1170,8 +1193,11 @@ class dmTemporalResponse : public MagAOXApp<true>,
      * @{
      */
 
-    /// INDI device name of the WFS camera, used to read its fps.  Default is wfscam.shmimName.
+    /// INDI device name of the WFS camera, used to read its fps and EM gain.  Default is wfscam.shmimName.
     std::string m_wfsCamDevName;
+
+    /// INDI device name of the high-order loop (a cacaoInterface), used to read its loop_state for the headers.
+    std::string m_loopDevName{ "holoop" };
 
     /// The DM index NN in dm<NN>disp<MM>: 0 woofer, 1 tweeter, 2 NCPC.
     int m_dmIndex{ 0 };
@@ -1264,6 +1290,19 @@ class dmTemporalResponse : public MagAOXApp<true>,
 
     /// Acquisition time [ns] of the most recent camWFS frame, used for the clock-domain check.  0 if none yet.
     std::atomic<int64_t> m_lastATimeNs{ 0 };
+
+    /// The camWFS EM gain, from the camera's INDI emgain property.  NaN if unknown.  Recorded in the headers.
+    std::atomic<double> m_wfsEMGain{ std::numeric_limits<double>::quiet_NaN() };
+
+    ///@}
+
+    /** \name High-Order Loop State - Data
+     *
+     * @{
+     */
+
+    /// The holoop loop_state from INDI: 1 on, 0 off, -1 unknown.  Recorded in the headers.
+    std::atomic<int> m_loopState{ -1 };
 
     ///@}
 
@@ -1378,6 +1417,9 @@ class dmTemporalResponse : public MagAOXApp<true>,
 
     /// Set if the camWFS fps changes during a run.
     std::atomic<bool> m_fpsChanged{ false };
+
+    /// Set if the holoop loop_state changes during a run.  Recorded as LOOPCHG; does not abort the run.
+    std::atomic<bool> m_loopChanged{ false };
 
     /// Set if the camWFS stream is re-allocated during a run.
     std::atomic<bool> m_camChanged{ false };
@@ -1566,6 +1608,9 @@ class dmTemporalResponse : public MagAOXApp<true>,
 
     /// Get the WFS camera INDI device name.
     const std::string &wfsCamDevName() const;
+
+    /// Get the high-order loop INDI device name.
+    const std::string &loopDevName() const;
 
     /// Get the DM index NN.
     int dmIndex() const;
@@ -1884,6 +1929,12 @@ class dmTemporalResponse : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_wfsFps; ///< The WFS camera fps, a set property.
     INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_wfsFps );
 
+    pcf::IndiProperty m_indiP_wfsEMGain; ///< The WFS camera EM gain, a set property.
+    INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_wfsEMGain );
+
+    pcf::IndiProperty m_indiP_loopState; ///< The high-order loop state, a set property.
+    INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_loopState );
+
     pcf::IndiProperty m_indiP_dmStream; ///< RO: the resolved DM stream name.
 
     pcf::IndiProperty m_indiP_runState; ///< RO: run status and phase.
@@ -1936,6 +1987,16 @@ inline void dmTemporalResponse::setupConfig()
                 false,
                 "string",
                 "INDI device name of the WFS camera.  Default is wfscam.shmimName." );
+
+    config.add( "holoop.devName",
+                "",
+                "holoop.devName",
+                argType::Required,
+                "holoop",
+                "devName",
+                false,
+                "string",
+                "INDI device name of the high-order loop, whose loop_state is recorded in the headers.  Default holoop." );
 
     config.add( "dm.index",
                 "",
@@ -2174,6 +2235,7 @@ inline int dmTemporalResponse::loadConfigImpl( mx::app::appConfigurator &_config
 
     m_wfsCamDevName = shmimMonitorT::m_shmimName;
     _config( m_wfsCamDevName, "wfscam.camDevName" );
+    _config( m_loopDevName, "holoop.devName" );
 
     _config( m_dmIndex, "dm.index" );
     _config( m_dmChannel, "dm.channel" );
@@ -2291,6 +2353,10 @@ inline int dmTemporalResponse::createIndiProperties()
     CREATE_REG_INDI_NEW_REQUESTSWITCH( m_indiP_stop, "stop" );
 
     REG_INDI_SETPROP( m_indiP_wfsFps, m_wfsCamDevName, std::string( "fps" ) );
+
+    REG_INDI_SETPROP( m_indiP_wfsEMGain, m_wfsCamDevName, std::string( "emgain" ) );
+
+    REG_INDI_SETPROP( m_indiP_loopState, m_loopDevName, std::string( "loop_state" ) );
 
     createROIndiText( m_indiP_dmStream, "dm_stream", "name", "DM Stream", "DM" );
     std::string sname;
@@ -2489,6 +2555,11 @@ inline int dmTemporalResponse::appShutdown()
 inline const std::string &dmTemporalResponse::wfsCamDevName() const
 {
     return m_wfsCamDevName;
+}
+
+inline const std::string &dmTemporalResponse::loopDevName() const
+{
+    return m_loopDevName;
 }
 
 inline int dmTemporalResponse::dmIndex() const
@@ -2807,6 +2878,8 @@ inline void dmTemporalResponse::snapshotParams( runParams &params ) const
     params.m_minRefSNR      = m_minRefSNR;
     params.m_baseDir        = m_baseDir;
     params.m_fps            = m_wfsFps;
+    params.m_emGain         = m_wfsEMGain;
+    params.m_loopState      = m_loopState;
 }
 
 inline int dmTemporalResponse::prepareRun( const timespec &runStart )
@@ -3279,6 +3352,7 @@ inline int dmTemporalResponse::runMeasurement()
 
     m_stopRequested = false;
     m_fpsChanged    = false;
+    m_loopChanged   = false;
     m_camChanged    = false;
     m_haveBest      = false;
     m_metrics.clear();
@@ -3561,6 +3635,11 @@ inline void dmTemporalResponse::appendRunHeader( mx::fits::fitsHeader<XWC_DEFAUL
     fh.append( "DMSTREAM", m_dmStreamName, "DM channel poked" );
     fh.append( "WFSSHMIM", shmimMonitorT::m_shmimName, "WFS camera stream" );
     fh.append( "WFSFPS", dmTemporalResponseMath::headerValue( m_run.m_fps ), "WFS camera fps at run start" );
+    fh.append( "EMGAIN", dmTemporalResponseMath::headerValue( m_run.m_emGain ), "WFS camera EM gain at run start" );
+    fh.append( "LOOPST", dmTemporalResponseMath::loopStateName( m_run.m_loopState ), "holoop loop_state at run start" );
+    fh.append( "LOOPCHG", static_cast<int>( m_loopChanged.load() ), "1 if loop_state changed during the run" );
+    fh.append( "GITSHA1", std::string( MAGAOX_CURRENT_SHA1 ), "MagAOX git SHA-1 of this build" );
+    fh.append( "GITMOD", static_cast<int>( MAGAOX_REPO_MODIFIED ), "1 if the build tree had uncommitted changes" );
     fh.append( "POKEMODE",
                std::string( m_run.m_pokeMode == dmTemporalResponseMath::pokeMode::actuator ? "actuator" : "pattern" ),
                "poke mode" );
@@ -4015,6 +4094,55 @@ INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_wfsFps )( const pcf::IndiProp
     }
 
     m_wfsFps = fps;
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_wfsEMGain )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_wfsEMGain, ipRecv );
+
+    if( !ipRecv.find( "current" ) )
+    {
+        return 0;
+    }
+
+    double emg = ipRecv["current"].get<double>();
+
+    // The response is normalized, so a gain change scales the signal but not the timing: warn only.  The first value
+    // received is not a change.
+    double prev = m_wfsEMGain.load();
+    if( m_running && dmTemporalResponseMath::isFinite( prev ) && emg != prev )
+    {
+        log<text_log>( "camWFS EM gain changed during run", logPrio::LOG_WARNING );
+    }
+
+    m_wfsEMGain = emg;
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_loopState )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loopState, ipRecv );
+
+    if( !ipRecv.find( "toggle" ) )
+    {
+        return 0;
+    }
+
+    int state = ( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On ) ? 1 : 0;
+
+    // Recorded as LOOPCHG in the files written after the change; the run continues.  The first value received is not
+    // a change.
+    int prev = m_loopState.load();
+    if( m_running && prev >= 0 && state != prev )
+    {
+        m_loopChanged = true;
+        log<text_log>( "holoop loop_state changed during run", logPrio::LOG_WARNING );
+    }
+
+    m_loopState = state;
 
     return 0;
 }

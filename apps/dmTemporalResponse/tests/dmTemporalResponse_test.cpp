@@ -208,6 +208,10 @@ class dmTemporalResponse_test : public dmTemporalResponse
 
         m_wfsFps = 1e6 / m_T;
 
+        // Provenance values recorded in the headers
+        m_wfsEMGain = 250;
+        m_loopState = 0;
+
         // Small, fast defaults
         m_pokeX        = { 3 };
         m_pokeY        = { 4 };
@@ -501,7 +505,7 @@ TEST_CASE( "dmTemporalResponse time helpers", "[dmTemporalResponse][helpers]" )
     }
 }
 
-/// Verify the bit-level finite checks (robust to -ffast-math) and the FITS header sentinel.
+/// Verify the bit-level finite checks (robust to -ffast-math), the FITS header sentinel, and the loop state names.
 /**
  * \ingroup dmTemporalResponse_unit_test
  */
@@ -512,6 +516,7 @@ TEST_CASE( "dmTemporalResponse finite checks and header sentinel", "[dmTemporalR
     dmTemporalResponseMath::isFinite( 0.0 );
     dmTemporalResponseMath::isFinite( 0.0f );
     dmTemporalResponseMath::headerValue( 0.0 );
+    dmTemporalResponseMath::loopStateName( 0 );
     #endif
     // clang-format on
 
@@ -529,6 +534,11 @@ TEST_CASE( "dmTemporalResponse finite checks and header sentinel", "[dmTemporalR
     REQUIRE( headerValue( 2.5 ) == 2.5 );
     REQUIRE( headerValue( std::numeric_limits<double>::quiet_NaN() ) == headerSentinel );
     REQUIRE( headerValue( std::numeric_limits<double>::infinity() ) == headerSentinel );
+
+    REQUIRE( loopStateName( 1 ) == "ON" );
+    REQUIRE( loopStateName( 0 ) == "OFF" );
+    REQUIRE( loopStateName( -1 ) == "UNKNOWN" );
+    REQUIRE( loopStateName( 2 ) == "UNKNOWN" );
 }
 
 /// Verify `dmStreamName()` formatting and range checks.
@@ -1222,6 +1232,7 @@ TEST_CASE( "dmTemporalResponse configuration defaults", "[dmTemporalResponse][co
     REQUIRE( app.m_shutdown == 0 );
     REQUIRE( app.shmimMonitorT::m_shmimName == "camwfs" );
     REQUIRE( app.wfsCamDevName() == "camwfs" );
+    REQUIRE( app.loopDevName() == "holoop" );
     REQUIRE( app.dmIndex() == 0 );
     REQUIRE( app.dmChannel() == 7 );
     REQUIRE( app.pokeModeName() == "actuator" );
@@ -1263,14 +1274,14 @@ TEST_CASE( "dmTemporalResponse configuration overrides", "[dmTemporalResponse][c
 
         mx::app::writeConfigFile(
             "/tmp/dmTemporalResponse_test_override.conf",
-            { "wfscam", "wfscam",   "dm",       "dm",       "poke",     "poke",     "poke",     "poke",
+            { "wfscam", "wfscam",   "holoop",   "dm",       "dm",       "poke",     "poke",     "poke",     "poke",
               "poke",   "poke",     "poke",     "poke",     "poke",     "poke",     "poke",     "poke",
               "poke",   "analysis", "analysis", "analysis", "analysis", "analysis", "analysis", "analysis", "output" },
-            { "shmimName",   "camDevName",   "index",      "channel", "mode",      "x",          "y",
+            { "shmimName",   "camDevName",   "devName",    "index",      "channel", "mode",      "x",          "y",
               "patternFile", "amp",          "maxCommand", "nDelays", "delaySpan", "nFrames",    "nTrials",
               "settle",      "trialTimeout", "maxRetries", "nRef",    "nSettle",   "maskThresh", "resampleFactor",
               "bestMetric",  "maxLateFrac",  "minRefSNR", "baseDir" },
-            { "camtest", "camdev", "1", "3",    "pattern", "5",    "6",   "/tmp/p.fits",
+            { "camtest", "camdev", "loopdev", "1", "3",    "pattern", "5",    "6",   "/tmp/p.fits",
               "0.25",    "0.5",    "7", "1500", "12",      "8",    "0.1", "3",
               "2",       "4",      "3", "0.2",  "5",       "rise", "0.3", "6", "/tmp/out" } );
 
@@ -1280,6 +1291,7 @@ TEST_CASE( "dmTemporalResponse configuration overrides", "[dmTemporalResponse][c
         REQUIRE( app.m_shutdown == 0 );
         REQUIRE( app.shmimMonitorT::m_shmimName == "camtest" );
         REQUIRE( app.wfsCamDevName() == "camdev" );
+        REQUIRE( app.loopDevName() == "loopdev" );
         REQUIRE( app.dmIndex() == 1 );
         REQUIRE( app.dmChannel() == 3 );
         REQUIRE( app.pokeModeName() == "pattern" );
@@ -1431,11 +1443,11 @@ TEST_CASE( "dmTemporalResponse INDI tunables", "[dmTemporalResponse][indi]" )
     }
 }
 
-/// Verify the start, stop, and fps callbacks.
+/// Verify the start, stop, fps, EM gain, and loop state callbacks.
 /**
  * \ingroup dmTemporalResponse_unit_test
  */
-TEST_CASE( "dmTemporalResponse INDI controls and fps", "[dmTemporalResponse][indi]" )
+TEST_CASE( "dmTemporalResponse INDI controls, fps, EM gain, and loop state", "[dmTemporalResponse][indi]" )
 {
     dmTemporalResponse_test app;
     REQUIRE( app.createIndiProperties() == 0 );
@@ -1445,6 +1457,8 @@ TEST_CASE( "dmTemporalResponse INDI controls and fps", "[dmTemporalResponse][ind
     dmTemporalResponse::newCallBack_m_indiP_start( pcf::IndiProperty() );
     dmTemporalResponse::newCallBack_m_indiP_stop( pcf::IndiProperty() );
     dmTemporalResponse::setCallBack_m_indiP_wfsFps( pcf::IndiProperty() );
+    dmTemporalResponse::setCallBack_m_indiP_wfsEMGain( pcf::IndiProperty() );
+    dmTemporalResponse::setCallBack_m_indiP_loopState( pcf::IndiProperty() );
     dmTemporalResponse::requestStart();
     dmTemporalResponse::requestStop();
     #endif
@@ -1503,6 +1517,69 @@ TEST_CASE( "dmTemporalResponse INDI controls and fps", "[dmTemporalResponse][ind
         ip["current"]   = 1000.0;
         REQUIRE( app.setCallBack_m_indiP_wfsFps( ip ) == 0 );
         REQUIRE( app.m_fpsChanged == true );
+        app.m_running = false;
+    }
+
+    SECTION( "EM gain set-callback" )
+    {
+        pcf::IndiProperty ip( pcf::IndiProperty::Number );
+        ip.setDevice( app.m_wfsCamDevName );
+        ip.setName( "emgain" );
+        ip.add( pcf::IndiElement( "current" ) );
+        ip["current"] = 300.0;
+
+        REQUIRE( app.setCallBack_m_indiP_wfsEMGain( ip ) == 0 );
+        REQUIRE( app.m_wfsEMGain == Approx( 300 ) );
+
+        pcf::IndiProperty nocur( pcf::IndiProperty::Number );
+        nocur.setDevice( app.m_wfsCamDevName );
+        nocur.setName( "emgain" );
+        REQUIRE( app.setCallBack_m_indiP_wfsEMGain( nocur ) == 0 );
+        REQUIRE( app.m_wfsEMGain == Approx( 300 ) );
+
+        // A change during a run is recorded but does not abort
+        app.m_running = true;
+        ip["current"] = 100.0;
+        REQUIRE( app.setCallBack_m_indiP_wfsEMGain( ip ) == 0 );
+        REQUIRE( app.m_wfsEMGain == Approx( 100 ) );
+        REQUIRE( app.m_fpsChanged == false );
+        app.m_running = false;
+    }
+
+    SECTION( "loop state set-callback" )
+    {
+        pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+        ip.setDevice( app.m_loopDevName );
+        ip.setName( "loop_state" );
+        ip.add( pcf::IndiElement( "toggle" ) );
+
+        // The first value received during a run is not a change
+        app.m_running   = true;
+        app.m_loopState = -1;
+        ip["toggle"].setSwitchState( pcf::IndiElement::Off );
+        REQUIRE( app.setCallBack_m_indiP_loopState( ip ) == 0 );
+        REQUIRE( app.m_loopState == 0 );
+        REQUIRE( app.m_loopChanged == false );
+        app.m_running = false;
+
+        ip["toggle"].setSwitchState( pcf::IndiElement::On );
+        REQUIRE( app.setCallBack_m_indiP_loopState( ip ) == 0 );
+        REQUIRE( app.m_loopState == 1 );
+        REQUIRE( app.m_loopChanged == false );
+
+        pcf::IndiProperty notog( pcf::IndiProperty::Switch );
+        notog.setDevice( app.m_loopDevName );
+        notog.setName( "loop_state" );
+        REQUIRE( app.setCallBack_m_indiP_loopState( notog ) == 0 );
+        REQUIRE( app.m_loopState == 1 );
+
+        // A change during a run sets the flag but does not abort
+        app.m_running = true;
+        ip["toggle"].setSwitchState( pcf::IndiElement::Off );
+        REQUIRE( app.setCallBack_m_indiP_loopState( ip ) == 0 );
+        REQUIRE( app.m_loopState == 0 );
+        REQUIRE( app.m_loopChanged == true );
+        REQUIRE( app.m_fpsChanged == false );
         app.m_running = false;
     }
 }
@@ -1925,6 +2002,13 @@ TEST_CASE( "dmTemporalResponse full synthetic run", "[dmTemporalResponse][run]" 
     REQUIRE( fh["POKEX"].value<int>() == 3 );
     REQUIRE( fh["POKEY"].value<int>() == 4 );
     REQUIRE( fitsStr( fh["DMSTREAM"].value<std::string>() ) == app.m_dmStreamOverride );
+
+    // Provenance cards
+    REQUIRE( fh["EMGAIN"].value<double>() == Approx( 250 ) );
+    REQUIRE( fitsStr( fh["LOOPST"].value<std::string>() ) == "OFF" );
+    REQUIRE( fh["LOOPCHG"].value<int>() == 0 );
+    REQUIRE( fitsStr( fh["GITSHA1"].value<std::string>() ) == std::string( MAGAOX_CURRENT_SHA1 ) );
+    REQUIRE( fh["GITMOD"].value<int>() == static_cast<int>( MAGAOX_REPO_MODIFIED ) );
 
     // Metrics match the first-order model: t50 = latency + tau ln2, rise = tau ln9
     for( size_t k = 0; k < app.m_metrics.size(); ++k )
