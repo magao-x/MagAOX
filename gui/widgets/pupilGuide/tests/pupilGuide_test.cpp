@@ -50,8 +50,9 @@ size_t Publisher::count( const std::string &key ) const
 class Widget : public xqt::pupilGuide
 {
   public:
-    Publisher                       m_publisher; ///< Offline parent for the panel and child subscribers.
-    std::vector<pcf::IndiProperty> &m_sent;      ///< Alias for all captured commands.
+    Publisher m_publisher; ///< Offline parent shared by the panel and child subscribers.
+
+    std::vector<pcf::IndiProperty> &m_sent; ///< Alias for all captured commands.
 
     /// Attach the panel and children to an offline publisher.
     Widget();

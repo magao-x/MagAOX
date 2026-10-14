@@ -32,7 +32,10 @@ namespace xqt
 {
 
 /// Convert requested x/y offsets into woofer tip/tilt coordinates.
-void wooferTipTilt( double &tip, double &tilt, double x, double y )
+void wooferTipTilt( double &tip,  /**< [out] Woofer tip-mode offset. */
+                    double &tilt, /**< [out] Woofer tilt-mode offset. */
+                    double  x,    /**< [in] Requested horizontal offset. */
+                    double  y /**< [in] Requested vertical offset. */ )
 {
     double rot   = ( 180. + 29.0 ) * 3.14159 / 180.;
     double scale = -1.0;
@@ -42,10 +45,16 @@ void wooferTipTilt( double &tip, double &tilt, double x, double y )
 }
 
 /// Main pupil-guiding and alignment control panel.
+/** The shared INDI connection controls transport availability; individual devices and
+ * properties control only their dependent actions. Callbacks and command handlers
+ * run on the Qt widget thread. Fresh valid observations restore controls without
+ * replaying commands or requiring another connection callback.
+ */
 class pupilGuide : public xWidget
 {
     Q_OBJECT
 
+    /// Reference camera used for the pupil and periscope coordinate transforms.
     enum camera
     {
         FLOWFS,
@@ -56,145 +65,188 @@ class pupilGuide : public xWidget
   protected:
     bool m_connected{ false }; ///< True while the shared INDI transport is connected.
 
-    std::string m_appState; ///< Cached top-level application state text when provided by INDI.
+    std::string m_appState; ///< Legacy application-state cache, cleared on connection loss.
 
     // --- modttm
-    std::string m_modFsmState;
-    int         m_modState{ 0 };
+    std::string m_modFsmState; ///< Last observed modulator FSM state.
 
-    double m_modCh1{ 0 };
-    double m_modCh2{ 0 };
+    int m_modState{ 0 }; ///< Last observed modulator operating mode.
 
-    double m_camwfsFreq{ 0 };
+    double m_modCh1{ 0 }; ///< Legacy modulator channel-one cache.
 
-    double m_modRad{ 0 };
-    double m_modRad_tgt{ 0 };
+    double m_modCh2{ 0 }; ///< Legacy modulator channel-two cache.
 
-    float m_stepSize{ 0.1 };
+    double m_camwfsFreq{ 0 }; ///< Last received WFS camera frame rate.
 
-    int m_tipmovewhat{ MOVE_WOOF };
+    double m_modRad{ 0 }; ///< Legacy current modulation-radius cache.
 
-    float m_focusWooferStep{ 0.2 };
-    float m_focusTelStep{ 100 };
+    double m_modRad_tgt{ 0 }; ///< Legacy target modulation-radius cache.
+
+    float m_stepSize{ 0.1 }; ///< Local step size for tip/tilt nudges.
+
+    int m_tipmovewhat{ MOVE_WOOF }; ///< Selected tip/tilt actuator; preserved across device loss.
+
+    float m_focusWooferStep{ 0.2 }; ///< Conversion from the focus step multiplier to woofer mode amplitude.
+
+    float m_focusTelStep{ 100 }; ///< Conversion from the focus step multiplier to telescope focus offset.
 
     // --- TCS
 
-    std::string m_tcsiState;
+    std::string m_tcsiState; ///< Last observed TCS interface FSM state.
 
-    bool m_labMode{ true };
+    bool m_labMode{ true }; ///< Effective lab mode, true while TCS or its mode observation is unavailable.
+
     bool m_reportedLabMode{ true }; ///< Last valid TCS mode, used only while TCS is available.
 
     // --- woofer
 
-    std::string m_dmWooferState;
-    std::string m_wooferModesState;
+    std::string m_dmWooferState; ///< Last observed woofer controller FSM state.
 
-    double m_tilt{ 0 };  ///< current value of tilt mode from wooferModes
-    double m_tip{ 0 };   ///< current value of tip mode from wooferModes
-    double m_focus{ 0 }; ///< current value of focus mode from wooferModes
+    std::string m_wooferModesState; ///< Last observed woofer modal-command FSM state.
 
-    float m_focusStepSize{ 0.1 };
+    double m_tilt{ 0 }; ///< Last valid woofer tilt amplitude; usable only while its observation remains valid.
+
+    double m_tip{ 0 }; ///< Last valid woofer tip amplitude; usable only while its observation remains valid.
+
+    double m_focus{ 0 }; ///< Last valid woofer focus amplitude, rounded to INDI command precision.
+
+    float m_focusStepSize{ 0.1 }; ///< Local step multiplier used by both focus actuators.
 
     // --- picoscix
-    std::string m_picoState{ "UNKNOWN" };
-    int         m_picoscixPos{ -1000000000 };
+    std::string m_picoState{ "UNKNOWN" }; ///< Last observed picomotor controller FSM state.
 
-    int         m_picoscix_stepSize{ 50 };
-    std::string m_picoscix_gotoSelection;
+    int m_picoscixPos{ -1000000000 }; ///< Last valid picoscix position; the initial sentinel cannot be used for motion.
+
+    int m_picoscix_stepSize{ 50 }; ///< Local picomotor nudge size in controller steps.
+
+    std::string m_picoscix_gotoSelection; ///< Legacy picomotor preset-selection cache.
 
     // --- camwfs-fit
-    std::string m_camwfsfitState;
-    double      m_med1{ 0 };
-    double      m_med2{ 0 };
-    double      m_med3{ 0 };
-    double      m_med4{ 0 };
+    std::string m_camwfsfitState; ///< Last observed pupil-fitting application FSM state.
 
-    double m_x1{ 0 };
-    double m_y1{ 0 };
-    double m_D1{ 0 };
+    double m_med1{ 0 }; ///< Last valid median flux in fitted quadrant 1.
 
-    double m_setx1{ 0 };
-    double m_sety1{ 0 };
-    double m_setD1{ 0 };
+    double m_med2{ 0 }; ///< Last valid median flux in fitted quadrant 2.
 
-    double m_x2{ 0 };
-    double m_y2{ 0 };
-    double m_D2{ 0 };
+    double m_med3{ 0 }; ///< Last valid median flux in fitted quadrant 3.
 
-    double m_setx2{ 0 };
-    double m_sety2{ 0 };
-    double m_setD2{ 0 };
+    double m_med4{ 0 }; ///< Last valid median flux in fitted quadrant 4.
 
-    double m_x3{ 0 };
-    double m_y3{ 0 };
-    double m_D3{ 0 };
+    double m_x1{ 0 }; ///< Last valid horizontal center of fitted quadrant 1.
 
-    double m_setx3{ 0 };
-    double m_sety3{ 0 };
-    double m_setD3{ 0 };
+    double m_y1{ 0 }; ///< Last valid vertical center of fitted quadrant 1.
 
-    double m_x4{ 0 };
-    double m_y4{ 0 };
-    double m_D4{ 0 };
+    double m_D1{ 0 }; ///< Last valid diameter of fitted quadrant 1.
 
-    double m_setx4{ 0 };
-    double m_sety4{ 0 };
-    double m_setD4{ 0 };
+    double m_setx1{ 0 }; ///< Last valid reference horizontal center for quadrant 1 deltas.
 
-    double m_threshold_current{ 0 };
-    double m_threshold_target{ 0 };
+    double m_sety1{ 0 }; ///< Last valid reference vertical center for quadrant 1 deltas.
+
+    double m_setD1{ 0 }; ///< Last valid reference diameter for quadrant 1 deltas.
+
+    double m_x2{ 0 }; ///< Last valid horizontal center of fitted quadrant 2.
+
+    double m_y2{ 0 }; ///< Last valid vertical center of fitted quadrant 2.
+
+    double m_D2{ 0 }; ///< Last valid diameter of fitted quadrant 2.
+
+    double m_setx2{ 0 }; ///< Last valid reference horizontal center for quadrant 2 deltas.
+
+    double m_sety2{ 0 }; ///< Last valid reference vertical center for quadrant 2 deltas.
+
+    double m_setD2{ 0 }; ///< Last valid reference diameter for quadrant 2 deltas.
+
+    double m_x3{ 0 }; ///< Last valid horizontal center of fitted quadrant 3.
+
+    double m_y3{ 0 }; ///< Last valid vertical center of fitted quadrant 3.
+
+    double m_D3{ 0 }; ///< Last valid diameter of fitted quadrant 3.
+
+    double m_setx3{ 0 }; ///< Last valid reference horizontal center for quadrant 3 deltas.
+
+    double m_sety3{ 0 }; ///< Last valid reference vertical center for quadrant 3 deltas.
+
+    double m_setD3{ 0 }; ///< Last valid reference diameter for quadrant 3 deltas.
+
+    double m_x4{ 0 }; ///< Last valid horizontal center of fitted quadrant 4.
+
+    double m_y4{ 0 }; ///< Last valid vertical center of fitted quadrant 4.
+
+    double m_D4{ 0 }; ///< Last valid diameter of fitted quadrant 4.
+
+    double m_setx4{ 0 }; ///< Last valid reference horizontal center for quadrant 4 deltas.
+
+    double m_sety4{ 0 }; ///< Last valid reference vertical center for quadrant 4 deltas.
+
+    double m_setD4{ 0 }; ///< Last valid reference diameter for quadrant 4 deltas.
+
+    double m_threshold_current{ 0 }; ///< Last received pupil-fit threshold.
+
+    double m_threshold_target{ 0 }; ///< Legacy target pupil-fit threshold cache.
 
     // -- camwfs-avg
-    std::string m_camwfsavgState;
-    unsigned    m_nAverage_current{ 0 };
-    unsigned    m_nAverage_target{ 0 };
+    std::string m_camwfsavgState; ///< Last observed WFS averaging application FSM state.
+
+    unsigned m_nAverage_current{ 0 }; ///< Last received WFS averaging count.
+
+    unsigned m_nAverage_target{ 0 }; ///< Legacy target WFS averaging count cache.
 
     // -- dmtweeter
-    std::string m_dmtweeterState;
-    bool        m_dmtweeterTestSet{ false };
+    std::string m_dmtweeterState; ///< Last observed tweeter controller FSM state.
+
+    bool m_dmtweeterTestSet{ false }; ///< Last known tweeter test-pattern switch; validity is tracked separately.
 
     // -- dmncpc
-    std::string m_dmncpcState;
-    bool        m_dmncpcTestSet{ false };
+    std::string m_dmncpcState; ///< Last observed NCPC controller FSM state.
+
+    bool m_dmncpcTestSet{ false }; ///< Last known NCPC test-pattern switch; validity is tracked separately.
 
     // -- ttmpupil
-    std::string m_pupFsmState;
-    double      m_pupCh1{ 0 };
-    double      m_pupCh2{ 0 };
+    std::string m_pupFsmState; ///< Last observed pupil TTM FSM state.
 
-    float m_pupStepSize{ 0.5 };
+    double m_pupCh1{ 0 }; ///< Last valid pupil TTM first-axis position.
 
-    int m_pupCam{ CAMSCIS };
+    double m_pupCh2{ 0 }; ///< Last valid pupil TTM second-axis position.
+
+    float m_pupStepSize{ 0.5 }; ///< Local pupil-steering nudge size.
+
+    int m_pupCam{ CAMSCIS }; ///< Camera coordinate transform selected for pupil and periscope nudges.
 
     // -- ttmperi
-    std::string m_ttmPeriFsmState;
-    double      m_ttmPeriCh1{ 0 };
-    double      m_ttmPeriCh2{ 0 };
+    std::string m_ttmPeriFsmState; ///< Last observed periscope TTM FSM state.
 
-    float m_ttmPeriStepSize{ 25 };
+    double m_ttmPeriCh1{ 0 }; ///< Last valid periscope first-axis voltage.
+
+    double m_ttmPeriCh2{ 0 }; ///< Last valid periscope second-axis voltage.
+
+    float m_ttmPeriStepSize{ 25 }; ///< Local periscope TTM voltage step.
 
     // -- Camera Lens
-    std::string m_camlensxFsmState;
-    std::string m_camlensyFsmState;
-    float       m_camlensx_pos{ 0 };
-    float       m_camlensy_pos{ 0 };
+    std::string m_camlensxFsmState; ///< Last observed camera-lens X-stage FSM state.
 
-    float m_camlensStepSize{ 0.01 };
+    std::string m_camlensyFsmState; ///< Last observed camera-lens Y-stage FSM state.
+
+    float m_camlensx_pos{ 0 }; ///< Last valid camera-lens X position used as the relative-motion baseline.
+
+    float m_camlensy_pos{ 0 }; ///< Last valid camera-lens Y position used as the relative-motion baseline.
+
+    float m_camlensStepSize{ 0.01 }; ///< Local camera-lens movement step in millimeters.
 
     // ****** Alignment ******** //
 
     // --- camwfs-align
-    std::string m_camwfs_align_fsmState;
+    std::string m_camwfs_align_fsmState; ///< Last observed pupil-tracking controller FSM state.
 
     // --- twAlign-camwfs-ctrl
-    std::string m_twAlign_camwfs_ctrl_fsmState;
+    std::string m_twAlign_camwfs_ctrl_fsmState; ///< Last observed actuator-alignment controller FSM state.
 
     // --- twAlign-camwfs-wfs
-    std::string m_twAlign_camwfs_wfs_fsmState;
+    std::string m_twAlign_camwfs_wfs_fsmState; ///< Last observed actuator-alignment sensor FSM state.
 
   public:
     /// Construct the pupil-guide control widget.
-    pupilGuide( QWidget *Parent = 0, Qt::WindowFlags f = Qt::WindowFlags() );
+    pupilGuide( QWidget        *Parent = 0, /**< [in] Optional Qt parent owning this widget. */
+                Qt::WindowFlags f      = Qt::WindowFlags() /**< [in] Qt window flags. */ );
 
     /// Destroy the pupil-guide control widget.
     ~pupilGuide();
@@ -208,103 +260,196 @@ class pupilGuide : public xWidget
     /// Apply disconnected-state GUI initialization and clear cached connection state.
     virtual void onDisconnect();
 
-    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
-    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/ );
-    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    /// Replace the observed definition of a known property and refresh dependent controls.
+    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Property definition or value update. */ );
 
-    void modGUISetEnable( bool enableModGUI, bool enableModArrows );
+    /// Invalidate only the deleted property or device and its dependent controls.
+    void handleDelProperty(
+        const pcf::IndiProperty &ipRecv /**< [in] Deleted property; an empty name means the entire device. */ );
 
-    void camwfsfitSetEnabled( bool enabled );
+    /// Merge a partial property update and refresh dependent controls.
+    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Property definition or value update. */ );
 
-    /// Enable or disable the cameralens GUI
-    /** IF whichcl is CAMLENS_BOTH, the action is applied to all components.
-     * If it's CAMLENS_X or CAMLENS_Y, it is only applied to that access.  The common components are then enabled.
-     */
-    void camlensSetEnabled( bool enabled,               ///< true for enabled, false for disabled
-                            int  whichcl = CAMLENS_BOTH ///< Which axis, or both.  CAMLENS_X, CAMLENS_Y, CAMLENS_BOTH
-    );
+    /// Apply modulator FSM availability to its controls and the selected motion buttons.
+    void modGUISetEnable( bool enableModGUI, /**< [in] Modulator section availability. */
+                          bool enableModArrows /**< [in] Selected tip/tilt actuator availability. */ );
 
-    void camwfs_align_setEnabled( bool enabled, bool all );
+    /// Set availability of the pupil-fitting readouts and related controls.
+    void camwfsfitSetEnabled( bool enabled /**< [in] Whether fitting readouts are available. */ );
 
-    void twAlign_camwfs_ctrl_setEnabled( bool enabled, bool all );
+    /// Set availability of camera-lens axes and their shared scale control.
+    void camlensSetEnabled( bool enabled, /**< [in] Whether the selected axes are available. */
+                            int  whichcl = CAMLENS_BOTH /**< [in] CAMLENS_X, CAMLENS_Y, or CAMLENS_BOTH. */ );
 
-    void twAlign_camwfs_wfs_setEnabled( bool enabled, bool all );
+    /// Set availability of the pupil-tracking section.
+    void camwfs_align_setEnabled( bool enabled, /**< [in] Whether the section controls are available. */
+                                  bool all /**< [in] Also update the section label. */ );
 
-    void alignment_buttons_setEnabled( bool enabled, bool all );
+    /// Set availability of the actuator-alignment controller section.
+    void twAlign_camwfs_ctrl_setEnabled( bool enabled, /**< [in] Whether the section controls are available. */
+                                         bool all /**< [in] Also update the section label. */ );
+
+    /// Set availability of the actuator-alignment sensor section.
+    void twAlign_camwfs_wfs_setEnabled( bool enabled, /**< [in] Whether the section controls are available. */
+                                        bool all /**< [in] Also update the section label. */ );
+
+    /// Initialize availability of the combined alignment controls.
+    void alignment_buttons_setEnabled( bool enabled, /**< [in] Whether the section controls are available. */
+                                       bool all /**< [in] Also update the section label. */ );
 
   public slots:
+    /// Refresh all controls from transport, FSM, and observed-property availability.
     void updateGUI();
 
     //----------- modttm
 
+    /// Request modulation when the modulator command is available.
     void on_buttonMod_mod_pressed();
+
+    /// Request the set position when the modulator command is available.
     void on_buttonMod_set_pressed();
+
+    /// Request the rest position when the modulator command is available.
     void on_buttonMod_rest_pressed();
 
+    /// Cycle the selected tip/tilt actuator, excluding the telescope in lab mode.
     void on_button_ttmtel_pressed();
 
+    /// Nudge the selected tip/tilt actuator upward when its inputs are available.
     void on_button_tip_u_pressed();
+
+    /// Nudge the selected tip/tilt actuator up and left when its inputs are available.
     void on_button_tip_ul_pressed();
+
+    /// Nudge the selected tip/tilt actuator left when its inputs are available.
     void on_button_tip_l_pressed();
+
+    /// Nudge the selected tip/tilt actuator down and left when its inputs are available.
     void on_button_tip_dl_pressed();
+
+    /// Nudge the selected tip/tilt actuator downward when its inputs are available.
     void on_button_tip_d_pressed();
+
+    /// Nudge the selected tip/tilt actuator down and right when its inputs are available.
     void on_button_tip_dr_pressed();
+
+    /// Nudge the selected tip/tilt actuator right when its inputs are available.
     void on_button_tip_r_pressed();
+
+    /// Nudge the selected tip/tilt actuator up and right when its inputs are available.
     void on_button_tip_ur_pressed();
+
+    /// Cycle the local tip/tilt step size.
     void on_button_tip_scale_pressed();
 
     //------------- focus
+    /// Increase focus on the selected actuator when its required inputs are available.
     void on_button_focus_p_pressed();
+
+    /// Decrease focus on the selected actuator when its required inputs are available.
     void on_button_focus_m_pressed();
+
+    /// Cycle the local focus step multiplier.
     void on_button_focus_scale_pressed();
 
     //------------- picoscix
-    void move_picoscix( int delta );
+    /// Move picoscix relative to a valid observed position without integer overflow.
+    void move_picoscix( int delta /**< [in] Signed relative movement in picomotor steps. */ );
+
+    /// Nudge picoscix in the positive direction by the selected step size.
     void on_picoscix_l_pressed();
+
+    /// Cycle the local picomotor step size.
     void on_picoscix_scale_pressed();
+
+    /// Nudge picoscix in the negative direction by the selected step size.
     void on_picoscix_r_pressed();
+
+    /// Apply the selected beamsplitter offset and clear the preset selection.
     void on_picoscix_go_pressed();
 
     //----------- dmtweeter
+    /// Toggle the tweeter test pattern from a known observed switch state.
     void on_buttonTweeterTest_set_pressed();
 
     //----------- dmncpc
+    /// Toggle the NCPC test pattern from a known observed switch state.
     void on_buttonNCPCTest_set_pressed();
 
     //----------- ttmpupil
+    /// Request release of the pupil TTM when that capability is available.
     void on_buttonPup_rest_pressed();
+
+    /// Request initialization of the pupil TTM when that capability is available.
     void on_buttonPup_set_pressed();
 
+    /// Cycle the camera used to choose pupil and periscope movement directions.
     void on_button_camera_pressed();
 
+    /// Nudge the pupil TTM up and left when its inputs are available.
     void on_button_pup_ul_pressed();
+
+    /// Nudge the pupil TTM down and left when its inputs are available.
     void on_button_pup_dl_pressed();
+
+    /// Nudge the pupil TTM down and right when its inputs are available.
     void on_button_pup_dr_pressed();
+
+    /// Nudge the pupil TTM up and right when its inputs are available.
     void on_button_pup_ur_pressed();
+
+    /// Cycle the local pupil-steering step size.
     void on_button_pup_scale_pressed();
 
     //---------- TTM Peri
+    /// Request the periscope TTM rest state when its switch is available.
     void on_button_ttmPeri_rest_pressed();
+
+    /// Request the periscope TTM set state when its switch is available.
     void on_button_ttmPeri_set_pressed();
 
+    /// Nudge the periscope TTM left when its inputs are available.
     void on_button_ttmPeri_l_pressed();
+
+    /// Nudge the periscope TTM right when its inputs are available.
     void on_button_ttmPeri_r_pressed();
+
+    /// Nudge the periscope TTM upward when its inputs are available.
     void on_button_ttmPeri_u_pressed();
+
+    /// Nudge the periscope TTM downward when its inputs are available.
     void on_button_ttmPeri_d_pressed();
+
+    /// Cycle the local periscope TTM step size.
     void on_button_ttmPeri_scale_pressed();
 
-    void toggleExpFit( bool visible );
+    /// Show or hide the individual pupil-fit coordinates.
+    void toggleExpFit( bool visible /**< [in] Whether to show the individual pupil-fit coordinates. */ );
+
+    /// Toggle the expanded pupil-fit coordinate display.
     void on_buttonExpFit_pressed();
 
+    /// Nudge the camera lens upward when its inputs are available.
     void on_button_camlens_u_pressed();
+
+    /// Nudge the camera lens left when its inputs are available.
     void on_button_camlens_l_pressed();
+
+    /// Nudge the camera lens downward when its inputs are available.
     void on_button_camlens_d_pressed();
+
+    /// Nudge the camera lens right when its inputs are available.
     void on_button_camlens_r_pressed();
+
+    /// Cycle the local camera-lens step size.
     void on_button_camlens_scale_pressed();
 
     // ******** alignment *********//
 
+    /// Start all three alignment participants only when every dependency is available.
     void on_button_startAlignment_pressed();
+
+    /// Stop each available alignment target, preserving the lab-mode routing rule.
     void on_button_stopAlignment_pressed();
 
   private:
@@ -312,17 +457,22 @@ class pupilGuide : public xWidget
     struct childSubscription
     {
         multiIndiSubscriber *subscriber; ///< Child owned by the Qt widget tree.
-        const char          *device;     ///< INDI device supplying the child.
-        const char          *property;   ///< INDI property supplying the child.
-        const char          *element;    ///< Required observed element for this child.
+
+        const char *device; ///< INDI device supplying the child.
+
+        const char *property; ///< INDI property supplying the child.
+
+        const char *element; ///< Required observed element for this child.
     };
 
     /// Observations for one of this panel's known INDI properties.
     struct propertyState
     {
-        pcf::IndiProperty::Type type;     ///< Expected protocol type from the producer contract.
-        std::set<std::string>   elements; ///< Observed element names, including empty command targets.
-        std::set<std::string>   valid;    ///< Elements with valid values since the last invalidation.
+        pcf::IndiProperty::Type type; ///< Expected protocol type from the producer contract.
+
+        std::set<std::string> elements; ///< Observed element names, including empty command targets.
+
+        std::set<std::string> valid; ///< Elements with valid values since the last invalidation.
     };
 
     /// Device/property observations; numeric caches are usable only with corresponding valid elements.

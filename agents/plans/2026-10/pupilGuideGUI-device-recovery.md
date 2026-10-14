@@ -5,7 +5,8 @@
 Date: 2026-10-13. Branch: `jrmales/pupilguide-device-recovery`, created from
 `dev` at `8c652ec5b3ef43db0cbdbc3833c5c8238ebf6495`.
 
-Status: implementation in progress as requested on 2026-10-14.
+Status: implementation and offline verification complete on 2026-10-14.
+Instrument validation remains a user-run follow-up.
 
 The user reported:
 
@@ -443,3 +444,33 @@ points to implement the corresponding planned behavior.
   only warning is the pre-existing unchecked `QFile::open()` result in untouched
   `pupilGuideGUI_main.cpp:18`. `git diff --check` passed. The app was built only;
   no live INDI client was launched. Full documentation and Doxygen checks follow.
+- Functional commits: `4eaff49e` isolates device loss and adds the initial
+  regression harness; `ae4dbc2b` implements observed-property eligibility and
+  the expanded regression coverage. Planning decisions are recorded in
+  `5011fc53` and `80df75a9`.
+- 2026-10-14, step 3: completed the full widget documentation pass, including
+  member roles, slot summaries, inline parameter documentation, and the
+  transport/property distinction. Added the widget and test source to the
+  library Doxygen inputs and enabled `PUPILGUIDE_GUI_TEST_DOXYGEN_REF` so the
+  regression tests link to the real widget APIs. The test group remains under
+  `application_unit_test`; the offline harness is hidden from Doxygen.
+- Focused Doxygen generation used `doc/config/Doxyfile.libMagAOX`, with inputs
+  restricted to `pupilGuide.hpp`, `pupilGuide_test.cpp`, `tests/groups.dox`, and
+  `tests/testXWC.hpp`; output went to `/tmp/pupilguide-doxygen/output`, with XML
+  enabled and project assets/Graphviz disabled. All 13 cases have real API
+  references and HTML backlinks (78 links). All 156 documented class members
+  have brief descriptions. No warnings name either pupil-guide source file.
+  Remaining diagnostics concern existing obsolete configuration tags,
+  `../logger/doc`, and references to the `tests` group and `zaberCtrl_test.cpp`
+  that are outside these focused inputs.
+- The documentation pass preserves every C++ token in the widget and test
+  source relative to `ae4dbc2b`; checked after excluding comments and whitespace.
+  `clang-format --dry-run --Werror` on both C++ files and `git diff --check`
+  passed. The prior successful build and 1,649-assertion run therefore cover the
+  final functional code. No separate formatting-only cleanup was necessary.
+- Follow-up validation: the user can reproduce the original sensor restart on
+  the instrument and confirm that healthy controls and the movement selector
+  remain available and the sensor controls recover. Agent work used only the
+  offline harness and a build; no instrument actions were performed. Silent
+  late-producer rediscovery and the similar `coronAlign` delete handler remain
+  separate work as scoped above.
