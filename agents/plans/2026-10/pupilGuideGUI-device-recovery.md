@@ -7,8 +7,10 @@ Date: 2026-10-13. Branch: `jrmales/pupilguide-device-recovery`, created from
 
 Status: implementation and offline verification complete on 2026-10-14.
 User-run `twAlign-camwfs-wfs` restart validation passed on 2026-10-14.
-Extension authorized on 2026-10-14: implement local `coronAlign` recovery and
-shared GUI missing-property rediscovery on the same feature branch.
+Extension authorized on 2026-10-14: local `coronAlign` recovery and shared GUI
+missing-property rediscovery on the same feature branch. Extension implementation,
+offline tests, builds, and documentation are complete; extension instrument
+validation remains user-run.
 
 The user reported:
 
@@ -49,8 +51,10 @@ gate the motion buttons on the selected actuator's actual dependencies.
 - Work only on a workstation. Do not run agents, INDI commands, or test clients
   against RTC or other instrument computers, including through a tunnel. Any
   eventual instrument validation must be performed by the user.
-- No controller/protocol changes, GUI redesign, general subscription-retry
-  implementation, or suite-wide widget refactor are planned.
+- The original scope excluded general subscription retries and shared-widget
+  changes. The authorized extension below adds shared GUI discovery and necessary
+  stage-widget recovery. Controller/protocol changes and GUI redesign remain
+  excluded.
 - Implementation was authorized on 2026-10-14. Record changes and validation below.
 
 # Agent findings and plan
@@ -609,3 +613,36 @@ semantics and instrument-side app retry implementation stay unchanged.
   empty target capabilities, direct stage-slot suppression, independent slider
   range loss, and restored stage-dialog titles. The core coronagraph commit is
   `8738f585`; the shared stage corrections follow as a separate functional commit.
+
+- Shared stage corrections committed as `c11032b9`. The final functional suites
+  pass 95 assertions in 6 publisher cases, 4,146 assertions in 9 coronagraph/
+  embedded-stage cases, and 1,649 assertions in 13 existing pupil-guide cases:
+  **5,890 assertions in 28 cases total**. The pupil-guide command was
+  `make -C /tmp/pupilguide-tests -f makefile.pupilGuide_test -j2` followed by
+  `QT_QPA_PLATFORM=offscreen /tmp/pupilguide-tests/pupilGuide_test`.
+- Builds succeeded with `make -C gui/apps/<app> -f makefile.<app> -j2` for
+  `pupilGuideGUI`, `coronAlignGUI`, `stageGUI`, and `cameraGUI`. The final three
+  were rebuilt after the shared stage corrections. Only existing unchecked
+  `QFile::open()` warnings remain in GUI entrypoints or `xWidgets/app.hpp`.
+  No GUI application was launched against an INDI server.
+- Completed full changed-file documentation for the publisher, coronagraph
+  panel, stage dialog, and shared summaries. Doxygen includes these production
+  headers, the offline transport helper, and both new test sources, with
+  `MULTIINDI_TEST_DOXYGEN_REF` and `CORONALIGN_GUI_TEST_DOXYGEN_REF` enabled.
+  Focused generation using the repository config produced 170 real-API links
+  with HTML backlinks across all 28 test cases. All 422 class members across
+  the six documented production classes have brief descriptions. No diagnostics
+  name changed source files; existing obsolete config settings and excluded
+  `../logger/doc`, `tests`, and `zaberCtrl_test.cpp` references remain as described
+  in the original focused documentation run.
+- Final documentation verification used `/tmp/alignment-extension-doxygen`.
+  Compared each of the five changed production headers with `c11032b9` after
+  removing comments and whitespace: all C++ tokens are unchanged. The test-only
+  documentation changes add Doxygen-only references and declaration parameter
+  names; runtime test behavior is unchanged. Repository clang-format checks and
+  `git diff --check` passed. No separate formatting-only commit was needed.
+- Both previously deferred items are implemented. User-run extension validation
+  can exercise a coronagraph device restart and a silent late-starting GUI
+  property producer. The earlier successful `twAlign-camwfs-wfs` instrument
+  test applies to the original pupil-guide implementation; it is not presented
+  as an instrument test of this extension.

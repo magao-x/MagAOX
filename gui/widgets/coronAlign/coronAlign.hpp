@@ -23,10 +23,16 @@ namespace xqt
 {
 
 /// Main coronagraph alignment control panel.
+/** Transport loss disables the full panel. Device/FSM loss invalidates only that
+ * device's readiness, positions, and pending moves; individual motion-property
+ * deletion leaves other axes available. Commands require fresh current values
+ * and observed target elements. Callbacks and motion slots run on the Qt thread.
+ */
 class coronAlign : public xWidget
 {
     Q_OBJECT
 
+    /// Camera view defining the existing horizontal and vertical motion mappings.
     enum camera
     {
         FLOWFS,
@@ -40,125 +46,177 @@ class coronAlign : public xWidget
     int m_camera{ CAMSCIS }; ///< Active camera view that determines which motion axes map onto the GUI arrows.
 
     // Pico Motors
-    std::string m_picoState;
+    std::string m_picoState; ///< Last observed FSM shared by all picomotor axes.
+
     /// Tracks a just-issued pico move until the controller publishes an FSM update.
     bool m_picoCommandPending{ false };
+
     /// Timeout interval in milliseconds before a non-pico pending latch requests a refresh or falls back locally.
     static constexpr int m_pendingTimeoutMs{ 2000 };
 
     // Pupil Plane
 
-    std::string m_fwPupilState;
+    std::string m_fwPupilState; ///< Last observed pupil filter-wheel FSM.
+
     /// Tracks a just-issued pupil filter-wheel move until the controller publishes an FSM update.
     bool m_fwPupilCommandPending{ false };
+
     /// Measures how long the current pupil filter-wheel pending latch has been active.
     QElapsedTimer m_fwPupilPendingTimer;
+
     /// Records whether the GUI has already requested a fresh pupil filter-wheel status during this pending latch.
     bool m_fwPupilPendingRefreshRequested{ false };
+
     /// Last pupil filter-wheel target requested by the GUI.
     double m_fwPupilTarget{ 0 };
 
-    double m_fwPupilPos{ 0 };
-    long   m_picoPupilPos{ 0 };
+    double m_fwPupilPos{ 0 }; ///< Last valid pupil filter-wheel position; availability is tracked separately.
 
-    double m_fwPupilStepSize{ 0.0001 };
-    double m_picoPupilStepSize{ 100 };
+    long m_picoPupilPos{ 0 }; ///< Last valid pupil picomotor position; availability is tracked separately.
 
-    int m_pupilScale{ 100 };
+    double m_fwPupilStepSize{ 0.0001 }; ///< Base pupil filter-wheel movement step before applying the local scale.
+
+    double m_picoPupilStepSize{ 100 }; ///< Base pupil picomotor movement step before applying the local scale.
+
+    int m_pupilScale{ 100 }; ///< Selected pupil-plane step multiplier; preserved across device loss.
 
     // Focal Plane
 
-    std::string m_fwFocalState;
+    std::string m_fwFocalState; ///< Last observed focal-plane filter-wheel FSM.
+
     /// Tracks a just-issued focal filter-wheel move until the controller publishes an FSM update.
     bool m_fwFocalCommandPending{ false };
+
     /// Measures how long the current focal filter-wheel pending latch has been active.
     QElapsedTimer m_fwFocalPendingTimer;
+
     /// Records whether the GUI has already requested a fresh focal filter-wheel status during this pending latch.
     bool m_fwFocalPendingRefreshRequested{ false };
+
     /// Last focal filter-wheel target requested by the GUI.
     double m_fwFocalTarget{ 0 };
 
-    double m_fwFocalPos{ 0 };
-    long   m_picoFocalPos{ 0 };
+    double m_fwFocalPos{ 0 }; ///< Last valid focal-plane filter-wheel position; availability is tracked separately.
 
-    double m_fwFocalStepSize{ 0.0001 };
-    double m_picoFocalStepSize{ 100 };
+    long m_picoFocalPos{ 0 }; ///< Last valid focal-plane picomotor position; availability is tracked separately.
 
-    int m_focalScale{ 100 };
+    double m_fwFocalStepSize{
+        0.0001 }; ///< Base focal-plane filter-wheel movement step before applying the local scale.
+
+    double m_picoFocalStepSize{ 100 }; ///< Base focal-plane picomotor movement step before applying the local scale.
+
+    int m_focalScale{ 100 }; ///< Selected focal-plane step multiplier; preserved across device loss.
 
     // Lyot Plane
 
-    std::string m_fwLyotState;
+    std::string m_fwLyotState; ///< Last observed Lyot filter-wheel FSM.
+
     /// Tracks a just-issued Lyot filter-wheel move until the controller publishes an FSM update.
     bool m_fwLyotCommandPending{ false };
+
     /// Measures how long the current Lyot filter-wheel pending latch has been active.
     QElapsedTimer m_fwLyotPendingTimer;
+
     /// Records whether the GUI has already requested a fresh Lyot filter-wheel status during this pending latch.
     bool m_fwLyotPendingRefreshRequested{ false };
+
     /// Last Lyot filter-wheel target requested by the GUI.
     double m_fwLyotTarget{ 0 };
 
-    double m_fwLyotPos{ 0 };
-    long   m_picoLyotPos{ 0 };
+    double m_fwLyotPos{ 0 }; ///< Last valid Lyot filter-wheel position; availability is tracked separately.
 
-    double m_fwLyotStepSize{ 0.0001 };
-    double m_picoLyotStepSize{ 100 };
+    long m_picoLyotPos{ 0 }; ///< Last valid Lyot picomotor position; availability is tracked separately.
 
-    int m_lyotScale{ 100 };
+    double m_fwLyotStepSize{ 0.0001 }; ///< Base Lyot filter-wheel movement step before applying the local scale.
+
+    double m_picoLyotStepSize{ 100 }; ///< Base Lyot picomotor movement step before applying the local scale.
+
+    int m_lyotScale{ 100 }; ///< Selected Lyot-plane step multiplier; preserved across device loss.
 
     // PIAA
-    std::string m_piaaState;
+    std::string m_piaaState; ///< Last observed PIAA longitudinal-stage FSM.
+
     /// Tracks a just-issued PIAA stage move until the controller publishes an FSM update.
     bool m_piaaCommandPending{ false };
+
     /// Measures how long the current PIAA stage pending latch has been active.
     QElapsedTimer m_piaaPendingTimer;
+
     /// Records whether the GUI has already requested a fresh PIAA stage status during this pending latch.
     bool m_piaaPendingRefreshRequested{ false };
+
     /// Last PIAA stage target requested by the GUI.
     double m_piaaTarget{ 0 };
-    double m_piaaPos{ 0 };
-    int    m_piaaScale{ 1 };
-    double m_piaaStepSize{ 0.1 };
+
+    double m_piaaPos{ 0 }; ///< Last valid PIAA longitudinal-stage position; availability is tracked separately.
+
+    int m_piaaScale{ 1 }; ///< Selected PIAA longitudinal-stage step multiplier; preserved across device loss.
+
+    double m_piaaStepSize{ 0.1 }; ///< Base PIAA longitudinal-stage movement step before applying the local scale.
 
     // PIAA0;
-    long   m_piaa0xPos{ 0 };
-    int    m_piaa0Scale{ 1 };
-    double m_piaa0StepSize{ 20 };
+
+    long m_piaa0xPos{ 0 }; ///< Last valid PIAA 0 X-axis position; availability is tracked separately.
+
+    int m_piaa0Scale{ 1 }; ///< Selected PIAA 0 step multiplier; preserved across device loss.
+
+    double m_piaa0StepSize{ 20 }; ///< Base PIAA 0 movement step before applying the local scale.
 
     // PIAA1;
-    long   m_piaa1xPos{ 0 };
-    long   m_piaa1yPos{ 0 };
-    int    m_piaa1Scale{ 1 };
-    double m_piaa1StepSize{ 20 };
+
+    long m_piaa1xPos{ 0 }; ///< Last valid PIAA 1 X-axis position; availability is tracked separately.
+
+    long m_piaa1yPos{ 0 }; ///< Last valid PIAA 1 Y-axis position; availability is tracked separately.
+
+    int m_piaa1Scale{ 1 }; ///< Selected PIAA 1 step multiplier; preserved across device loss.
+
+    double m_piaa1StepSize{ 20 }; ///< Base PIAA 1 movement step before applying the local scale.
 
     // iPIAA
-    std::string m_ipiaaState;
+    std::string m_ipiaaState; ///< Last observed inverse-PIAA longitudinal-stage FSM.
+
     /// Tracks a just-issued iPIAA stage move until the controller publishes an FSM update.
     bool m_ipiaaCommandPending{ false };
+
     /// Measures how long the current iPIAA stage pending latch has been active.
     QElapsedTimer m_ipiaaPendingTimer;
+
     /// Records whether the GUI has already requested a fresh iPIAA stage status during this pending latch.
     bool m_ipiaaPendingRefreshRequested{ false };
+
     /// Last iPIAA stage target requested by the GUI.
     double m_ipiaaTarget{ 0 };
-    double m_ipiaaPos{ 0 };
-    int    m_ipiaaScale{ 1 };
-    double m_ipiaaStepSize{ 0.1 };
+
+    double m_ipiaaPos{
+        0 }; ///< Last valid inverse-PIAA longitudinal-stage position; availability is tracked separately.
+
+    int m_ipiaaScale{ 1 }; ///< Selected inverse-PIAA longitudinal-stage step multiplier; preserved across device loss.
+
+    double m_ipiaaStepSize{
+        0.1 }; ///< Base inverse-PIAA longitudinal-stage movement step before applying the local scale.
 
     // iPIAA0;
-    long   m_ipiaa0xPos{ 0 };
-    int    m_ipiaa0Scale{ 1 };
-    double m_ipiaa0StepSize{ 20 };
+
+    long m_ipiaa0xPos{ 0 }; ///< Last valid inverse-PIAA 0 X-axis position; availability is tracked separately.
+
+    int m_ipiaa0Scale{ 1 }; ///< Selected inverse-PIAA 0 step multiplier; preserved across device loss.
+
+    double m_ipiaa0StepSize{ 20 }; ///< Base inverse-PIAA 0 movement step before applying the local scale.
 
     // iPIAA1;
-    long   m_ipiaa1xPos{ 0 };
-    long   m_ipiaa1yPos{ 0 };
-    int    m_ipiaa1Scale{ 1 };
-    double m_ipiaa1StepSize{ 20 };
+
+    long m_ipiaa1xPos{ 0 }; ///< Last valid inverse-PIAA 1 X-axis position; availability is tracked separately.
+
+    long m_ipiaa1yPos{ 0 }; ///< Last valid inverse-PIAA 1 Y-axis position; availability is tracked separately.
+
+    int m_ipiaa1Scale{ 1 }; ///< Selected inverse-PIAA 1 step multiplier; preserved across device loss.
+
+    double m_ipiaa1StepSize{ 20 }; ///< Base inverse-PIAA 1 movement step before applying the local scale.
 
   public:
     /// Construct the coronagraph alignment control widget.
-    coronAlign( QWidget *Parent = 0, Qt::WindowFlags f = Qt::WindowFlags() );
+    coronAlign( QWidget        *Parent = 0, /**< [in] Optional Qt parent owning the widget. */
+                Qt::WindowFlags f      = Qt::WindowFlags() /**< [in] Qt window flags. */ );
 
     /// Destroy the coronagraph alignment control widget.
     ~coronAlign();
@@ -172,9 +230,15 @@ class coronAlign : public xWidget
     /// Apply disconnected-state GUI initialization and clear cached connection state.
     virtual void onDisconnect();
 
-    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
-    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/ );
-    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    /// Replace a known property definition and refresh dependent controls.
+    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Received property definition or update. */ );
+
+    /// Invalidate only the deleted property or device and its dependent state.
+    void handleDelProperty(
+        const pcf::IndiProperty &ipRecv /**< [in] Deleted property; an empty name means the entire device. */ );
+
+    /// Merge valid partial observations and refresh dependent controls.
+    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Received property definition or update. */ );
 
     /// Starts a non-pico pending latch and its timeout timer.
     void startPendingCommand(
@@ -200,70 +264,149 @@ class coronAlign : public xWidget
                           const std::string &device /**< [in] Device name to query on timeout */,
                           const std::string &property /**< [in] Motion property name to query on timeout */ );
 
-    /// Processes stale non-pico pending latches by refreshing state once, then falling back locally if still
-    /// unresolved.
+    /// Expire stale non-pico motion latches after one status-refresh attempt.
     void expirePendingCommands();
 
+    /// Apply picomotor FSM readiness to the mapped motion buttons.
     void enablePicoButtons();
+
+    /// Disable picomotor motion and latch pending state when a READY device is commanded.
     void disablePicoButtons();
 
   public slots:
+    /// Refresh motion availability from connection, readiness, pending commands, and observed inputs.
     void updateGUI();
 
+    /// Select the FLOWFS camera mapping and refresh motion availability.
     void on_checkCamflowfs_clicked();
 
+    /// Keep the unsupported LLOWFS selector unchecked.
     void on_checkCamllowfs_clicked();
 
+    /// Select the science-camera mapping and refresh motion availability.
     void on_checkCamsci12_clicked();
 
+    /// Move pupil-plane upward when all required inputs are available.
     void on_button_pupil_u_pressed();
+
+    /// Move pupil-plane downward when all required inputs are available.
     void on_button_pupil_d_pressed();
+
+    /// Move pupil-plane left when all required inputs are available.
     void on_button_pupil_l_pressed();
+
+    /// Move pupil-plane right when all required inputs are available.
     void on_button_pupil_r_pressed();
+
+    /// Cycle the local pupil-plane movement scale.
     void on_button_pupil_scale_pressed();
 
+    /// Move focal-plane upward when all required inputs are available.
     void on_button_focal_u_pressed();
+
+    /// Move focal-plane downward when all required inputs are available.
     void on_button_focal_d_pressed();
+
+    /// Move focal-plane left when all required inputs are available.
     void on_button_focal_l_pressed();
+
+    /// Move focal-plane right when all required inputs are available.
     void on_button_focal_r_pressed();
+
+    /// Cycle the local focal-plane movement scale.
     void on_button_focal_scale_pressed();
 
+    /// Move Lyot-plane upward when all required inputs are available.
     void on_button_lyot_u_pressed();
+
+    /// Move Lyot-plane downward when all required inputs are available.
     void on_button_lyot_d_pressed();
+
+    /// Move Lyot-plane left when all required inputs are available.
     void on_button_lyot_l_pressed();
+
+    /// Move Lyot-plane right when all required inputs are available.
     void on_button_lyot_r_pressed();
+
+    /// Cycle the local Lyot-plane movement scale.
     void on_button_lyot_scale_pressed();
 
+    /// Move PIAA left when all required inputs are available.
     void on_button_piaa_l_pressed();
+
+    /// Move PIAA right when all required inputs are available.
     void on_button_piaa_r_pressed();
+
+    /// Move PIAA upward when all required inputs are available.
     void on_button_piaa_u_pressed();
+
+    /// Move PIAA downward when all required inputs are available.
     void on_button_piaa_d_pressed();
+
+    /// Cycle the local PIAA movement scale.
     void on_button_piaa_scale_pressed();
 
+    /// Move PIAA 0 left when all required inputs are available.
     void on_button_piaa0_l_pressed();
+
+    /// Move PIAA 0 right when all required inputs are available.
     void on_button_piaa0_r_pressed();
+
+    /// Cycle the local PIAA 0 movement scale.
     void on_button_piaa0_scale_pressed();
 
+    /// Move PIAA 1 left when all required inputs are available.
     void on_button_piaa1_l_pressed();
+
+    /// Move PIAA 1 right when all required inputs are available.
     void on_button_piaa1_r_pressed();
+
+    /// Move PIAA 1 upward when all required inputs are available.
     void on_button_piaa1_u_pressed();
+
+    /// Move PIAA 1 downward when all required inputs are available.
     void on_button_piaa1_d_pressed();
+
+    /// Cycle the local PIAA 1 movement scale.
     void on_button_piaa1_scale_pressed();
 
+    /// Move inverse-PIAA left when all required inputs are available.
     void on_button_ipiaa_l_pressed();
+
+    /// Move inverse-PIAA right when all required inputs are available.
     void on_button_ipiaa_r_pressed();
+
+    /// Move inverse-PIAA upward when all required inputs are available.
     void on_button_ipiaa_u_pressed();
+
+    /// Move inverse-PIAA downward when all required inputs are available.
     void on_button_ipiaa_d_pressed();
+
+    /// Cycle the local inverse-PIAA movement scale.
     void on_button_ipiaa_scale_pressed();
 
+    /// Move inverse-PIAA 0 left when all required inputs are available.
     void on_button_ipiaa0_l_pressed();
+
+    /// Move inverse-PIAA 0 right when all required inputs are available.
     void on_button_ipiaa0_r_pressed();
+
+    /// Cycle the local inverse-PIAA 0 movement scale.
     void on_button_ipiaa0_scale_pressed();
 
+    /// Move inverse-PIAA 1 left when all required inputs are available.
     void on_button_ipiaa1_l_pressed();
+
+    /// Move inverse-PIAA 1 right when all required inputs are available.
     void on_button_ipiaa1_r_pressed();
+
+    /// Move inverse-PIAA 1 upward when all required inputs are available.
     void on_button_ipiaa1_u_pressed();
+
+    /// Move inverse-PIAA 1 downward when all required inputs are available.
     void on_button_ipiaa1_d_pressed();
+
+    /// Cycle the local inverse-PIAA 1 movement scale.
     void on_button_ipiaa1_scale_pressed();
 
   private:
@@ -303,7 +446,8 @@ class coronAlign : public xWidget
 
     /// Applies a callable to each child widget subscribed directly through this GUI.
     template <typename funcT>
-    void forEachChildSubscriber( funcT &&func /**< [in] Callable applied to each direct child subscriber. */ );
+    void forEachChildSubscriber(
+        funcT &&func /**< [in] Callable receiving the child device name and stageStatus pointer. */ );
 
     /// Clears cached connection-dependent state so timer-driven GUI logic stays disconnected-safe.
     void resetConnectionState();

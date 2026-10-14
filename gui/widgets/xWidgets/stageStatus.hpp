@@ -18,6 +18,10 @@ namespace xqt
 {
 
 /// Stage-status summary widget with preset/filter selection support.
+/** A valid named selection takes precedence over the numeric position fallback.
+ * Missing numeric observations display as unavailable, while selection deletion
+ * preserves the independently observed device FSM and position.
+ */
 class stageStatus : public statusCombo
 {
     Q_OBJECT
@@ -57,14 +61,15 @@ class stageStatus : public statusCombo
     /// Reset the widget for a disconnected stage controller.
     virtual void onDisconnect();
 
-    /// Handle deletion of a stage property used by this widget.
-    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/ );
+    /// Clear only the deleted position or selection without discarding independent observations.
+    void handleDelProperty(
+        const pcf::IndiProperty &ipRecv /**< [in] Deleted property; an empty name means the whole device.*/ );
 
     /// Replace a position definition without retaining a missing current element.
     void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Received definition. */ );
 
     /// Handle updates to the stage position and preset/filter properties.
-    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Received property definition or update.*/ );
 
   protected:
     /// Return `true` when the property name is a selectable preset/filter switch.

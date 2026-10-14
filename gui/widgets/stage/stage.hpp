@@ -1,4 +1,3 @@
-
 /** \file stage.hpp
  * \brief Stage control widget used by stage and camera GUIs.
  */
@@ -17,10 +16,16 @@ namespace xqt
 {
 
 /// Stage control widget with parked-poweroff display support.
+/** Readiness, numeric movement inputs, slider range, and preset choices are
+ * independent observations. Named property loss clears only its dependents;
+ * whole-device/FSM loss resets all cached state and unsent edits. Numeric
+ * commands require fresh position and target elements, including direct slots.
+ */
 class stage : public xWidget
 {
     Q_OBJECT
 
+    /// Editing state used to preserve staged selections until submission or cancellation.
     enum editchanges
     {
         NOTEDITING,
@@ -34,13 +39,16 @@ class stage : public xWidget
 
     /// INDI device name of the stage controller.
     std::string m_stageName;
+
     /// Base window title shown while connected.
     std::string m_winTitle;
 
     /// Known preset names exposed by the controller.
     std::vector<std::string> m_presets;
+
     /// Placeholder for the current preset selection.
     std::string m_presetCurrent;
+
     /// Placeholder for the target preset selection.
     std::string m_presetTarget;
 
@@ -55,6 +63,7 @@ class stage : public xWidget
 
     /// Maximum allowed position in user units.
     double m_maxPos{ 100 };
+
     /// Whether a finite positive maximum was observed for slider scaling.
     bool m_maxPosValid{ false };
 
@@ -66,6 +75,7 @@ class stage : public xWidget
 
     /// Current position in user units.
     double m_position{ -1e30 };
+
     /// Tracks when the displayed position should be highlighted as changed.
     bool m_position_changed{ false };
 
@@ -74,10 +84,13 @@ class stage : public xWidget
 
     /// Tracks edit state for the preset combo box.
     int m_setPointEditing{ STOPPED };
+
     /// Whether a requested preset/filter change is still awaiting live confirmation.
     bool m_setPointCommandPending{ false };
+
     /// Last preset/filter name sent from the combo box.
     std::string m_setPointRequested;
+
     /// Timer that clears staged preset edits after inactivity.
     QTimer *m_setPointEditTimer{ nullptr };
 
@@ -95,17 +108,19 @@ class stage : public xWidget
 
     /// Reset the widget for an active INDI connection.
     virtual void onConnect();
+
     /// Reset the widget for a disconnected INDI connection.
     virtual void onDisconnect();
 
-    /// Handle a newly defined property using the same path as updates.
-    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    /// Replace observed capabilities or state before applying a property definition.
+    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Received property definition or update.*/ );
 
-    /// Handle a deleted stage property.
-    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/ );
+    /// Invalidate only the deleted stage property; whole-device/FSM loss resets all state.
+    void handleDelProperty(
+        const pcf::IndiProperty &ipRecv /**< [in] Deleted property; an empty name means the whole device.*/ );
 
     /// Handle a stage property update.
-    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Received property definition or update.*/ );
 
     /// Clear focus from the widget.
     void clear_focus();
@@ -146,16 +161,19 @@ class stage : public xWidget
 
     /// Send a negative relative move.
     void on_posMinus_pressed();
+
     /// Send a positive relative move.
     void on_posPlus_pressed();
 
     /// Increase the step size by one decade.
     void on_posStepMulTen_pressed();
+
     /// Decrease the step size by one decade.
     void on_posStepDivTen_pressed();
 
     /// Request a home operation.
     void on_home_pressed();
+
     /// Request an immediate stop.
     void on_stop_pressed();
 
@@ -174,7 +192,7 @@ class stage : public xWidget
     virtual void paintEvent( QPaintEvent *e /**< [in] Qt paint event being processed */ );
 
   private:
-    Ui::stage ui;
+    Ui::stage ui; ///< Generated UI facade for the stage dialog.
 };
 
 stage::stage( const std::string &stageName, QWidget *Parent, Qt::WindowFlags f )

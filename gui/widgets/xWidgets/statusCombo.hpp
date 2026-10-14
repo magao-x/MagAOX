@@ -14,10 +14,15 @@ namespace xqt
 {
 
 /// Combo-box status widget that can fall back to FSM text.
+/** A named value deletion clears choices and staged edits while retaining the
+ * device FSM. Whole-device/FSM loss resets all observations; later properties
+ * recover the summary through their ordinary callbacks.
+ */
 class statusCombo : public xWidget
 {
     Q_OBJECT
 
+    /// Editing state used to preserve staged selections until submission or cancellation.
     enum editchanges
     {
         NOTEDITING,
@@ -31,13 +36,16 @@ class statusCombo : public xWidget
 
     /// INDI device name providing this status.
     std::string m_device;
+
     /// INDI property name used for the selectable value.
     std::string m_property;
+
     /// Optional INDI element name for direct-value properties.
     std::string m_element;
 
     /// Label shown to the left of the status field.
     std::string m_label;
+
     /// Units suffix shown in the label when provided.
     std::string m_units;
 
@@ -49,19 +57,25 @@ class statusCombo : public xWidget
 
     /// Latest FSM state received for the device.
     std::string m_fsmState;
+
     /// Latest selected value text received for the device.
     std::string m_value;
+
     /// Whether the device is explicitly reporting a parked state.
     bool m_parked{ false };
+
     /// Whether the value should be shown instead of the FSM state.
     bool m_showVal{ true };
 
     /// Tracks edit state for the combo box.
     int m_statusEditing{ STOPPED };
+
     /// Whether a sent selection is still waiting for the live state to confirm it.
     bool m_statusCommandPending{ false };
+
     /// Last selection sent while waiting for the live property to confirm it.
     std::string m_statusRequested;
+
     /// Timer that clears staged combo-box edits after inactivity.
     QTimer *m_statusEditTimer{ nullptr };
 
@@ -107,14 +121,17 @@ class statusCombo : public xWidget
     /// Reset the widget for a disconnected INDI connection.
     virtual void onDisconnect();
 
-    /// Handle a newly defined property using the same path as updates.
-    virtual void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    /// Replace observed capabilities or state before applying a property definition.
+    virtual void
+    handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Received property definition or update.*/ );
 
     /// Handle deletion of an INDI property used by this widget.
-    virtual void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/ );
+    virtual void handleDelProperty(
+        const pcf::IndiProperty &ipRecv /**< [in] Deleted property; an empty name means the whole device.*/ );
 
     /// Handle updates to the device FSM, parked state, or value property.
-    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    virtual void
+    handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Received property definition or update.*/ );
 
   public:
     /// Hide the control widget when this summary row becomes disabled.
@@ -152,7 +169,7 @@ class statusCombo : public xWidget
     virtual void paintEvent( QPaintEvent *e /**< [in] Qt paint event being processed */ );
 
     /// Generated Qt UI backing this summary widget.
-    Ui::statusCombo ui;
+    Ui::statusCombo ui; ///< Generated UI facade for the summary selector.
 };
 
 statusCombo::statusCombo( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, f )

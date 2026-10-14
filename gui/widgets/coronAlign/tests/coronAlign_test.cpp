@@ -186,6 +186,38 @@ TEST_CASE( "Coronagraph startup and reconnect require fresh motion inputs", "[co
 #ifdef CORONALIGN_GUI_TEST_DOXYGEN_REF
     xqt::coronAlign::onConnect;
     xqt::coronAlign::onDisconnect;
+    xqt::coronAlign::on_button_pupil_u_pressed;
+    xqt::coronAlign::on_button_pupil_d_pressed;
+    xqt::coronAlign::on_button_pupil_l_pressed;
+    xqt::coronAlign::on_button_pupil_r_pressed;
+    xqt::coronAlign::on_button_focal_u_pressed;
+    xqt::coronAlign::on_button_focal_d_pressed;
+    xqt::coronAlign::on_button_focal_l_pressed;
+    xqt::coronAlign::on_button_focal_r_pressed;
+    xqt::coronAlign::on_button_lyot_u_pressed;
+    xqt::coronAlign::on_button_lyot_d_pressed;
+    xqt::coronAlign::on_button_lyot_l_pressed;
+    xqt::coronAlign::on_button_lyot_r_pressed;
+    xqt::coronAlign::on_button_piaa_l_pressed;
+    xqt::coronAlign::on_button_piaa_r_pressed;
+    xqt::coronAlign::on_button_piaa_u_pressed;
+    xqt::coronAlign::on_button_piaa_d_pressed;
+    xqt::coronAlign::on_button_piaa0_l_pressed;
+    xqt::coronAlign::on_button_piaa0_r_pressed;
+    xqt::coronAlign::on_button_piaa1_l_pressed;
+    xqt::coronAlign::on_button_piaa1_r_pressed;
+    xqt::coronAlign::on_button_piaa1_u_pressed;
+    xqt::coronAlign::on_button_piaa1_d_pressed;
+    xqt::coronAlign::on_button_ipiaa_l_pressed;
+    xqt::coronAlign::on_button_ipiaa_r_pressed;
+    xqt::coronAlign::on_button_ipiaa_u_pressed;
+    xqt::coronAlign::on_button_ipiaa_d_pressed;
+    xqt::coronAlign::on_button_ipiaa0_l_pressed;
+    xqt::coronAlign::on_button_ipiaa0_r_pressed;
+    xqt::coronAlign::on_button_ipiaa1_l_pressed;
+    xqt::coronAlign::on_button_ipiaa1_r_pressed;
+    xqt::coronAlign::on_button_ipiaa1_u_pressed;
+    xqt::coronAlign::on_button_ipiaa1_d_pressed;
     xqt::coronAlign::commandEnabled;
     xqt::coronAlign::resetConnectionState;
 #endif

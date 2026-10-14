@@ -28,7 +28,8 @@
 /// Dispatches a defProperty callback, queued through Qt for QObject subscribers.
 /** Copies the received property so queued delivery does not reference connection-thread storage.
  */
-inline void _dispatchDefProperty( multiIndiSubscriber *sub, const pcf::IndiProperty &ipRecv )
+inline void _dispatchDefProperty( multiIndiSubscriber     *sub, /**< [in] Subscriber receiving the callback. */
+                                  const pcf::IndiProperty &ipRecv /**< [in] Property copied for queued delivery. */ )
 {
     if( auto *obj = dynamic_cast<QObject *>( sub ) )
     {
@@ -43,7 +44,8 @@ inline void _dispatchDefProperty( multiIndiSubscriber *sub, const pcf::IndiPrope
 /// Dispatches a delProperty callback, queued through Qt for QObject subscribers.
 /** Copies the received property so queued delivery does not reference connection-thread storage.
  */
-inline void _dispatchDelProperty( multiIndiSubscriber *sub, const pcf::IndiProperty &ipRecv )
+inline void _dispatchDelProperty( multiIndiSubscriber     *sub, /**< [in] Subscriber receiving the callback. */
+                                  const pcf::IndiProperty &ipRecv /**< [in] Property copied for queued delivery. */ )
 {
     if( auto *obj = dynamic_cast<QObject *>( sub ) )
     {
@@ -58,7 +60,8 @@ inline void _dispatchDelProperty( multiIndiSubscriber *sub, const pcf::IndiPrope
 /// Dispatches a setProperty callback, queued through Qt for QObject subscribers.
 /** Copies the received property so queued delivery does not reference connection-thread storage.
  */
-inline void _dispatchSetProperty( multiIndiSubscriber *sub, const pcf::IndiProperty &ipRecv )
+inline void _dispatchSetProperty( multiIndiSubscriber     *sub, /**< [in] Subscriber receiving the callback. */
+                                  const pcf::IndiProperty &ipRecv /**< [in] Property copied for queued delivery. */ )
 {
     if( auto *obj = dynamic_cast<QObject *>( sub ) )
     {
@@ -71,7 +74,7 @@ inline void _dispatchSetProperty( multiIndiSubscriber *sub, const pcf::IndiPrope
 }
 
 /// Dispatches an onConnect callback, queued through Qt for QObject subscribers.
-inline void _dispatchOnConnect( multiIndiSubscriber *sub )
+inline void _dispatchOnConnect( multiIndiSubscriber *sub /**< [in] Subscriber receiving connection notification. */ )
 {
     if( auto *obj = dynamic_cast<QObject *>( sub ) )
     {
@@ -84,15 +87,24 @@ inline void _dispatchOnConnect( multiIndiSubscriber *sub )
 
 /// An INDI client which serves as a publisher for many subscribers.
 /** This allows many widgets to use a single INDI client connection from within
- * one overall application (e.g. a GUI window).
+ * one overall application (e.g. a GUI window). Named subscriptions share discovery
+ * state across listeners. Unresolved queries back off from one second to sixty
+ * seconds until a Def/Set arrives; device/FSM deletion rearms the device, and
+ * named deletion rearms only that property. The receive loop services retries
+ * during idle periods as well as incoming traffic. No remote commands are replayed.
+ * Subscriber routing and discovery bookkeeping share m_subMutex; transport sends
+ * and queued Qt callbacks occur outside the lock. A query already selected for
+ * sending can race a receipt or unsubscription, producing at most that extra read.
  */
 class multiIndiPublisher : public pcf::IndiClient, public multiIndiSubscriber
 {
 
   protected:
-    std::string          m_hostAddress; ///< Host address configured for the publisher connection.
-    std::string          m_hostPort;    ///< Host port configured for the publisher connection.
-    std::recursive_mutex m_subMutex;    ///< Guards subscriber structures during publish/subscribe updates.
+    std::string m_hostAddress; ///< Legacy address storage; connection setup is owned by IndiClient.
+
+    std::string m_hostPort; ///< Legacy port storage; connection setup is owned by IndiClient.
+
+    std::recursive_mutex m_subMutex; ///< Guards subscriber routing and discovery state across Qt and receive threads.
 
     /// Discovery state shared by all listeners of one explicitly named property.
     struct discoveryState
@@ -121,9 +133,9 @@ class multiIndiPublisher : public pcf::IndiClient, public multiIndiSubscriber
 
   public:
     /// Constructor, which establishes the INDI client connection.
-    multiIndiPublisher( const std::string &clientName,  ///< [in] INDI client name.
-                        const std::string &hostAddress, ///< [in] INDI server host address.
-                        const int          hostPort     ///< [in] INDI server host port.
+    multiIndiPublisher( const std::string &clientName,  /**< [in] INDI client name. */
+                        const std::string &hostAddress, /**< [in] INDI server host address. */
+                        const int          hostPort     /**< [in] INDI server host port. */
     );
 
     /// Destructor.
@@ -143,7 +155,10 @@ class multiIndiPublisher : public pcf::IndiClient, public multiIndiSubscriber
                               const std::string   &propName /**< [in] Property name. */
     );
 
-    /// Subscribes a subscriber for notifications on the given property.
+    /// Subscribe once per subscriber/property and discover its current definition.
+    /** An unresolved property shares its outstanding discovery schedule. A new
+     * listener for an already resolved property triggers a fresh targeted query.
+     */
     /** \returns 0 on success, -1 on error.
      */
     virtual int addSubscriberProperty( multiIndiSubscriber *sub,  /**< [in] Subscriber pointer. */

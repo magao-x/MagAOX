@@ -20,7 +20,11 @@ class OfflineIndiClient
     std::vector<IndiProperty> m_commands; ///< Captured command attempts.
 
     /// Accept connection metadata without constructing any socket.
-    OfflineIndiClient( const std::string &, const std::string &, const std::string &, const std::string &, int );
+    OfflineIndiClient( const std::string &name,     /**< [in] Ignored client name. */
+                       const std::string &version,  /**< [in] Ignored client version. */
+                       const std::string &protocol, /**< [in] Ignored protocol version. */
+                       const std::string &host,     /**< [in] Ignored hostname; no socket is created. */
+                       int                port /**< [in] Ignored port. */ );
 
     /// Allow the publisher's receive-loop update override.
     virtual void update();
@@ -32,7 +36,7 @@ class OfflineIndiClient
     void sendNewProperty( const IndiProperty &property /**< [in] Command to record. */ );
 
     /// Provide the unused receive-loop entry point without transport.
-    void processIndiRequests( bool /**< [in] Unused threading flag. */ );
+    void processIndiRequests( bool threaded /**< [in] Unused threading flag. */ );
 };
 
 inline OfflineIndiClient::OfflineIndiClient(
