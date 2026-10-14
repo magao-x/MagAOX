@@ -5,8 +5,7 @@
 Date: 2026-10-13. Branch: `jrmales/pupilguide-device-recovery`, created from
 `dev` at `8c652ec5b3ef43db0cbdbc3833c5c8238ebf6495`.
 
-Status: user answers incorporated and producer contracts checked on 2026-10-14;
-implementation has not started.
+Status: implementation in progress as requested on 2026-10-14.
 
 The user reported:
 
@@ -49,8 +48,7 @@ gate the motion buttons on the selected actuator's actual dependencies.
   eventual instrument validation must be performed by the user.
 - No controller/protocol changes, GUI redesign, general subscription-retry
   implementation, or suite-wide widget refactor are planned.
-- This task currently authorizes the branch and planning document. Record future
-  implementation and validation below when implementation is requested.
+- Implementation was authorized on 2026-10-14. Record changes and validation below.
 
 # Agent findings and plan
 
@@ -398,3 +396,15 @@ points to implement the corresponding planned behavior.
   `dmPokeXCorr`/`dmPokeWFS`, `closedLoopIndi`, and `tcsInterface` contracts by local
   source inspection and confirmed the parent sensor-state cache is unused.
   This update changes only the plan; no production code or tests were modified.
+- 2026-10-14, step 1: added shared-connection state and device/FSM-scoped
+  invalidation, preserving unrelated cached FSMs and selectors. Child bindings
+  identify exactly which displays/pending edits to clear on device loss. True
+  disconnect disables the panel and resets its children; property recovery
+  refreshes it without a connection callback. The first edit-cancellation test
+  found that `statusEntry::stopEditing()` retains typed text, so reset now empties
+  the edit before stopping it. Offline Qt tests passed: 109 assertions in 4 cases.
+  Build/run: `qmake <repo>/gui/widgets/pupilGuide/tests/pupilGuide_test.pro`,
+  `make -f makefile.pupilGuide_test -j2`, and
+  `QT_QPA_PLATFORM=offscreen ./pupilGuide_test` in `/tmp/pupilguide-tests`.
+  Property completeness, command guards, and full documentation remain for steps
+  2 and 3. `git diff --check` passed.

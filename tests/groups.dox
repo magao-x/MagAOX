@@ -72,6 +72,11 @@ $ bash ./testMagAOX.bash
  * \ingroup application_unit_test
  */
 
+/** \defgroup pupilGuideGUI_unit_test Pupil Guide GUI Unit Tests
+ * \brief Offline device availability, recovery, and command routing tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup rtimvROI_unit_test rtimv ROI Plugin Unit Tests
  * \brief Offline INDI command lifecycle and ROI interaction tests.
  * \ingroup application_unit_test
