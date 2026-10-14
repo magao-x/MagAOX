@@ -373,6 +373,8 @@ I've implemented the merged plan as the `dmTemporalResponse` app and committed i
 
 **Data tooling** (outside the repo, `dm_response_data/tools/index_runs.py`): add `GITSHA1`, `EMGAIN`, `LOOPST`, `LOOPCHG` columns to `runs.csv`.
 
+**Status (2026-10-14):** implemented in `8069e2b2` (docs `fd5adc2f`). On exao2 the test builds and the full `dmTemporalResponse_test` suite passes. Remaining: `clang-format` on the two changed source files (separate commit), rebuild and reinstall the app, and one hardware run to confirm `LOOPST` reads `ON`/`OFF` (not `UNKNOWN`) and `EMGAIN` matches camwfs.
+
 ## Debugging
 
 First build and test on the MagAO-X computer (exao2), 2026-10-01.
