@@ -5,7 +5,8 @@
 Date: 2026-10-13. Branch: `jrmales/pupilguide-device-recovery`, created from
 `dev` at `8c652ec5b3ef43db0cbdbc3833c5c8238ebf6495`.
 
-Status: analysis and implementation plan prepared; implementation has not started.
+Status: user answers incorporated and producer contracts checked on 2026-10-14;
+implementation has not started.
 
 The user reported:
 
@@ -164,10 +165,17 @@ the exact INDI message sequence from the reported RTC restart.
    A timer tick must not re-enable controls using stale or missing dependencies.
 8. Preserve subscriptions during device loss. No reconnect, command replay, or
    automatic alignment restart is required to recover the UI.
-9. Distinguish alignment Start from Stop. Proposed policy: Start requires every
-   device/property used by its existing command sequence; Stop remains usable
-   for available stop targets when another target is missing. Preserve the
-   existing lab-mode condition on stopping `camwfs-align`.
+9. Distinguish alignment Start from Stop. Per the user's answer, Start requires
+   all participants used by its existing command sequence; if any required
+   participant is unavailable, Start is disabled and sends no partial sequence.
+   Stop is enabled if any applicable stop target is available and sends only to
+   available targets, without requiring all participants to be READY. Preserve
+   the existing lab-mode condition on stopping `camwfs-align`.
+10. Per the user's answer, unavailable TCS means lab mode. Initialize/fall back to
+    lab mode when TCS or its mode information is unavailable, including after a
+    disconnect or relevant deletion. Do not retain a stale non-lab setting. A
+    returning, connected TCS with fresh mode information supplies the mode again;
+    independent woofer/TTM controls do not acquire a TCS dependency.
 
 ## Design and reuse
 
@@ -184,12 +192,12 @@ Initial dependency inventory:
 | Movement selector and camera selector | Shared connection; existing local selection rules |
 | Woofer tip/tilt | `dmwoofer.fsm`, `wooferModes.fsm`, valid `current_amps.0000` and `.0001`; existing target command contract |
 | Woofer focus | Same FSMs plus valid `current_amps.0002` |
-| TTM/telescope motion | Existing FSM rules; observed command inputs and lab-mode state where used |
+| TTM/telescope motion | Existing FSM rules and observed command inputs; unavailable TCS means lab mode and excludes telescope motion |
 | Pupil/periscope/lens/picomotor relative moves | Respective FSM plus current values for the axes actually used |
 | Sensor slider and parameter entries | Sensor readiness plus each control's own property/required elements |
 | Alignment loop sliders, gains, and deltas | Corresponding device readiness and individual property availability |
-| Alignment Start | All dependencies of the current three-device start sequence |
-| Alignment Stop | Available targets of the current stop sequence; no blanket all-devices-ready requirement |
+| Alignment Start | All dependencies of the current three-device start sequence; unavailable participant blocks the entire action |
+| Alignment Stop | Any available target of the current stop sequence; send only to available applicable targets, without requiring all devices READY |
 
 Finalize the complete input/output property inventory before coding. Where
 command capability must be observed, subscribe to the relevant property rather
@@ -212,6 +220,38 @@ widget change needs its own regression coverage for existing consumers.
 `coronAlign` contains a similar broad delete-to-disconnect pattern. Record it as
 a follow-up. If implementation reveals an identical reusable operation, propose
 a small common helper; do not expand this task into a suite-wide change.
+
+### Producer contracts verified after user review
+
+[dmPokeXCorr.hpp](../../../apps/dmPokeXCorr/dmPokeXCorr.hpp) inherits
+[dev::dmPokeWFS](../../../libMagAOX/app/dev/dmPokeWFS.hpp), whose `appStartup()`
+registers `continuous.toggle`, `nPokeImages`, `nPokeAverage`, and `poke_amp`.
+The numeric properties expose `current` and `target`. The `continuous` callback
+accepts On to start continuous measurements and Off to request stopping an
+active measurement. The separate `stop.request` capability is not needed to
+preserve the GUI's current start/stop command contract.
+
+[closedLoopIndi.hpp](../../../apps/closedLoopIndi/closedLoopIndi.hpp) registers
+`loop_state.toggle`; its callback calls `toggleLoop(true/false)` for On/Off.
+Thus the controller's `loop_state` subscription is correct, while the sensor's
+`loop_state` subscription is wrong.
+
+The parent's `m_twAlignSensorState` is currently assigned/reset but never read.
+Do not retain it just to duplicate `ui.actAlignSensor_slider` state. The parent
+does need sensor command availability for the combined Start/Stop actions:
+subscribe to `continuous` for that purpose, validate its `toggle` element, and
+track availability separately from whether the sensor is currently On or Off.
+Remove the unused sensor-state cache/handler when replacing the bad subscription.
+If future parent behavior needs running state, obtain it from this same verified
+property rather than reintroducing a `loop_state` dependency on the sensor.
+
+[tcsInterface.hpp](../../../apps/tcsInterface/tcsInterface.hpp) exposes
+`labMode.toggle` and uses CONNECTED for an available telescope connection. For
+the planned GUI behavior, loss of that availability forces effective lab mode;
+a missing/deleted lab-mode value also retains the lab fallback until refreshed.
+Handle mode/FSM arrival in either order. If telescope was selected when TCS is
+lost, disable its movement and keep the selector usable so the user can choose
+woofer/TTM; do not silently redirect a pending telescope move to another actuator.
 
 ## Implementation sequence
 
@@ -240,6 +280,11 @@ a small common helper; do not expand this task into a suite-wide change.
   merely because an FSM returns READY.
 - Implement the agreed Start/Stop policies and verify missing sensor parameters
   do not unnecessarily disable independent sensor controls.
+- Replace the sensor's incorrect `loop_state` subscription with `continuous`
+  availability tracking and remove its unused running-state cache. Keep the
+  controller subscriptions on `loop_state`.
+- Implement the lab-mode fallback on TCS loss and fresh-mode recovery, including
+  selection/command behavior when telescope was selected at the time of loss.
 - Extend the regression suite and commit this functional change with the plan.
 
 ### 3. Complete documentation and verification
@@ -272,7 +317,11 @@ a small common helper; do not expand this task into a suite-wide change.
 | Missing/malformed/nonfinite required values | No dependent command; valid zero remains usable; later valid data restores availability |
 | Only one axis or mode value is unavailable | Disable only actions that require it; preserve independent motion and focus eligibility |
 | Real connection loss, then reconnect | All remote-dependent actions invalidate; stale caches do not re-enable on timer ticks or connection alone |
-| One alignment participant absent | Start blocked; Stop follows the chosen available-target policy and lab-mode routing |
+| Each subset of alignment participants available | Start enabled only when all required participants are available; Stop enabled when any applicable target is available and sends only to those targets; preserve lab-mode routing |
+| Stop capability present while a participant is not READY | Stop remains usable; current Off state does not mean the capability is unavailable |
+| TCS absent at startup or lost after reporting non-lab mode | Effective lab mode becomes true; independent woofer/TTM controls work; telescope motion is unavailable and selection can be changed |
+| TCS FSM/mode return in either order | Fresh connected state and mode restore the reported mode; a stale non-lab cache cannot override the fallback |
+| Only the sensor's real properties are published | `continuous.toggle` is sufficient for sensor command availability; no dependency on sensor `loop_state`; controller still uses `loop_state` |
 | Command slot called immediately after invalidation | No command relying on missing data, even before the next timer tick |
 | Recovery after an unsent edit/pending toggle | No stale edit submission, automatic toggle, motion, or command replay |
 | Repeated deletion/redefinition | Idempotent state; selection and scale preserved; no duplicate commands/subscriptions |
@@ -281,23 +330,47 @@ Assert actual widget enabled states and captured command devices, properties,
 elements, and values. Exercise Qt event processing where queued child updates
 matter. Avoid timing-dependent sleeps and arbitrary coverage-percentage targets.
 
-## Design points to resolve during plan review
+## User review and resolved decisions (2026-10-14)
+
+The original questions and user answers are retained below as the engineering
+record. The resolutions supersede the earlier proposals where they differ.
 
 - **Alignment Stop:** proposed behavior keeps available participants stoppable
   when one disappears, with no READY requirement for an otherwise valid stop
   capability. Confirm this operator behavior before changing command routing.
+
+  ANSWER: Yes, if any are available then stop should be available.  Conversely, if any are not available then start should not be available.
+
+  Resolution: Start uses all-required availability; Stop uses any-applicable
+  availability. Apply these predicates both to the buttons and their command
+  handlers. Stop does not depend on an all-READY test or on receiving an On state.
+
 - **Unknown lab mode:** `m_labMode` currently defaults to true and survives the
   current connection reset. Define how unavailable `tcsi.labMode` affects
   telescope selection and alignment Stop without accidentally adding a TCS
   dependency to independent woofer/TTM operation. Conservative proposal: treat
   telescope eligibility as unknown/unavailable until lab mode is observed.
+
+  ANSWER: If TCS is not available then we are in lab mode almost by definition. So let's just go to lab mode if TCS is gone.
+
+  Resolution: use lab mode as the effective fallback on TCS loss, replacing the
+  proposal to leave mode unknown. Clear stale non-lab knowledge and recover from
+  fresh TCS state/mode without blocking unrelated motion.
+
 - **Sensor property mapping:** the parent subscribes to `loop_state`, while the
   sensor slider and Start/Stop send `continuous`. Verify the producer's actual
   contract before making either property an availability requirement. Do not
   introduce an impossible prerequisite from this existing mismatch.
 
-These points do not block documenting or testing the reported deletion defect.
-They must be settled before their corresponding behavior changes are implemented.
+  ANSWER: loop_state comes from the controller, not the wfs. At line 722 this is a mistake, we should subscribe to continuous -- if we actually use the sensor state independent
+  ly of ui.actAlignSensor_slider.  See the apps/dmPokeXCorr/dmPokeXCorr.hpp (and base classes) for the contract for -wfs.  For -ctrl see closedLoopIndi.
+
+  Resolution: producer review confirms the mapping. Track `continuous.toggle`
+  availability for the parent Start/Stop dependency, keep slider state handling
+  in the child, and remove the currently unused parent sensor-state cache.
+
+All three review questions are resolved. No further answer is needed on these
+points to implement the corresponding planned behavior.
 
 ## Follow-up and limits
 
@@ -320,3 +393,8 @@ They must be settled before their corresponding behavior changes are implemented
   patterns, and `agents/task_template.md`; reproduced restart and startup states
   offline; created the feature branch and this plan. No production code or
   repository test files have been changed.
+- 2026-10-14: read and preserved the user's three answers; reconciled requirements,
+  dependency inventory, implementation steps, and acceptance tests. Verified
+  `dmPokeXCorr`/`dmPokeWFS`, `closedLoopIndi`, and `tcsInterface` contracts by local
+  source inspection and confirmed the parent sensor-state cache is unused.
+  This update changes only the plan; no production code or tests were modified.
