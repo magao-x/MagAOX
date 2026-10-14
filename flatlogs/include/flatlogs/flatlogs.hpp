@@ -13,7 +13,9 @@
 #include "logDefs.hpp"
 #include "logPriority.hpp"
 #include "timespecX.hpp"
+#include "logCRC.hpp"
 #include "logHeader.hpp"
+#include "logEntry.hpp"
 #include "logStdFormat.hpp"
 
 #endif //flatlogs_flatlogs_hpp

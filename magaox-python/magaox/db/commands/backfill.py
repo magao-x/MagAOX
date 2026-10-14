@@ -23,7 +23,7 @@ from ._base import BaseDbCommand
 from magaox.constants import DEFAULT_PREFIX, DEFAULT_DATA_DIRS
 from magaox.db import ingest
 from magaox.db.records import Telem, FileIngestTime
-from magaox.utils import parse_iso_datetime_as_utc, utcnow, xfilename_to_utc_timestamp
+from magaox.utils import parse_iso_datetime_as_utc, utcnow, xfilename_to_utc_timestamp, log_extensions_for
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class LogDumpError(Exception):
 
 @xconf.config
 class Backfill(BaseDbCommand):
-    """Process ``.bintel`` files found in data folders that don't already have ingest records
+    """Process telemetry files (``.bintel``, ``.bintel2``) found in data folders that don't already have ingest records
     and populate the ``telem`` table
     """
 
@@ -42,7 +42,7 @@ class Backfill(BaseDbCommand):
         default="/opt/MagAOX/bin/logdump",
         help="logdump (a.k.a. teldump) command to use (spaces are allowed, e.g. to invoke in a container)",
     )
-    parallel_jobs : int = xconf.field(default=10, help="Number of parallel workers to process individual .bintel files")
+    parallel_jobs : int = xconf.field(default=10, help="Number of parallel workers to process individual telemetry (.bintel, .bintel2) files")
     limit : typing.Optional[int] = xconf.field(default=None, help="Exit after processing the first N files (for testing)")
 
     def _read_logdump(self, name, path):
@@ -89,7 +89,7 @@ class Backfill(BaseDbCommand):
     def backfill_from_path(self, path) -> str:
         fname = os.path.basename(path)
         name, rest = fname.rsplit('_', 1)
-        if path.endswith('.bintel'):
+        if path.endswith(tuple(log_extensions_for('.bintel'))):
             records = self._read_logdump(name, path)
         elif path.endswith('.ndjson.gz'):
             records = self._read_ndjson(name, path)

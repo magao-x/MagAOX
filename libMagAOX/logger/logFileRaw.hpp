@@ -18,6 +18,7 @@
 #include <flatlogs/flatlogs.hpp>
 
 #include "../file/fileTimes.hpp"
+#include "logExtensions.hpp"
 
 namespace MagAOX
 {
@@ -65,12 +66,14 @@ class logFileRaw
      */
     std::string m_logPath{ "." };                  ///< The base path for the log files.
     std::string m_logName{ "xlog" };               ///< The base name for the log files.
-    std::string m_logExt{ MAGAOX_default_logExt }; ///< The extension for the log files.
+    std::string m_logExt{ MAGAOX_default_logExt };  ///< The base extension for the log files.
 
     size_t m_maxLogSize{ MAGAOX_default_max_logSize }; ///< The maximum file size in bytes. Default is 10 MB.
 
     /// Atomic because it can be changed at runtime from an INDI callback, while the log thread is reading it.
-    std::atomic<unsigned> m_maxLogTime{ MAGAOX_default_maxLogTime }; ///< The maximum time span of a file in minutes. Default is 1440 (24 hours). 0 disables time-based rotation.
+    std::atomic<unsigned> m_maxLogTime{
+        MAGAOX_default_maxLogTime }; ///< The maximum time span of a file in minutes. Default is 1440 (24 hours).
+                                     ///< 0 disables time-based rotation.
     ///@}
 
     /** \name Internal State
@@ -552,7 +555,13 @@ mx::error_t logFileRaw<verboseT>::createFile( flatlogs::timespecX &ts )
 
     try
     {
-        mx::error_t errc = file::fileTimeRelPath( fileName, relPath, m_logName, m_logExt, ts.time_s, ts.time_ns );
+        // Files have the extension of the version this build writes.
+        mx::error_t errc = file::fileTimeRelPath( fileName,
+                                                  relPath,
+                                                  m_logName,
+                                                  logExtensionForVersion( m_logExt, flatlogs::logVersionDefault ),
+                                                  ts.time_s,
+                                                  ts.time_ns );
 
         if( !!errc )
         {
