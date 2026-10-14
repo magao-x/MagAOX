@@ -7,6 +7,8 @@ Date: 2026-10-13. Branch: `jrmales/pupilguide-device-recovery`, created from
 
 Status: implementation and offline verification complete on 2026-10-14.
 User-run `twAlign-camwfs-wfs` restart validation passed on 2026-10-14.
+Extension authorized on 2026-10-14: implement local `coronAlign` recovery and
+shared GUI missing-property rediscovery on the same feature branch.
 
 The user reported:
 
@@ -373,7 +375,7 @@ points to implement the corresponding planned behavior.
 
 ## Follow-up and limits
 
-- Missing-property retry/backoff is separate work. Recovery here is driven by
+- In the original pupil-guide scope, missing-property retry/backoff was separate work. Recovery here is driven by
   definitions/updates actually received; if a late-starting producer remains
   silent, investigate bounded rediscovery separately from UI state handling.
 - The protocol provides no local generation identifier for distinguishing an
@@ -475,4 +477,88 @@ points to implement the corresponding planned behavior.
   tests. Agent work used only the offline harness and a build; no instrument
   actions were performed by the agent.
 - Silent late-producer rediscovery and the similar `coronAlign` delete handler
-  remain separate work as scoped above.
+  were deferred from the original scope; the extension below now includes both.
+
+## Authorized extension: coronagraph recovery and GUI rediscovery
+
+The user requested: "ok let's extend this to cover both of those items."
+The original implementation and its instrument result remain the completed
+baseline. This extension includes implementation, offline tests, builds, and
+documentation; instrument actions remain user-run.
+
+### Findings and decisions
+
+- `coronAlign::handleDelProperty()` calls global `onDisconnect()` for any
+  deletion from its six devices. Its relative-motion position caches are not
+  initialized or tracked as observations. FSM-only recovery can therefore use
+  missing/stale baselines. Preserve camera mappings, step sizes, paired PIAA
+  moves, and pending-motion behavior while invalidating only affected inputs.
+- Summary `stageStatus` widgets and their detailed dialogs subscribe directly.
+  Reset affected child state on whole-device/FSM loss, and preserve unrelated
+  selection edits and pending moves. Named property deletion must stay local.
+- `multiIndiPublisher` sends one query on subscription, with no retry. Put
+  rediscovery in this shared publisher so both alignment GUIs and other GUI
+  consumers benefit, rather than duplicating polling in panels.
+- `MagAOXApp` already uses a steady-clock backoff of 1, 2, 4, 8, 16, 32, then
+  60 seconds. Reuse that policy without coupling GUI code to the application
+  base class. The existing INDI client's virtual `update()` runs each receive
+  iteration, including its one-second idle timeout, so no new thread or Qt
+  timer is necessary.
+- Keep one discovery record per explicitly subscribed device/property, shared
+  by all its listeners. Def/Set resolves it; whole-device/FSM deletion rearms
+  that device's subscriptions; named deletion rearms only that property.
+  Remove records after their last listener unsubscribes, and clear on teardown.
+  Fresh publishers naturally start a fresh schedule after reconnection.
+- Preserve an immediate targeted query for a genuinely late subscriber to a
+  resolved property, since the publisher does not retain values to replay.
+  Coalesce unresolved registrations and make repeat registration of the same
+  subscriber/property idempotent. Retries send only `getProperties`, never
+  commands, broad wildcard discovery, or synthetic connection callbacks.
+- A received property is discovered even when a widget rejects its values.
+  Element completeness/validation remains the widget's responsibility; the
+  retry loop must not poll a malformed but actively published value forever.
+
+### Implementation and acceptance plan
+
+1. Add bounded exponential discovery scheduling to `multiIndiPublisher`,
+   integrated with subscriptions, receive/delete callbacks, and teardown.
+   Test the actual publisher with a fake transport and deterministic clock:
+   exact schedule and 60-second cap, Def/Set resolution, silent late startup,
+   deletion scope, shared subscriptions, late listeners, unsubscription,
+   teardown/reconnect, and absence of `newProperty` traffic. No sockets.
+2. Make `coronAlign` connection/device/property availability explicit. Guard
+   every parent motion slot using the same eligibility as the GUI; require
+   fresh valid current positions and observed target elements, including all
+   inputs to paired moves. Test every device, camera mapping, partial recovery,
+   missing/malformed positions, child pending state, and full reconnect.
+3. Run the pupil-guide regression suite and build both alignment GUIs plus a
+   representative shared-publisher consumer. Finish full changed-file
+   documentation, Doxygen test links, formatting, and whitespace checks.
+   Keep functional commits separate from the documentation pass and update
+   this record with outcomes. No additional user decision is required to
+   implement these policies.
+
+### Extension limits
+
+The retry cap bounds traffic and discovery latency, not the number of attempts:
+permanently missing optional properties continue at one query per minute.
+Neither protocol generation tracking nor polling for silent loss after a
+property was already discovered is included. Existing controller command
+semantics and instrument-side app retry implementation stay unchanged.
+
+### Extension execution record
+
+- Shared publisher implementation: one discovery record per named subscription,
+  idempotent registration, receipt/deletion bookkeeping, last-listener cleanup,
+  and capped steady-clock retries from `IndiClient::update()`. No manager or
+  instrument-side changes were necessary. Initial queries now send outside the
+  routing lock during registration (QObject `subscribe()` already runs on its
+  widget thread), avoiding queued queries following a subscriber into a later
+  publisher after reconnect.
+- Publisher offline tests passed: 95 assertions in 6 cases. Build/run in
+  `/tmp/gui-publisher-tests`: `qmake <repo>/gui/lib/tests/multiIndiPublisher_test.pro`,
+  `make -f makefile.multiIndiPublisher_test -j2`, `./multiIndiPublisher_test`.
+  The shared test helper replaces only the transport base and clock; tests
+  exercise the real publisher, including queued Qt callbacks and destruction.
+  No sockets, sleeps, or commands are used. Coronagraph implementation and
+  final documentation/build verification are still in progress.

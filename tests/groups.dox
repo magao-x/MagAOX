@@ -81,3 +81,8 @@ $ bash ./testMagAOX.bash
  * \brief Offline INDI command lifecycle and ROI interaction tests.
  * \ingroup application_unit_test
  */
+
+/** \defgroup gui_publisher_unit_test GUI Publisher Unit Tests
+ * \brief Socket-free discovery retry, routing, and subscription lifecycle tests.
+ * \ingroup unit_test
+ */
