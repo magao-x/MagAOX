@@ -408,3 +408,38 @@ points to implement the corresponding planned behavior.
   `QT_QPA_PLATFORM=offscreen ./pupilGuide_test` in `/tmp/pupilguide-tests`.
   Property completeness, command guards, and full documentation remain for steps
   2 and 3. `git diff --check` passed.
+- 2026-10-14, step 2: implemented a bounded inventory of this panel's known
+  properties. Each entry records its expected type, observed element names, and
+  elements with valid values. This replaces repeated per-control validity flags
+  and also drives parent subscriptions. Definitions replace the property's
+  observations; Set messages merge partial elements. Wrong types, malformed or
+  nonfinite values, and out-of-range integer/float cache inputs invalidate the
+  relevant values without feeding uninitialized conversions into the caches.
+  Empty command targets remain valid capability observations: `ttmModulator`
+  defines empty `offset.x/y`, `dmMode` defines empty `target_amps`, and
+  `tcsInterface` defines empty `pyrNudge.x/y/z`.
+- Parent commands now refresh and check their control's eligibility before
+  constructing any commands. Independent woofer tip/tilt/focus, periscope axes,
+  lens axes, and child entries require their own inputs/capabilities. Pupil
+  diagonals require both axes before either command is sent. Picomotor addition
+  also rejects integer overflow; integer observations in scientific notation
+  are normalized before legacy typed cache extraction. Fit readouts clear
+  unavailable observations instead of presenting old values or default zero.
+- Start requires all three ready participants and their observed switches. Stop
+  sends Off only to available applicable targets and remains usable without an
+  all-READY condition. TCS loss selects effective lab mode; stale non-lab state
+  cannot survive loss/reconnect. Sensor availability uses `continuous`, and the
+  unused parent loop-state copies were removed. No shared widget or subscriber
+  implementation was changed, and no retry/transport layer was added.
+- Step 2 verification: `make -f makefile.pupilGuide_test -j2` followed by
+  `QT_QPA_PLATFORM=offscreen ./pupilGuide_test` in `/tmp/pupilguide-tests` passed
+  1,649 assertions in 13 cases. Tests capture both panel and child commands in
+  memory, cover all alignment-availability subsets, per-device/FSM deletion,
+  late/partial/invalid inputs, TCS fallback, direct parent slots, preserved
+  unrelated edits, and absence of command replay. The fitting-display test was
+  corrected to explicitly select absolute coordinates before testing values
+  without setpoints (the existing UI defaults to deltas).
+- `make -C gui/apps/pupilGuideGUI -f makefile.pupilGuideGUI -j2` succeeded. Its
+  only warning is the pre-existing unchecked `QFile::open()` result in untouched
+  `pupilGuideGUI_main.cpp:18`. `git diff --check` passed. The app was built only;
+  no live INDI client was launched. Full documentation and Doxygen checks follow.
