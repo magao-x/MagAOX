@@ -562,3 +562,30 @@ semantics and instrument-side app retry implementation stay unchanged.
   exercise the real publisher, including queued Qt callbacks and destruction.
   No sockets, sleeps, or commands are used. Coronagraph implementation and
   final documentation/build verification are still in progress.
+
+- Shared rediscovery committed as `e3e6fa2a`.
+- Coronagraph recovery now tracks connection availability and a bounded
+  subscription inventory. Only an affected device/FSM invalidates its baselines
+  and pending state; named position deletion preserves unrelated axes and
+  readiness. Current values must be finite, and pico positions must fit `long`
+  without fractional truncation; scientific integers are normalized before
+  cache extraction. Empty target elements establish command capability. Partial
+  Set merges observations, while Def replaces them. All parent motion slots
+  refresh eligibility before computing/sending targets, and paired PIAA moves
+  require both baselines before either command. Existing mappings, directions,
+  steps, and pending-motion behavior are preserved.
+- Whole-device/FSM loss resets only affected summary widgets and detailed stage
+  dialogs, including unsent selections. Full connection loss resets everything.
+  Position-only deletion cancels that non-pico device's pending latch; it does
+  not clear the shared picomotor busy latch, which remains controlled by its
+  FSM. Local camera selection and scale values survive device loss.
+- Coronagraph offline tests passed: 4,031 assertions in 7 cases using the real
+  panel, child widgets, and queued publisher callbacks over the shared fake
+  transport. Build/run in `/tmp/coron-align-tests`:
+  `qmake <repo>/gui/widgets/coronAlign/tests/coronAlign_test.pro`,
+  `make -f makefile.coronAlign_test -j2`,
+  `QT_QPA_PLATFORM=offscreen ./coronAlign_test`. The test project uses the
+  repository's `CONFIG += qwt` convention for the embedded stage dialogs.
+  The pending-selection test was corrected to publish selectable presets and
+  activate an actual combo-box selection: `setEditText()` has no effect on this
+  noneditable combo box.

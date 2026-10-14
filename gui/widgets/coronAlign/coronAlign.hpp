@@ -6,6 +6,9 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
+#include <map>
+#include <sstream>
 #include <unistd.h>
 
 #include <QElapsedTimer>
@@ -32,6 +35,8 @@ class coronAlign : public xWidget
     };
 
   protected:
+    bool m_connected{ false }; ///< Shared transport availability; device loss does not change it.
+
     int m_camera{ CAMSCIS }; ///< Active camera view that determines which motion axes map onto the GUI arrows.
 
     // Pico Motors
@@ -53,8 +58,8 @@ class coronAlign : public xWidget
     /// Last pupil filter-wheel target requested by the GUI.
     double m_fwPupilTarget{ 0 };
 
-    double m_fwPupilPos;
-    long   m_picoPupilPos;
+    double m_fwPupilPos{ 0 };
+    long   m_picoPupilPos{ 0 };
 
     double m_fwPupilStepSize{ 0.0001 };
     double m_picoPupilStepSize{ 100 };
@@ -73,8 +78,8 @@ class coronAlign : public xWidget
     /// Last focal filter-wheel target requested by the GUI.
     double m_fwFocalTarget{ 0 };
 
-    double m_fwFocalPos;
-    long   m_picoFocalPos;
+    double m_fwFocalPos{ 0 };
+    long   m_picoFocalPos{ 0 };
 
     double m_fwFocalStepSize{ 0.0001 };
     double m_picoFocalStepSize{ 100 };
@@ -93,8 +98,8 @@ class coronAlign : public xWidget
     /// Last Lyot filter-wheel target requested by the GUI.
     double m_fwLyotTarget{ 0 };
 
-    double m_fwLyotPos;
-    long   m_picoLyotPos;
+    double m_fwLyotPos{ 0 };
+    long   m_picoLyotPos{ 0 };
 
     double m_fwLyotStepSize{ 0.0001 };
     double m_picoLyotStepSize{ 100 };
@@ -111,18 +116,18 @@ class coronAlign : public xWidget
     bool m_piaaPendingRefreshRequested{ false };
     /// Last PIAA stage target requested by the GUI.
     double m_piaaTarget{ 0 };
-    double m_piaaPos;
+    double m_piaaPos{ 0 };
     int    m_piaaScale{ 1 };
     double m_piaaStepSize{ 0.1 };
 
     // PIAA0;
-    long   m_piaa0xPos;
+    long   m_piaa0xPos{ 0 };
     int    m_piaa0Scale{ 1 };
     double m_piaa0StepSize{ 20 };
 
     // PIAA1;
-    long   m_piaa1xPos;
-    long   m_piaa1yPos;
+    long   m_piaa1xPos{ 0 };
+    long   m_piaa1yPos{ 0 };
     int    m_piaa1Scale{ 1 };
     double m_piaa1StepSize{ 20 };
 
@@ -136,18 +141,18 @@ class coronAlign : public xWidget
     bool m_ipiaaPendingRefreshRequested{ false };
     /// Last iPIAA stage target requested by the GUI.
     double m_ipiaaTarget{ 0 };
-    double m_ipiaaPos;
+    double m_ipiaaPos{ 0 };
     int    m_ipiaaScale{ 1 };
     double m_ipiaaStepSize{ 0.1 };
 
     // iPIAA0;
-    long   m_ipiaa0xPos;
+    long   m_ipiaa0xPos{ 0 };
     int    m_ipiaa0Scale{ 1 };
     double m_ipiaa0StepSize{ 20 };
 
     // iPIAA1;
-    long   m_ipiaa1xPos;
-    long   m_ipiaa1yPos;
+    long   m_ipiaa1xPos{ 0 };
+    long   m_ipiaa1yPos{ 0 };
     int    m_ipiaa1Scale{ 1 };
     double m_ipiaa1StepSize{ 20 };
 
@@ -205,26 +210,11 @@ class coronAlign : public xWidget
   public slots:
     void updateGUI();
 
-    void on_checkCamflowfs_clicked()
-    {
-        ui.checkCamflowfs->setCheckState( Qt::Checked );
-        ui.checkCamllowfs->setCheckState( Qt::Unchecked );
-        ui.checkCamsci12->setCheckState( Qt::Unchecked );
-        m_camera = FLOWFS;
-    }
+    void on_checkCamflowfs_clicked();
 
-    void on_checkCamllowfs_clicked()
-    {
-        ui.checkCamllowfs->setCheckState( Qt::Unchecked );
-    }
+    void on_checkCamllowfs_clicked();
 
-    void on_checkCamsci12_clicked()
-    {
-        ui.checkCamflowfs->setCheckState( Qt::Unchecked );
-        ui.checkCamllowfs->setCheckState( Qt::Unchecked );
-        ui.checkCamsci12->setCheckState( Qt::Checked );
-        m_camera = CAMSCIS;
-    }
+    void on_checkCamsci12_clicked();
 
     void on_button_pupil_u_pressed();
     void on_button_pupil_d_pressed();
@@ -277,6 +267,40 @@ class coronAlign : public xWidget
     void on_button_ipiaa1_scale_pressed();
 
   private:
+    /// Availability of one subscribed motion property or FSM.
+    struct propertyState
+    {
+        bool m_current{ false }; ///< A valid current value or FSM state has been observed.
+
+        bool m_target{ false }; ///< The numeric command's target element has been observed.
+    };
+
+    /// Bounded inventory of the parent panel's motion and readiness subscriptions.
+    std::map<std::pair<std::string, std::string>, propertyState> m_properties;
+
+    /// Populate the parent subscription inventory before connection callbacks.
+    void initializeProperties();
+
+    /// Validate and merge a definition or partial update before reading cached values.
+    void receiveProperty( const pcf::IndiProperty &property, /**< [in] Incoming observation. */
+                          bool                     definition /**< [in] Replace prior observations when true. */ );
+
+    /// Apply a validated observation to legacy motion and pending-state caches.
+    void cacheProperty( const pcf::IndiProperty &property /**< [in] Validated observation. */ );
+
+    /// Clear one device's readiness and pending command state.
+    void resetDevice( const std::string &device /**< [in] Device being invalidated. */ );
+
+    /// Check the fresh baseline and command element for one motion property.
+    bool motionAvailable( const std::string &device, /**< [in] Motion controller. */
+                          const std::string &property /**< [in] Position property. */ ) const;
+
+    /// Restrict the FSM-derived controls to their own observed motion inputs.
+    void updateAvailability();
+
+    /// Refresh control eligibility before constructing commands.
+    bool commandEnabled( QWidget *control /**< [in] Requested motion control. */ );
+
     /// Applies a callable to each child widget subscribed directly through this GUI.
     template <typename funcT>
     void forEachChildSubscriber( funcT &&func /**< [in] Callable applied to each direct child subscriber. */ );
@@ -342,6 +366,7 @@ coronAlign::coronAlign( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, 
     ui.stagepiaa->setup( "stagepiaa" );
     ui.stageipiaa->setup( "stageipiaa" );
 
+    initializeProperties();
     onDisconnect();
 }
 
@@ -349,36 +374,86 @@ coronAlign::~coronAlign()
 {
 }
 
+void coronAlign::on_checkCamflowfs_clicked()
+{
+    ui.checkCamflowfs->setCheckState( Qt::Checked );
+    ui.checkCamllowfs->setCheckState( Qt::Unchecked );
+    ui.checkCamsci12->setCheckState( Qt::Unchecked );
+    m_camera = FLOWFS;
+    updateGUI();
+}
+
+void coronAlign::on_checkCamllowfs_clicked()
+{
+    ui.checkCamllowfs->setCheckState( Qt::Unchecked );
+    updateGUI();
+}
+
+void coronAlign::on_checkCamsci12_clicked()
+{
+    ui.checkCamflowfs->setCheckState( Qt::Unchecked );
+    ui.checkCamllowfs->setCheckState( Qt::Unchecked );
+    ui.checkCamsci12->setCheckState( Qt::Checked );
+    m_camera = CAMSCIS;
+    updateGUI();
+}
+
 template <typename funcT>
 void coronAlign::forEachChildSubscriber( funcT &&func )
 {
-    std::array<multiIndiSubscriber *, 5> subs{ { ui.fwpupil, ui.fwfpm, ui.fwlyot, ui.stagepiaa, ui.stageipiaa } };
-
-    for( auto *sub : subs )
-    {
-        func( sub );
-    }
+    func( "fwpupil", ui.fwpupil );
+    func( "fwfpm", ui.fwfpm );
+    func( "fwlyot", ui.fwlyot );
+    func( "stagepiaa", ui.stagepiaa );
+    func( "stageipiaa", ui.stageipiaa );
 }
 
 void coronAlign::resetConnectionState()
 {
-    m_picoState          = "";
-    m_picoCommandPending = false;
+    for( auto &entry : m_properties )
+        entry.second = propertyState{};
+    for( const auto *device : { "picomotors", "fwpupil", "fwfpm", "fwlyot", "stagepiaa", "stageipiaa" } )
+        resetDevice( device );
+    forEachChildSubscriber(
+        []( const char *, stageStatus *sub )
+        {
+            sub->onDisconnect();
+            sub->ctrlWidget()->onDisconnect();
+        } );
+}
 
-    m_fwPupilState = "";
-    clearPendingCommand( m_fwPupilCommandPending, m_fwPupilPendingTimer, m_fwPupilPendingRefreshRequested );
-
-    m_fwFocalState = "";
-    clearPendingCommand( m_fwFocalCommandPending, m_fwFocalPendingTimer, m_fwFocalPendingRefreshRequested );
-
-    m_fwLyotState = "";
-    clearPendingCommand( m_fwLyotCommandPending, m_fwLyotPendingTimer, m_fwLyotPendingRefreshRequested );
-
-    m_piaaState = "";
-    clearPendingCommand( m_piaaCommandPending, m_piaaPendingTimer, m_piaaPendingRefreshRequested );
-
-    m_ipiaaState = "";
-    clearPendingCommand( m_ipiaaCommandPending, m_ipiaaPendingTimer, m_ipiaaPendingRefreshRequested );
+void coronAlign::resetDevice( const std::string &device )
+{
+    if( device == "picomotors" )
+    {
+        m_picoState.clear();
+        m_picoCommandPending = false;
+    }
+    else if( device == "fwpupil" )
+    {
+        m_fwPupilState.clear();
+        clearPendingCommand( m_fwPupilCommandPending, m_fwPupilPendingTimer, m_fwPupilPendingRefreshRequested );
+    }
+    else if( device == "fwfpm" )
+    {
+        m_fwFocalState.clear();
+        clearPendingCommand( m_fwFocalCommandPending, m_fwFocalPendingTimer, m_fwFocalPendingRefreshRequested );
+    }
+    else if( device == "fwlyot" )
+    {
+        m_fwLyotState.clear();
+        clearPendingCommand( m_fwLyotCommandPending, m_fwLyotPendingTimer, m_fwLyotPendingRefreshRequested );
+    }
+    else if( device == "stagepiaa" )
+    {
+        m_piaaState.clear();
+        clearPendingCommand( m_piaaCommandPending, m_piaaPendingTimer, m_piaaPendingRefreshRequested );
+    }
+    else if( device == "stageipiaa" )
+    {
+        m_ipiaaState.clear();
+        clearPendingCommand( m_ipiaaCommandPending, m_ipiaaPendingTimer, m_ipiaaPendingRefreshRequested );
+    }
 }
 
 void coronAlign::startPendingCommand( bool &pending, QElapsedTimer &pendingTimer, bool &refreshRequested )
@@ -447,44 +522,46 @@ void coronAlign::expirePendingCommands()
         m_ipiaaCommandPending, m_ipiaaPendingTimer, m_ipiaaPendingRefreshRequested, "stageipiaa", "position" );
 }
 
+void coronAlign::initializeProperties()
+{
+    m_properties.emplace( std::make_pair( "fwpupil", "filter" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "fwpupil", "fsm" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "fwfpm", "filter" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "fwfpm", "fsm" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "fwlyot", "filter" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "fwlyot", "fsm" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "picopupil_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "picofpm_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "picolyot_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "piaa0x_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "piaa1x_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "piaa1y_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "ipiaa0x_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "ipiaa1x_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "ipiaa1y_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "fsm" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "stagepiaa", "position" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "stagepiaa", "fsm" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "stageipiaa", "position" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "stageipiaa", "fsm" ), propertyState{} );
+}
+
 void coronAlign::subscribe()
 {
     if( m_parent == nullptr )
         return;
 
-    m_parent->addSubscriberProperty( this, "fwpupil", "filter" );
-    m_parent->addSubscriberProperty( this, "fwpupil", "fsm" );
-
-    m_parent->addSubscriberProperty( this, "fwfpm", "filter" );
-    m_parent->addSubscriberProperty( this, "fwfpm", "fsm" );
-
-    m_parent->addSubscriberProperty( this, "fwlyot", "filter" );
-    m_parent->addSubscriberProperty( this, "fwlyot", "fsm" );
-
-    m_parent->addSubscriberProperty( this, "picomotors", "picopupil_pos" );
-    m_parent->addSubscriberProperty( this, "picomotors", "picofpm_pos" );
-    m_parent->addSubscriberProperty( this, "picomotors", "picolyot_pos" );
-    m_parent->addSubscriberProperty( this, "picomotors", "piaa0x_pos" );
-    m_parent->addSubscriberProperty( this, "picomotors", "piaa1x_pos" );
-    m_parent->addSubscriberProperty( this, "picomotors", "piaa1y_pos" );
-    m_parent->addSubscriberProperty( this, "picomotors", "ipiaa0x_pos" );
-    m_parent->addSubscriberProperty( this, "picomotors", "ipiaa1x_pos" );
-    m_parent->addSubscriberProperty( this, "picomotors", "ipiaa1y_pos" );
-    m_parent->addSubscriberProperty( this, "picomotors", "fsm" );
-
-    m_parent->addSubscriberProperty( this, "stagepiaa", "position" );
-    m_parent->addSubscriberProperty( this, "stagepiaa", "fsm" );
-
-    m_parent->addSubscriberProperty( this, "stageipiaa", "position" );
-    m_parent->addSubscriberProperty( this, "stageipiaa", "fsm" );
-
-    forEachChildSubscriber( [this]( multiIndiSubscriber *sub ) { m_parent->addSubscriber( sub ); } );
+    for( const auto &entry : m_properties )
+        m_parent->addSubscriberProperty( this, entry.first.first, entry.first.second );
+    forEachChildSubscriber( [this]( const char *, stageStatus *sub ) { m_parent->addSubscriber( sub ); } );
 
     return;
 }
 
 void coronAlign::onConnect()
 {
+    m_connected = true;
+    setEnabled( true );
     ui.labelPupil->setEnabled( true );
     ui.labelFocal->setEnabled( true );
     ui.labelLyot->setEnabled( true );
@@ -546,10 +623,13 @@ void coronAlign::onConnect()
     ui.button_ipiaa1_scale->setEnabled( true );
 
     setWindowTitle( "Coronagraph Alignment" );
+    updateGUI();
 }
 
 void coronAlign::onDisconnect()
 {
+    m_connected = false;
+    setEnabled( false );
     resetConnectionState();
 
     ui.labelPupil->setEnabled( false );
@@ -617,27 +697,109 @@ void coronAlign::onDisconnect()
 
 void coronAlign::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
-    std::string dev = ipRecv.getDevice();
-    if( dev == "picomotors" || dev == "fwpupil" || dev == "fwlyot" || dev == "fwfpm" || dev == "stagepiaa" ||
-        dev == "stageipiaa" )
-    {
-        return handleSetProperty( ipRecv );
-    }
-
-    return;
+    receiveProperty( ipRecv, true );
 }
 
 void coronAlign::handleDelProperty( const pcf::IndiProperty &ipRecv )
 {
-    std::string dev = ipRecv.getDevice();
-    if( dev == "picomotors" || dev == "fwpupil" || dev == "fwlyot" || dev == "fwfpm" || dev == "stagepiaa" ||
-        dev == "stageipiaa" )
+    const auto device      = ipRecv.getDevice();
+    const auto name        = ipRecv.getName();
+    const bool wholeDevice = name.empty() || name == "fsm";
+    if( !wholeDevice && m_properties.count( { device, name } ) == 0 )
+        return;
+    for( auto &entry : m_properties )
+        if( entry.first.first == device && ( wholeDevice || entry.first.second == name ) )
+            entry.second = propertyState{};
+    if( wholeDevice )
     {
-        onDisconnect();
+        resetDevice( device );
+        forEachChildSubscriber(
+            [&device]( const char *childDevice, stageStatus *sub )
+            {
+                if( device == childDevice )
+                {
+                    sub->onDisconnect();
+                    sub->ctrlWidget()->onDisconnect();
+                }
+            } );
     }
+    else if( device != "picomotors" )
+    {
+        // A non-pico device has one motion property; cancel only its pending latch.
+        // Preserve readiness: the named motion property, rather than the device, disappeared.
+        if( device == "fwpupil" )
+            clearPendingCommand( m_fwPupilCommandPending, m_fwPupilPendingTimer, m_fwPupilPendingRefreshRequested );
+        if( device == "fwfpm" )
+            clearPendingCommand( m_fwFocalCommandPending, m_fwFocalPendingTimer, m_fwFocalPendingRefreshRequested );
+        if( device == "fwlyot" )
+            clearPendingCommand( m_fwLyotCommandPending, m_fwLyotPendingTimer, m_fwLyotPendingRefreshRequested );
+        if( device == "stagepiaa" )
+            clearPendingCommand( m_piaaCommandPending, m_piaaPendingTimer, m_piaaPendingRefreshRequested );
+        if( device == "stageipiaa" )
+            clearPendingCommand( m_ipiaaCommandPending, m_ipiaaPendingTimer, m_ipiaaPendingRefreshRequested );
+    }
+    updateGUI();
 }
 
 void coronAlign::handleSetProperty( const pcf::IndiProperty &ipRecv )
+{
+    receiveProperty( ipRecv, false );
+}
+
+void coronAlign::receiveProperty( const pcf::IndiProperty &property, bool definition )
+{
+    if( !m_connected )
+        return;
+    const auto found = m_properties.find( { property.getDevice(), property.getName() } );
+    if( found == m_properties.end() )
+        return;
+    auto      &observed = found->second;
+    const bool fsm      = property.getName() == "fsm";
+    const auto type     = fsm ? pcf::IndiProperty::Text : pcf::IndiProperty::Number;
+    if( definition || property.getType() != type )
+        observed = propertyState{};
+    pcf::IndiProperty validated( type, property.getDevice(), property.getName() );
+    const std::string current = fsm ? "state" : "current";
+    if( property.getType() == type )
+    {
+        if( property.find( "target" ) )
+            observed.m_target = true;
+        if( property.find( current ) )
+        {
+            auto element = property[current];
+            bool valid   = !element.get().empty();
+            if( !fsm )
+            {
+                long double        value = 0;
+                std::istringstream input( element.get() );
+                valid = bool( input >> value );
+                if( valid )
+                {
+                    input >> std::ws;
+                    valid = input.eof() && std::isfinite( value );
+                    if( property.getDevice() == "picomotors" )
+                    {
+                        valid = valid && std::trunc( value ) == value && value >= std::numeric_limits<long>::min() &&
+                                value <= std::numeric_limits<long>::max();
+                        if( valid )
+                            element.set( static_cast<long>( value ) );
+                    }
+                    else
+                        valid = valid && std::fabs( value ) <= std::numeric_limits<double>::max();
+                }
+            }
+            observed.m_current = valid;
+            if( valid )
+                validated.add( element );
+        }
+    }
+    if( fsm && !observed.m_current )
+        resetDevice( property.getDevice() );
+    cacheProperty( validated );
+    updateGUI();
+}
+
+void coronAlign::cacheProperty( const pcf::IndiProperty &ipRecv )
 {
     std::string dev = ipRecv.getDevice();
 
@@ -854,6 +1016,8 @@ void coronAlign::handleSetProperty( const pcf::IndiProperty &ipRecv )
 
 void coronAlign::updateGUI()
 {
+    if( !m_connected )
+        return;
     expirePendingCommands();
 
     if( m_fwPupilCommandPending || m_fwPupilState != "READY" )
@@ -1019,7 +1183,79 @@ void coronAlign::updateGUI()
         ui.checkCamsci12->setCheckState( Qt::Checked );
     }
 
+    updateAvailability();
 } // updateGUI()
+
+bool coronAlign::motionAvailable( const std::string &device, const std::string &property ) const
+{
+    const auto found = m_properties.find( { device, property } );
+    return m_connected && found != m_properties.end() && found->second.m_current && found->second.m_target;
+}
+
+bool coronAlign::commandEnabled( QWidget *control )
+{
+    updateGUI();
+    return m_connected && control->isEnabled();
+}
+
+void coronAlign::updateAvailability()
+{
+    const auto limit = []( QWidget *control, bool available )
+    { control->setEnabled( control->isEnabled() && available ); };
+    const bool pupilWheel = motionAvailable( "fwpupil", "filter" );
+    const bool pupilPico  = motionAvailable( "picomotors", "picopupil_pos" );
+    limit( ui.button_pupil_u, m_camera == FLOWFS ? pupilPico : pupilWheel );
+    limit( ui.button_pupil_d, m_camera == FLOWFS ? pupilPico : pupilWheel );
+    limit( ui.button_pupil_l, m_camera == FLOWFS ? pupilWheel : pupilPico );
+    limit( ui.button_pupil_r, m_camera == FLOWFS ? pupilWheel : pupilPico );
+    ui.button_pupil_scale->setEnabled( ui.button_pupil_u->isEnabled() || ui.button_pupil_l->isEnabled() );
+    const bool focalWheel = motionAvailable( "fwfpm", "filter" );
+    const bool focalPico  = motionAvailable( "picomotors", "picofpm_pos" );
+    limit( ui.button_focal_u, m_camera == FLOWFS ? focalPico : focalWheel );
+    limit( ui.button_focal_d, m_camera == FLOWFS ? focalPico : focalWheel );
+    limit( ui.button_focal_l, m_camera == FLOWFS ? focalWheel : focalPico );
+    limit( ui.button_focal_r, m_camera == FLOWFS ? focalWheel : focalPico );
+    ui.button_focal_scale->setEnabled( ui.button_focal_u->isEnabled() || ui.button_focal_l->isEnabled() );
+    const bool lyotWheel = motionAvailable( "fwlyot", "filter" );
+    const bool lyotPico  = motionAvailable( "picomotors", "picolyot_pos" );
+    limit( ui.button_lyot_u, m_camera == LLOWFS ? lyotPico : lyotWheel );
+    limit( ui.button_lyot_d, m_camera == LLOWFS ? lyotPico : lyotWheel );
+    limit( ui.button_lyot_l, m_camera == LLOWFS ? lyotWheel : lyotPico );
+    limit( ui.button_lyot_r, m_camera == LLOWFS ? lyotWheel : lyotPico );
+    ui.button_lyot_scale->setEnabled( ui.button_lyot_u->isEnabled() || ui.button_lyot_l->isEnabled() );
+    const bool piaa0  = motionAvailable( "picomotors", "piaa0x_pos" );
+    const bool piaa1x = motionAvailable( "picomotors", "piaa1x_pos" );
+    const bool piaa1y = motionAvailable( "picomotors", "piaa1y_pos" );
+    limit( ui.button_piaa_l, piaa0 && piaa1x );
+    limit( ui.button_piaa_r, piaa0 && piaa1x );
+    limit( ui.button_piaa_u, motionAvailable( "stagepiaa", "position" ) );
+    limit( ui.button_piaa_d, motionAvailable( "stagepiaa", "position" ) );
+    limit( ui.button_piaa0_l, piaa0 );
+    limit( ui.button_piaa0_r, piaa0 );
+    limit( ui.button_piaa1_l, piaa1x );
+    limit( ui.button_piaa1_r, piaa1x );
+    limit( ui.button_piaa1_u, piaa1y );
+    limit( ui.button_piaa1_d, piaa1y );
+    ui.button_piaa_scale->setEnabled( ui.button_piaa_u->isEnabled() || ui.button_piaa_l->isEnabled() );
+    ui.button_piaa0_scale->setEnabled( ui.button_piaa0_l->isEnabled() );
+    ui.button_piaa1_scale->setEnabled( ui.button_piaa1_u->isEnabled() || ui.button_piaa1_l->isEnabled() );
+    const bool ipiaa0  = motionAvailable( "picomotors", "ipiaa0x_pos" );
+    const bool ipiaa1x = motionAvailable( "picomotors", "ipiaa1x_pos" );
+    const bool ipiaa1y = motionAvailable( "picomotors", "ipiaa1y_pos" );
+    limit( ui.button_ipiaa_l, ipiaa0 && ipiaa1x );
+    limit( ui.button_ipiaa_r, ipiaa0 && ipiaa1x );
+    limit( ui.button_ipiaa_u, motionAvailable( "stageipiaa", "position" ) );
+    limit( ui.button_ipiaa_d, motionAvailable( "stageipiaa", "position" ) );
+    limit( ui.button_ipiaa0_l, ipiaa0 );
+    limit( ui.button_ipiaa0_r, ipiaa0 );
+    limit( ui.button_ipiaa1_l, ipiaa1x );
+    limit( ui.button_ipiaa1_r, ipiaa1x );
+    limit( ui.button_ipiaa1_u, ipiaa1y );
+    limit( ui.button_ipiaa1_d, ipiaa1y );
+    ui.button_ipiaa_scale->setEnabled( ui.button_ipiaa_u->isEnabled() || ui.button_ipiaa_l->isEnabled() );
+    ui.button_ipiaa0_scale->setEnabled( ui.button_ipiaa0_l->isEnabled() );
+    ui.button_ipiaa1_scale->setEnabled( ui.button_ipiaa1_u->isEnabled() || ui.button_ipiaa1_l->isEnabled() );
+}
 
 void coronAlign::enablePicoButtons()
 {
@@ -1138,6 +1374,9 @@ void coronAlign::disablePicoButtons()
 
 void coronAlign::on_button_pupil_u_pressed()
 {
+    if( !commandEnabled( ui.button_pupil_u ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_camera == FLOWFS )
@@ -1169,6 +1408,9 @@ void coronAlign::on_button_pupil_u_pressed()
 
 void coronAlign::on_button_pupil_d_pressed()
 {
+    if( !commandEnabled( ui.button_pupil_d ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_camera == FLOWFS )
@@ -1199,6 +1441,9 @@ void coronAlign::on_button_pupil_d_pressed()
 
 void coronAlign::on_button_pupil_l_pressed()
 {
+    if( !commandEnabled( ui.button_pupil_l ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_camera == FLOWFS )
@@ -1230,6 +1475,9 @@ void coronAlign::on_button_pupil_l_pressed()
 
 void coronAlign::on_button_pupil_r_pressed()
 {
+    if( !commandEnabled( ui.button_pupil_r ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_camera == FLOWFS )
@@ -1290,6 +1538,9 @@ void coronAlign::on_button_pupil_scale_pressed()
 
 void coronAlign::on_button_focal_u_pressed()
 {
+    if( !commandEnabled( ui.button_focal_u ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_camera == FLOWFS )
@@ -1320,6 +1571,9 @@ void coronAlign::on_button_focal_u_pressed()
 
 void coronAlign::on_button_focal_d_pressed()
 {
+    if( !commandEnabled( ui.button_focal_d ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_camera == FLOWFS )
@@ -1350,6 +1604,9 @@ void coronAlign::on_button_focal_d_pressed()
 
 void coronAlign::on_button_focal_l_pressed()
 {
+    if( !commandEnabled( ui.button_focal_l ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_camera == FLOWFS )
@@ -1380,6 +1637,9 @@ void coronAlign::on_button_focal_l_pressed()
 
 void coronAlign::on_button_focal_r_pressed()
 {
+    if( !commandEnabled( ui.button_focal_r ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_camera == FLOWFS )
@@ -1437,6 +1697,8 @@ void coronAlign::on_button_focal_scale_pressed()
 
 void coronAlign::on_button_lyot_u_pressed()
 {
+    if( !commandEnabled( ui.button_lyot_u ) )
+        return;
 
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
@@ -1469,6 +1731,9 @@ void coronAlign::on_button_lyot_u_pressed()
 
 void coronAlign::on_button_lyot_d_pressed()
 {
+    if( !commandEnabled( ui.button_lyot_d ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_camera == FLOWFS || m_camera == CAMSCIS )
@@ -1500,6 +1765,9 @@ void coronAlign::on_button_lyot_d_pressed()
 
 void coronAlign::on_button_lyot_l_pressed()
 {
+    if( !commandEnabled( ui.button_lyot_l ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_camera == FLOWFS || m_camera == CAMSCIS )
@@ -1531,6 +1799,9 @@ void coronAlign::on_button_lyot_l_pressed()
 
 void coronAlign::on_button_lyot_r_pressed()
 {
+    if( !commandEnabled( ui.button_lyot_r ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_camera == FLOWFS || m_camera == CAMSCIS )
@@ -1590,6 +1861,8 @@ void coronAlign::on_button_lyot_scale_pressed()
 
 void coronAlign::on_button_piaa_l_pressed()
 {
+    if( !commandEnabled( ui.button_piaa_l ) )
+        return;
 
     disablePicoButtons();
 
@@ -1614,6 +1887,9 @@ void coronAlign::on_button_piaa_l_pressed()
 
 void coronAlign::on_button_piaa_r_pressed()
 {
+    if( !commandEnabled( ui.button_piaa_r ) )
+        return;
+
     disablePicoButtons();
 
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
@@ -1637,6 +1913,9 @@ void coronAlign::on_button_piaa_r_pressed()
 
 void coronAlign::on_button_piaa_u_pressed()
 {
+    if( !commandEnabled( ui.button_piaa_u ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "stagepiaa" );
@@ -1656,6 +1935,9 @@ void coronAlign::on_button_piaa_u_pressed()
 
 void coronAlign::on_button_piaa_d_pressed()
 {
+    if( !commandEnabled( ui.button_piaa_d ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "stagepiaa" );
@@ -1703,6 +1985,9 @@ void coronAlign::on_button_piaa_scale_pressed()
 
 void coronAlign::on_button_piaa0_l_pressed()
 {
+    if( !commandEnabled( ui.button_piaa0_l ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "picomotors" );
@@ -1717,6 +2002,9 @@ void coronAlign::on_button_piaa0_l_pressed()
 
 void coronAlign::on_button_piaa0_r_pressed()
 {
+    if( !commandEnabled( ui.button_piaa0_r ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "picomotors" );
@@ -1759,6 +2047,9 @@ void coronAlign::on_button_piaa0_scale_pressed()
 
 void coronAlign::on_button_piaa1_l_pressed()
 {
+    if( !commandEnabled( ui.button_piaa1_l ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "picomotors" );
@@ -1773,6 +2064,9 @@ void coronAlign::on_button_piaa1_l_pressed()
 
 void coronAlign::on_button_piaa1_r_pressed()
 {
+    if( !commandEnabled( ui.button_piaa1_r ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "picomotors" );
@@ -1787,6 +2081,9 @@ void coronAlign::on_button_piaa1_r_pressed()
 
 void coronAlign::on_button_piaa1_u_pressed()
 {
+    if( !commandEnabled( ui.button_piaa1_u ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "picomotors" );
@@ -1801,6 +2098,9 @@ void coronAlign::on_button_piaa1_u_pressed()
 
 void coronAlign::on_button_piaa1_d_pressed()
 {
+    if( !commandEnabled( ui.button_piaa1_d ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "picomotors" );
@@ -1843,6 +2143,9 @@ void coronAlign::on_button_piaa1_scale_pressed()
 
 void coronAlign::on_button_ipiaa_l_pressed()
 {
+    if( !commandEnabled( ui.button_ipiaa_l ) )
+        return;
+
     disablePicoButtons();
 
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
@@ -1866,6 +2169,9 @@ void coronAlign::on_button_ipiaa_l_pressed()
 
 void coronAlign::on_button_ipiaa_r_pressed()
 {
+    if( !commandEnabled( ui.button_ipiaa_r ) )
+        return;
+
     disablePicoButtons();
 
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
@@ -1889,6 +2195,9 @@ void coronAlign::on_button_ipiaa_r_pressed()
 
 void coronAlign::on_button_ipiaa_u_pressed()
 {
+    if( !commandEnabled( ui.button_ipiaa_u ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "stageipiaa" );
@@ -1908,6 +2217,9 @@ void coronAlign::on_button_ipiaa_u_pressed()
 
 void coronAlign::on_button_ipiaa_d_pressed()
 {
+    if( !commandEnabled( ui.button_ipiaa_d ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "stageipiaa" );
@@ -1955,6 +2267,9 @@ void coronAlign::on_button_ipiaa_scale_pressed()
 
 void coronAlign::on_button_ipiaa0_l_pressed()
 {
+    if( !commandEnabled( ui.button_ipiaa0_l ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "picomotors" );
@@ -1969,6 +2284,9 @@ void coronAlign::on_button_ipiaa0_l_pressed()
 
 void coronAlign::on_button_ipiaa0_r_pressed()
 {
+    if( !commandEnabled( ui.button_ipiaa0_r ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "picomotors" );
@@ -2011,6 +2329,9 @@ void coronAlign::on_button_ipiaa0_scale_pressed()
 
 void coronAlign::on_button_ipiaa1_l_pressed()
 {
+    if( !commandEnabled( ui.button_ipiaa1_l ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "picomotors" );
@@ -2025,6 +2346,9 @@ void coronAlign::on_button_ipiaa1_l_pressed()
 
 void coronAlign::on_button_ipiaa1_r_pressed()
 {
+    if( !commandEnabled( ui.button_ipiaa1_r ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "picomotors" );
@@ -2039,6 +2363,9 @@ void coronAlign::on_button_ipiaa1_r_pressed()
 
 void coronAlign::on_button_ipiaa1_u_pressed()
 {
+    if( !commandEnabled( ui.button_ipiaa1_u ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "picomotors" );
@@ -2053,6 +2380,9 @@ void coronAlign::on_button_ipiaa1_u_pressed()
 
 void coronAlign::on_button_ipiaa1_d_pressed()
 {
+    if( !commandEnabled( ui.button_ipiaa1_d ) )
+        return;
+
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "picomotors" );
