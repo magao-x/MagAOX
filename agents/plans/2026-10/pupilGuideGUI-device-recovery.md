@@ -6,7 +6,7 @@ Date: 2026-10-13. Branch: `jrmales/pupilguide-device-recovery`, created from
 `dev` at `8c652ec5b3ef43db0cbdbc3833c5c8238ebf6495`.
 
 Status: implementation and offline verification complete on 2026-10-14.
-Instrument validation remains a user-run follow-up.
+User-run `twAlign-camwfs-wfs` restart validation passed on 2026-10-14.
 
 The user reported:
 
@@ -468,9 +468,11 @@ points to implement the corresponding planned behavior.
   `clang-format --dry-run --Werror` on both C++ files and `git diff --check`
   passed. The prior successful build and 1,649-assertion run therefore cover the
   final functional code. No separate formatting-only cleanup was necessary.
-- Follow-up validation: the user can reproduce the original sensor restart on
-  the instrument and confirm that healthy controls and the movement selector
-  remain available and the sensor controls recover. Agent work used only the
-  offline harness and a build; no instrument actions were performed. Silent
-  late-producer rediscovery and the similar `coronAlign` delete handler remain
-  separate work as scoped above.
+- 2026-10-14, user-run instrument validation: the user reported, "ok tested a
+  restart of twAlign-camwfs-wfs, worked as designed." This confirms the original
+  sensor-restart scenario on the instrument. Other acceptance scenarios retain
+  their offline test coverage; this report does not claim additional instrument
+  tests. Agent work used only the offline harness and a build; no instrument
+  actions were performed by the agent.
+- Silent late-producer rediscovery and the similar `coronAlign` delete handler
+  remain separate work as scoped above.
