@@ -5,6 +5,7 @@
 #ifndef stageStatus_hpp
 #define stageStatus_hpp
 
+#include <cmath>
 #include <cstdio>
 #include <QWidget>
 
@@ -24,6 +25,12 @@ class stageStatus : public statusCombo
   protected:
     /// Most recent numeric position used when no named preset is active.
     float m_position{ 0 };
+
+    /// Numeric property supplying the current position fallback.
+    std::string m_positionProperty;
+
+    /// Whether a finite position has been observed since invalidation.
+    bool m_positionValid{ false };
 
   public:
     /// Construct an unconfigured stage-status summary widget.
@@ -52,6 +59,9 @@ class stageStatus : public statusCombo
 
     /// Handle deletion of a stage property used by this widget.
     void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/ );
+
+    /// Replace a position definition without retaining a missing current element.
+    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Received definition. */ );
 
     /// Handle updates to the stage position and preset/filter properties.
     void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
@@ -84,6 +94,8 @@ QString stageStatus::formatValue()
 {
     if( m_value == "" || m_value == "none" )
     {
+        if( !m_positionValid )
+            return "---";
         char pstr[64];
         snprintf( pstr, sizeof( pstr ), "%0.4f", m_position );
         return QString( pstr );
@@ -116,6 +128,21 @@ void stageStatus::onDisconnect()
     statusCombo::onDisconnect();
     m_property.clear();
     m_position = 0;
+    m_positionProperty.clear();
+    m_positionValid = false;
+}
+
+void stageStatus::handleDefProperty( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getDevice() != m_device )
+        return;
+    if( ipRecv.getName() == "position" || ipRecv.getName() == "filter" )
+    {
+        m_positionProperty = ipRecv.getName();
+        m_positionValid    = false;
+        m_valChanged       = true;
+    }
+    handleSetProperty( ipRecv );
 }
 
 void stageStatus::handleSetProperty( const pcf::IndiProperty &ipRecv )
@@ -130,14 +157,19 @@ void stageStatus::handleSetProperty( const pcf::IndiProperty &ipRecv )
 
     if( ipRecv.getName() == "position" || ipRecv.getName() == "filter" )
     {
-        if( ipRecv.find( "current" ) )
+        if( ipRecv.find( "current" ) || ipRecv.getType() != pcf::IndiProperty::Number )
         {
-            float pos = ipRecv["current"].get<float>();
-            if( pos != m_position && ( m_value == "none" || m_value == "" ) )
-            {
+            bool  valid = false;
+            float pos   = 0;
+            if( ipRecv.getType() == pcf::IndiProperty::Number && ipRecv.find( "current" ) )
+                pos = QString::fromStdString( ipRecv["current"].get() ).toFloat( &valid );
+            valid = valid && std::isfinite( pos );
+            if( valid != m_positionValid || pos != m_position )
                 m_valChanged = true;
-                m_position   = pos;
-            }
+            m_positionProperty = ipRecv.getName();
+            m_positionValid    = valid;
+            if( valid )
+                m_position = pos;
         }
     }
 
@@ -151,9 +183,9 @@ void stageStatus::handleDelProperty( const pcf::IndiProperty &ipRecv )
 
     bool clearSelectionProperty = ( ipRecv.getName() == m_property && isSelectionProperty( ipRecv.getName() ) );
 
-    if( ipRecv.getName() == "position" || ipRecv.getName() == "filter" )
+    if( !m_positionProperty.empty() && ipRecv.getName() == m_positionProperty )
     {
-        m_position = 0;
+        m_positionValid = false;
         if( m_value == "none" || m_value == "" )
         {
             m_valChanged = true;
@@ -166,6 +198,7 @@ void stageStatus::handleDelProperty( const pcf::IndiProperty &ipRecv )
     {
         m_property.clear();
     }
+    emit doUpdateGUI();
 }
 
 bool stageStatus::isSelectionProperty( const std::string &propertyName ) const

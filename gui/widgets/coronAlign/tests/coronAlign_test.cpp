@@ -257,6 +257,12 @@ TEST_CASE( "Coronagraph device deletion stays local", "[coronAlignGUI]" )
                     widget.state( device );
                 else
                     widget.positions( device );
+                if( std::string( device ) != "picomotors" )
+                {
+                    auto *summary = widget.findChild<xqt::stageStatus *>( device );
+                    REQUIRE( summary != nullptr );
+                    REQUIRE( summary->ctrlWidget()->windowTitle() == device );
+                }
                 for( const auto &button : motionButtons() )
                     REQUIRE( widget.control( button )->isEnabled() );
                 REQUIRE( qobject_cast<QPushButton *>( widget.control( "button_pupil_scale" ) )->text() == scale );
@@ -469,6 +475,128 @@ TEST_CASE( "Coronagraph late properties recover through shared rediscovery", "[c
     for( const auto &query : widget.m_publisher.m_queries )
         REQUIRE_FALSE(
             ( query.getDevice() == "fwpupil" && ( query.getName() == "fsm" || query.getName() == "filter" ) ) );
+    REQUIRE( widget.m_publisher.m_commands.empty() );
+}
+
+/** \brief Embedded stage dialogs preserve independent property state and never move from missing numeric inputs.
+ * \ingroup coronAlignGUI_unit_test
+ */
+TEST_CASE( "Coronagraph stage dialogs recover named properties independently", "[coronAlignGUI][stageGUI]" )
+{
+    // clang-format off
+#ifdef CORONALIGN_GUI_TEST_DOXYGEN_REF
+    xqt::stage::handleDefProperty;
+    xqt::stage::handleDelProperty;
+    xqt::stage::handleSetProperty;
+    xqt::stage::motionReady;
+    xqt::stage::readNumber;
+    xqt::stage::updateGUI;
+    xqt::stage::on_posMinus_pressed;
+    xqt::stage::on_posPlus_pressed;
+    xqt::stage::on_position_returnPressed;
+    xqt::stage::on_positionSlider_sliderReleased;
+#endif
+    // clang-format on
+    for( const auto *device : { "fwpupil", "stagepiaa" } )
+    {
+        Widget widget;
+        widget.ready();
+        auto *summary = widget.findChild<xqt::stageStatus *>( device );
+        REQUIRE( summary != nullptr );
+        auto *dialog = dynamic_cast<xqt::stage *>( summary->ctrlWidget() );
+        REQUIRE( dialog != nullptr );
+        auto *plus   = dialog->findChild<QPushButton *>( "posPlus" );
+        auto *slider = dialog->findChild<QWidget *>( "positionSlider" );
+        REQUIRE( plus != nullptr );
+        REQUIRE( slider != nullptr );
+        const std::string motion = std::string( device ) == "fwpupil" ? "filter" : "position";
+        REQUIRE( plus->isEnabled() );
+        REQUIRE( dialog->windowTitle() == device );
+        widget.erase( device, motion );
+        REQUIRE_FALSE( plus->isEnabled() );
+        REQUIRE( dialog->findChild<QPushButton *>( "home" )->isEnabled() );
+        dialog->on_posMinus_pressed();
+        dialog->on_posPlus_pressed();
+        dialog->on_position_returnPressed();
+        dialog->on_positionSlider_sliderReleased();
+        REQUIRE( widget.m_publisher.m_commands.empty() );
+        widget.position( device, motion ); // No FSM resend is needed for named recovery.
+        REQUIRE( plus->isEnabled() );
+        REQUIRE( dialog->windowTitle() == device );
+        widget.erase( device, motion == "filter" ? "position" : "filter" );
+        REQUIRE( plus->isEnabled() ); // Inactive alternative subscription is unrelated.
+        pcf::IndiProperty maximum( pcf::IndiProperty::Number, device, "maxpos" );
+        maximum.add( pcf::IndiElement( "value", "1000" ) );
+        widget.publish( maximum );
+        REQUIRE( slider->isEnabled() );
+        widget.erase( device, "maxpos" );
+        REQUIRE_FALSE( slider->isEnabled() );
+        REQUIRE( plus->isEnabled() );
+        widget.publish( maximum );
+        REQUIRE( slider->isEnabled() );
+        pcf::IndiProperty partial( pcf::IndiProperty::Number, device, motion );
+        partial.add( pcf::IndiElement( "target" ) );
+        widget.publish( partial );
+        REQUIRE_FALSE( plus->isEnabled() );
+        partial = pcf::IndiProperty( pcf::IndiProperty::Number, device, motion );
+        partial.add( pcf::IndiElement( "current", "0" ) );
+        widget.publish( partial, false );
+        REQUIRE( plus->isEnabled() );
+        dialog->on_posPlus_pressed();
+        REQUIRE( widget.m_publisher.m_commands.size() == 1 );
+        REQUIRE( widget.m_publisher.m_commands[0].getName() == motion );
+        REQUIRE( widget.m_publisher.m_commands[0]["target"].get<double>() == 1 );
+    }
+}
+
+/** \brief Summary readouts and preset choices recover without losing the independent device FSM.
+ * \ingroup coronAlignGUI_unit_test
+ */
+TEST_CASE( "Coronagraph stage summaries recover only deleted properties", "[coronAlignGUI][stageGUI]" )
+{
+    // clang-format off
+#ifdef CORONALIGN_GUI_TEST_DOXYGEN_REF
+    xqt::stageStatus::handleDefProperty;
+    xqt::stageStatus::handleDelProperty;
+    xqt::stageStatus::handleSetProperty;
+    xqt::stageStatus::formatValue;
+    xqt::statusCombo::handleDelProperty;
+#endif
+    // clang-format on
+    Widget widget;
+    widget.ready();
+    auto *summary = widget.findChild<xqt::stageStatus *>( "fwpupil" );
+    REQUIRE( summary != nullptr );
+    auto *combo = summary->findChild<QComboBox *>( "status" );
+    REQUIRE( combo != nullptr );
+    REQUIRE( summary->formatValue() == "100.0000" );
+    widget.erase( "fwpupil", "filter" );
+    REQUIRE( summary->formatValue() == "---" );
+    widget.position( "fwpupil", "filter" );
+    REQUIRE( summary->formatValue() == "100.0000" );
+    widget.erase( "fwpupil", "position" );
+    REQUIRE( summary->formatValue() == "100.0000" );
+    pcf::IndiProperty presets( pcf::IndiProperty::Switch, "fwpupil", "filterName" );
+    presets.add( pcf::IndiElement( "initial", pcf::IndiElement::On ) );
+    presets.add( pcf::IndiElement( "alternate", pcf::IndiElement::Off ) );
+    widget.publish( presets );
+    REQUIRE( combo->placeholderText() == "initial" );
+    widget.erase( "fwpupil", "filterName" );
+    REQUIRE( combo->count() == 0 );
+    REQUIRE( combo->placeholderText() == "100.0000" );
+    widget.publish( presets );
+    REQUIRE( combo->count() == 2 );
+    REQUIRE( combo->placeholderText() == "initial" );
+    widget.erase( "fwpupil", "filterName" );
+    for( const auto *invalid : { "", "bad", "nan", "inf", "1e999" } )
+    {
+        widget.position( "fwpupil", "filter", invalid );
+        REQUIRE( summary->formatValue() == "---" );
+        REQUIRE_FALSE( widget.control( "button_pupil_u" )->isEnabled() );
+        REQUIRE_FALSE( summary->ctrlWidget()->findChild<QPushButton *>( "posPlus" )->isEnabled() );
+    }
+    widget.position( "fwpupil", "filter", "0" );
+    REQUIRE( combo->placeholderText() == "0.0000" );
     REQUIRE( widget.m_publisher.m_commands.empty() );
 }
 

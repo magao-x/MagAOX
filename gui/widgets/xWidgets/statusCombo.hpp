@@ -333,9 +333,21 @@ void statusCombo::handleDelProperty( const pcf::IndiProperty &ipRecv )
         return;
     }
 
-    if( ipRecv.getName() == "fsm" || ipRecv.getName() == m_property )
+    if( ipRecv.getName().empty() || ipRecv.getName() == "fsm" )
     {
         onDisconnect();
+    }
+    else if( ipRecv.getName() == m_property )
+    {
+        m_value.clear();
+        m_statusEditing        = STOPPED;
+        m_statusCommandPending = false;
+        m_statusRequested.clear();
+        m_statusEditTimer->stop();
+        ui.status->clear();
+        m_showVal    = shouldShowValue();
+        m_valChanged = true;
+        emit doUpdateGUI();
     }
 }
 

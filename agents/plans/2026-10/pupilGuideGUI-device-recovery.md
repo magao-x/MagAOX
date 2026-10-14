@@ -589,3 +589,23 @@ semantics and instrument-side app retry implementation stay unchanged.
   The pending-selection test was corrected to publish selectable presets and
   activate an actual combo-box selection: `setEditText()` has no effect on this
   noneditable combo box.
+- Final recovery audit found that the embedded `stage` dialog also erased its
+  entire cache on any named position/preset deletion, while `statusCombo` erased
+  its FSM on selection deletion. A named rediscovery response could therefore
+  leave a dialog or summary stuck until an unrelated FSM update arrived. The
+  extension now includes narrowly scoped fixes in `stage.hpp`, `stageStatus.hpp`,
+  and `statusCombo.hpp`, with regressions through the real coronagraph children.
+- Stage dialogs preserve readiness and independent preset/numeric state on named
+  deletion, track numeric position/target and slider-range availability, and
+  reject direct numeric command slots while inputs are missing. Fresh FSM
+  observations restore dialog titles without a synthesized connection callback.
+  Whole-device/FSM loss still clears all state. Existing parked displays, camera
+  mappings, preset commands, and home/stop behavior remain in place. Summary
+  position fallback displays `---` while unknown, and selection recovery retains
+  its independent FSM. Inactive alternative property deletion leaves the active
+  numeric property usable.
+- Coronagraph and embedded-stage regression tests now pass 4,146 assertions in
+  9 cases, including named position/preset recovery, invalid numeric inputs,
+  empty target capabilities, direct stage-slot suppression, independent slider
+  range loss, and restored stage-dialog titles. The core coronagraph commit is
+  `8738f585`; the shared stage corrections follow as a separate functional commit.
