@@ -2458,10 +2458,12 @@ inline int dmTemporalResponse::appLogic()
     SHMIMMONITORT_UPDATE_INDI( shmimMonitorT );
 
     // Snapshot the tunables under the lock held by the INDI callbacks
-    runParams cur;
+    runParams   cur;
+    std::string pokeModeName;
     { // mutex scope
         std::lock_guard<std::mutex> plock( m_paramMutex );
         snapshotParams( cur );
+        pokeModeName = m_pokeModeName;
     }
 
     updateIfChanged( m_indiP_dmIndex, "current", cur.m_dmIndex );
@@ -2478,6 +2480,7 @@ inline int dmTemporalResponse::appLogic()
     updateIfChanged( m_indiP_nSettle, "current", cur.m_nSettle );
     updateIfChanged( m_indiP_maskThresh, "current", cur.m_maskThresh );
     updateIfChanged( m_indiP_bestMetric, "current", cur.m_bestMetric );
+    indi::updateSelectionSwitchIfChanged( m_indiP_pokeMode, pokeModeName, m_indiDriver, INDI_OK );
 
     std::string sname;
     dmTemporalResponseMath::dmStreamName( sname, cur.m_dmIndex, cur.m_dmChannel );
@@ -3928,12 +3931,8 @@ INDI_NEWCALLBACK_DEFN( dmTemporalResponse, m_indiP_pokeMode )( const pcf::IndiPr
     {
         if( ipRecv.find( mode ) && ipRecv[mode].getSwitchState() == pcf::IndiElement::On )
         {
+            // appLogic() publishes the new selection, so the local property is not changed here.
             m_pokeModeName = mode;
-
-            m_indiP_pokeMode["actuator"].setSwitchState( mode == "actuator" ? pcf::IndiElement::On
-                                                                            : pcf::IndiElement::Off );
-            m_indiP_pokeMode["pattern"].setSwitchState( mode == "pattern" ? pcf::IndiElement::On
-                                                                          : pcf::IndiElement::Off );
             return 0;
         }
     }

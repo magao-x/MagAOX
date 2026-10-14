@@ -1398,8 +1398,11 @@ TEST_CASE( "dmTemporalResponse INDI tunables", "[dmTemporalResponse][indi]" )
     {
         REQUIRE( app.newCallBack_m_indiP_pokeMode( switchProp( dev, "poke_mode", "pattern" ) ) == 0 );
         REQUIRE( app.m_pokeModeName == "pattern" );
-        REQUIRE( app.m_indiP_pokeMode["pattern"].getSwitchState() == pcf::IndiElement::On );
-        REQUIRE( app.m_indiP_pokeMode["actuator"].getSwitchState() == pcf::IndiElement::Off );
+
+        // The callback leaves the published property alone; appLogic() sends the new selection.  If the callback set
+        // the switch states itself, appLogic() would see no change and clients would never be updated.
+        REQUIRE( app.m_indiP_pokeMode["actuator"].getSwitchState() == pcf::IndiElement::On );
+        REQUIRE( app.m_indiP_pokeMode["pattern"].getSwitchState() == pcf::IndiElement::Off );
         REQUIRE( app.newCallBack_m_indiP_pokeMode( switchProp( dev, "poke_mode", "actuator" ) ) == 0 );
         REQUIRE( app.m_pokeModeName == "actuator" );
 
