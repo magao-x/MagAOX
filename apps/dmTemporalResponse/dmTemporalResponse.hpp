@@ -1714,6 +1714,9 @@ class dmTemporalResponse : public MagAOXApp<true>,
     /// The per-frame state machine: trigger, delay busy-wait, poke, and capture.
     /** Called on the shmimMonitor RT thread for every frame.  Only copies data; no arithmetic beyond timing.
      *
+     * A poke deadline is deferred to a later frame only if it is at least one frame period after this frame is
+     * processed, so every delay from the frame-receipt latency upward is reachable.
+     *
      * \returns 0 on success
      * \returns -1 on error
      */
@@ -2747,15 +2750,17 @@ inline int dmTemporalResponse::processFrame( void *src, const timespec &atime, u
 
     if( m_trialState == trialState::waitPoke )
     {
-        // If the deadline falls at or after the next expected frame, record this frame as the baseline and wait for a
-        // later frame.
-        if( m_framePeriodUs > 0 && dmTemporalResponseMath::tsDiffUs( m_tPoke, atime ) >= m_framePeriodUs )
+        timespec now = m_clock();
+
+        // If the deadline falls at or after the time the next frame will be processed, record this frame as the
+        // baseline and wait for a later frame.  The next frame is processed about one frame period after this one, so
+        // the test is against now, not atime: a deadline between atime + T and the next frame's receipt is still met
+        // by busy-waiting from this frame instead of being deferred and poked late.
+        if( m_framePeriodUs > 0 && dmTemporalResponseMath::tsDiffUs( m_tPoke, now ) >= m_framePeriodUs )
         {
             copyFrame( src, 0, atime );
             return 0;
         }
-
-        timespec now = m_clock();
 
         m_trialLate = ( dmTemporalResponseMath::tsDiffUs( now, m_tPoke ) > 0 );
 

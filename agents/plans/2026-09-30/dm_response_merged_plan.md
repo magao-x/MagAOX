@@ -375,7 +375,7 @@ I've implemented the merged plan as the `dmTemporalResponse` app and committed i
 
 **Status (2026-10-14):** implemented in `8069e2b2` (docs `fd5adc2f`). On exao2 the test builds and the full `dmTemporalResponse_test` suite passes. Remaining: `clang-format` on the two changed source files (separate commit), rebuild and reinstall the app, and one hardware run to confirm `LOOPST` reads `ON`/`OFF` (not `UNKNOWN`) and `EMGAIN` matches camwfs.
 
-## 16. Fill the Unreachable Poke Window: Time Delays From Frame Receipt (planned 2026-10-15, not implemented)
+## 16. Fill the Unreachable Poke Window: Time Delays From Frame Receipt (planned and implemented 2026-10-15)
 
 **Problem.** In every frame period there is a window of poke times that no delay can reach. The super-sampled curve then has empty bins with a period of one frame. At 5 kHz (runs `2026-10-14T222915`, `T223100`, `T222953`, `delaySpan` 400, `nDelays` 20) three of the ten 20 µs bins in each 200 µs period are empty. The same hole is present in every earlier run (about 70 µs of each 500 µs frame at 2 kHz), but it was less visible with 50 µs bins.
 
@@ -435,6 +435,8 @@ All delays from L upward become reachable, with no gap. Runs with `delaySpan` �
 3. Expect: `LATEFRAC` = 1 only for d = 0, 20, 40 µs; d = 200, 220, 240 µs achieved at about +2 µs; `NINVALID` = 0; no empty super-sampling bins (`summary_superres.fits` has no NaN between the first and last sample); the curve agrees with `2026-10-14T223100` where both have data.
 
 **Commits** (on `ktwitchell/dm-response`, AGENTS rule 19): (1) functional: the `processFrame()` change, the new test and this plan update; (2) docs: the timing-notes update; (3) formatting only, if `clang-format` changes anything.
+
+**Status (2026-10-15):** implemented as planned. In `processFrame()` the `m_clock()` read moved ahead of the deferral test, which now compares the deadline with that `now`; the `processFrame()` declaration docs describe the rule. New test case "state machine poke between one frame and frame receipt", with the 1010 µs and 1030 µs sections. Not yet built or run: build, unit tests and the hardware check above are pending on exao2.
 
 ## Debugging
 

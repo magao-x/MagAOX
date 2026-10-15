@@ -1727,6 +1727,81 @@ TEST_CASE( "dmTemporalResponse state machine deferred poke", "[dmTemporalRespons
     }
 }
 
+/// Verify a deadline between one frame period after the trigger atime and the next frame's receipt is poked on time.
+/** The deferral test is against the time the frame is processed, not its atime: with the frame processed 20 us after
+ * atime and T = 1000 us, a 1010 us delay is met by busy-waiting from the trigger frame, while a 1030 us delay is still
+ * deferred to the next frame.
+ *
+ * \ingroup dmTemporalResponse_unit_test
+ */
+TEST_CASE( "dmTemporalResponse state machine poke between one frame and frame receipt",
+           "[dmTemporalResponse][statemachine]" )
+{
+// clang-format off
+    #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
+    dmTemporalResponse::processFrame( nullptr, timespec(), 0 );
+    #endif
+    // clang-format on
+
+    dmTemporalResponse_test app;
+    app.setupStateMachine( 2, 1000 );
+
+    mx::improc::eigenImage<float> im( 8, 8 );
+
+    int64_t tTrig = s_fakeNs.load() + 1000000;
+    s_fakeNs      = tTrig + 20000;
+
+    SECTION( "deadline before the next frame is processed: poked from the trigger frame" )
+    {
+        app.arm( 1010, +1 );
+
+        im.setConstant( 1 );
+        REQUIRE( app.processFrame( im.data(), nsToTs( tTrig ), 40 ) == 0 );
+        REQUIRE( app.m_writes.size() == 1 );
+        REQUIRE( app.lastWrite().m_cmd( 3, 4 ) == Approx( 0.5 ) );
+        REQUIRE( app.m_trialState == dmTemporalResponse::trialState::capturing );
+        REQUIRE( app.m_trialLate == false );
+
+        double achieved = achievedDelay( app.m_trigATime, app.m_tCmd );
+        REQUIRE( achieved >= 1010 );
+        REQUIRE( achieved < 1015 );
+
+        // Baseline plane holds the trigger frame
+        REQUIRE( app.m_trialBuf.image( 0 )( 0, 0 ) == Approx( 1 ) );
+
+        // The next frame ends before the poke: captured as plane 1 with a negative time from the command
+        im.setConstant( 2 );
+        REQUIRE( app.processFrame( im.data(), nsToTs( tTrig + 1000000 ), 41 ) == 0 );
+        REQUIRE( app.m_trialBuf.image( 1 )( 0, 0 ) == Approx( 2 ) );
+        REQUIRE( tsDiffUs( app.m_trialTimes[1], app.m_tCmd ) < 0 );
+
+        im.setConstant( 3 );
+        REQUIRE( app.processFrame( im.data(), nsToTs( tTrig + 2000000 ), 42 ) == 0 );
+        REQUIRE( app.m_trialBuf.image( 2 )( 0, 0 ) == Approx( 3 ) );
+        REQUIRE( app.trialPosted() );
+        REQUIRE( app.m_trialValid );
+    }
+
+    SECTION( "deadline after the next frame is processed: still deferred" )
+    {
+        app.arm( 1030, +1 );
+
+        im.setConstant( 1 );
+        REQUIRE( app.processFrame( im.data(), nsToTs( tTrig ), 50 ) == 0 );
+        REQUIRE( app.m_writes.size() == 0 );
+        REQUIRE( app.m_trialState == dmTemporalResponse::trialState::waitPoke );
+
+        // Next frame, processed 20 us after its atime: poked on time from this frame
+        s_fakeNs = tTrig + 1000000 + 20000;
+        im.setConstant( 2 );
+        REQUIRE( app.processFrame( im.data(), nsToTs( tTrig + 1000000 ), 51 ) == 0 );
+        REQUIRE( app.m_writes.size() == 1 );
+        REQUIRE( app.m_trialLate == false );
+        REQUIRE( achievedDelay( app.m_trigATime, app.m_tCmd ) >= 1030 );
+        REQUIRE( app.m_trialBuf.image( 0 )( 0, 0 ) == Approx( 2 ) );
+    }
+}
+
 /// Verify a frame-counter gap during capture invalidates the trial.
 /**
  * \ingroup dmTemporalResponse_unit_test
