@@ -438,6 +438,14 @@ All delays from L upward become reachable, with no gap. Runs with `delaySpan` �
 
 **Status (2026-10-15):** implemented as planned. In `processFrame()` the `m_clock()` read moved ahead of the deferral test, which now compares the deadline with that `now`; the `processFrame()` declaration docs describe the rule. New test case "state machine poke between one frame and frame receipt", with the 1010 µs and 1030 µs sections. Not yet built or run: build, unit tests and the hardware check above are pending on exao2.
 
+**Hardware check (run `2026-10-15T214321`, build `ba13fe1f`, `GITMOD` 0):**
+- **Settings:** actuator (5, 8), amp 0.2, `delaySpan` 400, `nDelays` 20. camWFS ran at **3000 fps** (T = 333 µs), not the planned 5000, so the newly reachable window is [T, T + L) ≈ [333, 393) µs.
+- **Delays in that window are on time:** d = 340, 360 and 380 µs were achieved at +2.3, +2.3 and +2.2 µs with `LATEFRAC` 0. Before the change they would have landed at about 393 µs.
+- **Other delays:** only d = 0, 20 and 40 are late (receipt latency L ≈ 60 µs); d = 60 is late in 20% of trials.
+- **Super-sampled curve:** no empty bins (210 bins, 33 µs wide). The fix works.
+- **Invalid trials:** `NINVALID` was 2 in total, at d = 120 and 260 µs. Neither is in the new window, so the longer busy-wait did not cause them.
+- **New finding, not caused by this change:** the settled response differs between delays by up to ±4% (0.93–1.01 here; 0.98–1.035 in the 5 kHz run `2026-10-14T223100`). The delays are measured in sequence, so slow drift of the unmodulated camWFS gain during the run turns into per-delay level differences. Each super-sampling bin is filled by specific delays, so the curve picks up a pattern with a period of one frame (+4% spikes every 333 µs that do not decay), which can be mistaken for ringing. Possible fixes: normalize each delay by its own settled level before super-sampling, and/or interleave or randomize the delay order so that drift averages out.
+
 ## Debugging
 
 First build and test on the MagAO-X computer (exao2), 2026-10-01.
