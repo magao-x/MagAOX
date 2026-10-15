@@ -71,7 +71,12 @@ In both modes the largest absolute command must not exceed `poke.maxCommand` (de
 - Delays shorter than the time it takes the app to receive the frame are *late*: the poke is written immediately and
   the achieved delay is recorded.  If more than `maxLateFrac` of the trials at a delay are late, a warning is logged
   with the minimum achievable delay and the cube is flagged (`LATEFLAG = 1`).
-- Delays longer than one frame period are supported: the poke is held until the frame before the deadline.
+- Delays longer than one frame period are supported.  A deadline is deferred to a later frame only if it is at least
+  one frame period after the current frame is processed; otherwise the poke is made by busy-waiting from the current
+  frame.  So only delays shorter than the receipt latency are late, and a `delaySpan` of two frame periods (with a
+  step no larger than the super-sampling bin) gives data in every super-sampled time bin.  For a delay between one
+  frame period and one frame period plus the receipt latency, the first captured frame ends before the poke and has a
+  negative time from the command.
 - The measured response includes the full DM path (dmcomb channel sum, driver, and mechanics).
 - The app requires `atime` to be `CLOCK_REALTIME`, and refuses to start if the most recent frame's `atime` is more than
   1 s from the current time.
