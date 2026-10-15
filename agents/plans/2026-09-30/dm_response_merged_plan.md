@@ -375,6 +375,67 @@ I've implemented the merged plan as the `dmTemporalResponse` app and committed i
 
 **Status (2026-10-14):** implemented in `8069e2b2` (docs `fd5adc2f`). On exao2 the test builds and the full `dmTemporalResponse_test` suite passes. Remaining: `clang-format` on the two changed source files (separate commit), rebuild and reinstall the app, and one hardware run to confirm `LOOPST` reads `ON`/`OFF` (not `UNKNOWN`) and `EMGAIN` matches camwfs.
 
+## 16. Fill the Unreachable Poke Window: Time Delays From Frame Receipt (planned 2026-10-15, not implemented)
+
+**Problem.** In every frame period there is a window of poke times that no delay can reach. The super-sampled curve then has empty bins with a period of one frame. At 5 kHz (runs `2026-10-14T222915`, `T223100`, `T222953`, `delaySpan` 400, `nDelays` 20) three of the ten 20 µs bins in each 200 µs period are empty. The same hole is present in every earlier run (about 70 µs of each 500 µs frame at 2 kHz), but it was less visible with 50 µs bins.
+
+**Evidence** (`2026-10-14T222915`, achieved = requested + `delayErrMean`):
+
+| requested [µs] | 0 | 20 | 40 | 60–180 | 200 | 220 | 240 | 260–380 |
+|---|---|---|---|---|---|---|---|---|
+| achieved [µs] | 55.4 | 55.3 | 56.2 | +2.1 to +2.3 | 255.5 | 255.5 | 255.6 | +2.3 to +2.6 |
+| LATEFRAC | 1 | 1 | 1 | 0 | 1 | 1 | 1 | 0 |
+
+The app receives a frame about L ≈ 55 µs after its `atime` (about 70 µs at 2 kHz). Delays below L are late, as expected. Delays from T to T + L (T = frame period) are also late and land at T + L, although nothing physical prevents them.
+
+**Root cause.** In `processFrame()` (`dmTemporalResponse.hpp:2750–2756`, `waitPoke` state) a deadline is deferred to the next frame when it is at least one frame period past the current frame's **`atime`**:
+
+```cpp
+if( m_framePeriodUs > 0 && tsDiffUs( m_tPoke, atime ) >= m_framePeriodUs )   // defer to next frame
+```
+
+The next frame is only *received* at about `atime + T + L`. So a deadline in [`atime + T`, `atime + T + L`) is deferred and then poked late, on receipt of the next frame. Yet it falls before that frame arrives, so it could have been met by busy-waiting from the current frame.
+
+**Change.** Defer only if the deadline is at least one frame period past the time the current frame is being **processed**. That time is a good estimate of when the next frame will be processed:
+
+```cpp
+timespec now = m_clock();
+if( m_framePeriodUs > 0 && tsDiffUs( m_tPoke, now ) >= m_framePeriodUs )     // defer to next frame
+```
+
+The `now` already taken just below for the busy-wait is reused, so there is no extra clock read on the timing path. Nothing else in the state machine changes.
+
+**Effect on delays** (receipt latency L, frame period T, delay d from the trigger `atime`):
+
+| d | today | after the change |
+|---|---|---|
+| [0, L) | late, poked on receipt of the trigger frame | unchanged |
+| [L, T) | on time from the trigger frame | unchanged (d − L < T, so never deferred) |
+| [T, T + L) | **deferred, late, lands at T + L** | **on time, busy-wait from the trigger frame** |
+| ≥ T + L | deferred, then on time from a later frame | unchanged |
+
+All delays from L upward become reachable, with no gap. Runs with `delaySpan` ≤ one frame period (every run before the 5 kHz test) behave exactly as before.
+
+**Side effects:**
+1. **Longer busy-wait.** The busy-wait on the shmimMonitor thread can now last up to about one frame period (previously up to T − L). The next frame is posted during the wait and processed right after the poke. Since the wait stays under one frame period, no frame is skipped. If one were, the existing `cnt0` continuity check marks the trial invalid and it is retried, so it shows up in `NINVALID`.
+2. **One extra frame from before the poke.** For d in [T, T + L), the first captured frame (plane 1) has `atime` at or before the poke, so its time from the command is between −L and 0 and its response is about 0. Plane 0 stays the trigger frame, as the pre-poke baseline. The analysis (`computeMetrics()`, `crossingTime()`, the super-sampling) works from each frame's measured time, so it is unaffected. Those delays get one frame less of post-poke window (N − 1 frames, 3.8 ms at 5 kHz with N = 20).
+3. **Arrival jitter.** If the next frame arrives a little early, a deadline just under `now + T` is still met by busy-waiting (side effect 1). If it arrives a little late, a deadline just over `now + T` is deferred and may be slightly late. That poke is flagged by the existing `m_trialLate` and counted in `LATEFRAC` as now.
+
+**Tests** (`tests/dmTemporalResponse_test.cpp`):
+- The existing "state machine deferred poke" test (T = 1000 µs, frame processed 20 µs after `atime`, d = 1500 µs) still defers (1500 − 20 ≥ 1000). It is kept unchanged as the regression test for real deferrals.
+- New test "state machine poke between one frame and one frame plus latency": T = 1000 µs, frame processed 20 µs after `atime`, d = 1010 µs. Expect: the poke is written while processing the trigger frame, not late (`m_trialLate == false`), achieved delay ≥ 1010 µs and about 1010 µs. Plane 0 is the trigger frame. The next frame (`atime` = trigger + 1000 µs) is captured as plane 1 with a time before `m_tCmd`. The trial completes valid.
+- New check in the same test: d = 1030 µs (1030 − 20 ≥ 1000) still defers. This pins the new threshold to processing time, not `atime`.
+- Add Doxygen references to `processFrame()` in the new `TEST_CASE` (AGENTS rule 21).
+
+**Docs** (separate commit): in `doc/dmTemporalResponse.md` "Timing notes", replace "the poke is held until the frame before the deadline" with the receipt-based rule. Note that only delays below the receipt latency are late, and that a `delaySpan` of two frame periods now fills every super-sampling bin.
+
+**Verification on exao2:**
+1. Rebuild, run the unit tests, reinstall, restart.
+2. Repeat the 5 kHz single-actuator run (actuator (5, 8), amp 0.2, `delaySpan` 400, `nDelays` 20, other settings as `2026-10-14T223100`).
+3. Expect: `LATEFRAC` = 1 only for d = 0, 20, 40 µs; d = 200, 220, 240 µs achieved at about +2 µs; `NINVALID` = 0; no empty super-sampling bins (`summary_superres.fits` has no NaN between the first and last sample); the curve agrees with `2026-10-14T223100` where both have data.
+
+**Commits** (on `ktwitchell/dm-response`, AGENTS rule 19): (1) functional: the `processFrame()` change, the new test and this plan update; (2) docs: the timing-notes update; (3) formatting only, if `clang-format` changes anything.
+
 ## Debugging
 
 First build and test on the MagAO-X computer (exao2), 2026-10-01.
