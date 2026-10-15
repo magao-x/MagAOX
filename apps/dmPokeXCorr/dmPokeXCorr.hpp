@@ -183,9 +183,36 @@ class dmPokeXCorr : public MagAOXApp<true>,
      */
     int analyzeSensor();
 
+    /// Cross-correlate the negated poke image with the reference
+    /** A sign-inverted poke response gives an in-range delta here.
+     *
+     * \returns 0 on success
+     * \returns -1 on error, which is logged
+     */
+    int xcorrInverted( float &deltaX, /**< [out] the x delta of the negated poke image, in pixels */
+                       float &deltaY, /**< [out] the y delta of the negated poke image, in pixels */
+                       float &peak    /**< [out] the cross-correlation peak of the negated poke image */
+    );
+
+    /// Save diagnostics for the current measurement
+    /** Adds the cross-correlation results to the header, then writes the base diagnostics and the reference image.
+     *
+     * \returns 0 on success
+     * \returns -1 on error, which is logged
+     */
+    int saveDiagnostics( std::string       &prefix,    /**< [out] the path and file name prefix of the files written */
+                         const std::string &reason,    /**< [in] why diagnostics are being saved */
+                         float              deltaX,    /**< [in] the measured x delta, in pixels */
+                         float              deltaY,    /**< [in] the measured y delta, in pixels */
+                         float              peak,      /**< [in] the cross-correlation peak */
+                         float              invDeltaX, /**< [in] the x delta of the negated poke image, in pixels */
+                         float              invDeltaY, /**< [in] the y delta of the negated poke image, in pixels */
+                         float              invPeak    /**< [in] the cross-correlation peak of the negated poke image */
+    );
+
     /// Reject an out-of-range measurement
-    /** Writes diagnostics, including the cross-correlation reference, and logs an error with a hint to the operator.
-     * The measurement is not published.
+    /** Checks whether the negated poke image is in range, saves diagnostics, and logs an error with a hint to the
+     * operator.  The measurement is not published.
      *
      * \returns -1 so that the caller can stop measuring
      */
@@ -405,6 +432,16 @@ int dmPokeXCorr::analyzeSensor()
         return rejectMeasurement( xs, ys, pk );
     }
 
+    if( m_saveDiagnostics.exchange( false ) )
+    {
+        float       xi = 0, yi = 0, pki = 0;
+        std::string prefix;
+        if( xcorrInverted( xi, yi, pki ) == 0 && saveDiagnostics( prefix, "requested", xs, ys, pk, xi, yi, pki ) == 0 )
+        {
+            log<text_log>( "diagnostics saved to " + prefix + "_*.fits" );
+        }
+    }
+
     if( updateMeasurement( xs, ys ) < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "error from dmPokeWFS::updateMeasurement" } );
@@ -413,39 +450,86 @@ int dmPokeXCorr::analyzeSensor()
     return 0;
 }
 
-int dmPokeXCorr::rejectMeasurement( float deltaX, float deltaY, float peak )
+int dmPokeXCorr::xcorrInverted( float &deltaX, float &deltaY, float &peak )
 {
-    // Normalized zero-lag correlation with the reference.  Near -1 means the poke image is the negative of the
-    // reference
-    const eigenImage<float> &ref  = m_xcorr.refIm();
-    float                    norm = sqrt( ( m_pokeImage().square().sum() ) * ( ref.square().sum() ) );
-    float                    xc0  = ( norm > 0 ) ? ( m_pokeImage() * ref ).sum() / norm : 0;
+    eigenImage<float> inv = -m_pokeImage();
 
+    try
+    {
+        m_xcorr( deltaX, deltaY, peak, inv );
+    }
+    catch( const std::exception &e )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, std::string( "exception caught: \n" ) + e.what() } );
+    }
+
+    return 0;
+}
+
+int dmPokeXCorr::saveDiagnostics( std::string       &prefix,
+                                  const std::string &reason,
+                                  float              deltaX,
+                                  float              deltaY,
+                                  float              peak,
+                                  float              invDeltaX,
+                                  float              invDeltaY,
+                                  float              invPeak )
+{
     mx::fits::fitsHeader<> head;
+    head.append( "REASON", reason, "why diagnostics were saved" );
     head.append( "DELTAX", deltaX, "measured x delta [pix]" );
     head.append( "DELTAY", deltaY, "measured y delta [pix]" );
     head.append( "XCPEAK", peak, "cross-correlation peak" );
-    head.append( "XCZERO", xc0, "normalized zero-lag correlation with reference" );
+    head.append( "INVDX", invDeltaX, "x delta of negated poke image [pix]" );
+    head.append( "INVDY", invDeltaY, "y delta of negated poke image [pix]" );
+    head.append( "INVPEAK", invPeak, "cross-correlation peak of negated poke image" );
     uint64_t wfsCnt0 = ( shmimMonitorT::m_imageStream.md != nullptr ) ? shmimMonitorT::m_imageStream.md->cnt0 : 0;
     head.append( "WFSCNT0", wfsCnt0, "WFS stream cnt0 at write" );
 
-    std::string prefix;
-    std::string where = "diagnostics could not be written";
-    if( writeDiagnostics( prefix, head ) == 0 )
+    if( writeDiagnostics( prefix, head ) < 0 )
     {
-        mx::fits::fitsFile<float> ff;
-        eigenImage<float>         refCopy = ref;
-        if( !!ff.write( prefix + "_refIm.fits", refCopy, head ) )
-        {
-            log<software_error>( { __FILE__, __LINE__, "error writing " + prefix + "_refIm.fits" } );
-        }
-        where = "diagnostics written to " + prefix + "_*.fits";
+        return log<software_error, -1>( { __FILE__, __LINE__, "error from writeDiagnostics" } );
     }
+
+    mx::fits::fitsFile<float> ff;
+    eigenImage<float>         ref = m_xcorr.refIm();
+    if( !!ff.write( prefix + "_refIm.fits", ref, head ) )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "error writing " + prefix + "_refIm.fits" } );
+    }
+
+    return 0;
+}
+
+int dmPokeXCorr::rejectMeasurement( float deltaX, float deltaY, float peak )
+{
+    float xi = 0, yi = 0, pki = 0;
+    bool  invOK = ( xcorrInverted( xi, yi, pki ) == 0 );
 
     std::ostringstream msg;
     msg << "measurement rejected: delta (" << deltaX << ", " << deltaY << ") exceeds maxDelta " << m_maxDelta
-        << " pix, zero-lag correlation with reference " << xc0
-        << ". The poke response may be inverted; try changing the sign of poke_amp. Measurement stopped; " << where;
+        << " pix. ";
+
+    if( invOK && measurementInRange( xi, yi ) )
+    {
+        msg << "Inverted response confirmed: the negated poke image gives delta (" << xi << ", " << yi
+            << "). Change the sign of poke_amp. ";
+    }
+    else if( invOK )
+    {
+        msg << "The negated poke image is also out of range (" << xi << ", " << yi
+            << "), so this is not a simple sign inversion. ";
+    }
+
+    std::string prefix;
+    if( saveDiagnostics( prefix, "rejected", deltaX, deltaY, peak, xi, yi, pki ) == 0 )
+    {
+        msg << "Measurement stopped; diagnostics written to " << prefix << "_*.fits";
+    }
+    else
+    {
+        msg << "Measurement stopped; diagnostics could not be written";
+    }
 
     log<text_log>( msg.str(), logPrio::LOG_ERROR );
 

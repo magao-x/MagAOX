@@ -55,6 +55,20 @@ Safeguard added on this branch:
 - Diagnostics go to `pokecen.diagnosticsDir` (default `<basePath>/rawimages/<configName>/YYYY_MM_DD/`): FITS images `_poke`, `_raw`, `_dark`, `_dmchan`, `_dmcomb`, and `_refIm`. Each header records the deltas, cross-correlation peak and zero-lag value, poke configuration, WFS fps, stream names, `cnt0` of the WFS, poke-channel, and trigger streams, combined-DM updates and WFS frames received during the measurement, and the measurement start and end times. Those times can be matched against `camwfs` stream-writer archives.
 - `dmPokeXCorr_test` covers the range check. `writeDiagnostics()` needs live shared-memory streams and is not unit tested.
 
+## 2026-10-15 first captured rejection
+
+Diagnostics `twAlign-camwfs-wfs_20261015211742521262227_*` (21:17:42 UTC), saved locally at `/home/jrmales/tmp/twAlign-camwfs-wfs/2026_10_15`:
+
+- `POKEAMP = -0.2`, the compensating negative amplitude, so the state had flipped back since that compensation was set. `COUNTER = 85` completed measurements preceded this one in the same process.
+- The global cross-correlation maximum was a diagonal-pupil sidelobe: +0.46 at (59, 59). Its minimum was -0.67 at (-1, -1). All four pupil quadrants are anticorrelated with the reference (-0.69 to -0.83), so this is a true sign inversion with a one-pixel alignment offset. `XCZERO` was only -0.18 because the zero-lag value is very sensitive to that offset.
+- The poke-to-reference gain is unbalanced across quadrants (-3.2, -5.6, -5.6, -16.2), while the reference RMS and the raw quadrant fluxes are nearly balanced. The pyramid response differs from calibration in pupil balance as well as sign.
+- `DMTRUPD = 9489` over 4.745 s is exactly the 2000 Hz frame rate, so the loop was closed and the passive pokes were applied every frame. `WFSFRMS = 7998` against about 9490 expected shows the app's WFS monitor missed about 16% of frames.
+- Replaying mxlib's cross-correlation with the app's settings on the saved files reproduces (59.06, 59.06) with peak 6664.5 for +poke. For -poke it gives (-1.00, -1.06) with peak 9759.4.
+
+Open questions for the instrument: the telemetry deltas for counters before 85 (abrupt flip or drift), and whether the reference was reloaded (a `Got reference` line in the app's stderr) before the failure.
+
+Follow-up changes: on rejection, `dmPokeXCorr` now cross-correlates the negated poke image. When that delta is in range, the error says the inversion is confirmed and gives the inverted delta; otherwise it says this is not a simple inversion. `XCZERO` is replaced by `INVDX`, `INVDY`, `INVPEAK`, and `REASON`. A `save_diagnostics` INDI request saves the same files after the next completed measurement, so a known-good state can be captured to compare against an inverted one.
+
 ## Current verification and exit criteria
 
 - On this workstation, `make -C apps/dmPokeXCorr -j2` succeeded on this branch and left the tracked working tree clean. `git diff --check` for the three branch commits passed. These checks do not validate hardware timing.

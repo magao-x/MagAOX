@@ -7,6 +7,8 @@
 #ifndef dmPokeWFS_hpp
 #define dmPokeWFS_hpp
 
+#include <atomic>
+
 #include <mx/improc/eigenImage.hpp>
 #include <mx/improc/milkImage.hpp>
 #include <mx/improc/eigenCube.hpp>
@@ -109,7 +111,8 @@ namespace dev
   *   \endcode
   *   At the conclusion of analyzeSensor the measured signal (e.g. deltaX and deltaY) should be updated and set in m_indiP_measurement.
   *   The function \ref updateMeasurement() can be used for this.  However, the updating of the loop counter and the subsequent INDI
-  *   property update is handled automatically after that.
+  *   property update is handled automatically after that.  The measurement should first be checked with \ref measurementInRange(),
+  *   and if \ref m_saveDiagnostics is true analyzeSensor should clear it and save diagnostics with \ref writeDiagnostics().
   *
   * - Must be a telemeter with the following interface:
   *
@@ -384,6 +387,9 @@ protected:
 
     bool m_stopMeasurement {false}; ///< Used to request that the measurement in progress stop.
 
+    std::atomic<bool> m_saveDiagnostics{ false }; /**< Set by the save_diagnostics INDI request, cleared when
+                                                       diagnostics are saved after the next completed measurement. */
+
     ///@}
 
     sem_t m_imageSemaphore; ///< Semaphore used to signal that an image is ready
@@ -485,6 +491,9 @@ protected:
 
     pcf::IndiProperty m_indiP_stop; ///< Switch to request that measurement stop
     INDI_NEWCALLBACK_DECL(derivedT, m_indiP_stop);
+
+    pcf::IndiProperty m_indiP_saveDiagnostics; ///< Switch to request diagnostics after the next completed measurement
+    INDI_NEWCALLBACK_DECL( derivedT, m_indiP_saveDiagnostics );
 
     pcf::IndiProperty m_indiP_measurement; ///< Property to report the delta measurement, including the loop counter.
 
@@ -677,6 +686,8 @@ int dmPokeWFS<derivedT>::appStartup()
     CREATE_REG_INDI_NEW_TOGGLESWITCH_DERIVED( m_indiP_continuous, "continuous");
 
     CREATE_REG_INDI_NEW_REQUESTSWITCH_DERIVED( m_indiP_stop, "stop");
+
+    CREATE_REG_INDI_NEW_REQUESTSWITCH_DERIVED( m_indiP_saveDiagnostics, "save_diagnostics" );
 
     derived().template registerIndiPropertyReadOnly( m_indiP_measurement, "measurement", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
     m_indiP_measurement.add({"delta_x", 0.0});
@@ -1543,6 +1554,25 @@ INDI_NEWCALLBACK_DEFN( dmPokeWFS<derivedT>, m_indiP_stop )(const pcf::IndiProper
         {
             m_stopMeasurement = true;
         }
+    }
+
+    return 0;
+}
+
+template <class derivedT>
+INDI_NEWCALLBACK_DEFN( dmPokeWFS<derivedT>, m_indiP_saveDiagnostics )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS_DERIVED( m_indiP_saveDiagnostics, ipRecv )
+
+    if( ipRecv.find( "request" ) != true ) // this isn't valid
+    {
+        return -1;
+    }
+
+    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+    {
+        m_saveDiagnostics = true;
+        derivedT::template log<text_log>( "diagnostics will be saved after the next completed measurement" );
     }
 
     return 0;
