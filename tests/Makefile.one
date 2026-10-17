@@ -101,11 +101,12 @@ all: magaox_git_version.h $(TESTNAME) pcommand
 # The entrypoint suite launches the real app; always match its instrumentation
 # to this test build. Clear inherited make flags so a test's -B does not force
 # a rebuild of all shared dependencies; COVERAGE is passed explicitly.
-ifeq ($(notdir $(TESTNAME)),flipperCtrl_entrypoint_test)
-.PHONY: flipperCtrl_entrypoint_app
-$(TESTNAME): | flipperCtrl_entrypoint_app
-flipperCtrl_entrypoint_app:
-	MAKEFLAGS= $(MAKE) -C $(TESTS_DIR)/../apps/flipperCtrl -W flipperCtrl.cpp COVERAGE=$(COVERAGE)
+ifneq ($(filter $(notdir $(TESTNAME)),flipperCtrl_entrypoint_test streamWriter_entrypoint_test),)
+ENTRYPOINT_APP = $(patsubst %_entrypoint_test,%,$(notdir $(TESTNAME)))
+.PHONY: entrypoint_app
+$(TESTNAME): | entrypoint_app
+entrypoint_app:
+	MAKEFLAGS= $(MAKE) -C $(TESTS_DIR)/../apps/$(ENTRYPOINT_APP) -W $(ENTRYPOINT_APP).cpp COVERAGE=$(COVERAGE)
 endif
 
 $(TESTNAME): $(OBJNAME) testMain.o
