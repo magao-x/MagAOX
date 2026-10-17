@@ -29,6 +29,7 @@ apps_aoc = \
 	xt1121DCDU \
 	tcsInterface \
 	adcTracker \
+	hwpSequencer \
 	hwpTracker \
 	kTracker \
 	koolanceCtrl \
