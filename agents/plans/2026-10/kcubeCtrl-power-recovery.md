@@ -364,8 +364,9 @@ upstream dependency. The reported error locations and one-second interval agree
 with the identified path. Whitespace verification passed using
 `git diff --no-index --check /dev/null agents/plans/2026-10/kcubeCtrl-power-recovery.md`
 to include the new, untracked file. clang-format does not apply to this
-Markdown-only change. No executable verification or confirmed memory-crash
-reproduction is claimed.
+Markdown-only analysis change. At that stage, no executable verification or
+confirmed memory-crash reproduction was claimed. Subsequent offline verification
+is recorded below.
 
 
 ## Implementation record
@@ -374,7 +375,10 @@ The user approved implementation and selected a companion `tmcController` branch
 retaining MagAOX's external dependency. Both repositories use
 `jrmales/kcube-power-recovery`; MagAOX is based on the dev revision above, and the
 companion on upstream `6ba83aefadaf3ac2120e45ad7425aa6bce3aff80`. Its functional
-change is commit `8421603` (followed by documentation and formatting commits).
+change is commit `8421603`; final companion revision is `070043f` after
+documentation and formatting commits. A permanent local checkout is available at
+`/home/jrmales/Source/tmcController-working`, on the same feature branch. The
+companion remains unpushed; no remote repository was modified.
 
 ### Application decisions
 
@@ -471,6 +475,10 @@ make -C /tmp/kcube-tmcController/tests check \
 - LeakSanitizer cannot run under this environment's tracing/ptrace setup. Sanitized
   runs use `ASAN_OPTIONS=detect_leaks=0`; fake-context ownership is checked explicitly.
   No claim of leak-sanitizer or whole-process thread-sanitizer coverage is made.
+
+- Final formatted production build and both focused suites passed again.
+  `clang-format --dry-run --Werror` and `git diff --check` passed for both repositories.
+  Functional, documentation, and formatting changes are separate commits.
 
 ### Remaining operator validation
 
