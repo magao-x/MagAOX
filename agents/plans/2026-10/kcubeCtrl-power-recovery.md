@@ -1,6 +1,6 @@
 # kcubeCtrl / ttmperi power-transition and recovery analysis
 
-Date: 2026-10-17. Status: implemented on `jrmales/kcube-power-recovery`; offline validation complete, operator validation pending.
+Date: 2026-10-17. Status: implemented on `jrmales/kcube-power-recovery`; offline validation complete; operator reports several successful power cycles, targeted fault validation pending.
 
 Prompt: `ttmperi` occasionally shuts down after a USB error and sometimes crashes
 on power-on. Analyze the failures, consider recent `filterWheelCtrl` and other
@@ -378,7 +378,8 @@ companion on upstream `6ba83aefadaf3ac2120e45ad7425aa6bce3aff80`. Its functional
 change is commit `8421603`; final companion revision is `070043f` after
 documentation and formatting commits. A permanent local checkout is available at
 `/home/jrmales/Source/tmcController-working`, on the same feature branch. The
-companion remains unpushed; no remote repository was modified.
+companion was unpushed at the original implementation handoff; the agent did not
+modify a remote repository.
 
 ### Application decisions
 
@@ -480,11 +481,54 @@ make -C /tmp/kcube-tmcController/tests check \
   `clang-format --dry-run --Werror` and `git diff --check` passed for both repositories.
   Functional, documentation, and formatting changes are separate commits.
 
+### Operator power-cycle results
+
+Reported by the user on 2026-10-17 (America/Phoenix): several power cycles behaved
+well. On the first power-on, the supplied log dated 2026-10-18 showed one failed
+hardware-information read, followed by automatic recovery:
+
+| Supplied log time | Observation |
+| --- | --- |
+| 04:35:04.503551804 | POWEROFF to POWERON, then NODEVICE |
+| 04:35:04.527412876 | Both devices opened; NOTCONNECTED |
+| 04:35:04.761254862 | Transport setup completed; CONNECTED |
+| 04:35:05.760532648 | Axis 1 hardware-information read failed with -207 while actual/target remained On |
+| 04:35:05.760656311 | Recovery returned to NODEVICE without exiting |
+| 04:35:06.784245630 | Devices reopened after the approximately one-second retry interval |
+| 04:35:07.018281362 | Transport setup completed again |
+| 04:35:07.693345710 | Axis-1 initialization logged its connection information |
+
+The error is a USB read timeout: `readResponse()` applies a -200 offset to the
+FTDI read result, so -207 corresponds to -7. The
+[libftdi source](https://www.intra2net.com/en/developer/libftdi/documentation/ftdi_8c_source.html)
+returns the underlying libusb error with the text `usb bulk read failed`, and
+[libusb defines -7 as LIBUSB_ERROR_TIMEOUT](https://libusb.sourceforge.io/api-1.0/group__libusb__misc.html).
+This is a transport read timeout, distinct from the dependency's explicit -300
+overall-response-deadline result.
+
+The first CONNECTED transition was only about 0.258 seconds after the power-on
+state update. CONNECTED establishes USB/serial setup, not firmware/application
+readiness. A device that enumerates before it can answer the first APT query is a
+plausible explanation for this initial timeout; the excerpt does not prove that
+cause. It does directly demonstrate nonfatal recovery and a successful axis-1
+initialization on the next attempt, about 3.190 seconds after power-on. The excerpt
+ends before axis 2 and READY, so complete cycle success is the user's report,
+not independently established by these lines.
+
+The ERR severity is expected under the implemented policy: actual and target power
+were both On, and the timeout is logged before recovery. There is no new fatal
+`appLogic()` return. No timeout, severity, or firmware-wait code change is justified
+by this isolated recovered event. Retain the current defaults; if startup timeouts
+recur and cleaner startup is desired, an operator can evaluate a short configured
+`power.powerOnWait` using repeated cycles. One example cannot establish the required
+wait or diagnose the original memory crash.
+
 ### Remaining operator validation
 
-Deploy the companion revision before rebuilding the app. Confirm real KPZ101
-firmware replies satisfy the stricter frame checks, measure startup timing and
-perform supervised power-cycle/USB-fault checks. If the memory crash persists,
-collect the core and all-thread backtrace along with revisions and power/USB logs
-listed above. Offline tests establish the repaired lifecycle behavior, not the
-specific physical cause of the reported USB failure or a confirmed crash diagnosis.
+The reported power cycles provide initial hardware evidence for the recovery path.
+Additional supervised USB-fault checks, startup timing measurements, and exercise
+of all commands across the deployed firmware remain useful. If the memory crash
+persists, collect the core and all-thread backtrace along with revisions and
+power/USB logs listed above. These observations do not identify the physical cause
+of the timeout or confirm a diagnosis of the original memory crash. All instrument
+steps remain operator-only; this update involved local source review and documentation.
