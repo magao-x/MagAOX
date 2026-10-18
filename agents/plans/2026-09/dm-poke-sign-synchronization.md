@@ -69,6 +69,21 @@ Open questions for the instrument: the telemetry deltas for counters before 85 (
 
 Follow-up changes: on rejection, `dmPokeXCorr` now cross-correlates the negated poke image. When that delta is in range, the error says the inversion is confirmed and gives the inverted delta; otherwise it says this is not a simple inversion. `XCZERO` is replaced by `INVDX`, `INVDY`, `INVPEAK`, and `REASON`. A `save_diagnostics` INDI request saves the same files after the next completed measurement, so a known-good state can be captured to compare against an inverted one.
 
+## 2026-10-17 follow-up
+
+Operator information:
+
+- The same calibration is reloaded at every startup, so `aol1_zrespM` and `refIm` do not change between states. The reference is ruled out; the poke response itself flips.
+- The 85 measurements before the 2026-10-15 rejection had no signal because the DM was not responding (an electronics fault, after a DM restart). They do not show a mid-session flip. They all passed the 10-pixel check, so the alignment loop received noise-driven deltas.
+- A camera that has fallen behind (EDT circular buffer) is normally found through loop instability, which low alignment gain hides. Reconfiguring `camwfs` resynchronizes it, and doing so did not fix the inversion. Camera-side latency is ruled out.
+
+Remaining hypotheses: about 4-6 ms of extra latency in the DM command path (`dmcomb`, DM driver), tolerated by the low-gain alignment loop, or a real change in the pyramid's response to these pokes. The decisive test while inverted is `dmSleep=100000` and `nSettleImages=50`.
+
+Changes:
+
+- `xcorr.minPeak` (default 0.3; `<= 0` disables) rejects measurements whose normalized cross-correlation peak is below the minimum. With `normalize(true)` and no mask or window, the peak divided by the pixel count is the correlation coefficient (2026-10-15 capture: 6664.5/14400 = 0.463 and 9759.4/14400 = 0.678, against 0.456 and 0.672 computed directly). The rejection message distinguishes a confirmed inversion (negated image in range, with a valid and larger peak), no poke response (both peaks below the minimum), and neither. Headers add `XCNORM`, `INVNORM`, and `MINXCORR`.
+- `basicTimedPoke()` records the mean combined DM command (`dm01disp`) at the poke actuators when each accumulation window starts, separately by sign. Headers add `DMPLUS`, `DMMINUS`, and `DMHALFDF = (DMPLUS - DMMINUS)/2`, which should equal `POKEAMP` if the command path carries the commanded sign.
+
 ## Current verification and exit criteria
 
 - On this workstation, `make -C apps/dmPokeXCorr -j2` succeeded on this branch and left the tracked working tree clean. `git diff --check` for the three branch commits passed. These checks do not validate hardware timing.

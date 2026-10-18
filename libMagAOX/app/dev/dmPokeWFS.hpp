@@ -259,6 +259,16 @@ protected:
 
     uint64_t m_dmTriggerCnt0End{ 0 }; ///< The DM trigger stream cnt0 when the most recent measurement finished.
 
+    double m_dmPlusSum{ 0 }; /**< Sum over + pokes of the mean DM trigger stream value at the poke actuators when
+                                  accumulation starts, for the most recent measurement. */
+
+    unsigned m_dmPlusN{ 0 }; ///< Number of + pokes summed in m_dmPlusSum.
+
+    double m_dmMinusSum{ 0 }; /**< Sum over - pokes of the mean DM trigger stream value at the poke actuators when
+                                   accumulation starts, for the most recent measurement. */
+
+    unsigned m_dmMinusN{ 0 }; ///< Number of - pokes summed in m_dmMinusSum.
+
   public:
 
     /**\name MagAOXApp Interface
@@ -451,8 +461,9 @@ protected:
 
     /// Write diagnostic FITS images for the most recent measurement.
     /** Writes the poke image, the last raw WFS image, the dark, the poke DM channel, and the combined DM stream to
-     * `m_diagnosticsDir/YYYY_MM_DD/` as `<configName>_<timestamp>_<image>.fits`.  The configuration, timing, and
-     * stream counters of the most recent measurement are appended to \p head, which is written to every file.
+     * `m_diagnosticsDir/YYYY_MM_DD/` as `<configName>_<timestamp>_<image>.fits`.  The configuration, timing, stream
+     * counters, and mean combined DM command at the poke actuators for each poke sign of the most recent measurement
+     * are appended to \p head, which is written to every file.
      *
      * \returns 0 on success
      * \returns -1 on error, which is logged
@@ -1129,6 +1140,29 @@ int dmPokeWFS<derivedT>::basicTimedPoke(float pokeSign)
         ++nSettle;
     }
 
+    // Record the combined DM command at the poke actuators as accumulation starts
+    if( m_dmTriggerStreamOpen && m_dmTriggerStream.md->datatype == _DATATYPE_FLOAT &&
+        m_dmTriggerStream.md->size[0] == m_dmImage.rows() && m_dmTriggerStream.md->size[1] == m_dmImage.cols() )
+    {
+        double dmVal = 0;
+        for( size_t nn = 0; nn < m_poke_x.size(); ++nn )
+        {
+            dmVal += m_dmTriggerStream.array.F[m_poke_x[nn] + m_poke_y[nn] * m_dmTriggerStream.md->size[0]];
+        }
+        dmVal /= m_poke_x.size();
+
+        if( sign > 0 )
+        {
+            m_dmPlusSum += dmVal;
+            ++m_dmPlusN;
+        }
+        else
+        {
+            m_dmMinusSum += dmVal;
+            ++m_dmMinusN;
+        }
+    }
+
     uint32_t n = 0;
     while(n < m_nPokeImages && !(m_stopMeasurement || derived().m_shutdown))
     {
@@ -1173,6 +1207,11 @@ int dmPokeWFS<derivedT>::basicRunSensor()
         m_wfsFramesStart = m_wfsFrames;
     }
     m_dmTriggerCnt0Start = m_dmTriggerStreamOpen ? m_dmTriggerStream.md->cnt0 : 0;
+
+    m_dmPlusSum  = 0;
+    m_dmPlusN    = 0;
+    m_dmMinusSum = 0;
+    m_dmMinusN   = 0;
 
     for(unsigned nseq = 0; nseq < m_nPokeAverage; ++nseq)
     {
@@ -1361,6 +1400,11 @@ int dmPokeWFS<derivedT>::writeDiagnostics( std::string &prefix, mx::fits::fitsHe
         head.append( "WFSUSED",
                      2 * m_nPokeAverage * ( m_nSettleImages + m_nPokeImages ),
                      "WFS frames waited on in measurement" );
+        float dmPlus  = ( m_dmPlusN > 0 ) ? m_dmPlusSum / m_dmPlusN : 0;
+        float dmMinus = ( m_dmMinusN > 0 ) ? m_dmMinusSum / m_dmMinusN : 0;
+        head.append( "DMPLUS", dmPlus, "DM trigger at poke acts, + windows" );
+        head.append( "DMMINUS", dmMinus, "DM trigger at poke acts, - windows" );
+        head.append( "DMHALFDF", 0.5 * ( dmPlus - dmMinus ), "(DMPLUS-DMMINUS)/2, expect POKEAMP" );
         head.append( "TSTART", mx::sys::ISO8601DateTimeStr( m_measStart ), "measurement start [UTC]" );
         head.append( "TEND", mx::sys::ISO8601DateTimeStr( m_measEnd ), "measurement end [UTC]" );
 

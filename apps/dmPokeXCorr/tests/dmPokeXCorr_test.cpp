@@ -31,6 +31,16 @@ class dmPokeXCorr_test
     {
         return m_app.measurementInRange( deltaX, deltaY );
     }
+
+    void minXCorr( float mx )
+    {
+        m_app.m_minXCorr = mx;
+    }
+
+    bool peakValid( float normPeak )
+    {
+        return m_app.peakValid( normPeak );
+    }
 };
 
 } // namespace app
@@ -105,6 +115,35 @@ TEST_CASE( "dmPokeXCorr rejects deltas larger than maxDelta", "[dmPokeXCorr]" )
     {
         harness.maxDelta( 0 );
         REQUIRE( harness.measurementInRange( 1000, -1000 ) );
+    }
+}
+
+/// Verify that low normalized cross-correlation peaks are detected.
+/**
+ * \ingroup dmPokeXCorr_unit_test
+ */
+TEST_CASE( "dmPokeXCorr rejects peaks below minPeak", "[dmPokeXCorr]" )
+{
+    // clang-format off
+    #ifdef DMPOKEXCORR_TEST_DOXYGEN_REF
+    dmPokeXCorr::peakValid( 0 );
+    #endif
+    // clang-format on
+
+    dmPokeXCorr_test harness;
+
+    SECTION( "default minPeak is 0.3" )
+    {
+        REQUIRE( harness.peakValid( 0.68 ) );
+        REQUIRE( harness.peakValid( 0.3 ) );
+        REQUIRE_FALSE( harness.peakValid( 0.1 ) );
+        REQUIRE_FALSE( harness.peakValid( -0.5 ) );
+    }
+
+    SECTION( "minPeak <= 0 disables the check" )
+    {
+        harness.minXCorr( 0 );
+        REQUIRE( harness.peakValid( -1 ) );
     }
 }
 
