@@ -52,6 +52,11 @@ $ bash ./testMagAOX.bash
  * \ingroup application_unit_test
  */
 
+/** \defgroup kcubeCtrl_unit_test K-Cube Controller Unit Tests
+ * \brief Offline two-axis connection, power-transition, and communication recovery tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup picamCtrl_unit_test picamCtrl Unit Tests
  * \brief Offline temperature configuration and validation tests for picamCtrl.
  * \ingroup application_unit_test
