@@ -57,54 +57,91 @@ class shmimIntegrator_test : public shmimIntegrator
 {
   public:
     using shmimIntegrator::acquireAndCheckValid;
+
     using shmimIntegrator::configureAcquisition;
+
     using shmimIntegrator::findMatchingDark;
+
     using shmimIntegrator::fps;
+
     using shmimIntegrator::imageT;
+
     using shmimIntegrator::installSavedImage;
+
     using shmimIntegrator::loadImageIntoStream;
+
     using shmimIntegrator::m_activeAverage;
+
     using shmimIntegrator::m_activeGeneration;
+
     using shmimIntegrator::m_avgImage;
+
     using shmimIntegrator::m_avgTime;
+
     using shmimIntegrator::m_configuredGeneration;
+
     using shmimIntegrator::m_continuous;
+
     using shmimIntegrator::m_dark;
+
     using shmimIntegrator::m_dark2;
+
     using shmimIntegrator::m_fileSaveDir;
+
     using shmimIntegrator::m_fileSaver;
+
     using shmimIntegrator::m_fps;
+
     using shmimIntegrator::m_generation;
+
     using shmimIntegrator::m_imageCondition;
+
     using shmimIntegrator::m_imageMutex;
+
     using shmimIntegrator::m_imageValid;
+
     using shmimIntegrator::m_inFlight;
+
     using shmimIntegrator::m_nAverage;
+
     using shmimIntegrator::m_prepared;
+
     using shmimIntegrator::m_running;
+
     using shmimIntegrator::m_source;
+
     using shmimIntegrator::m_stateRevision;
+
     using shmimIntegrator::m_stateString;
+
     using shmimIntegrator::m_stateStringChanged;
+
     using shmimIntegrator::m_stateStringValid;
+
     using shmimIntegrator::m_stateStringValidOnStart;
+
     using shmimIntegrator::m_updated;
+
     using shmimIntegrator::startAcquisition;
 
-    bool             m_workersStarted{ false }; ///< Real worker loops need shutdown.
-    struct sigaction m_previousSignal{};        ///< Restored after the worker test.
+    bool m_workersStarted{ false }; ///< Real worker loops need shutdown.
+
+    struct sigaction m_previousSignal{}; ///< Restored after the worker test.
 
     /// Launch the real base loops using already-created private input streams.
     void startWorkers( const std::string &sourceName /**< [in] source stream */,
                        const std::string &darkName /**< [in] first dark stream */,
                        const std::string &dark2Name /**< [in] second dark stream */,
                        const std::string &outputName /**< [in] output stream */ );
+
     /// Join started workers and restore signal handling.
     void stopWorkers();
+
     /// Wait for a newer acknowledged generation with complete matching darks.
     bool waitReady( uint32_t width /**< [in] desired width */,
                     uint32_t height /**< [in] desired height */,
                     uint64_t after /**< [in] previous generation */ );
+
     /// Snapshot the current generation.
     uint64_t generation();
 
@@ -119,43 +156,57 @@ class shmimIntegrator_test : public shmimIntegrator
                       uint32_t width /**< [in] width */,
                       uint32_t height /**< [in] height */,
                       uint8_t  type /**< [in] datatype */ = _DATATYPE_FLOAT );
+
     /// Copy a raw source frame through the real callback.
     int sourcePixels( void *data /**< [in] source pixels */ );
+
     /// Copy a raw dark frame through the real callback.
     int darkPixels( bool second /**< [in] second dark selector */, void *data /**< [in] dark pixels */ );
+
     /// Invoke the real numeric callback with a local property.
     int number( const std::string &name /**< [in] property name */, double value /**< [in] requested value */ );
+
     /// Invoke the start/stop callback.
     int run( bool running /**< [in] start or stop */ );
+
     /// Invoke the state-source callback, optionally with validity only.
     int stateUpdate( const std::string &value /**< [in] state string */,
                      bool               valid /**< [in] state validity */,
                      bool               validityOnly /**< [in] omit current element */ = false );
+
     /// Wake a direct callback waiter without invoking any base worker.
     void stop();
+
     /// Query the output worker's restart request when the worker is not running.
     bool reconfigRequested() const;
+
     /// Attach a test metadata block for the write-flag failure check.
     void outputStream( IMAGE *image /**< [in] test-owned image */ );
 
     /// Initialize local properties, disk workspace, and averaging parameters.
     shmimIntegrator_test( unsigned average /**< [in] window length */         = 2,
                           unsigned update /**< [in] moving update interval */ = 0 );
+
     /// Stop workers and release only this fixture's resources.
     ~shmimIntegrator_test();
+
     /// Simulate the source monitor importing a descriptor.
     int source( uint32_t width /**< [in] source width */,
                 uint32_t height /**< [in] source height */,
                 uint8_t  type /**< [in] source datatype */ = _DATATYPE_FLOAT );
+
     /// Allocate and install one complete dark frame.
     int dark( bool     second /**< [in] select the second dark */,
               uint32_t width /**< [in] dark width */,
               uint32_t height /**< [in] dark height */,
               float    value /**< [in] constant pixels */ );
+
     /// Feed one constant source frame.
     int feed( float value /**< [in] constant pixels */ );
+
     /// Complete output configuration like the base frame-grabber.
     int start();
+
     /// Claim and copy an output with guards on both sides.
     std::vector<float> output();
 
@@ -392,6 +443,7 @@ uint64_t shmimIntegrator_test::generation()
 struct workerGuard
 {
     shmimIntegrator_test &m_app; ///< Fixture whose workers this guard joins.
+
     /// Join before stream owners are destroyed.
     ~workerGuard();
 };
@@ -405,25 +457,34 @@ workerGuard::~workerGuard()
 class localStream
 {
   public:
-    IMAGE       m_image{};        ///< Mapping owned by this fixture.
-    std::string m_name;           ///< Unique stream name inside a private MILK_SHM_DIR.
-    bool        m_open{ false };  ///< Mapping needs cleanup.
-    bool        m_owner{ false }; ///< Whether cleanup destroys or only closes the stream.
+    IMAGE m_image{}; ///< Mapping owned by this fixture.
+
+    std::string m_name; ///< Unique stream name inside a private MILK_SHM_DIR.
+
+    bool m_open{ false }; ///< Mapping needs cleanup.
+
+    bool m_owner{ false }; ///< Whether cleanup destroys or only closes the stream.
 
     /// Remember the name; mapping is opened separately.
     explicit localStream( const std::string &name /**< [in] stream name */ );
+
     /// Close only resources owned by this fixture.
     ~localStream();
+
     /// Create or replace a constant float image.
     void create( uint32_t width /**< [in] width */,
                  uint32_t height /**< [in] height */,
                  float    value /**< [in] pixel value */ );
+
     /// Open an existing output mapping and flush its reader semaphore.
     void open();
+
     /// Close the current mapping.
     void close();
+
     /// Notify consumers of a complete constant image.
     void post();
+
     /// Wait for one output and copy its pixels.
     std::vector<float> read();
 };

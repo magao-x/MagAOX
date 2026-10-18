@@ -84,19 +84,30 @@ class shmimIntegrator : public MagAOXApp<true>,
                         public dev::telemeter<shmimIntegrator>
 {
     friend class shmimIntegrator_test;
+
     friend class dev::shmimMonitor<shmimIntegrator>;
+
     friend class dev::shmimMonitor<shmimIntegrator, darkShmimT>;
+
     friend class dev::shmimMonitor<shmimIntegrator, dark2ShmimT>;
+
     friend class dev::frameGrabber<shmimIntegrator>;
+
     friend class dev::telemeter<shmimIntegrator>;
 
-    typedef dev::shmimMonitor<shmimIntegrator>              shmimMonitorT;
-    typedef dev::shmimMonitor<shmimIntegrator, darkShmimT>  darkMonitorT;
+    typedef dev::shmimMonitor<shmimIntegrator> shmimMonitorT;
+
+    typedef dev::shmimMonitor<shmimIntegrator, darkShmimT> darkMonitorT;
+
     typedef dev::shmimMonitor<shmimIntegrator, dark2ShmimT> dark2MonitorT;
-    typedef dev::frameGrabber<shmimIntegrator>              frameGrabberT;
-    typedef dev::telemeter<shmimIntegrator>                 telemeterT;
-    typedef float                                           realT;
-    typedef mx::improc::eigenImage<realT>                   imageT;
+
+    typedef dev::frameGrabber<shmimIntegrator> frameGrabberT;
+
+    typedef dev::telemeter<shmimIntegrator> telemeterT;
+
+    typedef float realT;
+
+    typedef mx::improc::eigenImage<realT> imageT;
 
   public:
     /// Averaged images are not flipped by the frame-grabber.
@@ -133,19 +144,25 @@ class shmimIntegrator : public MagAOXApp<true>,
     /// Committed input geometry and converter, imported only by its monitor.
     struct imageInfo
     {
-        uint32_t m_width{ 0 };                            ///< Committed width.
-        uint32_t m_height{ 0 };                           ///< Committed height.
-        size_t   m_pixels{ 0 };                           ///< Validated pixel count; zero means unavailable.
+        uint32_t m_width{ 0 }; ///< Committed width.
+
+        uint32_t m_height{ 0 }; ///< Committed height.
+
+        size_t m_pixels{ 0 }; ///< Validated pixel count; zero means unavailable.
+
         realT ( *m_pixget )( void *, size_t ){ nullptr }; ///< Converter for this allocation.
     };
 
     /// One optional dark image, owned under m_imageMutex.
     struct darkFrame
     {
-        imageInfo m_info;            ///< Descriptor for this monitor allocation.
-        imageT    m_image;           ///< Pixels copied from the dark stream.
-        bool      m_set{ false };    ///< A complete frame has been installed since allocation.
-        bool      m_failed{ false }; ///< A failed allocation gates output until a successful allocation of this dark.
+        imageInfo m_info; ///< Descriptor for this monitor allocation.
+
+        imageT m_image; ///< Pixels copied from the dark stream.
+
+        bool m_set{ false }; ///< A complete frame has been installed since allocation.
+
+        bool m_failed{ false }; ///< A failed allocation gates output until a successful allocation of this dark.
     };
 
     /// Protects all app image, configuration, readiness, and state-string data below.
@@ -154,39 +171,65 @@ class shmimIntegrator : public MagAOXApp<true>,
     /// Wakes the output worker for data, reconfiguration, or shutdown; never a data count.
     std::condition_variable m_imageCondition;
 
-    imageInfo m_source;                         ///< Committed source descriptor; never synthesized from a saved file.
-    bool      m_sourceFailed{ false };          ///< Invalid source allocation also gates saved-image publication.
-    darkFrame m_dark;                           ///< First optional correction image.
-    darkFrame m_dark2;                          ///< Second optional correction image.
+    imageInfo m_source; ///< Committed source descriptor; never synthesized from a saved file.
+
+    bool m_sourceFailed{ false }; ///< Invalid source allocation also gates saved-image publication.
+
+    darkFrame m_dark; ///< First optional correction image.
+
+    darkFrame m_dark2; ///< Second optional correction image.
+
     mx::improc::eigenCube<realT> m_accumImages; ///< Moving-average history for the prepared generation.
-    imageT                       m_avgImage;    ///< Working or completed image protected by the readiness flags.
 
-    unsigned m_nAverage{ 10 };            ///< Requested frame count, adjusted when time-based settings are prepared.
-    float    m_fps{ 0 };                  ///< Latest requested source FPS.
-    unsigned m_activeAverage{ 10 };       ///< Frame count used by the prepared buffers.
-    unsigned m_activeUpdate{ 0 };         ///< Update interval used by the prepared buffers.
-    unsigned m_nprocessed{ 0 };           ///< Burn-in count, saturated at the active window size.
-    size_t   m_currImage{ 0 };            ///< Next moving-average history slot.
-    size_t   m_sinceUpdate{ 0 };          ///< Frames accumulated since the last completed average.
-    bool     m_updated{ false };          ///< One completed but unclaimed result is available.
-    bool     m_inFlight{ false };         ///< A claimed result is being copied; preserves producer backpressure.
-    bool     m_prepared{ false };         ///< Working buffers are valid for m_generation.
-    bool     m_savedImage{ false };       ///< m_avgImage contains a complete saved image awaiting publication.
-    bool     m_stopping{ false };         ///< Shutdown gate and condition-variable wake predicate.
-    uint64_t m_generation{ 1 };           ///< Latest configuration request; every allocation advances it.
+    imageT m_avgImage; ///< Working or completed image protected by the readiness flags.
+
+    unsigned m_nAverage{ 10 }; ///< Requested frame count, adjusted when time-based settings are prepared.
+
+    float m_fps{ 0 }; ///< Latest requested source FPS.
+
+    unsigned m_activeAverage{ 10 }; ///< Frame count used by the prepared buffers.
+
+    unsigned m_activeUpdate{ 0 }; ///< Update interval used by the prepared buffers.
+
+    unsigned m_nprocessed{ 0 }; ///< Burn-in count, saturated at the active window size.
+
+    size_t m_currImage{ 0 }; ///< Next moving-average history slot.
+
+    size_t m_sinceUpdate{ 0 }; ///< Frames accumulated since the last completed average.
+
+    bool m_updated{ false }; ///< One completed but unclaimed result is available.
+
+    bool m_inFlight{ false }; ///< A claimed result is being copied; preserves producer backpressure.
+
+    bool m_prepared{ false }; ///< Working buffers are valid for m_generation.
+
+    bool m_savedImage{ false }; ///< m_avgImage contains a complete saved image awaiting publication.
+
+    bool m_stopping{ false }; ///< Shutdown gate and condition-variable wake predicate.
+
+    uint64_t m_generation{ 1 }; ///< Latest configuration request; every allocation advances it.
+
     uint64_t m_configuredGeneration{ 0 }; ///< Generation selected by configureAcquisition().
-    uint64_t m_activeGeneration{ 0 };     ///< Generation acknowledged after output stream setup.
 
-    bool        m_imageValid{ false };              ///< Published/saved image matches the current valid state string.
-    std::string m_stateString;                      ///< Current state used in saved-image filenames.
-    bool        m_stateStringValid{ false };        ///< State provider has declared the current state valid.
-    bool        m_stateStringValidOnStart{ false }; ///< State validity at the start of one-shot averaging.
-    bool        m_stateStringChanged{ false };      ///< Invalidates an integration or requests a saved-image lookup.
-    uint64_t    m_stateRevision{ 0 };               ///< Rejects disk reads overtaken by state or start/stop changes.
-    std::string m_fileSaveDir;                      ///< Startup-configured directory for saved averages.
+    uint64_t m_activeGeneration{ 0 }; ///< Generation acknowledged after output stream setup.
 
-    imageT m_claimedImage;     ///< Frame-grabber-only immutable snapshot through loadImageIntoStream().
-    bool   m_claimed{ false }; ///< Frame-grabber owns one snapshot matching its configured output.
+    bool m_imageValid{ false }; ///< Published/saved image matches the current valid state string.
+
+    std::string m_stateString; ///< Current state used in saved-image filenames.
+
+    bool m_stateStringValid{ false }; ///< State provider has declared the current state valid.
+
+    bool m_stateStringValidOnStart{ false }; ///< State validity at the start of one-shot averaging.
+
+    bool m_stateStringChanged{ false }; ///< Invalidates an integration or requests a saved-image lookup.
+
+    uint64_t m_stateRevision{ 0 }; ///< Rejects disk reads overtaken by state or start/stop changes.
+
+    std::string m_fileSaveDir; ///< Startup-configured directory for saved averages.
+
+    imageT m_claimedImage; ///< Frame-grabber-only immutable snapshot through loadImageIntoStream().
+
+    bool m_claimed{ false }; ///< Frame-grabber owns one snapshot matching its configured output.
 
   public:
     /// Initialize the optional dark monitor behavior.
@@ -292,9 +335,12 @@ class shmimIntegrator : public MagAOXApp<true>,
     int reconfig();
     ///@}
 
-    pcf::IndiProperty m_indiP_nAverage;       ///< Requested/current frame count.
-    pcf::IndiProperty m_indiP_avgTime;        ///< Requested/current averaging duration.
-    pcf::IndiProperty m_indiP_nUpdate;        ///< Requested/current update cadence.
+    pcf::IndiProperty m_indiP_nAverage; ///< Requested/current frame count.
+
+    pcf::IndiProperty m_indiP_avgTime; ///< Requested/current averaging duration.
+
+    pcf::IndiProperty m_indiP_nUpdate; ///< Requested/current update cadence.
+
     pcf::IndiProperty m_indiP_startAveraging; ///< Start/stop switch.
 
     /// Request a frame-count change.
@@ -314,7 +360,8 @@ class shmimIntegrator : public MagAOXApp<true>,
     /// Stage a changed input frame rate.
     INDI_SETCALLBACK_DECL( shmimIntegrator, m_indiP_fpsSource );
 
-    pcf::IndiProperty m_indiP_fps;         ///< Estimated output FPS.
+    pcf::IndiProperty m_indiP_fps; ///< Estimated output FPS.
+
     pcf::IndiProperty m_indiP_stateSource; ///< Subscription to the state string and validity.
 
     /// Track state changes and invalidate obsolete images/lookups.
