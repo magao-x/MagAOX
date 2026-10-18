@@ -519,3 +519,11 @@ instrument scheduling/load still requires operator validation.
 - Retaining the last complete dark after disconnect and first-dark-only correction
   in moving mode remain unchanged policies. Hardware verification and any policy
   changes remain separate follow-up work.
+
+### Commit record
+
+- `ad2dbee4`: functional implementation, regression suite, and this engineering
+  record. The shared `dev` bases remain unchanged.
+- The following documentation-only change registers the application test group
+  in `tests/groups.dox`. Declaration-spacing cleanup is kept separate from the
+  functional change.
