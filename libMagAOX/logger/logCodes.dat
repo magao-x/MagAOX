@@ -60,6 +60,8 @@ telem_psfacq             20066    telem_psfacq
 telem_pokecenter         20067    telem_pokecenter
 telem_pokeloop           20068    telem_pokeloop
 telem_observer           20070    telem_observer
+telem_pupilfit           20071    telem_pupilfit
+telem_pupilfit_state     20072    telem_pupilfit_state
 
 telem_rhusb              20100    telem_rhusb
 

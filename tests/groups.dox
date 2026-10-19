@@ -47,6 +47,11 @@ $ bash ./testMagAOX.bash
  * \ingroup unit_test
  */
 
+/** \defgroup pupilFit_unit_test Pupil Fit Unit Tests
+ * \brief Offline fitting, per-image telemetry, derived averages, and failure handling.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup filterWheelCtrl_unit_test Filter Wheel Controller Unit Tests
  * \brief Offline communication recovery, homing, and power-transition tests.
  * \ingroup application_unit_test
