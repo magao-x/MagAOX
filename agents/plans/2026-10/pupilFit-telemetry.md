@@ -67,7 +67,11 @@ the audit recommendations and requested this plan followed by implementation.
   parsing, missing/non-finite/corrupted payload rejection, repeated identical fits,
   reference identification, state callbacks, averaging resets and failed-frame guards.
 - `make -C apps/pupilFit` and `make -C utils/logdump` passed. No instrument connections
-  or commands were used. Documentation and final formatting verification remain.
+  or commands were used. Full-file Doxygen documentation and clang-format verification are complete.
+- Final builds and the optimized test suite passed again after formatting (420 assertions,
+  7 cases). A direct logdump CLI check against FlatBuffers-generated binary fixtures
+  verified text and JSON output for three pupils, four pupils, and an invalid attempt;
+  Python JSON parsing confirmed exact expected means and a null invalid-fit average.
 
 ## Implementation notes
 
@@ -82,3 +86,25 @@ the audit recommendations and requested this plan followed by implementation.
   declarations retain inline parameter documentation.
 - Existing upstream frame delivery and telemetry logger buffering behavior are retained.
   This records each attempted fit, rather than promising capture of every camera exposure.
+
+
+## Affected files
+
+- `apps/pupilFit/pupilFit.hpp`: event recording, state snapshots, callback ordering,
+  synchronized reference/fit state, active-pupil averages, and full-file documentation.
+- `apps/pupilFit/pupilFitter.hpp`: input/result validation, error propagation, reference
+  edge allocation, and full-file documentation.
+- `apps/pupilFit/tests/pupilFit_test.cpp`: offline regression tests replacing the placeholder.
+- `libMagAOX/logger/types/telem_pupilfit.hpp`: compact measurement records, verification,
+  metadata accessors, and derived text/JSON averages.
+- `libMagAOX/logger/types/telem_pupilfit_state.hpp`: configuration and setpoint records.
+- `libMagAOX/logger/types/schemas/telem_pupilfit.fbs` and
+  `libMagAOX/logger/types/schemas/telem_pupilfit_state.fbs`: wire schemas and field documentation.
+- `libMagAOX/logger/types/telem.cpp` and `libMagAOX/logger/logCodes.dat`: telemetry registration.
+- `libMagAOX/Makefile`: header dependencies.
+- `tests/Makefile.one`: FlatBuffers linking for JSON checks.
+- `tests/groups.dox`: application-unit-test grouping.
+- `agents/plans/2026-10/pupilFit-telemetry.md`: design, execution notes, and validation record.
+
+Generated logger/FlatBuffers files are build products and are not committed. No changes
+are needed in logdump itself: its existing dispatch uses the new type's formatters.

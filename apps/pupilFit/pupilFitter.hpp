@@ -23,53 +23,96 @@ namespace app
 template <typename realT>
 struct pupilFitter
 {
+    /// Workspace for one pupil region at the input sampling.
     mx::improc::eigenImage<realT> m_quad;
+
+    /// Magnified, normalized, then thresholded pupil workspace.
     mx::improc::eigenImage<realT> m_quadMag;
+
+    /// Rebinned edge mask for one pupil region.
     mx::improc::eigenImage<realT> m_circ;
+
+    /// Magnified edge mask used to measure the pupil circle.
     mx::improc::eigenImage<realT> m_circMag;
 
-    unsigned m_rows{ 0 }; ///< [in] the size of a quad, in rows
-    unsigned m_cols{ 0 }; ///< [in] the size of a quad, in cols
+    unsigned m_rows{ 0 }; ///< Allocated pupil-region height in pixels.
+    unsigned m_cols{ 0 }; ///< Allocated pupil-region width in pixels.
 
     int   m_numPupils{ 4 }; ///< the number of pupils.  Default is 4, 3 is also supported.
+
+    /// Sorted-pixel quantile used to estimate the local background.
     float m_bgMedIndex{ 0.1867 };
     float m_pupMedIndex{ 0.6867 }; ///< the index of the illuminated pupil median in a sorted array.
 
+
+    /// Background estimates in active quadrant order.
     float m_bg[4]   = { 0, 0, 0, 0 };
+
+    /// Illuminated-pupil intensity estimates in active quadrant order.
     float m_med[4]  = { 0, 0, 0, 0 };
+
+    /// Measured full-image x centers in active quadrant order.
     float m_avgx[4] = { 0, 0, 0, 0 };
+
+    /// Measured full-image y centers in active quadrant order.
     float m_avgy[4] = { 0, 0, 0, 0 };
+
+    /// Measured pupil radii in input-image pixels.
     float m_avgr[4] = { 0, 0, 0, 0 };
 
+
+    /// Threshold applied after local background subtraction and normalization.
     float m_thresh{ 0.5 };
 
+
+    /// Sorted magnified pixels used to estimate intensity quantiles.
     std::vector<realT> m_pixs;
 
+
+    /// Construct an unallocated fitter with the default four-pupil geometry.
     pupilFitter()
     {
     }
 
-    int setSize( unsigned rows, ///< [in] the new size of a quad, in rows
-                 unsigned cols  ///< [in] the new size of a quad, in cols
-    );
+    /// Allocate workspaces for a pupil region and its tenfold magnification.
+    int setSize( unsigned rows /**< [in] region height in pixels */,
+                 unsigned cols /**< [in] region width in pixels */ );
 
-    /// Returns the quadrant starting coordinates
-    int quadCoords( size_t &i0,    ///< [out] the i coordinate of the lower-left corner of quad
-                    size_t &j0,    ///< [out] the j coordinate of the lower-left corner of auad
-                    int     quadNo ///< [in] the quadrant number
-    );
 
-    int threshold( mx::improc::eigenImage<realT> &im );
+    /// Return the starting coordinates of a region in the full image.
+    int quadCoords( size_t &i0 /**< [out] first row of the pupil region */,
+                    size_t &j0 /**< [out] first column of the pupil region */,
+                    int quadNo /**< [in] zero-based pupil index */ );
 
-    int getQuad( mx::improc::eigenImage<realT> &quad, mx::improc::eigenImage<realT> &im, int quadNo );
 
-    int putQuad( mx::improc::eigenImage<realT> &im, mx::improc::eigenImage<realT> &quad, int quadNo );
+    /// Replace normalized intensities with a binary pupil mask.
+    int threshold( mx::improc::eigenImage<realT> &im /**< [in/out] normalized pupil image */ );
 
-    int outerpix( float &avgx, float &avgy, float &avgr, int quadNo );
 
-    int fit( mx::improc::eigenImage<realT> &im, mx::improc::eigenImage<realT> &edged );
+    /// Extract one pupil region from a full image.
+    int getQuad( mx::improc::eigenImage<realT> &quad /**< [out] preallocated region workspace */,
+                 mx::improc::eigenImage<realT> &im /**< [in] full input image */,
+                 int quadNo /**< [in] zero-based pupil index */ );
 
-    // int emitRegion( const std::string fname );
+
+    /// Copy a processed pupil region back into a full image.
+    int putQuad( mx::improc::eigenImage<realT> &im /**< [out] preallocated full image */,
+                 mx::improc::eigenImage<realT> &quad /**< [in] processed pupil region */,
+                 int quadNo /**< [in] zero-based pupil index */ );
+
+
+    /// Measure the full-image center and radius from the magnified pupil edge.
+    int outerpix( float &avgx /**< [out] full-image x center */,
+                  float &avgy /**< [out] full-image y center */,
+                  float &avgr /**< [out] radius at input-image sampling */,
+                  int quadNo /**< [in] zero-based pupil index */ );
+
+
+    /// Fit every active pupil, rejecting invalid dimensions, settings, pixels, or measurements.
+    /** \returns 0 on success, -1 on failure. On failure, callers must discard all measurement arrays. */
+    int fit( mx::improc::eigenImage<realT> &im /**< [in/out] full image, replaced by thresholded pupils */,
+             mx::improc::eigenImage<realT> &edged /**< [out] resized full-image edge mask */ );
+
 };
 
 template <typename realT>

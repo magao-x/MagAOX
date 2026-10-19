@@ -32,22 +32,31 @@ namespace MagAOX
 namespace app
 {
 
+/// Shared-memory monitor tag for the reference image.
 struct refShmimT
 {
+   /// Return the configuration section for the reference image.
    static std::string configSection()
    {
       return "refShmim";
    };
 
+
+   /// Return the INDI prefix for the reference image monitor.
    static std::string indiPrefix()
    {
       return "ref";
    };
 };
 
+
+/// Configured default setpoint selection.
 #define USEDEFSET (0)
+/// Reference-image setpoint selection.
 #define USEREFIM (1)
+/// User setpoint selection.
 #define USEUSERSET (2)
+/// Active setpoint provenance after capturing a live fit.
 #define USECURRENTSET (3)
 
 /// The MagAO-X Pyramid Pupil Fitter
@@ -66,16 +75,21 @@ class pupilFit : public MagAOXApp<true>, public dev::shmimMonitor<pupilFit>, pub
    friend class dev::telemeter<pupilFit>;
 
 public:
-   //The base shmimMonitor type
+   /// Live-image shared-memory monitor base.
    typedef dev::shmimMonitor<pupilFit> shmimMonitorT;
 
+
+   /// Reference-image shared-memory monitor base.
    typedef dev::shmimMonitor<pupilFit,refShmimT> refShmimMonitorT;
 
-   //The base frameGrabber type
+
+   /// Offset-output frame-grabber base.
    typedef dev::frameGrabber<pupilFit> frameGrabberT;
 
-   //The base telemeter type
+
+   /// Binary telemetry recorder base.
    typedef dev::telemeter<pupilFit> telemeterT;
+
 
    ///Floating point type in which to do all calculations.
    typedef float realT;
@@ -90,75 +104,147 @@ public:
 
 protected:
 
-   /** \name Configurable Parameters
+   /** \name Configurable Parameters - Data
      *@{
      */
 
    std::string m_threshShmimName {"camwfs_thresh"}; ///<The name of the image stream for the thresholded images.  Default is camwfs_thresh.
    std::string m_edgeShmimName {"camwfs_edge"}; ///<The name of the image stream for the edge images.  Default is camwfs_edge.
 
+
+   /// Normalized intensity threshold used to identify pupil edges.
    float m_threshold {0.5};
 
    int m_numPupils {4}; ///< The number of pupils.  Default is 4.  3 is also supported.
    ///@}
 
+   /// Cached reference pixels, protected by the INDI mutex.
    mx::improc::eigenImage<float> m_refIm;
+
+   /// Live image workspace, replaced by the thresholded image during fitting.
    mx::improc::eigenImage<float> m_fitIm;
+
+   /// Workspace containing the fitted pupil edges.
    mx::improc::eigenImage<float> m_edgeIm;
 
+
+   /// Shared fitter for live and reference images; accessed under the INDI mutex.
    pupilFitter<realT> m_fitter;
 
+
+   /// Owned output image stream for thresholded pixels.
    IMAGE m_threshShmim;
+
+   /// Whether the threshold stream must be destroyed on reallocation or shutdown.
    bool m_threshShmimConnected {false};
 
+
+   /// Owned output image stream for fitted edges.
    IMAGE m_edgeShmim;
+
+   /// Whether the edge stream must be destroyed on reallocation or shutdown.
    bool m_edgeShmimConnected {false};
 
+
+   /// Configured default x center setpoint for pupil 1, in full-image pixels.
    float m_defSetx1 {29.5};
+
+   /// Configured default y center setpoint for pupil 1, in full-image pixels.
    float m_defSety1 {29.5};
+
+   /// Configured default diameter setpoint for pupil 1, in full-image pixels.
    float m_defSetD1 {56.0};
 
+
+   /// Configured default x center setpoint for pupil 2, in full-image pixels.
    float m_defSetx2 {89.5};
+
+   /// Configured default y center setpoint for pupil 2, in full-image pixels.
    float m_defSety2 {29.5};
+
+   /// Configured default diameter setpoint for pupil 2, in full-image pixels.
    float m_defSetD2 {56.0};
 
+
+   /// Configured default x center setpoint for pupil 3, in full-image pixels.
    float m_defSetx3 {29.5};
+
+   /// Configured default y center setpoint for pupil 3, in full-image pixels.
    float m_defSety3 {89.5};
+
+   /// Configured default diameter setpoint for pupil 3, in full-image pixels.
    float m_defSetD3 {56.0};
 
+
+   /// Configured default x center setpoint for pupil 4, in full-image pixels.
    float m_defSetx4 {89.5};
+
+   /// Configured default y center setpoint for pupil 4, in full-image pixels.
    float m_defSety4 {89.5};
+
+   /// Configured default diameter setpoint for pupil 4, in full-image pixels.
    float m_defSetD4 {56.0};
 
+
+   /// User-mode x center setpoint for pupil 1, in full-image pixels.
    float m_userSetx1 {29.5};
+
+   /// User-mode y center setpoint for pupil 1, in full-image pixels.
    float m_userSety1 {29.5};
+
+   /// User-mode diameter setpoint for pupil 1, in full-image pixels.
    float m_userSetD1 {56.0};
 
+
+   /// User-mode x center setpoint for pupil 2, in full-image pixels.
    float m_userSetx2 {89.5};
+
+   /// User-mode y center setpoint for pupil 2, in full-image pixels.
    float m_userSety2 {29.5};
+
+   /// User-mode diameter setpoint for pupil 2, in full-image pixels.
    float m_userSetD2 {56.0};
 
+
+   /// User-mode x center setpoint for pupil 3, in full-image pixels.
    float m_userSetx3 {29.5};
+
+   /// User-mode y center setpoint for pupil 3, in full-image pixels.
    float m_userSety3 {89.5};
+
+   /// User-mode diameter setpoint for pupil 3, in full-image pixels.
    float m_userSetD3 {56.0};
 
+
+   /// User-mode x center setpoint for pupil 4, in full-image pixels.
    float m_userSetx4 {89.5};
+
+   /// User-mode y center setpoint for pupil 4, in full-image pixels.
    float m_userSety4 {89.5};
+
+   /// User-mode diameter setpoint for pupil 4, in full-image pixels.
    float m_userSetD4 {56.0};
 
+
+   /// Requested source of reference setpoints, applied on the next allocation.
    int m_setPointSource {USEDEFSET};
+
 
    /// Mode that supplied the active setpoints; unknown until image allocation.
    uint8_t m_activeSetPointSource {255};
 
+
    /// Cached reference image metadata, updated with the reference pixels.
    uint64_t m_refFrame {0};
+
 
    /// Acquisition timestamp of the cached reference image.
    timespec m_refAcquired {0, 0};
 
+
    /// Identifies temporal averaging resets, including resets while already enabled.
    uint64_t m_averageWindow {0};
+
 
    /// Last serialized state, used to omit unchanged snapshots between periodic records.
    std::vector<uint8_t> m_lastFitState;
@@ -166,169 +252,366 @@ protected:
 
    bool m_refUpdated {false}; ///< Flag set if the online reference update is used.
 
+
+   /// Active x center setpoint for pupil 1, in full-image pixels.
    float m_setx1 {29.5};
+
+   /// Active y center setpoint for pupil 1, in full-image pixels.
    float m_sety1 {29.5};
+
+   /// Active diameter setpoint for pupil 1, in full-image pixels.
    float m_setD1 {56.0};
 
+
+   /// Active x center setpoint for pupil 2, in full-image pixels.
    float m_setx2 {89.5};
+
+   /// Active y center setpoint for pupil 2, in full-image pixels.
    float m_sety2 {29.5};
+
+   /// Active diameter setpoint for pupil 2, in full-image pixels.
    float m_setD2 {56.0};
 
+
+   /// Active x center setpoint for pupil 3, in full-image pixels.
    float m_setx3 {29.5};
+
+   /// Active y center setpoint for pupil 3, in full-image pixels.
    float m_sety3 {89.5};
+
+   /// Active diameter setpoint for pupil 3, in full-image pixels.
    float m_setD3 {56.0};
 
+
+   /// Active x center setpoint for pupil 4, in full-image pixels.
    float m_setx4 {89.5};
+
+   /// Active y center setpoint for pupil 4, in full-image pixels.
    float m_sety4 {89.5};
+
+   /// Active diameter setpoint for pupil 4, in full-image pixels.
    float m_setD4 {56.0};
 
+
+   /// Across-pupil x offset supplied to the frame grabber.
    float m_avg_dx {0};
+
+   /// Across-pupil y offset supplied to the frame grabber.
    float m_avg_dy {0};
 
+
+   /// Whether successful live fits enter the current temporal averaging window.
    bool m_averaging {false};
+
+   /// Number of successful live fits accumulated in the current averaging window.
    size_t m_navg {0};
 
+
+   /// Sum of pupil 1 x center samples in the current window.
    float m_avgx1_accum {0};
+
+   /// Sum of squared pupil 1 x center samples in the current window.
    float m_avgx1sq_accum {0};
 
+
+   /// Sum of pupil 1 y center samples in the current window.
    float m_avgy1_accum {0};
+
+   /// Sum of squared pupil 1 y center samples in the current window.
    float m_avgy1sq_accum {0};
 
+
+   /// Sum of pupil 1 diameter samples in the current window.
    float m_avgD1_accum {0};
+
+   /// Sum of squared pupil 1 diameter samples in the current window.
    float m_avgD1sq_accum {0};
 
+
+   /// Sum of pupil 1 median intensity samples in the current window.
    float m_avgmed1_accum {0};
+
+   /// Sum of squared pupil 1 median intensity samples in the current window.
    float m_avgmed1sq_accum {0};
 
+
+   /// Temporal mean of pupil 1 x center in the current window.
    float m_avgx1 {0};
+
+   /// Population variance of pupil 1 x center in the current window.
    float m_varx1 {0};
 
+
+   /// Temporal mean of pupil 1 y center in the current window.
    float m_avgy1 {0};
+
+   /// Population variance of pupil 1 y center in the current window.
    float m_vary1 {0};
 
+
+   /// Temporal mean of pupil 1 diameter in the current window.
    float m_avgD1 {0};
+
+   /// Population variance of pupil 1 diameter in the current window.
    float m_varD1 {0};
 
+
+   /// Temporal mean of pupil 1 median intensity in the current window.
    float m_avgmed1 {0};
+
+   /// Population variance of pupil 1 median intensity in the current window.
    float m_varmed1 {0};
 
+
+   /// Sum of pupil 2 x center samples in the current window.
    float m_avgx2_accum {0};
+
+   /// Sum of squared pupil 2 x center samples in the current window.
    float m_avgx2sq_accum {0};
 
+
+   /// Sum of pupil 2 y center samples in the current window.
    float m_avgy2_accum {0};
+
+   /// Sum of squared pupil 2 y center samples in the current window.
    float m_avgy2sq_accum {0};
 
+
+   /// Sum of pupil 2 diameter samples in the current window.
    float m_avgD2_accum {0};
+
+   /// Sum of squared pupil 2 diameter samples in the current window.
    float m_avgD2sq_accum {0};
 
+
+   /// Sum of pupil 2 median intensity samples in the current window.
    float m_avgmed2_accum {0};
+
+   /// Sum of squared pupil 2 median intensity samples in the current window.
    float m_avgmed2sq_accum {0};
 
+
+   /// Temporal mean of pupil 2 x center in the current window.
    float m_avgx2 {0};
+
+   /// Population variance of pupil 2 x center in the current window.
    float m_varx2 {0};
 
+
+   /// Temporal mean of pupil 2 y center in the current window.
    float m_avgy2 {0};
+
+   /// Population variance of pupil 2 y center in the current window.
    float m_vary2 {0};
 
+
+   /// Temporal mean of pupil 2 diameter in the current window.
    float m_avgD2 {0};
+
+   /// Population variance of pupil 2 diameter in the current window.
    float m_varD2 {0};
 
+
+   /// Temporal mean of pupil 2 median intensity in the current window.
    float m_avgmed2 {0};
+
+   /// Population variance of pupil 2 median intensity in the current window.
    float m_varmed2 {0};
 
+
+   /// Sum of pupil 3 x center samples in the current window.
    float m_avgx3_accum {0};
+
+   /// Sum of squared pupil 3 x center samples in the current window.
    float m_avgx3sq_accum {0};
 
+
+   /// Sum of pupil 3 y center samples in the current window.
    float m_avgy3_accum {0};
+
+   /// Sum of squared pupil 3 y center samples in the current window.
    float m_avgy3sq_accum {0};
 
+
+   /// Sum of pupil 3 diameter samples in the current window.
    float m_avgD3_accum {0};
+
+   /// Sum of squared pupil 3 diameter samples in the current window.
    float m_avgD3sq_accum {0};
 
+
+   /// Sum of pupil 3 median intensity samples in the current window.
    float m_avgmed3_accum {0};
+
+   /// Sum of squared pupil 3 median intensity samples in the current window.
    float m_avgmed3sq_accum {0};
 
+
+   /// Temporal mean of pupil 3 x center in the current window.
    float m_avgx3 {0};
+
+   /// Population variance of pupil 3 x center in the current window.
    float m_varx3 {0};
 
+
+   /// Temporal mean of pupil 3 y center in the current window.
    float m_avgy3 {0};
+
+   /// Population variance of pupil 3 y center in the current window.
    float m_vary3 {0};
 
+
+   /// Temporal mean of pupil 3 diameter in the current window.
    float m_avgD3 {0};
+
+   /// Population variance of pupil 3 diameter in the current window.
    float m_varD3 {0};
 
+
+   /// Temporal mean of pupil 3 median intensity in the current window.
    float m_avgmed3 {0};
+
+   /// Population variance of pupil 3 median intensity in the current window.
    float m_varmed3 {0};
 
+
+   /// Sum of pupil 4 x center samples in the current window.
    float m_avgx4_accum {0};
+
+   /// Sum of squared pupil 4 x center samples in the current window.
    float m_avgx4sq_accum {0};
 
+
+   /// Sum of pupil 4 y center samples in the current window.
    float m_avgy4_accum {0};
+
+   /// Sum of squared pupil 4 y center samples in the current window.
    float m_avgy4sq_accum {0};
 
+
+   /// Sum of pupil 4 diameter samples in the current window.
    float m_avgD4_accum {0};
+
+   /// Sum of squared pupil 4 diameter samples in the current window.
    float m_avgD4sq_accum {0};
 
+
+   /// Sum of pupil 4 median intensity samples in the current window.
    float m_avgmed4_accum {0};
+
+   /// Sum of squared pupil 4 median intensity samples in the current window.
    float m_avgmed4sq_accum {0};
 
+
+   /// Temporal mean of pupil 4 x center in the current window.
    float m_avgx4 {0};
+
+   /// Population variance of pupil 4 x center in the current window.
    float m_varx4 {0};
 
+
+   /// Temporal mean of pupil 4 y center in the current window.
    float m_avgy4 {0};
+
+   /// Population variance of pupil 4 y center in the current window.
    float m_vary4 {0};
 
+
+   /// Temporal mean of pupil 4 diameter in the current window.
    float m_avgD4 {0};
+
+   /// Population variance of pupil 4 diameter in the current window.
    float m_varD4 {0};
 
+
+   /// Temporal mean of pupil 4 median intensity in the current window.
    float m_avgmed4 {0};
+
+   /// Population variance of pupil 4 median intensity in the current window.
    float m_varmed4 {0};
 
+
+   /// Sum of the across-pupil mean x center samples in the current window.
    float m_avgxAll_accum {0};
+
+   /// Sum of squared the across-pupil mean x center samples in the current window.
    float m_avgxAllsq_accum {0};
 
+
+   /// Sum of the across-pupil mean y center samples in the current window.
    float m_avgyAll_accum {0};
+
+   /// Sum of squared the across-pupil mean y center samples in the current window.
    float m_avgyAllsq_accum {0};
 
+
+   /// Sum of the across-pupil mean diameter samples in the current window.
    float m_avgDAll_accum {0};
+
+   /// Sum of squared the across-pupil mean diameter samples in the current window.
    float m_avgDAllsq_accum {0};
 
+
+   /// Sum of the across-pupil mean median intensity samples in the current window.
    float m_avgmedAll_accum {0};
+
+   /// Sum of squared the across-pupil mean median intensity samples in the current window.
    float m_avgmedAllsq_accum {0};
 
+
+   /// Temporal mean of the across-pupil mean x center in the current window.
    float m_avgxAll {0};
+
+   /// Population variance of the across-pupil mean x center in the current window.
    float m_varxAll {0};
 
+
+   /// Temporal mean of the across-pupil mean y center in the current window.
    float m_avgyAll {0};
+
+   /// Population variance of the across-pupil mean y center in the current window.
    float m_varyAll {0};
 
+
+   /// Temporal mean of the across-pupil mean diameter in the current window.
    float m_avgDAll {0};
+
+   /// Population variance of the across-pupil mean diameter in the current window.
    float m_varDAll {0};
 
+
+   /// Temporal mean of the across-pupil mean median intensity in the current window.
    float m_avgmedAll {0};
+
+   /// Population variance of the across-pupil mean median intensity in the current window.
    float m_varmedAll {0};
 
 public:
    /// Default c'tor.
    pupilFit();
 
+
    /// D'tor, declared and defined for noexcept.
    ~pupilFit() noexcept;
 
+
+   /// Register image, fitting, calibration, and telemetry configuration options.
    virtual void setupConfig();
+
 
    /// Implementation of loadConfig logic, separated for testing.
    /** This is called by loadConfig().
      */
    int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
 
+
+   /// Load configuration and request shutdown if it is invalid.
    virtual void loadConfig();
 
+
    /// Startup function
-   /**
-     *
-     */
    virtual int appStartup();
+
 
    /// Implementation of the FSM for pupilFit.
    /**
@@ -337,29 +620,33 @@ public:
      */
    virtual int appLogic();
 
+
    /// Shutdown the app.
-   /**
-     *
-     */
    virtual int appShutdown();
 
-   // shmimMonitor interface:
-   int allocate( const dev::shmimT &);
 
-   int processImage( void* curr_src,
-                     const dev::shmimT &
-                    );
+   /// Allocate live-image workspaces and apply the requested reference source.
+   int allocate( const dev::shmimT &tag /**< [in] live-image monitor dispatch tag */ );
 
-   // shmimMonitor interface for referenc:
-   int allocate( const refShmimT &);
 
-   int processImage( void* curr_src,
-                     const refShmimT &
-                   );
+   /// Fit, record, publish, and optionally accumulate one live image.
+   /** Failed fits are recorded but do not update outputs or temporal statistics. */
+   int processImage( void *curr_src /**< [in] current float image pixels */,
+                     const dev::shmimT &tag /**< [in] live-image monitor dispatch tag */ );
+
+
+   /// Allocate the reference-image cache.
+   int allocate( const refShmimT &tag /**< [in] reference-image monitor dispatch tag */ );
+
+
+   /// Cache reference pixels and source metadata, then request setpoint reallocation.
+   int processImage( void *curr_src /**< [in] current float reference pixels */,
+                     const refShmimT &tag /**< [in] reference-image monitor dispatch tag */ );
 
 protected:
 
-   bool m_updated {false}; //tells the f.g. that there is an actual image, not just a sem timeout
+   /// Whether an offset sample is waiting for the frame grabber; protected by the INDI mutex.
+   bool m_updated {false};
 
    sem_t m_smSemaphore {0}; ///< Semaphore used to synchronize the fg thread and the sm thread.
 
@@ -377,6 +664,7 @@ public:
      */
    int configureAcquisition();
 
+
    /// Implementation of the framegrabber fps interface
    /**
      * \todo this needs to infer the stream fps and return it
@@ -393,6 +681,7 @@ public:
      */
    int startAcquisition();
 
+
    /// Implementation of the framegrabber acquireAndCheckValid interface
    /**
      * \returns 0 on success
@@ -400,12 +689,14 @@ public:
      */
    int acquireAndCheckValid();
 
+
    /// Implementation of the framegrabber loadImageIntoStream interface
    /**
      * \returns 0 on success
      * \returns -1 on error
      */
-   int loadImageIntoStream( void * dest  /**< [in] */);
+   int loadImageIntoStream( void * dest  /**< [out] two-float destination for mean x/y offsets */);
+
 
    /// Implementation of the framegrabber reconfig interface
    /**
@@ -422,29 +713,65 @@ protected:
      * @{
      */
 
+   /// INDI threshold setting and request target.
    pcf::IndiProperty m_indiP_thresh;
 
+
+   /// Apply a threshold request and record the new fitting state.
+   /** \param ipRecv received INDI property; the callback macro declares this parameter. */
    INDI_NEWCALLBACK_DECL(pupilFit, m_indiP_thresh);
 
+
+   /// INDI start/reset/stop control for temporal statistics.
    pcf::IndiProperty m_indiP_averaging;
+
+   /// Start/reset or stop a temporal averaging window and record its boundary.
+   /** \param ipRecv received INDI property; the callback macro declares this parameter. */
    INDI_NEWCALLBACK_DECL(pupilFit, m_indiP_averaging);
 
+
+   /// Read-only INDI active pupil count.
    pcf::IndiProperty m_indiP_numPupils;
 
+
+   /// Read-only INDI measurements and active setpoints for pupil 1.
    pcf::IndiProperty m_indiP_quad1;
+
+   /// Read-only INDI measurements and active setpoints for pupil 2.
    pcf::IndiProperty m_indiP_quad2;
+
+   /// Read-only INDI measurements and active setpoints for pupil 3.
    pcf::IndiProperty m_indiP_quad3;
+
+   /// Read-only INDI measurements and active setpoints for pupil 4.
    pcf::IndiProperty m_indiP_quad4;
 
+
+   /// Read-only INDI across-pupil means and mean setpoint offsets.
    pcf::IndiProperty m_indiP_avg;
 
+
+   /// INDI request to reload the selected setpoints.
    pcf::IndiProperty m_indiP_reload;
+
+   /// Request reallocation using the selected reference source.
+   /** \param ipRecv received INDI property; the callback macro declares this parameter. */
    INDI_NEWCALLBACK_DECL(pupilFit, m_indiP_reload);
 
+
+   /// INDI request to capture the current measured positions as setpoints.
    pcf::IndiProperty m_indiP_update;
+
+   /// Capture current measured positions as active setpoints and record them.
+   /** \param ipRecv received INDI property; the callback macro declares this parameter. */
    INDI_NEWCALLBACK_DECL(pupilFit, m_indiP_update);
 
+
+   /// INDI selection of the requested reference source.
    pcf::IndiProperty m_indiP_refmode;
+
+   /// Select the requested reference source and record the pending change.
+   /** \param ipRecv received INDI property; the callback macro declares this parameter. */
    INDI_NEWCALLBACK_DECL(pupilFit, m_indiP_refmode);
 
    ///@}
@@ -456,8 +783,10 @@ protected:
    /// Check periodic state and frame-grabber telemetry; fit records are never replayed.
    int checkRecordTimes();
 
+
    /// Record a state snapshot with the INDI mutex held by the caller.
    int recordFitState( bool force = false /**< [in] emit even when unchanged */ );
+
 
    /// Fit and record one image with the INDI mutex held by the caller.
    int fitImage( mx::improc::eigenImage<float> &im /**< [in/out] input, replaced by thresholded pixels */,
@@ -466,14 +795,18 @@ protected:
                  const timespec &acquired /**< [in] source acquisition timestamp */,
                  bool reference /**< [in] true for reference-image calibration */ );
 
+
    /// Update across-pupil means and offsets while holding the INDI mutex.
    void updatePupilAverages();
+
 
    /// Record a periodic state snapshot; checkRecordTimes holds the INDI mutex.
    int recordTelem( const telem_pupilfit_state *tag /**< [in] telemetry dispatch tag */ );
 
 
-   int recordTelem( const telem_fgtimings * );
+
+   /// Force a frame-grabber timing record for the periodic telemetry dispatcher.
+   int recordTelem( const telem_fgtimings *tag /**< [in] telemetry dispatch tag */ );
 
    ///@}
 };

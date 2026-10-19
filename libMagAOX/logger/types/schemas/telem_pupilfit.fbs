@@ -3,21 +3,33 @@ namespace MagAOX.logger;
 
 struct PupilFitResult
 {
+    /// Full-image x center in input pixels.
     x:float;
+    /// Full-image y center in input pixels.
     y:float;
+    /// Diameter in input pixels.
     D:float;
+    /// Illuminated-pupil intensity quantile in input units.
     med:float;
+    /// Background intensity quantile in input units.
     bg:float;
 }
 
 table Telem_pupilfit_fb
 {
+    /// Source stream counter sampled at processing entry.
     frame:ulong;
+    /// Seconds of the source acquisition timestamp.
     acq_sec:long;
+    /// Nanoseconds of the source acquisition timestamp.
     acq_nsec:int;
+    /// True for reference-image fits; false for live-image fits.
     reference:bool;
+    /// Number of active pupils, either three or four.
     num_pupils:ubyte;
+    /// True only when every active pupil fit succeeded.
     valid:bool;
+    /// Active quadrants in order; empty for failed attempts.
     pupils:[PupilFitResult];
 }
 
