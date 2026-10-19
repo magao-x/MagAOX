@@ -2329,8 +2329,10 @@ int streamWriter::recordTelem( const telem_saving_state * )
 
 int streamWriter::recordSavingState( bool force )
 {
-    static int16_t  lastState     = -1;
-    static uint64_t currSaveStart = -1;
+    static int16_t  lastState   = -1;
+    static uint64_t lastFrameNo = -1;
+
+    uint64_t frameNo = m_currSaveStopFrameNo;
 
     int16_t state;
     if( m_writing == WRITING || m_writing == START_WRITING ||
@@ -2339,12 +2341,12 @@ int streamWriter::recordSavingState( bool force )
     else
         state = 0;
 
-    if( state != lastState || m_currSaveStart != currSaveStart || force )
+    if( state != lastState || frameNo != lastFrameNo || force )
     {
-        telem<telem_saving_state>( { state, m_currSaveStart } );
+        telem<telem_saving_state>( { state, frameNo } );
 
-        lastState     = state;
-        currSaveStart = m_currSaveStart;
+        lastState   = state;
+        lastFrameNo = frameNo;
     }
 
     return 0;

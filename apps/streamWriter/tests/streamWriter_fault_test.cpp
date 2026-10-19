@@ -798,6 +798,95 @@ TEST_CASE( "streamWriter schedules telemetry in every writing state and honors h
     }
 }
 
+/** \brief Report source-frame counters and steady activity across chunks, ring wrap, and stop completion.
+ * \ingroup streamWriter_unit_test */
+TEST_CASE( "streamWriter saving telemetry describes activity and source frames", "[streamWriter]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::recordSavingState(true));
+    XWCTEST_DOXYGEN_REF(streamWriter::appLogic());
+    XWCTEST_DOXYGEN_REF(streamWriter::doEncode());
+#endif
+    // clang-format on
+    Fixture f;
+    auto   &app = f.m_app;
+
+    SECTION( "scheduled state uses source counters independently of circular-buffer offsets" )
+    {
+        f.properties();
+        app.m_writing             = WRITING;
+        app.m_currSaveStart       = 734;
+        app.m_currSaveStopFrameNo = 1760;
+        g_faults.m_due            = true;
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( g_faults.m_telemetry.size() == 1 );
+        REQUIRE( GetSaving_state_change_fb( g_faults.m_telemetry.back().data() )->frameNo() == 1760 );
+
+        g_faults.m_telemetry.clear();
+        app.m_currSaveStart = 735;
+        REQUIRE( app.recordSavingState() == 0 );
+        REQUIRE( g_faults.m_telemetry.empty() );
+
+        app.m_currSaveStart       = 0;
+        app.m_currSaveStopFrameNo = 1761;
+        REQUIRE( app.recordSavingState() == 0 );
+        REQUIRE( g_faults.m_telemetry.size() == 1 );
+        auto &bytes = g_faults.m_telemetry.back();
+        REQUIRE( GetSaving_state_change_fb( bytes.data() )->state() == 1 );
+        REQUIRE( GetSaving_state_change_fb( bytes.data() )->frameNo() == 1761 );
+        REQUIRE( telem_saving_state::msgString( bytes.data(), bytes.size() ) ==
+                 "Saving state: active; save-window end frame: 1761" );
+
+        g_faults.m_due = true;
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( g_faults.m_telemetry.size() == 2 );
+        REQUIRE( GetSaving_state_change_fb( g_faults.m_telemetry.back().data() )->frameNo() == 1761 );
+
+        app.m_writing = NOT_WRITING;
+        REQUIRE( app.recordSavingState() == 0 );
+        REQUIRE( g_faults.m_telemetry.size() == 3 );
+        auto &stopped = g_faults.m_telemetry.back();
+        REQUIRE( telem_saving_state::msgString( stopped.data(), stopped.size() ) ==
+                 "Saving state: inactive; save-window end frame: 1761" );
+    }
+    SECTION( "chunk snapshots remain active until the final stop flush completes" )
+    {
+        f.buffers();
+        reinterpret_cast<uint16_t *>( app.m_rawImageCircBuff )[2] = 23;
+        auto *timing                                              = app.m_timingCircBuff + 10;
+        timing[0]                                                 = 1760;
+        timing[1] = timing[3] = 100;
+        timing[2] = timing[4]     = 1;
+        app.m_writing             = WRITING;
+        app.m_currSaveStart       = 2;
+        app.m_currSaveStop        = 3;
+        app.m_currSaveStopFrameNo = 1760;
+        REQUIRE( app.doEncode() == 0 );
+        REQUIRE( g_faults.m_telemetry.size() == 3 );
+        for( size_t index : { 0u, 2u } )
+        {
+            const auto *state = GetSaving_state_change_fb( g_faults.m_telemetry[index].data() );
+            REQUIRE( state->state() == 1 );
+            REQUIRE( state->frameNo() == 1760 );
+        }
+        REQUIRE( logs( "Saving started" ) == 0 );
+        REQUIRE( logs( "Saving stopped" ) == 0 );
+
+        g_faults.m_telemetry.clear();
+        app.m_writing             = STOP_WRITING;
+        app.m_currSaveStopFrameNo = timing[0] = 1761;
+        timing[2] = timing[4] = 2;
+        REQUIRE( app.doEncode() == 0 );
+        REQUIRE( app.m_writing == NOT_WRITING );
+        REQUIRE( g_faults.m_telemetry.size() == 3 );
+        REQUIRE( GetSaving_state_change_fb( g_faults.m_telemetry[0].data() )->state() == 1 );
+        REQUIRE( GetSaving_state_change_fb( g_faults.m_telemetry[2].data() )->state() == 0 );
+        REQUIRE( GetSaving_state_change_fb( g_faults.m_telemetry[2].data() )->frameNo() == 1761 );
+        REQUIRE( logs( "Saving stopped at frame number 1761" ) == 1 );
+    }
+}
+
 /** \brief Exercise startup and worker checks at every failing dependency boundary.
  * \ingroup streamWriter_unit_test */
 TEST_CASE( "streamWriter startup and worker health report dependency failures", "[streamWriter]" )

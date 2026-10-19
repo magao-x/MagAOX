@@ -30,9 +30,21 @@ struct telem_saving_state : public saving_state_change
 
    static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
 
+    /// Format a state snapshot without implying that saving has just started or stopped.
+    static std::string msgString( void             *msgBuffer /**< [in] serialized saving-state payload */,
+                                  flatlogs::msgLenT len /**< [in] unused payload length */ );
 };
 
 
+
+inline std::string telem_saving_state::msgString( void *msgBuffer, flatlogs::msgLenT len )
+{
+    static_cast<void>( len );
+    auto *state = GetSaving_state_change_fb( msgBuffer );
+
+    return std::string( "Saving state: " ) + ( state->state() == 0 ? "inactive" : "active" ) +
+           "; save-window end frame: " + std::to_string( state->frameNo() );
+}
 
 } //namespace logger
 } //namespace MagAOX
