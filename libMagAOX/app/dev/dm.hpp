@@ -1,8 +1,6 @@
 /** \file dm.hpp
  * \brief The MagAO-X generic deformable mirror controller.
  *
- * \author Jared R. Males (jaredmales@gmail.com)
- *
  * \ingroup app_files
  */
 
@@ -23,18 +21,21 @@ namespace app
 namespace dev
 {
 
+/// Get the ImageStreamIO type code, or zero for an unsupported type.
 template <typename typeT>
 constexpr uint8_t ImageStreamTypeCode()
 {
     return 0;
 }
 
+/// Get the ImageStreamIO code for single-precision DM commands.
 template <>
 constexpr uint8_t ImageStreamTypeCode<float>()
 {
     return _DATATYPE_FLOAT;
 }
 
+/// Get the ImageStreamIO code for double-precision DM commands.
 template <>
 constexpr uint8_t ImageStreamTypeCode<double>()
 {
@@ -49,7 +50,7 @@ constexpr uint8_t ImageStreamTypeCode<double>()
  *
  * - Must be a dev::shmimMonitor<derivedT>
  *
- * - Must NOT call dev::shmimMonitor<derivedT>::setupConfog and dev::shmimMonitor<derivedT>::loadConfig.  These are
+ * - Must NOT call dev::shmimMonitor<derivedT>::setupConfig and dev::shmimMonitor<derivedT>::loadConfig.  These are
  *   handled by this class.
  *
  * - Must expose the following interface
@@ -71,7 +72,7 @@ constexpr uint8_t ImageStreamTypeCode<double>()
  *       typedef dev::dm<derivedT, realT> dmT;
  *   \endcode
  *
- * - Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`, and `udpdateINDI`
+ * - Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`, and `updateINDI`
  *   functions must be placed in the derived class's functions of the same name. For convenience the
  *   following macros are defined to provide error checking:
  *   \code
@@ -93,13 +94,13 @@ class dm
     typedef mx::verbose::vvv verboseT;
 
   protected:
-    /** \name Configurable Parameters
+    /** \name Configurable Parameters - Data
      * @{
      */
 
     std::string m_calibPath; ///< The path to this DM's calibration files.
     std::string m_flatPath;  ///< The path to this DM's flat files (usually the same as calibPath)
-    std::string m_testPath;  ///< The path to this DM's test files (default is calibPath/tests;
+    std::string m_testPath;  ///< The path to this DM's test files (default is calibPath/tests).
 
     std::string m_actMaskPath; ///< The file name of the actuator mask for this DM
 
@@ -128,16 +129,16 @@ class dm
 
     float m_percThreshold{ 0.98 }; ///<  Threshold on percentage of frames an actuator is saturated over an interval.
 
-    float m_intervalSatThreshold{ 0.50 }; /**< Threshold on percentage of actuators which exceed
-                                               percThreshold in an interval.*/
+    /// Fraction of actuators exceeding percThreshold required to count an excessive-saturation interval.
+    float m_intervalSatThreshold{ 0.50 };
 
-    int m_intervalSatCountThreshold{ 10 }; /**< Threshold on number of consecutive intervals
-                                                the intervalSatThreshold is exceeded. */
+    /// Number of consecutive excessive-saturation intervals required before opening configured loops.
+    int m_intervalSatCountThreshold{ 10 };
 
     std::vector<std::string> m_satTriggerDevice; ///< Device(s) with a toggle switch to toggle on saturation trigger.
 
-    std::vector<std::string> m_satTriggerProperty; /**< Property with a toggle switch to toggle on saturation trigger,
-                                                        one per entry in satTriggerDevice.*/
+    /// Toggle-switch properties to clear after excessive saturation, paired with satTriggerDevice.
+    std::vector<std::string> m_satTriggerProperty;
 
     ///@}
 
@@ -146,6 +147,7 @@ class dm
 
     int m_numChannels{ 0 }; ///< The number of dmcomb channels found as part of allocation.
 
+    /// Owned mappings of the numbered main channels; auxiliary sources are opened only when clearing.
     std::vector<mx::improc::milkImage<realT> *> m_channels;
 
     std::map<std::string, std::string> m_flatCommands; ///< Map of flat file name to full path
@@ -157,10 +159,11 @@ class dm
     IMAGE m_flatImageStream;  ///< The ImageStreamIO shared memory buffer for the flat.
     bool  m_flatSet{ false }; ///< Flag indicating whether the flat command has been set.
 
+    /// Shared-memory actuator mask used to restrict loaded flat and test commands.
     mx::improc::milkImage<realT> m_actMask;
 
     std::map<std::string, std::string> m_testCommands; ///< Map of test file name to full path
-    std::string                        m_testCurrent;
+    std::string                        m_testCurrent;  ///< Name of the currently loaded test command.
 
     mx::improc::eigenImage<realT> m_testCommand;         ///< Data storage for the test command
     bool                          m_testLoaded{ false }; ///< Flag indicating whether a test command is loaded in memory
@@ -168,21 +171,21 @@ class dm
     IMAGE m_testImageStream;  ///< The ImageStreamIO shared memory buffer for the test.
     bool  m_testSet{ false }; ///< Flag indicating whether the test command has been set.
 
-    mx::improc::eigenImage<uint8_t> m_instSatMap; /**< The instantaneous saturation map, 0/1, set by the commandDM()
-                                    function of the derived class.*/
+    /// Instantaneous actuator saturation flags populated by derivedT::commandDM().
+    mx::improc::eigenImage<uint8_t> m_instSatMap;
 
-    mx::improc::eigenImage<uint16_t> m_accumSatMap; /**< The accumulated saturation map, which acccumulates for
-                                                     m_satAvgInt then is publised as a 0/1 image. */
+    /// Per-actuator saturation counts accumulated during m_satAvgInt milliseconds.
+    mx::improc::eigenImage<uint16_t> m_accumSatMap;
 
-    mx::improc::eigenImage<float> m_satPercMap; /**< Map of the percentage of time each actuator was
-                                                     saturated during the avg. interval.*/
+    /// Per-actuator fraction of saturated commands during the latest accumulation interval.
+    mx::improc::eigenImage<float> m_satPercMap;
 
     IMAGE m_satImageStream;     ///< The ImageStreamIO shared memory buffer for the sat map.
     IMAGE m_satPercImageStream; ///< The ImageStreamIO shared memory buffer for the sat percentage map.
 
-    int  m_overSatAct{ 0 };         // counter
-    int  m_intervalSatExceeds{ 0 }; // counter
-    bool m_intervalSatTrip{ 0 };    // flag to trip the loop opening
+    int  m_overSatAct{ 0 };         ///< Actuators exceeding the saturation percentage threshold in the latest interval.
+    int  m_intervalSatExceeds{ 0 }; ///< Consecutive accumulation intervals exceeding the saturation threshold.
+    bool m_intervalSatTrip{ 0 };    ///< Pending request to open configured loops after persistent saturation.
 
     mx::improc::milkImage<realT> m_outputShape; ///< The true output shape after saturation.
 
@@ -222,52 +225,40 @@ class dm
      */
     ~dm();
 
-    /// Get the
-    /**
-     * \returns the current value of
+    /** \name Configurable Parameters
+     * @{
      */
+
+    /// Get the calibration directory.
+    /** \returns the current value of m_calibPath */
     const std::string &calibPath() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the flat-command directory.
+    /** \returns the current value of m_flatPath */
     const std::string &flatPath() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the test-command directory.
+    /** \returns the current value of m_testPath */
     const std::string &testPath() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the default flat-command name.
+    /** \returns the current value of m_flatDefault */
     const std::string &flatDefault() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the default test-command name.
+    /** \returns the current value of m_testDefault */
     const std::string &testDefault() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the flat-command stream name.
+    /** \returns the current value of m_shmimFlat */
     const std::string &shmimFlat() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the test-command stream name.
+    /** \returns the current value of m_shmimTest */
     const std::string &shmimTest() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the saturation-map stream name.
+    /** \returns the current value of m_shmimSat */
     const std::string &shmimSat() const;
 
     /// Get the stream name for saturation percentage
@@ -288,16 +279,12 @@ class dm
      */
     int satThreadPrio() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the desaturated output-shape stream name.
+    /** \returns the current value of m_shmimShape */
     const std::string &shmimShape() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the desaturated delta-command stream name.
+    /** \returns the current value of m_shmimDelta */
     const std::string &shmimDelta() const;
 
     /// Get the DM Width
@@ -348,21 +335,31 @@ class dm
      */
     const std::vector<std::string> &satTriggerProperty() const;
 
+    /// Get the calibration directory relative to the application calibration root.
     const std::string &calibRelDir() const;
 
+    /// Get the discovered number of numbered main channels.
     int numChannels() const;
 
+    /// Get the instantaneous actuator saturation flags.
     const mx::improc::eigenImage<uint8_t> &instSatMap() const;
 
+    /// Get the accumulated actuator saturation counts.
     const mx::improc::eigenImage<uint16_t> &accumSatMap() const;
 
+    /// Get each actuator's saturation fraction over the accumulation interval.
     const mx::improc::eigenImage<float> &satPercMap() const;
 
+    /// Get the configured names of delta-command channels.
     const std::vector<std::string> &deltaChannels() const;
 
+    /// Get indices of channels treated as fixed rather than delta commands.
     const std::vector<size_t> &notDeltas() const;
 
+    /// Get the combined non-delta command calculated by makeDelta().
     const mx::improc::eigenImage<float> &totalFlat() const;
+
+    ///@}
 
     /// Setup the configuration system
     /**
@@ -446,8 +443,8 @@ class dm
     int whilePowerOff();
 
     /// Find the DM comb channels
-    /** Introspectively finds all dmXXdispYY channels, zeroes them, and raises the semapahore
-     * on the last to cause dmcomb to update.
+    /** Opens numbered main channels and classifies their delta-command membership.
+     * Auxiliary and other suffixed streams are excluded.
      */
     int findDMChannels();
 
@@ -456,11 +453,12 @@ class dm
      * \returns 0 on success
      * \returns -1 if incorrect size or data type in stream.
      */
-    int allocate( const dev::shmimT &sp );
+    int allocate( const dev::shmimT &sp /**< [in] Monitored stream tag. */ );
 
     /// Called by shmimMonitor when a new DM command is available.  This is just a pass-through to
     /// derivedT::commandDM(char*).
-    int processImage( void *curr_src, const dev::shmimT &sp );
+    int processImage( void              *curr_src /**< [in] Current combined command pixels. */,
+                      const dev::shmimT &sp /**< [in] Monitored stream tag. */ );
 
     /// Calls derived()->initDM()
     /**
@@ -469,7 +467,7 @@ class dm
      */
     int baseInitDM();
 
-    /// Calls derived()->releaseDM() and then 0s all channels and the sat map.
+    /// Calls derived()->releaseDM() and then zeros main/auxiliary channels and the saturation map.
     /** This is called by the relevant INDI callback
      *
      * \returns 0 on success
@@ -524,7 +522,7 @@ class dm
      * and loads the command in the local memory.  Calls setTest if the test
      * is currently set.
      */
-    int loadTest( const std::string &target );
+    int loadTest( const std::string &target /**< [in] Name used to look up the test-command file. */ );
 
     /// Send the current test command to the DM
     /** Writes the command to the designated shmim.
@@ -542,9 +540,13 @@ class dm
      */
     int zeroTest();
 
-    /// Zero all channels
-    /**
-     * \returns 0 on sucess
+    /// Zero all numbered main channels and their existing, compatible `_aux` sources.
+    /** Missing auxiliary sources are normal. Incompatible sources are left unchanged
+     * and reported as errors after the main channels are cleared. This does not coordinate with writers;
+     * commands written after the clear are the writer's responsibility. Only the last
+     * main channel's semaphore is posted, unless nosem is true.
+     *
+     * \returns 0 on success
      * \returns \<0 on an error
      */
     int zeroAll( bool nosem = false /**< [in] [optional] if true then the semaphore
@@ -588,9 +590,9 @@ class dm
 
     pcf::IndiProperty m_indiP_flat; ///< Property used to set and report the current flat
 
-    pcf::IndiProperty m_indiP_init;
-    pcf::IndiProperty m_indiP_zero;
-    pcf::IndiProperty m_indiP_release;
+    pcf::IndiProperty m_indiP_init;    ///< Request to initialize the DM hardware.
+    pcf::IndiProperty m_indiP_zero;    ///< Request to send the hardware zero command.
+    pcf::IndiProperty m_indiP_release; ///< Request to release the DM hardware and clear commands.
 
     pcf::IndiProperty m_indiP_flats;     ///< INDI Selection switch containing the flat files.
     pcf::IndiProperty m_indiP_flatShmim; ///< Publish the shmim being used for the flat
@@ -600,7 +602,7 @@ class dm
     pcf::IndiProperty m_indiP_testShmim; ///< Publish the shmim being used for the test command
     pcf::IndiProperty m_indiP_setTest;   ///< INDI toggle switch to set the current test pattern.
 
-    pcf::IndiProperty m_indiP_zeroAll;
+    pcf::IndiProperty m_indiP_zeroAll; ///< Request to clear main channels and auxiliary command sources.
 
   public:
     /// The static callback function to be registered for initializing the DM.
@@ -620,10 +622,10 @@ class dm
      * \returns -1 on error.
      */
     int newCallBack_init( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
-                                                                    the the new property request.*/
+                                                                    the new property request.*/
     );
 
-    /// The static callback function to be registered for initializing the DM.
+    /// Dispatch the request to zero the DM hardware.
     /**
      * \returns 0 on success.
      * \returns -1 on error.
@@ -631,7 +633,7 @@ class dm
     static int st_newCallBack_zero( void *app,                      /**< [in] a pointer to this, will be
                                                                               static_cast-ed to derivedT.*/
                                     const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
-                                                                              the the new property request.*/
+                                                                              the new property request.*/
     );
 
     /// The callback called by the static version, to actually process the new request.
@@ -643,7 +645,7 @@ class dm
         const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the
         the new property request.*/ );
 
-    /// The static callback function to be registered for initializing the DM.
+    /// Dispatch the request to release the DM hardware and clear its commands.
     /**
      * \returns 0 on success.
      * \returns -1 on error.
@@ -651,7 +653,7 @@ class dm
     static int st_newCallBack_release( void *app,                      /**< [in] a pointer to this, will be
                                                                                  static_cast-ed to derivedT.*/
                                        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
-                                                                                 the the new property request.*/
+                                                                                 the new property request.*/
     );
 
     /// The callback called by the static version, to actually process the new request.
@@ -680,16 +682,15 @@ class dm
      * \returns -1 on error.
      */
     int newCallBack_flats(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new property request.*/ );
 
     /// The static callback function to be registered for setting the flat
     /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    static int st_newCallBack_setFlat(
-        void                    *app,   ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+    static int st_newCallBack_setFlat( void                    *app,   /**< [in] Pointer to this, cast to derivedT. */
+                                       const pcf::IndiProperty &ipRecv /**< [in] New INDI property request. */
     );
 
     /// The callback called by the static version, to actually process the new request.
@@ -698,16 +699,15 @@ class dm
      * \returns -1 on error.
      */
     int newCallBack_setFlat(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new property request.*/ );
 
     /// The static callback function to be registered for selecting the test file
     /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    static int st_newCallBack_tests(
-        void                    *app,   ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+    static int st_newCallBack_tests( void                    *app,   /**< [in] Pointer to this, cast to derivedT. */
+                                     const pcf::IndiProperty &ipRecv /**< [in] New INDI property request. */
     );
 
     /// The callback called by the static version, to actually process the new request.
@@ -716,7 +716,7 @@ class dm
      * \returns -1 on error.
      */
     int newCallBack_tests(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new property request.*/ );
 
     /// The static callback function to be registered for setting the test shape
     /**
@@ -726,7 +726,7 @@ class dm
     static int st_newCallBack_setTest( void *app,                      /**< [in] a pointer to this, will be
                                                                                  static_cast-ed to derivedT.*/
                                        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
-                                                                                 the the new property request.*/
+                                                                                 the new property request.*/
     );
 
     /// The callback called by the static version, to actually process the new request.
@@ -743,9 +743,8 @@ class dm
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    static int st_newCallBack_zeroAll(
-        void                    *app,   ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+    static int st_newCallBack_zeroAll( void                    *app,   /**< [in] Pointer to this, cast to derivedT. */
+                                       const pcf::IndiProperty &ipRecv /**< [in] New INDI property request. */
     );
 
     /// The callback for the zeroAll toggle switch, called by the static version
@@ -754,7 +753,7 @@ class dm
      * \returns -1 on error.
      */
     int newCallBack_zeroAll(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new property request.*/ );
 
     /// Update the INDI properties for this device controller
     /** You should call this once per main loop.
@@ -771,6 +770,7 @@ class dm
     // clang-format off
     #ifdef XWC_DMTIMINGS //clang-format on
 
+    /// Index type used by optional controller timing sample buffers.
     typedef int32_t cbIndexT;
 
     /// Timing markers for total command processing, saturation posting, and saturation update intervals.
@@ -831,6 +831,7 @@ class dm
     #endif // clang-format on
 
   private:
+    /// Get the concrete controller used by the CRTP interface.
     derivedT &derived()
     {
         return *static_cast<derivedT *>( this );
@@ -2796,59 +2797,98 @@ int dm<derivedT, realT>::zeroAll( bool nosem )
         return 0;
     }
 
-    IMAGE imageStream;
+    int auxiliaryError = 0;
 
     for( int n = 0; n < m_numChannels; ++n )
     {
         char nstr[16];
         snprintf( nstr, sizeof( nstr ), "%02d", n );
-        std::string shmimN = derived().m_shmimName + nstr;
-
-        if( ImageStreamIO_openIm( &imageStream, shmimN.c_str() ) != 0 )
+        // Clear the persistent source before its destination; sources are not extra main channels.
+        for( const char *suffix : { "_aux", "" } )
         {
-            derivedT::template log<text_log>( "could not connect to channel " + shmimN, logPrio::LOG_WARNING );
-            continue;
-        }
+            bool        auxiliary = suffix[0] != '\0';
+            std::string shmimN    = derived().m_shmimName + nstr + suffix;
 
-        if( imageStream.md->size[0] != m_dmWidth )
-        {
+            if( auxiliary )
+            {
+                // Avoid ImageStreamIO's error output for normally absent auxiliary sources.
+                char filename[200];
+                if( ImageStreamIO_filename( filename, sizeof( filename ), shmimN.c_str() ) != IMAGESTREAMIO_SUCCESS )
+                {
+                    derivedT::template log<software_error>(
+                        { "could not construct auxiliary channel path " + shmimN } );
+                    auxiliaryError = -1;
+                    continue;
+                }
+                int fd = open( filename, O_RDWR );
+                if( fd < 0 )
+                {
+                    if( errno == ENOENT )
+                    {
+                        continue;
+                    }
+                    derivedT::template log<software_error>( { errno, "could not open auxiliary channel " + shmimN } );
+                    auxiliaryError = -1;
+                    continue;
+                }
+                close( fd );
+            }
+
+            IMAGE imageStream{};
+            if( ImageStreamIO_openIm( &imageStream, shmimN.c_str() ) != 0 )
+            {
+                derivedT::template log<text_log>( "could not connect to channel " + shmimN, logPrio::LOG_WARNING );
+                if( auxiliary )
+                {
+                    auxiliaryError = -1;
+                    continue;
+                }
+                continue;
+            }
+
+            if( imageStream.md->size[0] != m_dmWidth || imageStream.md->size[1] != m_dmHeight ||
+                ( auxiliary && ( imageStream.md->location != -1 || imageStream.md->naxis != 2 ||
+                                 imageStream.md->datatype != m_dmDataType ) ) )
+            {
+                ImageStreamIO_closeIm( &imageStream );
+                derivedT::template log<text_log>( "memory location, shape or data type mismatch between " + shmimN +
+                                                      " and configured DM",
+                                                  logPrio::LOG_ERROR );
+                if( auxiliary )
+                {
+                    auxiliaryError = -1;
+                    continue;
+                }
+                derived().updateSwitchIfChanged( m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE );
+                return -1;
+            }
+
+            imageStream.md->write = 1;
+            memset( imageStream.array.raw, 0, m_dmWidth * m_dmHeight * sizeof( realT ) );
+
+            clock_gettime( CLOCK_REALTIME, &imageStream.md->writetime );
+            imageStream.md->atime = imageStream.md->writetime;
+            imageStream.md->cnt0++;
+            imageStream.md->write = 0;
+
+            if( !auxiliary && n == m_numChannels - 1 && !nosem )
+            {
+                ImageStreamIO_sempost( &imageStream, -1 );
+            }
+
             ImageStreamIO_closeIm( &imageStream );
-            derivedT::template log<text_log>( "width mismatch between " + shmimN + " and configured DM",
-                                              logPrio::LOG_ERROR );
-            derived().updateSwitchIfChanged( m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE );
-            return -1;
         }
-
-        if( imageStream.md->size[1] != m_dmHeight )
-        {
-            ImageStreamIO_closeIm( &imageStream );
-            derivedT::template log<text_log>( "height mismatch between " + shmimN + " and configured DM",
-                                              logPrio::LOG_ERROR );
-            derived().updateSwitchIfChanged( m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE );
-            return -1;
-        }
-
-        imageStream.md->write = 1;
-        memset( imageStream.array.raw, 0, m_dmWidth * m_dmHeight * sizeof( realT ) );
-
-        clock_gettime( CLOCK_REALTIME, &imageStream.md->writetime );
-
-        // Set the image acquisition timestamp
-        imageStream.md->atime = imageStream.md->writetime;
-
-        imageStream.md->cnt0++;
-        imageStream.md->write = 0;
-
-        // Raise the semaphore on last one.
-        if( n == m_numChannels - 1 && !nosem )
-        {
-            ImageStreamIO_sempost( &imageStream, -1 );
-        }
-
-        ImageStreamIO_closeIm( &imageStream );
     }
 
-    derivedT::template log<text_log>( "all channels zeroed", logPrio::LOG_NOTICE );
+    if( auxiliaryError == 0 )
+    {
+        derivedT::template log<text_log>( "all channels zeroed", logPrio::LOG_NOTICE );
+    }
+    else
+    {
+        derivedT::template log<text_log>( "main channels zeroed; not all auxiliary sources could be cleared",
+                                          logPrio::LOG_ERROR );
+    }
 
     derived().updateSwitchIfChanged( m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE );
 
@@ -2871,7 +2911,7 @@ int dm<derivedT, realT>::zeroAll( bool nosem )
         return rv;
     }
 
-    return 0;
+    return auxiliaryError;
 }
 
 template <class derivedT, typename realT>

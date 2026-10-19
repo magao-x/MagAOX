@@ -1,6 +1,5 @@
 /** \file logMeta.cpp
  * \brief Declares and defines the logMeta class and related classes.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup logger_files
  *
@@ -50,6 +49,7 @@ logMetaDetail logMemberAccessor( flatlogs::eventCodeT ec,
    }
 }*/
 
+/// Return the stable unavailable-value sentinel.
 const std::string &logMeta::unavailableValue()
 {
     static const std::string value = "NOT AVAILABLE";
@@ -57,6 +57,7 @@ const std::string &logMeta::unavailableValue()
     return value;
 }
 
+/// Verify a raw entry using its registered event schema.
 bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
 {
     if( log == nullptr )
@@ -227,6 +228,9 @@ bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
     case eventCodes::TELEM_DMSPECK:
         verified = telem_dmspeck::verify( logBuff, len );
         break;
+    case eventCodes::TELEM_DMSYNCO:
+        verified = telem_dmsynco::verify( logBuff, len );
+        break;
     case eventCodes::TELEM_FGTIMINGS:
         verified = telem_fgtimings::verify( logBuff, len );
         break;
@@ -282,6 +286,7 @@ bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
     return verified;
 }
 
+/// Build the ordinary or hierarchical FITS keyword.
 std::string logMeta::fitsKeyword() const
 {
     std::string keyw;
@@ -302,31 +307,37 @@ std::string logMeta::fitsKeyword() const
     return keyw;
 }
 
+/// Initialize the metadata selection and formatting from a specification.
 logMeta::logMeta( const logMetaSpec &lms )
 {
     setLog( lms );
 }
 
+/// Return the selected telemetry device.
 const std::string &logMeta::device()
 {
     return m_spec.device;
 }
 
+/// Return the configured FITS keyword.
 const std::string &logMeta::keyword()
 {
     return m_spec.keyword;
 }
 
+/// Return the FITS header comment.
 const std::string &logMeta::comment()
 {
     return m_spec.comment;
 }
 
+/// Return the reason the most recent lookup was unavailable.
 const std::string &logMeta::unavailableReason() const
 {
     return m_unavailableReason;
 }
 
+/// Resolve the log member accessor and select default formatting.
 int logMeta::setLog( const logMetaSpec &lms )
 {
     m_spec   = lms;
@@ -395,6 +406,7 @@ int logMeta::setLog( const logMetaSpec &lms )
     return 0;
 }
 
+/// Resolve the metadata value over an exposure interval.
 std::string logMeta::value( logMap<verboseT>          &lm,
                             const flatlogs::timespecX &stime,
                             const flatlogs::timespecX &atime,
@@ -418,6 +430,7 @@ std::string logMeta::value( logMap<verboseT>          &lm,
     }
 }
 
+/// Format a numeric state or continuous measurement for the requested interval.
 std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                   const flatlogs::timespecX &stime,
                                   const flatlogs::timespecX &atime,
@@ -955,6 +968,7 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
     return m_invalidValue;
 }
 
+/// Resolve a string-valued state over the requested interval.
 std::string logMeta::valueString( logMap<verboseT>          &lm,
                                   const flatlogs::timespecX &stime,
                                   const flatlogs::timespecX &atime,
@@ -989,11 +1003,13 @@ std::string logMeta::valueString( logMap<verboseT>          &lm,
     return val;
 }
 
+/// Build a FITS card containing the unavailable-value sentinel.
 mx::fits::fitsHeaderCard<logMeta::verboseT> logMeta::unavailableCard() const
 {
     return mx::fits::fitsHeaderCard<verboseT>( fitsKeyword(), unavailableValue(), m_spec.comment );
 }
 
+/// Build the typed FITS card, retaining unavailable-data diagnostics.
 mx::fits::fitsHeaderCard<logMeta::verboseT>
 logMeta::card( logMap<verboseT> &lm, const flatlogs::timespecX &stime, const flatlogs::timespecX &atime, double maxGap )
 {

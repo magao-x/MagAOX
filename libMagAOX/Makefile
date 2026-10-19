@@ -68,6 +68,7 @@ INCLUDEDEPS= \
 	logger/types/telem_coretemps.hpp \
 	logger/types/telem_dmmodes.hpp \
 	logger/types/telem_dmspeck.hpp \
+	logger/types/telem_dmsynco.hpp \
 	logger/types/telem_drivetemps.hpp \
 	logger/types/telem_fgtimings.hpp \
 	logger/types/telem_flowrpm.hpp \
@@ -160,6 +161,7 @@ libMagAOX.a: libMagAOX.hpp.gch $(OBJS)
 
 logger/logMeta.o: logger/logMap.hpp logger/logMap.cpp logger/logMeta.hpp logger/logMeta.cpp logger/generated/logTypes.hpp
 logger/logMap.o: logger/logMap.hpp logger/logMap.cpp
+logger/logBinarySchemata.o: logger/generated/logTypes.hpp logger/generated/binarySchemata.inc
 
 clean:
 	rm -f libMagAOX.hpp.gch

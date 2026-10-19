@@ -1,0 +1,18 @@
+namespace MagAOX.logger;
+
+table Telem_dmsynco_fb
+{
+    state:int;
+    steps:int;
+    period_ns:long;
+    delivered:ulong;
+    missed:ulong;
+    faults:ulong;
+    cached:ulong;
+    snapshot_ns:long;
+    copy_ns:long;
+    residuals_ns:[long];
+    advances_ns:[long];
+}
+
+root_type Telem_dmsynco_fb;

@@ -44,5 +44,10 @@ $ bash ./testMagAOX.bash
   * \ingroup unit_test
 */
 
+/** \defgroup dmSyncopation_unit_test DM Syncopation Unit Tests
+ * \brief Deterministic scheduling, control and local shared-memory publication tests.
+ * \ingroup application_unit_test
+ */
+
 
 

@@ -31,6 +31,8 @@ The rule that "a strict cap takes precedence over hysteresis" came from the plan
 
 Recommendation (user decision): let `maxSubframes` set N and treat the rate cap as a sanity bound. Either evaluate the cap with an explicit tolerance (or configure it with margin, e.g. 6500 Hz), or evaluate it against the nominal main rate rather than the running estimate. In both cases add hysteresis so N changes only on a sustained rate change. Add unit tests at `T = 499.98, 500.00, 500.02 us`.
 
+User Response: agree that we want to make sure this is stable.  maxSubFrames should set N.  Note also that we can monitor the WFS camera's reported FPS and use it.  The long term average loop FPS will be <= camwfs.fps.current
+
 ### 2. Using the 5 us limit as a fault threshold will cause thrashing
 
 Guide L136, L142–144; plan L186, L265. `maxTimingErrorUs = 5` applies to both primary-phase residuals and later-step trigger residuals. An executed out-of-limit trigger cancels the cycle and forces reacquisition (`lockFrames = 32`, i.e. at least 16 ms unarmed).
@@ -47,6 +49,8 @@ Recommendations:
 - Per event: if a late trigger still falls inside its keepout-safe window, execute it; otherwise skip that one step.
 - Reacquire only after M consecutive failures, or on genuine main-timing anomalies (timeout, counter reset, main arriving earlier than `earlyMainUs`).
 
+User Response: the dmcomb polling issue is maybe not an issue.  The better than 2 us rms is at the output of dmcomb, so it appears that the discrete polling interval does not affect the timing jitter of the loop.
+
 ### 3. Other readers and writers of the destination channels are not handled
 
 Key Assumption 1 says the app owns `dm01disp07/08` exclusively, so that only the app writes them and only dmcomb reads them. That is not the case:
@@ -57,6 +61,9 @@ The plan's only condition for overwriting a destination is dmcomb consumption (p
 
 Two fixes are needed:
 - Decide whether 07/08 should be added to `deltaChannels`.
+
+User Response: valid concern but out of scope for this work.
+
 - Change the copy-start rule to "no earlier than previous trigger + path latency + K".
 
 **b. `zeroAll()` and `baseReleaseDM()` stop clearing aux contributions.** Both zero every `dm01dispNN` channel ([dm.hpp:2792](../../../libMagAOX/app/dev/dm.hpp#L2792), [dm.hpp:472](../../../libMagAOX/app/dev/dm.hpp#L472)).
@@ -64,6 +71,8 @@ Two fixes are needed:
 - If the app is disabled, 07/08 are cleared but the `_aux` streams are not, so re-enabling restores the old contribution.
 
 Options: the app detects writes to its destinations that it did not make (by `cnt0`/`writetime`) and disables itself; `zeroAll` also zeroes the `_aux` streams; or an operator rule is documented.
+
+User Response: we can have dmCtrl detect _aux channels and zero them.
 
 **c. Channel 07 is FDPR's control channel.** `/opt/MagAOX/config/fdpr2_dmtweeter_camsci2.conf:40` has `dmctrlchannel=dm01disp07`. Plan L127 notes this, but the question was never put to the user, whose answer covered only `twRotSpeck`.
 
@@ -83,11 +92,15 @@ Tweeter channel map from configs and `dev::dm` defaults:
 
 `dm01disp08` and `dm01disp11` have no config references. Suggest 08/11, or an explicit interlock with FDPR.
 
+User Response: we no longer run FDPR on the tweeter routinely, so this i sfine.
+
 **d. Triggered writers on other channels add mid-cycle combinations.**
 - `tweeterSpeck` and `tweeterMod` are dmSpeckle instances on `dm01disp09`, triggered from `dm01disp03` (`proclist_RTC.txt:27–28`). When `triggerDelay > 0` they increment `cnt0` after the delay ([dmSpeckle.hpp:871](../../../apps/dmSpeckle/dmSpeckle.hpp#L871)). That produces a mid-cycle combination that can land inside a scheduled step's keepout.
 - `tweeterModes` (dmMode on `dm01disp01`) writes whenever a user changes it.
 
 Under plan L324, every one of these writes is an unexpected output that drops lock. Decide whether triggered dmSpeckle is forbidden while synco is enabled, and whether occasional dmMode writes should be counted rather than drop lock.
+
+User Response: dmSpeckle will need to be updated to work with this new system.
 
 ### 4. dmcomb's trigger mode is already known, and it sets a lower bound on the guard
 
@@ -195,6 +208,9 @@ For open review item 4 (snapshot fallback): accept it, but do it in one pass. Re
 1. **Rate cap.** Evaluate it with a tolerance or against the nominal rate, or let `maxSubframes` decide? (finding 1)
 2. **The 5 us value.** What is it for, and should a limit violation skip one step or force reacquisition? (finding 2)
 3. **Destination channels.** Keep 07, which conflicts with FDPR, or move to 08/11? (finding 3c)
+
+Answer: we don't run FDPR on the tweeter (dm01) anymore, so that's a historical config.  Even if we do, it's done with control loops off.  So 7/8 are fine.
+
 4. **dev::dm integration.** Should 07/08 become `deltaChannels`, and how should `zeroAll`/`releaseDM` treat the `_aux` sources? (findings 3a, 3b)
 5. **Other writers.** What is the policy for triggered dmSpeckle and for dmMode writes while synco is enabled? (finding 3d)
 6. **Provider location.** Will providers run on the RTC or on ICC/ACC001? This decides the timing-stream clock and transport. (finding 8)

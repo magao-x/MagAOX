@@ -70,6 +70,7 @@ apps/dmPokeCenter/dmPokeCenter
 apps/dmPokeXCorr/dmPokeXCorr
 apps/dmRecon/dmRecon
 apps/dmSpeckle/dmSpeckle
+apps/dmSyncopation/dmSyncopation
 
 #f
 apps/filterWheelCtrl/filterWheelCtrl
