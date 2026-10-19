@@ -1,0 +1,24 @@
+// Per-image pupil results. Averages are derived by readers, never serialized.
+namespace MagAOX.logger;
+
+struct PupilFitResult
+{
+    x:float;
+    y:float;
+    D:float;
+    med:float;
+    bg:float;
+}
+
+table Telem_pupilfit_fb
+{
+    frame:ulong;
+    acq_sec:long;
+    acq_nsec:int;
+    reference:bool;
+    num_pupils:ubyte;
+    valid:bool;
+    pupils:[PupilFitResult];
+}
+
+root_type Telem_pupilfit_fb;

@@ -7,6 +7,8 @@
 #ifndef pupilFitter_hpp
 #define pupilFitter_hpp
 
+#include <mx/math/floatUtils.hpp>
+
 #include <mx/improc/eigenImage.hpp>
 #include <mx/improc/imageUtils.hpp>
 #include <mx/improc/circleOuterpix.hpp>
@@ -194,7 +196,7 @@ int pupilFitter<realT>::outerpix( float &avgx, float &avgy, float &avgr, int qua
 
     realT x0, y0, avgr0;
 
-    mx::improc::circleOuterpix( x0, y0, avgr0, avgx, avgy, avgr, m_circMag, m_quadMag );
+    if(mx::improc::circleOuterpix( x0, y0, avgr0, avgx, avgy, avgr, m_circMag, m_quadMag ) < 0) return -1;
 
     avgx /= 10.0;
     avgy /= 10.0;
@@ -215,12 +217,23 @@ int pupilFitter<realT>::fit( mx::improc::eigenImage<realT> &im, mx::improc::eige
     try
     {
 
+        if( (m_numPupils != 3 && m_numPupils != 4) || m_rows == 0 || m_cols == 0 ||
+            im.rows() != 2*m_rows || im.cols() != 2*m_cols ||
+            !mx::math::isFinite(m_thresh) || m_thresh <= 0 || m_thresh >= 1 ||
+            !mx::math::isFinite(m_bgMedIndex) || !mx::math::isFinite(m_pupMedIndex) ||
+            m_bgMedIndex < 0 || m_bgMedIndex >= m_pupMedIndex || m_pupMedIndex >= 1 ) return -1;
+
+        for(Eigen::Index i=0; i<im.size(); ++i)
+            if(!mx::math::isFinite(im.data()[i])) return -1;
+
+        edged.resize(im.rows(), im.cols());
+        edged.setZero();
         mx::improc::eigenImage<realT> imin = im;
         im.setZero();
         for( int i = 0; i < m_numPupils; ++i )
         {
             // 0) magnify the image
-            getQuad( m_quad, imin, i );
+            if(getQuad( m_quad, imin, i ) < 0) return -1;
 
             mx::improc::imageMagnify( m_quadMag, m_quad, mx::improc::bilinearTransform<realT>() );
 
@@ -238,19 +251,21 @@ int pupilFitter<realT>::fit( mx::improc::eigenImage<realT> &im, mx::improc::eige
             m_med[i] = m_pixs[m_pupMedIndex * m_pixs.size()]; // This should be the median of the pupils if the right
                                                               // size and contained in the quad
 
+            if( !mx::math::isFinite(m_med[i]) || !mx::math::isFinite(m_bg[i]) || m_med[i] <= m_bg[i] ) return -1;
             m_quadMag = ( m_quadMag - m_bg[i] ) / ( m_med[i] - m_bg[i] );
 
             // 2) Threshold the normalized quad
             threshold( m_quadMag );
 
             // 3) Find outer pixels and the radius
-            outerpix( m_avgx[i], m_avgy[i], m_avgr[i], i );
+            if(outerpix( m_avgx[i], m_avgy[i], m_avgr[i], i ) < 0 ||
+               !mx::math::isFinite(m_avgx[i]) || !mx::math::isFinite(m_avgy[i]) ||
+               !mx::math::isFinite(m_avgr[i]) || m_avgr[i] <= 0 ) return -1;
 
             // 4) De-magnify and prepare for putting on the streams
             mx::improc::imageRebinSum( m_quad, m_quadMag, true );
             mx::improc::imageRebinSum( m_circ, m_circMag );
-            putQuad( im, m_quad, i );
-            putQuad( edged, m_circ, i );
+            if(putQuad( im, m_quad, i ) < 0 || putQuad( edged, m_circ, i ) < 0) return -1;
         }
 
         return 0;

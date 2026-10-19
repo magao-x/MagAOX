@@ -1,0 +1,25 @@
+// Settings applying to subsequent pupil-fit records.
+namespace MagAOX.logger;
+
+struct PupilFitSetpoint
+{
+    x:float;
+    y:float;
+    D:float;
+}
+
+table Telem_pupilfit_state_fb
+{
+    setpoints:[PupilFitSetpoint];
+    requested_mode:ubyte;
+    active_mode:ubyte;
+    threshold:float;
+    pup_index:float;
+    bg_index:float;
+    width:uint;
+    height:uint;
+    averaging:bool;
+    window:ulong;
+}
+
+root_type Telem_pupilfit_state_fb;

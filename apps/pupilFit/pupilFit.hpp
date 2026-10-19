@@ -10,6 +10,8 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+#include <numeric>
+
 #include "pupilFitter.hpp"
 
 /** \defgroup pupilFit
@@ -46,6 +48,7 @@ struct refShmimT
 #define USEDEFSET (0)
 #define USEREFIM (1)
 #define USEUSERSET (2)
+#define USECURRENTSET (3)
 
 /// The MagAO-X Pyramid Pupil Fitter
 /**
@@ -144,6 +147,22 @@ protected:
    float m_userSetD4 {56.0};
 
    int m_setPointSource {USEDEFSET};
+
+   /// Mode that supplied the active setpoints; unknown until image allocation.
+   uint8_t m_activeSetPointSource {255};
+
+   /// Cached reference image metadata, updated with the reference pixels.
+   uint64_t m_refFrame {0};
+
+   /// Acquisition timestamp of the cached reference image.
+   timespec m_refAcquired {0, 0};
+
+   /// Identifies temporal averaging resets, including resets while already enabled.
+   uint64_t m_averageWindow {0};
+
+   /// Last serialized state, used to omit unchanged snapshots between periodic records.
+   std::vector<uint8_t> m_lastFitState;
+
 
    bool m_refUpdated {false}; ///< Flag set if the online reference update is used.
 
@@ -434,7 +453,25 @@ protected:
      *
      * @{
      */
+   /// Check periodic state and frame-grabber telemetry; fit records are never replayed.
    int checkRecordTimes();
+
+   /// Record a state snapshot with the INDI mutex held by the caller.
+   int recordFitState( bool force = false /**< [in] emit even when unchanged */ );
+
+   /// Fit and record one image with the INDI mutex held by the caller.
+   int fitImage( mx::improc::eigenImage<float> &im /**< [in/out] input, replaced by thresholded pixels */,
+                 mx::improc::eigenImage<float> &edge /**< [out] fitted edge image */,
+                 uint64_t frame /**< [in] source frame counter */,
+                 const timespec &acquired /**< [in] source acquisition timestamp */,
+                 bool reference /**< [in] true for reference-image calibration */ );
+
+   /// Update across-pupil means and offsets while holding the INDI mutex.
+   void updatePupilAverages();
+
+   /// Record a periodic state snapshot; checkRecordTimes holds the INDI mutex.
+   int recordTelem( const telem_pupilfit_state *tag /**< [in] telemetry dispatch tag */ );
+
 
    int recordTelem( const telem_fgtimings * );
 
@@ -468,7 +505,7 @@ void pupilFit::setupConfig()
    shmimMonitorT::setupConfig(config);
    refShmimMonitorT::setupConfig(config);
    frameGrabberT::setupConfig(config);
-   telemeterT::setupConfig(config);
+   TELEMETER_SETUP_CONFIG(config);
 
    config.add("shmimMonitor.shmimName", "", "shmimMonitor.shmimName", argType::Required, "shmimMonitor", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm. Default is camwfs_avg");
 
@@ -506,13 +543,17 @@ int pupilFit::loadConfigImpl( mx::app::appConfigurator & _config )
    if(refShmimMonitorT::m_shmimName != "") m_setPointSource = USEREFIM;
 
    frameGrabberT::loadConfig(_config);
-   telemeterT::loadConfig(_config);
+   TELEMETER_LOAD_CONFIG(_config);
 
    _config(m_threshold, "fit.threshold");
    _config(m_threshShmimName, "fit.threshShmimName");
    _config(m_edgeShmimName, "fit.edgeShmimName");
    _config(m_numPupils, "fit.numPupils");
    _config(m_fitter.m_pupMedIndex, "fit.pupMedIndex");
+   if(m_numPupils != 3 && m_numPupils != 4)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "fit.numPupils must be 3 or 4"});
+   }
 
    _config(m_defSetx1, "cal.setx1");
    _config(m_defSety1, "cal.sety1");
@@ -537,7 +578,7 @@ int pupilFit::loadConfigImpl( mx::app::appConfigurator & _config )
 inline
 void pupilFit::loadConfig()
 {
-   loadConfigImpl(config);
+   if(loadConfigImpl(config) < 0) m_shutdown = true;
 }
 
 inline
@@ -564,10 +605,7 @@ int pupilFit::appStartup()
       return log<software_error,-1>({__FILE__, __LINE__});
    }
 
-   if(telemeterT::appStartup() < 0)
-   {
-      return log<software_error,-1>({__FILE__, __LINE__});
-   }
+   TELEMETER_APP_STARTUP;
 
    createStandardIndiNumber<float>( m_indiP_thresh, "threshold", 0, 1 ,0, "%0.2f", "Threshold");
    m_indiP_thresh["current"].set(m_threshold);
@@ -710,6 +748,11 @@ int pupilFit::appStartup()
       return -1;
    }
 
+   { //mutex scope
+      std::lock_guard<std::mutex> guard(m_indiMutex);
+      recordFitState(true);
+   }
+
    state(stateCodes::OPERATING);
 
    return 0;
@@ -733,10 +776,7 @@ int pupilFit::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
 
-   if( telemeterT::appLogic() < 0)
-   {
-      return log<software_error,-1>({__FILE__,__LINE__});
-   }
+   TELEMETER_APP_LOGIC;
 
    std::lock_guard<std::mutex> guard(m_indiMutex);
    updateIfChanged(m_indiP_thresh, "current", m_threshold, INDI_IDLE);
@@ -778,7 +818,7 @@ int pupilFit::appShutdown()
    shmimMonitorT::appShutdown();
    refShmimMonitorT::appShutdown();
    frameGrabberT::appShutdown();
-   telemeterT::appShutdown();
+   TELEMETER_APP_SHUTDOWN;
 
    return 0;
 }
@@ -801,11 +841,12 @@ int pupilFit::allocate(const dev::shmimT & dummy)
    {
       mx::improc::eigenImage<float> refim, refedge;
       refim = m_refIm; //cuz it's modified by fitter.
-      if(m_fitter.fit(refim, refedge) < 0)
+      if(fitImage(refim, refedge, m_refFrame, m_refAcquired, true) < 0)
       {
          return log<software_error, -1>({__FILE__, __LINE__, "error from fitter for reference"});
       }
 
+      m_activeSetPointSource = USEREFIM;
       m_setx1 = m_fitter.m_avgx[0];
       m_sety1 = m_fitter.m_avgy[0];
       m_setD1 = 2*m_fitter.m_avgr[0];
@@ -840,6 +881,7 @@ int pupilFit::allocate(const dev::shmimT & dummy)
 
       if(m_setPointSource == USEUSERSET)
       {
+         m_activeSetPointSource = USEUSERSET;
          m_setx1 = m_userSetx1;
          m_sety1 = m_userSety1;
          m_setD1 = m_userSetD1;
@@ -863,6 +905,7 @@ int pupilFit::allocate(const dev::shmimT & dummy)
       }
       else
       {
+         m_activeSetPointSource = USEDEFSET;
          m_setx1 = m_defSetx1;
          m_sety1 = m_defSety1;
          m_setD1 = m_defSetD1;
@@ -884,6 +927,8 @@ int pupilFit::allocate(const dev::shmimT & dummy)
          log<text_log>("Set default set-points");
       }
    }
+
+   recordFitState();
 
    uint32_t imsize[3];
    imsize[0] = shmimMonitorT::m_width;
@@ -918,20 +963,21 @@ int pupilFit::processImage( void* curr_src,
                           )
 {
    static_cast<void>(dummy);
+   std::lock_guard<std::mutex> guard(m_indiMutex);
+   const auto frame = shmimMonitorT::m_imageStream.md->cnt0;
+   const auto acquired = shmimMonitorT::m_imageStream.md->atime;
 
    for(unsigned nn=0; nn < shmimMonitorT::m_width*shmimMonitorT::m_height; ++nn)
    {
       m_fitIm.data()[nn] = (reinterpret_cast<float *>(curr_src)) [nn];
    }
 
-   m_fitter.m_thresh = m_threshold;
+   if(fitImage(m_fitIm, m_edgeIm, frame, acquired, false) < 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "pupil fit failed"});
+   }
 
-   m_fitter.fit(m_fitIm, m_edgeIm);
-
-
-   {//mutex scope
-
-      std::lock_guard<std::mutex> guard(m_indiMutex);
+   {
       m_indiP_quad1["set-x"].set(m_setx1);
       m_indiP_quad1["x"].set(m_fitter.m_avgx[0]);
       m_indiP_quad1["dx"].set(m_fitter.m_avgx[0]-m_setx1);
@@ -974,21 +1020,7 @@ int pupilFit::processImage( void* curr_src,
       m_indiP_quad3.setState (INDI_BUSY);
       m_indiDriver->sendSetProperty (m_indiP_quad3);
 
-      if(m_numPupils == 3)
-      {
-         m_indiP_avg["x"].set(.333*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2]));
-         m_indiP_avg["y"].set(.333*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2]));
-         m_indiP_avg["D"].set(.667*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2]));
-
-         m_avg_dx = .333*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2] + m_fitter.m_avgx[3]) - 0.25*(m_setx1 + m_setx2 + m_setx3 + m_setx4);
-         m_avg_dy = .333*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2] + m_fitter.m_avgy[3]) - 0.25*(m_sety1 + m_sety2 + m_sety3 + m_sety4);
-
-
-         m_indiP_avg["dx"].set(.333*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2]) - 0.333*(m_setx1 + m_setx2 + m_setx3));
-         m_indiP_avg["dy"].set(.333*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2]) - 0.333*(m_sety1 + m_sety2 + m_sety3));
-         m_indiP_avg["dD"].set(.667*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2]) - 0.333*(m_setD1 + m_setD2 + m_setD3));
-      }
-      else
+      if(m_numPupils == 4)
       {
          m_indiP_quad4["set-x"].set(m_setx4);
          m_indiP_quad4["x"].set(m_fitter.m_avgx[3]);
@@ -1004,31 +1036,10 @@ int pupilFit::processImage( void* curr_src,
          m_indiP_quad4.setState (INDI_BUSY);
          m_indiDriver->sendSetProperty (m_indiP_quad4);
 
-         m_indiP_avg["x"].set(.25*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2] + m_fitter.m_avgx[3]));
-         m_indiP_avg["y"].set(.25*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2] + m_fitter.m_avgy[3]));
-         m_indiP_avg["D"].set(.5*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2] + m_fitter.m_avgr[3]));
-
-         m_avg_dx = .25*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2] + m_fitter.m_avgx[3]) - 0.25*(m_setx1 + m_setx2 + m_setx3 + m_setx4);
-         m_avg_dy = .25*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2] + m_fitter.m_avgy[3]) - 0.25*(m_sety1 + m_sety2 + m_sety3 + m_sety4);
-
-         m_indiP_avg["dx"].set(.25*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2] + m_fitter.m_avgx[3]) - 0.25*(m_setx1 + m_setx2 + m_setx3 + m_setx4));
-         m_indiP_avg["dy"].set(.25*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2] + m_fitter.m_avgy[3]) - 0.25*(m_sety1 + m_sety2 + m_sety3 + m_sety4));
-         m_indiP_avg["dD"].set(.5*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2] + m_fitter.m_avgr[3]) - 0.25*(m_setD1 + m_setD2 + m_setD3 + m_setD4));
-         m_indiDriver->sendSetProperty (m_indiP_avg);
-
       }
-
+      updatePupilAverages();
+      m_indiDriver->sendSetProperty(m_indiP_avg);
    }
-
-   //signal framegrabber
-//Now tell the f.g. to get going
-   m_updated = true;
-   if(sem_post(&m_smSemaphore) < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
-      return -1;
-   }
-
 
    if(m_averaging)
    {
@@ -1110,19 +1121,19 @@ int pupilFit::processImage( void* curr_src,
 
       if(m_numPupils == 3)
       {
-         float tmp = 0.333*(m_fitter.m_avgx[0]+m_fitter.m_avgx[1]+m_fitter.m_avgx[2]+m_fitter.m_avgx[3]);
+         float tmp = (m_fitter.m_avgx[0]+m_fitter.m_avgx[1]+m_fitter.m_avgx[2])/3.0f;
          m_avgxAll_accum += tmp;
          m_avgxAllsq_accum += tmp*tmp;
 
-         tmp = 0.333*(m_fitter.m_avgy[0]+m_fitter.m_avgy[1]+m_fitter.m_avgy[2]);
+         tmp = (m_fitter.m_avgy[0]+m_fitter.m_avgy[1]+m_fitter.m_avgy[2])/3.0f;
          m_avgyAll_accum += tmp;
          m_avgyAllsq_accum += tmp*tmp;
 
-         tmp = 2*0.333*(m_fitter.m_avgr[0]+m_fitter.m_avgr[1]+m_fitter.m_avgr[2]);
+         tmp = 2*(m_fitter.m_avgr[0]+m_fitter.m_avgr[1]+m_fitter.m_avgr[2])/3.0f;
          m_avgDAll_accum += tmp;
          m_avgDAllsq_accum += tmp*tmp;
 
-         tmp = 0.333*(m_fitter.m_med[0]+m_fitter.m_med[1]+m_fitter.m_med[2]);
+         tmp = (m_fitter.m_med[0]+m_fitter.m_med[1]+m_fitter.m_med[2])/3.0f;
          m_avgmedAll_accum += tmp;
          m_avgmedAllsq_accum += tmp*tmp;
 
@@ -1260,6 +1271,16 @@ int pupilFit::processImage( void* curr_src,
    ImageStreamIO_sempost(&m_threshShmim,-1);
    ImageStreamIO_sempost(&m_edgeShmim,-1);
 
+   //signal framegrabber
+//Now tell the f.g. to get going
+   m_updated = true;
+   if(sem_post(&m_smSemaphore) < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
+      return -1;
+   }
+
+
    return 0;
 }
 
@@ -1286,6 +1307,9 @@ int pupilFit::processImage( void* curr_src,
                           )
 {
    static_cast<void>(dummy);
+   std::lock_guard<std::mutex> guard(m_indiMutex);
+   m_refFrame = refShmimMonitorT::m_imageStream.md->cnt0;
+   m_refAcquired = refShmimMonitorT::m_imageStream.md->atime;
 
    int npix = 0;
    for(unsigned nn=0; nn < refShmimMonitorT::m_width*refShmimMonitorT::m_height; ++nn)
@@ -1336,6 +1360,7 @@ int pupilFit::acquireAndCheckValid()
 
    if(sem_timedwait(&m_smSemaphore, &ts) == 0)
    {
+      std::lock_guard<std::mutex> guard(m_indiMutex);
       if( m_updated )
       {
          clock_gettime(CLOCK_REALTIME, &m_currImageTimestamp);
@@ -1355,6 +1380,7 @@ int pupilFit::acquireAndCheckValid()
 inline
 int pupilFit::loadImageIntoStream(void * dest)
 {
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    (reinterpret_cast<float *>(dest))[0] = m_avg_dx;
    (reinterpret_cast<float *>(dest))[1] = m_avg_dy;
 
@@ -1370,6 +1396,7 @@ int pupilFit::reconfig()
 
 INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_thresh)(const pcf::IndiProperty & ipRecv)
 {
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    if(ipRecv.getName() != m_indiP_thresh.getName())
    {
       log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
@@ -1384,16 +1411,19 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_thresh)(const pcf::IndiProperty & ipRecv
       return -1;
    }
 
+   if(!mx::math::isFinite(target) || target <= 0 || target >= 1) return -1;
    m_threshold = target;
 
    if(m_setPointSource == USEREFIM) shmimMonitorT::m_restart = true; //need to re-process the reference
 
+   recordFitState();
    log<text_log>("set threshold = " + std::to_string(m_threshold), logPrio::LOG_NOTICE);
    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_averaging)(const pcf::IndiProperty & ipRecv)
 {
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    if(ipRecv.getName() != m_indiP_averaging.getName())
    {
       log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
@@ -1450,6 +1480,8 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_averaging)(const pcf::IndiProperty & ipR
 
       m_navg = 0;
       m_averaging = true;
+      ++m_averageWindow;
+      recordFitState();
 
       updateSwitchIfChanged(m_indiP_averaging, "toggle", pcf::IndiElement::On, INDI_BUSY);
 
@@ -1459,6 +1491,7 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_averaging)(const pcf::IndiProperty & ipR
    else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
    {
       m_averaging = false;
+      recordFitState();
       updateSwitchIfChanged(m_indiP_averaging, "toggle", pcf::IndiElement::Off, INDI_IDLE);
 
       log<text_log>("stopped averaging");
@@ -1496,6 +1529,7 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_update)(const pcf::IndiProperty & ipRecv
    {
       std::lock_guard<std::mutex> guard(m_indiMutex);
 
+      m_activeSetPointSource = USECURRENTSET;
       m_setx1 =  m_indiP_quad1["x"].get<float>();
       m_sety1 =  m_indiP_quad1["y"].get<float>();
       m_setD1 =  m_indiP_quad1["D"].get<float>();
@@ -1521,6 +1555,7 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_update)(const pcf::IndiProperty & ipRecv
          log<text_log>("Quad 4 set points: " + std::to_string(m_setx4) + " " +  std::to_string(m_sety4) + " " + std::to_string(m_setD4));
       }
 
+      recordFitState();
       if(m_setPointSource == USEUSERSET) shmimMonitorT::m_restart = true;
    }
 
@@ -1529,6 +1564,7 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_update)(const pcf::IndiProperty & ipRecv
 
 INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_refmode)(const pcf::IndiProperty & ipRecv)
 {
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    if(ipRecv.getName() != m_indiP_refmode.getName())
    {
       log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
@@ -1543,6 +1579,7 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_refmode)(const pcf::IndiProperty & ipRec
          {
             log<text_log>("using default reference.", logPrio::LOG_NOTICE);
             m_setPointSource = USEDEFSET;
+            recordFitState();
             shmimMonitorT::m_restart = true;
             return 0;
          }
@@ -1556,6 +1593,7 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_refmode)(const pcf::IndiProperty & ipRec
          {
             log<text_log>("using reference image.", logPrio::LOG_NOTICE);
             m_setPointSource = USEREFIM;
+            recordFitState();
             shmimMonitorT::m_restart = true;
             return 0;
          }
@@ -1569,6 +1607,7 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_refmode)(const pcf::IndiProperty & ipRec
          {
             log<text_log>("using user image.", logPrio::LOG_NOTICE);
             m_setPointSource = USEUSERSET;
+            recordFitState();
             shmimMonitorT::m_restart = true;
             return 0;
          }
@@ -1579,9 +1618,74 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_refmode)(const pcf::IndiProperty & ipRec
 }
 
 inline
+int pupilFit::recordFitState(bool force)
+{
+   std::vector<PupilFitSetpoint> setpoints = {{m_setx1,m_sety1,m_setD1}, {m_setx2,m_sety2,m_setD2},
+                                             {m_setx3,m_sety3,m_setD3}};
+   if(m_numPupils == 4) setpoints.emplace_back(m_setx4,m_sety4,m_setD4);
+   telem_pupilfit_state::messageT message(setpoints, m_setPointSource, m_activeSetPointSource, m_threshold,
+                                         m_fitter.m_pupMedIndex, m_fitter.m_bgMedIndex,
+                                         shmimMonitorT::m_width, shmimMonitorT::m_height, m_averaging, m_averageWindow);
+   std::vector<uint8_t> state(message.builder.GetBufferPointer(),
+                              message.builder.GetBufferPointer() + message.builder.GetSize());
+   if(force || state != m_lastFitState)
+   {
+      if(telem<telem_pupilfit_state>(message) < 0) return -1;
+      m_lastFitState = std::move(state);
+   }
+   return 0;
+}
+
+inline
+int pupilFit::fitImage(mx::improc::eigenImage<float> &im, mx::improc::eigenImage<float> &edge,
+                       uint64_t frame, const timespec &acquired, bool reference)
+{
+   if(recordFitState() < 0) return -1;
+   m_fitter.m_thresh = m_threshold;
+   bool valid = m_fitter.fit(im, edge) == 0;
+   std::vector<PupilFitResult> pupils;
+   if(valid)
+   {
+      for(int i=0; i<m_numPupils; ++i)
+         pupils.emplace_back(m_fitter.m_avgx[i], m_fitter.m_avgy[i], 2*m_fitter.m_avgr[i],
+                              m_fitter.m_med[i], m_fitter.m_bg[i]);
+   }
+   if(telem<telem_pupilfit>({frame, acquired, reference, static_cast<uint8_t>(m_numPupils), valid, pupils}) < 0)
+      return -1;
+   return valid ? 0 : -1;
+}
+
+inline
+void pupilFit::updatePupilAverages()
+{
+   float x = std::accumulate(m_fitter.m_avgx, m_fitter.m_avgx + m_numPupils, 0.0) / m_numPupils;
+   float y = std::accumulate(m_fitter.m_avgy, m_fitter.m_avgy + m_numPupils, 0.0) / m_numPupils;
+   float D = 2*std::accumulate(m_fitter.m_avgr, m_fitter.m_avgr + m_numPupils, 0.0) / m_numPupils;
+   float sx = (m_setx1 + m_setx2 + m_setx3 + (m_numPupils == 4 ? m_setx4 : 0)) / m_numPupils;
+   float sy = (m_sety1 + m_sety2 + m_sety3 + (m_numPupils == 4 ? m_sety4 : 0)) / m_numPupils;
+   float sD = (m_setD1 + m_setD2 + m_setD3 + (m_numPupils == 4 ? m_setD4 : 0)) / m_numPupils;
+   m_avg_dx = x - sx;
+   m_avg_dy = y - sy;
+   m_indiP_avg["x"].set(x);
+   m_indiP_avg["y"].set(y);
+   m_indiP_avg["D"].set(D);
+   m_indiP_avg["dx"].set(m_avg_dx);
+   m_indiP_avg["dy"].set(m_avg_dy);
+   m_indiP_avg["dD"].set(D-sD);
+}
+
+inline
+int pupilFit::recordTelem(const telem_pupilfit_state *tag)
+{
+   static_cast<void>(tag);
+   return recordFitState(true);
+}
+
+inline
 int pupilFit::checkRecordTimes()
 {
-   return telemeterT::checkRecordTimes(telem_fgtimings());
+   std::lock_guard<std::mutex> guard(m_indiMutex);
+   return telemeterT::checkRecordTimes(telem_fgtimings(), telem_pupilfit_state());
 }
 
 inline
