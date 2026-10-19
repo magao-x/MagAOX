@@ -1,404 +1,288 @@
 # dmSyncopation user guide
 
-This guide specifies the user interface before C++ implementation. Configuration keys and INDI property names below are proposed for review. The example is a configuration template; measured timing budgets still need to be supplied before operational use. The [engineering plan](../../../agents/plans/2026-10/dm-syncopation.md) records decisions and implementation work.
+`dmSyncopation` copies auxiliary deformable-mirror contributions into existing dmcomb input channels at a fixed integer subdivision of the main AO-loop period. One instance serves one DM. The initial instance, `dmtweeter_synco`, requests three steps per main cycle: approximately 6 kHz total cadence when the main loop runs at 2 kHz.
 
-## Purpose
+The [engineering plan](../../../agents/plans/2026-10/dm-syncopation.md) records design decisions and verification. The initial timing values are starting budgets for qualification, not measured instrument bounds. All live instrument setup, INDI actions and timing measurements are performed by the operator.
 
-`dmSyncopation` schedules auxiliary deformable-mirror contributions between updates from the main AO loop. One app instance serves one DM. The initial instance is `dmtweeter_synco`, using main dmcomb channels 07 and 08, a maximum command cadence of 6 kHz, and up to three steps per main-loop cycle.
-
-The main loop remains the timing reference. Its publication of `dmC` defines step 0. The app prepares auxiliary contributions before that publication, then adds uniformly spaced combinations during the rest of the cycle. A 2 kHz main loop with three steps therefore produces a nominal 6 kHz command cadence: one main-triggered combination and two auxiliary-triggered combinations per cycle.
-
-The app always copies every mapped contribution at every active step. Unchanged provider values remain valid and are copied again. There is no pixel-comparison pass or intentional no-copy branch.
-
-## Streams and ownership
+## Streams and command flow
 
 ```text
-                            MAIN COMMAND PATH
+                 MAIN AO COMMAND PATH
+ WFS -> reconstruction/filter -> command calculation
+                                       |
+                                       v
+                             dmC / dm01disp03
+                                       |
+                        genuine main publication
+                                       |
+                                       v
+                                    dmcomb ------> dm01disp ------> bmcCtrl
+                                       ^                         DM hardware
+                                       |
+ provider A -> dm01disp07_aux --+       |
+                              |       |
+                        dmSyncopation  |
+                              |       |
+ provider B -> dm01disp08_aux --+       |
+                              |       |
+                      copy all mappings
+                              |       |
+                              v       |
+                      dm01disp07 / 08 --+
 
-   WFS -> reconstruction/filter -> DM command calculation
-                                          |
-                                          v
-                                dmC / dm01disp03
-                                          |
-                              genuine main publication
-                                          |
-                                          v
- AUXILIARY COMMAND PATH                 dmcomb ------> dm01disp ------> bmcCtrl
-                                          ^                            hardware
- provider A -> dm01disp07_aux --+          |
-                               |          |
-                               v          |
-                         dmSyncopation     |
-                               |          |
- provider B -> dm01disp08_aux --+          |
-                               |          |
-                    copy all mappings     |
-                               |          |
-                               v          |
-                     dm01disp07 / 08 ------+
-
- Step 0: copy only; main dmC publication causes the combination.
- Step j > 0: copy all mappings, then increment dm01disp07.cnt0 once.
-
- dmSyncopation observes dmC and dm01disp for timing and output confirmation.
- It does not publish or post trigger semaphores on dmC.
+ Step 0: copy all mappings passively; the main publication triggers dmcomb.
+ Step >0: copy all mappings passively, then publish channel 07's counter once.
+ dmC and dm01disp are observed; dmSyncopation never publishes on dmC.
 ```
 
-| Stream | Writer | Role |
+| Stream | Writer | Purpose |
 | --- | --- | --- |
-| `dmC`, normally an alias of `dm01disp03` | Main AO command process | Primary publication timestamp/counter and authoritative main command. |
-| `dm01disp07_aux` | Provider for mapping 07 | Persistent auxiliary contribution, a 2-D float32 image. |
-| `dm01disp08_aux` | Provider for mapping 08 | Persistent auxiliary contribution, a 2-D float32 image. |
-| `dm01disp07`, `dm01disp08` | `dmSyncopation` while enabled | Destination inputs read by dmcomb. The app replaces each mapped input with its selected auxiliary contribution. |
-| `dm01disp` | dmcomb | Sum of all main DM input channels; observed to confirm consumption of a prepared batch. |
-| `dmtweeter_synco_timing` | `dmSyncopation` | Proposed timing stream for provider deadlines and synchronization notifications. |
+| `dmC`, normally `dm01disp03` | Main AO command calculation | Genuine primary commands; their publication defines cycle zero. |
+| `dm01disp07_aux`, `dm01disp08_aux` | One provider per source | Persistent 2-D float32 contributions, one image per mapping. |
+| `dm01disp07`, `dm01disp08` | dmSyncopation during normal operation | Existing dmcomb input channels receiving complete copies. Controller zero/release may also clear them. |
+| `dm01disp` | dmcomb | Combined output; its counter confirms that dmcomb consumed the inputs. |
+| `dmtweeter_synco_timing` | dmSyncopation | Monotonic timing information and semaphore notifications for local providers. |
 
-Source and destination dimensions must match the DM; the current tweeter configuration is 50x50. Only one provider owns each auxiliary source, and this app must have exclusive ownership of its destination channels. Contributions on other dmcomb channels continue to participate in the sum.
+Primary, combined, source and destination pixel streams must be CPU-backed 2-D float32 images with matching geometry and at most 1,048,576 pixels. The current tweeter uses 50x50 images. Sources follow `<destination>_aux` naming so controller clearing can discover them. A provider writes only its own auxiliary source. A source cannot be shared silently by two writers.
 
-There is one auxiliary image per mapping, shared by all steps. Increasing the number of subframes does not create `_00`, `_01`, or other per-step image arrays. Compatible existing auxiliary images retain their contents. Newly created auxiliary images are initialized from stable destination contents so attaching the app does not implicitly remove an existing contribution.
+There is one auxiliary image per mapping, regardless of the requested step count. Compatible existing source values are retained; newly created sources are seeded from stable destination contents. No per-step `_00`/`_01` payload arrays or provider readiness acknowledgements are needed.
 
-The combiner must check changes to the sum of its input counters promptly. A configuration that waits only for primary `dmC` events cannot supply the additional combinations through this counter-only route. The operator must qualify the route on the target system.
+Every active step copies every mapping, including unchanged values and cached complete values. There is no pixel-comparison pass or successful no-copy/HOLD branch. An unchanged source remains valid indefinitely. Providers explicitly publish zero to remove a contribution.
 
-## Cadence and step 0
-
-For measured main period `T` and subdivision count `N`, step spacing is `T/N`, the selected command rate is `N/T`, and the app generates `N-1` extra combinations per cycle. Step 0 is included in the configured maximum auxiliary rate.
+## Cadence and synchronization
 
 ```text
-Example: T = 500 us, N = 3, selected cadence = 6000 Hz
+Example main period: 500 us; requested steps: 3
 
-Time (us)         0            166.667         333.333       480       500
-                  |               |               |          |         |
-Main dmC          ^                                                    ^
-Aux counter                       ^               ^
-Combined step     0               1               2                    0
-                                                                     next cycle
+Time (us)       0              166.667           333.333              500
+                |                  |                 |                  |
+Main dmC        ^                                                       ^
+Aux counter                        ^                 ^
+Combined step   0                  1                 2                  0
+                                                                  next cycle
 
-Step 0 at t=0 was copied during the previous cycle.
-Step 0 for t=500 must finish by t=480 with a 20 us completion lead.
-No destination counter changes at t=480; the main event at t=500 triggers.
-
-The last auxiliary batch must be consumed before next-cycle step-0 copying.
+Step 0 at t=0 was copied during the previous main cycle.
+After step 2's readers finish, prepare step 0 for t=500 before its safe cutoff.
+Only the real main publisher triggers the combination at t=500.
 ```
 
-The diagram shows intended combination submissions. Combined-output publication and controller receipt occur later, after processing/delivery latency. The hardware keepout applies at the controller, so spacing between submissions must also allow for variation in that latency.
+`maxSubframes` sets the requested count, initially three; step 0 counts toward it. The app calculates a feasible maximum from keepout, reader lifetime and preparation windows, and validates the request. It reports an infeasible request rather than silently changing three steps to two. `N=1` is passive-only operation.
 
-The app calculates the largest feasible integer `N`. Useful upper bounds are:
+The planned interval is the estimated main period divided by the requested count. Small period changes around 500 us do not switch the integer count. The nominal total-cadence sanity rating is 6000 Hz with 1% tolerance and 32-frame persistence for ordinary rate changes. Hard safety violations take effect immediately. Camera FPS, initially `camwfs.fps.current`, supplies a nominal reference; actual primary observations still determine loop timing. The long-term relation `main FPS <= camera FPS` does not bound an individual early main arrival. Primary intervals arriving earlier or later than the filtered prediction by more than `tracking.earlyMainUs` are rejected as timing anomalies. An isolated delayed callback is not learned as a longer safe period; an actual rate change requires reacquisition.
 
-```text
-keepout limit = floor(shortest allowed main period / (keepout + guard))
-rate limit    = floor(maximum auxiliary rate * estimated main period)
-active steps  <= min(keepout limit, rate limit, configured maximum steps)
-```
+Scheduling uses `CLOCK_MONOTONIC` on the RTC. The primary callback observes publication after semaphore delivery and monitor bookkeeping; that observation has lag and uncertainty. Wait feedback tunes later scheduling bias but cannot discover an unobserved publication-to-callback offset. Image metadata follows ImageStreamIO's clock conventions and is not interpreted as a monotonic deadline.
 
-The app additionally checks copying, output confirmation, early-main uncertainty, and the final gap to the next main event. A rate cap or maximum-step setting is a limit, not a request to run at an independent frequency. `N=1` provides passive step-0 updates only. If no count is feasible, auxiliary operation stays unarmed.
+The selected counter-polling dmcomb configuration uses DELAY mode 4 and a requested 10 us sleep. Passive destination posts can notify viewers while leaving counters unchanged. Only the final designated counter publication triggers an auxiliary combination. The requested poll interval does not establish a delivered-jitter floor: the user's existing less-than-2 us RMS measurement is at dmcomb output.
 
-At 2 kHz, a 115 us keepout plus the proposed 20 us guard permits three subdivisions. Each 166.667 us spacing has 51.667 us nominal margin over keepout, of which 20 us is reserved by the guard. These figures do not establish worst-case timing on an instrument. With a strict 6 kHz cap, a measured main rate slightly above 2 kHz can reduce the count to two; the app reports the limiting reason rather than exceeding the cap.
+## Deadlines and reader lifetime
 
-## Timing and deadlines
-
-There are separate deadlines for the provider and the app:
+Provider timing and app timing are distinct:
 
 | Event | Meaning |
 | --- | --- |
-| Provider completion deadline | Finish publishing the desired source value before the bounded sampling window. This is timing information for the writer; the app cannot force the writer to finish. |
-| Source snapshot cutoff | The app freezes the selected complete batch by this time. Later-completing snapshots cannot replace values for that step. |
-| Destination completion deadline | The app must finish copying every selected contribution into the main input channels. For step 0 this precedes the predicted primary publication by `step0LeadUs`. |
-| Combination target | For step 0, the genuine primary publication. For later steps, the target time for the app's single destination counter increment. |
-
-Let `Pnext` be the predicted next primary publication, `S` the bounded snapshot budget, and `C` the bounded destination-copy budget. For step 0:
+| Source snapshot cutoff | The desired source publication must be complete before the app samples it for that step. A later value becomes eligible at a later sample. |
+| Preparation target | The app aims to finish copying before the hard cutoff, leaving a positive reserve for scheduling variability. |
+| Step-0 hard cutoff | Latest safe completion of the entire destination batch; constrained by both lead and the earliest plausible next main event. |
+| Later-step target | Time for the single final destination-counter publication. |
 
 ```text
-Destination completion deadline D0 = Pnext - step0LeadUs
-Source snapshot cutoff         F0 <= D0 - C
-Provider completion deadline   W0 <= F0 - S
+Previous submission      last controller reader finishes        next main
+        |                              |                             |
+        +---- delivery + processing ---+                             |
+                                       |                             |
+                                  sample/copy                        |
+                                       +-----> target ----> cutoff --+
+                                                  reserve       lead
 
-                 sampling window      copying window        main lead
-                <------ S ------>    <------ C ------>    <----------->
-Time -----------W0---------------F0-------------------D0---------------Pnext-->
-                |                |                    |                |
-Writer complete |                |                    |                |
-Batch frozen --------------------+                    |                |
-All destinations copied ------------------------------+                |
-Genuine main publication ----------------------------------------------+
+Copying starts only after dmcomb consumption AND the controller-reader hold.
+All mapped copies must complete before the applicable hard cutoff.
 ```
 
-Output confirmation and timing uncertainty may require earlier preparation than these simple budget inequalities indicate. The app publishes actual schedule deadlines; providers should read them rather than reconstructing the deadline from INDI rates.
+For a predicted next main event `Pnext`, the nominal step-0 deadline is `D0 = Pnext - step0LeadUs`. The effective cutoff is the earlier of `D0` and the earliest plausible main publication minus the required visibility margin. The preparation target is earlier again. A 20 us lead and 20 us early-main allowance alone provide no positive margin; validate the smaller effective window.
 
-### Keepout, guard, lead, and timing-error limit
+Before replacing a batch, the app requires dmcomb output confirmation and the previous submission's conservative delivery/processing/reader hold. `makeDelta()` rereads destination channels after `commandDM()`, so dmcomb consumption alone is insufficient. Combined output is not proof that controller processing or hardware transfer completed. Changing `deltaChannels` policy is outside this work.
 
-These settings serve different purposes:
+The nominal three-step interval is about 166.667 us. A 115 us processing estimate, 20 us guard, 10 us copy budget and 20 us lead leave very little final preparation time once delivery and uncertainty are included. These defaults can be infeasible together; qualify the complete window rather than relying only on `interval >= keepout + guard`.
 
-| Setting | Initial value/status | Application |
-| --- | --- | --- |
-| `scheduler.keepoutUs` | 115 us, selected low estimate | Time from controller receipt/wake through processing completion; used to bound subdivisions and trigger spacing. |
-| `scheduler.guardUs` | 20 us, proposal | Additional spacing margin for path variation and timing uncertainty. |
-| `scheduler.step0LeadUs` | 20 us, proposal | How early the entire step-0 destination copy must finish before predicted `dmC` publication. |
-| `scheduler.maxTimingErrorUs` | 5 us, initial interpretation of the user's timing answer | Absolute timing-error limit for primary phase residuals and later-step counter triggers; also a qualification target for those events. |
+The 5 us value is a guideline for timing analysis. It is not a hard execution limit, a grace period extending a copy deadline, or a mandatory reacquisition threshold.
 
-The 5 us timing-error limit is kept separate from the 20 us guard and completion-lead proposals. The user reports that semaphore-driven events typically achieve less than 2 us RMS jitter; that observation motivates the initial tolerance but is not a worst-case bound for this app.
+## Persistent values and decisions
 
-A step-0 copy finished after `D0` is a deadline miss even if it is only 1 us late, within the 5 us event tolerance, and still before the predicted primary publication. The event tolerance does not extend that deadline. Finishing earlier than `D0` is acceptable when the preceding batch has been consumed and the copy window is otherwise safe; early completion is measured for wait tuning.
-
-For a later step, an already-overdue target beyond the timing limit suppresses the auxiliary counter increment. If an out-of-limit trigger error is detected after publication, the app records the violation and cancels remaining auxiliary triggers while recovering. Keepout and the earliest-next-main window are checked independently and take precedence over a tolerable timing residual. No overdue trigger is replayed as a catch-up burst.
-
-The initial recovery policy stops the remaining auxiliary work on a scheduler timing failure and reacquires synchronization. A numerical acceptable miss rate over time has not been specified. Miss counts and qualification statistics remain visible; no miss-rate allowance permits unsafe spacing.
-
-### Persistent values and late provider writes
-
-Providers publish through ordinary ImageStreamIO write/counter semantics. They may leave a source unchanged for any number of cycles. Each step still copies its complete contribution. When a source is being rewritten or races the bounded snapshot, the proposed fallback selects that mapping's last complete cached value, reports cached-snapshot use, and copies it normally. A new value completed after a step's cutoff becomes eligible for a later snapshot.
-
-For example, provider A may publish nothing new for step 0 and then publish a new command before the step-1 writer deadline. The app copies A's previous value for step 0 and its new value for step 1. This is normal operation, not a step-0 miss. An app copy that could not start safely or finished too late is a separate scheduler failure.
-
-Providers explicitly publish zero to remove their contribution. Source age or an unchanged counter never implies zero and never causes a freshness fault. The proposed last-complete-cache fallback remains a review item; there is no provider ready/acknowledgement handshake.
-
-### Step decision tree
+Each source uses normal ImageStreamIO publication. The app checks the write flag and counter around one snapshot copy. If publication is in progress or changed during the copy, it uses that mapping's last complete cache. This is consistency fallback, not a freshness fault. The selected current/cached value is always copied to its destination.
 
 ```text
-        Locked; previous destination batch consumed; next step planned
+           Synchronized; step planned; previous readers finished
                                   |
-             Select each source's complete value by the cutoff
-             (use last complete cache for an in-progress write)
+                 Select complete values from all sources
+                 (last complete cache if a snapshot races)
                                   |
-                    Valid complete batch available?
-                       NO /                 \ YES
-                 Resource fault             |
-                 retain values      Copy fits guarded window?
-                 and disarm           NO /           \ YES
-                               NOT_STARTED           |
-                               report/cancel    ALWAYS COPY
-                               and recover      EVERY MAPPING
+                       Valid complete batch?
+                      NO /              \ YES
+                 Resource fault            |
+                 disarm/retain      Copy fits safe window?
+                                    NO /          \ YES
+                              skip/report           |
+                                             ALWAYS COPY
+                                             EVERY MAPPING
                                                     |
-                                              Which step?
-                                      STEP 0 /           \ STEP > 0
-                           Finished by D0?               Copy complete and
-                             NO /     \ YES              trigger window valid?
-                     COPIED_LATE       COPIED_ON_TIME       NO /       \ YES
-                     report/cancel          |          suppress        |
-                     and recover       No counter       trigger   Wait to target;
-                                       increment;      and recover recheck; increment
-                                       await main                ONE destination cnt0
-
-No provider update is a normal data case. No destination-copy HOLD branch exists.
+                                                Which step?
+                                       STEP 0 /            \ STEP >0
+                              Complete by cutoff?       Safe to trigger?
+                              NO /          \ YES        NO /      \ YES
+                       cancel cycle's      await         skip      publish ONE
+                       later triggers      main          step      counter once
 ```
 
-`NOT_STARTED` and `COPIED_LATE` are distinct diagnostics. Both cancel the affected cycle's additional triggers and initiate recovery. `COPIED_ON_TIME` permits later steps only after the genuine main event and its combination have been confirmed, with phase/keepout still valid. The main loop continues independently of auxiliary recovery.
+A provider can leave its command unchanged for step 0, then publish a new value for step 1. Both steps copy a valid value; neither provider silence nor source age is a scheduler miss.
+
+An unsafe individual auxiliary step is skipped. A step-0 preparation miss cancels that cycle's later triggers. Three consecutive original unsafe/missed steps cause reacquisition; a successful step resets that sequence. Steps cancelled as consequences of one failure are not additional original failures. Main timeout/reset, unexpected or ambiguous combined output, invalid resources and genuine early-main/safety violations disarm immediately. No skipped trigger is replayed.
+
+Ordinary disable, fault and shutdown retain contributions. On an ordinary disable, an already-started bounded passive batch finishes across all mappings, then no extra trigger is issued; this avoids intentionally leaving a partially updated batch solely because of cancellation. Disable is acknowledged after quiescence, and cancellation is not counted as a deadline miss. Re-enable reacquires the main reference and prepares a future step 0 before later triggers resume. Disabled operation does not copy later provider writes, including zero, into destinations.
 
 ## Provider timing stream
 
-`dmtweeter_synco_timing` is the proposed high-rate interface for providers. It publishes a coherent schedule, then posts independent consumer semaphores so each provider can reread it. A notification is a prompt to read current timing; it is not a lossless cycle counter.
+The timing record supplies future snapshot cutoffs, requested count, estimated period, monotonic reference and validity/restart identity. An ImageStreamIO notification tells a provider to reread the coherent current record; it is not a lossless event count. State/generation changes invalidate old timing predictions, not persistent pixel values.
 
-The schedule describes its version, session and schedule generation, validity, primary cycle identifier, active step count/period, primary reference, and each step's writer deadline, snapshot cutoff, copy deadline, and combination target. Times and identifiers use typed integer fields with an explicit clock identifier. The binary field layout will be frozen with implementation; providers must not guess offsets from this guide.
+Notifications after sampling describe the next usable cutoffs, including a future step 0. Providers must honor validity and expiry when main timing stops. The first provider is local dmSpeckle on the RTC. A remote ICC/ACC001 provider needs a separately specified clock mapping and transport budget; RTC monotonic nanoseconds cannot be used as another host's clock.
 
-The schedule includes step 0 of a future cycle early enough for provider work. A provider seeing a new generation or invalid schedule should discard obsolete timing predictions. Existing pixel values remain valid when timing generations change. Providers do not send per-cycle commits, explicit reuse records, or consumption acknowledgements.
+The shared declaration is [dmSyncopationTiming.hpp](../../../libMagAOX/app/dmSyncopationTiming.hpp). Layout version 1 is a CPU-backed one-dimensional signed-int64 image with 41 words and room for 16 steps:
 
-Source metadata uses the build's `CLOCK_ISIO`, which may resolve to TAI or realtime. Internal app waits and the provider schedule use host monotonic time; the app converts the primary publication timestamp into that domain. Providers must honor the schedule's clock identifier. A same-host provider can use the same monotonic clock; a remote provider needs an explicit clock/transport arrangement. INDI is not the transport for subframe deadlines.
+| Word offset | Field | Meaning |
+| --- | --- | --- |
+| 0 | `version` | Layout version, currently 1. |
+| 1 | `epoch` | Positive restart identity. |
+| 2 | `generation` | Positive schedule generation. |
+| 3 | `state` | 0 invalid, 1 acquiring, 2 armed. Acquiring records allow preparation of the first step 0. |
+| 4 | `steps` | Active requested count, 1–16. |
+| 5 | `period` | Estimated main period in nanoseconds. |
+| 6 | `reference` | Monotonic main observation reference in nanoseconds. |
+| 7 | `expires` | Monotonic expiry in nanoseconds. |
+| 8 | `cycle` | Main cycle identifier. |
+| 9–24 | `cutoffs[j]` | Per-step future snapshot cutoff; zero means unavailable. |
+| 25–40 | `targets[j]` | Corresponding command target in monotonic nanoseconds. |
+
+Read the whole record with ImageStreamIO write/counter consistency checks, then use `validRecord()` and `nextStep()` from the shared header. A valid record has a current reference, an unexpired bounded lifetime of at most three periods, a supported state/count and cutoffs preceding their targets. Choose the earliest usable future cutoff rather than relying on semaphore count or array order. Reject unsupported layout versions and obsolete epoch/generation predictions.
 
 ## Configuration
 
-The proposed configuration file is `dmtweeter_synco.conf`, using normal MagAOX section/key syntax. In the tables, a **selected** value comes from the reviewed plan; a **proposal** is an initial interface/default choice for review; a **required site value** needs a measured or explicitly approved bound. All durations ending in `Us` are microseconds; rates ending in `Hz` are hertz.
+The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains the selected mapping and initial bounds. All `Us` values are microseconds, `Hz` values are hertz, and count settings are integers. Configuration-only changes require restart. The five `settings` elements below can also be changed through INDI while disabled.
 
-### Streams and threads
-
-| Key | Initial value/status | Meaning and constraints |
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `dm.channels` | `dm01disp07,dm01disp08`, selected | Ordered comma-separated destination list; nonempty, existing, same-DM 2-D float32 geometry. Reject aliases that duplicate a mapping or name the primary/combined/timing stream. |
-| `dm.auxChannels` | Optional explicit list | Source names paired with `dm.channels` in the same order; equal list lengths and unique source ownership. When omitted, derive sources using `dm.auxSuffix`. |
-| `dm.auxSuffix` | `_aux`, proposal | Suffix for generated source names. With the selected destinations this produces `dm01disp07_aux` and `dm01disp08_aux`; ignored when an explicit source list is supplied. |
-| `dm.triggerChannel` | `dm01disp07`, selected | Exactly one member of the destination list whose counter is incremented for later steps. If omitted, use the first destination. |
-| `primary.shmimName` | `dmC`, selected | Main-command stream observed for phase; may resolve to `dm01disp03`. |
-| `combined.shmimName` | `dm01disp`, selected | Combined output observed for confirmation. |
-| `primary.getExistingFirst`, `combined.getExistingFirst` | `false`, proposal | Wait for new observations; existing images must not be counted as a new main event or a pending combination's confirmation. |
-| `scheduler.threadPrio` | `30`, selected | Timing-worker RT priority; validate against the platform scheduler range. Failure to obtain required RT scheduling prevents arming. |
-| `scheduler.cpuset` | `spare61`, selected | Worker cpuset on the relevant RTC, CPU 61 in the current setup. The user's machine-specific assignment supersedes the earlier global-config recommendation. |
-| `primary.threadPrio`, `combined.threadPrio` | `30`, proposal | Primary/output observer priorities; bounded callbacks must remain responsive. |
-| `primary.cpuset`, `combined.cpuset` | `spare61`, proposal | Initial observer placement. Keep slower app, INDI, and logging work outside the timing core. |
+| `shmimMonitor.shmimName` | `dmC` | Primary stream to observe. Existing frames are never treated as new main events. |
+| `shmimMonitor.threadPrio` | 30 | Primary monitor/cycle thread priority. |
+| `shmimMonitor.cpuset` | `spare61` | Primary monitor/cycle thread cpuset. |
+| `streams.destinations` | `dm01disp07,dm01disp08` | Ordered numbered main-channel mapping. Sources append `_aux`; the first destination supplies every later-step trigger. |
+| `streams.combined` | `dm01disp` | Existing combined-output stream. |
+| `streams.timing` | `<instance>_timing` | Signed-int64 provider schedule; `dmtweeter_synco_timing` for this instance. |
+| `scheduler.maxSubframes` | 3 | Fixed requested count, 1–16, including passive step 0. |
+| `scheduler.maxCadenceHz` | 6000 | Nominal total-cadence sanity rating, including step 0. |
+| `scheduler.keepoutUs` | 115 | Controller processing/last-reader duration estimate. |
+| `scheduler.guardUs` | 20 | Reserve beyond explicit delivery/reader bounds. |
+| `scheduler.step0LeadUs` | 20 | Nominal step-0 completion lead. |
+| `scheduler.deliveryUs` | 20 | Submission-to-controller delivery allowance. |
+| `scheduler.snapshotBudgetUs` | 10 | Whole-batch one-pass snapshot budget. |
+| `scheduler.copyBudgetUs` | 10 | Whole-batch destination copy/publication budget. |
+| `scheduler.visibilityUs` | 1 | Positive margin before the earliest plausible main publication. |
+| `scheduler.preparationReserveUs` | 2 | Preparation target's positive reserve before the hard cutoff. |
+| `scheduler.outputTimeoutUs` | 50 | Combined-output watchdog, separate from the delivery/reader hold. |
+| `tracking.cameraDevice` | `camwfs` | Subscribe to this device's `fps.current`; empty disables subscription. |
+| `tracking.nominalMainRateHz` | 2000 | Initial acquisition period before observed main timing is available. |
+| `tracking.minMainRateHz`, `tracking.maxMainRateHz` | 500, 4000 | Accepted primary-rate range. |
+| `tracking.earlyMainUs` | 20 | Early-main safety allowance; also the accepted early/late deviation of a primary callback interval from its filtered prediction. |
+| `tracking.observationLagUs` | 5 | Maximum publication-to-callback lag allowance. |
+| `tracking.lockFrames` | 32 | Clean main observations before preparing an active cycle. |
+| `tracking.rateTolerance` | 0.01 | Relative nominal-cadence tolerance: 1%. |
+| `tracking.rateFrames` | 32 | Consecutive ordinary cadence violations before disarming. |
+| `tracking.primarySemaphore` | 5 | Required primary reader index; unexpected allocation/fallback is rejected, and legacy reserved index 9 is prohibited. |
+| `recovery.consecutiveMisses` | 3 | Consecutive original unsafe/missed events before reacquisition. |
+| `feedback.gain` | 0.1 | Independent per-event wait-integrator gain, 0–1. |
+| `feedback.maxAdvanceUs` | 20 | Maximum absolute wait correction. |
+| `telemeter.maxInterval` | 10 seconds | Existing helper's aggregate telemetry interval. |
 
-Changing mapping, names, maximum-step capacity, or thread placement requires disabling and restarting the app. Compatible auxiliary streams are retained across restart. Main DM streams are never destroyed by this app.
+The example starts disabled. Its conservative full timing bundle is **infeasible for three steps at 2 kHz**: the shortest 166.667 us interval cannot cover the reader hold, copy and effective early-main cutoff. The app reports this without silently lowering the requested count. Qualified bounds must support the requested schedule before instrument enablement.
 
-### Cadence and timing
+Camera reports are accepted for five seconds. During observed operation the sanity check uses the smaller of the filtered main rate and a current camera report, falling back to the observed rate when the report is stale/unavailable. This does not replace immediate keepout/early-main checks. An observation gap is not permission to stretch the cycle.
 
-| Key | Initial value/status | Meaning and constraints |
-| --- | --- | --- |
-| `scheduler.keepoutUs` | `115`, selected estimate | Positive controller processing keepout. Increasing it can reduce the selected count. |
-| `scheduler.guardUs` | `20`, proposal | Nonnegative additional spacing margin. It must cover the approved path/timing uncertainty; a 5 us event tolerance does not automatically make a 5 us guard sufficient. |
-| `scheduler.step0LeadUs` | `20`, proposal | Positive lead for the complete step-0 destination batch. |
-| `scheduler.maxAuxRateHz` | `6000`, selected | Positive strict cap on total step cadence, including step 0. |
-| `scheduler.maxSubframes` | `3`, selected | Positive maximum step count; bounds scheduling/feedback storage. It does not change the number of auxiliary images. |
-| `scheduler.maxTimingErrorUs` | `5`, initial interpretation | Positive primary phase/later-trigger timing-error limit. It never extends the step-0 deadline or weakens keepout. |
-| `scheduler.snapshotBudgetUs` | Required site value | Positive worst-case budget for sampling/validating all mapped sources with bounded retry. Used to put writer deadlines before snapshot cutoffs. |
-| `scheduler.copyBudgetUs` | Required site value | Positive worst-case budget for writing the entire destination batch and its metadata. Averages are insufficient for deciding whether a copy fits. |
-
-The clock follows `CLOCK_ISIO` for source timestamp interpretation and metadata publication. It is reported on INDI rather than independently selected by configuration. Host monotonic time is used for waits and provider schedule timestamps. Producer and consumer builds must agree on the source timestamp domain.
-
-### Tracking, feedback, and diagnostics
-
-| Key | Initial value/status | Meaning and constraints |
-| --- | --- | --- |
-| `tracking.minMainRateHz`, `tracking.maxMainRateHz` | Required site values | Positive acquisition-rate bounds with minimum no greater than maximum. They constrain acceptable observations; they do not prescribe the actual main rate. |
-| `tracking.earlyMainUs` | Required site value | Nonnegative bound on early primary arrival used to construct the guarded copy/trigger windows. An error threshold is not proof of this bound. |
-| `tracking.periodWindow` | `32`, proposal | Positive number of main observations used for period estimation. A longer window smooths noise but adapts more slowly to rate changes. |
-| `tracking.lockFrames` | `32`, proposal | Consecutive valid main frames required before resuming; actual acquisition also needs a usable period estimate and prepared future step 0. |
-| `tracking.mainTimeoutPeriods` | `3`, proposal | Positive timeout multiplier of the estimated main period; acquisition uses the configured rate bounds until an estimate exists. Main silence disarms auxiliary triggers. |
-| `tracking.outputTimeoutUs` | Required site value | Positive bound for a corresponding combined output. It must fit the selected schedule's consumption/copy windows. Missing/coalesced output cannot be treated as confirmation. |
-| `feedback.gain` | `0.1`, proposal | Integrator gain in `[0,1]`; zero disables adaptation. Each step has its own correction. |
-| `feedback.maxAdvanceUs` | Required site value | Nonnegative limit on how much wait advancement may be learned. Clamping prevents windup and excessive early wakes. |
-| `feedback.spinUs` | `0`, proposal | Nonnegative bound on optional final spinning before a target. Zero disables spinning; any nonzero choice needs timing/CPU qualification. |
-| `diagnostics.windowSamples` | `2000`, proposal | Positive bounded sample window per step for displayed statistics and timing diagnostics. |
-| `telemeter.maxInterval` | `10` seconds, existing helper default | Maximum interval between aggregate telemetry records. Telemetry is separate from the provider schedule. |
-
-The worker learns repeatable wake/work bias by advancing its waits after late successful events and reducing the advance after early completion. It does not move cycle zero or permit an early auxiliary counter increment. Corrections reset on lock/count/timing changes, freeze after failed events, and stay within `feedback.maxAdvanceUs`. Jitter from unpredictable scheduling still needs margin.
-
-### Example configuration template
-
-This template contains the selected deployment values and proposed review defaults. The commented required site values must be filled before using it as an operational configuration. The app always starts disabled; enabling is an explicit INDI action after validation and qualification.
-
-```ini
-# Proposed dmtweeter_synco.conf; complete measured site values before use.
-[dm]
-channels=dm01disp07,dm01disp08
-auxSuffix=_aux
-triggerChannel=dm01disp07
-
-[primary]
-shmimName=dmC
-getExistingFirst=false
-threadPrio=30
-cpuset=spare61
-
-[combined]
-shmimName=dm01disp
-getExistingFirst=false
-threadPrio=30
-cpuset=spare61
-
-[scheduler]
-threadPrio=30
-cpuset=spare61
-keepoutUs=115
-guardUs=20
-step0LeadUs=20
-maxAuxRateHz=6000
-maxSubframes=3
-maxTimingErrorUs=5
-# snapshotBudgetUs=<measured worst-case complete-source sampling budget>
-# copyBudgetUs=<measured worst-case complete-destination copy budget>
-
-[tracking]
-# minMainRateHz=<approved acquisition range minimum>
-# maxMainRateHz=<approved acquisition range maximum>
-# earlyMainUs=<approved early-primary arrival bound>
-periodWindow=32
-lockFrames=32
-mainTimeoutPeriods=3
-# outputTimeoutUs=<approved combination response bound>
-
-[feedback]
-gain=0.1
-# maxAdvanceUs=<qualified bound on wait advancement>
-spinUs=0
-
-[diagnostics]
-windowSamples=2000
-
-[telemeter]
-maxInterval=10
-```
-
-All numeric inputs must be finite and in range. Required budgets and the complete schedule must be feasible together. Stream role/type/geometry conflicts, unavailable resources, and invalid combinations prevent arming. The app does not silently clamp an infeasible subdivision count to one.
+Numeric values must be finite and within the accepted range. Main destinations must be unique numbered channels of the expected geometry/type; source, output and timing roles cannot alias. Invalid configuration or incompatible resources prevent operation. Unavailable secondary resources are retried once per second while unarmed. If a complete snapshot or destination-copy batch exceeds its runtime budget, the budget grows to the observed duration plus 1 us, the schedule is invalidated, and acquisition/feasibility validation repeat. This enlarges the planning window conservatively; a quiet running maximum still does not prove a bound.
 
 ## INDI interface
 
-All properties below belong to device `dmtweeter_synco`. They specify the proposed interface, following existing MagAOX `toggle`, `request`, and numeric `current`/`target` conventions. Standard MagAOX FSM, monitor, thread-health, logging, and telemetry properties will also be present.
+All application properties belong to device `dmtweeter_synco`. The ordinary MagAOX FSM and monitor/telemeter properties are also present. The FSM can remain `READY` while synchronization is acquiring or unarmed; use `health.reason` and the timing summary to determine scheduling state.
 
-### Controls
-
-| Property | Type/access | Elements and use |
+| Property | Type/access | Elements and behavior |
 | --- | --- | --- |
-| `enabled` | Switch, read/write | `toggle`: request On to acquire/enable, Off to cancel auxiliary work. On expresses intent, not proof of lock; consult `sync_status`. Off is acknowledged after pending work is cancelled so no further auxiliary counter increment can occur. |
-| `reacquire` | Switch, read/write | `request`: momentary request to invalidate old timing, reset wait feedback, and acquire a fresh main reference. Requires enable intent; it does not zero contributions. Resets to Off after acceptance. |
-| `keepout` | Number, read/write while disabled | `current`, `target`, us; maps to `scheduler.keepoutUs`. |
-| `guard` | Number, read/write while disabled | `current`, `target`, us; maps to `scheduler.guardUs`. |
-| `step0_lead` | Number, read/write while disabled | `current`, `target`, us; maps to `scheduler.step0LeadUs`. |
-| `max_aux_rate` | Number, read/write while disabled | `current`, `target`, Hz; maps to `scheduler.maxAuxRateHz`. |
-| `timing_error_limit` | Number, read/write while disabled | `current`, `target`, us; maps to `scheduler.maxTimingErrorUs`. |
-| `snapshot_budget`, `copy_budget` | Number, read/write while disabled | Each has `current`, `target`, us; maps to the corresponding scheduler budget. |
-| `feedback_gain` | Number, read/write while disabled | `current`, `target`, dimensionless; maps to `feedback.gain`. |
-| `feedback_advance_limit` | Number, read/write while disabled | `current`, `target`, us; maps to `feedback.maxAdvanceUs`. |
+| `enable` | Switch, read/write | `toggle`: On requests acquisition/operation; Off cancels work and acknowledges after the current callback is quiescent. Source/destination values are retained. |
+| `reacquire` | Switch, read/write | `request`: On invalidates the schedule and resets acquisition/feedback; the switch returns Off. It does not zero contributions or enable a disabled app. |
+| `settings` | Number, read/write while disabled | `steps`, `maxCadenceHz`, `keepoutUs`, `guardUs`, `step0LeadUs`. Supply one or more named elements; the update is validated and applied together. |
+| `timing` | Number, read-only | Main/camera/planned rate, requested/active/feasible counts, delivery/miss/fault/cache counters and maximum snapshot/copy durations, detailed below. |
+| `health` | Text, read-only | `reason`, `primary`, `combined`, `timingStream`, `mapping`. Resolved stream identities and schedule status such as `disabled`, `acquiring main progression`, `preparing first step zero`, `armed`, or an infeasibility/fault reason. |
 
-Write a numeric property's `target`, then verify readback. Valid values become `current` while disabled. A request made while enabled or an invalid/nonfinite/infeasible value is rejected; the active setting remains unchanged and the property reports Alert. Mapping/capacity/thread settings and configuration-only tracking/diagnostic settings require restart. An INDI update does not write the source images or directly trigger the DM.
+`settings` uses its named elements directly; there are no numeric `current`/`target` pairs. Updates while enabled, unknown elements, nonfinite values and invalid counts/ranges are rejected without changing the active configuration. Changing `steps` never changes source-image count. After an accepted disabled update, enable again to acquire a new schedule.
 
-### Status and measurements
+The `timing` summary includes:
 
-| Property | Type/access | Elements and interpretation |
-| --- | --- | --- |
-| `sync_status` | Text, read-only | `state`, `reason`, `limit`, `session`, `generation`: scheduler state, most recent fault/transition, subdivision limiting reason, and timing identity. |
-| `rates` | Number, read-only | `main`, `selected`, `delivered`, Hz: measured primary rate, armed nominal total cadence, and measured confirmed combination rate. Selected/delivered are zero when no auxiliary schedule is armed; this does not mean the main loop has stopped. |
-| `subframes` | Number, read-only | `active`, `extra`, `keepout_limit`, `capacity`: active count `N`, extra trigger count `N-1`, guarded keepout upper bound, and configured maximum steps. Active/extra are zero while unarmed. |
-| `interval` | Number, read-only | `current`, us: armed step interval; zero while unarmed. |
-| `streams` | Text, read-only | `primary`, `combined`, `trigger`, `timing`: resolved stream identities and designated counter-trigger destination. |
-| `mapping_0`, `mapping_1`, ... | Text, read-only | `source`, `destination`: one property per configured mapping in list order. |
-| `clock` | Text, read-only | `primary`, `schedule`: resolved `CLOCK_ISIO` domain and host monotonic schedule domain. |
-| `step0` | Text, read-only | `outcome`, `cycle`: last planned step-0 result (`COPIED_ON_TIME`, `NOT_STARTED`, `COPIED_LATE`; `NONE` before a result) and its cycle identifier. |
-| `timing_step0`, `timing_step1`, ... | Number, read-only | `lastErrorUs`, `meanErrorUs`, `jitterRmsUs`, `maxAbsErrorUs`, `advanceUs`: event residuals and learned wait advance. Properties exist up to capacity; inactive steps are Idle. |
-| `counters` | Number, read-only | `step0NotStarted`, `step0Late`, `timingErrors`, `suppressedTriggers`, `missingOutputs`, `unexpectedOutputs`, `cacheReuse`, `mainFaults`, `clockFaults`, `recoveries`: cumulative diagnostics for the app run. |
+| Element | Meaning |
+| --- | --- |
+| `mainHz`, `cameraHz` | Filtered primary rate and last accepted camera report. A displayed camera value alone does not prove that the report is current. |
+| `plannedHz` | Requested count divided by filtered main period; a planned rate does not prove the schedule is armed. |
+| `deliveredHz` | Confirmed main-plus-auxiliary combinations per second over the latest status interval. This is software observation while synco tracks the schedule; zero while disabled does not mean the main AO loop stopped. |
+| `delivered` | Cumulative confirmed later-step combinations. |
+| `requested`, `active`, `feasible` | Requested count, currently primed count (zero when unprimed), and maximum count fitting the complete timing bounds. |
+| `missed`, `faults` | Original timing failures and synchronization/resource invalidations. |
+| `cached` | Fallbacks due to an incomplete/racing snapshot; unchanged sources are not counted as misses. |
+| `notStarted`, `copiedLate` | Step-0 preparation suppressed before copying or finished after the effective cutoff. |
+| `snapshotMaxUs`, `copyMaxUs` | Observed maxima for complete snapshot and destination-copy batches. |
 
-Step-0 residual is actual full-batch completion minus `D0`; positive means late. Later-step residual is actual counter increment minus its target. `jitterRmsUs` describes variation about the mean residual; `meanErrorUs` shows systematic bias and `maxAbsErrorUs` preserves excursions. Timing statistics reset for a new schedule generation and use the bounded diagnostic window; fault counters persist until app restart. Skipped triggers have no execution residual and are represented by counters. Failed executed events remain visible in diagnostics even when excluded from feedback learning.
+The `timing` property's state is Ok when the provider schedule is armed and Idle otherwise. Counts and software output timing do not prove completed hardware transfer. INDI is a low-rate status/control path; providers use the timing image and its notifications.
 
-`cacheReuse` counts fallback caused by an incomplete/racing source snapshot, not ordinary unchanged provider data. None of these freshness-related observations cause automatic zeroing. Confirmed combined-output rate is a software measurement, not proof of hardware completion or receipt spacing. INDI publishes summaries at the app's status-update cadence; providers use the timing stream for subframe scheduling.
+Aggregate `telem_dmsynco` records include schedule state/count/period, delivery/miss/fault/cache totals, maximum snapshot/copy durations, per-step residuals and learned wait advances. Residuals use actual completion/publication minus the event target; hard-cutoff classification is separate. No 5 us fault-limit configuration exists.
 
-## Operating sequence and recovery
+## 200 Hz tip/tilt test provider
+
+The first dmSpeckle provider generates tip/tilt with a physical vibration frequency of 200 Hz, so the WFS can measure it. Its normalized x/y ramps are driven in quadrature:
 
 ```text
-                       enable
-             DISABLED ---------> ACQUIRING
-                  ^                  |
-                  |        valid main frames + period estimate
-                  |        + complete future step-0 preparation
-                  |                  |
-               disable               v
-                  +--------------- LOCKED
-                  |                  |
-                  |            timing/phase failure
-                  |                  |
-                  |                  v
-                  +------------ RECOVERING
-                                     |
-                          good frames + new prepared step 0
-                                     |
-                                     +---------------------> LOCKED
-
-Invalid/missing resources -> FAULT; retain commands and disarm.
-After the resource is corrected, request reacquisition with enable intent On.
-Disable from any state -> DISABLED.
+command(x,y,t) = amp * [x*cos(2*pi*frequency*t) + y*sin(2*pi*frequency*t)]
 ```
 
-| Scheduler state | Operation |
-| --- | --- |
-| `DISABLED` | No destination copying or extra counter triggers. Existing contributions persist; mutable timing controls may be edited. |
-| `ACQUIRING` | Observe/estimate genuine main timing and publish future deadlines. Preparation for an upcoming step 0 can occur; no extra auxiliary trigger is armed yet. |
-| `LOCKED` | Copy every active step and execute guarded later-step counter triggers. Enable property is Ok. |
-| `RECOVERING` | Cancel additional triggers, retain destination contents, reset feedback, and reacquire valid timing. Enable intent can remain On while the schedule is unarmed/Busy. |
-| `FAULT` | Resource/configuration failure, Alert status, no armed auxiliary schedule. Correct the cause before reacquisition. |
+Both axes complete a cycle at 200 Hz; this is not a 200 Hz sample-to-sample toggle producing a 100 Hz waveform. `t` is the target time in monotonic seconds, and `amp` is each axis's edge amplitude. Sampling cadence and vibration frequency are separate settings.
 
-For operational use after implementation, the operator should:
+The [dmtweeter_vibration.conf example](../../dmSpeckle/dmtweeter_vibration.conf) selects managed operation:
 
-1. Establish exclusive ownership of destinations 07/08, a counter-responsive combiner, compatible streams, and the selected machine's `spare61` assignment.
-2. Qualify source clock agreement, controller keepout/path variability, complete snapshot/copy budgets, early-main bounds, and expected main-rate range. Fill required site values in the configuration.
-3. Start `dmtweeter_synco` disabled and verify stream/mapping/clock readback and resource health.
-4. Allow providers to publish initial values or use retained compatible source contents. Request `enabled.toggle=On`; wait for `sync_status.state=LOCKED` and verify count/rate/interval.
-5. Watch per-step jitter/worst-case residuals, `step0` outcomes, delivered rate, and fault/suppression counters under the relevant load. Use those measurements to qualify the 5 us target and chosen margins.
-6. Disable before changing writable timing settings. For a mapping/capacity/thread change, disable and restart. Re-enable always reacquires synchronization.
+```ini
+[dm]
+channelName=dm01disp07_aux
+frequency=200
+amp=0.01
 
-A valid previous command is enough to resume; fresh provider writes are not required. Recovery does not restore an earlier step, zero a contribution, or replay overdue triggers. A main timeout, counter reset, stream replacement, clock discontinuity, missing/extra combination, or invalid timing window can disarm operation and change the timing generation.
+[modulator]
+opMode=tiptilt
 
-Disabling or stopping the app preserves destination values. A zero written to an auxiliary source while disabled remains there until copying resumes; it does not immediately clear the corresponding main input channel. To clear through the normal path, publish zero and confirm it has been copied/applied while the schedule is operating before disabling. Any direct maintenance clearing while disabled is an explicit operator action outside this app's normal scheduling path.
+[syncopation]
+timingStream=dmtweeter_synco_timing
+writeLeadUs=50
+```
 
-The existing combiner does not atomically snapshot multiple input channels or block an unexpectedly early primary event during copying. An arbitrarily early main command can also arrive inside the keepout of an already submitted auxiliary command. This app detects/reports these cases and recovers; a hard gating or pipelining solution would require a separate change to the cooperating loop/controller path. All live setup, INDI, and qualification steps on the instrument are performed by the operator.
+A nonempty `syncopation.timingStream` enables managed mode. The DM channel name must end in `_aux` and match a synco source mapping. The provider chooses the first future cutoff, evaluates the command for its corresponding target and publishes 50 us before the cutoff, revalidating the schedule identity before publication. Invalid/expired schedules pause writes. The producer publishes its source normally; it neither attaches a legacy main trigger nor changes a main destination counter.
 
-## Items to finalize before implementation
+Existing dmSpeckle INDI `frequency`, `amp`, `modulating` and `zero` controls apply. Read-only `dm.timing` reports the managed timing stream alongside the existing DM name/channel readback. The legacy trigger is forced off, enabling it is rejected, and its delay setting has no managed effect. Stopping modulation retains the last auxiliary value; use the explicit zero control to remove the contribution.
 
-- Confirm that the selected 5 us timing value applies to the event error limit; the separate 20 us guard and step-0 lead remain proposals in this draft.
-- Approve the proposed configuration/INDI names and unselected defaults (observer placement, acquisition window, feedback, and diagnostics).
-- Approve the bounded last-complete-cache fallback; always-copy behavior itself is already settled.
-- Supply qualified site budgets/bounds and any numerical acceptable miss-rate criteria. The initial recovery policy cancels on timing failure without a miss-rate allowance.
-- Freeze the provider timing stream's binary layout/version with implementation, before external providers depend on it.
+## Controller clearing and maintenance
+
+Controller zero/release checks each existing numbered main channel for a matching `_aux` counterpart. Missing auxiliary streams are normal. Compatible CPU 2-D streams matching the configured geometry and scalar type are zeroed alongside the main channels. An incompatible or unopenable optional source is left untouched and reported as an error after the main channels and normal cleanup are cleared; it does not block main-channel clearing. Auxiliary clears update publication metadata/counters without semaphore notifications, preserving the controller's existing main-notification behavior.
+
+The controller is responsible for those clear operations; a writer that writes afterward can reapply a contribution. There is no shared provider pause, clear acknowledgement, bridge drain or persistent inhibition protocol. To keep a contribution zero, the operator must manage its writer separately.
+
+Programmatic dmMode integration is deferred. Disable dmSyncopation before independent lab-alignment or other direct-trigger maintenance. Source/destination ownership and the combiner's other trigger-producing inputs remain operational constraints; an unexpected combination is not treated as harmless.
+
+## Operator qualification
+
+1. Verify exclusive destination/source ownership, `spare61` availability, the deployed dmcomb DELAY/counter route and primary monitor semaphore assignment. Confirm the trigger channel is not excluded by astrogrid mode and auxiliary inputs do not unintentionally drive ZPO work.
+2. Use a controller built with `XWC_DMTIMINGS`. Assess `m_piTimes` for processing/reader duration and `m_triggerDelta` for controller receipt spacing, alongside app residuals and dmcomb output.
+3. Qualify delivery tails, observation lag, early-main uncertainty, snapshot/copy budgets and every adjacent/wraparound/copy window under the relevant load. Keep host-timing qualification separate from deterministic CI tests.
+4. Start disabled, verify configuration/status, start the local 200 Hz provider, then enable and wait for lock. Check requested/active/feasible counts and delivered cadence.
+5. Measure residual mean/RMS/percentiles/max, minimum receipt spacing, skipped/coalesced events and recovery duty cycle. Use 5 us as an analysis guideline. WFS measurements should recover the configured 200 Hz vibration.
+6. Disable before changing timing controls or performing independent maintenance. Mapping/topology changes require restart. Controller clearing does not stop active writers.
+
+An arbitrarily early main publication can race a multi-channel memcpy or follow an auxiliary submission too soon. This observer-based app can detect and recover from such a violation but cannot block the genuine main publisher. A hard gating/pipelining guarantee requires a separate change to the cooperating loop/controller path.
