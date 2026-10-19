@@ -26,6 +26,7 @@
 
 ../libMagAOX/tty/tests/ttyIOUtils_test
 
+../apps/kcubeCtrl/tests/kcubeCtrl_test
 ../apps/virtualPDU/tests/virtualPDU_test
 ../apps/acronameUsbHub/tests/acronameUsbHub_test
 ../apps/adcTracker/tests/adcTracker_test

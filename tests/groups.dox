@@ -47,8 +47,18 @@ $ bash ./testMagAOX.bash
  * \ingroup unit_test
  */
 
+/** \defgroup pupilFit_unit_test Pupil Fit Unit Tests
+ * \brief Offline fitting, per-image telemetry, derived averages, and failure handling.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup filterWheelCtrl_unit_test Filter Wheel Controller Unit Tests
  * \brief Offline communication recovery, homing, and power-transition tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup kcubeCtrl_unit_test K-Cube Controller Unit Tests
+ * \brief Offline two-axis connection, power-transition, and communication recovery tests.
  * \ingroup application_unit_test
  */
 
@@ -89,5 +99,10 @@ $ bash ./testMagAOX.bash
 
 /** \defgroup coronAlignGUI_unit_test Coronagraph Alignment GUI Unit Tests
  * \brief Offline device recovery, position validity, and motion routing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup shmimIntegrator_unit_test ImageStreamIO Integrator Unit Tests
+ * \brief Offline numerical, configuration, restart, and publication ownership regressions.
  * \ingroup application_unit_test
  */
