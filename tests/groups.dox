@@ -81,3 +81,8 @@ $ bash ./testMagAOX.bash
  * \brief Offline INDI command lifecycle and ROI interaction tests.
  * \ingroup application_unit_test
  */
+
+/** \defgroup shmimIntegrator_unit_test ImageStreamIO Integrator Unit Tests
+ * \brief Offline numerical, configuration, restart, and publication ownership regressions.
+ * \ingroup application_unit_test
+ */
