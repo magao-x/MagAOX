@@ -154,7 +154,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     uint64_t m_currSaveStart{ 0 }; ///< The circular buffer position at which to start saving.
     uint64_t m_currSaveStop{ 0 };  ///< The circular buffer position at which to stop saving.
 
-    uint64_t m_currSaveStopFrameNo{ 0 }; ///< The frame number of the image at which saving stopped (for logging)
+    uint64_t m_currSaveStopFrameNo{ 0 }; ///< Source-frame counter at the end of the latest queued save window.
 
     /// The xrif compression handle for image data
     xrif_t m_xrif{ nullptr };
@@ -350,7 +350,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     /// Force a scheduled saving-state telemetry record.
     int recordTelem( const telem_saving_state *record /**< [in] telemetry type selector */ );
 
-    /// Record changes in the saving state and current save window.
+    /// Record saving activity and the source-frame counter at the end of the latest queued save window.
     int recordSavingState( bool force = false /**< [in] emit even without a state change */ );
 
     /// Record changes in encoder sizes and rates.

@@ -1,6 +1,5 @@
 /** \file telem_saving_state.hpp
-  * \brief The MagAO-X logger telem_saving_state log type.
-  * \author Jared R. Males (jaredmales@gmail.com)
+  * \brief Saving-activity telemetry snapshots for the MagAO-X logger.
   *
   * \ingroup logger_types_files
   *
@@ -17,15 +16,15 @@ namespace MagAOX
 namespace logger
 {
 
-///Saving started log
+/// Snapshot of saving activity and the source-frame counter at the end of the latest queued save window.
 /** \ingroup logger_types
   */
 struct telem_saving_state : public saving_state_change
 {
-   ///The event code
+   /// Event code identifying a saving-state snapshot rather than a start or stop event.
    static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_SAVING_STATE;
 
-   ///The default level
+   /// Telemetry priority used for periodic and per-chunk snapshots.
    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
    static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
