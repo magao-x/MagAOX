@@ -9,6 +9,7 @@
 ../libMagAOX/app/dev/tests/dm_test
 ../libMagAOX/app/dev/tests/dev_test
 ../libMagAOX/app/dev/tests/stdCamera_test
+../libMagAOX/app/dev/tests/stdCamera_roi_test
 
 ../libMagAOX/file/tests/fileTimes_test
 ../libMagAOX/file/tests/stdFileName_test
@@ -25,6 +26,7 @@
 
 ../libMagAOX/tty/tests/ttyIOUtils_test
 
+../apps/kcubeCtrl/tests/kcubeCtrl_test
 ../apps/virtualPDU/tests/virtualPDU_test
 ../apps/acronameUsbHub/tests/acronameUsbHub_test
 ../apps/adcTracker/tests/adcTracker_test

@@ -18,6 +18,8 @@
 
 
 
+.DEFAULT_GOAL := all
+
 TESTS_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 SELF_DIR := $(TESTS_DIR)
 include $(SELF_DIR)/../Make/common.mk
@@ -40,6 +42,11 @@ EDT_TESTS = ocam2KCtrl_test ocam2KCtrl_lifecycle_test ocam2KCtrl_temperature_tes
 
 ifeq ($(notdir $(TESTNAME)),acronameUsbHub_test)
 	CPPFLAGS += -I$(TESTS_DIR)/../libs/BrainStem2
+else ifeq ($(notdir $(TESTNAME)),kcubeCtrl_test)
+    TMC_CONTROLLER_PATH ?= /opt/MagAOX/source/tmcController
+    FTDI_CFLAGS ?= $(shell pkg-config --cflags libftdi1)
+    CPPFLAGS += -I$(TMC_CONTROLLER_PATH) -I$(TMC_CONTROLLER_PATH)/tests $(FTDI_CFLAGS)
+    $(OBJNAME): $(PATHNAME)../kcubeCtrl.hpp $(TMC_CONTROLLER_PATH)/tmcController.hpp $(TMC_CONTROLLER_PATH)/tests/ftdiHarness.hpp
 else ifeq ($(notdir $(TESTNAME)),cursesINDI_test)
 	OTHER_HEADERS += cursesTableGrid.hpp
 	LDLIBS += -lncurses
@@ -49,6 +56,8 @@ else ifeq ($(notdir $(TESTNAME)),logstream_test)
 	LDLIBS = -lmxlib -lflatbuffers
 else ifeq ($(notdir $(TESTNAME)),logsurgeon_test)
 	LDLIBS = -lmxlib -lflatbuffers
+else ifeq ($(notdir $(TESTNAME)),pupilFit_test)
+	LDLIBS += -lflatbuffers
 else ifeq ($(notdir $(TESTNAME)),xrif2fits_test)
 	LDLIBS += -lcfitsio
 else ifeq ($(notdir $(TESTNAME)),xrif2shmim_test)
