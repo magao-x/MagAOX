@@ -2,7 +2,7 @@
 # Makefile for building MagAOX Qt GUIs
 #
 # The only thing that needs to be customized here is TARGET. The
-# remaing app-specific details are handled by the Qt .pro file.
+# remaining app-specific details are handled by the Qt .pro file.
 #
 # Usage: In the folder of a GUI app, create a Makefile with a minimum of:
 #       TARGET=<name>
@@ -23,8 +23,11 @@ ifeq "$(QMAKE_PATH)" ""
   QMAKE_PATH := $(shell which $(QMAKE) 2>/dev/null)
 endif
 
+# Cleaning must also work on systems without Qt development tools.
+ifneq ($(MAKECMDGOALS),clean)
 ifeq "$(QMAKE_PATH)" ""
   $(error No qmake found on PATH (are the Qt development libraries installed?))
+endif
 endif
 
 QMAKE_PROJECT := $(TARGET).pro
@@ -51,10 +54,14 @@ $(QMAKE_MAKEFILE): $(QMAKE_DEPS)
 install: $(TARGET)
 	sudo install bin/$(TARGET) /usr/local/bin
 
+# A stale generated makefile can rerun qmake during distclean. Only recurse
+# when qmake and the generated makefile are both present.
 clean:
-ifneq (,$(wildcard ./$(QMAKE_MAKEFILE)))  #Test if the generated makefile exists to avoid errors on 2nd make clean
+ifneq (,$(QMAKE_PATH))
+ifneq (,$(wildcard ./$(QMAKE_MAKEFILE)))
 	$(MAKE) -f $(QMAKE_MAKEFILE) distclean
 endif
-	rm -f *~
+endif
+	rm -f *~ $(QMAKE_MAKEFILE) .qmake.stash
 	rm -f bin/$(TARGET)
 	rm -rf bin moc obj res ui

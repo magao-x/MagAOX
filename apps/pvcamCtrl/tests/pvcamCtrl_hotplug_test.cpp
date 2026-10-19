@@ -184,11 +184,12 @@ TEST_CASE( "pvcamCtrl waits quietly in NODEVICE when no camera appears", "[pvcam
     REQUIRE( Fixture::errors() == 0 );
 }
 
-/// A port that stays up, or comes back up, while this camera is off belongs to another camera and is never reset.
+/// A port that stays up while this camera is off belongs to another camera and is never reset; a healthy camera is
+/// never reset either.
 /** \ingroup pvcamCtrl_unit_test */
 TEST_CASE( "pvcamCtrl refuses to hotplug a port that is not its camera's", "[pvcamCtrl][hotplug]" )
 {
-    SECTION( "port stays up while power is off" )
+    SECTION( "healthy camera on a port that stays up while power is off" )
     {
         HotplugFixture f;
         f.pcie( "0000:42:08.0" );
@@ -204,7 +205,21 @@ TEST_CASE( "pvcamCtrl refuses to hotplug a port that is not its camera's", "[pvc
         REQUIRE_FALSE( f.sibling() );
     }
 
-    SECTION( "port comes up while power is off" )
+    SECTION( "stale camera, which its own app may hold open, on a port that stays up" )
+    {
+        HotplugFixture f;
+        f.m_sysfs.camera( "0000:42:08.0", "0000:43:00.0", Cam::Stale );
+        f.pcie( "0000:42:08.0" );
+        f.start( 0 );
+        REQUIRE( f.loop() == 0 );
+        f.power( 1, 1 );
+        REQUIRE( f.loop() == 0 );
+        REQUIRE( f.m_pcieDisabled );
+        REQUIRE( Fixture::count( "stayed up while camera power was off" ) == 1 );
+        REQUIRE( f.m_pcie.m_ops.empty() );
+    }
+
+    SECTION( "another camera comes up healthy on a misconfigured port while this one is off" )
     {
         HotplugFixture f;
         f.cameraOff();
@@ -212,14 +227,45 @@ TEST_CASE( "pvcamCtrl refuses to hotplug a port that is not its camera's", "[pvc
         REQUIRE( f.loop() == 0 );
         REQUIRE( f.m_portSeenDown );
         f.m_sysfs.link( "0000:42:09.0", true );
-        REQUIRE( f.loop() == 0 );
-        REQUIRE( f.m_pcieDisabled );
-        REQUIRE( Fixture::count( "came up while camera power was off" ) == 1 );
+        f.m_sysfs.camera( "0000:42:09.0", "0000:44:00.0" );
         REQUIRE( f.loop() == 0 );
         f.power( 1, 1 );
         REQUIRE( f.loop() == 0 );
+        REQUIRE_FALSE( f.m_hotplugPending );
+        REQUIRE_FALSE( f.m_pcieDisabled );
         REQUIRE( f.m_pcie.m_ops.empty() );
+        REQUIRE( f.state() == stateCodes::OPERATING );
     }
+}
+
+/// The PDU switches the camera on before its INDI power state arrives, so the port comes up while the app still
+/// sees power off.  This is normal and must not disable hotplug (regression from 2026-10-12 on camflowfs).
+/** \ingroup pvcamCtrl_unit_test */
+TEST_CASE( "pvcamCtrl hotplugs when the camera powers up before power-on is reported", "[pvcamCtrl][hotplug]" )
+{
+    HotplugFixture f;
+    f.m_sysfs.camera( "0000:42:09.0", "0000:44:00.0" );
+    f.start( 1 );
+    REQUIRE( f.loop() == 0 );
+    f.power( 0, 0 );
+    REQUIRE( f.loop() == 0 );
+    f.cameraOff();
+    REQUIRE( f.loop() == 0 );
+    REQUIRE( f.m_portSeenDown );
+
+    f.cameraOn();
+    f.power( 0, 1 );
+    for( int n = 0; n < 2; ++n )
+        REQUIRE( f.loop() == 0 );
+    REQUIRE_FALSE( f.m_pcieDisabled );
+    REQUIRE( f.m_portSeenDown );
+
+    f.m_pcie.m_rescanCreates = "0000:44:00.0";
+    f.power( 1, 1 );
+    REQUIRE( f.loop() == 0 );
+    REQUIRE( f.op( "write 0000:42:09.0/0000:44:00.0/remove" ) );
+    REQUIRE( f.state() == stateCodes::OPERATING );
+    REQUIRE( Fixture::errors() == 0 );
 }
 
 /// Startup with power on hotplugs a stale camera before PVCAM opens it, and leaves a healthy one alone.
