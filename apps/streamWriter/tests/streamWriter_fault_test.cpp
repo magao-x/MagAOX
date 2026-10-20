@@ -850,7 +850,7 @@ TEST_CASE( "streamWriter saving telemetry describes activity and source frames",
         REQUIRE( telem_saving_state::msgString( stopped.data(), stopped.size() ) ==
                  "Saving state: inactive; save-window end frame: 1761" );
     }
-    SECTION( "chunk snapshots remain active until the final stop flush completes" )
+    SECTION( "unchanged post-write state is suppressed but the final stop is reported" )
     {
         f.buffers();
         reinterpret_cast<uint16_t *>( app.m_rawImageCircBuff )[2] = 23;
@@ -863,13 +863,11 @@ TEST_CASE( "streamWriter saving telemetry describes activity and source frames",
         app.m_currSaveStop        = 3;
         app.m_currSaveStopFrameNo = 1760;
         REQUIRE( app.doEncode() == 0 );
-        REQUIRE( g_faults.m_telemetry.size() == 3 );
-        for( size_t index : { 0u, 2u } )
-        {
-            const auto *state = GetSaving_state_change_fb( g_faults.m_telemetry[index].data() );
-            REQUIRE( state->state() == 1 );
-            REQUIRE( state->frameNo() == 1760 );
-        }
+        REQUIRE( g_faults.m_telemetry.size() == 2 );
+        const auto *state = GetSaving_state_change_fb( g_faults.m_telemetry[0].data() );
+        REQUIRE( state->state() == 1 );
+        REQUIRE( state->frameNo() == 1760 );
+        REQUIRE( Gettelem_saving_fb( g_faults.m_telemetry[1].data() )->raw_size() == 2 );
         REQUIRE( logs( "Saving started" ) == 0 );
         REQUIRE( logs( "Saving stopped" ) == 0 );
 
@@ -884,6 +882,30 @@ TEST_CASE( "streamWriter saving telemetry describes activity and source frames",
         REQUIRE( GetSaving_state_change_fb( g_faults.m_telemetry[2].data() )->state() == 0 );
         REQUIRE( GetSaving_state_change_fb( g_faults.m_telemetry[2].data() )->frameNo() == 1761 );
         REQUIRE( logs( "Saving stopped at frame number 1761" ) == 1 );
+    }
+    SECTION( "empty save windows suppress repeats while preserving stop and reconnect states" )
+    {
+        const int mode = GENERATE( 0, 1, 2 );
+        f.buffers();
+        app.m_currSaveStart        = 0;
+        app.m_currSaveStop         = 0;
+        app.m_currSaveStopFrameNo  = 1761;
+        app.m_writing              = mode == 0 ? WRITING : STOP_WRITING;
+        app.m_resumeAfterReconnect = mode == 2;
+        REQUIRE( app.doEncode() == 0 );
+        REQUIRE_FALSE( app.m_writePending );
+        REQUIRE( g_faults.m_telemetry.size() == ( mode == 1 ? 3 : 2 ) );
+        const auto *state = GetSaving_state_change_fb( g_faults.m_telemetry[0].data() );
+        REQUIRE( state->state() == 1 );
+        REQUIRE( state->frameNo() == 1761 );
+        REQUIRE( app.m_writing == ( mode == 0 ? WRITING : mode == 1 ? NOT_WRITING : START_WRITING ) );
+        REQUIRE( logs( "Saving stopped at frame number 1761" ) == ( mode == 1 ? 1 : 0 ) );
+        if( mode == 1 )
+        {
+            const auto *stopped = GetSaving_state_change_fb( g_faults.m_telemetry[2].data() );
+            REQUIRE( stopped->state() == 0 );
+            REQUIRE( stopped->frameNo() == 1761 );
+        }
     }
 }
 
@@ -1049,6 +1071,10 @@ TEST_CASE( "streamWriter allocations and output failures release write ownership
             REQUIRE( f.encode() == 0 );
         REQUIRE( app.m_writing == START_WRITING );
         REQUIRE_FALSE( app.m_writePending );
+        REQUIRE( g_faults.m_telemetry.size() == 2 );
+        REQUIRE( GetSaving_state_change_fb( g_faults.m_telemetry[0].data() )->state() == 1 );
+        REQUIRE( GetSaving_state_change_fb( g_faults.m_telemetry[0].data() )->frameNo() == count );
+        REQUIRE( logs( "Saving stopped" ) == 0 );
     }
     SECTION( "real static callback validates and changes the writer state" )
     {

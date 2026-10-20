@@ -2041,7 +2041,7 @@ int streamWriter::doEncode()
             m_stopWriteDeadline = 0;
         }
 
-        recordSavingState( true );
+        recordSavingState();
 
         m_writePending = false;
         return 0;
@@ -2228,7 +2228,7 @@ int streamWriter::doEncode()
         m_stopWriteDeadline = 0;
     }
 
-    recordSavingState( true );
+    recordSavingState();
 
     m_writePending = false;
     return 0;
