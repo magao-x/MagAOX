@@ -54,4 +54,4 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 <!-- Here the agent documents its plan for the implementation -->
 
 ## Follow-up and Edge Cases
-<!-- The agent should list any planned follow up and any edge cases that are not addressed >
+<!-- The agent should list any planned follow up and any edge cases that are not addressed -->

@@ -252,3 +252,5 @@ coverage_report/
 
 # Valgrind logs
 tests/valgrind/logs/*
+
+apps/virtualPDU/virtualPDU
