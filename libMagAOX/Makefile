@@ -60,6 +60,8 @@ INCLUDEDEPS= \
 	logger/types/software_log.hpp \
 	logger/types/state_change.hpp \
 	logger/types/string_log.hpp \
+	logger/types/telem_outlet.hpp \
+	logger/types/telem_pdu.hpp \
 	logger/types/telem_blockgains.hpp \
 	logger/types/telem_chrony_stats.hpp \
 	logger/types/telem_chrony_status.hpp \
@@ -83,6 +85,8 @@ INCLUDEDEPS= \
 	logger/types/telem_poltrack.hpp \
 	logger/types/telem_position.hpp \
 	logger/types/telem_psfacq.hpp \
+	logger/types/telem_pupilfit.hpp \
+	logger/types/telem_pupilfit_state.hpp \
 	logger/types/telem_rhusb.hpp \
 	logger/types/telem_saving_state.hpp \
 	logger/types/telem_saving.hpp \
@@ -142,6 +146,9 @@ OBJS = \
 
 
 all: libMagAOX.hpp.gch libMagAOX.a
+
+# Generated types and binary schemas must be complete before parallel object compilation.
+$(OBJS): logger/generated/logTypes.hpp
 
 app/MagAOXApp.o: app/MagAOXApp.hpp app/indiDriver.hpp app/indiMacros.hpp app/indiUtils.hpp app/stateCodes.o
 

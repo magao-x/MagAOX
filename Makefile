@@ -23,6 +23,7 @@ apps_common = \
 	closedLoopIndi
 
 apps_aoc = \
+	virtualPDU \
 	trippLitePDU \
 	xt1121Ctrl \
 	xt1121DCDU \
@@ -36,6 +37,7 @@ apps_aoc = \
 	xInstGraph
 
 pythonapps_aoc = \
+	virtualPDU \
 	audibleAlerts
 
 # Apps common to RTC and ICC on MagAO-X
@@ -117,9 +119,12 @@ apps_tic = \
 
 # Apps with simulator mode
 apps_sim = \
+	virtualPDU \
 	trippLitePDU
 
 all_buildable_apps = \
+	virtualPDU \
+	acronameUsbHub \
 	adcTracker \
 	alignLoop \
 	cacaoInterface \
