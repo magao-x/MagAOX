@@ -19,6 +19,7 @@ SOURCES       = indiDictionary.cpp
 
 LIBS         += ../../../../INDI/libcommon/libcommon.a
 LIBS         += ../../../../INDI/liblilxml/liblilxml.a
+LIBS         += -lrtimv
 
 TARGET        = $$qtLibraryTarget(rtimv_indiDictionaryPlugin)
 DESTDIR       = ./
