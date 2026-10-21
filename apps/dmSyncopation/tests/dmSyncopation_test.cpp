@@ -134,7 +134,9 @@ Harness::~Harness() noexcept
     stopMonitor();
     closeResources();
     if( m_imageStream.md )
+    {
         ImageStreamIO_closeIm( &m_imageStream );
+    }
 }
 
 void Harness::attach()
@@ -226,7 +228,9 @@ Streams::Streams()
         char        pattern[] = "/tmp/dm-synco-test-XXXXXX";
         const char *path      = mkdtemp( pattern );
         if( !path )
+        {
             throw std::runtime_error( "cannot create isolated ImageStreamIO directory" );
+        }
         return std::string( path );
     }();
     directory = processDirectory;
@@ -247,15 +251,25 @@ Streams::~Streams()
     {
         IMAGE image{};
         if( ImageStreamIO_openIm( &image, name ) == 0 )
+        {
             ImageStreamIO_destroyIm( &image );
+        }
     }
     for( auto &image : images )
+    {
         if( image.md )
+        {
             ImageStreamIO_destroyIm( &image );
+        }
+    }
     if( hadPrior )
+    {
         setenv( "MILK_SHM_DIR", prior.c_str(), 1 );
+    }
     else
+    {
         unsetenv( "MILK_SHM_DIR" );
+    }
 }
 
 /// Fake monotonic execution clock, with controlled output acknowledgements during waits.
@@ -376,7 +390,9 @@ void primaryObservation( Harness &app /**< [in,out] isolated scheduler */,
     metadata->writetime = synco::toTimespec( publication );
     metadata->cnt0 += count;
     if( app.m_combined )
+    {
         app.m_combined->image()->md->cnt0 += count;
+    }
     metadata->write = 0;
     Clock::time     = observed;
     REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
@@ -403,9 +419,13 @@ int64_t PrimaryProbe::now()
     if( image && tear )
     {
         if( tear == 1 )
+        {
             image->md->write = 1;
+        }
         else
+        {
             ++image->md->cnt0;
+        }
         tear = 0;
     }
     if( entered )
@@ -438,7 +458,9 @@ cameraTiming( double fps /**< [in] Measured acquisition frequency in Hz. */,
     if( statistics )
     {
         for( const auto &name : { "acq_jitter", "acq_min", "acq_max" } )
+        {
             packet.add( pcf::IndiElement( name ) );
+        }
         packet["acq_jitter"] = 1.234e-6;
         packet["acq_min"]    = 490e-6;
         packet["acq_max"]    = 510e-6;
@@ -522,7 +544,9 @@ TEST_CASE( "syncopation feedback and future record validity", "[dmSyncopation]" 
 {
     int64_t advance = 0;
     for( int j = 0; j < 100; ++j )
+    {
         advance = synco::feedback( advance, 2000 - advance, 0.2, 20000, true );
+    }
     REQUIRE( advance == Approx( 2000 ).margin( 5 ) );
     REQUIRE( synco::feedback( advance, 1000000, 0.2, 20000, false ) == advance );
     REQUIRE( synco::feedback( 0, 1000000, 1, 20000, true ) == 20000 );
@@ -801,7 +825,9 @@ TEST_CASE( "syncopation primes step zero before issuing later triggers", "[dmSyn
         ++streams.images[1].md->cnt0;
         REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
         if( cycle < 2 )
+        {
             REQUIRE( app.m_delivered == 0 );
+        }
     }
     REQUIRE( app.m_primed );
     REQUIRE( app.m_scheduleState == synco::armed );
@@ -1070,6 +1096,7 @@ TEST_CASE( "syncopation consumes measured camera acquisition reports", "[dmSynco
             REQUIRE( app.m_cameraTime.load() == acceptedTime );
         }
         for( const auto &name : { "acq_jitter", "acq_min", "acq_max" } )
+        {
             for( double bad :
                  { -1.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity() } )
             {
@@ -1083,7 +1110,9 @@ TEST_CASE( "syncopation consumes measured camera acquisition reports", "[dmSynco
                 REQUIRE( app.m_cameraMinUs == Approx( 490 ) );
                 REQUIRE( app.m_cameraMaxUs == Approx( 510 ) );
             }
+        }
         for( const auto &name : { "acq_jitter", "acq_min", "acq_max" } )
+        {
             for( const auto &bad : { "", "invalid", "1e-6 trailing", "nan", "inf", "1e999" } )
             {
                 packet       = cameraTiming( 1900 );
@@ -1096,6 +1125,7 @@ TEST_CASE( "syncopation consumes measured camera acquisition reports", "[dmSynco
                 REQUIRE( app.m_cameraMinUs == Approx( 490 ) );
                 REQUIRE( app.m_cameraMaxUs == Approx( 510 ) );
             }
+        }
         packet            = cameraTiming( 1900 );
         packet["acq_min"] = 1e-3;
         REQUIRE( app.setCallBack_m_indiP_camera( packet ) < 0 );
@@ -1163,8 +1193,12 @@ TEST_CASE( "syncopation camera callback does not wait for a timed cycle", "[dmSy
     app.m_now                           = Clock::now;
     auto                         packet = cameraTiming( 2000 );
     std::unique_lock<std::mutex> cycle( app.m_cycleMutex );
-    auto       response  = std::async( std::launch::async, [&]() { return app.setCallBack_m_indiP_camera( packet ); } );
-    const auto completed = response.wait_for( std::chrono::milliseconds( 500 ) );
+    auto                         response  = std::async( std::launch::async,
+                                [&]()
+                                {
+                                    return app.setCallBack_m_indiP_camera( packet );
+                                } );
+    const auto                   completed = response.wait_for( std::chrono::milliseconds( 500 ) );
     cycle.unlock(); // Release even with the old blocking callback before checking or joining the worker.
     const int result = response.get();
     REQUIRE( completed == std::future_status::ready );
@@ -1289,9 +1323,13 @@ TEST_CASE( "syncopation isolated phase outlier does not become the next period",
     app.m_requested   = 2;
     const bool camera = GENERATE( false, true );
     if( camera )
+    {
         REQUIRE( app.setCallBack_m_indiP_camera( cameraTiming( 2000 ) ) == 0 );
+    }
     for( int cycle = 0; cycle < 40; ++cycle )
+    {
         Clock::primary( 1000000000 + cycle * 500000 );
+    }
     REQUIRE( app.m_primed );
     REQUIRE( app.m_faults == 0 );
     const int64_t late = 1000000000 + 39 * 500000 + 525000;
@@ -1353,14 +1391,18 @@ TEST_CASE( "syncopation separates primary publication and observation intervals"
     REQUIRE( app.m_faultTiming.m_counter == app.m_primaryCounter );
     REQUIRE( app.m_faultTiming.m_publication == ( publicationInterval ? publicationInterval : -1 ) );
     if( publicationInterval )
+    {
         REQUIRE( app.m_faultInterval - app.m_faultTiming.m_publication == 555000 - publicationInterval );
+    }
     REQUIRE( app.m_faultTiming.m_previousRuntime == previousRuntime );
     REQUIRE( app.m_faultTiming.m_gap == observed + 1055100 - previousEnd );
     REQUIRE( app.m_faultTiming.m_sampleDelay >= 0 );
     REQUIRE( app.m_faultTiming.m_sampleDelay < 10000 );
     const auto fault = app.m_faultTiming;
     for( int miss = 0; miss < 3; ++miss )
+    {
         app.missedStep();
+    }
     app.m_lockFrames = 2;
     for( int cycle = 1; cycle <= 6; ++cycle )
     {
@@ -1613,9 +1655,13 @@ TEST_CASE( "syncopation records callback completion across early and scheduled r
         REQUIRE( app.m_previousCallbackRuntime == app.m_previousCallbackEnd - entry );
         REQUIRE( app.m_previousCallbackRuntime > 0 );
         if( cycle == 1 )
+        {
             REQUIRE( app.m_previousCallbackRuntime >= 50000 );
+        }
         if( cycle >= 3 )
+        {
             REQUIRE( app.m_previousCallbackRuntime > 400000 );
+        }
         previousRuntime = app.m_previousCallbackRuntime;
         previousEnd     = app.m_previousCallbackEnd;
     }
@@ -1645,8 +1691,12 @@ TEST_CASE( "syncopation callback diagnostics include cycle lock delay", "[dmSync
     auto               entered = started.get_future();
     PrimaryProbe::entered      = &started;
     std::unique_lock<std::mutex> cycle( app.m_cycleMutex );
-    auto response = std::async( std::launch::async, [&]() { return app.processImage( nullptr, dev::shmimT{} ); } );
-    const auto captured = entered.wait_for( std::chrono::milliseconds( 500 ) );
+    auto                         response = std::async( std::launch::async,
+                                [&]()
+                                {
+                                    return app.processImage( nullptr, dev::shmimT{} );
+                                } );
+    const auto                   captured = entered.wait_for( std::chrono::milliseconds( 500 ) );
     PrimaryProbe::time.fetch_add( 55000 );
     cycle.unlock(); // Release before checking the entry notification or joining the worker.
     const int result = response.get();
@@ -1679,7 +1729,9 @@ TEST_CASE( "syncopation fallback qualifies a coherent primary period", "[dmSynco
     SECTION( "a sustained genuine rate change eventually rearms at its qualified mean" )
     {
         for( int cycle = 0; cycle < 40; ++cycle )
+        {
             Clock::primary( 1000000000 + cycle * 500000 );
+        }
         REQUIRE( app.m_period == 500000 );
         REQUIRE( std::string( app.m_periodSource ) == "primary window" );
         const int64_t last = 1000000000 + 39 * 500000;
@@ -1687,7 +1739,9 @@ TEST_CASE( "syncopation fallback qualifies a coherent primary period", "[dmSynco
         {
             Clock::primary( last + cycle * 600000 );
             if( cycle < app.m_rateFrames )
+            {
                 REQUIRE( app.m_period == 500000 );
+            }
         }
         REQUIRE( app.m_period == 600000 );
         REQUIRE( app.m_measuredPeriod == 600000 );
@@ -1783,7 +1837,9 @@ TEST_CASE( "syncopation expires camera reports without relaxing timing bounds", 
     SECTION( "an expired report uses an already qualified primary window" )
     {
         for( int cycle = 1; cycle <= 4; ++cycle )
+        {
             app.updatePeriod( receipt + cycle * 600000, 600000, true );
+        }
         REQUIRE( app.m_measuredPeriod == 600000 );
         REQUIRE( app.m_period == 400000 );
         app.m_primed        = true;

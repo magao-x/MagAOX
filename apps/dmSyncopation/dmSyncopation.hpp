@@ -458,15 +458,21 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         double value = double( m_bounds.*entry.second ) / 1000;
         config( value, entry.first );
         if( !finite( value ) || value < 0 || value > 1000000 )
+        {
             return -1;
+        }
         m_bounds.*entry.second = int64_t( std::ceil( value * 1000 ) );
     }
     if( m_timingName.empty() )
+    {
         m_timingName = configName() + "_timing";
+    }
     if( m_combinedName.size() != 8 || m_combinedName.substr( 0, 2 ) != "dm" || m_combinedName.substr( 4 ) != "disp" ||
         m_combinedName.find_first_not_of( "0123456789", 2 ) != 4 ||
         ( m_timingName.size() >= 8 && m_timingName.substr( 0, 2 ) == "dm" && m_timingName.substr( 4, 4 ) == "disp" ) )
+    {
         return -1;
+    }
     if( m_requested < 1 || m_requested > synco::maxSteps || m_destinations.empty() || m_destinations.size() > 32 ||
         !finite( m_maxCadence ) || m_maxCadence <= 0 || !finite( m_nominalRate ) || !finite( m_minRate ) ||
         !finite( m_maxRate ) || m_minRate < 1 || m_maxRate > 100000 || m_minRate > m_nominalRate ||
@@ -477,23 +483,33 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         m_primarySemaphore == 9 || m_primarySemaphore >= SEMAPHORE_MAXVAL || m_bounds.copy == 0 ||
         m_bounds.snapshot == 0 || m_bounds.visibility == 0 || m_bounds.reserve == 0 ||
         ( !m_cameraDevice.empty() && ( m_cameraProperty.empty() || m_cameraElement.empty() ) ) )
+    {
         return -1;
+    }
     std::vector<std::string> names{ shmimMonitorT::m_shmimName, m_combinedName, m_timingName };
     for( const auto &name : m_destinations )
     {
         if( name.size() != 10 || name.substr( 0, 2 ) != "dm" || name.substr( 4, 4 ) != "disp" ||
             name.substr( 0, 8 ) != m_combinedName || name.find_first_not_of( "0123456789", 2 ) != 4 ||
             name.find_first_not_of( "0123456789", 8 ) != std::string::npos )
+        {
             return -1;
+        }
         names.push_back( name );
         names.push_back( name + "_aux" );
     }
     for( const auto &name : names )
+    {
         if( name.empty() || name.find_first_of( "/\\ \t\n" ) != std::string::npos )
+        {
             return -1;
+        }
+    }
     std::sort( names.begin(), names.end() );
     if( std::adjacent_find( names.begin(), names.end() ) != names.end() )
+    {
         return -1;
+    }
     m_period                         = int64_t( 1e9 / m_nominalRate );
     shmimMonitorT::m_semaphoreNumber = m_primarySemaphore;
     return 0;
@@ -532,7 +548,9 @@ inline bool dmSyncopation::openResources()
             shmimMonitorT::m_imageStream.md->naxis != 2 || shmimMonitorT::m_imageStream.md->location != -1 ||
             m_combined->image()->md->naxis != 2 || m_combined->image()->md->location != -1 ||
             m_combined->rows() != width || m_combined->cols() != height )
+        {
             throw std::runtime_error( "resource attachment failed" );
+        }
         for( const auto &name : m_destinations )
         {
             Mapping mapping;
@@ -542,19 +560,27 @@ inline bool dmSyncopation::openResources()
             mapping.m_destination->passive( true );
             if( mapping.m_destination->rows() != width || mapping.m_destination->cols() != height ||
                 mapping.m_destination->image()->md->naxis != 2 || mapping.m_destination->image()->md->location != -1 )
+            {
                 throw std::runtime_error( "resource attachment failed" );
+            }
             if( inode( name + "_aux" ) )
+            {
                 mapping.m_source->open( name + "_aux" );
+            }
             else
             {
                 // Seed once from a complete stable destination; never destroy/recreate an existing source.
                 const auto counter = mapping.m_destination->image()->md->cnt0;
                 if( mapping.m_destination->image()->md->write )
+                {
                     throw std::runtime_error( "resource attachment failed" );
+                }
                 std::vector<float> seed( width * height );
                 std::memcpy( seed.data(), mapping.m_destination->data(), seed.size() * sizeof( float ) );
                 if( mapping.m_destination->image()->md->write || counter != mapping.m_destination->image()->md->cnt0 )
+                {
                     throw std::runtime_error( "resource attachment failed" );
+                }
                 IMAGE    created{};
                 uint32_t sizes[]{ width, height };
                 // milkImage::create uses a three-axis circular buffer; controller auxiliary sources are plain 2D.
@@ -569,7 +595,9 @@ inline bool dmSyncopation::openResources()
                                                 0,
                                                 0,
                                                 0 ) != 0 )
+                {
                     throw std::runtime_error( "resource attachment failed" );
+                }
                 ImageStreamIO_closeIm( &created );
                 mapping.m_source->open( name + "_aux" );
                 mapping.m_source->setWrite( true );
@@ -578,7 +606,9 @@ inline bool dmSyncopation::openResources()
             }
             if( mapping.m_source->rows() != width || mapping.m_source->cols() != height ||
                 mapping.m_source->image()->md->naxis != 2 || mapping.m_source->image()->md->location != -1 )
+            {
                 throw std::runtime_error( "resource attachment failed" );
+            }
             mapping.m_counter          = mapping.m_destination->image()->md->cnt0;
             mapping.m_destinationInode = inode( name );
             mapping.m_sourceInode      = inode( name + "_aux" );
@@ -588,19 +618,27 @@ inline bool dmSyncopation::openResources()
             mapping.m_stage.resize( width * height );
             const auto count = mapping.m_source->image()->md->cnt0;
             if( mapping.m_source->image()->md->write )
+            {
                 throw std::runtime_error( "resource attachment failed" );
+            }
             std::memcpy( mapping.m_cache.data(), mapping.m_source->data(), mapping.m_cache.size() * sizeof( float ) );
             if( mapping.m_source->image()->md->write || count != mapping.m_source->image()->md->cnt0 )
+            {
                 throw std::runtime_error( "resource attachment failed" );
+            }
             m_mappings.push_back( std::move( mapping ) );
         }
         if( inode( m_timingName ) )
         {
             if( ImageStreamIO_openIm( &m_timing, m_timingName.c_str() ) != 0 )
+            {
                 throw std::runtime_error( "resource attachment failed" );
+            }
             if( m_timing.md->datatype != _DATATYPE_INT64 || m_timing.md->naxis != 1 || m_timing.md->location != -1 ||
                 m_timing.md->size[0] != synco::words )
+            {
                 throw std::runtime_error( "resource attachment failed" );
+            }
         }
         else
         {
@@ -608,13 +646,17 @@ inline bool dmSyncopation::openResources()
             if( ImageStreamIO_createIm_gpu(
                     &m_timing, m_timingName.c_str(), 1, &size, _DATATYPE_INT64, -1, 1, IMAGE_NB_SEMAPHORE, 0, 0, 0 ) !=
                 0 )
+            {
                 throw std::runtime_error( "resource attachment failed" );
+            }
         }
         identities.push_back( inode( m_timingName ) );
         m_timingInode = inode( m_timingName );
         std::sort( identities.begin(), identities.end() );
         if( identities.front() == 0 || std::adjacent_find( identities.begin(), identities.end() ) != identities.end() )
+        {
             throw std::runtime_error( "resource attachment failed" );
+        }
         m_consumed       = m_combined->image()->md->cnt0;
         m_trackingOutput = false;
         m_resources      = true;
@@ -635,7 +677,9 @@ inline void dmSyncopation::closeResources()
     m_mappings.clear();
     m_combined.reset();
     if( m_timing.md )
+    {
         ImageStreamIO_closeIm( &m_timing );
+    }
     m_timing = {};
 }
 
@@ -646,10 +690,14 @@ inline bool dmSyncopation::resourcesValid( bool files )
         m_timing.md->size[0] != synco::words || m_timing.md->location != -1 ||
         shmimMonitorT::m_imageStream.md->sem == 0 || m_combined->image()->md->naxis != 2 ||
         m_combined->image()->md->location != -1 )
+    {
         return false;
+    }
     if( files && ( inode( m_combinedName ) != m_combinedInode || inode( m_timingName ) != m_timingInode ||
                    inode( shmimMonitorT::m_shmimName ) != shmimMonitorT::m_inode ) )
+    {
         return false;
+    }
     for( size_t j = 0; j < m_mappings.size(); ++j )
     {
         const auto &mapping = m_mappings[j];
@@ -659,10 +707,14 @@ inline bool dmSyncopation::resourcesValid( bool files )
             mapping.m_destination->image()->md->cnt0 != mapping.m_counter ||
             mapping.m_destination->image()->md->write || mapping.m_destination->image()->md->sem == 0 ||
             mapping.m_source->image()->md->sem == 0 )
+        {
             return false;
+        }
         if( files && ( inode( m_destinations[j] ) != mapping.m_destinationInode ||
                        inode( m_destinations[j] + "_aux" ) != mapping.m_sourceInode ) )
+        {
             return false;
+        }
     }
     return true;
 }
@@ -671,7 +723,9 @@ inline void dmSyncopation::readCamera()
 {
     std::unique_lock<std::mutex> lock( m_cameraMutex, std::try_to_lock );
     if( lock.owns_lock() )
+    {
         m_cameraReport = { m_cameraFps.load(), m_cameraTime.load(), m_cameraJitterUs, m_cameraMinUs, m_cameraMaxUs };
+    }
 }
 
 inline void dmSyncopation::readPrimaryTiming( int64_t observed, uint64_t counter, bool sequential )
@@ -684,21 +738,29 @@ inline void dmSyncopation::readPrimaryTiming( int64_t observed, uint64_t counter
     int64_t       publication = 0;
     if( complete && !metadata->write && metadata->cnt0 == counter && stamp.tv_sec >= 0 && stamp.tv_nsec >= 0 &&
         stamp.tv_nsec < 1000000000 && stamp.tv_sec <= ( INT64_MAX - stamp.tv_nsec ) / 1000000000 )
+    {
         publication = int64_t( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec;
+    }
     m_primaryTiming           = {};
     m_primaryTiming.m_counter = counter;
     if( sequential && ( !m_havePrimaryCounter || counter > m_primaryCounter ) && publication > 0 &&
         m_previousPrimaryPublication > 0 && publication > m_previousPrimaryPublication )
+    {
         m_primaryTiming.m_publication = publication - m_previousPrimaryPublication;
+    }
     m_previousPrimaryPublication = publication;
     if( m_previousCallbackEnd > 0 )
     {
         m_primaryTiming.m_previousRuntime = m_previousCallbackRuntime;
         if( observed >= m_previousCallbackEnd )
+        {
             m_primaryTiming.m_gap = observed - m_previousCallbackEnd;
+        }
     }
     if( sampled >= observed )
+    {
         m_primaryTiming.m_sampleDelay = sampled - observed;
+    }
 }
 
 inline void dmSyncopation::updatePeriod( int64_t observed, int64_t interval, bool sequential )
@@ -707,7 +769,9 @@ inline void dmSyncopation::updatePeriod( int64_t observed, int64_t interval, boo
     {
         m_rateWindowCount = 0;
         if( !sequential )
+        {
             m_measuredPeriod = 0;
+        }
     }
     else
     {
@@ -804,7 +868,9 @@ inline bool dmSyncopation::waitUntil( int64_t target )
         }
         const int64_t now = m_now();
         if( now >= target )
+        {
             return true;
+        }
         const auto wake  = synco::toTimespec( std::min( target, now + 10000 ) );
         const int result = m_wait ? m_wait( &wake ) : clock_nanosleep( CLOCK_MONOTONIC, TIMER_ABSTIME, &wake, nullptr );
         if( result != 0 && result != EINTR )
@@ -830,9 +896,13 @@ inline bool dmSyncopation::consume()
             return true;
         }
         if( counter != m_consumed && counter != m_consumed + 1 )
+        {
             break;
+        }
         if( !waitUntil( std::min( deadline, m_now() + 1000 ) ) )
+        {
             return false;
+        }
     }
     m_lastOutputDelta = int64_t( m_combined->image()->md->cnt0 ) - int64_t( m_consumed );
     invalidate( "missing/ambiguous combined output", Fault::output );
@@ -854,7 +924,9 @@ inline bool dmSyncopation::snapshot()
             complete = !metadata->write && metadata->cnt0 == counter;
         }
         if( complete )
+        {
             std::copy( mapping.m_stage.begin(), mapping.m_stage.end(), mapping.m_cache.begin() );
+        }
         else
         {
             std::copy( mapping.m_cache.begin(), mapping.m_cache.end(), mapping.m_stage.begin() );
@@ -879,7 +951,9 @@ inline bool dmSyncopation::copyBatch( int64_t cutoff )
     const int64_t start = m_now();
     m_copyAttemptedAt   = start;
     if( start + m_bounds.copy > cutoff || !waitUntil( start ) || m_combined->image()->md->cnt0 != m_consumed )
+    {
         return false;
+    }
     m_copyStarted = true;
     for( auto &mapping : m_mappings )
     {
@@ -899,7 +973,9 @@ inline bool dmSyncopation::copyBatch( int64_t cutoff )
     m_copyCompleted         = completed;
     m_copyMax               = std::max( m_copyMax, completed - start );
     if( !waitUntil( completed ) )
+    {
         return false;
+    }
     if( completed - start > m_bounds.copy )
     {
         m_bounds.copy = completed - start + 1000;
@@ -907,7 +983,9 @@ inline bool dmSyncopation::copyBatch( int64_t cutoff )
         return false;
     }
     if( completed > cutoff )
+    {
         return false;
+    }
     return true;
 }
 
@@ -915,7 +993,9 @@ inline void dmSyncopation::missedStep()
 {
     ++m_missed;
     if( ++m_failures >= m_failureLimit )
+    {
         invalidate( "consecutive missed timing events", Fault::none, false );
+    }
 }
 
 inline bool dmSyncopation::executeStep( int step, int64_t target, int64_t cutoff )
@@ -926,9 +1006,13 @@ inline bool dmSyncopation::executeStep( int step, int64_t target, int64_t cutoff
     if( !waitUntil( snapshotAt ) || !snapshot() )
     {
         if( !m_enabled || m_faults != faultsBefore )
+        {
             return false;
+        }
         if( step == 0 )
+        {
             ++m_notStarted;
+        }
         missedStep();
         return false;
     }
@@ -941,14 +1025,20 @@ inline bool dmSyncopation::executeStep( int step, int64_t target, int64_t cutoff
     if( copyAt + m_bounds.copy > cutoff )
     {
         if( !m_enabled || m_faults != faultsBefore )
+        {
             return false;
+        }
         if( step == 0 )
+        {
             ++m_notStarted;
+        }
         missedStep();
         return false;
     }
     if( !waitUntil( copyAt ) )
+    {
         return false;
+    }
     const bool copied = copyBatch( cutoff );
     if( step == 0 && m_enabled && m_faults == faultsBefore && copyAt == desiredStart - advance )
     {
@@ -961,13 +1051,19 @@ inline bool dmSyncopation::executeStep( int step, int64_t target, int64_t cutoff
     if( !copied )
     {
         if( !m_enabled || m_faults != faultsBefore )
+        {
             return false;
+        }
         if( step == 0 )
         {
             if( m_copyStarted && m_copyCompleted > cutoff )
+            {
                 ++m_copiedLate;
+            }
             else if( !m_copyStarted )
+            {
                 ++m_notStarted;
+            }
         }
         missedStep();
         return false;
@@ -976,7 +1072,9 @@ inline bool dmSyncopation::executeStep( int step, int64_t target, int64_t cutoff
     if( step > 0 )
     {
         if( !waitUntil( target - m_advances[step] ) )
+        {
             return false;
+        }
         const int64_t latest = m_lastMain + m_period - m_bounds.early - m_bounds.observation;
         if( m_now() + m_bounds.delivery + m_bounds.keepout + m_bounds.guard > latest || m_now() > cutoff ||
             m_combined->image()->md->cnt0 != m_consumed )
@@ -986,7 +1084,9 @@ inline bool dmSyncopation::executeStep( int step, int64_t target, int64_t cutoff
         }
         auto &trigger = m_mappings.front();
         if( !waitUntil( m_now() ) )
+        {
             return false;
+        }
         const uint64_t expected = trigger.m_counter + 1;
         trigger.m_destination->passive( false );
         trigger.m_destination->post();
@@ -1005,12 +1105,16 @@ inline bool dmSyncopation::executeStep( int step, int64_t target, int64_t cutoff
             return false;
         }
         if( !consume() )
+        {
             return false;
+        }
         ++m_delivered;
     }
     m_residuals[step] = actual - target;
     if( step > 0 )
+    {
         m_advances[step] = synco::feedback( m_advances[step], m_residuals[step], m_gain, advanceLimit, true );
+    }
     m_failures = 0;
     return true;
 }
@@ -1019,7 +1123,9 @@ inline void dmSyncopation::publishSchedule( int64_t observed, int completed )
 {
     if( !m_timing.md || m_timing.md->datatype != _DATATYPE_INT64 || m_timing.md->naxis != 1 ||
         m_timing.md->size[0] != synco::words || m_timing.md->location != -1 )
+    {
         return;
+    }
     m_record.fill( 0 );
     m_record[synco::version]    = synco::layoutVersion;
     m_record[synco::epoch]      = m_epoch;
@@ -1033,10 +1139,14 @@ inline void dmSyncopation::publishSchedule( int64_t observed, int completed )
     for( int j = 0; observed > 0 && j < m_requested; ++j )
     {
         if( m_scheduleState == synco::acquiring && j > 0 )
+        {
             continue;
+        }
         int64_t target = j == 0 ? observed + m_period : observed + j * m_period / m_requested;
         if( completed == 0 || ( j > 0 && j <= completed ) )
+        {
             target += m_period;
+        }
         const int64_t preparation = j == 0 ? synco::copyCutoff( target, m_bounds ) - m_bounds.reserve : target;
         const int64_t cutoff =
             preparation - m_bounds.copy - int64_t( m_maxAdvanceUs * 1000 ) - m_bounds.snapshot - m_bounds.reserve;
@@ -1059,7 +1169,9 @@ inline int dmSyncopation::allocate( const dev::shmimT &tag )
     {
         const int assigned = shmimMonitorT::m_semaphoreNumber;
         if( assigned >= 0 && shmimMonitorT::m_imageStream.semReadPID[assigned] == getpid() )
+        {
             shmimMonitorT::m_imageStream.semReadPID[assigned] = 0;
+        }
         return -1;
     }
     invalidate( "acquiring resources" );
@@ -1161,7 +1273,9 @@ inline int dmSyncopation::processPrimary( int64_t observed )
     if( !m_resources )
     {
         if( observed < m_nextAttach )
+        {
             return 0;
+        }
         m_nextAttach = observed + 1000000000;
         if( !openResources() )
         {
@@ -1221,7 +1335,9 @@ inline int dmSyncopation::processPrimary( int64_t observed )
         // delivery window before choosing a baseline, so it cannot become the next main's acknowledgement.
         m_expectOutput = true;
         if( !waitUntil( observed + int64_t( std::max( m_outputTimeoutUs * 1000, double( m_bounds.delivery ) ) ) ) )
+        {
             return 0;
+        }
         if( m_combined->image()->md->write )
         {
             invalidate( "initial output baseline incomplete", Fault::output );
@@ -1243,9 +1359,13 @@ inline int dmSyncopation::processPrimary( int64_t observed )
     m_feasible           = synco::maximumSteps( m_period, m_bounds );
     const double nominal = 1e9 / m_period;
     if( nominal * m_requested > m_maxCadence * ( 1 + m_rateTolerance ) )
+    {
         ++m_rateViolations;
+    }
     else
+    {
         m_rateViolations = 0;
+    }
     if( !synco::feasible( m_period, m_requested, m_bounds ) || m_rateViolations >= m_rateFrames )
     {
         invalidate( "requested count/cadence infeasible" );
@@ -1272,7 +1392,9 @@ inline int dmSyncopation::processPrimary( int64_t observed )
                                    m_bounds.keepout - m_bounds.guard;
             executeStep( j, target, latest );
             if( m_scheduleState == synco::invalid || !m_enabled )
+            {
                 return 0;
+            }
         }
     }
     const int64_t cutoff = synco::copyCutoff( observed + m_period, m_bounds );
@@ -1423,15 +1545,21 @@ inline int dmSyncopation::appStartup()
     }
 
     if( getrandom( &m_epoch, sizeof( m_epoch ), 0 ) != sizeof( m_epoch ) )
+    {
         return -1;
+    }
     m_epoch &= INT64_MAX;
     if( m_epoch == 0 )
+    {
         m_epoch = 1;
+    }
     if( createStandardIndiToggleSw( m_indiP_enable, "enable" ) < 0 ||
         registerIndiPropertyNew( m_indiP_enable, INDI_NEWCALLBACK( m_indiP_enable ) ) < 0 ||
         createStandardIndiRequestSw( m_indiP_reacquire, "reacquire" ) < 0 ||
         registerIndiPropertyNew( m_indiP_reacquire, INDI_NEWCALLBACK( m_indiP_reacquire ) ) < 0 )
+    {
         return -1;
+    }
     REG_INDI_NEWPROP( m_indiP_settings, "settings", pcf::IndiProperty::Number );
     for( const auto &name : { "steps", "maxCadenceHz", "keepoutUs", "guardUs", "step0LeadUs" } )
     {
@@ -1487,12 +1615,16 @@ inline int dmSyncopation::appStartup()
                               "faultPrevCallbackUs",
                               "faultCallbackGapUs",
                               "faultEntryToCounterUs" } )
+    {
         m_indiP_status.add( pcf::IndiElement( name ) );
+    }
     REG_INDI_NEWPROP_NOCB( m_indiP_health, "health", pcf::IndiProperty::Text );
     m_indiP_health.setPerm( pcf::IndiProperty::ReadOnly );
     for( const auto &name :
          { "reason", "lastFault", "periodSource", "primary", "combined", "timingStream", "mapping" } )
+    {
         m_indiP_health.add( pcf::IndiElement( name ) );
+    }
     if( !m_cameraDevice.empty() )
     {
         REG_INDI_SETPROP( m_indiP_camera, m_cameraDevice, m_cameraProperty );
@@ -1520,7 +1652,9 @@ inline int dmSyncopation::appLogic()
             const int64_t  now       = m_now();
             const uint64_t delivered = m_mainDelivered + m_delivered;
             if( m_reportTime && now > m_reportTime )
+            {
                 m_deliveredHz = 1e9 * ( delivered - m_reportedDelivered ) / ( now - m_reportTime );
+            }
             m_reportTime                          = now;
             m_reportedDelivered                   = delivered;
             const auto                     status = m_scheduleState == synco::armed ? INDI_OK : INDI_IDLE;
@@ -1627,7 +1761,9 @@ inline int dmSyncopation::appLogic()
             const std::string periodSource = m_periodSource;
             std::string       mappings;
             for( const auto &name : m_destinations )
+            {
                 mappings += ( mappings.empty() ? "" : ", " ) + name + "_aux -> " + name;
+            }
             lock.unlock(); // Never hold the cycle mutex across INDI driver I/O.
             updateIfChanged( m_indiP_settings, settingNames, settingValues );
             updateIfChanged( m_indiP_status, names, values, status );
@@ -1726,10 +1862,14 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_enable )( const pcf::IndiProperty 
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_enable, ipRecv );
     if( ipRecv.getType() != pcf::IndiProperty::Switch || !ipRecv.find( "toggle" ) || ipRecv.getElements().size() != 1 )
+    {
         return -1;
+    }
     const bool enable = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
     if( !enable )
+    {
         m_enabled = false;
+    }
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_cycleMutex );
         invalidate( enable ? "acquiring" : "disabled" );
@@ -1748,7 +1888,9 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_reacquire )( const pcf::IndiProper
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_reacquire, ipRecv );
     if( ipRecv.getType() != pcf::IndiProperty::Switch || !ipRecv.find( "request" ) || ipRecv.getElements().size() != 1 )
+    {
         return -1;
+    }
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
         std::lock_guard<std::mutex> lock( m_cycleMutex );
@@ -1764,10 +1906,14 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_settings, ipRecv );
     if( ipRecv.getType() != pcf::IndiProperty::Number || ipRecv.getElements().empty() )
+    {
         return -1;
+    }
     std::lock_guard<std::mutex> lock( m_cycleMutex );
     if( m_enabled )
+    {
         return -1;
+    }
     int    requested = m_requested;
     double cadence   = m_maxCadence;
     auto   bounds    = m_bounds;
@@ -1776,27 +1922,41 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
         const auto  &name  = element.first;
         const double value = element.second.get<double>();
         if( !finite( value ) || value < 0 || value > 1e6 )
+        {
             return -1;
+        }
         if( name == "steps" )
         {
             if( value < 1 || value > synco::maxSteps || value != std::floor( value ) )
+            {
                 return -1;
+            }
             requested = int( value );
         }
         else if( name == "maxCadenceHz" )
         {
             if( value == 0 )
+            {
                 return -1;
+            }
             cadence = value;
         }
         else if( name == "keepoutUs" )
+        {
             bounds.keepout = int64_t( std::ceil( value * 1000 ) );
+        }
         else if( name == "guardUs" )
+        {
             bounds.guard = int64_t( std::ceil( value * 1000 ) );
+        }
         else if( name == "step0LeadUs" )
+        {
             bounds.lead = int64_t( std::ceil( value * 1000 ) );
+        }
         else
+        {
             return -1;
+        }
     }
     m_requested  = requested;
     m_maxCadence = cadence;
@@ -1810,21 +1970,29 @@ INDI_SETCALLBACK_DEFN( dmSyncopation, m_indiP_camera )( const pcf::IndiProperty 
     if( ipRecv.getType() != pcf::IndiProperty::Number || m_cameraDevice.empty() ||
         ipRecv.getDevice() != m_cameraDevice || ipRecv.getName() != m_cameraProperty ||
         !ipRecv.find( m_cameraElement ) )
+    {
         return -1;
+    }
     double      values[]{ 0, -1, -1, -1 };
     const char *names[]{ m_cameraElement.c_str(), "acq_jitter", "acq_min", "acq_max" };
     for( size_t j = 0; j < 4; ++j )
     {
         if( !ipRecv.find( names[j] ) )
+        {
             continue;
+        }
         // IndiElement's numeric getter does not report failed or partial conversions.
         std::istringstream input( ipRecv[names[j]].getValue() );
         if( !( input >> values[j] ) || !( input >> std::ws ).eof() || !finite( values[j] ) ||
             ( j == 0 ? ( values[j] <= 0 || values[j] > 100000 ) : ( values[j] < 0 || values[j] > 1000000 ) ) )
+        {
             return -1;
+        }
     }
     if( values[2] >= 0 && values[3] >= 0 && values[2] > values[3] )
+    {
         return -1;
+    }
     std::lock_guard<std::mutex> lock( m_cameraMutex );
     m_cameraFps      = values[0];
     m_cameraTime     = m_now();
