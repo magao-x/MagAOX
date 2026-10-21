@@ -10,9 +10,12 @@
 #include <mx/improc/eigenImage.hpp>
 #include <mx/improc/milkImage.hpp>
 #include <mx/ioutils/fits/fitsFile.hpp>
-#include <mx/sigproc/circularBuffer.hpp>
+#include <mx/math/floatUtils.hpp>
 
+#include "dmTiming.hpp"
 #include "shmimMonitor.hpp"
+#include "../../logger/types/telem_dmtimings.hpp"
+#include "../../logger/types/telem_fgtimings.hpp"
 
 namespace MagAOX
 {
@@ -766,77 +769,227 @@ class dm
 
     ///@}
 
+  protected:
+    /** \name Timing - Data
+     * @{ */
+    double m_timingWindow{ 2.0 }; ///< Trailing timing window in seconds; zero disables capture.
+
+    size_t m_timingCapacity{ 20000 }; ///< Queue and consumer-window event cap; zero disables capture.
+
+    dev::dmTiming m_dmTiming; ///< Single-producer capture and consumer-owned timing statistics.
+
+    uint64_t m_timingLastRecord{ 0 }; ///< Summary sequence last emitted by this instance.
+
+    bool m_timingRecorded{ false }; ///< Whether this instance has emitted a summary yet.
+
+    pcf::IndiProperty m_indiP_dmTiming; ///< Receipt/send cadence and paired-latency statistics.
+
+    pcf::IndiProperty m_indiP_dmStages; ///< Named controller-stage statistics, in seconds.
+
+    pcf::IndiProperty m_indiP_dmTimingQuality; ///< Timing coverage and quality counters.
+
+    pcf::IndiProperty m_indiP_dmTimingState; ///< Endpoint/clock definitions and measurement availability.
+
+    /// @}
+
   public:
-    // clang-format off
-    #ifdef XWC_DMTIMINGS //clang-format on
+    /** \name Timing
+     * @{ */
 
-    /// Index type used by optional controller timing sample buffers.
-    typedef int32_t cbIndexT;
+    /// Observe monitor events on the sole command producer thread.
+    void shmimMonitorTiming( const dev::shmimT &tag /**< [in] Main DM monitor tag. */,
+                             shmimMonitorEvent  event /**< [in] Receipt/attachment observation. */ );
 
-    /// Timing markers for total command processing, saturation posting, and saturation update intervals.
-    double m_t0{ 0 }, m_tf{ 0 }, m_tsat0{ 0 }, m_tsatf{ 0 };
+    /// Capture a controller phase marker without logging or allocating.
+    void dmTimingMark( MagAOX::dmTiming::Marker marker /**< [in] Controller endpoint to capture. */ );
 
-    /// Timing markers set by derived DM command implementations for actuator processing phases.
-    double m_tact0{ 0 }, m_tact1{ 0 }, m_tact2{ 0 }, m_tact3{ 0 }, m_tact4{ 0 };
+    /// Record backend submission status without changing command handling.
+    void dmTimingOutcome( MagAOX::dmTiming::Outcome outcome /**< [in] Observed submission/callback result. */ );
 
-    /// Timing markers for delta-channel update processing.
-    double m_tdelta0 {0}, m_tdeltaf {0};
+    /// Refresh the consumer-owned statistics outside the command thread.
+    void updateDMTimings();
 
-    /// Previous trigger semaphore arrival time, used to compute frame-to-frame spacing.
-    double m_t0Last{ 0 };
+    /// Get the cached consumer-owned timing summary.
+    const MagAOX::dmTiming::Summary &dmTimingSummary() const;
 
-    /// Circular buffer of total processImage latency samples.
-    mx::sigproc::circularBufferIndex<double, cbIndexT> m_piTimes;
+    /// Record the cached detailed summary and valid compatible timing record.
+    int recordDMTimings( bool force = false /**< [in] Emit even when the summary is unchanged. */ );
 
-    /// Circular buffer of saturation semaphore post latency samples.
-    mx::sigproc::circularBufferIndex<double, cbIndexT> m_satSem;
+    /// @}
 
-    /// Circular buffer of actuator processing latency samples.
-    mx::sigproc::circularBufferIndex<double, cbIndexT> m_actProc;
-
-    /// Circular buffer of actuator command latency samples.
-    mx::sigproc::circularBufferIndex<double, cbIndexT> m_actCom;
-
-    /// Circular buffer of saturation map update latency samples.
-    mx::sigproc::circularBufferIndex<double, cbIndexT> m_satUp;
-
-    /// Circular buffer of delta-channel update latency samples.
-    mx::sigproc::circularBufferIndex<double, cbIndexT> m_deltaUp;
-
-    /// Circular buffer of trigger semaphore frame-to-frame arrival deltas.
-    mx::sigproc::circularBufferIndex<double, cbIndexT> m_triggerDelta;
-
-    /// Storage for reporting total processImage latency samples.
-    std::vector<double> m_piTimesD;
-
-    /// Storage for reporting saturation semaphore post latency samples.
-    std::vector<double> m_satSemD;
-
-    /// Storage for reporting actuator processing latency samples.
-    std::vector<double> m_actProcD;
-
-    /// Storage for reporting actuator command latency samples.
-    std::vector<double> m_actComD;
-
-    /// Storage for reporting saturation map update latency samples.
-    std::vector<double> m_satUpD;
-
-    /// Storage for reporting delta-channel update latency samples.
-    std::vector<double> m_deltaUpD;
-
-    /// Storage for reporting trigger semaphore frame-to-frame arrival deltas.
-    std::vector<double> m_triggerDeltaD;
-
-    // clang-format off
-    #endif // clang-format on
+  protected:
+    /// Register read-only timing statistics and endpoint/quality descriptions.
+    int setupDMTimingINDI();
 
   private:
+    /// Emit timing records for owners with the standard telemetry interface.
+    template <class ownerT>
+    static auto timingRecord( ownerT                          &owner /**< [in] Concrete controller. */,
+                              const MagAOX::dmTiming::Summary &summary /**< [in] Coherent cached summary. */,
+                              int                              priority /**< [in] Preferred overload selector. */ )
+        -> decltype( owner.template telem<logger::telem_dmtimings>( { summary } ), int() );
+
+    /// Retain compatibility with software DM owners without a telemeter.
+    static int timingRecord( derivedT                        &owner /**< [in] Owner without telemetry support. */,
+                             const MagAOX::dmTiming::Summary &summary /**< [in] Unrecorded summary. */,
+                             long                             priority /**< [in] Fallback overload selector. */ );
+
     /// Get the concrete controller used by the CRTP interface.
-    derivedT &derived()
-    {
-        return *static_cast<derivedT *>( this );
-    }
+    derivedT &derived();
 };
+
+template <class derivedT, typename realT>
+derivedT &dm<derivedT, realT>::derived()
+{
+    return *static_cast<derivedT *>( this );
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::shmimMonitorTiming( const dev::shmimT &tag, shmimMonitorEvent event )
+{
+    static_cast<void>( tag );
+    if( event == shmimMonitorEvent::connected )
+    {
+        m_dmTiming.newSession();
+    }
+    else if( event == shmimMonitorEvent::receipt || event == shmimMonitorEvent::initial )
+    {
+        m_dmTiming.beginEvent( event == shmimMonitorEvent::receipt );
+    }
+    else if( event == shmimMonitorEvent::discarded )
+    {
+        m_dmTiming.outcome( MagAOX::dmTiming::Outcome::rejected );
+        m_dmTiming.finishEvent();
+    }
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::dmTimingMark( MagAOX::dmTiming::Marker marker )
+{
+    m_dmTiming.mark( marker );
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::dmTimingOutcome( MagAOX::dmTiming::Outcome outcome )
+{
+    m_dmTiming.outcome( outcome );
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::updateDMTimings()
+{
+    m_dmTiming.update();
+}
+
+template <class derivedT, typename realT>
+const MagAOX::dmTiming::Summary &dm<derivedT, realT>::dmTimingSummary() const
+{
+    return m_dmTiming.summary();
+}
+
+template <class derivedT, typename realT>
+template <class ownerT>
+auto dm<derivedT, realT>::timingRecord( ownerT &owner, const MagAOX::dmTiming::Summary &summary, int priority )
+    -> decltype( owner.template telem<logger::telem_dmtimings>( { summary } ), int() )
+{
+    static_cast<void>( priority );
+    owner.template telem<logger::telem_dmtimings>( { summary } );
+    if( summary.fgValid )
+    {
+        const auto &a  = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::receiptInterval )];
+        const auto &w  = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::sendInterval )];
+        const auto &wa = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::receiptSend )];
+        owner.template telem<logger::telem_fgtimings>( { a.mean, a.stddev, w.mean, w.stddev, wa.mean, wa.stddev } );
+    }
+    return 0;
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::timingRecord( derivedT &owner, const MagAOX::dmTiming::Summary &summary, long priority )
+{
+    static_cast<void>( owner );
+    static_cast<void>( summary );
+    static_cast<void>( priority );
+    return 0;
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::recordDMTimings( bool force )
+{
+    const auto &summary = m_dmTiming.summary();
+    if( force || !m_timingRecorded || summary.sequence != m_timingLastRecord )
+    {
+        int rv = timingRecord( derived(), summary, 0 );
+        if( rv < 0 )
+        {
+            return rv;
+        }
+        m_timingLastRecord = summary.sequence;
+        m_timingRecorded   = true;
+    }
+    return 0;
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::setupDMTimingINDI()
+{
+    derived().createROIndiNumber( m_indiP_dmTiming, "dm_timing" );
+    for( const auto *name : { "receipt_fps",
+                              "receipt_min",
+                              "receipt_max",
+                              "receipt_jitter",
+                              "receipt_count",
+                              "send_fps",
+                              "send_min",
+                              "send_max",
+                              "send_jitter",
+                              "send_count",
+                              "receipt_send",
+                              "receipt_send_jitter",
+                              "receipt_send_min",
+                              "receipt_send_max",
+                              "receipt_send_count" } )
+    {
+        m_indiP_dmTiming.add( pcf::IndiElement( name ) );
+        m_indiP_dmTiming[name] = -1.0;
+    }
+    if( derived().registerIndiPropertyReadOnly( m_indiP_dmTiming ) < 0 )
+        return -1;
+
+    derived().createROIndiNumber( m_indiP_dmStages, "dm_timing_stages" );
+    for( size_t i = MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::dispatch );
+         i < MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::count );
+         ++i )
+    {
+        std::string name = MagAOX::dmTiming::metricName( static_cast<MagAOX::dmTiming::Metric>( i ) );
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            std::string element = name + '_' + field;
+            m_indiP_dmStages.add( pcf::IndiElement( element ) );
+            m_indiP_dmStages[element] = -1.0;
+        }
+    }
+    if( derived().registerIndiPropertyReadOnly( m_indiP_dmStages ) < 0 )
+        return -1;
+
+    derived().createROIndiNumber( m_indiP_dmTimingQuality, "dm_timing_quality" );
+    for( const auto *name : { "window",  "span",      "age",      "capacity",   "queued",      "session", "sequence",
+                              "enabled", "valid",     "events",   "receipts",   "submitted",   "failed",  "partial",
+                              "noSend",  "synthetic", "rejected", "duplicates", "counterGaps", "invalid", "dropped" } )
+        m_indiP_dmTimingQuality.add( pcf::IndiElement( name ) );
+    if( derived().registerIndiPropertyReadOnly( m_indiP_dmTimingQuality ) < 0 )
+        return -1;
+
+    derived().createROIndiText( m_indiP_dmTimingState, "dm_timing_state", "state" );
+    m_indiP_dmTimingState.add( pcf::IndiElement( "clock" ) );
+    m_indiP_dmTimingState.add( pcf::IndiElement( "receipt" ) );
+    m_indiP_dmTimingState.add( pcf::IndiElement( "send" ) );
+    m_indiP_dmTimingState["state"]   = m_dmTiming.enabled() ? "warmingUp" : "disabled";
+    m_indiP_dmTimingState["clock"]   = "CLOCK_MONOTONIC; durations in seconds";
+    m_indiP_dmTimingState["receipt"] = "first timestamp after successful semaphore wait return";
+    m_indiP_dmTimingState["send"]    = "qualified backend submission return; not physical completion";
+    return derived().registerIndiPropertyReadOnly( m_indiP_dmTimingState );
+}
 
 template <class derivedT, typename realT>
 dm<derivedT, realT>::~dm()
@@ -1078,6 +1231,25 @@ int dm<derivedT, realT>::setupConfig( mx::app::appConfigurator &config )
     // Overriding the shmimMonitor setup so that these all go in the dm section
     // Otherwise, would call shmimMonitor<dm<derivedT,realT>>::setupConfig();
     ///\todo shmimMonitor now has configSection so this isn't necessary.
+    config.add( "dm.latencyTime",
+                "",
+                "dm.latencyTime",
+                argType::Required,
+                "dm",
+                "latencyTime",
+                false,
+                "double",
+                "Trailing DM timing window in seconds; zero disables." );
+    config.add( "dm.latencySize",
+                "",
+                "dm.latencySize",
+                argType::Required,
+                "dm",
+                "latencySize",
+                false,
+                "size_t",
+                "Maximum queued and retained DM timing events; zero disables." );
+
     config.add( "dm.threadPrio",
                 "",
                 "dm.threadPrio",
@@ -1321,6 +1493,14 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
 
     config( derived().m_shmimName, "dm.shmimName" );
 
+    config( m_timingWindow, "dm.latencyTime" );
+    config( m_timingCapacity, "dm.latencySize" );
+    if( !mx::math::isFinite( m_timingWindow ) || m_timingWindow < 0 || m_timingWindow >= 9e9 )
+    {
+        derivedT::template log<software_error>( { "invalid dm.latencyTime" } );
+        return -1;
+    }
+
     derived().m_getExistingFirst = true;
     // end of shmimmonitor overrides
 
@@ -1436,6 +1616,19 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::appStartup()
 {
+    try
+    {
+        m_dmTiming.configure( m_timingWindow, m_timingCapacity );
+    }
+    catch( const std::exception &error )
+    {
+        derivedT::template log<software_error>( { std::string( "DM timing allocation: " ) + error.what() } );
+        return -1;
+    }
+
+    if( setupDMTimingINDI() < 0 )
+        return -1;
+
     if( m_dmDataType == 0 )
     {
         derivedT::template log<software_error>( { "unsupported DM data type" } );
@@ -1600,58 +1793,8 @@ int dm<derivedT, realT>::appLogic()
         m_intervalSatTrip = false;
     }
 
-#ifdef XWC_DMTIMINGS
-    static uint64_t lastMono = 0;
-
-    if( m_piTimes.size() >= m_piTimes.maxEntries() && m_piTimes.maxEntries() > 0 &&
-        m_triggerDelta.size() >= m_triggerDelta.maxEntries() && m_triggerDelta.maxEntries() > 0 &&
-        m_piTimes.mono() != lastMono )
-    {
-        cbIndexT refEntry             = m_piTimes.earliest();
-        cbIndexT triggerDeltaRefEntry = m_triggerDelta.earliest();
-
-        m_piTimesD.resize( m_piTimes.maxEntries() );
-        m_satSemD.resize( m_satSem.maxEntries() );
-        m_actProcD.resize( m_actProc.maxEntries() );
-        m_actComD.resize( m_actCom.maxEntries() );
-        m_satUpD.resize( m_satUp.maxEntries() );
-        m_deltaUpD.resize( m_deltaUp.maxEntries() );
-        m_triggerDeltaD.resize( m_triggerDelta.maxEntries() );
-
-        for( size_t n = 0; n < m_piTimesD.size(); ++n )
-        {
-            m_piTimesD[n] = m_piTimes.at( refEntry, n );
-            m_satSemD[n]  = m_satSem.at( refEntry, n );
-            m_actProcD[n] = m_actProc.at( refEntry, n );
-            m_actComD[n]  = m_actCom.at( refEntry, n );
-            m_satUpD[n]   = m_satUp.at( refEntry, n );
-            m_deltaUpD[n] = m_deltaUp.at( refEntry, n );
-        }
-
-        for( size_t n = 0; n < m_triggerDeltaD.size(); ++n )
-        {
-            m_triggerDeltaD[n] = m_triggerDelta.at( triggerDeltaRefEntry, n );
-        }
-
-        std::cerr << "Act. Process:   " << mx::math::vectorMean( m_actProcD ) << " +/- "
-                  << sqrt( mx::math::vectorVariance( m_actProcD ) ) << "\n";
-        std::cerr << "Act. Command:   " << mx::math::vectorMean( m_actComD ) << " +/- "
-                  << sqrt( mx::math::vectorVariance( m_actComD ) ) << "\n";
-        std::cerr << "Sat. Update:    " << mx::math::vectorMean( m_satUpD ) << " +/- "
-                  << sqrt( mx::math::vectorVariance( m_satUpD ) ) << "\n";
-        std::cerr << "Delta Update:   " << mx::math::vectorMean( m_deltaUpD ) << " +/- "
-                  << sqrt( mx::math::vectorVariance( m_deltaUpD ) ) << "\n";
-        std::cerr << "Trig. Delta:    " << mx::math::vectorMean( m_triggerDeltaD ) << " +/- "
-                  << sqrt( mx::math::vectorVariance( m_triggerDeltaD ) ) << "\n";
-        std::cerr << "Tot. CommandDM: " << mx::math::vectorMean( m_piTimesD ) << " +/- "
-                  << sqrt( mx::math::vectorVariance( m_piTimesD ) ) << "\n";
-        std::cerr << "Sat. Semaphore: " << mx::math::vectorMean( m_satSemD ) << " +/- "
-                  << sqrt( mx::math::vectorVariance( m_satSemD ) ) << "\n";
-        std::cerr << "\n";
-
-        lastMono = m_piTimes.mono();
-    }
-#endif // XWC_DMTIMINGS
+    updateDMTimings();
+    recordDMTimings();
 
     return 0;
 }
@@ -1687,8 +1830,10 @@ int dm<derivedT, realT>::whilePowerOff()
 {
     checkFlats();
     checkTests();
-
-    return 0;
+    updateDMTimings();
+    if( recordDMTimings() < 0 )
+        return -1;
+    return updateINDI();
 }
 
 template <class derivedT, typename realT>
@@ -1871,99 +2016,68 @@ int dm<derivedT, realT>::allocate( const dev::shmimT &sp )
     m_totalDelta.resize( m_dmWidth, m_dmHeight );
     m_totalDelta.setZero();
 
-    // clang-format off
-    #ifdef XWC_DMTIMINGS
-    m_piTimes.maxEntries( 2000 );
-    m_satSem.maxEntries( 2000 );
-    m_actProc.maxEntries( 2000 );
-    m_actCom.maxEntries( 2000 );
-    m_satUp.maxEntries( 2000 );
-    m_deltaUp.maxEntries( 2000 );
-    m_triggerDelta.maxEntries( 2000 );
-    #endif // clang-format on
-
     return 0;
 }
 
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
 {
-    static_cast<void>( sp ); // be unused
-
-    // clang-format off
-    #ifdef XWC_DMTIMINGS
-    m_t0 = mx::sys::get_curr_time();
-    #endif // clang-format on
+    static_cast<void>( sp );
+    if( !m_dmTiming.active() )
+        m_dmTiming.beginEvent( false );
+    dmTimingMark( MagAOX::dmTiming::Marker::entry );
+    if( m_dmTiming.active() && derived().m_imageStream.md != nullptr && derived().m_imageStream.md->write == 0 )
+    {
+        uint64_t counter = derived().m_imageStream.md->cnt0;
+        std::atomic_thread_fence( std::memory_order_acquire );
+        if( derived().m_imageStream.md->write == 0 && counter == derived().m_imageStream.md->cnt0 )
+            m_dmTiming.inputCounter( counter );
+    }
 
     int rv = derived().commandDM( curr_src );
-
     if( rv < 0 )
     {
         derivedT::template log<software_critical>( { errno, rv, "Error from commandDM" } );
+        if( m_dmTiming.outcome() != MagAOX::dmTiming::Outcome::partial )
+            dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
+        dmTimingMark( MagAOX::dmTiming::Marker::finish );
+        m_dmTiming.finishEvent();
         return rv;
     }
 
-    // clang-format off
-    #ifdef XWC_DMTIMINGS
-    m_tdelta0 = mx::sys::get_curr_time();
-    #endif // clang-format on
-
-    if( m_deltaChannels.size() > 0 )
+    if( !m_deltaChannels.empty() )
     {
+        dmTimingMark( MagAOX::dmTiming::Marker::deltaStart );
         rv = makeDelta();
-
+        dmTimingMark( MagAOX::dmTiming::Marker::deltaEnd );
         if( rv < 0 )
         {
             derivedT::template log<software_critical>( { errno, rv, "Error from makeDelta" } );
+            dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
+            dmTimingMark( MagAOX::dmTiming::Marker::finish );
+            m_dmTiming.finishEvent();
             return rv;
         }
     }
+    else
+    {
+        // The legacy processing-through-delta endpoint exists even without delta work.
+        dmTimingMark( MagAOX::dmTiming::Marker::deltaEnd );
+    }
 
-    // clang-format off
-    #ifdef XWC_DMTIMINGS
-    m_tdeltaf = mx::sys::get_curr_time();
-
-    m_tf = m_tdeltaf;
-    #endif // clang-format on
-
-    // clang-format off
-    #ifdef XWC_DMTIMINGS
-    m_tsat0 = mx::sys::get_curr_time();
-    #endif // clang-format on
-
-    // Tell the sat thread to get going
-    if( sem_post( &m_satSemaphore ) < 0 )
+    dmTimingMark( MagAOX::dmTiming::Marker::postStart );
+    int postResult = sem_post( &m_satSemaphore );
+    dmTimingMark( MagAOX::dmTiming::Marker::postEnd );
+    if( postResult < 0 )
     {
         derivedT::template log<software_critical>( { errno, 0, "Error posting to semaphore" } );
+        dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
+        dmTimingMark( MagAOX::dmTiming::Marker::finish );
+        m_dmTiming.finishEvent();
         return -1;
     }
-
-    // clang-format off
-    #ifdef XWC_DMTIMINGS // clang-format on
-
-    m_tsatf = mx::sys::get_curr_time();
-
-    // Update the latency circ. buffs
-    if( m_piTimes.maxEntries() > 0 )
-    {
-        if( m_t0Last > 0 )
-        {
-            m_triggerDelta.nextEntry( m_t0 - m_t0Last );
-        }
-
-        m_piTimes.nextEntry( m_tf - m_t0 );
-        m_satSem.nextEntry( m_tsatf - m_tsat0 );
-        m_actProc.nextEntry( m_tact1 - m_tact0 );
-        m_actCom.nextEntry( m_tact2 - m_tact1 );
-        m_satUp.nextEntry( m_tact4 - m_tact3 );
-        m_deltaUp.nextEntry( m_tdeltaf - m_tdelta0 );
-
-        m_t0Last = m_t0;
-    }
-
-        // clang-format off
-    #endif // clang-format on
-
+    dmTimingMark( MagAOX::dmTiming::Marker::finish );
+    m_dmTiming.finishEvent();
     return rv;
 }
 
@@ -3245,6 +3359,101 @@ int dm<derivedT, realT>::updateINDI()
         return 0;
     }
 
+    const auto &summary = m_dmTiming.summary();
+    auto        state   = summary.fgValid ? pcf::IndiProperty::Ok : pcf::IndiProperty::Idle;
+    const auto &a       = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::receiptInterval )];
+    const auto &w       = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::sendInterval )];
+    const auto &wa      = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::receiptSend )];
+    indi::updateIfChanged<double>( m_indiP_dmTiming,
+                                   { "receipt_fps",
+                                     "receipt_min",
+                                     "receipt_max",
+                                     "receipt_jitter",
+                                     "receipt_count",
+                                     "send_fps",
+                                     "send_min",
+                                     "send_max",
+                                     "send_jitter",
+                                     "send_count",
+                                     "receipt_send",
+                                     "receipt_send_jitter",
+                                     "receipt_send_min",
+                                     "receipt_send_max",
+                                     "receipt_send_count" },
+                                   { a.valid && a.mean > 0 ? 1.0 / a.mean : -1,
+                                     a.count ? a.min : -1,
+                                     a.count ? a.max : -1,
+                                     a.valid ? a.stddev : -1,
+                                     static_cast<double>( a.count ),
+                                     w.valid && w.mean > 0 ? 1.0 / w.mean : -1,
+                                     w.count ? w.min : -1,
+                                     w.count ? w.max : -1,
+                                     w.valid ? w.stddev : -1,
+                                     static_cast<double>( w.count ),
+                                     wa.count ? wa.mean : -1,
+                                     wa.valid ? wa.stddev : -1,
+                                     wa.count ? wa.min : -1,
+                                     wa.count ? wa.max : -1,
+                                     static_cast<double>( wa.count ) },
+                                   derived().m_indiDriver,
+                                   state );
+
+    std::vector<std::string> names;
+    std::vector<double>      values;
+    for( size_t i = MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::dispatch );
+         i < MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::count );
+         ++i )
+    {
+        std::string name   = MagAOX::dmTiming::metricName( static_cast<MagAOX::dmTiming::Metric>( i ) );
+        const auto &metric = summary.metrics[i];
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+            names.push_back( name + '_' + field );
+        values.insert( values.end(),
+                       { metric.count ? metric.mean : -1,
+                         metric.valid ? metric.stddev : -1,
+                         metric.count ? metric.min : -1,
+                         metric.count ? metric.max : -1,
+                         static_cast<double>( metric.count ),
+                         metric.count ? metric.span : -1 } );
+    }
+    indi::updateIfChanged<double>( m_indiP_dmStages, names, values, derived().m_indiDriver, state );
+
+    const auto &q = summary.total;
+    indi::updateIfChanged<double>( m_indiP_dmTimingQuality,
+                                   { "window",      "span",    "age",    "capacity",  "queued",   "session",
+                                     "sequence",    "enabled", "valid",  "events",    "receipts", "submitted",
+                                     "failed",      "partial", "noSend", "synthetic", "rejected", "duplicates",
+                                     "counterGaps", "invalid", "dropped" },
+                                   { summary.windowSec,
+                                     summary.span,
+                                     summary.age,
+                                     static_cast<double>( summary.capacity ),
+                                     static_cast<double>( summary.queued ),
+                                     static_cast<double>( summary.session ),
+                                     static_cast<double>( summary.sequence ),
+                                     static_cast<double>( summary.enabled ),
+                                     static_cast<double>( summary.fgValid ),
+                                     static_cast<double>( q.events ),
+                                     static_cast<double>( q.receipts ),
+                                     static_cast<double>( q.submitted ),
+                                     static_cast<double>( q.failed ),
+                                     static_cast<double>( q.partial ),
+                                     static_cast<double>( q.noSend ),
+                                     static_cast<double>( q.synthetic ),
+                                     static_cast<double>( q.rejected ),
+                                     static_cast<double>( q.duplicates ),
+                                     static_cast<double>( q.counterGaps ),
+                                     static_cast<double>( q.invalid ),
+                                     static_cast<double>( q.dropped ) },
+                                   derived().m_indiDriver,
+                                   state );
+
+    const char *states[] = { "disabled", "warmingUp", "valid", "stale", "unavailable" };
+    indi::updateIfChanged( m_indiP_dmTimingState,
+                           "state",
+                           std::string( states[static_cast<size_t>( summary.state )] ),
+                           derived().m_indiDriver,
+                           state );
     return 0;
 }
 

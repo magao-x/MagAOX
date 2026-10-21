@@ -24,11 +24,13 @@ INCLUDEDEPS= \
 	app/dev/dssShutter.hpp \
 	app/dev/shmimMonitor.hpp \
 	app/dev/dm.hpp \
+	app/dev/dmTiming.hpp \
 	app/dev/telemeter.hpp \
 	app/dev/dmPokeWFS.hpp \
 	common/config.hpp \
 	common/defaults.hpp \
 	common/environment.hpp \
+	common/dmTiming.hpp \
 	file/fileTimes.hpp \
 	file/stdFileName.hpp \
 	file/stdSubDir.hpp \
@@ -71,6 +73,7 @@ INCLUDEDEPS= \
 	logger/types/telem_dmmodes.hpp \
 	logger/types/telem_dmspeck.hpp \
 	logger/types/telem_dmsynco.hpp \
+	logger/types/telem_dmtimings.hpp \
 	logger/types/telem_drivetemps.hpp \
 	logger/types/telem_fgtimings.hpp \
 	logger/types/telem_flowrpm.hpp \

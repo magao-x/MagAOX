@@ -56,8 +56,11 @@ else ifeq ($(notdir $(TESTNAME)),logstream_test)
 	LDLIBS = -lmxlib -lflatbuffers
 else ifeq ($(notdir $(TESTNAME)),logsurgeon_test)
 	LDLIBS = -lmxlib -lflatbuffers
-else ifeq ($(notdir $(TESTNAME)),pupilFit_test)
+else ifneq ($(filter $(notdir $(TESTNAME)),pupilFit_test dmTimingTelemetry_test),)
 	LDLIBS += -lflatbuffers
+else ifneq ($(filter $(notdir $(TESTNAME)),bmcCtrl_test alpaoCtrl_test irisaoCtrl_test),)
+	# Offline DM tests use their local SDK declarations and software function stubs.
+	CPPFLAGS += -I$(abspath $(PATHNAME)/sdk)
 else ifeq ($(notdir $(TESTNAME)),xrif2fits_test)
 	LDLIBS += -lcfitsio
 else ifeq ($(notdir $(TESTNAME)),xrif2shmim_test)

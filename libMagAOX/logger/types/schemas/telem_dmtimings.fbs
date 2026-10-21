@@ -1,0 +1,79 @@
+/// \file telem_dmtimings.fbs
+/// \brief Controller-local duration statistics and collection-quality schema.
+namespace MagAOX.logger;
+
+// Stable controller-local metric identifiers; none denotes physical DM completion.
+enum DmTimingMetric : ubyte
+{
+    receiptInterval = 0,
+    sendInterval = 1,
+    receiptSend = 2,
+    dispatch = 3,
+    actuator = 4,
+    sdk = 5,
+    saturation = 6,
+    delta = 7,
+    post = 8,
+    throughDelta = 9,
+    callback = 10,
+    receiptCallback = 11
+}
+
+enum DmTimingAvailability : ubyte
+{
+    disabled = 0,
+    warmingUp = 1,
+    valid = 2,
+    stale = 3,
+    unavailable = 4
+}
+
+// Durations and coverage are in seconds. Invalid rows retain explicit count/validity.
+table DmTimingStats
+{
+    metric:DmTimingMetric;
+    count:ulong;
+    mean:double;
+    stddev:double;
+    min:double;
+    max:double;
+    span:double;
+    valid:bool;
+}
+
+table DmTimingCounters
+{
+    events:ulong;
+    receipts:ulong;
+    submitted:ulong;
+    failed:ulong;
+    partial:ulong;
+    no_send:ulong;
+    synthetic:ulong;
+    rejected:ulong;
+    duplicates:ulong;
+    counter_gaps:ulong;
+    invalid:ulong;
+    dropped:ulong;
+}
+
+table Telem_dmtimings_fb
+{
+    session:ulong;
+    sequence:ulong;
+    now_ns:long;
+    newest_ns:long;
+    window_sec:double;
+    span_sec:double;
+    age_sec:double;
+    capacity:ulong;
+    queued:ulong;
+    enabled:bool;
+    fg_valid:bool;
+    state:DmTimingAvailability;
+    metrics:[DmTimingStats] (required);
+    total:DmTimingCounters (required);
+    delta:DmTimingCounters (required);
+}
+
+root_type Telem_dmtimings_fb;

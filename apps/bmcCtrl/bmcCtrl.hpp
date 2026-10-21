@@ -1,10 +1,8 @@
 /** \file bmcCtrl.hpp
-  * \brief The MagAO-X BMC DM controller header file
-  *
-  * \ingroup bmcCtrl_files
-  */
-
-
+ * \brief The MagAO-X BMC DM controller header file
+ *
+ * \ingroup bmcCtrl_files
+ */
 
 /*
 Open questions:
@@ -16,262 +14,305 @@ Test:
 
 */
 
-
 // #define _GLIBCXX_USE_CXX11_ABI 0
-
 
 #ifndef bmcCtrl_hpp
 #define bmcCtrl_hpp
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
-
+#include "../../libMagAOX/app/dev/telemeter.hpp"
 
 /* BMC SDK C Header */
 #include <BMCApi.h>
 
-
 /** \defgroup bmcCtrl
-  * \brief The MagAO-X application to control a BMC DM
-  *
-  * <a href="..//apps_html/page_module_bmcCtrl.html">Application Documentation</a>
-  *
-  * \ingroup apps
-  *
-  */
+ * \brief The MagAO-X application to control a BMC DM
+ *
+ * <a href="..//apps_html/page_module_bmcCtrl.html">Application Documentation</a>
+ *
+ * \ingroup apps
+ *
+ */
 
 /** \defgroup bmcCtrl_files
-  * \ingroup bmcCtrl
-  */
+ * \ingroup bmcCtrl
+ */
 
 namespace MagAOX
 {
 namespace app
 {
 
-
 /// The MagAO-X BMC DM Controller
 /**
-  * \ingroup bmcCtrl
-  */
-class bmcCtrl : public MagAOXApp<true>, public dev::dm<bmcCtrl,float>, public dev::shmimMonitor<bmcCtrl>
+ * \ingroup bmcCtrl
+ */
+class bmcCtrl : public MagAOXApp<true>,
+                public dev::dm<bmcCtrl, float>,
+                public dev::shmimMonitor<bmcCtrl>,
+                public dev::telemeter<bmcCtrl>
 {
 
-   //Give the test harness access.
-   friend class bmcCtrl_test;
+    // Give the test harness access.
+    friend class bmcCtrl_test;
 
-   friend class dev::dm<bmcCtrl,float>;
+    friend class dev::dm<bmcCtrl, float>;
 
-   friend class dev::shmimMonitor<bmcCtrl>;
+    friend class dev::shmimMonitor<bmcCtrl>;
 
-   typedef float realT;  ///< This defines the datatype used to signal the DM using the ImageStreamIO library.
+    friend class dev::telemeter<bmcCtrl>;
 
-   typedef dev::dm<bmcCtrl,float> dmT;
+    typedef dev::telemeter<bmcCtrl> telemeterT;
 
-   typedef dev::shmimMonitor<bmcCtrl> shmimMonitorT;
+    typedef float realT; ///< This defines the datatype used to signal the DM using the ImageStreamIO library.
 
+    typedef dev::dm<bmcCtrl, float> dmT;
 
-protected:
+    typedef dev::shmimMonitor<bmcCtrl> shmimMonitorT;
 
-   /** \name Configurable Parameters
+  protected:
+    /** \name Configurable Parameters - Data
      *@{
      */
 
-   std::string m_serialNumber; ///< The BMC serial number used to open the correct DM profile
+    std::string m_serialNumber; ///< The BMC serial number used to open the correct DM profile
 
-   long m_satThresh {100000} ;///< Threshold above which to log saturation.
+    long m_satThresh{ 100000 }; ///< Threshold above which to log saturation.
 
-   ///@}
+    ///@}
 
-   long m_nsat {0};
-public:
-   /// Default c'tor.
-   bmcCtrl();
+    long m_nsat{ 0 }; ///< Saturated actuator count accumulated for ordinary app reporting.
+  public:
+    /// Default c'tor.
+    bmcCtrl();
 
-   /// D'tor.
-   ~bmcCtrl() noexcept;
+    /// D'tor.
+    ~bmcCtrl() noexcept;
 
-   /// Setup the configuration system.
-   virtual void setupConfig();
+    /// Setup the configuration system.
+    virtual void setupConfig();
 
-   /// Implementation of loadConfig logic, separated for testing.
-   /** This is called by loadConfig().
+    /// Implementation of loadConfig logic, separated for testing.
+    /** This is called by loadConfig().
      */
-   int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
+    int loadConfigImpl(
+        mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
 
-   /// Load the configuration
-   virtual void loadConfig();
+    /// Load the configuration
+    virtual void loadConfig();
 
-   /// Startup function
-   /** Sets up INDI, and starts the shmim thread.
+    /// Startup function
+    /** Sets up INDI, and starts the shmim thread.
      *
      */
-   virtual int appStartup();
+    virtual int appStartup();
 
-   /// Implementation of the FSM for bmcCtrl.
-   /**
+    /// Implementation of the FSM for bmcCtrl.
+    /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
-   virtual int appLogic();
+    virtual int appLogic();
 
-   /// Shutdown the app.
-   /**
+    /// Shutdown the app.
+    /**
      *
      */
-   virtual int appShutdown();
+    virtual int appShutdown();
 
-   /// Cleanup after a power off.
-   /**
+    /// Cleanup after a power off.
+    /**
      */
-   virtual int onPowerOff();
+    virtual int onPowerOff();
 
-   /// Maintenace while powered off.
-   /**
+    /// Maintenace while powered off.
+    /**
      */
-   virtual int whilePowerOff();
+    virtual int whilePowerOff();
 
-   /** \name DM Base Class Interface
+    /** \name DM Base Class Interface
      *
      *@{
      */
 
-   /// Initialize the DM and prepare for operation.
-   /** Application is in state OPERATING upon successful conclusion.
+    /// Initialize the DM and prepare for operation.
+    /** Application is in state OPERATING upon successful conclusion.
      *
      * \returns 0 on success
      * \returns -1 on error
      */
-   int initDM();
+    int initDM();
 
-   /// Zero all commands on the DM
-   /** This does not update the shared memory buffer.
+    /// Zero all commands on the DM
+    /** This does not update the shared memory buffer.
      *
      * \returns 0 on success
      * \returns -1 on error
      */
-   int zeroDM();
+    int zeroDM();
 
-   /// Send a command to the DM
-   /** This is called by the shmim monitoring thread in response to a semaphore trigger.
+    /// Send a command to the DM
+    /** This is called by the shmim monitoring thread in response to a semaphore trigger.
      *
      * \returns 0 on success
      * \returns -1 on error
      */
-   int commandDM(void * curr_src);
+    int commandDM( void *curr_src /**< [in] Combined command pixels. */ );
 
-   /// Release the DM, making it safe to turn off power.
-   /** The application will be state READY at the conclusion of this.
+    /// Release the DM, making it safe to turn off power.
+    /** The application will be state READY at the conclusion of this.
      *
      * \returns 0 on success
      * \returns -1 on error
      */
-   int releaseDM();
+    int releaseDM();
 
-   ///@}
+    ///@}
 
-   /** \name BMC Interface
+    /** \name BMC Interface - Data
      *@{
      */
 
-protected:
-   double m_act_gain {0}; ///< Actuator gain (microns/volt)
-   double m_volume_factor {0}; ///< the volume factor to convert from displacement to commands
-   uint32_t m_nbAct {0}; ///< The number of actuators
+  protected:
+    double   m_act_gain{ 0 };      ///< Actuator gain (microns/volt)
+    double   m_volume_factor{ 0 }; ///< the volume factor to convert from displacement to commands
+    uint32_t m_nbAct{ 0 };         ///< The number of actuators
 
-   int * m_actuator_mapping {nullptr}; ///< Array containing the mapping from 2D grid position to linear index in the command vector
+    /// Calibrated command-vector address corresponding to each image-grid actuator.
+    int *m_actuator_mapping{ nullptr };
 
-   double * m_dminputs {nullptr}; ///< Pre-allocated command vector, used only in commandDM
+    double *m_dminputs{ nullptr }; ///< Pre-allocated command vector, used only in commandDM
 
-   DM m_dm = {}; ///< BMC SDK handle for the DM.
+    DM m_dm = {}; ///< BMC SDK handle for the DM.
 
-   bool m_dmopen {false}; ///< Track whether the DM connection has been opened
+    bool m_dmopen{ false }; ///< Track whether the DM connection has been opened
 
-public:
+    ///@}
 
-   /// Parse the BMC calibration file
-   /** \returns 0 on success
+  public:
+    /** \name BMC Interface
+     * @{ */
+
+    /// Parse the BMC calibration file
+    /** \returns 0 on success
      * \returns -1 on error
      */
-   int parse_calibration_file();
+    int parse_calibration_file();
 
-   /// Read the actuator mapping from a FITS file
-   /**
+    /// Read the actuator mapping from a FITS file
+    /**
      * \todo convert this to use mxlib::fitsFile
      *
      * \returns 0 on success
      * \returns -1 on error
      */
-   int get_actuator_mapping();
+    int get_actuator_mapping();
 
-   ///@}
+    ///@}
 
+  public:
+    /** \name Telemeter Interface
+     * @{ */
 
+    /// Check the common DM timing record's forced-publication interval.
+    int checkRecordTimes();
+
+    /// Record the common cached DM timing summary on a forced telemetry request.
+    int recordTelem( const telem_dmtimings *telem /**< [in] Telemetry type selector. */ );
+
+    ///@}
 };
 
-bmcCtrl::bmcCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+bmcCtrl::bmcCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
-   m_powerMgtEnabled = true;
-   return;
+    m_powerMgtEnabled = true;
+    return;
 }
 
 bmcCtrl::~bmcCtrl() noexcept
 {
-   if(m_actuator_mapping) free(m_actuator_mapping);
-   if(m_dminputs) free(m_dminputs);
-
+    if( m_actuator_mapping )
+        free( m_actuator_mapping );
+    if( m_dminputs )
+        free( m_dminputs );
 }
 
 void bmcCtrl::setupConfig()
 {
-   config.add("dm.serialNumber", "", "dm.serialNumber", argType::Required, "dm", "serialNumber", false, "string", "The BMC serial number used to find correct DM Profile.");
-   config.add("dm.calibRelDir", "", "dm.calibRelDir", argType::Required, "dm", "calibRelDir", false, "string", "Used to find the default config directory.");
-   config.add("dm.satThresh", "", "dm.satThresh", argType::Required, "dm", "satThresh", false, "string", "Threshold above which to log saturation.");
+    config.add( "dm.serialNumber",
+                "",
+                "dm.serialNumber",
+                argType::Required,
+                "dm",
+                "serialNumber",
+                false,
+                "string",
+                "The BMC serial number used to find correct DM Profile." );
+    config.add( "dm.calibRelDir",
+                "",
+                "dm.calibRelDir",
+                argType::Required,
+                "dm",
+                "calibRelDir",
+                false,
+                "string",
+                "Used to find the default config directory." );
+    config.add( "dm.satThresh",
+                "",
+                "dm.satThresh",
+                argType::Required,
+                "dm",
+                "satThresh",
+                false,
+                "string",
+                "Threshold above which to log saturation." );
 
-   DM_SETUP_CONFIG(config);
-
+    DM_SETUP_CONFIG( config );
+    TELEMETER_SETUP_CONFIG( config );
 }
 
-int bmcCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
+int bmcCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-   _config(m_calibRelDir, "dm.calibRelDir");
-   _config(m_serialNumber, "dm.serialNumber");
-   _config(m_satThresh, "dm.satThresh");
+    _config( m_calibRelDir, "dm.calibRelDir" );
+    _config( m_serialNumber, "dm.serialNumber" );
+    _config( m_satThresh, "dm.satThresh" );
 
-   DM_LOAD_CONFIG(_config);
+    DM_LOAD_CONFIG( _config );
+    TELEMETER_LOAD_CONFIG( _config );
 
-   return 0;
+    return 0;
 }
 
 void bmcCtrl::loadConfig()
 {
-    if(loadConfigImpl(config) < 0)
+    if( loadConfigImpl( config ) < 0 )
     {
-        log<software_error>({__FILE__,__LINE__, "error loading config"});
+        log<software_error>( { __FILE__, __LINE__, "error loading config" } );
         m_shutdown = 1;
     }
-
 }
 
 int bmcCtrl::appStartup()
 {
-   if(parse_calibration_file() < 0)
-   {
-      log<software_critical>({__FILE__,__LINE__});
-      return -1;
-   }
+    if( parse_calibration_file() < 0 )
+    {
+        log<software_critical>( { __FILE__, __LINE__ } );
+        return -1;
+    }
 
-   if(m_act_gain == 0 || m_volume_factor == 0)
-   {
-      log<software_critical>({__FILE__,__LINE__, "calibration not loaded properly"});
-      return -1;
-   }
+    if( m_act_gain == 0 || m_volume_factor == 0 )
+    {
+        log<software_critical>( { __FILE__, __LINE__, "calibration not loaded properly" } );
+        return -1;
+    }
 
-   DM_APP_STARTUP;
+    DM_APP_STARTUP;
+    TELEMETER_APP_STARTUP;
 
-   SHMIMMONITOR_APP_STARTUP;
+    SHMIMMONITOR_APP_STARTUP;
 
-   return 0;
+    return 0;
 }
 
 int bmcCtrl::appLogic()
@@ -279,337 +320,336 @@ int bmcCtrl::appLogic()
     DM_APP_LOGIC;
 
     SHMIMMONITOR_APP_LOGIC;
+    TELEMETER_APP_LOGIC;
 
-   if(state()==stateCodes::POWEROFF) return 0;
+    if( state() == stateCodes::POWEROFF )
+        return 0;
 
-   if(state()==stateCodes::POWERON)
-   {
-      sleep(5);
+    if( state() == stateCodes::POWERON )
+    {
+        sleep( 5 );
 
-      state(stateCodes::NOTHOMED);
-   }
+        state( stateCodes::NOTHOMED );
+    }
 
-   if(m_nsat > m_satThresh)
-   {
-      log<text_log>("Saturated actuators in last second: " + std::to_string(m_nsat), logPrio::LOG_WARNING);
-   }
+    if( m_nsat > m_satThresh )
+    {
+        log<text_log>( "Saturated actuators in last second: " + std::to_string( m_nsat ), logPrio::LOG_WARNING );
+    }
 
-   m_nsat = 0;
+    m_nsat = 0;
 
-   DM_UPDATE_INDI;
-   SHMIMMONITOR_UPDATE_INDI;
+    DM_UPDATE_INDI;
+    SHMIMMONITOR_UPDATE_INDI;
 
-   return 0;
+    return 0;
 }
 
 int bmcCtrl::appShutdown()
 {
-   if(m_dmopen) releaseDM();
+    if( m_dmopen )
+        releaseDM();
 
-   DM_APP_SHUTDOWN;
+    DM_APP_SHUTDOWN;
 
     SHMIMMONITOR_APP_SHUTDOWN;
+    TELEMETER_APP_SHUTDOWN;
 
-   return 0;
+    return 0;
 }
 
 int bmcCtrl::onPowerOff()
 {
-   return dm<bmcCtrl,float>::onPowerOff();;
+    return dm<bmcCtrl, float>::onPowerOff();
+    ;
 }
 
 int bmcCtrl::whilePowerOff()
 {
-   return dm<bmcCtrl,float>::whilePowerOff();;
+    return dm<bmcCtrl, float>::whilePowerOff();
+    ;
 }
 
 int bmcCtrl::initDM()
 {
-   if(m_dmopen)
-   {
-      log<text_log>("DM is already initialized.  Release first.", logPrio::LOG_ERROR);
-      return -1;
-   }
+    if( m_dmopen )
+    {
+        log<text_log>( "DM is already initialized.  Release first.", logPrio::LOG_ERROR );
+        return -1;
+    }
 
-   std::string ser = mx::ioutils::toUpper(m_serialNumber);
-   BMCRC ret = NO_ERR;
-   ret = BMCOpen(&m_dm, ser.c_str());
+    std::string ser = mx::ioutils::toUpper( m_serialNumber );
+    BMCRC       ret = NO_ERR;
+    ret             = BMCOpen( &m_dm, ser.c_str() );
 
-   if(ret == NO_ERR) m_dmopen = true; // remember that the DM connection has been opened
+    if( ret == NO_ERR )
+        m_dmopen = true; // remember that the DM connection has been opened
 
-   if(ret != NO_ERR)
-   {
-      const char *err;
-      err = BMCErrorString(ret);
-      log<text_log>(std::string("DM initialization failed: ") + err, logPrio::LOG_ERROR);
-      m_dm = {};
-      return -1;
-   }
+    if( ret != NO_ERR )
+    {
+        const char *err;
+        err = BMCErrorString( ret );
+        log<text_log>( std::string( "DM initialization failed: " ) + err, logPrio::LOG_ERROR );
+        m_dm = {};
+        return -1;
+    }
 
-   if (!m_dmopen)
-   {
-      log<text_log>("DM initialization failed. Couldn't open DM handle.", logPrio::LOG_ERROR);
-      return -1;
-   }
+    if( !m_dmopen )
+    {
+        log<text_log>( "DM initialization failed. Couldn't open DM handle.", logPrio::LOG_ERROR );
+        return -1;
+    }
 
-   // Get number of actuators
-   m_nbAct = m_dm.ActCount;
+    // Get number of actuators
+    m_nbAct = m_dm.ActCount;
 
+    // Load the DM map
+    uint32_t *map_lut;
+    map_lut = reinterpret_cast<uint32_t *>( malloc( sizeof( uint32_t ) * MAX_DM_SIZE ) );
+    ret     = BMCLoadMap( &m_dm, NULL, map_lut );
 
-   // Load the DM map
-   uint32_t *map_lut;
-   map_lut = reinterpret_cast<uint32_t *>(malloc(sizeof(uint32_t)*MAX_DM_SIZE));
-   ret = BMCLoadMap(&m_dm, NULL, map_lut);
+    if( ret != NO_ERR )
+    {
+        const char *err;
+        err = BMCErrorString( ret );
+        log<text_log>( std::string( "DM initialization failed. Couldn't load map." ) + err, logPrio::LOG_ERROR );
 
-   if(ret != NO_ERR)
-   {
-      const char *err;
-      err = BMCErrorString(ret);
-      log<text_log>(std::string("DM initialization failed. Couldn't load map.") + err, logPrio::LOG_ERROR);
+        m_dm = {};
 
-      m_dm = {};
+        state( stateCodes::ERROR );
+        return -1;
+    }
 
-      state(stateCodes::ERROR);
-      return -1;
-   }
+    if( m_dminputs )
+        free( m_dminputs );
+    m_dminputs = reinterpret_cast<double *>( calloc( m_nbAct, sizeof( double ) ) );
 
+    if( zeroDM() < 0 )
+    {
+        log<text_log>( "DM initialization failed.  Error zeroing DM.", logPrio::LOG_ERROR );
+        state( stateCodes::ERROR );
+        return -1;
+    }
 
-   if(m_dminputs) free(m_dminputs);
-   m_dminputs = reinterpret_cast<double*>(calloc( m_nbAct, sizeof( double ) ));
-
-   if(zeroDM() < 0)
-   {
-      log<text_log>("DM initialization failed.  Error zeroing DM.", logPrio::LOG_ERROR);
-      state(stateCodes::ERROR);
-      return -1;
-   }
-
-   /* get actuator mapping from 2D cacao image to 1D vector for BMC input */
-   if(m_actuator_mapping) free(m_actuator_mapping);
-   m_actuator_mapping = reinterpret_cast<int *>(malloc(m_nbAct * sizeof(int))); /* memory for actuator mapping */
+    /* get actuator mapping from 2D cacao image to 1D vector for BMC input */
+    if( m_actuator_mapping )
+        free( m_actuator_mapping );
+    m_actuator_mapping = reinterpret_cast<int *>( malloc( m_nbAct * sizeof( int ) ) ); /* memory for actuator mapping */
 
     /* initialize to -1 to allow for handling addressable but ignored actuators */
-    for (uint32_t idx = 0; idx < m_nbAct; ++idx)
+    for( uint32_t idx = 0; idx < m_nbAct; ++idx )
     {
         m_actuator_mapping[idx] = -1;
     }
 
-   if(get_actuator_mapping() < 0)
-   {
-      log<text_log>("DM initialization failed.  Failed to get actuator mapping.", logPrio::LOG_ERROR);
-      state(stateCodes::ERROR);
-      return -1;
-   }
+    if( get_actuator_mapping() < 0 )
+    {
+        log<text_log>( "DM initialization failed.  Failed to get actuator mapping.", logPrio::LOG_ERROR );
+        state( stateCodes::ERROR );
+        return -1;
+    }
 
-   if(m_actuator_mapping == nullptr)
-   {
-      log<text_log>("DM initialization failed.  null pointer.", logPrio::LOG_ERROR);
-      state(stateCodes::ERROR);
-      return -1;
-   }
+    if( m_actuator_mapping == nullptr )
+    {
+        log<text_log>( "DM initialization failed.  null pointer.", logPrio::LOG_ERROR );
+        state( stateCodes::ERROR );
+        return -1;
+    }
 
+    log<text_log>( "BMC " + m_serialNumber + " initialized", logPrio::LOG_NOTICE );
+    state( stateCodes::READY );
 
-   log<text_log>("BMC " + m_serialNumber + " initialized", logPrio::LOG_NOTICE);
-   state(stateCodes::READY);
-
-   return 0;
+    return 0;
 }
 
 int bmcCtrl::zeroDM()
 {
-   if(!m_dmopen)
-   {
-      log<text_log>("DM not initialized (NULL pointer)", logPrio::LOG_ERROR);
-      return -1;
-   }
+    if( !m_dmopen )
+    {
+        log<text_log>( "DM not initialized (NULL pointer)", logPrio::LOG_ERROR );
+        return -1;
+    }
 
-   if(m_nbAct == 0)
-   {
-      log<text_log>("DM not initialized (number of actuators)", logPrio::LOG_ERROR);
-      return -1;
-   }
+    if( m_nbAct == 0 )
+    {
+        log<text_log>( "DM not initialized (number of actuators)", logPrio::LOG_ERROR );
+        return -1;
+    }
 
-   double * dminputs = reinterpret_cast<double*>(calloc( m_nbAct, sizeof( double ) ));
+    double *dminputs = reinterpret_cast<double *>( calloc( m_nbAct, sizeof( double ) ) );
 
-   /* Send the all 0 command to the DM */
-   BMCRC ret = BMCSetArray(&m_dm, dminputs, NULL);
+    /* Send the all 0 command to the DM */
+    BMCRC ret = BMCSetArray( &m_dm, dminputs, NULL );
 
-   /* Release memory */
-   free( dminputs );
+    /* Release memory */
+    free( dminputs );
 
-   if(ret != NO_ERR)
-   {
-      const char *err;
-      err = BMCErrorString(ret);
-      log<text_log>(std::string("Error zeroing DM: ") + err, logPrio::LOG_ERROR);
-      return -1;
-   }
+    if( ret != NO_ERR )
+    {
+        const char *err;
+        err = BMCErrorString( ret );
+        log<text_log>( std::string( "Error zeroing DM: " ) + err, logPrio::LOG_ERROR );
+        return -1;
+    }
 
-   log<text_log>("DM zeroed");
-   return 0;
+    log<text_log>( "DM zeroed" );
+    return 0;
 }
 
-int bmcCtrl::commandDM(void * curr_src)
+int bmcCtrl::commandDM( void *curr_src )
 {
-   //This is based on Kyle Van Gorkoms original sendCommand function.
+    // This is based on Kyle Van Gorkoms original sendCommand function.
 
-   /*This loop performs the following steps:
-     1) converts from float to double
-     2) convert to volume-normalized displacement
-     3) convert to squared fractional voltage clamped from 0 to 1.
-   */
+    /*This loop performs the following steps:
+      1) converts from float to double
+      2) convert to volume-normalized displacement
+      3) convert to squared fractional voltage clamped from 0 to 1.
+    */
 
-   #ifdef XWC_DMTIMINGS
-   dmT::m_tact0 = mx::sys::get_curr_time();
-   #endif
+    dmTimingMark( MagAOX::dmTiming::Marker::actuatorStart );
 
-   double gain_scale = m_volume_factor/m_act_gain;
-   float inv_gain_scale = 1.0/gain_scale;
+    double gain_scale     = m_volume_factor / m_act_gain;
+    float  inv_gain_scale = 1.0 / gain_scale;
 
-   m_outputShape.setWrite(1);
+    m_outputShape.setWrite( 1 );
 
-   for (uint32_t idx = 0; idx < m_nbAct; ++idx)
-   {
-      int address = m_actuator_mapping[idx];
-      if(address < 0)
-      {
-         m_dminputs[idx] = 0.; // addressable but ignored actuators set to 0
-      }
-      else
-      {
-         realT input = reinterpret_cast<realT *>(curr_src)[address];
+    for( uint32_t idx = 0; idx < m_nbAct; ++idx )
+    {
+        int address = m_actuator_mapping[idx];
+        if( address < 0 )
+        {
+            m_dminputs[idx] = 0.; // addressable but ignored actuators set to 0
+        }
+        else
+        {
+            realT input = reinterpret_cast<realT *>( curr_src )[address];
 
-         m_dminputs[idx] = input * gain_scale;
+            m_dminputs[idx] = input * gain_scale;
 
-         if (m_dminputs[idx] > 1)
-         {
-            m_dminputs[idx] = 1;
-            m_outputShape[address] = inv_gain_scale;
-         }
-         else if (m_dminputs[idx] < 0)
-         {
-            m_dminputs[idx] = 0;
-            m_outputShape[address] = 0;
-         }
-         else
-         {
-            m_dminputs[idx] = sqrt(m_dminputs[idx]);
-            m_outputShape[address] = input;
-         }
-      }
-   }
+            if( m_dminputs[idx] > 1 )
+            {
+                m_dminputs[idx]        = 1;
+                m_outputShape[address] = inv_gain_scale;
+            }
+            else if( m_dminputs[idx] < 0 )
+            {
+                m_dminputs[idx]        = 0;
+                m_outputShape[address] = 0;
+            }
+            else
+            {
+                m_dminputs[idx]        = sqrt( m_dminputs[idx] );
+                m_outputShape[address] = input;
+            }
+        }
+    }
 
-   m_outputShape.post();
+    m_outputShape.post();
 
-   #ifdef XWC_DMTIMINGS
-   dmT::m_tact1 = mx::sys::get_curr_time();
-   #endif
+    dmTimingMark( MagAOX::dmTiming::Marker::actuatorEnd );
 
-   /* Send the command to the DM */
-   BMCRC ret = BMCSetArray(&m_dm, m_dminputs, NULL);
+    /* Send the command to the DM */
+    dmTimingMark( MagAOX::dmTiming::Marker::sdkStart );
+    BMCRC ret = BMCSetArray( &m_dm, m_dminputs, NULL );
 
-   #ifdef XWC_DMTIMINGS
-   dmT::m_tact2 = mx::sys::get_curr_time();
-   #endif
+    dmTimingMark( MagAOX::dmTiming::Marker::sdkEnd );
+    dmTimingOutcome( ret == NO_ERR ? MagAOX::dmTiming::Outcome::success : MagAOX::dmTiming::Outcome::failed );
 
-   /* Return immediately upon error, logging the error
-   message first and then return the failure code. */
-   if(ret != NO_ERR)
-   {
-      const char *err;
-      err = BMCErrorString(ret);
-      log<text_log>(std::string("DM command failed: ") + err, logPrio::LOG_ERROR);
-      return -1;
-   }
+    /* Return immediately upon error, logging the error
+    message first and then return the failure code. */
+    if( ret != NO_ERR )
+    {
+        const char *err;
+        err = BMCErrorString( ret );
+        log<text_log>( std::string( "DM command failed: " ) + err, logPrio::LOG_ERROR );
+        return -1;
+    }
 
-   #ifdef XWC_DMTIMINGS
-   dmT::m_tact3 = mx::sys::get_curr_time();
-   #endif
+    dmTimingMark( MagAOX::dmTiming::Marker::satStart );
 
-   /* Now update the instantaneous sat map */
-   for (uint32_t idx = 0; idx < m_nbAct; ++idx)
-   {
-      int address = m_actuator_mapping[idx];
+    /* Now update the instantaneous sat map */
+    for( uint32_t idx = 0; idx < m_nbAct; ++idx )
+    {
+        int address = m_actuator_mapping[idx];
 
-      if(address == -1)
-      {
-         continue;
-      }
-      else if(m_dminputs[idx] >= 1 || m_dminputs[idx] <= 0)
-      {
-         ++m_nsat;
-         m_instSatMap.data()[address] = 1;
-      }
-      else
-      {
-         m_instSatMap.data()[address] = 0;
-      }
-   }
+        if( address == -1 )
+        {
+            continue;
+        }
+        else if( m_dminputs[idx] >= 1 || m_dminputs[idx] <= 0 )
+        {
+            ++m_nsat;
+            m_instSatMap.data()[address] = 1;
+        }
+        else
+        {
+            m_instSatMap.data()[address] = 0;
+        }
+    }
 
-   #ifdef XWC_DMTIMINGS
-   dmT::m_tact4 = mx::sys::get_curr_time();
-   #endif
+    dmTimingMark( MagAOX::dmTiming::Marker::satEnd );
 
-   return ret;
+    return ret;
 }
 
 int bmcCtrl::releaseDM()
 {
-   // Safe DM shutdown on interrupt
+    // Safe DM shutdown on interrupt
 
-   if(!m_dmopen)
-   {
-      return 0;
-   }
+    if( !m_dmopen )
+    {
+        return 0;
+    }
 
-   state(stateCodes::NOTHOMED);
+    state( stateCodes::NOTHOMED );
 
-   if(!shutdown())
-   {
-      pthread_kill(m_smThread.native_handle(), SIGUSR1);
-   }
+    if( !shutdown() )
+    {
+        pthread_kill( m_smThread.native_handle(), SIGUSR1 );
+    }
 
-   sleep(1);
+    sleep( 1 );
 
-   if(zeroDM() < 0)
-   {
-      log<text_log>("DM release failed.  Error zeroing DM.", logPrio::LOG_ERROR);
-      state(stateCodes::ERROR);
-      return -1;
-   }
+    if( zeroDM() < 0 )
+    {
+        log<text_log>( "DM release failed.  Error zeroing DM.", logPrio::LOG_ERROR );
+        state( stateCodes::ERROR );
+        return -1;
+    }
 
     // Zero all actuators (this is probably redundant after zeroing the DM above)
     BMCRC ret = NO_ERR;
-    ret = BMCClearArray(&m_dm);
+    ret       = BMCClearArray( &m_dm );
 
-   if(ret != NO_ERR)
-   {
-      const char *err;
-      err = BMCErrorString(ret);
-      log<text_log>(std::string("DM reset failed: ") + err, logPrio::LOG_ERROR);
-      state(stateCodes::ERROR);
-      return -1;
-   }
+    if( ret != NO_ERR )
+    {
+        const char *err;
+        err = BMCErrorString( ret );
+        log<text_log>( std::string( "DM reset failed: " ) + err, logPrio::LOG_ERROR );
+        state( stateCodes::ERROR );
+        return -1;
+    }
 
-   // Close BMC connection
-   ret = BMCClose(&m_dm);
+    // Close BMC connection
+    ret = BMCClose( &m_dm );
 
-   if(ret == NO_ERR) m_dmopen = false;
+    if( ret == NO_ERR )
+        m_dmopen = false;
 
-   if(ret != NO_ERR)
-   {
-      const char *err;
-      err = BMCErrorString(ret);
-      log<text_log>(std::string("DM release failed: ") + err, logPrio::LOG_ERROR);
-      state(stateCodes::ERROR);
-      return -1;
-   }
+    if( ret != NO_ERR )
+    {
+        const char *err;
+        err = BMCErrorString( ret );
+        log<text_log>( std::string( "DM release failed: " ) + err, logPrio::LOG_ERROR );
+        state( stateCodes::ERROR );
+        return -1;
+    }
 
-   m_dm = {};
+    m_dm = {};
 
-   log<text_log>("BMC " + m_serialNumber + " reset and released", logPrio::LOG_NOTICE);
+    log<text_log>( "BMC " + m_serialNumber + " reset and released", logPrio::LOG_NOTICE );
 
-   return 0;
+    return 0;
 }
 
 /* Read in a configuration file with user-calibrated
@@ -618,116 +658,130 @@ fractional stroke as well as the volume displaced by
 the influence function. */
 int bmcCtrl::parse_calibration_file()
 {
-    FILE * fp;
-    char * line = NULL;
-    size_t len = 0;
+    FILE   *fp;
+    char   *line = NULL;
+    size_t  len  = 0;
     ssize_t read;
-    double * calibvals;
+    double *calibvals;
 
     std::string calibpath = m_calibPath + "/" + "bmc_2k_userconfig.txt";
 
     // open file
-    fp = fopen(calibpath.c_str(), "r");
-    if (fp == NULL)
+    fp = fopen( calibpath.c_str(), "r" );
+    if( fp == NULL )
     {
-       log<text_log>("Could not read configuration file at " + calibpath, logPrio::LOG_ERROR);
+        log<text_log>( "Could not read configuration file at " + calibpath, logPrio::LOG_ERROR );
         return -1;
     }
 
-    calibvals = reinterpret_cast<double*>(malloc(2*sizeof(double)));
-    int idx = 0;
-    while ((read = getline(&line, &len, fp)) != -1)
+    calibvals = reinterpret_cast<double *>( malloc( 2 * sizeof( double ) ) );
+    int idx   = 0;
+    while( ( read = getline( &line, &len, fp ) ) != -1 )
     {
         // grab first value from each line
-        calibvals[idx] = strtod(line, NULL);
+        calibvals[idx] = strtod( line, NULL );
         idx++;
     }
 
-    fclose(fp);
+    fclose( fp );
 
     // assign stroke and volume factors
-    m_act_gain = calibvals[0];
+    m_act_gain      = calibvals[0];
     m_volume_factor = calibvals[1];
 
-    free(calibvals);
+    free( calibvals );
 
-    log<text_log>("BMC " + m_serialNumber + ": Using stroke and volume calibration from " + calibpath);
+    log<text_log>( "BMC " + m_serialNumber + ": Using stroke and volume calibration from " + calibpath );
     std::cerr << m_act_gain << " " << m_volume_factor << "\n";
     return 0;
 }
 
-int bmcCtrl::get_actuator_mapping() //const char * serial, int nbAct, int * actuator_mapping)
+int bmcCtrl::get_actuator_mapping() // const char * serial, int nbAct, int * actuator_mapping)
 {
     /* This function closely follows the CFITSIO imstat
     example */
 
-    fitsfile *fptr;  /* FITS file pointer */
-    int status = 0;  /* CFITSIO status value MUST be initialized to zero! */
-
+    fitsfile *fptr;       /* FITS file pointer */
+    int       status = 0; /* CFITSIO status value MUST be initialized to zero! */
 
     // get file path to actuator map
     std::string calibpath = m_calibPath + "/" + "bmc_2k_actuator_mapping.fits";
 
-    if ( !fits_open_image(&fptr, calibpath.c_str(), READONLY, &status) )
+    if( !fits_open_image( &fptr, calibpath.c_str(), READONLY, &status ) )
     {
-      int hdutype, naxis;
-      long naxes[2];
+        int  hdutype, naxis;
+        long naxes[2];
 
-      if (fits_get_hdu_type(fptr, &hdutype, &status) || hdutype != IMAGE_HDU) {
-        printf("Error: this program only works on images, not tables\n");
-        return(1);
-      }
+        if( fits_get_hdu_type( fptr, &hdutype, &status ) || hdutype != IMAGE_HDU )
+        {
+            printf( "Error: this program only works on images, not tables\n" );
+            return ( 1 );
+        }
 
-      fits_get_img_dim(fptr, &naxis, &status);
-      fits_get_img_size(fptr, 2, naxes, &status);
+        fits_get_img_dim( fptr, &naxis, &status );
+        fits_get_img_size( fptr, 2, naxes, &status );
 
-      if (status || naxis != 2) {
-        printf("Error: NAXIS = %d.  Only 2-D images are supported.\n", naxis);
-        return(1);
-      }
+        if( status || naxis != 2 )
+        {
+            printf( "Error: NAXIS = %d.  Only 2-D images are supported.\n", naxis );
+            return ( 1 );
+        }
 
-      int * pix = reinterpret_cast<int *>(malloc(naxes[0] * sizeof(int))); /* memory for 1 row */
+        int *pix = reinterpret_cast<int *>( malloc( naxes[0] * sizeof( int ) ) ); /* memory for 1 row */
 
-      if (pix == NULL) {
-        printf("Memory allocation error\n");
-        return(1);
-      }
+        if( pix == NULL )
+        {
+            printf( "Memory allocation error\n" );
+            return ( 1 );
+        }
 
-      long fpixel[2];
-      //totpix = naxes[0] * naxes[1];
-      fpixel[0] = 1;  /* read starting with first pixel in each row */
+        long fpixel[2];
+        // totpix = naxes[0] * naxes[1];
+        fpixel[0] = 1; /* read starting with first pixel in each row */
 
-      /* process image one row at a time; increment row # in each loop */
-      int ij = 0;/* actuator mapping index */
-      for (fpixel[1] = 1; fpixel[1] <= naxes[1]; fpixel[1]++)
-      {
-         /* give starting pixel coordinate and number of pixels to read */
-         if (fits_read_pix(fptr, TINT, fpixel, naxes[0],0, pix,0, &status))
-            break;   /* jump out of loop on error */
+        /* process image one row at a time; increment row # in each loop */
+        int ij = 0; /* actuator mapping index */
+        for( fpixel[1] = 1; fpixel[1] <= naxes[1]; fpixel[1]++ )
+        {
+            /* give starting pixel coordinate and number of pixels to read */
+            if( fits_read_pix( fptr, TINT, fpixel, naxes[0], 0, pix, 0, &status ) )
+                break; /* jump out of loop on error */
 
-         // get indices of active actuators in order
-         for (int ii = 0; ii < naxes[0]; ii++) {
-           if (pix[ii] > 0) {
-                m_actuator_mapping[pix[ii] - 1] = ij;
-           }
-           ij++;
-         }
-      }
-      fits_close_file(fptr, &status);
+            // get indices of active actuators in order
+            for( int ii = 0; ii < naxes[0]; ii++ )
+            {
+                if( pix[ii] > 0 )
+                {
+                    m_actuator_mapping[pix[ii] - 1] = ij;
+                }
+                ij++;
+            }
+        }
+        fits_close_file( fptr, &status );
 
-      free(pix);
+        free( pix );
     }
 
-    if (status)  {
-        fits_report_error(stderr, status); /* print any error message */
+    if( status )
+    {
+        fits_report_error( stderr, status ); /* print any error message */
     }
 
-
-    log<text_log>("BMC " + m_serialNumber + ": Using actuator mapping from " + calibpath);
+    log<text_log>( "BMC " + m_serialNumber + ": Using actuator mapping from " + calibpath );
     return 0;
 }
 
-} //namespace app
-} //namespace MagAOX
+int bmcCtrl::checkRecordTimes()
+{
+    return telemeterT::checkRecordTimes( telem_dmtimings() );
+}
 
-#endif //bmcCtrl_hpp
+int bmcCtrl::recordTelem( const telem_dmtimings * )
+{
+    return dmT::recordDMTimings( true );
+}
+
+} // namespace app
+} // namespace MagAOX
+
+#endif // bmcCtrl_hpp

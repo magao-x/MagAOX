@@ -7,6 +7,9 @@
 ../libMagAOX/app/dev/tests/outletController_test
 ../libMagAOX/app/dev/tests/telemeter_test
 ../libMagAOX/app/dev/tests/dm_test
+../libMagAOX/app/dev/tests/dmTiming_test
+../libMagAOX/app/dev/tests/dmTiming_integration_test
+../libMagAOX/app/dev/tests/shmimMonitor_timing_test
 ../libMagAOX/app/dev/tests/dev_test
 ../libMagAOX/app/dev/tests/stdCamera_test
 ../libMagAOX/app/dev/tests/stdCamera_roi_test
@@ -19,6 +22,7 @@
 ../libMagAOX/logger/tests/logFileRaw_fileTime_error_test
 ../libMagAOX/logger/tests/logMap_test
 ../libMagAOX/logger/tests/pduTelemetry_test
+../libMagAOX/logger/tests/dmTimingTelemetry_test
 ../libMagAOX/logger/tests/logMeta_test
 ../libMagAOX/logger/tests/logTypes_Accessor_test
 ../libMagAOX/logger/tests/savingTelemetry_test
@@ -31,7 +35,9 @@
 ../apps/virtualPDU/tests/virtualPDU_test
 ../apps/acronameUsbHub/tests/acronameUsbHub_test
 ../apps/adcTracker/tests/adcTracker_test
+../apps/alpaoCtrl/tests/alpaoCtrl_test
 ../apps/alignLoop/tests/alignLoop_test
+../apps/bmcCtrl/tests/bmcCtrl_test
 ../apps/cacaoInterface/tests/cacaoInterface_test
 ../apps/closedLoopIndi/tests/closedLoopIndi_test
 ../apps/dmMode/tests/dmMode_test
@@ -44,6 +50,7 @@
 ../apps/flipperCtrl/tests/flipperCtrl_entrypoint_test
 ../apps/flowRPM/tests/flowRPM_test
 ../apps/indiTSAccumulator/tests/indiTSAccumulator_test
+../apps/irisaoCtrl/tests/irisaoCtrl_test
 ../apps/koolanceCtrl/tests/koolanceCtrl_test
 ../apps/kTracker/tests/kTracker_test
 ../apps/loPredCtrl/tests/loPredCtrl_test
