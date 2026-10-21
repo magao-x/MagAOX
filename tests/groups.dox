@@ -50,14 +50,28 @@ $ bash ./testMagAOX.bash
 
 /** \page page_test_coverage Test Coverage Report
  * \ingroup testing
- *
- * \htmlonly
- * <iframe
- *   title="MagAO-X test coverage report"
- *   src="../coverage/index.html"
- *   style="width: 100%; height: 85vh; border: 0;">
- * </iframe>
- * \endhtmlonly
+
+From the repository root, build and run the tests and generate the coverage report and API documentation:
+\verbatim
+$ tests/coverage/make_coverage
+$ make doc
+\endverbatim
+The coverage helper writes `doc/output/coverage/index.html`, which is embedded below.
+`make coverage` alone only builds instrumented application binaries; it does not run tests or generate the HTML report.
+
+\htmlonly
+<iframe
+  title="MagAO-X test coverage report"
+  src="../coverage/index.html"
+  style="width: 100%; height: 85vh; border: 0;">
+</iframe>
+\endhtmlonly
+ */
+
+/** \defgroup flatlogs_unit_test Flatlogs Unit Tests
+ * \brief Generated serialization and mixed-log round-trip tests.
+ * \ingroup logger_unit_test
+ */
 
 /** \defgroup pupilFit_unit_test Pupil Fit Unit Tests
  * \brief Offline fitting, per-image telemetry, derived averages, and failure handling.
