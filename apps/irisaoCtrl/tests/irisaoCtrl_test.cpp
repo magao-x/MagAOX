@@ -20,21 +20,25 @@ MirrorHandle MirrorConnect( const char *, const char *, bool )
 {
     return nullptr;
 }
+
 /// Expose one software segment to the production iterator.
 bool MirrorIterate( MirrorHandle, SegmentNumber segment )
 {
     return segment == 0;
 }
+
 /// Record one segment's preparation without hardware access.
 void SetMirrorPosition( MirrorHandle, SegmentNumber, double, double, double )
 {
     ++irisaoTimingTest::staged;
 }
+
 /// Make the software segment reachable.
 void GetMirrorPosition( MirrorHandle, SegmentNumber, MirrorPosition *position )
 {
     position->reachable = true;
 }
+
 /// Record the final submission without inventing success semantics for the vendor API.
 void MirrorCommand( MirrorHandle, int command )
 {
@@ -43,6 +47,7 @@ void MirrorCommand( MirrorHandle, int command )
     irisaoTimingTest::firstEntry = MagAOX::app::dev::dmTiming::monotonicNowNs();
     irisaoTimingTest::lastReturn = MagAOX::app::dev::dmTiming::monotonicNowNs();
 }
+
 /// Complete software-only teardown.
 void MirrorRelease( MirrorHandle )
 {
@@ -82,6 +87,7 @@ void irisaoCtrl_test::disabled( bool value )
 }
 } // namespace app
 } // namespace MagAOX
+
 /// \endcond
 
 namespace libXWCTest
@@ -104,17 +110,21 @@ TEST_CASE( "irisaoCtrl never treats unqualified SDK returns as successful submis
     // clang-format on
     using namespace MagAOX::app;
     using namespace MagAOX::dmTiming;
+
     irisaoCtrl_test app;
     const bool      disabled = GENERATE( false, true );
     app.disabled( disabled );
     float command[]{ 1, 2, 3 };
+
     app.m_dmTiming.beginEvent( true );
     REQUIRE( app.commandDM( command ) == 0 );
     REQUIRE( app.m_dmTiming.outcome() == ( disabled ? Outcome::noSend : Outcome::unknown ) );
     app.m_dmTiming.mark( Marker::finish );
     app.m_dmTiming.finishEvent();
     app.m_dmTiming.update();
+
     const auto &summary = app.dmTimingSummary();
+
     REQUIRE( irisaoTimingTest::staged == 1 );
     REQUIRE( irisaoTimingTest::calls == 1 );
     REQUIRE( summary.total.submitted == 0 );
@@ -122,7 +132,9 @@ TEST_CASE( "irisaoCtrl never treats unqualified SDK returns as successful submis
     REQUIRE( summary.metrics[metricIndex( Metric::receiptSend )].count == 0 );
     REQUIRE( summary.metrics[metricIndex( Metric::actuator )].count == 1 );
     REQUIRE( summary.metrics[metricIndex( Metric::saturation )].count == 0 );
+
     const auto &sdk = summary.metrics[metricIndex( Metric::sdk )];
+
     REQUIRE( sdk.count == 1 );
     REQUIRE( sdk.mean >= ( irisaoTimingTest::lastReturn - irisaoTimingTest::firstEntry ) * 1e-9 );
 }

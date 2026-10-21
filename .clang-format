@@ -1,6 +1,7 @@
 Language:        Cpp
 IndentWidth:     4
 BreakBeforeBraces: Allman
+InsertBraces:    true
 AlwaysBreakTemplateDeclarations: Yes
 SpaceBeforeParens: false
 AlignAfterOpenBracket: Align
@@ -9,6 +10,7 @@ SpacesInConditionalStatement: true
 SpacesInCStyleCastParentheses: false
 SpacesInParentheses: true
 AllowShortFunctionsOnASingleLine: false
+AllowShortLambdasOnASingleLine: None
 AlignTrailingComments: true
 BinPackArguments: false
 BinPackParameters: false

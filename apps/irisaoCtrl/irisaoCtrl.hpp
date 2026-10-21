@@ -212,7 +212,9 @@ irisaoCtrl::~irisaoCtrl() noexcept
 {
     // f(m_actuator_mapping) free(m_actuator_mapping);
     if( m_dminputs )
+    {
         free( m_dminputs );
+    }
 }
 
 void irisaoCtrl::setupConfig()
@@ -279,6 +281,7 @@ int irisaoCtrl::appStartup()
 {
 
     DM_APP_STARTUP;
+
     TELEMETER_APP_STARTUP;
     SHMIMMONITOR_APP_STARTUP;
 
@@ -292,12 +295,15 @@ int irisaoCtrl::appLogic()
     TELEMETER_APP_LOGIC;
 
     if( state() == stateCodes::POWEROFF )
+    {
         return 0;
+    }
 
     if( state() == stateCodes::POWERON )
     {
         log<text_log>( "detected POWERON" );
         sleep( 5 );
+
         return initDM();
     }
 
@@ -305,6 +311,7 @@ int irisaoCtrl::appLogic()
     {
         log<text_log>( "Saturated actuators in last second: " + std::to_string( m_nsat ), logPrio::LOG_WARNING );
     }
+
     m_nsat = 0;
 
     DM_UPDATE_INDI;
@@ -315,7 +322,9 @@ int irisaoCtrl::appLogic()
 int irisaoCtrl::appShutdown()
 {
     if( m_dmopen )
+    {
         releaseDM();
+    }
 
     dev::dm<irisaoCtrl, float>::appShutdown();
     shmimMonitor<irisaoCtrl>::appShutdown();
@@ -344,6 +353,7 @@ int irisaoCtrl::initDM()
     if( m_dmopen )
     {
         log<text_log>( "DM is already initialized.  Release first.", logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -360,6 +370,7 @@ int irisaoCtrl::initDM()
     {
         return -1;
     }
+
     log<text_log>( "GOT THE MIRROR HANDLE" );
     sleep( 2 );
 
@@ -375,12 +386,14 @@ int irisaoCtrl::initDM()
        log<text_log>(std::string("DM initialization failed: ") + err, logPrio::LOG_ERROR);
 
        m_dm = {};
+
        return -1;
     }
 
     if (!m_dmopen)
     {
        log<text_log>("DM initialization failed. Couldn't open DM handle.", logPrio::LOG_ERROR);
+
        return -1;
     }*/
 
@@ -389,21 +402,27 @@ int irisaoCtrl::initDM()
     // Get number of actuators
     // this is stupid, but I don't know how else to get this number
     SegmentNumber segment = 0; // don't know if this should start at 0 or 1
+
     while( MirrorIterate( m_dm, segment ) )
     {
         segment++;
     }
+
     m_nbAct = 3 * segment; // 3*(segment+1)
     log<text_log>( "Found " + std::to_string( segment ) + " segments for IrisAO mirror " + mser, logPrio::LOG_NOTICE );
 
     // cacao input -- FIX ME?
     if( m_dminputs )
+    {
         free( m_dminputs );
+    }
+
     m_dminputs = (double *)calloc( m_nbAct, sizeof( double ) );
 
     if( zeroDM() < 0 )
     {
         log<text_log>( "DM initialization failed.  Error zeroing DM.", logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -417,25 +436,30 @@ int irisaoCtrl::zeroDM()
     if( !m_dmopen )
     {
         log<text_log>( "DM not initialized (NULL pointer)", logPrio::LOG_ERROR );
+
         return -1;
     }
 
     if( m_nbAct == 0 )
     {
         log<text_log>( "DM not initialized (number of actuators)", logPrio::LOG_ERROR );
+
         return -1;
     }
 
     /* Send the all 0 command to the DM */
     SegmentNumber segment = 0;
+
     while( MirrorIterate( m_dm, segment ) )
     {
         SetMirrorPosition( m_dm, segment, 0, 0, 0 ); // z, xgrad, ygrad
         segment++;
     }
+
     MirrorCommand( m_dm, MirrorSendSettings );
 
     log<text_log>( "DM zeroed" );
+
     return 0;
 }
 
@@ -446,6 +470,7 @@ int irisaoCtrl::commandDM( void *curr_src )
     SegmentNumber  segment = 0; // start at 0 or 1?
     MirrorPosition position;
     int            idx;
+
     while( MirrorIterate( m_dm, segment ) )
     {
 
@@ -462,6 +487,7 @@ int irisaoCtrl::commandDM( void *curr_src )
         // querying) not sure how to handle ptt in the m_instSatMap. I guess I need to saturate a whole row/column at
         // once??
         GetMirrorPosition( m_dm, segment, &position );
+
         if( !position.reachable )
         {
             m_instSatMap.data()[idx]     = 1;
@@ -496,6 +522,7 @@ int irisaoCtrl::releaseDM()
     if( !m_dmopen )
     {
         log<text_log>( "dm is not initialized", logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -511,6 +538,7 @@ int irisaoCtrl::releaseDM()
     if( zeroDM() < 0 )
     {
         log<text_log>( "DM release failed.  Error zeroing DM.", logPrio::LOG_ERROR );
+
         return -1;
     }
 

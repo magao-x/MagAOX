@@ -12,6 +12,7 @@ namespace acs
 {
 using UInt = unsigned;
 }
+
 /// Software-only opaque ALPAO mirror handle.
 struct asdkDM
 {

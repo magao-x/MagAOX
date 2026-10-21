@@ -103,13 +103,15 @@ struct Counters
 /// Fixed-size command-thread handoff; no external timestamp implies verified frame identity.
 struct Event
 {
-    uint64_t sequence{ 0 };               ///< Producer sequence, including events subsequently dropped.
-    uint64_t session{ 0 };                ///< Monitor attachment/reset epoch.
-    uint64_t counter{ 0 };                ///< Input counter observed by the callback, when available.
-    bool     counterValid{ false };       ///< Whether the input-counter observation is available.
-    bool     synthetic{ false };          ///< No successful semaphore wait preceded this event.
-    bool     submitted{ false };          ///< SDK/transport success was explicitly qualified.
-    Outcome  outcome{ Outcome::unknown }; ///< Callback result independent of submission success.
+    uint64_t sequence{ 0 }; ///< Producer sequence, including events subsequently dropped.
+    uint64_t session{ 0 };  ///< Monitor attachment/reset epoch.
+    uint64_t counter{ 0 };  ///< Input counter observed by the callback, when available.
+
+    bool    counterValid{ false };       ///< Whether the input-counter observation is available.
+    bool    synthetic{ false };          ///< No successful semaphore wait preceded this event.
+    bool    submitted{ false };          ///< SDK/transport success was explicitly qualified.
+    Outcome outcome{ Outcome::unknown }; ///< Callback result independent of submission success.
+
     std::array<int64_t, static_cast<size_t>( Marker::count )> markers{};  ///< Monotonic nanoseconds.
     uint32_t                                                  valid{ 0 }; ///< Bit mask of available endpoints.
     uint32_t invalidMarkers{ 0 };                                         ///< Invalid timestamp captures in this event.
@@ -118,21 +120,25 @@ struct Event
 /// Consumer-owned coherent snapshot for telemetry and ordinary app logic.
 struct Summary
 {
-    uint64_t     session{ 0 };                    ///< Current monitor epoch.
-    uint64_t     sequence{ 0 };                   ///< Consumer summary sequence.
-    int64_t      nowNs{ 0 };                      ///< Monotonic evaluation time.
-    int64_t      newestNs{ -1 };                  ///< Newest retained event endpoint, or -1 when unavailable.
-    double       windowSec{ 0 };                  ///< Configured trailing elapsed-time window in seconds.
-    double       span{ 0 };                       ///< Actual retained endpoint span in seconds.
-    double       age{ -1 };                       ///< Age of newest retained event in seconds; -1 when unavailable.
-    size_t       capacity{ 0 };                   ///< Configured event/window cap.
-    size_t       queued{ 0 };                     ///< Queue occupancy after the bounded drain.
+    uint64_t session{ 0 };   ///< Current monitor epoch.
+    uint64_t sequence{ 0 };  ///< Consumer summary sequence.
+    int64_t  nowNs{ 0 };     ///< Monotonic evaluation time.
+    int64_t  newestNs{ -1 }; ///< Newest retained event endpoint, or -1 when unavailable.
+
+    double windowSec{ 0 }; ///< Configured trailing elapsed-time window in seconds.
+    double span{ 0 };      ///< Actual retained endpoint span in seconds.
+    double age{ -1 };      ///< Age of newest retained event in seconds; -1 when unavailable.
+    size_t capacity{ 0 };  ///< Configured event/window cap.
+    size_t queued{ 0 };    ///< Queue occupancy after the bounded drain.
+
     bool         enabled{ false };                ///< Collection is configured and preallocated.
     bool         fgValid{ false };                ///< All three populations required by telem_fgtimings are valid.
     Availability state{ Availability::disabled }; ///< Explicit compatible-summary availability.
+
     std::array<Stats, static_cast<size_t>( Metric::count )> metrics{}; ///< Independent metric populations.
-    Counters                                                total;     ///< Cumulative quality counts since configure.
-    Counters                                                delta; ///< Changes since the preceding consumer summary.
+
+    Counters total; ///< Cumulative quality counts since configure.
+    Counters delta; ///< Changes since the preceding consumer summary.
 };
 
 /// Convert a stable metric identifier to its array index.
@@ -168,6 +174,7 @@ inline const char *metricName( Metric metric )
                                       "throughDelta",
                                       "callback",
                                       "receiptCallback" };
+
     return metricIndex( metric ) < metricIndex( Metric::count ) ? names[metricIndex( metric )] : "unknown";
 }
 

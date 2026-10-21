@@ -136,24 +136,30 @@ inline int64_t dmTiming::monotonicNowNs()
     timespec ts{};
     int      rv = clock_gettime( CLOCK_MONOTONIC, &ts );
     errno       = savedErrno;
+
     return rv == 0 ? static_cast<int64_t>( ts.tv_sec ) * 1000000000LL + ts.tv_nsec : -1;
 }
 
 inline void dmTiming::configure( double windowSec, size_t capacity )
 {
     static_assert( std::atomic<uint64_t>::is_always_lock_free, "DM timing handoff requires lock-free positions" );
+
     m_enabled  = mx::math::isFinite( windowSec ) && windowSec > 0 && windowSec < 9e9 && capacity > 0;
     m_windowNs = m_enabled ? static_cast<int64_t>( windowSec * 1e9 ) : 0;
     m_enabled  = m_enabled && m_windowNs > 0;
+
     m_queue.clear();
     m_queue.resize( m_enabled ? capacity : 0 );
+
     m_head.store( 0, std::memory_order_relaxed );
     m_tail.store( 0, std::memory_order_relaxed );
     m_dropped.store( 0, std::memory_order_relaxed );
     m_session.store( 1, std::memory_order_relaxed );
+
     m_eventSequence = 0;
     m_event         = {};
     m_active        = false;
+
     m_window.clear();
     m_summary           = {};
     m_summary.windowSec = m_enabled ? windowSec : 0;
@@ -161,10 +167,11 @@ inline void dmTiming::configure( double windowSec, size_t capacity )
     m_summary.enabled   = m_enabled;
     m_summary.session   = 1;
     m_summary.state = m_enabled ? MagAOX::dmTiming::Availability::warmingUp : MagAOX::dmTiming::Availability::disabled;
-    m_total         = {};
-    m_previous      = {};
-    m_counterValid  = false;
-    m_everEvent     = false;
+
+    m_total        = {};
+    m_previous     = {};
+    m_counterValid = false;
+    m_everEvent    = false;
 }
 
 inline bool dmTiming::enabled() const
@@ -183,6 +190,7 @@ inline void dmTiming::beginEvent( bool hasReceipt )
     {
         return;
     }
+
     beginEventAt( hasReceipt, hasReceipt ? monotonicNowNs() : -1 );
 }
 
@@ -192,16 +200,19 @@ inline void dmTiming::beginEventAt( bool hasReceipt, int64_t receiptNs )
     {
         return;
     }
+
     if( m_active )
     {
         outcome( MagAOX::dmTiming::Outcome::rejected );
         finishEvent();
     }
+
     m_event           = {};
     m_event.sequence  = ++m_eventSequence;
     m_event.session   = m_session.load( std::memory_order_relaxed );
     m_event.synthetic = !hasReceipt;
     m_active          = true;
+
     if( hasReceipt )
     {
         markAt( MagAOX::dmTiming::Marker::receipt, receiptNs );
@@ -219,12 +230,15 @@ inline void dmTiming::mark( MagAOX::dmTiming::Marker marker )
 inline void dmTiming::markAt( MagAOX::dmTiming::Marker marker, int64_t ns )
 {
     using namespace MagAOX::dmTiming;
+
     if( !m_active || markerIndex( marker ) >= markerIndex( Marker::count ) )
     {
         return;
     }
+
     uint32_t bit     = 1u << markerIndex( marker );
     bool     ordered = ns >= 0;
+
     for( size_t i = 0; ordered && i < m_event.markers.size(); ++i )
     {
         if( ( m_event.valid & ( 1u << i ) ) && m_event.markers[i] > ns )
@@ -232,12 +246,15 @@ inline void dmTiming::markAt( MagAOX::dmTiming::Marker marker, int64_t ns )
             ordered = false;
         }
     }
+
     if( !ordered )
     {
         m_event.valid &= ~bit;
         ++m_event.invalidMarkers;
+
         return;
     }
+
     m_event.markers[markerIndex( marker )] = ns;
     m_event.valid |= bit;
 }
@@ -248,6 +265,7 @@ inline void dmTiming::inputCounter( uint64_t counter )
     {
         return;
     }
+
     m_event.counter      = counter;
     m_event.counterValid = true;
 }
@@ -258,7 +276,9 @@ inline void dmTiming::outcome( MagAOX::dmTiming::Outcome outcome )
     {
         return;
     }
+
     m_event.outcome = outcome;
+
     if( outcome == MagAOX::dmTiming::Outcome::success )
     {
         m_event.submitted = true;
@@ -284,14 +304,18 @@ inline void dmTiming::finishEvent()
     {
         return;
     }
+
     m_active      = false;
     uint64_t head = m_head.load( std::memory_order_relaxed );
     uint64_t tail = m_tail.load( std::memory_order_acquire );
+
     if( head - tail == m_queue.size() )
     {
         m_dropped.fetch_add( 1, std::memory_order_relaxed );
+
         return;
     }
+
     m_queue[head % m_queue.size()] = m_event;
     m_head.store( head + 1, std::memory_order_release );
 }
@@ -302,17 +326,20 @@ inline void dmTiming::newSession()
     {
         return;
     }
+
     if( m_active )
     {
         outcome( MagAOX::dmTiming::Outcome::rejected );
         finishEvent();
     }
+
     m_session.fetch_add( 1, std::memory_order_release );
 }
 
 inline void dmTiming::countEvent( const MagAOX::dmTiming::Event &event )
 {
     using namespace MagAOX::dmTiming;
+
     ++m_total.events;
     m_total.receipts += ( event.valid & ( 1u << markerIndex( Marker::receipt ) ) ) != 0;
     m_total.submitted += event.submitted;
@@ -322,12 +349,14 @@ inline void dmTiming::countEvent( const MagAOX::dmTiming::Event &event )
     m_total.noSend += event.outcome == Outcome::noSend;
     m_total.rejected += event.outcome == Outcome::rejected;
     m_total.invalid += event.invalidMarkers;
+
     if( event.counterValid && m_counterValid && event.session == m_counterSession &&
         event.sequence == m_counterSequence + 1 )
     {
         m_total.duplicates += event.counter == m_counter;
         m_total.counterGaps += event.counter != m_counter && event.counter != m_counter + 1;
     }
+
     m_counter         = event.counter;
     m_counterValid    = event.counterValid;
     m_counterSession  = event.session;
@@ -337,54 +366,68 @@ inline void dmTiming::countEvent( const MagAOX::dmTiming::Event &event )
 inline void dmTiming::update( int64_t nowNs )
 {
     using namespace MagAOX::dmTiming;
+
     ++m_summary.sequence;
     m_summary.nowNs = nowNs;
+
     if( !m_enabled )
     {
         return;
     }
+
     uint64_t session = m_session.load( std::memory_order_acquire );
+
     if( session != m_summary.session )
     {
         m_window.clear();
         m_summary.session = session;
         m_everEvent       = false;
     }
+
     uint64_t       tail = m_tail.load( std::memory_order_relaxed );
     const uint64_t head = m_head.load( std::memory_order_acquire );
+
     while( tail != head )
     {
         Event event = m_queue[tail % m_queue.size()];
         ++tail;
         m_tail.store( tail, std::memory_order_release );
         countEvent( event );
+
         if( event.session > m_summary.session )
         {
             m_window.clear();
             m_summary.session = event.session;
             m_everEvent       = false;
         }
+
         if( event.session == m_summary.session )
         {
             m_window.push_back( event );
+
             if( m_window.size() > m_queue.size() )
             {
                 m_window.pop_front();
             }
+
             m_everEvent = true;
         }
     }
+
     // A reset may race the bounded drain without yet publishing a new event.
     session = m_session.load( std::memory_order_acquire );
+
     if( session > m_summary.session )
     {
         m_window.clear();
         m_summary.session = session;
         m_everEvent       = false;
     }
-    m_summary.queued                       = static_cast<size_t>( m_head.load( std::memory_order_acquire ) - tail );
-    m_total.dropped                        = m_dropped.load( std::memory_order_relaxed );
-    m_summary.total                        = m_total;
+
+    m_summary.queued = static_cast<size_t>( m_head.load( std::memory_order_acquire ) - tail );
+    m_total.dropped  = m_dropped.load( std::memory_order_relaxed );
+    m_summary.total  = m_total;
+
     constexpr uint64_t Counters::*fields[] = { &Counters::events,
                                                &Counters::receipts,
                                                &Counters::submitted,
@@ -397,40 +440,53 @@ inline void dmTiming::update( int64_t nowNs )
                                                &Counters::counterGaps,
                                                &Counters::invalid,
                                                &Counters::dropped };
+
     for( auto field : fields )
     {
         m_summary.delta.*field = m_total.*field - m_previous.*field;
     }
+
     m_previous = m_total;
+
     calculate( nowNs );
 }
 
 inline void dmTiming::calculate( int64_t nowNs )
 {
     using namespace MagAOX::dmTiming;
+
     // Local arrays and Welford accumulation require no per-metric allocation.
     std::array<double, metricIndex( Metric::count )>  sumSquares{};
     std::array<int64_t, metricIndex( Metric::count )> earliest;
     std::array<int64_t, metricIndex( Metric::count )> latest;
     earliest.fill( std::numeric_limits<int64_t>::max() );
     latest.fill( -1 );
+
     m_summary.metrics  = {};
     m_summary.newestNs = -1;
     m_summary.age      = -1;
     m_summary.span     = 0;
+
     if( nowNs < 0 )
     {
         m_summary.fgValid = false;
         m_summary.state   = Availability::unavailable;
+
         return;
     }
+
     int64_t oldestNs = std::numeric_limits<int64_t>::max();
     int64_t cutoff   = nowNs >= m_windowNs ? nowNs - m_windowNs : 0;
-    auto    endpoint = []( const Event &event, Marker marker ) -> int64_t
-    { return event.valid & ( 1u << markerIndex( marker ) ) ? event.markers[markerIndex( marker )] : -1; };
+
+    auto endpoint = []( const Event &event, Marker marker ) -> int64_t
+    {
+        return event.valid & ( 1u << markerIndex( marker ) ) ? event.markers[markerIndex( marker )] : -1;
+    };
+
     auto newest = [&]( const Event &event )
     {
         int64_t value = -1;
+
         for( size_t i = 0; i < event.markers.size(); ++i )
         {
             if( event.valid & ( 1u << i ) )
@@ -438,52 +494,66 @@ inline void dmTiming::calculate( int64_t nowNs )
                 value = std::max( value, event.markers[i] );
             }
         }
+
         return value;
     };
+
     while( !m_window.empty() && newest( m_window.front() ) < cutoff )
     {
         m_window.pop_front();
     }
+
     auto add = [&]( Metric metric, int64_t a, int64_t b )
     {
         if( a < cutoff || b < a || b > nowNs )
         {
             return;
         }
+
         size_t index = metricIndex( metric );
         Stats &stats = m_summary.metrics[index];
         double value = ( b - a ) * 1e-9;
+
         ++stats.count;
         double difference = value - stats.mean;
         stats.mean += difference / stats.count;
         sumSquares[index] += difference * ( value - stats.mean );
+
         stats.min       = stats.count == 1 ? value : std::min( stats.min, value );
         stats.max       = stats.count == 1 ? value : std::max( stats.max, value );
         earliest[index] = std::min( earliest[index], a );
         latest[index]   = std::max( latest[index], b );
     };
+
     int64_t  previousReceipt = -1, previousSend = -1;
     uint64_t previousSequence = 0;
+
     for( const Event &event : m_window )
     {
         if( previousSequence && event.sequence != previousSequence + 1 )
         {
             previousReceipt = previousSend = -1;
         }
+
         previousSequence = event.sequence;
+
         for( size_t i = 0; i < event.markers.size(); ++i )
         {
             int64_t value = event.markers[i];
+
             if( ( event.valid & ( 1u << i ) ) && value >= cutoff && value <= nowNs )
             {
                 oldestNs           = std::min( oldestNs, value );
                 m_summary.newestNs = std::max( m_summary.newestNs, value );
             }
         }
+
         int64_t receipt = endpoint( event, Marker::receipt );
         int64_t send    = endpoint( event, Marker::sdkEnd );
+
         add( Metric::receiptInterval, previousReceipt, receipt );
         previousReceipt = receipt;
+
         if( event.submitted )
         {
             add( Metric::sendInterval, previousSend, send );
@@ -494,6 +564,7 @@ inline void dmTiming::calculate( int64_t nowNs )
         {
             previousSend = -1;
         }
+
         constexpr Metric metrics[] = { Metric::dispatch,
                                        Metric::actuator,
                                        Metric::sdk,
@@ -521,32 +592,39 @@ inline void dmTiming::calculate( int64_t nowNs )
                                        Marker::deltaEnd,
                                        Marker::finish,
                                        Marker::finish };
+
         for( size_t i = 0; i < sizeof( metrics ) / sizeof( metrics[0] ); ++i )
         {
             add( metrics[i], endpoint( event, starts[i] ), endpoint( event, ends[i] ) );
         }
     }
+
     for( size_t i = 0; i < m_summary.metrics.size(); ++i )
     {
         Stats &stats = m_summary.metrics[i];
         stats.valid  = stats.count > 1;
+
         if( stats.valid )
         {
             stats.stddev = std::sqrt( std::max( 0.0, sumSquares[i] / ( stats.count - 1 ) ) );
         }
+
         if( stats.count )
         {
             stats.span = ( latest[i] - earliest[i] ) * 1e-9;
         }
     }
+
     if( m_summary.newestNs >= 0 )
     {
         m_summary.age  = ( nowNs - m_summary.newestNs ) * 1e-9;
         m_summary.span = ( m_summary.newestNs - oldestNs ) * 1e-9;
     }
+
     m_summary.fgValid = m_summary.metrics[metricIndex( Metric::receiptInterval )].valid &&
                         m_summary.metrics[metricIndex( Metric::sendInterval )].valid &&
                         m_summary.metrics[metricIndex( Metric::receiptSend )].valid;
+
     if( m_summary.fgValid )
     {
         m_summary.state = Availability::valid;

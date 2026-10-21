@@ -416,6 +416,7 @@ int pi335Ctrl::appStartup()
     if( state() == stateCodes::UNINITIALIZED )
     {
         log<text_log>( "In appStartup but in state UNINITIALIZED.", logPrio::LOG_CRITICAL );
+
         return -1;
     }
 
@@ -482,13 +483,16 @@ int pi335Ctrl::appLogic()
     if( state() == stateCodes::NODEVICE )
     {
         int rv = tty::usbDevice::getDeviceName();
+
         if( rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES )
         {
             state( stateCodes::FAILURE );
+
             if( !stateLogged() )
             {
                 log<software_critical>( { __FILE__, __LINE__, rv, tty::ttyErrorString( rv ) } );
             }
+
             return -1;
         }
 
@@ -501,11 +505,13 @@ int pi335Ctrl::appLogic()
                 log<text_log>( std::string( "USB Device " ) + m_idVendor + ":" + m_idProduct + ":" + m_serial +
                                " not found in udev" );
             }
+
             return 0;
         }
         else
         {
             state( stateCodes::NOTCONNECTED );
+
             if( !stateLogged() )
             {
                 log<text_log>( std::string( "USB Device " ) + m_idVendor + ":" + m_idProduct + ":" + m_serial +
@@ -525,11 +531,16 @@ int pi335Ctrl::appLogic()
         if( rv < 0 )
         {
             int nrv = tty::usbDevice::getDeviceName();
+
             if( nrv < 0 && nrv != TTY_E_DEVNOTFOUND && nrv != TTY_E_NODEVNAMES )
             {
                 state( stateCodes::FAILURE );
+
                 if( !stateLogged() )
+                {
                     log<software_critical>( { __FILE__, __LINE__, nrv, tty::ttyErrorString( nrv ) } );
+                }
+
                 return -1;
             }
 
@@ -544,13 +555,18 @@ int pi335Ctrl::appLogic()
                          << " no longer found in udev";
                     log<text_log>( logs.str() );
                 }
+
                 return 0;
             }
 
             // if connect failed, and there is a device, then we have some other problem.
             state( stateCodes::FAILURE );
+
             if( !stateLogged() )
+            {
                 log<software_error>( { __FILE__, __LINE__, rv, tty::ttyErrorString( rv ) } );
+            }
+
             return -1;
         }
 
@@ -607,9 +623,13 @@ int pi335Ctrl::appLogic()
     if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
     {
         if( m_flatSet )
+        {
             state( stateCodes::OPERATING );
+        }
         else
+        {
             state( stateCodes::READY );
+        }
     }
 
     if( state() == stateCodes::READY )
@@ -626,6 +646,7 @@ int pi335Ctrl::appLogic()
         {
             log<software_error>( { __FILE__, __LINE__ } );
             state( stateCodes::ERROR );
+
             return 0;
         }
 
@@ -633,6 +654,7 @@ int pi335Ctrl::appLogic()
         mx::sys::milliSleep( 1 ); // Put this thread to sleep to make sure other thread gets a lock
 
         m_pos1 = pos1;
+
         if( fabs( m_pos1Set - m_pos1 ) > m_posTol )
         {
             updateIfChanged( m_indiP_pos1, "current", m_pos1, INDI_BUSY );
@@ -643,28 +665,35 @@ int pi335Ctrl::appLogic()
         }
 
         lock.lock();
+
         if( getSva( sva1, 1 ) < 0 )
         {
             log<software_error>( { __FILE__, __LINE__ } );
             state( stateCodes::ERROR );
+
             return 0;
         }
+
         m_sva1 = sva1;
 
         lock.unlock();
         mx::sys::milliSleep( 1 ); // Put this thread to sleep to make sure other thread gets a lock
 
         lock.lock();
+
         if( getPos( pos2, 2 ) < 0 )
         {
             log<software_error>( { __FILE__, __LINE__ } );
             state( stateCodes::ERROR );
+
             return 0;
         }
+
         lock.unlock();
         mx::sys::milliSleep( 1 ); // Put this thread to sleep to make sure other thread gets a lock
 
         m_pos2 = pos2;
+
         if( fabs( m_pos2Set - m_pos2 ) > m_posTol ) // sva2 != m_sva2)
         {
             updateIfChanged( m_indiP_pos2, "current", m_pos2, INDI_BUSY );
@@ -675,12 +704,15 @@ int pi335Ctrl::appLogic()
         }
 
         lock.lock();
+
         if( getSva( sva2, 2 ) < 0 )
         {
             log<software_error>( { __FILE__, __LINE__ } );
             state( stateCodes::ERROR );
+
             return 0;
         }
+
         lock.unlock();
         mx::sys::milliSleep( 1 ); // Put this thread to sleep to make sure other thread gets a lock
 
@@ -692,16 +724,20 @@ int pi335Ctrl::appLogic()
             float sva3;
 
             lock.lock();
+
             if( getPos( pos3, 3 ) < 0 )
             {
                 log<software_error>( { __FILE__, __LINE__ } );
                 state( stateCodes::ERROR );
+
                 return 0;
             }
+
             lock.unlock();
             mx::sys::milliSleep( 1 ); // Put this thread to sleep to make sure other thread gets a lock
 
             m_pos3 = pos3;
+
             if( fabs( m_pos3Set - m_pos3 ) > m_posTol )
             {
                 updateIfChanged( m_indiP_pos3, "current", m_pos3, INDI_BUSY );
@@ -712,12 +748,15 @@ int pi335Ctrl::appLogic()
             }
 
             lock.lock();
+
             if( getSva( sva3, 2 ) < 0 )
             {
                 log<software_error>( { __FILE__, __LINE__ } );
                 state( stateCodes::ERROR );
+
                 return 0;
             }
+
             lock.unlock();
             mx::sys::milliSleep( 1 ); // Put this thread to sleep to make sure other thread gets a lock
 
@@ -770,10 +809,12 @@ int pi335Ctrl::testConnection()
     }
 
     size_t st;
+
     if( ( st = resp.find( "E-727.3SDA" ) ) == std::string::npos )
     {
         return log<text_log, -1>( "Unknown device found: " + resp, logPrio::LOG_CRITICAL );
     }
+
     m_ctrl = mx::ioutils::removeWhiteSpace( resp.substr( st ) );
     log<text_log>( std::string( "Connected to " + m_ctrl + " on " ) + m_deviceName );
 
@@ -783,18 +824,21 @@ int pi335Ctrl::testConnection()
     {
         return log<software_critical, -1>( { __FILE__, __LINE__, rv, tty::ttyErrorString( rv ) } );
     }
+
     resp1 = mx::ioutils::removeWhiteSpace( resp1 );
 
     if( ( rv = tty::ttyWriteRead( resp2, "CST? 2\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout ) ) < 0 )
     {
         return log<software_critical, -1>( { __FILE__, __LINE__, rv, tty::ttyErrorString( rv ) } );
     }
+
     resp2 = mx::ioutils::removeWhiteSpace( resp2 );
 
     if( ( rv = tty::ttyWriteRead( resp3, "CST? 3\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout ) ) < 0 )
     {
         return log<software_critical, -1>( { __FILE__, __LINE__, rv, tty::ttyErrorString( rv ) } );
     }
+
     resp3 = mx::ioutils::removeWhiteSpace( resp3 );
 
     updateIfChanged( m_indiP_pos1, "current", 0.0 );
@@ -814,6 +858,7 @@ int pi335Ctrl::testConnection()
         m_stage       = resp1.substr( 2 );
         m_naxes       = 3;
         m_actuallyATZ = false;
+
         if( !m_pos_3_sent )
         {
             ///\todo this needs to only happen once, and then never again
@@ -922,6 +967,7 @@ int pi335Ctrl::testConnection()
     }
 
     m_flatCommand.resize( 3, 1 );
+
     if( m_naxes == 2 )
     {
         m_flatCommand( 0, 0 ) = m_homePos1;
@@ -934,6 +980,7 @@ int pi335Ctrl::testConnection()
         m_flatCommand( 1, 0 ) = m_homePos2;
         m_flatCommand( 2, 0 ) = m_homePos3;
     }
+
     m_flatLoaded = true;
 
     return 0;
@@ -1010,6 +1057,7 @@ int pi335Ctrl::home()
     if( m_servoState != 0 )
     {
         log<text_log>( "home requested but servos are not off", logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -1024,7 +1072,10 @@ int pi335Ctrl::home()
 int pi335Ctrl::homeState( int axis )
 {
     if( !m_actuallyATZ )
+    {
         return 1;
+    }
+
     std::string resp;
 
     if( getCom( resp, "ATZ?", axis ) < 0 )
@@ -1036,11 +1087,14 @@ int pi335Ctrl::homeState( int axis )
 
     ///\todo this should be a separate unit-tested parser
     size_t st = resp.find( '=' );
+
     if( st == std::string::npos || st > resp.size() - 2 )
     {
         log<software_error>( { __FILE__, __LINE__, "error parsing response" } );
+
         return -1;
     }
+
     st += 1;
 
     return mx::ioutils::convertFromString<double>( resp.substr( st ) );
@@ -1051,12 +1105,14 @@ int pi335Ctrl::home_1()
     if( m_servoState != 0 )
     {
         log<text_log>( "home_1 requested but servos are not off", logPrio::LOG_ERROR );
+
         return -1;
     }
 
     if( m_homingState != 0 )
     {
         log<text_log>( "home_1 requested but not in correct homing state", logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -1085,12 +1141,14 @@ int pi335Ctrl::home_2()
     if( m_servoState != 0 )
     {
         log<text_log>( "home_2 requested but servos are not off", logPrio::LOG_ERROR );
+
         return -1;
     }
 
     if( m_homingState != 1 )
     {
         log<text_log>( "home_2 requested but not in correct homing state", logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -1118,12 +1176,14 @@ int pi335Ctrl::home_3()
     if( m_servoState != 0 )
     {
         log<text_log>( "home_3 requested but servos are not off", logPrio::LOG_ERROR );
+
         return -1;
     }
 
     if( m_homingState != 2 )
     {
         log<text_log>( "home_3 requested but not in correct homing state", logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -1152,17 +1212,21 @@ int pi335Ctrl::finishInit()
     if( m_servoState != 0 )
     {
         log<text_log>( "finishInit requested but servos are not off", logPrio::LOG_ERROR );
+
         return -1;
     }
 
     if( m_naxes == 2 && m_homingState != 2 )
     {
         log<text_log>( "finishInit requested but not in correct homing state", logPrio::LOG_ERROR );
+
         return -1;
     }
+
     if( m_naxes == 3 && m_homingState != 3 )
     {
         log<text_log>( "finishInit requested but not in correct homing state", logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -1316,10 +1380,14 @@ int pi335Ctrl::zeroDM()
 {
     move_1( 0.0 );
     move_2( 0.0 );
+
     if( m_naxes == 3 )
+    {
         move_3( 0.0 );
+    }
 
     log<text_log>( "DM zeroed" );
+
     return 0;
 }
 
@@ -1328,40 +1396,52 @@ int pi335Ctrl::commandDM( void *curr_src )
     if( state() != stateCodes::OPERATING )
     {
         dmTimingOutcome( MagAOX::dmTiming::Outcome::noSend );
+
         return 0;
     }
+
     float pos1 = ( reinterpret_cast<float *>( curr_src ) )[0];
     float pos2 = ( reinterpret_cast<float *>( curr_src ) )[1];
 
     float pos3 = 0;
+
     if( m_naxes == 3 )
+    {
         pos3 = ( reinterpret_cast<float *>( curr_src ) )[2];
+    }
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
     m_dmWritesAttempted  = 0;
     m_dmWritesSuccessful = 0;
 
     int rv;
+
     if( ( rv = move_1( pos1, true ) ) < 0 )
     {
         recordDMOutcome();
+
         return rv;
     }
 
     if( ( rv = move_2( pos2, true ) ) < 0 )
     {
         recordDMOutcome();
+
         return rv;
     }
 
     if( m_naxes == 3 )
+    {
         if( ( rv = move_3( pos3, true ) ) < 0 )
         {
             recordDMOutcome();
+
             return rv;
         }
+    }
 
     recordDMOutcome();
+
     return 0;
 }
 
@@ -1422,6 +1502,7 @@ int pi335Ctrl::releaseDM()
 int pi335Ctrl::getCom( std::string &resp, const std::string &com, int axis )
 {
     std::string sendcom = com;
+
     if( axis == 1 || axis == 2 )
     {
         sendcom += " ";
@@ -1431,9 +1512,11 @@ int pi335Ctrl::getCom( std::string &resp, const std::string &com, int axis )
     sendcom += "\n";
 
     int rv = tty::ttyWriteRead( resp, sendcom, "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout );
+
     if( rv < 0 )
     {
         log<software_error>( { __FILE__, __LINE__, rv, tty::ttyErrorString( rv ) } );
+
         return -1;
     }
 
@@ -1443,6 +1526,7 @@ int pi335Ctrl::getCom( std::string &resp, const std::string &com, int axis )
 int pi335Ctrl::getPos( float &pos, int n )
 {
     std::string resp;
+
     if( getCom( resp, "POS?", n ) < 0 )
     {
         log<software_error>( { __FILE__, __LINE__ } );
@@ -1450,11 +1534,14 @@ int pi335Ctrl::getPos( float &pos, int n )
 
     ///\todo this should be a separate unit-tested parser
     size_t st = resp.find( '=' );
+
     if( st == std::string::npos || st > resp.size() - 2 )
     {
         log<software_error>( { __FILE__, __LINE__, "error parsing response" } );
+
         return -1;
     }
+
     st += 1;
     pos = mx::ioutils::convertFromString<double>( resp.substr( st ) );
 
@@ -1464,6 +1551,7 @@ int pi335Ctrl::getPos( float &pos, int n )
 int pi335Ctrl::getSva( float &sva, int n )
 {
     std::string resp;
+
     if( getCom( resp, "SVA?", n ) < 0 )
     {
         log<software_error>( { __FILE__, __LINE__ } );
@@ -1471,11 +1559,14 @@ int pi335Ctrl::getSva( float &sva, int n )
 
     ///\todo this should be a separate unit-tested parser
     size_t st = resp.find( '=' );
+
     if( st == std::string::npos || st > resp.size() - 2 )
     {
         log<software_error>( { __FILE__, __LINE__, "error parsing response" } );
+
         return -1;
     }
+
     st += 1;
     sva = mx::ioutils::convertFromString<double>( resp.substr( st ) );
 
@@ -1505,6 +1596,7 @@ int pi335Ctrl::move_1( float absPos, bool dmCommand )
     if( absPos < m_min1 || absPos > m_max1 )
     {
         log<text_log>( "request move on azis 1 out of range", logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -1513,13 +1605,20 @@ int pi335Ctrl::move_1( float absPos, bool dmCommand )
     std::string com = "MOV 1 " + std::to_string( absPos ) + "\n";
 
     if( dmCommand && m_dmWritesAttempted++ == 0 )
+    {
         dmTimingMark( MagAOX::dmTiming::Marker::sdkStart );
+    }
+
     rv = tty::ttyWrite( com, m_fileDescrip, m_writeTimeout );
+
     if( dmCommand )
     {
         dmTimingMark( MagAOX::dmTiming::Marker::sdkEnd );
+
         if( rv >= 0 )
+        {
             ++m_dmWritesSuccessful;
+        }
     }
 
     if( rv < 0 )
@@ -1537,6 +1636,7 @@ int pi335Ctrl::move_2( float absPos, bool dmCommand )
     if( absPos < m_min2 || absPos > m_max2 )
     {
         log<text_log>( "request move on azis 2 out of range", logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -1544,13 +1644,20 @@ int pi335Ctrl::move_2( float absPos, bool dmCommand )
     std::string com = "MOV 2 " + std::to_string( absPos ) + "\n";
 
     if( dmCommand && m_dmWritesAttempted++ == 0 )
+    {
         dmTimingMark( MagAOX::dmTiming::Marker::sdkStart );
+    }
+
     rv = tty::ttyWrite( com, m_fileDescrip, m_writeTimeout );
+
     if( dmCommand )
     {
         dmTimingMark( MagAOX::dmTiming::Marker::sdkEnd );
+
         if( rv >= 0 )
+        {
             ++m_dmWritesSuccessful;
+        }
     }
 
     if( rv < 0 )
@@ -1573,6 +1680,7 @@ int pi335Ctrl::move_3( float absPos, bool dmCommand )
     if( absPos < m_min3 || absPos > m_max3 )
     {
         log<text_log>( "request move on azis 3 out of range", logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -1580,13 +1688,20 @@ int pi335Ctrl::move_3( float absPos, bool dmCommand )
     std::string com = "MOV 3 " + std::to_string( absPos ) + "\n";
 
     if( dmCommand && m_dmWritesAttempted++ == 0 )
+    {
         dmTimingMark( MagAOX::dmTiming::Marker::sdkStart );
+    }
+
     rv = tty::ttyWrite( com, m_fileDescrip, m_writeTimeout );
+
     if( dmCommand )
     {
         dmTimingMark( MagAOX::dmTiming::Marker::sdkEnd );
+
         if( rv >= 0 )
+        {
             ++m_dmWritesSuccessful;
+        }
     }
 
     if( rv < 0 )
@@ -1615,10 +1730,14 @@ INDI_NEWCALLBACK_DEFN( pi335Ctrl, m_indiP_pos1 )
         }
 
         if( target == -999999 )
+        {
             target = current;
+        }
 
         if( target == -999999 )
+        {
             return 0;
+        }
 
         if( state() == stateCodes::READY )
         {
@@ -1636,6 +1755,7 @@ INDI_NEWCALLBACK_DEFN( pi335Ctrl, m_indiP_pos1 )
             return updateFlat( target, m_pos2Set, m_pos3Set );
         }
     }
+
     return -1;
 }
 
@@ -1657,10 +1777,14 @@ INDI_NEWCALLBACK_DEFN( pi335Ctrl, m_indiP_pos2 )
         }
 
         if( target == -999999 )
+        {
             target = current;
+        }
 
         if( target == -999999 )
+        {
             return 0;
+        }
 
         if( state() == stateCodes::READY )
         {
@@ -1669,6 +1793,7 @@ INDI_NEWCALLBACK_DEFN( pi335Ctrl, m_indiP_pos2 )
 
             updateIfChanged( m_indiP_pos2, "target", target );
             updateFlat( m_pos1Set, target, m_pos3Set ); // This just changes the values, but doesn't move
+
             return move_2( target );
         }
         else if( state() == stateCodes::OPERATING )
@@ -1676,6 +1801,7 @@ INDI_NEWCALLBACK_DEFN( pi335Ctrl, m_indiP_pos2 )
             return updateFlat( m_pos1Set, target, m_pos3Set );
         }
     }
+
     return -1;
 }
 
@@ -1698,10 +1824,14 @@ INDI_NEWCALLBACK_DEFN( pi335Ctrl, m_indiP_pos3 )
         }
 
         if( target == -999999 )
+        {
             target = current;
+        }
 
         if( target == -999999 )
+        {
             return 0;
+        }
 
         if( state() == stateCodes::READY )
         {
@@ -1711,6 +1841,7 @@ INDI_NEWCALLBACK_DEFN( pi335Ctrl, m_indiP_pos3 )
             updateIfChanged( m_indiP_pos3, "target", target );
 
             updateFlat( m_pos1Set, m_pos2Set, target ); // This just changes the values, but doesn't move
+
             return move_3( target );
         }
         else if( state() == stateCodes::OPERATING )
@@ -1718,6 +1849,7 @@ INDI_NEWCALLBACK_DEFN( pi335Ctrl, m_indiP_pos3 )
             return updateFlat( m_pos1Set, m_pos2Set, target );
         }
     }
+
     return -1;
 }
 

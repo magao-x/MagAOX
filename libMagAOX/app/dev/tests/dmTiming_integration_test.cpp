@@ -20,6 +20,7 @@ int semPost( sem_t *sem )
         errno = EIO;
         return -1;
     }
+
     return ::sem_post( sem );
 }
 } // namespace dmTimingIntegration
@@ -136,8 +137,11 @@ Controller::Controller() : MagAOXApp( "test", false )
     m_testPath    = "/tmp";
     m_imageStream = {};
     m_dmTiming.configure( 2, 20 );
+
     if( sem_init( &m_satSemaphore, 0, 0 ) != 0 )
+    {
         throw std::runtime_error( "local semaphore initialization" );
+    }
 }
 
 Controller::~Controller() noexcept
@@ -179,11 +183,13 @@ int Controller::releaseDM()
 int Controller::commandDM( void *pixels )
 {
     static_cast<void>( pixels );
+
     if( m_result == Outcome::noSend )
     {
         dmTimingOutcome( m_result );
         return m_return;
     }
+
     dmTimingMark( Marker::actuatorStart );
     dmTimingMark( Marker::actuatorEnd );
     dmTimingMark( Marker::sdkStart );
@@ -204,6 +210,7 @@ int Controller::telem( const typename logT::messageT &message )
                     message.builder.GetBufferPointer() + message.builder.GetSize() );
     return 0;
 }
+
 /// \endcond
 
 /** \defgroup dmTimingIntegration_tests DM Timing Integration Tests
@@ -309,11 +316,13 @@ TEST_CASE( "DM timing records only outside the command path", "[dev::dmTimingInt
     // clang-format on
 
     Controller app;
+
     for( unsigned i = 0; i < 3; ++i )
     {
         app.shmimMonitorTiming( {}, MagAOX::app::dev::shmimMonitorEvent::receipt );
         REQUIRE( app.processImage( nullptr, {} ) == 0 );
     }
+
     REQUIRE( app.m_records.empty() );
     app.updateDMTimings();
     REQUIRE( app.dmTimingSummary().fgValid );
@@ -389,11 +398,13 @@ TEST_CASE( "DM timing INDI follows valid, stale and disabled summaries", "[dev::
     CHECK( app.m_indiP_dmTiming["receipt_send_jitter"].get<double>() == -1 );
     CHECK( app.m_indiP_dmStages["delta_count"].get<double>() == 0 );
     CHECK( app.m_indiP_dmStages["delta_mean"].get<double>() == -1 );
+
     for( unsigned i = 0; i < 2; ++i )
     {
         app.shmimMonitorTiming( {}, MagAOX::app::dev::shmimMonitorEvent::receipt );
         REQUIRE( app.processImage( nullptr, {} ) == 0 );
     }
+
     app.updateDMTimings();
     REQUIRE( app.dmT::updateINDI() == 0 );
     CHECK( app.m_indiP_dmTiming["receipt_fps"].get<double>() ==
@@ -430,6 +441,7 @@ TEST_CASE( "DM timing continues aging in the power-off loop", "[dev::dmTimingInt
     REQUIRE( app.setupDMTimingINDI() == 0 );
     app.m_indiDriver = &driver;
     const auto base  = MagAOX::app::dev::dmTiming::monotonicNowNs() - 3000000000LL;
+
     for( unsigned i = 0; i < 3; ++i )
     {
         auto receipt = base + i * 500000;
@@ -441,6 +453,7 @@ TEST_CASE( "DM timing continues aging in the power-off loop", "[dev::dmTimingInt
         app.m_dmTiming.markAt( Marker::finish, receipt + 40 );
         app.m_dmTiming.finishEvent();
     }
+
     app.m_dmTiming.update( base + 1000100 );
     REQUIRE( app.dmTimingSummary().fgValid );
     REQUIRE( app.recordDMTimings() == 0 );

@@ -848,6 +848,7 @@ template <class derivedT, typename realT>
 void dm<derivedT, realT>::shmimMonitorTiming( const dev::shmimT &tag, shmimMonitorEvent event )
 {
     static_cast<void>( tag );
+
     if( event == shmimMonitorEvent::connected )
     {
         m_dmTiming.newSession();
@@ -894,6 +895,7 @@ auto dm<derivedT, realT>::timingRecord( ownerT &owner, const MagAOX::dmTiming::S
 {
     static_cast<void>( priority );
     owner.template telem<logger::telem_dmtimings>( { summary } );
+
     if( summary.fgValid )
     {
         const auto &a  = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::receiptInterval )];
@@ -901,6 +903,7 @@ auto dm<derivedT, realT>::timingRecord( ownerT &owner, const MagAOX::dmTiming::S
         const auto &wa = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::receiptSend )];
         owner.template telem<logger::telem_fgtimings>( { a.mean, a.stddev, w.mean, w.stddev, wa.mean, wa.stddev } );
     }
+
     return 0;
 }
 
@@ -917,16 +920,20 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::recordDMTimings( bool force )
 {
     const auto &summary = m_dmTiming.summary();
+
     if( force || !m_timingRecorded || summary.sequence != m_timingLastRecord )
     {
         int rv = timingRecord( derived(), summary, 0 );
+
         if( rv < 0 )
         {
             return rv;
         }
+
         m_timingLastRecord = summary.sequence;
         m_timingRecorded   = true;
     }
+
     return 0;
 }
 
@@ -934,6 +941,7 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::setupDMTimingINDI()
 {
     derived().createROIndiNumber( m_indiP_dmTiming, "dm_timing" );
+
     for( const auto *name : { "receipt_fps",
                               "receipt_min",
                               "receipt_max",
@@ -953,15 +961,20 @@ int dm<derivedT, realT>::setupDMTimingINDI()
         m_indiP_dmTiming.add( pcf::IndiElement( name ) );
         m_indiP_dmTiming[name] = -1.0;
     }
+
     if( derived().registerIndiPropertyReadOnly( m_indiP_dmTiming ) < 0 )
+    {
         return -1;
+    }
 
     derived().createROIndiNumber( m_indiP_dmStages, "dm_timing_stages" );
+
     for( size_t i = MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::dispatch );
          i < MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::count );
          ++i )
     {
         std::string name = MagAOX::dmTiming::metricName( static_cast<MagAOX::dmTiming::Metric>( i ) );
+
         for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
         {
             std::string element = name + '_' + field;
@@ -969,16 +982,25 @@ int dm<derivedT, realT>::setupDMTimingINDI()
             m_indiP_dmStages[element] = -1.0;
         }
     }
+
     if( derived().registerIndiPropertyReadOnly( m_indiP_dmStages ) < 0 )
+    {
         return -1;
+    }
 
     derived().createROIndiNumber( m_indiP_dmTimingQuality, "dm_timing_quality" );
+
     for( const auto *name : { "window",  "span",      "age",      "capacity",   "queued",      "session", "sequence",
                               "enabled", "valid",     "events",   "receipts",   "submitted",   "failed",  "partial",
                               "noSend",  "synthetic", "rejected", "duplicates", "counterGaps", "invalid", "dropped" } )
+    {
         m_indiP_dmTimingQuality.add( pcf::IndiElement( name ) );
+    }
+
     if( derived().registerIndiPropertyReadOnly( m_indiP_dmTimingQuality ) < 0 )
+    {
         return -1;
+    }
 
     derived().createROIndiText( m_indiP_dmTimingState, "dm_timing_state", "state" );
     m_indiP_dmTimingState.add( pcf::IndiElement( "clock" ) );
@@ -1467,6 +1489,7 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
     config( m_flatPath, "dm.flatPath" );
 
     config( m_flatDefault, "dm.flatDefault" );
+
     if( m_flatDefault != "" )
     {
         m_flatDefault = mx::ioutils::pathStem( m_flatDefault ); // strip off path and extension if provided.
@@ -1478,6 +1501,7 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
     config( m_testPath, "dm.testPath" );
 
     config( m_testDefault, "dm.testDefault" );
+
     if( m_testDefault != "" )
     {
         m_testDefault = mx::ioutils::pathStem( m_testDefault ); // strip off path and extension if provided.
@@ -1495,6 +1519,7 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
 
     config( m_timingWindow, "dm.latencyTime" );
     config( m_timingCapacity, "dm.latencySize" );
+
     if( !mx::math::isFinite( m_timingWindow ) || m_timingWindow < 0 || m_timingWindow >= 9e9 )
     {
         derivedT::template log<software_error>( { "invalid dm.latencyTime" } );
@@ -1627,7 +1652,9 @@ int dm<derivedT, realT>::appStartup()
     }
 
     if( setupDMTimingINDI() < 0 )
+    {
         return -1;
+    }
 
     if( m_dmDataType == 0 )
     {
@@ -1658,6 +1685,7 @@ int dm<derivedT, realT>::appStartup()
 
     // Register the setFlat INDI property
     derived().createStandardIndiToggleSw( m_indiP_setFlat, "flat_set" );
+
     if( derived().registerIndiPropertyNew( m_indiP_setFlat, st_newCallBack_setFlat ) < 0 )
     {
 #ifndef DM_TEST_NOLOG
@@ -1679,6 +1707,7 @@ int dm<derivedT, realT>::appStartup()
     m_indiP_testShmim.add( pcf::IndiElement( "channel" ) );
     m_indiP_testShmim["channel"] = m_shmimTest;
     derived().createStandardIndiToggleSw( m_indiP_setTest, "test_shmim" );
+
     if( derived().registerIndiPropertyReadOnly( m_indiP_testShmim ) < 0 )
     {
 #ifndef DM_TEST_NOLOG
@@ -1689,6 +1718,7 @@ int dm<derivedT, realT>::appStartup()
 
     // Register the setTest INDI property
     derived().createStandardIndiToggleSw( m_indiP_setTest, "test_set" );
+
     if( derived().registerIndiPropertyNew( m_indiP_setTest, st_newCallBack_setTest ) < 0 )
     {
 #ifndef DM_TEST_NOLOG
@@ -1699,6 +1729,7 @@ int dm<derivedT, realT>::appStartup()
 
     // Register the init INDI property
     derived().createStandardIndiRequestSw( m_indiP_init, "initDM" );
+
     if( derived().registerIndiPropertyNew( m_indiP_init, st_newCallBack_init ) < 0 )
     {
         // clang-format off
@@ -1726,12 +1757,14 @@ int dm<derivedT, realT>::appStartup()
 
     // Register the release INDI property
     derived().createStandardIndiRequestSw( m_indiP_release, "releaseDM" );
+
     if( derived().registerIndiPropertyNew( m_indiP_release, st_newCallBack_release ) < 0 )
     {
         return derivedT::template log<software_error, -1>( { "" } );
     }
 
     derived().createStandardIndiRequestSw( m_indiP_zeroAll, "zeroAll" );
+
     if( derived().registerIndiPropertyNew( m_indiP_zeroAll, st_newCallBack_zeroAll ) < 0 )
     {
 #ifndef DM_TEST_NOLOG
@@ -1831,8 +1864,12 @@ int dm<derivedT, realT>::whilePowerOff()
     checkFlats();
     checkTests();
     updateDMTimings();
+
     if( recordDMTimings() < 0 )
+    {
         return -1;
+    }
+
     return updateINDI();
 }
 
@@ -1840,6 +1877,7 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::findDMChannels()
 {
     std::string milkShmimDir = mx::sys::getEnv( "MILK_SHM_DIR" );
+
     if( milkShmimDir == "" )
     {
         milkShmimDir = "/milk/shm";
@@ -1858,6 +1896,7 @@ int dm<derivedT, realT>::findDMChannels()
     }
 
     m_numChannels = -1;
+
     for( size_t n = 0; n < dmlist.size(); ++n )
     {
         char nstr[16];
@@ -1902,6 +1941,7 @@ int dm<derivedT, realT>::findDMChannels()
 
         std::cerr << "looking for " << sname << '\n';
         auto res = std::find( m_deltaChannels.begin(), m_deltaChannels.end(), sname );
+
         if( res == m_deltaChannels.end() )
         {
             std::cerr << "  not a delta\n";
@@ -1915,17 +1955,21 @@ int dm<derivedT, realT>::findDMChannels()
     }
 
     std::cerr << "not deltas: ";
+
     for( size_t n = 0; n < m_notDeltas.size(); ++n )
     {
         std::cerr << m_notDeltas[n] << ' ';
     }
+
     std::cerr << '\n';
 
     std::cerr << "deltas: ";
+
     for( size_t n = 0; n < m_deltas.size(); ++n )
     {
         std::cerr << m_deltas[n] << ' ';
     }
+
     std::cerr << '\n';
 
     return 0;
@@ -2023,25 +2067,39 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
 {
     static_cast<void>( sp );
+
     if( !m_dmTiming.active() )
+    {
         m_dmTiming.beginEvent( false );
+    }
+
     dmTimingMark( MagAOX::dmTiming::Marker::entry );
+
     if( m_dmTiming.active() && derived().m_imageStream.md != nullptr && derived().m_imageStream.md->write == 0 )
     {
         uint64_t counter = derived().m_imageStream.md->cnt0;
         std::atomic_thread_fence( std::memory_order_acquire );
+
         if( derived().m_imageStream.md->write == 0 && counter == derived().m_imageStream.md->cnt0 )
+        {
             m_dmTiming.inputCounter( counter );
+        }
     }
 
     int rv = derived().commandDM( curr_src );
+
     if( rv < 0 )
     {
         derivedT::template log<software_critical>( { errno, rv, "Error from commandDM" } );
+
         if( m_dmTiming.outcome() != MagAOX::dmTiming::Outcome::partial )
+        {
             dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
+        }
+
         dmTimingMark( MagAOX::dmTiming::Marker::finish );
         m_dmTiming.finishEvent();
+
         return rv;
     }
 
@@ -2050,12 +2108,14 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
         dmTimingMark( MagAOX::dmTiming::Marker::deltaStart );
         rv = makeDelta();
         dmTimingMark( MagAOX::dmTiming::Marker::deltaEnd );
+
         if( rv < 0 )
         {
             derivedT::template log<software_critical>( { errno, rv, "Error from makeDelta" } );
             dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
             dmTimingMark( MagAOX::dmTiming::Marker::finish );
             m_dmTiming.finishEvent();
+
             return rv;
         }
     }
@@ -2068,16 +2128,20 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
     dmTimingMark( MagAOX::dmTiming::Marker::postStart );
     int postResult = sem_post( &m_satSemaphore );
     dmTimingMark( MagAOX::dmTiming::Marker::postEnd );
+
     if( postResult < 0 )
     {
         derivedT::template log<software_critical>( { errno, 0, "Error posting to semaphore" } );
         dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
         dmTimingMark( MagAOX::dmTiming::Marker::finish );
         m_dmTiming.finishEvent();
+
         return -1;
     }
+
     dmTimingMark( MagAOX::dmTiming::Marker::finish );
     m_dmTiming.finishEvent();
+
     return rv;
 }
 
@@ -2094,6 +2158,7 @@ int dm<derivedT, realT>::baseInitDM()
     derived().state( stateCodes::HOMING );
 
     int rv;
+
     if( ( rv = derived().initDM() ) < 0 )
     {
         derivedT::template log<software_critical>( { errno, rv, "Error from initDM" } );
@@ -2113,6 +2178,7 @@ int dm<derivedT, realT>::baseReleaseDM()
     }
 
     int rv;
+
     if( ( rv = derived().releaseDM() ) < 0 )
     {
         derivedT::template log<software_critical>( { errno, rv, "Error from releaseDM" } );
@@ -2146,6 +2212,7 @@ int dm<derivedT, realT>::checkFlats()
             derivedT::template log<software_error>(
                 { std::format( "error getting flat files: {}", mx::errorMessage( errc ) ) } );
         }
+
         gfn_logged = true;
         return -1;
     }
@@ -2181,6 +2248,7 @@ int dm<derivedT, realT>::checkFlats()
         for( size_t n = 0; n < tfs.size(); ++n )
         {
             std::filesystem::file_time_type lmt = std::filesystem::last_write_time( tfs[n] );
+
             if( lmt < tn )
             {
                 tfs.erase( tfs.begin() + n );
@@ -2195,14 +2263,20 @@ int dm<derivedT, realT>::checkFlats()
     }
 
     bool changed = false;
+
     for( size_t n = 0; n < tfs.size(); ++n )
     {
         auto ir =
             m_flatCommands.insert( std::pair<std::string, std::string>( mx::ioutils::pathStem( tfs[n] ), tfs[n] ) );
+
         if( ir.second == true )
+        {
             changed = true;
+        }
         else
+        {
             ir.first->second = tfs[n];
+        }
     }
 
     for( auto it = m_flatCommands.begin(); it != m_flatCommands.end(); ++it )
@@ -2428,6 +2502,7 @@ int dm<derivedT, realT>::setFlat( bool update )
         {
             derivedT::template log<text_log>( "error loading flat " + m_flatCurrent, logPrio::LOG_ERROR );
         }
+
         m_flatSet = flatSet;
     }
 
@@ -2558,6 +2633,7 @@ int dm<derivedT, realT>::zeroFlat()
     {
         derivedT::template log<software_error>( { "error from clearSat" } );
     }
+
     derived().state( stateCodes::READY );
 
     return 0;
@@ -2579,6 +2655,7 @@ int dm<derivedT, realT>::checkTests()
             derivedT::template log<software_error>(
                 { std::format( "error getting test files: {}", mx::errorMessage( errc ) ) } );
         }
+
         gfn_logged = true;
         return -1;
     }
@@ -2593,14 +2670,20 @@ int dm<derivedT, realT>::checkTests()
     }
 
     bool changed = false;
+
     for( size_t n = 0; n < tfs.size(); ++n )
     {
         auto ir =
             m_testCommands.insert( std::pair<std::string, std::string>( mx::ioutils::pathStem( tfs[n] ), tfs[n] ) );
+
         if( ir.second == true )
+        {
             changed = true;
+        }
         else
+        {
             ir.first->second = tfs[n];
+        }
     }
 
     for( auto it = m_testCommands.begin(); it != m_testCommands.end(); ++it )
@@ -2700,6 +2783,7 @@ int dm<derivedT, realT>::loadTest( const std::string &intarget )
     // load into memory.
     mx::fits::fitsFile<realT> ff;
     mx::error_t               errc = ff.read( m_testCommand, targetPath );
+
     if( errc != mx::error_t::noerror )
     {
         derivedT::template log<text_log>( std::format( "error reading test file {}: "
@@ -2746,10 +2830,14 @@ int dm<derivedT, realT>::loadTest( const std::string &intarget )
     }
 
     if( derived().m_indiDriver )
+    {
         derived().m_indiDriver->sendSetProperty( m_indiP_tests );
+    }
 
     if( m_testSet )
+    {
         setTest();
+    }
 
     return 0;
 }
@@ -2759,7 +2847,9 @@ int dm<derivedT, realT>::setTest()
 {
 
     if( m_shmimTest == "" )
+    {
         return 0;
+    }
 
     if( ImageStreamIO_openIm( &m_testImageStream, m_shmimTest.c_str() ) != 0 )
     {
@@ -2792,6 +2882,7 @@ int dm<derivedT, realT>::setTest()
         {
             derivedT::template log<text_log>( "error loading test " + m_testCurrent, logPrio::LOG_ERROR );
         }
+
         m_testSet = testSet;
     }
 
@@ -2849,7 +2940,9 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::zeroTest()
 {
     if( m_shmimTest == "" )
+    {
         return 0;
+    }
 
     if( ImageStreamIO_openIm( &m_testImageStream, m_shmimTest.c_str() ) != 0 )
     {
@@ -2927,6 +3020,7 @@ int dm<derivedT, realT>::zeroAll( bool nosem )
             {
                 // Avoid ImageStreamIO's error output for normally absent auxiliary sources.
                 char filename[200];
+
                 if( ImageStreamIO_filename( filename, sizeof( filename ), shmimN.c_str() ) != IMAGESTREAMIO_SUCCESS )
                 {
                     derivedT::template log<software_error>(
@@ -2934,29 +3028,36 @@ int dm<derivedT, realT>::zeroAll( bool nosem )
                     auxiliaryError = -1;
                     continue;
                 }
+
                 int fd = open( filename, O_RDWR );
+
                 if( fd < 0 )
                 {
                     if( errno == ENOENT )
                     {
                         continue;
                     }
+
                     derivedT::template log<software_error>( { errno, "could not open auxiliary channel " + shmimN } );
                     auxiliaryError = -1;
                     continue;
                 }
+
                 close( fd );
             }
 
             IMAGE imageStream{};
+
             if( ImageStreamIO_openIm( &imageStream, shmimN.c_str() ) != 0 )
             {
                 derivedT::template log<text_log>( "could not connect to channel " + shmimN, logPrio::LOG_WARNING );
+
                 if( auxiliary )
                 {
                     auxiliaryError = -1;
                     continue;
                 }
+
                 continue;
             }
 
@@ -2968,11 +3069,13 @@ int dm<derivedT, realT>::zeroAll( bool nosem )
                 derivedT::template log<text_log>( "memory location, shape or data type mismatch between " + shmimN +
                                                       " and configured DM",
                                                   logPrio::LOG_ERROR );
+
                 if( auxiliary )
                 {
                     auxiliaryError = -1;
                     continue;
                 }
+
                 derived().updateSwitchIfChanged( m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE );
                 return -1;
             }
@@ -3009,6 +3112,7 @@ int dm<derivedT, realT>::zeroAll( bool nosem )
     // Also cleanup flat and test
     m_flatSet = false;
     derived().updateSwitchIfChanged( m_indiP_setFlat, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle );
+
     if( derived().state() == stateCodes::OPERATING )
     {
         derived().state( stateCodes::READY );
@@ -3019,6 +3123,7 @@ int dm<derivedT, realT>::zeroAll( bool nosem )
     derived().updateSwitchIfChanged( m_indiP_setTest, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle );
 
     int rv;
+
     if( ( rv = clearSat() ) < 0 )
     {
         derivedT::template log<software_error>( { errno, rv, "Error from clearSat" } );
@@ -3197,11 +3302,13 @@ void dm<derivedT, realT>::satThreadExec()
     {
         // Get timespec for sem_timedwait
         timespec ts;
+
         if( clock_gettime( CLOCK_REALTIME, &ts ) < 0 )
         {
             derivedT::template log<software_critical>( { errno, 0, "clock_gettime" } );
             return;
         }
+
         ts.tv_sec += 1;
 
         // Wait on semaphore
@@ -3215,6 +3322,7 @@ void dm<derivedT, realT>::satThreadExec()
                     m_accumSatMap( rr, cc ) += m_instSatMap( rr, cc );
                 }
             }
+
             ++naccum;
 
             // If less than avg int --> go back and wait again
@@ -3225,15 +3333,18 @@ void dm<derivedT, realT>::satThreadExec()
 
             // If greater than avg int --> calc stats, write to streams.
             m_overSatAct = 0;
+
             for( int rr = 0; rr < m_instSatMap.rows(); ++rr )
             {
                 for( int cc = 0; cc < m_instSatMap.cols(); ++cc )
                 {
                     m_satPercMap( rr, cc ) = m_accumSatMap( rr, cc ) / naccum;
+
                     if( m_satPercMap( rr, cc ) >= m_percThreshold )
                     {
                         ++m_overSatAct;
                     }
+
                     satmap( rr, cc ) = ( m_accumSatMap( rr, cc ) > 0 ); // it's  1/0 map
                 }
             }
@@ -3400,14 +3511,19 @@ int dm<derivedT, realT>::updateINDI()
 
     std::vector<std::string> names;
     std::vector<double>      values;
+
     for( size_t i = MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::dispatch );
          i < MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::count );
          ++i )
     {
         std::string name   = MagAOX::dmTiming::metricName( static_cast<MagAOX::dmTiming::Metric>( i ) );
         const auto &metric = summary.metrics[i];
+
         for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
             names.push_back( name + '_' + field );
+        }
+
         values.insert( values.end(),
                        { metric.count ? metric.mean : -1,
                          metric.valid ? metric.stddev : -1,
@@ -3416,6 +3532,7 @@ int dm<derivedT, realT>::updateINDI()
                          static_cast<double>( metric.count ),
                          metric.count ? metric.span : -1 } );
     }
+
     indi::updateIfChanged<double>( m_indiP_dmStages, names, values, derived().m_indiDriver, state );
 
     const auto &q = summary.total;
@@ -3479,6 +3596,7 @@ int dm<derivedT, realT>::newCallBack_init( const pcf::IndiProperty &ipRecv )
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
         int rv = baseInitDM();
+
         if( rv < 0 )
         {
             return derivedT::template log<software_error, -1>( { "error from initDM in INDI callback" } );
@@ -3503,12 +3621,15 @@ int dm<derivedT, realT>::newCallBack_zero( const pcf::IndiProperty &ipRecv )
     }
 
     if( !ipRecv.find( "request" ) )
+    {
         return 0;
+    }
 
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
         return derived().zeroDM();
     }
+
     return 0;
 }
 
@@ -3527,12 +3648,15 @@ int dm<derivedT, realT>::newCallBack_release( const pcf::IndiProperty &ipRecv )
     }
 
     if( !ipRecv.find( "request" ) )
+    {
         return 0;
+    }
 
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
         return baseReleaseDM();
     }
+
     return 0;
 }
 
@@ -3565,7 +3689,9 @@ int dm<derivedT, realT>::newCallBack_flats( const pcf::IndiProperty &ipRecv )
     for( auto i = m_flatCommands.begin(); i != m_flatCommands.end(); ++i )
     {
         if( !ipRecv.find( i->first ) )
+        {
             continue;
+        }
 
         if( ipRecv[i->first].getSwitchState() == pcf::IndiElement::On )
         {
@@ -3602,7 +3728,9 @@ int dm<derivedT, realT>::newCallBack_setFlat( const pcf::IndiProperty &ipRecv )
     }
 
     if( !ipRecv.find( "toggle" ) )
+    {
         return 0;
+    }
 
     if( ipRecv["toggle"] == pcf::IndiElement::On )
     {
@@ -3643,7 +3771,9 @@ int dm<derivedT, realT>::newCallBack_tests( const pcf::IndiProperty &ipRecv )
     for( auto i = m_testCommands.begin(); i != m_testCommands.end(); ++i )
     {
         if( !ipRecv.find( i->first ) )
+        {
             continue;
+        }
 
         if( ipRecv[i->first].getSwitchState() == pcf::IndiElement::On )
         {
@@ -3680,7 +3810,9 @@ int dm<derivedT, realT>::newCallBack_setTest( const pcf::IndiProperty &ipRecv )
     }
 
     if( !ipRecv.find( "toggle" ) )
+    {
         return 0;
+    }
 
     if( ipRecv["toggle"] == pcf::IndiElement::On )
     {
@@ -3707,7 +3839,9 @@ int dm<derivedT, realT>::newCallBack_zeroAll( const pcf::IndiProperty &ipRecv )
     }
 
     if( !ipRecv.find( "request" ) )
+    {
         return 0;
+    }
 
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
@@ -3717,6 +3851,7 @@ int dm<derivedT, realT>::newCallBack_zeroAll( const pcf::IndiProperty &ipRecv )
         std::lock_guard<std::mutex> guard( derived().m_indiMutex );
         return zeroAll();
     }
+
     return 0;
 }
 

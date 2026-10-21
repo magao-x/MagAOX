@@ -21,32 +21,40 @@ asdkDM *asdkInit( const char * )
 {
     return &alpaoTimingTest::mirror;
 }
+
 /// Return an empty software SDK error state.
 void asdkGetLastError( UInt *code, char *text, UInt size )
 {
     *code = 0;
     if( text && size )
+    {
         text[0] = 0;
+    }
 }
+
 /// Report the two software actuators.
 COMPL_STAT asdkGet( asdkDM *, const char *, Scalar *value )
 {
     *value = 2;
     return 0;
 }
+
 /// Record the actual command-submission boundary without accessing hardware.
 COMPL_STAT asdkSend( asdkDM *, const Scalar * )
 {
     ++alpaoTimingTest::calls;
     alpaoTimingTest::firstEntry = MagAOX::app::dev::dmTiming::monotonicNowNs();
     alpaoTimingTest::lastReturn = MagAOX::app::dev::dmTiming::monotonicNowNs();
+
     return alpaoTimingTest::result;
 }
+
 /// Complete a software-only reset.
 COMPL_STAT asdkReset( asdkDM * )
 {
     return 0;
 }
+
 /// Complete software-only teardown.
 COMPL_STAT asdkRelease( asdkDM * )
 {
@@ -77,8 +85,12 @@ alpaoCtrl_test::alpaoCtrl_test()
     {
         char        path[] = "/tmp/alpao-timing-test-XXXXXX";
         const char *value  = mkdtemp( path );
+
         if( !value )
+        {
             throw std::runtime_error( "cannot create local ALPAO stream directory" );
+        }
+
         return std::string( value );
     }();
     setenv( "MILK_SHM_DIR", directory.c_str(), 1 );
@@ -106,6 +118,7 @@ alpaoCtrl_test::~alpaoCtrl_test() noexcept
 }
 } // namespace app
 } // namespace MagAOX
+
 /// \endcond
 
 namespace libXWCTest
@@ -128,21 +141,27 @@ TEST_CASE( "alpaoCtrl records actual SDK outcomes and phase endpoints", "[alpaoC
     // clang-format on
     using namespace MagAOX::app;
     using namespace MagAOX::dmTiming;
+
     alpaoCtrl_test app;
     alpaoTimingTest::result = GENERATE( 0, -1 );
     float command[]{ -2, 2 };
+
     app.m_dmTiming.beginEvent( true );
     REQUIRE( app.commandDM( command ) == alpaoTimingTest::result );
     app.m_dmTiming.mark( Marker::finish );
     app.m_dmTiming.finishEvent();
     app.m_dmTiming.update();
+
     const auto &summary = app.dmTimingSummary();
+
     REQUIRE( alpaoTimingTest::calls == 1 );
     REQUIRE( summary.total.submitted == ( alpaoTimingTest::result ? 0 : 1 ) );
     REQUIRE( summary.total.failed == ( alpaoTimingTest::result ? 1 : 0 ) );
     REQUIRE( summary.metrics[metricIndex( Metric::actuator )].count == 1 );
     REQUIRE( summary.metrics[metricIndex( Metric::saturation )].count == 1 );
+
     const auto &sdk = summary.metrics[metricIndex( Metric::sdk )];
+
     REQUIRE( sdk.count == 1 );
     REQUIRE( sdk.mean >= ( alpaoTimingTest::lastReturn - alpaoTimingTest::firstEntry ) * 1e-9 );
 }

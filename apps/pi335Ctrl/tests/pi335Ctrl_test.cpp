@@ -35,10 +35,15 @@ int pi335TestWrite( const std::string &command /**< [in] Actual position command
     static_cast<void>( timeout );
     auto      &script = pi335TimingTest::script;
     const auto index  = script.m_commands.size();
+
     if( index == 0 )
+    {
         script.m_firstEntry = app::dev::dmTiming::monotonicNowNs();
+    }
+
     script.m_commands.push_back( command );
     script.m_lastReturn = app::dev::dmTiming::monotonicNowNs();
+
     return script.m_results[index % script.m_results.size()];
 }
 } // namespace tty
@@ -101,6 +106,7 @@ void pi335Ctrl_test::finish()
 }
 } // namespace app
 } // namespace MagAOX
+
 /// \endcond
 
 namespace libXWCTest
@@ -131,10 +137,13 @@ TEST_CASE( "pi335Ctrl records the complete DM-origin serial submission", "[pi335
     const int      axes = GENERATE( 2, 3 );
     app.axes( axes );
     float command[]{ 3, 4, 5 };
+
     app.begin();
     REQUIRE( app.commandDM( command ) == 0 );
     app.finish();
+
     const auto &summary = app.dmTimingSummary();
+
     REQUIRE( app.m_dmWritesAttempted == unsigned( axes ) );
     REQUIRE( app.m_dmWritesSuccessful == unsigned( axes ) );
     REQUIRE( summary.total.submitted == 1 );
@@ -143,9 +152,14 @@ TEST_CASE( "pi335Ctrl records the complete DM-origin serial submission", "[pi335
     REQUIRE( pi335TimingTest::script.m_commands.size() == size_t( axes ) );
     REQUIRE( pi335TimingTest::script.m_commands[0] == "MOV 1 3.000000\n" );
     REQUIRE( pi335TimingTest::script.m_commands[1] == "MOV 2 4.000000\n" );
+
     if( axes == 3 )
+    {
         REQUIRE( pi335TimingTest::script.m_commands[2] == "MOV 3 5.000000\n" );
+    }
+
     const auto &sdk = summary.metrics[MagAOX::dmTiming::metricIndex( Metric::sdk )];
+
     REQUIRE( sdk.count == 1 );
     REQUIRE( sdk.mean >= ( pi335TimingTest::script.m_lastReturn - pi335TimingTest::script.m_firstEntry ) * 1e-9 );
 }
@@ -164,10 +178,13 @@ TEST_CASE( "pi335Ctrl timing uses actual serial results without changing command
     float          command[]{ 3, 4, 5 };
     const bool     partial            = GENERATE( false, true );
     pi335TimingTest::script.m_results = partial ? std::array<int, 3>{ 0, -9, 0 } : std::array<int, 3>{ -9, -9, 0 };
+
     app.begin();
     REQUIRE( app.commandDM( command ) == 0 ); // Existing move helpers log transport errors and return success.
     app.finish();
+
     const auto &summary = app.dmTimingSummary();
+
     REQUIRE( app.m_dmWritesAttempted == 2 );
     REQUIRE( app.m_dmWritesSuccessful == ( partial ? 1 : 0 ) );
     REQUIRE( summary.total.submitted == 0 );
@@ -190,25 +207,31 @@ TEST_CASE( "pi335Ctrl timing distinguishes unsent and range-rejected commands", 
     int            expected    = -1;
     bool           intentional = false;
     unsigned       writes      = 0;
+
     SECTION( "a non-operating controller does not send" )
     {
         app.state( stateCodes::READY );
         expected    = 0;
         intentional = true;
     }
+
     SECTION( "the first axis is rejected before any write" )
     {
         command[0] = 100;
     }
+
     SECTION( "the second axis is rejected after the first was sent" )
     {
         command[1] = 100;
         writes     = 1;
     }
+
     app.begin();
     REQUIRE( app.commandDM( command ) == expected );
     app.finish();
+
     const auto &summary = app.dmTimingSummary();
+
     REQUIRE( pi335TimingTest::script.m_commands.size() == writes );
     REQUIRE( summary.total.submitted == 0 );
     REQUIRE( summary.total.noSend == ( intentional ? 1 : 0 ) );
@@ -230,12 +253,15 @@ TEST_CASE( "pi335Ctrl manual moves cannot populate DM timing endpoints", "[pi335
     // clang-format on
     pi335Ctrl_test app;
     app.axes( 3 );
+
     app.begin();
     REQUIRE( app.move_1( 1 ) == 0 );
     REQUIRE( app.move_2( 2 ) == 0 );
     REQUIRE( app.move_3( 3 ) == 0 );
     app.finish();
+
     const auto &summary = app.dmTimingSummary();
+
     REQUIRE( pi335TimingTest::script.m_commands.size() == 3 );
     REQUIRE( app.m_dmWritesAttempted == 0 );
     REQUIRE( app.m_dmWritesSuccessful == 0 );

@@ -233,9 +233,14 @@ bmcCtrl::bmcCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 bmcCtrl::~bmcCtrl() noexcept
 {
     if( m_actuator_mapping )
+    {
         free( m_actuator_mapping );
+    }
+
     if( m_dminputs )
+    {
         free( m_dminputs );
+    }
 }
 
 void bmcCtrl::setupConfig()
@@ -269,6 +274,7 @@ void bmcCtrl::setupConfig()
                 "Threshold above which to log saturation." );
 
     DM_SETUP_CONFIG( config );
+
     TELEMETER_SETUP_CONFIG( config );
 }
 
@@ -279,6 +285,7 @@ int bmcCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_satThresh, "dm.satThresh" );
 
     DM_LOAD_CONFIG( _config );
+
     TELEMETER_LOAD_CONFIG( _config );
 
     return 0;
@@ -298,16 +305,19 @@ int bmcCtrl::appStartup()
     if( parse_calibration_file() < 0 )
     {
         log<software_critical>( { __FILE__, __LINE__ } );
+
         return -1;
     }
 
     if( m_act_gain == 0 || m_volume_factor == 0 )
     {
         log<software_critical>( { __FILE__, __LINE__, "calibration not loaded properly" } );
+
         return -1;
     }
 
     DM_APP_STARTUP;
+
     TELEMETER_APP_STARTUP;
 
     SHMIMMONITOR_APP_STARTUP;
@@ -323,7 +333,9 @@ int bmcCtrl::appLogic()
     TELEMETER_APP_LOGIC;
 
     if( state() == stateCodes::POWEROFF )
+    {
         return 0;
+    }
 
     if( state() == stateCodes::POWERON )
     {
@@ -348,7 +360,9 @@ int bmcCtrl::appLogic()
 int bmcCtrl::appShutdown()
 {
     if( m_dmopen )
+    {
         releaseDM();
+    }
 
     DM_APP_SHUTDOWN;
 
@@ -375,6 +389,7 @@ int bmcCtrl::initDM()
     if( m_dmopen )
     {
         log<text_log>( "DM is already initialized.  Release first.", logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -383,7 +398,9 @@ int bmcCtrl::initDM()
     ret             = BMCOpen( &m_dm, ser.c_str() );
 
     if( ret == NO_ERR )
+    {
         m_dmopen = true; // remember that the DM connection has been opened
+    }
 
     if( ret != NO_ERR )
     {
@@ -391,12 +408,14 @@ int bmcCtrl::initDM()
         err = BMCErrorString( ret );
         log<text_log>( std::string( "DM initialization failed: " ) + err, logPrio::LOG_ERROR );
         m_dm = {};
+
         return -1;
     }
 
     if( !m_dmopen )
     {
         log<text_log>( "DM initialization failed. Couldn't open DM handle.", logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -417,23 +436,31 @@ int bmcCtrl::initDM()
         m_dm = {};
 
         state( stateCodes::ERROR );
+
         return -1;
     }
 
     if( m_dminputs )
+    {
         free( m_dminputs );
+    }
+
     m_dminputs = reinterpret_cast<double *>( calloc( m_nbAct, sizeof( double ) ) );
 
     if( zeroDM() < 0 )
     {
         log<text_log>( "DM initialization failed.  Error zeroing DM.", logPrio::LOG_ERROR );
         state( stateCodes::ERROR );
+
         return -1;
     }
 
     /* get actuator mapping from 2D cacao image to 1D vector for BMC input */
     if( m_actuator_mapping )
+    {
         free( m_actuator_mapping );
+    }
+
     m_actuator_mapping = reinterpret_cast<int *>( malloc( m_nbAct * sizeof( int ) ) ); /* memory for actuator mapping */
 
     /* initialize to -1 to allow for handling addressable but ignored actuators */
@@ -446,6 +473,7 @@ int bmcCtrl::initDM()
     {
         log<text_log>( "DM initialization failed.  Failed to get actuator mapping.", logPrio::LOG_ERROR );
         state( stateCodes::ERROR );
+
         return -1;
     }
 
@@ -453,6 +481,7 @@ int bmcCtrl::initDM()
     {
         log<text_log>( "DM initialization failed.  null pointer.", logPrio::LOG_ERROR );
         state( stateCodes::ERROR );
+
         return -1;
     }
 
@@ -467,12 +496,14 @@ int bmcCtrl::zeroDM()
     if( !m_dmopen )
     {
         log<text_log>( "DM not initialized (NULL pointer)", logPrio::LOG_ERROR );
+
         return -1;
     }
 
     if( m_nbAct == 0 )
     {
         log<text_log>( "DM not initialized (number of actuators)", logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -489,10 +520,12 @@ int bmcCtrl::zeroDM()
         const char *err;
         err = BMCErrorString( ret );
         log<text_log>( std::string( "Error zeroing DM: " ) + err, logPrio::LOG_ERROR );
+
         return -1;
     }
 
     log<text_log>( "DM zeroed" );
+
     return 0;
 }
 
@@ -516,6 +549,7 @@ int bmcCtrl::commandDM( void *curr_src )
     for( uint32_t idx = 0; idx < m_nbAct; ++idx )
     {
         int address = m_actuator_mapping[idx];
+
         if( address < 0 )
         {
             m_dminputs[idx] = 0.; // addressable but ignored actuators set to 0
@@ -553,6 +587,7 @@ int bmcCtrl::commandDM( void *curr_src )
     BMCRC ret = BMCSetArray( &m_dm, m_dminputs, NULL );
 
     dmTimingMark( MagAOX::dmTiming::Marker::sdkEnd );
+
     dmTimingOutcome( ret == NO_ERR ? MagAOX::dmTiming::Outcome::success : MagAOX::dmTiming::Outcome::failed );
 
     /* Return immediately upon error, logging the error
@@ -562,6 +597,7 @@ int bmcCtrl::commandDM( void *curr_src )
         const char *err;
         err = BMCErrorString( ret );
         log<text_log>( std::string( "DM command failed: " ) + err, logPrio::LOG_ERROR );
+
         return -1;
     }
 
@@ -614,6 +650,7 @@ int bmcCtrl::releaseDM()
     {
         log<text_log>( "DM release failed.  Error zeroing DM.", logPrio::LOG_ERROR );
         state( stateCodes::ERROR );
+
         return -1;
     }
 
@@ -627,6 +664,7 @@ int bmcCtrl::releaseDM()
         err = BMCErrorString( ret );
         log<text_log>( std::string( "DM reset failed: " ) + err, logPrio::LOG_ERROR );
         state( stateCodes::ERROR );
+
         return -1;
     }
 
@@ -634,7 +672,9 @@ int bmcCtrl::releaseDM()
     ret = BMCClose( &m_dm );
 
     if( ret == NO_ERR )
+    {
         m_dmopen = false;
+    }
 
     if( ret != NO_ERR )
     {
@@ -642,6 +682,7 @@ int bmcCtrl::releaseDM()
         err = BMCErrorString( ret );
         log<text_log>( std::string( "DM release failed: " ) + err, logPrio::LOG_ERROR );
         state( stateCodes::ERROR );
+
         return -1;
     }
 
@@ -668,14 +709,17 @@ int bmcCtrl::parse_calibration_file()
 
     // open file
     fp = fopen( calibpath.c_str(), "r" );
+
     if( fp == NULL )
     {
         log<text_log>( "Could not read configuration file at " + calibpath, logPrio::LOG_ERROR );
+
         return -1;
     }
 
     calibvals = reinterpret_cast<double *>( malloc( 2 * sizeof( double ) ) );
     int idx   = 0;
+
     while( ( read = getline( &line, &len, fp ) ) != -1 )
     {
         // grab first value from each line
@@ -693,6 +737,7 @@ int bmcCtrl::parse_calibration_file()
 
     log<text_log>( "BMC " + m_serialNumber + ": Using stroke and volume calibration from " + calibpath );
     std::cerr << m_act_gain << " " << m_volume_factor << "\n";
+
     return 0;
 }
 
@@ -715,6 +760,7 @@ int bmcCtrl::get_actuator_mapping() // const char * serial, int nbAct, int * act
         if( fits_get_hdu_type( fptr, &hdutype, &status ) || hdutype != IMAGE_HDU )
         {
             printf( "Error: this program only works on images, not tables\n" );
+
             return ( 1 );
         }
 
@@ -724,6 +770,7 @@ int bmcCtrl::get_actuator_mapping() // const char * serial, int nbAct, int * act
         if( status || naxis != 2 )
         {
             printf( "Error: NAXIS = %d.  Only 2-D images are supported.\n", naxis );
+
             return ( 1 );
         }
 
@@ -732,6 +779,7 @@ int bmcCtrl::get_actuator_mapping() // const char * serial, int nbAct, int * act
         if( pix == NULL )
         {
             printf( "Memory allocation error\n" );
+
             return ( 1 );
         }
 
@@ -745,7 +793,9 @@ int bmcCtrl::get_actuator_mapping() // const char * serial, int nbAct, int * act
         {
             /* give starting pixel coordinate and number of pixels to read */
             if( fits_read_pix( fptr, TINT, fpixel, naxes[0], 0, pix, 0, &status ) )
+            {
                 break; /* jump out of loop on error */
+            }
 
             // get indices of active actuators in order
             for( int ii = 0; ii < naxes[0]; ii++ )
@@ -754,9 +804,11 @@ int bmcCtrl::get_actuator_mapping() // const char * serial, int nbAct, int * act
                 {
                     m_actuator_mapping[pix[ii] - 1] = ij;
                 }
+
                 ij++;
             }
         }
+
         fits_close_file( fptr, &status );
 
         free( pix );
@@ -768,6 +820,7 @@ int bmcCtrl::get_actuator_mapping() // const char * serial, int nbAct, int * act
     }
 
     log<text_log>( "BMC " + m_serialNumber + ": Using actuator mapping from " + calibpath );
+
     return 0;
 }
 

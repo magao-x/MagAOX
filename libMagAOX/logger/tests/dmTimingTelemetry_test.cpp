@@ -35,6 +35,7 @@ dmTiming::Summary sampleSummary()
     summary.enabled   = true;
     summary.fgValid   = true;
     summary.state     = dmTiming::Availability::valid;
+
     for( size_t index = 0; index < summary.metrics.size(); ++index )
     {
         auto &value  = summary.metrics[index];
@@ -46,6 +47,7 @@ dmTiming::Summary sampleSummary()
         value.span   = 1.5;
         value.valid  = true;
     }
+
     summary.total = { 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112 };
     summary.delta = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
     return summary;
@@ -71,6 +73,7 @@ flatlogs::bufferPtrT envelope( const telem_dmtimings::messageT &message /**< [in
                  buffer, { 1, 2 }, message, flatlogs::logPrio::LOG_TELEM ) == 0 );
     return buffer;
 }
+
 /// \endcond
 
 /// Preserve all metric populations, quality counters and timestamp/coverage units through binary and JSON paths.
@@ -98,6 +101,7 @@ TEST_CASE( "DM timing telemetry preserves controller-local populations", "[dmTim
     REQUIRE( record->fg_valid() );
     REQUIRE( record->state() == DmTimingAvailability_valid );
     REQUIRE( record->metrics()->size() == size_t( dmTiming::Metric::count ) );
+
     for( size_t index = 0; index < summary.metrics.size(); ++index )
     {
         const auto *row      = record->metrics()->Get( index );
@@ -111,6 +115,7 @@ TEST_CASE( "DM timing telemetry preserves controller-local populations", "[dmTim
         REQUIRE( row->span() == expected.span );
         REQUIRE( row->valid() );
     }
+
     const std::string text = telem_dmtimings::msgString( payload, message.builder.GetSize() );
     REQUIRE( text.starts_with( "[dmtimes] session=" ) );
     REQUIRE( text.find( "state=valid" ) != std::string::npos );
@@ -151,6 +156,7 @@ TEST_CASE( "DM timing metadata projects metrics and collection quality", "[dmTim
                                               "throughDelta",
                                               "callback",
                                               "receiptCallback" };
+
     for( size_t index = 0; index < names.size(); ++index )
     {
         const std::string name     = names[index];
@@ -163,6 +169,7 @@ TEST_CASE( "DM timing metadata projects metrics and collection quality", "[dmTim
         REQUIRE( project<double>( name + "_max", payload ) == expected.max );
         REQUIRE( project<double>( name + "_span", payload ) == expected.span );
     }
+
     REQUIRE( project<uint64_t>( "session", payload ) == summary.session );
     REQUIRE( project<uint64_t>( "sequence", payload ) == summary.sequence );
     REQUIRE( project<int64_t>( "nowNs", payload ) == summary.nowNs );
@@ -187,13 +194,17 @@ TEST_CASE( "DM timing metadata projects metrics and collection quality", "[dmTim
                                                  "counterGaps",
                                                  "invalid",
                                                  "dropped" };
+
     for( size_t index = 0; index < counters.size(); ++index )
     {
         REQUIRE( project<uint64_t>( std::string( "total_" ) + counters[index], payload ) == index + 101 );
         REQUIRE( project<uint64_t>( std::string( "delta_" ) + counters[index], payload ) == index + 1 );
     }
+
     for( const auto *name : { "absent", "receiptInterval_absent", "total_absent", "delta_absent" } )
+    {
         REQUIRE( telem_dmtimings::getAccessor( name ).accessor == nullptr );
+    }
 }
 
 /// Keep unavailable populations explicit through every availability state while preserving counts and rejecting invalid
@@ -228,23 +239,38 @@ TEST_CASE( "DM timing telemetry distinguishes availability and rejects malformed
         REQUIRE( telem_dmtimings::msgString( payload, message.builder.GetSize() ).find( "sdk[n=1]=unavailable" ) !=
                  std::string::npos );
     }
+
     for( int invalid = 0; invalid < 4; ++invalid )
     {
         INFO( "invalid case " << invalid );
         auto  summary = sampleSummary();
         auto &sdk     = summary.metrics[size_t( dmTiming::Metric::sdk )];
+
         if( invalid == 0 )
+        {
             sdk.count = 1;
+        }
+
         if( invalid == 1 )
+        {
             sdk.stddev = std::numeric_limits<double>::quiet_NaN();
+        }
+
         if( invalid == 2 )
+        {
             sdk.min = sdk.max + 1;
+        }
+
         if( invalid == 3 )
+        {
             summary.state = dmTiming::Availability( 99 );
+        }
+
         telem_dmtimings::messageT message( summary );
         auto                      buffer = envelope( message );
         REQUIRE_FALSE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) );
     }
+
     telem_dmtimings::messageT message( sampleSummary() );
     auto                      buffer = envelope( message );
     REQUIRE_FALSE( telem_dmtimings::verify( buffer, 1 ) );
@@ -267,15 +293,24 @@ TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelem
         builder.Clear();
         std::vector<flatbuffers::Offset<DmTimingStats>> rows;
         const size_t                                    count = variant == 1 ? 11 : 12;
+
         for( size_t index = 0; index < count; ++index )
         {
             size_t id = count - index - 1;
+
             if( variant == 2 && index == 0 )
+            {
                 id = 0;
+            }
+
             if( variant == 3 && index == 0 )
+            {
                 id = 99;
+            }
+
             rows.push_back( CreateDmTimingStats( builder, DmTimingMetric( id ), 3, 1e-4, 1e-6, 9e-5, 2e-4, 1, true ) );
         }
+
         const auto                metrics = builder.CreateVector( rows );
         const auto                total   = CreateDmTimingCounters( builder );
         const auto                delta   = CreateDmTimingCounters( builder );
@@ -286,8 +321,11 @@ TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelem
         builder.Finish( record.Finish() );
         auto buffer = envelope( message );
         REQUIRE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) == ( variant == 0 ) );
+
         if( variant == 0 )
+        {
             REQUIRE( project<double>( "sdk_mean", builder.GetBufferPointer() ) == 1e-4 );
+        }
     }
 }
 

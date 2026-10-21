@@ -20,31 +20,38 @@ BMCRC BMCOpen( DM *, const char * )
 {
     return NO_ERR;
 }
+
 /// Supply the two test actuator addresses.
 BMCRC BMCLoadMap( DM *, const char *, uint32_t *map )
 {
     map[0] = 0;
     map[1] = 1;
+
     return NO_ERR;
 }
+
 /// Record the actual submission boundary without accessing hardware.
 BMCRC BMCSetArray( DM *, const double *, const void * )
 {
     ++bmcTimingTest::calls;
     bmcTimingTest::firstEntry = MagAOX::app::dev::dmTiming::monotonicNowNs();
     bmcTimingTest::lastReturn = MagAOX::app::dev::dmTiming::monotonicNowNs();
+
     return bmcTimingTest::result;
 }
+
 /// Describe a scripted failure.
 const char *BMCErrorString( BMCRC )
 {
     return "offline SDK failure";
 }
+
 /// Complete a software-only clear.
 BMCRC BMCClearArray( DM * )
 {
     return NO_ERR;
 }
+
 /// Complete software-only teardown.
 BMCRC BMCClose( DM * )
 {
@@ -75,8 +82,12 @@ bmcCtrl_test::bmcCtrl_test()
     {
         char        path[] = "/tmp/bmc-timing-test-XXXXXX";
         const char *value  = mkdtemp( path );
+
         if( !value )
+        {
             throw std::runtime_error( "cannot create local BMC stream directory" );
+        }
+
         return std::string( value );
     }();
     setenv( "MILK_SHM_DIR", directory.c_str(), 1 );
@@ -104,6 +115,7 @@ bmcCtrl_test::~bmcCtrl_test() noexcept
 }
 } // namespace app
 } // namespace MagAOX
+
 /// \endcond
 
 namespace libXWCTest
@@ -126,21 +138,27 @@ TEST_CASE( "bmcCtrl records actual SDK outcomes and phase endpoints", "[bmcCtrl]
     // clang-format on
     using namespace MagAOX::app;
     using namespace MagAOX::dmTiming;
+
     bmcCtrl_test app;
     bmcTimingTest::result = GENERATE( 0, 7 );
     float command[]{ 0.25f, 2.0f };
+
     app.m_dmTiming.beginEvent( true );
     REQUIRE( app.commandDM( command ) == ( bmcTimingTest::result ? -1 : 0 ) );
     app.m_dmTiming.mark( Marker::finish );
     app.m_dmTiming.finishEvent();
     app.m_dmTiming.update();
+
     const auto &summary = app.dmTimingSummary();
+
     REQUIRE( bmcTimingTest::calls == 1 );
     REQUIRE( summary.total.submitted == ( bmcTimingTest::result ? 0 : 1 ) );
     REQUIRE( summary.total.failed == ( bmcTimingTest::result ? 1 : 0 ) );
     REQUIRE( summary.metrics[metricIndex( Metric::actuator )].count == 1 );
     REQUIRE( summary.metrics[metricIndex( Metric::saturation )].count == ( bmcTimingTest::result ? 0 : 1 ) );
+
     const auto &sdk = summary.metrics[metricIndex( Metric::sdk )];
+
     REQUIRE( sdk.count == 1 );
     REQUIRE( sdk.mean >= ( bmcTimingTest::lastReturn - bmcTimingTest::firstEntry ) * 1e-9 );
 }

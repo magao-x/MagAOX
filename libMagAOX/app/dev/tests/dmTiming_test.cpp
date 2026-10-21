@@ -148,11 +148,13 @@ TEST_CASE( "DM timing windows warm up, cap, and expire without fresh commands", 
     CHECK( collector.summary().state == Availability::stale );
     CHECK( collector.summary().age == -1 );
     CHECK( collector.summary().newestNs == -1 );
+
     for( const auto &metric : collector.summary().metrics )
     {
         CHECK( metric.count == 0 );
         CHECK_FALSE( metric.valid );
     }
+
     collector.configure( 2, 2 );
     command( collector, 1000000 );
     collector.update( 1000300 );
@@ -221,8 +223,12 @@ TEST_CASE( "DM timing handoff never overwrites unread events", "[dev::dmTiming]"
 {
     Collector collector;
     collector.configure( 2, 3 );
+
     for( int i = 0; i < 4; ++i )
+    {
         command( collector, 1000000 + i * 500000, 0, 100 + i );
+    }
+
     collector.update( 3000300 );
     CHECK( collector.summary().total.events == 3 );
     CHECK( collector.summary().total.dropped == 1 );
@@ -348,14 +354,22 @@ TEST_CASE( "DM timing SPSC handoff remains coherent during concurrent wraps", "[
             for( uint64_t i = 0; i < count; ++i )
             {
                 if( i == count / 2 )
+                {
                     collector.newSession();
+                }
+
                 command( collector, 1000000 + static_cast<int64_t>( i ) * 500000, 0, i );
             }
+
             done.store( true, std::memory_order_release );
         } );
     const int64_t now = 1000000 + static_cast<int64_t>( count ) * 500000;
+
     while( !done.load( std::memory_order_acquire ) )
+    {
         collector.update( now );
+    }
+
     producer.join();
     collector.update( now );
     const auto &summary = collector.summary();
@@ -367,9 +381,14 @@ TEST_CASE( "DM timing SPSC handoff remains coherent during concurrent wraps", "[
     CHECK( summary.total.counterGaps == 0 );
     CHECK( summary.queued == 0 );
     CHECK( summary.session == 2 );
+
     for( const auto &metric : summary.metrics )
+    {
         if( metric.count )
+        {
             CHECK( metric.min == Approx( metric.max ) );
+        }
+    }
 
     // clang-format off
 #ifdef XWCTEST_DOX_REF

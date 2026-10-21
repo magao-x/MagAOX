@@ -40,17 +40,26 @@ sharedDirectory::sharedDirectory()
     m_path               = result;
     const char *previous = getenv( "MILK_SHM_DIR" );
     m_hadPrevious        = previous != nullptr;
+
     if( previous )
+    {
         m_previous = previous;
+    }
+
     REQUIRE( setenv( "MILK_SHM_DIR", m_path.c_str(), 1 ) == 0 );
 }
 
 sharedDirectory::~sharedDirectory()
 {
     if( m_hadPrevious )
+    {
         setenv( "MILK_SHM_DIR", m_previous.c_str(), 1 );
+    }
     else
+    {
         unsetenv( "MILK_SHM_DIR" );
+    }
+
     std::filesystem::remove_all( m_path );
 }
 
@@ -171,6 +180,7 @@ int monitorHarness<withHook>::processImage( void *pixels, const dev::shmimT &spe
         std::lock_guard<std::mutex> lock( m_mutex );
         m_observations.push_back( 100 );
     }
+
     m_changed.notify_all();
     return 0;
 }
@@ -180,20 +190,31 @@ template <bool enabled, std::enable_if_t<enabled, int>>
 void monitorHarness<withHook>::shmimMonitorTiming( const dev::shmimT &specific, shmimMonitorEvent event )
 {
     static_cast<void>( specific );
+
     if( event == shmimMonitorEvent::receipt )
     {
         m_pendingReceipt = true;
+
         if( m_restartOnReceipt.exchange( false ) )
+        {
             monitorT::m_restart = true;
+        }
+
         if( m_rejectStateOnReceipt.exchange( false ) )
+        {
             m_state.store( stateCodes::READY );
+        }
     }
     else
+    {
         m_pendingReceipt = false;
+    }
+
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_mutex );
         m_observations.push_back( static_cast<int>( event ) );
     }
+
     m_changed.notify_all();
 }
 
@@ -203,14 +224,20 @@ void monitorHarness<withHook>::start( const std::string &name, bool initial )
     monitorT::m_shmimName        = name;
     monitorT::m_getExistingFirst = initial;
     monitorT::m_smThreadInit     = false;
-    monitorT::m_smThread         = std::thread( [this]() { monitorT::smThreadExec(); } );
+    monitorT::m_smThread         = std::thread(
+        [this]()
+        {
+            monitorT::smThreadExec();
+        } );
 }
 
 template <bool withHook>
 void monitorHarness<withHook>::join()
 {
     if( monitorT::m_smThread.joinable() )
+    {
         monitorT::m_smThread.join();
+    }
 }
 
 template <bool withHook>
@@ -392,6 +419,7 @@ TEST_CASE( "Monitor timing ignores timeouts and supports owners without hooks", 
         REQUIRE( fixture.m_monitor.wait( 100, 1 ) );
         CHECK( fixture.m_monitor.m_receiptCallbacks.load() == 1 );
     }
+
     SECTION( "No hook interface" )
     {
         streamFixture<false> fixture( true );

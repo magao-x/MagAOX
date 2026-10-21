@@ -508,6 +508,7 @@ int shmimMonitor<derivedT, specificT>::appStartup()
     act.sa_mask = set;
 
     errno = 0;
+
     if( sigaction( SIGUSR1, &act, 0 ) < 0 )
     {
         std::string logss = "Setting handler for SIGUSR1 failed. Errno says: ";
@@ -612,6 +613,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
         m_restart = false; // Set this up front, since we're about to restart.
 
         int logged = 0;
+
         while( !opened && !derived().m_shutdown && !m_restart && derived().state() == m_targetState )
         {
             // b/c ImageStreamIO prints every single time, and latest version don't support stopping it yet, and that
@@ -620,13 +622,17 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             char SM_fname[200];
             ImageStreamIO_filename( SM_fname, sizeof( SM_fname ), m_shmimName.c_str() );
             SM_fd = open( SM_fname, O_RDWR );
+
             if( SM_fd == -1 )
             {
                 m_smState = shmimMonitorState::notfound;
 
                 if( !logged )
+                {
                     derivedT::template log<text_log>(
                         "ImageStream " + m_shmimName + " not found (yet).  Retrying . . .", logPrio::LOG_NOTICE );
+                }
+
                 logged = 1;
                 sleep( 1 ); // be patient
                 continue;
@@ -716,6 +722,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
         m_typeSize = ImageStreamIO_typesize( m_dataType );
         m_width    = m_imageStream.md[0].size[0];
         int dim    = 1;
+
         if( m_imageStream.md[0].naxis > 1 )
         {
             m_height = m_imageStream.md[0].size[1];
@@ -865,12 +872,16 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             else
             {
                 if( m_imageStream.md[0].sem <= 0 )
+                {
                     break; // Indicates that the server has cleaned up.
+                }
 
                 // Check for why we timed out
                 if( errno == EINTR )
+                {
                     break; // This indicates signal interrupted us, time to restart or shutdown, loop will exit normally
                            // if flags set.
+                }
 
                 // ETIMEDOUT means we should check for deletion, and then wait more.
                 // Otherwise, report an error.
@@ -885,15 +896,18 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
                 char SM_fname[200];
                 ImageStreamIO_filename( SM_fname, sizeof( SM_fname ), m_shmimName.c_str() );
                 SM_fd = open( SM_fname, O_RDWR );
+
                 if( SM_fd == -1 )
                 {
                     m_restart = true;
                 }
+
                 close( SM_fd );
 
                 // Check if the inode changed
                 struct stat buffer;
                 int         rv = stat( SM_fname, &buffer );
+
                 if( rv != 0 )
                 {
                     m_restart = true;
@@ -912,7 +926,10 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
         // opened == true if we can get to this
         if( m_semaphoreNumber >= 0 )
+        {
             m_imageStream.semReadPID[m_semaphoreNumber] = 0; // release semaphore
+        }
+
         ImageStreamIO_closeIm( &m_imageStream );
         opened = false;
 
@@ -945,6 +962,7 @@ int shmimMonitor<derivedT, specificT>::create(
     char SM_fname[200];
     ImageStreamIO_filename( SM_fname, sizeof( SM_fname ), m_shmimName.c_str() );
     SM_fd = open( SM_fname, O_RDWR );
+
     if( SM_fd != -1 )
     {
         close( SM_fd );
@@ -1002,7 +1020,9 @@ template <class derivedT, class specificT>
 int shmimMonitor<derivedT, specificT>::updateINDI()
 {
     if( !derived().m_indiDriver )
+    {
         return 0;
+    }
 
     indi::updateIfChanged( m_indiP_shmimName, "name", m_shmimName, derived().m_indiDriver );
     indi::updateIfChanged( m_indiP_frameSize, "width", m_width, derived().m_indiDriver );
