@@ -2,7 +2,7 @@
 
 `dmSyncopation` copies auxiliary deformable-mirror contributions into existing dmcomb input channels at a fixed integer subdivision of the main AO-loop period. One instance serves one DM. The initial instance, `dmtweeter_synco`, requests three steps per main cycle: approximately 6 kHz total cadence when the main loop runs at 2 kHz.
 
-The [engineering plan](../../../agents/plans/2026-10/dm-syncopation.md) records design decisions and verification. The first operator-run N=2 trial did not sustain the requested cadence; the scheduler changes and diagnostics described here still need operator retesting. The initial timing values are starting budgets for qualification, not measured instrument bounds. All live instrument setup, INDI actions and timing measurements are performed by the operator.
+The [engineering plan](../../../agents/plans/2026-10/dm-syncopation.md) records settled design decisions; the [debugging record](../../../agents/plans/2026-10/dm-syncopation-debugging.md) records operator trials and local fixes. The trials have not yet established sustained requested cadence, and the measured-acquisition reference changes described here need operator retesting. Initial timing values are starting budgets for qualification, not measured instrument bounds. All live instrument setup, INDI actions and timing measurements are performed by the operator.
 
 ## Streams and command flow
 
@@ -70,7 +70,15 @@ Only the real main publisher triggers the combination at t=500.
 
 `maxSubframes` sets the requested count, initially three; step 0 counts toward it. The app calculates a feasible maximum from keepout, reader lifetime and preparation windows, and validates the request. It reports an infeasible request rather than silently changing three steps to two. `N=1` is passive-only operation.
 
-The planned interval is the estimated main period divided by the requested count. Small period changes around 500 us do not switch the integer count. The nominal total-cadence sanity rating is 6000 Hz with 1% tolerance and 32-frame persistence for ordinary rate changes. Hard safety violations take effect immediately. Camera FPS, initially `camwfs.fps.current`, supplies a nominal reference; actual primary observations still determine loop timing. The long-term relation `main FPS <= camera FPS` does not bound an individual early main arrival. Primary intervals arriving earlier or later than the filtered prediction by more than `tracking.earlyMainUs` are rejected as timing anomalies. An isolated delayed callback is not learned as a longer safe period; an actual rate change requires reacquisition.
+The planned interval is the selected main period divided by the requested count. Small period changes around 500 us do not switch the integer count. The nominal total-cadence sanity rating is 6000 Hz with 1% tolerance and 32-frame persistence for ordinary rate changes. Hard safety violations take effect immediately.
+
+The period reference is selected in this order:
+
+1. A fresh measured camera acquisition rate within the configured main-rate range, default `camwfs.fg_timing.acq_fps`.
+2. A qualified primary window: `tracking.rateFrames` sequential, broadly valid intervals whose range is at most twice `tracking.earlyMainUs`, averaged as total elapsed time divided by interval count.
+3. The configured nominal rate when neither measured source is usable.
+
+A short callback EMA or single anomalous interval no longer determines the period. Changing reference source, or changing the selected period by more than `tracking.earlyMainUs`, resets phase/output/feedback acquisition without incrementing a synchronization-fault counter. The camera period reference assumes one nominal main DM cycle per camera frame. For an intentionally divided/non-1:1 main cadence, disable the camera reference with an empty `tracking.cameraDevice` and use the qualified primary-window/nominal path. Unexpected counter gaps remain faults. The genuine DM publication/counter still anchors each cycle; the camera report supplies a period, not a replacement phase. Primary intervals outside the selected prediction's configured bounds still cause a timing fault. A stable acquisition average does not establish that every downstream DM publication/callback lies within those bounds.
 
 Only primary counter progression establishes a new physical main event. A callback whose counter is unchanged is ignored and counted as `duplicatePosts`; a queued semaphore notification does not supply a new cycle or timestamp. Counter jumps/resets are adopted once and cause reacquisition, so repeated notifications of that same value do not repeatedly reacquire.
 
@@ -194,14 +202,16 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `scheduler.visibilityUs` | 1 | Positive margin before the earliest plausible main publication. |
 | `scheduler.preparationReserveUs` | 2 | Preparation target's positive reserve before the hard cutoff. |
 | `scheduler.outputTimeoutUs` | 50 | Combined-output watchdog, separate from the delivery/reader hold. |
-| `tracking.cameraDevice` | `camwfs` | Subscribe to this device's `fps.current`; empty disables subscription. |
-| `tracking.nominalMainRateHz` | 2000 | Initial acquisition period before observed main timing is available. |
+| `tracking.cameraDevice` | `camwfs` | Device publishing measured acquisition timing; empty disables subscription. |
+| `tracking.cameraProperty` | `fg_timing` | Subscribed acquisition-timing property. |
+| `tracking.cameraElement` | `acq_fps` | Measured rate element used for the preferred period reference. |
+| `tracking.nominalMainRateHz` | 2000 | Fallback period when camera and qualified primary-window references are unavailable. |
 | `tracking.minMainRateHz`, `tracking.maxMainRateHz` | 500, 4000 | Accepted primary-rate range. |
-| `tracking.earlyMainUs` | 20 | Early-main safety allowance; also the accepted early/late deviation of a primary callback interval from its filtered prediction. |
+| `tracking.earlyMainUs` | 20 | Early-main safety allowance and accepted early/late callback-interval deviation from the selected period; also constrains primary-window qualification. |
 | `tracking.observationLagUs` | 5 | Maximum publication-to-callback lag allowance. |
 | `tracking.lockFrames` | 32 | Clean main observations before preparing an active cycle. |
 | `tracking.rateTolerance` | 0.01 | Relative nominal-cadence tolerance: 1%. |
-| `tracking.rateFrames` | 32 | Consecutive ordinary cadence violations before disarming. |
+| `tracking.rateFrames` | 32 | Primary-window interval count and consecutive ordinary cadence-violation persistence. |
 | `tracking.primarySemaphore` | 5 | Required primary reader index; unexpected allocation/fallback is rejected, and legacy reserved index 9 is prohibited. |
 | `recovery.consecutiveMisses` | 3 | Consecutive original unsafe/missed events before reacquisition. |
 | `feedback.gain` | 0.1 | Independent per-event wait-integrator gain, 0–1. |
@@ -210,7 +220,9 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 
 The example starts disabled. Its conservative full timing bundle is **infeasible for three steps at 2 kHz**: the shortest 166.667 us interval cannot cover the reader hold, copy and effective early-main cutoff. The app reports this without silently lowering the requested count. Qualified bounds must support the requested schedule before instrument enablement.
 
-Camera reports are accepted for five seconds. During observed operation the sanity check uses the smaller of the filtered main rate and a current camera report, falling back to the observed rate when the report is stale/unavailable. This does not replace immediate keepout/early-main checks. An observation gap is not permission to stretch the cycle.
+Measured camera reports are eligible while their accepted-reply age is less than five seconds; at five seconds they expire. The app requests subscribed property values once per second, outside the cycle mutex, because unchanged `updateIfChanged` values may otherwise produce no heartbeat. A fresh INDI reply can still contain an older camera statistic; reply age alone does not prove acquisition is continuing. Primary counter progression and silence checks remain necessary. Requested `fps.current` is no longer the default reference. `health.periodSource` identifies camera acquisition, qualified primary window or nominal fallback; `mainHz` is the reciprocal of the selected integer-nanosecond period, so it can differ slightly from the original floating-point camera report.
+
+`fg_timing.acq_jitter`, `acq_min` and `acq_max` are acquisition-interval statistics in seconds. The inspected camwfs configuration uses a roughly two-second window; INDI readbacks convert these values to microseconds. They describe local camera acquisition, not downstream AO processing, DM publication jitter, callback wake latency or qualified worst-case limits. A valid FPS-only packet is accepted and missing optional statistics become -1. Malformed numeric data, trailing junk, a present optional statistic that is nonfinite/negative/out of range, or a supplied minimum greater than its supplied maximum rejects the whole packet without refreshing the last valid camera report; old statistics are not paired with a new FPS. This reference change does not relax immediate keepout/early-main checks or turn an observation gap into permission to stretch the cycle.
 
 Numeric values must be finite and within the accepted range. Main destinations must be unique numbered channels of the expected geometry/type; source, output and timing roles cannot alias. Invalid configuration or incompatible resources prevent operation. Unavailable secondary resources are retried once per second while unarmed. If a complete snapshot or destination-copy batch exceeds its runtime budget, the budget grows to the observed duration plus 1 us, the schedule is invalidated, and acquisition/feasibility validation repeat while preserving learned wait corrections. This enlarges the planning window conservatively; a quiet running maximum still does not prove a bound.
 
@@ -224,7 +236,7 @@ Application properties belong to the configured INDI device: `dmtweeter_synco` i
 | `reacquire` | Switch, read/write | `request`: On invalidates the schedule and resets acquisition/feedback; the switch returns Off. It does not zero contributions or enable a disabled app. |
 | `settings` | Number, read/write while disabled | `steps`, `maxCadenceHz`, `keepoutUs`, `guardUs`, `step0LeadUs`. Supply one or more named elements; the update is validated and applied together. |
 | `timing` | Number, read-only | Main/camera/planned rate, requested/active/feasible counts, delivery/miss/fault/cache counters and maximum snapshot/copy durations, detailed below. |
-| `health` | Text, read-only | `reason`, `lastFault`, `primary`, `combined`, `timingStream`, `mapping`. Current schedule phase/reason, latched synchronization/resource fault and resolved stream identities. |
+| `health` | Text, read-only | `reason`, `lastFault`, `periodSource`, `primary`, `combined`, `timingStream`, `mapping`. Current phase/reason, latched fault, selected period reference and resolved stream identities. |
 
 `settings` uses its named elements directly; there are no numeric `current`/`target` pairs. Updates while enabled, unknown elements, nonfinite values and invalid counts/ranges are rejected without changing the active configuration. Changing `steps` never changes source-image count. After an accepted disabled update, enable again to acquire a new schedule.
 
@@ -232,8 +244,11 @@ The `timing` summary includes:
 
 | Element | Meaning |
 | --- | --- |
-| `mainHz`, `cameraHz` | Filtered primary rate and last accepted camera report. A displayed camera value alone does not prove that the report is current. |
-| `plannedHz` | Requested count divided by filtered main period; a planned rate does not prove the schedule is armed. |
+| `mainHz` | Reciprocal of the selected integer-nanosecond period; it is not a short callback EMA. |
+| `cameraHz`, `cameraAgeSec` | Last valid measured acquisition rate and accepted-reply age; 0 Hz/-1 seconds before a valid report. A fresh reply does not itself prove ongoing acquisition. |
+| `primaryMeasuredHz` | Most recent qualified primary-window rate, separate from the selected period reference; zero before a window is qualified or after a counter gap invalidates it. |
+| `cameraJitterUs`, `cameraMinUs`, `cameraMaxUs` | Acquisition-interval standard deviation/minimum/maximum in microseconds; -1 when absent from an accepted packet or not yet available. Present invalid statistics reject the packet. These are diagnostics, not safety bounds. |
+| `plannedHz` | Requested count divided by selected period; a planned rate does not prove the schedule is armed. |
 | `deliveredHz` | Confirmed main-plus-auxiliary combinations per second over the latest status interval. This is software observation while synco tracks the schedule; zero while disabled does not mean the main AO loop stopped. |
 | `delivered` | Cumulative confirmed later-step combinations. |
 | `requested`, `active`, `feasible` | Requested count, currently primed count (zero when unprimed), and maximum count fitting the complete timing bounds. |
@@ -247,9 +262,10 @@ The `timing` summary includes:
 | `step0WakeUs`, `step0WakeMaxUs` | Latest/maximum nonnegative copy-attempt lateness relative to the requested copy wake, including checks before the attempt. Only valid, unclamped step-0 wait samples update these values. |
 | `step0AdvanceUs` | Current nonnegative advance before the desired step-0 copy start, bounded by `feedback.maxAdvanceUs`. |
 | `lastPrimaryDelta` | Counter delta at the latest distinct primary observation; a jump/reset can differ from one. |
-| `lastIntervalUs` | Observed interval at the latest distinct primary event, or zero without a previous acquisition reference. |
+| `lastIntervalUs` | Observed interval at the latest distinct primary event, independent of schedule reacquisition; zero before a previous distinct observation exists. |
 | `lastOutputDelta` | Combined-output counter minus last confirmed counter at the latest output fault; it is not a continuously refreshed output delta. |
 | `lastFaultAgeSec` | Age of the latched synchronization/resource fault, or -1 if none has been recorded. |
+| `faultIntervalUs`, `faultPeriodUs`, `faultResidualUs` | Latched faulting primary interval, selected prediction and their difference for an interval anomaly. Later healthy observations do not overwrite them. A subsequent fault other than an interval anomaly clears these interval fields to zero; inspect them together with `health.lastFault`. |
 
 `health.reason` follows the current phase, for example `acquiring main progression` or `armed`; `health.lastFault` remains latched when that phase changes. A later acquiring status therefore does not erase the cause of a primary/resource/output/trigger fault. Inspect its matching counter and `lastFaultAgeSec` when diagnosing repeated recovery. Missed-step and budget reacquisition can update the current reason without changing that fault latch. For the operator retest, compare snapshots over a known interval: retain the latched fault and age, inspect the per-cause fault increments, and compare step-0 wake lateness/advance with current budgets and copy outcomes. A growing observed maximum alone is not the current budget, and occasional auxiliary `delivered` increments do not demonstrate sustained requested cadence.
 
@@ -300,7 +316,7 @@ Programmatic dmMode integration is deferred. Disable dmSyncopation before indepe
 1. Verify exclusive destination/source ownership, `spare61` availability, the deployed dmcomb DELAY/counter route and primary monitor semaphore assignment. Confirm the trigger channel is not excluded by astrogrid mode and auxiliary inputs do not unintentionally drive ZPO work.
 2. Use a controller built with `XWC_DMTIMINGS`. Assess `m_piTimes` for processing/reader duration and `m_triggerDelta` for controller receipt spacing, alongside app residuals and dmcomb output.
 3. Qualify delivery tails, observation lag, early-main uncertainty, snapshot/copy budgets and every adjacent/wraparound/copy window under the relevant load. Keep host-timing qualification separate from deterministic CI tests.
-4. Start disabled, verify configuration/status, start the local 200 Hz provider, then enable and wait for lock. Check requested/active/feasible counts and delivered cadence.
+4. Start disabled, verify configuration/status and the selected period source/camera reply age, start the local 200 Hz provider, then enable and wait for lock. Check requested/active/feasible counts, selected/measured rates and delivered cadence.
 5. Measure residual mean/RMS/percentiles/max, minimum receipt spacing, skipped/coalesced events and recovery duty cycle. Use 5 us as an analysis guideline. WFS measurements should recover the configured 200 Hz vibration.
 6. Disable before changing timing controls or performing independent maintenance. Mapping/topology changes require restart. Controller clearing does not stop active writers.
 
