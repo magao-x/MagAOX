@@ -445,3 +445,131 @@ Formatting preserves non-brace C++ tokens and preprocessor directives. No new
 implementation changes, build/test rerun, push, deployment or agent instrument
 action was performed as part of commit preparation. The operator will perform
 hardware testing.
+
+## 2026-10-21 first DM telemetry run and publication comparison
+
+The operator installed the controller telemetry and confirmed continuous 2 kHz
+AO operation. One detailed two-second window reports 2,741 receipt intervals
+over 1.99590386 seconds: mean 728.166 us, sample jitter 1,265.568 us, minimum
+124.295 us and maximum 25.20309 ms. Receipt-to-SDK mean is 108.448 us with
+0.503 us jitter, while SDK duration is 101.269 us with 0.185 us jitter. Counters
+show no timing-queue drops or observed input-counter gaps; these counters do not
+prove that every upstream command was observed. A compatible line from the
+preceding second reports receipt/send mean approximately 1.384 ms; it belongs
+to a different rolling window. Both record formats use seconds.
+
+At the operator's request, input-stream `writetime` is now sampled alongside
+`cnt0`, adding `publicationInterval` statistics independently of receipt and SDK
+cadence. The [engineering record](dm-timing-telemetry.md) and
+[user guide](../../../libMagAOX/app/dev/doc/dmTiming.md) document pairing, clocks,
+telemetry/INDI names and metadata consistency limits. The stream clock may be TAI;
+only differences within that clock are used. Local dmcomb's write protocol leaves
+a brief timestamp/counter association ambiguity, so the new metric is observational
+and cannot qualify exact frame identity or publication-to-wake latency.
+
+A new operator comparison of publication, receipt and send statistics from the
+same summary is pending. No cause for the irregular receipts is established,
+and no timing-control setting or instrument state is changed by this work.
+Scoped workstation tests pass **1,204 assertions / 22 cases**, as do library,
+PI-335 and logdump builds; the engineering record contains the exact coverage and
+existing-warning qualifications. No commit, push, deployment or agent instrument
+action was performed.
+
+## 2026-10-21 concurrent Python GPU workload discovered
+
+The operator reports that `nvidia-smi` shows Python analysis processes running
+and notes that the reported timing disruption may therefore be real. This is a
+new workload confounder, not a confirmed cause. Which GPU the analyses use, their
+load and their overlap with the pasted timing windows have not been established.
+Do not dismiss genuine command-publication/receipt irregularity solely because
+the camera reports 2 kHz or the AO loop appears functional. Conversely, internally
+consistent telemetry arithmetic does not independently validate the measurement.
+
+The next useful operator comparison is the same 2 kHz loop and settings with the
+analyses paused, recording detailed/compatible records emitted together and the
+new publication metric when installed. Compare elapsed coverage and sample/quality
+counts alongside cadence and jitter. An improvement would support a workload
+association; telemetry validation and exact attribution would remain separate.
+No process was inspected or stopped by an agent. This entry changes only the
+debugging record; no code, test/build rerun, commit, push or instrument action was
+performed.
+
+## 2026-10-21 timing recovers in the Python-workload pause comparison
+
+Following the discussion of pausing the other user's Python process, the operator
+reports a large improvement and supplies 19 consecutive `dmtweeter` compatible
+records, timestamped 20:19:00.662358724 through 20:19:18.684848776 UTC. The named
+source is
+`/opt/MagAOX/telem/dmtweeter/2026_10_21/dmtweeter_20261021193132468510705.bintel`.
+Ranges below are across the reported rolling-window means/sample standard
+deviations, not individual-event extrema or a combined standard deviation:
+
+| Measurement | Window mean range (us) | Window sample-jitter range (us) |
+| --- | --- | --- |
+| Receipt interval (`acq`) | 499.997755–500.002803 | 6.99847–7.67596 |
+| Successful SDK-return interval (`wrt`) | 499.997792–500.002435 | 6.94744–7.63072 |
+| Receipt-to-SDK latency (`wma`) | 108.525572–108.544261 | 0.426717–0.466923 |
+
+Both receipt and send cadence now agree with the expected 2 kHz rate. Compared
+with the earlier roughly 0.728–1.384 ms interval means and 1.266–2.465 ms jitter
+from different windows, this is a major change in observed event spacing.
+Receipt-to-SDK latency remains close to the earlier approximately 108.448 us,
+supporting relatively unchanged controller handling after receipt.
+
+This comparison strongly supports a workload-associated timing disruption and
+makes genuine earlier long intervals more credible. It does not identify GPU
+execution versus CPU/driver/memory effects, independently prove every earlier
+timestamp, or measure camera-to-DM latency. The roughly 7–8 us residual interval
+jitter is a sample standard deviation, not a worst-case bound. These compatible
+records do not contain event extrema, quality counts or the new publication
+metric; a detailed same-summary comparison remains useful. No further code,
+test/build rerun, commit, push or agent instrument action was performed; this
+entry and the linked engineering note record the operator's evidence only.
+
+## 2026-10-21 camera IRQ pinning and detailed residual timing
+
+The operator reports pinning the camera IRQ to the camera's CPU and provides 15
+compatible records at 20:26:04.199811290–20:26:18.217867294 UTC, followed by five
+detailed records at 20:28:03.355931828–20:28:07.360640641 UTC from the same
+`dmtweeter` telemetry file. The particular IRQ number/CPU are not specified.
+
+The first set has receipt-interval sample jitter of **5.87200–6.80430 us**, below
+the previous post-Python-pause **6.99847–7.67596 us**. The arithmetic average of
+the displayed rolling-window standard deviations changes from 7.25481 to
+6.31775 us, about 12.9% lower. These overlapping two-second summaries are neither
+independent samples nor a pooled event distribution. The later detailed set has
+receipt jitter of **7.31060–7.81507 us** and send jitter of **7.43400–7.95624 us**,
+so these observations do not establish a sustained IRQ-pinning improvement.
+Mean cadence remains consistent with 2 kHz.
+
+Across the five detailed windows, the reported statistics are:
+
+| Measurement | Window mean range (us) | Window sample-jitter range (us) | Reported event extrema (us) |
+| --- | --- | --- | --- |
+| Receipt interval | 499.999345–500.003511 | 7.31060–7.81507 | 454.428–572.382 |
+| Successful SDK-return interval | 499.999392–500.003511 | 7.43400–7.95624 | 453.296–572.331 |
+| Receipt-to-SDK latency | 108.531479–108.559934 | 0.452247–0.457235 | 107.503–111.981 |
+| SDK duration | 101.370502–101.376151 | 0.107996–0.114372 | 101.111–102.373 |
+| Measured callback work | 124.978558–125.029648 | 0.518868–0.528373 | 123.293–128.573 |
+
+Receipt intervals therefore include excursions of about **-45.6/+72.4 us**
+relative to a nominal 500 us interval despite the stable mean and smaller standard
+deviation. These are interval deviations, not directly the synco prediction phase
+residual or a qualified worst-case bound. Controller work after receipt remains
+comparatively consistent; the dominant measured variability is in spacing before
+the receipt endpoint. Publication versus wake-up effects are still unresolved.
+
+Each detailed summary covers approximately two seconds with 3,998–3,999 receipt
+intervals and approximately 4,000 command events; since-summary event deltas are
+2,002 or 2,003 over approximately 1.001 seconds. Slight differences between metric
+counts are expected because both endpoints must lie inside the elapsed-time window.
+Queue occupancy is zero except for one newly queued event in the third summary;
+there are no reported failures, partial/no-send/rejected events, duplicates,
+counter gaps, invalid local timestamps or dropped timing events in these deltas.
+Missing counter-observation coverage still limits what `counterGaps=0` establishes.
+
+The detailed records have the original twelve metrics and no `publicationInterval`;
+they do not yet exercise the new input-timestamp measurement. An operator run of
+that build remains the useful publication/receipt comparison. Only this debugging
+record and the engineering note change for these observations; no new code,
+test/build rerun, commit, push or agent instrument action was performed.

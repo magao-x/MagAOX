@@ -1,18 +1,24 @@
 # DM controller timing telemetry
 
-`dev::dm` reports controller receipt cadence, successful submission-return cadence
-and local processing times for BMC, ALPAO, IrisAO and PI-335 controllers. All local
+`dev::dm` reports observed input-publication cadence, controller receipt cadence,
+successful submission-return cadence and local processing times for BMC, ALPAO,
+IrisAO and PI-335 controllers. All local
 markers use integer `CLOCK_MONOTONIC` nanoseconds; reported durations and jitter
 use **seconds**, and FPS uses **Hz**. SDK or serial-write return is a software
 endpoint; physical DM response and settling require separate measurements.
+Publication intervals use integer differences of input-stream `writetime` values
+in the stream's own clock, which can be TAI or REALTIME. No external timestamp is
+subtracted from a local monotonic timestamp.
 
 ## Endpoints and metrics
 
 ```text
-dmcomb publishes combined command -> successful controller semaphore wait
+U  dmcomb writes input stream writetime and publishes combined command
+   -> successful controller semaphore wait
   A  first timestamp after wait return
      monitor metadata/state checks
   P  dev::dm::processImage entry
+     observe input cnt0 and writetime with metadata consistency checks
      actuator preparation [actuatorStart -> actuatorEnd]
   S  backend submission begins
      SDK call / grouped PI serial writes
@@ -44,10 +50,29 @@ measurement here. An initial existing-image callback has no `A`.
 | `throughDelta` | `D - P`, preserving the old `piTimes` endpoints |
 | `callback` | `F - P`, including semaphore posting |
 | `receiptCallback` | `F - A` |
+| `publicationInterval` | Observed input publication interval, `U[i] - U[i-1]`, for consecutive counters |
 
 Valid earlier stages survive a later error. `throughDelta` has an endpoint even
 when delta work is absent; the `delta` metric is then unavailable. Unsupported
 phases remain unavailable.
+
+`publicationInterval` helps distinguish irregular input publication from irregular
+controller receipts. For a continuously published 2 kHz command stream, its
+expected mean is 0.0005 seconds. It contributes only when adjacent retained
+events have valid, strictly consecutive input counters and positive, increasing
+`writetime` values. Missing/malformed timestamps, duplicate/skipped/reset counters,
+timing-event loss and attachment changes break the pair; intervals are not divided
+by a skipped-frame count. A failed/no-send callback can still observe a publication.
+Its count and validity are independent of the compatible three-population summary.
+
+Metadata is sampled at callback entry. The checks reject an active writer or a
+counter change across the read, but do not guarantee association with the semaphore
+token or pixels actually sent. In particular, the inspected dmcomb implementation
+does not raise `write` before updating the combined stream, and publishes
+`writetime` before incrementing `cnt0`. A read can therefore briefly observe a new
+timestamp with the previous counter. These are **observed publication intervals**,
+not a verified frame trace. Stream-clock jumps can also resemble publication stalls.
+The metric does not establish publication-to-receipt latency or camera-to-DM latency.
 
 ## Configuration and collection
 
@@ -77,6 +102,10 @@ current monotonic time, so stopped input becomes stale. Timing maintenance and
 publication also run in the ordinary power-off loop, where `appLogic` is skipped. Large valid durations
 remain in the statistics. Jitter is sample standard deviation using `N-1`:
 two intervals require at least three timestamps; each metric has its own count.
+For publication intervals, window membership and reported coverage use the two
+local receipt observations (entry when no receipt timestamp is available), while the interval
+value uses only the external timestamps. Different clock epochs cannot affect
+window eviction or coverage.
 
 Receipt cadence includes rejected receipts and callbacks that fail later.
 Successful-return cadence includes longer intervals across known failed/no-send
@@ -96,7 +125,7 @@ be useful while state is Idle.
 | Property | Elements and units |
 | --- | --- |
 | `dm_timing` | `receipt_fps`, `receipt_min`, `receipt_max`, `receipt_jitter`, `receipt_count`; `send_fps`, `send_min`, `send_max`, `send_jitter`, `send_count`; `receipt_send`, `receipt_send_jitter`, `receipt_send_min`, `receipt_send_max`, `receipt_send_count`. FPS is reciprocal mean interval; durations are seconds. |
-| `dm_timing_stages` | Nine names `dispatch`, `actuator`, `sdk`, `saturation`, `delta`, `post`, `throughDelta`, `callback`, `receiptCallback`, each suffixed `_mean`, `_jitter`, `_min`, `_max`, `_count`, `_span`: 54 elements. Durations/coverage use seconds. |
+| `dm_timing_stages` | Ten names `dispatch`, `actuator`, `sdk`, `saturation`, `delta`, `post`, `throughDelta`, `callback`, `receiptCallback`, `publicationInterval`, each suffixed `_mean`, `_jitter`, `_min`, `_max`, `_count`, `_span`: 60 elements. Durations/coverage use seconds. |
 | `dm_timing_quality` | `window`, `span`, `age` in seconds; `capacity`, `queued`, `session`, `sequence`; `enabled`, `valid` as 0/1; cumulative counters listed below: 21 elements. `age=-1` means no retained endpoint. |
 | `dm_timing_state` | Text elements `state`, `clock`, `receipt`, `send`. States are `disabled`, `warmingUp`, `valid`, `stale`, `unavailable`; endpoint descriptions identify the clock and software return semantics. |
 
@@ -130,6 +159,10 @@ device identity and endpoint definitions when comparing camera and DM records.
 An old compatible record does not establish current validity: inspect the
 detailed record first. LogMeta names use `<metric>_mean`, `_stddev`, `_min`,
 `_max`, `_count`, `_span`, `_valid`; unavailable duration projections are NaN.
+The detailed record appends `publicationInterval` as metric ID 12; the original
+twelve IDs and compatible `fgtimings` fields are unchanged. Rebuilt readers accept
+both the original twelve-row records and the new thirteen-row records. Older
+readers that require exactly twelve rows must be rebuilt to read the new records.
 
 BMC qualifies success from `BMCSetArray`; ALPAO uses `asdkSend`. IrisAO measures
 the final `MirrorCommand(...MirrorSendSettings)` span, but its success indication
