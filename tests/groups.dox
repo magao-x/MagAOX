@@ -23,9 +23,33 @@ $ make
 \endverbatim
 possibly with the `-B` flag.
 
-Then to run all tests:
+Then to run all tests, including the generated logger suites:
 \verbatim
 $ bash ./testMagAOX.bash
+\endverbatim
+
+The runner also works from the repository root:
+\verbatim
+$ bash tests/testMagAOX.bash
+\endverbatim
+Alternatively, `make test` from the `tests` directory builds the tests and invokes the same runner.
+
+Each run creates a unique, timestamped directory under `tests/results/`. Previous runs are preserved, and
+`tests/results/latest` points to the newest run. These generated results are ignored by git.
+
+- `run.log` saves both stdout and stderr while displaying them in the terminal, including Catch2 assertion failures,
+  generated logger build output, and the final failure summary.
+- `summary.tsv` records `PASS` or `FAIL`, the exit code, and the executable or logger-suite name for each invocation.
+  These are executable-level results; the individual Catch2 case and assertion counts are in `run.log`.
+
+Ordinary test failures, crashes, and missing executables do not skip subsequent tests. The runner returns nonzero if
+any invocation fails. The old `tests/test_stderr.txt` is no longer updated; use the saved run directory instead.
+Output from test builds performed before invoking the runner is not included in `run.log`.
+
+To inspect the latest run from the repository root:
+\verbatim
+$ cat tests/results/latest/summary.tsv
+$ less tests/results/latest/run.log
 \endverbatim
 
 */
@@ -58,6 +82,8 @@ $ make doc
 \endverbatim
 The coverage helper writes `doc/output/coverage/index.html`, which is embedded below.
 `make coverage` alone only builds instrumented application binaries; it does not run tests or generate the HTML report.
+The coverage helper saves test output through the runner described above. If tests fail, it still generates the coverage
+report from their counters and then returns nonzero. An HTML report therefore does not imply that every test passed.
 
 \htmlonly
 <iframe
