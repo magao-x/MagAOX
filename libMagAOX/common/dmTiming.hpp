@@ -28,6 +28,7 @@ enum class Metric : uint8_t
     throughDelta,
     callback,
     receiptCallback,
+    publicationInterval,
     count
 };
 
@@ -79,7 +80,7 @@ struct Stats
     double   stddev{ 0 };    ///< Sample standard deviation, in seconds; unavailable below two observations.
     double   min{ 0 };       ///< Minimum duration in seconds.
     double   max{ 0 };       ///< Maximum duration in seconds.
-    double   span{ 0 };      ///< Span of the earliest and latest contributing endpoints, in seconds.
+    double   span{ 0 };      ///< Local endpoint/observation coverage in seconds, also for publication intervals.
     bool     valid{ false }; ///< True when sample variance is defined.
 };
 
@@ -106,6 +107,8 @@ struct Event
     uint64_t sequence{ 0 }; ///< Producer sequence, including events subsequently dropped.
     uint64_t session{ 0 };  ///< Monitor attachment/reset epoch.
     uint64_t counter{ 0 };  ///< Input counter observed by the callback, when available.
+
+    int64_t publicationNs{ -1 }; ///< External writetime in ns; best-effort metadata, not atomic frame identity.
 
     bool    counterValid{ false };       ///< Whether the input-counter observation is available.
     bool    synthetic{ false };          ///< No successful semaphore wait preceded this event.
@@ -173,7 +176,8 @@ inline const char *metricName( Metric metric )
                                       "post",
                                       "throughDelta",
                                       "callback",
-                                      "receiptCallback" };
+                                      "receiptCallback",
+                                      "publicationInterval" };
 
     return metricIndex( metric ) < metricIndex( Metric::count ) ? names[metricIndex( metric )] : "unknown";
 }

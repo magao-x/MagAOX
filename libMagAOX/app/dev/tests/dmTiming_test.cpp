@@ -30,6 +30,14 @@ void unsent( Collector &collector, /**< [in,out] Collector receiving the event. 
              int64_t    receipt,   /**< [in] Monotonic receipt timestamp. */
              Outcome    result /**< [in] Known callback outcome. */ );
 
+/// Capture an external publication observation without an SDK submission.
+void publication( Collector &collector,           /**< [in,out] Collector receiving the event. */
+                  int64_t    observation,         /**< [in] Local monotonic receipt or synthetic-entry baseline. */
+                  int64_t    publicationNs,       /**< [in] External integer-nanosecond image writetime. */
+                  uint64_t   counter,             /**< [in] Observed stream counter. */
+                  bool       counterValid = true, /**< [in] Whether the counter observation is available. */
+                  bool       synthetic    = false /**< [in] Use callback entry without a semaphore receipt. */ );
+
 void command( Collector &collector, int64_t receipt, int64_t extra, uint64_t counter )
 {
     collector.beginEventAt( true, receipt );
@@ -56,6 +64,27 @@ void unsent( Collector &collector, int64_t receipt, Outcome result )
     collector.markAt( Marker::entry, receipt + 10 );
     collector.outcome( result );
     collector.markAt( Marker::finish, receipt + 20 );
+    collector.finishEvent();
+}
+
+void publication( Collector &collector,
+                  int64_t    observation,
+                  int64_t    publicationNs,
+                  uint64_t   counter,
+                  bool       counterValid,
+                  bool       synthetic )
+{
+    collector.beginEventAt( !synthetic, observation );
+    collector.markAt( Marker::entry, observation + 10 );
+
+    if( counterValid )
+    {
+        collector.inputCounter( counter );
+    }
+
+    collector.inputPublication( publicationNs );
+    collector.outcome( Outcome::noSend );
+    collector.markAt( Marker::finish, observation + 20 );
     collector.finishEvent();
 }
 
@@ -394,6 +423,213 @@ TEST_CASE( "DM timing SPSC handoff remains coherent during concurrent wraps", "[
 #ifdef XWCTEST_DOX_REF
     MagAOX::app::dev::dmTiming::finishEvent;
     MagAOX::app::dev::dmTiming::update;
+#endif
+    // clang-format on
+}
+
+/** \brief Publication cadence preserves epoch precision while using local observations for coverage.
+ * \ingroup dmTiming_tests
+ */
+TEST_CASE( "DM timing publication cadence is independent of receipt cadence", "[dev::dmTiming][publication]" )
+{
+    Collector collector;
+    collector.configure( 2, 20 );
+    constexpr int64_t epoch = 1792000000000000000LL;
+    publication( collector, 1000000, epoch, 10 );
+    publication( collector, 1100000, epoch + 500000, 11 );
+    publication( collector, 3000000, epoch + 1000002, 12 );
+    collector.update( 3100000 );
+
+    const auto &summary = collector.summary();
+    const auto &metric  = summary.metrics[metricIndex( Metric::publicationInterval )];
+    REQUIRE( metric.count == 2 );
+    CHECK( metric.valid );
+    CHECK( metric.mean == Approx( 0.000500001 ).margin( 1e-16 ) );
+    CHECK( metric.stddev == Approx( std::sqrt( 2.0 ) * 1e-9 ).margin( 1e-16 ) );
+    CHECK( metric.min == Approx( 0.0005 ) );
+    CHECK( metric.max == Approx( 0.000500002 ) );
+    CHECK( metric.span == Approx( 0.002 ) );
+    CHECK( summary.metrics[metricIndex( Metric::receiptInterval )].mean == Approx( 0.001 ) );
+    CHECK_FALSE( summary.fgValid );
+    CHECK( std::string( metricName( Metric::publicationInterval ) ) == "publicationInterval" );
+    CHECK( metricIndex( Metric::publicationInterval ) == 12 );
+
+    collector.configure( 2, 20 );
+    publication( collector, 1000000, epoch, 10, true, true );
+    publication( collector, 1500000, epoch + 500000, 11 );
+    collector.update( 1500020 );
+
+    const auto &synthetic = collector.summary().metrics[metricIndex( Metric::publicationInterval )];
+    CHECK( synthetic.count == 1 );
+    CHECK( synthetic.mean == Approx( 0.0005 ) );
+    CHECK( synthetic.span == Approx( 0.000499990 ) );
+    CHECK( collector.summary().total.synthetic == 1 );
+
+    // clang-format off
+#ifdef XWCTEST_DOX_REF
+    MagAOX::app::dev::dmTiming::inputPublication;
+    MagAOX::app::dev::dmTiming::calculate;
+#endif
+    // clang-format on
+}
+
+/** \brief Missing, repeated, backward and nonconsecutive observations cannot fabricate publication intervals.
+ * \ingroup dmTiming_tests
+ */
+TEST_CASE( "DM timing publication pairing requires consecutive valid observations", "[dev::dmTiming][publication]" )
+{
+    Collector collector;
+    collector.configure( 2, 30 );
+    constexpr int64_t epoch      = 1792000000000000000LL;
+    const uint64_t    counters[] = { 10, 11, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25 };
+    const int64_t     stamps[]   = { epoch,
+                                     epoch + 500000,
+                                     epoch + 500000,
+                                     epoch + 1000000,
+                                     epoch + 2000000,
+                                     epoch + 2500000,
+                                     0,
+                                     epoch + 3500000,
+                                     epoch + 4000000,
+                                     epoch + 3900000,
+                                     epoch + 4400000,
+                                     epoch + 4400000,
+                                     epoch + 4900000,
+                                     epoch + 5400000,
+                                     epoch + 5900000,
+                                     epoch + 6400000 };
+
+    for( size_t i = 0; i < sizeof( counters ) / sizeof( counters[0] ); ++i )
+    {
+        publication( collector, 1000000 + static_cast<int64_t>( i ) * 500000, stamps[i], counters[i], i != 13 );
+    }
+
+    collector.update( 9000000 );
+    const auto &metric = collector.summary().metrics[metricIndex( Metric::publicationInterval )];
+    REQUIRE( metric.count == 7 );
+    CHECK( metric.mean == Approx( 0.0005 ) );
+    CHECK( metric.stddev == 0 );
+    CHECK( collector.summary().total.duplicates == 1 );
+    CHECK( collector.summary().total.counterGaps == 1 );
+    CHECK( collector.summary().total.invalid == 0 );
+
+    collector.configure( 2, 10 );
+    publication( collector, 1000000, epoch, 10 );
+    collector.beginEventAt( true, 1500000 );
+    collector.inputCounter( 11 );
+    collector.inputPublication( epoch + 500000 );
+    collector.outcome( Outcome::failed );
+    collector.finishEvent();
+    publication( collector, 2000000, epoch + 1000000, 12 );
+    collector.update( 2000020 );
+    CHECK( collector.summary().metrics[metricIndex( Metric::publicationInterval )].count == 2 );
+    CHECK( collector.summary().metrics[metricIndex( Metric::sendInterval )].count == 0 );
+
+    collector.configure( 2, 10 );
+    collector.beginEventAt( false, -1 );
+    collector.inputCounter( 10 );
+    collector.inputPublication( epoch );
+    collector.finishEvent(); // Missing local observation cannot contribute coverage.
+    publication( collector, 1500000, epoch + 500000, 11 );
+    publication( collector, 2000000, epoch + 1000000, 12 );
+    collector.update( 2000020 );
+    CHECK( collector.summary().metrics[metricIndex( Metric::publicationInterval )].count == 1 );
+
+    // clang-format off
+#ifdef XWCTEST_DOX_REF
+    MagAOX::app::dev::dmTiming::inputCounter;
+    MagAOX::app::dev::dmTiming::inputPublication;
+    MagAOX::app::dev::dmTiming::calculate;
+#endif
+    // clang-format on
+}
+
+/** \brief Publication intervals obey local window/cap retention and never cross resets or lost events.
+ * \ingroup dmTiming_tests
+ */
+TEST_CASE( "DM timing publication windows respect retention and loss boundaries", "[dev::dmTiming][publication]" )
+{
+    Collector         collector;
+    constexpr int64_t epoch = 1792000000000000000LL;
+
+    SECTION( "Both local observation anchors must be in the elapsed-time window" )
+    {
+        collector.configure( 0.001, 8 );
+        publication( collector, 1000000, epoch, 10 );
+        publication( collector, 1500000, epoch + 500000, 11 );
+        publication( collector, 2000000, epoch + 1000000, 12 );
+        collector.update( 2000020 );
+
+        const auto &metric = collector.summary().metrics[metricIndex( Metric::publicationInterval )];
+        CHECK( metric.count == 1 );
+        CHECK( metric.span == Approx( 0.0005 ) );
+        CHECK_FALSE( metric.valid );
+        collector.update( 4000000 );
+        CHECK( collector.summary().metrics[metricIndex( Metric::publicationInterval )].count == 0 );
+    }
+
+    SECTION( "Capacity cannot borrow a predecessor outside the retained population" )
+    {
+        collector.configure( 2, 2 );
+
+        for( int i = 0; i < 3; ++i )
+        {
+            publication( collector, 1000000 + i * 500000, epoch + i * 500000, 10 + i );
+            collector.update( 1000020 + i * 500000 );
+        }
+
+        CHECK( collector.summary().metrics[metricIndex( Metric::publicationInterval )].count == 1 );
+        CHECK( collector.summary().metrics[metricIndex( Metric::publicationInterval )].span == Approx( 0.0005 ) );
+    }
+
+    SECTION( "A lost timing event breaks pairing even when the next observed counter is consecutive" )
+    {
+        collector.configure( 2, 3 );
+
+        for( int i = 0; i < 4; ++i )
+        {
+            publication( collector, 1000000 + i * 500000, epoch + i * 500000, 10 + i );
+        }
+
+        collector.update( 2500020 );
+        CHECK( collector.summary().total.dropped == 1 );
+        CHECK( collector.summary().metrics[metricIndex( Metric::publicationInterval )].count == 2 );
+        publication( collector, 3000000, epoch + 1500000, 13 );
+        collector.update( 3000020 );
+        CHECK( collector.summary().metrics[metricIndex( Metric::publicationInterval )].count == 1 );
+    }
+
+    SECTION( "A fresh monitor session cannot pair with the previous attachment" )
+    {
+        collector.configure( 2, 8 );
+        publication( collector, 1000000, epoch, 10 );
+        collector.update( 1000020 );
+        collector.newSession();
+        publication( collector, 1500000, epoch + 500000, 11 );
+        collector.update( 1500020 );
+        CHECK( collector.summary().metrics[metricIndex( Metric::publicationInterval )].count == 0 );
+        publication( collector, 2000000, epoch + 1000000, 12 );
+        collector.update( 2000020 );
+        CHECK( collector.summary().metrics[metricIndex( Metric::publicationInterval )].count == 1 );
+    }
+
+    SECTION( "A wrapped input counter starts a new publication association" )
+    {
+        collector.configure( 2, 8 );
+        publication( collector, 1000000, epoch, std::numeric_limits<uint64_t>::max() );
+        publication( collector, 1500000, epoch + 500000, 0 );
+        collector.update( 1500020 );
+        CHECK( collector.summary().metrics[metricIndex( Metric::publicationInterval )].count == 0 );
+        publication( collector, 2000000, epoch + 1000000, 1 );
+        collector.update( 2000020 );
+        CHECK( collector.summary().metrics[metricIndex( Metric::publicationInterval )].count == 1 );
+    }
+
+    // clang-format off
+#ifdef XWCTEST_DOX_REF
+    MagAOX::app::dev::dmTiming::newSession;
+    MagAOX::app::dev::dmTiming::finishEvent;
+    MagAOX::app::dev::dmTiming::calculate;
 #endif
     // clang-format on
 }

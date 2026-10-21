@@ -135,6 +135,17 @@ TEST_CASE( "DM timing telemetry preserves controller-local populations", "[dmTim
              Approx( summary.metrics[size_t( dmTiming::Metric::sdk )].mean ) );
     REQUIRE( jsonRecord->total()->dropped() == 112 );
     REQUIRE( jsonRecord->delta()->dropped() == 12 );
+
+    const auto *publication = jsonRecord->metrics()->Get( size_t( dmTiming::Metric::publicationInterval ) );
+    const auto &expected    = summary.metrics[size_t( dmTiming::Metric::publicationInterval )];
+    REQUIRE( publication->metric() == DmTimingMetric_publicationInterval );
+    REQUIRE( publication->count() == expected.count );
+    REQUIRE( publication->mean() == Approx( expected.mean ) );
+    REQUIRE( publication->stddev() == Approx( expected.stddev ) );
+    REQUIRE( publication->min() == Approx( expected.min ) );
+    REQUIRE( publication->max() == Approx( expected.max ) );
+    REQUIRE( publication->span() == expected.span );
+    REQUIRE( publication->valid() );
 }
 
 /// Expose every named metric and both counter populations without interpolating summaries or truncating counters.
@@ -144,7 +155,7 @@ TEST_CASE( "DM timing metadata projects metrics and collection quality", "[dmTim
     const auto                         summary = sampleSummary();
     telem_dmtimings::messageT          message( summary );
     auto                              *payload = message.builder.GetBufferPointer();
-    const std::array<const char *, 12> names{ "receiptInterval",
+    const std::array<const char *, 13> names{ "receiptInterval",
                                               "sendInterval",
                                               "receiptSend",
                                               "dispatch",
@@ -155,7 +166,8 @@ TEST_CASE( "DM timing metadata projects metrics and collection quality", "[dmTim
                                               "post",
                                               "throughDelta",
                                               "callback",
-                                              "receiptCallback" };
+                                              "receiptCallback",
+                                              "publicationInterval" };
 
     for( size_t index = 0; index < names.size(); ++index )
     {
@@ -281,29 +293,34 @@ TEST_CASE( "DM timing telemetry distinguishes availability and rejects malformed
     REQUIRE_FALSE( verifyLogEntry( telem_dmtimings::eventCode, nullptr ) );
 }
 
-/// Accept reordering by stable IDs while rejecting missing, duplicated and unknown metric identifiers.
+/// Accept complete legacy/current metric sets in any order while rejecting missing, duplicated and unknown identifiers.
 /** \ingroup dmTimingTelemetry_unit_test */
 TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelemetry]" )
 {
-    for( int variant = 0; variant < 4; ++variant )
+    for( int variant = 0; variant < 7; ++variant )
     {
         INFO( "metric-set variant " << variant );
         telem_dmtimings::messageT message( sampleSummary() );
         auto                     &builder = message.builder;
         builder.Clear();
         std::vector<flatbuffers::Offset<DmTimingStats>> rows;
-        const size_t                                    count = variant == 1 ? 11 : 12;
+        const size_t count = variant == 0 || variant == 3 ? 12 : variant == 2 ? 11 : variant == 6 ? 14 : 13;
 
         for( size_t index = 0; index < count; ++index )
         {
             size_t id = count - index - 1;
 
-            if( variant == 2 && index == 0 )
+            if( variant == 3 && index == 0 )
+            {
+                id = 12; // A new row cannot replace a required legacy row in a twelve-row record.
+            }
+
+            if( variant == 4 && index == 0 )
             {
                 id = 0;
             }
 
-            if( variant == 3 && index == 0 )
+            if( variant == 5 && index == 0 )
             {
                 id = 99;
             }
@@ -320,11 +337,28 @@ TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelem
         record.add_delta( delta );
         builder.Finish( record.Finish() );
         auto buffer = envelope( message );
-        REQUIRE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) == ( variant == 0 ) );
+        REQUIRE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) == ( variant <= 1 ) );
+
+        if( variant <= 1 )
+        {
+            REQUIRE( project<double>( "sdk_mean", builder.GetBufferPointer() ) == 1e-4 );
+        }
 
         if( variant == 0 )
         {
-            REQUIRE( project<double>( "sdk_mean", builder.GetBufferPointer() ) == 1e-4 );
+            REQUIRE( project<uint64_t>( "publicationInterval_count", builder.GetBufferPointer() ) == 0 );
+            REQUIRE_FALSE( project<bool>( "publicationInterval_valid", builder.GetBufferPointer() ) );
+
+            for( const auto *field : { "mean", "stddev", "min", "max", "span" } )
+            {
+                REQUIRE( mx::math::isNan(
+                    project<double>( std::string( "publicationInterval_" ) + field, builder.GetBufferPointer() ) ) );
+            }
+        }
+
+        if( variant == 1 )
+        {
+            REQUIRE( project<double>( "publicationInterval_mean", builder.GetBufferPointer() ) == 1e-4 );
         }
     }
 }

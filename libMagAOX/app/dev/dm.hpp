@@ -1007,7 +1007,7 @@ int dm<derivedT, realT>::setupDMTimingINDI()
     m_indiP_dmTimingState.add( pcf::IndiElement( "receipt" ) );
     m_indiP_dmTimingState.add( pcf::IndiElement( "send" ) );
     m_indiP_dmTimingState["state"]   = m_dmTiming.enabled() ? "warmingUp" : "disabled";
-    m_indiP_dmTimingState["clock"]   = "CLOCK_MONOTONIC; durations in seconds";
+    m_indiP_dmTimingState["clock"]   = "local: CLOCK_MONOTONIC; publicationInterval: stream writetime; seconds";
     m_indiP_dmTimingState["receipt"] = "first timestamp after successful semaphore wait return";
     m_indiP_dmTimingState["send"]    = "qualified backend submission return; not physical completion";
     return derived().registerIndiPropertyReadOnly( m_indiP_dmTimingState );
@@ -2077,12 +2077,21 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
 
     if( m_dmTiming.active() && derived().m_imageStream.md != nullptr && derived().m_imageStream.md->write == 0 )
     {
-        uint64_t counter = derived().m_imageStream.md->cnt0;
+        const auto *metadata = derived().m_imageStream.md;
+        uint64_t    counter  = metadata->cnt0;
+        const auto  stamp    = metadata->writetime;
         std::atomic_thread_fence( std::memory_order_acquire );
 
-        if( derived().m_imageStream.md->write == 0 && counter == derived().m_imageStream.md->cnt0 )
+        // Best-effort metadata observation; this does not establish atomic token/pixel identity.
+        if( metadata->write == 0 && counter == metadata->cnt0 )
         {
             m_dmTiming.inputCounter( counter );
+
+            if( stamp.tv_sec >= 0 && stamp.tv_nsec >= 0 && stamp.tv_nsec < 1000000000 &&
+                stamp.tv_sec <= ( std::numeric_limits<int64_t>::max() - stamp.tv_nsec ) / 1000000000 )
+            {
+                m_dmTiming.inputPublication( static_cast<int64_t>( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec );
+            }
         }
     }
 

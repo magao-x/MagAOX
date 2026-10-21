@@ -122,6 +122,7 @@ display microseconds. Include:
 | Metric | Endpoints / interpretation |
 | --- | --- |
 | Receipt interval, send interval, receipt-to-send | Extrema/counts complement the six-field record |
+| Observed publication interval | Consecutive input `writetime` differences in their own stream clock; local observation anchors define window/coverage |
 | Monitor dispatch | `P-A` |
 | Actuator preparation | Existing `tact1-tact0`; includes output-shape publication |
 | SDK call | `W-S`, distinct from receipt-to-send latency |
@@ -142,8 +143,9 @@ Record session/window sequence, actual coverage span, age of newest event,
 per-metric validity/counts and cumulative plus since-last-summary quality counters.
 Counters distinguish submitted, failed, partial, no-send, synthetic initial read,
 duplicate/counter-gap observations, invalid timestamps and dropped timing events.
-The implementation freezes the twelve metric IDs below and records cumulative
-and since-summary quality counters; individual metadata/state rejection causes
+The implementation preserves the original twelve metric IDs and appends observed
+publication cadence as ID 12. It records cumulative and since-summary quality
+counters; individual metadata/state rejection causes
 are currently combined in `rejected`.
 
 Use a trailing **2-second elapsed-time window**, capped at **20,000 events**, as
@@ -350,7 +352,8 @@ wall-clock doubles and stderr reports.
 Implemented the optional monitor observation hook, ownership-safe preallocated
 SPSC collector and consumer-owned elapsed-time statistics, all four controller
 adapters, read-only INDI and compatible/detailed telemetry. New event code
-`TELEM_DMTIMINGS=20892` records all twelve metrics and collection quality.
+`TELEM_DMTIMINGS=20892` initially recorded twelve metrics and collection quality;
+the publication-cadence follow-up below appends a thirteenth metric.
 `telem_fgtimings` and camera readers/schema remain unchanged. Detailed records
 precede compatible records; only the detailed type is scheduled independently for
 forced reports. Software owners without a telemetry helper retain a no-op
@@ -448,3 +451,98 @@ pass retains all non-brace C++ tokens and preprocessor directives; the existing
 remain applicable. No new tests or builds were needed for committing. Hardware
 qualification is pending operator testing. No push, deployment or agent instrument
 action is part of this commit request.
+
+### 2026-10-21 observed input-publication cadence
+
+The operator's first installed run reports irregular receipt/SDK-return intervals
+despite a continuously running 2 kHz AO loop. The pasted detailed record has
+2,741 receipt intervals across 1.99590386 seconds, mean 0.0007281663116 seconds,
+with extrema 0.000124295 and 0.02520309 seconds. Its receipt-to-SDK latency is
+approximately 108.448 us and SDK duration approximately 101.269 us. The compatible
+record from the preceding second represents a different rolling window; its
+approximately 1.384 ms receipt mean does not establish a field-mapping error.
+The operator requested recording the input `dmXXdisp` publication timestamp.
+
+The callback now copies `writetime` alongside its existing `cnt0` observation,
+validates timespec components/overflow and retains it in the fixed-size event.
+No additional clock calls, allocation, locking or logging are added to the
+producer. `publicationInterval` is appended as stable metric ID 12 and reports
+count, mean, sample jitter, extrema and coverage through detailed telemetry,
+LogMeta and six new `dm_timing_stages.publicationInterval_*` elements. The
+compatible `fgtimings` record and its validity criteria remain unchanged.
+
+Only adjacent retained events with consecutive valid counters and positive,
+strictly increasing publication timestamps contribute a pair. Missing metadata,
+duplicate/skipped/reset counters, queue loss and attachment changes break pairing.
+External timestamp differences produce the values; local receipt observations
+(entry when a receipt timestamp is unavailable) determine window membership and coverage. No
+stream-clock timestamp is subtracted from a monotonic marker. Malformed external
+timestamps do not increment the counter for invalid local clock captures.
+
+Source inspection of the local MILK checkout establishes the clock and limits:
+`src/ImageStreamIO/ImageStreamIO.h` selects `CLOCK_TAI` where available, otherwise
+`CLOCK_REALTIME`; `ImageStreamIO_UpdateIm_atime` in
+`src/ImageStreamIO/ImageStreamIO.c` writes the timestamp, increments `cnt0`, clears
+`write`, then posts. The dmcomb code in
+`plugins/cacao-src/AOloopControl_DM/AOloopControl_DM_comb.c` does not raise `write`
+before updating the combined stream, and delegates publication through
+`src/CommandLineInterface/processinfo/processinfo_update_output_stream.c`.
+Consequently the existing write/counter bracket is best-effort observation, not
+proof of token/pixel/timestamp association: a new timestamp with the prior
+counter can be visible briefly. Positive stream-clock steps can also resemble
+real stalls. No MILK source or publication behavior is changed here.
+
+The rebuilt detailed reader accepts complete original twelve-row records and
+new thirteen-row records, preserving old metric IDs. Missing publication data in
+old records projects as unavailable. Older readers that enforce exactly twelve
+rows need rebuilding for the new records. This is diagnostic publication cadence,
+not publication-to-receipt latency or verified total-loop timing.
+
+Scoped workstation checks pass:
+
+- Collector: **158 assertions / 10 cases**, including the existing 100,000-event
+  concurrent ownership/loss test and the new publication precision, association,
+  retention and reset cases.
+- DM callback/configuration/telemetry/INDI/power-off integration: **153 assertions
+  / 8 cases**, including real metadata-copy/validation, publication versus receipt
+  cadence, new property elements and unchanged compatible-field meanings.
+- Detailed logger: **893 assertions / 4 cases**, including binary/JSON roundtrip,
+  all 91 metric accessors, malformed metric sets and complete old twelve-row
+  record compatibility. Total scoped checks: **1,204 assertions / 22 cases**.
+- Normal library/schema generation, PI-335 and logdump builds pass. PI reports
+  nine existing `convertFromString` deprecation warnings; schema generation
+  reports existing field-name style warnings. Focused test builds are warning-free.
+- All seven touched C++ files pass clang-format and whitespace checks. This
+  follow-up does not rerun the earlier vendor SDK-stub, monitor or synco suites,
+  ThreadSanitizer or capture benchmark. The original 144-byte/0.193 us capture
+  benchmark predates the added metadata read and publication event field and
+  does not qualify this version's overhead.
+
+No commit, push, deployment, instrument command or agent hardware action was
+performed. Comparing the new publication metric with receipt/send cadence on the
+instrument remains an operator follow-up.
+
+### 2026-10-21 operator workload comparison
+
+In the Python-workload pause comparison, 19 consecutive `dmtweeter` compatible
+records recover receipt/send means of approximately 500 us, with interval jitter
+approximately 7–8 us and receipt-to-SDK latency approximately 108.53 us with
+0.43–0.47 us jitter. The [debugging record](dm-syncopation-debugging.md) preserves
+the source, timestamp range, exact window-statistic ranges and interpretation.
+This strongly supports workload-associated timing disruption; it does not yet
+localize the interference or independently qualify full-loop timing. The
+publication-metric comparison remains pending. No implementation or validation
+checkpoint changes accompany this operator evidence.
+
+### 2026-10-21 operator camera IRQ-pinning comparison
+
+After camera IRQ pinning, the first 15 compatible records show receipt jitter of
+5.87–6.80 us, but five detailed windows approximately two minutes later return to
+7.31–7.82 us. A sustained improvement is not established. Detailed receipt
+intervals span 454.428–572.382 us while receipt-to-SDK and SDK durations remain
+consistent. Event counts support the expected 2 kHz cadence and the reported
+outcome/drop counters are zero in the new summary deltas. The
+[debugging record](dm-syncopation-debugging.md) preserves exact values and count,
+window and metadata qualifications. These records still have only twelve metrics;
+the new `publicationInterval` build has not been demonstrated by this sample.
+No implementation or validation checkpoint changes accompany this evidence.

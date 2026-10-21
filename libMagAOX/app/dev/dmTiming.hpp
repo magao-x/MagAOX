@@ -108,6 +108,10 @@ class dmTiming
     /// Attach an observed input counter, without asserting verified frame identity.
     void inputCounter( uint64_t counter /**< [in] Stable counter observation supplied by the monitor. */ );
 
+    /// Attach best-effort external writetime with the observed counter, without asserting atomic frame identity.
+    void inputPublication(
+        int64_t publicationNs /**< [in] Positive external writetime in nanoseconds; otherwise unavailable. */ );
+
     /// Set callback outcome; success qualifies submission and later failures preserve it.
     void outcome( MagAOX::dmTiming::Outcome outcome /**< [in] Qualified backend or callback result. */ );
 
@@ -268,6 +272,16 @@ inline void dmTiming::inputCounter( uint64_t counter )
 
     m_event.counter      = counter;
     m_event.counterValid = true;
+}
+
+inline void dmTiming::inputPublication( int64_t publicationNs )
+{
+    if( !m_active )
+    {
+        return;
+    }
+
+    m_event.publicationNs = publicationNs > 0 ? publicationNs : -1;
 }
 
 inline void dmTiming::outcome( MagAOX::dmTiming::Outcome outcome )
@@ -503,16 +517,16 @@ inline void dmTiming::calculate( int64_t nowNs )
         m_window.pop_front();
     }
 
-    auto add = [&]( Metric metric, int64_t a, int64_t b )
+    auto addValue = [&]( Metric metric, int64_t durationNs, int64_t a, int64_t b )
     {
-        if( a < cutoff || b < a || b > nowNs )
+        if( durationNs < 0 || a < cutoff || b < a || b > nowNs )
         {
             return;
         }
 
         size_t index = metricIndex( metric );
         Stats &stats = m_summary.metrics[index];
-        double value = ( b - a ) * 1e-9;
+        double value = durationNs * 1e-9;
 
         ++stats.count;
         double difference = value - stats.mean;
@@ -525,8 +539,17 @@ inline void dmTiming::calculate( int64_t nowNs )
         latest[index]   = std::max( latest[index], b );
     };
 
-    int64_t  previousReceipt = -1, previousSend = -1;
-    uint64_t previousSequence = 0;
+    auto add = [&]( Metric metric, int64_t a, int64_t b )
+    {
+        if( a >= 0 && b >= a )
+        {
+            addValue( metric, b - a, a, b );
+        }
+    };
+
+    int64_t      previousReceipt = -1, previousSend = -1;
+    uint64_t     previousSequence = 0;
+    const Event *previousEvent    = nullptr;
 
     for( const Event &event : m_window )
     {
@@ -564,6 +587,32 @@ inline void dmTiming::calculate( int64_t nowNs )
         {
             previousSend = -1;
         }
+
+        if( previousEvent && event.sequence == previousEvent->sequence + 1 && event.session == previousEvent->session &&
+            event.counterValid && previousEvent->counterValid && event.counter > previousEvent->counter &&
+            event.counter == previousEvent->counter + 1 && previousEvent->publicationNs > 0 &&
+            event.publicationNs > previousEvent->publicationNs )
+        {
+            int64_t previousObservation = endpoint( *previousEvent, Marker::receipt );
+            int64_t observation         = receipt;
+
+            if( previousObservation < 0 )
+            {
+                previousObservation = endpoint( *previousEvent, Marker::entry );
+            }
+
+            if( observation < 0 )
+            {
+                observation = endpoint( event, Marker::entry );
+            }
+
+            addValue( Metric::publicationInterval,
+                      event.publicationNs - previousEvent->publicationNs,
+                      previousObservation,
+                      observation );
+        }
+
+        previousEvent = &event;
 
         constexpr Metric metrics[] = { Metric::dispatch,
                                        Metric::actuator,

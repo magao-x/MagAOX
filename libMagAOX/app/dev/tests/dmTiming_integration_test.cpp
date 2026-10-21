@@ -87,6 +87,7 @@ struct Controller : MagAOX::app::MagAOXApp<false>,
     using dmT::m_timingCapacity;
     using dmT::m_timingWindow;
     using dmT::setupDMTimingINDI;
+    using MagAOX::app::dev::shmimMonitor<Controller>::m_imageStream;
 
     Driver *m_indiDriver{ nullptr }; ///< Shadow the app driver with a local capture sink.
 
@@ -264,6 +265,91 @@ TEST_CASE( "DM callback timing retains the actual SDK endpoint", "[dev::dmTiming
     CHECK( app.dmTimingSummary().total.failed == 1 );
 }
 
+/// Compare observed stream publication cadence with independent local receipt cadence.
+/** \ingroup dmTimingIntegration_tests */
+TEST_CASE( "DM timing captures the input stream publication timestamp", "[dev::dmTimingIntegration]" )
+{
+    // clang-format off
+#ifdef DM_TIMING_INTEGRATION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dm<Controller, float>::processImage( nullptr, {} );
+    MagAOX::app::dev::dm<Controller, float>::updateINDI();
+#endif
+    // clang-format on
+
+    Driver         driver;
+    Controller     app;
+    IMAGE_METADATA metadata{};
+    app.m_imageStream.md = &metadata;
+    REQUIRE( app.setupDMTimingINDI() == 0 );
+    app.m_indiDriver = &driver;
+    const auto base  = MagAOX::app::dev::dmTiming::monotonicNowNs() - 5000000;
+
+    for( unsigned i = 0; i < 3; ++i )
+    {
+        metadata.cnt0      = 10 + i;
+        metadata.writetime = { 1700000000, i * 500000L };
+        app.m_dmTiming.beginEventAt( true, base + i * i * 500000 );
+        REQUIRE( app.processImage( nullptr, {} ) == 0 );
+    }
+
+    app.updateDMTimings();
+    const auto &publication = app.dmTimingSummary().metrics[metricIndex( Metric::publicationInterval )];
+    CHECK( publication.count == 2 );
+    CHECK( publication.mean == Approx( 0.0005 ) );
+    CHECK( publication.stddev == 0 );
+    CHECK( publication.span == Approx( 0.002 ) );
+    CHECK( app.dmTimingSummary().metrics[metricIndex( Metric::receiptInterval )].mean == Approx( 0.001 ) );
+    REQUIRE( app.dmT::updateINDI() == 0 );
+    CHECK( app.m_indiP_dmStages["publicationInterval_mean"].get<double>() == Approx( 0.0005 ) );
+    CHECK( app.m_indiP_dmStages["publicationInterval_count"].get<double>() == 2 );
+    REQUIRE( app.recordDMTimings() == 0 );
+    const auto *record = MagAOX::logger::GetTelem_dmtimings_fb( app.m_detailed.data() );
+    CHECK( record->metrics()->Get( metricIndex( Metric::publicationInterval ) )->mean() == Approx( 0.0005 ) );
+    const auto *compatible = MagAOX::logger::GetTelem_fgtimings_fb( app.m_compatible.data() );
+    CHECK( compatible->atime() == Approx( 0.001 ) );
+    app.m_imageStream.md = nullptr;
+}
+
+/// Reject unset, malformed, overflowing and actively written publication metadata.
+/** \ingroup dmTimingIntegration_tests */
+TEST_CASE( "DM timing excludes invalid publication metadata", "[dev::dmTimingIntegration]" )
+{
+    // clang-format off
+#ifdef DM_TIMING_INTEGRATION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dm<Controller, float>::processImage( nullptr, {} );
+#endif
+    // clang-format on
+
+    for( const auto stamp : { timespec{ 0, 0 },
+                              timespec{ -1, 0 },
+                              timespec{ 1700000000, -1 },
+                              timespec{ 1700000000, 1000000000 },
+                              timespec{ std::numeric_limits<int64_t>::max() / 1000000000 + 1, 0 },
+                              timespec{ 1700000000, 500000 } } )
+    {
+        Controller     app;
+        IMAGE_METADATA metadata{};
+        app.m_imageStream.md = &metadata;
+        const auto base      = MagAOX::app::dev::dmTiming::monotonicNowNs() - 5000000;
+
+        for( unsigned i = 0; i < 4; ++i )
+        {
+            metadata.cnt0      = 10 + i;
+            metadata.writetime = i == 1 ? stamp : timespec{ 1700000000, i * 500000L };
+            metadata.write     = i == 1 && stamp.tv_sec == 1700000000 && stamp.tv_nsec == 500000;
+            app.m_dmTiming.beginEventAt( true, base + i * 500000 );
+            REQUIRE( app.processImage( nullptr, {} ) == 0 );
+        }
+
+        app.updateDMTimings();
+        const auto &publication = app.dmTimingSummary().metrics[metricIndex( Metric::publicationInterval )];
+        CHECK( publication.count == 1 );
+        CHECK( publication.mean == Approx( 0.0005 ) );
+        CHECK( app.dmTimingSummary().total.invalid == 0 );
+        app.m_imageStream.md = nullptr;
+    }
+}
+
 /// Keep receipt-only events and initial/no-send/error callbacks from borrowing stale endpoints.
 /** \ingroup dmTimingIntegration_tests */
 TEST_CASE( "DM timing handles synthetic callbacks and rejected receipts", "[dev::dmTimingIntegration]" )
@@ -386,7 +472,7 @@ TEST_CASE( "DM timing INDI follows valid, stale and disabled summaries", "[dev::
     REQUIRE( app.setupDMTimingINDI() == 0 );
     app.m_indiDriver = &driver;
     REQUIRE( app.m_indiP_dmTiming.getNumElements() == 15 );
-    REQUIRE( app.m_indiP_dmStages.getNumElements() == 54 );
+    REQUIRE( app.m_indiP_dmStages.getNumElements() == 60 );
     REQUIRE( app.m_indiP_dmTimingQuality.getNumElements() == 21 );
     app.shmimMonitorTiming( {}, MagAOX::app::dev::shmimMonitorEvent::receipt );
     REQUIRE( app.processImage( nullptr, {} ) == 0 );

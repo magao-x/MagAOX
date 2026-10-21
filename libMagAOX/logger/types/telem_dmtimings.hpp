@@ -1,5 +1,5 @@
 /** \file telem_dmtimings.hpp
- * \brief Controller-local timing statistics, coverage and collection quality.
+ * \brief Controller timing, observed publication intervals, coverage and collection quality.
  * \ingroup logger_types_files
  */
 #ifndef logger_types_telem_dmtimings_hpp
@@ -22,7 +22,8 @@ namespace MagAOX
 namespace logger
 {
 
-/// Coherent controller statistics; SDK return is not physical DM completion.
+/// Coherent timing statistics; publication intervals retain their producer clock and SDK return is not physical
+/// completion.
 /** \ingroup logger_types */
 struct telem_dmtimings : public flatbuffer_log
 {
@@ -37,7 +38,7 @@ struct telem_dmtimings : public flatbuffer_log
         messageT( const dmTiming::Summary &summary /**< [in] coherent controller-local statistics */ );
     };
 
-    /// Verify the FlatBuffer and its complete stable metric-ID contract.
+    /// Verify the FlatBuffer and complete legacy or current stable metric-ID sets.
     static bool verify( flatlogs::bufferPtrT &buffer /**< [in] complete log entry */,
                         flatlogs::msgLenT     len /**< [in] serialized message length */ );
 
@@ -50,6 +51,8 @@ struct telem_dmtimings : public flatbuffer_log
 
   private:
     static constexpr size_t metricCount = size_t( dmTiming::Metric::count ); ///< Number of stable metric identifiers.
+
+    static constexpr size_t legacyMetricCount = 12; ///< Complete metric set before publication intervals were appended.
 
     /// Serialize one quality-counter population without changing its collection interval.
     static flatbuffers::Offset<DmTimingCounters>
@@ -105,7 +108,8 @@ inline flatbuffers::Offset<DmTimingCounters> telem_dmtimings::counters( flatbuff
 
 inline telem_dmtimings::messageT::messageT( const dmTiming::Summary &summary )
 {
-    static_assert( size_t( dmTiming::Metric::count ) == 12 );
+    static_assert( size_t( dmTiming::Metric::publicationInterval ) == 12 );
+    static_assert( size_t( dmTiming::Metric::count ) == 13 );
 
     builder.ForceDefaults( true ); // Preserve nonfinite input for verification even under fast-math comparisons.
 
@@ -164,8 +168,10 @@ inline bool telem_dmtimings::verify( flatlogs::bufferPtrT &buffer, flatlogs::msg
 
     const auto *record = GetTelem_dmtimings_fb( payload );
 
+    const size_t rows = record->metrics()->size();
+
     if( record->state() < DmTimingAvailability_MIN || record->state() > DmTimingAvailability_MAX ||
-        record->metrics()->size() != metricCount )
+        ( rows != legacyMetricCount && rows != metricCount ) )
     {
         return false;
     }
@@ -188,6 +194,14 @@ inline bool telem_dmtimings::verify( flatlogs::bufferPtrT &buffer, flatlogs::msg
               !mx::math::isFinite( row->min() ) || !mx::math::isFinite( row->max() ) ||
               !mx::math::isFinite( row->span() ) || row->stddev() < 0 || row->min() < 0 || row->mean() < row->min() ||
               row->mean() > row->max() || row->span() < 0 ) )
+        {
+            return false;
+        }
+    }
+
+    for( size_t index = 0; index < legacyMetricCount; ++index )
+    {
+        if( !seen[index] )
         {
             return false;
         }

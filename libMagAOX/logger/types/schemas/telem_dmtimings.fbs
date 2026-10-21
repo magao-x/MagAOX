@@ -16,7 +16,9 @@ enum DmTimingMetric : ubyte
     post = 8,
     throughDelta = 9,
     callback = 10,
-    receiptCallback = 11
+    receiptCallback = 11,
+    // Producer-clock timestamp differences; coverage uses local observation anchors.
+    publicationInterval = 12
 }
 
 enum DmTimingAvailability : ubyte
