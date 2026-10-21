@@ -11,6 +11,7 @@ set -eo pipefail
 #   --fast    capture coverage from the currently existing gcov counters only
 #######################################################
 
+# Describe report modes and the incremental coverage workflow.
 usage()
 {
     cat <<'EOF'
@@ -66,7 +67,9 @@ else
     fi
 fi
 
-lcov --directory . --capture --output-file coverage.info
+# PCH source paths can be recorded relative to an application's build directory.
+lcov --directory . --capture --output-file coverage.info \
+     --resolve-script "$repo_root/tests/coverage/resolve_source"
 
 lcov --remove coverage.info "*/tests/*" "/usr/*" "/sys/*" "/tty/*" \
          --ignore-errors unused,unused \
