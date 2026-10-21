@@ -27,7 +27,13 @@ class Harness : public dmSyncopation
     using dmSyncopation::Fault;
     using dmSyncopation::m_advances;
     using dmSyncopation::m_bounds;
+    using dmSyncopation::m_cameraElement;
     using dmSyncopation::m_cameraFps;
+    using dmSyncopation::m_cameraJitterUs;
+    using dmSyncopation::m_cameraMaxUs;
+    using dmSyncopation::m_cameraMinUs;
+    using dmSyncopation::m_cameraProperty;
+    using dmSyncopation::m_cameraTime;
     using dmSyncopation::m_clean;
     using dmSyncopation::m_combined;
     using dmSyncopation::m_consumed;
@@ -39,6 +45,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_enabled;
     using dmSyncopation::m_epoch;
     using dmSyncopation::m_faultCounts;
+    using dmSyncopation::m_faultInterval;
+    using dmSyncopation::m_faultPeriod;
     using dmSyncopation::m_faults;
     using dmSyncopation::m_indiP_camera;
     using dmSyncopation::m_indiP_enable;
@@ -49,12 +57,15 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_lastMain;
     using dmSyncopation::m_lockFrames;
     using dmSyncopation::m_mappings;
+    using dmSyncopation::m_measuredPeriod;
     using dmSyncopation::m_missed;
     using dmSyncopation::m_notStarted;
     using dmSyncopation::m_now;
     using dmSyncopation::m_period;
+    using dmSyncopation::m_periodSource;
     using dmSyncopation::m_primaryCounter;
     using dmSyncopation::m_primed;
+    using dmSyncopation::m_rateFrames;
     using dmSyncopation::m_reason;
     using dmSyncopation::m_record;
     using dmSyncopation::m_requested;
@@ -65,11 +76,12 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_wait;
     using dmSyncopation::missedStep;
     using dmSyncopation::snapshot;
+    using dmSyncopation::updatePeriod;
     using dmSyncopation::waitUntil;
     using MagAOXApp<true>::config;
     using dev::shmimMonitor<dmSyncopation>::m_imageStream;
 
-    /// Set a stable test instance identity.
+    /// Set a stable test identity and an unopened primary handle.
     Harness();
 
     /// Close only test attachments; the fixture destroys its isolated streams.
@@ -84,7 +96,8 @@ class Harness : public dmSyncopation
 
 Harness::Harness()
 {
-    m_configName = "synco_test";
+    m_configName  = "synco_test";
+    m_imageStream = {};
 }
 
 Harness::~Harness() noexcept
@@ -204,6 +217,10 @@ struct Clock
 
     /// Connect the fake clock and choose feasible synthetic timing bounds.
     static void connect( Harness &scheduler /**< [in,out] isolated scheduler */ );
+
+    /// Publish synthetic primary/combined events before invoking the monitor callback.
+    static void primary( int64_t  observed /**< [in] Absolute virtual observation time. */,
+                         uint64_t count = 1 /**< [in] Genuine publications represented by this callback. */ );
 };
 
 int64_t Clock::now()
@@ -274,6 +291,35 @@ void Clock::connect( Harness &scheduler )
     scheduler.m_bounds.copy        = 3000;
     scheduler.m_bounds.reserve     = 1000;
     scheduler.m_lockFrames         = 2;
+}
+
+void Clock::primary( int64_t observed, uint64_t count )
+{
+    time = observed;
+    app->m_imageStream.md->cnt0 += count;
+    app->m_combined->image()->md->cnt0 += count;
+    REQUIRE( app->processImage( nullptr, dev::shmimT{} ) == 0 );
+}
+
+/// Create a numeric camera acquisition report using seconds for interval statistics.
+pcf::IndiProperty
+cameraTiming( double fps /**< [in] Measured acquisition frequency in Hz. */,
+              bool   statistics = true /**< [in] Include jitter/minimum/maximum acquisition intervals. */ )
+{
+    pcf::IndiProperty packet( pcf::IndiProperty::Number );
+    packet.setDevice( "camwfs" );
+    packet.setName( "fg_timing" );
+    packet.add( pcf::IndiElement( "acq_fps" ) );
+    packet["acq_fps"] = fps;
+    if( statistics )
+    {
+        for( const auto &name : { "acq_jitter", "acq_min", "acq_max" } )
+            packet.add( pcf::IndiElement( name ) );
+        packet["acq_jitter"] = 1.234e-6;
+        packet["acq_min"]    = 490e-6;
+        packet["acq_max"]    = 510e-6;
+    }
+    return packet;
 }
 /// \endcond
 
@@ -368,6 +414,8 @@ TEST_CASE( "syncopation validates configuration before attaching streams", "[dmS
     app.setupConfig();
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
     REQUIRE( app.m_requested == 3 );
+    REQUIRE( app.m_cameraProperty == "fg_timing" );
+    REQUIRE( app.m_cameraElement == "acq_fps" );
     REQUIRE_FALSE( app.m_enabled );
     app.m_destinations = { "dm01disp07", "dm02disp08" };
     REQUIRE( app.loadConfigImpl( app.config ) < 0 );
@@ -689,6 +737,7 @@ TEST_CASE( "syncopation primes despite deterministic wake overshoot", "[dmSyncop
     app.m_bounds.snapshot = 7000;
     app.m_requested       = 2;
     Clock::wakeDelayNs    = 5000;
+    REQUIRE( app.setCallBack_m_indiP_camera( cameraTiming( 2000, false ) ) == 0 );
     REQUIRE( synco::feasible( 500000, 2, app.m_bounds ) );
     for( int cycle = 0; cycle < 40; ++cycle )
     {
@@ -781,6 +830,373 @@ TEST_CASE( "syncopation ignores queued primary notifications around a counter ju
     REQUIRE( app.m_faultCounts[size_t( Harness::Fault::primary )] == 1 );
 }
 
+/// Validate measured acquisition reports, optional seconds-to-microseconds diagnostics and custom property names.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation consumes measured camera acquisition reports", "[dmSyncopation][camera]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::setCallBack_m_indiP_camera(pcf::IndiProperty());
+    dmSyncopation::loadConfigImpl(mx::app::appConfigurator());
+    #endif
+    // clang-format on
+    Harness app;
+    Clock::app  = nullptr;
+    Clock::time = 1000000000;
+    app.m_now   = Clock::now;
+    REQUIRE( app.m_cameraJitterUs == -1 );
+    REQUIRE( app.m_cameraMinUs == -1 );
+    REQUIRE( app.m_cameraMaxUs == -1 );
+    auto packet = cameraTiming( 2000.08 );
+    REQUIRE( app.setCallBack_m_indiP_camera( packet ) == 0 );
+    REQUIRE( app.m_cameraFps.load() == Approx( 2000.08 ) );
+    REQUIRE( app.m_cameraJitterUs == Approx( 1.234 ) );
+    REQUIRE( app.m_cameraMinUs == Approx( 490 ) );
+    REQUIRE( app.m_cameraMaxUs == Approx( 510 ) );
+    const int64_t acceptedTime = app.m_cameraTime.load();
+    REQUIRE( acceptedTime > 0 );
+
+    SECTION( "a subsequent FPS-only report clears obsolete optional statistics" )
+    {
+        REQUIRE( app.setCallBack_m_indiP_camera( cameraTiming( 1900, false ) ) == 0 );
+        REQUIRE( app.m_cameraFps.load() == 1900 );
+        REQUIRE( app.m_cameraTime.load() > acceptedTime );
+        REQUIRE( app.m_cameraJitterUs == -1 );
+        REQUIRE( app.m_cameraMinUs == -1 );
+        REQUIRE( app.m_cameraMaxUs == -1 );
+    }
+    SECTION( "the camera reciprocal is rounded once without callback-rate smoothing" )
+    {
+        app.updatePeriod( Clock::time, 0, true );
+        REQUIRE( app.m_period == std::llround( 1e9 / 2000.08 ) );
+        REQUIRE( std::string( app.m_periodSource ) == "camera acquisition" );
+    }
+    SECTION( "numeric acquisition fields allow surrounding whitespace" )
+    {
+        packet["acq_fps"]    = " 2000.08 \t";
+        packet["acq_jitter"] = " 1.234e-6\n";
+        REQUIRE( app.setCallBack_m_indiP_camera( packet ) == 0 );
+        REQUIRE( app.m_cameraFps.load() == Approx( 2000.08 ) );
+        REQUIRE( app.m_cameraJitterUs == Approx( 1.234 ) );
+        REQUIRE( app.m_cameraTime.load() > acceptedTime );
+    }
+    SECTION( "invalid required and optional values reject the entire report" )
+    {
+        for( double bad : { 0.0,
+                            -1.0,
+                            100001.0,
+                            std::numeric_limits<double>::quiet_NaN(),
+                            std::numeric_limits<double>::infinity() } )
+        {
+            packet["acq_fps"] = bad;
+            INFO( "acq_fps=" << packet["acq_fps"].getValue() );
+            REQUIRE( app.setCallBack_m_indiP_camera( packet ) < 0 );
+            REQUIRE( app.m_cameraFps.load() == Approx( 2000.08 ) );
+            REQUIRE( app.m_cameraTime.load() == acceptedTime );
+        }
+        for( const auto &bad : { "", "invalid", "2000Hz", "nan", "inf", "1e999" } )
+        {
+            packet["acq_fps"] = bad;
+            INFO( "acq_fps=" << bad );
+            REQUIRE( app.setCallBack_m_indiP_camera( packet ) < 0 );
+            REQUIRE( app.m_cameraFps.load() == Approx( 2000.08 ) );
+            REQUIRE( app.m_cameraTime.load() == acceptedTime );
+        }
+        for( const auto &name : { "acq_jitter", "acq_min", "acq_max" } )
+            for( double bad :
+                 { -1.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity() } )
+            {
+                packet       = cameraTiming( 1900 );
+                packet[name] = bad;
+                INFO( name << '=' << packet[name].getValue() );
+                REQUIRE( app.setCallBack_m_indiP_camera( packet ) < 0 );
+                REQUIRE( app.m_cameraFps.load() == Approx( 2000.08 ) );
+                REQUIRE( app.m_cameraTime.load() == acceptedTime );
+                REQUIRE( app.m_cameraJitterUs == Approx( 1.234 ) );
+                REQUIRE( app.m_cameraMinUs == Approx( 490 ) );
+                REQUIRE( app.m_cameraMaxUs == Approx( 510 ) );
+            }
+        for( const auto &name : { "acq_jitter", "acq_min", "acq_max" } )
+            for( const auto &bad : { "", "invalid", "1e-6 trailing", "nan", "inf", "1e999" } )
+            {
+                packet       = cameraTiming( 1900 );
+                packet[name] = bad;
+                INFO( name << '=' << bad );
+                REQUIRE( app.setCallBack_m_indiP_camera( packet ) < 0 );
+                REQUIRE( app.m_cameraFps.load() == Approx( 2000.08 ) );
+                REQUIRE( app.m_cameraTime.load() == acceptedTime );
+                REQUIRE( app.m_cameraJitterUs == Approx( 1.234 ) );
+                REQUIRE( app.m_cameraMinUs == Approx( 490 ) );
+                REQUIRE( app.m_cameraMaxUs == Approx( 510 ) );
+            }
+        packet            = cameraTiming( 1900 );
+        packet["acq_min"] = 1e-3;
+        REQUIRE( app.setCallBack_m_indiP_camera( packet ) < 0 );
+        REQUIRE( app.m_cameraTime.load() == acceptedTime );
+    }
+    SECTION( "missing acquisition rate and mismatched property identities are rejected" )
+    {
+        pcf::IndiProperty missing( pcf::IndiProperty::Number );
+        missing.setDevice( "camwfs" );
+        missing.setName( "fg_timing" );
+        missing.add( pcf::IndiElement( "acq_jitter" ) );
+        missing["acq_jitter"] = 1e-6;
+        REQUIRE( app.setCallBack_m_indiP_camera( missing ) < 0 );
+        packet.setDevice( "other_camera" );
+        REQUIRE( app.setCallBack_m_indiP_camera( packet ) < 0 );
+        packet.setDevice( "camwfs" );
+        packet.setName( "fps" );
+        REQUIRE( app.setCallBack_m_indiP_camera( packet ) < 0 );
+        pcf::IndiProperty text( pcf::IndiProperty::Text );
+        text.setDevice( "camwfs" );
+        text.setName( "fg_timing" );
+        text.add( pcf::IndiElement( "acq_fps" ) );
+        text["acq_fps"] = "2000";
+        REQUIRE( app.setCallBack_m_indiP_camera( text ) < 0 );
+        REQUIRE( app.m_cameraTime.load() == acceptedTime );
+    }
+    SECTION( "configured camera property and element select the received measurement" )
+    {
+        app.setupConfig();
+        char path[] = "/tmp/dm-synco-camera-XXXXXX";
+        int  fd     = mkstemp( path );
+        REQUIRE( fd >= 0 );
+        close( fd );
+        {
+            std::ofstream settings( path );
+            settings << "[tracking]\ncameraProperty=measurement\ncameraElement=rate\n";
+        }
+        app.config.readConfig( path );
+        std::remove( path );
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        REQUIRE( app.m_cameraProperty == "measurement" );
+        REQUIRE( app.m_cameraElement == "rate" );
+        REQUIRE( app.setCallBack_m_indiP_camera( packet ) < 0 );
+        packet.setName( "measurement" );
+        REQUIRE( app.setCallBack_m_indiP_camera( packet ) < 0 );
+        packet.add( pcf::IndiElement( "rate" ) );
+        packet["rate"] = 1750.0;
+        REQUIRE( app.setCallBack_m_indiP_camera( packet ) == 0 );
+        REQUIRE( app.m_cameraFps.load() == 1750 );
+    }
+}
+
+/// Use the acquisition period as a stable reference without learning callback-to-callback phase jitter.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation camera period survives callback jitter", "[dmSyncopation][camera]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage(nullptr, dev::shmimT());
+    dmSyncopation::updatePeriod(0, 0, true);
+    #endif
+    // clang-format on
+    Streams streams;
+    Harness app;
+    app.attach();
+    Clock::connect( app );
+    app.m_bounds    = synco::Bounds{};
+    app.m_requested = 2;
+    REQUIRE( app.setCallBack_m_indiP_camera( cameraTiming( 2000 ) ) == 0 );
+    const std::array<int64_t, 4> jitter{ 0, 8000, 0, -8000 };
+    for( int cycle = 0; cycle < 80; ++cycle )
+    {
+        INFO( "jitter cycle " << cycle );
+        Clock::primary( 1000000000 + cycle * 500000 + jitter[cycle % jitter.size()] );
+        REQUIRE( app.m_period == 500000 );
+        REQUIRE( std::string( app.m_periodSource ) == "camera acquisition" );
+    }
+    REQUIRE( app.m_faults == 0 );
+    REQUIRE( app.m_primed );
+    REQUIRE( app.m_delivered > 60 );
+    REQUIRE( app.m_bounds.early == 20000 );
+    REQUIRE( app.m_bounds.observation == 5000 );
+}
+
+/// Reject an isolated late observation without replacing the reference period or creating a follow-on fault.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation isolated phase outlier does not become the next period", "[dmSyncopation][camera]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage(nullptr, dev::shmimT());
+    #endif
+    // clang-format on
+    Streams streams;
+    Harness app;
+    app.attach();
+    Clock::connect( app );
+    app.m_bounds      = synco::Bounds{};
+    app.m_requested   = 2;
+    const bool camera = GENERATE( false, true );
+    if( camera )
+        REQUIRE( app.setCallBack_m_indiP_camera( cameraTiming( 2000 ) ) == 0 );
+    for( int cycle = 0; cycle < 40; ++cycle )
+        Clock::primary( 1000000000 + cycle * 500000 );
+    REQUIRE( app.m_primed );
+    REQUIRE( app.m_faults == 0 );
+    const int64_t late = 1000000000 + 39 * 500000 + 525000;
+    Clock::primary( late );
+    REQUIRE( app.m_faults == 1 );
+    REQUIRE( app.m_period == 500000 );
+    REQUIRE( app.m_faultInterval == 525000 );
+    REQUIRE( app.m_faultPeriod == 500000 );
+    REQUIRE( app.m_faultInterval - app.m_faultPeriod == 25000 );
+    REQUIRE_FALSE( app.m_primed );
+    for( int cycle = 1; cycle <= 8; ++cycle )
+    {
+        Clock::primary( late + cycle * 500000 );
+        REQUIRE( app.m_period == 500000 );
+        REQUIRE( app.m_faults == 1 );
+    }
+    REQUIRE( app.m_primed );
+    REQUIRE( app.m_scheduleState == synco::armed );
+    REQUIRE( app.m_faultInterval == 525000 );
+    REQUIRE( app.m_faultPeriod == 500000 );
+}
+
+/// Qualify real primary-rate changes across phase resets while excluding missed counters and incoherent windows.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation fallback qualifies a coherent primary period", "[dmSyncopation][camera]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage(nullptr, dev::shmimT());
+    dmSyncopation::updatePeriod(0, 0, true);
+    #endif
+    // clang-format on
+    Streams streams;
+    Harness app;
+    app.attach();
+    Clock::connect( app );
+    app.m_bounds    = synco::Bounds{};
+    app.m_requested = 2;
+    SECTION( "a sustained genuine rate change eventually rearms at its qualified mean" )
+    {
+        for( int cycle = 0; cycle < 40; ++cycle )
+            Clock::primary( 1000000000 + cycle * 500000 );
+        REQUIRE( app.m_period == 500000 );
+        REQUIRE( std::string( app.m_periodSource ) == "primary window" );
+        const int64_t last = 1000000000 + 39 * 500000;
+        for( unsigned cycle = 1; cycle <= app.m_rateFrames + 8; ++cycle )
+        {
+            Clock::primary( last + cycle * 600000 );
+            if( cycle < app.m_rateFrames )
+                REQUIRE( app.m_period == 500000 );
+        }
+        REQUIRE( app.m_period == 600000 );
+        REQUIRE( app.m_measuredPeriod == 600000 );
+        REQUIRE( std::string( app.m_periodSource ) == "primary window" );
+        REQUIRE( app.m_primed );
+        REQUIRE( app.m_scheduleState == synco::armed );
+        REQUIRE( app.m_bounds.early == 20000 );
+    }
+    SECTION( "counter gaps cannot qualify their longer observation interval as a slow loop" )
+    {
+        for( unsigned cycle = 0; cycle < app.m_rateFrames + 5; ++cycle )
+        {
+            Clock::primary( 1000000000 + cycle * 1000000, 2 );
+            REQUIRE( app.m_period == 500000 );
+            REQUIRE( app.m_measuredPeriod == 0 );
+            REQUIRE( std::string( app.m_periodSource ) == "nominal" );
+        }
+        REQUIRE_FALSE( app.m_primed );
+        REQUIRE( app.m_delivered == 0 );
+    }
+    SECTION( "a wide interval range cannot qualify until a complete coherent window follows" )
+    {
+        app.m_rateFrames = 4;
+        int64_t observed = Clock::time;
+        for( int interval : { 600000, 650000, 600000, 650000, 600000, 650000 } )
+        {
+            observed += interval;
+            app.updatePeriod( observed, interval, true );
+            REQUIRE( app.m_measuredPeriod == 0 );
+            REQUIRE( app.m_period == 500000 );
+        }
+        for( int cycle = 0; cycle < 4; ++cycle )
+        {
+            observed += 600000;
+            app.updatePeriod( observed, 600000, true );
+        }
+        REQUIRE( app.m_measuredPeriod == 600000 );
+        REQUIRE( app.m_period == 600000 );
+    }
+}
+
+/// Expire camera timing at five seconds and reacquire with the qualified primary or nominal reference.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation expires camera reports without relaxing timing bounds", "[dmSyncopation][camera]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::updatePeriod(0, 0, true);
+    #endif
+    // clang-format on
+    Streams streams;
+    Harness app;
+    app.attach();
+    Clock::connect( app );
+    app.m_rateFrames = 4;
+    REQUIRE( app.setCallBack_m_indiP_camera( cameraTiming( 2500 ) ) == 0 );
+    const int64_t receipt = app.m_cameraTime.load();
+    app.updatePeriod( receipt, 0, true );
+    REQUIRE( app.m_period == 400000 );
+    REQUIRE( std::string( app.m_periodSource ) == "camera acquisition" );
+    const auto bounds = app.m_bounds;
+    SECTION( "a future receipt is not a valid reference on this monotonic timeline" )
+    {
+        Clock::time = receipt - 101;
+        app.updatePeriod( receipt - 1, 0, true );
+        REQUIRE( app.m_period == 500000 );
+        REQUIRE( std::string( app.m_periodSource ) == "nominal" );
+    }
+    SECTION( "a report received after callback entry is still current under the cycle lock" )
+    {
+        Clock::time = receipt + 1000;
+        app.updatePeriod( receipt - 1000, 0, true );
+        REQUIRE( app.m_period == 400000 );
+        REQUIRE( std::string( app.m_periodSource ) == "camera acquisition" );
+    }
+    SECTION( "a current camera report wins until expiry then falls back to nominal" )
+    {
+        Clock::time = receipt + 4999999899;
+        app.updatePeriod( receipt + 4999999999, 0, true );
+        REQUIRE( app.m_period == 400000 );
+        app.m_primed        = true;
+        app.m_scheduleState = synco::armed;
+        app.m_lastMain      = receipt + 4999999999;
+        Clock::time         = receipt + 4999999900;
+        app.updatePeriod( receipt + 5000000000, 0, true );
+        REQUIRE( app.m_period == 500000 );
+        REQUIRE( std::string( app.m_periodSource ) == "nominal" );
+        REQUIRE_FALSE( app.m_primed );
+        REQUIRE( app.m_scheduleState != synco::armed );
+        REQUIRE( app.m_lastMain == 0 );
+        REQUIRE( app.m_faults == 0 );
+    }
+    SECTION( "an expired report uses an already qualified primary window" )
+    {
+        for( int cycle = 1; cycle <= 4; ++cycle )
+            app.updatePeriod( receipt + cycle * 600000, 600000, true );
+        REQUIRE( app.m_measuredPeriod == 600000 );
+        REQUIRE( app.m_period == 400000 );
+        app.m_primed        = true;
+        app.m_scheduleState = synco::armed;
+        Clock::time         = receipt + 4999999901;
+        app.updatePeriod( receipt + 5000000001, 600000, true );
+        REQUIRE( app.m_period == 600000 );
+        REQUIRE( std::string( app.m_periodSource ) == "primary window" );
+        REQUIRE_FALSE( app.m_primed );
+        REQUIRE( app.m_faults == 0 );
+    }
+    REQUIRE( app.m_bounds.early == bounds.early );
+    REQUIRE( app.m_bounds.observation == bounds.observation );
+    REQUIRE( app.m_bounds.delivery == bounds.delivery );
+    REQUIRE( app.m_bounds.keepout == bounds.keepout );
+    REQUIRE( app.m_bounds.guard == bounds.guard );
+}
+
 /// Validate actual INDI callback behavior, including atomic updates and disabling before publication.
 /** \ingroup dmSyncopation_unit_test */
 TEST_CASE( "syncopation INDI callbacks enforce disabled settings", "[dmSyncopation]" )
@@ -819,12 +1235,12 @@ TEST_CASE( "syncopation INDI callbacks enforce disabled settings", "[dmSyncopati
     REQUIRE( app.newCallBack_m_indiP_settings( settings ) < 0 );
     pcf::IndiProperty fps( pcf::IndiProperty::Number );
     fps.setDevice( "camwfs" );
-    fps.setName( "fps" );
-    fps.add( pcf::IndiElement( "current" ) );
-    fps["current"] = 2000.08;
+    fps.setName( "fg_timing" );
+    fps.add( pcf::IndiElement( "acq_fps" ) );
+    fps["acq_fps"] = 2000.08;
     REQUIRE( app.setCallBack_m_indiP_camera( fps ) == 0 );
     REQUIRE( app.m_cameraFps.load() == Approx( 2000.08 ) );
-    fps["current"] = std::numeric_limits<double>::infinity();
+    fps["acq_fps"] = std::numeric_limits<double>::infinity();
     REQUIRE( app.setCallBack_m_indiP_camera( fps ) < 0 );
 }
 

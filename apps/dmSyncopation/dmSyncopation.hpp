@@ -5,8 +5,10 @@
 #define dmSyncopation_hpp
 
 #include <atomic>
+#include <cstring>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <sys/random.h>
 
 #include <mx/improc/milkImage.hpp>
@@ -80,29 +82,35 @@ class dmSyncopation : public MagAOXApp<true>,
     std::vector<std::string> m_destinations{ "dm01disp07", "dm01disp08" }; ///< Ordered destination mapping.
     std::string              m_combinedName{ "dm01disp" };                 ///< dmcomb output, observation only.
     std::string              m_timingName; ///< Integer timing record; defaults to instance name plus _timing.
-    std::string              m_cameraDevice{ "camwfs" }; ///< Device publishing fps.current.
-    int                      m_requested{ 3 };           ///< Fixed requested count, including passive step 0.
-    int                      m_primarySemaphore{ 5 };    ///< Required reader semaphore; reject allocation fallback.
+    std::string              m_cameraDevice{ "camwfs" };      ///< Device publishing measured acquisition timing.
+    std::string              m_cameraProperty{ "fg_timing" }; ///< Measured camera timing property.
+    std::string              m_cameraElement{ "acq_fps" };    ///< Measured acquisition-rate element.
+    int                      m_requested{ 3 };                ///< Fixed requested count, including passive step 0.
+    int                      m_primarySemaphore{ 5 }; ///< Required reader semaphore; reject allocation fallback.
     unsigned                 m_lockFrames{ 32 };  ///< Clean main observations before preparing the first active cycle.
     unsigned                 m_failureLimit{ 3 }; ///< Consecutive original event failures before reacquisition.
-    unsigned                 m_rateFrames{ 32 };  ///< Sustained nominal cadence violation persistence.
-    double                   m_nominalRate{ 2000 };   ///< Acquisition fallback, Hz.
-    double                   m_maxCadence{ 6000 };    ///< Nominal sanity rating, Hz, including step 0.
-    double                   m_rateTolerance{ 0.01 }; ///< Relative cadence-rating tolerance.
-    double                   m_minRate{ 500 };        ///< Minimum accepted main rate, Hz.
-    double                   m_maxRate{ 4000 };       ///< Maximum accepted main rate, Hz.
-    double                   m_gain{ 0.1 };           ///< Per-event wait integrator gain.
-    double                   m_maxAdvanceUs{ 20 };    ///< Absolute wait correction limit, us.
-    double                   m_outputTimeoutUs{ 50 }; ///< Combination watchdog, separate from delivery allowance.
-    synco::Bounds            m_bounds;                ///< Explicit copy, observation and reader bounds, ns.
+    unsigned      m_rateFrames{ 32 }; ///< Cadence violation persistence and primary-rate qualification interval count.
+    double        m_nominalRate{ 2000 };   ///< Acquisition fallback, Hz.
+    double        m_maxCadence{ 6000 };    ///< Nominal sanity rating, Hz, including step 0.
+    double        m_rateTolerance{ 0.01 }; ///< Relative cadence-rating tolerance.
+    double        m_minRate{ 500 };        ///< Minimum accepted main rate, Hz.
+    double        m_maxRate{ 4000 };       ///< Maximum accepted main rate, Hz.
+    double        m_gain{ 0.1 };           ///< Per-event wait integrator gain.
+    double        m_maxAdvanceUs{ 20 };    ///< Absolute wait correction limit, us.
+    double        m_outputTimeoutUs{ 50 }; ///< Combination watchdog, separate from delivery allowance.
+    synco::Bounds m_bounds;                ///< Explicit copy, observation and reader bounds, ns.
     ///@}
 
-    std::mutex           m_cycleMutex;       ///< Serializes lifecycle/configuration with a complete callback.
-    std::atomic<bool>    m_enabled{ false }; ///< Cancellation request, checked at bounded waits and publications.
-    std::atomic<double>  m_cameraFps{ 0 };   ///< Last accepted external FPS report.
-    std::atomic<int64_t> m_cameraTime{ 0 };  ///< Receipt time for camera-report expiry.
-    std::vector<Mapping> m_mappings;         ///< Open mappings, fixed while attached.
-    std::unique_ptr<syncoImage> m_combined;  ///< Read-only combined-output attachment.
+    std::mutex           m_cycleMutex;           ///< Serializes lifecycle/configuration with a complete callback.
+    std::atomic<bool>    m_enabled{ false };     ///< Cancellation request, checked at bounded waits and publications.
+    std::atomic<double>  m_cameraFps{ 0 };       ///< Last accepted external FPS report.
+    std::atomic<int64_t> m_cameraTime{ 0 };      ///< Receipt time for camera-report expiry.
+    double               m_cameraJitterUs{ -1 }; ///< Acquisition interval standard deviation, us; -1 when omitted.
+    double               m_cameraMinUs{ -1 };    ///< Minimum reported acquisition interval, us; -1 when omitted.
+    double               m_cameraMaxUs{ -1 };    ///< Maximum reported acquisition interval, us; -1 when omitted.
+    int64_t m_lastCameraPoll{ 0 };          ///< Last slow-loop subscription refresh; never used by the timing callback.
+    std::vector<Mapping>        m_mappings; ///< Open mappings, fixed while attached.
+    std::unique_ptr<syncoImage> m_combined; ///< Read-only combined-output attachment.
     ino_t                       m_combinedInode{ 0 }; ///< Combined-output file identity.
     IMAGE                       m_timing{};           ///< Owned timing publisher handle, never a DM input.
     ino_t                       m_timingInode{ 0 };   ///< File identity of the published provider schedule.
@@ -115,7 +123,9 @@ class dmSyncopation : public MagAOXApp<true>,
     int         m_scheduleState{ synco::invalid }; ///< Provider-facing acquisition/armed state.
     const char *m_reason{ "disabled" };            ///< Static health reason, formatted only by appLogic.
     const char *m_lastFaultReason{ "none" };       ///< Latched fault cause, retained while the current phase changes.
-    int64_t     m_lastFaultNs{ 0 }; ///< Monotonic timestamp of the latched synchronization/resource fault.
+    int64_t     m_lastFaultNs{ 0 };   ///< Monotonic timestamp of the latched synchronization/resource fault.
+    int64_t     m_faultInterval{ 0 }; ///< Latched interval at the latest interval fault; zero for other faults.
+    int64_t     m_faultPeriod{ 0 };   ///< Prediction used at the latest interval fault; zero for other faults.
     std::array<uint64_t, size_t( Fault::count )> m_faultCounts{}; ///< Fixed per-cause fault totals.
     bool     m_havePrimaryCounter{ false }; ///< Last-seen counter is initialized for the current primary attachment.
     uint64_t m_primaryCounter{ 0 };         ///< Last seen primary counter, retained through reacquisition.
@@ -125,26 +135,33 @@ class dmSyncopation : public MagAOXApp<true>,
     uint64_t m_duplicatePosts{ 0 };  ///< Unchanged-counter callbacks ignored while draining queued notifications.
     uint64_t m_consumed{ 0 };        ///< Last confirmed combined counter.
     int64_t  m_lastMain{ 0 };        ///< Previous main callback timestamp, monotonic ns.
-    int64_t  m_period{ 500000 };     ///< Filtered main period, monotonic ns.
-    int64_t  m_submission{ 0 };      ///< Actual last submission, or conservative main-publication upper bound.
-    int64_t  m_epoch{ 0 };           ///< Restart-unique timing record identity.
-    int64_t  m_generation{ 1 };      ///< Changes on invalidation/reacquisition.
-    unsigned m_clean{ 0 };           ///< Consecutive clean primary observations.
-    unsigned m_failures{ 0 };        ///< Original consecutive timing failures; dependent cancellations do not count.
-    unsigned m_rateViolations{ 0 };  ///< Consecutive nominal rate incompatibilities.
-    int      m_feasible{ 0 };        ///< Reported maximum feasible count, never an automatic count selector.
-    uint64_t m_delivered{ 0 };       ///< Confirmed later-step combinations.
-    uint64_t m_mainDelivered{ 0 };   ///< Confirmed primary combinations, separate from extra updates.
-    uint64_t m_reportedDelivered{ 0 }; ///< Receipt count at the previous slow status update.
-    int64_t  m_reportTime{ 0 };        ///< Monotonic reference for measured delivered cadence.
-    double   m_deliveredHz{ 0 };       ///< Main plus auxiliary confirmed cadence over the last status interval.
-    uint64_t m_missed{ 0 };            ///< Original timing failures.
-    uint64_t m_faults{ 0 };            ///< Synchronization/resource invalidations.
-    uint64_t m_cached{ 0 };            ///< Source fallback uses, not deadline misses.
-    uint64_t m_notStarted{ 0 };        ///< Step-0 copies suppressed before mutation.
-    uint64_t m_copiedLate{ 0 };        ///< Step-0 copies completed after the effective cutoff.
-    int64_t  m_snapshotMax{ 0 };       ///< Observed maximum complete snapshot batch time.
-    int64_t  m_copyMax{ 0 };           ///< Observed maximum complete destination copy time.
+    int64_t  m_previousPrimaryTime{ 0 };     ///< Last distinct observation, retained across phase reacquisition.
+    int64_t  m_rateWindowStart{ 0 };         ///< First timestamp of the candidate primary-rate window.
+    int64_t  m_rateWindowMin{ 0 };           ///< Shortest sequential interval in the candidate window.
+    int64_t  m_rateWindowMax{ 0 };           ///< Longest sequential interval in the candidate window.
+    unsigned m_rateWindowCount{ 0 };         ///< Number of coherent intervals accumulated for rate qualification.
+    int64_t  m_measuredPeriod{ 0 };          ///< Most recent qualified primary-window mean period, ns.
+    int64_t  m_period{ 500000 };             ///< Selected camera, qualified primary or configured period, ns.
+    const char *m_periodSource{ "nominal" }; ///< Current period reference, independent of primary phase.
+    int64_t     m_submission{ 0 };           ///< Actual last submission, or conservative main-publication upper bound.
+    int64_t     m_epoch{ 0 };                ///< Restart-unique timing record identity.
+    int64_t     m_generation{ 1 };           ///< Changes on invalidation/reacquisition.
+    unsigned    m_clean{ 0 };                ///< Consecutive clean primary observations.
+    unsigned    m_failures{ 0 };       ///< Original consecutive timing failures; dependent cancellations do not count.
+    unsigned    m_rateViolations{ 0 }; ///< Consecutive nominal rate incompatibilities.
+    int         m_feasible{ 0 };       ///< Reported maximum feasible count, never an automatic count selector.
+    uint64_t    m_delivered{ 0 };      ///< Confirmed later-step combinations.
+    uint64_t    m_mainDelivered{ 0 };  ///< Confirmed primary combinations, separate from extra updates.
+    uint64_t    m_reportedDelivered{ 0 }; ///< Receipt count at the previous slow status update.
+    int64_t     m_reportTime{ 0 };        ///< Monotonic reference for measured delivered cadence.
+    double      m_deliveredHz{ 0 };       ///< Main plus auxiliary confirmed cadence over the last status interval.
+    uint64_t    m_missed{ 0 };            ///< Original timing failures.
+    uint64_t    m_faults{ 0 };            ///< Synchronization/resource invalidations.
+    uint64_t    m_cached{ 0 };            ///< Source fallback uses, not deadline misses.
+    uint64_t    m_notStarted{ 0 };        ///< Step-0 copies suppressed before mutation.
+    uint64_t    m_copiedLate{ 0 };        ///< Step-0 copies completed after the effective cutoff.
+    int64_t     m_snapshotMax{ 0 };       ///< Observed maximum complete snapshot batch time.
+    int64_t     m_copyMax{ 0 };           ///< Observed maximum complete destination copy time.
     std::array<int64_t, synco::maxSteps> m_advances{};  ///< Independent bounded wait integrators.
     std::array<int64_t, synco::maxSteps> m_residuals{}; ///< Latest actual-minus-target timings, ns.
     int64_t ( *m_now )(){ synco::monotonicNs };         ///< Local clock adapter for deterministic tests.
@@ -209,7 +226,7 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Validate an atomic disabled-only timing/count setting update.
     INDI_NEWCALLBACK_DECL( dmSyncopation, m_indiP_settings );
 
-    /// Accept the configured camera's finite positive fps.current value.
+    /// Accept measured camera FPS and optional acquisition statistics as one coherent report.
     INDI_SETCALLBACK_DECL( dmSyncopation, m_indiP_camera );
 
   protected:
@@ -221,6 +238,11 @@ class dmSyncopation : public MagAOXApp<true>,
 
     /// Check shape/counter ownership, optionally including on-disk stream identity.
     bool resourcesValid( bool files /**< [in] include bounded-cycle-start inode checks */ );
+
+    /// Select a measured period without learning individual callback outliers as rate changes.
+    void updatePeriod( int64_t observed /**< [in] distinct primary observation time */,
+                       int64_t interval /**< [in] interval from the prior distinct observation, or zero */,
+                       bool    sequential /**< [in] whether primary counters progressed by exactly one */ );
 
     /// Invalidate scheduling while retaining the last complete contributions.
     void
@@ -284,7 +306,9 @@ inline void dmSyncopation::setupConfig()
         { "streams.destinations", "Ordered numbered DM destinations; sources append _aux; first triggers." },
         { "streams.combined", "Combined output to observe." },
         { "streams.timing", "Same-host signed-int64 schedule stream." },
-        { "tracking.cameraDevice", "Camera device publishing fps.current." },
+        { "tracking.cameraDevice", "Camera device publishing measured acquisition timing." },
+        { "tracking.cameraProperty", "Measured camera timing property." },
+        { "tracking.cameraElement", "Measured camera FPS element." },
         { "scheduler.maxSubframes", "Fixed requested steps, including passive step zero (1-16)." },
         { "scheduler.maxCadenceHz", "Nominal total cadence sanity rating, Hz." },
         { "scheduler.keepoutUs", "Controller processing/last-reader bound, us." },
@@ -303,7 +327,7 @@ inline void dmSyncopation::setupConfig()
         { "tracking.observationLagUs", "Qualified maximum publication-to-callback lag, us." },
         { "tracking.lockFrames", "Clean main observations before priming." },
         { "tracking.rateTolerance", "Relative nominal cadence tolerance." },
-        { "tracking.rateFrames", "Persistent cadence violation count." },
+        { "tracking.rateFrames", "Cadence violation persistence and primary-rate qualification interval count." },
         { "tracking.primarySemaphore", "Required monitor reader index; fallback is rejected." },
         { "recovery.consecutiveMisses", "Consecutive original missed steps before reacquisition." },
         { "feedback.gain", "Independent per-step wait integrator gain (0-1)." },
@@ -332,6 +356,8 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_combinedName, "streams.combined" );
     config( m_timingName, "streams.timing" );
     config( m_cameraDevice, "tracking.cameraDevice" );
+    config( m_cameraProperty, "tracking.cameraProperty" );
+    config( m_cameraElement, "tracking.cameraElement" );
     config( m_requested, "scheduler.maxSubframes" );
     config( m_maxCadence, "scheduler.maxCadenceHz" );
     config( m_nominalRate, "tracking.nominalMainRateHz" );
@@ -378,7 +404,8 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         m_maxAdvanceUs > 1000 || !finite( m_outputTimeoutUs ) || m_outputTimeoutUs <= 0 ||
         m_outputTimeoutUs > 1000000 || !m_lockFrames || !m_failureLimit || !m_rateFrames || m_primarySemaphore < 0 ||
         m_primarySemaphore == 9 || m_primarySemaphore >= SEMAPHORE_MAXVAL || m_bounds.copy == 0 ||
-        m_bounds.snapshot == 0 || m_bounds.visibility == 0 || m_bounds.reserve == 0 )
+        m_bounds.snapshot == 0 || m_bounds.visibility == 0 || m_bounds.reserve == 0 ||
+        ( !m_cameraDevice.empty() && ( m_cameraProperty.empty() || m_cameraElement.empty() ) ) )
         return -1;
     std::vector<std::string> names{ shmimMonitorT::m_shmimName, m_combinedName, m_timingName };
     for( const auto &name : m_destinations )
@@ -568,6 +595,56 @@ inline bool dmSyncopation::resourcesValid( bool files )
     return true;
 }
 
+inline void dmSyncopation::updatePeriod( int64_t observed, int64_t interval, bool sequential )
+{
+    if( !sequential || interval < int64_t( 1e9 / m_maxRate ) || interval > int64_t( 1e9 / m_minRate ) )
+    {
+        m_rateWindowCount = 0;
+        if( !sequential )
+            m_measuredPeriod = 0;
+    }
+    else
+    {
+        const int64_t shortest = std::min( m_rateWindowMin, interval );
+        const int64_t longest  = std::max( m_rateWindowMax, interval );
+        if( !m_rateWindowCount || longest - shortest > 2 * m_bounds.early )
+        {
+            m_rateWindowStart = observed - interval;
+            m_rateWindowMin   = interval;
+            m_rateWindowMax   = interval;
+            m_rateWindowCount = 0;
+        }
+        else
+        {
+            m_rateWindowMin = shortest;
+            m_rateWindowMax = longest;
+        }
+        if( ++m_rateWindowCount >= m_rateFrames )
+        {
+            m_measuredPeriod  = ( observed - m_rateWindowStart ) / m_rateWindowCount;
+            m_rateWindowCount = 0;
+        }
+    }
+    const auto cameraTime    = m_cameraTime.load();
+    const auto cameraFps     = m_cameraFps.load();
+    const auto referenceTime = m_now();
+    const bool camera = cameraTime > 0 && referenceTime >= cameraTime && referenceTime - cameraTime < 5000000000LL &&
+                        cameraFps >= m_minRate && cameraFps <= m_maxRate;
+    const char   *source = camera ? "camera acquisition" : ( m_measuredPeriod > 0 ? "primary window" : "nominal" );
+    const int64_t period =
+        camera ? int64_t( std::llround( 1e9 / cameraFps ) )
+               : ( m_measuredPeriod > 0 ? m_measuredPeriod : int64_t( std::llround( 1e9 / m_nominalRate ) ) );
+    if( std::strcmp( source, m_periodSource ) != 0 || period < m_period - m_bounds.early ||
+        period > m_period + m_bounds.early )
+    {
+        invalidate( m_enabled ? "period reference changed" : "disabled" );
+        m_lastMain       = 0;
+        m_trackingOutput = false;
+    }
+    m_period       = period;
+    m_periodSource = source;
+}
+
 inline void dmSyncopation::invalidate( const char *reason, Fault fault, bool resetFeedback )
 {
     if( fault != Fault::none )
@@ -576,6 +653,8 @@ inline void dmSyncopation::invalidate( const char *reason, Fault fault, bool res
         ++m_faultCounts[size_t( fault )];
         m_lastFaultReason = reason;
         m_lastFaultNs     = m_now();
+        m_faultInterval   = 0;
+        m_faultPeriod     = 0;
         m_trackingOutput  = false;
         m_lastMain        = 0;
     }
@@ -876,9 +955,12 @@ inline int dmSyncopation::allocate( const dev::shmimT &tag )
         return -1;
     }
     invalidate( "acquiring resources" );
-    m_lastMain           = 0;
-    m_primaryCounter     = shmimMonitorT::m_imageStream.md->cnt0;
-    m_havePrimaryCounter = true;
+    m_lastMain            = 0;
+    m_primaryCounter      = shmimMonitorT::m_imageStream.md->cnt0;
+    m_havePrimaryCounter  = true;
+    m_previousPrimaryTime = 0;
+    m_rateWindowCount     = 0;
+    m_measuredPeriod      = 0;
     openResources(); // Other streams may appear after the primary; callbacks retry while unarmed.
     return 0;
 }
@@ -916,6 +998,9 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
     m_lastPrimaryDelta    = m_havePrimaryCounter ? int64_t( counter ) - int64_t( m_primaryCounter ) : 0;
     m_primaryCounter      = counter; // Adopt jumps/resets once; queued duplicates must not re-enter acquisition.
     m_havePrimaryCounter  = true;
+    m_lastPrimaryInterval = m_previousPrimaryTime ? observed - m_previousPrimaryTime : 0;
+    m_previousPrimaryTime = observed;
+    updatePeriod( observed, m_lastPrimaryInterval, sequential );
     if( !m_enabled )
     {
         m_lastMain       = 0;
@@ -924,7 +1009,6 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
         return 0;
     }
     const int64_t previous = m_lastMain;
-    m_lastPrimaryInterval  = previous ? observed - previous : 0;
     if( !sequential )
     {
         invalidate( "primary counter jump/reset", Fault::primary );
@@ -935,17 +1019,13 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
           observed - previous > int64_t( 1e9 / m_minRate ) || observed < previous + m_period - m_bounds.early ||
           observed > previous + m_period + m_bounds.early ) )
     {
-        if( observed > previous && observed - previous >= int64_t( 1e9 / m_maxRate ) &&
-            observed - previous <= int64_t( 1e9 / m_minRate ) )
-            m_period =
-                observed - previous; // Reacquire an actual rate change; never learn a counter gap as a slower loop.
         invalidate( "primary interval anomaly", Fault::primary );
+        m_faultInterval = observed - previous;
+        m_faultPeriod   = m_period;
         return 0;
     }
     m_lastMain   = observed;
     m_submission = observed; // Conservative upper bound on the current main's publication.
-    if( previous )
-        m_period = ( 7 * m_period + observed - previous ) / 8;
     if( !m_trackingOutput )
     {
         // The current main may already be combined, or still pending. Drain its qualified
@@ -971,10 +1051,8 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
     }
     ++m_mainDelivered;
     ++m_clean;
-    m_feasible     = synco::maximumSteps( m_period, m_bounds );
-    double nominal = previous ? 1e9 / m_period : m_nominalRate;
-    if( observed - m_cameraTime < 5000000000LL && m_cameraFps > 0 )
-        nominal = std::min( nominal, m_cameraFps.load() );
+    m_feasible           = synco::maximumSteps( m_period, m_bounds );
+    const double nominal = 1e9 / m_period;
     if( nominal * m_requested > m_maxCadence * ( 1 + m_rateTolerance ) )
         ++m_rateViolations;
     else
@@ -1036,21 +1114,34 @@ inline int dmSyncopation::appStartup()
     }
     REG_INDI_NEWPROP_NOCB( m_indiP_status, "timing", pcf::IndiProperty::Number );
     m_indiP_status.setPerm( pcf::IndiProperty::ReadOnly );
-    for( const auto &name :
-         { "mainHz",           "cameraHz",       "plannedHz",       "deliveredHz",    "delivered",
-           "requested",        "active",         "feasible",        "missed",         "faults",
-           "cached",           "notStarted",     "copiedLate",      "snapshotMaxUs",  "copyMaxUs",
-           "primaryFaults",    "resourceFaults", "outputFaults",    "triggerFaults",  "duplicatePosts",
-           "step0WakeUs",      "step0WakeMaxUs", "step0AdvanceUs",  "copyBudgetUs",   "snapshotBudgetUs",
-           "lastPrimaryDelta", "lastIntervalUs", "lastOutputDelta", "lastFaultAgeSec" } )
+    for( const auto &name : { "mainHz",           "cameraHz",
+                              "plannedHz",        "deliveredHz",
+                              "delivered",        "requested",
+                              "active",           "feasible",
+                              "missed",           "faults",
+                              "cached",           "notStarted",
+                              "copiedLate",       "snapshotMaxUs",
+                              "copyMaxUs",        "primaryFaults",
+                              "resourceFaults",   "outputFaults",
+                              "triggerFaults",    "duplicatePosts",
+                              "step0WakeUs",      "step0WakeMaxUs",
+                              "step0AdvanceUs",   "copyBudgetUs",
+                              "snapshotBudgetUs", "lastPrimaryDelta",
+                              "lastIntervalUs",   "lastOutputDelta",
+                              "lastFaultAgeSec",  "cameraJitterUs",
+                              "cameraMinUs",      "cameraMaxUs",
+                              "cameraAgeSec",     "primaryMeasuredHz",
+                              "faultIntervalUs",  "faultPeriodUs",
+                              "faultResidualUs" } )
         m_indiP_status.add( pcf::IndiElement( name ) );
     REG_INDI_NEWPROP_NOCB( m_indiP_health, "health", pcf::IndiProperty::Text );
     m_indiP_health.setPerm( pcf::IndiProperty::ReadOnly );
-    for( const auto &name : { "reason", "lastFault", "primary", "combined", "timingStream", "mapping" } )
+    for( const auto &name :
+         { "reason", "lastFault", "periodSource", "primary", "combined", "timingStream", "mapping" } )
         m_indiP_health.add( pcf::IndiElement( name ) );
     if( !m_cameraDevice.empty() )
     {
-        REG_INDI_SETPROP( m_indiP_camera, m_cameraDevice, std::string( "fps" ) );
+        REG_INDI_SETPROP( m_indiP_camera, m_cameraDevice, m_cameraProperty );
     }
     state( stateCodes::READY );
     TELEMETER_APP_STARTUP;
@@ -1061,6 +1152,14 @@ inline int dmSyncopation::appStartup()
 inline int dmSyncopation::appLogic()
 {
     SHMIMMONITOR_APP_LOGIC;
+    const int64_t pollTime = m_now();
+    if( !m_cameraDevice.empty() && m_indiDriver &&
+        ( !m_lastCameraPoll || pollTime - m_lastCameraPoll >= 1000000000LL ) )
+    {
+        // Unchanged measured values do not generate a heartbeat; refresh outside the cycle mutex.
+        sendGetPropertySetList( true );
+        m_lastCameraPoll = pollTime;
+    }
     { // mutex scope
         std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
         if( lock.owns_lock() )
@@ -1083,14 +1182,26 @@ inline int dmSyncopation::appLogic()
                                                      m_bounds.keepout / 1000.0,
                                                      m_bounds.guard / 1000.0,
                                                      m_bounds.lead / 1000.0 };
-            const std::vector<std::string> names{
-                "mainHz",           "cameraHz",       "plannedHz",       "deliveredHz",    "delivered",
-                "requested",        "active",         "feasible",        "missed",         "faults",
-                "cached",           "notStarted",     "copiedLate",      "snapshotMaxUs",  "copyMaxUs",
-                "primaryFaults",    "resourceFaults", "outputFaults",    "triggerFaults",  "duplicatePosts",
-                "step0WakeUs",      "step0WakeMaxUs", "step0AdvanceUs",  "copyBudgetUs",   "snapshotBudgetUs",
-                "lastPrimaryDelta", "lastIntervalUs", "lastOutputDelta", "lastFaultAgeSec" };
-            const std::vector<double> values{ 1e9 / m_period,
+            const std::vector<std::string> names{ "mainHz",           "cameraHz",
+                                                  "plannedHz",        "deliveredHz",
+                                                  "delivered",        "requested",
+                                                  "active",           "feasible",
+                                                  "missed",           "faults",
+                                                  "cached",           "notStarted",
+                                                  "copiedLate",       "snapshotMaxUs",
+                                                  "copyMaxUs",        "primaryFaults",
+                                                  "resourceFaults",   "outputFaults",
+                                                  "triggerFaults",    "duplicatePosts",
+                                                  "step0WakeUs",      "step0WakeMaxUs",
+                                                  "step0AdvanceUs",   "copyBudgetUs",
+                                                  "snapshotBudgetUs", "lastPrimaryDelta",
+                                                  "lastIntervalUs",   "lastOutputDelta",
+                                                  "lastFaultAgeSec",  "cameraJitterUs",
+                                                  "cameraMinUs",      "cameraMaxUs",
+                                                  "cameraAgeSec",     "primaryMeasuredHz",
+                                                  "faultIntervalUs",  "faultPeriodUs",
+                                                  "faultResidualUs" };
+            const std::vector<double>      values{ 1e9 / m_period,
                                               m_cameraFps.load(),
                                               m_requested * 1e9 / m_period,
                                               m_deliveredHz,
@@ -1118,10 +1229,19 @@ inline int dmSyncopation::appLogic()
                                               double( m_lastPrimaryDelta ),
                                               m_lastPrimaryInterval / 1000.0,
                                               double( m_lastOutputDelta ),
-                                              m_lastFaultNs ? ( now - m_lastFaultNs ) / 1e9 : -1 };
-            const std::string         reason    = m_reason;
-            const std::string         lastFault = m_lastFaultReason;
-            std::string               mappings;
+                                              m_lastFaultNs ? ( now - m_lastFaultNs ) / 1e9 : -1,
+                                              m_cameraJitterUs,
+                                              m_cameraMinUs,
+                                              m_cameraMaxUs,
+                                              m_cameraTime > 0 ? ( now - m_cameraTime ) / 1e9 : -1,
+                                              m_measuredPeriod > 0 ? 1e9 / m_measuredPeriod : 0,
+                                              m_faultInterval / 1000.0,
+                                              m_faultPeriod / 1000.0,
+                                              m_faultPeriod ? ( m_faultInterval - m_faultPeriod ) / 1000.0 : 0 };
+            const std::string              reason       = m_reason;
+            const std::string              lastFault    = m_lastFaultReason;
+            const std::string              periodSource = m_periodSource;
+            std::string                    mappings;
             for( const auto &name : m_destinations )
                 mappings += ( mappings.empty() ? "" : ", " ) + name + "_aux -> " + name;
             lock.unlock(); // Never hold the cycle mutex across INDI driver I/O.
@@ -1129,6 +1249,7 @@ inline int dmSyncopation::appLogic()
             updateIfChanged( m_indiP_status, names, values, status );
             updateIfChanged( m_indiP_health, "reason", reason );
             updateIfChanged( m_indiP_health, "lastFault", lastFault );
+            updateIfChanged( m_indiP_health, "periodSource", periodSource );
             updateIfChanged( m_indiP_health, "primary", shmimMonitorT::m_shmimName );
             updateIfChanged( m_indiP_health, "combined", m_combinedName );
             updateIfChanged( m_indiP_health, "timingStream", m_timingName );
@@ -1261,14 +1382,30 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
 
 INDI_SETCALLBACK_DEFN( dmSyncopation, m_indiP_camera )( const pcf::IndiProperty &ipRecv )
 {
-    if( ipRecv.getType() != pcf::IndiProperty::Number || ipRecv.getDevice() != m_cameraDevice ||
-        ipRecv.getName() != "fps" || !ipRecv.find( "current" ) )
+    if( ipRecv.getType() != pcf::IndiProperty::Number || m_cameraDevice.empty() ||
+        ipRecv.getDevice() != m_cameraDevice || ipRecv.getName() != m_cameraProperty ||
+        !ipRecv.find( m_cameraElement ) )
         return -1;
-    const double fps = ipRecv["current"].get<double>();
-    if( !finite( fps ) || fps <= 0 || fps > 100000 )
+    double      values[]{ 0, -1, -1, -1 };
+    const char *names[]{ m_cameraElement.c_str(), "acq_jitter", "acq_min", "acq_max" };
+    for( size_t j = 0; j < 4; ++j )
+    {
+        if( !ipRecv.find( names[j] ) )
+            continue;
+        // IndiElement's numeric getter does not report failed or partial conversions.
+        std::istringstream input( ipRecv[names[j]].getValue() );
+        if( !( input >> values[j] ) || !( input >> std::ws ).eof() || !finite( values[j] ) ||
+            ( j == 0 ? ( values[j] <= 0 || values[j] > 100000 ) : ( values[j] < 0 || values[j] > 1000000 ) ) )
+            return -1;
+    }
+    if( values[2] >= 0 && values[3] >= 0 && values[2] > values[3] )
         return -1;
-    m_cameraFps  = fps;
-    m_cameraTime = m_now();
+    std::lock_guard<std::mutex> lock( m_cycleMutex );
+    m_cameraFps      = values[0];
+    m_cameraTime     = m_now();
+    m_cameraJitterUs = values[1] >= 0 ? values[1] * 1e6 : -1;
+    m_cameraMinUs    = values[2] >= 0 ? values[2] * 1e6 : -1;
+    m_cameraMaxUs    = values[3] >= 0 ? values[3] * 1e6 : -1;
     return 0;
 }
 
