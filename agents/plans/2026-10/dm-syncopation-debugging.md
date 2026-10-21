@@ -2,7 +2,7 @@
 
 This record tracks operator observations, diagnosis, changes and verification during debugging and optimization. The [main engineering plan](dm-syncopation.md) retains the settled design and review answers; the [user guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) documents current operation and interfaces.
 
-Current status: after the reported camwfs reconfigure and polling-fix push, the latest operator transcript shows camera queries returning and acquisition jitter around 0.46–0.63 us with synco enabled. The AO loop remained stable at low gain, which the operator notes could tolerate an extra frame or two; a small latency increase is not excluded. The earlier 8.10 us spread was not reproduced, but primary-interval faults persist: the latest latched interval is 555.169 us against 500 us. Fault-correlated publication/callback diagnostics are implemented and verified locally to separate primary publication timing from observation delay; operator evidence from those diagnostics is pending. The operator's earlier EDT-backlog diagnosis came from loop instability; no direct buffer-depth measurement was reported. Its onset and relation to synco remain unknown. The separate recurring-camera-definition defect is fixed and pushed in `2bab1b28`/`098d8741`. Exact startup latency and instrument timing qualification remain open.
+Current status: primary timestamp excursions occur with two steps and with passive-only one-step operation. The one-step comparison added 147 primary faults between snapshots, while its later snapshot was armed. The new one-step fault is 476.199 us published versus 475.799 us observed, only -0.400 us of changing observation delay; the two-step fault was 562.743/562.813 us. Extra DM triggers are therefore not required for the primary faults, although indirect effects from synco and its later-step load remain unresolved. The operator reports high-gain loop stability and confirms no frame-behind condition in this run. AO main threads and CUDA helpers are restricted to CPUs 45/46, separate from synco's CPU 61, which has no listed SMT sibling. Disabled-synco ITER summaries show baseline process-start variation, occasionally 485–520 us from the filter onward, without yet reproducing the larger publication tails. Exact startup latency, the origin of primary publication variation and sustained two-step qualification remain open; earlier EDT-confounded observations are retained below.
 
 Append subsequent investigations as dated entries, keeping operator evidence, local verification and outstanding instrument checks explicit. All agent work runs on the workstation; the operator performs instrument actions and supplies results.
 
@@ -275,3 +275,173 @@ The normal app build and final clang-format/whitespace checks passed. Independen
 The user requested pushing the verified diagnostics to `origin/jrmales/dm-syncopation`. Package the scheduler, five new test cases, settled plan and debugging record together, followed by the user-guide update in a documentation-only commit, per AGENTS.md.
 
 Validation remains **2349 assertions in 25 passing test cases**, a successful normal app build, independent source review and clean formatting/whitespace checks. No functional changes followed verification. Instrument results using the new fault-correlated fields remain pending; no configuration change or agent instrument action is included.
+
+## 2026-10-20 first diagnostic retest: primary publication excursion
+
+The operator supplied a new run with monitor TID **633227**, enabled with two requested steps and the same 20 us guard/lead and 115 us keepout. The operator explicitly reports the AO loop at **high gain** and confirms no frame-behind condition in this run. This is stronger operator evidence than the preceding low-gain stability check, which could hide an extra frame or two.
+
+Before enabling, the direct camera packet reported 1999.99900983901 Hz acquisition FPS, 0.470901480 us acquisition jitter, interval extrema 497.102737427–502.109527588 us, acquisition-to-write mean 53.694916535 us/jitter 1.508909035 us, and write FPS 1999.99829440538 with jitter 1.527268223 us. The enabled synco packet adopted another window: camera FPS 1999.99710201713, age 1.087494416 seconds, acquisition jitter 0.424730220 us and extrema 492.095947266–507.831573486 us. Camera statistics still do not directly measure the downstream primary publication endpoint.
+
+The new fields correlate the same latched interval anomaly at primary counter **123134542**:
+
+| Field | Value / interpretation |
+| --- | --- |
+| `faultPeriodUs` | 500.001 us selected camera-derived period. |
+| `faultIntervalUs`, `faultResidualUs` | 562.813 us callback-entry interval; +62.812 us relative to the prediction. |
+| `faultPublishUs`, `faultPublishValid` | **562.743 us**, valid; publication timestamp interval itself is +62.742 us relative to the prediction. |
+| `faultObserveExtraUs` | **+0.070 us**: only 70 ns difference between callback and publication intervals. |
+| `faultPrevCallbackUs`, `faultCallbackGapUs` | 451.223 us previous body duration plus 111.590 us completion-to-entry gap, summing to the observed 562.813 us. |
+| `faultEntryToCounterUs` | 5.681 us entry-to-metadata-sample elapsed time, including internal checks/possible lock wait. |
+| Fault class/age | 1109 primary faults, zero output/resource/trigger faults; latest interval fault age 0.002651608 seconds. |
+
+For this event, essentially all the long observed interval is present in the primary `writetime` interval. Changing semaphore/dispatch observation lag adds only 0.070 us; the preceding callback did not remain busy until this entry. Its body finished approximately 48.778 us before the next nominal callback time. These are relative timing observations: they do not measure absolute publication-to-entry lag or establish the configured 5 us observation bound. The 5.681 us entry-to-sample field is internal elapsed time and must not be interpreted as that absolute lag. Indirect synco interference with producer scheduling, upstream processing or downstream load remains possible; this packet does not establish the cause of the producer timestamp excursion or classify all 1109 primary faults as the same subtype.
+
+The app remains unprimed/acquiring (`active=0`, feasible/requested 2/2) with 998 accumulated auxiliary deliveries and software-confirmed `deliveredHz=1928.51583067258`, versus planned 3999.992000016 Hz. Latest normal primary interval 489.835 us, counter delta 1 and duplicate posts zero are separate from the fault latch. Missed/not-started/copied-late remain 1/0/0; copy maximum/budget are 11.341/12.341 us, snapshot maximum/budget 3.376/10 us, and latest/maximum step-0 wake lateness 4.186 us. These values do not demonstrate sustained two-step delivery.
+
+Local source tracing supports interpreting `writetime` as a completion/publication endpoint: the user-identified normal dmC producer `MVMextractModes` publishes calculated CPU/GPU results through `processinfo_update_output_stream()`, which calls `ImageStreamIO_UpdateIm()`. The inspected ImageStreamIO implementation timestamps `writetime`, increments the counter, clears the write flag and posts notifications. Confirming the deployed writer/version/clock contract remains relevant. Existing MILK process/stream trace data already carries writer PID, upstream trigger identity/counter and process-start/stream-update timestamps; that is a useful next source for locating which AO pipeline stage contributes variation, without another synco timing-control change.
+
+The operator was asked for a **passive-only `steps=1` comparison**, keeping AO gain and camera settings unchanged, with two status snapshots about ten seconds apart. Disable before changing steps and enable afterward. This retains passive preparation and timing checks while removing later-step work and extra DM triggers. Persistent publication faults would show that the later-step path is not required for them; improvement would implicate that path as a candidate, without separating its copy/wait work from downstream command load. Counters are cumulative, so compare increments and latch ages between the snapshots. The comparison was pending at this checkpoint; the response is recorded next.
+
+This is a debugging-record/source-analysis update only. No scheduling changes, bound relaxation, new test/build run, commit or agent instrument action was performed.
+
+## 2026-10-20 passive-only one-step comparison
+
+The operator supplied the requested Off, `settings.steps=1`, On sequence and two subsequent readbacks from the same monitor TID **633227**. Both report enabled/requested count one, selected 2 kHz main rate and planned 2 kHz rate. There are no wall-clock timestamps establishing the exact interval between the two readbacks; do not treat the requested ten-second wait as a measured duration.
+
+| Field | First one-step readback | Later one-step readback |
+| --- | --- | --- |
+| Current state | `active=0`, `disabled settings changed` | `active=1`, `armed` |
+| Primary/total faults | 13914 | 14061 (**+147**) |
+| Other fault classes / duplicate posts | All zero | All zero |
+| Auxiliary `delivered` | 12568 | 12568 (unchanged, as expected with no extra triggers) |
+| Confirmed `deliveredHz` | 0 | 1989.49138651204 Hz, now primary confirmations only |
+| Fault age | 20.9098916 s | 0.366973524 s |
+| Fault counter | 123548842 | 123639933 |
+| Fault callback / publication interval | 550.069 / 549.818 us | **475.799 / 476.199 us** |
+| Fault changing observation delay | +0.251 us | **-0.400 us** |
+| Fault previous body / completion gap | 448.507 / 101.562 us | **51.207 / 424.592 us** |
+| Fault entry-to-sample delay | 5.911 us | 5.36 us |
+| Camera acquisition jitter | 0.552893355 us | 0.365197675 us |
+| Step-0 advance / latest wake lateness | 20 / 0.674 us | 1.389 / 1.416 us |
+
+The first readback retains an approximately 21-second-old fault while the current reason is still `disabled settings changed`. That retained long interval is not evidence of a new fault under one-step operation. The 147-count increase and recent new latch in the later readback establish faults after the change without relying on that old latch. The earlier two-step count of 1109 and this first count of 13914 include intervening runtime; their difference cannot be assigned to the one-step test.
+
+The new one-step fault is an **early** primary observation: callback residual -24.201 us relative to 500 us, while publication timestamps themselves are -23.801 us early. That exceeds the configured 20 us early-main allowance. The observation/publication interval difference is only -0.400 us. Its preceding callback body lasted 51.207 us and ended 424.592 us before this callback; their sum matches the 475.799 us callback interval. Thus this event again points to primary publication-timestamp variation rather than a preceding callback staying busy through the next entry. The two-step long interval and this one-step short interval are different events; they must not be paired as one late/early sequence.
+
+One-step operation can arm between faults, and the unchanged auxiliary delivery count confirms no accumulated extras during this comparison. Its observed step-0 advance converged toward the measured wake/check lateness. These snapshots do not establish a whole-run fault rate or qualified bounds, and the later near-2-kHz confirmation rate does not prove every main update was tracked. Copy/snapshot maxima and the 1/0/0 missed/not-started/copied-late counters were unchanged.
+
+The later-step path and extra DM commands are not required for these primary faults. They may still increase publication variation in two-step operation. One-step mode retains passive-copy waits/checks and associated CPU work, so it is not an app-disabled baseline. The next upstream investigation can use the existing producer/stream trace and actual writer placement; a disabled-versus-enabled publication-interval comparison would distinguish baseline AO timing from possible indirect synco interference. No timing-bound change is justified by these two snapshots alone.
+
+The operator was asked to disable synco, select `dm01disp03`/`aol1_dmC` in `milk-streamCTRL`, and use F5 then Right Arrow for the expanded process trace, sharing writer PID and upstream stream names/PIDs. These keys are verified in the inspected local viewer source; actual instrument use remains operator-run. The response establishing the producer chain is recorded next.
+
+This entry changes only the debugging record. Whitespace validation passed; no new code, build/test rerun, commit or agent instrument action was performed.
+
+## 2026-10-20 upstream process trace and writer identification
+
+The operator supplied four trace rows for the selected primary stream. The viewer's stream label resolves `trigger_inode`, while the PID is the process writing the downstream output, not the process writing the named input. This interpretation is confirmed by the inspected `processinfo_update_output_stream()` and `streamCTRL_print_SPTRACE_details()` implementations: the publisher records its PID and trigger input in row zero, and copies the input's trace into later rows.
+
+| Row | Reported trigger inode | Trigger/input stream | Writer PID | Trace-derived output |
+| --- | --- | --- | --- | --- |
+| 00 | 1614 | `aol1_modevalDM` | **373333** | Selected `dm01disp03` / `aol1_dmC` |
+| 01 | 1600 | `aol1_modevalWFS` | **373141** | `aol1_modevalDM` |
+| 02 | 1589 | `aol1_imWFS2` | **372992** | `aol1_modevalWFS` |
+| 03 | 2411 | `camwfs` | **372805** | `aol1_imWFS2` |
+
+The resulting traced path is `camwfs -> aol1_imWFS2 -> aol1_modevalWFS -> aol1_modevalDM -> dm01disp03`. Camera acquisition's own writer is not identified by these four rows. The supplied PIDs identify processes, not necessarily their active RT thread TIDs. The trace contains no timing measurements locating the excursion to one of these stages.
+
+The operator has been asked, with synco disabled, for `ps -L` policy/RT-priority/current-CPU readbacks for all four processes; `taskset -pc` allowed-CPU lists for their main TIDs and synco monitor TID 633227; and CPU 61's SMT sibling list. CPU 61 was previously observed for synco, but the current allowed-CPU list is needed to verify present placement. A last-observed processor alone does not establish affinity, and different logical CPU numbers do not rule out sharing a physical core. If a producer's active processing thread is not its main TID, follow its actual thread's affinity rather than assuming the process-leader mask applies to every thread.
+
+Only the debugging record was changed. Whitespace validation passed; no new code, test/build rerun, commit or agent instrument action was performed. Operator scheduling/affinity results were pending at this checkpoint and follow below.
+
+## 2026-10-20 operator scheduling and affinity readbacks
+
+With synco disabled as requested, the operator supplied actual process/thread scheduling and main-thread affinity readbacks:
+
+| Process / main TID | Name | Actual policy / RT priority | Last-observed CPU | Allowed CPU list |
+| --- | --- | --- | --- | --- |
+| 372805 | `acquWFS-1` | FF / 49 | 45 | 45 |
+| 372992 | `wfs2cmodeval-1` | FF / 48 | 45 | 45 |
+| 373141 | `mfilt-1` | FF / 48 | 46 | 46 |
+| 373333 | `mvalC2dm-1` | FF / 48 | 45 | 45 |
+| Synco monitor TID 633227 | `dmSyncopation` | Not included in this `ps` selection | Not included | **61** |
+
+The `wfs2cmodeval-1` process also showed helper TIDs **373005, 373007, 373008** (`cuda0000340000e`, another `wfs2cmodeval-1`, `cuda-EvtHandlr`), all FF/48 and last observed on CPU 45. The `mvalC2dm-1` process showed helper TIDs **373501, 373531, 373532** (`cuda0000300000d`, another `mvalC2dm-1`, `cuda-EvtHandlr`), likewise FF/48 on CPU 45. The supplied `taskset` checks queried the process leaders; worker affinity masks have not yet been supplied independently.
+
+CPU 61's `thread_siblings_list` contains only **61**. Therefore the four verified AO main-thread affinity lists do not overlap synco's monitor affinity or its physical core. The simple explanation of direct monitor/main-thread CPU or SMT sharing is unsupported by this placement. Multiple existing AO stages and their observed CUDA workers share CPU 45, while the filter is on CPU 46; this may be an intentional pipeline arrangement and does not itself establish the cause of publication variation or justify moving threads. Indirect memory/cache/NUMA, GPU/driver/interrupt or other system-load effects remain possible, without evidence selecting one here.
+
+The operator has been asked to query all threads of the two CUDA processes with `taskset -apc 372992` and `taskset -apc 373333`, then inspect existing **`milk-procCTRL` F5 Timing** rows for all four stages while synco remains disabled. If timing is OFF, report that rather than changing measurement or timing-limit settings. This uses existing producer instrumentation instead of another scheduler change.
+
+Local viewer/source inspection clarifies what those values mean: ITER summarizes successive process-execution-start intervals; EXEC summarizes elapsed execution-start to execution-end time, after the normal input-trigger wait. EXEC can include scheduling or GPU waits during the computation, but not the preceding input semaphore wait. The inspected timing ring contains 100 samples (about 50 ms at 2 kHz), so several refreshes are more informative than one clean-looking min/max window. `milk-procCTRL` F4 additionally exposes trigger/missed-frame/timeout state. Expanded `milk-streamCTRL` traces show process-start timestamps and age, but do not display execution duration even though stream-update timestamps exist in the underlying trace.
+
+Only the debugging record was changed. Whitespace validation passed; no configuration changes, new code, test/build rerun, commit or agent instrument action was performed. Worker-affinity and per-stage timing results were pending at this checkpoint and follow below.
+
+## 2026-10-20 CUDA helper affinities and disabled ITER baseline
+
+The operator's all-task affinity queries confirm **CPU 45 for every listed thread** of both CUDA processes: 372992/373005/373007/373008 and 373333/373501/373531/373532. Together with the main-thread readbacks, this rules out direct CPU or SMT-core sharing between these AO threads and synco monitor TID 633227 on CPU 61. It does not select or exclude indirect system-load mechanisms.
+
+With synco still disabled, the operator reports ITER medians of **500.0 us** for the four pipeline processes. Typical displayed ranges are **495–502 us**, with occasional **485–520 us** ranges at `mfilt-1` and later stages. The user explicitly confirmed both the corrected 495–502 range (initially typed 595–502) and that these are **ITER**, not EXEC, values. No execution-duration summaries were supplied.
+
+These observations establish process-start timing variation while auxiliary scheduling is disabled. Around a 500 us period, the broader displayed range spans approximately -15 to +20 us, already near the configured 20 us phase allowance on its late side. They do not yet reproduce the approximately 476/563 us primary publication intervals captured during enabled operation. The viewer summarizes successive execution-start times over a short rolling window, not the primary stream's publication intervals. The stage summaries are not synchronized to each other or to a synco fault, so they cannot establish that the filter introduced the variation, identify computation versus dispatch/input timing, or measure its worst-case tail. The disabled app also retains its primary monitor, so this is not a fully stopped-process baseline.
+
+The next useful diagnostic should correlate upstream stage timing with the same anomalous primary event. Existing propagated stream traces offer a source for current/previous stage timestamps and input-counter identity; pairing those coherently with a fault would be more informative than treating unrelated short-window extrema as one event. That is a proposed follow-up, not an implementation change in this entry. Preserve the hard timing bounds while identifying the source and supported uncertainty.
+
+Only the debugging record is changed. Whitespace validation passed; no new operator action was requested after the clarification, and no new code, test/build rerun, commit or agent instrument action was performed.
+
+## 2026-10-21 direct DM controller timing telemetry plan
+
+The operator reports that analysis of recorded `dm01disp` timestamps has shown
+substantially lower jitter than the various MILK timing displays. Treat the viewer
+summaries and earlier sampled fault context as measurements of their own specific
+endpoints/windows, not as qualification of controller command timing or total
+loop latency. No further synco timing-control change is proposed on that basis.
+
+The requested next step is a plan for timing telemetry in `dev::dm`, following
+`dev::frameGrabber`/`ocam2KCtrl`: reuse `telem_fgtimings` for semaphore receipt,
+SDK-return cadence and paired elapsed time, and add detailed DM processing
+statistics. The separate [DM timing telemetry plan](dm-timing-telemetry.md)
+defines exact hooks, backend differences, bounded RT collection, validity and
+tests. It also identifies the frame/clock provenance needed before a controller
+measurement can be combined with camera timing into a true full-loop result.
+
+This is a planning checkpoint only. Existing operator evidence is preserved;
+no implementation, configuration change, build/test rerun, commit or agent
+instrument action was performed.
+
+
+## 2026-10-21 DM controller telemetry implementation
+
+The approved [DM timing telemetry plan](dm-timing-telemetry.md) is implemented for
+controller-local measurements. The hot path captures monotonic integer markers
+and fixed-size events only; ordinary logic computes elapsed-window statistics,
+publishes read-only INDI and records compatible `telem_fgtimings` plus detailed
+`telem_dmtimings`. Power-off logic also ages/publishes timing so old data cannot
+remain frozen as valid. The [user guide](../../../libMagAOX/app/dev/doc/dmTiming.md)
+contains exact endpoints, configuration and INDI units/names.
+
+This does not identify MILK viewer summaries with controller command timing or
+establish camera-to-DM latency. IrisAO success semantics remain unqualified;
+BMC/ALPAO/PI use their actual SDK/transport results. Local synthetic tests/builds
+and their precise SDK limitations are recorded in the separate plan, together
+with a workstation capture benchmark averaging approximately 0.193 us/event,
+with zero capture allocations or timing-event drops. That benchmark is not an
+instrument overhead or tail-latency qualification. Operator
+comparison against recorded streams, instrumentation overhead qualification and
+camera frame/clock provenance remain follow-ups before full-loop claims or
+further timing-bound decisions. No agent instrument command, deployment,
+configuration change or commit was performed.
+
+
+## 2026-10-21 local timing telemetry commit checkpoint
+
+The user requested commits before operator-run hardware testing. Functional DM
+controller telemetry and its engineering record are committed as `09028bb2`
+(`Add DM controller timing telemetry`), followed by separate documentation and
+braces/spacing cleanup commits. The existing validation checkpoint is **3826
+assertions across 58 cases**, passing ThreadSanitizer and normal library, PI,
+dmSyncopation and logdump builds. BMC/ALPAO/IrisAO SDK-specific coverage uses local
+software stubs; vendor ABI and instrument timing qualification remain pending.
+
+Formatting preserves non-brace C++ tokens and preprocessor directives. No new
+implementation changes, build/test rerun, push, deployment or agent instrument
+action was performed as part of commit preparation. The operator will perform
+hardware testing.

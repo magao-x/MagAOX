@@ -52,6 +52,26 @@ $ bash ./testMagAOX.bash
  * \ingroup application_unit_test
  */
 
+/** \defgroup alpaoCtrl_unit_test ALPAO Controller Unit Tests
+ * \brief Offline SDK endpoint, submission status and timing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup bmcCtrl_unit_test BMC Controller Unit Tests
+ * \brief Offline SDK endpoint, submission status and timing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup irisaoCtrl_unit_test IrisAO Controller Unit Tests
+ * \brief Offline submission timing and unavailable SDK status tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup pi335Ctrl_unit_test PI-335 Controller Unit Tests
+ * \brief Offline multi-axis transport, partial-write and timing tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup pupilFit_unit_test Pupil Fit Unit Tests
  * \brief Offline fitting, per-image telemetry, derived averages, and failure handling.
  * \ingroup application_unit_test

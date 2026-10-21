@@ -321,6 +321,8 @@ where needed. Follow the full-file documentation and test-grouping rules in
 
 ## Affected files
 
+- `AGENTS.md` and `.clang-format`: explicit control-flow braces, Allman layout,
+  multiline lambdas and blank lines between logical code groups.
 - `libMagAOX/app/dev/shmimMonitor.hpp`: optional receipt hook/lifecycle support.
 - `libMagAOX/app/dev/dm.hpp`, `libMagAOX/app/dev/dmTiming.hpp` and
   `libMagAOX/common/dmTiming.hpp`: shared timing types, safe handoff, statistics,
@@ -413,4 +415,36 @@ Instrument acceptance/overhead comparison and verified frame/clock association
 remain operator-run follow-ups. No camera-to-DM latency metric or raw timestamp
 stream has been fabricated from combined-image metadata. Any upstream provenance
 extension remains a separate concrete review item, as agreed in section 6.
-No instrument commands, deployment, configuration edits or commits were performed.
+No instrument commands, deployment or instrument configuration edits were
+performed during implementation. Subsequent local commits are recorded below.
+
+
+### Formatting review follow-up
+
+The user requested explicit control-flow braces and blank lines between logical
+code groups, using `dm::processImage` as an example. Applied that style across
+the timing work, recorded the standing preference in `AGENTS.md` and enabled
+`InsertBraces` plus multiline lambda bodies in `.clang-format`. Validation
+against saved pre-cleanup copies confirms all non-brace C++ tokens and
+preprocessor directives are unchanged across all 21 C++ files. The formatter and
+whitespace checks pass. This follow-up changes style only; the implementation
+validation results above remain the existing test/build checkpoint. No tests
+were added or rerun. The cleanup is kept in a separate final formatting commit.
+
+
+### 2026-10-21 local commit checkpoint
+
+The user authorized local commits before operator-run hardware testing. Functional
+implementation and this engineering record are committed as `09028bb2`
+(`Add DM controller timing telemetry`). User documentation, accumulated debugging
+evidence, test groups and the standing style preference are kept in a separate
+`Document DM timing telemetry and validation` commit. The reviewed braces/spacing
+and formatter configuration are kept in the final `Apply explicit braces and
+logical spacing` commit. Each commit carries the requested GPT-6 attribution.
+
+The validated implementation is unchanged by commit preparation. The formatting
+pass retains all non-brace C++ tokens and preprocessor directives; the existing
+3826-assertion/58-case test checkpoint and qualified build/SDK limitations above
+remain applicable. No new tests or builds were needed for committing. Hardware
+qualification is pending operator testing. No push, deployment or agent instrument
+action is part of this commit request.
