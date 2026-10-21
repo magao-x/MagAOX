@@ -12,6 +12,7 @@
 #include <mx/improc/eigenImage.hpp>
 #include <mx/improc/milkImage.hpp>
 #include <mx/ioutils/fits/fitsFile.hpp>
+#include <mx/sigproc/circularBuffer.hpp>
 
 #include "shmimMonitor.hpp"
 
@@ -772,29 +773,59 @@ class dm
 
     typedef int32_t cbIndexT;
 
+    /// Timing markers for total command processing, saturation posting, and saturation update intervals.
     double m_t0{ 0 }, m_tf{ 0 }, m_tsat0{ 0 }, m_tsatf{ 0 };
+
+    /// Timing markers set by derived DM command implementations for actuator processing phases.
     double m_tact0{ 0 }, m_tact1{ 0 }, m_tact2{ 0 }, m_tact3{ 0 }, m_tact4{ 0 };
+
+    /// Timing markers for delta-channel update processing.
     double m_tdelta0 {0}, m_tdeltaf {0};
 
+    /// Previous trigger semaphore arrival time, used to compute frame-to-frame spacing.
+    double m_t0Last{ 0 };
+
+    /// Circular buffer of total processImage latency samples.
     mx::sigproc::circularBufferIndex<double, cbIndexT> m_piTimes;
 
+    /// Circular buffer of saturation semaphore post latency samples.
     mx::sigproc::circularBufferIndex<double, cbIndexT> m_satSem;
 
+    /// Circular buffer of actuator processing latency samples.
     mx::sigproc::circularBufferIndex<double, cbIndexT> m_actProc;
 
+    /// Circular buffer of actuator command latency samples.
     mx::sigproc::circularBufferIndex<double, cbIndexT> m_actCom;
 
+    /// Circular buffer of saturation map update latency samples.
     mx::sigproc::circularBufferIndex<double, cbIndexT> m_satUp;
 
+    /// Circular buffer of delta-channel update latency samples.
     mx::sigproc::circularBufferIndex<double, cbIndexT> m_deltaUp;
 
+    /// Circular buffer of trigger semaphore frame-to-frame arrival deltas.
+    mx::sigproc::circularBufferIndex<double, cbIndexT> m_triggerDelta;
 
+    /// Storage for reporting total processImage latency samples.
     std::vector<double> m_piTimesD;
+
+    /// Storage for reporting saturation semaphore post latency samples.
     std::vector<double> m_satSemD;
+
+    /// Storage for reporting actuator processing latency samples.
     std::vector<double> m_actProcD;
+
+    /// Storage for reporting actuator command latency samples.
     std::vector<double> m_actComD;
+
+    /// Storage for reporting saturation map update latency samples.
     std::vector<double> m_satUpD;
+
+    /// Storage for reporting delta-channel update latency samples.
     std::vector<double> m_deltaUpD;
+
+    /// Storage for reporting trigger semaphore frame-to-frame arrival deltas.
+    std::vector<double> m_triggerDeltaD;
 
     // clang-format off
     #endif // clang-format on
@@ -1571,9 +1602,12 @@ int dm<derivedT, realT>::appLogic()
 #ifdef XWC_DMTIMINGS
     static uint64_t lastMono = 0;
 
-    if( m_piTimes.size() >= m_piTimes.maxEntries() && m_piTimes.maxEntries() > 0 && m_piTimes.mono() != lastMono )
+    if( m_piTimes.size() >= m_piTimes.maxEntries() && m_piTimes.maxEntries() > 0 &&
+        m_triggerDelta.size() >= m_triggerDelta.maxEntries() && m_triggerDelta.maxEntries() > 0 &&
+        m_piTimes.mono() != lastMono )
     {
-        cbIndexT refEntry = m_piTimes.earliest();
+        cbIndexT refEntry             = m_piTimes.earliest();
+        cbIndexT triggerDeltaRefEntry = m_triggerDelta.earliest();
 
         m_piTimesD.resize( m_piTimes.maxEntries() );
         m_satSemD.resize( m_satSem.maxEntries() );
@@ -1581,6 +1615,7 @@ int dm<derivedT, realT>::appLogic()
         m_actComD.resize( m_actCom.maxEntries() );
         m_satUpD.resize( m_satUp.maxEntries() );
         m_deltaUpD.resize( m_deltaUp.maxEntries() );
+        m_triggerDeltaD.resize( m_triggerDelta.maxEntries() );
 
         for( size_t n = 0; n < m_piTimesD.size(); ++n )
         {
@@ -1592,6 +1627,11 @@ int dm<derivedT, realT>::appLogic()
             m_deltaUpD[n] = m_deltaUp.at( refEntry, n );
         }
 
+        for( size_t n = 0; n < m_triggerDeltaD.size(); ++n )
+        {
+            m_triggerDeltaD[n] = m_triggerDelta.at( triggerDeltaRefEntry, n );
+        }
+
         std::cerr << "Act. Process:   " << mx::math::vectorMean( m_actProcD ) << " +/- "
                   << sqrt( mx::math::vectorVariance( m_actProcD ) ) << "\n";
         std::cerr << "Act. Command:   " << mx::math::vectorMean( m_actComD ) << " +/- "
@@ -1600,6 +1640,8 @@ int dm<derivedT, realT>::appLogic()
                   << sqrt( mx::math::vectorVariance( m_satUpD ) ) << "\n";
         std::cerr << "Delta Update:   " << mx::math::vectorMean( m_deltaUpD ) << " +/- "
                   << sqrt( mx::math::vectorVariance( m_deltaUpD ) ) << "\n";
+        std::cerr << "Trig. Delta:    " << mx::math::vectorMean( m_triggerDeltaD ) << " +/- "
+                  << sqrt( mx::math::vectorVariance( m_triggerDeltaD ) ) << "\n";
         std::cerr << "Tot. CommandDM: " << mx::math::vectorMean( m_piTimesD ) << " +/- "
                   << sqrt( mx::math::vectorVariance( m_piTimesD ) ) << "\n";
         std::cerr << "Sat. Semaphore: " << mx::math::vectorMean( m_satSemD ) << " +/- "
@@ -1836,6 +1878,7 @@ int dm<derivedT, realT>::allocate( const dev::shmimT &sp )
     m_actCom.maxEntries( 2000 );
     m_satUp.maxEntries( 2000 );
     m_deltaUp.maxEntries( 2000 );
+    m_triggerDelta.maxEntries( 2000 );
     #endif // clang-format on
 
     return 0;
@@ -1902,12 +1945,19 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
     // Update the latency circ. buffs
     if( m_piTimes.maxEntries() > 0 )
     {
+        if( m_t0Last > 0 )
+        {
+            m_triggerDelta.nextEntry( m_t0 - m_t0Last );
+        }
+
         m_piTimes.nextEntry( m_tf - m_t0 );
         m_satSem.nextEntry( m_tsatf - m_tsat0 );
         m_actProc.nextEntry( m_tact1 - m_tact0 );
         m_actCom.nextEntry( m_tact2 - m_tact1 );
         m_satUp.nextEntry( m_tact4 - m_tact3 );
         m_deltaUp.nextEntry( m_tdeltaf - m_tdelta0 );
+
+        m_t0Last = m_t0;
     }
 
         // clang-format off

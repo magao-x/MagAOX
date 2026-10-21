@@ -58,4 +58,63 @@ $ bash ./testMagAOX.bash
  *   style="width: 100%; height: 85vh; border: 0;">
  * </iframe>
  * \endhtmlonly
+
+/** \defgroup pupilFit_unit_test Pupil Fit Unit Tests
+ * \brief Offline fitting, per-image telemetry, derived averages, and failure handling.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup filterWheelCtrl_unit_test Filter Wheel Controller Unit Tests
+ * \brief Offline communication recovery, homing, and power-transition tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup kcubeCtrl_unit_test K-Cube Controller Unit Tests
+ * \brief Offline two-axis connection, power-transition, and communication recovery tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup picamCtrl_unit_test picamCtrl Unit Tests
+ * \brief Offline temperature configuration and validation tests for picamCtrl.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup ocam2KCtrl_temperature_unit_test OCAM Temperature Unit Tests
+ * \brief Shared OCAM temperature configuration and request-validation tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup stdCamera_unit_test stdCamera Unit Tests
+ * \brief Shared camera temperature, ROI geometry, configuration, and callback tests.
+ * \ingroup app_unit_test
+ */
+
+/** \defgroup roiGUI_unit_test ROI GUI Unit Tests
+ * \brief Offline coordinate display and command routing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup pupilGuideGUI_unit_test Pupil Guide GUI Unit Tests
+ * \brief Offline device availability, recovery, and command routing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup rtimvROI_unit_test rtimv ROI Plugin Unit Tests
+ * \brief Offline INDI command lifecycle and ROI interaction tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup gui_publisher_unit_test GUI Publisher Unit Tests
+ * \brief Socket-free discovery retry, routing, and subscription lifecycle tests.
+ * \ingroup unit_test
+ */
+
+/** \defgroup coronAlignGUI_unit_test Coronagraph Alignment GUI Unit Tests
+ * \brief Offline device recovery, position validity, and motion routing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup shmimIntegrator_unit_test ImageStreamIO Integrator Unit Tests
+ * \brief Offline numerical, configuration, restart, and publication ownership regressions.
+ * \ingroup application_unit_test
  */

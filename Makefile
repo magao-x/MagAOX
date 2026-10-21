@@ -23,6 +23,7 @@ apps_common = \
 	closedLoopIndi
 
 apps_aoc = \
+	virtualPDU \
 	trippLitePDU \
 	xt1121Ctrl \
 	xt1121DCDU \
@@ -36,6 +37,7 @@ apps_aoc = \
 	xInstGraph
 
 pythonapps_aoc = \
+	virtualPDU \
 	audibleAlerts
 
 # Apps common to RTC and ICC on MagAO-X
@@ -117,9 +119,12 @@ apps_tic = \
 
 # Apps with simulator mode
 apps_sim = \
+	virtualPDU \
 	trippLitePDU
 
 all_buildable_apps = \
+	virtualPDU \
+	acronameUsbHub \
 	adcTracker \
 	alignLoop \
 	cacaoInterface \
@@ -246,7 +251,7 @@ else ifeq ($(findstring ACC,$(MAGAOX_ROLE)),ACC)
   guis_to_build =
 else ifeq ($(MAGAOX_ROLE),TIC)
   guis_to_build =
-else ifeq ($(MAGAOX_ROLE),container)
+else ifeq ($(MAGAOX_ROLE),headless)
   guis_to_build =
 else
   guis_to_build = $(all_guis)
@@ -268,7 +273,7 @@ else ifeq ($(findstring ACC,$(MAGAOX_ROLE)),ACC)
   rtimv_plugins_to_build =
 else ifeq ($(MAGAOX_ROLE),TIC)
   rtimv_plugins_to_build =
-else ifeq ($(MAGAOX_ROLE),container)
+else ifeq ($(MAGAOX_ROLE),headless)
   rtimv_plugins_to_build =
 else
   rtimv_plugins_to_build = $(all_rtimv_plugins)
@@ -278,6 +283,7 @@ utils_to_build = \
 	logdump \
 	logsurgeon \
 	cursesINDI \
+	shmimDelta \
 	xrif2fits \
 	xrif2shmim
 
@@ -329,13 +335,13 @@ else ifeq ($(MAGAOX_ROLE),TIC)
 endif
 
 .PHONY: all
-all: indi_all libs_all flatlogs/bin/flatlogcodes apps_all guis_all utils_all
+all: indi_all libs_all flatlogs/bin/flatlogcodes apps_all guis_all rtimv_plugins_all utils_all
 
 .PHONY: basic
 basic: indi_all libs_all flatlogs/bin/flatlogcodes
 
 .PHONY: install
-install: indi_install libs_install pythonlibs_install apps_install pythonapps_install utils_install scripts_install rtscripts_install
+install: indi_install libs_install pythonlibs_install apps_install pythonapps_install guis_install rtimv_plugins_install utils_install scripts_install rtscripts_install
 
 #We clean just libMagAOX, and the apps, guis, and utils for normal devel work.
 .PHONY: clean

@@ -88,6 +88,7 @@ else
 endif
 
 ifeq ($(DEBUG),1)
+  CXXFLAGS += -DDEBUG
   OPTIMIZE += -O0 -g
 endif
 

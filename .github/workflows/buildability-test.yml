@@ -1,4 +1,7 @@
-name: Verify buildability
+name: Check buildability
+permissions:
+  contents: read
+  packages: write
 on:
   workflow_dispatch:
   schedule:
@@ -7,24 +10,53 @@ jobs:
   build-x86:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/magao-x/magao-x-setup:build
+      image: ghcr.io/magao-x/magao-x-setup:gui
       options: --user root
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Configure Git Safe Directory
         run: git config --global --add safe.directory "$(pwd)"
       - name: Build MagAO-X software
-        run: make
+        shell: bash -l {0}
+        run: |
+          conda activate $INSTRUMENT_CONDA_ENV
+          source /opt/rh/gcc-toolset-14/enable
+          make all_clean
+          cd flatlogs/src
+          make
+          make install
+          cd ../..
+          make setup
+          make libs_all
+          make all
+          make install
   build-arm:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/magao-x/magao-x-setup:build
+      image: ghcr.io/magao-x/magao-x-setup:gui
       options: --user root
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Configure Git Safe Directory
         run: git config --global --add safe.directory "$(pwd)"
       - name: Build MagAO-X software
-        run: make
+        shell: bash -l {0}
+        run: |
+          conda activate $INSTRUMENT_CONDA_ENV
+          source /opt/rh/gcc-toolset-14/enable
+          make all_clean
+          cd flatlogs/src
+          make
+          make install
+          cd ../..
+          make setup
+          make libs_all
+          make all
+          make install
+  update-container:
+    needs:
+      - build-x86
+      - build-arm
+    uses: ./.github/workflows/container.yml

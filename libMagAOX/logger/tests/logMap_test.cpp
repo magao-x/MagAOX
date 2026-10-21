@@ -220,6 +220,21 @@ TEST_CASE( "Building the app-to-file map", "[libMagAOX::logger::logMap]" )
         ++it;
         REQUIRE( it->fullName() == "/tmp/logMap_test/dev1/2024_11_23/dev1_20241123044510000000012.xlog" );
     }
+
+    SECTION( "Missing following date directory uses the previous log directory" )
+    {
+        MagAOX::file::stdFileName firstFile( "cam1/2024_11_19/cam1_20241124030000000000000.xrif" );
+        MagAOX::file::stdFileName lastFile( "cam1/2024_11_19/cam1_20241124040000000000000.xrif" );
+
+        MagAOX::logger::logMap lm;
+
+        mx::error_t errc = lm.loadAppToFileMap( "/tmp/logMap_test", "dev1", ".xlog", firstFile, lastFile );
+
+        REQUIRE( errc == mx::error_t::noerror );
+        REQUIRE( lm.m_appToFileMap["dev1"].size() == 1 );
+        auto it = lm.m_appToFileMap["dev1"].begin();
+        REQUIRE( it->fullName() == "/tmp/logMap_test/dev1/2024_11_23/dev1_20241123044510000000012.xlog" );
+    }
 }
 
 /// Building the app-to-file map with bad arguments
@@ -239,7 +254,7 @@ TEST_CASE( "Building the app-to-file map with bad arguments", "[libMagAOX::logge
 
         mx::error_t errc = lm.loadAppToFileMap( "/root/adlknalkejr111", "dev1", ".xlog", firstFile, lastFile );
 
-        REQUIRE(errc == mx::error_t::eacces);
+        REQUIRE( errc == mx::error_t::eacces );
         REQUIRE( lm.m_appToFileMap.size() == 0 );
     }
 
@@ -252,7 +267,7 @@ TEST_CASE( "Building the app-to-file map with bad arguments", "[libMagAOX::logge
 
         mx::error_t errc = lm.loadAppToFileMap( "/tmp/logMap_testX", "dev1", ".xlog", firstFile, lastFile );
 
-        REQUIRE(errc == mx::error_t::dirnotfound);
+        REQUIRE( errc == mx::error_t::dirnotfound );
         REQUIRE( lm.m_appToFileMap.size() == 0 );
     }
 
@@ -265,7 +280,7 @@ TEST_CASE( "Building the app-to-file map with bad arguments", "[libMagAOX::logge
 
         mx::error_t errc = lm.loadAppToFileMap( "/tmp/logMap_test", "dev1", ".xlog", firstFile, lastFile );
 
-        REQUIRE(errc == mx::error_t::invalidconfig);
+        REQUIRE( errc == mx::error_t::invalidconfig );
         REQUIRE( lm.m_appToFileMap.size() == 0 );
     }
 
@@ -278,7 +293,7 @@ TEST_CASE( "Building the app-to-file map with bad arguments", "[libMagAOX::logge
 
         mx::error_t errc = lm.loadAppToFileMap( "/tmp/logMap_test", "dev1", ".xlog", firstFile, lastFile );
 
-        REQUIRE(errc == mx::error_t::invalidconfig);
+        REQUIRE( errc == mx::error_t::invalidconfig );
         REQUIRE( lm.m_appToFileMap.size() == 0 );
     }
 
@@ -291,7 +306,7 @@ TEST_CASE( "Building the app-to-file map with bad arguments", "[libMagAOX::logge
 
         mx::error_t errc = lm.loadAppToFileMap( "/tmp/logMap_test", "dev6", ".xlog", firstFile, lastFile );
 
-        REQUIRE(errc == mx::error_t::noerror);
+        REQUIRE( errc == mx::error_t::noerror );
         REQUIRE( lm.m_appToFileMap.size() == 0 );
     }
 
@@ -304,11 +319,9 @@ TEST_CASE( "Building the app-to-file map with bad arguments", "[libMagAOX::logge
 
         mx::error_t errc = lm.loadAppToFileMap( "/tmp/logMap_test", "dev1", ".qlog", firstFile, lastFile );
 
-        REQUIRE(errc == mx::error_t::noerror);
+        REQUIRE( errc == mx::error_t::noerror );
         REQUIRE( lm.m_appToFileMap.size() == 0 );
     }
-
-
 }
 
 /// Building the app-to-file map with errors
