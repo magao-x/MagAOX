@@ -52,6 +52,17 @@ class dmSyncopation : public MagAOXApp<true>,
     using telemeterT    = dev::telemeter<dmSyncopation>;
 
   protected:
+    /// Fixed fault classes counted without formatting or logging in the timing callback.
+    enum class Fault
+    {
+        none,
+        primary,
+        resource,
+        output,
+        trigger,
+        count
+    };
+
     /// Persistent stream handles and one-pass source staging, owned by the scheduler.
     struct Mapping
     {
@@ -103,35 +114,46 @@ class dmSyncopation : public MagAOXApp<true>,
     bool        m_primed{ false };                 ///< The upcoming cycle has an on-time passive preparation.
     int         m_scheduleState{ synco::invalid }; ///< Provider-facing acquisition/armed state.
     const char *m_reason{ "disabled" };            ///< Static health reason, formatted only by appLogic.
-    uint64_t    m_primaryCounter{ 0 };             ///< Last genuine main counter accepted by this callback.
-    uint64_t    m_consumed{ 0 };                   ///< Last confirmed combined counter.
-    int64_t     m_lastMain{ 0 };                   ///< Previous main callback timestamp, monotonic ns.
-    int64_t     m_period{ 500000 };                ///< Filtered main period, monotonic ns.
-    int64_t     m_submission{ 0 };     ///< Actual last submission, or conservative main-publication upper bound.
-    int64_t     m_epoch{ 0 };          ///< Restart-unique timing record identity.
-    int64_t     m_generation{ 1 };     ///< Changes on invalidation/reacquisition.
-    unsigned    m_clean{ 0 };          ///< Consecutive clean primary observations.
-    unsigned    m_failures{ 0 };       ///< Original consecutive timing failures; dependent cancellations do not count.
-    unsigned    m_rateViolations{ 0 }; ///< Consecutive nominal rate incompatibilities.
-    int         m_feasible{ 0 };       ///< Reported maximum feasible count, never an automatic count selector.
-    uint64_t    m_delivered{ 0 };      ///< Confirmed later-step combinations.
-    uint64_t    m_mainDelivered{ 0 };  ///< Confirmed primary combinations, separate from extra updates.
-    uint64_t    m_reportedDelivered{ 0 }; ///< Receipt count at the previous slow status update.
-    int64_t     m_reportTime{ 0 };        ///< Monotonic reference for measured delivered cadence.
-    double      m_deliveredHz{ 0 };       ///< Main plus auxiliary confirmed cadence over the last status interval.
-    uint64_t    m_missed{ 0 };            ///< Original timing failures.
-    uint64_t    m_faults{ 0 };            ///< Synchronization/resource invalidations.
-    uint64_t    m_cached{ 0 };            ///< Source fallback uses, not deadline misses.
-    uint64_t    m_notStarted{ 0 };        ///< Step-0 copies suppressed before mutation.
-    uint64_t    m_copiedLate{ 0 };        ///< Step-0 copies completed after the effective cutoff.
-    int64_t     m_snapshotMax{ 0 };       ///< Observed maximum complete snapshot batch time.
-    int64_t     m_copyMax{ 0 };           ///< Observed maximum complete destination copy time.
+    const char *m_lastFaultReason{ "none" };       ///< Latched fault cause, retained while the current phase changes.
+    int64_t     m_lastFaultNs{ 0 }; ///< Monotonic timestamp of the latched synchronization/resource fault.
+    std::array<uint64_t, size_t( Fault::count )> m_faultCounts{}; ///< Fixed per-cause fault totals.
+    bool     m_havePrimaryCounter{ false }; ///< Last-seen counter is initialized for the current primary attachment.
+    uint64_t m_primaryCounter{ 0 };         ///< Last seen primary counter, retained through reacquisition.
+    int64_t  m_lastPrimaryDelta{ 0 };       ///< Counter change at the latest distinct primary observation.
+    int64_t  m_lastPrimaryInterval{ 0 };    ///< Observed interval at the latest distinct primary event.
+    int64_t  m_lastOutputDelta{ 0 }; ///< Observed combined counter minus the last confirmed counter at an output fault.
+    uint64_t m_duplicatePosts{ 0 };  ///< Unchanged-counter callbacks ignored while draining queued notifications.
+    uint64_t m_consumed{ 0 };        ///< Last confirmed combined counter.
+    int64_t  m_lastMain{ 0 };        ///< Previous main callback timestamp, monotonic ns.
+    int64_t  m_period{ 500000 };     ///< Filtered main period, monotonic ns.
+    int64_t  m_submission{ 0 };      ///< Actual last submission, or conservative main-publication upper bound.
+    int64_t  m_epoch{ 0 };           ///< Restart-unique timing record identity.
+    int64_t  m_generation{ 1 };      ///< Changes on invalidation/reacquisition.
+    unsigned m_clean{ 0 };           ///< Consecutive clean primary observations.
+    unsigned m_failures{ 0 };        ///< Original consecutive timing failures; dependent cancellations do not count.
+    unsigned m_rateViolations{ 0 };  ///< Consecutive nominal rate incompatibilities.
+    int      m_feasible{ 0 };        ///< Reported maximum feasible count, never an automatic count selector.
+    uint64_t m_delivered{ 0 };       ///< Confirmed later-step combinations.
+    uint64_t m_mainDelivered{ 0 };   ///< Confirmed primary combinations, separate from extra updates.
+    uint64_t m_reportedDelivered{ 0 }; ///< Receipt count at the previous slow status update.
+    int64_t  m_reportTime{ 0 };        ///< Monotonic reference for measured delivered cadence.
+    double   m_deliveredHz{ 0 };       ///< Main plus auxiliary confirmed cadence over the last status interval.
+    uint64_t m_missed{ 0 };            ///< Original timing failures.
+    uint64_t m_faults{ 0 };            ///< Synchronization/resource invalidations.
+    uint64_t m_cached{ 0 };            ///< Source fallback uses, not deadline misses.
+    uint64_t m_notStarted{ 0 };        ///< Step-0 copies suppressed before mutation.
+    uint64_t m_copiedLate{ 0 };        ///< Step-0 copies completed after the effective cutoff.
+    int64_t  m_snapshotMax{ 0 };       ///< Observed maximum complete snapshot batch time.
+    int64_t  m_copyMax{ 0 };           ///< Observed maximum complete destination copy time.
     std::array<int64_t, synco::maxSteps> m_advances{};  ///< Independent bounded wait integrators.
     std::array<int64_t, synco::maxSteps> m_residuals{}; ///< Latest actual-minus-target timings, ns.
     int64_t ( *m_now )(){ synco::monotonicNs };         ///< Local clock adapter for deterministic tests.
     int ( *m_wait )( const timespec * ){ nullptr };     ///< Optional absolute-wait adapter used by deterministic tests.
     bool    m_copyStarted{ false }; ///< Per-call outcome, independent of historical maximum copy duration.
+    int64_t m_copyAttemptedAt{ 0 }; ///< Actual copy-attempt start, including safely rejected attempts.
     int64_t m_copyCompleted{ 0 };   ///< Per-call completion timestamp for passive-copy classification.
+    int64_t m_step0Wake{ 0 };       ///< Latest passive-copy start lateness relative to the requested wake, ns.
+    int64_t m_step0WakeMax{ 0 };    ///< Maximum observed passive-copy wake/check lateness, ns.
 
     pcf::IndiProperty m_indiP_enable;    ///< Enable request and acknowledged quiescence.
     pcf::IndiProperty m_indiP_reacquire; ///< Request fresh synchronization.
@@ -201,8 +223,10 @@ class dmSyncopation : public MagAOXApp<true>,
     bool resourcesValid( bool files /**< [in] include bounded-cycle-start inode checks */ );
 
     /// Invalidate scheduling while retaining the last complete contributions.
-    void invalidate( const char *reason /**< [in] static diagnostic reason */,
-                     bool        fault /**< [in] count a genuine synchronization/resource fault */ );
+    void
+    invalidate( const char *reason /**< [in] static diagnostic reason */,
+                Fault       fault  = Fault::none /**< [in] synchronization/resource fault class, if any */,
+                bool resetFeedback = true /**< [in] reset learned waits for a changed synchronization contract */ );
 
     /// Wait with bounded cancellation and primary-counter checkpoints.
     bool waitUntil( int64_t target /**< [in] absolute monotonic target */ );
@@ -544,17 +568,29 @@ inline bool dmSyncopation::resourcesValid( bool files )
     return true;
 }
 
-inline void dmSyncopation::invalidate( const char *reason, bool fault )
+inline void dmSyncopation::invalidate( const char *reason, Fault fault, bool resetFeedback )
 {
-    if( fault )
+    if( fault != Fault::none )
+    {
         ++m_faults;
+        ++m_faultCounts[size_t( fault )];
+        m_lastFaultReason = reason;
+        m_lastFaultNs     = m_now();
+        m_trackingOutput  = false;
+        m_lastMain        = 0;
+    }
     m_reason        = reason;
     m_scheduleState = synco::invalid;
     m_clean         = 0;
     m_primed        = false;
     m_expectOutput  = false;
     m_failures      = 0;
-    m_advances.fill( 0 );
+    if( resetFeedback )
+    {
+        m_advances.fill( 0 );
+        // Start conservatively early; valid wake samples tune this toward actual wait/check latency.
+        m_advances[0] = int64_t( m_maxAdvanceUs * 1000 );
+    }
     ++m_generation;
     publishSchedule( 0, -1 );
 }
@@ -563,14 +599,20 @@ inline bool dmSyncopation::waitUntil( int64_t target )
 {
     while( m_enabled && !shutdown() )
     {
-        if( shmimMonitorT::m_imageStream.md->cnt0 != m_primaryCounter || !resourcesValid( false ) )
+        if( shmimMonitorT::m_imageStream.md->cnt0 != m_primaryCounter )
         {
-            invalidate( "primary/resource changed during cycle", true );
+            invalidate( "primary changed during cycle", Fault::primary );
+            return false;
+        }
+        if( !resourcesValid( false ) )
+        {
+            invalidate( "resource changed during cycle", Fault::resource );
             return false;
         }
         if( !m_expectOutput && m_combined->image()->md->cnt0 != m_consumed )
         {
-            invalidate( "unexpected combination", true );
+            m_lastOutputDelta = int64_t( m_combined->image()->md->cnt0 ) - int64_t( m_consumed );
+            invalidate( "unexpected combination", Fault::output );
             return false;
         }
         const int64_t now = m_now();
@@ -580,7 +622,7 @@ inline bool dmSyncopation::waitUntil( int64_t target )
         const int result = m_wait ? m_wait( &wake ) : clock_nanosleep( CLOCK_MONOTONIC, TIMER_ABSTIME, &wake, nullptr );
         if( result != 0 && result != EINTR )
         {
-            invalidate( "monotonic wait failed", true );
+            invalidate( "monotonic wait failed", Fault::resource );
             return false;
         }
     }
@@ -605,7 +647,8 @@ inline bool dmSyncopation::consume()
         if( !waitUntil( std::min( deadline, m_now() + 1000 ) ) )
             return false;
     }
-    invalidate( "missing/ambiguous combined output", true );
+    m_lastOutputDelta = int64_t( m_combined->image()->md->cnt0 ) - int64_t( m_consumed );
+    invalidate( "missing/ambiguous combined output", Fault::output );
     return false;
 }
 
@@ -636,7 +679,7 @@ inline bool dmSyncopation::snapshot()
     if( elapsed > m_bounds.snapshot )
     {
         m_bounds.snapshot = elapsed + 1000;
-        invalidate( "snapshot budget exceeded; enlarged for reacquisition", false );
+        invalidate( "snapshot budget exceeded; enlarged for reacquisition", Fault::none, false );
         return false;
     }
     return true;
@@ -647,6 +690,7 @@ inline bool dmSyncopation::copyBatch( int64_t cutoff )
     m_copyStarted       = false;
     m_copyCompleted     = 0;
     const int64_t start = m_now();
+    m_copyAttemptedAt   = start;
     if( start + m_bounds.copy > cutoff || !waitUntil( start ) || m_combined->image()->md->cnt0 != m_consumed )
         return false;
     m_copyStarted = true;
@@ -656,7 +700,7 @@ inline bool dmSyncopation::copyBatch( int64_t cutoff )
         // destinations do not become a mixture of old and newly staged mappings.
         if( shmimMonitorT::m_imageStream.md->cnt0 != m_primaryCounter )
         {
-            invalidate( "main event during batch copy", true );
+            invalidate( "main event during batch copy", Fault::primary );
             return false;
         }
         mapping.m_destination->setWrite( true );
@@ -672,7 +716,7 @@ inline bool dmSyncopation::copyBatch( int64_t cutoff )
     if( completed - start > m_bounds.copy )
     {
         m_bounds.copy = completed - start + 1000;
-        invalidate( "copy budget exceeded; enlarged for reacquisition", false );
+        invalidate( "copy budget exceeded; enlarged for reacquisition", Fault::none, false );
         return false;
     }
     if( completed > cutoff )
@@ -684,7 +728,7 @@ inline void dmSyncopation::missedStep()
 {
     ++m_missed;
     if( ++m_failures >= m_failureLimit )
-        invalidate( "consecutive missed timing events", false );
+        invalidate( "consecutive missed timing events", Fault::none, false );
 }
 
 inline bool dmSyncopation::executeStep( int step, int64_t target, int64_t cutoff )
@@ -702,12 +746,32 @@ inline bool dmSyncopation::executeStep( int step, int64_t target, int64_t cutoff
         return false;
     }
     publishSchedule( m_lastMain, step );
-    const int64_t hold   = m_submission + m_bounds.delivery + m_bounds.keepout + m_bounds.guard;
-    int64_t       copyAt = step == 0 ? target - m_bounds.copy - m_advances[0] : target - m_bounds.copy - advanceLimit;
-    copyAt               = std::max( hold, std::min( copyAt, cutoff - m_bounds.copy ) );
+    const int64_t hold         = m_submission + m_bounds.delivery + m_bounds.keepout + m_bounds.guard;
+    const int64_t desiredStart = target - m_bounds.copy;
+    const int64_t advance      = step == 0 ? m_advances[0] : advanceLimit;
+    // Step zero never trades its positive preparation reserve for a later planned start.
+    const int64_t copyAt = std::max( hold, desiredStart - advance );
+    if( copyAt + m_bounds.copy > cutoff )
+    {
+        if( !m_enabled || m_faults != faultsBefore )
+            return false;
+        if( step == 0 )
+            ++m_notStarted;
+        missedStep();
+        return false;
+    }
     if( !waitUntil( copyAt ) )
         return false;
-    if( !copyBatch( cutoff ) )
+    const bool copied = copyBatch( cutoff );
+    if( step == 0 && m_enabled && m_faults == faultsBefore && copyAt == desiredStart - advance )
+    {
+        m_step0Wake    = std::max<int64_t>( 0, m_copyAttemptedAt - copyAt );
+        m_step0WakeMax = std::max( m_step0WakeMax, m_step0Wake );
+        // A rejected copy still supplies a valid wait observation, not a successful command sample.
+        m_advances[0] = std::clamp<int64_t>(
+            synco::feedback( advance, m_copyAttemptedAt - desiredStart, m_gain, advanceLimit, true ), 0, advanceLimit );
+    }
+    if( !copied )
     {
         if( !m_enabled || m_faults != faultsBefore )
             return false;
@@ -742,7 +806,7 @@ inline bool dmSyncopation::executeStep( int step, int64_t target, int64_t cutoff
         trigger.m_destination->passive( true );
         if( trigger.m_destination->image()->md->cnt0 != expected )
         {
-            invalidate( "trigger destination counter changed unexpectedly", true );
+            invalidate( "trigger destination counter changed unexpectedly", Fault::resource );
             return false;
         }
         trigger.m_counter = expected;
@@ -750,17 +814,17 @@ inline bool dmSyncopation::executeStep( int step, int64_t target, int64_t cutoff
         m_submission      = actual;
         if( actual + m_bounds.delivery + m_bounds.keepout + m_bounds.guard > latest || actual > cutoff )
         {
-            invalidate( "actual trigger outside safe window", true );
+            invalidate( "actual trigger outside safe window", Fault::trigger );
             return false;
         }
         if( !consume() )
             return false;
         ++m_delivered;
     }
-    m_residuals[step]    = actual - target;
-    const bool unclamped = step > 0 || copyAt == target - m_bounds.copy - m_advances[0];
-    m_advances[step]     = synco::feedback( m_advances[step], m_residuals[step], m_gain, advanceLimit, unclamped );
-    m_failures           = 0;
+    m_residuals[step] = actual - target;
+    if( step > 0 )
+        m_advances[step] = synco::feedback( m_advances[step], m_residuals[step], m_gain, advanceLimit, true );
+    m_failures = 0;
     return true;
 }
 
@@ -811,8 +875,10 @@ inline int dmSyncopation::allocate( const dev::shmimT &tag )
             shmimMonitorT::m_imageStream.semReadPID[assigned] = 0;
         return -1;
     }
-    invalidate( "acquiring resources", false );
-    m_lastMain = 0;
+    invalidate( "acquiring resources" );
+    m_lastMain           = 0;
+    m_primaryCounter     = shmimMonitorT::m_imageStream.md->cnt0;
+    m_havePrimaryCounter = true;
     openResources(); // Other streams may appear after the primary; callbacks retry while unarmed.
     return 0;
 }
@@ -830,43 +896,54 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
         m_nextAttach = observed + 1000000000;
         if( !openResources() )
         {
-            invalidate( "resources unavailable", false );
+            invalidate( "resources unavailable" );
             return 0;
         }
     }
     if( !resourcesValid( true ) )
     {
-        invalidate( "resource replacement/external destination write", true );
+        invalidate( "resource replacement/external destination write", Fault::resource );
         closeResources(); // Reattach and refresh caches, including a controller's cleared auxiliary values.
         return 0;
     }
     const auto counter = shmimMonitorT::m_imageStream.md->cnt0;
+    if( m_havePrimaryCounter && counter == m_primaryCounter )
+    {
+        ++m_duplicatePosts;
+        return 0; // A queued semaphore token is not a new physical main event.
+    }
+    const bool sequential = !m_havePrimaryCounter || counter == m_primaryCounter + 1;
+    m_lastPrimaryDelta    = m_havePrimaryCounter ? int64_t( counter ) - int64_t( m_primaryCounter ) : 0;
+    m_primaryCounter      = counter; // Adopt jumps/resets once; queued duplicates must not re-enter acquisition.
+    m_havePrimaryCounter  = true;
     if( !m_enabled )
     {
-        m_primaryCounter = counter;
         m_lastMain       = 0;
         m_consumed       = m_combined->image()->md->cnt0;
         m_trackingOutput = false;
         return 0;
     }
     const int64_t previous = m_lastMain;
+    m_lastPrimaryInterval  = previous ? observed - previous : 0;
+    if( !sequential )
+    {
+        invalidate( "primary counter jump/reset", Fault::primary );
+        return 0;
+    }
     if( previous &&
-        ( counter != m_primaryCounter + 1 || observed <= previous || observed - previous < int64_t( 1e9 / m_maxRate ) ||
+        ( observed <= previous || observed - previous < int64_t( 1e9 / m_maxRate ) ||
           observed - previous > int64_t( 1e9 / m_minRate ) || observed < previous + m_period - m_bounds.early ||
           observed > previous + m_period + m_bounds.early ) )
     {
-        if( counter == m_primaryCounter + 1 && observed > previous &&
-            observed - previous >= int64_t( 1e9 / m_maxRate ) && observed - previous <= int64_t( 1e9 / m_minRate ) )
+        if( observed > previous && observed - previous >= int64_t( 1e9 / m_maxRate ) &&
+            observed - previous <= int64_t( 1e9 / m_minRate ) )
             m_period =
                 observed - previous; // Reacquire an actual rate change; never learn a counter gap as a slower loop.
-        invalidate( "primary counter/period anomaly", true );
-        m_trackingOutput = false;
-        m_lastMain       = 0;
+        invalidate( "primary interval anomaly", Fault::primary );
         return 0;
     }
-    m_primaryCounter = counter;
-    m_lastMain       = observed;
-    m_submission     = observed; // Conservative upper bound on the current main's publication.
+    m_lastMain   = observed;
+    m_submission = observed; // Conservative upper bound on the current main's publication.
     if( previous )
         m_period = ( 7 * m_period + observed - previous ) / 8;
     if( !m_trackingOutput )
@@ -878,7 +955,7 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
             return 0;
         if( m_combined->image()->md->write )
         {
-            invalidate( "initial output baseline incomplete", true );
+            invalidate( "initial output baseline incomplete", Fault::output );
             return 0;
         }
         m_consumed       = m_combined->image()->md->cnt0;
@@ -904,7 +981,7 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
         m_rateViolations = 0;
     if( !synco::feasible( m_period, m_requested, m_bounds ) || m_rateViolations >= m_rateFrames )
     {
-        invalidate( "requested count/cadence infeasible", false );
+        invalidate( "requested count/cadence infeasible" );
         return 0;
     }
     if( m_clean < m_lockFrames )
@@ -959,25 +1036,17 @@ inline int dmSyncopation::appStartup()
     }
     REG_INDI_NEWPROP_NOCB( m_indiP_status, "timing", pcf::IndiProperty::Number );
     m_indiP_status.setPerm( pcf::IndiProperty::ReadOnly );
-    for( const auto &name : { "mainHz",
-                              "cameraHz",
-                              "plannedHz",
-                              "deliveredHz",
-                              "delivered",
-                              "requested",
-                              "active",
-                              "feasible",
-                              "missed",
-                              "faults",
-                              "cached",
-                              "notStarted",
-                              "copiedLate",
-                              "snapshotMaxUs",
-                              "copyMaxUs" } )
+    for( const auto &name :
+         { "mainHz",           "cameraHz",       "plannedHz",       "deliveredHz",    "delivered",
+           "requested",        "active",         "feasible",        "missed",         "faults",
+           "cached",           "notStarted",     "copiedLate",      "snapshotMaxUs",  "copyMaxUs",
+           "primaryFaults",    "resourceFaults", "outputFaults",    "triggerFaults",  "duplicatePosts",
+           "step0WakeUs",      "step0WakeMaxUs", "step0AdvanceUs",  "copyBudgetUs",   "snapshotBudgetUs",
+           "lastPrimaryDelta", "lastIntervalUs", "lastOutputDelta", "lastFaultAgeSec" } )
         m_indiP_status.add( pcf::IndiElement( name ) );
     REG_INDI_NEWPROP_NOCB( m_indiP_health, "health", pcf::IndiProperty::Text );
     m_indiP_health.setPerm( pcf::IndiProperty::ReadOnly );
-    for( const auto &name : { "reason", "primary", "combined", "timingStream", "mapping" } )
+    for( const auto &name : { "reason", "lastFault", "primary", "combined", "timingStream", "mapping" } )
         m_indiP_health.add( pcf::IndiElement( name ) );
     if( !m_cameraDevice.empty() )
     {
@@ -998,9 +1067,7 @@ inline int dmSyncopation::appLogic()
         {
             if( m_enabled && m_lastMain && m_now() - m_lastMain > int64_t( 2e9 / m_minRate ) )
             {
-                invalidate( "main timeout", true );
-                m_lastMain       = 0;
-                m_trackingOutput = false;
+                invalidate( "main timeout", Fault::primary );
             }
             const int64_t  now       = m_now();
             const uint64_t delivered = m_mainDelivered + m_delivered;
@@ -1016,22 +1083,14 @@ inline int dmSyncopation::appLogic()
                                                      m_bounds.keepout / 1000.0,
                                                      m_bounds.guard / 1000.0,
                                                      m_bounds.lead / 1000.0 };
-            const std::vector<std::string> names{ "mainHz",
-                                                  "cameraHz",
-                                                  "plannedHz",
-                                                  "deliveredHz",
-                                                  "delivered",
-                                                  "requested",
-                                                  "active",
-                                                  "feasible",
-                                                  "missed",
-                                                  "faults",
-                                                  "cached",
-                                                  "notStarted",
-                                                  "copiedLate",
-                                                  "snapshotMaxUs",
-                                                  "copyMaxUs" };
-            const std::vector<double>      values{ 1e9 / m_period,
+            const std::vector<std::string> names{
+                "mainHz",           "cameraHz",       "plannedHz",       "deliveredHz",    "delivered",
+                "requested",        "active",         "feasible",        "missed",         "faults",
+                "cached",           "notStarted",     "copiedLate",      "snapshotMaxUs",  "copyMaxUs",
+                "primaryFaults",    "resourceFaults", "outputFaults",    "triggerFaults",  "duplicatePosts",
+                "step0WakeUs",      "step0WakeMaxUs", "step0AdvanceUs",  "copyBudgetUs",   "snapshotBudgetUs",
+                "lastPrimaryDelta", "lastIntervalUs", "lastOutputDelta", "lastFaultAgeSec" };
+            const std::vector<double> values{ 1e9 / m_period,
                                               m_cameraFps.load(),
                                               m_requested * 1e9 / m_period,
                                               m_deliveredHz,
@@ -1045,15 +1104,31 @@ inline int dmSyncopation::appLogic()
                                               double( m_notStarted ),
                                               double( m_copiedLate ),
                                               m_snapshotMax / 1000.0,
-                                              m_copyMax / 1000.0 };
-            const std::string              reason = m_reason;
-            std::string                    mappings;
+                                              m_copyMax / 1000.0,
+                                              double( m_faultCounts[size_t( Fault::primary )] ),
+                                              double( m_faultCounts[size_t( Fault::resource )] ),
+                                              double( m_faultCounts[size_t( Fault::output )] ),
+                                              double( m_faultCounts[size_t( Fault::trigger )] ),
+                                              double( m_duplicatePosts ),
+                                              m_step0Wake / 1000.0,
+                                              m_step0WakeMax / 1000.0,
+                                              m_advances[0] / 1000.0,
+                                              m_bounds.copy / 1000.0,
+                                              m_bounds.snapshot / 1000.0,
+                                              double( m_lastPrimaryDelta ),
+                                              m_lastPrimaryInterval / 1000.0,
+                                              double( m_lastOutputDelta ),
+                                              m_lastFaultNs ? ( now - m_lastFaultNs ) / 1e9 : -1 };
+            const std::string         reason    = m_reason;
+            const std::string         lastFault = m_lastFaultReason;
+            std::string               mappings;
             for( const auto &name : m_destinations )
                 mappings += ( mappings.empty() ? "" : ", " ) + name + "_aux -> " + name;
             lock.unlock(); // Never hold the cycle mutex across INDI driver I/O.
             updateIfChanged( m_indiP_settings, settingNames, settingValues );
             updateIfChanged( m_indiP_status, names, values, status );
             updateIfChanged( m_indiP_health, "reason", reason );
+            updateIfChanged( m_indiP_health, "lastFault", lastFault );
             updateIfChanged( m_indiP_health, "primary", shmimMonitorT::m_shmimName );
             updateIfChanged( m_indiP_health, "combined", m_combinedName );
             updateIfChanged( m_indiP_health, "timingStream", m_timingName );
@@ -1071,7 +1146,7 @@ inline int dmSyncopation::appShutdown()
     SHMIMMONITOR_APP_SHUTDOWN;
     TELEMETER_APP_SHUTDOWN;
     std::lock_guard<std::mutex> lock( m_cycleMutex );
-    invalidate( "shutdown", false );
+    invalidate( "shutdown" );
     closeResources();
     return 0;
 }
@@ -1111,7 +1186,7 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_enable )( const pcf::IndiProperty 
         m_enabled = false;
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_cycleMutex );
-        invalidate( enable ? "acquiring" : "disabled", false );
+        invalidate( enable ? "acquiring" : "disabled" );
         m_lastMain       = 0;
         m_trackingOutput = false;
         m_enabled        = enable;
@@ -1131,7 +1206,7 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_reacquire )( const pcf::IndiProper
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
         std::lock_guard<std::mutex> lock( m_cycleMutex );
-        invalidate( "reacquire requested", false );
+        invalidate( "reacquire requested" );
         m_lastMain       = 0;
         m_trackingOutput = false;
     }
@@ -1180,7 +1255,7 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
     m_requested  = requested;
     m_maxCadence = cadence;
     m_bounds     = bounds;
-    invalidate( "disabled settings changed", false );
+    invalidate( "disabled settings changed" );
     return 0;
 }
 

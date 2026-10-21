@@ -24,6 +24,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::consume;
     using dmSyncopation::copyBatch;
     using dmSyncopation::executeStep;
+    using dmSyncopation::Fault;
     using dmSyncopation::m_advances;
     using dmSyncopation::m_bounds;
     using dmSyncopation::m_cameraFps;
@@ -37,11 +38,14 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_destinations;
     using dmSyncopation::m_enabled;
     using dmSyncopation::m_epoch;
+    using dmSyncopation::m_faultCounts;
     using dmSyncopation::m_faults;
     using dmSyncopation::m_indiP_camera;
     using dmSyncopation::m_indiP_enable;
     using dmSyncopation::m_indiP_reacquire;
     using dmSyncopation::m_indiP_settings;
+    using dmSyncopation::m_lastFaultNs;
+    using dmSyncopation::m_lastFaultReason;
     using dmSyncopation::m_lastMain;
     using dmSyncopation::m_lockFrames;
     using dmSyncopation::m_mappings;
@@ -51,6 +55,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_period;
     using dmSyncopation::m_primaryCounter;
     using dmSyncopation::m_primed;
+    using dmSyncopation::m_reason;
     using dmSyncopation::m_record;
     using dmSyncopation::m_requested;
     using dmSyncopation::m_resources;
@@ -187,13 +192,14 @@ struct Clock
     static inline bool     lateCopy      = false;      ///< Inject an overrun only after a destination copy starts.
     static inline bool     disableInCopy = false;      ///< Cancel between passive mapping copies.
     static inline int64_t  disableAt     = 0;          ///< Cancel in the final pre-trigger interval.
+    static inline int64_t  wakeDelayNs   = 0;          ///< Deterministic scheduling delay after every requested wake.
     static inline bool     finishOutput  = false; ///< Complete an expected output whose counter is already visible.
     static inline uint64_t trigger       = 0;     ///< Last designated destination counter observed.
 
     /// Read deterministic elapsed work rather than host scheduler latency.
     static int64_t now();
 
-    /// Advance to the absolute target and emulate at most one combiner publication.
+    /// Advance to the absolute target plus wake delay and emulate one combiner publication.
     static int wait( const timespec *target /**< [in] absolute wait target */ );
 
     /// Connect the fake clock and choose feasible synthetic timing bounds.
@@ -219,7 +225,7 @@ int64_t Clock::now()
 
 int Clock::wait( const timespec *target )
 {
-    time = std::max( time, int64_t( target->tv_sec ) * 1000000000 + target->tv_nsec );
+    time = std::max( time, int64_t( target->tv_sec ) * 1000000000 + target->tv_nsec ) + wakeDelayNs;
     if( finishOutput )
     {
         app->m_combined->image()->md->write = 0;
@@ -252,6 +258,7 @@ void Clock::connect( Harness &scheduler )
     lateCopy                       = false;
     disableInCopy                  = false;
     disableAt                      = 0;
+    wakeDelayNs                    = 0;
     finishOutput                   = false;
     scheduler.m_now                = now;
     scheduler.m_wait               = wait;
@@ -392,12 +399,16 @@ TEST_CASE( "syncopation classifies misses and preserves reader lifetime", "[dmSy
     {
         auto &mapping = app.m_mappings.front();
         std::fill_n( mapping.m_destination->data(), 9, 6.0f );
-        app.m_submission = Clock::time + 100000;
-        REQUIRE_FALSE( app.executeStep( 0, Clock::time + 90000, Clock::time + 100000 ) );
+        app.m_submission     = Clock::time + 100000;
+        app.m_requested      = 2;
+        const int64_t cutoff = Clock::time + 100000;
+        REQUIRE_FALSE( app.executeStep( 0, cutoff - 10000, cutoff ) );
+        REQUIRE( Clock::time < cutoff ); // Reject the impossible hold before waiting into a future main event.
         REQUIRE( app.m_notStarted == 1 );
         REQUIRE( mapping.m_destination->data()[0] == 6.0f );
         REQUIRE( mapping.m_destination->image()->md->cnt0 == mapping.m_counter );
         REQUIRE( app.m_missed == 1 );
+        REQUIRE( app.m_faults == 0 );
     }
     SECTION( "a late copy is detected even below a historical maximum" )
     {
@@ -623,6 +634,151 @@ TEST_CASE( "syncopation primes step zero before issuing later triggers", "[dmSyn
         REQUIRE_FALSE( app.m_resources );
         REQUIRE( app.m_scheduleState == synco::invalid );
     }
+}
+
+/// Keep conservative copy budgets from moving fast passive copies toward the hard latest start.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation passive feedback retains headroom with a grown copy budget", "[dmSyncopation][regression]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::executeStep(0, 0, 0);
+    #endif
+    // clang-format on
+    Streams streams;
+    Harness app;
+    app.attach();
+    Clock::connect( app );
+    app.m_bounds.copy   = 21000;
+    app.m_requested     = 2;
+    app.m_scheduleState = synco::armed;
+    for( int cycle = 0; cycle < 30; ++cycle )
+    {
+        INFO( "passive cycle " << cycle );
+        const int64_t observed = 1000000000 + cycle * 500000;
+        Clock::time            = observed;
+        app.m_lastMain         = observed;
+        app.m_submission       = observed;
+        const int64_t cutoff   = synco::copyCutoff( observed + 500000, app.m_bounds );
+        REQUIRE( app.executeStep( 0, cutoff - app.m_bounds.reserve, cutoff ) );
+        // The virtual memcpy is much faster than its conservative budget. Completing
+        // before the latest permissible start demonstrates retained scheduling headroom.
+        REQUIRE( Clock::time < cutoff - app.m_bounds.copy );
+    }
+    REQUIRE( app.m_notStarted == 0 );
+    REQUIRE( app.m_missed == 0 );
+    REQUIRE( app.m_faults == 0 );
+    REQUIRE( app.m_mappings.front().m_destination->image()->md->cnt0 == 0 );
+}
+
+/// Prime and retain a feasible two-step schedule despite repeatable five-microsecond wake latency.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation primes despite deterministic wake overshoot", "[dmSyncopation][regression]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage(nullptr, dev::shmimT());
+    #endif
+    // clang-format on
+    Streams streams;
+    Harness app;
+    app.attach();
+    Clock::connect( app );
+    app.m_bounds          = synco::Bounds{};
+    app.m_bounds.copy     = 21000;
+    app.m_bounds.snapshot = 7000;
+    app.m_requested       = 2;
+    Clock::wakeDelayNs    = 5000;
+    REQUIRE( synco::feasible( 500000, 2, app.m_bounds ) );
+    for( int cycle = 0; cycle < 40; ++cycle )
+    {
+        INFO( "delayed-wake cycle " << cycle );
+        Clock::time = 1000000000 + cycle * 500000;
+        ++streams.images[0].md->cnt0;
+        ++streams.images[1].md->cnt0;
+        REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
+        if( cycle >= 10 )
+        {
+            REQUIRE( app.m_primed );
+            REQUIRE( app.m_scheduleState == synco::armed );
+        }
+    }
+    REQUIRE( app.m_requested == 2 );
+    REQUIRE( app.m_delivered >= 30 );
+    REQUIRE( app.m_notStarted == 0 );
+    REQUIRE( app.m_missed == 0 );
+    REQUIRE( app.m_faults == 0 );
+}
+
+/// Drain duplicate callback notifications without inventing a new main observation during reacquisition.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation ignores queued primary notifications around a counter jump", "[dmSyncopation][regression]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage(nullptr, dev::shmimT());
+    #endif
+    // clang-format on
+    Streams streams;
+    Harness app;
+    app.attach();
+    Clock::connect( app );
+    app.m_requested = 2;
+    ++streams.images[0].md->cnt0;
+    ++streams.images[1].md->cnt0;
+    REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
+    const int64_t firstObservation = app.m_lastMain;
+    REQUIRE( firstObservation > 0 );
+    const auto firstRecord = app.m_timing.md->cnt0;
+    for( int duplicate = 0; duplicate < 5; ++duplicate )
+    {
+        REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
+        REQUIRE( app.m_lastMain == firstObservation );
+        REQUIRE( app.m_clean == 0 );
+        REQUIRE( app.m_faults == 0 );
+        REQUIRE( app.m_delivered == 0 );
+        REQUIRE( app.m_timing.md->cnt0 == firstRecord );
+    }
+
+    Clock::time = 1000500000;
+    streams.images[0].md->cnt0 += 3;
+    streams.images[1].md->cnt0 += 3;
+    REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
+    REQUIRE( app.m_primaryCounter == streams.images[0].md->cnt0 );
+    REQUIRE( app.m_faults == 1 );
+    REQUIRE( app.m_lastMain == 0 );
+    REQUIRE_FALSE( app.m_primed );
+    REQUIRE( app.m_faultCounts[size_t( Harness::Fault::primary )] == 1 );
+    const std::string lastFault     = app.m_lastFaultReason;
+    const int64_t     lastFaultTime = app.m_lastFaultNs;
+    REQUIRE( lastFault != "none" );
+    REQUIRE( lastFaultTime > 0 );
+    const auto invalidRecord = app.m_timing.md->cnt0;
+    for( int duplicate = 0; duplicate < 5; ++duplicate )
+    {
+        REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
+        REQUIRE( app.m_lastMain == 0 );
+        REQUIRE( app.m_clean == 0 );
+        REQUIRE( app.m_faults == 1 );
+        REQUIRE( app.m_delivered == 0 );
+        REQUIRE( app.m_timing.md->cnt0 == invalidRecord );
+    }
+
+    for( int cycle = 2; cycle < 12; ++cycle )
+    {
+        Clock::time = 1000000000 + cycle * 500000;
+        ++streams.images[0].md->cnt0;
+        ++streams.images[1].md->cnt0;
+        REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
+    }
+    REQUIRE( app.m_primed );
+    REQUIRE( app.m_scheduleState == synco::armed );
+    REQUIRE( app.m_delivered > 0 );
+    REQUIRE( app.m_faults == 1 );
+    REQUIRE( std::string( app.m_reason ) != lastFault );
+    REQUIRE( std::string( app.m_lastFaultReason ) == lastFault );
+    REQUIRE( app.m_lastFaultNs == lastFaultTime );
+    REQUIRE( app.m_faultCounts[size_t( Harness::Fault::primary )] == 1 );
 }
 
 /// Validate actual INDI callback behavior, including atomic updates and disabling before publication.
