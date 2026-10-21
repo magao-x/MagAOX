@@ -87,6 +87,16 @@ class dmSyncopation : public MagAOXApp<true>,
         double  m_maxUs{ -1 };    ///< Maximum reported acquisition interval, us.
     };
 
+    /// Diagnostic context for one distinct primary observation; unavailable durations are -1 ns.
+    struct PrimaryTiming
+    {
+        uint64_t m_counter{ 0 };          ///< Primary counter associated with this observation.
+        int64_t  m_publication{ -1 };     ///< Interval between coherent publication timestamps in their own clock.
+        int64_t  m_previousRuntime{ -1 }; ///< Previous callback body duration, including its cycle-lock wait.
+        int64_t  m_gap{ -1 };             ///< Previous callback body completion to this callback entry, monotonic ns.
+        int64_t  m_sampleDelay{ -1 };     ///< This callback entry to its primary metadata sample, monotonic ns.
+    };
+
     /** \name Configuration - Data
      * @{ */
     std::vector<std::string> m_destinations{ "dm01disp07", "dm01disp08" }; ///< Ordered destination mapping.
@@ -128,15 +138,20 @@ class dmSyncopation : public MagAOXApp<true>,
     synco::Record               m_record{};           ///< Current coherent provider schedule.
     bool                        m_resources{ false }; ///< Mappings and timing stream are attached and validated.
     int64_t                     m_nextAttach{ 0 }; ///< Bounded retry interval while unarmed resources are unavailable.
-    bool        m_trackingOutput{ false };         ///< A baseline is available to associate the next main combination.
-    bool        m_expectOutput{ false };           ///< Exactly one pending combination, or the initial baseline drain.
-    bool        m_primed{ false };                 ///< The upcoming cycle has an on-time passive preparation.
-    int         m_scheduleState{ synco::invalid }; ///< Provider-facing acquisition/armed state.
-    const char *m_reason{ "disabled" };            ///< Static health reason, formatted only by appLogic.
-    const char *m_lastFaultReason{ "none" };       ///< Latched fault cause, retained while the current phase changes.
-    int64_t     m_lastFaultNs{ 0 };   ///< Monotonic timestamp of the latched synchronization/resource fault.
-    int64_t     m_faultInterval{ 0 }; ///< Latched interval at the latest interval fault; zero for other faults.
-    int64_t     m_faultPeriod{ 0 };   ///< Prediction used at the latest interval fault; zero for other faults.
+    bool          m_trackingOutput{ false };       ///< A baseline is available to associate the next main combination.
+    bool          m_expectOutput{ false };         ///< Exactly one pending combination, or the initial baseline drain.
+    bool          m_primed{ false };               ///< The upcoming cycle has an on-time passive preparation.
+    int           m_scheduleState{ synco::invalid }; ///< Provider-facing acquisition/armed state.
+    const char   *m_reason{ "disabled" };            ///< Static health reason, formatted only by appLogic.
+    const char   *m_lastFaultReason{ "none" };       ///< Latched fault cause, retained while the current phase changes.
+    int64_t       m_lastFaultNs{ 0 };   ///< Monotonic timestamp of the latched synchronization/resource fault.
+    int64_t       m_faultInterval{ 0 }; ///< Latched interval at the latest interval fault; zero for other faults.
+    int64_t       m_faultPeriod{ 0 };   ///< Prediction used at the latest interval fault; zero for other faults.
+    PrimaryTiming m_primaryTiming;      ///< Diagnostic context for the latest distinct primary observation.
+    PrimaryTiming m_faultTiming;        ///< Same-event context latched with the latest primary interval fault.
+    int64_t       m_previousPrimaryPublication{ 0 }; ///< Last coherent positive primary publication timestamp, ns.
+    int64_t m_previousCallbackRuntime{ -1 }; ///< Duration of the previous invocation, including ignored duplicates.
+    int64_t m_previousCallbackEnd{ 0 };      ///< Previous body completion before cycle-lock release, monotonic ns.
     std::array<uint64_t, size_t( Fault::count )> m_faultCounts{}; ///< Fixed per-cause fault totals.
     bool     m_havePrimaryCounter{ false }; ///< Last-seen counter is initialized for the current primary attachment.
     uint64_t m_primaryCounter{ 0 };         ///< Last seen primary counter, retained through reacquisition.
@@ -241,6 +256,9 @@ class dmSyncopation : public MagAOXApp<true>,
     INDI_SETCALLBACK_DECL( dmSyncopation, m_indiP_camera );
 
   protected:
+    /// Execute one cycle while the caller holds the cycle mutex.
+    int processPrimary( int64_t observed /**< [in] callback entry time on the monotonic scheduling clock */ );
+
     /// Attach existing destinations/output and create only missing auxiliary/timing streams.
     bool openResources();
 
@@ -252,6 +270,11 @@ class dmSyncopation : public MagAOXApp<true>,
 
     /// Refresh the coherent camera cache only when its short mailbox lock is immediately available.
     void readCamera();
+
+    /// Sample publication and previous-callback diagnostics without changing scheduling or retrying metadata reads.
+    void readPrimaryTiming( int64_t  observed /**< [in] current callback's monotonic entry time */,
+                            uint64_t counter /**< [in] primary counter accepted by this observation */,
+                            bool     sequential /**< [in] counters advanced by exactly one */ );
 
     /// Select a measured period without learning individual callback outliers as rate changes.
     void updatePeriod( int64_t observed /**< [in] distinct primary observation time */,
@@ -573,7 +596,8 @@ inline bool dmSyncopation::openResources()
 
 inline void dmSyncopation::closeResources()
 {
-    m_resources = false;
+    m_resources                  = false;
+    m_previousPrimaryPublication = 0;
     m_mappings.clear();
     m_combined.reset();
     if( m_timing.md )
@@ -614,6 +638,33 @@ inline void dmSyncopation::readCamera()
     std::unique_lock<std::mutex> lock( m_cameraMutex, std::try_to_lock );
     if( lock.owns_lock() )
         m_cameraReport = { m_cameraFps.load(), m_cameraTime.load(), m_cameraJitterUs, m_cameraMinUs, m_cameraMaxUs };
+}
+
+inline void dmSyncopation::readPrimaryTiming( int64_t observed, uint64_t counter, bool sequential )
+{
+    const auto *metadata = shmimMonitorT::m_imageStream.md;
+    const bool  complete = !metadata->write && metadata->cnt0 == counter;
+    const auto  stamp    = metadata->writetime;
+    std::atomic_thread_fence( std::memory_order_acquire );
+    const int64_t sampled     = m_now();
+    int64_t       publication = 0;
+    if( complete && !metadata->write && metadata->cnt0 == counter && stamp.tv_sec >= 0 && stamp.tv_nsec >= 0 &&
+        stamp.tv_nsec < 1000000000 && stamp.tv_sec <= ( INT64_MAX - stamp.tv_nsec ) / 1000000000 )
+        publication = int64_t( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec;
+    m_primaryTiming           = {};
+    m_primaryTiming.m_counter = counter;
+    if( sequential && ( !m_havePrimaryCounter || counter > m_primaryCounter ) && publication > 0 &&
+        m_previousPrimaryPublication > 0 && publication > m_previousPrimaryPublication )
+        m_primaryTiming.m_publication = publication - m_previousPrimaryPublication;
+    m_previousPrimaryPublication = publication;
+    if( m_previousCallbackEnd > 0 )
+    {
+        m_primaryTiming.m_previousRuntime = m_previousCallbackRuntime;
+        if( observed >= m_previousCallbackEnd )
+            m_primaryTiming.m_gap = observed - m_previousCallbackEnd;
+    }
+    if( sampled >= observed )
+        m_primaryTiming.m_sampleDelay = sampled - observed;
 }
 
 inline void dmSyncopation::updatePeriod( int64_t observed, int64_t interval, bool sequential )
@@ -677,6 +728,7 @@ inline void dmSyncopation::invalidate( const char *reason, Fault fault, bool res
         m_lastFaultNs     = m_now();
         m_faultInterval   = 0;
         m_faultPeriod     = 0;
+        m_faultTiming     = {};
         m_trackingOutput  = false;
         m_lastMain        = 0;
     }
@@ -977,12 +1029,16 @@ inline int dmSyncopation::allocate( const dev::shmimT &tag )
         return -1;
     }
     invalidate( "acquiring resources" );
-    m_lastMain            = 0;
-    m_primaryCounter      = shmimMonitorT::m_imageStream.md->cnt0;
-    m_havePrimaryCounter  = true;
-    m_previousPrimaryTime = 0;
-    m_rateWindowCount     = 0;
-    m_measuredPeriod      = 0;
+    m_lastMain                   = 0;
+    m_primaryCounter             = shmimMonitorT::m_imageStream.md->cnt0;
+    m_havePrimaryCounter         = true;
+    m_previousPrimaryTime        = 0;
+    m_previousPrimaryPublication = 0;
+    m_previousCallbackRuntime    = -1;
+    m_previousCallbackEnd        = 0;
+    m_primaryTiming              = {};
+    m_rateWindowCount            = 0;
+    m_measuredPeriod             = 0;
     openResources(); // Other streams may appear after the primary; callbacks retry while unarmed.
     return 0;
 }
@@ -993,6 +1049,15 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
     static_cast<void>( tag );
     const int64_t               observed = m_now();
     std::lock_guard<std::mutex> lock( m_cycleMutex );
+    const int                   result    = processPrimary( observed );
+    const int64_t               completed = m_now();
+    m_previousCallbackRuntime             = completed >= observed ? completed - observed : -1;
+    m_previousCallbackEnd                 = completed;
+    return result;
+}
+
+inline int dmSyncopation::processPrimary( int64_t observed )
+{
     if( !m_resources )
     {
         if( observed < m_nextAttach )
@@ -1017,6 +1082,7 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
         return 0; // A queued semaphore token is not a new physical main event.
     }
     const bool sequential = !m_havePrimaryCounter || counter == m_primaryCounter + 1;
+    readPrimaryTiming( observed, counter, sequential );
     m_lastPrimaryDelta    = m_havePrimaryCounter ? int64_t( counter ) - int64_t( m_primaryCounter ) : 0;
     m_primaryCounter      = counter; // Adopt jumps/resets once; queued duplicates must not re-enter acquisition.
     m_havePrimaryCounter  = true;
@@ -1044,6 +1110,7 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
         invalidate( "primary interval anomaly", Fault::primary );
         m_faultInterval = observed - previous;
         m_faultPeriod   = m_period;
+        m_faultTiming   = m_primaryTiming;
         return 0;
     }
     m_lastMain   = observed;
@@ -1136,25 +1203,50 @@ inline int dmSyncopation::appStartup()
     }
     REG_INDI_NEWPROP_NOCB( m_indiP_status, "timing", pcf::IndiProperty::Number );
     m_indiP_status.setPerm( pcf::IndiProperty::ReadOnly );
-    for( const auto &name : { "mainHz",           "cameraHz",
-                              "plannedHz",        "deliveredHz",
-                              "delivered",        "requested",
-                              "active",           "feasible",
-                              "missed",           "faults",
-                              "cached",           "notStarted",
-                              "copiedLate",       "snapshotMaxUs",
-                              "copyMaxUs",        "primaryFaults",
-                              "resourceFaults",   "outputFaults",
-                              "triggerFaults",    "duplicatePosts",
-                              "step0WakeUs",      "step0WakeMaxUs",
-                              "step0AdvanceUs",   "copyBudgetUs",
-                              "snapshotBudgetUs", "lastPrimaryDelta",
-                              "lastIntervalUs",   "lastOutputDelta",
-                              "lastFaultAgeSec",  "cameraJitterUs",
-                              "cameraMinUs",      "cameraMaxUs",
-                              "cameraAgeSec",     "primaryMeasuredHz",
-                              "faultIntervalUs",  "faultPeriodUs",
-                              "faultResidualUs" } )
+    for( const auto &name : { "mainHz",
+                              "cameraHz",
+                              "plannedHz",
+                              "deliveredHz",
+                              "delivered",
+                              "requested",
+                              "active",
+                              "feasible",
+                              "missed",
+                              "faults",
+                              "cached",
+                              "notStarted",
+                              "copiedLate",
+                              "snapshotMaxUs",
+                              "copyMaxUs",
+                              "primaryFaults",
+                              "resourceFaults",
+                              "outputFaults",
+                              "triggerFaults",
+                              "duplicatePosts",
+                              "step0WakeUs",
+                              "step0WakeMaxUs",
+                              "step0AdvanceUs",
+                              "copyBudgetUs",
+                              "snapshotBudgetUs",
+                              "lastPrimaryDelta",
+                              "lastIntervalUs",
+                              "lastOutputDelta",
+                              "lastFaultAgeSec",
+                              "cameraJitterUs",
+                              "cameraMinUs",
+                              "cameraMaxUs",
+                              "cameraAgeSec",
+                              "primaryMeasuredHz",
+                              "faultIntervalUs",
+                              "faultPeriodUs",
+                              "faultResidualUs",
+                              "faultPrimaryCounter",
+                              "faultPublishUs",
+                              "faultPublishValid",
+                              "faultObserveExtraUs",
+                              "faultPrevCallbackUs",
+                              "faultCallbackGapUs",
+                              "faultEntryToCounterUs" } )
         m_indiP_status.add( pcf::IndiElement( name ) );
     REG_INDI_NEWPROP_NOCB( m_indiP_health, "health", pcf::IndiProperty::Text );
     m_indiP_health.setPerm( pcf::IndiProperty::ReadOnly );
@@ -1197,67 +1289,101 @@ inline int dmSyncopation::appLogic()
                                                      m_bounds.keepout / 1000.0,
                                                      m_bounds.guard / 1000.0,
                                                      m_bounds.lead / 1000.0 };
-            const std::vector<std::string> names{ "mainHz",           "cameraHz",
-                                                  "plannedHz",        "deliveredHz",
-                                                  "delivered",        "requested",
-                                                  "active",           "feasible",
-                                                  "missed",           "faults",
-                                                  "cached",           "notStarted",
-                                                  "copiedLate",       "snapshotMaxUs",
-                                                  "copyMaxUs",        "primaryFaults",
-                                                  "resourceFaults",   "outputFaults",
-                                                  "triggerFaults",    "duplicatePosts",
-                                                  "step0WakeUs",      "step0WakeMaxUs",
-                                                  "step0AdvanceUs",   "copyBudgetUs",
-                                                  "snapshotBudgetUs", "lastPrimaryDelta",
-                                                  "lastIntervalUs",   "lastOutputDelta",
-                                                  "lastFaultAgeSec",  "cameraJitterUs",
-                                                  "cameraMinUs",      "cameraMaxUs",
-                                                  "cameraAgeSec",     "primaryMeasuredHz",
-                                                  "faultIntervalUs",  "faultPeriodUs",
-                                                  "faultResidualUs" };
-            const std::vector<double>      values{ 1e9 / m_period,
-                                              m_cameraReport.m_fps,
-                                              m_requested * 1e9 / m_period,
-                                              m_deliveredHz,
-                                              double( m_delivered ),
-                                              double( m_requested ),
-                                              m_primed ? double( m_requested ) : 0,
-                                              double( m_feasible ),
-                                              double( m_missed ),
-                                              double( m_faults ),
-                                              double( m_cached ),
-                                              double( m_notStarted ),
-                                              double( m_copiedLate ),
-                                              m_snapshotMax / 1000.0,
-                                              m_copyMax / 1000.0,
-                                              double( m_faultCounts[size_t( Fault::primary )] ),
-                                              double( m_faultCounts[size_t( Fault::resource )] ),
-                                              double( m_faultCounts[size_t( Fault::output )] ),
-                                              double( m_faultCounts[size_t( Fault::trigger )] ),
-                                              double( m_duplicatePosts ),
-                                              m_step0Wake / 1000.0,
-                                              m_step0WakeMax / 1000.0,
-                                              m_advances[0] / 1000.0,
-                                              m_bounds.copy / 1000.0,
-                                              m_bounds.snapshot / 1000.0,
-                                              double( m_lastPrimaryDelta ),
-                                              m_lastPrimaryInterval / 1000.0,
-                                              double( m_lastOutputDelta ),
-                                              m_lastFaultNs ? ( now - m_lastFaultNs ) / 1e9 : -1,
-                                              m_cameraReport.m_jitterUs,
-                                              m_cameraReport.m_minUs,
-                                              m_cameraReport.m_maxUs,
-                                              m_cameraReport.m_received > 0 ? ( now - m_cameraReport.m_received ) / 1e9
-                                                                                 : -1,
-                                              m_measuredPeriod > 0 ? 1e9 / m_measuredPeriod : 0,
-                                              m_faultInterval / 1000.0,
-                                              m_faultPeriod / 1000.0,
-                                              m_faultPeriod ? ( m_faultInterval - m_faultPeriod ) / 1000.0 : 0 };
-            const std::string              reason       = m_reason;
-            const std::string              lastFault    = m_lastFaultReason;
-            const std::string              periodSource = m_periodSource;
-            std::string                    mappings;
+            const std::vector<std::string> names{ "mainHz",
+                                                  "cameraHz",
+                                                  "plannedHz",
+                                                  "deliveredHz",
+                                                  "delivered",
+                                                  "requested",
+                                                  "active",
+                                                  "feasible",
+                                                  "missed",
+                                                  "faults",
+                                                  "cached",
+                                                  "notStarted",
+                                                  "copiedLate",
+                                                  "snapshotMaxUs",
+                                                  "copyMaxUs",
+                                                  "primaryFaults",
+                                                  "resourceFaults",
+                                                  "outputFaults",
+                                                  "triggerFaults",
+                                                  "duplicatePosts",
+                                                  "step0WakeUs",
+                                                  "step0WakeMaxUs",
+                                                  "step0AdvanceUs",
+                                                  "copyBudgetUs",
+                                                  "snapshotBudgetUs",
+                                                  "lastPrimaryDelta",
+                                                  "lastIntervalUs",
+                                                  "lastOutputDelta",
+                                                  "lastFaultAgeSec",
+                                                  "cameraJitterUs",
+                                                  "cameraMinUs",
+                                                  "cameraMaxUs",
+                                                  "cameraAgeSec",
+                                                  "primaryMeasuredHz",
+                                                  "faultIntervalUs",
+                                                  "faultPeriodUs",
+                                                  "faultResidualUs",
+                                                  "faultPrimaryCounter",
+                                                  "faultPublishUs",
+                                                  "faultPublishValid",
+                                                  "faultObserveExtraUs",
+                                                  "faultPrevCallbackUs",
+                                                  "faultCallbackGapUs",
+                                                  "faultEntryToCounterUs" };
+            const std::vector<double>      values{
+                1e9 / m_period,
+                m_cameraReport.m_fps,
+                m_requested * 1e9 / m_period,
+                m_deliveredHz,
+                double( m_delivered ),
+                double( m_requested ),
+                m_primed ? double( m_requested ) : 0,
+                double( m_feasible ),
+                double( m_missed ),
+                double( m_faults ),
+                double( m_cached ),
+                double( m_notStarted ),
+                double( m_copiedLate ),
+                m_snapshotMax / 1000.0,
+                m_copyMax / 1000.0,
+                double( m_faultCounts[size_t( Fault::primary )] ),
+                double( m_faultCounts[size_t( Fault::resource )] ),
+                double( m_faultCounts[size_t( Fault::output )] ),
+                double( m_faultCounts[size_t( Fault::trigger )] ),
+                double( m_duplicatePosts ),
+                m_step0Wake / 1000.0,
+                m_step0WakeMax / 1000.0,
+                m_advances[0] / 1000.0,
+                m_bounds.copy / 1000.0,
+                m_bounds.snapshot / 1000.0,
+                double( m_lastPrimaryDelta ),
+                m_lastPrimaryInterval / 1000.0,
+                double( m_lastOutputDelta ),
+                m_lastFaultNs ? ( now - m_lastFaultNs ) / 1e9 : -1,
+                m_cameraReport.m_jitterUs,
+                m_cameraReport.m_minUs,
+                m_cameraReport.m_maxUs,
+                m_cameraReport.m_received > 0 ? ( now - m_cameraReport.m_received ) / 1e9 : -1,
+                m_measuredPeriod > 0 ? 1e9 / m_measuredPeriod : 0,
+                m_faultInterval / 1000.0,
+                m_faultPeriod / 1000.0,
+                m_faultPeriod ? ( m_faultInterval - m_faultPeriod ) / 1000.0 : 0,
+                double( m_faultTiming.m_counter ),
+                m_faultTiming.m_publication > 0 ? m_faultTiming.m_publication / 1000.0 : -1,
+                m_faultTiming.m_publication > 0 ? 1.0 : 0.0,
+                m_faultTiming.m_publication > 0
+                         ? ( double( m_faultInterval ) - double( m_faultTiming.m_publication ) ) / 1000.0
+                         : -1,
+                m_faultTiming.m_previousRuntime >= 0 ? m_faultTiming.m_previousRuntime / 1000.0 : -1,
+                m_faultTiming.m_gap >= 0 ? m_faultTiming.m_gap / 1000.0 : -1,
+                m_faultTiming.m_sampleDelay >= 0 ? m_faultTiming.m_sampleDelay / 1000.0 : -1 };
+            const std::string reason       = m_reason;
+            const std::string lastFault    = m_lastFaultReason;
+            const std::string periodSource = m_periodSource;
+            std::string       mappings;
             for( const auto &name : m_destinations )
                 mappings += ( mappings.empty() ? "" : ", " ) + name + "_aux -> " + name;
             lock.unlock(); // Never hold the cycle mutex across INDI driver I/O.

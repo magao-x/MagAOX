@@ -5,6 +5,7 @@
 #include "../../../tests/testXWC.hpp"
 #include "../dmSyncopation.hpp"
 
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -52,6 +53,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_faultInterval;
     using dmSyncopation::m_faultPeriod;
     using dmSyncopation::m_faults;
+    using dmSyncopation::m_faultTiming;
     using dmSyncopation::m_indiP_camera;
     using dmSyncopation::m_indiP_enable;
     using dmSyncopation::m_indiP_reacquire;
@@ -67,7 +69,11 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_now;
     using dmSyncopation::m_period;
     using dmSyncopation::m_periodSource;
+    using dmSyncopation::m_previousCallbackEnd;
+    using dmSyncopation::m_previousCallbackRuntime;
+    using dmSyncopation::m_previousPrimaryPublication;
     using dmSyncopation::m_primaryCounter;
+    using dmSyncopation::m_primaryTiming;
     using dmSyncopation::m_primed;
     using dmSyncopation::m_rateFrames;
     using dmSyncopation::m_reason;
@@ -80,6 +86,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_wait;
     using dmSyncopation::missedStep;
     using dmSyncopation::readCamera;
+    using dmSyncopation::readPrimaryTiming;
     using dmSyncopation::snapshot;
     using dmSyncopation::updatePeriod;
     using dmSyncopation::waitUntil;
@@ -304,6 +311,67 @@ void Clock::primary( int64_t observed, uint64_t count )
     app->m_imageStream.md->cnt0 += count;
     app->m_combined->image()->md->cnt0 += count;
     REQUIRE( app->processImage( nullptr, dev::shmimT{} ) == 0 );
+}
+
+/// Publish independent wall-clock metadata before a monotonic callback without rewinding elapsed execution time.
+void primaryObservation( Harness &app /**< [in,out] isolated scheduler */,
+                         int64_t  observed /**< [in] monotonic time before callback entry */,
+                         int64_t  publication /**< [in] independent wall-clock publication time */,
+                         uint64_t count = 1 /**< [in] publications represented by this observation */ )
+{
+    REQUIRE( observed >= Clock::time );
+    auto *metadata      = app.m_imageStream.md;
+    metadata->write     = 1;
+    metadata->writetime = synco::toTimespec( publication );
+    metadata->cnt0 += count;
+    if( app.m_combined )
+        app.m_combined->image()->md->cnt0 += count;
+    metadata->write = 0;
+    Clock::time     = observed;
+    REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
+}
+
+/// Atomic clock and metadata mutation at the existing sampling read, without nondeterministic writer races.
+struct PrimaryProbe
+{
+    static inline std::atomic<int64_t> time{ 1000000000 }; ///< Monotonic execution shared with a lock-wait worker.
+    static inline IMAGE *image{ nullptr }; ///< Isolated primary whose publication bracket may be interrupted.
+    static inline int    tear{ 0 };        ///< One-shot write-flag or counter change during metadata sampling.
+    static inline std::promise<void> *entered{ nullptr }; ///< Optional notification that callback entry was captured.
+
+    /// Read elapsed work, then inject one metadata change or notify the lock-wait coordinator.
+    static int64_t now();
+
+    /// Clear all test-only hooks before adopting this clock.
+    static void reset();
+};
+
+int64_t PrimaryProbe::now()
+{
+    const int64_t value = time.fetch_add( 100 ) + 100;
+    if( image && tear )
+    {
+        if( tear == 1 )
+            image->md->write = 1;
+        else
+            ++image->md->cnt0;
+        tear = 0;
+    }
+    if( entered )
+    {
+        auto *signal = entered;
+        entered      = nullptr;
+        signal->set_value();
+    }
+    return value;
+}
+
+void PrimaryProbe::reset()
+{
+    time    = 1000000000;
+    image   = nullptr;
+    tear    = 0;
+    entered = nullptr;
 }
 
 /// Create a numeric camera acquisition report using seconds for interval statistics.
@@ -1150,6 +1218,352 @@ TEST_CASE( "syncopation isolated phase outlier does not become the next period",
     REQUIRE( app.m_scheduleState == synco::armed );
     REQUIRE( app.m_faultInterval == 525000 );
     REQUIRE( app.m_faultPeriod == 500000 );
+}
+
+/// Attribute a faulting callback interval to independent publication timing and preserve the same-event diagnostic
+/// latch.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation separates primary publication and observation intervals", "[dmSyncopation][diagnostics]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage(nullptr, dev::shmimT());
+    dmSyncopation::readPrimaryTiming(0, 0, true);
+    #endif
+    // clang-format on
+    Streams streams;
+    Harness app;
+    app.attach();
+    Clock::connect( app );
+    app.m_requested  = 2;
+    app.m_lockFrames = 100;
+    REQUIRE( app.setCallBack_m_indiP_camera( cameraTiming( 2000, false ) ) == 0 );
+    const int64_t observed = Clock::time + 1000000;
+    const int64_t wall     = 1700000000123456789LL;
+    primaryObservation( app, observed, wall );
+    REQUIRE( app.m_primaryTiming.m_publication == -1 );
+    REQUIRE( app.m_primaryTiming.m_previousRuntime == -1 );
+    REQUIRE( app.m_primaryTiming.m_gap == -1 );
+    primaryObservation( app, observed + 500000, wall + 500000 );
+    REQUIRE( app.m_primaryTiming.m_publication == 500000 );
+    const auto previousRuntime = app.m_previousCallbackRuntime;
+    const auto previousEnd     = app.m_previousCallbackEnd;
+
+    const int64_t publicationInterval =
+        GENERATE( int64_t( 500000 ), int64_t( 555000 ), int64_t( 600000 ), int64_t( 0 ) );
+    const int64_t faultPublication = publicationInterval ? wall + 500000 + publicationInterval : 0;
+    primaryObservation( app, observed + 1055000, faultPublication );
+    REQUIRE( app.m_faults == 1 );
+    REQUIRE( app.m_faultInterval == 555000 );
+    REQUIRE( app.m_faultPeriod == 500000 );
+    REQUIRE( app.m_faultTiming.m_counter == app.m_primaryCounter );
+    REQUIRE( app.m_faultTiming.m_publication == ( publicationInterval ? publicationInterval : -1 ) );
+    if( publicationInterval )
+        REQUIRE( app.m_faultInterval - app.m_faultTiming.m_publication == 555000 - publicationInterval );
+    REQUIRE( app.m_faultTiming.m_previousRuntime == previousRuntime );
+    REQUIRE( app.m_faultTiming.m_gap == observed + 1055100 - previousEnd );
+    REQUIRE( app.m_faultTiming.m_sampleDelay >= 0 );
+    REQUIRE( app.m_faultTiming.m_sampleDelay < 10000 );
+    const auto fault = app.m_faultTiming;
+    for( int miss = 0; miss < 3; ++miss )
+        app.missedStep();
+    app.m_lockFrames = 2;
+    for( int cycle = 1; cycle <= 6; ++cycle )
+    {
+        primaryObservation( app,
+                            observed + 1055000 + cycle * 500000,
+                            wall + 500000 + ( publicationInterval ? publicationInterval : 500000 ) + cycle * 500000 );
+        REQUIRE( app.m_faultTiming.m_counter == fault.m_counter );
+        REQUIRE( app.m_faultTiming.m_publication == fault.m_publication );
+        REQUIRE( app.m_faultTiming.m_previousRuntime == fault.m_previousRuntime );
+        REQUIRE( app.m_faultTiming.m_gap == fault.m_gap );
+        REQUIRE( app.m_faultTiming.m_sampleDelay == fault.m_sampleDelay );
+    }
+    REQUIRE( app.m_primed );
+    REQUIRE( app.m_faults == 1 );
+
+    streams.images[2].md->write = 1;
+    REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
+    streams.images[2].md->write = 0;
+    REQUIRE( app.m_faultCounts[size_t( Harness::Fault::resource )] == 1 );
+    REQUIRE( app.m_faultTiming.m_counter == 0 );
+    REQUIRE( app.m_faultTiming.m_publication == -1 );
+    REQUIRE( app.m_faultTiming.m_previousRuntime == -1 );
+    REQUIRE( app.m_faultTiming.m_gap == -1 );
+    REQUIRE( app.m_faultTiming.m_sampleDelay == -1 );
+}
+
+/// Reject invalid timestamps and publications changed inside the metadata bracket without bridging the invalid sample.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation rejects incoherent primary publication metadata", "[dmSyncopation][diagnostics]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::readPrimaryTiming(0, 0, true);
+    #endif
+    // clang-format on
+    Streams streams;
+    Harness app;
+    app.attach();
+    Clock::connect( app );
+    app.m_enabled          = false;
+    const int64_t observed = Clock::time + 1000000;
+    const int64_t wall     = 1700000000000000000LL;
+    primaryObservation( app, observed, wall );
+    primaryObservation( app, observed + 500000, wall + 500000 );
+    REQUIRE( app.m_primaryTiming.m_publication == 500000 );
+
+    PrimaryProbe::reset();
+    PrimaryProbe::time  = Clock::time + 10000;
+    PrimaryProbe::image = &app.m_imageStream;
+    app.m_now           = PrimaryProbe::now;
+    auto *metadata      = app.m_imageStream.md;
+    metadata->cnt0 += 1;
+    metadata->writetime = synco::toTimespec( wall + 1000000 );
+    const auto expected = metadata->cnt0;
+    SECTION( "a writer is still publishing" )
+    {
+        metadata->write = 1;
+    }
+    SECTION( "the supplied observation counter no longer matches" )
+    {
+        ++metadata->cnt0;
+    }
+    SECTION( "the timestamp is absent" )
+    {
+        metadata->writetime = { 0, 0 };
+    }
+    SECTION( "negative seconds are invalid" )
+    {
+        metadata->writetime.tv_sec = -1;
+    }
+    SECTION( "negative nanoseconds are invalid" )
+    {
+        metadata->writetime.tv_nsec = -1;
+    }
+    SECTION( "nanoseconds must be normalized" )
+    {
+        metadata->writetime.tv_nsec = 1000000000;
+    }
+    SECTION( "nanosecond conversion must fit a signed diagnostic value" )
+    {
+        metadata->writetime.tv_sec = INT64_MAX / 1000000000 + 1;
+    }
+    SECTION( "write begins after the timestamp was copied" )
+    {
+        PrimaryProbe::tear = 1;
+    }
+    SECTION( "the counter changes after the timestamp was copied" )
+    {
+        PrimaryProbe::tear = 2;
+    }
+    app.readPrimaryTiming( PrimaryProbe::time.load(), expected, true );
+    REQUIRE( app.m_primaryTiming.m_counter == expected );
+    REQUIRE( app.m_primaryTiming.m_publication == -1 );
+    REQUIRE( app.m_previousPrimaryPublication == 0 );
+    REQUIRE( app.m_primaryTiming.m_sampleDelay >= 0 );
+
+    metadata->write      = 0;
+    app.m_primaryCounter = metadata->cnt0;
+    ++metadata->cnt0;
+    metadata->writetime = synco::toTimespec( wall + 1500000 );
+    app.readPrimaryTiming( PrimaryProbe::time.load(), metadata->cnt0, true );
+    REQUIRE( app.m_primaryTiming.m_publication == -1 );
+    app.m_primaryCounter = metadata->cnt0;
+    ++metadata->cnt0;
+    metadata->writetime = synco::toTimespec( wall + 2000000 );
+    app.readPrimaryTiming( PrimaryProbe::time.load(), metadata->cnt0, true );
+    REQUIRE( app.m_primaryTiming.m_publication == 500000 );
+    PrimaryProbe::reset();
+}
+
+/// Start new publication baselines after counter discontinuities or a resource epoch change.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation never associates publication intervals across primary discontinuities",
+           "[dmSyncopation][diagnostics]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage(nullptr, dev::shmimT());
+    dmSyncopation::allocate(dev::shmimT());
+    #endif
+    // clang-format on
+    Streams streams;
+    Harness app;
+    app.attach();
+    Clock::connect( app );
+    app.m_enabled          = false;
+    const int64_t observed = Clock::time + 1000000;
+    const int64_t wall     = 1700000000000000000LL;
+    primaryObservation( app, observed, wall );
+    primaryObservation( app, observed + 500000, wall + 500000 );
+    REQUIRE( app.m_primaryTiming.m_publication == 500000 );
+    SECTION( "a skipped counter adopts a new stable publication baseline" )
+    {
+        primaryObservation( app, observed + 2000000, wall + 2000000, 3 );
+        REQUIRE( app.m_primaryTiming.m_publication == -1 );
+        REQUIRE( app.m_previousPrimaryPublication == wall + 2000000 );
+        primaryObservation( app, observed + 2500000, wall + 2500000 );
+        REQUIRE( app.m_primaryTiming.m_publication == 500000 );
+    }
+    SECTION( "a reset counter cannot preserve the former timestamp association" )
+    {
+        app.m_imageStream.md->cnt0        = 0;
+        app.m_combined->image()->md->cnt0 = 0;
+        primaryObservation( app, observed + 1000000, wall + 1000000 );
+        REQUIRE( app.m_primaryTiming.m_publication == -1 );
+        REQUIRE( app.m_previousPrimaryPublication == wall + 1000000 );
+        primaryObservation( app, observed + 1500000, wall + 1500000 );
+        REQUIRE( app.m_primaryTiming.m_publication == 500000 );
+    }
+    SECTION( "unsigned wrap is a discontinuity even though adding one wraps too" )
+    {
+        app.m_primaryCounter       = UINT64_MAX;
+        app.m_imageStream.md->cnt0 = UINT64_MAX;
+        primaryObservation( app, observed + 1000000, wall + 1000000 );
+        REQUIRE( app.m_primaryTiming.m_counter == 0 );
+        REQUIRE( app.m_primaryTiming.m_publication == -1 );
+        primaryObservation( app, observed + 1500000, wall + 1500000 );
+        REQUIRE( app.m_primaryTiming.m_publication == 500000 );
+    }
+    SECTION( "equal or backwards timestamps establish a new baseline without a usable interval" )
+    {
+        const int64_t adjustment = GENERATE( int64_t( 0 ), int64_t( -500000 ) );
+        const int64_t restarted  = wall + 500000 + adjustment;
+        primaryObservation( app, observed + 1000000, restarted );
+        REQUIRE( app.m_primaryTiming.m_publication == -1 );
+        REQUIRE( app.m_previousPrimaryPublication == restarted );
+        primaryObservation( app, observed + 1500000, restarted + 500000 );
+        REQUIRE( app.m_primaryTiming.m_publication == 500000 );
+    }
+    SECTION( "reallocation discards callback and publication baselines" )
+    {
+        REQUIRE( app.allocate( dev::shmimT{} ) == 0 );
+        REQUIRE( app.m_previousPrimaryPublication == 0 );
+        REQUIRE( app.m_previousCallbackRuntime == -1 );
+        REQUIRE( app.m_previousCallbackEnd == 0 );
+        primaryObservation( app, observed + 1000000, wall + 1000000 );
+        REQUIRE( app.m_primaryTiming.m_publication == -1 );
+        REQUIRE( app.m_primaryTiming.m_previousRuntime == -1 );
+        REQUIRE( app.m_primaryTiming.m_gap == -1 );
+    }
+    SECTION( "a replaced resource breaks the old epoch before reattachment" )
+    {
+        char filename[PATH_MAX];
+        ImageStreamIO_filename( filename, sizeof( filename ), "synco_test_timing" );
+        const std::string backup = std::string( filename ) + ".old";
+        REQUIRE( rename( filename, backup.c_str() ) == 0 );
+        {
+            std::ofstream replacement( filename );
+            replacement << "replacement";
+        }
+        REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
+        REQUIRE_FALSE( app.m_resources );
+        REQUIRE( app.m_previousPrimaryPublication == 0 );
+        REQUIRE( std::remove( filename ) == 0 );
+        REQUIRE( rename( backup.c_str(), filename ) == 0 );
+        primaryObservation( app, observed + 1000000, wall + 1000000 );
+        REQUIRE( app.m_resources );
+        REQUIRE( app.m_primaryTiming.m_publication == -1 );
+        primaryObservation( app, observed + 1500000, wall + 1500000 );
+        REQUIRE( app.m_primaryTiming.m_publication == 500000 );
+    }
+}
+
+/// Record every completed callback body while ignoring duplicate posts as publication observations.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation records callback completion across early and scheduled returns",
+           "[dmSyncopation][diagnostics]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage(nullptr, dev::shmimT());
+    dmSyncopation::processPrimary(0);
+    #endif
+    // clang-format on
+    Streams streams;
+    Harness app;
+    app.attach();
+    Clock::connect( app );
+    app.m_requested        = 2;
+    app.m_enabled          = false;
+    const int64_t observed = Clock::time + 1000000;
+    const int64_t wall     = 1700000000000000000LL;
+    primaryObservation( app, observed, wall );
+    REQUIRE( app.m_previousCallbackRuntime == app.m_previousCallbackEnd - observed - 100 );
+    REQUIRE( app.m_previousCallbackRuntime > 0 );
+    const auto sample = app.m_primaryTiming;
+    const auto stamp  = app.m_previousPrimaryPublication;
+
+    Clock::time += 10000;
+    const int64_t duplicateEntry = Clock::time + 100;
+    REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
+    REQUIRE( app.m_previousCallbackRuntime == app.m_previousCallbackEnd - duplicateEntry );
+    REQUIRE( app.m_previousCallbackRuntime > 0 );
+    REQUIRE( app.m_primaryTiming.m_counter == sample.m_counter );
+    REQUIRE( app.m_primaryTiming.m_publication == sample.m_publication );
+    REQUIRE( app.m_primaryTiming.m_previousRuntime == sample.m_previousRuntime );
+    REQUIRE( app.m_primaryTiming.m_gap == sample.m_gap );
+    REQUIRE( app.m_primaryTiming.m_sampleDelay == sample.m_sampleDelay );
+    REQUIRE( app.m_previousPrimaryPublication == stamp );
+    auto previousRuntime = app.m_previousCallbackRuntime;
+    auto previousEnd     = app.m_previousCallbackEnd;
+
+    app.m_enabled = true;
+    for( int cycle = 1; cycle <= 5; ++cycle )
+    {
+        const int64_t entry = observed + cycle * 500000 + 100;
+        primaryObservation( app, entry - 100, wall + cycle * 500000 );
+        REQUIRE( app.m_primaryTiming.m_previousRuntime == previousRuntime );
+        REQUIRE( app.m_primaryTiming.m_gap == entry - previousEnd );
+        REQUIRE( app.m_previousCallbackRuntime == app.m_previousCallbackEnd - entry );
+        REQUIRE( app.m_previousCallbackRuntime > 0 );
+        if( cycle == 1 )
+            REQUIRE( app.m_previousCallbackRuntime >= 50000 );
+        if( cycle >= 3 )
+            REQUIRE( app.m_previousCallbackRuntime > 400000 );
+        previousRuntime = app.m_previousCallbackRuntime;
+        previousEnd     = app.m_previousCallbackEnd;
+    }
+    REQUIRE( app.m_primed );
+    REQUIRE( app.m_delivered >= 2 );
+    REQUIRE( app.m_faults == 0 );
+}
+
+/// Include time waiting for the cycle mutex in both callback runtime and entry-to-metadata delay.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation callback diagnostics include cycle lock delay", "[dmSyncopation][diagnostics]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage(nullptr, dev::shmimT());
+    #endif
+    // clang-format on
+    Streams streams;
+    Harness app;
+    app.attach();
+    app.m_enabled = false;
+    PrimaryProbe::reset();
+    app.m_now = PrimaryProbe::now;
+    ++app.m_imageStream.md->cnt0;
+    app.m_imageStream.md->writetime = { 1700000000, 0 };
+    std::promise<void> started;
+    auto               entered = started.get_future();
+    PrimaryProbe::entered      = &started;
+    std::unique_lock<std::mutex> cycle( app.m_cycleMutex );
+    auto response = std::async( std::launch::async, [&]() { return app.processImage( nullptr, dev::shmimT{} ); } );
+    const auto captured = entered.wait_for( std::chrono::milliseconds( 500 ) );
+    PrimaryProbe::time.fetch_add( 55000 );
+    cycle.unlock(); // Release before checking the entry notification or joining the worker.
+    const int result = response.get();
+    REQUIRE( captured == std::future_status::ready );
+    REQUIRE( result == 0 );
+    REQUIRE( app.m_previousCallbackRuntime >= 55000 );
+    REQUIRE( app.m_previousCallbackRuntime == app.m_previousCallbackEnd - 1000000100 );
+    REQUIRE( app.m_primaryTiming.m_sampleDelay >= 55000 );
+    REQUIRE( app.m_primaryTiming.m_previousRuntime == -1 );
+    REQUIRE( app.m_primaryTiming.m_gap == -1 );
+    PrimaryProbe::reset();
 }
 
 /// Qualify real primary-rate changes across phase resets while excluding missed counters and incoherent windows.
