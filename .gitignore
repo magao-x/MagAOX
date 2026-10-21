@@ -217,6 +217,7 @@ tests/singleTest
 tests/testMagAOX
 tests/testMagAOXsetuid
 tests/test_stderr.txt
+tests/results/
 
 
 #Devel stuff in flatlogs

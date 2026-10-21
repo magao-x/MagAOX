@@ -9,6 +9,7 @@ set -eo pipefail
 # modes:
 #   default   zero counters, run the full test suite, then capture coverage
 #   --fast    capture coverage from the currently existing gcov counters only
+# Test failures do not prevent report generation, but make the final status nonzero.
 #######################################################
 
 # Describe report modes and the incremental coverage workflow.
@@ -18,6 +19,7 @@ usage()
 Usage: tests/coverage/update_coverage [--fast]
 
   default   zero counters, run the full test suite, then refresh the HTML report
+            (saves test logs under tests/results; returns nonzero if tests fail)
   --fast    skip zeroing/rerunning tests and build the HTML report from existing .gcda files
 
 Typical fast-path workflow:
@@ -30,6 +32,7 @@ EOF
 mode="full"
 repo_root=$(pwd)
 coverage_output="doc/output/coverage"
+test_status=0
 
 case "${1:-}" in
     "")
@@ -55,7 +58,7 @@ if [[ "$mode" == "full" ]]; then
 
     chmod +x testMagAOX.bash
 
-    bash -l testMagAOX.bash
+    bash -l testMagAOX.bash || test_status=$?
 
     cd ..
 else
@@ -88,3 +91,5 @@ genhtml coverage_filtered.info --output-directory "$coverage_output" \
                                --prefix "$repo_root" \
                                --demangle-cpp \
                                --css-file tests/coverage/gcov.css
+
+exit "$test_status"
