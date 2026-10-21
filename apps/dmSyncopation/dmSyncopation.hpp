@@ -120,8 +120,7 @@ class dmSyncopation : public MagAOXApp<true>,
     double               m_cameraMinUs{ -1 };    ///< Minimum reported acquisition interval, us; -1 when omitted.
     double               m_cameraMaxUs{ -1 };    ///< Maximum reported acquisition interval, us; -1 when omitted.
     CameraReport         m_cameraReport;    ///< Cycle-owned snapshot; retained if the mailbox is briefly unavailable.
-    int64_t m_lastCameraPoll{ 0 };          ///< Last slow-loop subscription refresh; never used by the timing callback.
-    std::vector<Mapping>        m_mappings; ///< Open mappings, fixed while attached.
+    std::vector<Mapping> m_mappings;        ///< Open mappings, fixed while attached.
     std::unique_ptr<syncoImage> m_combined; ///< Read-only combined-output attachment.
     ino_t                       m_combinedInode{ 0 }; ///< Combined-output file identity.
     IMAGE                       m_timing{};           ///< Owned timing publisher handle, never a DM input.
@@ -1175,14 +1174,6 @@ inline int dmSyncopation::appStartup()
 inline int dmSyncopation::appLogic()
 {
     SHMIMMONITOR_APP_LOGIC;
-    const int64_t pollTime = m_now();
-    if( !m_cameraDevice.empty() && m_indiDriver &&
-        ( !m_lastCameraPoll || pollTime - m_lastCameraPoll >= 1000000000LL ) )
-    {
-        // Unchanged measured values do not generate a heartbeat; refresh outside the cycle mutex.
-        sendGetPropertySetList( true );
-        m_lastCameraPoll = pollTime;
-    }
     { // mutex scope
         std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
         if( lock.owns_lock() )

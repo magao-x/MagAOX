@@ -2,7 +2,7 @@
 
 This record tracks operator observations, diagnosis, changes and verification during debugging and optimization. The [main engineering plan](dm-syncopation.md) retains the settled design and review answers; the [user guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) documents current operation and interfaces.
 
-Current status: the operator now confirms INDI is responding on the previously pushed build, without deploying the local mailbox change. The earlier disabled-startup delay remains unclassified; post-recovery wait evidence does not establish its cause. The separate camera-callback isolation change passed local tests and the app build; operator retesting remains pending. Instrument timing qualification remains pending.
+Current status: the measured camera period is selected correctly, but enabled operation still produces repeated primary-interval faults. On the same instance with no other reported changes, disabling synco reduced camera acquisition jitter from 8.10 us to about 0.60 us; after stopping the process it was 0.586 us. Repeated camera-property requests explain why a property-wide `getINDI` query stayed open while synco ran; local removal of that periodic polling awaits operator retesting. INDI eventually responds after restart; the exact startup delay remains unmeasured. Instrument timing qualification remains pending.
 
 Append subsequent investigations as dated entries, keeping operator evidence, local verification and outstanding instrument checks explicit. All agent work runs on the workstation; the operator performs instrument actions and supplies results.
 
@@ -137,3 +137,62 @@ Local blocking/coherency regression verification passed **1660 assertions in 20 
 The user requested committing and pushing the camera-mailbox change to `origin/jrmales/dm-syncopation`. Package the scheduler, regression tests, main plan and this debugging record together, followed by the user-guide update in a documentation-only commit, per AGENTS.md. The preceding entry records the precommit investigation and independent instrument recovery.
 
 Validation remains **1660 assertions in 20 passing test cases**, a successful normal app build, and clean formatting/whitespace checks. No functional changes were made after verification. The original startup delay remains unclassified, and operator retesting of this mailbox change and sustained-cadence qualification remain pending.
+
+## 2026-10-20 post-mailbox restart and disabled readback
+
+After the mailbox commits, the operator again received two consecutive `No dmtweeter-synco.*.* from localhost:7624` responses, then a normal disabled readback. The intervening process checks used old PID **602544** and returned only their header. They establish that the old PID was absent, not whether the new instance was running or blocked. The eventual monitor TID was **611151**; it is a thread ID, not an independently established main-process PID.
+
+The recovered readback selected `health.periodSource=camera acquisition`, with `cameraHz=1999.99900983901`, `cameraAgeSec=0.79091665`, `mainHz=2000`, `plannedHz=4000`, and zero faults/misses. Acquisition jitter was 0.615467165 us, with interval extrema 494.003295898–505.924224854 us. `primaryMeasuredHz=2000.11600672839` is a separate short-window primary measurement and does not replace the selected camera period. The camera report rounds to a 500000 ns period, explaining the displayed 2000 Hz. The disabled readback does not qualify enabled cadence.
+
+Source inspection identified existing bridge behavior that can explain immediate query failures: app INDI startup signals the passthrough restart (`libMagAOX/app/indiDriver.hpp`); `INDI/xindidriver/xindidriver.cpp` drains three FIFOs until each is quiet for one second, then sleeps two seconds before launching forwarding threads. `INDI/INDI/indiserver.c` also enforces a ten-second minimum interval between starts of a driver, and can skip requests directed to a restarting driver. `getINDI` defaults to a two-second timeout. Retry fresh queries after bridge startup rather than assuming a longer timeout resends a request skipped during restart. Continuous outgoing traffic, including the new one-second polling, could extend a quiet-based drain; no timestamped bridge logs establish whether that happened here. These source findings fit the reported sequence but do not measure or prove its exact cause. No startup-code change is justified by this readback alone.
+
+## 2026-10-20 enabled timing disturbance and disabled comparison
+
+A subsequent enabled snapshot used monitor TID **613273**, so it must not be combined with TID 611151's counters as one continuous run. The selected period now follows measured acquisition timing correctly: `cameraHz=1999.99781744991`, `mainHz=1999.996000008` (500001 ns), `plannedHz=3999.992000016`, and `health.periodSource=camera acquisition`.
+
+Enabled operation nevertheless remained unarmed/acquiring, with 1242 primary faults and no output/resource/trigger faults. The latest latched `primary interval anomaly` was **555.008 us** against **500.001 us**, residual **+55.007 us**, beyond the configured 20 us allowance. `lastPrimaryDelta=1` and `duplicatePosts=0`; the later healthy `lastIntervalUs=495.456` is a different observation. `missed=1`, `notStarted=0`, `copiedLate=0`, copy maximum 11.842 us/budget 12.842 us and snapshot maximum 5.951 us/budget 10 us do not reproduce the earlier repeated step-0 start suppression. Auxiliary `delivered=1140` and confirmed `deliveredHz=1929.41968844031` show intermittent extras, not the requested sustained cadence.
+
+The operator disabled the same instance, waited for fresh camera statistics and reported **no other changes**:
+
+| Camera acquisition statistic | Enabled readback | After disabling, direct `camwfs.fg_timing` |
+| --- | --- | --- |
+| Mean rate | 1999.99781744991 Hz | 1999.99900983901 Hz |
+| Interval standard deviation | 8.101606773 us | 0.600831874 us |
+| Shortest interval | 255.107879639 us | 484.943389893 us |
+| Longest interval | 744.819641113 us | 514.984130859 us |
+
+The following synco readback still used TID 613273 and reported Off, `health.reason=disabled`, `mainHz=2000`, `deliveredHz=0`, and an adopted camera jitter of 0.606584503 us. Its slightly different camera extrema/rate are from a later report window. Cumulative `delivered=9293` and `primaryFaults=faults=10075` include activity between the initial enabled snapshot and disabling; the supplied observations do not provide an elapsed rate or imply those faults occurred after disabling. The retained latest interval fault was 559.357 us versus 500.001 us (+59.356 us), already 74.66957831 seconds old in the disabled readback. Missed/not-started/copied-late counts remained 1/0/0, and other fault classes remained zero.
+
+This controlled comparison strongly associates the larger acquisition timing spread with enabled synco operation, while leaving the mechanism unresolved. Camera `acq_*` values use EDT-provided DMA timestamps; they do not independently establish physical exposure-clock jitter. The primary interval is measured at callback entry and includes publication timing plus changes in wake/dispatch latency. Enabled-only work includes repeated at-most-10-us sleep checkpoints, shorter combined-output polls, mapped copies/posts, and extra downstream DM combinations/commands. Timer/CPU interference, CPU/SMT placement and downstream processing are candidates to distinguish, not established causes. Retain the configured hard bounds rather than widening them to accept the observed excursions.
+
+The next operator-controlled comparison is a fully stopped synco process, followed by another fresh `camwfs.fg_timing` window, to distinguish disabled monitor/polling activity from the enabled workload. Ordinary shutdown retains auxiliary contributions. That comparison remains pending. No functional code change, new test run, commit or agent instrument action was performed for these observations.
+
+## 2026-10-20 stopped baseline and recurring INDI definitions
+
+The operator stopped the app using `xctrl shutdown dmtweeter-synco`; the command reported several waits before the tmux session ended. The subsequent direct `camwfs.fg_timing` query reported:
+
+| Statistic | Stopped-process value |
+| --- | --- |
+| Acquisition FPS | 1999.99996375131 Hz |
+| Acquisition interval standard deviation | 0.585991481 us |
+| Acquisition interval minimum / maximum | 488.042831421 / 509.023666382 us |
+| Acquisition-to-write mean / standard deviation | 53.619915141 / 1.618420259 us |
+| Write FPS | 2000.00330245155 Hz |
+| Write interval standard deviation | 1.554393963 us |
+| Write interval minimum / maximum | 466.585159302 / 536.203384399 us |
+
+Acquisition jitter is close to the preceding disabled-process baseline (0.600831874 us), while the enabled snapshot was 8.101606773 us. These observations support investigating enabled scheduling and downstream work as the source of the larger spread. They do not identify which component causes it, and one stopped window does not establish a timing bound.
+
+The operator additionally observed that `getINDI camwfs.fg_timing` never finished while synco was running. Source tracing confirms a concrete cause: `dmSyncopation::appLogic()` forcibly requested its subscribed properties once per second. Every camera `getProperties` response supplies a property definition, and indiserver broadcasts that definition to interested clients. Property-wide `getINDI` has a wildcard element and waits for a quiet interval; its default two-second alarm is restarted on each matching definition (`INDI/INDI/getINDI.c`, `listenINDI()`/`findDPE()`). One-second definition traffic therefore prevents normal query completion. This is recurring forced polling, rather than a new request generated by every received camera update; server subscriptions are deduplicated.
+
+Remove the app-specific periodic request and its timestamp member. Retain the base class's initial, unresolved and restart subscription handling and ordinary incoming camera updates. The five-second valid-reply expiry remains unchanged: if all published values remain unchanged long enough to produce no update, use the existing qualified-primary-window/nominal fallback and reacquire on reference changes. Do not use property-definition traffic as an acquisition heartbeat. The camera mailbox and hard timing checks remain unchanged.
+
+This change addresses the demonstrated query-timeout regression. Removing repeated outgoing definitions may also reduce traffic during the bridge's quiet-based startup drain, but startup delay and the enabled jitter increase still require operator verification.
+
+Local verification passed **1660 assertions in 20 test cases**, including existing incoming-report, mailbox, strict-expiry, fallback and unchanged-bound checks, followed by a successful normal app build and clean clang-format/whitespace checks. Independent source review confirmed normal initial/unresolved/restart subscriptions remain registered and the app-specific periodic request is absent. The app fixture does not exercise live driver transport; query completion after deployment remains an operator check. No new test scaffolding, agent instrument action or commit was introduced.
+
+## 2026-10-20 periodic-polling fix commit and push checkpoint
+
+The user requested pushing the periodic-camera-polling fix to `origin/jrmales/dm-syncopation`. Package the scheduler change, main plan and debugging record together, followed by a documentation-only user-guide commit, per AGENTS.md.
+
+Validation remains **1660 assertions in 20 passing test cases**, a successful normal app build and clean formatting/whitespace checks; no functional changes followed that verification. Operator confirmation of normal query completion and startup behavior remains pending. The enabled timing disturbance remains unresolved. No agent instrument action was performed.
