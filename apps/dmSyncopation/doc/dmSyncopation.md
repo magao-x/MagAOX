@@ -216,6 +216,8 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `recovery.consecutiveMisses` | 3 | Consecutive original unsafe/missed events before reacquisition. |
 | `feedback.gain` | 0.1 | Independent per-event wait-integrator gain, 0–1. |
 | `feedback.maxAdvanceUs` | 20 | Maximum wait correction; step-0 advance is nonnegative and starts at this value after a feedback reset. |
+| `diagnostics.windowSec` | 2 | Elapsed-time window for independent primary publication/receipt statistics; zero disables collection. |
+| `diagnostics.maxEvents` | 20000 | Maximum queued and retained primary timing events; zero disables collection. Storage is allocated before the monitor starts. |
 | `telemeter.maxInterval` | 10 seconds | Existing helper's aggregate telemetry interval. |
 
 The example starts disabled. Its conservative full timing bundle is **infeasible for three steps at 2 kHz**: the shortest 166.667 us interval cannot cover the reader hold, copy and effective early-main cutoff. The app reports this without silently lowering the requested count. Qualified bounds must support the requested schedule before instrument enablement.
@@ -236,6 +238,8 @@ Application properties belong to the configured INDI device: `dmtweeter_synco` i
 | `reacquire` | Switch, read/write | `request`: On invalidates the schedule and resets acquisition/feedback; the switch returns Off. It does not zero contributions or enable a disabled app. |
 | `settings` | Number, read/write while disabled | `steps`, `maxCadenceHz`, `keepoutUs`, `guardUs`, `step0LeadUs`. Supply one or more named elements; the update is validated and applied together. |
 | `timing` | Number, read-only | Main/camera/planned rate, requested/active/feasible counts, delivery/miss/fault/cache counters and maximum snapshot/copy durations, detailed below. |
+| `primary_timing` | Number, read-only | Independent publication and receipt interval statistics, detailed below. Durations are seconds, not the microseconds used by the existing `timing` diagnostic elements. |
+| `primary_timing_quality` | Number, read-only | Collection/window/queue validity and cumulative observation-quality counts, detailed below. |
 | `health` | Text, read-only | `reason`, `lastFault`, `periodSource`, `primary`, `combined`, `timingStream`, `mapping`. Current phase/reason, latched fault, selected period reference and resolved stream identities. |
 
 `settings` uses its named elements directly; there are no numeric `current`/`target` pairs. Updates while enabled, unknown elements, nonfinite values and invalid counts/ranges are rejected without changing the active configuration. Changing `steps` never changes source-image count. After an accepted disabled update, enable again to acquire a new schedule.
@@ -277,13 +281,102 @@ The `timing` summary includes:
 
 The `faultPrimaryCounter` and associated publication/callback fields describe only the latest primary interval anomaly. Ordinary recovery retains them; another synchronization/resource fault clears them. Publication metadata is sampled once with write/counter checks on both sides, without retries. A publication interval requires two stable consecutive counters with positive, normalized, representable and increasing timestamps. Invalid metadata or a counter gap makes that interval unavailable. The immediately preceding callback includes an ignored duplicate notification; its body ends under the cycle lock just before unlock, excluding the final unlock and monitor bookkeeping. Its duration and gap help distinguish callback overrun from delay between callbacks.
 
-For a 555 us callback interval, `faultPublishUs` near 500 us and `faultObserveExtraUs` near +55 us indicate changing observation lag; publication near 555 us indicates an excursion in the producer timestamp interval, subject to its clock contract. These compare intervals within each clock, without subtracting absolute timestamps or changing scheduling phase, bounds or gates. Forward wall-clock steps can affect the publication diagnostic. It cannot measure constant EDT/pipeline delay or camera capture age. These fields add no configuration and do not change the provider timing record or aggregate telemetry schema.
+For a 555 us callback interval, `faultPublishUs` near 500 us and `faultObserveExtraUs` near +55 us indicate changing observation lag; publication near 555 us indicates an excursion in the producer timestamp interval, subject to its clock contract. These compare intervals within each clock, without subtracting absolute timestamps or changing scheduling phase, bounds or gates. Forward stream-clock steps can affect the publication diagnostic. It cannot measure constant EDT/pipeline delay or camera capture age. These fault-latched fields retain their existing configuration and provider timing layout; the independent cadence aggregates below have separate configuration and telemetry.
 
 Repeated property-definition replies reset `getINDI` query timeouts and can keep a query running even while the app responds. dmSyncopation therefore does not send once-per-second property refresh requests.
 
 The `timing` property's state is Ok when the provider schedule is armed and Idle otherwise. Counts and software output timing do not prove completed hardware transfer. INDI is a low-rate status/control path; providers use the timing image and its notifications.
 
 Aggregate `telem_dmsynco` records include schedule state/count/period, delivery/miss/fault/cache totals, maximum snapshot/copy durations, per-step residuals and learned wait advances. Residuals use actual completion/publication minus the event target; hard-cutoff classification is separate. No 5 us fault-limit configuration exists.
+
+## Independent primary cadence measurements
+
+Primary measurements run while `enable.toggle=Off` as well as while synco is
+enabled, acquiring or faulting. They continue when auxiliary/combined resources
+are unavailable, provided the primary monitor is receiving commands. They do not
+select the scheduling period, change timing bounds, trigger faults, or publish DM
+commands. A scheduler disable/reacquire does not reset this independent history.
+The monitor's primary attachment changes its timing session.
+
+```text
+primary AO command (dm01disp03 / aol1_dmC)
+  U: writer's writetime + cnt0
+  A: first timestamp after synco's successful semaphore wait
+  P: callback entry, sample primary metadata
+       |
+       +--> existing synco scheduling, if enabled
+       |
+       +--> fixed timing event --> ordinary app logic --> INDI + dmsynco
+
+publication interval = U[i] - U[i-1], in the stream's own clock
+receipt interval     = A[i] - A[i-1], using CLOCK_MONOTONIC
+```
+
+Publication intervals require adjacent retained observations with stable metadata
+reads, valid consecutive counters and positive, increasing `writetime`. Invalid
+timestamps, counter gaps/resets/duplicates, timing-event loss and new attachments
+break the pair. Receipt intervals count actual wait returns, including subsequent
+rejections and duplicate notifications; their reciprocal mean is a wake-up rate,
+not proof of distinct command delivery. An initial existing-image callback has no
+fabricated receipt, but can contribute a publication observation.
+
+`primary_timing` has these suffixes for each prefix, `publication_` and `receipt_`:
+
+| Suffix | Meaning |
+| --- | --- |
+| `fps` | Reciprocal mean interval, Hz, once sample variance is defined. |
+| `mean`, `jitter`, `min`, `max` | Mean, sample standard deviation and extrema, **seconds**. |
+| `count` | Number of contributing intervals. |
+| `span` | Coverage of contributing local observations, seconds. |
+
+For regular 2 kHz publication, means are approximately `0.0005`. Unavailable
+durations/FPS are `-1`; an empty count is zero. One interval provides mean/extrema/
+span but insufficient evidence for jitter/FPS; variance needs two intervals.
+Both observations must be inside the trailing time window and retained population.
+The cap can shorten coverage; a stopped input ages out. Each metric has its own
+population, so unrelated window standard deviations cannot form a jitter budget.
+
+`primary_timing_quality` has `enabled`, `valid`, `window`, `span`, `age`,
+`capacity`, `queued`, `session`, `sequence`, `events`, `receipts`, `synthetic`,
+`rejected`, `duplicates`, `counterGaps`, `invalid`, `dropped`. Durations are seconds;
+`age=-1` means no retained endpoint. Counters accumulate since configuration.
+`dropped` counts a full timing-event queue, not missing upstream frames. `valid=1`
+and property state Ok mean both interval populations have sample variance,
+independently of scheduler/SDK status. They do not qualify nominal cadence, frame
+provenance or safety bounds. Zero gaps alone does not prove full counter coverage.
+
+`telem_dmsynco` appends optional `primary_timing` containing these populations,
+coverage, monotonic evaluation timestamp, session/sequence and quality counts.
+Human-readable `[dmsynco]` records label `primaryPublicationInterval` and
+`primaryReceiptInterval`, using seconds. When collection is enabled, aggregates
+are emitted on each ordinary app-logic pass (normally about once per second),
+rather than waiting for the ten-second forced-telemetry interval. Statistics and
+serialization remain outside the monitor thread and cycle mutex.
+
+The record also carries `schedule_valid`. If the cycle mutex is busy, fresh
+primary measurements are still recorded with `schedule_valid=0`; ignore the
+scheduler state/counts/feedback placeholders in that record. This flag does not
+invalidate primary statistics. Older records without the primary table report it
+unavailable; their scheduler fields retain their meaning. Appended optional fields
+preserve the binary layout for older readers, but rebuild readers to see the
+primary data and honor `schedule_valid=0`; older readers can display placeholders
+as scheduler values. With collection disabled, recording follows the ordinary
+forced-telemetry schedule.
+
+Metadata consistency checks are best-effort, not proof of token/counter/timestamp/
+pixel association. The stream clock can be TAI or REALTIME. Publication intervals
+use differences in that clock, with local receipts (entry if unavailable) for
+window membership and coverage. External timestamps are never subtracted from
+monotonic timestamps. Neither publication-to-wake nor camera-to-DM latency is
+established here.
+
+For an operator comparison, keep synco disabled and compare its primary publication
+statistics with the DM controller's combined-stream `publicationInterval` over
+overlapping windows, inspecting counts/quality alongside jitter/extrema. Variation
+already at the primary input suggests investigating upstream; variation appearing
+between primary and combined publication suggests that intervening path. Extra
+triggers change the combined population, so enabled comparisons also need their
+schedule context.
 
 ## 200 Hz tip/tilt test provider
 
@@ -326,7 +419,7 @@ Programmatic dmMode integration is deferred. Disable dmSyncopation before indepe
 ## Operator qualification
 
 1. Verify exclusive destination/source ownership, `spare61` availability, the deployed dmcomb DELAY/counter route and primary monitor semaphore assignment. Confirm the trigger channel is not excluded by astrogrid mode and auxiliary inputs do not unintentionally drive ZPO work.
-2. Use a controller built with `XWC_DMTIMINGS`. Assess `m_piTimes` for processing/reader duration and `m_triggerDelta` for controller receipt spacing, alongside app residuals and dmcomb output.
+2. Use the runtime [DM controller timing telemetry](../../../libMagAOX/app/dev/doc/dmTiming.md): `dm_timing`, `dm_timing_stages` and `[dmtimes]` records. Compare the documented processing/reader endpoints and receipt spacing with app residuals and dmcomb output. Use synco's independent primary statistics for the input-to-combined cadence comparison; the legacy `XWC_DMTIMINGS` buffers are no longer needed.
 3. Qualify delivery tails, observation lag, early-main uncertainty, snapshot/copy budgets and every adjacent/wraparound/copy window under the relevant load. Keep host-timing qualification separate from deterministic CI tests.
 4. Start disabled, verify configuration/status and the selected period source/camera reply age, start the local 200 Hz provider, then enable and wait for lock. Check requested/active/feasible counts, selected/measured rates and delivered cadence.
 5. Measure residual mean/RMS/percentiles/max, minimum receipt spacing, skipped/coalesced events and recovery duty cycle. Use 5 us as an analysis guideline. WFS measurements should recover the configured 200 Hz vibration.

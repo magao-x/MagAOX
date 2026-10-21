@@ -546,3 +546,34 @@ outcome/drop counters are zero in the new summary deltas. The
 window and metadata qualifications. These records still have only twelve metrics;
 the new `publicationInterval` build has not been demonstrated by this sample.
 No implementation or validation checkpoint changes accompany this evidence.
+
+### 2026-10-21 operator publication-metric validation sample
+
+The operator's new detailed DM records include `publicationInterval`. Over nine
+windows, publication/receipt populations match at 3,998–3,999 intervals, with
+publication jitter 5.735–6.695 us and receipt jitter 5.758–6.714 us and closely
+matching extrema. This supports timing variation already present at combined
+publication. Camera acquisition/write jitter is lower in the supplied earlier
+windows, but the camera and DM populations are not simultaneous. The
+[debugging record](dm-syncopation-debugging.md) preserves exact sources, ranges,
+quality counts and qualifications. These aggregates cannot establish
+publication-to-receipt delay jitter or total camera-to-DM latency; external-clock
+and metadata association limits remain in force. The useful next comparison is
+contemporaneous primary (`dm01disp03` / `aol1_dmC`) and combined (`dm01disp`)
+publication timing. No implementation, test/build checkpoint or timing-control
+setting changes accompany this operator evidence.
+
+### 2026-10-21 primary observer implemented in dmSyncopation
+
+The requested upstream comparison is now supported locally by reusing
+`dev::dmTiming` in dmSyncopation for primary publication and semaphore receipts.
+The [synco engineering record](dm-syncopation.md) and
+[guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) define the independent
+configuration, INDI and optional primary table in existing synco telemetry. It
+collects while scheduling is disabled and through resource/control failures;
+primary validity does not depend on unavailable SDK populations. Ordinary-thread
+recording also continues when the scheduling mutex is busy, with explicit
+schedule-snapshot validity. Scoped checks pass **2,625 assertions / 34 cases**
+and normal library/app/logdump builds. The DM controller collector/schema and
+its existing statistics are unchanged. An operator comparison over overlapping
+primary/combined windows remains pending.

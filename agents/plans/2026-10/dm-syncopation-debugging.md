@@ -573,3 +573,108 @@ they do not yet exercise the new input-timestamp measurement. An operator run of
 that build remains the useful publication/receipt comparison. Only this debugging
 record and the engineering note change for these observations; no new code,
 test/build rerun, commit, push or agent instrument action was performed.
+
+## 2026-10-21 publication timing installed: variation precedes controller receipt
+
+The operator supplies camera compatible telemetry at
+20:46:09.487242309–20:46:25.894217912 UTC, DM compatible telemetry at
+20:46:41.974271188–20:46:58.996762840 UTC, and nine detailed DM records at
+20:47:07.007294734–20:47:15.017751105 UTC. The DM records now include
+`publicationInterval`, establishing that the updated measurement is installed.
+Reported sources are:
+
+- `/opt/MagAOX/telem/camwfs/2026_10_21/camwfs_20261021194808830042330.bintel`
+- `/opt/MagAOX/telem/dmtweeter/2026_10_21/dmtweeter_20261021204403769510932.bintel`
+
+The nine camera summaries retain approximately 500 us acquisition/write means.
+Acquisition interval sample jitter is **0.288261–0.646438 us**, write interval
+jitter **1.84804–2.31055 us**, and acquisition-to-write latency mean
+**51.547897–52.143258 us** with **1.42152–1.90975 us** jitter. These camera windows
+precede the DM windows, so they are not measurements of identical frames/time
+populations and cannot establish a stage-by-stage jitter budget.
+
+The nine detailed DM summaries show:
+
+| Measurement | Window mean range (us) | Window sample-jitter range (us) | Reported event extrema (us) |
+| --- | --- | --- | --- |
+| Observed publication interval | 499.993606–500.002165 | 5.735345–6.694835 | 434.862–584.574 |
+| Receipt interval | 499.993581–500.002210 | 5.757785–6.713803 | 434.921–584.645 |
+| Successful SDK-return interval | 499.982180–500.001967 | 5.344454–6.270590 | 434.971–584.594 |
+| Receipt-to-SDK latency | 109.358012–109.668889 | 0.699239–0.909290 | 108.034–114.346 |
+| SDK duration | 101.760376–102.065930 | 0.597585–0.846659 | 101.141–106.080 |
+| Measured callback work | 125.636804–126.025231 | 0.758731–1.010678 | 123.974–131.037 |
+
+Publication and receipt interval counts match at 3,998 or 3,999 per window, with
+matching local coverage; their sample standard deviations differ by only about
+0.012–0.024 us. This strongly supports timing variation already being present at
+combined-stream publication. It makes controller wake scheduling a less likely
+dominant explanation in these windows, but equal marginal means/standard
+deviations do not determine publication-to-receipt delay jitter. Do not subtract
+the standard deviations or variances to infer that delay without paired samples
+and a qualified clock relationship. The metadata association limitations recorded
+above still apply, and window extrema do not prove the same individual events
+produce each extreme.
+
+Observed publication intervals include approximately **-65.1/+84.6 us** excursions
+around 500 us. Controller receipt-to-SDK work is still comparatively consistent,
+although its approximately 0.70–0.91 us jitter is higher than the earlier
+approximately 0.45 us. The compatible DM sequence also shows receipt-to-SDK mean
+drifting from approximately 108.95 to 109.53 us; the detailed SDK means then decline
+from approximately 102.07 to 101.76 us. No cause for that modest variation is
+established, and none of these spans measures camera-to-DM or physical response.
+
+The new detailed since-summary counters report approximately 2,002–2,003 events
+per approximately 1.001 seconds and zero failed, partial, no-send, rejected,
+duplicate, counter-gap, invalid-clock or dropped timing events. One snapshot has
+one newly queued event; that is occupancy rather than loss. Publication/receipt
+window populations match here, improving the association evidence beyond merely
+observing zero gaps, without proving full upstream frame provenance.
+
+The next useful upstream comparison is contemporaneous primary-command
+(`dm01disp03` / `aol1_dmC`, as previously configured) and combined-command
+(`dm01disp`) publication intervals. This can distinguish variation reaching dmcomb
+from variation introduced between primary and combined publication. The current
+camera/DM aggregates do not identify a particular intermediate AO stage or prove
+an IRQ-pinning effect. Only this record and the engineering note change; no code,
+test/build rerun, commit, push or agent instrument action was performed.
+
+## 2026-10-21 independent primary cadence added to dmSyncopation
+
+At the operator's request, the app now uses the existing bounded `dev::dmTiming`
+collector for continuous primary publication and actual semaphore-receipt
+statistics. Capture precedes cycle locking and resource/duplicate/enable decisions;
+collection therefore remains active while disabled or acquiring and with missing
+auxiliary resources. Only primary monitor attachment changes the timing session.
+Existing scheduler bounds, prediction, fault decisions and fault-latched diagnostic
+sampling are unchanged.
+
+The [user guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) documents the
+new startup-only `diagnostics.windowSec=2` / `diagnostics.maxEvents=20000` defaults,
+zero-disable modes, `primary_timing` and `primary_timing_quality` INDI properties,
+and optional primary table in `[dmsynco]` telemetry. Durations are seconds. Each
+ordinary app pass updates/publishes independently of the cycle mutex and records
+approximately once per second. If scheduler fields cannot be sampled without
+waiting, the record carries fresh primary data and `schedule_valid=0`; readers
+must ignore the unavailable scheduler placeholders. Old records remain readable;
+rebuild readers to display primary data and honor the new validity flag.
+
+Source clock, metadata pairing, window/count and provenance qualifications from
+the DM-controller measurement also apply here. The new data is independent of
+SDK-oriented compatible validity and does not measure cross-clock latency.
+Operator measurements from this new primary-observer version are pending.
+
+Workstation checks pass **2,625 assertions / 34 cases**, including the real
+private-stream monitor/hook/callback/collector route and legacy/new logger
+roundtrips, plus normal library, dmSyncopation and logdump builds. The
+[engineering plan](dm-syncopation.md) records exact coverage, build qualifications
+and affected files. No new performance benchmark, commit, push, deployment or
+agent instrument action was performed.
+
+## 2026-10-21 primary cadence commit and push checkpoint
+
+The user requested committing and pushing the verified primary observer to
+`origin/jrmales/dm-syncopation`. Package implementation, tests and the main plan
+first, followed by the guide/debugging notes and separate formatting cleanup.
+The remote branch was current at preflight. Operator installation and a comparison
+over overlapping primary/combined windows remain pending; no agent instrument
+action is included.
