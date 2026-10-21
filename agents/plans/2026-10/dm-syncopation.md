@@ -414,6 +414,102 @@ The [debugging and optimization record](dm-syncopation-debugging.md) contains th
 - **Telemetry and registration:** `libMagAOX/logger/types/telem_dmsynco.hpp`, `types/schemas/telem_dmsynco.fbs`, logger code/metadata registration, `libMagAOX/Makefile`, root `Makefile`, `tests/tests.list`, `tests/groups.dox` and generated-artifact ignore handling. The app tests include FlatBuffers telemetry serialization/verification.
 - **Documentation:** this plan, the [debugging and optimization record](dm-syncopation-debugging.md) and `apps/dmSyncopation/doc/dmSyncopation.md`. The independent review and its user responses remain the review evidence.
 
+### 2026-10-21 independent primary publication/receipt diagnostics
+
+The operator requested adding primary-stream cadence statistics to this app after
+the DM controller's new combined-publication measurement closely matched its
+receipt timing. Reuse `dev::dmTiming` for the primary observer instead of adding a
+second accumulator: the existing monitor supplies real receipt/attachment events,
+and `processImage` copies best-effort `cnt0`/`writetime` metadata before the cycle
+mutex and scheduling/resource early returns. Timing collection runs while synco
+is disabled, enabled, acquiring or faulting. Only monitor attachment changes its
+session; enable/reacquire and auxiliary-resource failures do not reset it.
+
+Preallocate the bounded handoff before starting the monitor. New startup-only
+`diagnostics.windowSec=2` and `diagnostics.maxEvents=20000` select the elapsed
+window and queue/retained-event cap; either zero disables collection. The monitor
+captures markers/metadata and hands off fixed events without allocation,
+statistics, INDI or telemetry. App logic drains/calculates outside the cycle mutex.
+External publication differences remain in the producer clock; local receipts
+(entry if unavailable) define coverage/window membership. No cross-clock latency
+or verified frame identity is inferred. Invalid/missing timestamps, discontinuous
+counters, timing-event loss and monitor attachment changes break publication pairs.
+
+Read-only `primary_timing` exposes `publication_` and `receipt_` prefixes with
+`fps`, `mean`, `jitter`, `min`, `max`, `count`, `span` (14 elements). Durations use
+seconds; unavailable duration/FPS is -1 and empty counts are zero. Separate
+`primary_timing_quality` reports configuration, validity, coverage, epoch/sequence,
+queue occupancy and cumulative observation/drop counts (17 elements). Primary
+validity requires both interval populations' sample variances, independently of
+SDK-oriented compatible timing availability or synco schedule state.
+
+Append an optional primary table and default-true `schedule_valid` to the existing
+`telem_dmsynco` schema; retain existing fields and eleven-argument construction.
+With diagnostics enabled, record on each ordinary app pass, normally about 1 Hz.
+When the cycle mutex is busy, fresh primary statistics still record with
+`schedule_valid=false` and explicitly unavailable scheduler placeholders; readers
+must ignore those schedule fields. Schema/log formatting and ordinary recording
+remain outside the real-time path. Older buffers without primary data remain
+readable. Older readers remain structurally compatible but cannot honor the new
+schedule-validity flag; rebuild readers before interpreting new busy-cycle
+records, whose scheduler placeholders are explicitly unavailable.
+
+This is a diagnostic addition only. Period selection, counter-driven scheduling,
+timing bounds, fault/recovery decisions and provider schedule layout stay intact.
+The existing fault-latched primary timing context retains its own sampling and
+meaning. Tests cover disabled/resource-failure collection, exact integer timestamp
+differences, invalid metadata/discontinuities/loss, staleness/zero configuration,
+INDI/telemetry independence and a real isolated-stream monitor path. The user
+guide documents the new configuration, properties, record meanings and an
+operator-run primary-versus-combined comparison.
+
+Scoped workstation verification passes:
+
+- App tests: **2,487 assertions / 30 cases**, retaining the existing scheduler,
+  resource, camera, callback and fault regressions, plus five primary-cadence
+  cases. A real private-stream monitor exercises hook discovery, actual wait
+  notifications, callbacks and the collector. Its finite five-post sequence uses
+  a generous test-only retention window and does not assume hard 2 kHz host
+  scheduling. Deterministic cases cover the two-second default and staleness.
+- Dedicated logger tests: **138 assertions / 4 cases**, including binary/JSON
+  roundtrip, physically absent legacy primary/validity fields, disabled/default
+  construction, independent scheduler validity and malformed metric rejection.
+  Total scoped checks: **2,625 assertions / 34 cases**.
+- Normal library/schema generation, dmSyncopation and logdump builds pass. App,
+  reader and focused test builds are warning-free; schema generation retains
+  existing unrelated field-name style warnings.
+- All four touched C++ files pass clang-format and whitespace checks. Full-file
+  formatting applies the standing explicit-brace preference to legacy app/test
+  control blocks as well as the new code.
+
+Review corrected a temporary-pair compiler warning and made the busy-lock test
+bounded, releasing the owner before checking the result so a future blocking
+regression fails instead of hanging. The real-monitor fixture joins before
+clearing its already-closed imported handle, and uses an initial known external
+timestamp to test the first publication pair deterministically. New INDI coverage
+checks registration, permissions, dimensions, initial unavailable values and a
+safe no-driver update; it does not exercise numeric XML output through a driver.
+No new performance benchmark, ThreadSanitizer, or instrument qualification is
+claimed. Existing timing bounds/control behavior are unchanged.
+
+Affected files:
+
+- `apps/dmSyncopation/dmSyncopation.hpp`, `Makefile`,
+  `tests/dmSyncopation_test.cpp`, `doc/dmSyncopation.md`.
+- `libMagAOX/logger/types/telem_dmsynco.hpp`,
+  `types/schemas/telem_dmsynco.fbs`, `tests/dmSyncoTelemetry_test.cpp`.
+- `tests/Makefile.one`, `tests/tests.list`.
+- This plan, `agents/plans/2026-10/dm-syncopation-debugging.md` and
+  `agents/plans/2026-10/dm-timing-telemetry.md`.
+
+The user authorized committing and pushing this update to
+`origin/jrmales/dm-syncopation`. Package the implementation and this engineering
+record first, followed by documentation and separate formatting cleanup. No
+deployment or agent instrument action is included. The next operator run can keep
+synco disabled and compare its primary publication population with the
+controller's combined-publication population over overlapping windows, using a
+rebuilt app and reader.
+
 ## Follow-up and Edge Cases
 
 - **Hard guarantee limit:** an unbounded early main event can race a multi-channel copy or overlap an already submitted command. Polling counters before writes cannot undo that race. Bounds and operational coordination are required; hard gating would be a separate cooperating-system change.

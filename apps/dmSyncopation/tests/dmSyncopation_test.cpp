@@ -56,6 +56,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_faultTiming;
     using dmSyncopation::m_indiP_camera;
     using dmSyncopation::m_indiP_enable;
+    using dmSyncopation::m_indiP_primaryTiming;
+    using dmSyncopation::m_indiP_primaryTimingQuality;
     using dmSyncopation::m_indiP_reacquire;
     using dmSyncopation::m_indiP_settings;
     using dmSyncopation::m_lastFaultNs;
@@ -65,6 +67,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_mappings;
     using dmSyncopation::m_measuredPeriod;
     using dmSyncopation::m_missed;
+    using dmSyncopation::m_nextAttach;
     using dmSyncopation::m_notStarted;
     using dmSyncopation::m_now;
     using dmSyncopation::m_period;
@@ -72,6 +75,9 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_previousCallbackEnd;
     using dmSyncopation::m_previousCallbackRuntime;
     using dmSyncopation::m_previousPrimaryPublication;
+    using dmSyncopation::m_primaryCadence;
+    using dmSyncopation::m_primaryCadenceMaxEvents;
+    using dmSyncopation::m_primaryCadenceWindow;
     using dmSyncopation::m_primaryCounter;
     using dmSyncopation::m_primaryTiming;
     using dmSyncopation::m_primed;
@@ -87,8 +93,10 @@ class Harness : public dmSyncopation
     using dmSyncopation::missedStep;
     using dmSyncopation::readCamera;
     using dmSyncopation::readPrimaryTiming;
+    using dmSyncopation::setupPrimaryCadenceINDI;
     using dmSyncopation::snapshot;
     using dmSyncopation::updatePeriod;
+    using dmSyncopation::updatePrimaryCadenceINDI;
     using dmSyncopation::waitUntil;
     using MagAOXApp<true>::config;
     using dev::shmimMonitor<dmSyncopation>::m_imageStream;
@@ -102,6 +110,15 @@ class Harness : public dmSyncopation
     /// Attach the primary using the same metadata the monitor supplies before allocate.
     void attach();
 
+    /// Attach only the private primary descriptor, leaving all scheduler resources unavailable.
+    void attachPrimaryOnly();
+
+    /// Start the real monitor loop against the fixture's existing streams, without normal app startup.
+    void startMonitor();
+
+    /// Stop and join the real monitor, clearing its already-closed imported descriptor.
+    void stopMonitor();
+
     /// Initialize callback properties without starting any threads or INDI connections.
     void properties();
 };
@@ -114,12 +131,20 @@ Harness::Harness()
 
 Harness::~Harness() noexcept
 {
+    stopMonitor();
     closeResources();
     if( m_imageStream.md )
         ImageStreamIO_closeIm( &m_imageStream );
 }
 
 void Harness::attach()
+{
+    attachPrimaryOnly();
+    REQUIRE( allocate( dev::shmimT{} ) == 0 );
+    REQUIRE( m_resources );
+}
+
+void Harness::attachPrimaryOnly()
 {
     m_shmimName    = "dm97disp03";
     m_combinedName = "dm97disp";
@@ -133,8 +158,34 @@ void Harness::attach()
     m_dataType        = _DATATYPE_FLOAT;
     m_inode           = inode( m_shmimName );
     m_semaphoreNumber = 5;
-    REQUIRE( allocate( dev::shmimT{} ) == 0 );
-    REQUIRE( m_resources );
+}
+
+void Harness::startMonitor()
+{
+    m_shmimName        = "dm97disp03";
+    m_combinedName     = "dm97disp";
+    m_destinations     = { "dm97disp07", "dm97disp08" };
+    m_timingName       = "synco_test_timing";
+    m_epoch            = 12345;
+    m_getExistingFirst = true;
+    m_smThreadInit     = false;
+    m_semaphoreNumber  = 5;
+    state( stateCodes::READY );
+    m_smThread = std::thread(
+        [this]()
+        {
+            dev::shmimMonitor<dmSyncopation>::smThreadExec();
+        } );
+}
+
+void Harness::stopMonitor()
+{
+    if( m_smThread.joinable() )
+    {
+        m_shutdown = true;
+        m_smThread.join();  // The real monitor's timed wait is bounded to one second.
+        m_imageStream = {}; // smThreadExec closed this import without clearing IMAGE.
+    }
 }
 
 void Harness::properties()
@@ -313,10 +364,10 @@ void Clock::primary( int64_t observed, uint64_t count )
     REQUIRE( app->processImage( nullptr, dev::shmimT{} ) == 0 );
 }
 
-/// Publish independent wall-clock metadata before a monotonic callback without rewinding elapsed execution time.
+/// Publish independent stream-clock metadata before a monotonic callback without rewinding elapsed execution time.
 void primaryObservation( Harness &app /**< [in,out] isolated scheduler */,
                          int64_t  observed /**< [in] monotonic time before callback entry */,
-                         int64_t  publication /**< [in] independent wall-clock publication time */,
+                         int64_t  publication /**< [in] independent stream-clock publication time */,
                          uint64_t count = 1 /**< [in] publications represented by this observation */ )
 {
     REQUIRE( observed >= Clock::time );
@@ -394,6 +445,49 @@ cameraTiming( double fps /**< [in] Measured acquisition frequency in Hz. */,
     }
     return packet;
 }
+/// Deterministic local capture clock, independent of external publication epochs.
+struct CadenceClock
+{
+    static inline int64_t time{ 1000000000 }; ///< Next local timestamp in nanoseconds.
+
+    /// Supply monotonically increasing capture/entry/completion timestamps.
+    static int64_t now();
+};
+
+int64_t CadenceClock::now()
+{
+    return time++;
+}
+
+/// Prepare diagnostics without starting a scheduler, monitor, SDK or INDI connection.
+void prepareCadence( Harness &app /**< [in,out] Isolated primary fixture. */ )
+{
+    app.attachPrimaryOnly();
+    app.m_nextAttach = std::numeric_limits<int64_t>::max();
+    app.m_now        = CadenceClock::now;
+    app.m_primaryCadence.configure( 2, 20 );
+    app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::connected );
+}
+
+/// Publish best-effort metadata and feed an actual optional receipt/initial hook followed by the callback.
+void cadenceObservation( Harness &app /**< [in,out] Isolated primary fixture. */,
+                         int64_t  receipt /**< [in] Monotonic receipt time. */,
+                         int64_t  publication /**< [in] External publication nanoseconds. */,
+                         uint64_t counter /**< [in] Observed primary counter. */,
+                         bool     initial = false /**< [in] Initial callback without a semaphore receipt. */,
+                         bool     writing = false /**< [in] Leave the image write flag set during observation. */ )
+{
+    auto *metadata      = app.m_imageStream.md;
+    metadata->write     = 1;
+    metadata->writetime = synco::toTimespec( publication );
+    metadata->cnt0      = counter;
+    metadata->write     = writing ? 1 : 0;
+    CadenceClock::time  = receipt;
+    app.shmimMonitorTiming( dev::shmimT{},
+                            initial ? dev::shmimMonitorEvent::initial : dev::shmimMonitorEvent::receipt );
+    REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
+}
+
 /// \endcond
 
 /// Verify fixed count feasibility, rounding, passive-only operation and narrow copy-window rejection.
@@ -1753,6 +1847,342 @@ TEST_CASE( "syncopation INDI callbacks enforce disabled settings", "[dmSyncopati
     REQUIRE( app.m_cameraFps.load() == Approx( 2000.08 ) );
     fps["acq_fps"] = std::numeric_limits<double>::infinity();
     REQUIRE( app.setCallBack_m_indiP_camera( fps ) < 0 );
+}
+
+/// Measure primary cadence while synco is disabled and its scheduler resources are unavailable.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation primary cadence is independent of scheduling resources", "[dmSyncopation][primaryTiming]" )
+{
+    Streams streams;
+    Harness app;
+    prepareCadence( app );
+    constexpr int64_t epoch = 1792000000000000000LL;
+    cadenceObservation( app, 1000000000, epoch, 10, true );
+    cadenceObservation( app, 1000500000, epoch + 500000, 11 );
+    cadenceObservation( app, 1000900000, epoch + 1000000, 12 );
+    cadenceObservation( app, 1001500000, epoch + 1500000, 13 );
+    app.m_primaryCadence.update( CadenceClock::time );
+
+    using namespace MagAOX::dmTiming;
+    const auto &summary     = app.m_primaryCadence.summary();
+    const auto &receipt     = summary.metrics[metricIndex( Metric::receiptInterval )];
+    const auto &publication = summary.metrics[metricIndex( Metric::publicationInterval )];
+    REQUIRE( receipt.valid );
+    REQUIRE( publication.valid );
+    CHECK( receipt.count == 2 );
+    CHECK( publication.count == 3 );
+    CHECK( receipt.mean == Approx( 0.0005 ) );
+    CHECK( receipt.stddev == Approx( std::sqrt( 2.0 ) * 0.0001 ) );
+    CHECK( publication.mean == Approx( 0.0005 ) );
+    CHECK( publication.stddev == 0 );
+    CHECK( summary.total.synthetic == 1 );
+    CHECK( summary.total.receipts == 3 );
+    CHECK( summary.total.events == 4 );
+    CHECK_FALSE( summary.fgValid ); // No SDK endpoints are invented for the scheduler.
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_faults == 0 );
+    CHECK( app.m_lastMain == 0 );
+
+    REQUIRE( app.setupPrimaryCadenceINDI() == 0 );
+    CHECK( app.m_indiP_primaryTiming.getElements().size() == 14 );
+    CHECK( app.m_indiP_primaryTimingQuality.getElements().size() == 17 );
+    CHECK( app.m_indiP_primaryTiming.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_primaryTimingQuality.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_primaryTiming["publication_count"].get<double>() == 0 );
+    CHECK( app.m_indiP_primaryTiming["publication_mean"].get<double>() == -1 );
+    CHECK( app.m_indiP_primaryTimingQuality["enabled"].get<double>() == 1 );
+    app.updatePrimaryCadenceINDI(); // No INDI driver or tunnel is needed for a safe no-op.
+
+    const uint64_t events = summary.total.events;
+    app.m_primaryCadence.update( CadenceClock::time + 3000000000LL );
+    CHECK( app.m_primaryCadence.summary().metrics[metricIndex( Metric::publicationInterval )].count == 0 );
+    CHECK( app.m_primaryCadence.summary().metrics[metricIndex( Metric::receiptInterval )].count == 0 );
+    CHECK( app.m_primaryCadence.summary().total.events == events );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::shmimMonitorTiming;
+    dmSyncopation::readPrimaryCadence;
+    dmSyncopation::processImage;
+    dmSyncopation::setupPrimaryCadenceINDI;
+    dmSyncopation::updatePrimaryCadenceINDI;
+#endif
+    // clang-format on
+}
+
+/// Reject unusable publication metadata while retaining real receipt observations and loss boundaries.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation primary cadence tracks metadata quality and attachment epochs",
+           "[dmSyncopation][primaryTiming]" )
+{
+    Streams streams;
+    Harness app;
+    prepareCadence( app );
+    constexpr int64_t epoch = 1792000000000000000LL;
+    cadenceObservation( app, 1000000000, epoch, 10 );
+    cadenceObservation( app, 1000500000, epoch + 500000, 11 );
+    cadenceObservation( app, 1001000000, epoch + 500000, 11 ); // Duplicate notification.
+    cadenceObservation( app, 1001500000, epoch + 1000000, 12 );
+    cadenceObservation( app, 1002000000, epoch + 2000000, 14 ); // Counter gap.
+    cadenceObservation( app, 1002500000, epoch + 2500000, 15 );
+    cadenceObservation( app, 1003000000, epoch + 2400000, 16 ); // Backward external stamp.
+    cadenceObservation( app, 1003500000, epoch + 2900000, 17 );
+    app.m_primaryCadence.update( CadenceClock::time );
+
+    using namespace MagAOX::dmTiming;
+    CHECK( app.m_primaryCadence.summary().metrics[metricIndex( Metric::publicationInterval )].count == 4 );
+    CHECK( app.m_primaryCadence.summary().metrics[metricIndex( Metric::publicationInterval )].mean ==
+           Approx( 0.0005 ) );
+    CHECK( app.m_primaryCadence.summary().total.duplicates == 1 );
+    CHECK( app.m_primaryCadence.summary().total.counterGaps == 1 );
+    CHECK( app.m_primaryCadence.summary().total.receipts == 8 );
+
+    app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::connected );
+    cadenceObservation( app, 1004000000, epoch + 3400000, 18 );
+    cadenceObservation( app, 1004500000, epoch + 3900000, 19, false, true ); // Write flag prevents metadata acceptance.
+    cadenceObservation( app, 1005000000, epoch + 4400000, 20 );
+    cadenceObservation( app, 1005500000, epoch + 4900000, 21 );
+    app.m_primaryCadence.update( CadenceClock::time );
+    CHECK( app.m_primaryCadence.summary().metrics[metricIndex( Metric::publicationInterval )].count == 1 );
+    CHECK( app.m_primaryCadence.summary().metrics[metricIndex( Metric::receiptInterval )].count == 3 );
+
+    app.m_imageStream.md->writetime.tv_nsec = 1000000000;
+    app.m_imageStream.md->cnt0              = 22;
+    CadenceClock::time                      = 1006000000;
+    app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::receipt );
+    REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
+    app.m_imageStream.md->writetime.tv_sec  = std::numeric_limits<int64_t>::max();
+    app.m_imageStream.md->writetime.tv_nsec = 1;
+    app.m_imageStream.md->cnt0              = 23;
+    CadenceClock::time                      = 1006500000;
+    app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::receipt );
+    REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
+    app.m_primaryCadence.update( CadenceClock::time );
+    CHECK( app.m_primaryCadence.summary().metrics[metricIndex( Metric::publicationInterval )].count == 1 );
+    CHECK( app.m_primaryCadence.summary().metrics[metricIndex( Metric::receiptInterval )].count == 5 );
+
+    CadenceClock::time = 1007000000;
+    app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::receipt );
+    app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::discarded );
+    app.m_primaryCadence.update( CadenceClock::time );
+    CHECK( app.m_primaryCadence.summary().total.rejected == 1 );
+    CHECK_FALSE( app.m_primaryCadence.active() );
+    CHECK( app.m_primaryCadence.summary().metrics[metricIndex( Metric::receiptInterval )].count == 6 );
+
+    const auto session = app.m_primaryCadence.summary().session;
+    app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::connected );
+    app.m_primaryCadence.update( CadenceClock::time );
+    CHECK( app.m_primaryCadence.summary().session == session + 1 );
+    CHECK( app.m_primaryCadence.summary().metrics[metricIndex( Metric::publicationInterval )].count == 0 );
+    CHECK( app.m_primaryCadence.summary().metrics[metricIndex( Metric::receiptInterval )].count == 0 );
+    CHECK( app.m_faults == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::shmimMonitorTiming;
+    dmSyncopation::readPrimaryCadence;
+    dmSyncopation::processImage;
+#endif
+    // clang-format on
+}
+
+/// Validate the independent runtime window/cap controls, including both zero-disable modes.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation primary diagnostics configuration is independently bounded", "[dmSyncopation][primaryTiming]" )
+{
+    Harness app;
+    app.setupConfig();
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    CHECK( app.m_primaryCadenceWindow == 2 );
+    CHECK( app.m_primaryCadenceMaxEvents == 20000 );
+
+    SECTION( "Configured window and capacity" )
+    {
+        char path[] = "/tmp/dm-synco-diagnostics-XXXXXX";
+        int  fd     = mkstemp( path );
+        REQUIRE( fd >= 0 );
+        close( fd );
+
+        {
+            std::ofstream settings( path );
+            settings << "[diagnostics]\nwindowSec=0.5\nmaxEvents=64\n";
+        }
+
+        app.config.readConfig( path );
+        std::remove( path );
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        CHECK( app.m_primaryCadenceWindow == 0.5 );
+        CHECK( app.m_primaryCadenceMaxEvents == 64 );
+    }
+
+    SECTION( "Nonfinite and negative elapsed time are rejected" )
+    {
+        app.m_primaryCadenceWindow = std::numeric_limits<double>::quiet_NaN();
+        CHECK( app.loadConfigImpl( app.config ) < 0 );
+        app.m_primaryCadenceWindow = -1;
+        CHECK( app.loadConfigImpl( app.config ) < 0 );
+    }
+
+    SECTION( "Negative event capacity is rejected before allocation" )
+    {
+        char path[] = "/tmp/dm-synco-diagnostics-XXXXXX";
+        int  fd     = mkstemp( path );
+        REQUIRE( fd >= 0 );
+        close( fd );
+
+        {
+            std::ofstream settings( path );
+            settings << "[diagnostics]\nmaxEvents=-1\n";
+        }
+
+        app.config.readConfig( path );
+        std::remove( path );
+        CHECK( app.loadConfigImpl( app.config ) < 0 );
+    }
+
+    SECTION( "Either zero control disables capture without consuming the scheduler clock" )
+    {
+        for( const auto controls : { std::make_pair( 0.0, size_t( 20 ) ), std::make_pair( 2.0, size_t( 0 ) ) } )
+        {
+            app.m_primaryCadence.configure( controls.first, controls.second );
+            app.m_now          = CadenceClock::now;
+            CadenceClock::time = 1000000000;
+            app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::receipt );
+            CHECK( CadenceClock::time == 1000000000 );
+            CHECK_FALSE( app.m_primaryCadence.active() );
+            CHECK_FALSE( app.m_primaryCadence.enabled() );
+        }
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::setupConfig;
+    dmSyncopation::loadConfigImpl;
+    dmSyncopation::shmimMonitorTiming;
+#endif
+    // clang-format on
+}
+
+/// Keep primary telemetry available when the scheduler's complete-cycle lock is busy.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation primary telemetry does not wait for the scheduler lock", "[dmSyncopation][primaryTiming]" )
+{
+    Streams streams;
+    Harness app;
+    prepareCadence( app );
+    constexpr int64_t epoch = 1792000000000000000LL;
+    cadenceObservation( app, 1000000000, epoch, 10 );
+    cadenceObservation( app, 1000500000, epoch + 500000, 11 );
+    cadenceObservation( app, 1001000000, epoch + 1000000, 12 );
+    app.m_primaryCadence.update( CadenceClock::time );
+    std::promise<void> locked;
+    std::promise<void> release;
+    auto               unlock = release.get_future();
+    auto               owner  = std::async( std::launch::async,
+                             [&]()
+                             {
+                                 std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+                                 locked.set_value();
+                                 unlock.wait();
+                             } );
+    locked.get_future().wait();
+    MagAOX::logger::telem_dmsynco::lastRecord = {};
+
+    auto recording = std::async( std::launch::async,
+                                 [&]()
+                                 {
+                                     return app.recordTelem( nullptr );
+                                 } );
+
+    const auto readiness = recording.wait_for( std::chrono::milliseconds( 500 ) );
+    release.set_value();
+    owner.get();
+    const int result = recording.get();
+
+    CHECK( readiness == std::future_status::ready );
+    CHECK( result == 0 );
+    CHECK( MagAOX::logger::telem_dmsynco::lastRecord.tv_sec > 0 );
+    CHECK( app.m_primaryCadence.summary().total.receipts == 3 );
+    CHECK( app.m_primaryCadence.summary()
+               .metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::publicationInterval )]
+               .valid );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::recordTelem;
+#endif
+    // clang-format on
+}
+
+/// Exercise the real semaphore loop, inherited hook, callback and collector without a hard scheduling assumption.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation real monitor forwards finite primary cadence events",
+           "[dmSyncopation][primaryTiming][regression]" )
+{
+    Streams           streams;
+    Harness           app;
+    constexpr int64_t epoch         = 1792000000000000000LL;
+    streams.images[0].md->writetime = synco::toTimespec( epoch - 500000 );
+    app.m_primaryCadence.configure( 30, 32 ); // Retain every finite post through all bounded waits and worker cleanup.
+    app.startMonitor();
+    auto waitEvents = [&]( uint64_t count )
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 3 );
+
+        do
+        {
+            app.m_primaryCadence.update();
+
+            if( app.m_primaryCadence.summary().total.events >= count )
+            {
+                return true;
+            }
+
+            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+        } while( std::chrono::steady_clock::now() < deadline );
+
+        return false;
+    };
+
+    REQUIRE( waitEvents( 1 ) );
+    CHECK( app.m_primaryCadence.summary().total.synthetic == 1 );
+    CHECK( app.m_primaryCadence.summary().total.receipts == 0 );
+    for( uint64_t i = 0; i < 5; ++i )
+    {
+        auto *metadata      = streams.images[0].md;
+        metadata->write     = 1;
+        metadata->writetime = synco::toTimespec( epoch + int64_t( i ) * 500000 );
+        ++metadata->cnt0;
+        metadata->write = 0;
+        REQUIRE( ImageStreamIO_sempost( &streams.images[0], -1 ) == 0 );
+        REQUIRE( waitEvents( i + 2 ) );
+    }
+
+    app.stopMonitor();
+    app.m_primaryCadence.update();
+    const auto &summary = app.m_primaryCadence.summary();
+    CHECK( summary.total.events == 6 );
+    CHECK( summary.total.receipts == 5 );
+    CHECK( summary.total.synthetic == 1 );
+    CHECK( summary.total.dropped == 0 );
+    CHECK( summary.total.rejected == 0 );
+    CHECK( summary.total.invalid == 0 );
+    CHECK( summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::receiptInterval )].count == 4 );
+    const auto &publication =
+        summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::publicationInterval )];
+    CHECK( publication.count == 5 );
+    CHECK( publication.mean == Approx( 0.0005 ) );
+    CHECK( publication.stddev == 0 );
+    CHECK_FALSE( app.m_enabled );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::shmimMonitor::smThreadExec;
+    dmSyncopation::shmimMonitorTiming;
+    dmSyncopation::processImage;
+#endif
+    // clang-format on
 }
 
 } // namespace dmSyncopationTest

@@ -23,6 +23,7 @@
 ../libMagAOX/logger/tests/logMap_test
 ../libMagAOX/logger/tests/pduTelemetry_test
 ../libMagAOX/logger/tests/dmTimingTelemetry_test
+../libMagAOX/logger/tests/dmSyncoTelemetry_test
 ../libMagAOX/logger/tests/logMeta_test
 ../libMagAOX/logger/tests/logTypes_Accessor_test
 ../libMagAOX/logger/tests/savingTelemetry_test

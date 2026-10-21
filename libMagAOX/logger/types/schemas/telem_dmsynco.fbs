@@ -1,4 +1,42 @@
+/// \file telem_dmsynco.fbs
+/// \brief Scheduler telemetry with optional observed primary publication and receipt cadence.
 namespace MagAOX.logger;
+
+// Values and coverage are seconds; publication values retain their external clock.
+table DmSyncoTimingStats
+{
+    count:ulong;
+    mean:double;
+    stddev:double;
+    min:double;
+    max:double;
+    span:double;
+    valid:bool;
+}
+
+table DmSyncoPrimaryTiming
+{
+    session:ulong;
+    sequence:ulong;
+    now_ns:long;
+    window_sec:double;
+    span_sec:double;
+    age_sec:double;
+    capacity:ulong;
+    queued:ulong;
+    enabled:bool;
+    valid:bool;
+    publication:DmSyncoTimingStats (required);
+    receipt:DmSyncoTimingStats (required);
+    events:ulong;
+    receipts:ulong;
+    synthetic:ulong;
+    rejected:ulong;
+    duplicates:ulong;
+    counter_gaps:ulong;
+    invalid:ulong;
+    dropped:ulong;
+}
 
 table Telem_dmsynco_fb
 {
@@ -13,6 +51,8 @@ table Telem_dmsynco_fb
     copy_ns:long;
     residuals_ns:[long];
     advances_ns:[long];
+    primary_timing:DmSyncoPrimaryTiming;
+    schedule_valid:bool = true;
 }
 
 root_type Telem_dmsynco_fb;

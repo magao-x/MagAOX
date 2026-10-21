@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -15,6 +16,7 @@
 #include <mx/math/floatUtils.hpp>
 
 #include "../../libMagAOX/libMagAOX.hpp"
+#include "../../libMagAOX/app/dev/dmTiming.hpp"
 #include "../../magaox_git_version.h"
 #include "syncoSchedule.hpp"
 
@@ -91,7 +93,7 @@ class dmSyncopation : public MagAOXApp<true>,
     struct PrimaryTiming
     {
         uint64_t m_counter{ 0 };          ///< Primary counter associated with this observation.
-        int64_t  m_publication{ -1 };     ///< Interval between coherent publication timestamps in their own clock.
+        int64_t  m_publication{ -1 };     ///< Interval between best-effort publication timestamps in their own clock.
         int64_t  m_previousRuntime{ -1 }; ///< Previous callback body duration, including its cycle-lock wait.
         int64_t  m_gap{ -1 };             ///< Previous callback body completion to this callback entry, monotonic ns.
         int64_t  m_sampleDelay{ -1 };     ///< This callback entry to its primary metadata sample, monotonic ns.
@@ -110,15 +112,17 @@ class dmSyncopation : public MagAOXApp<true>,
     unsigned                 m_lockFrames{ 32 };  ///< Clean main observations before preparing the first active cycle.
     unsigned                 m_failureLimit{ 3 }; ///< Consecutive original event failures before reacquisition.
     unsigned      m_rateFrames{ 32 }; ///< Cadence violation persistence and primary-rate qualification interval count.
-    double        m_nominalRate{ 2000 };   ///< Acquisition fallback, Hz.
-    double        m_maxCadence{ 6000 };    ///< Nominal sanity rating, Hz, including step 0.
-    double        m_rateTolerance{ 0.01 }; ///< Relative cadence-rating tolerance.
-    double        m_minRate{ 500 };        ///< Minimum accepted main rate, Hz.
-    double        m_maxRate{ 4000 };       ///< Maximum accepted main rate, Hz.
-    double        m_gain{ 0.1 };           ///< Per-event wait integrator gain.
-    double        m_maxAdvanceUs{ 20 };    ///< Absolute wait correction limit, us.
-    double        m_outputTimeoutUs{ 50 }; ///< Combination watchdog, separate from delivery allowance.
-    synco::Bounds m_bounds;                ///< Explicit copy, observation and reader bounds, ns.
+    double        m_nominalRate{ 2000 };       ///< Acquisition fallback, Hz.
+    double        m_maxCadence{ 6000 };        ///< Nominal sanity rating, Hz, including step 0.
+    double        m_rateTolerance{ 0.01 };     ///< Relative cadence-rating tolerance.
+    double        m_minRate{ 500 };            ///< Minimum accepted main rate, Hz.
+    double        m_maxRate{ 4000 };           ///< Maximum accepted main rate, Hz.
+    double        m_gain{ 0.1 };               ///< Per-event wait integrator gain.
+    double        m_maxAdvanceUs{ 20 };        ///< Absolute wait correction limit, us.
+    double        m_outputTimeoutUs{ 50 };     ///< Combination watchdog, separate from delivery allowance.
+    double        m_primaryCadenceWindow{ 2 }; ///< Independent primary diagnostics window in seconds; zero disables.
+    size_t        m_primaryCadenceMaxEvents{ 20000 }; ///< Queue and retained-event cap; zero disables diagnostics.
+    synco::Bounds m_bounds;                           ///< Explicit copy, observation and reader bounds, ns.
     ///@}
 
     std::mutex           m_cycleMutex;       ///< Serializes lifecycle/configuration with a complete callback.
@@ -148,10 +152,11 @@ class dmSyncopation : public MagAOXApp<true>,
     int64_t       m_faultInterval{ 0 }; ///< Latched interval at the latest interval fault; zero for other faults.
     int64_t       m_faultPeriod{ 0 };   ///< Prediction used at the latest interval fault; zero for other faults.
     PrimaryTiming m_primaryTiming;      ///< Diagnostic context for the latest distinct primary observation.
+    dev::dmTiming m_primaryCadence;     ///< Monitor-producer cadence events and ordinary-thread cached statistics.
     PrimaryTiming m_faultTiming;        ///< Same-event context latched with the latest primary interval fault.
-    int64_t       m_previousPrimaryPublication{ 0 }; ///< Last coherent positive primary publication timestamp, ns.
-    int64_t m_previousCallbackRuntime{ -1 }; ///< Duration of the previous invocation, including ignored duplicates.
-    int64_t m_previousCallbackEnd{ 0 };      ///< Previous body completion before cycle-lock release, monotonic ns.
+    int64_t m_previousPrimaryPublication{ 0 }; ///< Last consistency-checked positive primary publication timestamp, ns.
+    int64_t m_previousCallbackRuntime{ -1 };   ///< Duration of the previous invocation, including ignored duplicates.
+    int64_t m_previousCallbackEnd{ 0 };        ///< Previous body completion before cycle-lock release, monotonic ns.
     std::array<uint64_t, size_t( Fault::count )> m_faultCounts{}; ///< Fixed per-cause fault totals.
     bool     m_havePrimaryCounter{ false }; ///< Last-seen counter is initialized for the current primary attachment.
     uint64_t m_primaryCounter{ 0 };         ///< Last seen primary counter, retained through reacquisition.
@@ -198,12 +203,15 @@ class dmSyncopation : public MagAOXApp<true>,
     int64_t m_step0Wake{ 0 };       ///< Latest passive-copy start lateness relative to the requested wake, ns.
     int64_t m_step0WakeMax{ 0 };    ///< Maximum observed passive-copy wake/check lateness, ns.
 
-    pcf::IndiProperty m_indiP_enable;    ///< Enable request and acknowledged quiescence.
-    pcf::IndiProperty m_indiP_reacquire; ///< Request fresh synchronization.
-    pcf::IndiProperty m_indiP_settings;  ///< Disabled-only essential numeric controls.
-    pcf::IndiProperty m_indiP_status;    ///< Compact rates/counts/outcome summary.
-    pcf::IndiProperty m_indiP_health;    ///< Schedule reason and stream identities.
-    pcf::IndiProperty m_indiP_camera;    ///< External camera FPS subscription.
+    pcf::IndiProperty m_indiP_enable;        ///< Enable request and acknowledged quiescence.
+    pcf::IndiProperty m_indiP_reacquire;     ///< Request fresh synchronization.
+    pcf::IndiProperty m_indiP_settings;      ///< Disabled-only essential numeric controls.
+    pcf::IndiProperty m_indiP_status;        ///< Compact rates/counts/outcome summary.
+    pcf::IndiProperty m_indiP_health;        ///< Schedule reason and stream identities.
+    pcf::IndiProperty m_indiP_camera;        ///< External camera FPS subscription.
+    pcf::IndiProperty m_indiP_primaryTiming; ///< Continuous observed primary publication/receipt statistics in seconds.
+    pcf::IndiProperty
+        m_indiP_primaryTimingQuality; ///< Independent diagnostic coverage, validity and collection quality.
 
   public:
     /// Construct without publishing or enabling any DM command.
@@ -237,6 +245,10 @@ class dmSyncopation : public MagAOXApp<true>,
     int processImage( void              *source /**< [in] unused primary pixel pointer */,
                       const dev::shmimT &tag /**< [in] primary-monitor tag */ );
 
+    /// Observe monitor receipts and attachment epochs independently of scheduler/resource state.
+    void shmimMonitorTiming( const dev::shmimT     &tag /**< [in] Primary-monitor tag. */,
+                             dev::shmimMonitorEvent event /**< [in] Actual monitor lifecycle/receipt event. */ );
+
     /// Schedule aggregate telemetry outside the timed callback.
     int checkRecordTimes();
 
@@ -256,6 +268,15 @@ class dmSyncopation : public MagAOXApp<true>,
     INDI_SETCALLBACK_DECL( dmSyncopation, m_indiP_camera );
 
   protected:
+    /// Capture local entry and best-effort primary metadata before acquiring the cycle mutex.
+    void readPrimaryCadence( int64_t observed /**< [in] Existing monotonic callback-entry timestamp. */ );
+
+    /// Register the independent read-only primary cadence properties.
+    int setupPrimaryCadenceINDI();
+
+    /// Publish the consumer-owned cadence cache without acquiring the cycle mutex.
+    void updatePrimaryCadenceINDI();
+
     /// Execute one cycle while the caller holds the cycle mutex.
     int processPrimary( int64_t observed /**< [in] callback entry time on the monotonic scheduling clock */ );
 
@@ -368,7 +389,9 @@ inline void dmSyncopation::setupConfig()
         { "tracking.primarySemaphore", "Required monitor reader index; fallback is rejected." },
         { "recovery.consecutiveMisses", "Consecutive original missed steps before reacquisition." },
         { "feedback.gain", "Independent per-step wait integrator gain (0-1)." },
-        { "feedback.maxAdvanceUs", "Maximum absolute wait correction, us." } };
+        { "feedback.maxAdvanceUs", "Maximum absolute wait correction, us." },
+        { "diagnostics.windowSec", "Independent primary timing window, seconds; zero disables collection." },
+        { "diagnostics.maxEvents", "Primary timing queue/window event cap; zero disables collection." } };
     for( const auto &key : keys )
     {
         const auto dot = key.first.find( '.' );
@@ -408,6 +431,17 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_gain, "feedback.gain" );
     config( m_maxAdvanceUs, "feedback.maxAdvanceUs" );
     config( m_outputTimeoutUs, "scheduler.outputTimeoutUs" );
+    config( m_primaryCadenceWindow, "diagnostics.windowSec" );
+    int64_t cadenceEvents = m_primaryCadenceMaxEvents;
+    config( cadenceEvents, "diagnostics.maxEvents" );
+
+    if( !finite( m_primaryCadenceWindow ) || m_primaryCadenceWindow < 0 || m_primaryCadenceWindow >= 9e9 ||
+        cadenceEvents < 0 || uint64_t( cadenceEvents ) > std::numeric_limits<size_t>::max() )
+    {
+        return -1;
+    }
+
+    m_primaryCadenceMaxEvents                                        = size_t( cadenceEvents );
     const std::pair<const char *, int64_t synco::Bounds::*> bounds[] = {
         { "scheduler.keepoutUs", &synco::Bounds::keepout },
         { "scheduler.guardUs", &synco::Bounds::guard },
@@ -1047,13 +1081,79 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
 {
     static_cast<void>( source );
     static_cast<void>( tag );
-    const int64_t               observed = m_now();
+    const int64_t observed = m_now();
+    readPrimaryCadence( observed );
     std::lock_guard<std::mutex> lock( m_cycleMutex );
     const int                   result    = processPrimary( observed );
     const int64_t               completed = m_now();
     m_previousCallbackRuntime             = completed >= observed ? completed - observed : -1;
     m_previousCallbackEnd                 = completed;
+    m_primaryCadence.markAt( MagAOX::dmTiming::Marker::finish, completed );
+    m_primaryCadence.outcome( MagAOX::dmTiming::Outcome::noSend );
+    m_primaryCadence.finishEvent();
     return result;
+}
+
+inline void dmSyncopation::shmimMonitorTiming( const dev::shmimT &tag, dev::shmimMonitorEvent event )
+{
+    static_cast<void>( tag );
+
+    if( !m_primaryCadence.enabled() )
+    {
+        return;
+    }
+
+    if( event == dev::shmimMonitorEvent::connected )
+    {
+        m_primaryCadence.newSession();
+    }
+    else if( event == dev::shmimMonitorEvent::receipt || event == dev::shmimMonitorEvent::initial )
+    {
+        const bool receipt = event == dev::shmimMonitorEvent::receipt;
+        m_primaryCadence.beginEventAt( receipt, receipt ? m_now() : -1 );
+    }
+    else if( event == dev::shmimMonitorEvent::discarded )
+    {
+        m_primaryCadence.outcome( MagAOX::dmTiming::Outcome::rejected );
+        m_primaryCadence.finishEvent();
+    }
+}
+
+inline void dmSyncopation::readPrimaryCadence( int64_t observed )
+{
+    if( !m_primaryCadence.enabled() )
+    {
+        return;
+    }
+
+    if( !m_primaryCadence.active() )
+    {
+        m_primaryCadence.beginEventAt( false, -1 );
+    }
+
+    m_primaryCadence.markAt( MagAOX::dmTiming::Marker::entry, observed );
+    const auto *metadata = shmimMonitorT::m_imageStream.md;
+
+    if( !m_primaryCadence.active() || !metadata || metadata->write != 0 )
+    {
+        return;
+    }
+
+    const uint64_t counter = metadata->cnt0;
+    const auto     stamp   = metadata->writetime;
+    std::atomic_thread_fence( std::memory_order_acquire );
+
+    // This bracket is an observed metadata sample, not atomic token/pixel/frame identity.
+    if( metadata->write == 0 && counter == metadata->cnt0 )
+    {
+        m_primaryCadence.inputCounter( counter );
+
+        if( stamp.tv_sec >= 0 && stamp.tv_nsec >= 0 && stamp.tv_nsec < 1000000000 &&
+            stamp.tv_sec <= ( std::numeric_limits<int64_t>::max() - stamp.tv_nsec ) / 1000000000 )
+        {
+            m_primaryCadence.inputPublication( static_cast<int64_t>( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec );
+        }
+    }
 }
 
 inline int dmSyncopation::processPrimary( int64_t observed )
@@ -1180,8 +1280,148 @@ inline int dmSyncopation::processPrimary( int64_t observed )
     return 0;
 }
 
+inline int dmSyncopation::setupPrimaryCadenceINDI()
+{
+    if( createROIndiNumber( m_indiP_primaryTiming, "primary_timing" ) < 0 ||
+        createROIndiNumber( m_indiP_primaryTimingQuality, "primary_timing_quality" ) < 0 )
+    {
+        return -1;
+    }
+
+    for( const auto *prefix : { "publication_", "receipt_" } )
+    {
+        for( const auto *field : { "fps", "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            const std::string name = std::string( prefix ) + field;
+            m_indiP_primaryTiming.add( pcf::IndiElement( name ) );
+            m_indiP_primaryTiming[name] = std::string( field ) == "count" ? 0.0 : -1.0;
+        }
+    }
+
+    for( const auto *name : { "enabled",
+                              "valid",
+                              "window",
+                              "span",
+                              "age",
+                              "capacity",
+                              "queued",
+                              "session",
+                              "sequence",
+                              "events",
+                              "receipts",
+                              "synthetic",
+                              "rejected",
+                              "duplicates",
+                              "counterGaps",
+                              "invalid",
+                              "dropped" } )
+    {
+        m_indiP_primaryTimingQuality.add( pcf::IndiElement( name ) );
+        m_indiP_primaryTimingQuality[name] = 0.0;
+    }
+
+    m_indiP_primaryTimingQuality["enabled"]  = m_primaryCadence.enabled() ? 1.0 : 0.0;
+    m_indiP_primaryTimingQuality["window"]   = m_primaryCadence.summary().windowSec;
+    m_indiP_primaryTimingQuality["capacity"] = double( m_primaryCadence.summary().capacity );
+    m_indiP_primaryTimingQuality["age"]      = -1.0;
+
+    if( registerIndiPropertyReadOnly( m_indiP_primaryTiming ) < 0 )
+    {
+        return -1;
+    }
+
+    return registerIndiPropertyReadOnly( m_indiP_primaryTimingQuality );
+}
+
+inline void dmSyncopation::updatePrimaryCadenceINDI()
+{
+    const auto &summary = m_primaryCadence.summary();
+    const auto &publication =
+        summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::publicationInterval )];
+    const auto &receipt = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::receiptInterval )];
+    const bool  valid   = publication.valid && receipt.valid;
+    const auto  state   = valid ? INDI_OK : INDI_IDLE;
+    std::vector<std::string> names;
+    std::vector<double>      values;
+
+    const std::pair<const char *, const MagAOX::dmTiming::Stats *> populations[] = { { "publication_", &publication },
+                                                                                     { "receipt_", &receipt } };
+
+    for( const auto &entry : populations )
+    {
+        const auto &metric = *entry.second;
+
+        for( const auto *field : { "fps", "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            names.push_back( std::string( entry.first ) + field );
+        }
+
+        values.insert( values.end(),
+                       { metric.valid && metric.mean > 0 ? 1.0 / metric.mean : -1.0,
+                         metric.count ? metric.mean : -1.0,
+                         metric.valid ? metric.stddev : -1.0,
+                         metric.count ? metric.min : -1.0,
+                         metric.count ? metric.max : -1.0,
+                         double( metric.count ),
+                         metric.count ? metric.span : -1.0 } );
+    }
+
+    updateIfChanged( m_indiP_primaryTiming, names, values, state );
+    const auto &quality = summary.total;
+    updateIfChanged<double>( m_indiP_primaryTimingQuality,
+                             { "enabled",
+                               "valid",
+                               "window",
+                               "span",
+                               "age",
+                               "capacity",
+                               "queued",
+                               "session",
+                               "sequence",
+                               "events",
+                               "receipts",
+                               "synthetic",
+                               "rejected",
+                               "duplicates",
+                               "counterGaps",
+                               "invalid",
+                               "dropped" },
+                             { double( summary.enabled ),
+                               double( valid ),
+                               summary.windowSec,
+                               summary.span,
+                               summary.age,
+                               double( summary.capacity ),
+                               double( summary.queued ),
+                               double( summary.session ),
+                               double( summary.sequence ),
+                               double( quality.events ),
+                               double( quality.receipts ),
+                               double( quality.synthetic ),
+                               double( quality.rejected ),
+                               double( quality.duplicates ),
+                               double( quality.counterGaps ),
+                               double( quality.invalid ),
+                               double( quality.dropped ) },
+                             state );
+}
+
 inline int dmSyncopation::appStartup()
 {
+    try
+    {
+        m_primaryCadence.configure( m_primaryCadenceWindow, m_primaryCadenceMaxEvents );
+    }
+    catch( const std::exception &error )
+    {
+        return log<software_error, -1>( { std::string( "Primary timing allocation: " ) + error.what() } );
+    }
+
+    if( setupPrimaryCadenceINDI() < 0 )
+    {
+        return -1;
+    }
+
     if( getrandom( &m_epoch, sizeof( m_epoch ), 0 ) != sizeof( m_epoch ) )
         return -1;
     m_epoch &= INT64_MAX;
@@ -1266,6 +1506,8 @@ inline int dmSyncopation::appStartup()
 inline int dmSyncopation::appLogic()
 {
     SHMIMMONITOR_APP_LOGIC;
+    m_primaryCadence.update( m_now() );
+    updatePrimaryCadenceINDI();
     { // mutex scope
         std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
         if( lock.owns_lock() )
@@ -1399,6 +1641,12 @@ inline int dmSyncopation::appLogic()
         }
     }
     SHMIMMONITOR_UPDATE_INDI;
+
+    if( m_primaryCadence.enabled() )
+    {
+        recordTelem( nullptr );
+    }
+
     TELEMETER_APP_LOGIC;
     return 0;
 }
@@ -1422,19 +1670,54 @@ inline int dmSyncopation::checkRecordTimes()
 inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
 {
     static_cast<void>( record );
-    std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
-    if( !lock.owns_lock() )
+    int                                  state     = synco::invalid;
+    int                                  count     = 0;
+    int64_t                              period    = 0;
+    uint64_t                             delivered = 0, missed = 0, faults = 0, cached = 0;
+    int64_t                              snapshot = 0, copy = 0;
+    std::array<int64_t, synco::maxSteps> residualSnapshot{}, advanceSnapshot{};
+    bool                                 scheduleValid = false;
+
+    { // mutex scope
+        std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
+
+        if( lock.owns_lock() )
+        {
+            scheduleValid    = true;
+            state            = m_scheduleState;
+            count            = m_requested;
+            period           = m_period;
+            delivered        = m_delivered;
+            missed           = m_missed;
+            faults           = m_faults;
+            cached           = m_cached;
+            snapshot         = m_snapshotMax;
+            copy             = m_copyMax;
+            residualSnapshot = m_residuals;
+            advanceSnapshot  = m_advances;
+        }
+    }
+
+    if( !scheduleValid && !m_primaryCadence.enabled() )
+    {
         return 0;
-    std::vector<int64_t> residuals( m_residuals.begin(), m_residuals.begin() + m_requested );
-    std::vector<int64_t> advances( m_advances.begin(), m_advances.begin() + m_requested );
-    const int            state     = m_scheduleState;
-    const int            count     = m_requested;
-    const int64_t        period    = m_period;
-    const uint64_t       delivered = m_delivered, missed = m_missed, faults = m_faults, cached = m_cached;
-    const int64_t        snapshot = m_snapshotMax, copy = m_copyMax;
-    lock.unlock();
-    telem_dmsynco::messageT message(
-        state, count, period, delivered, missed, faults, cached, snapshot, copy, residuals, advances );
+    }
+
+    const std::vector<int64_t> residuals( residualSnapshot.begin(), residualSnapshot.begin() + count );
+    const std::vector<int64_t> advances( advanceSnapshot.begin(), advanceSnapshot.begin() + count );
+    telem_dmsynco::messageT    message( state,
+                                     count,
+                                     period,
+                                     delivered,
+                                     missed,
+                                     faults,
+                                     cached,
+                                     snapshot,
+                                     copy,
+                                     residuals,
+                                     advances,
+                                     m_primaryCadence.summary(),
+                                     scheduleValid );
     telem<telem_dmsynco>( message );
     return 0;
 }
