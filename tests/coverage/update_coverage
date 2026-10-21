@@ -28,6 +28,7 @@ EOF
 
 mode="full"
 repo_root=$(pwd)
+coverage_output="doc/output/coverage"
 
 case "${1:-}" in
     "")
@@ -73,7 +74,9 @@ lcov --remove coverage.info "*/tests/*" "/usr/*" "/sys/*" "/tty/*" \
          --ignore-errors path \
          --output-file coverage_filtered.info
 
-genhtml coverage_filtered.info --output-directory coverage_report \
+mkdir -p "$(dirname "$coverage_output")"
+
+genhtml coverage_filtered.info --output-directory "$coverage_output" \
                                --title "MagAOX" \
                                --hierarchical \
                                --merge-aliases \
