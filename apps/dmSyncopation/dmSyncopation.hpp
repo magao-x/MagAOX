@@ -77,6 +77,16 @@ class dmSyncopation : public MagAOXApp<true>,
         ino_t                       m_sourceInode{ 0 };      ///< File identity at attachment.
     };
 
+    /// Coherent camera measurement cached by the cycle without waiting for the INDI input thread.
+    struct CameraReport
+    {
+        double  m_fps{ 0 };       ///< Measured acquisition frequency, Hz.
+        int64_t m_received{ 0 };  ///< Original monotonic receipt time, ns.
+        double  m_jitterUs{ -1 }; ///< Acquisition interval standard deviation, us.
+        double  m_minUs{ -1 };    ///< Minimum reported acquisition interval, us.
+        double  m_maxUs{ -1 };    ///< Maximum reported acquisition interval, us.
+    };
+
     /** \name Configuration - Data
      * @{ */
     std::vector<std::string> m_destinations{ "dm01disp07", "dm01disp08" }; ///< Ordered destination mapping.
@@ -101,13 +111,15 @@ class dmSyncopation : public MagAOXApp<true>,
     synco::Bounds m_bounds;                ///< Explicit copy, observation and reader bounds, ns.
     ///@}
 
-    std::mutex           m_cycleMutex;           ///< Serializes lifecycle/configuration with a complete callback.
-    std::atomic<bool>    m_enabled{ false };     ///< Cancellation request, checked at bounded waits and publications.
-    std::atomic<double>  m_cameraFps{ 0 };       ///< Last accepted external FPS report.
-    std::atomic<int64_t> m_cameraTime{ 0 };      ///< Receipt time for camera-report expiry.
+    std::mutex           m_cycleMutex;       ///< Serializes lifecycle/configuration with a complete callback.
+    std::atomic<bool>    m_enabled{ false }; ///< Cancellation request, checked at bounded waits and publications.
+    std::mutex           m_cameraMutex; ///< Protects only the pending camera report, never a timed cycle or INDI I/O.
+    std::atomic<double>  m_cameraFps{ 0 };       ///< Latest validated pending acquisition frequency, Hz.
+    std::atomic<int64_t> m_cameraTime{ 0 };      ///< Original receipt time of the pending camera report.
     double               m_cameraJitterUs{ -1 }; ///< Acquisition interval standard deviation, us; -1 when omitted.
     double               m_cameraMinUs{ -1 };    ///< Minimum reported acquisition interval, us; -1 when omitted.
     double               m_cameraMaxUs{ -1 };    ///< Maximum reported acquisition interval, us; -1 when omitted.
+    CameraReport         m_cameraReport;    ///< Cycle-owned snapshot; retained if the mailbox is briefly unavailable.
     int64_t m_lastCameraPoll{ 0 };          ///< Last slow-loop subscription refresh; never used by the timing callback.
     std::vector<Mapping>        m_mappings; ///< Open mappings, fixed while attached.
     std::unique_ptr<syncoImage> m_combined; ///< Read-only combined-output attachment.
@@ -238,6 +250,9 @@ class dmSyncopation : public MagAOXApp<true>,
 
     /// Check shape/counter ownership, optionally including on-disk stream identity.
     bool resourcesValid( bool files /**< [in] include bounded-cycle-start inode checks */ );
+
+    /// Refresh the coherent camera cache only when its short mailbox lock is immediately available.
+    void readCamera();
 
     /// Select a measured period without learning individual callback outliers as rate changes.
     void updatePeriod( int64_t observed /**< [in] distinct primary observation time */,
@@ -595,6 +610,13 @@ inline bool dmSyncopation::resourcesValid( bool files )
     return true;
 }
 
+inline void dmSyncopation::readCamera()
+{
+    std::unique_lock<std::mutex> lock( m_cameraMutex, std::try_to_lock );
+    if( lock.owns_lock() )
+        m_cameraReport = { m_cameraFps.load(), m_cameraTime.load(), m_cameraJitterUs, m_cameraMinUs, m_cameraMaxUs };
+}
+
 inline void dmSyncopation::updatePeriod( int64_t observed, int64_t interval, bool sequential )
 {
     if( !sequential || interval < int64_t( 1e9 / m_maxRate ) || interval > int64_t( 1e9 / m_minRate ) )
@@ -625,8 +647,9 @@ inline void dmSyncopation::updatePeriod( int64_t observed, int64_t interval, boo
             m_rateWindowCount = 0;
         }
     }
-    const auto cameraTime    = m_cameraTime.load();
-    const auto cameraFps     = m_cameraFps.load();
+    readCamera();
+    const auto cameraTime    = m_cameraReport.m_received;
+    const auto cameraFps     = m_cameraReport.m_fps;
     const auto referenceTime = m_now();
     const bool camera = cameraTime > 0 && referenceTime >= cameraTime && referenceTime - cameraTime < 5000000000LL &&
                         cameraFps >= m_minRate && cameraFps <= m_maxRate;
@@ -1164,6 +1187,7 @@ inline int dmSyncopation::appLogic()
         std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
         if( lock.owns_lock() )
         {
+            readCamera();
             if( m_enabled && m_lastMain && m_now() - m_lastMain > int64_t( 2e9 / m_minRate ) )
             {
                 invalidate( "main timeout", Fault::primary );
@@ -1202,7 +1226,7 @@ inline int dmSyncopation::appLogic()
                                                   "faultIntervalUs",  "faultPeriodUs",
                                                   "faultResidualUs" };
             const std::vector<double>      values{ 1e9 / m_period,
-                                              m_cameraFps.load(),
+                                              m_cameraReport.m_fps,
                                               m_requested * 1e9 / m_period,
                                               m_deliveredHz,
                                               double( m_delivered ),
@@ -1230,10 +1254,11 @@ inline int dmSyncopation::appLogic()
                                               m_lastPrimaryInterval / 1000.0,
                                               double( m_lastOutputDelta ),
                                               m_lastFaultNs ? ( now - m_lastFaultNs ) / 1e9 : -1,
-                                              m_cameraJitterUs,
-                                              m_cameraMinUs,
-                                              m_cameraMaxUs,
-                                              m_cameraTime > 0 ? ( now - m_cameraTime ) / 1e9 : -1,
+                                              m_cameraReport.m_jitterUs,
+                                              m_cameraReport.m_minUs,
+                                              m_cameraReport.m_maxUs,
+                                              m_cameraReport.m_received > 0 ? ( now - m_cameraReport.m_received ) / 1e9
+                                                                                 : -1,
                                               m_measuredPeriod > 0 ? 1e9 / m_measuredPeriod : 0,
                                               m_faultInterval / 1000.0,
                                               m_faultPeriod / 1000.0,
@@ -1400,7 +1425,7 @@ INDI_SETCALLBACK_DEFN( dmSyncopation, m_indiP_camera )( const pcf::IndiProperty 
     }
     if( values[2] >= 0 && values[3] >= 0 && values[2] > values[3] )
         return -1;
-    std::lock_guard<std::mutex> lock( m_cycleMutex );
+    std::lock_guard<std::mutex> lock( m_cameraMutex );
     m_cameraFps      = values[0];
     m_cameraTime     = m_now();
     m_cameraJitterUs = values[1] >= 0 ? values[1] * 1e6 : -1;

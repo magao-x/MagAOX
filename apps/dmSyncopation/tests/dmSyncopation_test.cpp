@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <limits>
 
 namespace libXWCTest
@@ -32,7 +33,9 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_cameraJitterUs;
     using dmSyncopation::m_cameraMaxUs;
     using dmSyncopation::m_cameraMinUs;
+    using dmSyncopation::m_cameraMutex;
     using dmSyncopation::m_cameraProperty;
+    using dmSyncopation::m_cameraReport;
     using dmSyncopation::m_cameraTime;
     using dmSyncopation::m_clean;
     using dmSyncopation::m_combined;
@@ -40,6 +43,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_copiedLate;
     using dmSyncopation::m_copyMax;
     using dmSyncopation::m_copyStarted;
+    using dmSyncopation::m_cycleMutex;
     using dmSyncopation::m_delivered;
     using dmSyncopation::m_destinations;
     using dmSyncopation::m_enabled;
@@ -75,6 +79,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_timing;
     using dmSyncopation::m_wait;
     using dmSyncopation::missedStep;
+    using dmSyncopation::readCamera;
     using dmSyncopation::snapshot;
     using dmSyncopation::updatePeriod;
     using dmSyncopation::waitUntil;
@@ -979,6 +984,98 @@ TEST_CASE( "syncopation consumes measured camera acquisition reports", "[dmSynco
         REQUIRE( app.setCallBack_m_indiP_camera( packet ) == 0 );
         REQUIRE( app.m_cameraFps.load() == 1750 );
     }
+}
+
+/// Accept an INDI acquisition report while a timed cycle owns its scheduling mutex.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation camera callback does not wait for a timed cycle", "[dmSyncopation][camera][regression]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::setCallBack_m_indiP_camera(pcf::IndiProperty());
+    #endif
+    // clang-format on
+    Harness app;
+    Clock::app                          = nullptr;
+    Clock::time                         = 1000000000;
+    app.m_now                           = Clock::now;
+    auto                         packet = cameraTiming( 2000 );
+    std::unique_lock<std::mutex> cycle( app.m_cycleMutex );
+    auto       response  = std::async( std::launch::async, [&]() { return app.setCallBack_m_indiP_camera( packet ); } );
+    const auto completed = response.wait_for( std::chrono::milliseconds( 500 ) );
+    cycle.unlock(); // Release even with the old blocking callback before checking or joining the worker.
+    const int result = response.get();
+    REQUIRE( completed == std::future_status::ready );
+    REQUIRE( result == 0 );
+    REQUIRE( app.m_cameraFps.load() == 2000 );
+    REQUIRE( app.m_cameraTime.load() == 1000000100 );
+    REQUIRE( app.m_cameraJitterUs == Approx( 1.234 ) );
+    REQUIRE( app.m_cameraMinUs == Approx( 490 ) );
+    REQUIRE( app.m_cameraMaxUs == Approx( 510 ) );
+}
+
+/// Keep a coherent cached acquisition report if its mailbox is busy and consume the next report without refreshing its
+/// age.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation timed cycle never waits for the camera mailbox", "[dmSyncopation][camera][regression]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::readCamera();
+    dmSyncopation::updatePeriod(0, 0, true);
+    #endif
+    // clang-format on
+    Harness app;
+    Clock::app  = nullptr;
+    Clock::time = 1000000000;
+    app.m_now   = Clock::now;
+    REQUIRE( app.setCallBack_m_indiP_camera( cameraTiming( 2000 ) ) == 0 );
+    app.readCamera();
+    const auto cached = app.m_cameraReport;
+    REQUIRE( cached.m_fps == 2000 );
+    REQUIRE( cached.m_received == 1000000100 );
+    REQUIRE( cached.m_jitterUs == Approx( 1.234 ) );
+    REQUIRE( cached.m_minUs == Approx( 490 ) );
+    REQUIRE( cached.m_maxUs == Approx( 510 ) );
+
+    Clock::time          = 2000000000;
+    auto packet          = cameraTiming( 1600 );
+    packet["acq_jitter"] = 2e-6;
+    packet["acq_min"]    = 600e-6;
+    packet["acq_max"]    = 650e-6;
+    REQUIRE( app.setCallBack_m_indiP_camera( packet ) == 0 );
+    const int64_t                received = app.m_cameraTime.load();
+    std::unique_lock<std::mutex> mailbox( app.m_cameraMutex );
+    auto                         response  = std::async( std::launch::async,
+                                [&]()
+                                {
+                                    std::lock_guard<std::mutex> cycle( app.m_cycleMutex );
+                                    app.readCamera();
+                                    app.updatePeriod( 2000000200, 0, true );
+                                } );
+    const auto                   completed = response.wait_for( std::chrono::milliseconds( 500 ) );
+    mailbox.unlock(); // Release before assertions or joining so a blocking implementation cannot hang the suite.
+    response.get();
+    REQUIRE( completed == std::future_status::ready );
+    REQUIRE( app.m_cameraReport.m_fps == cached.m_fps );
+    REQUIRE( app.m_cameraReport.m_received == cached.m_received );
+    REQUIRE( app.m_cameraReport.m_jitterUs == cached.m_jitterUs );
+    REQUIRE( app.m_cameraReport.m_minUs == cached.m_minUs );
+    REQUIRE( app.m_cameraReport.m_maxUs == cached.m_maxUs );
+    REQUIRE( app.m_period == 500000 );
+    REQUIRE( std::string( app.m_periodSource ) == "camera acquisition" );
+
+    Clock::time += 1000000;
+    app.readCamera();
+    REQUIRE( app.m_cameraReport.m_fps == 1600 );
+    REQUIRE( app.m_cameraReport.m_received == received );
+    REQUIRE( app.m_cameraReport.m_received < Clock::time );
+    REQUIRE( app.m_cameraReport.m_jitterUs == Approx( 2 ) );
+    REQUIRE( app.m_cameraReport.m_minUs == Approx( 600 ) );
+    REQUIRE( app.m_cameraReport.m_maxUs == Approx( 650 ) );
+    app.updatePeriod( Clock::time, 0, true );
+    REQUIRE( app.m_period == 625000 );
+    REQUIRE( std::string( app.m_periodSource ) == "camera acquisition" );
 }
 
 /// Use the acquisition period as a stable reference without learning callback-to-callback phase jitter.
