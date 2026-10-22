@@ -369,7 +369,7 @@ template<class parentT, class logFileT>
 int logManager<parentT, logFileT>::setupConfig( mx::app::appConfigurator & config )
 {
    config.add(m_configSection+".logDir","L", "logDir",mx::app::argType::Required, m_configSection, "logDir", false, "string", "The directory for log files");
-   config.add(m_configSection+".logExt","", "logExt",mx::app::argType::Required, m_configSection, "logExt", false, "string", "The extension for log files");
+   config.add(m_configSection+".logExt","", "logExt",mx::app::argType::Required, m_configSection, "logExt", false, "string", "The base extension for log files (e.g. binlog). Don't set a value ending in \"2\" for non-v2 entries.");
    config.add(m_configSection+".maxLogSize","", "maxLogSize",mx::app::argType::Required, m_configSection, "maxLogSize", false, "string", "The maximum size of log files");
    config.add(m_configSection+".maxLogTime","", "maxLogTime",mx::app::argType::Required, m_configSection, "maxLogTime", false, "unsigned", "The maximum time span of log files in minutes. 0 disables time-based rotation.");
    config.add(m_configSection+".writePause","", "writePause",mx::app::argType::Required, m_configSection, "writePause", false, "unsigned long", "The log thread pause time in ns");

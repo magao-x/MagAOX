@@ -16,12 +16,15 @@ using namespace mx::sys::tscomp;
 
 #include <mx/ioutils/fileUtils.hpp>
 
+#include <limits>
 #include <vector>
 #include <map>
+#include <set>
 
 #include <flatlogs/flatlogs.hpp>
 #include "../file/stdFileName.hpp"
 #include "generated/logCodes.hpp"
+#include "logExtensions.hpp"
 
 #ifndef DEBUG_CRUMB
     #ifdef DEBUG
@@ -54,80 +57,183 @@ inline bool logMapPriorityValid( flatlogs::logPrioT prio /**< [in] priority valu
            prio == flatlogs::logPrio::LOG_TELEM;
 }
 
-/// Check whether a flatlog entry's header and claimed size fit in the loaded buffer.
-inline bool logMapEntryExtentValid( size_t &totalSize, /**< [out] total entry size claimed by the header */
-                                    char   *buffer,    /**< [in] candidate flatlog entry */
-                                    char   *bufferEnd  /**< [in] one past the loaded buffer */
-)
+/// Check if log type of given event code is known.
+inline bool logMapEventCodeKnown( flatlogs::eventCodeT ev /**< [in] event code to check */ )
 {
-    totalSize = 0;
-    if( buffer == nullptr || bufferEnd == nullptr || buffer >= bufferEnd )
-    {
-        return false;
-    }
-
-    size_t remaining = bufferEnd - buffer;
-    if( remaining < static_cast<size_t>( flatlogs::logHeader::minHeadSize ) )
-    {
-        return false;
-    }
-
-    size_t headerSize = flatlogs::logHeader::headerSize( buffer );
-    if( headerSize == 0 || headerSize > remaining )
-    {
-        return false;
-    }
-
-    totalSize = flatlogs::logHeader::totalSize( buffer );
-    return totalSize > 0 && totalSize <= remaining;
+    return eventCodeName( ev ) != "unknown event code";
 }
 
-/// Check whether a flatlog entry has a sane envelope for length-chain traversal.
-inline bool logMapEntrySane( size_t              &totalSize, /**< [out] total entry size claimed by the header */
-                             char                *buffer,    /**< [in] candidate flatlog entry */
-                             char                *bufferEnd, /**< [in] one past the loaded buffer */
-                             flatlogs::timespecX *minTs = 0  /**< [in] optional minimum plausible timestamp */
-)
+/// Result of integrity check on a log entry.
+/** Meaning for each version:
+ * - v2: \ref verified if the checksum matches, \ref failedChecksum if not, and \ref failedStructure if the entry
+ *   doesn't fit in the file or its version byte is wrong.
+ * - v1: since v1 has no checksum, \ref notChecked if the entry fits, its priority is a defined one and its time 
+ *   is not before the previous entry's in the same file. Otherwise \ref failedStructure.
+ *
+ * Unknown event codes aren't included here.
+ */
+enum class logIntegrity : uint8_t
 {
-    if( !logMapEntryExtentValid( totalSize, buffer, bufferEnd ) )
+    verified,        ///< v2: the checksum matches, so the bytes are as they were written.
+    failedChecksum,  ///< v2: the entry fits, but its checksum doesn't match.
+    notChecked,      ///< v1: passed the plausibility checks but there is no checksum to check.
+    failedStructure  ///< The entry doesn't fit, has the wrong version byte, or, for v1, fails the plausibility checks.
+};
+
+/// Map integrity result to string.
+/**
+ * \returns "verified", "not checked", "structure" or "checksum".
+ */
+inline const char *logIntegrityName( logIntegrity integrity /**< [in] the result to name */ )
+{
+    switch( integrity )
     {
-        return false;
+    case logIntegrity::verified:
+        return "verified";
+    case logIntegrity::failedChecksum:
+        return "checksum";
+    case logIntegrity::notChecked:
+        return "not checked";
+    case logIntegrity::failedStructure:
+        return "structure";
     }
 
-    if( !logMapPriorityValid( flatlogs::logHeader::logLevel( buffer ) ) )
-    {
-        return false;
-    }
-
-    if( eventCodeName( flatlogs::logHeader::eventCode( buffer ) ) == "unknown event code" )
-    {
-        return false;
-    }
-
-    return minTs == 0 || !( flatlogs::logHeader::timespec( buffer ) < *minTs );
+    return "unknown";
 }
 
-/// Byte-scan forward to the next sane flatlog envelope.
-inline char *logMapResync( char                *buffer,    /**< [in] failed flatlog entry */
-                           char                *bufferEnd, /**< [in] one past the loaded buffer */
-                           flatlogs::timespecX *minTs = 0  /**< [in] optional minimum plausible timestamp */
+/// The outcome of reading one entry while walking through a file.
+struct logStep
+{
+    flatlogs::parsedEntry m_entry; ///< The decoded entry.
+
+    logIntegrity m_integrity{ logIntegrity::failedStructure }; ///< Integrity check result.
+
+    /// Check if the entry can be used.
+    /**
+     * \returns true if the verdict is \ref logIntegrity::verified or \ref logIntegrity::notChecked.
+     */
+    bool usable() const;
+};
+
+inline bool logStep::usable() const
+{
+    return m_integrity == logIntegrity::verified || m_integrity == logIntegrity::notChecked;
+}
+
+/// Read and check integrity of entry at one position in a file's bytes.
+/** Both versions check integrity here.
+ * Checking if the log type is known is not included here and is left to the callers that need 
+ * it for efficiency reasons.
+ */
+inline void logMapStepEntry( logStep &step,                        /**< [out] the entry with its integrity result */
+                             const char *fileBytes,                /**< [in] the start of the file's bytes */
+                             size_t fileSize,                      /**< [in] the number of bytes in the file */
+                             size_t pos,                           /**< [in] offset of the entry in the file */
+                             flatlogs::logVersionT version,        /**< [in] the file's format version */
+                             const flatlogs::timespecX *prevTs     /**< [in] time of the previous usable entry in
+                                                                             this file, or null if none */
 )
 {
-    if( buffer == nullptr || bufferEnd == nullptr )
+    step.m_integrity = logIntegrity::failedStructure;
+
+    if( fileBytes == nullptr || pos >= fileSize )
     {
-        return nullptr;
+        step.m_entry = flatlogs::parsedEntry();
+        step.m_entry.version = version;
+        return;
     }
 
-    for( char *candidate = buffer + 1; candidate < bufferEnd; ++candidate )
+    step.m_entry = flatlogs::parseEntry( fileBytes + pos, fileSize - pos, version );
+
+    switch( step.m_entry.status )
     {
-        char                *chain      = candidate;
-        size_t               chainLinks = 0;
-        flatlogs::timespecX  chainMinTs;
-        flatlogs::timespecX *chainMinTsPtr = minTs;
-        while( chain < bufferEnd )
+    case flatlogs::entryStatus::checksumOk:
+        step.m_integrity = logIntegrity::verified;
+        break;
+    case flatlogs::entryStatus::checksumMismatch:
+        step.m_integrity = logIntegrity::failedChecksum;
+        break;
+    case flatlogs::entryStatus::noChecksum:
+    {
+        flatlogs::timespecX ts = step.m_entry.ts;
+        if( !logMapPriorityValid( step.m_entry.prio ) || ( prevTs != nullptr && ts < *prevTs ) )
         {
-            size_t totalSize = 0;
-            if( !logMapEntrySane( totalSize, chain, bufferEnd, chainMinTsPtr ) )
+            step.m_integrity = logIntegrity::failedStructure;
+        }
+        else
+        {
+            step.m_integrity = logIntegrity::notChecked;
+        }
+        break;
+    }
+    default:
+        step.m_integrity = logIntegrity::failedStructure;
+        break;
+    }
+}
+
+/// Check whether a v1 entry is plausible enough to be part of a restart chain after damage.
+/** Stricter than \ref logMapStepEntry: the event code must also be known, so that damaged bytes that happen to look
+ * like an entry of an unknown type are not chosen as the place to restart.
+ *
+ * \returns true if the entry can be a link in the chain.
+ */
+inline bool logMapV1RestartLink( flatlogs::parsedEntry &entry,         /**< [out] the decoded entry */
+                                 const char *fileBytes,                /**< [in] the start of the file's bytes */
+                                 size_t fileSize,                      /**< [in] the number of bytes in the file */
+                                 size_t pos,                           /**< [in] offset of the entry in the file */
+                                 const flatlogs::timespecX *minTs      /**< [in] earliest plausible time, or null */
+)
+{
+    entry = flatlogs::logHeaderV1::parse( fileBytes + pos, fileSize - pos );
+
+    if( entry.status != flatlogs::entryStatus::noChecksum )
+    {
+        return false;
+    }
+
+    if( !logMapPriorityValid( entry.prio ) )
+    {
+        return false;
+    }
+
+    if( !logMapEventCodeKnown( entry.eventCode ) )
+    {
+        return false;
+    }
+
+    flatlogs::timespecX ts = entry.ts;
+    return minTs == nullptr || !( ts < *minTs );
+}
+
+/// Within one v1 file, byte-scan forward to the next place where a chain of plausible entries starts.
+/** An entry is accepted when three plausible entries follow each other from it, or when the plausible entries
+ * from it run exactly to the end of the file.
+ * Never reads past the end of the file.
+ *
+ * \returns the offset of the place to restart, or flatlogs::entryNotFound if there is none in this file.
+ */
+inline size_t logMapResyncV1( const char *fileBytes,                /**< [in] the start of the file's bytes */
+                              size_t fileSize,                      /**< [in] the number of bytes in the file */
+                              size_t failedAt,                      /**< [in] offset of the failed entry */
+                              const flatlogs::timespecX *minTs      /**< [in] earliest plausible time, or null */
+)
+{
+    if( fileBytes == nullptr )
+    {
+        return flatlogs::entryNotFound;
+    }
+
+    for( size_t candidate = failedAt + 1; candidate < fileSize; ++candidate )
+    {
+        size_t chain = candidate;
+        size_t chainLinks = 0;
+        flatlogs::timespecX chainMinTs;
+        const flatlogs::timespecX *chainMinTsPtr = minTs;
+        while( chain < fileSize )
+        {
+            flatlogs::parsedEntry entry;
+            if( !logMapV1RestartLink( entry, fileBytes, fileSize, chain, chainMinTsPtr ) )
             {
                 break;
             }
@@ -138,18 +244,191 @@ inline char *logMapResync( char                *buffer,    /**< [in] failed flat
                 return candidate;
             }
 
-            chainMinTs    = flatlogs::logHeader::timespec( chain );
+            chainMinTs = entry.ts;
             chainMinTsPtr = &chainMinTs;
-            chain += totalSize;
+            chain += entry.entrySize;
         }
 
-        if( chain == bufferEnd && chainLinks > 0 )
+        if( chain == fileSize && chainLinks > 0 )
         {
             return candidate;
         }
     }
 
-    return nullptr;
+    return flatlogs::entryNotFound;
+}
+
+/// Find where to carry on after a failed entry.
+/** v2 searches for the next entry that passes its checksum.
+ * v1 searches for a chain of plausible entries.
+ *
+ * \returns the offset of the place to carry on, or flatlogs::entryNotFound if none in this file.
+ */
+inline size_t logMapRecover( const char *fileBytes,                /**< [in] the start of the file's bytes */
+                             size_t fileSize,                      /**< [in] the number of bytes in the file */
+                             size_t failedAt,                      /**< [in] offset of the failed entry */
+                             flatlogs::logVersionT version,        /**< [in] the file's version */
+                             const logStep &failed,                /**< [in] the result of reading the failed entry */
+                             const flatlogs::timespecX *prevTs     /**< [in] time of the previous usable entry in
+                                                                             this file, or null if none */
+)
+{
+    if( version == flatlogs::logVersion1 )
+    {
+        return logMapResyncV1( fileBytes, fileSize, failedAt, prevTs );
+    }
+
+    if( version == flatlogs::logVersion2 )
+    {
+        return flatlogs::findNextEntryV2( fileBytes, fileSize, failedAt, failed.m_entry );
+    }
+
+    return flatlogs::entryNotFound;
+}
+
+/// Result of stop during walk through file.
+enum class logWalkEvent
+{
+    entry,  ///< A usable entry.
+    damage, ///< An entry that failed.
+    end     ///< The end of the file.
+};
+
+/// Walks through the entries of one file, recovering from damage.
+/** Each file is walked by the rules of its own version.
+ */
+struct logFileWalk
+{
+    const char *m_bytes{ nullptr }; ///< The start of the file's bytes. Not owned.
+
+    size_t m_size{ 0 }; ///< The number of bytes in the file.
+
+    flatlogs::logVersionT m_version{ flatlogs::logVersion1 }; ///< The file's version.
+
+    size_t m_pos{ 0 }; ///< Offset where the next entry is expected.
+
+    bool m_havePrevTs{ false }; ///< True once a usable entry has been found in this walk.
+
+    flatlogs::timespecX m_prevTs; ///< Time of the previous usable entry, valid if m_havePrevTs is true.
+
+    /// Construct a walk that has nothing to walk.
+    logFileWalk();
+
+    /// Construct a walk through a file.
+    logFileWalk( const char *bytes,               /**< [in] the start of the file's bytes */
+                 size_t size,                     /**< [in] the number of bytes in the file */
+                 flatlogs::logVersionT version,   /**< [in] the file's version */
+                 size_t pos = 0                   /**< [in] offset of the first entry to read */
+    );
+
+    /// Move to the next entry and evaluate.
+    /**
+     * \returns logWalkEvent::entry if a usable entry was read; the walk has moved past it.
+     * \returns logWalkEvent::damage if the entry failed; the walk has moved to \p resumeAt.
+     * \returns logWalkEvent::end at the end of the file; \p step, \p at and \p resumeAt are unchanged.
+     */
+    logWalkEvent next( logStep &step,    /**< [out] the entry that was read, with its evaluation result */
+                       size_t &at,       /**< [out] offset of that entry in the file */
+                       size_t &resumeAt  /**< [out] offset where the walk carries on, or flatlogs::entryNotFound
+                                                   if a damaged entry left nothing usable in the file */
+    );
+};
+
+inline logFileWalk::logFileWalk()
+{
+}
+
+inline logFileWalk::logFileWalk( const char *bytes, size_t size, flatlogs::logVersionT version, size_t pos )
+    : m_bytes( bytes ), m_size( size ), m_version( version ), m_pos( pos )
+{
+}
+
+inline logWalkEvent logFileWalk::next( logStep &step, size_t &at, size_t &resumeAt )
+{
+    if( m_bytes == nullptr || m_pos >= m_size )
+    {
+        return logWalkEvent::end;
+    }
+
+    const flatlogs::timespecX *prevTs = m_havePrevTs ? &m_prevTs : nullptr;
+
+    at = m_pos;
+    logMapStepEntry( step, m_bytes, m_size, m_pos, m_version, prevTs );
+
+    if( step.usable() )
+    {
+        m_prevTs = step.m_entry.ts;
+        m_havePrevTs = true;
+        m_pos += step.m_entry.entrySize;
+        resumeAt = m_pos;
+        return logWalkEvent::entry;
+    }
+
+    resumeAt = logMapRecover( m_bytes, m_size, at, m_version, step, prevTs );
+    m_pos = ( resumeAt == flatlogs::entryNotFound ) ? m_size : resumeAt;
+
+    return logWalkEvent::damage;
+}
+
+/// A log entry found by a lookup.
+/** It holds its own copy of the entry and the copy stays valid whatever is loaded afterwards.
+ */
+struct logEntryRecord
+{
+    /// A copy of the whole entry as stored in the file. Empty if no entry is held.
+    /** The padding places the message on an 8-byte boundary (the vector's storage is at least that aligned), so log
+     * types reading it as a flatbuffer don't read unaligned.
+     */
+    std::vector<char> m_bytes;
+
+    size_t m_entrySize{ 0 }; ///< The size of the entry, without the padding.
+
+    size_t m_messageOffset{ 0 }; ///< Where the message starts in m_bytes.
+
+    flatlogs::logVersionT m_version{ 0 }; ///< The version the entry was read as.
+
+    flatlogs::logPrioT m_prio{ 0 }; ///< The entry's priority.
+
+    flatlogs::eventCodeT m_eventCode{ 0 }; ///< The entry's event code.
+
+    flatlogs::timespecX m_ts; ///< The entry's timestamp.
+
+    flatlogs::msgLenT m_msgLen{ 0 }; ///< The length of the entry's message.
+
+    logIntegrity m_integrity{ logIntegrity::failedStructure }; ///< Entry's integrity result.
+
+    bool m_unsupportedType{ false }; ///< True if this build doesn't know the entry's event code.
+
+    std::string m_sourceFile; ///< Full path of the file the entry came from.
+
+    size_t m_sourceOffset{ std::numeric_limits<size_t>::max() }; ///< Byte offset of the entry in its file.
+
+    /// Check whether this record holds no entry.
+    /**
+     * \returns true if no entry has been copied into this record, as when a lookup finds nothing.
+     */
+    bool empty() const;
+
+    /// Retrieve entry's message to pass to a log type.
+    /**
+     * \returns a pointer to the message in m_bytes, or nullptr if no entry is held.
+     */
+    void *message();
+};
+
+inline bool logEntryRecord::empty() const
+{
+    return m_bytes.empty();
+}
+
+inline void *logEntryRecord::message()
+{
+    if( m_bytes.empty() )
+    {
+        return nullptr;
+    }
+
+    return m_bytes.data() + m_messageOffset;
 }
 
 #ifdef XWCTEST_NAMESPACE
@@ -165,9 +444,10 @@ struct logInMemory
     /// Source file range in the loaded log buffer.
     struct loadedFile
     {
-        size_t      m_begin{ 0 }; ///< First byte offset from this source file.
-        size_t      m_end{ 0 };   ///< One past the last byte offset from this source file.
-        std::string m_name;       ///< Full source file path.
+        size_t                m_begin{ 0 }; ///< First byte offset from this source file.
+        size_t                m_end{ 0 };   ///< One past the last byte offset from this source file.
+        std::string           m_name;       ///< Full source file path.
+        flatlogs::logVersionT m_version{ flatlogs::logVersion1 }; ///< Version this file is read as.
     };
 
     std::vector<char> m_memory; ///< The buffer holding the log data.
@@ -181,14 +461,80 @@ struct logInMemory
 
     std::string m_reportPrefix; ///< Optional prefix for user-facing recoverable log parsing reports.
 
+    /// Full paths of files that failed to load.
+    /** A file that failed to load is not read or reported again to avoid redundancy.
+     * This includes failures contingent on what is already loaded (overlapping files, or a file that would
+     * go in the middle).
+     */
+    std::set<std::string> m_rejectedFiles;
+
     /// Load one flatlog file into memory.
+    /** On load, entries are read and evaluated. Damaged entries are reported and skipped.
+     * Entries of a log type this build doesn't know are reported once per file and event code.
+     *
+     * \returns 0 on success
+     * \returns -1 if the file can't be read, has no usable entry, can't be placed among the loaded files, or failed
+     *          to load before
+     */
     int loadFile( file::stdFileName<verboseT> const &lfn /**< [in] standard file name to load */ );
 
-    /// Get the source file name for a log entry pointer.
-    std::string sourceFile( char *log /**< [in] pointer to a log entry in m_memory */ ) const;
+    /// Reject file that previously failed to load.
+    /**
+     * \returns -1, for loadFile to return.
+     */
+    int rejectFile( file::stdFileName<verboseT> const &lfn /**< [in] the file that failed to load */ );
 
-    /// Get the byte offset in the source file for a log entry pointer.
-    size_t sourceOffset( char *log /**< [in] pointer to a log entry in m_memory */ ) const;
+    /// Start a walk through loaded file.
+    /**
+     * \returns a walk through the file's bytes in m_memory.
+     */
+    logFileWalk fileWalk( size_t file,      /**< [in] index of the file in m_loadedFiles */
+                          size_t offset = 0 /**< [in] offset in the file of the first entry to read */
+    ) const;
+
+    /// Copy a usable entry found by a walk into a record.
+    /**
+     * \returns the record holding the entry.
+     */
+    logEntryRecord record( size_t file,           /**< [in] index of the entry's file in m_loadedFiles */
+                           size_t offset,         /**< [in] offset of the entry in its file */
+                           const logStep &step    /**< [in] the entry as read by the walk */
+    ) const;
+
+    /// Find a loaded file by its full path.
+    /**
+     * \returns the index of the file in m_loadedFiles or m_loadedFiles.size() if file not loaded.
+     */
+    size_t findFile( const std::string &name /**< [in] full path of the file */ ) const;
+};
+
+/// Structure to walk in order the usable entries of all loaded files of one app.
+/** Damaged entries are skipped silently (reported when file was loaded).
+ */
+struct logMemoryWalk
+{
+    const logInMemory *m_lim{ nullptr }; ///< The loaded files being walked. Not owned.
+
+    size_t m_file{ 0 }; ///< Index in m_lim->m_loadedFiles of the file being walked.
+
+    logFileWalk m_walk; ///< The walk through the current file.
+
+    /// Construct a walk starting at an entry of one loaded file.
+    logMemoryWalk( const logInMemory &lim,        /**< [in] the loaded files to walk */
+                   size_t file = 0,               /**< [in] index of the file to start in */
+                   size_t offset = 0              /**< [in] offset in that file of the first entry to read */
+    );
+
+    /// Move to the next usable entry.
+    /** At the end of each file moves to the next file.
+     *
+     * \returns true if a usable entry was found
+     * \returns false at the end of the last loaded file
+     */
+    bool next( logStep &step,  /**< [out] the entry that was read, with its verdict */
+               size_t &file,   /**< [out] index of the entry's file in m_loadedFiles */
+               size_t &offset  /**< [out] offset of the entry in its file */
+    );
 };
 
 /// Map of log entries by application name, mapping both to files and to loaded buffers.
@@ -236,37 +582,41 @@ struct logMap
 
     /// Get log file names in a directory and distribute them into the map by app-name
     /** Finding no logs is not reported as an error (no exception is thrown).  You must check
-     *  the size of m_appToFileMap to check if any files were found.
-     *
+     *  the size of m_appToFileMap to check if any files were found.  Reporting that is left to the caller.
+     *  Files of both versions are found.
      */
     mx::error_t loadAppToFileMap( const std::string &dir,        /**< [in] the directory to search for files
                                                                            (contains the dev/YYYY_MM_DD subdirs)*/
                                   const std::string  &dev,       ///< [in] the device name to search for logs of
-                                  const std::string  &ext,       ///< [in] the extension to search for
+                                  const std::string  &ext,       ///< [in] the base extension to search for
                                   const stdFileNameT &firstFile, ///< [in] the first file that needs coverage
                                   const stdFileNameT &lastFile   ///< [in] the last file that needs coverage
     );
 
-    /// Get the log for an event code which is the first prior to the supplied time
-    int getPriorLog( char                      *&logBefore, ///< [out] pointer to the first byte of the prior log entry
-                     const std::string          &appName,   ///< [in] the name of the app specifying which log to search
-                     const flatlogs::eventCodeT &ev,        ///< [in] the event code to search for
-                     const flatlogs::timespecX  &ts,        ///< [in] the timestamp to be prior to
-                     char                       *hint = 0   /**< [in] [optional] a hint specifying
-                                                                      where to start searching.  If null
-                                                                      search starts at beginning.*/
+    /// Get the last entry with an event code at or before a time.
+    /** Loads files as needed. The result holds its own copy of the entry.
+     *
+     * The search stops at the first entry later than \p ts. v2 entries are not checked for time order, so, if the clock
+     * stepped backwards, a verified v2 entry written after that is not found.
+     *
+     * \returns 0 on success
+     * \returns -1 if no such entry is loaded
+     */
+    int getPriorEntry( logEntryRecord &before,              /**< [out] the entry found */
+                       const std::string &appName,          /**< [in] the name of the app whose logs are searched */
+                       const flatlogs::eventCodeT &ev,      /**< [in] the event code to search for */
+                       const flatlogs::timespecX &ts        /**< [in] the time being compared against */
     );
 
-    /// Get the next log with the same event code which is after the supplied time
-    int getNextLog( char             *&logAfter,   ///< [out] pointer to the first byte of the prior log entry
-                    char              *logCurrent, ///< [in] The log to start from
-                    const std::string &appName     ///< [in] the name of the app specifying which log to search
-    );
-
-    /// Get the nearest loaded logs around the current search point.
-    int getNearestLogs( flatlogs::bufferPtrT &logBefore, /**< [out] log before the search time */
-                        flatlogs::bufferPtrT &logAfter,  /**< [out] log after the search time */
-                        const std::string    &appName    /**< [in] app/device name to search */
+    /// Get the next entry with the same event code as current entry.
+    /**
+     * \returns 0 on success
+     * \returns 1 if there is no later entry with that event code in the loaded files
+     * \returns -1 if \p current can't be found in the loaded files
+     */
+    int getNextEntry( logEntryRecord &after,         /**< [out] the entry found */
+                      const logEntryRecord &current, /**< [in] the entry to start from */
+                      const std::string &appName     /**< [in] the name of the app whose logs are searched */
     );
 
     /// Load files that cover a requested timestamp for an app.
@@ -421,7 +771,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
             continue;
         }
 
-        mx_error_check( mx::ioutils::getFileNames( tmp_flist, basedir + subdir.path(), dev, "", ext ) );
+        mx_error_check( listLogFiles<verboseT>( tmp_flist, basedir + subdir.path(), dev, ext ) );
 
         if( tmp_flist.size() == 0 ) // this subdir has no files in it so go around
         {
@@ -509,7 +859,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
                 continue;
             }
 
-            mx_error_check( mx::ioutils::getFileNames( tmp_flist, basedir + subdir.path(), dev, "", ext ) );
+            mx_error_check( listLogFiles<verboseT>( tmp_flist, basedir + subdir.path(), dev, ext ) );
 
             if( tmp_flist.size() == 0 ) // this subdir has no files so go ahead
             {
@@ -597,7 +947,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
 
             std::vector<std::string> tmp_flist;
 
-            mx_error_check( mx::ioutils::getFileNames( tmp_flist, basedir + subdir.path(), dev, "", ext ) );
+            mx_error_check( listLogFiles<verboseT>( tmp_flist, basedir + subdir.path(), dev, ext ) );
 
             if( follLogFile_n == static_cast<size_t>( -1 ) )
             {
@@ -638,7 +988,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
 
             std::vector<std::string> tmp_flist;
 
-            mx_error_check( mx::ioutils::getFileNames( tmp_flist, basedir + subdir.path(), dev, "", ext ) );
+            mx_error_check( listLogFiles<verboseT>( tmp_flist, basedir + subdir.path(), dev, ext ) );
 
             mx_error_check( addFileListToFileMap( dev, tmp_flist, prevLogFile_n, tmp_flist.size() ) );
         }
@@ -671,7 +1021,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
 
                 std::vector<std::string> tmp_flist;
 
-                mx_error_check( mx::ioutils::getFileNames( tmp_flist, basedir + subdir.path(), dev, "", ext ) );
+                mx_error_check( listLogFiles<verboseT>( tmp_flist, basedir + subdir.path(), dev, ext ) );
 
                 mx_error_check( addFileListToFileMap( dev, tmp_flist, 0, tmp_flist.size() ) );
 
@@ -703,7 +1053,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
                 return mx::error_report<verboseT>(errc);
             }*/
 
-            mx_error_check( mx::ioutils::getFileNames( tmp_flist, basedir + subdir.path(), dev, "", ext ) );
+            mx_error_check( listLogFiles<verboseT>( tmp_flist, basedir + subdir.path(), dev, ext ) );
 
             if( errc == mx::error_t::noerror )
             {
@@ -738,24 +1088,17 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
 }
 
 template <class verboseT>
-int logMap<verboseT>::getPriorLog( char                      *&logBefore,
-                                   const std::string          &appName,
-                                   const flatlogs::eventCodeT &ev,
-                                   const flatlogs::timespecX  &ts,
-                                   char                       *hint )
+int logMap<verboseT>::getPriorEntry( logEntryRecord             &before,
+                                     const std::string          &appName,
+                                     const flatlogs::eventCodeT &ev,
+                                     const flatlogs::timespecX  &ts )
 {
-    static_cast<void>( hint );
-
-    DEBUG_CRUMB( "" );
-
     if( m_appToFileMap[appName].size() == 0 )
     {
-        DEBUG_CRUMB( "getPriorLog no file map app=" + appName + " ev=" + std::to_string( ev ) +
+        DEBUG_CRUMB( "getPriorEntry no file map app=" + appName + " ev=" + std::to_string( ev ) +
                      " ts=" + logMapDebugTime( ts ) );
         return -1;
     }
-
-    DEBUG_CRUMB( "getPriorLog begin app=" + appName + " ev=" + std::to_string( ev ) + " ts=" + logMapDebugTime( ts ) );
 
     logInMemory &lim = m_appToBufferMap[appName];
 
@@ -763,153 +1106,99 @@ int logMap<verboseT>::getPriorLog( char                      *&logBefore,
     et.time_s += 30;
     if( lim.m_startTime > ts || et < ts )
     {
-        DEBUG_CRUMB( "getPriorLog loading files app=" + appName + " ev=" + std::to_string( ev ) +
+        DEBUG_CRUMB( "getPriorEntry loading files app=" + appName + " ev=" + std::to_string( ev ) +
                      " ts=" + logMapDebugTime( ts ) + " loadedStart=" + logMapDebugTime( lim.m_startTime ) +
                      " loadedEnd=" + logMapDebugTime( lim.m_endTime ) );
 
         if( loadFiles( appName, ts ) < 0 )
         {
-            DEBUG_CRUMB( "getPriorLog loadFiles failed app=" + appName + " ev=" + std::to_string( ev ) +
-                         " ts=" + logMapDebugTime( ts ) );
             return -1;
         }
     }
 
-    if( lim.m_memory.size() == 0 )
+    bool found = false;
+    size_t foundFile = 0;
+    size_t foundOffset = 0;
+    logStep foundStep;
+
+    logMemoryWalk walk( lim );
+    logStep step;
+    size_t file = 0;
+    size_t offset = 0;
+    while( walk.next( step, file, offset ) )
     {
-        DEBUG_CRUMB( "getPriorLog empty memory app=" + appName + " ev=" + std::to_string( ev ) +
-                     " ts=" + logMapDebugTime( ts ) );
-        return -1;
-    }
-
-    char *buffer      = lim.m_memory.data();
-    char *bufferEnd   = lim.m_memory.data() + lim.m_memory.size();
-    char *priorBuffer = nullptr;
-
-    while( buffer < bufferEnd )
-    {
-        size_t               totalSize = 0;
-        flatlogs::timespecX  minTs;
-        flatlogs::timespecX *minTsPtr = nullptr;
-        if( priorBuffer != nullptr )
-        {
-            minTs    = flatlogs::logHeader::timespec( priorBuffer );
-            minTsPtr = &minTs;
-        }
-
-        if( !logMapEntrySane( totalSize, buffer, bufferEnd, minTsPtr ) )
-        {
-            char *resynced = logMapResync( buffer, bufferEnd, minTsPtr );
-            if( resynced != nullptr )
-            {
-                DEBUG_CRUMB( "getPriorLog resync app=" + appName + " ev=" + std::to_string( ev ) +
-                             " offset=" + std::to_string( buffer - lim.m_memory.data() ) +
-                             " resyncOffset=" + std::to_string( resynced - lim.m_memory.data() ) );
-                buffer = resynced;
-                continue;
-            }
-
-            DEBUG_CRUMB( "getPriorLog resync failed app=" + appName + " ev=" + std::to_string( ev ) +
-                         " offset=" + std::to_string( buffer - lim.m_memory.data() ) );
-            break;
-        }
-
-        if( ts < flatlogs::logHeader::timespec( buffer ) )
+        if( ts < step.m_entry.ts )
         {
             break;
         }
 
-        if( flatlogs::logHeader::eventCode( buffer ) == ev )
+        if( step.m_entry.eventCode == ev )
         {
-            priorBuffer = buffer;
+            found = true;
+            foundFile = file;
+            foundOffset = offset;
+            foundStep = step;
         }
-
-        buffer += totalSize;
     }
 
-    if( priorBuffer == nullptr )
+    if( !found )
     {
-        DEBUG_CRUMB( "getPriorLog no prior app=" + appName + " ev=" + std::to_string( ev ) +
+        DEBUG_CRUMB( "getPriorEntry no prior app=" + appName + " ev=" + std::to_string( ev ) +
                      " ts=" + logMapDebugTime( ts ) + " loadedStart=" + logMapDebugTime( lim.m_startTime ) +
-                     " loadedEnd=" + logMapDebugTime( lim.m_endTime ) +
-                     " memoryBytes=" + std::to_string( lim.m_memory.size() ) );
+                     " loadedEnd=" + logMapDebugTime( lim.m_endTime ) );
         return -1;
     }
 
-    logBefore = priorBuffer;
+    before = lim.record( foundFile, foundOffset, foundStep );
 
-    DEBUG_CRUMB( "getPriorLog found app=" + appName + " ev=" + std::to_string( ev ) + " ts=" + logMapDebugTime( ts ) +
-                 " logTs=" + logMapDebugTime( flatlogs::logHeader::timespec( logBefore ) ) );
+    DEBUG_CRUMB( "getPriorEntry found app=" + appName + " ev=" + std::to_string( ev ) + " ts=" + logMapDebugTime( ts ) +
+                 " logTs=" + logMapDebugTime( before.m_ts ) );
 
     return 0;
-} // getPriorLog
+}
 
 template <class verboseT>
-int logMap<verboseT>::getNextLog( char *&logAfter, char *logCurrent, const std::string &appName )
+int logMap<verboseT>::getNextEntry( logEntryRecord &after, const logEntryRecord &current, const std::string &appName )
 {
-    logInMemory &lim = m_appToBufferMap[appName];
-
-    if( logCurrent == nullptr || lim.m_memory.size() == 0 )
+    auto appBuffer = m_appToBufferMap.find( appName );
+    if( appBuffer == m_appToBufferMap.end() || current.empty() )
     {
-        DEBUG_CRUMB( "getNextLog missing current/buffer app=" + appName );
+        DEBUG_CRUMB( "getNextEntry missing current/buffer app=" + appName );
         return -1;
     }
 
-    char *bufferStart = lim.m_memory.data();
-    char *bufferEnd   = lim.m_memory.data() + lim.m_memory.size();
-    if( logCurrent < bufferStart || logCurrent >= bufferEnd )
+    logInMemory &lim = appBuffer->second;
+
+    size_t currentFile = lim.findFile( current.m_sourceFile );
+    if( currentFile >= lim.m_loadedFiles.size() )
     {
-        DEBUG_CRUMB( "getNextLog current outside buffer app=" + appName );
+        DEBUG_CRUMB( "getNextEntry current file not loaded app=" + appName + " file=" + current.m_sourceFile );
         return -1;
     }
 
-    size_t currentSize = flatlogs::logHeader::totalSize( logCurrent );
-    if( currentSize == 0 || logCurrent + currentSize > bufferEnd )
+    // The walk starts by re-reading the current entry.
+    logMemoryWalk walk( lim, currentFile, current.m_sourceOffset );
+    logStep step;
+    size_t file = 0;
+    size_t offset = 0;
+    if( !walk.next( step, file, offset ) || file != currentFile || offset != current.m_sourceOffset )
     {
         std::cerr << "attempt to read invalid log entry, possible log corruption.\n";
         return -1;
     }
 
-    flatlogs::eventCodeT ev     = flatlogs::logHeader::eventCode( logCurrent );
-    char                *buffer = logCurrent + currentSize;
-
-    DEBUG_CRUMB( "getNextLog begin app=" + appName + " ev=" + std::to_string( ev ) +
-                 " currentTs=" + logMapDebugTime( flatlogs::logHeader::timespec( logCurrent ) ) + " loadedStart=" +
-                 logMapDebugTime( lim.m_startTime ) + " loadedEnd=" + logMapDebugTime( lim.m_endTime ) );
-
-    while( buffer < bufferEnd )
+    while( walk.next( step, file, offset ) )
     {
-        size_t              totalSize = 0;
-        flatlogs::timespecX currentTs = flatlogs::logHeader::timespec( logCurrent );
-        if( !logMapEntrySane( totalSize, buffer, bufferEnd, &currentTs ) )
+        if( step.m_entry.eventCode == current.m_eventCode )
         {
-            char *resynced = logMapResync( buffer, bufferEnd, &currentTs );
-            if( resynced != nullptr )
-            {
-                DEBUG_CRUMB( "getNextLog resync app=" + appName + " ev=" + std::to_string( ev ) +
-                             " offset=" + std::to_string( buffer - lim.m_memory.data() ) +
-                             " resyncOffset=" + std::to_string( resynced - lim.m_memory.data() ) );
-                buffer = resynced;
-                continue;
-            }
-
-            DEBUG_CRUMB( "getNextLog resync failed app=" + appName + " ev=" + std::to_string( ev ) +
-                         " offset=" + std::to_string( buffer - lim.m_memory.data() ) );
-            break;
-        }
-
-        if( flatlogs::logHeader::eventCode( buffer ) == ev )
-        {
-            logAfter = buffer;
-            DEBUG_CRUMB( "getNextLog found app=" + appName + " ev=" + std::to_string( ev ) +
-                         " logTs=" + logMapDebugTime( flatlogs::logHeader::timespec( logAfter ) ) );
+            after = lim.record( file, offset, step );
+            DEBUG_CRUMB( "getNextEntry found app=" + appName + " ev=" + std::to_string( current.m_eventCode ) +
+                         " logTs=" + logMapDebugTime( after.m_ts ) );
             return 0;
         }
-
-        buffer += totalSize;
     }
 
-    DEBUG_CRUMB( "getNextLog no next app=" + appName + " ev=" + std::to_string( ev ) +
+    DEBUG_CRUMB( "getNextEntry no next app=" + appName + " ev=" + std::to_string( current.m_eventCode ) +
                  " loadedEnd=" + logMapDebugTime( lim.m_endTime ) );
     return 1;
 }

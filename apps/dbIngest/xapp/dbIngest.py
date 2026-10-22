@@ -112,6 +112,9 @@ def _run_logdump_thread(logger_name, logdump_dir, logdump_args, name, message_qu
                 return
             if len(glob.glob(glob_pattern)):
                 log.exception(f"Exception in log/telem follower for {name}")
+                # Don't restart immediately, the file might not have advanced yet and
+                # logdump may stop again on the same damage.
+                time.sleep(RETRY_WAIT_SEC)
             else:
                 log.info(f"No files found for {name}, waiting for them to appear")
             while not len(glob.glob(glob_pattern)):

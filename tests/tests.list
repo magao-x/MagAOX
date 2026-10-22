@@ -136,6 +136,7 @@
 ../libMagAOX/tty/tests/ttyIOUtils_test
 
 ../utils/logsurgeon/tests/logsurgeon_config_test
+../utils/logsurgeon/tests/logsurgeon_test
 
 ../utils/tests/cursesINDI_test
 ../utils/tests/logdump_test
