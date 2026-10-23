@@ -216,10 +216,15 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `recovery.consecutiveMisses` | 3 | Consecutive original unsafe/missed events before reacquisition. |
 | `feedback.gain` | 0.1 | Independent per-event wait-integrator gain, 0–1. |
 | `feedback.maxAdvanceUs` | 20 | Maximum wait correction; step-0 advance is nonnegative and starts at this value after a feedback reset. |
-| `diagnostics.windowSec` | 2 | Elapsed-time window for independent primary and combined-stream statistics; zero disables both collectors. |
-| `diagnostics.maxEvents` | 20000 | Queue and retained-event cap for each observer; zero disables both. Storage is allocated before the monitors start. |
-| `diagnostics.excursionUs` | 20 | Primary interval-pair classification threshold around the diagnostic window median, in microseconds; zero disables only the pair analysis. Independent of scheduler timing bounds. |
+| `diagnostics.windowSec` | 2 | Elapsed-time window for all independent observers; zero disables collection. |
+| `diagnostics.maxEvents` | 20000 | Queue and retained-event cap for each observer; zero disables collection. Storage is allocated before the monitors start. |
+| `diagnostics.excursionUs` | 20 | Acquisition/primary excursion threshold around each diagnostic window median, in microseconds; zero disables pair/conditional classification. Ordinary trace timing remains enabled. Independent of scheduler timing bounds. |
 | `diagnostics.combiner` | true | Start an independent combined-output observer for cadence and process-trace timing. Scheduling can remain disabled. |
+| `diagnostics.camera` | true | Start an independent metadata-only camera observer for acquisition timestamp intervals. |
+| `diagnostics.pipeline` | true | Capture up to ten existing upstream process-trace rows at primary observation. |
+| `cameraMonitor.shmimName` | `camwfs` | Camera image whose `atime` is analyzed. Independent of the `tracking.cameraDevice` INDI subscription. Semaphore selection is automatic by default. |
+| `cameraMonitor.threadPrio` | 0 | Acquisition observer scheduling priority; zero uses ordinary scheduling. |
+| `cameraMonitor.cpuset` | empty | Optional acquisition observer CPU placement. |
 | `combinerMonitor.threadPrio` | 0 | Combined observer scheduling priority; zero uses ordinary scheduling. |
 | `combinerMonitor.cpuset` | empty | Optional observer cpuset. Choose an available CPU placement on the instrument. |
 | `combinerMonitor.shmimName` | `streams.combined` | Forced to the scheduler's configured combined output; a separate value is ignored. Semaphore selection is automatic. |
@@ -248,6 +253,12 @@ Application properties belong to the configured INDI device: `dmtweeter_synco` i
 | `primary_interval_pairs` | Number, read-only | Ordered primary publication-interval excursions, conditional successors and two-interval sums; durations are seconds. |
 | `combiner_timing` | Number, read-only | Independent combined cadence and producer-trace duration populations, in seconds. |
 | `combiner_timing_quality` | Number, read-only | Combined-observer coverage, writer/trigger identity and trace rejection/loss counters. |
+| `camera_timing` | Number, read-only | Independent `acquisition_` and `receipt_` interval populations, in seconds. |
+| `camera_timing_quality` | Number, read-only | Camera coverage, queue state, gaps, rejections and losses. |
+| `camera_interval_pairs` | Number, read-only | Independent acquisition excursion ordering around its own window median. |
+| `pipeline_timing_quality` | Number, read-only | Primary excursion classification, trace stage count, coverage and qualification counters. |
+| `pipeline_stage0` ... `pipeline_stage9` | Number, read-only | Trace-row identity, ordinary processing/handoff durations and excursion-conditioned changes. Trace rows are unrelated to synco substep numbers. |
+| `pipeline_boundary_timing` | Number, read-only | Oldest represented stage-start intervals and signed changes in the primary publication tail. |
 | `health` | Text, read-only | `reason`, `lastFault`, `periodSource`, `primary`, `combined`, `timingStream`, `mapping`. Current phase/reason, latched fault, selected period reference and resolved stream identities. |
 
 `settings` uses its named elements directly; there are no numeric `current`/`target` pairs. Updates while enabled, unknown elements, nonfinite values and invalid counts/ranges are rejected without changing the active configuration. Changing `steps` never changes source-image count. After an accepted disabled update, enable again to acquire a new schedule.
@@ -565,6 +576,136 @@ tails, rejections and minimum spacing alongside RMS. No configuration changes ar
 made automatically, and these measurements do not relax synco's timing bounds.
 Naming the trigger also adds the producer's upstream trace-copy work; include that
 configuration change in the comparison record.
+
+## Independent camera acquisition excursions
+
+A third metadata-only monitor reads `cameraMonitor.shmimName`, normally `camwfs`.
+Its default scheduling priority is ordinary. It never copies image pixels,
+changes camera settings or writes/posts to the stream. It runs while synco
+scheduling is disabled and while auxiliary resources are unavailable. Its helper
+properties use the `cam_` prefix.
+
+The external interval is **`atime[i] - atime[i-1]`**, not camera `writetime` or
+the observer's wake interval. `camera_timing` uses the same suffixes as
+`primary_timing`, replacing `publication_` with `acquisition_`; `receipt_` remains
+the observer's independent monotonic wake population. The quality and pair
+properties use the same elements as their primary counterparts. Each collector
+has its own median and population; no camera timestamp is paired or subtracted
+from a DM timestamp.
+
+Inspect `acquisition_min` and `acquisition_max` to detect occasional long/short
+intervals even when RMS is small. The appended `[dmsynco]` camera table records
+these extrema, count, coverage and quality, unlike the existing camera
+`[fgtimes]` record, which contains only means and jitters. Text populations are
+`cameraAcquisitionInterval`, `cameraReceiptInterval`, `cameraAfterLateInterval`,
+`cameraAfterEarlyInterval`, `cameraLateEarlySum` and `cameraEarlyLateSum`, with
+`camera_pairs` reporting the directed fractions.
+
+The ordinary-priority observer can miss notifications. Counter gaps, duplicates,
+queue drops, rejected/unstable metadata and missing interval coverage prevent a
+claim that acquisition had no excursions during the entire test. Positive
+nonincreasing acquisition timestamps for consecutive observed counters are
+rejected, as are malformed stamps; they do not become valid long/short samples.
+An excursion at the end of a window still affects interval extrema even before
+its successor is available for the pair statistics. Attachments and broken
+observation chains restart associations.
+
+## Locate excursions within the upstream AO trace
+
+The primary callback now copies at most ten populated existing process-trace
+rows into a bounded queue before acquiring the cycle mutex. It takes no extra
+clock readings and performs no statistics, logging or stream writes for this
+capture. Ordinary app logic computes the timing populations. This is separate
+from the combined observer, which continues to inspect its first two rows.
+
+The trace is ordered backwards from the primary writer:
+
+```text
+camera acquisition (independent atime check)
+    ... camera publication / first-stage wake may precede represented trace ...
+oldest represented stage start -> work -> upstream update
+                                           |
+                                        handoff
+                                           v
+                                  next stage start -> work -> update
+                                                               |
+                                                          ... handoffs ...
+                                                               v
+                                      primary writer start -> update -> writetime
+```
+
+`pipeline_stage0` identifies the primary writer; higher row numbers identify
+earlier upstream writers. For the previously observed AO chain, these correspond
+to DM-command conversion, filtering, reconstruction and WFS preparation,
+respectively. `writerPid` and `inputInode` identify the current row; the inode is
+its **trigger input**, not its output. Stream names and PIDs may change after a
+restart. The stage number is not synco's passive/active step number.
+
+Each row has `present`, `row`, `writerPid`, `inputInode` and these prefixes, with
+`mean`, `jitter`, `min`, `max`, `count`, `span` suffixes:
+
+| Prefix | Population |
+| --- | --- |
+| `execution_` | Stage start to its trace-update timestamp, including any waiting within that work. |
+| `handoff_` | Next upstream row's update to this stage's start; unavailable for the oldest row. |
+| `lateExecution_`, `lateHandoff_` | Those durations when the current primary publication interval exceeds its median plus threshold. |
+| `earlyExecution_`, `earlyHandoff_` | Those durations when the current primary interval is below its median minus threshold. |
+| `lateExecutionChange_`, `lateHandoffChange_` | Signed changes from the preceding associated observation during late primary intervals. |
+| `earlyExecutionChange_`, `earlyHandoffChange_` | Signed changes from the preceding associated observation during early primary intervals. |
+
+All values are **seconds**. Changes may be negative. Counts distinguish an
+unavailable value from a valid negative change; jitter needs two samples.
+Conditioned means remain useful with one excursion. Ordinary timing remains
+available when `diagnostics.excursionUs=0`, with conditional populations empty.
+Each primary interval uses the retained primary-publication median, including
+ordinary tails, even when its trace cannot be qualified.
+
+For example, a 580 us primary interval, 500 us oldest-stage start interval and
+an 80 us `lateExecutionChange_mean` in one row point to added work in that stage.
+A positive `lateHandoffChange_mean` instead points to added delay between stages.
+If all represented changes are small but `lateSourceInterval_mean` is about
+580 us, the variation already exists at the oldest represented start. A steady
+camera acquisition series would still leave camera publication and first-stage
+wake as possible contributors. Several stages can contribute to one excursion;
+do not force a single-cause interpretation or add marginal standard deviations.
+
+`pipeline_boundary_timing` exposes `sourceInterval_`, `lateSourceInterval_`,
+`earlySourceInterval_`, `latePublicationChange_` and `earlyPublicationChange_`.
+The source interval measures consecutive oldest represented starts, not camera
+acquisition. Publication changes measure the change in primary `writetime`
+minus row-zero trace update. Together with row changes, these distinguish
+variation entering the trace from variation added within it or after it.
+
+`pipeline_timing_quality` reports `enabled`, `window`, `span`, `age`, `capacity`,
+`queued`, `session`, `sequence`, `median`, `threshold`, `intervals`, `late`,
+`early`, `stages`, plus cumulative `events`, `receipts`, `synthetic`, `rejected`,
+`duplicates`, `counterGaps`, `invalidMetadata`, `missingTrace`, `invalidTrace`,
+`topologyChanges`, `truncated`, `dropped`. Class counts describe publication
+intervals; trace-conditioned population counts can be smaller. Statistics include
+only the latest observed topology; identity changes break adjacent-observation
+associations. A coherent first chain seeds
+the baseline; subsequent real consecutive fresh observations establish timings.
+Nonprogressing starts, input counters, malformed or unreceived rows, gaps and
+losses break associations. Oversized chains are counted as truncated and cannot
+establish full-chain attribution.
+
+Existing MILK process timing must be enabled for the represented stages' starts
+to advance. The app does not change `MeasureTiming`, trigger modes, priorities
+or producer configuration. Trace input counters are sampled at output update,
+and repeated metadata reads cannot prove exact consumed-frame identity; the
+statistics are **best-effort trace associations**. All trace differences stay
+within the external trace clock, independently of camera acquisition and local
+monotonic coverage clocks. They do not establish physical DM response or full
+camera-to-DM latency.
+
+Both new observers append optional `[dmsynco]` tables. Rebuild/install
+`dmSyncopation` and `logdump`; old records report new tables unavailable. For the
+first comparison, leave scheduling disabled and compare `cameraAcquisitionInterval`
+extrema with `pipeline_stage` conditioned changes and `pipelineSourceInterval`.
+Ordinary app-logic passes emit these diagnostics even if the schedule snapshot
+is busy; an absent trace does not suppress camera or primary interval statistics.
+No median-grid scheduler, skip-recovery or targeted extra-step wake behavior is
+implemented by these diagnostic additions.
 
 ## 200 Hz tip/tilt test provider
 
