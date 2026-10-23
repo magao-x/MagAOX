@@ -9,7 +9,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
+#include <limits>
+#include <mutex>
 #include <thread>
 
 #include <ImageStreamIO/ImageStruct.h>
@@ -71,7 +74,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
 
     size_t m_maxCircBuffLength{ 1024 }; ///< The maximum length of the circular buffer, in frames
 
-    double m_maxCircBuffSize{ 2048 }; ///< The maximum size of the circular bufffer in MB.
+    double m_maxCircBuffSize{ 2048 }; ///< The maximum size of the circular buffer in MB.
 
     size_t m_maxWriteChunkLength{ 512 }; /**< The maximum number of frames to write at a time.  Must
                                               be an integer factor of m_maxCircBuffLength.*/
@@ -133,8 +136,21 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     double m_nextSkipSummaryTime{ 0.0 }; ///< Time after which the next summary skip log may be emitted.
 
     // Writer book-keeping:
-    int m_writing{ NOT_WRITING }; /**< Controls whether or not images are being written,
-                   and sequences start and stop of writing.*/
+    std::atomic<int> m_writing{ NOT_WRITING }; ///< Published state; transitions are serialized by m_writeMutex.
+
+    std::mutex m_writeMutex; ///< Protects capture state and the single writer-owned save descriptor.
+
+    std::condition_variable m_writeCond; ///< Wakes the producer when the writer releases its save window.
+
+    size_t m_chunkFrames{ 0 }; ///< Unsaved frames in the current contiguous capture chunk, protected by m_writeMutex.
+
+    bool m_stopQueued{ false }; ///< The pending save completes the stop; no more recording frames may be appended.
+
+    std::atomic<bool> m_fgReady{ false }; ///< The source has completed allocation, semaphore flushing, and baselining.
+
+    std::atomic<bool> m_fgStopped{ true }; ///< The producer can no longer publish work during shutdown.
+
+    std::atomic<bool> m_writerFailed{ false }; ///< Failed writer completion prevents any further publication.
 
     std::atomic<bool> m_writePending{
         false }; ///< Whether the writer thread still owns a queued save window and may touch the circular buffers.
@@ -143,18 +159,35 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
                                        ///< new frame.
 
     double m_writeCompletionTimeout{
-        5.0 }; ///< Seconds to wait for the writer thread to finish a queued flush during restart cleanup.
+        5.0 }; ///< Maximum producer wait for a queued save before buffer reuse, publication, or reconnect cleanup.
 
     bool m_resumeAfterReconnect{
         false }; ///< Tracks whether reconnect cleanup should resume writing immediately on the replacement stream.
 
-    uint64_t m_currChunkStart{ 0 }; ///< The circular buffer starting position of the current to-be-written chunk.
-    uint64_t m_nextChunkStart{ 0 }; ///< The circular buffer starting position of the next to-be-written chunk.
+    uint64_t m_currChunkStart{ 0 }; ///< First unsaved frame in the current contiguous chunk, protected by m_writeMutex.
+    uint64_t m_nextChunkStart{ 0 }; ///< Aligned chunk boundary used to limit the next save window.
 
     uint64_t m_currSaveStart{ 0 }; ///< The circular buffer position at which to start saving.
     uint64_t m_currSaveStop{ 0 };  ///< The circular buffer position at which to stop saving.
 
-    uint64_t m_currSaveStopFrameNo{ 0 }; ///< Source-frame counter at the end of the latest queued save window.
+    std::atomic<uint64_t> m_currSaveStopFrameNo{
+        0 }; ///< Source-frame counter at the end of the latest queued save window.
+
+    double m_compressionRatio{ 0 }; ///< Last completed encoder ratio, protected by m_writeMutex.
+
+    double m_encodeRate{ 0 }; ///< Last completed image encoder byte rate, protected by m_writeMutex.
+
+    double m_differenceRate{ 0 }; ///< Last completed differencing byte rate, protected by m_writeMutex.
+
+    double m_reorderRate{ 0 }; ///< Last completed reorder byte rate, protected by m_writeMutex.
+
+    double m_compressRate{ 0 }; ///< Last completed compression byte rate, protected by m_writeMutex.
+
+    size_t m_frameBytes{ 0 }; ///< Frame size associated with the published encoder rates, protected by m_writeMutex.
+
+    int16_t m_lastSavingState{ -1 }; ///< Last saving-state telemetry value, protected by m_writeMutex.
+
+    uint64_t m_lastSavingFrame{ UINT64_MAX }; ///< Last saving-state telemetry frame, protected by m_writeMutex.
 
     /// The xrif compression handle for image data
     xrif_t m_xrif{ nullptr };
@@ -184,7 +217,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     virtual void loadConfig();
 
     /// Load configuration while reporting helper failures.
-    /** \returns 0 on success, or -1 if telemetry configuration fails. */
+    /** \returns 0 on success, or -1 for invalid semaphore waits or failed telemetry configuration. */
     int loadConfigImpl( mx::app::appConfigurator &config /**< [in/out] application configuration */ );
 
     /// Startup functions
@@ -200,16 +233,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     virtual int appShutdown();
 
   protected:
-    /** \name SIGSEGV & SIGBUS signal handling
-     * These signals occur as a result of a ImageStreamIO source server resetting (e.g. changing frame sizes).
-     * When they occur a restart of the framegrabber and framewriter thread main loops is triggered.
-     *
-     * @{
-     */
-    bool m_restart{ false }; ///< Requests reopening the source stream after replacement or a signal.
-
-    static streamWriter *m_selfWriter; ///< Static pointer to this (set in constructor).  Used for getting out of the
-                                       ///< static SIGSEGV handler.
+    std::atomic<bool> m_restart{ false }; ///< Requests reopening the source stream after metadata or inode changes.
 
     /// Initialize the xrif system.
     /** Allocates the handles and headers pointers.
@@ -218,23 +242,6 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
      * \returns -1 on error.
      */
     int initialize_xrif();
-
-    /// Sets the handler for SIGSEGV and SIGBUS
-    /** These are caused by ImageStreamIO server resets.
-     */
-    int setSigSegvHandler();
-
-    /// The handler called when SIGSEGV or SIGBUS is received, which will be due to ImageStreamIO server resets.  Just a
-    /// wrapper for handlerSigSegv.
-    static void _handlerSigSegv( int        signum /**< [in] received signal */,
-                                 siginfo_t *siginf /**< [in] signal details */,
-                                 void      *ucont /**< [in] signal context */ );
-
-    /// Handles SIGSEGV and SIGBUS.  Sets m_restart to true.
-    void handlerSigSegv( int        signum /**< [in] received signal */,
-                         siginfo_t *siginf /**< [in] signal details */,
-                         void      *ucont /**< [in] signal context */ );
-    ///@}
 
     /** \name Framegrabber Thread
      * This thread monitors the ImageStreamIO buffer and copies its images to the circular buffer.
@@ -245,7 +252,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
 
     std::string m_fgCpuset; ///< The cpuset for the framegrabber thread.  Ignored if empty (the default).
 
-    std::thread m_fgThread; ///< A separate thread for the actual framegrabbings
+    std::thread m_fgThread; ///< Worker owning source acquisition and circular-buffer publication.
 
     bool m_fgThreadInit{ true }; ///< Synchronizer to ensure f.g. thread initializes before doing dangerous things.
 
@@ -285,15 +292,28 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     /// Release the circular buffers owned by the framegrabber thread.
     void release_circbufs();
 
-    /// Wait for the writer thread to finish any queued save work before buffer teardown.
+    /// Wait for successful writer completion before reusing or releasing its save window.
+    /** \returns false on writer failure or expiration of m_writeCompletionTimeout. */
     bool waitForWriteCompletion( uint64_t saveStopFrameNo /**< [in] The last frame number associated with the
                                                                queued save for timeout logging. */ );
+
+    /// Publish the current chunk once the preceding descriptor has been released.
+    /** The caller retains its unsaved chunk while waiting, and callbacks may change stop intent during the wait.
+     * \returns 0 on success, or -1 on writer failure, a timeout, an invalid window, or a semaphore error. */
+    int queueWrite( std::unique_lock<std::mutex> &lock /**< [in/out] held capture-state lock, released while waiting */,
+                    uint64_t                      frameNo /**< [in] final source-frame counter in the chunk */ );
+
+    /// Release the queued window and complete its stop transition after encoding.
+    void completeWrite( bool success = true /**< [in] whether encoding completed successfully */ );
 
     /// Thread starter, called by fgThreadStart on thread construction.  Calls fgThreadExec.
     static void fgThreadStart( streamWriter *s /**< [in] a pointer to an streamWriter instance (normally this) */ );
 
     /// Execute the frame grabber main loop.
     void fgThreadExec();
+
+    /// Run source acquisition while fgThreadExec publishes worker lifetime and readiness.
+    void fgThreadRun();
 
     ///@}
 
@@ -322,7 +342,9 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     /// Execute the stream writer main loop.
     void swThreadExec();
 
-    /// Function called when semaphore is raised to do the encode and write.
+    /// Validate and encode a stable save window, releasing its ownership on completion or failure.
+    /** The writer calls this only for a pending notification; direct callers must provide a complete descriptor.
+     * \returns 0 on success, or -1 on invalid input or a fatal encoding/output prerequisite failure. */
     int doEncode();
     ///@}
 
@@ -359,14 +381,9 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     ///@}
 };
 
-// Set self pointer to null so app starts up uninitialized.
-streamWriter *streamWriter::m_selfWriter = nullptr;
-
 streamWriter::streamWriter() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     m_powerMgtEnabled = false;
-
-    m_selfWriter = this;
 
     return;
 }
@@ -544,7 +561,7 @@ void streamWriter::setupConfig()
                 "semWait",
                 false,
                 "int",
-                "The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec." );
+                "The time in nsec to wait on the semaphore, from 1 to 999999999. Default is 5e8 nsec." );
 
     config.add( "framegrabber.warnMissedData",
                 "",
@@ -612,6 +629,11 @@ int streamWriter::loadConfigImpl( mx::app::appConfigurator &config )
 
     config( m_semaphoreNumber, "framegrabber.semaphoreNumber" );
     config( m_semWaitNSec, "framegrabber.semWait" );
+    if( m_semWaitNSec == 0 || m_semWaitNSec > 999999999 )
+    {
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "framegrabber.semWait must be between 1 and 999999999 ns" } );
+    }
     config( m_warnMissedData, "framegrabber.warnMissedData" );
 
     config( m_fgThreadPrio, "framegrabber.threadPrio" );
@@ -732,12 +754,8 @@ int streamWriter::appStartup()
                                    "Total Encoding Rate [f.p.s.]" );
 
     // Now set up the framegrabber and writer threads.
-    //  - need SIGSEGV and SIGBUS handling for ImageStreamIO restarts
     //  - initialize the semaphore
     //  - start the threads
-
-    if( setSigSegvHandler() < 0 )
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
 
     if( sem_init( &m_swSemaphore, 0, 0 ) < 0 )
         return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "Initializing S.W. semaphore" } );
@@ -892,11 +910,7 @@ int streamWriter::appLogic()
 
 int streamWriter::appShutdown()
 {
-    m_writing              = NOT_WRITING;
-    m_writePending         = false;
-    m_resumeAfterReconnect = false;
-    m_stopWriteDeadline    = 0;
-    updateINDI();
+    m_shutdown = 1;
 
     try
     {
@@ -919,6 +933,17 @@ int streamWriter::appShutdown()
     catch( ... )
     {
     }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_writeMutex );
+        m_writing              = NOT_WRITING;
+        m_writePending         = false;
+        m_chunkFrames          = 0;
+        m_stopQueued           = false;
+        m_resumeAfterReconnect = false;
+        m_stopWriteDeadline    = 0;
+    }
+    updateINDI();
 
     release_circbufs();
 
@@ -997,59 +1022,6 @@ int streamWriter::initialize_xrif()
     }
 
     return 0;
-}
-
-int streamWriter::setSigSegvHandler()
-{
-    struct sigaction act;
-    sigset_t         set;
-
-    act.sa_sigaction = &streamWriter::_handlerSigSegv;
-    act.sa_flags     = SA_SIGINFO;
-    sigemptyset( &set );
-    act.sa_mask = set;
-
-    errno = 0;
-    if( sigaction( SIGSEGV, &act, 0 ) < 0 )
-    {
-        std::string logss = "Setting handler for SIGSEGV failed. Errno says: ";
-        logss += strerror( errno );
-
-        log<software_error>( { __FILE__, __LINE__, errno, 0, logss } );
-
-        return -1;
-    }
-
-    errno = 0;
-    if( sigaction( SIGBUS, &act, 0 ) < 0 )
-    {
-        std::string logss = "Setting handler for SIGBUS failed. Errno says: ";
-        logss += strerror( errno );
-
-        log<software_error>( { __FILE__, __LINE__, errno, 0, logss } );
-
-        return -1;
-    }
-
-    log<text_log>( "Installed SIGSEGV/SIGBUS signal handler.", logPrio::LOG_DEBUG );
-
-    return 0;
-}
-
-void streamWriter::_handlerSigSegv( int signum, siginfo_t *siginf, void *ucont )
-{
-    m_selfWriter->handlerSigSegv( signum, siginf, ucont );
-}
-
-void streamWriter::handlerSigSegv( int signum, siginfo_t *siginf, void *ucont )
-{
-    static_cast<void>( signum );
-    static_cast<void>( siginf );
-    static_cast<void>( ucont );
-
-    m_restart = true;
-
-    return;
 }
 
 void streamWriter::getCircBuffLengths( size_t  &circBuffLength,
@@ -1254,33 +1226,93 @@ void streamWriter::release_circbufs()
 
 bool streamWriter::waitForWriteCompletion( uint64_t saveStopFrameNo )
 {
-    const auto timeout  = std::chrono::duration<double>( m_writeCompletionTimeout );
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    auto       nextLog  = std::chrono::steady_clock::now();
-
-    while( m_writePending )
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::duration<double>( m_writeCompletionTimeout );
+    std::unique_lock<std::mutex> lock( m_writeMutex );
+    if( m_writeCond.wait_until( lock, deadline, [this] { return !m_writePending || m_writerFailed; } ) )
     {
-        const auto now = std::chrono::steady_clock::now();
+        return !m_writerFailed;
+    }
+    log<text_log>( "timed out waiting " + std::to_string( m_writeCompletionTimeout ) +
+                       " sec for the writer thread to finish frame " + std::to_string( saveStopFrameNo ),
+                   logPrio::LOG_NOTICE );
+    return false;
+}
 
-        if( now >= deadline )
+int streamWriter::queueWrite( std::unique_lock<std::mutex> &lock, uint64_t frameNo )
+{
+    if( m_writerFailed )
+    {
+        return -1;
+    }
+    if( m_writePending )
+    {
+        const uint64_t previousFrame = m_currSaveStopFrameNo;
+        lock.unlock();
+        const bool completed = waitForWriteCompletion( previousFrame );
+        lock.lock();
+        if( !completed )
         {
-            log<text_log>( "timed out waiting " + std::to_string( m_writeCompletionTimeout ) +
-                               " sec for the writer thread to finish frame " + std::to_string( saveStopFrameNo ),
-                           logPrio::LOG_NOTICE );
-            return false;
+            m_shutdown = 1;
+            return -1;
         }
-
-        if( now >= nextLog )
-        {
-            log<text_log>( "still waiting for the writer thread to finish frame " + std::to_string( saveStopFrameNo ),
-                           logPrio::LOG_DEBUG );
-            nextLog = now + std::chrono::seconds( 1 );
-        }
-
-        std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
     }
 
-    return true;
+    if( m_currChunkStart > m_circBuffLength || m_chunkFrames > m_circBuffLength - m_currChunkStart ||
+        m_chunkFrames > m_writeChunkLength )
+    {
+        return log<software_critical, -1>( { __FILE__, __LINE__, "invalid capture chunk" } );
+    }
+    if( m_chunkFrames == 0 )
+    {
+        return 0;
+    }
+
+    m_currSaveStart       = m_currChunkStart;
+    m_currSaveStop        = m_currChunkStart + m_chunkFrames;
+    m_currSaveStopFrameNo = frameNo;
+    m_stopQueued          = m_writing == STOP_WRITING;
+    m_chunkFrames         = 0;
+    m_currChunkStart      = m_currSaveStop == m_circBuffLength ? 0 : m_currSaveStop;
+    m_nextChunkStart      = ( m_currChunkStart / m_writeChunkLength ) * m_writeChunkLength;
+    m_stopWriteDeadline   = 0;
+    m_writePending        = true;
+    if( sem_post( &m_swSemaphore ) < 0 )
+    {
+        m_writePending = false;
+        m_writeCond.notify_all();
+        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "Error posting to semaphore" } );
+    }
+    return 0;
+}
+
+void streamWriter::completeWrite( bool success )
+{
+    bool     stopped = false;
+    uint64_t frameNo;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_writeMutex );
+        frameNo = m_currSaveStopFrameNo;
+        if( !success )
+        {
+            m_writerFailed = true;
+            m_shutdown     = 1;
+            m_writing      = NOT_WRITING;
+        }
+        else if( m_writing == STOP_WRITING && ( m_stopQueued || m_chunkFrames == 0 ) )
+        {
+            m_writing           = m_resumeAfterReconnect ? START_WRITING : NOT_WRITING;
+            stopped             = !m_resumeAfterReconnect;
+            m_stopWriteDeadline = 0;
+        }
+        m_stopQueued   = false;
+        m_writePending = false;
+    }
+    if( stopped )
+    {
+        log<saving_stop>( { 0, frameNo } );
+    }
+    recordSavingState();
+    m_writeCond.notify_all();
 }
 
 void streamWriter::fgThreadStart( streamWriter *o )
@@ -1289,6 +1321,15 @@ void streamWriter::fgThreadStart( streamWriter *o )
 }
 
 void streamWriter::fgThreadExec()
+{
+    m_fgStopped = false;
+    fgThreadRun();
+    m_fgReady   = false;
+    m_fgStopped = true;
+    m_writeCond.notify_all();
+}
+
+void streamWriter::fgThreadRun()
 {
     m_fgThreadID = syscall( SYS_gettid );
 
@@ -1309,6 +1350,7 @@ void streamWriter::fgThreadExec()
     {
         /* Initialize ImageStreamIO
          */
+        m_fgReady = false;
         opened    = false;
         m_restart = false; // Set this up front, since we're about to restart.
 
@@ -1451,9 +1493,14 @@ void streamWriter::fgThreadExec()
         uint64_t maxChunkTimeNs = static_cast<uint64_t>( m_maxChunkTime * 1e9 );
 
         uint64_t curr_image; // The current cnt1 index
-        m_currImage      = 0;
-        m_currChunkStart = 0;
-        m_nextChunkStart = 0;
+        {                    // mutex scope
+            std::lock_guard<std::mutex> lock( m_writeMutex );
+            m_currImage      = 0;
+            m_currChunkStart = 0;
+            m_nextChunkStart = 0;
+            m_chunkFrames    = 0;
+            m_stopQueued     = false;
+        }
 
         // Initialize curr_image after the post-setup flush.
         if( useCnt1 )
@@ -1481,6 +1528,8 @@ void streamWriter::fgThreadExec()
 
         bool restartWriting = false; // flag to prevent logging on a logging restart
 
+        m_fgReady = true;
+
         // This is the main image grabbing loop.
         while( !m_shutdown && !m_restart )
         {
@@ -1501,6 +1550,20 @@ void streamWriter::fgThreadExec()
                         log<software_error>( { __FILE__, __LINE__, errno, "sem_trywait" } );
                     }
                     break;
+                }
+
+                std::unique_lock<std::mutex> lock( m_writeMutex );
+                if( m_writePending && m_currImage >= m_currSaveStart && m_currImage < m_currSaveStop )
+                {
+                    const uint64_t previousFrame = m_currSaveStopFrameNo;
+                    lock.unlock();
+                    const bool completed = waitForWriteCompletion( previousFrame );
+                    lock.lock();
+                    if( !completed )
+                    {
+                        m_shutdown = 1;
+                        return;
+                    }
                 }
 
                 if( useCnt1 )
@@ -1623,115 +1686,41 @@ void streamWriter::fgThreadExec()
                     m_stopWriteDeadline = 0;
                 }
 
-                switch( m_writing )
+                if( m_writing == START_WRITING )
                 {
-                case START_WRITING:
-
-                    m_currChunkStart     = m_currImage;
-                    m_nextChunkStart     = ( m_currImage / m_writeChunkLength ) * m_writeChunkLength;
-                    m_currChunkStartTime = m_currImageTime;
-
-                    if( !restartWriting && !m_resumeAfterReconnect ) // We only log if this is really a start
+                    if( !restartWriting && !m_resumeAfterReconnect )
                     {
                         log<saving_start>( { 1, new_cnt0 } );
                     }
-                    else // on a restart after a timeout or reconnect we don't log
+                    restartWriting         = false;
+                    m_resumeAfterReconnect = false;
+                    m_writing              = WRITING;
+                }
+
+                if( m_writing == WRITING || ( m_writing == STOP_WRITING && !m_stopQueued ) )
+                {
+                    if( m_chunkFrames == 0 )
                     {
-                        restartWriting         = false;
-                        m_resumeAfterReconnect = false;
-                    }
-
-                    m_writing = WRITING;
-
-                    // fall through
-                case WRITING:
-                    if( m_currImage - m_nextChunkStart == m_writeChunkLength - 1 )
-                    {
-                        m_currSaveStart       = m_currChunkStart;
-                        m_currSaveStop        = m_nextChunkStart + m_writeChunkLength;
-                        m_currSaveStopFrameNo = new_cnt0;
-
-#ifdef SW_DEBUG
-                        std::cerr << __FILE__ << " " << __LINE__ << " WRITING " << m_currImage << " "
-                                  << m_nextChunkStart << " "
-                                  << ( m_currImage - m_nextChunkStart == m_writeChunkLength - 1 ) << " "
-                                  << ( m_currImageTime - m_currChunkStartTime > maxChunkTimeNs ) << " " << new_cnt0
-                                  << "\n";
-#endif
-
-                        // Now tell the writer to get going
-                        m_writePending = true;
-                        if( sem_post( &m_swSemaphore ) < 0 )
-                        {
-                            m_writePending = false;
-                            log<software_critical>( { __FILE__, __LINE__, errno, 0, "Error posting to semaphore" } );
-                            return;
-                        }
-
-                        m_nextChunkStart = ( ( m_currImage + 1 ) / m_writeChunkLength ) * m_writeChunkLength;
-                        if( m_nextChunkStart >= m_circBuffLength )
-                        {
-                            m_nextChunkStart = 0;
-                        }
-
-                        m_currChunkStart     = m_nextChunkStart;
+                        m_currChunkStart     = m_currImage;
+                        m_nextChunkStart     = ( m_currImage / m_writeChunkLength ) * m_writeChunkLength;
                         m_currChunkStartTime = m_currImageTime;
                     }
-                    else if( m_currImageTime - m_currChunkStartTime > maxChunkTimeNs )
+                    ++m_chunkFrames;
+                    const bool full    = m_currImage - m_nextChunkStart == m_writeChunkLength - 1;
+                    const bool expired = m_currImageTime >= m_currChunkStartTime &&
+                                         m_currImageTime - m_currChunkStartTime > maxChunkTimeNs;
+                    if( full || expired || m_writing == STOP_WRITING )
                     {
-                        m_currSaveStart       = m_currChunkStart;
-                        m_currSaveStop        = m_currImage + 1;
-                        m_currSaveStopFrameNo = new_cnt0;
-
-                        // clang-format off
-                        #ifdef SW_DEBUG
-                        std::cerr << __FILE__ << " " << __LINE__ << " IMAGE TIME WRITING " << m_currImage << " "
-                                  << m_nextChunkStart << " "
-                                  << ( m_currImage - m_nextChunkStart == m_writeChunkLength - 1 ) << " "
-                                  << ( m_currImageTime - m_currChunkStartTime > maxChunkTimeNs ) << " " << new_cnt0
-                                  << "\n";
-                        #endif
-                        // clang-format on
-
-                        // Now tell the writer to get going
-                        m_writePending = true;
-                        if( sem_post( &m_swSemaphore ) < 0 )
+                        if( queueWrite( lock, new_cnt0 ) < 0 )
                         {
-                            m_writePending = false;
-                            log<software_critical>( { __FILE__, __LINE__, errno, 0, "Error posting to semaphore" } );
                             return;
                         }
-
-                        m_writing      = START_WRITING;
-                        restartWriting = true;
+                        if( !full && expired && m_writing == WRITING )
+                        {
+                            m_writing      = START_WRITING;
+                            restartWriting = true;
+                        }
                     }
-                    break;
-
-                case STOP_WRITING:
-                    m_currSaveStart       = m_currChunkStart;
-                    m_currSaveStop        = m_currImage + 1;
-                    m_currSaveStopFrameNo = new_cnt0;
-
-                    // clang-format off
-                    #ifdef SW_DEBUG
-                    std::cerr << __FILE__ << " " << __LINE__ << " STOP_WRITING\n";
-                    #endif
-                    // clang-format on
-
-                    // Now tell the writer to get going
-                    m_writePending      = true;
-                    m_stopWriteDeadline = 0;
-                    if( sem_post( &m_swSemaphore ) < 0 )
-                    {
-                        m_writePending = false;
-                        log<software_critical>( { __FILE__, __LINE__, errno, 0, "Error posting to semaphore" } );
-                        return;
-                    }
-                    restartWriting = false;
-                    break;
-
-                default:
-                    break;
                 }
 
                 ++m_currImage;
@@ -1742,68 +1731,27 @@ void streamWriter::fgThreadExec()
             }
             else
             {
-                // If semaphore times-out or errors, we first cleanup any writing that needs to be done
-                // we can also get here if a signal interrupts the sem wait which is triggered by INDI callbacks
-                switch( m_writing )
-                {
-                case WRITING:
-                    // Here, if there is at least 1 image, we check for delta-time > m_maxChunkTime
-                    //  then write
-                    if( ( m_currImage - m_nextChunkStart > 0 ) &&
-                        ( static_cast<uint64_t>( mx::sys::get_curr_time() * 1e9 ) - m_currChunkStartTime >
-                          maxChunkTimeNs ) )
+                const int waitError = errno;
+                { //mutex scope
+                    std::unique_lock<std::mutex> lock( m_writeMutex );
+                    const double                 now = mx::sys::get_curr_time();
+                    const bool                   expired =
+                        m_writing == WRITING && m_chunkFrames > 0 && now * 1e9 - m_currChunkStartTime > maxChunkTimeNs;
+                    const bool stopping = m_writing == STOP_WRITING && !m_stopQueued && now >= m_stopWriteDeadline;
+                    if( ( expired || stopping ) && m_chunkFrames > 0 )
                     {
-                        m_currSaveStart       = m_currChunkStart;
-                        m_currSaveStop        = m_currImage;
-                        m_currSaveStopFrameNo = last_cnt0;
-
-#ifdef SW_DEBUG
-                        std::cerr << __FILE__ << " " << __LINE__ << " TIMEOUT WRITING " << " " << m_currImage << " "
-                                  << m_nextChunkStart << " " << ( m_currImage - m_nextChunkStart ) << " " << last_cnt0
-                                  << "\n";
-#endif
-
-                        // Now tell the writer to get going
-                        m_writePending = true;
-                        if( sem_post( &m_swSemaphore ) < 0 )
+                        if( queueWrite( lock, last_cnt0 ) < 0 )
                         {
-                            m_writePending = false;
-                            log<software_critical>( { __FILE__, __LINE__, errno, 0, "Error posting to semaphore" } );
                             return;
                         }
-
-                        m_writing      = START_WRITING;
-                        restartWriting = true;
-                    }
-                    break;
-                case STOP_WRITING:
-                    if( mx::sys::get_curr_time() >= m_stopWriteDeadline )
-                    {
-                        // If the stop timer expires before the next frame arrives, flush the current chunk and
-                        // settle back to the idle state exactly as we would on the next frame.
-                        m_currSaveStart       = m_currChunkStart;
-                        m_currSaveStop        = m_currImage;
-                        m_currSaveStopFrameNo = last_cnt0;
-
-#ifdef SW_DEBUG
-                        std::cerr << __FILE__ << " " << __LINE__ << " TIMEOUT STOP_WRITING\n";
-#endif
-
-                        // Now tell the writer to get going
-                        m_writePending      = true;
-                        m_stopWriteDeadline = 0;
-                        if( sem_post( &m_swSemaphore ) < 0 )
+                        if( m_writing == WRITING )
                         {
-                            m_writePending = false;
-                            log<software_critical>( { __FILE__, __LINE__, errno, 0, "Error posting to semaphore" } );
-                            return;
+                            m_writing      = START_WRITING;
+                            restartWriting = true;
                         }
-                        restartWriting = false;
                     }
-                    break;
-                default:
-                    break;
                 }
+                errno = waitError;
 
                 if( image.md[0].sem <= 0 )
                 {
@@ -1853,56 +1801,34 @@ void streamWriter::fgThreadExec()
             }
         }
 
-        const bool resumeAfterReconnect = ( m_writing == WRITING );
-
-        if( m_writePending && !waitForWriteCompletion( last_cnt0 ) )
-        {
-            m_shutdown = 1;
-            return;
-        }
-
-        ///\todo might still be writing here, so must check
-        // If semaphore times-out or errors, we first cleanup any writing that needs to be done
-        if( m_writing == WRITING || m_writing == STOP_WRITING )
-        {
-            // Here, if there is at least 1 image, then write
-            if( ( m_currImage - m_nextChunkStart > 0 ) )
+        m_fgReady = false;
+        { //mutex scope
+            std::unique_lock<std::mutex> lock( m_writeMutex );
+            const bool                   resume = !m_shutdown && ( m_writing == WRITING || m_writing == START_WRITING );
+            m_resumeAfterReconnect              = resume;
+            if( m_chunkFrames > 0 )
             {
-                m_currSaveStart       = m_currChunkStart;
-                m_currSaveStop        = m_currImage;
-                m_currSaveStopFrameNo = last_cnt0;
-
-                m_writing              = STOP_WRITING;
-                m_stopWriteDeadline    = 0;
-                m_resumeAfterReconnect = resumeAfterReconnect;
-
-                std::cerr << __FILE__ << " " << __LINE__ << " WRITING ON RESTART " << last_cnt0 << "\n";
-                // Now tell the writer to get going
-                m_writePending = true;
-                if( sem_post( &m_swSemaphore ) < 0 )
+                m_writing           = STOP_WRITING;
+                m_stopWriteDeadline = 0;
+                if( queueWrite( lock, last_cnt0 ) < 0 )
                 {
-                    m_writePending = false;
-                    log<software_critical>( { __FILE__, __LINE__, errno, 0, "Error posting to semaphore" } );
                     return;
                 }
             }
-            else if( resumeAfterReconnect )
+            else if( m_writePending )
             {
-                m_writing              = START_WRITING;
-                m_stopWriteDeadline    = 0;
-                m_resumeAfterReconnect = true;
+                m_writing    = STOP_WRITING;
+                m_stopQueued = true;
             }
             else
             {
-                m_writing              = NOT_WRITING;
-                m_resumeAfterReconnect = false;
+                m_writing = resume ? START_WRITING : NOT_WRITING;
             }
-
-            if( !waitForWriteCompletion( last_cnt0 ) )
-            {
-                m_shutdown = 1;
-                return;
-            }
+        }
+        if( !waitForWriteCompletion( last_cnt0 ) )
+        {
+            m_shutdown = 1;
+            return;
         }
 
         release_circbufs();
@@ -1949,14 +1875,14 @@ void streamWriter::swThreadExec()
         sleep( 1 );
     }
 
-    while( !m_shutdown )
+    while( !m_shutdown || !m_fgStopped || m_writePending )
     {
         while( !shutdown() && ( !( state() == stateCodes::READY || state() == stateCodes::OPERATING ) ) )
         {
             sleep( 1 );
         }
 
-        if( shutdown() )
+        if( shutdown() && m_fgStopped && !m_writePending )
         {
             break;
         }
@@ -1969,11 +1895,12 @@ void streamWriter::swThreadExec()
             return; // will trigger a shutdown
         }
 
+        ts.tv_sec += m_semWaitSec;
         mx::sys::timespecAddNsec( ts, m_semWaitNSec );
 
         if( sem_timedwait( &m_swSemaphore, &ts ) == 0 )
         {
-            if( doEncode() < 0 )
+            if( m_writePending && doEncode() < 0 )
             {
                 log<software_critical>( { __FILE__, __LINE__, "error encoding data" } );
                 return;
@@ -2001,57 +1928,67 @@ void streamWriter::swThreadExec()
 
 int streamWriter::doEncode()
 {
-    if( m_writing == NOT_WRITING )
-    {
-        m_writePending = false;
-        return 0;
+    uint64_t saveStart, saveStop;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_writeMutex );
+        if( m_writing == NOT_WRITING )
+        {
+            m_writePending = false;
+            m_writeCond.notify_all();
+            return 0;
+        }
+        saveStart      = m_currSaveStart;
+        saveStop       = m_currSaveStop;
+        m_writePending = true;
     }
 
     recordSavingState( true );
-
-    // Record these to prevent a change in other thread
-    uint64_t saveStart       = m_currSaveStart;
-    uint64_t saveStopFrameNo = m_currSaveStopFrameNo;
-    size_t   nFrames         = m_currSaveStop - saveStart;
-    size_t   nBytes          = m_width * m_height * m_typeSize;
-
-#ifdef SW_DEBUG
-    std::cerr << "nFrames: " << nFrames << "\n";
-#endif
-
-    if( nFrames == 0 ) // can happend during a stop.  just clean up but don't try to write nothting.
+    if( saveStart > saveStop || saveStop > m_circBuffLength || saveStop - saveStart > m_writeChunkLength )
     {
-#ifdef SW_DEBUG
-        std::cerr << "nothing to write\n";
-#endif
-
-        recordSavingStats( true );
-
-        if( m_writing == STOP_WRITING )
+        completeWrite( false );
+        return log<software_critical, -1>( { __FILE__, __LINE__, "invalid save window" } );
+    }
+    const size_t nFrames = saveStop - saveStart;
+    if( nFrames == 0 )
+    {
+        if( m_xrif )
         {
-            if( m_resumeAfterReconnect )
-            {
-                m_writing = START_WRITING;
-            }
-            else
-            {
-                m_writing = NOT_WRITING;
-                log<saving_stop>( { 0, saveStopFrameNo } );
-            }
-            m_stopWriteDeadline = 0;
+            recordSavingStats( true );
         }
-
-        recordSavingState();
-
-        m_writePending = false;
+        completeWrite();
         return 0;
     }
-    // Configure xrif and copy image data -- this does no allocations
+
+    constexpr size_t timingBytes = 5 * sizeof( uint64_t );
+    const size_t     maxSize     = std::numeric_limits<size_t>::max();
+    if( m_width == 0 || m_height == 0 || m_typeSize <= 0 || m_width > maxSize / m_height ||
+        m_width * m_height > maxSize / static_cast<size_t>( m_typeSize ) )
+    {
+        completeWrite( false );
+        return log<software_critical, -1>( { __FILE__, __LINE__, "invalid frame byte count" } );
+    }
+    const size_t nBytes = m_width * m_height * m_typeSize;
+    if( m_circBuffLength > maxSize / nBytes || m_circBuffLength > maxSize / timingBytes ||
+        nFrames > std::numeric_limits<xrif_dimension_t>::max() || !m_rawImageCircBuff || !m_timingCircBuff || !m_xrif ||
+        !m_xrif_timing || !m_xrif->raw_buffer || !m_xrif_timing->raw_buffer ||
+        nFrames > m_xrif->raw_buffer_size / nBytes || nFrames > m_xrif_timing->raw_buffer_size / timingBytes )
+    {
+        completeWrite( false );
+        return log<software_critical, -1>( { __FILE__, __LINE__, "save window exceeds allocated buffer capacity" } );
+    }
+
+    // Both sizing operations must succeed before either destination is modified.
     int rv = xrif_set_size( m_xrif, m_width, m_height, 1, nFrames, m_dataType );
     if( rv != XRIF_NOERROR )
     {
-        // This is a big problem.  Report it as "ALERT" and go on.
-        log<software_alert>( { __FILE__, __LINE__, 0, rv, "xrif set size error. DATA POSSIBLY LOST" } );
+        completeWrite( false );
+        return log<software_alert, -1>( { __FILE__, __LINE__, 0, rv, "xrif set size error. DATA POSSIBLY LOST" } );
+    }
+    rv = xrif_set_size( m_xrif_timing, 5, 1, 1, nFrames, XRIF_TYPECODE_UINT64 );
+    if( rv != XRIF_NOERROR )
+    {
+        completeWrite( false );
+        return log<software_alert, -1>( { __FILE__, __LINE__, 0, rv, "xrif set size error. DATA POSSIBLY LOST" } );
     }
 
     rv = xrif_set_lz4_acceleration( m_xrif, m_lz4accel );
@@ -2062,14 +1999,6 @@ int streamWriter::doEncode()
     }
 
     memcpy( m_xrif->raw_buffer, m_rawImageCircBuff + saveStart * nBytes, nFrames * nBytes );
-
-    // Configure xrif and copy timing data -- no allocations
-    rv = xrif_set_size( m_xrif_timing, 5, 1, 1, nFrames, XRIF_TYPECODE_UINT64 );
-    if( rv != XRIF_NOERROR )
-    {
-        // This is a big problem.  Report it as "ALERT" and go on.
-        log<software_alert>( { __FILE__, __LINE__, 0, rv, "xrif set size error. DATA POSSIBLY LOST." } );
-    }
 
     rv = xrif_set_lz4_acceleration( m_xrif_timing, m_lz4accel );
     if( rv != XRIF_NOERROR )
@@ -2127,7 +2056,7 @@ int streamWriter::doEncode()
         std::string msg = "error from file::fileTimeRePath: ";
         msg += mx::errorMessage( errc );
         msg += " (" + std::string( mx::errorName( errc ) ) + ")";
-        m_writePending = false;
+        completeWrite( false );
         return log<software_error, -1>( { __FILE__, __LINE__, msg } );
     }
 
@@ -2143,14 +2072,14 @@ int streamWriter::doEncode()
         msg += e.what();
         msg += " code: ";
         msg += e.code().value();
-        m_writePending = false;
+        completeWrite( false );
         return log<software_critical, -1>( { __FILE__, __LINE__, msg } );
     }
     catch( const std::exception &e )
     {
         std::string msg = "exception from std::create_directories. ";
         msg += e.what();
-        m_writePending = false;
+        completeWrite( false );
         return log<software_critical, -1>( { __FILE__, __LINE__, msg } );
     }
 
@@ -2159,7 +2088,7 @@ int streamWriter::doEncode()
     if( fp_xrif == NULL )
     {
         // This is it.  If we can't write data to disk need to fix.
-        m_writePending = false;
+        completeWrite( false );
         return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "failed to open file for writing" } );
     }
 
@@ -2214,23 +2143,7 @@ int streamWriter::doEncode()
 
     recordSavingStats( true );
 
-    if( m_writing == STOP_WRITING )
-    {
-        if( m_resumeAfterReconnect )
-        {
-            m_writing = START_WRITING;
-        }
-        else
-        {
-            m_writing = NOT_WRITING;
-            log<saving_stop>( { 0, saveStopFrameNo } );
-        }
-        m_stopWriteDeadline = 0;
-    }
-
-    recordSavingState();
-
-    m_writePending = false;
+    completeWrite();
     return 0;
 
 } // doEncode
@@ -2245,19 +2158,46 @@ INDI_NEWCALLBACK_DEFN( streamWriter, m_indiP_writing )
         return 0;
     }
 
-    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off &&
-        ( m_writing == WRITING || m_writing == START_WRITING ) )
-    {
-        m_writing              = STOP_WRITING;
-        m_resumeAfterReconnect = false;
-        m_stopWriteDeadline    = mx::sys::get_curr_time() + m_writeStopTimeout;
+    bool     stopped   = false;
+    uint64_t stopFrame = 0;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_writeMutex );
+        if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off && m_writing == STOP_WRITING )
+        {
+            m_resumeAfterReconnect = false;
+        }
+        if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off &&
+            ( m_writing == WRITING || m_writing == START_WRITING ) )
+        {
+            m_resumeAfterReconnect = false;
+            m_stopWriteDeadline    = mx::sys::get_curr_time() + m_writeStopTimeout;
+            if( m_chunkFrames == 0 )
+            {
+                m_writing           = m_writePending ? STOP_WRITING : NOT_WRITING;
+                m_stopQueued        = m_writePending;
+                m_stopWriteDeadline = 0;
+                stopped             = !m_writePending;
+                stopFrame           = m_currSaveStopFrameNo;
+            }
+            else
+            {
+                m_writing = STOP_WRITING;
+            }
+        }
+        else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_writing == NOT_WRITING )
+        {
+            m_writing              = START_WRITING;
+            m_chunkFrames          = 0;
+            m_stopQueued           = false;
+            m_resumeAfterReconnect = false;
+            m_stopWriteDeadline    = 0;
+        }
     }
 
-    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_writing == NOT_WRITING )
+    if( stopped )
     {
-        m_writing              = START_WRITING;
-        m_resumeAfterReconnect = false;
-        m_stopWriteDeadline    = 0;
+        log<saving_stop>( { 0, stopFrame } );
+        recordSavingState();
     }
 
     return 0;
@@ -2265,39 +2205,51 @@ INDI_NEWCALLBACK_DEFN( streamWriter, m_indiP_writing )
 
 void streamWriter::updateINDI()
 {
+    int    writing;
+    double ratio, encodeRate, differenceRate, reorderRate, compressRate;
+    size_t frameBytes;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_writeMutex );
+        writing        = m_writing;
+        ratio          = m_compressionRatio;
+        encodeRate     = m_encodeRate;
+        differenceRate = m_differenceRate;
+        reorderRate    = m_reorderRate;
+        compressRate   = m_compressRate;
+        frameBytes     = m_frameBytes;
+    }
     // Only update this if not changing
-    if( m_writing == NOT_WRITING || m_writing == WRITING || m_writing == START_WRITING )
+    if( writing == NOT_WRITING || writing == WRITING || writing == START_WRITING )
     {
-        if( m_xrif && ( m_writing == WRITING || m_writing == START_WRITING ) )
+        if( writing == WRITING || writing == START_WRITING )
         {
             indi::updateSwitchIfChanged( m_indiP_writing, "toggle", pcf::IndiElement::On, m_indiDriver, INDI_OK );
-            indi::updateIfChanged( m_indiP_xrifStats, "ratio", m_xrif->compression_ratio, m_indiDriver, INDI_BUSY );
-            indi::updateIfChanged(
-                m_indiP_xrifStats, "encodeMBsec", m_xrif->encode_rate / 1048576.0, m_indiDriver, INDI_BUSY );
+            indi::updateIfChanged( m_indiP_xrifStats, "ratio", ratio, m_indiDriver, INDI_BUSY );
+            indi::updateIfChanged( m_indiP_xrifStats, "encodeMBsec", encodeRate / 1048576.0, m_indiDriver, INDI_BUSY );
             indi::updateIfChanged( m_indiP_xrifStats,
                                    "encodeFPS",
-                                   m_xrif->encode_rate / ( m_width * m_height * m_typeSize ),
+                                   encodeRate / std::max<size_t>( frameBytes, 1 ),
                                    m_indiDriver,
                                    INDI_BUSY );
             indi::updateIfChanged(
-                m_indiP_xrifStats, "differenceMBsec", m_xrif->difference_rate / 1048576.0, m_indiDriver, INDI_BUSY );
+                m_indiP_xrifStats, "differenceMBsec", differenceRate / 1048576.0, m_indiDriver, INDI_BUSY );
             indi::updateIfChanged( m_indiP_xrifStats,
                                    "differenceFPS",
-                                   m_xrif->difference_rate / ( m_width * m_height * m_typeSize ),
+                                   differenceRate / std::max<size_t>( frameBytes, 1 ),
                                    m_indiDriver,
                                    INDI_BUSY );
             indi::updateIfChanged(
-                m_indiP_xrifStats, "reorderMBsec", m_xrif->reorder_rate / 1048576.0, m_indiDriver, INDI_BUSY );
+                m_indiP_xrifStats, "reorderMBsec", reorderRate / 1048576.0, m_indiDriver, INDI_BUSY );
             indi::updateIfChanged( m_indiP_xrifStats,
                                    "reorderFPS",
-                                   m_xrif->reorder_rate / ( m_width * m_height * m_typeSize ),
+                                   reorderRate / std::max<size_t>( frameBytes, 1 ),
                                    m_indiDriver,
                                    INDI_BUSY );
             indi::updateIfChanged(
-                m_indiP_xrifStats, "compressMBsec", m_xrif->compress_rate / 1048576.0, m_indiDriver, INDI_BUSY );
+                m_indiP_xrifStats, "compressMBsec", compressRate / 1048576.0, m_indiDriver, INDI_BUSY );
             indi::updateIfChanged( m_indiP_xrifStats,
                                    "compressFPS",
-                                   m_xrif->compress_rate / ( m_width * m_height * m_typeSize ),
+                                   compressRate / std::max<size_t>( frameBytes, 1 ),
                                    m_indiDriver,
                                    INDI_BUSY );
         }
@@ -2329,8 +2281,7 @@ int streamWriter::recordTelem( const telem_saving_state * )
 
 int streamWriter::recordSavingState( bool force )
 {
-    static int16_t  lastState   = -1;
-    static uint64_t lastFrameNo = -1;
+    std::lock_guard<std::mutex> lock( m_writeMutex );
 
     uint64_t frameNo = m_currSaveStopFrameNo;
 
@@ -2341,12 +2292,12 @@ int streamWriter::recordSavingState( bool force )
     else
         state = 0;
 
-    if( state != lastState || frameNo != lastFrameNo || force )
+    if( state != m_lastSavingState || frameNo != m_lastSavingFrame || force )
     {
         telem<telem_saving_state>( { state, frameNo } );
 
-        lastState   = state;
-        lastFrameNo = frameNo;
+        m_lastSavingState = state;
+        m_lastSavingFrame = frameNo;
     }
 
     return 0;
@@ -2354,6 +2305,14 @@ int streamWriter::recordSavingState( bool force )
 
 int streamWriter::recordSavingStats( bool force )
 {
+    std::lock_guard<std::mutex> lock( m_writeMutex );
+    m_compressionRatio = m_xrif->compression_ratio;
+    m_encodeRate       = m_xrif->encode_rate;
+    m_differenceRate   = m_xrif->difference_rate;
+    m_reorderRate      = m_xrif->reorder_rate;
+    m_compressRate     = m_xrif->compress_rate;
+    m_frameBytes       = m_width * m_height * m_typeSize;
+
     static uint32_t last_rawSize        = -1;
     static uint32_t last_compressedSize = -1;
     static float    last_encodeRate     = -1;
