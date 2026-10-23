@@ -161,8 +161,8 @@ inline telem_dmsynco::messageT::messageT( int                          state,
         timingStats( builder, primary.metrics[dmTiming::metricIndex( dmTiming::Metric::receiptInterval )] );
     const bool primaryValid = primary.metrics[dmTiming::metricIndex( dmTiming::Metric::publicationInterval )].valid &&
                               primary.metrics[dmTiming::metricIndex( dmTiming::Metric::receiptInterval )].valid;
-    const auto &quality       = primary.total;
-    const auto  primaryTiming = CreateDmSyncoPrimaryTiming( builder,
+    const auto &quality        = primary.total;
+    const auto  primaryTiming  = CreateDmSyncoPrimaryTiming( builder,
                                                            primary.session,
                                                            primary.sequence,
                                                            primary.nowNs,

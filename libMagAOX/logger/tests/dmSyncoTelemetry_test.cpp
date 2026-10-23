@@ -23,20 +23,22 @@ using namespace MagAOX::logger;
 dmTiming::Summary samplePrimary()
 {
     dmTiming::Summary primary;
-    primary.session                                                                 = ( uint64_t( 1 ) << 54 ) + 5;
-    primary.sequence                                                                = 27;
-    primary.nowNs                                                                   = 1234567890123;
-    primary.windowSec                                                               = 2;
-    primary.span                                                                    = 1.6;
-    primary.age                                                                     = 0.125;
-    primary.capacity                                                                = 20000;
-    primary.queued                                                                  = 3;
-    primary.enabled                                                                 = true;
-    primary.fgValid                                                                 = false;
+    primary.session   = ( uint64_t( 1 ) << 54 ) + 5;
+    primary.sequence  = 27;
+    primary.nowNs     = 1234567890123;
+    primary.windowSec = 2;
+    primary.span      = 1.6;
+    primary.age       = 0.125;
+    primary.capacity  = 20000;
+    primary.queued    = 3;
+    primary.enabled   = true;
+    primary.fgValid   = false;
+
     primary.metrics[dmTiming::metricIndex( dmTiming::Metric::publicationInterval )] = {
         4, 500e-6, 1e-6, 498e-6, 502e-6, 1.4, true };
     primary.metrics[dmTiming::metricIndex( dmTiming::Metric::receiptInterval )] = {
         3, 510e-6, 2e-6, 507e-6, 513e-6, 1.2, true };
+
     primary.total.events      = 100;
     primary.total.receipts    = 99;
     primary.total.synthetic   = 1;
