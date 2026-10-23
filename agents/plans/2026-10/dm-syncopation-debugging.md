@@ -2,7 +2,7 @@
 
 This record tracks operator observations, diagnosis, changes and verification during debugging and optimization. The [main engineering plan](dm-syncopation.md) retains the settled design and review answers; the [user guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) documents current operation and interfaces.
 
-Current status: primary timestamp excursions occur with two steps and with passive-only one-step operation. The one-step comparison added 147 primary faults between snapshots, while its later snapshot was armed. The new one-step fault is 476.199 us published versus 475.799 us observed, only -0.400 us of changing observation delay; the two-step fault was 562.743/562.813 us. Extra DM triggers are therefore not required for the primary faults, although indirect effects from synco and its later-step load remain unresolved. The operator reports high-gain loop stability and confirms no frame-behind condition in this run. AO main threads and CUDA helpers are restricted to CPUs 45/46, separate from synco's CPU 61, which has no listed SMT sibling. Disabled-synco ITER summaries show baseline process-start variation, occasionally 485–520 us from the filter onward, without yet reproducing the larger publication tails. Exact startup latency, the origin of primary publication variation and sustained two-step qualification remain open; earlier EDT-confounded observations are retained below.
+Current status: ordered primary telemetry strongly favors late-then-early intervals, but does not support an always-late-then-early rule. Eight nonoverlapping two-second windows from the latest operator run show 49/65 late intervals immediately followed by early intervals, versus 6/69 early intervals immediately followed by late intervals, using a 20 us classification threshold. The median stays 499.944–500.145 us across all reports. Primary publication tails remain approximately -81/+81 us, while the mode-3 combiner contributes about 9.31 us mean delay with 0.17–0.18 us deviation. No auxiliary deliveries or collection-quality errors are reported in this run. The median/skip scheduler and targeted extra-step wake remain unimplemented, and the early-arrival reserve remains undecided. Earlier trials, including the EDT-confounded observations, are retained below; the origin of primary publication variation and sustained multi-step qualification remain open.
 
 Append subsequent investigations as dated entries, keeping operator evidence, local verification and outstanding instrument checks explicit. All agent work runs on the workstation; the operator performs instrument actions and supplies results.
 
@@ -1289,3 +1289,262 @@ capture or producer event changes were introduced. No hardware qualification,
 agent instrument action or commit/push is included. The new
 scheduler behavior and targeted extra-step wake remain pending, with the early
 reserve undecided.
+
+## 2026-10-23 operator result: late-then-early predominates
+
+The operator supplied 15 new `[dmsynco]` records, sequences **26–40** in primary
+session **2**, logged from **21:32:58.957127125** through **21:33:12.977516466 UTC**.
+The source telemetry file is
+`dmtweeter-synco_20261023213233925248850.bintel`, provided in attachment
+`f68a84e8-2846-46e4-837a-7bff40fd55d9/Pasted text.txt`. The primary-pair table is
+present and enabled, with a **20 us** threshold and about **3,999 intervals /
+3,998 adjacent pairs** per two-second window. All reports have valid primary
+timing and a captured schedule, `state=0`, `steps=2`, and zero delivered, missed
+and fault counters. These records measure ordering without demonstrating active
+extra-step delivery; the enable toggle is not present in this telemetry.
+
+Reports arrive about once per second, so neighboring two-second windows overlap.
+For a sample without shared observations, select sequences **26, 28, 30, 32, 34,
+36, 38, 40**. Their `primary_now_ns` times are at least **2.002860006 s** apart,
+leaving 2.860–2.978 ms between nominal window boundaries. These eight windows
+contain **31,992 eligible intervals / 31,984 adjacent pairs**; this is a sampled
+set of disjoint windows, not a cumulative total over the continuous run.
+
+| Directed follow-up | Count | Conditional fraction |
+| --- | --- | --- |
+| Late interval immediately followed by early | 49 / 65 eligible late follow-ups | 75.38% |
+| Early interval immediately followed by late | 6 / 69 eligible early follow-ups | 8.70% |
+
+The alternate disjoint selection, sequences **27, 29, 31, 33, 35, 37, 39**, gives
+**46/59 (77.97%)** and **5/64 (7.81%)**, respectively. It supports the same
+directional preference but overlaps the first selection, so do not combine the
+two selections or treat them as independent replicates. Excursions can cluster;
+these fractions are descriptive observations, not an independent-event
+probability model.
+
+Across the first disjoint selection, the next interval after a late interval
+averages **472.591 us** (65 samples), whereas the next interval after an early
+interval averages **505.258 us** (69 samples). The 49 late-then-early sums average
+**1,000.678 us**, close to twice the roughly 500 us median, supporting substantial
+two-interval catch-up. Individual sums span **951.037–1,038.631 us**, however, so
+the next interval does not exactly repay each delay. Sixteen eligible late
+intervals have no immediate successor classified early at this threshold.
+
+This supports the operator's expectation as the dominant pattern, not as an
+absolute rule. Nonzero early-then-late counts also do not prove an independently
+early initiating event: a late–early–late sequence contributes both directed
+pairs. The saved pair summaries cannot distinguish such rebounds from separate
+early-first disturbances. The fractions condition on the first interval and
+its observed successor, not directly on whether every short interval has a late
+predecessor. Classification still measures interval length, not absolute phase
+against the camera grid.
+
+The median across all 15 windows is **499.944–500.145 us**; primary publication
+interval deviation is **5.687–6.252 us**, with overall extrema
+**419.221–580.557 us**. Primary publication and receipt statistics closely agree.
+The combiner remains writer PID **2070021**, trigger inode **1525**. Its
+primary-to-combined-publication mean is **9.305–9.334 us**, with deviation
+**0.171–0.179 us** and observed maximum **11.151 us**. The much smaller variation
+in that delay remains consistent with most output cadence variation already
+being present at primary publication.
+
+Primary event totals increase **48,462 -> 76,503** (+28,041) between first and
+last records. All reported primary/combiner quality-error totals remain zero,
+including duplicates, gaps, rejected/invalid metadata, missing/unlinked trace
+and collection drops. Queues contain at most one observation. This supports
+using the reported contiguous-event populations for this comparison; it is not
+a proof about unobserved instrument paths or physical DM response.
+
+Record the dominant compensation pattern in the main plan, but do not make
+exact catch-up or a universal late-first order a scheduler assumption. The
+median/skip revision and targeted wake remain pending, and these measurements
+do not choose or qualify the early-arrival reserve. Only engineering records
+were changed for this analysis; no C++ changes, test/build rerun, commit, push
+or agent instrument action was performed.
+
+## 2026-10-23 clarification: keep active steps on the predicted cadence
+
+The operator clarifies the intended ordinary-excursion handling: an early main
+can skip passive step-0 preparation while the following active step 1 remains
+on the regular cadence; a late main should not move step 1. The main plan is
+revised to distinguish the predicted median-period target grid from actual
+main arrival and from passive preparation success. This supersedes the prior
+proposal to re-anchor every active target to each observed main and to require
+fresh successful step-0 preparation before resuming active work.
+
+For a predicted main at **500 us**, `T=500 us` and two steps, the active step-1
+target stays **750 us** for either a main at **420 us** or one at **580 us**.
+An early main cancels a passive batch that has not started and cannot safely
+precede it; if the batch is already complete there is no preparation to skip.
+A skipped preparation leaves the last complete contribution in place and is
+counted without a routine primary-fault/reacquisition response. The next active
+step independently stages/copies its contribution and does not depend on that
+passive preparation having succeeded.
+
+For a late main, an already prepared passive step 0 is still ready on time;
+its main-triggered application to the DM is late. The active target does not
+slide, but execution still requires association of the actual main's combined
+output and expiration of its reader/processing hold. A main arriving too close
+to the target, or not yet observed/associated, makes that active step unusable:
+skip it rather than postponing it or synthesizing catch-up triggers. A main
+arriving during an in-progress passive copy is a reader/partial-batch fault,
+not an ordinary silent skip. Skipping future preparation also cannot undo a
+collision with a previously issued active command whose hold is still running.
+
+Source inspection confirms the current code has both superseded couplings:
+`processPrimary()` targets `observed + j*T/Nreq` and gates all active steps on
+`m_primed`, which comes from successful passive preparation. It also faults on
+the narrow primary-interval residual. The proposed behavior therefore requires
+scheduler changes rather than a configuration adjustment. Median period alone
+does not specify phase; initial grid acquisition, persistent phase correction
+and ambiguous-cycle handling remain design details to settle. The next-main
+envelope must allow catch-up after a late main rather than assuming another
+full `T` from that late arrival. The early-arrival reserve remains undecided.
+
+Only the main plan and this debugging record were revised. No C++ changes,
+test/build rerun, commit, push or agent instrument action was performed.
+
+## 2026-10-23 upstream stage attribution: current coverage and next diagnostic
+
+The operator asks whether existing telemetry can identify which AO processing
+stage produces each excursion, predicting steady `camwfs.atime` followed by a
+delay in one or more later stages. Current measurements show the large interval
+excursions already at `dm01disp03` publication, while the latest measured
+primary-to-combined delay has only 0.171–0.179 us deviation. They do not locate
+the excursion among camera publication, WFS preparation, reconstruction, filter
+and DM-command production. Separate camera/primary aggregate windows cannot
+associate a particular delayed command with its camera acquisition or determine
+whether the responsible stage is repeatable.
+
+Local source inspection confirms `dev::dmCombTiming::observe()` captures only
+the combined trace's first two rows, representing dmcomb and the primary
+producer. It publishes aggregate combiner durations, not a frame-associated
+upstream timing chain. MILK already propagates additional process-trace rows
+containing writer PID, trigger inode/input counter, process-start and
+stream-update times. A possible next diagnostic is to copy a bounded upstream
+chain at primary observation and calculate each stage's start-to-update work
+and upstream-update-to-start handoff. Condition those measurements on the same
+late/early primary event, retaining its preceding/following observations; compare
+latency changes between successive associated frames, since a constant long
+stage latency does not by itself create interval jitter. Preserve all stage
+contributions rather than forcing every excursion into one cause.
+
+This could reuse existing producer timestamps without adding AO hot-path clock
+reads, but trace fields are best-effort metadata: input counters are sampled at
+output update, not proven consumed-frame identity. Validate chain continuity,
+counter/frame association, missing/frozen rows and writer/session changes before
+claiming event attribution. `camwfs.atime` is not carried by the process trace;
+matching a specific DM excursion to its EDT acquisition timestamp would need
+a separately matched camera frame. The
+camera frame grabber's REALTIME publication timestamp, MILK external trace
+clock and local monotonic markers also need qualified clock relationships before
+cross-clock latency subtraction. Ordinary aggregate stage statistics alone
+would not establish which stage caused a given excursion.
+
+This records a diagnostic proposal, not a new implementation request. Only
+this engineering record was changed; no C++ changes, tests, build, commit, push
+or agent instrument action was performed.
+
+### Independent camera acquisition excursion check
+
+The operator clarifies that camera acquisition can be analyzed separately to
+test whether `camwfs.atime` ever has interval excursions. This does not require
+camera-to-DM frame matching or subtraction of clocks from separate systems.
+Analyze consecutive acquisition differences in their own clock over the same
+test period, recording window coverage, extrema and any threshold-exceeding
+intervals. Existing `camwfs.fg_timing.acq_min`/`acq_max` already report these
+extrema for each analyzed window; mean/RMS alone cannot establish absence of
+rare excursions. The current `[fgtimes]` log stores means/jitters without these
+extrema. Continuous coverage matters when claiming none occurred.
+
+If covered camera intervals remain steady while primary intervals have large
+excursions, that places the added variation after camera acquisition. The
+propagated AO trace can then locate variation in later handoff/processing
+stages. Exact event association remains relevant only for correlating a specific
+camera event with a specific command or calculating full camera-to-DM latency;
+it is not a prerequisite for this independent camera check. No implementation
+or hardware action is implied by this clarification.
+
+## 2026-10-23 independent camera and upstream checks implemented
+
+The operator authorized implementing the two diagnostic checks. A third
+metadata-only monitor independently observes camera acquisition `atime`, using
+existing `dev::dmTiming` interval/median/pair analysis. It defaults to `camwfs`
+and ordinary scheduling, with automatic reader allocation. Acquisition extrema,
+counts, coverage, quality and excursion ordering are retained in `[dmsynco]` and
+read-only INDI rather than depending on mean/RMS-only camera `[fgtimes]` logs.
+No camera-to-DM frame pairing is attempted. Malformed and nonincreasing stamps
+at consecutive counters are rejected; gaps/losses prevent a claim of complete
+camera coverage. Camera pixel data and producer settings are never changed.
+
+The new reusable `dev::dmPipelineTiming` captures up to ten existing primary
+trace rows before the cycle mutex, reusing existing primary receipt/entry times.
+Its producer performs bounded metadata copies without allocating, waiting or
+reading another clock. Ordinary app logic analyzes each stage's processing and
+handoff duration, plus changes from the previous associated observation,
+conditioned on late/early primary publication intervals around a retained-window
+median. Signed changes separate newly added delay from constant stage latency.
+Oldest represented start intervals and primary publication-tail changes retain
+variation outside the represented stages. The camera acquisition endpoint is
+independent of that oldest trace boundary.
+
+Qualification requires real consecutive primary events and fresh coherent rows
+with independently progressing trigger-input counters, starts and updates.
+Identity changes break associations and statistics include only the latest
+observed topology. Existing MILK MeasureTiming must keep starts advancing; no
+producer timing, trigger or scheduling configuration is changed. Missing,
+invalid/frozen, truncated, changed and lost observations are reported explicitly.
+Trace metadata still does not prove exact consumed-frame identity. All external
+clock differences remain separate from monotonic observation coverage.
+
+New optional `[dmsynco]` camera/pipeline tables append to the existing schema;
+legacy buffers remain readable. Camera interval properties reuse primary
+cadence/quality/pair registration and update code. New pipeline properties show
+row identity, ordinary and conditional populations, signed changes, boundary
+intervals and quality. Both checks continue while synco scheduling is disabled,
+auxiliary resources are unavailable or a timed cycle holds the scheduler mutex.
+`diagnostics.camera` and `diagnostics.pipeline` default true; `cameraMonitor`
+selects the independent acquisition stream. Window/cap/threshold settings are
+shared with existing diagnostics; a zero excursion threshold keeps ordinary
+trace measurements while disabling conditional/pair classification.
+
+The guide documents metric names, seconds versus configured microseconds,
+observation coverage, row indices versus synco step numbers, clocks and source
+boundary limits. Main-plan scheduler revisions remain pending: this adds no
+median-grid scheduling, per-step skip policy or targeted extra-step wake, and
+the early-arrival reserve stays undecided.
+
+During local verification, the new configuration regression caught the monitor
+helper overwriting the camera name with the app instance. Restoring `camwfs`
+after helper setup fixes the intended default. The new logger test also needed
+its explicit generated API include; that test-only build issue was corrected.
+Final verification results and the requested commit/push checkpoint follow.
+
+### Local verification and requested commit/push checkpoint
+
+Final focused workstation suites pass **4,673 assertions / 64 cases**:
+
+| Suite | Assertions | Cases |
+| --- | ---: | ---: |
+| App and isolated primary/combined/camera semaphore workers | 2,897 | 41 |
+| Upstream stage collector | 99 | 5 |
+| New acquisition/pipeline telemetry | 355 | 4 |
+| Legacy synco telemetry | 322 | 7 |
+| Existing ordered-pair/controller telemetry | 1,000 | 7 |
+
+Normal library/schema, dmSyncopation and logdump builds pass. No new C++ warnings
+were emitted; the library's existing schema field-name notices and dirty-tree
+build notices remain unrelated. All touched C++ files pass clang-format checks,
+whitespace checks pass, and independent collector/serialization/app/guide reviews
+found no remaining blockers. The final app run includes the fixed camera default.
+Local tests used isolated temporary shared memory only; test logs were preserved
+outside the repository. No instrument commands or hardware actions were run.
+
+The user authorized committing and pushing after verification. Keep functional
+code/tests and these associated engineering records together, followed by the
+user guide as a documentation-only commit. Operator deployment must rebuild and
+install both dmSyncopation and logdump, then compare camera extrema and upstream
+conditional changes while scheduling remains disabled. That instrument result,
+not the workstation checks, will determine whether acquisition or a particular
+handoff/processing stage carries the observed excursions. Scheduler revisions
+and selection of the early-arrival reserve remain separate pending work.

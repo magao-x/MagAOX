@@ -92,8 +92,9 @@ Current work, following the 2026-10-23 measurements and operator direction:
 | --- | --- |
 | Primary, combiner and DM-controller timing measurements | Implemented; operator evidence recorded. |
 | Semaphore-triggered dmcomb baseline | Operator reports mode 3; substantially lower combiner delay jitter measured. |
-| Ordered primary interval-pair measurements | Implemented and locally verified. Tests both orderings without assuming the expected result. |
-| Median-based period and skipped auxiliary cycles for ordinary excursions | Revised design below; not implemented. |
+| Ordered primary interval-pair measurements | Implemented and verified. Operator sample favors late-then-early (49/65) over early-then-late (6/69), without a universal ordering or exact compensation. |
+| Independent camera acquisition excursions and upstream AO trace stages | Implemented and locally verified; operator comparison pending. |
+| Median-based target cadence and per-step skips for ordinary excursions | Revised design below; active targets stay on the predicted grid despite early/late main arrivals. Not implemented. |
 | Targeted dmcomb-reader wake for active extra steps | Proposed design below; not implemented. |
 | Enabled multi-step qualification | Pending the scheduler changes and full timing-window qualification. |
 
@@ -134,22 +135,41 @@ targets mid-cycle. Compute from preallocated storage outside final copy/wake
 operations. A persistent real rate change still requires acquisition and a new
 feasibility check.
 
-The median sets `T` and substep spacing `T/Nreq`. Each distinct real primary
-publication still supplies that cycle's observed monotonic phase anchor. It
-does not become a synthetic regular-grid main event. Publish future provider
-cutoffs using the selected median, current real anchor and actual schedule
-validity; cancel obsolete cutoffs when skipping a cycle. Never manufacture a
-primary event or replay missed auxiliary triggers to catch up.
+The median sets `T` and substep spacing `T/Nreq`. Following the operator's
+clarification below, maintain a predicted main phase `Gk` and active targets
+`Gk + j*T/Nreq`, rather than shifting those targets to each actual main arrival.
+Actual primary events identify real cycle progression and start the associated
+reader/processing hold; they do not automatically reset the active target grid.
+A long interval followed by a short one must not move step 1 first late and
+then early. Median period alone does not define phase: initial phase acquisition,
+bounded correction for persistent phase drift, and ambiguous cycle assignment
+still need explicit design before implementation. Freeze published targets for
+a cycle; deliberate future-grid changes must have visible schedule validity and
+must not retime an already advertised step. Never manufacture a primary event
+or replay missed auxiliary triggers to catch up.
 
-**Ordinary excursions:** cancel obsolete/unusable auxiliary targets, count the
-affected auxiliary cycle/steps as skipped, and retain the median and learned
-wait corrections. The main AO command continues normally. Once current combined
-output is associated and a fresh on-time passive step 0 has been prepared,
-resume on the next usable real cycle without demanding another 32 consecutive
-near-median intervals. Interval-excursion skips are separate from the existing
-consecutive app-deadline-failure recovery counter; repeated harmless skips must
-not recreate the current full-reacquisition loop. Preserve retained complete
-contributions and the always-copy rule for steps actually executed.
+**Ordinary excursions:** cancel only obsolete/unusable step work, count it as
+skipped, and retain the median and learned wait corrections. The main AO command
+continues normally. An early main observed before passive step-0 copying starts
+cancels that preparation if it can no longer precede the main safely; an already
+completed copy needs no cancellation. The main uses the last complete retained
+contribution if the new preparation was skipped. This routine skip does not
+disarm the next active target or require a new successful passive step 0 before
+step 1 becomes eligible. Record the skip in telemetry without treating it as a
+primary synchronization fault or demanding another 32 near-median intervals.
+Keep routine excursion skips separate from consecutive app-deadline failures.
+
+A late main leaves an already prepared passive step 0 ready at its original
+deadline; its main-triggered application occurs late. The next active target
+stays on the predicted grid. Before its independent snapshot/copy/trigger,
+require the actual main's combined output to be associated and its full
+reader/processing hold to have expired. If that leaves no safe window at the
+fixed target, skip the active step rather than sliding it later or issuing
+catch-up work. A main not yet observed/associated cannot be assumed complete
+merely because its predicted time has passed. Successful passive preparation
+and active eligibility are separate state; remove the present `m_primed` gate
+that suppresses all active steps after a skipped step 0. Preserve retained
+complete contributions and the always-copy rule for steps actually executed.
 
 A forward counter gap means unobserved primary publications: suppress stale
 auxiliary work, exclude the gap-spanning interval from the median, and establish
@@ -162,7 +182,11 @@ during a copy cannot be made safe retrospectively by labelling it skipped.
 **Timing envelope:** separate the residual threshold used to classify an
 ordinary skipped cycle from `tracking.earlyMainUs`, the physical earliest-next-
 main reserve used for copy/trigger windows. A median is neither a minimum
-spacing nor an early-arrival bound. Retain all delivery, controller-reader,
+spacing nor an early-arrival bound. Passive-step cancellation does not protect
+an earlier active command whose hardware/reader hold is still running when the
+next main arrives. Check the next-main envelope against the predicted phase and
+qualified reserve, not simply late actual arrival plus `T`: a short catch-up
+interval may follow. Retain all delivery, controller-reader,
 copy, visibility and post-action checks and recompute full feasibility with the
 chosen early reserve. The observed approximately 80 us early intervals exceed
 the current 20 us reserve. The operator explicitly chose to leave the new reserve
@@ -176,11 +200,32 @@ reader bound to make the requested count fit. The 273 us calculation is a
 conditional example, not a selected configuration.
 
 Verification must exercise an ordinary 500 us stream with isolated 420/580 us
-intervals, retained median/feedback, skipped stale targets without catch-up,
-forward gaps versus resets, persistent rate change, safe resume after fresh
-step-0 preparation, and a main arriving before/during mutation or at output
-acknowledgement. Expose median count/age, interval-excursion skips and genuine
-faults distinctly. This revision changes no C++ or live configuration yet.
+intervals, retained median/feedback and fixed active targets, skipped passive
+preparation without suppressing an otherwise eligible step 1, and a completed
+passive copy followed by a late main. Cover active targets rejected by the
+actual-main hold or by a missing main association, no target sliding/catch-up,
+forward gaps versus resets, persistent rate/phase change, and a main arriving
+before/during mutation or at output acknowledgement. Expose median count/age,
+grid phase, per-step excursion skips and genuine faults distinctly. This
+revision changes no C++ or live configuration yet.
+
+### 2026-10-23 clarification: passive skips and fixed active targets
+
+The operator clarifies that early main arrival should ordinarily skip only an
+unstarted passive step-0 preparation, and that late main arrival should not move
+the step-1 target. This supersedes the earlier per-observed-main phase anchor
+and the requirement to prepare another successful step 0 before active work
+can resume. For `T=500 us`, `Nreq=2` and predicted main time `Gk=500 us`, step 1
+remains targeted at **750 us** whether the real main arrives at **420 us** or
+**580 us**. The actual main still runs normally. A late main can veto an active
+write through its actual reader/processing hold, but does not shift that target.
+
+Here "late step 0" means late main-triggered DM application, not necessarily a
+late passive memory copy. Routine skipped preparations are quiet operationally
+but counted in telemetry; a main overlapping a copy already in progress remains
+a genuine reader/partial-batch fault. These distinctions leave the early-arrival
+reserve undecided and require a specified grid phase-tracking policy before
+implementing this revision.
 
 ### 2026-10-23 ordered excursion check implemented
 
@@ -235,6 +280,84 @@ Affected files:
 The separate median scheduler,
 skip-recovery and targeted auxiliary-wake revisions remain unimplemented, and
 the early-arrival reserve remains undecided.
+
+### 2026-10-23 ordered excursion operator evidence
+
+The first operator pair telemetry contains 15 overlapping two-second windows.
+Selecting eight disjoint windows gives **49/65 (75.38%)** late intervals with an
+immediate early successor, versus **6/69 (8.70%)** early intervals with an
+immediate late successor, at the configured **20 us** classification threshold.
+The late-then-early sums average **1,000.678 us**, but range
+**951.037–1,038.631 us**. The window medians remain **499.944–500.145 us**.
+The [debugging record](dm-syncopation-debugging.md) documents window selection,
+quality checks, alternate selection and limits of the interpretation.
+
+Late-then-early compensation is the dominant measured pattern, not an invariant
+or a bound on the next main arrival. Reverse pairs may also belong to
+late–early–late sequences; pair aggregates do not establish which disturbance
+initiated them. The pending scheduler must continue to handle both orders,
+ordinary successors and incomplete compensation. No reserve, scheduler policy
+or live setting is changed or qualified by this result.
+
+### 2026-10-23 independent acquisition and upstream stage checks
+
+At the operator's request, implement independent camera acquisition interval
+checks and upstream trace-stage measurements before further scheduler changes.
+Reuse existing `dev::dmTiming` interval/pair analysis for a third metadata-only
+`shmimMonitor` observing camera `atime`; default stream `camwfs`, ordinary
+priority, automatic semaphore selection. No camera-to-DM pairing or cross-clock
+latency is required. Persist interval extrema/count/coverage and observation
+quality in `[dmsynco]`, since camera `[fgtimes]` alone contains only means/jitters.
+Reject malformed or nonprogressing acquisition metadata, and expose gaps/losses
+so a partial observation cannot establish that acquisition never had excursions.
+
+A new reusable `dev::dmPipelineTiming` collector copies up to ten existing trace
+rows at primary callback entry, reusing its existing observation/receipt times
+before taking the scheduler mutex. A bounded preallocated handoff moves all
+statistics to ordinary app logic. Per-row processing and handoff durations are
+conditioned on late/early primary publication intervals around the retained
+median; signed changes from the preceding associated command identify added
+latency rather than merely stages with a constant large duration. Oldest-stage
+start intervals and primary publication-tail changes expose variation outside
+the represented trace. A delayed source/wake boundary is not assigned to a later
+stage. Ordinary tails remain in the median even when their trace is unavailable.
+
+Trace association requires coherent metadata, real consecutive observations,
+progressing per-row starts/updates/input counters, received trigger status on
+linked rows and stable topology. Row input counters are not equal across stages.
+Topology changes break adjacency, and statistics retain only rows matching the
+latest topology. Stale, malformed, gapped, truncated and missing traces remain
+visible in quality counters. Existing MILK `MeasureTiming` must make starts
+advance; the app does not change producer settings. Propagated traces remain
+best-effort associations rather than proven consumed-frame identity.
+
+New controls `diagnostics.camera` and `diagnostics.pipeline` default true; all
+observers share `diagnostics.windowSec`, `maxEvents` and the independent
+`excursionUs` threshold. `cameraMonitor` selects the acquisition stream/placement,
+independently of the existing camera INDI FPS subscription. Read-only INDI adds
+`camera_timing`, `camera_timing_quality`, `camera_interval_pairs`,
+`pipeline_timing_quality`, `pipeline_stage0` through `pipeline_stage9` and
+`pipeline_boundary_timing`. Trace-row numbers are unrelated to synco step
+numbers. Camera and pipeline optional telemetry tables append to the existing
+schema; rebuild/install both app and logdump. The guide explains units, sparse
+populations, quality, source-boundary coverage and how to interpret stage changes.
+
+Verification passes **4,673 assertions / 64 cases**: app 2,897/41, upstream
+collector 99/5, new camera/pipeline logger 355/4, legacy synco logger 322/7 and
+existing pair/controller logger 1,000/7. Normal library/schema, app and logdump
+builds pass, as do formatting, whitespace and independent implementation/guide
+reviews. A camera default-name regression and a test-only missing include were
+corrected before the final successful runs. Instrument comparison remains an
+operator-run follow-up; no agent instrument actions were performed.
+
+Affected implementation files are `apps/dmSyncopation/dmSyncopation.hpp`, its
+tests, new common/dev `dmPipelineTiming.hpp` headers and collector tests,
+`telem_dmsynco.fbs`/`telem_dmsynco.hpp`, focused pipeline/legacy logger tests,
+`libMagAOX/Makefile`, `tests/Makefile.one` and `tests/groups.dox`. Engineering
+records and the user guide accompany the code. Local verification results are
+recorded in the debugging record. These checks do not implement the median-grid
+scheduler, per-step skip recovery or targeted wake; the early reserve is still
+undecided.
 
 ### 2026-10-23 proposed targeted primary-semaphore wake
 

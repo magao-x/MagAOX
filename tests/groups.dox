@@ -77,6 +77,16 @@ $ less tests/results/latest/run.log
  * \ingroup application_unit_test
  */
 
+/** \defgroup dmPipelineTiming_unit_test Upstream AO Trace Timing Unit Tests
+ * \brief Ordered stage timing, excursion attribution and bounded observation tests.
+ * \ingroup app_dev_unit_tests
+ */
+
+/** \defgroup dmPipelineTelemetry_unit_test Upstream AO Timing Telemetry Unit Tests
+ * \brief Independent camera, upstream trace and legacy serialization tests.
+ * \ingroup logger_unit_test
+ */
+
 /** \defgroup alpaoCtrl_unit_test ALPAO Controller Unit Tests
  * \brief Offline SDK endpoint, submission status and timing tests.
  * \ingroup application_unit_test

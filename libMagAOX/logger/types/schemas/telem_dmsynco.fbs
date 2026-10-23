@@ -1,5 +1,5 @@
 /// \file telem_dmsynco.fbs
-/// \brief Scheduler telemetry with optional primary cadence, ordered excursions and combiner traces.
+/// \brief Scheduler telemetry with optional primary/camera cadence, pipeline stages and combiner traces.
 namespace MagAOX.logger;
 
 // Values and coverage are seconds; publication values retain their external clock.
@@ -29,6 +29,7 @@ table DmSyncoIntervalPairs
     early_late_sum:DmSyncoTimingStats (required);
 }
 
+// External-stamp population is primary writetime or, only in camera_timing, independent camera atime.
 table DmSyncoPrimaryTiming
 {
     session:ulong;
@@ -90,6 +91,67 @@ table DmSyncoCombinerTiming
     dropped:ulong;
 }
 
+// Trace row zero is the latest primary producer; increasing rows follow its upstream inputs.
+// All stage durations, signed changes, reference intervals and coverage are seconds.
+table DmSyncoPipelineStage
+{
+    row_index:ulong;
+    pid:long;
+    input_inode:ulong;
+    execution:DmSyncoTimingStats (required);
+    handoff:DmSyncoTimingStats (required);
+    late_execution:DmSyncoTimingStats (required);
+    late_handoff:DmSyncoTimingStats (required);
+    early_execution:DmSyncoTimingStats (required);
+    early_handoff:DmSyncoTimingStats (required);
+    late_execution_change:DmSyncoTimingStats (required);
+    late_handoff_change:DmSyncoTimingStats (required);
+    early_execution_change:DmSyncoTimingStats (required);
+    early_handoff_change:DmSyncoTimingStats (required);
+}
+
+table DmSyncoPipelineQuality
+{
+    events:ulong;
+    receipts:ulong;
+    synthetic:ulong;
+    rejected:ulong;
+    duplicates:ulong;
+    counter_gaps:ulong;
+    invalid_metadata:ulong;
+    missing_trace:ulong;
+    invalid_trace:ulong;
+    topology_changes:ulong;
+    truncated:ulong;
+    dropped:ulong;
+}
+
+table DmSyncoPipelineTiming
+{
+    enabled:bool;
+    session:ulong;
+    sequence:ulong;
+    now_ns:long;
+    window_sec:double;
+    span_sec:double;
+    age_sec:double;
+    capacity:ulong;
+    queued:ulong;
+    median:double;
+    threshold:double;
+    intervals:ulong;
+    late:ulong;
+    early:ulong;
+    stage_count:ulong;
+    total:DmSyncoPipelineQuality (required);
+    stages:[DmSyncoPipelineStage] (required);
+    source_interval:DmSyncoTimingStats (required);
+    late_source_interval:DmSyncoTimingStats (required);
+    early_source_interval:DmSyncoTimingStats (required);
+    late_publication_change:DmSyncoTimingStats (required);
+    early_publication_change:DmSyncoTimingStats (required);
+}
+
 table Telem_dmsynco_fb
 {
     state:int;
@@ -106,6 +168,8 @@ table Telem_dmsynco_fb
     primary_timing:DmSyncoPrimaryTiming;
     schedule_valid:bool = true;
     combiner_timing:DmSyncoCombinerTiming;
+    camera_timing:DmSyncoPrimaryTiming;
+    pipeline_timing:DmSyncoPipelineTiming;
 }
 
 root_type Telem_dmsynco_fb;

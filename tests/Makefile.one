@@ -56,7 +56,7 @@ else ifeq ($(notdir $(TESTNAME)),logstream_test)
 	LDLIBS = -lmxlib -lflatbuffers
 else ifeq ($(notdir $(TESTNAME)),logsurgeon_test)
 	LDLIBS = -lmxlib -lflatbuffers
-else ifneq ($(filter $(notdir $(TESTNAME)),pupilFit_test dmTimingTelemetry_test dmSyncoTelemetry_test),)
+else ifneq ($(filter $(notdir $(TESTNAME)),pupilFit_test dmTimingTelemetry_test dmSyncoTelemetry_test dmPipelineTelemetry_test),)
 	LDLIBS += -lflatbuffers
 else ifneq ($(filter $(notdir $(TESTNAME)),bmcCtrl_test alpaoCtrl_test irisaoCtrl_test),)
 	# Offline DM tests use their local SDK declarations and software function stubs.

@@ -25,12 +25,14 @@ INCLUDEDEPS= \
 	app/dev/shmimMonitor.hpp \
 	app/dev/dm.hpp \
 	app/dev/dmTiming.hpp \
+	app/dev/dmPipelineTiming.hpp \
 	app/dev/telemeter.hpp \
 	app/dev/dmPokeWFS.hpp \
 	common/config.hpp \
 	common/defaults.hpp \
 	common/environment.hpp \
 	common/dmTiming.hpp \
+	common/dmPipelineTiming.hpp \
 	file/fileTimes.hpp \
 	file/stdFileName.hpp \
 	file/stdSubDir.hpp \

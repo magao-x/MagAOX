@@ -23,6 +23,7 @@ class Harness : public dmSyncopation
 {
   public:
     using CombinedMonitor = dev::shmimMonitor<dmSyncopation, syncoCombinerT>;
+    using CameraMonitor   = dev::shmimMonitor<dmSyncopation, syncoCameraT>;
 
     using dmSyncopation::allocate;
     using dmSyncopation::consume;
@@ -31,6 +32,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::Fault;
     using dmSyncopation::m_advances;
     using dmSyncopation::m_bounds;
+    using dmSyncopation::m_cameraCadence;
+    using dmSyncopation::m_cameraDiagnostics;
     using dmSyncopation::m_cameraElement;
     using dmSyncopation::m_cameraFps;
     using dmSyncopation::m_cameraJitterUs;
@@ -59,9 +62,15 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_faults;
     using dmSyncopation::m_faultTiming;
     using dmSyncopation::m_indiP_camera;
+    using dmSyncopation::m_indiP_cameraPairs;
+    using dmSyncopation::m_indiP_cameraQuality;
+    using dmSyncopation::m_indiP_cameraTiming;
     using dmSyncopation::m_indiP_combinerQuality;
     using dmSyncopation::m_indiP_combinerTiming;
     using dmSyncopation::m_indiP_enable;
+    using dmSyncopation::m_indiP_pipelineBoundary;
+    using dmSyncopation::m_indiP_pipelineQuality;
+    using dmSyncopation::m_indiP_pipelineStages;
     using dmSyncopation::m_indiP_primaryPairs;
     using dmSyncopation::m_indiP_primaryTiming;
     using dmSyncopation::m_indiP_primaryTimingQuality;
@@ -79,6 +88,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_now;
     using dmSyncopation::m_period;
     using dmSyncopation::m_periodSource;
+    using dmSyncopation::m_pipelineCadence;
+    using dmSyncopation::m_pipelineDiagnostics;
     using dmSyncopation::m_previousCallbackEnd;
     using dmSyncopation::m_previousCallbackRuntime;
     using dmSyncopation::m_previousPrimaryPublication;
@@ -102,11 +113,16 @@ class Harness : public dmSyncopation
     using dmSyncopation::missedStep;
     using dmSyncopation::readCamera;
     using dmSyncopation::readPrimaryTiming;
+    using dmSyncopation::setupCadenceINDI;
     using dmSyncopation::setupCombinerCadenceINDI;
+    using dmSyncopation::setupPipelineINDI;
     using dmSyncopation::setupPrimaryCadenceINDI;
     using dmSyncopation::snapshot;
+    using dmSyncopation::updateCadenceINDI;
     using dmSyncopation::updateCombinerCadenceINDI;
+    using dmSyncopation::updatePairsINDI;
     using dmSyncopation::updatePeriod;
+    using dmSyncopation::updatePipelineINDI;
     using dmSyncopation::updatePrimaryCadenceINDI;
     using dmSyncopation::updatePrimaryPairsINDI;
     using dmSyncopation::waitUntil;
@@ -162,6 +178,24 @@ class Harness : public dmSyncopation
     /// Return the independent monitor's configured thread priority.
     int combinedMonitorPriority() const;
 
+    /// Import an isolated fixture stream for metadata-only acquisition observation.
+    void attachCameraOnly();
+
+    /// Return the camera observer's descriptor without opening scheduler resources.
+    IMAGE &cameraImage();
+
+    /// Start the real camera monitor using the isolated primary fixture as its input.
+    void startCameraMonitor();
+
+    /// Join the camera observer and clear its already-closed imported descriptor.
+    void stopCameraMonitor();
+
+    /// Return the camera monitor's configured stream name.
+    const std::string &cameraMonitorName() const;
+
+    /// Return the camera observer's configured scheduling priority.
+    int cameraMonitorPriority() const;
+
     /// Initialize callback properties without starting any threads or INDI connections.
     void properties();
 };
@@ -174,6 +208,7 @@ Harness::Harness()
 
 Harness::~Harness() noexcept
 {
+    stopCameraMonitor();
     stopCombinedMonitor();
     stopMonitor();
     closeResources();
@@ -185,6 +220,11 @@ Harness::~Harness() noexcept
     if( combinedImage().md )
     {
         ImageStreamIO_closeIm( &combinedImage() );
+    }
+
+    if( cameraImage().md )
+    {
+        ImageStreamIO_closeIm( &cameraImage() );
     }
 }
 
@@ -283,6 +323,52 @@ const std::string &Harness::combinedMonitorName() const
 int Harness::combinedMonitorSemaphore() const
 {
     return CombinedMonitor::m_semaphoreNumber;
+}
+
+void Harness::attachCameraOnly()
+{
+    CameraMonitor::m_shmimName = "dm97disp03";
+    REQUIRE( ImageStreamIO_openIm( &cameraImage(), "dm97disp03" ) == 0 );
+    REQUIRE( allocate( syncoCameraT{} ) == 0 );
+}
+
+IMAGE &Harness::cameraImage()
+{
+    return CameraMonitor::m_imageStream;
+}
+
+void Harness::startCameraMonitor()
+{
+    CameraMonitor::m_shmimName        = "dm97disp03";
+    CameraMonitor::m_getExistingFirst = true;
+    CameraMonitor::m_smThreadInit     = false;
+    CameraMonitor::m_semaphoreNumber  = -1;
+    state( stateCodes::READY );
+    CameraMonitor::m_smThread = std::thread(
+        [this]()
+        {
+            CameraMonitor::smThreadExec();
+        } );
+}
+
+void Harness::stopCameraMonitor()
+{
+    if( CameraMonitor::m_smThread.joinable() )
+    {
+        m_shutdown = true;
+        CameraMonitor::m_smThread.join();
+        cameraImage() = {};
+    }
+}
+
+const std::string &Harness::cameraMonitorName() const
+{
+    return CameraMonitor::m_shmimName;
+}
+
+int Harness::cameraMonitorPriority() const
+{
+    return CameraMonitor::m_smThreadPrio;
 }
 
 int Harness::combinedMonitorPriority() const
@@ -2753,6 +2839,291 @@ TEST_CASE( "syncopation real combined monitor forwards process traces", "[dmSync
     MagAOX::app::dev::shmimMonitor<dmSyncopation, syncoCombinerT>::smThreadExec;
     dmSyncopation::processImage( nullptr, syncoCombinerT{} );
     dmSyncopation::shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::receipt );
+#endif
+    // clang-format on
+}
+
+/// Distinguish camera acquisition excursions from publication and local observer wake timing.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation camera checks acquisition intervals independently", "[dmSyncopation][cameraTiming]" )
+{
+    Streams streams;
+    Harness app;
+    app.attachCameraOnly();
+    app.m_now = CadenceClock::now;
+    app.m_cameraCadence.configure( 2, 32, 20e-6 );
+    constexpr int64_t epoch = 1792000000000000000LL;
+    const int64_t     offsets[]{ 0, 500000, 1000000, 1580000, 2000000, 2500000, 3000000 };
+
+    for( size_t i = 0; i < std::size( offsets ); ++i )
+    {
+        auto *metadata      = streams.images[0].md;
+        metadata->cnt0      = 10 + i;
+        metadata->atime     = synco::toTimespec( epoch + offsets[i] );
+        metadata->writetime = synco::toTimespec( epoch + int64_t( i ) * 700000 );
+        CadenceClock::time  = 1000000000 + int64_t( i ) * 600000;
+        app.shmimMonitorTiming( syncoCameraT{}, dev::shmimMonitorEvent::receipt );
+        std::unique_lock<std::mutex> cycle( app.m_cycleMutex );
+        auto                         observation = std::async( std::launch::async,
+                                       [&]()
+                                       {
+                                           return app.processImage( nullptr, syncoCameraT{} );
+                                       } );
+        const auto                   ready       = observation.wait_for( std::chrono::milliseconds( 500 ) );
+        cycle.unlock();
+        CHECK( observation.get() == 0 );
+        CHECK( ready == std::future_status::ready );
+    }
+
+    app.m_cameraCadence.update( CadenceClock::time );
+    using namespace MagAOX::dmTiming;
+    const auto &summary     = app.m_cameraCadence.summary();
+    const auto &acquisition = summary.metrics[metricIndex( Metric::publicationInterval )];
+    CHECK( acquisition.count == 6 );
+    CHECK( acquisition.mean == Approx( 0.0005 ) );
+    CHECK( acquisition.min == Approx( 0.00042 ) );
+    CHECK( acquisition.max == Approx( 0.00058 ) );
+    CHECK( summary.metrics[metricIndex( Metric::receiptInterval )].mean == Approx( 0.0006 ) );
+    CHECK( summary.intervalPairs.median == Approx( 0.0005 ) );
+    CHECK( summary.intervalPairs.lateEarlySum.count == 1 );
+    CHECK( summary.intervalPairs.afterLate.count == 1 );
+    CHECK( summary.total.receipts == 7 );
+    CHECK( summary.total.rejected == 0 );
+    CHECK_FALSE( app.m_resources );
+    CHECK_FALSE( app.m_enabled );
+    CHECK( app.m_faults == 0 );
+
+    for( size_t image = 0; image < streams.images.size(); ++image )
+    {
+        for( size_t pixel = 0; pixel < 9; ++pixel )
+        {
+            CHECK( streams.images[image].array.F[pixel] == float( image ) );
+        }
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::allocate( syncoCameraT{} );
+    dmSyncopation::processImage( nullptr, syncoCameraT{} );
+    dmSyncopation::shmimMonitorTiming( syncoCameraT{}, dev::shmimMonitorEvent::receipt );
+#endif
+    // clang-format on
+}
+
+/// Reject unavailable and nonprogressing acquisition metadata and break associations across source epochs.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation camera checks expose incomplete observations", "[dmSyncopation][cameraTiming]" )
+{
+    Streams streams;
+    Harness app;
+    app.attachCameraOnly();
+    app.m_now = CadenceClock::now;
+    app.m_cameraCadence.configure( 2, 32, 20e-6 );
+    constexpr int64_t epoch = 1792000000000000000LL;
+
+    for( uint64_t i = 0; i < 6; ++i )
+    {
+        auto *metadata     = streams.images[0].md;
+        metadata->cnt0     = 10 + i;
+        metadata->atime    = synco::toTimespec( epoch + int64_t( i ) * 500000 );
+        CadenceClock::time = 1000000000 + int64_t( i ) * 500000;
+
+        if( i == 2 )
+        {
+            metadata->atime = synco::toTimespec( epoch + 500000 );
+        }
+        else if( i == 4 )
+        {
+            metadata->atime.tv_nsec = 1000000000;
+        }
+
+        app.shmimMonitorTiming( syncoCameraT{}, dev::shmimMonitorEvent::receipt );
+        REQUIRE( app.processImage( nullptr, syncoCameraT{} ) == 0 );
+    }
+
+    app.m_cameraCadence.update( CadenceClock::time );
+    using namespace MagAOX::dmTiming;
+    CHECK( app.m_cameraCadence.summary().total.rejected == 2 );
+    CHECK( app.m_cameraCadence.summary().metrics[metricIndex( Metric::publicationInterval )].count == 1 );
+    const auto session = app.m_cameraCadence.summary().session;
+    app.shmimMonitorTiming( syncoCameraT{}, dev::shmimMonitorEvent::connected );
+    streams.images[0].md->cnt0  = 0;
+    streams.images[0].md->atime = synco::toTimespec( epoch );
+    CadenceClock::time += 500000;
+    app.shmimMonitorTiming( syncoCameraT{}, dev::shmimMonitorEvent::receipt );
+    REQUIRE( app.processImage( nullptr, syncoCameraT{} ) == 0 );
+    app.m_cameraCadence.update( CadenceClock::time );
+    CHECK( app.m_cameraCadence.summary().session == session + 1 );
+    CHECK( app.m_cameraCadence.summary().intervalPairs.intervals == 0 );
+    CHECK( app.m_faults == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, syncoCameraT{} );
+    dmSyncopation::shmimMonitorTiming( syncoCameraT{}, dev::shmimMonitorEvent::connected );
+#endif
+    // clang-format on
+}
+
+/// Expose optional ordinary-priority camera collection and fixed bounded trace properties without starting workers.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation upstream diagnostic configuration and properties", "[dmSyncopation][pipelineTiming]" )
+{
+    Harness app;
+    app.setupConfig();
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    CHECK( app.m_cameraDiagnostics );
+    CHECK( app.m_pipelineDiagnostics );
+    CHECK( app.cameraMonitorName() == "camwfs" );
+    CHECK( app.cameraMonitorPriority() == 0 );
+    CHECK( syncoCameraT::configSection() == "cameraMonitor" );
+    CHECK( syncoCameraT::indiPrefix() == "cam" );
+    app.m_cameraCadence.configure( 2, 32, 20e-6 );
+    app.m_pipelineCadence.configure( 2, 32, 20e-6 );
+    REQUIRE( app.setupCadenceINDI( app.m_cameraCadence,
+                                   app.m_indiP_cameraTiming,
+                                   app.m_indiP_cameraQuality,
+                                   app.m_indiP_cameraPairs,
+                                   "camera",
+                                   "acquisition_" ) == 0 );
+    REQUIRE( app.setupPipelineINDI() == 0 );
+    CHECK( app.m_indiP_cameraTiming.find( "acquisition_min" ) );
+    CHECK( app.m_indiP_cameraTiming.find( "receipt_mean" ) );
+    CHECK( app.m_indiP_cameraPairs.getElements().size() == 29 );
+    CHECK( app.m_indiP_pipelineQuality.find( "invalidTrace" ) );
+    CHECK( app.m_indiP_pipelineBoundary.find( "sourceInterval_mean" ) );
+    CHECK( app.m_indiP_pipelineStages[0].find( "lateExecutionChange_mean" ) );
+    CHECK( app.m_indiP_pipelineStages[9].getPerm() == pcf::IndiProperty::ReadOnly );
+    app.updateCadenceINDI( app.m_cameraCadence, app.m_indiP_cameraTiming, app.m_indiP_cameraQuality, "acquisition_" );
+    app.updatePairsINDI( app.m_cameraCadence, app.m_indiP_cameraPairs );
+    app.updatePipelineINDI();
+
+    char      path[] = "/tmp/dm-synco-upstream-config-XXXXXX";
+    const int fd     = mkstemp( path );
+    REQUIRE( fd >= 0 );
+    close( fd );
+
+    {
+        std::ofstream settings( path );
+        settings << "[diagnostics]\ncamera=false\npipeline=false\n[cameraMonitor]\nshmimName=other_camera\n";
+    }
+
+    app.config.readConfig( path );
+    std::remove( path );
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    CHECK_FALSE( app.m_cameraDiagnostics );
+    CHECK_FALSE( app.m_pipelineDiagnostics );
+    CHECK( app.cameraMonitorName() == "other_camera" );
+    CHECK_FALSE( app.m_enabled );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::setupConfig;
+    dmSyncopation::loadConfigImpl;
+    dmSyncopation::setupCadenceINDI;
+    dmSyncopation::setupPipelineINDI;
+    dmSyncopation::updateCadenceINDI;
+    dmSyncopation::updatePairsINDI;
+    dmSyncopation::updatePipelineINDI;
+#endif
+    // clang-format on
+}
+
+/// Forward primary receipt and session hooks into trace collection even when scheduler resources are absent.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation primary forwards independent upstream trace observations", "[dmSyncopation][pipelineTiming]" )
+{
+    Streams streams;
+    Harness app;
+    prepareCadence( app );
+    app.m_pipelineCadence.configure( 2, 32, 20e-6 );
+    constexpr int64_t epoch = 1792000000000000000LL;
+    cadenceObservation( app, 1000000000, epoch, 10 );
+    cadenceObservation( app, 1000500000, epoch + 500000, 11 );
+    app.m_pipelineCadence.update( CadenceClock::time );
+    CHECK( app.m_pipelineCadence.summary().total.events == 2 );
+    CHECK( app.m_pipelineCadence.summary().total.receipts == 2 );
+    CHECK( app.m_pipelineCadence.summary().intervals == 1 );
+    CHECK( app.m_pipelineCadence.summary().stageCount == 0 );
+    CHECK( app.m_faults == 0 );
+    CHECK_FALSE( app.m_resources );
+    CadenceClock::time += 500000;
+    app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::receipt );
+    app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::discarded );
+    app.m_pipelineCadence.update( CadenceClock::time );
+    CHECK( app.m_pipelineCadence.summary().total.rejected == 1 );
+    const auto session = app.m_pipelineCadence.summary().session;
+    app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::connected );
+    app.m_pipelineCadence.update( CadenceClock::time );
+    CHECK( app.m_pipelineCadence.summary().session == session + 1 );
+    CHECK( app.m_pipelineCadence.summary().intervals == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, dev::shmimT{} );
+    dmSyncopation::shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::receipt );
+#endif
+    // clang-format on
+}
+
+/// Exercise the camera semaphore worker without involving any AO or DM scheduler stream writes.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation real camera monitor retains acquisition timing", "[dmSyncopation][cameraTiming][regression]" )
+{
+    Streams           streams;
+    Harness           app;
+    constexpr int64_t epoch     = 1792000000000000000LL;
+    streams.images[0].md->atime = synco::toTimespec( epoch );
+    app.m_cameraCadence.configure( 30, 32, 20e-6 );
+    app.startCameraMonitor();
+    auto waitEvents = [&]( uint64_t expected )
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 3 );
+
+        do
+        {
+            app.m_cameraCadence.update();
+
+            if( app.m_cameraCadence.summary().total.events >= expected )
+            {
+                return true;
+            }
+
+            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+        } while( std::chrono::steady_clock::now() < deadline );
+
+        return false;
+    };
+    REQUIRE( waitEvents( 1 ) );
+
+    for( uint64_t i = 1; i <= 5; ++i )
+    {
+        streams.images[0].md->write = 1;
+        streams.images[0].md->atime = synco::toTimespec( epoch + int64_t( i ) * 500000 );
+        streams.images[0].md->cnt0  = i;
+        streams.images[0].md->write = 0;
+        REQUIRE( ImageStreamIO_sempost( &streams.images[0], -1 ) == 0 );
+        REQUIRE( waitEvents( i + 1 ) );
+    }
+
+    app.stopCameraMonitor();
+    app.m_cameraCadence.update();
+    const auto &summary = app.m_cameraCadence.summary();
+    CHECK( summary.total.events == 6 );
+    CHECK( summary.total.receipts == 5 );
+    CHECK( summary.total.synthetic == 1 );
+    CHECK( summary.total.rejected == 0 );
+    CHECK( summary.total.dropped == 0 );
+    CHECK( summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::publicationInterval )].count == 5 );
+    CHECK( summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::publicationInterval )].mean ==
+           Approx( 0.0005 ) );
+    CHECK_FALSE( app.m_resources );
+    CHECK_FALSE( app.m_enabled );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::shmimMonitor<dmSyncopation, syncoCameraT>::smThreadExec;
+    dmSyncopation::processImage( nullptr, syncoCameraT{} );
 #endif
     // clang-format on
 }
