@@ -53,6 +53,10 @@ class dmTiming
 
     int64_t m_windowNs{ 0 }; ///< Configured consumer window duration.
 
+    double m_excursionSec{ 0 }; ///< Immutable positive ordered-interval threshold; zero disables that analysis.
+
+    std::vector<int64_t> m_intervalScratch; ///< Consumer-only median workspace, reserved before collection starts.
+
     std::deque<MagAOX::dmTiming::Event> m_window; ///< Consumer-owned retained events.
 
     MagAOX::dmTiming::Summary m_summary; ///< Consumer-owned snapshot; forced recording reads this cache.
@@ -77,13 +81,25 @@ class dmTiming
     /// Recompute independent metric populations from consumer-owned events.
     void calculate( int64_t nowNs /**< [in] Monotonic window evaluation time. */ );
 
+    /// Require two real, contiguous publication observations within the same local retention window.
+    static bool orderedPublication( const MagAOX::dmTiming::Event &previous /**< [in] Earlier observation. */,
+                                    const MagAOX::dmTiming::Event &event /**< [in] Following observation. */,
+                                    int64_t                        cutoff /**< [in] Oldest accepted local receipt. */,
+                                    int64_t                        nowNs /**< [in] Latest accepted local receipt. */ );
+
+    /// Recompute publication medians and directed adjacent-interval populations outside the producer thread.
+    void calculateIntervalPairs( int64_t cutoff /**< [in] Oldest accepted local receipt. */,
+                                 int64_t nowNs /**< [in] Latest accepted local receipt. */ );
+
   public:
     /// Read monotonic nanoseconds without changing errno; return -1 on clock failure.
     static int64_t monotonicNowNs();
 
     /// Allocate handoff storage and reset all state while producer and consumer are stopped.
-    void configure( double windowSec /**< [in] Positive elapsed-time window; zero disables. */,
-                    size_t capacity /**< [in] Maximum queued and retained events; zero disables. */ );
+    void
+    configure( double windowSec /**< [in] Positive elapsed-time window; zero disables. */,
+               size_t capacity /**< [in] Maximum queued and retained events; zero disables. */,
+               double excursionSec = 0 /**< [in] Positive publication excursion threshold; zero disables pairs. */ );
 
     /// Return whether collection was configured with nonzero storage and duration.
     bool enabled() const;
@@ -144,16 +160,23 @@ inline int64_t dmTiming::monotonicNowNs()
     return rv == 0 ? static_cast<int64_t>( ts.tv_sec ) * 1000000000LL + ts.tv_nsec : -1;
 }
 
-inline void dmTiming::configure( double windowSec, size_t capacity )
+inline void dmTiming::configure( double windowSec, size_t capacity, double excursionSec )
 {
     static_assert( std::atomic<uint64_t>::is_always_lock_free, "DM timing handoff requires lock-free positions" );
 
-    m_enabled  = mx::math::isFinite( windowSec ) && windowSec > 0 && windowSec < 9e9 && capacity > 0;
-    m_windowNs = m_enabled ? static_cast<int64_t>( windowSec * 1e9 ) : 0;
-    m_enabled  = m_enabled && m_windowNs > 0;
+    m_enabled      = mx::math::isFinite( windowSec ) && windowSec > 0 && windowSec < 9e9 && capacity > 0;
+    m_windowNs     = m_enabled ? static_cast<int64_t>( windowSec * 1e9 ) : 0;
+    m_enabled      = m_enabled && m_windowNs > 0;
+    m_excursionSec = m_enabled && mx::math::isFinite( excursionSec ) && excursionSec > 0 ? excursionSec : 0;
 
     m_queue.clear();
     m_queue.resize( m_enabled ? capacity : 0 );
+    m_intervalScratch.clear();
+
+    if( m_excursionSec > 0 )
+    {
+        m_intervalScratch.reserve( capacity );
+    }
 
     m_head.store( 0, std::memory_order_relaxed );
     m_tail.store( 0, std::memory_order_relaxed );
@@ -171,6 +194,8 @@ inline void dmTiming::configure( double windowSec, size_t capacity )
     m_summary.enabled   = m_enabled;
     m_summary.session   = 1;
     m_summary.state = m_enabled ? MagAOX::dmTiming::Availability::warmingUp : MagAOX::dmTiming::Availability::disabled;
+    m_summary.intervalPairs.enabled   = m_excursionSec > 0;
+    m_summary.intervalPairs.threshold = m_excursionSec;
 
     m_total        = {};
     m_previous     = {};
@@ -476,10 +501,13 @@ inline void dmTiming::calculate( int64_t nowNs )
     earliest.fill( std::numeric_limits<int64_t>::max() );
     latest.fill( -1 );
 
-    m_summary.metrics  = {};
-    m_summary.newestNs = -1;
-    m_summary.age      = -1;
-    m_summary.span     = 0;
+    m_summary.metrics                 = {};
+    m_summary.newestNs                = -1;
+    m_summary.age                     = -1;
+    m_summary.span                    = 0;
+    m_summary.intervalPairs           = {};
+    m_summary.intervalPairs.enabled   = m_excursionSec > 0;
+    m_summary.intervalPairs.threshold = m_excursionSec;
 
     if( nowNs < 0 )
     {
@@ -516,6 +544,8 @@ inline void dmTiming::calculate( int64_t nowNs )
     {
         m_window.pop_front();
     }
+
+    calculateIntervalPairs( cutoff, nowNs );
 
     auto addValue = [&]( Metric metric, int64_t durationNs, int64_t a, int64_t b )
     {
@@ -690,6 +720,153 @@ inline void dmTiming::calculate( int64_t nowNs )
     else
     {
         m_summary.state = Availability::warmingUp;
+    }
+}
+
+inline bool dmTiming::orderedPublication( const MagAOX::dmTiming::Event &previous,
+                                          const MagAOX::dmTiming::Event &event,
+                                          int64_t                        cutoff,
+                                          int64_t                        nowNs )
+{
+    using namespace MagAOX::dmTiming;
+    const uint32_t receipt = 1u << markerIndex( Marker::receipt );
+
+    return !previous.synthetic && !event.synthetic && previous.outcome != Outcome::rejected &&
+           event.outcome != Outcome::rejected && !previous.invalidMarkers && !event.invalidMarkers &&
+           ( previous.valid & receipt ) && ( event.valid & receipt ) && previous.counterValid && event.counterValid &&
+           event.session == previous.session && event.sequence > previous.sequence &&
+           event.sequence == previous.sequence + 1 && event.counter > previous.counter &&
+           event.counter == previous.counter + 1 && previous.publicationNs > 0 &&
+           event.publicationNs > previous.publicationNs && previous.markers[markerIndex( Marker::receipt )] >= cutoff &&
+           event.markers[markerIndex( Marker::receipt )] >= previous.markers[markerIndex( Marker::receipt )] &&
+           event.markers[markerIndex( Marker::receipt )] <= nowNs;
+}
+
+inline void dmTiming::calculateIntervalPairs( int64_t cutoff, int64_t nowNs )
+{
+    using namespace MagAOX::dmTiming;
+    auto &summary = m_summary.intervalPairs;
+
+    if( !summary.enabled )
+    {
+        return;
+    }
+
+    m_intervalScratch.clear();
+    const Event *previous = nullptr;
+
+    for( const auto &event : m_window )
+    {
+        if( previous && orderedPublication( *previous, event, cutoff, nowNs ) )
+        {
+            m_intervalScratch.push_back( event.publicationNs - previous->publicationNs );
+        }
+
+        previous = &event;
+    }
+
+    summary.intervals = m_intervalScratch.size();
+
+    if( !summary.intervals )
+    {
+        return;
+    }
+
+    const auto middle = m_intervalScratch.begin() + m_intervalScratch.size() / 2;
+    std::nth_element( m_intervalScratch.begin(), middle, m_intervalScratch.end() );
+    long double medianNs = *middle;
+
+    if( m_intervalScratch.size() % 2 == 0 )
+    {
+        const int64_t lower = *std::max_element( m_intervalScratch.begin(), middle );
+        medianNs            = lower + ( medianNs - lower ) / 2;
+    }
+
+    summary.median                     = static_cast<double>( medianNs * 1e-9L );
+    const long double      thresholdNs = m_excursionSec * 1e9;
+    std::array<Stats *, 4> populations{
+        &summary.afterLate, &summary.afterEarly, &summary.lateEarlySum, &summary.earlyLateSum };
+    std::array<double, 4>  sumSquares{};
+    std::array<int64_t, 4> earliest, latest;
+    earliest.fill( std::numeric_limits<int64_t>::max() );
+    latest.fill( -1 );
+
+    auto add = [&]( size_t index, int64_t duration, int64_t a, int64_t b )
+    {
+        auto  &stats = *populations[index];
+        double value = duration * 1e-9;
+        ++stats.count;
+        double difference = value - stats.mean;
+        stats.mean += difference / stats.count;
+        sumSquares[index] += difference * ( value - stats.mean );
+        stats.min       = stats.count == 1 ? value : std::min( stats.min, value );
+        stats.max       = stats.count == 1 ? value : std::max( stats.max, value );
+        earliest[index] = std::min( earliest[index], a );
+        latest[index]   = std::max( latest[index], b );
+    };
+
+    previous                      = nullptr;
+    const Event *first            = nullptr;
+    int64_t      previousInterval = -1;
+
+    for( const auto &event : m_window )
+    {
+        const bool    qualified = previous && orderedPublication( *previous, event, cutoff, nowNs );
+        const int64_t interval  = qualified ? event.publicationNs - previous->publicationNs : -1;
+
+        if( qualified && previousInterval > 0 )
+        {
+            ++summary.pairs;
+            const long double firstResidual = previousInterval - medianNs;
+            const long double nextResidual  = interval - medianNs;
+            const int64_t     a             = previous->markers[markerIndex( Marker::receipt )];
+            const int64_t     b             = event.markers[markerIndex( Marker::receipt )];
+
+            if( firstResidual > thresholdNs )
+            {
+                add( 0, interval, a, b );
+
+                if( nextResidual < -thresholdNs )
+                {
+                    add( 2,
+                         event.publicationNs - first->publicationNs,
+                         first->markers[markerIndex( Marker::receipt )],
+                         b );
+                }
+            }
+            else if( firstResidual < -thresholdNs )
+            {
+                add( 1, interval, a, b );
+
+                if( nextResidual > thresholdNs )
+                {
+                    add( 3,
+                         event.publicationNs - first->publicationNs,
+                         first->markers[markerIndex( Marker::receipt )],
+                         b );
+                }
+            }
+        }
+
+        first            = qualified ? previous : nullptr;
+        previous         = &event;
+        previousInterval = interval;
+    }
+
+    for( size_t index = 0; index < populations.size(); ++index )
+    {
+        auto &stats = *populations[index];
+        stats.valid = stats.count > 1;
+
+        if( stats.valid )
+        {
+            stats.stddev = std::sqrt( std::max( 0.0, sumSquares[index] / ( stats.count - 1 ) ) );
+        }
+
+        if( stats.count )
+        {
+            stats.span = ( latest[index] - earliest[index] ) * 1e-9;
+        }
     }
 }
 

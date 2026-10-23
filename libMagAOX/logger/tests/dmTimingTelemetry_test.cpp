@@ -1,5 +1,5 @@
 /** \file dmTimingTelemetry_test.cpp
- * \brief Controller timing telemetry round trips, validity and metadata projections.
+ * \brief Controller timing and ordered-primary-excursion telemetry round trips and validity.
  * \ingroup logger_files
  */
 #include "../../../tests/testXWC.hpp"
@@ -72,6 +72,32 @@ flatlogs::bufferPtrT envelope( const telem_dmtimings::messageT &message /**< [in
     REQUIRE( flatlogs::logHeader::createLog<telem_dmtimings>(
                  buffer, { 1, 2 }, message, flatlogs::logPrio::LOG_TELEM ) == 0 );
     return buffer;
+}
+
+/// Build a real syncopation log envelope for optional primary pair verification.
+flatlogs::bufferPtrT envelope( const telem_dmsynco::messageT &message /**< [in] serialized syncopation summary */ )
+{
+    flatlogs::bufferPtrT buffer;
+    REQUIRE( flatlogs::logHeader::createLog<telem_dmsynco>( buffer, { 1, 2 }, message, flatlogs::logPrio::LOG_TELEM ) ==
+             0 );
+    return buffer;
+}
+
+/// Construct asymmetric directed transitions so serialization cannot exchange their denominators.
+dmTiming::Summary pairSummary()
+{
+    auto  summary      = sampleSummary();
+    auto &pairs        = summary.intervalPairs;
+    pairs.enabled      = true;
+    pairs.intervals    = 12;
+    pairs.pairs        = 11;
+    pairs.median       = 500e-6;
+    pairs.threshold    = 20e-6;
+    pairs.afterLate    = { 5, 460e-6, 15e-6, 420e-6, 500e-6, 1.5, true };
+    pairs.afterEarly   = { 4, 540e-6, 20e-6, 500e-6, 580e-6, 1.4, true };
+    pairs.lateEarlySum = { 3, 1001e-6, 2e-6, 999e-6, 1003e-6, 1.3, true };
+    pairs.earlyLateSum = { 2, 998e-6, 3e-6, 995e-6, 1001e-6, 1.2, true };
+    return summary;
 }
 
 /// \endcond
@@ -360,6 +386,211 @@ TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelem
         {
             REQUIRE( project<double>( "publicationInterval_mean", builder.GetBufferPointer() ) == 1e-4 );
         }
+    }
+}
+
+/// Preserve directed transition counts, conditional intervals and two-interval sums through binary, text and JSON.
+/** \ingroup dmTimingTelemetry_unit_test */
+TEST_CASE( "Syncopation telemetry preserves ordered primary excursions", "[dmTimingTelemetry]" )
+{
+    const auto              summary = pairSummary();
+    telem_dmsynco::messageT message( 0, 2, 500000, 0, 0, 0, 0, 0, 0, {}, {}, summary );
+    auto                    buffer = envelope( message );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    auto       *payload = message.builder.GetBufferPointer();
+    const auto *primary = GetTelem_dmsynco_fb( payload )->primary_timing();
+    const auto *pairs   = primary->interval_pairs();
+    REQUIRE( pairs != nullptr );
+    REQUIRE( pairs->enabled() );
+    REQUIRE( pairs->intervals() == 12 );
+    REQUIRE( pairs->pairs() == 11 );
+    REQUIRE( pairs->median() == 500e-6 );
+    REQUIRE( pairs->threshold() == 20e-6 );
+    REQUIRE( primary->session() == summary.session );
+    REQUIRE( primary->dropped() == summary.total.dropped );
+
+    const std::array<const DmSyncoTimingStats *, 4> populations{
+        pairs->after_late(), pairs->after_early(), pairs->late_early_sum(), pairs->early_late_sum() };
+    const auto                                  &expected = summary.intervalPairs;
+    const std::array<const dmTiming::Stats *, 4> source{
+        &expected.afterLate, &expected.afterEarly, &expected.lateEarlySum, &expected.earlyLateSum };
+
+    for( size_t index = 0; index < populations.size(); ++index )
+    {
+        const auto *actual = populations[index];
+        const auto *value  = source[index];
+        REQUIRE( actual->count() == value->count );
+        REQUIRE( actual->mean() == value->mean );
+        REQUIRE( actual->stddev() == value->stddev );
+        REQUIRE( actual->min() == value->min );
+        REQUIRE( actual->max() == value->max );
+        REQUIRE( actual->span() == value->span );
+        REQUIRE( actual->valid() );
+    }
+
+    const auto text = telem_dmsynco::msgString( payload, message.builder.GetSize() );
+    REQUIRE( text.find( "primary_pairs={enabled:1,intervals:12,pairs:11,median_s:0.0005,threshold_s:2e-05," ) !=
+             std::string::npos );
+    REQUIRE( text.find( "lateEarly:3/5,earlyLate:2/4}" ) != std::string::npos );
+    REQUIRE( text.find( "primaryAfterLateInterval[n=5 valid=1] mean_s=0.00046" ) != std::string::npos );
+    REQUIRE( text.find( "primaryAfterEarlyInterval[n=4 valid=1] mean_s=0.00054" ) != std::string::npos );
+    REQUIRE( text.find( "primaryLateEarlySum[n=3 valid=1] mean_s=0.001001" ) != std::string::npos );
+    REQUIRE( text.find( "primaryEarlyLateSum[n=2 valid=1] mean_s=0.000998" ) != std::string::npos );
+
+    const auto          json = telem_dmsynco::msgJSON( payload,
+                                              message.builder.GetSize(),
+                                              reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ),
+                                              telem_dmsynco_bfbs_len );
+    flatbuffers::Parser parser;
+    REQUIRE( parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ), telem_dmsynco_bfbs_len ) );
+    REQUIRE( parser.Parse( json.c_str() ) );
+    const auto *jsonPairs =
+        GetTelem_dmsynco_fb( parser.builder_.GetBufferPointer() )->primary_timing()->interval_pairs();
+    REQUIRE( jsonPairs->median() == Approx( expected.median ) );
+    REQUIRE( jsonPairs->threshold() == Approx( expected.threshold ) );
+    REQUIRE( jsonPairs->after_late()->count() == 5 );
+    REQUIRE( jsonPairs->after_early()->count() == 4 );
+    REQUIRE( jsonPairs->late_early_sum()->count() == 3 );
+    REQUIRE( jsonPairs->early_late_sum()->count() == 2 );
+    REQUIRE( jsonPairs->late_early_sum()->mean() == Approx( expected.lateEarlySum.mean ) );
+    REQUIRE( jsonPairs->early_late_sum()->mean() == Approx( expected.earlyLateSum.mean ) );
+}
+
+/// Distinguish old absent fields, disabled analysis, enabled empty windows and single-sample conditional statistics.
+/** \ingroup dmTimingTelemetry_unit_test */
+TEST_CASE( "Syncopation primary pair telemetry preserves legacy and sparse availability", "[dmTimingTelemetry]" )
+{
+    for( int variant = 0; variant < 4; ++variant )
+    {
+        INFO( "availability variant " << variant );
+        dmTiming::Summary summary;
+
+        if( variant >= 1 )
+        {
+            summary.intervalPairs.enabled   = true;
+            summary.intervalPairs.threshold = 20e-6;
+        }
+
+        if( variant >= 2 )
+        {
+            auto &pairs        = summary.intervalPairs;
+            pairs.intervals    = 2;
+            pairs.pairs        = 1;
+            pairs.median       = 500e-6;
+            pairs.afterLate    = { 1, 420e-6, 0, 420e-6, 420e-6, 0, false };
+            pairs.lateEarlySum = { 1, 1000e-6, 0, 1000e-6, 1000e-6, 0, false };
+        }
+
+        telem_dmsynco::messageT message( 0, 2, 500000, 0, 0, 0, 0, 0, 0, {}, {}, summary );
+
+        if( variant == 3 )
+        {
+            auto &builder = message.builder;
+            builder.Clear();
+            const auto                  publication = CreateDmSyncoTimingStats( builder );
+            const auto                  receipt     = CreateDmSyncoTimingStats( builder );
+            DmSyncoPrimaryTimingBuilder primary( builder );
+            primary.add_publication( publication );
+            primary.add_receipt( receipt );
+            const auto              primaryTiming = primary.Finish();
+            Telem_dmsynco_fbBuilder record( builder );
+            record.add_primary_timing( primaryTiming );
+            builder.Finish( record.Finish() );
+        }
+
+        auto buffer = envelope( message );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        auto       *payload = message.builder.GetBufferPointer();
+        const auto *primary = GetTelem_dmsynco_fb( payload )->primary_timing();
+        const auto  text    = telem_dmsynco::msgString( payload, message.builder.GetSize() );
+
+        if( variant == 3 )
+        {
+            REQUIRE( primary->interval_pairs() == nullptr );
+            REQUIRE( text.find( "primary_pairs=unavailable" ) != std::string::npos );
+        }
+        else
+        {
+            REQUIRE( primary->interval_pairs() != nullptr );
+            REQUIRE( primary->interval_pairs()->enabled() == ( variant != 0 ) );
+            REQUIRE( text.find( "primary_pairs=unavailable" ) == std::string::npos );
+
+            if( variant == 2 )
+            {
+                REQUIRE( text.find( "lateEarly:1/1,earlyLate:0/0}" ) != std::string::npos );
+                REQUIRE( text.find( "primaryAfterLateInterval[n=1 valid=0] mean_s=0.00042 stddev_s=unavailable" ) !=
+                         std::string::npos );
+            }
+            else
+            {
+                REQUIRE( text.find( "primaryAfterLateInterval[n=0 valid=0]=unavailable" ) != std::string::npos );
+            }
+        }
+    }
+}
+
+/// Reject impossible directed counts and nonfinite or inconsistent classification parameters.
+/** \ingroup dmTimingTelemetry_unit_test */
+TEST_CASE( "Syncopation primary pair telemetry rejects malformed populations", "[dmTimingTelemetry]" )
+{
+    for( int variant = 0; variant < 15; ++variant )
+    {
+        INFO( "malformed pair variant " << variant );
+        auto  summary = pairSummary();
+        auto &pairs   = summary.intervalPairs;
+
+        switch( variant )
+        {
+        case 0:
+            pairs.pairs = pairs.intervals;
+            break;
+        case 1:
+            pairs.intervals = 0;
+            break;
+        case 2:
+            pairs.afterLate.count = pairs.pairs + 1;
+            break;
+        case 3:
+            pairs.afterEarly.count = pairs.pairs;
+            break;
+        case 4:
+            pairs.lateEarlySum.count = pairs.afterLate.count + 1;
+            break;
+        case 5:
+            pairs.earlyLateSum.count = pairs.afterEarly.count + 1;
+            break;
+        case 6:
+            pairs.median = std::numeric_limits<double>::quiet_NaN();
+            break;
+        case 7:
+            pairs.threshold = std::numeric_limits<double>::infinity();
+            break;
+        case 8:
+            pairs.median = 0;
+            break;
+        case 9:
+            pairs.threshold = 0;
+            break;
+        case 10:
+            pairs.enabled = false;
+            break;
+        case 11:
+            pairs.afterLate.count = 1;
+            break;
+        case 12:
+            pairs.earlyLateSum.stddev = -1;
+            break;
+        case 13:
+            pairs.lateEarlySum.mean = std::numeric_limits<double>::quiet_NaN();
+            break;
+        case 14:
+            pairs.afterEarly.min = pairs.afterEarly.max + 1;
+            break;
+        }
+
+        telem_dmsynco::messageT message( 0, 2, 500000, 0, 0, 0, 0, 0, 0, {}, {}, summary );
+        auto                    buffer = envelope( message );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
     }
 }
 

@@ -1,5 +1,5 @@
 /// \file telem_dmsynco.fbs
-/// \brief Scheduler telemetry with optional primary cadence and combiner trace measurements.
+/// \brief Scheduler telemetry with optional primary cadence, ordered excursions and combiner traces.
 namespace MagAOX.logger;
 
 // Values and coverage are seconds; publication values retain their external clock.
@@ -12,6 +12,21 @@ table DmSyncoTimingStats
     max:double;
     span:double;
     valid:bool;
+}
+
+// Consecutive primary publication intervals classified around their retained-window median.
+// All durations and coverage are seconds. Conditional counts are the directed-transition denominators.
+table DmSyncoIntervalPairs
+{
+    enabled:bool;
+    intervals:ulong;
+    pairs:ulong;
+    median:double;
+    threshold:double;
+    after_late:DmSyncoTimingStats (required);
+    after_early:DmSyncoTimingStats (required);
+    late_early_sum:DmSyncoTimingStats (required);
+    early_late_sum:DmSyncoTimingStats (required);
 }
 
 table DmSyncoPrimaryTiming
@@ -36,6 +51,7 @@ table DmSyncoPrimaryTiming
     counter_gaps:ulong;
     invalid:ulong;
     dropped:ulong;
+    interval_pairs:DmSyncoIntervalPairs;
 }
 
 table DmSyncoCombinerTiming

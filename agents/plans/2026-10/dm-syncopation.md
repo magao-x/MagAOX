@@ -86,9 +86,20 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 Implementation status: implemented and verified locally; operator-run instrument timing qualification remains pending. The [debugging and optimization record](dm-syncopation-debugging.md) tracks instrument trials, subsequent fixes and verification. This section records the settled design and implementation notes. The [user guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) describes the implemented configuration, timing record and INDI interface.
 
+Current work, following the 2026-10-23 measurements and operator direction:
+
+| Item | Status |
+| --- | --- |
+| Primary, combiner and DM-controller timing measurements | Implemented; operator evidence recorded. |
+| Semaphore-triggered dmcomb baseline | Operator reports mode 3; substantially lower combiner delay jitter measured. |
+| Ordered primary interval-pair measurements | Implemented and locally verified. Tests both orderings without assuming the expected result. |
+| Median-based period and skipped auxiliary cycles for ordinary excursions | Revised design below; not implemented. |
+| Targeted dmcomb-reader wake for active extra steps | Proposed design below; not implemented. |
+| Enabled multi-step qualification | Pending the scheduler changes and full timing-window qualification. |
+
 ## Task Summary
 
-### Current contract
+### Implemented contract, with pending revisions below
 
 - Build `dmSyncopation` as a MagAOXApp, initially instance `dmtweeter_synco`, one DM per instance, RT priority 30 on the selected RTC's `spare61` (CPU 61). Main destinations remain `dm01disp07` and `dm01disp08`; corresponding persistent sources are `dm01disp07_aux` and `dm01disp08_aux`.
 - The real main-loop publication of `dmC` defines cycle zero. The app observes that stream but never publishes pixels/counters or posts trigger semaphores on it. It copies the next cycle's step-0 contribution before the main publication. Each later step copies all mapped contributions and publishes exactly one designated destination counter, initially channel 07.
@@ -98,6 +109,184 @@ Implementation status: implemented and verified locally; operator-run instrument
 - Controller keepout starts at controller receipt and includes command processing and downstream channel rereads. Retain the 115 us estimate and separate initial guard/step-0 lead of 20 us each. Destination replacement must wait for **both dmcomb consumption and the previous controller reader-lifetime bound**. The full window must fit; the initial numbers are not a demonstrated timing guarantee.
 - The user's reported less-than-2 us RMS jitter is **at dmcomb output**. The requested 10 us combiner sleep does not establish a 10 us delivered-jitter floor. **5 us is a guideline for analysis**, not a hard scheduling or alarm threshold. A late step may execute when its full window is safe; otherwise skip it. Reacquire after three consecutive original unsafe/missed steps; genuine synchronization faults disarm immediately.
 - Retain contributions on ordinary disable/fault. Explicit controller zero/release clears discovered main and auxiliary channels. **The controller is not responsible for writes occurring after that clear**; no provider-pause, clear-epoch or shared quiescence protocol is required. Adapt dmSpeckle as the first local auxiliary provider, generating a 200 Hz alternating tip/tilt command measurable by the WFS. Programmatic dmMode integration and `deltaChannels` policy changes are deferred.
+
+### 2026-10-23 revised cadence and skip policy
+
+The operator directs accepting the measured large interval excursions as part of
+normal operation, skipping affected auxiliary work where possible, and basing
+syncopation on the median interval. This supersedes camera-first period
+selection and unconditional fault/reacquisition for ordinary interval residuals
+in the implemented contract above. It is a pending implementation revision.
+
+**Period and phase:** use a bounded rolling median of primary intervals, with
+32 samples as the proposed initial window (reuse the existing rate-window
+setting). Prefer consistency-checked consecutive primary publication timestamp
+differences in their own clock. Include the observed ordinary excursions rather
+than requiring the entire window to lie within the old narrow range. Exclude
+duplicate-counter callbacks, intervals spanning counter gaps/resets, invalid
+timestamps and intervals outside the broad configured rate limits. Never
+silently mix publication-clock samples and monotonic callback samples. Before a
+valid median exists, fresh camera/nominal timing may seed acquisition; camera
+FPS remains diagnostic and cannot override a valid primary median. Keep a valid
+estimate through an isolated excursion or forward observation gap, with explicit
+freshness. Apply period updates at cycle boundaries, without moving existing
+targets mid-cycle. Compute from preallocated storage outside final copy/wake
+operations. A persistent real rate change still requires acquisition and a new
+feasibility check.
+
+The median sets `T` and substep spacing `T/Nreq`. Each distinct real primary
+publication still supplies that cycle's observed monotonic phase anchor. It
+does not become a synthetic regular-grid main event. Publish future provider
+cutoffs using the selected median, current real anchor and actual schedule
+validity; cancel obsolete cutoffs when skipping a cycle. Never manufacture a
+primary event or replay missed auxiliary triggers to catch up.
+
+**Ordinary excursions:** cancel obsolete/unusable auxiliary targets, count the
+affected auxiliary cycle/steps as skipped, and retain the median and learned
+wait corrections. The main AO command continues normally. Once current combined
+output is associated and a fresh on-time passive step 0 has been prepared,
+resume on the next usable real cycle without demanding another 32 consecutive
+near-median intervals. Interval-excursion skips are separate from the existing
+consecutive app-deadline-failure recovery counter; repeated harmless skips must
+not recreate the current full-reacquisition loop. Preserve retained complete
+contributions and the always-copy rule for steps actually executed.
+
+A forward counter gap means unobserved primary publications: suppress stale
+auxiliary work, exclude the gap-spanning interval from the median, and establish
+a fresh bounded output baseline before resuming. Counter rollback/reset,
+identity/resource changes, unexplained/ambiguous output, or a genuine unsafe
+copy/reader overlap remain stop/reacquisition conditions. An arriving primary
+detected before mutation can cancel the old schedule normally; one arriving
+during a copy cannot be made safe retrospectively by labelling it skipped.
+
+**Timing envelope:** separate the residual threshold used to classify an
+ordinary skipped cycle from `tracking.earlyMainUs`, the physical earliest-next-
+main reserve used for copy/trigger windows. A median is neither a minimum
+spacing nor an early-arrival bound. Retain all delivery, controller-reader,
+copy, visibility and post-action checks and recompute full feasibility with the
+chosen early reserve. The observed approximately 80 us early intervals exceed
+the current 20 us reserve. The operator explicitly chose to leave the new reserve
+undecided; the proposed 100 us value is not selected. The existing 20 us setting
+is unchanged, not newly qualified by this decision. Any revised value would
+require hardware qualification. With
+the current other defaults, 100 us makes the existing two-step feasibility test
+require 273 us in a 250 us half-cycle, so accepting that reserve requires fewer
+steps or separately qualified smaller timing budgets. Do not silently relax a
+reader bound to make the requested count fit. The 273 us calculation is a
+conditional example, not a selected configuration.
+
+Verification must exercise an ordinary 500 us stream with isolated 420/580 us
+intervals, retained median/feedback, skipped stale targets without catch-up,
+forward gaps versus resets, persistent rate change, safe resume after fresh
+step-0 preparation, and a main arriving before/during mutation or at output
+acknowledgement. Expose median count/age, interval-excursion skips and genuine
+faults distinctly. This revision changes no C++ or live configuration yet.
+
+### 2026-10-23 ordered excursion check implemented
+
+At the operator's request, add a measurement of whether late intervals are
+immediately followed by early intervals or the reverse. Reuse primary
+`dev::dmTiming` events and compute a diagnostic window median plus directed-pair
+statistics on the ordinary consumer thread. No producer timestamps, event
+payload, scheduling-period/recovery logic or trigger behavior changes. Other
+collector users leave this optional analysis disabled by default.
+
+`diagnostics.excursionUs` defaults to 20 us; zero disables only the pair analysis.
+It is independent of early-main/reader bounds. Strict classification is outside
+median +/- threshold, with equality ordinary. Both intervals require three real
+qualified observations inside the diagnostic window; sequence/counter gaps,
+invalid stamps, rejected/synthetic events and resets break adjacency. Even
+medians average the two middle samples. Include ordinary tails when calculating
+the median and ordinary successors in the conditional denominators.
+
+New shared `IntervalPairs` summaries expose eligible interval/pair counts,
+median/threshold, next-interval populations `afterLate`/`afterEarly`, and two-
+interval sums `lateEarlySum`/`earlyLateSum`. Their count ratios test each directed
+hypothesis; a sum near twice the median supports compensation. Sparse counts
+remain useful without inventing a one-sample variance. An optional appended
+primary FlatBuffer table preserves legacy records, and `primary_interval_pairs`
+exposes 29 read-only INDI elements. All published durations are seconds. The
+[guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) defines the denominators,
+window overlap and interpretation limits. Rebuild both the app and logdump.
+
+Verification passes **4,540 assertions / 73 cases**: collector 317/15,
+app 2,748/36, new pair/controller logger suite 1,000/7, existing synco logger
+suite 322/7 and default-disabled integration 153/8. Normal library/schema, app
+and logdump builds pass. C++ formatting and whitespace checks pass; independent
+review found no remaining production defect. Tests cover both directions and
+ordinary successors, sparse/even median/threshold boundaries, broken chains and
+window expiry, app independence/configuration and legacy/malformed serialization.
+Existing schema naming and dirty-build notices remain unrelated build output.
+No hardware performance/ordering result is claimed by these workstation tests.
+
+Affected files:
+
+- Collector: `libMagAOX/common/dmTiming.hpp`, `libMagAOX/app/dev/dmTiming.hpp`,
+  `libMagAOX/app/dev/tests/dmTiming_test.cpp`.
+- App: `apps/dmSyncopation/dmSyncopation.hpp`,
+  `apps/dmSyncopation/tests/dmSyncopation_test.cpp`.
+- Telemetry: `libMagAOX/logger/types/schemas/telem_dmsynco.fbs`,
+  `libMagAOX/logger/types/telem_dmsynco.hpp`,
+  `libMagAOX/logger/tests/dmTimingTelemetry_test.cpp`,
+  `libMagAOX/logger/tests/dmSyncoTelemetry_test.cpp`.
+- Documentation: `apps/dmSyncopation/doc/dmSyncopation.md` and the main synco,
+  debugging and DM-timing engineering records in this directory.
+
+The separate median scheduler,
+skip-recovery and targeted auxiliary-wake revisions remain unimplemented, and
+the early-arrival reserve remains undecided.
+
+### 2026-10-23 proposed targeted primary-semaphore wake
+
+The operator proposes letting synco wake dmcomb through the primary stream's
+semaphore for the `Nreq-1` active extra steps. This is a proposed extension to
+the implemented polling contract above, not an implemented feature. The
+targeted exception permits a wake on dmcomb's registered reader only; primary
+pixels, write flag, counters, timestamps, process trace and ordinary notification
+fan-out remain owned by the real AO producer.
+
+- Retain complete passive batch preparation and the existing single designated
+  destination-counter publication. Mode-3 dmcomb still tests the channel counter
+  sum before producing output; a wake without that counter change is insufficient.
+- After publication for an eligible `j>0` step, post only the actual dmcomb reader
+  semaphore on `dm01disp03`. Never add a step-0 wake. Use a semaphore-only operation:
+  the inspected `ImageStreamIO_sempost(image,index)` also updates `semWritePID` and
+  posts `semlog`, so even an indexed call has unwanted primary notifications.
+- Select/validate dmcomb's existing reader, rather than allocating, claiming,
+  consuming, flushing or unregistering another primary reader. Require the
+  expected stream identity, effective mode 3, assigned index and matching reader
+  PID; disarm/reacquire after producer restart or assignment/resource changes.
+  The trace's mode field is not reliable in the inspected MILK implementation.
+- Retain final primary-counter and safe-window checks through counter publication
+  and wake. Timestamp the actual wake for submission/feedback/reader-hold bounds,
+  retain the post-action overrun check and requalify delivery timing. A failed
+  wake after destination-counter publication must disarm without rollback/replay.
+- Accept exactly one combined-counter increment only while the same primary
+  counter/identity is still current. Add that explicit check at acknowledgement:
+  current `consume()` can accept an already-present output before `waitUntil()`
+  performs its primary check. Mode-3 queue coalescing means successful `sem_post`
+  alone cannot establish delivery or association with an auxiliary step.
+- Targeting avoids artificial receipts for synco's primary monitor, loggers and
+  other primary readers. Extra combined outputs intentionally repeat primary
+  trace identity; keep linked-primary latency populations restricted to advancing
+  main updates and document expected repeated-primary counts for extra outputs.
+
+Implementation verification should cover target-only wake, unchanged primary
+data/metadata/log notification, no step-0 wake, publication ordering, stale reader
+rejection, failed/coalesced wakes and primary change at acknowledgement. No
+scheduler code, timing bound, live FPS setting or instrument action is changed
+by this proposal.
+
+The operator's subsequent mode-3 baseline (2026-10-23 20:33 UTC) supports this
+direction: trace-primary-to-combined delay averages 9.323–9.380 us with
+0.165–0.174 us jitter, compared with 11.736–11.897 us and 3.342–3.388 us under
+DELAY mode. Combined publication cadence now closely follows the primary, with
+full stage counts and no new quality-counter increments in the excerpt. The
+operator also reports controller `[fgtimes]` jitter RMS roughly halved. The
+[debugging record](dm-syncopation-debugging.md) preserves exact evidence and
+qualifications. This baseline does not yet test the proposed extra-step wake or
+resolve the remaining large primary-interval tails; implementation and enabled
+qualification remain pending.
 
 ### Review disposition
 

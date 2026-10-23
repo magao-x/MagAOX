@@ -146,8 +146,9 @@ class dmSyncopation : public MagAOXApp<true>,
     double        m_outputTimeoutUs{ 50 };     ///< Combination watchdog, separate from delivery allowance.
     double        m_primaryCadenceWindow{ 2 }; ///< Independent primary diagnostics window in seconds; zero disables.
     size_t        m_primaryCadenceMaxEvents{ 20000 }; ///< Queue and retained-event cap; zero disables diagnostics.
-    bool          m_combinerDiagnostics{ true };      ///< Observe combined-output traces independently of scheduling.
-    synco::Bounds m_bounds;                           ///< Explicit copy, observation and reader bounds, ns.
+    double        m_primaryExcursionUs{ 20 };    ///< Diagnostic interval excursion threshold around the window median.
+    bool          m_combinerDiagnostics{ true }; ///< Observe combined-output traces independently of scheduling.
+    synco::Bounds m_bounds;                      ///< Explicit copy, observation and reader bounds, ns.
     ///@}
 
     std::mutex           m_cycleMutex;       ///< Serializes lifecycle/configuration with a complete callback.
@@ -239,7 +240,8 @@ class dmSyncopation : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_camera;        ///< External camera FPS subscription.
     pcf::IndiProperty m_indiP_primaryTiming; ///< Continuous observed primary publication/receipt statistics in seconds.
     pcf::IndiProperty
-        m_indiP_primaryTimingQuality;          ///< Independent diagnostic coverage, validity and collection quality.
+        m_indiP_primaryTimingQuality;       ///< Independent diagnostic coverage, validity and collection quality.
+    pcf::IndiProperty m_indiP_primaryPairs; ///< Ordered primary interval pairs and conditional compensation statistics.
     pcf::IndiProperty m_indiP_combinerTiming;  ///< Combined cadence and best-effort trace durations, in seconds.
     pcf::IndiProperty m_indiP_combinerQuality; ///< Combined trace availability, identities and observation quality.
 
@@ -317,6 +319,9 @@ class dmSyncopation : public MagAOXApp<true>,
 
     /// Publish the consumer-owned cadence cache without acquiring the cycle mutex.
     void updatePrimaryCadenceINDI();
+
+    /// Publish ordered interval pairs independently of the scheduling period and timing bounds.
+    void updatePrimaryPairsINDI();
 
     /// Register the independent read-only combined timing and quality properties.
     int setupCombinerCadenceINDI();
@@ -443,6 +448,8 @@ inline void dmSyncopation::setupConfig()
         { "feedback.maxAdvanceUs", "Maximum absolute wait correction, us." },
         { "diagnostics.windowSec", "Independent primary timing window, seconds; zero disables collection." },
         { "diagnostics.maxEvents", "Each timing observer's queue/window cap; zero disables collection." },
+        { "diagnostics.excursionUs",
+          "Primary interval-pair threshold around the diagnostic median, us; zero disables." },
         { "diagnostics.combiner", "Observe combined-stream cadence and producer trace independently of scheduling." } };
     for( const auto &key : keys )
     {
@@ -485,11 +492,13 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_maxAdvanceUs, "feedback.maxAdvanceUs" );
     config( m_outputTimeoutUs, "scheduler.outputTimeoutUs" );
     config( m_primaryCadenceWindow, "diagnostics.windowSec" );
+    config( m_primaryExcursionUs, "diagnostics.excursionUs" );
     config( m_combinerDiagnostics, "diagnostics.combiner" );
     int64_t cadenceEvents = m_primaryCadenceMaxEvents;
     config( cadenceEvents, "diagnostics.maxEvents" );
 
     if( !finite( m_primaryCadenceWindow ) || m_primaryCadenceWindow < 0 || m_primaryCadenceWindow >= 9e9 ||
+        !finite( m_primaryExcursionUs ) || m_primaryExcursionUs < 0 || m_primaryExcursionUs > 1000000 ||
         cadenceEvents < 0 || uint64_t( cadenceEvents ) > std::numeric_limits<size_t>::max() )
     {
         return -1;
@@ -1519,7 +1528,8 @@ inline int dmSyncopation::processPrimary( int64_t observed )
 inline int dmSyncopation::setupPrimaryCadenceINDI()
 {
     if( createROIndiNumber( m_indiP_primaryTiming, "primary_timing" ) < 0 ||
-        createROIndiNumber( m_indiP_primaryTimingQuality, "primary_timing_quality" ) < 0 )
+        createROIndiNumber( m_indiP_primaryTimingQuality, "primary_timing_quality" ) < 0 ||
+        createROIndiNumber( m_indiP_primaryPairs, "primary_interval_pairs" ) < 0 )
     {
         return -1;
     }
@@ -1561,12 +1571,38 @@ inline int dmSyncopation::setupPrimaryCadenceINDI()
     m_indiP_primaryTimingQuality["capacity"] = double( m_primaryCadence.summary().capacity );
     m_indiP_primaryTimingQuality["age"]      = -1.0;
 
+    for( const auto *name : { "enabled", "median", "threshold", "intervals", "pairs" } )
+    {
+        m_indiP_primaryPairs.add( pcf::IndiElement( name ) );
+        m_indiP_primaryPairs[name] = 0.0;
+    }
+
+    for( const auto *prefix : { "afterLate_", "afterEarly_", "lateEarlySum_", "earlyLateSum_" } )
+    {
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            const std::string name = std::string( prefix ) + field;
+            m_indiP_primaryPairs.add( pcf::IndiElement( name ) );
+            m_indiP_primaryPairs[name] = std::string( field ) == "count" ? 0.0 : -1.0;
+        }
+    }
+
+    const auto &pairs                 = m_primaryCadence.summary().intervalPairs;
+    m_indiP_primaryPairs["enabled"]   = double( pairs.enabled );
+    m_indiP_primaryPairs["median"]    = -1.0;
+    m_indiP_primaryPairs["threshold"] = pairs.enabled ? pairs.threshold : -1.0;
+
     if( registerIndiPropertyReadOnly( m_indiP_primaryTiming ) < 0 )
     {
         return -1;
     }
 
-    return registerIndiPropertyReadOnly( m_indiP_primaryTimingQuality );
+    if( registerIndiPropertyReadOnly( m_indiP_primaryTimingQuality ) < 0 )
+    {
+        return -1;
+    }
+
+    return registerIndiPropertyReadOnly( m_indiP_primaryPairs );
 }
 
 inline void dmSyncopation::updatePrimaryCadenceINDI()
@@ -1640,6 +1676,44 @@ inline void dmSyncopation::updatePrimaryCadenceINDI()
                                double( quality.invalid ),
                                double( quality.dropped ) },
                              state );
+
+    updatePrimaryPairsINDI();
+}
+
+inline void dmSyncopation::updatePrimaryPairsINDI()
+{
+    const auto              &pairs = m_primaryCadence.summary().intervalPairs;
+    std::vector<std::string> names{ "enabled", "median", "threshold", "intervals", "pairs" };
+    std::vector<double>      values{ double( pairs.enabled ),
+                                pairs.intervals ? pairs.median : -1.0,
+                                pairs.enabled ? pairs.threshold : -1.0,
+                                double( pairs.intervals ),
+                                double( pairs.pairs ) };
+    const std::pair<const char *, const MagAOX::dmTiming::Stats *> populations[] = {
+        { "afterLate_", &pairs.afterLate },
+        { "afterEarly_", &pairs.afterEarly },
+        { "lateEarlySum_", &pairs.lateEarlySum },
+        { "earlyLateSum_", &pairs.earlyLateSum } };
+
+    for( const auto &entry : populations )
+    {
+        const auto &metric = *entry.second;
+
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            names.push_back( std::string( entry.first ) + field );
+        }
+
+        values.insert( values.end(),
+                       { metric.count ? metric.mean : -1.0,
+                         metric.valid ? metric.stddev : -1.0,
+                         metric.count ? metric.min : -1.0,
+                         metric.count ? metric.max : -1.0,
+                         double( metric.count ),
+                         metric.count ? metric.span : -1.0 } );
+    }
+
+    updateIfChanged( m_indiP_primaryPairs, names, values, pairs.pairs ? INDI_OK : INDI_IDLE );
 }
 
 inline int dmSyncopation::setupCombinerCadenceINDI()
@@ -1757,7 +1831,7 @@ inline int dmSyncopation::appStartup()
 {
     try
     {
-        m_primaryCadence.configure( m_primaryCadenceWindow, m_primaryCadenceMaxEvents );
+        m_primaryCadence.configure( m_primaryCadenceWindow, m_primaryCadenceMaxEvents, m_primaryExcursionUs * 1e-6 );
         m_combinerCadence.configure( m_combinerDiagnostics ? m_primaryCadenceWindow : 0, m_primaryCadenceMaxEvents );
     }
     catch( const std::exception &error )

@@ -1,5 +1,5 @@
 /** \file telem_dmsynco.hpp
- * \brief Aggregate syncopation timing, outcomes and per-step feedback telemetry.
+ * \brief Aggregate syncopation timing, ordered excursions, outcomes and per-step feedback telemetry.
  */
 #ifndef logger_types_telem_dmsynco_hpp
 #define logger_types_telem_dmsynco_hpp
@@ -63,6 +63,11 @@ struct telem_dmsynco : public flatbuffer_log
     timingStats( flatbuffers::FlatBufferBuilder &builder /**< [in/out] destination builder */,
                  const dmTiming::Stats          &stats /**< [in] interval or duration population in seconds */ );
 
+    /// Serialize ordered primary excursions without changing their direction or denominator populations.
+    static flatbuffers::Offset<DmSyncoIntervalPairs>
+    intervalPairs( flatbuffers::FlatBufferBuilder &builder /**< [in/out] destination builder */,
+                   const dmTiming::IntervalPairs  &pairs /**< [in] consecutive primary intervals in seconds */ );
+
     /// Serialize independently qualified combiner populations, provenance and quality counters.
     static flatbuffers::Offset<DmSyncoCombinerTiming>
     combinerTiming( flatbuffers::FlatBufferBuilder &builder /**< [in/out] destination builder */,
@@ -70,6 +75,10 @@ struct telem_dmsynco : public flatbuffer_log
 
     /// Check finite populated statistics and sample-variance validity.
     static bool validStats( const DmSyncoTimingStats *stats /**< [in] required nested cadence population */ );
+
+    /// Validate optional ordered-pair populations and their conditional count relationships.
+    static bool
+    validIntervalPairs( const DmSyncoIntervalPairs *pairs /**< [in] optional ordered primary excursions */ );
 
     /// Append one population, distinguishing unavailable variance from a measured zero.
     static void formatStats( std::ostream             &output /**< [in/out] formatted aggregate */,
@@ -82,6 +91,26 @@ inline flatbuffers::Offset<DmSyncoTimingStats> telem_dmsynco::timingStats( flatb
 {
     return CreateDmSyncoTimingStats(
         builder, stats.count, stats.mean, stats.stddev, stats.min, stats.max, stats.span, stats.valid );
+}
+
+inline flatbuffers::Offset<DmSyncoIntervalPairs> telem_dmsynco::intervalPairs( flatbuffers::FlatBufferBuilder &builder,
+                                                                               const dmTiming::IntervalPairs  &pairs )
+{
+    const auto afterLate    = timingStats( builder, pairs.afterLate );
+    const auto afterEarly   = timingStats( builder, pairs.afterEarly );
+    const auto lateEarlySum = timingStats( builder, pairs.lateEarlySum );
+    const auto earlyLateSum = timingStats( builder, pairs.earlyLateSum );
+
+    return CreateDmSyncoIntervalPairs( builder,
+                                       pairs.enabled,
+                                       pairs.intervals,
+                                       pairs.pairs,
+                                       pairs.median,
+                                       pairs.threshold,
+                                       afterLate,
+                                       afterEarly,
+                                       lateEarlySum,
+                                       earlyLateSum );
 }
 
 inline flatbuffers::Offset<DmSyncoCombinerTiming>
@@ -161,6 +190,7 @@ inline telem_dmsynco::messageT::messageT( int                          state,
         timingStats( builder, primary.metrics[dmTiming::metricIndex( dmTiming::Metric::receiptInterval )] );
     const bool primaryValid = primary.metrics[dmTiming::metricIndex( dmTiming::Metric::publicationInterval )].valid &&
                               primary.metrics[dmTiming::metricIndex( dmTiming::Metric::receiptInterval )].valid;
+    const auto  primaryPairs   = intervalPairs( builder, primary.intervalPairs );
     const auto &quality        = primary.total;
     const auto  primaryTiming  = CreateDmSyncoPrimaryTiming( builder,
                                                            primary.session,
@@ -182,7 +212,8 @@ inline telem_dmsynco::messageT::messageT( int                          state,
                                                            quality.duplicates,
                                                            quality.counterGaps,
                                                            quality.invalid,
-                                                           quality.dropped );
+                                                           quality.dropped,
+                                                           primaryPairs );
     const auto  combinedTiming = combinerTiming( builder, combiner );
 
     builder.Finish( CreateTelem_dmsynco_fb( builder,
@@ -221,6 +252,39 @@ inline bool telem_dmsynco::validStats( const DmSyncoTimingStats *stats )
     return true;
 }
 
+inline bool telem_dmsynco::validIntervalPairs( const DmSyncoIntervalPairs *pairs )
+{
+    if( !pairs )
+    {
+        return true;
+    }
+
+    if( !( validStats( pairs->after_late() ) && validStats( pairs->after_early() ) &&
+           validStats( pairs->late_early_sum() ) && validStats( pairs->early_late_sum() ) &&
+           mx::math::isFinite( pairs->median() ) && pairs->median() >= 0 && mx::math::isFinite( pairs->threshold() ) &&
+           pairs->threshold() >= 0 ) )
+    {
+        return false;
+    }
+
+    const uint64_t maximumPairs = pairs->intervals() ? pairs->intervals() - 1 : 0;
+    const uint64_t afterLate    = pairs->after_late()->count();
+    const uint64_t afterEarly   = pairs->after_early()->count();
+
+    if( pairs->pairs() > maximumPairs || afterLate > pairs->pairs() || afterEarly > pairs->pairs() - afterLate ||
+        pairs->late_early_sum()->count() > afterLate || pairs->early_late_sum()->count() > afterEarly )
+    {
+        return false;
+    }
+
+    if( !pairs->enabled() )
+    {
+        return pairs->intervals() == 0 && pairs->pairs() == 0 && pairs->median() == 0 && pairs->threshold() == 0;
+    }
+
+    return pairs->threshold() > 0 && ( pairs->intervals() == 0 ? pairs->median() == 0 : pairs->median() > 0 );
+}
+
 inline bool telem_dmsynco::verify( flatlogs::bufferPtrT &buffer, flatlogs::msgLenT len )
 {
     if( !buffer )
@@ -242,7 +306,8 @@ inline bool telem_dmsynco::verify( flatlogs::bufferPtrT &buffer, flatlogs::msgLe
                       primary->valid() == ( primary->publication()->valid() && primary->receipt()->valid() ) &&
                       mx::math::isFinite( primary->window_sec() ) && primary->window_sec() >= 0 &&
                       mx::math::isFinite( primary->span_sec() ) && primary->span_sec() >= 0 &&
-                      mx::math::isFinite( primary->age_sec() ) && primary->age_sec() >= -1 ) )
+                      mx::math::isFinite( primary->age_sec() ) && primary->age_sec() >= -1 &&
+                      validIntervalPairs( primary->interval_pairs() ) ) )
     {
         return false;
     }
@@ -314,6 +379,26 @@ inline std::string telem_dmsynco::msgString( void *buffer, flatlogs::msgLenT len
     else
     {
         output << " primary_timing=unavailable";
+    }
+
+    const auto *pairs = primary ? primary->interval_pairs() : nullptr;
+
+    if( pairs )
+    {
+        output << " primary_pairs={enabled:" << pairs->enabled() << ",intervals:" << pairs->intervals()
+               << ",pairs:" << pairs->pairs() << ",median_s:" << pairs->median()
+               << ",threshold_s:" << pairs->threshold() << ",lateEarly:" << pairs->late_early_sum()->count() << '/'
+               << pairs->after_late()->count() << ",earlyLate:" << pairs->early_late_sum()->count() << '/'
+               << pairs->after_early()->count() << '}';
+
+        formatStats( output, "primaryAfterLateInterval", pairs->after_late() );
+        formatStats( output, "primaryAfterEarlyInterval", pairs->after_early() );
+        formatStats( output, "primaryLateEarlySum", pairs->late_early_sum() );
+        formatStats( output, "primaryEarlyLateSum", pairs->early_late_sum() );
+    }
+    else
+    {
+        output << " primary_pairs=unavailable";
     }
 
     const auto *combiner = record->combiner_timing();

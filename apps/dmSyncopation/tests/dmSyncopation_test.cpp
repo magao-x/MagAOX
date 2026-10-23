@@ -62,6 +62,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_combinerQuality;
     using dmSyncopation::m_indiP_combinerTiming;
     using dmSyncopation::m_indiP_enable;
+    using dmSyncopation::m_indiP_primaryPairs;
     using dmSyncopation::m_indiP_primaryTiming;
     using dmSyncopation::m_indiP_primaryTimingQuality;
     using dmSyncopation::m_indiP_reacquire;
@@ -85,6 +86,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_primaryCadenceMaxEvents;
     using dmSyncopation::m_primaryCadenceWindow;
     using dmSyncopation::m_primaryCounter;
+    using dmSyncopation::m_primaryExcursionUs;
     using dmSyncopation::m_primaryTiming;
     using dmSyncopation::m_primaryTraceInode;
     using dmSyncopation::m_primed;
@@ -106,6 +108,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::updateCombinerCadenceINDI;
     using dmSyncopation::updatePeriod;
     using dmSyncopation::updatePrimaryCadenceINDI;
+    using dmSyncopation::updatePrimaryPairsINDI;
     using dmSyncopation::waitUntil;
     using MagAOXApp<true>::config;
     using dev::shmimMonitor<dmSyncopation>::m_imageStream;
@@ -584,7 +587,7 @@ void prepareCadence( Harness &app /**< [in,out] Isolated primary fixture. */ )
     app.attachPrimaryOnly();
     app.m_nextAttach = std::numeric_limits<int64_t>::max();
     app.m_now        = CadenceClock::now;
-    app.m_primaryCadence.configure( 2, 20 );
+    app.m_primaryCadence.configure( 2, 20, app.m_primaryExcursionUs * 1e-6 );
     app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::connected );
 }
 
@@ -2118,6 +2121,69 @@ TEST_CASE( "syncopation primary cadence is independent of scheduling resources",
     // clang-format on
 }
 
+/// Measure both excursion orderings from real primary metadata without changing scheduler timing or bounds.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation primary interval pairs retain direction and ordinary successors",
+           "[dmSyncopation][primaryTiming][intervalPairs]" )
+{
+    Streams streams;
+    Harness app;
+    prepareCadence( app );
+    const int64_t     period       = app.m_period;
+    const auto        earlyReserve = app.m_bounds.early;
+    constexpr int64_t epoch        = 1792000000000000000LL;
+    int64_t           offset       = 0;
+    uint64_t          counter      = 10;
+    cadenceObservation( app, 1000000000, epoch, counter );
+
+    for( const int64_t interval :
+         { 500000, 580000, 420000, 500000, 420000, 580000, 500000, 580000, 500000, 500000, 500000 } )
+    {
+        offset += interval;
+        cadenceObservation( app, 1000000000 + offset, epoch + offset, ++counter );
+    }
+
+    app.m_primaryCadence.update( CadenceClock::time );
+    const auto &pairs = app.m_primaryCadence.summary().intervalPairs;
+    REQUIRE( pairs.enabled );
+    CHECK( pairs.median == Approx( 0.0005 ) );
+    CHECK( pairs.threshold == Approx( 20e-6 ) );
+    CHECK( pairs.intervals == 11 );
+    CHECK( pairs.pairs == 10 );
+    CHECK( pairs.afterLate.count == 3 );
+    CHECK( pairs.afterEarly.count == 2 );
+    CHECK( pairs.lateEarlySum.count == 1 );
+    CHECK( pairs.earlyLateSum.count == 1 );
+    CHECK( pairs.afterLate.mean == Approx( ( 420e-6 + 500e-6 + 500e-6 ) / 3 ) );
+    CHECK( pairs.afterEarly.mean == Approx( 540e-6 ) );
+    CHECK( pairs.lateEarlySum.mean == Approx( 0.001 ) );
+    CHECK( pairs.earlyLateSum.mean == Approx( 0.001 ) );
+    CHECK_FALSE( pairs.lateEarlySum.valid );
+    CHECK( app.m_period == period );
+    CHECK( app.m_bounds.early == earlyReserve );
+    CHECK( app.m_faults == 0 );
+    CHECK_FALSE( app.m_enabled );
+
+    REQUIRE( app.setupPrimaryCadenceINDI() == 0 );
+    CHECK( app.m_indiP_primaryPairs.getElements().size() == 29 );
+    CHECK( app.m_indiP_primaryPairs.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_primaryPairs["enabled"].get<double>() == 1 );
+    CHECK( app.m_indiP_primaryPairs["threshold"].get<double>() == Approx( 20e-6 ) );
+    CHECK( app.m_indiP_primaryPairs["lateEarlySum_count"].get<double>() == 0 );
+    CHECK( app.m_indiP_primaryPairs["lateEarlySum_jitter"].get<double>() == -1 );
+    app.updatePrimaryPairsINDI(); // No INDI driver or tunnel is created for this local test.
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::shmimMonitorTiming;
+    dmSyncopation::readPrimaryCadence;
+    dmSyncopation::processImage;
+    dmSyncopation::setupPrimaryCadenceINDI;
+    dmSyncopation::updatePrimaryPairsINDI;
+#endif
+    // clang-format on
+}
+
 /// Reject unusable publication metadata while retaining real receipt observations and loss boundaries.
 /** \ingroup dmSyncopation_unit_test */
 TEST_CASE( "syncopation primary cadence tracks metadata quality and attachment epochs",
@@ -2203,6 +2269,7 @@ TEST_CASE( "syncopation primary diagnostics configuration is independently bound
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
     CHECK( app.m_primaryCadenceWindow == 2 );
     CHECK( app.m_primaryCadenceMaxEvents == 20000 );
+    CHECK( app.m_primaryExcursionUs == 20 );
 
     SECTION( "Configured window and capacity" )
     {
@@ -2213,7 +2280,7 @@ TEST_CASE( "syncopation primary diagnostics configuration is independently bound
 
         {
             std::ofstream settings( path );
-            settings << "[diagnostics]\nwindowSec=0.5\nmaxEvents=64\n";
+            settings << "[diagnostics]\nwindowSec=0.5\nmaxEvents=64\nexcursionUs=5\n";
         }
 
         app.config.readConfig( path );
@@ -2221,6 +2288,23 @@ TEST_CASE( "syncopation primary diagnostics configuration is independently bound
         REQUIRE( app.loadConfigImpl( app.config ) == 0 );
         CHECK( app.m_primaryCadenceWindow == 0.5 );
         CHECK( app.m_primaryCadenceMaxEvents == 64 );
+        CHECK( app.m_primaryExcursionUs == 5 );
+    }
+
+    SECTION( "Pair threshold is independently validated and zero disables only pairs" )
+    {
+        for( const double invalid :
+             { -1.0, 1000001.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity() } )
+        {
+            app.m_primaryExcursionUs = invalid;
+            CHECK( app.loadConfigImpl( app.config ) < 0 );
+        }
+
+        app.m_primaryExcursionUs = 0;
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        app.m_primaryCadence.configure( 2, 20, app.m_primaryExcursionUs * 1e-6 );
+        CHECK( app.m_primaryCadence.enabled() );
+        CHECK_FALSE( app.m_primaryCadence.summary().intervalPairs.enabled );
     }
 
     SECTION( "Nonfinite and negative elapsed time are rejected" )

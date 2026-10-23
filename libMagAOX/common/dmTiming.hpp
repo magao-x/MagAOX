@@ -84,6 +84,27 @@ struct Stats
     bool     valid{ false }; ///< True when sample variance is defined.
 };
 
+/// Ordered publication-interval populations; every duration and threshold is in seconds.
+/** Excursions are strictly above/below the retained interval median plus/minus
+ * threshold. Conditional next-interval counts are the opportunities for each
+ * directed opposite-excursion sum population, not proof of causal catch-up.
+ */
+struct IntervalPairs
+{
+    bool enabled{ false }; ///< Consumer-side analysis is configured with a positive threshold.
+
+    double median{ 0 };    ///< Median qualified publication interval; zero without intervals.
+    double threshold{ 0 }; ///< Positive excursion distance from the median; zero when disabled.
+
+    uint64_t intervals{ 0 }; ///< Qualified intervals in the retained population.
+    uint64_t pairs{ 0 };     ///< Adjacent qualified interval pairs, including ordinary intervals.
+
+    Stats afterLate;    ///< Next interval when the first interval exceeds median plus threshold.
+    Stats afterEarly;   ///< Next interval when the first interval is below median minus threshold.
+    Stats lateEarlySum; ///< Two-interval sum for a late interval immediately followed by an early interval.
+    Stats earlyLateSum; ///< Two-interval sum for an early interval immediately followed by a late interval.
+};
+
 /// Quality counts; counter gaps count observations, not an inferred number of missing images.
 struct Counters
 {
@@ -139,6 +160,8 @@ struct Summary
     Availability state{ Availability::disabled }; ///< Explicit compatible-summary availability.
 
     std::array<Stats, static_cast<size_t>( Metric::count )> metrics{}; ///< Independent metric populations.
+
+    IntervalPairs intervalPairs; ///< Optional ordered publication analysis, independent of receipt cadence.
 
     Counters total; ///< Cumulative quality counts since configure.
     Counters delta; ///< Changes since the preceding consumer summary.

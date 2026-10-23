@@ -247,7 +247,7 @@ TEST_CASE( "Synco telemetry accepts legacy records and defaults primary timing d
     REQUIRE( record->advances_ns()->Get( 1 ) == 400 );
     REQUIRE( telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() ) ==
              "[dmsynco] state=3 steps=2 period_ns=500000 delivered=11 missed=2 faults=3 schedule_valid=1 "
-             "primary_timing=unavailable combiner_timing=unavailable" );
+             "primary_timing=unavailable primary_pairs=unavailable combiner_timing=unavailable" );
 }
 
 /// Keep primary availability independent of SDK populations and unavailable scheduler snapshots.
