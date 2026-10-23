@@ -218,6 +218,7 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `feedback.maxAdvanceUs` | 20 | Maximum wait correction; step-0 advance is nonnegative and starts at this value after a feedback reset. |
 | `diagnostics.windowSec` | 2 | Elapsed-time window for independent primary and combined-stream statistics; zero disables both collectors. |
 | `diagnostics.maxEvents` | 20000 | Queue and retained-event cap for each observer; zero disables both. Storage is allocated before the monitors start. |
+| `diagnostics.excursionUs` | 20 | Primary interval-pair classification threshold around the diagnostic window median, in microseconds; zero disables only the pair analysis. Independent of scheduler timing bounds. |
 | `diagnostics.combiner` | true | Start an independent combined-output observer for cadence and process-trace timing. Scheduling can remain disabled. |
 | `combinerMonitor.threadPrio` | 0 | Combined observer scheduling priority; zero uses ordinary scheduling. |
 | `combinerMonitor.cpuset` | empty | Optional observer cpuset. Choose an available CPU placement on the instrument. |
@@ -244,6 +245,7 @@ Application properties belong to the configured INDI device: `dmtweeter_synco` i
 | `timing` | Number, read-only | Main/camera/planned rate, requested/active/feasible counts, delivery/miss/fault/cache counters and maximum snapshot/copy durations, detailed below. |
 | `primary_timing` | Number, read-only | Independent publication and receipt interval statistics, detailed below. Durations are seconds, not the microseconds used by the existing `timing` diagnostic elements. |
 | `primary_timing_quality` | Number, read-only | Collection/window/queue validity and cumulative observation-quality counts, detailed below. |
+| `primary_interval_pairs` | Number, read-only | Ordered primary publication-interval excursions, conditional successors and two-interval sums; durations are seconds. |
 | `combiner_timing` | Number, read-only | Independent combined cadence and producer-trace duration populations, in seconds. |
 | `combiner_timing_quality` | Number, read-only | Combined-observer coverage, writer/trigger identity and trace rejection/loss counters. |
 | `health` | Text, read-only | `reason`, `lastFault`, `periodSource`, `primary`, `combined`, `timingStream`, `mapping`. Current phase/reason, latched fault, selected period reference and resolved stream identities. |
@@ -383,6 +385,69 @@ already at the primary input suggests investigating upstream; variation appearin
 between primary and combined publication suggests that intervening path. Extra
 triggers change the combined population, so enabled comparisons also need their
 schedule context.
+
+## Ordered primary interval excursions
+
+`primary_interval_pairs` tests whether a long publication interval is immediately
+followed by a short one, or the reverse. It uses existing primary timestamps in
+the ordinary statistics pass, independently of scheduling and its cycle mutex.
+No extra monitor-thread timestamp reads, pixel work or primary publications are
+added. It collects with synco scheduling disabled.
+
+The reference is the median of eligible publication intervals in the retained
+diagnostic window; for an even population, it is the average of the two middle
+values. This diagnostic median does not change the scheduler's period selection.
+An interval is **late** only when it exceeds `median + threshold`, and **early**
+only when it is below `median - threshold`. Equality is ordinary. The default
+threshold is 20 us, set by `diagnostics.excursionUs`; this is separate from
+`tracking.earlyMainUs` and any proposed early-arrival reserve. Classification
+describes interval length, not absolute phase relative to a camera exposure.
+
+The property has `enabled`, `median`, `threshold`, `intervals` and `pairs`, plus
+`mean`, `jitter`, `min`, `max`, `count`, `span` suffixes for four prefixes:
+
+| Prefix | Population |
+| --- | --- |
+| `afterLate_` | Next interval after each eligible late interval, including ordinary successors. |
+| `afterEarly_` | Next interval after each eligible early interval, including ordinary successors. |
+| `lateEarlySum_` | Sum of two consecutive intervals classified late then early. |
+| `earlyLateSum_` | Sum of two consecutive intervals classified early then late. |
+
+All durations, including `median` and `threshold`, are **seconds**. Counts are
+zero when empty; unavailable durations are `-1`, and jitter needs two samples.
+Property state Ok means at least one eligible interval pair exists, not that an
+excursion was seen or that its variance is available. `intervals` counts all
+qualified intervals and `pairs` all qualified adjacent interval pairs, including
+ordinary ones. Each pair requires three real, ordered observations with adjacent
+event sequences/counters and valid increasing publication timestamps wholly
+inside the retained window. Gaps, resets, duplicates, invalid/rejected/synthetic
+observations and collection loss break adjacency. Coherent metadata at a break
+can establish a fresh baseline; no interval is divided across a counter gap.
+
+The conditional late-to-early fraction is
+`lateEarlySum_count / afterLate_count`; the reverse is
+`earlyLateSum_count / afterEarly_count`. A zero denominator means no eligible
+follow-up evidence. An interval at the end of a window without an observed
+successor is not included in either denominator. For a 500 us median, sums near
+0.001 seconds support two-interval compensation. For example:
+
+```text
+primary_pairs={enabled:1,intervals:3999,pairs:3998,median_s:0.0005,threshold_s:0.00002,lateEarly:12/12,earlyLate:0/12}
+```
+
+This would mean every one of twelve eligible late intervals had an immediate
+early successor in that window; it is not proof that this always happens.
+`[dmsynco]` also reports full `primaryAfterLateInterval`,
+`primaryAfterEarlyInterval`, `primaryLateEarlySum`, `primaryEarlyLateSum`
+populations. These are overlapping trailing-window measurements, not cumulative
+counters; do not sum counts across successive reports. Opposite-order pairs can
+overlap in a late–early–late sequence.
+
+The pair table is an appended optional part of primary timing. Rebuild the app
+and `logdump` to record/display it. Older records report
+`primary_pairs=unavailable`; disabled analysis reports `enabled:0`. Setting
+`diagnostics.excursionUs=0` leaves existing primary/combiner statistics enabled.
+No scheduler recovery, trigger route or timing limit is changed by this check.
 
 ## Independent combiner trace timing
 

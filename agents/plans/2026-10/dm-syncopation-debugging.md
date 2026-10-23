@@ -870,3 +870,422 @@ and whitespace checks pass. Package the implementation and main plan first,
 then the user guide/debugging notes and separate formatting cleanup. Operator
 installation, clock/trace configuration checks and measurements remain pending;
 no live configuration change or agent instrument action is included.
+
+## 2026-10-23 19:24 UTC comparison still lacks combiner-stage output
+
+The operator supplied thirteen synco records at
+19:24:21.864556852–19:24:33.879001139 UTC (primary session 2, sequences
+17,704–17,716) and twelve controller records at
+19:24:23.335999571–19:24:34.351111872 UTC (session 5, sequences
+17,683–17,694). No telemetry source filenames were included.
+
+The synco lines contain valid primary populations but no combiner fields at all.
+The current reader always appends either the combiner table's formatted fields or
+`combiner_timing=unavailable`, even for legacy writer records. Complete absence
+of both forms indicates an older formatter, or externally removed/truncated text;
+it does not establish that the running app is old. A new writer decoded by an old
+reader would have this appearance. The operator was asked for `type -a teldump`
+and the read-only `dmtweeter-synco.combiner_timing_quality` property to distinguish
+the reader command from the app's installed/running interface. No reconfiguration
+is prescribed before resolving this missing-data issue.
+
+| Measurement | Window mean range (us) | Window sample-jitter range (us) | Reported event extrema (us) |
+| --- | --- | --- | --- |
+| Primary publication interval | 499.997938–500.002000 | 5.664070–6.225451 | 421.947–574.215 |
+| Synco primary receipt interval | 499.997884–500.002088 | 5.718387–6.284060 | 421.897–574.385 |
+| Combined publication interval | 499.996475–500.003297 | 7.253794–7.678544 | 421.867–576.348 |
+| Controller receipt interval | 499.996535–500.003295 | 7.277665–7.699629 | 421.866–576.358 |
+| Successful SDK-return interval | 499.996232–500.003433 | 7.290447–7.712534 | 421.787–575.517 |
+| Controller receipt-to-SDK latency | 108.988375–109.138374 | 0.435409–0.524606 | 107.833–113.314 |
+| SDK duration | 101.298183–101.303501 | 0.071630–0.083170 | 101.101–102.314 |
+
+The mean cadence remains consistent with 2 kHz. Publication/receipt interval
+counts and local coverage match within each observer: 3,999 primary intervals
+and 3,998–3,999 combined intervals per nominal two-second window. Nearby report
+pairs are offset by approximately 0.470–0.472 seconds, so their nominal windows
+overlap by approximately 76%; commands remain unpaired. The larger combined
+publication jitter is consistent with earlier evidence of additional variation
+in the intervening path, but it does not identify a combiner stage, quantify
+independent added jitter or establish total loop latency. Controller SDK duration
+remains much steadier. Primary/combined interval tails still reach roughly
+-78/+74–76 us about 500 us; RMS alone does not qualify timing bounds.
+
+Primary cumulative duplicates/gaps are 1,061/1,060 throughout, with zero new
+problem counts over 24,029 additional receipts. Controller cumulative
+duplicates/gaps are 1,000,553/977,626 throughout; every displayed since-summary
+delta has zero duplicates, gaps, failures, partial/no-send, rejected, invalid or
+dropped events, with 2,002–2,003 receipts/submissions. Those large totals therefore
+reflect earlier observations, not new anomalies in the displayed span. Their
+onset/cause cannot be dated here; gap counts are anomalous counter transitions,
+not an inferred number of missing frames. Queue occupancy is zero or one.
+Synco remains unarmed in the snapshots, with zero deliveries/misses and a single
+unchanged cumulative fault. The excerpt does not identify that fault's cause.
+
+The combiner execution/publication/linkage measurements are still pending an
+updated-reader readback. This evidence updates only the debugging record and DM
+timing note; no code, test/build rerun, commit, push, live configuration or agent
+instrument action is included.
+
+## 2026-10-23 19:31 UTC combiner stages available; primary linkage absent
+
+After identifying `logdump` as the reader requiring an update, the operator
+supplied fifteen complete current-format records from
+`dmtweeter-synco_20261023191911531081671.bintel`, at
+19:31:02.354944804–19:31:16.369481373 UTC. Primary and combiner sessions are both
+2, with sequences 18,104–18,118. The new combiner table is present and enabled;
+execution/publication populations have 4,000 observations in every nominal
+two-second window, and all four publication/receipt interval populations have
+3,999. Thus the earlier missing-field issue is resolved in this readback.
+
+| Measurement | Window mean range (us) | Window sample-jitter range (us) | Reported event extrema (us) |
+| --- | --- | --- | --- |
+| Primary publication interval | 499.999398–500.001620 | 2.973495–4.544225 | 423.209–579.835 |
+| Synco primary receipt interval | 499.999423–500.001675 | 3.006357–4.562379 | 423.109–579.534 |
+| Combined publication interval | 499.999338–500.002665 | 6.118142–7.122052 | 421.577–578.111 |
+| Combined observer receipt interval | 499.999330–500.002850 | 6.140706–7.818030 | 421.506–578.222 |
+| Combiner execution start to trace update | 4.928640–5.048666 | 0.158043–0.265622 | 4.459–10.189 |
+| Combiner trace update to writetime | 0.156957–0.165228 | 0.020552–0.167473 | 0.120–4.339 |
+
+The approximately 5 us execution duration includes counter checks, optional work,
+summation and trace setup. The short final publication duration excludes later
+notification posts. Their jitter is substantially smaller than the observed
+combined publication-interval jitter. This makes the earlier wait/start stage the
+next measurement target; these aggregate populations do not yet measure its
+delay or prove its contribution. The primary/combined summary `now` values are
+only 433–525 us apart, with approximately matching retained coverage, but commands
+are still unpaired. Do not subtract marginal variances or infer independent added
+jitter. Combined observer receipt jitter rises above publication jitter toward
+the end; observer wake timing can affect that population, which is separate from
+producer publication timing. No simultaneous controller or camera records are
+included here, and total loop latency remains unresolved. Primary and combined
+publication tails still reach roughly -77/+80 us and -78/+78 us about 500 us.
+
+Every record reports writer PID 2,989,283, `combiner_trigger_inode=0` and
+`combiner_primary_counter=0`. Both `combinerPrimaryStart` and
+`combinerPrimaryPublication` therefore remain unavailable with zero samples.
+`unlinkedPrimary` increases by 28,029, exactly matching the increase in combined
+events/receipts. This is missing upstream association, not a counted DM command
+failure. Zero `invalidPrimary`/`repeatedPrimary` does not validate upstream trace
+data: linkage is rejected before those checks.
+
+Other quality totals remain unchanged throughout: primary duplicates/gaps
+1,061/1,060; combined duplicates/gaps 1,030/353, invalid metadata 9 and invalid
+trace 1. Missing traces, repeated starts, queue drops and rejections do not
+increase. Primary receipts increase by 28,030 and combined receipts by 28,029;
+the different observation endpoints do not establish a missing frame. Queue
+occupancy is zero or one. Scheduler state remains 0, deliveries/misses remain
+zero, and its single cumulative fault is unchanged. Enabled diagnostic flags
+do not mean scheduling is enabled.
+
+The operator was asked to inspect the FPS name and `.procinfo.triggermode`,
+`.procinfo.triggersname`, `.procinfo.triggerdelay` for the identified writer,
+without changing settings yet. Local MILK source confirms that a resolved named
+primary supplies its inode and upstream trace even with DELAY mode 4 retained.
+If the current configuration is unnamed/unresolved, naming the actual primary
+(`dm01disp03` / `aol1_dmC`) and restarting dmcomb is the intended linkage step;
+retain its existing wake policy/delay for that comparison. Naming the stream also
+adds upstream trace-copy work, and the best-effort metadata/provenance limitations
+still apply. An immediate switch to one-input semaphore triggering would alter
+auxiliary-only update behavior and is not justified by this excerpt.
+
+This updates only the debugging record and DM timing note. No code, test/build
+rerun, commit, push, live configuration or agent instrument action is included.
+
+### dmcomb trigger configuration confirmed
+
+The operator confirmed `.procinfo.triggermode=4` (correcting an initial report of
+5), a blank `.procinfo.triggersname`, and `.procinfo.triggerdelay=0.000010` seconds
+(10 us). This matches the inspected DELAY mode and explains the zero trigger
+inode. The delay is a requested sleep, not a measured primary-to-start delay or
+an inferred jitter floor.
+
+The next operator configuration step is to set only the trigger-stream name to
+`dm01disp03`, retain mode 4 and the 10 us delay, and restart dmcomb through the
+normal instrument procedure. The inspected dmcomb loads its numbered channel
+streams before processinfo trigger initialization, so that channel name should
+resolve when initialization records its inode. Keep synco scheduling disabled
+for the baseline comparison. After restart, verify a nonzero matching trigger
+inode and accumulating valid `combinerPrimaryStart`/`combinerPrimaryPublication`
+samples in new telemetry. Their availability still depends on upstream trace
+freshness and ordered timestamps. Naming the primary adds trace-copy work but
+retains DELAY-mode all-channel scanning. No operator configuration change has
+been reported as performed yet; the FPS instance name remains unspecified.
+
+## 2026-10-23 20:22 UTC linked primary-to-combiner timing
+
+The operator supplied seven records at
+20:22:01.761752005–20:22:07.769232540 UTC, sequences 21,161–21,167, following
+the requested trigger-name configuration/restart. No bintel filename or repeated
+FPS mode/delay readback was included. The writer has changed to PID 2,053,564,
+the trigger inode is consistently 1,525 and the named primary counter advances
+from 200,294,486 to 200,306,501. Both linked populations are now valid with
+3,999–4,000 observations per nominal two-second window. Primary and combiner
+collector sessions remain 2 across the producer change; their summary times
+are 533–543 us apart.
+
+| Measurement | Window mean range (us) | Window sample-jitter range (us) | Reported event extrema (us) |
+| --- | --- | --- | --- |
+| Primary publication interval | 499.999710–500.001234 | 3.633671–3.961510 | 433.790–574.866 |
+| Synco primary receipt interval | 499.999703–500.001319 | 3.659141–3.991984 | 433.659–575.467 |
+| Combined publication interval | 499.998548–500.002163 | 6.224304–6.475876 | 431.445–573.573 |
+| Combined observer receipt interval | 499.998691–500.002108 | 6.314880–6.610741 | 431.445–573.894 |
+| Primary trace update to combiner execution start | 6.506088–6.703962 | 3.413763–3.457118 | 0.551–12.734 |
+| Combiner execution start to trace update | 4.857137–4.946693 | 0.148513–0.165380 | 4.338–6.081 |
+| Combiner trace update to writetime | 0.314056–0.323214 | 0.020986–0.027013 | 0.290–0.832 |
+| Primary trace update to combined writetime | 11.736252–11.896973 | 3.341926–3.387929 | 5.590–18.214 |
+
+This locates the largest measured stage variation before combiner execution:
+approximately 6.5–6.7 us mean with 3.4 us jitter, versus about 4.9 us execution
+with 0.15–0.17 us jitter. That is consistent with variable polling phase under
+the previously reported DELAY/10 us configuration, without proving a particular
+wait distribution or actual iteration period. For each qualified population the
+three stage means add to the primary-to-combined mean, within printed precision.
+Stage variances must not be added/subtracted without covariance. Publication
+intervals additionally contain differences between adjacent command delays and
+upstream interval variation; their 6.2–6.5 us jitter is not the same statistic as
+the approximately 3.4 us primary-to-combined delay jitter.
+
+The upstream endpoint is the primary producer's trace-update timestamp, slightly
+before its writetime. The output endpoint is combined writetime, before later
+notification posts and controller work. Thus the approximately 11.8 us delay
+does not include camera-to-primary, combined-to-controller wake or SDK latency.
+Trace association remains best-effort metadata, not proven atomic pixel/counter
+identity. The observed 18.214 us maximum in these short, overlapping windows is
+not a qualified upper bound and does not relax any scheduler timing criterion.
+
+Primary events/receipts, combined events/receipts and the named primary counter
+all advance by 12,015 over the excerpt. Every problem counter is unchanged,
+including `unlinkedPrimary=41,349,322` and `repeatedPrimary=1`. The scheduler
+remains state 0 with zero deliveries/misses and an unchanged fault count of 2;
+queue occupancy is zero or one. Compared with the 19:31 excerpt, primary gap and
+scheduler fault totals have each increased by one, combined duplicate/gap totals
+by 85/20 and repeated-primary by one. Those changes occurred somewhere between
+the excerpts; their timing/cause cannot be assigned to the restart from these
+records. No new anomaly is observed during this excerpt.
+
+The next proposed single-variable comparison is a requested 5 us delay
+(`.procinfo.triggerdelay=0.000005`), retaining mode 4, the named primary, placement,
+priority and workload, with synco scheduling disabled. This increases polling
+activity; compare CPU use as well as linked delay jitter/extrema, combined
+cadence and quality counters over fresh windows. Local MILK source permits
+runtime FPS delay updates. No such change has yet been reported as performed.
+This evidence updates only the debugging record and DM timing note; no code,
+test/build rerun, commit, push or agent instrument action is included.
+
+### Primary-triggered comparison selected
+
+The operator proposed switching to triggered operation on the current path. This
+supersedes the proposed 5 us polling-delay experiment for the next baseline:
+retain `dm01disp03` as `.procinfo.triggersname`, select semaphore
+`.procinfo.triggermode=3`, and request automatic reader allocation with
+`.procinfo.semindexrequested=-1`. Keep synco scheduling disabled and other
+placement/priority/workload settings unchanged. The retained DELAY setting is
+unused in mode 3. Obtain fresh linked-stage/combined/controller timing and check
+actual mode/reader assignment; allocation failure can fall back to CNT0 mode 1.
+
+Use a normal dmcomb restart for this transition. The inspected source allocates
+and registers its semaphore reader during trigger initialization, whereas a live
+FPS mode change alone only changes the mode field. Actual deployment and the
+new comparison remain operator steps, not agent instrument actions.
+
+Primary-triggered combination still includes all channel values on each real
+primary wake, so it is compatible with the current disabled-synco baseline and
+passive step-0 preparation (`steps=1`). Independent non-primary changes wait for
+the next primary event. The present multi-step scheduler posts its designated
+destination (normally `dm01disp07`) for later steps and never posts the primary;
+those events would not wake dmcomb waiting only on `dm01disp03`. Before returning
+to multi-step operation, a trigger route carrying both primary and designated
+auxiliary events is required. This comparison does not implement that route or
+change the existing scheduler's no-primary-post contract.
+
+### Targeted primary-semaphore wake proposed for extra steps
+
+The operator clarified the intended multi-step route: synco can post a semaphore
+on `dm01disp03` for active extra steps while leaving the real primary command
+unchanged. Local source review finds this workable as a tightly scoped exception
+to the previous no-primary-post contract. Finish the existing passive batch,
+publish the designated auxiliary destination counter, then issue one bare
+`sem_post` to dmcomb's verified reader for each eligible `j>0` step. Step 0 adds
+no wake. The auxiliary counter change remains necessary because dmcomb checks
+channel-counter progression even after a semaphore wake.
+
+Use only dmcomb's assigned reader, not primary fan-out or synco's own monitor
+semaphore. The inspected `ImageStreamIO_sempost(image,index)` also updates
+`semWritePID` and posts the logger semaphore, so it does not provide the strictly
+targeted operation. Validate the stream identity, reader index/PID and actual
+mode; never allocate/consume/flush/unregister dmcomb's reader on its behalf.
+Reject stale assignments after restart. Primary pixels, metadata and other
+reader/log semaphores remain untouched by the synthetic wake.
+
+Retain final primary-counter/window checks, timestamp the actual wake and require
+one combined-counter acknowledgement before another step. Recheck the primary
+counter before accepting that acknowledgement: current `consume()` can accept
+an existing output increment before reaching its primary-checking wait. Queued
+real/synthetic wakes can coalesce, so post success is not proof of delivery. A
+failed wake after auxiliary counter publication must disarm without rollback or
+replay. Extra outputs intentionally reuse the primary trace identity; existing
+linked-primary populations remain main-only and repeated-primary counts become
+expected for those extras. The [main plan](dm-syncopation.md) records the proposal
+and verification scope. No scheduler implementation or live change is included.
+
+## 2026-10-23 20:33 UTC semaphore-triggered baseline
+
+The operator confirmed dmcomb trigger mode 3 and supplied fifteen records from
+`dmtweeter-synco_20261023191911531081671.bintel`, at
+20:33:44.561096594–20:33:58.577849414 UTC, sequences 21,863–21,877. Both observer
+sessions remain 2; the new stable writer PID is 2,070,021, trigger inode remains
+1,525 and the named primary counter advances from 201,619,675 to 201,647,708.
+Every interval population has 3,999 samples and every per-output stage has
+4,000 valid samples per nominal two-second window. Summary times are 473–630 us
+apart. The operator also reports that `dmtweeter` `[fgtimes]` jitter RMS has
+roughly halved; no controller records were included to calculate that ratio here.
+
+| Measurement | Window mean range (us) | Window sample-jitter range (us) | Reported event extrema (us) |
+| --- | --- | --- | --- |
+| Primary publication interval | 499.998599–500.001966 | 3.508605–4.009065 | 421.827–580.135 |
+| Synco primary receipt interval | 499.998637–500.001949 | 3.526258–4.031853 | 422.087–579.986 |
+| Combined publication interval | 499.999466–500.001177 | 3.534654–4.021923 | 421.617–580.296 |
+| Combined observer receipt interval | 499.999366–500.001152 | 3.572648–4.060006 | 421.827–581.328 |
+| Primary trace update to combiner execution start | 3.841527–3.874822 | 0.148693–0.153102 | 3.426–5.811 |
+| Combiner execution start to trace update | 4.918682–4.943921 | 0.071946–0.082437 | 4.558–5.801 |
+| Combiner trace update to writetime | 0.561251–0.566026 | 0.042448–0.045912 | 0.400–1.062 |
+| Primary trace update to combined writetime | 9.323245–9.379611 | 0.164774–0.174293 | 8.756–11.282 |
+
+Compared with the mode-4 20:22 excerpt, primary-to-start delay jitter falls from
+3.414–3.457 us to 0.149–0.153 us; total trace-primary-to-combined delay jitter
+falls from 3.342–3.388 us to 0.165–0.174 us, approximately twentyfold. Mean total
+delay falls from 11.736–11.897 us to 9.323–9.380 us. Combined publication interval
+jitter falls from 6.224–6.476 us to 3.535–4.022 us and now closely follows the
+primary's 3.509–4.009 us. This strongly supports polling as the source of most
+of the previously observed additional combiner-path timing spread. The reported
+controller improvement is consistent with that result. These are descriptive
+comparisons across separate, overlapping-window excerpts; do not subtract
+marginal variances or claim a pooled independent jitter estimate.
+
+Primary/combined events and receipts, and the named primary counter, each advance
+by 28,033. All problem counters remain unchanged throughout, including combined
+`unlinkedPrimary=41,349,322` and `repeatedPrimary=13`. Primary duplicates/gaps are
+1,061/1,062; combined duplicates/gaps are 1,144/379. The ordinary valid scheduler
+snapshots remain state 0, two requested steps, zero deliveries/misses and three
+cumulative faults. The 20:33:55 record has `schedule_valid=0`: its zero steps,
+period and faults are unavailable-snapshot placeholders, not a scheduler reset.
+Both diagnostic tables remain valid in that record. Queue occupancy is zero or
+one. Since the last 20:22 record, primary gaps and scheduler faults each rose by
+one, combined duplicates/gaps by 29/6 and repeated-primary by 12. These increments
+occurred in the unobserved interval/changeover and cannot be assigned to steady
+mode-3 operation from this evidence.
+
+The remaining cadence variation and roughly -78/+80 us primary interval tails
+are already upstream of dmcomb. The much steadier combiner delay does not by
+itself qualify synco's primary-interval bounds or enabled extra steps. Existing
+trace-clock, best-effort association and endpoint limitations remain: these
+durations do not include camera-to-primary or combined-to-controller/SDK work,
+and the observed maximum is not a qualified bound. The result supports the
+targeted primary-reader wake proposal, which remains unimplemented and requires
+its own extra-step timing/delivery verification. Only engineering records are
+updated; no code, test/build rerun, commit, push or agent instrument action is
+included.
+
+## 2026-10-23 direction: median cadence and skipped auxiliary cycles
+
+The operator asked to consolidate the current work and accept the observed
+large interval excursions as skipped frames where possible, with syncopation
+based on the median interval. The completed work is timing instrumentation and
+the operator's switch of dmcomb to mode 3, which removed most additional
+combiner delay jitter. The targeted extra-step wake and new median/skip policy
+are still design work, not C++ changes.
+
+Inspection shows why the present app repeatedly reacquires: even though period
+selection is independent of a single interval, `processPrimary()` still faults
+on each interval outside selected-period +/- `earlyMainUs` (20 us by default).
+That clears output/phase priming and learned corrections, then requires 32 clean
+frames. Replacing only the period estimator would leave that behavior intact.
+
+The revised [main plan](dm-syncopation.md) uses a rolling primary-interval
+median, includes ordinary tails in that estimator, and keeps every real primary
+as the phase anchor. Duplicates and gap-spanning/invalid samples are excluded.
+Camera FPS may seed acquisition and remains diagnostic; it no longer overrides
+a valid median. Ordinary excursions cancel obsolete auxiliary targets and count
+as skips while retaining the median/feedback. Resume requires known current
+output and fresh on-time passive preparation, not another run of 32 near-median
+intervals. Forward counter gaps require a bounded baseline resynchronization;
+resets, resource changes, ambiguous output and actual unsafe copy/read overlap
+still stop operation. No skipped main or auxiliary trigger is synthesized or
+replayed.
+
+The early-arrival reserve remains a separate engineering choice. An early main
+cannot be prevented from overlapping an already-issued command merely by
+skipping after its arrival. The operator was asked about a provisional 100 us
+reserve against the observed approximately 80 us early intervals. With the
+current delivery/keepout/guard/copy/observation/visibility/reserve defaults, this
+would require 273 us per half-cycle in the existing feasibility test, exceeding
+the 250 us available for two steps at 2 kHz. The operator explicitly chose to
+leave this reserve undecided, so 100 us is not selected. The current 20 us
+setting remains unchanged and unqualified for the larger excursions. No timing
+budget has been relaxed or instrument setting changed. This is a plan/evidence
+update only, with no code, test/build rerun, commit or push.
+
+### Can present telemetry establish excursion ordering?
+
+The operator asked whether early arrivals follow late arrivals, or vice versa.
+Current saved `[dmsynco]`/`[dmtimes]` timing tables contain count, mean, sample
+deviation, extrema and coverage, not ordered interval pairs or raw timestamps.
+Overlapping windows do not recover immediate adjacency or a directional
+correlation. The INDI fault publication/observation values describe the same
+latched interval in different clocks; they are not neighboring intervals.
+
+For a 500 us nominal period, an isolated delayed timestamp can produce intervals
+580 then 420 us, while an isolated advanced timestamp can produce 420 then
+580 us. Both pairs have identical aggregate statistics. A short interval is early
+relative to the previous observed timestamp plus the period; it need not be
+early relative to the camera/AO timing grid. Negative lag-one interval
+correlation alone would not distinguish these two cases.
+
+Ordered primary publication events already exist in the collector's bounded
+consumer window. A possible addition is consumer-side long-to-short versus
+short-to-long transition counts and conditional rates, next-interval residuals,
+and two-interval sum residuals. Alternatively, export a bounded ordered
+timestamp/counter trace. Break associations at duplicate/gapped counters, loss,
+resets or invalid timestamps and keep publication/receipt clocks separate. This
+is a measurement proposal only; no new fields, code or instrument actions are
+included, and the early-arrival reserve remains undecided.
+
+### Ordered interval-pair check implemented
+
+The operator requested building the ordering check, expecting late-then-early
+to dominate. The implementation tests both directions without that assumption:
+the primary collector uses existing publication observations to compute the
+window median and pair statistics on its ordinary consumer thread. No producer
+event/timestamp capture, scheduler period, recovery policy or trigger route is
+changed. Other users of the shared collector leave this optional analysis off.
+
+The new diagnostic-only `diagnostics.excursionUs` defaults to 20 us and zero
+disables pair analysis without disabling the existing collectors. Eligible
+three-event sequences must be real, contiguous, timestamp-valid and within the
+window. Duplicates/gaps/invalid events break the incoming chain. Next-interval
+populations after late/early intervals include ordinary successors; directed
+opposite-excursion sum counts form the corresponding numerators. Thus a displayed
+`lateEarly:N/D` means N early successors among D eligible late follow-ups, not a
+count divided by all late intervals including those without an observed next
+event. Reverse evidence is retained independently. Pair sums can be compared
+with twice the reported diagnostic median.
+
+The app adds read-only `primary_interval_pairs` and an optional appended primary
+table in `[dmsynco]`. The text formatter reports both fractions and four complete
+populations. Older buffers remain readable and explicitly report pair data
+unavailable; new disabled summaries remain distinct. The
+[guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) documents seconds versus
+the microsecond configuration, sparse data and overlapping windows. These
+interval-order measurements do not establish absolute camera phase or prove
+that every future excursion follows the same pattern.
+
+Normal library/schema, app and logdump builds pass. Focused workstation suites
+pass **4,540 assertions / 73 cases**: collector 317/15, app 2,748/36,
+new pair/controller logger 1,000/7, legacy synco logger 322/7 and default-disabled
+collector integration 153/8. Formatting/whitespace and independent review pass.
+The test fixture's conditional count and legacy formatter expectation were
+corrected during verification; the final suites all pass. No extra RT timestamp
+capture or producer event changes were introduced. No hardware qualification,
+agent instrument action or commit/push is included. The new
+scheduler behavior and targeted extra-step wake remain pending, with the early
+reserve undecided.

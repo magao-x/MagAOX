@@ -631,3 +631,169 @@ new INDI/telemetry, availability counters and exact configuration controls.
 `.procinfo.triggersname` can supply upstream linkage while retaining DELAY
 polling, with an operator-controlled restart. No live mode, polling delay, CPU
 placement, timing bound or instrument setting is changed.
+
+### 2026-10-23 19:24 UTC readback and reader-version check
+
+New excerpts show primary publication jitter 5.664–6.225 us and combined
+publication jitter 7.254–7.679 us at approximately 2 kHz, while SDK-duration
+jitter remains 0.072–0.083 us. Large cumulative duplicate/gap counts are unchanged
+throughout both excerpts, and every controller since-summary problem delta is
+zero. These are historical totals rather than new losses in this sample.
+
+The synco text contains neither new combiner fields nor the current reader's
+mandatory `combiner_timing=unavailable` fallback. An older formatter (or filtered
+text) is therefore indicated; this alone does not identify the running app
+version. Reader-command and new INDI-property checks were requested before
+interpreting absent stage data. The [debugging record](dm-syncopation-debugging.md)
+preserves exact ranges, timing overlap and counter qualifications. No code or
+instrument setting changes accompany this evidence.
+
+### 2026-10-23 19:31 UTC combiner-stage readback
+
+Fifteen new current-format synco records resolve the missing-reader-fields issue.
+All local cadence/execution/publication populations have full two-second counts:
+primary publication jitter is 2.973–4.544 us and combined publication jitter is
+6.118–7.122 us at approximately 2 kHz. Combiner execution takes 4.929–5.049 us
+with 0.158–0.266 us jitter; trace-update-to-writetime takes 0.157–0.165 us with
+0.021–0.167 us jitter. Execution and final publication peaks are 10.189 us and
+4.339 us respectively. These stages exclude waiting before iteration start.
+
+The linked upstream populations remain empty: writer PID 2,989,283 reports trigger
+inode/counter zero, and `unlinkedPrimary` increases once per new combined event.
+All other duplicate/gap/invalid/drop totals are unchanged. Inspect the writer's
+actual FPS trigger name, mode and delay before obtaining upstream linkage while
+preserving its wake policy. Naming a resolved primary can supply trace linkage
+in DELAY mode, with an operator-controlled restart and extra trace-copy work.
+
+The small measured execution/publication jitter makes the earlier wait/start
+stage the next measurement target, but its delay/contribution and total loop
+latency are not yet measured. Closely aligned summary times do not establish
+per-command association or permit variance subtraction. The
+[debugging record](dm-syncopation-debugging.md) preserves sources, exact ranges,
+tails and quality qualifications. No implementation or live setting changes
+accompany this evidence.
+
+The operator subsequently confirmed DELAY mode 4, a blank trigger-stream name and
+a requested 10 us delay (the initial report of mode 5 was corrected). This
+explains the missing trigger inode. The next operator step is to name
+`dm01disp03`, retain mode/delay, restart dmcomb through the normal procedure and
+verify advancing linked populations with synco scheduling disabled. This
+configuration change has not yet been reported as performed.
+
+### 2026-10-23 20:22 UTC linked combiner delay available
+
+Seven subsequent records have a new writer PID 2,053,564, trigger inode 1,525 and
+advancing named primary counter. Both linked populations now have 3,999–4,000
+qualified observations per window, and `unlinkedPrimary` no longer increases.
+All problem counters and scheduler faults are unchanged within the excerpt;
+some cumulative totals increased in the unobserved interval since 19:31.
+
+Primary-trace-update to combiner-start delay averages 6.506–6.704 us with
+3.414–3.457 us jitter. Execution averages 4.857–4.947 us with 0.149–0.165 us
+jitter; the final publication segment averages 0.314–0.323 us with
+0.021–0.027 us jitter. The whole trace-primary-to-combined delay averages
+11.736–11.897 us with 3.342–3.388 us jitter and observed extrema 5.590–18.214 us.
+The largest measured stage variation is before execution, consistent with
+polling phase under the previously reported DELAY/10 us configuration. Interval
+jitter (primary 3.634–3.962 us, combined 6.224–6.476 us) and command-delay jitter
+are different populations; covariance matters when relating them.
+
+The [debugging record](dm-syncopation-debugging.md) preserves exact ranges,
+counts, counter history and endpoint/association qualifications. These short,
+overlapping windows do not establish an upper bound or total camera-to-DM
+latency. A proposed 5 us polling-delay comparison retains mode, trace linkage,
+placement, priority and workload with synco scheduling disabled, and compares
+CPU use alongside timing/quality. No implementation or agent instrument action
+accompanies this evidence.
+
+The operator then selected a primary-semaphore-triggered comparison instead of
+the proposed 5 us delay. Use mode 3 on `dm01disp03` with automatic semaphore
+reader allocation and a normal dmcomb restart; a live mode change alone does not
+allocate the reader. Keep synco scheduling disabled and verify effective mode
+and reader assignment. This directly compares the baseline without DELAY
+polling. Current later synco steps post a different destination, so a compatible
+route for both main and auxiliary triggers is required before multi-step
+operation; passive-only preparation remains compatible. No such route is
+implemented or instrument configuration changed by an agent.
+
+The operator clarified that extra steps could wake dmcomb's existing primary
+reader directly. The proposed route retains auxiliary counter publication and
+adds a reader-specific bare semaphore post, with no step-0 post or primary
+pixel/counter/timestamp/log notification changes. Reader identity, timing and
+same-primary output-acknowledgement checks are required. Extra combined outputs
+would intentionally repeat primary trace identity; linked-primary delay metrics
+should continue to describe advancing main events. The
+[main plan](dm-syncopation.md) and [debugging record](dm-syncopation-debugging.md)
+record this proposed extension; it is not yet implemented.
+
+### 2026-10-23 20:33 UTC mode-3 timing improvement
+
+The operator confirmed semaphore mode 3. Fifteen new synco records retain full
+interval/stage counts and valid primary linkage. Primary-to-start delay now
+averages 3.842–3.875 us with 0.149–0.153 us jitter; primary-trace-to-combined
+publication averages 9.323–9.380 us with 0.165–0.174 us jitter. The latter jitter
+was 3.342–3.388 us under DELAY mode, an approximately twentyfold reduction.
+Combined publication interval jitter is now 3.535–4.022 us, closely following
+primary publication jitter of 3.509–4.009 us. This supports polling as the source
+of most of the previously observed additional combiner timing spread. The
+operator reports controller `[fgtimes]` jitter RMS roughly halved, consistent
+with this result; controller records were not supplied with this excerpt.
+
+Both observers and the named primary counter advance by 28,033 with no new
+quality-counter increments. A lone `schedule_valid=0` record contains scheduler
+placeholders while both diagnostic tables remain valid. Counter increases since
+the prior excerpt occurred during an unobserved interval/changeover, not within
+the displayed steady sample. The [debugging record](dm-syncopation-debugging.md)
+preserves exact ranges and history. Primary interval tails still reach roughly
+-78/+80 us; enabled extra-step qualification and full camera-to-DM latency remain
+open. The targeted semaphore wake route is still proposed, not implemented.
+
+### 2026-10-23 median cadence and excursion recovery direction
+
+The operator now requests median-based syncopation and accepting ordinary large
+interval excursions by skipping affected auxiliary work. The
+[main plan](dm-syncopation.md) separates this from the completed measurement and
+mode-3 baseline work. A rolling primary median replaces camera-first period
+selection once valid; actual primary events retain the phase anchor. Ordinary
+excursions retain median/feedback and cancel stale work without full 32-frame
+reacquisition or replay. Duplicates/gap-spanning intervals are excluded from the
+estimator, and missing-observation recovery remains distinct from resets or
+ambiguous output.
+
+This does not establish an earliest-main bound: the measured roughly 80 us
+early tails exceed the current 20 us reserve. A separate provisional 100 us
+reserve was proposed for operator review and feasibility reassessment. Under
+current other defaults it would make two-step timing infeasible (273 us needed
+versus 250 us available per half-cycle). The operator explicitly chose to leave
+the reserve undecided; 100 us is not selected and the existing 20 us setting is
+unchanged, not newly qualified. Actual copy/reader overlap checks remain
+required. No C++ or live setting
+changes accompany this revision.
+
+The operator also asked whether short intervals follow long intervals or the
+reverse. Current saved aggregates cannot establish adjacent-event ordering or
+that directional correlation; the fault latch does not store neighboring
+intervals. A delayed single publication and an advanced single publication can
+produce reversed interval pairs with identical summary statistics. Ordered
+pair/conditional statistics could be computed from the collector's existing
+consumer-owned timestamp window without new RT captures, or a bounded raw trace
+could be exported. No such addition has been implemented.
+
+### 2026-10-23 ordered primary pairs implemented
+
+The requested check now reuses the shared collector's existing publication
+events for consumer-side median and ordered-pair analysis, enabled only for
+synco's primary observer. `afterLate`/`afterEarly` describe eligible next
+intervals including ordinary successors; `lateEarlySum`/`earlyLateSum` describe
+two-interval compensation in each direction. Their count ratios retain explicit
+conditional denominators. A separate configurable 20 us diagnostic threshold
+classifies excursions and does not select the scheduler's early reserve.
+
+The app exposes `primary_interval_pairs` and an append-only optional primary
+telemetry table. Existing controller timing serialization and the producer's
+event/timestamp capture remain unchanged. The
+[synco plan](dm-syncopation.md) and [guide](../../../apps/dmSyncopation/doc/dmSyncopation.md)
+record interpretation and compatibility. Normal library/app/reader builds and
+**4,540 assertions / 73 focused cases** pass, including existing default-disabled
+controller integration and legacy synco records. C++ formatting, whitespace and
+independent review pass. Scheduler median/skip/wake changes are still pending.
